@@ -217,7 +217,8 @@
   function rowIndex(layout) {
     if (layout.rows) return layout.rows;
     const folded = layout.outline?.foldedRows || [];
-    const runs = unionRuns(unionRuns(layout.hiddenRows, layout.filter ? layout.filter.hidden : []), folded);
+    const tableRuns = (layout.tables || []).reduce((all, t) => unionRuns(all, t.filterHidden || []), []);
+    const runs = unionRuns(unionRuns(unionRuns(layout.hiddenRows, layout.filter ? layout.filter.hidden : []), tableRuns), folded);
     const n = runs.length;
     const starts = new Int32Array(n);
     const ends = new Int32Array(n);
@@ -391,6 +392,18 @@
     layout.rows = null;
     if (isEmpty(layout)) delete bySheet[name];
     touch();
+  }
+
+  // Sets the rows (1-based runs) the conditions of a table's own filter hide (PD-226).
+  function setTableFilterHidden(name, tableName, runs) {
+    const layout = bySheet[name];
+    const table = layout?.tables?.find((t) => t.name === tableName);
+    if (!table) return false;
+    if (runs.length) table.filterHidden = runs.map((r) => [r[0], r[1]]);
+    else delete table.filterHidden;
+    layout.rows = null;
+    touch();
+    return true;
   }
 
   // ---- the tables (PD-224) ----------------------------------------------------------------------------------------
@@ -577,6 +590,7 @@
     copiedTables,
     filterOf,
     setFilter,
+    setTableFilterHidden,
     filterToJson,
     colHidden,
     hiddenColRuns,

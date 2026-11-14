@@ -35,8 +35,26 @@
     ["endsWith", "끝", 1],
     ["empty", "비어 있음", 0],
     ["notEmpty", "비어 있지 않음", 0],
+    // A column's number against the rest of its column (PD-226): the whole criterion, never one of two.
+    ["top", "상위 항목", 1],
+    ["bottom", "하위 항목", 1],
+    ["topPercent", "상위 %", 1],
+    ["bottomPercent", "하위 %", 1],
+    ["aboveAverage", "평균 초과", 0],
+    ["belowAverage", "평균 미만", 0],
   ];
   const NUMERIC_OPS = new Set(["greaterThan", "greaterThanOrEqual", "lessThan", "lessThanOrEqual"]);
+  const MAX_TOP_ITEMS = 1000000; // items a top or bottom filter may ask for
+  const MAX_TOP_PERCENT = 100;
+  // The statistic operators and the engine's criteria they stand for.
+  const STAT_OPS = {
+    top: { top: { count: 0 } },
+    bottom: { top: { bottom: true, count: 0 } },
+    topPercent: { top: { percent: true, count: 0 } },
+    bottomPercent: { top: { bottom: true, percent: true, count: 0 } },
+    aboveAverage: { average: { above: true } },
+    belowAverage: { average: { above: false } },
+  };
 
   // ---- a condition in the dialog <-> the engine's custom condition ---------------------------------
   // The form is `{ op, text }`; the condition is `{ op?, text }` (no `op` is the wildcard text match).
@@ -85,8 +103,33 @@
 
   const paramsOf = (op) => OPERATORS.find((o) => o[0] === op)?.[2] ?? 0;
 
+  // The criteria of a statistic row, or an error text.
+  function statCriteria(form) {
+    const base = STAT_OPS[form.op];
+    if (!base.top) return { criteria: structuredClone(base) };
+    const text = String(form.text ?? "").trim();
+    const count = /^[0-9]+$/.test(text) ? Number(text) : 0;
+    const most = base.top.percent ? MAX_TOP_PERCENT : MAX_TOP_ITEMS;
+    if (count < 1 || count > most) return { error: "1~" + most };
+    return { criteria: { top: { ...base.top, count } } };
+  }
+
+  // The form row of a statistic criteria, or null.
+  function statForm(criteria) {
+    if (criteria?.average) return { op: criteria.average.above ? "aboveAverage" : "belowAverage", text: "" };
+    const top = criteria?.top;
+    if (!top) return null;
+    const op = (top.bottom ? "bottom" : "top") + (top.percent ? "Percent" : "");
+    return { op, text: String(top.count) };
+  }
+
   // `{ and, rows: [form, form?] }` -> the column's criteria, or an error text.
   function criteriaFromForms(and, forms) {
+    const stats = forms.filter((form) => form && STAT_OPS[form.op]);
+    if (stats.length > 0) {
+      const others = forms.filter((form) => form && form.op !== "none");
+      return others.length > 1 ? { error: "다른 조건과 함께 쓸 수 없음" } : statCriteria(stats[0]);
+    }
     const conditions = [];
     for (const form of forms) {
       if (!form || form.op === "none") continue;
@@ -104,6 +147,8 @@
 
   // The two form rows of a column's custom criteria.
   function formsFromCriteria(criteria) {
+    const stat = statForm(criteria);
+    if (stat) return { and: true, rows: [stat, { op: "none", text: "" }] };
     const rows = (criteria?.conditions || []).map(toForm);
     // A new condition (or a single one) joins with AND, as a spreadsheet's dialog starts.
     return { and: criteria?.conditions?.length === 2 ? criteria.and === true : true, rows: [rows[0] || { op: "none", text: "" }, rows[1] || { op: "none", text: "" }] };
@@ -165,6 +210,7 @@
     MAX_FILTER_TEXT,
     OPERATORS,
     NUMERIC_OPS,
+    STAT_OPS,
     toCondition,
     toForm,
     paramsOf,
@@ -237,15 +283,32 @@
       return item;
     }
 
+    // The colours the conditional formats give the rows of column `col`, for a colour condition or the colour
+    // list of the panel; the sheet has no colour of its own to filter by (PD-226).
+    function addColors(item, filter, col) {
+      const rules = host.__EASYOFFICE_SHEET_RULES__;
+      const runs = rules?.colorRuns?.(getActiveSheetName(), col, filter.range.r1 + 1, filter.range.r2);
+      if (runs?.fill.length) item.fill = runs.fill;
+      if (runs?.font.length) item.font = runs.font;
+    }
+
     function requestFor(op, filter, extraCols, extra) {
       const map = sheetDataStore[getActiveSheetName()] || {};
       const cols = new Set(filter.columns.map((c) => c.col));
       for (const c of extraCols) cols.add(c);
+      const colored = new Set(filter.columns.filter((c) => c.color).map((c) => c.col));
+      for (const c of extraCols) colored.add(c);
       return {
         sessionAction: "filter",
         op,
         filter: jsonOf(filter),
-        data: [...cols].sort((a, b) => a - b).map((c) => columnData(map, filter, c)),
+        data: [...cols]
+          .sort((a, b) => a - b)
+          .map((c) => {
+            const item = columnData(map, filter, c);
+            if (colored.has(c)) addColors(item, filter, c);
+            return item;
+          }),
         ...extra,
       };
     }
@@ -270,6 +333,51 @@
     }
 
     const dataRows = (filter) => filter.range.r2 - filter.range.r1;
+
+    // The range with the rows written right below it taken in (the spreadsheet program does this when the filter is
+    // applied again): rows go in while the next one holds something in a column of the range, up to the bound, and
+    // never into a table.
+    function extendedRange(name, range) {
+      const map = sheetDataStore[name] || {};
+      const last = Math.min(getExtent().dataRows, range.r1 + MAX_FILTER_ROWS - 1);
+      const has = (r) => {
+        for (let c = range.c1; c <= range.c2; c += 1) {
+          const entry = map[gridUtils.refOf(r, c)];
+          if (entry && (entry.value || entry.formula)) return true;
+        }
+        return false;
+      };
+      let r2 = range.r2;
+      while (r2 < last && has(r2 + 1) && layoutApi.tablesIn(name, r2 + 1, range.c1, r2 + 1, range.c2).length === 0) r2 += 1;
+      return { ...range, r2 };
+    }
+
+    // ---- the filters of the tables of the sheet (PD-226) -----------------------------------------------------
+    // A table with conditions in its filter is judged by the same engine request as the sheet's filter: its header
+    // row and data rows are the range, the conditions of its columns the columns.
+    function tableFilterOf(t) {
+      const parse = gridUtils.parseRef;
+      const [a, b] = String(t.range).split(":").map((ref) => parse(ref));
+      if (!a || !b || !t.header || !Array.isArray(t.filter) || t.filter.length === 0) return null;
+      const r2 = b.row - (t.totals ? 1 : 0);
+      if (r2 <= a.row || r2 - a.row >= MAX_FILTER_ROWS) return null;
+      return { range: { r1: a.row, c1: a.col, r2, c2: b.col }, columns: t.filter, hidden: [] };
+    }
+
+    // Judges every filtered table of the sheet again; true when each answer came back.
+    async function applyTables(name) {
+      let all = true;
+      for (const t of [...layoutApi.tablesOf(name)]) {
+        const tf = tableFilterOf(t);
+        if (!tf) continue;
+        const answer = await evaluate(tf);
+        if (answer) layoutApi.setTableFilterHidden(name, t.name, answer.hidden);
+        else all = false;
+      }
+      return all;
+    }
+
+    const hasTableFilters = (name) => layoutApi.tablesOf(name).some((t) => tableFilterOf(t));
 
     function summary(filter, count) {
       const total = dataRows(filter);
@@ -372,7 +480,7 @@
         const columns = filter.columns.filter((c) => c.col !== col);
         if (criteria) columns.push({ col, ...criteria });
         columns.sort((a, b) => a.col - b.col);
-        return install(name, { range: filter.range, columns, hidden: [] });
+        return install(name, { range: extendedRange(name, filter.range), columns, hidden: [] });
       });
     }
 
@@ -400,19 +508,35 @@
         await drainInFlightSheetWork();
         const name = syncCells();
         const filter = filterOf(name);
-        if (!filter) {
+        if (!filter && !hasTableFilters(name)) {
           say("켜진 필터 없음");
           return false;
         }
-        return install(name, { range: filter.range, columns: filter.columns, hidden: [] });
+        const done = filter ? await install(name, { range: extendedRange(name, filter.range), columns: filter.columns, hidden: [] }) : true;
+        if (!(await applyTables(name))) {
+          say("필터를 적용하지 못함");
+          return false;
+        }
+        if (!filter) {
+          grid.layoutChanged();
+          refreshWindowFromModel();
+          say("필터 다시 적용");
+          changed();
+        }
+        return done;
       });
     }
 
-    // After a row or column edit that dropped a column's condition (inside the edit's own step).
-    async function reapplyAfterEdit() {
+    // After a row or column edit that dropped a column's condition (inside the edit's own step): the sheet's filter
+    // (`sheetToo`) and the tables' filters are judged by what is left.
+    async function reapplyAfterEdit(sheetToo = true) {
       const name = getActiveSheetName();
       const filter = filterOf(name);
-      if (filter) await install(name, { range: filter.range, columns: filter.columns, hidden: [] });
+      if (filter && sheetToo) await install(name, { range: filter.range, columns: filter.columns, hidden: [] });
+      if (await applyTables(name)) {
+        grid.layoutChanged();
+        refreshWindowFromModel();
+      }
     }
 
     // The values `col` offers among the rows the other columns leave visible; `null` on failure.
@@ -462,6 +586,7 @@
       run,
       toggle,
       reapply,
+      hasTableFilters,
       clearAll,
       setCriteria,
       reapplyAfterEdit,

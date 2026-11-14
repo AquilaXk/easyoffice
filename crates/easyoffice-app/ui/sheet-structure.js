@@ -212,7 +212,9 @@
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
         // A deleted column took its condition along: the rows it hid are judged again by the rest.
-        if (result.answer.filterReapply === true) await filter.reapplyAfterEdit();
+        if (result.answer.filterReapply === true || (axis === "col" && op === "delete" && filter.hasTableFilters(name))) {
+          await filter.reapplyAfterEdit(result.answer.filterReapply === true);
+        }
         say(unit + " " + count + "개 " + (op === "insert" ? "삽입" : "삭제"));
         return true;
       });

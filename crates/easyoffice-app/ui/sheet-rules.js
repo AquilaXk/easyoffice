@@ -360,6 +360,26 @@
       listeners.repaint?.();
     }
 
+    // The fill and text colours the rules give the cells of column `col` (1-based) in rows `r1`..`r2`, as the
+    // filter's runs `[[first, last, "rrggbb"], ...]` (offsets from `r1`); `null` when no cell has a rule colour.
+    function colorRuns(sheet, col, r1, r2) {
+      const map = fx.get(sheet);
+      if (!map || map.size === 0) return null;
+      const out = { fill: [], font: [] };
+      const add = (runs, i, color) => {
+        const last = runs[runs.length - 1];
+        if (last && last[1] === i - 1 && last[2] === color) last[1] = i;
+        else runs.push([i, i, color]);
+      };
+      for (let r = r1; r <= r2; r += 1) {
+        const f = map.get((r - 1) * MAX_COLS + (col - 1));
+        if (!f) continue;
+        if (f.bg) add(out.fill, r - r1, f.bg.slice(1));
+        if (f.fg) add(out.font, r - r1, f.fg.slice(1));
+      }
+      return out.fill.length || out.font.length ? out : null;
+    }
+
     function fxAt(sheet, ref) {
       const map = fx.get(sheet);
       if (!map || map.size === 0) return undefined;
@@ -486,6 +506,7 @@
       applyPacked,
       clearFx,
       fxAt,
+      colorRuns,
       paintTd,
       validationAt,
       listItems,

@@ -224,7 +224,7 @@ function fakeFilterEngine() {
   };
 }
 
-async function createHarness(override = () => undefined) {
+async function createHarness(override = () => undefined, model = MODEL) {
   const requests = [];
   const fake = fakeFilterEngine();
   const engine = (body) => {
@@ -249,7 +249,7 @@ async function createHarness(override = () => undefined) {
   });
   switchModule(harness.document, "SHEET");
   await flushAsyncTurns();
-  await pickFile(harness.document, makeFixtureFile("필터.xlsx", MODEL));
+  await pickFile(harness.document, makeFixtureFile("필터.xlsx", model));
   await flushAsyncTurns(8);
   return { ...harness, requests };
 }
@@ -609,4 +609,181 @@ test("undo steps of a filter change keep the cells as they are and a sort step p
   assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""]);
   await click(h, redo);
   assert.equal(layout.filterOf("표").columns.length, 1);
+});
+
+// ---- the conditions of PD-226: top and average in the dialog, the range that grows, a table's own filter ----------------
+
+test("the statistic operators of the dialog are the whole criterion of a column", () => {
+  const top = core.criteriaFromForms(true, [{ op: "top", text: "10" }, { op: "none", text: "" }]);
+  assert.deepEqual(top.criteria, { top: { count: 10 } });
+  assert.deepEqual(core.criteriaFromForms(true, [{ op: "none", text: "" }, { op: "bottomPercent", text: " 25 " }]).criteria, {
+    top: { bottom: true, percent: true, count: 25 },
+  });
+  assert.deepEqual(core.criteriaFromForms(true, [{ op: "topPercent", text: "100" }, { op: "none", text: "" }]).criteria, { top: { percent: true, count: 100 } });
+  assert.deepEqual(core.criteriaFromForms(false, [{ op: "aboveAverage", text: "" }, { op: "none", text: "" }]).criteria, { average: { above: true } });
+  assert.deepEqual(core.criteriaFromForms(false, [{ op: "none", text: "" }, { op: "belowAverage", text: "x" }]).criteria, { average: { above: false } });
+  // A count must be a whole number in range, and a statistic is never one of two conditions.
+  for (const text of ["", "0", "-1", "1.5", "abc", "1000001"]) {
+    assert.ok(core.criteriaFromForms(true, [{ op: "top", text }, { op: "none", text: "" }]).error, "items " + text);
+  }
+  assert.ok(core.criteriaFromForms(true, [{ op: "topPercent", text: "101" }, { op: "none", text: "" }]).error);
+  assert.ok(core.criteriaFromForms(true, [{ op: "top", text: "3" }, { op: "greaterThan", text: "1" }]).error);
+  assert.ok(core.criteriaFromForms(true, [{ op: "aboveAverage", text: "" }, { op: "belowAverage", text: "" }]).error);
+  // The dialog shows a stored statistic as it was entered, and keeps the second row empty.
+  for (const [criteria, row] of [
+    [{ top: { count: 7 } }, { op: "top", text: "7" }],
+    [{ top: { bottom: true, count: 7 } }, { op: "bottom", text: "7" }],
+    [{ top: { percent: true, count: 5 } }, { op: "topPercent", text: "5" }],
+    [{ top: { bottom: true, percent: true, count: 5 } }, { op: "bottomPercent", text: "5" }],
+    [{ average: { above: true } }, { op: "aboveAverage", text: "" }],
+    [{ average: { above: false } }, { op: "belowAverage", text: "" }],
+  ]) {
+    const forms = core.formsFromCriteria(criteria);
+    assert.deepEqual(forms.rows, [row, { op: "none", text: "" }]);
+    assert.deepEqual(core.criteriaFromForms(forms.and, forms.rows).criteria, criteria);
+  }
+  assert.deepEqual([core.paramsOf("top"), core.paramsOf("bottomPercent"), core.paramsOf("aboveAverage")], [1, 1, 0]);
+});
+
+test("a table's filter hides rows apart from the user's, through the layout JSON", async () => {
+  const layout = await layoutApi();
+  const json = {
+    hiddenRows: [[5, 5]],
+    tables: [{ name: "T", range: "A1:C9", header: true, columns: ["a", "b", "c"], filter: [{ col: 1, values: ["x"] }], filterHidden: [[3, 4], [7, 8]] }],
+  };
+  layout.replaceAll({ S: json });
+  assert.deepEqual(layout.getAll(), { S: json });
+  assert.deepEqual([3, 4, 5, 6, 7, 8].map((r) => layout.rowHidden("S", r)), [true, true, true, false, true, true]);
+  // Unhiding the user's row leaves the table's rows hidden; clearing the table's rows shows them.
+  layout.setHidden("S", "row", 5, 5, false);
+  assert.equal(layout.rowHidden("S", 5), false);
+  assert.equal(layout.rowHidden("S", 4), true);
+  assert.equal(layout.setTableFilterHidden("S", "T", []), true);
+  assert.equal(layout.rowHidden("S", 4), false);
+  assert.equal(layout.tablesOf("S")[0].filterHidden, undefined);
+  assert.equal(layout.setTableFilterHidden("S", "Nope", [[2, 2]]), false);
+  assert.equal(layout.setTableFilterHidden("S", "T", [[6, 6]]), true);
+  assert.equal(layout.rowHidden("S", 6), true);
+});
+
+const GROWN = {
+  sheets: [
+    {
+      name: "표",
+      cells: [
+        { ref: "A1", raw: "부서" },
+        { ref: "B1", raw: "매출" },
+        ...[["영업", "10"], ["개발", "20"], ["영업", "30"], ["기획", "40"], ["영업", "50"], ["개발", "60"]].flatMap(([dept, sales], i) => [
+          { ref: "A" + (i + 2), raw: dept },
+          { ref: "B" + (i + 2), raw: sales },
+        ]),
+        // Rows written below the range: 8 and 9 are next to it, 11 is after an empty row.
+        { ref: "A8", raw: "영업" },
+        { ref: "B8", raw: "70" },
+        { ref: "A9", raw: "기획" },
+        { ref: "A11", raw: "영업" },
+      ],
+    },
+  ],
+};
+
+test("applying again takes in the rows written right below the range, up to an empty row", async () => {
+  const h = await createHarness(undefined, GROWN);
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.setFilter("표", { range: { r1: 1, c1: 1, r2: 7, c2: 2 }, columns: [{ col: 1, values: ["영업"] }], hidden: [] });
+  await click(h, act(d, "filter-reapply"));
+  assert.deepEqual(layout.filterOf("표").range, { r1: 1, c1: 1, r2: 9, c2: 2 });
+  const sent = h.requests.at(-1);
+  assert.equal(sent.filter.range, "A1:B9");
+  assert.equal(sent.data[0].values.length, 8, "rows 2 to 9");
+  assert.deepEqual(layout.filterOf("표").hidden, [[3, 3], [5, 5], [7, 7], [9, 9]], "the row 9 of 기획 is judged too");
+  // Nothing below grows it again.
+  await click(h, act(d, "filter-reapply"));
+  assert.deepEqual(layout.filterOf("표").range, { r1: 1, c1: 1, r2: 9, c2: 2 });
+});
+
+test("choosing a condition also takes in the rows written below, and one undo gives the range back", async () => {
+  const h = await createHarness(undefined, GROWN);
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.setFilter("표", { range: { r1: 1, c1: 1, r2: 7, c2: 2 }, columns: [], hidden: [] });
+  cell(d, "A1").focus();
+  key(cell(d, "A1"), "ArrowDown", { altKey: true });
+  await flushAsyncTurns(10);
+  await click(h, shownRows(d)[1]);
+  await click(h, d.getElementById("btn-sheet-filter-ok"));
+  assert.equal(layout.filterOf("표").range.r2, 9);
+  await click(h, undo(d));
+  assert.equal(layout.filterOf("표").range.r2, 7);
+});
+
+test("the range does not grow into a table", async () => {
+  const h = await createHarness(undefined, GROWN);
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({
+    표: {
+      filter: { range: "A1:B7", columns: [{ col: 1, values: ["영업"] }] },
+      tables: [{ name: "T", range: "A9:B10", header: true, columns: ["a", "b"] }],
+    },
+  });
+  await click(h, act(d, "filter-reapply"));
+  assert.equal(layout.filterOf("표").range.r2, 8, "row 9 belongs to the table");
+});
+
+test("applying again judges the conditions of a table's filter and keeps its rows apart from the user's", async () => {
+  const h = await createHarness(undefined, GROWN);
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({
+    표: {
+      hiddenRows: [[2, 2]],
+      tables: [{ name: "T", range: "A1:B7", header: true, columns: ["부서", "매출"], filter: [{ col: 1, values: ["영업"] }] }],
+    },
+  });
+  await click(h, act(d, "filter-reapply"));
+  const table = layout.tablesOf("표")[0];
+  assert.deepEqual(table.filterHidden, [[3, 3], [5, 5], [7, 7]]);
+  assert.equal(h.requests.at(-1).filter.range, "A1:B7");
+  assert.deepEqual(layout.get("표").hiddenRows, [[2, 2]], "the user's row stays the user's");
+  assert.deepEqual([2, 3, 4, 5].map((r) => layout.rowHidden("표", r)), [true, true, false, true]);
+  // Conditions of the table are what a later apply reads: change them and judge again.
+  table.filter = [{ col: 1, values: ["개발"] }];
+  await click(h, act(d, "filter-reapply"));
+  assert.deepEqual(layout.tablesOf("표")[0].filterHidden, [[2, 2], [4, 6]]);
+  // A table whose filter has no condition, or no header row, is not judged.
+  layout.replaceAll({ 표: { tables: [{ name: "U", range: "A1:B7", header: false, columns: ["a", "b"], filter: [{ col: 1, values: ["x"] }] }] } });
+  const before = h.requests.length;
+  await click(h, act(d, "filter-reapply"));
+  assert.equal(feedback(d), "켜진 필터 없음");
+  assert.equal(h.requests.length, before);
+});
+
+// Packed appearances as the engine sends them (`pack.rs`): rows and heads are little-endian words.
+function packedFill(cells, rgb) {
+  const words = cells.flatMap(([row, col]) => [row, col | (1 << 18), 0]);
+  return { pal: [rgb], w: Buffer.from(new Uint8Array(new Uint32Array(words).buffer)).toString("base64") };
+}
+
+test("the colours the rules give a column are sent as runs for a colour condition, and only then", async () => {
+  const h = await createHarness((body) => (body.op === "apply" ? { hidden: [[3, 3]], count: 1 } : undefined));
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const rules = h.host.__EASYOFFICE_SHEET_RULES__;
+  // A2, A3 and A5 (0-based rows 1, 2, 4 of column 0) are filled.
+  rules.applyPacked("표", packedFill([[1, 0], [2, 0], [4, 0]], 0xffc7ce), true);
+  assert.deepEqual(rules.colorRuns("표", 1, 2, 7), { fill: [[0, 1, "ffc7ce"], [3, 3, "ffc7ce"]], font: [] });
+  assert.equal(rules.colorRuns("표", 2, 2, 7), null, "no colour in column B");
+  layout.replaceAll({ 표: { filter: { range: "A1:B7", columns: [{ col: 1, color: { rgb: "ffc7ce" } }] } } });
+  await click(h, act(d, "filter-reapply"));
+  const sent = h.requests.at(-1);
+  assert.deepEqual(sent.filter.columns, [{ col: 1, color: { rgb: "ffc7ce" } }]);
+  assert.deepEqual(sent.data[0].fill, [[0, 1, "ffc7ce"], [3, 3, "ffc7ce"]]);
+  assert.equal(sent.data[0].font, undefined);
+  assert.deepEqual(layout.filterOf("표").hidden, [[3, 3]]);
+  // A column with a value list has no colour in its request.
+  layout.replaceAll({ 표: { filter: { range: "A1:B7", columns: [{ col: 1, values: ["영업"] }] } } });
+  await click(h, act(d, "filter-reapply"));
+  assert.equal(h.requests.at(-1).data[0].fill, undefined);
 });
