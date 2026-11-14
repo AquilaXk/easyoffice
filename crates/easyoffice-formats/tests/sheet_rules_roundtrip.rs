@@ -373,6 +373,63 @@ fn ods_names_conditions_it_cannot_read() {
     );
 }
 
+/// Packs the sample validations, rewrites `content.xml`, and reads the rules back.
+fn ods_rules_after_editing_content(edit: impl Fn(&str) -> String) -> SheetRules {
+    let sheets = vec![(
+        "Sheet1".to_string(),
+        vec![(0, 0, "1".to_string()), (3, 1, "5".to_string())],
+    )];
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &[styling(ods_sample())]).unwrap();
+    let mut entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    for e in &mut entries {
+        if e.path == "content.xml" {
+            e.data = edit(&String::from_utf8(e.data.clone()).unwrap()).into_bytes();
+        }
+    }
+    let repacked = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+        &entries
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    easyoffice_formats::read_sheet_styling(&repacked, easyoffice_formats::DocumentFormat::Ods)
+        .unwrap()
+        .remove(0)
+        .1
+        .rules
+}
+
+#[test]
+fn ods_cells_pointing_at_an_unsupported_validation_are_skipped() {
+    let rules = ods_rules_after_editing_content(|xml| {
+        let mut out = String::new();
+        let mut rest = xml;
+        while let Some((head, tail)) = rest.split_once("table:condition=\"") {
+            out.push_str(head);
+            out.push_str("table:condition=\"of:unknown-condition()");
+            rest = tail.split_once('"').map_or("", |(_, after)| after);
+            out.push('"');
+        }
+        out.push_str(rest);
+        out
+    });
+    assert!(rules.dv.is_empty());
+    assert!(!rules.unsupported.is_empty());
+}
+
+#[test]
+fn ods_cells_pointing_at_a_missing_validation_are_skipped() {
+    let rules = ods_rules_after_editing_content(|xml| {
+        xml.replace("table:name=\"eoval", "table:name=\"gone")
+    });
+    assert!(rules.dv.is_empty());
+}
+
 #[test]
 fn ods_is_untouched_by_empty_rules() {
     let sheets = vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])];

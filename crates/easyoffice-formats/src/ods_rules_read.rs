@@ -584,7 +584,10 @@ fn fold_cell_validations(
     let mut names: Vec<String> = cells.keys().cloned().collect();
     names.sort();
     for name in names {
-        let spec = &specs[&name];
+        // A cell may name a validation the reader dropped (unsupported condition, or no definition).
+        let Some(spec) = specs.get(&name) else {
+            continue;
+        };
         let boxes = boxes_of(&cells[&name]);
         for chunk in boxes.chunks(MAX_RANGES_PER_RULE) {
             if rules.len() >= MAX_RULES_PER_SHEET {
