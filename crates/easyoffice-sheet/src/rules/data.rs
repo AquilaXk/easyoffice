@@ -6,7 +6,7 @@
 //! computed once per distinct range list and shared by every rule on it until a cell in the range
 //! changes (`StatsCache::invalidate`).
 
-use crate::{EvalContext, EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
+use crate::{EvalContext, EvaluatedCellValue, PackedCellCoordinate, SheetEngine, WorkbookEngine};
 use easyoffice_formats::CellBox;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -17,6 +17,8 @@ pub(crate) const BLANK_SCAN_CELLS: u64 = 65_536;
 
 pub(crate) trait Cells {
     fn value(&mut self, coord: PackedCellCoordinate) -> EvaluatedCellValue;
+    /// The value at `coord` of the sheet named `sheet`; `None` when the workbook has no such sheet.
+    fn value_on(&mut self, sheet: &str, coord: PackedCellCoordinate) -> Option<EvaluatedCellValue>;
     /// Populated cells inside `b`, row-major.
     fn populated(&mut self, b: &CellBox) -> Vec<PackedCellCoordinate>;
     /// Evaluates formula text without the leading `=`.
@@ -34,6 +36,24 @@ impl Cells for SheetCells<'_, '_> {
     fn value(&mut self, coord: PackedCellCoordinate) -> EvaluatedCellValue {
         self.ctx.reset_steps();
         self.sheet.eval_coord_ctx(coord, self.ctx, 0)
+    }
+
+    fn value_on(&mut self, sheet: &str, coord: PackedCellCoordinate) -> Option<EvaluatedCellValue> {
+        let known = WorkbookEngine::is_same_sheet_identity(sheet, &self.sheet.name)
+            || self
+                .ctx
+                .workbook
+                .is_some_and(|wb| wb.sheet(sheet).is_some());
+        known.then(|| {
+            self.ctx.reset_steps();
+            self.sheet.with_sheet_coord_value(
+                Some(sheet),
+                coord,
+                self.ctx,
+                0,
+                EvaluatedCellValue::clone,
+            )
+        })
     }
 
     fn populated(&mut self, b: &CellBox) -> Vec<PackedCellCoordinate> {

@@ -14,8 +14,11 @@
 
 use super::data::{Cells, SheetCells};
 use crate::coercion::{is_valid_decimal_syntax, parse_iso_date_serial, parse_strict_number};
-use crate::{EvalContext, EvaluatedCellValue, MemoTable, PackedCellCoordinate, WorkbookEngine};
+use crate::{
+    EvalContext, EvaluatedCellValue, MemoTable, PackedCellCoordinate, WorkbookEngine, MAX_EVAL_TIME,
+};
 use easyoffice_formats::{CellBox, Cmp, DataValidation, DvAlert, DvKind};
+use std::time::Duration;
 
 /// Outcome of [`validate_input`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,16 +103,30 @@ pub(crate) fn list_items(dv: &DataValidation, cells: &mut dyn Cells) -> Vec<Stri
                 .collect()
         }
         Some(reference) => {
-            let target = reference.rsplit_once('!').map_or(reference, |(_, r)| r);
+            // A reference to another sheet reads that sheet (`=Sheet2!$A$1:$A$5`, `='My Sheet'!A1:A5`).
+            let (sheet, target) = match reference.rsplit_once('!') {
+                Some((name, target)) => (
+                    Some(WorkbookEngine::unquote_formula_sheet_token(name).unwrap_or(name.into())),
+                    target,
+                ),
+                None => (None, reference),
+            };
             let Some(b) = CellBox::parse(target) else {
                 return Vec::new();
             };
             let mut out = Vec::new();
             let area = b.area().min(super::data::BLANK_SCAN_CELLS);
+            let width = u64::from(b.col1 - b.col0 + 1);
             for i in 0..area {
-                let width = u64::from(b.col1 - b.col0 + 1);
                 let (r, c) = (b.row0 + (i / width) as u32, b.col0 + (i % width) as u32);
-                let v = cells.value(PackedCellCoordinate((u64::from(r) << 32) | u64::from(c)));
+                let at = PackedCellCoordinate((u64::from(r) << 32) | u64::from(c));
+                let v = match &sheet {
+                    None => cells.value(at),
+                    Some(name) => match cells.value_on(name, at) {
+                        Some(v) => v,
+                        None => return Vec::new(),
+                    },
+                };
                 if v != EvaluatedCellValue::Empty {
                     out.push(v.to_display_string());
                 }
@@ -205,7 +222,8 @@ fn judge(dv: &DataValidation, cells: &mut dyn Cells, input: &str) -> bool {
 
 /// Judges `input` for the cell `coord` of sheet `sheet` against `rules`. The first rule that
 /// covers the cell applies. A custom formula sees `input` in the cell, so the cell is set for the
-/// duration of the check and restored afterwards; `memo` is the formula memo of the caller.
+/// duration of the check and restored afterwards; `memo` is the formula memo of the caller. The check
+/// stops at [`MAX_EVAL_TIME`] and an unfinished custom formula rejects the input.
 pub fn validate_input(
     wb: &mut WorkbookEngine,
     sheet: usize,
@@ -213,6 +231,18 @@ pub fn validate_input(
     coord: PackedCellCoordinate,
     input: &str,
     memo: MemoTable,
+) -> (Verdict, MemoTable) {
+    validate_within(wb, sheet, rules, coord, input, memo, MAX_EVAL_TIME)
+}
+
+pub(crate) fn validate_within(
+    wb: &mut WorkbookEngine,
+    sheet: usize,
+    rules: &[DataValidation],
+    coord: PackedCellCoordinate,
+    input: &str,
+    memo: MemoTable,
+    limit: Duration,
 ) -> (Verdict, MemoTable) {
     let Some(dv) = rules.iter().find(|dv| {
         dv.ranges
@@ -225,13 +255,22 @@ pub fn validate_input(
         return (Verdict::Valid, memo);
     }
     let previous = wb.sheets()[sheet].cells.get(&coord).cloned();
-    if dv.kind == DvKind::Custom {
+    let custom = dv.kind == DvKind::Custom;
+    if custom {
         wb.sheets_mut()[sheet].set_cell_coord(coord, input);
     }
     let sid = wb.sheets()[sheet].resolved_sheet_id();
+    // A custom formula runs with the input in its cell, so the formula values of the caller's memo
+    // may rest on the old content and what the check computes is not the sheet's: it gets a memo of
+    // its own that is dropped, and the caller's memo comes back as it went in.
+    let (check_memo, kept) = if custom {
+        (MemoTable::new(sid), Some(memo))
+    } else {
+        (memo, None)
+    };
     let (ok, memo) = {
-        let mut ctx = EvalContext::with_workbook(wb, sid);
-        ctx.memo = memo;
+        let mut ctx = EvalContext::with_workbook(wb, sid).with_time_limit(limit);
+        ctx.memo = check_memo;
         let ok = {
             let mut cells = SheetCells {
                 sheet: &wb.sheets()[sheet],
@@ -239,9 +278,10 @@ pub fn validate_input(
             };
             judge(dv, &mut cells, input)
         };
-        (ok, std::mem::replace(&mut ctx.memo, MemoTable::new(sid)))
+        let used = std::mem::replace(&mut ctx.memo, MemoTable::new(sid));
+        (ok, kept.unwrap_or(used))
     };
-    if dv.kind == DvKind::Custom {
+    if custom {
         wb.sheets_mut()[sheet].set_cell_coord(coord, previous.unwrap_or_default());
     }
     let verdict = if ok {
