@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use crate::code_pages::CodePage;
+use crate::decode_budget::DecodeBudget;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
 use crate::rich_table::RichTable;
@@ -124,6 +125,7 @@ struct Reader {
     list_first_nfc: HashMap<i32, i32>,
     ls_list: HashMap<i32, i32>,
     open_list: OpenList,
+    text_budget: DecodeBudget,
 }
 
 /// The `\list` or `\listoverride` being read; its parts come in either order.
@@ -143,6 +145,10 @@ struct OpenTable {
 
 impl Reader {
     fn new() -> Self {
+        Self::with_budget(DecodeBudget::new())
+    }
+
+    fn with_budget(text_budget: DecodeBudget) -> Self {
         Self {
             stack: vec![Group {
                 dest: Dest::Body,
@@ -176,6 +182,7 @@ impl Reader {
             list_first_nfc: HashMap::new(),
             ls_list: HashMap::new(),
             open_list: OpenList::default(),
+            text_budget,
         }
     }
 
@@ -203,22 +210,25 @@ impl Reader {
         }
     }
 
-    fn emit(&mut self, text: &str) {
+    fn emit(&mut self, text: &str) -> Result<(), EasyOfficeError> {
         self.high_surrogate = None;
         match self.top().dest {
             Dest::Body => {
                 if self.in_row {
                     // Table writers put a separator space between the row group and the first cell.
                     let first_cell = self.row.is_empty() && self.cell.is_empty();
-                    self.cell
-                        .push_str(if first_cell { text.trim_start() } else { text });
+                    let s = if first_cell { text.trim_start() } else { text };
+                    self.text_budget.charge(s.len(), "RTF 표 셀")?;
+                    self.cell.push_str(s);
                 } else {
+                    self.text_budget.charge_run(text.len(), "RTF 런")?;
                     let chars = self.top().chars.clone();
                     let fmt = self.resolve(&chars);
                     push_run(&mut self.runs, text, &fmt);
                 }
             }
             Dest::FontTbl => {
+                self.text_budget.charge(text.len(), "RTF 메타데이터")?;
                 for ch in text.chars() {
                     if ch == ';' {
                         let name = self.font_name.trim().to_string();
@@ -247,23 +257,29 @@ impl Reader {
                     self.rgb = [None; 3];
                 }
             }
-            Dest::Title => self.title.push_str(text),
+            Dest::Title => {
+                self.text_budget.charge(text.len(), "RTF 메타데이터")?;
+                self.title.push_str(text);
+            }
             Dest::Info | Dest::Skip | Dest::ListTable | Dest::ListOverrides => {}
         }
+        Ok(())
     }
 
-    fn flush_table(&mut self) {
+    fn flush_table(&mut self) -> Result<(), EasyOfficeError> {
         if let Some(open) = self.table.take() {
             if !open.rows.is_empty() {
+                self.text_budget.charge_block(0, "RTF 표")?;
                 let merges = merges_from_marks(&open.marks);
                 let (table, dropped) = RichTable::with_merges(open.rows, merges);
                 self.merges_dropped += dropped;
                 self.blocks.push(RichBlock::Table(table));
             }
         }
+        Ok(())
     }
 
-    fn end_paragraph(&mut self) {
+    fn end_paragraph(&mut self) -> Result<(), EasyOfficeError> {
         let mut runs = std::mem::take(&mut self.runs);
         // Paragraph properties last until `\pard`, not until the end of the paragraph.
         let para = self.para.clone();
@@ -290,7 +306,8 @@ impl Reader {
             runs = merged;
         }
         if runs.iter().any(|r| !r.text.trim().is_empty()) {
-            self.flush_table();
+            self.flush_table()?;
+            self.text_budget.charge_block(0, "RTF 문단")?;
             let list = if para.heading > 0 { None } else { para.list };
             let left_indent_twips = if list.is_some() && para.left_indent == Some(720) {
                 None
@@ -318,9 +335,10 @@ impl Reader {
                 page_break_before: false,
             }));
         }
+        Ok(())
     }
 
-    fn end_row(&mut self) {
+    fn end_row(&mut self) -> Result<(), EasyOfficeError> {
         let row = std::mem::take(&mut self.row);
         let marks = std::mem::take(&mut self.row_marks);
         self.in_row = false;
@@ -330,7 +348,7 @@ impl Reader {
             .as_ref()
             .is_some_and(|open| open.idx != self.table_idx)
         {
-            self.flush_table();
+            self.flush_table()?;
         }
         match self.table.as_mut() {
             Some(open) => {
@@ -345,13 +363,14 @@ impl Reader {
                 })
             }
         }
+        Ok(())
     }
 
-    fn emit_unicode(&mut self, n: i32) {
+    fn emit_unicode(&mut self, n: i32) -> Result<(), EasyOfficeError> {
         let unit = (n & 0xFFFF) as u16;
         if (0xD800..0xDC00).contains(&unit) {
             self.high_surrogate = Some(unit);
-            return;
+            return Ok(());
         }
         let ch = match self.high_surrogate.take() {
             Some(high) if (0xDC00..0xE000).contains(&unit) => {
@@ -360,26 +379,25 @@ impl Reader {
             _ => char::from_u32(u32::from(unit)),
         };
         let mut buf = [0u8; 4];
-        self.emit(ch.unwrap_or('\u{FFFD}').encode_utf8(&mut buf));
+        self.emit(ch.unwrap_or('\u{FFFD}').encode_utf8(&mut buf))
     }
 
-    fn control_word(&mut self, word: &str, param: Option<i32>) {
+    fn control_word(&mut self, word: &str, param: Option<i32>) -> Result<(), EasyOfficeError> {
         if word == "tblidx" {
             self.table_idx = usize::try_from(param.unwrap_or(0)).unwrap_or(0);
-            return;
+            return Ok(());
         }
         if word == "ansicpg" {
             self.code_page = param.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-            return;
+            return Ok(());
         }
         if word == "uc" {
             self.top().unicode_skip = usize::try_from(param.unwrap_or(1)).unwrap_or(0);
-            return;
+            return Ok(());
         }
         if word == "u" && param.is_some() && self.top().dest != Dest::Skip {
             self.top().first_word = false;
-            self.emit_unicode(param.unwrap_or(0));
-            return;
+            return self.emit_unicode(param.unwrap_or(0));
         }
         let first = std::mem::replace(&mut self.top().first_word, false);
         if first {
@@ -395,16 +413,16 @@ impl Reader {
             };
             if let Some(dest) = dest {
                 self.top().dest = dest;
-                return;
+                return Ok(());
             }
         }
         if word == "pnlvlblt" {
             self.para.list = Some(crate::RichListKind::Bullet);
-            return;
+            return Ok(());
         }
         if matches!(word, "pnlvlbody" | "pnlvl") {
             self.para.list = Some(crate::RichListKind::Ordered);
-            return;
+            return Ok(());
         }
         match self.top().dest {
             Dest::FontTbl => {
@@ -420,7 +438,7 @@ impl Reader {
                     }
                     _ => {}
                 }
-                return;
+                return Ok(());
             }
             Dest::ColorTbl => {
                 let value = param.and_then(|v| u8::try_from(v.clamp(0, 255)).ok());
@@ -430,16 +448,16 @@ impl Reader {
                     "blue" => self.rgb[2] = value,
                     _ => {}
                 }
-                return;
+                return Ok(());
             }
             Dest::ListTable | Dest::ListOverrides => {
                 self.list_table_word(word, param);
-                return;
+                return Ok(());
             }
-            Dest::Skip | Dest::Info | Dest::Title => return,
+            Dest::Skip | Dest::Info | Dest::Title => return Ok(()),
             Dest::Body => {}
         }
-        self.body_word(word, param);
+        self.body_word(word, param)
     }
 
     /// One control word of the list table or the override table.
@@ -479,30 +497,31 @@ impl Reader {
         }
     }
 
-    fn body_word(&mut self, word: &str, param: Option<i32>) {
+    fn body_word(&mut self, word: &str, param: Option<i32>) -> Result<(), EasyOfficeError> {
         let on = param != Some(0);
         match word {
-            "par" if !self.in_row => self.end_paragraph(),
+            "par" if !self.in_row => self.end_paragraph()?,
             "par" | "line" if self.in_row => {
                 self.high_surrogate = None;
                 if !self.cell.is_empty() {
+                    self.text_budget.charge(1, "RTF 표 셀")?;
                     self.cell.push('\n');
                 }
             }
             "pard" => {
                 self.para = ParaProps::default();
             }
-            "line" => self.emit("\n"),
-            "tab" => self.emit("\t"),
-            "emdash" => self.emit("\u{2014}"),
-            "endash" => self.emit("\u{2013}"),
-            "bullet" => self.emit("\u{2022}"),
-            "lquote" => self.emit("\u{2018}"),
-            "rquote" => self.emit("\u{2019}"),
-            "ldblquote" => self.emit("\u{201C}"),
-            "rdblquote" => self.emit("\u{201D}"),
-            "enspace" => self.emit("\u{2002}"),
-            "emspace" => self.emit("\u{2003}"),
+            "line" => self.emit("\n")?,
+            "tab" => self.emit("\t")?,
+            "emdash" => self.emit("\u{2014}")?,
+            "endash" => self.emit("\u{2013}")?,
+            "bullet" => self.emit("\u{2022}")?,
+            "lquote" => self.emit("\u{2018}")?,
+            "rquote" => self.emit("\u{2019}")?,
+            "ldblquote" => self.emit("\u{201C}")?,
+            "rdblquote" => self.emit("\u{201D}")?,
+            "enspace" => self.emit("\u{2002}")?,
+            "emspace" => self.emit("\u{2003}")?,
             "deff" => self.default_font = param.unwrap_or(0),
             "trowd" => {
                 self.in_row = true;
@@ -520,10 +539,11 @@ impl Reader {
                 self.row_marks.push(marks);
             }
             "cell" if self.in_row => {
+                self.text_budget.charge_cell(0, "RTF 표 셀")?;
                 let cell = std::mem::take(&mut self.cell);
                 self.row.push(cell);
             }
-            "row" if self.in_row => self.end_row(),
+            "row" if self.in_row => self.end_row()?,
             "ql" => self.para.align = Some(RichAlignment::Left),
             "qc" => self.para.align = Some(RichAlignment::Center),
             "qr" => self.para.align = Some(RichAlignment::Right),
@@ -551,6 +571,7 @@ impl Reader {
             }
             _ => self.char_word(word, param, on),
         }
+        Ok(())
     }
 
     fn char_word(&mut self, word: &str, param: Option<i32>, on: bool) {
@@ -641,17 +662,17 @@ impl Reader {
         (ch, ESCAPE_LEN)
     }
 
-    fn escape_symbol(&mut self, rest: &str) -> usize {
+    fn escape_symbol(&mut self, rest: &str) -> Result<usize, EasyOfficeError> {
         let Some(sym) = rest.chars().next() else {
-            return 0;
+            return Ok(0);
         };
         let mut buf = [0u8; 4];
         match sym {
-            '\\' | '{' | '}' => self.emit(sym.encode_utf8(&mut buf)),
-            '~' => self.emit("\u{00A0}"),
-            '_' => self.emit("\u{2011}"),
+            '\\' | '{' | '}' => self.emit(sym.encode_utf8(&mut buf))?,
+            '~' => self.emit("\u{00A0}")?,
+            '_' => self.emit("\u{2011}")?,
             '*' => self.top().dest = Dest::Skip,
-            '\n' | '\r' => self.body_word("par", None),
+            '\n' | '\r' => self.body_word("par", None)?,
             '\'' => {
                 let lead = rest
                     .get(1..3)
@@ -659,13 +680,13 @@ impl Reader {
                     .and_then(hex_byte);
                 if let Some(lead) = lead {
                     let (ch, used) = self.code_page_char(lead, rest);
-                    self.emit(ch.encode_utf8(&mut buf));
-                    return used;
+                    self.emit(ch.encode_utf8(&mut buf))?;
+                    return Ok(used);
                 }
             }
             _ => {}
         }
-        escape_len(rest)
+        Ok(escape_len(rest))
     }
 
     /// Reads `\ucN` fallback units as the text runs: each plain character, `\'hh`, control
@@ -710,7 +731,7 @@ impl Reader {
                             skip_fallback -= 1;
                             escape_len(after)
                         } else {
-                            self.escape_symbol(after)
+                            self.escape_symbol(after)?
                         };
                         i += 1 + adv;
                         continue;
@@ -731,7 +752,7 @@ impl Reader {
                         skip_fallback -= 1;
                         continue;
                     }
-                    self.control_word(word, param);
+                    self.control_word(word, param)?;
                     if word == "u" && param.is_some() {
                         skip_fallback = self.top().unicode_skip;
                     }
@@ -746,7 +767,7 @@ impl Reader {
                             .unwrap_or(rest.len());
                         let end = end.max(ch.len_utf8());
                         let chunk = &rest[..end];
-                        self.emit(chunk);
+                        self.emit(chunk)?;
                         i += end;
                         continue;
                     }
@@ -823,8 +844,8 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     };
     let mut reader = Reader::new();
     reader.run(text_cow.as_ref())?;
-    reader.end_paragraph();
-    reader.flush_table();
+    reader.end_paragraph()?;
+    reader.flush_table()?;
     let title = if reader.title.trim().is_empty() {
         DEFAULT_TITLE.to_string()
     } else {
@@ -860,69 +881,5 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rtf_reads_super_sub_para_layout_and_special_characters() {
-        let rtf = concat!(
-            "{\\rtf1\\ansi\\pard\\li720\\fi-360\\sl360\\slmult1 ",
-            "H{\\sub 2}O X\\super 3\\nosupersub !\\par",
-            "\\pard \\bullet \\lquote A\\rquote \\ldblquote B\\rdblquote \\enspace\\emspace\\~\\_\\par}"
-        );
-        let (doc, _) = read_rtf(rtf.as_bytes()).unwrap();
-        assert_eq!(doc.blocks.len(), 2);
-        let RichBlock::Paragraph(p0) = &doc.blocks[0] else {
-            panic!("paragraph 0");
-        };
-        assert_eq!(p0.left_indent_twips, Some(720));
-        assert_eq!(p0.first_line_indent_twips, Some(-360));
-        assert_eq!(p0.line_spacing_percent, Some(150));
-        assert!(p0
-            .runs
-            .iter()
-            .any(|r| r.text == "2" && r.script == RichScript::Subscript));
-        assert!(p0
-            .runs
-            .iter()
-            .any(|r| r.text == "3" && r.script == RichScript::Superscript));
-        assert!(p0
-            .runs
-            .iter()
-            .any(|r| r.text == "!" && r.script == RichScript::Normal));
-
-        let RichBlock::Paragraph(p1) = &doc.blocks[1] else {
-            panic!("paragraph 1");
-        };
-        assert_eq!(
-            p1.plain_text(),
-            "\u{2022}\u{2018}A\u{2019}\u{201C}B\u{201D}\u{2002}\u{2003}\u{00A0}\u{2011}"
-        );
-    }
-
-    #[test]
-    fn rtf_reads_chcbpat_cb_outlinelevel_and_pn_list_levels() {
-        let rtf = concat!(
-            "{\\rtf1\\ansi{\\colortbl ;\\red255\\green255\\blue0;\\red0\\green255\\blue255;}",
-            "\\pard\\outlinelevel1 HeadingTwo\\par",
-            "\\pard{\\*\\pn\\pnlvlblt}\\chcbpat1 BulletItem\\par",
-            "\\pard\\pnlvlbody\\cb2 OrderedItem\\par}"
-        );
-        let (doc, _) = read_rtf(rtf.as_bytes()).unwrap();
-        assert_eq!(doc.blocks.len(), 3);
-        let RichBlock::Paragraph(h2) = &doc.blocks[0] else {
-            panic!("paragraph 0");
-        };
-        assert_eq!(h2.heading_level, 2);
-        let RichBlock::Paragraph(b_item) = &doc.blocks[1] else {
-            panic!("paragraph 1");
-        };
-        assert_eq!(b_item.list, Some(crate::RichListKind::Bullet));
-        assert_eq!(b_item.runs[0].highlight.as_deref(), Some("FFFF00"));
-        let RichBlock::Paragraph(o_item) = &doc.blocks[2] else {
-            panic!("paragraph 2");
-        };
-        assert_eq!(o_item.list, Some(crate::RichListKind::Ordered));
-        assert_eq!(o_item.runs[0].highlight.as_deref(), Some("00FFFF"));
-    }
-}
+#[path = "rich_read_rtf/tests.rs"]
+mod tests;

@@ -112,3 +112,46 @@ fn megabyte_inputs_match_across_paths() {
         assert_eq!(hw, expected);
     }
 }
+
+#[test]
+#[ignore]
+fn bench_crc32_release() {
+    let mut rng = XorShift(0x5A17_9C3E_8B14_D207);
+    let data: Vec<u8> = (0..(1 << 20)).map(|_| rng.next() as u8).collect();
+    let rounds = 200u32;
+
+    let t0 = std::time::Instant::now();
+    let mut acc_base = 0u32;
+    for _ in 0..rounds {
+        acc_base ^= IeeeCrc32::checksum_byte_by_byte_baseline(std::hint::black_box(&data));
+    }
+    let dt_base = t0.elapsed();
+
+    let t1 = std::time::Instant::now();
+    let mut acc_scalar = 0u32;
+    for _ in 0..rounds {
+        acc_scalar ^= IeeeCrc32::checksum_scalar(std::hint::black_box(&data));
+    }
+    let dt_scalar = t1.elapsed();
+
+    let t2 = std::time::Instant::now();
+    let mut acc_fast = 0u32;
+    for _ in 0..rounds {
+        acc_fast ^= IeeeCrc32::checksum(std::hint::black_box(&data));
+    }
+    let dt_fast = t2.elapsed();
+
+    assert_eq!(acc_base, acc_scalar);
+    assert_eq!(acc_base, acc_fast);
+    let mb = f64::from(rounds);
+    println!(
+        "bench_crc32_release ({}): baseline {:.2} ms ({:.0} MB/s) | scalar-slice16 {:.2} ms ({:.0} MB/s) | dispatch {:.2} ms ({:.0} MB/s)",
+        IeeeCrc32::hardware_path_name(),
+        dt_base.as_secs_f64() * 1000.0,
+        mb / dt_base.as_secs_f64(),
+        dt_scalar.as_secs_f64() * 1000.0,
+        mb / dt_scalar.as_secs_f64(),
+        dt_fast.as_secs_f64() * 1000.0,
+        mb / dt_fast.as_secs_f64(),
+    );
+}

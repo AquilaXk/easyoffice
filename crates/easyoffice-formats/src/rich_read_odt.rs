@@ -6,6 +6,7 @@ mod frame;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
@@ -304,6 +305,7 @@ struct OdtWalker<'a> {
     dropped_merges: usize,
     in_automatic_styles: bool,
     budget: ImageBudget,
+    text_budget: DecodeBudget,
     /// Address of the open `text:a`, when it is a safe link.
     link: Option<String>,
     /// The last paragraph that held no text asked for a page break; the next one carries it.
@@ -353,6 +355,7 @@ impl<'a> OdtWalker<'a> {
             dropped_merges: 0,
             in_automatic_styles: false,
             budget: ImageBudget::default(),
+            text_budget: DecodeBudget::new(),
             link: None,
             pending_page_break: false,
             frame_mode: false,
@@ -361,18 +364,18 @@ impl<'a> OdtWalker<'a> {
     }
 
     /// Handles an element start; returns true when the subtree must be skipped.
-    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<bool, EasyOfficeError> {
         match name {
             "office:document-content" => {
                 self.title = attr(attrs, "title").unwrap_or_default().into_owned()
             }
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
-            "text:note" | "office:annotation" | "text:tracked-changes" => return true,
+            "text:note" | "office:annotation" | "text:tracked-changes" => return Ok(true),
             "draw:custom-shape" => {
                 if !self.warnings.iter().any(|w| w == UNSUPPORTED_OBJECT_NOTE) {
                     self.warnings.push(UNSUPPORTED_OBJECT_NOTE.to_string());
                 }
-                return true;
+                return Ok(true);
             }
             "text:p" | "text:h" if !self.in_automatic_styles => self.start_paragraph(name, attrs),
             "text:span" if !self.paras.is_empty() => self.start_span(attrs),
@@ -392,10 +395,10 @@ impl<'a> OdtWalker<'a> {
                     "text:page-number" => RichField::PageNumber,
                     "text:page-count" => RichField::TotalPages,
                     _ => RichField::FileName,
-                });
+                })?;
             }
-            "text:tab" => self.push_inline("\t"),
-            "text:line-break" => self.push_inline("\n"),
+            "text:tab" => self.push_inline("\t")?,
+            "text:line-break" => self.push_inline("\n")?,
             "text:s" => {
                 let mut rem = attr(attrs, "text:c")
                     .as_deref()
@@ -404,7 +407,7 @@ impl<'a> OdtWalker<'a> {
                     .min(MAX_REPEATED_SPACES);
                 while rem > 0 {
                     let chunk = rem.min(SPACES_64.len());
-                    self.push_inline(&SPACES_64[..chunk]);
+                    self.push_inline(&SPACES_64[..chunk])?;
                     rem -= chunk;
                 }
             }
@@ -435,12 +438,13 @@ impl<'a> OdtWalker<'a> {
             "table:covered-table-cell" if self.tbl_depth == 1 => {
                 let repeated = count_attr(attrs, "table:number-columns-repeated");
                 for _ in 0..repeated.min(self.padding_room()) {
+                    self.text_budget.charge_cell(0, "ODT 병합 셀")?;
                     self.table.covered();
                 }
             }
             _ => {}
         }
-        false
+        Ok(false)
     }
 
     fn start_paragraph(&mut self, name: &str, attrs: &Attrs<'_>) {
@@ -491,9 +495,10 @@ impl<'a> OdtWalker<'a> {
         self.span_fmts.push(merge_span_fmt(cur, add));
     }
 
-    fn push_field_run(&mut self, field: RichField) {
+    fn push_field_run(&mut self, field: RichField) -> Result<(), EasyOfficeError> {
         let fmt = self.span_fmts.last().cloned().unwrap_or_default();
         if let Some(top) = self.paras.last_mut() {
+            self.text_budget.charge_run(0, "ODT 페이지 필드")?;
             top.runs.push(RichRun {
                 bold: fmt.bold,
                 italic: fmt.italic,
@@ -508,13 +513,18 @@ impl<'a> OdtWalker<'a> {
                 ..RichRun::default()
             });
         }
+        Ok(())
     }
 
-    fn push_inline(&mut self, text: &str) {
-        if self.in_field {
-            return;
+    fn push_inline(&mut self, text: &str) -> Result<(), EasyOfficeError> {
+        if self.in_field || self.paras.is_empty() {
+            return Ok(());
         }
+        let link_len = self.link.as_deref().map_or(0, str::len);
+        self.text_budget
+            .charge_run(text.len().saturating_add(link_len), "ODT 런")?;
         push_inline(&mut self.paras, &self.span_fmts, self.link.as_deref(), text);
+        Ok(())
     }
 
     fn warn_once(&mut self, note: &str) {
@@ -544,6 +554,7 @@ impl<'a> OdtWalker<'a> {
             self.warn_once("외부 링크이거나 찾을 수 없는 그림은 가져오지 않았습니다.");
             return Ok(());
         };
+        self.budget.charge(entry.data.len())?;
         let mut image = match RichImage::new(entry.data.clone(), frame.alt.as_str()) {
             Ok(image) => image,
             Err(err) => {
@@ -554,7 +565,6 @@ impl<'a> OdtWalker<'a> {
                 return Ok(());
             }
         };
-        self.budget.charge(entry.data.len())?;
         if let Some((w, h)) = frame.size_emu {
             // An out-of-range size keeps the default derived from the pixels.
             let _ = image.set_display_emu(w, h);
@@ -565,7 +575,7 @@ impl<'a> OdtWalker<'a> {
         Ok(())
     }
 
-    fn on_end(&mut self, name: &str) {
+    fn on_end(&mut self, name: &str) -> Result<(), EasyOfficeError> {
         match name {
             "office:automatic-styles" | "office:font-face-decls" => {
                 self.in_automatic_styles = false
@@ -580,19 +590,20 @@ impl<'a> OdtWalker<'a> {
             "text:list" => {
                 self.list_stack.pop();
             }
-            "text:p" | "text:h" if !self.in_automatic_styles => self.finish_paragraph(),
+            "text:p" | "text:h" if !self.in_automatic_styles => self.finish_paragraph()?,
             "table:table-cell" if self.tbl_depth == 1 => {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
                     self.cell_paras.pop();
                 }
                 let text = self.cell_paras.join("\n");
                 self.cell_paras.clear();
-                self.push_cell(text);
+                self.push_cell(text)?;
             }
             "table:table-row" if self.tbl_depth == 1 => self.table.end_row(),
             "table:table" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
+                    self.text_budget.charge_block(0, "ODT 표")?;
                     let (table, dropped) = std::mem::take(&mut self.table).finish();
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
@@ -600,6 +611,7 @@ impl<'a> OdtWalker<'a> {
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Cells that a repeat count may still add to the open row.
@@ -608,18 +620,21 @@ impl<'a> OdtWalker<'a> {
     }
 
     /// Adds the closed cell, repeated as declared (bounded by the row width limit).
-    fn push_cell(&mut self, text: String) {
+    fn push_cell(&mut self, text: String) -> Result<(), EasyOfficeError> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
+        self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
         self.table.anchor(text.clone(), row_span, col_span);
         for _ in 1..repeated {
+            self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
             self.table.cell(text.clone());
         }
+        Ok(())
     }
 
-    fn finish_paragraph(&mut self) {
+    fn finish_paragraph(&mut self) -> Result<(), EasyOfficeError> {
         let Some(mut p) = self.paras.pop() else {
-            return;
+            return Ok(());
         };
         let toc_page = match p.toc {
             Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
@@ -632,6 +647,7 @@ impl<'a> OdtWalker<'a> {
         } else if text.trim().is_empty() && !p.runs.iter().any(|r| r.field.is_some()) {
             self.pending_page_break |= p.style.page_break_before;
         } else {
+            self.text_budget.charge_block(0, "ODT 문단")?;
             let list = if p.outline > 0 || p.toc.is_some() {
                 None
             } else if let Some(kind) = self.list_stack.last() {
@@ -670,6 +686,7 @@ impl<'a> OdtWalker<'a> {
             .last()
             .map_or_else(CharFmt::default, |q| q.base.clone());
         self.span_fmts.push(base);
+        Ok(())
     }
 }
 
@@ -712,12 +729,12 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
                 walker.on_frame(&frame, &entry_by_path)?;
             }
             XmlEvent::Start { name, ref attrs } => {
-                if walker.on_start(name, attrs) {
+                if walker.on_start(name, attrs)? {
                     reader.skip_subtree()?;
                 }
             }
-            XmlEvent::Text(text) => walker.push_inline(&text),
-            XmlEvent::End(name) => walker.on_end(name),
+            XmlEvent::Text(text) => walker.push_inline(&text)?,
+            XmlEvent::End(name) => walker.on_end(name)?,
         }
     }
     let OdtWalker {
@@ -853,5 +870,69 @@ mod tests {
         assert!(p1.fmt.bold);
         assert!(p1.fmt.italic);
         assert_eq!(p1.fmt.color.as_deref(), Some("112233"));
+    }
+
+    #[test]
+    fn hostile_on_frame_charges_image_budget_before_clone_or_decode() {
+        let entry = ZipArchiveEntry {
+            path: "Pictures/bad.bin".to_string(),
+            data: vec![0u8; 1024],
+            crc32: 0,
+        };
+        let mut by_path = HashMap::new();
+        by_path.insert("Pictures/bad.bin", &entry);
+        let styles = HashMap::new();
+        let lists = HashMap::new();
+        let mut walker = OdtWalker::new(&styles, &lists);
+        walker.paras.push(Para {
+            runs: Vec::new(),
+            style: StyleProps::default(),
+            outline: 0,
+            toc: None,
+            bookmark: None,
+            toc_dots: false,
+            base: CharFmt::default(),
+            images: Vec::new(),
+        });
+        let frame_xml = r#"<draw:frame><draw:image xlink:href="Pictures/bad.bin"/></draw:frame>"#;
+        let events: Vec<XmlEvent<'_>> = XmlReader::new(frame_xml)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        for _ in 0..crate::MAX_IMAGES_PER_DOCUMENT {
+            walker.on_frame(&events, &by_path).unwrap();
+        }
+        assert!(matches!(
+            walker.on_frame(&events, &by_path),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
+    }
+
+    #[test]
+    fn hostile_odt_runs_exceeding_decode_budget_fail_closed() {
+        let styles = HashMap::new();
+        let lists = HashMap::new();
+        let mut walker = OdtWalker::new(&styles, &lists);
+        walker.text_budget = DecodeBudget::with_limit(256);
+        let xml = format!(
+            "<office:document-content>{}</office:document-content>",
+            "<text:p>hello</text:p>".repeat(8)
+        );
+        let mut reader = XmlReader::new(&xml);
+        let mut hit = None;
+        while let Some(ev) = reader.next_event().unwrap() {
+            let res = match ev {
+                XmlEvent::Start { name, ref attrs } => walker.on_start(name, attrs).map(|_| ()),
+                XmlEvent::Text(text) => walker.push_inline(&text),
+                XmlEvent::End(name) => walker.on_end(name),
+            };
+            if let Err(err) = res {
+                hit = Some(err);
+                break;
+            }
+        }
+        assert!(matches!(
+            hit,
+            Some(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
     }
 }

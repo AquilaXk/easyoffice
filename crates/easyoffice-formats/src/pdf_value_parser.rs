@@ -4,7 +4,8 @@
 
 use super::{
     apply_flate_decode_parms_at, dict_get, resolve_value, PdfIndirectObject, PdfObjValue,
-    MAX_PDF_NESTING_DEPTH, MAX_PDF_STREAM_DECODE_BYTES,
+    MAX_PDF_COLLECTION_LEN, MAX_PDF_NESTING_DEPTH, MAX_PDF_STREAM_DECODE_BYTES,
+    MAX_PDF_STRING_BYTES,
 };
 use crate::pdf_stream_parser::{
     decode_pdf_name, is_pdf_delim_or_ws, is_standalone_pdf_kw, skip_pdf_ws_and_comments,
@@ -44,6 +45,9 @@ fn parse_pdf_dict(
         }
         let k = pdf_regular_run_end(bytes, p + 1, limit);
         let key = decode_pdf_name(&bytes[p + 1..k]);
+        if entries.len() >= MAX_PDF_COLLECTION_LEN {
+            return Err(());
+        }
         let Some((val, next_p)) =
             parse_pdf_value_with_table(bytes, paren_table, k, limit, depth + 1)?
         else {
@@ -70,6 +74,9 @@ fn parse_pdf_array(
         }
         if bytes[p] == b']' {
             return Ok(Some((PdfObjValue::Array(items), p + 1)));
+        }
+        if items.len() >= MAX_PDF_COLLECTION_LEN {
+            return Err(());
         }
         let Some((val, next_p)) =
             parse_pdf_value_with_table(bytes, paren_table, p, limit, depth + 1)?
@@ -106,17 +113,27 @@ fn parse_pdf_string(
         PdfNonCodeKind::ParenString {
             inner_start,
             inner_end,
-        } => Ok(Some((
-            PdfObjValue::ParenStr(bytes[inner_start..inner_end].to_vec()),
-            step.next_index,
-        ))),
+        } => {
+            if inner_end.saturating_sub(inner_start) > MAX_PDF_STRING_BYTES {
+                return Err(());
+            }
+            Ok(Some((
+                PdfObjValue::ParenStr(bytes[inner_start..inner_end].to_vec()),
+                step.next_index,
+            )))
+        }
         PdfNonCodeKind::HexString {
             inner_start,
             inner_end,
-        } => Ok(Some((
-            PdfObjValue::HexStr(bytes[inner_start..inner_end].to_vec()),
-            step.next_index,
-        ))),
+        } => {
+            if inner_end.saturating_sub(inner_start) > MAX_PDF_STRING_BYTES {
+                return Err(());
+            }
+            Ok(Some((
+                PdfObjValue::HexStr(bytes[inner_start..inner_end].to_vec()),
+                step.next_index,
+            )))
+        }
         _ => Err(()),
     }
 }
@@ -543,5 +560,24 @@ mod tests {
             decode_pdf_stream_filters(b"30>", &too_long_entries, &objects, &mut budget),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))
         ));
+    }
+
+    #[test]
+    fn hostile_pdf_collection_len_and_string_bytes_fail_closed() {
+        let huge_arr = format!("[{}]", "0 ".repeat(16_385));
+        assert!(
+            parse_pdf_value_with_table(huge_arr.as_bytes(), None, 0, huge_arr.len(), 0).is_err()
+        );
+
+        let huge_dict = format!("<<{}>>", "/A 0 ".repeat(16_385));
+        assert!(
+            parse_pdf_value_with_table(huge_dict.as_bytes(), None, 0, huge_dict.len(), 0).is_err()
+        );
+
+        let mut huge_str = Vec::with_capacity((1024 * 1024) + 3);
+        huge_str.push(b'(');
+        huge_str.resize((1024 * 1024) + 2, b'A');
+        huge_str.push(b')');
+        assert!(parse_pdf_value_with_table(&huge_str, None, 0, huge_str.len(), 0).is_err());
     }
 }

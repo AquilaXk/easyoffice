@@ -56,7 +56,9 @@ pub(crate) fn master_of(layouts: &[SheetPage], styling: &SheetStyling) -> u16 {
     layouts
         .iter()
         .position(|l| *l == layout)
-        .map_or(0, |i| (i + 1) as u16)
+        .and_then(|i| i.checked_add(1))
+        .and_then(|n| u16::try_from(n).ok())
+        .unwrap_or(0)
 }
 
 fn mm(mils: u32) -> String {
@@ -340,10 +342,11 @@ fn count_lines(fragment: &str, tag: &str, repeat: &str) -> u64 {
         let head = &after[..end];
         // `table:table-row-group` and `table:table-rows` are not rows.
         if head.is_empty() || head.starts_with([' ', '/', '\n', '\t']) {
-            total += extract_attr_from_fragment(head, repeat)
+            let add = extract_attr_from_fragment(head, repeat)
                 .and_then(|v| v.trim().parse::<u64>().ok())
                 .unwrap_or(1)
                 .max(1);
+            total = total.saturating_add(add);
         }
         rest = &after[end..];
     }
@@ -362,13 +365,18 @@ fn header_run(inner: &str, wrapper: &str, tag: &str, repeat: &str, max: u32) -> 
     if within == 0 || within > u64::from(max) || before > u64::from(u32::MAX) / 2 {
         return None;
     }
-    Some((before as u32, (before + within - 1) as u32))
+    let first = u32::try_from(before).ok()?;
+    let last = before
+        .checked_add(within)?
+        .checked_sub(1)
+        .and_then(|end| u32::try_from(end).ok())?;
+    Some((first, last))
 }
 
 /// The wrappers that write `title` lines at the start of a table (`None` for a run that starts later).
 pub(crate) fn title_end(run: Option<(u32, u32)>) -> Option<u32> {
     run.filter(|(first, _)| *first == 0)
-        .map(|(_, last)| last + 1)
+        .and_then(|(_, last)| last.checked_add(1))
 }
 
 /// Gives each sheet its page layout (through its table style's master page) and its print ranges. `styles` is
@@ -518,5 +526,34 @@ mod tests {
         assert_eq!(mils("bad"), None);
         assert_eq!(mils("-1cm"), None);
         assert_eq!(mils("99999in"), None);
+    }
+
+    #[test]
+    fn hostile_repeat_overflow_and_max_title_end_do_not_panic() {
+        let huge = format!(
+            r#"<table:table-row table:number-rows-repeated="{max}"/><table:table-row table:number-rows-repeated="{max}"/>"#,
+            max = u64::MAX
+        );
+        assert_eq!(
+            count_lines(&huge, "<table:table-row", "table:number-rows-repeated"),
+            u64::MAX
+        );
+        assert_eq!(title_end(Some((0, u32::MAX))), None);
+
+        let before = u64::from(u32::MAX) / 2;
+        let xml = format!(
+            r#"<table:table-row table:number-rows-repeated="{before}"/><table:table-header-rows><table:table-row table:number-rows-repeated="{within}"/></table:table-header-rows>"#,
+            within = u64::from(u32::MAX)
+        );
+        assert_eq!(
+            header_run(
+                &xml,
+                "table:table-header-rows",
+                "<table:table-row",
+                "table:number-rows-repeated",
+                u32::MAX
+            ),
+            None
+        );
     }
 }

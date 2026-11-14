@@ -156,16 +156,78 @@ pub enum Credential {
     Both(Box<AgileHash>, OdfKey),
 }
 
-fn utf16le(password: &str) -> Vec<u8> {
-    password.encode_utf16().flat_map(u16::to_le_bytes).collect()
+#[inline]
+fn volatile_zero_bytes(buf: &mut [u8]) {
+    for slot in buf.iter_mut() {
+        // SAFETY: Each iterator element is a valid, aligned, initialized `&mut u8` owned by `buf`.
+        unsafe { std::ptr::write_volatile(slot, 0u8) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+#[inline]
+fn volatile_zero_u16(buf: &mut [u16]) {
+    for slot in buf.iter_mut() {
+        // SAFETY: Each iterator element is a valid, aligned, initialized `&mut u16` owned by `buf`.
+        unsafe { std::ptr::write_volatile(slot, 0u16) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+struct ZeroizeBytes(Vec<u8>);
+
+impl ZeroizeBytes {
+    fn new(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+
+    fn extend_from_slice(&mut self, slice: &[u8]) {
+        self.0.extend_from_slice(slice);
+    }
+}
+
+impl std::ops::Deref for ZeroizeBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Drop for ZeroizeBytes {
+    fn drop(&mut self) {
+        volatile_zero_bytes(&mut self.0);
+    }
+}
+
+struct ZeroizeU16(Vec<u16>);
+
+impl std::ops::Deref for ZeroizeU16 {
+    type Target = [u16];
+
+    fn deref(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+impl Drop for ZeroizeU16 {
+    fn drop(&mut self) {
+        volatile_zero_u16(&mut self.0);
+    }
+}
+
+fn utf16le(password: &str) -> ZeroizeBytes {
+    ZeroizeBytes::new(password.encode_utf16().flat_map(u16::to_le_bytes).collect())
 }
 
 /// The legacy 16-bit hash of a password (ECMA-376 Part 4 14.7.1).
 fn legacy_hash(password: &str) -> u16 {
-    let units: Vec<u16> = password
-        .encode_utf16()
-        .take(LEGACY_PASSWORD_CHARS)
-        .collect();
+    let units = ZeroizeU16(
+        password
+            .encode_utf16()
+            .take(LEGACY_PASSWORD_CHARS)
+            .collect(),
+    );
     let rotate = |h: u16| ((h >> 14) & 1) | ((h << 1) & 0x7FFF);
     let mut hash = 0u16;
     for &unit in units.iter().rev() {
@@ -176,14 +238,19 @@ fn legacy_hash(password: &str) -> u16 {
 
 /// Key bytes of the ODS digest `uri` for `password`: SHA-1 (the default) tries UTF-8 and the older UTF-16LE
 /// form; SHA-256 hashes UTF-8. Both URIs of SHA-256 in use are accepted.
-fn odf_candidates(uri: Option<&str>, password: &str) -> Option<Vec<Vec<u8>>> {
+fn odf_candidates(uri: Option<&str>, password: &str) -> Option<Vec<ZeroizeBytes>> {
     match uri {
-        None | Some("http://www.w3.org/2000/09/xmldsig#sha1") => Some(vec![
-            Sha::Sha1.digest(password.as_bytes()),
-            Sha::Sha1.digest(&utf16le(password)),
-        ]),
+        None | Some("http://www.w3.org/2000/09/xmldsig#sha1") => {
+            let utf16 = utf16le(password);
+            Some(vec![
+                ZeroizeBytes::new(Sha::Sha1.digest(password.as_bytes())),
+                ZeroizeBytes::new(Sha::Sha1.digest(&utf16)),
+            ])
+        }
         Some(ODF_SHA256 | "http://www.w3.org/2001/04/xmlenc#sha256") => {
-            Some(vec![Sha::Sha256.digest(password.as_bytes())])
+            Some(vec![ZeroizeBytes::new(
+                Sha::Sha256.digest(password.as_bytes()),
+            )])
         }
         Some(_) => None,
     }
@@ -260,9 +327,11 @@ impl Credential {
             return None;
         }
         let sha = Sha::Sha512;
-        let mut message = salt.to_vec();
-        message.extend(utf16le(password));
-        let hash = sha.iterate(&sha.digest(&message), spin, None)?;
+        let pw_utf16 = utf16le(password);
+        let mut message = ZeroizeBytes::new(salt.to_vec());
+        message.extend_from_slice(&pw_utf16);
+        let initial = ZeroizeBytes::new(sha.digest(&message));
+        let hash = ZeroizeBytes::new(sha.iterate(&initial, spin, None)?);
         Some(Self::Agile(AgileHash {
             algorithm: "SHA-512".to_string(),
             hash: base64_codec::encode(&hash),
@@ -276,8 +345,9 @@ impl Credential {
         if password.is_empty() || password.encode_utf16().count() > MAX_PASSWORD_UNITS {
             return None;
         }
+        let digest = ZeroizeBytes::new(Sha::Sha256.digest(password.as_bytes()));
         Some(Self::Odf(OdfKey {
-            key: base64_codec::encode(&Sha::Sha256.digest(password.as_bytes())),
+            key: base64_codec::encode(&digest),
             algorithm: Some(ODF_SHA256.to_string()),
         }))
     }
@@ -312,7 +382,7 @@ fn accepted_if(matches: bool) -> PasswordCheck {
 
 impl OdfKey {
     fn verify(&self, password: &str) -> PasswordCheck {
-        let Some(key) = base64_codec::decode(&self.key) else {
+        let Some(key) = base64_codec::decode(&self.key).map(ZeroizeBytes::new) else {
             return PasswordCheck::Unsupported(Unsupported::Encoding);
         };
         let Some(candidates) = odf_candidates(self.algorithm.as_deref(), password) else {
@@ -335,21 +405,22 @@ impl AgileHash {
             return PasswordCheck::Unsupported(Unsupported::SpinCount);
         }
         let (Some(salt), Some(hash)) = (
-            base64_codec::decode(&self.salt),
-            base64_codec::decode(&self.hash),
+            base64_codec::decode(&self.salt).map(ZeroizeBytes::new),
+            base64_codec::decode(&self.hash).map(ZeroizeBytes::new),
         ) else {
             return PasswordCheck::Unsupported(Unsupported::Encoding);
         };
         if hash.len() != sha.len() {
             return PasswordCheck::Unsupported(Unsupported::Encoding);
         }
-        let mut message = salt;
-        message.extend(utf16le(password));
-        let Some(derived) = sha.iterate(
-            &sha.digest(&message),
-            self.spin,
-            Some(Instant::now() + VERIFY_TIME),
-        ) else {
+        let pw_utf16 = utf16le(password);
+        let mut message = ZeroizeBytes::new(salt.to_vec());
+        message.extend_from_slice(&pw_utf16);
+        let initial = ZeroizeBytes::new(sha.digest(&message));
+        let Some(derived) = sha
+            .iterate(&initial, self.spin, Some(Instant::now() + VERIFY_TIME))
+            .map(ZeroizeBytes::new)
+        else {
             return PasswordCheck::Unsupported(Unsupported::Time);
         };
         accepted_if(constant_time_eq(&derived, &hash))
@@ -522,7 +593,7 @@ mod tests {
         // Same value from an independent computation of the loop (checked against a reference run).
         let sha = Sha::Sha512;
         let mut m = vec![1u8, 2, 3, 4];
-        m.extend(utf16le("abc"));
+        m.extend_from_slice(&utf16le("abc"));
         let mut h = sha.digest(&m);
         for i in 0u32..3 {
             let mut next = h.clone();
@@ -651,5 +722,21 @@ mod tests {
         p.on = false;
         assert!(p.cell_editable(1, 1, false));
         assert!(SheetProtection::default().is_default());
+    }
+
+    #[test]
+    fn secret_buffers_are_volatile_zeroed_on_drop() {
+        let mut bytes = vec![0xAAu8, 0x55, 0xCC, 0x33];
+        volatile_zero_bytes(&mut bytes);
+        assert_eq!(bytes, [0u8; 4]);
+        let mut units = vec![0x1234u16, 0xABCD];
+        volatile_zero_u16(&mut units);
+        assert_eq!(units, [0u16; 2]);
+        let guarded = ZeroizeBytes::new(vec![1, 2, 3, 4]);
+        assert_eq!(&*guarded, &[1, 2, 3, 4]);
+        drop(guarded);
+        let guarded16 = ZeroizeU16(vec![0x1020, 0x3040]);
+        assert_eq!(&*guarded16, &[0x1020, 0x3040]);
+        drop(guarded16);
     }
 }

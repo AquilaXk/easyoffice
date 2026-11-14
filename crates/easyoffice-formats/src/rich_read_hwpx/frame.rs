@@ -9,7 +9,9 @@ use crate::hwpx_parts::HWPUNIT_PER_TWIP;
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_page_frame::margins_from_hwpx;
 use crate::xml_stream::{attr, XmlEvent};
-use crate::{RichBinding, RichBindingKind, RichBlock, RichField, RichPaper, RichRun};
+use crate::{
+    EasyOfficeError, RichBinding, RichBindingKind, RichBlock, RichField, RichPaper, RichRun,
+};
 
 /// Header and footer controls that are not kept.
 #[derive(Default)]
@@ -98,8 +100,12 @@ impl SectionWalker {
     }
 
     /// A page-number field of a header or footer paragraph, in the format of the open run.
-    pub(super) fn push_page_field(&mut self, header: &Header, field: RichField) {
-        self.flush_run(header);
+    pub(super) fn push_page_field(
+        &mut self,
+        header: &Header,
+        field: RichField,
+    ) -> Result<(), EasyOfficeError> {
+        self.flush_run(header)?;
         let fmt = self
             .runs
             .last()
@@ -107,6 +113,7 @@ impl SectionWalker {
             .cloned()
             .unwrap_or_default();
         if let Some(top) = self.paras.last_mut() {
+            self.text_budget.charge_run(0, "HWPX 페이지 필드")?;
             top.runs.push(RichRun {
                 bold: fmt.bold,
                 italic: fmt.italic,
@@ -121,11 +128,16 @@ impl SectionWalker {
                 ..RichRun::default()
             });
         }
+        Ok(())
     }
 
     /// Reads the `hp:header` or `hp:footer` of a control (events span `hp:ctrl` to its end) into the page
     /// frame; returns false when the control holds neither.
-    pub(super) fn on_frame_control(&mut self, events: &[XmlEvent<'_>], header: &Header) -> bool {
+    pub(super) fn on_frame_control(
+        &mut self,
+        events: &[XmlEvent<'_>],
+        header: &Header,
+    ) -> Result<bool, EasyOfficeError> {
         let Some((at, is_header, apply)) = events.iter().enumerate().find_map(|(i, e)| match e {
             XmlEvent::Start {
                 name: name @ ("hp:header" | "hp:footer"),
@@ -137,16 +149,16 @@ impl SectionWalker {
             )),
             _ => None,
         }) else {
-            return false;
+            return Ok(false);
         };
         let kind = usize::from(!is_header);
         if !matches!(apply.as_str(), "" | "BOTH") {
             self.left_out.pages = true;
-            return true;
+            return Ok(true);
         }
         if self.frame_found[kind] {
             self.left_out.sections = true;
-            return true;
+            return Ok(true);
         }
         self.frame_found[kind] = true;
         let mut walker = SectionWalker::default();
@@ -171,7 +183,7 @@ impl SectionWalker {
                         } else {
                             RichField::PageNumber
                         },
-                    );
+                    )?;
                 }
                 XmlEvent::Start { name, attrs } => {
                     depth += 1;
@@ -187,12 +199,12 @@ impl SectionWalker {
                     ) {
                         self.left_out.objects = true;
                     }
-                    walker.on_start(name, attrs, header, &mut blocks);
+                    walker.on_start(name, attrs, header, &mut blocks)?;
                 }
-                XmlEvent::Text(text) => walker.on_text(text),
+                XmlEvent::Text(text) => walker.on_text(text)?,
                 XmlEvent::End(name) => {
                     depth = depth.saturating_sub(1);
-                    walker.on_end(name, header, &mut blocks);
+                    walker.on_end(name, header, &mut blocks)?;
                     if depth == 0 {
                         break;
                     }
@@ -215,6 +227,6 @@ impl SectionWalker {
         } else {
             self.frame.footer = paragraphs;
         }
-        true
+        Ok(true)
     }
 }

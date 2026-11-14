@@ -350,3 +350,21 @@ fn hostile_inputs_stay_bounded() {
         assert_same(&xml);
     }
 }
+
+#[test]
+fn swar_tag_and_attr_scans_match_legacy_tokenizer_across_long_tags() {
+    let long_tag = format!("ns:{}", "element_name".repeat(4));
+    let long_attr = "attribute_identifier_".repeat(3);
+    let long_spaces = " ".repeat(29);
+    let xml = format!(
+        "<{long_tag}{long_spaces}{long_attr}   =   'a > \"b\"' \t second_attr=\"한글>값\"   empty=\"\"  />"
+    );
+    assert_same(&xml);
+    for pad in 0..=16usize {
+        let padded = format!(
+            "<el{}a=\"v>1\"   longname_0123456789='x'/>",
+            " ".repeat(pad)
+        );
+        assert_same(&padded);
+    }
+}

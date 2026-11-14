@@ -33,6 +33,10 @@ pub(super) const MAX_PDF_STREAM_DECODE_BYTES: usize = 16 * 1024 * 1024;
 pub(super) const MAX_PDF_TOTAL_DECODED_BYTES: usize = 32 * 1024 * 1024;
 pub(super) const MAX_PDF_PAGE_TREE_DEPTH: usize = 64;
 pub(super) const MAX_PDF_CONTENTS_ARRAY_LEN: usize = 256;
+pub(super) const MAX_PDF_INDIRECT_OBJECTS: usize = 65_536;
+pub(super) const MAX_PDF_OBJSTM_ENTRIES: usize = 4_096;
+pub(super) const MAX_PDF_COLLECTION_LEN: usize = 16_384;
+pub(super) const MAX_PDF_STRING_BYTES: usize = 1024 * 1024;
 const MODEL_B64_COMMENT_PREFIX: &[u8] = b"%EasyOfficePDFModelBase64:";
 
 #[derive(Debug, Clone)]
@@ -576,7 +580,7 @@ pub(super) fn expand_pdf_object_streams(
     objects: &mut HashMap<(u32, u16), PdfIndirectObject>,
     flate_cache: &HashMap<(u32, u16), Vec<u8>>,
     next_order_seq: &mut usize,
-) {
+) -> Result<(), EasyOfficeError> {
     type ObjStmHeader = ((u32, u16), usize, usize, Option<(usize, usize)>, usize);
     let mut obj_stms: Vec<ObjStmHeader> = objects
         .iter()
@@ -602,15 +606,22 @@ pub(super) fn expand_pdf_object_streams(
         } else {
             continue;
         };
-        if first > stream_slice.len() || n > 4096 {
+        if n > MAX_PDF_OBJSTM_ENTRIES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "PDF ObjStm 엔트리 수({n})가 상한({MAX_PDF_OBJSTM_ENTRIES})을 초과했습니다."
+            )));
+        }
+        if first > stream_slice.len() {
             continue;
         }
         let header_str = String::from_utf8_lossy(&stream_slice[..first]);
+        let need = n.saturating_mul(2);
         let nums: Vec<usize> = header_str
             .split_ascii_whitespace()
             .filter_map(|tok| tok.parse::<usize>().ok())
+            .take(need)
             .collect();
-        if nums.len() < n * 2 {
+        if nums.len() < need {
             continue;
         }
         for i in 0..n {
@@ -623,17 +634,27 @@ pub(super) fn expand_pdf_object_streams(
             if let Ok(Some((val, _))) =
                 parse_pdf_value_with_table(stream_slice, None, obj_start, stream_slice.len(), 0)
             {
-                *next_order_seq += 1;
-                objects
-                    .entry((emb_obj_num, 0))
-                    .or_insert(PdfIndirectObject {
-                        val,
-                        stream_range: None,
-                        order_seq: *next_order_seq,
-                    });
+                let key = (emb_obj_num, 0);
+                if !objects.contains_key(&key) {
+                    if objects.len() >= MAX_PDF_INDIRECT_OBJECTS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                            "PDF 간접 객체 수가 상한({MAX_PDF_INDIRECT_OBJECTS})을 초과했습니다."
+                        )));
+                    }
+                    *next_order_seq += 1;
+                    objects.insert(
+                        key,
+                        PdfIndirectObject {
+                            val,
+                            stream_range: None,
+                            order_seq: *next_order_seq,
+                        },
+                    );
+                }
             }
         }
     }
+    Ok(())
 }
 
 fn has_pdf_comment_with_prefix(stream_bytes: &[u8], prefix: &[u8], skip_pdf_strings: bool) -> bool {
@@ -966,3 +987,7 @@ pub(super) fn validate_pdf_trailer_json(
     }
     None
 }
+
+#[cfg(test)]
+#[path = "pdf_object_graph/tests.rs"]
+mod tests;

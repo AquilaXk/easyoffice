@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::pages_proto::{ArchiveObject, Message, ObjectTable};
+use crate::pages_proto::{ArchiveObject, FastU64Map, Message, ObjectTable};
 use crate::pages_schema::{data_info, drawable, geometry, image, package_metadata, ty};
 use crate::rich_image::truncate_alt;
 use crate::rich_image_probe::sniff_format;
@@ -37,7 +37,7 @@ pub(crate) enum PageImage {
 pub(crate) struct PageImages<'a> {
     objects: &'a ObjectTable,
     files: &'a HashMap<String, Vec<u8>>,
-    names: Option<HashMap<u64, String>>,
+    names: Option<FastU64Map<String>>,
     count: usize,
     bytes: usize,
 }
@@ -108,8 +108,8 @@ impl<'a> PageImages<'a> {
     }
 }
 
-fn collect_file_names(objects: &ObjectTable) -> HashMap<u64, String> {
-    let mut names = HashMap::new();
+fn collect_file_names(objects: &ObjectTable) -> FastU64Map<String> {
+    let mut names = FastU64Map::default();
     for obj in objects.objects.values() {
         if obj.type_id != ty::PACKAGE_METADATA {
             continue;

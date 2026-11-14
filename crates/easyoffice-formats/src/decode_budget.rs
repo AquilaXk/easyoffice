@@ -18,6 +18,10 @@ pub(crate) const MAX_DECODED_DOCUMENT_BYTES: usize = 256 * MIB;
 
 /// Bytes a cell record costs besides its text: the `(row, column, String)` tuple the readers keep.
 pub(crate) const CELL_OVERHEAD_BYTES: usize = std::mem::size_of::<(u32, u32, String)>();
+/// Base memory overhead charged for each decoded rich run besides its text bytes.
+pub(crate) const RUN_OVERHEAD_BYTES: usize = std::mem::size_of::<crate::RichRun>();
+/// Base memory overhead charged for each decoded rich block besides its inline payload bytes.
+pub(crate) const BLOCK_OVERHEAD_BYTES: usize = std::mem::size_of::<crate::RichBlock>();
 
 /// Most UTF-8 bytes one UTF-16 code unit or one Windows-1252 byte can decode to.
 pub(crate) const MAX_UTF8_BYTES_PER_UNIT: usize = 3;
@@ -74,6 +78,24 @@ impl DecodeBudget {
     ) -> Result<(), EasyOfficeError> {
         self.charge(text_len.saturating_add(CELL_OVERHEAD_BYTES), what)
     }
+
+    /// Charges one rich run: its text bytes plus base struct overhead.
+    pub(crate) fn charge_run(
+        &mut self,
+        text_len: usize,
+        what: &str,
+    ) -> Result<(), EasyOfficeError> {
+        self.charge(text_len.saturating_add(RUN_OVERHEAD_BYTES), what)
+    }
+
+    /// Charges one rich block: its extra bytes plus base enum overhead.
+    pub(crate) fn charge_block(
+        &mut self,
+        extra_bytes: usize,
+        what: &str,
+    ) -> Result<(), EasyOfficeError> {
+        self.charge(extra_bytes.saturating_add(BLOCK_OVERHEAD_BYTES), what)
+    }
 }
 
 #[cfg(test)]
@@ -96,8 +118,21 @@ mod tests {
         let mut budget = DecodeBudget::with_limit(10);
         assert!(budget.charge(usize::MAX, "a").is_err());
         assert!(budget.charge_cell(usize::MAX, "a").is_err());
+        assert!(budget.charge_run(usize::MAX, "a").is_err());
+        assert!(budget.charge_block(usize::MAX, "a").is_err());
         budget
             .charge(10, "a")
             .expect("a refused charge takes nothing");
+    }
+
+    #[test]
+    fn charge_run_and_block_count_base_overhead() {
+        let mut run_budget = DecodeBudget::with_limit(RUN_OVERHEAD_BYTES + 4);
+        run_budget.charge_run(4, "run").unwrap();
+        assert!(run_budget.charge_run(0, "run").is_err());
+
+        let mut block_budget = DecodeBudget::with_limit(BLOCK_OVERHEAD_BYTES + 4);
+        block_budget.charge_block(4, "blk").unwrap();
+        assert!(block_budget.charge_block(0, "blk").is_err());
     }
 }

@@ -21,6 +21,10 @@ use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
 
 /// Spaces one `text:s` element may stand for.
 const MAX_TEXT_SPACES: usize = 4096;
+/// Maximum worksheets accepted in one ODS document.
+pub(crate) const MAX_ODS_SHEETS: usize = 1_024;
+/// Maximum spilled array formulas accepted on one ODS sheet.
+pub(crate) const MAX_SPILLS_PER_SHEET: usize = crate::MAX_SPILL_REFS;
 
 /// One `table:table-cell` or `table:covered-table-cell` of a row.
 pub(crate) struct OdsCell<'a> {
@@ -283,6 +287,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
 ) -> Result<(), EasyOfficeError> {
     let mut reader = XmlReader::unbounded(xml);
     let mut table_nesting = 0usize;
+    let mut table_count = 0usize;
     let mut seen_row = false;
     let mut row_repeat: Option<u32> = None;
     let mut row_filtered = false;
@@ -303,6 +308,12 @@ pub(crate) fn walk_ods<S: OdsSink>(
                 ref attrs,
             } => {
                 if table_nesting == 0 {
+                    table_count += 1;
+                    if table_count > MAX_ODS_SHEETS {
+                        return Err(ods_budget_error(
+                            "ODS 시트 개수가 허용 상한(1,024)을 초과했습니다.",
+                        ));
+                    }
                     seen_row = false;
                     sink.table(attrs);
                 }
@@ -440,12 +451,19 @@ impl TextSink {
                     if let (true, (Some(rows), Some(cols)), true) =
                         (self.want_spills, cell.matrix, text.starts_with('='))
                     {
-                        self.spills.push(crate::SpillRef {
-                            row: r,
-                            col: c,
-                            rows,
-                            cols,
-                        });
+                        if rows > 1 || cols > 1 {
+                            if self.spills.len() >= MAX_SPILLS_PER_SHEET {
+                                return Err(ods_budget_error(
+                                    "ODS 시트당 배열 수식 스필 개수가 허용 상한을 초과했습니다.",
+                                ));
+                            }
+                            self.spills.push(crate::SpillRef {
+                                row: r,
+                                col: c,
+                                rows,
+                                cols,
+                            });
+                        }
                     }
                     self.cells.push((r, c, text.clone()));
                 }
@@ -513,16 +531,10 @@ impl OdsSink for TextSink {
             OdfCodec::MAX_COLS + 1,
         );
         if !spills.is_empty() {
-            let covered: std::collections::HashSet<(u32, u32)> = spills
-                .iter()
-                .flat_map(|r| {
-                    (0..r.rows)
-                        .flat_map(move |dr| (0..r.cols).map(move |dc| (dr, dc)))
-                        .filter(|&(dr, dc)| dr + dc > 0)
-                        .map(move |(dr, dc)| (r.row + dr, r.col + dc))
-                })
-                .collect();
-            cells.retain(|(row, col, _)| !covered.contains(&(*row, *col)));
+            cells.retain(|(row, col, _)| {
+                let before = spills.partition_point(|r| r.row <= *row);
+                !crate::is_covered_by_spills(&spills[..before], *row, *col)
+            });
         }
         self.table_spills.push(spills);
         self.sheets.push((name, cells));

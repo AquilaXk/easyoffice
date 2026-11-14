@@ -570,7 +570,7 @@ impl<'s> SheetScanner<'s> {
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
         let (row, col) = cell.pos;
         if let Some(reference) = cell.formula.as_ref().and_then(|f| f.array_ref.as_deref()) {
-            self.record_spill(row, col, reference);
+            self.record_spill(row, col, reference)?;
         }
         if let Some(text) = self.cell_text(cell)? {
             self.cells.push((row, col, text));
@@ -588,44 +588,49 @@ impl<'s> SheetScanner<'s> {
         if self.styling.spills.is_empty() {
             return;
         }
-        let mut covered: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
-        for r in &self.styling.spills {
-            for dr in 0..r.rows {
-                for dc in 0..r.cols {
-                    if dr + dc > 0 {
-                        covered.insert((r.row + dr, r.col + dc));
-                    }
-                }
-            }
-        }
-        self.cells
-            .retain(|(row, col, _)| !covered.contains(&(*row, *col)));
+        let spills = &self.styling.spills;
+        self.cells.retain(|(row, col, _)| {
+            let before = spills.partition_point(|r| r.row <= *row);
+            !crate::is_covered_by_spills(&spills[..before], *row, *col)
+        });
     }
 
     /// An array formula over more than one cell is an array that spills: the cells after its first
     /// hold the results the file cached.
-    fn record_spill(&mut self, row: u32, col: u32, reference: &str) {
+    fn record_spill(&mut self, row: u32, col: u32, reference: &str) -> Result<(), EasyOfficeError> {
         if !self.want_styling {
-            return;
+            return Ok(());
         }
         let Some(area) = crate::sheet_styling::xlsx_layout::parse_merge(reference) else {
-            return;
+            return Ok(());
         };
         if (area.row0, area.col0) != (row, col) {
-            return;
+            return Ok(());
         }
         let (Some(rows), Some(cols)) = (
-            (area.row1 - area.row0).checked_add(1),
-            (area.col1 - area.col0).checked_add(1),
+            area.row1
+                .checked_sub(area.row0)
+                .and_then(|d| d.checked_add(1)),
+            area.col1
+                .checked_sub(area.col0)
+                .and_then(|d| d.checked_add(1)),
         ) else {
-            return;
+            return Ok(());
         };
-        self.styling.spills.push(crate::SpillRef {
-            row,
-            col,
-            rows,
-            cols,
-        });
+        if rows > 1 || cols > 1 {
+            if self.styling.spills.len() >= crate::MAX_SPILL_REFS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "XLSX 시트당 배열 수식 스필 개수가 허용 상한을 초과했습니다.".to_string(),
+                ));
+            }
+            self.styling.spills.push(crate::SpillRef {
+                row,
+                col,
+                rows,
+                cols,
+            });
+        }
+        Ok(())
     }
 
     fn shared_string(&self, raw: &str) -> Result<&'s str, EasyOfficeError> {

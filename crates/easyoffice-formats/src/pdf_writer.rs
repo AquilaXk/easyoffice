@@ -22,8 +22,9 @@ pub(crate) const PDF_TEXT_MARGIN_PT: u64 = 54;
 pub(crate) const PDF_BODY_FIRST_BASELINE_PT: i32 = 760;
 pub(crate) const PDF_BODY_LINE_PITCH_PT: i32 = 16;
 /// Width available to a text line in thousandths of the font size (the unit of glyph advances).
-const PDF_TEXT_LINE_UNITS: u32 =
-    ((PDF_PAGE_WIDTH_PT - 2 * PDF_TEXT_MARGIN_PT) * 1000 / PDF_TEXT_FONT_PT) as u32;
+const PDF_TEXT_LINE_UNITS: u32 = ((PDF_PAGE_WIDTH_PT.saturating_sub(2 * PDF_TEXT_MARGIN_PT))
+    .saturating_mul(1000)
+    / PDF_TEXT_FONT_PT) as u32;
 /// Page box (A4, points) and the margin kept free around a placed picture.
 pub(crate) const PDF_PAGE_WIDTH_PT: u64 = 595;
 pub(crate) const PDF_PAGE_HEIGHT_PT: u64 = 842;
@@ -169,7 +170,7 @@ pub(crate) fn lay_out(page: &PdfPageModel, first_number: usize) -> Vec<LaidPage>
         .enumerate()
         .map(|(c_idx, chunk)| LaidPage {
             model: PdfPageModel {
-                page_number: first_number + c_idx,
+                page_number: first_number.saturating_add(c_idx),
                 rotation_degrees: page.rotation_degrees,
                 body_text: chunk
                     .iter()
@@ -198,7 +199,7 @@ pub(crate) fn lay_out(page: &PdfPageModel, first_number: usize) -> Vec<LaidPage>
 pub(crate) fn paginate_pages(source_pages: Vec<PdfPageModel>) -> Vec<PdfPageModel> {
     let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
     for page in &source_pages {
-        let first = effective_pages.len() + 1;
+        let first = effective_pages.len().saturating_add(1);
         effective_pages.extend(lay_out(page, first).into_iter().map(|p| p.model));
     }
     effective_pages
@@ -227,7 +228,10 @@ pub(crate) fn text_entries(
 fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>, annotated: bool) -> String {
     let mut stream_lines: Vec<String> = Vec::new();
     for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
-        let y = PDF_BODY_FIRST_BASELINE_PT - (l_idx as i32) * PDF_BODY_LINE_PITCH_PT;
+        let y_off = i32::try_from(l_idx)
+            .unwrap_or(i32::MAX)
+            .saturating_mul(PDF_BODY_LINE_PITCH_PT);
+        let y = PDF_BODY_FIRST_BASELINE_PT.saturating_sub(y_off);
         if !annotated {
             stream_lines.push(text_ops(
                 PDF_TEXT_MARGIN_PT as f64,
@@ -351,20 +355,20 @@ struct PagePlan {
 }
 
 /// Assigns object numbers in page order (first page object is 3); returns the next free number.
-fn plan_objects(entries: &[PdfPageEntry]) -> (Vec<PagePlan>, usize) {
+fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
     let mut next = 3usize;
     let mut plans = Vec::with_capacity(entries.len());
     for entry in entries {
         let page_obj = next;
-        let content_obj = next + 1;
-        next += 2;
+        let content_obj = next.checked_add(1)?;
+        next = next.checked_add(2)?;
         let (mut image_obj, mut mask_obj) = (None, None);
         if let PdfPageEntry::Image(page) = entry {
             image_obj = Some(next);
-            next += 1;
+            next = next.checked_add(1)?;
             if page.image.soft_mask.is_some() {
                 mask_obj = Some(next);
-                next += 1;
+                next = next.checked_add(1)?;
             }
         }
         plans.push(PagePlan {
@@ -375,11 +379,13 @@ fn plan_objects(entries: &[PdfPageEntry]) -> (Vec<PagePlan>, usize) {
             annotations: Vec::new(),
         });
     }
-    (plans, next)
+    Some((plans, next))
 }
 
 fn image_content_stream(page: &PdfImagePage) -> String {
-    let y = PDF_PAGE_HEIGHT_PT - PDF_IMAGE_MARGIN_PT - page.height_pt;
+    let y = PDF_PAGE_HEIGHT_PT
+        .saturating_sub(PDF_IMAGE_MARGIN_PT)
+        .saturating_sub(page.height_pt);
     format!(
         "q {} 0 0 {} {PDF_IMAGE_MARGIN_PT} {y} cm /Im1 Do Q",
         page.width_pt, page.height_pt
@@ -402,24 +408,39 @@ impl PdfSerializer {
         entries: &[PdfPageEntry],
     ) -> Vec<u8> {
         let page_count = entries.len();
-        let (mut plans, latin_font_obj) = plan_objects(entries);
+        let (mut plans, latin_font_obj) = plan_objects(entries).expect("PDF object count overflow");
         let kids_refs = plans
             .iter()
             .map(|p| format!("{} 0 R", p.page_obj))
             .collect::<Vec<_>>()
             .join(" ");
-        let korean_font_obj = latin_font_obj + 1;
-        let cid_font_obj = latin_font_obj + 2;
-        let descriptor_obj = latin_font_obj + 3;
-        let cmap_obj = latin_font_obj + 4;
-        let info_obj = latin_font_obj + 5;
+        let korean_font_obj = latin_font_obj
+            .checked_add(1)
+            .expect("PDF object count overflow");
+        let cid_font_obj = latin_font_obj
+            .checked_add(2)
+            .expect("PDF object count overflow");
+        let descriptor_obj = latin_font_obj
+            .checked_add(3)
+            .expect("PDF object count overflow");
+        let cmap_obj = latin_font_obj
+            .checked_add(4)
+            .expect("PDF object count overflow");
+        let info_obj = latin_font_obj
+            .checked_add(5)
+            .expect("PDF object count overflow");
         // Annotation objects follow the document objects.
-        let mut total_objects = info_obj + 1;
+        let mut total_objects = info_obj.checked_add(1).expect("PDF object count overflow");
         for (entry, plan) in entries.iter().zip(&mut plans) {
             if let PdfPageEntry::Text(_, annotations) = entry {
                 for _ in annotations {
-                    plan.annotations.push((total_objects, total_objects + 1));
-                    total_objects += 2;
+                    let ap_obj = total_objects
+                        .checked_add(1)
+                        .expect("PDF object count overflow");
+                    plan.annotations.push((total_objects, ap_obj));
+                    total_objects = total_objects
+                        .checked_add(2)
+                        .expect("PDF object count overflow");
                 }
             }
         }
@@ -603,5 +624,22 @@ mod tests {
         assert_eq!(moves[0], (54.0, 700.0));
         assert!((moves[1].0 - advance("가")).abs() < 0.006 && moves[1].1 == 0.0);
         assert!((moves[2].0 - advance("·")).abs() < 0.006 && moves[2].1 == 0.0);
+    }
+
+    #[test]
+    fn hostile_oversized_image_height_does_not_underflow() {
+        let page = super::PdfImagePage {
+            page_number: 1,
+            rotation_degrees: 0,
+            image: crate::pdf_image::PdfImageObject {
+                dict: String::new(),
+                data: Vec::new(),
+                soft_mask: None,
+            },
+            width_pt: 500,
+            height_pt: 2_000,
+        };
+        let s = super::image_content_stream(&page);
+        assert!(s.contains(" 0 cm /Im1 Do Q"), "{s}");
     }
 }

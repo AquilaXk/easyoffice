@@ -1,25 +1,45 @@
 use crate::EasyOfficeError;
 
+const MAX_BITSET_WORDS: usize = 1_048_576;
+const MAX_BITSET_SECTORS: usize = MAX_BITSET_WORDS * 64;
+const MAX_INITIAL_WORDS: usize = 65_536;
+
 /// Compact `u64` word bitset replacing `HashSet<u32>` for $O(1)$ OLE2 sector cycle and claim tracking.
 #[derive(Debug, Clone)]
 pub struct SectorBitset {
     words: Vec<u64>,
+    limit: usize,
 }
 
 impl SectorBitset {
     #[inline]
     pub fn with_capacity(max_sectors: usize) -> Self {
+        let initial_words = (max_sectors >> 6).saturating_add(1).min(MAX_INITIAL_WORDS);
         Self {
-            words: vec![0u64; (max_sectors + 64) / 64],
+            words: vec![0u64; initial_words],
+            limit: MAX_BITSET_SECTORS,
+        }
+    }
+
+    #[inline]
+    pub fn with_limit(max_sectors: usize) -> Self {
+        let limit = max_sectors.min(MAX_BITSET_SECTORS);
+        let initial_words = (limit >> 6).saturating_add(1).min(MAX_INITIAL_WORDS);
+        Self {
+            words: vec![0u64; initial_words],
+            limit,
         }
     }
 
     #[inline]
     pub fn insert(&mut self, sec: u32) -> bool {
         let idx = sec as usize;
+        if idx >= self.limit {
+            return false;
+        }
         let word_idx = idx >> 6;
         if word_idx >= self.words.len() {
-            if word_idx > 1_048_576 {
+            if word_idx >= MAX_BITSET_WORDS {
                 return false;
             }
             self.words.resize(word_idx + 1, 0);
@@ -34,44 +54,88 @@ impl SectorBitset {
     }
 }
 
+#[inline]
+const fn pack_utf16le_ascii4(word: u64) -> [u8; 4] {
+    let lo16 = (word | (word >> 8)) & 0x0000_FFFF_0000_FFFF;
+    let lo32 = (lo16 | (lo16 >> 16)) as u32;
+    lo32.to_le_bytes()
+}
+
 /// Single-pass SWAR UTF-16LE decoder scanning 4 code units (`u64`) at a time without allocating `Vec<u16>`.
 #[inline]
 pub fn decode_utf16le_swar(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+    decode_utf16_swar::<false>(bytes)
+}
+
+/// Single-pass SWAR UTF-16BE decoder scanning 4 code units (`u64`) at a time without allocating `Vec<u16>`.
+#[inline]
+pub fn decode_utf16be_swar(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+    decode_utf16_swar::<true>(bytes)
+}
+
+#[inline]
+fn decode_utf16_swar<const BE: bool>(bytes: &[u8]) -> Result<String, EasyOfficeError> {
     if bytes.len() % 2 != 0 {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
-        ));
+        let msg = if BE {
+            "UTF-16BE 바이트 길이가 짝수가 아닙니다."
+        } else {
+            "UTF-16LE 바이트 길이가 짝수가 아닙니다."
+        };
+        return Err(EasyOfficeError::CorruptedContainer(msg.to_string()));
     }
+    let ascii_mask: u64 = if BE {
+        0x80FF_80FF_80FF_80FF
+    } else {
+        0xFF80_FF80_FF80_FF80
+    };
     let mut out = String::with_capacity(bytes.len() / 2);
     let mut offset = 0usize;
+    let mut ascii_buf = [0u8; 64];
 
     while offset + 8 <= bytes.len() {
         let word = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-        if (word & 0xFF80_FF80_FF80_FF80) == 0 {
-            out.push((word & 0x7F) as u8 as char);
-            out.push(((word >> 16) & 0x7F) as u8 as char);
-            out.push(((word >> 32) & 0x7F) as u8 as char);
-            out.push(((word >> 48) & 0x7F) as u8 as char);
+        if (word & ascii_mask) == 0 {
+            let mut filled = 4usize;
+            let norm = if BE { word >> 8 } else { word };
+            ascii_buf[0..4].copy_from_slice(&pack_utf16le_ascii4(norm));
             offset += 8;
+            while filled < ascii_buf.len() && offset + 8 <= bytes.len() {
+                let next = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+                if (next & ascii_mask) != 0 {
+                    break;
+                }
+                let next_norm = if BE { next >> 8 } else { next };
+                ascii_buf[filled..filled + 4].copy_from_slice(&pack_utf16le_ascii4(next_norm));
+                filled += 4;
+                offset += 8;
+            }
+            if let Ok(s) = std::str::from_utf8(&ascii_buf[..filled]) {
+                out.push_str(s);
+            }
         } else {
-            decode_one_utf16le_unit(bytes, &mut offset, &mut out)?;
+            decode_one_utf16_unit::<BE>(bytes, &mut offset, &mut out)?;
         }
     }
 
     while offset < bytes.len() {
-        decode_one_utf16le_unit(bytes, &mut offset, &mut out)?;
+        decode_one_utf16_unit::<BE>(bytes, &mut offset, &mut out)?;
     }
 
     Ok(out)
 }
 
 #[inline]
-fn decode_one_utf16le_unit(
+fn decode_one_utf16_unit<const BE: bool>(
     bytes: &[u8],
     offset: &mut usize,
     out: &mut String,
 ) -> Result<(), EasyOfficeError> {
-    let u = u16::from_le_bytes([bytes[*offset], bytes[*offset + 1]]);
+    let pair = [bytes[*offset], bytes[*offset + 1]];
+    let u = if BE {
+        u16::from_be_bytes(pair)
+    } else {
+        u16::from_le_bytes(pair)
+    };
     *offset += 2;
     if u < 0x80 {
         out.push(u as u8 as char);
@@ -80,7 +144,12 @@ fn decode_one_utf16le_unit(
         out.push(char::from_u32(u as u32).unwrap());
         Ok(())
     } else if (0xD800..=0xDBFF).contains(&u) && *offset + 2 <= bytes.len() {
-        let u2 = u16::from_le_bytes([bytes[*offset], bytes[*offset + 1]]);
+        let pair2 = [bytes[*offset], bytes[*offset + 1]];
+        let u2 = if BE {
+            u16::from_be_bytes(pair2)
+        } else {
+            u16::from_le_bytes(pair2)
+        };
         if (0xDC00..=0xDFFF).contains(&u2) {
             *offset += 2;
             let cp = 0x10000 + (((u as u32 - 0xD800) << 10) | (u2 as u32 - 0xDC00));
@@ -88,11 +157,11 @@ fn decode_one_utf16le_unit(
             return Ok(());
         }
         Err(EasyOfficeError::InvalidUtf8(
-            "유효하지 않은 UTF-16LE 서로게이트 쌍입니다.".to_string(),
+            "유효하지 않은 UTF-16 서로게이트 쌍입니다.".to_string(),
         ))
     } else {
         Err(EasyOfficeError::InvalidUtf8(
-            "유효하지 않은 UTF-16LE 시퀀스입니다.".to_string(),
+            "유효하지 않은 UTF-16 시퀀스입니다.".to_string(),
         ))
     }
 }
@@ -228,20 +297,30 @@ pub(crate) fn read_len_prefixed_utf16le(
     cursor: &mut usize,
     limit: usize,
 ) -> Result<String, EasyOfficeError> {
-    if *cursor + 4 > limit {
+    let bound = limit.min(bytes.len());
+    let Some(after_len) = cursor.checked_add(4) else {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 길이 프리픽스 읽기 범위 초과".to_string(),
+        ));
+    };
+    if after_len > bound {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 길이 프리픽스 읽기 범위 초과".to_string(),
         ));
     }
     let byte_len = read_u32_le(bytes, *cursor)? as usize;
-    *cursor += 4;
-    if byte_len % 2 != 0 || *cursor + byte_len > limit {
+    let Some(end) = after_len.checked_add(byte_len) else {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
+        ));
+    };
+    if byte_len % 2 != 0 || end > bound {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
         ));
     }
-    let s = decode_utf16le_swar(&bytes[*cursor..*cursor + byte_len])?;
-    *cursor += byte_len;
+    let s = decode_utf16le_swar(&bytes[after_len..end])?;
+    *cursor = end;
     Ok(s)
 }
 
@@ -302,4 +381,41 @@ pub(crate) fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, EasyOffice
         bytes[offset + 6],
         bytes[offset + 7],
     ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sector_bitset_limit_and_read_len_prefixed_bounds_fail_closed() {
+        let mut bounded = SectorBitset::with_limit(200);
+        assert!(bounded.insert(0));
+        assert!(!bounded.insert(0));
+        assert!(bounded.insert(199));
+        assert!(!bounded.insert(200));
+
+        // Unbounded hint `with_capacity(usize::MAX)` must not overflow or OOM.
+        let mut huge = SectorBitset::with_capacity(usize::MAX);
+        assert!(huge.insert(5));
+
+        // `limit` larger than `bytes.len()` or overflowing `cursor + byte_len` must return Err, not panic.
+        let payload = [0x04, 0x00, 0x00, 0x00, b'A', 0x00];
+        let mut cursor = 0usize;
+        assert!(read_len_prefixed_utf16le(&payload, &mut cursor, 1024).is_err());
+
+        let overflow_len = [0xFE, 0xFF, 0xFF, 0xFF, b'A', 0x00];
+        let mut cursor2 = 0usize;
+        assert!(read_len_prefixed_utf16le(&overflow_len, &mut cursor2, usize::MAX).is_err());
+
+        // SWAR ASCII batch & mixed UTF-16LE roundtrip parity.
+        let ascii_long = "A".repeat(145) + "XYZ123!";
+        let mixed = format!("{ascii_long} 한글 가나다 🚀✨ {}", "Q".repeat(69));
+        let encoded = encode_utf16le_swar(&mixed);
+        assert_eq!(decode_utf16le_swar(&encoded).unwrap(), mixed);
+        assert_eq!(
+            decode_utf16le_swar(&encoded).unwrap(),
+            decode_utf16le_vec_baseline(&encoded).unwrap()
+        );
+    }
 }

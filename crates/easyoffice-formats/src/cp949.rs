@@ -227,8 +227,8 @@ pub(crate) fn decode_cp949_pair(b1: u8, b2: u8) -> Option<char> {
     char::from_u32(0xAC00 + (u + lo) as u32)
 }
 
-/// Decodes raw RTF input bytes: valid UTF-8 sequences are preserved, non-UTF-8 byte pairs are
-/// decoded as CP949 Hangul when valid, and any remaining lone byte falls back to Latin-1.
+/// Decodes raw RTF input bytes: whole UTF-8 buffers stay intact; otherwise ASCII runs copy
+/// directly and valid CP949 pairs take priority over 2..4B UTF-8 guesses before Latin-1 fallback.
 pub(crate) fn decode_cp949_or_latin1_bytes(bytes: &[u8]) -> String {
     if let Ok(s) = std::str::from_utf8(bytes) {
         return s.to_string();
@@ -236,37 +236,24 @@ pub(crate) fn decode_cp949_or_latin1_bytes(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        let b = bytes[i];
-        if b < 0x80 {
-            out.push(b as char);
-            i += 1;
+        let run = ascii_prefix_len(&bytes[i..]);
+        if run > 0 {
+            if let Ok(ascii) = std::str::from_utf8(&bytes[i..i + run]) {
+                out.push_str(ascii);
+            }
+            i += run;
             continue;
         }
-        let max_utf8 = (bytes.len() - i).min(4);
-        let mut matched_utf8 = None;
-        for len in 2..=max_utf8 {
-            if let Ok(s) = std::str::from_utf8(&bytes[i..i + len]) {
-                if let Some(ch) = s.chars().next() {
-                    matched_utf8 = Some((ch, len));
-                    break;
-                }
-            }
-        }
-        if let Some((ch, len)) = matched_utf8 {
-            out.push(ch);
-            i += len;
-        } else if i + 1 < bytes.len() {
+        let b = bytes[i];
+        if i + 1 < bytes.len() {
             if let Some(ch) = decode_cp949_pair(b, bytes[i + 1]) {
                 out.push(ch);
                 i += 2;
-            } else {
-                out.push(char::from(b));
-                i += 1;
+                continue;
             }
-        } else {
-            out.push(char::from(b));
-            i += 1;
         }
+        out.push(char::from(b));
+        i += 1;
     }
     out
 }
@@ -386,5 +373,33 @@ mod tests {
             assert_eq!(ascii_prefix_len(&v), pos);
         }
         assert_eq!(ascii_prefix_len(&[b'a'; 21]), 21);
+    }
+
+    #[test]
+    fn cp949_pairs_overlapping_utf8_bit_patterns_are_not_misdecoded() {
+        // [0xB0, 0xA1] ('가') forces non-UTF-8 fallback path.
+        // [0xC8, 0xA1..=0xBF] matches valid 2-byte UTF-8 (110xxxxx 10xxxxxx), e.g. 0xC8 0xAD ('화').
+        // [0xEC, 0xA1, 0xB0] matches valid 3-byte UTF-8 (1110xxxx 10xxxxxx 10xxxxxx) across
+        // Hanja (0xEC, 0xA1) + Hangul (0xB0, 0xA1).
+        let hanja = decode_cp949_pair(0xEC, 0xA1).unwrap();
+        let hangul_2b = decode_cp949_pair(0xC8, 0xAD).unwrap();
+        assert_eq!(hangul_2b, '화');
+
+        let bytes_2b = [b'x', 0xB0, 0xA1, 0xC8, 0xAD, b'y'];
+        assert_eq!(decode_cp949_or_latin1_bytes(&bytes_2b), "x가화y");
+
+        let bytes_3b = [0xB0, 0xA1, 0xEC, 0xA1, 0xB0, 0xA1];
+        assert_eq!(
+            decode_cp949_or_latin1_bytes(&bytes_3b),
+            format!("가{hanja}가")
+        );
+
+        // Unassigned CP949 pair [0xC9, 0xA1] overlaps 2-byte UTF-8 too, and must fall back
+        // to Latin-1 bytes rather than synthetic UTF-8 U+0261.
+        let unassigned = [0xB0, 0xA1, 0xC9, 0xA1];
+        assert_eq!(
+            decode_cp949_or_latin1_bytes(&unassigned),
+            "가\u{00C9}\u{00A1}"
+        );
     }
 }

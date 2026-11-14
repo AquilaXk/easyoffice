@@ -197,17 +197,20 @@ pub(crate) fn laid_document_pages(doc: &RichDocument, rotation_degrees: u16) -> 
         _ => (gutter, 0),
     };
     let to_pt = |twips: u32| f64::from(twips) / TWIPS_PER_PT;
-    let (body_left, body_right) = (to_pt(left + side_gutter), w - to_pt(right));
-    let (body_top, body_bottom) = (h - to_pt(top + top_gutter), to_pt(bottom));
+    let (body_left, body_right) = (to_pt(left.saturating_add(side_gutter)), w - to_pt(right));
+    let (body_top, body_bottom) = (h - to_pt(top.saturating_add(top_gutter)), to_pt(bottom));
     let text_width = (body_right - body_left).max(1.0);
-    let units = (text_width / PDF_TEXT_FONT_PT as f64 * 1000.0) as u32;
+    let units =
+        ((text_width / PDF_TEXT_FONT_PT as f64) * 1000.0).clamp(1.0, u32::MAX as f64) as u32;
     let text = render_plain_text(doc, " | ", false);
     let mut lines: Vec<&str> = Vec::new();
     for line in text.split('\n') {
         let spans = wrap_spans(line, units.max(1));
         lines.extend(spans.into_iter().map(|r| &line[r]));
     }
-    let per_page = (((body_top - body_bottom) / BODY_LINE_PITCH_PT).floor() as usize).max(1);
+    let per_page = ((body_top - body_bottom) / BODY_LINE_PITCH_PT)
+        .floor()
+        .clamp(1.0, usize::MAX as f64) as usize;
     let chunks: Vec<&[&str]> = if lines.is_empty() {
         vec![&[][..]]
     } else {
@@ -377,7 +380,11 @@ pub(crate) fn encode_sheet_pdf(
                 })
                 .collect()
         };
-        let wide = used.is_some_and(|u| u.c2 - u.c1 + 1 > WIDE_SHEET_COLUMNS);
+        let wide = used.is_some_and(|u| {
+            u.c2.checked_sub(u.c1)
+                .and_then(|d| d.checked_add(1))
+                .is_some_and(|w| w > WIDE_SHEET_COLUMNS)
+        });
         let setup = if page.is_default() && wide {
             SheetPage {
                 landscape: true,
@@ -387,7 +394,23 @@ pub(crate) fn encode_sheet_pdf(
             page.clone()
         };
         for area in areas {
-            printed_cells += u64::from(area.r2 - area.r1 + 1) * u64::from(area.c2 - area.c1 + 1);
+            let (Some(rows), Some(cols)) = (
+                area.r2.checked_sub(area.r1).and_then(|d| d.checked_add(1)),
+                area.c2.checked_sub(area.c1).and_then(|d| d.checked_add(1)),
+            ) else {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "인쇄 범위가 올바르지 않아 PDF로 저장할 수 없습니다.".to_string(),
+                ));
+            };
+            let Some(next_cells) = u64::from(rows)
+                .checked_mul(u64::from(cols))
+                .and_then(|n| printed_cells.checked_add(n))
+            else {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "인쇄 범위가 너무 커서 PDF로 저장할 수 없습니다.".to_string(),
+                ));
+            };
+            printed_cells = next_cells;
             if printed_cells > MAX_SHEET_CELLS {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
                     "인쇄 범위가 너무 커서 PDF로 저장할 수 없습니다.".to_string(),
@@ -441,6 +464,11 @@ fn sheet_area_pages(
     };
     let box_w = paper_w - m_left - m_right;
     let box_h = paper_h - m_top - m_bottom;
+    if !box_w.is_finite() || box_w <= 0.0 || !box_h.is_finite() || box_h <= 0.0 {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "PDF 여백이 용지 크기를 초과하여 저장할 수 없습니다.".to_string(),
+        ));
+    }
     let hidden_rows = styling.map_or(&[][..], |s| &s.hidden_rows[..]);
     let hidden_cols = styling.map_or(&[][..], |s| &s.hidden_cols[..]);
     let col_sizes: Vec<f64> = (area.c1..=area.c2)
@@ -472,7 +500,12 @@ fn sheet_area_pages(
     let total_w = col_sizes.iter().sum::<f64>() + head_w;
     let total_h = row_sizes.iter().sum::<f64>() + head_h;
     let scale = match page.scale {
-        PageScale::Percent(p) => f64::from(p) / 100.0,
+        PageScale::Percent(0) => {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "PDF 인쇄 배율은 0보다 커야 합니다.".to_string(),
+            ));
+        }
+        PageScale::Percent(p) => (f64::from(p) / 100.0).max(MIN_SCALE),
         PageScale::Fit { width, height } => {
             let mut fit: f64 = 1.0;
             if width > 0 && total_w > 0.0 {
@@ -485,14 +518,33 @@ fn sheet_area_pages(
         }
     };
     let title = |run: Option<(u32, u32)>, first: u32, len: usize| {
-        run.filter(|&(a, b)| a >= first && ((b - first) as usize) < len)
-            .map(|(a, b)| ((a - first) as usize, (b - first) as usize))
+        run.filter(|&(a, b)| b >= a && a >= first)
+            .and_then(|(a, b)| {
+                let end = b.checked_sub(first)? as usize;
+                (end < len).then_some(((a - first) as usize, end))
+            })
     };
     let title_rows = title(page.title_rows, area.r1, row_sizes.len());
     let title_cols = title(page.title_cols, area.c1, col_sizes.len());
-    let col_groups = cut(&col_sizes, box_w / scale - head_w, title_cols);
-    let row_groups = cut(&row_sizes, box_h / scale - head_h, title_rows);
-    if entries.len() + col_groups.len() * row_groups.len() > MAX_SHEET_PAGES {
+    let avail_w = box_w / scale - head_w;
+    let avail_h = box_h / scale - head_h;
+    if !avail_w.is_finite() || avail_w <= 0.0 || !avail_h.is_finite() || avail_h <= 0.0 {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "PDF 인쇄 영역이 너무 좁아 저장할 수 없습니다.".to_string(),
+        ));
+    }
+    let col_groups = cut(&col_sizes, avail_w, title_cols);
+    let row_groups = cut(&row_sizes, avail_h, title_rows);
+    let Some(total_pages) = col_groups
+        .len()
+        .checked_mul(row_groups.len())
+        .and_then(|n| entries.len().checked_add(n))
+    else {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "인쇄 범위가 너무 커서 PDF로 저장할 수 없습니다.".to_string(),
+        ));
+    };
+    if total_pages > MAX_SHEET_PAGES {
         return Err(EasyOfficeError::ResourceBudgetExceeded(
             "인쇄 범위가 너무 커서 PDF로 저장할 수 없습니다.".to_string(),
         ));
@@ -606,4 +658,86 @@ fn sheet_area_pages(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sheet_page::PageMargins;
+    use crate::{CellBox, RichBinding, RichPageFrame, RichPageMargins};
+
+    fn one_cell_sheet() -> Vec<crate::OdsUnpacked> {
+        vec![("S1".to_string(), vec![(0, 0, "a".to_string())])]
+    }
+
+    #[test]
+    fn hostile_zero_percent_scale_and_excess_margins_fail_closed() {
+        let mut st = SheetStyling::default();
+        st.page.scale = PageScale::Percent(0);
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st]).is_err());
+
+        let mut st_margin = SheetStyling::default();
+        st_margin.page.margins = Some(PageMargins {
+            left: 10_000,
+            right: 10_000,
+            top: 1_000,
+            bottom: 1_000,
+            header: 0,
+            footer: 0,
+        });
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st_margin]).is_err());
+    }
+
+    #[test]
+    fn hostile_inverted_or_max_print_area_and_title_fail_closed_without_panic() {
+        let mut inverted = SheetStyling::default();
+        inverted.page.print_area = vec![CellBox {
+            row0: 5,
+            col0: 0,
+            row1: 2,
+            col1: 0,
+        }];
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[inverted]).is_err());
+
+        let mut max_row = SheetStyling::default();
+        max_row.page.print_area = vec![CellBox {
+            row0: 0,
+            col0: 0,
+            row1: u32::MAX,
+            col1: 0,
+        }];
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[max_row]).is_err());
+
+        let mut bad_title = SheetStyling::default();
+        bad_title.page.print_area = vec![CellBox {
+            row0: 5,
+            col0: 0,
+            row1: 10,
+            col1: 2,
+        }];
+        bad_title.page.title_rows = Some((10, 2));
+        let res = encode_sheet_pdf("t", &one_cell_sheet(), &[bad_title]);
+        assert!(res.is_ok());
+
+        let doc = RichDocument {
+            page_frame: RichPageFrame {
+                margins: Some(RichPageMargins {
+                    top: u32::MAX,
+                    bottom: 0,
+                    header: 0,
+                    footer: 0,
+                    left: u32::MAX,
+                    right: 0,
+                }),
+                binding: RichBinding {
+                    gutter: 100,
+                    kind: RichBindingKind::Single,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let pages = laid_document_pages(&doc, 0);
+        assert_eq!(pages.len(), 1);
+    }
 }

@@ -272,3 +272,49 @@ fn test_output_grows_toward_the_declared_size_without_passing_it() {
         input
     );
 }
+
+#[test]
+fn test_copy_match_short_overlap_distances_2_to_7() {
+    for dist in 1..=16usize {
+        let mut pat = Vec::with_capacity(64 * 1024);
+        let seed: Vec<u8> = (0..dist).map(|i| b'A' + (i as u8 % 26)).collect();
+        while pat.len() < 64 * 1024 {
+            pat.extend_from_slice(&seed);
+        }
+        pat.truncate(64 * 1024);
+        let packed = deflate_raw(&pat);
+        let out = inflate_raw(&packed, pat.len() + 1024).unwrap();
+        assert_eq!(out, pat, "roundtrip mismatch for distance={dist}");
+    }
+}
+
+#[test]
+#[ignore]
+fn bench_deflate_release() {
+    let repeat_pat = b"XYZABC1".repeat(600_000); // dist=7 repeating pattern (~4.2 MB)
+    let packed_pat = deflate_raw(&repeat_pat);
+    let small = b"<w:p><w:r><w:t>Bench</w:t></w:r></w:p>".repeat(100); // ~3.7 KB
+    let packed_small = deflate_raw(&small);
+
+    let t0 = std::time::Instant::now();
+    for _ in 0..50 {
+        let out = inflate_raw(&packed_pat, repeat_pat.len() + 1024).unwrap();
+        std::hint::black_box(out.len());
+    }
+    let dt_pat = t0.elapsed();
+
+    let t1 = std::time::Instant::now();
+    for _ in 0..20_000 {
+        let out = inflate_raw_sized(&packed_small, small.len() + 1024, 0).unwrap();
+        std::hint::black_box(out.len());
+    }
+    let dt_small = t1.elapsed();
+
+    eprintln!(
+        "[bench_deflate_release] pattern_4_2MB_x50={:?} ({:.1} MiB/s), unhinted_3_7KB_x20k={:?} ({:.1} MiB/s)",
+        dt_pat,
+        (repeat_pat.len() as f64 * 50.0) / (1024.0 * 1024.0 * dt_pat.as_secs_f64()),
+        dt_small,
+        (small.len() as f64 * 20_000.0) / (1024.0 * 1024.0 * dt_small.as_secs_f64())
+    );
+}

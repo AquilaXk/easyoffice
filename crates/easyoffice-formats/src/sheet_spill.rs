@@ -18,8 +18,8 @@ pub struct SpillRef {
 }
 
 impl SpillRef {
-    pub fn area(&self) -> usize {
-        self.rows as usize * self.cols as usize
+    pub fn area(&self) -> u64 {
+        u64::from(self.rows) * u64::from(self.cols)
     }
 
     /// Whether `(row, col)` is a cell of the area after the anchor.
@@ -54,23 +54,58 @@ impl SpillRef {
     }
 }
 
+/// Whether `(row, col)` lies strictly after the anchor inside any of `spills`.
+pub fn is_covered_by_spills(spills: &[SpillRef], row: u32, col: u32) -> bool {
+    spills.iter().any(|r| r.covers_after_anchor(row, col))
+}
+
 /// The refs that fit the bounds of a sheet and the budget, one per anchor, by position.
 pub fn normalize_spills(refs: &[SpillRef], max_rows: u32, max_cols: u32) -> Vec<SpillRef> {
     let mut kept: Vec<SpillRef> = Vec::new();
-    let mut covered = 0usize;
+    let mut covered = 0u64;
+    let max_cells = MAX_SPILL_REF_CELLS as u64;
     for r in refs {
+        let area = r.area();
         let fits = r.rows >= 1
             && r.cols >= 1
-            && r.area() > 1
+            && area > 1
             && r.row.checked_add(r.rows).is_some_and(|end| end <= max_rows)
             && r.col.checked_add(r.cols).is_some_and(|end| end <= max_cols);
-        if !fits || kept.len() >= MAX_SPILL_REFS || covered + r.area() > MAX_SPILL_REF_CELLS {
+        if !fits || kept.len() >= MAX_SPILL_REFS || covered.saturating_add(area) > max_cells {
             continue;
         }
-        covered += r.area();
+        covered += area;
         kept.push(*r);
     }
     kept.sort_unstable();
     kept.dedup_by_key(|r| (r.row, r.col));
     kept
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn huge_spill_area_uses_u64_and_covered_check_works_without_expansion() {
+        let giant = SpillRef {
+            row: 0,
+            col: 0,
+            rows: 1_048_576,
+            cols: 16_384,
+        };
+        assert_eq!(giant.area(), 17_179_869_184u64);
+        assert!(normalize_spills(&[giant], 1_048_576, 16_384).is_empty());
+
+        let valid = SpillRef {
+            row: 2,
+            col: 3,
+            rows: 3,
+            cols: 4,
+        };
+        assert!(!is_covered_by_spills(&[valid], 2, 3));
+        assert!(is_covered_by_spills(&[valid], 2, 4));
+        assert!(is_covered_by_spills(&[valid], 4, 6));
+        assert!(!is_covered_by_spills(&[valid], 5, 6));
+    }
 }

@@ -5,6 +5,7 @@
 //! tree, `p:nvSpPr`/`p:spPr`/`p:txBody` on each shape, slide titles in a title placeholder shape,
 //! speaker notes in real notes slides, and the presentation title in `docProps/core.xml`.
 
+use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::ooxml_shared_parts::{
     core_properties_xml, drawingml_theme_xml, CORE_PROPERTIES_CONTENT_TYPE,
@@ -17,6 +18,7 @@ use crate::{
     EasyOfficeError, OoxmlCodec, OoxmlPptxPayload, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
     ZipSecurityPolicy,
 };
+use std::collections::HashSet;
 
 const PML_NS: &str = concat!(
     "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" ",
@@ -30,6 +32,7 @@ const SLIDESHOW_MAIN_CT: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml";
 const PRESENTATION_MAIN_CT: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+const MAX_PPTX_SLIDES: usize = 2_000;
 
 fn rels_xml(rels: &[(&str, &str, String)]) -> String {
     let mut xml = format!(
@@ -609,23 +612,47 @@ impl OoxmlCodec {
         let is_slideshow =
             slideshow_ct || extract_attr(pres_xml, "<p:presentation", "slideshow") == Some("1");
 
+        let mut budget = DecodeBudget::new();
+        budget.charge(pres_xml.len(), "PPTX 프레젠테이션")?;
+
         let rel_targets = Self::pptx_relationship_targets(&entry_map)?;
         let mut ordered_slide_entries: Vec<&ZipArchiveEntry> = Vec::new();
+        let mut seen_paths: HashSet<&str> = HashSet::new();
+        let mut sld_id_count = 0usize;
         for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
+            sld_id_count += 1;
+            if sld_id_count > MAX_PPTX_SLIDES * 4 {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PPTX 슬라이드 참조 수 한도를 초과했습니다.".to_string(),
+                ));
+            }
             let rid = extract_attr_from_fragment(sld_id_attrs, "r:id")
                 .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"));
             let target = rid.and_then(|rid| rel_targets.get(rid));
             if let Some(&entry) = target.and_then(|path| entry_map.get(path.as_str())) {
-                ordered_slide_entries.push(entry);
+                if seen_paths.insert(entry.path.as_str()) {
+                    if ordered_slide_entries.len() >= MAX_PPTX_SLIDES {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
+                        ));
+                    }
+                    ordered_slide_entries.push(entry);
+                }
             }
         }
         if ordered_slide_entries.is_empty() {
             ordered_slide_entries = Self::pptx_slides_by_number(&entries);
+            if ordered_slide_entries.len() > MAX_PPTX_SLIDES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
+                ));
+            }
         }
 
-        let mut slides = Vec::new();
+        let mut slides = Vec::with_capacity(ordered_slide_entries.len());
         for s_entry in ordered_slide_entries {
             let s_xml = utf8_entry(s_entry, "ppt/slides/slide.xml")?;
+            budget.charge(s_xml.len(), "PPTX 슬라이드 XML")?;
             let (s_title, bullets) = Self::pptx_slide_title_and_bullets(s_xml);
             let notes = match read_notes_slide(&entry_map, &s_entry.path)? {
                 Some(n) => n,
@@ -633,6 +660,11 @@ impl OoxmlCodec {
                     .map(XmlSanitizer::unescape)
                     .unwrap_or_default(),
             };
+            budget.charge_block(s_title.len(), "PPTX 슬라이드 제목")?;
+            for bullet in &bullets {
+                budget.charge_run(bullet.len(), "PPTX 슬라이드 텍스트")?;
+            }
+            budget.charge(notes.len(), "PPTX 슬라이드 노트")?;
             slides.push((s_title, bullets, notes));
         }
 
@@ -694,5 +726,141 @@ mod tests {
             extract_notes_xml_text(notes_xml).as_deref(),
             Some("발표자 핵심 메모\n추가 자유 텍스트 상자")
         );
+    }
+
+    #[test]
+    fn pptx_duplicate_slide_targets_are_deduplicated_and_hostile_amplification_fails_closed() {
+        // 1. Duplicate rId target referenced N times must yield only 1 slide, not N copies.
+        let base = OoxmlCodec::pack_pptx(&OoxmlPptxPayload {
+            title: "dedup".into(),
+            is_slideshow: false,
+            slides: vec![("첫 슬라이드".into(), vec!["내용".into()], "노트".into())],
+        })
+        .unwrap();
+        let mut entries: Vec<(String, Vec<u8>)> =
+            ZipArchiveCodec::unpack(&base, &ZipSecurityPolicy::default())
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.path, e.data))
+                .collect();
+        let repeated_ids = (1..=500)
+            .map(|i| format!("<p:sldId id=\"{}\" r:id=\"rId2\"/>", 256 + i))
+            .collect::<String>();
+        let dup_rels = rels_xml(&[("rId2", "slide", "slides/slide1.xml".to_string())]);
+        let mut found_rels = false;
+        for (path, data) in &mut entries {
+            if path == "ppt/presentation.xml" {
+                *data = format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                     <p:presentation {PML_NS}><p:sldIdLst>{repeated_ids}</p:sldIdLst></p:presentation>"
+                )
+                .into_bytes();
+            } else if path == "ppt/_rels/presentation.xml.rels" {
+                *data = dup_rels.clone().into_bytes();
+                found_rels = true;
+            }
+        }
+        if !found_rels {
+            entries.push((
+                "ppt/_rels/presentation.xml.rels".to_string(),
+                dup_rels.into_bytes(),
+            ));
+        }
+        let dup_bytes = ZipArchiveCodec::pack(&entries).unwrap();
+        let unpacked = OoxmlCodec::unpack_pptx(&dup_bytes).unwrap();
+        assert_eq!(unpacked.slides.len(), 1);
+
+        // 2. Excess slide count (> MAX_PPTX_SLIDES) fails closed.
+        let mut over_ids = String::new();
+        let mut over_rels = Vec::new();
+        for i in 1..=(MAX_PPTX_SLIDES + 1) {
+            let rid = format!("rId{i}");
+            over_ids.push_str(&format!("<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 256 + i));
+            over_rels.push((rid, "slide", format!("slides/slide{i}.xml")));
+        }
+        let over_rel_refs: Vec<(&str, &str, String)> = over_rels
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), *b, c.clone()))
+            .collect();
+        let mut over_entries = vec![
+            (
+                "[Content_Types].xml".to_string(),
+                b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>".to_vec(),
+            ),
+            (
+                "ppt/_rels/presentation.xml.rels".to_string(),
+                rels_xml(&over_rel_refs).into_bytes(),
+            ),
+            (
+                "ppt/presentation.xml".to_string(),
+                format!("<p:presentation {PML_NS}><p:sldIdLst>{over_ids}</p:sldIdLst></p:presentation>").into_bytes(),
+            ),
+        ];
+        for i in 1..=(MAX_PPTX_SLIDES + 1) {
+            over_entries.push((format!("ppt/slides/slide{i}.xml"), b"<p:sld/>".to_vec()));
+        }
+        let over_bytes = ZipArchiveCodec::pack(&over_entries).unwrap();
+        assert!(matches!(
+            OoxmlCodec::unpack_pptx(&over_bytes),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
+
+        // 3. Shared giant notesSlide referenced by many unique small slides trips DecodeBudget.
+        let big_note_text = "A".repeat(300_000);
+        let note_xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+             <p:notes {PML_NS}><p:cSld><p:spTree>\
+             <p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr>\
+             <p:txBody><a:p><a:r><a:t>{big_note_text}</a:t></a:r></a:p></p:txBody></p:sp>\
+             </p:spTree></p:cSld></p:notes>"
+        );
+        let slide_count = 950usize; // 950 * 300KB = 285MB > 256MiB DecodeBudget
+        let mut amp_entries = vec![
+            (
+                "[Content_Types].xml".to_string(),
+                b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>".to_vec(),
+            ),
+            ("ppt/notesSlides/notesSlide1.xml".to_string(), note_xml.into_bytes()),
+        ];
+        let mut sld_ids = String::new();
+        let mut pres_rels = Vec::new();
+        for i in 1..=slide_count {
+            let rid = format!("rId{i}");
+            let path = format!("ppt/slides/slide{i}.xml");
+            let rel_path = format!("ppt/slides/_rels/slide{i}.xml.rels");
+            amp_entries.push((
+                path,
+                b"<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree/></p:cSld></p:sld>".to_vec(),
+            ));
+            amp_entries.push((
+                rel_path,
+                rels_xml(&[(
+                    "rId1",
+                    "notesSlide",
+                    "../notesSlides/notesSlide1.xml".to_string(),
+                )])
+                .into_bytes(),
+            ));
+            sld_ids.push_str(&format!("<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 256 + i));
+            pres_rels.push((rid, "slide", format!("slides/slide{i}.xml")));
+        }
+        let rel_refs: Vec<(&str, &str, String)> = pres_rels
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), *b, c.clone()))
+            .collect();
+        amp_entries.push((
+            "ppt/_rels/presentation.xml.rels".to_string(),
+            rels_xml(&rel_refs).into_bytes(),
+        ));
+        amp_entries.push((
+            "ppt/presentation.xml".to_string(),
+            format!("<p:presentation {PML_NS}><p:sldIdLst>{sld_ids}</p:sldIdLst></p:presentation>")
+                .into_bytes(),
+        ));
+        let amp_bytes = ZipArchiveCodec::pack(&amp_entries).unwrap();
+        assert!(matches!(
+            OoxmlCodec::unpack_pptx(&amp_bytes),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
     }
 }

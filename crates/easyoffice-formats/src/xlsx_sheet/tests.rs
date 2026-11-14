@@ -522,3 +522,39 @@ fn hidden_rows_and_columns_and_merges_are_read() {
     .unwrap();
     assert!(none.styling.is_empty());
 }
+
+#[test]
+fn hostile_giant_spill_merge_and_excess_spills_do_not_oom() {
+    let table = SharedStrings::from_strings(&[]);
+    let giant_merge_and_spill = r#"<worksheet><sheetData><row r="1"><c r="A1"><f t="array" ref="A1:AZZ1000">SEQUENCE(1000,1378)</f><v>anchor</v></c></row><row r="500"><c r="B500" t="inlineStr"><is><t>spilled</t></is></c><c r="BAA500" t="inlineStr"><is><t>outside</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells></worksheet>"#;
+    let scan = scan_worksheet(
+        giant_merge_and_spill,
+        &table,
+        &XfStyles::default(),
+        true,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap();
+    assert_eq!(scan.styling.merges.len(), 1);
+    assert_eq!(scan.styling.spills.len(), 1);
+    assert!(scan.cells.iter().any(|&(r, c, _)| (r, c) == (0, 0)));
+    assert!(!scan.cells.iter().any(|&(r, c, _)| (r, c) == (499, 1)));
+    assert!(scan.cells.iter().any(|&(r, c, _)| (r, c) == (499, 1378)));
+
+    // Excess spills fail closed instead of accumulating unboundedly.
+    let mut excess = String::from("<worksheet><sheetData>");
+    for r in 1..=4_097u32 {
+        excess.push_str(&format!(
+            r#"<row r="{r}"><c r="A{r}"><f t="array" ref="A{r}:B{r}">SEQUENCE(1,2)</f><v>1</v></c></row>"#
+        ));
+    }
+    excess.push_str("</sheetData></worksheet>");
+    let err = scan_worksheet(
+        &excess,
+        &table,
+        &XfStyles::default(),
+        true,
+        &mut DecodeBudget::new(),
+    );
+    assert!(err.is_err());
+}

@@ -472,3 +472,37 @@ fn measure_one_pass_against_the_substring_scanner() {
         xml.len()
     );
 }
+
+#[test]
+fn hostile_ods_exceeding_max_sheets_fails_closed() {
+    let tables: Vec<(&str, &str)> = (0..1_025).map(|_| ("", "")).collect();
+    let xml = content(&tables);
+    assert!(crate::sheet_styling::ods_grid::read_ods_sheets(&xml).is_err());
+}
+
+#[test]
+fn hostile_ods_exceeding_max_spills_per_sheet_fails_closed() {
+    let repeated_spill_rows = r#"<table:table-row table:number-rows-repeated="4097"><table:table-cell table:formula="of:=A1" table:number-matrix-rows-spanned="2" table:number-matrix-columns-spanned="1"><text:p>1</text:p></table:table-cell></table:table-row>"#;
+    let xml = content(&[("", repeated_spill_rows)]);
+    let err = crate::sheet_styling::ods_grid::read_ods_sheets_with_styling(&xml);
+    assert!(err.is_err());
+}
+
+#[test]
+fn giant_spill_covers_without_hashset_expansion() {
+    let xml = content(&[(
+        "table:name=\"Sheet1\"",
+        r#"<table:table-row><table:table-cell table:formula="of:=SEQUENCE(1000,2000)" table:number-matrix-rows-spanned="1000" table:number-matrix-columns-spanned="2000"><text:p>anchor</text:p></table:table-cell></table:table-row><table:table-row table:number-rows-repeated="499"/><table:table-row><table:table-cell table:number-columns-repeated="1000"/><table:table-cell><text:p>covered</text:p></table:table-cell><table:table-cell table:number-columns-repeated="1000"/><table:table-cell><text:p>outside_col</text:p></table:table-cell></table:table-row>"#,
+    )]);
+    let (sheets, stylings) =
+        crate::sheet_styling::ods_grid::read_ods_sheets_with_styling(&xml).unwrap();
+    assert_eq!(stylings[0].1.spills.len(), 1);
+    let cells = &sheets[0].1;
+    assert!(cells
+        .iter()
+        .any(|&(r, c, ref v)| (r, c) == (0, 0) && v == "=SEQUENCE(1000,2000)"));
+    assert!(!cells.iter().any(|&(r, c, _)| (r, c) == (500, 1000)));
+    assert!(cells
+        .iter()
+        .any(|&(r, c, ref v)| (r, c) == (500, 2001) && v == "outside_col"));
+}

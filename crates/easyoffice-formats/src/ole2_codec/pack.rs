@@ -149,6 +149,7 @@ impl Ole2ContainerCodec {
                 "OLE2 스토리지 이름은 비어 있을 수 없습니다.".to_string(),
             ));
         }
+        Self::validate_cfb_entry_name(part)?;
         let mut existing = None;
         for &c_idx in &nodes[parent_idx].children {
             let same_name =
@@ -182,6 +183,7 @@ impl Ole2ContainerCodec {
         if leaf_name.is_empty() {
             return Err(empty_stream_name_error());
         }
+        Self::validate_cfb_entry_name(leaf_name)?;
         let duplicate = nodes[parent_idx].children.iter().any(|&c_idx| {
             Self::cmp_cfb_dir_names(&nodes[c_idx].name, leaf_name) == std::cmp::Ordering::Equal
         });

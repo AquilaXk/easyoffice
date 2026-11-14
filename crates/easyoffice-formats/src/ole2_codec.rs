@@ -98,6 +98,21 @@ impl Ole2ContainerCodec {
         }
     }
 
+    pub(crate) fn validate_cfb_entry_name(name: &str) -> Result<(), EasyOfficeError> {
+        if name.is_empty()
+            || name == "."
+            || name == ".."
+            || name
+                .chars()
+                .any(|c| matches!(c, '/' | '\\' | ':' | '!' | '\0'))
+        {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "OLE2 디렉터리 엔트리 이름에 허용되지 않는 문자 또는 경로 세그먼트가 포함되었습니다: {name}"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn cmp_cfb_dir_names(a: &str, b: &str) -> std::cmp::Ordering {
         let a_len = a.encode_utf16().count();
         let b_len = b.encode_utf16().count();
@@ -398,5 +413,66 @@ impl Ole2SecurityGuard {
             ));
         }
         Ok(version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cfb_dir_names_compare_by_utf16_length_then_uppercase_lexicographic() {
+        use std::cmp::Ordering;
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("z", "AA"),
+            Ordering::Less
+        );
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("DocInfo", "docinfo"),
+            Ordering::Equal
+        );
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("cafe\u{00E9}", "CAFE\u{00C9}"),
+            Ordering::Equal
+        );
+        // Surrogate pair '😀' uses 2 UTF-16 code units vs BMP '가' (1 unit).
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("가", "😀"),
+            Ordering::Less
+        );
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("PrvText", "Summary"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn cfb_unpack_rejects_illegal_chars_and_traversal_in_entry_names() {
+        // Pack valid 1-stream OLE2 ("ABCD"), then overwrite the entry's UTF-16LE name bytes
+        // in the raw directory sector with illegal CFB names containing '/', '\', ':', '!'.
+        let base = Ole2ContainerCodec::pack(&[("ABCD".to_string(), b"payload".to_vec())]).unwrap();
+        let needle = b"A\0B\0C\0D\0";
+        let offset = base
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("directory entry UTF-16LE bytes");
+
+        for bad in ["a/b\0", "a\\b\0", "C:a\0", "x!y\0", "..\0\0"] {
+            let mut hacked = base.clone();
+            let mut utf16 = Vec::new();
+            for u in bad.encode_utf16() {
+                utf16.extend_from_slice(&u.to_le_bytes());
+            }
+            hacked[offset..offset + 8].copy_from_slice(&utf16[..8]);
+            // Update name_byte_len at offset + 64 when "..\0\0" to 6 bytes (`..` + NUL).
+            if bad.starts_with("..") {
+                hacked[offset + 64..offset + 66].copy_from_slice(&6u16.to_le_bytes());
+            }
+            let res = Ole2ContainerCodec::unpack(&hacked);
+            assert!(
+                matches!(res, Err(EasyOfficeError::SecurityViolation(_))),
+                "bad CFB name {bad:?} was not rejected: {res:?}"
+            );
+        }
     }
 }

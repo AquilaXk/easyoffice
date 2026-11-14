@@ -480,34 +480,102 @@ impl RichDocument {
     }
 }
 
-const TABLE_FORMULA_FUNCS: [&str; 6] = ["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"];
+#[derive(Clone, Copy)]
+enum TableFormulaFunc {
+    Sum,
+    Average,
+    Count,
+    Max,
+    Min,
+    Product,
+}
 
-fn parse_table_formula(text: &str) -> Option<(&'static str, &'static str)> {
+#[derive(Clone, Copy)]
+enum TableFormulaDir {
+    Above,
+    Below,
+    Left,
+    Right,
+}
+
+fn parse_table_formula(text: &str) -> Option<(TableFormulaFunc, TableFormulaDir)> {
     let body = text.trim().strip_prefix('=')?.trim();
     let open = body.find('(')?;
-    let func_raw = body[..open].trim().to_ascii_uppercase();
-    let arg_raw = body[open + 1..]
-        .trim()
-        .strip_suffix(')')?
-        .trim()
-        .to_ascii_uppercase();
-    let func = TABLE_FORMULA_FUNCS.into_iter().find(|f| *f == func_raw)?;
-    let dir = ["ABOVE", "BELOW", "LEFT", "RIGHT"]
-        .into_iter()
-        .find(|d| *d == arg_raw)?;
+    let func_raw = body[..open].trim();
+    let arg_raw = body[open + 1..].trim().strip_suffix(')')?.trim();
+    let func = if func_raw.eq_ignore_ascii_case("SUM") {
+        TableFormulaFunc::Sum
+    } else if func_raw.eq_ignore_ascii_case("AVERAGE") {
+        TableFormulaFunc::Average
+    } else if func_raw.eq_ignore_ascii_case("COUNT") {
+        TableFormulaFunc::Count
+    } else if func_raw.eq_ignore_ascii_case("MAX") {
+        TableFormulaFunc::Max
+    } else if func_raw.eq_ignore_ascii_case("MIN") {
+        TableFormulaFunc::Min
+    } else if func_raw.eq_ignore_ascii_case("PRODUCT") {
+        TableFormulaFunc::Product
+    } else {
+        return None;
+    };
+    let dir = if arg_raw.eq_ignore_ascii_case("ABOVE") {
+        TableFormulaDir::Above
+    } else if arg_raw.eq_ignore_ascii_case("BELOW") {
+        TableFormulaDir::Below
+    } else if arg_raw.eq_ignore_ascii_case("LEFT") {
+        TableFormulaDir::Left
+    } else if arg_raw.eq_ignore_ascii_case("RIGHT") {
+        TableFormulaDir::Right
+    } else {
+        return None;
+    };
     Some((func, dir))
 }
 
 fn parse_table_number(text: &str) -> Option<f64> {
-    let cleaned: String = text
-        .trim()
-        .chars()
-        .filter(|c| *c != ',' && !c.is_whitespace())
-        .collect();
-    if cleaned.is_empty() {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
         return None;
     }
-    cleaned.parse::<f64>().ok().filter(|n| n.is_finite())
+    let bytes = trimmed.as_bytes();
+    if !bytes
+        .iter()
+        .any(|&b| b == b',' || b <= b' ' || !b.is_ascii())
+    {
+        return trimmed.parse::<f64>().ok().filter(|n| n.is_finite());
+    }
+    let mut stack = [0u8; 64];
+    let mut len = 0usize;
+    let mut overflow: Option<String> = None;
+    for ch in trimmed.chars() {
+        if ch == ',' || ch.is_whitespace() {
+            continue;
+        }
+        if !ch.is_ascii() {
+            return None;
+        }
+        if let Some(ref mut s) = overflow {
+            s.push(ch);
+        } else if len < stack.len() {
+            stack[len] = ch as u8;
+            len += 1;
+        } else {
+            let mut s = String::with_capacity(trimmed.len());
+            s.push_str(std::str::from_utf8(&stack).unwrap_or(""));
+            s.push(ch);
+            overflow = Some(s);
+        }
+    }
+    let slice = match overflow.as_deref() {
+        Some(s) => s,
+        None => {
+            if len == 0 {
+                return None;
+            }
+            std::str::from_utf8(&stack[..len]).ok()?
+        }
+    };
+    slice.parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
 /// Formats a computed table value: integers without a fraction, otherwise up to 10 decimals.
@@ -519,6 +587,40 @@ pub fn format_table_number(n: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+fn fold_table_operands<'a, I: Iterator<Item = &'a str>>(func: TableFormulaFunc, cells: I) -> f64 {
+    let mut count = 0usize;
+    let mut sum = 0.0f64;
+    let mut prod = 1.0f64;
+    let mut extremum = match func {
+        TableFormulaFunc::Max => f64::MIN,
+        TableFormulaFunc::Min => f64::MAX,
+        _ => 0.0,
+    };
+    for cell in cells {
+        let Some(n) = parse_table_number(cell) else {
+            continue;
+        };
+        count += 1;
+        match func {
+            TableFormulaFunc::Sum | TableFormulaFunc::Average => sum += n,
+            TableFormulaFunc::Count => {}
+            TableFormulaFunc::Max => extremum = extremum.max(n),
+            TableFormulaFunc::Min => extremum = extremum.min(n),
+            TableFormulaFunc::Product => prod *= n,
+        }
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    match func {
+        TableFormulaFunc::Sum => sum,
+        TableFormulaFunc::Average => sum / count as f64,
+        TableFormulaFunc::Count => count as f64,
+        TableFormulaFunc::Max | TableFormulaFunc::Min => extremum,
+        TableFormulaFunc::Product => prod,
+    }
+}
+
 /// Replaces word-processor table formulas (`=SUM(ABOVE)`, `=AVERAGE(LEFT)`, … with SUM, AVERAGE,
 /// COUNT, MAX, MIN, PRODUCT over ABOVE, BELOW, LEFT, RIGHT) by their computed values, row by row.
 /// Non-numeric cells are skipped; unrecognized formulas are left as text.
@@ -528,28 +630,21 @@ pub fn evaluate_table_formulas(rows: &mut [Vec<String>]) {
             let Some((func, dir)) = parse_table_formula(&rows[r][c]) else {
                 continue;
             };
-            let cell_at = |rr: usize, cc: usize| rows.get(rr).and_then(|row| row.get(cc));
-            let operands: Vec<f64> = match dir {
-                "ABOVE" => (0..r).filter_map(|rr| cell_at(rr, c)).collect::<Vec<_>>(),
-                "BELOW" => (r + 1..rows.len())
-                    .filter_map(|rr| cell_at(rr, c))
-                    .collect(),
-                "LEFT" => rows[r][..c].iter().collect(),
-                _ => rows[r][c + 1..].iter().collect(),
-            }
-            .into_iter()
-            .filter_map(|s| parse_table_number(s))
-            .collect();
-            let value = match func {
-                "SUM" => operands.iter().sum(),
-                "COUNT" => operands.len() as f64,
-                "AVERAGE" if !operands.is_empty() => {
-                    operands.iter().sum::<f64>() / operands.len() as f64
+            let value = match dir {
+                TableFormulaDir::Above => fold_table_operands(
+                    func,
+                    (0..r).filter_map(|rr| rows[rr].get(c).map(String::as_str)),
+                ),
+                TableFormulaDir::Below => fold_table_operands(
+                    func,
+                    (r + 1..rows.len()).filter_map(|rr| rows[rr].get(c).map(String::as_str)),
+                ),
+                TableFormulaDir::Left => {
+                    fold_table_operands(func, rows[r][..c].iter().map(String::as_str))
                 }
-                "MAX" if !operands.is_empty() => operands.iter().copied().fold(f64::MIN, f64::max),
-                "MIN" if !operands.is_empty() => operands.iter().copied().fold(f64::MAX, f64::min),
-                "PRODUCT" if !operands.is_empty() => operands.iter().product(),
-                _ => 0.0,
+                TableFormulaDir::Right => {
+                    fold_table_operands(func, rows[r][c + 1..].iter().map(String::as_str))
+                }
             };
             rows[r][c] = format_table_number(value);
         }

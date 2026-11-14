@@ -104,33 +104,35 @@ impl UniversalFormatConverter {
         format: DocumentFormat,
         formula_cache: Option<&XlsxFormulaCache>,
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        if format == DocumentFormat::Pages {
+            return Err(EasyOfficeError::InvalidArgument(
+                "Pages(.pages) 저장은 본문·제목·기본 서식을 가진 문서 내용(블록)만 지원합니다. 시트·슬라이드·단순 본문은 쓸 수 없습니다.".to_string(),
+            ));
+        }
         let title = if model.title.trim().is_empty() {
             "문서".to_string()
         } else {
             model.title.clone()
         };
-        let paragraphs = model.effective_paragraphs();
-        let sheet_cells = model.effective_sheet_cells();
-        let slides = model.effective_slides();
 
         match format {
-            DocumentFormat::Pages => Err(EasyOfficeError::InvalidArgument(
-                "Pages(.pages) 저장은 본문·제목·기본 서식을 가진 문서 내용(블록)만 지원합니다. 시트·슬라이드·단순 본문은 쓸 수 없습니다.".to_string(),
-            )),
+            DocumentFormat::Pages => unreachable!(),
             DocumentFormat::Docx => OoxmlCodec::pack_docx(&OoxmlDocxPayload {
                 title,
-                paragraphs,
+                paragraphs: model.effective_paragraphs(),
                 tables: model.tables.clone(),
             }),
             DocumentFormat::Doc => LegacyOle2Codec::pack_doc(&LegacyDocPayload {
                 title,
-                paragraphs,
+                paragraphs: model.effective_paragraphs(),
                 tables: model.tables.clone(),
             }),
-            DocumentFormat::Odt => OdfCodec::pack_odt(&title, &paragraphs, &model.tables),
+            DocumentFormat::Odt => {
+                OdfCodec::pack_odt(&title, &model.effective_paragraphs(), &model.tables)
+            }
             DocumentFormat::Rtf => Ok(RtfCodec::encode(&RtfPayload {
                 title,
-                paragraphs,
+                paragraphs: model.effective_paragraphs(),
                 tables: model.tables.clone(),
             })),
             DocumentFormat::Markdown => {
@@ -138,7 +140,7 @@ impl UniversalFormatConverter {
                     level: 1,
                     text: title,
                 }];
-                for p in paragraphs {
+                for p in model.effective_paragraphs() {
                     blocks.push(MarkdownBlock::Paragraph(p));
                 }
                 for table in &model.tables {
@@ -150,7 +152,7 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Txt => {
                 let mut lines = vec![title];
-                lines.extend(paragraphs);
+                lines.extend(model.effective_paragraphs());
                 Ok(lines.join("\n").into_bytes())
             }
             DocumentFormat::Hwp | DocumentFormat::Hwt => {
@@ -168,7 +170,8 @@ impl UniversalFormatConverter {
                             .clone()
                             .unwrap_or_else(|| title.clone()),
                         document_number: title,
-                        paragraphs: paragraphs
+                        paragraphs: model
+                            .effective_paragraphs()
                             .into_iter()
                             .enumerate()
                             .map(|(idx, text)| Hwp5ParagraphRecord {
@@ -191,17 +194,17 @@ impl UniversalFormatConverter {
                 is_template: format == DocumentFormat::Hwtx,
                 official_agency: model.official_agency.clone(),
                 approval_lines: vec!["기안".to_string(), "검토".to_string(), "결재".to_string()],
-                paragraphs,
+                paragraphs: model.effective_paragraphs(),
                 tables: model.tables.clone(),
             }),
             DocumentFormat::Xlsx => OoxmlCodec::pack_xlsx_multi_with_formula_cache(
-                &[(title, sheet_cells)],
+                &[(title, model.effective_sheet_cells())],
                 formula_cache.map(std::slice::from_ref).unwrap_or_default(),
             ),
             DocumentFormat::Xls => {
                 let payload = LegacyXlsPayload {
                     sheet_name: title,
-                    cells: sheet_cells,
+                    cells: model.effective_sheet_cells(),
                 };
                 // Cells derived from document text are never formulas, even when they start
                 // with '='; only a model that carries explicit sheet cells keeps formulas.
@@ -215,7 +218,7 @@ impl UniversalFormatConverter {
                 }
             }
             DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled_with_cache(
-                &[(title, sheet_cells)],
+                &[(title, model.effective_sheet_cells())],
                 formula_cache.map(std::slice::from_ref).unwrap_or_default(),
                 &[],
             ),
@@ -225,19 +228,20 @@ impl UniversalFormatConverter {
                 } else {
                     '\t'
                 };
-                let rows = cells_to_grid(&sheet_cells, &title)?;
+                let rows = cells_to_grid(&model.effective_sheet_cells(), &title)?;
                 Ok(CsvCodec::serialize_with_bom(&rows, delim))
             }
             DocumentFormat::Pptx | DocumentFormat::Ppsx => {
                 OoxmlCodec::pack_pptx(&OoxmlPptxPayload {
                     title,
                     is_slideshow: format == DocumentFormat::Ppsx,
-                    slides,
+                    slides: model.effective_slides(),
                 })
             }
             DocumentFormat::Ppt => LegacyOle2Codec::pack_ppt(&LegacyPptPayload {
                 title,
-                slides: slides
+                slides: model
+                    .effective_slides()
                     .into_iter()
                     .map(|(s_title, bullets, notes)| LegacyPptSlide {
                         title: s_title,
@@ -248,9 +252,9 @@ impl UniversalFormatConverter {
                     })
                     .collect(),
             }),
-            DocumentFormat::Odp => OdfCodec::pack_odp(&title, &slides),
+            DocumentFormat::Odp => OdfCodec::pack_odp(&title, &model.effective_slides()),
             DocumentFormat::Pdf => {
-                let mut body_lines = paragraphs;
+                let mut body_lines = model.effective_paragraphs();
                 for table in &model.tables {
                     for row in table {
                         if !row.is_empty() {
@@ -277,6 +281,14 @@ impl UniversalFormatConverter {
         format_hint: Option<&str>,
     ) -> Result<(DocumentFormat, UniversalDocumentModel), EasyOfficeError> {
         let format = FormatDetector::detect(bytes, format_hint)?;
+        let model = Self::decode_with_format(bytes, format)?;
+        Ok((format, model))
+    }
+
+    fn decode_with_format(
+        bytes: &[u8],
+        format: DocumentFormat,
+    ) -> Result<UniversalDocumentModel, EasyOfficeError> {
         let model = match format {
             DocumentFormat::Pages => Self::decode_pages(bytes)?,
             DocumentFormat::Docx => {
@@ -346,7 +358,7 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Pdf => Self::decode_pdf(bytes)?,
         };
-        Ok((format, model))
+        Ok(model)
     }
 
     fn decode_pages(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
@@ -453,14 +465,30 @@ impl UniversalFormatConverter {
         source_hint: Option<&str>,
         target: DocumentFormat,
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        if RICH_ORDER_TARGETS.contains(&target) {
-            if let Ok(decoded) = Self::decode_rich(bytes, source_hint) {
+        let source_format = FormatDetector::detect(bytes, source_hint)?;
+        let is_rich_doc_source = matches!(
+            source_format,
+            DocumentFormat::Docx
+                | DocumentFormat::Hwpx
+                | DocumentFormat::Hwtx
+                | DocumentFormat::Pages
+                | DocumentFormat::Odt
+                | DocumentFormat::Markdown
+                | DocumentFormat::Txt
+                | DocumentFormat::Rtf
+                | DocumentFormat::Doc
+                | DocumentFormat::Hwp
+                | DocumentFormat::Hwt
+                | DocumentFormat::Pdf
+        );
+        if RICH_ORDER_TARGETS.contains(&target) && is_rich_doc_source {
+            if let Ok(decoded) = Self::decode_rich(bytes, Some(source_format.extension())) {
                 if let crate::DecodedContent::Document(doc) = decoded.content {
                     return Self::encode_rich(&doc, target, None);
                 }
             }
         }
-        let (_, model) = Self::decode(bytes, source_hint)?;
+        let model = Self::decode_with_format(bytes, source_format)?;
         Self::encode(&model, target)
     }
 
@@ -811,5 +839,37 @@ mod tests {
         let blocks = crate::rtf_xml_helpers::extract_tag_bodies(xml_with_gt_attr, "table:table");
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].contains("셀값"));
+    }
+
+    #[test]
+    fn test_convert_fast_path_and_lazy_encode_for_tabular_slide_and_doc() {
+        let model = UniversalDocumentModel {
+            title: "변환검증".to_string(),
+            paragraphs: vec!["첫문단".to_string()],
+            tables: Vec::new(),
+            sheet_cells: vec![(0, 0, "항목".to_string())],
+            slides: vec![("제목".to_string(), vec!["요점".to_string()], String::new())],
+            official_agency: None,
+        };
+        let xlsx = UniversalFormatConverter::encode(&model, DocumentFormat::Xlsx).unwrap();
+        let pdf_from_xlsx =
+            UniversalFormatConverter::convert(&xlsx, Some("xlsx"), DocumentFormat::Pdf).unwrap();
+        assert!(pdf_from_xlsx.starts_with(b"%PDF-"));
+
+        let csv = b"col1,col2\nv1,v2\n";
+        let txt_from_csv =
+            UniversalFormatConverter::convert(csv, Some("csv"), DocumentFormat::Txt).unwrap();
+        assert!(String::from_utf8_lossy(&txt_from_csv).contains("v1"));
+
+        let pptx = UniversalFormatConverter::encode(&model, DocumentFormat::Pptx).unwrap();
+        let md_from_pptx =
+            UniversalFormatConverter::convert(&pptx, Some("pptx"), DocumentFormat::Markdown)
+                .unwrap();
+        assert!(String::from_utf8_lossy(&md_from_pptx).contains("제목"));
+
+        let docx = UniversalFormatConverter::encode(&model, DocumentFormat::Docx).unwrap();
+        let pdf_from_docx =
+            UniversalFormatConverter::convert(&docx, Some("docx"), DocumentFormat::Pdf).unwrap();
+        assert!(pdf_from_docx.starts_with(b"%PDF-"));
     }
 }

@@ -60,7 +60,7 @@ impl Reader<'_> {
     /// mark in the body).
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let mut out = Vec::new();
-        let marks = self.footnote_marks(body);
+        let marks = self.footnote_marks(body)?;
         self.note_numbering_rule(!marks.is_empty());
         for mark in marks {
             let Some(obj) = self.objects.get(mark.id) else {
@@ -139,7 +139,7 @@ impl Reader<'_> {
             FOOTNOTE_HEADING
         };
         let comments: Vec<RichBlock> = self
-            .comment_texts(body)
+            .comment_texts(body)?
             .into_iter()
             .map(|text| {
                 RichBlock::Paragraph(RichParagraph {

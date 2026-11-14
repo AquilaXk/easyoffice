@@ -217,6 +217,14 @@ fn parse_table_ranges(attrs: &str) -> Vec<CellBox> {
         .collect()
 }
 
+const MAX_VALIDATION_SPECS: usize = MAX_RULES_PER_SHEET * 16;
+
+fn push_unsupported(list: &mut Vec<String>, message: String) {
+    if list.len() < MAX_RULES_PER_SHEET {
+        list.push(message);
+    }
+}
+
 fn parse_conditional_formats(
     table_xml: &str,
     styles: &HashMap<String, CfStyle>,
@@ -230,19 +238,28 @@ fn parse_conditional_formats(
         }
         let mut found: Vec<(CfKind, CfStyle, String)> = Vec::new();
         for (a, _) in extract_tags_or_self_closing_with_attrs(block, "calcext:condition") {
+            if rules.cf.len() + found.len() >= MAX_RULES_PER_SHEET {
+                break;
+            }
             let value = attr(a, "calcext:value").unwrap_or_default();
             let style = attr(a, "calcext:apply-style-name")
                 .and_then(|n| styles.get(&n).copied())
                 .unwrap_or_default();
             match parse_condition(&value) {
                 Some(kind) => found.push((kind, style, String::new())),
-                None => rules.unsupported.push(format!(
-                    "조건부 서식 {}",
-                    value.split('(').next().unwrap_or("조건")
-                )),
+                None => push_unsupported(
+                    &mut rules.unsupported,
+                    format!(
+                        "조건부 서식 {}",
+                        bounded(value.split('(').next().unwrap_or("조건").to_string())
+                    ),
+                ),
             }
         }
         for (_, body) in extract_tags_with_attrs(block, "calcext:color-scale") {
+            if rules.cf.len() + found.len() >= MAX_RULES_PER_SHEET {
+                break;
+            }
             let stops: Vec<(CfValue, u32)> =
                 extract_tags_or_self_closing_with_attrs(body, "calcext:color-scale-entry")
                     .into_iter()
@@ -252,10 +269,13 @@ fn parse_conditional_formats(
             if (2..=3).contains(&stops.len()) {
                 found.push((CfKind::ColorScale(stops), CfStyle::default(), String::new()));
             } else {
-                rules.unsupported.push("조건부 서식 colorScale".to_string());
+                push_unsupported(&mut rules.unsupported, "조건부 서식 colorScale".to_string());
             }
         }
         for (a, body) in extract_tags_with_attrs(block, "calcext:data-bar") {
+            if rules.cf.len() + found.len() >= MAX_RULES_PER_SHEET {
+                break;
+            }
             let entries: Vec<CfValue> =
                 extract_tags_or_self_closing_with_attrs(body, "calcext:formatting-entry")
                     .into_iter()
@@ -275,10 +295,13 @@ fn parse_conditional_formats(
                     String::new(),
                 ));
             } else {
-                rules.unsupported.push("조건부 서식 dataBar".to_string());
+                push_unsupported(&mut rules.unsupported, "조건부 서식 dataBar".to_string());
             }
         }
         for (a, body) in extract_tags_with_attrs(block, "calcext:icon-set") {
+            if rules.cf.len() + found.len() >= MAX_RULES_PER_SHEET {
+                break;
+            }
             let name = attr(a, "calcext:icon-set-type").unwrap_or_default();
             let name = if name == "5Ratings" {
                 "5Rating".to_string()
@@ -303,7 +326,7 @@ fn parse_conditional_formats(
                         String::new(),
                     ))
                 }
-                _ => rules.unsupported.push("조건부 서식 iconSet".to_string()),
+                _ => push_unsupported(&mut rules.unsupported, "조건부 서식 iconSet".to_string()),
             }
         }
         for (kind, style, _) in found {
@@ -445,12 +468,18 @@ fn parse_validations(
         let Some((kind, cmp, a, b)) = parse_validation_condition(&condition)
             .or_else(|| parse_text_length_operator(&condition))
         else {
-            unsupported.push(format!(
-                "데이터 유효성 {}",
-                condition.split('(').next().unwrap_or("조건")
-            ));
+            push_unsupported(
+                unsupported,
+                format!(
+                    "데이터 유효성 {}",
+                    bounded(condition.split('(').next().unwrap_or("조건").to_string())
+                ),
+            );
             continue;
         };
+        if out.len() >= MAX_VALIDATION_SPECS {
+            break;
+        }
         let message = |tag: &str| {
             extract_tags_with_attrs(body, tag)
                 .into_iter()
@@ -659,8 +688,37 @@ impl OdsRuleReader {
         if !validated.is_empty() {
             fold_cell_validations(validated, &self.validations, &mut rules);
             rules.unsupported.append(&mut self.unsupported_validations);
+            rules.unsupported.truncate(MAX_RULES_PER_SHEET);
         }
         rules.cf.sort_by_key(|r| r.priority);
         rules
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostile_excess_ods_unsupported_and_validation_specs_are_bounded() {
+        let mut content = String::from(
+            "<office:document-content><office:body><office:spreadsheet><table:content-validations>",
+        );
+        for i in 0..400 {
+            content.push_str(&format!(
+                r#"<table:content-validation table:name="bad{i}" table:condition="unknownFunc(1)"/>"#
+            ));
+        }
+        content.push_str("</table:content-validations><table:table table:name=\"S1\">");
+        content.push_str("<calcext:conditional-formats><calcext:conditional-format calcext:target-range-address=\"S1.A1\">");
+        for _ in 0..400 {
+            content.push_str(r#"<calcext:condition calcext:value="unsupportedCond()"/>"#);
+        }
+        content.push_str("</calcext:conditional-format></calcext:conditional-formats></table:table></office:spreadsheet></office:body></office:document-content>");
+        let mut reader = OdsRuleReader::new(&content);
+        let mut validated = HashMap::new();
+        validated.insert("x".to_string(), BTreeSet::new());
+        let rules = reader.table_rules(&content, &validated);
+        assert!(rules.unsupported.len() <= MAX_RULES_PER_SHEET);
     }
 }

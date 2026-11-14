@@ -2,8 +2,12 @@ use crate::EasyOfficeError;
 use std::sync::OnceLock;
 
 mod compress;
+mod out_buf;
 #[cfg(test)]
 mod reference_inflate;
+use out_buf::OutBuf;
+#[cfg(test)]
+use out_buf::OUT_SLACK;
 
 const MAX_BITS: usize = 15;
 const FAST_LUT_BITS: u32 = 9;
@@ -463,148 +467,6 @@ fn read_dynamic_huffman_tables(
     ))
 }
 
-/// Extra bytes kept writable past the logical end so a match can be copied in 8-byte chunks
-/// (longest match 258 + 7 bytes of chunk overshoot).
-const OUT_SLACK: usize = MAX_MATCH_LEN + 8;
-const MIN_OUT_CAPACITY: usize = 4_096;
-/// Most output allocated before any byte is produced. The declared size is untrusted (a ZIP
-/// header can claim 512 MiB for a 100-byte stream), so a bigger buffer is only reached by growing
-/// with the output that really appears (PD-175).
-const MAX_INITIAL_OUT_CAPACITY: usize = 4 * 1024 * 1024;
-/// Growth factor while the declared size is still ahead of the buffer.
-const HINTED_GROWTH: usize = 4;
-/// Non-overlapping matches longer than this use `memmove` instead of the 8-byte chunk loop.
-const LONG_COPY_MIN: usize = 32;
-
-/// Flat output buffer: `buf[..pos]` is the produced data, the rest is writable scratch so the
-/// hot loop never goes through `Vec::push` capacity logic.
-struct OutBuf {
-    buf: Vec<u8>,
-    pos: usize,
-    /// Largest `buf.len()` worth allocating (the output budget plus slack).
-    hard_cap: usize,
-    /// Output size the container declares (0 when unknown); a growth target, never trusted.
-    expected_len: usize,
-}
-
-impl OutBuf {
-    /// `expected_len` is the output size the container declares (0 when unknown): an honest claim
-    /// up to [`MAX_INITIAL_OUT_CAPACITY`] is allocated at once, sparing the doubling growth, which
-    /// for a small picture copies the output about twice over. A larger or false claim is not
-    /// allocated up front: the buffer grows toward it as the output appears (see `grow`).
-    fn new(input_len: usize, max_output_bytes: usize, expected_len: usize) -> Self {
-        let hard_cap = max_output_bytes.saturating_add(OUT_SLACK);
-        let guess = if expected_len > 0 {
-            expected_len
-        } else {
-            input_len.saturating_mul(8).max(MIN_OUT_CAPACITY)
-        };
-        let initial = guess
-            .min(MAX_INITIAL_OUT_CAPACITY)
-            .saturating_add(OUT_SLACK)
-            .min(hard_cap);
-        Self {
-            buf: vec![0u8; initial],
-            pos: 0,
-            hard_cap,
-            expected_len,
-        }
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.pos
-    }
-
-    /// Guarantees `OUT_SLACK` writable bytes beyond `pos`.
-    #[inline]
-    fn ensure_slack(&mut self) {
-        if self.pos + OUT_SLACK > self.buf.len() {
-            self.grow(OUT_SLACK);
-        }
-    }
-
-    /// Guarantees `extra` writable bytes (plus slack) beyond `pos`.
-    fn reserve_extra(&mut self, extra: usize) {
-        if self.pos.saturating_add(extra).saturating_add(OUT_SLACK) > self.buf.len() {
-            self.grow(extra.saturating_add(OUT_SLACK));
-        }
-    }
-
-    #[cold]
-    fn grow(&mut self, need: usize) {
-        let len = self.buf.len();
-        let hint_end = self.expected_len.saturating_add(OUT_SLACK);
-        // Output that is still short of the declared size grows quickly toward it and stops there;
-        // otherwise (no claim, or a claim already passed) the buffer doubles.
-        let step = if hint_end > len {
-            len.saturating_mul(HINTED_GROWTH).min(hint_end)
-        } else {
-            len.saturating_mul(2)
-        };
-        let wanted = step.max(self.pos.saturating_add(need));
-        // The budget is checked before every write, so more than `hard_cap` is never required
-        // for output that passes the check (a single stored block may exceed it only by `need`).
-        let target = wanted.min(self.hard_cap.max(self.pos.saturating_add(need)));
-        self.buf.resize(target, 0);
-    }
-
-    /// Appends one byte, growing the buffer when it is full.
-    #[inline]
-    fn push_literal(&mut self, b: u8) {
-        if self.pos >= self.buf.len() {
-            self.grow(OUT_SLACK);
-        }
-        self.buf[self.pos] = b;
-        self.pos += 1;
-    }
-
-    /// Appends one byte; the caller has ensured slack.
-    #[inline]
-    fn push_unchecked_space(&mut self, b: u8) {
-        self.buf[self.pos] = b;
-        self.pos += 1;
-    }
-
-    fn extend_from_slice(&mut self, bytes: &[u8]) {
-        self.reserve_extra(bytes.len());
-        self.buf[self.pos..self.pos + bytes.len()].copy_from_slice(bytes);
-        self.pos += bytes.len();
-    }
-
-    /// Appends an LZ77 match (`distance` already validated against `pos`, slack ensured).
-    #[inline]
-    fn copy_match(&mut self, distance: usize, match_len: usize) {
-        let dst = self.pos;
-        let src = dst - distance;
-        if distance >= match_len && match_len > LONG_COPY_MIN {
-            self.buf.copy_within(src..src + match_len, dst);
-        } else if distance >= 8 {
-            // Forward 8-byte chunks are safe: each chunk's source lies entirely before its
-            // destination. Overshoot into the slack is overwritten by later output.
-            let mut copied = 0usize;
-            while copied < match_len {
-                let chunk: [u8; 8] = self.buf[src + copied..src + copied + 8].try_into().unwrap();
-                self.buf[dst + copied..dst + copied + 8].copy_from_slice(&chunk);
-                copied += 8;
-            }
-        } else if distance == 1 {
-            let b = self.buf[src];
-            self.buf[dst..dst + match_len].fill(b);
-        } else {
-            for i in 0..match_len {
-                self.buf[dst + i] = self.buf[src + i];
-            }
-        }
-        self.pos += match_len;
-    }
-
-    fn finish(mut self) -> Vec<u8> {
-        self.buf.truncate(self.pos);
-        self.buf
-    }
-}
-
 /// Bits a single symbol can consume in the fast loop: literal/length code (15) + length extra (5)
 /// + distance code (15) + distance extra (13).
 const FAST_SYMBOL_BITS: u32 = 48;
@@ -770,7 +632,7 @@ fn decode_huffman_block(
     Ok(())
 }
 
-fn inflate_raw_with_consumed(
+pub(crate) fn inflate_raw_with_consumed(
     input: &[u8],
     max_output_bytes: usize,
     expected_len: usize,

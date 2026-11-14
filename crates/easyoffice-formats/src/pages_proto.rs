@@ -8,6 +8,7 @@
 //! wire format (varint-prefixed ArchiveInfo, then one payload per MessageInfo.length).
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasher, Hasher};
 
 use crate::EasyOfficeError;
 
@@ -488,10 +489,61 @@ pub struct ArchiveObject {
     pub extra: Vec<(u32, Vec<u8>)>,
 }
 
+/// Seeded 64-bit hasher tuned for `u64` object identifiers while preventing offline hash collisions.
+#[derive(Debug, Clone, Copy)]
+pub struct FastU64Hasher {
+    state: u64,
+}
+
+impl Hasher for FastU64Hasher {
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        let x = (self.state ^ i).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        self.state = x ^ (x >> 32);
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        self.state = crate::bytes_hash::hash_bytes(bytes, self.state);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.state
+    }
+}
+
+/// Seeded `BuildHasher` for [`FastU64Hasher`].
+#[derive(Debug, Clone, Copy)]
+pub struct FastU64BuildHasher {
+    seed: u64,
+}
+
+impl Default for FastU64BuildHasher {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            seed: crate::bytes_hash::random_seed(),
+        }
+    }
+}
+
+impl BuildHasher for FastU64BuildHasher {
+    type Hasher = FastU64Hasher;
+
+    #[inline]
+    fn build_hasher(&self) -> Self::Hasher {
+        FastU64Hasher { state: self.seed }
+    }
+}
+
+pub type FastU64Map<V> = HashMap<u64, V, FastU64BuildHasher>;
+pub type FastU64Set = HashSet<u64, FastU64BuildHasher>;
+
 /// Objects keyed by identifier.
 #[derive(Debug, Default)]
 pub struct ObjectTable {
-    pub objects: HashMap<u64, ArchiveObject>,
+    pub objects: FastU64Map<ArchiveObject>,
 }
 
 impl ObjectTable {
@@ -508,7 +560,7 @@ impl ObjectTable {
         max_nodes: usize,
         refs_of: impl Fn(&ArchiveObject) -> Vec<u64>,
     ) -> Vec<u64> {
-        let mut seen: HashSet<u64> = HashSet::new();
+        let mut seen: FastU64Set = FastU64Set::default();
         let mut order = Vec::new();
         let mut frontier = vec![root];
         for _ in 0..=max_depth {
@@ -541,7 +593,7 @@ impl ObjectTable {
     ) -> Vec<u64> {
         let mut seen = [0u64; 16];
         let mut seen_len = 0usize;
-        let mut spill: Option<HashSet<u64>> = None;
+        let mut spill: Option<FastU64Set> = None;
         let mut out = Vec::new();
         let mut cur = Some(start);
         while let Some(id) = cur {
@@ -557,7 +609,7 @@ impl ObjectTable {
                 seen_len += 1;
                 false
             } else {
-                let mut set: HashSet<u64> = seen.into_iter().collect();
+                let mut set: FastU64Set = seen.into_iter().collect();
                 let dup = !set.insert(id);
                 spill = Some(set);
                 dup
@@ -572,5 +624,67 @@ impl ObjectTable {
             cur = parent_of(obj);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_u64_map_seeded_lookups_and_cycles_work() {
+        let mut a = FastU64Map::default();
+        let mut b = FastU64Map::default();
+        for i in 0..256u64 {
+            a.insert(i * 17 + 3, i);
+            b.insert(i * 17 + 3, i);
+        }
+        assert_eq!(a.len(), 256);
+        assert_eq!(a.get(&(10 * 17 + 3)), Some(&10));
+        assert_ne!(a.hasher().seed, b.hasher().seed);
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_pages_u64_map_release() {
+        const COUNT: u64 = 50_000;
+        const ROUNDS: u64 = 40;
+        let mut sip = HashMap::with_capacity(COUNT as usize);
+        let mut fast =
+            FastU64Map::with_capacity_and_hasher(COUNT as usize, FastU64BuildHasher::default());
+        for i in 0..COUNT {
+            let k = i.wrapping_mul(0x9E37_79B1_85EB_CA87);
+            sip.insert(k, i);
+            fast.insert(k, i);
+        }
+
+        let t0 = std::time::Instant::now();
+        let mut sum_sip = 0u64;
+        for r in 0..ROUNDS {
+            for i in 0..COUNT {
+                let k = std::hint::black_box(i.wrapping_mul(0x9E37_79B1_85EB_CA87));
+                sum_sip = sum_sip.wrapping_add(*sip.get(&k).unwrap_or(&r));
+            }
+        }
+        let dt_sip = t0.elapsed();
+
+        let t1 = std::time::Instant::now();
+        let mut sum_fast = 0u64;
+        for r in 0..ROUNDS {
+            for i in 0..COUNT {
+                let k = std::hint::black_box(i.wrapping_mul(0x9E37_79B1_85EB_CA87));
+                sum_fast = sum_fast.wrapping_add(*fast.get(&k).unwrap_or(&r));
+            }
+        }
+        let dt_fast = t1.elapsed();
+        assert_eq!(
+            std::hint::black_box(sum_sip),
+            std::hint::black_box(sum_fast)
+        );
+        println!(
+            "bench_pages_u64_map_release: SipHash {:.2} ms vs FastU64 {:.2} ms",
+            dt_sip.as_secs_f64() * 1000.0,
+            dt_fast.as_secs_f64() * 1000.0
+        );
     }
 }

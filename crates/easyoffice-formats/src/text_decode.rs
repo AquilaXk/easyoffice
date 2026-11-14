@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 
 use crate::cp949::decode_cp949_strict;
-use crate::utf16_swar::decode_utf16le_swar;
+use crate::utf16_swar::{decode_utf16be_swar, decode_utf16le_swar};
 use crate::EasyOfficeError;
 
 const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
@@ -23,11 +23,7 @@ fn decode_utf16be(bytes: &[u8], label: &str) -> Result<String, EasyOfficeError> 
     if bytes.len() % 2 != 0 {
         return Err(invalid(label, "UTF-16BE 바이트 길이가 짝수가 아닙니다."));
     }
-    let units = bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]));
-    char::decode_utf16(units)
-        .collect::<Result<String, _>>()
+    decode_utf16be_swar(bytes)
         .map_err(|_| invalid(label, "UTF-16BE에 짝이 없는 서러게이트가 있습니다."))
 }
 
@@ -151,5 +147,27 @@ mod tests {
     #[test]
     fn utf8_replacement_character_in_input_is_preserved() {
         assert_eq!(text("a\u{FFFD}b".as_bytes()).unwrap(), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn utf16be_swar_matches_char_decode_across_long_ascii_and_mixed_text() {
+        let long_ascii = "AsciiColumn_0123456789,".repeat(15);
+        let mixed = format!("{long_ascii}가나다라\u{1F680}끝{}", "Z".repeat(71));
+        let mut be_bytes = UTF16BE_BOM.to_vec();
+        for u in mixed.encode_utf16() {
+            be_bytes.extend_from_slice(&u.to_be_bytes());
+        }
+        assert_eq!(text(&be_bytes).unwrap(), mixed);
+
+        // Tail lengths 0..=14 bytes of pure ASCII around the 8-byte SWAR stride and 64-byte batch limit.
+        for n in 0..=140usize {
+            let s = "A".repeat(n);
+            let mut raw = Vec::with_capacity(n * 2);
+            for b in s.bytes() {
+                raw.push(0);
+                raw.push(b);
+            }
+            assert_eq!(decode_utf16be_swar(&raw).unwrap(), s);
+        }
     }
 }

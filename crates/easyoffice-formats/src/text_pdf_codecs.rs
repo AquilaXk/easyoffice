@@ -16,8 +16,8 @@ use pdf_object_graph::{
     is_opaque_binary_stream, parse_pdf_value_with_table, resolve_catalog_and_pages_target,
     resolve_int, resolve_stream_bounds, resolve_stream_length_hint, resolve_value,
     trailer_or_xref_has_spliced_encrypt, validate_pdf_trailer_json, IntObjIndex, PageNodeTarget,
-    PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
-    MAX_PDF_TOTAL_DECODED_BYTES,
+    PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_INDIRECT_OBJECTS,
+    MAX_PDF_PAGE_TREE_DEPTH, MAX_PDF_TOTAL_DECODED_BYTES,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -255,6 +255,11 @@ impl<'a> PdfTopLevelScan<'a> {
             ));
         }
         self.order_seq += 1;
+        if !self.objects.contains_key(&id) && self.objects.len() >= MAX_PDF_INDIRECT_OBJECTS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "PDF 간접 객체 수가 상한({MAX_PDF_INDIRECT_OBJECTS})을 초과했습니다."
+            )));
+        }
         self.objects.insert(
             id,
             PdfIndirectObject {
@@ -869,7 +874,7 @@ impl PdfSerializer {
             )?
         };
 
-        expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq);
+        expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq)?;
         let ordered_objs = ordered_by_sequence(&objects);
         let mut decoded = DecodeBudget::new();
         let to_unicode = build_tounicode_maps(bytes, &objects, &flate_cache, &mut decoded)?;

@@ -212,7 +212,9 @@ impl<'a> Ole2Reader<'a> {
                 "OLE2 디렉터리 엔트리 이름 길이 오류: {name_byte_len}"
             )));
         }
-        decode_utf16le(&self.dir_bytes[base..base + name_byte_len - 2])
+        let name = decode_utf16le(&self.dir_bytes[base..base + name_byte_len - 2])?;
+        Ole2ContainerCodec::validate_cfb_entry_name(&name)?;
+        Ok(name)
     }
 
     fn read_stream(

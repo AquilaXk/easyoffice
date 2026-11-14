@@ -6,6 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_document::{
@@ -384,30 +385,31 @@ struct DocxWalker {
     section_gutter: u32,
     first_gutter: u32,
     first_paper: Option<RichPaper>,
+    text_budget: DecodeBudget,
 }
 
 impl DocxWalker {
     /// Handles an element start; returns true when the whole subtree must be skipped.
-    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<bool, EasyOfficeError> {
         if self.frame_mode && name == "w:instrText" {
             self.in_instruction = true;
-            return false;
+            return Ok(false);
         }
         if SKIPPED_ELEMENTS.contains(&name) {
-            return true;
+            return Ok(true);
         }
         if self.frame_mode && name == DRAWING_ELEMENT {
             self.warn_once("머리말·꼬리말의 그림·도형은 가져오지 않았습니다.".to_string());
-            return true;
+            return Ok(true);
         }
         if UNSUPPORTED_OBJECT_ELEMENTS.contains(&name) {
             if !self.warnings.iter().any(|w| w == UNSUPPORTED_OBJECT_NOTE) {
                 self.warnings.push(UNSUPPORTED_OBJECT_NOTE.to_string());
             }
-            return true;
+            return Ok(true);
         }
         self.track_structure(name, attrs);
-        self.track_frame(name, attrs);
+        self.track_frame(name, attrs)?;
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val").as_deref());
@@ -417,9 +419,9 @@ impl DocxWalker {
         if self.in_run && self.in_rpr {
             apply_run_property(&mut self.fmt, name, attrs);
         } else if self.in_run && !self.in_ppr {
-            self.apply_inline_break(name, attrs);
+            self.apply_inline_break(name, attrs)?;
         }
-        false
+        Ok(false)
     }
 
     fn track_structure(&mut self, name: &str, attrs: &Attrs<'_>) {
@@ -477,7 +479,7 @@ impl DocxWalker {
     }
 
     /// Section header/footer references (body parts) and page fields (header/footer parts).
-    fn track_frame(&mut self, name: &str, attrs: &Attrs<'_>) {
+    fn track_frame(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
         match name {
             "w:sectPr" => {
                 self.section_margins = None;
@@ -512,7 +514,7 @@ impl DocxWalker {
                         .and_then(|i| field_of_instruction(&i));
                     if let Some(field) = field {
                         self.result_field = Some(field);
-                        self.push_field_run(field);
+                        self.push_field_run(field)?;
                     }
                 }
                 Some("end") => {
@@ -523,10 +525,12 @@ impl DocxWalker {
             },
             _ => {}
         }
+        Ok(())
     }
 
-    fn push_field_run(&mut self, field: RichField) {
+    fn push_field_run(&mut self, field: RichField) -> Result<(), EasyOfficeError> {
         if let Some(top) = self.paras.last_mut() {
+            self.text_budget.charge_run(0, "DOCX 페이지 필드")?;
             top.runs.push(RichRun {
                 bold: self.fmt.bold,
                 italic: self.fmt.italic,
@@ -541,6 +545,7 @@ impl DocxWalker {
                 ..RichRun::default()
             });
         }
+        Ok(())
     }
 
     fn apply_para_property(top: &mut ParaState, name: &str, val: Option<&str>) {
@@ -555,17 +560,23 @@ impl DocxWalker {
         }
     }
 
-    fn apply_inline_break(&mut self, name: &str, attrs: &Attrs<'_>) {
-        match name {
-            "w:tab" | "w:ptab" => self.cur_text.push('\t'),
-            "w:br" if attr(attrs, "w:type").as_deref() == Some("page") => self.note_page_break(),
-            "w:br" if attr(attrs, "w:type").as_deref() != Some("column") => {
-                self.cur_text.push('\n')
+    fn apply_inline_break(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
+        let ch = match name {
+            "w:tab" | "w:ptab" => Some('\t'),
+            "w:br" if attr(attrs, "w:type").as_deref() == Some("page") => {
+                self.note_page_break();
+                None
             }
-            "w:cr" => self.cur_text.push('\n'),
-            "w:noBreakHyphen" => self.cur_text.push('-'),
-            _ => {}
+            "w:br" if attr(attrs, "w:type").as_deref() != Some("column") => Some('\n'),
+            "w:cr" => Some('\n'),
+            "w:noBreakHyphen" => Some('-'),
+            _ => None,
+        };
+        if let Some(c) = ch {
+            self.text_budget.charge(1, "DOCX 제어 문자")?;
+            self.cur_text.push(c);
         }
+        Ok(())
     }
 
     /// A `w:br w:type="page"`: text after it starts the page, so a break before any text belongs to this paragraph
@@ -581,17 +592,20 @@ impl DocxWalker {
         }
     }
 
-    fn on_text(&mut self, text: &str) {
+    fn on_text(&mut self, text: &str) -> Result<(), EasyOfficeError> {
         if self.in_t {
+            self.text_budget.charge(text.len(), "DOCX 텍스트")?;
             self.cur_text.push_str(text);
         } else if self.in_instruction {
             if let Some(instruction) = self.field_instruction.as_mut() {
+                self.text_budget.charge(text.len(), "DOCX 필드")?;
                 instruction.push_str(text);
             }
         }
+        Ok(())
     }
 
-    fn on_end(&mut self, name: &str, resolver: &Resolver<'_>) {
+    fn on_end(&mut self, name: &str, resolver: &Resolver<'_>) -> Result<(), EasyOfficeError> {
         match name {
             "w:t" => self.in_t = false,
             "w:instrText" => self.in_instruction = false,
@@ -608,11 +622,15 @@ impl DocxWalker {
             "w:r" => {
                 if let Some((field, written)) = self.simple_field {
                     if !written {
-                        self.push_field_run(field);
+                        self.push_field_run(field)?;
                         self.simple_field = Some((field, true));
                     }
                 } else if self.result_field.is_none() {
                     if let Some(top) = self.paras.last_mut() {
+                        if !self.cur_text.is_empty() {
+                            let link_len = self.link.as_deref().map_or(0, str::len);
+                            self.text_budget.charge_run(link_len, "DOCX 런")?;
+                        }
                         push_linked_run(
                             &mut top.runs,
                             &self.cur_text,
@@ -627,19 +645,21 @@ impl DocxWalker {
                 self.in_t = false;
             }
             "w:hyperlink" => self.link = None,
-            "w:p" => self.finish_paragraph(resolver),
+            "w:p" => self.finish_paragraph(resolver)?,
             "w:tc" if self.tbl_depth == 1 => {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
                     self.cell_paras.pop();
                 }
                 let text = self.cell_paras.join("\n");
                 self.cell_paras.clear();
+                self.text_budget.charge_cell(text.len(), "DOCX 표 셀")?;
                 self.push_cell(text);
             }
             "w:tr" if self.tbl_depth == 1 => self.table.end_row(),
             "w:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
+                    self.text_budget.charge_block(0, "DOCX 표")?;
                     let (table, dropped) = std::mem::take(&mut self.table).finish();
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
@@ -647,6 +667,7 @@ impl DocxWalker {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn push_cell(&mut self, text: String) {
@@ -694,9 +715,9 @@ impl DocxWalker {
         }
     }
 
-    fn finish_paragraph(&mut self, resolver: &Resolver<'_>) {
+    fn finish_paragraph(&mut self, resolver: &Resolver<'_>) -> Result<(), EasyOfficeError> {
         let Some(mut p) = self.paras.pop() else {
-            return;
+            return Ok(());
         };
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
@@ -709,6 +730,7 @@ impl DocxWalker {
                 .iter()
                 .any(|r| r.field.is_some() || !r.text.trim().is_empty())
             {
+                self.text_budget.charge_block(0, "DOCX 문단")?;
                 let mut paragraph = resolver.finish(p);
                 paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
                 self.blocks.push(RichBlock::Paragraph(paragraph));
@@ -717,6 +739,7 @@ impl DocxWalker {
             self.pending_page_break |= (carried && !kept) || after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
         }
+        Ok(())
     }
 }
 
@@ -735,12 +758,12 @@ fn walk_part(
                 walker.on_drawing(&drawing, media)?;
             }
             XmlEvent::Start { name, ref attrs } => {
-                if walker.on_start(name, attrs) {
+                if walker.on_start(name, attrs)? {
                     reader.skip_subtree()?;
                 }
             }
-            XmlEvent::Text(text) => walker.on_text(&text),
-            XmlEvent::End(name) => walker.on_end(name, resolver),
+            XmlEvent::Text(text) => walker.on_text(&text)?,
+            XmlEvent::End(name) => walker.on_end(name, resolver)?,
         }
     }
     Ok(())
@@ -942,38 +965,5 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn docx_style_inheritance_resolves_based_on_and_outline_lvl_and_breaks_cycles() {
-        let styles_xml = r#"<w:styles>
-            <w:style w:type="paragraph" w:styleId="BaseH2">
-                <w:name w:val="Heading 2"/>
-            </w:style>
-            <w:style w:type="paragraph" w:styleId="CustomSub">
-                <w:name w:val="Custom Subheading"/>
-                <w:basedOn w:val="BaseH2"/>
-            </w:style>
-            <w:style w:type="paragraph" w:styleId="Outline3">
-                <w:name w:val="Section Title"/>
-                <w:pPr><w:outlineLvl w:val="2"/></w:pPr>
-            </w:style>
-            <w:style w:type="paragraph" w:styleId="CycleA">
-                <w:basedOn w:val="CycleB"/>
-            </w:style>
-            <w:style w:type="paragraph" w:styleId="CycleB">
-                <w:basedOn w:val="CycleA"/>
-            </w:style>
-        </w:styles>"#;
-        let styles = read_styles(styles_xml).expect("styles parse");
-        let numbering = Numbering::default();
-        let resolver = Resolver {
-            styles: &styles,
-            numbering: &numbering,
-        };
-        assert_eq!(resolver.resolve_style_chain("CustomSub"), (2, None));
-        assert_eq!(resolver.resolve_style_chain("Outline3"), (3, None));
-        assert_eq!(resolver.resolve_style_chain("CycleA"), (0, None));
-    }
-}
+#[path = "rich_read_ooxml/tests.rs"]
+mod tests;

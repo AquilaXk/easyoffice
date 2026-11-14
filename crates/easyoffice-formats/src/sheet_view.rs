@@ -145,6 +145,26 @@ fn collapsed_within(collapsed: &[(u32, u32)], levels: &[LevelRun], limit: u32) -
         && subtract_runs(collapsed, &plain_runs(levels)).is_empty()
 }
 
+/// Whether sorted `runs` completely covers `first..=last` (`O(log runs.len())` fast path on disjoint runs).
+fn runs_cover(sorted_runs: &[(u32, u32)], first: u32, last: u32) -> bool {
+    let idx = sorted_runs.partition_point(|&(s, _)| s <= first);
+    let Some(mut cur) = idx.checked_sub(1) else {
+        return false;
+    };
+    let mut covered_end = sorted_runs[cur].1;
+    while covered_end < last {
+        cur += 1;
+        let Some(&(s, e)) = sorted_runs.get(cur) else {
+            return false;
+        };
+        if s > covered_end.saturating_add(1) {
+            return false;
+        }
+        covered_end = covered_end.max(e);
+    }
+    true
+}
+
 impl Outline {
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty() && self.cols.is_empty()
@@ -199,11 +219,15 @@ impl Outline {
     /// that is folded as a whole, sorted. The inverse of [`Self::split_collapsed`].
     pub fn summary_marks(levels: &[LevelRun], collapsed: &[(u32, u32)], above: bool) -> Vec<u32> {
         let mut marks = Vec::new();
+        if collapsed.is_empty() {
+            return marks;
+        }
         for k in 1..=MAX_OUTLINE_LEVEL {
             for (first, last) in segments(levels, k) {
-                let folded = intersect_runs(collapsed, &[(first, last)]) == [(first, last)];
-                if let Some(row) = summary_of(first, last, above).filter(|_| folded) {
-                    marks.push(row);
+                if let Some(row) = summary_of(first, last, above) {
+                    if runs_cover(collapsed, first, last) {
+                        marks.push(row);
+                    }
                 }
             }
         }
@@ -315,5 +339,34 @@ mod tests {
         assert_eq!((runs.len(), total), (3, 5));
         push_level(&mut runs, &mut total, 5, (11, 12), 1);
         assert_eq!((runs.len(), total), (3, 5));
+    }
+
+    #[test]
+    fn summary_marks_large_outline_binary_search_parity_and_speed() {
+        let mut levels = Vec::with_capacity(20_000);
+        let mut collapsed = Vec::with_capacity(10_000);
+        for i in 0..20_000u32 {
+            let base = i * 4 + 1;
+            let lvl = if i % 2 == 0 { 1 } else { 2 };
+            levels.push((base, base + 2, lvl));
+            if i % 2 == 0 {
+                collapsed.push((base, base + 2));
+            }
+        }
+        let oracle: Vec<u32> = (0..10_000u32).map(|i| (i * 2) * 4 + 4).collect();
+
+        let start = std::time::Instant::now();
+        let actual = Outline::summary_marks(&levels, &collapsed, false);
+        let elapsed = start.elapsed();
+        assert_eq!(actual, oracle);
+        assert!(
+            elapsed < std::time::Duration::from_millis(100),
+            "summary_marks took too long on 20k outline runs: {elapsed:?}"
+        );
+        // Adjacent unmerged runs in `collapsed` must behave identically to `intersect_runs`.
+        assert_eq!(
+            Outline::summary_marks(&[(1, 4, 1)], &[(1, 2), (3, 4)], false),
+            vec![5]
+        );
     }
 }

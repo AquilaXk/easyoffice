@@ -652,6 +652,12 @@ fn parse_kind(attrs: &str, body: &str) -> Result<CfKind, String> {
     })
 }
 
+fn push_unsupported(rules: &mut SheetRules, message: String) {
+    if rules.unsupported.len() < MAX_RULES_PER_SHEET {
+        rules.unsupported.push(message);
+    }
+}
+
 fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut SheetRules) {
     for (block_attrs, block) in
         extract_tags_or_self_closing_with_attrs(sheet_xml, "conditionalFormatting")
@@ -679,16 +685,16 @@ fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut Sh
                     });
                 }
                 Ok(_) => {}
-                Err(name) => rules.unsupported.push(format!("조건부 서식 {name}")),
+                Err(name) => push_unsupported(rules, format!("조건부 서식 {}", bounded(name))),
             }
         }
     }
     // Icon sets outside the 2007 schema (stars, triangles, boxes, custom icons) live only here.
     let extended = sheet_xml.matches("<x14:cfRule").count();
-    for _ in 0..extended.saturating_sub(sheet_xml.matches("<x14:cfRule type=\"dataBar\"").count()) {
-        rules
-            .unsupported
-            .push("조건부 서식 확장 아이콘".to_string());
+    let count = extended.saturating_sub(sheet_xml.matches("<x14:cfRule type=\"dataBar\"").count());
+    let room = MAX_RULES_PER_SHEET.saturating_sub(rules.unsupported.len());
+    for _ in 0..count.min(room) {
+        push_unsupported(rules, "조건부 서식 확장 아이콘".to_string());
     }
 }
 
@@ -739,10 +745,12 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
         }
         let ty = attr(attrs, "type").unwrap_or_default();
         let Some(kind) = DvKind::from_name(&ty).filter(|k| k.file_kind() == *k) else {
-            rules.unsupported.push(format!(
-                "데이터 유효성 {}",
-                if ty.is_empty() { "none" } else { &ty }
-            ));
+            let label = if ty.is_empty() {
+                "none".to_string()
+            } else {
+                bounded(ty)
+            };
+            push_unsupported(rules, format!("데이터 유효성 {label}"));
             continue;
         };
         let ranges = parse_sqref(&attr(attrs, "sqref").unwrap_or_default());
@@ -756,8 +764,8 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
         let f1 = first_formula(body, "formula1");
         dv.a = if kind.is_list() {
             match f1.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-                Some(items) => items.replace("\"\"", "\""),
-                None => format!("={f1}"),
+                Some(items) => bounded(items.replace("\"\"", "\"")),
+                None => bounded(format!("={f1}")),
             }
         } else {
             f1
@@ -777,8 +785,10 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
         rules.dv.push(dv);
     }
     restore_kinds(sheet_xml, rules);
-    for _ in 0..sheet_xml.matches("<x14:dataValidation ").count() {
-        rules.unsupported.push("데이터 유효성 확장".to_string());
+    let ext_count = sheet_xml.matches("<x14:dataValidation ").count();
+    let room = MAX_RULES_PER_SHEET.saturating_sub(rules.unsupported.len());
+    for _ in 0..ext_count.min(room) {
+        push_unsupported(rules, "데이터 유효성 확장".to_string());
     }
 }
 
@@ -793,4 +803,32 @@ pub(crate) fn parse_worksheet_rules(sheet_xml: &str, dxf: &[CfStyle]) -> SheetRu
     }
     rules.cf.sort_by_key(|r| r.priority);
     rules
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostile_excess_unsupported_rules_are_bounded() {
+        let mut xml = String::from("<worksheet><conditionalFormatting sqref=\"A1\">");
+        for _ in 0..400 {
+            xml.push_str(r#"<cfRule type="unknownVendorRule" priority="1"/>"#);
+        }
+        xml.push_str("</conditionalFormatting>");
+        for _ in 0..400 {
+            xml.push_str("<x14:cfRule type=\"iconSet\"/>");
+        }
+        xml.push_str("<dataValidations>");
+        for _ in 0..400 {
+            xml.push_str(r#"<dataValidation type="customBad" sqref="A1"/>"#);
+        }
+        xml.push_str("</dataValidations>");
+        for _ in 0..400 {
+            xml.push_str("<x14:dataValidation sqref=\"A1\"/>");
+        }
+        xml.push_str("</worksheet>");
+        let rules = parse_worksheet_rules(&xml, &[]);
+        assert!(rules.unsupported.len() <= MAX_RULES_PER_SHEET);
+    }
 }

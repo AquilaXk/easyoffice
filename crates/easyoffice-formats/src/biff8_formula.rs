@@ -37,6 +37,10 @@ const COL_MASK: u16 = 0x3FFF;
 const MAX_STR_UNITS: usize = 255;
 /// Nesting of parentheses and calls the parser follows (it recurses).
 const MAX_DEPTH: usize = 64;
+/// Maximum byte length of formula source text or decoded text output.
+const MAX_FORMULA_TEXT_BYTES: usize = 64 * 1024;
+/// Maximum evaluation stack depth while decoding postfix `rgce` tokens.
+const MAX_DECODE_STACK: usize = 2_048;
 
 /// Binary operators from the lowest precedence to the highest: each row is one level, tokens are
 /// `(text, ptg)`; longer texts come first so `<=` is not read as `<`.
@@ -195,6 +199,11 @@ pub(crate) fn formula_text(rgce: &[u8]) -> Option<String> {
 
 /// The tokens of `expr` (a formula without its leading `=`).
 pub(crate) fn encode_rgce(expr: &str) -> Result<Vec<u8>, String> {
+    if expr.len() > MAX_FORMULA_TEXT_BYTES {
+        return Err(format!(
+            "수식 길이가 허용 한도({MAX_FORMULA_TEXT_BYTES}바이트)를 초과했습니다"
+        ));
+    }
     let mut parser = Parser {
         chars: expr.chars().collect(),
         pos: 0,
@@ -593,15 +602,28 @@ fn parse_cell(word: &str) -> Result<Cell, String> {
 /// The text of `rgce` (without `=`), or `None` for any token outside the set above or malformed
 /// tokens (the reader then uses the cached value).
 pub(crate) fn decode_rgce(rgce: &[u8]) -> Option<String> {
-    let mut stack: Vec<String> = Vec::new();
+    if rgce.len() > MAX_BIFF8_RECORD_DATA_LEN {
+        return None;
+    }
+    let mut stack: Vec<(String, usize)> = Vec::new();
+    let push_node = |stack: &mut Vec<(String, usize)>, text: String, depth: usize| -> Option<()> {
+        if depth > MAX_DEPTH
+            || text.len() > MAX_FORMULA_TEXT_BYTES
+            || stack.len() >= MAX_DECODE_STACK
+        {
+            return None;
+        }
+        stack.push((text, depth));
+        Some(())
+    };
     let mut at = 0usize;
     while at < rgce.len() {
         let ptg = rgce[at];
         at += 1;
         match ptg {
             0x03..=0x0E => {
-                let right = stack.pop()?;
-                let left = stack.pop()?;
+                let (right, rd) = stack.pop()?;
+                let (left, ld) = stack.pop()?;
                 let op = match ptg {
                     0x03 => "+",
                     0x04 => "-",
@@ -616,16 +638,30 @@ pub(crate) fn decode_rgce(rgce: &[u8]) -> Option<String> {
                     0x0D => ">",
                     _ => "<>",
                 };
-                stack.push(format!("{left}{op}{right}"));
+                if left
+                    .len()
+                    .saturating_add(op.len())
+                    .saturating_add(right.len())
+                    > MAX_FORMULA_TEXT_BYTES
+                {
+                    return None;
+                }
+                push_node(&mut stack, format!("{left}{op}{right}"), ld.max(rd))?;
             }
             PTG_UPLUS | PTG_UMINUS => {
-                let operand = stack.pop()?;
+                let (operand, d) = stack.pop()?;
                 let sign = if ptg == PTG_UMINUS { "-" } else { "+" };
-                stack.push(format!("{sign}{operand}"));
+                if operand.len().saturating_add(1) > MAX_FORMULA_TEXT_BYTES {
+                    return None;
+                }
+                push_node(&mut stack, format!("{sign}{operand}"), d.checked_add(1)?)?;
             }
             PTG_PAREN => {
-                let inner = stack.pop()?;
-                stack.push(format!("({inner})"));
+                let (inner, d) = stack.pop()?;
+                if inner.len().saturating_add(2) > MAX_FORMULA_TEXT_BYTES {
+                    return None;
+                }
+                push_node(&mut stack, format!("({inner})"), d.checked_add(1)?)?;
             }
             PTG_STR => {
                 let cch = usize::from(*rgce.get(at)?);
@@ -644,39 +680,47 @@ pub(crate) fn decode_rgce(rgce: &[u8]) -> Option<String> {
                     at += cch;
                     raw.iter().map(|b| char::from(*b)).collect()
                 };
-                stack.push(format!("\"{}\"", text.replace('"', "\"\"")));
+                push_node(&mut stack, format!("\"{}\"", text.replace('"', "\"\"")), 0)?;
             }
             PTG_BOOL => {
                 let value = *rgce.get(at)? != 0;
                 at += 1;
-                stack.push(if value { "TRUE" } else { "FALSE" }.to_string());
+                push_node(
+                    &mut stack,
+                    if value { "TRUE" } else { "FALSE" }.to_string(),
+                    0,
+                )?;
             }
             PTG_INT => {
                 let value = u16::from_le_bytes(rgce.get(at..at + 2)?.try_into().ok()?);
                 at += 2;
-                stack.push(value.to_string());
+                push_node(&mut stack, value.to_string(), 0)?;
             }
             PTG_NUM => {
                 let value = f64::from_le_bytes(rgce.get(at..at + 8)?.try_into().ok()?);
                 at += 8;
                 value.is_finite().then_some(())?;
-                stack.push(value.to_string());
+                push_node(&mut stack, value.to_string(), 0)?;
             }
             0x24 | 0x44 | 0x64 => {
                 let row = u16::from_le_bytes(rgce.get(at..at + 2)?.try_into().ok()?);
                 let col = u16::from_le_bytes(rgce.get(at + 2..at + 4)?.try_into().ok()?);
                 at += 4;
-                stack.push(cell_text(row, col));
+                push_node(&mut stack, cell_text(row, col), 0)?;
             }
             0x25 | 0x45 | 0x65 => {
                 let raw = rgce.get(at..at + 8)?;
                 at += 8;
                 let word = |i: usize| u16::from_le_bytes([raw[i], raw[i + 1]]);
-                stack.push(format!(
-                    "{}:{}",
-                    cell_text(word(0), word(4)),
-                    cell_text(word(2), word(6))
-                ));
+                push_node(
+                    &mut stack,
+                    format!(
+                        "{}:{}",
+                        cell_text(word(0), word(4)),
+                        cell_text(word(2), word(6))
+                    ),
+                    0,
+                )?;
             }
             PTG_FUNC | 0x21 | 0x61 => {
                 let index = u16::from_le_bytes(rgce.get(at..at + 2)?.try_into().ok()?);
@@ -697,13 +741,35 @@ pub(crate) fn decode_rgce(rgce: &[u8]) -> Option<String> {
             _ => return None,
         }
     }
-    (stack.len() == 1).then(|| stack.remove(0))
+    (stack.len() == 1).then(|| stack.remove(0).0)
 }
 
-fn call_text(stack: &mut Vec<String>, name: &str, count: usize) -> Option<()> {
+fn call_text(stack: &mut Vec<(String, usize)>, name: &str, count: usize) -> Option<()> {
     let at = stack.len().checked_sub(count)?;
-    let args = stack.split_off(at).join(",");
-    stack.push(format!("{name}({args})"));
+    let mut max_depth = 0usize;
+    let mut args_len = count.saturating_sub(1);
+    for (s, d) in &stack[at..] {
+        max_depth = max_depth.max(*d);
+        args_len = args_len.saturating_add(s.len());
+    }
+    let next_depth = if count == 0 {
+        0
+    } else {
+        max_depth.checked_add(1)?
+    };
+    if next_depth > MAX_DEPTH
+        || name.len().saturating_add(2).saturating_add(args_len) > MAX_FORMULA_TEXT_BYTES
+    {
+        return None;
+    }
+    let mut args = String::with_capacity(args_len);
+    for (idx, (s, _)) in stack.drain(at..).enumerate() {
+        if idx > 0 {
+            args.push(',');
+        }
+        args.push_str(&s);
+    }
+    stack.push((format!("{name}({args})"), next_depth));
     Some(())
 }
 
@@ -814,5 +880,25 @@ mod tests {
         assert!(encode_rgce(&deep).is_err());
         let unary = format!("{}1", "-".repeat(10_000));
         assert!(encode_rgce(&unary).is_err());
+    }
+
+    #[test]
+    fn hostile_decode_rgce_depth_over_64_and_oversized_formula_are_refused() {
+        // 65 nested parentheses in postfix rgce must fail closed (`None`).
+        let mut rgce_deep = vec![PTG_INT, 1, 0];
+        rgce_deep.extend(std::iter::repeat_n(PTG_PAREN, MAX_DEPTH + 1));
+        assert_eq!(decode_rgce(&rgce_deep), None);
+
+        // Oversized rgce exceeding BIFF8 record limit must fail closed (`None`).
+        let mut rgce_huge = Vec::with_capacity(MAX_BIFF8_RECORD_DATA_LEN + 64);
+        rgce_huge.extend_from_slice(&[PTG_INT, 1, 0]);
+        while rgce_huge.len() <= MAX_BIFF8_RECORD_DATA_LEN {
+            rgce_huge.extend_from_slice(&[PTG_INT, 1, 0, PTG_ADD]);
+        }
+        assert_eq!(decode_rgce(&rgce_huge), None);
+
+        // Oversized source formula string fails closed before building token buffer.
+        let huge_expr = "1+".repeat(40_000) + "1";
+        assert!(encode_rgce(&huge_expr).is_err());
     }
 }

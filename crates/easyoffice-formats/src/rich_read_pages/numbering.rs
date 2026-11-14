@@ -57,6 +57,7 @@ const ROMAN: [(usize, &str); 13] = [
     (1, "i"),
 ];
 const MAX_ROMAN: usize = 3999;
+const MAX_SYMBOL_REPEAT: usize = 64;
 const FULLWIDTH_ZERO: u32 = 0xFF10;
 
 fn roman(mut n: usize) -> String {
@@ -98,7 +99,7 @@ pub(super) fn note_label(format: u64, number: usize) -> String {
         settings::FORMAT_ROMAN if (1..=MAX_ROMAN).contains(&number) => roman(number),
         settings::FORMAT_SYMBOLIC if number >= 1 => {
             let k = number - 1;
-            SYMBOLS[k % SYMBOLS.len()].repeat(k / SYMBOLS.len() + 1)
+            SYMBOLS[k % SYMBOLS.len()].repeat((k / SYMBOLS.len() + 1).min(MAX_SYMBOL_REPEAT))
         }
         settings::FORMAT_JAPANESE_NUMERIC => number
             .to_string()
@@ -154,6 +155,18 @@ mod tests {
             "二十"
         );
         assert_eq!(note_label(99, 3), "3");
+    }
+
+    #[test]
+    fn note_label_symbolic_caps_repeat_at_64() {
+        let huge = note_label(settings::FORMAT_SYMBOLIC, usize::MAX);
+        assert_eq!(huge.chars().count(), 64);
+        assert_eq!(
+            note_label(settings::FORMAT_SYMBOLIC, 6 * 63 + 1)
+                .chars()
+                .count(),
+            64
+        );
     }
 
     #[test]

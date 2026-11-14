@@ -86,6 +86,12 @@ struct MdInline {
     buf: String,
     i: usize,
     no_more_single_tilde: bool,
+    last_caret: Option<Option<usize>>,
+    no_more_backtick: bool,
+    next_rbracket: Option<usize>,
+    no_more_rbracket: bool,
+    next_rparen: Option<usize>,
+    no_more_rparen: bool,
 }
 
 impl MdInline {
@@ -262,7 +268,7 @@ impl MdInline {
             }
             '^' => {
                 let active = self.fmt.script == RichScript::Superscript;
-                let can_open = !active && !is_ws(next) && self.chars[i + 1..].contains(&'^');
+                let can_open = !active && !is_ws(next) && self.has_closing_caret(i + 1);
                 let can_close = active && !is_ws(prev);
                 if can_open || can_close {
                     self.flush();
@@ -366,12 +372,59 @@ impl MdInline {
         self.i += 1;
     }
 
+    fn has_closing_caret(&mut self, from: usize) -> bool {
+        let last = *self.last_caret.get_or_insert_with(|| {
+            self.chars[from..]
+                .iter()
+                .rposition(|&x| x == '^')
+                .map(|p| from + p)
+        });
+        last.is_some_and(|idx| idx >= from)
+    }
+
+    fn find_next_char(
+        chars: &[char],
+        from: usize,
+        needle: char,
+        cached: &mut Option<usize>,
+        exhausted: &mut bool,
+    ) -> Option<usize> {
+        if *exhausted {
+            return None;
+        }
+        if let Some(pos) = *cached {
+            if pos >= from {
+                return Some(pos);
+            }
+        }
+        let found = chars[from..]
+            .iter()
+            .position(|&x| x == needle)
+            .map(|p| from + p);
+        match found {
+            Some(pos) => {
+                *cached = Some(pos);
+                Some(pos)
+            }
+            None => {
+                *exhausted = true;
+                None
+            }
+        }
+    }
+
     fn code_span(&mut self) {
         let i = self.i;
-        if let Some(end) = self.chars[i + 1..].iter().position(|&x| x == '`') {
+        let end = if self.no_more_backtick {
+            None
+        } else {
+            self.chars[i + 1..].iter().position(|&x| x == '`')
+        };
+        if let Some(end) = end {
             self.buf.extend(&self.chars[i + 1..i + 1 + end]);
             self.i += end + 2;
         } else {
+            self.no_more_backtick = true;
             self.buf.push('`');
             self.i += 1;
         }
@@ -395,13 +448,25 @@ impl MdInline {
     }
 
     /// Label range and the index after `)` for a link whose `[` is at `bracket`.
-    fn link_span(&self, bracket: usize) -> Option<(std::ops::Range<usize>, usize)> {
-        let close = bracket + 1 + self.chars[bracket + 1..].iter().position(|&x| x == ']')?;
+    fn link_span(&mut self, bracket: usize) -> Option<(std::ops::Range<usize>, usize)> {
+        let close = Self::find_next_char(
+            &self.chars,
+            bracket + 1,
+            ']',
+            &mut self.next_rbracket,
+            &mut self.no_more_rbracket,
+        )?;
         if self.chars.get(close + 1) != Some(&'(') {
             return None;
         }
-        let end = self.chars[close + 2..].iter().position(|&x| x == ')')?;
-        Some((bracket + 1..close, close + 2 + end + 1))
+        let end = Self::find_next_char(
+            &self.chars,
+            close + 2,
+            ')',
+            &mut self.next_rparen,
+            &mut self.no_more_rparen,
+        )?;
+        Some((bracket + 1..close, end + 1))
     }
 }
 
@@ -426,6 +491,12 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
         buf: String::new(),
         i: 0,
         no_more_single_tilde: false,
+        last_caret: None,
+        no_more_backtick: false,
+        next_rbracket: None,
+        no_more_rbracket: false,
+        next_rparen: None,
+        no_more_rparen: false,
     };
     while scanner.i < scanner.chars.len() {
         scanner.step();
@@ -780,5 +851,33 @@ mod tests {
         };
         assert_eq!(q3.left_indent_twips, Some(2160));
         assert_eq!(q3.plain_text(), "3단 인용");
+    }
+
+    #[test]
+    fn hostile_50k_repeated_inline_delimiters_stay_linear() {
+        let valid = parse_md_inline(
+            "[링크](https://a) ![그림](b) `코드` x^2^ H~2~O ^unclosed `unclosed [unclosed",
+        );
+        let joined: String = valid.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            joined,
+            "링크 그림 코드 x2 H2O ^unclosed `unclosed [unclosed"
+        );
+
+        let start = std::time::Instant::now();
+        for hostile in [
+            "[".repeat(50_000),
+            "[a](".repeat(12_500),
+            "^a ".repeat(16_667),
+            "`a ".repeat(16_667),
+        ] {
+            let runs = parse_md_inline(&hostile);
+            assert!(!runs.is_empty());
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "50k inline scan took too long: {elapsed:?}"
+        );
     }
 }

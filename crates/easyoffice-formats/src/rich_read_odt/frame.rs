@@ -187,14 +187,14 @@ pub(super) fn read_page_frame(
             }
             XmlEvent::Start { name, ref attrs } => {
                 if let Some((_, walker)) = open.as_mut() {
-                    if walker.on_start(name, attrs) {
+                    if walker.on_start(name, attrs)? {
                         reader.skip_subtree()?;
                     }
                 }
             }
             XmlEvent::Text(text) => {
                 if let Some((_, walker)) = open.as_mut() {
-                    walker.push_inline(&text);
+                    walker.push_inline(&text)?;
                 }
             }
             XmlEvent::End(name @ ("style:header" | "style:footer")) if open.is_some() => {
@@ -232,7 +232,7 @@ pub(super) fn read_page_frame(
             }
             XmlEvent::End(name) => {
                 if let Some((_, walker)) = open.as_mut() {
-                    walker.on_end(name);
+                    walker.on_end(name)?;
                 }
             }
         }

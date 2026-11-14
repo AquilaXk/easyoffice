@@ -9,7 +9,10 @@ use super::numbering::note_label;
 use super::{reference, AttrTable, Flow, Reader};
 use crate::pages_proto::Message;
 use crate::pages_schema::{column, hyperlink, settings, storage, style, ty};
-use crate::RichListNumber;
+use crate::{EasyOfficeError, RichListNumber};
+
+const MAX_MARK_ENTRIES: usize = 50_000;
+const MAX_COMMENTS: usize = 50_000;
 
 /// Warning kinds, one per mark family (reported as `kind N개`).
 const UNSAFE_LINK: &str = "허용되지 않는 형식의 하이퍼링크 주소(글자만 가져옴)";
@@ -27,22 +30,30 @@ const UNKNOWN_LIST_FORMAT: &str = "알 수 없는 목록 번호 형식(1. 형식
 const MULTI_COLUMN: &str = "다단 문단 구간(단 나누기 없이 한 단으로 가져옴)";
 
 /// Entries `(character index, object id)` of an object attribute table that point at an object.
-/// Malformed tables and entries are ignored: the marks only feed warnings.
-fn table_objects(st: &Message<'_>, field: u32) -> Vec<(u64, u64)> {
+/// Malformed tables and entries are ignored, while entry caps fail closed.
+fn table_objects(st: &Message<'_>, field: u32) -> Result<Vec<(u64, u64)>, EasyOfficeError> {
     let Some(table) = st.sub(field).ok().flatten() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    table
-        .subs(storage::TABLE_ENTRIES)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|e| {
-            Some((
-                e.varint(storage::ENTRY_INDEX)?,
-                reference(e, storage::ENTRY_OBJECT)?,
-            ))
-        })
-        .collect()
+    let mut out = Vec::new();
+    let res = table.for_each_sub(storage::TABLE_ENTRIES, |e| {
+        if out.len() >= MAX_MARK_ENTRIES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages 표식 테이블 항목 수 한도 초과".to_string(),
+            ));
+        }
+        if let (Some(idx), Some(obj)) = (
+            e.varint(storage::ENTRY_INDEX),
+            reference(&e, storage::ENTRY_OBJECT),
+        ) {
+            out.push((idx, obj));
+        }
+        Ok(())
+    });
+    if let Err(err @ EasyOfficeError::ResourceBudgetExceeded(_)) = res {
+        return Err(err);
+    }
+    Ok(out)
 }
 
 const fn is_comment_anchor(type_id: u32) -> bool {
@@ -68,21 +79,28 @@ impl Reader<'_> {
     /// Footnote marks of a storage in text order with the number shown at each. Older files keep
     /// them in one table and newer ones in another; entries are told apart from hyperlinks and
     /// other fields by the type of the object they point at.
-    pub(super) fn footnote_marks(&self, st: &Message<'_>) -> Vec<FootnoteMark> {
-        let mut marks: Vec<(u64, u64)> = [storage::FOOTNOTE_TABLE, storage::FOOTNOTE_TABLE_V2]
-            .into_iter()
-            .flat_map(|field| table_objects(st, field))
-            .filter(|(_, id)| {
-                self.objects
-                    .get(*id)
-                    .is_some_and(|o| is_footnote(o.type_id))
-            })
-            .collect();
+    pub(super) fn footnote_marks(
+        &self,
+        st: &Message<'_>,
+    ) -> Result<Vec<FootnoteMark>, EasyOfficeError> {
+        let mut marks: Vec<(u64, u64)> = Vec::new();
+        for field in [storage::FOOTNOTE_TABLE, storage::FOOTNOTE_TABLE_V2] {
+            for (idx, id) in table_objects(st, field)? {
+                if self.objects.get(id).is_some_and(|o| is_footnote(o.type_id)) {
+                    if marks.len() >= MAX_MARK_ENTRIES {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "Pages 각주 표식 수 한도 초과".to_string(),
+                        ));
+                    }
+                    marks.push((idx, id));
+                }
+            }
+        }
         marks.sort_unstable_by_key(|(i, _)| *i);
         marks.dedup_by_key(|(i, _)| *i);
         let restart_at_sections = self.settings.notes.numbering == settings::NUMBERING_PER_SECTION;
         let mut sections: Vec<u64> = if restart_at_sections {
-            table_objects(st, storage::SECTION_TABLE)
+            table_objects(st, storage::SECTION_TABLE)?
                 .into_iter()
                 .map(|(i, _)| i)
                 .collect()
@@ -101,7 +119,7 @@ impl Reader<'_> {
             number += 1;
             out.push(FootnoteMark { index, id, number });
         }
-        out
+        Ok(out)
     }
 
     /// Text shown at a footnote mark and in front of its note.
@@ -112,23 +130,27 @@ impl Reader<'_> {
     /// Hyperlink run table of a storage: the value in effect at a character is the hyperlink
     /// object there, `None` where an entry ends the link. Only addresses of a known safe kind are
     /// kept; the others are counted.
-    pub(super) fn link_table(&mut self, st: &Message<'_>) -> AttrTable {
+    pub(super) fn link_table(&mut self, st: &Message<'_>) -> Result<AttrTable, EasyOfficeError> {
         let mut best: Vec<(u64, Option<u64>)> = Vec::new();
         for field in [storage::SMARTFIELD_TABLE, storage::LANGUAGE_OR_FIELD_TABLE] {
             let Some(table) = st.sub(field).ok().flatten() else {
                 continue;
             };
-            let entries: Vec<(u64, Option<u64>)> = table
-                .subs(storage::TABLE_ENTRIES)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|e| {
-                    Some((
-                        e.varint(storage::ENTRY_INDEX)?,
-                        reference(e, storage::ENTRY_OBJECT),
-                    ))
-                })
-                .collect();
+            let mut entries: Vec<(u64, Option<u64>)> = Vec::new();
+            let res = table.for_each_sub(storage::TABLE_ENTRIES, |e| {
+                if entries.len() >= MAX_MARK_ENTRIES {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 하이퍼링크 표 항목 수 한도 초과".to_string(),
+                    ));
+                }
+                if let Some(index) = e.varint(storage::ENTRY_INDEX) {
+                    entries.push((index, reference(&e, storage::ENTRY_OBJECT)));
+                }
+                Ok(())
+            });
+            if let Err(err @ EasyOfficeError::ResourceBudgetExceeded(_)) = res {
+                return Err(err);
+            }
             let has_link = entries.iter().any(|(_, id)| {
                 id.is_some_and(|id| {
                     self.objects
@@ -161,7 +183,7 @@ impl Reader<'_> {
             }
         }
         self.skip_many(UNSAFE_LINK, rejected);
-        AttrTable::from_entries(entries)
+        Ok(AttrTable::from_entries(entries))
     }
 
     /// Target of a hyperlink object when it is a plain web, mail, phone or ftp address.
@@ -180,16 +202,27 @@ impl Reader<'_> {
     }
 
     /// Comment texts of the main flow in mark order; unreadable ones are counted.
-    pub(super) fn comment_texts(&mut self, st: &Message<'_>) -> Vec<String> {
-        let mut found: Vec<(u64, u64)> = storage::MARK_TABLES
-            .into_iter()
-            .flat_map(|table| table_objects(st, table))
-            .filter(|(_, id)| {
-                self.objects
-                    .get(*id)
+    pub(super) fn comment_texts(
+        &mut self,
+        st: &Message<'_>,
+    ) -> Result<Vec<String>, EasyOfficeError> {
+        let mut found: Vec<(u64, u64)> = Vec::new();
+        for table in storage::MARK_TABLES {
+            for (idx, id) in table_objects(st, table)? {
+                if self
+                    .objects
+                    .get(id)
                     .is_some_and(|o| is_comment_anchor(o.type_id))
-            })
-            .collect();
+                {
+                    if found.len() >= MAX_COMMENTS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "Pages 댓글 수 한도 초과".to_string(),
+                        ));
+                    }
+                    found.push((idx, id));
+                }
+            }
+        }
         found.sort_unstable_by_key(|(i, _)| *i);
         found.dedup_by_key(|(i, _)| *i);
         let mut out = Vec::new();
@@ -207,12 +240,16 @@ impl Reader<'_> {
                 .map(|t| t.trim().to_string())
                 .filter(|t| !t.is_empty());
             match text {
-                Some(t) => out.push(t),
+                Some(t) => {
+                    self.text_budget
+                        .charge_block(t.len(), "Pages 댓글 텍스트")?;
+                    out.push(t);
+                }
                 None => unreadable += 1,
             }
         }
         self.skip_many(UNREADABLE_COMMENT, unreadable);
-        out
+        Ok(out)
     }
 
     fn mark_kind(table: u32, type_id: u32) -> Option<String> {
@@ -233,9 +270,13 @@ impl Reader<'_> {
 
     /// Counts the marks of one storage that are not imported. Footnote marks of nested text are
     /// counted too, since only the main flow numbers and lists footnotes.
-    pub(super) fn note_marks(&mut self, st: &Message<'_>, flow: Flow) {
+    pub(super) fn note_marks(
+        &mut self,
+        st: &Message<'_>,
+        flow: Flow,
+    ) -> Result<(), EasyOfficeError> {
         for table in storage::MARK_TABLES {
-            for (_, id) in table_objects(st, table) {
+            for (_, id) in table_objects(st, table)? {
                 let Some(type_id) = self.objects.get(id).map(|o| o.type_id) else {
                     continue;
                 };
@@ -252,6 +293,7 @@ impl Reader<'_> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Columns of a column style, following its parent chain to the first style that sets them.
@@ -291,12 +333,13 @@ impl Reader<'_> {
     }
 
     /// Counts paragraph ranges of the body that are set in more than one column.
-    pub(super) fn note_columns(&mut self, st: &Message<'_>) {
-        let multi = table_objects(st, storage::LAYOUT_STYLE_TABLE)
+    pub(super) fn note_columns(&mut self, st: &Message<'_>) -> Result<(), EasyOfficeError> {
+        let multi = table_objects(st, storage::LAYOUT_STYLE_TABLE)?
             .into_iter()
             .filter(|(_, id)| self.column_count(*id) > 1)
             .count();
         self.skip_many(MULTI_COLUMN, multi);
+        Ok(())
     }
 }
 
@@ -322,5 +365,116 @@ impl Reader<'_> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decode_budget::DecodeBudget;
+    use crate::pages_proto::{ArchiveObject, ObjectTable};
+    use crate::pages_table::TableBudget;
+    use crate::rich_read_pages::numbering::DocumentSettings;
+    use crate::rich_read_pages_image::PageImages;
+    use std::collections::{BTreeMap, HashMap};
+
+    fn varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn f_varint(num: u32, v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        varint(u64::from(num) << 3, &mut out);
+        varint(v, &mut out);
+        out
+    }
+
+    fn f_bytes(num: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        varint((u64::from(num) << 3) | 2, &mut out);
+        varint(bytes.len() as u64, &mut out);
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    fn f_ref(num: u32, id: u64) -> Vec<u8> {
+        f_bytes(num, &f_varint(1, id))
+    }
+
+    #[test]
+    fn table_objects_rejects_entries_beyond_cap() {
+        let entry = [
+            f_varint(storage::ENTRY_INDEX, 0),
+            f_ref(storage::ENTRY_OBJECT, 10),
+        ]
+        .concat();
+        let packed_entry = f_bytes(storage::TABLE_ENTRIES, &entry);
+        let mut table_bytes = Vec::with_capacity(packed_entry.len() * (MAX_MARK_ENTRIES + 1));
+        for _ in 0..=MAX_MARK_ENTRIES {
+            table_bytes.extend_from_slice(&packed_entry);
+        }
+        let st_bytes = f_bytes(storage::FOOTNOTE_TABLE, &table_bytes);
+        let msg = Message::parse(&st_bytes).unwrap();
+        assert!(matches!(
+            table_objects(&msg, storage::FOOTNOTE_TABLE),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
+    }
+
+    #[test]
+    fn comment_texts_charge_decode_budget_and_fail_closed() {
+        let mut objects = ObjectTable::default();
+        objects.objects.insert(
+            1,
+            ArchiveObject {
+                type_id: ty::COMMENT_TEXT,
+                payload: f_bytes(1, &"C".repeat(16 * 1024).into_bytes()),
+                extra: Vec::new(),
+            },
+        );
+        objects.objects.insert(
+            2,
+            ArchiveObject {
+                type_id: ty::COMMENT_FIELD,
+                payload: f_ref(1, 1),
+                extra: Vec::new(),
+            },
+        );
+        let mut table_bytes = Vec::new();
+        for i in 0..10u64 {
+            let entry = [
+                f_varint(storage::ENTRY_INDEX, i),
+                f_ref(storage::ENTRY_OBJECT, 2),
+            ]
+            .concat();
+            table_bytes.extend_from_slice(&f_bytes(storage::TABLE_ENTRIES, &entry));
+        }
+        let st_bytes = f_bytes(storage::MARK_TABLES[0], &table_bytes);
+        let st_msg = Message::parse(&st_bytes).unwrap();
+        let data_files = HashMap::new();
+        let mut reader = Reader {
+            objects: &objects,
+            skipped: BTreeMap::new(),
+            paragraphs: 0,
+            runs: 0,
+            tables: TableBudget::default(),
+            fmt_cache: crate::pages_proto::FastU64Map::default(),
+            images: PageImages::new(&objects, &data_files),
+            quiet: false,
+            text_budget: DecodeBudget::with_limit(64 * 1024),
+            settings: DocumentSettings::default(),
+        };
+        assert!(matches!(
+            reader.comment_texts(&st_msg),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
     }
 }

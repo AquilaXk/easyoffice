@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 mod frame;
 
+use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::section_xml;
 use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
@@ -418,6 +419,7 @@ struct SectionWalker {
     dropped_merges: usize,
     cell_paras: Vec<String>,
     budget: ImageBudget,
+    text_budget: DecodeBudget,
     /// Address of the open hyperlink field (`hp:fieldBegin type="HYPERLINK"` to `hp:fieldEnd`).
     link: Option<String>,
     /// The header and footer of the page (the first `BOTH` control of each kind) and what was left out.
@@ -525,6 +527,7 @@ impl SectionWalker {
             warn("표 안의 그림은 가져오지 않았습니다.".to_string());
             return Ok(());
         }
+        self.budget.charge(entry.data.len())?;
         let mut image = match RichImage::new(entry.data.clone(), fields.alt.as_str()) {
             Ok(image) => image,
             Err(err) => {
@@ -535,7 +538,6 @@ impl SectionWalker {
                 return Ok(());
             }
         };
-        self.budget.charge(entry.data.len())?;
         if let Some((w, h)) = fields.size {
             // An out-of-range size keeps the default derived from the pixels.
             let _ = image.set_display_emu(w, h);
@@ -554,7 +556,7 @@ impl SectionWalker {
         attrs: &Attrs<'_>,
         header: &Header,
         blocks: &mut Vec<RichBlock>,
-    ) {
+    ) -> Result<(), EasyOfficeError> {
         match name {
             "hp:p" => self.paras.push(ParaState {
                 runs: Vec::new(),
@@ -567,13 +569,21 @@ impl SectionWalker {
                 text: String::new(),
             }),
             "hp:t" => self.t_depth += 1,
-            "hp:tab" if self.t_depth > 0 => push_text(&mut self.runs, "\t"),
-            "hp:lineBreak" if self.t_depth > 0 => push_text(&mut self.runs, "\n"),
-            "hp:nbSpace" | "hp:fwSpace" if self.t_depth > 0 => push_text(&mut self.runs, " "),
-            "hp:hyphen" if self.t_depth > 0 => push_text(&mut self.runs, "-"),
+            "hp:tab" if self.t_depth > 0 => {
+                push_text(&mut self.runs, "\t", &mut self.text_budget)?;
+            }
+            "hp:lineBreak" if self.t_depth > 0 => {
+                push_text(&mut self.runs, "\n", &mut self.text_budget)?;
+            }
+            "hp:nbSpace" | "hp:fwSpace" if self.t_depth > 0 => {
+                push_text(&mut self.runs, " ", &mut self.text_budget)?;
+            }
+            "hp:hyphen" if self.t_depth > 0 => {
+                push_text(&mut self.runs, "-", &mut self.text_budget)?;
+            }
             "hp:tbl" => {
                 if self.tbl_depth == 0 {
-                    self.flush_text_before_table(header, blocks);
+                    self.flush_text_before_table(header, blocks)?;
                 }
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
@@ -601,24 +611,31 @@ impl SectionWalker {
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn on_text(&mut self, text: &str) {
+    fn on_text(&mut self, text: &str) -> Result<(), EasyOfficeError> {
         if self.t_depth > 0 {
-            push_text(&mut self.runs, text);
+            push_text(&mut self.runs, text, &mut self.text_budget)?;
         }
+        Ok(())
     }
 
-    fn on_end(&mut self, name: &str, header: &Header, blocks: &mut Vec<RichBlock>) {
+    fn on_end(
+        &mut self,
+        name: &str,
+        header: &Header,
+        blocks: &mut Vec<RichBlock>,
+    ) -> Result<(), EasyOfficeError> {
         match name {
             "hp:t" => self.t_depth = self.t_depth.saturating_sub(1),
             "hp:run" => {
-                self.flush_run(header);
+                self.flush_run(header)?;
                 self.runs.pop();
             }
             "hp:p" => {
                 self.link = None;
-                self.finish_paragraph(header, blocks);
+                self.finish_paragraph(header, blocks)?;
             }
             "hp:tc" if self.tbl_depth == 1 => {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
@@ -627,12 +644,14 @@ impl SectionWalker {
                 let (row, col) = self.cell_addr.unwrap_or((self.tr_index, self.next_col));
                 let (row_span, col_span) = self.cell_span;
                 self.next_col = col.saturating_add(col_span);
+                let text = self.cell_paras.join("\n");
+                self.text_budget.charge_cell(text.len(), "HWPX 표 셀")?;
                 self.placed.push(PlacedCell {
                     row,
                     col,
                     row_span,
                     col_span,
-                    text: self.cell_paras.join("\n"),
+                    text,
                 });
                 self.cell_paras.clear();
             }
@@ -640,6 +659,7 @@ impl SectionWalker {
             "hp:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.placed.is_empty() {
+                    self.text_budget.charge_block(0, "HWPX 표")?;
                     let (table, dropped) = table_from_placed(std::mem::take(&mut self.placed));
                     self.dropped_merges += dropped;
                     blocks.push(RichBlock::Table(table));
@@ -647,21 +667,27 @@ impl SectionWalker {
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Moves the text of the open run into the paragraph, as a run of the open hyperlink if there is one.
-    fn flush_run(&mut self, header: &Header) {
+    fn flush_run(&mut self, header: &Header) -> Result<(), EasyOfficeError> {
         let (Some(run), Some(top)) = (self.runs.last_mut(), self.paras.last_mut()) else {
-            return;
+            return Ok(());
         };
         let fmt = header.chars.get(&run.char_pr).cloned().unwrap_or_default();
         let text = std::mem::take(&mut run.text);
+        if !text.is_empty() {
+            let link_len = self.link.as_deref().map_or(0, str::len);
+            self.text_budget.charge_run(link_len, "HWPX 런")?;
+        }
         push_linked_run(&mut top.runs, &text, &fmt, self.link.as_deref());
+        Ok(())
     }
 
     /// A `hp:ctrl` holds field marks: a hyperlink field starts a link, its end mark closes it. Text before
     /// the mark in the same run stays outside the link. Every other control is ignored.
-    fn on_ctrl(&mut self, events: &[XmlEvent<'_>], header: &Header) {
+    fn on_ctrl(&mut self, events: &[XmlEvent<'_>], header: &Header) -> Result<(), EasyOfficeError> {
         let (mut begin, mut in_command, mut command) = (false, false, String::new());
         for event in events {
             match event {
@@ -669,14 +695,14 @@ impl SectionWalker {
                     name: "hp:fieldBegin",
                     attrs,
                 } if attr(attrs, "type").as_deref() == Some("HYPERLINK") => {
-                    self.flush_run(header);
+                    self.flush_run(header)?;
                     begin = true;
                 }
                 XmlEvent::Start {
                     name: "hp:fieldEnd",
                     ..
                 } => {
-                    self.flush_run(header);
+                    self.flush_run(header)?;
                     self.link = None;
                 }
                 XmlEvent::Start {
@@ -693,28 +719,37 @@ impl SectionWalker {
         if begin {
             self.link = link_from_command(&command);
         }
+        Ok(())
     }
 
-    fn finish_paragraph(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
+    fn finish_paragraph(
+        &mut self,
+        header: &Header,
+        blocks: &mut Vec<RichBlock>,
+    ) -> Result<(), EasyOfficeError> {
         let Some(p) = self.paras.pop() else {
-            return;
+            return Ok(());
         };
         if self.tbl_depth > 0 {
             self.cell_paras
                 .push(p.runs.iter().map(|r| r.text.as_str()).collect());
-            return;
+            return Ok(());
         }
-        push_paragraph_blocks(header, p, blocks);
+        push_paragraph_blocks(header, p, blocks, &mut self.text_budget)
     }
 
     /// A table is written inside the paragraph that holds it, but the paragraph is only complete
     /// at its end tag, after the table. The text (and pictures) before the table become their
     /// own paragraph now, so the table block follows them; what comes after the table is read
     /// as a paragraph of its own.
-    fn flush_text_before_table(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
-        self.flush_run(header);
+    fn flush_text_before_table(
+        &mut self,
+        header: &Header,
+        blocks: &mut Vec<RichBlock>,
+    ) -> Result<(), EasyOfficeError> {
+        self.flush_run(header)?;
         let Some(top) = self.paras.last_mut() else {
-            return;
+            return Ok(());
         };
         let before = ParaState {
             runs: std::mem::take(&mut top.runs),
@@ -722,20 +757,27 @@ impl SectionWalker {
             style: top.style.clone(),
             images: std::mem::take(&mut top.images),
         };
-        push_paragraph_blocks(header, before, blocks);
+        push_paragraph_blocks(header, before, blocks, &mut self.text_budget)
     }
 }
 
 /// The paragraph block (when it has text) and its pictures, in that order.
-fn push_paragraph_blocks(header: &Header, mut p: ParaState, blocks: &mut Vec<RichBlock>) {
+fn push_paragraph_blocks(
+    header: &Header,
+    mut p: ParaState,
+    blocks: &mut Vec<RichBlock>,
+    text_budget: &mut DecodeBudget,
+) -> Result<(), EasyOfficeError> {
     let images = std::mem::take(&mut p.images);
     if p.runs
         .iter()
         .any(|r| r.field.is_some() || !r.text.trim().is_empty())
     {
+        text_budget.charge_block(0, "HWPX 문단")?;
         blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
     }
     blocks.extend(images.into_iter().map(RichBlock::Image));
+    Ok(())
 }
 
 fn read_section(
@@ -757,8 +799,8 @@ fn read_section(
                 name: "hp:ctrl", ..
             } => {
                 let control = reader.collect_subtree(event)?;
-                if !walker.on_frame_control(&control, header) {
-                    walker.on_ctrl(&control, header);
+                if !walker.on_frame_control(&control, header)? {
+                    walker.on_ctrl(&control, header)?;
                 }
             }
             XmlEvent::Start {
@@ -777,10 +819,10 @@ fn read_section(
                     reader.skip_subtree()?;
                     continue;
                 }
-                walker.on_start(name, attrs, header, blocks);
+                walker.on_start(name, attrs, header, blocks)?;
             }
-            XmlEvent::Text(text) => walker.on_text(&text),
-            XmlEvent::End(name) => walker.on_end(name, header, blocks),
+            XmlEvent::Text(text) => walker.on_text(&text)?,
+            XmlEvent::End(name) => walker.on_end(name, header, blocks)?,
         }
     }
     Ok(())
@@ -834,10 +876,16 @@ fn finish_frame(walker: &mut SectionWalker) -> RichPageFrame {
     frame
 }
 
-fn push_text(runs: &mut [RunState], text: &str) {
+fn push_text(
+    runs: &mut [RunState],
+    text: &str,
+    budget: &mut DecodeBudget,
+) -> Result<(), EasyOfficeError> {
     if let Some(run) = runs.last_mut() {
+        budget.charge(text.len(), "HWPX 텍스트")?;
         run.text.push_str(text);
     }
+    Ok(())
 }
 
 /// Decodes every `Contents/section*.xml` of a HWPX/HWTX package in order.
@@ -922,22 +970,5 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
 }
 
 #[cfg(test)]
-mod link_command_tests {
-    use super::link_from_command;
-
-    #[test]
-    fn a_hyperlink_command_is_read_in_the_three_known_forms() {
-        for (command, expected) in [
-            ("https://a.b/c?d=1;e=2", Some("https://a.b/c?d=1;e=2")),
-            ("HYPERLINK \"https://a.b/x\"", Some("https://a.b/x")),
-            ("http\\://a.b/x;1;0;0;", Some("http://a.b/x")),
-            ("mailto\\:me@a.b;1;0;0;", Some("mailto:me@a.b")),
-            ("javascript:alert(1)", None),
-            ("HYPERLINK \"file:///etc/passwd\"", None),
-            ("javascript\\:alert(1);1;0;0;", None),
-            ("", None),
-        ] {
-            assert_eq!(link_from_command(command).as_deref(), expected, "{command}");
-        }
-    }
-}
+#[path = "rich_read_hwpx/tests.rs"]
+mod tests;

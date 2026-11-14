@@ -73,9 +73,61 @@ pub(crate) fn unescape_cow(text: &str) -> Cow<'_, str> {
     }
 }
 
+const SWAR_LO: u64 = 0x0101_0101_0101_0101;
+const SWAR_HI: u64 = 0x8080_8080_8080_8080;
+const SWAR_SPACES: u64 = 0x2020_2020_2020_2020;
+
+#[inline]
+const fn swar_has_zero(word: u64) -> u64 {
+    word.wrapping_sub(SWAR_LO) & !word & SWAR_HI
+}
+
+#[inline]
+const fn swar_has_le_20(word: u64) -> u64 {
+    word.wrapping_sub(SWAR_LO * 0x21) & !word & SWAR_HI
+}
+
 #[inline]
 fn skip_ws(bytes: &[u8], mut i: usize) -> usize {
+    while i + 8 <= bytes.len() {
+        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+        if word != SWAR_SPACES {
+            break;
+        }
+        i += 8;
+    }
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+#[inline]
+fn find_attr_name_end(bytes: &[u8], mut i: usize) -> usize {
+    const EQ_MASK: u64 = SWAR_LO * (b'=' as u64);
+    while i + 8 <= bytes.len() {
+        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+        if (swar_has_le_20(word) | swar_has_zero(word ^ EQ_MASK)) != 0 {
+            break;
+        }
+        i += 8;
+    }
+    while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+#[inline]
+fn find_ascii_ws(bytes: &[u8], mut i: usize) -> usize {
+    while i + 8 <= bytes.len() {
+        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+        if swar_has_le_20(word) != 0 {
+            break;
+        }
+        i += 8;
+    }
+    while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
         i += 1;
     }
     i
@@ -93,9 +145,7 @@ fn next_attr<'a>(
         return Ok(None);
     }
     let name_start = i;
-    while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
+    i = find_attr_name_end(bytes, i);
     let name = &raw[name_start..i];
     i = skip_ws(bytes, i);
     if i >= bytes.len() || bytes[i] != b'=' {
@@ -123,8 +173,25 @@ pub(crate) enum XmlEvent<'a> {
 
 /// Index of the `>` that closes the start tag at `from`, skipping quoted attribute values.
 fn find_tag_end(bytes: &[u8], from: usize) -> Option<usize> {
+    const GT_MASK: u64 = SWAR_LO * (b'>' as u64);
+    const DQ_MASK: u64 = SWAR_LO * (b'"' as u64);
+    const SQ_MASK: u64 = SWAR_LO * (b'\'' as u64);
     let mut i = from;
     while i < bytes.len() {
+        while i + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+            let hit = swar_has_zero(word ^ GT_MASK)
+                | swar_has_zero(word ^ DQ_MASK)
+                | swar_has_zero(word ^ SQ_MASK);
+            if hit != 0 {
+                i += (hit.trailing_zeros() as usize) >> 3;
+                break;
+            }
+            i += 8;
+        }
+        if i >= bytes.len() {
+            break;
+        }
         match bytes[i] {
             b'>' => return Some(i),
             q @ (b'"' | b'\'') => i = XmlSanitizer::find_byte_swar(bytes, i + 1, q)? + 1,
@@ -308,9 +375,7 @@ impl<'a> XmlReader<'a> {
         if empty {
             inner = &inner[..inner.len() - 1];
         }
-        let name_end = inner
-            .find(|c: char| c.is_ascii_whitespace())
-            .unwrap_or(inner.len());
+        let name_end = find_ascii_ws(inner.as_bytes(), 0);
         let name = &inner[..name_end];
         if name.is_empty() {
             return Err(corrupt("XML 태그 이름이 비어 있습니다."));

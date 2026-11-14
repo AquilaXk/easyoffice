@@ -121,11 +121,11 @@ fn embed_hwp(document: &[u8], png: &[u8]) -> Result<Vec<u8>, EasyOfficeError> {
     Ole2ContainerCodec::pack(&streams)
 }
 
-/// The policy the Hangul editor's own reader applies (no ratio rule, its entry limit): the same
-/// one a save is verified with, so a package the editor wrote can be rewritten.
+/// The policy the Hangul editor's own reader applies (capped compression ratio, its entry limit):
+/// the same one a save is verified with, so a package the editor wrote can be rewritten safely.
 fn hangul_zip_policy() -> ZipSecurityPolicy {
     ZipSecurityPolicy {
-        max_compression_ratio: f64::INFINITY,
+        max_compression_ratio: 1024.0,
         max_single_entry_uncompressed_bytes: HANGUL_EDITOR_MAX_ENTRY_BYTES,
         ..ZipSecurityPolicy::default()
     }
@@ -210,10 +210,21 @@ fn add_ooxml_thumbnail(
     let content_types = text_of(entries, OOXML_CONTENT_TYPES)?;
     let existing = relationship_tags(&rels)
         .find(|tag| attribute(tag, "Type") == Some(OOXML_THUMBNAIL_REL_TYPE))
-        .map(|tag| attribute(tag, "Target").unwrap_or_default().to_string());
+        .map(|tag| {
+            let external = attribute(tag, "TargetMode")
+                .is_some_and(|mode| mode.eq_ignore_ascii_case("External"));
+            let target = attribute(tag, "Target").unwrap_or_default().to_string();
+            (external, target)
+        });
     let (part, rels) = match existing {
-        Some(target) => {
+        Some((external, target)) => {
+            if external || target.contains('?') || target.contains('#') {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "미리보기 관계 대상이 안전하지 않습니다.".to_string(),
+                ));
+            }
             let part = target.trim_start_matches('/').to_string();
+            crate::ZipSecurityGuard::validate_entry_path(&part)?;
             if !part.to_ascii_lowercase().ends_with(".png") {
                 return Err(invalid("패키지의 미리보기 그림이 PNG가 아닙니다."));
             }

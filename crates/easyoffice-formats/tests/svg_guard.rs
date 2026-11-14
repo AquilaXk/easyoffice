@@ -102,3 +102,28 @@ fn damaged_gzip_and_non_utf8_are_refused() {
     let nested = gzip(&good, 0, &[]);
     assert!(checked_svg_text(&nested, 1 << 20).is_err());
 }
+
+#[test]
+fn forged_gzip_crc32_isize_and_trailing_bytes_fail_closed() {
+    let good = gzip(SVG.as_bytes(), 0, &[]);
+    let len = good.len();
+    assert!(len > 18);
+
+    // Tampered CRC32 trailer byte.
+    let mut bad_crc = good.clone();
+    bad_crc[len - 6] ^= 0x01;
+    assert!(checked_svg_text(&bad_crc, 1 << 20).is_err());
+
+    // Tampered ISIZE trailer byte.
+    let mut bad_isize = good.clone();
+    bad_isize[len - 2] ^= 0x01;
+    assert!(checked_svg_text(&bad_isize, 1 << 20).is_err());
+
+    // Truncated trailer (fewer than 8 bytes after deflate stream).
+    assert!(checked_svg_text(&good[..len - 4], 1 << 20).is_err());
+
+    // Unexpected trailing garbage bytes after trailer.
+    let mut extra = good.clone();
+    extra.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+    assert!(checked_svg_text(&extra, 1 << 20).is_err());
+}

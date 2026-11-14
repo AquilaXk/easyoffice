@@ -362,3 +362,47 @@ fn documents_over_the_rewrite_budget_and_broken_containers_are_refused() {
     cut_hwp.truncate(cut_hwp.len() / 2);
     assert!(embed_thumbnail(DocumentFormat::Hwp, &cut_hwp, &png).is_err());
 }
+
+#[test]
+fn hostile_docx_relationship_targets_and_hwpx_compression_bomb_fail_closed() {
+    let png = thumbnail();
+    for (label, rel_attr) in [
+        ("dotdot traversal", "Target=\"../../evil.png\""),
+        ("internal parent segment", "Target=\"docProps/../evil.png\""),
+        ("external url", "Target=\"https://evil.example/thumb.png\""),
+        (
+            "external mode",
+            "Target=\"docProps/thumbnail.png\" TargetMode=\"External\"",
+        ),
+    ] {
+        let mut entries = parts(&docx());
+        for (name, data) in &mut entries {
+            if name == "_rels/.rels" {
+                let rels = String::from_utf8(data.clone()).unwrap().replace(
+                    "</Relationships>",
+                    &format!(
+                        "<Relationship Id=\"rId9\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail\" {rel_attr}/></Relationships>"
+                    ),
+                );
+                *data = rels.into_bytes();
+            }
+        }
+        let package = ZipArchiveCodec::pack_compressed(&entries).unwrap();
+        assert!(
+            embed_thumbnail(DocumentFormat::Docx, &package, &png).is_err(),
+            "{label} was accepted"
+        );
+    }
+
+    // Build an HWPX entry whose deflate compression ratio exceeds 1024.0 (e.g. 12 MiB of zeros).
+    let mut bomb_entries = parts(&hwpx());
+    bomb_entries.push((
+        "Contents/filler.xml".to_string(),
+        vec![b'0'; 12 * 1024 * 1024],
+    ));
+    let bomb_hwpx = ZipArchiveCodec::pack_deflate(&bomb_entries).unwrap();
+    assert!(matches!(
+        embed_thumbnail(DocumentFormat::Hwpx, &bomb_hwpx, &png),
+        Err(EasyOfficeError::DecompressionBombDetected { .. })
+    ));
+}

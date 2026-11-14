@@ -14,14 +14,14 @@ mod marks;
 mod notes;
 mod numbering;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use self::marks::FootnoteMark;
 use self::numbering::DocumentSettings;
 use crate::decode_budget::DecodeBudget;
 use crate::pages_package::load_package;
-use crate::pages_proto::{read_reference, ArchiveObject, Message, ObjectTable};
+use crate::pages_proto::{read_reference, ArchiveObject, FastU64Map, Message, ObjectTable};
 use crate::pages_schema::{attachment, baseline, char_props_layout, compact_para, heading};
 use crate::pages_schema::{list_type, para_props, root};
 use crate::pages_schema::{storage, style, ty};
@@ -42,6 +42,7 @@ const MAX_RUNS: usize = 1_000_000;
 /// per reference, so the paragraph and run counts alone do not bound what it copies.
 const MAX_CONVERTED_TEXT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STYLE_CHAIN: usize = 16;
+const MAX_FMT_CACHE: usize = 65_536;
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
 const MAX_HEADING_LEVEL: u8 = 6;
 /// Deepest list level kept (Pages has nine levels).
@@ -447,7 +448,7 @@ struct Reader<'a> {
     paragraphs: usize,
     runs: usize,
     tables: TableBudget,
-    fmt_cache: HashMap<u64, Rc<Fmt>>,
+    fmt_cache: FastU64Map<Rc<Fmt>>,
     images: PageImages<'a>,
     /// Marks such as page-number fields in headers and footers are not reported as skipped.
     quiet: bool,
@@ -494,7 +495,9 @@ impl<'a> Reader<'a> {
             }
         }
         let out = Rc::new(out);
-        self.fmt_cache.insert(id, Rc::clone(&out));
+        if self.fmt_cache.len() < MAX_FMT_CACHE {
+            self.fmt_cache.insert(id, Rc::clone(&out));
+        }
         out
     }
 
@@ -581,6 +584,9 @@ impl<'a> Reader<'a> {
         let cfmt = t.char_styles.at(seg_start).map(|id| self.style_fmt(id));
         let mut run = styled_run(std::mem::take(cur), cfmt.as_deref(), pfmt);
         run.link = t.links.at(seg_start).and_then(|id| self.link_url(id));
+        if let Some(link) = &run.link {
+            self.text_budget.charge(link.len(), "Pages 하이퍼링크")?;
+        }
         content.runs.push(run);
         Ok(())
     }
@@ -636,15 +642,15 @@ impl<'a> Reader<'a> {
         let text = st.text(storage::TEXT)?;
         self.text_budget.charge(text.len(), "Pages 본문 텍스트")?;
         let marks = if flow == Flow::Body {
-            self.footnote_marks(st)
+            self.footnote_marks(st)?
         } else {
             Vec::new()
         };
-        let links = self.link_table(st);
+        let links = self.link_table(st)?;
         let tables = StorageTables::parse(st, marks, links)?;
-        self.note_marks(st, flow);
+        self.note_marks(st, flow)?;
         if flow == Flow::Body {
-            self.note_columns(st);
+            self.note_columns(st)?;
         }
         let mut blocks = Vec::new();
         let mut pos: u64 = 0;
@@ -751,7 +757,7 @@ impl<'a> Reader<'a> {
     }
 
     fn read_table(&mut self, info: &ArchiveObject) -> Result<Option<RichTable>, EasyOfficeError> {
-        match read_table(self.objects, info, &mut self.tables)? {
+        match read_table(self.objects, info, &mut self.tables, &mut self.text_budget)? {
             TableOutcome::Read(t) => {
                 self.skip_many("표 셀의 읽을 수 없는 값(문자열·기간 등)", t.unsupported);
                 self.skip_many("표 셀 안의 개체(그림·필드 등)", t.cell_objects);
@@ -801,7 +807,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         paragraphs: 0,
         runs: 0,
         tables: TableBudget::default(),
-        fmt_cache: HashMap::new(),
+        fmt_cache: FastU64Map::default(),
         images: PageImages::new(&pkg.objects, &pkg.data_files),
         quiet: false,
         text_budget: DecodeBudget::with_limit(MAX_CONVERTED_TEXT_BYTES),

@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::decode_budget::DecodeBudget;
 use crate::{EasyOfficeError, XmlSanitizer};
 
 pub struct CsvCodec;
@@ -39,6 +40,8 @@ struct SwarCsvScanner<'a> {
     max_cols: usize,
     pos: usize,
     trailing_delim: bool,
+    cell_count: usize,
+    budget: DecodeBudget,
 }
 
 impl<'a> SwarCsvScanner<'a> {
@@ -52,6 +55,8 @@ impl<'a> SwarCsvScanner<'a> {
             max_cols: 0,
             pos: 0,
             trailing_delim: false,
+            cell_count: 0,
+            budget: DecodeBudget::new(),
         }
     }
 
@@ -69,9 +74,15 @@ impl<'a> SwarCsvScanner<'a> {
         &mut self,
         on_field: &mut F,
         field: Cow<'a, str>,
-    ) {
+    ) -> Result<(), EasyOfficeError> {
+        self.cell_count += 1;
+        if self.cell_count > CsvCodec::MAX_GRID_CELLS {
+            return Err(csv_budget_error());
+        }
+        self.budget.charge_cell(field.len(), "CSV/TSV 셀")?;
         on_field(self.row_idx, self.col_idx, field);
         self.col_idx += 1;
+        Ok(())
     }
 
     #[inline]
@@ -130,14 +141,14 @@ impl<'a> SwarCsvScanner<'a> {
             return self.step_quoted(on_field);
         }
         if b == self.delim_b {
-            self.emit(on_field, Cow::Borrowed(""));
+            self.emit(on_field, Cow::Borrowed(""))?;
             self.pos += 1;
             self.trailing_delim = true;
             return Ok(true);
         }
         if b == b'\r' || b == b'\n' {
             self.pos = self.after_eol(self.pos);
-            self.emit(on_field, Cow::Borrowed(""));
+            self.emit(on_field, Cow::Borrowed(""))?;
             self.end_row();
             self.trailing_delim = false;
             return Ok(true);
@@ -153,17 +164,17 @@ impl<'a> SwarCsvScanner<'a> {
         self.pos += 1;
         let field = self.quoted_field()?;
         let Some(&next_b) = self.bytes.get(self.pos) else {
-            self.emit(on_field, field);
+            self.emit(on_field, field)?;
             self.end_row();
             return Ok(false);
         };
         if next_b == self.delim_b {
-            self.emit(on_field, field);
+            self.emit(on_field, field)?;
             self.pos += 1;
             self.trailing_delim = true;
         } else if next_b == b'\r' || next_b == b'\n' {
             self.pos = self.after_eol(self.pos);
-            self.emit(on_field, field);
+            self.emit(on_field, field)?;
             self.end_row();
         } else {
             return Err(EasyOfficeError::CorruptedContainer(
@@ -182,7 +193,7 @@ impl<'a> SwarCsvScanner<'a> {
         let end_pos = CsvCodec::find_csv_unquoted_special_swar(self.bytes, pos, self.delim_b);
         let field = Cow::Borrowed(&self.input[pos..end_pos]);
         if end_pos == self.bytes.len() {
-            self.emit(on_field, field);
+            self.emit(on_field, field)?;
             self.end_row();
             return Ok(false);
         }
@@ -190,7 +201,7 @@ impl<'a> SwarCsvScanner<'a> {
         if term == b'"' {
             return Err(csv_unexpected_quote_error());
         }
-        self.emit(on_field, field);
+        self.emit(on_field, field)?;
         if term == self.delim_b {
             self.pos = end_pos + 1;
             self.trailing_delim = true;
@@ -208,7 +219,7 @@ impl<'a> SwarCsvScanner<'a> {
     ) -> Result<(usize, usize), EasyOfficeError> {
         if self.trailing_delim && self.col_idx > 0 {
             self.check_budget()?;
-            self.emit(on_field, Cow::Borrowed(""));
+            self.emit(on_field, Cow::Borrowed(""))?;
             self.max_cols = self.max_cols.max(self.col_idx);
             self.row_idx += 1;
         }
@@ -223,6 +234,8 @@ struct ScalarCsvParser {
     current_row: Vec<String>,
     current_field: String,
     state: CsvParseState,
+    cell_count: usize,
+    budget: DecodeBudget,
 }
 
 impl ScalarCsvParser {
@@ -233,11 +246,21 @@ impl ScalarCsvParser {
         Ok(())
     }
 
+    fn push_cell(&mut self, text: String) -> Result<(), EasyOfficeError> {
+        self.check_budget()?;
+        self.cell_count += 1;
+        if self.cell_count > CsvCodec::MAX_GRID_CELLS {
+            return Err(csv_budget_error());
+        }
+        self.budget.charge_cell(text.len(), "CSV/TSV 셀")?;
+        self.current_row.push(text);
+        Ok(())
+    }
+
     /// Ends the current field (budget checked) and returns to the start state.
     fn end_field(&mut self) -> Result<(), EasyOfficeError> {
-        self.check_budget()?;
-        self.current_row
-            .push(std::mem::take(&mut self.current_field));
+        let field = std::mem::take(&mut self.current_field);
+        self.push_cell(field)?;
         self.state = CsvParseState::Start;
         Ok(())
     }
@@ -273,8 +296,7 @@ impl ScalarCsvParser {
                 if is_eol {
                     self.end_row()?;
                 } else {
-                    self.check_budget()?;
-                    self.current_row.push(String::new());
+                    self.push_cell(String::new())?;
                 }
             }
             CsvParseState::Start => {
@@ -316,15 +338,14 @@ impl ScalarCsvParser {
         match self.state {
             CsvParseState::InQuoted => return Err(csv_unclosed_quote_error()),
             CsvParseState::QuoteInQuoted | CsvParseState::InUnquoted => {
-                self.check_budget()?;
-                self.current_row.push(self.current_field);
-                self.rows.push(self.current_row);
+                let tail = std::mem::take(&mut self.current_field);
+                self.push_cell(tail)?;
+                self.rows.push(std::mem::take(&mut self.current_row));
             }
             CsvParseState::Start => {
                 if !self.current_row.is_empty() {
-                    self.check_budget()?;
-                    self.current_row.push(String::new());
-                    self.rows.push(self.current_row);
+                    self.push_cell(String::new())?;
+                    self.rows.push(std::mem::take(&mut self.current_row));
                 }
             }
         }
@@ -373,6 +394,30 @@ impl CsvCodec {
         bytes.len()
     }
 
+    #[inline]
+    fn find_byte_swar(bytes: &[u8], start: usize, target: u8) -> Option<usize> {
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
+        let splat = (target as u64).wrapping_mul(LO);
+        let mut idx = start;
+        while idx + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[idx..idx + 8].try_into().unwrap());
+            let d = word ^ splat;
+            let mask = d.wrapping_sub(LO) & !d & HI;
+            if mask != 0 {
+                return Some(idx + ((mask.trailing_zeros() >> 3) as usize));
+            }
+            idx += 8;
+        }
+        while idx < bytes.len() {
+            if bytes[idx] == target {
+                return Some(idx);
+            }
+            idx += 1;
+        }
+        None
+    }
+
     pub fn visit_fields_swar<'a, F>(
         input: &'a str,
         delimiter: char,
@@ -381,6 +426,7 @@ impl CsvCodec {
     where
         F: FnMut(usize, usize, Cow<'a, str>),
     {
+        let input = input.strip_prefix('\u{FEFF}').unwrap_or(input);
         if input.is_empty() {
             return Ok((0, 0));
         }
@@ -411,13 +457,13 @@ impl CsvCodec {
     /// Korean-locale systems decode the text as UTF-8 rather than the legacy code page.
     pub const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
-    /// Serializes rows and prefixes the UTF-8 BOM ([`Self::UTF8_BOM`]).
+    /// Serializes rows and prefixes the UTF-8 BOM ([`Self::UTF8_BOM`]) in a single buffer.
     pub fn serialize_with_bom(rows: &[Vec<String>], delimiter: char) -> Vec<u8> {
-        let body = Self::serialize(rows, delimiter);
-        let mut out = Vec::with_capacity(Self::UTF8_BOM.len() + body.len());
-        out.extend_from_slice(Self::UTF8_BOM);
-        out.extend_from_slice(body.as_bytes());
-        out
+        let mut out =
+            String::with_capacity(Self::UTF8_BOM.len() + Self::estimate_serialized_bytes(rows));
+        out.push('\u{FEFF}');
+        Self::serialize_into(&mut out, rows, delimiter);
+        out.into_bytes()
     }
 
     pub fn parse(input: &str, delimiter: char) -> Result<Vec<Vec<String>>, EasyOfficeError> {
@@ -459,12 +505,13 @@ impl CsvCodec {
         parser.finish()
     }
 
-    pub fn serialize(rows: &[Vec<String>], delimiter: char) -> String {
-        let total_bytes: usize = rows
-            .iter()
+    fn estimate_serialized_bytes(rows: &[Vec<String>]) -> usize {
+        rows.iter()
             .map(|r| r.iter().map(|f| f.len() + 2).sum::<usize>() + 2)
-            .sum();
-        let mut out = String::with_capacity(total_bytes);
+            .sum()
+    }
+
+    fn serialize_into(out: &mut String, rows: &[Vec<String>], delimiter: char) {
         for (r_idx, row) in rows.iter().enumerate() {
             if r_idx > 0 {
                 out.push_str("\r\n");
@@ -473,30 +520,67 @@ impl CsvCodec {
                 if c_idx > 0 {
                     out.push(delimiter);
                 }
-                Self::write_serialized_field(&mut out, field, delimiter);
+                Self::write_serialized_field(out, field, delimiter);
             }
         }
+    }
+
+    pub fn serialize(rows: &[Vec<String>], delimiter: char) -> String {
+        let mut out = String::with_capacity(Self::estimate_serialized_bytes(rows));
+        Self::serialize_into(&mut out, rows, delimiter);
         out
     }
 
     fn write_serialized_field(out: &mut String, field: &str, delimiter: char) {
-        if field.contains(delimiter)
-            || field.contains('"')
-            || field.contains('\n')
-            || field.contains('\r')
-        {
-            out.push('"');
-            for ch in field.chars() {
-                if ch == '"' {
-                    out.push_str("\"\"");
-                } else {
-                    out.push(ch);
-                }
+        let (hit, hit_is_quote) = if delimiter.is_ascii() {
+            let bytes = field.as_bytes();
+            let hit = Self::find_csv_unquoted_special_swar(bytes, 0, delimiter as u8);
+            if hit == bytes.len() {
+                out.push_str(field);
+                return;
             }
             out.push('"');
+            out.push_str(&field[..hit]);
+            let mut start = if bytes[hit] == b'"' {
+                out.push_str("\"\"");
+                hit + 1
+            } else {
+                hit
+            };
+            while let Some(q) = Self::find_byte_swar(bytes, start, b'"') {
+                out.push_str(&field[start..q]);
+                out.push_str("\"\"");
+                start = q + 1;
+            }
+            out.push_str(&field[start..]);
+            out.push('"');
+            return;
         } else {
-            out.push_str(field);
+            let Some((hit, ch)) = field
+                .char_indices()
+                .find(|&(_, c)| c == delimiter || c == '"' || c == '\n' || c == '\r')
+            else {
+                out.push_str(field);
+                return;
+            };
+            (hit, ch == '"')
+        };
+        out.push('"');
+        out.push_str(&field[..hit]);
+        let mut start = if hit_is_quote {
+            out.push_str("\"\"");
+            hit + 1
+        } else {
+            hit
+        };
+        for (rel, _) in field[start..].match_indices('"') {
+            let q = start + rel;
+            out.push_str(&field[start..q]);
+            out.push_str("\"\"");
+            start = q + 1;
         }
+        out.push_str(&field[start..]);
+        out.push('"');
     }
 }
 
@@ -544,6 +628,8 @@ struct MarkdownAccumulator {
     numbered: Vec<String>,
     table: Vec<Vec<String>>,
     table_seen_sep: bool,
+    table_cells: usize,
+    budget: DecodeBudget,
 }
 
 impl MarkdownAccumulator {
@@ -576,24 +662,32 @@ impl MarkdownAccumulator {
         self.flush_table();
     }
 
-    fn feed_line(&mut self, trimmed: &str, parse_row: fn(&str) -> Vec<String>) {
+    fn feed_line(
+        &mut self,
+        trimmed: &str,
+        parse_row: fn(&str) -> Vec<String>,
+    ) -> Result<(), EasyOfficeError> {
         if trimmed.is_empty() {
             self.flush_all();
         } else if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
-            self.feed_table_row(trimmed, parse_row);
+            self.feed_table_row(trimmed, parse_row)?;
         } else if let Some(rest) = trimmed
             .strip_prefix("- ")
             .or_else(|| trimmed.strip_prefix("* "))
         {
             self.flush_numbered();
             self.flush_table();
-            self.bullets.push(rest.trim().to_string());
+            let item = rest.trim();
+            self.budget.charge_block(item.len(), "Markdown 목록 항목")?;
+            self.bullets.push(item.to_string());
         } else if let Some(item) = numbered_item(trimmed) {
             self.flush_bullets();
             self.flush_table();
+            self.budget.charge_block(item.len(), "Markdown 번호 항목")?;
             self.numbered.push(item.to_string());
         } else {
             self.flush_all();
+            self.budget.charge_block(trimmed.len(), "Markdown 블록")?;
             self.blocks.push(match atx_heading(trimmed) {
                 Some((level, text)) => MarkdownBlock::Heading {
                     level,
@@ -605,14 +699,22 @@ impl MarkdownAccumulator {
                 },
             });
         }
+        Ok(())
     }
 
-    fn feed_table_row(&mut self, trimmed: &str, parse_row: fn(&str) -> Vec<String>) {
+    fn feed_table_row(
+        &mut self,
+        trimmed: &str,
+        parse_row: fn(&str) -> Vec<String>,
+    ) -> Result<(), EasyOfficeError> {
         self.flush_bullets();
         self.flush_numbered();
         let inner = trimmed.strip_prefix('|').unwrap_or(trimmed);
         let inner = inner.strip_suffix('|').unwrap_or(inner);
         let cells = parse_row(inner);
+        for cell in &cells {
+            self.budget.charge_cell(cell.len(), "Markdown 표 셀")?;
+        }
         let is_sep = self.table.len() == 1
             && !self.table_seen_sep
             && !cells.is_empty()
@@ -620,8 +722,16 @@ impl MarkdownAccumulator {
         if is_sep {
             self.table_seen_sep = true;
         } else {
+            self.table_cells = self.table_cells.saturating_add(cells.len());
+            if self.table_cells > CsvCodec::MAX_GRID_CELLS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "Markdown 표 셀 수가 상한({}개)을 초과했습니다.",
+                    CsvCodec::MAX_GRID_CELLS
+                )));
+            }
             self.table.push(cells);
         }
+        Ok(())
     }
 }
 
@@ -668,7 +778,7 @@ impl CommonMarkCodec {
 
         let mut acc = MarkdownAccumulator::default();
         for raw_line in markdown.lines() {
-            acc.feed_line(raw_line.trim(), Self::parse_markdown_table_row);
+            acc.feed_line(raw_line.trim(), Self::parse_markdown_table_row)?;
         }
         acc.flush_all();
         Ok(acc.blocks)
@@ -736,74 +846,5 @@ impl CommonMarkCodec {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_swar_csv_parser_large_rows_escaped_quotes_crlf_lf_and_korean_utf8() {
-        let mut table = Vec::with_capacity(64);
-        for r in 0..64 {
-            table.push(vec![
-                format!("기획조정실_{r:03}"),
-                format!("\"예산집행, 1분기 \"\"승인\"\" ({r})\""),
-                format!("{}", (r + 1) * 1250),
-                format!("\"다중행 메모 1행\n2행 상세내역 {r}\""),
-                "디지털행정혁신과".to_string(),
-                String::new(),
-            ]);
-        }
-
-        let crlf_csv = table
-            .iter()
-            .map(|row| row.join(","))
-            .collect::<Vec<_>>()
-            .join("\r\n");
-        let lf_csv = crlf_csv.replace("\r\n", "\n");
-
-        let parsed_crlf = CsvCodec::parse(&crlf_csv, ',').unwrap();
-        let baseline_crlf = CsvCodec::parse_scalar_baseline(&crlf_csv, ',').unwrap();
-        let parsed_lf = CsvCodec::parse(&lf_csv, ',').unwrap();
-
-        assert_eq!(parsed_crlf.len(), 64);
-        assert_eq!(parsed_crlf, baseline_crlf);
-        assert_eq!(parsed_lf, baseline_crlf);
-        assert_eq!(parsed_crlf[0][0], "기획조정실_000");
-        assert_eq!(parsed_crlf[0][1], "예산집행, 1분기 \"승인\" (0)");
-        assert_eq!(parsed_crlf[0][3], "다중행 메모 1행\n2행 상세내역 0");
-        assert_eq!(parsed_crlf[0][5], "");
-
-        assert!(CsvCodec::parse("\"unclosed quote", ',').is_err());
-        assert!(CsvCodec::parse("unquoted\"quote,val", ',').is_err());
-
-        let mut visited_borrowed = 0usize;
-        let mut visited_owned = 0usize;
-        let mut visited_rows = vec![Vec::<String>::new()];
-        CsvCodec::visit_fields_swar(&crlf_csv, ',', |r_idx, _c_idx, field| {
-            while visited_rows.len() <= r_idx {
-                visited_rows.push(Vec::new());
-            }
-            match &field {
-                Cow::Borrowed(_) => visited_borrowed += 1,
-                Cow::Owned(_) => visited_owned += 1,
-            }
-            visited_rows[r_idx].push(field.into_owned());
-        })
-        .unwrap();
-        assert_eq!(visited_rows, parsed_crlf);
-        assert_eq!(visited_owned, 64);
-        assert_eq!(visited_borrowed, 64 * 5);
-        assert_eq!(
-            crate::rtf_xml_helpers::unescape_xml_single_pass("A&#0;&#x01;&#xFFFE;&#65;B"),
-            "A&#0;&#x01;&#xFFFE;AB"
-        );
-    }
-
-    #[test]
-    fn test_f14_csv_scalar_baseline_enforces_max_cols() {
-        let too_many_cols = "a,".repeat(CsvCodec::MAX_COLS + 1);
-        assert!(matches!(
-            CsvCodec::parse_scalar_baseline(&too_many_cols, ','),
-            Err(EasyOfficeError::ResourceBudgetExceeded(_))
-        ));
-    }
-}
+#[path = "csv_markdown_codecs/tests.rs"]
+mod tests;
