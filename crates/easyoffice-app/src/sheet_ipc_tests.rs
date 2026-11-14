@@ -109,7 +109,9 @@ fn test_large_workbook_recalc_over_http_and_bounded_413() {
         resp_413.starts_with("HTTP/1.1 413 Payload Too Large\r\n"),
         "got: {resp_413}"
     );
-    assert!(resp_413.contains("Content-Security-Policy: default-src 'self'\r\n"));
+    assert!(resp_413.contains(
+        "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+    ));
 
     let oversized_static = format!(
         "POST /index.html HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
