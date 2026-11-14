@@ -93,6 +93,26 @@ fn parse_column(v: &StrictJsonValue, range: &CellBox) -> Result<FilterColumn, Ea
     Ok(FilterColumn { col, criteria })
 }
 
+/// The conditions of a filter's columns from `[{"col":..}, ...]`, sorted by column and inside `range`.
+pub(crate) fn parse_columns(
+    v: &StrictJsonValue,
+    range: &CellBox,
+) -> Result<Vec<FilterColumn>, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad("columns"))?;
+    if items.len() > MAX_FILTER_COLUMNS {
+        return Err(over("조건 열 수"));
+    }
+    let mut columns: Vec<FilterColumn> = Vec::with_capacity(items.len());
+    for item in items {
+        let column = parse_column(item, range)?;
+        if columns.last().is_some_and(|last| last.col >= column.col) {
+            return Err(bad("columns"));
+        }
+        columns.push(column);
+    }
+    Ok(columns)
+}
+
 /// A filter from its JSON object.
 pub(crate) fn parse_filter(v: &StrictJsonValue) -> Result<SheetFilter, EasyOfficeError> {
     let obj = v.as_object().ok_or_else(|| bad("filter"))?;
@@ -107,21 +127,7 @@ pub(crate) fn parse_filter(v: &StrictJsonValue) -> Result<SheetFilter, EasyOffic
     }
     let mut filter = SheetFilter::new(range);
     if let Some(columns) = StrictJsonValue::get_field(obj, "columns") {
-        let columns = columns.as_array().ok_or_else(|| bad("columns"))?;
-        if columns.len() > MAX_FILTER_COLUMNS {
-            return Err(over("조건 열 수"));
-        }
-        for item in columns {
-            let column = parse_column(item, &range)?;
-            if filter
-                .columns
-                .last()
-                .is_some_and(|last| last.col >= column.col)
-            {
-                return Err(bad("columns"));
-            }
-            filter.columns.push(column);
-        }
+        filter.columns = parse_columns(columns, &range)?;
     }
     if let Some(hidden) = StrictJsonValue::get_field(obj, "hidden") {
         filter.hidden = parse_runs_limited(
@@ -157,15 +163,10 @@ fn condition_json(out: &mut String, c: &CustomCondition) {
     out.push('}');
 }
 
-/// The JSON object of `filter`.
-pub(crate) fn filter_json(filter: &SheetFilter) -> String {
-    let mut out = String::with_capacity(128);
-    let _ = write!(
-        out,
-        "{{\"range\":\"{}\",\"columns\":[",
-        filter.range.to_a1()
-    );
-    for (i, column) in filter.columns.iter().enumerate() {
+/// `[{"col":..}, ...]` for the conditions of a filter's columns.
+pub(crate) fn write_columns(out: &mut String, columns: &[FilterColumn]) {
+    out.push('[');
+    for (i, column) in columns.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
@@ -180,7 +181,7 @@ pub(crate) fn filter_json(filter: &SheetFilter) -> String {
                     if j > 0 {
                         out.push(',');
                     }
-                    push_text(&mut out, value);
+                    push_text(out, value);
                 }
                 out.push(']');
             }
@@ -189,10 +190,10 @@ pub(crate) fn filter_json(filter: &SheetFilter) -> String {
                     out.push_str(",\"and\":true");
                 }
                 out.push_str(",\"conditions\":[");
-                condition_json(&mut out, first);
+                condition_json(out, first);
                 if let Some(second) = second {
                     out.push(',');
-                    condition_json(&mut out, second);
+                    condition_json(out, second);
                 }
                 out.push(']');
             }
@@ -200,6 +201,13 @@ pub(crate) fn filter_json(filter: &SheetFilter) -> String {
         out.push('}');
     }
     out.push(']');
+}
+
+/// The JSON object of `filter`.
+pub(crate) fn filter_json(filter: &SheetFilter) -> String {
+    let mut out = String::with_capacity(128);
+    let _ = write!(out, "{{\"range\":\"{}\",\"columns\":", filter.range.to_a1());
+    write_columns(&mut out, &filter.columns);
     if !filter.hidden.is_empty() {
         let _ = write!(out, ",\"hidden\":{}", runs_json(&filter.hidden));
     }

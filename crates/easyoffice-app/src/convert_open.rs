@@ -490,6 +490,12 @@ fn decode_response(
                         st.links_rejected
                     ));
                 }
+                if st.tables_rejected > 0 {
+                    warnings.push(format!(
+                        "{name} 시트의 표 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                        st.tables_rejected
+                    ));
+                }
                 if st.num_fmts_rejected > 0 {
                     warnings.push(format!(
                         "서식 코드 {}개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다.",

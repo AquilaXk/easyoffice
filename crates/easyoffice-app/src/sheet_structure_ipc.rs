@@ -5,12 +5,12 @@
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
 //! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols` (see `sheet_layout_json`),
-//! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`) and `rules`
+//! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`), `tables` (see `sheet_table_json`) and `rules`
 //! `{sheet: {cf, dv}}` of every sheet, and the row and column groups `outline` (`sheet_view_json`).
 //!
 //! Answer: the session's `formulas` (`[{sheet, cell, value}]`, the text of every formula the edit
 //! rewrote, by new position), the `changed` values, `circular`, and the moved `merges`,
-//! `hiddenRows`, `hiddenCols`, `filter` (`null` when the edit removed it; `filterReapply: true` when
+//! `hiddenRows`, `hiddenCols`, `tables` (the ones the edit did not remove), `filter` (`null` when the edit removed it; `filterReapply: true` when
 //! it dropped a column's condition, so the page evaluates the others again), `widths` and the
 //! `outline` and `rules` that changed. A request's `linkTargets` `{sheet: ["#Sheet1!B5", ...]}` (the
 //! in-workbook targets of the links of each sheet) answers `linkTargets` `{sheet: [[old, new], ...]}`
@@ -35,8 +35,8 @@ use easyoffice_formats::{
     INSERT_COLUMNS, INSERT_ROWS, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
-    shift_boxes, shift_filter, shift_outline, shift_rules, shift_runs, shift_widths, Axis,
-    AxisEdit, AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
+    shift_boxes, shift_filter, shift_outline, shift_rules, shift_runs, shift_tables, shift_widths,
+    Axis, AxisEdit, AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -165,6 +165,14 @@ fn moved_layout_json(
         if shifted.reapply {
             out.push_str(",\"filterReapply\":true");
         }
+    }
+    if let Some(v) = field("tables") {
+        let moved = shift_tables(&crate::sheet_table_json::parse_tables(v)?, edit);
+        let _ = write!(
+            out,
+            ",\"tables\":{}",
+            crate::sheet_table_json::tables_json(&moved)
+        );
     }
     if let Some(v) = field("widths") {
         let moved = shift_widths(&parse_widths(v)?, edit);

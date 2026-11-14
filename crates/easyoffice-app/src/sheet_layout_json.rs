@@ -134,6 +134,9 @@ pub(crate) fn parse_layout(
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
     }
+    if let Some(v) = StrictJsonValue::get_field(obj, "tables") {
+        styling.tables = crate::sheet_table_json::parse_tables(v)?;
+    }
     if let Some(v) = StrictJsonValue::get_field(obj, "spills") {
         styling.spills = parse_spills(v)?;
     }
@@ -229,6 +232,13 @@ pub(crate) fn write_layout_split(
             out,
             ",\"filter\":{}",
             crate::sheet_filter_json::filter_json(filter)
+        );
+    }
+    if !styling.tables.is_empty() {
+        let _ = write!(
+            out,
+            ",\"tables\":{}",
+            crate::sheet_table_json::tables_json(&styling.tables)
         );
     }
     crate::sheet_view_json::write_view(out, styling);

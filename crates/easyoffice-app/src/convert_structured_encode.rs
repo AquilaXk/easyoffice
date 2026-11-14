@@ -45,6 +45,7 @@ fn workbook_engine(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> Workboo
         let sheet = wb.add_sheet(name.clone());
         if let Some(styling) = stylings.get(index) {
             sheet.set_spill_merges(styling.merges.clone());
+            sheet.set_spill_tables(styling.tables.iter().map(|t| t.range).collect());
         }
         for (row, col, raw) in cells {
             if spills

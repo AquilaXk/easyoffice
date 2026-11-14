@@ -485,13 +485,14 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
-    /// Tells the session the merged ranges of `sheet` and recalculates the arrays they concern (PD-222).
-    pub(crate) fn set_merges(
+    /// Tells the session the merged ranges of `sheet` (the tables of it with `tables`) and recalculates the arrays
+    /// they concern (PD-222, PD-224).
+    pub(crate) fn set_blockers(
         &self,
         id: &str,
         owner: &str,
         sheet: &str,
-        merges: Vec<CellBox>,
+        (boxes, tables): (Vec<CellBox>, bool),
         now: Instant,
     ) -> Result<Applied, EasyOfficeError> {
         let Some(handle) = self.checkout(id, owner, now) else {
@@ -501,7 +502,12 @@ impl Registry {
             lock(&self.inner).sessions.remove(id);
             return Ok(Applied::Expired);
         };
-        match session.set_sheet_merges(sheet, merges) {
+        let set = if tables {
+            session.set_sheet_tables(sheet, boxes)
+        } else {
+            session.set_sheet_merges(sheet, boxes)
+        };
+        match set {
             Ok(()) => {}
             Err(RecalcError::Invalid(err)) => return Err(err),
             Err(RecalcError::OverBudget) => return Ok(Applied::Refused),
@@ -830,7 +836,8 @@ impl EasyOfficeIpcRouter {
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
             "locks" => Self::sheet_session_locks(entries, owner),
-            "merges" => Self::sheet_session_merges(entries, owner),
+            "merges" => Self::sheet_session_blockers(entries, owner, false),
+            "tables" => Self::sheet_session_blockers(entries, owner, true),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
@@ -940,17 +947,22 @@ impl EasyOfficeIpcRouter {
     }
 
     /// `merges` `{session, sheet, merges}`: `merges` is `["A1:B2", ...]`; the arrays do not cross them (PD-222).
-    fn sheet_session_merges(
+    /// `tables` `{session, sheet, tables}`: `tables` is `["A1:C5", ...]`, the ranges of the sheet's tables, which
+    /// an array may not be placed in or cross (PD-224).
+    fn sheet_session_blockers(
         entries: &[(String, StrictJsonValue)],
         owner: &str,
+        tables: bool,
     ) -> Result<String, EasyOfficeError> {
         let id = session_id(entries)?;
         let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
-        let merges = match StrictJsonValue::get_field(entries, "merges") {
-            None | Some(StrictJsonValue::Null) => Vec::new(),
-            Some(v) => crate::sheet_layout_json::parse_merges(v)?,
-        };
-        match registry().set_merges(id, owner, sheet, merges, Instant::now())? {
+        let boxes =
+            match StrictJsonValue::get_field(entries, if tables { "tables" } else { "merges" }) {
+                None | Some(StrictJsonValue::Null) => Vec::new(),
+                Some(v) if tables => crate::sheet_table_json::parse_table_ranges(v)?,
+                Some(v) => crate::sheet_layout_json::parse_merges(v)?,
+            };
+        match registry().set_blockers(id, owner, sheet, (boxes, tables), Instant::now())? {
             Applied::Done(json) => Ok(json),
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),
