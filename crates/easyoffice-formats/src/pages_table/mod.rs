@@ -457,6 +457,14 @@ pub(crate) fn read_table(
         return Ok(TableOutcome::Skipped("읽을 수 없는 표"));
     };
     let mut ctx = CellContext::new(objects, &store, budget)?;
+    let header_cost = rows.saturating_mul(std::mem::size_of::<Vec<String>>());
+    let slots_cost = rows
+        .saturating_mul(cols)
+        .saturating_mul(std::mem::size_of::<String>());
+    text_budget.charge(
+        header_cost.saturating_add(slots_cost),
+        "Pages 표 그리드 슬롯",
+    )?;
     let mut grid = vec![vec![String::new(); cols]; rows];
     let unsupported = match store.sub(table::STORE_TILES)? {
         Some(tiles) => fill_tiles(&mut ctx, &tiles, &mut grid, cols, text_budget)?,

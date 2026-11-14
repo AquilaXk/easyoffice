@@ -682,6 +682,11 @@ impl LegacyOle2Codec {
                 )?;
             } else if rec_type == Self::RT_SLIDE {
                 *saw_valid_ppt = true;
+                if slides.len() >= 4096 {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "PPT 슬라이드 개수가 상한(4,096)을 초과했습니다.".to_string(),
+                    ));
+                }
                 let mut slide = LegacyPptSlide {
                     title: String::new(),
                     bullets: Vec::new(),
@@ -698,6 +703,11 @@ impl LegacyOle2Codec {
                     s.title.is_empty() && s.bullets.is_empty() && s.notes.is_empty()
                 });
                 if !reuse_last {
+                    if slides.len() >= 4096 {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "PPT 슬라이드 개수가 상한(4,096)을 초과했습니다.".to_string(),
+                        ));
+                    }
                     slides.push(LegacyPptSlide {
                         title: String::new(),
                         bullets: Vec::new(),
@@ -811,6 +821,16 @@ impl LegacyOle2Codec {
             return Err(EasyOfficeError::CorruptedContainer(
                 "PPT RT_Document(0x03E8) 루트 레코드가 유효하지 않습니다.".to_string(),
             ));
+        }
+
+        let mut budget = DecodeBudget::new();
+        budget.charge(title.len(), "PPT 제목")?;
+        for s in &slides {
+            budget.charge(s.title.len(), "PPT 슬라이드 제목")?;
+            for b in &s.bullets {
+                budget.charge(b.len(), "PPT 슬라이드 본문")?;
+            }
+            budget.charge(s.notes.len(), "PPT 슬라이드 발표자 노트")?;
         }
 
         Ok(LegacyPptPayload { title, slides })

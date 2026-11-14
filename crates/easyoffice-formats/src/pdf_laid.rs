@@ -5,6 +5,7 @@
 //! the same glyph units as the line breaker, so a line is cut where its column ends and a number sits at the right.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use crate::pdf_text_wrap::wrap_spans;
 use crate::pdf_writer::{mixed_units, text_ops, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
@@ -145,15 +146,20 @@ impl Canvas {
 
 /// The text of a header or footer paragraph for page `number` of `total`.
 fn frame_text(p: &RichParagraph, number: usize, total: usize, title: &str) -> String {
-    p.runs
-        .iter()
-        .map(|run| match run.field {
-            Some(RichField::PageNumber) => number.to_string(),
-            Some(RichField::TotalPages) => total.to_string(),
-            Some(RichField::FileName) => title.to_string(),
-            None => run.text.clone(),
-        })
-        .collect()
+    let mut out = String::new();
+    for run in &p.runs {
+        match run.field {
+            Some(RichField::PageNumber) => {
+                let _ = write!(out, "{number}");
+            }
+            Some(RichField::TotalPages) => {
+                let _ = write!(out, "{total}");
+            }
+            Some(RichField::FileName) => out.push_str(title),
+            None => out.push_str(&run.text),
+        }
+    }
+    out
 }
 
 /// Whether the engine's document PDF has to lay the pages out itself: the document has a header, a footer or a page setup.

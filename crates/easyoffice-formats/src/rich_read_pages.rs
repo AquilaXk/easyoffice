@@ -345,14 +345,6 @@ struct StorageTables {
 }
 
 impl StorageTables {
-    /// 1-based footnote number of the mark at `idx`.
-    fn footnote_number(&self, idx: u64) -> Option<usize> {
-        self.footnote_marks
-            .binary_search_by_key(&idx, |m| m.index)
-            .ok()
-            .map(|k| self.footnote_marks[k].number)
-    }
-
     fn parse(
         st: &Message,
         footnote_marks: Vec<FootnoteMark>,
@@ -602,6 +594,7 @@ impl<'a> Reader<'a> {
     ) -> Result<(LineContent, u64), EasyOfficeError> {
         let mut style_cuts = t.char_styles.boundaries_after(start).peekable();
         let mut link_cuts = t.links.boundaries_after(start).peekable();
+        let mut fn_cursor = t.footnote_marks.partition_point(|m| m.index < start);
         let mut content = LineContent::default();
         let mut cur = String::new();
         let mut seg_start = start;
@@ -620,7 +613,15 @@ impl<'a> Reader<'a> {
             }
             if ch == '\u{FFFC}' || ch == storage::FOOTNOTE_MARK_CHAR {
                 content.attachments.extend(t.attachments.exact(utf16));
-                if let Some(number) = t.footnote_number(utf16) {
+                while fn_cursor < t.footnote_marks.len()
+                    && t.footnote_marks[fn_cursor].index < utf16
+                {
+                    fn_cursor += 1;
+                }
+                if fn_cursor < t.footnote_marks.len() && t.footnote_marks[fn_cursor].index == utf16
+                {
+                    let number = t.footnote_marks[fn_cursor].number;
+                    fn_cursor += 1;
                     self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
                     seg_start = utf16 + 1;
                     content.runs.push(self.footnote_number_run(number)?);

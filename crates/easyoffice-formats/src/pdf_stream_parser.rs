@@ -137,6 +137,7 @@ impl PdfStreamCollector {
 pub(crate) const MAX_PAGE_TEXT_BYTES: usize = 32 * 1024 * 1024;
 
 const MAX_GRAPHICS_STATE_DEPTH: usize = 64;
+const MAX_OPERANDS: usize = 256;
 const LEADING_EPSILON: f64 = 1e-6;
 const KERN_SPACE_THRESHOLD: f64 = -180.0;
 
@@ -225,6 +226,13 @@ impl<'a> PdfStreamInterpreter<'a> {
         self.dict_depth == 0 && self.in_text_object
     }
 
+    #[inline]
+    fn push_operand(&mut self, op: PdfStreamOperand) {
+        if self.operands.len() < MAX_OPERANDS {
+            self.operands.push(op);
+        }
+    }
+
     fn push_text(&mut self, decoded: String) {
         self.text_bytes = self.text_bytes.saturating_add(decoded.len());
         if self.text_bytes > self.text_limit {
@@ -235,7 +243,7 @@ impl<'a> PdfStreamInterpreter<'a> {
             self.array_buf.push_str(&decoded);
             self.array_has_text = true;
         } else {
-            self.operands.push(PdfStreamOperand::Str(decoded));
+            self.push_operand(PdfStreamOperand::Str(decoded));
         }
     }
 
@@ -284,7 +292,7 @@ impl<'a> PdfStreamInterpreter<'a> {
         self.in_array = false;
         if self.array_has_text {
             let text = std::mem::take(&mut self.array_buf);
-            self.operands.push(PdfStreamOperand::ArrayText(text));
+            self.push_operand(PdfStreamOperand::ArrayText(text));
         } else {
             self.array_buf.clear();
         }
@@ -314,7 +322,7 @@ impl<'a> PdfStreamInterpreter<'a> {
             return;
         }
         if let Ok(num) = tok.parse::<f64>() {
-            self.operands.push(PdfStreamOperand::Num(num));
+            self.push_operand(PdfStreamOperand::Num(num));
             return;
         }
         self.run_operator(tok);
@@ -337,8 +345,7 @@ impl<'a> PdfStreamInterpreter<'a> {
             b'/' => {
                 let end = pdf_token_end(bytes, i + 1);
                 if self.dict_depth == 0 && !self.in_array {
-                    self.operands
-                        .push(PdfStreamOperand::Name(stream[i..end].to_string()));
+                    self.push_operand(PdfStreamOperand::Name(stream[i..end].to_string()));
                 }
                 end
             }
@@ -474,6 +481,9 @@ fn parse_pdf_content_stream_within(
     let mut i = 0usize;
     let mut interp = PdfStreamInterpreter::new(fonts, text_limit);
     while i < bytes.len() {
+        if interp.exceeded {
+            break;
+        }
         if bytes[i].is_ascii_whitespace() {
             i += 1;
             continue;

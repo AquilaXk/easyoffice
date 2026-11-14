@@ -8,6 +8,9 @@
 //! work is proportional to the number of cells, and a work budget stops hostile inputs that
 //! declare many large regions.
 
+use crate::decode_budget::DecodeBudget;
+use crate::EasyOfficeError;
+
 /// Largest row or column span of one region (15 bits, so a cell state fits in a `u32`).
 pub const MAX_MERGE_SPAN: u32 = 0x7FFF;
 /// Largest grid (rows times widest row) that regions are validated against.
@@ -301,7 +304,12 @@ impl TableAssembler {
 
     /// Pushes a cell and the covered cells of its column span. A span that is too wide is
     /// dropped (the cell is then plain) and counted. Returns the column and the span used.
-    fn push_spanning(&mut self, text: String, col_span: u32) -> (usize, u32) {
+    fn push_spanning(
+        &mut self,
+        text: String,
+        col_span: u32,
+        budget: &mut DecodeBudget,
+    ) -> Result<(usize, u32), EasyOfficeError> {
         let col = self.row.len();
         self.open.remove(&col);
         let mut span = col_span.max(1);
@@ -309,9 +317,16 @@ impl TableAssembler {
             self.dropped += 1;
             span = 1;
         }
+        let padding_slots = (span as usize).saturating_sub(1);
+        if padding_slots > 0 {
+            budget.charge(
+                padding_slots.saturating_mul(std::mem::size_of::<String>()),
+                "표 가로 병합 패딩 슬롯",
+            )?;
+        }
         self.row.push(text);
         self.row.extend((1..span).map(|_| String::new()));
-        (col, span)
+        Ok((col, span))
     }
 
     fn fits(&self, col: usize, col_span: u32) -> bool {
@@ -328,51 +343,76 @@ impl TableAssembler {
     }
 
     /// Adds a plain cell.
-    pub fn cell(&mut self, text: String) {
-        self.push_spanning(text, 1);
+    pub fn cell(&mut self, text: String, budget: &mut DecodeBudget) -> Result<(), EasyOfficeError> {
+        self.push_spanning(text, 1, budget)?;
+        Ok(())
     }
 
     /// Adds a covered cell (no text of its own); regions are declared by their anchor.
-    pub fn covered(&mut self) {
-        self.cell(String::new());
+    pub fn covered(&mut self, budget: &mut DecodeBudget) -> Result<(), EasyOfficeError> {
+        self.cell(String::new(), budget)
     }
 
     /// Adds the anchor of a region whose covered cells follow as separate cells (ODF). A span
     /// that is too large is dropped (the cell is then plain) and counted.
-    pub fn anchor(&mut self, text: String, row_span: u32, col_span: u32) {
+    pub fn anchor(
+        &mut self,
+        text: String,
+        row_span: u32,
+        col_span: u32,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let col = self.row.len();
-        self.cell(text);
+        self.cell(text, budget)?;
         if row_span <= 1 && col_span <= 1 {
-            return;
+            return Ok(());
         }
         if row_span > MAX_MERGE_SPAN || !self.fits(col, col_span) {
             self.dropped += 1;
-            return;
+            return Ok(());
         }
         self.merges
             .push(self.region(col, row_span.max(1), col_span.max(1)));
+        Ok(())
     }
 
     /// Adds a cell spanning `col_span` columns followed by its covered cells (OOXML `gridSpan`).
-    pub fn spanning(&mut self, text: String, col_span: u32) {
-        let (col, span) = self.push_spanning(text, col_span);
+    pub fn spanning(
+        &mut self,
+        text: String,
+        col_span: u32,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
+        let (col, span) = self.push_spanning(text, col_span, budget)?;
         if span > 1 {
             self.merges.push(self.region(col, 1, span));
         }
+        Ok(())
     }
 
     /// Adds the first cell of a region that following rows may extend with
     /// [`Self::continue_above`] (OOXML `vMerge="restart"`). Never extended, it is a plain cell.
-    pub fn restart(&mut self, text: String, col_span: u32) {
-        let (col, span) = self.push_spanning(text, col_span);
+    pub fn restart(
+        &mut self,
+        text: String,
+        col_span: u32,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
+        let (col, span) = self.push_spanning(text, col_span, budget)?;
         self.merges.push(self.region(col, 1, span));
         self.open.insert(col, self.merges.len() - 1);
+        Ok(())
     }
 
     /// Adds a cell that continues the region directly above in the same column (OOXML
     /// `vMerge`), padded to `col_span` cells. Without a matching region above it is a plain
     /// cell.
-    pub fn continue_above(&mut self, text: String, col_span: u32) {
+    pub fn continue_above(
+        &mut self,
+        text: String,
+        col_span: u32,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let col = self.row.len();
         let row = self.rows.len() as u32;
         let col_span = col_span.max(1);
@@ -383,17 +423,30 @@ impl TableAssembler {
         match extend {
             Some(i) => {
                 self.merges[i].row_span += 1;
+                let padding_slots = (col_span as usize).saturating_sub(1);
+                if padding_slots > 0 {
+                    budget.charge(
+                        padding_slots.saturating_mul(std::mem::size_of::<String>()),
+                        "표 세로 병합 가로 패딩 슬롯",
+                    )?;
+                }
                 self.row.push(text);
                 self.row.extend((1..col_span).map(|_| String::new()));
+                Ok(())
             }
-            None => self.spanning(text, col_span),
+            None => self.spanning(text, col_span, budget),
         }
     }
 
     /// The table, and the number of regions that were dropped while building or validating.
-    pub fn finish(self) -> (RichTable, usize) {
+    pub fn finish(self, budget: &mut DecodeBudget) -> Result<(RichTable, usize), EasyOfficeError> {
+        let header_cost = self
+            .rows
+            .len()
+            .saturating_mul(std::mem::size_of::<Vec<String>>());
+        budget.charge(header_cost, "표 행 헤더 비용")?;
         let (table, dropped) = RichTable::with_merges(self.rows, self.merges);
-        (table, dropped + self.dropped)
+        Ok((table, dropped + self.dropped))
     }
 }
 
@@ -410,7 +463,10 @@ pub(crate) struct PlacedCell {
 /// Lays addressed cells out as a grid. Cells at a taken address and cells beyond the size limits
 /// are dropped and counted; a span that does not fit is reduced to one cell. The grid is as large
 /// as the farthest accepted cell or region.
-pub(crate) fn table_from_placed(cells: Vec<PlacedCell>) -> (RichTable, usize) {
+pub(crate) fn table_from_placed(
+    cells: Vec<PlacedCell>,
+    budget: &mut DecodeBudget,
+) -> Result<(RichTable, usize), EasyOfficeError> {
     let mut dropped = 0usize;
     let (mut rows, mut cols) = (0usize, 0usize);
     let mut accepted: Vec<PlacedCell> = Vec::with_capacity(cells.len());
@@ -440,6 +496,14 @@ pub(crate) fn table_from_placed(cells: Vec<PlacedCell>) -> (RichTable, usize) {
         cols = cols.max(c + cell.col_span as usize);
         accepted.push(cell);
     }
+    let header_cost = rows.saturating_mul(std::mem::size_of::<Vec<String>>());
+    let slots_cost = rows
+        .saturating_mul(cols)
+        .saturating_mul(std::mem::size_of::<String>());
+    budget.charge(
+        header_cost.saturating_add(slots_cost),
+        "HWPX 표 그리드 슬롯 선차감",
+    )?;
     let mut grid = vec![vec![String::new(); cols]; rows];
     let mut anchored = BitGrid::new(rows, cols);
     let mut merges = Vec::new();
@@ -459,7 +523,7 @@ pub(crate) fn table_from_placed(cells: Vec<PlacedCell>) -> (RichTable, usize) {
         });
     }
     let (table, rejected) = RichTable::with_merges(grid, merges);
-    (table, dropped + rejected)
+    Ok((table, dropped + rejected))
 }
 
 #[cfg(test)]
@@ -565,17 +629,18 @@ mod tests {
 
     #[test]
     fn assembler_pads_column_spans_and_continues_vertical_regions() {
+        let mut b = DecodeBudget::default();
         let mut a = TableAssembler::default();
         a.start_row();
-        a.spanning("가".into(), 2);
-        a.restart("나".into(), 1);
+        a.spanning("가".into(), 2, &mut b).unwrap();
+        a.restart("나".into(), 1, &mut b).unwrap();
         a.end_row();
         a.start_row();
-        a.cell("x".into());
-        a.cell("y".into());
-        a.continue_above(String::new(), 1);
+        a.cell("x".into(), &mut b).unwrap();
+        a.cell("y".into(), &mut b).unwrap();
+        a.continue_above(String::new(), 1, &mut b).unwrap();
         a.end_row();
-        let (t, dropped) = a.finish();
+        let (t, dropped) = a.finish(&mut b).unwrap();
         assert_eq!(dropped, 0);
         assert_eq!(t.rows[0].len(), 3);
         assert_eq!(t.merges, vec![merge(0, 0, 1, 2), merge(0, 2, 2, 1)]);
@@ -583,13 +648,14 @@ mod tests {
 
     #[test]
     fn assembler_ignores_orphan_continuations_and_huge_spans() {
+        let mut b = DecodeBudget::default();
         let mut a = TableAssembler::default();
         a.start_row();
-        a.continue_above(String::new(), 1);
-        a.spanning("a".into(), u32::MAX);
-        a.anchor("b".into(), u32::MAX, 1);
+        a.continue_above(String::new(), 1, &mut b).unwrap();
+        a.spanning("a".into(), u32::MAX, &mut b).unwrap();
+        a.anchor("b".into(), u32::MAX, 1, &mut b).unwrap();
         a.end_row();
-        let (t, dropped) = a.finish();
+        let (t, dropped) = a.finish(&mut b).unwrap();
         assert_eq!(t.rows[0].len(), 3);
         assert!(t.merges.is_empty());
         assert_eq!(dropped, 2);
@@ -597,6 +663,7 @@ mod tests {
 
     #[test]
     fn placed_cells_make_a_grid_and_drop_duplicates_and_far_cells() {
+        let mut b = DecodeBudget::default();
         let cell = |row, col, row_span, col_span, text: &str| PlacedCell {
             row,
             col,
@@ -604,14 +671,18 @@ mod tests {
             col_span,
             text: text.to_string(),
         };
-        let (t, dropped) = table_from_placed(vec![
-            cell(0, 0, 1, 2, "a"),
-            cell(0, 2, 2, 1, "b"),
-            cell(1, 0, 1, 1, "c"),
-            cell(1, 0, 1, 1, "dup"),
-            cell(0, u32::MAX, 1, 1, "far"),
-            cell(9_999_999, 0, 1, 1, "tall"),
-        ]);
+        let (t, dropped) = table_from_placed(
+            vec![
+                cell(0, 0, 1, 2, "a"),
+                cell(0, 2, 2, 1, "b"),
+                cell(1, 0, 1, 1, "c"),
+                cell(1, 0, 1, 1, "dup"),
+                cell(0, u32::MAX, 1, 1, "far"),
+                cell(9_999_999, 0, 1, 1, "tall"),
+            ],
+            &mut b,
+        )
+        .unwrap();
         assert_eq!(t.rows.len(), 2);
         assert_eq!(t.rows[0], vec!["a", "", "b"]);
         assert_eq!(t.rows[1][0], "c");

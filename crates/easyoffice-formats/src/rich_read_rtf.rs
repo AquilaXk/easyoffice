@@ -243,6 +243,13 @@ impl Reader {
             }
             Dest::ColorTbl => {
                 for _ in text.matches(';') {
+                    if self.colors.len() >= 4096 {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "RTF 색상표 엔트리 개수가 상한(4,096)을 초과했습니다.".to_string(),
+                        ));
+                    }
+                    self.text_budget
+                        .charge(std::mem::size_of::<Option<String>>() + 8, "RTF 색상표")?;
                     let [r, g, b] = self.rgb;
                     let color = (r.is_some() || g.is_some() || b.is_some()).then(|| {
                         format!(

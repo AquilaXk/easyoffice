@@ -1,5 +1,8 @@
 #[path = "pdf_damaged_encrypt.rs"]
 mod pdf_damaged_encrypt;
+#[path = "pdf_obj_stream.rs"]
+mod pdf_obj_stream;
+pub(super) use pdf_obj_stream::expand_pdf_object_streams;
 #[path = "pdf_opaque_stream.rs"]
 mod pdf_opaque_stream;
 pub(super) use pdf_opaque_stream::is_opaque_binary_stream;
@@ -573,88 +576,6 @@ pub(super) fn decode_and_validate_pdf_streams(
         }
     }
     Ok(flate_cache)
-}
-
-pub(super) fn expand_pdf_object_streams(
-    bytes: &[u8],
-    objects: &mut HashMap<(u32, u16), PdfIndirectObject>,
-    flate_cache: &HashMap<(u32, u16), Vec<u8>>,
-    next_order_seq: &mut usize,
-) -> Result<(), EasyOfficeError> {
-    type ObjStmHeader = ((u32, u16), usize, usize, Option<(usize, usize)>, usize);
-    let mut obj_stms: Vec<ObjStmHeader> = objects
-        .iter()
-        .filter_map(|(&id, obj)| {
-            let PdfObjValue::Dict(ref d) = obj.val else {
-                return None;
-            };
-            if !dict_name_eq(d, "/Type", "/ObjStm") {
-                return None;
-            }
-            let n = usize::try_from(resolve_int(dict_get(d, "/N")?, objects)?).ok()?;
-            let first = usize::try_from(resolve_int(dict_get(d, "/First")?, objects)?).ok()?;
-            Some((id, n, first, obj.stream_range, obj.order_seq))
-        })
-        .collect();
-    obj_stms.sort_by_key(|x| x.4);
-
-    for (id, n, first, stream_range, _) in obj_stms {
-        let stream_slice: &[u8] = if let Some(decoded) = flate_cache.get(&id) {
-            decoded.as_slice()
-        } else if let Some((s, e)) = stream_range {
-            &bytes[s..e]
-        } else {
-            continue;
-        };
-        if n > MAX_PDF_OBJSTM_ENTRIES {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "PDF ObjStm 엔트리 수({n})가 상한({MAX_PDF_OBJSTM_ENTRIES})을 초과했습니다."
-            )));
-        }
-        if first > stream_slice.len() {
-            continue;
-        }
-        let header_str = String::from_utf8_lossy(&stream_slice[..first]);
-        let need = n.saturating_mul(2);
-        let nums: Vec<usize> = header_str
-            .split_ascii_whitespace()
-            .filter_map(|tok| tok.parse::<usize>().ok())
-            .take(need)
-            .collect();
-        if nums.len() < need {
-            continue;
-        }
-        for i in 0..n {
-            let emb_obj_num = nums[i * 2] as u32;
-            let rel_off = nums[i * 2 + 1];
-            let obj_start = first.saturating_add(rel_off);
-            if obj_start >= stream_slice.len() {
-                continue;
-            }
-            if let Ok(Some((val, _))) =
-                parse_pdf_value_with_table(stream_slice, None, obj_start, stream_slice.len(), 0)
-            {
-                let key = (emb_obj_num, 0);
-                if !objects.contains_key(&key) {
-                    if objects.len() >= MAX_PDF_INDIRECT_OBJECTS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                            "PDF 간접 객체 수가 상한({MAX_PDF_INDIRECT_OBJECTS})을 초과했습니다."
-                        )));
-                    }
-                    *next_order_seq += 1;
-                    objects.insert(
-                        key,
-                        PdfIndirectObject {
-                            val,
-                            stream_range: None,
-                            order_seq: *next_order_seq,
-                        },
-                    );
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn has_pdf_comment_with_prefix(stream_bytes: &[u8], prefix: &[u8], skip_pdf_strings: bool) -> bool {

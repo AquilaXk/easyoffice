@@ -20,10 +20,12 @@ pub mod hwpx_codec;
 mod hwpx_parts;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
+mod odt_rich_writer;
 pub mod office_codecs;
 pub mod ole2_codec;
 mod ooxml_presentation;
 mod ooxml_shared_parts;
+mod open_formula_syntax;
 mod output_compatibility;
 pub mod pages_iwa;
 pub mod pages_package;
@@ -87,8 +89,8 @@ pub use crc32::IeeeCrc32;
 pub use csv_markdown_codecs::*;
 pub use deflate::*;
 pub use embedded_thumbnail::{
-    check_thumbnail_png, embed_thumbnail, supports_thumbnail, MAX_EMBED_DOCUMENT_BYTES,
-    MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
+    check_thumbnail_png, embed_thumbnail, read_thumbnail, supports_thumbnail,
+    MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
 };
 pub use hwp_eqedit::*;
 pub use office_codecs::*;

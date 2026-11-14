@@ -27,7 +27,7 @@ pub(crate) const BLOCK_OVERHEAD_BYTES: usize = std::mem::size_of::<crate::RichBl
 pub(crate) const MAX_UTF8_BYTES_PER_UNIT: usize = 3;
 
 /// Remaining decoded-byte allowance of one document.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DecodeBudget {
     limit: usize,
     remaining: usize,

@@ -274,3 +274,82 @@ fn ensure_png_default(content_types: String) -> Result<String, EasyOfficeError> 
     patched.insert_str(at, PNG_CONTENT_TYPE_DEFAULT);
     Ok(patched)
 }
+
+/// Reads the embedded preview picture (PNG) from `document`, if any, using selective unpack.
+pub fn read_thumbnail(
+    format: DocumentFormat,
+    document: &[u8],
+) -> Result<Option<Vec<u8>>, EasyOfficeError> {
+    if !supports_thumbnail(format) || document.is_empty() {
+        return Ok(None);
+    }
+    let raw = match format {
+        DocumentFormat::Hwp | DocumentFormat::Hwt => {
+            let streams = Ole2ContainerCodec::unpack(document)?;
+            streams
+                .into_iter()
+                .find(|s| s.name.eq_ignore_ascii_case(HWP_PREVIEW_STREAM))
+                .map(|s| s.data)
+        }
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => {
+            let entries =
+                ZipArchiveCodec::unpack_selected(document, &hangul_zip_policy(), |path| {
+                    path.eq_ignore_ascii_case(HWPX_PREVIEW_ENTRY)
+                })?;
+            entries.into_iter().next().map(|e| e.data)
+        }
+        _ => {
+            let entries = ZipArchiveCodec::unpack_selected(
+                document,
+                &ZipSecurityPolicy::default(),
+                |path| {
+                    path.eq_ignore_ascii_case(OOXML_THUMBNAIL_ENTRY)
+                        || path.eq_ignore_ascii_case(OOXML_ROOT_RELS)
+                },
+            )?;
+            if let Some(thumb) = entries
+                .iter()
+                .find(|e| e.path.eq_ignore_ascii_case(OOXML_THUMBNAIL_ENTRY))
+            {
+                Some(thumb.data.clone())
+            } else if let Some(rels_entry) = entries
+                .iter()
+                .find(|e| e.path.eq_ignore_ascii_case(OOXML_ROOT_RELS))
+            {
+                if let Ok(rels) = std::str::from_utf8(&rels_entry.data) {
+                    if let Some(tag) = relationship_tags(rels)
+                        .find(|tag| attribute(tag, "Type") == Some(OOXML_THUMBNAIL_REL_TYPE))
+                    {
+                        if let Some(target) = attribute(tag, "Target") {
+                            if target.contains("..") {
+                                None
+                            } else {
+                                let part = target.trim_start_matches('/');
+                                let custom = ZipArchiveCodec::unpack_selected(
+                                    document,
+                                    &ZipSecurityPolicy::default(),
+                                    |path| path.eq_ignore_ascii_case(part),
+                                )?;
+                                custom.into_iter().next().map(|e| e.data)
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    };
+    if let Some(data) = raw {
+        check_thumbnail_png(&data)?;
+        Ok(Some(data))
+    } else {
+        Ok(None)
+    }
+}

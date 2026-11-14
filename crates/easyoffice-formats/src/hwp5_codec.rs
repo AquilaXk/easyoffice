@@ -271,6 +271,7 @@ impl Hwp5Codec {
         inflated: &mut DecodeBudget,
     ) -> Result<std::borrow::Cow<'a, [u8]>, EasyOfficeError> {
         if !is_compressed {
+            inflated.charge(data.len(), "HWP 5.0 비압축 스트림")?;
             return Ok(std::borrow::Cow::Borrowed(data));
         }
         let limit =
@@ -406,11 +407,12 @@ impl Hwp5Codec {
         }
         let eq = format!("[수식] ${latex}$");
         if let Some(last) = paragraphs.last_mut() {
-            last.text = if last.text.is_empty() {
-                eq
+            if last.text.is_empty() {
+                last.text = eq;
             } else {
-                format!("{} {eq}", last.text)
-            };
+                last.text.push(' ');
+                last.text.push_str(&eq);
+            }
         } else {
             paragraphs.push(Hwp5ParagraphRecord {
                 text: eq,

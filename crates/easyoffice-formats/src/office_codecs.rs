@@ -3,24 +3,17 @@ pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::sheet_links::xlsx_links::{links_xml, read_links, sheet_relationships};
 use crate::sheet_styling::sheet_links::LinkAllowance;
-use crate::sheet_styling::sheet_rules::xlsx_rules::{
-    parse_dxf_styles, parse_worksheet_rules, rules_xml,
-};
+use crate::sheet_styling::sheet_rules::xlsx_rules::{parse_dxf_styles, parse_worksheet_rules};
 use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
-use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
-use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
-use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
-use crate::sheet_styling::xlsx_view::{
-    apply_tint, sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml, theme_palette, DEFAULT_THEME,
-};
+use crate::sheet_styling::xlsx_view::{apply_tint, theme_palette, DEFAULT_THEME};
 use crate::sheet_styling::{
-    merges_clear_of_tables, sheet_states, unique_table_names, IdMemo, SheetState, SheetStyling,
+    merges_clear_of_tables, sheet_states, unique_table_names, SheetState, SheetStyling,
     TableRegistry,
 };
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
@@ -188,237 +181,7 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
     sst_xml
 }
 
-/// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
-fn push_cell_xml(
-    sheet_xml: &mut String,
-    col_ref: &str,
-    row_num: u32,
-    xf: usize,
-    content: crate::sheet_styling::xlsx_parts::CellContent<'_>,
-    sst_map: &SharedStringMap<'_>,
-) {
-    use std::fmt::Write;
-    let crate::sheet_styling::xlsx_parts::CellContent {
-        raw,
-        cached,
-        spill,
-        filled,
-        text_only,
-    } = content;
-    let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
-    if xf > 0 {
-        let _ = write!(sheet_xml, " s=\"{xf}\"");
-    }
-    if raw.is_empty() {
-        sheet_xml.push_str("/>");
-    } else if text_only || (filled && raw.starts_with('=')) {
-        let _ = write!(
-            sheet_xml,
-            " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
-            XmlSanitizer::escape(raw)
-        );
-    } else if let Some(formula) = raw.strip_prefix('=') {
-        let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
-        // An array that spills is an array formula over its area, flagged dynamic (`cm`).
-        let (cm, f) = match spill {
-            Some(area) => (
-                " cm=\"1\"",
-                format!("<f t=\"array\" ref=\"{}\">{body}</f>", area.a1()),
-            ),
-            None => ("", format!("<f>{body}</f>")),
-        };
-        match cached {
-            Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
-                let _ = write!(sheet_xml, "{cm}>{f}<v>{n}</v></c>");
-            }
-            Some(XlsxCachedValue::Text(text)) => {
-                let _ = write!(
-                    sheet_xml,
-                    " t=\"str\"{cm}>{f}<v>{}</v></c>",
-                    XmlSanitizer::escape(text)
-                );
-            }
-            Some(XlsxCachedValue::Boolean(b)) => {
-                let _ = write!(sheet_xml, " t=\"b\"{cm}>{f}<v>{}</v></c>", u8::from(*b));
-            }
-            _ => {
-                let _ = write!(sheet_xml, "{cm}>{f}</c>");
-            }
-        }
-    } else if crate::cell_numbers::numeric_cell_value(raw).is_some() {
-        let _ = write!(
-            sheet_xml,
-            " t=\"n\"><v>{}</v></c>",
-            XmlSanitizer::escape(raw)
-        );
-    } else {
-        let idx = sst_map.get(raw).copied().unwrap_or(0);
-        let _ = write!(sheet_xml, " t=\"s\"><v>{idx}</v></c>");
-    }
-}
-
-/// Cells grouped by row; styled blank cells are included so their style is preserved.
-fn group_cells_by_row<'a>(
-    cells: &'a [(u32, u32, String)],
-    styling: Option<&SheetStyling>,
-    blank: &'a String,
-) -> std::collections::BTreeMap<u32, Vec<(u32, &'a String)>> {
-    let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
-        std::collections::BTreeMap::new();
-    for (row, col, raw) in cells {
-        rows_map.entry(*row).or_default().push((*col, raw));
-    }
-    if let Some(st) = styling {
-        let valued: std::collections::HashSet<(u32, u32)> =
-            cells.iter().map(|(r, c, _)| (*r, *c)).collect();
-        // A cell with a hyperlink is written with its look even when it holds no value (PD-223).
-        let blank_cells: std::collections::BTreeSet<(u32, u32)> = st
-            .cells
-            .iter()
-            .filter(|(_, style)| !style.is_plain())
-            .map(|(&at, _)| at)
-            .chain(st.links.keys().copied())
-            .filter(|at| !valued.contains(at))
-            .collect();
-        for (row, col) in blank_cells {
-            rows_map.entry(row).or_default().push((col, blank));
-        }
-        let filtered = st.filter_hidden_runs();
-        let hidden = st.hidden_rows.iter().chain(&st.outline.collapsed_rows);
-        for &(start, end) in hidden.chain(filtered) {
-            for row in start..=end {
-                rows_map.entry(row).or_default();
-            }
-        }
-        for &(start, end, _) in &st.outline.rows {
-            for row in start..=end {
-                rows_map.entry(row).or_default();
-            }
-        }
-        for row in summary_rows(st) {
-            rows_map.entry(row).or_default();
-        }
-        for &(start, end) in &st.unlocked_rows {
-            for row in start..=end {
-                rows_map.entry(row).or_default();
-            }
-        }
-    }
-    rows_map
-}
-
-/// The rows that carry `collapsed`: the summary of every group folded as a whole.
-fn summary_rows(styling: &SheetStyling) -> Vec<u32> {
-    let outline = &styling.outline;
-    Outline::summary_marks(
-        &outline.rows,
-        &outline.collapsed_rows,
-        &outline.open_rows,
-        outline.summary_above,
-    )
-}
-
-fn build_sheet_xml(
-    cells: &[(u32, u32, String)],
-    cache: Option<&XlsxFormulaCache>,
-    styling: Option<&SheetStyling>,
-    style_table: &XlsxStyleTable,
-    sst_map: &SharedStringMap<'_>,
-    (links_xml, table_parts): (&str, &str),
-    headers: &HeaderCells,
-) -> String {
-    use std::fmt::Write;
-    let blank = String::new();
-    let rows_map = group_cells_by_row(cells, styling, &blank);
-    let mut sheet_xml = String::with_capacity(cells.len().saturating_mul(64) + 256);
-    sheet_xml.push_str(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-    );
-    if let Some(st) = styling {
-        sheet_xml.push_str(&sheet_pr_xml(st));
-        sheet_xml.push_str(&sheet_views_xml(st.freeze, &st.view));
-        sheet_xml.push_str(&sheet_format_pr_xml(st));
-        sheet_xml.push_str(&layout_cols_xml(st, style_table.unlocked_xf()));
-    }
-    let marks = styling.map(summary_rows).unwrap_or_default();
-    sheet_xml.push_str("<sheetData>");
-    let mut col_buf = [0u8; 4];
-    let mut ids = IdMemo::new();
-    let spill_areas: &[crate::SpillRef] = styling.map_or(&[], |st| &st.spills);
-    let spill_anchors: std::collections::HashMap<(u32, u32), crate::SpillRef> = styling
-        .map(|st| st.spills.iter().map(|r| ((r.row, r.col), *r)).collect())
-        .unwrap_or_default();
-    for (row, mut row_cells) in rows_map {
-        row_cells.sort_by_key(|(col, _)| *col);
-        let row_num = row.saturating_add(1);
-        let hidden = styling.is_some_and(|st| st.row_hidden(row));
-        let _ = write!(
-            sheet_xml,
-            "<row r=\"{row_num}\"{}",
-            if hidden { " hidden=\"1\"" } else { "" }
-        );
-        if let Some(st) = styling {
-            let level = level_at(&st.outline.rows, row);
-            if level > 0 {
-                let _ = write!(sheet_xml, " outlineLevel=\"{level}\"");
-            }
-            if marks.binary_search(&row).is_ok() {
-                sheet_xml.push_str(" collapsed=\"1\"");
-            }
-            if crate::sheet_styling::xlsx_layout::run_contains(&st.unlocked_rows, row) {
-                let _ = write!(
-                    sheet_xml,
-                    " s=\"{}\" customFormat=\"1\"",
-                    style_table.unlocked_xf()
-                );
-            }
-        }
-        sheet_xml.push('>');
-        for (col, raw) in row_cells {
-            let col_ref = write_col_letters(&mut col_buf, col as usize);
-            let xf = styling.map_or(0, |st| style_table.cell_xf(st, row, col, &mut ids));
-            let cached = cache.and_then(|c| c.get(&(row, col)));
-            push_cell_xml(
-                &mut sheet_xml,
-                col_ref,
-                row_num,
-                xf,
-                crate::sheet_styling::xlsx_parts::CellContent {
-                    raw,
-                    cached,
-                    spill: spill_anchors.get(&(row, col)),
-                    filled: raw.starts_with('=')
-                        && spill_areas
-                            .iter()
-                            .any(|area| area.covers_after_anchor(row, col)),
-                    text_only: headers.contains(row, col),
-                },
-                sst_map,
-            );
-        }
-        sheet_xml.push_str("</row>");
-    }
-    sheet_xml.push_str("</sheetData>");
-    if let Some(st) = styling {
-        if let Some(protect) = &st.protect {
-            sheet_xml.push_str(&crate::sheet_styling::xlsx_protect::sheet_protection_xml(
-                protect,
-            ));
-        }
-        if let Some(filter) = &st.filter {
-            sheet_xml.push_str(&autofilter_xml(filter, &style_table.dxf));
-        }
-        sheet_xml.push_str(&merge_cells_xml(&merges_clear_of_tables(
-            &st.merges, &st.tables,
-        )));
-        sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
-        sheet_xml.push_str(links_xml);
-        sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
-    }
-    sheet_xml.push_str(table_parts);
-    sheet_xml.push_str("</worksheet>");
-    sheet_xml
-}
+use crate::sheet_styling::xlsx_sheet_writer::build_sheet_xml;
 
 impl OoxmlCodec {
     pub const MAX_XLSX_ROWS: u32 = 1_048_576;
@@ -512,6 +275,9 @@ impl OoxmlCodec {
             .unwrap_or_else(|| "문서".to_string());
 
         let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
+        let mut budget = DecodeBudget::new();
+        budget.charge(title.len(), "DOCX 제목")?;
+
         for tbl_inner in extract_tag_bodies(xml, "w:tbl") {
             let mut rows = Vec::new();
             for tr_inner in extract_tag_bodies(tbl_inner, "w:tr") {
@@ -522,6 +288,7 @@ impl OoxmlCodec {
                         .map(XmlSanitizer::unescape)
                         .collect::<Vec<_>>()
                         .join("");
+                    budget.charge_cell(cell_text.len(), "DOCX 표 셀")?;
                     cells.push(cell_text);
                 }
                 rows.push(cells);
@@ -537,6 +304,7 @@ impl OoxmlCodec {
                 .map(XmlSanitizer::unescape)
                 .collect::<Vec<_>>()
                 .join("");
+            budget.charge_block(text.len(), "DOCX 단락")?;
             paragraphs.push(text);
         }
 

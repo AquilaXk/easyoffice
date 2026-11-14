@@ -161,7 +161,10 @@ impl SectionWalker {
             return Ok(true);
         }
         self.frame_found[kind] = true;
-        let mut walker = SectionWalker::default();
+        let mut walker = SectionWalker {
+            text_budget: self.text_budget.clone(),
+            ..Default::default()
+        };
         let mut blocks = Vec::new();
         let mut depth = 0usize;
         for event in &events[at..] {
@@ -227,6 +230,7 @@ impl SectionWalker {
         } else {
             self.frame.footer = paragraphs;
         }
+        self.text_budget = walker.text_budget;
         Ok(true)
     }
 }

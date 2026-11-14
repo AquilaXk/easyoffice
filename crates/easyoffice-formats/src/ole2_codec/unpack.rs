@@ -4,11 +4,13 @@ use super::{
     decode_utf16le, read_u16_le, read_u32_le, read_u64_le, EasyOfficeError, Ole2ContainerCodec,
     Ole2SecurityGuard, Ole2StreamEntry, SectorBitset,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MINI_SECTOR_SIZE: usize = 64;
 const MAX_ENTRY_NAME_BYTES: usize = 64;
 const MIN_ENTRY_NAME_BYTES: usize = 2;
+const MAX_DIR_DEPTH: usize = 32;
+const EXPECTED_MINI_CUTOFF: usize = 4096;
 const HEADER_SECTOR_SHIFT_OFFSET: usize = 30;
 const HEADER_FIRST_DIR_SECTOR_OFFSET: usize = 48;
 const HEADER_MINI_CUTOFF_OFFSET: usize = 56;
@@ -21,11 +23,17 @@ const ENTRY_CHILD_OFFSET: usize = 76;
 const ENTRY_START_OFFSET: usize = 116;
 const ENTRY_SIZE_OFFSET: usize = 120;
 
-type SiblingNames = HashMap<String, Vec<String>>;
+type SiblingNames = HashMap<String, HashSet<Vec<u16>>>;
 
 #[inline]
 fn is_live_id(id: u32) -> bool {
     id != Ole2ContainerCodec::FREE_SECTOR && id != Ole2ContainerCodec::END_OF_CHAIN
+}
+
+fn sibling_key(name: &str) -> Vec<u16> {
+    name.encode_utf16()
+        .map(Ole2ContainerCodec::fold_cfb_utf16_unit)
+        .collect()
 }
 
 /// Rejects a case-insensitive duplicate sibling name, then records it.
@@ -34,15 +42,13 @@ fn register_sibling(
     prefix: &str,
     name: &str,
 ) -> Result<(), EasyOfficeError> {
+    let key = sibling_key(name);
     let siblings = names.entry(prefix.to_string()).or_default();
-    if siblings.iter().any(|existing| {
-        Ole2ContainerCodec::cmp_cfb_dir_names(existing, name) == std::cmp::Ordering::Equal
-    }) {
+    if !siblings.insert(key) {
         return Err(EasyOfficeError::SecurityViolation(format!(
             "OLE2 디렉터리 내 대소문자 구분 없는 중복 이름이 감지되었습니다: {prefix}{name}"
         )));
     }
-    siblings.push(name.to_string());
     Ok(())
 }
 
@@ -68,6 +74,11 @@ impl<'a> Ole2Reader<'a> {
         let sector_size = 1usize << (read_u16_le(bytes, HEADER_SECTOR_SHIFT_OFFSET)? as usize);
         let first_dir_sector = read_u32_le(bytes, HEADER_FIRST_DIR_SECTOR_OFFSET)?;
         let mini_cutoff = read_u32_le(bytes, HEADER_MINI_CUTOFF_OFFSET)? as usize;
+        if mini_cutoff != EXPECTED_MINI_CUTOFF {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "유효하지 않은 OLE2 mini_cutoff: {mini_cutoff} (4096이어야 함)"
+            )));
+        }
         let first_minifat_sector = read_u32_le(bytes, HEADER_FIRST_MINIFAT_OFFSET)?;
         let dir_chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_dir_sector)?;
 
@@ -83,6 +94,35 @@ impl<'a> Ole2Reader<'a> {
         let mut claimed_sectors = SectorBitset::with_capacity(total_sectors);
         for &sec in &dir_chain {
             claimed_sectors.insert(sec);
+        }
+        let fat_sector_count = read_u32_le(bytes, 44)? as usize;
+        for slot in 0..fat_sector_count.min(109) {
+            let fat_sec = read_u32_le(bytes, 76 + slot * 4)?;
+            if is_live_id(fat_sec) {
+                claimed_sectors.insert(fat_sec);
+            }
+        }
+        let mut difat_sec = read_u32_le(bytes, 68)?;
+        let num_difat_sectors = read_u32_le(bytes, 72)? as usize;
+        let entries_per_difat = (sector_size / 4).saturating_sub(1);
+        let mut difat_steps = 0;
+        while is_live_id(difat_sec) && difat_steps < num_difat_sectors {
+            claimed_sectors.insert(difat_sec);
+            let d_offset = (1 + difat_sec as usize) * sector_size;
+            if d_offset + sector_size <= bytes.len() {
+                for slot in 0..entries_per_difat {
+                    if let Ok(sec) = read_u32_le(bytes, d_offset + slot * 4) {
+                        if is_live_id(sec) {
+                            claimed_sectors.insert(sec);
+                        }
+                    }
+                }
+                difat_sec = read_u32_le(bytes, d_offset + entries_per_difat * 4)
+                    .unwrap_or(Ole2ContainerCodec::END_OF_CHAIN);
+            } else {
+                break;
+            }
+            difat_steps += 1;
         }
         let mut reader = Self {
             bytes,
@@ -249,8 +289,8 @@ impl<'a> Ole2Reader<'a> {
         stream_size: usize,
         full_name: &str,
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut payload =
-            Vec::with_capacity(stream_size.div_ceil(MINI_SECTOR_SIZE) * MINI_SECTOR_SIZE);
+        let needed_cap = stream_size.div_ceil(MINI_SECTOR_SIZE) * MINI_SECTOR_SIZE;
+        let mut payload = Vec::with_capacity(needed_cap.min(self.mini_stream.len()));
         let mut cur = start_sector;
         let mut visited = SectorBitset::with_capacity(self.total_mini_sectors);
         while cur != Ole2ContainerCodec::END_OF_CHAIN {
@@ -313,20 +353,35 @@ impl<'a> Ole2Reader<'a> {
         if !is_live_id(root_child) {
             return Ok(());
         }
-        let mut stack: Vec<(u32, String)> = vec![(root_child, String::new())];
-        while let Some((dir_id, prefix)) = stack.pop() {
+        let mut stack: Vec<(u32, String, usize)> = vec![(root_child, String::new(), 0)];
+        while let Some((dir_id, prefix, depth)) = stack.pop() {
+            if depth > MAX_DIR_DEPTH {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 디렉터리 트리 깊이가 허용 상한(32)을 초과했습니다.".to_string(),
+                ));
+            }
             if is_live_id(dir_id) {
-                self.visit_node(dir_id, prefix, &mut stack, visited_dir, names, streams)?;
+                self.visit_node(
+                    dir_id,
+                    prefix,
+                    depth,
+                    &mut stack,
+                    visited_dir,
+                    names,
+                    streams,
+                )?;
             }
         }
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn visit_node(
         &mut self,
         dir_id: u32,
         prefix: String,
-        stack: &mut Vec<(u32, String)>,
+        depth: usize,
+        stack: &mut Vec<(u32, String, usize)>,
         visited_dir: &mut SectorBitset,
         names: &mut SiblingNames,
         streams: &mut Vec<Ole2StreamEntry>,
@@ -348,7 +403,7 @@ impl<'a> Ole2Reader<'a> {
         let right_sib = read_u32_le(&self.dir_bytes, base + ENTRY_RIGHT_OFFSET)?;
         let child_id = read_u32_le(&self.dir_bytes, base + ENTRY_CHILD_OFFSET)?;
         if is_live_id(right_sib) {
-            stack.push((right_sib, prefix.clone()));
+            stack.push((right_sib, prefix.clone(), depth));
         }
         if obj_type == Ole2ContainerCodec::OBJ_TYPE_STORAGE
             || obj_type == Ole2ContainerCodec::OBJ_TYPE_STREAM
@@ -357,7 +412,7 @@ impl<'a> Ole2Reader<'a> {
             register_sibling(names, &prefix, &name)?;
             if obj_type == Ole2ContainerCodec::OBJ_TYPE_STORAGE {
                 if is_live_id(child_id) {
-                    stack.push((child_id, format!("{prefix}{name}/")));
+                    stack.push((child_id, format!("{prefix}{name}/"), depth + 1));
                 }
             } else {
                 let full_name = if prefix.is_empty() {
@@ -369,7 +424,7 @@ impl<'a> Ole2Reader<'a> {
             }
         }
         if is_live_id(left_sib) {
-            stack.push((left_sib, prefix));
+            stack.push((left_sib, prefix, depth));
         }
         Ok(())
     }

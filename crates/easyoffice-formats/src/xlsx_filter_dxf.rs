@@ -37,6 +37,7 @@ pub(crate) fn parse_dxf_colors(styles_xml: &str, colors: &ColorScheme) -> Vec<Dx
     };
     extract_tag_bodies(dxfs, "dxf")
         .into_iter()
+        .take(4096)
         .map(|dxf| {
             let fill = extract_tag_bodies(dxf, "fill").into_iter().next();
             let none = fill.is_some_and(|f| f.contains("patternType=\"none\""));

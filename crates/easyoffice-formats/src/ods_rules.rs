@@ -29,6 +29,10 @@ pub(crate) struct OdsRuleTable {
     style_index: HashMap<CfStyle, usize>,
     /// `(sheet, index into that sheet's dv list)` in the order of the `eoval<N>` names.
     validations: Vec<(usize, usize)>,
+    /// Pre-indexed validation ranges per sheet: `(range, validation_name_index)`.
+    sheet_validations: Vec<Vec<(CellBox, usize)>>,
+    /// Pre-formatted attribute strings: ` table:content-validation-name="eoval{n}"`.
+    attr_strings: Vec<String>,
 }
 
 fn quote_sheet(name: &str) -> String {
@@ -193,6 +197,8 @@ impl OdsRuleTable {
             styles: Vec::new(),
             style_index: HashMap::new(),
             validations: Vec::new(),
+            sheet_validations: vec![Vec::new(); stylings.len()],
+            attr_strings: Vec::new(),
         };
         for (sheet, st) in stylings.iter().enumerate() {
             for rule in st.rules.cf.iter().filter(|r| !r.style.is_plain()) {
@@ -205,6 +211,15 @@ impl OdsRuleTable {
                 if !dv.ranges.is_empty() {
                     table.validations.push((sheet, i));
                 }
+            }
+        }
+        for (n, &(sheet, i)) in table.validations.iter().enumerate() {
+            table
+                .attr_strings
+                .push(format!(" table:content-validation-name=\"eoval{n}\""));
+            let dv = &stylings[sheet].rules.dv[i];
+            for &range in &dv.ranges {
+                table.sheet_validations[sheet].push((range, n));
             }
         }
         table
@@ -241,12 +256,6 @@ impl OdsRuleTable {
             );
         }
         xml
-    }
-
-    fn name_of(&self, sheet: usize, dv_index: usize) -> Option<usize> {
-        self.validations
-            .iter()
-            .position(|&(s, i)| s == sheet && i == dv_index)
     }
 
     /// `<table:content-validations>` for the whole workbook.
@@ -311,22 +320,22 @@ impl OdsRuleTable {
     pub(crate) fn cell_attr(
         &self,
         sheet: usize,
-        stylings: &[SheetStyling],
+        _stylings: &[SheetStyling],
         row: u32,
         col: u32,
-    ) -> String {
-        let Some(st) = stylings.get(sheet) else {
-            return String::new();
+    ) -> &str {
+        let Some(rules) = self.sheet_validations.get(sheet) else {
+            return "";
         };
-        st.rules
-            .dv
-            .iter()
-            .enumerate()
-            .find(|(_, dv)| dv.ranges.iter().any(|b| b.contains(row, col)))
-            .and_then(|(i, _)| self.name_of(sheet, i))
-            .map_or(String::new(), |n| {
-                format!(" table:content-validation-name=\"eoval{n}\"")
-            })
+        if rules.is_empty() {
+            return "";
+        }
+        for (range, n) in rules {
+            if range.contains(row, col) {
+                return self.attr_strings.get(*n).map_or("", |s| s.as_str());
+            }
+        }
+        ""
     }
 
     /// Empty cells that must exist to carry a validation: ranges small enough to spell out.

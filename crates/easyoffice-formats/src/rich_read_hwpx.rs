@@ -660,7 +660,8 @@ impl SectionWalker {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.placed.is_empty() {
                     self.text_budget.charge_block(0, "HWPX 표")?;
-                    let (table, dropped) = table_from_placed(std::mem::take(&mut self.placed));
+                    let (table, dropped) =
+                        table_from_placed(std::mem::take(&mut self.placed), &mut self.text_budget)?;
                     self.dropped_merges += dropped;
                     blocks.push(RichBlock::Table(table));
                 }

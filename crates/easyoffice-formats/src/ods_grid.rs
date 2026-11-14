@@ -116,6 +116,7 @@ struct CellBuilder<'a> {
     paragraph_depth: usize,
     /// The `text:p` just started was `<text:p/>`: its end event is not a paragraph end.
     empty_paragraph: bool,
+    want_text: bool,
 }
 
 impl<'a> CellBuilder<'a> {
@@ -169,15 +170,21 @@ impl<'a> CellBuilder<'a> {
             depth: 1,
             paragraph_depth: 0,
             empty_paragraph: false,
+            want_text: want_text && !covered,
         }
     }
 
     /// Feeds one event inside the cell; true when the cell element has ended.
-    fn feed(&mut self, event: &XmlEvent<'a>, empty_start: bool) -> bool {
+    fn feed(
+        &mut self,
+        event: &XmlEvent<'a>,
+        empty_start: bool,
+        budget: &mut DecodeBudget,
+    ) -> Result<bool, EasyOfficeError> {
         match event {
             XmlEvent::Start { name, attrs } => {
                 self.depth += 1;
-                self.start(name, attrs, empty_start);
+                self.start(name, attrs, empty_start, budget)?;
             }
             XmlEvent::End(name) => {
                 self.depth -= 1;
@@ -189,19 +196,27 @@ impl<'a> CellBuilder<'a> {
                     }
                 }
             }
-            XmlEvent::Text(text) if self.paragraph_depth > 0 => {
+            XmlEvent::Text(text) if self.want_text && self.paragraph_depth > 0 => {
+                budget.charge(text.len(), "ODS 셀 텍스트")?;
                 self.fields.paragraphs.push_str(text);
             }
             XmlEvent::Text(_) => {}
         }
-        self.depth == 0
+        Ok(self.depth == 0)
     }
 
-    fn start(&mut self, name: &str, attrs: &Attrs<'a>, empty_start: bool) {
+    fn start(
+        &mut self,
+        name: &str,
+        attrs: &Attrs<'a>,
+        empty_start: bool,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         match name {
             "text:p" => {
                 if self.paragraph_depth == 0 {
-                    if self.fields.paragraph_count > 0 {
+                    if self.want_text && self.fields.paragraph_count > 0 {
+                        budget.charge(1, "ODS 단락 개행")?;
                         self.fields.paragraphs.push('\n');
                     }
                     self.fields.paragraph_count += 1;
@@ -213,14 +228,15 @@ impl<'a> CellBuilder<'a> {
                     self.paragraph_depth += 1;
                 }
             }
-            _ if self.paragraph_depth == 0 => {}
+            _ if !self.want_text || self.paragraph_depth == 0 => {}
             "text:s" => {
                 let count = attrs
                     .iter_raw()
                     .find(|(n, _)| matches!(*n, "text:c" | "c"))
                     .and_then(|(_, v)| unescape_cow(v).trim().parse::<usize>().ok())
-                    .unwrap_or(1)
-                    .min(MAX_TEXT_SPACES);
+                    .unwrap_or(1);
+                budget.charge(count, "ODS 공백 확장")?;
+                let count = count.min(MAX_TEXT_SPACES);
                 self.fields
                     .paragraphs
                     .extend(std::iter::repeat_n(' ', count));
@@ -236,10 +252,17 @@ impl<'a> CellBuilder<'a> {
                 }
                 self.cell.link = href.map(|href| (href, title));
             }
-            "text:tab" => self.fields.paragraphs.push('\t'),
-            "text:line-break" => self.fields.paragraphs.push('\n'),
+            "text:tab" => {
+                budget.charge(1, "ODS 탭")?;
+                self.fields.paragraphs.push('\t');
+            }
+            "text:line-break" => {
+                budget.charge(1, "ODS 줄바꿈")?;
+                self.fields.paragraphs.push('\n');
+            }
             _ => {}
         }
+        Ok(())
     }
 
     fn finish(mut self, want_text: bool) -> OdsCell<'a> {
@@ -284,6 +307,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
     xml: &str,
     want_text: bool,
     sink: &mut S,
+    budget: &mut DecodeBudget,
 ) -> Result<(), EasyOfficeError> {
     let mut reader = XmlReader::unbounded(xml);
     let mut table_nesting = 0usize;
@@ -295,7 +319,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
     let mut cell: Option<CellBuilder<'_>> = None;
     while let Some(event) = reader.next_event()? {
         if let Some(open) = cell.as_mut() {
-            if open.feed(&event, reader.last_start_was_empty()) {
+            if open.feed(&event, reader.last_start_was_empty(), budget)? {
                 if let Some(done) = cell.take() {
                     cells.push(done.finish(want_text));
                 }
@@ -568,7 +592,8 @@ impl TextSink {
 /// Reads every table of `content_xml`.
 pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
     let mut sink = TextSink::new(false);
-    walk_ods(content_xml, true, &mut sink)?;
+    let mut budget = DecodeBudget::new();
+    walk_ods(content_xml, true, &mut sink, &mut budget)?;
     Ok(sink.into_sheets())
 }
 
@@ -581,7 +606,8 @@ pub(crate) fn read_ods_sheets_with_styling(
         TextSink::new(true),
         (StyleSink::new(&styles), ValidationSink::default()),
     );
-    walk_ods(content_xml, true, &mut sinks)?;
+    let mut budget = DecodeBudget::new();
+    walk_ods(content_xml, true, &mut sinks, &mut budget)?;
     let (mut text, (style, validation)) = sinks;
     let table_spills = std::mem::take(&mut text.table_spills);
     let mut tables = with_rules(content_xml, style.into_tables(), validation);

@@ -74,6 +74,8 @@ pub(crate) mod xlsx_parts;
 pub(crate) mod xlsx_protect;
 #[path = "xlsx_sheet.rs"]
 pub(crate) mod xlsx_sheet;
+#[path = "xlsx_sheet_writer.rs"]
+pub(crate) mod xlsx_sheet_writer;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
 #[path = "xlsx_view.rs"]

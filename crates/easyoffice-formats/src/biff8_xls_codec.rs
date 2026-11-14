@@ -61,8 +61,10 @@ impl LegacyOle2Codec {
 
     #[inline]
     pub(crate) fn format_biff_number(num: f64) -> String {
-        if num.fract() == 0.0 && num.abs() < 1e15 {
-            format!("{num:.0}")
+        if num == 0.0 {
+            "0".to_string()
+        } else if num.fract() == 0.0 && num.abs() < 1e15 {
+            (num as i64).to_string()
         } else {
             format!("{num}")
         }

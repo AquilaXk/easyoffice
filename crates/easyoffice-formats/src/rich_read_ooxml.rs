@@ -14,7 +14,7 @@ use crate::rich_document::{
 };
 use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{
-    drawing_picture, load_docx_frame_targets, load_docx_hyperlinks, DocxMedia, DrawingOutcome,
+    drawing_picture, load_docx_frame_targets, DocxMedia, DocxRelationships, DrawingOutcome,
 };
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_read_page_setup::{
@@ -653,14 +653,15 @@ impl DocxWalker {
                 let text = self.cell_paras.join("\n");
                 self.cell_paras.clear();
                 self.text_budget.charge_cell(text.len(), "DOCX 표 셀")?;
-                self.push_cell(text);
+                self.push_cell(text)?;
             }
             "w:tr" if self.tbl_depth == 1 => self.table.end_row(),
             "w:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
                     self.text_budget.charge_block(0, "DOCX 표")?;
-                    let (table, dropped) = std::mem::take(&mut self.table).finish();
+                    let (table, dropped) =
+                        std::mem::take(&mut self.table).finish(&mut self.text_budget)?;
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
                 }
@@ -670,13 +671,16 @@ impl DocxWalker {
         Ok(())
     }
 
-    fn push_cell(&mut self, text: String) {
+    fn push_cell(&mut self, text: String) -> Result<(), EasyOfficeError> {
         let span = self.cell_span;
         match self.cell_v_merge {
-            VMerge::None => self.table.spanning(text, span),
-            VMerge::Restart => self.table.restart(text, span),
-            VMerge::Continue => self.table.continue_above(text, span),
+            VMerge::None => self.table.spanning(text, span, &mut self.text_budget)?,
+            VMerge::Restart => self.table.restart(text, span, &mut self.text_budget)?,
+            VMerge::Continue => self
+                .table
+                .continue_above(text, span, &mut self.text_budget)?,
         }
+        Ok(())
     }
 
     /// Records the picture of a `w:drawing` in the open paragraph, or a warning when skipped.
@@ -839,8 +843,8 @@ fn read_frame_part(
 
 /// The header and footer of the page: the default one of the first section that has one. First-page and
 /// odd/even ones, and ones that differ between sections, are reported and not kept.
-fn read_page_frame(
-    entries: &[crate::ZipArchiveEntry],
+fn read_page_frame_with_targets(
+    targets: &HashMap<String, String>,
     parts: &[(&str, &str)],
     resolver: &Resolver<'_>,
     media: &DocxMedia<'_>,
@@ -852,7 +856,6 @@ fn read_page_frame(
     if refs.is_empty() {
         return Ok((frame, warnings));
     }
-    let targets = load_docx_frame_targets(entries)?;
     let even = even_and_odd_headers(checked_part(parts, "word/settings.xml"))?;
     let (mut other_pages, mut other_sections) = (false, false);
     for header in [true, false] {
@@ -890,6 +893,19 @@ fn read_page_frame(
     Ok((frame, warnings))
 }
 
+#[allow(dead_code)]
+fn read_page_frame(
+    entries: &[crate::ZipArchiveEntry],
+    parts: &[(&str, &str)],
+    resolver: &Resolver<'_>,
+    media: &DocxMedia<'_>,
+    refs: &[FrameRef],
+    title_pg: bool,
+) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
+    let targets = load_docx_frame_targets(entries)?;
+    read_page_frame_with_targets(&targets, parts, resolver, media, refs, title_pg)
+}
+
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.
 pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
@@ -920,14 +936,15 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         styles: &styles,
         numbering: &numbering,
     };
-    let media = DocxMedia::load(&entries)?;
+    let docx_rels = DocxRelationships::load(&entries)?;
+    let media = docx_rels.media;
     let mut walker = DocxWalker {
-        links: load_docx_hyperlinks(&entries)?,
+        links: docx_rels.links,
         ..DocxWalker::default()
     };
     walk_part(doc_xml, &mut walker, &resolver, &media)?;
-    let (mut page_frame, frame_warnings) = read_page_frame(
-        &entries,
+    let (mut page_frame, frame_warnings) = read_page_frame_with_targets(
+        &docx_rels.frame_targets,
         &parts,
         &resolver,
         &media,

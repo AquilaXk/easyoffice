@@ -2,6 +2,8 @@
 //! wraps a group in its own element. Only addresses that pass [`safe_link_target`] are written; any
 //! other run is written as plain text.
 
+use std::collections::HashMap;
+
 use crate::rich_document::safe_link_target;
 use crate::{RichRun, XmlSanitizer};
 
@@ -45,15 +47,20 @@ const DOCX_HYPERLINK_REL_TYPE: &str =
 #[derive(Default)]
 pub(crate) struct DocxLinks {
     urls: Vec<String>,
+    index: HashMap<String, usize>,
 }
 
 impl DocxLinks {
     pub(crate) fn rel_id(&mut self, url: &str) -> String {
-        let at = self.urls.iter().position(|u| u == url).unwrap_or_else(|| {
+        let idx = if let Some(&at) = self.index.get(url) {
+            at
+        } else {
+            let at = self.urls.len();
             self.urls.push(url.to_string());
-            self.urls.len() - 1
-        });
-        format!("rIdLink{}", at + 1)
+            self.index.insert(url.to_string(), at);
+            at
+        };
+        format!("rIdLink{}", idx + 1)
     }
 
     pub(crate) fn relationships(&self) -> String {

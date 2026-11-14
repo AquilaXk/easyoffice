@@ -677,7 +677,11 @@ mod tests {
     #[test]
     fn a_file_written_by_another_program_is_read_by_the_schema() {
         let cond = |field, op: &str, value: &str, ty: &str| {
-            format!("<table:filter-condition table:field-number=\"{field}\" table:value=\"{value}\" table:operator=\"{op}\" table:data-type=\"{ty}\"/>")
+            format!(
+                "<table:filter-condition table:field-number=\"{field}\" table:value=\"{}\" table:operator=\"{}\" table:data-type=\"{ty}\"/>",
+                XmlSanitizer::escape(value),
+                XmlSanitizer::escape(op)
+            )
         };
         // A lone condition, an AND of two conditions on one field, and a set of values.
         let lone = parse_filter(&cond(1, ">=", "5", "number"), &range());

@@ -16,7 +16,8 @@ pub const HWP5_PUA_BMP_SYMBOLS: &[u16] = &[
 
 pub fn hwp5_symbol_to_plane15(unit: u16) -> Option<u32> {
     HWP5_PUA_BMP_SYMBOLS
-        .contains(&unit)
+        .binary_search(&unit)
+        .is_ok()
         .then(|| PLANE15_PUA_BASE | u32::from(unit & 0x0FFF))
 }
 
@@ -157,24 +158,41 @@ enum EqToken {
 
 const FONT_PREFIXES: &[&str] = &["bold", "rm", "it"];
 
-const KNOWN_COMMANDS_LIST: &str = "over atop sqrt root of sup sub lsub lsup from to left right \
-sum prod coprod int oint dint tint bigcup bigcap lim matrix pmatrix bmatrix dmatrix cases pile \
-lpile rpile cpile hat bar vec dot ddot tilde acute grave check breve overline underline widehat \
-widetilde overbrace underbrace overrightarrow mathring rm it bold binom choose sin cos tan csc \
-sec cot arcsin arccos arctan sinh cosh tanh log ln lg exp max min det dim gcd lcm mod deg ker \
-hom arg inf alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda \
-mu nu xi omicron pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega times \
-div cdot pm mp circ bullet star ast oplus otimes odot leq le geq ge neq ne approx equiv sim \
-simeq cong propto ll gg subset supset subseteq supseteq in notin ni cup cap emptyset nothing \
-rarrow rightarrow larrow leftarrow lrarrow leftrightarrow uparrow downarrow uarrow darrow \
-mapsto implies iff infty infin partial nabla forall exists exist neg lnot land lor therefore \
-because dots cdots ldots vdots ddots prime aleph hbar ell wp re im angle triangle perp parallel \
-mid scale color langle rangle lfloor rfloor lceil rceil vert dvert line dline";
+#[rustfmt::skip]
+const KNOWN_COMMANDS: &[&str] = &[
+    "acute", "aleph", "alpha", "angle", "approx", "arccos", "arcsin", "arctan", "arg", "ast", "atop", "bar",
+    "because", "beta", "bigcap", "bigcup", "binom", "bmatrix", "bold", "breve", "bullet", "cap", "cases", "cdot",
+    "cdots", "check", "chi", "choose", "circ", "color", "cong", "coprod", "cos", "cosh", "cot", "cpile",
+    "csc", "cup", "darrow", "ddot", "ddots", "deg", "delta", "det", "dim", "dint", "div", "dline",
+    "dmatrix", "dot", "dots", "downarrow", "dvert", "ell", "emptyset", "epsilon", "equiv", "eta", "exist", "exists",
+    "exp", "forall", "from", "gamma", "gcd", "ge", "geq", "gg", "grave", "hat", "hbar", "hom",
+    "iff", "im", "implies", "in", "inf", "infin", "infty", "int", "iota", "it", "kappa", "ker",
+    "lambda", "land", "langle", "larrow", "lceil", "lcm", "ldots", "le", "left", "leftarrow", "leftrightarrow", "leq",
+    "lfloor", "lg", "lim", "line", "ll", "ln", "lnot", "log", "lor", "lpile", "lrarrow", "lsub",
+    "lsup", "mapsto", "mathring", "matrix", "max", "mid", "min", "mod", "mp", "mu", "nabla", "ne",
+    "neg", "neq", "ni", "nothing", "notin", "nu", "odot", "of", "oint", "omega", "omicron", "oplus",
+    "otimes", "over", "overbrace", "overline", "overrightarrow", "parallel", "partial", "perp", "phi", "pi", "pile", "pm",
+    "pmatrix", "prime", "prod", "propto", "psi", "rangle", "rarrow", "rceil", "re", "rfloor", "rho", "right",
+    "rightarrow", "rm", "root", "rpile", "scale", "sec", "sigma", "sim", "simeq", "sin", "sinh", "sqrt",
+    "star", "sub", "subset", "subseteq", "sum", "sup", "supset", "supseteq", "tan", "tanh", "tau", "therefore",
+    "theta", "tilde", "times", "tint", "to", "triangle", "uarrow", "underbrace", "underline", "uparrow", "upsilon", "varepsilon",
+    "varphi", "varpi", "varrho", "varsigma", "vartheta", "vdots", "vec", "vert", "widehat", "widetilde", "wp", "xi",
+    "zeta",
+];
 
 fn is_known_command(word: &str) -> bool {
-    KNOWN_COMMANDS_LIST
-        .split_ascii_whitespace()
-        .any(|w| w.eq_ignore_ascii_case(word))
+    let mut lower_buf = [0u8; 32];
+    if word.len() > lower_buf.len() {
+        return false;
+    }
+    let lower = &mut lower_buf[..word.len()];
+    for (dst, &src) in lower.iter_mut().zip(word.as_bytes()) {
+        *dst = src.to_ascii_lowercase();
+    }
+    let Ok(needle) = std::str::from_utf8(lower) else {
+        return false;
+    };
+    KNOWN_COMMANDS.binary_search(&needle).is_ok()
 }
 
 fn push_eqedit_word_tokens(word: String, tokens: &mut Vec<EqToken>) {

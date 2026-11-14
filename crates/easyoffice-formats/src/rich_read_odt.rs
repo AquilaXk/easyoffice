@@ -439,7 +439,7 @@ impl<'a> OdtWalker<'a> {
                 let repeated = count_attr(attrs, "table:number-columns-repeated");
                 for _ in 0..repeated.min(self.padding_room()) {
                     self.text_budget.charge_cell(0, "ODT 병합 셀")?;
-                    self.table.covered();
+                    self.table.covered(&mut self.text_budget)?;
                 }
             }
             _ => {}
@@ -604,7 +604,8 @@ impl<'a> OdtWalker<'a> {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
                     self.text_budget.charge_block(0, "ODT 표")?;
-                    let (table, dropped) = std::mem::take(&mut self.table).finish();
+                    let (table, dropped) =
+                        std::mem::take(&mut self.table).finish(&mut self.text_budget)?;
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
                 }
@@ -624,10 +625,11 @@ impl<'a> OdtWalker<'a> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
         self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
-        self.table.anchor(text.clone(), row_span, col_span);
+        self.table
+            .anchor(text.clone(), row_span, col_span, &mut self.text_budget)?;
         for _ in 1..repeated {
             self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
-            self.table.cell(text.clone());
+            self.table.cell(text.clone(), &mut self.text_budget)?;
         }
         Ok(())
     }

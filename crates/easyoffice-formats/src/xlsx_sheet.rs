@@ -63,6 +63,9 @@ impl SharedStrings {
     }
 }
 
+const MAX_SST_ITEMS: usize = 1 << 20;
+const MAX_SST_TOTAL_BYTES: usize = 128 * 1024 * 1024;
+
 /// Reads every `si` item: the text of its `t` elements outside `rPh` phonetic runs.
 pub(crate) fn read_shared_strings(xml: &str) -> Result<SharedStrings, EasyOfficeError> {
     let mut table = SharedStrings::default();
@@ -73,9 +76,19 @@ pub(crate) fn read_shared_strings(xml: &str) -> Result<SharedStrings, EasyOffice
     while let Some(event) = reader.next_event()? {
         match event {
             XmlEvent::Start { name: "si", .. } if reader.last_start_was_empty() => {
+                if table.ends.len() >= MAX_SST_ITEMS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "XLSX 공유 문자열(SST) 항목 수가 상한을 초과했습니다.".to_string(),
+                    ));
+                }
                 table.ends.push(table.text.len());
             }
             XmlEvent::Start { name: "si", .. } => {
+                if table.ends.len() >= MAX_SST_ITEMS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "XLSX 공유 문자열(SST) 항목 수가 상한을 초과했습니다.".to_string(),
+                    ));
+                }
                 item_start = Some(table.text.len());
                 phonetic_depth = 0;
             }
@@ -89,7 +102,15 @@ pub(crate) fn read_shared_strings(xml: &str) -> Result<SharedStrings, EasyOffice
                 in_text = true;
             }
             XmlEvent::End("t") => in_text = false,
-            XmlEvent::Text(text) if in_text => table.text.push_str(&text),
+            XmlEvent::Text(text) if in_text => {
+                if table.text.len().saturating_add(text.len()) > MAX_SST_TOTAL_BYTES {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "XLSX 공유 문자열(SST) 누적 바이트가 상한(128 MiB)을 초과했습니다."
+                            .to_string(),
+                    ));
+                }
+                table.text.push_str(&text);
+            }
             XmlEvent::End("si") => {
                 if let Some(start) = item_start.take() {
                     table.close_item(start);
@@ -196,7 +217,7 @@ fn cell_position(
 fn attrs_flag(attrs: &Attrs<'_>, name: &str) -> bool {
     attrs
         .iter_raw()
-        .any(|(n, v)| plain_name(n) == name && matches!(&*unescape_cow(v), "1" | "true"))
+        .any(|(n, v)| plain_name(n) == name && matches!(v.trim(), "1" | "true"))
 }
 
 /// What the decoded-budget error names when a cell's copy of a string or formula is refused.
@@ -233,7 +254,7 @@ impl<'s> SheetScanner<'s> {
         let declared = attrs
             .iter_raw()
             .find(|(name, _)| plain_name(name) == "r")
-            .and_then(|(_, value)| unescape_cow(value).parse::<u32>().ok())
+            .and_then(|(_, value)| value.trim().parse::<u32>().ok())
             .and_then(|r| r.checked_sub(1));
         self.row = declared.unwrap_or(self.next_row);
         if self.row >= OoxmlCodec::MAX_XLSX_ROWS {
@@ -275,7 +296,7 @@ impl<'s> SheetScanner<'s> {
         attrs
             .iter_raw()
             .find(|(name, _)| plain_name(name) == attr)
-            .and_then(|(_, value)| unescape_cow(value).parse::<usize>().ok())
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
             .and_then(|i| self.xf_styles.get(i))
             .is_some_and(|style| style.unlocked)
     }
@@ -412,7 +433,7 @@ impl<'s> SheetScanner<'s> {
         let merge = attrs
             .iter_raw()
             .find(|(name, _)| plain_name(name) == "ref")
-            .and_then(|(_, value)| parse_merge(&unescape_cow(value)));
+            .and_then(|(_, value)| parse_merge(value));
         self.styling.merges.extend(merge);
     }
 
@@ -478,16 +499,22 @@ impl<'s> SheetScanner<'s> {
                 let (mut kind, mut index, mut array_ref) = (None, None, None);
                 for (name, value) in attrs.iter_raw() {
                     match plain_name(name) {
-                        "t" => kind.get_or_insert_with(|| unescape_cow(value)),
-                        "si" => index.get_or_insert_with(|| unescape_cow(value)),
-                        "ref" => array_ref.get_or_insert_with(|| unescape_cow(value)),
+                        "t" => {
+                            kind.get_or_insert(value);
+                        }
+                        "si" => {
+                            index.get_or_insert(value);
+                        }
+                        "ref" => {
+                            array_ref.get_or_insert_with(|| unescape_cow(value));
+                        }
                         _ => continue,
                     };
                 }
-                let is_array = kind.as_deref() == Some("array");
+                let is_array = kind == Some("array");
                 cell.formula = Some(Formula {
-                    shared: kind.as_deref() == Some("shared"),
-                    index: index.and_then(|s| s.parse::<u32>().ok()),
+                    shared: kind == Some("shared"),
+                    index: index.and_then(|s| s.trim().parse::<u32>().ok()),
                     body: Cow::Borrowed(""),
                     array_ref: array_ref.filter(|_| is_array),
                 });

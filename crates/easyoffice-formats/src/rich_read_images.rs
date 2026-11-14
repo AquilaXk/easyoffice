@@ -18,65 +18,85 @@ const HYPERLINK_REL_SUFFIX: &str = "/hyperlink";
 const HEADER_REL_SUFFIX: &str = "/header";
 const FOOTER_REL_SUFFIX: &str = "/footer";
 
+/// Parsed relationships of `word/document.xml.rels`, extracted in a single pass.
+pub(crate) struct DocxRelationships<'a> {
+    pub(crate) links: HashMap<String, String>,
+    pub(crate) frame_targets: HashMap<String, String>,
+    pub(crate) media: DocxMedia<'a>,
+}
+
+impl<'a> DocxRelationships<'a> {
+    pub(crate) fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
+        let mut links = HashMap::new();
+        let mut frame_targets = HashMap::new();
+        let mut by_rel = HashMap::new();
+
+        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
+            entries.iter().map(|e| (e.path.as_str(), e)).collect();
+
+        if let Some(&rels) = entry_by_path.get(DOCUMENT_RELS_PATH) {
+            let xml = std::str::from_utf8(&rels.data).map_err(|_| {
+                EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류"))
+            })?;
+            XmlSanitizer::validate_safe_xml(xml)?;
+            for event in XmlReader::new(xml) {
+                let XmlEvent::Start { name, attrs } = event? else {
+                    continue;
+                };
+                if name != "Relationship" {
+                    continue;
+                }
+                let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
+                    continue;
+                };
+                let rel_type = attr(&attrs, "Type").unwrap_or_default();
+                let external = attr(&attrs, "TargetMode").as_deref() == Some("External");
+
+                if rel_type.ends_with(HYPERLINK_REL_SUFFIX) {
+                    if let Some(url) = safe_link_target(&target) {
+                        links.insert(id.to_string(), url.to_string());
+                    }
+                } else if rel_type.ends_with(HEADER_REL_SUFFIX)
+                    || rel_type.ends_with(FOOTER_REL_SUFFIX)
+                {
+                    if !external {
+                        if let Some(path) = resolve_target(&target) {
+                            frame_targets.insert(id.to_string(), path);
+                        }
+                    }
+                } else if rel_type.ends_with(IMAGE_REL_SUFFIX) && !external {
+                    let entry = resolve_target(&target)
+                        .and_then(|path| entry_by_path.get(path.as_str()).copied());
+                    if let Some(entry) = entry {
+                        by_rel.insert(id.to_string(), entry);
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            links,
+            frame_targets,
+            media: DocxMedia::new(by_rel),
+        })
+    }
+}
+
 /// Relationship id -> address of the external hyperlinks of `word/document.xml`. An address that
 /// is not a [`safe_link_target`] is left out, so its text reads as plain text.
+#[allow(dead_code)]
 pub(crate) fn load_docx_hyperlinks(
     entries: &[ZipArchiveEntry],
 ) -> Result<HashMap<String, String>, EasyOfficeError> {
-    let mut links = HashMap::new();
-    let Some(rels) = entries.iter().find(|e| e.path == DOCUMENT_RELS_PATH) else {
-        return Ok(links);
-    };
-    let xml = std::str::from_utf8(&rels.data)
-        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류")))?;
-    XmlSanitizer::validate_safe_xml(xml)?;
-    for event in XmlReader::new(xml) {
-        let XmlEvent::Start { name, attrs } = event? else {
-            continue;
-        };
-        let is_link = attr(&attrs, "Type").is_some_and(|t| t.ends_with(HYPERLINK_REL_SUFFIX));
-        if name != "Relationship" || !is_link {
-            continue;
-        }
-        let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
-            continue;
-        };
-        if let Some(url) = safe_link_target(&target) {
-            links.insert(id.to_string(), url.to_string());
-        }
-    }
-    Ok(links)
+    Ok(DocxRelationships::load(entries)?.links)
 }
 
 /// Relationship id -> part path of the header and footer parts of `word/document.xml`.
+#[allow(dead_code)]
 pub(crate) fn load_docx_frame_targets(
     entries: &[ZipArchiveEntry],
 ) -> Result<HashMap<String, String>, EasyOfficeError> {
-    let mut targets = HashMap::new();
-    let Some(rels) = entries.iter().find(|e| e.path == DOCUMENT_RELS_PATH) else {
-        return Ok(targets);
-    };
-    let xml = std::str::from_utf8(&rels.data)
-        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류")))?;
-    XmlSanitizer::validate_safe_xml(xml)?;
-    for event in XmlReader::new(xml) {
-        let XmlEvent::Start { name, attrs } = event? else {
-            continue;
-        };
-        let is_frame = attr(&attrs, "Type")
-            .is_some_and(|t| t.ends_with(HEADER_REL_SUFFIX) || t.ends_with(FOOTER_REL_SUFFIX));
-        let external = attr(&attrs, "TargetMode").as_deref() == Some("External");
-        if name != "Relationship" || !is_frame || external {
-            continue;
-        }
-        let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
-            continue;
-        };
-        if let Some(path) = resolve_target(&target) {
-            targets.insert(id.to_string(), path);
-        }
-    }
-    Ok(targets)
+    Ok(DocxRelationships::load(entries)?.frame_targets)
 }
 
 /// Result of reading one `w:drawing`.
@@ -105,36 +125,9 @@ fn resolve_target(target: &str) -> Option<String> {
 }
 
 impl<'a> DocxMedia<'a> {
+    #[allow(dead_code)]
     pub(crate) fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
-        let mut by_rel = HashMap::new();
-        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
-            entries.iter().map(|e| (e.path.as_str(), e)).collect();
-        let Some(&rels) = entry_by_path.get(DOCUMENT_RELS_PATH) else {
-            return Ok(Self::new(by_rel));
-        };
-        let xml = std::str::from_utf8(&rels.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류"))
-        })?;
-        XmlSanitizer::validate_safe_xml(xml)?;
-        for event in XmlReader::new(xml) {
-            let XmlEvent::Start { name, attrs } = event? else {
-                continue;
-            };
-            let is_image = attr(&attrs, "Type").is_some_and(|t| t.ends_with(IMAGE_REL_SUFFIX));
-            let external = attr(&attrs, "TargetMode").as_deref() == Some("External");
-            if name != "Relationship" || !is_image || external {
-                continue;
-            };
-            let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
-                continue;
-            };
-            let entry =
-                resolve_target(&target).and_then(|path| entry_by_path.get(path.as_str()).copied());
-            if let Some(entry) = entry {
-                by_rel.insert(id.to_string(), entry);
-            }
-        }
-        Ok(Self::new(by_rel))
+        Ok(DocxRelationships::load(entries)?.media)
     }
 
     fn new(by_rel: HashMap<String, &'a ZipArchiveEntry>) -> Self {

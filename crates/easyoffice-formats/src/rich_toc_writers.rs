@@ -32,21 +32,36 @@ fn is_entry(block: Option<&RichBlock>) -> bool {
 }
 
 /// Field markup to put before and after the runs of the paragraph at `index` (`(begin, end)`, both empty
-/// unless it is the first or the last entry of a block).
-pub(crate) fn docx_field_edges(blocks: &[RichBlock], index: usize) -> (String, &'static str) {
+/// unless it is the first or the last entry of a block), with optional shape caching.
+pub(crate) fn docx_field_edges_cached(
+    blocks: &[RichBlock],
+    index: usize,
+    cache: &mut Option<TocShape>,
+) -> (String, &'static str) {
     if !is_entry(blocks.get(index)) {
+        *cache = None;
         return (String::new(), "");
     }
     let first = index == 0 || !is_entry(blocks.get(index - 1));
     let last = !is_entry(blocks.get(index + 1));
-    (
-        if first {
-            docx_field_begin(&shape_from(blocks, index))
-        } else {
-            String::new()
-        },
-        if last { DOCX_FIELD_END } else { "" },
-    )
+    let begin = if first {
+        let shape = cache.get_or_insert_with(|| shape_from(blocks, index));
+        docx_field_begin(shape)
+    } else {
+        String::new()
+    };
+    if last {
+        *cache = None;
+        (begin, DOCX_FIELD_END)
+    } else {
+        (begin, "")
+    }
+}
+
+/// Field markup to put before and after the runs of the paragraph at `index`.
+#[allow(dead_code)]
+pub(crate) fn docx_field_edges(blocks: &[RichBlock], index: usize) -> (String, &'static str) {
+    docx_field_edges_cached(blocks, index, &mut None)
 }
 
 /// What a table-of-contents block needs to say about itself: the deepest entry level (at least 1) and, when
@@ -101,10 +116,11 @@ pub(crate) fn docx_toc_page(p: &RichParagraph) -> String {
     let target = p
         .runs
         .iter()
-        .find_map(|r| r.link.as_deref()?.strip_prefix('#'));
+        .find_map(|r| r.link.as_deref()?.strip_prefix('#'))
+        .and_then(crate::rich_document::toc_bookmark_number);
     let page_xml = match target {
-        Some(name) => format!(
-            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGEREF {name} \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>{result}{DOCX_FIELD_END}"
+        Some(num) => format!(
+            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGEREF _Toc{num} \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>{result}{DOCX_FIELD_END}"
         ),
         None => result,
     };

@@ -807,6 +807,7 @@ pub(crate) fn parse_ods_styling(
 ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (StyleSink::new(&styles), ValidationSink::default());
-    walk_ods(content_xml, false, &mut sinks)?;
+    let mut budget = crate::decode_budget::DecodeBudget::new();
+    walk_ods(content_xml, false, &mut sinks, &mut budget)?;
     Ok(with_rules(content_xml, sinks.0.into_tables(), sinks.1))
 }

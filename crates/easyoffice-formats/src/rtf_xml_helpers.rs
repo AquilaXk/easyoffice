@@ -55,6 +55,7 @@ impl RtfCodec {
         let mut title = "RTF 문서".to_string();
         let mut paragraphs: Vec<String> = Vec::new();
         let mut tables: Vec<(usize, Vec<Vec<String>>)> = Vec::new();
+        let mut budget = crate::decode_budget::DecodeBudget::new();
 
         for raw_line in raw.lines() {
             let line = raw_line.trim();
@@ -63,20 +64,26 @@ impl RtfCodec {
                 .and_then(|s| s.strip_suffix("}}"))
             {
                 title = Self::unescape_rtf_text(rest);
+                budget.charge(title.len(), "RTF 플랫 제목")?;
             } else if let Some(rest) = line
                 .strip_prefix("\\pard")
                 .and_then(|s| s.strip_suffix("\\par"))
             {
                 let text = crate::rich_rtf_writer::strip_rtf_format_words(rest);
-                paragraphs.push(Self::unescape_rtf_text(&text));
+                let unescaped = Self::unescape_rtf_text(&text);
+                budget.charge_block(unescaped.len(), "RTF 플랫 단락")?;
+                paragraphs.push(unescaped);
             } else if line.starts_with("{\\trowd") && line.ends_with("\\row}") {
                 let tbl_idx = extract_between(line, "{\\*\\tblidx ", "}")
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
-                let row_cells = crate::rich_rtf_table::flat_row_cells(line)
-                    .iter()
-                    .map(|c| Self::unescape_rtf_text(c))
-                    .collect();
+                let raw_cells = crate::rich_rtf_table::flat_row_cells(line);
+                let mut row_cells = Vec::with_capacity(raw_cells.len());
+                for c in raw_cells {
+                    let unescaped = Self::unescape_rtf_text(&c);
+                    budget.charge_cell(unescaped.len(), "RTF 플랫 표 셀")?;
+                    row_cells.push(unescaped);
+                }
                 if let Some(last) = tables.last_mut().filter(|(idx, _)| *idx == tbl_idx) {
                     last.1.push(row_cells);
                 } else {
@@ -327,11 +334,47 @@ fn find_tag_close_gt(bytes: &[u8], start: usize) -> Option<usize> {
 }
 
 #[inline]
+fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'-' && bytes[i + 1] == b'-' && bytes[i + 2] == b'>' {
+            return Some(i + 3);
+        }
+        i += 1;
+    }
+    None
+}
+
+#[inline]
+fn find_cdata_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b']' && bytes[i + 1] == b']' && bytes[i + 2] == b'>' {
+            return Some(i + 3);
+        }
+        i += 1;
+    }
+    None
+}
+
+#[inline]
 fn find_valid_open_tag(bytes: &[u8], start: usize, tag_bytes: &[u8]) -> Option<(usize, usize)> {
     let need = 1 + tag_bytes.len();
     let mut pos = start;
     while pos + need < bytes.len() {
         let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
+        if bytes[lt..].starts_with(b"<!--") {
+            if let Some(c_end) = find_comment_end(bytes, lt + 4) {
+                pos = c_end;
+                continue;
+            }
+        }
+        if bytes[lt..].starts_with(b"<![CDATA[") {
+            if let Some(c_end) = find_cdata_end(bytes, lt + 9) {
+                pos = c_end;
+                continue;
+            }
+        }
         let after_tag = lt + need;
         if after_tag >= bytes.len() {
             return None;
@@ -357,6 +400,18 @@ fn find_matching_close_tag(
 
     while scan < bytes.len() {
         let lt = crate::XmlSanitizer::find_byte_swar(bytes, scan, b'<')?;
+        if bytes[lt..].starts_with(b"<!--") {
+            if let Some(c_end) = find_comment_end(bytes, lt + 4) {
+                scan = c_end;
+                continue;
+            }
+        }
+        if bytes[lt..].starts_with(b"<![CDATA[") {
+            if let Some(c_end) = find_cdata_end(bytes, lt + 9) {
+                scan = c_end;
+                continue;
+            }
+        }
         if lt + close_prefix_len < bytes.len()
             && bytes[lt + 1] == b'/'
             && &bytes[lt + 2..lt + close_prefix_len] == tag_bytes
@@ -479,9 +534,10 @@ pub(crate) fn extract_tags_with_attrs<'a>(xml: &'a str, tag: &str) -> Vec<(&'a s
     out
 }
 
-pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
+pub(crate) fn extract_tags_or_self_closing_with_attrs_limit<'a>(
     xml: &'a str,
     tag: &str,
+    limit: usize,
 ) -> Vec<(&'a str, &'a str)> {
     let bytes = xml.as_bytes();
     let tag_bytes = tag.as_bytes();
@@ -489,7 +545,10 @@ pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
     let mut out = Vec::new();
     let mut cursor = 0usize;
 
-    while let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) {
+    while out.len() < limit {
+        let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) else {
+            break;
+        };
         let after_tag = open_pos + open_prefix_len;
         if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
             let mut attr_end = gt_pos;
@@ -513,6 +572,13 @@ pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
         cursor = next_cursor;
     }
     out
+}
+
+pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
+    xml: &'a str,
+    tag: &str,
+) -> Vec<(&'a str, &'a str)> {
+    extract_tags_or_self_closing_with_attrs_limit(xml, tag, usize::MAX)
 }
 
 #[cfg(test)]
@@ -569,7 +635,7 @@ pub(crate) fn extract_ods_cells_from_row(row_xml: &str) -> Vec<(bool, &str, &str
     out
 }
 
-pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
+pub(crate) fn replace_tag_blocks(xml: &str, tag: &str, replacement: &str) -> String {
     let bytes = xml.as_bytes();
     let tag_bytes = tag.as_bytes();
     let open_prefix_len = 1 + tag_bytes.len();
@@ -578,6 +644,7 @@ pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
 
     while let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) {
         out.push_str(&xml[cursor..open_pos]);
+        out.push_str(replacement);
         let after_tag = open_pos + open_prefix_len;
         if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
             cursor = gt_pos + 1;
@@ -593,6 +660,10 @@ pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
     }
     out.push_str(&xml[cursor..]);
     out
+}
+
+pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
+    replace_tag_blocks(xml, tag, "")
 }
 
 pub(crate) fn extract_balanced_elements<'a>(xml: &'a str, tag: &str) -> Vec<(&'a str, &'a str)> {
@@ -652,21 +723,30 @@ pub(crate) fn extract_odf_blocks_in_order<'a>(
     out
 }
 
-pub(crate) fn extract_odf_inline_text(xml_fragment: &str) -> String {
+pub(crate) fn extract_odf_inline_text_with_budget(
+    xml_fragment: &str,
+    budget: &mut crate::decode_budget::DecodeBudget,
+) -> Result<String, EasyOfficeError> {
     let bytes = xml_fragment.as_bytes();
     let mut out = String::with_capacity(xml_fragment.len());
     let mut cursor = 0usize;
 
     while cursor < bytes.len() {
         let Some(lt) = crate::XmlSanitizer::find_byte_swar(bytes, cursor, b'<') else {
-            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[cursor..]));
+            let tail = crate::XmlSanitizer::unescape(&xml_fragment[cursor..]);
+            budget.charge(tail.len(), "ODF 텍스트 꼬리")?;
+            out.push_str(&tail);
             break;
         };
         if lt > cursor {
-            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[cursor..lt]));
+            let chunk = crate::XmlSanitizer::unescape(&xml_fragment[cursor..lt]);
+            budget.charge(chunk.len(), "ODF 텍스트 청크")?;
+            out.push_str(&chunk);
         }
         let Some(gt) = find_tag_close_gt(bytes, lt + 1) else {
-            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[lt..]));
+            let tail = crate::XmlSanitizer::unescape(&xml_fragment[lt..]);
+            budget.charge(tail.len(), "ODF 텍스트 꼬리")?;
+            out.push_str(&tail);
             break;
         };
         let tag_inner = &bytes[lt + 1..gt];
@@ -678,175 +758,35 @@ pub(crate) fn extract_odf_inline_text(xml_fragment: &str) -> String {
                 let count = extract_attr_from_fragment(attrs_frag, "text:c")
                     .or_else(|| extract_attr_from_fragment(attrs_frag, "c"))
                     .and_then(|v| v.trim().parse::<usize>().ok())
-                    .unwrap_or(1)
-                    .min(4096);
+                    .unwrap_or(1);
+                budget.charge(count, "ODF 공백 확장")?;
+                let count = count.min(4096);
                 for _ in 0..count {
                     out.push(' ');
                 }
             } else if tag_inner.starts_with(b"text:tab")
                 && (tag_inner.len() == 8 || is_tag_name_boundary(tag_inner[8]))
             {
+                budget.charge(1, "ODF 탭")?;
                 out.push('\t');
             } else if tag_inner.starts_with(b"text:line-break")
                 && (tag_inner.len() == 15 || is_tag_name_boundary(tag_inner[15]))
             {
+                budget.charge(1, "ODF 줄바꿈")?;
                 out.push('\n');
             }
         }
         cursor = gt + 1;
     }
-    out
+    Ok(out)
 }
 
-pub(crate) fn to_open_formula_syntax_impl(formula_without_eq: &str) -> String {
-    let bytes = formula_without_eq.as_bytes();
-    let mut out = String::with_capacity(formula_without_eq.len() + 16);
-    let mut i = 0usize;
-    let mut in_quotes = false;
-
-    while i < bytes.len() {
-        if bytes[i] == b'"' {
-            in_quotes = !in_quotes;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        if in_quotes {
-            let ch = formula_without_eq[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-            continue;
-        }
-        if bytes[i] == b'[' {
-            let mut j = i + 1;
-            let mut in_sq = false;
-            while j < bytes.len() {
-                if bytes[j] == b'\'' {
-                    in_sq = !in_sq;
-                } else if bytes[j] == b']' && !in_sq {
-                    j += 1;
-                    break;
-                }
-                j += formula_without_eq[j..].chars().next().unwrap().len_utf8();
-            }
-            out.push_str(&formula_without_eq[i..j]);
-            i = j;
-            continue;
-        }
-        if let Some((consumed, formatted)) = try_convert_a1_or_sheet_ref(&formula_without_eq[i..]) {
-            let prev_is_ident = i > 0
-                && (bytes[i - 1].is_ascii_alphanumeric()
-                    || bytes[i - 1] == b'_'
-                    || bytes[i - 1] == b'.');
-            if !prev_is_ident {
-                out.push_str(&formatted);
-                i += consumed;
-                continue;
-            }
-        }
-        let ch = formula_without_eq[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
+pub(crate) fn extract_odf_inline_text(xml_fragment: &str) -> String {
+    let mut b = crate::decode_budget::DecodeBudget::new();
+    extract_odf_inline_text_with_budget(xml_fragment, &mut b).unwrap_or_default()
 }
 
-fn scan_optional_sheet_prefix(s: &str) -> (Option<&str>, usize) {
-    let bytes = s.as_bytes();
-    if bytes.first() == Some(&b'\'') {
-        let mut idx = 1usize;
-        while idx < bytes.len() {
-            if bytes[idx] == b'\'' {
-                if idx + 1 < bytes.len() && bytes[idx + 1] == b'\'' {
-                    idx += 2;
-                    continue;
-                }
-                if idx + 1 < bytes.len() && bytes[idx + 1] == b'!' {
-                    return (Some(&s[..=idx]), idx + 2);
-                }
-                break;
-            }
-            idx += s[idx..].chars().next().unwrap().len_utf8();
-        }
-    } else if let Some(bang_pos) = s.find('!') {
-        let candidate = &s[..bang_pos];
-        if !candidate.is_empty() && candidate.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            return (Some(candidate), bang_pos + 1);
-        }
-    }
-    (None, 0)
-}
-
-fn try_convert_a1_or_sheet_ref(s: &str) -> Option<(usize, String)> {
-    let bytes = s.as_bytes();
-    let (sheet_prefix, pos) = scan_optional_sheet_prefix(s);
-    let (c1_len, c1_str) = scan_single_a1_coord(&bytes[pos..])?;
-    let mut end_pos = pos + c1_len;
-    if end_pos < bytes.len() && bytes[end_pos] == b'(' {
-        return None;
-    }
-
-    if end_pos < bytes.len() && bytes[end_pos] == b':' {
-        let rhs_slice = &s[end_pos + 1..];
-        let (rhs_sheet, rhs_pos) = scan_optional_sheet_prefix(rhs_slice);
-        if let Some((c2_len, c2_str)) = scan_single_a1_coord(&rhs_slice.as_bytes()[rhs_pos..]) {
-            let after_range = end_pos + 1 + rhs_pos + c2_len;
-            if after_range >= bytes.len() || !bytes[after_range].is_ascii_alphanumeric() {
-                end_pos = after_range;
-                let left_part = match sheet_prefix {
-                    Some(sh) => format!("{sh}.{c1_str}"),
-                    None => format!(".{c1_str}"),
-                };
-                let right_part = match rhs_sheet {
-                    Some(rsh) if Some(rsh) != sheet_prefix => format!("{rsh}.{c2_str}"),
-                    _ => format!(".{c2_str}"),
-                };
-                return Some((end_pos, format!("[{left_part}:{right_part}]")));
-            }
-        }
-    }
-
-    let formatted = if let Some(sh) = sheet_prefix {
-        format!("[{sh}.{c1_str}]")
-    } else {
-        format!("[.{c1_str}]")
-    };
-    Some((end_pos, formatted))
-}
-
-pub(crate) fn scan_single_a1_coord(bytes: &[u8]) -> Option<(usize, String)> {
-    let mut idx = 0usize;
-    let mut out = String::new();
-    if idx < bytes.len() && bytes[idx] == b'$' {
-        out.push('$');
-        idx += 1;
-    }
-    let col_start = idx;
-    while idx < bytes.len() && bytes[idx].is_ascii_alphabetic() {
-        out.push(bytes[idx] as char);
-        idx += 1;
-    }
-    let col_len = idx - col_start;
-    if col_len == 0 || col_len > 3 {
-        return None;
-    }
-    if idx < bytes.len() && bytes[idx] == b'$' {
-        out.push('$');
-        idx += 1;
-    }
-    let row_start = idx;
-    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-        out.push(bytes[idx] as char);
-        idx += 1;
-    }
-    if idx == row_start || idx - row_start > 7 {
-        return None;
-    }
-    if idx < bytes.len() && (bytes[idx].is_ascii_alphanumeric() || bytes[idx] == b'_') {
-        return None;
-    }
-    Some((idx, out))
-}
+pub(crate) use crate::open_formula_syntax::{scan_single_a1_coord, to_open_formula_syntax_impl};
 
 #[cfg(test)]
 mod tests {

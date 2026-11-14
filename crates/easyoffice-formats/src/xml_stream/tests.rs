@@ -56,6 +56,11 @@ fn legacy_parse_attrs(raw: &str) -> Result<Vec<(String, String)>, EasyOfficeErro
         let Some(val_end) = XmlSanitizer::find_byte_swar(bytes, value_start, quote) else {
             return Err(corrupt("XML 속성 값이 닫히지 않았습니다."));
         };
+        if XmlSanitizer::find_byte_swar(&bytes[value_start..val_end], 0, b'<').is_some() {
+            return Err(corrupt(
+                "XML 속성 값에 금지된 문자 '<'가 포함되어 있습니다.",
+            ));
+        }
         i = val_end;
         attrs.push((
             name.to_string(),

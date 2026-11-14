@@ -628,31 +628,48 @@ impl HwpxCodec {
 
         let mut tables = Vec::new();
         let mut paragraphs = Vec::new();
+        let mut budget = crate::decode_budget::DecodeBudget::new();
+        budget.charge(title.len(), "HWPX 제목")?;
 
         for (_, sec_entry) in sec_entries {
             let sec_xml = section_xml(&parts, &sec_entry.path)?;
 
             for tbl_body in extract_tag_bodies(sec_xml, "hp:tbl") {
-                tables.push(extract_hwpx_table_rows(tbl_body)?);
+                let rows = extract_hwpx_table_rows(tbl_body)?;
+                for r in &rows {
+                    for c in r {
+                        budget.charge_cell(c.len(), "HWPX 표 셀")?;
+                    }
+                }
+                tables.push(rows);
                 let tbl_without_tc = strip_tag_blocks(tbl_body, "hp:tc");
+                let prev_len = paragraphs.len();
                 append_hwpx_equations(&tbl_without_tc, &mut paragraphs)?;
+                for p in &paragraphs[prev_len..] {
+                    budget.charge(p.len(), "HWPX 수식 텍스트")?;
+                }
             }
 
-            for p_body in extract_tag_bodies(sec_xml, "hp:p") {
-                let has_table = p_body.contains("<hp:tbl");
-                let p_text_only = if has_table {
-                    strip_tag_blocks(p_body, "hp:tbl")
-                } else {
-                    p_body.to_string()
-                };
-                if is_structural_carrier(&p_text_only, has_table) {
+            let sec_tables_replaced =
+                crate::rtf_xml_helpers::replace_tag_blocks(sec_xml, "hp:tbl", "<hp:tbl_Removed/>");
+            for p_body in extract_tag_bodies(&sec_tables_replaced, "hp:p") {
+                budget.charge_block(0, "HWPX 문단")?;
+                let has_table = p_body.contains("<hp:tbl_Removed/>");
+                if is_structural_carrier(p_body, has_table) {
                     continue;
                 }
-                extract_hwpx_paragraphs_and_eqs(&p_text_only, &mut paragraphs)?;
+                let prev_len = paragraphs.len();
+                extract_hwpx_paragraphs_and_eqs(p_body, &mut paragraphs)?;
+                for p in &paragraphs[prev_len..] {
+                    budget.charge(p.len(), "HWPX 문단 텍스트")?;
+                }
             }
-            let sec_without_tables = strip_tag_blocks(sec_xml, "hp:tbl");
-            let outside_p = strip_tag_blocks(&sec_without_tables, "hp:p");
+            let outside_p = strip_tag_blocks(&sec_tables_replaced, "hp:p");
+            let prev_len = paragraphs.len();
             append_hwpx_equations(&outside_p, &mut paragraphs)?;
+            for p in &paragraphs[prev_len..] {
+                budget.charge(p.len(), "HWPX 수식 텍스트")?;
+            }
         }
 
         Ok(HwpxPayload {

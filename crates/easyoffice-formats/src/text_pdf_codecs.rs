@@ -550,6 +550,12 @@ impl PdfSerializer {
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 비어 있습니다.".to_string(),
                 ));
             }
+            if b64.len() > 16 * 1024 * 1024 {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64) 길이가 허용 상한을 초과했습니다."
+                        .to_string(),
+                ));
+            }
             let Some(decoded) = Self::decode_base64_utf8(&b64) else {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)의 Base64/UTF-8 디코딩에 실패했습니다."
@@ -874,9 +880,15 @@ impl PdfSerializer {
             )?
         };
 
-        expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq)?;
-        let ordered_objs = ordered_by_sequence(&objects);
         let mut decoded = DecodeBudget::new();
+        expand_pdf_object_streams(
+            bytes,
+            &mut objects,
+            &flate_cache,
+            &mut order_seq,
+            &mut decoded,
+        )?;
+        let ordered_objs = ordered_by_sequence(&objects);
         let to_unicode = build_tounicode_maps(bytes, &objects, &flate_cache, &mut decoded)?;
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);

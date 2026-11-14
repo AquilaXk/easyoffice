@@ -10,8 +10,6 @@ const MAX_INITIAL_OUT_CAPACITY: usize = 4 * 1024 * 1024;
 const HINTED_GROWTH: usize = 4;
 /// Theoretical upper bound of RFC 1951 DEFLATE expansion (~1032x per compressed input byte).
 const MAX_DEFLATE_EXPANSION: usize = 1_032;
-/// Non-overlapping matches longer than this use `memmove` instead of the 8-byte chunk loop.
-const LONG_COPY_MIN: usize = 32;
 
 /// Flat output buffer: `buf[..pos]` is the produced data, the rest is writable scratch so the
 /// hot loop never goes through `Vec::push` capacity logic.
@@ -113,7 +111,7 @@ impl OutBuf {
     pub(super) fn copy_match(&mut self, distance: usize, match_len: usize) {
         let dst = self.pos;
         let src = dst - distance;
-        if distance >= match_len && match_len > LONG_COPY_MIN {
+        if distance >= match_len {
             self.buf.copy_within(src..src + match_len, dst);
         } else if distance >= 8 {
             // Forward 8-byte chunks are safe: each chunk's source lies entirely before its

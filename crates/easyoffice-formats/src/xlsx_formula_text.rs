@@ -194,48 +194,41 @@ enum Tok {
     Punct(char),
 }
 
+#[inline]
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '.' | '$')
 }
 
-/// The end (a char index) of the structured reference group that opens at `chars[i]`, if one does: it follows
-/// a table's name or starts with `@`, `#` or `[` (PD-225). Its text is one opaque token, so the `[Q1]` after the
-/// comma of `[[#This Row],[Q1]]` is not read as an optional parameter.
-fn structured_group_end(text: &str, chars: &[char], offsets: &[usize], i: usize) -> Option<usize> {
-    let named = i > 0 && is_word_char(chars[i - 1]);
-    let opens = chars[i + 1..]
-        .iter()
-        .find(|c| **c != ' ')
-        .is_some_and(|c| matches!(c, '@' | '#' | '['));
-    if !(named || opens) {
-        return None;
-    }
-    let end = crate::structured_ref::group_end(text, offsets[i])?;
-    offsets
-        .binary_search(&end)
-        .ok()
-        .or((end == text.len()).then_some(chars.len()))
+#[inline]
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$')
 }
 
 fn tokenize(text: &str) -> Vec<Tok> {
-    let chars: Vec<char> = text.chars().collect();
-    let offsets: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '[' {
-            if let Some(end) = structured_group_end(text, &chars, &offsets, i) {
-                out.push(Tok::Quoted(chars[i..end].iter().collect()));
-                i = end;
-                continue;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'[' {
+            let named = i > 0 && text[..i].chars().last().is_some_and(is_word_char);
+            let opens = bytes[i + 1..]
+                .iter()
+                .find(|&&c| c != b' ')
+                .is_some_and(|&c| matches!(c, b'@' | b'#' | b'['));
+            if named || opens {
+                if let Some(end) = crate::structured_ref::group_end(text, i) {
+                    out.push(Tok::Quoted(text[i..end].to_string()));
+                    i = end;
+                    continue;
+                }
             }
         }
-        if c == '"' || c == '\'' {
+        if b == b'"' || b == b'\'' {
             let mut j = i + 1;
-            while j < chars.len() {
-                if chars[j] == c {
-                    if chars.get(j + 1) == Some(&c) {
+            while j < bytes.len() {
+                if bytes[j] == b {
+                    if j + 1 < bytes.len() && bytes[j + 1] == b {
                         j += 2;
                         continue;
                     }
@@ -243,19 +236,52 @@ fn tokenize(text: &str) -> Vec<Tok> {
                 }
                 j += 1;
             }
-            let end = (j + 1).min(chars.len());
-            out.push(Tok::Quoted(chars[i..end].iter().collect()));
+            let end = (j + 1).min(bytes.len());
+            out.push(Tok::Quoted(text[i..end].to_string()));
             i = end;
-        } else if is_word_char(c) {
-            let mut j = i;
-            while j < chars.len() && is_word_char(chars[j]) {
-                j += 1;
+        } else if b.is_ascii() {
+            if is_word_byte(b) {
+                let mut j = i + 1;
+                while j < bytes.len() && is_word_byte(bytes[j]) {
+                    j += 1;
+                }
+                if j < bytes.len() && !bytes[j].is_ascii() {
+                    let mut char_bytes = 0;
+                    for ch in text[j..].chars() {
+                        if is_word_char(ch) {
+                            char_bytes += ch.len_utf8();
+                        } else {
+                            break;
+                        }
+                    }
+                    j += char_bytes;
+                }
+                out.push(Tok::Word(text[i..j].to_string()));
+                i = j;
+            } else {
+                out.push(Tok::Punct(b as char));
+                i += 1;
             }
-            out.push(Tok::Word(chars[i..j].iter().collect()));
-            i = j;
         } else {
-            out.push(Tok::Punct(c));
-            i += 1;
+            let ch = text[i..].chars().next().unwrap();
+            let ch_len = ch.len_utf8();
+            if is_word_char(ch) {
+                let mut j = i + ch_len;
+                let mut char_bytes = 0;
+                for c in text[j..].chars() {
+                    if is_word_char(c) {
+                        char_bytes += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                j += char_bytes;
+                out.push(Tok::Word(text[i..j].to_string()));
+                i = j;
+            } else {
+                out.push(Tok::Punct(ch));
+                i += ch_len;
+            }
         }
     }
     out

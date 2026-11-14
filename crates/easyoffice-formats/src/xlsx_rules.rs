@@ -11,6 +11,7 @@ use std::fmt::Write;
 
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
+    extract_tags_or_self_closing_with_attrs_limit,
 };
 use crate::sheet_styling::sheet_rules::{
     format_sqref, icon_set_index, parse_sqref, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp,
@@ -27,6 +28,7 @@ pub(crate) struct DxfTable {
     index: HashMap<CfStyle, usize>,
     /// The formats of colour filters (`font`, colour), after the conditional formats (PD-226).
     colors: Vec<(bool, Option<u32>)>,
+    color_index: HashMap<(bool, Option<u32>), usize>,
 }
 
 impl DxfTable {
@@ -51,8 +53,10 @@ impl DxfTable {
         all: impl IntoIterator<Item = (bool, Option<u32>)>,
     ) -> Self {
         for color in all {
-            if !self.colors.contains(&color) {
+            if let std::collections::hash_map::Entry::Vacant(e) = self.color_index.entry(color) {
+                let idx = self.colors.len();
                 self.colors.push(color);
+                e.insert(idx);
             }
         }
         self
@@ -60,7 +64,7 @@ impl DxfTable {
 
     /// The id of the format a colour filter names.
     pub(crate) fn color_id(&self, font: bool, color: Option<u32>) -> Option<usize> {
-        let at = self.colors.iter().position(|c| *c == (font, color))?;
+        let at = self.color_index.get(&(font, color)).copied()?;
         Some(self.styles.len() + at)
     }
 
@@ -160,6 +164,7 @@ pub(crate) fn parse_dxf_styles(styles_xml: &str) -> Vec<CfStyle> {
     };
     extract_tag_bodies(dxfs, "dxf")
         .into_iter()
+        .take(MAX_RULES_PER_SHEET)
         .map(|dxf| {
             let mut style = CfStyle::default();
             if let Some(font) = extract_tag_bodies(dxf, "font").into_iter().next() {
@@ -659,13 +664,19 @@ fn push_unsupported(rules: &mut SheetRules, message: String) {
 }
 
 fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut SheetRules) {
-    for (block_attrs, block) in
-        extract_tags_or_self_closing_with_attrs(sheet_xml, "conditionalFormatting")
-    {
+    for (block_attrs, block) in extract_tags_or_self_closing_with_attrs_limit(
+        sheet_xml,
+        "conditionalFormatting",
+        MAX_RULES_PER_SHEET,
+    ) {
+        if rules.cf.len() >= MAX_RULES_PER_SHEET {
+            break;
+        }
         let ranges = parse_sqref(&attr(block_attrs, "sqref").unwrap_or_default());
-        for (attrs, body) in extract_tags_or_self_closing_with_attrs(block, "cfRule") {
+        let limit = MAX_RULES_PER_SHEET.saturating_sub(rules.cf.len());
+        for (attrs, body) in extract_tags_or_self_closing_with_attrs_limit(block, "cfRule", limit) {
             if rules.cf.len() >= MAX_RULES_PER_SHEET {
-                return;
+                break;
             }
             match parse_kind(attrs, body) {
                 Ok(kind) if !ranges.is_empty() => {
@@ -739,9 +750,13 @@ fn restore_kinds(sheet_xml: &str, rules: &mut SheetRules) {
 }
 
 fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
-    for (attrs, body) in extract_tags_or_self_closing_with_attrs(sheet_xml, "dataValidation") {
+    for (attrs, body) in extract_tags_or_self_closing_with_attrs_limit(
+        sheet_xml,
+        "dataValidation",
+        MAX_RULES_PER_SHEET,
+    ) {
         if rules.len() >= MAX_RULES_PER_SHEET {
-            return;
+            break;
         }
         let ty = attr(attrs, "type").unwrap_or_default();
         let Some(kind) = DvKind::from_name(&ty).filter(|k| k.file_kind() == *k) else {

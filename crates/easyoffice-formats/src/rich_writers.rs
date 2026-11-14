@@ -9,39 +9,33 @@ use crate::pdf_writer::{
     text_entries, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
-use crate::rich_document::frame_paragraph;
 use crate::rich_document::{
     RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, TOC_BOOKMARK_PREFIX,
 };
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
-    docx_content_types, docx_image_paragraph, docx_image_relationship, emu_to_points,
-    odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
+    docx_content_types, docx_image_paragraph, docx_image_relationship, emu_to_points, MediaParts,
+    DOCX_PICTURE_NAMESPACES,
 };
 use crate::rich_link_writers::{
     docx_linked_run_properties, link_groups, DocxLinks, DOCX_LINK_STYLE_XML,
 };
-use crate::rich_list_writers::{
-    docx_num_pr, docx_numbering_xml, level_of, list_kind_of, odt_list_styles_xml, plan_lists,
-    OdtListWriter,
-};
+use crate::rich_list_writers::{docx_num_pr, docx_numbering_xml, list_kind_of, plan_lists};
 use crate::rich_page_frame::{
     docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper, docx_settings,
-    odt_field, odt_master_page, odt_styles_xml, DOCX_FOOTER_PART, DOCX_HEADER_PART,
-    DOCX_SETTINGS_PART,
+    odt_field, DOCX_FOOTER_PART, DOCX_HEADER_PART, DOCX_SETTINGS_PART,
 };
 use crate::rich_run_writers::{
-    docx_run_properties, odt_font_face_decls, odt_text_key, odt_text_key_is_plain,
-    odt_text_style_xml, OdtTextKey,
+    docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
 };
-use crate::rich_table_writers::{push_docx_table, push_odt_table};
+use crate::rich_table_writers::push_docx_table;
 use crate::rich_toc_writers::{
-    docx_field_edges, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
-    is_toc_block, odt_toc_page, odt_toc_paragraph_style, odt_toc_styles_xml, TocScope,
+    docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
+    is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
 };
 use crate::{
-    CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
-    PdfSerializer, XmlSanitizer, ZipArchiveCodec,
+    CommonMarkCodec, EasyOfficeError, MarkdownBlock, PdfDocumentModel, PdfPageModel, PdfSerializer,
+    XmlSanitizer, ZipArchiveCodec,
 };
 
 /// `w:spacing/@w:line` value of single line spacing (240ths of a line).
@@ -262,17 +256,13 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     let mut image_rels = String::new();
     let mut links = DocxLinks::default();
     let mut toc_scope = TocScope::docx();
+    let mut toc_field_cache = None;
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
         match block {
             RichBlock::Paragraph(p) => {
-                push_docx_paragraph(
-                    &mut body,
-                    p,
-                    lists.block_run[index],
-                    &mut links,
-                    &docx_field_edges(&doc.blocks, index),
-                );
+                let edges = docx_field_edges_cached(&doc.blocks, index, &mut toc_field_cache);
+                push_docx_paragraph(&mut body, p, lists.block_run[index], &mut links, &edges);
             }
             RichBlock::Image(img) => {
                 let picture = media.add(DOCX_MEDIA_DIR, img);
@@ -373,20 +363,20 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
 // ---------------------------------------------------------------- ODT
 
 /// Interned automatic-style keys, in first-use order.
-struct StyleTable<K: Eq + std::hash::Hash + Clone> {
-    keys: Vec<K>,
-    index: std::collections::HashMap<K, usize>,
+pub(crate) struct StyleTable<K: Eq + std::hash::Hash + Clone> {
+    pub(crate) keys: Vec<K>,
+    pub(crate) index: std::collections::HashMap<K, usize>,
 }
 
 impl<K: Eq + std::hash::Hash + Clone> StyleTable<K> {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             keys: Vec::new(),
             index: std::collections::HashMap::new(),
         }
     }
 
-    fn intern(&mut self, key: &K) -> usize {
+    pub(crate) fn intern(&mut self, key: &K) -> usize {
         if let Some(&pos) = self.index.get(key) {
             return pos;
         }
@@ -399,7 +389,7 @@ impl<K: Eq + std::hash::Hash + Clone> StyleTable<K> {
 
 /// Automatic paragraph style identity.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
-struct OdtParaKey {
+pub(crate) struct OdtParaKey {
     align: Option<RichAlignment>,
     level: u8,
     left_twips: Option<u32>,
@@ -422,7 +412,7 @@ pub(crate) fn push_odt_text(out: &mut String, text: &str) {
     }
 }
 
-fn push_odt_paragraph(
+pub(crate) fn push_odt_paragraph(
     body: &mut String,
     p: &RichParagraph,
     para_styles: &mut StyleTable<OdtParaKey>,
@@ -507,7 +497,7 @@ fn odt_twips_to_pt(twips: i64) -> String {
 }
 
 /// `style:style` XML of one paragraph style (1-based `number`).
-fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
+pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
     let OdtParaKey {
         align,
         level,
@@ -557,125 +547,7 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
     styles
 }
 
-const ODT_MEDIA_DIR: &str = "Pictures";
-
-pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
-    check_document_images(doc)?;
-    let mut media = MediaParts::new();
-    let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
-    let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
-    let mut body = String::with_capacity(1024);
-    let lists = plan_lists(&doc.blocks);
-    let mut open_lists = OdtListWriter::default();
-    let mut toc_scope = TocScope::odt();
-    // The header and footer go first so their styles are in the tables the body shares; styles.xml
-    // and content.xml both write the whole set.
-    let [header_xml, footer_xml] =
-        [&doc.page_frame.header, &doc.page_frame.footer].map(|paragraphs| {
-            (!paragraphs.is_empty()).then(|| {
-                let mut xml = String::new();
-                for p in paragraphs {
-                    push_odt_paragraph(
-                        &mut xml,
-                        &frame_paragraph(p),
-                        &mut para_styles,
-                        &mut text_styles,
-                    );
-                }
-                xml
-            })
-        });
-    for (index, block) in doc.blocks.iter().enumerate() {
-        toc_scope.enter(&mut body, &doc.blocks, index);
-        match (block, lists.block_run[index]) {
-            (RichBlock::Paragraph(p), Some(run)) => {
-                open_lists.enter(&mut body, &lists, run, level_of(p));
-                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
-                continue;
-            }
-            _ => open_lists.leave(&mut body),
-        }
-        match block {
-            RichBlock::Paragraph(p) => {
-                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
-            }
-            RichBlock::Table(table) => push_odt_table(&mut body, table),
-            RichBlock::Image(img) => {
-                let picture = media.add(ODT_MEDIA_DIR, img);
-                body.push_str(&odt_image_paragraph(img, picture.ordinal, &picture.path));
-            }
-        }
-    }
-    open_lists.leave(&mut body);
-    toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
-
-    let mut run_styles = String::new();
-    for (idx, key) in para_styles.keys.iter().enumerate() {
-        run_styles.push_str(&odt_para_style_xml(idx + 1, key));
-    }
-    for (idx, key) in text_styles.keys.iter().enumerate() {
-        run_styles.push_str(&odt_text_style_xml(idx + 1, key));
-    }
-    let mut styles = String::from("<office:automatic-styles>");
-    if doc.blocks.iter().any(is_toc_block) {
-        styles.push_str(&odt_toc_styles_xml());
-    }
-    styles.push_str(&run_styles);
-    styles.push_str(&odt_list_styles_xml(&lists));
-    styles.push_str("</office:automatic-styles>");
-    let font_decls = odt_font_face_decls(&text_styles.keys);
-    let styles = format!("{font_decls}{styles}");
-
-    let content = format!(
-        concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content ",
-            "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
-            "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" ",
-            "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" ",
-            "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
-            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
-            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" {}",
-            "office:version=\"1.2\" title=\"{}\">{}<office:body><office:text>{}</office:text></office:body></office:document-content>"
-        ),
-        ODT_PICTURE_NAMESPACES,
-        XmlSanitizer::escape(&doc.display_title()),
-        styles,
-        body
-    );
-    XmlSanitizer::validate_safe_xml(&content)?;
-    let page = &doc.page_frame;
-    let has_frame = header_xml.is_some()
-        || footer_xml.is_some()
-        || page.margins.is_some()
-        || page.paper.is_some();
-    let mut listing = media.listing();
-    if has_frame {
-        listing.insert(0, ("styles.xml".to_string(), "text/xml"));
-    }
-    let manifest = OdfCodec::build_manifest_with_media(OdfCodec::MIMETYPE_ODT, &listing);
-    let mut entries = vec![
-        (
-            "mimetype".to_string(),
-            OdfCodec::MIMETYPE_ODT.as_bytes().to_vec(),
-        ),
-        ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
-        ("content.xml".to_string(), content.into_bytes()),
-    ];
-    if has_frame {
-        let (layout, master) = odt_master_page(
-            header_xml.as_deref(),
-            footer_xml.as_deref(),
-            page.margins.as_ref(),
-            page.paper.as_ref(),
-            page.binding,
-        );
-        let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
-        XmlSanitizer::validate_safe_xml(&styles_xml)?;
-        entries.push(("styles.xml".to_string(), styles_xml.into_bytes()));
-    }
-    entries.extend(media.into_entries());
-    ZipArchiveCodec::pack_compressed(&entries)
-}
+pub(crate) use crate::odt_rich_writer::pack_odt_rich;
 
 // ---------------------------------------------------------------- Markdown / TXT / PDF
 

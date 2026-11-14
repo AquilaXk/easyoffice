@@ -103,12 +103,16 @@ fn push_name(out: &mut String, def: &DefinedName, local: Option<usize>) {
 /// sheet's styling carries them), empty without any.
 pub(crate) fn defined_names_xml(sheet_names: &[String], stylings: &[SheetStyling]) -> String {
     let mut inner = super::xlsx_page::print_names_inner(sheet_names, stylings);
+    let sheet_index: std::collections::HashMap<String, usize> = sheet_names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.to_lowercase(), i))
+        .collect();
     for def in stylings.first().map_or(&[][..], |s| &s.defined_names[..]) {
-        let local = def.scope.as_deref().and_then(|scope| {
-            sheet_names.iter().position(|n| {
-                n.eq_ignore_ascii_case(scope) || n.to_lowercase() == scope.to_lowercase()
-            })
-        });
+        let local = def
+            .scope
+            .as_deref()
+            .and_then(|scope| sheet_index.get(&scope.to_lowercase()).copied());
         if def.scope.is_some() && local.is_none() {
             continue;
         }

@@ -267,6 +267,9 @@ impl OdfCodec {
             .unwrap_or_else(|| "ODT 문서".to_string());
 
         let mut tables = Vec::new();
+        let mut budget = crate::decode_budget::DecodeBudget::new();
+        budget.charge(title.len(), "ODT 제목")?;
+
         for tbl_body in extract_tag_bodies(&content_xml, "table:table") {
             let mut rows = Vec::new();
             for row_body in extract_tag_bodies(tbl_body, "table:table-row") {
@@ -282,6 +285,7 @@ impl OdfCodec {
                     } else {
                         extract_odf_inline_text(cell_body)
                     };
+                    budget.charge_cell(cell_text.len(), "ODT 표 셀")?;
                     cells.push(cell_text);
                 }
                 rows.push(cells);
@@ -290,10 +294,12 @@ impl OdfCodec {
         }
 
         let without_tables = strip_tag_blocks(&content_xml, "table:table");
-        let paragraphs = extract_odf_blocks_in_order(&without_tables, &["text:p", "text:h"])
-            .into_iter()
-            .map(|(_, _, body)| extract_odf_inline_text(body))
-            .collect();
+        let mut paragraphs = Vec::new();
+        for (_, _, body) in extract_odf_blocks_in_order(&without_tables, &["text:p", "text:h"]) {
+            let text = extract_odf_inline_text(body);
+            budget.charge_block(text.len(), "ODT 단락")?;
+            paragraphs.push(text);
+        }
 
         Ok((title, paragraphs, tables))
     }
@@ -563,7 +569,7 @@ impl OdfCodec {
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")
                     })
-                    + &rules.table.cell_attr(rules.sheet, rules.stylings, row, col);
+                    + rules.table.cell_attr(rules.sheet, rules.stylings, row, col);
                 let cached = cache.and_then(|c| c.get(&(row, col)));
                 // An array that spills is a matrix formula over its area (the cells after the first
                 // are written as the values the formula gave).
@@ -775,10 +781,25 @@ impl OdfCodec {
             })
             .unwrap_or_else(|| "발표자료".to_string());
 
-        let slides = extract_balanced_elements(&content_xml, "draw:page")
-            .into_iter()
-            .map(|(attrs, inner)| Self::parse_odp_slide(attrs, inner))
-            .collect();
+        let raw_slides = extract_balanced_elements(&content_xml, "draw:page");
+        if raw_slides.len() > 4096 {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "ODP 슬라이드 개수가 상한(4,096)을 초과했습니다.".to_string(),
+            ));
+        }
+        let mut budget = crate::decode_budget::DecodeBudget::new();
+        budget.charge(title.len(), "ODP 제목")?;
+
+        let mut slides = Vec::with_capacity(raw_slides.len());
+        for (attrs, inner) in raw_slides {
+            let slide = Self::parse_odp_slide(attrs, inner);
+            budget.charge(slide.0.len(), "ODP 슬라이드 제목")?;
+            for bullet in &slide.1 {
+                budget.charge(bullet.len(), "ODP 슬라이드 본문")?;
+            }
+            budget.charge(slide.2.len(), "ODP 슬라이드 발표자 노트")?;
+            slides.push(slide);
+        }
         Ok((title, slides))
     }
 

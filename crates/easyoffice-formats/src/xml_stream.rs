@@ -159,6 +159,11 @@ fn next_attr<'a>(
     let Some(value_end) = XmlSanitizer::find_byte_swar(bytes, value_start, bytes[i]) else {
         return Err(corrupt("XML 속성 값이 닫히지 않았습니다."));
     };
+    if XmlSanitizer::find_byte_swar(&bytes[value_start..value_end], 0, b'<').is_some() {
+        return Err(corrupt(
+            "XML 속성 값에 금지된 문자 '<'가 포함되어 있습니다.",
+        ));
+    }
     *pos = value_end + 1;
     Ok(Some((name, &raw[value_start..value_end])))
 }

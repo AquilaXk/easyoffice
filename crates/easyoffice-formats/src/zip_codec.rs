@@ -164,7 +164,11 @@ impl ZipArchiveCodec {
                 });
             }
 
-            let local_header_offset = out.len() as u32;
+            let local_header_offset =
+                u32::try_from(out.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
+                    actual: out.len(),
+                    max: u32::MAX as usize,
+                })?;
             let crc = Self::crc32(data);
             let uncomp_size_u32 = data.len() as u32;
             let name_len = path_bytes.len() as u16;
@@ -222,9 +226,20 @@ impl ZipArchiveCodec {
             central_dir.extend_from_slice(path_bytes);
         }
 
-        let cd_offset = out.len() as u32;
-        let cd_size = central_dir.len() as u32;
-        let entry_count = entries.len() as u16;
+        let cd_offset = u32::try_from(out.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
+            actual: out.len(),
+            max: u32::MAX as usize,
+        })?;
+        let cd_size =
+            u32::try_from(central_dir.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
+                actual: central_dir.len(),
+                max: u32::MAX as usize,
+            })?;
+        let entry_count = u16::try_from(entries.len()).map_err(|_| {
+            EasyOfficeError::ResourceBudgetExceeded(
+                "ZIP 아카이브 엔트리 수(u16)가 상한을 초과했습니다.".to_string(),
+            )
+        })?;
         out.extend_from_slice(&central_dir);
 
         // End of Central Directory Record (22 bytes)
@@ -301,6 +316,20 @@ impl ZipArchiveCodec {
         .map(|_| ())
     }
 
+    /// Unpacks only the entries matching `path_filter`, avoiding decoding the rest.
+    pub fn unpack_selected(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+        mut path_filter: impl FnMut(&str) -> bool,
+    ) -> Result<Vec<ZipArchiveEntry>, EasyOfficeError> {
+        let mut entries = Vec::new();
+        Self::unpack_each_selected(bytes, policy, &mut path_filter, |entry| {
+            entries.push(entry);
+            false
+        })?;
+        Ok(entries)
+    }
+
     fn unpack_each_selected(
         bytes: &[u8],
         policy: &ZipSecurityPolicy,
@@ -324,7 +353,15 @@ impl ZipArchiveCodec {
             )
         })?;
 
+        let disk_num = read_u16_le(bytes, eocd_offset + 4)?;
+        let cd_start_disk = read_u16_le(bytes, eocd_offset + 6)?;
+        let disk_entries = read_u16_le(bytes, eocd_offset + 8)? as usize;
         let total_entries = read_u16_le(bytes, eocd_offset + 10)? as usize;
+        if disk_num != 0 || cd_start_disk != 0 || disk_entries != total_entries {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "다중 디스크 ZIP 아카이브는 지원하지 않습니다.".to_string(),
+            ));
+        }
         let cd_size = read_u32_le(bytes, eocd_offset + 12)? as usize;
         let cd_offset = read_u32_le(bytes, eocd_offset + 16)? as usize;
 
@@ -409,6 +446,12 @@ impl ZipArchiveCodec {
             ));
 
             cursor = next_cursor;
+        }
+
+        if cursor != cd_end {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PKZIP Central Directory 엔트리 총 크기 불일치".to_string(),
+            ));
         }
 
         ZipSecurityGuard::validate_archive(&descriptors, policy)?;
