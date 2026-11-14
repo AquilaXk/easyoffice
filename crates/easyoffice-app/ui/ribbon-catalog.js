@@ -330,7 +330,12 @@
     { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
     { keys: "Ctrl+P", action: "print", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+E", action: "hwp-export-pdf", module: "HWP", desktopOnly: true, macOnly: true, forwardFromEditor: true },
-    { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
+    // The command search is Ctrl+/ as in the reference editor (`engine/input-handler-keyboard.ts` `handleCtrlKey`); the Hangul
+    // window keeps the editor's own key, so it is not forwarded. Ctrl+K is the hyperlink of the Office programs: the
+    // document, spreadsheet and slide windows open their hyperlink dialog with one press (PD-218); the Hangul editor keeps
+    // its own Ctrl+K,H. A text field takes Ctrl+K for itself.
+    { keys: "Ctrl+/", action: "palette" },
+    { keys: "Ctrl+K", action: "insert-link", ribbon: true, modules: ["DOC", "SHEET", "SLIDE"], notInField: true },
     // Find and replace as in the reference editor (Ctrl+F, Ctrl+F2). Ctrl+H is left alone: it is the
     // system "hide" key on macOS and the history page in browsers.
     { keys: "Ctrl+F", action: "find" },

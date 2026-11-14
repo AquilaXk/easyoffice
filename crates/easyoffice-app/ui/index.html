@@ -70,7 +70,7 @@
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC SHEET" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
               <div class="md-item" data-kinds="DOC SHEET" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
-              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+K</span></div>
+              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="view">
@@ -108,7 +108,8 @@
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
               <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
-              <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-toc" role="menuitem" tabindex="-1"><span class="md-label">자동 목차 생성</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-toc-update" role="menuitem" tabindex="-1"><span class="md-label">목차 업데이트</span></div>
@@ -124,7 +125,7 @@
               <div class="md-item" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 개체</span></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="sheet-mod-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 시각화</span></div>
               <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
-              <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
+              <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="link-remove" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 제거</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="data-fn-browser" role="menuitem" tabindex="-1"><span class="md-label">함수 마법사</span></div>
@@ -344,7 +345,7 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="workbook-protect" role="menuitem" tabindex="-1"><span class="md-label">통합 문서 보호</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="range-allow" role="menuitem" tabindex="-1"><span class="md-label">범위 편집 허용</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">환경 설정 및 명령 검색</span><span class="md-shortcut">/</span></div>
+              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">환경 설정 및 명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="help">
@@ -357,8 +358,8 @@
         </div>
 
         <div class="topbar-actions" role="toolbar" aria-label="창 도구">
-          <button id="btn-command-palette" class="palette-btn" type="button" title="명령 팔레트 (Ctrl+K)" aria-label="명령 팔레트 열기">
-            <span class="icon-slot" data-icon="search"></span><span class="palette-label">명령 검색</span><kbd id="shortcut-hint">Ctrl+K</kbd>
+          <button id="btn-command-palette" class="palette-btn" type="button" title="명령 팔레트 (Ctrl+/)" aria-label="명령 팔레트 열기">
+            <span class="icon-slot" data-icon="search"></span><span class="palette-label">명령 검색</span><kbd id="shortcut-hint">Ctrl+/</kbd>
           </button>
           <button id="btn-theme-toggle" class="icon-btn" type="button" data-icon="moon" title="다크 모드로 전환" aria-label="다크 모드로 전환"></button>
         </div>
@@ -416,7 +417,7 @@
           <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말" aria-label="머리말"><span class="tb-sprite icon-header"></span><span class="tb-label">머리말</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footer" title="꼬리말" aria-label="꼬리말"><span class="tb-sprite icon-footer"></span><span class="tb-label">꼬리말</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" title="각주" aria-label="각주"><span class="tb-sprite icon-footnote"></span><span class="tb-label">각주</span></button>
-          <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+/)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
         </div>
         <div class="tb-group tb-headerfooter-group" data-hf-group hidden>
           <span class="tb-hf-label"></span>

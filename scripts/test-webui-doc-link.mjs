@@ -157,3 +157,25 @@ test("a file opened with link runs shows them as links, an unsafe address as pla
   const linked = blocks[0].runs.filter((r) => r.link);
   assert.deepEqual(linked.map((r) => [r.text, r.link, r.bold]), [["링크", URL, true]]);
 });
+
+test("Ctrl+K and Cmd+K open the link dialog on the selected text of the document window; Ctrl+/ stays the command search", async () => {
+  const h = await createRunHarness([p("링크 만들기 문장")]);
+  const [first] = h.blocks;
+  h.selection.addRange(rangeOf(textNodeOf(first), 0, textNodeOf(first), 2));
+  const dialog = byId(h, "doc-link-dialog");
+  const press = h.sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  assert.equal(press.defaultPrevented, true);
+  await flushAsyncTurns(30);
+  assert.equal(dialog.open, true);
+  assert.equal(byId(h, "doc-link-label").value, "링크");
+  dialog.close();
+  h.document.activeElement?.blur?.();
+  h.selection.removeAllRanges();
+  h.selection.addRange(rangeOf(textNodeOf(first), 0, textNodeOf(first), 2));
+  h.sandbox.dispatchWindowKeydown({ key: "k", metaKey: true });
+  await flushAsyncTurns(30);
+  assert.equal(dialog.open, true, "Cmd+K on macOS");
+  dialog.close();
+  assert.equal(h.sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true }).defaultPrevented, true);
+  assert.equal(byId(h, "cmd-palette-modal").open, true);
+});

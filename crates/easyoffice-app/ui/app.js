@@ -316,10 +316,9 @@
         for (const c of cats[cat]) {
           // The sheet's page setup is one menu item and one command search entry (`sheetMenuPaletteItems`).
           if (mod === "SHEET" && /^sheet-layout-(paper|orientation|margins)$/.test(c.id)) continue;
-          // In the sheet the link command is the hyperlink dialog (PD-218), not the document editor's link and bookmark; Ctrl+K is the command search there.
-          const sheetLink = c.id === "sheet-insert-link";
-          const dispShortcut = sheetLink ? "" : fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
-          const label = sheetLink ? "하이퍼링크" : c.title;
+          // In the sheet the link command is the hyperlink dialog (PD-218), not the document editor's link and bookmark.
+          const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
+          const label = c.id === "sheet-insert-link" ? "하이퍼링크" : c.title;
           const title = mod === activeModule ? label : koBadge + " · " + label;
           items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + label + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });
         }
@@ -764,7 +763,7 @@
 
   function handleOpenPaletteKeydown(e, modal, cmdSearchInput) {
     if (e.key === "Escape") return void modal.close?.();
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === "/") {
       e.preventDefault();
       return void modal.close?.();
     }

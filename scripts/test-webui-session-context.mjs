@@ -172,12 +172,12 @@ test("command palette only displays shortcuts that the keydown handler really bi
   }
 });
 
-test("Ctrl+K opens the palette, '/' only fires outside text entry, and reserved browser keys are left untouched", async () => {
+test("Ctrl+/ opens the palette, '/' only fires outside text entry, and reserved browser keys are left untouched", async () => {
   const { document, sandbox } = await createWorkspaceHarness();
   const modal = document.getElementById("cmd-palette-modal");
 
-  const ctrlK = sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
-  assert.equal(ctrlK.defaultPrevented, true);
+  const ctrlSlash = sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true });
+  assert.equal(ctrlSlash.defaultPrevented, true);
   assert.equal(modal.open, true);
   sandbox.dispatchWindowKeydown({ key: "Escape" });
   assert.equal(modal.open, false);
@@ -482,7 +482,7 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.equal(document.title, "보고서.docx — EasyOffice".replace("보고서.docx", document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC")));
   assert.equal(document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC"), "보고서.docx");
   assert.ok(commandItem(document, "document-home-bold"), "menu item for the catalog command is present after retry");
-  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
+  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+/");
 });
 
 test("mod-symbol without selection appends inside a trailing .eo-run in DOC, and also inserts in SHEET and SLIDE", async () => {

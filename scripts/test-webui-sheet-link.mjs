@@ -481,42 +481,39 @@ test("a cell an array filled takes no link", async () => {
   assert.deepEqual(saysOf, []);
 });
 
-test("in the sheet window Ctrl+K starts the two-key shortcut of the reference editor: H opens the hyperlink dialog, any other key ends it, the search stays on / and its button", async () => {
+test("Ctrl+K opens the hyperlink dialog of the document, sheet and slide windows, Ctrl+/ the command search everywhere", async () => {
   const t = await open();
   const { sandbox, document } = t;
   const dialog = t.byId("sheet-link-dialog");
+  const docDialog = t.byId("doc-link-dialog");
   const palette = t.byId("cmd-palette-modal");
   await t.select("A2");
+  document.activeElement?.blur?.();
   const first = sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
   assert.equal(first.defaultPrevented, true);
-  assert.equal(palette.open, false, "Ctrl+K no longer opens the search in the sheet window");
-  sandbox.dispatchWindowKeydown({ key: "Control" });
-  const second = sandbox.dispatchWindowKeydown({ key: "h" });
-  assert.equal(second.defaultPrevented, true);
   await flushAsyncTurns(20);
-  assert.equal(dialog.open, true);
+  assert.equal(dialog.open, true, "one press, no second key");
+  assert.equal(palette.open, false);
   dialog.close();
-  // a key that is not H ends the chord and does its own work
-  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
-  sandbox.dispatchWindowKeydown({ key: "x" });
-  sandbox.dispatchWindowKeydown({ key: "h" });
-  await flushAsyncTurns(10);
-  assert.equal(dialog.open, false);
-  // the Korean layout's key for H and the Meta key of macOS
-  sandbox.dispatchWindowKeydown({ key: "k", metaKey: true });
-  sandbox.dispatchWindowKeydown({ key: "ㅗ" });
-  await flushAsyncTurns(20);
-  assert.equal(dialog.open, true);
-  dialog.close();
-  assert.equal(document.getElementById("shortcut-hint").textContent, "/");
-  assert.match(t.byId("btn-command-palette").getAttribute("title"), /\(\/\)/);
   document.activeElement?.blur?.();
-  sandbox.dispatchWindowKeydown({ key: "/" });
+  sandbox.dispatchWindowKeydown({ key: "k", metaKey: true });
+  await flushAsyncTurns(20);
+  assert.equal(dialog.open, true, "Cmd+K on macOS");
+  dialog.close();
+  // a text field takes Ctrl+K for itself
+  t.byId("formula-input").focus();
+  assert.equal(sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true }).defaultPrevented, false);
+  assert.equal(dialog.open, false);
+  document.activeElement?.blur?.();
+  // the command search
+  const slash = sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true });
+  assert.equal(slash.defaultPrevented, true);
   assert.equal(palette.open, true);
-  palette.close();
-  switchModule(document, "DOC");
+  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+/");
+  sandbox.dispatchWindowKeydown({ key: "Escape" });
+  assert.equal(palette.open, false);
+  // the Hangul window leaves Ctrl+K to its editor
+  switchModule(document, "HWP");
   await flushAsyncTurns(8);
-  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
-  assert.equal(palette.open, true, "the other windows keep Ctrl+K for the search");
-  assert.notEqual(document.getElementById("shortcut-hint").textContent, "/");
+  assert.equal(sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true }).defaultPrevented, false);
 });

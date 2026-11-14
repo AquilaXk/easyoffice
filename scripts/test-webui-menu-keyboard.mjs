@@ -160,19 +160,19 @@ test("command palette is a listbox: options carry ids and aria-selected, the inp
   assert.equal(list.querySelectorAll("li")[0].getAttribute("aria-disabled"), "true");
 });
 
-test("Find opens the find dialog and the command palette keeps its own label and key (Ctrl+K)", async () => {
+test("Find opens the find dialog and the command palette keeps its own label and key (Ctrl+/)", async () => {
   const { document, sandbox } = await createWorkspaceHarness();
   const item = document.querySelector('.md-item[data-studio-menu-cmd="palette"]');
   assert.match(item.querySelector(".md-label").textContent, /명령 검색/);
   const button = document.querySelector('#icon-toolbar [data-studio-cmd="palette"]');
   assert.match(button.getAttribute("aria-label"), /명령 검색/);
-  assert.match(button.getAttribute("title"), /Ctrl\+K/);
+  assert.match(button.getAttribute("title"), /Ctrl\+\//);
   assert.match(document.querySelector('.md-item[data-studio-menu-cmd="find"] .md-label').textContent, /찾기/);
   const ev = sandbox.dispatchWindowKeydown({ key: "f", ctrlKey: true });
   assert.equal(ev.defaultPrevented, true);
   assert.equal(document.getElementById("find-dialog").open, true, "Ctrl+F finds in the document");
   assert.equal(document.getElementById("cmd-palette-modal").open, false);
-  const palette = sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  const palette = sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true });
   assert.equal(palette.defaultPrevented, true);
   assert.equal(document.getElementById("cmd-palette-modal").open, true);
 });

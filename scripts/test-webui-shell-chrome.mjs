@@ -302,14 +302,14 @@ test("menu shortcut labels follow the platform: command glyphs on macOS, Ctrl el
   assert.ok(macLabels.length >= 15);
   assert.ok(macLabels.includes("⌘N") && macLabels.includes("⇧⌘Z") && macLabels.includes("⌥⌘O") && macLabels.includes("⌥⌘D"), macLabels.join(" "));
   assert.ok(macLabels.every((label) => !/Ctrl|Alt|Shift/.test(label)), "no Windows words left on macOS");
-  assert.ok(macLabels.includes("/"), "labels that are not key combinations stay");
+  assert.ok(macLabels.includes("⌘/") && macLabels.includes("⌘K"), "the command search and the hyperlink keys");
   assert.equal(mac.document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (⌘B)");
   assert.equal(mac.document.getElementById("btn-slide-move-up").getAttribute("title"), "위로 이동 · ⌥↑");
 
   const win = await createWorkspaceHarness({ platform: "Win32" });
   await flushAsyncTurns(10);
   const winLabels = menuLabels(win.document);
-  assert.ok(winLabels.includes("Ctrl+N") && winLabels.includes("Ctrl+Shift+Z") && winLabels.includes("Ctrl+Alt+O"));
+  assert.ok(winLabels.includes("Ctrl+N") && winLabels.includes("Ctrl+Shift+Z") && winLabels.includes("Ctrl+Alt+O") && winLabels.includes("Ctrl+/") && winLabels.includes("Ctrl+K"));
   assert.ok(winLabels.every((label) => !/[⌘⌥⇧⌃]/.test(label)));
   assert.equal(win.document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (Ctrl+B)");
 });

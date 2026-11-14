@@ -28,7 +28,7 @@ const type = (h, id, value) => {
 const count = (h) => $(h.document, "find-count").textContent || $(h.document, "find-status").textContent;
 const editorText = (h) => $(h.document, "doc-editor").textContent;
 
-test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace row, Ctrl+K keeps the palette", async () => {
+test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace row, Ctrl+/ opens the palette", async () => {
   const h = await openDoc();
   const dialog = $(h.document, "find-dialog");
   assert.equal(ctrl(h, "f").defaultPrevented, true);
@@ -42,7 +42,7 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   assert.equal($(h.document, "find-replace-row").hidden, false);
   assert.equal($(h.document, "find-dialog-title").textContent, "찾아 바꾸기");
   assert.equal(ctrl(h, "h").defaultPrevented, false, "Ctrl+H is not taken (macOS hide, browser history)");
-  ctrl(h, "k");
+  ctrl(h, "/");
   assert.equal($(h.document, "cmd-palette-modal").open, true);
 });
 
@@ -52,7 +52,8 @@ test("the shortcut table has no repeated combination and keeps print, find and r
   const keys = table.map((b) => b.keys);
   assert.equal(new Set(keys).size, keys.length);
   const action = (k) => table.find((b) => b.keys === k)?.action;
-  assert.deepEqual([action("Ctrl+F"), action("Ctrl+F2"), action("Ctrl+K"), action("Ctrl+P")], ["find", "replace", "palette", "print"]);
+  assert.deepEqual([action("Ctrl+F"), action("Ctrl+F2"), action("Ctrl+/"), action("Ctrl+P")], ["find", "replace", "palette", "print"]);
+  assert.equal(action("Ctrl+K"), "insert-link", "Ctrl+K is the hyperlink of the document, sheet and slide windows");
   assert.equal(action("Ctrl+H"), undefined);
   assert.equal(action("Ctrl+L"), undefined, "Ctrl+L is the browser address bar");
 });

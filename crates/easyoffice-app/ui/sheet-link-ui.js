@@ -6,7 +6,7 @@
 // in the 웹 주소 field, as in the document editor. A link cell opens on a click (the help: one click of the left button
 // follows the link, holding the button down selects the cell instead); a cell that is part of a larger selection or
 // clicked with a modifier only selects. Applying and removing are one undo step each and go through the cell writer, so
-// the protection of the sheet decides (the flag 하이퍼링크 삽입 and the lock of the cell). Ctrl+K, H opens the dialog (`workspace-session.js`).
+// the protection of the sheet decides (the flag 하이퍼링크 삽입 and the lock of the cell). Ctrl+K opens the dialog (`ribbon-catalog.js` shortcut table).
 (function (host) {
   "use strict";
 

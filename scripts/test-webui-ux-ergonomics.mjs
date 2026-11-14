@@ -368,7 +368,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(catalog.formatPlatformShortcut("⌃⌥S", "Ctrl"), "Ctrl+Alt+S");
   assert.equal(catalog.formatPlatformShortcut("⇧⌘P", "Ctrl"), "Shift+Ctrl+P");
   assert.equal(catalog.formatPlatformShortcut("⌘B", "⌘"), "⌘B");
-  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
+  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+/");
 
   switchModule(document, "DOC");
   await flushAsyncTurns();
@@ -574,7 +574,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(paletteModal.querySelector("#cmd-palette-list .cp-empty")?.textContent, "검색 결과 없음");
   cmdInput.value = "";
   cmdInput.dispatchEvent({ type: "input" });
-  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true });
   assert.equal(paletteModal.open, false);
 });
 

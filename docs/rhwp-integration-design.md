@@ -197,7 +197,7 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
 | 파일 메뉴 | 1) 열기·저장·다른 이름으로 저장·인쇄는 EasyOffice 메뉴가 소유<br>2) 오버레이가 업스트림 메뉴바의 `file:*` 항목을 `chrome.set`/CSS로 숨김<br>3) 업스트림 `command/commands/file.ts`(File System Access, `showSaveFilePicker`, `?url=` fetch)는 오버레이에서 **부모 위임 구현으로 교체**(참조 앱의 `command/commands/file` extension과 같은 위치) |
 | 편집기 도구모음 | 1) rhwp 서식 도구모음(글꼴, 크기, 굵게, 문단, 표)을 그대로 사용(문자 모양과 조판 정확성이 핵심 가치)<br>2) HWP 활성 시 EasyOffice `#doc-style-bar`와 문서 전용 리본 명령은 숨기거나 비활성(PD-072 3항 규칙 확장) |
 | 리본 연결(5단계) | 1) 리본 140종 중 HWP에 의미가 있는 명령(굵게·기울임·밑줄·정렬·표 삽입·쪽 설정 등)만 `automation.execute(id)`로 매핑<br>2) 매핑이 없으면 비활성<br>3) 매핑표는 `ribbon-catalog.js`에 데이터로 둠(140종 수치 불변) |
-| 단축키 | 1) iframe에 포커스가 있으면 부모 `keydown`이 실행되지 않음<br>2) 오버레이가 `WORKSPACE_SHORTCUT_BINDINGS` 중 셸 소유 키(`Ctrl+S`, `Ctrl+O`, `Ctrl+K`, `Ctrl+Alt+D`)만 `preventDefault` 후 포트로 부모에 전달<br>3) `Ctrl+Z/Y/B/I/U`는 rhwp가 처리<br>4) 키 목록은 부모가 연결 시 보냄(SSOT 유지) |
+| 단축키 | 1) iframe에 포커스가 있으면 부모 `keydown`이 실행되지 않음<br>2) 오버레이가 `WORKSPACE_SHORTCUT_BINDINGS` 중 셸 소유 키(`Ctrl+S`, `Ctrl+O`, `Ctrl+Alt+O`, `Ctrl+P`; 명령 팔레트 `Ctrl+/`와 `Ctrl+K`는 편집기 자체 키)만 `preventDefault` 후 포트로 부모에 전달<br>3) `Ctrl+Z/Y/B/I/U`는 rhwp가 처리<br>4) 키 목록은 부모가 연결 시 보냄(SSOT 유지) |
 | 실행 취소 | 1) HWP 문서 이력의 원천은 rhwp(`engine/history.ts` `CommandHistory`(최대 1000) + Rust 스냅샷)<br>2) EasyOffice 편집 메뉴의 실행 취소/다시 실행은 HWP 활성 시 `automation.execute('edit:undo'/'edit:redo')`<br>3) `ribbon_session.rs`의 HWP 모듈 스택(PD-069)은 HWP 활성 시 쓰지 않음 |
 | 수정 상태 | 1) PD-072의 DOM FNV 지문 대신 `document-change-events-v1` + `getDocumentState()`(revision/dirty) 사용<br>2) `beforeunload` 등록 조건에 "HWP dirty" 추가 |
 | 자동 저장 | 1) PD-072 `localStorage` 스냅샷은 5 MB 한도라 HWP 바이너리를 담을 수 없음<br>2) HWP는 **IndexedDB**(`easyoffice.hwp.autosave.v1`)에 `{tabId, fileName, format, savedAt, revision, bytes}`를 디바운스 저장(`exportHwp` 결과)<br>3) `localStorage` 스냅샷에는 탭 참조만 넣음<br>4) 업스트림 `src/recovery/`(IndexedDB 복구)를 그대로 쓸지 부모 소유로 할지는 §8 Q9. 권장은 부모 소유: 복원 UI와 검증을 EasyOffice가 통제하고, 복원 전 `FormatDetector` 통과를 필수로 함<br>5) 큰 문서의 `exportHwp` 비용(§6.1) 때문에 HWP 자동 저장 간격은 5초 이상 + 유휴 시점으로 함 |
@@ -569,7 +569,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 - **의존**: 4
 - **위험**: 두 겹 도구모음의 UX 혼란 → 사용성 리뷰 필요. 다중 iframe 메모리 사용.
 - **수용 기준**
-  - 포커스가 iframe 안에 있어도 `Ctrl+S`/`Ctrl+O`/`Ctrl+K`가 셸 동작을 수행.
+  - 포커스가 iframe 안에 있어도 `Ctrl+S`/`Ctrl+O`가 셸 동작을 수행.
   - 리본 굵게·정렬이 HWP 선택 범위에 적용.
   - 탭 4개를 열었을 때 메모리 사용량을 측정해 기록.
   - 인쇄 미리보기 쪽 수가 `pageCount`와 같다.

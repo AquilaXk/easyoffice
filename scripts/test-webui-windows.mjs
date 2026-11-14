@@ -617,7 +617,7 @@ test("the shortcut table marks which combos the HWP editor forwards", async () =
   const { host } = await openWindow("?module=DOC&win=w-keys");
   const bindings = host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS;
   const forwarded = bindings.filter((b) => b.forwardFromEditor).map((b) => b.keys).sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+E", "Ctrl+K", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+Q", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W"]);
+  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+E", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+Q", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W"]);
   for (const b of bindings.filter((x) => ["Ctrl+N", "Ctrl+W", "Ctrl+Q"].includes(x.keys))) assert.equal(b.desktopOnly, true);
   assert.ok(forwarded.every((k) => k.startsWith("Ctrl+")), "plain typing is never forwarded");
 });
@@ -642,14 +642,16 @@ test("a forwarded combo runs the same action as the keyboard; unknown or plain k
     "studio-save": () => ran.push("save"), "file-open": () => ran.push("open"), "file-new": () => ran.push("new"),
     palette: () => ran.push("palette"), "window-close": () => ran.push("close"),
   };
-  for (const combo of ["Ctrl+S", "Ctrl+O", "Ctrl+N", "Ctrl+K", "Ctrl+W"]) {
+  for (const combo of ["Ctrl+S", "Ctrl+O", "Ctrl+N", "Ctrl+W"]) {
     assert.equal(session.runForwardedShortcut(combo, actions), true, combo);
   }
-  assert.deepEqual(ran, ["save", "open", "new", "palette", "close"]);
+  assert.deepEqual(ran, ["save", "open", "new", "close"]);
+  // The editor keeps its own Ctrl+/ (its palette) and Ctrl+K,H: the shell is not asked for them.
+  for (const combo of ["Ctrl+/", "Ctrl+K"]) assert.equal(session.runForwardedShortcut(combo, actions), false, combo);
   for (const combo of ["Ctrl+C", "Ctrl+Z", "A", "가", "Ctrl+Alt+Delete", "", undefined, 42]) {
     assert.equal(session.runForwardedShortcut(combo, actions), false, String(combo));
   }
-  assert.equal(ran.length, 5);
+  assert.equal(ran.length, 4);
 });
 
 // The reference app binds PDF export to ⌘E through its macOS menu only and leaves Ctrl+E to the editor's
