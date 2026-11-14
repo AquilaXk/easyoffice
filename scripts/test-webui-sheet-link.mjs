@@ -517,3 +517,179 @@ test("Ctrl+K opens the hyperlink dialog of the document, sheet and slide windows
   await flushAsyncTurns(8);
   assert.equal(sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true }).defaultPrevented, false);
 });
+
+// ---- PD-223: HYPERLINK formula cells and the AutoCorrect rule for typed addresses ----
+
+async function typeInto(t, ref, text) {
+  const td = t.cell(ref);
+  td.focus();
+  td.textContent = "";
+  for (const ch of text) {
+    const active = t.document.activeElement;
+    active.dispatchEvent({ type: "keydown", key: ch, target: active });
+    active.dispatchEvent({ type: "beforeinput", inputType: "insertText", data: ch, target: active });
+    active.textContent += ch;
+    active.dispatchEvent({ type: "input", inputType: "insertText", data: ch, target: active });
+  }
+  t.cell(ref).dispatchEvent({ type: "keydown", key: "Tab", target: t.cell(ref) });
+  await flushAsyncTurns(15);
+}
+
+test("the AutoCorrect rule takes a whole typed address only: http, https, mailto and www", async () => {
+  const { links } = await open();
+  const taken = {
+    "https://example.com/a?b=1": "https://example.com/a?b=1",
+    "  HTTP://A.B/x  ": "HTTP://A.B/x",
+    "mailto:me@example.com": "mailto:me@example.com",
+    "www.example.com": "http://www.example.com",
+    "WWW.Example.com/path": "http://WWW.Example.com/path",
+  };
+  for (const [typed, target] of Object.entries(taken)) assert.equal(links.autoTarget(typed), target, typed);
+  for (const typed of [
+    "", "hello", "see https://example.com", "https://example.com is a site", "https://", "mailto:", "www.", "www.com", "www..x", "example.com",
+    "me@example.com", "ftp://a.b", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "https://a b", "#Sheet1!A1", "=HYPERLINK(\"https://a.b\")",
+    "https://a.b/" + "x".repeat(2048),
+  ]) {
+    assert.equal(links.autoTarget(typed), null, typed);
+  }
+});
+
+test("a typed address becomes a link when the entry is done; one undo takes the link away and keeps the text, the second takes the entry back", async () => {
+  const t = await open();
+  const before = t.cell("B3").textContent;
+  await typeInto(t, "B3", "https://example.com/a?b=1");
+  assert.equal(t.cell("B3").dataset.link, "external");
+  assert.equal(t.cell("B3").textContent, "https://example.com/a?b=1");
+  assert.deepEqual((await t.save()).sheets[0].links, [{ ref: "B3", target: URL_A }]);
+  await t.undo();
+  assert.equal(t.cell("B3").dataset.link, undefined, "the first undo takes the link");
+  assert.equal(t.cell("B3").textContent, "https://example.com/a?b=1", "and keeps the text as typed");
+  await t.undo();
+  assert.equal(t.cell("B3").textContent, before, "the second undo takes the entry back");
+  assert.equal(t.cell("B3").dataset.link, undefined);
+  t.userClick(studioItem(t.document, "studio-redo"));
+  await flushAsyncTurns(20);
+  assert.equal(t.cell("B3").textContent, "https://example.com/a?b=1");
+  assert.equal(t.cell("B3").dataset.link, undefined, "the first redo brings the text");
+  t.userClick(studioItem(t.document, "studio-redo"));
+  await flushAsyncTurns(20);
+  assert.equal(t.cell("B3").dataset.link, "external", "the second redo brings the link");
+});
+
+test("other text, a formula, an address inside a sentence and a paste or fill of text make no link; a typed www address goes to http", async () => {
+  const t = await open();
+  await typeInto(t, "B3", "hello https://example.com");
+  await typeInto(t, "B4", "=\"https://example.com\"");
+  assert.equal(t.cell("B3").dataset.link, undefined);
+  assert.equal(t.cell("B4").dataset.link, undefined);
+  await typeInto(t, "B5", "www.example.com");
+  assert.equal(t.cell("B5").dataset.link, "external");
+  assert.equal(t.cell("B5").getAttribute("title"), "http://www.example.com");
+  await typeInto(t, "B6", "mailto:me@example.com");
+  assert.equal(t.cell("B6").dataset.link, "external");
+  // The dialog and the edit writer take what they are given: no second link on top of an address the dialog set.
+  await t.select("B7");
+  await t.openDialog();
+  t.fill("sheet-link-address", URL_A);
+  await t.apply();
+  await typeInto(t, "B7", "https://example.com/b");
+  assert.deepEqual((await t.save()).sheets[0].links.filter((l) => l.ref === "B7"), [{ ref: "B7", target: "https://example.com/b" }], "a typed address replaces the cell's link");
+});
+
+test("a text typed on a protected sheet that does not allow 하이퍼링크 삽입 stays text, quietly", async () => {
+  const t = await open();
+  await pickFile(t.document, makeFixtureFile("보호.xlsx", PROTECTED_BOOK(t.host.__EASYOFFICE_SHEET_PROTECT__.FLAG_NAMES)));
+  await flushAsyncTurns(20);
+  await typeInto(t, "A2", "https://example.com/a");
+  assert.equal(t.cell("A2").textContent, "https://example.com/a", "the unlocked cell takes the text");
+  assert.equal(t.cell("A2").dataset.link, undefined, "but no link without the flag");
+  assert.equal(t.byId("sheet-protect-alert-dialog").open, false, "and no alert for it");
+});
+
+test("with 하이퍼링크 삽입 allowed an unlocked cell takes the typed address as a link; a locked cell cannot be typed into", async () => {
+  const t = await open();
+  const flags = t.host.__EASYOFFICE_SHEET_PROTECT__.FLAG_NAMES.filter((f) => f !== "insertHyperlinks");
+  await pickFile(t.document, makeFixtureFile("보호2.xlsx", PROTECTED_BOOK(flags)));
+  await flushAsyncTurns(20);
+  await typeInto(t, "A2", "https://example.com/a");
+  assert.equal(t.cell("A2").dataset.link, "external");
+  assert.equal(t.cell("A3").getAttribute("contenteditable"), "false", "a locked cell cannot be typed into, so it takes no auto link either");
+});
+
+test("a HYPERLINK formula cell shows as a link while it gives no error; a click asks the engine for the address and opens it", async () => {
+  const asked = [];
+  const t = await open({
+    evaluate_sheet: async (payload, offline) => {
+      const body = JSON.parse(String(payload));
+      if (body.sessionAction !== "linkTarget") return offline.evaluate_sheet(payload);
+      asked.push(body);
+      const answers = { B3: { target: URL_A }, B4: { target: "javascript:alert(1)" }, B5: { error: "#VALUE!" }, B6: { target: "#Sheet2!B2" } };
+      return answers[body.cell] ?? { none: true };
+    },
+  });
+  const calls = [];
+  t.host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable: () => true, openLink: async (url) => calls.push(url) };
+  for (const [ref, formula] of [["B3", '=HYPERLINK("https://example.com/a?b=1","열기")'], ["B4", '=HYPERLINK("javascript:alert(1)")'], ["B6", '=HYPERLINK("#Sheet2!B2","이동")']]) {
+    await typeInto(t, ref, formula);
+  }
+  assert.equal(t.cell("B3").dataset.link, "formula");
+  assert.equal(t.cell("B3").getAttribute("title"), null, "no address is known before the click");
+  assert.equal(t.cell("B3").textContent, "열기", "the cell shows the friendly name");
+  const click = async (ref) => {
+    const td = t.cell(ref);
+    td.focus();
+    td.dispatchEvent({ type: "mousedown", target: td, button: 0, timeStamp: 1000, clientX: 10, clientY: 10, bubbles: true });
+    td.dispatchEvent({ type: "mouseup", target: td, button: 0, bubbles: true });
+    td.dispatchEvent({ type: "click", target: td, button: 0, timeStamp: 1050, clientX: 10, clientY: 10, bubbles: true });
+    await flushAsyncTurns(20);
+  };
+  await click("B3");
+  assert.equal(asked.at(-1).formula, '=HYPERLINK("https://example.com/a?b=1","열기")');
+  assert.equal(asked.at(-1).sheet, "Sheet1");
+  assert.deepEqual(calls, [URL_A], "opened through the shell command with the engine's address");
+  await click("B4");
+  assert.deepEqual(calls, [URL_A], "an address the page's policy refuses is not opened");
+  assert.equal(t.say(), "허용되지 않는 주소");
+  await click("B6");
+  assert.equal(t.host.__EASYOFFICE_SHEET_NAMES__ && t.cell("B2") !== null, true);
+  assert.equal(calls.length, 1, "a jump inside the workbook is not opened outside");
+  // An error value is no link, whatever the formula says.
+  const link = t.host.__EASYOFFICE_SHEET_LINK__;
+  assert.equal(link.isHyperlinkFormula({ formula: '=HYPERLINK("https://a.b")', value: "x" }), true);
+  assert.equal(link.isHyperlinkFormula({ formula: '=HYPERLINK("https://a.b")', value: "#VALUE!" }), false);
+  assert.equal(link.isHyperlinkFormula({ formula: '=IF(A1,HYPERLINK("https://a.b"))', value: "x" }), false);
+  assert.equal(link.isHyperlinkFormula({ formula: "", value: "x" }), false);
+});
+
+test("a right click on a link cell opens a menu with 하이퍼링크 고치기... and 하이퍼링크 지우기 on that cell; other cells and headers keep their own", async () => {
+  const t = await open();
+  await t.select("B3");
+  await t.openDialog();
+  t.fill("sheet-link-address", URL_A);
+  await t.apply();
+  const menu = t.byId("sheet-header-menu");
+  const shown = () => [...menu.querySelectorAll(".md-item")].filter((el) => !el.hidden).map((el) => el.textContent);
+  const plain = { type: "contextmenu", target: t.cell("C5"), button: 2, clientX: 40, clientY: 40, bubbles: true };
+  t.cell("C5").dispatchEvent(plain);
+  assert.equal(menu.hidden, true, "a cell without a link has no menu of ours");
+  const td = t.cell("B3");
+  td.dispatchEvent({ type: "contextmenu", target: td, button: 2, clientX: 40, clientY: 40, bubbles: true });
+  assert.equal(menu.hidden, false);
+  assert.deepEqual(shown(), ["하이퍼링크 고치기...", "하이퍼링크 지우기"]);
+  t.userClick(menu.querySelector('[data-sheet-act="link-edit"]'));
+  await flushAsyncTurns(12);
+  assert.equal(t.byId("sheet-link-dialog").open, true, "고치기 opens the dialog filled with the cell's link");
+  assert.equal(t.byId("sheet-link-address").value, URL_A);
+  t.byId("sheet-link-dialog").close();
+  const textBefore = td.textContent;
+  t.cell("E4").focus();
+  td.dispatchEvent({ type: "contextmenu", target: td, button: 2, clientX: 40, clientY: 40, bubbles: true });
+  t.userClick(menu.querySelector('[data-sheet-act="link-clear"]'));
+  await flushAsyncTurns(20);
+  assert.equal(td.dataset.link, undefined, "지우기 takes the link of the clicked cell, though another one was active");
+  assert.equal(td.textContent, textBefore, "and keeps its text");
+  const header = t.document.querySelector("#pane-sheet th[data-col]");
+  header.dispatchEvent({ type: "contextmenu", target: header, button: 2, clientX: 40, clientY: 10, bubbles: true });
+  assert.equal(shown().includes("행 삭제") || shown().includes("열 삭제"), true);
+  assert.equal(shown().includes("하이퍼링크 지우기"), false, "a header menu shows no link items");
+});

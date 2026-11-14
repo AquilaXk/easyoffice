@@ -401,7 +401,7 @@
       else delete td.dataset.formula;
       // A cell an array filled (PD-217) keeps the address of the formula that made it.
       if (entry?.spillOf) td.dataset.spillOf = entry.spillOf; else delete td.dataset.spillOf;
-      host.__EASYOFFICE_SHEET_LINK__?.paint(td, entry?.link);
+      host.__EASYOFFICE_SHEET_LINK__?.paint(td, entry?.link, entry);
       const st = entry?.style;
       td.style.fontWeight = st?.fontWeight || "";
       td.style.fontStyle = st?.fontStyle || "";

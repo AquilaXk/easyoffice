@@ -324,6 +324,8 @@
         const [first, last] = span("col");
         return editAxis("col", "delete", first, last - first + 1);
       },
+      "link-edit": () => Promise.resolve(linkUi.open()),
+      "link-clear": linkUi.remove,
       hide: () => {
         const axis = getSelection().axis === "col" ? "col" : "row";
         const [first, last] = span(axis);
@@ -387,15 +389,26 @@
     function openMenu(axis, x, y) {
       const el = menu();
       if (!el) return;
-      for (const item of el.querySelectorAll("[data-axis]")) item.hidden = item.dataset.axis !== axis;
+      for (const item of el.querySelectorAll("[data-axis]")) item.hidden = !item.dataset.axis.split(" ").includes(axis);
       el.hidden = false;
       placeMenu(el, x, y);
       visibleItems()[0]?.focus();
     }
 
+    // A right click on a cell that holds a hyperlink opens the two items the reference editor's menu has on a link (하이퍼링크
+    // 고치기..., 하이퍼링크 지우기), on the cell it selects (PD-223).
+    function openLinkMenu(ev) {
+      const td = ev.target?.closest?.("#pane-sheet td[data-link]");
+      if (!td?._link) return;
+      ev.preventDefault();
+      commitIfEditing();
+      deps.selectRange({ r1: td._row, c1: td._col, r2: td._row, c2: td._col });
+      openMenu("link", ev.clientX, ev.clientY);
+    }
+
     function onContextMenu(ev) {
       const th = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
-      if (!th) return;
+      if (!th) return openLinkMenu(ev);
       ev.preventDefault();
       commitIfEditing();
       const axis = th.dataset.col ? "col" : "row";
@@ -499,7 +512,7 @@
       outlineUi.render();
     }
 
-    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open() };
+    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open(), autoLink: linkUi.autoLink };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;

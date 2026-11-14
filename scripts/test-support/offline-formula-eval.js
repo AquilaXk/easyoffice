@@ -635,8 +635,14 @@
     return b === null ? valErr("#VALUE!") : valBool(!b);
   }
 
+  // HYPERLINK(target, [name]) gives its friendly name, the target without one (the address is the engine's `linkTarget`).
+  function scalarHyperlink(args) {
+    return valText(formatFormulaValue(args.length > 1 ? args[1] : args[0]));
+  }
+
   // Scalar functions: [min arity, max arity, implementation].
   const SCALAR_FUNCTIONS = new Map([
+    ["HYPERLINK", [1, 2, scalarHyperlink]],
     ["ABS", [1, 1, scalarAbs]],
     ["ROUND", [1, 2, scalarRound]],
     ["LEN", [1, 1, scalarLen]],

@@ -566,6 +566,24 @@
     // page's sheet set changes, so the page lets go of it and the next sync opens a new one.
     const rewriteSheetRefs = (sheetsMap, request) => runOnSession(sheetsMap, request, "sheetRefs", dropSession);
 
+    // The address the HYPERLINK formula of a cell opens (PD-223), evaluated by the engine on the workbook: `{ target }`,
+    // `{ error }` when the function gives an error, `{ none: true }` when the formula is not a HYPERLINK call. Without
+    // a session the request carries the cells.
+    async function linkTarget(sheetsMap, sheet, cell, formula) {
+      const request = { sheet, cell, formula };
+      const viaSession = await runOnSession(sheetsMap, request, "linkTarget", () => {});
+      if (viaSession.ok) return viaSession.answer;
+      const { cells } = buildCellsAndFormulaTargets(sheetsMap);
+      return sessionCall({
+        ...request,
+        sessionAction: "linkTarget",
+        sheets: Object.keys(sheetsMap),
+        cells,
+        ...namesField(),
+        ...mergesField(sheetsMap),
+      });
+    }
+
     // The value text of every defined name, as the engine shows it in the 이름 관리 list (PD-214).
     const nameValues = (sheetsMap) => runOnSession(sheetsMap, {}, "nameValues", () => {});
 
@@ -891,6 +909,7 @@
       editAxis,
       rewriteSheetRefs,
       nameValues,
+      linkTarget,
       callSheetAction: sessionCall,
       enableSheetSessions,
       scrubSheetStoreMap,

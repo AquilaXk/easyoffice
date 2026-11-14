@@ -576,6 +576,7 @@
         const change = recordUndo ? sheetHistory.begin({ refs: [getActiveSheetCellRef()] }) : null;
         const prep = await prepareFormulaBarEvaluation();
         commitPreparedFormulaBarEvaluation(prep, change);
+        if (recordUndo) structure.autoLink(getActiveSheetName(), getActiveSheetCellRef(), false);
       };
       if (recordUndo) {
         return enqueueWorkspaceHistoryOp(drainThenRun);
@@ -690,6 +691,7 @@
         return Promise.resolve(false);
       }
       sheetDataStore[editSheet] = snapshotDomSheetCells();
+      if (textChanged) structure.autoLink(editSheet, td.dataset.cell, true);
       if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, rawText);
       return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus));
     }

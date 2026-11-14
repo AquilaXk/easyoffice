@@ -64,11 +64,32 @@
     return "#" + quoteSheet(sheet) + "!" + (one ? corner(rg.r1, rg.c1) : corner(rg.r1, rg.c1) + ":" + corner(rg.r2, rg.c2));
   }
 
-  // A cell with a hyperlink shows as a link and says where it goes: the screen tip, else the address.
-  function paint(td, link) {
+  // A formula that is a call of HYPERLINK (PD-223): the cell's result is a link as long as the call gives no error.
+  const HYPERLINK_FORMULA_RE = /^\s*=\s*HYPERLINK\s*\(/i;
+  const ERROR_VALUE_RE = /^#(VALUE!|REF!|NAME\?|N\/A|NUM!|DIV\/0!|NULL!|SPILL!|CALC!)$/;
+  const isHyperlinkFormula = (entry) =>
+    HYPERLINK_FORMULA_RE.test(entry?.formula || "") && !ERROR_VALUE_RE.test(String(entry?.value ?? ""));
+
+  // The address a typed text becomes under the AutoCorrect rule of the spreadsheet programs, "Internet and network paths with
+  // hyperlinks" (PD-223): the whole text is one word that starts with http://, https:// or mailto:, or with www. and holds a
+  // dot after it (the address then starts with http://). Null for any other text, and for an address the policy refuses.
+  const AUTO_ADDRESS_RE = /^(?:(?:https?:\/\/|mailto:)\S+|www\.[^\s.]\S*\.\S+)$/i;
+  function autoTarget(text) {
+    const typed = String(text ?? "").trim();
+    if (!AUTO_ADDRESS_RE.test(typed)) return null;
+    return normalizeTarget(/^www\./i.test(typed) ? "http://" + typed : typed);
+  }
+
+  // A cell with a hyperlink shows as a link and says where it goes: the screen tip, else the address. A cell whose
+  // formula is a HYPERLINK call shows as a link too (`data-link="formula"`); its address is evaluated when it is clicked.
+  function paint(td, link, entry) {
     td._link = link || null;
     if (!link) {
-      if (td.dataset.link) {
+      const formula = isHyperlinkFormula(entry);
+      if (formula) {
+        td.dataset.link = "formula";
+        td.removeAttribute("title");
+      } else if (td.dataset.link) {
         delete td.dataset.link;
         td.removeAttribute("title");
       }
@@ -149,6 +170,8 @@
     normalizeTarget,
     make,
     of,
+    isHyperlinkFormula,
+    autoTarget,
     isInternal,
     locationOf,
     internalTarget,

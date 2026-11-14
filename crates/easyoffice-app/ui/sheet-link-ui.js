@@ -25,7 +25,7 @@
   function createSheetLinkUi(deps) {
     const {
       document, sheetDataStore, getActiveSheetName, getSelection, getRange, selectRange, switchSheet, commitIfEditing,
-      focusAnchor, snapshotDomSheetCells, applyCellEdits, gridUtils,
+      focusAnchor, snapshotDomSheetCells, applyCellEdits, gridUtils, sheetStoreHelpers, sheetHistory,
     } = deps;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const links = host.__EASYOFFICE_SHEET_LINK__;
@@ -92,6 +92,23 @@
       }
     }
 
+    // Follows the HYPERLINK formula of a cell: the engine evaluates the address, and it goes through the same policy
+    // and the same opening as the address of a link (PD-223).
+    async function followFormula(ref, sheet) {
+      const map = snapshotDomSheetCells();
+      sheetDataStore[sheet] = map;
+      const formula = map[ref]?.formula || "";
+      if (!links.isHyperlinkFormula(map[ref])) return false;
+      try {
+        const answer = await sheetStoreHelpers.linkTarget(sheetDataStore, sheet, ref, formula);
+        if (typeof answer?.target === "string") return follow({ target: answer.target }, sheet);
+        if (answer?.none !== true) say(MESSAGES.failed);
+      } catch {
+        say(MESSAGES.failed);
+      }
+      return false;
+    }
+
     // ---- a click on a link cell ----------------------------------------------------------------------------
 
     let press = null;
@@ -111,7 +128,29 @@
       if (ev.timeStamp - down.at >= HOLD_MS || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > DRAG_PX) return;
       const rg = getRange();
       if (rg.r1 !== rg.r2 || rg.c1 !== rg.c2 || gridUtils.refOf(rg.r1, rg.c1) !== td.dataset.cell) return;
-      void follow(td._link, getActiveSheetName());
+      if (td.dataset.link === "formula") void followFormula(td.dataset.cell, getActiveSheetName());
+      else void follow(td._link, getActiveSheetName());
+    }
+
+    // The AutoCorrect rule for a text typed into a cell (PD-223): an address typed as the whole text becomes a link when the
+    // entry is done, as a history step of its own after the entry's, so that one undo takes the link away and keeps the text
+    // and a second one takes the entry back. `replace` lets the typed address take the place of the link the cell has; a
+    // sheet that does not allow 하이퍼링크 삽입 keeps the text as typed, quietly. It works on the model the entry has just
+    // been written to and never waits for the work queue (the entry's recalculation is still in it).
+    function autoLink(sheet, ref, replace) {
+      const entry = sheetDataStore[sheet]?.[ref];
+      const target = !entry || entry.formula || host.__EASYOFFICE_SHEET_SPILL__?.isChild(entry) ? null : links.autoTarget(entry.value);
+      if (target === null || (entry.link && (!replace || entry.link.target === target))) return false;
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      const link = links.make(target, "");
+      if (!link || (guard && !guard.allows(sheet, "insertHyperlinks"))) return false;
+      const change = sheetHistory.begin({ sheet, refs: [ref], sync: false });
+      const next = { ...entry, link };
+      sheetDataStore[sheet][ref] = next;
+      sheetHistory.commit(change, { compact: false });
+      const td = sheet === getActiveSheetName() ? document.querySelector('#pane-sheet td[data-cell="' + ref + '"]') : null;
+      if (td) links.paint(td, link, next);
+      return true;
     }
 
     // ---- the dialog ----------------------------------------------------------------------------------------
@@ -283,7 +322,7 @@
       }
     }
 
-    return { open, follow, apply, remove, bind, actions: { "link-remove": remove } };
+    return { open, follow, autoLink, apply, remove, bind, actions: { "link-remove": remove } };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_LINK_UI__ = createSheetLinkUi;
