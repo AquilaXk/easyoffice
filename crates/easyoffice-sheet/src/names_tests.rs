@@ -132,7 +132,12 @@ fn definitions_that_lead_back_to_themselves_are_refused_or_read_as_errors() {
             "{cell}"
         );
     }
-    let built = crate::names::NameTable::build(&cyclic, &["Sheet1"], false);
+    let built = crate::names::NameTable::build(
+        &cyclic,
+        &["Sheet1"],
+        false,
+        &crate::table_index::TableIndex::default(),
+    );
     assert!(built
         .issues
         .iter()

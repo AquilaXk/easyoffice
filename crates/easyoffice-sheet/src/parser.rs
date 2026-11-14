@@ -1,3 +1,5 @@
+use crate::names::{name_key, NameKey};
+use crate::table_index::{TableCtx, IMPLICIT_TABLE_KEY};
 use crate::{CellRange, FormulaError, PackedCellCoordinate};
 use std::sync::Arc;
 
@@ -29,6 +31,9 @@ pub(crate) enum Token {
     RBrace,
     /// The row separator of an array constant (outside braces `;` reads as a comma).
     Semicolon,
+    /// The bracket group of a structured reference (`[Q1]`, `[[#This Row],[Q1]]`, `[@Q1]`), the table's
+    /// name before it (if any) being the identifier token in front.
+    Structured(String),
     /// The spill range operator after a reference (`A1#`).
     Hash,
 }
@@ -306,6 +311,20 @@ fn find_bracket_close(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>
     None
 }
 
+/// Whether the `[` at `open` starts a structured reference: it follows a table's name, or its first character
+/// is `@`, `#` or `[` (an ODF reference starts with a dot, a quote or a sheet name).
+fn is_structured_group(text: &str, open: usize, out: &str) -> bool {
+    let named = out
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\\'));
+    named
+        || matches!(
+            text[open + 1..].trim_start_matches(' ').as_bytes().first(),
+            Some(b'@' | b'#' | b'[')
+        )
+}
+
 pub(crate) fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_, str> {
     if !stripped.contains('[') {
         return std::borrow::Cow::Borrowed(stripped);
@@ -329,6 +348,19 @@ pub(crate) fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_
             } else {
                 in_single_quote = !in_single_quote;
                 out.push(ch);
+            }
+            continue;
+        }
+        if !in_double_quote
+            && !in_single_quote
+            && ch == '['
+            && is_structured_group(stripped, idx, &out)
+        {
+            // `Table1[Q1]`, `[@Q1]`: a structured reference (PD-225), which the lexer reads as one token.
+            let end = easyoffice_formats::group_end(stripped, idx).unwrap_or(stripped.len());
+            out.push_str(&stripped[idx..end]);
+            while chars.peek().is_some_and(|&(i, _)| i < end) {
+                chars.next();
             }
             continue;
         }
@@ -370,23 +402,46 @@ pub fn normalize_open_formula_references(raw_src: &str) -> String {
 
 pub(crate) use crate::lexer::tokenize_formula;
 
-pub(crate) struct Parser {
+pub(crate) struct Parser<'a> {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
     /// A defined name was read (see [`Expr::Name`]).
     pub(crate) saw_name: bool,
     /// `LET` or `LAMBDA` was read: its variables are told from defined names after parsing.
     pub(crate) saw_scope: bool,
+    /// The tables structured references are resolved against; without them such a reference reads `#NAME?`.
+    tables: Option<&'a TableCtx<'a>>,
+    /// The hash of each table a structured reference named (see [`crate::table_index`]).
+    table_keys: Vec<NameKey>,
 }
 
-impl Parser {
-    pub(crate) fn new(tokens: Vec<Token>) -> Self {
+impl<'a> Parser<'a> {
+    pub(crate) fn new(tokens: Vec<Token>, tables: Option<&'a TableCtx<'a>>) -> Self {
         Self {
             tokens,
             pos: 0,
             saw_name: false,
             saw_scope: false,
+            tables,
+            table_keys: Vec::new(),
         }
+    }
+
+    /// A structured reference: `table` is the name in front of the group (none for `[@Q1]`).
+    fn structured_reference(
+        &mut self,
+        table: Option<&str>,
+        group: &str,
+    ) -> Result<Expr, FormulaError> {
+        let sref = easyoffice_formats::parse_group(group).ok_or(FormulaError::Value)?;
+        self.table_keys.push(match table {
+            Some(name) => name_key(&easyoffice_formats::fold_name(name)),
+            None => IMPLICIT_TABLE_KEY,
+        });
+        Ok(match self.tables {
+            Some(ctx) => ctx.index.resolve(ctx, table, &sref),
+            None => Expr::ErrorLiteral(FormulaError::Name),
+        })
     }
 
     pub(crate) fn peek(&self) -> Option<&Token> {
@@ -564,6 +619,7 @@ impl Parser {
                 Ok(inner)
             }
             Some(Token::Ident(name)) => self.parse_ident_primary(name, depth),
+            Some(Token::Structured(group)) => self.structured_reference(None, &group),
             Some(Token::LBrace) => self.parse_array_literal(),
             _ => Err(FormulaError::Value),
         }
@@ -599,6 +655,11 @@ impl Parser {
         if matches!(self.peek(), Some(Token::Bang)) {
             self.next();
             return self.parse_sheet_reference(name);
+        }
+        if let Some(Token::Structured(group)) = self.peek() {
+            let group = group.clone();
+            self.next();
+            return self.structured_reference(Some(&name), &group);
         }
         if matches!(self.peek(), Some(Token::LParen)) {
             self.next();
@@ -751,10 +812,21 @@ pub(crate) fn normalize_korean_function_aliases(expr: &str) -> std::borrow::Cow<
     }
 }
 
-/// Parses a formula body. The flag says whether it uses defined names (see [`Expr::Name`]).
-pub(crate) fn parse_formula(expr_src: &str) -> Result<(Expr, bool), FormulaError> {
+/// A formula body parsed: the syntax tree, whether it uses defined names (see [`Expr::Name`]) and the hash
+/// of each table a structured reference in it names.
+pub(crate) struct Parsed {
+    pub(crate) expr: Expr,
+    pub(crate) saw_name: bool,
+    pub(crate) table_keys: Vec<NameKey>,
+}
+
+/// Parses a formula body; structured references are resolved against `tables` (see [`TableCtx`]).
+pub(crate) fn parse_formula_in(
+    expr_src: &str,
+    tables: Option<&TableCtx<'_>>,
+) -> Result<Parsed, FormulaError> {
     let tokens = tokenize_formula(expr_src)?;
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens, tables);
     let mut expr = parser.parse_expression(0)?;
     if parser.pos != parser.tokens.len() {
         return Err(FormulaError::Value);
@@ -762,7 +834,16 @@ pub(crate) fn parse_formula(expr_src: &str) -> Result<(Expr, bool), FormulaError
     if parser.saw_scope {
         crate::parser_array::resolve_scopes(&mut expr);
     }
-    Ok((expr, parser.saw_name))
+    Ok(Parsed {
+        expr,
+        saw_name: parser.saw_name,
+        table_keys: parser.table_keys,
+    })
+}
+
+/// Parses a formula body with no tables around it. The flag says whether it uses defined names.
+pub(crate) fn parse_formula(expr_src: &str) -> Result<(Expr, bool), FormulaError> {
+    parse_formula_in(expr_src, None).map(|p| (p.expr, p.saw_name))
 }
 
 /// Parses a formula body with no workbook around it: a defined name reads `#NAME?`.

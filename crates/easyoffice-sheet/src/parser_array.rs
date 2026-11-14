@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// bounded by the token budget (`MAX_TOKENS`) in any case; this keeps it a small multiple of it.
 const MAX_LITERAL_CELLS: usize = 4_096;
 
-impl Parser {
+impl Parser<'_> {
     /// Consumes the `#` of `A1#` when it is next.
     pub(crate) fn take_hash(&mut self) -> bool {
         let hash = matches!(self.peek(), Some(Token::Hash));

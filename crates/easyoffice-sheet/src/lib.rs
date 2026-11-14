@@ -68,6 +68,8 @@ mod sort_refs;
 mod special;
 mod spill;
 mod spill_merges;
+mod table_api;
+pub mod table_index;
 mod text_format;
 pub mod types;
 pub mod workbook;
@@ -232,6 +234,8 @@ pub struct SheetEngine {
     pub(crate) cell_index: OnceLock<dag::CellIndex>,
     /// The workbook's defined names, shared by its sheets (PD-214).
     pub(crate) names: Arc<NameTable>,
+    /// The workbook's tables, shared by its sheets: what a structured reference is resolved against (PD-225).
+    pub(crate) tables: Arc<table_index::TableIndex>,
     /// The formulas that use a defined name, with the names (hashes) they use, so a change of a
     /// definition compiles only those again.
     pub(crate) name_uses: CellMap<compile::NameUse>,
@@ -272,6 +276,7 @@ impl SheetEngine {
             formula_index: OnceLock::new(),
             cell_index: OnceLock::new(),
             names: Arc::default(),
+            tables: Arc::default(),
             name_uses: CellMap::default(),
             name_budget: Arc::default(),
         }
@@ -407,7 +412,7 @@ impl SheetEngine {
             self.set_name_uses(coord, None);
             self.update_dense_number(coord, None);
         } else {
-            let compile::Compiled { entry, uses } = self.compile_cell_entry(&val);
+            let compile::Compiled { entry, uses } = self.compile_cell_entry(coord, &val);
             self.set_name_uses(coord, uses);
             self.update_dense_number(coord, entry.as_ref());
             self.mark_array_formula(coord, entry.as_ref());
@@ -455,7 +460,7 @@ impl SheetEngine {
         let compiled: Vec<(PackedCellCoordinate, compile::Compiled)> = self
             .cells
             .iter()
-            .map(|(&coord, raw)| (coord, self.compile_cell_entry(raw)))
+            .map(|(&coord, raw)| (coord, self.compile_cell_entry(coord, raw)))
             .collect();
         for (coord, compile::Compiled { entry, uses }) in compiled {
             self.set_name_uses(coord, uses);
@@ -709,7 +714,7 @@ impl SheetEngine {
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;
             }
-            match self.compile_formula(expr_src).entry {
+            match self.compile_formula(ctx.current_coord, expr_src).entry {
                 Some(Ok(expr)) if array_class::needs_array(&expr) => {
                     self.eval_array_formula(&expr, None, ctx, depth)
                 }

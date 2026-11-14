@@ -245,6 +245,13 @@ pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError
             continue;
         }
         let b = bytes[i];
+        if b == b'[' {
+            // The group of a structured reference (the ODF references were rewritten before).
+            let end = easyoffice_formats::group_end(src, i).ok_or(FormulaError::Value)?;
+            tokens.push(Token::Structured(src[i..end].to_string()));
+            i = end;
+            continue;
+        }
         let special = match b {
             b'{' => {
                 braces += 1;

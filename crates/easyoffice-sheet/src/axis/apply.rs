@@ -141,7 +141,22 @@ impl WorkbookEngine {
             }
         }
 
+        // The tables of the sheet follow the edit too (PD-225): the new list is checked against the bounds before
+        // anything moves, and the formulas that name a table that changed are compiled again once the cells
+        // are where they will be.
+        let moved_tables = {
+            let tables = self.tables.tables_of(&target_name);
+            let shifted = super::shift_tables(&tables, &edit);
+            let order = self.sheet_names();
+            self.tables
+                .with_sheet(&target_name, shifted.clone(), &order)?;
+            (!tables.is_empty()).then_some(shifted)
+        };
         let removed_cells = self.sheets_mut()[target].move_axis(&edit);
+        if let Some(shifted) = moved_tables {
+            let plan = self.plan_tables(&target_name, shifted)?;
+            self.commit_tables(plan);
+        }
         let mut rewritten = Vec::with_capacity(rewrites.len());
         for (si, coord, new) in rewrites {
             let at = if si == target {

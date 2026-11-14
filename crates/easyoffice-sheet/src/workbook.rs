@@ -12,6 +12,8 @@ use std::sync::Arc;
 pub struct WorkbookEngine {
     sheets: Vec<SheetEngine>,
     names: Arc<NameTable>,
+    /// The tables, which structured references are resolved against (PD-225).
+    pub(crate) tables: Arc<crate::table_index::TableIndex>,
     /// Nodes the formulas that use names hold, over all sheets (see `names::MAX_WORKBOOK_NAME_NODES`).
     name_budget: Arc<AtomicUsize>,
 }
@@ -27,6 +29,7 @@ impl Clone for WorkbookEngine {
         Self {
             sheets,
             names: Arc::clone(&self.names),
+            tables: Arc::clone(&self.tables),
             name_budget: budget,
         }
     }
@@ -38,7 +41,7 @@ pub const NAME_VALUE_CELLS: usize = 24;
 /// A change of the defined names worked out but not applied: the new table and the formulas
 /// (sheet index, cell) that use a name whose meaning changes and so compile again.
 pub(crate) struct NamesPlan {
-    table: Arc<NameTable>,
+    pub(crate) table: Arc<NameTable>,
     pub(crate) affected: Vec<(usize, PackedCellCoordinate)>,
     /// The problems of the definitions, by position in the list given.
     pub(crate) issues: Vec<(usize, crate::NameIssue)>,
@@ -117,7 +120,7 @@ impl WorkbookEngine {
         defs.push(candidate.clone());
         let at = defs.len() - 1;
         let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
-        let built = NameTable::build(&defs, &sheet_names, true);
+        let built = NameTable::build(&defs, &sheet_names, true, &self.tables);
         built
             .issues
             .iter()
@@ -132,7 +135,7 @@ impl WorkbookEngine {
         let first = defs.len();
         defs.extend_from_slice(candidates);
         let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
-        let issues = NameTable::build(&defs, &sheet_names, true).issues;
+        let issues = NameTable::build(&defs, &sheet_names, true, &self.tables).issues;
         (first..defs.len())
             .map(|i| {
                 issues
@@ -210,13 +213,24 @@ impl WorkbookEngine {
         defs: &[DefinedName],
         strict: bool,
     ) -> Result<NamesPlan, EasyOfficeError> {
+        self.plan_names_with(defs, strict, &self.tables)
+    }
+
+    /// [`plan_names`](Self::plan_names) for the structured references of the definitions resolved against
+    /// `tables` (the tables a change is about to install).
+    pub(crate) fn plan_names_with(
+        &self,
+        defs: &[DefinedName],
+        strict: bool,
+        tables: &crate::table_index::TableIndex,
+    ) -> Result<NamesPlan, EasyOfficeError> {
         let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
         if strict && defs.len() > MAX_NAMES {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "이름은 최대 {MAX_NAMES}개까지 정의할 수 있습니다."
             )));
         }
-        let built = NameTable::build(defs, &sheet_names, strict);
+        let built = NameTable::build(defs, &sheet_names, strict, tables);
         if let (true, Some(&(i, issue))) = (strict, built.issues.first()) {
             return Err(crate::names::issue_error(defs, i, issue));
         }
@@ -243,13 +257,23 @@ impl WorkbookEngine {
     }
 
     pub(crate) fn commit_names(&mut self, plan: NamesPlan) {
-        self.names = plan.table;
-        for sheet in &mut self.sheets {
-            sheet.names = Arc::clone(&self.names);
-        }
+        self.install_names(plan.table);
         for &(si, coord) in &plan.affected {
             self.sheets[si].recompile_cell(coord);
         }
+    }
+
+    /// Makes `table` the workbook's names, in every sheet; the formulas that use a changed name are not
+    /// compiled again here.
+    pub(crate) fn install_names(&mut self, table: Arc<NameTable>) {
+        self.names = table;
+        for sheet in &mut self.sheets {
+            sheet.names = Arc::clone(&self.names);
+        }
+    }
+
+    pub(crate) fn names_use_tables(&self) -> bool {
+        self.names.uses_tables()
     }
 
     pub fn unquote_formula_sheet_token(s: &str) -> Option<String> {
@@ -323,6 +347,7 @@ impl WorkbookEngine {
         }
         engine.has_workbook_assigned_id = true;
         engine.names = Arc::clone(&self.names);
+        engine.tables = Arc::clone(&self.tables);
         engine.name_budget = Arc::clone(&self.name_budget);
         self.sheets.push(engine);
         if !self.names.is_empty() {

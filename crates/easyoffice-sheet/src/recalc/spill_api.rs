@@ -73,6 +73,25 @@ impl RecalcSession {
         self.set_sheet_blockers(sheet, tables, true)
     }
 
+    /// Tells the session the tables of `sheet` with their names, columns and shape (an empty list: none): an array
+    /// is blocked by them as by [`set_sheet_tables`](Self::set_sheet_tables), and the structured references that
+    /// name a table whose range or columns changed are compiled again and calculated by the next
+    /// [`recalculate`](Self::recalculate) (PD-225).
+    pub fn set_sheet_table_defs(
+        &mut self,
+        sheet: &str,
+        tables: Vec<easyoffice_formats::SheetTable>,
+    ) -> Result<(), super::RecalcError> {
+        if self.over_budget {
+            return Err(super::RecalcError::OverBudget);
+        }
+        let boxes = tables.iter().map(|t| t.range).collect();
+        let plan = self.wb.plan_tables(sheet, tables)?;
+        self.set_sheet_blockers(sheet, boxes, true)?;
+        let affected = plan.affected.clone();
+        self.swap_formulas(&affected, |wb| wb.commit_tables(plan))
+    }
+
     fn set_sheet_blockers(
         &mut self,
         sheet: &str,

@@ -194,6 +194,14 @@ pub(crate) fn adjust_formula_row_refs(raw: &str, own_sheet: &str, rows: SortedRo
             }
             quote_start = i + 1;
         } else if !in_double_quotes && !in_single_quotes {
+            if b == b'[' {
+                // A structured reference names columns, not cells (PD-225): it stays as written.
+                if let Some(end) = easyoffice_formats::group_end(raw, i) {
+                    out.push_str(&raw[i..end]);
+                    i = end;
+                    continue;
+                }
+            }
             let prev_is_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
             if !prev_is_ident {
                 if let Some(prefix) = sheet_prefix_len(bytes, i) {

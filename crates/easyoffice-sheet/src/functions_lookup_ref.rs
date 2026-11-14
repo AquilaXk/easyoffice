@@ -286,7 +286,8 @@ impl SheetEngine {
         let trimmed = formula.trim();
         let body = crate::parser::strip_formula_prefix(trimmed)
             .or_else(|| crate::parser::strip_open_formula_prefix(trimmed))?;
-        let Some(Ok(Expr::FuncCall { name, args })) = self.compile_formula(body.trim()).entry
+        let Some(Ok(Expr::FuncCall { name, args })) =
+            self.compile_formula(ctx.current_coord, body.trim()).entry
         else {
             return None;
         };

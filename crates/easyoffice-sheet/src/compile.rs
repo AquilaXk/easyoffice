@@ -1,6 +1,8 @@
 //! Compiling the text of a cell (a formula, a number or a boolean), with the defined names a
 //! formula uses expanded (PD-214).
 
+use crate::parser::Parsed;
+use crate::table_index::TableCtx;
 use crate::{Expr, FormulaError, PackedCellCoordinate, SheetEngine};
 
 /// The defined names one formula uses (see [`SheetEngine::name_uses`]).
@@ -15,6 +17,16 @@ pub(crate) struct NameUse {
 pub(crate) struct Compiled {
     pub(crate) entry: Option<Result<Expr, FormulaError>>,
     pub(crate) uses: Option<NameUse>,
+}
+
+/// What a formula that names tables but no defined name remembers (nothing is held in memory for it).
+fn keys_only(mut keys: Vec<crate::names::NameKey>) -> NameUse {
+    keys.sort_unstable();
+    keys.dedup();
+    NameUse {
+        keys: keys.into_boxed_slice(),
+        nodes: 0,
+    }
 }
 
 /// A compiled formula that uses names: `nodes` is what it holds in memory because of them.
@@ -35,7 +47,7 @@ fn names_used(
 impl SheetEngine {
     /// Compiles the text of a cell: a formula (with the defined names it uses expanded), a number or a
     /// boolean. `None` entry for plain text.
-    pub(crate) fn compile_cell_entry(&self, raw: &str) -> Compiled {
+    pub(crate) fn compile_cell_entry(&self, coord: PackedCellCoordinate, raw: &str) -> Compiled {
         let trimmed = raw.trim();
         let entry = if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
             let expr_src = formula_body.trim();
@@ -45,7 +57,7 @@ impl SheetEngine {
                     uses: None,
                 };
             }
-            return self.compile_formula(expr_src);
+            return self.compile_formula(Some(coord), expr_src);
         } else if crate::coercion::is_valid_decimal_syntax(trimmed) {
             if let Some(num) = crate::coercion::parse_strict_number(trimmed) {
                 Some(Ok(Expr::Number(num)))
@@ -62,10 +74,23 @@ impl SheetEngine {
         Compiled { entry, uses: None }
     }
 
-    /// A formula body compiled in this sheet: the defined names it uses are replaced by their
-    /// definitions (see [`names`]).
-    pub(crate) fn compile_formula(&self, expr_src: &str) -> Compiled {
-        let (mut expr, saw_name) = match crate::parser::parse_formula(expr_src) {
+    /// A formula body compiled in this sheet: the structured references in it are resolved against the tables
+    /// and the defined names it uses are replaced by their definitions (see [`names`]).
+    pub(crate) fn compile_formula(
+        &self,
+        coord: Option<PackedCellCoordinate>,
+        expr_src: &str,
+    ) -> Compiled {
+        let ctx = TableCtx {
+            index: &self.tables,
+            sheet: &self.name,
+            coord,
+        };
+        let Parsed {
+            mut expr,
+            saw_name,
+            table_keys,
+        } = match crate::parser::parse_formula_in(expr_src, Some(&ctx)) {
             Ok(parsed) => parsed,
             Err(e) => {
                 return Compiled {
@@ -75,13 +100,17 @@ impl SheetEngine {
             }
         };
         if !saw_name {
+            let uses = (!table_keys.is_empty()).then(|| keys_only(table_keys));
             return Compiled {
                 entry: Some(Ok(expr)),
-                uses: None,
+                uses,
             };
         }
-        let mut keys = Vec::new();
-        let held = match self.names.expand(&mut expr, &self.name, &mut keys) {
+        let mut keys = table_keys;
+        let held = match self
+            .names
+            .expand(&mut expr, &self.name, &self.tables, coord, &mut keys)
+        {
             Ok((_, held)) => held,
             Err(e) => return names_used(keys, 0, Err(e)),
         };

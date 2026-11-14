@@ -17,9 +17,10 @@
 //! expanded definition, [`MAX_FORMULA_NODES`] in one expanded formula. A name that is cyclic reads
 //! `#NAME?`; one too deep or too large reads `#VALUE!`; an unknown name reads `#NAME?`.
 
-use crate::parser::parse_formula;
+use crate::parser::parse_formula_in;
+use crate::table_index::{TableCtx, TableIndex};
 use crate::SharedExpr;
-use crate::{Expr, FormulaError};
+use crate::{Expr, FormulaError, PackedCellCoordinate};
 use easyoffice_formats::{
     defined_name_problem, fold_name, DefinedName, EasyOfficeError, MAX_NAMES,
     MAX_NAME_COMMENT_CHARS, MAX_REFERS_TO_CHARS,
@@ -95,6 +96,8 @@ pub enum NameIssue {
 pub struct NameTable {
     defs: Vec<DefinedName>,
     index: HashMap<Box<str>, Vec<Resolved>>,
+    /// A definition has a structured reference, so a change of the tables builds the table again (PD-225).
+    uses_tables: bool,
     /// Nodes the expanded definitions hold in memory.
     phys_total: usize,
 }
@@ -212,6 +215,8 @@ fn is_leaf(expr: &Expr) -> bool {
 /// What a name is replaced by.
 enum Repl<'a> {
     Tree(&'a Arc<SharedExpr>, usize),
+    /// A reference that is no name's definition: the data of a table that has the name.
+    Leaf(Expr),
     Error(FormulaError),
 }
 
@@ -236,6 +241,7 @@ fn replace_names<'a>(
         };
         let replacement = match resolve(scope.as_deref(), name) {
             Repl::Error(e) => Expr::ErrorLiteral(e),
+            Repl::Leaf(expr) => expr,
             Repl::Tree(tree, phys) => {
                 logical = logical.saturating_add(tree.nodes - 1);
                 if logical > max_nodes {
@@ -269,6 +275,11 @@ fn formula_text(refers_to: &str) -> &str {
 impl NameTable {
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
+    }
+
+    /// Whether a definition has a structured reference (a change of the tables builds the names again).
+    pub(crate) fn uses_tables(&self) -> bool {
+        self.uses_tables
     }
 
     /// The definitions in the order they were given.
@@ -313,12 +324,18 @@ impl NameTable {
     /// the table, the others stay in it reading as errors. `strict` also refuses a name that is
     /// a function's or a sheet's (a name entered by a user); a file may have one, and a formula tells
     /// it from the function by its parenthesis.
-    pub(crate) fn build(defs: &[DefinedName], sheets: &[&str], strict: bool) -> Built {
+    pub(crate) fn build(
+        defs: &[DefinedName],
+        sheets: &[&str],
+        strict: bool,
+        tables: &TableIndex,
+    ) -> Built {
         let mut issues: Vec<(usize, NameIssue)> = Vec::new();
         let mut parsed: Vec<Option<Parsed>> = Vec::with_capacity(defs.len());
         let mut by_name: HashMap<String, Vec<usize>> = HashMap::with_capacity(defs.len());
         let first_sheet = sheets.first().copied();
         let mut parsed_nodes = 0usize;
+        let mut uses_tables = false;
         for (i, def) in defs.iter().enumerate() {
             let folded = fold_name(&def.name);
             let mut issue = Self::check_header(def, sheets, strict);
@@ -342,7 +359,8 @@ impl NameTable {
                 continue;
             }
             by_name.entry(folded.clone()).or_default().push(i);
-            let mut expr = parse_names_expr(&def.refers_to);
+            let owner = def.scope.as_deref().or(first_sheet).unwrap_or_default();
+            let mut expr = parse_names_expr(&def.refers_to, owner, tables, &mut uses_tables);
             if expr.is_err() {
                 issue = issue.or(Some(NameIssue::BadFormula));
             }
@@ -368,6 +386,7 @@ impl NameTable {
         let mut table = NameTable {
             defs: defs.to_vec(),
             index: HashMap::new(),
+            uses_tables,
             phys_total: 0,
         };
         let mut resolved = expand_all(&mut parsed, &by_name, defs, &mut issues);
@@ -439,8 +458,15 @@ impl NameTable {
         &self,
         expr: &mut Expr,
         sheet: &str,
+        tables: &TableIndex,
+        coord: Option<PackedCellCoordinate>,
         uses: &mut Vec<NameKey>,
     ) -> Result<(usize, usize), FormulaError> {
+        let ctx = TableCtx {
+            index: tables,
+            sheet,
+            coord,
+        };
         let mut folded = String::new();
         // `Square(3)` where `Square` is a defined name: a call of the value the name stands for.
         walk_mut(expr, |node, _| {
@@ -471,7 +497,11 @@ impl NameTable {
                     Ok(tree) => Repl::Tree(tree, entry.phys),
                     Err(e) => Repl::Error(*e),
                 },
-                None => Repl::Error(FormulaError::Name),
+                // No name: a table of the name is its data (`SUM(Table1)`).
+                None => match tables.data_of(&folded, &ctx) {
+                    Some(data) => Repl::Leaf(data),
+                    None => Repl::Error(FormulaError::Name),
+                },
             }
         });
         uses.sort_unstable();
@@ -488,8 +518,22 @@ fn scope_eq(a: Option<&str>, b: Option<&str>) -> bool {
     }
 }
 
-fn parse_names_expr(refers_to: &str) -> Result<Expr, FormulaError> {
-    parse_formula(formula_text(refers_to)).map(|(expr, _)| expr)
+/// A definition parsed; its structured references are resolved for the sheet `owner` (they have no cell, so
+/// `#This Row` reads `#VALUE!`). `uses_tables` is set when it has one.
+fn parse_names_expr(
+    refers_to: &str,
+    owner: &str,
+    tables: &TableIndex,
+    uses_tables: &mut bool,
+) -> Result<Expr, FormulaError> {
+    let ctx = TableCtx {
+        index: tables,
+        sheet: owner,
+        coord: None,
+    };
+    let parsed = parse_formula_in(formula_text(refers_to), Some(&ctx))?;
+    *uses_tables |= !parsed.table_keys.is_empty();
+    Ok(parsed.expr)
 }
 
 /// A reference without a sheet in a definition points at the sheet the definition belongs to.
@@ -643,7 +687,10 @@ pub fn validate_names(defs: &[DefinedName], sheets: &[&str]) -> Result<(), EasyO
             "이름은 최대 {MAX_NAMES}개까지 정의할 수 있습니다."
         )));
     }
-    match NameTable::build(defs, sheets, true).issues.first() {
+    match NameTable::build(defs, sheets, true, &TableIndex::default())
+        .issues
+        .first()
+    {
         None => Ok(()),
         Some(&(i, issue)) => Err(issue_error(defs, i, issue)),
     }

@@ -43,11 +43,22 @@ impl RecalcSession {
         let plan = self.wb.plan_names(defs, strict)?;
         let issues = plan.issues.clone();
         let affected = plan.affected.clone();
-        // All the formulas that change leave and enter the graph together, so a cell they all read (the
-        // one a name stands for) is rewritten once, not once per formula.
+        self.swap_formulas(&affected, |wb| wb.commit_names(plan))?;
+        Ok(issues)
+    }
+
+    /// Compiles the formulas at `affected` again with `commit` (which changes what they compile to: the defined
+    /// names or the tables), moves them in the dependency graph and marks them dirty. All the formulas that change
+    /// leave and enter the graph together, so a cell they all read (the one a name stands for) is rewritten once,
+    /// not once per formula. The graph outgrowing the session's budget makes the session unusable.
+    pub(super) fn swap_formulas(
+        &mut self,
+        affected: &[(usize, crate::PackedCellCoordinate)],
+        commit: impl FnOnce(&mut crate::WorkbookEngine),
+    ) -> Result<(), RecalcError> {
         let mut pairs: Vec<(Ref, u32)> = Vec::new();
         let mut leaving: Vec<u32> = Vec::new();
-        for &(sheet, coord) in &affected {
+        for &(sheet, coord) in affected {
             let sheet = sheet as u16;
             let engine = &self.wb.sheets()[usize::from(sheet)];
             let Some(vertex) = self.graph.vertex_at(sheet, coord) else {
@@ -68,10 +79,10 @@ impl RecalcSession {
             let engine = &self.wb.sheets()[usize::from(sheet)];
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
         }
-        self.wb.commit_names(plan);
+        commit(&mut self.wb);
         self.name_bytes = self.wb.name_bytes();
         pairs.clear();
-        for &(sheet, coord) in &affected {
+        for &(sheet, coord) in affected {
             let sheet = sheet as u16;
             let engine = &self.wb.sheets()[usize::from(sheet)];
             if let Some(entry @ Ok(ast)) = engine.compiled_asts.get(&coord) {
@@ -90,7 +101,7 @@ impl RecalcSession {
             self.over_budget = true;
             return Err(RecalcError::OverBudget);
         }
-        Ok(issues)
+        Ok(())
     }
 
     /// Estimated heap bytes of what the defined names add: their definitions, the trees they expand to and the

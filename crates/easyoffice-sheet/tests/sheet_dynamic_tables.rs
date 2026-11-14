@@ -138,13 +138,11 @@ fn a_workbook_without_a_session_places_arrays_around_tables() {
 }
 
 #[test]
-fn structured_references_are_not_supported_yet() {
-    // `Table1[Col]` needs the table names and columns in the formula engine; until then it is an error, not a
-    // number (a TODO line tracks it).
+fn a_structured_reference_to_a_table_that_is_not_there_is_a_name_error() {
+    // The references of a table the engine knows are in `sheet_structured_refs.rs`.
     let mut m = new_empty_model();
     m._set("A1", "1");
     m._set("B1", "=SUM(Table1[Q1])");
     m.evaluate();
-    let shown = m._get_text("B1");
-    assert!(shown.starts_with('#'), "{shown}");
+    assert_eq!(m._get_text("B1"), "#NAME?");
 }

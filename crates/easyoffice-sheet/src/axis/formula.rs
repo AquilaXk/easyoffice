@@ -312,6 +312,13 @@ pub(super) fn scan_refs(
             i += 1;
             continue;
         }
+        if b == b'[' {
+            // The group of a structured reference names columns, not cells (PD-225): it is left as written.
+            if let Some(end) = easyoffice_formats::group_end(text, i) {
+                i = end;
+                continue;
+            }
+        }
         let prev_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
         let starts_token = b == b'\'' || b == b'$' || is_ident_byte(b) || !b.is_ascii();
         if prev_ident || !starts_token {
