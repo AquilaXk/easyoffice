@@ -251,6 +251,11 @@
         say("셀 범위를 선택");
         return Promise.resolve(false);
       }
+      // The spreadsheet program does not merge cells of a table (PD-224).
+      if (layoutApi.tablesIn(getActiveSheetName(), rg.r1, rg.c1, rg.r2, rg.c2).length > 0) {
+        say("표 안의 칸은 병합할 수 없음");
+        return Promise.resolve(false);
+      }
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();

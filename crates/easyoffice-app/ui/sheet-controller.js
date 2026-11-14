@@ -470,6 +470,11 @@
             }
           }
         });
+        // A formula in a table's header cell is fixed as the text of its result (PD-224).
+        if (host.__EASYOFFICE_SHEET_LAYOUT__.settleTableHeaders(sheetDataStore[curSheet], curSheet)) {
+          refreshWindowFromModel();
+          updatedActiveSheet = true;
+        }
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }

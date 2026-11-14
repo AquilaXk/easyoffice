@@ -396,13 +396,47 @@
   // ---- the tables (PD-224) ----------------------------------------------------------------------------------------
   const tablesOf = (name) => bySheet[name]?.tables || [];
 
+  // The tables of the sheet that share a cell with the rectangle `r1..r2` by `c1..c2`.
+  function tablesIn(name, r1, c1, r2, c2) {
+    const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
+    return tablesOf(name).filter((t) => {
+      const [from, to] = String(t.range).split(":").map((ref) => parse(ref));
+      return from && to && from.row <= r2 && to.row >= r1 && from.col <= c2 && to.col >= c1;
+    });
+  }
+
+  // A header cell holds the text of its name: a formula typed there is fixed as the text of its result, as the
+  // spreadsheet program does. `map` is the sheet's cell model, whose formula cells already hold their values.
+  // True when a cell changed.
+  function settleTableHeaders(map, name) {
+    let changed = false;
+    for (const t of tablesIn(name, 1, 1, 1048576, 16384)) {
+      if (!t.header || !map) continue;
+      const [from, to] = String(t.range).split(":").map((ref) => host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef(ref));
+      for (let c = from.col; c <= to.col; c += 1) {
+        const entry = map[refOf(from.row, c)];
+        if (entry && String(entry.formula || "").startsWith("=")) {
+          entry.formula = "";
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  const MAX_TABLE_NAME = 255;
+
   // `tables` of a copied sheet with names that no table of `layouts` (sheet name -> layout JSON) has: `Name_2`, `Name_3`, ...
+  // cut so that the name keeps within the 255 characters a file allows.
   function copiedTables(tables, layouts) {
     const taken = new Set();
     for (const json of Object.values(layouts || {})) for (const t of json?.tables || []) taken.add(String(t.name).toLowerCase());
     return structuredClone(tables).map((t) => {
       let name = t.name;
-      for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = t.name + "_" + n;
+      for (let n = 2; taken.has(name.toLowerCase()); n += 1) {
+        const suffix = "_" + n;
+        name = Array.from(t.name).slice(0, MAX_TABLE_NAME - suffix.length).join("") + suffix;
+      }
       taken.add(name.toLowerCase());
       return { ...t, name };
     });
@@ -476,6 +510,8 @@
     rowsHiddenTotal,
     rowAtVisible,
     tablesOf,
+    tablesIn,
+    settleTableHeaders,
     copiedTables,
     filterOf,
     setFilter,

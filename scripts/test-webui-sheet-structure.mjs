@@ -245,3 +245,60 @@ test("a row edit sends the tables of the sheet, takes the engine's moved ones, a
   assert.equal(layout.tablesOf("Sheet1")[0].range, "A2:B5");
   layout.replaceAll({});
 });
+
+test("the merge command leaves the cells of a table alone and merges the cells beside it (PD-224)", async () => {
+  const harness = await openWithEngine();
+  const { document, userClick, host } = harness;
+  const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({ Sheet1: { tables: [{ name: "T", range: "B2:C5", header: true, totals: false, columns: ["a", "b"] }] } });
+  const keyOn = (el, k) => el.dispatchEvent({ type: "keydown", key: k, target: el, shiftKey: true });
+  const select = (ref, rights) => {
+    document.querySelector(`#pane-sheet td[data-cell="${ref}"]`).focus();
+    for (let i = 0; i < rights; i += 1) keyOn(document.activeElement, "ArrowRight");
+  };
+  const merge = async () => {
+    userClick(document.querySelector('.md-item[data-sheet-act="merge"]'));
+    await flushAsyncTurns(20);
+  };
+  select("C3", 1);
+  await merge();
+  assert.equal(document.getElementById("status-command-feedback").textContent, "표 안의 칸은 병합할 수 없음");
+  assert.deepEqual(layout.get("Sheet1").merges, []);
+  select("D8", 1);
+  await merge();
+  assert.deepEqual(layout.toJson(layout.get("Sheet1")).merges, ["D8:E8"]);
+  layout.replaceAll({});
+});
+
+test("a formula typed into a table's header cell is fixed as the text of its result (PD-224)", async () => {
+  const { host } = await createWorkspaceHarness();
+  const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({ S: { tables: [{ name: "T", range: "B2:C5", header: true, totals: false, columns: ["a", "b"] }] } });
+  const map = {
+    B2: { value: "Region", formula: "=\"Reg\"&\"ion\"" },
+    C2: { value: "plain", formula: "" },
+    B3: { value: "3", formula: "=1+2" },
+    E2: { value: "9", formula: "=A1" },
+  };
+  assert.equal(layout.settleTableHeaders(map, "S"), true);
+  assert.deepEqual(map.B2, { value: "Region", formula: "" });
+  assert.equal(map.B3.formula, "=1+2", "a data cell keeps its formula");
+  assert.equal(map.E2.formula, "=A1", "a cell outside the table keeps its formula");
+  assert.equal(layout.settleTableHeaders(map, "S"), false, "settled once");
+  layout.replaceAll({ S: { tables: [{ name: "H", range: "B2:C5", header: false, totals: false, columns: ["a", "b"] }] } });
+  const bare = { B2: { value: "1", formula: "=1" } };
+  assert.equal(layout.settleTableHeaders(bare, "S"), false, "a table without a header row has no header cells");
+  layout.replaceAll({});
+});
+
+test("a copied table name that gets a suffix is cut to the 255 characters a file allows", async () => {
+  const { host } = await createWorkspaceHarness();
+  const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const long = "n".repeat(255);
+  const all = { A: { tables: [{ name: long, range: "A1:A2", columns: ["a"] }] } };
+  const [copy] = layout.copiedTables(all.A.tables, all);
+  assert.equal(copy.name.length, 255);
+  assert.ok(copy.name.endsWith("_2"));
+  assert.equal(copy.name.slice(0, 253), "n".repeat(253));
+  assert.deepEqual(layout.tablesIn("A", 1, 1, 1, 1), [], "tablesIn reads the sheet's own layout");
+});
