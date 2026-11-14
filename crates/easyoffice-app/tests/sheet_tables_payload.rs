@@ -300,3 +300,45 @@ fn a_merge_over_a_table_in_a_file_is_left_out_with_a_warning_and_a_save_leaves_i
         "{opened}"
     );
 }
+
+#[test]
+fn a_custom_table_style_goes_through_a_save_and_an_open_and_a_built_in_one_carries_no_definition() {
+    let custom = SALES.replace(
+        r#""style":"TableStyleMedium2""#,
+        r##""style":"Mine","styleDef":{"h":{"f":"1f4e78","c":"ffffff","b":1},"r1":{"f":"ddebf7","sz":2},"t":{"bd":{"t":"double:000000"}}}"##,
+    );
+    let opened = decode(
+        "표.xlsx",
+        &save("xlsx", &sheet_with_tables(&format!("[{custom}]"))),
+    );
+    assert!(
+        opened.contains(r#""style":"Mine","styleDef":{"h":{"f":"1f4e78","c":"ffffff","b":1},"r1":{"f":"ddebf7","sz":2},"t":{"bd":{"t":"double:000000"}}}"#),
+        "{opened}"
+    );
+    let built_in = decode(
+        "표.xlsx",
+        &save("xlsx", &sheet_with_tables(&format!("[{SALES}]"))),
+    );
+    assert!(
+        built_in.contains(r#""style":"TableStyleMedium2""#) && !built_in.contains("styleDef"),
+        "{built_in}"
+    );
+    // A definition on a built-in name, or a malformed one, is refused instead of written.
+    for bad in [
+        SALES.replace(
+            r#""filter":[]"#,
+            r#""filter":[],"styleDef":{"h":{"f":"1f4e78"}}"#,
+        ),
+        custom.replace(r#""h":{"#, r#""zz":{"#),
+        custom.replace(r#""sz":2"#, r#""sz":99"#),
+    ] {
+        let payload = format!(
+            r#"{{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"표","sheets":[{}]}}"#,
+            sheet_with_tables(&format!("[{bad}]"))
+        );
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err(),
+            "{bad}"
+        );
+    }
+}
