@@ -59,20 +59,34 @@ impl RecalcSession {
         text: &str,
         anchor: Option<PackedCellCoordinate>,
     ) -> EvaluatedCellValue {
+        self.evaluate_text_within(sheet, text, anchor, self.budget.max_time)
+            .0
+    }
+
+    /// [`evaluate_text`](Self::evaluate_text) that stops after `limit`; the flag says the time ran out
+    /// and the value is not one to show.
+    pub(crate) fn evaluate_text_within(
+        &mut self,
+        sheet: &str,
+        text: &str,
+        anchor: Option<PackedCellCoordinate>,
+        limit: Duration,
+    ) -> (EvaluatedCellValue, bool) {
         let Some(idx) = self.wb.find_sheet_index(sheet) else {
-            return EvaluatedCellValue::Error(FormulaError::Ref);
+            return (EvaluatedCellValue::Error(FormulaError::Ref), false);
         };
         let engine = &self.wb.sheets()[idx];
-        let mut ctx = EvalContext::with_workbook(&self.wb, engine.resolved_sheet_id())
-            .with_time_limit(self.budget.max_time);
+        let mut ctx =
+            EvalContext::with_workbook(&self.wb, engine.resolved_sheet_id()).with_time_limit(limit);
         ctx.memo = std::mem::replace(&mut self.memo, crate::MemoTable::new(1));
         ctx.rng_state = self.rng_state;
         ctx.current_coord = anchor;
         ctx.reset_steps();
         let value = engine.eval_raw_string_ctx(text, &mut ctx, 0);
         self.rng_state = ctx.rng_state;
+        let expired = ctx.expired();
         self.memo = ctx.memo;
-        value
+        (value, expired)
     }
 
     /// The value of every populated cell of `sheet`, the cells arrays fill included.

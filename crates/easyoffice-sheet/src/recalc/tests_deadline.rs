@@ -603,3 +603,36 @@ fn chain_bench() {
         .fold(f64::INFINITY, f64::min);
     println!("chain, {} formulas: best of 5 {best:.1} ms", targets.len());
 }
+
+/// The request of a workbook with an array formula settles it and then calculates each formula
+/// target; the targets share the deadline of the request instead of each getting a new one.
+#[test]
+fn formula_targets_of_a_workbook_with_arrays_share_one_deadline() {
+    const TARGETS: usize = 30;
+    let one = one_cell();
+    let mut wb = heavy_workbook(0);
+    wb.set_cell("Sheet1", "AD1", "=SEQUENCE(3)").unwrap();
+    assert!(wb.has_array_formulas());
+    let heavy = format!("={}0", format!("SUM(A1:Z{ROWS})+").repeat(TERMS));
+    let targets: Vec<WorkbookEvalTarget<'_>> = (0..TARGETS)
+        .map(|_| WorkbookEvalTarget {
+            sheet: "Sheet1",
+            expr: &heavy,
+            anchor: None,
+        })
+        .collect();
+    let start = Instant::now();
+    let batch = wb.evaluate_targets_within(&targets, one * 4);
+    let took = start.elapsed();
+    assert!(batch.timed_out, "the targets did not fit the limit");
+    assert!(
+        took < one * 15,
+        "{took:?} against {one:?} a target: the limit was not shared"
+    );
+    let done = (0..TARGETS).filter(|&i| !batch.is_unreached(i)).count();
+    assert!(done > 0 && done < TARGETS, "{done}");
+    assert!(
+        (0..TARGETS).all(|i| batch.is_unreached(i) || batch.values[i].as_number().is_some()),
+        "a target that has a value has its real one"
+    );
+}

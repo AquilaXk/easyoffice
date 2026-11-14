@@ -235,17 +235,22 @@ impl WorkbookEngine {
         targets: &[WorkbookEvalTarget<'_>],
         limit: Duration,
     ) -> Option<WorkbookBatchEvaluation> {
+        // One deadline for the whole request: the settling and every formula target share `limit`.
+        let start = Instant::now();
         let mut settled = self.settle(limit)?;
+        let mut timed_out = settled.outcome.timed_out;
         let mut values = Vec::with_capacity(targets.len());
         let mut unreached = Vec::new();
         for (i, target) in targets.iter().enumerate() {
             let expr = target.expr.trim();
             let value = if crate::parser::strip_open_formula_prefix(expr).is_some() {
-                Some(
+                let left = limit.saturating_sub(start.elapsed());
+                let (value, expired) =
                     settled
                         .session
-                        .evaluate_text(target.sheet, expr, target.anchor),
-                )
+                        .evaluate_text_within(target.sheet, expr, target.anchor, left);
+                timed_out |= expired;
+                (!expired).then_some(value)
             } else {
                 match PackedCellCoordinate::parse_a1(expr) {
                     Ok(coord) if settled.session.is_unreached(target.sheet, coord) => None,
@@ -262,7 +267,7 @@ impl WorkbookEngine {
         Some(WorkbookBatchEvaluation {
             values,
             circular: settled.outcome.circular,
-            timed_out: settled.outcome.timed_out,
+            timed_out,
             unreached,
             spills: settled.session.spill_areas(),
         })
