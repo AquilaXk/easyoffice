@@ -165,6 +165,7 @@
         cellAt: (r, c) => getEntry(grid.refOf(r, c)),
         shiftFormula,
         refOf: grid.refOf,
+        tableFor: (name, row, col) => (name ? layout?.tableNamed(name) : layout?.tableAt(getSheetName(), row, col)),
       });
       if (result.refused) {
         feedback("채우기 범위 초과");

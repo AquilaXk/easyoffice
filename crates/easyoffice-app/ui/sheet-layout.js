@@ -466,6 +466,18 @@
     return true;
   }
 
+  // The table of that name on any sheet, or the table of `sheet` that has the cell (1-based row and column).
+  function tableNamed(name) {
+    const folded = String(name).toLowerCase();
+    for (const sheet of Object.keys(bySheet)) {
+      const found = tablesOf(sheet).find((t) => String(t.name).toLowerCase() === folded);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const tableAt = (sheet, row, col) => tablesIn(sheet, row, col, row, col)[0] || null;
+
   const MAX_TABLE_NAME = 255;
 
   // `tables` of a copied sheet with names that no table of `layouts` (sheet name -> layout JSON) has: `Name_2`, `Name_3`, ...
@@ -555,6 +567,8 @@
     tablesIn,
     settleTableHeaders,
     tableColumnRenames,
+    tableNamed,
+    tableAt,
     setTableColumn,
     copiedTables,
     filterOf,

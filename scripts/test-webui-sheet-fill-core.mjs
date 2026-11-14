@@ -172,3 +172,55 @@ test("the double click target follows the neighbouring column and stops above da
   assert.deepEqual(core.detectFillEnd({ r1: 1, c1: 2, r2: 1, c2: 2 }, tall, 1048576, 16384), { refused: "limit" });
   assert.equal(core.detectFillEnd({ r1: 1048576, c1: 2, r2: 1048576, c2: 2 }, () => true, 1048576, 16384), null, "at the last row");
 });
+
+// Structured references in a fill (PD-225): the column specifiers move like a series for a fill right or left and for a
+// fill up or down with Ctrl; a plain fill up or down and the copy leave them; past the table's edge the reference is #REF!.
+const sales = { name: "Sales", columns: ["Region", "Q1", "Q2", "Q3", "Q 4$"] };
+const tableFor = (name) => (name === null || name.toLowerCase() === "sales" ? sales : null);
+
+function fillFormula(formula, direction, count, mode = "auto") {
+  const horizontal = direction === "right" || direction === "left";
+  const source = horizontal ? { r1: 5, c1: 5, r2: 5, c2: 5 } : { r1: 5, c1: 5, r2: 5, c2: 5 };
+  const result = core.planFill({
+    source,
+    direction,
+    count,
+    mode,
+    cellAt: () => ({ value: "", formula }),
+    shiftFormula: (f) => f,
+    refOf,
+    tableFor,
+  });
+  return result.edits.map((e) => e.formula);
+}
+
+test("a fill right or left moves the column specifiers like a series, in the table's order", () => {
+  assert.deepEqual(fillFormula("=SUM(Sales[Q1])", "right", 2), ["=SUM(Sales[Q2])", "=SUM(Sales[Q3])"]);
+  assert.deepEqual(fillFormula("=SUM(Sales[Q2])", "left", 1), ["=SUM(Sales[Q1])"]);
+  assert.deepEqual(fillFormula("=SUM(sales[q3])", "right", 1), ["=SUM(sales[[Q 4$]])"], "the table name stays as typed; a name that needs brackets gets them");
+  assert.deepEqual(fillFormula("=Sales[[#This Row],[Q1]]*2", "right", 1), ["=Sales[[#This Row],[Q2]]*2"]);
+  assert.deepEqual(fillFormula("=Sales[@Q1]+1", "right", 1), ["=Sales[@Q2]+1"]);
+  assert.deepEqual(fillFormula("=[@Q1]+1", "right", 1), ["=[@Q2]+1"], "inside the table the name may be left out");
+  assert.deepEqual(fillFormula("=SUM(Sales[[Q1]:[Q2]])", "right", 1), ["=SUM(Sales[[Q2]:[Q3]])"], "both ends of a column range move");
+  assert.deepEqual(fillFormula("=SUM(Sales[[#Headers],[#Data],[Q1]])", "right", 1), ["=SUM(Sales[[#Headers],[#Data],[Q2]])"]);
+  assert.deepEqual(fillFormula("=SUM(Sales[#All])+Sales[Q1]", "right", 1), ["=SUM(Sales[#All])+Sales[Q2]"], "a reference with no column stays");
+  assert.deepEqual(fillFormula('="Sales[Q1]"&Sales[Q1]', "right", 1), ['="Sales[Q1]"&Sales[Q2]'], "text in quotes is not a reference");
+  assert.deepEqual(fillFormula("=Other[Q1]", "right", 1), ["=Other[Q1]"], "a table the page does not know stays");
+});
+
+test("past the first or last column of the table the reference is #REF!", () => {
+  assert.deepEqual(fillFormula("=SUM(Sales[Q2])", "left", 3), ["=SUM(Sales[Q1])", "=SUM(Sales[Region])", "=SUM(#REF!)"]);
+  assert.deepEqual(fillFormula("=Sales[Q3]+Sales[[Q1]:[Q2]]", "right", 2), ["=Sales[[Q 4$]]+Sales[[Q2]:[Q3]]", "=#REF!+Sales[[Q3]:[Q 4$]]"]);
+  assert.deepEqual(fillFormula("=[@Region]", "left", 1), ["=#REF!"]);
+});
+
+test("up and down move them only with Ctrl; a copy leaves them", () => {
+  assert.deepEqual(fillFormula("=SUM(Sales[Q1])", "down", 2), ["=SUM(Sales[Q1])", "=SUM(Sales[Q1])"], "plain fill down: no adjustment");
+  assert.deepEqual(fillFormula("=SUM(Sales[Q1])", "up", 1), ["=SUM(Sales[Q1])"]);
+  assert.deepEqual(fillFormula("=SUM(Sales[Q1])", "down", 2, "toggle"), ["=SUM(Sales[Q2])", "=SUM(Sales[Q3])"], "Ctrl: like a series");
+  assert.deepEqual(fillFormula("=SUM(Sales[Q2])", "up", 1, "toggle"), ["=SUM(Sales[Q1])"]);
+  assert.deepEqual(fillFormula("=SUM(Sales[Q1])", "right", 1, "copy"), ["=SUM(Sales[Q1])"], "a copy fill leaves the column");
+  // Without a table list (an old caller) nothing moves.
+  const plain = core.planFill({ source: { r1: 1, c1: 1, r2: 1, c2: 1 }, direction: "right", count: 1, cellAt: () => ({ value: "", formula: "=Sales[Q1]" }), shiftFormula: (f) => f, refOf });
+  assert.equal(plain.edits[0].formula, "=Sales[Q1]");
+});

@@ -235,13 +235,158 @@
     return steps.map((s) => ({ src: s.src, value: values[s.run] ? values[s.run][s.ordinal] : null }));
   }
 
+  // ---- structured references in a fill (PD-225) ----------------------------------------------------------------
+  // A fill moves the column specifiers of a structured reference like a series: `Table1[Q1]` filled one cell to the right
+  // is `Table1[Q2]` (the spreadsheet program does it for a fill right or left and for a fill up or down with Ctrl; a copy
+  // and a plain fill up or down leave them). Every column name of the reference moves by the same number of columns of its
+  // table, in the table's order; past the first or last column the reference is `#REF!`. The syntax is the engine's
+  // (`structured_ref.rs`): a bracket group after a table's name or one that starts with `@`, `#` or `[`, `'` escapes
+  // `[`, `]`, `#`, `'` and `@`, and a column name with a special character sits in brackets of its own.
+  const ESCAPABLE = "[]#'@";
+  const MAX_GROUP_DEPTH = 4;
+  const NAME_CHAR = /[\p{L}\p{N}_.\\]/u;
+
+  function groupEnd(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i += 1) {
+      const c = text[i];
+      if (c === "'" && i + 1 < text.length && ESCAPABLE.includes(text[i + 1])) i += 1;
+      else if (c === "[") {
+        depth += 1;
+        if (depth > MAX_GROUP_DEPTH) return -1;
+      } else if (c === "]") {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+        if (depth < 0) return -1;
+      }
+    }
+    return -1;
+  }
+
+  const unescapeName = (raw) => raw.replace(/'([[\]#'@])/g, "$1");
+  const escapeName = (name) => name.replace(/(['[\]#])/g, "'$1").replace(/^@/, "'@");
+  // ASCII punctuation (but `_`) and control characters need a bracket of their own.
+  const needsBrackets = (name) => /[\x00-\x1f\x7f!-/:-@[-^`{-~]/.test(name);
+  const written = (name, bracketed) => (bracketed || needsBrackets(name) ? "[" + escapeName(name) + "]" : escapeName(name));
+
+  // The elements of a group's inner text, split at the commas that are not inside brackets.
+  function splitElements(inner) {
+    const parts = [];
+    let depth = 0;
+    let from = 0;
+    for (let i = 0; i < inner.length; i += 1) {
+      const c = inner[i];
+      if (c === "'" && ESCAPABLE.includes(inner[i + 1] || "")) i += 1;
+      else if (c === "[") depth += 1;
+      else if (c === "]") depth -= 1;
+      else if (c === "," && depth === 0) {
+        parts.push(inner.slice(from, i));
+        from = i + 1;
+      }
+    }
+    parts.push(inner.slice(from));
+    return parts;
+  }
+
+  // `[a]` or `[a]:[b]` with every name mapped by `rename`; null when a name has no new name.
+  function mapColumnElement(text, rename) {
+    const t = text.trim();
+    const end = groupEnd(t, 0);
+    if (!t.startsWith("[") || end < 0) return null;
+    const first = rename(unescapeName(t.slice(1, end - 1)));
+    if (first === null) return null;
+    if (end === t.length) return "[" + escapeName(first) + "]";
+    if (t[end] !== ":" || !t.slice(end + 1).startsWith("[")) return null;
+    const second = rename(unescapeName(t.slice(end + 2, t.length - 1)));
+    return second === null ? null : "[" + escapeName(first) + "]:[" + escapeName(second) + "]";
+  }
+
+  // The group `[...]` with its column names mapped; the group itself when it names no column; null when one cannot move.
+  function mapGroup(group, rename) {
+    const inner = group.slice(1, -1);
+    const s = inner.trimStart();
+    if (s === "" || s.startsWith("#")) return group;
+    if (s.startsWith("@")) {
+      const rest = s.slice(1);
+      if (rest.trim() === "") return group;
+      if (rest.trimStart().startsWith("[")) {
+        const mapped = mapColumnElement(rest, rename);
+        return mapped === null ? null : "[@" + mapped + "]";
+      }
+      const name = rename(unescapeName(rest));
+      return name === null ? null : "[@" + written(name, false) + "]";
+    }
+    if (s.startsWith("[")) {
+      const parts = [];
+      for (const part of splitElements(inner)) {
+        const trimmed = part.trim();
+        const mapped = trimmed.startsWith("[#") ? trimmed : mapColumnElement(trimmed, rename);
+        if (mapped === null) return null;
+        parts.push(mapped);
+      }
+      return "[" + parts.join(",") + "]";
+    }
+    const name = rename(unescapeName(inner));
+    return name === null ? null : "[" + written(name, false) + "]";
+  }
+
+  // The index of the quote that closes the string or sheet name opening at `i` (a doubled quote stays inside).
+  function quotedEnd(text, i) {
+    for (let j = i + 1; j < text.length; j += 1) {
+      if (text[j] !== text[i]) continue;
+      if (text[j + 1] !== text[i]) return j;
+      j += 1;
+    }
+    return text.length - 1;
+  }
+
+  // `formula` with the column specifiers of its structured references moved by `delta` columns of their tables.
+  // `tableFor(name)` answers `{ columns }` for the table of that name (`null`: the table the formula's cell is in).
+  function shiftStructured(formula, delta, tableFor) {
+    if (!formula.includes("[") || delta === 0) return formula;
+    let out = "";
+    let copied = 0;
+    let nameStart = 0;
+    for (let i = 0; i < formula.length; i += 1) {
+      const c = formula[i];
+      if (c === '"' || c === "'") {
+        i = quotedEnd(formula, i);
+        continue;
+      }
+      if (c !== "[") {
+        if (!(i > 0 && NAME_CHAR.test(formula[i - 1]))) nameStart = i;
+        continue;
+      }
+      const qualified = i > 0 && NAME_CHAR.test(formula[i - 1]);
+      const next = formula.slice(i + 1).trimStart()[0];
+      if (!qualified && (next === undefined || !"@#[".includes(next))) continue;
+      const end = groupEnd(formula, i);
+      if (end < 0) continue;
+      const start = qualified ? nameStart : i;
+      const open = i;
+      const table = tableFor(qualified ? formula.slice(start, i) : null);
+      i = end - 1;
+      if (!table) continue;
+      const rename = (name) => {
+        const at = table.columns.findIndex((col) => col.toLowerCase() === name.toLowerCase());
+        return at < 0 || at + delta < 0 || at + delta >= table.columns.length ? null : table.columns[at + delta];
+      };
+      const mapped = mapGroup(formula.slice(open, end), rename);
+      out += formula.slice(copied, mapped === null ? start : open) + (mapped === null ? "#REF!" : mapped);
+      copied = end;
+    }
+    return out + formula.slice(copied);
+  }
+
   // The cells written by a fill of `source` ({ r1, c1, r2, c2 }, 1-based) by `count` lines in
   // `direction` ("down", "up", "right" or "left"). `mode` is "auto" (the default for the content),
   // "copy" or "toggle" (the other one). `cellAt(row, col)` answers `{ value, formula, style }` or
   // undefined; `shiftFormula(text, dRow, dCol)` moves the relative references of a formula.
   // Answers `{ edits, applyType }` or `{ refused: "limit" }`.
   function planFill(opts) {
-    const { source: s, direction, count, cellAt, mode = "auto", shiftFormula, refOf } = opts;
+    const { source: s, direction, count, cellAt, mode = "auto", shiftFormula, refOf, tableFor } = opts;
+    // The column specifiers of a structured reference move with the fill right or left and with Ctrl up or down (PD-225).
+    const adjustColumns = Boolean(tableFor) && (direction === "right" || direction === "left" ? mode !== "copy" : mode === "toggle");
     const isDateCode = (code) => host.__EASYOFFICE_SHEET_NUMFMT__?.patternKind(code) === "date";
     const vertical = direction === "down" || direction === "up";
     const reverse = direction === "up" || direction === "left";
@@ -274,7 +419,10 @@
         const edit = { ref: refOf(row, col), value: "", formula: "", style: plainStyle(from?.style) };
         // The copy and series fills bring the hyperlink along, or none (PD-218).
         edit.link = from?.link ?? null;
-        if (from?.formula) edit.formula = shiftFormula(from.formula, row - fromRow, col - fromCol);
+        if (from?.formula) {
+          edit.formula = shiftFormula(from.formula, row - fromRow, col - fromCol);
+          if (adjustColumns) edit.formula = shiftStructured(edit.formula, vertical ? row - fromRow : col - fromCol, (name) => tableFor(name, fromRow, fromCol));
+        }
         else edit.value = step.value ?? String(from?.value ?? "");
         edits.push(edit);
       });
@@ -310,6 +458,7 @@
     LOOP_SERIES,
     classify,
     planFill,
+    shiftStructured,
     detectFillEnd,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

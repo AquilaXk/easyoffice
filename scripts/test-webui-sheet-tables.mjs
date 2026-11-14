@@ -205,3 +205,55 @@ test("the page takes the engine's rewrite of the formulas and then names the col
   layout.replaceAll({});
   names.replaceAll([]);
 });
+
+test("one undo of a header edit gives back the header, the column name and the formulas, and redo does it again (PD-221, PD-225)", async () => {
+  const { host, sandbox } = await createWorkspaceHarness();
+  const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({ S: { tables: [named(["Region", "Q1", "Q2"])] } });
+  // The engine's rewrite, as the page asks for it: the old column name becomes the new one in the formulas.
+  const store = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc: async (command, payload) => {
+      const body = JSON.parse(payload);
+      const rewrites = body.formulas
+        .filter((f) => f.text.includes(`[${body.from}]`))
+        .map((f) => ({ sheet: f.sheet, cell: f.cell, text: f.text.replaceAll(`[${body.from}]`, `[${body.to}]`) }));
+      return { rewrites, names: null };
+    },
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  const sheets = { S: { A1: entry("Region"), B1: entry("Q1"), C1: entry("Q2"), E1: entry("6", "=SUM(Sales[Q1])") } };
+  const steps = [];
+  const history = host.__EASYOFFICE_CREATE_SHEET_HISTORY__({
+    sheetDataStore: sheets,
+    sheetRowCounts: {},
+    getActiveModule: () => "SHEET",
+    getActiveSheetName: () => "S",
+    getActiveSheetCellRef: () => "B1",
+    getController: () => ({}),
+    push: (record) => steps.push(record),
+  });
+  const settle = async () => {
+    for (let i = 0; i < 4; i += 1) {
+      const done = new Promise((resolve) => store.followTableHeaders(sheets, () => resolve(true)));
+      if ((await Promise.race([done, new Promise((r) => setTimeout(() => r(false), 20))])) === false) break;
+    }
+  };
+  const state = () => [sheets.S.B1.value, layout.tablesOf("S")[0].columns[1], sheets.S.E1.formula];
+  await settle();
+  // The user types a new header: one history step for the cell.
+  const change = history.begin({ refs: ["B1"], sync: false });
+  sheets.S.B1 = entry("Total");
+  history.commit(change);
+  await settle();
+  assert.deepEqual(state(), ["Total", "Total", "=SUM(Sales[Total])"]);
+  // One undo writes the old header text; the column name and the formula follow it.
+  const redo = history.swap(steps.pop()).inverse;
+  await settle();
+  assert.deepEqual(state(), ["Q1", "Q1", "=SUM(Sales[Q1])"]);
+  // One redo writes the new text again.
+  history.swap(redo);
+  await settle();
+  assert.deepEqual(state(), ["Total", "Total", "=SUM(Sales[Total])"]);
+  layout.replaceAll({});
+});

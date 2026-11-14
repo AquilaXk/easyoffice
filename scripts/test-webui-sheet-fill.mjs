@@ -34,6 +34,7 @@ const MODEL = {
         { ref: "H3", raw: "막음" },
         { ref: "I5", raw: "z5" },
         { ref: "I6", raw: "z6" },
+        { ref: "B4", raw: "=SUM(Sales[Q1])" },
       ],
     },
   ],
@@ -123,6 +124,32 @@ test("dragging right copies formulas with moved references and the cell formats 
   assert.deepEqual(text(document, ["C1", "D1", "E1", "F1"]), ["10", "10", "10", "10"]);
   assert.equal(cell(document, "F1").style.fontWeight, "600", "the format travels");
   assert.equal(cell(document, "E1").dataset.formula ?? "", "");
+});
+
+test("a fill moves the column specifiers of a structured reference like a series and one undo takes it back (PD-225)", async () => {
+  const h = await open();
+  const { document, host } = h;
+  const table = (range) => ({ name: "Sales", range, header: true, totals: false, columns: ["Q0", "Q1", "Q2", "Q3"] });
+  host.__EASYOFFICE_SHEET_LAYOUT__.setSheet("채우기", { tables: [table("M1:P3")] });
+  // Right: the column moves with the cell. Past the last column of the table the reference is #REF!.
+  await select(document, "B4", []);
+  await drag(document, "F4");
+  assert.deepEqual(
+    ["C4", "D4", "E4", "F4"].map((ref) => cell(document, ref).dataset.formula),
+    ["=SUM(Sales[Q2])", "=SUM(Sales[Q3])", "=SUM(#REF!)", "=SUM(#REF!)"]
+  );
+  h.userClick(studioItem(document, "studio-undo"));
+  await flushAsyncTurns(15);
+  assert.deepEqual(["C4", "D4", "E4"].map((ref) => cell(document, ref)?.dataset.formula ?? ""), ["", "", ""], "one undo takes the whole fill back");
+  assert.equal(cell(document, "B4").dataset.formula, "=SUM(Sales[Q1])");
+  // Down: the plain fill leaves the column, Ctrl moves it like a series.
+  await select(document, "B4", []);
+  await drag(document, "B6");
+  assert.deepEqual(["B5", "B6"].map((ref) => cell(document, ref).dataset.formula), ["=SUM(Sales[Q1])", "=SUM(Sales[Q1])"]);
+  await select(document, "B4", []);
+  await drag(document, "B6", { ctrlKey: true });
+  assert.deepEqual(["B5", "B6"].map((ref) => cell(document, ref).dataset.formula), ["=SUM(Sales[Q2])", "=SUM(Sales[Q3])"]);
+  host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll({});
 });
 
 test("filling up continues away from the source: the cell above the first one gets the previous value", async () => {
