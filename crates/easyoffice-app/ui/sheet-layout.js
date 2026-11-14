@@ -545,6 +545,8 @@
   }
 
   const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
+  // The colour of the sheet's tab as "rrggbb", null for none (PD-229).
+  const setTabColor = (name, rgb) => setView(name, "tabColor", /^[0-9a-f]{6}$/i.test(rgb || "") ? rgb.toLowerCase() : null);
   const setHiddenSheet = (name, hidden) => setView(name, "hidden", hidden === true);
   // The page setup of the sheet (`sheet-page.js`): the engine's `page` JSON, null for the default.
   const pageOf = (name) => bySheet[name]?.page || null;
@@ -616,6 +618,7 @@
     freezeOf,
     setFreeze,
     tabColorOf,
+    setTabColor,
     hiddenOf,
     veryHiddenOf,
     setHiddenSheet,

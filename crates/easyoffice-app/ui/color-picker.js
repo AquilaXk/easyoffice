@@ -166,6 +166,25 @@
     return { open, close, toggle: () => (panel.hidden ? open() : close()) };
   }
 
+  // The palette of the style bar as the body of a menu panel (the sheet tab menu's `탭 색`): the gray row and the
+  // colour rows, the button that removes the colour (`clearLabel`) and `다른 색...`, which opens `input` (a
+  // `<input type="color">`) whose `change` the caller listens to. `onSelect(color)` gets "#rrggbb" or "" for the
+  // removing button; `current` ("rrggbb") marks the swatch that is in use. Replaces what the panel held.
+  function fillMenuPalette(panel, { onSelect, input, current = "", clearLabel = "색 없음" }) {
+    const document = panel.ownerDocument;
+    panel.replaceChildren();
+    const mark = (row) => {
+      for (const swatch of row.children) swatch.classList.toggle("selected", swatch.title.slice(1) === current);
+      return row;
+    };
+    for (const colors of [GRAY_ROW, ...PALETTE_ROWS]) panel.appendChild(mark(makeRow(document, colors, onSelect)));
+    const actions = document.createElement("div");
+    actions.className = "sb-hl-palette-actions";
+    actions.appendChild(makeButton(document, clearLabel, () => onSelect("")));
+    actions.appendChild(makeButton(document, "다른 색...", () => input.click()));
+    panel.appendChild(actions);
+  }
+
   // `hostEl` holds the toggle button (`[data-color-toggle]`), the native input and the palette
   // panel (`.sb-hl-palette`). `onSelect(color)` gets "#rrggbb", or "" for "색 없음" (`options.clear`).
   // `options.remember` keeps the recent-colour row (stored under `options.recentKey`, the shared text-colour
@@ -217,5 +236,5 @@
     return { open: popup.open, close: popup.close };
   }
 
-  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, RECENT_KEY, RECENT_LIMIT, placePanel };
+  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, fillMenuPalette, RECENT_KEY, RECENT_LIMIT, placePanel };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -6,6 +6,12 @@
   // the store (whose key order a name like "2024" would reorder) and carried by every snapshot, so
   // undo, open and save keep it. `reconcile` follows the store: a sheet that is gone leaves the
   // list and a sheet nobody placed (the pivot's, a restored older snapshot's) goes last.
+  //
+  // 참조 구현: the reference engine's `packages/sheets-ui/src/views/sheet-bar/sheet-bar-tabs/SheetBarItem.tsx` lines
+  // 38-99 (a tab that is not selected takes the colour as its background and a light or dark text by the colour's
+  // darkness; a selected tab shows the colour as a 2px bar at its lower edge), Apache-2.0, Copyright 2023-present
+  // DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: plain DOM and CSS, the text
+  // colour comes from the cell rule of the sheet window (`autoTextColor`).
 
   const names = host.__EASYOFFICE_SHEET_TAB_NAMES__;
   const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -45,6 +51,21 @@
     return tab;
   }
 
+  // The tab's colour (PD-229): a tab that is not chosen has it for its background and the text that reads on it (the
+  // rule of a cell with a fill, PD-227); the chosen tab keeps its own look and shows the colour as a bar along its
+  // lower edge. The look is in `shell.css` (`data-tab-color`); this sets the two values it uses.
+  function paintColor(btn, rgb) {
+    if (!rgb) {
+      delete btn.dataset.tabColor;
+      btn.style.removeProperty("--tab-color");
+      btn.style.removeProperty("--tab-text");
+      return;
+    }
+    btn.dataset.tabColor = rgb;
+    btn.style.setProperty("--tab-color", "#" + rgb);
+    btn.style.setProperty("--tab-text", "#" + (host.__EASYOFFICE_SHEET_LOOK__?.autoTextColor(rgb) ?? "000000"));
+  }
+
   // Draws the tabs of the visible sheets before the add button, in order, reusing the buttons that
   // are there (a button that stays in place keeps its focus) and marking `active`.
   function render({ document, keys, active }) {
@@ -64,6 +85,7 @@
       const isActive = name === active;
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
+      paintColor(btn, layout.tabColorOf(name));
       return btn;
     });
     const placed = [...bar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")];

@@ -378,9 +378,20 @@
 .sheet-tab-btn { transition: transform 0.12s ease; }
 .sheet-tab-btn.dragging { z-index: 2; transition: none; background: var(--color-surface-raised); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }
 .sheet-tab-edit { flex: 0 0 auto; }
+/* Tab colour (PD-229): the colour is the background of a tab that is not chosen; the chosen tab keeps its look and has the colour as a 2px bar along its lower edge (`sheet-tab-strip.js` sets the two values). */
+.sheet-tab-btn[data-tab-color]:not(.active), .sheet-tab-btn[data-tab-color]:not(.active):hover { background: var(--tab-color); color: var(--tab-text); }
+.sheet-tab-btn[data-tab-color].active { box-shadow: inset 0 -2px 0 var(--tab-color); }
 .sheet-tab-bar.copying { cursor: copy; }
-.sheet-tab-btn.drop-before { box-shadow: inset 2px 0 0 var(--accent-strong); }
-.sheet-tab-btn.drop-end { box-shadow: inset -2px 0 0 var(--accent-strong); }
+.sheet-tab-btn.drop-before, .sheet-tab-btn[data-tab-color].active.drop-before { box-shadow: inset 2px 0 0 var(--accent-strong); }
+.sheet-tab-btn.drop-end, .sheet-tab-btn[data-tab-color].active.drop-end { box-shadow: inset -2px 0 0 var(--accent-strong); }
+/* The `탭 색` submenu of the tab menu: palette rows as the filter panel's colour list has them. */
+#sheet-tab-menu { overflow: visible; }
+.sb-hl-swatch.selected { box-shadow: 0 0 0 1px var(--color-text); }
+#sheet-tab-color-input { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+#sheet-tab-menu .md-sub.open > .md-sub-panel { display: block; }
+#sheet-tab-menu .md-sub-panel { padding: 4px 0; }
+#sheet-tab-menu .md-sub-panel .sb-hl-palette-row, #sheet-tab-menu .md-sub-panel .sb-hl-palette-actions { padding: 2px 16px; margin-bottom: 0; }
+#sheet-tab-menu .md-sub-panel .sb-hl-palette-actions { margin-top: 2px; }
 .sheet-tab-edit[aria-invalid="true"] { border-color: var(--ui-danger-strong); box-shadow: 0 0 0 2px var(--ui-danger-soft); }
 .sheet-tab-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }

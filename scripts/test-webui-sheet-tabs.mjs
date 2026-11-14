@@ -631,7 +631,9 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   press("ArrowUp");
   assert.equal(focused(), "move-right");
   press("ArrowUp");
-  assert.equal(focused(), "move-copy", "move-left is skipped");
+  assert.equal(h.document.activeElement.dataset.tabSub, "color", "move-left is skipped");
+  press("ArrowUp");
+  assert.equal(focused(), "move-copy");
   press("Escape");
   assert.equal(h.menu().hidden, true);
 });
@@ -923,4 +925,118 @@ test("a copy of a sheet takes its names with their references moved by the sheet
   await h.tabMenu("시트1", "copy");
   assert.deepEqual(h.names(), ["시트1", "Sheet2"], "no copy was made");
   assert.match(h.status(), /이름 정의가 한도를 넘어/);
+});
+
+test("탭 색 colours the tab as the other spreadsheet program does: the colour is the background of a tab that is not chosen, a bar under the chosen one (PD-229)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" }, tabColor: "112244" }, { name: "Sheet2", cells: { A1: "2" }, tabColor: "ffcc00" }, { name: "Sheet3", cells: { A1: "3" } }]);
+  const style = (name, prop) => h.tab(name).style.getPropertyValue(prop);
+  // Sheet1 is chosen: it has the bar value and the text it already had; Sheet2 is the colour with black text on the light colour.
+  assert.equal(h.tab("Sheet1").dataset.tabColor, "112244");
+  assert.equal(style("Sheet1", "--tab-color"), "#112244");
+  assert.equal(style("Sheet1", "--tab-text"), "#ffffff", "white on a dark colour");
+  assert.equal(style("Sheet2", "--tab-color"), "#ffcc00");
+  assert.equal(style("Sheet2", "--tab-text"), "#000000", "black on a light colour");
+  assert.equal(h.tab("Sheet3").dataset.tabColor, undefined);
+  assert.equal(h.tab("Sheet3").style.getPropertyValue("--tab-color"), "");
+  // Choosing a tab moves nothing: the colour stays on the tab and only the look (CSS) differs.
+  h.tab("Sheet2").click();
+  await flushAsyncTurns(30);
+  assert.equal(h.active(), "Sheet2");
+  assert.equal(h.tab("Sheet2").dataset.tabColor, "ffcc00");
+});
+
+test("the 탭 색 palette sets the colour of the tab it was opened on, 색 없음 takes it off, each is one undo step and the file gets it back (PD-229)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, { name: "Sheet2", cells: { A1: "2" } }]);
+  const { document, userClick } = h;
+  const openMenu = (name) => {
+    const t = h.tab(name);
+    t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  };
+  const swatches = () => [...document.querySelectorAll("#sheet-tab-color-panel .sb-hl-swatch")];
+  openMenu("Sheet2");
+  assert.equal(document.querySelector('#sheet-tab-menu [data-tab-sub="color"]').getAttribute("aria-disabled"), null);
+  const red = swatches().find((s) => s.title === "#ff0000");
+  userClick(red);
+  await flushAsyncTurns(40);
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf("Sheet2"), "ff0000");
+  assert.equal(h.tab("Sheet2").style.getPropertyValue("--tab-color"), "#ff0000");
+  assert.equal(h.tab("Sheet1").dataset.tabColor, undefined, "only the tab it was opened on");
+  assert.equal(document.getElementById("sheet-tab-menu").hidden, true, "the menu closes");
+  assert.equal((await h.saved()).find((s) => s.name === "Sheet2").tabColor, "ff0000");
+  // The palette marks the colour in use; the colour of another picker ("다른 색...") goes the same way.
+  openMenu("Sheet2");
+  assert.equal(swatches().find((s) => s.classList.contains("selected"))?.title, "#ff0000");
+  const input = document.getElementById("sheet-tab-color-input");
+  input.value = "#123456";
+  input.onchange();
+  await flushAsyncTurns(40);
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf("Sheet2"), "123456");
+  // 색 없음.
+  openMenu("Sheet2");
+  userClick([...document.querySelectorAll("#sheet-tab-color-panel .sb-hl-palette-actions button")][0]);
+  await flushAsyncTurns(40);
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf("Sheet2"), null);
+  assert.equal(h.tab("Sheet2").dataset.tabColor, undefined);
+  // The same colour again is no step; each of the others is exactly one.
+  openMenu("Sheet1");
+  userClick(swatches().find((s) => s.title === "#00ff00"));
+  await flushAsyncTurns(40);
+  openMenu("Sheet1");
+  userClick(swatches().find((s) => s.title === "#00ff00"));
+  await flushAsyncTurns(40);
+  await h.history("studio-undo");
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf("Sheet1"), null, "one undo takes the colour off, as the second press was no step");
+  await h.history("studio-undo");
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf("Sheet2"), "123456");
+  assert.equal(h.tab("Sheet2").dataset.tabColor, "123456", "the strip follows the undo");
+});
+
+test("a protected workbook structure and a protected sheet keep the tab colour from changing (PD-216, PD-229)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, { name: "Sheet2", cells: { A1: "2" }, protect: { on: true, deny: [] } }]);
+  const { document } = h;
+  const sub = () => document.querySelector('#sheet-tab-menu [data-tab-sub="color"]');
+  const openMenu = (name) => {
+    const t = h.tab(name);
+    t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  };
+  openMenu("Sheet2");
+  assert.equal(sub().getAttribute("aria-disabled"), "true", "a protected sheet");
+  assert.equal(await h.host.__EASYOFFICE_SHEET_PROTECT__ && true, true);
+  openMenu("Sheet1");
+  assert.equal(sub().getAttribute("aria-disabled"), null);
+  h.host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook({ structure: true, windows: false });
+  openMenu("Sheet1");
+  assert.equal(sub().getAttribute("aria-disabled"), "true", "a protected structure");
+  h.host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(null);
+});
+
+test("the keyboard reaches the 탭 색 palette: Right opens it, the arrows move in it, Left and Escape go back to the item (PD-229)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, { name: "Sheet2", cells: { A1: "2" } }]);
+  const { document } = h;
+  const t = h.tab("Sheet1");
+  t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  const sub = document.querySelector('#sheet-tab-menu [data-tab-sub="color"]');
+  const panel = document.getElementById("sheet-tab-color-panel");
+  sub.focus();
+  const press = (key) => h.menu().dispatchEvent({ type: "keydown", key, target: document.activeElement });
+  press("ArrowRight");
+  assert.equal(sub.classList.contains("open"), true);
+  assert.equal(panel.contains(document.activeElement), true);
+  const first = document.activeElement;
+  press("ArrowRight");
+  assert.notEqual(document.activeElement, first);
+  press("End");
+  assert.equal(document.activeElement.textContent, "다른 색...");
+  press("ArrowLeft");
+  assert.equal(document.activeElement, sub);
+  assert.equal(sub.classList.contains("open"), false);
+  assert.equal(h.menu().hidden, false, "Left only leaves the palette");
+  press("ArrowRight");
+  press("Escape");
+  assert.equal(document.activeElement, sub);
+  assert.equal(h.menu().hidden, false, "Escape in the palette goes back first");
 });

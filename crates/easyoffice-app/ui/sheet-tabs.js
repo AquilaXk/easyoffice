@@ -75,6 +75,8 @@
         delete: open && shown.length > 1 && at >= 0,
         rename: open && at >= 0,
         moveCopy: open && at >= 0,
+        // The colour of a tab is off under a protected structure and on a protected sheet (PD-229).
+        tabColor: open && at >= 0 && !host.__EASYOFFICE_SHEET_PROTECT__?.isOn(sheet),
         moveLeft: open && at > 0,
         moveRight: open && at >= 0 && at < shown.length - 1,
         hide: open && shown.length > 1 && at >= 0,
@@ -347,6 +349,23 @@
       return at < 0 ? Promise.resolve(false) : moveTo(sheet, at + delta);
     };
 
+    // The colour of the tab of `sheet` ("rrggbb", null for none), one undo step.
+    function setTabColor(sheet, rgb) {
+      if (structureBlocked()) return Promise.resolve(false);
+      if (!can(sheet).tabColor) {
+        say("보호된 시트의 탭 색은 바꿀 수 없음");
+        return Promise.resolve(false);
+      }
+      return change((next) => {
+        const { tabColor, ...kept } = next.sheetLayout[sheet] || {};
+        if ((tabColor || null) === (rgb || null)) return false;
+        if (rgb) kept.tabColor = rgb;
+        if (Object.keys(kept).length > 0) next.sheetLayout[sheet] = kept;
+        else delete next.sheetLayout[sheet];
+        return rgb ? "탭 색: " + names.labelOf(sheet) : "탭 색 없음: " + names.labelOf(sheet);
+      });
+    }
+
     function hide(sheet) {
       if (structureBlocked()) return Promise.resolve(false);
       if (!can(sheet).hide) {
@@ -387,7 +406,7 @@
       "tab-unhide": () => unhide(),
     };
 
-    return { can, insert, remove, rename, checkRename, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, actions, shownSheets, hiddenSheets };
+    return { can, insert, remove, rename, checkRename, setTabColor, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, actions, shownSheets, hiddenSheets };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TABS__ = createSheetTabs;

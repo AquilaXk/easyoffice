@@ -243,20 +243,20 @@ test("a row edit sends the groups and keeps the frozen panes and the tab colour 
   assert.ok(document);
 });
 
-test("the tab colour is kept in the layout for the file but has no command and no look on the tab", async () => {
+test("the tab menu has 탭 색 with a palette, and a tab that has a colour shows it (PD-229 turns PD-210's removal back)", async () => {
   const { document, layout } = await open();
   const tab = document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
   tab.dispatchEvent({ type: "contextmenu", target: tab, clientX: 40, clientY: 700 });
   const menu = document.getElementById("sheet-tab-menu");
   assert.equal(menu.hidden, false);
-  // The tab commands: insert, delete, rename, copy, move, hide and show again (PD-209); no colour command.
-  assert.deepEqual([...menu.children].map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent), ["시트 삽입", "삭제", "이름 바꾸기", "복사", "이동/복사…", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…"]);
-  assert.equal(document.getElementById("sheet-tab-color-palette"), null);
-  assert.equal(document.querySelector('[data-sheet-act="tab-color"]'), null);
+  const labels = [...menu.children].filter((el) => !el.matches("input")).map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent);
+  assert.deepEqual(labels, ["시트 삽입", "삭제", "이름 바꾸기", "복사", "이동/복사…", "탭 색", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…"]);
+  const panel = document.getElementById("sheet-tab-color-panel");
+  assert.equal(panel.querySelectorAll(".sb-hl-palette-row").length, 7, "the gray row and the six colour rows of the style bar");
+  assert.deepEqual([...panel.querySelectorAll(".sb-hl-palette-actions button")].map((b) => b.textContent), ["색 없음", "다른 색..."]);
   layout().replaceAll({ Sheet1: { tabColor: "3366cc" } });
   assert.equal(layout().tabColorOf("Sheet1"), "3366cc");
-  assert.equal(tab.dataset.tabColor, undefined);
-  assert.equal(layout().getAll().Sheet1.tabColor, "3366cc", "the file still gets the colour back");
+  assert.equal(layout().getAll().Sheet1.tabColor, "3366cc", "the file gets the colour back");
 });
 
 test("sorting keeps the groups and the folded rows where they are, and the folded rows stay in place", async () => {

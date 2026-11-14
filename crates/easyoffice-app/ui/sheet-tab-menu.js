@@ -12,7 +12,10 @@
     const $ = (id) => document.getElementById(id);
     const menu = () => $("sheet-tab-menu");
     const tabOf = (name) => Array.from(document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")).find((t) => t.dataset.sheetTab === name) || null;
-    const items = () => Array.from(menu().querySelectorAll(".md-item")).filter((el) => !el.hidden && el.getAttribute("aria-disabled") !== "true");
+    const items = () => Array.from(menu().querySelectorAll(":scope > .md-item, :scope > .md-sub")).filter((el) => !el.hidden && el.getAttribute("aria-disabled") !== "true");
+    const sub = () => menu().querySelector(".md-sub");
+    const subPanel = () => $("sheet-tab-color-panel");
+    const subItems = () => Array.from(subPanel().querySelectorAll("button"));
     let menuSheet = null;
 
     // Which command each item runs on the sheet that was pressed.
@@ -41,8 +44,39 @@
       unhide: "unhide",
     };
 
+    // The `탭 색` palette: the colours of the style bar, 색 없음 and 다른 색..., for the tab that was pressed.
+    function fillColors(sheet) {
+      const input = $("sheet-tab-color-input");
+      const apply = (color) => {
+        closeMenu();
+        void Promise.resolve(getTabs().setTabColor(sheet, color === "" ? null : color.slice(1))).catch(() => {});
+      };
+      host.__EASYOFFICE_COLOR_PICKER__.fillMenuPalette(subPanel(), {
+        onSelect: apply,
+        input,
+        current: host.__EASYOFFICE_SHEET_LAYOUT__.tabColorOf(sheet) || "",
+      });
+      input.onchange = () => apply(input.value);
+    }
+
+    // A key opens the panel (`open` shows it; the pointer shows it by hovering).
+    function openSub() {
+      sub().classList.add("open");
+      placeSub();
+    }
+
+    // The panel opens beside the item; a window edge that would cut it moves it up.
+    function placeSub() {
+      const panel = subPanel();
+      panel.style.top = "";
+      const bottom = panel.getBoundingClientRect().bottom;
+      const room = (host.innerHeight || document.documentElement.clientHeight) - MENU_MARGIN;
+      if (bottom > room) panel.style.top = -4 - (bottom - room) + "px";
+    }
+
     function closeMenu() {
       const el = menu();
+      sub()?.classList.remove("open");
       if (el && !el.hidden) el.hidden = true;
     }
 
@@ -51,6 +85,9 @@
       if (!el) return;
       menuSheet = tab.dataset.sheetTab;
       const can = getTabs().can(menuSheet);
+      if (!can.tabColor) sub().setAttribute("aria-disabled", "true");
+      else sub().removeAttribute("aria-disabled");
+      fillColors(menuSheet);
       for (const item of el.querySelectorAll("[data-tab-act]")) {
         const key = ENABLED_BY[item.dataset.tabAct];
         const off = key !== undefined && !can[key];
@@ -69,9 +106,16 @@
     }
 
     function onMenuKeydown(ev) {
+      const inSub = subPanel().contains(document.activeElement);
+      if (inSub) return onSubKeydown(ev);
+      sub().classList.remove("open");
       const list = items();
       const at = list.indexOf(document.activeElement);
-      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      if ((ev.key === "ArrowRight" || ev.key === "Enter" || ev.key === " ") && document.activeElement === sub()) {
+        ev.preventDefault();
+        openSub();
+        subItems()[0]?.focus();
+      } else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
         ev.preventDefault();
         list[(at + (ev.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus();
       } else if (ev.key === "Home" || ev.key === "End") {
@@ -84,6 +128,25 @@
       } else if (ev.key === "Enter" || ev.key === " ") {
         ev.preventDefault();
         document.activeElement?.click?.();
+      }
+    }
+
+    // Inside the palette the arrows move between its swatches and buttons, Left and Escape go back to the item.
+    function onSubKeydown(ev) {
+      const list = subItems();
+      const at = list.indexOf(document.activeElement);
+      if (ev.key === "Escape" || ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        sub().focus();
+        sub().classList.remove("open");
+      } else if (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "ArrowRight") {
+        ev.preventDefault();
+        const step = ev.key === "ArrowUp" ? -1 : 1;
+        list[(at + step + list.length) % list.length]?.focus();
+      } else if (ev.key === "Home" || ev.key === "End") {
+        ev.preventDefault();
+        list[ev.key === "Home" ? 0 : list.length - 1]?.focus();
       }
     }
 
@@ -104,6 +167,7 @@
       });
       const el = menu();
       el?.addEventListener("keydown", onMenuKeydown);
+      sub()?.addEventListener("mouseenter", placeSub);
       el?.addEventListener("contextmenu", (ev) => ev.preventDefault());
       for (const item of el?.querySelectorAll("[data-tab-act]") || []) {
         item.addEventListener("click", () => {
