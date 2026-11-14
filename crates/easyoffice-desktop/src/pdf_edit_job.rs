@@ -481,9 +481,11 @@ async fn split_flow(
     Ok(Some(written))
 }
 
-/// Writes the file of each range into `folder`. The names are checked first; the files are built,
-/// checked and written one at a time (so they are never all in memory), and if one fails the ones
-/// written so far are removed again.
+/// Writes the file of each range into `folder`. The names are checked first (two ranges that give one name
+/// are refused, so is a name that is taken); the files are built, checked and written one at a time (so they
+/// are never all in memory). A file is claimed with `create_new` just before it is written, so a file that
+/// appeared during the long build is refused instead of replaced. If one fails the files this call made are
+/// removed again and no other.
 fn write_split(
     session: &EditSession,
     ranges: &[Range<usize>],
@@ -495,10 +497,14 @@ fn write_split(
         .iter()
         .map(|range| split_file_name_of(&file_stem(session.stem()), range))
         .collect();
-    if let Some(taken) = names.iter().find(|name| folder.join(name).exists()) {
+    let mut seen = std::collections::HashSet::with_capacity(names.len());
+    if let Some(twice) = names.iter().find(|name| !seen.insert(name.as_str())) {
         return Err(format!(
-            "같은 이름의 파일이 이미 있어 분할하지 않았습니다: {taken}"
+            "같은 쪽 범위가 두 번 들어 있어 분할하지 않았습니다: {twice}"
         ));
+    }
+    if let Some(taken) = names.iter().find(|name| folder.join(name).exists()) {
+        return Err(taken_message(taken));
     }
     let mut written: Vec<PathBuf> = Vec::new();
     let mut total = 0usize;
@@ -515,8 +521,12 @@ fn write_split(
             }
             let request = SaveRequest::from_bytes(name, bytes)?;
             let target = folder.join(name);
+            claim_new_file(&target).map_err(|err| match err.kind() {
+                std::io::ErrorKind::AlreadyExists => taken_message(name),
+                _ => err.to_string(),
+            })?;
+            written.push(target.clone());
             write_document_bytes(&target, request.bytes()).map_err(|err| err.to_string())?;
-            written.push(target);
         }
         Ok(())
     })();
@@ -529,6 +539,19 @@ fn write_split(
             Err(message)
         }
     }
+}
+
+fn taken_message(name: &str) -> String {
+    format!("같은 이름의 파일이 이미 있어 분할하지 않았습니다: {name}")
+}
+
+/// Creates `path` empty and fails when anything is there: the name is the call's from then on.
+fn claim_new_file(path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(drop)
 }
 
 /// Answer of `pdf_edit_save`. Like a save it names the file only, never a path (PD-088).
@@ -610,6 +633,7 @@ mod tests {
     use super::*;
     use crate::pdf_edit_engine::InProcessEngine;
     use crate::pdf_edit_fixtures::{deadline, read, sample_pdf};
+    use crate::pdf_edit_wire::PagePlan;
     use usvg::fontdb::Database;
 
     fn engine() -> InProcessEngine {
@@ -823,6 +847,68 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         assert!(write_split(&s, &ranges, &dir, &engine(), &tight).is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_ranges_that_give_one_name_write_nothing() {
+        let dir = scratch_dir("split-twice");
+        let s = session(3);
+        let ranges = s.split_ranges(Some("1, 1")).unwrap();
+        let err = write_split(&s, &ranges, &dir, &engine(), &deadline()).unwrap_err();
+        assert!(err.contains("두 번"), "{err}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An engine that, while it builds the file of one range, lets somebody else create that name.
+    struct Racing {
+        inner: InProcessEngine,
+        name: PathBuf,
+        builds: std::cell::Cell<usize>,
+    }
+
+    impl PdfEngine for Racing {
+        fn inspect(&self, bytes: &Arc<Vec<u8>>) -> Result<usize, String> {
+            self.inner.inspect(bytes)
+        }
+
+        fn build(
+            &self,
+            sources: &[Arc<Vec<u8>>],
+            pages: &[PagePlan],
+            overlay: &Overlay,
+        ) -> Result<Vec<u8>, String> {
+            self.builds.set(self.builds.get() + 1);
+            if self.builds.get() == 2 {
+                std::fs::write(&self.name, b"someone else's file").unwrap();
+            }
+            self.inner.build(sources, pages, overlay)
+        }
+    }
+
+    #[test]
+    fn a_name_taken_while_the_files_are_built_is_refused_and_left_alone() {
+        let dir = scratch_dir("split-race");
+        let s = session(3);
+        let ranges = s.split_ranges(None).unwrap();
+        let racing = Racing {
+            inner: engine(),
+            name: dir.join("보고서_2.pdf"),
+            builds: std::cell::Cell::new(0),
+        };
+        let err = write_split(&s, &ranges, &dir, &racing, &deadline()).unwrap_err();
+        assert!(err.contains("같은 이름"), "{err}");
+        assert_eq!(
+            std::fs::read(dir.join("보고서_2.pdf")).unwrap(),
+            b"someone else's file",
+            "the file that appeared is neither replaced nor removed by the rollback"
+        );
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "the first file this call wrote is gone again"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
