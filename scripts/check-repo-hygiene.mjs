@@ -508,7 +508,7 @@ for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
     if (lineCount >= 1000) {
       errors.push(`WebUI JS file ${uiRel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
-    for (const violation of findHtmlSinkViolations(uiText)) {
+    for (const violation of findHtmlSinkViolations(uiText, uiRel)) {
       errors.push(`Prohibited HTML sink in ${uiRel} (${violation})`);
     }
     if (/\.setAttribute\(\s*["']style["']/i.test(uiText)) {
