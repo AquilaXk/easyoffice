@@ -3,7 +3,14 @@ use super::*;
 fn parse(cell_xml: &str, shared: &[String]) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
     let sheet = format!("<sheetData><row r=\"1\">{cell_xml}</row></sheetData>");
     let table = SharedStrings::from_strings(shared);
-    scan_worksheet(&sheet, &table, &[], false, &mut DecodeBudget::new()).map(|scan| scan.cells)
+    scan_worksheet(
+        &sheet,
+        &table,
+        &XfStyles::default(),
+        false,
+        &mut DecodeBudget::new(),
+    )
+    .map(|scan| scan.cells)
 }
 
 #[test]

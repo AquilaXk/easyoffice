@@ -197,7 +197,14 @@ fn sheet(body: &str) -> String {
 
 fn new_cells(xml: &str, shared: &[String]) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
     let table = SharedStrings::from_strings(shared);
-    scan_worksheet(xml, &table, &[], false, &mut DecodeBudget::new()).map(|scan| scan.cells)
+    scan_worksheet(
+        xml,
+        &table,
+        &XfStyles::default(),
+        false,
+        &mut DecodeBudget::new(),
+    )
+    .map(|scan| scan.cells)
 }
 
 /// The same cells, or the same kind of error.
@@ -334,22 +341,46 @@ fn styling_matches_the_substring_scanner() {
     let xml = r#"<worksheet><cols><col min="1" max="2" width="20" customWidth="1"/><col min="3" max="3" width="9"/><col min="4" max="5" width="12.5" customWidth="true"/><col min="2" max="1" width="5" customWidth="1"/><col min="6" max="6" width="7" customWidth="0"/><col min="x" max="9" width="7" customWidth="1"/></cols><sheetData><row><c r="A1" s="1"><v>1</v></c><c r="B1" s="2"/><c r="C1" s="0"/><c r="D1" s="9"/><c r="E1" s="1" t="s"><v>0</v></c><c s="1"/><c r="F1" s="x"/></row></sheetData></worksheet>"#;
     let table = SharedStrings::from_strings(&["a".to_string()]);
     let old = legacy_worksheet_styling(xml, &styles);
-    let new = scan_worksheet(xml, &table, &styles, true, &mut DecodeBudget::new())
-        .unwrap()
-        .styling;
+    let new = scan_worksheet(
+        xml,
+        &table,
+        &XfStyles {
+            styles: styles.to_vec(),
+            ..XfStyles::default()
+        },
+        true,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap()
+    .styling;
     // The cell without `r` after E1 is F1 (ECMA-376 18.3.1.4); the substring scanner skipped it.
     let mut expected = old.clone();
     expected.cells.insert((0, 5), styles[1]);
     assert_eq!(expected, new);
     assert_eq!(old.cells.len(), 3);
     assert!(!old.columns.is_empty());
-    let none = scan_worksheet(xml, &table, &styles, false, &mut DecodeBudget::new())
-        .unwrap()
-        .styling;
+    let none = scan_worksheet(
+        xml,
+        &table,
+        &XfStyles {
+            styles: styles.to_vec(),
+            ..XfStyles::default()
+        },
+        false,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap()
+    .styling;
     assert!(none.is_empty(), "no styling unless asked for");
-    let no_xf = scan_worksheet(xml, &table, &[], true, &mut DecodeBudget::new())
-        .unwrap()
-        .styling;
+    let no_xf = scan_worksheet(
+        xml,
+        &table,
+        &XfStyles::default(),
+        true,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap()
+    .styling;
     assert_eq!(no_xf, legacy_worksheet_styling(xml, &[]));
 }
 
@@ -447,10 +478,16 @@ fn measure_one_pass_against_the_substring_scanner() {
             .len()
     });
     let new = time(&|| {
-        scan_worksheet(&xml, &table, &[], false, &mut DecodeBudget::new())
-            .unwrap()
-            .cells
-            .len()
+        scan_worksheet(
+            &xml,
+            &table,
+            &XfStyles::default(),
+            false,
+            &mut DecodeBudget::new(),
+        )
+        .unwrap()
+        .cells
+        .len()
     });
     println!(
         "xlsx sheet {} bytes: substring scanner {old:.2} ms, one-pass {new:.2} ms",
@@ -462,12 +499,26 @@ fn measure_one_pass_against_the_substring_scanner() {
 fn hidden_rows_and_columns_and_merges_are_read() {
     let xml = r#"<worksheet><cols><col min="2" max="3" width="9" hidden="true"/><col min="5" max="5" width="12" customWidth="1"/></cols><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2" hidden="1"><c r="A2"><v>2</v></c></row><row r="3" hidden="0"/><row r="4" hidden="1"/></sheetData><mergeCells count="3"><mergeCell ref="A1:C1"/><mergeCell ref="B5"/><mergeCell ref="x"/></mergeCells></worksheet>"#;
     let table = SharedStrings::from_strings(&[]);
-    let scan = scan_worksheet(xml, &table, &[], true, &mut DecodeBudget::new()).unwrap();
+    let scan = scan_worksheet(
+        xml,
+        &table,
+        &XfStyles::default(),
+        true,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap();
     assert_eq!(scan.styling.hidden_rows, vec![(1, 1), (3, 3)]);
     assert_eq!(scan.styling.hidden_cols, vec![(1, 2)]);
     assert_eq!(scan.styling.merges.len(), 1);
     assert_eq!(scan.styling.merges[0].to_a1(), "A1:C1");
     assert_eq!(scan.styling.columns.len(), 1);
-    let none = scan_worksheet(xml, &table, &[], false, &mut DecodeBudget::new()).unwrap();
+    let none = scan_worksheet(
+        xml,
+        &table,
+        &XfStyles::default(),
+        false,
+        &mut DecodeBudget::new(),
+    )
+    .unwrap();
     assert!(none.styling.is_empty());
 }
