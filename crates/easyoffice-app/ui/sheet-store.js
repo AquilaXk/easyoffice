@@ -14,6 +14,8 @@
   const isInputEntry = (entry) => !spillApi || spillApi.isInput(entry);
   // The `names` field of a stateless request: only when there are names to send.
   const namesField = () => (namesApi?.hasAny() ? { names: namesApi.getAll() } : {});
+  // The merged ranges go with a request that has no session (the engine places arrays around them, PD-222).
+  const mergesField = (sheets) => spillApi?.mergesField(Object.keys(sheets || {}), host.__EASYOFFICE_SHEET_LAYOUT__) || {};
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
@@ -170,6 +172,9 @@
       names: null,
       // The lock payload of each protected sheet the session was told (see `syncLocks`).
       locks: new Map(),
+      // The merges payload of each sheet the session was told, and the layout version it was read at (see `syncMerges`).
+      merges: new Map(),
+      mergesVersion: -1,
       gen: 0,
     };
     let sessionChain = Promise.resolve();
@@ -187,6 +192,8 @@
       session.rules = new Map();
       session.names = null;
       session.locks = new Map();
+      session.merges = new Map();
+      session.mergesVersion = -1;
     }
 
     // Forgets the session and tells the engine to release it (an unknown id is harmless there).
@@ -274,6 +281,7 @@
         await openSession(names, sheetKey);
       }
       await syncNames(sheetsMap);
+      const mergeChanged = await syncMerges(names, sheetsMap);
       const { changes, formulaTargets } = diffAgainstMirror(sheetsMap, names);
       let at = 0;
       let last = null;
@@ -311,7 +319,7 @@
         circular: last.circular === true,
         timedOut: last.timedOut === true,
         pending: last.pending,
-        spillsChanged: spillsChanged || lockChanged,
+        spillsChanged: spillsChanged || lockChanged || mergeChanged,
       };
     }
 
@@ -374,6 +382,33 @@
         }
         changed = true;
       }
+      return changed;
+    }
+
+    // Tells the engine the merged ranges of each sheet when they differ from what it holds: an array is not placed
+    // across one (PD-222). Before the cells, so an array is placed once. Returns whether the answer changed the model.
+    async function syncMerges(names, sheetsMap) {
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      if (!spillApi || !layoutApi?.version) return false;
+      const version = layoutApi.version();
+      if (session.mergesVersion === version) return false;
+      let changed = false;
+      for (const name of names) {
+        const payload = JSON.stringify(spillApi.mergePayload(name, layoutApi));
+        if ((session.merges.get(name) ?? "[]") === payload) continue;
+        const res = await sessionCall({ sessionAction: "merges", session: session.id, sheet: name, merges: JSON.parse(payload) });
+        if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+        if (res.refused) continue;
+        session.merges.set(name, payload);
+        for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
+        if (takeSpills(sheetsMap, res)) changed = true;
+        for (const c of Array.isArray(res.changed) ? res.changed : []) {
+          const held = sheetsMap[c.sheet]?.[c.cell];
+          if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
+        }
+        changed = true;
+      }
+      session.mergesVersion = version;
       return changed;
     }
 
@@ -572,6 +607,7 @@
           targets: [{ sheet, cell }],
           cells,
           ...namesField(),
+          ...mergesField(sheets),
         })
       );
       return readExtraValue(rpcRes, sheets, extraTarget, 1);
@@ -662,6 +698,7 @@
         targets: targetSpecs,
         cells,
         ...namesField(),
+        ...mergesField(sheets),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
@@ -715,6 +752,7 @@
         targets: formulaTargets.map(({ sheet, cell }) => ({ sheet, cell })),
         cells,
         ...namesField(),
+        ...mergesField(sheetsMap),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;

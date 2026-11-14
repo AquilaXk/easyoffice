@@ -98,7 +98,9 @@
       sheetHistory.restoreRowCounts(record);
       for (const [name, change] of notes.extent) controller.noteCellsRestored(name, change);
       await restoreWorkspaceSnapshot(sheetHistory.snapshotOf(record, notes), backendSyncRes, { keepProtections: true });
-      if (record.sheets.some((entry) => entry.delta.n > 0 || entry.absent)) await controller.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      // A merge that comes or goes changes where an array may be placed (PD-222): the calculation after the step places it again.
+      const cellsChanged = record.sheets.some((entry) => entry.delta.n > 0 || entry.absent);
+      if (cellsChanged || record.parts.sheetLayout !== undefined) await controller.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       return true;
     }
 

@@ -291,6 +291,8 @@
         layoutApi.removeMerges(name, rg.r1, rg.c1, rg.r2, rg.c2);
         sheetHistory.commit(change);
         grid.layoutChanged();
+        // The merge no longer stops an array from filling its cells (PD-222).
+        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
         say("병합 해제");
         return true;

@@ -248,7 +248,9 @@
         const filledBy = host.__EASYOFFICE_SHEET_SPILL__?.isChild(api.getEntry(ref)) ? api.getEntry(api.getEntry(ref).spillOf) : null;
         formulaInput.classList.toggle("spill-ghost", Boolean(filledBy));
         if (filledBy) {
-          formulaInput.value = filledBy.formula || "";
+          // The formula of a cell whose format hides it stays hidden on the cells it fills (PD-222).
+          const concealed = hidden || protectApi?.formulaHidden(api.getSheetName(), sel.ar, sel.ac, filledBy.style);
+          formulaInput.value = concealed ? api.getEntry(ref)?.value || "" : filledBy.formula || "";
         } else if (activeTd) {
           const live = grid.readTdValue(activeTd);
           formulaInput.value = stateOf(activeTd)?.userEdited ? live : hidden ? live : activeTd.dataset.formula || live;

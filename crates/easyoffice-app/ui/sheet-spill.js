@@ -57,22 +57,36 @@
     }
   }
 
+  // A cell the array stops filling goes back to what it was before: empty, with the format it has (the lock of a cell
+  // on a protected sheet is part of its format) and its hyperlink (PD-222).
+  function release(map, ref) {
+    const held = map[ref];
+    if (held.style || held.link) {
+      const { style, link } = held;
+      map[ref] = { value: "", formula: "", ...(style ? { style } : {}), ...(link ? { link } : {}) };
+    } else {
+      delete map[ref];
+    }
+  }
+
   // Forgets the cells the array of `anchorRef` filled.
   function clearArea(map, anchorRef) {
     const anchor = map[anchorRef];
     if (!isAnchor(anchor)) {
       // The formula was edited or removed, so its entry no longer says how big the area was: look for its cells.
-      for (const ref of Object.keys(map)) if (map[ref]?.spillOf === anchorRef) delete map[ref];
+      for (const ref of Object.keys(map)) if (map[ref]?.spillOf === anchorRef) release(map, ref);
       return;
     }
     forEachChild(anchorRef, anchor.spillRows, anchor.spillCols, (ref) => {
-      if (map[ref]?.spillOf === anchorRef) delete map[ref];
+      if (map[ref]?.spillOf === anchorRef) release(map, ref);
     });
     delete anchor.spillRows;
     delete anchor.spillCols;
   }
 
-  // Fills the area of the array at `anchorRef`; a cell the user wrote stays as it is.
+  // Fills the area of the array at `anchorRef`; a cell the user wrote stays as it is. A cell that holds only a format (or a
+  // hyperlink) is an empty cell: the array fills it and the cell keeps its format, so a cell unlocked on a protected sheet
+  // is still unlocked with a value in it (PD-222).
   function fillArea(map, anchorRef, rows, cols, valueOf) {
     const anchor = map[anchorRef];
     if (!anchor) return;
@@ -80,9 +94,12 @@
     anchor.spillCols = cols;
     forEachChild(anchorRef, rows, cols, (ref) => {
       const held = map[ref];
-      if (held && !held.spillOf) return;
+      if (held && !held.spillOf && (held.value || held.formula)) return;
       const value = valueOf(ref);
-      map[ref] = { value: value === undefined || value === null ? "" : String(value), formula: "", spillOf: anchorRef };
+      const child = { value: value === undefined || value === null ? "" : String(value), formula: "", spillOf: anchorRef };
+      if (held?.style) child.style = held.style;
+      if (held?.link) child.link = held.link;
+      map[ref] = child;
     });
   }
 
@@ -107,7 +124,7 @@
     for (const map of Object.values(sheets || {})) {
       for (const ref of Object.keys(map || {})) {
         const entry = map[ref];
-        if (isChild(entry)) delete map[ref];
+        if (isChild(entry)) release(map, ref);
         else if (isAnchor(entry)) {
           delete entry.spillRows;
           delete entry.spillCols;
@@ -169,6 +186,21 @@
     return { unlocked, locked, rows: runs("row"), cols: runs("col") };
   }
 
+  // The merged ranges of a sheet, for the engine (an array is not placed across one, PD-222): `["A1:B2", ...]`.
+  function mergePayload(name, layoutApi) {
+    return (layoutApi?.get?.(name)?.merges || []).map((m) => refOf(m.r1, m.c1) + ":" + refOf(m.r2, m.c2));
+  }
+
+  // The `merges` field of a request without a session: `{ "Sheet1": ["A1:B2"] }`, nothing when no sheet has one.
+  function mergesField(names, layoutApi) {
+    const out = {};
+    for (const name of names) {
+      const list = mergePayload(name, layoutApi);
+      if (list.length) out[name] = list;
+    }
+    return Object.keys(out).length ? { merges: out } : {};
+  }
+
   // The engine is not told about cells an array filled.
   const isInput = (entry) => !isChild(entry);
 
@@ -188,6 +220,8 @@
     replaceAll,
     areasOf,
     lockPayload,
+    mergePayload,
+    mergesField,
     clearArea,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

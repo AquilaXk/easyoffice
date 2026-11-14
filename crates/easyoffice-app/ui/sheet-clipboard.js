@@ -236,6 +236,23 @@
       );
     }
 
+    // Clipboard text carries no formula of an array: written over cells an array filled but not over the cell of its formula, it
+    // would change a part of the array (PD-222). The in-app copy knows which cells are results, so it is not asked.
+    function cutsArray(target, rowsN, colsN) {
+      const spill = host.__EASYOFFICE_SHEET_SPILL__;
+      if (!spill) return false;
+      const r2 = target.r1 + rowsN - 1;
+      const c2 = target.c1 + colsN - 1;
+      const inside = (at) => at && at.row >= target.r1 && at.row <= r2 && at.col >= target.c1 && at.col <= c2;
+      for (let r = target.r1; r <= r2; r += 1) {
+        for (let c = target.c1; c <= c2; c += 1) {
+          const e = api.getEntry(grid.refOf(r, c));
+          if (spill.isChild(e) && !inside(spill.parseRef(e.spillOf))) return true;
+        }
+      }
+      return false;
+    }
+
     // Pastes a block (the in-app copy or clipboard text) at the range: `mode` is one of
     // `core.MODES`, `transpose` turns rows and columns over.
     function pasteBlock(snap, range, options) {
@@ -261,8 +278,15 @@
       const rowsN = transpose ? snap.cols : snap.cells.length;
       const colsN = transpose ? snap.cells.length : snap.cols;
       const spread = single && (range.r2 > range.r1 || range.c2 > range.c1);
-      if (cutsMerge(target, spread ? range.r2 - range.r1 + 1 : rowsN, spread ? range.c2 - range.c1 + 1 : colsN)) {
+      const pasteRows = spread ? range.r2 - range.r1 + 1 : rowsN;
+      const pasteCols = spread ? range.c2 - range.c1 + 1 : colsN;
+      if (cutsMerge(target, pasteRows, pasteCols)) {
         say("병합 셀과 겹침");
+        return Promise.resolve(null);
+      }
+      const writesContent = mode !== "formats" && mode !== "widths";
+      if (snap.rows === null && writesContent && cutsArray(target, pasteRows, pasteCols)) {
+        say("배열 수식의 개별 셀 내용을 변경할 수 없습니다");
         return Promise.resolve(null);
       }
       const extra = plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "";
