@@ -426,13 +426,33 @@
   // ---- the tables (PD-224) ----------------------------------------------------------------------------------------
   const tablesOf = (name) => bySheet[name]?.tables || [];
 
+  // A table's rectangle `{ range, r1, c1, r2, c2 }` (1-based), parsed once per range text; `r2 < r1` for a range that is none.
+  const boxes = new WeakMap();
+  function tableBox(table) {
+    const held = boxes.get(table);
+    if (held && held.range === table.range) return held;
+    const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
+    const [a, b] = String(table.range).split(":").map((ref) => parse(ref));
+    const box = a && b ? { range: table.range, r1: a.row, c1: a.col, r2: b.row, c2: b.col } : { range: table.range, r1: 1, c1: 1, r2: 0, c2: 0 };
+    boxes.set(table, box);
+    return box;
+  }
+
   // The tables of the sheet that share a cell with the rectangle `r1..r2` by `c1..c2`.
   function tablesIn(name, r1, c1, r2, c2) {
-    const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
     return tablesOf(name).filter((t) => {
-      const [from, to] = String(t.range).split(":").map((ref) => parse(ref));
-      return from && to && from.row <= r2 && to.row >= r1 && from.col <= c2 && to.col >= c1;
+      const b = tableBox(t);
+      return b.r2 >= b.r1 && b.r1 <= r2 && b.r2 >= r1 && b.c1 <= c2 && b.c2 >= c1;
     });
+  }
+
+  // Replaces the tables of a sheet (the page's own changes to them: a new table, a new style, a new size); one version step.
+  function setTables(name, tables) {
+    const layout = entry(name);
+    layout.tables = tables;
+    layout.rows = null;
+    if (isEmpty(layout)) delete bySheet[name];
+    touch();
   }
 
   // A header cell holds the text of its name: a formula typed there is fixed as the text of its result, as the
@@ -601,6 +621,8 @@
     rowAtVisible,
     tablesOf,
     tablesIn,
+    tableBox,
+    setTables,
     settleTableHeaders,
     tableColumnRenames,
     resetTableHeaders,

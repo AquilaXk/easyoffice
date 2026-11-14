@@ -430,6 +430,14 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_SHEET_LAYOUT__",
     ),
     (
+        include_str!("../ui/sheet-table-presets.js"),
+        "__EASYOFFICE_SHEET_TABLE_PRESETS__",
+    ),
+    (
+        include_str!("../ui/sheet-table-style.js"),
+        "__EASYOFFICE_SHEET_TABLE_STYLE__",
+    ),
+    (
         include_str!("../ui/sheet-filter.js"),
         "__EASYOFFICE_CREATE_SHEET_FILTER__",
     ),

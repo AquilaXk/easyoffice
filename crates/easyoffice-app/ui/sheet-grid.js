@@ -401,6 +401,7 @@
         const m = layoutApi?.mergeAt(getSheetName(), td._row, td._col);
         lookApi.paintTd(td, st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);
       }
+      host.__EASYOFFICE_SHEET_TABLE_STYLE__?.paintTd(td, getSheetName());
       host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, getSheetName());
     }
 

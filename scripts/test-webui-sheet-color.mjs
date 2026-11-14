@@ -360,8 +360,8 @@ test("a sheet copy takes the colors of its source", async () => {
 test("the formulas of a cell with a conditional format keep the cell's own colors as the fallback", async () => {
   const fs = await import("node:fs");
   const css = fs.readFileSync(UI("styles.css"), "utf8");
-  assert.match(css, /td\[data-cf\]:not\(\.selected-cell\):not\(\.in-range\) \{ background-color: var\(--cf-bg, var\(--cell-fill, transparent\)\); \}/);
-  assert.match(css, /td\[data-cf\] \{ color: var\(--cf-fg, var\(--cell-fg, inherit\)\)/);
+  assert.match(css, /td\[data-cf\]:not\(\.selected-cell\):not\(\.in-range\) \{ background-color: var\(--cf-bg, var\(--cell-fill, var\(--ts-fill, transparent\)\)\); \}/);
+  assert.match(css, /td\[data-cf\] \{ color: var\(--cf-fg, var\(--cell-fg, var\(--ts-fg, inherit\)\)\)/);
   assert.match(css, /td\[data-fill\]:where\(:not\(\[data-fg\]\):not\(\[data-link\]\)\) \{ color: var\(--cell-auto-fg/);
   // The cell's own colors come first in the sheet, so the number format color and the conditional format win.
   assert.ok(css.indexOf("td[data-fg] { color: var(--cell-fg, inherit); }") < css.indexOf("td.nf-colored"), "the cell text color is below the number format color");
