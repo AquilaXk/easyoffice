@@ -31,6 +31,10 @@ use crate::{
     ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
+#[path = "rich_read_ooxml/styles.rs"]
+mod styles;
+use styles::*;
+
 /// `w:vMerge` state of a table cell.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum VMerge {
@@ -69,66 +73,6 @@ struct ParaState {
     page_break_before: bool,
     /// A page break after text of the paragraph: the next paragraph starts the page.
     page_break_after: bool,
-}
-
-const MAX_STYLE_INHERIT_DEPTH: usize = 16;
-
-#[derive(Default, Clone, Debug)]
-struct DocxStyle {
-    name: Option<String>,
-    based_on: Option<String>,
-    outline_lvl: Option<u8>,
-}
-
-/// styleId -> style metadata (`w:name`, `w:basedOn`, `w:outlineLvl`).
-/// Adapted from BSD-2-Clause and MIT reference implementations (see `THIRD_PARTY_NOTICES.md`).
-fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
-    let mut out: HashMap<String, DocxStyle> = HashMap::new();
-    let mut current: Option<String> = None;
-    for ev in XmlReader::new(xml) {
-        match ev? {
-            XmlEvent::Start {
-                name: "w:style",
-                attrs,
-            } => {
-                if let Some(id) = attr(&attrs, "w:styleId") {
-                    out.entry(id.to_string()).or_default();
-                    current = Some(id.into_owned());
-                } else {
-                    current = None;
-                }
-            }
-            XmlEvent::Start {
-                name: "w:name",
-                attrs,
-            } => {
-                if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
-                    out.entry(id.clone()).or_default().name = Some(val.to_string());
-                }
-            }
-            XmlEvent::Start {
-                name: "w:basedOn",
-                attrs,
-            } => {
-                if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
-                    out.entry(id.clone()).or_default().based_on = Some(val.to_string());
-                }
-            }
-            XmlEvent::Start {
-                name: "w:outlineLvl",
-                attrs,
-            } => {
-                if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
-                    if let Ok(lvl) = val.parse::<u8>() {
-                        out.entry(id.clone()).or_default().outline_lvl = Some(lvl);
-                    }
-                }
-            }
-            XmlEvent::End("w:style") => current = None,
-            _ => {}
-        }
-    }
-    Ok(out)
 }
 
 fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
@@ -773,37 +717,31 @@ fn walk_part(
     Ok(())
 }
 
-/// Whether `word/settings.xml` turns on different headers and footers for odd and even pages.
-fn even_and_odd_headers(settings: Option<&str>) -> Result<bool, EasyOfficeError> {
-    let Some(xml) = settings else {
-        return Ok(false);
-    };
-    for event in XmlReader::new(xml) {
-        if let XmlEvent::Start {
-            name: "w:evenAndOddHeaders",
-            attrs,
-        } = event?
-        {
-            return Ok(toggle_on(attr(&attrs, "w:val").as_deref()));
-        }
-    }
-    Ok(false)
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct DocxSettings {
+    pub(crate) even_and_odd_headers: bool,
+    pub(crate) mirror_margins: bool,
+    pub(crate) gutter_at_top: bool,
 }
 
-/// Whether `word/settings.xml` mirrors the margins of facing pages and puts the gutter at the top.
-fn binding_flags(settings: Option<&str>) -> Result<(bool, bool), EasyOfficeError> {
-    let (mut mirror, mut top) = (false, false);
-    for event in XmlReader::new(settings.unwrap_or_default()) {
+/// Extracted flags from `word/settings.xml` in a single pass.
+fn read_word_settings(settings: Option<&str>) -> Result<DocxSettings, EasyOfficeError> {
+    let mut s = DocxSettings::default();
+    let Some(xml) = settings else {
+        return Ok(s);
+    };
+    for event in XmlReader::new(xml) {
         if let XmlEvent::Start { name, attrs } = event? {
             let on = toggle_on(attr(&attrs, "w:val").as_deref());
             match name {
-                "w:mirrorMargins" => mirror = on,
-                "w:gutterAtTop" => top = on,
+                "w:evenAndOddHeaders" => s.even_and_odd_headers = on,
+                "w:mirrorMargins" => s.mirror_margins = on,
+                "w:gutterAtTop" => s.gutter_at_top = on,
                 _ => {}
             }
         }
     }
-    Ok((mirror, top))
+    Ok(s)
 }
 
 /// The paragraphs of one header or footer part.
@@ -850,13 +788,14 @@ fn read_page_frame_with_targets(
     media: &DocxMedia<'_>,
     refs: &[FrameRef],
     title_pg: bool,
+    settings: DocxSettings,
 ) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
     let mut frame = RichPageFrame::default();
     let mut warnings = Vec::new();
     if refs.is_empty() {
         return Ok((frame, warnings));
     }
-    let even = even_and_odd_headers(checked_part(parts, "word/settings.xml"))?;
+    let even = settings.even_and_odd_headers;
     let (mut other_pages, mut other_sections) = (false, false);
     for header in [true, false] {
         let mut chosen: Option<&str> = None;
@@ -903,7 +842,8 @@ fn read_page_frame(
     title_pg: bool,
 ) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
     let targets = load_docx_frame_targets(entries)?;
-    read_page_frame_with_targets(&targets, parts, resolver, media, refs, title_pg)
+    let settings = read_word_settings(checked_part(parts, "word/settings.xml"))?;
+    read_page_frame_with_targets(&targets, parts, resolver, media, refs, title_pg, settings)
 }
 
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.
@@ -943,6 +883,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         ..DocxWalker::default()
     };
     walk_part(doc_xml, &mut walker, &resolver, &media)?;
+    let settings = read_word_settings(checked_part(&parts, "word/settings.xml"))?;
     let (mut page_frame, frame_warnings) = read_page_frame_with_targets(
         &docx_rels.frame_targets,
         &parts,
@@ -950,9 +891,13 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         &media,
         &walker.frame_refs,
         walker.title_pg,
+        settings,
     )?;
-    let (mirror, at_top) = binding_flags(checked_part(&parts, "word/settings.xml"))?;
-    let binding = binding_of(walker.first_gutter, mirror, at_top);
+    let binding = binding_of(
+        walker.first_gutter,
+        settings.mirror_margins,
+        settings.gutter_at_top,
+    );
     (page_frame.margins, page_frame.paper) =
         fitting_setup(walker.first_margins, walker.first_paper, binding);
     if page_frame.margins.is_some() {

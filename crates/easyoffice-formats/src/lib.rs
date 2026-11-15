@@ -70,6 +70,7 @@ pub mod rtf_xml_helpers;
 mod sha_digest;
 mod sheet_styling;
 pub mod strict_json;
+pub mod strict_json_borrow;
 mod svg_guard;
 mod text_decode;
 pub mod text_pdf_codecs;
@@ -118,6 +119,7 @@ pub use rtf_xml_helpers::{
 };
 pub use sheet_styling::*;
 pub use strict_json::StrictJsonValue;
+pub use strict_json_borrow::*;
 pub use svg_guard::checked_svg_text;
 pub use text_pdf_codecs::*;
 pub use utf16_swar::{

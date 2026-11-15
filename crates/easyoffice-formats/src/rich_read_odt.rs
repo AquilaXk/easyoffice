@@ -206,6 +206,7 @@ fn read_styles_into(
                         lists.entry(n.clone()).or_insert(RichListKind::Bullet);
                     }
                 }
+                "office:body" => break,
                 _ => {}
             },
             XmlEvent::End(name) => match name {

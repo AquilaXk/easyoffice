@@ -573,9 +573,26 @@ fn escape_markdown_inline(text: &str) -> String {
 }
 
 /// Table cell text as Markdown: inline marks escaped, except `|`, which the table renderer
-/// escapes itself.
+/// escapes itself (single pass without `.replace` allocations).
 fn escape_markdown_cell(text: &str) -> String {
-    escape_markdown_inline(text).replace("\\|", "|")
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev = None;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let doubled_equals = ch == '=' && (prev == Some('=') || chars.peek() == Some(&'='));
+        if (doubled_equals
+            || matches!(
+                ch,
+                '\\' | '`' | '*' | '_' | '~' | '^' | '[' | ']' | '<' | '>' | '#' | '!'
+            ))
+            && ch != '|'
+        {
+            out.push('\\');
+        }
+        out.push(ch);
+        prev = Some(ch);
+    }
+    out
 }
 
 /// Escapes characters that would start a block construct at the beginning of a line.

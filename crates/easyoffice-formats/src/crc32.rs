@@ -274,7 +274,7 @@ mod x86 {
 
 #[cfg(target_arch = "aarch64")]
 mod arm {
-    use std::arch::aarch64::{__crc32b, __crc32d};
+    use std::arch::aarch64::{__crc32b, __crc32d, __crc32h, __crc32w};
 
     /// CRC32 instruction path (`crc` is the finalized running value).
     ///
@@ -290,8 +290,19 @@ mod arm {
             ]);
             state = __crc32d(state, word);
         }
-        for &byte in chunks.remainder() {
-            state = __crc32b(state, byte);
+        let mut rem = chunks.remainder();
+        if rem.len() >= 4 {
+            let dword = u32::from_le_bytes([rem[0], rem[1], rem[2], rem[3]]);
+            state = __crc32w(state, dword);
+            rem = &rem[4..];
+        }
+        if rem.len() >= 2 {
+            let hword = u16::from_le_bytes([rem[0], rem[1]]);
+            state = __crc32h(state, hword);
+            rem = &rem[2..];
+        }
+        if let Some(&b) = rem.first() {
+            state = __crc32b(state, b);
         }
         !state
     }

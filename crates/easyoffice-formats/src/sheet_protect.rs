@@ -158,8 +158,14 @@ pub enum Credential {
 
 #[inline]
 fn volatile_zero_bytes(buf: &mut [u8]) {
-    for slot in buf.iter_mut() {
-        // SAFETY: Each iterator element is a valid, aligned, initialized `&mut u8` owned by `buf`.
+    let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u64>() };
+    for slot in prefix.iter_mut() {
+        unsafe { std::ptr::write_volatile(slot, 0u8) };
+    }
+    for word in words.iter_mut() {
+        unsafe { std::ptr::write_volatile(word, 0u64) };
+    }
+    for slot in suffix.iter_mut() {
         unsafe { std::ptr::write_volatile(slot, 0u8) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
@@ -167,8 +173,14 @@ fn volatile_zero_bytes(buf: &mut [u8]) {
 
 #[inline]
 fn volatile_zero_u16(buf: &mut [u16]) {
-    for slot in buf.iter_mut() {
-        // SAFETY: Each iterator element is a valid, aligned, initialized `&mut u16` owned by `buf`.
+    let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u64>() };
+    for slot in prefix.iter_mut() {
+        unsafe { std::ptr::write_volatile(slot, 0u16) };
+    }
+    for word in words.iter_mut() {
+        unsafe { std::ptr::write_volatile(word, 0u64) };
+    }
+    for slot in suffix.iter_mut() {
         unsafe { std::ptr::write_volatile(slot, 0u16) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
