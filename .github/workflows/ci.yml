@@ -427,8 +427,12 @@ jobs:
               throw "Windows --serve loopback smoke test failed to return HTTP 200"
             }
             $csp = ($resp.Headers["Content-Security-Policy"] -join ", ").Trim()
-            if ($csp -ne "default-src 'self'; base-uri 'none'; object-src 'none'") {
+            if ($csp -ne "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'") {
               throw "Unexpected Content-Security-Policy header: '$csp'"
+            }
+            $xfo = ($resp.Headers["X-Frame-Options"] -join ", ").Trim()
+            if ($xfo -ne "DENY") {
+              throw "Unexpected X-Frame-Options header: '$xfo'"
             }
           } finally {
             if ($null -ne $proc -and -not $proc.HasExited) {

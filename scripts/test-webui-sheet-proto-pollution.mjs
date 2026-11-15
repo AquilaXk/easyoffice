@@ -48,18 +48,28 @@ test("sheet controller handles special sheet names in extent scan without vanish
     sheetDataStore[name] = cells;
   }
 
-  // Create a minimal sheet controller to test scanExtent and cellRefOfRange
+  let activeSheet = "toString";
+  let activeRef = "A1";
+  // Create a minimal sheet controller to test scanExtent and small-range selection/toolbar queries
   const controller = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
     document,
     sheetDataStore,
     sheetRowCounts,
-    sheetStoreHelpers: helpers({ invokeIpc: async () => ({}), normalizeFormattedNumericCell: (v) => String(v), tokenizeFormulaStringLiterals: () => [] }),
+    sheetStoreHelpers: helpers({
+      invokeIpc: async () => ({}),
+      normalizeFormattedNumericCell: (v) => String(v),
+      tokenizeFormulaStringLiterals: () => [],
+    }),
     getActiveModule: () => "SHEET",
-    getActiveSheetName: () => "toString",
-    setActiveSheetName: () => {},
-    getActiveSheetCellRef: () => "A1",
-    setActiveSheetCellRef: () => {},
-    enqueueWorkspaceHistoryOp: () => {},
+    getActiveSheetName: () => activeSheet,
+    setActiveSheetName: (next) => {
+      activeSheet = next;
+    },
+    getActiveSheetCellRef: () => activeRef,
+    setActiveSheetCellRef: (next) => {
+      activeRef = next;
+    },
+    enqueueWorkspaceHistoryOp: (fn) => Promise.resolve().then(fn),
     restoreWorkspaceSnapshot: () => {},
     sheetHistory: null,
     onSheetSwitchedOutline: () => {},
@@ -70,36 +80,49 @@ test("sheet controller handles special sheet names in extent scan without vanish
     assert.ok(typeof count === "number" && count >= 5, `sheet "${name}" row count is >= 5`);
   }
 
-  // Measure cellRefOfRange performance on 20,000 cells
-  const benchSheet = Object.create(null);
+  // Deterministic O(1) proof on 20,000 cells: small-range selection aggregate & format toolbar sync
+  // (area <= 4096) must address target cells directly without enumerating Object.keys(map).
+  const benchRaw = Object.create(null);
   for (let r = 1; r <= 200; r++) {
     for (let c = 1; c <= 100; c++) {
-      benchSheet[gridUtils.refOf(r, c)] = { value: "x", formula: "" };
+      benchRaw[gridUtils.refOf(r, c)] = { value: r === 10 && c === 5 ? "42" : "1", formula: "" };
     }
   }
-  sheetDataStore["bench"] = benchSheet;
+  let fullKeyScans = 0;
+  let directCellReads = 0;
+  const trackedBench = new Proxy(benchRaw, {
+    ownKeys(target) {
+      fullKeyScans += 1;
+      return Reflect.ownKeys(target);
+    },
+    get(target, prop, receiver) {
+      if (typeof prop === "string") directCellReads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  sheetDataStore.bench = trackedBench;
+  activeSheet = "bench";
 
-  // Single cell range clear/query (area = 1 <= 4096)
-  const singleRange = { r1: 10, c1: 5, r2: 10, c2: 5 };
-  const visited = [];
-  const start = performance.now();
-  for (let i = 0; i < 1000; i++) {
-    visited.length = 0;
-    // Test through internal cell query
-    for (let r = singleRange.r1; r <= singleRange.r2; r++) {
-      for (let c = singleRange.c1; c <= singleRange.c2; c++) {
-        const ref = gridUtils.refOf(r, c);
-        if (benchSheet[ref] !== undefined) visited.push(ref);
-      }
-    }
-  }
-  const elapsed = performance.now() - start;
-  assert.equal(visited.length, 1);
-  assert.equal(visited[0], "E10");
-  assert.ok(elapsed < 200, `1000 single cell queries on 20,000 cells took ${elapsed.toFixed(2)}ms (< 200ms)`);
+  // Prime extent cache once (initial extent scan legitimately enumerates keys once), then reset counters.
+  assert.equal(controller.getSheetRowCount("bench"), 200);
+  assert.equal(fullKeyScans, 1, "initial extent scan enumerates keys once");
+  fullKeyScans = 0;
+  directCellReads = 0;
+
+  controller.updateSheetSelectionAndAggregates("E10");
+  assert.equal(fullKeyScans, 0, "initial 1x1 selection + viewport render must not call Object.keys on 20,000-cell sheet");
+
+  directCellReads = 0;
+  controller.syncSheetFormatToolbar();
+  assert.equal(fullKeyScans, 0, "1x1 toolbar sync must not call Object.keys on 20,000-cell sheet");
+  assert.equal(directCellReads, 1, "1x1 toolbar sync reads only the single selected cell");
+
+  controller.updateSheetSelectionAndAggregates("F12");
+  assert.equal(activeRef, "F12");
+  assert.equal(fullKeyScans, 0, "subsequent 1x1 selection move must not call Object.keys on 20,000-cell sheet");
 });
 
-test("sheet store diff against mirror handles 20,000 cells diff efficiently", async () => {
+test("sheet store diff against mirror skips untouched sheet references without key or cell scans", async () => {
   const { host } = await createWorkspaceHarness();
   const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
   const createStore = host.__EASYOFFICE_CREATE_SHEET_STORE__;
@@ -114,6 +137,7 @@ test("sheet store diff against mirror handles 20,000 cells diff efficiently", as
   // Prepare 2 sheets with 10,000 cells each (total 20,000 cells)
   const sheet1 = Object.create(null);
   const sheet2 = Object.create(null);
+  const lastRef = gridUtils.refOf(100, 100);
   for (let r = 1; r <= 100; r++) {
     for (let c = 1; c <= 100; c++) {
       const ref = gridUtils.refOf(r, c);
@@ -122,23 +146,36 @@ test("sheet store diff against mirror handles 20,000 cells diff efficiently", as
     }
   }
 
-  const sheetsMap = { Sheet1: sheet1, Sheet2: sheet2 };
-  await helper.callSheetAction({ sessionAction: "open", sheets: ["Sheet1", "Sheet2"] });
+  const initialMap = { Sheet2: sheet2, Sheet1: sheet1 };
+  await helper.callSheetAction({ sessionAction: "open", sheets: ["Sheet2", "Sheet1"] });
 
   // First full sync establishes the snapshot and mirror
-  const fullSync = await helper.computeEvaluatedSheetStore(sheetsMap, "Sheet1");
+  const fullSync = await helper.computeEvaluatedSheetStore(initialMap, "Sheet1");
   assert.ok(fullSync, "first sync completed");
 
-  // Benchmark single-cell modification on Sheet1 while Sheet2 remains untouched
-  // (reference identity sheet2 === sheet2)
-  const modifiedSheet1 = { ...sheet1, A1: { value: "99", formula: "" } };
-  const partialMap = { Sheet1: modifiedSheet1, Sheet2: sheet2 };
+  let untouchedKeyScans = 0;
+  let untouchedCellReads = 0;
+  const trackedSheet2 = new Proxy(sheet2, {
+    ownKeys(target) {
+      untouchedKeyScans += 1;
+      return Reflect.ownKeys(target);
+    },
+    get(target, prop, receiver) {
+      if (typeof prop === "string") untouchedCellReads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 
-  const start = performance.now();
-  for (let i = 0; i < 50; i++) {
-    helper.sheetCellDataChanged(sheetsMap, partialMap, false);
-  }
-  const diffElapsed = performance.now() - start;
-  assert.ok(diffElapsed < 100, `50 partial diff checks on 20,000 cells took ${diffElapsed.toFixed(2)}ms (< 100ms)`);
+  const baseMap = { Sheet2: trackedSheet2, Sheet1: sheet1 };
+  const unchangedMap = { Sheet2: trackedSheet2, Sheet1: sheet1 };
+  const modifiedSheet1 = Object.assign(Object.create(null), sheet1, {
+    [lastRef]: { value: "99", formula: "" },
+  });
+  const partialMap = { Sheet2: trackedSheet2, Sheet1: modifiedSheet1 };
+
+  assert.equal(helper.sheetCellDataChanged(baseMap, unchangedMap, false), false);
+  assert.equal(helper.sheetCellDataChanged(baseMap, partialMap, false), true);
+  assert.equal(untouchedKeyScans, 0, "untouched shared-reference sheet must not trigger ownKeys scan");
+  assert.equal(untouchedCellReads, 0, "untouched shared-reference sheet must not trigger per-cell reads");
 });
 
