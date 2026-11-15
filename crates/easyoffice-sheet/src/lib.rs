@@ -53,6 +53,7 @@ mod functions_text_bytes;
 mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
+mod hidden_rows;
 mod lexer;
 mod lookup_helpers;
 mod lookup_index;
@@ -140,6 +141,8 @@ pub struct SheetEngine {
     pub(crate) spill_merges: Option<Arc<spill_merges::SpillMerges>>,
     /// The tables of the sheet, which an array may not be placed in or cross (PD-224).
     pub(crate) spill_tables: Option<Arc<spill_merges::SpillMerges>>,
+    /// The rows the user and a filter hid, which `SUBTOTAL` and `AGGREGATE` leave out (PD-232).
+    pub(crate) hidden_rows: Option<Arc<hidden_rows::HiddenRows>>,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -188,6 +191,7 @@ impl SheetEngine {
             spill_lock: None,
             spill_merges: None,
             spill_tables: None,
+            hidden_rows: None,
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),

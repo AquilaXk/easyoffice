@@ -367,19 +367,13 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let fn_code = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i32;
-        let base_code = if (101..=111).contains(&fn_code) {
-            fn_code - 100
-        } else {
-            fn_code
-        };
-        if !(1..=11).contains(&base_code) {
-            return Err(FormulaError::Value);
-        }
+        let (base_code, mode) =
+            crate::hidden_rows::subtotal_mode(fn_code).ok_or(FormulaError::Value)?;
 
         let mut acc = SubtotalAcc::new();
         for arg in &args[1..] {
             if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                self.subtotal_range(&spec, &mut acc, ctx, depth)?;
+                self.subtotal_range(&spec, &mut acc, mode, ctx, depth)?;
             } else if !crate::expr_contains_subtotal(arg) {
                 acc.fold(self.eval_arg_val(arg, ctx, depth)?)?;
             }
@@ -387,17 +381,20 @@ impl SheetEngine {
         acc.result(base_code)
     }
 
-    /// Folds every non-nested-subtotal cell of a streamed range into `acc`.
+    /// Folds every non-nested-subtotal cell of a streamed range into `acc`, leaving out the rows `mode` skips (PD-232).
     fn subtotal_range(
         &self,
         spec: &StreamingRangeSpec<'_>,
         acc: &mut SubtotalAcc,
+        mode: crate::hidden_rows::SubtotalMode,
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<(), FormulaError> {
         let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = *spec;
         let total = rows.saturating_mul(cols);
         let target_sheet = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx);
+        let hidden = target_sheet.and_then(|ts| ts.hidden_rows.clone());
+        let skipped = |row: u32| hidden.as_deref().is_some_and(|h| mode.skips(h.status(row)));
         let max_r = min_r + (rows as u32).saturating_sub(1);
         let max_c = min_c + (cols as u32).saturating_sub(1);
         let pop_count = target_sheet.map_or(total, |ts| {
@@ -412,7 +409,9 @@ impl SheetEngine {
                 .cell_index()
                 .range_coords(min_r, max_r, min_c, max_c);
             for coord in pop_coords {
-                if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {
+                if skipped(coord.row())
+                    || self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx)
+                {
                     continue;
                 }
                 acc.fold(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))?;
@@ -420,6 +419,9 @@ impl SheetEngine {
             return Ok(());
         }
         for dr in 0..rows {
+            if !transposed && skipped(min_r + dr as u32) {
+                continue;
+            }
             for dc in 0..cols {
                 let (r, c) = if transposed {
                     (min_r + dc as u32, min_c + dr as u32)
@@ -428,6 +430,9 @@ impl SheetEngine {
                 };
                 if ctx.steps > Self::MAX_EVAL_STEPS {
                     return Err(FormulaError::Value);
+                }
+                if transposed && skipped(r) {
+                    continue;
                 }
                 let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
                 if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {

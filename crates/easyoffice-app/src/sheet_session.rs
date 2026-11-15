@@ -801,6 +801,9 @@ impl EasyOfficeIpcRouter {
     ///   session needed, see `sheet_protect_ipc`, PD-216).
     /// - `merges` `{session, sheet, merges}` -> the recalculation answer: `merges` is `["A1:B2", ...]` and an
     ///   array that would cross one is `#SPILL!` (PD-222).
+    /// - `hiddenRows` `{session, sheet, hiddenRows}` -> the recalculation answer: `hiddenRows` is `{"hidden": [[first, last], ...],
+    ///   "filtered": [...]}` (1-based), the rows a user and a filter hid; `SUBTOTAL` and `AGGREGATE` leave them out and only the
+    ///   formulas that use them are calculated again (PD-232).
     /// - `linkTarget` `{session | cells.., sheet, cell, formula}` -> `{target}`, `{error}` or `{none}`: the address a
     ///   `HYPERLINK` formula cell opens (PD-223, see `sheet_link_target_ipc`).
     /// - `tableColumn` `{table, from, to, tables, formulas, names?}` -> `{rewrites, names}`: the formulas that name a
@@ -820,6 +823,7 @@ impl EasyOfficeIpcRouter {
             "locks" => Self::sheet_session_locks(entries, owner),
             "merges" => Self::sheet_session_blockers(entries, owner, false),
             "tables" => Self::sheet_session_blockers(entries, owner, true),
+            "hiddenRows" => Self::sheet_session_hidden_rows(entries, owner),
             "tableColumn" => Self::table_column_rewrites(entries),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),

@@ -43,6 +43,12 @@ impl RecalcSession {
                 *slot = (!moved.is_empty()).then(|| std::sync::Arc::new(moved));
             }
         }
+        if edit.axis == crate::axis::Axis::Row {
+            target_engine.hidden_rows = target_engine
+                .hidden_rows
+                .as_deref()
+                .and_then(|rows| rows.shifted(&edit));
+        }
         let validations = self.moved_validations(sheet, &edit);
         let mut wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());
         // The areas arrays filled are at the old positions; the rebuilt session places them again.

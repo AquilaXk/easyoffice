@@ -51,6 +51,35 @@ pub(crate) fn merges_by_sheet(
         .collect()
 }
 
+/// The rows a sheet hides for `SUBTOTAL` and `AGGREGATE` (PD-232): `{"hidden": [[first, last], ...], "filtered": [...]}`, 1-based
+/// and inclusive, the rows a user (or a folded group) hid and the rows a filter hid; zero-based runs. Either may be absent.
+pub(crate) type HiddenRowRuns = (Vec<(u32, u32)>, Vec<(u32, u32)>);
+
+pub(crate) fn parse_engine_hidden_rows(
+    v: &StrictJsonValue,
+) -> Result<HiddenRowRuns, EasyOfficeError> {
+    let obj = v.as_object().ok_or_else(|| bad("hiddenRows"))?;
+    let runs = |key: &str| match StrictJsonValue::get_field(obj, key) {
+        None | Some(StrictJsonValue::Null) => Ok(Vec::new()),
+        Some(list) => parse_runs_limited(list, LAST_ROW, "hiddenRows", u64::from(LAST_ROW) + 1),
+    };
+    Ok((runs("hidden")?, runs("filtered")?))
+}
+
+/// The `hiddenRows` field of a request without a session: `{"Sheet1": {"hidden": [...], "filtered": [...]}, ...}`; none when absent.
+pub(crate) fn hidden_rows_by_sheet(
+    entries: &[(String, StrictJsonValue)],
+) -> Result<Vec<(String, HiddenRowRuns)>, EasyOfficeError> {
+    let Some(field) = StrictJsonValue::get_field(entries, "hiddenRows") else {
+        return Ok(Vec::new());
+    };
+    let sheets = field.as_object().ok_or_else(|| bad("hiddenRows"))?;
+    sheets
+        .iter()
+        .map(|(name, runs)| Ok((name.clone(), parse_engine_hidden_rows(runs)?)))
+        .collect()
+}
+
 /// Runs from `[[first, last], ...]`, 1-based; `last_index` is the last valid zero-based index.
 pub(crate) fn parse_runs(
     v: &StrictJsonValue,

@@ -369,6 +369,12 @@ impl EasyOfficeIpcRouter {
                 sheet.set_spill_merges(merges);
             }
         }
+        // The rows the sheets hide, for `SUBTOTAL` and `AGGREGATE` (PD-232). Set before the first calculation, which comes later.
+        for (name, (hidden, filtered)) in sheet_layout_json::hidden_rows_by_sheet(entries)? {
+            if let Some(sheet) = wb.sheet_mut(&name) {
+                sheet.set_hidden_rows(hidden, filtered);
+            }
+        }
         Ok(wb)
     }
 

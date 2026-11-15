@@ -1,6 +1,7 @@
 //! `evaluate_sheet` with `sessionAction` `merges` and `tables`: what an array may not be placed in or cross, and
 //! the tables structured references are resolved against (PD-222, PD-224, PD-225).
 
+use crate::sheet_layout_json::HiddenRowRuns;
 use crate::sheet_session::{
     recalc_answer, registry, session_id, Applied, Registry, EXPIRED, REFUSED,
 };
@@ -10,10 +11,11 @@ use easyoffice_formats::{CellBox, EasyOfficeError, StrictJsonValue};
 use easyoffice_sheet::RecalcError;
 use std::time::Instant;
 
-/// What `set_blockers` is told: the merged ranges of a sheet, or its tables.
+/// What `set_blockers` is told: the merged ranges of a sheet, its tables, or the rows it hides (PD-232).
 pub(crate) enum Blockers {
     Merges(Vec<CellBox>),
     Tables(TablesField),
+    HiddenRows(HiddenRowRuns),
 }
 
 impl Registry {
@@ -38,6 +40,9 @@ impl Registry {
         };
         let set = match blockers {
             Blockers::Merges(boxes) => session.set_sheet_merges(sheet, boxes),
+            Blockers::HiddenRows((hidden, filtered)) => {
+                session.set_sheet_hidden_rows(sheet, hidden, filtered)
+            }
             Blockers::Tables(TablesField {
                 tables: Some(tables),
                 ..
@@ -59,6 +64,31 @@ impl Registry {
 }
 
 impl EasyOfficeIpcRouter {
+    /// `hiddenRows` `{session, sheet, hiddenRows}`: `hiddenRows` is `{"hidden": [[first, last], ...], "filtered": [...]}`, the rows a
+    /// user and a filter hid; `SUBTOTAL` and `AGGREGATE` leave them out and only those formulas are calculated again (PD-232).
+    pub(crate) fn sheet_session_hidden_rows(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let runs = match StrictJsonValue::get_field(entries, "hiddenRows") {
+            None | Some(StrictJsonValue::Null) => (Vec::new(), Vec::new()),
+            Some(v) => crate::sheet_layout_json::parse_engine_hidden_rows(v)?,
+        };
+        match registry().set_blockers(
+            id,
+            owner,
+            sheet,
+            Blockers::HiddenRows(runs),
+            Instant::now(),
+        )? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
+        }
+    }
+
     /// `merges` `{session, sheet, merges}`: `merges` is `["A1:B2", ...]`; the arrays do not cross them (PD-222).
     /// `tables` `{session, sheet, tables}`: `tables` is `["A1:C5", ...]`, the ranges of the sheet's tables, which
     /// an array may not be placed in or cross (PD-224), or the tables themselves (`sheet_table_json`), which also

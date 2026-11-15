@@ -627,6 +627,16 @@ impl SheetEngine {
             (!tables.is_empty()).then(|| Arc::new(crate::spill_merges::SpillMerges::new(tables)));
     }
 
+    /// Sets the rows the user and a filter hid (sorted, disjoint, zero-based inclusive runs), which `SUBTOTAL` and `AGGREGATE`
+    /// leave out (PD-232). Call it before the cells are calculated; a session uses
+    /// [`RecalcSession::set_sheet_hidden_rows`](crate::RecalcSession::set_sheet_hidden_rows). True when the rows changed.
+    pub fn set_hidden_rows(&mut self, hidden: Vec<(u32, u32)>, filtered: Vec<(u32, u32)>) -> bool {
+        let next = crate::hidden_rows::HiddenRows::new(hidden, filtered);
+        let changed = self.hidden_rows != next;
+        self.hidden_rows = next;
+        changed
+    }
+
     /// Forgets every area of the sheet (the cells they filled stop being cells).
     pub(crate) fn clear_spills(&mut self) {
         if !self.spill.is_empty() {

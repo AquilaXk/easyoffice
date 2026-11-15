@@ -63,6 +63,29 @@ impl RecalcSession {
         self.set_sheet_blockers(sheet, merges, false)
     }
 
+    /// Tells the session the rows the user (`hidden`) and a filter (`filtered`) hid in `sheet`, as sorted, disjoint, zero-based
+    /// inclusive runs (empty lists: none). Only the formulas that use `SUBTOTAL` or `AGGREGATE` (of any sheet, since a range may
+    /// name another one) are calculated again by the next [`recalculate`](Self::recalculate) (PD-232).
+    pub fn set_sheet_hidden_rows(
+        &mut self,
+        sheet: &str,
+        hidden: Vec<(u32, u32)>,
+        filtered: Vec<(u32, u32)>,
+    ) -> Result<(), super::RecalcError> {
+        let idx = self.sheet_index(sheet)?;
+        if !self.wb.sheets_mut()[usize::from(idx)].set_hidden_rows(hidden, filtered) {
+            return Ok(());
+        }
+        for (sheet_idx, engine) in self.wb.sheets().iter().enumerate() {
+            for &coord in &engine.subtotal_coords {
+                if let Some(v) = self.graph.vertex_at(sheet_idx as u16, coord) {
+                    self.dirty.insert(v);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Tells the session the tables of `sheet` (an empty list: none). An array that would be placed in or cross
     /// one is `#SPILL!`, as for merged ranges (PD-224).
     pub fn set_sheet_tables(

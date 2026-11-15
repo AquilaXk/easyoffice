@@ -9,8 +9,8 @@
 //! Codes 1 to 13 take references and code 14 to 19 (`LARGE`, `SMALL`, `PERCENTILE.INC`,
 //! `QUARTILE.INC`, `PERCENTILE.EXC`, `QUARTILE.EXC`) take one array and `k`. Options 0 to 3 skip
 //! cells that hold a `SUBTOTAL` or `AGGREGATE` (the same set `SUBTOTAL` skips), 2, 3, 6 and 7 skip
-//! error values. The formula engine does not know which rows the editor hides, so the options that
-//! skip hidden rows (1, 3, 5, 7) skip none, as `SUBTOTAL` 101 to 111 do.
+//! error values. The options that skip hidden rows (1, 3, 5, 7) leave out the rows the page told the sheet
+//! are hidden, by the user or by a filter (`hidden_rows`, PD-232).
 
 use crate::range_refs::StreamingRangeSpec;
 use crate::{
@@ -32,6 +32,7 @@ const NESTED_OPTIONS: i64 = 4;
 struct Skip {
     errors: bool,
     nested: bool,
+    hidden: bool,
 }
 
 impl Skip {
@@ -39,6 +40,7 @@ impl Skip {
         Self {
             errors: matches!(option, 2 | 3 | 6 | 7),
             nested: option < NESTED_OPTIONS,
+            hidden: matches!(option, 1 | 3 | 5 | 7),
         }
     }
 }
@@ -213,6 +215,9 @@ impl SheetEngine {
         let sheet = sheet.as_deref();
         let total = rows.saturating_mul(*cols);
         let target_sheet = self.resolve_sheet_ref(sheet, ctx);
+        let hidden = target_sheet
+            .filter(|_| skip.hidden)
+            .and_then(|t| t.hidden_rows.clone());
         let last_row = min_r + (*rows as u32).saturating_sub(1);
         let last_col = min_c + (*cols as u32).saturating_sub(1);
         let pop_count = target_sheet.map_or(total, |t| {
@@ -234,6 +239,12 @@ impl SheetEngine {
             None
         };
         let mut visit = |coord: PackedCellCoordinate, ctx: &mut EvalContext<'_>| {
+            if hidden
+                .as_deref()
+                .is_some_and(|h| h.status(coord.row()) != crate::hidden_rows::RowStatus::Normal)
+            {
+                return Ok(());
+            }
             if skip.nested && self.is_nested_subtotal_cell(sheet, coord, ctx) {
                 return Ok(());
             }

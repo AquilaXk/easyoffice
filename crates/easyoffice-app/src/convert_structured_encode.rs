@@ -86,6 +86,10 @@ fn workbook_engine(
             // reader and the page already hold them within the bounds; one that is not leaves the references
             // to read as errors.
             let _ = wb.set_tables(name, styling.tables.clone());
+            // The rows the sheet hides: `SUBTOTAL` and `AGGREGATE` leave them out (PD-232).
+            let (hidden, filtered) = styling.hidden_row_runs();
+            wb.try_add_sheet(name.clone())?
+                .set_hidden_rows(hidden, filtered);
         }
         let sheet = wb.try_add_sheet(name.clone())?;
         if let Some(filter) = SpillRefCoverFilter::new(spills) {

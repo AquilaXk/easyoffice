@@ -456,7 +456,27 @@ pub struct SheetStyling {
     pub merges_dropped: u32,
 }
 
+/// Sorted, disjoint, zero-based inclusive runs of rows.
+pub type RowRuns = Vec<(u32, u32)>;
+
 impl SheetStyling {
+    /// The rows the sheet hides, for the formulas that leave them out (`SUBTOTAL`, `AGGREGATE`, PD-232): the rows a user hid or a
+    /// folded group hid, and the rows the sheet's filter and the tables' filters hid, as sorted, disjoint, zero-based runs.
+    pub fn hidden_row_runs(&self) -> (RowRuns, RowRuns) {
+        let mut hidden = self.hidden_rows.clone();
+        hidden.extend_from_slice(&self.outline.collapsed_rows);
+        let mut filtered: Vec<(u32, u32)> =
+            self.filter.iter().flat_map(|f| f.hidden.clone()).collect();
+        filtered.extend(
+            self.tables
+                .iter()
+                .flat_map(|t| t.filter_hidden.iter().copied()),
+        );
+        normalize_runs(&mut hidden);
+        normalize_runs(&mut filtered);
+        (hidden, filtered)
+    }
+
     /// `stylings` with the first sheet shown (see [`hides_every_sheet`]).
     pub(crate) fn with_first_shown(stylings: &[SheetStyling]) -> Vec<SheetStyling> {
         let mut shown = stylings.to_vec();
