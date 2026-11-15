@@ -160,3 +160,26 @@ fn hostile_attributes_and_a_huge_totals_formula_in_a_file_are_read_to_a_bound() 
     assert!(read.tables[0].totals);
     assert_eq!(read.tables[0].columns[1], "Q1");
 }
+
+#[test]
+fn a_custom_formula_is_spelled_as_the_cell_spells_it_and_a_cell_of_only_an_equal_sign_names_no_function(
+) {
+    let (mut cells, t) = totals_table();
+    cells.retain(|(r, c, _)| !(*r == 4 && matches!(*c, 3 | 4 | 5)));
+    cells.push((4, 3, "=LET(x,1,x+1)".to_string()));
+    cells.push((4, 4, "=XLOOKUP(1,B2:B4,C2:C4)".to_string()));
+    cells.push((4, 5, "=".to_string()));
+    let bytes = pack(&cells, &t);
+    let xml = part(&bytes, "xl/tables/table1.xml");
+    for expected in [
+        "<tableColumn id=\"4\" name=\"Q3\" totalsRowFunction=\"custom\"><totalsRowFormula>_xlfn.LET(_xlpm.x,1,_xlpm.x+1)</totalsRowFormula></tableColumn>",
+        "<tableColumn id=\"5\" name=\"Q4\" totalsRowFunction=\"custom\"><totalsRowFormula>_xlfn.XLOOKUP(1,B2:B4,C2:C4)</totalsRowFormula></tableColumn>",
+        "<tableColumn id=\"6\" name=\"Note\"/>",
+    ] {
+        assert!(xml.contains(expected), "{expected}\n{xml}");
+    }
+    // The cell of the sheet holds the same text.
+    let sheet = part(&bytes, "xl/worksheets/sheet1.xml");
+    assert!(sheet.contains("_xlfn.LET(_xlpm.x,1,_xlpm.x+1)"), "{sheet}");
+    assert!(sheet.contains("_xlfn.XLOOKUP(1,B2:B4,C2:C4)"), "{sheet}");
+}

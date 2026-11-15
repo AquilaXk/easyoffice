@@ -16,6 +16,7 @@
 
 use std::fmt::Write;
 
+use crate::sheet_styling::to_file_formula;
 use crate::sheet_table::MAX_TABLE_TEXT_CHARS;
 use crate::XmlSanitizer;
 
@@ -96,11 +97,16 @@ pub(crate) fn column_totals(raw: Option<&str>, table: &str, column: &str) -> Col
                 ..ColumnTotals::default()
             };
         }
-        // A formula over the limit is a cell the file keeps as it is, not a column the list can describe.
-        return if body.chars().count() <= MAX_TOTALS_FORMULA_CHARS {
+        // The formula as the file spells it, as the cell holds it (`_xlfn.` and `_xlpm.` prefixes). A cell that holds only `=` has no
+        // formula to name, and one over the limit is a cell the file keeps as it is, not a column the list can describe.
+        if body.trim().is_empty() {
+            return ColumnTotals::default();
+        }
+        let formula = to_file_formula(body.trim());
+        return if formula.chars().count() <= MAX_TOTALS_FORMULA_CHARS {
             ColumnTotals {
                 function: Some("custom"),
-                formula: Some(body.to_string()),
+                formula: Some(formula),
                 ..ColumnTotals::default()
             }
         } else {
@@ -185,6 +191,26 @@ mod tests {
             let totals = of(raw);
             assert_eq!(totals.function, Some("custom"), "{raw}");
             assert_eq!(totals.formula.as_deref(), Some(&raw[1..]));
+        }
+    }
+
+    #[test]
+    fn a_custom_formula_is_written_as_the_file_spells_it_and_an_empty_one_is_no_function() {
+        for (raw, written) in [
+            ("=XLOOKUP(1,A1:A3,B1:B3)", "_xlfn.XLOOKUP(1,A1:A3,B1:B3)"),
+            ("=LET(x,1,x+1)", "_xlfn.LET(_xlpm.x,1,_xlpm.x+1)"),
+            (
+                "=STDEV.S(Sales[Q1 total])",
+                "_xlfn.STDEV.S(Sales[Q1 total])",
+            ),
+            ("=SUM(A1:A3)", "SUM(A1:A3)"),
+        ] {
+            let totals = of(raw);
+            assert_eq!(totals.function, Some("custom"), "{raw}");
+            assert_eq!(totals.formula.as_deref(), Some(written), "{raw}");
+        }
+        for raw in ["=", "=  ", "= "] {
+            assert_eq!(of(raw), ColumnTotals::default(), "{raw:?}");
         }
     }
 
