@@ -314,29 +314,46 @@ impl WorkbookEngine {
     pub fn canonical_sheet_key(raw: &str) -> String {
         if raw.trim().is_empty() {
             String::new()
+        } else if raw.is_ascii() {
+            raw.to_ascii_lowercase()
         } else {
-            raw.to_ascii_uppercase()
+            raw.chars().flat_map(char::to_lowercase).collect()
         }
     }
 
     /// Same identity as comparing canonical_sheet_keys, without allocating.
     pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
-        !a.trim().is_empty() && a.eq_ignore_ascii_case(b)
+        if a.trim().is_empty() || b.trim().is_empty() {
+            return false;
+        }
+        if a.is_ascii() && b.is_ascii() {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a.chars()
+                .flat_map(char::to_lowercase)
+                .eq(b.chars().flat_map(char::to_lowercase))
+        }
     }
 
     pub(crate) fn find_sheet_index(&self, name: &str) -> Option<usize> {
         if name.trim().is_empty() {
             return None;
         }
-        let key = name.to_ascii_uppercase();
-        if let Some(&idx) = self.sheet_by_name.get(&key) {
-            if idx < self.sheets.len() && self.sheets[idx].name.eq_ignore_ascii_case(name) {
+        if self.sheets.len() <= 16 {
+            return self
+                .sheets
+                .iter()
+                .position(|s| Self::is_same_sheet_identity(&s.name, name));
+        }
+        let target_hash = crate::compute_sheet_id(name);
+        if let Some(idx) = self.find_sheet_index_by_id(target_hash) {
+            if Self::is_same_sheet_identity(&self.sheets[idx].name, name) {
                 return Some(idx);
             }
         }
         self.sheets
             .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(name))
+            .position(|s| Self::is_same_sheet_identity(&s.name, name))
     }
 
     pub fn sheet_by_id(&self, sheet_id: u16) -> Option<&SheetEngine> {
@@ -395,7 +412,7 @@ impl WorkbookEngine {
         engine.name_budget = Arc::clone(&self.name_budget);
         let new_idx = self.sheets.len();
         self.sheet_by_name
-            .insert(engine.name.to_ascii_uppercase(), new_idx);
+            .insert(Self::canonical_sheet_key(&engine.name), new_idx);
         self.sheet_by_id.insert(candidate, new_idx);
         self.sheets.push(engine);
         if !self.names.is_empty() {

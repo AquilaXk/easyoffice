@@ -453,9 +453,20 @@ impl PackedWorkbookCoord {
 #[inline]
 pub fn compute_sheet_id(name: &str) -> u16 {
     let mut hash: u32 = 0x811C_9DC5;
-    for b in name.bytes() {
-        hash ^= u32::from(b.to_ascii_lowercase());
-        hash = hash.wrapping_mul(0x0100_0193);
+    if name.is_ascii() {
+        for b in name.bytes() {
+            hash ^= u32::from(b.to_ascii_lowercase());
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+    } else {
+        let mut buf = [0u8; 4];
+        for ch in name.chars().flat_map(char::to_lowercase) {
+            let s = ch.encode_utf8(&mut buf);
+            for &b in s.as_bytes() {
+                hash ^= u32::from(b);
+                hash = hash.wrapping_mul(0x0100_0193);
+            }
+        }
     }
     let folded = ((hash >> 16) ^ (hash & 0xFFFF)) as u16;
     if folded == 0 {

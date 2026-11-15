@@ -39,13 +39,38 @@ pub(crate) enum Locality {
     Cell,
     /// Statistics of the rule's ranges.
     Range,
-    /// Cells anywhere (formula operands, expressions).
+    /// Cells anywhere on the local sheet.
+    LocalSheet,
+    /// Cells anywhere across the workbook (formula operands with cross-sheet refs, dynamic functions).
     Sheet,
 }
 
 fn is_literal(text: &str) -> bool {
     let t = text.trim();
     t.parse::<f64>().is_ok() || (t.len() >= 2 && t.starts_with('"') && t.ends_with('"'))
+}
+
+fn expr_has_cross_sheet_or_dynamic(expr: &str) -> bool {
+    if expr.contains('!') {
+        return true;
+    }
+    let upper = expr.to_ascii_uppercase();
+    upper.contains("INDIRECT(")
+        || upper.contains("OFFSET(")
+        || upper.contains("RAND(")
+        || upper.contains("NOW(")
+        || upper.contains("TODAY(")
+}
+
+fn expr_locality(expr: &str) -> Locality {
+    let t = expr.trim().trim_start_matches('=');
+    if is_literal(t) {
+        Locality::Cell
+    } else if expr_has_cross_sheet_or_dynamic(t) {
+        Locality::Sheet
+    } else {
+        Locality::LocalSheet
+    }
 }
 
 fn all_numbers(values: &[&CfValue]) -> bool {
@@ -59,7 +84,15 @@ fn any_formula(values: &[&CfValue]) -> bool {
 pub(crate) fn locality(kind: &CfKind) -> Locality {
     let graded = |values: &[&CfValue]| {
         if any_formula(values) {
-            Locality::Sheet
+            if values
+                .iter()
+                .filter(|v| v.kind == ValueKind::Formula)
+                .any(|v| expr_has_cross_sheet_or_dynamic(&v.text))
+            {
+                Locality::Sheet
+            } else {
+                Locality::LocalSheet
+            }
         } else if all_numbers(values) {
             Locality::Cell
         } else {
@@ -71,7 +104,18 @@ pub(crate) fn locality(kind: &CfKind) -> Locality {
             if is_literal(a) && (!cmp.takes_two() || is_literal(b)) {
                 Locality::Cell
             } else {
-                Locality::Sheet
+                let loc_a = expr_locality(a);
+                let loc_b = if cmp.takes_two() {
+                    expr_locality(b)
+                } else {
+                    Locality::Cell
+                };
+                match (loc_a, loc_b) {
+                    (Locality::Sheet, _) | (_, Locality::Sheet) => Locality::Sheet,
+                    (Locality::LocalSheet, _) | (_, Locality::LocalSheet) => Locality::LocalSheet,
+                    (Locality::Range, _) | (_, Locality::Range) => Locality::Range,
+                    _ => Locality::Cell,
+                }
             }
         }
         CfKind::Text { .. }
@@ -79,7 +123,7 @@ pub(crate) fn locality(kind: &CfKind) -> Locality {
         | CfKind::Errors { .. }
         | CfKind::TimePeriod(_) => Locality::Cell,
         CfKind::Top { .. } | CfKind::Average { .. } | CfKind::Duplicates { .. } => Locality::Range,
-        CfKind::Expression(_) => Locality::Sheet,
+        CfKind::Expression(formula) => expr_locality(formula),
         CfKind::ColorScale(stops) => graded(&stops.iter().map(|(v, _)| v).collect::<Vec<_>>()),
         CfKind::DataBar { min, max, .. } => graded(&[min, max]),
         CfKind::IconSet { thresholds, .. } => graded(&thresholds.iter().collect::<Vec<_>>()),
@@ -275,11 +319,40 @@ pub(crate) fn make_plan(
     today: i64,
 ) -> Option<Plan> {
     Some(match &rule.kind {
-        CfKind::CellIs { cmp, a, b } => Plan::CellIs {
-            cmp: *cmp,
-            a: operand(a, cells),
-            b: operand(b, cells),
-        },
+        CfKind::CellIs { cmp, a, b } => {
+            let mut op_a = operand(a, cells);
+            let mut op_b = operand(b, cells);
+            if let Operand::Text(t) = op_a {
+                op_a = Operand::Text(fold(&t));
+            }
+            if let Operand::Text(t) = op_b {
+                op_b = Operand::Text(fold(&t));
+            }
+            if matches!(cmp, Cmp::Between | Cmp::NotBetween) {
+                match (&op_a, &op_b) {
+                    (Operand::Num(x), Operand::Num(y)) => {
+                        let (lo, hi) = if x <= y { (*x, *y) } else { (*y, *x) };
+                        op_a = Operand::Num(lo);
+                        op_b = Operand::Num(hi);
+                    }
+                    (Operand::Text(x), Operand::Text(y)) => {
+                        let (lo, hi) = if x <= y {
+                            (x.clone(), y.clone())
+                        } else {
+                            (y.clone(), x.clone())
+                        };
+                        op_a = Operand::Text(lo);
+                        op_b = Operand::Text(hi);
+                    }
+                    _ => {}
+                }
+            }
+            Plan::CellIs {
+                cmp: *cmp,
+                a: op_a,
+                b: op_b,
+            }
+        }
         CfKind::Text { op, text } => Plan::Text {
             op: *op,
             needle: fold(text),
@@ -385,17 +458,53 @@ fn compare_number(cmp: Cmp, v: f64, a: f64, b: f64) -> bool {
     }
 }
 
+#[inline]
+fn ascii_case_cmp(v: &str, target: &str) -> std::cmp::Ordering {
+    let mut vb = v.bytes();
+    let mut tb = target.bytes();
+    loop {
+        match (vb.next(), tb.next()) {
+            (Some(b1), Some(b2)) => {
+                let c1 = b1.to_ascii_lowercase();
+                let c2 = b2.to_ascii_lowercase();
+                if c1 != c2 {
+                    return c1.cmp(&c2);
+                }
+            }
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+        }
+    }
+}
+
 fn compare_text(cmp: Cmp, v: &str, a: &str, b: &str) -> bool {
-    let (v, a, b) = (fold(v), fold(a), fold(b));
-    match cmp {
-        Cmp::Between => v >= a.clone().min(b.clone()) && v <= a.max(b),
-        Cmp::NotBetween => !(v >= a.clone().min(b.clone()) && v <= a.max(b)),
-        Cmp::Equal => v == a,
-        Cmp::NotEqual => v != a,
-        Cmp::Greater => v > a,
-        Cmp::GreaterEqual => v >= a,
-        Cmp::Less => v < a,
-        Cmp::LessEqual => v <= a,
+    if v.is_ascii() && a.is_ascii() && b.is_ascii() {
+        match cmp {
+            Cmp::Equal => v.eq_ignore_ascii_case(a),
+            Cmp::NotEqual => !v.eq_ignore_ascii_case(a),
+            Cmp::Greater => ascii_case_cmp(v, a).is_gt(),
+            Cmp::GreaterEqual => !ascii_case_cmp(v, a).is_lt(),
+            Cmp::Less => ascii_case_cmp(v, a).is_lt(),
+            Cmp::LessEqual => !ascii_case_cmp(v, a).is_gt(),
+            Cmp::Between => !ascii_case_cmp(v, a).is_lt() && !ascii_case_cmp(v, b).is_gt(),
+            Cmp::NotBetween => ascii_case_cmp(v, a).is_lt() || ascii_case_cmp(v, b).is_gt(),
+        }
+    } else {
+        let fv = fold(v);
+        let fa = fold(a);
+        let fb = fold(b);
+        let (lo, hi) = if fa <= fb { (&fa, &fb) } else { (&fb, &fa) };
+        match cmp {
+            Cmp::Between => fv >= *lo && fv <= *hi,
+            Cmp::NotBetween => fv < *lo || fv > *hi,
+            Cmp::Equal => fv == fa,
+            Cmp::NotEqual => fv != fa,
+            Cmp::Greater => fv > fa,
+            Cmp::GreaterEqual => fv >= fa,
+            Cmp::Less => fv < fa,
+            Cmp::LessEqual => fv <= fa,
+        }
     }
 }
 
@@ -435,17 +544,56 @@ fn cell_is(cmp: Cmp, a: &Operand, b: &Operand, value: &EvaluatedCellValue) -> bo
     }
 }
 
-fn text_rule(op: TextOp, needle: &str, value: &EvaluatedCellValue) -> bool {
-    match value {
-        EvaluatedCellValue::Text(s) => {
-            let hay = fold(s);
-            match op {
-                TextOp::Contains => hay.contains(needle),
-                TextOp::NotContains => !hay.contains(needle),
-                TextOp::Begins => hay.starts_with(needle),
-                TextOp::Ends => hay.ends_with(needle),
+fn text_match_op(op: TextOp, needle: &str, hay: &str) -> bool {
+    if needle.is_ascii() && hay.is_ascii() {
+        match op {
+            TextOp::Contains => {
+                if needle.is_empty() {
+                    true
+                } else if hay.len() < needle.len() {
+                    false
+                } else {
+                    let nb = needle.as_bytes();
+                    hay.as_bytes()
+                        .windows(nb.len())
+                        .any(|w| w.eq_ignore_ascii_case(nb))
+                }
+            }
+            TextOp::NotContains => {
+                if needle.is_empty() {
+                    false
+                } else if hay.len() < needle.len() {
+                    true
+                } else {
+                    let nb = needle.as_bytes();
+                    !hay.as_bytes()
+                        .windows(nb.len())
+                        .any(|w| w.eq_ignore_ascii_case(nb))
+                }
+            }
+            TextOp::Begins => {
+                hay.len() >= needle.len() && hay[..needle.len()].eq_ignore_ascii_case(needle)
+            }
+            TextOp::Ends => {
+                hay.len() >= needle.len()
+                    && hay[hay.len() - needle.len()..].eq_ignore_ascii_case(needle)
             }
         }
+    } else {
+        let h = fold(hay);
+        let n = fold(needle);
+        match op {
+            TextOp::Contains => h.contains(&n),
+            TextOp::NotContains => !h.contains(&n),
+            TextOp::Begins => h.starts_with(&n),
+            TextOp::Ends => h.ends_with(&n),
+        }
+    }
+}
+
+fn text_rule(op: TextOp, needle: &str, value: &EvaluatedCellValue) -> bool {
+    match value {
+        EvaluatedCellValue::Text(s) => text_match_op(op, needle, s),
         EvaluatedCellValue::Empty => match op {
             TextOp::Contains | TextOp::Begins | TextOp::Ends => needle.is_empty(),
             TextOp::NotContains => !needle.is_empty(),
@@ -458,23 +606,11 @@ fn text_rule(op: TextOp, needle: &str, value: &EvaluatedCellValue) -> bool {
                 return op == TextOp::NotContains;
             }
             let s = value.to_display_string();
-            let hay = fold(&s);
-            match op {
-                TextOp::Contains => hay.contains(needle),
-                TextOp::NotContains => !hay.contains(needle),
-                TextOp::Begins => hay.starts_with(needle),
-                TextOp::Ends => hay.ends_with(needle),
-            }
+            text_match_op(op, needle, &s)
         }
         _ => {
             let s = value.to_display_string();
-            let hay = fold(&s);
-            match op {
-                TextOp::Contains => hay.contains(needle),
-                TextOp::NotContains => !hay.contains(needle),
-                TextOp::Begins => hay.starts_with(needle),
-                TextOp::Ends => hay.ends_with(needle),
-            }
+            text_match_op(op, needle, &s)
         }
     }
 }

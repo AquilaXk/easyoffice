@@ -185,18 +185,24 @@ pub struct RecalcOutcome {
 struct Firsts {
     list: Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)>,
     /// Built when a cell can come twice (a second pass, a cell an anchor filled).
-    index: Option<std::collections::HashSet<(u16, PackedCellCoordinate)>>,
+    index: Option<DetSet<crate::PackedWorkbookCoord>>,
 }
 
 impl Firsts {
-    fn index(&mut self) -> &mut std::collections::HashSet<(u16, PackedCellCoordinate)> {
+    fn index(&mut self) -> &mut DetSet<crate::PackedWorkbookCoord> {
         let list = &self.list;
-        self.index
-            .get_or_insert_with(|| list.iter().map(|(k, _)| *k).collect())
+        self.index.get_or_insert_with(|| {
+            list.iter()
+                .map(|((s, c), _)| crate::PackedWorkbookCoord::new(*s, *c))
+                .collect()
+        })
     }
 
     fn note(&mut self, key: (u16, PackedCellCoordinate), old: Option<EvaluatedCellValue>) {
-        if self.index().insert(key) {
+        if self
+            .index()
+            .insert(crate::PackedWorkbookCoord::new(key.0, key.1))
+        {
             self.list.push((key, old));
         }
     }
@@ -819,13 +825,20 @@ impl RecalcSession {
         // pass finished keep theirs (they are not calculated again).
         let mut pending = std::mem::take(&mut ctx.pending);
         if ctx.expired() {
-            let cut: std::collections::HashSet<(u16, PackedCellCoordinate)> =
-                unfinished.iter().map(|&v| self.graph.site(v)).collect();
+            let cut: DetSet<crate::PackedWorkbookCoord> = unfinished
+                .iter()
+                .map(|&v| {
+                    let (s, c) = self.graph.site(v);
+                    crate::PackedWorkbookCoord::new(s, c)
+                })
+                .collect();
             pending.retain(|p| {
                 !sheets
                     .iter()
                     .position(|s| s.resolved_sheet_id() == p.sheet_id)
-                    .is_some_and(|idx| cut.contains(&(idx as u16, p.anchor)))
+                    .is_some_and(|idx| {
+                        cut.contains(&crate::PackedWorkbookCoord::new(idx as u16, p.anchor))
+                    })
             });
         }
         self.dynamic_circular_pass = ctx.circular;

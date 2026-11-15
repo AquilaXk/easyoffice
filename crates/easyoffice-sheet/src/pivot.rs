@@ -48,7 +48,11 @@ fn normalize_pivot_key(v: EvaluatedCellValue) -> (String, String) {
         },
         other => other.to_display_string(),
     };
-    let canon = disp.to_lowercase();
+    let canon = if disp.is_ascii() {
+        disp.to_ascii_lowercase()
+    } else {
+        disp.to_lowercase()
+    };
     (disp, canon)
 }
 
@@ -168,6 +172,12 @@ fn tally(
             .col
             .filter(|&c| c < col_count)
             .map(|c| min_c + c as u32);
+        let default_col_idx = if col_col.is_none() {
+            let (ts, tc) = pivot_total_key();
+            Some(cols.position(ts, tc))
+        } else {
+            None
+        };
         for r_off in first_row..row_count {
             if r_off as u32 % CLOCK_ROWS == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
                 return Err(PivotError::TimedOut);
@@ -187,11 +197,13 @@ fn tally(
             if rows.keys.len() * cols.keys.len().max(1) > max_cells {
                 return Err(PivotError::TooLarge);
             }
-            let (col_str, canonical_col) = match col_col {
-                Some(cc) => column_key(row_idx, cc, &mut value_at)?,
-                None => pivot_total_key(),
+            let c_idx = match col_col {
+                Some(cc) => {
+                    let (col_str, canonical_col) = column_key(row_idx, cc, &mut value_at)?;
+                    cols.position(col_str, canonical_col)
+                }
+                None => default_col_idx.unwrap(),
             };
-            let c_idx = cols.position(col_str, canonical_col);
             if rows.keys.len() * cols.keys.len() > max_cells {
                 return Err(PivotError::TooLarge);
             }

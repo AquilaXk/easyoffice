@@ -395,6 +395,7 @@ impl RuleRuntime {
                 .collect();
             let affected = match self.states[i].locality {
                 Locality::Sheet => any_changed || !touched.is_empty(),
+                Locality::LocalSheet => !touched.is_empty(),
                 Locality::Cell | Locality::Range => !inside.is_empty(),
             };
             if cells.budget_exhausted() {
@@ -404,6 +405,7 @@ impl RuleRuntime {
                 for j in (i + 1)..self.rules.len() {
                     let rule_j_affected = match self.states[j].locality {
                         Locality::Sheet => any_changed || !touched.is_empty(),
+                        Locality::LocalSheet => !touched.is_empty(),
                         Locality::Cell | Locality::Range => touched.iter().any(|c| {
                             self.rules[j]
                                 .ranges

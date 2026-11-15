@@ -465,11 +465,11 @@ pub(crate) fn publish(
 ) -> Published {
     let mut out = Published::default();
     for p in pending {
-        let Some(idx) = wb
-            .sheets()
-            .iter()
-            .position(|s| s.resolved_sheet_id() == p.sheet_id)
-        else {
+        let Some(idx) = wb.find_sheet_index_by_id(p.sheet_id).or_else(|| {
+            wb.sheets()
+                .iter()
+                .position(|s| s.resolved_sheet_id() == p.sheet_id)
+        }) else {
             continue;
         };
         publish_one(&mut wb.sheets_mut()[idx], idx as u16, memo, &p, &mut out);

@@ -16,7 +16,46 @@ use std::collections::HashMap;
 /// Ranges at most this large are walked cell by cell; larger ones use the column index.
 const SMALL_RANGE_CELLS: usize = 256;
 
-type Frame = (u16, PackedCellCoordinate, bool);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub(crate) struct PackedDfsFrame(pub u64);
+
+impl PackedDfsFrame {
+    #[inline]
+    pub const fn new(slot: u16, coord: PackedCellCoordinate, expanded: bool) -> Self {
+        let sheet_bits = (slot as u64) << 48;
+        let row_bits = ((coord.row() as u64) & 0x000F_FFFF) << 28;
+        let col_bits = ((coord.col() as u64) & 0x07FF_FFFF) << 1;
+        let exp_bits = expanded as u64;
+        Self(sheet_bits | row_bits | col_bits | exp_bits)
+    }
+
+    #[inline]
+    pub const fn slot(self) -> u16 {
+        (self.0 >> 48) as u16
+    }
+
+    #[inline]
+    pub fn coord(self) -> PackedCellCoordinate {
+        let row = ((self.0 >> 28) & 0x000F_FFFF) as u32;
+        let col = ((self.0 >> 1) & 0x07FF_FFFF) as u32;
+        PackedCellCoordinate((u64::from(row) << 32) | u64::from(col))
+    }
+
+    #[inline]
+    pub const fn expanded(self) -> bool {
+        (self.0 & 1) != 0
+    }
+
+    #[inline]
+    pub fn unpack(self) -> (u16, PackedCellCoordinate, bool) {
+        (self.slot(), self.coord(), self.expanded())
+    }
+}
+
+const _: () = assert!(std::mem::size_of::<PackedDfsFrame>() == 8);
+
+type Frame = PackedDfsFrame;
 
 #[inline]
 pub(crate) fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
@@ -613,7 +652,9 @@ impl DepWalk<'_> {
     fn visit(&mut self, slot: u16, sheet_id: u16, dep: PackedCellCoordinate) {
         match self.state.get(sheet_id, dep) {
             1 => *self.cycle = true,
-            0 if !self.memo.contains_at(sheet_id, dep) => self.stack.push((slot, dep, false)),
+            0 if !self.memo.contains_at(sheet_id, dep) => {
+                self.stack.push(PackedDfsFrame::new(slot, dep, false))
+            }
             _ => {}
         }
     }
@@ -791,10 +832,11 @@ impl SheetEngine {
         for &coord in roots.iter().rev() {
             if is_formula(self.compiled_asts.get(&coord)) && !ctx.memo.contains_at(self_sid, coord)
             {
-                stack.push((0, coord, false));
+                stack.push(PackedDfsFrame::new(0, coord, false));
             }
         }
-        while let Some((slot, coord, expanded)) = stack.pop() {
+        while let Some(frame) = stack.pop() {
+            let (slot, coord, expanded) = frame.unpack();
             if ctx.expired() {
                 break;
             }
@@ -823,7 +865,7 @@ impl SheetEngine {
                 state.set(sid, coord, 2);
                 continue;
             }
-            stack.push((slot, coord, true));
+            stack.push(PackedDfsFrame::new(slot, coord, true));
             let mut cycle = false;
             let mut walk = DepWalk {
                 memo: &ctx.memo,
