@@ -16,8 +16,8 @@ pub struct WorkbookEngine {
     pub(crate) tables: Arc<crate::table_index::TableIndex>,
     /// Nodes the formulas that use names hold, over all sheets (see `names::MAX_WORKBOOK_NAME_NODES`).
     name_budget: Arc<AtomicUsize>,
-    sheet_by_name: std::collections::HashMap<String, usize>,
-    sheet_by_id: std::collections::HashMap<u16, usize>,
+    sheet_by_name: crate::FastMap<String, usize>,
+    sheet_by_id: crate::FastMap<u16, usize>,
 }
 
 impl Clone for WorkbookEngine {
@@ -322,7 +322,11 @@ impl WorkbookEngine {
     }
 
     /// Same identity as comparing canonical_sheet_keys, without allocating.
+    #[inline]
     pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
+        if a == b {
+            return !a.trim().is_empty();
+        }
         if a.trim().is_empty() || b.trim().is_empty() {
             return false;
         }
@@ -335,20 +339,76 @@ impl WorkbookEngine {
         }
     }
 
+    #[inline]
+    fn fold_sheet_key_stack<'a>(raw: &str, buf: &'a mut [u8; 256]) -> Option<&'a str> {
+        if raw.is_ascii() {
+            if raw.len() > buf.len() {
+                return None;
+            }
+            for (dst, src) in buf[..raw.len()].iter_mut().zip(raw.bytes()) {
+                *dst = src.to_ascii_lowercase();
+            }
+            return std::str::from_utf8(&buf[..raw.len()]).ok();
+        }
+        let mut pos = 0usize;
+        let mut ch_buf = [0u8; 4];
+        for ch in raw.chars().flat_map(char::to_lowercase) {
+            let enc = ch.encode_utf8(&mut ch_buf);
+            let next = pos + enc.len();
+            if next > buf.len() {
+                return None;
+            }
+            buf[pos..next].copy_from_slice(enc.as_bytes());
+            pos = next;
+        }
+        std::str::from_utf8(&buf[..pos]).ok()
+    }
+
     pub(crate) fn find_sheet_index(&self, name: &str) -> Option<usize> {
         if name.trim().is_empty() {
             return None;
         }
-        if self.sheets.len() <= 16 {
+        if self.sheets.len() <= 4 {
             return self
                 .sheets
                 .iter()
                 .position(|s| Self::is_same_sheet_identity(&s.name, name));
         }
-        let target_hash = crate::compute_sheet_id(name);
-        if let Some(idx) = self.find_sheet_index_by_id(target_hash) {
-            if Self::is_same_sheet_identity(&self.sheets[idx].name, name) {
-                return Some(idx);
+        let has_ascii_upper = name.bytes().any(|b| b.is_ascii_uppercase());
+        if !has_ascii_upper {
+            if let Some(&idx) = self.sheet_by_name.get(name) {
+                if idx < self.sheets.len()
+                    && Self::is_same_sheet_identity(&self.sheets[idx].name, name)
+                {
+                    return Some(idx);
+                }
+            }
+            if name.is_ascii() {
+                return self
+                    .sheets
+                    .iter()
+                    .position(|s| Self::is_same_sheet_identity(&s.name, name));
+            }
+        }
+        let mut stack_buf = [0u8; 256];
+        if let Some(folded) = Self::fold_sheet_key_stack(name, &mut stack_buf) {
+            if has_ascii_upper || folded != name {
+                if let Some(&idx) = self.sheet_by_name.get(folded) {
+                    if idx < self.sheets.len()
+                        && Self::is_same_sheet_identity(&self.sheets[idx].name, name)
+                    {
+                        return Some(idx);
+                    }
+                }
+            }
+        } else {
+            let owned = Self::canonical_sheet_key(name);
+            if let Some(&idx) = self.sheet_by_name.get(&owned) {
+                if idx < self.sheets.len()
+                    && Self::is_same_sheet_identity(&self.sheets[idx].name, name)
+                {
+                    return Some(idx);
+                }
             }
         }
         self.sheets

@@ -431,16 +431,14 @@ impl SheetEngine {
         if ctx.claims.is_empty() {
             return true;
         }
-        !ctx.claims.iter().any(|c| {
-            c.overlaps(
-                sheet_id,
-                anchor.row(),
-                anchor.col(),
-                last_row,
-                last_col,
-                anchor,
-            )
-        })
+        !ctx.claims.has_overlap(
+            sheet_id,
+            anchor.row(),
+            anchor.col(),
+            last_row,
+            last_col,
+            anchor,
+        )
     }
 }
 

@@ -481,12 +481,95 @@ pub fn parse_archive_header(buf: &[u8]) -> Result<ArchiveHeader, EasyOfficeError
     })
 }
 
+/// Shared slice over a decompressed `.iwa` slab so thousands of records share one heap allocation.
+#[derive(Clone)]
+pub struct PayloadBytes {
+    slab: std::sync::Arc<[u8]>,
+    start: u32,
+    end: u32,
+}
+
+impl PayloadBytes {
+    #[inline]
+    pub fn from_slab(slab: std::sync::Arc<[u8]>, start: u32, end: u32) -> Self {
+        debug_assert!(start <= end && (end as usize) <= slab.len());
+        Self { slab, start, end }
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.slab[self.start as usize..self.end as usize]
+    }
+}
+
+impl Default for PayloadBytes {
+    fn default() -> Self {
+        Self {
+            slab: std::sync::Arc::from(&[][..]),
+            start: 0,
+            end: 0,
+        }
+    }
+}
+
+impl std::ops::Deref for PayloadBytes {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl AsRef<[u8]> for PayloadBytes {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl std::fmt::Debug for PayloadBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
+
+impl PartialEq for PayloadBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for PayloadBytes {}
+
+impl From<Vec<u8>> for PayloadBytes {
+    fn from(vec: Vec<u8>) -> Self {
+        let len = u32::try_from(vec.len()).expect("payload length exceeds u32");
+        Self {
+            slab: std::sync::Arc::from(vec),
+            start: 0,
+            end: len,
+        }
+    }
+}
+
+impl From<&[u8]> for PayloadBytes {
+    fn from(slice: &[u8]) -> Self {
+        let len = u32::try_from(slice.len()).expect("payload length exceeds u32");
+        Self {
+            slab: std::sync::Arc::from(slice),
+            start: 0,
+            end: len,
+        }
+    }
+}
+
 /// One archived object: the first message type and payload, plus any extra messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveObject {
     pub type_id: u32,
-    pub payload: Vec<u8>,
-    pub extra: Vec<(u32, Vec<u8>)>,
+    pub payload: PayloadBytes,
+    pub extra: Vec<(u32, PayloadBytes)>,
 }
 
 /// Seeded 64-bit hasher tuned for `u64` object identifiers while preventing offline hash collisions.

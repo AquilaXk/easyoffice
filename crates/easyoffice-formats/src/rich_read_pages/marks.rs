@@ -436,7 +436,7 @@ mod tests {
             1,
             ArchiveObject {
                 type_id: ty::COMMENT_TEXT,
-                payload: f_bytes(1, &"C".repeat(16 * 1024).into_bytes()),
+                payload: f_bytes(1, &"C".repeat(16 * 1024).into_bytes()).into(),
                 extra: Vec::new(),
             },
         );
@@ -444,7 +444,7 @@ mod tests {
             2,
             ArchiveObject {
                 type_id: ty::COMMENT_FIELD,
-                payload: f_ref(1, 1),
+                payload: f_ref(1, 1).into(),
                 extra: Vec::new(),
             },
         );

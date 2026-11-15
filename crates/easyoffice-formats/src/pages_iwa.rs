@@ -10,6 +10,7 @@
 
 use crate::pages_proto::{
     parse_archive_header, parse_archive_info, read_varint, ArchiveInfo, ArchiveObject, ObjectTable,
+    PayloadBytes,
 };
 use crate::EasyOfficeError;
 
@@ -278,23 +279,37 @@ pub fn add_to_table(table: &mut ObjectTable, records: Vec<IwaRecord>) {
         let Some((first, payload)) = msgs.next() else {
             continue;
         };
-        let extra = msgs.map(|(m, p)| (m.type_id, p)).collect();
+        let extra = msgs
+            .map(|(m, p)| (m.type_id, PayloadBytes::from(p)))
+            .collect();
         table.objects.insert(
             rec.info.identifier,
             ArchiveObject {
                 type_id: first.type_id,
-                payload,
+                payload: PayloadBytes::from(payload),
                 extra,
             },
         );
     }
 }
 
-/// Decodes a decompressed `.iwa` record stream directly into `table` without intermediate record or header `Vec` allocations.
+/// Decodes a decompressed `.iwa` record stream directly into `table` using a single shared slab allocation.
 pub fn decode_stream_into_table(
     stream: &[u8],
     table: &mut ObjectTable,
 ) -> Result<(), EasyOfficeError> {
+    if stream.is_empty() {
+        return Ok(());
+    }
+    decode_slab_into_table(std::sync::Arc::from(stream), table)
+}
+
+/// Decodes a shared `.iwa` byte slab into `table` with zero per-record payload copies.
+pub fn decode_slab_into_table(
+    slab: std::sync::Arc<[u8]>,
+    table: &mut ObjectTable,
+) -> Result<(), EasyOfficeError> {
+    let stream: &[u8] = &slab;
     let mut pos = 0usize;
     let mut count = 0usize;
     while pos < stream.len() {
@@ -319,18 +334,23 @@ pub fn decode_stream_into_table(
         let first_end = pos
             .checked_add(first_len)
             .ok_or_else(|| bad("offset overflow"))?;
-        let first_payload = stream
+        stream
             .get(pos..first_end)
-            .ok_or_else(|| bad("record payload truncated"))?
-            .to_vec();
+            .ok_or_else(|| bad("record payload truncated"))?;
+        let first_start_u32 = u32::try_from(pos).map_err(|_| bad("offset overflow"))?;
+        let first_end_u32 = u32::try_from(first_end).map_err(|_| bad("offset overflow"))?;
+        let first_payload =
+            PayloadBytes::from_slab(std::sync::Arc::clone(&slab), first_start_u32, first_end_u32);
         pos = first_end;
         let mut extra = Vec::with_capacity(header.count.saturating_sub(1));
         for &(type_id, len) in &header.infos[1..header.count] {
             let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
-            let payload = stream
+            stream
                 .get(pos..end)
-                .ok_or_else(|| bad("record payload truncated"))?
-                .to_vec();
+                .ok_or_else(|| bad("record payload truncated"))?;
+            let start_u32 = u32::try_from(pos).map_err(|_| bad("offset overflow"))?;
+            let end_u32 = u32::try_from(end).map_err(|_| bad("offset overflow"))?;
+            let payload = PayloadBytes::from_slab(std::sync::Arc::clone(&slab), start_u32, end_u32);
             pos = end;
             extra.push((type_id, payload));
         }

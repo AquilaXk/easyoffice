@@ -198,8 +198,12 @@ impl SheetEngine {
                     (coord.row() - min_r) as usize,
                     (coord.col() - min_c) as usize,
                 );
-                data[dr * cols + dc] =
-                    self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                let v = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                let hb = v.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data[dr * cols + dc] = v;
             }
         } else {
             ctx.steps = ctx.steps.saturating_add(total);
@@ -209,6 +213,10 @@ impl SheetEngine {
                         Ok(v) => v,
                         Err(e) => V::Error(e),
                     };
+                    let hb = v.heap_bytes();
+                    if hb > 0 {
+                        ctx.charge_array_extra_bytes(hb)?;
+                    }
                     data[dr * cols + dc] = v;
                 }
             }
@@ -257,6 +265,10 @@ impl SheetEngine {
                         Err(_) => V::Error(FormulaError::Ref),
                     }
                 };
+                let hb = v.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
                 data.push(v);
             }
         }

@@ -155,7 +155,7 @@ fn reference_cycles_terminate() {
             id,
             ArchiveObject {
                 type_id: 1,
-                payload: f_varint(1, id % 3 + 1),
+                payload: f_varint(1, id % 3 + 1).into(),
                 extra: vec![],
             },
         );

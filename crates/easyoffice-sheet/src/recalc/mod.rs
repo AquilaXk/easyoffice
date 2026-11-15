@@ -363,10 +363,7 @@ impl RecalcSession {
             cells: self.wb.sheets().iter().map(|s| s.cells.len()).sum(),
             raw_bytes: self.raw_bytes,
             edges: self.graph.edge_count() + self.dynamic.edge_count(),
-            graph_bytes: self
-                .graph
-                .heap_bytes_estimate()
-                .saturating_add(dynamic_bytes),
+            graph_bytes: self.graph.heap_bytes_estimate(),
             ast_bytes: self.ast_bytes(),
             rule_bytes: self
                 .rules
@@ -393,11 +390,10 @@ impl RecalcSession {
     }
 
     fn exceeds_budget(&self) -> bool {
-        let graph_bytes = self.graph.heap_bytes_estimate();
-        let total = self.footprint().total_bytes();
-        self.graph.edge_count() > self.budget.max_edges
-            || graph_bytes > self.budget.max_graph_bytes
-            || total > self.budget.max_bytes
+        let fp = self.footprint();
+        fp.edges > self.budget.max_edges
+            || fp.graph_bytes.saturating_add(fp.dynamic_bytes) > self.budget.max_graph_bytes
+            || fp.total_bytes() > self.budget.max_bytes
     }
 
     /// Number of formula cells and of distinct range references tracked by the graph.

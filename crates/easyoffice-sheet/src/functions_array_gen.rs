@@ -234,7 +234,12 @@ impl SheetEngine {
                 for c in 0..lookup.cols {
                     let mut one = vec![crate::array_eval::literal(lookup.get(r, c))];
                     one.extend(rest.iter().cloned());
-                    data.push(self.eval_func_ctx("XLOOKUP", &one, ctx, depth));
+                    let cell = self.eval_func_ctx("XLOOKUP", &one, ctx, depth);
+                    let hb = cell.heap_bytes();
+                    if hb > 0 {
+                        ctx.charge_array_extra_bytes(hb)?;
+                    }
+                    data.push(cell);
                 }
             }
             return Ok(Val::grid(Grid::from_rows(lookup.rows, lookup.cols, data)));
@@ -277,12 +282,15 @@ impl SheetEngine {
         let mut data = Vec::with_capacity(out_rows * out_cols);
         for k in 0..out_rows * out_cols {
             let (dr, dc) = if vertical { (found, k) } else { (k, found) };
-            data.push(
-                match self.eval_streaming_cell_allow_error(&spec, dr, dc, ctx, depth) {
-                    Ok(v) => v,
-                    Err(e) => V::Error(e),
-                },
-            );
+            let cell = match self.eval_streaming_cell_allow_error(&spec, dr, dc, ctx, depth) {
+                Ok(v) => v,
+                Err(e) => V::Error(e),
+            };
+            let hb = cell.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+            data.push(cell);
         }
         Ok(Val::grid(Grid::from_rows(out_rows, out_cols, data)))
     }

@@ -379,6 +379,9 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_evaluate_sheet(payload: &str, owner: &str) -> Result<String, EasyOfficeError> {
+        if let Some(fast) = sheet_session::try_fast_sheet_session_borrowed(payload, owner)? {
+            return Ok(fast);
+        }
         let entries = Self::parse_rpc_json_object(payload)?;
         if let Some(action) = Self::optional_json_str(&entries, "sessionAction")? {
             return Self::handle_sheet_session_action(action, &entries, owner);

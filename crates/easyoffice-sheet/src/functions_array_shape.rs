@@ -203,14 +203,28 @@ impl SheetEngine {
             let rows: usize = grids.iter().map(|g| g.rows).sum();
             ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(rows * cols);
+            let mut idx = 0usize;
             for g in &grids {
                 for r in 0..g.rows {
                     for c in 0..cols {
-                        data.push(if c < g.cols {
+                        let cell = if c < g.cols {
                             g.get(r, c).clone()
                         } else {
                             na.clone()
-                        });
+                        };
+                        let hb = cell.heap_bytes();
+                        if hb > 0 {
+                            ctx.charge_array_extra_bytes(hb)?;
+                        }
+                        data.push(cell);
+                        if (idx & 4095) == 4095 {
+                            ctx.charge_steps(1)?;
+                            ctx.poll_deadline();
+                            if ctx.expired() {
+                                return Err(FormulaError::Value);
+                            }
+                        }
+                        idx += 1;
                     }
                 }
             }
@@ -220,14 +234,28 @@ impl SheetEngine {
             let cols: usize = grids.iter().map(|g| g.cols).sum();
             ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(rows * cols);
+            let mut idx = 0usize;
             for r in 0..rows {
                 for g in &grids {
                     for c in 0..g.cols {
-                        data.push(if r < g.rows {
+                        let cell = if r < g.rows {
                             g.get(r, c).clone()
                         } else {
                             na.clone()
-                        });
+                        };
+                        let hb = cell.heap_bytes();
+                        if hb > 0 {
+                            ctx.charge_array_extra_bytes(hb)?;
+                        }
+                        data.push(cell);
+                        if (idx & 4095) == 4095 {
+                            ctx.charge_steps(1)?;
+                            ctx.poll_deadline();
+                            if ctx.expired() {
+                                return Err(FormulaError::Value);
+                            }
+                        }
+                        idx += 1;
                     }
                 }
             }

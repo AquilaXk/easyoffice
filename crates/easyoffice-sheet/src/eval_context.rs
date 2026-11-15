@@ -38,6 +38,102 @@ impl ClaimedSpillRect {
     }
 }
 
+/// Row-striped spatial set of claimed spill rectangles in the current pass (PD-217).
+/// Uses zero-allocation linear scan up to 16 claims, switching to 64-row stripe buckets
+/// (plus an overflow list for tall rectangles) so `K` spills on one sheet check overlap in O(1).
+#[derive(Debug, Default)]
+pub(crate) struct ClaimedSpillSet {
+    rects: Vec<ClaimedSpillRect>,
+    stripes: FastMap<u64, Vec<u32>>,
+    tall: Vec<u32>,
+}
+
+const CLAIM_LINEAR_CAP: usize = 16;
+const CLAIM_STRIPE_SHIFT: u32 = 6;
+const CLAIM_MAX_STRIPES: u32 = 128;
+
+impl ClaimedSpillSet {
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.rects.is_empty()
+    }
+
+    #[inline]
+    fn index_rect(
+        stripes: &mut FastMap<u64, Vec<u32>>,
+        tall: &mut Vec<u32>,
+        idx: u32,
+        rect: &ClaimedSpillRect,
+    ) {
+        let s0 = rect.r0 >> CLAIM_STRIPE_SHIFT;
+        let s1 = rect.r1 >> CLAIM_STRIPE_SHIFT;
+        if s1 - s0 > CLAIM_MAX_STRIPES {
+            tall.push(idx);
+        } else {
+            let prefix = u64::from(rect.sheet_id) << 32;
+            for s in s0..=s1 {
+                stripes.entry(prefix | u64::from(s)).or_default().push(idx);
+            }
+        }
+    }
+
+    pub(crate) fn push(&mut self, rect: ClaimedSpillRect) {
+        let idx = self.rects.len() as u32;
+        self.rects.push(rect);
+        if self.rects.len() == CLAIM_LINEAR_CAP + 1 {
+            for (i, r) in self.rects.iter().enumerate() {
+                Self::index_rect(&mut self.stripes, &mut self.tall, i as u32, r);
+            }
+        } else if self.rects.len() > CLAIM_LINEAR_CAP {
+            Self::index_rect(&mut self.stripes, &mut self.tall, idx, &rect);
+        }
+    }
+
+    pub(crate) fn has_overlap(
+        &self,
+        sheet_id: u16,
+        r0: u32,
+        c0: u32,
+        r1: u32,
+        c1: u32,
+        owner: PackedCellCoordinate,
+    ) -> bool {
+        if self.rects.len() <= CLAIM_LINEAR_CAP {
+            return self
+                .rects
+                .iter()
+                .any(|c| c.overlaps(sheet_id, r0, c0, r1, c1, owner));
+        }
+        let s0 = r0 >> CLAIM_STRIPE_SHIFT;
+        let s1 = r1 >> CLAIM_STRIPE_SHIFT;
+        if s1 - s0 > CLAIM_MAX_STRIPES {
+            return self
+                .rects
+                .iter()
+                .any(|c| c.overlaps(sheet_id, r0, c0, r1, c1, owner));
+        }
+        if self
+            .tall
+            .iter()
+            .any(|&i| self.rects[i as usize].overlaps(sheet_id, r0, c0, r1, c1, owner))
+        {
+            return true;
+        }
+        let prefix = u64::from(sheet_id) << 32;
+        for s in s0..=s1 {
+            if let Some(bucket) = self.stripes.get(&(prefix | u64::from(s))) {
+                if bucket
+                    .iter()
+                    .any(|&i| self.rects[i as usize].overlaps(sheet_id, r0, c0, r1, c1, owner))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
     pub memo: MemoTable,
@@ -56,7 +152,7 @@ pub(crate) struct EvalContext<'a> {
     /// What the pass decided for the anchors it calculated.
     pub(crate) pending: Vec<Pending>,
     /// Rectangles the pass has given to anchors.
-    pub(crate) claims: Vec<ClaimedSpillRect>,
+    pub(crate) claims: ClaimedSpillSet,
     /// The arrays this pass placed, by sheet and anchor: a `A1#` read in the same pass takes the array itself.
     pub(crate) fresh: FastMap<u64, Arc<Grid>>,
     /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
@@ -82,7 +178,7 @@ impl<'a> EvalContext<'a> {
             lambda_depth: 0,
             spill_budget: None,
             pending: Vec::new(),
-            claims: Vec::new(),
+            claims: ClaimedSpillSet::default(),
             fresh: FastMap::default(),
             dyn_reads: None,
             lookup_cache: LookupCache::default(),
@@ -105,7 +201,7 @@ impl<'a> EvalContext<'a> {
             lambda_depth: 0,
             spill_budget: None,
             pending: Vec::new(),
-            claims: Vec::new(),
+            claims: ClaimedSpillSet::default(),
             fresh: FastMap::default(),
             dyn_reads: None,
             lookup_cache: LookupCache::default(),

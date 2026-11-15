@@ -230,4 +230,27 @@ fn sec_01_dynamic_array_huge_string_fails_closed_without_oom() {
         elapsed2.as_millis() < 500,
         "500ms 이내 종료되어야 함: {elapsed2:?}"
     );
+
+    // 3) LET + VSTACK 기하급수 문자열 복제 증폭 (2^14 = 16,384행 * 32KB = 512 MiB 힙 문자열)
+    wb.set_cell(
+        "Sheet1",
+        "A3",
+        "=LET(s, REPT(\"A\", 32767), b1, VSTACK(s,s), b2, VSTACK(b1,b1), b3, VSTACK(b2,b2), b4, VSTACK(b3,b3), b5, VSTACK(b4,b4), b6, VSTACK(b5,b5), b7, VSTACK(b6,b6), b8, VSTACK(b7,b7), b9, VSTACK(b8,b8), b10, VSTACK(b9,b9), b11, VSTACK(b10,b10), b12, VSTACK(b11,b11), b13, VSTACK(b12,b12), VSTACK(b13,b13))",
+    )
+    .unwrap();
+    let started = Instant::now();
+    let val3 = wb.evaluate_cell("Sheet1", "A3");
+    let elapsed3 = started.elapsed();
+    assert!(
+        matches!(
+            val3,
+            EvaluatedCellValue::Error(crate::FormulaError::Spill)
+                | EvaluatedCellValue::Error(crate::FormulaError::Value)
+        ),
+        "예상: #SPILL! 또는 #VALUE!, 실제: {val3:?}"
+    );
+    assert!(
+        elapsed3.as_millis() < 500,
+        "500ms 이내 종료되어야 함: {elapsed3:?}"
+    );
 }

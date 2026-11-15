@@ -738,9 +738,20 @@ fn sec_03_recalc_session_includes_memo_and_dynamic_in_budget_and_footprint() {
         wb.set_cell("Sheet1", &format!("B{r}"), format!("=A{r}*2"))
             .unwrap();
     }
+    wb.set_cell("Sheet1", "C1", "=INDIRECT(\"A1\")+5").unwrap();
     let mut session = RecalcSession::new(wb).unwrap();
     let _ = session.recalculate();
     let fp = session.footprint();
     assert!(fp.memo_bytes > 0, "memo_bytes가 산입되어야 함");
-    assert!(fp.total_bytes() >= fp.raw_bytes + fp.graph_bytes + fp.ast_bytes + fp.memo_bytes);
+    assert!(fp.dynamic_bytes > 0, "dynamic_bytes가 산입되어야 함");
+    assert_eq!(
+        fp.total_bytes(),
+        fp.raw_bytes
+            + fp.graph_bytes
+            + fp.dynamic_bytes
+            + fp.ast_bytes
+            + fp.rule_bytes
+            + fp.spill_bytes
+            + fp.memo_bytes
+    );
 }

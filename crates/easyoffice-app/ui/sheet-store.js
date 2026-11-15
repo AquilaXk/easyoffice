@@ -49,6 +49,7 @@
     for (const sh of keysA) {
       if (!Object.hasOwn(sheetsB || {}, sh)) return true;
       const mapA = sheetsA[sh] || {}, mapB = sheetsB[sh] || {};
+      if (mapA === mapB) continue;
       const refsA = Object.keys(mapA), refsB = Object.keys(mapB);
       if (refsA.length !== refsB.length) return true;
       for (const ref of refsA) {

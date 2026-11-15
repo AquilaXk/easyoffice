@@ -520,7 +520,7 @@ mod tests {
             id,
             ArchiveObject {
                 type_id,
-                payload,
+                payload: payload.into(),
                 extra: Vec::new(),
             },
         );

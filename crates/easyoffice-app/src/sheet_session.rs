@@ -731,7 +731,7 @@ fn sheet_name_message(problem: SheetNameProblem) -> String {
     }
 }
 
-fn applied_json(res: Applied) -> String {
+pub(crate) fn applied_json(res: Applied) -> String {
     match res {
         Applied::Done(json) => json,
         Applied::Expired => EXPIRED.to_string(),

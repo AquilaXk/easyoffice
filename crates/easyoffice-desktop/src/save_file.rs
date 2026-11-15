@@ -237,28 +237,6 @@ pub(crate) use crate::sensitive_path::{
     ensure_safe_symlink_target, in_sensitive_credential_dir, sensitive_symlink_error,
 };
 
-fn has_symlink_ancestor(path: &Path) -> bool {
-    let mut current = PathBuf::new();
-    for comp in path.components() {
-        current.push(comp);
-        #[cfg(target_os = "macos")]
-        {
-            if current == Path::new("/tmp")
-                || current == Path::new("/var")
-                || current == Path::new("/etc")
-            {
-                continue;
-            }
-        }
-        if let Ok(meta) = fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// The file a save really replaces. A symbolic link is followed: renaming the temporary file over
 /// the link would swap the link for a regular file and leave its target unchanged. A link that
 /// points nowhere is an error, so nothing is created behind it.
@@ -270,19 +248,14 @@ fn resolve_link(path: &Path) -> std::io::Result<PathBuf> {
             Ok(canonical)
         }
         _ => {
-            if in_sensitive_credential_dir(path) {
-                return Err(sensitive_symlink_error());
-            }
+            ensure_safe_symlink_target(path)?;
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
                 if let Ok(canon_parent) = fs::canonicalize(parent) {
                     if in_sensitive_credential_dir(&canon_parent) {
                         return Err(sensitive_symlink_error());
                     }
                     if let Some(file_name) = path.file_name() {
-                        let target = canon_parent.join(file_name);
-                        if has_symlink_ancestor(parent) {
-                            ensure_safe_symlink_target(&target)?;
-                        }
+                        ensure_safe_symlink_target(&canon_parent.join(file_name))?;
                     }
                 }
             }

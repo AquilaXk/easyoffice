@@ -113,21 +113,6 @@ impl Grid {
             .unwrap_or(EvaluatedCellValue::Empty)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn transposed(&self) -> Self {
-        let mut data = Vec::with_capacity(self.data.len());
-        for c in 0..self.cols {
-            for r in 0..self.rows {
-                data.push(self.get(r, c).clone());
-            }
-        }
-        Self {
-            rows: self.cols,
-            cols: self.rows,
-            data,
-        }
-    }
-
     pub(crate) fn transposed_checked(
         &self,
         ctx: &mut crate::EvalContext<'_>,

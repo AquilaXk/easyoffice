@@ -158,21 +158,44 @@ pub fn watch_parent_death() {
         .spawn(move || unsafe {
             let kq = libc::kqueue();
             if kq < 0 {
+                if libc::getppid() != ppid {
+                    libc::_exit(1);
+                }
                 return;
             }
             let ke = libc::kevent {
                 ident: ppid as usize,
                 filter: libc::EVFILT_PROC,
-                flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT,
+                flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT | libc::EV_RECEIPT,
                 fflags: libc::NOTE_EXIT,
                 data: 0,
                 udata: std::ptr::null_mut(),
             };
-            let mut event: libc::kevent = std::mem::zeroed();
-            let ret = libc::kevent(kq, &ke, 1, &mut event, 1, std::ptr::null());
-            libc::close(kq);
-            if ret > 0 {
+            let mut receipt: libc::kevent = std::mem::zeroed();
+            let reg = libc::kevent(kq, &ke, 1, &mut receipt, 1, std::ptr::null());
+            let parent_gone = reg < 0
+                || (reg > 0
+                    && (receipt.flags & libc::EV_ERROR) != 0
+                    && receipt.data == libc::ESRCH as isize)
+                || libc::getppid() != ppid;
+            if parent_gone {
+                libc::close(kq);
                 libc::_exit(1);
+            }
+            let mut event: libc::kevent = std::mem::zeroed();
+            loop {
+                let ret = libc::kevent(kq, std::ptr::null(), 0, &mut event, 1, std::ptr::null());
+                if ret > 0 {
+                    libc::close(kq);
+                    libc::_exit(1);
+                }
+                if ret < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                    libc::close(kq);
+                    if libc::getppid() != ppid {
+                        libc::_exit(1);
+                    }
+                    return;
+                }
             }
         });
 }

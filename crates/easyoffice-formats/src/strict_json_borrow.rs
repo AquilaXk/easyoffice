@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use crate::EasyOfficeError;
 
-pub const MAX_STRICT_JSON_DEPTH: usize = 64;
+pub const MAX_STRICT_JSON_DEPTH: usize = 32;
 const LINEAR_KEY_LIMIT: usize = 16;
 const EXPONENT_CLAMP_MARGIN: usize = 25;
 const MAX_U64_DIGITS: usize = 20;
@@ -167,12 +167,36 @@ impl<'a> StrictJsonBorrow<'a> {
     ) -> Option<&'b str> {
         Self::get_field(entries, key).and_then(Self::as_str)
     }
+
+    pub fn to_scalar_string(&self) -> Option<String> {
+        match self {
+            Self::Null => Some(String::new()),
+            Self::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
+            Self::Number(n) => Some((*n).to_string()),
+            Self::Str(s) => Some(s.as_ref().to_string()),
+            Self::Array(_) | Self::Object(_) => None,
+        }
+    }
+
+    pub fn into_scalar_string(self) -> Option<String> {
+        match self {
+            Self::Null => Some(String::new()),
+            Self::Bool(b) => Some(if b { "true" } else { "false" }.to_string()),
+            Self::Number(n) => Some(n.to_string()),
+            Self::Str(s) => Some(if s.is_empty() {
+                String::new()
+            } else {
+                s.into_owned()
+            }),
+            Self::Array(_) | Self::Object(_) => None,
+        }
+    }
 }
 
 pub fn parse_strict_json_borrowed<'a>(
     input: &'a str,
 ) -> Result<StrictJsonBorrow<'a>, EasyOfficeError> {
-    let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input);
+    let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input).trim();
     let mut cursor = JsonBorrowCursor {
         src: trimmed,
         bytes: trimmed.as_bytes(),
