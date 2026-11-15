@@ -165,7 +165,7 @@ fn hostile_attributes_and_a_huge_totals_formula_in_a_file_are_read_to_a_bound() 
 fn a_custom_formula_is_spelled_as_the_cell_spells_it_and_a_cell_of_only_an_equal_sign_names_no_function(
 ) {
     let (mut cells, t) = totals_table();
-    cells.retain(|(r, c, _)| !(*r == 4 && matches!(*c, 3 | 4 | 5)));
+    cells.retain(|(r, c, _)| !(*r == 4 && (3..=5).contains(c)));
     cells.push((4, 3, "=LET(x,1,x+1)".to_string()));
     cells.push((4, 4, "=XLOOKUP(1,B2:B4,C2:C4)".to_string()));
     cells.push((4, 5, "=".to_string()));
