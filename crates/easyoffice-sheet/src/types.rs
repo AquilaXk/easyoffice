@@ -362,6 +362,14 @@ pub enum EvaluatedCellValue {
 }
 
 impl EvaluatedCellValue {
+    #[inline]
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Text(s) => s.capacity().max(s.len()),
+            _ => 0,
+        }
+    }
+
     pub fn as_number(&self) -> Option<f64> {
         match self {
             Self::Empty => None,

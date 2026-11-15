@@ -103,6 +103,24 @@ impl EvalContext<'_> {
         Ok(())
     }
 
+    /// Reserves additional dynamic-array heap bytes (e.g. text cell capacities) against the
+    /// per-root 128 MiB array budget (`#SPILL!` fail-closed on overflow or exhaustion).
+    #[inline]
+    pub(crate) fn charge_array_extra_bytes(&mut self, bytes: usize) -> Result<(), FormulaError> {
+        if bytes == 0 {
+            return Ok(());
+        }
+        let next = self
+            .array_bytes
+            .checked_add(bytes)
+            .ok_or(FormulaError::Spill)?;
+        if next > crate::array::MAX_ARRAY_BYTES {
+            return Err(FormulaError::Spill);
+        }
+        self.array_bytes = next;
+        Ok(())
+    }
+
     /// Counts `n` root ticks and reads the clock when a multiple of [`POLL_STEPS`] is crossed.
     #[inline]
     fn tick(&mut self, n: u32) {

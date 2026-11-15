@@ -397,7 +397,10 @@ fn the_footprint_counts_cells_text_and_edges_through_edits() {
     let f = s.footprint();
     assert_eq!((f.cells, f.raw_bytes, f.edges), (2, 2 + 5, 1));
     assert!(f.graph_bytes > 0 && f.ast_bytes == 5 * AST_BYTES_PER_FORMULA_BYTE);
-    assert_eq!(f.total_bytes(), f.raw_bytes + f.graph_bytes + f.ast_bytes);
+    assert_eq!(
+        f.total_bytes(),
+        f.raw_bytes + f.graph_bytes + f.ast_bytes + f.memo_bytes
+    );
     s.set_cell("S", at("A1"), "1234").unwrap();
     s.set_cell("S", at("C1"), "abc").unwrap();
     let f = s.footprint();
@@ -724,4 +727,20 @@ fn random_cyclic_edits_match_a_full_recalculation() {
 fn random_edits_soak() {
     random_edit_run(1_000..=1_600, true);
     random_edit_run(2_000..=2_600, false);
+}
+
+#[test]
+fn sec_03_recalc_session_includes_memo_and_dynamic_in_budget_and_footprint() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    for r in 1..=50 {
+        wb.set_cell("Sheet1", &format!("A{r}"), "10").unwrap();
+        wb.set_cell("Sheet1", &format!("B{r}"), format!("=A{r}*2"))
+            .unwrap();
+    }
+    let mut session = RecalcSession::new(wb).unwrap();
+    let _ = session.recalculate();
+    let fp = session.footprint();
+    assert!(fp.memo_bytes > 0, "memo_bytes가 산입되어야 함");
+    assert!(fp.total_bytes() >= fp.raw_bytes + fp.graph_bytes + fp.ast_bytes + fp.memo_bytes);
 }

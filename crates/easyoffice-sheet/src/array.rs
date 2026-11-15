@@ -49,6 +49,19 @@ impl Grid {
         data: Vec<EvaluatedCellValue>,
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(rows, cols)?;
+        for (i, cell) in data.iter().enumerate() {
+            let hb = cell.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+            if (i & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
+            }
+        }
         Ok(Self::from_rows(rows, cols, data))
     }
 
@@ -62,9 +75,23 @@ impl Grid {
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(rows, cols)?;
         let mut data = Vec::with_capacity(rows * cols);
+        let mut idx = 0usize;
         for r in 0..rows {
             for c in 0..cols {
-                data.push(f(r, c));
+                let cell = f(r, c);
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell);
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
             }
         }
         Ok(Self { rows, cols, data })
@@ -86,6 +113,7 @@ impl Grid {
             .unwrap_or(EvaluatedCellValue::Empty)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn transposed(&self) -> Self {
         let mut data = Vec::with_capacity(self.data.len());
         for c in 0..self.cols {
@@ -105,7 +133,31 @@ impl Grid {
         ctx: &mut crate::EvalContext<'_>,
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(self.cols, self.rows)?;
-        Ok(self.transposed())
+        let mut data = Vec::with_capacity(self.data.len());
+        let mut idx = 0usize;
+        for c in 0..self.cols {
+            for r in 0..self.rows {
+                let cell = self.get(r, c).clone();
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell);
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
+            }
+        }
+        Ok(Self {
+            rows: self.cols,
+            cols: self.rows,
+            data,
+        })
     }
 
     /// The rows listed by `keep`, in that order.
@@ -116,8 +168,23 @@ impl Grid {
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(keep.len(), self.cols)?;
         let mut data = Vec::with_capacity(keep.len() * self.cols);
+        let mut idx = 0usize;
         for &r in keep {
-            data.extend_from_slice(&self.data[r * self.cols..(r + 1) * self.cols]);
+            for cell in &self.data[r * self.cols..(r + 1) * self.cols] {
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell.clone());
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
+            }
         }
         Ok(Self {
             rows: keep.len(),
@@ -134,9 +201,23 @@ impl Grid {
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(self.rows, keep.len())?;
         let mut data = Vec::with_capacity(self.rows * keep.len());
+        let mut idx = 0usize;
         for r in 0..self.rows {
             for &c in keep {
-                data.push(self.get(r, c).clone());
+                let cell = self.get(r, c).clone();
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell);
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
             }
         }
         Ok(Self {

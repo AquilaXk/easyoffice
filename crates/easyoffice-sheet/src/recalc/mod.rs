@@ -92,6 +92,10 @@ pub struct Footprint {
     pub rule_bytes: usize,
     /// Estimated heap bytes of the cells that arrays fill (PD-217).
     pub spill_bytes: usize,
+    /// Estimated heap bytes of the evaluation memo table.
+    pub memo_bytes: usize,
+    /// Estimated heap bytes of dynamic range dependencies.
+    pub dynamic_bytes: usize,
 }
 
 impl Footprint {
@@ -102,6 +106,8 @@ impl Footprint {
             .saturating_add(self.ast_bytes)
             .saturating_add(self.rule_bytes)
             .saturating_add(self.spill_bytes)
+            .saturating_add(self.memo_bytes)
+            .saturating_add(self.dynamic_bytes)
     }
 }
 
@@ -345,6 +351,8 @@ impl RecalcSession {
 
     /// Cells, text and graph the session holds (what a caller meters).
     pub fn footprint(&self) -> Footprint {
+        let memo_bytes = self.memo.heap_bytes();
+        let dynamic_bytes = self.dynamic.heap_bytes_estimate();
         Footprint {
             cells: self.wb.sheets().iter().map(|s| s.cells.len()).sum(),
             raw_bytes: self.raw_bytes,
@@ -352,7 +360,7 @@ impl RecalcSession {
             graph_bytes: self
                 .graph
                 .heap_bytes_estimate()
-                .saturating_add(self.dynamic.heap_bytes_estimate()),
+                .saturating_add(dynamic_bytes),
             ast_bytes: self.ast_bytes(),
             rule_bytes: self
                 .rules
@@ -366,6 +374,8 @@ impl RecalcSession {
                 .map(|s| s.spill.filled_count())
                 .sum::<usize>()
                 .saturating_mul(crate::spill::SPILL_CELL_BYTES),
+            memo_bytes,
+            dynamic_bytes,
         }
     }
 
@@ -378,14 +388,10 @@ impl RecalcSession {
 
     fn exceeds_budget(&self) -> bool {
         let graph_bytes = self.graph.heap_bytes_estimate();
-        let ast_bytes = self.ast_bytes();
+        let total = self.footprint().total_bytes();
         self.graph.edge_count() > self.budget.max_edges
             || graph_bytes > self.budget.max_graph_bytes
-            || self
-                .raw_bytes
-                .saturating_add(graph_bytes)
-                .saturating_add(ast_bytes)
-                > self.budget.max_bytes
+            || total > self.budget.max_bytes
     }
 
     /// Number of formula cells and of distinct range references tracked by the graph.

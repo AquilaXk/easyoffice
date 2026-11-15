@@ -335,24 +335,24 @@ fn find_tag_close_gt(bytes: &[u8], start: usize) -> Option<usize> {
 
 #[inline]
 fn find_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut i = start;
-    while i + 2 < bytes.len() {
-        if bytes[i] == b'-' && bytes[i + 1] == b'-' && bytes[i + 2] == b'>' {
-            return Some(i + 3);
+    let mut cursor = start;
+    while let Some(gt) = crate::XmlSanitizer::find_byte_swar(bytes, cursor, b'>') {
+        if gt >= start + 2 && bytes[gt - 1] == b'-' && bytes[gt - 2] == b'-' {
+            return Some(gt + 1);
         }
-        i += 1;
+        cursor = gt + 1;
     }
     None
 }
 
 #[inline]
 fn find_cdata_end(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut i = start;
-    while i + 2 < bytes.len() {
-        if bytes[i] == b']' && bytes[i + 1] == b']' && bytes[i + 2] == b'>' {
-            return Some(i + 3);
+    let mut cursor = start;
+    while let Some(gt) = crate::XmlSanitizer::find_byte_swar(bytes, cursor, b'>') {
+        if gt >= start + 2 && bytes[gt - 1] == b']' && bytes[gt - 2] == b']' {
+            return Some(gt + 1);
         }
-        i += 1;
+        cursor = gt + 1;
     }
     None
 }
@@ -364,16 +364,12 @@ fn find_valid_open_tag(bytes: &[u8], start: usize, tag_bytes: &[u8]) -> Option<(
     while pos + need < bytes.len() {
         let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
         if bytes[lt..].starts_with(b"<!--") {
-            if let Some(c_end) = find_comment_end(bytes, lt + 4) {
-                pos = c_end;
-                continue;
-            }
+            pos = find_comment_end(bytes, lt + 4)?;
+            continue;
         }
         if bytes[lt..].starts_with(b"<![CDATA[") {
-            if let Some(c_end) = find_cdata_end(bytes, lt + 9) {
-                pos = c_end;
-                continue;
-            }
+            pos = find_cdata_end(bytes, lt + 9)?;
+            continue;
         }
         let after_tag = lt + need;
         if after_tag >= bytes.len() {
@@ -401,16 +397,12 @@ fn find_matching_close_tag(
     while scan < bytes.len() {
         let lt = crate::XmlSanitizer::find_byte_swar(bytes, scan, b'<')?;
         if bytes[lt..].starts_with(b"<!--") {
-            if let Some(c_end) = find_comment_end(bytes, lt + 4) {
-                scan = c_end;
-                continue;
-            }
+            scan = find_comment_end(bytes, lt + 4)?;
+            continue;
         }
         if bytes[lt..].starts_with(b"<![CDATA[") {
-            if let Some(c_end) = find_cdata_end(bytes, lt + 9) {
-                scan = c_end;
-                continue;
-            }
+            scan = find_cdata_end(bytes, lt + 9)?;
+            continue;
         }
         if lt + close_prefix_len < bytes.len()
             && bytes[lt + 1] == b'/'
@@ -900,5 +892,29 @@ mod tests {
             assert_eq!(decoded, s);
         }
         assert_eq!(cursor, buf.len());
+    }
+
+    #[test]
+    fn test_sec_02_unclosed_comment_and_cdata_fail_closed_instantly() {
+        use std::time::Instant;
+        let unclosed = "<!--".repeat(100_000);
+        let t0 = Instant::now();
+        let res = find_valid_open_tag(unclosed.as_bytes(), 0, b"w:tbl");
+        let elapsed = t0.elapsed();
+        assert_eq!(res, None);
+        assert!(
+            elapsed.as_millis() < 50,
+            "미종결 XML 주석 탐색은 50ms 미만이어야 함: {elapsed:?}"
+        );
+
+        let unclosed_cdata = "<![CDATA[".repeat(100_000);
+        let t1 = Instant::now();
+        let res_cdata = find_valid_open_tag(unclosed_cdata.as_bytes(), 0, b"w:tbl");
+        let elapsed_cdata = t1.elapsed();
+        assert_eq!(res_cdata, None);
+        assert!(
+            elapsed_cdata.as_millis() < 50,
+            "미종결 CDATA 탐색은 50ms 미만이어야 함: {elapsed_cdata:?}"
+        );
     }
 }

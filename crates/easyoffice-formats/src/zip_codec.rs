@@ -458,6 +458,18 @@ impl ZipArchiveCodec {
 
         let mut totals = [0_u64; ZIP_BUDGET_SLOTS];
 
+        struct ParsedEntry {
+            path: String,
+            method: u16,
+            expected_crc: u32,
+            uncomp_size: usize,
+            data_start: usize,
+            data_end: usize,
+        }
+
+        let mut parsed_entries = Vec::with_capacity(raw_records.len());
+        let mut spans = Vec::with_capacity(raw_records.len());
+
         for (path, method, expected_crc, comp_size, uncomp_size, local_offset) in raw_records {
             if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
@@ -534,24 +546,49 @@ impl ZipArchiveCodec {
                 )));
             }
 
-            if !path_filter(&path) {
+            spans.push((local_offset, data_end));
+            parsed_entries.push(ParsedEntry {
+                path,
+                method,
+                expected_crc,
+                uncomp_size,
+                data_start,
+                data_end,
+            });
+        }
+
+        spans.sort_unstable_by_key(|&(start, _)| start);
+        for i in 1..spans.len() {
+            let prev_end = spans[i - 1].1;
+            let next_start = spans[i].0;
+            if prev_end > next_start {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "ZIP 로컬 엔트리 구간 중첩(오버래핑 ZIP) 감지".to_string(),
+                ));
+            }
+        }
+
+        for entry in parsed_entries {
+            if !path_filter(&entry.path) {
                 continue;
             }
 
-            let slot = policy.slot(&path);
+            let slot = policy.slot(&entry.path);
             let (max_single, max_total) = policy.limits(slot);
-            let compressed_slice = &bytes[data_start..data_end];
-            let payload = if method == Self::METHOD_STORE {
+            let compressed_slice = &bytes[entry.data_start..entry.data_end];
+            let payload = if entry.method == Self::METHOD_STORE {
                 compressed_slice.to_vec()
             } else {
                 let decompressed = crate::deflate::inflate_raw_sized(
                     compressed_slice,
                     max_single as usize,
-                    uncomp_size,
+                    entry.uncomp_size,
                 )?;
-                if decompressed.len() != uncomp_size {
+                if decompressed.len() != entry.uncomp_size {
                     return Err(EasyOfficeError::CorruptedContainer(format!(
-                        "Deflate 엔트리({path}) 복원 크기 불일치 (expected: {uncomp_size}, actual: {})",
+                        "Deflate 엔트리({}) 복원 크기 불일치 (expected: {}, actual: {})",
+                        entry.path,
+                        entry.uncomp_size,
                         decompressed.len()
                     )));
                 }
@@ -567,14 +604,15 @@ impl ZipArchiveCodec {
             }
 
             let actual_crc = Self::crc32(&payload);
-            if actual_crc != expected_crc {
+            if actual_crc != entry.expected_crc {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "ZIP 엔트리({path}) CRC-32 체크섬 불일치 (expected: {expected_crc:#010x}, actual: {actual_crc:#010x})"
+                    "ZIP 엔트리({}) CRC-32 체크섬 불일치 (expected: {:#010x}, actual: {:#010x})",
+                    entry.path, entry.expected_crc, actual_crc
                 )));
             }
 
             if visit(ZipArchiveEntry {
-                path,
+                path: entry.path,
                 data: payload,
                 crc32: actual_crc,
             }) {
@@ -897,6 +935,38 @@ mod tests {
         assert_eq!(
             PdfSerializer::parse(&PdfSerializer::serialize(&pdf_doc)).unwrap(),
             pdf_doc
+        );
+    }
+
+    #[test]
+    fn test_sec_05_overlapping_zip_entries_rejected() {
+        let entries = vec![
+            ("file1.txt".to_string(), b"Hello World".to_vec()),
+            ("file2.txt".to_string(), b"Foo Bar Baz".to_vec()),
+        ];
+        let valid_zip = ZipArchiveCodec::pack(&entries).unwrap();
+        let eocd = valid_zip
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .unwrap();
+        let cd_offset =
+            u32::from_le_bytes(valid_zip[eocd + 16..eocd + 20].try_into().unwrap()) as usize;
+        let mut evil = valid_zip.clone();
+        let cd2 = evil[cd_offset + 4..]
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap()
+            + cd_offset
+            + 4;
+        evil[cd2 + 42..cd2 + 46].copy_from_slice(&0u32.to_le_bytes());
+        let nlen = u16::from_le_bytes(evil[cd_offset + 28..cd_offset + 30].try_into().unwrap());
+        evil[cd2 + 28..cd2 + 30].copy_from_slice(&nlen.to_le_bytes());
+        let name1 = &valid_zip[cd_offset + 46..cd_offset + 46 + nlen as usize];
+        evil[cd2 + 46..cd2 + 46 + nlen as usize].copy_from_slice(name1);
+        let res = ZipArchiveCodec::unpack(&evil, &crate::ZipSecurityPolicy::default());
+        assert!(
+            matches!(res, Err(EasyOfficeError::SecurityViolation(_))),
+            "중첩 ZIP은 SecurityViolation이어야 함"
         );
     }
 }

@@ -116,7 +116,19 @@ impl SheetEngine {
                 .iter()
                 .map(|g| Val::scalar(g.data[i].clone()))
                 .collect();
-            data.push(element(self.apply_val(&f, call_args, ctx, depth + 1)?));
+            let cell = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
+            let hb = cell.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+            data.push(cell);
+            if (i & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
+            }
         }
         Ok(Val::grid(Grid::from_rows(rows, cols, data)))
     }
@@ -162,11 +174,18 @@ impl SheetEngine {
             Some(v) => (v, 0),
             None => (grid.data[0].clone(), 1),
         };
-        for item in &grid.data[start..] {
+        for (i, item) in grid.data[start..].iter().enumerate() {
             let call_args = vec![Val::scalar(acc), Val::scalar(item.clone())];
             acc = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
             if let V::Error(e) = acc {
                 return Err(e);
+            }
+            if (i & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
             }
         }
         Ok(Val::scalar(acc))
@@ -186,15 +205,30 @@ impl SheetEngine {
         let start = usize::from(initial.is_none());
         let mut data = Vec::with_capacity(grid.data.len());
         if initial.is_none() {
+            let hb = acc.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
             data.push(acc.clone());
         }
-        for item in &grid.data[start..] {
+        for (i, item) in grid.data[start..].iter().enumerate() {
             let call_args = vec![Val::scalar(acc), Val::scalar(item.clone())];
             acc = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
             if let V::Error(e) = acc {
                 return Err(e);
             }
+            let hb = acc.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
             data.push(acc.clone());
+            if (i & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
+            }
         }
         Ok(Val::grid(Grid::from_rows(grid.rows, grid.cols, data)))
     }
@@ -226,12 +260,19 @@ impl SheetEngine {
             } else {
                 grid.take_cols_checked(ctx, &[i])?
             };
-            data.push(element(self.apply_val(
-                &f,
-                vec![Val::grid(line)],
-                ctx,
-                depth + 1,
-            )?));
+            let cell = element(self.apply_val(&f, vec![Val::grid(line)], ctx, depth + 1)?);
+            let hb = cell.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+            data.push(cell);
+            if (i & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
+            }
         }
         Ok(Val::grid(if by_row {
             Grid::from_rows(lines, 1, data)
@@ -263,13 +304,27 @@ impl SheetEngine {
         ctx.charge_array_cells(rows, cols)?;
         let f = self.lambda_arg(&args[2], env, ctx, depth)?;
         let mut data = Vec::with_capacity(rows * cols);
+        let mut idx = 0usize;
         for r in 1..=rows {
             for c in 1..=cols {
                 let call_args = vec![
                     Val::scalar(V::Number(r as f64)),
                     Val::scalar(V::Number(c as f64)),
                 ];
-                data.push(element(self.apply_val(&f, call_args, ctx, depth + 1)?));
+                let cell = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell);
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
             }
         }
         Ok(Val::grid(Grid::from_rows(rows, cols, data)))

@@ -483,6 +483,7 @@ impl SheetEngine {
         let (rows, cols) = broadcast_dims(&present);
         ctx.charge_array_cells(rows, cols)?;
         let mut data = Vec::with_capacity(rows * cols);
+        let mut idx = 0usize;
         for r in 0..rows {
             for c in 0..cols {
                 for (slot, grid) in call_args.iter_mut().zip(&grids) {
@@ -490,7 +491,20 @@ impl SheetEngine {
                         *slot = literal(&broadcast_at(g, r, c));
                     }
                 }
-                data.push(self.eval_func_ctx(name, &call_args, ctx, depth));
+                let val = self.eval_func_ctx(name, &call_args, ctx, depth);
+                let hb = val.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(val);
+                if (idx & 4095) == 4095 {
+                    ctx.charge_steps(4096)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+                idx += 1;
             }
         }
         Ok(Val::grid(Grid::from_rows(rows, cols, data)))
@@ -549,13 +563,27 @@ fn binary_grid(
     let (rows, cols) = broadcast_dims(&[l, r]);
     ctx.charge_array_cells(rows, cols)?;
     let mut data = Vec::with_capacity(rows * cols);
+    let mut idx = 0usize;
     for i in 0..rows {
         for j in 0..cols {
             let (a, b) = (broadcast_at(l, i, j), broadcast_at(r, i, j));
-            data.push(match (a, b) {
+            let val = match (a, b) {
                 (V::Error(e), _) | (_, V::Error(e)) => V::Error(e),
                 (a, b) => SheetEngine::apply_binary_op(op, a, b),
-            });
+            };
+            let hb = val.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+            data.push(val);
+            if (idx & 4095) == 4095 {
+                ctx.charge_steps(4096)?;
+                ctx.poll_deadline();
+                if ctx.expired() {
+                    return Err(FormulaError::Value);
+                }
+            }
+            idx += 1;
         }
     }
     Ok(Grid::from_rows(rows, cols, data))

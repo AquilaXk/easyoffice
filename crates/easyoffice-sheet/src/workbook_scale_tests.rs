@@ -180,3 +180,54 @@ fn one_shared_evaluation_gives_the_values_of_one_evaluation_per_sheet() {
         assert_eq!(t, a, "{sheet}!{a1}");
     }
 }
+
+#[test]
+fn sec_01_dynamic_array_huge_string_fails_closed_without_oom() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    // 1) =EXPAND("x", 2000, 1000, REPT("A", 32767))
+    wb.set_cell(
+        "Sheet1",
+        "A1",
+        "=EXPAND(\"x\", 2000, 1000, REPT(\"A\", 32767))",
+    )
+    .unwrap();
+    let started = Instant::now();
+    let val = wb.evaluate_cell("Sheet1", "A1");
+    let elapsed = started.elapsed();
+    assert!(
+        matches!(
+            val,
+            EvaluatedCellValue::Error(crate::FormulaError::Spill)
+                | EvaluatedCellValue::Error(crate::FormulaError::Value)
+        ),
+        "예상: #SPILL! 또는 #VALUE!, 실제: {val:?}"
+    );
+    assert!(
+        elapsed.as_millis() < 500,
+        "500ms 이내 종료되어야 함: {elapsed:?}"
+    );
+
+    // 2) =MAKEARRAY(1000, 1000, LAMBDA(r, c, r & REPT("A", 32760)))
+    wb.set_cell(
+        "Sheet1",
+        "A2",
+        "=MAKEARRAY(1000, 1000, LAMBDA(r, c, r & REPT(\"A\", 32760)))",
+    )
+    .unwrap();
+    let started = Instant::now();
+    let val2 = wb.evaluate_cell("Sheet1", "A2");
+    let elapsed2 = started.elapsed();
+    assert!(
+        matches!(
+            val2,
+            EvaluatedCellValue::Error(crate::FormulaError::Spill)
+                | EvaluatedCellValue::Error(crate::FormulaError::Value)
+        ),
+        "예상: #SPILL! 또는 #VALUE!, 실제: {val2:?}"
+    );
+    assert!(
+        elapsed2.as_millis() < 500,
+        "500ms 이내 종료되어야 함: {elapsed2:?}"
+    );
+}

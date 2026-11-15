@@ -122,12 +122,18 @@ type RadixLeaf<P> = [Option<Box<P>>; LEAF_LEN];
 /// one leaf group instead of a flat 32k-slot directory.
 struct RadixDir<P> {
     groups: Vec<Option<Box<RadixLeaf<P>>>>,
+    allocated_groups: usize,
+    allocated_pages: usize,
 }
 
 impl<P> RadixDir<P> {
     #[inline]
     fn new() -> Self {
-        Self { groups: Vec::new() }
+        Self {
+            groups: Vec::new(),
+            allocated_groups: 0,
+            allocated_pages: 0,
+        }
     }
 
     #[inline]
@@ -149,9 +155,26 @@ impl<P> RadixDir<P> {
         if self.groups.len() <= root_idx {
             self.groups.resize_with(root_idx + 1, || None);
         }
-        let leaf =
-            self.groups[root_idx].get_or_insert_with(|| Box::new(std::array::from_fn(|_| None)));
-        leaf[page & LEAF_MASK].get_or_insert_with(init)
+        let leaf_slot = &mut self.groups[root_idx];
+        if leaf_slot.is_none() {
+            *leaf_slot = Some(Box::new(std::array::from_fn(|_| None)));
+            self.allocated_groups += 1;
+        }
+        let leaf = leaf_slot.as_mut().unwrap();
+        let slot = &mut leaf[page & LEAF_MASK];
+        if slot.is_none() {
+            *slot = Some(init());
+            self.allocated_pages += 1;
+        }
+        slot.as_mut().unwrap()
+    }
+
+    #[inline]
+    fn heap_bytes(&self) -> usize {
+        let root_cap = self.groups.capacity() * std::mem::size_of::<Option<Box<RadixLeaf<P>>>>();
+        let leaf_bytes = self.allocated_groups * (std::mem::size_of::<RadixLeaf<P>>() + 16);
+        let page_bytes = self.allocated_pages * (std::mem::size_of::<P>() + 16);
+        root_cap + leaf_bytes + page_bytes
     }
 
     #[cfg(test)]
@@ -161,7 +184,7 @@ impl<P> RadixDir<P> {
 
     #[cfg(test)]
     fn allocated_groups(&self) -> usize {
-        self.groups.iter().filter(|g| g.is_some()).count()
+        self.allocated_groups
     }
 }
 
@@ -201,6 +224,7 @@ pub struct MemoTable {
     free: Vec<u32>,
     overflow: FastMap<u64, EvaluatedCellValue>,
     visiting_overflow: FastMap<u64, ()>,
+    text_bytes: usize,
 }
 
 impl MemoTable {
@@ -212,6 +236,7 @@ impl MemoTable {
             free: Vec::new(),
             overflow: FastMap::default(),
             visiting_overflow: FastMap::default(),
+            text_bytes: 0,
         }
     }
 
@@ -262,24 +287,43 @@ impl MemoTable {
         coord: PackedCellCoordinate,
         value: EvaluatedCellValue,
     ) {
+        let val_hb = value.heap_bytes();
         match self.dense(sheet_id, coord) {
             Some((page, slot)) => {
                 let existing = self.page_mut(page).slots[slot];
                 if existing != 0 {
+                    let old_hb = self.arena[existing as usize - 1].heap_bytes();
+                    self.text_bytes = self
+                        .text_bytes
+                        .saturating_sub(old_hb)
+                        .saturating_add(val_hb);
                     self.arena[existing as usize - 1] = value;
                 } else if let Some(reused) = self.free.pop() {
+                    let old_hb = self.arena[reused as usize - 1].heap_bytes();
+                    self.text_bytes = self
+                        .text_bytes
+                        .saturating_sub(old_hb)
+                        .saturating_add(val_hb);
                     self.arena[reused as usize - 1] = value;
                     self.page_mut(page).slots[slot] = reused;
                 } else {
                     // The step budget keeps memoized cells far below u32::MAX.
                     let next = u32::try_from(self.arena.len() + 1).unwrap_or(u32::MAX);
+                    self.text_bytes = self.text_bytes.saturating_add(val_hb);
                     self.arena.push(value);
                     self.page_mut(page).slots[slot] = next;
                 }
             }
             None => {
-                self.overflow
-                    .insert(PackedWorkbookCoord::new(sheet_id, coord).0, value);
+                let key = PackedWorkbookCoord::new(sheet_id, coord).0;
+                if let Some(old) = self.overflow.insert(key, value) {
+                    self.text_bytes = self
+                        .text_bytes
+                        .saturating_sub(old.heap_bytes())
+                        .saturating_add(val_hb);
+                } else {
+                    self.text_bytes = self.text_bytes.saturating_add(val_hb);
+                }
             }
         }
     }
@@ -299,15 +343,43 @@ impl MemoTable {
                     return None;
                 }
                 self.free.push(index);
-                Some(std::mem::replace(
+                let old = std::mem::replace(
                     &mut self.arena[index as usize - 1],
                     EvaluatedCellValue::Empty,
-                ))
+                );
+                self.text_bytes = self.text_bytes.saturating_sub(old.heap_bytes());
+                Some(old)
             }
-            None => self
-                .overflow
-                .remove(&PackedWorkbookCoord::new(sheet_id, coord).0),
+            None => {
+                let key = PackedWorkbookCoord::new(sheet_id, coord).0;
+                let old = self.overflow.remove(&key);
+                if let Some(ref val) = old {
+                    self.text_bytes = self.text_bytes.saturating_sub(val.heap_bytes());
+                }
+                old
+            }
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.pages = RadixDir::new();
+        self.arena.clear();
+        self.free.clear();
+        self.overflow.clear();
+        self.visiting_overflow.clear();
+        self.text_bytes = 0;
+    }
+
+    /// Returns the estimated total heap bytes allocated by the memo table.
+    #[inline]
+    pub fn heap_bytes(&self) -> usize {
+        let pages_bytes = self.pages.heap_bytes();
+        let arena_bytes = self.arena.capacity() * std::mem::size_of::<EvaluatedCellValue>();
+        let free_bytes = self.free.capacity() * std::mem::size_of::<u32>();
+        let overflow_bytes = self.overflow.capacity()
+            * (std::mem::size_of::<u64>() + std::mem::size_of::<EvaluatedCellValue>() + 16);
+        let visiting_bytes = self.visiting_overflow.capacity() * (std::mem::size_of::<u64>() + 16);
+        pages_bytes + arena_bytes + free_bytes + overflow_bytes + visiting_bytes + self.text_bytes
     }
 
     pub fn insert(&mut self, key: PackedWorkbookCoord, value: EvaluatedCellValue) {
