@@ -93,7 +93,7 @@ fn a_request_without_a_session_takes_the_hidden_rows() {
 fn a_save_calculates_the_subtotals_without_the_hidden_rows() {
     // The sheet's layout says row 2 is hidden by the filter; the cached value of the formula in the file is the filtered sum.
     let payload = r#"{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"표","sheets":[{"name":"S",
-      "cells":[{"ref":"A1","raw":"440"},{"ref":"A2","raw":"285"},{"ref":"A3","raw":"215"},{"ref":"B1","raw":"=SUBTOTAL(109,A1:A3)"}],
+      "cells":[{"ref":"A1","raw":"440"},{"ref":"A2","raw":"285"},{"ref":"A3","raw":"215"},{"ref":"B1","raw":"=SUBTOTAL(109,A1:A3)"},{"ref":"B2","raw":"=LAMBDA(r,SUBTOTAL(109,r))(A1:A3)"}],
       "hiddenRows":[[2,2]]}]}"#;
     let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
     let bytes =
@@ -111,6 +111,10 @@ fn a_save_calculates_the_subtotals_without_the_hidden_rows() {
     assert!(
         xml.contains("<f>SUBTOTAL(109,A1:A3)</f><v>655</v>"),
         "the user hid row 2: 109 leaves it out, {xml}"
+    );
+    assert!(
+        xml.contains("<v>655</v>") && xml.matches("<v>655</v>").count() == 2,
+        "a lambda around the subtotal too, {xml}"
     );
 }
 

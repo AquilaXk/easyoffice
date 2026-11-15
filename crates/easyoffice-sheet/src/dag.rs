@@ -37,6 +37,11 @@ pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
             expr_contains_subtotal(inner)
         }
         Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
+        // A call of a lambda (a defined name's expanded body is a shared tree, an immediate lambda is the callee itself)
+        // and the arguments it is given (PD-232).
+        Expr::Call(call) => {
+            expr_contains_subtotal(&call.callee) || call.args.iter().any(expr_contains_subtotal)
+        }
         Expr::Shared(shared) => expr_contains_subtotal(&shared.expr),
         _ => false,
     }

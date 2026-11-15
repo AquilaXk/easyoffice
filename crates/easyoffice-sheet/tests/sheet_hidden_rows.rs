@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod dynamic_support;
-use dynamic_support::{new_empty_model, Model};
+use dynamic_support::{new_empty_model, DefinedNameEntry, Model};
 use easyoffice_sheet::{Axis, AxisBudget, AxisEdit, EditKind, WorkbookEngine, WorkbookEvalTarget};
 
 /// Six regional totals in A1:A6 (1,625 together, 1,125 without the second and third) with every function on them.
@@ -208,4 +208,76 @@ fn aggregate_options_that_ignore_hidden_rows_leave_out_both_kinds() {
     hide(&mut m, &[(0, 0)], &[(3, 3)]);
     // Option 5 ignores the hidden row 1 and the filtered row 4; option 4 ignores nothing.
     assert_eq!(shown(&m, &["F1", "F2", "F3"]), ["875", "1625", "285"]);
+}
+
+#[test]
+fn a_subtotal_inside_a_lambda_call_follows_the_hidden_rows_too() {
+    let mut m = book();
+    m.new_defined_name(DefinedNameEntry::new("SV", "=LAMBDA(r,SUBTOTAL(109,r))"))
+        .unwrap();
+    m._set("B1", "=SV(A1:A6)");
+    m._set("B2", "=LAMBDA(r,SUBTOTAL(109,r))(A1:A6)");
+    m._set("B3", "=LAMBDA(x,x)(SUBTOTAL(109,A1:A6))");
+    m._set("B4", "=SUBTOTAL(109,A1:A6)");
+    m._set("B5", "=ROUND(SUBTOTAL(109,A1:A6),0)");
+    m._set("B6", "=LET(r,A1:A6,SUBTOTAL(109,r))");
+    m._set("B7", "=SUM(A1:A6)");
+    m._set("B8", "=SUBTOTAL(9,A1:A6)");
+    m.evaluate();
+    let cells = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"];
+    assert_eq!(shown(&m, &cells), ["1625"; 8]);
+    hide(&mut m, &[], &[(1, 2)]);
+    assert_eq!(
+        shown(&m, &cells),
+        ["1125", "1125", "1125", "1125", "1125", "1125", "1625", "1125"]
+    );
+    hide(&mut m, &[], &[]);
+    assert_eq!(shown(&m, &cells), ["1625"; 8]);
+}
+
+/// Makes `SV` the only defined name, with `body`.
+fn define(m: &mut Model, body: &str) {
+    let name = easyoffice_formats::DefinedName {
+        name: "SV".to_string(),
+        scope: None,
+        refers_to: body.to_string(),
+        comment: String::new(),
+        hidden: false,
+    };
+    m.session().set_names(&[name]).unwrap();
+}
+
+#[test]
+fn a_name_that_changes_to_a_subtotal_body_and_back_joins_and_leaves_the_formulas_that_follow_the_hidden_rows(
+) {
+    let mut m = book();
+    define(&mut m, "=LAMBDA(r,SUM(r))");
+    m._set("B1", "=SV(A1:A6)");
+    m.evaluate();
+    hide(&mut m, &[], &[(1, 2)]);
+    assert_eq!(
+        m._get_text("B1"),
+        "1625",
+        "a SUM does not know the hidden rows"
+    );
+    // The same name with a SUBTOTAL body: the formula is compiled again and the hidden rows count.
+    define(&mut m, "=LAMBDA(r,SUBTOTAL(109,r))");
+    m.evaluate();
+    assert_eq!(m._get_text("B1"), "1125");
+    hide(&mut m, &[], &[]);
+    assert_eq!(m._get_text("B1"), "1625");
+    hide(&mut m, &[], &[(1, 2)]);
+    assert_eq!(m._get_text("B1"), "1125");
+    // And back to a body without one: the hidden rows no longer concern the cell, so the pass has nothing of it to calculate.
+    define(&mut m, "=LAMBDA(r,SUM(r))");
+    m.evaluate();
+    assert_eq!(m._get_text("B1"), "1625");
+    hide(&mut m, &[], &[]);
+    assert!(!m
+        .last
+        .as_ref()
+        .unwrap()
+        .changed
+        .iter()
+        .any(|c| c.coord.col() == 1 && c.coord.row() == 0));
 }
