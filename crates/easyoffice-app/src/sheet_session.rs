@@ -379,6 +379,13 @@ impl Registry {
             format!("{{\"session\":\"{id}\",\"staged\":{}}}", changes.len())
         };
         let after = session.footprint();
+        if !self.fits(id, after) {
+            drop(session);
+            lock(&self.inner).sessions.remove(id);
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "시트 재계산 후 세션 메모리 한도를 넘었습니다.".to_string(),
+            ));
+        }
         drop(session);
         self.record_footprint(id, after);
         Ok(Applied::Done(json))
@@ -674,7 +681,15 @@ pub fn close_sheet_sessions_of(owner: &str) -> usize {
 /// rules or that another sheet has, or the deletion of the last sheet.
 fn check_sheet_op(session: &RecalcSession, op: &SheetOp) -> Result<(), EasyOfficeError> {
     let names: Vec<&str> = session.sheet_names().collect();
-    let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+    let same = |a: &str, b: &str| {
+        if a.is_ascii() && b.is_ascii() {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a.chars()
+                .flat_map(char::to_lowercase)
+                .eq(b.chars().flat_map(char::to_lowercase))
+        }
+    };
     if !names.iter().any(|n| same(n, op.sheet())) {
         return Err(EasyOfficeError::InvalidArgument(format!(
             "시트를 찾을 수 없습니다: {}",
@@ -775,42 +790,10 @@ fn parse_changes(
 }
 
 impl EasyOfficeIpcRouter {
-    /// Handles an `evaluate_sheet` payload that carries `sessionAction` (the command set stays at
-    /// the 15 commands of the IPC contract, as for the ribbon history in PD-069):
-    /// - `open` `{sheets:[names]}` -> `{session}`; the sheet set is fixed for the session.
-    /// - `apply` `{session, changes:[{sheet,cell,value}], recalc?}` -> the formula cells whose value
-    ///   changed; `recalc:false` only stages the edits (chunked loading of a big sheet).
-    /// - `rules` `{session, sheet, rules:{cf,dv}}` -> `{cf}`: the packed appearance of every
-    ///   formatted cell of the sheet. Later `apply` answers carry `cf` for the cells whose
-    ///   appearance changed (PD-171).
-    /// - `structure` `{session, sheet, axis, op, at, count, ...}` -> the rewritten formulas and the
-    ///   moved layout and rules (see `sheet_structure_ipc`).
-    /// - `names` `{session, names}` -> the defined names of the session and the formulas that changed,
-    ///   `nameCheck` `{sheets, names, candidate, replace?}` -> `{problem}` (see `sheet_names_ipc`, PD-214).
-    /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
-    /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
-    ///   session needed, see `sheet_pivot_ipc`).
-    /// - `format` `{items:[{code, values}]}` -> the text of each formatted cell (no session
-    ///   needed, see `sheet_format_ipc`, PD-193).
-    /// - `filter` `{op: "apply"|"values", filter, data, col?, query?}` -> the rows the conditions
-    ///   hide, or the distinct values of a column (no session needed, see `sheet_filter_ipc`,
-    ///   PD-198).
-    /// - `sort` `{keys:[{asc, values}], caseSensitive?}` -> `{order}`, the stable row order of the
-    ///   keys (no session needed, see `sheet_sort_ipc`, PD-203).
-    /// - `protectHash` `{password, kind}` -> `{pwd}` and `protectVerify` `{pwd, password}` -> `{ok}` (no
-    ///   session needed, see `sheet_protect_ipc`, PD-216).
-    /// - `merges` `{session, sheet, merges}` -> the recalculation answer: `merges` is `["A1:B2", ...]` and an
-    ///   array that would cross one is `#SPILL!` (PD-222).
-    /// - `hiddenRows` `{session, sheet, hiddenRows}` -> the recalculation answer: `hiddenRows` is `{"hidden": [[first, last], ...],
-    ///   "filtered": [...]}` (1-based), the rows a user and a filter hid; `SUBTOTAL` and `AGGREGATE` leave them out and only the
-    ///   formulas that use them are calculated again (PD-232).
-    /// - `linkTarget` `{session | cells.., sheet, cell, formula}` -> `{target}`, `{error}` or `{none}`: the address a
-    ///   `HYPERLINK` formula cell opens (PD-223, see `sheet_link_target_ipc`).
-    /// - `tableColumn` `{table, from, to, tables, formulas, names?}` -> `{rewrites, names}`: the formulas that name a
-    ///   renamed column of a table, written with the new name (no session needed, see `sheet_table_column_ipc`,
-    ///   PD-225). With `op` `rename` (`{table, to}`) or `range` (`{table}`) the formulas that name a renamed table
-    ///   or a table turned into a range (PD-231).
-    /// - `close` `{session}` -> `{closed}`.
+    /// Handles an `evaluate_sheet` payload that carries `sessionAction` (IPC contract actions:
+    /// open, apply, rules, locks, merges, tables, hiddenRows, tableColumn, structure, names,
+    /// nameCheck, nameValues, linkTarget, sheetRefs, validate, pivot, format, filter, sort,
+    /// protectHash, protectVerify, close).
     pub(crate) fn handle_sheet_session_action(
         action: &str,
         entries: &[(String, StrictJsonValue)],
@@ -889,9 +872,11 @@ impl EasyOfficeIpcRouter {
             StrictJsonValue::get_field(entries, "recalc"),
             Some(StrictJsonValue::Bool(false))
         );
-        registry()
-            .apply(id, owner, &changes, recalc, Instant::now())
-            .map(applied_json)
+        match registry().apply(id, owner, &changes, recalc, Instant::now()) {
+            Ok(applied) => Ok(applied_json(applied)),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED.to_string()),
+            Err(err) => Err(err),
+        }
     }
 
     fn sheet_session_rules(

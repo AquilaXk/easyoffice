@@ -29,21 +29,11 @@
   function styleFlagsMask(s) {
     if (!s) return 0;
     const td = s.textDecoration || "";
-    const bold =
-      s.bold ||
-      s.fontWeight === "600" ||
-      s.fontWeight === "700" ||
-      s.fontWeight === "bold" ||
-      Number(s.fontWeight) >= 600;
+    const bold = s.bold || s.fontWeight === "600" || s.fontWeight === "700" || s.fontWeight === "bold" || Number(s.fontWeight) >= 600;
     const italic = s.italic || s.fontStyle === "italic";
     const underline = s.underline || td.includes("underline");
     const strike = s.strike || td.includes("line-through");
-    return (
-      (bold ? 1 : 0) |
-      (italic ? 2 : 0) |
-      (underline ? 4 : 0) |
-      (strike ? 8 : 0)
-    );
+    return (bold ? 1 : 0) | (italic ? 2 : 0) | (underline ? 4 : 0) | (strike ? 8 : 0);
   }
 
   function cellStyleChanged(sa, sb) {
@@ -54,25 +44,16 @@
   }
 
   function sheetCellDataChanged(sheetsA, sheetsB, includeStyle = true) {
-    const keysA = Object.keys(sheetsA || {});
-    const keysB = Object.keys(sheetsB || {});
+    const keysA = Object.keys(sheetsA || {}), keysB = Object.keys(sheetsB || {});
     if (keysA.length !== keysB.length) return true;
     for (const sh of keysA) {
       if (!Object.hasOwn(sheetsB || {}, sh)) return true;
-      const mapA = sheetsA[sh] || {};
-      const mapB = sheetsB[sh] || {};
-      const refsA = Object.keys(mapA);
-      const refsB = Object.keys(mapB);
+      const mapA = sheetsA[sh] || {}, mapB = sheetsB[sh] || {};
+      const refsA = Object.keys(mapA), refsB = Object.keys(mapB);
       if (refsA.length !== refsB.length) return true;
       for (const ref of refsA) {
-        const ea = mapA[ref];
-        const eb = mapB[ref];
-        if (
-          !eb ||
-          (ea?.value || "") !== (eb?.value || "") ||
-          (ea?.formula || "") !== (eb?.formula || "") ||
-          (includeStyle && cellStyleChanged(ea?.style, eb?.style))
-        ) {
+        const ea = mapA[ref], eb = mapB[ref];
+        if (!eb || (ea?.value || "") !== (eb?.value || "") || (ea?.formula || "") !== (eb?.formula || "") || (includeStyle && cellStyleChanged(ea?.style, eb?.style))) {
           return true;
         }
       }
@@ -80,26 +61,10 @@
     return false;
   }
 
-  function extractEvaluatedTargetValue(
-    rpcRes,
-    targetValues,
-    batchValues,
-    target,
-    idx,
-    totalTargets
-  ) {
-    if (targetValues && idx < targetValues.length) {
-      return targetValues[idx];
-    }
-    if (batchValues) {
-      return (
-        batchValues[target.key] ??
-        batchValues[asciiUpper(target.sheet) + "!" + asciiUpper(target.cell)]
-      );
-    }
-    if (totalTargets === 1 && rpcRes?.value !== undefined) {
-      return rpcRes.value;
-    }
+  function extractEvaluatedTargetValue(rpcRes, targetValues, batchValues, target, idx, totalTargets) {
+    if (targetValues && idx < targetValues.length) return targetValues[idx];
+    if (batchValues) return batchValues[target.key] ?? batchValues[asciiUpper(target.sheet) + "!" + asciiUpper(target.cell)];
+    if (totalTargets === 1 && rpcRes?.value !== undefined) return rpcRes.value;
     return undefined;
   }
 
@@ -108,11 +73,7 @@
   }
 
   function assertValidScrubResponse(origText, res) {
-    if (
-      !res ||
-      typeof res.scrubbedText !== "string" ||
-      (origText.length > 0 && res.scrubbedText.length === 0)
-    ) {
+    if (!res || typeof res.scrubbedText !== "string" || (origText.length > 0 && res.scrubbedText.length === 0)) {
       throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
     }
   }
@@ -378,19 +339,20 @@
       if (!spillApi || !layoutApi) return false;
       let changed = false;
       for (const name of names) {
-        const payload = JSON.stringify(spillApi.lockPayload(name, sheetsMap[name], layoutApi));
+        const lockObj = spillApi.lockPayload(name, sheetsMap[name], layoutApi);
+        if (!lockObj && !session.locks.has(name)) continue;
+        const payload = JSON.stringify(lockObj);
         if ((session.locks.get(name) ?? "null") === payload) continue;
-        const res = await sessionCall({ sessionAction: "locks", session: session.id, sheet: name, lock: JSON.parse(payload) });
+        const res = await sessionCall({ sessionAction: "locks", session: session.id, sheet: name, lock: lockObj });
         if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
         if (res.refused) continue;
         session.locks.set(name, payload);
-        for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
-        if (takeSpills(sheetsMap, res)) changed = true;
-        // a formula cell whose value changed shows it
         for (const c of Array.isArray(res.changed) ? res.changed : []) {
+          session.values.set(c.sheet + "!" + c.cell, c.value);
           const held = sheetsMap[c.sheet]?.[c.cell];
           if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
         }
+        if (takeSpills(sheetsMap, res)) changed = true;
         changed = true;
       }
       return changed;
@@ -407,18 +369,19 @@
       let changed = false;
       for (const name of names) {
         for (const kind of ["merges", "tables"]) {
-          const payload = JSON.stringify(spillApi.blockerPayload(kind, name, layoutApi));
+          const blockerObj = spillApi.blockerPayload(kind, name, layoutApi);
+          const payload = JSON.stringify(blockerObj);
           if ((session[kind].get(name) ?? "[]") === payload) continue;
-          const res = await sessionCall({ sessionAction: kind, session: session.id, sheet: name, [kind]: JSON.parse(payload) });
+          const res = await sessionCall({ sessionAction: kind, session: session.id, sheet: name, [kind]: blockerObj });
           if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
           if (res.refused) continue;
           session[kind].set(name, payload);
-          for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
-          if (takeSpills(sheetsMap, res)) changed = true;
           for (const c of Array.isArray(res.changed) ? res.changed : []) {
+            session.values.set(c.sheet + "!" + c.cell, c.value);
             const held = sheetsMap[c.sheet]?.[c.cell];
             if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
           }
+          if (takeSpills(sheetsMap, res)) changed = true;
           changed = true;
         }
       }

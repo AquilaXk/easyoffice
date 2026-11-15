@@ -81,7 +81,7 @@
     }
 
     // ---- used extent (rows/cols that hold data) ---------------------------------------------
-    let extentCache = {};
+    let extentCache = Object.create(null);
 
     function scanExtent(sheetName) {
       const map = sheetDataStore[sheetName] || {};
@@ -243,21 +243,30 @@
     function saveActiveSheetCellsToWorkbook() {
       const curSheet = getActiveSheetName();
       sheetDataStore[curSheet] = snapshotDomSheetCells();
-      if (!sheetRowCounts[curSheet]) {
+      if ((sheetRowCounts[curSheet] ?? 0) === 0) {
         const domRows = document.querySelectorAll("#pane-sheet tbody tr").length;
         sheetRowCounts[curSheet] = domRows > 0 ? domRows : DEFAULT_SHEET_ROW_COUNT;
       }
     }
 
     function cellRefOfRange(range, cb) {
-      for (const ref of Object.keys(activeSheetMap())) {
+      const map = activeSheetMap();
+      const r1 = Math.min(range.r1, range.r2), r2 = Math.max(range.r1, range.r2);
+      const c1 = Math.min(range.c1, range.c2), c2 = Math.max(range.c1, range.c2);
+      if ((r2 - r1 + 1) * (c2 - c1 + 1) <= 4096) {
+        for (let r = r1; r <= r2; r++) {
+          for (let c = c1; c <= c2; c++) {
+            const ref = gridUtils.refOf(r, c);
+            if (map && map[ref] !== undefined) cb(ref);
+          }
+        }
+        return;
+      }
+      for (const ref of Object.keys(map)) {
         const packed = gridUtils.packRef(ref);
         if (packed > 0) {
-          const col = packed & 32767;
-          const row = (packed - col) / 32768;
-          if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) {
-            cb(ref);
-          }
+          const col = packed & 32767, row = (packed - col) / 32768;
+          if (row >= r1 && row <= r2 && col >= c1 && col <= c2) cb(ref);
         }
       }
     }
@@ -373,7 +382,7 @@
     }
 
     function replaceLiveSheetDataStore(nextSheets, nextRowCounts) {
-      extentCache = {};
+      extentCache = Object.create(null);
       Object.keys(sheetDataStore).forEach((k) => delete sheetDataStore[k]);
       Object.assign(sheetDataStore, nextSheets);
       if (nextRowCounts && typeof nextRowCounts === "object") {
@@ -381,14 +390,10 @@
         Object.assign(sheetRowCounts, nextRowCounts);
       } else {
         Object.keys(sheetRowCounts).forEach((k) => {
-          if (!Object.hasOwn(sheetDataStore, k)) {
-            delete sheetRowCounts[k];
-          }
+          if (!Object.hasOwn(sheetDataStore, k)) delete sheetRowCounts[k];
         });
         Object.keys(sheetDataStore).forEach((k) => {
-          if (!sheetRowCounts[k]) {
-            extentCache[k] = scanExtent(k);
-          }
+          if ((sheetRowCounts[k] ?? 0) === 0) extentCache[k] = scanExtent(k);
         });
       }
     }

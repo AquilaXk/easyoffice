@@ -78,10 +78,8 @@ fn workbook_engine(
     let mut wb = WorkbookEngine::new();
     for (index, (name, cells)) in sheets.iter().enumerate() {
         let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
-        wb.try_add_sheet(name.clone())?;
+        wb.try_add_sheet(name.as_str())?;
         if let Some(styling) = stylings.get(index) {
-            wb.try_add_sheet(name.clone())?
-                .set_spill_merges(styling.merges.clone());
             // The tables come before the cells, so a structured reference compiles against them (PD-225). The
             // reader and the page already hold them within the bounds; one that is not leaves the references
             // to read as errors.
@@ -91,7 +89,12 @@ fn workbook_engine(
             wb.try_add_sheet(name.clone())?
                 .set_hidden_rows(hidden, filtered);
         }
-        let sheet = wb.try_add_sheet(name.clone())?;
+        let sheet = wb
+            .sheet_mut(name.as_str())
+            .expect("sheet was just added by try_add_sheet");
+        if let Some(styling) = stylings.get(index) {
+            sheet.set_spill_merges(styling.merges.clone());
+        }
         if let Some(filter) = SpillRefCoverFilter::new(spills) {
             for (row, col, raw) in cells {
                 if filter.covers_after_anchor(*row, *col) {

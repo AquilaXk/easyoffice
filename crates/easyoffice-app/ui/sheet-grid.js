@@ -35,10 +35,10 @@
   // round-trip, which matters for undo snapshots of sheets with tens of thousands of cells. A frozen
   // (shared) style object is kept as it is.
   function cloneSheetStore(store) {
-    const out = {};
+    const out = Object.create(null);
     Object.keys(store || {}).forEach((name) => {
       const src = store[name] || {};
-      const dst = {};
+      const dst = Object.create(null);
       Object.keys(src).forEach((ref) => {
         const e = src[ref];
         if (!e) return;

@@ -337,7 +337,8 @@
         entry.size = bytes.byteLength;
         fonts.cacheBytes += entry.size;
         for (const [key, old] of fonts.cache) {
-          if (fonts.cacheBytes <= FONT_CACHE_BYTES || key === file) break;
+          if (fonts.cacheBytes <= FONT_CACHE_BYTES) break;
+          if (key === file) continue;
           fonts.cacheBytes -= old.size;
           fonts.cache.delete(key);
         }

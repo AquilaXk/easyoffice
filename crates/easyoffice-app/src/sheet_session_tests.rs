@@ -735,3 +735,73 @@ fn sheet_session_lock_tracks_memory_and_enforces_budget() {
     let _ = reg.apply(&s1, "win1", &[change], true, now).unwrap();
     assert!(lock(&reg.inner).sessions.get(&s1).unwrap().bytes > locked_bytes);
 }
+
+#[test]
+fn session_apply_enforces_post_recalc_footprint_limits() {
+    let now = Instant::now();
+    let reg_temp = Registry::new(LIMITS);
+    let id_temp = reg_temp
+        .open(&["Sheet1".to_string()], "owner", now)
+        .unwrap();
+    let initial_bytes = lock(&reg_temp.inner).sessions.get(&id_temp).unwrap().bytes;
+    drop(reg_temp);
+
+    let changes = vec![
+        CellChange {
+            sheet: "Sheet1".to_string(),
+            coord: PackedCellCoordinate::new(0, 0).unwrap(),
+            raw: "100".to_string(),
+        },
+        CellChange {
+            sheet: "Sheet1".to_string(),
+            coord: PackedCellCoordinate::new(0, 1).unwrap(),
+            raw: "=A1 * 2".to_string(),
+        },
+    ];
+    let incoming: usize = changes.iter().map(|c| c.raw.len()).sum();
+
+    // Set max_total_bytes exactly enough to pass the pre-check (initial_bytes + incoming),
+    // while keeping max_session_bytes large so that internal engine apply succeeds.
+    // The post-recalculation footprint will exceed max_total_bytes and trigger ResourceBudgetExceeded.
+    let limits = Limits {
+        max_session_bytes: 100_000,
+        max_total_bytes: initial_bytes + incoming,
+        ..LIMITS
+    };
+    let reg = Registry::new(limits);
+    let id = reg.open(&["Sheet1".to_string()], "owner", now).unwrap();
+
+    let res = reg.apply(&id, "owner", &changes, true, now);
+    assert!(matches!(
+        res,
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+    // The exceeded session must be evicted/removed from registry.
+    assert!(!lock(&reg.inner).sessions.contains_key(&id));
+}
+
+#[test]
+fn unicode_case_folding_sheet_op_comparison() {
+    let limits = LIMITS;
+    let reg = Registry::new(limits);
+    let now = Instant::now();
+    let id = reg
+        .open(&["데이터".to_string(), "Sheet2".to_string()], "owner", now)
+        .unwrap();
+    let handle = reg.checkout(&id, "owner", now).unwrap();
+    let session = handle.lock().unwrap();
+
+    // ASCII case fold
+    let op = SheetOp::Rename {
+        from: "sheet2".to_string(),
+        to: "SheetNew".to_string(),
+    };
+    assert!(check_sheet_op(&session, &op).is_ok());
+
+    // Non-ASCII sheet match
+    let op_unicode = SheetOp::Rename {
+        from: "데이터".to_string(),
+        to: "새데이터".to_string(),
+    };
+    assert!(check_sheet_op(&session, &op_unicode).is_ok());
+}

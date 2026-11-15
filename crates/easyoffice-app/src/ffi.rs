@@ -73,6 +73,10 @@ unsafe fn respond(command_ptr: *const c_char, payload_ptr: *const c_char) -> Str
     }
 }
 
+unsafe extern "C" {
+    fn strnlen(s: *const c_char, maxlen: usize) -> usize;
+}
+
 /// The bytes of the NUL-terminated string at `ptr`, or `None` when it is longer than `limit`. The
 /// scan stops at the terminator or after `limit + 1` bytes, so it never reads past what a valid
 /// string holds and never walks a string that is already over the limit to its end.
@@ -80,13 +84,13 @@ unsafe fn respond(command_ptr: *const c_char, payload_ptr: *const c_char) -> Str
 /// # Safety
 /// `ptr` points to a NUL-terminated string.
 unsafe fn bounded_c_str<'a>(ptr: *const c_char, limit: usize) -> Option<&'a [u8]> {
-    let bytes = ptr.cast::<u8>();
-    for len in 0..=limit {
-        if *bytes.add(len) == 0 {
-            return Some(std::slice::from_raw_parts(bytes, len));
-        }
+    let max_len = limit.saturating_add(1);
+    let len = unsafe { strnlen(ptr, max_len) };
+    if len <= limit {
+        Some(unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len) })
+    } else {
+        None
     }
-    None
 }
 
 /// Frees a C string previously allocated by `easyoffice_ffi_dispatch_json`.
@@ -103,6 +107,9 @@ pub unsafe extern "C" fn easyoffice_ffi_free_string(ptr: *mut c_char) {
 }
 
 fn into_raw_c_string(text: &str) -> *mut c_char {
+    if let Ok(c) = CString::new(text) {
+        return c.into_raw();
+    }
     let sanitized = text.replace('\0', " ");
     CString::new(sanitized)
         .unwrap_or_else(|_| CString::new("{\"ok\":false}").unwrap())

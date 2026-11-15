@@ -31,9 +31,8 @@
 
   const docTabStore = { DOC: null, HWP: null };
 
-  const sheetDataStore = { Sheet1: null };
-
-  const sheetRowCounts = {};
+  const sheetDataStore = Object.assign(Object.create(null), { Sheet1: null });
+  const sheetRowCounts = Object.create(null);
   let workspaceSession = null;
   let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
