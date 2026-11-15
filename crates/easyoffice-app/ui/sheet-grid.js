@@ -699,7 +699,8 @@
         const r = td._row;
         const c = td._col;
         td.classList.toggle("sheet-hidden", hiddenColSet ? hiddenColSet.has(c) : false);
-        // The header cells of the sheet's filter and of the tables with filter buttons carry the button (PD-226, PD-231).
+        // The header cells of the sheet's filter and of the tables with filter buttons carry the button (PD-226, PD-232); a button on
+        // each header cell of a table that has them (the reference of the table filter, `THIRD_PARTY_NOTICES.md`).
         let head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
         let on = head && filterCols.has(c);
         const table = tableStyle?.tableAt(name, r, c);

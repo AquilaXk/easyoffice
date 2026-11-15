@@ -14,6 +14,14 @@
 // 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: the form is a pair of rows (an
 // operator and a text each) joined by AND or OR, "between" is not a separate operator, and the
 // filter's requests carry the displayed text of the cells instead of the reference's worker.
+//
+// The filter of a table (PD-232) is judged, applied and undone by the same commands as the sheet's: `owner` is `null` for the
+// sheet's filter and a table's name for that table's, `viewOf` answers either as `{ range, columns, hidden }` and `store` keeps
+// the answer. 참조 구현: Univer `packages/sheets-table/src/models/table-filter.ts` lines 27-82 (`TableFilters`: a condition per
+// column and the rows the conditions filter out, replaced as a whole) and `commands/commands/set-table-filter.command.ts` lines
+// 28-66 (one command per column change, its undo restoring the condition and the rows), same commit and license. Modifications: the
+// conditions are the engine's (`filter` action), the undo is the workspace step of `change`, and the page's layout holds the table's
+// conditions and hidden rows.
 (function (host) {
   "use strict";
 

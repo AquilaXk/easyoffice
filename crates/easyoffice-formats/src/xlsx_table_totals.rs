@@ -8,6 +8,9 @@
 //! The reader keeps none of them, the cells hold the same content (a file whose attributes name a function
 //! its cells do not hold shows the cells, as the spreadsheet program does).
 //!
+//! No reference implementation writes these: the reference table readers keep `totalsRowFunction` and `totalsRowLabel` as `None`
+//! or have the totals row count only, and the reference table model has no totals row (`THIRD_PARTY_NOTICES.md`).
+//!
 //! The function numbers are the list of the spreadsheet program's totals row (its support page on totaling
 //! the data of a table shows `=SUBTOTAL(109,[Midwest])` as the sum); the 100s skip the rows a filter hides.
 

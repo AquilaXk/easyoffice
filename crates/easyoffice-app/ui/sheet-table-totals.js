@@ -6,6 +6,10 @@
   // the cell itself (`functionOf`), so a cell edited by hand shows what it holds now. The file's `totalsRowFunction` is the
   // same word list (ECMA-376 18.18.80); the writer derives it from the cell too (`xlsx_tables.rs`).
   //
+  // No reference implementation holds a totals-row function list: the reference tables have no totals row or read no
+  // `totalsRowFunction` (`THIRD_PARTY_NOTICES.md`), so the list and its `SUBTOTAL` numbers follow the spreadsheet program's support
+  // page on totaling table data and ECMA-376 18.18.80.
+  //
   // The menu is the page's `.context-menu` with `.md-item` rows (the sheet tab menu's markup); it opens from the arrow on the
   // selected totals-row cell (`td.totals-cell.selected-cell::after`) and with Alt+Down.
 
