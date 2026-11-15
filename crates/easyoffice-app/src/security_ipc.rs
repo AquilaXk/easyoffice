@@ -7,11 +7,13 @@ use easyoffice_formats::{
 use crate::{DocumentSecurityAuditor, EasyOfficeIpcRouter, PiiAuditResult};
 use std::fmt::Write as _;
 
+#[cfg(test)]
 #[inline]
 fn is_pdf_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'\0' | 0x0c)
 }
 
+#[cfg(test)]
 #[inline]
 fn is_pdf_delimiter(b: u8) -> bool {
     is_pdf_whitespace(b)
@@ -21,6 +23,7 @@ fn is_pdf_delimiter(b: u8) -> bool {
         )
 }
 
+#[cfg(test)]
 #[inline]
 fn hex_val(b: u8) -> Option<u8> {
     match b {
@@ -31,6 +34,7 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn pdf_has_encrypt_key(bytes: &[u8]) -> bool {
     let mut i = 0;
     let len = bytes.len();
@@ -457,12 +461,15 @@ impl EasyOfficeIpcRouter {
     }
 
     fn audit_pdf_container(bytes: &[u8]) -> Result<usize, EasyOfficeError> {
-        if pdf_has_encrypt_key(bytes) {
-            return Err(EasyOfficeError::SecurityViolation(
-                "암호화된 PDF 문서는 보안 정책상 거부됩니다.".to_string(),
-            ));
-        }
-        let pdf = PdfSerializer::parse(bytes)?;
+        let pdf = match PdfSerializer::parse(bytes) {
+            Ok(pdf) => pdf,
+            Err(EasyOfficeError::EncryptedDocumentUnsupported(_)) => {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "암호화된 PDF 문서는 보안 정책상 거부됩니다.".to_string(),
+                ));
+            }
+            Err(e) => return Err(e),
+        };
         if pdf.pages.is_empty() {
             return Err(Self::empty_audit_error());
         }

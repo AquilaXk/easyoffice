@@ -28,7 +28,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use tauri::{AppHandle, State, WebviewWindow};
 use usvg::fontdb::{Database, Language, Source, Stretch, Style};
 
@@ -39,6 +39,10 @@ pub const MAX_FACES: usize = 25_000;
 /// Most distinct font bytes one window may be served over its life (a new list does not renew it). A document names a handful of
 /// fonts; this leaves room for a few large CJK collections and stops a loop that asks for all.
 pub const MAX_SESSION_BYTES: u64 = 512 * 1024 * 1024;
+/// Maximum concurrent font file reads allowed across the process.
+pub const MAX_CONCURRENT_FONT_READS: usize = 4;
+/// Maximum requests for the same font file allowed per window session.
+pub const MAX_FILE_REQUESTS_PER_SESSION: u32 = 4;
 /// Longest family or style text the editor accepts.
 const MAX_NAME_CHARS: usize = 1024;
 /// Most alias names kept for a face (the editor accepts 32).
@@ -226,6 +230,8 @@ struct Session {
     revision: String,
     /// Files whose bytes this window already received (not charged twice).
     served: HashSet<u32>,
+    /// Requests count per file to bound repeated queries.
+    requests: HashMap<u32, u32>,
     bytes: u64,
 }
 
@@ -234,11 +240,23 @@ struct Reservation {
     epoch: u64,
 }
 
+struct ReadSlotGuard(Arc<(Mutex<usize>, Condvar)>);
+
+impl Drop for ReadSlotGuard {
+    fn drop(&mut self) {
+        let (lock, cvar) = &*self.0;
+        let mut count = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        *count = count.saturating_sub(1);
+        cvar.notify_one();
+    }
+}
+
 /// The catalog (built once for the process) and the list each window holds.
 pub struct SystemFonts {
     catalog: OnceLock<Arc<Catalog>>,
     sessions: Mutex<HashMap<String, Session>>,
     next_epoch: AtomicU64,
+    read_slots: Arc<(Mutex<usize>, Condvar)>,
     /// Most distinct font bytes one window is served.
     budget: u64,
 }
@@ -255,8 +273,20 @@ impl SystemFonts {
             catalog: OnceLock::new(),
             sessions: Mutex::new(HashMap::new()),
             next_epoch: AtomicU64::new(0),
+            read_slots: Arc::new((Mutex::new(0), Condvar::new())),
             budget,
         }
+    }
+
+    fn acquire_read_slot(&self) -> ReadSlotGuard {
+        let (lock, cvar) = &*self.read_slots;
+        let mut count = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        while *count >= MAX_CONCURRENT_FONT_READS {
+            count = cvar.wait(count).unwrap_or_else(PoisonError::into_inner);
+        }
+        *count += 1;
+        drop(count);
+        ReadSlotGuard(Arc::clone(&self.read_slots))
     }
 
     /// The window's new list. `build` runs only the first time (the font folders are scanned once
@@ -276,6 +306,7 @@ impl SystemFonts {
                 epoch: self.next_epoch.fetch_add(1, Ordering::Relaxed),
                 revision: String::new(),
                 served: HashSet::new(),
+                requests: HashMap::new(),
                 bytes: 0,
             })
             .revision
@@ -293,6 +324,7 @@ impl SystemFonts {
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(MSG_UNREADABLE.to_string());
         }
+        let _slot = self.acquire_read_slot();
         let mut handle = File::open(&path).map_err(|_| MSG_UNREADABLE.to_string())?;
         let meta = handle.metadata().map_err(|_| MSG_UNREADABLE.to_string())?;
         if !meta.is_file() {
@@ -303,7 +335,7 @@ impl SystemFonts {
             return Err(MSG_TOO_LARGE.to_string());
         }
         let reservation = self.charge(label, revision, file, size)?;
-        let result = read_font(&mut handle);
+        let result = read_font(&mut handle, size as usize);
         self.settle(label, reservation, file, size, result.is_ok());
         result
     }
@@ -338,6 +370,13 @@ impl SystemFonts {
             .get_mut(label)
             .filter(|session| session.revision == revision)
             .ok_or_else(|| MSG_NO_LIST.to_string())?;
+
+        let count = session.requests.entry(file).or_insert(0);
+        if *count >= MAX_FILE_REQUESTS_PER_SESSION {
+            return Err("동일 글꼴 재요청 한도를 초과했습니다.".to_string());
+        }
+        *count += 1;
+
         if session.served.contains(&file) {
             return Ok(None);
         }
@@ -393,8 +432,9 @@ fn is_sfnt(head: &[u8; 4]) -> bool {
 
 /// Reads at most [`MAX_FONT_BYTES`] and accepts only a font signature. Reading one byte more than
 /// the bound catches a file that grew after it was measured.
-fn read_font(source: &mut impl Read) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
+fn read_font(source: &mut impl Read, expected_len: usize) -> Result<Vec<u8>, String> {
+    let cap = expected_len.min(MAX_FONT_BYTES as usize);
+    let mut bytes = Vec::with_capacity(cap);
     source
         .take(MAX_FONT_BYTES + 1)
         .read_to_end(&mut bytes)

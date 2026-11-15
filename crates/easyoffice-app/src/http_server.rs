@@ -174,7 +174,8 @@ pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
 /// CSP of the main page and every API/error response. A same-origin <iframe> is already allowed by
 /// the `default-src` fallback (`frame-src` -> `child-src` -> `default-src`), so the editor frame
 /// needs no relaxation here; only `/hwp-studio/*` gets its own policy (`hwp_bundle::STUDIO_CSP`).
-const MAIN_CSP: &str = "default-src 'self'; base-uri 'none'; object-src 'none'";
+const MAIN_CSP: &str =
+    "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
 
 fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
     write_http_bytes(stream, status, content_type, MAIN_CSP, "", body.as_bytes());
@@ -188,20 +189,24 @@ fn write_http_bytes(
     extra_headers: &str,
     body: &[u8],
 ) {
+    let x_frame_options = if csp.contains("frame-ancestors 'none'") {
+        "X-Frame-Options: DENY\r\n"
+    } else {
+        "X-Frame-Options: SAMEORIGIN\r\n"
+    };
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: {csp}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{extra_headers}Connection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: {csp}\r\n{x_frame_options}X-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{extra_headers}Connection: close\r\n\r\n",
         body.len()
     );
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body);
     let _ = stream.flush();
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
+    let _ = stream.set_nonblocking(true);
     let mut drain = [0u8; 1024];
-    for _ in 0..4 {
-        match stream.read(&mut drain) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
+    while let Ok(n) = stream.read(&mut drain) {
+        if n == 0 {
+            break;
         }
     }
 }

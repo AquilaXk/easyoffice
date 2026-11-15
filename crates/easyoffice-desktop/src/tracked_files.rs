@@ -68,6 +68,37 @@ impl Fingerprint {
 /// named pipe is refused before it is opened (opening one blocks until a program writes to it, and
 /// its length of 0 passes every size check), and the handle is looked at again in case the path was
 /// replaced in between.
+#[cfg(unix)]
+pub fn open_regular(path: &Path) -> std::io::Result<(fs::File, fs::Metadata)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+
+    let not_regular =
+        || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file");
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(not_regular());
+    }
+
+    let fd = file.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok((file, meta))
+}
+
+#[cfg(not(unix))]
 pub fn open_regular(path: &Path) -> std::io::Result<(fs::File, fs::Metadata)> {
     let not_regular =
         || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file");
@@ -463,5 +494,19 @@ mod tests {
         );
         assert!(open_regular(&file).is_ok());
         assert!(open_regular(&dir).is_err(), "a folder is not a file either");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_regular_blocks_fifo_without_hanging() {
+        let dir = scratch("fifo-noblock");
+        let fifo_path = dir.join("test.fifo");
+        let c_path = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+        unsafe {
+            assert_eq!(libc::mkfifo(c_path.as_ptr(), 0o600), 0);
+        }
+        let res = open_regular(&fifo_path);
+        assert!(res.is_err());
+        let _ = fs::remove_file(&fifo_path);
     }
 }

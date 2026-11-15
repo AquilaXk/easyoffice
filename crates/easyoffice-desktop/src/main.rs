@@ -173,7 +173,7 @@ async fn save_document_file(
     // Decoding and checking a document of up to 256MiB takes a while: off the async workers. The
     // preview picture (first page as SVG, PD-132) is made here too and never fails the save.
     let request = tauri::async_runtime::spawn_blocking(move || {
-        let request = SaveRequest::parse(&file_name, &base64)?;
+        let request = SaveRequest::parse_owned(&file_name, base64)?;
         Ok::<_, String>(match thumbnail_svg {
             Some(svg) => request.with_thumbnail(&svg, &font_dirs),
             None => request,

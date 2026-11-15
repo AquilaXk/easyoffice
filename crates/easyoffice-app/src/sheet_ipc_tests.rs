@@ -110,7 +110,7 @@ fn test_large_workbook_recalc_over_http_and_bounded_413() {
         "got: {resp_413}"
     );
     assert!(resp_413.contains(
-        "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'\r\n"
     ));
 
     let oversized_static = format!(

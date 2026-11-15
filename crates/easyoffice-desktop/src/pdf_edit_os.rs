@@ -147,6 +147,39 @@ pub fn confine(child: &std::process::Child, memory_limit: usize) -> Result<Confi
     }
 }
 
+#[cfg(target_os = "macos")]
+pub fn watch_parent_death() {
+    let ppid = unsafe { libc::getppid() };
+    if ppid <= 1 {
+        std::process::exit(1);
+    }
+    let _ = std::thread::Builder::new()
+        .name("pdf-worker-parent-watcher".to_string())
+        .spawn(move || unsafe {
+            let kq = libc::kqueue();
+            if kq < 0 {
+                return;
+            }
+            let ke = libc::kevent {
+                ident: ppid as usize,
+                filter: libc::EVFILT_PROC,
+                flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT,
+                fflags: libc::NOTE_EXIT,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            };
+            let mut event: libc::kevent = std::mem::zeroed();
+            let ret = libc::kevent(kq, &ke, 1, &mut event, 1, std::ptr::null());
+            libc::close(kq);
+            if ret > 0 {
+                libc::_exit(1);
+            }
+        });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn watch_parent_death() {}
+
 #[cfg(not(windows))]
 pub fn confine(_child: &std::process::Child, _memory_limit: usize) -> Result<Confinement, ()> {
     Ok(Confinement {})

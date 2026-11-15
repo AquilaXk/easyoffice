@@ -93,10 +93,10 @@ fn an_empty_or_oversized_file_is_refused_before_it_is_read() {
 #[test]
 fn a_file_that_grows_past_the_bound_while_it_is_read_is_refused() {
     let mut endless = std::io::repeat(0);
-    assert_eq!(read_font(&mut endless), Err(MSG_TOO_LARGE.to_string()));
+    assert_eq!(read_font(&mut endless, 0), Err(MSG_TOO_LARGE.to_string()));
     let mut exact = std::io::repeat(0).take(MAX_FONT_BYTES);
     assert_eq!(
-        read_font(&mut exact),
+        read_font(&mut exact, MAX_FONT_BYTES as usize),
         Err(MSG_NOT_A_FONT.to_string()),
         "the bound itself is read; the signature decides"
     );
@@ -452,4 +452,30 @@ fn system_fonts_are_measured() {
             started.elapsed()
         );
     }
+}
+
+#[test]
+fn repeated_request_limit_is_enforced() {
+    let dir = tempfile::tempdir().unwrap();
+    let font_file = dir.path().join("test.ttf");
+    let mut data = vec![0u8; 1024];
+    data[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+    std::fs::write(&font_file, data).unwrap();
+
+    let fonts = SystemFonts::default();
+    let file_path = font_file.clone();
+    let list = fonts
+        .list("win", move || Catalog {
+            files: vec![file_path],
+            faces: Arc::new([]),
+        })
+        .unwrap();
+
+    // First 4 requests succeed
+    for _ in 0..MAX_FILE_REQUESTS_PER_SESSION {
+        assert!(fonts.read("win", &list.revision, 0).is_ok());
+    }
+    // 5th request is refused
+    let err = fonts.read("win", &list.revision, 0).unwrap_err();
+    assert!(err.contains("동일 글꼴 재요청 한도를 초과했습니다."));
 }

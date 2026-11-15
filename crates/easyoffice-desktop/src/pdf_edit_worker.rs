@@ -34,6 +34,7 @@ use std::time::Instant;
 
 /// Runs the worker and returns the process exit code.
 pub fn run() -> i32 {
+    crate::pdf_edit_os::watch_parent_death();
     limit_own_address_space(MAX_CHILD_ADDRESS_SPACE_BYTES);
     watch_self();
     let work = std::thread::Builder::new()

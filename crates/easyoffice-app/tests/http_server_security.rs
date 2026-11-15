@@ -9,6 +9,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+const EXPECTED_MAIN_CSP: &str =
+    "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'\r\n";
+const EXPECTED_XFO_DENY: &str = "X-Frame-Options: DENY\r\n";
+
 fn send_raw_http_request(port: u16, raw_request: &[u8], timeout: Duration) -> String {
     let mut stream =
         TcpStream::connect(("127.0.0.1", port)).expect("connect to local test listener");
@@ -49,10 +53,12 @@ fn test_http_ipc_rejects_unpaired_surrogate_with_400_and_csp() {
         "expected 400 Bad Request, got: {resp}"
     );
     assert!(
-        resp.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
+        resp.contains(EXPECTED_MAIN_CSP),
         "missing CSP header on 400 response: {resp}"
+    );
+    assert!(
+        resp.contains(EXPECTED_XFO_DENY),
+        "missing XFO header on 400 response: {resp}"
     );
 
     stop.store(true, Ordering::Release);
@@ -91,8 +97,12 @@ fn test_http_panic_recovery_releases_all_32_slots_and_serves_subsequent_get() {
             "iteration {i}: expected 500 Internal Server Error, got: {resp}"
         );
         assert!(
-            resp.contains("Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"),
+            resp.contains(EXPECTED_MAIN_CSP),
             "iteration {i}: missing CSP header on 500 response: {resp}"
+        );
+        assert!(
+            resp.contains(EXPECTED_XFO_DENY),
+            "iteration {i}: missing XFO header on 500 response: {resp}"
         );
     }
 
@@ -103,10 +113,12 @@ fn test_http_panic_recovery_releases_all_32_slots_and_serves_subsequent_get() {
         "expected 200 OK after 32 panics, got: {ok_resp}"
     );
     assert!(
-        ok_resp.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
+        ok_resp.contains(EXPECTED_MAIN_CSP),
         "missing CSP header on 200 response: {ok_resp}"
+    );
+    assert!(
+        ok_resp.contains(EXPECTED_XFO_DENY),
+        "missing XFO header on 200 response: {ok_resp}"
     );
 
     stop.store(true, Ordering::Release);
@@ -179,9 +191,7 @@ fn test_http_slowloris_overflow_and_deadline_eviction_preserve_fast_get() {
         "expected immediate 503 or 200 during slowloris wave, got: {overflow_resp}"
     );
     assert!(
-        overflow_resp.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
+        overflow_resp.contains(EXPECTED_MAIN_CSP),
         "missing CSP header during slowloris wave"
     );
 
@@ -201,9 +211,7 @@ fn test_http_slowloris_overflow_and_deadline_eviction_preserve_fast_get() {
         "expected 200 OK after slowloris deadline eviction, got: {ok_resp}"
     );
     assert!(
-        ok_resp.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
+        ok_resp.contains(EXPECTED_MAIN_CSP),
         "missing CSP header on GET /: {ok_resp}"
     );
     assert!(
@@ -354,10 +362,12 @@ fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
 
     let (head, _) = split_response(&get(port, "/"));
     assert!(
-        head.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
+        head.contains(EXPECTED_MAIN_CSP),
         "main page keeps its CSP: {head}"
+    );
+    assert!(
+        head.contains(EXPECTED_XFO_DENY),
+        "main page keeps its XFO: {head}"
     );
     stop.store(true, Ordering::Release);
     handle.join().unwrap();
@@ -420,12 +430,8 @@ fn test_editor_csp_names_the_page_origin_not_self() {
     );
     // The main page keeps the plain policy.
     let main = get_with_host(port, "/", &format!("127.0.0.1:{port}"));
-    assert!(
-        main.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
-        "{main}"
-    );
+    assert!(main.contains(EXPECTED_MAIN_CSP), "{main}");
+    assert!(main.contains(EXPECTED_XFO_DENY), "{main}");
     stop.store(true, Ordering::Release);
     handle.join().unwrap();
 }
@@ -445,12 +451,8 @@ fn assert_status(resp: &str, status: &str) {
         "wanted {status}: {}",
         &resp[..resp.len().min(300)]
     );
-    assert!(
-        resp.contains(
-            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
-        ),
-        "{resp}"
-    );
+    assert!(resp.contains(EXPECTED_MAIN_CSP), "{resp}");
+    assert!(resp.contains(EXPECTED_XFO_DENY), "{resp}");
 }
 
 #[test]
