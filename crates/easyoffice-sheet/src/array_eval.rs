@@ -498,7 +498,7 @@ impl SheetEngine {
                 }
                 data.push(val);
                 if (idx & 4095) == 4095 {
-                    ctx.charge_steps(4096)?;
+                    ctx.charge_steps(1)?;
                     ctx.poll_deadline();
                     if ctx.expired() {
                         return Err(FormulaError::Value);
@@ -577,7 +577,7 @@ fn binary_grid(
             }
             data.push(val);
             if (idx & 4095) == 4095 {
-                ctx.charge_steps(4096)?;
+                ctx.charge_steps(1)?;
                 ctx.poll_deadline();
                 if ctx.expired() {
                     return Err(FormulaError::Value);

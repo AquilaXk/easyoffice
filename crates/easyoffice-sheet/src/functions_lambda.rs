@@ -123,7 +123,7 @@ impl SheetEngine {
             }
             data.push(cell);
             if (i & 4095) == 4095 {
-                ctx.charge_steps(4096)?;
+                ctx.charge_steps(1)?;
                 ctx.poll_deadline();
                 if ctx.expired() {
                     return Err(FormulaError::Value);
@@ -181,7 +181,7 @@ impl SheetEngine {
                 return Err(e);
             }
             if (i & 4095) == 4095 {
-                ctx.charge_steps(4096)?;
+                ctx.charge_steps(1)?;
                 ctx.poll_deadline();
                 if ctx.expired() {
                     return Err(FormulaError::Value);
@@ -223,7 +223,7 @@ impl SheetEngine {
             }
             data.push(acc.clone());
             if (i & 4095) == 4095 {
-                ctx.charge_steps(4096)?;
+                ctx.charge_steps(1)?;
                 ctx.poll_deadline();
                 if ctx.expired() {
                     return Err(FormulaError::Value);
@@ -267,7 +267,7 @@ impl SheetEngine {
             }
             data.push(cell);
             if (i & 4095) == 4095 {
-                ctx.charge_steps(4096)?;
+                ctx.charge_steps(1)?;
                 ctx.poll_deadline();
                 if ctx.expired() {
                     return Err(FormulaError::Value);
@@ -318,7 +318,7 @@ impl SheetEngine {
                 }
                 data.push(cell);
                 if (idx & 4095) == 4095 {
-                    ctx.charge_steps(4096)?;
+                    ctx.charge_steps(1)?;
                     ctx.poll_deadline();
                     if ctx.expired() {
                         return Err(FormulaError::Value);
