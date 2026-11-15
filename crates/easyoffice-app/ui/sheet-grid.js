@@ -680,6 +680,7 @@
       const filter = layout?.filter || null;
       const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
       const tableStyle = layout?.tables?.length > 0 ? host.__EASYOFFICE_SHEET_TABLE_STYLE__ : null;
+      const filtered = filter !== null || tableStyle !== null;
       const hasColRuns = !empty && colRuns.length > 0;
       const hiddenColSet = hasColRuns ? new Set() : null;
       for (const [c, th] of colHeadByCol) {
@@ -701,16 +702,14 @@
         td.classList.toggle("sheet-hidden", hiddenColSet ? hiddenColSet.has(c) : false);
         // The header cells of the sheet's filter and of the tables with filter buttons carry the button (PD-226, PD-232); a button on
         // each header cell of a table that has them (the reference of the table filter, `THIRD_PARTY_NOTICES.md`).
-        let head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
-        let on = head && filterCols.has(c);
-        const table = tableStyle?.tableAt(name, r, c);
-        if (table && Array.isArray(table.filter) && table.header !== false && layoutApi.tableBox(table).r1 === r) {
-          head = true;
-          on = table.filter.some((x) => x.col === c);
-        }
+        // The panel opens by the same answer (`filterOwnerAt`).
+        const owner = filtered ? layoutApi.filterOwnerAt(name, r, c) : undefined;
+        const head = owner !== undefined;
+        const on = head && (owner === null ? filterCols.has(c) : layoutApi.tablesOf(name).find((t) => t.name === owner).filter.some((x) => x.col === c));
         td.classList.toggle("filter-head", head);
         td.classList.toggle("filter-on", on);
         // The totals-row cells of a table carry the function list's arrow while selected (PD-232).
+        const table = tableStyle?.tableAt(name, r, c);
         td.classList.toggle("totals-cell", Boolean(table && table.totals === true && layoutApi.tableBox(table).r2 === r));
         const m = hasMerges ? layoutApi.mergeAt(name, r, c) : null;
         const anchor = Boolean(m) && m.r1 === r && m.c1 === c;

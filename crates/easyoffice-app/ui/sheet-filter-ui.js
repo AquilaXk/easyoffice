@@ -39,14 +39,8 @@
     const columnOf = (filterModel, col) => filterModel?.columns.find((c) => c.col === col) || null;
 
     // The owner of the button on the header cell `row`, `col`: `null` for the sheet's filter, a table's name for a table with
-    // filter buttons, `undefined` for a cell that has no button.
-    function ownerAt(row, col) {
-      const name = getActiveSheetName();
-      const table = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.tableAt(name, row, col);
-      if (table) return table.header !== false && Array.isArray(table.filter) && layoutApi.tableBox(table).r1 === row ? table.name : undefined;
-      const f = layoutApi.filterOf(name);
-      return f && row === f.range.r1 && col >= f.range.c1 && col <= f.range.c2 ? null : undefined;
-    }
+    // filter buttons, `undefined` for a cell that has no button (the answer the grid draws the button by).
+    const ownerAt = (row, col) => layoutApi.filterOwnerAt(getActiveSheetName(), row, col);
 
     // ---- the drop-down button on the header cells ------------------------------------------------
     // The cell paints the button itself (`td.filter-head::after`); a press on that corner opens

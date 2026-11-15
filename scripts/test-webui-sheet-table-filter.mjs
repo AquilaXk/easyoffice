@@ -9,11 +9,12 @@ import { fakeFilterEngine } from "./test-support/fake-filter-engine.mjs";
 // works on the table's own conditions and hidden rows, `필터 단추` and the filter command turn the buttons on and off, and
 // each change is one undo step.
 
-const modelWith = (tables) => ({
+const modelWith = (tables, filter = null) => ({
   sheets: [
     {
       name: "표",
       tables,
+      ...(filter ? { filter } : {}),
       cells: [
         { ref: "A1", raw: "부서" },
         { ref: "B1", raw: "매출" },
@@ -31,7 +32,7 @@ const modelWith = (tables) => ({
 
 const table = (extra = {}) => ({ name: "표1", range: "A1:B6", header: true, totals: false, columns: ["부서", "매출"], style: "TableStyleMedium2", rowStripes: true, ...extra });
 
-async function createHarness(tables = []) {
+async function createHarness(tables = [], filter = null) {
   const requests = [];
   const fake = fakeFilterEngine();
   const cat = (await createWorkspaceHarness()).sandbox.__EASYOFFICE_RIBBON_CATALOG__;
@@ -55,7 +56,7 @@ async function createHarness(tables = []) {
   });
   switchModule(harness.document, "SHEET");
   await flushAsyncTurns();
-  await pickFile(harness.document, makeFixtureFile("표필터.xlsx", modelWith(tables)));
+  await pickFile(harness.document, makeFixtureFile("표필터.xlsx", modelWith(tables, filter)));
   await flushAsyncTurns(8);
   return { ...harness, requests };
 }
@@ -269,4 +270,26 @@ test("a protected sheet that denies 자동 필터 사용 keeps the table's panel
   }
   assert.deepEqual(tableOf(h).filter, before, "no condition went in");
   assert.equal(tableOf(h).filterHidden, undefined);
+});
+
+test("a sheet filter that shares its header cells with a table without buttons keeps its button, and the press opens its panel", async () => {
+  const h = await createHarness([table({})], { range: "A1:B6", columns: [], hidden: [] });
+  const d = h.document;
+  assert.ok(cell(d, "A1").classList.contains("filter-head"), "the button is drawn");
+  assert.equal(layoutOf(h).filterOwnerAt("표", 1, 1), null, "by the sheet's filter");
+  await pressButton(h, "A1");
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, false, "the panel opens by the answer the grid drew by");
+  assert.equal(h.requests.at(-1).filter.range, "A1:B6");
+});
+
+test("where a table with buttons and a sheet filter share the header cells the table owns the button", async () => {
+  const h = await createHarness([table({ filter: [] })], { range: "A1:B6", columns: [], hidden: [] });
+  const d = h.document;
+  assert.equal(layoutOf(h).filterOwnerAt("표", 1, 2), "표1");
+  assert.ok(cell(d, "B1").classList.contains("filter-head"));
+  await pressButton(h, "B1");
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, false);
+  assert.equal(h.requests.at(-1).op, "values");
+  assert.equal(layoutOf(h).filterOwnerAt("표", 2, 2), undefined, "a data cell has none");
+  assert.equal(layoutOf(h).filterOwnerAt("표", 1, 9), undefined, "nor a cell outside both");
 });

@@ -442,6 +442,16 @@
     return true;
   }
 
+  // Who owns the filter button of the header cell `row`, `col` of a sheet (PD-232): a table's name for a table with filter buttons whose
+  // header row has the cell, `null` for the sheet's filter when its header row has it (also where a file made it share cells with a
+  // table that has no buttons), `undefined` for a cell with no button. The grid draws the button and the panel opens by this answer.
+  function filterOwnerAt(name, row, col) {
+    const table = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.tableAt(name, row, col);
+    if (table && table.header !== false && Array.isArray(table.filter) && tableBox(table).r1 === row) return table.name;
+    const f = bySheet[name]?.filter;
+    return f && row === f.range.r1 && col >= f.range.c1 && col <= f.range.c2 ? null : undefined;
+  }
+
   // Clears the conditions of a table's own filter and the rows they hide (the table keeps its filter buttons).
   // True when there was anything to clear.
   function clearTableFilter(name, tableName) {
@@ -666,6 +676,7 @@
     setFilter,
     setTableFilterHidden,
     setTableFilter,
+    filterOwnerAt,
     hiddenRunsOf,
     sameHiddenRuns,
     NO_RUNS,
