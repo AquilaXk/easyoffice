@@ -919,6 +919,15 @@
     });
     // Rule changes (dialogs, undo, open) re-evaluate; new appearances repaint the cells.
     sheetRules.on("changed", () => void recalculateActiveSheetFormulas().catch(() => {}));
+    // The rows a user or a filter hid changed (a hide, a filter, an undo): the formulas that leave hidden rows out are calculated
+    // again, and only those in the engine (PD-232).
+    // It runs after the step that changed them (an undo restores the cells after the layout).
+    host.__EASYOFFICE_SHEET_LAYOUT__.onChange(() => {
+      if (getActiveModule() !== "SHEET" || !sheetStoreHelpers.hiddenRowsStale(getActiveSheetName())) return;
+      void enqueueWorkspaceHistoryOp(async () => {
+        if (sheetStoreHelpers.hiddenRowsStale(getActiveSheetName())) await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      }).catch(() => {});
+    });
     sheetRules.on("repaint", () => grid.repaintFx());
     sheetRules.on("readCells", (sheet, ref) => String(sheetDataStore[sheet]?.[ref]?.value ?? ""));
 

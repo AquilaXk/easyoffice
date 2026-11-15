@@ -15,7 +15,11 @@
   // The `names` field of a stateless request: only when there are names to send.
   const namesField = () => (namesApi?.hasAny() ? { names: namesApi.getAll() } : {});
   // The merged ranges go with a request that has no session (the engine places arrays around them, PD-222).
-  const mergesField = (sheets) => spillApi?.mergesField(Object.keys(sheets || {}), host.__EASYOFFICE_SHEET_LAYOUT__) || {};
+  const mergesField = (sheets) => {
+    const names = Object.keys(sheets || {});
+    const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+    return { ...(spillApi?.mergesField(names, layoutApi) || {}), ...(spillApi?.hiddenRowsField(names, layoutApi) || {}) };
+  };
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
@@ -176,10 +180,13 @@
       // (see `syncMerges`).
       merges: new Map(),
       tables: new Map(),
+      // The hidden rows each sheet was told (see `syncMerges`, PD-232).
+      hiddenRows: new Map(),
       mergesVersion: -1,
       gen: 0,
     };
     let sessionChain = Promise.resolve();
+    const hiddenRows = host.__EASYOFFICE_CREATE_SHEET_HIDDEN_ROWS_SYNC__({ session, sessionCall: (body) => sessionCall(body), isFormulaStr });
 
     // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
     function sessionCall(body) {
@@ -196,6 +203,7 @@
       session.locks = new Map();
       session.merges = new Map();
       session.tables = new Map();
+      session.hiddenRows = new Map();
       session.mergesVersion = -1;
     }
 
@@ -414,6 +422,8 @@
           changed = true;
         }
       }
+      // The rows a user and a filter hid: `SUBTOTAL` and `AGGREGATE` are calculated again (PD-232).
+      if (await hiddenRows.sync(names, sheetsMap)) changed = true;
       session.mergesVersion = version;
       return changed;
     }
@@ -975,6 +985,7 @@
       callSheetAction: sessionCall,
       renameTableColumns,
       followTableHeaders,
+      hiddenRowsStale: (name) => hiddenRows.stale(name),
       enableSheetSessions,
       scrubSheetStoreMap,
     };

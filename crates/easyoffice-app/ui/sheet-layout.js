@@ -247,7 +247,24 @@
   }
 
   const NO_ROWS = { n: 0, starts: new Int32Array(0), ends: new Int32Array(0), before: new Int32Array(1) };
+  const NO_RUNS = { hidden: [], filtered: [] };
   const rowsOf = (name) => (bySheet[name] ? rowIndex(bySheet[name]) : NO_ROWS);
+
+  // What the engine is told of the hidden rows of a sheet (PD-232): the rows a user hid or a folded group hid, and the rows the sheet's
+  // filter and the tables' filters hid (1-based runs). `SUBTOTAL` and `AGGREGATE` leave them out. Held in the row index, which a
+  // change of the layout may drop, so two answers are compared by `sameHiddenRuns`.
+  function hiddenRunsOf(name) {
+    const layout = bySheet[name];
+    if (!layout) return NO_RUNS;
+    const ix = rowIndex(layout);
+    if (!ix.engine) {
+      const tableRuns = (layout.tables || []).reduce((all, t) => unionRuns(all, t.filterHidden || []), []);
+      ix.engine = { hidden: unionRuns(layout.hiddenRows, layout.outline?.foldedRows || []), filtered: unionRuns(layout.filter ? layout.filter.hidden : [], tableRuns) };
+    }
+    return ix.engine;
+  }
+  const sameRuns = (a, b) => a.length === b.length && a.every((run, i) => run[0] === b[i][0] && run[1] === b[i][1]);
+  const sameHiddenRuns = (a, b) => a === b || (sameRuns(a.hidden, b.hidden) && sameRuns(a.filtered, b.filtered));
 
   // Rows hidden above row `i`.
   function rowsHiddenBefore(name, i) {
@@ -649,6 +666,9 @@
     setFilter,
     setTableFilterHidden,
     setTableFilter,
+    hiddenRunsOf,
+    sameHiddenRuns,
+    NO_RUNS,
     clearTableFilter,
     filterToJson,
     colHidden,

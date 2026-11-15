@@ -221,6 +221,16 @@
     return out;
   }
 
+  // The `hiddenRows` field of a request without a session: `{ "Sheet1": { hidden, filtered } }` for the sheets that hide rows (PD-232).
+  function hiddenRowsField(names, layoutApi) {
+    const byName = {};
+    for (const name of names) {
+      const runs = layoutApi?.hiddenRunsOf?.(name);
+      if (runs && (runs.hidden.length || runs.filtered.length)) byName[name] = runs;
+    }
+    return Object.keys(byName).length ? { hiddenRows: byName } : {};
+  }
+
   // The engine is not told about cells an array filled.
   const isInput = (entry) => !isChild(entry);
 
@@ -243,6 +253,7 @@
     mergePayload,
     blockerPayload,
     mergesField,
+    hiddenRowsField,
     clearArea,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
