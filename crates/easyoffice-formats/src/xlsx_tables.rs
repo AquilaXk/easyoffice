@@ -22,6 +22,9 @@ use crate::sheet_styling::table_style::TableStyleDef;
 use crate::sheet_styling::xlsx_filter::{autofilter_xml, FilterScan};
 use crate::sheet_styling::xlsx_filter_dxf::DxfColors;
 use crate::sheet_styling::xlsx_sheet::decode_xlsx_escapes;
+use crate::sheet_table::xlsx_table_totals::{
+    column_totals, formula_child, write_attributes, ColumnTotals,
+};
 use crate::sheet_table::{SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_TEXT_CHARS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
 use crate::{CellBox, EasyOfficeError, XlsxCachedValue, XlsxFormulaCache, XmlSanitizer};
@@ -358,7 +361,13 @@ fn resolve_columns<'a>(
 }
 
 /// The XML of one table part.
-fn table_xml(id: usize, table: &SheetTable, columns: &[String], dxf: &DxfTable) -> String {
+fn table_xml(
+    id: usize,
+    table: &SheetTable,
+    columns: &[String],
+    totals: &[ColumnTotals],
+    dxf: &DxfTable,
+) -> String {
     let name = XmlSanitizer::escape(&table.name);
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><table xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" id=\"{id}\" name=\"{name}\" displayName=\"{name}\" ref=\"{}\"",
@@ -381,10 +390,22 @@ fn table_xml(id: usize, table: &SheetTable, columns: &[String], dxf: &DxfTable) 
     for (i, column) in columns.iter().enumerate() {
         let _ = write!(
             out,
-            "<tableColumn id=\"{}\" name=\"{}\"/>",
+            "<tableColumn id=\"{}\" name=\"{}\"",
             i + 1,
             XmlSanitizer::escape(&escape_column_name(column))
         );
+        match totals.get(i).filter(|_| table.totals) {
+            Some(t) => {
+                write_attributes(&mut out, t);
+                match formula_child(t) {
+                    Some(child) => {
+                        let _ = write!(out, ">{child}</tableColumn>");
+                    }
+                    None => out.push_str("/>"),
+                }
+            }
+            None => out.push_str("/>"),
+        }
     }
     out.push_str("</tableColumns><tableStyleInfo");
     if let Some(style) = dxf.table_style_name(table).or(table.style.as_deref()) {
@@ -437,6 +458,19 @@ impl TableWriter {
         for (i, t) in tables.iter().enumerate().filter(|(_, t)| t.header) {
             by_row.entry(t.range.row0).or_default().push(i);
         }
+        let mut totals_by_row: HashMap<u32, Vec<usize>> = HashMap::new();
+        for (i, t) in tables.iter().enumerate().filter(|(_, t)| t.totals) {
+            totals_by_row.entry(t.range.row1).or_default().push(i);
+        }
+        // The totals-row cells, to write the column attributes of the list's functions from them (PD-232).
+        let mut totals_cells: HashMap<(usize, u32), &str> = HashMap::new();
+        for (row, col, raw) in cells {
+            for &i in totals_by_row.get(row).into_iter().flatten() {
+                if (tables[i].range.col0..=tables[i].range.col1).contains(col) {
+                    totals_cells.insert((i, *col), raw.as_str());
+                }
+            }
+        }
         // A header cell holds text: a formula there is its result, which the spreadsheet program also keeps
         // as fixed text.
         let mut texts: HashMap<(usize, u32), Cow<'_, str>> = HashMap::new();
@@ -478,6 +512,14 @@ impl TableWriter {
                 let name = &names[(col - table.range.col0) as usize];
                 fixes.insert((table.range.row0, col), name.clone());
             }
+            let totals: Vec<ColumnTotals> = names
+                .iter()
+                .enumerate()
+                .map(|(k, name)| {
+                    let col = table.range.col0 + k as u32;
+                    column_totals(totals_cells.get(&(i, col)).copied(), &table.name, name)
+                })
+                .collect();
             self.count += 1;
             let n = self.count;
             let _ = write!(
@@ -486,7 +528,7 @@ impl TableWriter {
             );
             self.parts.push((
                 format!("xl/tables/table{n}.xml"),
-                table_xml(n, table, &names, dxf).into_bytes(),
+                table_xml(n, table, &names, &totals, dxf).into_bytes(),
             ));
             let _ = write!(out.parts_xml, "<tablePart r:id=\"rIdT{n}\"/>");
             let _ = write!(
@@ -558,7 +600,7 @@ mod tests {
         t.first_column = true;
         t.column_stripes = true;
         t.filter = Some(Vec::new());
-        let xml = table_xml(7, &t, &t.columns, &DxfTable::default());
+        let xml = table_xml(7, &t, &t.columns, &[], &DxfTable::default());
         assert!(xml.contains("id=\"7\"") && xml.contains("totalsRowCount=\"1\""));
         assert!(xml.contains("<autoFilter ref=\"B2:D8\"/>"), "{xml}");
         assert!(xml.contains("name=\"a_x000a_b\""));
@@ -571,7 +613,7 @@ mod tests {
         let mut t = table("T", "A1:B3");
         t.header = false;
         t.row_stripes = false;
-        let xml = table_xml(1, &t, &t.columns, &DxfTable::default());
+        let xml = table_xml(1, &t, &t.columns, &[], &DxfTable::default());
         assert!(xml.contains("headerRowCount=\"0\"") && !xml.contains("<autoFilter"));
         assert_eq!(parse_table(&xml), Some(t));
     }
@@ -581,7 +623,7 @@ mod tests {
         let mut t = table("Tab1", "A1:B2");
         t.columns = vec!["\"<>&".into(), "x' y".into()];
         t.style = Some("\"<>&'".into());
-        let xml = table_xml(1, &t, &t.columns, &DxfTable::default());
+        let xml = table_xml(1, &t, &t.columns, &[], &DxfTable::default());
         XmlSanitizer::validate_safe_xml(&xml).unwrap();
         assert_eq!(parse_table(&xml), Some(t));
     }

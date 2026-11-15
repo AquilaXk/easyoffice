@@ -29,6 +29,8 @@ use crate::{CellBox, EasyOfficeError};
 
 #[path = "ods_tables.rs"]
 pub(crate) mod ods_tables;
+#[path = "xlsx_table_totals.rs"]
+pub(crate) mod xlsx_table_totals;
 #[path = "xlsx_tables.rs"]
 pub(crate) mod xlsx_tables;
 

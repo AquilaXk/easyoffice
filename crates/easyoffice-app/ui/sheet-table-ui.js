@@ -21,9 +21,6 @@
     tableName: { empty: "표 이름을 입력", tooLong: "이름은 255자까지", name: "표 이름이 올바르지 않음", reserved: "함수나 시트 이름은 쓸 수 없음", duplicate: "이미 있는 이름", limit: "이름은 10,000개까지", unchecked: "이름을 확인하지 못함" },
   };
   const TOTAL_LABEL = "요약";
-  const SUM = 109;
-  const COUNT = 103;
-  const NUMERIC = /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/;
   const OPTIONS = {
     header: (t) => t.header !== false,
     totals: (t) => t.totals === true,
@@ -64,10 +61,12 @@
     const ops = host.__EASYOFFICE_SHEET_TABLE_OPS__;
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+    const totalsApi = host.__EASYOFFICE_SHEET_TABLE_TOTALS__;
     const refOf = host.__EASYOFFICE_SHEET_REFS__.refOf;
     const { $, setChecked, openDialog, closeDialog, note } = kit;
     const state = { mode: "create", table: null, bound: false };
     let gallery = null;
+    let totalsMenu = null;
 
     const say = (text) => {
       const fb = document.getElementById("status-command-feedback");
@@ -484,24 +483,13 @@
     function totalsCells(held, b, ctx) {
       const last = b.c2;
       const first = b.r1 + (held.header === false ? 0 : 1);
-      let numbers = 0;
-      let filled = 0;
-      for (let r = first; r <= b.r2; r += 1) {
-        const text = ctx.cellAt(r, last)?.value;
-        if (text !== undefined && text !== "") {
-          filled += 1;
-          if (NUMERIC.test(String(text))) numbers += 1;
-        }
-      }
-      const column = held.columns[held.columns.length - 1];
-      const special = /[^\p{L}\p{N}_ ]/u.test(column) ? "[" + escapeColumn(column) + "]" : escapeColumn(column);
-      const code = filled > 0 && numbers === filled ? SUM : COUNT;
-      const cells = [{ row: b.r2 + 1, col: last, text: "", formula: "=SUBTOTAL(" + code + "," + held.name + "[" + special + "])" }];
+      const texts = [];
+      for (let r = first; r <= b.r2; r += 1) texts.push(ctx.cellAt(r, last)?.value);
+      const id = totalsApi.defaultFunction(texts);
+      const cells = [{ row: b.r2 + 1, col: last, text: "", formula: totalsApi.formulaFor(held, held.columns.length - 1, id) }];
       if (held.columns.length > 1) cells.unshift({ row: b.r2 + 1, col: b.c1, text: TOTAL_LABEL });
       return cells;
     }
-
-    const escapeColumn = (text) => text.replace(/(['\[\]#])/g, "'$1");
 
     // Turning the totals row on puts a row under the table (its cells when they are empty, else a row opens there); turning it
     // off takes the last row out of the table and empties it.
@@ -541,6 +529,34 @@
         }
         return done;
       });
+    }
+
+    // ---- the function of a totals-row cell ---------------------------------------------------------------------------------------
+    // One step: the cell takes the `SUBTOTAL` of function `id` over its column (`none` empties it); `more` starts a formula of
+    // the user's own in the formula bar.
+    function setTotalsFunction(table, index, id) {
+      if (id === "more") return startOwnFormula(table, index);
+      return changeTable(table, (held, ctx) => {
+        if (held.totals !== true || index < 0 || index >= held.columns.length) return null;
+        const at = { row: ctx.boxOf(held).r2, col: ctx.boxOf(held).c1 + index };
+        if (id === "none") return { table: held, clear: [at], text: STATUS.totals };
+        const formula = totalsApi.formulaFor(held, index, id);
+        return formula ? { table: held, writes: [{ ...at, text: "", formula }], text: STATUS.totals } : null;
+      });
+    }
+
+    function startOwnFormula(table, index) {
+      const name = getActiveSheetName();
+      if (!allowed(name)) return Promise.resolve(false);
+      const b = layoutApi.tableBox(table);
+      selectRange({ r1: b.r2, c1: b.c1 + index, r2: b.r2, c2: b.c1 + index });
+      const input = $("formula-input");
+      if (input) {
+        input.value = "=";
+        input.focus?.();
+        input.setSelectionRange?.(1, 1);
+      }
+      return Promise.resolve(true);
     }
 
     const touchesBox = (a, c) => a.r1 <= c.r2 && a.r2 >= c.r1 && a.c1 <= c.c2 && a.c2 >= c.c1;
@@ -729,6 +745,21 @@
           if (!done) input.value = tableAtActive()?.name ?? "";
         });
       });
+      totalsMenu = host.__EASYOFFICE_CREATE_SHEET_TABLE_TOTALS_MENU__({
+        document,
+        getSheetName: getActiveSheetName,
+        getSelection,
+        tableAt: styleApi.tableAt,
+        boxOf: layoutApi.tableBox,
+        // The cell as the page shows it now (the model is behind a cell that was just edited).
+        cellAt: (row, col) => {
+          const td = document.querySelector('#pane-sheet td[data-cell="' + refOf(row, col) + '"]');
+          return td?.dataset.formula ? { formula: td.dataset.formula } : sheetDataStore[getActiveSheetName()]?.[refOf(row, col)];
+        },
+        canEdit: () => allowed(getActiveSheetName()),
+        pick: setTotalsFunction,
+      });
+      totalsMenu.bind();
       layoutApi.onChange(sync);
       host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter, growth };
     }

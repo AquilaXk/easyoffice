@@ -709,6 +709,8 @@
         }
         td.classList.toggle("filter-head", head);
         td.classList.toggle("filter-on", on);
+        // The totals-row cells of a table carry the function list's arrow while selected (PD-232).
+        td.classList.toggle("totals-cell", Boolean(table && table.totals === true && layoutApi.tableBox(table).r2 === r));
         const m = hasMerges ? layoutApi.mergeAt(name, r, c) : null;
         const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
         td.classList.toggle("merge-anchor", anchor);
