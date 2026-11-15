@@ -11,6 +11,7 @@
     renamed: (name) => "표 이름: " + name,
     resized: "표 크기 조정",
     toRange: "범위로 변환",
+    toRangeBare: "범위로 변환: 서식 제외",
     expanded: "표 자동 확장",
     style: "표 스타일",
     option: "표 스타일 옵션",
@@ -62,6 +63,7 @@
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
     const totalsApi = host.__EASYOFFICE_SHEET_TABLE_TOTALS__;
+    const bakeApi = host.__EASYOFFICE_SHEET_TABLE_BAKE__;
     const refOf = host.__EASYOFFICE_SHEET_REFS__.refOf;
     const { $, setChecked, openDialog, closeDialog, note } = kit;
     const state = { mode: "create", table: null, bound: false };
@@ -399,11 +401,17 @@
           return false;
         }
         const b = layoutApi.tableBox(held);
-        const record = sheetHistory.begin({ bySheet: refsOf(answer.rewrites), parts: ["sheetLayout", "definedNames"] });
+        // The table's look goes into the cells' own formats (the cells' own formats stay), inside the same step.
+        const map = sheetDataStore[name] || (sheetDataStore[name] = {});
+        const baked = bakeApi.plan(held, b, (row, col) => map[refOf(row, col)]?.style);
+        const by = refsOf(answer.rewrites);
+        by[name] = [...(by[name] || []), ...baked.cells.map((c) => c.ref)];
+        const record = sheetHistory.begin({ bySheet: by, parts: ["sheetLayout", "definedNames"] });
         applyRewrites(answer);
+        bakeApi.apply(baked, host.__EASYOFFICE_SHEET_STYLE_CODEC__.patchCell.bind(null, map));
         layoutApi.setTables(name, layoutApi.tablesOf(name).filter((t) => t !== held));
         sheetHistory.commit(record);
-        await settle(name, STATUS.toRange);
+        await settle(name, baked.over ? STATUS.toRangeBare : STATUS.toRange);
         selectRange({ r1: b.r1, c1: b.c1, r2: b.r2, c2: b.c2 });
         // The rows the table's own filter hid show again.
         return true;

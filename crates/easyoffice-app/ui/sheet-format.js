@@ -432,5 +432,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;
-  host.__EASYOFFICE_SHEET_STYLE_CODEC__ = { styleToPayload, styleFromPayload };
+  host.__EASYOFFICE_SHEET_STYLE_CODEC__ = { styleToPayload, styleFromPayload, patchCell };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

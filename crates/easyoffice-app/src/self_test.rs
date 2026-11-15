@@ -446,6 +446,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_TABLE_GALLERY__",
     ),
     (
+        include_str!("../ui/sheet-table-bake.js"),
+        "__EASYOFFICE_SHEET_TABLE_BAKE__",
+    ),
+    (
         include_str!("../ui/sheet-table-totals.js"),
         "__EASYOFFICE_SHEET_TABLE_TOTALS__",
     ),
