@@ -157,6 +157,7 @@
       lastColumn: false,
       rowStripes: true,
       columnStripes: false,
+      filter: [],
     };
     return { table, headerWrites, insertRow, box: final };
   }

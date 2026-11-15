@@ -679,6 +679,7 @@
       const colRuns = layout?.hiddenCols || [];
       const filter = layout?.filter || null;
       const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
+      const tableStyle = layout?.tables?.length > 0 ? host.__EASYOFFICE_SHEET_TABLE_STYLE__ : null;
       const hasColRuns = !empty && colRuns.length > 0;
       const hiddenColSet = hasColRuns ? new Set() : null;
       for (const [c, th] of colHeadByCol) {
@@ -698,9 +699,16 @@
         const r = td._row;
         const c = td._col;
         td.classList.toggle("sheet-hidden", hiddenColSet ? hiddenColSet.has(c) : false);
-        const head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
+        // The header cells of the sheet's filter and of the tables with filter buttons carry the button (PD-226, PD-231).
+        let head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
+        let on = head && filterCols.has(c);
+        const table = tableStyle?.tableAt(name, r, c);
+        if (table && Array.isArray(table.filter) && table.header !== false && layoutApi.tableBox(table).r1 === r) {
+          head = true;
+          on = table.filter.some((x) => x.col === c);
+        }
         td.classList.toggle("filter-head", head);
-        td.classList.toggle("filter-on", head && filterCols.has(c));
+        td.classList.toggle("filter-on", on);
         const m = hasMerges ? layoutApi.mergeAt(name, r, c) : null;
         const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
         td.classList.toggle("merge-anchor", anchor);

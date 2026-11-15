@@ -34,7 +34,19 @@
     let rowEls = [];
 
     const filterNow = () => layoutApi.filterOf(getActiveSheetName());
+    // The filter the panel works on: the sheet's (`owner` null) or the table `owner`'s (PD-226, PD-231).
+    const viewNow = (owner) => filter.viewOf(getActiveSheetName(), owner);
     const columnOf = (filterModel, col) => filterModel?.columns.find((c) => c.col === col) || null;
+
+    // The owner of the button on the header cell `row`, `col`: `null` for the sheet's filter, a table's name for a table with
+    // filter buttons, `undefined` for a cell that has no button.
+    function ownerAt(row, col) {
+      const name = getActiveSheetName();
+      const table = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.tableAt(name, row, col);
+      if (table) return table.header !== false && Array.isArray(table.filter) && layoutApi.tableBox(table).r1 === row ? table.name : undefined;
+      const f = layoutApi.filterOf(name);
+      return f && row === f.range.r1 && col >= f.range.c1 && col <= f.range.c2 ? null : undefined;
+    }
 
     // ---- the drop-down button on the header cells ------------------------------------------------
     // The cell paints the button itself (`td.filter-head::after`); a press on that corner opens
@@ -44,21 +56,23 @@
       if (!td || (ev.button ?? 0) !== 0) return;
       const box = td.getBoundingClientRect();
       if (ev.clientX < box.right - HIT_PX || ev.clientY < box.bottom - HIT_PX) return;
+      const owner = ownerAt(td._row, td._col);
+      if (owner === undefined) return;
       ev.preventDefault();
       ev.stopPropagation();
-      void open(td._col, box.left, box.bottom);
+      void open(td._col, box.left, box.bottom, owner);
     }
 
     // Alt+Down on a header cell of the range opens the panel, as the button does.
     function onKeydown(ev) {
       if (!ev.altKey || ev.key !== "ArrowDown") return;
-      const f = filterNow();
       const sel = getSelection();
-      if (!f || sel.axis || sel.ar !== f.range.r1 || sel.ac < f.range.c1 || sel.ac > f.range.c2) return;
+      const owner = sel.axis ? undefined : ownerAt(sel.ar, sel.ac);
+      if (owner === undefined) return;
       const td = document.querySelector('#pane-sheet td[data-cell="' + host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(sel.ar, sel.ac) + '"]');
       const box = td?.getBoundingClientRect?.() || { left: 0, bottom: 0 };
       ev.preventDefault();
-      void open(sel.ac, box.left, box.bottom);
+      void open(sel.ac, box.left, box.bottom, owner);
     }
 
     // ---- the panel -----------------------------------------------------------------------------------
@@ -301,14 +315,14 @@
     // condition says (everything when it has none or a custom one).
     async function load(query) {
       const token = ++state.token;
-      const answer = await filter.values(state.col, query);
+      const answer = await filter.values(state.col, query, state.owner);
       if (!state || token !== state.token) return;
       if (!answer) {
         filter.say("값 목록을 가져오지 못함");
         close(true);
         return;
       }
-      const criteria = columnOf(filterNow(), state.col);
+      const criteria = columnOf(viewNow(state.owner), state.col);
       // A list condition (values, dates or both) says what is checked; any other condition shows everything checked.
       const listed = Boolean(criteria && (criteria.values || criteria.dates));
       const picked = listed ? new Set(criteria.values || []) : null;
@@ -348,12 +362,12 @@
       el.style.top = Math.max(0, vh > 0 ? Math.min(y, vh - height - MENU_MARGIN) : y) + "px";
     }
 
-    async function open(col, x, y) {
-      const f = filterNow();
+    async function open(col, x, y, owner = null) {
+      const f = viewNow(owner);
       const el = panel();
       if (!f || !el) return;
       close(false);
-      state = { col, items: [], blank: null, tree: [], flat: [{ kind: "all" }], more: false, query: "", cursor: -1, token: 0 };
+      state = { col, owner, items: [], blank: null, tree: [], flat: [{ kind: "all" }], more: false, query: "", cursor: -1, token: 0 };
       renderColors(null, null);
       const has = Boolean(columnOf(f, col));
       const clear = el.querySelector('[data-filter-act="clear-column"]');
@@ -389,10 +403,10 @@
       if (picked.length === 0 && !blank && dates.length === 0) return;
       const treeAll = state.tree.every((y) => nodeState(y) === "true");
       const everything = state.query === "" && !state.more && picked.length === state.items.length && (!state.blank || blank) && treeAll;
-      const col = state.col;
+      const { col, owner } = state;
       close(true);
       const criteria = everything ? null : { ...(blank ? { blank: true } : {}), values: picked, ...(dates.length ? { dates } : {}) };
-      void filter.setCriteria(col, criteria);
+      void filter.setCriteria(col, criteria, owner);
     }
 
     // The colours the conditional formats give the column, for the `색 기준 필터` submenu: the fill colours and the
@@ -468,26 +482,26 @@
     // A colour (or "none") picked in the submenu.
     function pickColor(el) {
       if (!state) return;
-      const col = state.col;
+      const { col, owner } = state;
       const color = { ...(el.dataset.font ? { font: true } : {}), ...(el.dataset.rgb ? { rgb: el.dataset.rgb } : {}) };
       close(true);
-      void filter.setCriteria(col, { color });
+      void filter.setCriteria(col, { color }, owner);
     }
 
     // Runs one of the panel's menu rows.
     function act(name) {
       if (!state) return;
-      const col = state.col;
+      const { col, owner } = state;
       if (name === "sort-asc" || name === "sort-desc") {
         close(true);
-        void filter.sortBy(col, name === "sort-desc");
+        void filter.sortBy(col, name === "sort-desc", owner);
       } else if (name === "custom") {
         close(false);
-        openCustom(col);
+        openCustom(col, owner);
       } else if (name === "clear-column") {
         if (panel().querySelector('[data-filter-act="clear-column"]')?.getAttribute("aria-disabled") === "true") return;
         close(true);
-        void filter.setCriteria(col, null);
+        void filter.setCriteria(col, null, owner);
       } else if (name === "cancel") {
         close(true);
       }
@@ -627,6 +641,7 @@
 
     // ---- the custom condition dialog ---------------------------------------------------------------------
     let customCol = 0;
+    let customOwner = null;
     const rowIds = [
       ["sheet-filter-op1", "sheet-filter-text1"],
       ["sheet-filter-op2", "sheet-filter-text2"],
@@ -639,10 +654,11 @@
       }
     }
 
-    function openCustom(col) {
-      const f = filterNow();
+    function openCustom(col, owner = null) {
+      const f = viewNow(owner);
       if (!f) return;
       customCol = col;
+      customOwner = owner;
       const forms = core.formsFromCriteria(columnOf(f, col));
       forms.rows.forEach((form, k) => {
         setSelect(rowIds[k][0], form.op);
@@ -666,13 +682,13 @@
         return;
       }
       closeDialog("sheet-filter-dialog");
-      void filter.setCriteria(customCol, result.criteria);
+      void filter.setCriteria(customCol, result.criteria, customOwner);
     }
 
     // ---- state shown elsewhere ----------------------------------------------------------------------------
     // The "필터" menu item is checked while the sheet has a filter.
     function refreshMenu() {
-      const on = filterNow() ? "true" : "false";
+      const on = filterNow() || filter.activeTable(getActiveSheetName())?.filter ? "true" : "false";
       for (const el of document.querySelectorAll('[data-sheet-act="filter-toggle"]')) el.setAttribute("aria-checked", on);
     }
 

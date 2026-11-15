@@ -56,7 +56,7 @@ test("a table is made of the range with its header row, banded rows and the defa
   const plan = api.planCreate({ box: box("A1:B2"), header: true, ctx: sheet(cells) });
   assert.equal(plan.error, undefined);
   assert.equal(plan.insertRow, false);
-  assert.deepEqual(plan.table, { name: "표1", range: "A1:B2", header: true, totals: false, columns: ["Region", "Q1"], style: "TableStyleMedium2", firstColumn: false, lastColumn: false, rowStripes: true, columnStripes: false });
+  assert.deepEqual(plan.table, { name: "표1", range: "A1:B2", header: true, totals: false, columns: ["Region", "Q1"], style: "TableStyleMedium2", firstColumn: false, lastColumn: false, rowStripes: true, columnStripes: false, filter: [] });
   assert.deepEqual(plan.headerWrites, [], "the header cells already say their names");
 });
 

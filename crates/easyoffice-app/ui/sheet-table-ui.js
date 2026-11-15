@@ -31,6 +31,7 @@
     firstColumn: (t) => t.firstColumn === true,
     lastColumn: (t) => t.lastColumn === true,
     columnStripes: (t) => t.columnStripes === true,
+    filterButton: (t) => Array.isArray(t.filter),
   };
   const MAX_EXPAND_STEPS = 100000;
 
@@ -414,6 +415,7 @@
     function toggleOption(table, key, on) {
       if (key === "header") return toggleHeader(table, on);
       if (key === "totals") return toggleTotals(table, on);
+      if (key === "filterButton") return filter.setTableButtons(table.name, on);
       return changeTable(table, (held) => ({ table: { ...held, [key]: on }, text: STATUS.option, recalc: false }));
     }
 
@@ -454,7 +456,7 @@
       const headerOf = (held, row) => {
         const now = layoutApi.tableBox(held);
         return {
-          table: { ...held, header: true, range: ops.rangeText(row, now.c1, now.r2, now.c2) },
+          table: { ...held, header: true, filter: [], range: ops.rangeText(row, now.c1, now.r2, now.c2) },
           writes: held.columns.map((text, i) => ({ row, col: now.c1 + i, text })),
           text: STATUS.header,
         };
@@ -643,6 +645,8 @@
     function sync() {
       const bar = $("sheet-table-bar");
       if (!bar) return;
+      // The 필터 menu item is checked while the active cell is in a table with buttons.
+      filter.notify();
       const table = tableAtActive();
       bar.hidden = !table;
       if (!table) {
@@ -654,12 +658,15 @@
       for (const box of bar.querySelectorAll("[data-table-opt]")) box.checked = OPTIONS[box.dataset.tableOpt](table);
       const locked = Boolean(protectApi && protectApi.isOn(getActiveSheetName()));
       for (const el of bar.querySelectorAll("input, button")) el.disabled = locked;
+      // Without a header row there is nothing to carry the buttons.
+      const buttons = bar.querySelector('[data-table-opt="filterButton"]');
+      if (buttons && table.header === false) buttons.disabled = true;
     }
 
     function openGallery() {
       const table = tableAtActive();
       if (!table) return;
-      const options = Object.fromEntries(Object.keys(OPTIONS).map((key) => [key, OPTIONS[key](table)]));
+      const options = Object.fromEntries(Object.keys(OPTIONS).filter((key) => key !== "filterButton").map((key) => [key, OPTIONS[key](table)]));
       gallery.open($("btn-table-style"), table.style || null, options, customStyles());
     }
 

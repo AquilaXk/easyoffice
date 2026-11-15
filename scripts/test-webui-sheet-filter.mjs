@@ -6,6 +6,7 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule } from "./test-support/modules.mjs";
+import { fakeFilterEngine } from "./test-support/fake-filter-engine.mjs";
 
 // The sheet's auto filter (PD-198): how a condition in the dialog maps to the engine's condition,
 // the range a filter is created for, the layout lookups over the rows the user and the filter
@@ -173,57 +174,6 @@ const MODEL = {
   ],
 };
 
-// A stand-in for the engine's `filter` action: values lists, `greaterThan` and `*x*` conditions.
-function judge(criteria, text) {
-  if (criteria.values) return text === "" ? criteria.blank === true : criteria.values.includes(text);
-  const one = (c) => {
-    if (c.op === "greaterThan") return text !== "" && Number(text) > Number(c.text);
-    if (c.op === "lessThan") return text !== "" && Number(text) < Number(c.text);
-    return new RegExp("^" + c.text.replaceAll("*", ".*") + "$", "i").test(text);
-  };
-  const [a, b] = criteria.conditions;
-  return b ? (criteria.and ? one(a) && one(b) : one(a) || one(b)) : one(a);
-}
-
-function fakeFilterEngine() {
-  return (body) => {
-    const rows = body.data[0]?.values.length ?? 0;
-    const column = (col) => body.data.find((d) => d.col === col).values;
-    const hiddenBy = (skip) => {
-      const hidden = new Set();
-      for (const c of body.filter.columns) {
-        if (c.col === skip) continue;
-        column(c.col).forEach((text, i) => {
-          if (!judge(c, text)) hidden.add(i);
-        });
-      }
-      return hidden;
-    };
-    if (body.op === "apply") {
-      const hidden = hiddenBy(-1);
-      const base = Number(/^[A-Z]+(\d+)/.exec(body.filter.range)[1]) + 1;
-      const runs = [];
-      for (let i = 0; i < rows; i += 1) {
-        if (!hidden.has(i)) continue;
-        const last = runs[runs.length - 1];
-        if (last && last[1] === base + i - 1) last[1] = base + i;
-        else runs.push([base + i, base + i]);
-      }
-      return { hidden: runs, count: hidden.size };
-    }
-    const excluded = hiddenBy(body.col);
-    const counts = new Map();
-    let blank = 0;
-    column(body.col).forEach((text, i) => {
-      if (excluded.has(i)) return;
-      if (text === "") blank += 1;
-      else if (!body.query || text.toLowerCase().includes(body.query.toLowerCase())) counts.set(text, (counts.get(text) || 0) + 1);
-    });
-    const items = [...counts].sort((a, b) => a[0].localeCompare(b[0], "ko"));
-    return { items, blank: body.query ? 0 : blank, more: false };
-  };
-}
-
 async function createHarness(override = () => undefined, model = MODEL) {
   const requests = [];
   const fake = fakeFilterEngine();
@@ -356,12 +306,12 @@ test("a value condition hides rows apart from the user's, shows on the header an
   assert.deepEqual(layout.getAll(), before, "the undo restored the state from before the condition");
 });
 
-test("the sheet's filter is not turned on over a table, and is over the cells next to one (PD-224)", async () => {
+test("the sheet's filter is not turned on over a table without a header row (PD-224)", async () => {
   const h = await createHarness();
   const d = h.document;
   const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
   const before = layout.getAll();
-  layout.replaceAll({ ...before, 표: { ...before["표"], tables: [{ name: "T", range: "A1:B7", header: true, totals: false, columns: ["a", "b"] }] } });
+  layout.replaceAll({ ...before, 표: { ...before["표"], tables: [{ name: "T", range: "A1:B7", header: false, totals: false, columns: ["a", "b"] }] } });
   cell(d, "A3").focus();
   await click(h, act(d, "filter-toggle"));
   assert.equal(feedback(d), "표와 겹치는 범위에는 필터를 켤 수 없음");

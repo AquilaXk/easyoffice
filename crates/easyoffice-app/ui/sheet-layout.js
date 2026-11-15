@@ -410,6 +410,21 @@
     return true;
   }
 
+  // Sets the conditions of a table's own filter (a list, empty for buttons without conditions; `null` for a table
+  // without filter buttons) and the rows they hide.
+  function setTableFilter(name, tableName, columns, runs) {
+    const layout = bySheet[name];
+    const table = layout?.tables?.find((t) => t.name === tableName);
+    if (!table) return false;
+    if (columns === null) delete table.filter;
+    else table.filter = columns;
+    if (runs?.length) table.filterHidden = runs.map((r) => [r[0], r[1]]);
+    else delete table.filterHidden;
+    layout.rows = null;
+    touch();
+    return true;
+  }
+
   // Clears the conditions of a table's own filter and the rows they hide (the table keeps its filter buttons).
   // True when there was anything to clear.
   function clearTableFilter(name, tableName) {
@@ -633,6 +648,7 @@
     filterOf,
     setFilter,
     setTableFilterHidden,
+    setTableFilter,
     clearTableFilter,
     filterToJson,
     colHidden,

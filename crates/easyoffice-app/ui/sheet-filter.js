@@ -373,13 +373,27 @@
     // ---- the filters of the tables of the sheet (PD-226) -----------------------------------------------------
     // A table with conditions in its filter is judged by the same engine request as the sheet's filter: its header
     // row and data rows are the range, the conditions of its columns the columns.
-    function tableFilterOf(t) {
+    // The filter of a table with filter buttons, as the page models the sheet's: `null` for a table without them.
+    function tableViewOf(t) {
       const parse = gridUtils.parseRef;
       const [a, b] = String(t.range).split(":").map((ref) => parse(ref));
-      if (!a || !b || !t.header || !Array.isArray(t.filter) || t.filter.length === 0) return null;
+      if (!a || !b || t.header === false || !Array.isArray(t.filter)) return null;
       const r2 = b.row - (t.totals ? 1 : 0);
       if (r2 <= a.row || r2 - a.row >= MAX_FILTER_ROWS) return null;
-      return { range: { r1: a.row, c1: a.col, r2, c2: b.col }, columns: t.filter, hidden: [] };
+      return { range: { r1: a.row, c1: a.col, r2, c2: b.col }, columns: t.filter, hidden: t.filterHidden || [] };
+    }
+
+    // The same with conditions: the one the engine has rows to judge for.
+    function tableFilterOf(t) {
+      const view = tableViewOf(t);
+      return view && view.columns.length > 0 ? { ...view, hidden: [] } : null;
+    }
+
+    // The filter an owner stands for: `null` is the sheet's own, a table's name that table's.
+    function viewOf(name, owner) {
+      if (owner === null) return filterOf(name);
+      const table = layoutApi.tablesOf(name).find((t) => t.name === owner);
+      return table ? tableViewOf(table) : null;
     }
 
     // Judges every filtered table of the sheet again; true when each answer came back.
@@ -402,15 +416,21 @@
       return "필터: " + total + "행 중 " + (total - count) + "행 표시";
     }
 
-    // Applies `next` (the range and conditions) to the sheet: the engine's hidden rows replace
+    // Keeps the conditions and the hidden rows in the filter of `owner`.
+    function store(name, owner, next, hidden) {
+      if (owner === null) layoutApi.setFilter(name, { ...next, hidden });
+      else layoutApi.setTableFilter(name, owner, next.columns, hidden);
+    }
+
+    // Applies `next` (the range and conditions) to the sheet or the table `owner`: the engine's hidden rows replace
     // the filter's. Returns whether it worked.
-    async function install(name, next) {
+    async function install(name, next, owner = null) {
       const answer = await evaluate(next);
       if (!answer) {
         say("필터를 적용하지 못함");
         return false;
       }
-      layoutApi.setFilter(name, { ...next, hidden: answer.hidden });
+      store(name, owner, next, answer.hidden);
       grid.layoutChanged();
       refreshWindowFromModel();
       say(summary(next, answer.count));
@@ -454,7 +474,32 @@
       return !(create ? guard.guardUnprotected(name) : guard.guardAction(name, "autoFilter"));
     }
 
+    // The table with a header row that holds the active cell: the filter command works on its buttons (PD-231).
+    function activeTable(name) {
+      const sel = getSelection();
+      const table = sel && host.__EASYOFFICE_SHEET_TABLE_STYLE__?.tableAt(name, sel.ar, sel.ac);
+      return table && table.header !== false ? table : null;
+    }
+
+    // Turns the filter buttons of a table on, or off with the conditions and the rows they hid (the spreadsheet program's
+    // `필터 단추`); one undoable step.
+    function setTableButtons(tableName, on) {
+      if (blocked(true)) return Promise.resolve(false);
+      return change(async (name) => {
+        const table = layoutApi.tablesOf(name).find((t) => t.name === tableName);
+        if (!table || table.header === false || Array.isArray(table.filter) === on) return false;
+        layoutApi.setTableFilter(name, tableName, on ? [] : null, []);
+        grid.layoutChanged();
+        refreshWindowFromModel();
+        say(on ? "필터 켬" : "필터 해제");
+        changed();
+        return true;
+      });
+    }
+
     function toggle() {
+      const table = activeTable(getActiveSheetName());
+      if (table) return setTableButtons(table.name, !Array.isArray(table.filter));
       if (blocked(true)) return Promise.resolve(false);
       return change(async (name) => {
         if (filterOf(name)) {
@@ -490,15 +535,17 @@
     }
 
     // Sets (or with null removes) the condition of column `col` and applies the filter.
-    function setCriteria(col, criteria) {
+    function setCriteria(col, criteria, owner = null) {
       if (blocked(false)) return Promise.resolve(false);
       return change(async (name) => {
-        const filter = filterOf(name);
+        const filter = viewOf(name, owner);
         if (!filter) return false;
         const columns = filter.columns.filter((c) => c.col !== col);
         if (criteria) columns.push({ col, ...criteria });
         columns.sort((a, b) => a.col - b.col);
-        return install(name, { range: extendedRange(name, filter.range), columns, hidden: [] });
+        // A table grows by what is typed under it (PD-231); only the sheet's filter takes rows in when applied again.
+        const range = owner === null ? extendedRange(name, filter.range) : filter.range;
+        return install(name, { range, columns, hidden: [] }, owner);
       });
     }
 
@@ -576,9 +623,9 @@
     }
 
     // The values `col` offers among the rows the other columns leave visible; `null` on failure.
-    async function values(col, query) {
+    async function values(col, query, owner = null) {
       const name = syncCells();
-      const filter = filterOf(name);
+      const filter = viewOf(name, owner);
       if (!filter) return null;
       try {
         const answer = await sheetStoreHelpers.callSheetAction(requestFor("values", filter, [col], { col, query: query || "" }));
@@ -590,23 +637,23 @@
 
     // Sorts the data rows by column `col` (descending when `descending`) and applies the filter
     // again, because the rows moved.
-    function sortBy(col, descending) {
+    function sortBy(col, descending, owner = null) {
       return change(async (name) => {
-        const filter = filterOf(name);
+        const filter = viewOf(name, owner);
         if (!filter) return false;
         const { r1, r2, c1, c2 } = filter.range;
         const sorted = await sortRange({ range: { r1: r1 + 1, r2, c1, c2, keyCol: col }, direction: descending ? -1 : 1 });
         if (!sorted) return false;
         sheetDataStore[name] = snapshotDomSheetCells();
         const answer = await evaluate({ range: filter.range, columns: filter.columns, hidden: [] });
-        if (answer) layoutApi.setFilter(name, { range: filter.range, columns: filter.columns, hidden: answer.hidden });
+        if (answer) store(name, owner, { range: filter.range, columns: filter.columns }, answer.hidden);
         grid.layoutChanged();
         refreshWindowFromModel();
         say(descending ? "내림차순 정렬" : "오름차순 정렬");
         changed();
         return true;
       }, (name) => {
-        const filter = filterOf(name);
+        const filter = viewOf(name, owner);
         return filter ? { r1: filter.range.r1 + 1, r2: filter.range.r2, c1: filter.range.c1, c2: filter.range.c2 } : null;
       });
     }
@@ -621,6 +668,9 @@
     return {
       run,
       toggle,
+      setTableButtons,
+      activeTable,
+      viewOf,
       reapply,
       hasTableFilters,
       clearAll,
@@ -630,6 +680,7 @@
       sortBy,
       current: active,
       onChange: (fn) => listeners.push(fn),
+      notify: changed,
       say,
     };
   }
