@@ -6,6 +6,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 mod frame;
+mod objects;
+
+use self::objects::{is_drawing_shape, NoteFormatSpec, OLE_SKIP_WARNING};
 
 use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::section_xml;
@@ -275,6 +278,7 @@ struct ParaState {
     para_pr: String,
     style: String,
     images: Vec<RichImage>,
+    after_blocks: Vec<RichBlock>,
     columns: Option<RichColumns>,
 }
 
@@ -394,24 +398,6 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
     }
 }
 
-const SKIPPED_SUBTREES: [&str; 13] = [
-    "hp:secPr",
-    "hp:ctrl",
-    "hp:equation",
-    "hp:ole",
-    "hp:container",
-    "hp:rect",
-    "hp:ellipse",
-    "hp:line",
-    "hp:arc",
-    "hp:polygon",
-    "hp:curve",
-    "hp:connectLine",
-    "hp:textart",
-];
-
-const SHAPE_SKIP_NOTE: &str = "그림·도형·수식·머리말은 가져오지 않았습니다.";
-
 /// A non-negative integer attribute (`default` when absent or unreadable, saturating when huge).
 fn count_attr(attrs: &Attrs<'_>, name: &str, default: u32) -> u32 {
     attr(attrs, name)
@@ -426,7 +412,10 @@ struct SectionWalker {
     runs: Vec<RunState>,
     t_depth: usize,
     tbl_depth: usize,
+    in_cell: bool,
     placed: Vec<PlacedCell>,
+    table_images: Vec<RichImage>,
+    table_captions: Vec<RichBlock>,
     /// Index of the open `hp:tr` and the column after the previous cell (positions of cells
     /// that carry no `hp:cellAddr`).
     tr_index: u32,
@@ -449,6 +438,16 @@ struct SectionWalker {
     paper: Option<RichPaper>,
     binding: RichBinding,
     left_out: frame::FrameLeftOut,
+    /// Footnote and endnote formatting + collected appendix blocks across sections.
+    footnote_spec: NoteFormatSpec,
+    endnote_spec: NoteFormatSpec,
+    next_footnote: usize,
+    next_endnote: usize,
+    total_notes: usize,
+    footnotes: Vec<RichBlock>,
+    endnotes: Vec<RichBlock>,
+    nest_depth: u8,
+    in_note: bool,
 }
 
 /// Binary item id -> package entry, from the `opf:item` manifest of `Contents/content.hpf`.
@@ -524,51 +523,6 @@ fn scan_picture<'e>(events: &[XmlEvent<'e>]) -> PictureFields<'e> {
 }
 
 impl SectionWalker {
-    /// Reads an `hp:pic` (events span its start to its end) into the open paragraph.
-    fn on_picture(
-        &mut self,
-        events: &[XmlEvent<'_>],
-        media: &HwpxMedia<'_>,
-        warnings: &mut Vec<String>,
-    ) -> Result<(), EasyOfficeError> {
-        let fields = scan_picture(events);
-        let entry = fields.item.as_deref().and_then(|id| media.by_id.get(id));
-        let mut warn = |note: String| {
-            if !warnings.contains(&note) {
-                warnings.push(note);
-            }
-        };
-        let Some(entry) = entry else {
-            warn("찾을 수 없거나 외부에 있는 그림은 가져오지 않았습니다.".to_string());
-            return Ok(());
-        };
-        if self.tbl_depth > 0 || self.paras.is_empty() {
-            warn("표 안의 그림은 가져오지 않았습니다.".to_string());
-            return Ok(());
-        }
-        self.budget.charge(entry.data.len())?;
-        let mut image = match RichImage::new(entry.data.clone(), fields.alt.as_str()) {
-            Ok(image) => image,
-            Err(err) => {
-                warn(format!(
-                    "그림 '{}'을 가져오지 않았습니다: {err}",
-                    entry.path
-                ));
-                return Ok(());
-            }
-        };
-        if let Some((w, h)) = fields.size {
-            // An out-of-range size keeps the default derived from the pixels.
-            let _ = image.set_display_emu(w, h);
-        }
-        if let Some(top) = self.paras.last_mut() {
-            top.images.push(image);
-        }
-        Ok(())
-    }
-}
-
-impl SectionWalker {
     fn on_start(
         &mut self,
         name: &str,
@@ -582,7 +536,8 @@ impl SectionWalker {
                 para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
                 style: attr(attrs, "styleIDRef").unwrap_or_default().into_owned(),
                 images: Vec::new(),
-                columns: (self.tbl_depth == 0)
+                after_blocks: Vec::new(),
+                columns: (self.tbl_depth == 0 && !self.in_note)
                     .then_some(self.current_columns)
                     .flatten(),
             }),
@@ -610,11 +565,15 @@ impl SectionWalker {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
                     self.placed.clear();
+                    self.table_images.clear();
+                    self.table_captions.clear();
+                    self.in_cell = false;
                     self.tr_index = 0;
                 }
             }
             "hp:tr" if self.tbl_depth == 1 => self.next_col = 0,
             "hp:tc" if self.tbl_depth == 1 => {
+                self.in_cell = true;
                 self.cell_paras.clear();
                 self.cell_addr = None;
                 self.cell_span = (1, 1);
@@ -660,6 +619,7 @@ impl SectionWalker {
                 self.finish_paragraph(header, blocks)?;
             }
             "hp:tc" if self.tbl_depth == 1 => {
+                self.in_cell = false;
                 let (row, col) = self.cell_addr.unwrap_or((self.tr_index, self.next_col));
                 let (row_span, col_span) = self.cell_span;
                 self.next_col = col.saturating_add(col_span);
@@ -678,12 +638,18 @@ impl SectionWalker {
             "hp:tr" if self.tbl_depth == 1 => self.tr_index = self.tr_index.saturating_add(1),
             "hp:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
-                if self.tbl_depth == 0 && !self.placed.is_empty() {
-                    self.text_budget.charge_block(0, "HWPX 표")?;
-                    let (table, dropped) =
-                        table_from_placed(std::mem::take(&mut self.placed), &mut self.text_budget)?;
-                    self.dropped_merges += dropped;
-                    blocks.push(RichBlock::Table(table));
+                if self.tbl_depth == 0 {
+                    if !self.placed.is_empty() {
+                        self.text_budget.charge_block(0, "HWPX 표")?;
+                        let (table, dropped) = table_from_placed(
+                            std::mem::take(&mut self.placed),
+                            &mut self.text_budget,
+                        )?;
+                        self.dropped_merges += dropped;
+                        blocks.push(RichBlock::Table(table));
+                    }
+                    blocks.extend(self.table_images.drain(..).map(RichBlock::Image));
+                    blocks.append(&mut self.table_captions);
                 }
             }
             _ => {}
@@ -739,13 +705,14 @@ impl SectionWalker {
             para_pr: top.para_pr.clone(),
             style: top.style.clone(),
             images: std::mem::take(&mut top.images),
+            after_blocks: std::mem::take(&mut top.after_blocks),
             columns: top.columns,
         };
         push_paragraph_blocks(header, before, blocks, &mut self.text_budget)
     }
 }
 
-/// The paragraph block (when it has text) and its pictures, in that order.
+/// The paragraph block (when it has text), its pictures and any trailing caption blocks.
 fn push_paragraph_blocks(
     header: &Header,
     mut p: ParaState,
@@ -753,6 +720,7 @@ fn push_paragraph_blocks(
     text_budget: &mut DecodeBudget,
 ) -> Result<(), EasyOfficeError> {
     let images = std::mem::take(&mut p.images);
+    let after_blocks = std::mem::take(&mut p.after_blocks);
     if p.runs
         .iter()
         .any(|r| r.field.is_some() || !r.text.trim().is_empty())
@@ -761,6 +729,7 @@ fn push_paragraph_blocks(
         blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
     }
     blocks.extend(images.into_iter().map(RichBlock::Image));
+    blocks.extend(after_blocks);
     Ok(())
 }
 
@@ -777,13 +746,22 @@ fn read_section(
         match event {
             XmlEvent::Start { name: "hp:pic", .. } => {
                 let picture = reader.collect_subtree(event)?;
-                walker.on_picture(&picture, media, warnings)?;
+                walker.on_picture(&picture, header, media, blocks, warnings)?;
+            }
+            XmlEvent::Start {
+                name: "hp:equation",
+                ..
+            } => {
+                let eq = reader.collect_subtree(event)?;
+                walker.on_equation(&eq, header, media, blocks, warnings)?;
             }
             XmlEvent::Start {
                 name: "hp:ctrl", ..
             } => {
                 let control = reader.collect_subtree(event)?;
-                if !walker.on_frame_control(&control, header)? {
+                if !walker.on_frame_control(&control, header)?
+                    && !walker.on_note_control(&control, header, media, warnings)?
+                {
                     walker.on_ctrl(&control, header)?;
                 }
             }
@@ -793,16 +771,27 @@ fn read_section(
                 let properties = reader.collect_subtree(event)?;
                 walker.on_section_properties(&properties);
             }
-            XmlEvent::Start { name, ref attrs } => {
-                if SKIPPED_SUBTREES.contains(&name) {
-                    if !matches!(name, "hp:secPr" | "hp:ctrl")
-                        && !warnings.iter().any(|w| w == SHAPE_SKIP_NOTE)
-                    {
-                        warnings.push(SHAPE_SKIP_NOTE.to_string());
-                    }
-                    reader.skip_subtree()?;
-                    continue;
+            XmlEvent::Start {
+                name: "hp:caption", ..
+            } if walker.tbl_depth == 1 && !walker.in_cell => {
+                let cap = reader.collect_subtree(event)?;
+                let cap_blocks = walker.extract_caption_blocks(&cap, header, media, warnings)?;
+                walker.table_captions.extend(cap_blocks);
+            }
+            XmlEvent::Start { name, .. } if is_drawing_shape(name) => {
+                let shape = reader.collect_subtree(event)?;
+                walker.on_shape_or_container(&shape, header, media, blocks, warnings)?;
+            }
+            XmlEvent::Start {
+                name: "hp:ole" | "hp:switch",
+                ..
+            } => {
+                if !warnings.iter().any(|w| w == OLE_SKIP_WARNING) {
+                    warnings.push(OLE_SKIP_WARNING.to_string());
                 }
+                reader.skip_subtree()?;
+            }
+            XmlEvent::Start { name, ref attrs } => {
                 walker.on_start(name, attrs, header, blocks)?;
             }
             XmlEvent::Text(text) => walker.on_text(&text)?,
@@ -871,6 +860,19 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             &mut blocks,
             &mut warnings,
         )?;
+    }
+    for (title_text, note_blocks) in [
+        ("각주", std::mem::take(&mut walker.footnotes)),
+        ("미주", std::mem::take(&mut walker.endnotes)),
+    ] {
+        if !note_blocks.is_empty() {
+            blocks.push(RichBlock::Paragraph(RichParagraph {
+                runs: vec![RichRun::plain(title_text)],
+                heading_level: 2,
+                ..RichParagraph::default()
+            }));
+            blocks.extend(note_blocks);
+        }
     }
     if walker.dropped_merges > 0 {
         warnings.push(format!(

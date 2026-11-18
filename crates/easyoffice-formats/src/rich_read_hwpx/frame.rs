@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 
+use super::objects::{decode_note_deco, NoteNumKind};
 use super::{Header, SectionWalker};
 use crate::hwpx_parts::HWPUNIT_PER_TWIP;
 use crate::rich_document::{
@@ -38,73 +39,145 @@ impl SectionWalker {
     /// end); the first section that gives a setup that fits its paper wins. The paper is stored upright and
     /// swapped when the page is landscape (`NARROWLY`, `rhwp` `src/parser/hwpx/section.rs:450-458`).
     pub(super) fn on_section_properties(&mut self, events: &[XmlEvent<'_>]) {
-        if self.margins.is_some() {
-            return;
-        }
+        let first_setup = self.margins.is_none();
         let (mut paper, mut landscape) = (None, false);
         let mut kind = RichBindingKind::Single;
+        let mut note_target: Option<bool> = None;
         for event in events {
-            let XmlEvent::Start { name, attrs } = event else {
-                continue;
-            };
-            if *name == "hp:visibility"
-                && (attr(attrs, "hideFirstHeader").as_deref() == Some("1")
-                    || attr(attrs, "hideFirstFooter").as_deref() == Some("1"))
-            {
-                self.frame.first_page_different = true;
-                continue;
-            }
-            let value = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<u32>().ok());
-            if *name == "hp:pagePr" {
-                landscape =
-                    attr(attrs, "landscape").is_some_and(|v| v.eq_ignore_ascii_case("NARROWLY"));
-                kind = match attr(attrs, "gutterType").as_deref() {
-                    Some("LEFT_RIGHT") => RichBindingKind::Duplex,
-                    Some("TOP_BOTTOM") => RichBindingKind::Top,
-                    _ => RichBindingKind::Single,
-                };
-                if let (Some(width), Some(height)) = (value("width"), value("height")) {
-                    paper = Some((to_twips(width), to_twips(height)));
+            match event {
+                XmlEvent::End("hp:footNotePr" | "hp:endNotePr") => {
+                    note_target = None;
+                    continue;
                 }
-                continue;
-            }
-            if *name != "hp:margin" {
-                continue;
-            }
-            if let (Some(header), Some(footer), Some(top), Some(bottom), Some(left), Some(right)) = (
-                value("header"),
-                value("footer"),
-                value("top"),
-                value("bottom"),
-                value("left"),
-                value("right"),
-            ) {
-                let margins = margins_from_hwpx((header, footer, top, bottom), (left, right));
-                let paper = paper.map(|(w, h)| {
-                    let (short, long) = (w.min(h), w.max(h));
-                    if landscape {
-                        RichPaper {
-                            width: long,
-                            height: short,
+                XmlEvent::Start { name, attrs } => {
+                    if *name == "hp:footNotePr" {
+                        note_target = Some(false);
+                        continue;
+                    }
+                    if *name == "hp:endNotePr" {
+                        note_target = Some(true);
+                        continue;
+                    }
+                    if let Some(is_end) = note_target {
+                        let spec = if is_end {
+                            &mut self.endnote_spec
+                        } else {
+                            &mut self.footnote_spec
+                        };
+                        if *name == "hp:autoNumFormat" {
+                            if let Some(t) = attr(attrs, "type") {
+                                spec.kind = NoteNumKind::from_owpml(&t);
+                            }
+                            if let Some(p) = attr(attrs, "prefixChar") {
+                                spec.prefix = decode_note_deco(Some(&p), None);
+                            }
+                            if let Some(s) = attr(attrs, "suffixChar") {
+                                spec.suffix = decode_note_deco(Some(&s), None);
+                            }
+                            if let Some(u) = attr(attrs, "userChar") {
+                                spec.user_char = decode_note_deco(Some(&u), None);
+                            }
+                        } else if *name == "hp:numbering" {
+                            let restart = matches!(
+                                attr(attrs, "type").as_deref(),
+                                Some("ON_SECTION" | "ON_PAGE")
+                            );
+                            spec.restart_each_section = restart;
+                            let new_num = attr(attrs, "newNum")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .filter(|n| *n > 0);
+                            if restart {
+                                let base = new_num.unwrap_or(1).saturating_sub(1);
+                                if is_end {
+                                    self.next_endnote = base;
+                                } else {
+                                    self.next_footnote = base;
+                                }
+                            } else if first_setup {
+                                if let Some(start) = new_num {
+                                    let base = start.saturating_sub(1);
+                                    if is_end {
+                                        self.next_endnote = base;
+                                    } else {
+                                        self.next_footnote = base;
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        RichPaper {
-                            width: short,
-                            height: long,
+                        continue;
+                    }
+                    if !first_setup {
+                        continue;
+                    }
+                    if *name == "hp:visibility"
+                        && (attr(attrs, "hideFirstHeader").as_deref() == Some("1")
+                            || attr(attrs, "hideFirstFooter").as_deref() == Some("1"))
+                    {
+                        self.frame.first_page_different = true;
+                        continue;
+                    }
+                    let value =
+                        |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<u32>().ok());
+                    if *name == "hp:pagePr" {
+                        landscape = attr(attrs, "landscape")
+                            .is_some_and(|v| v.eq_ignore_ascii_case("NARROWLY"));
+                        kind = match attr(attrs, "gutterType").as_deref() {
+                            Some("LEFT_RIGHT") => RichBindingKind::Duplex,
+                            Some("TOP_BOTTOM") => RichBindingKind::Top,
+                            _ => RichBindingKind::Single,
+                        };
+                        if let (Some(width), Some(height)) = (value("width"), value("height")) {
+                            paper = Some((to_twips(width), to_twips(height)));
+                        }
+                        continue;
+                    }
+                    if *name != "hp:margin" {
+                        continue;
+                    }
+                    if let (
+                        Some(header),
+                        Some(footer),
+                        Some(top),
+                        Some(bottom),
+                        Some(left),
+                        Some(right),
+                    ) = (
+                        value("header"),
+                        value("footer"),
+                        value("top"),
+                        value("bottom"),
+                        value("left"),
+                        value("right"),
+                    ) {
+                        let margins =
+                            margins_from_hwpx((header, footer, top, bottom), (left, right));
+                        let paper = paper.map(|(w, h)| {
+                            let (short, long) = (w.min(h), w.max(h));
+                            if landscape {
+                                RichPaper {
+                                    width: long,
+                                    height: short,
+                                }
+                            } else {
+                                RichPaper {
+                                    width: short,
+                                    height: long,
+                                }
+                            }
+                        });
+                        let binding = RichBinding {
+                            kind,
+                            gutter: to_twips(value("gutter").unwrap_or(0)),
+                        };
+                        if paper.is_none_or(|p| p.holds_bound(&margins, binding)) {
+                            self.margins = Some(margins);
+                            self.paper = paper;
+                            self.binding = binding;
                         }
                     }
-                });
-                let binding = RichBinding {
-                    kind,
-                    gutter: to_twips(value("gutter").unwrap_or(0)),
-                };
-                if paper.is_none_or(|p| p.holds_bound(&margins, binding)) {
-                    self.margins = Some(margins);
-                    self.paper = paper;
-                    self.binding = binding;
                 }
+                _ => {}
             }
-            return;
         }
     }
 

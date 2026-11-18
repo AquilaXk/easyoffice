@@ -20,6 +20,7 @@ pub mod hwp5_codec;
 pub mod hwp_eqedit;
 pub mod hwpx_codec;
 mod hwpx_parts;
+mod hwpx_unpack;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 mod odf_package;

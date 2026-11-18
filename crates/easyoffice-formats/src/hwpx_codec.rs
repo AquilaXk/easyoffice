@@ -13,7 +13,8 @@ use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER,
     HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
-use crate::office_codecs::{checked_part, checked_zip_xml_entries};
+pub(crate) use crate::hwpx_unpack::section_xml;
+use crate::office_codecs::checked_part;
 use crate::rich_document::{
     frame_paragraph, safe_link_target, RichAlignment, RichBinding, RichBlock, RichColumns,
     RichDocument, RichField, RichPageMargins, RichPaper, RichParagraph,
@@ -30,10 +31,9 @@ use crate::rich_page_frame::{
 use crate::rich_table::{CellSpan, SpanMap, TableCellLink};
 use crate::rich_table_writers::slice_cell_links;
 use crate::rtf_xml_helpers::{
-    extract_attr, extract_attr_from_fragment, extract_tag_bodies,
-    extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs, strip_tag_blocks,
+    extract_attr, extract_attr_from_fragment, extract_tag_bodies, extract_tags_with_attrs,
 };
-use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
+use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec};
 
 /// OPF metadata entry marking a document as a template (`.hwtx`).
 pub const HWPX_TEMPLATE_META_MARKER: &str =
@@ -745,181 +745,6 @@ impl HwpxCodec {
     }
 
     pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
-        let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        let parts = checked_zip_xml_entries(&entries)?;
-        let (_header_xml, title, is_template, official_agency, approval_lines) =
-            Self::extract_header_and_metadata(&parts)?;
-
-        let mut sec_entries: Vec<(usize, &crate::ZipArchiveEntry)> = entries
-            .iter()
-            .filter_map(|e| {
-                let idx = e
-                    .path
-                    .strip_prefix("Contents/section")
-                    .and_then(|s| s.strip_suffix(".xml"))
-                    .and_then(|s| s.parse::<usize>().ok())?;
-                Some((idx, e))
-            })
-            .collect();
-        sec_entries.sort_by_key(|(idx, _)| *idx);
-
-        if sec_entries.is_empty() {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "HWPX 필수 엔트리 'Contents/section0.xml'이 누락되었습니다.".to_string(),
-            ));
-        }
-
-        let mut tables = Vec::new();
-        let mut paragraphs = Vec::new();
-        let mut budget = crate::decode_budget::DecodeBudget::new();
-        budget.charge(title.len(), "HWPX 제목")?;
-
-        for (_, sec_entry) in sec_entries {
-            let sec_xml = section_xml(&parts, &sec_entry.path)?;
-
-            for tbl_body in extract_tag_bodies(sec_xml, "hp:tbl") {
-                let rows = extract_hwpx_table_rows(tbl_body)?;
-                for r in &rows {
-                    for c in r {
-                        budget.charge_cell(c.len(), "HWPX 표 셀")?;
-                    }
-                }
-                tables.push(rows);
-                let tbl_without_tc = strip_tag_blocks(tbl_body, "hp:tc");
-                let prev_len = paragraphs.len();
-                append_hwpx_equations(&tbl_without_tc, &mut paragraphs)?;
-                for p in &paragraphs[prev_len..] {
-                    budget.charge(p.len(), "HWPX 수식 텍스트")?;
-                }
-            }
-
-            let sec_tables_replaced =
-                crate::rtf_xml_helpers::replace_tag_blocks(sec_xml, "hp:tbl", "<hp:tbl_Removed/>");
-            for p_body in extract_tag_bodies(&sec_tables_replaced, "hp:p") {
-                budget.charge_block(0, "HWPX 문단")?;
-                let has_table = p_body.contains("<hp:tbl_Removed/>");
-                if is_structural_carrier(p_body, has_table) {
-                    continue;
-                }
-                let prev_len = paragraphs.len();
-                extract_hwpx_paragraphs_and_eqs(p_body, &mut paragraphs)?;
-                for p in &paragraphs[prev_len..] {
-                    budget.charge(p.len(), "HWPX 문단 텍스트")?;
-                }
-            }
-            let outside_p = strip_tag_blocks(&sec_tables_replaced, "hp:p");
-            let prev_len = paragraphs.len();
-            append_hwpx_equations(&outside_p, &mut paragraphs)?;
-            for p in &paragraphs[prev_len..] {
-                budget.charge(p.len(), "HWPX 수식 텍스트")?;
-            }
-        }
-
-        Ok(HwpxPayload {
-            title,
-            is_template,
-            official_agency,
-            approval_lines,
-            paragraphs,
-            tables,
-        })
+        crate::hwpx_unpack::unpack_hwpx_bytes(bytes)
     }
-}
-
-/// A `Contents/section*.xml` part of a package whose XML entries were checked as a whole.
-pub(crate) fn section_xml<'a>(
-    parts: &[(&str, &'a str)],
-    path: &str,
-) -> Result<&'a str, EasyOfficeError> {
-    checked_part(parts, path).ok_or_else(|| {
-        EasyOfficeError::CorruptedContainer(format!(
-            "HWPX 구역 엔트리 '{path}'를 읽을 수 없습니다."
-        ))
-    })
-}
-
-/// A paragraph that only anchors a table or carries section/column properties has no text.
-fn is_structural_carrier(p_body: &str, had_table: bool) -> bool {
-    let carries_props = p_body.contains("<hp:secPr") || p_body.contains("<hp:ctrl");
-    (had_table || carries_props)
-        && extract_tags_or_self_closing_with_attrs(p_body, "hp:t").is_empty()
-        && !p_body.contains("<hp:equation")
-}
-
-fn extract_hwpx_paragraphs_and_eqs(
-    p_body: &str,
-    out: &mut Vec<String>,
-) -> Result<(), EasyOfficeError> {
-    let p_without_eq = strip_tag_blocks(p_body, "hp:equation");
-    let text = extract_tag_bodies(&p_without_eq, "hp:t")
-        .into_iter()
-        .map(XmlSanitizer::unescape)
-        .collect::<Vec<_>>()
-        .join("");
-    if !text.is_empty() || !p_body.contains("<hp:equation") {
-        out.push(text);
-    }
-    append_hwpx_equations(p_body, out)
-}
-
-fn extract_hwpx_cell_text(tc_body: &str) -> Result<String, EasyOfficeError> {
-    let cell_paras = extract_tag_bodies(tc_body, "hp:p");
-    let mut parts = Vec::new();
-    if !cell_paras.is_empty() {
-        for p in cell_paras {
-            extract_hwpx_paragraphs_and_eqs(p, &mut parts)?;
-        }
-        let tc_no_p = strip_tag_blocks(tc_body, "hp:p");
-        append_hwpx_equations(&tc_no_p, &mut parts)?;
-    } else {
-        let tc_no_eq = strip_tag_blocks(tc_body, "hp:equation");
-        let direct_t = extract_tag_bodies(&tc_no_eq, "hp:t");
-        let text_nodes = if !direct_t.is_empty() {
-            direct_t
-        } else {
-            extract_tag_bodies(&tc_no_eq, "hp:cellText")
-        };
-        let t = text_nodes
-            .into_iter()
-            .map(XmlSanitizer::unescape)
-            .collect::<Vec<_>>()
-            .join("");
-        if !t.is_empty() || !tc_body.contains("<hp:equation") {
-            parts.push(t);
-        }
-        append_hwpx_equations(tc_body, &mut parts)?;
-    }
-    Ok(parts.join("\n"))
-}
-
-fn extract_hwpx_table_rows(tbl_body: &str) -> Result<Vec<Vec<String>>, EasyOfficeError> {
-    let mut rows = Vec::new();
-    let tr_bodies = extract_tag_bodies(tbl_body, "hp:tr");
-    let row_slices = if !tr_bodies.is_empty() {
-        tr_bodies
-    } else {
-        vec![tbl_body]
-    };
-    for tr_body in row_slices {
-        let mut cells = Vec::new();
-        for tc_body in extract_tag_bodies(tr_body, "hp:tc") {
-            cells.push(extract_hwpx_cell_text(tc_body)?);
-        }
-        rows.push(cells);
-    }
-    Ok(rows)
-}
-
-fn append_hwpx_equations(xml: &str, out: &mut Vec<String>) -> Result<(), EasyOfficeError> {
-    for eq_body in extract_tag_bodies(xml, "hp:equation") {
-        for raw_script in extract_tag_bodies(eq_body, "hp:script") {
-            let script = XmlSanitizer::unescape(raw_script);
-            let trimmed = script.trim();
-            if !trimmed.is_empty() {
-                let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
-                out.push(format!("$${latex}$$"));
-            }
-        }
-    }
-    Ok(())
 }

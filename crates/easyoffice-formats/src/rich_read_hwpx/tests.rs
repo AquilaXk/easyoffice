@@ -34,12 +34,16 @@ fn hostile_on_picture_charges_image_budget_before_clone_or_decode() {
     let events: Vec<XmlEvent<'_>> = XmlReader::new(pic_xml)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
+    let header = Header::default();
+    let mut blocks = Vec::new();
     let mut warnings = Vec::new();
     for _ in 0..crate::MAX_IMAGES_PER_DOCUMENT {
-        walker.on_picture(&events, &media, &mut warnings).unwrap();
+        walker
+            .on_picture(&events, &header, &media, &mut blocks, &mut warnings)
+            .unwrap();
     }
     assert!(matches!(
-        walker.on_picture(&events, &media, &mut warnings),
+        walker.on_picture(&events, &header, &media, &mut blocks, &mut warnings),
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }
