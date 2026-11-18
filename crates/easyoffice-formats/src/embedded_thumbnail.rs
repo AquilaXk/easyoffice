@@ -1,18 +1,20 @@
-//! Preview picture inside a saved document (PD-132).
+//! Preview picture inside a saved document (PD-132, PD-239).
 //!
 //! File managers and recent-document lists show the picture a program stored in the file itself:
 //! the `PrvImage` stream of an HWP 5.0 OLE2 container, `Preview/PrvImage.png` of an HWPX package
-//! (KS X 6101) and `docProps/thumbnail.png` of an OOXML package, which the package root points to
-//! with a `metadata/thumbnail` relationship (ECMA-376 Part 2 section 10.1.3.2). The engine draws no
-//! pages, so it never makes the picture: the caller hands over PNG bytes and this module puts them
-//! in the file. Every input is checked before anything is parsed (Fail-Closed): the picture must be
-//! a structurally valid PNG within the byte and pixel limits, and the document within the size the
-//! rewrite is allowed to hold in memory.
+//! (KS X 6101), `docProps/thumbnail.png` of an OOXML package (`DOCX`, `XLSX`, `PPTX`, `PPSX`),
+//! which the package root points to with a `metadata/thumbnail` relationship (ECMA-376 Part 2
+//! section 10.1.3.2), and `Thumbnails/thumbnail.png` of an ODF package (`ODT`, `ODS`, `ODP`,
+//! ODF 1.2 Part 3 section 3.8). The engine draws no pages, so it never makes the picture: the
+//! caller hands over PNG bytes and this module puts them in the file. Every input is checked
+//! before anything is parsed (Fail-Closed): the picture must be a structurally valid PNG within
+//! the byte and pixel limits, and the document within the size the rewrite is allowed to hold in
+//! memory.
 
 use crate::rich_image_probe::probe_png;
 use crate::{
-    DocumentFormat, EasyOfficeError, Ole2ContainerCodec, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy, HANGUL_EDITOR_MAX_ENTRY_BYTES,
+    DocumentFormat, EasyOfficeError, Ole2ContainerCodec, ZipArchiveCodec, ZipSecurityPolicy,
+    HANGUL_EDITOR_MAX_ENTRY_BYTES,
 };
 
 /// Largest picture accepted (encoded bytes). Half of the reader's limit for a start-window card,
@@ -36,6 +38,11 @@ const OOXML_THUMBNAIL_REL_TYPE: &str =
 const PNG_CONTENT_TYPE_DEFAULT: &str = "<Default Extension=\"png\" ContentType=\"image/png\"/>";
 /// Relationship id of a thumbnail the module adds (a number follows when the id is taken).
 const OOXML_THUMBNAIL_REL_ID: &str = "rIdThumbnail";
+const ODF_THUMBNAIL_PREFIX: &str = "Thumbnails/thumbnail.";
+const ODF_THUMBNAIL_ENTRY: &str = "Thumbnails/thumbnail.png";
+const ODF_MANIFEST: &str = "META-INF/manifest.xml";
+const ODF_MANIFEST_FILE_ENTRY: &str =
+    "<manifest:file-entry manifest:full-path=\"Thumbnails/thumbnail.png\" manifest:media-type=\"image/png\"/>";
 
 /// Whether [`embed_thumbnail`] writes a preview picture into files of `format`.
 pub fn supports_thumbnail(format: DocumentFormat) -> bool {
@@ -46,6 +53,12 @@ pub fn supports_thumbnail(format: DocumentFormat) -> bool {
             | DocumentFormat::Hwpx
             | DocumentFormat::Hwtx
             | DocumentFormat::Docx
+            | DocumentFormat::Xlsx
+            | DocumentFormat::Pptx
+            | DocumentFormat::Ppsx
+            | DocumentFormat::Odt
+            | DocumentFormat::Ods
+            | DocumentFormat::Odp
     )
 }
 
@@ -90,8 +103,41 @@ pub fn embed_thumbnail(
     }
     match format {
         DocumentFormat::Hwp | DocumentFormat::Hwt => embed_hwp(document, png),
-        DocumentFormat::Hwpx | DocumentFormat::Hwtx => embed_hwpx(document, png),
-        _ => embed_docx(document, png),
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => {
+            embed_zip(format, document, png, &hangul_zip_policy())
+        }
+        _ => embed_zip(format, document, png, &ZipSecurityPolicy::default()),
+    }
+}
+
+/// Inserts or replaces `png` directly in unpacked ZIP `entries` before packing (single-pass path
+/// for [`crate::UniversalFormatConverter::encode_rich_with_thumbnail`]).
+pub(crate) fn embed_thumbnail_entries(
+    format: DocumentFormat,
+    entries: &mut Vec<(String, Vec<u8>)>,
+    png: &[u8],
+) -> Result<(), EasyOfficeError> {
+    check_thumbnail_png(png)?;
+    match format {
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => {
+            upsert(
+                entries,
+                HWPX_PREVIEW_ENTRY,
+                (HWPX_PREVIEW_ENTRY.to_string(), png.to_vec()),
+                |(path, _)| path,
+            );
+            Ok(())
+        }
+        DocumentFormat::Docx
+        | DocumentFormat::Xlsx
+        | DocumentFormat::Pptx
+        | DocumentFormat::Ppsx => add_ooxml_thumbnail(entries, png),
+        DocumentFormat::Odt | DocumentFormat::Ods | DocumentFormat::Odp => {
+            add_odf_thumbnail(entries, png)
+        }
+        _ => Err(EasyOfficeError::UnsupportedExtension(
+            format.extension().to_string(),
+        )),
     }
 }
 
@@ -131,37 +177,30 @@ fn hangul_zip_policy() -> ZipSecurityPolicy {
     }
 }
 
-fn embed_hwpx(document: &[u8], png: &[u8]) -> Result<Vec<u8>, EasyOfficeError> {
-    let mut entries = ZipArchiveCodec::unpack(document, &hangul_zip_policy())?;
-    upsert(
-        &mut entries,
-        HWPX_PREVIEW_ENTRY,
-        ZipArchiveEntry::new(HWPX_PREVIEW_ENTRY, png.to_vec()),
-        |entry| &entry.path,
-    );
+fn embed_zip(
+    format: DocumentFormat,
+    document: &[u8],
+    png: &[u8],
+    policy: &ZipSecurityPolicy,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let mut entries: Vec<(String, Vec<u8>)> = ZipArchiveCodec::unpack(document, policy)?
+        .into_iter()
+        .map(|entry| (entry.path, entry.data))
+        .collect();
+    embed_thumbnail_entries(format, &mut entries, png)?;
     ZipArchiveCodec::pack_compressed(&entries)
 }
 
-fn embed_docx(document: &[u8], png: &[u8]) -> Result<Vec<u8>, EasyOfficeError> {
-    let mut entries = ZipArchiveCodec::unpack(document, &ZipSecurityPolicy::default())?;
-    add_ooxml_thumbnail(&mut entries, png)?;
-    ZipArchiveCodec::pack_compressed(&entries)
+fn text_of(entries: &[(String, Vec<u8>)], path: &str) -> Result<String, EasyOfficeError> {
+    let (_, data) = entries.iter().find(|(p, _)| p == path).ok_or_else(|| {
+        EasyOfficeError::CorruptedContainer(format!("패키지에 {path}가 없습니다."))
+    })?;
+    String::from_utf8(data.clone()).map_err(|_| EasyOfficeError::InvalidUtf8(path.to_string()))
 }
 
-fn text_of(entries: &[ZipArchiveEntry], path: &str) -> Result<String, EasyOfficeError> {
-    let entry = entries
-        .iter()
-        .find(|entry| entry.path == path)
-        .ok_or_else(|| {
-            EasyOfficeError::CorruptedContainer(format!("패키지에 {path}가 없습니다."))
-        })?;
-    String::from_utf8(entry.data.clone())
-        .map_err(|_| EasyOfficeError::InvalidUtf8(path.to_string()))
-}
-
-fn set_text(entries: &mut [ZipArchiveEntry], path: &str, text: String) {
-    if let Some(entry) = entries.iter_mut().find(|entry| entry.path == path) {
-        *entry = ZipArchiveEntry::new(path, text.into_bytes());
+fn set_text(entries: &mut [(String, Vec<u8>)], path: &str, text: String) {
+    if let Some((_, data)) = entries.iter_mut().find(|(p, _)| p == path) {
+        *data = text.into_bytes();
     }
 }
 
@@ -203,7 +242,7 @@ fn free_relationship_id(rels: &str) -> String {
 /// that already points at a PNG thumbnail gets that part replaced; one whose thumbnail is another
 /// kind of picture is refused rather than left with two.
 fn add_ooxml_thumbnail(
-    entries: &mut Vec<ZipArchiveEntry>,
+    entries: &mut Vec<(String, Vec<u8>)>,
     png: &[u8],
 ) -> Result<(), EasyOfficeError> {
     let rels = text_of(entries, OOXML_ROOT_RELS)?;
@@ -249,12 +288,9 @@ fn add_ooxml_thumbnail(
     }
     set_text(entries, OOXML_ROOT_RELS, rels);
     set_text(entries, OOXML_CONTENT_TYPES, content_types);
-    upsert(
-        entries,
-        &part,
-        ZipArchiveEntry::new(part.clone(), png.to_vec()),
-        |entry| &entry.path,
-    );
+    upsert(entries, &part, (part.clone(), png.to_vec()), |(path, _)| {
+        path
+    });
     Ok(())
 }
 
@@ -273,6 +309,62 @@ fn ensure_png_default(content_types: String) -> Result<String, EasyOfficeError> 
     let mut patched = content_types;
     patched.insert_str(at, PNG_CONTENT_TYPE_DEFAULT);
     Ok(patched)
+}
+
+fn is_odf_thumbnail_stem(path: &str) -> bool {
+    let trimmed = path.trim_start_matches('/');
+    trimmed
+        .get(..ODF_THUMBNAIL_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(ODF_THUMBNAIL_PREFIX))
+}
+
+/// Puts `png` into an ODF package as `Thumbnails/thumbnail.png` and registers it in
+/// `META-INF/manifest.xml` (ODF 1.2 Part 3 section 3.8). A non-PNG thumbnail entry is refused
+/// rather than left alongside the new PNG.
+fn add_odf_thumbnail(
+    entries: &mut Vec<(String, Vec<u8>)>,
+    png: &[u8],
+) -> Result<(), EasyOfficeError> {
+    if entries.iter().any(|(path, _)| {
+        is_odf_thumbnail_stem(path) && !path.eq_ignore_ascii_case(ODF_THUMBNAIL_ENTRY)
+    }) {
+        return Err(invalid("패키지의 미리보기 그림이 PNG가 아닙니다."));
+    }
+    let manifest = text_of(entries, ODF_MANIFEST)?;
+    let mut has_png_entry = false;
+    for tag in manifest
+        .split("<manifest:file-entry")
+        .skip(1)
+        .filter(|rest| rest.starts_with([' ', '\t', '\r', '\n']))
+        .filter_map(|rest| rest.find('>').map(|end| &rest[..end]))
+    {
+        if let Some(full_path) = attribute(tag, "manifest:full-path") {
+            let clean = full_path.trim_start_matches('/');
+            if clean.eq_ignore_ascii_case(ODF_THUMBNAIL_ENTRY) {
+                has_png_entry = true;
+            } else if is_odf_thumbnail_stem(clean) {
+                return Err(invalid("패키지의 미리보기 그림이 PNG가 아닙니다."));
+            }
+        }
+    }
+    if !has_png_entry {
+        let at = manifest
+            .rfind("</manifest:manifest>")
+            .ok_or_else(|| EasyOfficeError::CorruptedContainer("매니페스트 형식".to_string()))?;
+        let mut patched = manifest;
+        patched.insert_str(at, ODF_MANIFEST_FILE_ENTRY);
+        crate::XmlSanitizer::validate_safe_xml(&patched)?;
+        set_text(entries, ODF_MANIFEST, patched);
+    } else {
+        crate::XmlSanitizer::validate_safe_xml(&manifest)?;
+    }
+    upsert(
+        entries,
+        ODF_THUMBNAIL_ENTRY,
+        (ODF_THUMBNAIL_ENTRY.to_string(), png.to_vec()),
+        |(path, _)| path,
+    );
+    Ok(())
 }
 
 /// Reads the embedded preview picture (PNG) from `document`, if any, using selective unpack.
@@ -296,6 +388,14 @@ pub fn read_thumbnail(
                 ZipArchiveCodec::unpack_selected(document, &hangul_zip_policy(), |path| {
                     path.eq_ignore_ascii_case(HWPX_PREVIEW_ENTRY)
                 })?;
+            entries.into_iter().next().map(|e| e.data)
+        }
+        DocumentFormat::Odt | DocumentFormat::Ods | DocumentFormat::Odp => {
+            let entries = ZipArchiveCodec::unpack_selected(
+                document,
+                &ZipSecurityPolicy::default(),
+                |path| path.eq_ignore_ascii_case(ODF_THUMBNAIL_ENTRY),
+            )?;
             entries.into_iter().next().map(|e| e.data)
         }
         _ => {

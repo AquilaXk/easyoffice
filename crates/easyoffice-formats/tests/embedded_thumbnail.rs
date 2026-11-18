@@ -2,10 +2,10 @@
 //! format's own place, nothing else in the document changes, and bad input is refused.
 
 use easyoffice_formats::{
-    embed_thumbnail, supports_thumbnail, DocumentFormat, EasyOfficeError, Ole2ContainerCodec,
-    RichBlock, RichDocument, RichImage, RichParagraph, RichRun, UniversalDocumentModel,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_EMBED_DOCUMENT_BYTES,
-    MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
+    embed_thumbnail, read_thumbnail, supports_thumbnail, DocumentFormat, EasyOfficeError,
+    Ole2ContainerCodec, RichBlock, RichDocument, RichImage, RichParagraph, RichRun,
+    UniversalDocumentModel, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
 };
 
 #[allow(dead_code)]
@@ -84,20 +84,27 @@ fn without(mut all: Vec<(String, Vec<u8>)>, name: &str) -> Vec<(String, Vec<u8>)
 }
 
 #[test]
-fn only_the_three_formats_with_a_preview_part_are_supported() {
+fn only_the_package_formats_with_a_preview_part_are_supported() {
     for format in [
         DocumentFormat::Hwp,
         DocumentFormat::Hwt,
         DocumentFormat::Hwpx,
         DocumentFormat::Hwtx,
         DocumentFormat::Docx,
+        DocumentFormat::Xlsx,
+        DocumentFormat::Pptx,
+        DocumentFormat::Ppsx,
+        DocumentFormat::Odt,
+        DocumentFormat::Ods,
+        DocumentFormat::Odp,
     ] {
         assert!(supports_thumbnail(format), "{format:?}");
     }
     for format in [
         DocumentFormat::Pdf,
-        DocumentFormat::Xlsx,
-        DocumentFormat::Odt,
+        DocumentFormat::Rtf,
+        DocumentFormat::Csv,
+        DocumentFormat::Pages,
     ] {
         assert!(!supports_thumbnail(format), "{format:?}");
         let err = embed_thumbnail(format, b"x", &thumbnail()).unwrap_err();
@@ -291,16 +298,148 @@ fn the_rich_writer_adds_the_picture_only_when_the_caller_gives_one() {
     )
     .unwrap();
     assert_eq!(part(&with, "docProps/thumbnail.png").unwrap(), png);
-    // A format without a preview part ignores the picture.
-    let odt = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Odt, None).unwrap();
-    let odt_with = UniversalFormatConverter::encode_rich_with_thumbnail(
-        &doc,
+    // Single-pass DOCX, ODT, and HWPX match the two-pass embed_thumbnail output and round-trip.
+    for format in [
+        DocumentFormat::Docx,
         DocumentFormat::Odt,
+        DocumentFormat::Hwpx,
+    ] {
+        let plain = UniversalFormatConverter::encode_rich(&doc, format, None).unwrap();
+        let two_pass = embed_thumbnail(format, &plain, &png).unwrap();
+        let one_pass =
+            UniversalFormatConverter::encode_rich_with_thumbnail(&doc, format, None, Some(&png))
+                .unwrap();
+        assert_eq!(one_pass, two_pass, "{format:?}");
+        assert_eq!(
+            read_thumbnail(format, &one_pass).unwrap().as_deref(),
+            Some(png.as_slice()),
+            "{format:?}"
+        );
+    }
+    // A format without a preview part ignores the picture.
+    let rtf = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Rtf, None).unwrap();
+    let rtf_with = UniversalFormatConverter::encode_rich_with_thumbnail(
+        &doc,
+        DocumentFormat::Rtf,
         None,
         Some(&png),
     )
     .unwrap();
-    assert_eq!(odt_with, odt);
+    assert_eq!(rtf_with, rtf);
+}
+
+#[test]
+fn all_ooxml_and_odf_packages_store_and_replace_thumbnails_cleanly() {
+    let png = thumbnail();
+    let second_png = make_png(90, 128, 2, 3);
+    let mut rich_model = model();
+    rich_model.sheet_cells = vec![(0, 0, "항목".to_string()), (1, 0, "42".to_string())];
+    rich_model.slides = vec![("제목".to_string(), vec!["요점".to_string()], String::new())];
+    for format in [
+        DocumentFormat::Xlsx,
+        DocumentFormat::Pptx,
+        DocumentFormat::Ppsx,
+    ] {
+        let original = UniversalFormatConverter::encode(&rich_model, format).unwrap();
+        let once = embed_thumbnail(format, &original, &png).unwrap();
+        assert_eq!(part(&once, "docProps/thumbnail.png").unwrap(), png);
+        assert_eq!(
+            read_thumbnail(format, &once).unwrap().as_deref(),
+            Some(png.as_slice())
+        );
+        let twice = embed_thumbnail(format, &once, &second_png).unwrap();
+        assert_eq!(part(&twice, "docProps/thumbnail.png").unwrap(), second_png);
+        assert_eq!(
+            text(&twice, "_rels/.rels")
+                .matches("metadata/thumbnail")
+                .count(),
+            1
+        );
+        UniversalFormatConverter::decode_rich(&twice, Some(format.extension())).unwrap();
+    }
+    for format in [
+        DocumentFormat::Odt,
+        DocumentFormat::Ods,
+        DocumentFormat::Odp,
+    ] {
+        let original = UniversalFormatConverter::encode(&rich_model, format).unwrap();
+        let once = embed_thumbnail(format, &original, &png).unwrap();
+        assert_eq!(parts(&once)[0].0, "mimetype");
+        assert_eq!(part(&once, "Thumbnails/thumbnail.png").unwrap(), png);
+        assert_eq!(
+            read_thumbnail(format, &once).unwrap().as_deref(),
+            Some(png.as_slice())
+        );
+        let manifest = text(&once, "META-INF/manifest.xml");
+        assert_eq!(
+            manifest
+                .matches("manifest:full-path=\"Thumbnails/thumbnail.png\"")
+                .count(),
+            1
+        );
+        let twice = embed_thumbnail(format, &once, &second_png).unwrap();
+        assert_eq!(
+            part(&twice, "Thumbnails/thumbnail.png").unwrap(),
+            second_png
+        );
+        assert_eq!(
+            text(&twice, "META-INF/manifest.xml")
+                .matches("manifest:full-path=\"Thumbnails/thumbnail.png\"")
+                .count(),
+            1
+        );
+        UniversalFormatConverter::decode_rich(&twice, Some(format.extension())).unwrap();
+    }
+    // ODF package with a non-PNG thumbnail entry is refused (Fail-Closed).
+    let mut bad_odf =
+        parts(&UniversalFormatConverter::encode_rich(&rich(), DocumentFormat::Odt, None).unwrap());
+    bad_odf.push((
+        "Thumbnails/thumbnail.jpg".to_string(),
+        vec![0xFF, 0xD8, 0xFF, 0xD9],
+    ));
+    let bad_pkg = ZipArchiveCodec::pack_compressed(&bad_odf).unwrap();
+    assert!(embed_thumbnail(DocumentFormat::Odt, &bad_pkg, &png).is_err());
+}
+
+#[test]
+fn single_pass_encode_rich_with_thumbnail_beats_two_pass_rewrite() {
+    let png = thumbnail();
+    let mut blocks = Vec::with_capacity(80);
+    for idx in 0..80 {
+        blocks.push(RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain(format!(
+                "문단 {idx}: 보고서 본문 데이터와 표약을 포함한 문장입니다. "
+            ))],
+            ..RichParagraph::default()
+        }));
+    }
+    let doc = RichDocument {
+        page_frame: Default::default(),
+        title: "성능 비교".to_string(),
+        blocks,
+        official_agency: None,
+    };
+    let rounds = 40;
+    let t0 = std::time::Instant::now();
+    for _ in 0..rounds {
+        let raw = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
+        let out = embed_thumbnail(DocumentFormat::Docx, &raw, &png).unwrap();
+        std::hint::black_box(out);
+    }
+    let two_pass = t0.elapsed();
+    let t1 = std::time::Instant::now();
+    for _ in 0..rounds {
+        let out = UniversalFormatConverter::encode_rich_with_thumbnail(
+            &doc,
+            DocumentFormat::Docx,
+            None,
+            Some(&png),
+        )
+        .unwrap();
+        std::hint::black_box(out);
+    }
+    let one_pass = t1.elapsed();
+    eprintln!("encode_rich_with_thumbnail {rounds}x: two_pass={two_pass:?}, one_pass={one_pass:?}");
 }
 
 #[test]

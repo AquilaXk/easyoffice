@@ -109,7 +109,34 @@ fn a_hostile_page_with_a_huge_declared_size_costs_a_small_picture_only() {
 fn each_format_shows_the_drawn_page_through_the_start_window_reader() {
     let fonts = fonts();
     let expected = render_png(A4_SVG, &fonts).unwrap();
-    for (extension, document) in [("hwp", hwp()), ("hwpx", hwpx()), ("docx", docx())] {
+    let mut full = model();
+    full.sheet_cells = vec![(0, 0, "항목".to_string()), (1, 0, "100".to_string())];
+    full.slides = vec![("제목".to_string(), vec!["내용".to_string()], String::new())];
+    for (extension, document) in [
+        ("hwp", hwp()),
+        ("hwpx", hwpx()),
+        ("docx", docx()),
+        (
+            "xlsx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Xlsx).unwrap(),
+        ),
+        (
+            "pptx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Pptx).unwrap(),
+        ),
+        (
+            "odt",
+            UniversalFormatConverter::encode_rich(&rich(), DocumentFormat::Odt, None).unwrap(),
+        ),
+        (
+            "ods",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Ods).unwrap(),
+        ),
+        (
+            "odp",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Odp).unwrap(),
+        ),
+    ] {
         let saved = with_first_page(extension, &document, A4_SVG, &fonts).unwrap();
         let found =
             extract_thumbnail(&mut Cursor::new(saved)).unwrap_or_else(|| panic!("{extension}"));
@@ -122,7 +149,8 @@ fn each_format_shows_the_drawn_page_through_the_start_window_reader() {
 fn a_format_without_a_preview_part_and_a_document_over_the_budget_are_refused() {
     let fonts = fonts();
     assert!(with_first_page("pdf", b"%PDF-1.4", A4_SVG, &fonts).is_err());
-    assert!(with_first_page("xlsx", b"x", A4_SVG, &fonts).is_err());
+    assert!(with_first_page("rtf", b"{\\rtf1}", A4_SVG, &fonts).is_err());
+    assert!(with_first_page("csv", b"a,b\n", A4_SVG, &fonts).is_err());
     let huge = vec![0_u8; MAX_EMBED_DOCUMENT_BYTES + 1];
     assert!(with_first_page("hwp", &huge, A4_SVG, &fonts).is_err());
 }
@@ -276,5 +304,96 @@ fn svg_pages_and_pictures_over_element_filter_or_use_budgets_are_refused() {
         let png = render_png(&page_with_picture(hostile.as_bytes()), &fonts)
             .expect("host page renders without hostile nested svg");
         assert_eq!(pixel(&png, 1, 1), [255, 255, 255, 255]);
+    }
+}
+
+#[test]
+fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
+    use easyoffice_app::{EasyOfficeIpcRouter, ShellWriters};
+    let fonts = fonts();
+    let mut full = model();
+    full.sheet_cells = vec![(0, 0, "매출".to_string()), (1, 0, "=10+20".to_string())];
+    full.slides = vec![(
+        "분기 발표".to_string(),
+        vec!["핵심 지표".to_string()],
+        String::new(),
+    )];
+    // SaveRequest::with_drawn_thumbnail draws page 1 for DOCX, ODT, XLSX, ODS, PPTX, ODP, HWPX.
+    for (name, bytes) in [
+        ("report.docx", docx()),
+        (
+            "report.odt",
+            UniversalFormatConverter::encode_rich(&rich(), DocumentFormat::Odt, None).unwrap(),
+        ),
+        (
+            "book.xlsx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Xlsx).unwrap(),
+        ),
+        (
+            "book.ods",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Ods).unwrap(),
+        ),
+        (
+            "deck.pptx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Pptx).unwrap(),
+        ),
+        (
+            "deck.odp",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Odp).unwrap(),
+        ),
+        ("doc.hwpx", hwpx()),
+    ] {
+        assert!(!has_non_placeholder_thumbnail(&bytes), "{name}");
+        let req = SaveRequest::parse(name, &base64_codec::encode(&bytes))
+            .unwrap()
+            .with_drawn_thumbnail(&[]);
+        assert!(has_non_placeholder_thumbnail(req.bytes()), "{name}");
+        let found = extract_thumbnail(&mut Cursor::new(req.bytes()))
+            .unwrap_or_else(|| panic!("missing thumbnail in {name}"));
+        check_thumbnail_png(&found.bytes).unwrap();
+        let pixmap = tiny_skia::Pixmap::decode_png(&found.bytes).unwrap();
+        assert_eq!(pixmap.width().max(pixmap.height()), MAX_THUMBNAIL_SIDE_PX);
+        assert!(
+            pixmap
+                .pixels()
+                .iter()
+                .any(|p| [p.red(), p.green(), p.blue()] != [255, 255, 255]),
+            "non-white ink drawn for {name}"
+        );
+        // Second pass skips without rewriting when a real thumbnail is already inside.
+        let again = SaveRequest::parse(name, &base64_codec::encode(req.bytes()))
+            .unwrap()
+            .with_drawn_thumbnail(&[]);
+        assert_eq!(again.bytes(), req.bytes(), "{name} was rewritten twice");
+    }
+
+    // ShellWriters.thumbnail embeds the rhwp-laid first page directly during convert_document_format.
+    let draw_thumb = |h: &[u8]| render_hwpx_first_page_png(h, &fonts);
+    let save_hwp = |h: &[u8]| crate::doc_hwp::hwpx_to_hwp(h);
+    let writers = ShellWriters {
+        pdf: None,
+        hwp: Some(&save_hwp),
+        thumbnail: Some(&draw_thumb),
+    };
+    for target in ["docx", "odt", "hwpx", "hwp"] {
+        let payload = format!(
+            r#"{{"sourceFormat":"docx","targetFormat":"{target}","forSave":true,"title":"보고서","blocks":[{{"type":"paragraph","heading":1,"runs":[{{"text":"첫 쪽 제목"}}]}},{{"type":"paragraph","runs":[{{"text":"본문 단락입니다."}}]}}]}}"#
+        );
+        let response = EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
+            "convert_document_format",
+            &payload,
+            "",
+            writers,
+        )
+        .unwrap();
+        let marker = "\"convertedBase64\":\"";
+        let start = response.find(marker).unwrap() + marker.len();
+        let b64 = &response[start..start + response[start..].find('"').unwrap()];
+        let out = EasyOfficeIpcRouter::decode_base64(b64).unwrap();
+        let found = extract_thumbnail(&mut Cursor::new(&out))
+            .unwrap_or_else(|| panic!("missing thumbnail in converted {target}"));
+        check_thumbnail_png(&found.bytes).unwrap();
+        let pixmap = tiny_skia::Pixmap::decode_png(&found.bytes).unwrap();
+        assert_eq!((pixmap.width(), pixmap.height()), (181, 256), "{target}");
     }
 }

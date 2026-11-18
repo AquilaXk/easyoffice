@@ -14,13 +14,13 @@
 
 mod bounded;
 mod cache;
-mod card;
-mod card_source;
+pub(crate) mod card;
+pub(crate) mod card_source;
 mod ole2;
 mod pdf_page;
 mod render;
 mod source;
-mod zip;
+pub(crate) mod zip;
 
 use crate::pdf_fonts::shared_font_db;
 use crate::shell_caller::ShellCaller;

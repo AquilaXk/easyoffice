@@ -18,6 +18,13 @@ use crate::{EasyOfficeError, OdfCodec, RichBlock, RichDocument, XmlSanitizer, Zi
 const ODT_MEDIA_DIR: &str = "Pictures";
 
 pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
+    let entries = odt_rich_entries(doc)?;
+    ZipArchiveCodec::pack_compressed(&entries)
+}
+
+pub(crate) fn odt_rich_entries(
+    doc: &RichDocument,
+) -> Result<Vec<(String, Vec<u8>)>, EasyOfficeError> {
     check_document_images(doc)?;
     let mut media = MediaParts::new();
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
@@ -132,5 +139,5 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         entries.push(("styles.xml".to_string(), styles_xml.into_bytes()));
     }
     entries.extend(media.into_entries());
-    ZipArchiveCodec::pack_compressed(&entries)
+    Ok(entries)
 }

@@ -59,7 +59,7 @@ pub fn content_of(bytes: &[u8], extension: &str) -> Result<Content, RenderError>
     Ok(content_from(decoded))
 }
 
-pub(super) fn content_from(decoded: DecodedDocument) -> Content {
+pub(crate) fn content_from(decoded: DecodedDocument) -> Content {
     match decoded.content {
         DecodedContent::Document(document) => Content::Page(
             document

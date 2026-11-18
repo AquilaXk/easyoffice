@@ -78,7 +78,7 @@ pub mod smart_tools;
 mod table_style_json;
 
 pub use benchmark::*;
-pub use convert_hwp::{RichHwpWriter, ShellWriters};
+pub use convert_hwp::{RichHwpWriter, RichThumbnailRenderer, ShellWriters};
 pub use convert_structured::RichPdfRenderer;
 pub use ffi::*;
 pub use http_server::{
@@ -120,7 +120,7 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         let writers = ShellWriters {
             pdf: Some(renderer),
-            hwp: None,
+            ..ShellWriters::default()
         };
         Self::dispatch_inner(command, payload, "", writers)
     }

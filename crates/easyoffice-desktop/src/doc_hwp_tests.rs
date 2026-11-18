@@ -10,8 +10,8 @@ const PAYLOAD: &str = r#"{"sourceFormat":"docx","targetFormat":"hwp","title":"ë³
 fn convert(payload: &str) -> Result<String, easyoffice_formats::EasyOfficeError> {
     let save = |hwpx: &[u8]| hwpx_to_hwp(hwpx);
     let writers = ShellWriters {
-        pdf: None,
         hwp: Some(&save),
+        ..ShellWriters::default()
     };
     EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
         "convert_document_format",

@@ -687,23 +687,37 @@ impl UniversalFormatConverter {
         crate::rich_writers::serialize_pdf_rich(doc, options)
     }
 
-    /// [`Self::encode_rich`] with a preview picture in the file (PD-132). The engine draws no
-    /// pages, so `thumbnail_png` comes from the caller; `None`, or a format without a preview part
-    /// (see [`crate::supports_thumbnail`]), gives exactly what [`Self::encode_rich`] gives. A
-    /// picture that is not a valid PNG within the limits is an error.
+    /// [`Self::encode_rich`] with a preview picture in the file (PD-132, PD-239). The engine draws
+    /// no pages, so `thumbnail_png` comes from the caller; `None`, or a format without a preview
+    /// part (see [`crate::supports_thumbnail`]), gives exactly what [`Self::encode_rich`] gives.
+    /// `DOCX`, `ODT`, and `HWPX`/`HWTX` insert the preview before packing the ZIP so the archive
+    /// is compressed once without an unpack/repack pass. A picture that is not a valid PNG within
+    /// the limits is an error.
     pub fn encode_rich_with_thumbnail(
         doc: &RichDocument,
         format: DocumentFormat,
         formula_cache: Option<&XlsxFormulaCache>,
         thumbnail_png: Option<&[u8]>,
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        let bytes = Self::encode_rich(doc, format, formula_cache)?;
-        match thumbnail_png {
-            Some(png) if crate::supports_thumbnail(format) => {
-                crate::embed_thumbnail(format, &bytes, png)
-            }
-            _ => Ok(bytes),
+        let Some(png) = thumbnail_png.filter(|_| crate::supports_thumbnail(format)) else {
+            return Self::encode_rich(doc, format, formula_cache);
+        };
+        crate::check_thumbnail_png(png)?;
+        let entries = match format {
+            DocumentFormat::Docx => Some(crate::rich_writers::docx_rich_entries(doc)?),
+            DocumentFormat::Odt => Some(crate::odt_rich_writer::odt_rich_entries(doc)?),
+            DocumentFormat::Hwpx | DocumentFormat::Hwtx => Some(HwpxCodec::pack_rich_entries(
+                doc,
+                format == DocumentFormat::Hwtx,
+            )?),
+            _ => None,
+        };
+        if let Some(mut entries) = entries {
+            crate::embedded_thumbnail::embed_thumbnail_entries(format, &mut entries, png)?;
+            return crate::ZipArchiveCodec::pack_compressed(&entries);
         }
+        let bytes = Self::encode_rich(doc, format, formula_cache)?;
+        crate::embed_thumbnail(format, &bytes, png)
     }
 }
 

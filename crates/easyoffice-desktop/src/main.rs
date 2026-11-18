@@ -131,13 +131,21 @@ async fn ipc_dispatch(
         // A rich document converted to PDF is laid out and drawn here (PD-167); the engine keeps
         // its own PDF as the fallback. The font database is built when a PDF is first drawn. A
         // document converted to HWP is written by rhwp here (PD-178); there is no fallback.
+        let font_dirs_thumb = font_dirs.clone();
         let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
             doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))
         };
         let save_hwp = |hwpx: &[u8]| doc_hwp::hwpx_to_hwp(hwpx);
+        let draw_thumb = |hwpx: &[u8]| {
+            save_thumbnail::render_hwpx_first_page_png(
+                hwpx,
+                &pdf_fonts::shared_font_db(&font_dirs_thumb),
+            )
+        };
         let writers = ShellWriters {
             pdf: Some(&draw),
             hwp: Some(&save_hwp),
+            thumbnail: Some(&draw_thumb),
         };
         EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
             &command, &payload, &owner, writers,
@@ -176,7 +184,7 @@ async fn save_document_file(
         let request = SaveRequest::parse_owned(&file_name, base64)?;
         Ok::<_, String>(match thumbnail_svg {
             Some(svg) => request.with_thumbnail(&svg, &font_dirs),
-            None => request,
+            None => request.with_drawn_thumbnail(&font_dirs),
         })
     })
     .await

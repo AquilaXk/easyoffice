@@ -133,6 +133,21 @@ impl SaveRequest {
         })
     }
 
+    /// Draws and embeds a first-page preview picture when the caller supplied no SVG (non-Hangul
+    /// saves and converted files, PD-239). Skips immediately via central-directory/OLE2 seek when
+    /// the format has no preview slot or the document already holds a non-placeholder thumbnail.
+    pub fn with_drawn_thumbnail(self, font_dirs: &[PathBuf]) -> Self {
+        let supported = easyoffice_formats::DocumentFormat::from_extension(&self.extension)
+            .is_some_and(easyoffice_formats::supports_thumbnail);
+        if !supported || crate::save_thumbnail::has_non_placeholder_thumbnail(&self.bytes) {
+            return self;
+        }
+        self.with_thumbnail_using(|extension, bytes| {
+            let fonts = crate::pdf_export::shared_font_db(font_dirs);
+            crate::save_thumbnail::with_drawn_first_page(extension, bytes, &fonts)
+        })
+    }
+
     /// [`Self::with_thumbnail`] with the step that makes the new bytes given by the caller (a test
     /// hook: the guard around it is what keeps a panic from failing the save).
     pub(crate) fn with_thumbnail_using(

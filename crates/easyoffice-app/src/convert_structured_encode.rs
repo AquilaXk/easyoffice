@@ -12,7 +12,7 @@ use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
 };
 
-use crate::convert_hwp::{write_hwp, ShellWriters};
+use crate::convert_hwp::{write_hwp, RichThumbnailRenderer, ShellWriters};
 use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured::StructuredContent;
 use crate::convert_structured_doc::{is_document_format, slides_to_document};
@@ -534,7 +534,7 @@ pub(crate) fn encode_target(
 ) -> Result<Vec<u8>, EasyOfficeError> {
     if format == DocumentFormat::Hwp {
         let hwpx = encode_structured(content, DocumentFormat::Hwpx, title, warnings)?;
-        return write_hwp(&hwpx, writers.hwp);
+        return write_hwp(&hwpx, writers.hwp, writers.thumbnail);
     }
     if let (Some(render), StructuredContent::Document(doc, options)) = (writers.pdf, content) {
         if host_draws_pdf(format, source, options) {
@@ -544,7 +544,7 @@ pub(crate) fn encode_target(
             }
         }
     }
-    encode_structured(content, format, title, warnings)
+    encode_structured_with_thumbnail(content, format, title, writers.thumbnail, None, warnings)
 }
 
 /// [`encode_target`] for a converted source file. A `.hwp`/`.hwpx` source goes to the host as the
@@ -560,8 +560,8 @@ pub(crate) fn encode_source_target(
     writers: ShellWriters<'_>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
+    let native = matches!(source, DocumentFormat::Hwp | DocumentFormat::Hwpx);
     if let (Some(render), StructuredContent::Document(_, options)) = (writers.pdf, content) {
-        let native = matches!(source, DocumentFormat::Hwp | DocumentFormat::Hwpx);
         if native && host_draws_pdf(format, source, options) {
             match render(source_bytes, options) {
                 Ok(pdf) => return Ok(pdf),
@@ -572,7 +572,54 @@ pub(crate) fn encode_source_target(
             }
         }
     }
+    if native && format != DocumentFormat::Hwp && format != DocumentFormat::Pdf {
+        return encode_structured_with_thumbnail(
+            content,
+            format,
+            title,
+            writers.thumbnail,
+            Some(source_bytes),
+            warnings,
+        );
+    }
     encode_target(content, format, source, title, writers, warnings)
+}
+
+fn encode_rich_for_host(
+    doc: &RichDocument,
+    format: DocumentFormat,
+    cache: Option<&XlsxFormulaCache>,
+    thumbnail: Option<&RichThumbnailRenderer<'_>>,
+    native_layout_bytes: Option<&[u8]>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let Some(render) = thumbnail.filter(|_| easyoffice_formats::supports_thumbnail(format)) else {
+        return UniversalFormatConverter::encode_rich(doc, format, cache);
+    };
+    if matches!(format, DocumentFormat::Hwpx | DocumentFormat::Hwtx)
+        && native_layout_bytes.is_none()
+    {
+        let hwpx = UniversalFormatConverter::encode_rich(doc, format, cache)?;
+        if let Ok(png) = render(&hwpx) {
+            if let Ok(with_thumb) = easyoffice_formats::embed_thumbnail(format, &hwpx, &png) {
+                return Ok(with_thumb);
+            }
+        }
+        return Ok(hwpx);
+    }
+    let png = match native_layout_bytes {
+        Some(bytes) => render(bytes).ok(),
+        None => UniversalFormatConverter::encode_rich(doc, DocumentFormat::Hwpx, None)
+            .ok()
+            .and_then(|hwpx| render(&hwpx).ok()),
+    };
+    if let Some(png) = png {
+        if let Ok(with_thumb) =
+            UniversalFormatConverter::encode_rich_with_thumbnail(doc, format, cache, Some(&png))
+        {
+            return Ok(with_thumb);
+        }
+    }
+    UniversalFormatConverter::encode_rich(doc, format, cache)
 }
 
 /// The document as HWPX, drawn by `render`.
@@ -599,6 +646,17 @@ pub(crate) fn encode_structured(
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
+    encode_structured_with_thumbnail(content, format, title, None, None, warnings)
+}
+
+fn encode_structured_with_thumbnail(
+    content: &StructuredContent,
+    format: DocumentFormat,
+    title: &str,
+    thumbnail: Option<&RichThumbnailRenderer<'_>>,
+    native_layout_bytes: Option<&[u8]>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, EasyOfficeError> {
     if format == DocumentFormat::Pages && !matches!(content, StructuredContent::Document(..)) {
         return Err(EasyOfficeError::InvalidArgument(
             "Pages(.pages)로는 문서 내용만 저장할 수 있습니다. 시트·슬라이드는 다른 형식으로 저장하세요."
@@ -621,7 +679,7 @@ pub(crate) fn encode_structured(
             }
             let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
-            UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
+            encode_rich_for_host(&doc, format, cache.as_ref(), thumbnail, native_layout_bytes)
         }
         StructuredContent::Workbook(page_sheets, stylings) => {
             // The cells an array filled are its formula's results: the engine gives them (and they come
@@ -677,13 +735,13 @@ pub(crate) fn encode_structured(
                         blocks,
                         official_agency: None,
                     };
-                    UniversalFormatConverter::encode_rich(&doc, format, None)
+                    encode_rich_for_host(&doc, format, None, thumbnail, None)
                 }
             }
         }
         StructuredContent::Slides(slides) if is_document_format(format) => {
             let doc = slides_to_document(slides, title);
-            UniversalFormatConverter::encode_rich(&doc, format, None)
+            encode_rich_for_host(&doc, format, None, thumbnail, None)
         }
         StructuredContent::Slides(slides) => {
             let model = UniversalDocumentModel {

@@ -439,6 +439,14 @@ impl HwpxCodec {
     /// each distinct alignment/indent a `paraPr`, and heading levels use "개요 N" styles. The header and
     /// footer are controls of the first paragraph.
     pub fn pack_rich(doc: &RichDocument, is_template: bool) -> Result<Vec<u8>, EasyOfficeError> {
+        let entries = Self::pack_rich_entries(doc, is_template)?;
+        ZipArchiveCodec::pack_compressed(&entries)
+    }
+
+    pub(crate) fn pack_rich_entries(
+        doc: &RichDocument,
+        is_template: bool,
+    ) -> Result<Vec<(String, Vec<u8>)>, EasyOfficeError> {
         check_document_images(doc)?;
         let mut media = MediaParts::new();
         let mut sec = SectionWriter::new();
@@ -503,7 +511,7 @@ impl HwpxCodec {
             paragraphs: Vec::new(),
             tables: Vec::new(),
         };
-        Self::pack_package(&meta, header, sec.finish(), media)
+        Self::package_entries(&meta, header, sec.finish(), media)
     }
 
     fn pack_package(
@@ -512,6 +520,16 @@ impl HwpxCodec {
         section: String,
         media: MediaParts,
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        let entries = Self::package_entries(payload, header, section, media)?;
+        ZipArchiveCodec::pack_compressed(&entries)
+    }
+
+    fn package_entries(
+        payload: &HwpxPayload,
+        header: String,
+        section: String,
+        media: MediaParts,
+    ) -> Result<Vec<(String, Vec<u8>)>, EasyOfficeError> {
         let mut metadata = format!(
             "<opf:title>{}</opf:title><opf:language>ko</opf:language><opf:meta name=\"creator\" content=\"text\">EasyOffice</opf:meta>",
             XmlSanitizer::escape(&payload.title)
@@ -578,7 +596,7 @@ impl HwpxCodec {
             ("settings.xml".to_string(), SETTINGS_XML.as_bytes().to_vec()),
         ];
         entries.extend(media.into_entries());
-        ZipArchiveCodec::pack_compressed(&entries)
+        Ok(entries)
     }
 
     /// Validates XML entries, extracts `Contents/header.xml`, and parses package metadata.

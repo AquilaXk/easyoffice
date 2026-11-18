@@ -278,7 +278,7 @@ impl EasyOfficeIpcRouter {
             }
             if dst_fmt == DocumentFormat::Hwp && size_fmt == DocumentFormat::Hwpx {
                 let hwpx = encode_structured(content, DocumentFormat::Hwpx, title, &mut warnings)?;
-                let dst_bytes = write_hwp(&hwpx, writers.hwp)?;
+                let dst_bytes = write_hwp(&hwpx, writers.hwp, writers.thumbnail)?;
                 (hwpx.len(), dst_bytes)
             } else {
                 let dst_bytes =
@@ -312,7 +312,7 @@ impl EasyOfficeIpcRouter {
             };
             if dst_fmt == DocumentFormat::Hwp {
                 let hwpx = UniversalFormatConverter::encode(&model, DocumentFormat::Hwpx)?;
-                let dst_bytes = write_hwp(&hwpx, writers.hwp)?;
+                let dst_bytes = write_hwp(&hwpx, writers.hwp, writers.thumbnail)?;
                 let source_len = if for_save || size_fmt == DocumentFormat::Hwpx {
                     hwpx.len()
                 } else {
@@ -713,8 +713,8 @@ mod tests {
             Ok(hwp_stub.clone())
         };
         let writers = ShellWriters {
-            pdf: None,
             hwp: Some(&writer),
+            ..ShellWriters::default()
         };
         let hwpx_only = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",

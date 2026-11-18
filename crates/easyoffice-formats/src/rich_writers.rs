@@ -233,6 +233,13 @@ const DOCX_FIRST_IMAGE_REL: usize = 2;
 const DOCX_MEDIA_DIR: &str = "word/media";
 
 pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
+    let entries = docx_rich_entries(doc)?;
+    ZipArchiveCodec::pack_compressed(&entries)
+}
+
+pub(crate) fn docx_rich_entries(
+    doc: &RichDocument,
+) -> Result<Vec<(String, Vec<u8>)>, EasyOfficeError> {
     check_document_images(doc)?;
     let rels = concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
@@ -357,7 +364,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         }
     }
     entries.extend(media.into_entries());
-    ZipArchiveCodec::pack_compressed(&entries)
+    Ok(entries)
 }
 
 // ---------------------------------------------------------------- ODT
