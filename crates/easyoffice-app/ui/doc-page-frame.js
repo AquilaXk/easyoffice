@@ -290,8 +290,20 @@
       const label = group.querySelector(".tb-hf-label");
       if (label) {
         label.textContent = editing
-          ? LABELS[bandOf(editing)] + " · " + scopeLabel(editing) + (isZones ? " · 3구역" : "") + " 편집 중"
+          ? LABELS[bandOf(editing)] + " · " + scopeLabel(editing) + " 편집 중"
           : "";
+      }
+      const switchBtn = group.querySelector('[data-hf-action="switch-band"]');
+      if (switchBtn) {
+        const isHdr = !editing || bandOf(editing) === "header";
+        const moveText = isHdr ? "바닥글로 이동" : "머리글로 이동";
+        const moveLead = isHdr ? "바닥글로" : "머리글로";
+        switchBtn.setAttribute("title", moveText);
+        switchBtn.setAttribute("aria-label", moveText);
+        const switchLbl = switchBtn.querySelector(".tb-label");
+        if (switchLbl) {
+          replaceKids(switchLbl, [document.createTextNode(moveLead), document.createElement("br"), document.createTextNode("이동")]);
+        }
       }
       const setPressed = (action, on) => {
         const btn = group.querySelector('[data-hf-action="' + action + '"]');
@@ -475,7 +487,7 @@
         if (variantOf(editing) === "first") return openSlot(curBand, false);
       }
       sync();
-      deps.setFeedback?.(nextOn ? "첫 쪽 머리말·꼬리말 분리 켜짐" : "첫 쪽 머리말·꼬리말 분리 꺼짐");
+      deps.setFeedback?.("첫 페이지를 다르게 지정");
       return true;
     }
 
@@ -501,7 +513,7 @@
         if (variantOf(editing) === "even") return openSlot(curBand, false);
       }
       sync();
-      deps.setFeedback?.(nextOn ? "짝수·홀수 쪽 머리말·꼬리말 분리 켜짐" : "짝수·홀수 쪽 머리말·꼬리말 분리 꺼짐");
+      deps.setFeedback?.("짝수와 홀수 페이지를 다르게 지정");
       return true;
     }
 
@@ -536,7 +548,7 @@
       else run();
       sync();
       focusZone(section, 0);
-      deps.setFeedback?.(enable ? "좌·중·우 3구역 편집 켜짐" : "단일 구역 편집 전환");
+      deps.setFeedback?.(enable ? "빈 문서(3열)" : statusTitle(editing) + " 편집 중");
       return true;
     }
 

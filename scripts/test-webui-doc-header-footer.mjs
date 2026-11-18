@@ -230,7 +230,8 @@ test("PD-249: 3-zone toggle splits header into left/center/right compartments, n
   const hdr = section(editor, "header");
   assert.equal(hdr.dataset.eoHfZones, "true");
   assert.equal(toggleZonesBtn.getAttribute("aria-pressed"), "true");
-  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /3구역/);
+  assert.equal(toggleZonesBtn.getAttribute("title"), "빈 문서(3열)");
+  assert.equal(document.querySelector("#icon-toolbar .tb-hf-label").textContent, "머리말 · 양쪽 편집 중");
 
   const zones = [...hdr.querySelectorAll(":scope > p[data-eo-zone]")];
   assert.deepEqual(zones.map((p) => p.dataset.eoZone), ["left", "center", "right"]);
@@ -299,10 +300,13 @@ test("PD-249: first-page and even/odd toggles author distinct slots, step throug
   assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /짝수 쪽/);
   section(editor, "evenHeader").querySelector("p").textContent = "짝수 머리말";
 
-  // Switch band on evenHeader -> evenFooter
-  document.querySelector('#icon-toolbar [data-hf-action="switch-band"]').click();
+  // Switch band on evenHeader -> evenFooter (button dynamically flips from 바닥글로 이동 -> 머리글로 이동)
+  const switchBtn = document.querySelector('#icon-toolbar [data-hf-action="switch-band"]');
+  assert.equal(switchBtn.getAttribute("title"), "바닥글로 이동");
+  switchBtn.click();
   await flushAsyncTurns();
   assert.equal(frame.isEditing(), "evenFooter");
+  assert.equal(switchBtn.getAttribute("title"), "머리글로 이동");
   section(editor, "evenFooter").querySelector("p").textContent = "짝수 꼬리말";
 
   // Next wraps around to firstHeader -> Next -> firstFooter (leave empty so cover page has no footer) -> Next -> odd header -> Next -> odd footer
