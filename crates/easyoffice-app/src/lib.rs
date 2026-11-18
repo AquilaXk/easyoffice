@@ -37,6 +37,7 @@ mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
 mod sheet_blockers_ipc;
+mod sheet_display;
 mod sheet_filter_ipc;
 mod sheet_filter_json;
 mod sheet_format_ipc;

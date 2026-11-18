@@ -41,6 +41,41 @@ const DARK_FILL_LUMINANCE: u32 = 62;
 const MAX_SHEET_PAGES: usize = 5_000;
 const MAX_SHEET_CELLS: u64 = 200_000;
 
+/// How a number format changes the way a page draws one cell (PD-235): a number sits at the right, the colour of the
+/// format's section replaces the cell's text colour, and `*x` repeats `x` over the width the text leaves free
+/// (`fill` is the byte offset in the text and the character).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CellShown {
+    pub numeric: bool,
+    pub color: Option<u32>,
+    pub fill: Option<(usize, char)>,
+}
+
+/// The cells of one sheet a number format changed, by zero-based row and column.
+pub type SheetShown = HashMap<(u32, u32), CellShown>;
+
+/// Most copies of a fill character one cell draws (a column cannot be wider in points than this many glyphs).
+const MAX_FILL_REPEAT: usize = 512;
+
+/// `text` with its fill character repeated over the `room` pt the text leaves free.
+fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) -> String {
+    let Some((at, ch)) = fill.filter(|(at, _)| text.is_char_boundary(*at)) else {
+        return text.to_string();
+    };
+    let glyph = width_pt(ch.encode_utf8(&mut [0u8; 4]), size);
+    let free = room - width_pt(text, size);
+    let copies = if glyph > 0.0 && free > 0.0 {
+        ((free / glyph) as usize).min(MAX_FILL_REPEAT)
+    } else {
+        0
+    };
+    let mut out = String::with_capacity(text.len() + copies * ch.len_utf8());
+    out.push_str(&text[..at]);
+    out.extend(std::iter::repeat_n(ch, copies));
+    out.push_str(&text[at..]);
+    out
+}
+
 /// Text width in points at `size` pt.
 fn width_pt(text: &str, size: f64) -> f64 {
     f64::from(mixed_units(text)) * size / 1000.0
@@ -347,6 +382,7 @@ pub(crate) fn encode_sheet_pdf(
     title: &str,
     sheets: &[crate::OdsUnpacked],
     stylings: &[SheetStyling],
+    shown: &[SheetShown],
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let mut entries: Vec<PdfPageEntry> = Vec::new();
     let mut printed_cells = 0u64;
@@ -426,7 +462,7 @@ pub(crate) fn encode_sheet_pdf(
                 &mut entries,
                 area,
                 &setup,
-                styling,
+                (styling, shown.get(index)),
                 &by_cell,
                 page.is_default(),
             )?;
@@ -449,7 +485,7 @@ fn sheet_area_pages(
     entries: &mut Vec<PdfPageEntry>,
     area: Area,
     page: &SheetPage,
-    styling: Option<&SheetStyling>,
+    (styling, shown): (Option<&SheetStyling>, Option<&SheetShown>),
     cells: &HashMap<(u32, u32), &str>,
     unset: bool,
 ) -> Result<(), EasyOfficeError> {
@@ -634,20 +670,23 @@ fn sheet_area_pages(
                         canvas.fill_rect(x, y - h, w, h, rgb);
                     }
                     if let Some(text) = cells.get(&at) {
-                        let shown = fit_text(text, font, w - 2.0 * pad);
-                        let tw = width_pt(&shown, font);
-                        let tx = if is_number(text) {
+                        let how = shown.and_then(|m| m.get(&at)).copied().unwrap_or_default();
+                        let room = w - 2.0 * pad;
+                        let drawn = fit_text(&filled_text(text, how.fill, font, room), font, room);
+                        let tw = width_pt(&drawn, font);
+                        let tx = if how.numeric || is_number(text) {
                             x + w - pad - tw
                         } else {
                             x + pad
                         };
                         let ty = y - h + (h - font) / 2.0 + 1.0;
-                        match look
-                            .and_then(|style| style.font_color)
+                        match how
+                            .color
+                            .or_else(|| look.and_then(|style| style.font_color))
                             .or_else(|| auto_text_color(fill))
                         {
-                            Some(rgb) => canvas.colored_text(tx, ty, font, &shown, rgb),
-                            None => canvas.text(tx, ty, font, &shown),
+                            Some(rgb) => canvas.colored_text(tx, ty, font, &drawn, rgb),
+                            None => canvas.text(tx, ty, font, &drawn),
                         }
                     }
                     x += w;
@@ -680,7 +719,7 @@ mod tests {
     fn hostile_zero_percent_scale_and_excess_margins_fail_closed() {
         let mut st = SheetStyling::default();
         st.page.scale = PageScale::Percent(0);
-        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st]).is_err());
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st], &[]).is_err());
 
         let mut st_margin = SheetStyling::default();
         st_margin.page.margins = Some(PageMargins {
@@ -691,7 +730,7 @@ mod tests {
             header: 0,
             footer: 0,
         });
-        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st_margin]).is_err());
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[st_margin], &[]).is_err());
     }
 
     #[test]
@@ -703,7 +742,7 @@ mod tests {
             row1: 2,
             col1: 0,
         }];
-        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[inverted]).is_err());
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[inverted], &[]).is_err());
 
         let mut max_row = SheetStyling::default();
         max_row.page.print_area = vec![CellBox {
@@ -712,7 +751,7 @@ mod tests {
             row1: u32::MAX,
             col1: 0,
         }];
-        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[max_row]).is_err());
+        assert!(encode_sheet_pdf("t", &one_cell_sheet(), &[max_row], &[]).is_err());
 
         let mut bad_title = SheetStyling::default();
         bad_title.page.print_area = vec![CellBox {
@@ -722,7 +761,7 @@ mod tests {
             col1: 2,
         }];
         bad_title.page.title_rows = Some((10, 2));
-        let res = encode_sheet_pdf("t", &one_cell_sheet(), &[bad_title]);
+        let res = encode_sheet_pdf("t", &one_cell_sheet(), &[bad_title], &[]);
         assert!(res.is_ok());
 
         let doc = RichDocument {

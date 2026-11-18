@@ -9,7 +9,8 @@
   // print uses (`#eo-print-root`, `shell.css`); the page rules go through a constructed stylesheet.
   //   - document: the pages the screen shows, each with its header, footer and page number (`doc-page-print.js`); an
   //     editor without a page layout flows over its paper (the browser breaks the pages)
-  //   - sheet: the used range as a gridded table, landscape when it is wide
+  //   - sheet: the used range as a gridded table, landscape when it is wide; a cell with a number format shows the text the
+  //     engine's formatter gives (the grid's text, PD-193), asked for before the pages are built because the build is synchronous
   //   - slide: one slide per page, in the deck's aspect ratio
 
   const { ROOT_ID, PAGE_CLASS, createPageRules } = host.__EASYOFFICE_HWP_PRINT_INTERNALS__;
@@ -23,6 +24,8 @@
   const COLUMN_BITS = 32767;
   const ROW_STRIDE = 32768;
   const AFTERPRINT_FALLBACK_MS = 5 * 60 * 1000;
+  const MAX_PRINT_CELLS = 200000;
+  const FILL_REPEATS = 300;
   const MSG_UNSUPPORTED = "이 모듈은 인쇄를 지원하지 않습니다.";
   const MSG_EMPTY = "인쇄할 내용이 없습니다.";
   const MSG_OPENING = "인쇄 대화상자를 여는 중…";
@@ -37,6 +40,8 @@
     const bridge = deps.desktopBridge;
     const printWindow = deps.print || (() => (bridge?.isAvailable() ? bridge.windowCommand("printWebview") : env.print()));
     let printed = null;
+    // The display of the formatted cells of the sheet being printed: Map code -> Map(stored value -> { t, c, f } or null).
+    let sheetFormats = null;
 
     function addPageRule(rules, size, margin) {
       rules.sheet.insertRule("@page { size: " + size.width + "mm " + size.height + "mm; margin: " + margin + "; }", rules.sheet.cssRules.length);
@@ -138,16 +143,20 @@
       return { range, cells };
     }
 
+    // The format code of a cell (a text format shows the stored text as typed) and whether a page sets its text at the right.
+    const codeOf = (entry) => entry?.style?.numFmt || "";
+
     function cellClasses(entry, text) {
       const style = entry.style || {};
       const names = STYLE_CLASSES.filter(([flag]) => style[flag]).map(([, name]) => name);
-      if (gridUtils.isNumericText(text)) names.push("eo-print-num");
+      if (codeOf(entry) !== "@" && gridUtils.isNumericText(text)) names.push("eo-print-num");
       return names.join(" ");
     }
 
-    // The page setup of the sheet (`sheet-page.js`) gives the paper, margins, scale, print area and repeated rows and columns;
-    // a sheet without one prints its used range on A4, turned when it is wide (`sheet-page-print.js`).
-    function buildSheet(rules) {
+    // What a sheet prints: the cells, the boxes (the page setup's print areas or the used range) and the page setup. The page
+    // setup of the sheet (`sheet-page.js`) gives the paper, margins, scale, print area and repeated rows and columns; a sheet
+    // without one prints its used range on A4, turned when it is wide (`sheet-page-print.js`).
+    function sheetPlan() {
       const map = sheetController.snapshotDomSheetCells();
       const { range } = usedRange(map);
       const geometry = sheetController.printGeometry();
@@ -156,16 +165,70 @@
       if (areas.length === 0 && !range) throw new Error(MSG_EMPTY);
       const boxes = areas.length > 0 ? areas : [{ r1: range.r1, c1: range.c1, r2: range.r2, c2: range.c2 }];
       const wide = range !== null && range.c2 - range.c1 + 1 > WIDE_SHEET_COLUMNS;
-      const page = geometry.page ?? (wide ? { landscape: true } : null);
+      return { map, geometry, core, boxes, page: geometry.page ?? (wide ? { landscape: true } : null) };
+    }
+
+    // Asks the engine for the display of every formatted cell the pages will hold, so `buildSheet` reads them from memory.
+    // A sheet this cannot plan, or an engine that does not answer, prints its cells in the General display.
+    async function warmSheetFormats() {
+      sheetFormats = null;
+      const display = host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
+      if (getActiveModule() !== "SHEET" || !display?.resolveAll) return;
+      let plan;
+      try {
+        plan = sheetPlan();
+      } catch {
+        return;
+      }
+      const wanted = new Map();
+      let held = 0;
+      for (const ref in plan.map) {
+        if (!Object.hasOwn(plan.map, ref)) continue;
+        const entry = plan.map[ref];
+        const code = codeOf(entry);
+        const packed = code ? gridUtils.packRef(ref) : 0;
+        if (packed <= 0 || entry.value == null || entry.value === "") continue;
+        const col = packed & COLUMN_BITS;
+        const row = (packed - col) / ROW_STRIDE;
+        if (!plan.boxes.some((b) => row >= b.r1 && row <= b.r2 && col >= b.c1 && col <= b.c2)) continue;
+        if ((held += 1) > MAX_PRINT_CELLS) return;
+        let values = wanted.get(code);
+        if (!values) wanted.set(code, (values = new Set()));
+        values.add(String(entry.value));
+      }
+      if (wanted.size > 0) sheetFormats = await display.resolveAll(wanted);
+    }
+
+    // A cell whose format has a `*x` fill: the text before it, the repeats (drawn, `eo-print-fill` in `shell.css`), the text after.
+    function fillCell(td, text, [index, char]) {
+      const holder = document.createElement("span");
+      holder.className = "eo-print-fill";
+      const part = (value) => {
+        const el = document.createElement("span");
+        el.textContent = value;
+        return el;
+      };
+      const repeats = document.createElement("i");
+      repeats.dataset.fill = char.repeat(FILL_REPEATS);
+      for (const child of [part(text.slice(0, index)), repeats, part(text.slice(index))]) holder.appendChild(child);
+      td.appendChild(holder);
+    }
+
+    function buildSheet(rules) {
+      const { map, geometry, core, boxes, page } = sheetPlan();
       const cellAt = (row, col) => {
         const entry = map[gridUtils.refOf(row, col)];
         const text = entry && entry.value != null ? String(entry.value) : "";
         return entry && (text !== "" || entry.style) ? { text, entry } : null;
       };
       const renderCell = ({ text, entry }, td) => {
-        td.textContent = gridUtils.formatGeneral(text);
+        const code = codeOf(entry);
+        const shown = code ? sheetFormats?.get(code)?.get(text) : null;
         td.className = cellClasses(entry, text);
+        if (shown?.f) fillCell(td, shown.t, shown.f);
+        else td.textContent = shown ? shown.t : code === "@" ? text : gridUtils.formatGeneral(text);
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
+        if (shown?.c) td.style.color = shown.c;
       };
       return host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({
         document, boxes, geometry, page, core, cellAt, rules, pageClass: PAGE_CLASS, renderCell: (td, cell) => renderCell(cell, td),
@@ -223,7 +286,12 @@
       if (!build) throw new Error(MSG_UNSUPPORTED);
       remove();
       const rules = createPageRules(env);
-      const nodes = build(rules);
+      let nodes;
+      try {
+        nodes = build(rules);
+      } finally {
+        sheetFormats = null;
+      }
       const root = document.createElement("div");
       root.id = ROOT_ID;
       root.setAttribute("aria-hidden", "true");
@@ -250,6 +318,7 @@
     }
 
     async function print() {
+      await warmSheetFormats();
       prepare();
       notify(MSG_OPENING);
       await nextFrame();

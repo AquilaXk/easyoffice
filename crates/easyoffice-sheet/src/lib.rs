@@ -8,6 +8,7 @@ mod array_class;
 mod array_eval;
 pub mod axis;
 mod byte_width;
+mod cell_display;
 pub mod coercion;
 mod compile;
 mod criteria;
@@ -84,6 +85,9 @@ pub use axis::{
     shift_boxes, shift_filter, shift_levels, shift_link_targets, shift_names, shift_outline,
     shift_runs, shift_table, shift_tables, shift_widths, Axis, AxisBudget, AxisEdit,
     AxisEditReport, EditKind, FilterShift, SheetChange,
+};
+pub use cell_display::{
+    compile_for_page, format_for_page, general_display, CellText, CompiledNumFmt,
 };
 pub use coercion::*;
 pub(crate) use dag::expr_contains_subtotal;

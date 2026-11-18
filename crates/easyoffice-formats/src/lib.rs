@@ -99,6 +99,7 @@ pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
 pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
+pub use pdf_laid::{CellShown, SheetShown};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
@@ -860,11 +861,13 @@ impl XmlSanitizer {
 
 /// The PDF of a workbook as the page setups of its sheets print it (the engine's own PDF, PD-213): `sheets` are the
 /// displayed cells of each sheet by zero-based row and column, `stylings` the sheets' page setups, column widths and hidden
-/// rows and columns. Fails when the print areas make more cells or pages than a print may.
+/// rows and columns, `shown` how the number formats changed the cells of each sheet (colour, right alignment, fill; PD-235).
+/// Fails when the print areas make more cells or pages than a print may.
 pub fn encode_sheet_pdf(
     title: &str,
     sheets: &[crate::OdsUnpacked],
     stylings: &[SheetStyling],
+    shown: &[SheetShown],
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    pdf_laid::encode_sheet_pdf(title, sheets, stylings)
+    pdf_laid::encode_sheet_pdf(title, sheets, stylings, shown)
 }

@@ -1,5 +1,7 @@
 //! Cell fill and font colours in BIFF8 (PD-227): the `FONT` (0x0031), `XF` (0x00E0) and `PALETTE`
-//! (0x0092) records and the cell records that name an XF, MS-XLS 2.4.122, 2.4.353 and 2.4.192.
+//! (0x0092) records and the cell records that name an XF, MS-XLS 2.4.122, 2.4.353 and 2.4.192. A
+//! reader also takes the number format of each XF (PD-235): the format index of the `XF` and the
+//! codes of the `FORMAT` records (0x041E, MS-XLS 2.4.126); a save does not write them.
 //!
 //! 참조 구현: Apache POI `poi/src/main/java/org/apache/poi/hssf/record/PaletteRecord.java` lines 35-47
 //! (the 56 palette entries from colour index 8 and their default colours) and 95-128 (an entry
@@ -21,6 +23,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use std::sync::Arc;
+
+use crate::sheet_styling::sheet_numfmt::{
+    builtin_code, NumFmtTable, CUSTOM_BASE, MAX_NUM_FMT_CODE_BYTES,
+};
 use crate::sheet_styling::xlsx_color::DEFAULT_INDEXED;
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
 use crate::{MAX_BIFF8_COL, MAX_BIFF8_ROW};
@@ -28,6 +35,7 @@ use crate::{MAX_BIFF8_COL, MAX_BIFF8_ROW};
 pub(crate) const FONT: u16 = 0x0031;
 pub(crate) const XF: u16 = 0x00E0;
 pub(crate) const PALETTE: u16 = 0x0092;
+const FORMAT: u16 = 0x041E;
 const BLANK: u16 = 0x0201;
 const MULBLANK: u16 = 0x00BE;
 const NUMBER: u16 = 0x0203;
@@ -54,10 +62,26 @@ const SOLID: u32 = 1;
 
 // ---- reading ----
 
-/// What the XFs of a workbook say about colours, resolved once the first cell is read.
+#[derive(Clone, Copy)]
+struct ResolvedXf {
+    fill: Option<u32>,
+    font_color: Option<u32>,
+    num_fmt: u16,
+}
+
+/// What the XFs of a workbook say about colours and number formats, resolved once the first cell is read.
 struct Resolved {
-    /// Per XF: the fill and the font colour, `None` when it has neither.
-    xfs: Vec<Option<(Option<u32>, Option<u32>)>>,
+    /// Per XF: the fill, the font colour and the number format id, `None` when it has none of them.
+    xfs: Vec<Option<ResolvedXf>>,
+}
+
+/// What the cell records of a workbook say about formatting: the styled cells of each worksheet and the
+/// number format codes their ids point into (one table for the workbook, like XLSX).
+pub(crate) struct XlsStyles {
+    pub(crate) sheets: Vec<BTreeMap<(u32, u32), CellStyle>>,
+    pub(crate) num_fmts: Arc<Vec<String>>,
+    /// Formats of the file that are not read: an id the table does not define or a code over a bound.
+    pub(crate) num_fmts_rejected: u32,
 }
 
 /// Reads the fonts, XFs and palette of the workbook globals and the XF of every cell record.
@@ -65,9 +89,12 @@ struct Resolved {
 pub(crate) struct XlsStyleReader {
     palette: Vec<u32>,
     fonts: Vec<u16>,
-    /// Per XF: the font index, the fill pattern and the foreground colour index.
-    xfs: Vec<(u16, u32, u16)>,
+    /// Per XF: the font index, the fill pattern, the foreground colour index and the number format index.
+    xfs: Vec<(u16, u32, u16, u16)>,
+    /// The codes of the `FORMAT` records by format index.
+    formats: HashMap<u16, String>,
     resolved: Option<Resolved>,
+    num_fmts: NumFmtTable,
     cells: BTreeMap<(u32, u32), CellStyle>,
     sheets: Vec<BTreeMap<(u32, u32), CellStyle>>,
 }
@@ -96,11 +123,23 @@ impl XlsStyleReader {
                 // A short record still takes its number: the XFs after it keep theirs.
                 XF if self.xfs.len() < MAX_RECORDS => {
                     self.xfs.push(
-                        match (u16_at(body, 0), u32_at(body, 14), u16_at(body, 18)) {
-                            (Some(font), Some(fill), Some(fore)) => (font, fill >> 26, fore & 0x7F),
-                            _ => (0, 0, ICV_SYSTEM_TEXT),
+                        match (
+                            u16_at(body, 0),
+                            u16_at(body, 2),
+                            u32_at(body, 14),
+                            u16_at(body, 18),
+                        ) {
+                            (Some(font), Some(format), Some(fill), Some(fore)) => {
+                                (font, fill >> 26, fore & 0x7F, format)
+                            }
+                            _ => (0, 0, ICV_SYSTEM_TEXT, 0),
                         },
                     );
+                }
+                FORMAT if self.formats.len() < MAX_RECORDS => {
+                    if let Some((index, code)) = read_format(body) {
+                        self.formats.insert(index, code);
+                    }
                 }
                 PALETTE => self.palette = read_palette(body),
                 _ => {}
@@ -146,16 +185,42 @@ impl XlsStyleReader {
             reader.fonts.get(record).and_then(|&icv| reader.rgb(icv))
         };
         let default_color = font_rgb(self, 0);
-        let xfs = self
-            .xfs
-            .iter()
-            .map(|&(ifnt, pattern, fore)| {
-                let font = font_rgb(self, ifnt).filter(|rgb| Some(*rgb) != default_color);
-                let fill = (pattern == SOLID).then(|| self.rgb(fore)).flatten();
-                (font.is_some() || fill.is_some()).then_some((fill, font))
-            })
-            .collect();
+        let raw = std::mem::take(&mut self.xfs);
+        let mut xfs = Vec::with_capacity(raw.len());
+        for &(ifnt, pattern, fore, format) in &raw {
+            let font_color = font_rgb(self, ifnt).filter(|rgb| Some(*rgb) != default_color);
+            let fill = (pattern == SOLID).then(|| self.rgb(fore)).flatten();
+            let num_fmt = self.num_fmt_id(format);
+            xfs.push(
+                (font_color.is_some() || fill.is_some() || num_fmt != 0).then_some(ResolvedXf {
+                    fill,
+                    font_color,
+                    num_fmt,
+                }),
+            );
+        }
+        self.xfs = raw;
         self.resolved = Some(Resolved { xfs });
+    }
+
+    /// The cell format id of the format index `format`: General for index 0, the id of a built-in code or of an
+    /// entry of the workbook's table; an index that names no code is counted and reads as General.
+    fn num_fmt_id(&mut self, format: u16) -> u16 {
+        if format == 0 {
+            return 0;
+        }
+        let code = if format < CUSTOM_BASE {
+            builtin_code(format).or_else(|| self.formats.get(&format).map(String::as_str))
+        } else {
+            self.formats.get(&format).map(String::as_str)
+        };
+        match code {
+            Some(code) => self.num_fmts.intern(code),
+            None => {
+                self.num_fmts.reject();
+                0
+            }
+        }
     }
 
     /// The colour of colour index `icv`: the workbook's palette over the default one.
@@ -179,7 +244,11 @@ impl XlsStyleReader {
         if self.resolved.is_none() {
             self.resolve();
         }
-        let Some(Some((fill, font_color))) = self
+        let Some(Some(ResolvedXf {
+            fill,
+            font_color,
+            num_fmt,
+        })) = self
             .resolved
             .as_ref()
             .and_then(|r| r.xfs.get(usize::from(xf)))
@@ -193,6 +262,7 @@ impl XlsStyleReader {
                 CellStyle {
                     fill,
                     font_color,
+                    num_fmt,
                     ..CellStyle::default()
                 },
             );
@@ -204,10 +274,42 @@ impl XlsStyleReader {
         self.sheets.push(std::mem::take(&mut self.cells));
     }
 
-    /// The coloured cells of every worksheet, in file order.
-    pub(crate) fn finish(self) -> Vec<BTreeMap<(u32, u32), CellStyle>> {
-        self.sheets
+    /// The styled cells of every worksheet, in file order, and the number format table.
+    pub(crate) fn finish(self) -> XlsStyles {
+        let (num_fmts, num_fmts_rejected) = self.num_fmts.finish();
+        XlsStyles {
+            sheets: self.sheets,
+            num_fmts,
+            num_fmts_rejected,
+        }
     }
+}
+
+/// The format index and code of a `FORMAT` record: the index, a character count, `XLUnicodeString` flags,
+/// then the characters (MS-XLS 2.4.126 and 2.5.293). Truncated or overlong records fail closed (`None`).
+fn read_format(body: &[u8]) -> Option<(u16, String)> {
+    let index = u16_at(body, 0)?;
+    let count = usize::from(u16_at(body, 2)?);
+    if count > MAX_NUM_FMT_CODE_BYTES {
+        return None;
+    }
+    let flags = *body.get(4)?;
+    let wide = flags & 0x01 != 0;
+    let head = 5 + usize::from(flags & 0x08 != 0) * 2 + usize::from(flags & 0x04 != 0) * 4;
+    let byte_len = if wide { count * 2 } else { count };
+    let chars = body.get(head..head + byte_len)?;
+    let code = if wide {
+        let mut units = [0u16; MAX_NUM_FMT_CODE_BYTES];
+        for (slot, pair) in units[..count].iter_mut().zip(chars.chunks_exact(2)) {
+            *slot = u16::from_le_bytes([pair[0], pair[1]]);
+        }
+        String::from_utf16(&units[..count]).ok()?
+    } else if chars.is_ascii() {
+        String::from_utf8(chars.to_vec()).ok()?
+    } else {
+        chars.iter().map(|&b| char::from(b)).collect()
+    };
+    Some((index, code))
 }
 
 /// The entries of a `PALETTE` record: a count and four bytes (red, green, blue, 0) each; at most the 56
@@ -516,7 +618,7 @@ mod tests {
         r.record(NUMBER, &cell(0, 1, 1), true);
         r.record(NUMBER, &cell(0, 2, 2), true);
         r.end_sheet();
-        let cells = &r.finish()[0];
+        let cells = &r.finish().sheets[0];
         assert_eq!(
             cells[&(0, 0)].font_color,
             Some(0xFF0000),
@@ -546,7 +648,7 @@ mod tests {
             r.record(BLANK, &cell(xf, 0, xf), true);
         }
         r.end_sheet();
-        let cells = &r.finish()[0];
+        let cells = &r.finish().sheets[0];
         assert_eq!(
             cells[&(0, 0)].fill,
             Some(0x020000),
@@ -576,7 +678,7 @@ mod tests {
         r.record(MULBLANK, &[9, 0, 0xFF, 0xFF, 0, 0], true);
         r.record(MULRK, &[9], true);
         r.end_sheet();
-        let cells = &r.finish()[0];
+        let cells = &r.finish().sheets[0];
         assert_eq!(cells[&(3, 5)].fill, Some(0xFF0000));
         assert_eq!(cells[&(3, 6)].fill, Some(0x00FF00));
         assert_eq!(cells.len(), 3, "{cells:?}");
@@ -600,6 +702,108 @@ mod tests {
         // The last XF a record can name is the last one kept.
         r.record(BLANK, &cell(0, 0, 65_535), true);
         r.end_sheet();
-        assert_eq!(r.finish()[0].len(), 1);
+        assert_eq!(r.finish().sheets[0].len(), 1);
+    }
+
+    fn xf_with_format(format: u16) -> Vec<u8> {
+        let mut body = xf(0, 0, 0x40);
+        body[2..4].copy_from_slice(&format.to_le_bytes());
+        body
+    }
+
+    fn format_record(index: u16, code: &str) -> Vec<u8> {
+        let mut body = index.to_le_bytes().to_vec();
+        body.extend((code.chars().count() as u16).to_le_bytes());
+        if code.is_ascii() {
+            body.push(0);
+            body.extend(code.bytes());
+        } else {
+            body.push(1);
+            body.extend(code.encode_utf16().flat_map(u16::to_le_bytes));
+        }
+        body
+    }
+
+    #[test]
+    fn number_formats_come_from_built_in_ids_and_format_records() {
+        let mut r = reader(
+            &[8],
+            &[xf_with_format(2), xf_with_format(164), xf_with_format(165)],
+        );
+        r.record(FORMAT, &format_record(164, "yyyy\\-mm\\-dd"), false);
+        r.record(FORMAT, &format_record(165, "0\"원\""), false);
+        for (col, xf) in [(0, 0), (1, 1), (2, 2)] {
+            r.record(NUMBER, &cell(0, col, xf), true);
+        }
+        r.end_sheet();
+        let styles = r.finish();
+        let cells = &styles.sheets[0];
+        assert_eq!(cells[&(0, 0)].num_fmt, 2, "built-in 0.00 keeps its id");
+        let code = |col| {
+            crate::sheet_styling::sheet_numfmt::resolve_code(
+                cells[&(0, col)].num_fmt,
+                &styles.num_fmts,
+            )
+        };
+        assert_eq!(code(1), Some("yyyy\\-mm\\-dd"));
+        assert_eq!(code(2), Some("0\"원\""));
+        assert_eq!(styles.num_fmts_rejected, 0);
+    }
+
+    #[test]
+    fn a_format_index_that_names_no_code_is_counted_and_reads_as_general() {
+        // 27 is a locale built-in this reader does not define; 200 has no FORMAT record.
+        let mut r = reader(&[8], &[xf_with_format(27), xf_with_format(200)]);
+        r.record(NUMBER, &cell(0, 0, 0), true);
+        r.record(NUMBER, &cell(0, 1, 1), true);
+        r.end_sheet();
+        let styles = r.finish();
+        assert!(styles.sheets[0].is_empty());
+        assert_eq!(styles.num_fmts_rejected, 2);
+    }
+
+    #[test]
+    fn currency_format_records_under_custom_base_and_truncated_or_overlong_records_behave_safely() {
+        let mut r = reader(
+            &[8],
+            &[xf_with_format(5), xf_with_format(166), xf_with_format(167)],
+        );
+        // Currency index 5 with rich/ext header flags (`0x0C`) before ASCII payload.
+        let mut rich_ext = Vec::new();
+        rich_ext.extend_from_slice(&5u16.to_le_bytes());
+        rich_ext.extend_from_slice(&6u16.to_le_bytes());
+        rich_ext.push(0x0C);
+        rich_ext.extend_from_slice(&[0u8; 6]);
+        rich_ext.extend_from_slice(b"$#,##0");
+        r.record(FORMAT, &rich_ext, false);
+        // Truncated wide record: claims 20 UTF-16 units, carries 2 bytes -> rejected.
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&166u16.to_le_bytes());
+        truncated.extend_from_slice(&20u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, b'0', 0]);
+        r.record(FORMAT, &truncated, false);
+        // Overlong record: claims 300 chars (> 255) -> rejected before allocation.
+        let mut overlong = Vec::new();
+        overlong.extend_from_slice(&167u16.to_le_bytes());
+        overlong.extend_from_slice(&300u16.to_le_bytes());
+        overlong.push(0);
+        overlong.resize(305, b'0');
+        r.record(FORMAT, &overlong, false);
+
+        for (col, xf) in [(0, 0), (1, 1), (2, 2)] {
+            r.record(NUMBER, &cell(0, col, xf), true);
+        }
+        r.end_sheet();
+        let styles = r.finish();
+        let cells = &styles.sheets[0];
+        assert_eq!(
+            crate::sheet_styling::sheet_numfmt::resolve_code(
+                cells[&(0, 0)].num_fmt,
+                &styles.num_fmts
+            ),
+            Some("$#,##0")
+        );
+        assert!(!cells.contains_key(&(0, 1)) && !cells.contains_key(&(0, 2)));
+        assert_eq!(styles.num_fmts_rejected, 2);
     }
 }

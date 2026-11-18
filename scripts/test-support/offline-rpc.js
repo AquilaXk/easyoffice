@@ -635,6 +635,7 @@ function offlineSourceConversion(parsed) {
         if (m) return [(m[2] ? n * 100 : n).toFixed(m[1] ? m[1].length : 0) + (m[2] ? "%" : ""), ""];
         if (code === '"₩"#,##0') return ["₩" + group(Math.round(n)), ""];
         if (code === "#,##0;[Red]-#,##0") return [group(Math.round(n)), n < 0 ? "#ff0000" : ""];
+        if (code === '_("$"* #,##0.00_)') return [" $" + n.toFixed(2) + " ", "", [2, " "]];
         return null;
       };
       return {
@@ -642,13 +643,15 @@ function offlineSourceConversion(parsed) {
           if (code.length > 255) return { bad: true };
           const t = [];
           const c = {};
+          const f = {};
           values.forEach((text, i) => {
             const n = Number(text);
             const out = text === "" || !Number.isFinite(n) ? null : render(code, n);
             if (out?.[1]) c[i] = out[1];
+            if (out?.[2]) f[i] = out[2];
             t.push(out ? out[0] : null);
           });
-          return { t, c };
+          return Object.keys(f).length > 0 ? { t, c, f } : { t, c };
         }),
       };
     }

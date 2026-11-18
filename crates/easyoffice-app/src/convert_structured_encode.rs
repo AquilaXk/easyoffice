@@ -5,7 +5,7 @@
 use easyoffice_formats::{
     pages_write_loss, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload,
     OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument, RichParagraph,
-    RichRun, SheetStyling, SpillRef, UniversalDocumentModel, UniversalFormatConverter,
+    RichRun, SheetShown, SheetStyling, SpillRef, UniversalDocumentModel, UniversalFormatConverter,
     XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
@@ -17,6 +17,7 @@ use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured::StructuredContent;
 use crate::convert_structured_doc::{is_document_format, slides_to_document};
 use crate::eval_limit::evaluate_for_file;
+use crate::sheet_display::{show_cells, Show};
 use crate::sheet_links_xls::xls_links;
 
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
@@ -270,6 +271,15 @@ fn encode_xls(
             "하이퍼링크 {skipped_links}개는 XLS의 범위(65,536행, 256열) 밖이거나 주소가 너무 길어 저장하지 않았습니다."
         ));
     }
+    let formatted: usize = stylings
+        .iter()
+        .map(|styling| styling.cells.values().filter(|c| c.num_fmt != 0).count())
+        .sum();
+    if formatted > 0 {
+        warnings.push(format!(
+            "숫자 서식이 있는 칸 {formatted}개는 XLS에 서식을 저장하지 않아 값만 저장했습니다."
+        ));
+    }
     let (approximated, dropped) = LegacyOle2Codec::xls_color_losses(stylings);
     if approximated > 0 {
         warnings.push(format!(
@@ -307,6 +317,7 @@ fn encode_delimited(
     let (computed, _) = computed_sheets(sheets, stylings)?;
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
+    show_cells(&mut cells, stylings.first(), Show::Values);
     let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
     if !left_out.is_empty() {
         let shown = left_out.len().min(WARNED_SHEET_NAMES);
@@ -359,11 +370,12 @@ fn evaluate_workbook(
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
-    for (name, cells) in sheets {
+    for (index, (name, cells)) in sheets.iter().enumerate() {
         let (cache, mut displays) = sheet_values(cells, &mut values, with_grids);
         caches.push(cache);
         if with_grids {
             add_spilled_cells(name, &mut displays, &spills);
+            show_cells(&mut displays, stylings.get(index), Show::Table);
             grids.push(rectangular_grid(&displays, &mut grid_cells)?);
         }
     }
@@ -375,16 +387,18 @@ fn evaluate_workbook(
 fn evaluate_displays(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
-) -> Result<Vec<DisplayCells>, EasyOfficeError> {
+) -> Result<(Vec<DisplayCells>, Vec<SheetShown>), EasyOfficeError> {
     let (mut values, spills) = evaluate_formulas(sheets, stylings, true)?;
     Ok(sheets
         .iter()
-        .map(|(name, cells)| {
+        .enumerate()
+        .map(|(index, (name, cells))| {
             let mut displays = sheet_values(cells, &mut values, true).1;
             add_spilled_cells(name, &mut displays, &spills);
-            displays
+            let shown = show_cells(&mut displays, stylings.get(index), Show::Page);
+            (displays, shown)
         })
-        .collect())
+        .unzip())
 }
 
 /// The value of each formula cell across all sheets in sheet and cell order (`None` for one the
@@ -632,13 +646,13 @@ pub(crate) fn encode_structured(
                     )
                 }
                 DocumentFormat::Pdf => {
-                    let displays = evaluate_displays(sheets, stylings)?;
+                    let (displays, shown) = evaluate_displays(sheets, stylings)?;
                     let named: Vec<OdsUnpacked> = sheets
                         .iter()
                         .map(|(name, _)| name.clone())
                         .zip(displays)
                         .collect();
-                    easyoffice_formats::encode_sheet_pdf(title, &named, stylings)
+                    easyoffice_formats::encode_sheet_pdf(title, &named, stylings, &shown)
                 }
                 DocumentFormat::Xls => encode_xls(sheets, stylings, title, warnings),
                 DocumentFormat::Csv | DocumentFormat::Tsv => {

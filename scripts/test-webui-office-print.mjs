@@ -143,6 +143,47 @@ test("sheet: fills and text colors print, a filled empty cell is part of the ran
   assert.match(css, /#eo-print-root \{[^}]*print-color-adjust: exact/);
 });
 
+test("sheet: a number format's text, color and fill print, and a text format prints the stored text (PD-234)", async () => {
+  const t = await setup("SHEET");
+  await pickFile(
+    t.h.document,
+    makeFixtureFile("서식표시.xlsx", {
+      sheets: [{ name: "Sheet1", numFmts: ["0.0%", "#,##0;[Red]-#,##0", '_("$"* #,##0.00_)', "@"], cells: [
+        { ref: "B2", raw: "0.256", style: { nf: 1 } },
+        { ref: "B3", raw: "-1234.6", style: { nf: 2 } },
+        { ref: "B4", raw: "7.5", style: { nf: 3 } },
+        { ref: "B5", raw: "007", style: { nf: 4 } },
+        { ref: "B6", raw: "0.30000000000000004" },
+      ] }],
+    })
+  );
+  await flushAsyncTurns(8);
+  await t.print();
+  assert.equal(t.printed.length, 1, t.feedback());
+  const tds = [...t.printed[0].querySelectorAll("td")];
+  assert.deepEqual(tds.map((td) => td.textContent), ["25.6%", "-1,235", " $7.50 ", "007", "0.3"]);
+  assert.equal(tds[1].style.color, "#ff0000", "the [Red] section prints red");
+  assert.equal(tds[0].style.color, "", "a section without a color keeps the cell's");
+  assert.match(tds[0].className, /eo-print-num/);
+  assert.doesNotMatch(tds[3].className, /eo-print-num/, "a text format is text, not a number");
+  const fill = tds[2].querySelector(".eo-print-fill");
+  assert.deepEqual([...fill.children].map((el) => el.textContent), [" $", "", "7.50 "]);
+  assert.ok(fill.children[1].dataset.fill.length > 100 && fill.children[1].dataset.fill.trim() === "", "the fill repeats its character");
+  t.h.sandbox.dispatchWindowEvent("afterprint");
+});
+
+test("sheet: an engine that does not answer leaves the cells in their General display", async () => {
+  const t = await setup("SHEET");
+  await pickFile(
+    t.h.document,
+    makeFixtureFile("답없음.xlsx", { sheets: [{ name: "Sheet1", numFmts: ["0.0%"], cells: [{ ref: "A1", raw: "0.256", style: { nf: 1 } }] }] })
+  );
+  await flushAsyncTurns(8);
+  t.h.host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__.attach({ call: async () => { throw new Error("엔진 없음"); } });
+  await t.print();
+  assert.equal(t.printed[0].querySelector("td").textContent, "0.256", "the stored value shows when the engine does not answer");
+});
+
 test("sheet: an empty sheet and a range past the cell cap are refused with a message", async () => {
   const t = await setup("SHEET");
   await pickFile(t.h.document, makeFixtureFile("빈.xlsx", { sheets: [{ name: "Sheet1", cells: [] }] }));

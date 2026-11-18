@@ -129,8 +129,8 @@ fn push_month_name(out: &mut String, n: usize, mo: i64, korean: bool) {
             }
         }
         3 => out.push_str(&MONTH_NAMES[idx][..3]),
-        4 => out.push_str(MONTH_NAMES[idx]),
-        _ => out.push_str(&MONTH_NAMES[idx][..1]),
+        5 => out.push_str(&MONTH_NAMES[idx][..1]),
+        _ => out.push_str(MONTH_NAMES[idx]),
     }
 }
 

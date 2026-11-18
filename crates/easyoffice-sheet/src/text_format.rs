@@ -544,7 +544,7 @@ impl CompiledFormat {
         };
         for t in &section.toks {
             match t {
-                Tok::At => out.push_str(text),
+                Tok::At | Tok::General => out.push_str(text),
                 Tok::Lit(s) => out.push_str(s),
                 Tok::Fill(c) => out.set_fill(*c),
                 _ => {}
@@ -612,14 +612,22 @@ pub fn code_shows_date(code: &str, num: f64) -> bool {
 /// General display: the value is text and the code has no text section, or a date/time code
 /// cannot show the number.
 pub fn format_cell_value(code: &str, raw: &str) -> Option<FormattedText> {
-    let compiled = compiled_format(code);
+    format_cell_with(&compiled_format(code), raw).map(|(shown, _)| shown)
+}
+
+/// [`format_cell_value`] for a code that is already compiled, plus whether the cell formatted as a
+/// finite number (`true`) rather than through a text section (`false`).
+pub(crate) fn format_cell_with(
+    compiled: &CompiledFormat,
+    raw: &str,
+) -> Option<(FormattedText, bool)> {
     if compiled.is_text_only() {
-        return Some(compiled.render_text(raw));
+        return Some((compiled.render_text(raw), false));
     }
     match raw.trim().parse::<f64>() {
-        Ok(num) if num.is_finite() => compiled.render_number(num).ok(),
+        Ok(num) if num.is_finite() => compiled.render_number(num).ok().map(|s| (s, true)),
         _ => compiled
             .has_text_section()
-            .then(|| compiled.render_text(raw)),
+            .then(|| (compiled.render_text(raw), false)),
     }
 }

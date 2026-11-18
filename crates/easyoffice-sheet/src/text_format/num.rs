@@ -5,7 +5,9 @@ use super::{dbnum, FormattedText, Section, Tok, MAX_FRACTION_DIGITS};
 use crate::coercion::format_general_number;
 
 /// Largest denominator width (in placeholders) a fraction code may request.
-const MAX_FRACTION_DEN_DIGITS: usize = 5;
+const MAX_FRACTION_DEN_DIGITS: usize = 7;
+/// Significant decimal digits a spreadsheet keeps of a number before it formats it.
+const SIGNIFICANT_DIGITS: usize = 15;
 /// Convergence threshold of the continued-fraction search (reference format-code `frac`).
 const FRACTION_EPS: f64 = 0.000_000_05;
 /// Iteration bound of the continued-fraction search (each step grows the denominator).
@@ -32,6 +34,8 @@ pub(super) struct FracPlan {
     num_start: usize,
     /// Index of the `/` token.
     slash: usize,
+    /// Index of the first denominator token (after the slash and an optional space).
+    den_start: usize,
     /// Index just past the denominator tokens.
     den_end: usize,
     int_phs: Vec<char>,
@@ -58,25 +62,88 @@ pub(super) fn render(section: &Section, kind: &NumKind, value: f64, out: &mut Fo
     }
 }
 
-fn round_half_away(v: f64, decimals: usize) -> f64 {
-    let factor = 10f64.powi(decimals as i32);
-    let q = v * factor;
-    if !q.is_finite() {
-        return v;
+/// A non-negative number as its 15 significant decimal digits: `0.d0d1..d14 x 10^point`. The
+/// spreadsheet formats this decimal text, not the binary value, so `0.285` rounds to `0.29` and
+/// digits past the 15th are zeros.
+struct Decimal {
+    digits: [u8; SIGNIFICANT_DIGITS],
+    point: i32,
+}
+
+impl Decimal {
+    fn of(v: f64) -> Self {
+        let text = format!("{:.*e}", SIGNIFICANT_DIGITS - 1, v);
+        let (mantissa, exp) = text.split_once('e').unwrap_or((&text, "0"));
+        let mut digits = [0u8; SIGNIFICANT_DIGITS];
+        for (slot, b) in digits
+            .iter_mut()
+            .zip(mantissa.bytes().filter(u8::is_ascii_digit))
+        {
+            *slot = b - b'0';
+        }
+        let point = if v == 0.0 {
+            0
+        } else {
+            exp.parse::<i32>().unwrap_or(0) + 1
+        };
+        Self { digits, point }
     }
-    let nudge = q.abs() * f64::EPSILON * 2.0;
-    (q + nudge.copysign(q)).round() / factor
+
+    /// Decimal exponent of the leading digit (`1.5` is 0, `0.05` is -2).
+    fn leading_exponent(&self, shift: i32) -> i32 {
+        self.point + shift - 1
+    }
+
+    /// `(integer digits without leading zeros, fraction digits)` of the value times `10^shift`,
+    /// rounded half away from zero to `prec` fraction digits.
+    fn fixed(&self, shift: i32, prec: usize) -> (String, String) {
+        let point = self.point + shift;
+        let (mut int, mut frac): (Vec<u8>, Vec<u8>) = if point >= 0 {
+            let head = (point as usize).min(SIGNIFICANT_DIGITS);
+            let mut int = self.digits[..head].to_vec();
+            int.resize(point as usize, 0);
+            (int, self.digits[head..].to_vec())
+        } else {
+            let leading_zeros = point.unsigned_abs() as usize;
+            if leading_zeros > prec {
+                return (String::new(), "0".repeat(prec));
+            }
+            let mut frac = vec![0u8; leading_zeros];
+            frac.extend_from_slice(&self.digits);
+            (Vec::new(), frac)
+        };
+        let round_up = frac.get(prec).is_some_and(|&d| d >= 5);
+        frac.resize(prec, 0);
+        if round_up {
+            let carried = frac.iter_mut().rev().chain(int.iter_mut().rev()).all(|d| {
+                *d = (*d + 1) % 10;
+                *d == 0
+            });
+            if carried {
+                int.insert(0, 1);
+            }
+        }
+        let start = int.iter().position(|&d| d != 0).unwrap_or(int.len());
+        let text = |d: &[u8]| {
+            let mut s = String::with_capacity(d.len());
+            for &b in d {
+                s.push(char::from(b'0' + b));
+            }
+            s
+        };
+        (text(&int[start..]), text(&frac))
+    }
 }
 
 fn group_thousands(digits: &str) -> String {
-    let chars: Vec<char> = digits.chars().collect();
-    let mut out = String::with_capacity(chars.len() + chars.len() / 3);
-    for (idx, ch) in chars.iter().enumerate() {
-        let remaining = chars.len() - idx;
-        if idx > 0 && remaining % 3 == 0 && chars[idx - 1].is_ascii_digit() {
+    let bytes = digits.as_bytes();
+    let mut out = String::with_capacity(bytes.len() + bytes.len() / 3);
+    for (idx, &b) in bytes.iter().enumerate() {
+        let remaining = bytes.len() - idx;
+        if idx > 0 && remaining % 3 == 0 && bytes[idx - 1].is_ascii_digit() {
             out.push(',');
         }
-        out.push(*ch);
+        out.push(char::from(b));
     }
     out
 }
@@ -196,16 +263,17 @@ fn classify_commas(
     (grouping, scale_commas)
 }
 
-/// Normalizes `v` to scientific notation; returns `(mantissa, exponent)`.
-fn scientific_parts(v: f64, int_placeholders: usize, frac_len: usize) -> (f64, i32) {
-    let int_digits = int_placeholders.max(1) as i32;
-    let mut exponent = v.log10().floor() as i32 - (int_digits - 1);
-    let mut mantissa = round_half_away(v / 10f64.powi(exponent), frac_len);
-    if mantissa >= 10f64.powi(int_digits) {
-        exponent += 1;
-        mantissa = round_half_away(v / 10f64.powi(exponent), frac_len);
+/// Exponent of scientific notation: a multiple of the integer placeholder count (`##0.0E+0`
+/// steps by 3), so the mantissa shows between one and that many integer digits. The mantissa
+/// rounding can carry into one more digit, which moves the exponent one step up.
+fn scientific_exponent(dec: &Decimal, shift: i32, int_placeholders: usize, prec: usize) -> i32 {
+    let step = int_placeholders.max(1) as i32;
+    let mut exponent = dec.leading_exponent(shift).div_euclid(step) * step;
+    let (int, _) = dec.fixed(shift - exponent, prec);
+    if int.len() > step as usize {
+        exponent += step;
     }
-    (mantissa, exponent)
+    exponent
 }
 
 /// The character the `p`-th integer placeholder (of `phs.len()`) shows for `digits`
@@ -249,14 +317,15 @@ struct Layout<'a> {
 
 fn render_digits(section: &Section, plan: &NumPlan, value: f64, out: &mut FormattedText) {
     let prec = plan.frac_phs.len();
-    let mut v = value * 100f64.powi(plan.percent_count) / 1000f64.powi(plan.scale_commas);
+    let dec = Decimal::of(value);
+    let mut shift = 2 * plan.percent_count - 3 * plan.scale_commas;
     let mut exponent = 0i32;
-    if plan.exp_min_len.is_some() && v != 0.0 {
-        (v, exponent) = scientific_parts(v, plan.int_phs.len(), prec);
+    if plan.exp_min_len.is_some() && value != 0.0 {
+        exponent = scientific_exponent(&dec, shift, plan.int_phs.len(), prec);
+        shift -= exponent;
     }
-    let raw = format!("{:.prec$}", round_half_away(v, prec));
-    let (int_raw, frac_raw) = raw.split_once('.').unwrap_or((raw.as_str(), ""));
-    let int_digits = if int_raw == "0" { "" } else { int_raw };
+    let (int_digits, frac_raw) = dec.fixed(shift, prec);
+    let (int_digits, frac_raw) = (int_digits.as_str(), frac_raw.as_str());
     let mut frac_cut = prec;
     while frac_cut > 0
         && plan.frac_phs[frac_cut - 1] != '0'
@@ -369,45 +438,73 @@ fn emit_int_placeholder(
     }
 }
 
+/// A token a denominator is written with: a digit placeholder or a literal digit (`16`, `100`).
+fn is_den_token(t: &Tok) -> bool {
+    match t {
+        Tok::Digit(_) => true,
+        Tok::Lit(s) => s.len() == 1 && s.as_bytes()[0].is_ascii_digit(),
+        _ => false,
+    }
+}
+
+/// The fixed denominator a run such as `10` names (`Some(Some(10))`), `Some(None)` for a run of
+/// placeholders (the best fit is searched) and `None` for a run that mixes both.
+fn fixed_denominator(run: &[&Tok]) -> Option<Option<u32>> {
+    if !run.iter().any(|t| matches!(t, Tok::Lit(_))) {
+        return Some(None);
+    }
+    let digits: Option<String> = run
+        .iter()
+        .map(|t| match t {
+            Tok::Lit(s) => s.chars().next(),
+            Tok::Digit('0') => Some('0'),
+            _ => None,
+        })
+        .collect();
+    let den: u32 = digits?.parse().ok().filter(|d| *d >= 1)?;
+    Some(Some(den))
+}
+
 impl FracPlan {
     /// Recognizes `[int ]num/den` placeholder runs around the first `/` (denominator either
     /// placeholders such as `??` or a literal integer such as `16`).
     fn detect(section: &[Tok]) -> Option<Self> {
         let slash = section.iter().position(|t| *t == Tok::Slash)?;
-        let num_start = section[..slash]
+        // One space may sit on either side of the slash (`# ?? / ???`).
+        let is_space = |t: Option<&Tok>| matches!(t, Some(Tok::Lit(s)) if s == " ");
+        let num_end = if slash >= 2
+            && is_space(section.get(slash - 1))
+            && matches!(section[slash - 2], Tok::Digit(_))
+        {
+            slash - 1
+        } else {
+            slash
+        };
+        let num_start = section[..num_end]
             .iter()
             .rposition(|t| !matches!(t, Tok::Digit(_)))
             .map_or(0, |i| i + 1);
-        if num_start == slash {
+        if num_start == num_end {
             return None;
         }
-        let rest = &section[slash + 1..];
-        let den_placeholders = rest
+        let gap = usize::from(is_space(section.get(slash + 1)));
+        let den_start = slash + 1 + gap;
+        let run: Vec<&Tok> = section[den_start..]
             .iter()
-            .take_while(|t| matches!(t, Tok::Digit(_)))
-            .count();
-        let (den_len, fixed_den) = if den_placeholders > 0 {
-            (den_placeholders, None)
-        } else {
-            let lits: String = rest
-                .iter()
-                .map_while(|t| match t {
-                    Tok::Lit(s) if s.len() == 1 && s.as_bytes()[0].is_ascii_digit() => {
-                        Some(s.as_str())
-                    }
-                    _ => None,
-                })
-                .collect();
-            let den: u32 = lits.parse().ok().filter(|d| (1..100_000).contains(d))?;
-            (lits.len(), Some(den))
-        };
+            .take_while(|t| is_den_token(t))
+            .collect();
+        if run.is_empty() {
+            return None;
+        }
+        let fixed_den = fixed_denominator(&run)?;
         Some(Self {
             num_start,
             slash,
-            den_end: slash + 1 + den_len,
+            den_start,
+            den_end: den_start + run.len(),
             int_phs: digit_placeholders(&section[..num_start]),
-            num_phs: digit_placeholders(&section[num_start..slash]),
-            den_phs: digit_placeholders(&section[slash + 1..slash + 1 + den_len])
+            num_phs: digit_placeholders(&section[num_start..num_end]),
+            den_phs: digit_placeholders(&section[den_start..den_start + run.len()])
                 .into_iter()
                 .take(MAX_FRACTION_DEN_DIGITS)
                 .collect(),
@@ -420,37 +517,35 @@ impl FracPlan {
     }
 }
 
-/// Best rational approximation `(numerator, denominator)` of `x >= 0` with denominator at most
-/// `max_den`: continued-fraction convergents (reference format-code `frac`), plus the closest
-/// semiconvergent when the next convergent would exceed the bound.
+/// Rational approximation `(numerator, denominator)` of `x >= 0` with a denominator of at most
+/// `max_den`: the last continued-fraction convergent within the bound (reference format-code
+/// `frac`; the program's own output is not always the closest fraction, `12.3` is `12 1/3` with
+/// one denominator digit, not `12 2/7`).
 fn best_fraction(x: f64, max_den: u32) -> (u64, u64) {
     let max_den = u64::from(max_den);
     let (mut p2, mut q2) = (0u64, 1u64);
     let (mut p1, mut q1) = (1u64, 0u64);
+    let (mut p, mut q) = (0u64, 0u64);
     let mut b = x;
     for _ in 0..MAX_FRACTION_STEPS {
+        if q1 >= max_den {
+            break;
+        }
         let a = b.floor();
         let step = a as u64;
-        let p = step.saturating_mul(p1).saturating_add(p2);
-        let q = step.saturating_mul(q1).saturating_add(q2);
-        if q > max_den {
-            let k = (max_den - q2) / q1.max(1);
-            let semi = (k * p1 + p2, k * q1 + q2);
-            let error = |(p, q): (u64, u64)| (x - p as f64 / q as f64).abs();
-            return if k > 0 && error(semi) < error((p1, q1)) {
-                semi
-            } else {
-                (p1, q1)
-            };
-        }
-        (p2, q2, p1, q1) = (p1, q1, p, q);
+        p = step.saturating_mul(p1).saturating_add(p2);
+        q = step.saturating_mul(q1).saturating_add(q2);
         let rest = b - a;
         if rest < FRACTION_EPS {
             break;
         }
         b = 1.0 / rest;
+        (p2, q2, p1, q1) = (p1, q1, p, q);
     }
-    (p1, q1.max(1))
+    if q > max_den {
+        (p, q) = if q1 > max_den { (p2, q2) } else { (p1, q1) };
+    }
+    (p, q.max(1))
 }
 
 fn render_fraction(section: &Section, plan: &FracPlan, value: f64, out: &mut FormattedText) {
@@ -491,8 +586,8 @@ fn render_fraction(section: &Section, plan: &FracPlan, value: f64, out: &mut For
             Tok::Slash if idx == plan.slash => {
                 out.push(if mixed && numer == 0 { ' ' } else { '/' });
             }
-            Tok::Digit(_) | Tok::Lit(_) if idx > plan.slash && idx < plan.den_end => {
-                if idx == plan.slash + 1 {
+            Tok::Digit(_) | Tok::Lit(_) if idx >= plan.den_start && idx < plan.den_end => {
+                if idx == plan.den_start {
                     push_den(out, plan, denom, mixed && numer == 0);
                 }
             }

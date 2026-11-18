@@ -4,8 +4,10 @@
 //! grouped by number format code, and answers with the text each one shows. The page keeps the
 //! answers by code and value, so a repeated value is never sent twice. The command set stays at 15.
 //!
-//! Request `{items:[{code, values:[text...]}]}`, answer `{items:[{t:[text|null...], c:{index:"#rrggbb"}}]}`:
-//! `null` means the cell keeps its General display, `c` lists the section colors by value index.
+//! Request `{items:[{code, values:[text...]}]}`, answer `{items:[{t:[text|null...], c:{index:"#rrggbb"},
+//! f:{index:[utf16Offset, "char"]}}]}`: `null` means the cell keeps its General display, `c` lists the
+//! section colors by value index and `f` (only when a value has one) the `*x` fill of a value (the
+//! printed page repeats the character over the free width of the cell, PD-235).
 //! A code over the bounds of `sheet_numfmt` answers `{bad:true}` and its cells stay General.
 
 use crate::EasyOfficeIpcRouter;
@@ -41,6 +43,7 @@ fn render_item(
         return Ok(());
     }
     let mut colors = String::new();
+    let mut fills = String::new();
     out.push_str("{\"t\":[");
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
@@ -63,8 +66,24 @@ fn render_item(
             }
             let _ = write!(colors, "\"{index}\":\"{}\"", color.hex());
         }
+        if let Some((at, ch)) = shown
+            .fill
+            .filter(|(at, _)| shown.text.is_char_boundary(*at))
+        {
+            if !fills.is_empty() {
+                fills.push(',');
+            }
+            let unit = shown.text[..at].encode_utf16().count();
+            let _ = write!(fills, "\"{index}\":[{unit},\"");
+            fills.push_str(&EasyOfficeIpcRouter::escape_json_str(&ch.to_string()));
+            fills.push_str("\"]");
+        }
     }
-    let _ = write!(out, "],\"c\":{{{colors}}}}}");
+    let _ = write!(out, "],\"c\":{{{colors}}}");
+    if !fills.is_empty() {
+        let _ = write!(out, ",\"f\":{{{fills}}}");
+    }
+    out.push('}');
     Ok(())
 }
 
@@ -123,6 +142,18 @@ mod tests {
         assert_eq!(
             answer,
             r##"{"items":[{"t":["1,234.50","-2.00",null,null],"c":{"1":"#ff0000"}}]}"##
+        );
+    }
+
+    #[test]
+    fn an_asterisk_fill_answers_its_offset_and_character() {
+        let answer = call(
+            r#"{"sessionAction":"format","items":[{"code":"_($* #,##0.00_)","values":["7.5"]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            answer,
+            r#"{"items":[{"t":[" $7.50 "],"c":{},"f":{"0":[2," "]}}]}"#
         );
     }
 

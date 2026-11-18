@@ -6,11 +6,11 @@ use crate::ole2_codec::{
 };
 use crate::sheet_links::xls_links::{self, XlsLinkReader};
 use crate::sheet_links::{LinkCollector, SheetLinks};
-use crate::sheet_styling::{sheet_states, CellStyle, SheetState, SheetStyling};
+use crate::sheet_styling::{sheet_states, SheetState, SheetStyling};
 use crate::xls_boundsheet;
 use crate::xls_sst_cursor::SstContinueCursor;
 use crate::xls_styles::{
-    blank_record, default_font_record, set_formula_xf, XlsColorPlan, XlsStyleReader,
+    blank_record, default_font_record, set_formula_xf, XlsColorPlan, XlsStyleReader, XlsStyles,
 };
 use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
@@ -449,14 +449,17 @@ impl LegacyOle2Codec {
     pub fn unpack_xls_with_styling(
         bytes: &[u8],
     ) -> Result<(crate::OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (payloads, collectors, colors, states) = Self::unpack_xls_walk(bytes)?;
+        let (payloads, collectors, styles, states) = Self::unpack_xls_walk(bytes)?;
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
-        let mut colors = colors.into_iter();
+        let (num_fmts, rejected) = (styles.num_fmts, styles.num_fmts_rejected);
+        let mut colors = styles.sheets.into_iter();
         let mut states = states.into_iter();
-        for (payload, links) in payloads.into_iter().zip(collectors) {
+        for (index, (payload, links)) in payloads.into_iter().zip(collectors).enumerate() {
             let mut styling = SheetStyling {
                 cells: colors.next().unwrap_or_default(),
+                num_fmts: std::sync::Arc::clone(&num_fmts),
+                num_fmts_rejected: if index == 0 { rejected } else { 0 },
                 links: links.links,
                 links_rejected: links.rejected,
                 ..SheetStyling::default()
@@ -475,7 +478,7 @@ impl LegacyOle2Codec {
         (
             Vec<LegacyXlsPayload>,
             Vec<LinkCollector>,
-            Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+            XlsStyles,
             Vec<SheetState>,
         ),
         EasyOfficeError,
@@ -963,7 +966,7 @@ impl XlsParseState {
     ) -> (
         Vec<LegacyXlsPayload>,
         Vec<LinkCollector>,
-        Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+        XlsStyles,
         Vec<SheetState>,
     ) {
         if self.sheets.is_empty()

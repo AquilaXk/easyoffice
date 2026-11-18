@@ -311,6 +311,10 @@
   #eo-print-root .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
   #eo-print-root .eo-print-grid td { border-color: currentcolor; }
   #eo-print-root .eo-print-num { text-align: right; }
+  /* A number format's `*x` fill (PD-235): the character repeats over the width the text leaves free; the repeats are drawn, not text, so a copy or a text search of the page holds the cell's text once. */
+  #eo-print-root .eo-print-fill { display: flex; }
+  #eo-print-root .eo-print-fill > i { flex: 1 1 0; min-width: 0; overflow: hidden; font-style: normal; }
+  #eo-print-root .eo-print-fill > i::before { content: attr(data-fill); }
   #eo-print-root .eo-print-b { font-weight: 700; }
   #eo-print-root .eo-print-i { font-style: italic; }
   #eo-print-root .eo-print-u { text-decoration: underline; }
