@@ -17,21 +17,30 @@
 //! page contents, the fonts and the pictures are copied byte for byte (the content stream is
 //! decoded and compressed again by the library, pictures and fonts are not touched).
 //!
-//! Not carried over: annotations and links, form fields, outlines and the structure tree (the
-//! library copies pages, not the catalog). Only the title, author, subject and keywords of the
-//! first PDF are kept.
+//! Carried over (PD-245): safe `/Link` annotations (`http`, `https`, `mailto` and internal page or
+//! named destinations), existing text markup and note annotations (`/Highlight`, `/Underline`,
+//! `/StrikeOut`, `/Squiggly`, `/Text`), `/Catalog /Outlines` bookmarks, and interactive `/AcroForm`
+//! `/Widget` fields (`applicant` and `department` updated or added when requested), plus new
+//! phrase `/Highlight` and `/Underline` annotations positioned from glyph advances. Only the
+//! structure tree and document-level scripts/signatures are omitted; title, author, subject and
+//! keywords of the first PDF are kept.
 
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
 };
+use crate::pdf_edit_forms::{process_forms, write_catalog_acroform, PageGeom};
 use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, resource_entries, Limits};
+use crate::pdf_edit_outlines::preserve_outlines;
 use crate::pdf_edit_overlay::{upright_matrix, Overlay};
-pub use crate::pdf_edit_wire::{OverlayMaker, PagePlan};
+use crate::pdf_edit_preserve::{preserve_page_annots, MarkupKey, PageDestMap};
+use crate::pdf_edit_text_pos::add_page_phrase_markups;
+pub use crate::pdf_edit_wire::{OverlayKind, OverlayMaker, PagePlan};
+use hayro::hayro_interpret::InterpreterCache;
 use hayro_syntax::page::{Page, Rotation};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use hayro_write::{extract, ChunkSettings, ExtractionQuery};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 const PRODUCER: &str = "EasyOffice";
@@ -163,8 +172,92 @@ pub fn build(
         deadline,
     )?;
 
-    let mut page_refs = Vec::with_capacity(pages.len());
-    for (n, (plan, place)) in pages.iter().zip(&placements).enumerate() {
+    let page_slots: Vec<(Ref, Ref)> = (0..pages.len())
+        .map(|_| (next.bump(), next.bump()))
+        .collect();
+    let page_refs: Vec<Ref> = page_slots.iter().map(|&(p, _)| p).collect();
+    let dest_map = PageDestMap::build(&parsed, pages, &page_refs, deadline)?;
+
+    let mut page_annots: Vec<Vec<Ref>> = vec![Vec::new(); pages.len()];
+    let mut total_annots = 0usize;
+    let mut added_markups = 0usize;
+    let interp_caches: BTreeMap<usize, InterpreterCache<'_>> = if overlay.markup.is_some() {
+        parsed
+            .keys()
+            .map(|&src| (src, InterpreterCache::new()))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+
+    for (n, ((plan, place), &(page_ref, _))) in
+        pages.iter().zip(&placements).zip(&page_slots).enumerate()
+    {
+        if n & PAGES_PER_CHECK_MASK == 0 {
+            deadline.check()?;
+        }
+        let pdf = parsed
+            .get(&plan.source)
+            .ok_or("쪽의 원본 PDF가 없습니다.")?;
+        let src_page = pdf.pages().get(plan.index).ok_or("없는 쪽을 가리킵니다.")?;
+        let mut seen_markups: HashSet<MarkupKey> = HashSet::new();
+        let kept = preserve_page_annots(
+            &mut out,
+            &mut next,
+            &dest_map,
+            plan.source,
+            pdf,
+            src_page,
+            page_ref,
+            &mut total_annots,
+            &mut seen_markups,
+        )?;
+        page_annots[n].extend(kept);
+        if let (Some(markup), Some(cache)) = (&overlay.markup, interp_caches.get(&plan.source)) {
+            let added = add_page_phrase_markups(
+                &mut out,
+                &mut next,
+                cache,
+                pdf.xref(),
+                src_page,
+                (place.width, place.height),
+                page_ref,
+                markup,
+                &mut added_markups,
+                &mut total_annots,
+                &mut seen_markups,
+            )?;
+            page_annots[n].extend(added);
+        }
+    }
+
+    let geoms: Vec<PageGeom> = placements
+        .iter()
+        .zip(&page_refs)
+        .map(|(place, &page_ref)| PageGeom {
+            width: place.width,
+            height: place.height,
+            rotate: place.rotate,
+            page_ref,
+        })
+        .collect();
+    let forms_out = process_forms(
+        &mut out,
+        &mut next,
+        &parsed,
+        pages,
+        &geoms,
+        &mut page_annots,
+        &overlay.form,
+        make_overlay,
+        &mut total_annots,
+        deadline,
+    )?;
+    let outlines_ref = preserve_outlines(&mut out, &mut next, &dest_map, &parsed, pages, deadline)?;
+
+    for (n, ((plan, place), &(page_ref, content_ref))) in
+        pages.iter().zip(&placements).zip(&page_slots).enumerate()
+    {
         if n & PAGES_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
@@ -175,8 +268,6 @@ pub fn build(
         let overlay_form = overlays
             .get(&overlay_key(shown, n == 0 && overlay.stamp.is_some()))
             .copied();
-        let (page_ref, content_ref) = (next.bump(), next.bump());
-        page_refs.push(page_ref);
         let mut content = Content::new();
         content
             .save_state()
@@ -196,6 +287,9 @@ pub fn build(
             .parent(tree_ref)
             .contents(content_ref)
             .rotate(i32::from(place.rotate));
+        if !page_annots[n].is_empty() {
+            page.annotations(page_annots[n].iter().copied());
+        }
         let mut resources = page.resources();
         let mut x_objects = resources.x_objects();
         x_objects.pair(ORIGINAL_FORM, form);
@@ -207,7 +301,13 @@ pub fn build(
         page.finish();
     }
 
-    out.catalog(catalog_ref).pages(tree_ref);
+    let mut catalog = out.catalog(catalog_ref);
+    catalog.pages(tree_ref);
+    if let Some(outlines_ref) = outlines_ref {
+        catalog.outlines(outlines_ref);
+    }
+    write_catalog_acroform(&mut catalog, &forms_out);
+    catalog.finish();
     let count = i32::try_from(page_refs.len()).map_err(|_| "쪽 수가 너무 많습니다.")?;
     out.pages(tree_ref).count(count).kids(page_refs);
     write_info(&mut out, info_ref, pages, &parsed);
@@ -341,10 +441,16 @@ fn copy_overlays(
                 "쪽 크기가 {MAX_OVERLAY_SIZES}가지를 넘어 스탬프와 워터마크를 넣을 수 없습니다."
             ));
         }
-        if overlay.svg(shown.0, shown.1, n == 0).is_none() {
+        let first = n == 0 && overlay.stamp.is_some();
+        if overlay.svg(shown.0, shown.1, first).is_none() {
             continue;
         }
-        let bytes = Arc::new(make_overlay(shown.0, shown.1, n == 0)?);
+        let kind = if first {
+            OverlayKind::FirstPage
+        } else {
+            OverlayKind::Watermark
+        };
+        let bytes = Arc::new(make_overlay(shown.0, shown.1, kind)?);
         let pdf = open_pdf(&bytes)?;
         let copied = extract(
             &pdf,

@@ -23,7 +23,7 @@ mod pdf_edit_wire;
 use pdf_edit_budget::{Jobs, MSG_BUSY, MSG_MEMORY, MSG_TIMEOUT, MSG_WORKER_DIED};
 use pdf_edit_fixtures::{hand_written_with_xref, hidden_object_stream_bomb, sample_pdf};
 use pdf_edit_supervisor::Supervisor;
-use pdf_edit_wire::{BuildHead, PagePlan};
+use pdf_edit_wire::{BuildHead, OverlayKind, PagePlan, WireForm};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,10 +60,12 @@ fn head(pages: Vec<PagePlan>, sources: usize) -> BuildHead {
         pages,
         watermark: None,
         stamp: None,
+        markup: None,
+        form: WireForm::default(),
     }
 }
 
-fn no_overlay(_: f32, _: f32, _: bool) -> Result<Vec<u8>, String> {
+fn no_overlay(_: f32, _: f32, _: OverlayKind) -> Result<Vec<u8>, String> {
     Err("no overlay expected".to_string())
 }
 
@@ -128,8 +130,8 @@ fn files_are_merged_and_the_overlay_comes_from_the_shell() {
     let mut asked = Vec::new();
     // The shell answers with a PDF of its own making (here any one-page file).
     let stand_in = sample_pdf(9, 1, &[]);
-    let mut overlay = |width: f32, height: f32, stamp: bool| {
-        asked.push((width, height, stamp));
+    let mut overlay = |width: f32, height: f32, kind: OverlayKind| {
+        asked.push((width, height, kind));
         Ok(stand_in.clone())
     };
     let mut plan = head(pages, 2);
@@ -141,7 +143,13 @@ fn files_are_merged_and_the_overlay_comes_from_the_shell() {
     assert_eq!(pages_of(&out), 3);
     // All three pages are 200 x 300: one overlay for the first page (stamp), one for the others.
     asked.sort_by_key(|a| a.2);
-    assert_eq!(asked, [(200.0, 300.0, false), (200.0, 300.0, true)]);
+    assert_eq!(
+        asked,
+        [
+            (200.0, 300.0, OverlayKind::Watermark),
+            (200.0, 300.0, OverlayKind::FirstPage)
+        ]
+    );
 }
 
 #[test]

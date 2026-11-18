@@ -289,3 +289,47 @@ test("the error line of the split and merge dialog uses the reference note style
   assert.ok(!note.classList.contains("formula-result"));
   assert.equal(document.querySelector("#pdf-highlight-dialog .dialog-body > p"), null, "the highlight dialog has no note line");
 });
+
+test("highlight/underline markup and applicant/department form fields sync to the shell before pdf_edit_save and clear cleanly", async () => {
+  const { document, named, userClick } = await createPdfShell();
+  await open(document);
+
+  userClick(commandItem(document, "pdf-mod-highlight"));
+  await flushAsyncTurns(8);
+  document.getElementById("pdf-highlight-text").value = "제1조 목적";
+  const kindSel = document.getElementById("pdf-highlight-kind-select");
+  kindSel.value = "underline";
+  kindSel.dispatchEvent({ type: "change", target: kindSel });
+  const colorSel = document.getElementById("pdf-highlight-color-select");
+  colorSel.value = "#90CAF9";
+  colorSel.dispatchEvent({ type: "change", target: colorSel });
+  userClick(document.getElementById("btn-pdf-highlight-apply"));
+  await flushAsyncTurns(8);
+
+  document.getElementById("pdf-form-applicant").value = "홍길동";
+  document.getElementById("pdf-form-dept").value = "법무지원팀";
+
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(12);
+
+  assert.deepEqual(named("pdf_edit_apply").map((c) => c.args.op), [
+    { kind: "turn", degrees: 0 },
+    { kind: "overlay", stamp: "", watermark: "" },
+    { kind: "markup", text: "제1조 목적", style: "underline", color: "#90CAF9" },
+    { kind: "form", applicant: "홍길동", department: "법무지원팀" },
+  ]);
+
+  // Clearing both after they were sent transmits one clearing op each, then goes quiet on a third save.
+  document.getElementById("pdf-highlight-input").value = "";
+  document.getElementById("pdf-form-applicant").value = "";
+  document.getElementById("pdf-form-dept").value = "";
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(12);
+
+  assert.deepEqual(named("pdf_edit_apply").slice(4).map((c) => c.args.op), [
+    { kind: "turn", degrees: 0 },
+    { kind: "overlay", stamp: "", watermark: "" },
+    { kind: "markup", text: "", style: "underline", color: "#90CAF9" },
+    { kind: "form", applicant: "", department: "" },
+  ]);
+});

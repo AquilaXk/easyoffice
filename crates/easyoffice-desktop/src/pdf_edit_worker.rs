@@ -20,11 +20,11 @@ use crate::pdf_edit_budget::{
 use crate::pdf_edit_build::build;
 use crate::pdf_edit_inspect::inspect;
 use crate::pdf_edit_os::{limit_own_address_space, own_resident_bytes};
-use crate::pdf_edit_overlay::Overlay;
+use crate::pdf_edit_overlay::{parse_form, Overlay, MSG_MARKUP_TEXT};
 use crate::pdf_edit_wire::{
-    from_shell_cap, read_frame, split_render_request, write_frame, BuildHead, EXIT_DEADLINE,
-    EXIT_MEMORY, NEED_OVERLAY, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, REQ_RENDER, RES_ERR, RES_OK,
-    SOURCE,
+    from_shell_cap, read_frame, split_render_request, write_frame, BuildHead, OverlayKind,
+    EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, REQ_RENDER,
+    RES_ERR, RES_OK, SOURCE,
 };
 use crate::pdf_first_page::first_page_png;
 use std::io::{self, Read, Write};
@@ -119,9 +119,27 @@ fn build_request(
         }
         sources.push(Arc::new(bytes));
     }
-    let overlay = Overlay::new(head.watermark.as_deref(), head.stamp.as_deref())?;
-    let mut ask = |width: f32, height: f32, stamp: bool| -> Result<Vec<u8>, String> {
-        let need = crate::pdf_edit_wire::encode_overlay_need(width, height, stamp);
+    let mut overlay = Overlay::new(head.watermark.as_deref(), head.stamp.as_deref())?;
+    if let Some(markup) = head.markup {
+        let trimmed = markup.text.trim();
+        if trimmed.is_empty()
+            || trimmed.chars().count() > crate::pdf_edit_budget::MAX_MARKUP_CHARS
+            || trimmed.chars().any(char::is_control)
+        {
+            return Err(MSG_MARKUP_TEXT.to_string());
+        }
+        overlay.markup = Some(crate::pdf_edit_wire::WireMarkup {
+            text: trimmed.to_string(),
+            underline: markup.underline,
+            color: markup.color,
+        });
+    }
+    overlay.form = parse_form(
+        head.form.applicant.as_deref(),
+        head.form.department.as_deref(),
+    )?;
+    let mut ask = |width: f32, height: f32, kind: OverlayKind| -> Result<Vec<u8>, String> {
+        let need = crate::pdf_edit_wire::encode_overlay_need(width, height, kind);
         write_frame(output, NEED_OVERLAY, &[&need]).map_err(|_| bad_request())?;
         match read_frame(input, from_shell_cap) {
             Ok((OVERLAY_REPLY, pdf)) => Ok(pdf),

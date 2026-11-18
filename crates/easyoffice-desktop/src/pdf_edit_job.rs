@@ -14,7 +14,6 @@ use crate::pdf_edit_budget::{
     Deadline, MAX_SESSION_BYTES, MAX_SOURCE_BYTES, MAX_SPLIT_TOTAL_BYTES, SPLIT_DEADLINE,
 };
 use crate::pdf_edit_engine::{ChildEngine, PdfEngine};
-use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
 use crate::save_error::SaveError;
 use crate::save_file::{
@@ -135,16 +134,26 @@ pub struct PdfEditState {
     turn: u16,
     stamp: Option<String>,
     watermark: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    markup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    applicant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    department: Option<String>,
 }
 
 impl PdfEditState {
     fn of(session: &EditSession) -> Self {
+        let ov = session.overlay();
         Self {
             pages: session.page_count(),
             sources: session.source_count(),
             turn: session.first_turn(),
-            stamp: session.overlay().stamp.clone(),
-            watermark: session.overlay().watermark.clone(),
+            stamp: ov.stamp.clone(),
+            watermark: ov.watermark.clone(),
+            markup: ov.markup.as_ref().map(|m| m.text.clone()),
+            applicant: ov.form.applicant.clone().filter(|s| !s.is_empty()),
+            department: ov.form.department.clone().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -167,6 +176,19 @@ pub enum PdfEditOp {
         stamp: Option<String>,
         watermark: Option<String>,
     },
+    /// Set or clear the phrase highlight / underline annotation (PD-245).
+    #[serde(rename_all = "camelCase")]
+    Markup {
+        text: String,
+        style: Option<String>,
+        color: Option<String>,
+    },
+    /// Set or clear the interactive applicant / department form fields (PD-245).
+    #[serde(rename_all = "camelCase")]
+    Form {
+        applicant: Option<String>,
+        department: Option<String>,
+    },
 }
 
 fn apply(session: &mut EditSession, op: PdfEditOp) -> Result<(), String> {
@@ -174,9 +196,15 @@ fn apply(session: &mut EditSession, op: PdfEditOp) -> Result<(), String> {
         PdfEditOp::Turn { degrees } => session.set_turn(degrees),
         PdfEditOp::Rotate { degrees, pages } => session.rotate(pages.as_deref(), degrees),
         PdfEditOp::Overlay { stamp, watermark } => {
-            session.set_overlay(Overlay::new(watermark.as_deref(), stamp.as_deref())?);
-            Ok(())
+            session.set_overlay_marks(watermark.as_deref(), stamp.as_deref())
         }
+        PdfEditOp::Markup { text, style, color } => {
+            session.set_markup(&text, style.as_deref(), color.as_deref())
+        }
+        PdfEditOp::Form {
+            applicant,
+            department,
+        } => session.set_form(applicant.as_deref(), department.as_deref()),
     }
 }
 
@@ -630,6 +658,7 @@ mod tests {
     use super::*;
     use crate::pdf_edit_engine::InProcessEngine;
     use crate::pdf_edit_fixtures::{deadline, read, sample_pdf};
+    use crate::pdf_edit_overlay::Overlay;
     use crate::pdf_edit_wire::PagePlan;
     use usvg::fontdb::Database;
 

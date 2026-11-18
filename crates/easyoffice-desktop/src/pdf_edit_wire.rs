@@ -61,9 +61,56 @@ pub struct PagePlan {
     pub turn: u16,
 }
 
-/// Makes the PDF of an overlay for a page shown `width` x `height` points (with the stamp or not).
+/// Which rendered PDF XObject the worker asks the shell to draw (`NEED_OVERLAY` byte 9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OverlayKind {
+    /// Page watermark only.
+    Watermark = 0,
+    /// First-page watermark and approval stamp.
+    FirstPage = 1,
+    /// Value-only appearance for an existing applicant `/Tx` widget.
+    ApplicantField = 2,
+    /// Value-only appearance for an existing department `/Tx` widget.
+    DepartmentField = 3,
+    /// Framed `"신청인: …"` appearance for a studio-added applicant `/Tx` widget.
+    ApplicantLabeled = 4,
+    /// Framed `"부서: …"` appearance for a studio-added department `/Tx` widget.
+    DepartmentLabeled = 5,
+}
+
+impl OverlayKind {
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(Self::Watermark),
+            1 => Some(Self::FirstPage),
+            2 => Some(Self::ApplicantField),
+            3 => Some(Self::DepartmentField),
+            4 => Some(Self::ApplicantLabeled),
+            5 => Some(Self::DepartmentLabeled),
+            _ => None,
+        }
+    }
+}
+
+/// Highlight or underline markup phrase requested by the PDF studio (PD-245).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WireMarkup {
+    pub text: String,
+    pub underline: bool,
+    pub color: [u8; 3],
+}
+
+/// Interactive form field edits requested by the PDF studio (PD-245).
+/// `None` leaves any existing field untouched; `Some("")` clears a matched field; `Some(v)` sets `/V`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WireForm {
+    pub applicant: Option<String>,
+    pub department: Option<String>,
+}
+
+/// Makes the PDF of an overlay or widget appearance of `width` x `height` points.
 /// The shell makes them: the worker process has no fonts and no files.
-pub type OverlayMaker<'a> = dyn FnMut(f32, f32, bool) -> Result<Vec<u8>, String> + 'a;
+pub type OverlayMaker<'a> = dyn FnMut(f32, f32, OverlayKind) -> Result<Vec<u8>, String> + 'a;
 
 /// Writes one frame whose payload is `parts` one after the other (no copy of the parts).
 pub fn write_frame<W: Write + ?Sized>(out: &mut W, tag: u8, parts: &[&[u8]]) -> io::Result<()> {
@@ -144,6 +191,9 @@ pub fn read_frame<R: Read + ?Sized>(
     Ok((head[0], payload))
 }
 
+/// Largest text field encoded in a [`BuildHead`] (bytes).
+const MAX_HEAD_TEXT_BYTES: usize = 2048;
+
 /// The plan of a build, sent before the sources.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildHead {
@@ -151,6 +201,8 @@ pub struct BuildHead {
     pub pages: Vec<PagePlan>,
     pub watermark: Option<String>,
     pub stamp: Option<String>,
+    pub markup: Option<WireMarkup>,
+    pub form: WireForm,
 }
 
 fn put_text(out: &mut Vec<u8>, text: &Option<String>) {
@@ -164,9 +216,22 @@ fn put_text(out: &mut Vec<u8>, text: &Option<String>) {
     }
 }
 
+fn put_markup(out: &mut Vec<u8>, markup: &Option<WireMarkup>) {
+    match markup {
+        None => out.push(0),
+        Some(m) => {
+            out.push(1);
+            out.extend_from_slice(&u32::try_from(m.text.len()).unwrap_or(0).to_le_bytes());
+            out.extend_from_slice(m.text.as_bytes());
+            out.push(u8::from(m.underline));
+            out.extend_from_slice(&m.color);
+        }
+    }
+}
+
 impl BuildHead {
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(16 + self.pages.len() * 10);
+        let mut out = Vec::with_capacity(24 + self.pages.len() * 10);
         out.extend_from_slice(
             &u32::try_from(self.sources)
                 .unwrap_or(u32::MAX)
@@ -179,6 +244,9 @@ impl BuildHead {
         );
         put_text(&mut out, &self.watermark);
         put_text(&mut out, &self.stamp);
+        put_markup(&mut out, &self.markup);
+        put_text(&mut out, &self.form.applicant);
+        put_text(&mut out, &self.form.department);
         for page in &self.pages {
             out.extend_from_slice(&u32::try_from(page.source).unwrap_or(u32::MAX).to_le_bytes());
             out.extend_from_slice(&u32::try_from(page.index).unwrap_or(u32::MAX).to_le_bytes());
@@ -198,6 +266,11 @@ impl BuildHead {
         }
         let watermark = at.text()?;
         let stamp = at.text()?;
+        let markup = at.markup()?;
+        let form = WireForm {
+            applicant: at.text()?,
+            department: at.text()?,
+        };
         let mut pages = Vec::with_capacity(count);
         for _ in 0..count {
             let (source, index) = (at.u32()? as usize, at.u32()? as usize);
@@ -216,6 +289,8 @@ impl BuildHead {
             pages,
             watermark,
             stamp,
+            markup,
+            form,
         })
     }
 }
@@ -242,29 +317,58 @@ impl<'a> Cursor<'a> {
             0 => Some(None),
             1 => {
                 let len = self.u32()? as usize;
+                if len > MAX_HEAD_TEXT_BYTES {
+                    return None;
+                }
                 String::from_utf8(self.take(len)?.to_vec()).ok().map(Some)
+            }
+            _ => None,
+        }
+    }
+
+    fn markup(&mut self) -> Option<Option<WireMarkup>> {
+        match self.take(1)?[0] {
+            0 => Some(None),
+            1 => {
+                let len = self.u32()? as usize;
+                if len == 0 || len > MAX_HEAD_TEXT_BYTES {
+                    return None;
+                }
+                let text = String::from_utf8(self.take(len)?.to_vec()).ok()?;
+                let underline = match self.take(1)?[0] {
+                    0 => false,
+                    1 => true,
+                    _ => return None,
+                };
+                let color: [u8; 3] = self.take(3)?.try_into().ok()?;
+                Some(Some(WireMarkup {
+                    text,
+                    underline,
+                    color,
+                }))
             }
             _ => None,
         }
     }
 }
 
-/// A request for the overlay of a page shown `width` x `height` points.
-pub fn encode_overlay_need(width: f32, height: f32, stamp: bool) -> Vec<u8> {
+/// A request for the overlay or widget appearance of `width` x `height` points.
+pub fn encode_overlay_need(width: f32, height: f32, kind: OverlayKind) -> Vec<u8> {
     let mut out = Vec::with_capacity(9);
     out.extend_from_slice(&width.to_le_bytes());
     out.extend_from_slice(&height.to_le_bytes());
-    out.push(u8::from(stamp));
+    out.push(kind as u8);
     out
 }
 
-pub fn decode_overlay_need(bytes: &[u8]) -> Option<(f32, f32, bool)> {
+pub fn decode_overlay_need(bytes: &[u8]) -> Option<(f32, f32, OverlayKind)> {
     let [a, b, c, d, e, f, g, h, s] = <[u8; 9]>::try_from(bytes).ok()?;
     let (w, h) = (
         f32::from_le_bytes([a, b, c, d]),
         f32::from_le_bytes([e, f, g, h]),
     );
-    (w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 && s <= 1).then_some((w, h, s == 1))
+    let kind = OverlayKind::from_byte(s)?;
+    (w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0).then_some((w, h, kind))
 }
 
 #[cfg(test)]
@@ -350,6 +454,15 @@ mod tests {
             ],
             watermark: Some("대외비".into()),
             stamp: None,
+            markup: Some(WireMarkup {
+                text: "제1조".into(),
+                underline: true,
+                color: [255, 235, 59],
+            }),
+            form: WireForm {
+                applicant: Some("홍길동".into()),
+                department: Some(String::new()),
+            },
         };
         let bytes = head.encode();
         assert_eq!(BuildHead::decode(&bytes, 64, 5000), Some(head.clone()));
@@ -376,16 +489,32 @@ mod tests {
 
     #[test]
     fn overlay_needs_are_checked() {
-        let bytes = encode_overlay_need(595.0, 842.0, true);
-        assert_eq!(decode_overlay_need(&bytes), Some((595.0, 842.0, true)));
+        let bytes = encode_overlay_need(595.0, 842.0, OverlayKind::FirstPage);
         assert_eq!(
-            decode_overlay_need(&encode_overlay_need(f32::NAN, 1.0, false)),
+            decode_overlay_need(&bytes),
+            Some((595.0, 842.0, OverlayKind::FirstPage))
+        );
+        for kind in [
+            OverlayKind::Watermark,
+            OverlayKind::ApplicantField,
+            OverlayKind::DepartmentField,
+            OverlayKind::ApplicantLabeled,
+            OverlayKind::DepartmentLabeled,
+        ] {
+            let encoded = encode_overlay_need(120.0, 20.0, kind);
+            assert_eq!(decode_overlay_need(&encoded), Some((120.0, 20.0, kind)));
+        }
+        assert_eq!(
+            decode_overlay_need(&encode_overlay_need(f32::NAN, 1.0, OverlayKind::Watermark)),
             None
         );
         assert_eq!(
-            decode_overlay_need(&encode_overlay_need(0.0, 1.0, false)),
+            decode_overlay_need(&encode_overlay_need(0.0, 1.0, OverlayKind::Watermark)),
             None
         );
+        let mut unknown = bytes.clone();
+        unknown[8] = 6;
+        assert_eq!(decode_overlay_need(&unknown), None);
         assert_eq!(decode_overlay_need(&bytes[..8]), None);
     }
 }

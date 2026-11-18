@@ -45,8 +45,32 @@ pub const MAX_SPLIT_FILES: usize = 200;
 pub const MAX_SPLIT_TOTAL_BYTES: usize = 1024 * MIB;
 /// Most distinct page sizes that get an overlay of their own (stamp and watermark).
 pub const MAX_OVERLAY_SIZES: usize = 128;
+/// Most form widget appearance overlays one build may ask the shell to draw (PD-245).
+pub const MAX_WIDGET_OVERLAYS: usize = 16;
 /// Longest stamp or watermark text (characters).
 pub const MAX_OVERLAY_CHARS: usize = 100;
+/// Longest phrase for a highlight or underline annotation (characters, PD-245).
+pub const MAX_MARKUP_CHARS: usize = 200;
+/// Longest form field value set from the PDF studio (characters, PD-245).
+pub const MAX_FORM_CHARS: usize = 200;
+/// Most annotations read from a single source page (PD-245).
+pub const MAX_PAGE_ANNOTS: usize = 2_048;
+/// Most annotations preserved and added across one output PDF (PD-245).
+pub const MAX_TOTAL_ANNOTS: usize = 16_384;
+/// Most outline (bookmark) items preserved across one output PDF (PD-245).
+pub const MAX_OUTLINE_ITEMS: usize = 4_096;
+/// Deepest outline hierarchy followed (PD-245).
+pub const MAX_OUTLINE_DEPTH: usize = 32;
+/// Most named destinations resolved in one source PDF (PD-245).
+pub const MAX_DEST_ENTRIES: usize = 8_192;
+/// Most `/Names /Dests` tree nodes visited in one source PDF (PD-245).
+pub const MAX_NAME_TREE_NODES: usize = 1_024;
+/// Most positioned glyphs scanned on one page when searching for a markup phrase (PD-245).
+pub const MAX_PAGE_GLYPHS: usize = 200_000;
+/// Most highlight or underline annotations added by one phrase search (PD-245).
+pub const MAX_ADDED_MARKUPS: usize = 2_000;
+/// Most interactive form fields preserved across one output PDF (PD-245).
+pub const MAX_FORM_FIELDS: usize = 2_048;
 /// How long one request may run before the worker is killed.
 pub const WORK_DEADLINE: Duration = Duration::from_secs(60);
 /// How long a split may take in all (each file has the deadline of a request of its own).

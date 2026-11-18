@@ -10,7 +10,8 @@
 //! The overlay is drawn upright. A page that is displayed rotated (`/Rotate`) is not: the
 //! placement matrix ([`upright_matrix`]) turns the overlay back into the page's own space.
 
-use crate::pdf_edit_budget::MAX_OVERLAY_CHARS;
+use crate::pdf_edit_budget::{MAX_FORM_CHARS, MAX_MARKUP_CHARS, MAX_OVERLAY_CHARS};
+use crate::pdf_edit_wire::{OverlayKind, WireForm, WireMarkup};
 
 /// Space between the stamp and the edges of the page (points).
 const STAMP_MARGIN: f32 = 36.0;
@@ -29,12 +30,17 @@ const FONT_FAMILY: &str = "Noto Sans KR, sans-serif";
 const PX_PER_PT: f32 = 96.0 / 72.0;
 
 pub const MSG_OVERLAY_TEXT: &str = "스탬프와 워터마크 문구는 줄바꿈 없이 100자 이내여야 합니다.";
+pub const MSG_MARKUP_TEXT: &str = "형광펜·밑줄 주석 문구는 줄바꿈 없이 200자 이내여야 합니다.";
+pub const MSG_MARKUP_STYLE: &str = "지원하지 않는 주석 종류 또는 색상입니다.";
+pub const MSG_FORM_TEXT: &str = "양식 필드 값은 줄바꿈 없이 200자 이내여야 합니다.";
 
-/// What is laid over the pages: a watermark on every page and a stamp on the first.
+/// What is laid over or written into the pages: watermark, first-page stamp, phrase markup and form edits.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Overlay {
     pub watermark: Option<String>,
     pub stamp: Option<String>,
+    pub markup: Option<WireMarkup>,
+    pub form: WireForm,
 }
 
 impl Overlay {
@@ -43,11 +49,49 @@ impl Overlay {
         Ok(Self {
             watermark: clean_text(watermark)?,
             stamp: clean_text(stamp)?,
+            markup: None,
+            form: WireForm::default(),
         })
+    }
+
+    pub fn set_marks(
+        &mut self,
+        watermark: Option<&str>,
+        stamp: Option<&str>,
+    ) -> Result<(), String> {
+        self.watermark = clean_text(watermark)?;
+        self.stamp = clean_text(stamp)?;
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
         self.watermark.is_none() && self.stamp.is_none()
+    }
+
+    /// The SVG of an overlay or widget appearance of `width` x `height` points.
+    pub fn svg_for(&self, kind: OverlayKind, width: f32, height: f32) -> Option<String> {
+        match kind {
+            OverlayKind::Watermark => self.svg(width, height, false),
+            OverlayKind::FirstPage => self.svg(width, height, true),
+            OverlayKind::ApplicantField => {
+                widget_svg(None, self.form.applicant.as_deref()?, width, height)
+            }
+            OverlayKind::DepartmentField => {
+                widget_svg(None, self.form.department.as_deref()?, width, height)
+            }
+            OverlayKind::ApplicantLabeled => widget_svg(
+                Some("신청인"),
+                self.form.applicant.as_deref()?,
+                width,
+                height,
+            ),
+            OverlayKind::DepartmentLabeled => widget_svg(
+                Some("부서"),
+                self.form.department.as_deref()?,
+                width,
+                height,
+            ),
+        }
     }
 
     /// The SVG of an overlay for a page that is shown `width` x `height` points (rotation applied),
@@ -70,6 +114,102 @@ impl Overlay {
             height * PX_PER_PT
         ))
     }
+}
+
+/// Validates and parses a phrase markup request; an empty phrase clears the markup.
+pub fn parse_markup(
+    text: &str,
+    style: Option<&str>,
+    color: Option<&str>,
+) -> Result<Option<WireMarkup>, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.chars().count() > MAX_MARKUP_CHARS || trimmed.chars().any(char::is_control) {
+        return Err(MSG_MARKUP_TEXT.to_string());
+    }
+    let underline = match style.map(str::trim).filter(|s| !s.is_empty()) {
+        None | Some("highlight") => false,
+        Some("underline") => true,
+        Some(_) => return Err(MSG_MARKUP_STYLE.to_string()),
+    };
+    let rgb = match color.map(str::trim).filter(|s| !s.is_empty()) {
+        None => [255, 255, 0],
+        Some(hex) => parse_hex_rgb(hex).ok_or_else(|| MSG_MARKUP_STYLE.to_string())?,
+    };
+    Ok(Some(WireMarkup {
+        text: trimmed.to_string(),
+        underline,
+        color: rgb,
+    }))
+}
+
+fn parse_hex_rgb(raw: &str) -> Option<[u8; 3]> {
+    let hex = raw.strip_prefix('#').unwrap_or(raw);
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+    ])
+}
+
+/// Validates and trims interactive form field edits (`Some("")` clears an existing field).
+pub fn parse_form(applicant: Option<&str>, department: Option<&str>) -> Result<WireForm, String> {
+    Ok(WireForm {
+        applicant: clean_form_value(applicant)?,
+        department: clean_form_value(department)?,
+    })
+}
+
+fn clean_form_value(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.chars().count() > MAX_FORM_CHARS || trimmed.chars().any(char::is_control) {
+        return Err(MSG_FORM_TEXT.to_string());
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+fn widget_svg(label: Option<&str>, value: &str, width: f32, height: f32) -> Option<String> {
+    if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let shown = match label {
+        Some(prefix) if !value.is_empty() => format!("{prefix}: {value}"),
+        Some(_) => String::new(),
+        None => value.to_string(),
+    };
+    let font_size = (height * 0.56).clamp(7.0, 13.0);
+    let baseline = height * 0.5 + font_size * 0.35;
+    let frame = if label.is_some() && !shown.is_empty() {
+        format!(
+            r##"<rect x="0.5" y="0.5" width="{}" height="{}" rx="2.5" fill="#F8FAFC" fill-opacity="0.92" stroke="#94A3B8" stroke-width="0.75"/>"##,
+            (width - 1.0).max(1.0),
+            (height - 1.0).max(1.0)
+        )
+    } else {
+        String::new()
+    };
+    let text_el = if shown.is_empty() {
+        String::new()
+    } else {
+        let pad_x = (height * 0.25).clamp(2.0, 6.0);
+        format!(
+            r##"<text x="{pad_x}" y="{baseline}" font-family="{FONT_FAMILY}" font-size="{font_size}" fill="#0F172A">{}</text>"##,
+            xml_escape(&shown)
+        )
+    };
+    Some(format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {width} {height}">{frame}{text_el}</svg>"#,
+        width * PX_PER_PT,
+        height * PX_PER_PT
+    ))
 }
 
 fn clean_text(text: Option<&str>) -> Result<Option<String>, String> {

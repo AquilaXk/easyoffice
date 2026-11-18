@@ -23,13 +23,17 @@ mod os_recent;
 mod pdf_edit_budget;
 mod pdf_edit_build;
 mod pdf_edit_engine;
+mod pdf_edit_forms;
 mod pdf_edit_inspect;
 mod pdf_edit_job;
 mod pdf_edit_os;
+mod pdf_edit_outlines;
 mod pdf_edit_overlay;
+mod pdf_edit_preserve;
 mod pdf_edit_scan;
 mod pdf_edit_session;
 mod pdf_edit_supervisor;
+mod pdf_edit_text_pos;
 mod pdf_edit_wire;
 mod pdf_edit_worker;
 mod pdf_export;
@@ -709,6 +713,8 @@ mod named_pipe_support;
 mod pdf_edit_fixtures;
 #[cfg(test)]
 mod pdf_edit_hostile_tests;
+#[cfg(test)]
+mod pdf_edit_preserve_tests;
 #[cfg(test)]
 mod pdf_edit_tests;
 #[cfg(test)]

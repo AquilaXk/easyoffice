@@ -7,7 +7,7 @@
 
 use crate::pdf_edit_budget::{MAX_PAGES, MAX_SESSION_BYTES, MAX_SOURCES, MAX_SPLIT_FILES};
 use crate::pdf_edit_engine::PdfEngine;
-use crate::pdf_edit_overlay::Overlay;
+use crate::pdf_edit_overlay::{parse_form, parse_markup, Overlay};
 use crate::pdf_edit_wire::PagePlan;
 use std::ops::Range;
 use std::sync::Arc;
@@ -107,8 +107,36 @@ impl EditSession {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn set_overlay(&mut self, overlay: Overlay) {
         self.overlay = overlay;
+    }
+
+    pub fn set_overlay_marks(
+        &mut self,
+        watermark: Option<&str>,
+        stamp: Option<&str>,
+    ) -> Result<(), String> {
+        self.overlay.set_marks(watermark, stamp)
+    }
+
+    pub fn set_markup(
+        &mut self,
+        text: &str,
+        style: Option<&str>,
+        color: Option<&str>,
+    ) -> Result<(), String> {
+        self.overlay.markup = parse_markup(text, style, color)?;
+        Ok(())
+    }
+
+    pub fn set_form(
+        &mut self,
+        applicant: Option<&str>,
+        department: Option<&str>,
+    ) -> Result<(), String> {
+        self.overlay.form = parse_form(applicant, department)?;
+        Ok(())
     }
 
     /// Appends all pages of `files` after the current ones. Each file passes `inspect`, and the

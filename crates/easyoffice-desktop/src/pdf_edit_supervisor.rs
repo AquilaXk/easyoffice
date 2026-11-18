@@ -10,9 +10,9 @@
 //! and Linux (address space limit) also have the kernel enforce a memory limit.
 
 use crate::pdf_edit_budget::{
-    Jobs, JOBS, MAX_CHILD_RSS_BYTES, MAX_OVERLAY_SIZES, MEMORY_POLL, MSG_BUSY, MSG_MEMORY,
-    MSG_PANIC, MSG_TIMEOUT, MSG_WORKER_DIED, PREVIEW_DEADLINE, PREVIEW_JOBS, PREVIEW_MAX_RSS_BYTES,
-    WORK_DEADLINE,
+    Jobs, JOBS, MAX_CHILD_RSS_BYTES, MAX_OVERLAY_SIZES, MAX_WIDGET_OVERLAYS, MEMORY_POLL, MSG_BUSY,
+    MSG_MEMORY, MSG_PANIC, MSG_TIMEOUT, MSG_WORKER_DIED, PREVIEW_DEADLINE, PREVIEW_JOBS,
+    PREVIEW_MAX_RSS_BYTES, WORK_DEADLINE,
 };
 use crate::pdf_edit_os::{child_resident_bytes, confine};
 use crate::pdf_edit_wire::{
@@ -181,15 +181,15 @@ impl Supervisor {
                     Ok(Ok((RES_ERR, payload))) => break Err(sentence(&payload)),
                     Ok(Ok((NEED_OVERLAY, payload))) => {
                         asked += 1;
-                        let Some((width, height, stamp)) = decode_overlay_need(&payload) else {
+                        let Some((width, height, kind)) = decode_overlay_need(&payload) else {
                             break Err(MSG_WORKER_DIED.to_string());
                         };
-                        if asked > MAX_OVERLAY_SIZES + 1 {
+                        if asked > MAX_OVERLAY_SIZES + 1 + MAX_WIDGET_OVERLAYS {
                             break Err(MSG_WORKER_DIED.to_string());
                         }
                         // A panic of the overlay code must not leave the worker running behind it.
                         let made =
-                            catch_unwind(AssertUnwindSafe(|| make_overlay(width, height, stamp)));
+                            catch_unwind(AssertUnwindSafe(|| make_overlay(width, height, kind)));
                         let reply = match made {
                             Ok(Ok(pdf)) => (OVERLAY_REPLY, pdf),
                             Ok(Err(message)) => (OVERLAY_FAIL, message.into_bytes()),

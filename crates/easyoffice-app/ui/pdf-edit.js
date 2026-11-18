@@ -11,10 +11,17 @@
 
   const STAMP_BADGE_ID = "pdf-stamp-badge";
   const WATERMARK_LAYER_ID = "pdf-watermark-layer";
+  const HIGHLIGHT_INPUT_ID = "pdf-highlight-input";
+  const HIGHLIGHT_KIND_ID = "pdf-highlight-kind";
+  const HIGHLIGHT_COLOR_ID = "pdf-highlight-color";
+  const FORM_APPLICANT_ID = "pdf-form-applicant";
+  const FORM_DEPT_ID = "pdf-form-dept";
 
   function createPdfEdit(deps) {
     const { document, desktopBridge, getPdfRotationDeg } = deps;
     let active = false;
+    let sentMarkup = false;
+    let sentForm = false;
 
     const shell = () => (desktopBridge?.isAvailable?.() ? desktopBridge.pdfEdit : null);
     const reason = (err) => err?.message || String(err);
@@ -27,6 +34,8 @@
     // empty outside the shell, otherwise whether the original's objects are being edited.
     async function open(fileName, bytes, options) {
       active = false;
+      sentMarkup = false;
+      sentForm = false;
       const bridge = shell();
       if (!bridge) return "";
       try {
@@ -46,15 +55,32 @@
       return (document.getElementById(id)?.textContent || "").trim();
     }
 
-    // What the page shows now, as the shell needs it: one rotation for the file, the stamp and the
-    // watermark as applied (the badge and the layer, which the apply button fills). Sent before a
-    // save, so undo and redo of those controls reach the file too.
+    function valOf(id) {
+      return String(document.getElementById(id)?.value || "").trim();
+    }
+
+    // What the page shows now, as the shell needs it: rotation, stamp/watermark, and (when set or
+    // cleared after being set) the highlight/underline phrase and applicant/department form fields.
     async function syncFromUi() {
       const bridge = shell();
       if (!active || !bridge) return null;
       const turn = ((Math.round(Number(getPdfRotationDeg()) || 0) % 360) + 360) % 360;
       await bridge.apply({ kind: "turn", degrees: turn });
-      return bridge.apply({ kind: "overlay", stamp: textOf(STAMP_BADGE_ID), watermark: textOf(WATERMARK_LAYER_ID) });
+      let last = await bridge.apply({ kind: "overlay", stamp: textOf(STAMP_BADGE_ID), watermark: textOf(WATERMARK_LAYER_ID) });
+      const hlText = valOf(HIGHLIGHT_INPUT_ID);
+      if (hlText !== "" || sentMarkup) {
+        const style = valOf(HIGHLIGHT_KIND_ID) === "underline" ? "underline" : "highlight";
+        const color = valOf(HIGHLIGHT_COLOR_ID) || "#FFFF00";
+        last = await bridge.apply({ kind: "markup", text: hlText, style, color });
+        sentMarkup = hlText !== "";
+      }
+      const applicant = valOf(FORM_APPLICANT_ID);
+      const department = valOf(FORM_DEPT_ID);
+      if (applicant !== "" || department !== "" || sentForm) {
+        last = await bridge.apply({ kind: "form", applicant, department });
+        sentForm = applicant !== "" || department !== "";
+      }
+      return last;
     }
 
     // Status text for the apply button; empty when the edit is not on the file.
@@ -141,6 +167,7 @@
       const choice = await chooseSplitMerge();
       if (!choice) return "페이지 분할·병합을 취소했습니다";
       try {
+        if (choice.mode !== "merge") await syncFromUi();
         const res = await shell().splitMerge(choice);
         if (res.action === "merged") return "PDF " + res.count + "개를 이어 붙였습니다 (총 " + res.pages + "쪽 · 실행 취소로 되돌릴 수 없습니다)";
         if (res.action === "split") {

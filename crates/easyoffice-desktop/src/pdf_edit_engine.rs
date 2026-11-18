@@ -8,7 +8,7 @@
 
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_supervisor::Supervisor;
-use crate::pdf_edit_wire::{BuildHead, PagePlan};
+use crate::pdf_edit_wire::{BuildHead, OverlayKind, PagePlan};
 use crate::pdf_export::{shared_font_db, PdfAssembler};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,16 +27,16 @@ pub trait PdfEngine {
     ) -> Result<Vec<u8>, String>;
 }
 
-/// The one-page PDF of the stamp and watermark text for a page shown `width` x `height` points.
+/// The one-page PDF of an overlay or widget appearance of `width` x `height` points.
 pub fn overlay_pdf(
     font_dirs: &[PathBuf],
     overlay: &Overlay,
     width: f32,
     height: f32,
-    stamp: bool,
+    kind: OverlayKind,
 ) -> Result<Vec<u8>, String> {
     let svg = overlay
-        .svg(width, height, stamp)
+        .svg_for(kind, width, height)
         .ok_or_else(|| "스탬프와 워터마크를 만들 수 없습니다.".to_string())?;
     let fonts = shared_font_db(font_dirs);
     let mut assembler = PdfAssembler::new(&fonts, true);
@@ -80,10 +80,12 @@ impl PdfEngine for ChildEngine {
             pages: pages.to_vec(),
             watermark: overlay.watermark.clone(),
             stamp: overlay.stamp.clone(),
+            markup: overlay.markup.clone(),
+            form: overlay.form.clone(),
         };
         self.supervisor
-            .build(sources, &head, &mut |width, height, stamp| {
-                overlay_pdf(&self.font_dirs, overlay, width, height, stamp)
+            .build(sources, &head, &mut |width, height, kind| {
+                overlay_pdf(&self.font_dirs, overlay, width, height, kind)
             })
     }
 }
@@ -121,8 +123,8 @@ impl PdfEngine for InProcessEngine {
             sources,
             pages,
             overlay,
-            &mut |width, height, stamp| {
-                let svg = overlay.svg(width, height, stamp).ok_or("no overlay")?;
+            &mut |width, height, kind| {
+                let svg = overlay.svg_for(kind, width, height).ok_or("no overlay")?;
                 let mut assembler = PdfAssembler::new(&fonts, true);
                 assembler.add_pages(&[svg])?;
                 assembler.finish()
