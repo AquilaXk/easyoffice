@@ -223,6 +223,7 @@ pub(super) fn read_page_frame(
     let mut reader = XmlReader::new(xml);
     let (mut masters, mut other_masters) = (0usize, false);
     let mut open: Option<(&'static str, OdtWalker<'_>)> = None;
+    let mut region: Option<(usize, crate::RichAlignment)> = None;
     let mut layout_name: Option<String> = None;
     while let Some(event) = reader.next_event()? {
         match event {
@@ -272,7 +273,21 @@ pub(super) fn read_page_frame(
                 };
                 let mut walker = OdtWalker::new(styles, list_styles);
                 walker.frame_mode = true;
+                region = None;
                 open = Some((slot, walker));
+            }
+            XmlEvent::Start {
+                name: rtag @ ("style:region-left" | "style:region-center" | "style:region-right"),
+                ..
+            } if open.is_some() => {
+                if let Some((_, walker)) = open.as_ref() {
+                    let align = match rtag {
+                        "style:region-center" => crate::RichAlignment::Center,
+                        "style:region-right" => crate::RichAlignment::Right,
+                        _ => crate::RichAlignment::Left,
+                    };
+                    region = Some((walker.blocks.len(), align));
+                }
             }
             XmlEvent::Start { name, ref attrs } => {
                 if let Some((_, walker)) = open.as_mut() {
@@ -286,10 +301,22 @@ pub(super) fn read_page_frame(
                     walker.push_inline(&text)?;
                 }
             }
+            XmlEvent::End("style:region-left" | "style:region-center" | "style:region-right")
+                if open.is_some() =>
+            {
+                if let (Some((start, align)), Some((_, walker))) = (region.take(), open.as_mut()) {
+                    for block in &mut walker.blocks[start..] {
+                        if let RichBlock::Paragraph(p) = block {
+                            p.alignment.get_or_insert(align);
+                        }
+                    }
+                }
+            }
             XmlEvent::End(
                 "style:header" | "style:footer" | "style:header-left" | "style:footer-left"
                 | "style:header-first" | "style:footer-first",
             ) if open.is_some() => {
+                region = None;
                 let Some((slot, mut walker)) = open.take() else {
                     continue;
                 };

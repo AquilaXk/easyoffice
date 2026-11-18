@@ -317,12 +317,41 @@
     return nodes;
   }
 
-  // The header and footer sections (including first/even page variants) of a decoded document (`doc-page-frame.js`), after the body.
+  // The header and footer sections (including first/even page variants and 3-zone strips) of a decoded document (`doc-page-frame.js`), after the body.
   const PAGE_FRAME_KINDS = ["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"];
+  const ZONE_NAMES = ["left", "center", "right"];
+  function splitDecodedZones(blocks) {
+    if (!Array.isArray(blocks) || blocks.length < 2 || blocks.length > 3) return null;
+    const zones = [null, null, null];
+    let prev = -1;
+    for (const b of blocks) {
+      if (b?.type !== "paragraph" || b.heading || b.list || b.leftIndentTwips || b.firstLineIndentTwips || b.lineSpacingPercent || b.toc !== undefined || b.pageBreakBefore) {
+        return null;
+      }
+      const slot = b.align === "center" ? 1 : b.align === "right" ? 2 : (!b.align || b.align === "left") ? 0 : -1;
+      if (slot <= prev) return null;
+      zones[slot] = b;
+      prev = slot;
+    }
+    return zones;
+  }
   function pageFrameNodes(res) {
     return PAGE_FRAME_KINDS
       .filter((kind) => Array.isArray(res[kind]) && res[kind].length > 0)
-      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } }));
+      .map((kind) => {
+        const zones = splitDecodedZones(res[kind]);
+        if (!zones) {
+          return { ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } };
+        }
+        const children = ZONE_NAMES.map((zone, idx) => {
+          const block = zones[idx];
+          const p = block ? buildEditorNodes([block])[0] : elSpec("p", [elSpec("br")]);
+          p.data = { ...(p.data || {}), eoZone: zone };
+          p.style = { ...(p.style || {}), textAlign: zone };
+          return p;
+        });
+        return { ...elSpec("section", children, {}, { class: "eo-page-frame" }), data: { eoHf: kind, eoHfZones: "true" } };
+      });
   }
 
   // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.

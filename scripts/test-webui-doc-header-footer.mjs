@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 // The 머리말 and 꼬리말 commands (PD-211): each enters the page's header or footer for editing in place (made on the
@@ -214,4 +214,197 @@ test("every sheet's footer copy holds exactly the section's fields, one element 
   footer.querySelector("p").appendChild(Object.assign(document.createElement("span"), { className: "eo-page-field" }));
   frame.paint();
   assert.deepEqual(fieldCounts(), [2, 2, 2, 2], "a field added to the section appears once more on every sheet, not by page");
+});
+
+test("PD-249: 3-zone toggle splits header into left/center/right compartments, navigates with Tab, inserts fields into the focused zone, and saves zone alignments", async () => {
+  const { document, editor, host, userClick } = await openDoc("w-hf-zones-pd249");
+  const frame = host.__EASYOFFICE_DOC_PAGE_FRAME__;
+  userClick(toolbarButton(document, "mod-header"));
+  await flushAsyncTurns();
+
+  const toggleZonesBtn = document.querySelector('#icon-toolbar [data-hf-action="toggle-zones"]');
+  assert.equal(toggleZonesBtn.getAttribute("aria-pressed"), "false");
+  toggleZonesBtn.click();
+  await flushAsyncTurns();
+
+  const hdr = section(editor, "header");
+  assert.equal(hdr.dataset.eoHfZones, "true");
+  assert.equal(toggleZonesBtn.getAttribute("aria-pressed"), "true");
+  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /3구역/);
+
+  const zones = [...hdr.querySelectorAll(":scope > p[data-eo-zone]")];
+  assert.deepEqual(zones.map((p) => p.dataset.eoZone), ["left", "center", "right"]);
+
+  zones[0].textContent = "연구소";
+  zones[1].textContent = "연례 보고서";
+
+  // Tab twice from zone 0 -> zone 1 -> zone 2 (right), then insert page-number field into right zone
+  frame.focusZone(hdr, 0);
+  editor.dispatchEvent({ type: "keydown", key: "Tab", shiftKey: false });
+  editor.dispatchEvent({ type: "keydown", key: "Tab", shiftKey: false });
+  zones[2].textContent = "";
+  document.querySelector('#icon-toolbar [data-hf-action="page-number"]').click();
+  await flushAsyncTurns();
+  assert.equal(zones[2].querySelectorAll('.eo-page-field[data-eo-field="page"]').length, 1, "field inserted into right zone");
+  assert.equal(zones[0].querySelectorAll(".eo-page-field").length, 0);
+
+  frame.endEdit();
+  await flushAsyncTurns();
+
+  const layer = editor.querySelector(":scope > footer.doc-page-layer") || Object.assign(document.createElement("footer"), { className: "doc-page-layer" });
+  if (!layer.parentNode) editor.appendChild(layer);
+  layer.innerHTML = "";
+  layer.appendChild(Object.assign(document.createElement("i"), { className: "doc-page-sheet" }));
+  frame.paint();
+
+  const copy = layer.querySelector('.doc-page-sheet > .doc-page-hf[data-hf="header"]');
+  assert.equal(copy.dataset.hfZones, "true");
+  assert.deepEqual([...copy.querySelectorAll(":scope > p")].map((p) => p.dataset.eoZone), ["left", "center", "right"]);
+  assert.equal(frame.printCopy("header", 3, 5).dataset.hfZones, "true");
+  assert.equal(frame.printCopy("header", 3, 5).querySelector('[data-eo-zone="right"]').textContent, "3");
+
+  const saved = host.__EASYOFFICE_SAVE_PAYLOAD__.collectPageFrame(editor);
+  assert.equal(saved.header.length, 3);
+  assert.deepEqual(
+    saved.header.map((p) => [p.align, p.runs.map((r) => r.field || r.text).join("")]),
+    [["left", "연구소"], ["center", "연례 보고서"], ["right", "page"]]
+  );
+});
+
+test("PD-249: first-page and even/odd toggles author distinct slots, step through prev/next/switch-band, render per sheet, and undo cleanly", async () => {
+  const { document, editor, host, sandbox, userClick } = await openDoc("w-hf-variants-pd249");
+  const frame = host.__EASYOFFICE_DOC_PAGE_FRAME__;
+  userClick(toolbarButton(document, "mod-header"));
+  await flushAsyncTurns();
+
+  section(editor, "header").querySelector("p").textContent = "홀수 머리말";
+
+  // Enable first-page different -> switches into firstHeader
+  const firstBtn = document.querySelector('#icon-toolbar [data-hf-action="toggle-first"]');
+  firstBtn.click();
+  await flushAsyncTurns();
+  assert.equal(editor.dataset.eoFirstPage, "true");
+  assert.equal(firstBtn.getAttribute("aria-pressed"), "true");
+  assert.equal(frame.isEditing(), "firstHeader");
+  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /첫 쪽/);
+  section(editor, "firstHeader").querySelector("p").textContent = "표지 머리말";
+
+  // Enable even/odd different -> switches into evenHeader
+  const evenBtn = document.querySelector('#icon-toolbar [data-hf-action="toggle-even-odd"]');
+  evenBtn.click();
+  await flushAsyncTurns();
+  assert.equal(editor.dataset.eoEvenOdd, "true");
+  assert.equal(evenBtn.getAttribute("aria-pressed"), "true");
+  assert.equal(frame.isEditing(), "evenHeader");
+  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /짝수 쪽/);
+  section(editor, "evenHeader").querySelector("p").textContent = "짝수 머리말";
+
+  // Switch band on evenHeader -> evenFooter
+  document.querySelector('#icon-toolbar [data-hf-action="switch-band"]').click();
+  await flushAsyncTurns();
+  assert.equal(frame.isEditing(), "evenFooter");
+  section(editor, "evenFooter").querySelector("p").textContent = "짝수 꼬리말";
+
+  // Next wraps around to firstHeader -> Next -> firstFooter (leave empty so cover page has no footer) -> Next -> odd header -> Next -> odd footer
+  document.querySelector('#icon-toolbar [data-hf-action="next"]').click();
+  await flushAsyncTurns();
+  assert.equal(frame.isEditing(), "firstHeader");
+  document.querySelector('#icon-toolbar [data-hf-action="next"]').click();
+  await flushAsyncTurns();
+  assert.equal(frame.isEditing(), "firstFooter");
+  document.querySelector('#icon-toolbar [data-hf-action="next"]').click();
+  await flushAsyncTurns();
+  assert.equal(frame.isEditing(), "header");
+  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /홀수 쪽/);
+  document.querySelector('#icon-toolbar [data-hf-action="next"]').click();
+  await flushAsyncTurns();
+  assert.equal(frame.isEditing(), "footer");
+  section(editor, "footer").querySelector("p").textContent = "홀수 꼬리말";
+
+  frame.endEdit();
+  await flushAsyncTurns();
+  assert.equal(section(editor, "firstFooter"), null, "empty firstFooter pruned on slot switch");
+
+  const layer = editor.querySelector(":scope > footer.doc-page-layer") || Object.assign(document.createElement("footer"), { className: "doc-page-layer" });
+  if (!layer.parentNode) editor.appendChild(layer);
+  layer.innerHTML = "";
+  for (let i = 0; i < 3; i += 1) layer.appendChild(Object.assign(document.createElement("i"), { className: "doc-page-sheet" }));
+  frame.paint();
+
+  const sheets = layer.querySelectorAll(".doc-page-sheet");
+  assert.equal(sheets[0].querySelector('.doc-page-hf[data-hf="header"]').textContent, "표지 머리말");
+  assert.equal(sheets[0].querySelector('.doc-page-hf[data-hf="footer"]'), null, "cover page hides footer when firstFooter is empty");
+  assert.equal(sheets[1].querySelector('.doc-page-hf[data-hf="header"]').textContent, "짝수 머리말");
+  assert.equal(sheets[1].querySelector('.doc-page-hf[data-hf="footer"]').textContent, "짝수 꼬리말");
+  assert.equal(sheets[2].querySelector('.doc-page-hf[data-hf="header"]').textContent, "홀수 머리말");
+  assert.equal(sheets[2].querySelector('.doc-page-hf[data-hf="footer"]').textContent, "홀수 꼬리말");
+
+  const saved = host.__EASYOFFICE_SAVE_PAYLOAD__.collectPageFrame(editor);
+  assert.equal(saved.firstPageDifferent, true);
+  assert.equal(saved.evenOddDifferent, true);
+  assert.equal(saved.firstHeader[0].runs[0].text, "표지 머리말");
+  assert.equal(saved.evenHeader[0].runs[0].text, "짝수 머리말");
+  assert.equal(saved.evenFooter[0].runs[0].text, "짝수 꼬리말");
+  assert.equal(saved.header[0].runs[0].text, "홀수 머리말");
+  assert.equal(saved.footer[0].runs[0].text, "홀수 꼬리말");
+
+  // Undo can step back cleanly
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(editor.dataset.eoFirstPage, "true");
+});
+
+test("PD-249: opening a decoded document with sparse 2-zone [center, right] header mounts 3-zone grid and roundtrips without empty left paragraph", async () => {
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const decoded = {
+    status: "OK",
+    action: "decode",
+    fileName: "sparse-zones.docx",
+    format: "docx",
+    module: "DOC",
+    kind: "document",
+    title: "구역",
+    sourceBytes: 256,
+    specification: "OOXML",
+    itemCount: 1,
+    warnings: [],
+    header: [
+      { type: "paragraph", align: "center", runs: [{ text: "가운데 제목" }] },
+      { type: "paragraph", align: "right", runs: [{ text: "", field: "page" }] },
+    ],
+    blocks: [{ type: "paragraph", runs: [{ text: "본문" }] }],
+  };
+  const testIpc = async (cmd, rawPayload) => {
+    const body = typeof rawPayload === "string" && rawPayload.trimStart().startsWith("{") ? JSON.parse(rawPayload) : null;
+    if (cmd === "convert_document_format" && body?.action === "decode") return decoded;
+    return offline[cmd](rawPayload);
+  };
+  const h = await createWorkspaceHarness({ search: "?module=DOC&win=w-hf-open-zones", testIpc });
+  await flushAsyncTurns(6);
+  const res = await h.host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("sparse-zones.docx", new Uint8Array([80, 75, 3, 4]));
+  assert.equal(res.ok, true);
+  await flushAsyncTurns(6);
+
+  const editor = h.document.getElementById("doc-editor");
+  const hdr = section(editor, "header");
+  assert.equal(hdr.dataset.eoHfZones, "true");
+  const zones = [...hdr.querySelectorAll(":scope > p[data-eo-zone]")];
+  assert.equal(zones.length, 3);
+  assert.equal(zones[0].textContent, "");
+  assert.equal(zones[1].textContent, "가운데 제목");
+  assert.equal(zones[2].querySelectorAll('.eo-page-field[data-eo-field="page"]').length, 1);
+
+  const saved = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectPageFrame(editor);
+  assert.equal(saved.header.length, 2, "blank left compartment omitted from saved paragraphs");
+  assert.equal(saved.header[0].align, "center");
+  assert.equal(saved.header[1].align, "right");
 });

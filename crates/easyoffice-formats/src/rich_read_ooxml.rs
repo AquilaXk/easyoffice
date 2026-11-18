@@ -75,6 +75,8 @@ struct ParaState {
     page_break_after: bool,
     /// Inline section break (`w:pPr/w:sectPr`) ending at this paragraph, carrying its columns.
     sect_end: Option<Option<RichColumns>>,
+    /// Horizontal header/footer zones split by `w:ptab w:alignment="center|right"` (`PD-249`).
+    zones: Vec<(String, Vec<crate::RichRun>)>,
 }
 
 fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
@@ -515,6 +517,32 @@ impl DocxWalker {
     }
 
     fn apply_inline_break(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
+        if self.frame_mode && name == "w:ptab" {
+            if let Some(next_jc) = match attr(attrs, "w:alignment").as_deref() {
+                Some("center") => Some("center"),
+                Some("right") => Some("right"),
+                _ => None,
+            } {
+                if let Some(top) = self.paras.last_mut() {
+                    if !self.cur_text.is_empty() {
+                        let link_len = self.link.as_deref().map_or(0, str::len);
+                        self.text_budget.charge_run(link_len, "DOCX 런")?;
+                        push_linked_run(
+                            &mut top.runs,
+                            &self.cur_text,
+                            &self.fmt,
+                            self.link.as_deref(),
+                        );
+                        self.cur_text.clear();
+                    }
+                    let prev_jc = top.jc.take().unwrap_or_else(|| "left".to_string());
+                    let prev_runs = std::mem::take(&mut top.runs);
+                    top.zones.push((prev_jc, prev_runs));
+                    top.jc = Some(next_jc.to_string());
+                    return Ok(());
+                }
+            }
+        }
         let ch = match name {
             "w:tab" | "w:ptab" => Some('\t'),
             "w:br" if attr(attrs, "w:type").as_deref() == Some("page") => {
@@ -711,6 +739,28 @@ impl DocxWalker {
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
             self.cell_paras.push(p.runs);
+        } else if !p.zones.is_empty() {
+            let mut zones = std::mem::take(&mut p.zones);
+            let last_jc = p.jc.take().unwrap_or_else(|| "left".to_string());
+            let last_runs = std::mem::take(&mut p.runs);
+            zones.push((last_jc, last_runs));
+            for (jc, runs) in zones {
+                if runs
+                    .iter()
+                    .any(|r| r.field.is_some() || !r.text.trim().is_empty())
+                {
+                    self.text_budget.charge_block(0, "DOCX 문단")?;
+                    let zone_state = ParaState {
+                        runs,
+                        style_id: p.style_id.clone(),
+                        jc: Some(jc),
+                        ..ParaState::default()
+                    };
+                    self.blocks
+                        .push(RichBlock::Paragraph(resolver.finish(zone_state)));
+                }
+            }
+            self.blocks.extend(images.into_iter().map(RichBlock::Image));
         } else {
             let carried = p.page_break_before;
             let after = p.page_break_after;

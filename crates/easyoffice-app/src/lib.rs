@@ -71,13 +71,12 @@ mod sheet_sort_ipc;
 mod sheet_structure_ipc;
 #[cfg(test)]
 mod sheet_structure_ipc_tests;
-mod sheet_table_assets;
 mod sheet_table_column_ipc;
 mod sheet_table_json;
 mod sheet_view_json;
-mod sheet_view_scripts;
 pub mod smart_tools;
 mod table_style_json;
+mod webui_assets;
 
 pub use benchmark::*;
 pub use convert_hwp::{RichHwpWriter, RichThumbnailRenderer, ShellWriters};

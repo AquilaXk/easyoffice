@@ -504,7 +504,7 @@
         ? { count: colsCount, equal: colsMatch[2] === "1", gapTwips: Number(colsMatch[3]) }
         : ctx.columns;
       return {
-        align: normalizeAlign(node.style?.textAlign) || ctx.align,
+        align: normalizeAlign(node.style?.textAlign) || normalizeAlign(node.dataset?.eoZone) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         toc: tocRole(node) ?? ctx.toc,
         bookmark: headingMatch ? bookmarkNumber(node.id) : undefined,
@@ -583,13 +583,15 @@
     for (const section of Array.from(root?.children || [])) {
       const kind = section.dataset?.eoHf;
       if (!FRAME_KINDS.has(kind) || Object.hasOwn(frame, kind)) continue;
-      const blocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph").slice(0, MAX_FRAME_PARAGRAPHS);
+      const isZones = section.dataset?.eoHfZones === "true";
+      const rawBlocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph");
+      const blocks = (isZones ? rawBlocks.filter((b) => b.runs.length > 0) : rawBlocks).slice(0, MAX_FRAME_PARAGRAPHS);
       if (blocks.some((b) => b.runs.length > 0)) frame[kind] = blocks;
     }
-    if (options.firstPageDifferent === true || frame.firstHeader || frame.firstFooter) {
+    if (options.firstPageDifferent === true || root?.dataset?.eoFirstPage === "true" || frame.firstHeader || frame.firstFooter) {
       frame.firstPageDifferent = true;
     }
-    if (options.evenOddDifferent === true || frame.evenHeader || frame.evenFooter) {
+    if (options.evenOddDifferent === true || root?.dataset?.eoEvenOdd === "true" || frame.evenHeader || frame.evenFooter) {
       frame.evenOddDifferent = true;
     }
     return frame;

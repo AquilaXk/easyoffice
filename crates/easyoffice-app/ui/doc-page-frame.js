@@ -1,50 +1,53 @@
 (function (host) {
   "use strict";
 
-  // Header and footer of the page (PD-211). Each is one `<section data-eo-hf="header|footer">` child of the
-  // document editor that holds its paragraphs. The section is not part of the body flow (the page layout, the
-  // save payload, find and the statistics skip it); it is drawn in the top and bottom margin of every page,
-  // as a copy inside each paper sheet of the page layer, and a page-number field (`.eo-page-field`) shows the
-  // number of the sheet it sits on (a CSS counter of the layer). Editing follows the reference editor: the
-  // command enters the header or footer of page 1, the body is dimmed and not editable, a toolbar group
-  // offers close, delete and page number, and the copies on the other pages follow every keystroke.
+  // Header and footer of the page (PD-211, PD-249). Each slot (`header`, `footer`, `firstHeader`, `firstFooter`,
+  // `evenHeader`, `evenFooter`) is a `<section data-eo-hf="...">` child of `#doc-editor` outside the body flow.
+  // When `data-eo-hf-zones="true"` is enabled on a section, its three `<p data-eo-zone="left|center|right">`
+  // compartments sit side-by-side in a 3-column horizontal grid on screen, on every paper sheet copy, in print,
+  // and across DOCX (`w:ptab`), ODT (`style:region-*`), HWPX, and Pages roundtrips.
 
   const KINDS = ["header", "footer"];
   const ALL_KINDS = ["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"];
+  const ZONES = ["left", "center", "right"];
   const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
-  // The page setup that places them, in twips, as the editor's `data-eo-page` (`doc-page-setup.js`: "width,height,left,
-  // right,top,bottom,header,footer"): top and bottom are the distances from the page edge to the body, header and
-  // footer those to the header and footer (the engine's `RichPageMargins`). Without one the reference editor's new-document setup applies
-  // (`rhwp` `src/model/page.rs:36-51`: header area 15 mm below a 20 mm margin, body at 35 mm; footer area 15 mm
-  // above a 15 mm margin, body ending 30 mm from the bottom).
   const DEFAULT_MARGINS = { top: 1984, bottom: 1700, header: 1134, footer: 850 };
   const PX_PER_TWIP = 1 / 15;
-  // Space kept between a header or footer that grew past its area and the body.
   const GROWN_GAP_PX = 6;
-  // Position of each margin in `data-eo-page`.
   const PAGE_MARGIN_AT = { top: 4, bottom: 5, header: 6, footer: 7 };
   const LABELS = { header: "머리말", footer: "꼬리말" };
-  const APPLY_LABEL = "양쪽";
   const SECTION_CLASS = "eo-page-frame";
   const FIELD_CLASS = "eo-page-field";
   const COPY_CLASS = "doc-page-hf";
   const LAYER_SELECTOR = ":scope > footer.doc-page-layer";
   const MSG_NOT_PAGED = "쪽 보기에서만 편집";
 
-  const isFrame = (el) => el?.nodeType === 1 && el.tagName === "SECTION" && el.dataset?.eoHf !== undefined;
+  const isFrame = (el) => el?.nodeType === 1 && el.tagName === "SECTION" && ALL_KINDS.includes(el.dataset?.eoHf);
+  const bandOf = (kind) => (kind === "header" || kind === "firstHeader" || kind === "evenHeader" ? "header" : "footer");
+  const variantOf = (kind) => (String(kind || "").startsWith("first") ? "first" : String(kind || "").startsWith("even") ? "even" : "default");
+  const slotOf = (band, variant) => {
+    const cap = band === "header" ? "Header" : "Footer";
+    if (variant === "first") return "first" + cap;
+    if (variant === "even") return "even" + cap;
+    return band;
+  };
 
-  const lastParagraph = (section) => Array.from(section.children).at(-1) ?? section;
+  function replaceKids(parent, kids) {
+    while (parent.firstChild) parent.removeChild(parent.firstChild);
+    for (const kid of kids) parent.appendChild(kid);
+  }
 
-  // `data-eo-page` as `{ top, bottom, header, footer }` in twips, or null when it is absent or malformed.
+  function hasNodeContent(node) {
+    return Boolean(node) && (String(node.textContent || "").trim() !== "" || node.querySelector?.("." + FIELD_CLASS) !== null);
+  }
+
   function parseMargins(text) {
     const parts = String(text ?? "").split(",").map((v) => Number(v));
     if ((parts.length !== 8 && parts.length !== 10) || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
     return Object.fromEntries(Object.entries(PAGE_MARGIN_AT).map(([key, at]) => [key, parts[at]]));
   }
 
-  function hasContent(section) {
-    return Boolean(section) && (section.textContent.trim() !== "" || section.querySelector("." + FIELD_CLASS) !== null);
-  }
+  const lastParagraph = (section) => Array.from(section.children).at(-1) ?? section;
 
   function createPageFrame(deps) {
     const document = deps.document;
@@ -56,34 +59,88 @@
     let editing = null;
     let scheduled = false;
     let paintedKey = "";
+    let lastZoneIdx = 0;
+    let savedRange = null;
+    const bound = [];
 
     const layerOf = () => editor?.querySelector(LAYER_SELECTOR) ?? null;
     const sectionOf = (kind) => (editor ? Array.from(editor.children).find((el) => isFrame(el) && el.dataset.eoHf === kind) ?? null : null);
     const scrollOf = () => editor?.closest?.(".doc-scroll-container") ?? document.querySelector(".doc-scroll-container");
     const toolbar = () => document.getElementById("icon-toolbar");
-
-    // The page setup of the document: the editor's own, else the default.
     const marginsOf = () => parseMargins(editor?.dataset.eoPage);
+    const fileName = () => String(deps.getFileName?.() ?? "");
+    const isFirstDiff = () => editor?.dataset.eoFirstPage === "true";
+    const isEvenOddDiff = () => editor?.dataset.eoEvenOdd === "true";
 
-    function create(kind) {
+    function scopeLabel(kind) {
+      const v = variantOf(kind);
+      if (v === "first") return "첫 쪽";
+      if (v === "even") return "짝수 쪽";
+      return isEvenOddDiff() ? "홀수 쪽" : "양쪽";
+    }
+
+    function statusTitle(kind) {
+      const base = LABELS[bandOf(kind)];
+      const scope = scopeLabel(kind);
+      return scope === "양쪽" ? base : scope + " " + base;
+    }
+
+    function makeZoneParagraph(zone, sourceNodes) {
+      const p = document.createElement("p");
+      p.dataset.eoZone = zone;
+      p.style.textAlign = zone;
+      const nodes = (sourceNodes || []).filter((n) => n.nodeType !== 1 || n.tagName !== "BR" || sourceNodes.length > 1);
+      if (nodes.length > 0) {
+        for (const n of nodes) p.appendChild(n);
+      } else {
+        p.appendChild(document.createElement("br"));
+      }
+      return p;
+    }
+
+    function isValidThreeZones(section) {
+      const kids = Array.from(section.children);
+      return kids.length === 3 && ZONES.every((z, i) => kids[i].tagName === "P" && kids[i].dataset?.eoZone === z);
+    }
+
+    function ensureThreeZones(section) {
+      if (isValidThreeZones(section)) return;
+      const buckets = [[], [], []];
+      for (const child of Array.from(section.children)) {
+        const align = String(child.dataset?.eoZone || child.style?.textAlign || "").trim().toLowerCase();
+        const idx = align === "center" ? 1 : align === "right" ? 2 : 0;
+        if (!hasNodeContent(child)) continue;
+        if (buckets[idx].length > 0) buckets[idx].push(document.createElement("br"));
+        for (const node of Array.from(child.childNodes)) buckets[idx].push(node.cloneNode(true));
+      }
+      replaceKids(section, ZONES.map((zone, idx) => makeZoneParagraph(zone, buckets[idx])));
+    }
+
+    function create(kind, useZones = false) {
       const section = document.createElement("section");
       section.className = SECTION_CLASS;
       section.dataset.eoHf = kind;
-      const p = document.createElement("p");
-      p.appendChild(document.createElement("br"));
-      section.appendChild(p);
+      if (useZones) {
+        section.dataset.eoHfZones = "true";
+        ensureThreeZones(section);
+      } else {
+        const p = document.createElement("p");
+        p.appendChild(document.createElement("br"));
+        section.appendChild(p);
+      }
       const layer = layerOf();
       if (layer) layer.before(section);
       else editor.appendChild(section);
       return section;
     }
 
-    // ---- the copies on the paper sheets ------------------------------------------------------
+    // ---- copies on paper sheets & print -------------------------------------------------------
 
-    function copyOf(section, slot = section.dataset.eoHf) {
+    function copyOf(section, band = bandOf(section.dataset.eoHf)) {
       const copy = document.createElement("div");
       copy.className = COPY_CLASS;
-      copy.dataset.hf = slot;
+      copy.dataset.hf = band;
+      if (section.dataset.eoHfZones === "true") copy.dataset.hfZones = "true";
       copy.setAttribute("aria-hidden", "true");
       for (const p of section.children) copy.appendChild(p.cloneNode(true));
       for (const el of copy.querySelectorAll("[id], [contenteditable]")) {
@@ -94,75 +151,45 @@
       return copy;
     }
 
-    function sheetSection(kind, pageIndex) {
-      if (pageIndex === 0 && editing === kind) return sectionOf(kind);
-      const cap = kind === "header" ? "Header" : "Footer";
-      if (pageIndex === 0 && editor?.dataset.eoFirstPage === "true") {
-        const first = sectionOf("first" + cap);
-        return hasContent(first) ? first : null;
-      }
-      if (pageIndex % 2 === 1 && editor?.dataset.eoEvenOdd === "true") {
-        const even = sectionOf("even" + cap);
-        if (hasContent(even)) return even;
-      }
-      const base = sectionOf(kind);
-      return hasContent(base) ? base : null;
+    function targetSlotForSheet(band, pageIndex) {
+      if (pageIndex === 0 && isFirstDiff()) return slotOf(band, "first");
+      if (pageIndex % 2 === 1 && isEvenOddDiff()) return slotOf(band, "even");
+      return band;
     }
 
-    const fileName = () => String(deps.getFileName?.() ?? "");
+    function editSheetIndex(slot, pageCount) {
+      const band = bandOf(slot);
+      for (let i = 0; i < pageCount; i += 1) {
+        if (targetSlotForSheet(band, i) === slot) return i;
+      }
+      return 0;
+    }
 
-    // The header or footer of page `pageNumber` of `total` for printing: the copy a sheet shows, with its fields as text.
+    function sheetSection(band, pageIndex, editIdx = -1) {
+      if (editing && bandOf(editing) === band && pageIndex === editIdx) return sectionOf(editing);
+      if (pageIndex === 0 && isFirstDiff()) {
+        const first = sectionOf(slotOf(band, "first"));
+        return hasNodeContent(first) ? first : null;
+      }
+      if (pageIndex % 2 === 1 && isEvenOddDiff()) {
+        const even = sectionOf(slotOf(band, "even"));
+        if (hasNodeContent(even)) return even;
+      }
+      const base = sectionOf(band);
+      return hasNodeContent(base) ? base : null;
+    }
+
     function printCopy(kind, pageNumber, total) {
-      const section = sheetSection(kind, Math.max(0, (Number(pageNumber) || 1) - 1));
-      if (!section) return null;
-      const copy = copyOf(section, kind);
+      const band = bandOf(kind);
+      const section = sheetSection(band, Math.max(0, (Number(pageNumber) || 1) - 1), -1);
+      if (!section || !hasNodeContent(section)) return null;
+      const copy = copyOf(section, band);
       for (const field of copy.querySelectorAll("." + FIELD_CLASS)) {
         const text = field.dataset.eoField === "pages" ? total : field.dataset.eoField === "filename" ? fileName() : pageNumber;
         field.parentNode.insertBefore(document.createTextNode(String(text)), field);
         field.parentNode.removeChild(field);
       }
       return copy;
-    }
-
-    // Draws the header and footer on every sheet of the page layer; the sheet of page 1 shows the live section
-    // instead of a copy while that one is edited. Only a changed content, name, setup, sheet count or edit state
-    // redraws, and then the areas are measured (a header that grew moves the body, `applyGeometry`).
-    function paint() {
-      const layer = layerOf();
-      if (!layer) return;
-      const allSections = ALL_KINDS.map((kind) => sectionOf(kind));
-      const sheets = layer.children.length;
-      const pageCount = Math.max(1, sheets);
-      const anyHeader = Array.from({ length: pageCount }, (_, idx) => sheetSection("header", idx)).find(Boolean) ?? null;
-      const anyFooter = Array.from({ length: pageCount }, (_, idx) => sheetSection("footer", idx)).find(Boolean) ?? null;
-      const sections = [anyHeader, anyFooter];
-      const key = [
-        allSections.map((s) => (s ? s.innerHTML : "")).join("\u0001"),
-        editing,
-        sheets,
-        fileName(),
-        editor.dataset.eoPage,
-        editor.dataset.eoFirstPage,
-        editor.dataset.eoEvenOdd,
-      ].join("|");
-      [["data-hf-header", anyHeader], ["data-hf-footer", anyFooter]].forEach(([name, section]) => {
-        if (!section) layer.removeAttribute(name);
-        else if (!layer.hasAttribute(name)) layer.setAttribute(name, "");
-      });
-      // The page-count field reads the number of sheets from this counter.
-      const counters = "eo-page 0 eo-total " + sheets;
-      if (layer.style.getPropertyValue("counter-reset") !== counters) layer.style.setProperty("counter-reset", counters);
-      if (key === paintedKey && sheets > 0) return;
-      paintedKey = key;
-      Array.from(layer.children).forEach((sheet, index) => {
-        for (const old of Array.from(sheet.querySelectorAll(":scope > ." + COPY_CLASS))) old.remove();
-        KINDS.forEach((kind) => {
-          const section = sheetSection(kind, index);
-          if (!section || (index === 0 && editing === kind)) return;
-          sheet.appendChild(copyOf(section, kind));
-        });
-      });
-      applyGeometry(sections, layer);
     }
 
     function setVar(name, value) {
@@ -174,15 +201,57 @@
       }
     }
 
-    // Places the areas from the page setup and tells the page layout how far the body must keep away.
+    function paint() {
+      const layer = layerOf();
+      if (!layer) return;
+      const allSections = ALL_KINDS.map((kind) => sectionOf(kind));
+      const sheets = layer.children.length;
+      const pageCount = Math.max(1, sheets);
+      const editIdx = editing ? editSheetIndex(editing, pageCount) : -1;
+      const anyHeader = Array.from({ length: pageCount }, (_, idx) => sheetSection("header", idx, editIdx)).find(Boolean) ?? null;
+      const anyFooter = Array.from({ length: pageCount }, (_, idx) => sheetSection("footer", idx, editIdx)).find(Boolean) ?? null;
+      const sections = [anyHeader, anyFooter];
+      const pitch = Number(pages?.geometry?.()?.pitch) || 0;
+      const key = [
+        allSections.map((s) => (s ? (s.dataset.eoHfZones || "") + ":" + s.innerHTML : "")).join("\u0001"),
+        editing,
+        editIdx,
+        pitch,
+        sheets,
+        fileName(),
+        editor.dataset.eoPage,
+        editor.dataset.eoFirstPage,
+        editor.dataset.eoEvenOdd,
+      ].join("|");
+      [["data-hf-header", anyHeader], ["data-hf-footer", anyFooter]].forEach(([name, section]) => {
+        if (!section) layer.removeAttribute(name);
+        else if (!layer.hasAttribute(name)) layer.setAttribute(name, "");
+      });
+      const counters = "eo-page 0 eo-total " + sheets;
+      if (layer.style.getPropertyValue("counter-reset") !== counters) layer.style.setProperty("counter-reset", counters);
+      const previewPage = editing ? (variantOf(editing) === "even" ? Math.max(2, editIdx + 1) : editIdx + 1) : 1;
+      setVar("counter-reset", editing ? "hf-edit-page " + previewPage + " hf-edit-total " + pageCount : null);
+      setVar("--hf-edit-sheet-y", editing && editIdx > 0 && pitch > 0 ? Math.round(editIdx * pitch * 100) / 100 + "px" : null);
+      if (key === paintedKey && sheets > 0) return;
+      paintedKey = key;
+      Array.from(layer.children).forEach((sheet, index) => {
+        for (const old of Array.from(sheet.querySelectorAll(":scope > ." + COPY_CLASS))) old.remove();
+        KINDS.forEach((band) => {
+          const section = sheetSection(band, index, editIdx);
+          if (!section || (editing && bandOf(editing) === band && index === editIdx)) return;
+          sheet.appendChild(copyOf(section, band));
+        });
+      });
+      applyGeometry(sections, layer);
+    }
+
     function applyGeometry(sections, layer) {
       const m = marginsOf() ?? DEFAULT_MARGINS;
       const px = (twips) => Math.round(twips * PX_PER_TWIP * 100) / 100;
       const [header, footer] = sections;
       const band = (kind) => px(kind === "header" ? Math.max(0, m.top - m.header) : Math.max(0, m.bottom - m.footer));
       const grown = (kind) => {
-        if (editing === kind) return Number(sectionOf(kind)?.offsetHeight) || 0;
-        let maxH = 0;
+        let maxH = editing && bandOf(editing) === kind ? Number(sectionOf(editing)?.offsetHeight) || 0 : 0;
         for (const sh of Array.from(layer.children)) {
           const h = Number(sh.querySelector(":scope > ." + COPY_CLASS + '[data-hf="' + kind + '"]')?.offsetHeight) || 0;
           if (h > maxH) maxH = h;
@@ -193,13 +262,13 @@
       setVar("--hf-band-h", header ? band("header") + "px" : null);
       setVar("--hf-ft", footer ? px(m.footer) + "px" : null);
       setVar("--hf-fband-h", footer ? band("footer") + "px" : null);
-      // Measured with the areas at their minimum: the body starts below the header, ends above the footer.
       const headerHeight = header ? grown("header") : 0;
       const footerHeight = footer ? grown("footer") : 0;
       const room = (distance, height, area, margin) => Math.max(margin, distance + height + (height > area + 0.5 ? GROWN_GAP_PX : 0));
       setVar("--pg-hf-top", header ? room(px(m.header), headerHeight, band("header"), px(m.top)) + "px" : null);
       setVar("--pg-hf-bottom", footer ? room(px(m.footer), footerHeight, band("footer"), px(m.bottom)) + "px" : null);
-      setVar("--hf-fh", footer && editing === "footer" ? footerHeight + "px" : null);
+      const liveFooterH = editing && bandOf(editing) === "footer" ? (Number(sectionOf(editing)?.offsetHeight) || footerHeight) : 0;
+      setVar("--hf-fh", footer && editing && bandOf(editing) === "footer" ? liveFooterH + "px" : null);
     }
 
     function schedule() {
@@ -211,14 +280,35 @@
       });
     }
 
-    // Brings the editing state in line with the DOM after any change (typing, an undo that restored the
-    // sections, the page layer being made again).
+    function updateToolbar() {
+      const bar = toolbar();
+      const group = bar?.querySelector(".tb-headerfooter-group");
+      if (!group) return;
+      group.hidden = !editing;
+      const section = editing ? sectionOf(editing) : null;
+      const isZones = section?.dataset.eoHfZones === "true";
+      const label = group.querySelector(".tb-hf-label");
+      if (label) {
+        label.textContent = editing
+          ? LABELS[bandOf(editing)] + " · " + scopeLabel(editing) + (isZones ? " · 3구역" : "") + " 편집 중"
+          : "";
+      }
+      const setPressed = (action, on) => {
+        const btn = group.querySelector('[data-hf-action="' + action + '"]');
+        if (btn) btn.setAttribute("aria-pressed", on ? "true" : "false");
+      };
+      setPressed("toggle-first", isFirstDiff());
+      setPressed("toggle-even-odd", isEvenOddDiff());
+      setPressed("toggle-zones", Boolean(isZones));
+    }
+
     function sync() {
       if (!editor) return;
       if (editing && !sectionOf(editing)) endEdit();
-      for (const kind of KINDS) {
+      for (const kind of ALL_KINDS) {
         const section = sectionOf(kind);
         if (!section) continue;
+        if (section.dataset.eoHfZones === "true") ensureThreeZones(section);
         const want = editing === kind ? "true" : null;
         if (section.getAttribute("contenteditable") !== want) {
           if (want) section.setAttribute("contenteditable", want);
@@ -229,6 +319,7 @@
         if (field.getAttribute("contenteditable") !== "false") field.setAttribute("contenteditable", "false");
         if (editing && field.dataset.eoField === "filename" && field.dataset.eoName !== fileName()) field.dataset.eoName = fileName();
       }
+      updateToolbar();
       paint();
     }
 
@@ -237,80 +328,234 @@
       schedule();
     }
 
-    // ---- editing ------------------------------------------------------------------------------
+    // ---- caret & zone tracking ---------------------------------------------------------------
 
-    function placeCaret(section) {
+    function rememberSelection() {
+      if (!editing || !editor) return;
+      const section = sectionOf(editing);
       const sel = env.getSelection?.();
-      if (!sel || typeof document.createRange !== "function") return;
-      const last = lastParagraph(section);
-      const range = document.createRange();
-      range.selectNodeContents(last);
-      range.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(range);
+      if (!section || !sel?.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!section.contains(range.commonAncestorContainer)) return;
+      savedRange = range.cloneRange();
+      if (section.dataset.eoHfZones === "true") {
+        const zones = Array.from(section.children);
+        const idx = zones.findIndex((p) => p === range.startContainer || p.contains?.(range.startContainer));
+        if (idx >= 0) lastZoneIdx = idx;
+      }
+    }
+
+    function focusZone(section, zoneIdx = 0) {
+      if (!section) return false;
+      const zones = Array.from(section.children);
+      const target = section.dataset.eoHfZones === "true"
+        ? (zones[Math.max(0, Math.min(zones.length - 1, zoneIdx))] ?? lastParagraph(section))
+        : lastParagraph(section);
+      lastZoneIdx = Math.max(0, zones.indexOf(target));
+      section.focus?.();
+      const sel = env.getSelection?.();
+      if (sel && typeof document.createRange === "function") {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        if (target.childNodes.length === 1 && target.firstChild?.nodeType === 1 && target.firstChild.tagName === "BR") {
+          range.setStart(target, 0);
+        }
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        savedRange = range.cloneRange();
+      }
+      return true;
     }
 
     function setEditState(kind) {
       editing = kind;
+      savedRange = null;
+      lastZoneIdx = 0;
       if (kind) editor.dataset.eoHfEdit = kind;
-      else delete editor.dataset.eoHfEdit;
+      else {
+        delete editor.dataset.eoHfEdit;
+        setVar("counter-reset", null);
+        setVar("--hf-edit-sheet-y", null);
+      }
       editor.setAttribute("contenteditable", kind ? "false" : "true");
       scrollOf()?.classList.toggle("hf-editing", Boolean(kind));
       const bar = toolbar();
       if (bar) bar.dataset.hfEditing = kind || "";
-      const group = bar?.querySelector(".tb-headerfooter-group");
-      if (group) {
-        group.hidden = !kind;
-        const label = group.querySelector(".tb-hf-label");
-        if (label) label.textContent = kind ? LABELS[kind] + " · " + APPLY_LABEL + " 편집 중" : "";
-      }
+      updateToolbar();
       deps.onEditingChange?.(kind);
     }
 
-    // Enters the header or footer: made first when the document has none (one undo step), then edited in place.
-    function open(kind) {
-      if (!editor || !KINDS.includes(kind)) return false;
-      // The manuscript grid has no pages to draw them on.
+    function pruneEmptySlot(kind) {
+      const section = kind ? sectionOf(kind) : null;
+      if (section && !hasNodeContent(section)) section.remove();
+    }
+
+    function openSlot(kind, undoable = true) {
+      if (!editor || !ALL_KINDS.includes(kind)) return false;
       if (editor.classList.contains("manuscript-grid")) {
         deps.setFeedback?.(MSG_NOT_PAGED);
         return false;
       }
-      if (editing && editing !== kind) endEdit();
+      if (editing && editing !== kind) {
+        const prev = editing;
+        setEditState(null);
+        pruneEmptySlot(prev);
+      }
       if (!sectionOf(kind)) {
+        const siblingZones = sectionOf(bandOf(kind))?.dataset.eoHfZones === "true";
         const run = () => {
-          create(kind);
+          if (variantOf(kind) === "first") editor.dataset.eoFirstPage = "true";
+          if (variantOf(kind) === "even") editor.dataset.eoEvenOdd = "true";
+          create(kind, siblingZones);
           return { changed: true };
         };
-        if (deps.withUndo) deps.withUndo(run);
+        if (undoable && deps.withUndo) deps.withUndo(run);
         else run();
       }
       const section = sectionOf(kind);
       setEditState(kind);
       sync();
-      section.focus?.();
-      placeCaret(section);
+      focusZone(section, 0);
       section.scrollIntoView?.({ block: "nearest" });
-      deps.setFeedback?.(LABELS[kind] + " 편집 중");
+      deps.setFeedback?.(statusTitle(kind) + " 편집 중");
       return true;
     }
 
-    // Leaves the edit state; an empty section is not kept.
+    function open(requestedKind) {
+      if (!editor) return false;
+      if (KINDS.includes(requestedKind)) {
+        const curPage = Math.max(1, Number(pages?.currentPage?.()) || 1);
+        return openSlot(targetSlotForSheet(requestedKind, curPage - 1), true);
+      }
+      return openSlot(requestedKind, true);
+    }
+
+    function activeSlots() {
+      const slots = [];
+      if (isFirstDiff()) slots.push("firstHeader", "firstFooter");
+      slots.push("header", "footer");
+      if (isEvenOddDiff()) slots.push("evenHeader", "evenFooter");
+      return slots;
+    }
+
+    function navigateSlot(delta = 1) {
+      if (!editing) return false;
+      const slots = activeSlots();
+      const cur = Math.max(0, slots.indexOf(editing));
+      const next = slots[(cur + delta + slots.length * 4) % slots.length];
+      return next && next !== editing ? openSlot(next, true) : true;
+    }
+
+    function switchBand() {
+      if (!editing) return false;
+      const otherBand = bandOf(editing) === "header" ? "footer" : "header";
+      return openSlot(slotOf(otherBand, variantOf(editing)), true);
+    }
+
+    function toggleFirstPage() {
+      if (!editor) return false;
+      const nextOn = !isFirstDiff();
+      const curBand = editing ? bandOf(editing) : "header";
+      const run = () => {
+        if (nextOn) {
+          editor.dataset.eoFirstPage = "true";
+          if (!sectionOf(slotOf(curBand, "first"))) {
+            create(slotOf(curBand, "first"), sectionOf(curBand)?.dataset.eoHfZones === "true");
+          }
+        } else {
+          delete editor.dataset.eoFirstPage;
+        }
+        return { changed: true };
+      };
+      if (deps.withUndo) deps.withUndo(run);
+      else run();
+      if (editing) {
+        if (nextOn) return openSlot(slotOf(curBand, "first"), false);
+        if (variantOf(editing) === "first") return openSlot(curBand, false);
+      }
+      sync();
+      deps.setFeedback?.(nextOn ? "첫 쪽 머리말·꼬리말 분리 켜짐" : "첫 쪽 머리말·꼬리말 분리 꺼짐");
+      return true;
+    }
+
+    function toggleEvenOdd() {
+      if (!editor) return false;
+      const nextOn = !isEvenOddDiff();
+      const curBand = editing ? bandOf(editing) : "header";
+      const run = () => {
+        if (nextOn) {
+          editor.dataset.eoEvenOdd = "true";
+          if (!sectionOf(slotOf(curBand, "even"))) {
+            create(slotOf(curBand, "even"), sectionOf(curBand)?.dataset.eoHfZones === "true");
+          }
+        } else {
+          delete editor.dataset.eoEvenOdd;
+        }
+        return { changed: true };
+      };
+      if (deps.withUndo) deps.withUndo(run);
+      else run();
+      if (editing) {
+        if (nextOn) return openSlot(slotOf(curBand, "even"), false);
+        if (variantOf(editing) === "even") return openSlot(curBand, false);
+      }
+      sync();
+      deps.setFeedback?.(nextOn ? "짝수·홀수 쪽 머리말·꼬리말 분리 켜짐" : "짝수·홀수 쪽 머리말·꼬리말 분리 꺼짐");
+      return true;
+    }
+
+    function toggleZones() {
+      const section = editing ? sectionOf(editing) : null;
+      if (!section) return false;
+      const enable = section.dataset.eoHfZones !== "true";
+      const run = () => {
+        if (enable) {
+          section.dataset.eoHfZones = "true";
+          ensureThreeZones(section);
+        } else {
+          const kept = Array.from(section.children).filter((p) => hasNodeContent(p));
+          if (kept.length === 0) {
+            const p = document.createElement("p");
+            p.appendChild(document.createElement("br"));
+            kept.push(p);
+          } else {
+            for (const p of kept) {
+              const z = p.dataset?.eoZone;
+              delete p.dataset.eoZone;
+              if (z === "left") p.style.textAlign = "";
+              else if (z === "center" || z === "right") p.style.textAlign = z;
+            }
+          }
+          delete section.dataset.eoHfZones;
+          replaceKids(section, kept);
+        }
+        return { changed: true };
+      };
+      if (deps.withUndo) deps.withUndo(run);
+      else run();
+      sync();
+      focusZone(section, 0);
+      deps.setFeedback?.(enable ? "좌·중·우 3구역 편집 켜짐" : "단일 구역 편집 전환");
+      return true;
+    }
+
     function endEdit() {
       if (!editing) return false;
       const kind = editing;
-      const section = sectionOf(kind);
+      const title = statusTitle(kind);
       setEditState(null);
-      if (section && !hasContent(section)) section.remove();
+      pruneEmptySlot(kind);
       sync();
       editor.focus?.();
-      deps.setFeedback?.(LABELS[kind] + " 닫음");
+      deps.setFeedback?.(title + " 닫음");
       return true;
     }
 
-    // Deletes the header or footer being edited, as one undo step.
     function removeEditing() {
       const kind = editing;
       if (!kind) return false;
+      const title = statusTitle(kind);
       setEditState(null);
       const run = () => {
         sectionOf(kind)?.remove();
@@ -320,11 +565,24 @@
       else run();
       sync();
       editor.focus?.();
-      deps.setFeedback?.(LABELS[kind] + " 지움");
+      deps.setFeedback?.(title + " 지움");
       return true;
     }
 
-    // A field (`page`, `pages`, `filename`) at the caret of the header or footer being edited.
+    function targetParagraphForInsert(section) {
+      if (section.dataset.eoHfZones === "true") {
+        ensureThreeZones(section);
+        return section.children[Math.max(0, Math.min(2, lastZoneIdx))] ?? lastParagraph(section);
+      }
+      return lastParagraph(section);
+    }
+
+    function stripPlaceholderBr(p) {
+      if (p?.childNodes?.length === 1 && p.firstChild?.nodeType === 1 && p.firstChild.tagName === "BR") {
+        p.removeChild(p.firstChild);
+      }
+    }
+
     function insertField(kind = "page") {
       if (!Object.hasOwn(FIELDS, kind)) return false;
       const section = editing ? sectionOf(editing) : null;
@@ -335,16 +593,28 @@
         field.dataset.eoField = kind;
         field.setAttribute("contenteditable", "false");
         const sel = env.getSelection?.();
-        const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
-        if (range && section.contains(range.commonAncestorContainer)) {
+        const liveRange = sel?.rangeCount ? sel.getRangeAt(0) : null;
+        const range = liveRange && section.contains(liveRange.commonAncestorContainer)
+          ? liveRange
+          : (savedRange && section.contains(savedRange.commonAncestorContainer) ? savedRange.cloneRange() : null);
+        if (range) {
+          const hostP = Array.from(section.children).find((p) => p === range.startContainer || p.contains?.(range.startContainer));
           range.deleteContents();
           range.insertNode(field);
+          if (hostP && hostP.childNodes.length === 2 && hostP.lastChild?.tagName === "BR") {
+            hostP.removeChild(hostP.lastChild);
+          }
           range.setStartAfter(field);
           range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
+          if (sel) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          savedRange = range.cloneRange();
         } else {
-          lastParagraph(section).appendChild(field);
+          const target = targetParagraphForInsert(section);
+          stripPlaceholderBr(target);
+          target.appendChild(field);
         }
         return { changed: true };
       };
@@ -356,25 +626,72 @@
 
     // ---- wiring -------------------------------------------------------------------------------
 
+    function insertZoneLineBreak(section) {
+      const sel = env.getSelection?.();
+      if (!sel?.rangeCount || typeof document.createRange !== "function") return;
+      const range = sel.getRangeAt(0);
+      if (!section.contains(range.commonAncestorContainer)) return;
+      range.deleteContents();
+      const br = document.createElement("br");
+      range.insertNode(br);
+      range.setStartAfter(br);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      savedRange = range.cloneRange();
+      schedule();
+    }
+
     function onKeydown(ev) {
-      if (editing && ev.key === "Escape") {
+      if (!editing) return;
+      if (ev.key === "Escape") {
         ev.preventDefault?.();
         endEdit();
+        return;
       }
+      const section = sectionOf(editing);
+      if (!section || section.dataset.eoHfZones !== "true") return;
+      if (ev.key === "Tab") {
+        rememberSelection();
+        ev.preventDefault?.();
+        const delta = ev.shiftKey ? -1 : 1;
+        focusZone(section, (lastZoneIdx + delta + 3) % 3);
+        return;
+      }
+      if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey) {
+        ev.preventDefault?.();
+        insertZoneLineBreak(section);
+      }
+    }
+
+    function listen(target, type, fn, options) {
+      if (!target?.addEventListener) return;
+      target.addEventListener(type, fn, options);
+      bound.push(() => target.removeEventListener?.(type, fn, options));
     }
 
     function bindToolbar() {
       const group = toolbar()?.querySelector(".tb-headerfooter-group");
       if (!group) return;
       const actions = {
+        prev: () => navigateSlot(-1),
+        next: () => navigateSlot(1),
+        "switch-band": switchBand,
         close: endEdit,
         delete: removeEditing,
         "page-number": () => insertField("page"),
         "total-pages": () => insertField("pages"),
         "file-name": () => insertField("filename"),
+        "toggle-first": toggleFirstPage,
+        "toggle-even-odd": toggleEvenOdd,
+        "toggle-zones": toggleZones,
       };
       for (const btn of group.querySelectorAll("[data-hf-action]")) {
-        btn.addEventListener("click", () => actions[btn.dataset.hfAction]?.());
+        listen(btn, "mousedown", (ev) => {
+          rememberSelection();
+          ev.preventDefault?.();
+        });
+        listen(btn, "click", () => actions[btn.dataset.hfAction]?.());
       }
     }
 
@@ -385,10 +702,20 @@
       const Observer = env.MutationObserver;
       if (typeof Observer === "function") {
         observer = new Observer(onMutations);
-        observer.observe(editor, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["contenteditable"] });
+        observer.observe(editor, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["contenteditable", "data-eo-first-page", "data-eo-even-odd", "data-eo-hf-zones"],
+        });
       }
-      editor.addEventListener("keydown", onKeydown);
-      pages?.onSheets?.(() => paint());
+      listen(editor, "keydown", onKeydown);
+      listen(editor, "keyup", rememberSelection);
+      listen(editor, "mouseup", rememberSelection);
+      listen(document, "selectionchange", rememberSelection);
+      const offSheets = pages?.onSheets?.(() => paint());
+      if (typeof offSheets === "function") bound.push(offSheets);
       bindToolbar();
       schedule();
     }
@@ -396,16 +723,18 @@
     function detach() {
       observer?.disconnect();
       observer = null;
-      editor?.removeEventListener?.("keydown", onKeydown);
+      for (const off of bound.splice(0)) off();
       editor = null;
+      pages = null;
+      savedRange = null;
     }
 
     const api = {
-      attach, detach, open, endEdit, removeEditing, insertField, paint, sync, printCopy,
+      attach, detach, open, openSlot, endEdit, removeEditing, insertField, paint, sync, printCopy,
+      navigateSlot, switchBand, toggleFirstPage, toggleEvenOdd, toggleZones, focusZone, activeSlots,
       isEditing: () => editing,
-      has: (kind) => hasContent(sectionOf(kind)),
-      // The distances that place the header and footer now: the page setup's, else the default while there is one.
-      margins: () => marginsOf() ?? (KINDS.some((kind) => hasContent(sectionOf(kind))) ? { ...DEFAULT_MARGINS } : null),
+      has: (kind) => hasNodeContent(sectionOf(kind)),
+      margins: () => marginsOf() ?? (ALL_KINDS.some((kind) => hasNodeContent(sectionOf(kind))) ? { ...DEFAULT_MARGINS } : null),
     };
     host.__EASYOFFICE_DOC_PAGE_FRAME__ = api;
     return api;

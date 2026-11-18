@@ -8,7 +8,9 @@ use crate::rich_document::frame_paragraph;
 use crate::rich_image::check_document_images;
 use crate::rich_image_writers::{odt_image_paragraph, MediaParts, ODT_PICTURE_NAMESPACES};
 use crate::rich_list_writers::{level_of, odt_list_styles_xml, plan_lists, OdtListWriter};
-use crate::rich_page_frame::{odt_master_page, odt_styles_xml, OdtMasterInput};
+use crate::rich_page_frame::{
+    odt_master_page, odt_styles_xml, split_horizontal_zones, OdtMasterInput,
+};
 use crate::rich_run_writers::{odt_font_face_decls, odt_text_style_xml, OdtTextKey};
 use crate::rich_table_writers::push_odt_table;
 use crate::rich_toc_writers::{is_toc_block, odt_toc_styles_xml, TocScope};
@@ -46,13 +48,33 @@ pub(crate) fn odt_rich_entries(
     .map(|(paragraphs, enabled)| {
         (enabled && !paragraphs.is_empty()).then(|| {
             let mut xml = String::new();
-            for p in paragraphs {
-                push_odt_paragraph(
-                    &mut xml,
-                    &frame_paragraph(p),
-                    &mut para_styles,
-                    &mut text_styles,
-                );
+            if let Some(zones) = split_horizontal_zones(paragraphs) {
+                let region_tags = [
+                    ("style:region-left", zones[0]),
+                    ("style:region-center", zones[1]),
+                    ("style:region-right", zones[2]),
+                ];
+                for (tag, zone) in region_tags {
+                    if let Some(p) = zone {
+                        xml.push_str(&format!("<{tag}>"));
+                        push_odt_paragraph(
+                            &mut xml,
+                            &frame_paragraph(p),
+                            &mut para_styles,
+                            &mut text_styles,
+                        );
+                        xml.push_str(&format!("</{tag}>"));
+                    }
+                }
+            } else {
+                for p in paragraphs {
+                    push_odt_paragraph(
+                        &mut xml,
+                        &frame_paragraph(p),
+                        &mut para_styles,
+                        &mut text_styles,
+                    );
+                }
             }
             xml
         })

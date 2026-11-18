@@ -143,6 +143,78 @@ pub(crate) fn docx_settings(
     Some((xml, rel, content_type))
 }
 
+/// Splits `2..=3` strictly left-to-right ordered paragraphs (`Left`/`None` < `Center` < `Right`)
+/// without block-only layout properties into horizontal `[Left, Center, Right]` slots (`PD-249`).
+pub(crate) fn split_horizontal_zones(
+    paragraphs: &[RichParagraph],
+) -> Option<[Option<&RichParagraph>; 3]> {
+    if !(2..=3).contains(&paragraphs.len()) {
+        return None;
+    }
+    let mut zones: [Option<&RichParagraph>; 3] = [None, None, None];
+    let mut prev_slot: Option<usize> = None;
+    for p in paragraphs {
+        if p.heading_level > 0
+            || p.list.is_some()
+            || p.left_indent_twips.is_some()
+            || p.first_line_indent_twips.is_some()
+            || p.line_spacing_percent.is_some()
+            || p.toc.is_some()
+            || p.page_break_before
+        {
+            return None;
+        }
+        let slot = match p.alignment {
+            None | Some(crate::RichAlignment::Left) => 0,
+            Some(crate::RichAlignment::Center) => 1,
+            Some(crate::RichAlignment::Right) => 2,
+            Some(crate::RichAlignment::Justify) => return None,
+        };
+        if prev_slot.is_some_and(|prev| slot <= prev) {
+            return None;
+        }
+        zones[slot] = Some(p);
+        prev_slot = Some(slot);
+    }
+    Some(zones)
+}
+
+fn push_docx_frame_runs(xml: &mut String, p: &RichParagraph) {
+    for run in &p.runs {
+        let properties = docx_run_properties(run);
+        match run.field {
+            Some(field) => xml.push_str(&docx_field_run(field, &properties)),
+            None => {
+                xml.push_str("<w:r>");
+                xml.push_str(&properties);
+                crate::rich_writers::push_docx_text(xml, &run.text);
+                xml.push_str("</w:r>");
+            }
+        }
+    }
+}
+
+fn docx_frame_zones_paragraph(zones: [Option<&RichParagraph>; 3]) -> String {
+    let mut xml = String::from("<w:p>");
+    if let Some(left) = zones[0] {
+        push_docx_frame_runs(&mut xml, left);
+    }
+    if let Some(center) = zones[1] {
+        xml.push_str(
+            "<w:r><w:ptab w:alignment=\"center\" w:relativeTo=\"margin\" w:leader=\"none\"/></w:r>",
+        );
+        push_docx_frame_runs(&mut xml, center);
+    }
+    if let Some(right) = zones[2] {
+        xml.push_str(
+            "<w:r><w:ptab w:alignment=\"right\" w:relativeTo=\"margin\" w:leader=\"none\"/></w:r>",
+        );
+        push_docx_frame_runs(&mut xml, right);
+    }
+    xml.push_str("</w:p>");
+    xml
+}
+
 fn docx_frame_paragraph(p: &RichParagraph) -> String {
     let mut xml = String::from("<w:p>");
     let jc = p.alignment.map(|a| match a {
@@ -160,18 +232,7 @@ fn docx_frame_paragraph(p: &RichParagraph) -> String {
         }
         xml.push_str("</w:pPr>");
     }
-    for run in &p.runs {
-        let properties = docx_run_properties(run);
-        match run.field {
-            Some(field) => xml.push_str(&docx_field_run(field, &properties)),
-            None => {
-                xml.push_str("<w:r>");
-                xml.push_str(&properties);
-                crate::rich_writers::push_docx_text(&mut xml, &run.text);
-                xml.push_str("</w:r>");
-            }
-        }
-    }
+    push_docx_frame_runs(&mut xml, p);
     xml.push_str("</w:p>");
     xml
 }
@@ -183,8 +244,12 @@ pub(crate) fn docx_frame_part(paragraphs: &[RichParagraph], header: bool) -> Opt
     }
     let root = if header { "w:hdr" } else { "w:ftr" };
     let mut xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><{root} {DOCX_NAMESPACES}>");
-    for p in paragraphs {
-        xml.push_str(&docx_frame_paragraph(p));
+    if let Some(zones) = split_horizontal_zones(paragraphs) {
+        xml.push_str(&docx_frame_zones_paragraph(zones));
+    } else {
+        for p in paragraphs {
+            xml.push_str(&docx_frame_paragraph(p));
+        }
     }
     xml.push_str(&format!("</{root}>"));
     Some(xml)

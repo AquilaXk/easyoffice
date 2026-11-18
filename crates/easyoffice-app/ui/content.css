@@ -397,13 +397,20 @@
 }
 .doc-page-hf[data-hf="header"] { top: var(--hf-hd, 75.6px); min-height: var(--hf-band-h, 56.7px); }
 .doc-page-hf[data-hf="footer"] { bottom: var(--hf-ft, 56.7px); min-height: var(--hf-fband-h, 56.7px); }
-.doc-page-hf p, #doc-editor > section[data-eo-hf] p { margin: 0; min-height: 1.4em; }
+.doc-page-hf p, #doc-editor > section[data-eo-hf] p { margin: 0; min-height: 1.4em; overflow-wrap: anywhere; }
+.doc-page-hf [data-eo-zone="left"], #doc-editor > section[data-eo-hf] [data-eo-zone="left"] { text-align: left; }
+.doc-page-hf [data-eo-zone="center"], #doc-editor > section[data-eo-hf] [data-eo-zone="center"] { text-align: center; }
+.doc-page-hf [data-eo-zone="right"], #doc-editor > section[data-eo-hf] [data-eo-zone="right"] { text-align: right; }
 .eo-page-field::before { content: counter(eo-page); }
 .eo-page-field[data-eo-field="pages"]::before { content: counter(eo-total); }
 .eo-page-field[data-eo-field="filename"]::before { content: attr(data-eo-name); }
 .doc-page-layer[data-hf-footer] .doc-page-sheet::after { display: none; }
 #doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"],
-#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
+#doc-editor[data-eo-hf-edit="firstHeader"] > section[data-eo-hf="firstHeader"],
+#doc-editor[data-eo-hf-edit="evenHeader"] > section[data-eo-hf="evenHeader"],
+#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"],
+#doc-editor[data-eo-hf-edit="firstFooter"] > section[data-eo-hf="firstFooter"],
+#doc-editor[data-eo-hf-edit="evenFooter"] > section[data-eo-hf="evenFooter"] {
   position: absolute;
   z-index: 3;
   display: flex;
@@ -418,14 +425,44 @@
   outline: none;
   cursor: text;
 }
-#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"] { top: var(--hf-hd, 75.6px); min-height: var(--hf-band-h, 56.7px); }
-#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
-  top: calc(var(--pg-h, 1123px) - var(--hf-ft, 56.7px) - max(var(--hf-fband-h, 56.7px), var(--hf-fh, 0px)));
+.doc-page-hf[data-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"][data-eo-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="firstHeader"] > section[data-eo-hf="firstHeader"][data-eo-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="evenHeader"] > section[data-eo-hf="evenHeader"][data-eo-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"][data-eo-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="firstFooter"] > section[data-eo-hf="firstFooter"][data-eo-hf-zones="true"],
+#doc-editor[data-eo-hf-edit="evenFooter"] > section[data-eo-hf="evenFooter"][data-eo-hf-zones="true"] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 12px;
+  align-items: start;
+}
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf][data-eo-hf-zones="true"] > p[data-eo-zone] {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 1.75em;
+  padding: 2px 6px;
+  border: 1px dashed var(--ui-border);
+  border-radius: var(--radius-sm);
+}
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf][data-eo-hf-zones="true"] > p[data-eo-zone]:hover {
+  border-color: var(--ui-border-strong);
+}
+#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"],
+#doc-editor[data-eo-hf-edit="firstHeader"] > section[data-eo-hf="firstHeader"],
+#doc-editor[data-eo-hf-edit="evenHeader"] > section[data-eo-hf="evenHeader"] {
+  top: calc(var(--hf-edit-sheet-y, 0px) + var(--hf-hd, 75.6px));
+  min-height: var(--hf-band-h, 56.7px);
+}
+#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"],
+#doc-editor[data-eo-hf-edit="firstFooter"] > section[data-eo-hf="firstFooter"],
+#doc-editor[data-eo-hf-edit="evenFooter"] > section[data-eo-hf="evenFooter"] {
+  top: calc(var(--hf-edit-sheet-y, 0px) + var(--pg-h, 1123px) - var(--hf-ft, 56.7px) - max(var(--hf-fband-h, 56.7px), var(--hf-fh, 0px)));
   min-height: var(--hf-fband-h, 56.7px);
 }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field[data-eo-field="page"]::before,
-#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field:not([data-eo-field])::before { content: "1"; }
-#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field[data-eo-field="pages"]::before { content: "1"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field:not([data-eo-field])::before { content: counter(hf-edit-page); }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field[data-eo-field="pages"]::before { content: counter(hf-edit-total); }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf]::before {
   content: "";
   position: absolute;
@@ -460,7 +497,13 @@
   white-space: nowrap;
 }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(양쪽)"; }
+#doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(홀수 쪽)"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstHeader"]::after { content: "머리말(첫 쪽)"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenHeader"]::after { content: "머리말(짝수 쪽)"; }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(양쪽)"; }
+#doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(홀수 쪽)"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstFooter"]::after { content: "꼬리말(첫 쪽)"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenFooter"]::after { content: "꼬리말(짝수 쪽)"; }
 .doc-scroll-container.hf-editing { background: var(--ui-active); }
 
 @media screen {
