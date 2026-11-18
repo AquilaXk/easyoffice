@@ -2,7 +2,7 @@
 //! formats (PD-235). A cell with a number format shows what the engine's formatter gives, the
 //! same code path as the grid and `TEXT`; a cell without one shows its General text.
 
-use easyoffice_formats::{resolve_code, CellShown, SheetShown, SheetStyling};
+use easyoffice_formats::{resolve_code, CellShown, CellValueKind, SheetShown, SheetStyling};
 use easyoffice_sheet::{compile_for_page, general_display, CompiledNumFmt};
 
 use std::borrow::Cow;
@@ -61,9 +61,13 @@ pub(crate) fn show_cells(
     let mut memo = NumFmtMemo::new();
     for (row, col, text) in cells.iter_mut() {
         let at = (*row, *col);
+        let kind = styling.map_or_else(
+            || CellValueKind::infer(text),
+            |s| s.cell_kind(*row, *col, text),
+        );
         let formatted = styling
             .and_then(|s| memo.compiled(s, at))
-            .and_then(|fmt| fmt.format(text));
+            .and_then(|fmt| fmt.format_typed(text, kind));
         match formatted {
             Some(cell) if mode == Show::Page => {
                 shown.insert(
@@ -77,7 +81,7 @@ pub(crate) fn show_cells(
                 *text = cell.text;
             }
             Some(cell) => *text = cell.flat(),
-            None if mode != Show::Values => {
+            None if mode != Show::Values && kind == CellValueKind::Number => {
                 if let Cow::Owned(general) = general_display(text) {
                     *text = general;
                 }

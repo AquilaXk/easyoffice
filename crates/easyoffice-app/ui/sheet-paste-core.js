@@ -79,6 +79,7 @@
           const now = getEntry(ref);
           edit.value = now?.value ?? "";
           edit.formula = now?.formula ?? "";
+          if (now?.t) edit.t = now.t;
         }
         edit.ref = ref;
         result.edits.push(edit);
@@ -96,12 +97,15 @@
     const value = String(from?.value ?? "");
     const formula = from?.formula || (!copied && mode !== "values" && isFormulaStr(value) ? value : "");
     const text = formula ? "" : value;
-    if (mode === "values") return { value, formula: "" };
+    const t = copied && !formula && from?.t ? from.t : undefined;
+    if (mode === "values") return t ? { value, formula: "", t } : { value, formula: "" };
     if (mode === "formats") return { value: "", formula: "", style: plainStyle(from?.style) };
-    if (mode === "formulas" || !copied) return { value: text, formula };
+    if (mode === "formulas" || !copied) return t ? { value: text, formula, t } : { value: text, formula };
     // A plain paste brings the source's hyperlink or none; the special pastes of values, formulas and formats leave the
     // hyperlink of the cell they land on (PD-218).
-    return { value: text, formula, style: plainStyle(from?.style), link: from?.link ?? null };
+    return t
+      ? { value: text, formula, t, style: plainStyle(from?.style), link: from?.link ?? null }
+      : { value: text, formula, style: plainStyle(from?.style), link: from?.link ?? null };
   }
 
   // Column widths of the pasted columns by column; a source column at the default width resets the

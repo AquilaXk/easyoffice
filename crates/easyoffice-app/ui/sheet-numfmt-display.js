@@ -87,7 +87,11 @@
       try {
         answer = await call({
           sessionAction: "format",
-          items: codes.map(([code, values]) => ({ code, values: [...values.values()] })),
+          items: codes.map(([code, values]) => (
+            code.startsWith("\u0000")
+              ? { code: code.slice(1), textOnly: true, values: [...values.values()] }
+              : { code, values: [...values.values()] }
+          )),
         });
       } catch {
         answer = null;
@@ -114,21 +118,32 @@
     return batch;
   }
 
-  function queue(code, raw, map) {
+  function queue(code, raw, map, literal) {
     let values = pending.get(code);
     if (!values) {
       values = new Map();
       pending.set(code, values);
     }
-    values.set(raw, normalize(raw));
+    values.set(raw, literal ? String(raw) : normalize(raw));
     map.set(raw, null);
   }
 
   // The display of `raw` under `code`: { t, c } or null (General). A value the cache lacks is
   // requested and null returned until the answer arrives.
-  function shown(code, raw) {
+  function shown(code, raw, cellType) {
     if (!code || badCodes.has(code)) return null;
     if (code === "@") return { t: raw, c: "" };
+    if (cellType === "s") {
+      if (!code.includes("@")) return null;
+      const keyCode = "\u0000" + code;
+      const map = slot(keyCode);
+      const hit = map.get(raw);
+      if (hit !== undefined) return hit || null;
+      if (!call) return null;
+      queue(keyCode, raw, map, true);
+      schedule();
+      return null;
+    }
     const map = slot(code);
     const hit = map.get(raw);
     if (hit !== undefined) return hit || null;
@@ -137,7 +152,7 @@
       map.set(raw, 0);
       return null;
     }
-    queue(code, raw, map);
+    queue(code, raw, map, false);
     schedule();
     return null;
   }
@@ -165,7 +180,9 @@
     for (const [code, raws] of wanted) {
       if (!code || code === "@" || badCodes.has(code)) continue;
       const values = new Map();
-      for (const raw of raws) if (askable(code, raw)) values.set(raw, normalize(raw));
+      for (const raw of raws) {
+        if (askable(code, raw)) values.set(raw, code.startsWith("\u0000") ? String(raw) : normalize(raw));
+      }
       if (values.size > 0) entries.push([code, values]);
     }
     await ask(entries, (codes, answer) => {

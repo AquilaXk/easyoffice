@@ -54,7 +54,7 @@
       if (refsA.length !== refsB.length) return true;
       for (const ref of refsA) {
         const ea = mapA[ref], eb = mapB[ref];
-        if (!eb || (ea?.value || "") !== (eb?.value || "") || (ea?.formula || "") !== (eb?.formula || "") || (includeStyle && cellStyleChanged(ea?.style, eb?.style))) {
+        if (!eb || (ea?.value || "") !== (eb?.value || "") || (ea?.formula || "") !== (eb?.formula || "") || (ea?.t || "") !== (eb?.t || "") || (includeStyle && cellStyleChanged(ea?.style, eb?.style))) {
           return true;
         }
       }
@@ -101,8 +101,11 @@
           if (entry.formula || entry.value) {
             const val = entry.formula
               ? entry.formula
-              : normalizeFormattedNumericCell(entry.value);
-            cells.push({ sheet: shName, cell: ref, value: val });
+              : entry.t === "s"
+                ? String(entry.value)
+                : normalizeFormattedNumericCell(entry.value);
+            const t = entry.formula ? undefined : host.__EASYOFFICE_SHEET_CELL_TYPE__?.wireTag(val, entry.t);
+            cells.push(t ? { sheet: shName, cell: ref, value: val, t } : { sheet: shName, cell: ref, value: val });
           }
         }
       }
@@ -226,16 +229,19 @@
             formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
           }
           if (!entry.formula && !entry.value) continue;
-          const raw = entry.formula ? entry.formula : normalizeFormattedNumericCell(entry.value);
+          const raw = entry.formula ? entry.formula : entry.t === "s" ? String(entry.value) : normalizeFormattedNumericCell(entry.value);
+          const t = entry.formula ? "" : (host.__EASYOFFICE_SHEET_CELL_TYPE__?.wireTag(raw, entry.t) || "");
           const known = mirror.get(ref);
+          const mkChange = () => (t ? { sheet: shName, cell: ref, value: raw, t } : { sheet: shName, cell: ref, value: raw });
           if (known === undefined) {
-            mirror.set(ref, { raw, gen });
-            changes.push({ sheet: shName, cell: ref, value: raw });
+            mirror.set(ref, { raw, t, gen });
+            changes.push(mkChange());
           } else {
             known.gen = gen;
-            if (known.raw !== raw) {
+            if (known.raw !== raw || known.t !== t) {
               known.raw = raw;
-              changes.push({ sheet: shName, cell: ref, value: raw });
+              known.t = t;
+              changes.push(mkChange());
             }
           }
         }
@@ -536,7 +542,7 @@
           map = new Map();
           session.raw.set(f.sheet, map);
         }
-        map.set(f.cell, { raw: f.value, gen: session.gen });
+        map.set(f.cell, { raw: f.value, t: "", gen: session.gen });
       }
       for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
         session.values.set(c.sheet + "!" + c.cell, c.value);

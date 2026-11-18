@@ -99,13 +99,24 @@
     return null;
   }
 
-  function parsePlainCellTyped(rawStr) {
+  function parsePlainCellTyped(rawStr, explicitTag) {
     const raw = String(rawStr ?? "");
+    if (explicitTag === "s") return raw === "" ? valEmpty() : valText(raw);
+    if (explicitTag === "e") return valErr(raw || "#VALUE!");
+    if (explicitTag === "b") return valBool(!/^false$/i.test(raw.trim()) && raw.trim() !== "0");
     const trimmed = raw.trim();
     if (!trimmed) return valEmpty();
+    if (/^#(?:NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!|GETTING_DATA|ERROR!)$/.test(trimmed)) {
+      return valErr(trimmed);
+    }
     const cleanedNum = normalizeFormattedNumericCell(trimmed);
     const num = Number(cleanedNum);
-    if (cleanedNum !== "" && Number.isFinite(num)) return valNum(num);
+    if (cleanedNum !== "" && Number.isFinite(num)) {
+      const unsigned = cleanedNum.startsWith("-") ? cleanedNum.slice(1) : cleanedNum;
+      if (explicitTag === "n" || !(unsigned.startsWith("0") && unsigned.length > 1 && /^\d/.test(unsigned[1]))) {
+        return valNum(num);
+      }
+    }
     const up = asciiUpperJs(trimmed);
     if (up === "TRUE") return valBool(true);
     if (up === "FALSE") return valBool(false);
@@ -140,7 +151,7 @@
       }
       return computed;
     }
-    const plain = parsePlainCellTyped(workbook.rawValues[fullKey] ?? "");
+    const plain = parsePlainCellTyped(workbook.rawValues[fullKey] ?? "", workbook.cellTypes?.[fullKey]);
     workbook.memo.set(fullKey, plain);
     return plain;
   }
@@ -780,6 +791,7 @@
     }
     const cells = doc.cells || [];
     const rawValues = {};
+    const cellTypes = {};
     const formulaEntries = {};
     const triples = [];
 
@@ -793,6 +805,9 @@
       if (typeof item.cell !== "string" || !item.cell.trim()) {
         throw new Error("InvalidArgument: JSON 셀 'cell' 주소가 비어 있습니다.");
       }
+      if (item.t !== undefined && item.t !== null && !["n", "s", "b", "e", "f"].includes(item.t)) {
+        throw new Error("InvalidArgument: 알 수 없는 셀 타입 태그입니다: " + String(item.t));
+      }
       const shName = jsonSheetNameOrDefaultJs(item.sheet ?? defaultSheet, defaultSheet);
       const addrNorm = normalizeA1Token(item.cell);
       if (!addrNorm) {
@@ -803,14 +818,16 @@
         ? resolveCanonicalSheetUpper(knownSheets, shName)
         : ensureKnownSheetUpper(knownSheets, shName);
       if (!shUpper) continue;
-      triples.push({ shUpper, addrUpper: addrNorm, strVal });
+      triples.push({ shUpper, addrUpper: addrNorm, strVal, t: item.t || undefined });
     }
 
     for (const triple of triples) {
-      const { shUpper, addrUpper, strVal } = triple;
+      const { shUpper, addrUpper, strVal, t } = triple;
       const fullKey = shUpper + "!" + addrUpper;
       rawValues[fullKey] = strVal;
-      if (isFormulaStringJs(strVal)) {
+      if (t) cellTypes[fullKey] = t;
+      else delete cellTypes[fullKey];
+      if (t !== "s" && isFormulaStringJs(strVal)) {
         formulaEntries[fullKey] = strVal.trim();
       } else {
         delete formulaEntries[fullKey];
@@ -819,6 +836,7 @@
 
     return {
       rawValues,
+      cellTypes,
       formulaEntries,
       knownSheets,
       memo: new Map(),

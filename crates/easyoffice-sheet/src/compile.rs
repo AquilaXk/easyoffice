@@ -45,31 +45,39 @@ fn names_used(
 }
 
 impl SheetEngine {
-    /// Compiles the text of a cell: a formula (with the defined names it uses expanded), a number or a
-    /// boolean. `None` entry for plain text.
+    /// Compiles the text of a cell according to its effective [`crate::CellValueKind`] (PD-241):
+    /// a formula (with the defined names it uses expanded), a number, a boolean, or an error literal.
+    /// `None` entry for plain or explicitly text-typed cells.
     pub(crate) fn compile_cell_entry(&self, coord: PackedCellCoordinate, raw: &str) -> Compiled {
-        let trimmed = raw.trim();
-        let entry = if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
-            let expr_src = formula_body.trim();
-            if expr_src.is_empty() {
-                return Compiled {
-                    entry: None,
-                    uses: None,
+        let kind = self.effective_cell_kind(coord, raw);
+        let entry = match kind {
+            crate::CellValueKind::Formula => {
+                let Some(formula_body) = crate::parser::strip_formula_prefix(raw) else {
+                    return Compiled {
+                        entry: None,
+                        uses: None,
+                    };
                 };
+                let expr_src = formula_body.trim();
+                if expr_src.is_empty() {
+                    return Compiled {
+                        entry: None,
+                        uses: None,
+                    };
+                }
+                return self.compile_formula(Some(coord), expr_src);
             }
-            return self.compile_formula(Some(coord), expr_src);
-        } else if crate::coercion::is_valid_decimal_syntax(trimmed) {
-            if let Some(num) = crate::coercion::parse_strict_number(trimmed) {
-                Some(Ok(Expr::Number(num)))
-            } else {
-                Some(Err(FormulaError::Num))
+            crate::CellValueKind::Number => easyoffice_formats::numeric_cell_value(raw.trim())
+                .or_else(|| crate::coercion::parse_strict_number(raw))
+                .map(|num| Ok(Expr::Number(num))),
+            crate::CellValueKind::Boolean => {
+                let b = !raw.trim().eq_ignore_ascii_case("FALSE") && raw.trim() != "0";
+                Some(Ok(Expr::Boolean(b)))
             }
-        } else if trimmed.eq_ignore_ascii_case("TRUE") {
-            Some(Ok(Expr::Boolean(true)))
-        } else if trimmed.eq_ignore_ascii_case("FALSE") {
-            Some(Ok(Expr::Boolean(false)))
-        } else {
-            None
+            crate::CellValueKind::Error => Some(Err(
+                FormulaError::from_code(raw).unwrap_or(FormulaError::Value)
+            )),
+            crate::CellValueKind::Text => None,
         };
         Compiled { entry, uses: None }
     }
@@ -134,7 +142,8 @@ impl SheetEngine {
         let Some(raw) = self.cells.get(&coord).cloned() else {
             return;
         };
-        self.set_cell_coord(coord, raw);
+        let kind = self.explicit_kinds.get(&coord).copied();
+        self.set_cell_typed_coord(coord, raw, kind);
     }
 
     /// Records (or forgets) the names the formula at `coord` uses.

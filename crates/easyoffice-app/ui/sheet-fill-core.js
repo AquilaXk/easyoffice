@@ -76,7 +76,7 @@
     if (entry.formula) return { type: "formula" };
     const v = String(entry.value ?? "");
     const code = entry.style?.numFmt || "";
-    if (code !== "@" && isNumberText(v)) return { type: code && isDateCode(code) ? "date" : "number" };
+    if (code !== "@" && entry.t !== "s" && isNumberText(v)) return { type: code && isDateCode(code) ? "date" : "number" };
     const loop = loopOf(v);
     if (loop) return { type: "loop", key: loop.name };
     const ext = matchExtendNumber(v);
@@ -422,8 +422,10 @@
         if (from?.formula) {
           edit.formula = shiftFormula(from.formula, row - fromRow, col - fromCol);
           if (adjustColumns) edit.formula = shiftStructured(edit.formula, vertical ? row - fromRow : col - fromCol, (name) => tableFor(name, fromRow, fromCol));
+        } else {
+          edit.value = step.value ?? String(from?.value ?? "");
+          if (from?.t) edit.t = from.t;
         }
-        else edit.value = step.value ?? String(from?.value ?? "");
         edits.push(edit);
       });
     }

@@ -55,6 +55,7 @@ impl SheetEngine {
     /// removed.
     fn move_axis(&mut self, edit: &AxisEdit) -> usize {
         let cells = std::mem::take(&mut self.cells);
+        let mut kinds = std::mem::take(&mut self.explicit_kinds);
         let mut asts = std::mem::take(&mut self.compiled_asts);
         let mut subtotals = std::mem::take(&mut self.subtotal_coords);
         let mut arrays = std::mem::take(&mut self.array_formulas);
@@ -83,6 +84,9 @@ impl SheetEngine {
             }
             if let Some(uses) = name_uses.remove(&coord) {
                 self.name_uses.insert(moved, uses);
+            }
+            if let Some(kind) = kinds.remove(&coord) {
+                self.explicit_kinds.insert(moved, kind);
             }
             self.cells.insert(moved, raw);
         }
@@ -135,7 +139,9 @@ impl WorkbookEngine {
                     }
                     continue;
                 }
-                if crate::parser::strip_formula_prefix(raw).is_none() {
+                if engine.is_explicit_text(coord)
+                    || crate::parser::strip_formula_prefix(raw).is_none()
+                {
                     continue;
                 }
                 if let Some(new) =
@@ -216,7 +222,9 @@ impl WorkbookEngine {
                 continue;
             }
             for (&coord, raw) in &engine.cells {
-                if crate::parser::strip_formula_prefix(raw).is_none() {
+                if engine.is_explicit_text(coord)
+                    || crate::parser::strip_formula_prefix(raw).is_none()
+                {
                     continue;
                 }
                 scanned += 1;

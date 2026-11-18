@@ -7,10 +7,24 @@ use std::time::Instant;
 use crate::sheet_rules_json::visuals_json;
 use crate::sheet_session::{applied_json, registry, REFUSED};
 use crate::EasyOfficeIpcRouter;
-use easyoffice_formats::{parse_strict_json_borrowed, EasyOfficeError, StrictJsonBorrow};
-use easyoffice_sheet::{
-    CellChange, ChangedCell, EvaluatedCellValue, PackedCellCoordinate, RecalcOutcome, RecalcSession,
+use easyoffice_formats::{
+    parse_strict_json_borrowed, CellValueKind, EasyOfficeError, StrictJsonBorrow,
 };
+use easyoffice_sheet::{
+    ChangedCell, EvaluatedCellValue, PackedCellCoordinate, RecalcOutcome, RecalcSession,
+    TypedCellChange,
+};
+
+pub(crate) fn parse_cell_kind_tag(
+    tag: Option<&str>,
+) -> Result<Option<CellValueKind>, EasyOfficeError> {
+    tag.map(|t| {
+        CellValueKind::from_tag(t).ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(format!("알 수 없는 셀 타입 태그입니다: '{t}'"))
+        })
+    })
+    .transpose()
+}
 
 fn borrow_opt_str<'a, 'b>(
     entries: &'b [(Cow<'a, str>, StrictJsonBorrow<'a>)],
@@ -37,7 +51,7 @@ fn borrow_session_id<'a, 'b>(
 
 fn parse_borrowed_changes<'a>(
     entries: Vec<(Cow<'a, str>, StrictJsonBorrow<'a>)>,
-) -> Result<(String, bool, Vec<CellChange>), EasyOfficeError> {
+) -> Result<(String, bool, Vec<TypedCellChange>), EasyOfficeError> {
     let mut session = None;
     let mut recalc = true;
     let mut changes_val = None;
@@ -82,6 +96,7 @@ fn parse_borrowed_changes<'a>(
         let mut sheet: Option<Cow<'a, str>> = None;
         let mut cell: Option<Cow<'a, str>> = None;
         let mut raw = String::new();
+        let mut kind: Option<CellValueKind> = None;
         for (fk, fv) in fields {
             match fk.as_ref() {
                 "sheet" => match fv {
@@ -110,6 +125,15 @@ fn parse_borrowed_changes<'a>(
                         )
                     })?;
                 }
+                "t" => match fv {
+                    StrictJsonBorrow::Null => {}
+                    StrictJsonBorrow::Str(s) => kind = parse_cell_kind_tag(Some(s.as_ref()))?,
+                    _ => {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "JSON 필드 't'는 문자열이어야 합니다.".to_string(),
+                        ))
+                    }
+                },
                 _ => {}
             }
         }
@@ -118,10 +142,11 @@ fn parse_borrowed_changes<'a>(
             Some(s) if !s.is_empty() => s.into_owned(),
             _ => String::new(),
         };
-        out.push(CellChange {
+        out.push(TypedCellChange {
             sheet: sheet_owned,
             coord,
             raw,
+            kind,
         });
     }
     Ok((id, recalc, out))
@@ -175,7 +200,7 @@ pub(crate) fn try_fast_sheet_session_borrowed(
         }
         "apply" => {
             let (id, recalc, changes) = parse_borrowed_changes(entries)?;
-            match registry().apply(&id, owner, &changes, recalc, Instant::now()) {
+            match registry().apply_typed(&id, owner, &changes, recalc, Instant::now()) {
                 Ok(applied) => Ok(Some(applied_json(applied))),
                 Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(Some(REFUSED.to_string())),
                 Err(err) => Err(err),
@@ -276,7 +301,7 @@ pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> String {
 pub(crate) fn recalc_answer(
     id: &str,
     session: &mut RecalcSession,
-    changes: &[CellChange],
+    changes: &[TypedCellChange],
     outcome: &RecalcOutcome,
 ) -> String {
     let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
@@ -288,7 +313,7 @@ pub(crate) fn recalc_answer(
     ));
     out.push_str(&timed_out_field(outcome));
     out.push_str(&spills_field(session, outcome));
-    let rule_updates = session.rule_updates(changes, outcome);
+    let rule_updates = session.rule_updates_typed(changes, outcome);
     if !rule_updates.changed.is_empty() {
         out.push_str(",\"cf\":[");
         for (i, (sheet, visuals)) in rule_updates.changed.iter().enumerate() {

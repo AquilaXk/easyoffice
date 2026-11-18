@@ -356,6 +356,9 @@ fn write_sheet_cells(
         coord.write_a1(out);
         out.push_str("\",\"raw\":");
         push_json_str(out, raw);
+        if let Some(kind) = styling.and_then(|s| s.explicit_cell_kind(*r, *c, raw)) {
+            let _ = write!(out, ",\"t\":\"{}\"", kind.tag());
+        }
         if let Some(style) = style {
             out.push_str(",\"style\":");
             write_style(out, style, num_fmts);

@@ -201,3 +201,118 @@ fn a_payload_over_the_ipc_ceiling_is_refused_by_every_command() {
         "a payload at the ceiling still reaches the command"
     );
 }
+
+#[test]
+fn cell_type_tags_round_trip_through_ipc_and_reject_hostile_tags_fail_closed() {
+    use easyoffice_formats::EasyOfficeError;
+
+    // 1. Stateless `evaluate_sheet`: `t:"s"` keeps `"123"` and `"=1+1"` as text.
+    let eval_res = EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        r#"{"sheet":"Sheet1","targets":[{"cell":"B1"},{"cell":"B2"},{"cell":"B3"}],"cells":[{"cell":"A1","value":"123","t":"s"},{"cell":"A2","value":"=1+1","t":"s"},{"cell":"B1","value":"=SUM(A1:A2)"},{"cell":"B2","value":"=ISTEXT(A1)"},{"cell":"B3","value":"=A2"}]}"#,
+    )
+    .unwrap();
+    assert!(
+        eval_res.contains(r#""targetValues":["0","TRUE","=1+1"]"#),
+        "{eval_res}"
+    );
+
+    // 2. Stateful session `apply` (borrowed fast-path): flipping `t` recomputes dependents.
+    let open = EasyOfficeIpcRouter::dispatch_for_owner(
+        "evaluate_sheet",
+        r#"{"sessionAction":"open","sheets":["Sheet1"]}"#,
+        "win-ct",
+    )
+    .unwrap();
+    let sid_start = open.find("\"ss").unwrap() + 1;
+    let sid_end = sid_start + open[sid_start..].find('"').unwrap();
+    let sid = &open[sid_start..sid_end];
+
+    let step1 = EasyOfficeIpcRouter::dispatch_for_owner(
+        "evaluate_sheet",
+        &format!(
+            r#"{{"sessionAction":"apply","session":"{sid}","changes":[{{"sheet":"Sheet1","cell":"A1","value":"123"}},{{"sheet":"Sheet1","cell":"B1","value":"=SUM(A1)"}}]}}"#
+        ),
+        "win-ct",
+    )
+    .unwrap();
+    assert!(step1.contains(r#""cell":"B1","value":"123""#), "{step1}");
+
+    let step2 = EasyOfficeIpcRouter::dispatch_for_owner(
+        "evaluate_sheet",
+        &format!(
+            r#"{{"sessionAction":"apply","session":"{sid}","changes":[{{"sheet":"Sheet1","cell":"A1","value":"123","t":"s"}}]}}"#
+        ),
+        "win-ct",
+    )
+    .unwrap();
+    assert!(step2.contains(r#""cell":"B1","value":"0""#), "{step2}");
+
+    // 3. Structured save -> decode round-trip across xlsx, ods, xls preserves `t:"s"`.
+    for fmt in ["xlsx", "ods", "xls"] {
+        let save = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &format!(
+                r##"{{"sourceFormat":"xlsx","targetFormat":"{fmt}","forSave":true,"sheets":[{{"name":"Sheet1","cells":[{{"ref":"A1","raw":"123","t":"s"}},{{"ref":"A2","raw":"=1+1","t":"s"}},{{"ref":"A3","raw":"TRUE"}},{{"ref":"A4","raw":"#N/A"}}]}}]}}"##
+            ),
+        )
+        .unwrap();
+        let marker = "\"convertedBase64\":\"";
+        let start = save.find(marker).unwrap() + marker.len();
+        let b64 = &save[start..start + save[start..].find('"').unwrap()];
+        let reopen = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &format!(r#"{{"action":"decode","fileName":"book.{fmt}","sourceBase64":"{b64}"}}"#),
+        )
+        .unwrap();
+        assert!(
+            reopen.contains(r#"{"ref":"A1","raw":"123","t":"s"}"#),
+            "{fmt}: {reopen}"
+        );
+        assert!(
+            reopen.contains(r#"{"ref":"A2","raw":"=1+1","t":"s"}"#),
+            "{fmt}: {reopen}"
+        );
+        assert!(
+            reopen.contains(r#"{"ref":"A3","raw":"TRUE"}"#),
+            "{fmt}: {reopen}"
+        );
+        assert!(
+            reopen.contains(r##"{"ref":"A4","raw":"#N/A"}"##),
+            "{fmt}: {reopen}"
+        );
+    }
+
+    // 4. Hostile `"t"` tags fail closed with InvalidArgument across every IPC entry point.
+    for bad in [
+        r#"{"sheet":"Sheet1","targets":[{"cell":"A1"}],"cells":[{"cell":"A1","value":"1","t":"bogus"}]}"#,
+        r#"{"sheet":"Sheet1","targets":[{"cell":"A1"}],"cells":[{"cell":"A1","value":"1","t":123}]}"#,
+        r#"{"sheet":"Sheet1","targets":[{"cell":"A1"}],"cells":[{"cell":"A1","value":"1","t":""}]}"#,
+    ] {
+        assert!(
+            matches!(
+                EasyOfficeIpcRouter::dispatch("evaluate_sheet", bad),
+                Err(EasyOfficeError::InvalidArgument(_))
+            ),
+            "{bad}"
+        );
+    }
+    let bad_session = format!(
+        r#"{{"sessionAction":"apply","session":"{sid}","changes":[{{"sheet":"Sheet1","cell":"A1","value":"1","t":"evil"}}]}}"#
+    );
+    assert!(matches!(
+        EasyOfficeIpcRouter::dispatch_for_owner("evaluate_sheet", &bad_session, "win-ct"),
+        Err(EasyOfficeError::InvalidArgument(_))
+    ));
+    let bad_save = r#"{"sourceFormat":"xlsx","targetFormat":"xlsx","sheets":[{"name":"Sheet1","cells":[{"ref":"A1","raw":"1","t":"evil"}]}]}"#;
+    assert!(matches!(
+        EasyOfficeIpcRouter::dispatch("convert_document_format", bad_save),
+        Err(EasyOfficeError::InvalidArgument(_))
+    ));
+
+    let _ = EasyOfficeIpcRouter::dispatch_for_owner(
+        "evaluate_sheet",
+        &format!(r#"{{"sessionAction":"close","session":"{sid}"}}"#),
+        "win-ct",
+    );
+}

@@ -51,6 +51,7 @@ use crate::XlsxCachedValue;
 /// of the array it spills (PD-217).
 pub(crate) struct CellContent<'a> {
     pub(crate) raw: &'a str,
+    pub(crate) kind: crate::CellValueKind,
     pub(crate) cached: Option<&'a XlsxCachedValue>,
     pub(crate) spill: Option<&'a crate::SpillRef>,
     /// A cell an array filled: its text is a value, even when it starts with `=`.

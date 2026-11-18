@@ -12,6 +12,7 @@
 //! are dirty on every pass, and while a circular reference exists every formula is (see
 //! [`RecalcSession::recalculate`]). The sheet set is fixed for the life of a session.
 
+mod apply;
 mod dynamic;
 mod graph;
 mod id_set;
@@ -334,7 +335,12 @@ impl RecalcSession {
                     if session.exceeds_budget() {
                         return Err(RecalcError::OverBudget);
                     }
-                } else {
+                } else if !sheet.is_explicit_text(coord)
+                    && sheet
+                        .cells
+                        .get(&coord)
+                        .is_some_and(|raw| crate::parser::strip_formula_prefix(raw).is_some())
+                {
                     // `=5`, `=TRUE`, a parse error: no vertex, but the first pass reports them.
                     session.edited.push((idx as u16, coord));
                 }
@@ -403,76 +409,7 @@ impl RecalcSession {
         (self.graph.vertex_count(), self.graph.range_count())
     }
 
-    /// Stages one edit; it takes effect at the next [`recalculate`](Self::recalculate).
-    pub fn set_cell(
-        &mut self,
-        sheet: &str,
-        coord: PackedCellCoordinate,
-        raw: &str,
-    ) -> Result<(), RecalcError> {
-        if self.over_budget {
-            return Err(RecalcError::OverBudget);
-        }
-        let idx = self.sheet_index(sheet)?;
-        self.stage(idx, coord, raw)
-    }
-
-    /// Stages a batch of edits. A large batch rebuilds the cell indexes once instead of patching
-    /// them per edit.
-    pub fn apply(&mut self, changes: &[CellChange]) -> Result<(), RecalcError> {
-        if self.over_budget {
-            return Err(RecalcError::OverBudget);
-        }
-        let mut resolved = Vec::with_capacity(changes.len());
-        for change in changes {
-            resolved.push(self.sheet_index(&change.sheet)?);
-        }
-        if changes.len() > BULK_CHANGE_THRESHOLD {
-            for &idx in &resolved {
-                self.wb.sheets_mut()[usize::from(idx)].drop_indexes();
-            }
-        }
-        if changes.len() >= 8 {
-            let mut batch_pairs: Vec<(Ref, u32)> = Vec::new();
-            let mut leaving: Vec<(u32, u16, PackedCellCoordinate, usize)> = Vec::new();
-            let mut seen_vertices = DetSet::default();
-            for (change, &sheet) in changes.iter().zip(&resolved) {
-                let engine = &self.wb.sheets()[usize::from(sheet)];
-                let old_raw = engine.cells.get(&change.coord).map_or("", String::as_str);
-                if old_raw == change.raw {
-                    continue;
-                }
-                if let Some(vertex) = self.graph.vertex_at(sheet, change.coord) {
-                    if seen_vertices.insert(vertex) {
-                        if let Some(Ok(ast)) = engine.compiled_asts.get(&change.coord) {
-                            collect_refs(&self.wb, sheet, ast, &mut self.refs);
-                            batch_pairs.extend(self.refs.iter().map(|&r| (r, vertex)));
-                        }
-                        leaving.push((vertex, sheet, change.coord, old_raw.len()));
-                    }
-                }
-            }
-            if !leaving.is_empty() {
-                if !batch_pairs.is_empty() {
-                    self.graph.unregister_batch(&mut batch_pairs);
-                }
-                for (vertex, sheet, coord, old_len) in leaving {
-                    self.formula_bytes -= old_len;
-                    Self::release_vertex(&mut self.graph, &mut self.dynamic, vertex);
-                    self.dirty.remove(vertex);
-                    self.cyclic.remove(vertex);
-                    let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
-                    self.memo.remove_at(sid, coord);
-                }
-            }
-        }
-        for (change, idx) in changes.iter().zip(resolved) {
-            self.stage(idx, change.coord, &change.raw)?;
-        }
-        Ok(())
-    }
-
-    fn sheet_index(&self, name: &str) -> Result<u16, EasyOfficeError> {
+    pub(in crate::recalc) fn sheet_index(&self, name: &str) -> Result<u16, EasyOfficeError> {
         self.wb
             .find_sheet_index(name)
             .map(|idx| idx as u16)
@@ -483,67 +420,13 @@ impl RecalcSession {
 
     /// Takes a formula cell out of the graph, with what it read through `OFFSET` and `INDIRECT`: its id may be
     /// reused, so nothing may stay behind under it. Every path that removes a vertex goes through here.
-    fn release_vertex(graph: &mut DepGraph, dynamic: &mut dynamic::DynamicReads, vertex: u32) {
+    pub(in crate::recalc) fn release_vertex(
+        graph: &mut DepGraph,
+        dynamic: &mut dynamic::DynamicReads,
+        vertex: u32,
+    ) {
         graph.remove_vertex(vertex);
         dynamic.forget(vertex);
-    }
-
-    fn stage(
-        &mut self,
-        sheet: u16,
-        coord: PackedCellCoordinate,
-        raw: &str,
-    ) -> Result<(), RecalcError> {
-        let engine = &self.wb.sheets()[usize::from(sheet)];
-        let old_raw = engine.cells.get(&coord).map_or("", String::as_str);
-        if old_raw == raw {
-            return Ok(());
-        }
-        self.raw_bytes = self.raw_bytes - old_raw.len() + raw.len();
-        if let Some(vertex) = self.graph.vertex_at(sheet, coord) {
-            if let Some(Ok(ast)) = engine.compiled_asts.get(&coord) {
-                collect_refs(&self.wb, sheet, ast, &mut self.refs);
-                self.graph.unregister(vertex, &self.refs);
-            }
-            self.formula_bytes -= old_raw.len();
-            Self::release_vertex(&mut self.graph, &mut self.dynamic, vertex);
-            self.dirty.remove(vertex);
-            self.cyclic.remove(vertex);
-            self.memo.remove_at(engine.resolved_sheet_id(), coord);
-        }
-        if self.wb.sheets()[usize::from(sheet)]
-            .spill
-            .area_entry(coord)
-            .is_some()
-        {
-            // The formula that filled an area is replaced: the area goes with it.
-            crate::spill::release_anchor(
-                &mut self.wb.sheets_mut()[usize::from(sheet)],
-                sheet,
-                &mut self.memo,
-                coord,
-                &mut self.released,
-            );
-        }
-        self.wb.sheets_mut()[usize::from(sheet)].set_cell_coord(coord, raw);
-        self.name_bytes = self.wb.name_bytes();
-        let engine = &self.wb.sheets()[usize::from(sheet)];
-        if let Some(entry) = engine.compiled_asts.get(&coord) {
-            if let (true, Ok(ast)) = (is_formula(Some(entry)), entry) {
-                let vertex = self.graph.add_vertex(sheet, coord);
-                let volatile = collect_refs(&self.wb, sheet, ast, &mut self.refs);
-                self.graph.register(vertex, &self.refs);
-                self.graph.set_volatile(vertex, volatile);
-                self.dirty.insert(vertex);
-                self.formula_bytes += raw.len();
-            }
-        }
-        self.edited.push((sheet, coord));
-        if self.exceeds_budget() {
-            self.over_budget = true;
-            return Err(RecalcError::OverBudget);
-        }
-        Ok(())
     }
 
     /// Recomputes every formula that depends on a staged edit (and every volatile formula) and
@@ -729,10 +612,11 @@ impl RecalcSession {
         ctx.rng_state = self.rng_state;
         for &(sheet, coord) in &edited_all {
             let engine = &sheets[usize::from(sheet)];
-            let is_formula_text = engine
-                .cells
-                .get(&coord)
-                .is_some_and(|raw| crate::parser::strip_formula_prefix(raw.trim()).is_some());
+            let is_formula_text = !engine.is_explicit_text(coord)
+                && engine
+                    .cells
+                    .get(&coord)
+                    .is_some_and(|raw| crate::parser::strip_formula_prefix(raw.trim()).is_some());
             if is_formula_text && self.graph.vertex_at(sheet, coord).is_none() {
                 ctx.reset_steps();
                 changed.push(ChangedCell {

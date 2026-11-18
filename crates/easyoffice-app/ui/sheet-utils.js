@@ -5,19 +5,7 @@
   const MAX_COLS = 16384;
   const UNICODE_ALNUM_RE = /^[\p{L}\p{N}]$/u;
   const UNICODE_ALPHA_RE = /^\p{L}$/u;
-  const SAFE_SERIALIZED_ATTRS = [
-    "id",
-    "class",
-    "contenteditable",
-    "href",
-    "target",
-    "rel",
-    "colspan",
-    "rowspan",
-    "title",
-    "role",
-    "aria-label",
-  ];
+  const SAFE_SERIALIZED_ATTRS = ["id", "class", "contenteditable", "href", "target", "rel", "colspan", "rowspan", "title", "role", "aria-label"];
 
   function asciiUpperJs(str) {
     const s = String(str ?? "");
@@ -893,6 +881,95 @@
     }
     return { count, sum, min, max, avg: sum / count };
   }
+
+  const CELL_TYPE_TAGS = new Set(["n", "s", "b", "e", "f"]);
+  const CELL_ERROR_LITERALS = new Set([
+    "#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!",
+    "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA", "#ERROR!",
+  ]);
+  const STRICT_CELL_NUM_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+  function isStrictCellNumber(raw) {
+    if (!raw || !STRICT_CELL_NUM_RE.test(raw)) return false;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return false;
+    const unsigned = raw.charCodeAt(0) === 45 ? raw.slice(1) : raw;
+    if (unsigned.charCodeAt(0) === 48 && unsigned.length > 1 && unsigned.charCodeAt(1) >= 48 && unsigned.charCodeAt(1) <= 57) {
+      return false;
+    }
+    const mantissa = unsigned.split(/[eE]/)[0];
+    const sig = mantissa.replace(".", "").replace(/^0+/, "").length;
+    return sig <= 15 || (sig <= 17 && mantissa.includes(".") && String(n) === raw);
+  }
+
+  function inferCellTypeTag(raw) {
+    const s = String(raw ?? "");
+    if (!s) return "s";
+    const c0 = s.charCodeAt(0);
+    if (c0 === 61) return "f";
+    if (c0 === 35) return CELL_ERROR_LITERALS.has(s) ? "e" : "s";
+    if (c0 === 84 || c0 === 70) return s === "TRUE" || s === "FALSE" ? "b" : "s";
+    if ((c0 >= 48 && c0 <= 57) || c0 === 45 || c0 === 46) return isStrictCellNumber(s) ? "n" : "s";
+    return "s";
+  }
+
+  function needsTextPin(raw) {
+    if (!raw) return false;
+    return (
+      inferCellTypeTag(raw) !== "s" ||
+      raw.startsWith("'") ||
+      normalizeFormattedNumericCell(raw) !== raw.trim() ||
+      /^(?:true|false)$/i.test(raw.trim())
+    );
+  }
+
+  function explicitCellTypeTag(raw, tag) {
+    const s = String(raw ?? "");
+    if (!s || !CELL_TYPE_TAGS.has(tag)) return undefined;
+    if (tag === "s") return needsTextPin(s) ? "s" : undefined;
+    return tag !== inferCellTypeTag(s) ? tag : undefined;
+  }
+
+  function wireCellTypeTag(raw, tag) {
+    const s = String(raw ?? "");
+    if (!s || !CELL_TYPE_TAGS.has(tag)) return undefined;
+    return tag !== inferCellTypeTag(s) ? tag : undefined;
+  }
+
+  function editableCellRaw(value, formula, tag, numFmt) {
+    if (formula) return formula;
+    const val = String(value ?? "");
+    if (!val) return "";
+    if (tag === "s" && numFmt !== "@" && needsTextPin(val)) return "'" + val;
+    if (val.startsWith("'")) return "'" + val;
+    return val;
+  }
+
+  function parseTypedCellInput(rawInput, numFmt) {
+    const raw = String(rawInput ?? "");
+    if (raw.startsWith("'")) {
+      const value = raw.slice(1);
+      const t = explicitCellTypeTag(value, "s");
+      return { value, formula: "", t, editable: editableCellRaw(value, "", t, numFmt) };
+    }
+    if (numFmt === "@") {
+      const t = explicitCellTypeTag(raw, "s");
+      return { value: raw, formula: "", t, editable: raw };
+    }
+    if (isFormulaStringJs(raw)) {
+      return { value: "", formula: raw, t: undefined, editable: raw };
+    }
+    return { value: raw, formula: "", t: undefined, editable: raw };
+  }
+
+  host.__EASYOFFICE_SHEET_CELL_TYPE__ = {
+    inferTag: inferCellTypeTag,
+    explicitTag: explicitCellTypeTag,
+    wireTag: wireCellTypeTag,
+    editableRaw: editableCellRaw,
+    parseTypedInput: parseTypedCellInput,
+    isTextEntry: (entry) => entry?.t === "s" || entry?.style?.numFmt === "@",
+  };
 
   host.__EASYOFFICE_SHEET_UTILS__ = {
     asciiUpperJs,

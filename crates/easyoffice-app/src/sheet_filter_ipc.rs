@@ -29,7 +29,7 @@ use easyoffice_sheet::filter::{
     value_list, CellAux, ColumnText, DateTree, RowBits, FIRST_DAY_SERIAL, LAST_DAY_SERIAL,
     NO_COLOR,
 };
-use easyoffice_sheet::{code_shows_date, compile_for_page, format_cell_value};
+use easyoffice_sheet::{code_shows_date, compile_for_page, format_typed_cell_value};
 use std::fmt::Write;
 
 type Entries = [(String, StrictJsonValue)];
@@ -417,7 +417,8 @@ fn open_columns(
             continue;
         };
         let offset = (*row - range.row0 - 1) as usize;
-        if raw.starts_with('=') {
+        let kind = styling.cell_kind(*row, *col, raw);
+        if kind == easyoffice_formats::CellValueKind::Formula {
             unread.set(offset);
             continue;
         }
@@ -427,16 +428,18 @@ fn open_columns(
             .and_then(|style| resolve_code(style.num_fmt, &styling.num_fmts))
             .filter(|_| raw.len() <= MAX_FORMATTED_BYTES);
         let column = &mut data[at];
-        if let Some(aux) = column.aux.as_mut() {
-            if let Some(n) = number_of(raw) {
-                aux.numbers[offset] = n;
-                if code.is_some_and(|c| code_shows_date(c, n)) {
-                    aux.dates.set(offset);
+        if kind == easyoffice_formats::CellValueKind::Number {
+            if let Some(aux) = column.aux.as_mut() {
+                if let Some(n) = number_of(raw) {
+                    aux.numbers[offset] = n;
+                    if code.is_some_and(|c| code_shows_date(c, n)) {
+                        aux.dates.set(offset);
+                    }
                 }
             }
         }
         if reads_shown_text(&columns[at].criteria) {
-            let shown = code.and_then(|code| format_cell_value(code, raw));
+            let shown = code.and_then(|code| format_typed_cell_value(code, raw, kind));
             column.texts[offset] = shown.map_or_else(|| raw.clone(), |s| s.text);
         }
     }

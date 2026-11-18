@@ -586,36 +586,51 @@ impl<'s> SheetScanner<'s> {
         Ok(Some(with_equals(&crate::from_file_formula(&shifted))))
     }
 
-    /// The text a finished cell contributes, charged to the decoded budget; `None` when the cell
-    /// has no content.
-    fn cell_text(&mut self, cell: CellState<'_>) -> Result<Option<String>, EasyOfficeError> {
+    /// The text and explicit value kind a finished cell contributes, charged to the decoded budget;
+    /// `None` when the cell has no content.
+    fn cell_text(
+        &mut self,
+        cell: CellState<'_>,
+    ) -> Result<Option<(String, crate::CellValueKind)>, EasyOfficeError> {
         if let Some(formula) = self.formula_text(&cell)? {
-            return Ok(Some(formula));
+            return Ok(Some((formula, crate::CellValueKind::Formula)));
         }
         if cell.cell_type == "inlineStr" || (cell.cell_type.is_empty() && cell.has_inline) {
             let text = decode_xlsx_escapes(cell.inline);
             self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
-            return Ok(Some(text));
+            return Ok(Some((text, crate::CellValueKind::Text)));
         }
         let Some(raw) = cell.value else {
             return Ok(None);
         };
-        let text = match &*cell.cell_type {
+        let (text, kind) = match &*cell.cell_type {
             "s" => {
                 let shared = self.shared_string(&raw)?;
                 self.budget.charge_cell(shared.len(), CELL_BUDGET_WHAT)?;
-                return Ok(Some(shared.to_string()));
+                return Ok(Some((shared.to_string(), crate::CellValueKind::Text)));
             }
+            "str" => (decode_xlsx_escapes(raw), crate::CellValueKind::Text),
             "b" => match raw.trim() {
-                "1" | "true" | "TRUE" => "TRUE".to_string(),
-                "0" | "false" | "FALSE" => "FALSE".to_string(),
-                _ => raw.into_owned(),
+                "1" | "true" | "TRUE" => ("TRUE".to_string(), crate::CellValueKind::Boolean),
+                "0" | "false" | "FALSE" => ("FALSE".to_string(), crate::CellValueKind::Boolean),
+                _ => (raw.into_owned(), crate::CellValueKind::Boolean),
             },
-            "d" => raw.trim().to_string(),
-            _ => decode_xlsx_escapes(raw),
+            "e" => (decode_xlsx_escapes(raw), crate::CellValueKind::Error),
+            "d" => (raw.trim().to_string(), crate::CellValueKind::Text),
+            _ => {
+                let decoded = decode_xlsx_escapes(raw);
+                let k = if crate::cell_numbers::numeric_cell_value(&decoded).is_some()
+                    || decoded.trim().parse::<f64>().is_ok_and(f64::is_finite)
+                {
+                    crate::CellValueKind::Number
+                } else {
+                    crate::CellValueKind::infer(&decoded)
+                };
+                (decoded, k)
+            }
         };
         self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
-        Ok(Some(text))
+        Ok(Some((text, kind)))
     }
 
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
@@ -623,7 +638,10 @@ impl<'s> SheetScanner<'s> {
         if let Some(reference) = cell.formula.as_ref().and_then(|f| f.array_ref.as_deref()) {
             self.record_spill(row, col, reference)?;
         }
-        if let Some(text) = self.cell_text(cell)? {
+        if let Some((text, kind)) = self.cell_text(cell)? {
+            if self.want_styling {
+                self.styling.set_cell_kind(row, col, &text, kind);
+            }
             self.cells.push((row, col, text));
         }
         Ok(())
@@ -642,7 +660,13 @@ impl<'s> SheetScanner<'s> {
         let spills = &self.styling.spills;
         self.cells.retain(|(row, col, _)| {
             let before = spills.partition_point(|r| r.row <= *row);
-            !crate::is_covered_by_spills(&spills[..before], *row, *col)
+            let keep = !crate::is_covered_by_spills(&spills[..before], *row, *col);
+            if !keep {
+                self.styling
+                    .cell_types
+                    .remove(&crate::pack_cell_pos(*row, *col));
+            }
+            keep
         });
     }
 

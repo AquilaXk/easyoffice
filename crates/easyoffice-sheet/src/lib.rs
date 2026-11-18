@@ -9,6 +9,7 @@ mod array_eval;
 pub mod axis;
 mod byte_width;
 mod cell_display;
+mod cell_kind;
 pub mod coercion;
 mod compile;
 mod criteria;
@@ -87,8 +88,10 @@ pub use axis::{
     AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use cell_display::{
-    compile_for_page, format_for_page, general_display, CellText, CompiledNumFmt,
+    compile_for_page, format_for_page, format_for_page_typed, general_display, CellText,
+    CompiledNumFmt,
 };
+pub use cell_kind::{CellValueKind, TypedCellChange};
 pub use coercion::*;
 pub(crate) use dag::expr_contains_subtotal;
 pub use deadline::MAX_EVAL_TIME;
@@ -133,6 +136,7 @@ pub struct SheetEngine {
     pub(crate) sheet_id: u16,
     pub(crate) has_workbook_assigned_id: bool,
     pub(crate) cells: CellMap<String>,
+    pub(crate) explicit_kinds: CellMap<easyoffice_formats::CellValueKind>,
     pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
     pub(crate) subtotal_coords: HashSet<PackedCellCoordinate>,
     /// Formulas the array evaluator calculates (see `array_class::needs_array`).
@@ -188,6 +192,7 @@ impl SheetEngine {
             sheet_id,
             has_workbook_assigned_id: false,
             cells: CellMap::default(),
+            explicit_kinds: CellMap::default(),
             compiled_asts: CellMap::default(),
             subtotal_coords: HashSet::new(),
             array_formulas: HashSet::new(),
@@ -292,13 +297,7 @@ impl SheetEngine {
     }
 
     pub fn set_cell_coord(&mut self, coord: PackedCellCoordinate, raw_value: impl Into<String>) {
-        self.invalidate_plan();
-        let was_populated = self.cells.contains_key(&coord);
-        let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
-        self.store_cell(coord, raw_value.into());
-        // Indexes that exist are patched instead of rebuilt: an edit that does not add or remove a
-        // populated / formula cell leaves them untouched.
-        self.patch_indexes(coord, was_populated, was_formula);
+        self.set_cell_typed_coord(coord, raw_value, None);
     }
 
     fn patch_indexes(
@@ -353,9 +352,10 @@ impl SheetEngine {
         }
     }
 
-    fn store_cell(&mut self, coord: PackedCellCoordinate, val: String) {
+    pub(crate) fn store_cell_preserving_kind(&mut self, coord: PackedCellCoordinate, val: String) {
         if val.is_empty() {
             self.cells.remove(&coord);
+            self.explicit_kinds.remove(&coord);
             self.compiled_asts.remove(&coord);
             self.subtotal_coords.remove(&coord);
             self.array_formulas.remove(&coord);
@@ -388,6 +388,7 @@ impl SheetEngine {
         let was_populated = self.cells.contains_key(&coord);
         let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
         let comp = Ok(Expr::Number(num));
+        self.explicit_kinds.remove(&coord);
         self.set_name_uses(coord, None);
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
@@ -606,7 +607,9 @@ impl SheetEngine {
             return CellEval::Owned(match self.cells.get(&coord) {
                 None => EvaluatedCellValue::Empty,
                 Some(raw) => {
-                    if crate::parser::strip_formula_prefix(raw).is_some_and(|s| s.trim().is_empty())
+                    if !self.is_explicit_text(coord)
+                        && crate::parser::strip_formula_prefix(raw)
+                            .is_some_and(|s| s.trim().is_empty())
                     {
                         EvaluatedCellValue::Empty
                     } else if raw.len() > Self::MAX_CELL_TEXT_CHARS

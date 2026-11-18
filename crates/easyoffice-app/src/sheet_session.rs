@@ -20,9 +20,11 @@ use easyoffice_formats::{
     sheet_name_problem, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules, StrictJsonValue,
     MAX_SHEET_NAME_UNITS,
 };
+#[cfg(test)]
+use easyoffice_sheet::CellChange;
 use easyoffice_sheet::{
-    AxisBudget, AxisEdit, Budget, CellChange, Footprint, PackedCellCoordinate, RecalcError,
-    RecalcSession, SheetLock, Verdict, WorkbookEngine, MAX_EVAL_TIME,
+    AxisBudget, AxisEdit, Budget, Footprint, PackedCellCoordinate, RecalcError, RecalcSession,
+    SheetLock, TypedCellChange, Verdict, WorkbookEngine, MAX_EVAL_TIME,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -318,11 +320,32 @@ impl Registry {
 
     /// Stages `changes` and, when `recalc`, recomputes. A session another owner opened does not
     /// exist for `owner`.
+    #[cfg(test)]
     pub(crate) fn apply(
         &self,
         id: &str,
         owner: &str,
         changes: &[CellChange],
+        recalc: bool,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let typed: Vec<TypedCellChange> = changes
+            .iter()
+            .map(|c| TypedCellChange {
+                sheet: c.sheet.clone(),
+                coord: c.coord,
+                raw: c.raw.clone(),
+                kind: None,
+            })
+            .collect();
+        self.apply_typed(id, owner, &typed, recalc, now)
+    }
+
+    pub(crate) fn apply_typed(
+        &self,
+        id: &str,
+        owner: &str,
+        changes: &[TypedCellChange],
         recalc: bool,
         now: Instant,
     ) -> Result<Applied, EasyOfficeError> {
@@ -363,7 +386,7 @@ impl Registry {
             lock(&self.inner).sessions.remove(id);
             return Ok(Applied::Refused);
         }
-        match session.apply(changes) {
+        match session.apply_typed(changes) {
             Ok(()) => {}
             Err(RecalcError::Invalid(err)) => return Err(err),
             Err(RecalcError::OverBudget) => {
@@ -755,7 +778,7 @@ pub(crate) fn session_id(entries: &[(String, StrictJsonValue)]) -> Result<&str, 
 
 fn parse_changes(
     entries: &[(String, StrictJsonValue)],
-) -> Result<Vec<CellChange>, EasyOfficeError> {
+) -> Result<Vec<TypedCellChange>, EasyOfficeError> {
     let Some(items) = StrictJsonValue::get_field(entries, "changes") else {
         return Ok(Vec::new());
     };
@@ -772,6 +795,7 @@ fn parse_changes(
             })?;
             let sheet = EasyOfficeIpcRouter::optional_json_str(fields, "sheet")?.unwrap_or("");
             let cell = EasyOfficeIpcRouter::optional_json_str(fields, "cell")?.unwrap_or("");
+            let kind = parse_cell_kind_tag(EasyOfficeIpcRouter::optional_json_str(fields, "t")?)?;
             let raw = match StrictJsonValue::get_field(fields, "value") {
                 None => String::new(),
                 Some(v) => v.to_scalar_string().ok_or_else(|| {
@@ -780,10 +804,11 @@ fn parse_changes(
                     )
                 })?,
             };
-            Ok(CellChange {
+            Ok(TypedCellChange {
                 sheet: sheet.to_string(),
                 coord: PackedCellCoordinate::parse_a1(cell.trim())?,
                 raw,
+                kind,
             })
         })
         .collect()
@@ -872,7 +897,7 @@ impl EasyOfficeIpcRouter {
             StrictJsonValue::get_field(entries, "recalc"),
             Some(StrictJsonValue::Bool(false))
         );
-        match registry().apply(id, owner, &changes, recalc, Instant::now()) {
+        match registry().apply_typed(id, owner, &changes, recalc, Instant::now()) {
             Ok(applied) => Ok(applied_json(applied)),
             Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED.to_string()),
             Err(err) => Err(err),

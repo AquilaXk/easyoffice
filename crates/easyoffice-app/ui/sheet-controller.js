@@ -9,30 +9,15 @@
     return Boolean(entry && (entry.value || entry.formula));
   }
 
+  const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
+
   function createSheetController(deps) {
     const {
-      document,
-      sheetDataStore,
-      sheetRowCounts,
-      sheetStoreHelpers,
-      getActiveModule,
-      getActiveSheetName,
-      setActiveSheetName,
-      getActiveSheetCellRef,
-      setActiveSheetCellRef,
-      enqueueWorkspaceHistoryOp,
-      restoreWorkspaceSnapshot,
-      sheetHistory,
-      onSheetSwitchedOutline,
+      document, sheetDataStore, sheetRowCounts, sheetStoreHelpers, getActiveModule,
+      getActiveSheetName, setActiveSheetName, getActiveSheetCellRef, setActiveSheetCellRef,
+      enqueueWorkspaceHistoryOp, restoreWorkspaceSnapshot, sheetHistory, onSheetSwitchedOutline,
     } = deps;
-
-    const {
-      isFormulaStr,
-      extractEvaluatedTargetValue,
-      computeEvaluatedSheetStore,
-      evaluateLiveFormulaTargets,
-      followCalculation,
-    } = sheetStoreHelpers;
+    const { isFormulaStr, extractEvaluatedTargetValue, computeEvaluatedSheetStore, evaluateLiveFormulaTargets, followCalculation } = sheetStoreHelpers;
 
     const sheetCellFocusState = new WeakMap();
     let latestSheetRecalcSeq = 0;
@@ -197,18 +182,17 @@
         prevEntry.value !== "" &&
         !isFormulaStr(prevEntry.value);
       const value = keepComputedValue ? prevEntry.value : textVal;
-      const fontWeight = td.style.fontWeight || "";
-      const fontStyle = td.style.fontStyle || "";
-      const textDecoration = td.style.textDecoration || "";
-      const fontSize = td.style.fontSize || "";
-      const numFmt = td._nf || "";
-      const look = td._st;
+      const fontWeight = td.style.fontWeight || "", fontStyle = td.style.fontStyle || "";
+      const textDecoration = td.style.textDecoration || "", fontSize = td.style.fontSize || "";
+      const numFmt = td._nf || "", look = td._st;
       const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt || lookApi?.hasLook(look));
       if (value === "" && formula === "" && !hasStyle && !prevEntry?.link) {
         delete map[ref];
         return;
       }
       const cellEntry = { value, formula };
+      const ct = !formula && td._ct ? cellTypeApi.explicitTag(value, td._ct) : undefined;
+      if (ct) cellEntry.t = ct;
       if (hasStyle) {
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
         if (numFmt) cellEntry.style.numFmt = numFmt;
@@ -303,7 +287,9 @@
       const initialText = grid.readTdValue(td);
       const entry = {
         initialText,
-        initialRaw: td.dataset.formula || initialText,
+        initialCt: td._ct || "",
+        initialRaw: cellTypeApi.editableRaw(initialText, td.dataset.formula || "", td._ct, td._nf),
+        editBaseline: null,
         ref: td.dataset.cell,
         pendingSnapshot: null,
         snapshotPushed: false,
@@ -319,11 +305,15 @@
       if (!st) return;
       const text = grid.readTdValue(td);
       st.initialText = text;
-      st.initialRaw = td.dataset.formula || text;
+      st.initialCt = td._ct || "";
+      st.initialRaw = cellTypeApi.editableRaw(text, td.dataset.formula || "", td._ct, td._nf);
+      st.editBaseline = null;
       if (clearPending) {
         st.pendingSnapshot = null;
         st.snapshotPushed = false;
         st.userEdited = false;
+        st.mode = null;
+        st.restore = null;
         st.sheetName = getActiveSheetName();
       }
     }
@@ -516,34 +506,24 @@
       const targetCellRef = getActiveSheetCellRef();
       sheetDataStore[targetSheet] = snapshotDomSheetCells();
       const candidateSheets = gridUtils.cloneSheetStore(sheetDataStore);
-      if (!candidateSheets[targetSheet]) {
-        candidateSheets[targetSheet] = {};
-      }
+      if (!candidateSheets[targetSheet]) candidateSheets[targetSheet] = {};
       const prevCell = candidateSheets[targetSheet][targetCellRef];
+      const prevRaw = cellTypeApi.editableRaw(prevCell?.value || "", prevCell?.formula || "", prevCell?.t, prevCell?.style?.numFmt).trim();
       let rawFormula = input.value.trim();
-      if (options.autoSum) {
-        const cellBaseline = (prevCell?.formula || prevCell?.value || "").trim();
-        if (rawFormula === cellBaseline && !isFormulaStr(rawFormula)) {
-          rawFormula = inferAutoSumFormulaForCell(targetCellRef, candidateSheets[targetSheet]);
-          input.value = rawFormula;
-        }
+      if (options.autoSum && rawFormula === prevRaw && !isFormulaStr(rawFormula) && !rawFormula.startsWith("'")) {
+        rawFormula = inferAutoSumFormulaForCell(targetCellRef, candidateSheets[targetSheet]);
+        input.value = rawFormula;
       }
-      const isFormula = isFormulaStr(rawFormula);
-      const nextCell = {
-        value: isFormula ? "" : rawFormula,
-        formula: isFormula ? rawFormula : "",
-      };
-      if (prevCell?.style) {
-        nextCell.style = prevCell.style;
-      }
+      const parsed = cellTypeApi.parseTypedInput(rawFormula, prevCell?.style?.numFmt);
+      const nextCell = { value: parsed.value, formula: parsed.formula };
+      if (parsed.t) nextCell.t = parsed.t;
+      if (prevCell?.style) nextCell.style = prevCell.style;
+      if (prevCell?.link) nextCell.link = prevCell.link;
       candidateSheets[targetSheet][targetCellRef] = nextCell;
       const evaluated = await trackSheetAsyncWork(
-        computeEvaluatedSheetStore(candidateSheets, targetSheet, {
-          sheet: targetSheet,
-          cell: targetCellRef,
-        })
+        computeEvaluatedSheetStore(candidateSheets, targetSheet, { sheet: targetSheet, cell: targetCellRef })
       );
-      const textChanged = rawFormula !== (prevCell?.formula || prevCell?.value || "").trim();
+      const textChanged = parsed.editable.trim() !== prevRaw;
       return { epoch, targetSheet, targetCellRef, evaluated, textChanged };
     }
 
@@ -599,8 +579,9 @@
     function captureCellBeforeEdit(td, st) {
       const ref = td.dataset.cell;
       const prev = sheetDataStore[st.sheetName]?.[ref];
-      const formula = isFormulaStr(st.initialRaw) ? st.initialRaw : "";
+      const formula = !st.initialCt && isFormulaStr(st.initialRaw) ? st.initialRaw : "";
       const entry = prev || st.initialText !== "" || formula !== "" ? { ...prev, value: st.initialText, formula } : undefined;
+      if (entry && !st.initialCt) delete entry.t;
       return sheetHistory.begin({ sheet: st.sheetName, refs: [ref], before: { [ref]: entry }, sync: false });
     }
 
@@ -665,6 +646,7 @@
         gate.then((accepted) => {
           if (!accepted) {
             st.userEdited = false;
+            td._ct = st.initialCt || "";
             grid.setDisplayValue(td, st.initialText);
           }
           return commitSheetCellEditNow(td, keepFocus);
@@ -678,25 +660,28 @@
         if (!keepFocus) sheetCellFocusState.delete(td);
         return Promise.resolve(false);
       }
-      const editSheet = st.sheetName;
-      const rawText = grid.readTdValue(td);
-      const textChanged = Boolean(st.userEdited) || rawText !== st.initialText;
-      const wasEditing = Boolean(st.mode) || textChanged;
+      const editSheet = st.sheetName, rawDom = grid.readTdValue(td), editBaseline = st.editBaseline;
+      const edited = Boolean(st.userEdited) || (editBaseline !== null ? rawDom !== editBaseline : rawDom !== st.initialText);
+      const wasEditing = Boolean(st.mode) || edited;
       input.endEdit(td);
-      if (textChanged) {
-        if (isFormulaStr(rawText)) td.dataset.formula = rawText;
+      let nextValue = st.initialText;
+      if (edited) {
+        const parsed = cellTypeApi.parseTypedInput(rawDom, td._nf);
+        nextValue = parsed.value;
+        td._ct = parsed.t || "";
+        if (parsed.formula) td.dataset.formula = parsed.formula;
         else delete td.dataset.formula;
+        pushCellUndoSnapshotIfNeeded(td, st, parsed.editable);
       }
-      pushCellUndoSnapshotIfNeeded(td, st, td.dataset.formula || rawText);
-      const shouldRecalc = st.snapshotPushed || textChanged;
+      const shouldRecalc = st.snapshotPushed || edited;
       releaseCellFocus(td, keepFocus);
       if (!shouldRecalc) {
-        settleUnchangedCell(td, { editSheet, rawText, keepFocus, wasEditing });
+        settleUnchangedCell(td, { editSheet, rawText: editBaseline !== null ? st.initialText : rawDom, keepFocus, wasEditing });
         return Promise.resolve(false);
       }
+      if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, nextValue);
       sheetDataStore[editSheet] = snapshotDomSheetCells();
-      if (textChanged) structure.autoLink(editSheet, td.dataset.cell, true);
-      if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, rawText);
+      if (edited) structure.autoLink(editSheet, td.dataset.cell, true);
       return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus));
     }
 

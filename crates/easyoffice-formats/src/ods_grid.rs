@@ -11,6 +11,7 @@
 
 use std::borrow::Cow;
 
+use crate::cell_type::CellValueKind;
 use crate::decode_budget::DecodeBudget;
 use crate::odf_hwpx_codecs::{ods_budget_error, OdsMultiUnpacked};
 use crate::sheet_styling::ods_styles::{parse_automatic_styles, with_rules, StyleSink};
@@ -35,6 +36,8 @@ pub(crate) struct OdsCell<'a> {
     pub(crate) explicit_col: Option<u32>,
     /// The cell text by priority (formula, paragraphs, value); only read when text is wanted.
     pub(crate) text: Option<String>,
+    /// Explicit cell value kind declared on `<table:table-cell>` (PD-241).
+    pub(crate) kind: Option<CellValueKind>,
     /// `table:style-name`, as written.
     pub(crate) style: Option<&'a str>,
     /// `table:content-validation-name`, as written.
@@ -101,6 +104,8 @@ fn plain_name(name: &str) -> &str {
 #[derive(Default)]
 struct CellFields<'a> {
     formula: Option<Cow<'a, str>>,
+    value_type: Option<&'a str>,
+    calcext_type: Option<&'a str>,
     boolean: Option<&'a str>,
     value: Option<Cow<'a, str>>,
     string_value: Option<Cow<'a, str>>,
@@ -127,6 +132,7 @@ impl<'a> CellBuilder<'a> {
             explicit_row: None,
             explicit_col: None,
             text: None,
+            kind: None,
             style: None,
             validation: None,
             matrix: (None, None),
@@ -143,6 +149,12 @@ impl<'a> CellBuilder<'a> {
                 ("table:number-matrix-columns-spanned", _) => cell.matrix.1 = value.parse().ok(),
                 ("table:content-validation-name", _) if cell.validation.is_none() => {
                     cell.validation = Some(value);
+                }
+                ("office:value-type" | "value-type", _) => {
+                    fields.value_type.get_or_insert(value);
+                }
+                ("calcext:value-type", _) => {
+                    fields.calcext_type.get_or_insert(value);
                 }
                 ("table:formula", true) => {
                     fields.formula.get_or_insert_with(|| unescape_cow(value));
@@ -267,9 +279,26 @@ impl<'a> CellBuilder<'a> {
 
     fn finish(mut self, want_text: bool) -> OdsCell<'a> {
         if want_text && !self.cell.covered {
+            let kind = self.resolve_kind();
             self.cell.text = self.resolve_text();
+            self.cell.kind = kind;
         }
         self.cell
+    }
+
+    fn resolve_kind(&self) -> Option<CellValueKind> {
+        let f = &self.fields;
+        if f.formula.is_some() {
+            return Some(CellValueKind::Formula);
+        }
+        match f.value_type.map(str::trim) {
+            Some("string") => Some(CellValueKind::Text),
+            Some("boolean") => Some(CellValueKind::Boolean),
+            Some("float" | "currency" | "percentage") => Some(CellValueKind::Number),
+            _ if f.boolean.is_some() => Some(CellValueKind::Boolean),
+            _ if f.calcext_type.map(str::trim) == Some("error") => Some(CellValueKind::Error),
+            _ => None,
+        }
     }
 
     /// Cell text by priority: formula, the raw typed value (boolean, number, date, string value),
@@ -612,6 +641,13 @@ pub(crate) fn read_ods_sheets_with_styling(
     let table_spills = std::mem::take(&mut text.table_spills);
     let mut tables = with_rules(content_xml, style.into_tables(), validation);
     for ((_, styling), spills) in tables.iter_mut().zip(table_spills) {
+        if !spills.is_empty() && !styling.cell_types.is_empty() {
+            styling.cell_types.retain(|&packed, _| {
+                let (row, col) = crate::cell_type::unpack_cell_pos(packed);
+                let before = spills.partition_point(|r| r.row <= row);
+                !crate::is_covered_by_spills(&spills[..before], row, col)
+            });
+        }
         styling.spills = spills;
     }
     Ok((text.into_sheets(), tables))

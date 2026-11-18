@@ -134,6 +134,7 @@
           // A protected sheet copies the value, not the formula, of a cell whose format hides it (PD-216).
           const hidden = e?.formula && host.__EASYOFFICE_SHEET_PROTECT__?.formulaHidden(sheetName(), r, c, e.style);
           const cell = e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: hidden ? "" : e.formula || "", style: e.style } : null;
+          if (cell && !e.formula && e.t) cell.t = e.t;
           if (cell && e.link) cell.link = e.link;
           // A cell an array filled whose formula is copied too comes back with the formula (PD-217): pasting the formula
           // recreates it, pasting values still writes it.

@@ -298,7 +298,12 @@ impl EasyOfficeIpcRouter {
         } else if !default_sheet.trim().is_empty() {
             wb.try_add_sheet(default_sheet)?;
         }
-        let mut cell_triples: Vec<(String, String, String)> = Vec::new();
+        let mut cell_triples: Vec<(
+            String,
+            String,
+            String,
+            Option<easyoffice_formats::CellValueKind>,
+        )> = Vec::new();
         if let Some(cells_val) = StrictJsonValue::get_field(entries, "cells") {
             let cells = cells_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
@@ -321,6 +326,8 @@ impl EasyOfficeIpcRouter {
                         "JSON 'cells' 항목에 비어 있지 않은 'cell' 주소가 필요합니다.".to_string(),
                     ));
                 }
+                let kind =
+                    sheet_session::parse_cell_kind_tag(Self::optional_json_str(c_entries, "t")?)?;
                 let val = match StrictJsonValue::get_field(c_entries, "value") {
                     None => String::new(),
                     Some(v) => v.to_scalar_string().ok_or_else(|| {
@@ -330,12 +337,12 @@ impl EasyOfficeIpcRouter {
                         )
                     })?,
                 };
-                cell_triples.push((sh.to_string(), addr.to_string(), val));
+                cell_triples.push((sh.to_string(), addr.to_string(), val, kind));
             }
         }
         let has_explicit_sheets = explicit_sheets_val.is_some();
         if !has_explicit_sheets {
-            for (sh, _, _) in &cell_triples {
+            for (sh, _, _, _) in &cell_triples {
                 if !sh.trim().is_empty() {
                     wb.try_add_sheet(sh)?;
                 }
@@ -356,9 +363,9 @@ impl EasyOfficeIpcRouter {
                 }
             }
         }
-        for (sh, addr, val) in cell_triples {
+        for (sh, addr, val, kind) in cell_triples {
             if wb.sheet(&sh).is_some() {
-                wb.set_cell(&sh, &addr, val)?;
+                wb.set_cell_typed(&sh, &addr, val, kind)?;
             }
         }
         let names = sheet_names_json::names_field(entries)?;

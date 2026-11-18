@@ -11,8 +11,8 @@
 //! A code over the bounds of `sheet_numfmt` answers `{bad:true}` and its cells stay General.
 
 use crate::EasyOfficeIpcRouter;
-use easyoffice_formats::{code_within_bounds, EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::format_cell_value;
+use easyoffice_formats::{code_within_bounds, CellValueKind, EasyOfficeError, StrictJsonValue};
+use easyoffice_sheet::{format_cell_value, format_typed_cell_value};
 use std::fmt::Write;
 
 /// Codes in one request (the engine keeps 256 compiled formats).
@@ -37,6 +37,7 @@ fn render_item(
     out: &mut String,
     code: &str,
     values: &[StrictJsonValue],
+    text_only: bool,
 ) -> Result<(), EasyOfficeError> {
     if !code_within_bounds(code) {
         out.push_str("{\"bad\":true}");
@@ -53,7 +54,13 @@ fn render_item(
             .as_str()
             .ok_or_else(|| invalid("서식 'values' 항목은 문자열이어야 합니다."))?;
         let shown = (raw.len() <= MAX_VALUE_BYTES)
-            .then(|| format_cell_value(code, raw))
+            .then(|| {
+                if text_only {
+                    format_typed_cell_value(code, raw, CellValueKind::Text)
+                } else {
+                    format_cell_value(code, raw)
+                }
+            })
             .flatten();
         let Some(shown) = shown else {
             out.push_str("null");
@@ -106,6 +113,10 @@ impl EasyOfficeIpcRouter {
                 .as_object()
                 .ok_or_else(|| invalid("서식 항목은 객체여야 합니다."))?;
             let code = Self::optional_json_str(fields, "code")?.unwrap_or("");
+            let text_only = matches!(
+                StrictJsonValue::get_field(fields, "textOnly"),
+                Some(StrictJsonValue::Bool(true))
+            );
             let values = StrictJsonValue::get_field(fields, "values")
                 .and_then(StrictJsonValue::as_array)
                 .ok_or_else(|| invalid("서식 'values' 필드는 배열이어야 합니다."))?;
@@ -118,7 +129,7 @@ impl EasyOfficeIpcRouter {
             if index > 0 {
                 out.push(',');
             }
-            render_item(&mut out, code, values)?;
+            render_item(&mut out, code, values, text_only)?;
         }
         out.push_str("]}");
         Ok(out)

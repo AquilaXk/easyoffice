@@ -3,10 +3,10 @@
 //! formats get the displayed grids, and PDF goes through the shell's writer when it offers one.
 
 use easyoffice_formats::{
-    pages_write_loss, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload,
-    OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument, RichParagraph,
-    RichRun, SheetShown, SheetStyling, SpillRef, UniversalDocumentModel, UniversalFormatConverter,
-    XlsxCachedValue, XlsxFormulaCache,
+    pages_write_loss, CellValueKind, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec,
+    LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument,
+    RichParagraph, RichRun, SheetShown, SheetStyling, SpillRef, UniversalDocumentModel,
+    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
@@ -26,6 +26,23 @@ const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
 type ValueGrid = Vec<Vec<String>>;
 /// Displayed cells of one sheet as `(row, col, text)`.
 type DisplayCells = Vec<(u32, u32, String)>;
+
+fn evaluated_kind(v: &EvaluatedCellValue) -> CellValueKind {
+    match v {
+        EvaluatedCellValue::Number(_) => CellValueKind::Number,
+        EvaluatedCellValue::Boolean(_) => CellValueKind::Boolean,
+        EvaluatedCellValue::Error(_) => CellValueKind::Error,
+        EvaluatedCellValue::Text(_) | EvaluatedCellValue::Empty => CellValueKind::Text,
+    }
+}
+
+#[inline]
+fn cell_is_formula(styling: Option<&SheetStyling>, row: u32, col: u32, raw: &str) -> bool {
+    styling.map_or_else(
+        || CellValueKind::infer(raw),
+        |st| st.cell_kind(row, col, raw),
+    ) == CellValueKind::Formula
+}
 
 fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
     match v {
@@ -93,7 +110,8 @@ fn workbook_engine(
         let sheet = wb
             .sheet_mut(name.as_str())
             .expect("sheet was just added by try_add_sheet");
-        if let Some(styling) = stylings.get(index) {
+        let sheet_styling = stylings.get(index);
+        if let Some(styling) = sheet_styling {
             sheet.set_spill_merges(styling.merges.clone());
         }
         if let Some(filter) = SpillRefCoverFilter::new(spills) {
@@ -102,13 +120,15 @@ fn workbook_engine(
                     continue;
                 }
                 if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                    sheet.set_cell_coord(coord, raw.clone());
+                    let kind = sheet_styling.and_then(|st| st.explicit_cell_kind(*row, *col, raw));
+                    sheet.set_cell_typed_coord(coord, raw.clone(), kind);
                 }
             }
         } else {
             for (row, col, raw) in cells {
                 if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                    sheet.set_cell_coord(coord, raw.clone());
+                    let kind = sheet_styling.and_then(|st| st.explicit_cell_kind(*row, *col, raw));
+                    sheet.set_cell_typed_coord(coord, raw.clone(), kind);
                 }
             }
         }
@@ -122,12 +142,13 @@ fn workbook_engine(
 fn computed_sheets(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
-) -> Result<(Vec<OdsUnpacked>, usize), EasyOfficeError> {
+) -> Result<(Vec<OdsUnpacked>, Vec<SheetStyling>, usize), EasyOfficeError> {
     let wb = workbook_engine(sheets, stylings)?;
     let mut a1_pairs: Vec<(&str, String)> = Vec::new();
-    for (name, cells) in sheets {
+    for (index, (name, cells)) in sheets.iter().enumerate() {
+        let st = stylings.get(index);
         for (row, col, raw) in cells {
-            if raw.starts_with('=') {
+            if cell_is_formula(st, *row, *col, raw) {
                 if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
                     a1_pairs.push((name.as_str(), coord.to_a1()));
                 }
@@ -147,31 +168,41 @@ fn computed_sheets(
     let mut eval_iter = values.into_iter();
 
     let mut computed = Vec::with_capacity(sheets.len());
-    for (name, cells) in sheets {
+    let mut computed_stylings = Vec::with_capacity(sheets.len());
+    for (index, (name, cells)) in sheets.iter().enumerate() {
+        let orig_st = stylings.get(index);
+        let mut st = orig_st.cloned().unwrap_or_default();
         let mut values = Vec::with_capacity(cells.len());
         for (row, col, raw) in cells {
-            if !raw.starts_with('=') {
+            if !cell_is_formula(orig_st, *row, *col, raw) {
                 values.push((*row, *col, raw.clone()));
                 continue;
             }
             if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
             }
-            let value = eval_iter
+            let eval = eval_iter
                 .next()
                 .flatten()
-                .unwrap_or(EvaluatedCellValue::Empty)
-                .to_display_string();
-            values.push((*row, *col, value));
+                .unwrap_or(EvaluatedCellValue::Empty);
+            let display = eval.to_display_string();
+            st.set_cell_kind(*row, *col, &display, evaluated_kind(&eval));
+            values.push((*row, *col, display));
         }
-        add_spilled_cells(name, &mut values, &spills);
+        add_spilled_cells(name, &mut values, Some(&mut st), &spills);
         computed.push((name.clone(), values));
+        computed_stylings.push(st);
     }
-    Ok((computed, formulas))
+    Ok((computed, computed_stylings, formulas))
 }
 
 /// Adds the cells the arrays of `sheet` filled (as the values they show) to its cells, where it has none (PD-217).
-fn add_spilled_cells(sheet: &str, cells: &mut Vec<(u32, u32, String)>, spills: &[SpillArea]) {
+fn add_spilled_cells(
+    sheet: &str,
+    cells: &mut Vec<(u32, u32, String)>,
+    mut styling: Option<&mut SheetStyling>,
+    spills: &[SpillArea],
+) {
     if spills.is_empty() {
         return;
     }
@@ -189,7 +220,11 @@ fn add_spilled_cells(sheet: &str, cells: &mut Vec<(u32, u32, String)>, spills: &
             let (dr, dc) = ((i / area.cols) as u32, (i % area.cols) as u32);
             let at = (area.anchor.row() + dr, area.anchor.col() + dc);
             if (dr + dc > 0) && !held.contains(&at) {
-                cells.push((at.0, at.1, value.to_display_string()));
+                let text = value.to_display_string();
+                if let Some(st) = styling.as_deref_mut() {
+                    st.set_cell_kind(at.0, at.1, &text, evaluated_kind(value));
+                }
+                cells.push((at.0, at.1, text));
             }
         }
     }
@@ -216,16 +251,25 @@ fn without_spilled_cells(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> V
         .collect()
 }
 
-/// `sheets` with the cells the arrays filled added as values.
-fn with_spilled_cells(sheets: &[OdsUnpacked], spills: &[SpillArea]) -> Vec<OdsUnpacked> {
+/// `sheets` and `stylings` with the cells the arrays filled added as typed values.
+fn with_spilled_cells(
+    sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
+    spills: &[SpillArea],
+) -> (Vec<OdsUnpacked>, Vec<SheetStyling>) {
+    if spills.is_empty() {
+        return (sheets.to_vec(), stylings.to_vec());
+    }
     sheets
         .iter()
-        .map(|(name, cells)| {
+        .enumerate()
+        .map(|(index, (name, cells))| {
             let mut cells = cells.clone();
-            add_spilled_cells(name, &mut cells, spills);
-            (name.clone(), cells)
+            let mut st = stylings.get(index).cloned().unwrap_or_default();
+            add_spilled_cells(name, &mut cells, Some(&mut st), spills);
+            ((name.clone(), cells), st)
         })
-        .collect()
+        .unzip()
 }
 
 /// Longest list of sheet names a warning spells out.
@@ -238,7 +282,7 @@ fn encode_xls(
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let (computed, formulas) = computed_sheets(sheets, stylings)?;
+    let (computed, computed_stylings, formulas) = computed_sheets(sheets, stylings)?;
     if formulas > 0 {
         warnings.push(format!(
             "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
@@ -301,7 +345,7 @@ fn encode_xls(
             cells: Vec::new(),
         });
     }
-    LegacyOle2Codec::pack_xls_multi_values_styled(&payloads, &links, stylings)
+    LegacyOle2Codec::pack_xls_multi_values_styled(&payloads, &links, &computed_stylings)
 }
 
 /// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV
@@ -314,10 +358,10 @@ fn encode_delimited(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let label = format.extension().to_uppercase();
-    let (computed, _) = computed_sheets(sheets, stylings)?;
+    let (computed, computed_stylings, _) = computed_sheets(sheets, stylings)?;
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
-    show_cells(&mut cells, stylings.first(), Show::Values);
+    show_cells(&mut cells, computed_stylings.first(), Show::Values);
     let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
     if !left_out.is_empty() {
         let shown = left_out.len().min(WARNED_SHEET_NAMES);
@@ -371,34 +415,43 @@ fn evaluate_workbook(
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
     for (index, (name, cells)) in sheets.iter().enumerate() {
-        let (cache, mut displays) = sheet_values(cells, &mut values, with_grids);
+        let orig_st = stylings.get(index);
+        let mut display_st = with_grids.then(|| orig_st.cloned().unwrap_or_default());
+        let (cache, mut displays) =
+            sheet_values(cells, orig_st, display_st.as_mut(), &mut values, with_grids);
         caches.push(cache);
         if with_grids {
-            add_spilled_cells(name, &mut displays, &spills);
-            show_cells(&mut displays, stylings.get(index), Show::Table);
+            add_spilled_cells(name, &mut displays, display_st.as_mut(), &spills);
+            show_cells(&mut displays, display_st.as_ref(), Show::Table);
             grids.push(rectangular_grid(&displays, &mut grid_cells)?);
         }
     }
     Ok((caches, grids, spills))
 }
 
+type EvaluatedDisplays = (Vec<DisplayCells>, Vec<SheetStyling>, Vec<SheetShown>);
+
 /// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
 /// sheet has them, so a print area and repeated rows address real rows).
 fn evaluate_displays(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
-) -> Result<(Vec<DisplayCells>, Vec<SheetShown>), EasyOfficeError> {
+) -> Result<EvaluatedDisplays, EasyOfficeError> {
     let (mut values, spills) = evaluate_formulas(sheets, stylings, true)?;
-    Ok(sheets
-        .iter()
-        .enumerate()
-        .map(|(index, (name, cells))| {
-            let mut displays = sheet_values(cells, &mut values, true).1;
-            add_spilled_cells(name, &mut displays, &spills);
-            let shown = show_cells(&mut displays, stylings.get(index), Show::Page);
-            (displays, shown)
-        })
-        .unzip())
+    let mut all_displays = Vec::with_capacity(sheets.len());
+    let mut all_stylings = Vec::with_capacity(sheets.len());
+    let mut all_shown = Vec::with_capacity(sheets.len());
+    for (index, (name, cells)) in sheets.iter().enumerate() {
+        let orig_st = stylings.get(index);
+        let mut display_st = orig_st.cloned().unwrap_or_default();
+        let mut displays = sheet_values(cells, orig_st, Some(&mut display_st), &mut values, true).1;
+        add_spilled_cells(name, &mut displays, Some(&mut display_st), &spills);
+        let shown = show_cells(&mut displays, Some(&display_st), Show::Page);
+        all_displays.push(displays);
+        all_stylings.push(display_st);
+        all_shown.push(shown);
+    }
+    Ok((all_displays, all_stylings, all_shown))
 }
 
 /// The value of each formula cell across all sheets in sheet and cell order (`None` for one the
@@ -417,10 +470,12 @@ fn evaluate_formulas(
     let wb = workbook_engine(sheets, stylings)?;
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
-        .flat_map(|(name, cells)| {
+        .enumerate()
+        .flat_map(|(index, (name, cells))| {
+            let st = stylings.get(index);
             cells
                 .iter()
-                .filter(|(_, _, raw)| raw.starts_with('='))
+                .filter(move |(r, c, raw)| cell_is_formula(st, *r, *c, raw))
                 .filter_map(move |(r, c, _)| {
                     PackedCellCoordinate::new(*r, *c)
                         .ok()
@@ -444,13 +499,15 @@ fn evaluate_formulas(
 /// formula cell from `values` in cell order.
 fn sheet_values(
     cells: &[(u32, u32, String)],
+    orig_styling: Option<&SheetStyling>,
+    mut display_styling: Option<&mut SheetStyling>,
     values: &mut impl Iterator<Item = Option<EvaluatedCellValue>>,
     with_grids: bool,
 ) -> (XlsxFormulaCache, DisplayCells) {
     let mut cache = XlsxFormulaCache::new();
     let mut displays = Vec::new();
     for (row, col, raw) in cells {
-        let display = if raw.starts_with('=') {
+        let display = if cell_is_formula(orig_styling, *row, *col, raw) {
             if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
             };
@@ -458,7 +515,13 @@ fn sheet_values(
             if let Some(c) = value.as_ref().and_then(cached_value) {
                 cache.insert((*row, *col), c);
             }
-            value.map_or_else(String::new, |v| v.to_display_string())
+            let text = value
+                .as_ref()
+                .map_or_else(String::new, |v| v.to_display_string());
+            if let (Some(st), Some(v)) = (display_styling.as_deref_mut(), value.as_ref()) {
+                st.set_cell_kind(*row, *col, &text, evaluated_kind(v));
+            }
+            text
         } else {
             raw.clone()
         };
@@ -689,28 +752,22 @@ fn encode_structured_with_thumbnail(
             match format {
                 DocumentFormat::Xlsx => {
                     let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
-                    OoxmlCodec::pack_xlsx_multi_styled(
-                        &with_spilled_cells(sheets, &spills),
-                        &caches,
-                        stylings,
-                    )
+                    let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
+                    OoxmlCodec::pack_xlsx_multi_styled(&out_sheets, &caches, &out_stylings)
                 }
                 DocumentFormat::Ods => {
                     let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
-                    OdfCodec::pack_ods_multi_styled_with_cache(
-                        &with_spilled_cells(sheets, &spills),
-                        &caches,
-                        stylings,
-                    )
+                    let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
+                    OdfCodec::pack_ods_multi_styled_with_cache(&out_sheets, &caches, &out_stylings)
                 }
                 DocumentFormat::Pdf => {
-                    let (displays, shown) = evaluate_displays(sheets, stylings)?;
+                    let (displays, display_stylings, shown) = evaluate_displays(sheets, stylings)?;
                     let named: Vec<OdsUnpacked> = sheets
                         .iter()
                         .map(|(name, _)| name.clone())
                         .zip(displays)
                         .collect();
-                    easyoffice_formats::encode_sheet_pdf(title, &named, stylings, &shown)
+                    easyoffice_formats::encode_sheet_pdf(title, &named, &display_stylings, &shown)
                 }
                 DocumentFormat::Xls => encode_xls(sheets, stylings, title, warnings),
                 DocumentFormat::Csv | DocumentFormat::Tsv => {

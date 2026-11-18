@@ -309,11 +309,15 @@
     (sheets || []).forEach((sheet) => {
       const map = {};
       let maxRow = 0;
+      const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
       (sheet.cells || []).forEach((cell) => {
         const raw = String(cell.raw ?? "");
         const style = codec ? codec.styleFromPayload(cell.style, sheet.numFmts) : null;
         if (!raw && !style) return;
-        const entry = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
+        const isFormula = cell.t !== "s" && raw.startsWith("=");
+        const entry = isFormula ? { value: "", formula: raw } : { value: raw, formula: "" };
+        const t = isFormula ? undefined : cellTypeApi?.explicitTag(raw, cell.t);
+        if (t) entry.t = t;
         if (style) entry.style = style;
         map[cell.ref] = entry;
         const packed = gridUtils ? gridUtils.packRef(cell.ref) : 0;

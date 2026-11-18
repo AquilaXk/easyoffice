@@ -5,12 +5,15 @@
 //! (`03045`), a phone number (`+8210...`), a code of more than 15 significant digits. The writers
 //! of XLSX, ODS and XLS share this rule so one cell is the same type in every format.
 
-/// Significant decimal digits an IEEE double keeps exactly (`f64::DIGITS`).
+/// Significant decimal digits an IEEE double keeps from arbitrary decimal input (`f64::DIGITS`).
 const MAX_SIGNIFICANT_DIGITS: usize = f64::DIGITS as usize;
+/// Shortest round-trip decimal digits an IEEE double emits (`f64::to_string()`, up to 17 digits).
+const MAX_IEEE_ROUNDTRIP_DIGITS: usize = 17;
 
 /// The value of `text` when it is a number that survives being stored as a double: finite, no
-/// leading `+`, no leading zero before another digit, at most 15 significant digits.
-pub(crate) fn numeric_cell_value(text: &str) -> Option<f64> {
+/// leading `+`, no leading zero before another digit, and either at most 15 significant digits or
+/// a decimal fraction whose IEEE-754 shortest round-trip string equals `text` (`1.0 / 3.0`, etc.).
+pub fn numeric_cell_value(text: &str) -> Option<f64> {
     let first = *text.as_bytes().first()?;
     if !(first.is_ascii_digit() || matches!(first, b'-' | b'.')) {
         return None;
@@ -27,7 +30,20 @@ pub(crate) fn numeric_cell_value(text: &str) -> Option<f64> {
         .filter(u8::is_ascii_digit)
         .skip_while(|d| *d == b'0')
         .count();
-    (significant <= MAX_SIGNIFICANT_DIGITS).then_some(value)
+    if significant <= MAX_SIGNIFICANT_DIGITS {
+        return Some(value);
+    }
+    if significant <= MAX_IEEE_ROUNDTRIP_DIGITS && mantissa.as_bytes().contains(&b'.') {
+        let mut buf = [0u8; 32];
+        let mut cur = std::io::Cursor::new(&mut buf[..]);
+        if std::io::Write::write_fmt(&mut cur, format_args!("{value}")).is_ok() {
+            let pos = cur.position() as usize;
+            if &buf[..pos] == text.as_bytes() {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

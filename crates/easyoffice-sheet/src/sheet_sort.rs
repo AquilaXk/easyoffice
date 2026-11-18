@@ -117,19 +117,20 @@ impl SheetEngine {
         let order = sort_order(&columns);
 
         // Take the cells of the range out (no copies), grouped by source row.
-        let mut moved: Vec<(u32, u32, String)> = Vec::new();
+        let mut moved: Vec<(u32, u32, String, Option<crate::CellValueKind>)> = Vec::new();
         for coord in &in_range {
+            let kind = self.explicit_kinds.remove(coord);
             if let Some(raw) = self.cells.remove(coord) {
-                moved.push((coord.row(), coord.col(), raw));
+                moved.push((coord.row(), coord.col(), raw, kind));
             }
             self.compiled_asts.remove(coord);
             self.subtotal_coords.remove(coord);
             self.array_formulas.remove(coord);
             self.update_dense_number(*coord, None);
         }
-        moved.sort_unstable_by_key(|&(r, c, _)| (r, c));
+        moved.sort_unstable_by_key(|&(r, c, _, _)| (r, c));
         let mut starts = vec![0usize; rows + 1];
-        for (r, _, _) in &moved {
+        for (r, _, _, _) in &moved {
             starts[(r - start_row) as usize + 1] += 1;
         }
         for i in 0..rows {
@@ -142,10 +143,11 @@ impl SheetEngine {
             let source_row = start_row + source;
             let from = starts[source as usize];
             let to = starts[source as usize + 1];
-            for (_, col, raw) in &mut moved[from..to] {
+            for (_, col, raw, kind) in &mut moved[from..to] {
                 let target_coord = PackedCellCoordinate::new(target_row, *col)?;
                 let text = std::mem::take(raw);
-                let text = if target_row == source_row {
+                let text = if target_row == source_row || *kind == Some(crate::CellValueKind::Text)
+                {
                     text
                 } else {
                     adjust_formula_row_refs(
@@ -154,6 +156,9 @@ impl SheetEngine {
                         SortedRows::new(start_row, end_row, source_row, target_row),
                     )
                 };
+                if let Some(k) = crate::cell_kind::normalize_explicit_kind(&text, *kind) {
+                    self.explicit_kinds.insert(target_coord, k);
+                }
                 self.cells.insert(target_coord, text);
                 dirty_coords.push(target_coord);
             }

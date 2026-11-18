@@ -113,9 +113,10 @@
   function setDisplayValue(td, value) {
     const raw = String(value ?? "");
     const nf = td._nf;
-    const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw) : null;
-    let shown = formatted ? formatted.t : formatGeneral(raw);
-    if (formatted && nf !== "@" && isNumericText(raw)) shown = fitToCell(td, shown);
+    const textTyped = td._ct === "s" || nf === "@";
+    const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw, td._ct) : null;
+    let shown = formatted ? formatted.t : textTyped ? raw : formatGeneral(raw);
+    if (formatted && !textTyped && isNumericText(raw)) shown = fitToCell(td, shown);
     if (td.textContent !== shown) td.textContent = shown;
     if (shown === raw) {
       if (td.dataset.raw !== undefined) {
@@ -127,7 +128,7 @@
       if (td.dataset.raw !== raw) td.dataset.raw = raw;
       if (td.dataset.display !== shown) td.dataset.display = shown;
     }
-    td.classList.toggle("num", nf !== "@" && isNumericText(raw));
+    td.classList.toggle("num", !textTyped && isNumericText(raw));
     const color = formatted?.c || "";
     if (color || td._nfColor) {
       td._nfColor = color;
@@ -376,6 +377,7 @@
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
       td._nf = entry?.style?.numFmt || "";
+      td._ct = formula ? "" : (entry?.t || "");
       setDisplayValue(td, value);
       if (formula) td.dataset.formula = formula;
       else delete td.dataset.formula;

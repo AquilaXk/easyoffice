@@ -3,6 +3,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::cell_type::{pack_cell_pos, CellValueKind};
+use crate::pages_proto::FastU64Map;
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, extract_tags_or_self_closing_with_attrs,
     extract_tags_with_attrs,
@@ -513,6 +515,7 @@ pub(crate) struct StyleSink<'s> {
     /// Columns whose default cell style is unlocked (PD-216).
     unlocked_cols: Vec<(u32, u32)>,
     cells: BTreeMap<(u32, u32), CellStyle>,
+    cell_types: FastU64Map<CellValueKind>,
     name: String,
     row: u32,
     column: u32,
@@ -544,6 +547,7 @@ impl<'s> StyleSink<'s> {
             columns: BTreeMap::new(),
             unlocked_cols: Vec::new(),
             cells: BTreeMap::new(),
+            cell_types: FastU64Map::default(),
             name: String::new(),
             row: 0,
             column: 0,
@@ -646,6 +650,7 @@ impl OdsSink for StyleSink<'_> {
         self.columns = BTreeMap::new();
         self.unlocked_cols = Vec::new();
         self.cells = BTreeMap::new();
+        self.cell_types = FastU64Map::default();
         self.row = 0;
         self.column = 0;
         let props = attrs
@@ -721,19 +726,35 @@ impl OdsSink for StyleSink<'_> {
                 .style
                 .and_then(|n| self.styles.cells.get(&*unescape_cow(n)))
                 .filter(|s| !s.is_plain());
+            let block = u64::from(repeat) * u64::from(cell.col_repeat);
+            let in_grid = u64::from(self.row) + u64::from(repeat)
+                <= u64::from(OdfCodec::MAX_ROWS) + 1
+                && u64::from(col) + u64::from(cell.col_repeat) <= u64::from(OdfCodec::MAX_COLS) + 1;
             if let Some(style) = style {
                 // A style repeated across a whole row/column band (a "format the sheet" fill) is
                 // not individual cell formatting; only bounded blocks are kept.
-                let block = u64::from(repeat) * u64::from(cell.col_repeat);
-                let in_grid = u64::from(self.row) + u64::from(repeat)
-                    <= u64::from(OdfCodec::MAX_ROWS) + 1
-                    && u64::from(col) + u64::from(cell.col_repeat)
-                        <= u64::from(OdfCodec::MAX_COLS) + 1;
                 if in_grid && block <= 1024 && self.cells.len() + block as usize <= MAX_STYLED_CELLS
                 {
                     for r in self.row..self.row + repeat {
                         for c in col..col + cell.col_repeat {
                             self.cells.insert((r, c), *style);
+                        }
+                    }
+                }
+            }
+            if let (Some(text), Some(kind)) = (&cell.text, cell.kind) {
+                if !text.is_empty()
+                    && kind != CellValueKind::infer(text)
+                    && in_grid
+                    && block <= 1024
+                    && self.cell_types.len() + block as usize <= MAX_STYLED_CELLS
+                {
+                    let base_r = cell.explicit_row.unwrap_or(self.row);
+                    let base_c = cell.explicit_col.unwrap_or(col);
+                    for dr in 0..repeat {
+                        for dc in 0..cell.col_repeat {
+                            self.cell_types
+                                .insert(pack_cell_pos(base_r + dr, base_c + dc), kind);
                         }
                     }
                 }
@@ -757,6 +778,7 @@ impl OdsSink for StyleSink<'_> {
     fn table_end(&mut self) {
         let mut styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
+            cell_types: std::mem::take(&mut self.cell_types),
             columns: std::mem::take(&mut self.columns),
             unlocked_cols: std::mem::take(&mut self.unlocked_cols),
             num_fmts: Arc::clone(&self.styles.num_fmts),
@@ -808,6 +830,6 @@ pub(crate) fn parse_ods_styling(
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (StyleSink::new(&styles), ValidationSink::default());
     let mut budget = crate::decode_budget::DecodeBudget::new();
-    walk_ods(content_xml, false, &mut sinks, &mut budget)?;
+    walk_ods(content_xml, true, &mut sinks, &mut budget)?;
     Ok(with_rules(content_xml, sinks.0.into_tables(), sinks.1))
 }

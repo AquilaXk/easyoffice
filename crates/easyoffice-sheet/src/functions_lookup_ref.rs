@@ -362,9 +362,9 @@ impl SheetEngine {
             range.start.col().min(range.end.col()),
         )
         .map_err(|_| FormulaError::Ref)?;
-        let formula = sheet
-            .cells
-            .get(&corner)
+        let formula = (!sheet.is_explicit_text(corner))
+            .then(|| sheet.cells.get(&corner))
+            .flatten()
             .map(|raw| raw.trim())
             .filter(|raw| {
                 raw.strip_prefix('=')

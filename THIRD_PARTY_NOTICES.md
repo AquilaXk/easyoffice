@@ -9295,7 +9295,7 @@ Source: https://github.com/tafia/quick-xml 0.42.0 (`src/reader/slice_reader.rs`,
 
 ### calamine (MIT)
 
-Source: https://github.com/tafia/calamine 0.38.0 (`src/xlsx/mod.rs`: `read_shared_strings`, the worksheet cell reader). `crates/easyoffice-formats/src/xlsx_sheet.rs` and `ods_grid.rs` (from `src/ods.rs`) follow its single event loop with a small state per cell and a shared string table built once, in safe Rust without the dependency; the table is an arena string with end offsets. The cell rules (formulas, shared formulas, inline strings, types) are this repository's own. Used under the MIT license (Copyright (c) 2016 Johann Tuffe), whose text is the quick-xml entry of the generated section above.
+Source: https://github.com/tafia/calamine 0.38.0 (`src/datatype.rs` `Data` variants, `src/xlsx/mod.rs`: `read_shared_strings`, `ST_CellType` dispatch and the worksheet cell reader). `crates/easyoffice-formats/src/xlsx_sheet.rs`, `ods_grid.rs` (from `src/ods.rs`) and `cell_type.rs` (PD-241, 1-byte `CellValueKind` and sparse `FastU64Map` overrides) follow its single event loop with a small state per cell, explicit value-kind dispatch and a shared string table built once, in safe Rust without the dependency; the table is an arena string with end offsets. The cell rules (formulas, shared formulas, inline strings, types) are this repository's own. Used under the MIT license (Copyright (c) 2016 Johann Tuffe), whose text is the quick-xml entry of the generated section above.
 
 ### Univer sheets auto filter (Apache-2.0)
 

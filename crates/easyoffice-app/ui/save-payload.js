@@ -538,6 +538,7 @@
     return ordered.map((name) => {
       const store = sheetDataStore?.[name] || {};
       const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
+      const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
       const numFmts = internNumFmts();
       const cells = [];
       for (const ref of Object.keys(store)) {
@@ -545,7 +546,11 @@
         const raw = String(entry?.formula || entry?.value || "");
         const style = codec ? codec.styleToPayload(entry?.style, numFmts.intern) : null;
         if (!raw && !style) continue;
-        cells.push(style ? { ref, raw, style } : { ref, raw });
+        const t = entry?.formula ? undefined : cellTypeApi?.wireTag(raw, entry?.t);
+        const cell = { ref, raw };
+        if (t) cell.t = t;
+        if (style) cell.style = style;
+        cells.push(cell);
       }
       const columns = buildColumnsPayload(columnWidths?.[name]);
       const sheet = columns.length > 0 ? { name, cells, columns } : { name, cells };

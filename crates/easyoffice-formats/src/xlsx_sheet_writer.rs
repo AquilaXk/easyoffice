@@ -27,6 +27,7 @@ pub(crate) fn push_cell_xml(
     xf: usize,
     crate::sheet_styling::xlsx_parts::CellContent {
         raw,
+        kind,
         cached,
         spill,
         filled,
@@ -40,49 +41,83 @@ pub(crate) fn push_cell_xml(
     }
     if raw.is_empty() {
         sheet_xml.push_str("/>");
-    } else if text_only || (filled && raw.starts_with('=')) {
+    } else if text_only || filled {
         let _ = write!(
             sheet_xml,
             " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
             XmlSanitizer::escape(raw)
         );
-    } else if let Some(formula) = raw.strip_prefix('=') {
-        let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
-        // An array that spills is an array formula over its area, flagged dynamic (`cm`).
-        let (cm, f) = match spill {
-            Some(area) => (
-                " cm=\"1\"",
-                format!("<f t=\"array\" ref=\"{}\">{body}</f>", area.a1()),
-            ),
-            None => ("", format!("<f>{body}</f>")),
-        };
-        match cached {
-            Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
-                let _ = write!(sheet_xml, "{cm}>{f}<v>{n}</v></c>");
+    } else {
+        match kind {
+            crate::CellValueKind::Formula => {
+                let Some(formula) = raw.strip_prefix('=') else {
+                    push_shared_or_inline_str(sheet_xml, raw, sst_map);
+                    return;
+                };
+                let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
+                let (cm, f) = match spill {
+                    Some(area) => (
+                        " cm=\"1\"",
+                        format!("<f t=\"array\" ref=\"{}\">{body}</f>", area.a1()),
+                    ),
+                    None => ("", format!("<f>{body}</f>")),
+                };
+                match cached {
+                    Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
+                        let _ = write!(sheet_xml, "{cm}>{f}<v>{n}</v></c>");
+                    }
+                    Some(XlsxCachedValue::Text(text)) => {
+                        let _ = write!(
+                            sheet_xml,
+                            " t=\"str\"{cm}>{f}<v>{}</v></c>",
+                            XmlSanitizer::escape(text)
+                        );
+                    }
+                    Some(XlsxCachedValue::Boolean(b)) => {
+                        let _ = write!(sheet_xml, " t=\"b\"{cm}>{f}<v>{}</v></c>", u8::from(*b));
+                    }
+                    _ => {
+                        let _ = write!(sheet_xml, "{cm}>{f}</c>");
+                    }
+                }
             }
-            Some(XlsxCachedValue::Text(text)) => {
+            crate::CellValueKind::Number
+                if crate::cell_numbers::numeric_cell_value(raw).is_some()
+                    || raw.trim().parse::<f64>().is_ok_and(f64::is_finite) =>
+            {
                 let _ = write!(
                     sheet_xml,
-                    " t=\"str\"{cm}>{f}<v>{}</v></c>",
-                    XmlSanitizer::escape(text)
+                    " t=\"n\"><v>{}</v></c>",
+                    XmlSanitizer::escape(raw)
                 );
             }
-            Some(XlsxCachedValue::Boolean(b)) => {
-                let _ = write!(sheet_xml, " t=\"b\"{cm}>{f}<v>{}</v></c>", u8::from(*b));
+            crate::CellValueKind::Boolean => {
+                let v = u8::from(!raw.trim().eq_ignore_ascii_case("FALSE") && raw.trim() != "0");
+                let _ = write!(sheet_xml, " t=\"b\"><v>{v}</v></c>");
             }
-            _ => {
-                let _ = write!(sheet_xml, "{cm}>{f}</c>");
+            crate::CellValueKind::Error => {
+                let _ = write!(
+                    sheet_xml,
+                    " t=\"e\"><v>{}</v></c>",
+                    XmlSanitizer::escape(raw)
+                );
+            }
+            crate::CellValueKind::Text | crate::CellValueKind::Number => {
+                push_shared_or_inline_str(sheet_xml, raw, sst_map);
             }
         }
-    } else if crate::cell_numbers::numeric_cell_value(raw).is_some() {
+    }
+}
+
+fn push_shared_or_inline_str(sheet_xml: &mut String, raw: &str, sst_map: &SharedStringMap<'_>) {
+    if let Some(&idx) = sst_map.get(raw) {
+        let _ = write!(sheet_xml, " t=\"s\"><v>{idx}</v></c>");
+    } else {
         let _ = write!(
             sheet_xml,
-            " t=\"n\"><v>{}</v></c>",
+            " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
             XmlSanitizer::escape(raw)
         );
-    } else {
-        let idx = sst_map.get(raw).copied().unwrap_or(0);
-        let _ = write!(sheet_xml, " t=\"s\"><v>{idx}</v></c>");
     }
 }
 
@@ -258,6 +293,10 @@ pub(crate) fn build_sheet_xml(
             let col_ref = write_col_letters(&mut col_buf, col as usize);
             let xf = styling.map_or(0, |st| style_table.cell_xf(st, row, col, &mut ids));
             let cached = cache.and_then(|c| c.get(&(row, col)));
+            let kind = styling.map_or_else(
+                || crate::CellValueKind::infer(raw),
+                |st| st.cell_kind(row, col, raw),
+            );
             push_cell_xml(
                 &mut sheet_xml,
                 col_ref,
@@ -265,9 +304,10 @@ pub(crate) fn build_sheet_xml(
                 xf,
                 crate::sheet_styling::xlsx_parts::CellContent {
                     raw,
+                    kind,
                     cached,
                     spill: spill_anchors.get(&(row, col)),
-                    filled: raw.starts_with('=')
+                    filled: kind == crate::CellValueKind::Formula
                         && spill_areas
                             .iter()
                             .any(|area| area.covers_after_anchor(row, col)),

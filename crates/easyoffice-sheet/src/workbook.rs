@@ -583,7 +583,9 @@ impl WorkbookEngine {
         let eff = if !formula.trim().is_empty() {
             formula
         } else {
-            sheet.cells.get(&anchor).map(String::as_str)?
+            (!sheet.is_explicit_text(anchor))
+                .then(|| sheet.cells.get(&anchor).map(String::as_str))
+                .flatten()?
         };
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         ctx.current_coord = Some(anchor);

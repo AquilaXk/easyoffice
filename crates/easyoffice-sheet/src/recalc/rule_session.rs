@@ -105,10 +105,27 @@ impl RecalcSession {
     /// Appearance changes after `edits` and the recalculation `outcome`, per sheet index. A sheet
     /// whose rules outgrew the budget is listed in `dropped` and loses its rules.
     pub fn rule_updates(&mut self, edits: &[CellChange], outcome: &RecalcOutcome) -> RuleUpdates {
+        self.rule_updates_iter(edits.iter().map(|e| (e.sheet.as_str(), e.coord)), outcome)
+    }
+
+    /// [`Self::rule_updates`] for typed cell edits (PD-241).
+    pub fn rule_updates_typed(
+        &mut self,
+        edits: &[crate::TypedCellChange],
+        outcome: &RecalcOutcome,
+    ) -> RuleUpdates {
+        self.rule_updates_iter(edits.iter().map(|e| (e.sheet.as_str(), e.coord)), outcome)
+    }
+
+    fn rule_updates_iter<'a>(
+        &mut self,
+        edits: impl IntoIterator<Item = (&'a str, PackedCellCoordinate)>,
+        outcome: &RecalcOutcome,
+    ) -> RuleUpdates {
         let mut touched: Vec<Vec<PackedCellCoordinate>> = vec![Vec::new(); self.wb.sheet_count()];
-        for edit in edits {
-            if let Some(i) = self.wb.find_sheet_index(&edit.sheet) {
-                touched[i].push(edit.coord);
+        for (sheet, coord) in edits {
+            if let Some(i) = self.wb.find_sheet_index(sheet) {
+                touched[i].push(coord);
             }
         }
         for c in &outcome.changed {

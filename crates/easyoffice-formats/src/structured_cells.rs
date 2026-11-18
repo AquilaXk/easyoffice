@@ -16,10 +16,15 @@ type Cells = [(u32, u32, String)];
 /// `cells` with every formula's text mapped by `rewrite` (`None` keeps the text); borrowed when none changes.
 fn map_formulas<'a>(
     cells: &'a Cells,
+    styling: Option<&SheetStyling>,
     mut rewrite: impl FnMut(u32, u32, &str) -> Option<String>,
 ) -> Cow<'a, Cells> {
     let mut out: Option<Vec<(u32, u32, String)>> = None;
     for (i, (row, col, raw)) in cells.iter().enumerate() {
+        if styling.is_some_and(|st| st.cell_kind(*row, *col, raw) != crate::CellValueKind::Formula)
+        {
+            continue;
+        }
         let Some(body) = raw.strip_prefix('=').filter(|b| may_hold_structured_ref(b)) else {
             continue;
         };
@@ -38,8 +43,12 @@ fn table_at(tables: &[SheetTable], row: u32, col: u32) -> Option<&SheetTable> {
 }
 
 /// The cells of one sheet for an XLSX file; `tables` are the tables of that sheet.
-pub(crate) fn file_formulas<'a>(cells: &'a Cells, tables: &[SheetTable]) -> Cow<'a, Cells> {
-    map_formulas(cells, |row, col, body| {
+pub(crate) fn file_formulas<'a>(
+    cells: &'a Cells,
+    tables: &[SheetTable],
+    styling: Option<&SheetStyling>,
+) -> Cow<'a, Cells> {
+    map_formulas(cells, styling, |row, col, body| {
         to_file_refs(body, table_at(tables, row, col).map(|t| t.name.as_str()))
     })
 }
@@ -106,7 +115,7 @@ pub(crate) fn range_formulas<'a>(
         return Cow::Borrowed(cells);
     }
     let tables = Tables::new(stylings);
-    map_formulas(cells, |row, col, body| {
+    map_formulas(cells, stylings.get(sheet), |row, col, body| {
         ranges_of(body, (sheet, row, col), sheet_names, stylings, &tables)
     })
 }

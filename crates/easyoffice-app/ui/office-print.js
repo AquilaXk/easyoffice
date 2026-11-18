@@ -145,11 +145,12 @@
 
     // The format code of a cell (a text format shows the stored text as typed) and whether a page sets its text at the right.
     const codeOf = (entry) => entry?.style?.numFmt || "";
+    const isTextEntry = (entry) => entry?.t === "s" || codeOf(entry) === "@";
 
     function cellClasses(entry, text) {
       const style = entry.style || {};
       const names = STYLE_CLASSES.filter(([flag]) => style[flag]).map(([, name]) => name);
-      if (codeOf(entry) !== "@" && gridUtils.isNumericText(text)) names.push("eo-print-num");
+      if (!isTextEntry(entry) && gridUtils.isNumericText(text)) names.push("eo-print-num");
       return names.join(" ");
     }
 
@@ -186,14 +187,15 @@
         if (!Object.hasOwn(plan.map, ref)) continue;
         const entry = plan.map[ref];
         const code = codeOf(entry);
-        const packed = code ? gridUtils.packRef(ref) : 0;
+        const packed = code && !(entry?.t === "s" && !code.includes("@")) ? gridUtils.packRef(ref) : 0;
         if (packed <= 0 || entry.value == null || entry.value === "") continue;
         const col = packed & COLUMN_BITS;
         const row = (packed - col) / ROW_STRIDE;
         if (!plan.boxes.some((b) => row >= b.r1 && row <= b.r2 && col >= b.c1 && col <= b.c2)) continue;
         if ((held += 1) > MAX_PRINT_CELLS) return;
-        let values = wanted.get(code);
-        if (!values) wanted.set(code, (values = new Set()));
+        const fmtKey = entry?.t === "s" && code !== "@" ? "\u0000" + code : code;
+        let values = wanted.get(fmtKey);
+        if (!values) wanted.set(fmtKey, (values = new Set()));
         values.add(String(entry.value));
       }
       if (wanted.size > 0) sheetFormats = await display.resolveAll(wanted);
@@ -223,10 +225,11 @@
       };
       const renderCell = ({ text, entry }, td) => {
         const code = codeOf(entry);
-        const shown = code ? sheetFormats?.get(code)?.get(text) : null;
+        const fmtKey = entry?.t === "s" && code !== "@" ? "\u0000" + code : code;
+        const shown = code && !(entry?.t === "s" && !code.includes("@")) ? sheetFormats?.get(fmtKey)?.get(text) : null;
         td.className = cellClasses(entry, text);
         if (shown?.f) fillCell(td, shown.t, shown.f);
-        else td.textContent = shown ? shown.t : code === "@" ? text : gridUtils.formatGeneral(text);
+        else td.textContent = shown ? shown.t : isTextEntry(entry) ? text : gridUtils.formatGeneral(text);
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
         if (shown?.c) td.style.color = shown.c;
       };

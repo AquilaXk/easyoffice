@@ -674,7 +674,18 @@ fn parse_sheets(
                     }
                 }
                 let raw = opt_str(cell, "raw")?.unwrap_or("");
+                let explicit_kind = match opt_str(cell, "t")? {
+                    None => None,
+                    Some(tag) => Some(
+                        easyoffice_formats::CellValueKind::from_tag(tag).ok_or_else(|| {
+                            invalid(format!("구조화 저장: 알 수 없는 셀 타입 '{tag}'"))
+                        })?,
+                    ),
+                };
                 if !raw.is_empty() {
+                    if let Some(kind) = explicit_kind {
+                        styling.set_cell_kind(key.0, key.1, raw, kind);
+                    }
                     cells.insert(key, raw.to_string());
                 }
             }

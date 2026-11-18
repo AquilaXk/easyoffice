@@ -13,11 +13,12 @@
 //! defaults are `TRUE` and `FALSE`.
 
 use super::data::{Cells, SheetCells};
-use crate::coercion::{is_valid_decimal_syntax, parse_iso_date_serial, parse_strict_number};
+use crate::coercion::parse_iso_date_serial;
 use crate::{
-    EvalContext, EvaluatedCellValue, MemoTable, PackedCellCoordinate, WorkbookEngine, MAX_EVAL_TIME,
+    EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate, WorkbookEngine,
+    MAX_EVAL_TIME,
 };
-use easyoffice_formats::{CellBox, Cmp, DataValidation, DvAlert, DvKind};
+use easyoffice_formats::{numeric_cell_value, CellBox, Cmp, DataValidation, DvAlert, DvKind};
 use std::time::Duration;
 
 /// Outcome of [`validate_input`].
@@ -34,17 +35,21 @@ pub enum Verdict {
 }
 
 fn typed_value(input: &str) -> EvaluatedCellValue {
+    if let Some(rest) = input.strip_prefix('\'') {
+        return EvaluatedCellValue::Text(rest.to_string());
+    }
     let t = input.trim();
-    if is_valid_decimal_syntax(t) {
-        if let Some(n) = parse_strict_number(t) {
-            return EvaluatedCellValue::Number(n);
-        }
+    if let Some(n) = numeric_cell_value(t) {
+        return EvaluatedCellValue::Number(n);
     }
     if t.eq_ignore_ascii_case("TRUE") {
         return EvaluatedCellValue::Boolean(true);
     }
     if t.eq_ignore_ascii_case("FALSE") {
         return EvaluatedCellValue::Boolean(false);
+    }
+    if let Some(err) = FormulaError::from_code(t) {
+        return EvaluatedCellValue::Error(err);
     }
     EvaluatedCellValue::Text(input.to_string())
 }
@@ -138,7 +143,7 @@ pub(crate) fn list_items(dv: &DataValidation, cells: &mut dyn Cells) -> Vec<Stri
 
 fn judge(dv: &DataValidation, cells: &mut dyn Cells, input: &str) -> bool {
     let value = typed_value(input);
-    let text_len = input.chars().count() as f64;
+    let text_len = input.strip_prefix('\'').unwrap_or(input).chars().count() as f64;
     match dv.kind {
         DvKind::Whole | DvKind::Decimal => {
             let EvaluatedCellValue::Number(n) = value else {

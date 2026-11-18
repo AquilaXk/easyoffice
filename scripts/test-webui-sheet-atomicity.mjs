@@ -122,7 +122,7 @@ test("offline RPC preserves literal sheet tab identity, single-layer formula unq
       sheet: "Sheet1",
       targets: [{ cell: "C1" }, { cell: "C2" }, { cell: "C3" }, { cell: "C4" }],
       cells: [
-        { sheet: "Sheet1", cell: "A1", value: "#REF!" },
+        { sheet: "Sheet1", cell: "A1", value: "#REF!", t: "s" },
         { sheet: "Sheet1", cell: "B1", value: 25 },
         { sheet: "Sheet1", cell: "C1", value: "=A1" },
         { sheet: "Sheet1", cell: "C2", value: '="Label: " & A1' },
@@ -132,6 +132,22 @@ test("offline RPC preserves literal sheet tab identity, single-layer formula unq
     })
   );
   assert.deepEqual(plainErrorTextRes.targetValues, ["#REF!", "Label: #REF!", "#VALUE!", "25"]);
+
+  const typedErrorCellRes = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Sheet1",
+      targets: [{ cell: "C1" }, { cell: "C2" }, { cell: "C3" }, { cell: "C4" }],
+      cells: [
+        { sheet: "Sheet1", cell: "A1", value: "#REF!" },
+        { sheet: "Sheet1", cell: "B1", value: 25 },
+        { sheet: "Sheet1", cell: "C1", value: "=A1" },
+        { sheet: "Sheet1", cell: "C2", value: '="Label: " & A1' },
+        { sheet: "Sheet1", cell: "C3", value: "=A1 + 1" },
+        { sheet: "Sheet1", cell: "C4", value: "=SUM(A1:B1)" },
+      ],
+    })
+  );
+  assert.deepEqual(typedErrorCellRes.targetValues, ["#REF!", "#REF!", "#REF!", "#REF!"]);
 
   const explicitRes = offlineRpc.evaluate_sheet(
     JSON.stringify({

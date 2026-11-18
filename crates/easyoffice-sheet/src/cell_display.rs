@@ -5,7 +5,9 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use crate::text_format::{compiled_format, format_cell_with, CompiledFormat};
+use crate::text_format::{
+    compiled_format, format_cell_with, format_typed_cell_with, CompiledFormat,
+};
 
 /// Significant digits a General decimal shows (the page's rule, `formatGeneral` in `sheet-grid.js`).
 const GENERAL_DIGITS: usize = 10;
@@ -54,6 +56,21 @@ impl CompiledNumFmt {
         })
     }
 
+    /// Formats `raw` honoring its [`easyoffice_formats::CellValueKind`] (PD-241).
+    pub fn format_typed(
+        &self,
+        raw: &str,
+        kind: easyoffice_formats::CellValueKind,
+    ) -> Option<CellText> {
+        let (shown, numeric) = format_typed_cell_with(&self.0, raw, kind)?;
+        Some(CellText {
+            text: shown.text,
+            color: shown.color.map(|c| c.0),
+            fill: shown.fill,
+            numeric,
+        })
+    }
+
     /// Whether finite `num` renders through a date or time section under this compiled format.
     #[inline]
     pub fn shows_date(&self, num: f64) -> bool {
@@ -70,6 +87,15 @@ pub fn compile_for_page(code: &str) -> CompiledNumFmt {
 /// display (see `format_cell_value`).
 pub fn format_for_page(code: &str, raw: &str) -> Option<CellText> {
     compile_for_page(code).format(raw)
+}
+
+/// [`format_for_page`] honoring `kind` so text-typed numeric strings ignore numeric sections.
+pub fn format_for_page_typed(
+    code: &str,
+    raw: &str,
+    kind: easyoffice_formats::CellValueKind,
+) -> Option<CellText> {
+    compile_for_page(code).format_typed(raw, kind)
 }
 
 /// General display of a stored value: a long decimal (float noise such as `0.30000000000000004`)

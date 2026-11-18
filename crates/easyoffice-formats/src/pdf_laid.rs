@@ -677,11 +677,21 @@ fn sheet_area_pages(
                         canvas.fill_rect(x, y - h, w, h, rgb);
                     }
                     if let Some(text) = cells.get(&at) {
-                        let how = shown.and_then(|m| m.get(&at)).copied().unwrap_or_default();
+                        let how_opt = shown.and_then(|m| m.get(&at)).copied();
+                        let how = how_opt.unwrap_or_default();
                         let room = w - 2.0 * pad;
                         let drawn = fit_text(&filled_text(text, how.fill, font, room), font, room);
                         let tw = width_pt(&drawn, font);
-                        let tx = if how.numeric || is_number(text) {
+                        let right_aligned = match how_opt {
+                            Some(cell) => cell.numeric,
+                            None => styling
+                                .and_then(|s| s.explicit_cell_kind(at.0, at.1, text))
+                                .map_or_else(
+                                    || is_number(text),
+                                    |k| k == crate::CellValueKind::Number,
+                                ),
+                        };
+                        let tx = if right_aligned {
                             x + w - pad - tw
                         } else {
                             x + pad

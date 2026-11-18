@@ -139,16 +139,29 @@ fn build_workbook_parts(
     (workbook_xml, wb_rels_xml)
 }
 
-/// Unique non-numeric, non-formula strings with their indices and the total occurrence count.
-fn collect_shared_strings(
-    active_sheets: &[OdsUnpacked],
-) -> (Vec<&str>, SharedStringMap<'_>, usize) {
-    let mut shared_strings: Vec<&str> = Vec::new();
+/// Unique text-cell strings with their indices and the total occurrence count.
+fn collect_shared_strings<'a>(
+    active_sheets: &'a [OdsUnpacked],
+    stylings: &[SheetStyling],
+) -> (Vec<&'a str>, SharedStringMap<'a>, usize) {
+    let mut shared_strings: Vec<&'a str> = Vec::new();
     let mut sst_map = SharedStringMap::new();
     let mut total_str_count = 0usize;
-    for (_, cells) in active_sheets {
-        for (_, _, val) in cells {
-            if val.starts_with('=') || crate::cell_numbers::numeric_cell_value(val).is_some() {
+    for (sheet_idx, (_, cells)) in active_sheets.iter().enumerate() {
+        let styling = stylings.get(sheet_idx);
+        for &(row, col, ref val) in cells {
+            if val.is_empty() {
+                continue;
+            }
+            let kind = styling.map_or_else(
+                || crate::CellValueKind::infer(val),
+                |st| st.cell_kind(row, col, val),
+            );
+            let needs_sst = matches!(kind, crate::CellValueKind::Text)
+                || (kind == crate::CellValueKind::Number
+                    && crate::cell_numbers::numeric_cell_value(val).is_none()
+                    && !val.trim().parse::<f64>().is_ok_and(f64::is_finite));
+            if !needs_sst {
                 continue;
             }
             total_str_count += 1;
@@ -362,7 +375,8 @@ impl OoxmlCodec {
         let states = sheet_states(active_sheets.len(), stylings);
         let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &states, stylings);
         let styles_xml = style_table.to_xml();
-        let (shared_strings, sst_map, total_str_count) = collect_shared_strings(active_sheets);
+        let (shared_strings, sst_map, total_str_count) =
+            collect_shared_strings(active_sheets, stylings);
         let sst_xml = build_shared_strings_xml(&shared_strings, total_str_count);
 
         XmlSanitizer::validate_safe_xml(&workbook_xml)?;
@@ -380,8 +394,13 @@ impl OoxmlCodec {
         let sheet_cells: Vec<_> = active_sheets
             .iter()
             .zip(&sheet_tables)
-            .map(|((_, cells), tables)| {
-                crate::sheet_styling::structured_cells::file_formulas(cells, tables)
+            .enumerate()
+            .map(|(i, ((_, cells), tables))| {
+                crate::sheet_styling::structured_cells::file_formulas(
+                    cells,
+                    tables,
+                    stylings.get(i),
+                )
             })
             .collect();
         let mut table_writer = TableWriter::default();

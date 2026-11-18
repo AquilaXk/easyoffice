@@ -111,6 +111,8 @@ pub use table_style::{
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
+use crate::cell_type::{pack_cell_pos, CellValueKind};
+use crate::pages_proto::FastU64Map;
 use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, OdfCodec, OoxmlCodec};
 
 /// Largest number of styled cells or sized columns one sheet may carry.
@@ -397,6 +399,9 @@ impl CellStyle {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SheetStyling {
     pub cells: BTreeMap<(u32, u32), CellStyle>,
+    /// Sparse explicit cell value kinds, stored only when a cell's kind differs from
+    /// [`CellValueKind::infer`] (PD-241).
+    pub cell_types: FastU64Map<CellValueKind>,
     pub columns: BTreeMap<u32, u32>,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
@@ -488,6 +493,7 @@ impl SheetStyling {
 
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
+            && self.cell_types.is_empty()
             && self.columns.is_empty()
             && self.rules.is_empty()
             && self.merges.is_empty()
@@ -586,6 +592,37 @@ impl SheetStyling {
                 .tables
                 .iter()
                 .any(|t| xlsx_layout::run_contains(&t.filter_hidden, row))
+    }
+
+    /// Records an explicit cell value kind in sparse delta form (`kind != infer(raw)`), bounded by
+    /// [`MAX_STYLED_CELLS`] (PD-241).
+    pub fn set_cell_kind(&mut self, row: u32, col: u32, raw: &str, kind: CellValueKind) {
+        let packed = pack_cell_pos(row, col);
+        if raw.is_empty() || kind == CellValueKind::infer(raw) {
+            self.cell_types.remove(&packed);
+        } else if self.cell_types.len() < MAX_STYLED_CELLS || self.cell_types.contains_key(&packed)
+        {
+            self.cell_types.insert(packed, kind);
+        }
+    }
+
+    /// Effective value kind of `(row, col)` with stored text `raw`.
+    #[inline]
+    pub fn cell_kind(&self, row: u32, col: u32, raw: &str) -> CellValueKind {
+        if raw.is_empty() {
+            return CellValueKind::Text;
+        }
+        self.cell_types
+            .get(&pack_cell_pos(row, col))
+            .copied()
+            .unwrap_or_else(|| CellValueKind::infer(raw))
+    }
+
+    /// Returns `Some(kind)` only when `(row, col)` overrides [`CellValueKind::infer`].
+    #[inline]
+    pub fn explicit_cell_kind(&self, row: u32, col: u32, raw: &str) -> Option<CellValueKind> {
+        let kind = *self.cell_types.get(&pack_cell_pos(row, col))?;
+        (!raw.is_empty() && kind != CellValueKind::infer(raw)).then_some(kind)
     }
 
     /// Whether the user, a folded group, the filter or a table's filter hides `row`.

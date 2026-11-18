@@ -621,6 +621,38 @@ pub fn format_cell_value(code: &str, raw: &str) -> Option<FormattedText> {
     format_cell_with(&compiled_format(code), raw).map(|(shown, _)| shown)
 }
 
+/// [`format_cell_value`] honoring the cell's [`easyoffice_formats::CellValueKind`] (PD-241):
+/// text-typed cells (`'123`, `t="s"`) apply only the text section (`@`), never numeric/date sections.
+pub fn format_typed_cell_value(
+    code: &str,
+    raw: &str,
+    kind: easyoffice_formats::CellValueKind,
+) -> Option<FormattedText> {
+    format_typed_cell_with(&compiled_format(code), raw, kind).map(|(shown, _)| shown)
+}
+
+pub(crate) fn format_typed_cell_with(
+    compiled: &CompiledFormat,
+    raw: &str,
+    kind: easyoffice_formats::CellValueKind,
+) -> Option<(FormattedText, bool)> {
+    match kind {
+        easyoffice_formats::CellValueKind::Text => {
+            if compiled.is_text_only() || compiled.has_text_section() {
+                Some((compiled.render_text(raw), false))
+            } else {
+                None
+            }
+        }
+        easyoffice_formats::CellValueKind::Boolean | easyoffice_formats::CellValueKind::Error => {
+            None
+        }
+        easyoffice_formats::CellValueKind::Number | easyoffice_formats::CellValueKind::Formula => {
+            format_cell_with(compiled, raw)
+        }
+    }
+}
+
 /// [`format_cell_value`] for a code that is already compiled, plus whether the cell formatted as a
 /// finite number (`true`) rather than through a text section (`false`).
 pub(crate) fn format_cell_with(

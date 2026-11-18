@@ -139,8 +139,16 @@
       const nums = [];
       const liveRef = liveTd ? liveTd.dataset.cell : "";
       const push = (ref) => {
-        const raw = ref === liveRef ? grid.readTdValue(liveTd) : api.getEntry(ref)?.value;
-        const n = numericOf(raw);
+        if (ref === liveRef) {
+          const liveRaw = (liveTd.textContent || "").trim();
+          if (liveRaw.startsWith("'") || liveTd._nf === "@") return;
+          const n = numericOf(liveRaw);
+          if (n !== null) nums.push(n);
+          return;
+        }
+        const entry = api.getEntry(ref);
+        if (!entry || entry.t === "s" || entry.style?.numFmt === "@") return;
+        const n = numericOf(entry.value);
         if (n !== null) nums.push(n);
       };
       const area = (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1);
@@ -247,16 +255,20 @@
         // A cell an array filled shows the formula of the array, dimmed: it cannot be edited on its own (PD-217).
         const filledBy = host.__EASYOFFICE_SHEET_SPILL__?.isChild(api.getEntry(ref)) ? api.getEntry(api.getEntry(ref).spillOf) : null;
         formulaInput.classList.toggle("spill-ghost", Boolean(filledBy));
+        const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
         if (filledBy) {
           // The formula of a cell whose format hides it stays hidden on the cells it fills (PD-222).
           const concealed = hidden || protectApi?.formulaHidden(api.getSheetName(), sel.ar, sel.ac, filledBy.style);
           formulaInput.value = concealed ? api.getEntry(ref)?.value || "" : filledBy.formula || "";
         } else if (activeTd) {
           const live = grid.readTdValue(activeTd);
-          formulaInput.value = stateOf(activeTd)?.userEdited ? live : hidden ? live : activeTd.dataset.formula || live;
+          const st = stateOf(activeTd);
+          formulaInput.value = st?.userEdited || (st?.mode && st?.editBaseline !== null)
+            ? live
+            : cellTypeApi.editableRaw(live, hidden ? "" : activeTd.dataset.formula || "", activeTd._ct, activeTd._nf);
         } else {
           const entry = api.getEntry(ref);
-          formulaInput.value = hidden ? entry?.value || "" : entry?.formula || entry?.value || "";
+          formulaInput.value = cellTypeApi.editableRaw(entry?.value || "", hidden ? "" : entry?.formula || "", entry?.t, entry?.style?.numFmt);
         }
       }
       const aggEl = document.getElementById("status-sheet-agg");
@@ -500,19 +512,27 @@
       st.restore = {
         text: grid.readTdValue(td),
         formula: td.dataset.formula || "",
+        ct: td._ct || "",
       };
       markEditing(td, st, mode);
       // A formula a protected sheet hides is not unfolded into the cell: the edit shows the value (PD-216).
       const hidden = protectApi?.formulaHidden(api.getSheetName(), td._row, td._col, td._st);
-      const raw = (!hidden && td.dataset.formula) || grid.readTdValue(td);
+      const raw = host.__EASYOFFICE_SHEET_CELL_TYPE__.editableRaw(
+        grid.readTdValue(td),
+        hidden ? "" : td.dataset.formula || "",
+        td._ct,
+        td._nf
+      );
       delete td.dataset.raw;
       delete td.dataset.display;
       if (replace) {
         td.textContent = "";
         delete td.dataset.formula;
+        td._ct = "";
+        st.editBaseline = null;
       } else {
         td.textContent = raw;
-        api.syncSheetCellFocusBaseline(td, false);
+        st.editBaseline = raw;
       }
       placeCaret(td);
     }
@@ -522,6 +542,7 @@
       if (st) {
         st.mode = null;
         st.restore = null;
+        st.editBaseline = null;
       }
       delete td.dataset.editMode;
       td.classList.remove("editing");
@@ -534,8 +555,10 @@
       if (!st) return;
       const r = st.restore || {
         text: st.initialText,
-        formula: isFormulaStr(st.initialRaw) ? st.initialRaw : "",
+        formula: !st.initialCt && isFormulaStr(st.initialRaw) ? st.initialRaw : "",
+        ct: st.initialCt || "",
       };
+      td._ct = r.ct || "";
       grid.setDisplayValue(td, r.text);
       if (r.formula) td.dataset.formula = r.formula;
       else delete td.dataset.formula;
@@ -550,7 +573,9 @@
       const text = grid.readTdValue(td);
       const entry = {
         initialText: text,
-        initialRaw: td.dataset.formula || text,
+        initialCt: td._ct || "",
+        initialRaw: host.__EASYOFFICE_SHEET_CELL_TYPE__.editableRaw(text, td.dataset.formula || "", td._ct, td._nf),
+        editBaseline: null,
         ref: td.dataset.cell,
         pendingSnapshot: null,
         snapshotPushed: false,
@@ -566,7 +591,7 @@
     function onInput(td) {
       const st = stateOf(td);
       const rawText = (td.textContent || "").trim();
-      if (isFormulaStr(rawText)) td.dataset.formula = rawText;
+      if (!rawText.startsWith("'") && td._nf !== "@" && isFormulaStr(rawText)) td.dataset.formula = rawText;
       else delete td.dataset.formula;
       if (st) {
         if (!st.mode) markEditing(td, st, "edit");
