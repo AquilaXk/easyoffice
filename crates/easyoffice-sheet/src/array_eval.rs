@@ -321,6 +321,9 @@ impl SheetEngine {
             "ISOMITTED" => self.fn_isomitted(args, env),
             "IF" => self.fn_if_array(args, env, ctx, depth),
             "IFERROR" | "IFNA" => self.fn_iferror_array(name == "IFNA", args, env, ctx, depth),
+            "IFS" => self.fn_ifs_array(args, env, ctx, depth),
+            "SWITCH" => self.fn_switch_array(args, env, ctx, depth),
+            "CHOOSE" => self.fn_choose_branch_array(args, env, ctx, depth),
             "OFFSET" | "ROW" | "COLUMN"
                 if args
                     .first()
@@ -364,9 +367,18 @@ impl SheetEngine {
             _ => {
                 let mark = ctx.temp.len();
                 let args = self.substitute_args(args, env, ctx, depth)?;
+                let prev_link = ctx.last_hyperlink_id;
+                ctx.last_hyperlink_id = 0;
                 let value = self.eval_func_ctx(name, &args, ctx, depth);
+                let link_id =
+                    if name == "HYPERLINK" || (name == "INDEX" && !matches!(value, V::Error(_))) {
+                        ctx.last_hyperlink_id
+                    } else {
+                        0
+                    };
+                ctx.last_hyperlink_id = prev_link;
                 ctx.temp.truncate(mark);
-                Ok(Val::scalar(value))
+                Ok(Val::grid(Grid::scalar_with_link(value, link_id)))
             }
         }
     }
@@ -473,6 +485,9 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> ValResult {
+        if name == "HYPERLINK" {
+            return self.lifted_hyperlink(args, env, ctx, depth);
+        }
         let mut grids: Vec<Option<Arc<Grid>>> = Vec::with_capacity(args.len());
         let mut call_args: Vec<Expr> = args.to_vec();
         for (i, arg) in args.iter().enumerate() {
@@ -520,6 +535,74 @@ impl SheetEngine {
             }
         }
         Ok(Val::grid(Grid::from_rows(rows, cols, data)))
+    }
+
+    /// Element-wise `HYPERLINK(target, [friendly_name])` over scalar or array arguments without intermediate AST clones.
+    fn lifted_hyperlink(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if args.is_empty() || args.len() > 2 {
+            return Ok(Val::error(FormulaError::Value));
+        }
+        let target_grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
+        let name_grid = match args.get(1) {
+            Some(arg) if !matches!(arg, Expr::Missing) => {
+                Some(self.eval_val(arg, env, ctx, depth + 1)?.into_grid()?)
+            }
+            _ => None,
+        };
+        let (rows, cols) = match &name_grid {
+            Some(ng) => broadcast_dims(&[&target_grid, ng]),
+            None => (target_grid.rows.max(1), target_grid.cols.max(1)),
+        };
+        let to_res = |v: V| match v {
+            V::Error(e) => Err(e),
+            other => Ok(other),
+        };
+        ctx.charge_array_cells(rows, cols)?;
+        let total = rows * cols;
+        let mut data = Vec::with_capacity(total);
+        let mut links: Option<Vec<u32>> = None;
+        let prev = ctx.last_hyperlink_id;
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = data.len();
+                ctx.last_hyperlink_id = 0;
+                let t_res = to_res(broadcast_at(&target_grid, r, c));
+                let n_res = name_grid.as_ref().map(|ng| to_res(broadcast_at(ng, r, c)));
+                let cell = match Self::eval_hyperlink_vals(t_res, n_res, ctx) {
+                    Ok(v) => v,
+                    Err(e) => V::Error(e),
+                };
+                let link_id = ctx.last_hyperlink_id;
+                let hb = cell.heap_bytes();
+                if hb > 0 {
+                    ctx.last_hyperlink_id = prev;
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data.push(cell);
+                if link_id != 0 {
+                    let lv = links.get_or_insert_with(|| vec![0u32; total]);
+                    lv[idx] = link_id;
+                }
+                if (idx & 4095) == 4095 {
+                    ctx.last_hyperlink_id = prev;
+                    ctx.charge_steps(1)?;
+                    ctx.poll_deadline();
+                    if ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                }
+            }
+        }
+        ctx.last_hyperlink_id = prev;
+        Ok(Val::grid(Grid::from_rows_with_links(
+            rows, cols, data, links,
+        )))
     }
 }
 

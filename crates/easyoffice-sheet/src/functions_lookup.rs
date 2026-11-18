@@ -433,6 +433,12 @@ impl SheetEngine {
             (eff_r as u32 - 1, eff_c as u32 - 1)
         };
         let coord = packed(min_r + r_off, min_c + c_off)?;
+        if let Some(index) = sheet_opt
+            .as_deref()
+            .and_then(crate::array::virtual_sheet_index)
+        {
+            ctx.last_hyperlink_id = ctx.temp_link_id(index, coord);
+        }
         Ok(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))
     }
 

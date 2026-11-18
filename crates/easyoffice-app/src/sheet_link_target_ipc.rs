@@ -11,7 +11,7 @@
 use crate::sheet_session::{registry, session_id, Applied, EXPIRED, REFUSED};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::{EvaluatedCellValue, FormulaError, PackedCellCoordinate, WorkbookEngine};
+use easyoffice_sheet::{EvaluatedCellValue, FormulaError, PackedCellCoordinate};
 use std::time::Instant;
 
 type Entries = [(String, StrictJsonValue)];
@@ -35,6 +35,14 @@ fn answer(found: Option<Result<String, FormulaError>>) -> String {
     }
 }
 
+/// Parameters of one `linkTarget` lookup.
+pub(crate) struct LinkTargetQuery<'a> {
+    pub(crate) sheet: &'a str,
+    pub(crate) cell: PackedCellCoordinate,
+    pub(crate) anchor: Option<PackedCellCoordinate>,
+    pub(crate) formula: &'a str,
+}
+
 impl EasyOfficeIpcRouter {
     pub(crate) fn sheet_link_target(
         entries: &Entries,
@@ -52,15 +60,21 @@ impl EasyOfficeIpcRouter {
                 .unwrap_or("")
                 .trim(),
         )?;
+        let anchor = match Self::optional_json_str(entries, "anchor")?
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(a1) => Some(PackedCellCoordinate::parse_a1(a1)?),
+            None => None,
+        };
         if StrictJsonValue::get_field(entries, "session").is_some() {
-            return match registry().link_target(
-                session_id(entries)?,
-                owner,
+            let q = LinkTargetQuery {
                 sheet,
                 cell,
+                anchor,
                 formula,
-                Instant::now(),
-            )? {
+            };
+            return match registry().link_target(session_id(entries)?, owner, &q, Instant::now())? {
                 Applied::Done(json) => Ok(json),
                 Applied::Expired => Ok(EXPIRED.to_string()),
                 Applied::Refused => Ok(REFUSED.to_string()),
@@ -68,9 +82,10 @@ impl EasyOfficeIpcRouter {
         }
         let default_sheet = Self::resolve_default_sheet_from_entries(entries)?;
         let wb = Self::build_workbook_from_json_entries(entries, &default_sheet)?;
-        Ok(answer(wb.hyperlink_address_at(
+        Ok(answer(wb.hyperlink_address_for_cell(
             Self::json_sheet_name_or_default(sheet, &default_sheet),
-            Some(cell),
+            cell,
+            anchor,
             formula,
         )))
     }
@@ -81,23 +96,18 @@ impl crate::sheet_session::Registry {
         &self,
         id: &str,
         owner: &str,
-        sheet: &str,
-        cell: PackedCellCoordinate,
-        formula: &str,
+        q: &LinkTargetQuery<'_>,
         now: Instant,
     ) -> Result<Applied, EasyOfficeError> {
         let Some(handle) = self.checkout(id, owner, now) else {
             return Ok(Applied::Expired);
         };
-        let Ok(session) = handle.lock() else {
+        let Ok(mut session) = handle.lock() else {
             self.forget(id);
             return Ok(Applied::Expired);
         };
-        let wb: &WorkbookEngine = session.workbook();
-        Ok(Applied::Done(answer(wb.hyperlink_address_at(
-            sheet,
-            Some(cell),
-            formula,
+        Ok(Applied::Done(answer(session.hyperlink_address_for_cell(
+            q.sheet, q.cell, q.anchor, q.formula,
         ))))
     }
 }
@@ -209,6 +219,46 @@ mod tests {
         assert_eq!(
             stateless("=HYPERLINK(\"file:///etc/passwd\")"),
             "{\"error\":\"#VALUE!\"}"
+        );
+    }
+
+    #[test]
+    fn wrapped_and_spilled_hyperlink_cells_resolve_their_own_address() {
+        let id = open(&[
+            ("A1", "TRUE"),
+            (
+                "C1",
+                "=IF(A1, HYPERLINK(\"https://example.com/wrapped\", \"열기\"), \"대기\")",
+            ),
+            (
+                "D1",
+                "=VSTACK(\"제목\", HYPERLINK(\"https://example.com/p/\"&SEQUENCE(2), \"p\"&SEQUENCE(2)))",
+            ),
+        ]);
+        assert_eq!(
+            call(&format!(
+                "{{\"sessionAction\":\"linkTarget\",\"session\":\"{id}\",\"sheet\":\"S\",\"cell\":\"C1\",\"formula\":\"\"}}"
+            ))
+            .unwrap(),
+            "{\"target\":\"https://example.com/wrapped\"}"
+        );
+        assert_eq!(
+            call(&format!(
+                "{{\"sessionAction\":\"linkTarget\",\"session\":\"{id}\",\"sheet\":\"S\",\"cell\":\"D1\",\"anchor\":\"D1\",\"formula\":\"\"}}"
+            ))
+            .unwrap(),
+            "{\"none\":true}"
+        );
+        assert_eq!(
+            call(&format!(
+                "{{\"sessionAction\":\"linkTarget\",\"session\":\"{id}\",\"sheet\":\"S\",\"cell\":\"D3\",\"anchor\":\"D1\",\"formula\":\"\"}}"
+            ))
+            .unwrap(),
+            "{\"target\":\"https://example.com/p/2\"}"
+        );
+        assert_eq!(
+            call("{\"sessionAction\":\"linkTarget\",\"sheet\":\"S\",\"sheets\":[\"S\"],\"cell\":\"D2\",\"anchor\":\"D1\",\"cells\":[],\"formula\":\"=HYPERLINK(\\\"https://example.com/s/\\\"&SEQUENCE(2),\\\"항목\\\")\"}").unwrap(),
+            "{\"target\":\"https://example.com/s/2\"}"
         );
     }
 

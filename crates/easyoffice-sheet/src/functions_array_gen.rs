@@ -127,23 +127,23 @@ impl SheetEngine {
             cond.rows.max(yes.rows).max(no.rows),
             cond.cols.max(yes.cols).max(no.cols),
         );
-        let grid = Grid::build_checked(ctx, rows, cols, |r, c| {
+        let grid = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
             let at = |g: &Grid| {
                 let (r, c) = (
                     if g.rows == 1 { 0 } else { r },
                     if g.cols == 1 { 0 } else { c },
                 );
-                (r < g.rows && c < g.cols).then(|| g.get(r, c).clone())
+                (r < g.rows && c < g.cols).then(|| (g.get(r, c).clone(), g.link_id(r, c)))
             };
             match at(&cond) {
-                Some(flag) => match pick(&flag) {
+                Some((flag, _)) => match pick(&flag) {
                     Ok(true) => at(&yes),
                     Ok(false) => at(&no),
-                    Err(e) => Some(V::Error(e)),
+                    Err(e) => Some((V::Error(e), 0)),
                 },
                 None => None,
             }
-            .unwrap_or(V::Error(FormulaError::Na))
+            .unwrap_or((V::Error(FormulaError::Na), 0))
         })?;
         Ok(Val::grid(grid))
     }
@@ -168,20 +168,235 @@ impl SheetEngine {
         if !value.data.iter().any(caught) {
             return Ok(Val::Grid(value));
         }
+        if value.is_scalar() {
+            return self.eval_val(&args[1], env, ctx, depth + 1);
+        }
         let fallback = self.eval_val(&args[1], env, ctx, depth + 1)?.into_grid()?;
         let (rows, cols) = (value.rows.max(fallback.rows), value.cols.max(fallback.cols));
-        let grid = Grid::build_checked(ctx, rows, cols, |r, c| {
+        let grid = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
             let at = |g: &Grid| {
                 let (r, c) = (
                     if g.rows == 1 { 0 } else { r },
                     if g.cols == 1 { 0 } else { c },
                 );
-                (r < g.rows && c < g.cols).then(|| g.get(r, c).clone())
+                (r < g.rows && c < g.cols).then(|| (g.get(r, c).clone(), g.link_id(r, c)))
             };
             match at(&value) {
-                Some(v) if !caught(&v) => v,
-                Some(_) => at(&fallback).unwrap_or(V::Error(FormulaError::Na)),
-                None => V::Error(FormulaError::Na),
+                Some((v, lid)) if !caught(&v) => (v, lid),
+                Some(_) => at(&fallback).unwrap_or((V::Error(FormulaError::Na), 0)),
+                None => (V::Error(FormulaError::Na), 0),
+            }
+        })?;
+        Ok(Val::grid(grid))
+    }
+
+    /// `IFS(cond1, val1, ...)` preserving hyperlink handles and short-circuiting scalar conditions.
+    pub(crate) fn fn_ifs_array(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if args.len() < 2 || args.len() % 2 != 0 {
+            return Err(FormulaError::Value);
+        }
+        let to_bool = |v: &V| match v {
+            V::Error(e) => Err(*e),
+            V::Empty => Ok(false),
+            other => other.as_bool().ok_or(FormulaError::Value),
+        };
+        if !args.iter().step_by(2).any(crate::array_class::arrayish) {
+            for pair in args.chunks(2) {
+                let cond = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
+                if cond.is_scalar() {
+                    match to_bool(&cond.data[0]) {
+                        Ok(true) => return self.eval_val(&pair[1], env, ctx, depth + 1),
+                        Ok(false) => continue,
+                        Err(e) => return Ok(Val::error(e)),
+                    }
+                }
+            }
+            return Ok(Val::error(FormulaError::Na));
+        }
+        let mut pairs = Vec::with_capacity(args.len() / 2);
+        let (mut rows, mut cols) = (1usize, 1usize);
+        for pair in args.chunks(2) {
+            let c = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
+            let v = self.eval_val(&pair[1], env, ctx, depth + 1)?.into_grid()?;
+            rows = rows.max(c.rows).max(v.rows);
+            cols = cols.max(c.cols).max(v.cols);
+            pairs.push((c, v));
+        }
+        let grid = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
+            let at = |g: &Grid| {
+                let (rr, cc) = (
+                    if g.rows == 1 { 0 } else { r },
+                    if g.cols == 1 { 0 } else { c },
+                );
+                (rr < g.rows && cc < g.cols).then(|| (g.get(rr, cc).clone(), g.link_id(rr, cc)))
+            };
+            for (cg, vg) in &pairs {
+                let Some((flag, _)) = at(cg) else {
+                    return (V::Error(FormulaError::Na), 0);
+                };
+                match to_bool(&flag) {
+                    Ok(true) => return at(vg).unwrap_or((V::Error(FormulaError::Na), 0)),
+                    Ok(false) => {}
+                    Err(e) => return (V::Error(e), 0),
+                }
+            }
+            (V::Error(FormulaError::Na), 0)
+        })?;
+        Ok(Val::grid(grid))
+    }
+
+    /// `SWITCH(expr, val1, res1, ..., [default])` preserving hyperlink handles.
+    pub(crate) fn fn_switch_array(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if args.len() < 3 {
+            return Err(FormulaError::Value);
+        }
+        let target = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
+        let rest = &args[1..];
+        if target.is_scalar()
+            && !rest
+                .chunks_exact(2)
+                .any(|p| crate::array_class::arrayish(&p[0]))
+        {
+            if let V::Error(e) = target.data[0] {
+                return Ok(Val::error(e));
+            }
+            for pair in rest.chunks_exact(2) {
+                let k = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
+                if k.is_scalar() {
+                    if let V::Error(e) = k.data[0] {
+                        return Ok(Val::error(e));
+                    }
+                    if Self::values_match(&target.data[0], &k.data[0]) {
+                        return self.eval_val(&pair[1], env, ctx, depth + 1);
+                    }
+                }
+            }
+            return match rest.len() % 2 {
+                1 => self.eval_val(&rest[rest.len() - 1], env, ctx, depth + 1),
+                _ => Ok(Val::error(FormulaError::Na)),
+            };
+        }
+        let mut pairs = Vec::with_capacity(rest.len() / 2);
+        let (mut rows, mut cols) = (target.rows, target.cols);
+        for pair in rest.chunks_exact(2) {
+            let k = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
+            let v = self.eval_val(&pair[1], env, ctx, depth + 1)?.into_grid()?;
+            rows = rows.max(k.rows).max(v.rows);
+            cols = cols.max(k.cols).max(v.cols);
+            pairs.push((k, v));
+        }
+        let default = if rest.len() % 2 == 1 {
+            let d = self
+                .eval_val(&rest[rest.len() - 1], env, ctx, depth + 1)?
+                .into_grid()?;
+            rows = rows.max(d.rows);
+            cols = cols.max(d.cols);
+            Some(d)
+        } else {
+            None
+        };
+        let grid = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
+            let at = |g: &Grid| {
+                let (rr, cc) = (
+                    if g.rows == 1 { 0 } else { r },
+                    if g.cols == 1 { 0 } else { c },
+                );
+                (rr < g.rows && cc < g.cols).then(|| (g.get(rr, cc).clone(), g.link_id(rr, cc)))
+            };
+            let Some((tv, _)) = at(&target) else {
+                return (V::Error(FormulaError::Na), 0);
+            };
+            if let V::Error(e) = tv {
+                return (V::Error(e), 0);
+            }
+            for (kg, vg) in &pairs {
+                let Some((kv, _)) = at(kg) else {
+                    return (V::Error(FormulaError::Na), 0);
+                };
+                if let V::Error(e) = kv {
+                    return (V::Error(e), 0);
+                }
+                if Self::values_match(&tv, &kv) {
+                    return at(vg).unwrap_or((V::Error(FormulaError::Na), 0));
+                }
+            }
+            match &default {
+                Some(dg) => at(dg).unwrap_or((V::Error(FormulaError::Na), 0)),
+                None => (V::Error(FormulaError::Na), 0),
+            }
+        })?;
+        Ok(Val::grid(grid))
+    }
+
+    /// `CHOOSE(index_num, value1, ...)` preserving arrays and hyperlink handles.
+    pub(crate) fn fn_choose_branch_array(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if args.len() < 2 {
+            return Err(FormulaError::Value);
+        }
+        let idx_grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
+        let pick_idx = |v: &V| -> Result<usize, FormulaError> {
+            if let V::Error(e) = v {
+                return Err(*e);
+            }
+            let n = v.as_number().ok_or(FormulaError::Value)?.trunc() as isize;
+            if n < 1 || (n as usize) >= args.len() {
+                return Err(FormulaError::Value);
+            }
+            Ok(n as usize)
+        };
+        if idx_grid.is_scalar() {
+            return match pick_idx(&idx_grid.data[0]) {
+                Ok(i) => self.eval_val(&args[i], env, ctx, depth + 1),
+                Err(e) => Ok(Val::error(e)),
+            };
+        }
+        let mut choices: Vec<Option<std::sync::Arc<Grid>>> = vec![None; args.len()];
+        let (mut rows, mut cols) = (idx_grid.rows, idx_grid.cols);
+        for v in &idx_grid.data {
+            if let Ok(i) = pick_idx(v) {
+                if choices[i].is_none() {
+                    let g = self.eval_val(&args[i], env, ctx, depth + 1)?.into_grid()?;
+                    rows = rows.max(g.rows);
+                    cols = cols.max(g.cols);
+                    choices[i] = Some(g);
+                }
+            }
+        }
+        let grid = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
+            let at = |g: &Grid| {
+                let (rr, cc) = (
+                    if g.rows == 1 { 0 } else { r },
+                    if g.cols == 1 { 0 } else { c },
+                );
+                (rr < g.rows && cc < g.cols).then(|| (g.get(rr, cc).clone(), g.link_id(rr, cc)))
+            };
+            let Some((iv, _)) = at(&idx_grid) else {
+                return (V::Error(FormulaError::Na), 0);
+            };
+            match pick_idx(&iv) {
+                Ok(i) => choices[i]
+                    .as_deref()
+                    .and_then(at)
+                    .unwrap_or((V::Error(FormulaError::Na), 0)),
+                Err(e) => (V::Error(e), 0),
             }
         })?;
         Ok(Val::grid(grid))

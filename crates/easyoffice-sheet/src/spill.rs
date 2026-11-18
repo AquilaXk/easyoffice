@@ -49,11 +49,26 @@ pub(crate) struct Area {
 pub(crate) struct SpillTable {
     areas: CellMap<Area>,
     owner: CellMap<PackedCellCoordinate>,
+    active_links: crate::DetSet<PackedCellCoordinate>,
 }
 
 impl SpillTable {
     pub(crate) fn is_empty(&self) -> bool {
-        self.areas.is_empty()
+        self.areas.is_empty() && self.active_links.is_empty()
+    }
+
+    #[inline]
+    pub(crate) fn has_active_link(&self, coord: PackedCellCoordinate) -> bool {
+        self.active_links.contains(&coord)
+    }
+
+    #[inline]
+    pub(crate) fn remove_active_link(&mut self, coord: PackedCellCoordinate) -> bool {
+        self.active_links.remove(&coord)
+    }
+
+    pub(crate) fn active_links(&self) -> impl Iterator<Item = PackedCellCoordinate> + '_ {
+        self.active_links.iter().copied()
     }
 
     /// Rows and columns of the placed area of the anchor at `anchor`.
@@ -281,6 +296,8 @@ pub(crate) struct Pending {
     pub(crate) area: Area,
     /// The values of a placed array bigger than one cell.
     pub(crate) grid: Option<Arc<Grid>>,
+    /// Whether `(0, 0)` of the formula's grid carries a live `HYPERLINK` target (PD-236).
+    pub(crate) anchor_link: bool,
 }
 
 /// An anchor whose area changed in a recalculation: `rows` and `cols` are 0 when it no longer
@@ -326,6 +343,7 @@ impl SheetEngine {
         };
         let sheet_id = self.resolved_sheet_id();
         let (rows, cols) = (grid.rows as u32, grid.cols as u32);
+        let anchor_link = grid.link_id(0, 0) != 0 && !matches!(first, V::Error(_));
         if grid.is_scalar() {
             let area = Area {
                 rows: 1,
@@ -337,6 +355,7 @@ impl SheetEngine {
                 anchor,
                 area,
                 grid: None,
+                anchor_link,
             });
             return first;
         }
@@ -360,6 +379,7 @@ impl SheetEngine {
                 anchor,
                 area,
                 grid: None,
+                anchor_link: false,
             });
             return V::Error(FormulaError::Spill);
         }
@@ -382,6 +402,7 @@ impl SheetEngine {
             anchor,
             area,
             grid: Some(grid),
+            anchor_link,
         });
         first
     }
@@ -453,6 +474,8 @@ pub(crate) struct Published {
     pub(crate) infos: Vec<SpillInfo>,
     /// The cells an anchor gave up (a blocked anchor that asked for them may fit now).
     pub(crate) freed: Vec<(u16, PackedCellCoordinate)>,
+    /// Cells whose `HYPERLINK` flag toggled even if their display value stayed equal (PD-236).
+    pub(crate) link_toggled: Vec<(u16, PackedCellCoordinate)>,
 }
 
 /// Applies the placements a pass decided to the sheets and the memo.
@@ -483,6 +506,15 @@ fn publish_one(
     out: &mut Published,
 ) {
     let anchor = p.anchor;
+    let next_anchor_link = !p.area.blocked && p.anchor_link;
+    let prev_anchor_link = if next_anchor_link {
+        !sheet.spill.active_links.insert(anchor)
+    } else {
+        sheet.spill.active_links.remove(&anchor)
+    };
+    if prev_anchor_link != next_anchor_link {
+        out.link_toggled.push((idx, anchor));
+    }
     let old = sheet.spill.areas.get(&anchor).copied();
     // Many cells at once: the populated-cell index is rebuilt in one sorted pass instead of patched cell by cell.
     let cells = |a: Option<Area>| a.map_or(0, |a| a.rows as usize * a.cols as usize);
@@ -502,6 +534,9 @@ fn publish_one(
                 if (dr + dc > 0) && (dr >= new_extent.0 || dc >= new_extent.1) {
                     let cell = at(anchor, dr, dc);
                     sheet.spill.owner.remove(&cell);
+                    if sheet.spill.active_links.remove(&cell) {
+                        out.link_toggled.push((idx, cell));
+                    }
                     let kept = sheet.cells.contains_key(&cell);
                     if let Some(index) = sheet.cell_index.get_mut() {
                         index.set_populated(cell, kept);
@@ -531,11 +566,23 @@ fn publish_one(
                         index.set_populated(cell, true);
                     }
                 }
+                let next_link =
+                    grid.link_id(dr as usize, dc as usize) != 0 && !matches!(value, V::Error(_));
+                let prev_link = if next_link {
+                    !sheet.spill.active_links.insert(cell)
+                } else {
+                    sheet.spill.active_links.remove(&cell)
+                };
                 let was = memo.get_at(p.sheet_id, cell).cloned();
-                if was.as_ref() != Some(&value) {
-                    out.before.push((idx, cell, was));
-                    out.touched.push((idx, cell));
-                    changed = true;
+                if was.as_ref() != Some(&value) || prev_link != next_link {
+                    out.before.push((idx, cell, was.clone()));
+                    if prev_link != next_link {
+                        out.link_toggled.push((idx, cell));
+                    }
+                    if was.as_ref() != Some(&value) {
+                        out.touched.push((idx, cell));
+                        changed = true;
+                    }
                 }
                 memo.insert_at(p.sheet_id, cell, value);
             }
@@ -571,6 +618,10 @@ pub(crate) fn release_anchor(
     anchor: PackedCellCoordinate,
     out: &mut Published,
 ) {
+    let had_link = sheet.spill.active_links.remove(&anchor);
+    if had_link {
+        out.link_toggled.push((idx, anchor));
+    }
     let Some(old) = sheet.spill.areas.remove(&anchor) else {
         return;
     };
@@ -585,6 +636,9 @@ pub(crate) fn release_anchor(
                     let cell = at(anchor, dr, dc);
                     if sheet.spill.owner.get(&cell) == Some(&anchor) {
                         sheet.spill.owner.remove(&cell);
+                        if sheet.spill.active_links.remove(&cell) {
+                            out.link_toggled.push((idx, cell));
+                        }
                         let kept = sheet.cells.contains_key(&cell);
                         if let Some(index) = sheet.cell_index.get_mut() {
                             index.set_populated(cell, kept);
@@ -598,13 +652,15 @@ pub(crate) fn release_anchor(
             }
         }
     }
-    out.infos.push(SpillInfo {
-        sheet: usize::from(idx),
-        anchor,
-        rows: 0,
-        cols: 0,
-        blocked: false,
-    });
+    if old.rows * old.cols > 1 || old.blocked {
+        out.infos.push(SpillInfo {
+            sheet: usize::from(idx),
+            anchor,
+            rows: 0,
+            cols: 0,
+            blocked: false,
+        });
+    }
 }
 
 impl SheetEngine {

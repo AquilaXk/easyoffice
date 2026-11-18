@@ -81,6 +81,21 @@ impl RecalcSession {
         }
         commit(&mut self.wb);
         self.name_bytes = self.wb.name_bytes();
+        for &(sheet, coord) in affected {
+            let needs_release = {
+                let engine = &self.wb.sheets()[sheet];
+                engine.spill.area_entry(coord).is_some() && !engine.array_formulas.contains(&coord)
+            };
+            if needs_release {
+                crate::spill::release_anchor(
+                    &mut self.wb.sheets_mut()[sheet],
+                    sheet as u16,
+                    &mut self.memo,
+                    coord,
+                    &mut self.released,
+                );
+            }
+        }
         pairs.clear();
         for &(sheet, coord) in affected {
             let sheet = sheet as u16;

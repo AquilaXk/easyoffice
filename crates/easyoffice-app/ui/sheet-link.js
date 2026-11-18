@@ -64,16 +64,155 @@
     return "#" + quoteSheet(sheet) + "!" + (one ? corner(rg.r1, rg.c1) : corner(rg.r1, rg.c1) + ":" + corner(rg.r2, rg.c2));
   }
 
-  // A formula that is a call of HYPERLINK (PD-223): the cell's result is a link as long as the call gives no error.
-  const HYPERLINK_FORMULA_RE = /^\s*=\s*HYPERLINK\s*\(/i;
+  // Formulas whose evaluated result can carry a HYPERLINK target (PD-223, PD-236). When the engine has evaluated the cell
+  // (`entry.formulaLink` boolean), its exact per-cell handle state wins (covering defined names, branch selection, and
+  // spilled child cells); before evaluation, a single-pass scan checks for a 1..2-argument HYPERLINK call not stripped by a
+  // top-level operator.
   const ERROR_VALUE_RE = /^#(VALUE!|REF!|NAME\?|N\/A|NUM!|DIV\/0!|NULL!|SPILL!|CALC!)$/;
-  const isHyperlinkFormula = (entry) =>
-    HYPERLINK_FORMULA_RE.test(entry?.formula || "") && !ERROR_VALUE_RE.test(String(entry?.value ?? ""));
+  const isIdentCont = (ch) =>
+    (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57) || ch === 95 || ch === 46 || ch >= 128;
+
+  function skipQuoted(src, i, quote) {
+    let p = i + 1;
+    while (p < src.length) {
+      if (src.charCodeAt(p) === quote) {
+        if (p + 1 < src.length && src.charCodeAt(p + 1) === quote) p += 2;
+        else return p + 1;
+      } else p += 1;
+    }
+    return p;
+  }
+
+  function validHyperlinkCallAt(src, openIdx) {
+    let depth = 1, commas = 0, hasToken = false, p = openIdx + 1;
+    while (p < src.length && depth > 0) {
+      const ch = src.charCodeAt(p);
+      if (ch === 34 || ch === 39) {
+        hasToken = true;
+        p = skipQuoted(src, p, ch);
+        continue;
+      }
+      if (ch === 40) {
+        depth += 1;
+        hasToken = true;
+      } else if (ch === 41) {
+        depth -= 1;
+        if (depth === 0) return hasToken && commas <= 1;
+      } else if (ch === 44 && depth === 1) {
+        commas += 1;
+        if (commas > 1) return false;
+      } else if (ch > 32) {
+        hasToken = true;
+      }
+      p += 1;
+    }
+    return false;
+  }
+
+  function mayYieldHyperlink(formula) {
+    const src = String(formula ?? "").trim();
+    if (!src.startsWith("=")) return false;
+    let i = 1;
+    while (i < src.length && src.charCodeAt(i) <= 32) i += 1;
+    if (i < src.length && src.charCodeAt(i) === 43) i += 1;
+    let depth = 0, sawHyperlink = false;
+    while (i < src.length) {
+      const ch = src.charCodeAt(i);
+      if (ch === 34 || ch === 39) {
+        i = skipQuoted(src, i, ch);
+        continue;
+      }
+      if (ch === 40) {
+        depth += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === 41) {
+        if (depth === 0) return false;
+        depth -= 1;
+        i += 1;
+        continue;
+      }
+      if (depth === 0 && (ch === 38 || ch === 43 || ch === 45 || ch === 42 || ch === 47 || ch === 94 || ch === 61 || ch === 60 || ch === 62 || ch === 37)) {
+        return false;
+      }
+      if ((ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch === 95 || ch >= 128) {
+        const start = i;
+        i += 1;
+        while (i < src.length && isIdentCont(src.charCodeAt(i))) i += 1;
+        let p = i;
+        while (p < src.length && src.charCodeAt(p) <= 32) p += 1;
+        if (p < src.length && src.charCodeAt(p) === 40 && i - start === 9 && src.slice(start, i).toUpperCase() === "HYPERLINK") {
+          if (validHyperlinkCallAt(src, p)) sawHyperlink = true;
+        }
+        continue;
+      }
+      i += 1;
+    }
+    return depth === 0 && sawHyperlink;
+  }
+
+  function isHyperlinkFormula(entry) {
+    if (!entry || ERROR_VALUE_RE.test(String(entry.value ?? ""))) return false;
+    if (typeof entry.formulaLink === "boolean") return entry.formulaLink;
+    return mayYieldHyperlink(entry.formula || "");
+  }
+
+  // O(1) ASCII lookup table for RFC 5322 dot-atom characters in bare email AutoCorrect (PD-236).
+  const EMAIL_LOCAL_OK = (() => {
+    const tbl = new Uint8Array(128);
+    const mark = (s) => {
+      for (let i = 0; i < s.length; i += 1) tbl[s.charCodeAt(i)] = 1;
+    };
+    for (let c = 48; c <= 57; c += 1) tbl[c] = 1;
+    for (let c = 65; c <= 90; c += 1) tbl[c] = 1;
+    for (let c = 97; c <= 122; c += 1) tbl[c] = 1;
+    mark("!#$%&'*+/=?^_`{|}~-.");
+    return tbl;
+  })();
+
+  function isBareEmail(typed) {
+    const len = typed.length;
+    if (len < 6 || len > 254) return false;
+    const at = typed.indexOf("@");
+    if (at < 1 || at > 64 || typed.indexOf("@", at + 1) !== -1) return false;
+    if (typed.charCodeAt(0) === 46 || typed.charCodeAt(at - 1) === 46) return false;
+    let prevDot = false;
+    for (let i = 0; i < at; i += 1) {
+      const c = typed.charCodeAt(i);
+      if (c >= 128 || EMAIL_LOCAL_OK[c] === 0) return false;
+      if (c === 46) {
+        if (prevDot) return false;
+        prevDot = true;
+      } else prevDot = false;
+    }
+    const domLen = len - at - 1;
+    if (domLen < 4 || domLen > 253) return false;
+    let labelLen = 0, labels = 1, allAlpha = true, prevHyphen = false;
+    for (let i = at + 1; i < len; i += 1) {
+      const c = typed.charCodeAt(i);
+      if (c === 46) {
+        if (labelLen === 0 || labelLen > 63 || prevHyphen) return false;
+        labels += 1;
+        labelLen = 0;
+        allAlpha = true;
+        prevHyphen = false;
+        continue;
+      }
+      const alpha = (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+      const digit = c >= 48 && c <= 57;
+      if (!alpha && !digit && c !== 45) return false;
+      if (c === 45 && labelLen === 0) return false;
+      if (!alpha) allAlpha = false;
+      prevHyphen = c === 45;
+      labelLen += 1;
+    }
+    return labels >= 2 && labelLen >= 2 && labelLen <= 63 && !prevHyphen && allAlpha;
+  }
 
   // The address a typed text becomes under the AutoCorrect rule of the spreadsheet programs, "Internet and network paths with
-  // hyperlinks" (PD-223): the whole text is one word that starts with http://, https:// or mailto:, or with www. and holds a
-  // dot after it (the address then starts with http://). Null for any other text, and for an address the policy refuses.
-  // The checks are plain scans (no backtracking pattern) over a text of at most the address length.
+  // hyperlinks" (PD-223, PD-236): the whole text is one word starting with http://, https:// or mailto:, with www. and a dot
+  // after it (http://), or a bare email address local@domain.tld (mailto:). Null for any other text or refused target.
   const MAX_ADDRESS_CHARS = 2048;
   const AUTO_SCHEME_RE = /^(?:https?:\/\/|mailto:)/i;
   const AUTO_WHITESPACE_RE = /\s/;
@@ -82,10 +221,12 @@
     if (typed.length > MAX_ADDRESS_CHARS || AUTO_WHITESPACE_RE.test(typed)) return null;
     const scheme = AUTO_SCHEME_RE.exec(typed);
     if (scheme) return typed.length > scheme[0].length ? normalizeTarget(typed) : null;
-    if (typed.slice(0, 4).toLowerCase() !== "www.") return null;
-    const rest = typed.slice(4);
-    const dot = rest.indexOf(".", 1);
-    return rest[0] !== "." && dot > 0 && dot < rest.length - 1 ? normalizeTarget("http://" + typed) : null;
+    if (typed.slice(0, 4).toLowerCase() === "www.") {
+      const rest = typed.slice(4);
+      const dot = rest.indexOf(".", 1);
+      return rest[0] !== "." && dot > 0 && dot < rest.length - 1 ? normalizeTarget("http://" + typed) : null;
+    }
+    return isBareEmail(typed) ? normalizeTarget("mailto:" + typed) : null;
   }
 
   // A cell with a hyperlink shows as a link and says where it goes: the screen tip, else the address. A cell whose
@@ -178,6 +319,7 @@
     normalizeTarget,
     make,
     of,
+    mayYieldHyperlink,
     isHyperlinkFormula,
     autoTarget,
     isInternal,

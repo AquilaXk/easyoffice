@@ -20,6 +20,8 @@ pub struct SpillArea {
     /// The array could not be placed: the anchor shows `#SPILL!` and the values are not on the sheet.
     pub blocked: bool,
     pub values: Vec<EvaluatedCellValue>,
+    /// Row-major hyperlink flags when at least one cell in the placed area carries a `HYPERLINK` target; empty otherwise (PD-236).
+    pub links: Vec<bool>,
 }
 
 impl RecalcSession {
@@ -195,6 +197,47 @@ impl RecalcSession {
         (value, expired)
     }
 
+    /// Evaluates the `HYPERLINK` target of `cell` (or its spill anchor) using the session's settled memo (PD-236).
+    pub fn hyperlink_address_for_cell(
+        &mut self,
+        sheet: &str,
+        cell: PackedCellCoordinate,
+        anchor_hint: Option<PackedCellCoordinate>,
+        formula: &str,
+    ) -> Option<Result<String, FormulaError>> {
+        let idx = self.wb.find_sheet_index(sheet)?;
+        let (sid, anchor, eff) = {
+            let engine = &self.wb.sheets()[idx];
+            let anchor = anchor_hint
+                .or_else(|| engine.spill.owner_of(cell))
+                .unwrap_or(cell);
+            if cell.row() < anchor.row() || cell.col() < anchor.col() {
+                return None;
+            }
+            let eff = if !formula.trim().is_empty() {
+                formula.to_string()
+            } else {
+                engine.cells.get(&anchor)?.clone()
+            };
+            (engine.resolved_sheet_id(), anchor, eff)
+        };
+        let mut ctx =
+            EvalContext::with_workbook(&self.wb, sid).with_time_limit(self.budget.max_time);
+        ctx.memo = std::mem::replace(&mut self.memo, crate::MemoTable::new(1));
+        ctx.rng_state = self.rng_state;
+        ctx.current_coord = Some(anchor);
+        ctx.reset_steps();
+        let res = self.wb.sheets()[idx].hyperlink_address_ctx(
+            &eff,
+            (cell.row() - anchor.row()) as usize,
+            (cell.col() - anchor.col()) as usize,
+            &mut ctx,
+        );
+        self.rng_state = ctx.rng_state;
+        self.memo = ctx.memo;
+        res
+    }
+
     /// The value of every populated cell of `sheet`, the cells arrays fill included.
     pub fn sheet_values(&self, sheet: &str) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
         let Some(idx) = self.wb.find_sheet_index(sheet) else {
@@ -235,7 +278,9 @@ impl RecalcSession {
             for (anchor, area) in anchors {
                 let (rows, cols) = (area.rows as usize, area.cols as usize);
                 let mut values = Vec::with_capacity(if area.blocked { 0 } else { rows * cols });
+                let mut links = Vec::new();
                 if !area.blocked {
+                    let mut idx = 0usize;
                     for r in 0..rows {
                         for c in 0..cols {
                             let at = PackedCellCoordinate(
@@ -248,6 +293,13 @@ impl RecalcSession {
                                     .cloned()
                                     .unwrap_or(EvaluatedCellValue::Empty),
                             );
+                            if engine.has_active_formula_link(at) {
+                                if links.is_empty() {
+                                    links.resize(rows * cols, false);
+                                }
+                                links[idx] = true;
+                            }
+                            idx += 1;
                         }
                     }
                 }
@@ -258,6 +310,7 @@ impl RecalcSession {
                     cols,
                     blocked: area.blocked,
                     values,
+                    links,
                 });
             }
         }

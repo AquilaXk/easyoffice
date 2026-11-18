@@ -214,10 +214,7 @@
         if (numFmt) cellEntry.style.numFmt = numFmt;
         for (const key of lookApi?.hasLook(look) ? lookApi.LOOK_KEYS : []) if (look[key]) cellEntry.style[key] = look[key];
       }
-      if (spill?.isAnchor(prevEntry) && prevEntry.formula === formula) {
-        cellEntry.spillRows = prevEntry.spillRows;
-        cellEntry.spillCols = prevEntry.spillCols;
-      }
+      spill?.copyComputedMeta(prevEntry, cellEntry, formula);
       // A hyperlink (PD-218) stays through any text the cell is given, even none.
       if (prevEntry?.link) cellEntry.link = prevEntry.link;
       map[ref] = cellEntry;
@@ -460,6 +457,7 @@
               isFormulaStr((td.textContent || "").trim());
             if (!isEditingFormulaInPlace) {
               grid.setDisplayValue(td, value);
+              host.__EASYOFFICE_SHEET_LINK__?.paint(td, storedEntry?.link, storedEntry);
               syncSheetCellFocusBaseline(td, forceFocusedDisplay);
             }
           }

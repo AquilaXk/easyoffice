@@ -552,7 +552,47 @@ impl WorkbookEngine {
         let sheet = self.sheet(sheet_name)?;
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         ctx.current_coord = anchor;
-        sheet.hyperlink_address_ctx(formula, &mut ctx)
+        sheet.hyperlink_address_ctx(formula, 0, 0, &mut ctx)
+    }
+
+    /// The address of a `HYPERLINK` formula cell or spilled child `cell` on `sheet_name` (PD-236).
+    pub fn hyperlink_address_for_cell(
+        &self,
+        sheet_name: &str,
+        cell: PackedCellCoordinate,
+        anchor_hint: Option<PackedCellCoordinate>,
+        formula: &str,
+    ) -> Option<Result<String, FormulaError>> {
+        if self.has_array_formulas() {
+            if let Some(mut settled) = self.settle(crate::MAX_EVAL_TIME) {
+                return settled.session.hyperlink_address_for_cell(
+                    sheet_name,
+                    cell,
+                    anchor_hint,
+                    formula,
+                );
+            }
+        }
+        let sheet = self.sheet(sheet_name)?;
+        let anchor = anchor_hint
+            .or_else(|| sheet.spill.owner_of(cell))
+            .unwrap_or(cell);
+        if cell.row() < anchor.row() || cell.col() < anchor.col() {
+            return None;
+        }
+        let eff = if !formula.trim().is_empty() {
+            formula
+        } else {
+            sheet.cells.get(&anchor).map(String::as_str)?
+        };
+        let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+        ctx.current_coord = Some(anchor);
+        sheet.hyperlink_address_ctx(
+            eff,
+            (cell.row() - anchor.row()) as usize,
+            (cell.col() - anchor.col()) as usize,
+            &mut ctx,
+        )
     }
 
     pub fn evaluate_formula_on_sheet_at(
@@ -590,6 +630,10 @@ pub struct WorkbookBatchEvaluation {
     pub unreached: Vec<bool>,
     /// The arrays of the workbook that spill, with their values (PD-217); empty without array formulas.
     pub spills: Vec<crate::SpillArea>,
+    /// Formula cells (anchors and spilled cells) whose current evaluated value carries a `HYPERLINK` target (PD-236).
+    pub formula_links: Vec<(String, PackedCellCoordinate)>,
+    /// Whether any compiled formula in the workbook contains a `HYPERLINK` call (PD-236).
+    pub has_hyperlink_formulas: bool,
 }
 
 impl WorkbookBatchEvaluation {

@@ -334,6 +334,11 @@ impl SheetEngine {
         }
     }
 
+    #[inline]
+    pub(crate) fn has_active_formula_link(&self, coord: PackedCellCoordinate) -> bool {
+        self.spill.has_active_link(coord)
+    }
+
     /// Records whether the formula compiled for `coord` is one the array evaluator calculates.
     fn mark_array_formula(
         &mut self,
@@ -344,6 +349,7 @@ impl SheetEngine {
             self.array_formulas.insert(coord);
         } else {
             self.array_formulas.remove(&coord);
+            self.spill.remove_active_link(coord);
         }
     }
 
@@ -353,6 +359,7 @@ impl SheetEngine {
             self.compiled_asts.remove(&coord);
             self.subtotal_coords.remove(&coord);
             self.array_formulas.remove(&coord);
+            self.spill.remove_active_link(coord);
             self.set_name_uses(coord, None);
             self.update_dense_number(coord, None);
         } else {
@@ -386,6 +393,7 @@ impl SheetEngine {
         self.compiled_asts.insert(coord, comp);
         self.subtotal_coords.remove(&coord);
         self.array_formulas.remove(&coord);
+        self.spill.remove_active_link(coord);
         self.cells.insert(coord, format!("{num}"));
         self.patch_indexes(coord, was_populated, was_formula);
     }

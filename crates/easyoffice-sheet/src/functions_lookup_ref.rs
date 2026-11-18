@@ -15,9 +15,10 @@
 //! Differences from the original: `LOOKUP` reuses the approximate-match binary search of `VLOOKUP`
 //! (type-aware, linear fallback on unsorted data), a relative R1C1 `ADDRESS` is counted from the
 //! formula cell as the file format defines it, the row and column are checked against the sheet size,
-//! `HYPERLINK` keeps the type of its friendly name and accepts only the link targets of the document
-//! editor (`http`, `https`, `mailto`) or a `#` jump inside the workbook, and a multi-cell reference gives its first cell (cells hold one
-//! value).
+//! `HYPERLINK` keeps the type of its friendly name, accepts only the link targets of the document
+//! editor (`http`, `https`, `mailto`) or a `#` jump inside the workbook, lifts element-wise over
+//! array arguments, and attaches a compact `u32` handle so wrapper functions (`IF`, `LET`, `LAMBDA`,
+//! `INDEX`, `VSTACK`, etc.) preserve the selected cell's target while arithmetic and `&` strip it.
 
 use crate::functions_lookup::{
     check_lookup_arity, same_value_type, sorted_approx_binary_search, update_best_floor,
@@ -250,6 +251,37 @@ impl SheetEngine {
         }
     }
 
+    /// Validates and evaluates one `(target, optional_name)` `HYPERLINK` pair, recording its handle on `ctx`.
+    pub(crate) fn eval_hyperlink_vals(
+        target_res: Result<EvaluatedCellValue, FormulaError>,
+        name_res: Option<Result<EvaluatedCellValue, FormulaError>>,
+        ctx: &mut EvalContext<'_>,
+    ) -> CellResult {
+        let fail = |e: FormulaError, ctx: &mut EvalContext<'_>| {
+            ctx.last_hyperlink_id = ctx.record_hyperlink(Err(e));
+            Err(e)
+        };
+        let target = match target_res {
+            Ok(v) => v.to_display_string(),
+            Err(e) => return fail(e, ctx),
+        };
+        let name = match name_res {
+            Some(Ok(v)) => Some(v),
+            Some(Err(e)) => return fail(e, ctx),
+            None => None,
+        };
+        if safe_link_target(&target).is_none() && !is_internal_link_target(&target) {
+            return fail(FormulaError::Value, ctx);
+        }
+        let shown = match name {
+            Some(EvaluatedCellValue::Empty) => EvaluatedCellValue::Number(0.0),
+            Some(v) => v,
+            None => EvaluatedCellValue::Text(target.clone()),
+        };
+        ctx.last_hyperlink_id = ctx.record_hyperlink(Ok(target));
+        Ok(shown)
+    }
+
     /// `HYPERLINK(target, [name])`: the friendly name (the target text without one). The cell holds
     /// no link, so the target only has to be one the editors would open (PD-192) or a jump inside
     /// the workbook (`#Sheet!A1`, `#Name`, PD-195).
@@ -260,50 +292,49 @@ impl SheetEngine {
         depth: usize,
     ) -> CellResult {
         check_lookup_arity(args, 1, 2)?;
-        let target = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-        let name = match args.get(1) {
-            Some(arg) if !matches!(arg, Expr::Missing) => Some(self.eval_arg_val(arg, ctx, depth)?),
+        let target_res = self.eval_arg_val(&args[0], ctx, depth);
+        let name_res = match args.get(1) {
+            Some(arg) if !matches!(arg, Expr::Missing) => Some(self.eval_arg_val(arg, ctx, depth)),
             _ => None,
         };
-        if safe_link_target(&target).is_none() && !is_internal_link_target(&target) {
-            return Err(FormulaError::Value);
-        }
-        Ok(match name {
-            Some(EvaluatedCellValue::Empty) => EvaluatedCellValue::Number(0.0),
-            Some(v) => v,
-            None => EvaluatedCellValue::Text(target),
-        })
+        Self::eval_hyperlink_vals(target_res, name_res, ctx)
     }
 
-    /// The address a formula whose result is a `HYPERLINK` call opens (PD-223): its first argument evaluated on
-    /// this sheet, under the rules of the function (a target the editors would open, or a `#` jump inside the
-    /// workbook). `None` when the formula is not such a call; the error the function itself would give otherwise.
+    /// The address a formula whose result at `(dr, dc)` comes from a `HYPERLINK` call opens (PD-223, PD-236).
+    /// Supports root `HYPERLINK`, control-flow / `LET` / `LAMBDA` / array-shaping wrappers, defined names,
+    /// and array-argument spills (`dr, dc` offset from `ctx.current_coord`).
     pub(crate) fn hyperlink_address_ctx(
         &self,
         formula: &str,
+        dr: usize,
+        dc: usize,
         ctx: &mut EvalContext<'_>,
     ) -> Option<Result<String, FormulaError>> {
         let trimmed = formula.trim();
         let body = crate::parser::strip_formula_prefix(trimmed)
             .or_else(|| crate::parser::strip_open_formula_prefix(trimmed))?;
-        let Some(Ok(Expr::FuncCall(call))) =
-            self.compile_formula(ctx.current_coord, body.trim()).entry
-        else {
+        let Some(Ok(expr)) = self.compile_formula(ctx.current_coord, body.trim()).entry else {
             return None;
         };
-        if call.name != "HYPERLINK" || check_lookup_arity(&call.args, 1, 2).is_err() {
+        if !crate::array_class::expr_contains_valid_hyperlink(&expr) {
             return None;
         }
-        let target = match self.eval_arg_val(&call.args[0], ctx, 0) {
-            Ok(value) => value.to_display_string(),
+        ctx.link_targets = Some(Vec::new());
+        let val = self.eval_val(&expr, &crate::array::Env::default(), ctx, 0);
+        let pool = ctx.link_targets.take()?;
+        let grid = match val {
+            Ok(crate::array::Val::Grid(g)) => g,
+            Ok(_) => return None,
             Err(e) => return Some(Err(e)),
         };
-        let allowed = safe_link_target(&target).is_some() || is_internal_link_target(&target);
-        Some(if allowed {
-            Ok(target)
-        } else {
-            Err(FormulaError::Value)
-        })
+        if dr >= grid.rows || dc >= grid.cols {
+            return None;
+        }
+        let id = grid.link_id(dr, dc);
+        if id == 0 {
+            return None;
+        }
+        pool.get(id as usize - 1).cloned()
     }
 
     /// `FORMULATEXT(ref)` (`as_text`) or `ISFORMULA(ref)` on the first cell of the reference.

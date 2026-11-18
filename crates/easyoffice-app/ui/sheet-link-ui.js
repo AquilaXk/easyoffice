@@ -92,15 +92,18 @@
       }
     }
 
-    // Follows the HYPERLINK formula of a cell: the engine evaluates the address, and it goes through the same policy
-    // and the same opening as the address of a link (PD-223).
+    // Follows the HYPERLINK formula of a cell or spilled child (PD-223, PD-236): the engine evaluates the address, and it goes
+    // through the same policy and opening as a cell link.
     async function followFormula(ref, sheet) {
       const map = snapshotDomSheetCells();
       sheetDataStore[sheet] = map;
-      const formula = map[ref]?.formula || "";
-      if (!links.isHyperlinkFormula(map[ref])) return false;
+      const entry = map[ref];
+      const anchorRef = entry?.spillOf || ref;
+      const anchorEntry = map[anchorRef];
+      const formula = anchorEntry?.formula || "";
+      if (!links.isHyperlinkFormula(entry) && !(entry?.spillOf && links.isHyperlinkFormula(anchorEntry))) return false;
       try {
-        const answer = await sheetStoreHelpers.linkTarget(sheetDataStore, sheet, ref, formula);
+        const answer = await sheetStoreHelpers.linkTarget(sheetDataStore, sheet, ref, formula, anchorRef !== ref ? anchorRef : "");
         if (typeof answer?.target === "string") return follow({ target: answer.target }, sheet);
         if (answer?.none !== true) say(MESSAGES.failed);
       } catch {

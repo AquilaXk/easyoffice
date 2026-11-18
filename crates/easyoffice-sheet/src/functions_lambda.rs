@@ -18,10 +18,15 @@ use std::sync::Arc;
 
 /// The one value a lambda returned; an array is `#CALC!`.
 fn element(val: Val) -> V {
+    element_with_link(val).0
+}
+
+fn element_with_link(val: Val) -> (V, u32) {
     match val {
-        Val::Grid(g) if g.is_scalar() => g.top_left(),
-        Val::Grid(_) => V::Error(FormulaError::Calc),
-        Val::Lambda(_) | Val::Ref(_) | Val::Omitted => V::Error(FormulaError::Calc),
+        Val::Grid(g) if g.is_scalar() => (g.top_left(), g.link_id_flat(0)),
+        Val::Grid(_) | Val::Lambda(_) | Val::Ref(_) | Val::Omitted => {
+            (V::Error(FormulaError::Calc), 0)
+        }
     }
 }
 
@@ -109,19 +114,24 @@ impl SheetEngine {
         if grids.iter().any(|g| g.rows != rows || g.cols != cols) {
             return Err(FormulaError::Value);
         }
+        let total = rows * cols;
         ctx.charge_array_cells(rows, cols)?;
-        let mut data = Vec::with_capacity(rows * cols);
-        for i in 0..rows * cols {
+        let mut data = Vec::with_capacity(total);
+        let mut links: Option<Vec<u32>> = None;
+        for i in 0..total {
             let call_args = grids
                 .iter()
-                .map(|g| Val::scalar(g.data[i].clone()))
+                .map(|g| Val::grid(Grid::scalar_with_link(g.data[i].clone(), g.link_id_flat(i))))
                 .collect();
-            let cell = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
+            let (cell, lid) = element_with_link(self.apply_val(&f, call_args, ctx, depth + 1)?);
             let hb = cell.heap_bytes();
             if hb > 0 {
                 ctx.charge_array_extra_bytes(hb)?;
             }
             data.push(cell);
+            if lid != 0 {
+                links.get_or_insert_with(|| vec![0; total])[i] = lid;
+            }
             if (i & 4095) == 4095 {
                 ctx.charge_steps(1)?;
                 ctx.poll_deadline();
@@ -130,7 +140,9 @@ impl SheetEngine {
                 }
             }
         }
-        Ok(Val::grid(Grid::from_rows(rows, cols, data)))
+        Ok(Val::grid(Grid::from_rows_with_links(
+            rows, cols, data, links,
+        )))
     }
 
     /// The initial value (when given), the array and the lambda of `REDUCE` and `SCAN`.
@@ -254,18 +266,23 @@ impl SheetEngine {
             ctx.charge_array_cells(1, lines)?;
         }
         let mut data = Vec::with_capacity(lines);
+        let mut links: Option<Vec<u32>> = None;
         for i in 0..lines {
             let line = if by_row {
                 grid.take_rows_checked(ctx, &[i])?
             } else {
                 grid.take_cols_checked(ctx, &[i])?
             };
-            let cell = element(self.apply_val(&f, vec![Val::grid(line)], ctx, depth + 1)?);
+            let (cell, lid) =
+                element_with_link(self.apply_val(&f, vec![Val::grid(line)], ctx, depth + 1)?);
             let hb = cell.heap_bytes();
             if hb > 0 {
                 ctx.charge_array_extra_bytes(hb)?;
             }
             data.push(cell);
+            if lid != 0 {
+                links.get_or_insert_with(|| vec![0; lines])[i] = lid;
+            }
             if (i & 4095) == 4095 {
                 ctx.charge_steps(1)?;
                 ctx.poll_deadline();
@@ -275,9 +292,9 @@ impl SheetEngine {
             }
         }
         Ok(Val::grid(if by_row {
-            Grid::from_rows(lines, 1, data)
+            Grid::from_rows_with_links(lines, 1, data, links)
         } else {
-            Grid::from_rows(1, lines, data)
+            Grid::from_rows_with_links(1, lines, data, links)
         }))
     }
 
@@ -301,9 +318,11 @@ impl SheetEngine {
             return Err(FormulaError::Spill);
         }
         let (rows, cols) = (rows as usize, cols as usize);
+        let total = rows * cols;
         ctx.charge_array_cells(rows, cols)?;
         let f = self.lambda_arg(&args[2], env, ctx, depth)?;
-        let mut data = Vec::with_capacity(rows * cols);
+        let mut data = Vec::with_capacity(total);
+        let mut links: Option<Vec<u32>> = None;
         let mut idx = 0usize;
         for r in 1..=rows {
             for c in 1..=cols {
@@ -311,12 +330,16 @@ impl SheetEngine {
                     Val::scalar(V::Number(r as f64)),
                     Val::scalar(V::Number(c as f64)),
                 ];
-                let cell = element(self.apply_val(&f, call_args, ctx, depth + 1)?);
+                let (cell, lid) =
+                    element_with_link(self.apply_val(&f, call_args, ctx, depth + 1)?);
                 let hb = cell.heap_bytes();
                 if hb > 0 {
                     ctx.charge_array_extra_bytes(hb)?;
                 }
                 data.push(cell);
+                if lid != 0 {
+                    links.get_or_insert_with(|| vec![0; total])[idx] = lid;
+                }
                 if (idx & 4095) == 4095 {
                     ctx.charge_steps(1)?;
                     ctx.poll_deadline();
@@ -327,6 +350,8 @@ impl SheetEngine {
                 idx += 1;
             }
         }
-        Ok(Val::grid(Grid::from_rows(rows, cols, data)))
+        Ok(Val::grid(Grid::from_rows_with_links(
+            rows, cols, data, links,
+        )))
     }
 }

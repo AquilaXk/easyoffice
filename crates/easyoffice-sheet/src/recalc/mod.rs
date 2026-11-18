@@ -159,6 +159,8 @@ pub struct ChangedCell {
     /// Index of the sheet in workbook order (see [`RecalcSession::sheet_name`]).
     pub sheet: usize,
     pub coord: PackedCellCoordinate,
+    /// Whether the cell's evaluated result currently carries a `HYPERLINK` target (PD-236).
+    pub hyperlink: bool,
     pub value: EvaluatedCellValue,
 }
 
@@ -576,6 +578,11 @@ impl RecalcSession {
         seeds.append(&mut self.released.touched);
         let mut infos: Vec<SpillInfo> = std::mem::take(&mut self.released.infos);
         let mut freed: Vec<(u16, PackedCellCoordinate)> = std::mem::take(&mut self.released.freed);
+        let mut link_toggled: DetSet<crate::PackedWorkbookCoord> =
+            std::mem::take(&mut self.released.link_toggled)
+                .into_iter()
+                .map(|(s, c)| crate::PackedWorkbookCoord::new(s, c))
+                .collect();
         let mut unfinished: Vec<u32>;
         let mut computed = 0usize;
         let mut timed_out = false;
@@ -596,6 +603,9 @@ impl RecalcSession {
             let published = crate::spill::publish(&mut self.wb, &mut self.memo, result.pending);
             for (sheet, coord, old) in published.before {
                 firsts.note((sheet, coord), old);
+            }
+            for (sheet, coord) in published.link_toggled {
+                link_toggled.insert(crate::PackedWorkbookCoord::new(sheet, coord));
             }
             infos.extend(published.infos);
             seeds = published.touched;
@@ -645,6 +655,9 @@ impl RecalcSession {
             for (sheet, coord, old) in out.before {
                 firsts.note((sheet, coord), old);
             }
+            for (sheet, coord) in out.link_toggled {
+                link_toggled.insert(crate::PackedWorkbookCoord::new(sheet, coord));
+            }
             infos.extend(out.infos);
             let mut readers = out.touched;
             readers.extend(rings.iter().copied());
@@ -663,6 +676,9 @@ impl RecalcSession {
             for (sheet, coord, old) in published.before {
                 firsts.note((sheet, coord), old);
             }
+            for (sheet, coord) in published.link_toggled {
+                link_toggled.insert(crate::PackedWorkbookCoord::new(sheet, coord));
+            }
             infos.extend(published.infos);
         }
 
@@ -676,7 +692,8 @@ impl RecalcSession {
             if unfinished_sites.contains(&(sheet, coord)) {
                 continue;
             }
-            let sid = sheets[usize::from(sheet)].resolved_sheet_id();
+            let engine = &sheets[usize::from(sheet)];
+            let sid = engine.resolved_sheet_id();
             let held = self.memo.get_at(sid, coord);
             if held.is_none() && old.is_none() && self.graph.vertex_at(sheet, coord).is_none() {
                 continue;
@@ -687,10 +704,12 @@ impl RecalcSession {
                     self.cyclic.insert(v);
                 }
             }
-            if old.as_ref() != Some(&value) {
+            let toggled = link_toggled.contains(&crate::PackedWorkbookCoord::new(sheet, coord));
+            if old.as_ref() != Some(&value) || toggled {
                 changed.push(ChangedCell {
                     sheet: usize::from(sheet),
                     coord,
+                    hyperlink: engine.has_active_formula_link(coord),
                     value,
                 });
             }
@@ -719,6 +738,7 @@ impl RecalcSession {
                 changed.push(ChangedCell {
                     sheet: usize::from(sheet),
                     coord,
+                    hyperlink: false,
                     value: engine.eval_coord_ctx(coord, &mut ctx, 0),
                 });
             }

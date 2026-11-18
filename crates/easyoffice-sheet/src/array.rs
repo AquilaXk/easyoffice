@@ -16,12 +16,13 @@ pub(crate) const MAX_ARRAY_BYTES: usize = 128 * 1024 * 1024;
 /// with `#NUM!` instead of the Rust stack.
 pub(crate) const MAX_LAMBDA_DEPTH: usize = 64;
 
-/// Rows by columns of values, row by row.
+/// Rows by columns of values, row by row, plus optional per-element `HYPERLINK` handles (`0` = none).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Grid {
     pub(crate) rows: usize,
     pub(crate) cols: usize,
     pub(crate) data: Vec<EvaluatedCellValue>,
+    pub(crate) links: Option<Vec<u32>>,
 }
 
 impl Grid {
@@ -30,6 +31,16 @@ impl Grid {
             rows: 1,
             cols: 1,
             data: vec![value],
+            links: None,
+        }
+    }
+
+    pub(crate) fn scalar_with_link(value: EvaluatedCellValue, link_id: u32) -> Self {
+        Self {
+            rows: 1,
+            cols: 1,
+            data: vec![value],
+            links: (link_id != 0).then(|| vec![link_id]),
         }
     }
 
@@ -39,7 +50,27 @@ impl Grid {
 
     pub(crate) fn from_rows(rows: usize, cols: usize, data: Vec<EvaluatedCellValue>) -> Self {
         debug_assert_eq!(rows * cols, data.len());
-        Self { rows, cols, data }
+        Self {
+            rows,
+            cols,
+            data,
+            links: None,
+        }
+    }
+
+    pub(crate) fn from_rows_with_links(
+        rows: usize,
+        cols: usize,
+        data: Vec<EvaluatedCellValue>,
+        links: Option<Vec<u32>>,
+    ) -> Self {
+        debug_assert_eq!(rows * cols, data.len());
+        Self {
+            rows,
+            cols,
+            data,
+            links,
+        }
     }
 
     pub(crate) fn from_rows_checked(
@@ -47,6 +78,16 @@ impl Grid {
         rows: usize,
         cols: usize,
         data: Vec<EvaluatedCellValue>,
+    ) -> Result<Self, FormulaError> {
+        Self::from_rows_with_links_checked(ctx, rows, cols, data, None)
+    }
+
+    pub(crate) fn from_rows_with_links_checked(
+        ctx: &mut crate::EvalContext<'_>,
+        rows: usize,
+        cols: usize,
+        data: Vec<EvaluatedCellValue>,
+        links: Option<Vec<u32>>,
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(rows, cols)?;
         for (i, cell) in data.iter().enumerate() {
@@ -62,7 +103,7 @@ impl Grid {
                 }
             }
         }
-        Ok(Self::from_rows(rows, cols, data))
+        Ok(Self::from_rows_with_links(rows, cols, data, links))
     }
 
     /// A grid of `rows` by `cols` cells filled by `f(row, col)`; `#SPILL!` past the per-array or
@@ -73,17 +114,32 @@ impl Grid {
         cols: usize,
         mut f: impl FnMut(usize, usize) -> EvaluatedCellValue,
     ) -> Result<Self, FormulaError> {
+        Self::build_with_links_checked(ctx, rows, cols, |r, c| (f(r, c), 0))
+    }
+
+    /// Like [`Self::build_checked`], also preserving non-zero `HYPERLINK` handles lazily.
+    pub(crate) fn build_with_links_checked(
+        ctx: &mut crate::EvalContext<'_>,
+        rows: usize,
+        cols: usize,
+        mut f: impl FnMut(usize, usize) -> (EvaluatedCellValue, u32),
+    ) -> Result<Self, FormulaError> {
+        let total = rows * cols;
         ctx.charge_array_cells(rows, cols)?;
-        let mut data = Vec::with_capacity(rows * cols);
+        let mut data = Vec::with_capacity(total);
+        let mut links: Option<Vec<u32>> = None;
         let mut idx = 0usize;
         for r in 0..rows {
             for c in 0..cols {
-                let cell = f(r, c);
+                let (cell, link_id) = f(r, c);
                 let hb = cell.heap_bytes();
                 if hb > 0 {
                     ctx.charge_array_extra_bytes(hb)?;
                 }
                 data.push(cell);
+                if link_id != 0 {
+                    links.get_or_insert_with(|| vec![0; total])[idx] = link_id;
+                }
                 if (idx & 4095) == 4095 {
                     ctx.charge_steps(1)?;
                     ctx.poll_deadline();
@@ -94,12 +150,30 @@ impl Grid {
                 idx += 1;
             }
         }
-        Ok(Self { rows, cols, data })
+        Ok(Self {
+            rows,
+            cols,
+            data,
+            links,
+        })
     }
 
     #[inline]
     pub(crate) fn get(&self, r: usize, c: usize) -> &EvaluatedCellValue {
         &self.data[r * self.cols + c]
+    }
+
+    #[inline]
+    pub(crate) fn link_id(&self, r: usize, c: usize) -> u32 {
+        self.link_id_flat(r * self.cols + c)
+    }
+
+    #[inline]
+    pub(crate) fn link_id_flat(&self, idx: usize) -> u32 {
+        self.links
+            .as_ref()
+            .and_then(|v| v.get(idx).copied())
+            .unwrap_or(0)
     }
 
     pub(crate) fn is_scalar(&self) -> bool {
@@ -117,31 +191,8 @@ impl Grid {
         &self,
         ctx: &mut crate::EvalContext<'_>,
     ) -> Result<Self, FormulaError> {
-        ctx.charge_array_cells(self.cols, self.rows)?;
-        let mut data = Vec::with_capacity(self.data.len());
-        let mut idx = 0usize;
-        for c in 0..self.cols {
-            for r in 0..self.rows {
-                let cell = self.get(r, c).clone();
-                let hb = cell.heap_bytes();
-                if hb > 0 {
-                    ctx.charge_array_extra_bytes(hb)?;
-                }
-                data.push(cell);
-                if (idx & 4095) == 4095 {
-                    ctx.charge_steps(1)?;
-                    ctx.poll_deadline();
-                    if ctx.expired() {
-                        return Err(FormulaError::Value);
-                    }
-                }
-                idx += 1;
-            }
-        }
-        Ok(Self {
-            rows: self.cols,
-            cols: self.rows,
-            data,
+        Self::build_with_links_checked(ctx, self.cols, self.rows, |c, r| {
+            (self.get(r, c).clone(), self.link_id(r, c))
         })
     }
 
@@ -151,30 +202,9 @@ impl Grid {
         ctx: &mut crate::EvalContext<'_>,
         keep: &[usize],
     ) -> Result<Self, FormulaError> {
-        ctx.charge_array_cells(keep.len(), self.cols)?;
-        let mut data = Vec::with_capacity(keep.len() * self.cols);
-        let mut idx = 0usize;
-        for &r in keep {
-            for cell in &self.data[r * self.cols..(r + 1) * self.cols] {
-                let hb = cell.heap_bytes();
-                if hb > 0 {
-                    ctx.charge_array_extra_bytes(hb)?;
-                }
-                data.push(cell.clone());
-                if (idx & 4095) == 4095 {
-                    ctx.charge_steps(1)?;
-                    ctx.poll_deadline();
-                    if ctx.expired() {
-                        return Err(FormulaError::Value);
-                    }
-                }
-                idx += 1;
-            }
-        }
-        Ok(Self {
-            rows: keep.len(),
-            cols: self.cols,
-            data,
+        Self::build_with_links_checked(ctx, keep.len(), self.cols, |ri, c| {
+            let r = keep[ri];
+            (self.get(r, c).clone(), self.link_id(r, c))
         })
     }
 
@@ -184,31 +214,9 @@ impl Grid {
         ctx: &mut crate::EvalContext<'_>,
         keep: &[usize],
     ) -> Result<Self, FormulaError> {
-        ctx.charge_array_cells(self.rows, keep.len())?;
-        let mut data = Vec::with_capacity(self.rows * keep.len());
-        let mut idx = 0usize;
-        for r in 0..self.rows {
-            for &c in keep {
-                let cell = self.get(r, c).clone();
-                let hb = cell.heap_bytes();
-                if hb > 0 {
-                    ctx.charge_array_extra_bytes(hb)?;
-                }
-                data.push(cell);
-                if (idx & 4095) == 4095 {
-                    ctx.charge_steps(1)?;
-                    ctx.poll_deadline();
-                    if ctx.expired() {
-                        return Err(FormulaError::Value);
-                    }
-                }
-                idx += 1;
-            }
-        }
-        Ok(Self {
-            rows: self.rows,
-            cols: keep.len(),
-            data,
+        Self::build_with_links_checked(ctx, self.rows, keep.len(), |r, ci| {
+            let c = keep[ci];
+            (self.get(r, c).clone(), self.link_id(r, c))
         })
     }
 }

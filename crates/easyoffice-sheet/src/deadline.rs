@@ -289,6 +289,8 @@ impl WorkbookEngine {
             timed_out: ctx.expired(),
             unreached,
             spills: Vec::new(),
+            formula_links: Vec::new(),
+            has_hyperlink_formulas: false,
         }
     }
 
@@ -328,12 +330,28 @@ impl WorkbookEngine {
             }
             values.push(value.unwrap_or(EvaluatedCellValue::Empty));
         }
+        let mut formula_links = Vec::new();
+        let mut has_hyperlink_formulas = false;
+        for engine in settled.session.workbook().sheets() {
+            if !has_hyperlink_formulas {
+                has_hyperlink_formulas = engine.compiled_asts.values().any(|e| {
+                    matches!(e, Ok(expr) if crate::array_class::expr_contains_valid_hyperlink(expr))
+                });
+            }
+            let mut coords: Vec<_> = engine.spill.active_links().collect();
+            coords.sort_unstable();
+            for coord in coords {
+                formula_links.push((engine.name.clone(), coord));
+            }
+        }
         Some(WorkbookBatchEvaluation {
             values,
             circular: settled.outcome.circular,
             timed_out,
             unreached,
             spills: settled.session.spill_areas(),
+            formula_links,
+            has_hyperlink_formulas,
         })
     }
 

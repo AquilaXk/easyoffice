@@ -535,19 +535,20 @@ async function typeInto(t, ref, text) {
   await flushAsyncTurns(15);
 }
 
-test("the AutoCorrect rule takes a whole typed address only: http, https, mailto and www", async () => {
+test("the AutoCorrect rule takes a whole typed address only: http, https, mailto, www and bare email", async () => {
   const { links } = await open();
   const taken = {
     "https://example.com/a?b=1": "https://example.com/a?b=1",
     "  HTTP://A.B/x  ": "HTTP://A.B/x",
     "mailto:me@example.com": "mailto:me@example.com",
+    "me@example.com": "mailto:me@example.com",
     "www.example.com": "http://www.example.com",
     "WWW.Example.com/path": "http://WWW.Example.com/path",
   };
   for (const [typed, target] of Object.entries(taken)) assert.equal(links.autoTarget(typed), target, typed);
   for (const typed of [
     "", "hello", "see https://example.com", "https://example.com is a site", "https://", "mailto:", "www.", "www.com", "www..x", "example.com",
-    "me@example.com", "ftp://a.b", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "https://a b", "#Sheet1!A1", "=HYPERLINK(\"https://a.b\")",
+    "me@localhost", "ftp://a.b", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "https://a b", "#Sheet1!A1", "=HYPERLINK(\"https://a.b\")",
     "https://a.b/" + "x".repeat(2048),
   ]) {
     assert.equal(links.autoTarget(typed), null, typed);
@@ -587,6 +588,16 @@ test("other text, a formula, an address inside a sentence and a paste or fill of
   assert.equal(t.cell("B5").getAttribute("title"), "http://www.example.com");
   await typeInto(t, "B6", "mailto:me@example.com");
   assert.equal(t.cell("B6").dataset.link, "external");
+  await typeInto(t, "B8", "first.last+tag@sub.example.co.kr");
+  assert.equal(t.cell("B8").dataset.link, "external");
+  assert.equal(t.cell("B8").getAttribute("title"), "mailto:first.last+tag@sub.example.co.kr");
+  const linkApi = t.host.__EASYOFFICE_SHEET_LINK__;
+  for (const badEmail of ["user@localhost", "user@127.0.0.1", ".a@b.com", "a..b@c.com", "a@-b.com", "a@b-.com", "a@b.1", "a@b.c", "foo:bar@b.com", `${"a".repeat(65)}@b.com`]) {
+    assert.equal(linkApi.autoTarget(badEmail), null, badEmail);
+  }
+  const t0 = performance.now();
+  assert.equal(linkApi.autoTarget(`${"a".repeat(64)}@${"b.".repeat(90)}c1`), null);
+  assert.equal(performance.now() - t0 < 20, true, "adversarial bare-email input runs in bounded single-pass time");
   // The dialog and the edit writer take what they are given: no second link on top of an address the dialog set.
   await t.select("B7");
   await t.openDialog();
@@ -653,12 +664,55 @@ test("a HYPERLINK formula cell shows as a link while it gives no error; a click 
   await click("B6");
   assert.equal(t.host.__EASYOFFICE_SHEET_NAMES__ && t.cell("B2") !== null, true);
   assert.equal(calls.length, 1, "a jump inside the workbook is not opened outside");
-  // An error value is no link, whatever the formula says.
+  // An error value is no link, whatever the formula says; wrapped HYPERLINK and engine formulaLink flags work.
   const link = t.host.__EASYOFFICE_SHEET_LINK__;
   assert.equal(link.isHyperlinkFormula({ formula: '=HYPERLINK("https://a.b")', value: "x" }), true);
   assert.equal(link.isHyperlinkFormula({ formula: '=HYPERLINK("https://a.b")', value: "#VALUE!" }), false);
-  assert.equal(link.isHyperlinkFormula({ formula: '=IF(A1,HYPERLINK("https://a.b"))', value: "x" }), false);
+  assert.equal(link.isHyperlinkFormula({ formula: '=IF(A1,HYPERLINK("https://a.b"))', value: "x" }), true);
+  assert.equal(link.isHyperlinkFormula({ formula: '=IF(A1,HYPERLINK("https://a.b"))', value: "x", formulaLink: false }), false);
+  assert.equal(link.isHyperlinkFormula({ formula: '=HYPERLINK("https://a.b")&"!"', value: "x" }), false);
+  assert.equal(link.isHyperlinkFormula({ formula: "", spillOf: "C1", value: "항목2", formulaLink: true }), true);
   assert.equal(link.isHyperlinkFormula({ formula: "", value: "x" }), false);
+});
+
+test("clicking a spilled HYPERLINK child cell asks the engine for that cell with its anchor and opens the target", async () => {
+  const asked = [];
+  const t = await open({
+    evaluate_sheet: async (payload, offline) => {
+      const body = JSON.parse(String(payload));
+      if (body.sessionAction === "linkTarget") {
+        asked.push(body);
+        return body.cell === "F12" && body.anchor === "F10" ? { target: "https://example.com/spilled-2" } : { none: true };
+      }
+      if (!body.sessionAction && Array.isArray(body.targets)) {
+        return {
+          query: body.targets[0]?.cell || "F10",
+          value: "제목",
+          values: { "Sheet1!F10": "제목" },
+          targetValues: ["제목"],
+          circular: false,
+          spills: [{ sheet: "Sheet1", cell: "F10", rows: 3, cols: 1, blocked: false, values: ["제목", "항목1", "항목2"], links: [false, true, true] }],
+          formulaLinks: ["Sheet1!F11", "Sheet1!F12"],
+        };
+      }
+      return offline.evaluate_sheet(payload);
+    },
+  });
+  const opened = [];
+  t.host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable: () => true, openLink: async (url) => opened.push(url) };
+  await typeInto(t, "F10", '=VSTACK("제목",HYPERLINK("https://example.com/spilled-"&SEQUENCE(2),"항목"&SEQUENCE(2)))');
+  assert.equal(t.cell("F10").dataset.link, undefined, "header row of VSTACK is not a link");
+  assert.equal(t.cell("F11").dataset.link, "formula", "first spilled HYPERLINK row is a link");
+  assert.equal(t.cell("F12").dataset.link, "formula", "second spilled HYPERLINK row is a link");
+  const td = t.cell("F12");
+  td.focus();
+  td.dispatchEvent({ type: "mousedown", target: td, button: 0, timeStamp: 1000, clientX: 10, clientY: 10, bubbles: true });
+  td.dispatchEvent({ type: "mouseup", target: td, button: 0, bubbles: true });
+  td.dispatchEvent({ type: "click", target: td, button: 0, timeStamp: 1050, clientX: 10, clientY: 10, bubbles: true });
+  await flushAsyncTurns(20);
+  assert.equal(asked.at(-1)?.cell, "F12");
+  assert.equal(asked.at(-1)?.anchor, "F10");
+  assert.deepEqual(opened, ["https://example.com/spilled-2"]);
 });
 
 test("a right click on a link cell opens a menu with 하이퍼링크 고치기... and 하이퍼링크 지우기 on that cell; other cells and headers keep their own", async () => {

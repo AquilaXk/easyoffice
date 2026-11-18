@@ -46,8 +46,9 @@ fn slice(
     rows: std::ops::Range<usize>,
     cols: std::ops::Range<usize>,
 ) -> Result<Grid, FormulaError> {
-    Grid::build_checked(ctx, rows.len(), cols.len(), |r, c| {
-        grid.get(rows.start + r, cols.start + c).clone()
+    Grid::build_with_links_checked(ctx, rows.len(), cols.len(), |r, c| {
+        let (rr, cc) = (rows.start + r, cols.start + c);
+        (grid.get(rr, cc).clone(), grid.link_id(rr, cc))
     })
 }
 
@@ -151,22 +152,32 @@ impl SheetEngine {
         };
         // Emit directly into flat vector in a single pass without allocating intermediate coordinate vectors.
         let mut flat = Vec::new();
+        let mut links: Option<Vec<u32>> = None;
+        let mut push_cell = |r: usize, c: usize| {
+            let v = grid.get(r, c).clone();
+            if keep(&v) {
+                let lid = grid.link_id(r, c);
+                if lid != 0 {
+                    let cur = flat.len();
+                    let lvec = links.get_or_insert_with(|| vec![0; cur]);
+                    lvec.resize(cur, 0);
+                    lvec.push(lid);
+                } else if let Some(lvec) = links.as_mut() {
+                    lvec.push(0);
+                }
+                flat.push(v);
+            }
+        };
         if by_col {
             for c in 0..grid.cols {
                 for r in 0..grid.rows {
-                    let v = grid.get(r, c).clone();
-                    if keep(&v) {
-                        flat.push(v);
-                    }
+                    push_cell(r, c);
                 }
             }
         } else {
             for r in 0..grid.rows {
                 for c in 0..grid.cols {
-                    let v = grid.get(r, c).clone();
-                    if keep(&v) {
-                        flat.push(v);
-                    }
+                    push_cell(r, c);
                 }
             }
         }
@@ -175,9 +186,9 @@ impl SheetEngine {
         }
         let n = flat.len();
         Ok(Val::grid(if column {
-            Grid::from_rows_checked(ctx, n, 1, flat)?
+            Grid::from_rows_with_links_checked(ctx, n, 1, flat, links)?
         } else {
-            Grid::from_rows_checked(ctx, 1, n, flat)?
+            Grid::from_rows_with_links_checked(ctx, 1, n, flat, links)?
         }))
     }
 
@@ -201,22 +212,27 @@ impl SheetEngine {
         if vertical {
             let cols = grids.iter().map(|g| g.cols).max().unwrap_or(0);
             let rows: usize = grids.iter().map(|g| g.rows).sum();
+            let total = rows * cols;
             ctx.charge_array_cells(rows, cols)?;
-            let mut data = Vec::with_capacity(rows * cols);
+            let mut data = Vec::with_capacity(total);
+            let mut links: Option<Vec<u32>> = None;
             let mut idx = 0usize;
             for g in &grids {
                 for r in 0..g.rows {
                     for c in 0..cols {
-                        let cell = if c < g.cols {
-                            g.get(r, c).clone()
+                        let (cell, lid) = if c < g.cols {
+                            (g.get(r, c).clone(), g.link_id(r, c))
                         } else {
-                            na.clone()
+                            (na.clone(), 0)
                         };
                         let hb = cell.heap_bytes();
                         if hb > 0 {
                             ctx.charge_array_extra_bytes(hb)?;
                         }
                         data.push(cell);
+                        if lid != 0 {
+                            links.get_or_insert_with(|| vec![0; total])[idx] = lid;
+                        }
                         if (idx & 4095) == 4095 {
                             ctx.charge_steps(1)?;
                             ctx.poll_deadline();
@@ -228,26 +244,33 @@ impl SheetEngine {
                     }
                 }
             }
-            Ok(Val::grid(Grid::from_rows(rows, cols, data)))
+            Ok(Val::grid(Grid::from_rows_with_links(
+                rows, cols, data, links,
+            )))
         } else {
             let rows = grids.iter().map(|g| g.rows).max().unwrap_or(0);
             let cols: usize = grids.iter().map(|g| g.cols).sum();
+            let total = rows * cols;
             ctx.charge_array_cells(rows, cols)?;
-            let mut data = Vec::with_capacity(rows * cols);
+            let mut data = Vec::with_capacity(total);
+            let mut links: Option<Vec<u32>> = None;
             let mut idx = 0usize;
             for r in 0..rows {
                 for g in &grids {
                     for c in 0..g.cols {
-                        let cell = if r < g.rows {
-                            g.get(r, c).clone()
+                        let (cell, lid) = if r < g.rows {
+                            (g.get(r, c).clone(), g.link_id(r, c))
                         } else {
-                            na.clone()
+                            (na.clone(), 0)
                         };
                         let hb = cell.heap_bytes();
                         if hb > 0 {
                             ctx.charge_array_extra_bytes(hb)?;
                         }
                         data.push(cell);
+                        if lid != 0 {
+                            links.get_or_insert_with(|| vec![0; total])[idx] = lid;
+                        }
                         if (idx & 4095) == 4095 {
                             ctx.charge_steps(1)?;
                             ctx.poll_deadline();
@@ -259,7 +282,9 @@ impl SheetEngine {
                     }
                 }
             }
-            Ok(Val::grid(Grid::from_rows(rows, cols, data)))
+            Ok(Val::grid(Grid::from_rows_with_links(
+                rows, cols, data, links,
+            )))
         }
     }
 
@@ -317,11 +342,11 @@ impl SheetEngine {
             None | Some(Expr::Missing) => pad_of(None),
             Some(_) => pad_of(Some(self.arg_single(args, 3, None, env, ctx, depth)?)),
         };
-        let out = Grid::build_checked(ctx, rows, cols, |r, c| {
+        let out = Grid::build_with_links_checked(ctx, rows, cols, |r, c| {
             if r < grid.rows && c < grid.cols {
-                grid.get(r, c).clone()
+                (grid.get(r, c).clone(), grid.link_id(r, c))
             } else {
-                pad.clone()
+                (pad.clone(), 0)
             }
         })?;
         Ok(Val::grid(out))
@@ -354,11 +379,16 @@ impl SheetEngine {
         };
         let n = grid.data.len();
         let lines = n.div_ceil(count);
-        let at = |i: usize| grid.data.get(i).cloned().unwrap_or_else(|| pad.clone());
+        let at = |i: usize| {
+            (
+                grid.data.get(i).cloned().unwrap_or_else(|| pad.clone()),
+                grid.link_id_flat(i),
+            )
+        };
         let out = if by_rows {
-            Grid::build_checked(ctx, lines, count, |r, c| at(r * count + c))?
+            Grid::build_with_links_checked(ctx, lines, count, |r, c| at(r * count + c))?
         } else {
-            Grid::build_checked(ctx, count, lines, |r, c| at(c * count + r))?
+            Grid::build_with_links_checked(ctx, count, lines, |r, c| at(c * count + r))?
         };
         Ok(Val::grid(out))
     }

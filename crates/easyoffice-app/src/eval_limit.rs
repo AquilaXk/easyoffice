@@ -96,12 +96,13 @@ pub(crate) fn answer(requests: &[(&str, &str)], batch: &WorkbookBatchEvaluation)
     let first = shown(0).map_or("null".to_string(), |v| format!("\"{v}\""));
     with_timed_out(
         format!(
-            "{{\"query\":\"{}\",\"value\":{first},\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}{}}}",
+            "{{\"query\":\"{}\",\"value\":{first},\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}{}{}}}",
             esc(requests[0].1),
             values.join(","),
             target_values.join(","),
             batch.circular,
-            spills_field(batch)
+            spills_field(batch),
+            formula_links_field(batch)
         ),
         batch.timed_out,
     )
@@ -119,8 +120,18 @@ pub(crate) fn spill_areas_json(areas: &[SpillArea]) -> String {
                 .iter()
                 .map(|v| format!("\"{}\"", esc(&v.to_display_string())))
                 .collect();
+            let links_suffix = if a.links.is_empty() {
+                String::new()
+            } else {
+                let flags: Vec<&str> = a
+                    .links
+                    .iter()
+                    .map(|&b| if b { "true" } else { "false" })
+                    .collect();
+                format!(",\"links\":[{}]", flags.join(","))
+            };
             format!(
-                "{{\"sheet\":\"{}\",\"cell\":\"{}\",\"rows\":{},\"cols\":{},\"blocked\":{},\"values\":[{}]}}",
+                "{{\"sheet\":\"{}\",\"cell\":\"{}\",\"rows\":{},\"cols\":{},\"blocked\":{},\"values\":[{}]{links_suffix}}}",
                 esc(&a.sheet),
                 a.anchor.to_a1(),
                 a.rows,
@@ -139,6 +150,20 @@ fn spills_field(batch: &WorkbookBatchEvaluation) -> String {
         return String::new();
     }
     format!(",\"spills\":{}", spill_areas_json(&batch.spills))
+}
+
+/// `,"formulaLinks":["Sheet!A1",...]` of a stateless answer when the workbook contains `HYPERLINK` formulas (PD-236).
+fn formula_links_field(batch: &WorkbookBatchEvaluation) -> String {
+    if !batch.has_hyperlink_formulas && batch.formula_links.is_empty() {
+        return String::new();
+    }
+    let esc = EasyOfficeIpcRouter::escape_json_str;
+    let items: Vec<String> = batch
+        .formula_links
+        .iter()
+        .map(|(sheet, coord)| format!("\"{}!{}\"", esc(sheet), coord.to_a1()))
+        .collect();
+    format!(",\"formulaLinks\":[{}]", items.join(","))
 }
 
 /// Evaluates `targets` for a file. With `complete` the save is refused when the pass did not reach

@@ -132,6 +132,7 @@
       refusedKey: null,
       raw: new Map(),
       values: new Map(),
+      links: new Map(),
       // Rule payload the session holds per sheet (see `syncRules`).
       rules: new Map(),
       // The names payload the session holds (see `syncNames`), null before the first one is sent.
@@ -160,6 +161,7 @@
       session.sheetKey = "";
       session.raw = new Map();
       session.values = new Map();
+      session.links = new Map();
       session.rules = new Map();
       session.names = null;
       session.locks = new Map();
@@ -296,19 +298,23 @@
       };
     }
 
-    // Folds what an answer says about arrays into the sheet model: the areas that changed and the values of the
-    // cells they fill. Returns whether the model changed.
+    // Folds what an answer says about arrays and `HYPERLINK` formula flags into the sheet model.
     function takeSpills(sheetsMap, answer) {
       if (!spillApi) return false;
-      let changed = false;
+      let changed = spillApi.applyChangedLinks(sheetsMap, answer.changed, session.links);
       for (const info of Array.isArray(answer.spills) ? answer.spills : []) {
         const map = sheetsMap?.[info.sheet];
         if (!map) continue;
-        spillApi.applyInfo(map, info, (ref) => session.values.get(info.sheet + "!" + ref));
+        spillApi.applyInfo(
+          map,
+          info,
+          (ref) => session.values.get(info.sheet + "!" + ref),
+          (ref) => session.links.get(info.sheet + "!" + ref) === true
+        );
         changed = true;
       }
       for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
-        if (spillApi.setValue(sheetsMap?.[c.sheet], c.cell, c.value)) changed = true;
+        if (spillApi.setValue(sheetsMap?.[c.sheet], c.cell, c.value, c.link === true)) changed = true;
       }
       return changed;
     }
@@ -591,8 +597,8 @@
     // The address the HYPERLINK formula of a cell opens (PD-223), evaluated by the engine on the workbook: `{ target }`,
     // `{ error }` when the function gives an error, `{ none: true }` when the formula is not a HYPERLINK call. Without
     // a session the request carries the cells.
-    async function linkTarget(sheetsMap, sheet, cell, formula) {
-      const request = { sheet, cell, formula };
+    async function linkTarget(sheetsMap, sheet, cell, formula, anchor = "") {
+      const request = anchor ? { sheet, cell, anchor, formula } : { sheet, cell, formula };
       const viaSession = await runOnSession(sheetsMap, request, "linkTarget", () => {});
       if (viaSession.ok) return viaSession.answer;
       const { cells } = buildCellsAndFormulaTargets(sheetsMap);
@@ -696,6 +702,7 @@
             const stored = sheets[target.sheet]?.[target.cell];
             const value = sessionValue(target.key);
             if (stored && value !== undefined && value !== null) stored.value = String(value);
+            if (stored && spillApi) spillApi.writeAnchorFormulaLink(stored, session.links.get(target.key) === true);
           }
           let extraValue = "";
           if (extraTarget && extraIsFormula) {
@@ -761,7 +768,7 @@
         }
       });
 
-      if (spillApi) spillApi.replaceAll(sheets, rpcRes?.spills);
+      if (spillApi) spillApi.replaceAll(sheets, rpcRes?.spills, rpcRes?.formulaLinks);
       const extraValue = extraTarget
         ? readExtraValue(rpcRes, sheets, extraTarget, rpcTargets.length)
         : "";
@@ -798,7 +805,7 @@
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
-      if (spillApi) spillApi.replaceAll(sheetsMap, rpcRes?.spills);
+      if (spillApi) spillApi.replaceAll(sheetsMap, rpcRes?.spills, rpcRes?.formulaLinks);
       return { rpcRes, formulaTargets, targetValues, batchValues, spillsChanged: Boolean(spillApi) };
     }
 

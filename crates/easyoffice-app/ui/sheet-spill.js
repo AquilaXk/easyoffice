@@ -87,7 +87,7 @@
   // Fills the area of the array at `anchorRef`; a cell the user wrote stays as it is. A cell that holds only a format (or a
   // hyperlink) is an empty cell: the array fills it and the cell keeps its format, so a cell unlocked on a protected sheet
   // is still unlocked with a value in it (PD-222).
-  function fillArea(map, anchorRef, rows, cols, valueOf) {
+  function fillArea(map, anchorRef, rows, cols, valueOf, linkOf) {
     const anchor = map[anchorRef];
     if (!anchor) return;
     anchor.spillRows = rows;
@@ -97,6 +97,7 @@
       if (held && !held.spillOf && (held.value || held.formula)) return;
       const value = valueOf(ref);
       const child = { value: value === undefined || value === null ? "" : String(value), formula: "", spillOf: anchorRef };
+      if (linkOf && linkOf(ref) === true) child.formulaLink = true;
       if (held?.style) child.style = held.style;
       if (held?.link) child.link = held.link;
       map[ref] = child;
@@ -105,29 +106,84 @@
 
   // One entry of the engine's `spills` list: `{ cell, rows, cols, blocked }` (`rows` 0: the formula no longer
   // spills). `valueOf(ref)` gives the value of a cell the array filled.
-  function applyInfo(map, info, valueOf) {
+  function applyInfo(map, info, valueOf, linkOf) {
     clearArea(map, info.cell);
-    if (info.rows > 0 && info.blocked !== true) fillArea(map, info.cell, info.rows, info.cols, valueOf);
+    if (info.rows > 0 && info.blocked !== true) fillArea(map, info.cell, info.rows, info.cols, valueOf, linkOf);
   }
 
-  // The new value of a cell an array filled; false when the cell is not one.
-  function setValue(map, ref, value) {
+  // The new value (and `HYPERLINK` flag, PD-236) of a cell an array filled; false when the cell is not one.
+  function setValue(map, ref, value, isLink) {
     const entry = map?.[ref];
     if (!isChild(entry)) return false;
     entry.value = String(value ?? "");
+    if (isLink) entry.formulaLink = true;
+    else delete entry.formulaLink;
     return true;
   }
 
-  // The whole picture from a stateless answer (`{ sheet, cell, rows, cols, blocked, values }` per array, row by
-  // row): every area is forgotten and the listed ones are filled again.
-  function replaceAll(sheets, spills) {
-    for (const map of Object.values(sheets || {})) {
+  // Preserves computed anchor metadata across DOM snapshots when `formula` is unchanged.
+  function copyComputedMeta(prevEntry, cellEntry, formula) {
+    if (!prevEntry || prevEntry.formula !== formula) return;
+    if (isAnchor(prevEntry)) {
+      cellEntry.spillRows = prevEntry.spillRows;
+      cellEntry.spillCols = prevEntry.spillCols;
+    }
+    if (typeof prevEntry.formulaLink === "boolean") {
+      cellEntry.formulaLink = prevEntry.formulaLink;
+    }
+  }
+
+  function writeAnchorFormulaLink(entry, isLink) {
+    if (!entry || !entry.formula) return false;
+    const mayLink = host.__EASYOFFICE_SHEET_LINK__?.mayYieldHyperlink?.(entry.formula) === true;
+    if (isLink) {
+      if (entry.formulaLink === true) return false;
+      entry.formulaLink = true;
+      return true;
+    }
+    if (mayLink) {
+      if (entry.formulaLink === false) return false;
+      entry.formulaLink = false;
+      return true;
+    }
+    if (entry.formulaLink !== undefined) {
+      delete entry.formulaLink;
+      return true;
+    }
+    return false;
+  }
+
+  // Applies `ChangedCell` `link` flags (`c.link === true`) to formula anchor entries without adding keys to plain formulas (PD-236).
+  function applyChangedLinks(sheetsMap, changedList, linkMap) {
+    let toggled = false;
+    for (const c of Array.isArray(changedList) ? changedList : []) {
+      const isLink = c.link === true;
+      const key = c.sheet + "!" + c.cell;
+      if (linkMap) {
+        if (isLink) linkMap.set(key, true);
+        else linkMap.delete(key);
+      }
+      if (writeAnchorFormulaLink(sheetsMap?.[c.sheet]?.[c.cell], isLink)) toggled = true;
+    }
+    return toggled;
+  }
+
+  // The whole picture from a stateless answer (`{ sheet, cell, rows, cols, blocked, values, links? }` per array, row by
+  // row, plus optional `formulaLinks`): every area is forgotten and the listed ones are filled again.
+  function replaceAll(sheets, spills, formulaLinks) {
+    const linkSet = Array.isArray(formulaLinks) ? new Set(formulaLinks) : null;
+    for (const [sheetName, map] of Object.entries(sheets || {})) {
       for (const ref of Object.keys(map || {})) {
         const entry = map[ref];
         if (isChild(entry)) release(map, ref);
-        else if (isAnchor(entry)) {
-          delete entry.spillRows;
-          delete entry.spillCols;
+        else {
+          if (isAnchor(entry)) {
+            delete entry.spillRows;
+            delete entry.spillCols;
+          }
+          if (linkSet && entry?.formula) {
+            writeAnchorFormulaLink(entry, linkSet.has(sheetName + "!" + ref));
+          }
         }
       }
     }
@@ -136,10 +192,27 @@
       if (!map || spill.blocked === true || !(spill.rows > 0)) continue;
       const at = parseRef(spill.cell);
       if (!at) continue;
-      fillArea(map, spill.cell, spill.rows, spill.cols, (ref) => {
-        const p = parseRef(ref);
-        return spill.values?.[(p.row - at.row) * spill.cols + (p.col - at.col)];
-      });
+      const hasLinks = Array.isArray(spill.links);
+      if (hasLinks && map[spill.cell]) writeAnchorFormulaLink(map[spill.cell], Boolean(spill.links[0]));
+      fillArea(
+        map,
+        spill.cell,
+        spill.rows,
+        spill.cols,
+        (ref) => {
+          const p = parseRef(ref);
+          return spill.values?.[(p.row - at.row) * spill.cols + (p.col - at.col)];
+        },
+        hasLinks || linkSet
+          ? (ref) => {
+              if (hasLinks) {
+                const p = parseRef(ref);
+                return Boolean(spill.links[(p.row - at.row) * spill.cols + (p.col - at.col)]);
+              }
+              return linkSet.has(spill.sheet + "!" + ref);
+            }
+          : null
+      );
     }
   }
 
@@ -247,6 +320,9 @@
     areaOf,
     applyInfo,
     setValue,
+    copyComputedMeta,
+    writeAnchorFormulaLink,
+    applyChangedLinks,
     replaceAll,
     areasOf,
     lockPayload,

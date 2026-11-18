@@ -118,6 +118,7 @@ pub(crate) fn is_lifted_fn(name: &str) -> bool {
             | "ISNONTEXT"
             | "ISEVEN"
             | "ISODD"
+            | "HYPERLINK"
     )
 }
 
@@ -186,7 +187,7 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
         Expr::FuncCall(f) => {
             let name = f.name.as_str();
             let args = &f.args;
-            if is_spill_fn(name) {
+            if is_spill_fn(name) || (name == "HYPERLINK" && (1..=2).contains(&args.len())) {
                 return true;
             }
             if name == "SUMPRODUCT" {
@@ -207,7 +208,47 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
 fn scan_spill_only(expr: &Expr) -> bool {
     let mut found = false;
     crate::names::walk(expr, |node| {
-        found |= matches!(node, Expr::FuncCall(f) if is_spill_fn(&f.name));
+        found |= matches!(
+            node,
+            Expr::FuncCall(f)
+                if is_spill_fn(&f.name)
+                    || (f.name == "HYPERLINK" && (1..=2).contains(&f.args.len()))
+        );
     });
     found
+}
+
+/// Whether `expr` contains at least one syntactically valid `HYPERLINK` call (`1..=2` arguments),
+/// traversing `Expr::Shared` defined-name subtrees at most once per shared pointer.
+pub(crate) fn expr_contains_valid_hyperlink(expr: &Expr) -> bool {
+    let mut seen = crate::DetSet::default();
+    let mut stack = vec![expr];
+    while let Some(node) = stack.pop() {
+        match node {
+            Expr::Shared(shared) => {
+                if seen.insert(std::sync::Arc::as_ptr(shared)) {
+                    stack.push(&shared.expr);
+                }
+            }
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
+                stack.push(inner);
+            }
+            Expr::Binary { lhs, rhs, .. } => {
+                stack.push(lhs);
+                stack.push(rhs);
+            }
+            Expr::FuncCall(f) => {
+                if f.name == "HYPERLINK" && (1..=2).contains(&f.args.len()) {
+                    return true;
+                }
+                stack.extend(f.args.iter());
+            }
+            Expr::Call(c) => {
+                stack.push(&c.callee);
+                stack.extend(c.args.iter());
+            }
+            _ => {}
+        }
+    }
+    false
 }

@@ -219,7 +219,11 @@ pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: 
                     out.push_str(&num_str);
                 }
             }
-            out.push_str("\"}");
+            if c.hyperlink {
+                out.push_str("\",\"link\":true}");
+            } else {
+                out.push_str("\"}");
+            }
         }
     }
     out.push(']');

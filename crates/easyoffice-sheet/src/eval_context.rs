@@ -160,6 +160,10 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) lookup_cache: LookupCache,
     /// Virtual single-cell override for zero-mutation evaluations.
     pub(crate) cell_overlay: Option<(u16, PackedCellCoordinate, EvaluatedCellValue)>,
+    /// Link handle produced by the most recent scalar `HYPERLINK` / `INDEX` call (`0` = none).
+    pub(crate) last_hyperlink_id: u32,
+    /// Captured `HYPERLINK` targets (`1`-based index) when evaluating on click (`None` during normal recalc).
+    pub(crate) link_targets: Option<Vec<Result<String, crate::FormulaError>>>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -183,6 +187,8 @@ impl<'a> EvalContext<'a> {
             dyn_reads: None,
             lookup_cache: LookupCache::default(),
             cell_overlay: None,
+            last_hyperlink_id: 0,
+            link_targets: None,
         }
     }
 
@@ -206,6 +212,34 @@ impl<'a> EvalContext<'a> {
             dyn_reads: None,
             lookup_cache: LookupCache::default(),
             cell_overlay: None,
+            last_hyperlink_id: 0,
+            link_targets: None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn record_hyperlink(&mut self, res: Result<String, crate::FormulaError>) -> u32 {
+        match self.link_targets.as_mut() {
+            Some(pool) => {
+                if pool.len() >= crate::array::MAX_ARRAY_CELLS {
+                    return 0;
+                }
+                pool.push(res);
+                pool.len() as u32
+            }
+            None => u32::from(res.is_ok()),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn temp_link_id(&self, index: usize, coord: PackedCellCoordinate) -> u32 {
+        match self.temp.get(index) {
+            Some(grid)
+                if (coord.row() as usize) < grid.rows && (coord.col() as usize) < grid.cols =>
+            {
+                grid.link_id(coord.row() as usize, coord.col() as usize)
+            }
+            _ => 0,
         }
     }
 
