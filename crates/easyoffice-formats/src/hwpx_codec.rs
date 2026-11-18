@@ -149,12 +149,19 @@ impl ShapeTables {
         } else {
             0
         };
-        let (heading_type, heading_id_ref) = match list_kind {
-            Some(crate::RichListKind::Bullet) => (HEADING_BULLET, u32::from(list_lvl % 3) + 1),
-            Some(crate::RichListKind::Ordered) => {
-                (HEADING_NUMBER, ordered_run_id.unwrap_or(1).max(1))
+        let (heading_type, heading_id_ref, checked) = match list_kind {
+            Some(crate::RichListKind::Bullet) => {
+                (HEADING_BULLET, u32::from(list_lvl % 3) + 1, false)
             }
-            None => (HEADING_NONE, 0),
+            Some(crate::RichListKind::Task) => (
+                HEADING_BULLET,
+                crate::rich_list_writers::HWPX_TASK_BULLET_ID,
+                p.task_checked,
+            ),
+            Some(crate::RichListKind::Ordered) => {
+                (HEADING_NUMBER, ordered_run_id.unwrap_or(1).max(1), false)
+            }
+            None => (HEADING_NONE, 0, false),
         };
         let para = HwpxParaShape {
             align: match p.alignment {
@@ -167,6 +174,7 @@ impl ShapeTables {
             heading_type,
             heading_id_ref,
             heading_level: list_lvl,
+            checked,
             left_margin: p
                 .left_indent_twips
                 .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))

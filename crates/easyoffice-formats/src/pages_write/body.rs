@@ -96,6 +96,7 @@ pub(super) fn run_loses_format(run: &RichRun) -> bool {
 pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
     p.page_break_before
         || p.bookmark.is_some()
+        || (p.list == Some(RichListKind::Task) && !(1..=6).contains(&p.heading_level))
         || p.left_indent_twips
             .is_some_and(|t| t > MAX_INDENT_TWIPS as u32)
         || p.first_line_indent_twips
@@ -298,7 +299,7 @@ pub(super) fn write_body<'a>(
 
                 let (lvl, lstyle) = match paragraph.list {
                     None => (0u64, styles.list),
-                    Some(RichListKind::Bullet) => {
+                    Some(RichListKind::Bullet | RichListKind::Task) => {
                         let lvl = u64::from(paragraph.list_level.min(8));
                         any_list_level |= lvl > 0;
                         (lvl, styles.list_variation(bp, ListLook::Bullet)?)

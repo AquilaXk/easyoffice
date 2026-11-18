@@ -38,6 +38,7 @@ struct ParaShape {
     heading_type: String,
     heading_id_ref: u32,
     heading_level: u8,
+    checked: bool,
     left: u32,
     /// First-line indent (`hc:intent`), HWPUNIT.
     intent: i32,
@@ -152,8 +153,17 @@ impl HeaderBuilder {
         match name {
             "hh:paraPr" => {
                 self.intent_seen = false;
-                self.cur_para =
-                    attr(attrs, "id").map(|id| (id.to_string(), ParaShape::default(), false));
+                let checked = attr(attrs, "checked").as_deref() == Some("1");
+                self.cur_para = attr(attrs, "id").map(|id| {
+                    (
+                        id.to_string(),
+                        ParaShape {
+                            checked,
+                            ..ParaShape::default()
+                        },
+                        false,
+                    )
+                });
             }
             "hh:align" => {
                 if let Some(p) = self.para_mut() {
@@ -304,14 +314,20 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         heading = (shape.heading_level + 1).min(6);
     }
     let marker_margin = shape.left == LIST_LEFT_MARGIN;
-    let list = if heading > 0 {
-        None
+    let (list, task_checked) = if heading > 0 {
+        (None, false)
     } else {
         match shape.heading_type.as_str() {
-            "BULLET" => Some(RichListKind::Bullet),
-            "NUMBER" => Some(RichListKind::Ordered),
-            _ if marker_margin => Some(RichListKind::Bullet),
-            _ => None,
+            "BULLET" => match header
+                .numberings
+                .bullet_task(shape.heading_id_ref, shape.checked)
+            {
+                Some(checked) => (Some(RichListKind::Task), checked),
+                None => (Some(RichListKind::Bullet), false),
+            },
+            "NUMBER" => (Some(RichListKind::Ordered), false),
+            _ if marker_margin => (Some(RichListKind::Bullet), false),
+            _ => (None, false),
         }
     };
     let list_level = if list.is_some() {
@@ -386,6 +402,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
     RichParagraph {
         list_level,
         list_number,
+        task_checked,
         runs,
         alignment,
         heading_level: heading,

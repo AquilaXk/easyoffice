@@ -373,6 +373,34 @@
    page margins around the band (`page-margin-guides.ts`, 14px, same colour as the sheet corners), the badge above its
    top-left corner (`editor.css` .hf-edit-badge) and the dimmed workspace (`#scroll-container.hf-editing`). */
 #doc-editor > section[data-eo-hf] { display: none; }
+#doc-editor ul[data-eo-list="task"], #eo-print-root ul[data-eo-list="task"] { list-style: none; padding-left: 16px; }
+#doc-editor ul[data-eo-list="task"] > li, #eo-print-root ul[data-eo-list="task"] > li { position: relative; padding-left: 22px; }
+#doc-editor ul[data-eo-list="task"] > li::before, #eo-print-root ul[data-eo-list="task"] > li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.28em;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--ui-border-strong);
+  border-radius: 2px;
+  background: var(--doc-paper);
+  cursor: pointer;
+}
+#doc-editor ul[data-eo-list="task"] > li[data-eo-checked="true"], #eo-print-root ul[data-eo-list="task"] > li[data-eo-checked="true"] { color: var(--ui-text-muted); text-decoration: line-through; }
+#doc-editor ul[data-eo-list="task"] > li[data-eo-checked="true"]::before, #eo-print-root ul[data-eo-list="task"] > li[data-eo-checked="true"]::before {
+  content: "✓";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--ui-text-on-accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
 #doc-editor li[data-eo-list-level="1"] { margin-left: 24px; }
 #doc-editor li[data-eo-list-level="2"] { margin-left: 48px; }
 #doc-editor li[data-eo-list-level="3"] { margin-left: 72px; }

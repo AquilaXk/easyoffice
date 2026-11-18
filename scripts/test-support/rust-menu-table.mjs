@@ -1,4 +1,4 @@
-// The item table of crates/easyoffice-desktop/src/native_menu.rs as source text, with the spreadsheet
+// The item table of crates/easyoffice-desktop/src/native_menu/items.rs as source text, with the spreadsheet
 // macro written out: `sa!("id", "label", "act")` (or with braces) is `item("id", "label", None, "sheet-act:act")`.
 export function itemTable(source) {
   const start = source.indexOf("pub const ITEMS");

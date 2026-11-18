@@ -24,11 +24,14 @@ const LEVEL_STEP_TWIPS: u32 = 720;
 const HANGING_TWIPS: u32 = 360;
 /// Bullet characters by level, repeating.
 const BULLETS: [&str; 3] = ["\u{2022}", "\u{25E6}", "\u{25AA}"];
+/// `hh:bullet@id` reserved for checkable task bullets (`☐` / `☑`, `checkable="1"`).
+pub(crate) const HWPX_TASK_BULLET_ID: u32 = 4;
 
 /// What a run's list looks like at every level.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ListDef {
     pub kind: RichListKind,
+    pub checked: bool,
     pub levels: [RichListNumber; LIST_LEVELS],
 }
 
@@ -60,9 +63,12 @@ pub(crate) fn plan_lists(blocks: &[RichBlock]) -> ListPlan {
     let mut index: HashMap<ListDef, usize> = HashMap::new();
     let mut run_start = 0;
     while run_start < blocks.len() {
-        let kind = match &blocks[run_start] {
-            RichBlock::Paragraph(p) => list_kind_of(p),
-            _ => None,
+        let (kind, checked) = match &blocks[run_start] {
+            RichBlock::Paragraph(p) => match list_kind_of(p) {
+                Some(k) => (Some(k), k == RichListKind::Task && p.task_checked),
+                None => (None, false),
+            },
+            _ => (None, false),
         };
         let Some(kind) = kind else {
             plan.block_run.push(None);
@@ -72,7 +78,12 @@ pub(crate) fn plan_lists(blocks: &[RichBlock]) -> ListPlan {
         let run: Vec<&RichParagraph> = blocks[run_start..]
             .iter()
             .map_while(|block| match block {
-                RichBlock::Paragraph(p) if list_kind_of(p) == Some(kind) => Some(p),
+                RichBlock::Paragraph(p)
+                    if list_kind_of(p) == Some(kind)
+                        && (kind != RichListKind::Task || p.task_checked == checked) =>
+                {
+                    Some(p)
+                }
                 _ => None,
             })
             .collect();
@@ -85,7 +96,11 @@ pub(crate) fn plan_lists(blocks: &[RichBlock]) -> ListPlan {
                 levels[level] = p.list_number.unwrap_or_default();
             }
         }
-        let def = ListDef { kind, levels };
+        let def = ListDef {
+            kind,
+            checked,
+            levels,
+        };
         let def_index = *index.entry(def.clone()).or_insert_with(|| {
             plan.defs.push(def);
             plan.defs.len() - 1
@@ -130,6 +145,13 @@ fn enclosure_affixes(enclosure: RichNumberEnclosure) -> (&'static str, &'static 
     }
 }
 
+/// Whether `plan` needs `word/numbering.xml` (bullet or ordered runs; task lists use `w14:checkbox` SDTs).
+pub(crate) fn has_docx_numbering(plan: &ListPlan) -> bool {
+    plan.runs
+        .iter()
+        .any(|&d| plan.defs[d].kind != RichListKind::Task)
+}
+
 /// `word/numbering.xml` (ECMA-376 17.9): one `w:abstractNum` per definition, then one `w:num` per
 /// run (`numId` = run index + 1). Ordered runs restart at 1 on every level.
 pub(crate) fn docx_numbering_xml(plan: &ListPlan) -> String {
@@ -144,6 +166,10 @@ pub(crate) fn docx_numbering_xml(plan: &ListPlan) -> String {
         for (level, number) in def.levels.iter().enumerate() {
             let (format, text) = match def.kind {
                 RichListKind::Bullet => ("bullet", BULLETS[level % BULLETS.len()].to_string()),
+                RichListKind::Task => (
+                    "bullet",
+                    if def.checked { "\u{2611}" } else { "\u{2610}" }.to_string(),
+                ),
                 RichListKind::Ordered => {
                     let (before, after) = enclosure_affixes(number.enclosure);
                     (
@@ -225,6 +251,10 @@ pub(crate) fn odt_list_styles_xml(plan: &ListPlan) -> String {
                 RichListKind::Bullet => xml.push_str(&format!(
                     "<text:list-level-style-bullet text:level=\"{level_number}\" text:bullet-char=\"{}\">{position}</text:list-level-style-bullet>",
                     BULLETS[level % BULLETS.len()]
+                )),
+                RichListKind::Task => xml.push_str(&format!(
+                    "<text:list-level-style-bullet text:level=\"{level_number}\" text:bullet-char=\"{}\">{position}</text:list-level-style-bullet>",
+                    if def.checked { "\u{2611}" } else { "\u{2610}" }
                 )),
                 RichListKind::Ordered => {
                     let (before, after) = enclosure_affixes(number.enclosure);
@@ -354,21 +384,30 @@ pub(crate) fn hwpx_numberings_xml(plan: &ListPlan) -> String {
     xml
 }
 
-/// `hh:bullets` element for HWPX `header.xml` covering bullet ids `1..=max_id` (`•`, `◦`, `▪`).
+/// `hh:bullets` element for HWPX `header.xml` covering bullet ids `1..=max_id` (`•`, `◦`, `▪`, plus checkable id `4`).
 pub(crate) fn hwpx_bullets_xml(max_id: u32) -> String {
     use std::fmt::Write;
     if max_id == 0 {
         return String::new();
     }
-    let count = usize::try_from(max_id).unwrap_or(1).min(BULLETS.len());
-    let mut xml = String::with_capacity(48 + count * 240);
-    let _ = write!(xml, "<hh:bullets itemCnt=\"{count}\">");
-    for (idx, glyph) in BULLETS.iter().enumerate().take(count) {
+    let has_task = max_id >= HWPX_TASK_BULLET_ID;
+    let plain_count = usize::try_from(max_id).unwrap_or(1).min(BULLETS.len());
+    let total_count = plain_count + usize::from(has_task);
+    let mut xml = String::with_capacity(48 + total_count * 260);
+    let _ = write!(xml, "<hh:bullets itemCnt=\"{total_count}\">");
+    for (idx, glyph) in BULLETS.iter().enumerate().take(plain_count) {
         let _ = write!(
             xml,
             "<hh:bullet id=\"{}\" char=\"{glyph}\" useImage=\"0\"><hh:paraHead level=\"0\" align=\"LEFT\" useInstWidth=\"0\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"DIGIT\" charPrIDRef=\"4294967295\" checkable=\"0\"/></hh:bullet>",
             idx + 1,
         );
+    }
+    if has_task {
+        xml.push_str(concat!(
+            "<hh:bullet id=\"4\" char=\"\u{2610}\" checkedChar=\"\u{2611}\" useImage=\"0\">",
+            "<hh:paraHead level=\"0\" align=\"LEFT\" useInstWidth=\"0\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"DIGIT\" charPrIDRef=\"4294967295\" checkable=\"1\"/>",
+            "</hh:bullet>"
+        ));
     }
     xml.push_str("</hh:bullets>");
     xml
@@ -376,6 +415,7 @@ pub(crate) fn hwpx_bullets_xml(max_id: u32) -> String {
 
 /// Maximum `<hh:paraHead>` entries accepted in one HWPX `header.xml` before failing closed.
 pub(crate) const MAX_HWPX_NUMBERING_HEADS: usize = 8_192;
+const MAX_HWPX_BULLETS: usize = 1_024;
 const HWPX_HEAD_TEXT_CAP: usize = 32;
 
 fn decode_hwpx_num_format(num_format: Option<&str>) -> RichNumberFormat {
@@ -405,7 +445,10 @@ fn decode_hwpx_enclosure(bytes: &[u8]) -> RichNumberEnclosure {
 #[derive(Default)]
 pub(crate) struct HwpxNumberingReader {
     map: HashMap<u64, RichListNumber>,
+    /// `hh:bullet@id` -> `1` (checkable `☐`/`☑`) or `2` (static checked `☑`/`☒`).
+    bullets: HashMap<u32, u8>,
     cur_id: Option<u32>,
+    cur_bullet_id: Option<u32>,
     cur_head: Option<(u8, RichNumberFormat, u8, [u8; HWPX_HEAD_TEXT_CAP])>,
     overflowed: bool,
 }
@@ -424,6 +467,33 @@ impl HwpxNumberingReader {
         match name {
             "hh:numbering" => {
                 self.cur_id = attr(attrs, "id").and_then(|s| s.parse::<u32>().ok());
+            }
+            "hh:bullet" => {
+                if self.bullets.len() >= MAX_HWPX_BULLETS {
+                    self.overflowed = true;
+                    return;
+                }
+                let bid = attr(attrs, "id").and_then(|s| s.parse::<u32>().ok());
+                self.cur_bullet_id = bid;
+                if let Some(id) = bid {
+                    let ch = attr(attrs, "char")
+                        .and_then(|s| s.chars().next())
+                        .unwrap_or('\0');
+                    let has_checked_char =
+                        attr(attrs, "checkedChar").is_some_and(|s| !s.is_empty());
+                    if has_checked_char || ch == '\u{2610}' {
+                        self.bullets.insert(id, 1);
+                    } else if matches!(ch, '\u{2611}' | '\u{2612}' | '\u{F0FE}') {
+                        self.bullets.insert(id, 2);
+                    }
+                }
+            }
+            "hh:paraHead" if self.cur_bullet_id.is_some() => {
+                if attr(attrs, "checkable").as_deref() == Some("1") {
+                    if let Some(id) = self.cur_bullet_id {
+                        self.bullets.insert(id, 1);
+                    }
+                }
             }
             "hh:paraHead" if self.cur_id.is_some() => {
                 if self.map.len() >= MAX_HWPX_NUMBERING_HEADS {
@@ -471,6 +541,9 @@ impl HwpxNumberingReader {
                 self.cur_id = None;
                 self.cur_head = None;
             }
+            "hh:bullet" => {
+                self.cur_bullet_id = None;
+            }
             _ => {}
         }
     }
@@ -478,10 +551,19 @@ impl HwpxNumberingReader {
     pub(crate) fn check_budget(&self) -> Result<(), crate::EasyOfficeError> {
         if self.overflowed {
             return Err(crate::EasyOfficeError::ResourceBudgetExceeded(format!(
-                "HWPX 번호 머리글 개수가 한도({MAX_HWPX_NUMBERING_HEADS}개)를 넘었습니다."
+                "HWPX 번호·글머리표 머리글 개수가 한도({MAX_HWPX_NUMBERING_HEADS}개)를 넘었습니다."
             )));
         }
         Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn bullet_task(&self, id: u32, para_checked: bool) -> Option<bool> {
+        match self.bullets.get(&id).copied() {
+            Some(1) => Some(para_checked),
+            Some(2) => Some(true),
+            _ => None,
+        }
     }
 
     #[inline]

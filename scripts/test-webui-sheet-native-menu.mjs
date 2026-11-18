@@ -12,7 +12,7 @@ const REPO = new URL("../", import.meta.url);
 const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 
 function sheetItems() {
-  const source = read("crates/easyoffice-desktop/src/native_menu.rs");
+  const source = read("crates/easyoffice-desktop/src/native_menu/items.rs");
   const table = itemTable(source);
   return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
 }

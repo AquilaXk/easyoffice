@@ -398,6 +398,7 @@ const FORMAT_TEXT: MenuSpec = menu(
         "format:justify",
         "format:para-numbering",
         "format:para-bullet",
+        "format:para-checklist",
         "format:indent-in",
         "format:indent-out",
     ],

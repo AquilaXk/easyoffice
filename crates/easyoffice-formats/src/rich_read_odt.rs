@@ -6,7 +6,7 @@ mod frame;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use self::frame::{parse_odt_list_level_number, OdtListStyle};
+use self::frame::{parse_odt_list_level_bullet, parse_odt_list_level_number, OdtListStyle};
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
@@ -209,9 +209,8 @@ fn read_styles_into(
                 }
                 "text:list-level-style-bullet" => {
                     if let Some(n) = cur_list.as_ref() {
-                        lists
-                            .entry(n.clone())
-                            .or_insert_with(|| OdtListStyle::new(RichListKind::Bullet));
+                        let parsed = parse_odt_list_level_bullet(attrs);
+                        lists.entry(n.clone()).or_insert(parsed);
                     }
                 }
                 "office:body" => break,
@@ -668,25 +667,32 @@ impl<'a> OdtWalker<'a> {
             self.pending_page_break |= p.style.page_break_before;
         } else {
             self.text_budget.charge_block(0, "ODT 문단")?;
-            let (list, list_level, list_number) = if p.outline > 0 || p.toc.is_some() {
-                (None, 0, None)
+            let (list, task_checked, list_level, list_number) = if p.outline > 0 || p.toc.is_some()
+            {
+                (None, false, 0, None)
             } else if let Some(entry) = self.list_stack.last() {
                 let lvl = (self.list_stack.len() - 1).min(8) as u8;
                 let num = (entry.kind == RichListKind::Ordered)
                     .then(|| entry.levels[usize::from(lvl)])
                     .flatten()
                     .filter(|&n| n != crate::RichListNumber::default());
-                (Some(entry.kind), lvl, num)
+                (
+                    Some(entry.kind),
+                    entry.kind == RichListKind::Task && entry.checked,
+                    lvl,
+                    num,
+                )
             } else if let Some(kind) = p.style.list_kind {
-                (Some(kind), 0, None)
+                (Some(kind), false, 0, None)
             } else if p.style.list_margin {
-                (Some(RichListKind::Bullet), 0, None)
+                (Some(RichListKind::Bullet), false, 0, None)
             } else {
-                (None, 0, None)
+                (None, false, 0, None)
             };
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
                 list_level,
                 list_number,
+                task_checked,
                 runs: p.runs,
                 alignment: p.style.align,
                 heading_level: p.outline,

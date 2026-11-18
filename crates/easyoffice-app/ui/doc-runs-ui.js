@@ -37,8 +37,9 @@
   const HEADING_TAG_RE = /^H[1-6]$/;
   const STYLE_HEADING_RE = /^개요 ([1-3])$/;
   const PLAIN_STYLES = new Set(["바탕글", "공문서 바탕글"]);
-  const LIST_TAGS = { ordered: "OL", bullet: "UL" };
+  const LIST_TAGS = { ordered: "OL", bullet: "UL", task: "UL" };
   const LIST_TAG_NAMES = new Set(Object.values(LIST_TAGS));
+  const LIST_BUTTON_CMDS = { ordered: "para-numbering", bullet: "para-bullet", task: "para-checklist" };
   // Look carried over when a paragraph changes its tag (the style whitelist of the saved document state).
   const CARRIED_STYLE_PROPS = [
     "paddingLeft", "paddingRight", "textIndent", "lineHeight", "textAlign",
@@ -466,18 +467,32 @@
       return block.tagName === "LI" && LIST_TAG_NAMES.has(block.parentNode?.tagName);
     }
 
+    function listKindOf(block) {
+      if (!isListItem(block)) return null;
+      if (block.parentNode.tagName === "OL") return "ordered";
+      return block.parentNode.dataset?.eoList === "task" ? "task" : "bullet";
+    }
+
+    function sameListContainer(el, kind) {
+      if (!el || el.nodeType !== 1 || el.tagName !== LIST_TAGS[kind]) return false;
+      if (kind === "ordered") return true;
+      return (el.dataset?.eoList === "task") === (kind === "task");
+    }
+
     // A list item becomes a plain paragraph after the list; the items behind it continue in a new list.
     function itemToParagraph(li) {
       if (!isListItem(li)) {
         const plain = retag(li, "p");
         delete plain.dataset.eoListLevel;
         delete plain.dataset.eoListNum;
+        delete plain.dataset.eoChecked;
         return plain;
       }
       const list = li.parentNode;
       const para = retag(li, "p");
       delete para.dataset.eoListLevel;
       delete para.dataset.eoListNum;
+      delete para.dataset.eoChecked;
       const tail = [];
       for (let n = para.nextSibling; n; n = n.nextSibling) tail.push(n);
       const holder = list.parentNode;
@@ -492,43 +507,65 @@
     }
 
     // A paragraph becomes an item of the list just before it (or of a new list), joined to a list behind it.
-    function paragraphToItem(block, listTag) {
+    function paragraphToItem(block, kind) {
+      const listTag = LIST_TAGS[kind];
       const item = retag(block, "li");
+      if (kind === "task") {
+        item.dataset.eoChecked = item.dataset.eoChecked === "true" ? "true" : "false";
+      } else {
+        delete item.dataset.eoChecked;
+      }
       const holder = item.parentNode;
       const prev = item.previousSibling;
-      let list = prev && prev.nodeType === 1 && prev.tagName === listTag ? prev : null;
+      let list = sameListContainer(prev, kind) ? prev : null;
       if (!list) {
         list = item.ownerDocument.createElement(listTag);
+        if (kind === "task") {
+          list.className = "eo-task-list";
+          list.dataset.eoList = "task";
+        }
         holder.insertBefore(list, item);
       }
       list.appendChild(item);
       const next = list.nextSibling;
-      if (next && next.nodeType === 1 && next.tagName === listTag) {
+      if (sameListContainer(next, kind)) {
         while (next.firstChild) list.appendChild(next.firstChild);
         holder.removeChild(next);
       }
       return item;
     }
 
-    function isItemOf(block, listTag) {
-      return block.tagName === "LI" && block.parentNode?.tagName === listTag;
+    function isItemOf(block, kind) {
+      return listKindOf(block) === kind;
     }
 
-    // Numbered / bulleted paragraphs as `<ol>/<ul><li>`; applying the same kind to list items again takes them out.
+    // Numbered / bulleted / checklist paragraphs as `<ol>/<ul><li>`; applying the same kind again takes them out.
     function toggleList(kind) {
-      const listTag = LIST_TAGS[kind];
-      if (!listTag) return { changed: false, blocks: 0 };
+      if (!LIST_TAGS[kind]) return { changed: false, blocks: 0 };
       const pick = () => paragraphTargets().filter((b) => b.tagName === "P" || b.tagName === "LI");
       return runOnParagraphs((blocks, range) => {
         const replaced = new Map();
-        const off = blocks.every((b) => isItemOf(b, listTag));
+        const off = blocks.every((b) => isItemOf(b, kind));
         blocks.forEach((b) => {
           if (off) replaced.set(b, itemToParagraph(b));
-          else if (isItemOf(b, listTag)) return;
-          else replaced.set(b, paragraphToItem(isListItem(b) ? itemToParagraph(b) : b, listTag));
+          else if (isItemOf(b, kind)) return;
+          else replaced.set(b, paragraphToItem(isListItem(b) ? itemToParagraph(b) : b, kind));
         });
         restoreSelection(range, replaced);
-      }, "번호·글머리표를 적용할 문단을 먼저 선택하세요", pick);
+      }, "번호·글머리표·체크리스트를 적용할 문단을 먼저 선택하세요", pick);
+    }
+
+    function toggleTaskChecked(explicitItems) {
+      const pick = Array.isArray(explicitItems)
+        ? () => explicitItems.filter((b) => isItemOf(b, "task"))
+        : () => paragraphTargets().filter((b) => isItemOf(b, "task"));
+      return runOnParagraphs((items) => {
+        const nextChecked = !items.every((li) => li.dataset.eoChecked === "true");
+        items.forEach((li) => {
+          li.dataset.eoChecked = nextChecked ? "true" : "false";
+        });
+        return items.length > 0;
+      }, "체크 상태를 바꿀 체크리스트 항목을 먼저 선택하세요", pick);
     }
 
     // The style box: outline levels are headings, the plain styles are paragraphs.
@@ -574,11 +611,19 @@
       return ALIGN_BUTTON_MODES.includes(css) ? css : "justify";
     }
 
-    // Alignment buttons, line spacing and style box show the first paragraph of the selection.
+    // Alignment buttons, list buttons, line spacing and style box show the first paragraph of the selection.
     function syncParagraphControls(blk) {
       if (!blk) return;
       const mode = alignModeOf(blk);
       ALIGN_BUTTON_MODES.forEach((m) => setPressed("btn-align-" + m, m === mode));
+      const activeList = listKindOf(blk);
+      Object.entries(LIST_BUTTON_CMDS).forEach(([kind, cmd]) => {
+        const btn = document.querySelector('#icon-toolbar .tb-btn[data-studio-cmd="' + cmd + '"]');
+        if (!btn) return;
+        const on = kind === activeList;
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        btn.classList.toggle("active", on);
+      });
       showLineSpacing(lineSpacingOf(blk));
       const style = byId("doc-style-select");
       const name = styleNameOf(blk);
@@ -717,11 +762,41 @@
     }
 
     function handleKeydown(ev) {
-      if (ev.key !== "Tab" || ev.altKey || ev.ctrlKey || ev.metaKey || !isDocModule()) return;
+      if (!isDocModule()) return;
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey) {
+        const taskItems = paragraphTargets().filter((b) => isItemOf(b, "task"));
+        if (taskItems.length === 0) return;
+        ev.preventDefault?.();
+        toggleTaskChecked(taskItems);
+        return;
+      }
+      if (ev.key !== "Tab" || ev.altKey || ev.ctrlKey || ev.metaKey) return;
       const items = paragraphTargets().filter((b) => isListItem(b));
       if (items.length === 0) return;
       ev.preventDefault?.();
       shiftListLevel(ev.shiftKey ? -1 : 1);
+    }
+
+    function handleEditorClick(ev) {
+      if (!isDocModule()) return;
+      const target = ev.target;
+      if (!target || target.nodeType !== 1 || target.tagName !== "LI" || !isItemOf(target, "task")) return;
+      const x = typeof ev.offsetX === "number"
+        ? ev.offsetX
+        : typeof target.getBoundingClientRect === "function" && typeof ev.clientX === "number"
+          ? ev.clientX - (target.getBoundingClientRect().left || 0)
+          : NaN;
+      if (!Number.isFinite(x) || x < -2 || x > 20) return;
+      ev.preventDefault?.();
+      toggleTaskChecked([target]);
+    }
+
+    function handleInput(ev) {
+      if (ev?.inputType !== "insertParagraph" || !isDocModule()) return;
+      const blk = paragraphTargets()[0];
+      if (blk && isItemOf(blk, "task") && blk.dataset.eoChecked === "true" && !(blk.textContent || "").trim()) {
+        blk.dataset.eoChecked = "false";
+      }
     }
 
     function bind() {
@@ -730,6 +805,8 @@
       document.addEventListener?.("selectionchange", handleSelectionChange);
       root.addEventListener("beforeinput", handleBeforeInput);
       root.addEventListener("keydown", handleKeydown);
+      root.addEventListener("click", handleEditorClick);
+      root.addEventListener("input", handleInput);
       Object.entries(RULER_PINS).forEach(([id, prop]) => {
         const pin = document.getElementById(id);
         if (pin) bindRulerPin(pin, prop);
@@ -738,7 +815,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, shiftListLevel, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,

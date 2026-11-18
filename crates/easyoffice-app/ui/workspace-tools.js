@@ -626,7 +626,11 @@
       return true;
     }
 
-    const PARA_LIST_CMDS = { "para-numbering": { kind: "ordered", label: "문단 번호 서식 적용 완료" }, "para-bullet": { kind: "bullet", label: "글머리표 서식 적용 완료" } };
+    const PARA_LIST_CMDS = {
+      "para-numbering": { kind: "ordered", label: "문단 번호 서식 적용 완료" },
+      "para-bullet": { kind: "bullet", label: "글머리표 서식 적용 완료" },
+      "para-checklist": { kind: "task", label: "체크리스트 서식 적용 완료" },
+    };
     const PARA_INDENT_CMDS = { "indent-in": { delta: 16, label: "한 수준 증가 적용 완료" }, "indent-out": { delta: -16, label: "한 수준 감소 적용 완료" } };
     function execStudioParaCmd(cmd, fb, isDocMod) {
       const list = PARA_LIST_CMDS[cmd];

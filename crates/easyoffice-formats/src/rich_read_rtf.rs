@@ -86,6 +86,7 @@ struct ParaProps {
     align: Option<RichAlignment>,
     heading: u8,
     list: Option<crate::RichListKind>,
+    task_checked: bool,
     left_indent: Option<u32>,
     first_line: Option<i32>,
     sl: Option<i32>,
@@ -121,8 +122,9 @@ struct Reader {
     unsupported_code_page: Option<u32>,
     /// `\'hh` bytes that no table cell maps (shown as U+FFFD).
     undecodable_bytes: usize,
-    /// `\lsN` -> `\listid` -> number format of the first level.
+    /// `\lsN` -> `\listid` -> number format / checkable task flag of the first level.
     list_first_nfc: HashMap<i32, i32>,
+    list_first_task: HashMap<i32, bool>,
     ls_list: HashMap<i32, i32>,
     open_list: OpenList,
     text_budget: DecodeBudget,
@@ -133,6 +135,7 @@ struct Reader {
 struct OpenList {
     levels: usize,
     nfc: Option<i32>,
+    task: Option<bool>,
     id: Option<i32>,
 }
 
@@ -180,6 +183,7 @@ impl Reader {
             unsupported_code_page: None,
             undecodable_bytes: 0,
             list_first_nfc: HashMap::new(),
+            list_first_task: HashMap::new(),
             ls_list: HashMap::new(),
             open_list: OpenList::default(),
             text_budget,
@@ -268,7 +272,19 @@ impl Reader {
                 self.text_budget.charge(text.len(), "RTF 메타데이터")?;
                 self.title.push_str(text);
             }
-            Dest::Info | Dest::Skip | Dest::ListTable | Dest::ListOverrides => {}
+            Dest::ListTable => {
+                if self.open_list.levels == 1 {
+                    if text.contains('\u{2610}') {
+                        self.open_list.task = Some(false);
+                    } else if text.contains('\u{2611}') || text.contains('\u{2612}') {
+                        self.open_list.task = Some(true);
+                    }
+                    if let (Some(id), Some(checked)) = (self.open_list.id, self.open_list.task) {
+                        self.list_first_task.insert(id, checked);
+                    }
+                }
+            }
+            Dest::Info | Dest::Skip | Dest::ListOverrides => {}
         }
         Ok(())
     }
@@ -316,6 +332,7 @@ impl Reader {
             self.flush_table()?;
             self.text_budget.charge_block(0, "RTF 문단")?;
             let list = if para.heading > 0 { None } else { para.list };
+            let task_checked = list == Some(crate::RichListKind::Task) && para.task_checked;
             let left_indent_twips = if list.is_some() && para.left_indent == Some(720) {
                 None
             } else {
@@ -330,6 +347,7 @@ impl Reader {
                 alignment: para.align,
                 heading_level: para.heading,
                 list,
+                task_checked,
                 left_indent_twips,
                 first_line_indent_twips: para.first_line,
                 line_spacing_percent,
@@ -481,20 +499,25 @@ impl Reader {
             if let (Some(id), Some(nfc)) = (open.id, open.nfc) {
                 self.list_first_nfc.insert(id, nfc);
             }
+            if let (Some(id), Some(checked)) = (open.id, open.task) {
+                self.list_first_task.insert(id, checked);
+            }
         }
     }
 
     /// Kind of the list `\lsN` names: bullet or none for the list table's first level, numbers
     /// otherwise. Without a table entry, `\ls2` is the numbered list (the engine's own writer).
-    fn list_kind(&self, ls: Option<i32>) -> crate::RichListKind {
-        let nfc = ls
-            .and_then(|ls| self.ls_list.get(&ls))
-            .and_then(|id| self.list_first_nfc.get(id));
+    fn list_kind(&self, ls: Option<i32>) -> (crate::RichListKind, bool) {
+        let list_id = ls.and_then(|ls| self.ls_list.get(&ls)).copied();
+        if let Some(checked) = list_id.and_then(|id| self.list_first_task.get(&id).copied()) {
+            return (crate::RichListKind::Task, checked);
+        }
+        let nfc = list_id.and_then(|id| self.list_first_nfc.get(&id));
         match nfc {
-            Some(&NFC_BULLET | &NFC_NONE) => crate::RichListKind::Bullet,
-            Some(_) => crate::RichListKind::Ordered,
-            None if ls == Some(2) => crate::RichListKind::Ordered,
-            None => crate::RichListKind::Bullet,
+            Some(&NFC_BULLET | &NFC_NONE) => (crate::RichListKind::Bullet, false),
+            Some(_) => (crate::RichListKind::Ordered, false),
+            None if ls == Some(2) => (crate::RichListKind::Ordered, false),
+            None => (crate::RichListKind::Bullet, false),
         }
     }
 
@@ -550,7 +573,9 @@ impl Reader {
             "qr" => self.para.align = Some(RichAlignment::Right),
             "qj" => self.para.align = Some(RichAlignment::Justify),
             "ls" => {
-                self.para.list = Some(self.list_kind(param));
+                let (kind, checked) = self.list_kind(param);
+                self.para.list = Some(kind);
+                self.para.task_checked = checked;
             }
             "li" => {
                 self.para.left_indent =

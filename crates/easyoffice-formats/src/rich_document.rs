@@ -42,6 +42,7 @@ impl RichAlignment {
 pub enum RichListKind {
     Bullet,
     Ordered,
+    Task,
 }
 
 /// Numbering style of an ordered list level.
@@ -470,6 +471,8 @@ pub struct RichParagraph {
     pub alignment: Option<RichAlignment>,
     pub heading_level: u8,
     pub list: Option<RichListKind>,
+    /// Completion state when `list == Some(RichListKind::Task)`.
+    pub task_checked: bool,
     /// Nesting level of a list paragraph, 0 for the outermost (read from Pages and DOCX; the DOCX
     /// and ODT writers emit it as `w:ilvl` and nested `text:list`).
     pub list_level: u8,

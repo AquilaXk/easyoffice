@@ -21,7 +21,9 @@ use crate::rich_image_writers::{
 use crate::rich_link_writers::{
     docx_linked_run_properties, link_groups, DocxLinks, DOCX_LINK_STYLE_XML,
 };
-use crate::rich_list_writers::{docx_num_pr, docx_numbering_xml, list_kind_of, plan_lists};
+use crate::rich_list_writers::{
+    docx_num_pr, docx_numbering_xml, has_docx_numbering, list_kind_of, plan_lists,
+};
 pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_page_frame::{
     docx_cols_xml, docx_field_run, docx_frame_parts_and_refs, docx_page_margins, docx_paper,
@@ -145,14 +147,17 @@ fn push_docx_paragraph(
     sect_pr: Option<&str>,
 ) {
     out.push_str("<w:p>");
+    let list_kind = list_kind_of(p);
+    let is_task = list_kind == Some(RichListKind::Task) && p.toc.is_none();
     let style = if let Some(role) = p.toc {
         Some(docx_toc_style_id(role))
     } else if (1..=6).contains(&p.heading_level) {
         Some(format!("Heading{}", p.heading_level))
     } else {
-        list_kind_of(p).map(|kind| match kind {
-            RichListKind::Bullet => "ListBullet".to_string(),
-            RichListKind::Ordered => "ListNumber".to_string(),
+        list_kind.and_then(|kind| match kind {
+            RichListKind::Bullet => Some("ListBullet".to_string()),
+            RichListKind::Ordered => Some("ListNumber".to_string()),
+            RichListKind::Task => None,
         })
     };
     let jc = p.alignment.map(|a| match a {
@@ -161,9 +166,15 @@ fn push_docx_paragraph(
         RichAlignment::Right => "right",
         RichAlignment::Justify => "both",
     });
-    let layout = docx_paragraph_layout(p);
+    let mut layout = docx_paragraph_layout(p);
+    if is_task && p.left_indent_twips.is_none() && p.first_line_indent_twips.is_none() {
+        let left = 720 * (u32::from(p.list_level.min(8)) + 1);
+        layout.push_str(&format!("<w:ind w:left=\"{left}\" w:hanging=\"360\"/>"));
+    }
     let tabs = docx_toc_tabs(p);
+    let num_run = run.filter(|_| !is_task);
     if style.is_some()
+        || num_run.is_some()
         || jc.is_some()
         || !layout.is_empty()
         || !tabs.is_empty()
@@ -177,7 +188,7 @@ fn push_docx_paragraph(
         if p.page_break_before {
             out.push_str("<w:pageBreakBefore/>");
         }
-        if let Some(run) = run {
+        if let Some(run) = num_run {
             out.push_str(&docx_num_pr(run, p));
         }
         out.push_str(&tabs);
@@ -194,6 +205,24 @@ fn push_docx_paragraph(
     if let Some(number) = p.bookmark {
         out.push_str(&format!(
             "<w:bookmarkStart w:id=\"{number}\" w:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
+        ));
+    }
+    if is_task {
+        let (val, glyph) = if p.task_checked {
+            ("1", "\u{2612}")
+        } else {
+            ("0", "\u{2610}")
+        };
+        out.push_str(&format!(
+            concat!(
+                "<w:sdt><w:sdtPr><w14:checkbox><w14:checked w14:val=\"{val}\"/>",
+                "<w14:checkedState w14:val=\"2612\" w14:font=\"MS Gothic\"/>",
+                "<w14:uncheckedState w14:val=\"2610\" w14:font=\"MS Gothic\"/>",
+                "</w14:checkbox></w:sdtPr><w:sdtContent><w:r><w:t>{glyph}</w:t></w:r></w:sdtContent></w:sdt>",
+                "<w:r><w:t xml:space=\"preserve\"> </w:t></w:r>"
+            ),
+            val = val,
+            glyph = glyph,
         ));
     }
     for (link, group) in link_groups(&p.runs) {
@@ -261,7 +290,7 @@ pub(crate) fn docx_rich_entries(
     let mut body = String::with_capacity(1024);
     body.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     body.push_str(
-        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"",
+        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\"",
     );
     body.push_str(DOCX_PICTURE_NAMESPACES);
     body.push_str("><w:body>");
@@ -341,7 +370,7 @@ pub(crate) fn docx_rich_entries(
     ));
     body.push_str("</w:body></w:document>");
 
-    let has_lists = !lists.runs.is_empty();
+    let has_lists = has_docx_numbering(&lists);
     let numbering = has_lists.then(|| docx_numbering_xml(&lists));
     let content_types = docx_content_types(&media, has_lists, &frame.content_types);
     let numbering_rel = if has_lists {
@@ -595,7 +624,19 @@ pub(crate) use crate::odt_rich_writer::pack_odt_rich;
 /// `cell_sep`.
 fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) {
     match block {
-        RichBlock::Paragraph(p) => lines.push(p.plain_text()),
+        RichBlock::Paragraph(p) => {
+            if p.list == Some(RichListKind::Task) && !(1..=6).contains(&p.heading_level) {
+                let indent = "  ".repeat(usize::from(p.list_level.min(8)));
+                let mark = if p.task_checked {
+                    "\u{2611}"
+                } else {
+                    "\u{2610}"
+                };
+                lines.push(format!("{indent}{mark} {}", p.plain_text()));
+            } else {
+                lines.push(p.plain_text());
+            }
+        }
         RichBlock::Image(img) => lines.push(img.fallback_text().to_string()),
         RichBlock::Table(table) => {
             for row in table.rows.iter().filter(|r| !r.is_empty()) {

@@ -163,7 +163,7 @@ function rustLayout() {
 const ITEM_PATTERN = /item\(\s*"([^"]+)",\s*"([^"]+)",\s*(?:None|Some\("[^"]+"\)),\s*"([^"]+)",?\s*\)/g;
 
 function rustItemTable() {
-  return itemTable(read("crates/easyoffice-desktop/src/native_menu.rs"));
+  return itemTable(read("crates/easyoffice-desktop/src/native_menu/items.rs"));
 }
 
 function rustItems() {

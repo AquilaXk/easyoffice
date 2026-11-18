@@ -18,6 +18,7 @@ use crate::{
 #[derive(Clone, Copy)]
 pub(super) struct OdtListStyle {
     pub kind: RichListKind,
+    pub checked: bool,
     pub levels: [Option<RichListNumber>; LIST_LEVELS],
 }
 
@@ -25,8 +26,28 @@ impl OdtListStyle {
     pub const fn new(kind: RichListKind) -> Self {
         Self {
             kind,
+            checked: false,
             levels: [None; LIST_LEVELS],
         }
+    }
+
+    pub const fn task(checked: bool) -> Self {
+        Self {
+            kind: RichListKind::Task,
+            checked,
+            levels: [None; LIST_LEVELS],
+        }
+    }
+}
+
+pub(super) fn parse_odt_list_level_bullet(attrs: &Attrs<'_>) -> OdtListStyle {
+    match attr(attrs, "text:bullet-char")
+        .and_then(|s| s.chars().next())
+        .unwrap_or('\u{2022}')
+    {
+        '\u{2610}' => OdtListStyle::task(false),
+        '\u{2611}' | '\u{2612}' => OdtListStyle::task(true),
+        _ => OdtListStyle::new(RichListKind::Bullet),
     }
 }
 

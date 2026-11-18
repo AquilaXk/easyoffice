@@ -141,6 +141,8 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
     let mut para_count = 0usize;
     let mut heading_count = 0usize;
     let mut list_count = 0usize;
+    let mut task_count = 0usize;
+    let mut checked_task_count = 0usize;
     let mut table_count = 0usize;
     let mut image_count = 0usize;
     let mut equation_count = 0usize;
@@ -179,8 +181,14 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
                         outline.push((idx, p.heading_level, text.clone(), p.bookmark));
                     }
                 }
-                if p.list.is_some() {
+                if let Some(kind) = p.list {
                     list_count += 1;
+                    if kind == RichListKind::Task {
+                        task_count += 1;
+                        if p.task_checked {
+                            checked_task_count += 1;
+                        }
+                    }
                 }
                 for r in &p.runs {
                     if let Some(url) = &r.link {
@@ -242,7 +250,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
 
     let _ = write!(
         out,
-        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
+        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"taskItemCount\":{task_count},\"checkedTaskCount\":{checked_task_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
         doc.blocks.len()
     );
     for (i, (b_idx, level, text, bm)) in outline.iter().enumerate() {
@@ -322,6 +330,14 @@ fn write_doc_block_summary(out: &mut String, index: usize, block: &RichBlock) {
                     let _ = write!(
                         out,
                         "\"ordered\",\"listLevel\":{},\"listNumber\":\"{code}\"",
+                        p.list_level.min(8)
+                    );
+                }
+                Some(RichListKind::Task) => {
+                    let _ = write!(
+                        out,
+                        "\"task\",\"checked\":{},\"listLevel\":{}",
+                        p.task_checked,
                         p.list_level.min(8)
                     );
                 }

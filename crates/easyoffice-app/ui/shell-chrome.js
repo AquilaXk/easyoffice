@@ -76,6 +76,7 @@
     "format:justify": "studio-cmd:para-shape",
     "format:para-numbering": "studio-cmd:para-numbering",
     "format:para-bullet": "studio-cmd:para-bullet",
+    "format:para-checklist": "studio-cmd:para-checklist",
     "format:indent-in": "studio-cmd:indent-in",
     "format:indent-out": "studio-cmd:indent-out",
     "format:numfmt-general": "sheet-numfmt:general",

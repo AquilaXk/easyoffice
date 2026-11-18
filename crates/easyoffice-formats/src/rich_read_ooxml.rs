@@ -77,6 +77,9 @@ struct ParaState {
     sect_end: Option<Option<RichColumns>>,
     /// Horizontal header/footer zones split by `w:ptab w:alignment="center|right"` (`PD-249`).
     zones: Vec<(String, Vec<crate::RichRun>)>,
+    /// Word 2010 `w14:checkbox` SDT state (`Some(checked)`) and single separator space stripper (`PD-250`).
+    task_checkbox: Option<bool>,
+    strip_task_space: bool,
 }
 
 fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
@@ -159,7 +162,7 @@ impl Resolver<'_> {
             .map(|id| self.numbering.level(id, level));
         // A list style names the kind (as before); the number format is the level's own when
         // the numbering agrees on the kind.
-        let (list, list_number) = match (heading, style_list, numbered) {
+        let (mut list, mut list_number) = match (heading, style_list, numbered) {
             (1.., ..) => (None, None),
             (_, Some(kind), def) => (
                 Some(kind),
@@ -168,13 +171,36 @@ impl Resolver<'_> {
             (_, None, Some(def)) => (Some(def.kind), def.number),
             (_, None, None) => (None, None),
         };
+        let mut task_checked = false;
+        let mut list_level = if list.is_some() { level as u8 } else { 0 };
+        if heading == 0 && toc.is_none() {
+            if let Some(checked) = p.task_checkbox {
+                list = Some(RichListKind::Task);
+                task_checked = checked;
+                list_number = None;
+                list_level = if p.ilvl.is_some() {
+                    level as u8
+                } else if p.first_line == Some(-360)
+                    && p.left_indent
+                        .is_some_and(|l| (720..=6480).contains(&l) && l % 720 == 0)
+                {
+                    let recovered = ((p.left_indent.unwrap_or(720) / 720) - 1) as u8;
+                    p.left_indent = None;
+                    p.first_line = None;
+                    recovered
+                } else {
+                    0
+                };
+            }
+        }
         let toc_page = match toc {
             Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
             _ => None,
         };
         RichParagraph {
-            list_level: if list.is_some() { level as u8 } else { 0 },
+            list_level,
             list_number,
+            task_checked,
             alignment: alignment(p.jc.as_deref()),
             runs: p.runs,
             heading_level: heading,
@@ -337,7 +363,11 @@ pub(super) struct DocxWalker {
     first_gutter: u32,
     first_paper: Option<RichPaper>,
     text_budget: DecodeBudget,
+    sdt_stack: Vec<Option<bool>>,
+    checkbox_sdt_content_depth: usize,
 }
+
+const MAX_SDT_DEPTH: usize = 16;
 
 impl DocxWalker {
     /// Handles an element start; returns true when the whole subtree must be skipped.
@@ -358,6 +388,25 @@ impl DocxWalker {
                 self.warnings.push(UNSUPPORTED_OBJECT_NOTE.to_string());
             }
             return Ok(true);
+        }
+        if name == "w:sdt" {
+            if self.sdt_stack.len() >= MAX_SDT_DEPTH {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "DOCX 콘텐츠 컨트롤(w:sdt) 중첩 깊이가 상한(16)을 초과했습니다.".to_string(),
+                ));
+            }
+            self.sdt_stack.push(None);
+        } else if name == "w14:checkbox" || name.ends_with(":checkbox") {
+            if let Some(slot) = self.sdt_stack.last_mut() {
+                *slot = Some(slot.unwrap_or(false));
+            }
+        } else if name == "w14:checked" || name.ends_with(":checked") {
+            if let Some(slot @ Some(_)) = self.sdt_stack.last_mut() {
+                let val = attr(attrs, "w14:val").or_else(|| attr(attrs, "w:val"));
+                *slot = Some(toggle_on(val.as_deref()));
+            }
+        } else if name == "w:sdtContent" && self.sdt_stack.last().copied().flatten().is_some() {
+            self.checkbox_sdt_content_depth += 1;
         }
         self.track_structure(name, attrs);
         self.track_frame(name, attrs)?;
@@ -575,6 +624,10 @@ impl DocxWalker {
     }
 
     fn on_text(&mut self, text: &str) -> Result<(), EasyOfficeError> {
+        if self.checkbox_sdt_content_depth > 0 {
+            self.text_budget.charge(text.len(), "DOCX 확인란 기호")?;
+            return Ok(());
+        }
         if self.in_t {
             self.text_budget.charge(text.len(), "DOCX 텍스트")?;
             self.cur_text.push_str(text);
@@ -589,6 +642,19 @@ impl DocxWalker {
 
     fn on_end(&mut self, name: &str, resolver: &Resolver<'_>) -> Result<(), EasyOfficeError> {
         match name {
+            "w:sdtContent" if self.sdt_stack.last().copied().flatten().is_some() => {
+                self.checkbox_sdt_content_depth = self.checkbox_sdt_content_depth.saturating_sub(1);
+            }
+            "w:sdt" => {
+                if let Some(Some(checked)) = self.sdt_stack.pop() {
+                    if let Some(top) = self.paras.last_mut() {
+                        if top.task_checkbox.is_none() && top.runs.is_empty() {
+                            top.task_checkbox = Some(checked);
+                            top.strip_task_space = true;
+                        }
+                    }
+                }
+            }
             "w:t" => self.in_t = false,
             "w:instrText" => self.in_instruction = false,
             "w:fldSimple" => self.simple_field = None,
@@ -625,8 +691,16 @@ impl DocxWalker {
                         self.push_field_run(field)?;
                         self.simple_field = Some((field, true));
                     }
-                } else if self.result_field.is_none() {
+                } else if self.result_field.is_none() && self.checkbox_sdt_content_depth == 0 {
                     if let Some(top) = self.paras.last_mut() {
+                        if top.strip_task_space && !self.cur_text.is_empty() {
+                            top.strip_task_space = false;
+                            if self.cur_text == " " {
+                                self.cur_text.clear();
+                            } else if let Some(rest) = self.cur_text.strip_prefix(' ') {
+                                self.cur_text = rest.to_string();
+                            }
+                        }
                         if !self.cur_text.is_empty() {
                             let link_len = self.link.as_deref().map_or(0, str::len);
                             self.text_budget.charge_run(link_len, "DOCX 런")?;

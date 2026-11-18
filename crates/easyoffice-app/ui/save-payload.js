@@ -405,6 +405,7 @@
         if (cur.ctx.pageBreak) block.pageBreakBefore = true;
         if (cur.ctx.list) {
           block.list = cur.ctx.list;
+          if (cur.ctx.list === "task") block.checked = Boolean(cur.ctx.checked);
           if (cur.ctx.listLevel > 0) block.listLevel = cur.ctx.listLevel;
           if (cur.ctx.list === "ordered" && cur.ctx.listNumber) block.listNumber = cur.ctx.listNumber;
         }
@@ -491,8 +492,11 @@
       if (listParent) {
         const parentTag = (listParent.tagName || "").toUpperCase();
         if (parentTag === "OL") nextList = "ordered";
-        else if (parentTag === "UL") nextList = "bullet";
+        else if (parentTag === "UL") nextList = listParent.dataset?.eoList === "task" ? "task" : "bullet";
       }
+      const checked = tag === "LI"
+        ? (nextList === "task" && node.dataset?.eoChecked === "true")
+        : Boolean(ctx.checked);
       const attrLevel = tag === "LI" ? Math.max(0, Number.parseInt(node.dataset?.eoListLevel || "0", 10) || 0) : 0;
       const listLevel = tag === "LI" ? Math.min(8, ulDepth + attrLevel) : (ctx.listLevel || 0);
       const listNumber = tag === "LI"
@@ -514,6 +518,7 @@
         inList,
         ulDepth,
         list: nextList,
+        checked,
         listLevel,
         listNumber,
         columns,

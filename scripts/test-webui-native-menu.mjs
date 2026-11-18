@@ -15,7 +15,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const CHROME_JS = new URL("crates/easyoffice-app/ui/shell-chrome.js", REPO);
 
 function rustItems() {
-  const source = read("crates/easyoffice-desktop/src/native_menu.rs");
+  const source = read("crates/easyoffice-desktop/src/native_menu/items.rs");
   const table = itemTable(source);
   const items = [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*(None|Some\("([^"]+)"\)),\s*"([^"]+)",?\s*\)/g)];
   return items.map((m) => ({ id: m[1], label: m[2], accelerator: m[4] ?? null, action: m[5] }));

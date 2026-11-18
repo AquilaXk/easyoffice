@@ -97,6 +97,7 @@ export const STANDARD_IDENTIFIERS_B64 = [
   "QWRvYmUtSWRlbnRpdHktMA==",
   "L1JlZ2lzdHJ5IChBZG9iZSk=",
   "UG93ZXJQb2ludCBEb2N1bWVudA==",
+  "aHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS9vZmZpY2Uvd29yZC8yMDEwL3dvcmRtbA==",
 ];
 
 // A file that adapts a published implementation names it in its leading comment block (license and

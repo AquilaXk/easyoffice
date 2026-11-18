@@ -544,12 +544,14 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
 fn paragraph_list(
     text: &str,
     list: RichListKind,
+    task_checked: bool,
     list_level: u8,
     list_number: Option<RichListNumber>,
 ) -> RichBlock {
     RichBlock::Paragraph(RichParagraph {
         runs: parse_md_inline(text),
         list: Some(list),
+        task_checked,
         list_level: list_level.min(8),
         list_number,
         ..RichParagraph::default()
@@ -595,41 +597,39 @@ fn list_marker(
     trimmed: &str,
 ) -> Option<(
     RichListKind,
+    bool,
     Option<RichListNumber>,
     std::borrow::Cow<'_, str>,
 )> {
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
             let rest = rest.trim();
-            if let Some(task) = rest.strip_prefix("[ ] ") {
-                return Some((
-                    RichListKind::Bullet,
-                    None,
-                    format!("\u{2610} {}", task.trim()).into(),
-                ));
+            if let Some(task) = rest
+                .strip_prefix("[ ] ")
+                .or_else(|| (rest == "[ ]").then_some(""))
+            {
+                return Some((RichListKind::Task, false, None, task.trim().into()));
             }
             if let Some(task) = rest
                 .strip_prefix("[x] ")
                 .or_else(|| rest.strip_prefix("[X] "))
+                .or_else(|| matches!(rest, "[x]" | "[X]").then_some(""))
             {
-                return Some((
-                    RichListKind::Bullet,
-                    None,
-                    format!("\u{2611} {}", task.trim()).into(),
-                ));
+                return Some((RichListKind::Task, true, None, task.trim().into()));
             }
-            return Some((RichListKind::Bullet, None, rest.into()));
+            return Some((RichListKind::Bullet, false, None, rest.into()));
         }
     }
     let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
     if (1..=9).contains(&digits) {
         let rest = &trimmed[digits..];
         if let Some(body) = rest.strip_prefix(". ") {
-            return Some((RichListKind::Ordered, None, body.trim().into()));
+            return Some((RichListKind::Ordered, false, None, body.trim().into()));
         }
         if let Some(body) = rest.strip_prefix(") ") {
             return Some((
                 RichListKind::Ordered,
+                false,
                 Some(RichListNumber {
                     format: RichNumberFormat::Decimal,
                     enclosure: RichNumberEnclosure::RightParenthesis,
@@ -775,9 +775,15 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
             blocks.push(RichBlock::Table(table));
             continue;
         }
-        if let Some((kind, num, body)) = list_marker(trimmed) {
+        if let Some((kind, checked, num, body)) = list_marker(trimmed) {
             flush(&mut blocks, &mut pending);
-            blocks.push(paragraph_list(&body, kind, leading_list_level(line), num));
+            blocks.push(paragraph_list(
+                &body,
+                kind,
+                checked,
+                leading_list_level(line),
+                num,
+            ));
             i += 1;
             continue;
         }
@@ -857,17 +863,24 @@ mod tests {
 
         let blocks = read_markdown("- [ ] 미완료\n- [x] 완료1\n- [X] 완료2\n").unwrap();
         assert_eq!(blocks.len(), 3);
-        let texts: Vec<String> = blocks
+        let items: Vec<(bool, String)> = blocks
             .iter()
             .map(|b| match b {
                 RichBlock::Paragraph(p) => {
-                    assert_eq!(p.list, Some(RichListKind::Bullet));
-                    p.plain_text()
+                    assert_eq!(p.list, Some(RichListKind::Task));
+                    (p.task_checked, p.plain_text())
                 }
                 _ => panic!("expected paragraph"),
             })
             .collect();
-        assert_eq!(texts, vec!["☐ 미완료", "☑ 완료1", "☑ 완료2"]);
+        assert_eq!(
+            items,
+            vec![
+                (false, "미완료".to_string()),
+                (true, "완료1".to_string()),
+                (true, "완료2".to_string()),
+            ]
+        );
     }
 
     #[test]

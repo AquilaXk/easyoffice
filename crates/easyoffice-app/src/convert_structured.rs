@@ -375,8 +375,10 @@ fn parse_paragraph(
         None | Some("") => None,
         Some("bullet") => Some(RichListKind::Bullet),
         Some("ordered") => Some(RichListKind::Ordered),
+        Some("task") => Some(RichListKind::Task),
         Some(other) => return Err(invalid(format!("구조화 저장: 알 수 없는 목록 '{other}'"))),
     };
+    let task_checked = opt_bool(obj, "checked")? && list == Some(RichListKind::Task);
     let raw_list_level = opt_bounded(obj, "listLevel", 0, 8)?.unwrap_or(0) as u8;
     let list_level = if list.is_some() { raw_list_level } else { 0 };
     let list_number = match opt_str(obj, "listNumber")?.filter(|s| !s.is_empty()) {
@@ -394,6 +396,7 @@ fn parse_paragraph(
     Ok(RichParagraph {
         list_level,
         list_number,
+        task_checked,
         runs,
         alignment,
         heading_level,

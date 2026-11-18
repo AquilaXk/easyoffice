@@ -136,8 +136,12 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
         let token = match l {
             RichListKind::Bullet => "bullet",
             RichListKind::Ordered => "ordered",
+            RichListKind::Task => "task",
         };
         let _ = write!(out, ",\"list\":\"{token}\"");
+        if l == RichListKind::Task {
+            let _ = write!(out, ",\"checked\":{}", p.task_checked);
+        }
         if p.list_level > 0 {
             let _ = write!(out, ",\"listLevel\":{}", p.list_level.min(8));
         }

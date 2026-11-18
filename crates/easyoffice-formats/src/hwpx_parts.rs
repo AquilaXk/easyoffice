@@ -112,6 +112,7 @@ pub(crate) struct HwpxParaShape {
     pub heading_type: &'static str,
     pub heading_id_ref: u32,
     pub heading_level: u8,
+    pub checked: bool,
     pub left_margin: u32,
     /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
     pub intent: i32,
@@ -126,6 +127,7 @@ impl Default for HwpxParaShape {
             heading_type: HEADING_NONE,
             heading_id_ref: 0,
             heading_level: 0,
+            checked: false,
             left_margin: 0,
             intent: 0,
             line_percent: DEFAULT_LINE_PERCENT,
@@ -198,7 +200,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
     };
     format!(
         concat!(
-            "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
+            "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"{checked}\">",
             "{align}",
             "<hh:heading type=\"{heading_type}\" idRef=\"{heading_ref}\" level=\"{heading_level}\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
@@ -210,6 +212,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "</hh:paraPr>"
         ),
         id = id,
+        checked = u8::from(shape.checked),
         align = align_xml,
         heading_type = shape.heading_type,
         heading_ref = heading_ref,

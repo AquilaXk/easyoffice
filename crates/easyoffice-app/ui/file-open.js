@@ -302,13 +302,18 @@
         const h = applyParagraphLayout(elSpec("h" + heading, inline, style), block);
         if (Number.isInteger(block.bookmark) && block.bookmark > 0) h.attrs.id = "eo-h-" + block.bookmark;
         nodes.push(h);
-      } else if (block.list === "bullet" || block.list === "ordered") {
+      } else if (block.list === "bullet" || block.list === "ordered" || block.list === "task") {
         const tag = block.list === "ordered" ? "ol" : "ul";
-        if (openList?.tag !== tag) {
-          openList = elSpec(tag);
+        const isTask = block.list === "task";
+        if (openList?.tag !== tag || (openList?.data?.eoList === "task") !== isTask) {
+          openList = isTask
+            ? { ...elSpec("ul", [], {}, { class: "eo-task-list" }), data: { eoList: "task" } }
+            : elSpec(tag);
           nodes.push(openList);
         }
-        openList.children.push(applyParagraphLayout(elSpec("li", inline, style), block));
+        const li = applyParagraphLayout(elSpec("li", inline, style), block);
+        if (isTask) li.data.eoChecked = block.checked === true ? "true" : "false";
+        openList.children.push(li);
       } else {
         openList = null;
         nodes.push(applyParagraphLayout(elSpec("p", inline, style), block));

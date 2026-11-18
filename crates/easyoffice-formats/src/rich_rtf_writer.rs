@@ -55,6 +55,8 @@ const SINGLE_LINE_240THS: u32 = 240;
 /// `\lsN` of each list kind: the reader's `\ls2` is the numbered list, any other number a bullet.
 const BULLET_LIST_OVERRIDE: u32 = 1;
 const ORDERED_LIST_OVERRIDE: u32 = 2;
+const TASK_UNCHECKED_OVERRIDE: u32 = 3;
+const TASK_CHECKED_OVERRIDE: u32 = 4;
 
 /// Removes the formatting control words written by [`encode_rtf_rich`] (alignment, bold, italic,
 /// underline, strike, size, indent, spacing, script, list, outline level) so the line decoder sees
@@ -123,14 +125,16 @@ fn list_kind_of(p: &RichParagraph) -> Option<RichListKind> {
     p.list.filter(|_| !is_heading(p))
 }
 
-fn list_override_id(kind: RichListKind) -> u32 {
+fn list_override_id(kind: RichListKind, checked: bool) -> u32 {
     match kind {
         RichListKind::Bullet => BULLET_LIST_OVERRIDE,
         RichListKind::Ordered => ORDERED_LIST_OVERRIDE,
+        RichListKind::Task if checked => TASK_CHECKED_OVERRIDE,
+        RichListKind::Task => TASK_UNCHECKED_OVERRIDE,
     }
 }
 
-/// `{\*\listtable ...}` and `{\*\listoverridetable ...}` for the bullet and numbered list.
+/// `{\*\listtable ...}` and `{\*\listoverridetable ...}` for the bullet, numbered and task lists.
 fn list_table_lines() -> [String; 2] {
     let level = |nfc: u32, text: &str, numbers: &str| {
         format!(
@@ -139,12 +143,40 @@ fn list_table_lines() -> [String; 2] {
     };
     let bullet = level(23, "\\'01\\uc0\\u8226 ", "");
     let ordered = level(0, "\\'02\\'00.", "\\'01");
+    let task_unchecked = level(23, "\\'01\\uc0\\u9744 ", "");
+    let task_checked = level(23, "\\'01\\uc0\\u9745 ", "");
     [
         format!(
-            "{{\\*\\listtable{{\\list\\listtemplateid{BULLET_LIST_OVERRIDE}{bullet}\\listid{BULLET_LIST_OVERRIDE}}}{{\\list\\listtemplateid{ORDERED_LIST_OVERRIDE}{ordered}\\listid{ORDERED_LIST_OVERRIDE}}}}}"
+            concat!(
+                "{{\\*\\listtable",
+                "{{\\list\\listtemplateid{b}{bullet}\\listid{b}}}",
+                "{{\\list\\listtemplateid{o}{ordered}\\listid{o}}}",
+                "{{\\list\\listtemplateid{tu}{task_unchecked}\\listid{tu}}}",
+                "{{\\list\\listtemplateid{tc}{task_checked}\\listid{tc}}}",
+                "}}"
+            ),
+            b = BULLET_LIST_OVERRIDE,
+            o = ORDERED_LIST_OVERRIDE,
+            tu = TASK_UNCHECKED_OVERRIDE,
+            tc = TASK_CHECKED_OVERRIDE,
+            bullet = bullet,
+            ordered = ordered,
+            task_unchecked = task_unchecked,
+            task_checked = task_checked,
         ),
         format!(
-            "{{\\*\\listoverridetable{{\\listoverride\\listid{BULLET_LIST_OVERRIDE}\\listoverridecount0\\ls{BULLET_LIST_OVERRIDE}}}{{\\listoverride\\listid{ORDERED_LIST_OVERRIDE}\\listoverridecount0\\ls{ORDERED_LIST_OVERRIDE}}}}}"
+            concat!(
+                "{{\\*\\listoverridetable",
+                "{{\\listoverride\\listid{b}\\listoverridecount0\\ls{b}}}",
+                "{{\\listoverride\\listid{o}\\listoverridecount0\\ls{o}}}",
+                "{{\\listoverride\\listid{tu}\\listoverridecount0\\ls{tu}}}",
+                "{{\\listoverride\\listid{tc}\\listoverridecount0\\ls{tc}}}",
+                "}}"
+            ),
+            b = BULLET_LIST_OVERRIDE,
+            o = ORDERED_LIST_OVERRIDE,
+            tu = TASK_UNCHECKED_OVERRIDE,
+            tc = TASK_CHECKED_OVERRIDE,
         ),
     ]
 }
@@ -168,7 +200,10 @@ fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
         line.push_str(&format!("\\outlinelevel{}\\fs{size}", p.heading_level - 1));
         base = format!("\\fs{size} ");
     } else if let Some(kind) = list {
-        line.push_str(&format!("\\ls{}\\ilvl0", list_override_id(kind)));
+        line.push_str(&format!(
+            "\\ls{}\\ilvl0",
+            list_override_id(kind, p.task_checked)
+        ));
     }
     let left = p
         .left_indent_twips

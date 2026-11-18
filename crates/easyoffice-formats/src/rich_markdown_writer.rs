@@ -176,19 +176,30 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
                     *deeper = 0;
                 }
                 let indent = "  ".repeat(lvl);
-                let marker = if p.list == Some(RichListKind::Ordered) {
-                    ordinals[lvl] += 1;
-                    let suffix = match p.list_number.map(|n| n.enclosure) {
-                        Some(
-                            RichNumberEnclosure::Parentheses
-                            | RichNumberEnclosure::RightParenthesis,
-                        ) => ")",
-                        _ => ".",
-                    };
-                    format!("{}{suffix}", ordinals[lvl])
-                } else {
-                    ordinals[lvl] = 0;
-                    "-".to_string()
+                let marker = match p.list {
+                    Some(RichListKind::Ordered) => {
+                        ordinals[lvl] += 1;
+                        let suffix = match p.list_number.map(|n| n.enclosure) {
+                            Some(
+                                RichNumberEnclosure::Parentheses
+                                | RichNumberEnclosure::RightParenthesis,
+                            ) => ")",
+                            _ => ".",
+                        };
+                        format!("{}{suffix}", ordinals[lvl])
+                    }
+                    Some(RichListKind::Task) => {
+                        ordinals[lvl] = 0;
+                        if p.task_checked {
+                            "- [x]".to_string()
+                        } else {
+                            "- [ ]".to_string()
+                        }
+                    }
+                    _ => {
+                        ordinals[lvl] = 0;
+                        "-".to_string()
+                    }
                 };
                 list_buf.push(format!("{indent}{marker} {}", render_markdown_runs(p)));
             }

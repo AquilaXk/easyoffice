@@ -327,7 +327,7 @@
     if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
     if (activeModule === "DOC" || activeModule === "HWP") {
       // The native menu's items: the Hangul editor's own commands while it owns the window, the page frame otherwise.
-      for (const [cmd, title, english, menuId] of [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"]]) {
+      for (const [cmd, title, english, menuId] of [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"], ["para-checklist", "체크리스트", "checklist", "format:para-checklist"]]) {
         items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
