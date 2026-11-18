@@ -150,3 +150,29 @@ fn a_number_format_run_is_only_a_sheet_style() {
         "{reopened}"
     );
 }
+
+#[test]
+fn dynamic_date_conditions_survive_xlsx_and_keep_hidden_rows_in_ods() {
+    // Column C holds dates 45002..=45031 (March/April 2023). Rows 2..=17 (45002..=45017) are in
+    // March/April; with `M4` (April, 45017..=45031), March rows 2..=16 are hidden by the filter.
+    let filter =
+        r#""filter":{"range":"A1:D31","columns":[{"col":3,"dynamic":"M4"}],"hidden":[[2,16]]}"#;
+    let source = sheet(&format!("{NUMFMT},{filter}"));
+    let reopened_xlsx = open(&save(&source, "xlsx"), "동적날짜.xlsx");
+    assert!(
+        reopened_xlsx.contains(r#"{"col":3,"dynamic":"M4"}"#),
+        "{reopened_xlsx}"
+    );
+    assert!(
+        reopened_xlsx.contains(r#""hidden":[[2,16]]"#),
+        "{reopened_xlsx}"
+    );
+    assert!(!reopened_xlsx.contains("hiddenRows"), "{reopened_xlsx}");
+
+    let reopened_ods = open(&save(&source, "ods"), "동적날짜.ods");
+    assert!(
+        !reopened_ods.contains(r#""dynamic""#) && reopened_ods.contains(r#""hidden":[[2,16]]"#),
+        "{reopened_ods}"
+    );
+    assert!(!reopened_ods.contains("hiddenRows"), "{reopened_ods}");
+}

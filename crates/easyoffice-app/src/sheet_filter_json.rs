@@ -13,9 +13,10 @@
 use crate::sheet_layout_json::{parse_runs_limited, runs_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    CellBox, CustomCondition, CustomOp, DateGroup, DateUnit, EasyOfficeError, FilterColumn,
-    FilterCriteria, SheetFilter, StrictJsonValue, MAX_FILTER_COLUMNS, MAX_FILTER_DATE_GROUPS,
-    MAX_FILTER_ROWS, MAX_FILTER_TEXT_CHARS, MAX_FILTER_VALUES, MAX_TOP_ITEMS, MAX_TOP_PERCENT,
+    CellBox, CustomCondition, CustomOp, DateGroup, DateUnit, DynamicDate, EasyOfficeError,
+    FilterColumn, FilterCriteria, SheetFilter, StrictJsonValue, MAX_FILTER_COLUMNS,
+    MAX_FILTER_DATE_GROUPS, MAX_FILTER_ROWS, MAX_FILTER_TEXT_CHARS, MAX_FILTER_VALUES,
+    MAX_TOP_ITEMS, MAX_TOP_PERCENT,
 };
 use std::fmt::Write;
 
@@ -171,6 +172,12 @@ fn parse_column(v: &StrictJsonValue, range: &CellBox) -> Result<FilterColumn, Ea
             })
             .ok_or_else(|| bad("average"))?;
         FilterCriteria::Average { above }
+    } else if let Some(dynamic) = StrictJsonValue::get_field(obj, "dynamic") {
+        let kind = dynamic
+            .as_str()
+            .and_then(DynamicDate::from_name)
+            .ok_or_else(|| bad("dynamic"))?;
+        FilterCriteria::DynamicDate(kind)
     } else if let Some(color) = StrictJsonValue::get_field(obj, "color") {
         parse_color(color)?
     } else if obj.iter().any(|(k, _)| k == "values" || k == "dates") {
@@ -385,6 +392,9 @@ pub(crate) fn write_columns(out: &mut String, columns: &[FilterColumn]) {
             FilterCriteria::Average { above } => {
                 let _ = write!(out, ",\"average\":{{\"above\":{above}}}");
             }
+            FilterCriteria::DynamicDate(kind) => {
+                let _ = write!(out, ",\"dynamic\":\"{}\"", kind.name());
+            }
             FilterCriteria::Color { font, color } => {
                 out.push_str(",\"color\":{");
                 if *font {
@@ -478,6 +488,18 @@ mod tests {
         assert!(again.contains(r#"{"col":5,"color":{"font":true,"rgb":"9c0006"}}"#));
         let plain = parse(r#"{"range":"A1:B9","columns":[{"col":1,"color":{}}]}"#).unwrap();
         assert!(filter_json(&plain).contains(r#"{"col":1,"color":{}}"#));
+        for kind in DynamicDate::ALL {
+            let dyn_json = format!(
+                r#"{{"range":"A1:B9","columns":[{{"col":1,"dynamic":"{}"}}]}}"#,
+                kind.name()
+            );
+            let parsed = parse(&dyn_json).unwrap();
+            assert_eq!(filter_json(&parsed), dyn_json);
+        }
+        assert!(
+            parse(r#"{"range":"A1:B9","columns":[{"col":1,"dynamic":"aboveAverage"}]}"#).is_err()
+        );
+        assert!(parse(r#"{"range":"A1:B9","columns":[{"col":1,"dynamic":1}]}"#).is_err());
     }
 
     #[test]

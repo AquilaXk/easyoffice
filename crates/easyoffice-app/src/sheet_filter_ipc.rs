@@ -25,10 +25,11 @@ use easyoffice_formats::{
     SheetFilter, SheetStyling, SheetTable, StrictJsonValue, MAX_FILTER_ROWS, MAX_FILTER_VALUES,
 };
 use easyoffice_sheet::filter::{
-    color_list, date_tree, hidden_bits, number_of, split_hidden_rows, tree_rows, value_list,
-    CellAux, ColumnText, DateTree, RowBits, NO_COLOR,
+    color_list, date_tree, hidden_bits_at, number_of, split_hidden_rows, tree_rows, utc_today,
+    value_list, CellAux, ColumnText, DateTree, RowBits, FIRST_DAY_SERIAL, LAST_DAY_SERIAL,
+    NO_COLOR,
 };
-use easyoffice_sheet::{code_shows_date, format_cell_value};
+use easyoffice_sheet::{code_shows_date, compile_for_page, format_cell_value};
 use std::fmt::Write;
 
 type Entries = [(String, StrictJsonValue)];
@@ -54,17 +55,30 @@ struct Column {
 fn reads_numbers(criteria: &FilterCriteria) -> bool {
     match criteria {
         FilterCriteria::Values { dates, .. } => !dates.is_empty(),
-        FilterCriteria::Top { .. } | FilterCriteria::Average { .. } => true,
+        FilterCriteria::Top { .. }
+        | FilterCriteria::Average { .. }
+        | FilterCriteria::DynamicDate(_) => true,
         FilterCriteria::Custom { .. } | FilterCriteria::Color { .. } => false,
     }
 }
 
+/// Whether a column's criteria read the displayed text of its cells.
+fn reads_shown_text(criteria: &FilterCriteria) -> bool {
+    matches!(
+        criteria,
+        FilterCriteria::Values { .. } | FilterCriteria::Custom { .. }
+    )
+}
+
 /// Applies the format runs of one data column to its texts; `numbers` and `dates` are filled for
-/// the cells whose format shows a date when the column keeps them.
+/// the cells whose format shows a date when the column keeps them. Format strings are compiled
+/// once per run, and columns whose criteria never inspect displayed text (`DynamicDate`, `Top`,
+/// `Average`, `Color`) skip string formatting altogether (PD-238).
 fn apply_formats(
     texts: &mut [String],
     runs: &StrictJsonValue,
     aux: &mut Option<CellAux>,
+    format_texts: bool,
 ) -> Result<(), EasyOfficeError> {
     for run in runs.as_array().ok_or_else(|| invalid("fmt"))? {
         let parts = run
@@ -82,17 +96,20 @@ fn apply_formats(
         if !code_within_bounds(code) {
             continue;
         }
+        let compiled = compile_for_page(code);
         for (i, text) in texts.iter_mut().enumerate().take(last + 1).skip(first) {
             if text.len() > MAX_FORMATTED_BYTES {
                 continue;
             }
             if let Some(aux) = aux.as_mut() {
-                if aux.number(i).is_some_and(|n| code_shows_date(code, n)) {
+                if aux.number(i).is_some_and(|n| compiled.shows_date(n)) {
                     aux.dates.set(i);
                 }
             }
-            if let Some(shown) = format_cell_value(code, text) {
-                *text = shown.text;
+            if format_texts {
+                if let Some(shown) = compiled.format(text) {
+                    *text = shown.text;
+                }
             }
         }
     }
@@ -188,7 +205,11 @@ fn parse_data(
             }
         }
         if let Some(runs) = StrictJsonValue::get_field(obj, "fmt") {
-            apply_formats(&mut texts, runs, &mut aux)?;
+            let format_texts = target == Some(col)
+                || filter
+                    .column(col)
+                    .is_some_and(|c| reads_shown_text(&c.criteria));
+            apply_formats(&mut texts, runs, &mut aux, format_texts)?;
         }
         columns.push(Column { col, texts, aux });
     }
@@ -205,11 +226,23 @@ fn push_text(out: &mut String, text: &str) {
     out.push('"');
 }
 
+fn parse_today(entries: &Entries) -> Result<i64, EasyOfficeError> {
+    match StrictJsonValue::get_field(entries, "today") {
+        None | Some(StrictJsonValue::Null) => Ok(utc_today()),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| i64::try_from(n).ok())
+            .filter(|&n| (FIRST_DAY_SERIAL..=LAST_DAY_SERIAL).contains(&n))
+            .ok_or_else(|| invalid("today")),
+    }
+}
+
 impl EasyOfficeIpcRouter {
     pub(crate) fn sheet_filter(entries: &Entries) -> Result<String, EasyOfficeError> {
         let filter = parse_filter(
             StrictJsonValue::get_field(entries, "filter").ok_or_else(|| invalid("filter"))?,
         )?;
+        let today = parse_today(entries)?;
         let target = match Self::optional_json_str(entries, "op")? {
             Some("values") => Some(values_column(entries, &filter)?),
             _ => None,
@@ -225,14 +258,14 @@ impl EasyOfficeIpcRouter {
             .collect();
         match Self::optional_json_str(entries, "op")? {
             Some("apply") => {
-                let bits = hidden_bits(&filter, &views, None)?;
+                let bits = hidden_bits_at(&filter, &views, None, today)?;
                 Ok(format!(
                     "{{\"hidden\":{},\"count\":{}}}",
                     runs_json(&bits.runs(filter.range.row0 + 1)),
                     bits.count()
                 ))
             }
-            Some("values") => values_answer(entries, &filter, &views),
+            Some("values") => values_answer(entries, &filter, &views, today),
             _ => Err(invalid("op")),
         }
     }
@@ -252,6 +285,7 @@ fn values_answer(
     entries: &Entries,
     filter: &SheetFilter,
     views: &[ColumnText<'_>],
+    today: i64,
 ) -> Result<String, EasyOfficeError> {
     let col = values_column(entries, filter)?;
     let query = EasyOfficeIpcRouter::optional_json_str(entries, "query")?.unwrap_or("");
@@ -262,7 +296,7 @@ fn values_answer(
         .iter()
         .find(|v| v.col == col)
         .ok_or_else(|| invalid("열 값이 없습니다"))?;
-    let excluded = hidden_bits(filter, views, Some(col))?;
+    let excluded = hidden_bits_at(filter, views, Some(col), today)?;
     // Without a search the dates are the tree's, and the list holds the other texts; a search lists every
     // text that has it, the dates' too.
     let tree = target
@@ -401,8 +435,10 @@ fn open_columns(
                 }
             }
         }
-        let shown = code.and_then(|code| format_cell_value(code, raw));
-        column.texts[offset] = shown.map_or_else(|| raw.clone(), |s| s.text);
+        if reads_shown_text(&columns[at].criteria) {
+            let shown = code.and_then(|code| format_cell_value(code, raw));
+            column.texts[offset] = shown.map_or_else(|| raw.clone(), |s| s.text);
+        }
     }
     // A colour condition is judged against the colours of the cells themselves, blank ones too (PD-227). A
     // colour a conditional format gives is not known here: a file's colour condition over such a column hides
@@ -498,386 +534,5 @@ pub(crate) fn split_for_open(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use easyoffice_formats::CellBox;
-
-    fn call(body: &str) -> Result<String, EasyOfficeError> {
-        EasyOfficeIpcRouter::dispatch("evaluate_sheet", body)
-    }
-
-    const FILTER: &str = r#"{"range":"A1:B7","columns":[{"col":1,"values":["영업","개발"]},{"col":2,"conditions":[{"op":"greaterThan","text":"10"}]}]}"#;
-    const DATA: &str = r#"[{"col":1,"values":["영업","영업","개발","","기획","영업"]},{"col":2,"values":["5","20","30","40","50","abc"]}]"#;
-
-    #[test]
-    fn apply_answers_the_hidden_rows_one_based() {
-        let json = call(&format!(
-            r#"{{"sessionAction":"filter","op":"apply","filter":{FILTER},"data":{DATA}}}"#
-        ))
-        .unwrap();
-        // Data rows 1..6 are sheet rows 2..7: row 2 (5 <= 10), 5 (blank), 6 (기획), 7 ("abc").
-        assert_eq!(json, r#"{"hidden":[[2,2],[5,7]],"count":4}"#);
-    }
-
-    #[test]
-    fn values_leave_out_the_rows_other_columns_hide() {
-        let json = call(&format!(
-            r#"{{"sessionAction":"filter","op":"values","col":1,"filter":{FILTER},"data":{DATA}}}"#
-        ))
-        .unwrap();
-        // Column B hides rows 2 (5) and 7 ("abc"): the rest are 영업, 개발, "", 기획.
-        assert_eq!(
-            json,
-            r#"{"items":[["개발",1],["기획",1],["영업",1]],"blank":1,"more":false}"#
-        );
-        let searched = call(&format!(
-            r#"{{"sessionAction":"filter","op":"values","col":1,"query":"영","filter":{FILTER},"data":{DATA}}}"#
-        ))
-        .unwrap();
-        assert_eq!(searched, r#"{"items":[["영업",1]],"blank":0,"more":false}"#);
-    }
-
-    #[test]
-    fn the_displayed_text_is_judged_not_the_stored_one() {
-        let filter = r#"{"range":"A1:A3","columns":[{"col":1,"values":["2023-03-15"]}]}"#;
-        let data = r#"[{"col":1,"values":["45000","45001"],"fmt":[[0,1,"yyyy-mm-dd"]]}]"#;
-        let json = call(&format!(
-            r#"{{"sessionAction":"filter","op":"apply","filter":{filter},"data":{data}}}"#
-        ))
-        .unwrap();
-        assert_eq!(json, r#"{"hidden":[[3,3]],"count":1}"#);
-    }
-
-    #[test]
-    fn opening_tells_the_filter_s_rows_from_the_user_s() {
-        let mut filter = SheetFilter::new(CellBox::parse("A1:A5").unwrap());
-        filter.columns = vec![FilterColumn {
-            col: 0,
-            criteria: FilterCriteria::Values {
-                blank: false,
-                values: vec!["영업".into()],
-                dates: Vec::new(),
-            },
-        }];
-        let styling = SheetStyling {
-            filter: Some(filter),
-            hidden_rows: vec![(2, 3), (7, 7)],
-            ..SheetStyling::default()
-        };
-        let cells: Vec<(u32, u32, String)> = ["부서", "영업", "개발", "영업", "개발"]
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (i as u32, 0, t.to_string()))
-            .collect();
-        let split = split_for_open(&cells, &styling).unwrap();
-        // Row 3 (index 2) is 개발 and hidden by the filter; row 4 is 영업 and the user's.
-        assert_eq!(split.filter.unwrap().hidden, vec![(2, 2)]);
-        assert_eq!(split.hidden, vec![(3, 3), (7, 7)]);
-        assert!(split_for_open(&cells, &SheetStyling::default()).is_none());
-    }
-
-    #[test]
-    fn opening_judges_a_colour_condition_against_the_colours_of_the_cells() {
-        use easyoffice_formats::CellStyle;
-        let mut filter = SheetFilter::new(CellBox::parse("A1:A6").unwrap());
-        filter.columns = vec![FilterColumn {
-            col: 0,
-            criteria: FilterCriteria::Color {
-                font: false,
-                color: Some(0xFFC7CE),
-            },
-        }];
-        let pink = CellStyle {
-            fill: Some(0xFFC7CE),
-            ..CellStyle::default()
-        };
-        let green = CellStyle {
-            fill: Some(0x00FF00),
-            ..CellStyle::default()
-        };
-        let mut styling = SheetStyling {
-            filter: Some(filter),
-            // The file hides rows 3, 4 and 6 (indexes 2, 3, 5): the user hid row 4 too, but the file says one flag.
-            hidden_rows: vec![(2, 3), (5, 5)],
-            ..SheetStyling::default()
-        };
-        // Row 2 pink (shown), row 3 green, row 4 none, row 5 pink (blank cell, no text), row 6 green.
-        styling.cells.insert((1, 0), pink);
-        styling.cells.insert((2, 0), green);
-        styling.cells.insert((4, 0), pink);
-        styling.cells.insert((5, 0), green);
-        let cells: Vec<(u32, u32, String)> = ["부서", "a", "b", "c"]
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (i as u32, 0, t.to_string()))
-            .collect();
-        let split = split_for_open(&cells, &styling).unwrap();
-        // Rows 3, 4 and 6 hide because their cell is not pink, so the file's hidden rows are all the filter's.
-        assert_eq!(split.filter.unwrap().hidden, vec![(2, 3), (5, 5)]);
-        assert!(split.hidden.is_empty());
-        // The same file with no colours of its own: nothing is pink, every row of the file's is the filter's.
-        styling.cells.clear();
-        let split = split_for_open(&cells, &styling).unwrap();
-        assert_eq!(split.filter.unwrap().hidden, vec![(2, 3), (5, 5)]);
-    }
-
-    /// 100,000 rows of 3 columns, a sheet filter over all of them and 300 tables of 100 rows each, every
-    /// table with a condition: the time `split_for_open` takes (`--ignored --nocapture`, release).
-    #[test]
-    #[ignore = "measurement"]
-    fn opening_a_sheet_with_a_filter_and_many_filtered_tables() {
-        let rows = 100_000u32;
-        let cells: Vec<(u32, u32, String)> = (0..rows)
-            .flat_map(|r| (0..3).map(move |c| (r, c, format!("v{}", r % 7))))
-            .collect();
-        let on = |col| FilterColumn {
-            col,
-            criteria: FilterCriteria::Values {
-                blank: false,
-                values: vec!["v1".into()],
-                dates: Vec::new(),
-            },
-        };
-        let mut filter = SheetFilter::new(CellBox::parse(&format!("A1:C{rows}")).unwrap());
-        filter.columns = vec![on(0)];
-        // The tables sit in columns far to the right of the data, so the filter does not share a cell with them.
-        let tables: Vec<SheetTable> = (0..300u32)
-            .map(|i| {
-                let first = i * 100 + 1;
-                let mut t = SheetTable::new(
-                    format!("T{i}"),
-                    CellBox::parse(&format!("H{first}:J{}", first + 99)).unwrap(),
-                );
-                t.filter = Some(vec![on(7)]);
-                t
-            })
-            .collect();
-        let styling = SheetStyling {
-            filter: Some(filter),
-            tables,
-            hidden_rows: vec![(2, 50_000)],
-            ..SheetStyling::default()
-        };
-        let start = std::time::Instant::now();
-        let split = split_for_open(&cells, &styling).unwrap();
-        println!("split_for_open: {:?}", start.elapsed());
-        assert!(split.filter.is_some());
-    }
-
-    #[test]
-    fn rows_a_file_marks_as_the_filter_s_are_kept_whatever_the_conditions_say() {
-        let mut filter = SheetFilter::new(CellBox::parse("A1:A5").unwrap());
-        filter.columns = vec![FilterColumn {
-            col: 0,
-            criteria: FilterCriteria::Values {
-                blank: false,
-                values: vec!["영업".into()],
-                dates: Vec::new(),
-            },
-        }];
-        // The reader of a format that tells the kinds apart put row 4 (영업) in the filter's rows.
-        filter.hidden = vec![(4, 4)];
-        let mut table = SheetTable::new("T", CellBox::parse("C1:C5").unwrap());
-        table.filter = filter.columns.clone().into();
-        table.filter_hidden = vec![(3, 3)];
-        let styling = SheetStyling {
-            filter: Some(filter),
-            tables: vec![table],
-            hidden_rows: vec![(2, 2)],
-            ..SheetStyling::default()
-        };
-        let cells: Vec<(u32, u32, String)> = ["부서", "영업", "개발", "영업", "개발"]
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (i as u32, 0, t.to_string()))
-            .collect();
-        let split = split_for_open(&cells, &styling).unwrap();
-        assert_eq!(split.filter.unwrap().hidden, vec![(4, 4)]);
-        assert_eq!(split.tables[0].filter_hidden, vec![(3, 3)]);
-        assert_eq!(split.hidden, vec![(2, 2)]);
-    }
-
-    fn apply(filter: &str, data: &str) -> Result<String, EasyOfficeError> {
-        call(&format!(
-            r#"{{"sessionAction":"filter","op":"apply","filter":{filter},"data":{data}}}"#
-        ))
-    }
-
-    #[test]
-    fn top_and_average_judge_the_numbers_of_the_visible_rows() {
-        let data = r#"[{"col":1,"values":["a","a","b","a","a"]},{"col":2,"values":["10","99","30","20","x"]}]"#;
-        let top =
-            r#"{"range":"A1:B6","columns":[{"col":1,"values":["a"]},{"col":2,"top":{"count":2}}]}"#;
-        // The b row (30) does not compete: of 10, 99, 20 and "x" the two largest are 99 and 20.
-        assert_eq!(
-            apply(top, data).unwrap(),
-            r#"{"hidden":[[2,2],[4,4],[6,6]],"count":3}"#
-        );
-        let below = r#"{"range":"A1:B6","columns":[{"col":2,"average":{"above":false}}]}"#;
-        // The average of 10, 99, 30, 20 is 39.75: 10, 30 and 20 are below it.
-        assert_eq!(
-            apply(below, data).unwrap(),
-            r#"{"hidden":[[3,3],[6,6]],"count":2}"#
-        );
-        let bottom = r#"{"range":"A1:B6","columns":[{"col":2,"top":{"bottom":true,"percent":true,"count":50}}]}"#;
-        assert_eq!(
-            apply(bottom, data).unwrap(),
-            r#"{"hidden":[[3,4],[6,6]],"count":3}"#
-        );
-    }
-
-    #[test]
-    fn a_colour_criterion_reads_the_colour_runs_and_a_date_group_the_format_runs() {
-        let fill =
-            r#"[{"col":1,"values":["a","b","c","d"],"fill":[[0,0,"ffc7ce"],[2,3,"ffc7ce"]]}]"#;
-        let pink = r#"{"range":"A1:A5","columns":[{"col":1,"color":{"rgb":"ffc7ce"}}]}"#;
-        assert_eq!(
-            apply(pink, fill).unwrap(),
-            r#"{"hidden":[[3,3]],"count":1}"#
-        );
-        let none = r#"{"range":"A1:A5","columns":[{"col":1,"color":{}}]}"#;
-        assert_eq!(
-            apply(none, fill).unwrap(),
-            r#"{"hidden":[[2,2],[4,5]],"count":3}"#
-        );
-        let font =
-            r#"{"range":"A1:A5","columns":[{"col":1,"color":{"font":true,"rgb":"ff0000"}}]}"#;
-        // No text colour was sent: the condition is not judged (the sheet has no colour of its own to read).
-        assert_eq!(apply(font, fill).unwrap(), r#"{"hidden":[],"count":0}"#);
-        let plain = r#"[{"col":1,"values":["a","b","c","d"]}]"#;
-        assert_eq!(apply(pink, plain).unwrap(), r#"{"hidden":[],"count":0}"#);
-        assert_eq!(apply(none, plain).unwrap(), r#"{"hidden":[],"count":0}"#);
-        // 45000 is 2023-03-15, 45400 is 2024-04-18; only the cells in a date format are dates.
-        let dates =
-            r#"[{"col":1,"values":["45000","45400","45000","hello"],"fmt":[[0,1,"yyyy-mm-dd"]]}]"#;
-        let year =
-            r#"{"range":"A1:A5","columns":[{"col":1,"dates":[{"unit":"year","year":2023}]}]}"#;
-        // The third cell holds 45000 too, but its format is General: it is a number, not a date.
-        assert_eq!(
-            apply(year, dates).unwrap(),
-            r#"{"hidden":[[3,5]],"count":3}"#
-        );
-        let day = r#"{"range":"A1:A5","columns":[{"col":1,"dates":[{"unit":"day","year":2024,"month":4,"day":18}]}]}"#;
-        assert_eq!(
-            apply(day, dates).unwrap(),
-            r#"{"hidden":[[2,2],[4,5]],"count":3}"#
-        );
-    }
-
-    #[test]
-    fn the_value_list_of_a_column_with_dates_and_colours_carries_the_tree_and_the_colours() {
-        let filter = r#"{"range":"A1:A6","columns":[]}"#;
-        let data = r#"[{"col":1,"values":["45000","45001","45400","","t"],"fmt":[[0,2,"yyyy-mm-dd"]],"fill":[[0,1,"ff0000"]]}]"#;
-        let json = call(&format!(
-            r#"{{"sessionAction":"filter","op":"values","col":1,"filter":{filter},"data":{data}}}"#
-        ))
-        .unwrap();
-        assert!(
-            json.contains(r#""dates":{"years":[[2023,2,[[3,2,[[15,1],[16,1]]]]],[2024,1,[[4,1,[[18,1]]]]]],"more":false}"#),
-            "{json}"
-        );
-        assert!(
-            json.contains(r#""colors":{"fill":[["ff0000",2]],"noFill":3,"font":[],"noFont":5}"#),
-            "{json}"
-        );
-        // The dates are the tree's: the list holds the other texts and the empty cell.
-        assert!(
-            json.starts_with(r#"{"items":[["t",1]],"blank":1,"more":false,"dates""#),
-            "{json}"
-        );
-        // A search lists every text that has it, dates included, and brings no tree.
-        let searched = call(&format!(
-            r#"{{"sessionAction":"filter","op":"values","col":1,"query":"2023","filter":{filter},"data":{data}}}"#
-        ))
-        .unwrap();
-        assert!(
-            searched.starts_with(r#"{"items":[["2023-03-15",1],["2023-03-16",1]],"#)
-                && !searched.contains(r#""dates""#),
-            "{searched}"
-        );
-    }
-
-    #[test]
-    fn new_criteria_over_a_bound_or_malformed_are_refused() {
-        let data = r#"[{"col":1,"values":["1","2"]}]"#;
-        for column in [
-            r#"{"col":1,"top":{"count":0}}"#,
-            r#"{"col":1,"top":{"count":101,"percent":true}}"#,
-            r#"{"col":1,"top":{"count":1000001}}"#,
-            r#"{"col":1,"top":{}}"#,
-            r#"{"col":1,"average":{}}"#,
-            r#"{"col":1,"average":"above"}"#,
-            r#"{"col":1,"color":{"rgb":"red"}}"#,
-            r#"{"col":1,"color":{"rgb":"ff00001"}}"#,
-            r#"{"col":1,"dates":[{"unit":"month","year":2024}]}"#,
-            r#"{"col":1,"dates":[{"unit":"day","year":2023,"month":2,"day":29}]}"#,
-            r#"{"col":1,"dates":[{"unit":"week","year":2023}]}"#,
-            r#"{"col":1,"dates":[{"unit":"year","year":1700}]}"#,
-            r#"{"col":1,"dates":{}}"#,
-        ] {
-            let filter = format!(r#"{{"range":"A1:A3","columns":[{column}]}}"#);
-            assert!(apply(&filter, data).is_err(), "{column}");
-        }
-        let filter = r#"{"range":"A1:A3","columns":[{"col":1,"color":{"rgb":"ff0000"}}]}"#;
-        for bad in [
-            r#"[{"col":1,"values":["1","2"],"fill":[[0,2,"ff0000"]]}]"#,
-            r#"[{"col":1,"values":["1","2"],"fill":[[1,0,"ff0000"]]}]"#,
-            r#"[{"col":1,"values":["1","2"],"fill":[[0,0,"zzzzzz"]]}]"#,
-            r#"[{"col":1,"values":["1","2"],"fill":[[0,0]]}]"#,
-            r#"[{"col":1,"values":["1","2"],"fill":"red"}]"#,
-        ] {
-            assert!(apply(filter, bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn a_hostile_list_of_many_colours_and_days_stays_bounded() {
-        // 20,000 distinct days and 5,000 distinct colours over 20,000 rows.
-        let rows = 20_000;
-        let values: Vec<String> = (0..rows).map(|i| (40_000 + i).to_string()).collect();
-        let values = format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|v| format!("\"{v}\""))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let fill = (0..rows)
-            .map(|i| format!("[{i},{i},\"{:06x}\"]", i % 5000))
-            .collect::<Vec<_>>()
-            .join(",");
-        let data = format!(
-            r#"[{{"col":1,"values":{values},"fmt":[[0,{last},"yyyy-mm-dd"]],"fill":[{fill}]}}]"#,
-            last = rows - 1
-        );
-        let filter = format!(r#"{{"range":"A1:A{}","columns":[]}}"#, rows + 1);
-        let json = call(&format!(
-            r#"{{"sessionAction":"filter","op":"values","col":1,"filter":{filter},"data":{data}}}"#
-        ))
-        .unwrap();
-        assert!(json.contains(r#""more":true}"#), "the day tree is cut");
-        assert!(json.matches(r#"["#).count() > 1_000);
-    }
-
-    #[test]
-    fn bad_requests_are_refused() {
-        let short = r#"[{"col":1,"values":["a"]},{"col":2,"values":["1"]}]"#;
-        for (op, data) in [
-            ("apply", short),
-            ("apply", r#"[{"col":1,"values":["a","b","c","d","e","f"]}]"#),
-            ("nope", DATA),
-            ("apply", r#"[{"col":1,"values":[1,2,3,4,5,6]}]"#),
-            ("apply", r#"[{"col":0,"values":["a","b","c","d","e","f"]}]"#),
-        ] {
-            let body = format!(
-                r#"{{"sessionAction":"filter","op":"{op}","filter":{FILTER},"data":{data}}}"#
-            );
-            assert!(call(&body).is_err(), "{op} {data}");
-        }
-        let too_many = format!(
-            r#"{{"sessionAction":"filter","op":"values","col":9,"filter":{FILTER},"data":{DATA}}}"#
-        );
-        assert!(call(&too_many).is_err());
-    }
-}
+#[path = "sheet_filter_ipc_tests.rs"]
+mod tests;

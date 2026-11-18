@@ -949,4 +949,57 @@ test("the 색 기준 필터 submenu is off when the column has fewer than two ki
   await openPanel(h, "A");
   assert.equal(d.getElementById("sheet-filter-color").getAttribute("aria-disabled"), "true");
   assert.equal(d.getElementById("sheet-filter-color-menu").children.length, 0);
+  assert.equal(d.getElementById("sheet-filter-date").getAttribute("aria-disabled"), "true");
+  assert.equal(d.getElementById("sheet-filter-date-menu").children.length, 0);
+});
+
+test("dynamic date operators map cleanly in the dialog, send today serial and work from 날짜 필터 submenu (PD-238)", async () => {
+  assert.equal(core.DYNAMIC_DATE_OPS.size, 32);
+  for (const op of core.DYNAMIC_DATE_OPS) {
+    assert.equal(core.paramsOf(op), 0, op);
+    const built = core.criteriaFromForms(true, [{ op, text: "ignored" }, { op: "none", text: "" }]);
+    assert.deepEqual(built, { criteria: { dynamic: op } }, op);
+    const back = core.formsFromCriteria(built.criteria);
+    assert.deepEqual(back, { and: true, rows: [{ op, text: "" }, { op: "none", text: "" }] }, op);
+    assert.equal(core.criteriaFromForms(true, [{ op, text: "" }, { op: "equals", text: "1" }]).error, "다른 조건과 함께 쓸 수 없음");
+  }
+
+  const h = await createHarness(treeEngine());
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "A");
+
+  const dateSub = d.getElementById("sheet-filter-date");
+  assert.equal(dateSub.getAttribute("aria-disabled"), null, "enabled on a date column");
+  const dateMenu = d.getElementById("sheet-filter-date-menu");
+  const directPicks = [...dateMenu.querySelectorAll(":scope > [data-date-pick]")].map((el) => [el.dataset.datePick, el.textContent]);
+  assert.equal(directPicks.length, 16);
+  assert.deepEqual(directPicks[0], ["tomorrow", "내일"]);
+  assert.deepEqual(directPicks.at(-1), ["yearToDate", "연초부터 현재까지"]);
+  const periodSub = dateMenu.querySelector(":scope > .md-sub");
+  assert.equal(periodSub.querySelector(":scope > .md-label").textContent, "기간 내 모든 날짜");
+  const periodPicks = [...periodSub.querySelectorAll("[data-date-pick]")].map((el) => [el.dataset.datePick, el.textContent]);
+  assert.equal(periodPicks.length, 16);
+  assert.deepEqual(periodPicks[0], ["Q1", "1분기"]);
+  assert.deepEqual(periodPicks.at(-1), ["M12", "12월"]);
+
+  // Pick Q1 from the nested submenu: sends `dynamic: "Q1"` and local `today` serial, 1 undo step.
+  await click(h, periodSub.querySelector('[data-date-pick="Q1"]'));
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, true);
+  const sent = h.requests.filter((r) => r.op === "apply").at(-1);
+  assert.deepEqual(sent.filter.columns, [{ col: 1, dynamic: "Q1" }]);
+  assert.ok(Number.isInteger(sent.today) && sent.today >= 40000, "today serial: " + sent.today);
+
+  // Reopening marks Q1 checked in the submenu and pre-selects Q1 with hidden text input in 조건 필터.
+  await openPanel(h, "A");
+  assert.equal(d.querySelector('#sheet-filter-date-menu [data-date-pick="Q1"]').getAttribute("aria-checked"), "true");
+  await click(h, d.querySelector('[data-filter-act="custom"]'));
+  assert.equal(d.getElementById("sheet-filter-op1").value, "Q1");
+  assert.equal(d.getElementById("sheet-filter-text1").hidden, true);
+  d.getElementById("sheet-filter-dialog").close?.();
+
+  await click(h, undo(d));
+  assert.deepEqual(layout.filterOf("표").columns, []);
 });

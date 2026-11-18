@@ -146,4 +146,14 @@ fn filter_requests_over_100000_rows() {
         "values, date tree over 5,000 days",
         &request("values", year, &[&d], r#""col":4,"#),
     );
+    let dyn_ytd = r#"{"col":4,"dynamic":"yearToDate"}"#;
+    let dyn_q1 = r#"{"col":4,"dynamic":"Q1"}"#;
+    time(
+        "apply, dynamic date yearToDate (100k dates)",
+        &request("apply", dyn_ytd, &[&d], r#""today":44500,"#),
+    );
+    time(
+        "apply, dynamic date Q1 bitmask (100k dates)",
+        &request("apply", dyn_q1, &[&d], r#""today":44500,"#),
+    );
 }

@@ -2,8 +2,9 @@
 //! beside the user's (PD-198).
 
 use easyoffice_formats::{
-    CellBox, CustomCondition, CustomOp, DateGroup, DateUnit, FilterColumn, FilterCriteria,
-    OoxmlCodec, SheetFilter, SheetStyling, SheetTable, ZipArchiveCodec, ZipSecurityPolicy,
+    CellBox, CustomCondition, CustomOp, DateGroup, DateUnit, DynamicDate, FilterColumn,
+    FilterCriteria, OoxmlCodec, SheetFilter, SheetStyling, SheetTable, ZipArchiveCodec,
+    ZipSecurityPolicy,
 };
 
 fn sample() -> SheetStyling {
@@ -177,12 +178,14 @@ fn every_kind() -> Vec<FilterColumn> {
                 color: None,
             },
         ),
+        on(8, FilterCriteria::DynamicDate(DynamicDate::YearToDate)),
+        on(9, FilterCriteria::DynamicDate(DynamicDate::Q1)),
     ]
 }
 
 #[test]
 fn date_groups_top_average_and_colour_filters_round_trip_through_the_package() {
-    let mut filter = SheetFilter::new(CellBox::parse("A1:H20").unwrap());
+    let mut filter = SheetFilter::new(CellBox::parse("A1:J20").unwrap());
     filter.columns = every_kind();
     let styling = SheetStyling {
         filter: Some(filter.clone()),
@@ -201,7 +204,7 @@ fn date_groups_top_average_and_colour_filters_round_trip_through_the_package() {
 
 #[test]
 fn a_table_keeps_and_writes_the_same_kinds_of_conditions() {
-    let mut table = SheetTable::new("Sales", CellBox::parse("A1:H20").unwrap());
+    let mut table = SheetTable::new("Sales", CellBox::parse("A1:J20").unwrap());
     table.filter = Some(every_kind());
     let styling = SheetStyling {
         tables: vec![table.clone()],

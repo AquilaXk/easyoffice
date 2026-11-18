@@ -22,6 +22,22 @@ const SECONDS_PER_DAY: f64 = 86_400.0;
 /// Serial numbers a date cell may have (the engine's date range, 1900-01-01 to 9999-12-31).
 const FIRST_SERIAL: f64 = 1.0;
 const LAST_SERIAL: f64 = 2_958_465.0;
+pub const FIRST_DAY_SERIAL: i64 = 1;
+pub const LAST_DAY_SERIAL: i64 = 2_958_465;
+
+/// Whole calendar day serial of `serial` (`1..=2_958_465`), rounding time of day to the nearest
+/// second so a day's last half second belongs to the next day (matching [`Moment::of_serial`]).
+#[inline]
+pub fn serial_day(serial: f64) -> Option<i64> {
+    if !serial.is_finite() || !(FIRST_SERIAL..LAST_SERIAL + 1.0).contains(&serial) {
+        return None;
+    }
+    let mut days = serial.floor();
+    if ((serial - days) * SECONDS_PER_DAY).round() >= SECONDS_PER_DAY {
+        days += 1.0;
+    }
+    (days <= LAST_SERIAL).then_some(days as i64)
+}
 
 /// The calendar fields of a date and time serial number, `None` outside the date range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

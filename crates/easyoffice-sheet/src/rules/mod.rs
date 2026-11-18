@@ -12,7 +12,7 @@ mod cf;
 pub(crate) mod data;
 pub(crate) mod expr_shift;
 mod pack;
-mod period;
+pub(crate) mod period;
 mod sheet_ref;
 #[cfg(test)]
 mod shift;

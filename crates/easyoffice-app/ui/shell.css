@@ -327,7 +327,8 @@
 .sheet-filter-panel { width: 240px; padding: 4px 0 8px; }
 .sheet-filter-panel .md-item[data-filter-act] { padding-left: 16px; }
 .sheet-filter-panel { overflow: visible; }
-.sheet-filter-panel .md-sub { padding-left: 16px; }
+.sheet-filter-panel > .md-sub { padding-left: 16px; }
+.sheet-filter-panel .md-sub-panel[data-leaf-menu] { max-height: min(440px, calc(100vh - 24px)); overflow-y: auto; }
 .sheet-filter-panel .md-sub-panel .sb-hl-palette-row { padding: 2px 16px; margin-bottom: 0; }
 .sheet-filter-row .sheet-filter-arrow { margin-left: 0; padding-left: 0; flex: none; }
 .sheet-filter-row .sheet-filter-arrow[hidden] { display: none; }
@@ -346,7 +347,7 @@
 #sheet-sort-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
 #sheet-sort-dialog .custom-select.dialog-select { flex: 1; min-width: 0; width: auto; }
 #sheet-sort-dialog .dialog-btn { flex-shrink: 0; }
-#sheet-filter-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-filter-dialog { width: min(420px, calc(100vw - 32px)); overflow: visible; }
 #sheet-filter-dialog .dialog-label { width: 40px; min-width: 40px; flex-shrink: 0; }
 #sheet-filter-dialog .dialog-text-input { flex: 1; min-width: 0; }
 

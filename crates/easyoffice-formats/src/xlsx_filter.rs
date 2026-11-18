@@ -14,8 +14,9 @@
 //! as ordinary hidden rows. A range or a list over the bounds of `sheet_filter` drops the whole filter.
 
 use crate::sheet_filter::{
-    CustomCondition, CustomOp, DateGroup, DateUnit, FilterColumn, FilterCriteria, SheetFilter,
-    MAX_FILTER_COLUMNS, MAX_FILTER_DATE_GROUPS, MAX_FILTER_VALUES, MAX_TOP_ITEMS, MAX_TOP_PERCENT,
+    CustomCondition, CustomOp, DateGroup, DateUnit, DynamicDate, FilterColumn, FilterCriteria,
+    SheetFilter, MAX_FILTER_COLUMNS, MAX_FILTER_DATE_GROUPS, MAX_FILTER_VALUES, MAX_TOP_ITEMS,
+    MAX_TOP_PERCENT,
 };
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::xlsx_filter_dxf::{DxfColor, DxfColors};
@@ -154,7 +155,10 @@ impl<'a> FilterScan<'a> {
                 self.open = match attrs.get("type").as_deref() {
                     Some("aboveAverage") => Open::Single(FilterCriteria::Average { above: true }),
                     Some("belowAverage") => Open::Single(FilterCriteria::Average { above: false }),
-                    _ => Open::Unsupported,
+                    Some(kind) => DynamicDate::from_name(kind).map_or(Open::Unsupported, |d| {
+                        Open::Single(FilterCriteria::DynamicDate(d))
+                    }),
+                    None => Open::Unsupported,
                 };
             }
             "colorFilter" => self.open = self.color_filter(attrs),
@@ -414,6 +418,9 @@ pub(crate) fn autofilter_xml(filter: &SheetFilter, dxf: &DxfTable) -> String {
                 };
                 let _ = write!(out, "<dynamicFilter type=\"{kind}\"/>");
             }
+            FilterCriteria::DynamicDate(kind) => {
+                let _ = write!(out, "<dynamicFilter type=\"{}\"/>", kind.name());
+            }
             FilterCriteria::Color { font, color } => {
                 // The workbook's differential formats were built from the same filters, so the colour has one.
                 let id = dxf.color_id(*font, *color).unwrap_or(0);
@@ -648,13 +655,33 @@ mod tests {
         assert_eq!(scan("<autoFilter ref=\"A1:C9\"/>"), Some(plain));
         let xml = concat!(
             "<autoFilter ref=\"A1:C9\">",
-            "<filterColumn colId=\"0\"><dynamicFilter type=\"today\"/></filterColumn>",
+            "<filterColumn colId=\"0\"><dynamicFilter type=\"null\"/></filterColumn>",
             "<filterColumn colId=\"1\"><filters calendarType=\"hijri\"><dateGroupItem year=\"1445\" dateTimeGrouping=\"year\"/></filters></filterColumn>",
             "<filterColumn colId=\"2\"><customFilters><customFilter operator=\"equal\" val=\"1\"/>",
             "<customFilter val=\"2\"/><customFilter val=\"3\"/></customFilters></filterColumn>",
             "</autoFilter>"
         );
         assert_eq!(scan(xml).unwrap().columns, Vec::new());
+    }
+
+    #[test]
+    fn every_dynamic_date_filter_round_trips_and_ignores_cached_bounds() {
+        let mut filter = SheetFilter::new(CellBox::parse("A1:AF20").unwrap());
+        filter.columns = DynamicDate::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| column(i as u32, FilterCriteria::DynamicDate(d)))
+            .collect();
+        let xml = autofilter_xml(&filter, &DxfTable::default());
+        assert!(xml.contains("<dynamicFilter type=\"yearToDate\"/>"));
+        assert!(xml.contains("<dynamicFilter type=\"Q4\"/>"));
+        assert!(xml.contains("<dynamicFilter type=\"M12\"/>"));
+        assert_eq!(scan(&xml), Some(filter));
+        let cached = "<autoFilter ref=\"A1:B9\"><filterColumn colId=\"0\"><dynamicFilter type=\"today\" val=\"45000\" maxVal=\"45000.999988\"/></filterColumn><filterColumn colId=\"1\"><dynamicFilter type=\"nope\"/></filterColumn></autoFilter>";
+        assert_eq!(
+            scan(cached).unwrap().columns,
+            vec![column(0, FilterCriteria::DynamicDate(DynamicDate::Today))]
+        );
     }
 
     #[test]

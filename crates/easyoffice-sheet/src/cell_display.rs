@@ -53,6 +53,12 @@ impl CompiledNumFmt {
             numeric,
         })
     }
+
+    /// Whether finite `num` renders through a date or time section under this compiled format.
+    #[inline]
+    pub fn shows_date(&self, num: f64) -> bool {
+        self.0.shows_date(num)
+    }
 }
 
 /// Pre-compiles `code` for repeated [`CompiledNumFmt::format`] calls across a sheet.

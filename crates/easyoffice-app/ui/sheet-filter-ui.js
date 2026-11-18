@@ -332,6 +332,7 @@
       state.tree = buildTree(answer.dates, !listed, criteria?.dates || []);
       state.cursor = -1;
       rebuildFlat();
+      renderDates(answer.dates, criteria);
       renderColors(answer.colors, criteria);
       const list = $("sheet-filter-list");
       if (list) list.scrollTop = 0;
@@ -356,12 +357,35 @@
       el.style.top = Math.max(0, vh > 0 ? Math.min(y, vh - height - MENU_MARGIN) : y) + "px";
     }
 
+    // Keeps an open `.md-sub-panel` inside the window when the filter panel sits near the bottom or right edge.
+    function fitSubmenu(sub) {
+      if (!sub || sub.getAttribute("aria-disabled") === "true") return;
+      const subPanel = sub.querySelector(":scope > .md-sub-panel");
+      if (!subPanel) return;
+      subPanel.style.top = "";
+      subPanel.style.left = "";
+      subPanel.style.right = "";
+      const box = subPanel.getBoundingClientRect?.();
+      const vw = host.innerWidth || document.documentElement.clientWidth || 0;
+      const vh = host.innerHeight || document.documentElement.clientHeight || 0;
+      if (!box || (!box.width && !box.height)) return;
+      if (vh > 0 && box.bottom > vh - MENU_MARGIN) {
+        const shift = Math.min(box.top - MENU_MARGIN, box.bottom - (vh - MENU_MARGIN));
+        if (shift > 0) subPanel.style.top = -4 - shift + "px";
+      }
+      if (vw > 0 && box.right > vw - MENU_MARGIN) {
+        subPanel.style.left = "auto";
+        subPanel.style.right = "100%";
+      }
+    }
+
     async function open(col, x, y, owner = null) {
       const f = viewNow(owner);
       const el = panel();
       if (!f || !el) return;
       close(false);
       state = { col, owner, items: [], blank: null, tree: [], flat: [{ kind: "all" }], more: false, query: "", cursor: -1, token: 0 };
+      renderDates(null, null);
       renderColors(null, null);
       const has = Boolean(columnOf(f, col));
       const clear = el.querySelector('[data-filter-act="clear-column"]');
@@ -473,6 +497,77 @@
       else sub.setAttribute("aria-disabled", "true");
     }
 
+    // Dynamic date submenu (`날짜 필터` + `기간 내 모든 날짜`, PD-238): enabled when the column has date cells or an
+    // active dynamic date condition.
+    function renderDates(dates, criteria) {
+      const sub = $("sheet-filter-date");
+      const menu = $("sheet-filter-date-menu");
+      if (!sub || !menu) return;
+      menu.textContent = "";
+      const current = criteria?.dynamic || "";
+      if (!dates?.years?.length && !current) {
+        sub.setAttribute("aria-disabled", "true");
+        return;
+      }
+      sub.removeAttribute("aria-disabled");
+      const addGroups = (hostEl, groups) => {
+        groups.forEach((group, gi) => {
+          if (gi > 0) {
+            const sep = document.createElement("div");
+            sep.className = "md-sep";
+            hostEl.appendChild(sep);
+          }
+          for (const [id, text] of group) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "md-item";
+            item.tabIndex = -1;
+            item.setAttribute("role", "menuitemcheckbox");
+            item.setAttribute("aria-checked", current === id ? "true" : "false");
+            item.dataset.datePick = id;
+            const span = document.createElement("span");
+            span.className = "md-label";
+            span.textContent = text;
+            item.appendChild(span);
+            hostEl.appendChild(item);
+          }
+        });
+      };
+      addGroups(menu, core.DYNAMIC_DATE_GROUPS);
+      const sep = document.createElement("div");
+      sep.className = "md-sep";
+      menu.appendChild(sep);
+      const periodSub = document.createElement("div");
+      periodSub.className = "md-sub";
+      periodSub.tabIndex = -1;
+      periodSub.setAttribute("role", "menuitem");
+      periodSub.setAttribute("aria-haspopup", "menu");
+      const label = document.createElement("span");
+      label.className = "md-label";
+      label.textContent = "기간 내 모든 날짜";
+      const arrow = document.createElement("span");
+      arrow.className = "md-arrow md-caret";
+      arrow.dataset.icon = "chevron-right";
+      host.__EASYOFFICE_ICONS__?.setIcon?.(document, arrow, "chevron-right");
+      const periodMenu = document.createElement("div");
+      periodMenu.className = "md-sub-panel menu-dropdown md-submenu";
+      periodMenu.dataset.leafMenu = "1";
+      periodMenu.setAttribute("role", "menu");
+      periodMenu.setAttribute("aria-label", "기간 내 모든 날짜");
+      addGroups(periodMenu, core.DYNAMIC_PERIOD_GROUPS);
+      periodSub.appendChild(label);
+      periodSub.appendChild(arrow);
+      periodSub.appendChild(periodMenu);
+      menu.appendChild(periodSub);
+    }
+
+    function pickDate(el) {
+      if (!state) return;
+      const { col, owner } = state;
+      close(true);
+      void filter.setCriteria(col, { dynamic: el.dataset.datePick }, owner);
+    }
+
     // A colour (or "none") picked in the submenu.
     function pickColor(el) {
       if (!state) return;
@@ -502,6 +597,11 @@
     }
 
     function onPanelClick(ev) {
+      const dateEl = ev.target?.closest?.("[data-date-pick]");
+      if (dateEl) {
+        pickDate(dateEl);
+        return;
+      }
       const colorEl = ev.target?.closest?.("[data-color-pick]");
       if (colorEl) {
         pickColor(colorEl);
@@ -520,7 +620,9 @@
 
     // Keyboard order of the panel: the menu rows, the search field, the list, then the buttons
     // (Tab). Arrow keys walk the menu rows and the search field; in the list they move its cursor.
-    const menuRows = () => [...panel().querySelectorAll('.md-item[data-filter-act]:not([aria-disabled="true"]), .md-sub:not([aria-disabled="true"])')];
+    const menuRows = () => [...panel().querySelectorAll(':scope > .md-item[data-filter-act]:not([aria-disabled="true"]), :scope > .md-sub:not([aria-disabled="true"])')];
+    const subItems = (menuEl) =>
+      menuEl ? [...menuEl.querySelectorAll(":scope > [data-date-pick], :scope > .md-sub, :scope > .sb-hl-palette-row > [data-color-pick], :scope > [data-color-pick]")] : [];
 
     function focusList(cursor) {
       const list = $("sheet-filter-list");
@@ -585,22 +687,40 @@
           ev.preventDefault();
           confirm();
         }
+      } else if (target?.parentElement?.closest?.(".md-sub-panel")) {
+        const inSub = target.parentElement.closest(".md-sub-panel");
+        const items = subItems(inSub);
+        const at = items.indexOf(target);
+        if (ev.key === "ArrowLeft") {
+          ev.preventDefault();
+          inSub.closest(".md-sub")?.focus();
+        } else if (target.classList?.contains("md-sub") && (ev.key === "ArrowRight" || ev.key === "Enter" || ev.key === " ")) {
+          ev.preventDefault();
+          subItems(target.querySelector(":scope > .md-sub-panel"))[0]?.focus();
+        } else if (target.dataset?.datePick && (ev.key === "Enter" || ev.key === " ")) {
+          ev.preventDefault();
+          pickDate(target);
+        } else if (ev.key === "ArrowDown" && items.length) {
+          ev.preventDefault();
+          items[(at + 1) % items.length]?.focus();
+        } else if (ev.key === "ArrowUp" && items.length) {
+          ev.preventDefault();
+          items[(at - 1 + items.length) % items.length]?.focus();
+        }
       } else if (target?.classList?.contains("md-sub")) {
         const rows = menuRows();
         const at = rows.indexOf(target);
         if (ev.key === "ArrowRight" || ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
-          target.querySelector("[data-color-pick]")?.focus();
+          subItems(target.querySelector(":scope > .md-sub-panel"))[0]?.focus();
         } else if (ev.key === "ArrowDown") {
           ev.preventDefault();
-          rows[(at + 1) % rows.length]?.focus();
+          if (at === rows.length - 1) $("sheet-filter-search")?.focus();
+          else rows[(at + 1) % rows.length]?.focus();
         } else if (ev.key === "ArrowUp") {
           ev.preventDefault();
           rows[(at - 1 + rows.length) % rows.length]?.focus();
         }
-      } else if (target?.dataset?.colorPick && ev.key === "ArrowLeft") {
-        ev.preventDefault();
-        target.closest(".md-sub")?.focus();
       } else if (target?.dataset?.filterAct && target.classList.contains("md-item")) {
         const rows = menuRows();
         const at = rows.indexOf(target);
@@ -694,6 +814,11 @@
       const el = panel();
       el?.addEventListener("click", onPanelClick);
       el?.addEventListener("keydown", onPanelKeydown);
+      const fitPath = (ev) => {
+        for (const s of el.querySelectorAll(".md-sub")) if (s.contains(ev.target)) fitSubmenu(s);
+      };
+      el?.addEventListener("mouseover", fitPath);
+      el?.addEventListener("focusin", fitPath);
       el?.addEventListener("contextmenu", (ev) => ev.preventDefault());
       $("sheet-filter-search")?.addEventListener("input", onSearchInput);
       $("sheet-filter-list")?.addEventListener("scroll", renderRows);

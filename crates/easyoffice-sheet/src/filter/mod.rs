@@ -22,6 +22,7 @@ mod bits;
 mod cell_aux;
 mod condition;
 mod dates;
+mod dynamic;
 mod runs;
 mod stats;
 mod wildcard;
@@ -29,7 +30,11 @@ mod wildcard;
 pub use bits::RowBits;
 pub use cell_aux::{color_list, CellAux, ColorList, NO_COLOR};
 pub use condition::{number_of, ColumnMatcher};
-pub use dates::{date_tree, tree_rows, DateKeys, DateTree, Moment, MonthNode};
+pub use dates::{
+    date_tree, serial_day, tree_rows, DateKeys, DateTree, Moment, MonthNode, FIRST_DAY_SERIAL,
+    LAST_DAY_SERIAL,
+};
+pub use dynamic::{utc_today, DynamicPlan};
 pub use runs::{intersect_runs, subtract_runs};
 pub use wildcard::{Wildcard, MAX_PATTERN_CHARS};
 
@@ -89,6 +94,16 @@ pub fn hidden_bits(
     columns: &[ColumnText<'_>],
     skip: Option<u32>,
 ) -> Result<RowBits, EasyOfficeError> {
+    hidden_bits_at(filter, columns, skip, utc_today())
+}
+
+/// Like [`hidden_bits`], with `today` as the reference whole-day serial for dynamic date criteria.
+pub fn hidden_bits_at(
+    filter: &SheetFilter,
+    columns: &[ColumnText<'_>],
+    skip: Option<u32>,
+    today: i64,
+) -> Result<RowBits, EasyOfficeError> {
     let rows = data_rows(filter);
     let mut hidden = RowBits::new(rows);
     let mut scratch: Vec<char> = Vec::new();
@@ -96,7 +111,7 @@ pub fn hidden_bits(
     let mut statistics = Vec::new();
     for entry in filter.columns.iter().filter(|c| Some(c.col) != skip) {
         let cells = column(columns, entry.col, rows)?;
-        let matcher = ColumnMatcher::compile(&entry.criteria)
+        let matcher = ColumnMatcher::compile_at(&entry.criteria, today)
             .ok_or_else(|| invalid("조건 문자열이 너무 깁니다"))?;
         if matcher.is_statistic() {
             statistics.push((&entry.criteria, cells));

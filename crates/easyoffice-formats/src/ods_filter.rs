@@ -244,7 +244,9 @@ fn column_xml(field: u32, criteria: &FilterCriteria) -> Option<String> {
             };
             push_condition(&mut out, field, &cond);
         }
-        FilterCriteria::Average { .. } | FilterCriteria::Color { .. } => return None,
+        FilterCriteria::Average { .. }
+        | FilterCriteria::DynamicDate(_)
+        | FilterCriteria::Color { .. } => return None,
     }
     Some(out)
 }

@@ -28,6 +28,46 @@
   const MAX_FILTER_ROWS = 200000; // rows of a range, header row included
   const MAX_FILTER_VALUES = 10000; // values a column's list holds
   const MAX_FILTER_TEXT = 255; // characters of a condition's text
+  // Date-based dynamic filter operators (ECMA-376 18.18.26 `ST_DynamicFilterType`, PD-238).
+  const DYNAMIC_DATE_GROUPS = [
+    [
+      ["tomorrow", "내일"],
+      ["today", "오늘"],
+      ["yesterday", "어제"],
+    ],
+    [
+      ["nextWeek", "다음 주"],
+      ["thisWeek", "이번 주"],
+      ["lastWeek", "지난주"],
+    ],
+    [
+      ["nextMonth", "다음 달"],
+      ["thisMonth", "이번 달"],
+      ["lastMonth", "지난달"],
+    ],
+    [
+      ["nextQuarter", "다음 분기"],
+      ["thisQuarter", "이번 분기"],
+      ["lastQuarter", "지난 분기"],
+    ],
+    [
+      ["nextYear", "내년"],
+      ["thisYear", "올해"],
+      ["lastYear", "작년"],
+    ],
+    [["yearToDate", "연초부터 현재까지"]],
+  ];
+  const DYNAMIC_PERIOD_GROUPS = [
+    [
+      ["Q1", "1분기"],
+      ["Q2", "2분기"],
+      ["Q3", "3분기"],
+      ["Q4", "4분기"],
+    ],
+    Array.from({ length: 12 }, (_, i) => ["M" + (i + 1), i + 1 + "월"]),
+  ];
+  const DYNAMIC_DATE_LIST = [...DYNAMIC_DATE_GROUPS.flat(), ...DYNAMIC_PERIOD_GROUPS.flat()];
+  const DYNAMIC_DATE_OPS = new Set(DYNAMIC_DATE_LIST.map(([id]) => id));
   const OPERATORS = [
     // [id, label, parameters]
     ["none", "없음", 0],
@@ -50,6 +90,7 @@
     ["bottomPercent", "하위 %", 1],
     ["aboveAverage", "평균 초과", 0],
     ["belowAverage", "평균 미만", 0],
+    ...DYNAMIC_DATE_LIST.map(([id, label]) => [id, label, 0]),
   ];
   const NUMERIC_OPS = new Set(["greaterThan", "greaterThanOrEqual", "lessThan", "lessThanOrEqual"]);
   const MAX_TOP_ITEMS = 1000000; // items a top or bottom filter may ask for
@@ -133,10 +174,11 @@
 
   // `{ and, rows: [form, form?] }` -> the column's criteria, or an error text.
   function criteriaFromForms(and, forms) {
-    const stats = forms.filter((form) => form && STAT_OPS[form.op]);
-    if (stats.length > 0) {
+    const whole = forms.filter((form) => form && (STAT_OPS[form.op] || DYNAMIC_DATE_OPS.has(form.op)));
+    if (whole.length > 0) {
       const others = forms.filter((form) => form && form.op !== "none");
-      return others.length > 1 ? { error: "다른 조건과 함께 쓸 수 없음" } : statCriteria(stats[0]);
+      if (others.length > 1) return { error: "다른 조건과 함께 쓸 수 없음" };
+      return DYNAMIC_DATE_OPS.has(whole[0].op) ? { criteria: { dynamic: whole[0].op } } : statCriteria(whole[0]);
     }
     const conditions = [];
     for (const form of forms) {
@@ -155,6 +197,9 @@
 
   // The two form rows of a column's custom criteria.
   function formsFromCriteria(criteria) {
+    if (criteria?.dynamic && DYNAMIC_DATE_OPS.has(criteria.dynamic)) {
+      return { and: true, rows: [{ op: criteria.dynamic, text: "" }, { op: "none", text: "" }] };
+    }
     const stat = statForm(criteria);
     if (stat) return { and: true, rows: [stat, { op: "none", text: "" }] };
     const rows = (criteria?.conditions || []).map(toForm);
@@ -212,6 +257,13 @@
     return { r1: Math.min(sel.ar, sel.cr), c1: 1, r2: Math.max(sel.ar, sel.cr), c2: extent.cols };
   }
 
+  // Local calendar date as a spreadsheet serial (days since 1899-12-30), matching `sheet-rules.js`.
+  function todaySerial() {
+    const DateCtor = host.Date || Date;
+    const d = new DateCtor();
+    return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000);
+  }
+
   host.__EASYOFFICE_SHEET_FILTER_CORE__ = {
     MAX_FILTER_ROWS,
     MAX_FILTER_VALUES,
@@ -219,6 +271,10 @@
     OPERATORS,
     NUMERIC_OPS,
     STAT_OPS,
+    DYNAMIC_DATE_GROUPS,
+    DYNAMIC_PERIOD_GROUPS,
+    DYNAMIC_DATE_OPS,
+    todaySerial,
     toCondition,
     toForm,
     paramsOf,
@@ -324,10 +380,12 @@
       for (const c of extraCols) cols.add(c);
       const colored = new Set(filter.columns.filter((c) => c.color).map((c) => c.col));
       for (const c of extraCols) colored.add(c);
+      const hasDynamic = filter.columns.some((c) => c.dynamic);
       return {
         sessionAction: "filter",
         op,
         filter: jsonOf(filter),
+        ...(hasDynamic ? { today: todaySerial() } : {}),
         data: [...cols]
           .sort((a, b) => a - b)
           .map((c) => {

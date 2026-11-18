@@ -27,14 +27,14 @@ pub(crate) fn utc_today() -> i64 {
 }
 
 /// First day of the month that is `step` months from the month of `day`.
-fn month_start(day: i64, step: i64) -> i64 {
+pub(crate) fn month_start(day: i64, step: i64) -> i64 {
     let (y, m, _) = civil_from_serial(day);
     let index = y * 12 + (m - 1) + step;
     serial_from_civil(index.div_euclid(12), index.rem_euclid(12) + 1, 1)
 }
 
 /// Sunday of the week of `day`.
-fn week_start(day: i64) -> i64 {
+pub(crate) fn week_start(day: i64) -> i64 {
     // Serial 1 is a Sunday, so serials 1, 8, 15, ... start weeks.
     day - (day - 1).rem_euclid(7)
 }

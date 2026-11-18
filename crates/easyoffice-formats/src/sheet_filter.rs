@@ -187,9 +187,163 @@ pub enum FilterCriteria {
     },
     /// The numbers above (or below) the average of the numbers in the column (`dynamicFilter`).
     Average { above: bool },
+    /// The dates in a calendar period relative to today or in a recurring quarter or month across
+    /// all years (ECMA-376 18.3.2.5 `dynamicFilter`, 18.18.26 `ST_DynamicFilterType`, PD-238).
+    DynamicDate(DynamicDate),
     /// The cells whose fill (or, with `font`, text) colour is `color` as `0xRRGGBB`; `None` is the
     /// cells with no colour of their own (`colorFilter`).
     Color { font: bool, color: Option<u32> },
+}
+
+/// Date-based `ST_DynamicFilterType` values (ECMA-376 18.18.26, PD-238).
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicDate {
+    Today,
+    Yesterday,
+    Tomorrow,
+    ThisWeek,
+    LastWeek,
+    NextWeek,
+    ThisMonth,
+    LastMonth,
+    NextMonth,
+    ThisQuarter,
+    LastQuarter,
+    NextQuarter,
+    ThisYear,
+    LastYear,
+    NextYear,
+    YearToDate,
+    Q1,
+    Q2,
+    Q3,
+    Q4,
+    M1,
+    M2,
+    M3,
+    M4,
+    M5,
+    M6,
+    M7,
+    M8,
+    M9,
+    M10,
+    M11,
+    M12,
+}
+
+impl DynamicDate {
+    pub const ALL: [Self; 32] = [
+        Self::Today,
+        Self::Yesterday,
+        Self::Tomorrow,
+        Self::ThisWeek,
+        Self::LastWeek,
+        Self::NextWeek,
+        Self::ThisMonth,
+        Self::LastMonth,
+        Self::NextMonth,
+        Self::ThisQuarter,
+        Self::LastQuarter,
+        Self::NextQuarter,
+        Self::ThisYear,
+        Self::LastYear,
+        Self::NextYear,
+        Self::YearToDate,
+        Self::Q1,
+        Self::Q2,
+        Self::Q3,
+        Self::Q4,
+        Self::M1,
+        Self::M2,
+        Self::M3,
+        Self::M4,
+        Self::M5,
+        Self::M6,
+        Self::M7,
+        Self::M8,
+        Self::M9,
+        Self::M10,
+        Self::M11,
+        Self::M12,
+    ];
+
+    /// The `type` attribute value of `dynamicFilter` (ECMA-376 18.18.26).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Today => "today",
+            Self::Yesterday => "yesterday",
+            Self::Tomorrow => "tomorrow",
+            Self::ThisWeek => "thisWeek",
+            Self::LastWeek => "lastWeek",
+            Self::NextWeek => "nextWeek",
+            Self::ThisMonth => "thisMonth",
+            Self::LastMonth => "lastMonth",
+            Self::NextMonth => "nextMonth",
+            Self::ThisQuarter => "thisQuarter",
+            Self::LastQuarter => "lastQuarter",
+            Self::NextQuarter => "nextQuarter",
+            Self::ThisYear => "thisYear",
+            Self::LastYear => "lastYear",
+            Self::NextYear => "nextYear",
+            Self::YearToDate => "yearToDate",
+            Self::Q1 => "Q1",
+            Self::Q2 => "Q2",
+            Self::Q3 => "Q3",
+            Self::Q4 => "Q4",
+            Self::M1 => "M1",
+            Self::M2 => "M2",
+            Self::M3 => "M3",
+            Self::M4 => "M4",
+            Self::M5 => "M5",
+            Self::M6 => "M6",
+            Self::M7 => "M7",
+            Self::M8 => "M8",
+            Self::M9 => "M9",
+            Self::M10 => "M10",
+            Self::M11 => "M11",
+            Self::M12 => "M12",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "today" => Self::Today,
+            "yesterday" => Self::Yesterday,
+            "tomorrow" => Self::Tomorrow,
+            "thisWeek" => Self::ThisWeek,
+            "lastWeek" => Self::LastWeek,
+            "nextWeek" => Self::NextWeek,
+            "thisMonth" => Self::ThisMonth,
+            "lastMonth" => Self::LastMonth,
+            "nextMonth" => Self::NextMonth,
+            "thisQuarter" => Self::ThisQuarter,
+            "lastQuarter" => Self::LastQuarter,
+            "nextQuarter" => Self::NextQuarter,
+            "thisYear" => Self::ThisYear,
+            "lastYear" => Self::LastYear,
+            "nextYear" => Self::NextYear,
+            "yearToDate" => Self::YearToDate,
+            "Q1" => Self::Q1,
+            "Q2" => Self::Q2,
+            "Q3" => Self::Q3,
+            "Q4" => Self::Q4,
+            "M1" => Self::M1,
+            "M2" => Self::M2,
+            "M3" => Self::M3,
+            "M4" => Self::M4,
+            "M5" => Self::M5,
+            "M6" => Self::M6,
+            "M7" => Self::M7,
+            "M8" => Self::M8,
+            "M9" => Self::M9,
+            "M10" => Self::M10,
+            "M11" => Self::M11,
+            "M12" => Self::M12,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,7 +446,7 @@ fn criteria_within_bounds(c: &FilterCriteria, text_ok: impl Fn(&CustomCondition)
             MAX_TOP_ITEMS
         })
             .contains(count),
-        FilterCriteria::Average { .. } => true,
+        FilterCriteria::Average { .. } | FilterCriteria::DynamicDate(_) => true,
         FilterCriteria::Color { color, .. } => color.is_none_or(|c| c <= 0xFF_FFFF),
     }
 }

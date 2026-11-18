@@ -16,6 +16,7 @@
 
 use super::cell_aux::{CellAux, NO_COLOR};
 use super::dates::DateKeys;
+use super::dynamic::{utc_today, DynamicPlan};
 use super::wildcard::Wildcard;
 use easyoffice_formats::{CustomCondition, CustomOp, FilterCriteria};
 use std::collections::HashSet;
@@ -166,6 +167,7 @@ enum Test {
         font: bool,
         color: u32,
     },
+    DynamicDate(DynamicPlan),
     /// Compares the cell with the other cells of the column; judged by `stats`, never per cell.
     Statistic,
 }
@@ -176,6 +178,11 @@ pub struct ColumnMatcher(Test);
 impl ColumnMatcher {
     /// `None` when a pattern is over the wildcard bound.
     pub fn compile(criteria: &FilterCriteria) -> Option<Self> {
+        Self::compile_at(criteria, utc_today())
+    }
+
+    /// Compiles `criteria` with `today` as the reference whole-day serial for dynamic date rules.
+    pub fn compile_at(criteria: &FilterCriteria, today: i64) -> Option<Self> {
         Some(Self(match criteria {
             FilterCriteria::Values {
                 blank,
@@ -190,6 +197,9 @@ impl ColumnMatcher {
                 font: *font,
                 color: color.unwrap_or(NO_COLOR),
             },
+            FilterCriteria::DynamicDate(kind) => {
+                Test::DynamicDate(DynamicPlan::compile(*kind, today))
+            }
             FilterCriteria::Top { .. } | FilterCriteria::Average { .. } => Test::Statistic,
             FilterCriteria::Custom { and, first, second } => {
                 let first = Cond::compile(first)?;
@@ -228,6 +238,7 @@ impl ColumnMatcher {
             Test::And(a, b) => a.accepts(text, scratch) && b.accepts(text, scratch),
             Test::Or(a, b) => a.accepts(text, scratch) || b.accepts(text, scratch),
             Test::Color { font, color } => !aux.has_color(*font) || aux.color(*font, i) == *color,
+            Test::DynamicDate(plan) => aux.date(i).is_some_and(|serial| plan.accepts(serial)),
             Test::Statistic => true,
         }
     }
