@@ -102,7 +102,7 @@ pub use sheet_table::{
     MAX_TABLE_COLUMNS_TOTAL, MAX_TABLE_TEXT_CHARS,
 };
 pub use sheet_view::*;
-pub use structured_edit::{convert_table_refs, rename_table_refs};
+pub use structured_edit::{convert_table_refs, rename_table_refs, rename_tables_refs};
 pub use structured_ref::*;
 pub use table_style::{
     is_builtin_table_style, StyleElement, StyleFormat, TableEdge, TableLine, TableStyleDef,

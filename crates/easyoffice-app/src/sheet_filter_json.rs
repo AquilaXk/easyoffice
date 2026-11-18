@@ -222,6 +222,45 @@ pub(crate) fn parse_columns(
     Ok(columns)
 }
 
+/// 1-based sorted unique columns inside `range` whose filter dropdown button is hidden (PD-237).
+pub(crate) fn parse_hidden_buttons(
+    v: &StrictJsonValue,
+    range: &CellBox,
+) -> Result<Vec<u32>, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad("hiddenButtons"))?;
+    if items.len() > MAX_FILTER_COLUMNS {
+        return Err(over("숨김 단추 열 수"));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let col = item
+            .as_u64()
+            .filter(|c| (1..=16_384).contains(c))
+            .map(|c| c as u32 - 1)
+            .filter(|c| (range.col0..=range.col1).contains(c))
+            .ok_or_else(|| bad("hiddenButtons"))?;
+        if out.last().is_some_and(|&last| last >= col) {
+            return Err(bad("hiddenButtons"));
+        }
+        out.push(col);
+    }
+    Ok(out)
+}
+
+pub(crate) fn write_hidden_buttons(out: &mut String, cols: &[u32]) {
+    if cols.is_empty() {
+        return;
+    }
+    out.push_str(",\"hiddenButtons\":[");
+    for (i, &col) in cols.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{}", col + 1);
+    }
+    out.push(']');
+}
+
 /// A filter from its JSON object.
 pub(crate) fn parse_filter(v: &StrictJsonValue) -> Result<SheetFilter, EasyOfficeError> {
     let obj = v.as_object().ok_or_else(|| bad("filter"))?;
@@ -252,6 +291,11 @@ pub(crate) fn parse_filter(v: &StrictJsonValue) -> Result<SheetFilter, EasyOffic
         {
             return Err(bad("hidden"));
         }
+    }
+    if let Some(hb) = StrictJsonValue::get_field(obj, "hiddenButtons")
+        .filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        filter.hidden_buttons = parse_hidden_buttons(hb, &range)?;
     }
     Ok(filter)
 }
@@ -380,6 +424,7 @@ pub(crate) fn filter_json(filter: &SheetFilter) -> String {
     if !filter.hidden.is_empty() {
         let _ = write!(out, ",\"hidden\":{}", runs_json(&filter.hidden));
     }
+    write_hidden_buttons(&mut out, &filter.hidden_buttons);
     out.push('}');
     out
 }

@@ -67,6 +67,9 @@ fn anchor_deleted(rule: &CfRule, edit: &AxisEdit) -> bool {
     let Some(first) = rule.ranges.first() else {
         return false;
     };
+    if edit.axis == Axis::Row && !edit.covers_cols(first.col0, first.col1) {
+        return false;
+    }
     let start = match edit.axis {
         Axis::Row => first.row0,
         Axis::Col => first.col0,

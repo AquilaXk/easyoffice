@@ -255,13 +255,28 @@
       return done;
     }
 
+    function collectRuleSites(rulesObj, mentionsAny, pushSite) {
+      for (const r of rulesObj?.cf || []) {
+        if (r.t === "expr" && mentionsAny(r.formula)) pushSite(r.formula, (v) => { r.formula = v; });
+        if (r.t === "cellIs") {
+          for (const k of ["a", "b"]) if (r[k]?.startsWith("=") && mentionsAny(r[k])) pushSite(r[k], (v) => { r[k] = v; });
+        }
+        for (const sv of [...(r.stops || []), r.min, r.max, ...(r.thresholds || [])]) {
+          if (sv?.k === "formula" && mentionsAny(sv.v)) pushSite(sv.v, (v) => { sv.v = v; });
+        }
+      }
+      for (const r of rulesObj?.dv || []) {
+        if (r.t === "checkbox" || ((r.t === "list" || r.t === "listNoArrow") && !r.a?.startsWith("="))) continue;
+        for (const k of ["a", "b"]) if (r[k] && mentionsAny(r[k])) pushSite(r[k], (v) => { r[k] = v; });
+      }
+    }
+
     // `next` with a copy of `sheet` under a name of its own; returns the name. Its formulas keep their text: a
-    // reference without a sheet name now points into the copy, one with a name still points where it did. The
-    // sheet's own names (those scoped to it) are copied to the copy and refer to it (PD-214). Null, with the reason in the
-    // status text, when the names cannot all be copied: the copy is then not made.
-    function cloneInto(next, sheet) {
+    // reference without a sheet name now points into the copy, one with a name still points where it did, and a
+    // structured reference on the copy that named one of `sheet`'s tables moves to the copy's table (PD-237).
+    async function cloneInto(next, sheet) {
       const name = names.copyName(names.labelOf(sheet), next.sheetOrder);
-      const copies = host.__EASYOFFICE_SHEET_NAMES__.copiedFor(next.definedNames || [], sheet, name);
+      let copies = host.__EASYOFFICE_SHEET_NAMES__.copiedFor(next.definedNames || [], sheet, name);
       if (copies === null) {
         say("이름 정의가 한도를 넘어 복사할 수 없음");
         return null;
@@ -270,11 +285,57 @@
       if (next.sheetRowCounts[sheet]) next.sheetRowCounts[name] = next.sheetRowCounts[sheet];
       if (next.sheetColumnWidths[sheet]) next.sheetColumnWidths[name] = { ...next.sheetColumnWidths[sheet] };
       if (next.sheetRules[sheet]) next.sheetRules[name] = structuredClone(next.sheetRules[sheet]);
+      let pairs = [];
       if (next.sheetLayout[sheet]) {
         const { hidden, veryHidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
         // Table names are unique in the workbook: the copy's tables get names of their own (PD-224).
-        if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
+        if (kept.tables) {
+          const sourceTables = kept.tables;
+          kept.tables = layoutApi.copiedTables(sourceTables, next.sheetLayout);
+          pairs = sourceTables.map((t, i) => [t.name, kept.tables[i].name]).filter(([a, b]) => a.toLowerCase() !== b.toLowerCase());
+        }
         if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;
+      }
+      if (pairs.length > 0) {
+        const needles = pairs.map(([from]) => from.toLowerCase());
+        const mentionsAny = (s) => {
+          if (!s) return false;
+          const lo = String(s).toLowerCase();
+          return needles.some((n) => lo.includes(n));
+        };
+        const formulas = [];
+        for (const [cell, entry] of Object.entries(next.sheets[name] || {})) {
+          if (entry?.formula?.startsWith("=") && mentionsAny(entry.formula)) formulas.push({ sheet: name, cell, text: entry.formula });
+        }
+        const texts = [];
+        const sites = [];
+        const pushSite = (txt, set) => { texts.push(txt); sites.push(set); };
+        for (const t of next.sheetLayout[name]?.tables || []) {
+          (t.calculatedColumns || []).forEach((f, j) => {
+            if (mentionsAny(f)) pushSite(f, (v) => { t.calculatedColumns[j] = v; });
+          });
+        }
+        collectRuleSites(next.sheetRules[name], mentionsAny, pushSite);
+        if (formulas.length > 0 || texts.length > 0 || copies.some((d) => mentionsAny(d.refersTo))) {
+          try {
+            const answer = await sheetStoreHelpers.callSheetAction({
+              sessionAction: "tableColumn",
+              op: "renameBatch",
+              renames: pairs,
+              tables: {},
+              formulas,
+              names: copies,
+              ...(texts.length ? { texts } : {}),
+            });
+            for (const w of Array.isArray(answer?.rewrites) ? answer.rewrites : []) {
+              if (next.sheets[name]?.[w.cell]) next.sheets[name][w.cell] = { ...next.sheets[name][w.cell], formula: w.text };
+            }
+            if (Array.isArray(answer?.names)) copies = answer.names;
+            for (const [idx, val] of Array.isArray(answer?.textRewrites) ? answer.textRewrites : []) sites[idx]?.(val);
+          } catch {
+            // falls through when no engine IPC is attached
+          }
+        }
       }
       if (copies.length > 0) next.definedNames = [...next.definedNames, ...copies];
       viewState.copy(sheet, name);
@@ -288,8 +349,8 @@
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
       }
-      return change((next) => {
-        const name = cloneInto(next, sheet);
+      return change(async (next) => {
+        const name = await cloneInto(next, sheet);
         if (name === null) return false;
         place(next, name, next.sheetOrder.indexOf(sheet) + 1);
         activate(next, name);
@@ -304,10 +365,10 @@
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
       }
-      return change((next) => {
+      return change(async (next) => {
         if (before !== null && !next.sheetOrder.includes(before)) return false;
         if (!makeCopy && before === sheet) return false;
-        const name = makeCopy ? cloneInto(next, sheet) : sheet;
+        const name = makeCopy ? await cloneInto(next, sheet) : sheet;
         if (name === null) return false;
         const order = next.sheetOrder.filter((n) => n !== name);
         order.splice(before === null ? order.length : order.indexOf(before), 0, name);

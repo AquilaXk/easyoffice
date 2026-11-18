@@ -342,3 +342,118 @@ fn a_custom_table_style_goes_through_a_save_and_an_open_and_a_built_in_one_carri
         );
     }
 }
+
+#[test]
+fn pd237_hidden_buttons_calculated_columns_partial_structure_and_batch_rename_work_end_to_end() {
+    // 1. XLSX round-trip through convert_document_format preserves hiddenButtons (filter + table) and calculatedColumns.
+    let sheet = r#"{"name":"S","cells":[
+        {"ref":"A1","raw":"side"},{"ref":"B1","raw":"Item"},{"ref":"C1","raw":"Price"},{"ref":"D1","raw":"Total"},
+        {"ref":"B2","raw":"Pen"},{"ref":"C2","raw":"100"},{"ref":"D2","raw":"=[@Price]*2"},
+        {"ref":"B3","raw":"Pad"},{"ref":"C3","raw":"200"},{"ref":"D3","raw":"=[@Price]*2"}],
+      "filter":{"range":"F1:H3","columns":[],"hiddenButtons":[6,8]},
+      "tables":[{"name":"Sales","range":"B1:D3","header":true,"totals":false,"columns":["Item","Price","Total"],
+        "filter":[],"hiddenButtons":[2,4],"calculatedColumns":[null,null,"=[@Price]*2"]}]}"#;
+    let opened = decode("표.xlsx", &save("xlsx", sheet));
+    assert!(opened.contains(r#""hiddenButtons":[6,8]"#), "{opened}");
+    assert!(opened.contains(r#""hiddenButtons":[2,4]"#), "{opened}");
+    assert!(
+        opened.contains(r#""calculatedColumns":[null,null,"=Sales[[#This Row],[Price]]*2"]"#),
+        "{opened}"
+    );
+
+    // Hostile hiddenButtons / calculatedColumns payloads are refused Fail-Closed.
+    for bad_sheet in [
+        sheet.replace(r#""hiddenButtons":[2,4]"#, r#""hiddenButtons":[4,2]"#),
+        sheet.replace(r#""hiddenButtons":[2,4]"#, r#""hiddenButtons":[1]"#),
+        sheet.replace(
+            r#""filter":[],"hiddenButtons":[2,4]"#,
+            r#""hiddenButtons":[2]"#,
+        ),
+        sheet.replace(
+            r#""calculatedColumns":[null,null,"=[@Price]*2"]"#,
+            r#""calculatedColumns":[null,"not_formula",null]"#,
+        ),
+        sheet.replace(
+            r#""calculatedColumns":[null,null,"=[@Price]*2"]"#,
+            r#""calculatedColumns":[null]"#,
+        ),
+    ] {
+        let payload = format!(
+            r#"{{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"표","sheets":[{bad_sheet}]}}"#
+        );
+        assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err());
+    }
+
+    // 2. Session `structure` with `cols: [2, 3]` shifts only B..C and refuses straddling merges/tables.
+    let session = json_str_field(
+        &call(r#"{"sessionAction":"open","sheets":["S"]}"#),
+        "session",
+    )
+    .to_string();
+    call(&format!(
+        r#"{{"sessionAction":"apply","session":"{session}","recalc":true,"changes":[
+          {{"sheet":"S","cell":"A2","value":"keep"}},
+          {{"sheet":"S","cell":"B2","value":"10"}},
+          {{"sheet":"S","cell":"C2","value":"=B2+5"}},
+          {{"sheet":"S","cell":"D2","value":"=A2"}}
+        ]}}"#
+    ));
+    let shifted = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{session}","sheet":"S","axis":"row","op":"insert","at":2,"count":1,"cols":[2,3],
+          "merges":["A2:A3","B3:C4"],"tables":[{{"name":"Below","range":"B5:C6","columns":["x","y"]}},{{"name":"Right","range":"D2:E4","columns":["p","q"]}}]}}"#
+    ));
+    assert!(
+        shifted.contains(r#""cell":"C3","value":"=B3+5""#),
+        "{shifted}"
+    );
+    assert!(!shifted.contains(r#""cell":"D3""#), "{shifted}");
+    assert!(
+        shifted.contains(r#""merges":["A2:A3","B4:C5"]"#),
+        "{shifted}"
+    );
+    assert!(
+        shifted.contains(r#""name":"Below","range":"B6:C7""#)
+            && shifted.contains(r#""name":"Right","range":"D2:E4""#),
+        "{shifted}"
+    );
+    // Straddling merge A4:B4 refuses `cols: [2, 3]` before mutating the session.
+    let straddle = EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        &format!(
+            r#"{{"sessionAction":"structure","session":"{session}","sheet":"S","axis":"row","op":"insert","at":2,"count":1,"cols":[2,3],"merges":["A4:B4"]}}"#
+        ),
+    );
+    assert!(straddle.is_err());
+
+    // 3. `tableColumn` with `op: "renameBatch"` rewrites formulas, defined names and `texts` in one pass.
+    let batch = call(
+        r#"{"sessionAction":"tableColumn","op":"renameBatch","renames":[["표1","표1_2"],["Sales","Sales_2"]],
+          "tables":{},
+          "formulas":[
+            {"sheet":"Copy","cell":"E1","text":"=SUM(표1[금액])+COUNTA(Sales)"},
+            {"sheet":"Copy","cell":"B2","text":"=[@금액]*2"}
+          ],
+          "names":[{"name":"LocalSum","scope":"Copy","refersTo":"SUM(표1[금액])"}],
+          "texts":["=표1[@금액]*1.1","plain"]}"#,
+    );
+    assert!(
+        batch
+            .contains(r#"{"sheet":"Copy","cell":"E1","text":"=SUM(표1_2[금액])+COUNTA(Sales_2)"}"#)
+            && !batch.contains(r#""cell":"B2""#),
+        "{batch}"
+    );
+    assert!(
+        batch.contains(r#""refersTo":"=SUM(표1_2[금액])""#)
+            || batch.contains(r#""refersTo":"SUM(표1_2[금액])""#),
+        "{batch}"
+    );
+    assert!(
+        batch.contains(r#""textRewrites":[[0,"=표1_2[@금액]*1.1"]]"#),
+        "{batch}"
+    );
+    assert!(EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        r#"{"sessionAction":"tableColumn","op":"renameBatch","renames":[],"formulas":[]}"#,
+    )
+    .is_err());
+}

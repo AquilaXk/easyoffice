@@ -182,7 +182,21 @@ impl SheetLock {
             let mut out = Vec::with_capacity(list.len());
             for &(row, first, last) in list {
                 if by_rows {
-                    out.extend(edit.map_index(row).map(|moved| (moved, first, last)));
+                    if let Some((lo, hi)) = edit.cols {
+                        if first < lo {
+                            out.push((row, first, last.min(lo - 1)));
+                        }
+                        let mid0 = first.max(lo);
+                        let mid1 = last.min(hi);
+                        if mid0 <= mid1 {
+                            out.extend(edit.map_index(row).map(|moved| (moved, mid0, mid1)));
+                        }
+                        if last > hi {
+                            out.push((row, first.max(hi + 1), last));
+                        }
+                    } else {
+                        out.extend(edit.map_index(row).map(|moved| (moved, first, last)));
+                    }
                 } else {
                     out.extend(
                         shift_runs(&[(first, last)], edit)
@@ -190,6 +204,9 @@ impl SheetLock {
                             .map(|(a, b)| (row, a, b)),
                     );
                 }
+            }
+            if by_rows && edit.cols.is_some() {
+                out.sort_unstable();
             }
             out
         };

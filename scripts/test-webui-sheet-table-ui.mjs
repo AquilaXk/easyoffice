@@ -493,3 +493,145 @@ test("opening the dialog records no undo step and a cancelled dialog leaves the 
   assert.equal(tables(h).length, 0);
   assert.deepEqual(sizes(), { undo: 0, redo: 2 });
 });
+
+test("creating a headerless table shifts only the table's columns and refuses straddling merges below (PD-237)", async () => {
+  const seen = [];
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const h = await createWorkspaceHarness({
+    transformHtml: demoHtml,
+    tauriInvoke: async (command, args) => {
+      if (command === "get_workspace_bootstrap") {
+        return JSON.stringify({ platform: "macOS", shortcutModifier: "⌘", sheetSessions: true, openTabs: [] });
+      }
+      if (command === "evaluate_sheet") {
+        const body = JSON.parse(args.payload);
+        if (body.sessionAction === "open") return { session: "s1" };
+        if (body.sessionAction === "close") return { closed: true };
+        if (body.sessionAction === "structure") {
+          seen.push(body);
+          return {
+            session: body.session,
+            formulas: [],
+            changed: [],
+            circular: false,
+            removed: 0,
+            spillAreas: [],
+            merges: body.merges || [],
+            hiddenRows: body.hiddenRows || [],
+            hiddenCols: body.hiddenCols || [],
+            tables: body.tables || [],
+            widths: body.widths || [],
+            rules: {},
+          };
+        }
+        return { session: body.session || "s1", changed: [], circular: false };
+      }
+      return offline[command] ? offline[command](args?.payload ?? "{}") : { status: "ok" };
+    },
+  });
+  await openDemoWorkbook(h.document);
+  switchModule(h.document, "SHEET");
+  await flushAsyncTurns();
+  const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
+  const cells = [
+    ["A2", "왼쪽고정"],
+    ["B2", "10"],
+    ["C2", "20"],
+    ["D2", "오른쪽고정"],
+    ["B3", "30"],
+    ["C3", "40"],
+  ].map(([ref, raw]) => ({ ref, raw }));
+  await pickFile(h.document, makeFixtureFile("hl.xlsx", { sheets: [{ name: "Sheet1", cells, merges: ["A6:B6"] }] }));
+  await flushAsyncTurns(10);
+
+  // Straddling merge A6:B6 below B2:C3 refuses headerless table creation in the dialog.
+  await makeTable(h, "B2:C3", false);
+  assert.equal($(h, "sheet-table-dialog").open, true);
+  assert.equal($(h, "sheet-table-status").textContent, "아래에 걸친 표·병합·필터가 있어 셀을 내릴 수 없음");
+  h.userClick(h.document.querySelector("#sheet-table-dialog [data-dialog-close].dialog-btn"));
+  await flushAsyncTurns(4);
+
+  // Remove the straddling merge and create the headerless table on B2:C3 -> B2:C4.
+  h.host.__EASYOFFICE_SHEET_LAYOUT__.removeMerges("Sheet1", 6, 1, 6, 2);
+  await makeTable(h, "B2:C3", false);
+  assert.deepEqual(seen.at(-1)?.cols, [2, 3], "structure request restricts the row shift to columns B..C");
+  assert.equal(tables(h)[0].range, "B2:C4");
+  assert.deepEqual(tables(h)[0].columns, ["Column1", "Column2"]);
+  assert.equal(cell(h.document, "B2").textContent, "Column1");
+  assert.equal(cell(h.document, "C2").textContent, "Column2");
+  assert.equal(cell(h.document, "B3").textContent, "10");
+  assert.equal(cell(h.document, "C4").textContent, "40");
+  // Cells in A2 and D2 outside the table's columns did NOT move down!
+  assert.equal(cell(h.document, "A2").textContent, "왼쪽고정");
+  assert.equal(cell(h.document, "A3").textContent, "");
+  assert.equal(cell(h.document, "D2").textContent, "오른쪽고정");
+  assert.equal(cell(h.document, "D3").textContent, "");
+  await undo(h);
+  assert.equal(tables(h).length, 0);
+  assert.equal(cell(h.document, "B2").textContent, "10");
+  assert.equal(cell(h.document, "A2").textContent, "왼쪽고정");
+});
+
+test("typing a formula in an empty table column fills all data rows as its own undo step and grows into new rows (PD-237)", async () => {
+  const h = await openSheet();
+  const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
+  const table = {
+    name: "Sales",
+    range: "A1:C4",
+    header: true,
+    totals: false,
+    columns: ["품목", "수량", "금액"],
+    style: "TableStyleMedium2",
+    firstColumn: false,
+    lastColumn: false,
+    rowStripes: true,
+    columnStripes: false,
+  };
+  const cells = [
+    ["A1", "품목"], ["B1", "수량"], ["C1", "금액"],
+    ["A2", "연필"], ["B2", "3"],
+    ["A3", "공책"], ["B3", "5"],
+    ["A4", "지우개"], ["B4", "2"],
+  ].map(([ref, raw]) => ({ ref, raw }));
+  await pickFile(h.document, makeFixtureFile("calc.xlsx", { sheets: [{ name: "Sheet1", cells, tables: [table] }] }));
+  await flushAsyncTurns(8);
+
+  const c2 = cell(h.document, "C2");
+  c2.focus();
+  typeText(h.document, "=[@수량]*100");
+  key(c2, "Enter");
+  await flushAsyncTurns(28);
+
+  assert.equal(cell(h.document, "C2").dataset.formula, "=[@수량]*100");
+  assert.equal(cell(h.document, "C3").dataset.formula, "=[@수량]*100");
+  assert.equal(cell(h.document, "C4").dataset.formula, "=[@수량]*100");
+  assert.deepEqual(tables(h)[0].calculatedColumns, [null, null, "=[@수량]*100"]);
+
+  // Typing a new row below auto-fills the calculated column C5!
+  const a5 = cell(h.document, "A5");
+  a5.focus();
+  typeText(h.document, "볼펜");
+  key(a5, "Enter");
+  await flushAsyncTurns(28);
+  assert.equal(tables(h)[0].range, "A1:C5");
+  assert.equal(cell(h.document, "C5").dataset.formula, "=[@수량]*100");
+
+  // Undo new row growth -> undo A5 -> undo calculated-column fill (keeps C2!).
+  await undo(h);
+  assert.equal(tables(h)[0].range, "A1:C4");
+  await undo(h);
+  assert.equal(cell(h.document, "A5").textContent, "");
+  await undo(h);
+  assert.equal(cell(h.document, "C2").dataset.formula, "=[@수량]*100", "typed cell keeps its formula");
+  assert.equal(cell(h.document, "C3").dataset.formula, undefined, "auto-filled rows revert to empty");
+  assert.equal(cell(h.document, "C4").dataset.formula, undefined);
+});

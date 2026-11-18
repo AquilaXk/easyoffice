@@ -22,8 +22,9 @@ use crate::sheet_styling::table_style::TableStyleDef;
 use crate::sheet_styling::xlsx_filter::{autofilter_xml, FilterScan};
 use crate::sheet_styling::xlsx_filter_dxf::DxfColors;
 use crate::sheet_styling::xlsx_sheet::decode_xlsx_escapes;
+use crate::sheet_styling::{from_file_formula, to_file_formula};
 use crate::sheet_table::xlsx_table_totals::{
-    column_totals, formula_child, write_attributes, ColumnTotals,
+    column_totals, formula_child, write_attributes, ColumnTotals, MAX_TOTALS_FORMULA_CHARS,
 };
 use crate::sheet_table::{SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_TEXT_CHARS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
@@ -67,9 +68,37 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
     let mut filter = FilterScan::new(dxfs);
     let mut has_filter = false;
     let mut columns: Vec<String> = Vec::new();
+    let mut calc_formulas: Vec<Option<String>> = Vec::new();
+    let mut in_calc_formula = false;
+    let mut calc_buf = String::new();
     let mut max_columns = 0usize;
     while let Ok(Some(event)) = reader.next_event() {
         filter.feed(&event);
+        match event {
+            XmlEvent::Text(text) if in_calc_formula => {
+                if calc_buf.len() + text.len() > MAX_TOTALS_FORMULA_CHARS * 4 {
+                    return None;
+                }
+                calc_buf.push_str(&text);
+                continue;
+            }
+            XmlEvent::End("calculatedColumnFormula") if in_calc_formula => {
+                in_calc_formula = false;
+                let trimmed = calc_buf.trim();
+                if !trimmed.is_empty() {
+                    let converted = format!("={}", from_file_formula(trimmed));
+                    if converted.chars().count() > MAX_TOTALS_FORMULA_CHARS {
+                        return None;
+                    }
+                    if let Some(slot) = calc_formulas.last_mut() {
+                        *slot = Some(converted);
+                    }
+                }
+                calc_buf.clear();
+                continue;
+            }
+            _ => {}
+        }
         let XmlEvent::Start { name, attrs } = event else {
             continue;
         };
@@ -93,6 +122,11 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
                     return None;
                 }
                 columns.push(decode_xlsx_escapes(attrs.get("name")?));
+                calc_formulas.push(None);
+            }
+            "calculatedColumnFormula" if !columns.is_empty() => {
+                in_calc_formula = true;
+                calc_buf.clear();
             }
             "tableStyleInfo" => {
                 let t = table.as_mut()?;
@@ -113,9 +147,16 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
         return None;
     }
     table.columns = columns;
+    if calc_formulas.iter().any(Option::is_some) {
+        table.calculated_columns = calc_formulas;
+    }
     if has_filter && table.header {
-        let conditions = filter.finish_unbounded().map(|f| f.columns);
-        table.filter = Some(conditions.unwrap_or_default());
+        let parsed = filter.finish_unbounded();
+        table.hidden_buttons = parsed
+            .as_ref()
+            .map(|f| f.hidden_buttons.clone())
+            .unwrap_or_default();
+        table.filter = Some(parsed.map(|f| f.columns).unwrap_or_default());
     }
     Some(table)
 }
@@ -365,6 +406,7 @@ fn table_xml(
     id: usize,
     table: &SheetTable,
     columns: &[String],
+    calc: &[Option<String>],
     totals: &[ColumnTotals],
     dxf: &DxfTable,
 ) -> String {
@@ -384,6 +426,7 @@ fn table_xml(
     if let Some(conditions) = &table.filter {
         let mut filter = SheetFilter::new(table.filter_range());
         filter.columns.clone_from(conditions);
+        filter.hidden_buttons.clone_from(&table.hidden_buttons);
         out.push_str(&autofilter_xml(&filter, dxf));
     }
     let _ = write!(out, "<tableColumns count=\"{}\">", columns.len());
@@ -394,17 +437,28 @@ fn table_xml(
             i + 1,
             XmlSanitizer::escape(&escape_column_name(column))
         );
-        match totals.get(i).filter(|_| table.totals) {
-            Some(t) => {
-                write_attributes(&mut out, t);
-                match formula_child(t) {
-                    Some(child) => {
-                        let _ = write!(out, ">{child}</tableColumn>");
-                    }
-                    None => out.push_str("/>"),
-                }
+        let tot = totals.get(i).filter(|_| table.totals);
+        if let Some(t) = tot {
+            write_attributes(&mut out, t);
+        }
+        let calc_child = calc.get(i).and_then(Option::as_deref).map(|f| {
+            format!(
+                "<calculatedColumnFormula>{}</calculatedColumnFormula>",
+                XmlSanitizer::escape(f)
+            )
+        });
+        let tot_child = tot.and_then(formula_child);
+        if calc_child.is_some() || tot_child.is_some() {
+            out.push('>');
+            if let Some(c) = calc_child {
+                out.push_str(&c);
             }
-            None => out.push_str("/>"),
+            if let Some(t) = tot_child {
+                out.push_str(&t);
+            }
+            out.push_str("</tableColumn>");
+        } else {
+            out.push_str("/>");
         }
     }
     out.push_str("</tableColumns><tableStyleInfo");
@@ -462,12 +516,28 @@ impl TableWriter {
         for (i, t) in tables.iter().enumerate().filter(|(_, t)| t.totals) {
             totals_by_row.entry(t.range.row1).or_default().push(i);
         }
-        // The totals-row cells, to write the column attributes of the list's functions from them (PD-232).
+        // Single pass over `cells` for header text, totals cells, and per-column data formulas (PD-232, PD-237).
         let mut totals_cells: HashMap<(usize, u32), &str> = HashMap::new();
+        let mut data_formulas: HashMap<(usize, u32), (usize, Option<&str>, bool)> = HashMap::new();
         for (row, col, raw) in cells {
             for &i in totals_by_row.get(row).into_iter().flatten() {
                 if (tables[i].range.col0..=tables[i].range.col1).contains(col) {
                     totals_cells.insert((i, *col), raw.as_str());
+                }
+            }
+            for (i, t) in tables.iter().enumerate() {
+                let d0 = t.range.row0 + u32::from(t.header);
+                let d1 = t.range.row1.saturating_sub(u32::from(t.totals));
+                if (*row >= d0 && *row <= d1) && (t.range.col0..=t.range.col1).contains(col) {
+                    let entry = data_formulas.entry((i, *col)).or_insert((0, None, true));
+                    entry.0 += 1;
+                    if !raw.starts_with('=') || raw[1..].trim().is_empty() {
+                        entry.2 = false;
+                    } else if entry.1.is_none() {
+                        entry.1 = Some(raw.as_str());
+                    } else if entry.1 != Some(raw.as_str()) {
+                        entry.2 = false;
+                    }
                 }
             }
         }
@@ -512,6 +582,30 @@ impl TableWriter {
                 let name = &names[(col - table.range.col0) as usize];
                 fixes.insert((table.range.row0, col), name.clone());
             }
+            let data_rows = (table.range.row1
+                - u32::from(table.totals)
+                - (table.range.row0 + u32::from(table.header))
+                + 1) as usize;
+            let calc: Vec<Option<String>> = (0..names.len())
+                .map(|k| {
+                    let col = table.range.col0 + k as u32;
+                    let model = table
+                        .calculated_columns
+                        .get(k)
+                        .and_then(Option::as_deref)
+                        .and_then(|s| s.strip_prefix('='))
+                        .map(str::trim)
+                        .filter(|b| !b.is_empty());
+                    let uniform = data_formulas
+                        .get(&(i, col))
+                        .filter(|(cnt, f, same)| *same && *cnt == data_rows && f.is_some())
+                        .and_then(|(_, f, _)| f.and_then(|s| s.strip_prefix('=')).map(str::trim));
+                    let body = uniform.or(model)?;
+                    let canonical = crate::structured_ref::to_file_refs(body, Some(&table.name));
+                    let file_f = to_file_formula(canonical.as_deref().unwrap_or(body));
+                    (file_f.chars().count() <= MAX_TOTALS_FORMULA_CHARS).then_some(file_f)
+                })
+                .collect();
             let totals: Vec<ColumnTotals> = names
                 .iter()
                 .enumerate()
@@ -528,7 +622,7 @@ impl TableWriter {
             );
             self.parts.push((
                 format!("xl/tables/table{n}.xml"),
-                table_xml(n, table, &names, &totals, dxf).into_bytes(),
+                table_xml(n, table, &names, &calc, &totals, dxf).into_bytes(),
             ));
             let _ = write!(out.parts_xml, "<tablePart r:id=\"rIdT{n}\"/>");
             let _ = write!(
@@ -600,7 +694,7 @@ mod tests {
         t.first_column = true;
         t.column_stripes = true;
         t.filter = Some(Vec::new());
-        let xml = table_xml(7, &t, &t.columns, &[], &DxfTable::default());
+        let xml = table_xml(7, &t, &t.columns, &[], &[], &DxfTable::default());
         assert!(xml.contains("id=\"7\"") && xml.contains("totalsRowCount=\"1\""));
         assert!(xml.contains("<autoFilter ref=\"B2:D8\"/>"), "{xml}");
         assert!(xml.contains("name=\"a_x000a_b\""));
@@ -613,7 +707,7 @@ mod tests {
         let mut t = table("T", "A1:B3");
         t.header = false;
         t.row_stripes = false;
-        let xml = table_xml(1, &t, &t.columns, &[], &DxfTable::default());
+        let xml = table_xml(1, &t, &t.columns, &[], &[], &DxfTable::default());
         assert!(xml.contains("headerRowCount=\"0\"") && !xml.contains("<autoFilter"));
         assert_eq!(parse_table(&xml), Some(t));
     }
@@ -623,7 +717,7 @@ mod tests {
         let mut t = table("Tab1", "A1:B2");
         t.columns = vec!["\"<>&".into(), "x' y".into()];
         t.style = Some("\"<>&'".into());
-        let xml = table_xml(1, &t, &t.columns, &[], &DxfTable::default());
+        let xml = table_xml(1, &t, &t.columns, &[], &[], &DxfTable::default());
         XmlSanitizer::validate_safe_xml(&xml).unwrap();
         assert_eq!(parse_table(&xml), Some(t));
     }

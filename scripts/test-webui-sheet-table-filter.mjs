@@ -293,3 +293,23 @@ test("where a table with buttons and a sheet filter share the header cells the t
   assert.equal(layoutOf(h).filterOwnerAt("표", 2, 2), undefined, "a data cell has none");
   assert.equal(layoutOf(h).filterOwnerAt("표", 1, 9), undefined, "nor a cell outside both");
 });
+
+test("hiddenButtons hides the filter button on those columns only while keeping other columns interactive (PD-237)", async () => {
+  const h = await createHarness([table({ filter: [], hiddenButtons: [2] })]);
+  const d = h.document;
+  assert.equal(layoutOf(h).filterOwnerAt("표", 1, 1), "표1");
+  assert.equal(layoutOf(h).filterOwnerAt("표", 1, 2), undefined, "column B has hiddenButton=1");
+  assert.ok(cell(d, "A1").classList.contains("filter-head"));
+  assert.equal(cell(d, "B1").classList.contains("filter-head"), false);
+  await pressButton(h, "B1");
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, true, "pressing hidden-button header does not open the panel");
+  await pressButton(h, "A1");
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, false, "visible-button column opens normally");
+
+  // Sheet autoFilter hiddenButtons works the same way and round-trips through filterToJson.
+  const h2 = await createHarness([], { range: "A1:C6", columns: [], hidden: [], hiddenButtons: [1, 3] });
+  assert.equal(layoutOf(h2).filterOwnerAt("표", 1, 1), undefined);
+  assert.equal(layoutOf(h2).filterOwnerAt("표", 1, 2), null);
+  assert.equal(layoutOf(h2).filterOwnerAt("표", 1, 3), undefined);
+  assert.deepEqual(layoutOf(h2).toJson(layoutOf(h2).get("표")).filter.hiddenButtons, [1, 3]);
+});

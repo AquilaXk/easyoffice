@@ -22,7 +22,9 @@
 
 use std::collections::HashSet;
 
-use crate::sheet_filter::{columns_within_bounds, FilterColumn, MAX_FILTER_ROWS};
+use crate::sheet_filter::{
+    columns_within_bounds, hidden_buttons_within_bounds, FilterColumn, MAX_FILTER_ROWS,
+};
 use crate::sheet_names::{defined_name_problem, fold_name, NameProblem};
 use crate::sheet_styling::table_style::{is_builtin_table_style, TableStyleDef};
 use crate::{CellBox, EasyOfficeError};
@@ -67,6 +69,10 @@ pub struct SheetTable {
     /// The auto filter of the table: `None` when the table has no filter buttons, else the conditions of
     /// its columns (absolute columns, inside the range).
     pub filter: Option<Vec<FilterColumn>>,
+    /// Sorted zero-based columns of `range` whose filter drop-down button is hidden (`hiddenButton="1"`, PD-237).
+    pub hidden_buttons: Vec<u32>,
+    /// Per-column calculated-column formulas (`Some("=[@Q1]*2")`), empty when no column has one (PD-237).
+    pub calculated_columns: Vec<Option<String>>,
     /// The rows the conditions of `filter` hide, as sorted, disjoint zero-based inclusive runs, apart
     /// from the rows a user hid (PD-226). Empty for a table whose filter has no conditions, or whose
     /// range is too tall for the filter to be applied.
@@ -90,6 +96,8 @@ impl SheetTable {
             row_stripes: true,
             column_stripes: false,
             filter: None,
+            hidden_buttons: Vec::new(),
+            calculated_columns: Vec::new(),
             filter_hidden: Vec::new(),
         }
     }
@@ -133,6 +141,21 @@ impl SheetTable {
                 .filter
                 .as_ref()
                 .is_none_or(|f| self.header && columns_within_bounds(f, &r))
+            && (self.hidden_buttons.is_empty()
+                || (self.header
+                    && self.filter.is_some()
+                    && hidden_buttons_within_bounds(&self.hidden_buttons, &r)))
+            && (self.calculated_columns.is_empty()
+                || (self.calculated_columns.len() == self.columns.len()
+                    && self.calculated_columns.iter().all(|f| {
+                        f.as_deref().is_none_or(|s| {
+                            s.strip_prefix('=').is_some_and(|b| {
+                                !b.trim().is_empty()
+                                    && s.chars().count()
+                                        <= xlsx_table_totals::MAX_TOTALS_FORMULA_CHARS
+                            })
+                        })
+                    })))
             && self.filter_hidden_within_bounds()
     }
 

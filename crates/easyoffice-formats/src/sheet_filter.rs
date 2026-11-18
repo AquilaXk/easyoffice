@@ -205,6 +205,8 @@ pub struct SheetFilter {
     pub range: CellBox,
     /// Sorted by column, one entry per column.
     pub columns: Vec<FilterColumn>,
+    /// Sorted zero-based columns inside `range` whose drop-down button is hidden (`hiddenButton="1"`, PD-237).
+    pub hidden_buttons: Vec<u32>,
     /// Rows the filter hides, as sorted, disjoint, non-adjacent zero-based inclusive runs.
     pub hidden: Vec<(u32, u32)>,
 }
@@ -214,6 +216,7 @@ impl SheetFilter {
         Self {
             range,
             columns: Vec::new(),
+            hidden_buttons: Vec::new(),
             hidden: Vec::new(),
         }
     }
@@ -229,6 +232,7 @@ impl SheetFilter {
                 .iter()
                 .all(|&(first, last)| first > r.row0 && last <= r.row1)
             && columns_within_bounds(&self.columns, &r)
+            && hidden_buttons_within_bounds(&self.hidden_buttons, &r)
     }
 
     pub fn column(&self, col: u32) -> Option<&FilterColumn> {
@@ -258,6 +262,15 @@ pub(crate) fn columns_within_bounds(columns: &[FilterColumn], range: &CellBox) -
             (range.col0..=range.col1).contains(&c.col)
                 && criteria_within_bounds(&c.criteria, text_ok)
         })
+}
+
+/// Whether `hidden_buttons` are strictly ascending zero-based columns inside `range`.
+pub(crate) fn hidden_buttons_within_bounds(buttons: &[u32], range: &CellBox) -> bool {
+    buttons.len() <= (range.col1 - range.col0 + 1) as usize
+        && buttons.windows(2).all(|pair| pair[0] < pair[1])
+        && buttons
+            .iter()
+            .all(|c| (range.col0..=range.col1).contains(c))
 }
 
 fn criteria_within_bounds(c: &FilterCriteria, text_ok: impl Fn(&CustomCondition) -> bool) -> bool {

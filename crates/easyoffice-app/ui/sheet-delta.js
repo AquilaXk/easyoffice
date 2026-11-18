@@ -241,6 +241,7 @@
     const col = packed % PACK_STRIDE;
     const row = (packed - col) / PACK_STRIDE;
     const rowAxis = edit.axis === "row";
+    if (rowAxis && edit.cols && (col < edit.cols[0] || col > edit.cols[1])) return packed;
     const index = rowAxis ? row : col;
     let moved = index;
     if (edit.op === "insert") {

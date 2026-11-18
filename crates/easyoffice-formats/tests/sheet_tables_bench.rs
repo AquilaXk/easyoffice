@@ -164,3 +164,89 @@ fn sixteen_thousand_identical_headers_are_named_in_linear_time() {
     let save = best(|| OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &styled).unwrap());
     println!("save ms: 16,384 identical headers {save:.1}");
 }
+
+#[test]
+#[ignore = "benchmark: run in release"]
+fn pd237_batch_rename_vs_sequential_and_calculated_column_pack() {
+    use easyoffice_formats::{rename_table_refs, rename_tables_refs};
+
+    let pairs_owned: Vec<(String, String)> = (1..=16)
+        .map(|i| (format!("Table{i}"), format!("Table{i}_2")))
+        .collect();
+    let pairs: Vec<(&str, &str)> = pairs_owned
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let formulas: Vec<String> = (0..10_000)
+        .map(|i| {
+            let t = (i % 16) + 1;
+            format!("SUM(Table{t}[Q1])+COUNTA(Table{t})+[@Local]*2")
+        })
+        .collect();
+
+    let seq_ms = best(|| {
+        let mut count = 0usize;
+        for f in &formulas {
+            let mut cur: Option<String> = None;
+            for &(from, to) in &pairs {
+                let src = cur.as_deref().unwrap_or(f.as_str());
+                if let Some(next) = rename_table_refs(src, from, to) {
+                    cur = Some(next);
+                }
+            }
+            if cur.is_some() {
+                count += 1;
+            }
+        }
+        assert_eq!(count, formulas.len());
+        count
+    });
+    let batch_ms = best(|| {
+        let mut count = 0usize;
+        for f in &formulas {
+            if rename_tables_refs(f, &pairs).is_some() {
+                count += 1;
+            }
+        }
+        assert_eq!(count, formulas.len());
+        count
+    });
+    println!(
+        "10,000 formulas x 16 tables rename ms: sequential {seq_ms:.2} -> single-pass batch {batch_ms:.2}"
+    );
+
+    // 10,000-row x 4-col table with a calculated column and hiddenButton: single-pass XLSX pack & unpack.
+    let mut cells = vec![
+        (0, 0, "Item".to_string()),
+        (0, 1, "Price".to_string()),
+        (0, 2, "Qty".to_string()),
+        (0, 3, "Total".to_string()),
+    ];
+    for r in 1..=10_000u32 {
+        cells.push((r, 0, format!("P{r}")));
+        cells.push((r, 1, "10".to_string()));
+        cells.push((r, 2, "3".to_string()));
+        cells.push((r, 3, "=[@Price]*[@Qty]".to_string()));
+    }
+    let mut t = SheetTable::new("Sales", CellBox::parse("A1:D10001").unwrap());
+    t.columns = vec!["Item".into(), "Price".into(), "Qty".into(), "Total".into()];
+    t.filter = Some(Vec::new());
+    t.hidden_buttons = vec![1, 3];
+    let sheets = vec![("S".to_string(), cells)];
+    let styled = [SheetStyling {
+        tables: vec![t],
+        ..SheetStyling::default()
+    }];
+    let pack_ms = best(|| OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &styled).unwrap());
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &styled).unwrap();
+    let unpack_ms = best(|| OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap());
+    let back = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap().1;
+    assert_eq!(
+        back[0].1.tables[0].calculated_columns[3].as_deref(),
+        Some("=Sales[[#This Row],[Price]]*Sales[[#This Row],[Qty]]")
+    );
+    assert_eq!(back[0].1.tables[0].hidden_buttons, vec![1, 3]);
+    println!(
+        "10,000-row calculated-column table XLSX ms: pack {pack_ms:.2}  unpack {unpack_ms:.2}"
+    );
+}

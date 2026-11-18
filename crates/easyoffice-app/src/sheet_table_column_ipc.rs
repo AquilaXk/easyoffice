@@ -14,7 +14,8 @@ use crate::sheet_table_json::tables_by_sheet;
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     convert_table_refs, may_hold_structured_ref, rename_column_refs, rename_table_refs,
-    DefinedName, EasyOfficeError, SheetTable, StrictJsonValue, TableLookup, MAX_TABLE_TEXT_CHARS,
+    rename_tables_refs, DefinedName, EasyOfficeError, SheetTable, StrictJsonValue, TableLookup,
+    MAX_TABLES, MAX_TABLE_TEXT_CHARS,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashMap;
@@ -54,6 +55,10 @@ enum Edit<'a> {
         from: &'a str,
         to: &'a str,
     },
+    RenameBatch {
+        pairs: Vec<(&'a str, &'a str)>,
+        needles: Vec<String>,
+    },
     Range {
         table: &'a SheetTable,
         sheet: &'a str,
@@ -67,6 +72,13 @@ impl Edit<'_> {
             Self::Column { .. } => may_hold_structured_ref(body),
             Self::Rename { from, .. } => {
                 may_hold_structured_ref(body) || body.to_lowercase().contains(&from.to_lowercase())
+            }
+            Self::RenameBatch { needles, .. } => {
+                if may_hold_structured_ref(body) {
+                    return true;
+                }
+                let lower = body.to_lowercase();
+                needles.iter().any(|n| lower.contains(n))
             }
             Self::Range { table, .. } => {
                 may_hold_structured_ref(body)
@@ -90,6 +102,7 @@ impl Edit<'_> {
                 rename_column_refs(body, own.map(|t| t.name.as_str()), table, from, to)
             }
             Self::Rename { from, to } => rename_table_refs(body, from, to),
+            Self::RenameBatch { pairs, .. } => rename_tables_refs(body, pairs),
             Self::Range {
                 table,
                 sheet: table_sheet,
@@ -125,19 +138,43 @@ impl EasyOfficeIpcRouter {
                 .get(&sheet.to_lowercase())
                 .map_or(&[][..], |tables| &tables[..])
         };
-        let table = text_field(entries, "table")?;
         let op = StrictJsonValue::get_str(entries, "op").unwrap_or("column");
         let edit = match op {
             "column" => Edit::Column {
-                table,
+                table: text_field(entries, "table")?,
                 from: text_field(entries, "from")?,
                 to: text_field(entries, "to")?,
             },
             "rename" => Edit::Rename {
-                from: table,
+                from: text_field(entries, "table")?,
                 to: text_field(entries, "to")?,
             },
+            "renameBatch" => {
+                let items = StrictJsonValue::get_field(entries, "renames")
+                    .and_then(StrictJsonValue::as_array)
+                    .filter(|a| !a.is_empty() && a.len() <= MAX_TABLES)
+                    .ok_or_else(|| bad("renames"))?;
+                let mut pairs = Vec::with_capacity(items.len());
+                let mut needles = Vec::with_capacity(items.len());
+                for item in items {
+                    let pair = item
+                        .as_array()
+                        .filter(|p| p.len() == 2)
+                        .ok_or_else(|| bad("renames"))?;
+                    fn valid(v: &StrictJsonValue) -> Option<&str> {
+                        v.as_str()
+                            .filter(|s| !s.is_empty() && s.chars().count() <= MAX_TABLE_TEXT_CHARS)
+                    }
+                    let (Some(from), Some(to)) = (valid(&pair[0]), valid(&pair[1])) else {
+                        return Err(bad("renames"));
+                    };
+                    needles.push(from.to_lowercase());
+                    pairs.push((from, to));
+                }
+                Edit::RenameBatch { pairs, needles }
+            }
             "range" => {
+                let table = text_field(entries, "table")?;
                 let (sheet, found) = by_sheet
                     .iter()
                     .find_map(|(sheet, tables)| {
@@ -198,6 +235,35 @@ impl EasyOfficeIpcRouter {
         } else {
             "null".to_string()
         });
+        if let Some(texts) = StrictJsonValue::get_field(entries, "texts")
+            .filter(|v| !matches!(v, StrictJsonValue::Null))
+        {
+            let items = texts.as_array().ok_or_else(|| bad("texts"))?;
+            if items.len() > MAX_FORMULAS {
+                return Err(bad("texts"));
+            }
+            out.push_str(",\"textRewrites\":[");
+            let mut first_t = true;
+            for (idx, item) in items.iter().enumerate() {
+                let text = item.as_str().ok_or_else(|| bad("texts"))?;
+                let body = text.strip_prefix('=').unwrap_or(text);
+                if !edit.may_apply(body) {
+                    continue;
+                }
+                let Some(new) = edit.rewrite(body, "", u32::MAX, None, "") else {
+                    continue;
+                };
+                if !first_t {
+                    out.push(',');
+                }
+                first_t = false;
+                let prefix = if text.starts_with('=') { "=" } else { "" };
+                out.push_str(&format!("[{idx},\"{prefix}"));
+                EasyOfficeIpcRouter::escape_json_into(&mut out, &new);
+                out.push_str("\"]");
+            }
+            out.push(']');
+        }
         out.push('}');
         Ok(out)
     }

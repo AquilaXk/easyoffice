@@ -11,7 +11,7 @@
 //! `AxisEdit::shift_span` (see the header of `axis/mod.rs`). The spreadsheet program keeps a table whose
 //! totals row is deleted as a table without one; this port does the same.
 
-use super::{shift_runs, Axis, AxisEdit, EditKind};
+use super::{layout::shift_runs_on_axis, Axis, AxisEdit, EditKind};
 use easyoffice_formats::{fold_name, FilterColumn, SheetTable};
 use std::collections::HashSet;
 
@@ -21,6 +21,9 @@ pub fn shift_table(table: &SheetTable, edit: &AxisEdit) -> Option<SheetTable> {
     match edit.axis {
         Axis::Row => {
             let range = table.range;
+            if !edit.covers_cols(range.col0, range.col1) {
+                return Some(out);
+            }
             let deleted = |row: u32| {
                 edit.kind == EditKind::Delete && (edit.at..edit.at + edit.count).contains(&row)
             };
@@ -29,7 +32,7 @@ pub fn shift_table(table: &SheetTable, edit: &AxisEdit) -> Option<SheetTable> {
             }
             (out.range.row0, out.range.row1) = edit.shift_span(range.row0, range.row1)?;
             out.totals = table.totals && !deleted(range.row1);
-            out.filter_hidden = shift_runs(&table.filter_hidden, edit);
+            out.filter_hidden = shift_runs_on_axis(&table.filter_hidden, edit);
         }
         Axis::Col => {
             let range = table.range;
@@ -80,6 +83,28 @@ pub fn shift_table(table: &SheetTable, edit: &AxisEdit) -> Option<SheetTable> {
                     })
                     .collect()
             });
+            out.hidden_buttons = table
+                .hidden_buttons
+                .iter()
+                .filter_map(|&c| edit.map_index(c).filter(|c| (start..=end).contains(c)))
+                .collect();
+            if !table.calculated_columns.is_empty() {
+                let mut calc = Vec::with_capacity((end - start + 1) as usize);
+                for col in start..=end {
+                    let entry = edit
+                        .unmap_index(col)
+                        .filter(|c| (range.col0..=range.col1).contains(c))
+                        .and_then(|c| table.calculated_columns.get((c - range.col0) as usize))
+                        .cloned()
+                        .flatten();
+                    calc.push(entry);
+                }
+                if calc.iter().any(Option::is_some) {
+                    out.calculated_columns = calc;
+                } else {
+                    out.calculated_columns.clear();
+                }
+            }
         }
     }
     (out.range.row1 - out.range.row0 + 1 >= out.min_rows()).then_some(out)

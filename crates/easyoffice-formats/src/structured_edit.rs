@@ -76,15 +76,68 @@ fn replace_bare(text: &str, name: &str, mut replace: impl FnMut() -> String) -> 
 
 /// `formula` (text without `=`) with the table `from` named `to`: `Sales[Q1]` and the bare `Sales`.
 pub fn rename_table_refs(formula: &str, from: &str, to: &str) -> Option<String> {
+    rename_tables_refs(formula, &[(from, to)])
+}
+
+/// `formula` (text without `=`) with every table `(from, to)` in `renames` replaced in one pass per stage:
+/// both `Sales[Q1]` structured references and bare `Sales` table names (PD-237).
+pub fn rename_tables_refs(formula: &str, renames: &[(&str, &str)]) -> Option<String> {
+    if renames.is_empty() {
+        return None;
+    }
+    let find_to = |candidate: &str| -> Option<&str> {
+        renames
+            .iter()
+            .find(|(from, _)| same_name(candidate, from))
+            .map(|(_, to)| *to)
+    };
     let qualified = rewrite_refs(formula, |found| {
-        let table = found.table.filter(|t| same_name(t, from))?;
+        let table = found.table?;
+        let to = find_to(table)?;
         Some(format!(
             "{to}{}",
             &formula[found.start + table.len()..found.end]
         ))
     });
     let current = qualified.as_deref().unwrap_or(formula);
-    replace_bare(current, from, || to.to_string()).or(qualified)
+    let bytes = current.as_bytes();
+    let mut out: Option<String> = None;
+    let mut copied = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            i = quoted_end(bytes, i);
+        } else if b == b'[' {
+            i = group_end(current, i).unwrap_or(i + 1);
+        } else if is_name_byte(b) {
+            let start = i;
+            while i < bytes.len() && is_name_byte(bytes[i]) {
+                i += 1;
+            }
+            let after = current[i..]
+                .trim_start_matches(' ')
+                .as_bytes()
+                .first()
+                .copied();
+            let before = start.checked_sub(1).map(|p| bytes[p]);
+            if !matches!(after, Some(b'(' | b'!' | b'[')) && before != Some(b'!') {
+                if let Some(to) = find_to(&current[start..i]) {
+                    let buf = out.get_or_insert_with(|| String::with_capacity(current.len() + 16));
+                    buf.push_str(&current[copied..start]);
+                    buf.push_str(to);
+                    copied = i;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out.map(|mut buf| {
+        buf.push_str(&current[copied..]);
+        buf
+    })
+    .or(qualified)
 }
 
 /// `formula` (text without `=`) with every reference to `table` written as the cells it stands for, as
@@ -175,6 +228,20 @@ mod tests {
             "a column of that name is not the table"
         );
         assert_eq!(r("Sales(1)"), None, "a call is not a table");
+    }
+
+    #[test]
+    fn rename_tables_refs_rewrites_multiple_tables_in_one_pass_without_chaining() {
+        let pairs = [("표1", "표1_2"), ("표1_2", "표1_3"), ("Sales", "Sales_2")];
+        assert_eq!(
+            rename_tables_refs("SUM(표1[단가])+COUNTA(표1_2)+AVERAGE(sales[Q1])", &pairs)
+                .as_deref(),
+            Some("SUM(표1_2[단가])+COUNTA(표1_3)+AVERAGE(Sales_2[Q1])"),
+            "표1 -> 표1_2 must not chain into 표1_2 -> 표1_3"
+        );
+        assert_eq!(rename_tables_refs("[@단가]*[@수량]", &pairs), None);
+        assert_eq!(rename_tables_refs("표1!A1+\"표1\"", &pairs), None);
+        assert_eq!(rename_tables_refs("SUM(표1[단가])", &[]), None);
     }
 
     #[test]

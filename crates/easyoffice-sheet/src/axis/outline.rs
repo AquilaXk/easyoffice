@@ -15,6 +15,9 @@ use easyoffice_formats::{intersect_runs, level_at, normalize_runs, LevelRun, Out
 /// Level runs after `edit`: deleted rows leave their group, surviving runs shift, and inserted rows
 /// take the smaller level of their neighbours.
 pub fn shift_levels(runs: &[LevelRun], edit: &AxisEdit) -> Vec<LevelRun> {
+    if edit.cols.is_some() {
+        return runs.to_vec();
+    }
     let mut moved: Vec<LevelRun> = runs
         .iter()
         .filter_map(|&(s, e, level)| {
@@ -44,6 +47,9 @@ pub fn shift_levels(runs: &[LevelRun], edit: &AxisEdit) -> Vec<LevelRun> {
 
 /// The groups of `outline` after `edit`.
 pub fn shift_outline(outline: &Outline, edit: &AxisEdit) -> Outline {
+    if edit.cols.is_some() {
+        return outline.clone();
+    }
     let mut moved = outline.clone();
     let (levels, folded, open) = match edit.axis {
         Axis::Row => (

@@ -409,16 +409,23 @@
       for (const r of renames) {
         const tables = {};
         const formulas = [];
+        const texts = [];
+        const calcSites = [];
         for (const [sheet, map] of Object.entries(sheetsMap)) {
           const list = spillApi.blockerPayload("tables", sheet, layoutApi);
           if (list.length) tables[sheet] = list;
+          for (const t of layoutApi.tablesOf(sheet)) {
+            (t.calculatedColumns || []).forEach((f, j) => {
+              if (f?.includes("[")) { texts.push(f); calcSites.push([t, j]); }
+            });
+          }
           for (const [cell, held] of Object.entries(map || {})) {
             if (held?.formula && held.formula.includes("[")) formulas.push({ sheet, cell, text: held.formula });
           }
         }
         let answer = null;
         try {
-          answer = await sessionCall({ sessionAction: "tableColumn", table: r.table, from: r.from, to: r.to, tables, formulas, names: namesApi?.getAll() || [] });
+          answer = await sessionCall({ sessionAction: "tableColumn", table: r.table, from: r.from, to: r.to, tables, formulas, names: namesApi?.getAll() || [], ...(texts.length ? { texts } : {}) });
         } catch {
           answer = null;
         }
@@ -427,6 +434,7 @@
           const held = sheetsMap[w.sheet]?.[w.cell];
           if (held) held.formula = w.text;
         }
+        for (const [idx, val] of answer.textRewrites || []) calcSites[idx][0].calculatedColumns[calcSites[idx][1]] = val;
         if (answer.names && namesApi) namesApi.replaceAll(answer.names);
         layoutApi.setTableColumn(r.sheet, r.table, r.index, r.to);
         changed = true;
@@ -501,7 +509,7 @@
     // Moves the mirror of the session after an `structure` answer: the cells and values of the
     // edited sheet change position and the rewritten formulas replace their text.
     function moveMirror(request, answer, sheetsMap) {
-      const edit = { axis: request.axis, op: request.op, at: request.at, count: request.count };
+      const edit = { axis: request.axis, op: request.op, at: request.at, count: request.count, ...(request.cols ? { cols: request.cols } : {}) };
       const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
       const mirror = session.raw.get(request.sheet);
       if (mirror) {

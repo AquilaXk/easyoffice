@@ -456,3 +456,81 @@ fn merged_ranges_over_a_table_are_left_out_of_a_file_and_of_a_save() {
         "{sheet}"
     );
 }
+
+#[test]
+fn calculated_columns_and_hidden_buttons_round_trip_through_xlsx_and_refuse_overlong_formulas() {
+    let mut t = table("Sales", "B2:E5");
+    t.totals = true;
+    t.columns = vec!["Item".into(), "Price".into(), "Qty".into(), "Total".into()];
+    t.filter = Some(Vec::new());
+    t.hidden_buttons = vec![2, 4]; // C and E (0-based 2 and 4)
+    t.calculated_columns = vec![
+        None,
+        None,
+        None,
+        Some("=IFS([@Qty]>0,[@Price]*[@Qty])".into()),
+    ];
+    let cells = vec![
+        (1, 1, "Item".to_string()),
+        (1, 2, "Price".to_string()),
+        (1, 3, "Qty".to_string()),
+        (1, 4, "Total".to_string()),
+        (2, 1, "Pen".to_string()),
+        (2, 2, "100".to_string()),
+        (2, 3, "3".to_string()),
+        (2, 4, "=IFS([@Qty]>0,[@Price]*[@Qty])".to_string()),
+        (3, 1, "Book".to_string()),
+        (3, 2, "250".to_string()),
+        (3, 3, "2".to_string()),
+        (3, 4, "=IFS([@Qty]>0,[@Price]*[@Qty])".to_string()),
+        (4, 1, "합계".to_string()),
+        (4, 4, "=SUBTOTAL(109,Sales[Total])".to_string()),
+    ];
+    let bytes = xlsx(&[("S", cells, vec![t])]);
+    let part = entry(&bytes, "xl/tables/table1.xml");
+    assert!(
+        part.contains(r#"<filterColumn colId="1" hiddenButton="1"/>"#)
+            && part.contains(r#"<filterColumn colId="3" hiddenButton="1"/>"#),
+        "{part}"
+    );
+    // ECMA-376 CT_TableColumn: calculatedColumnFormula precedes totalsRowFunction/totalsRowFormula, with _xlfn. prefix.
+    assert!(
+        part.contains("<calculatedColumnFormula>_xlfn.IFS(Sales[[#This Row],[Qty]]&gt;0,Sales[[#This Row],[Price]]*Sales[[#This Row],[Qty]])</calculatedColumnFormula>")
+            || part.contains("<calculatedColumnFormula>_xlfn.IFS([@Qty]&gt;0,[@Price]*[@Qty])</calculatedColumnFormula>"),
+        "{part}"
+    );
+    let back = read_xlsx(&bytes);
+    assert_eq!(back[0].tables[0].hidden_buttons, vec![2, 4]);
+    assert_eq!(
+        back[0].tables[0].calculated_columns,
+        vec![
+            None,
+            None,
+            None,
+            Some(
+                "=IFS(Sales[[#This Row],[Qty]]>0,Sales[[#This Row],[Price]]*Sales[[#This Row],[Qty]])"
+                    .into()
+            )
+        ]
+    );
+
+    // Fail-Closed: calculatedColumnFormula over 8,192 characters rejects the hostile table part.
+    let huge = "1+".repeat(4_100) + "1";
+    let hostile = rebuild(&bytes, |path, xml| {
+        if path == "xl/tables/table1.xml" {
+            let start = xml.find("<calculatedColumnFormula>").unwrap();
+            let end = xml.find("</calculatedColumnFormula>").unwrap()
+                + "</calculatedColumnFormula>".len();
+            format!(
+                "{}<calculatedColumnFormula>{huge}</calculatedColumnFormula>{}",
+                &xml[..start],
+                &xml[end..]
+            )
+        } else {
+            xml
+        }
+    });
+    let checked = read_xlsx(&hostile);
+    assert!(checked[0].tables.is_empty());
+    assert_eq!(checked[0].tables_rejected, 1);
+}

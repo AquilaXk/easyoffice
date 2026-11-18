@@ -57,6 +57,32 @@ function fakeEngine() {
         }
         return { session: body.session, formulas, rules };
       }
+      case "tableColumn": {
+        if (body.op !== "renameBatch") return { rewrites: [], names: null };
+        const applyPairs = (text) => {
+          let cur = text;
+          for (const [from, to] of body.renames || []) {
+            cur = cur.replace(new RegExp(`(?<![A-Za-z0-9_가-힣])${from}(?![A-Za-z0-9_가-힣!])`, "gi"), to);
+          }
+          return cur;
+        };
+        const rewrites = (body.formulas || [])
+          .map((f) => ({ ...f, next: applyPairs(f.text) }))
+          .filter((f) => f.next !== f.text)
+          .map((f) => ({ sheet: f.sheet, cell: f.cell, text: f.next }));
+        let namesChanged = false;
+        const namesOut = (body.names || []).map((d) => {
+          const next = applyPairs(d.refersTo);
+          if (next !== d.refersTo) namesChanged = true;
+          return { ...d, refersTo: next };
+        });
+        const textRewrites = [];
+        (body.texts || []).forEach((t, idx) => {
+          const next = applyPairs(t);
+          if (next !== t) textRewrites.push([idx, next]);
+        });
+        return { rewrites, names: namesChanged ? namesOut : null, ...(textRewrites.length ? { textRewrites } : {}) };
+      }
       default:
         return {};
     }
@@ -1046,4 +1072,46 @@ test("the text on a tab colour is white on a dark colour and black on a light on
   const want = { "3366cc": "#ffffff", "1f3864": "#ffffff", c00000: "#ffffff", "00b050": "#ffffff", ffc000: "#000000", e2e2f8: "#000000", "808080": "#000000", "7f7f7f": "#ffffff" };
   await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, ...Object.keys(want).map((rgb, i) => ({ name: "S" + (i + 2), cells: { A1: "x" }, tabColor: rgb }))]);
   for (const [i, [rgb, text]] of Object.entries(want).entries()) assert.equal(h.tab("S" + (i + 2)).style.getPropertyValue("--tab-text"), text, rgb);
+});
+
+test("copying a sheet rewrites structured references on the copy to the copied table while leaving the source intact (PD-237)", async () => {
+  const h = await open();
+  const table = {
+    name: "표1",
+    range: "A1:B3",
+    header: true,
+    totals: false,
+    columns: ["단가", "합계"],
+    calculatedColumns: [null, "=표1[@단가]*2"],
+    rowStripes: true,
+    columnStripes: false,
+    firstColumn: false,
+    lastColumn: false,
+  };
+  await h.openBook([
+    {
+      name: "Sheet1",
+      cells: { A1: "단가", B1: "합계", A2: "10", B2: "=표1[@단가]*2", A3: "20", B3: "=표1[@단가]*2", D1: "=SUM(표1[단가])+COUNTA(표1)" },
+      tables: [table],
+    },
+    { name: "Sheet2", cells: { A1: "=SUM(Sheet1!A2:A3)+SUM(표1[단가])" } },
+  ]);
+  h.host.__EASYOFFICE_SHEET_NAMES__.replaceAll([
+    { name: "LocalTotal", scope: "Sheet1", refersTo: "=SUM(표1[단가])" },
+    { name: "GlobalTotal", refersTo: "=SUM(표1[단가])" },
+  ]);
+  await h.tabMenu("Sheet1", "copy");
+  const book = await h.book();
+  assert.equal(book["시트 1 (2)"].tables[0].name, "표1_2");
+  assert.equal(book["시트 1 (2)"].cells.D1, "=SUM(표1_2[단가])+COUNTA(표1_2)");
+  assert.equal(book["시트 1 (2)"].cells.B2, "=표1_2[@단가]*2");
+  assert.deepEqual(book["시트 1 (2)"].tables[0].calculatedColumns, [null, "=표1_2[@단가]*2"]);
+  // Source sheet, other sheet, and workbook-scoped name still point at 표1.
+  assert.equal(book.Sheet1.cells.D1, "=SUM(표1[단가])+COUNTA(표1)");
+  assert.equal(book.Sheet2.cells.A1, "=SUM(Sheet1!A2:A3)+SUM(표1[단가])");
+  const defs = h.host.__EASYOFFICE_SHEET_NAMES__.getAll();
+  assert.equal(defs.find((d) => d.scope === "시트 1 (2)")?.refersTo, "=SUM(표1_2[단가])");
+  assert.equal(defs.find((d) => !d.scope && d.name === "GlobalTotal")?.refersTo, "=SUM(표1[단가])");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2"]);
 });

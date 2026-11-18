@@ -13,6 +13,7 @@
     toRange: "범위로 변환",
     toRangeBare: "범위로 변환: 서식 제외",
     expanded: "표 자동 확장",
+    calculated: "계산 열 채우기",
     style: "표 스타일",
     option: "표 스타일 옵션",
     header: "머리글 행",
@@ -199,8 +200,8 @@
     function runCreate(plan) {
       const name = getActiveSheetName();
       if (plan.insertRow) {
-        // The row for the header opens above the range (the rows below move down) in the same step.
-        return editAxis("row", "insert", plan.box.r1, 1, (sheet) => addTable(sheet, plan)).then((done) => {
+        // The row for the header opens above the range (only the table's columns move down, PD-237) in the same step.
+        return editAxis("row", "insert", plan.box.r1, 1, (sheet) => addTable(sheet, plan), [plan.box.c1, plan.box.c2]).then((done) => {
           if (done) afterCreate(name, plan.table);
           return done;
         });
@@ -371,14 +372,30 @@
         sheetDataStore[name] = snapshotDomSheetCells();
         const held = layoutApi.tablesOf(name).find((t) => t.name === table.name);
         if (!held) return false;
-        const answer = await rewritesFor({ op: "rename", table: held.name, to, formulas: formulasNaming(held.name) });
+        const calcTexts = [];
+        const calcIdx = [];
+        (held.calculatedColumns || []).forEach((f, j) => {
+          if (f && (f.includes("[") || f.toLowerCase().includes(held.name.toLowerCase()))) {
+            calcTexts.push(f);
+            calcIdx.push(j);
+          }
+        });
+        const answer = await rewritesFor({
+          op: "rename",
+          table: held.name,
+          to,
+          formulas: formulasNaming(held.name),
+          ...(calcTexts.length ? { texts: calcTexts } : {}),
+        });
         if (!answer) {
           say(STATUS.tableName.unchecked);
           return false;
         }
         const record = sheetHistory.begin({ bySheet: refsOf(answer.rewrites), parts: ["sheetLayout", "definedNames"] });
         applyRewrites(answer);
-        layoutApi.setTables(name, withTable(name, held, { ...held, name: to }));
+        const nextCalc = held.calculatedColumns ? [...held.calculatedColumns] : null;
+        for (const [idx, val] of answer.textRewrites || []) if (nextCalc) nextCalc[calcIdx[idx]] = val;
+        layoutApi.setTables(name, withTable(name, held, { ...held, name: to, ...(nextCalc ? { calculatedColumns: nextCalc } : {}) }));
         sheetHistory.commit(record);
         await settle(name, STATUS.renamed(to));
         return true;
@@ -444,6 +461,7 @@
           const next = { ...held, header: false, range: ops.rangeText(b.r1 + 1, b.c1, b.r2, b.c2) };
           delete next.filter;
           delete next.filterHidden;
+          delete next.hiddenButtons;
           return { table: next, text: STATUS.header };
         });
       }
@@ -469,15 +487,19 @@
         };
       };
       if (room) return changeTable(table, (held) => headerOf(held, above.r1));
-      // No room above: a row opens at the table's first row (the table moves down) and the header goes into it.
+      // No room above: a row opens at the table's first row (only the table's columns move down, PD-237) and the header goes into it.
       if (!allowed(name)) return Promise.resolve(false);
+      if (ops.straddleConflict(ctx, b.r1, b.c1, b.c2, table)) {
+        say(STATUS.noHeaderRoom);
+        return Promise.resolve(false);
+      }
       return editAxis("row", "insert", b.r1, 1, (sheet) => {
         const held = layoutApi.tablesOf(sheet).find((t) => t.name === table.name);
         if (!held) return;
         const made = headerOf(held, layoutApi.tableBox(held).r1 - 1);
         writeCells(sheet, made.writes);
         layoutApi.setTables(sheet, withTable(sheet, held, made.table));
-      }).then((done) => {
+      }, [b.c1, b.c2]).then((done) => {
         if (done) {
           sync();
           say(STATUS.header);
@@ -665,6 +687,74 @@
       return { tables, writes, reapply: tables.some((t) => Array.isArray(t.filter) && t.filter.length > 0) };
     }
 
+    // ---- calculated columns (PD-237) ---------------------------------------------------------------------------------------
+    // Typing a formula into one cell of an empty (or previously calculated) table column fills the rest of the column's data
+    // rows as a step of its own, so one undo removes the column fill while keeping the typed formula.
+    function fillCalculated(sheet, ref) {
+      if (sheet !== getActiveSheetName() || layoutApi.tablesOf(sheet).length === 0 || (protectApi && protectApi.isOn(sheet))) return Promise.resolve(false);
+      const p = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef(ref);
+      if (!p) return Promise.resolve(false);
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        const map = snapshotDomSheetCells();
+        sheetDataStore[sheet] = map;
+        const held = styleApi.tableAt(sheet, p.row, p.col);
+        if (!held) return false;
+        const b = layoutApi.tableBox(held);
+        const d1 = b.r1 + (held.header === false ? 0 : 1);
+        const d2 = b.r2 - (held.totals === true ? 1 : 0);
+        if (p.row < d1 || p.row > d2) return false;
+        const colIdx = p.col - b.c1;
+        const prevCalc = held.calculatedColumns?.[colIdx] || null;
+        const formula = map[ref]?.formula || "";
+        const dropPrevIfGone = () => {
+          if (!prevCalc) return;
+          for (let r = d1; r <= d2; r += 1) if (map[refOf(r, p.col)]?.formula === prevCalc) return;
+          const nextCalc = [...(held.calculatedColumns || [])];
+          nextCalc[colIdx] = null;
+          const norm = ops.normalizeCalc(nextCalc, held.columns.length);
+          const next = { ...held };
+          if (norm) next.calculatedColumns = norm;
+          else delete next.calculatedColumns;
+          layoutApi.setTables(sheet, withTable(sheet, held, next));
+        };
+        if (!formula.startsWith("=") || formula.length <= 1) {
+          dropPrevIfGone();
+          return false;
+        }
+        const writes = [];
+        for (let r = d1; r <= d2; r += 1) {
+          if (r === p.row) continue;
+          const cur = map[refOf(r, p.col)];
+          const empty = !cur || (!cur.value && !cur.formula);
+          const sameAsPrev = prevCalc !== null && cur?.formula === prevCalc;
+          if (!empty && !sameAsPrev) {
+            dropPrevIfGone();
+            return false;
+          }
+          if (cur?.formula !== formula) writes.push({ row: r, col: p.col, text: "", formula });
+        }
+        const nextArr = Array.from({ length: held.columns.length }, (_, i) => (i === colIdx ? formula : held.calculatedColumns?.[i] ?? null));
+        const nextTable = { ...held, calculatedColumns: nextArr };
+        if (writes.length === 0) {
+          if (prevCalc !== formula) layoutApi.setTables(sheet, withTable(sheet, held, nextTable));
+          return false;
+        }
+        const record = sheetHistory.begin({ refs: writes.map((w) => refOf(w.row, w.col)), parts: ["sheetLayout"] });
+        writeCells(sheet, writes);
+        layoutApi.setTables(sheet, withTable(sheet, held, nextTable));
+        sheetHistory.commit(record);
+        await settle(sheet, STATUS.calculated);
+        if (Array.isArray(nextTable.filter) && nextTable.filter.length > 0) await filter.reapplyAfterEdit(false);
+        return true;
+      });
+    }
+
+    async function afterCellInput(sheet, ref) {
+      await expandAfter(sheet, [ref]);
+      return fillCalculated(sheet, ref);
+    }
+
     // ---- the bar ----------------------------------------------------------------------------------------------------------
     function sync() {
       const bar = $("sheet-table-bar");
@@ -769,13 +859,15 @@
       });
       totalsMenu.bind();
       layoutApi.onChange(sync);
-      host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter, growth };
+      host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter, fillCalculated, afterCellInput, growth };
     }
 
     return {
       bind,
       sync,
       expandAfter,
+      fillCalculated,
+      afterCellInput,
       actions: { "table-create": () => Promise.resolve(openCreate()), "table-resize": () => Promise.resolve(openResize()) },
     };
   }

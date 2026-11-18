@@ -12,7 +12,7 @@
 //! (see the header of `axis/mod.rs`). Rows the filter hides move like the user's hidden rows;
 //! inserted rows are shown.
 
-use super::{shift_runs, Axis, AxisEdit, EditKind};
+use super::{layout::shift_runs_on_axis, Axis, AxisEdit, EditKind};
 use easyoffice_formats::{FilterColumn, SheetFilter, MAX_FILTER_ROWS};
 
 /// The filter after an edit.
@@ -36,6 +36,12 @@ pub fn shift_filter(filter: &SheetFilter, edit: &AxisEdit) -> FilterShift {
     let mut reapply = false;
     match edit.axis {
         Axis::Row => {
+            if !edit.covers_cols(range.col0, range.col1) {
+                return FilterShift {
+                    filter: Some(out),
+                    reapply: false,
+                };
+            }
             let header_deleted = edit.kind == EditKind::Delete
                 && (edit.at..edit.at + edit.count).contains(&range.row0);
             let Some((start, end)) = edit
@@ -48,7 +54,7 @@ pub fn shift_filter(filter: &SheetFilter, edit: &AxisEdit) -> FilterShift {
                 return gone;
             }
             (out.range.row0, out.range.row1) = (start, end);
-            out.hidden = shift_runs(&filter.hidden, edit);
+            out.hidden = shift_runs_on_axis(&filter.hidden, edit);
         }
         Axis::Col => {
             let Some((start, end)) = edit.shift_span(range.col0, range.col1) else {
@@ -68,6 +74,11 @@ pub fn shift_filter(filter: &SheetFilter, edit: &AxisEdit) -> FilterShift {
                         criteria: c.criteria.clone(),
                     })
                 })
+                .collect();
+            out.hidden_buttons = filter
+                .hidden_buttons
+                .iter()
+                .filter_map(|&c| edit.map_index(c).filter(|col| (start..=end).contains(col)))
                 .collect();
         }
     }

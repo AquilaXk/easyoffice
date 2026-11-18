@@ -149,6 +149,7 @@
         const p = grid.parseRef(ref);
         const style = moved[ref].style;
         if (!p || !style || (byRow ? p.row : p.col) !== before) continue;
+        if (byRow && edit.cols && (p.col < edit.cols[0] || p.col > edit.cols[1])) continue;
         for (let i = 1; i <= edit.count; i += 1) {
           copies[byRow ? grid.refOf(before + i, p.col) : grid.refOf(p.row, before + i)] = { value: "", formula: "", style };
         }
@@ -156,6 +157,28 @@
         if (n > MAX_INHERITED_CELLS) return;
       }
       Object.assign(moved, copies);
+    }
+
+    function fillInsertedCalculatedRows(name, edit) {
+      if (edit.axis !== "row" || edit.op !== "insert") return;
+      const map = sheetDataStore[name] || (sheetDataStore[name] = {});
+      for (const t of layoutApi.tablesOf(name)) {
+        if (!Array.isArray(t.calculatedColumns)) continue;
+        const b = layoutApi.tableBox(t);
+        if (edit.cols && (b.c1 < edit.cols[0] || b.c2 > edit.cols[1])) continue;
+        const d1 = b.r1 + (t.header === false ? 0 : 1);
+        const d2 = b.r2 - (t.totals === true ? 1 : 0);
+        const r0 = Math.max(d1, edit.at);
+        const r1 = Math.min(d2, edit.at + edit.count - 1);
+        for (let r = r0; r <= r1; r += 1) {
+          t.calculatedColumns.forEach((formula, i) => {
+            if (!formula) return;
+            const ref = grid.refOf(r, b.c1 + i);
+            const cur = map[ref];
+            if (!cur || (!cur.value && !cur.formula)) map[ref] = { ...cur, value: "", formula };
+          });
+        }
+      }
     }
 
     // The answer applied to the model: cells move, rewritten formulas replace their text, the layout,
@@ -195,12 +218,13 @@
 
     // Whether the sheet's protection lets the rows or columns be inserted or deleted: the flag, and for a
     // deletion that no locked cell with content goes with them (PD-216).
-    function editAllowed(name, axis, op, at, count) {
+    function editAllowed(name, axis, op, at, count, cols = null) {
       if (!protectApi.guardAction(name, EDIT_FLAGS[axis + ":" + op])) return false;
       if (op !== "delete" || !protectApi.isOn(name)) return true;
       const map = sheetDataStore[name] || {};
       for (const ref of Object.keys(map)) {
         const p = grid.parseRef(ref);
+        if (axis === "row" && cols && p && (p.col < cols[0] || p.col > cols[1])) continue;
         const index = p && (axis === "row" ? p.row : p.col);
         const entry = map[ref];
         if (index >= at && index < at + count && (entry.value || entry.formula) && !protectApi.cellEditable(name, p.row, p.col, entry.style)) {
@@ -212,7 +236,7 @@
     }
 
     // `inStep(sheet)` runs in the step after the answer is applied, so a command that opens a row for its own cells is one undo step.
-    function editAxis(axis, op, at, count, inStep) {
+    function editAxis(axis, op, at, count, inStep, cols = null) {
       const unit = axis === "row" ? "행" : "열";
       const limit = axis === "row" ? MAX_ROWS_PER_EDIT : MAX_COLS_PER_EDIT;
       if (count > limit) {
@@ -224,8 +248,8 @@
         commitIfEditing();
         const name = getActiveSheetName();
         sheetDataStore[name] = snapshotDomSheetCells();
-        if (protectApi && !editAllowed(name, axis, op, at, count)) return false;
-        const edit = { axis, op, at, count };
+        if (protectApi && !editAllowed(name, axis, op, at, count, cols)) return false;
+        const edit = cols ? { axis, op, at, count, cols } : { axis, op, at, count };
         // Every cell may move or be rewritten by the edit, and the engine's answer lands on the model before the cells
         // move: the step keeps the cells the edit changed or deleted, read against where the edit puts them (PD-216).
         const change = sheetHistory.begin({ sheets: "all", parts: "all", shift: { sheet: name, ...edit } });
@@ -236,6 +260,7 @@
           return false;
         }
         applyAnswer(name, edit, result.answer);
+        fillInsertedCalculatedRows(name, edit);
         // The rebuilt session placed every array again: the cells they fill are taken from it (PD-217).
         if (Array.isArray(result.answer.spillAreas)) host.__EASYOFFICE_SHEET_SPILL__?.replaceAll(sheetDataStore, result.answer.spillAreas);
         inStep?.(name);
@@ -556,10 +581,10 @@
       tableUi.sync();
     }
 
-    // The text of a cell was typed: it may become a link, and a table next to it grows over it.
+    // The text of a cell was typed: it may become a link, a table next to it grows over it, and a calculated column fills.
     function autoLink(sheet, ref, replace) {
       const linked = linkUi.autoLink(sheet, ref, replace);
-      void tableUi.expandAfter(sheet, [ref]);
+      void tableUi.afterCellInput(sheet, ref);
       return linked;
     }
 

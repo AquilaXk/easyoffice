@@ -10,7 +10,9 @@
 //! the table that a session needs to place arrays are `["A1:C5", ...]`. Input over a bound is refused,
 //! not trimmed.
 
-use crate::sheet_filter_json::{parse_columns, write_columns};
+use crate::sheet_filter_json::{
+    parse_columns, parse_hidden_buttons, write_columns, write_hidden_buttons,
+};
 use crate::sheet_layout_json::{parse_runs_limited, runs_json};
 use crate::table_style_json::{parse_style_def, write_style_def};
 use crate::EasyOfficeIpcRouter;
@@ -92,6 +94,34 @@ fn parse_table(v: &StrictJsonValue) -> Result<SheetTable, EasyOfficeError> {
             "table.filterHidden",
             u64::from(MAX_FILTER_ROWS),
         )?;
+    }
+    if let Some(hb) = field("hiddenButtons").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        if table.filter.is_none() {
+            return Err(bad("hiddenButtons"));
+        }
+        table.hidden_buttons = parse_hidden_buttons(hb, &range)?;
+    }
+    if let Some(calc) = field("calculatedColumns").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let items = calc
+            .as_array()
+            .filter(|a| a.len() == table.width() as usize)
+            .ok_or_else(|| bad("calculatedColumns"))?;
+        let mut parsed = Vec::with_capacity(items.len());
+        for item in items {
+            if matches!(item, StrictJsonValue::Null) {
+                parsed.push(None);
+            } else if let Some(f) = item
+                .as_str()
+                .filter(|f| f.starts_with('=') && f.len() > 1 && f.chars().count() <= 8_192)
+            {
+                parsed.push(Some(f.to_string()));
+            } else {
+                return Err(bad("calculatedColumns"));
+            }
+        }
+        if parsed.iter().any(Option::is_some) {
+            table.calculated_columns = parsed;
+        }
     }
     if !table.within_bounds() {
         return Err(over());
@@ -210,6 +240,24 @@ pub(crate) fn tables_json(tables: &[SheetTable]) -> String {
             if !t.filter_hidden.is_empty() {
                 let _ = write!(out, ",\"filterHidden\":{}", runs_json(&t.filter_hidden));
             }
+            write_hidden_buttons(&mut out, &t.hidden_buttons);
+        }
+        if !t.calculated_columns.is_empty() && t.calculated_columns.iter().any(Option::is_some) {
+            out.push_str(",\"calculatedColumns\":[");
+            for (j, col_f) in t.calculated_columns.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                match col_f {
+                    Some(f) => {
+                        out.push('"');
+                        EasyOfficeIpcRouter::escape_json_into(&mut out, f);
+                        out.push('"');
+                    }
+                    None => out.push_str("null"),
+                }
+            }
+            out.push(']');
         }
         out.push('}');
     }

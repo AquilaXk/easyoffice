@@ -234,6 +234,16 @@ enum Outcome {
 /// Applies `edit` to the reference's span on the edited axis. `collapse` keeps a deleted cell
 /// reference pointing at the cell that took its place (a rule's anchor refs, see `rules`).
 fn move_unit(unit: &mut Unit, edit: &AxisEdit, collapse: bool) -> Outcome {
+    if edit.axis == Axis::Row && edit.cols.is_some() {
+        let c0 = unit.first.col;
+        let c1 = unit.second.as_ref().map_or(c0, |s| s.col);
+        let (Some((u0, _)), Some((u1, _))) = (c0, c1) else {
+            return Outcome::Same;
+        };
+        if !edit.covers_cols(u0.min(u1), u0.max(u1)) {
+            return Outcome::Same;
+        }
+    }
     let a0 = unit.first.on(edit.axis);
     let a1 = unit.second.as_ref().map_or(a0, |s| s.on(edit.axis));
     let (Some((v0, _)), Some((v1, _))) = (a0, a1) else {

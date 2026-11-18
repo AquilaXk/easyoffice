@@ -27,6 +27,9 @@ pub fn shift_boxes(boxes: &[CellBox], edit: &AxisEdit, drop_single: bool) -> Vec
     boxes
         .iter()
         .filter_map(|b| {
+            if edit.axis == Axis::Row && !edit.covers_cols(b.col0, b.col1) {
+                return (!drop_single || b.area() > 1).then_some(*b);
+            }
             let (s, e) = span_of(b, edit.axis);
             let (ns, ne) = edit.shift_span(s, e)?;
             let mut out = *b;
@@ -39,9 +42,18 @@ pub fn shift_boxes(boxes: &[CellBox], edit: &AxisEdit, drop_single: bool) -> Vec
         .collect()
 }
 
-/// Sorted, non-overlapping inclusive runs of hidden rows (or columns) after `edit`. A run that
-/// the insertion cuts in two stays two runs: the inserted rows are visible.
+/// Sorted, non-overlapping inclusive runs of whole-sheet rows (or columns) after `edit`.
+/// A column-bounded row shift leaves whole-sheet row runs unchanged.
 pub fn shift_runs(runs: &[(u32, u32)], edit: &AxisEdit) -> Vec<(u32, u32)> {
+    if edit.cols.is_some() {
+        return runs.to_vec();
+    }
+    shift_runs_on_axis(runs, edit)
+}
+
+/// Sorted, non-overlapping inclusive runs after `edit` on its axis, used for ranges already known
+/// to lie inside `edit.cols` (such as a table's or filter's own hidden rows).
+pub(super) fn shift_runs_on_axis(runs: &[(u32, u32)], edit: &AxisEdit) -> Vec<(u32, u32)> {
     let mut out: Vec<(u32, u32)> = Vec::with_capacity(runs.len() + 1);
     let mut push = |s: u32, e: u32| match out.last_mut() {
         Some(last) if last.1 + 1 >= s => last.1 = last.1.max(e),

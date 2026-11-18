@@ -106,16 +106,25 @@ impl<'a> FilterScan<'a> {
                 self.open = Open::None;
                 self.col = None;
                 let (Some(filter), Some(id)) = (
-                    self.filter.as_ref(),
+                    self.filter.as_mut(),
                     attrs.get("colId").and_then(|v| v.parse::<u32>().ok()),
                 ) else {
                     return;
                 };
-                self.col = filter
+                let Some(col) = filter
                     .range
                     .col0
                     .checked_add(id)
-                    .filter(|&c| c <= filter.range.col1);
+                    .filter(|&c| c <= filter.range.col1)
+                else {
+                    return;
+                };
+                if flag(attrs, "hiddenButton") {
+                    if let Err(at) = filter.hidden_buttons.binary_search(&col) {
+                        filter.hidden_buttons.insert(at, col);
+                    }
+                }
+                self.col = Some(col);
             }
             _ if self.col.is_none() => {}
             "filters" => {
@@ -328,17 +337,38 @@ fn custom_filter_xml(out: &mut String, c: &CustomCondition) {
 /// `<autoFilter>` for `filter`; a colour filter names its differential format in `dxf`.
 pub(crate) fn autofilter_xml(filter: &SheetFilter, dxf: &DxfTable) -> String {
     let mut out = format!("<autoFilter ref=\"{}\"", filter.range.to_a1());
-    if filter.columns.is_empty() {
+    if filter.columns.is_empty() && filter.hidden_buttons.is_empty() {
         out.push_str("/>");
         return out;
     }
     out.push('>');
-    for column in &filter.columns {
-        let _ = write!(
-            out,
-            "<filterColumn colId=\"{}\">",
-            column.col - filter.range.col0
-        );
+    let mut ci = 0usize;
+    let mut hi = 0usize;
+    while ci < filter.columns.len() || hi < filter.hidden_buttons.len() {
+        let col_c = filter.columns.get(ci).map(|c| c.col);
+        let col_h = filter.hidden_buttons.get(hi).copied();
+        let col = match (col_c, col_h) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => break,
+        };
+        let has_col = col_c == Some(col);
+        let hidden_btn = col_h == Some(col);
+        if hidden_btn {
+            hi += 1;
+        }
+        let _ = write!(out, "<filterColumn colId=\"{}\"", col - filter.range.col0);
+        if hidden_btn {
+            out.push_str(" hiddenButton=\"1\"");
+        }
+        if !has_col {
+            out.push_str("/>");
+            continue;
+        }
+        let column = &filter.columns[ci];
+        ci += 1;
+        out.push('>');
         match &column.criteria {
             FilterCriteria::Values {
                 blank,

@@ -436,3 +436,100 @@ fn a_structured_reference_is_left_as_written_by_an_edit_and_a_rename() {
         None
     );
 }
+
+#[test]
+fn column_bounded_row_insert_shifts_only_covered_columns_and_refuses_straddling_tables() {
+    use crate::{shift_boxes, shift_filter, shift_table, AxisBudget, WorkbookEngine};
+    use easyoffice_formats::{CellBox, SheetFilter, SheetTable};
+    fn cell_of<'a>(s: &'a crate::SheetEngine, a1: &str) -> Option<&'a str> {
+        s.raw_cells()
+            .get(&crate::PackedCellCoordinate::parse_a1(a1).unwrap())
+            .map(String::as_str)
+    }
+
+    let partial = AxisEdit::new(Axis::Row, EditKind::Insert, 1, 1)
+        .unwrap()
+        .with_cols(1, 2)
+        .unwrap(); // row 2 (0-based 1), cols B..C (0-based 1..=2)
+    assert!(AxisEdit::new(Axis::Col, EditKind::Insert, 0, 1)
+        .unwrap()
+        .with_cols(0, 1)
+        .is_err());
+
+    let mut wb = WorkbookEngine::new();
+    {
+        let s = wb.add_sheet("S");
+        s.set_cell("A2", "left").unwrap();
+        s.set_cell("B2", "10").unwrap();
+        s.set_cell("C2", "=B2*2").unwrap();
+        s.set_cell("D2", "=A2&B2&SUM(B2:C3)&SUM(A2:C3)").unwrap();
+    }
+    let mut below = SheetTable::new("Below", CellBox::parse("B4:C5").unwrap());
+    below.columns = vec!["x".into(), "y".into()];
+    let mut aside = SheetTable::new("Aside", CellBox::parse("D2:E4").unwrap());
+    aside.columns = vec!["p".into(), "q".into()];
+    wb.set_tables("S", vec![below.clone(), aside.clone()])
+        .unwrap();
+
+    wb.apply_axis_edit("S", partial, AxisBudget::default())
+        .unwrap();
+    let s = wb.sheet("S").unwrap();
+    assert_eq!(cell_of(s, "A2"), Some("left"), "left column untouched");
+    assert_eq!(cell_of(s, "B2"), None, "B2 moved down to B3");
+    assert_eq!(cell_of(s, "B3"), Some("10"));
+    assert_eq!(cell_of(s, "C3"), Some("=B3*2"));
+    // B2 and B2:C3 lie inside B..C and move; A2 and A2:C3 lie outside/straddle and stay.
+    assert_eq!(cell_of(s, "D2"), Some("=A2&B3&SUM(B3:C4)&SUM(A2:C3)"));
+    assert_eq!(
+        shift_table(&below, &partial).unwrap().range.to_a1(),
+        "B5:C6"
+    );
+    assert_eq!(
+        shift_table(&aside, &partial).unwrap().range.to_a1(),
+        "D2:E4"
+    );
+    let merges = vec![
+        CellBox::parse("A2:A3").unwrap(),
+        CellBox::parse("B2:C3").unwrap(),
+    ];
+    let moved_merges: Vec<String> = shift_boxes(&merges, &partial, true)
+        .into_iter()
+        .map(|m| m.to_a1())
+        .collect();
+    assert_eq!(moved_merges, vec!["A2:A3", "B3:C4"]);
+
+    let f_out = SheetFilter::new(CellBox::parse("D2:E6").unwrap());
+    assert_eq!(
+        shift_filter(&f_out, &partial).filter.unwrap().range.to_a1(),
+        "D2:E6"
+    );
+
+    // Straddling table A5:C6 refuses a B..C shift at row 2 without changing anything.
+    let mut straddle_wb = WorkbookEngine::new();
+    straddle_wb.add_sheet("S").set_cell("B2", "keep").unwrap();
+    let mut wide = SheetTable::new("Wide", CellBox::parse("A5:C6").unwrap());
+    wide.columns = vec!["a".into(), "b".into(), "c".into()];
+    straddle_wb.set_tables("S", vec![wide]).unwrap();
+    assert!(straddle_wb
+        .apply_axis_edit("S", partial, AxisBudget::default())
+        .is_err());
+    assert_eq!(cell_of(straddle_wb.sheet("S").unwrap(), "B2"), Some("keep"));
+
+    // Column edits shift hidden_buttons and calculated_columns and collapse all-None calculated_columns.
+    let mut calc_t = SheetTable::new("Calc", CellBox::parse("B2:D4").unwrap());
+    calc_t.columns = vec!["a".into(), "b".into(), "c".into()];
+    calc_t.filter = Some(Vec::new());
+    calc_t.hidden_buttons = vec![1, 3]; // B and D
+    calc_t.calculated_columns = vec![None, None, Some("=[@a]+[@b]".into())];
+    let ins_col = AxisEdit::new(Axis::Col, EditKind::Insert, 2, 1).unwrap(); // before C
+    let grown = shift_table(&calc_t, &ins_col).unwrap();
+    assert_eq!(grown.hidden_buttons, vec![1, 4]);
+    assert_eq!(
+        grown.calculated_columns,
+        vec![None, None, None, Some("=[@a]+[@b]".into())]
+    );
+    let del_calc = AxisEdit::new(Axis::Col, EditKind::Delete, 4, 1).unwrap(); // delete E (the calculated col)
+    let shrunk = shift_table(&grown, &del_calc).unwrap();
+    assert_eq!(shrunk.hidden_buttons, vec![1]);
+    assert!(shrunk.calculated_columns.is_empty());
+}

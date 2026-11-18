@@ -66,7 +66,24 @@ fn parse_edit(entries: &Entries) -> Result<AxisEdit, EasyOfficeError> {
             .ok_or_else(|| invalid(key))
     };
     let at = number("at")?.checked_sub(1).ok_or_else(|| invalid("at"))?;
-    AxisEdit::new(axis, kind, at, number("count")?)
+    let mut edit = AxisEdit::new(axis, kind, at, number("count")?)?;
+    if let Some(cols) =
+        StrictJsonValue::get_field(entries, "cols").filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        let pair = cols
+            .as_array()
+            .filter(|a| a.len() == 2)
+            .ok_or_else(|| invalid("cols"))?;
+        let col_at = |i: usize| {
+            pair[i]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .and_then(|n| n.checked_sub(1))
+                .ok_or_else(|| invalid("cols"))
+        };
+        edit = edit.with_cols(col_at(0)?, col_at(1)?)?;
+    }
+    Ok(edit)
 }
 
 /// The answer for an edit the sheet's protection locks.
@@ -109,12 +126,18 @@ fn parse_widths(v: &StrictJsonValue) -> Result<BTreeMap<u32, u32>, EasyOfficeErr
 /// The layout the request carries, moved for `edit`, as the answer's JSON fields.
 fn moved_layout_json(
     entries: &Entries,
+    sheet: &str,
     edit: &AxisEdit,
     out: &mut String,
 ) -> Result<(), EasyOfficeError> {
     let field = |key: &str| StrictJsonValue::get_field(entries, key);
+    let straddles = |b: &CellBox| b.row1 >= edit.at && edit.straddles_cols(b.col0, b.col1);
     if let Some(v) = field("merges") {
-        let moved: Vec<CellBox> = shift_boxes(&parse_merges(v)?, edit, true);
+        let parsed = parse_merges(v)?;
+        if parsed.iter().any(&straddles) {
+            return Err(invalid("cols"));
+        }
+        let moved: Vec<CellBox> = shift_boxes(&parsed, edit, true);
         let _ = write!(out, ",\"merges\":{}", merges_json(&moved));
     }
     if let Some(v) = field("hiddenRows") {
@@ -155,7 +178,11 @@ fn moved_layout_json(
     }
     // `null` is the page saying the sheet has no filter.
     if let Some(v) = field("filter").filter(|v| !matches!(v, StrictJsonValue::Null)) {
-        let shifted = shift_filter(&parse_filter(v)?, edit);
+        let parsed = parse_filter(v)?;
+        if straddles(&parsed.range) {
+            return Err(invalid("cols"));
+        }
+        let shifted = shift_filter(&parsed, edit);
         match &shifted.filter {
             Some(moved) => {
                 let _ = write!(out, ",\"filter\":{}", filter_json(moved));
@@ -167,7 +194,20 @@ fn moved_layout_json(
         }
     }
     if let Some(v) = field("tables") {
-        let moved = shift_tables(&crate::sheet_table_json::parse_tables(v)?, edit);
+        let parsed = crate::sheet_table_json::parse_tables(v)?;
+        if parsed.iter().any(|t| straddles(&t.range)) {
+            return Err(invalid("cols"));
+        }
+        let mut moved = shift_tables(&parsed, edit);
+        for t in &mut moved {
+            for formula in t.calculated_columns.iter_mut().flatten() {
+                if let Some(next) =
+                    easyoffice_sheet::axis::rewrite_formula_refs(formula, sheet, sheet, edit, false)
+                {
+                    *formula = next;
+                }
+            }
+        }
         let _ = write!(
             out,
             ",\"tables\":{}",
@@ -288,7 +328,7 @@ impl EasyOfficeIpcRouter {
         }
         // The page's own parts move first, so a bad request fails before the session changes.
         let mut moved = String::new();
-        moved_layout_json(entries, &edit, &mut moved)?;
+        moved_layout_json(entries, sheet, &edit, &mut moved)?;
         moved_rules_json(entries, sheet, &edit, &mut moved)?;
         crate::sheet_links_json::moved_link_targets_json(entries, sheet, &edit, &mut moved)?;
         match crate::sheet_session::registry().structure(id, owner, sheet, edit, Instant::now())? {

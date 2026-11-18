@@ -64,6 +64,7 @@ pub struct AxisEdit {
     pub kind: EditKind,
     pub at: u32,
     pub count: u32,
+    pub cols: Option<(u32, u32)>,
 }
 
 impl AxisEdit {
@@ -87,7 +88,38 @@ impl AxisEdit {
             kind,
             at,
             count,
+            cols: None,
         })
+    }
+
+    /// Restricts a row edit to zero-based columns `first..=last` (PD-237).
+    pub fn with_cols(mut self, first: u32, last: u32) -> Result<Self, EasyOfficeError> {
+        if self.axis != Axis::Row || first > last || last >= PackedCellCoordinate::MAX_COLS {
+            return Err(EasyOfficeError::InvalidArgument(
+                "열 범위 지정 행 편집이 올바르지 않습니다.".to_string(),
+            ));
+        }
+        self.cols =
+            (!(first == 0 && last + 1 == PackedCellCoordinate::MAX_COLS)).then_some((first, last));
+        Ok(self)
+    }
+
+    /// True when `c0..=c1` lies wholly inside the edited columns (always true without `cols`).
+    #[inline]
+    pub const fn covers_cols(&self, c0: u32, c1: u32) -> bool {
+        match self.cols {
+            None => true,
+            Some((lo, hi)) => c0 >= lo && c1 <= hi,
+        }
+    }
+
+    /// True when `c0..=c1` overlaps `self.cols` without lying wholly inside it.
+    #[inline]
+    pub const fn straddles_cols(&self, c0: u32, c1: u32) -> bool {
+        match self.cols {
+            None => false,
+            Some((lo, hi)) => c0 <= hi && c1 >= lo && !(c0 >= lo && c1 <= hi),
+        }
     }
 
     /// Number of rows or columns on the edited axis.
@@ -132,6 +164,9 @@ impl AxisEdit {
     #[inline]
     pub fn map_coord(&self, coord: PackedCellCoordinate) -> Option<PackedCellCoordinate> {
         let (row, col) = (coord.row(), coord.col());
+        if self.axis == Axis::Row && !self.covers_cols(col, col) {
+            return Some(coord);
+        }
         let (row, col) = match self.axis {
             Axis::Row => (self.map_index(row)?, col),
             Axis::Col => (row, self.map_index(col)?),
@@ -145,6 +180,9 @@ impl AxisEdit {
     #[inline]
     pub fn unmap_coord(&self, coord: PackedCellCoordinate) -> Option<PackedCellCoordinate> {
         let (row, col) = (coord.row(), coord.col());
+        if self.axis == Axis::Row && !self.covers_cols(col, col) {
+            return Some(coord);
+        }
         let (row, col) = match self.axis {
             Axis::Row => (self.unmap_index(row)?, col),
             Axis::Col => (row, self.unmap_index(col)?),

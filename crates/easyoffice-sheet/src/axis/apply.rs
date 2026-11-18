@@ -106,6 +106,17 @@ impl WorkbookEngine {
         })?;
         let started = Instant::now();
         let target_name = self.sheets()[target].name.clone();
+        if edit.cols.is_some() {
+            let tables = self.tables.tables_of(&target_name);
+            if tables
+                .iter()
+                .any(|t| t.range.row1 >= edit.at && edit.straddles_cols(t.range.col0, t.range.col1))
+            {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "표 범위를 가로질러 셀을 내릴 수 없습니다.".to_string(),
+                ));
+            }
+        }
         let mut rewrites: Vec<(usize, PackedCellCoordinate, String)> = Vec::new();
         let mut scanned = 0usize;
         for (si, engine) in self.sheets().iter().enumerate() {

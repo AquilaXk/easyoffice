@@ -39,6 +39,7 @@
     resizeTables: "다른 표와 겹치는 범위로는 크기를 바꿀 수 없음",
     resizeMerges: "병합된 칸이 있는 범위로는 크기를 바꿀 수 없음",
     resizeFilter: "필터가 있는 범위로는 크기를 바꿀 수 없음",
+    straddle: "아래에 걸친 표·병합·필터가 있어 셀을 내릴 수 없음",
   };
 
   const fold = (text) => String(text).toLowerCase();
@@ -111,6 +112,41 @@
     return entry ? String(entry.value ?? "") : "";
   };
 
+  // Whether `other` at or below `r1` overlaps columns `c1..c2` without lying wholly inside `c1..c2` (PD-237).
+  const straddlesBelow = (r1, c1, c2, other) =>
+    other.r2 >= r1 && other.c1 <= c2 && other.c2 >= c1 && !(other.c1 >= c1 && other.c2 <= c2);
+
+  function straddleConflict(ctx, r1, c1, c2, skip = null) {
+    if (ctx.tables.some((t) => t !== skip && straddlesBelow(r1, c1, c2, ctx.boxOf(t)))) return true;
+    if (ctx.merges.some((m) => straddlesBelow(r1, c1, c2, m))) return true;
+    if (ctx.filter && straddlesBelow(r1, c1, c2, ctx.filter)) return true;
+    return false;
+  }
+
+  function normalizeCalc(list, len) {
+    const out = Array.from({ length: len }, (_, i) => (typeof list?.[i] === "string" && list[i].startsWith("=") ? list[i] : null));
+    return out.some(Boolean) ? out : undefined;
+  }
+
+  // The calculated-column formula of each column of `table`: explicit `calculatedColumns`, or an identical formula
+  // already held by every existing data row of that column (PD-237).
+  function effectiveCalc(table, b, cellAt) {
+    const d1 = b.r1 + (table.header === false ? 0 : 1);
+    const d2 = b.r2 - (table.totals === true ? 1 : 0);
+    return table.columns.map((_, i) => {
+      const explicit = table.calculatedColumns?.[i];
+      if (typeof explicit === "string" && explicit.startsWith("=")) return explicit;
+      if (d1 > d2) return null;
+      const col = b.c1 + i;
+      const first = cellAt(d1, col)?.formula;
+      if (!first || !first.startsWith("=")) return null;
+      for (let r = d1 + 1; r <= d2; r += 1) {
+        if (cellAt(r, col)?.formula !== first) return null;
+      }
+      return first;
+    });
+  }
+
   // What keeps a table of `box` off the sheet: `"tables"`, `"merges"` or `"filter"` (tables other than `skip`); null when nothing.
   function conflict(ctx, box, skip) {
     if (ctx.tables.some((t) => t !== skip && touches(box, ctx.boxOf(t)))) return "tables";
@@ -133,8 +169,15 @@
     const asked = { ...box, r2: rows };
     const refused = conflict(ctx, asked, null);
     if (refused) return { error: MESSAGES[refused] };
-    // Without a header row the data moves down one row and the row that opens holds `Column<n>`; the table covers both.
+    // Without a header row the data in `box.c1..box.c2` moves down one row and the row that opens holds `Column<n>`; the table covers both.
     const insertRow = !header;
+    if (insertRow) {
+      if (straddleConflict(ctx, box.r1, box.c1, box.c2)) return { error: MESSAGES.straddle };
+      for (let c = box.c1; c <= box.c2; c += 1) {
+        const edge = ctx.cellAt(MAX_ROW, c);
+        if (edge && (edge.value || edge.formula)) return { error: MESSAGES.bottom };
+      }
+    }
     const final = { r1: box.r1, c1: box.c1, r2: rows + (insertRow ? 1 : 0), c2: box.c2 };
     const used = new Set();
     const texts = [];
@@ -196,8 +239,34 @@
       if (header && (String(entry?.value ?? "") !== text || entry?.formula)) headerWrites.push({ row: box.r1, col: at, text });
     });
     const next = { ...structuredClone(table), range: rangeText(box.r1, box.c1, box.r2, box.c2), columns };
+    const mappedCalc = [];
+    for (let c = box.c1; c <= box.c2; c += 1) {
+      mappedCalc.push(c >= old.c1 && c <= old.c2 ? table.calculatedColumns?.[c - old.c1] ?? null : null);
+    }
+    const normCalc = normalizeCalc(mappedCalc, columns.length);
+    if (normCalc) {
+      next.calculatedColumns = normCalc;
+      const oldD2 = old.r2 - (totals ? 1 : 0);
+      const newD1 = box.r1 + (header ? 1 : 0);
+      const newD2 = box.r2 - (totals ? 1 : 0);
+      for (let r = Math.max(newD1, oldD2 + 1); r <= newD2; r += 1) {
+        normCalc.forEach((formula, i) => {
+          if (!formula) return;
+          const col = box.c1 + i;
+          const cur = ctx.cellAt(r, col);
+          if (!cur || (!cur.value && !cur.formula)) headerWrites.push({ row: r, col, text: "", formula });
+        });
+      }
+    } else {
+      delete next.calculatedColumns;
+    }
     // The conditions of the columns that left go with them; the rows the rest hide are judged again by the page.
     if (Array.isArray(next.filter)) next.filter = next.filter.filter((cond) => cond.col >= box.c1 && cond.col <= box.c2);
+    if (Array.isArray(next.hiddenButtons)) {
+      const hb = next.hiddenButtons.filter((col) => col >= box.c1 && col <= box.c2);
+      if (hb.length) next.hiddenButtons = hb;
+      else delete next.hiddenButtons;
+    }
     delete next.filterHidden;
     return { table: next, headerWrites };
   }
@@ -226,8 +295,21 @@
         const used = new Set(table.columns.map(fold));
         const [name] = headerNames([header ? cellText(ctx, g.r1, col) : ""], used, table.columns.length + 1);
         next.columns = [...table.columns, name];
+        if (Array.isArray(next.calculatedColumns)) next.calculatedColumns = [...next.calculatedColumns, null];
         const entry = ctx.cellAt(g.r1, col);
         if (header && (String(entry?.value ?? "") !== name || entry?.formula)) headerWrites.push({ row: g.r1, col, text: name });
+      } else {
+        const calc = effectiveCalc(table, g, ctx.cellAt);
+        const norm = normalizeCalc(calc, table.columns.length);
+        if (norm) {
+          next.calculatedColumns = norm;
+          norm.forEach((formula, i) => {
+            const c = g.c1 + i;
+            if (!formula || c === col) return;
+            const cur = ctx.cellAt(row, c);
+            if (!cur || (!cur.value && !cur.formula)) headerWrites.push({ row, col: c, text: "", formula });
+          });
+        }
       }
       delete next.filterHidden;
       return { table: next, headerWrites, to: below ? "row" : "column" };
@@ -246,5 +328,7 @@
     planResize,
     planExpand,
     rangeText,
+    straddleConflict,
+    normalizeCalc,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

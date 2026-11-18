@@ -328,6 +328,7 @@
       columns: structuredClone(f.columns),
     };
     if (f.hidden.length) out.hidden = f.hidden.map((r) => [r[0], r[1]]);
+    if (f.hiddenButtons?.length) out.hiddenButtons = [...f.hiddenButtons];
     return out;
   }
 
@@ -337,11 +338,13 @@
     const p = parse(a);
     const q = parse(b ?? "");
     if (!p || !q) return null;
-    return {
+    const out = {
       range: { r1: p.row, c1: p.col, r2: q.row, c2: q.col },
       columns: Array.isArray(json.columns) ? structuredClone(json.columns) : [],
       hidden: Array.isArray(json.hidden) ? json.hidden.map((r) => [r[0], r[1]]) : [],
     };
+    if (Array.isArray(json.hiddenButtons) && json.hiddenButtons.length) out.hiddenButtons = [...json.hiddenButtons];
+    return out;
   }
 
   function refOf(r, c) {
@@ -433,8 +436,12 @@
     const layout = bySheet[name];
     const table = layout?.tables?.find((t) => t.name === tableName);
     if (!table) return false;
-    if (columns === null) delete table.filter;
-    else table.filter = columns;
+    if (columns === null) {
+      delete table.filter;
+      delete table.hiddenButtons;
+    } else {
+      table.filter = columns;
+    }
     if (runs?.length) table.filterHidden = runs.map((r) => [r[0], r[1]]);
     else delete table.filterHidden;
     layout.rows = null;
@@ -442,14 +449,19 @@
     return true;
   }
 
-  // Who owns the filter button of the header cell `row`, `col` of a sheet (PD-232): a table's name for a table with filter buttons whose
-  // header row has the cell, `null` for the sheet's filter when its header row has it (also where a file made it share cells with a
-  // table that has no buttons), `undefined` for a cell with no button. The grid draws the button and the panel opens by this answer.
+  // Who owns the filter button of the header cell `row`, `col` of a sheet (PD-232, PD-237): a table's name for a table with filter buttons whose
+  // header row has the cell (unless `hiddenButtons` hides that column's button), `null` for the sheet's filter when its header row has it
+  // (unless `hiddenButtons` hides it), `undefined` for a cell with no button. The grid draws the button and the panel opens by this answer.
   function filterOwnerAt(name, row, col) {
     const table = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.tableAt(name, row, col);
-    if (table && table.header !== false && Array.isArray(table.filter) && tableBox(table).r1 === row) return table.name;
+    if (table && table.header !== false && Array.isArray(table.filter) && tableBox(table).r1 === row) {
+      return table.hiddenButtons?.includes(col) ? undefined : table.name;
+    }
     const f = bySheet[name]?.filter;
-    return f && row === f.range.r1 && col >= f.range.c1 && col <= f.range.c2 ? null : undefined;
+    if (f && row === f.range.r1 && col >= f.range.c1 && col <= f.range.c2) {
+      return f.hiddenButtons?.includes(col) ? undefined : null;
+    }
+    return undefined;
   }
 
   // Clears the conditions of a table's own filter and the rows they hide (the table keeps its filter buttons).
@@ -633,6 +645,7 @@
   function remapRef(edit, ref) {
     const p = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef(ref);
     if (!p) return ref;
+    if (edit.axis === "row" && edit.cols && (p.col < edit.cols[0] || p.col > edit.cols[1])) return ref;
     const row = edit.axis === "row" ? mapIndex(edit, p.row) : p.row;
     const col = edit.axis === "col" ? mapIndex(edit, p.col) : p.col;
     return row === null || col === null ? null : refOf(row, col);
