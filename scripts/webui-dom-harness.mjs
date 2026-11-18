@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { matchesSelectorList } from "./webui-css-selector.mjs";
@@ -7,6 +9,25 @@ const cjsRequire = createRequire(import.meta.url);
 const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
+const INDEX_HTML_RAW = fs.readFileSync(INDEX_HTML_PATH, "utf8");
+const COMPILED_MODULES = new Map();
+
+function runCachedModule(resolvedPath) {
+  let entry = COMPILED_MODULES.get(resolvedPath);
+  if (!entry) {
+    const code = fs.readFileSync(resolvedPath, "utf8");
+    const dir = path.dirname(resolvedPath);
+    const req = createRequire(resolvedPath);
+    const fn = vm.compileFunction(code, ["exports", "require", "module", "__filename", "__dirname"], {
+      filename: resolvedPath,
+    });
+    entry = { fn, req, dir };
+    COMPILED_MODULES.set(resolvedPath, entry);
+  }
+  const modObj = { exports: {} };
+  entry.fn(modObj.exports, entry.req, modObj, resolvedPath, entry.dir);
+  return modObj.exports;
+}
 const PROD_PRE_SCRIPTS = [
   "../crates/easyoffice-app/ui/theme.js",
   "../crates/easyoffice-app/ui/zoom-range.js",
@@ -421,8 +442,17 @@ class MiniElement extends MiniNode {
   }
 
   set id(v) {
-    if (v) this._attrs.set("id", String(v));
-    else this._attrs.delete("id");
+    const prev = this._attrs.get("id");
+    if (prev && this.ownerDocument?._byId?.get(prev) === this) this.ownerDocument._byId.delete(prev);
+    if (v) {
+      const next = String(v);
+      this._attrs.set("id", next);
+      if (this.ownerDocument?._byId && !this.ownerDocument._byId.has(next)) {
+        this.ownerDocument._byId.set(next, this);
+      }
+    } else {
+      this._attrs.delete("id");
+    }
   }
 
   get className() {
@@ -462,12 +492,26 @@ class MiniElement extends MiniNode {
   }
 
   removeAttribute(name) {
-    this._attrs.delete(String(name || "").toLowerCase());
+    const k = String(name || "").toLowerCase();
+    if (k === "id") {
+      const prev = this._attrs.get("id");
+      if (prev && this.ownerDocument?._byId?.get(prev) === this) this.ownerDocument._byId.delete(prev);
+    }
+    this._attrs.delete(k);
   }
 
   setAttribute(name, value) {
     const k = String(name || "").toLowerCase();
     const strVal = String(value ?? "");
+    if (k === "id") {
+      const prev = this._attrs.get("id");
+      if (prev && prev !== strVal && this.ownerDocument?._byId?.get(prev) === this) {
+        this.ownerDocument._byId.delete(prev);
+      }
+      if (strVal && this.ownerDocument?._byId && !this.ownerDocument._byId.has(strVal)) {
+        this.ownerDocument._byId.set(strVal, this);
+      }
+    }
     this._attrs.set(k, strVal);
   }
 
@@ -767,8 +811,11 @@ function parseAttributesInto(attrText, el) {
   let m;
   while ((m = attrRe.exec(attrText)) !== null) {
     const name = m[1].toLowerCase();
-    const val = m[2] ?? m[3] ?? m[4] ?? "";
-    el._attrs.set(name, decodeHtmlEntities(val));
+    const val = decodeHtmlEntities(m[2] ?? m[3] ?? m[4] ?? "");
+    el._attrs.set(name, val);
+    if (name === "id" && val && el.ownerDocument?._byId && !el.ownerDocument._byId.has(val)) {
+      el.ownerDocument._byId.set(val, el);
+    }
   }
 }
 
@@ -828,6 +875,7 @@ class MiniDocument {
 
   constructor(htmlSource) {
     this._listeners = new Map();
+    this._byId = new Map();
     const nodes = parseHtmlFragment(htmlSource, this);
     this.documentElement =
       nodes.find((n) => n.nodeType === 1 && n.tagName === "HTML") ||
@@ -835,6 +883,13 @@ class MiniDocument {
     this.body =
       this.documentElement.querySelector("body") || new MiniElement("body", this);
     this.activeElement = this.body;
+  }
+
+  _isConnected(node) {
+    for (let cur = node; cur; cur = cur.parentElement) {
+      if (cur === this.documentElement) return true;
+    }
+    return false;
   }
 
   createElement(tag) {
@@ -870,7 +925,14 @@ class MiniDocument {
   }
 
   getElementById(id) {
-    return this.documentElement.querySelector(`#${id}`);
+    const key = String(id ?? "");
+    if (!key) return null;
+    const hit = this._byId.get(key);
+    if (hit && hit._attrs.get("id") === key && this._isConnected(hit)) return hit;
+    this._byId.delete(key);
+    const found = this.documentElement.querySelector(`#${key}`);
+    if (found) this._byId.set(key, found);
+    return found;
   }
 
   querySelector(sel) {
@@ -935,8 +997,7 @@ function resolveShellInternals(options) {
 }
 
 export async function createWorkspaceHarness(options = {}) {
-  const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-  const document = new MiniDocument(options.transformHtml ? options.transformHtml(html) : html);
+  const document = new MiniDocument(options.transformHtml ? options.transformHtml(INDEX_HTML_RAW) : INDEX_HTML_RAW);
   const windowListeners = new Map();
   const downloads = [];
   const revokedUrls = [];
@@ -1074,10 +1135,7 @@ export async function createWorkspaceHarness(options = {}) {
   globalThis.__EASYOFFICE_HOST_ENV__ = hostEnv;
   try {
     for (const mod of modulesToLoad) {
-      delete cjsRequire.cache[mod.resolvedPath];
-    }
-    for (const mod of modulesToLoad) {
-      cjsRequire(mod.relPath);
+      runCachedModule(mod.resolvedPath);
     }
   } finally {
     delete globalThis.__EASYOFFICE_HOST_ENV__;
