@@ -310,7 +310,13 @@ fn svg_pages_and_pictures_over_element_filter_or_use_budgets_are_refused() {
 #[test]
 fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
     use easyoffice_app::{EasyOfficeIpcRouter, ShellWriters};
-    let fonts = fonts();
+    let bundled_fonts = Arc::new(
+        crate::pdf_fonts::tests::bundled_only_db()
+            .expect("bundled NotoSansKR-Regular.ttf; run scripts/checkout-rhwp.mjs"),
+    );
+    let bundled_dirs: Vec<std::path::PathBuf> = crate::pdf_fonts::tests::bundled_font_dir()
+        .into_iter()
+        .collect();
     let mut full = model();
     full.sheet_cells = vec![(0, 0, "매출".to_string()), (1, 0, "=10+20".to_string())];
     full.slides = vec![(
@@ -318,12 +324,66 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
         vec!["핵심 지표".to_string()],
         String::new(),
     )];
-    // SaveRequest::with_drawn_thumbnail draws page 1 for DOCX, ODT, XLSX, ODS, PPTX, ODP, HWPX.
+    // Pure-Korean content drawn against ONLY bundled Noto Sans KR (zero host OS fonts).
+    for (ext, bytes) in [
+        ("docx", docx()),
+        (
+            "odt",
+            UniversalFormatConverter::encode_rich(&rich(), DocumentFormat::Odt, None).unwrap(),
+        ),
+        (
+            "xlsx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Xlsx).unwrap(),
+        ),
+        (
+            "ods",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Ods).unwrap(),
+        ),
+        (
+            "pptx",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Pptx).unwrap(),
+        ),
+        (
+            "odp",
+            UniversalFormatConverter::encode(&full, DocumentFormat::Odp).unwrap(),
+        ),
+        ("hwpx", hwpx()),
+    ] {
+        let embedded = with_drawn_first_page(ext, &bytes, &bundled_fonts).unwrap();
+        let found = extract_thumbnail(&mut Cursor::new(&embedded))
+            .unwrap_or_else(|| panic!("missing thumbnail in {ext}"));
+        check_thumbnail_png(&found.bytes).unwrap();
+        let pixmap = tiny_skia::Pixmap::decode_png(&found.bytes).unwrap();
+        assert_eq!(pixmap.width().max(pixmap.height()), MAX_THUMBNAIL_SIDE_PX);
+        assert!(
+            pixmap
+                .pixels()
+                .iter()
+                .any(|p| [p.red(), p.green(), p.blue()] != [255, 255, 255]),
+            "non-white ink drawn for pure-Korean .{ext} with bundled font"
+        );
+    }
+
+    // SaveRequest::with_drawn_thumbnail draws page 1 and skips idempotently on a second pass.
+    // Includes Latin + Korean text because another unit test in this binary may have initialized
+    // the process-wide `shared_font_db(&[])` before `bundled_dirs` was passed.
+    let mixed_rich = RichDocument {
+        page_frame: Default::default(),
+        title: "Report 저장 시험".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("Body 본문")],
+            ..RichParagraph::default()
+        })],
+        official_agency: None,
+    };
     for (name, bytes) in [
-        ("report.docx", docx()),
+        (
+            "report.docx",
+            UniversalFormatConverter::encode_rich(&mixed_rich, DocumentFormat::Docx, None).unwrap(),
+        ),
         (
             "report.odt",
-            UniversalFormatConverter::encode_rich(&rich(), DocumentFormat::Odt, None).unwrap(),
+            UniversalFormatConverter::encode_rich(&mixed_rich, DocumentFormat::Odt, None).unwrap(),
         ),
         (
             "book.xlsx",
@@ -341,12 +401,15 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
             "deck.odp",
             UniversalFormatConverter::encode(&full, DocumentFormat::Odp).unwrap(),
         ),
-        ("doc.hwpx", hwpx()),
+        (
+            "doc.hwpx",
+            UniversalFormatConverter::encode_rich(&mixed_rich, DocumentFormat::Hwpx, None).unwrap(),
+        ),
     ] {
         assert!(!has_non_placeholder_thumbnail(&bytes), "{name}");
         let req = SaveRequest::parse(name, &base64_codec::encode(&bytes))
             .unwrap()
-            .with_drawn_thumbnail(&[]);
+            .with_drawn_thumbnail(&bundled_dirs);
         assert!(has_non_placeholder_thumbnail(req.bytes()), "{name}");
         let found = extract_thumbnail(&mut Cursor::new(req.bytes()))
             .unwrap_or_else(|| panic!("missing thumbnail in {name}"));
@@ -363,12 +426,12 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
         // Second pass skips without rewriting when a real thumbnail is already inside.
         let again = SaveRequest::parse(name, &base64_codec::encode(req.bytes()))
             .unwrap()
-            .with_drawn_thumbnail(&[]);
+            .with_drawn_thumbnail(&bundled_dirs);
         assert_eq!(again.bytes(), req.bytes(), "{name} was rewritten twice");
     }
 
     // ShellWriters.thumbnail embeds the rhwp-laid first page directly during convert_document_format.
-    let draw_thumb = |h: &[u8]| render_hwpx_first_page_png(h, &fonts);
+    let draw_thumb = |h: &[u8]| render_hwpx_first_page_png(h, &bundled_fonts);
     let save_hwp = |h: &[u8]| crate::doc_hwp::hwpx_to_hwp(h);
     let writers = ShellWriters {
         pdf: None,
@@ -396,4 +459,56 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
         let pixmap = tiny_skia::Pixmap::decode_png(&found.bytes).unwrap();
         assert_eq!((pixmap.width(), pixmap.height()), (181, 256), "{target}");
     }
+}
+
+#[test]
+fn generic_fallback_draws_ink_even_when_bundled_noto_is_absent() {
+    // Simulates a Linux runner without Noto Sans KR or Korean fonts in the DB.
+    let mut sys = Database::new();
+    sys.load_system_fonts();
+    let latin_id =
+        sys.faces()
+            .find(|f| {
+                sys.with_face_data(f.id, |d, idx| {
+                    ttf_parser::Face::parse(d, idx)
+                        .ok()
+                        .and_then(|face| face.glyph_index('R'))
+                        .is_some()
+                })
+                .unwrap_or(false)
+                    && !f.families.iter().any(|(n, _)| {
+                        n.contains("Noto") || n.contains("Apple") || n.contains("Gothic")
+                    })
+            })
+            .expect("at least one Latin non-Korean system face")
+            .id;
+    let bytes = sys
+        .with_face_data(latin_id, |data, _| data.to_vec())
+        .expect("face bytes");
+    let mut db = Database::new();
+    db.load_font_data(bytes);
+    crate::pdf_fonts::set_generic_families(&mut db);
+    let db = Arc::new(db);
+
+    let latin_doc = RichDocument {
+        page_frame: Default::default(),
+        title: "Report 1".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("Summary line")],
+            ..RichParagraph::default()
+        })],
+        official_agency: None,
+    };
+    let docx_bytes =
+        UniversalFormatConverter::encode_rich(&latin_doc, DocumentFormat::Docx, None).unwrap();
+    let out = with_drawn_first_page("report.docx", &docx_bytes, &db).unwrap();
+    let found = extract_thumbnail(&mut Cursor::new(&out)).unwrap();
+    let pixmap = tiny_skia::Pixmap::decode_png(&found.bytes).unwrap();
+    assert!(
+        pixmap
+            .pixels()
+            .iter()
+            .any(|p| [p.red(), p.green(), p.blue()] != [255, 255, 255]),
+        "generic serif/sans-serif must still resolve when Noto Sans KR is absent"
+    );
 }

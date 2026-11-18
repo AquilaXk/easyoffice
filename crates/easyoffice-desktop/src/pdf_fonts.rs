@@ -106,11 +106,48 @@ fn has_char(db: &Database, id: ID, c: char) -> bool {
     .unwrap_or(false)
 }
 
-/// Points the generic families at [`FALLBACK_FAMILY`].
+/// Points the generic families at [`FALLBACK_FAMILY`] when loaded, or otherwise ensures every
+/// unresolved generic family points to an installed face so `usvg` never resolves `serif` /
+/// `sans-serif` / `monospace` to a missing font name.
 pub fn set_generic_families(db: &mut Database) {
-    db.set_serif_family(FALLBACK_FAMILY);
-    db.set_sans_serif_family(FALLBACK_FAMILY);
-    db.set_monospace_family(FALLBACK_FAMILY);
+    let has_fallback = db
+        .query(&usvg::fontdb::Query {
+            families: &[usvg::fontdb::Family::Name(FALLBACK_FAMILY)],
+            ..usvg::fontdb::Query::default()
+        })
+        .is_some();
+    if has_fallback {
+        db.set_serif_family(FALLBACK_FAMILY);
+        db.set_sans_serif_family(FALLBACK_FAMILY);
+        db.set_monospace_family(FALLBACK_FAMILY);
+        return;
+    }
+    let fallback_name = db
+        .faces()
+        .find(|f| has_char(db, f.id, 'A'))
+        .or_else(|| db.faces().next())
+        .and_then(|f| f.families.first().map(|(name, _)| name.clone()));
+    let Some(name) = fallback_name else {
+        return;
+    };
+    for family in [
+        usvg::fontdb::Family::Serif,
+        usvg::fontdb::Family::SansSerif,
+        usvg::fontdb::Family::Monospace,
+    ] {
+        let resolved = db.query(&usvg::fontdb::Query {
+            families: &[family],
+            ..usvg::fontdb::Query::default()
+        });
+        if resolved.is_none() {
+            match family {
+                usvg::fontdb::Family::Serif => db.set_serif_family(&name),
+                usvg::fontdb::Family::SansSerif => db.set_sans_serif_family(&name),
+                usvg::fontdb::Family::Monospace => db.set_monospace_family(&name),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Which faces were probed for one character and which of them have it: two bits per face
