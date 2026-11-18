@@ -15,7 +15,9 @@
 
 use super::package::{Blueprint, ComponentId, ROOT};
 use super::wire::{bytes, float, msg, reference, string, varint, Fld};
-use crate::EasyOfficeError;
+use crate::{
+    EasyOfficeError, RichColumns, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichScript,
+};
 use std::collections::BTreeMap;
 
 const TYPE_STYLESHEET: u32 = 401;
@@ -76,22 +78,81 @@ pub(super) fn rgb(bytes: [u8; 3]) -> Vec<Fld> {
 }
 
 /// The look a run asks for; only set properties are written.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct CharLook {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    pub strike: bool,
     pub size_half_pt: Option<u16>,
+    pub font: Option<String>,
     pub color: Option<[u8; 3]>,
+    pub highlight: Option<[u8; 3]>,
+    pub script: u8,
 }
 
 impl CharLook {
+    pub(super) fn script_code(script: RichScript) -> u8 {
+        match script {
+            RichScript::Normal => 0,
+            RichScript::Superscript => 1,
+            RichScript::Subscript => 2,
+        }
+    }
+
     pub(super) fn is_plain(&self) -> bool {
         !self.bold
             && !self.italic
             && !self.underline
+            && !self.strike
             && self.size_half_pt.is_none()
+            && self.font.is_none()
             && self.color.is_none()
+            && self.highlight.is_none()
+            && self.script == 0
+    }
+}
+
+/// Paragraph-level overrides relative to a base paragraph style (`Body` or `Heading 1..6`).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub(super) struct ParaLook {
+    pub alignment: Option<u64>,
+    pub first_line_indent_twips: Option<i32>,
+    pub left_indent_twips: Option<u32>,
+    pub line_spacing_percent: Option<u16>,
+}
+
+impl ParaLook {
+    pub(super) fn is_plain(&self) -> bool {
+        self.alignment.is_none()
+            && self.first_line_indent_twips.is_none()
+            && self.left_indent_twips.is_none()
+            && self.line_spacing_percent.is_none()
+    }
+}
+
+/// List style variation key (`Bullet` or ordered `LIST_LEVEL_NUMBER_FORMATS` code).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum ListLook {
+    Bullet,
+    Ordered(u64),
+}
+
+impl ListLook {
+    pub(super) fn ordered_code(num: RichListNumber) -> u64 {
+        let group = match num.enclosure {
+            RichNumberEnclosure::Dot => 0,
+            RichNumberEnclosure::Parentheses => 1,
+            RichNumberEnclosure::RightParenthesis => 2,
+        };
+        match num.format {
+            RichNumberFormat::Decimal => group,
+            RichNumberFormat::UpperRoman => 3 + group,
+            RichNumberFormat::LowerRoman => 6 + group,
+            RichNumberFormat::LowerLatin => 9 + group,
+            RichNumberFormat::UpperLatin => 12 + group,
+            RichNumberFormat::HangulSyllable => 45,
+        }
     }
 }
 
@@ -101,6 +162,7 @@ pub(super) struct Styles {
     pub headings: [u64; 6],
     pub list: u64,
     pub body_column: u64,
+    pub image: u64,
     component: ComponentId,
     null_character: u64,
     column: u64,
@@ -108,8 +170,10 @@ pub(super) struct Styles {
     named: Vec<(String, u64)>,
     /// Variations by parent, in creation order: `(parent, children)`.
     families: Vec<(u64, Vec<u64>)>,
-    paragraph_variations: BTreeMap<(u64, u64), u64>,
+    paragraph_variations: BTreeMap<(u64, ParaLook), u64>,
     character_variations: BTreeMap<CharLook, u64>,
+    list_variations: BTreeMap<ListLook, u64>,
+    column_variations: BTreeMap<(u8, bool, u32), u64>,
     /// `(theme field, style)` of every drawing preset.
     presets: Vec<(u32, u64)>,
 }
@@ -337,6 +401,7 @@ impl Styles {
             headings,
             list,
             body_column,
+            image,
             component,
             null_character,
             column,
@@ -344,6 +409,8 @@ impl Styles {
             families: vec![(column, vec![body_column])],
             paragraph_variations: BTreeMap::new(),
             character_variations: BTreeMap::new(),
+            list_variations: BTreeMap::new(),
+            column_variations: BTreeMap::new(),
             presets,
         })
     }
@@ -355,24 +422,47 @@ impl Styles {
         }
     }
 
-    /// The anonymous variation of `parent` that sets only an alignment (1 right, 2 centre,
-    /// 3 justified, 0 left); one per distinct pair.
-    pub(super) fn aligned(
+    /// The anonymous variation of `parent` setting alignment, indents and/or line spacing.
+    pub(super) fn paragraph_variation(
         &mut self,
         bp: &mut Blueprint,
         parent: u64,
-        alignment: u64,
+        look: ParaLook,
     ) -> Result<u64, EasyOfficeError> {
-        if let Some(id) = self.paragraph_variations.get(&(parent, alignment)) {
+        if look.is_plain() {
+            return Ok(parent);
+        }
+        if let Some(id) = self.paragraph_variations.get(&(parent, look)) {
             return Ok(*id);
+        }
+        let mut bag = Vec::new();
+        let mut count = 0u64;
+        if let Some(align) = look.alignment {
+            bag.push(varint(1, align));
+            count += 1;
+        }
+        if let Some(first_tw) = look.first_line_indent_twips {
+            bag.push(float(7, first_tw as f32 / 20.0));
+            count += 1;
+        }
+        if let Some(left_tw) = look.left_indent_twips {
+            bag.push(float(11, left_tw as f32 / 20.0));
+            count += 1;
+        }
+        if let Some(pct) = look.line_spacing_percent {
+            bag.push(msg(
+                13,
+                vec![varint(1, 0), float(2, f32::from(pct) / 100.0)],
+            ));
+            count += 1;
         }
         let fields = [
             variation_header(parent, self.stylesheet),
-            varint(10, 1),
-            msg(12, vec![varint(1, alignment)]),
+            varint(10, count),
+            msg(12, bag),
         ];
         let id = bp.add(self.component, TYPE_PARAGRAPH_STYLE, &fields)?;
-        self.paragraph_variations.insert((parent, alignment), id);
+        self.paragraph_variations.insert((parent, look), id);
         self.register(parent, id);
         Ok(id)
     }
@@ -387,7 +477,7 @@ impl Styles {
             return Ok(*id);
         }
         let mut bag = Vec::new();
-        let mut count = 0;
+        let mut count = 0u64;
         for (number, on) in [(1, look.bold), (2, look.italic)] {
             if on {
                 bag.push(varint(number, 1));
@@ -398,12 +488,28 @@ impl Styles {
             bag.push(float(3, f32::from(half_points) / 2.0));
             count += 1;
         }
+        if let Some(ref font_name) = look.font {
+            bag.push(string(5, font_name));
+            count += 1;
+        }
         if let Some(rgb_bytes) = look.color {
             bag.push(msg(7, rgb(rgb_bytes)));
             count += 1;
         }
+        if look.script != 0 {
+            bag.push(varint(10, u64::from(look.script)));
+            count += 1;
+        }
         if look.underline {
             bag.push(varint(11, 1));
+            count += 1;
+        }
+        if look.strike {
+            bag.push(varint(12, 1));
+            count += 1;
+        }
+        if let Some(hl_bytes) = look.highlight {
+            bag.push(msg(26, rgb(hl_bytes)));
             count += 1;
         }
         if let Some(rgb_bytes) = look.color {
@@ -417,6 +523,75 @@ impl Styles {
         let id = bp.add(self.component, TYPE_CHARACTER_STYLE, &fields)?;
         self.character_variations.insert(look, id);
         self.register(self.null_character, id);
+        Ok(id)
+    }
+
+    /// The anonymous variation of `self.list` for bullet or numbered lists.
+    pub(super) fn list_variation(
+        &mut self,
+        bp: &mut Blueprint,
+        look: ListLook,
+    ) -> Result<u64, EasyOfficeError> {
+        if let Some(id) = self.list_variations.get(&look) {
+            return Ok(*id);
+        }
+        let (kind_val, override_count, number_code) = match look {
+            ListLook::Bullet => (2u64, 4u64, None),
+            ListLook::Ordered(code) => (3u64, 5u64, Some(code)),
+        };
+        let mut fields = vec![
+            variation_header(self.list, self.stylesheet),
+            varint(10, override_count),
+        ];
+        fields.extend((0..9).map(|_| varint(11, kind_val)));
+        fields.extend((0..9).map(|_| float(12, 0.0)));
+        fields.extend((0..9).map(|level| float(13, 36.0 * level as f32)));
+        if let Some(code) = number_code {
+            fields.extend((0..9).map(|_| varint(15, code)));
+        }
+        let id = bp.add(self.component, TYPE_LIST_STYLE, &fields)?;
+        self.list_variations.insert(look, id);
+        self.register(self.list, id);
+        Ok(id)
+    }
+
+    /// The anonymous variation of `self.column` for multi-column paragraph layouts (`count >= 2`).
+    pub(super) fn column_variation(
+        &mut self,
+        bp: &mut Blueprint,
+        cols: RichColumns,
+        body_width_pt: f32,
+    ) -> Result<u64, EasyOfficeError> {
+        let count = cols.count.clamp(2, 16);
+        let body_w_twips = (body_width_pt * 20.0).max(1.0);
+        let gap_frac = (f32::from(cols.gap_twips) / body_w_twips).clamp(0.0, 0.9);
+        let key = (count, cols.equal, gap_frac.to_bits());
+        if let Some(id) = self.column_variations.get(&key) {
+            return Ok(*id);
+        }
+        let columns_inner = if cols.equal {
+            let mut eq = vec![varint(1, u64::from(count))];
+            if gap_frac > 0.0 {
+                eq.push(float(2, gap_frac));
+            }
+            msg(1, eq)
+        } else {
+            let avail = (1.0 - gap_frac * f32::from(count - 1)).max(0.1);
+            let width = avail / f32::from(count);
+            let mut uneq = vec![float(1, width)];
+            for _ in 1..count {
+                uneq.push(msg(2, vec![float(1, gap_frac), float(2, width)]));
+            }
+            msg(2, uneq)
+        };
+        let fields = [
+            variation_header(self.column, self.stylesheet),
+            varint(10, 1),
+            msg(11, vec![msg(7, vec![columns_inner])]),
+        ];
+        let id = bp.add(self.component, TYPE_COLUMN_STYLE, &fields)?;
+        self.column_variations.insert(key, id);
+        self.register(self.column, id);
         Ok(id)
     }
 

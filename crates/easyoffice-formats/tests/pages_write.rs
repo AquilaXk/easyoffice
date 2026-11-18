@@ -1,13 +1,13 @@
-//! Pages minimal writer (PD-162): structure rules of the package, read-back through our own reader
-//! (a circular check: it proves the writer and the reader agree, not that Pages opens the file),
-//! limits and the loss counts behind the save warnings.
+//! Pages package writer (PD-162 · PD-246): structure rules of the package, read-back through our
+//! own reader, limits and the loss counts behind the save warnings.
 
 use easyoffice_formats::pages_iwa::{decompress_iwa, snappy_decompress, split_records, IwaRecord};
 use easyoffice_formats::pages_proto::{Message, WireValue};
 use easyoffice_formats::{
-    pages_write_loss, DecodedContent, DocumentFormat, EasyOfficeError, RichAlignment, RichBlock,
-    RichDocument, RichListKind, RichParagraph, RichRun, RichTable, UniversalDocumentModel,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    pages_write_loss, DecodedContent, DocumentFormat, EasyOfficeError, PagesWriteLoss,
+    RichAlignment, RichBinding, RichBindingKind, RichBlock, RichDocument, RichField, RichListKind,
+    RichParagraph, RichRun, RichTable, RichToc, UniversalDocumentModel, UniversalFormatConverter,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -504,44 +504,62 @@ fn a_flat_model_is_refused_and_a_document_converts() {
 
 #[test]
 fn what_cannot_be_written_is_counted_for_the_warning() {
-    let table = RichTable::from(vec![vec!["a".to_string()]]);
-    let list = RichParagraph {
-        list: Some(RichListKind::Bullet),
-        ..para(vec![run("항목")])
-    };
-    let styled = RichParagraph {
-        left_indent_twips: Some(720),
+    let supported = doc(vec![
+        RichBlock::Paragraph(para(vec![run("본문")])),
+        RichBlock::Table(RichTable::from(vec![vec!["a".to_string()]])),
+        RichBlock::Paragraph(RichParagraph {
+            list: Some(RichListKind::Bullet),
+            left_indent_twips: Some(720),
+            ..para(vec![RichRun {
+                strike: true,
+                font: Some("Arial".into()),
+                link: Some("https://example.org/docs".into()),
+                ..run("서식")
+            }])
+        }),
+    ]);
+    assert_eq!(pages_write_loss(&supported), PagesWriteLoss::default());
+
+    let toc_para = RichParagraph {
+        toc: Some(RichToc::Title),
+        page_break_before: true,
         ..para(vec![RichRun {
-            strike: true,
-            font: Some("Arial".into()),
-            ..run("서식")
+            link: Some("#_Toc1".into()),
+            ..run("목차 제목")
         }])
     };
-    let source = doc(vec![
-        RichBlock::Paragraph(para(vec![run("본문")])),
-        RichBlock::Table(table.clone()),
-        RichBlock::Table(table),
-        RichBlock::Paragraph(list),
-        RichBlock::Paragraph(styled),
+    let mut source = doc(vec![
+        RichBlock::Paragraph(toc_para),
+        RichBlock::Table(RichTable::from(Vec::<Vec<String>>::new())),
     ]);
+    source.page_frame.binding = RichBinding {
+        kind: RichBindingKind::Top,
+        gutter: 200,
+    };
+    source.page_frame.header = vec![para(vec![RichRun {
+        field: Some(RichField::FileName),
+        ..RichRun::default()
+    }])];
     let loss = pages_write_loss(&source);
-    assert_eq!(loss.elements, 3, "two tables and a list item");
-    assert_eq!(loss.formats, 2, "one run and one paragraph");
-    let (back, _) = read_back(&write(&source));
-    let texts: Vec<String> = back
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            RichBlock::Paragraph(p) => Some(p.plain_text()),
-            _ => None,
-        })
-        .collect();
     assert_eq!(
-        texts,
-        ["본문", "항목", "서식"],
-        "tables are left out, list and styled text stay"
+        loss.elements, 2,
+        "one TOC paragraph and one empty 0x0 table"
     );
-    assert_eq!(pages_write_loss(&formatted_document()).elements, 0);
+    assert_eq!(
+        loss.formats, 4,
+        "page_break_before, #_Toc1 link, top binding+gutter, and FileName field"
+    );
+    assert_eq!(
+        loss.warnings(),
+        vec![
+            "Pages 저장에서 빠진 요소 2개".to_string(),
+            "Pages 저장에서 빠진 서식 4곳".to_string(),
+        ]
+    );
+    assert_eq!(
+        pages_write_loss(&formatted_document()),
+        PagesWriteLoss::default()
+    );
 }
 
 /// QA samples for opening in the app (it cannot be done by the tests):

@@ -112,6 +112,14 @@ impl RichTable {
         validate_links(&self.rows, self.links.clone()).0
     }
 
+    /// Validated, non-overlapping merged regions within the grid for writers.
+    pub(crate) fn validated_merges(&self) -> Vec<CellMerge> {
+        if self.merges.is_empty() {
+            return Vec::new();
+        }
+        validate_merges(&self.rows, &self.merges).0
+    }
+
     /// Width of the widest row.
     pub fn column_count(&self) -> usize {
         self.rows.iter().map(Vec::len).max().unwrap_or(0)

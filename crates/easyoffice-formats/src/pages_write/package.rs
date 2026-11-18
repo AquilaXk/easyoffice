@@ -56,6 +56,7 @@ struct Component {
 /// A document being assembled.
 pub(super) struct Blueprint {
     components: Vec<Component>,
+    data_files: Vec<(u64, String, Vec<u8>)>,
     next: u64,
 }
 
@@ -77,6 +78,7 @@ impl Blueprint {
                 component(ROOT, "Document", false),
                 component(DOCUMENT_METADATA, "DocumentMetadata", true),
             ],
+            data_files: Vec::new(),
             next: FIRST_IDENTIFIER,
         }
     }
@@ -143,7 +145,14 @@ impl Blueprint {
         Ok(id)
     }
 
-    /// The ZIP entries of the package: object streams, the component index and the identity.
+    /// Registers a binary file stored at `Data/<name>` and returns its `DataInfo` identifier.
+    pub(super) fn add_data(&mut self, name: String, data: Vec<u8>) -> u64 {
+        let id = self.allocate();
+        self.data_files.push((id, name, data));
+        id
+    }
+
+    /// The ZIP entries of the package: object streams, the component index, data files and the identity.
     pub(super) fn finish(mut self) -> Result<Vec<u8>, EasyOfficeError> {
         let metadata = self
             .components
@@ -178,13 +187,26 @@ impl Blueprint {
         let mut zip_entries: Vec<(String, Vec<u8>)> = Vec::new();
         let mut total = 0usize;
         for component in &mut self.components {
-            // The root of a component comes first in its stream.
+            // The root of a component comes first in its stream, followed by ascending identifiers.
             let id = component.id;
-            component.entries.sort_by_key(|e| e.record.id != id);
+            component
+                .entries
+                .sort_by_key(|e| (e.record.id != id, e.record.id));
             let records: Vec<&Record> = component.entries.iter().map(|e| &e.record).collect();
             total += add_stream(&mut zip_entries, component.name, &records)?;
         }
         total += add_stream(&mut zip_entries, "Metadata", &[&index])?;
+        for (_, name, data) in self.data_files {
+            total = total
+                .checked_add(data.len())
+                .filter(|sum| *sum <= MAX_DOCUMENT_BYTES)
+                .ok_or_else(|| {
+                    EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 쓰기: 문서 전체 크기 한도 초과".to_string(),
+                    )
+                })?;
+            zip_entries.push((format!("Data/{name}"), data));
+        }
         if total > MAX_DOCUMENT_BYTES {
             return Err(EasyOfficeError::ResourceBudgetExceeded(
                 "Pages 쓰기: 문서 전체 크기 한도 초과".to_string(),
@@ -247,6 +269,12 @@ impl Blueprint {
                 info.push(varint(21, 1));
             }
             fields.push(msg(3, info));
+        }
+        for (id, name, _) in &self.data_files {
+            fields.push(msg(
+                4,
+                vec![varint(1, *id), string(3, name), string(4, name)],
+            ));
         }
         fields.push(bytes(5, COMPONENT_VERSION.to_vec()));
         fields.push(bytes(7, PACKAGE_VERSION.to_vec()));

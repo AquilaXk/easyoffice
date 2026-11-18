@@ -661,11 +661,27 @@ mod tests {
         assert_eq!(json_str_field(&json, "detectedTarget"), "docx");
         let pages = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
-            r#"{"sourceFormat":"docx","targetFormat":"pages","title":"쓰기","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]},{"type":"table","rows":[[{"text":"a"}]]}]}"#,
+            r#"{"sourceFormat":"docx","targetFormat":"pages","title":"쓰기","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]},{"type":"table","rows":[[{"text":"a"},{"text":"b"}]]}]}"#,
         )
         .unwrap();
         assert_eq!(json_str_field(&pages, "detectedTarget"), "pages");
-        assert!(pages.contains("Pages 저장에서 빠진 요소 1개"), "{pages}");
+        assert!(
+            !pages.contains("Pages 저장에서 빠진"),
+            "tables are now written losslessly into Pages: {pages}"
+        );
+        let pages_loss = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r##"{"sourceFormat":"docx","targetFormat":"pages","title":"쓰기","blocks":[{"type":"paragraph","pageBreakBefore":true,"runs":[{"text":"본문","link":"#_Toc1"}]},{"type":"table","rows":[]}]}"##,
+        )
+        .unwrap();
+        assert!(
+            pages_loss.contains("Pages 저장에서 빠진 요소 1개"),
+            "{pages_loss}"
+        );
+        assert!(
+            pages_loss.contains("Pages 저장에서 빠진 서식 2곳"),
+            "{pages_loss}"
+        );
         // Sheets and slides are not documents: they are refused, not silently emptied.
         assert!(EasyOfficeIpcRouter::dispatch(
             "convert_document_format",

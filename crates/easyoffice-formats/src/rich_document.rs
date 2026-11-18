@@ -159,8 +159,8 @@ pub struct RichRun {
     pub highlight: Option<String>,
     /// Superscript / subscript position.
     pub script: RichScript,
-    /// Hyperlink target the run belongs to (a [`safe_link_target`] address). The DOCX, ODT and HWPX writers
-    /// emit it; the Pages writer drops it (counted by `pages_write_loss`).
+    /// Hyperlink target the run belongs to (a [`safe_link_target`] address). The DOCX, ODT, HWPX and Pages
+    /// writers emit external targets (`#_Toc<N>` internal anchors are counted by `pages_write_loss` in Pages).
     pub link: Option<String>,
     /// A field that the page fills in; `text` is empty. Only header and footer paragraphs carry one.
     pub field: Option<RichField>,
