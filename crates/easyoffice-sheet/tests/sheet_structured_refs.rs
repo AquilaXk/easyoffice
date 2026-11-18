@@ -328,3 +328,36 @@ fn a_sort_moves_a_relative_cell_but_not_a_structured_reference() {
         easyoffice_sheet::sorted_formula("=[@A5]*A5+Sales[[#This Row],[A5]]", "S", 0, 9, 2, 6);
     assert_eq!(moved, "=[@A5]*A9+Sales[[#This Row],[A5]]");
 }
+
+#[test]
+fn bracketed_colons_cross_sheet_ranges_and_malformed_indirect_fail_closed() {
+    let mut m = new_empty_model();
+    let cols = ["Q1 $", "a:b", "끝"];
+    for (i, n) in cols.iter().enumerate() {
+        m._set(&format!("{}1", (b'A' + i as u8) as char), n);
+        m._set(
+            &format!("{}2", (b'A' + i as u8) as char),
+            &format!("{}", (i + 1) * 10),
+        );
+    }
+    m._set("Sheet2!A1", "x");
+    m._set("Sheet2!A2", "99");
+    m.session()
+        .set_sheet_table_defs("Sheet1", vec![table("T", "A1:C2", &cols, false)])
+        .unwrap();
+    m.session()
+        .set_sheet_table_defs("Sheet2", vec![table("Other", "A1:A2", &["x"], false)])
+        .unwrap();
+    assert_eq!(text(&mut m, "=SUM(T[[Q1 $]]:T[[a:b]])"), "30");
+    assert_eq!(text(&mut m, "=SUM(INDIRECT(\"T[[a:b]]:T[끝]\"))"), "50");
+    assert_eq!(text(&mut m, "=SUM(T[[Q1 $]]:Other[x])"), "#REF!");
+    assert_eq!(
+        text(&mut m, "=SUM(INDIRECT(\"T[[Q1 $]]:Other[x]\"))"),
+        "#REF!"
+    );
+    assert_eq!(text(&mut m, "=INDIRECT(\"T[[a:b\")"), "#REF!");
+    assert_eq!(text(&mut m, "=INDIRECT(\"T[끝]extra\")"), "#REF!");
+    let huge = "A".repeat(9_000);
+    m._set("G1", &huge);
+    assert_eq!(text(&mut m, "=INDIRECT(G1)"), "#REF!");
+}

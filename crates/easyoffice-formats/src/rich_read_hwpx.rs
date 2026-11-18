@@ -16,6 +16,7 @@ use crate::hwpx_parts::{
 use crate::office_codecs::checked_zip_xml_entries;
 use crate::rich_document::{normalize_hex_color, safe_link_target};
 use crate::rich_image::{safe_package_path, ImageBudget};
+use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table::{table_from_placed, PlacedCell};
 use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -32,6 +33,7 @@ const EMU_PER_HWPUNIT: u64 = 127;
 struct ParaShape {
     align: Option<String>,
     heading_type: String,
+    heading_id_ref: u32,
     heading_level: u8,
     left: u32,
     /// First-line indent (`hc:intent`), HWPUNIT.
@@ -55,6 +57,7 @@ struct Header {
     chars: HashMap<String, CharFmt>,
     paras: HashMap<String, ParaShape>,
     styles: HashMap<String, StyleInfo>,
+    numberings: HwpxNumberingReader,
 }
 
 /// Parsing state while reading `Contents/header.xml`.
@@ -77,6 +80,7 @@ impl HeaderBuilder {
     }
 
     fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) {
+        self.header.numberings.on_start(name, attrs);
         if !self.on_char_start(name, attrs) {
             self.on_para_start(name, attrs);
         }
@@ -157,6 +161,10 @@ impl HeaderBuilder {
                 if let Some(p) = self.para_mut() {
                     p.heading_type =
                         attr(attrs, "type").map_or_else(|| "NONE".to_string(), Cow::into_owned);
+                    p.heading_id_ref = attr(attrs, "idRef")
+                        .as_deref()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
                     p.heading_level = attr(attrs, "level")
                         .as_deref()
                         .and_then(|l| l.parse().ok())
@@ -211,6 +219,7 @@ impl HeaderBuilder {
     }
 
     fn on_end(&mut self, name: &str) {
+        self.header.numberings.on_end(name);
         match name {
             "hh:charPr" => {
                 if let Some((id, f)) = self.cur_char.take() {
@@ -253,9 +262,10 @@ fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
         match ev? {
             XmlEvent::Start { name, attrs } => builder.on_start(name, &attrs),
             XmlEvent::End(name) => builder.on_end(name),
-            XmlEvent::Text(_) => {}
+            XmlEvent::Text(text) => builder.header.numberings.on_text(&text),
         }
     }
+    builder.header.numberings.check_budget()?;
     Ok(builder.header)
 }
 
@@ -299,8 +309,18 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
             _ => None,
         }
     };
+    let list_level = if list.is_some() {
+        shape.heading_level.min(8)
+    } else {
+        0
+    };
+    let list_number = (list == Some(RichListKind::Ordered))
+        .then(|| header.numberings.get(shape.heading_id_ref, list_level))
+        .flatten();
+    let default_list_margin =
+        list.is_some() && shape.left == LIST_LEFT_MARGIN * (u32::from(list_level) + 1);
     let to_twips = |hwpunit: i64| i32::try_from(hwpunit / i64::from(HWPUNIT_PER_TWIP)).ok();
-    let left_indent_twips = (!marker_margin && shape.left > 0)
+    let left_indent_twips = (!marker_margin && !default_list_margin && shape.left > 0)
         .then(|| to_twips(i64::from(shape.left)))
         .flatten()
         .and_then(|t| u32::try_from(t).ok());
@@ -359,8 +379,8 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         }
     }
     RichParagraph {
-        list_level: 0,
-        list_number: None,
+        list_level,
+        list_number,
         runs,
         alignment,
         heading_level: heading,

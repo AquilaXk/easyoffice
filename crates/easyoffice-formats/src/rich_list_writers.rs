@@ -1,10 +1,15 @@
-//! List definitions of the DOCX and ODT writers (PD-178).
+//! List definitions of the DOCX, ODT and HWPX writers (PD-178, PD-234).
 //!
 //! A *run* is a stretch of consecutive list paragraphs of the same kind (bullet or ordered); a
 //! non-list block ends it. Each run is one list in the output (`w:num` in DOCX, `text:list` in
-//! ODT), so a numbered list after a body paragraph starts again at 1. The number format and the
-//! punctuation of each level come from the first paragraph of the run at that level
-//! ([`RichParagraph::list_number`], PD-157), the nesting from [`RichParagraph::list_level`].
+//! ODT, `hh:numbering` in HWPX), so a numbered list after a body paragraph starts again at 1. The
+//! number format and the punctuation of each level come from the first paragraph of the run at
+//! that level ([`RichParagraph::list_number`], PD-157), the nesting from
+//! [`RichParagraph::list_level`].
+//!
+//! 참조 구현: HWPX OWPML `hh:numberings`·`hh:bullets`·`hh:paraHead` 속성 및 7수준 매핑은
+//! `rhwp` (`src/serializer/hwpx/header.rs` lines 448-460, 792-958, MIT, `THIRD_PARTY_NOTICES.md`)를
+//! 따른다.
 
 use std::collections::HashMap;
 
@@ -283,5 +288,208 @@ impl OdtListWriter {
         }
         self.depth = 0;
         self.run = None;
+    }
+}
+
+/// Levels an HWP5 / OWPML numbering head carries (`0..=6`; levels `7..=9` in `hh:paraHead` repeat level 6).
+pub(crate) const HWPX_MAX_LIST_LEVEL: u8 = 6;
+const HWPX_PARA_HEAD_SLOTS: usize = 10;
+
+fn hwpx_format(format: RichNumberFormat) -> &'static str {
+    match format {
+        RichNumberFormat::Decimal => "DIGIT",
+        RichNumberFormat::LowerLatin => "LATIN_SMALL",
+        RichNumberFormat::UpperLatin => "LATIN_CAPITAL",
+        RichNumberFormat::LowerRoman => "ROMAN_SMALL",
+        RichNumberFormat::UpperRoman => "ROMAN_CAPITAL",
+        RichNumberFormat::HangulSyllable => "HANGUL_SYLLABLE",
+    }
+}
+
+/// 1-based `hh:numbering@id` for each run in `plan` (`0` for bullet runs).
+pub(crate) fn hwpx_ordered_run_ids(plan: &ListPlan) -> Vec<u32> {
+    let mut next_id = 0u32;
+    plan.runs
+        .iter()
+        .map(|&def_idx| {
+            if plan.defs[def_idx].kind == RichListKind::Ordered {
+                next_id += 1;
+                next_id
+            } else {
+                0
+            }
+        })
+        .collect()
+}
+
+/// `hh:numberings` element for HWPX `header.xml` (one `hh:numbering` per ordered run so each run starts at 1).
+pub(crate) fn hwpx_numberings_xml(plan: &ListPlan) -> String {
+    use std::fmt::Write;
+    let ordered_defs: Vec<&ListDef> = plan
+        .runs
+        .iter()
+        .map(|&d| &plan.defs[d])
+        .filter(|def| def.kind == RichListKind::Ordered)
+        .collect();
+    if ordered_defs.is_empty() {
+        return String::new();
+    }
+    let mut xml = String::with_capacity(64 + ordered_defs.len() * 1_900);
+    let _ = write!(xml, "<hh:numberings itemCnt=\"{}\">", ordered_defs.len());
+    for (idx, def) in ordered_defs.iter().enumerate() {
+        let _ = write!(xml, "<hh:numbering id=\"{}\" start=\"0\">", idx + 1);
+        for slot in 0..HWPX_PARA_HEAD_SLOTS {
+            let number = def.levels[slot.min(usize::from(HWPX_MAX_LIST_LEVEL))];
+            let (before, after) = enclosure_affixes(number.enclosure);
+            let lvl_1 = slot + 1;
+            let _ = write!(
+                xml,
+                "<hh:paraHead start=\"1\" level=\"{lvl_1}\" align=\"LEFT\" useInstWidth=\"1\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"{}\" charPrIDRef=\"4294967295\" checkable=\"0\">{before}^{lvl_1}{after}</hh:paraHead>",
+                hwpx_format(number.format),
+            );
+        }
+        xml.push_str("</hh:numbering>");
+    }
+    xml.push_str("</hh:numberings>");
+    xml
+}
+
+/// `hh:bullets` element for HWPX `header.xml` covering bullet ids `1..=max_id` (`•`, `◦`, `▪`).
+pub(crate) fn hwpx_bullets_xml(max_id: u32) -> String {
+    use std::fmt::Write;
+    if max_id == 0 {
+        return String::new();
+    }
+    let count = usize::try_from(max_id).unwrap_or(1).min(BULLETS.len());
+    let mut xml = String::with_capacity(48 + count * 240);
+    let _ = write!(xml, "<hh:bullets itemCnt=\"{count}\">");
+    for (idx, glyph) in BULLETS.iter().enumerate().take(count) {
+        let _ = write!(
+            xml,
+            "<hh:bullet id=\"{}\" char=\"{glyph}\" useImage=\"0\"><hh:paraHead level=\"0\" align=\"LEFT\" useInstWidth=\"0\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"DIGIT\" charPrIDRef=\"4294967295\" checkable=\"0\"/></hh:bullet>",
+            idx + 1,
+        );
+    }
+    xml.push_str("</hh:bullets>");
+    xml
+}
+
+/// Maximum `<hh:paraHead>` entries accepted in one HWPX `header.xml` before failing closed.
+pub(crate) const MAX_HWPX_NUMBERING_HEADS: usize = 8_192;
+const HWPX_HEAD_TEXT_CAP: usize = 32;
+
+fn decode_hwpx_num_format(num_format: Option<&str>) -> RichNumberFormat {
+    match num_format.unwrap_or("DIGIT") {
+        "LATIN_SMALL" => RichNumberFormat::LowerLatin,
+        "LATIN_CAPITAL" => RichNumberFormat::UpperLatin,
+        "ROMAN_SMALL" => RichNumberFormat::LowerRoman,
+        "ROMAN_CAPITAL" => RichNumberFormat::UpperRoman,
+        "HANGUL_SYLLABLE" | "HANGUL_JAMO" => RichNumberFormat::HangulSyllable,
+        _ => RichNumberFormat::Decimal,
+    }
+}
+
+fn decode_hwpx_enclosure(bytes: &[u8]) -> RichNumberEnclosure {
+    let trimmed = bytes.trim_ascii();
+    if trimmed.first() == Some(&b'(') && trimmed.last() == Some(&b')') {
+        RichNumberEnclosure::Parentheses
+    } else if trimmed.last() == Some(&b')') {
+        RichNumberEnclosure::RightParenthesis
+    } else {
+        RichNumberEnclosure::Dot
+    }
+}
+
+/// Collects `((numbering_id: u32) << 8 | level: u8) -> RichListNumber` while streaming HWPX `header.xml`
+/// with zero heap allocation per `<hh:paraHead>` or paragraph lookup, failing closed past [`MAX_HWPX_NUMBERING_HEADS`].
+#[derive(Default)]
+pub(crate) struct HwpxNumberingReader {
+    map: HashMap<u64, RichListNumber>,
+    cur_id: Option<u32>,
+    cur_head: Option<(u8, RichNumberFormat, u8, [u8; HWPX_HEAD_TEXT_CAP])>,
+    overflowed: bool,
+}
+
+impl HwpxNumberingReader {
+    #[inline]
+    const fn pack_key(id: u32, level: u8) -> u64 {
+        (id as u64) << 8 | (level as u64)
+    }
+
+    pub(crate) fn on_start(&mut self, name: &str, attrs: &crate::xml_stream::Attrs<'_>) {
+        use crate::xml_stream::attr;
+        if self.overflowed {
+            return;
+        }
+        match name {
+            "hh:numbering" => {
+                self.cur_id = attr(attrs, "id").and_then(|s| s.parse::<u32>().ok());
+            }
+            "hh:paraHead" if self.cur_id.is_some() => {
+                if self.map.len() >= MAX_HWPX_NUMBERING_HEADS {
+                    self.overflowed = true;
+                    self.cur_head = None;
+                    return;
+                }
+                let lvl = attr(attrs, "level")
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .and_then(|l| l.checked_sub(1));
+                let fmt = decode_hwpx_num_format(attr(attrs, "numFormat").as_deref());
+                if let Some(level) = lvl.filter(|&l| l < 10) {
+                    self.cur_head = Some((level, fmt, 0, [0u8; HWPX_HEAD_TEXT_CAP]));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn on_text(&mut self, text: &str) {
+        if let Some((_, _, len, buf)) = self.cur_head.as_mut() {
+            let cur = usize::from(*len);
+            let take = text.len().min(HWPX_HEAD_TEXT_CAP.saturating_sub(cur));
+            if take > 0 {
+                buf[cur..cur + take].copy_from_slice(&text.as_bytes()[..take]);
+                *len = (cur + take) as u8;
+            }
+        }
+    }
+
+    pub(crate) fn on_end(&mut self, name: &str) {
+        match name {
+            "hh:paraHead" => {
+                if let (Some(id), Some((lvl, format, len, buf))) =
+                    (self.cur_id, self.cur_head.take())
+                {
+                    let enclosure = decode_hwpx_enclosure(&buf[..usize::from(len)]);
+                    self.map.insert(
+                        Self::pack_key(id, lvl),
+                        RichListNumber { format, enclosure },
+                    );
+                }
+            }
+            "hh:numbering" => {
+                self.cur_id = None;
+                self.cur_head = None;
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn check_budget(&self) -> Result<(), crate::EasyOfficeError> {
+        if self.overflowed {
+            return Err(crate::EasyOfficeError::ResourceBudgetExceeded(format!(
+                "HWPX 번호 머리글 개수가 한도({MAX_HWPX_NUMBERING_HEADS}개)를 넘었습니다."
+            )));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn get(&self, id: u32, level: u8) -> Option<RichListNumber> {
+        if id == 0 {
+            return None;
+        }
+        let num = self.map.get(&Self::pack_key(id, level)).copied()?;
+        (num != RichListNumber::default()).then_some(num)
     }
 }

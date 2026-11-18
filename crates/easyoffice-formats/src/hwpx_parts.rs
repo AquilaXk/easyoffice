@@ -103,11 +103,13 @@ impl Default for HwpxCharShape {
     }
 }
 
-/// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment, list heading type, and left margin (HWPUNIT).
+/// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment, list heading type/id/level, and left margin (HWPUNIT).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwpxParaShape {
     pub align: Option<&'static str>,
     pub heading_type: &'static str,
+    pub heading_id_ref: u32,
+    pub heading_level: u8,
     pub left_margin: u32,
     /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
     pub intent: i32,
@@ -120,6 +122,8 @@ impl Default for HwpxParaShape {
         Self {
             align: None,
             heading_type: HEADING_NONE,
+            heading_id_ref: 0,
+            heading_level: 0,
             left_margin: 0,
             intent: 0,
             line_percent: DEFAULT_LINE_PERCENT,
@@ -185,11 +189,16 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         Some(a) => format!("<hh:align horizontal=\"{a}\" vertical=\"BASELINE\"/>"),
         None => "<hh:align vertical=\"BASELINE\"/>".to_string(),
     };
+    let heading_ref = if shape.heading_type == HEADING_NONE {
+        0
+    } else {
+        shape.heading_id_ref.max(1)
+    };
     format!(
         concat!(
             "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
             "{align}",
-            "<hh:heading type=\"{heading_type}\" idRef=\"{heading_ref}\" level=\"0\"/>",
+            "<hh:heading type=\"{heading_type}\" idRef=\"{heading_ref}\" level=\"{heading_level}\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
             "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
@@ -201,7 +210,8 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         id = id,
         align = align_xml,
         heading_type = shape.heading_type,
-        heading_ref = u8::from(shape.heading_type != HEADING_NONE),
+        heading_ref = heading_ref,
+        heading_level = shape.heading_level,
         left = shape.left_margin,
         intent = shape.intent,
         line = shape.line_percent
@@ -226,6 +236,17 @@ pub(crate) fn header_xml_with(
     para_shapes: &[HwpxParaShape],
     extra_styles: &[HwpxStyle],
     extra_fonts: &[String],
+) -> String {
+    header_xml_with_lists(char_shapes, para_shapes, extra_styles, extra_fonts, None)
+}
+
+/// [`header_xml_with`] with explicit `hh:numberings` XML when `numberings_xml` is `Some`.
+pub(crate) fn header_xml_with_lists(
+    char_shapes: &[HwpxCharShape],
+    para_shapes: &[HwpxParaShape],
+    extra_styles: &[HwpxStyle],
+    extra_fonts: &[String],
+    numberings_xml: Option<&str>,
 ) -> String {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hh:head xmlns:hh=\"{NS_HEAD}\" xmlns:hc=\"{NS_CORE}\" version=\"1.4\" secCnt=\"1\">"
@@ -268,16 +289,26 @@ pub(crate) fn header_xml_with(
     }
     xml.push_str("</hh:charProperties>");
     xml.push_str("<hh:tabProperties itemCnt=\"1\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/></hh:tabProperties>");
-    let uses = |heading: &str| {
-        para_shapes
-            .iter()
-            .any(|shape| shape.heading_type == heading)
-    };
-    if uses(HEADING_NUMBER) {
-        xml.push_str(NUMBERING_XML);
+    let max_bullet_id = para_shapes
+        .iter()
+        .filter(|shape| shape.heading_type == HEADING_BULLET)
+        .map(|shape| shape.heading_id_ref.max(1))
+        .max()
+        .unwrap_or(0);
+    let uses_number = para_shapes
+        .iter()
+        .any(|shape| shape.heading_type == HEADING_NUMBER);
+    match numberings_xml {
+        Some(custom) => xml.push_str(custom),
+        None if uses_number => xml.push_str(NUMBERING_XML),
+        None => {}
     }
-    if uses(HEADING_BULLET) {
-        xml.push_str(BULLET_XML);
+    if max_bullet_id > 0 {
+        if max_bullet_id == 1 {
+            xml.push_str(BULLET_XML);
+        } else {
+            xml.push_str(&crate::rich_list_writers::hwpx_bullets_xml(max_bullet_id));
+        }
     }
     xml.push_str(&format!(
         "<hh:paraProperties itemCnt=\"{}\">",

@@ -1,3 +1,10 @@
+//! Reference extraction (`A1:B2`, `Sheet!A1`, `OFFSET`, `INDIRECT`) for scalar and streaming callers.
+//!
+//! 참조 구현: `INDIRECT`의 구조적 참조(`Table1[Q1]`, `Table1[a]:Table1[b]`, `Table1`) 해석은
+//! Univer (`packages/engine-formula/src/functions/lookup/indirect/index.ts`, Apache-2.0, commit
+//! 5a06a7842c8e13fa0646d0733dc3662cf4b330b9) 및 IronCalc (`base/src/expressions/parser/mod.rs`,
+//! MIT OR Apache-2.0, `THIRD_PARTY_NOTICES.md`)의 표·열 색인 해석 규칙을 따른다.
+
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
     SheetEngine, WorkbookEngine,
@@ -52,6 +59,10 @@ fn split_once_unquoted_colon(s: &str) -> Result<Option<(&str, &str)>, FormulaErr
             b'\'' => {
                 in_quotes = true;
             }
+            b'[' if !in_quotes => {
+                i = easyoffice_formats::group_end(s, i).ok_or(FormulaError::Ref)?;
+                continue;
+            }
             b':' if !in_quotes => {
                 return Ok(Some((&s[..i], &s[i + 1..])));
             }
@@ -63,6 +74,19 @@ fn split_once_unquoted_colon(s: &str) -> Result<Option<(&str, &str)>, FormulaErr
         return Err(FormulaError::Ref);
     }
     Ok(None)
+}
+
+fn expr_to_sheet_range(expr: Expr) -> Result<(Option<String>, CellRange), FormulaError> {
+    match expr {
+        Expr::Cell(c) => Ok((None, CellRange::new(c, c).map_err(|_| FormulaError::Ref)?)),
+        Expr::Range(r) => Ok((None, r)),
+        Expr::SheetCell(sc) => Ok((
+            Some(sc.sheet),
+            CellRange::new(sc.coord, sc.coord).map_err(|_| FormulaError::Ref)?,
+        )),
+        Expr::SheetRange(sr) => Ok((Some(sr.sheet), sr.range)),
+        _ => Err(FormulaError::Ref),
+    }
 }
 
 fn parse_indirect_sheet_token(sh_raw: &str) -> Result<String, FormulaError> {
@@ -125,6 +149,37 @@ impl SheetEngine {
         }
     }
 
+    fn parse_indirect_structured_side(
+        &self,
+        raw: &str,
+        tctx: &crate::table_index::TableCtx<'_>,
+    ) -> Result<(Option<String>, CellRange), FormulaError> {
+        let side = raw.trim();
+        if let Some(open) = side.find('[') {
+            if easyoffice_formats::group_end(side, open) != Some(side.len()) {
+                return Err(FormulaError::Ref);
+            }
+            let table = if open == 0 {
+                None
+            } else {
+                let name = &side[..open];
+                if name
+                    .chars()
+                    .any(|c| c.is_whitespace() || matches!(c, '!' | '\''))
+                {
+                    return Err(FormulaError::Ref);
+                }
+                Some(name)
+            };
+            let sref = easyoffice_formats::parse_group(&side[open..]).ok_or(FormulaError::Ref)?;
+            expr_to_sheet_range(self.tables.resolve(tctx, table, &sref))
+        } else {
+            let (sh, coord) = parse_indirect_endpoint(side)?;
+            let range = CellRange::new(coord, coord).map_err(|_| FormulaError::Ref)?;
+            Ok((sh, range))
+        }
+    }
+
     fn extract_indirect_ref<'b>(
         &self,
         args: &'b [Expr],
@@ -144,10 +199,65 @@ impl SheetEngine {
             }
         }
         let trimmed = ref_str.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed.len() > crate::parser::MAX_FORMULA_LEN {
             return Err(FormulaError::Ref);
         }
+        let tctx = crate::table_index::TableCtx {
+            index: &self.tables,
+            sheet: &self.name,
+            coord: ctx.current_coord,
+        };
+        if trimmed.contains('[') {
+            let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? else {
+                let (sh_opt, range) = self.parse_indirect_structured_side(trimmed, &tctx)?;
+                return self.qualify_indirect_range(sh_opt, range, ctx);
+            };
+            let (lhs_sh, ra) = self.parse_indirect_structured_side(lhs_raw, &tctx)?;
+            let (rhs_sh, rb) = self.parse_indirect_structured_side(rhs_raw, &tctx)?;
+            let eff_a = lhs_sh.as_deref().unwrap_or(&self.name);
+            let eff_b = rhs_sh.as_deref().unwrap_or(&self.name);
+            if !WorkbookEngine::is_same_sheet_identity(eff_a, eff_b) {
+                return Err(FormulaError::Ref);
+            }
+            let out_sh = lhs_sh.or(rhs_sh);
+            let r0 = ra
+                .start
+                .row()
+                .min(ra.end.row())
+                .min(rb.start.row())
+                .min(rb.end.row());
+            let r1 = ra
+                .start
+                .row()
+                .max(ra.end.row())
+                .max(rb.start.row())
+                .max(rb.end.row());
+            let c0 = ra
+                .start
+                .col()
+                .min(ra.end.col())
+                .min(rb.start.col())
+                .min(rb.end.col());
+            let c1 = ra
+                .start
+                .col()
+                .max(ra.end.col())
+                .max(rb.start.col())
+                .max(rb.end.col());
+            let start = PackedCellCoordinate::new(r0, c0).map_err(|_| FormulaError::Ref)?;
+            let end = PackedCellCoordinate::new(r1, c1).map_err(|_| FormulaError::Ref)?;
+            return self.qualify_indirect_range(out_sh, CellRange { start, end }, ctx);
+        }
         let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? else {
+            if !trimmed.contains('!')
+                && !self.tables.is_empty()
+                && PackedCellCoordinate::parse_a1(trimmed).is_err()
+            {
+                if let Some(expr) = self.tables.data_of_raw(trimmed, &tctx) {
+                    let (sh_opt, range) = expr_to_sheet_range(expr)?;
+                    return self.qualify_indirect_range(sh_opt, range, ctx);
+                }
+            }
             let (sh_opt, coord) = parse_indirect_endpoint(trimmed)?;
             let range = CellRange::new(coord, coord).map_err(|_| FormulaError::Ref)?;
             return self.qualify_indirect_range(sh_opt, range, ctx);

@@ -18,12 +18,128 @@
 //! first sheet.
 
 use crate::names::{name_key, NameKey};
-use crate::{CellRange, Expr, FormulaError, PackedCellCoordinate};
+use crate::{CellRange, Expr, FastMap, FormulaError, PackedCellCoordinate, WorkbookEngine};
 use easyoffice_formats::{
     fold_name, resolve, tables_within_bounds, CellBox, EasyOfficeError, RefError, SheetTable,
     StructuredRef, MAX_TABLES, MAX_TABLE_COLUMNS_TOTAL,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+const STACK_FOLD_CAP: usize = 256;
+
+/// Calls `f` with the lowercase-folded `name` using a 256-byte stack buffer or zero-copy borrow
+/// whenever `name` is already lowercase or Hangul, falling back to heap [`fold_name`] only for
+/// long (> 256 B) or non-ASCII uppercase identifiers.
+#[inline]
+pub(crate) fn with_folded<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+    if name.is_ascii() {
+        if !name.bytes().any(|b| b.is_ascii_uppercase()) {
+            return f(name);
+        }
+        if name.len() <= STACK_FOLD_CAP {
+            let mut buf = [0u8; STACK_FOLD_CAP];
+            for (dst, src) in buf[..name.len()].iter_mut().zip(name.bytes()) {
+                *dst = src.to_ascii_lowercase();
+            }
+            if let Ok(folded) = std::str::from_utf8(&buf[..name.len()]) {
+                return f(folded);
+            }
+        }
+        return f(&name.to_ascii_lowercase());
+    }
+    if !name.chars().any(char::is_uppercase) {
+        return f(name);
+    }
+    f(&fold_name(name))
+}
+
+fn ref_box_endpoint(e: &Expr) -> Result<Option<(Option<&str>, CellRange)>, FormulaError> {
+    match e {
+        Expr::ErrorLiteral(err) => Err(*err),
+        Expr::Cell(c) => Ok(CellRange::new(*c, *c).ok().map(|r| (None, r))),
+        Expr::Range(r) => Ok(Some((None, *r))),
+        Expr::SheetCell(sc) => Ok(CellRange::new(sc.coord, sc.coord)
+            .ok()
+            .map(|r| (Some(sc.sheet.as_str()), r))),
+        Expr::SheetRange(sr) => Ok(Some((Some(sr.sheet.as_str()), sr.range))),
+        _ => Ok(None),
+    }
+}
+
+/// Joins two reference expressions across the binary `:` range operator (`Table1[a]:Table1[b]`,
+/// `[@a]:[@b]`, `A2:Table1[b]`), returning their bounding rectangle on the same sheet or `#REF!`.
+pub(crate) fn join_colon_range(
+    lhs: Expr,
+    rhs: Expr,
+    cur_sheet: Option<&str>,
+) -> Result<Expr, FormulaError> {
+    let a = match ref_box_endpoint(&lhs) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Err(FormulaError::Value),
+        Err(err) => return Ok(Expr::ErrorLiteral(err)),
+    };
+    let b = match ref_box_endpoint(&rhs) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Err(FormulaError::Value),
+        Err(err) => return Ok(Expr::ErrorLiteral(err)),
+    };
+    let out_sheet = match (a.0, b.0) {
+        (None, None) => None,
+        (Some(sa), Some(sb)) => {
+            if !WorkbookEngine::is_same_sheet_identity(sa, sb) {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            }
+            Some(sa.to_string())
+        }
+        (Some(s), None) | (None, Some(s)) => {
+            let Some(cur) = cur_sheet else {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            };
+            if !WorkbookEngine::is_same_sheet_identity(s, cur) {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            }
+            None
+        }
+    };
+    let (ra, rb) = (a.1, b.1);
+    let r0 = ra
+        .start
+        .row()
+        .min(ra.end.row())
+        .min(rb.start.row())
+        .min(rb.end.row());
+    let r1 = ra
+        .start
+        .row()
+        .max(ra.end.row())
+        .max(rb.start.row())
+        .max(rb.end.row());
+    let c0 = ra
+        .start
+        .col()
+        .min(ra.end.col())
+        .min(rb.start.col())
+        .min(rb.end.col());
+    let c1 = ra
+        .start
+        .col()
+        .max(ra.end.col())
+        .max(rb.start.col())
+        .max(rb.end.col());
+    let Ok(start) = PackedCellCoordinate::new(r0, c0) else {
+        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+    };
+    let Ok(end) = PackedCellCoordinate::new(r1, c1) else {
+        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+    };
+    let single = start == end;
+    Ok(match (out_sheet, single) {
+        (None, true) => Expr::Cell(start),
+        (None, false) => Expr::Range(CellRange { start, end }),
+        (Some(sh), true) => Expr::sheet_cell(sh, start),
+        (Some(sh), false) => Expr::sheet_range(sh, CellRange { start, end }),
+    })
+}
 
 /// What a formula remembers of a reference that names no table (inside one, `[@Q1]`): a change of any table of
 /// its own sheet compiles it again, and a change on another sheet does not.
@@ -36,12 +152,13 @@ struct Entry {
     sheet: String,
     table: SheetTable,
     /// Folded column name to position in the table (the first of equal names).
-    columns: HashMap<Box<str>, u32>,
+    columns: FastMap<Box<str>, u32>,
 }
 
 impl Entry {
     fn new(sheet: String, table: SheetTable) -> Self {
-        let mut columns = HashMap::with_capacity(table.columns.len());
+        let mut columns =
+            FastMap::with_capacity_and_hasher(table.columns.len(), Default::default());
         for (i, name) in table.columns.iter().enumerate() {
             columns.entry(fold_name(name).into()).or_insert(i as u32);
         }
@@ -67,7 +184,7 @@ impl Entry {
 #[derive(Debug, Clone, Default)]
 pub struct TableIndex {
     entries: Vec<Entry>,
-    by_name: HashMap<Box<str>, usize>,
+    by_name: FastMap<Box<str>, usize>,
 }
 
 /// Where a formula stands: the sheet and cell it is in (a definition of a name has no cell).
@@ -98,7 +215,7 @@ impl TableIndex {
             .into_iter()
             .map(|(sheet, table)| Entry::new(sheet, table))
             .collect();
-        let mut by_name = HashMap::with_capacity(entries.len());
+        let mut by_name = FastMap::with_capacity_and_hasher(entries.len(), Default::default());
         for (i, e) in entries.iter().enumerate() {
             by_name.entry(fold_name(&e.table.name).into()).or_insert(i);
         }
@@ -207,10 +324,9 @@ impl TableIndex {
         sref: &StructuredRef,
     ) -> Expr {
         let entry = match (table, ctx.coord) {
-            (Some(name), _) => self
-                .by_name
-                .get(fold_name(name).as_str())
-                .map(|&i| &self.entries[i]),
+            (Some(name), _) => {
+                with_folded(name, |key| self.by_name.get(key).map(|&i| &self.entries[i]))
+            }
             (None, Some(coord)) => self.containing(ctx.sheet, coord),
             (None, None) => None,
         };
@@ -227,7 +343,7 @@ impl TableIndex {
         let cells = resolve(
             sref,
             &entry.table,
-            |name| entry.columns.get(fold_name(name).as_str()).copied(),
+            |name| with_folded(name, |key| entry.columns.get(key).copied()),
             row,
         );
         match cells {
@@ -247,5 +363,10 @@ impl TableIndex {
             at: false,
         };
         Some(self.resolve(ctx, Some(&self.entries[i].table.name), &sref))
+    }
+
+    /// Zero-allocation bare table lookup using [`with_folded`] stack folding (for `INDIRECT("Table1")`).
+    pub(crate) fn data_of_raw(&self, raw_name: &str, ctx: &TableCtx<'_>) -> Option<Expr> {
+        with_folded(raw_name, |folded| self.data_of(folded, ctx))
     }
 }

@@ -8,8 +8,8 @@
 //! Document metadata (template flag, issuing agency, approval lines) lives in OPF `opf:meta`.
 
 use crate::hwpx_parts::{
-    header_xml, header_xml_with, manifest_xml, section_properties_xml, text_width, HwpxCharShape,
-    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
+    header_xml, header_xml_with_lists, manifest_xml, section_properties_xml, text_width,
+    HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
     DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER, HWPUNIT_PER_TWIP,
     LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
@@ -21,6 +21,9 @@ use crate::rich_document::{
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
 use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_end};
+use crate::rich_list_writers::{
+    hwpx_numberings_xml, hwpx_ordered_run_ids, list_kind_of, plan_lists, HWPX_MAX_LIST_LEVEL,
+};
 use crate::rich_page_frame::{hwpx_frame_control, hwpx_number_control};
 use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
@@ -126,11 +129,29 @@ impl ShapeTables {
         idx
     }
 
-    fn write_paragraph(&mut self, sec: &mut SectionWriter, p: &RichParagraph) {
+    fn write_paragraph(
+        &mut self,
+        sec: &mut SectionWriter,
+        p: &RichParagraph,
+        ordered_run_id: Option<u32>,
+    ) {
         let level = if (1..=6).contains(&p.heading_level) {
             p.heading_level
         } else {
             0
+        };
+        let list_kind = list_kind_of(p);
+        let list_lvl = if list_kind.is_some() {
+            p.list_level.min(HWPX_MAX_LIST_LEVEL)
+        } else {
+            0
+        };
+        let (heading_type, heading_id_ref) = match list_kind {
+            Some(crate::RichListKind::Bullet) => (HEADING_BULLET, u32::from(list_lvl % 3) + 1),
+            Some(crate::RichListKind::Ordered) => {
+                (HEADING_NUMBER, ordered_run_id.unwrap_or(1).max(1))
+            }
+            None => (HEADING_NONE, 0),
         };
         let para = HwpxParaShape {
             align: match p.alignment {
@@ -140,16 +161,14 @@ impl ShapeTables {
                 Some(RichAlignment::Right) => Some("RIGHT"),
                 Some(RichAlignment::Justify) => Some("JUSTIFY"),
             },
-            heading_type: match p.list {
-                Some(crate::RichListKind::Bullet) => HEADING_BULLET,
-                Some(crate::RichListKind::Ordered) => HEADING_NUMBER,
-                None => HEADING_NONE,
-            },
+            heading_type,
+            heading_id_ref,
+            heading_level: list_lvl,
             left_margin: p
                 .left_indent_twips
                 .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))
-                .unwrap_or(if p.list.is_some() {
-                    LIST_LEFT_MARGIN
+                .unwrap_or(if list_kind.is_some() {
+                    LIST_LEFT_MARGIN * (u32::from(list_lvl) + 1)
                 } else {
                     0
                 }),
@@ -428,6 +447,9 @@ impl HwpxCodec {
         sec.margins = doc.page_frame.margins;
         sec.paper = doc.page_frame.paper;
         sec.binding = doc.page_frame.binding;
+        let list_plan = plan_lists(&doc.blocks);
+        let ordered_ids = hwpx_ordered_run_ids(&list_plan);
+        let numberings_xml = hwpx_numberings_xml(&list_plan);
         for (header, paragraphs) in [
             (true, &doc.page_frame.header),
             (false, &doc.page_frame.footer),
@@ -437,7 +459,7 @@ impl HwpxCodec {
             }
             let mut fragment = SectionWriter::fragment(sec.next_para_id);
             for p in paragraphs {
-                shapes.write_paragraph(&mut fragment, &frame_paragraph(p));
+                shapes.write_paragraph(&mut fragment, &frame_paragraph(p), None);
             }
             sec.next_para_id = fragment.next_para_id;
             sec.frame_controls.push_str(&hwpx_frame_control(
@@ -446,9 +468,17 @@ impl HwpxCodec {
                 &fragment.xml,
             ));
         }
-        for block in &doc.blocks {
+        for (idx, block) in doc.blocks.iter().enumerate() {
             match block {
-                RichBlock::Paragraph(p) => shapes.write_paragraph(&mut sec, p),
+                RichBlock::Paragraph(p) => {
+                    let ordered_id = list_plan
+                        .block_run
+                        .get(idx)
+                        .copied()
+                        .flatten()
+                        .and_then(|run| ordered_ids.get(run).copied());
+                    shapes.write_paragraph(&mut sec, p, ordered_id);
+                }
                 RichBlock::Table(table) => {
                     sec.table_paragraph(&table.rows, table.span_map().as_ref());
                 }
@@ -458,11 +488,12 @@ impl HwpxCodec {
                 }
             }
         }
-        let header = header_xml_with(
+        let header = header_xml_with_lists(
             &shapes.char_shapes,
             &shapes.para_shapes,
             &shapes.styles,
             &shapes.fonts,
+            Some(&numberings_xml),
         );
         let meta = HwpxPayload {
             title: doc.display_title(),

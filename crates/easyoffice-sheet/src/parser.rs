@@ -1,5 +1,12 @@
+//! Formula lexer and recursive-descent parser.
+//!
+//! 참조 구현: 구조적 참조 토큰 결합과 이항 `:` 범위 연산자(`Table1[a]:Table1[b]`, `[@a]:[@b]`)는
+//! IronCalc (`base/src/expressions/parser/mod.rs` lines 1189-1370, MIT OR Apache-2.0, commit
+//! 01b39c1ad26252f7b6c810440e8433a932daee07) 및 Univer (`table-reference-object.ts`, Apache-2.0,
+//! `THIRD_PARTY_NOTICES.md`)의 범위 결합 규칙을 따른다.
+
 use crate::names::{name_key, NameKey};
-use crate::table_index::{implicit_key, TableCtx};
+use crate::table_index::{implicit_key, join_colon_range, with_folded, TableCtx};
 use crate::{CellRange, FormulaError, PackedCellCoordinate};
 
 use std::borrow::Cow;
@@ -409,7 +416,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Expr, FormulaError> {
         let sref = easyoffice_formats::parse_group(group).ok_or(FormulaError::Value)?;
         self.table_keys.push(match table {
-            Some(name) => name_key(&easyoffice_formats::fold_name(name)),
+            Some(name) => with_folded(name, name_key),
             None => implicit_key(self.tables.map_or("", |ctx| ctx.sheet)),
         });
         let resolved = match self.tables {
@@ -554,8 +561,30 @@ impl<'a> Parser<'a> {
         self.parse_postfix(depth)
     }
 
+    fn colon_starts_structured(&self) -> bool {
+        matches!(self.tokens.get(self.pos), Some(Token::Colon))
+            && (matches!(self.tokens.get(self.pos + 1), Some(Token::Structured(_)))
+                || (matches!(self.tokens.get(self.pos + 1), Some(Token::Ident(_)))
+                    && matches!(self.tokens.get(self.pos + 2), Some(Token::Structured(_)))))
+    }
+
     fn parse_postfix(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let specs_mark = self.ref_specs.as_ref().map_or(0, Vec::len);
         let mut expr = self.parse_primary(depth)?;
+        while matches!(self.peek(), Some(Token::Colon)) {
+            self.next();
+            let rhs = self.parse_primary(depth + 1)?;
+            expr = join_colon_range(expr, rhs, self.tables.map(|ctx| ctx.sheet))?;
+            if let Some(specs) = self.ref_specs.as_mut() {
+                specs.truncate(specs_mark);
+                if matches!(
+                    expr,
+                    Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_)
+                ) {
+                    specs.push(RefSpec::Fixed);
+                }
+            }
+        }
         // `LAMBDA(x, x+1)(2)`: a function call result that is called again.
         while matches!(self.peek(), Some(Token::LParen))
             && (matches!(&expr, Expr::FuncCall(f) if f.name == "LAMBDA")
@@ -681,7 +710,7 @@ impl<'a> Parser<'a> {
         if name.eq_ignore_ascii_case("FALSE") {
             return Ok(Expr::Boolean(false));
         }
-        if matches!(self.peek(), Some(Token::Colon)) {
+        if matches!(self.peek(), Some(Token::Colon)) && !self.colon_starts_structured() {
             self.next();
             return self.finish_range(&name);
         }
@@ -724,7 +753,7 @@ impl<'a> Parser<'a> {
         let Some(cell_ident) = self.next_range_endpoint_string() else {
             return Err(FormulaError::Ref);
         };
-        if matches!(self.peek(), Some(Token::Colon)) {
+        if matches!(self.peek(), Some(Token::Colon)) && !self.colon_starts_structured() {
             self.next();
             let Some(s) = self.next_range_endpoint_string() else {
                 return Err(FormulaError::Ref);
