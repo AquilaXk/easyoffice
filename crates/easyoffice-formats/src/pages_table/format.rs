@@ -244,7 +244,7 @@ fn civil_from_days(days: i64) -> Option<(i64, i64, i64)> {
 }
 
 fn date_parts(seconds: f64) -> Option<DateParts> {
-    if seconds.abs() >= MAX_DATE_SECONDS {
+    if !seconds.is_finite() || seconds.abs() >= MAX_DATE_SECONDS {
         return None;
     }
     let whole = seconds.floor() as i64;
@@ -261,6 +261,12 @@ fn date_parts(seconds: f64) -> Option<DateParts> {
         minute: in_day % SECONDS_PER_HOUR / SECONDS_PER_MINUTE,
         second: in_day % SECONDS_PER_MINUTE,
     })
+}
+
+/// Formats seconds since 2001-01-01 UTC as `YYYY-MM-DD`.
+pub(crate) fn format_iso_date(seconds: f64) -> Option<String> {
+    let t = date_parts(seconds)?;
+    Some(format!("{:04}-{:02}-{:02}", t.year, t.month, t.day))
 }
 
 /// Writes one pattern field (`yyyy`, `yy`, `M`/`MM`, `d`/`dd`, `H`/`HH`, `h`/`hh`, `m`/`mm`, `s`/`ss`, `a`/`aa`).

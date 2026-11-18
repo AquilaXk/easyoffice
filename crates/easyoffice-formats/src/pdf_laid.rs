@@ -280,15 +280,22 @@ pub(crate) fn laid_document_pages(doc: &RichDocument, rotation_degrees: u16) -> 
             };
             canvas.text(x, y, FRAME_FONT_PT, &t);
         };
-        for (n, p) in frame.header.iter().enumerate() {
+        let (hdr, ftr) = if i == 0 && frame.first_page_different {
+            (&frame.first_header, &frame.first_footer)
+        } else if (i + 1) % 2 == 0 && frame.even_odd_different {
+            (&frame.even_header, &frame.even_footer)
+        } else {
+            (&frame.header, &frame.footer)
+        };
+        for (n, p) in hdr.iter().enumerate() {
             place(
                 &mut canvas,
                 p,
                 h - to_pt(header) - FRAME_FONT_PT - n as f64 * FRAME_LINE_PT,
             );
         }
-        let last = frame.footer.len().saturating_sub(1);
-        for (n, p) in frame.footer.iter().enumerate() {
+        let last = ftr.len().saturating_sub(1);
+        for (n, p) in ftr.iter().enumerate() {
             place(
                 &mut canvas,
                 p,

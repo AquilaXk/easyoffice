@@ -75,6 +75,7 @@ fn sample() -> RichDocument {
             margins: Some(MARGINS),
             paper: Some(RichPaper::A4),
             binding: Default::default(),
+            ..RichPageFrame::default()
         },
     }
 }
@@ -416,10 +417,7 @@ fn hwpx_even_and_odd_headers_and_second_sections_are_reported() {
     let source = RichDocument {
         page_frame: RichPageFrame {
             header: vec![para(vec![RichRun::plain("양쪽")], None)],
-            footer: Vec::new(),
-            margins: None,
-            paper: None,
-            binding: Default::default(),
+            ..RichPageFrame::default()
         },
         blocks: vec![RichBlock::Paragraph(para(
             vec![RichRun::plain("본문")],

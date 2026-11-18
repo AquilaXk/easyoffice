@@ -115,12 +115,10 @@ impl Reader<'_> {
                 }
                 Ok(blocks)
             }
-            ty::IMAGE => Ok(self.read_picture(obj)?.into_iter().collect()),
-            ty::TABLE_INFO => Ok(self
-                .read_table(obj)?
-                .map(RichBlock::Table)
-                .into_iter()
-                .collect()),
+            ty::IMAGE => self.read_picture_or_equation(obj, true),
+            ty::EQUATION => self.read_standalone_equation(obj, true),
+            ty::TABLE_INFO => self.read_table_blocks(obj),
+            ty::CHART | ty::CHART_LEGACY => self.read_chart(obj, true),
             other => {
                 self.skip(format!(
                     "쪽 위의 개체: {}(형식 {other})",

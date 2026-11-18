@@ -326,8 +326,6 @@ impl Reader {
                 .filter(|s| para.slmult && *s > 0)
                 .and_then(|s| u16::try_from((i64::from(s) * 100 + 120) / 240).ok());
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
-                list_level: 0,
-                list_number: None,
                 runs,
                 alignment: para.align,
                 heading_level: para.heading,
@@ -335,11 +333,7 @@ impl Reader {
                 left_indent_twips,
                 first_line_indent_twips: para.first_line,
                 line_spacing_percent,
-                toc: None,
-                bookmark: None,
-                toc_page: None,
-                toc_dots: false,
-                page_break_before: false,
+                ..RichParagraph::default()
             }));
         }
         Ok(())

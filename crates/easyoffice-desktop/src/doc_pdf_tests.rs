@@ -339,7 +339,7 @@ fn framed_document(landscape: bool) -> RichDocument {
         } else {
             RichPaper::A4
         }),
-        binding: Default::default(),
+        ..RichPageFrame::default()
     };
     doc
 }

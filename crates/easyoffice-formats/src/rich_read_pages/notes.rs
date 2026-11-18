@@ -1,15 +1,17 @@
 //! Text that lives outside the main text flow: shape/text-box text (placed where the shape is
-//! anchored) and footnotes, headers and footers (appended after the body under a heading).
+//! anchored) and footnotes, headers, footers, comments and tracked changes (appended after the
+//! body under a heading).
 
 use super::{reference, Flow, Reader};
 use crate::pages_proto::{ArchiveObject, Message};
-use crate::pages_schema::{footnote, header_footer, shape, ty};
+use crate::pages_schema::{footnote, header_footer, shape, storage};
 use crate::{EasyOfficeError, RichBlock, RichParagraph, RichRun};
 
 /// Appendix headings (heading level 2 paragraphs).
 const FOOTNOTE_HEADING: &str = "각주";
 const ENDNOTE_HEADING: &str = "미주";
 const COMMENT_HEADING: &str = "댓글";
+const CHANGE_HEADING: &str = "변경 추적";
 const HEADER_HEADING: &str = "머리글";
 const FOOTER_HEADING: &str = "바닥글";
 const APPENDIX_HEADING_LEVEL: u8 = 2;
@@ -60,8 +62,9 @@ impl Reader<'_> {
     /// mark in the body).
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let mut out = Vec::new();
-        let marks = self.footnote_marks(body)?;
-        self.note_numbering_rule(!marks.is_empty());
+        let body_text = body.text(storage::TEXT)?;
+        let deleted = self.deleted_ranges(body, &body_text)?;
+        let marks = self.footnote_marks(body, &deleted)?;
         for mark in marks {
             let Some(obj) = self.objects.get(mark.id) else {
                 continue;
@@ -87,48 +90,7 @@ impl Reader<'_> {
         Ok(out)
     }
 
-    /// Distinct non-empty paragraphs of every header (or footer) storage, in object order.
-    fn header_footer_blocks(&mut self, field: u32) -> Result<Vec<RichBlock>, EasyOfficeError> {
-        let mut ids: Vec<u64> = self
-            .objects
-            .objects
-            .iter()
-            .filter(|(_, o)| o.type_id == ty::HEADER_FOOTER_LIST)
-            .map(|(id, _)| *id)
-            .collect();
-        ids.sort_unstable();
-        let mut out: Vec<RichBlock> = Vec::new();
-        for id in ids {
-            let Some(obj) = self.objects.get(id) else {
-                continue;
-            };
-            let list = Message::parse(&obj.payload)?;
-            for entry in list.subs(field)? {
-                let Some(storage_id) = entry.varint(1) else {
-                    continue;
-                };
-                let Some(st) = self.storage_message(storage_id) else {
-                    continue;
-                };
-                // Page-number fields and other marks in headers and footers are not reported as
-                // skipped; pictures always are.
-                self.quiet = true;
-                let blocks = self.convert_storage(&st, Flow::Nested);
-                self.quiet = false;
-                for block in blocks? {
-                    if non_empty(&block) && !out.contains(&block) {
-                        out.push(block);
-                    } else if let RichBlock::Image(image) = &block {
-                        // The same logo repeats in every header/footer variant: count it once.
-                        self.images.release(image);
-                    }
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// Appendix after the body: footnotes, then header and footer text, each under a heading.
+    /// Appendix after the body: footnotes, active headers/footers, comments and tracked changes.
     pub(super) fn appendix_blocks(
         &mut self,
         body: &Message<'_>,
@@ -148,17 +110,19 @@ impl Reader<'_> {
                 })
             })
             .collect();
+        let changes = self.tracked_change_blocks(body)?;
         let sections = [
             (note_heading, self.footnote_blocks(body)?),
             (
                 HEADER_HEADING,
-                self.header_footer_blocks(header_footer::HEADERS)?,
+                self.appendix_header_footer_blocks(body, header_footer::HEADERS)?,
             ),
             (
                 FOOTER_HEADING,
-                self.header_footer_blocks(header_footer::FOOTERS)?,
+                self.appendix_header_footer_blocks(body, header_footer::FOOTERS)?,
             ),
             (COMMENT_HEADING, comments),
+            (CHANGE_HEADING, changes),
         ];
         let mut out = Vec::new();
         for (title, blocks) in sections {

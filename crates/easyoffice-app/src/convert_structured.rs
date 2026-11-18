@@ -240,6 +240,7 @@ fn parse_page_frame(
         margins,
         paper,
         binding,
+        ..RichPageFrame::default()
     })
 }
 
@@ -364,6 +365,7 @@ fn parse_paragraph(
         toc_page,
         toc_dots,
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
+        ..RichParagraph::default()
     })
 }
 

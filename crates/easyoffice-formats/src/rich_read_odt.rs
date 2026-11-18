@@ -678,6 +678,7 @@ impl<'a> OdtWalker<'a> {
                 toc_dots: toc_page.is_some() && p.toc_dots,
                 page_break_before: p.style.page_break_before
                     | std::mem::take(&mut self.pending_page_break),
+                ..RichParagraph::default()
             }));
         }
         if self.tbl_depth == 0 {

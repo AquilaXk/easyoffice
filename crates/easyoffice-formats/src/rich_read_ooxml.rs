@@ -183,6 +183,7 @@ impl Resolver<'_> {
             toc_page,
             toc_dots: toc_page.is_some() && p.tab_leader.as_deref().is_none_or(|l| l == "dot"),
             page_break_before: p.page_break_before,
+            ..RichParagraph::default()
         }
     }
 }

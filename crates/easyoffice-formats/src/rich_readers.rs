@@ -22,6 +22,7 @@ use crate::{
 pub type DecodedSlide = (String, Vec<String>, String);
 
 /// Decoded editor content.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodedContent {
     /// Ordered paragraphs and tables (DOC/HWP/PDF modules).

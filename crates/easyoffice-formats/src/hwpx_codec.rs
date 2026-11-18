@@ -8,14 +8,14 @@
 //! Document metadata (template flag, issuing agency, approval lines) lives in OPF `opf:meta`.
 
 use crate::hwpx_parts::{
-    header_xml, header_xml_with_lists, manifest_xml, section_properties_xml, text_width,
-    HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
-    DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER, HWPUNIT_PER_TWIP,
-    LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
+    header_xml, header_xml_with_lists, hwpx_col_ctrl_xml, manifest_xml, section_properties_xml,
+    text_width, HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML,
+    DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER,
+    HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{
-    frame_paragraph, RichAlignment, RichBinding, RichBlock, RichDocument, RichField,
+    frame_paragraph, RichAlignment, RichBinding, RichBlock, RichColumns, RichDocument, RichField,
     RichPageMargins, RichPaper, RichParagraph,
 };
 use crate::rich_image::{check_document_images, RichImage};
@@ -203,7 +203,7 @@ impl ShapeTables {
         } else {
             0
         };
-        sec.open_paragraph_with(para_pr, style);
+        sec.open_paragraph_with_cols(para_pr, style, p.columns);
         let groups = external_link_groups(&p.runs);
         if groups.is_empty() {
             let char_pr = intern(&mut self.char_shapes, &mut self.char_map, base);
@@ -251,6 +251,8 @@ struct SectionWriter {
     next_para_id: u32,
     next_table_id: u32,
     sec_pr_pending: bool,
+    track_columns: bool,
+    current_columns: Option<RichColumns>,
     /// `hp:ctrl` header and footer of the page, written into the run that holds the section properties.
     frame_controls: String,
     /// Page margins and paper of the section (`hp:pagePr`); the defaults when `None`.
@@ -268,6 +270,8 @@ impl SectionWriter {
             next_para_id: 0,
             next_table_id: 1,
             sec_pr_pending: true,
+            track_columns: true,
+            current_columns: None,
             frame_controls: String::new(),
             margins: None,
             paper: None,
@@ -282,6 +286,8 @@ impl SectionWriter {
             next_para_id: first_para_id,
             next_table_id: 1,
             sec_pr_pending: false,
+            track_columns: false,
+            current_columns: None,
             frame_controls: String::new(),
             margins: None,
             paper: None,
@@ -300,10 +306,16 @@ impl SectionWriter {
     }
 
     fn open_paragraph(&mut self) {
-        self.open_paragraph_with(0, 0);
+        let cols = self.current_columns;
+        self.open_paragraph_with_cols(0, 0, cols);
     }
 
-    fn open_paragraph_with(&mut self, para_pr: usize, style: usize) {
+    fn open_paragraph_with_cols(
+        &mut self,
+        para_pr: usize,
+        style: usize,
+        cols: Option<RichColumns>,
+    ) {
         self.xml.push_str(&format!(
             "<hp:p id=\"{}\" paraPrIDRef=\"{para_pr}\" styleIDRef=\"{style}\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
             self.next_para_id
@@ -311,14 +323,22 @@ impl SectionWriter {
         self.next_para_id += 1;
         if self.sec_pr_pending {
             self.sec_pr_pending = false;
+            self.current_columns = cols;
             self.xml.push_str("<hp:run charPrIDRef=\"0\">");
             self.xml.push_str(&section_properties_xml(
                 self.margins.as_ref(),
                 self.paper.as_ref(),
                 self.binding,
+                cols,
             ));
             self.xml.push_str(&self.frame_controls);
             self.xml.push_str("</hp:run>");
+        } else if self.track_columns && cols != self.current_columns {
+            self.current_columns = cols;
+            self.xml.push_str(&format!(
+                "<hp:run charPrIDRef=\"0\">{}</hp:run>",
+                hwpx_col_ctrl_xml(cols)
+            ));
         }
     }
 

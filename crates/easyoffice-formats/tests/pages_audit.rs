@@ -163,9 +163,11 @@ fn marks_without_a_rich_model_equivalent_are_reported_by_kind_and_count() {
     let bookmark = b.add(2035, &f_str(1, "uuid"));
     let insertion = b.add(2060, &f_varint(1, 1));
     let deletion = b.add(2060, &f_varint(1, 2));
+    let change_unknown = b.add(2060, &f_varint(1, 99));
     let comment = b.add(2033, &f_str(2, "c"));
     let date = b.add(2034, &f_str(1, "d"));
     let unknown = b.add(2099, &[]);
+    // Indexes: 링0 크1 메2 일3 책4 갈5 피6 삽7 입8 삭9 제10 댓11 글12 날13 짜14 알15 수16 없17 음18
     let text = "링크메일책갈피삽입삭제댓글날짜알수없음";
     let st = b.add(
         2001,
@@ -179,23 +181,33 @@ fn marks_without_a_rich_model_equivalent_are_reported_by_kind_and_count() {
                         (0, Some(link)),
                         (2, Some(link2)),
                         (4, None),
-                        (8, Some(date)),
+                        (13, Some(date)),
                     ],
                 ),
-                table_field(15, &[(4, Some(bookmark)), (6, None)]),
-                table_field(21, &[(6, Some(insertion))]),
-                table_field(22, &[(8, Some(deletion))]),
-                table_field(19, &[(10, Some(comment)), (12, Some(unknown))]),
+                table_field(15, &[(4, Some(bookmark)), (7, None)]),
+                table_field(
+                    21,
+                    &[(7, Some(insertion)), (9, None), (15, Some(change_unknown))],
+                ),
+                table_field(22, &[(9, Some(deletion)), (11, None)]),
+                table_field(19, &[(11, Some(comment)), (15, Some(unknown))]),
             ],
         ),
     );
     let (doc, warnings) = open(&body_only(b, st)).expect("opens");
-    assert_eq!(paragraph_texts(&doc), vec![text]);
+    assert_eq!(
+        paragraph_texts(&doc),
+        vec![
+            "링크메일책갈피삽입댓글날짜알수없음",
+            "변경 추적",
+            "[삽입] 삽입",
+            "[삭제] 삭제",
+        ]
+    );
     for expected in [
         "날짜·시각 필드(저장된 글자만 가져옴) 1개",
         "책갈피 1개",
-        "변경 추적 삽입 표시(글자는 그대로 가져옴) 1개",
-        "변경 추적 삭제 표시(삭제된 글자도 그대로 가져옴) 1개",
+        "변경 추적 1개",
         "읽을 수 없는 댓글 1개",
         "글 속 표시(형식 2099) 1개",
     ] {
@@ -247,6 +259,7 @@ fn newer_footnote_table_and_mark_character_are_numbered_like_the_fixture_layout(
 
 #[test]
 fn multi_column_paragraph_ranges_are_reported_through_the_style_chain() {
+    use easyoffice_formats::RichColumns;
     let mut b = DocBuilder::default();
     let equal = |count: u64| f_bytes(11, &f_bytes(7, &f_bytes(1, &f_varint(1, count))));
     let base = b.add(2024, &equal(1));
@@ -269,14 +282,22 @@ fn multi_column_paragraph_ranges_are_reported_through_the_style_chain() {
             )],
         ),
     );
-    let (_, warnings) = open(&body_only(b, st)).expect("opens");
-    assert!(
-        warned(
-            &warnings,
-            "다단 문단 구간(단 나누기 없이 한 단으로 가져옴) 2개"
-        ),
-        "{warnings:?}"
-    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    assert!(!warned(&warnings, "다단"), "{warnings:?}");
+    let cols: Vec<Option<RichColumns>> = doc
+        .blocks
+        .iter()
+        .filter_map(|bl| match bl {
+            RichBlock::Paragraph(p) => Some(p.columns),
+            _ => None,
+        })
+        .collect();
+    let expected_two = Some(RichColumns {
+        count: 2,
+        equal: true,
+        gap_twips: 0,
+    });
+    assert_eq!(cols, vec![None, expected_two, expected_two, None]);
 }
 
 #[test]
@@ -576,24 +597,47 @@ fn endnotes_use_their_own_heading_and_note_settings_set_the_numbers() {
 }
 
 #[test]
-fn per_page_footnote_restart_is_reported_because_pages_are_not_laid_out() {
+fn per_page_footnote_restart_resets_across_manual_and_wrapped_page_breaks() {
     let mut b = DocBuilder::default();
-    settings_object(&mut b, 0, 2, 1); // footnotes, symbolic, restart each page
-    let st_note = b.add(2001, &DocBuilder::storage_payload("주", &[], &[], &[], &[]));
-    let note = b.add(2012, &f_ref(2, st_note));
+    settings_object(&mut b, 0, 2, 1); // footnotes, symbolic (*, †), restart each page
+    let notes: Vec<u64> = ["일", "이", "삼", "사"]
+        .iter()
+        .map(|t| {
+            let st_n = b.add(2001, &DocBuilder::storage_payload(t, &[], &[], &[], &[]));
+            b.add(2012, &f_ref(2, st_n))
+        })
+        .collect();
+    let long_wrap = "가나다라마바사아자차카타파하 ".repeat(180);
+    let text = format!("가{FFFC}나{FFFC}\u{c}다{FFFC}\n{long_wrap}\n라{FFFC}");
+    let m0 = 1u64;
+    let m1 = 3u64;
+    let m2 = 6u64;
+    let m3 = 8 + utf16_len(&long_wrap) + 2;
     let st = b.add(
         2001,
-        &with_tables(&format!("가{FFFC}"), &[table_field(11, &[(1, Some(note))])]),
+        &with_tables(
+            &text,
+            &[table_field(
+                11,
+                &[
+                    (m0, Some(notes[0])),
+                    (m1, Some(notes[1])),
+                    (m2, Some(notes[2])),
+                    (m3, Some(notes[3])),
+                ],
+            )],
+        ),
     );
     let (doc, warnings) = open(&body_only(b, st)).expect("opens");
-    assert_eq!(paragraph_texts(&doc), vec!["가*", "각주", "* 주"]);
     assert!(
-        warned(
-            &warnings,
-            "쪽마다 다시 시작하는 각주 번호(연속 번호로 표시) 1개"
-        ),
+        !warned(&warnings, "쪽마다 다시 시작하는 각주 번호"),
         "{warnings:?}"
     );
+    let texts = paragraph_texts(&doc);
+    assert_eq!(texts[0], "가*나\u{2020}");
+    assert_eq!(texts[1], "다*");
+    assert_eq!(texts[3], "라*");
+    assert_eq!(&texts[4..], ["각주", "* 일", "\u{2020} 이", "* 삼", "* 사"]);
 }
 
 #[test]
@@ -708,5 +752,171 @@ fn independent_character_and_paragraph_layouts_are_read_next_to_the_fixture_layo
             p.line_spacing_percent
         ),
         (Some(360), Some(720), Some(150))
+    );
+}
+
+#[test]
+#[ignore = "release benchmark: cargo test -p easyoffice-formats --release --test pages_audit bench_pd240_pages_decode_release -- --ignored --nocapture"]
+fn bench_pd240_pages_decode_release() {
+    let f_f64 = |num: u32, v: f64| -> Vec<u8> {
+        let mut o = Vec::new();
+        varint((u64::from(num) << 3) | 1, &mut o);
+        o.extend_from_slice(&v.to_le_bytes());
+        o
+    };
+    let mut b = DocBuilder::default();
+    settings_object(&mut b, 0, 2, 1);
+    let author = b.add(212, &f_str(1, "검수자"));
+    let sess = b.add(2062, &f_ref(2, author));
+    let chg_ins = b.add(2060, &cat(&[f_varint(1, 1), f_ref(2, sess)]));
+    let chg_del = b.add(2060, &cat(&[f_varint(1, 2), f_ref(2, sess)]));
+    let col2 = b.add(
+        2024,
+        &f_bytes(
+            11,
+            &f_bytes(7, &f_bytes(1, &cat(&[f_varint(1, 2), f_f32(2, 0.04)]))),
+        ),
+    );
+    let link = b.add(2032, &f_str(2, "https://example.com/item"));
+
+    // Rich-text table (40x4) with cell hyperlinks
+    let cell_st = b.add(
+        2001,
+        &cat(&[
+            DocBuilder::storage_payload("항목 바로가기", &[], &[], &[], &[]),
+            table_field(11, &[(3, Some(link)), (7, None)]),
+        ]),
+    );
+    let rt_payload = b.add(6218, &f_ref(1, cell_st));
+    let list = b.add(
+        6005,
+        &cat(&[
+            f_varint(1, 8),
+            f_bytes(
+                3,
+                &cat(&[f_varint(1, 1), f_varint(2, 1), f_ref(9, rt_payload)]),
+            ),
+        ]),
+    );
+    let mut cell_buf = vec![5u8, 9, 0, 0, 0, 0, 0, 0];
+    cell_buf.extend_from_slice(&0x0002_1070u32.to_le_bytes());
+    for v in [1u32, 2, 1, 5, 1] {
+        cell_buf.extend_from_slice(&v.to_le_bytes());
+    }
+    let offs: Vec<u8> = [0u16; 4].iter().flat_map(|v| v.to_le_bytes()).collect();
+    let row_infos: Vec<Vec<u8>> = (0..40u64)
+        .map(|r| {
+            f_bytes(
+                5,
+                &cat(&[
+                    f_varint(1, r),
+                    f_varint(2, 4),
+                    f_bytes(6, &cell_buf),
+                    f_bytes(7, &offs),
+                ]),
+            )
+        })
+        .collect();
+    let tile = b.add(6002, &cat(&row_infos));
+    let tiles = cat(&[
+        f_bytes(1, &cat(&[f_varint(1, 0), f_ref(2, tile)])),
+        f_varint(2, 256),
+    ]);
+    let model = b.add(
+        6001,
+        &cat(&[
+            f_bytes(4, &cat(&[f_bytes(3, &tiles), f_ref(17, list)])),
+            f_varint(6, 40),
+            f_varint(7, 4),
+        ]),
+    );
+    let tbl = b.add(6000, &f_ref(2, model));
+    let tbl_att = b.attachment(tbl);
+
+    // Chart (12x6)
+    let mut grid_parts = Vec::new();
+    for r in 0..12 {
+        grid_parts.push(f_str(1, &format!("시리즈{r}")));
+    }
+    for c in 0..6 {
+        grid_parts.push(f_str(2, &format!("분기{c}")));
+    }
+    for r in 0..12 {
+        let cells: Vec<Vec<u8>> = (0..6)
+            .map(|c| {
+                if (r + c) % 5 == 0 {
+                    f_bytes(1, &[])
+                } else {
+                    f_bytes(1, &f_f64(1, (r * 10 + c) as f64))
+                }
+            })
+            .collect();
+        grid_parts.push(f_bytes(3, &cat(&cells)));
+    }
+    let chart = b.add(
+        5021,
+        &f_bytes(
+            10000,
+            &cat(&[f_varint(1, 1), f_bytes(7, &cat(&grid_parts))]),
+        ),
+    );
+    let chart_att = b.attachment(chart);
+    let eq = b.add(3005, &f_str(100, "\\sum_{i=1}^{n} x_i^2"));
+    let eq_att = b.attachment(eq);
+
+    let mut body_text = String::new();
+    let mut ins_entries = Vec::new();
+    let mut del_entries = Vec::new();
+    for _ in 0..200u64 {
+        let base = utf16_len(&body_text);
+        body_text.push_str("본문 문단 앞에 추가글삭제글 이어지는 내용입니다.\n");
+        ins_entries.push((base + 9, Some(chg_ins)));
+        ins_entries.push((base + 12, None));
+        del_entries.push((base + 12, Some(chg_del)));
+        del_entries.push((base + 15, None));
+    }
+    let att_pos = utf16_len(&body_text);
+    body_text.push_str(&format!("{FFFC}\n{FFFC}\n{FFFC}"));
+    let body = b.add(
+        2001,
+        &cat(&[
+            DocBuilder::storage_payload(
+                &body_text,
+                &[],
+                &[],
+                &[],
+                &[
+                    (att_pos, Some(tbl_att)),
+                    (att_pos + 2, Some(chart_att)),
+                    (att_pos + 4, Some(eq_att)),
+                ],
+            ),
+            table_field(12, &[(0, Some(col2))]),
+            table_field(21, &ins_entries),
+            table_field(22, &del_entries),
+        ]),
+    );
+    let payload = body_only(b, body);
+
+    // Warmup
+    let (doc, _) = open(&payload).expect("warmup decode");
+    assert!(doc.blocks.len() > 200);
+
+    let iters = 100u32;
+    let started = std::time::Instant::now();
+    for _ in 0..iters {
+        let (d, _) = open(&payload).expect("bench decode");
+        std::hint::black_box(d);
+    }
+    let elapsed = started.elapsed();
+    let avg_us = elapsed.as_secs_f64() * 1_000_000.0 / f64::from(iters);
+    println!(
+        "PD-240 Pages decode bench: zip={} B, blocks={}, iters={}, total={:?}, avg={:.1} us ({:.3} ms)",
+        payload.len(),
+        doc.blocks.len(),
+        iters,
+        elapsed,
+        avg_us,
+        avg_us / 1000.0
     );
 }

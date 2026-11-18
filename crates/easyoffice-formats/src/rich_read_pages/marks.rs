@@ -1,33 +1,34 @@
-//! Marks inside a text storage: hyperlinks and footnote marks are imported, comments are listed
-//! in an appendix, and what the rich model cannot carry (bookmarks, tracked changes, fields,
-//! multi-column layouts) is counted and reported as warnings instead of being dropped silently.
-//! The tables that hold these marks differ between file versions, so entries are classified by
-//! the type of the object they point at.
+//! Marks inside a text storage: hyperlinks, footnote marks (with continuous, per-section and
+//! per-page numbering) and tracked changes are imported, comments are listed in an appendix, and
+//! what the rich model cannot carry (bookmarks, date/merge/placeholder/ruby fields) is counted
+//! and reported as warnings instead of being dropped silently.
 
-use super::numbering::list_number;
-use super::numbering::note_label;
-use super::{reference, AttrTable, Flow, Reader};
+use super::numbering::{list_number, note_label};
+use super::{
+    ends_paragraph, reference, AttrTable, Flow, Reader, PAGE_BREAK, SECTION_BREAK, TWIPS_PER_POINT,
+};
 use crate::pages_proto::Message;
-use crate::pages_schema::{column, hyperlink, settings, storage, style, ty};
+use crate::pages_schema::{change, hyperlink, settings, storage, style, ty};
+use crate::pdf_text_wrap::wrap_spans;
 use crate::{EasyOfficeError, RichListNumber};
 
-const MAX_MARK_ENTRIES: usize = 50_000;
+pub(super) const MAX_MARK_ENTRIES: usize = 50_000;
 const MAX_COMMENTS: usize = 50_000;
+const DEFAULT_FONT_SIZE_PT: f32 = 12.0;
+const DEFAULT_LINE_HEIGHT_FACTOR: f32 = 1.2;
+const MIN_WRAP_WIDTH_PT: f32 = 36.0;
+const MIN_BODY_HEIGHT_PT: f32 = 72.0;
 
 /// Warning kinds, one per mark family (reported as `kind N개`).
-const UNSAFE_LINK: &str = "허용되지 않는 형식의 하이퍼링크 주소(글자만 가져옴)";
+pub(super) const UNSAFE_LINK: &str = "허용되지 않는 형식의 하이퍼링크 주소(글자만 가져옴)";
 const UNREADABLE_COMMENT: &str = "읽을 수 없는 댓글";
-const PER_PAGE_RESTART: &str = "쪽마다 다시 시작하는 각주 번호(연속 번호로 표시)";
 const DATE_FIELD: &str = "날짜·시각 필드(저장된 글자만 가져옴)";
 const BOOKMARK: &str = "책갈피";
-const INSERTION: &str = "변경 추적 삽입 표시(글자는 그대로 가져옴)";
-const DELETION: &str = "변경 추적 삭제 표시(삭제된 글자도 그대로 가져옴)";
 const CHANGE: &str = "변경 추적";
 const OTHER_FIELD: &str = "글 속 필드(자리표시자·병합·루비)";
 const NESTED_COMMENT: &str = "도형·각주·머리글·바닥글 안의 댓글";
 const NESTED_FOOTNOTE: &str = "도형·각주·머리글·바닥글 안의 각주";
 const UNKNOWN_LIST_FORMAT: &str = "알 수 없는 목록 번호 형식(1. 형식으로 가져옴)";
-const MULTI_COLUMN: &str = "다단 문단 구간(단 나누기 없이 한 단으로 가져옴)";
 
 /// Entries `(character index, object id)` of an object attribute table that point at an object.
 /// Malformed tables and entries are ignored, while entry caps fail closed.
@@ -63,6 +64,11 @@ const fn is_comment_anchor(type_id: u32) -> bool {
     )
 }
 
+fn is_in_ranges(ranges: &[(u64, u64)], idx: u64) -> bool {
+    let pos = ranges.partition_point(|&(s, _)| s <= idx);
+    pos.checked_sub(1).is_some_and(|k| idx < ranges[k].1)
+}
+
 /// A footnote mark of a storage with the number shown at it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FootnoteMark {
@@ -76,16 +82,127 @@ const fn is_footnote(type_id: u32) -> bool {
 }
 
 impl Reader<'_> {
-    /// Footnote marks of a storage in text order with the number shown at each. Older files keep
-    /// them in one table and newer ones in another; entries are told apart from hyperlinks and
-    /// other fields by the type of the object they point at.
-    pub(super) fn footnote_marks(
-        &self,
+    /// Assigns 1-based per-page footnote numbers by walking explicit page/section breaks
+    /// (`\u{000C}`, `\u{0004}`) and wrapped visual line heights (`pdf_text_wrap::wrap_spans`
+    /// against `PageSetup` body width/height and active `RichColumns`).
+    fn number_footnotes_per_page(
+        &mut self,
         st: &Message<'_>,
+        marks: &[(u64, u64)],
+    ) -> Result<Vec<FootnoteMark>, EasyOfficeError> {
+        let text = st.text(storage::TEXT)?;
+        let para_styles = AttrTable::parse(st, storage::PARA_STYLE_TABLE)?;
+        let char_styles = AttrTable::parse(st, storage::CHAR_STYLE_TABLE)?;
+        let layout_styles = AttrTable::parse(st, storage::LAYOUT_STYLE_TABLE)?;
+
+        let mut out = Vec::with_capacity(marks.len());
+        let mut mark_cursor = 0usize;
+        let mut current_page = 0usize;
+        let mut mark_page_seen: Option<usize> = None;
+        let mut number = 0usize;
+        let mut used_height_pt = 0.0f32;
+        let mut u16_pos = 0u64;
+        let mut byte_offset = 0usize;
+
+        let mut emit_until = |limit_u16: u64, page: usize| {
+            while mark_cursor < marks.len() && marks[mark_cursor].0 < limit_u16 {
+                if mark_page_seen != Some(page) {
+                    mark_page_seen = Some(page);
+                    number = 0;
+                }
+                number += 1;
+                let (index, id) = marks[mark_cursor];
+                out.push(FootnoteMark { index, id, number });
+                mark_cursor += 1;
+            }
+        };
+
+        for line in text.split(ends_paragraph) {
+            let term = text[byte_offset + line.len()..].chars().next();
+            byte_offset += line.len() + term.map_or(0, char::len_utf8);
+
+            let para_start = u16_pos;
+            let pfmt = para_styles.at(para_start).map(|id| self.style_fmt(id));
+            let cfmt = char_styles.at(para_start).map(|id| self.style_fmt(id));
+            let cols = layout_styles
+                .at(para_start)
+                .and_then(|id| self.resolve_columns(id));
+            let col_count = cols.map_or(1u32, |c| u32::from(c.count.max(1)));
+            let gap_pt = cols.map_or(0.0f32, |c| f32::from(c.gap_twips) / TWIPS_PER_POINT);
+            let indent_pt = pfmt
+                .as_ref()
+                .and_then(|f| f.left_indent_twips)
+                .map_or(0.0f32, |tw| tw as f32 / TWIPS_PER_POINT);
+            let col_width_pt = ((self.body_width_pt
+                - gap_pt * (col_count.saturating_sub(1) as f32))
+                / (col_count as f32)
+                - indent_pt)
+                .max(MIN_WRAP_WIDTH_PT);
+
+            let size_pt = cfmt
+                .as_ref()
+                .and_then(|f| f.size_half_pt)
+                .or_else(|| pfmt.as_ref().and_then(|f| f.size_half_pt))
+                .map_or(DEFAULT_FONT_SIZE_PT, |hp| f32::from(hp) * 0.5);
+            let spacing_mult = pfmt
+                .as_ref()
+                .and_then(|f| f.line_spacing_percent)
+                .map_or(DEFAULT_LINE_HEIGHT_FACTOR, |pct| {
+                    (f32::from(pct) / 100.0) * DEFAULT_LINE_HEIGHT_FACTOR
+                });
+            let line_h_pt = (size_pt * spacing_mult).max(1.0);
+            let page_cap_pt = self.body_height_pt.max(MIN_BODY_HEIGHT_PT) * (col_count as f32);
+            let max_units = ((col_width_pt / size_pt) * 1000.0).round().max(1000.0) as u32;
+
+            let spans = wrap_spans(line, max_units);
+            let mut chars = line.char_indices().peekable();
+            let mut cur_u16 = para_start;
+
+            for (span_idx, _) in spans.iter().enumerate() {
+                if used_height_pt + line_h_pt > page_cap_pt && used_height_pt > 0.0 {
+                    current_page += 1;
+                    used_height_pt = line_h_pt;
+                } else {
+                    used_height_pt += line_h_pt;
+                }
+                let boundary_byte = spans
+                    .get(span_idx + 1)
+                    .map_or(line.len(), |next| next.start);
+                while let Some(&(_, ch)) = chars.peek().filter(|&&(b, _)| b < boundary_byte) {
+                    cur_u16 += ch.len_utf16() as u64;
+                    chars.next();
+                }
+                emit_until(cur_u16, current_page);
+            }
+            for (_, ch) in chars {
+                cur_u16 += ch.len_utf16() as u64;
+            }
+            let next_para_start = cur_u16.saturating_add(u64::from(term.is_some()));
+            emit_until(next_para_start, current_page);
+            u16_pos = next_para_start;
+
+            if matches!(term, Some(PAGE_BREAK | SECTION_BREAK)) {
+                current_page += 1;
+                used_height_pt = 0.0;
+            }
+        }
+        emit_until(u64::MAX, current_page);
+        Ok(out)
+    }
+
+    /// Footnote marks of a storage in text order with the number shown at each. Marks inside
+    /// tracked deletions are skipped.
+    pub(super) fn footnote_marks(
+        &mut self,
+        st: &Message<'_>,
+        deleted_ranges: &[(u64, u64)],
     ) -> Result<Vec<FootnoteMark>, EasyOfficeError> {
         let mut marks: Vec<(u64, u64)> = Vec::new();
         for field in [storage::FOOTNOTE_TABLE, storage::FOOTNOTE_TABLE_V2] {
             for (idx, id) in table_objects(st, field)? {
+                if is_in_ranges(deleted_ranges, idx) {
+                    continue;
+                }
                 if self.objects.get(id).is_some_and(|o| is_footnote(o.type_id)) {
                     if marks.len() >= MAX_MARK_ENTRIES {
                         return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -98,6 +215,12 @@ impl Reader<'_> {
         }
         marks.sort_unstable_by_key(|(i, _)| *i);
         marks.dedup_by_key(|(i, _)| *i);
+        if marks.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.settings.notes.numbering == settings::NUMBERING_PER_PAGE {
+            return self.number_footnotes_per_page(st, &marks);
+        }
         let restart_at_sections = self.settings.notes.numbering == settings::NUMBERING_PER_SECTION;
         let mut sections: Vec<u64> = if restart_at_sections {
             table_objects(st, storage::SECTION_TABLE)?
@@ -173,8 +296,6 @@ impl Reader<'_> {
             });
             let kept = link.filter(|id| self.link_url(*id).is_some());
             rejected += usize::from(link.is_some() && kept.is_none());
-            // Entries that do not change the link (rejected addresses, other fields) must not
-            // split runs.
             if entries
                 .last()
                 .map_or(kept.is_some(), |(_, last)| *last != kept)
@@ -252,14 +373,22 @@ impl Reader<'_> {
         Ok(out)
     }
 
-    fn mark_kind(table: u32, type_id: u32) -> Option<String> {
+    fn mark_kind(&self, table: u32, id: u64, type_id: u32, flow: Flow) -> Option<String> {
         let kind = match type_id {
             ty::HYPERLINK => return None,
             ty::DATE_FIELD => DATE_FIELD,
             ty::BOOKMARK => BOOKMARK,
             t if is_comment_anchor(t) => return None,
-            ty::CHANGE if table == storage::INSERTION_TABLE => INSERTION,
-            ty::CHANGE if table == storage::DELETION_TABLE => DELETION,
+            ty::CHANGE
+                if flow == Flow::Body
+                    && matches!(table, storage::INSERTION_TABLE | storage::DELETION_TABLE)
+                    && matches!(
+                        self.change_kind(id),
+                        Some(change::KIND_INSERTION | change::KIND_DELETION)
+                    ) =>
+            {
+                return None
+            }
             ty::CHANGE => CHANGE,
             ty::PLACEHOLDER_FIELD | ty::MERGE_FIELD | ty::RUBY_FIELD => OTHER_FIELD,
             t if is_footnote(t) => return None,
@@ -288,7 +417,7 @@ impl Reader<'_> {
                     if flow == Flow::Nested {
                         self.skip(NESTED_COMMENT);
                     }
-                } else if let Some(kind) = Self::mark_kind(table, type_id) {
+                } else if let Some(kind) = self.mark_kind(table, id, type_id, flow) {
                     self.skip(kind);
                 }
             }
@@ -296,54 +425,6 @@ impl Reader<'_> {
         Ok(())
     }
 
-    /// Columns of a column style, following its parent chain to the first style that sets them.
-    fn column_count(&self, style_id: u64) -> u64 {
-        let chain = self.objects.chain(style_id, super::MAX_STYLE_CHAIN, |o| {
-            let m = Message::parse(&o.payload).ok()?;
-            let header = m.sub(style::HEADER).ok().flatten()?;
-            reference(&header, style::HEADER_PARENT)
-        });
-        for id in chain {
-            let Some(columns) = self
-                .object(id, ty::COLUMN_STYLE)
-                .and_then(|o| Message::parse(&o.payload).ok())
-                .and_then(|m| m.sub(column::PROPS).ok().flatten())
-                .and_then(|p| p.sub(column::COLUMNS).ok().flatten())
-            else {
-                continue;
-            };
-            if let Ok(Some(equal)) = columns.sub(column::EQUAL) {
-                return equal.varint(column::EQUAL_COUNT).unwrap_or(1);
-            }
-            if let Ok(Some(unequal)) = columns.sub(column::UNEQUAL) {
-                let following = unequal
-                    .subs(column::UNEQUAL_FOLLOWING)
-                    .map_or(0, |v| v.len() as u64);
-                return following.saturating_add(1);
-            }
-        }
-        1
-    }
-
-    /// Reports a per-page restart rule, which cannot be applied without page layout.
-    pub(super) fn note_numbering_rule(&mut self, any_footnotes: bool) {
-        if any_footnotes && self.settings.notes.numbering == settings::NUMBERING_PER_PAGE {
-            self.skip(PER_PAGE_RESTART);
-        }
-    }
-
-    /// Counts paragraph ranges of the body that are set in more than one column.
-    pub(super) fn note_columns(&mut self, st: &Message<'_>) -> Result<(), EasyOfficeError> {
-        let multi = table_objects(st, storage::LAYOUT_STYLE_TABLE)?
-            .into_iter()
-            .filter(|(_, id)| self.column_count(*id) > 1)
-            .count();
-        self.skip_many(MULTI_COLUMN, multi);
-        Ok(())
-    }
-}
-
-impl Reader<'_> {
     /// Number format of an ordered list paragraph at `level`; `None` for the plain `1.` and,
     /// with a warning, for a format value this reader does not know.
     pub(super) fn list_number_of(&mut self, list_style: u64, level: u64) -> Option<RichListNumber> {
@@ -375,6 +456,7 @@ mod tests {
     use crate::pages_proto::{ArchiveObject, ObjectTable};
     use crate::pages_table::TableBudget;
     use crate::rich_read_pages::numbering::DocumentSettings;
+    use crate::rich_read_pages::sections::{DEFAULT_BODY_HEIGHT_PT, DEFAULT_BODY_WIDTH_PT};
     use crate::rich_read_pages_image::PageImages;
     use std::collections::{BTreeMap, HashMap};
 
@@ -471,6 +553,8 @@ mod tests {
             quiet: false,
             text_budget: DecodeBudget::with_limit(64 * 1024),
             settings: DocumentSettings::default(),
+            body_width_pt: DEFAULT_BODY_WIDTH_PT,
+            body_height_pt: DEFAULT_BODY_HEIGHT_PT,
         };
         assert!(matches!(
             reader.comment_texts(&st_msg),

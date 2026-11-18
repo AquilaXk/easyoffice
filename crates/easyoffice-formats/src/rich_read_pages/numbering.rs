@@ -23,6 +23,8 @@ pub(super) struct DocumentSettings {
     pub notes: NoteSettings,
     /// A page-layout document: no flowing body, content lives in drawables on pages.
     pub page_layout: bool,
+    /// Spreads with distinct left (even) and right (odd) pages (`TP.SettingsArchive.facing_pages`).
+    pub facing_pages: bool,
 }
 
 impl DocumentSettings {
@@ -34,6 +36,7 @@ impl DocumentSettings {
                 numbering: payload.varint(settings::NOTE_NUMBERING).unwrap_or(0),
             },
             page_layout: payload.varint(settings::BODY) == Some(0),
+            facing_pages: payload.varint(settings::FACING_PAGES).unwrap_or(0) != 0,
         }
     }
 }

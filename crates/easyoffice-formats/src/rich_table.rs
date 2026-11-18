@@ -13,6 +13,9 @@ use crate::EasyOfficeError;
 
 /// Largest row or column span of one region (15 bits, so a cell state fits in a `u32`).
 pub const MAX_MERGE_SPAN: u32 = 0x7FFF;
+/// Maximum hyperlinks kept on one table.
+pub const MAX_TABLE_LINKS: usize = 50_000;
+const MAX_CELL_URL_BYTES: usize = 4_096;
 /// Largest grid (rows times widest row) that regions are validated against.
 const MAX_GRID_CELLS: usize = 4_000_000;
 /// Largest grid of cells at explicit addresses.
@@ -34,12 +37,22 @@ pub struct CellMerge {
     pub col_span: u32,
 }
 
-/// A table: rows of final cell text and the merged regions over them (sorted by position once
-/// built through [`RichTable::with_merges`]).
+/// Hyperlink covering the UTF-8 byte range `start..end` inside `rows[row][col]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableCellLink {
+    pub row: u32,
+    pub col: u32,
+    pub start: u32,
+    pub end: u32,
+    pub url: String,
+}
+
+/// A table: rows of final cell text, merged regions over them, and cell-level hyperlink spans.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichTable {
     pub rows: Vec<Vec<String>>,
     pub merges: Vec<CellMerge>,
+    pub links: Vec<TableCellLink>,
 }
 
 impl From<Vec<Vec<String>>> for RichTable {
@@ -53,6 +66,7 @@ impl RichTable {
         Self {
             rows,
             merges: Vec::new(),
+            links: Vec::new(),
         }
     }
 
@@ -60,7 +74,42 @@ impl RichTable {
     /// regions and the number of regions that were dropped.
     pub fn with_merges(rows: Vec<Vec<String>>, merges: Vec<CellMerge>) -> (Self, usize) {
         let (merges, dropped) = validate_merges(&rows, &merges);
-        (Self { rows, merges }, dropped)
+        (
+            Self {
+                rows,
+                merges,
+                links: Vec::new(),
+            },
+            dropped,
+        )
+    }
+
+    /// Builds a table from cell text, candidate regions and candidate cell hyperlinks. Returns
+    /// `(table, dropped_merges, dropped_links)`.
+    pub fn with_merges_and_links(
+        rows: Vec<Vec<String>>,
+        merges: Vec<CellMerge>,
+        links: Vec<TableCellLink>,
+    ) -> (Self, usize, usize) {
+        let (merges, dropped_merges) = validate_merges(&rows, &merges);
+        let (links, dropped_links) = validate_links(&rows, links);
+        (
+            Self {
+                rows,
+                merges,
+                links,
+            },
+            dropped_merges,
+            dropped_links,
+        )
+    }
+
+    /// Validated, non-overlapping cell links sorted by `(row, col, start, end)` for single-pass writers.
+    pub(crate) fn validated_links(&self) -> Vec<TableCellLink> {
+        if self.links.is_empty() {
+            return Vec::new();
+        }
+        validate_links(&self.rows, self.links.clone()).0
     }
 
     /// Width of the widest row.
@@ -77,6 +126,72 @@ impl RichTable {
         let (merges, _) = validate_merges(&self.rows, &self.merges);
         SpanMap::build(self.column_count(), self.rows.len(), &merges)
     }
+}
+
+/// Validates a cell hyperlink address: accepts [`crate::safe_link_target`] (`http`, `https`,
+/// `mailto`, `#_Toc<N>`) plus `tel:` and `ftp://` within [`MAX_CELL_URL_BYTES`] and free of
+/// whitespace/control characters; rejects everything else (`javascript:`, `file:`, `data:`, ...).
+pub(crate) fn safe_cell_link_url(raw: &str) -> Option<&str> {
+    if let Some(ok) = crate::rich_document::safe_link_target(raw) {
+        return Some(ok);
+    }
+    let url = raw.trim();
+    let bad_char = |c: char| c <= ' ' || ('\u{7f}'..='\u{9f}').contains(&c);
+    if url.is_empty() || url.len() > MAX_CELL_URL_BYTES || url.chars().any(bad_char) {
+        return None;
+    }
+    let (scheme, rest) = url.split_once(':')?;
+    let valid = match scheme.to_ascii_lowercase().as_str() {
+        "tel" => !rest.is_empty() && !rest.starts_with(['/', '?']),
+        "ftp" => rest
+            .strip_prefix("//")
+            .is_some_and(|r| !r.is_empty() && !r.starts_with(['/', '?', '#'])),
+        _ => false,
+    };
+    valid.then_some(url)
+}
+
+fn validate_links(rows: &[Vec<String>], links: Vec<TableCellLink>) -> (Vec<TableCellLink>, usize) {
+    let total = links.len();
+    let mut candidates = Vec::with_capacity(total.min(MAX_TABLE_LINKS));
+    for mut link in links {
+        if candidates.len() >= MAX_TABLE_LINKS {
+            break;
+        }
+        let (Ok(r), Ok(c), Ok(s), Ok(e)) = (
+            usize::try_from(link.row),
+            usize::try_from(link.col),
+            usize::try_from(link.start),
+            usize::try_from(link.end),
+        ) else {
+            continue;
+        };
+        let Some(cell) = rows.get(r).and_then(|row| row.get(c)) else {
+            continue;
+        };
+        if s >= e || e > cell.len() || !cell.is_char_boundary(s) || !cell.is_char_boundary(e) {
+            continue;
+        }
+        let Some(clean_url) = safe_cell_link_url(&link.url) else {
+            continue;
+        };
+        if clean_url.len() != link.url.len() {
+            link.url = clean_url.to_string();
+        }
+        candidates.push(link);
+    }
+    candidates.sort_by_key(|l| (l.row, l.col, l.start, l.end));
+    let mut kept: Vec<TableCellLink> = Vec::with_capacity(candidates.len());
+    for link in candidates {
+        if let Some(prev) = kept.last() {
+            if prev.row == link.row && prev.col == link.col && link.start < prev.end {
+                continue;
+            }
+        }
+        kept.push(link);
+    }
+    let dropped = total.saturating_sub(kept.len());
+    (kept, dropped)
 }
 
 /// What a grid position is in a merged table.

@@ -103,10 +103,10 @@ pub use pdf_laid::{CellShown, SheetShown};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
-    RichBinding, RichBindingKind, RichBlock, RichDocument, RichField, RichListKind, RichListNumber,
-    RichNumberEnclosure, RichNumberFormat, RichPageFrame, RichPageMargins, RichPaper,
-    RichParagraph, RichRun, RichScript, RichToc, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS,
-    MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
+    RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField, RichListKind,
+    RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame, RichPageMargins,
+    RichPaper, RichParagraph, RichRun, RichScript, RichToc, MAX_PAGE_FRAME_PARAGRAPHS,
+    MAX_PAGE_MARGIN_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,
@@ -114,7 +114,9 @@ pub use rich_image::{
 };
 pub use rich_image_probe::RichImageFormat;
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
-pub use rich_table::{CellMerge, CellSpan, RichTable, SpanMap, MAX_MERGE_SPAN};
+pub use rich_table::{
+    CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
+};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };

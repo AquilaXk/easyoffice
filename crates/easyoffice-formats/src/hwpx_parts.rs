@@ -5,7 +5,9 @@
 //! style (`style id="0"`) plus optional heading styles; every paragraph and run in
 //! `section0.xml` refers to these IDs.
 
-use crate::{RichBinding, RichBindingKind, RichPageMargins, RichPaper, RichScript, XmlSanitizer};
+use crate::{
+    RichBinding, RichBindingKind, RichColumns, RichPageMargins, RichPaper, RichScript, XmlSanitizer,
+};
 
 pub(crate) const NS_HEAD: &str = "http://www.owpml.org/owpml/2011/head";
 pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
@@ -392,12 +394,28 @@ pub(crate) fn text_width(
         .max(1)
 }
 
+/// Column definition control (`hp:colPr`) inside a paragraph run.
+pub(crate) fn hwpx_col_ctrl_xml(columns: Option<RichColumns>) -> String {
+    let (count, same_sz, gap_hwp) = match columns {
+        Some(c) if c.count > 1 => (
+            c.count.min(16),
+            u8::from(c.equal),
+            u32::from(c.gap_twips) * HWPUNIT_PER_TWIP,
+        ),
+        _ => (1, 1, 0),
+    };
+    format!(
+        "<hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"{count}\" sameSz=\"{same_sz}\" sameGap=\"{gap_hwp}\"/></hp:ctrl>"
+    )
+}
+
 /// Section properties (`hp:secPr`) plus the column control; must sit in the first run of the
 /// first paragraph of each section.
 pub(crate) fn section_properties_xml(
     margins: Option<&RichPageMargins>,
     paper: Option<&RichPaper>,
     binding: RichBinding,
+    columns: Option<RichColumns>,
 ) -> String {
     let (header, footer, top, bottom) = margins.map_or(
         (4252, 4252, 5668, 4252),
@@ -407,6 +425,7 @@ pub(crate) fn section_properties_xml(
     let orientation = if landscape { "NARROWLY" } else { "WIDELY" };
     let gutter = binding.gutter * HWPUNIT_PER_TWIP;
     let gutter_type = gutter_type(binding.kind);
+    let col_ctrl = hwpx_col_ctrl_xml(columns);
     format!(
         concat!(
             "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"0\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
@@ -415,8 +434,7 @@ pub(crate) fn section_properties_xml(
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",
             "<hp:pagePr landscape=\"{orientation}\" width=\"{width}\" height=\"{height}\" gutterType=\"{gutter_type}\">",
             "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"{gutter}\" left=\"{left}\" right=\"{right}\" top=\"{top}\" bottom=\"{bottom}\"/>",
-            "</hp:pagePr></hp:secPr>",
-            "<hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"1\" sameSz=\"1\" sameGap=\"0\"/></hp:ctrl>"
+            "</hp:pagePr></hp:secPr>{col_ctrl}"
         ),
         orientation = orientation,
         width = width,
@@ -428,7 +446,8 @@ pub(crate) fn section_properties_xml(
         left = left,
         right = right,
         top = top,
-        bottom = bottom
+        bottom = bottom,
+        col_ctrl = col_ctrl
     )
 }
 

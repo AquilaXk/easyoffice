@@ -68,7 +68,38 @@ impl<'a> PageImages<'a> {
         self.bytes = self.bytes.saturating_sub(picture.bytes().len());
     }
 
+    /// Whether `obj` (`ty::IMAGE`) points at an in-bounds PNG or JPEG file in `Data/`, without
+    /// charging the document image budget.
+    pub(crate) fn has_supported_raster(&mut self, obj: &ArchiveObject) -> bool {
+        let Ok(msg) = Message::parse(&obj.payload) else {
+            return false;
+        };
+        let Some(data_id) = msg
+            .sub(image::DATA)
+            .ok()
+            .flatten()
+            .and_then(|d| d.varint(1))
+        else {
+            return false;
+        };
+        let Some(name) = self.file_name(data_id).map(str::to_string) else {
+            return false;
+        };
+        let Some(bytes) = self.files.get(&format!("{DATA_DIR}{name}")) else {
+            return false;
+        };
+        bytes.len() <= MAX_IMAGE_BYTES && sniff_format(bytes).is_some()
+    }
+
     pub(crate) fn read(&mut self, obj: &ArchiveObject) -> Result<PageImage, EasyOfficeError> {
+        self.read_with_fallback_alt(obj, None)
+    }
+
+    pub(crate) fn read_with_fallback_alt(
+        &mut self,
+        obj: &ArchiveObject,
+        fallback_alt: Option<&str>,
+    ) -> Result<PageImage, EasyOfficeError> {
         let Ok(msg) = Message::parse(&obj.payload) else {
             return Ok(PageImage::Skipped("읽을 수 없는 그림"));
         };
@@ -94,7 +125,13 @@ impl<'a> PageImages<'a> {
         if sniff_format(bytes).is_none() {
             return Ok(PageImage::Skipped(UNSUPPORTED_FORMAT));
         }
-        let Ok(mut image) = RichImage::new(bytes.clone(), description(&msg)) else {
+        let mut alt = description(&msg);
+        if alt.is_empty() {
+            if let Some(fb) = fallback_alt {
+                alt = truncate_alt(fb.trim().to_string());
+            }
+        }
+        let Ok(mut image) = RichImage::new(bytes.clone(), alt) else {
             return Ok(PageImage::Skipped("손상되었거나 한도를 넘은 PNG·JPEG 그림"));
         };
         if let Some((w, h)) = display_size_emu(&msg) {

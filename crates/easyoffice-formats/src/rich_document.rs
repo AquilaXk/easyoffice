@@ -241,13 +241,19 @@ impl RichPaper {
 /// Most paragraphs of one header or footer; a file with more keeps the first ones.
 pub const MAX_PAGE_FRAME_PARAGRAPHS: usize = 64;
 
-/// The header and footer drawn on every page: formatted paragraphs (runs, alignment, indents and line
-/// spacing; headings, lists, links and tables are not kept). Files with different first-page or
-/// odd/even frames keep the default one.
+/// The header and footer drawn on pages: formatted paragraphs (runs, alignment, indents and line
+/// spacing; headings, lists, links and tables are not kept). Optional first-page and even-page
+/// variants are used when `first_page_different` or `even_odd_different` is set.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichPageFrame {
     pub header: Vec<RichParagraph>,
     pub footer: Vec<RichParagraph>,
+    pub first_header: Vec<RichParagraph>,
+    pub first_footer: Vec<RichParagraph>,
+    pub even_header: Vec<RichParagraph>,
+    pub even_footer: Vec<RichParagraph>,
+    pub first_page_different: bool,
+    pub even_odd_different: bool,
     /// The page setup of the first section: the distances of the body, header and footer from the page
     /// edges. `None` when the file gives none or gives one that does not fit its paper (the editor then uses
     /// its own default, a writer the format's).
@@ -260,7 +266,12 @@ pub struct RichPageFrame {
 
 impl RichPageFrame {
     pub fn is_empty(&self) -> bool {
-        self.header.is_empty() && self.footer.is_empty()
+        self.header.is_empty()
+            && self.footer.is_empty()
+            && self.first_header.is_empty()
+            && self.first_footer.is_empty()
+            && self.even_header.is_empty()
+            && self.even_footer.is_empty()
     }
 }
 
@@ -387,6 +398,14 @@ pub const MAX_TOC_PAGE: u32 = 9_999_999;
 /// Deepest entry level of a table-of-contents block (the word-processor styles `TOC 1`–`TOC 9`).
 pub const MAX_TOC_LEVEL: u8 = 9;
 
+/// Multi-column layout of a paragraph or section (`count >= 2`, 4-byte `Copy` value).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RichColumns {
+    pub count: u8,
+    pub equal: bool,
+    pub gap_twips: u16,
+}
+
 /// A paragraph: runs plus paragraph properties. `heading_level` 0 is body text, 1–6 headings.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichParagraph {
@@ -406,6 +425,8 @@ pub struct RichParagraph {
     pub first_line_indent_twips: Option<i32>,
     /// Line height as a percentage of single spacing (200 = double); `None` inherits.
     pub line_spacing_percent: Option<u16>,
+    /// Multi-column layout in effect on this paragraph (`count > 1`); `None` for a single column.
+    pub columns: Option<RichColumns>,
     /// Set on the paragraphs of a generated table of contents; the writers wrap consecutive ones in the
     /// format's table-of-contents container and the readers recover the role from the style name.
     pub toc: Option<RichToc>,

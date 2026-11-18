@@ -1,12 +1,15 @@
 //! Table reader for the Pages reader: model dimensions, tiles of packed cells, rich-text payloads
-//! and cell formats mapped to a grid of display strings. Packed cells are decoded in place from
-//! slices of the decoded buffers ([`packed`]); the only allocation per cell is its
-//! final text. All limits are errors or skips, never silent truncation.
+//! and cell formats mapped to a grid of display strings, cell hyperlinks and inline cell objects.
+//! Packed cells are decoded in place from slices of the decoded buffers ([`packed`]); all limits
+//! are errors or skips, never silent truncation.
 
 use std::rc::Rc;
 
+use self::cell_rich::{decode_rich_cell_storage, RichCellDecoded, MAX_CELL_MARK_ENTRIES};
+pub(crate) use self::format::format_iso_date;
 use self::format::{render_value, FormatSpec};
 use self::packed::{parse_cell, CellScalar, PackedCell};
+mod cell_rich;
 mod format;
 mod merge;
 mod packed;
@@ -14,12 +17,13 @@ mod packed;
 use crate::decode_budget::DecodeBudget;
 use crate::pages_proto::{read_reference, ArchiveObject, FastU64Map, Message, ObjectTable};
 use crate::pages_schema::{cell, table, ty};
-use crate::{CellMerge, EasyOfficeError};
+use crate::rich_read_pages_image::PageImages;
+use crate::{CellMerge, EasyOfficeError, TableCellLink};
 
 const MAX_TABLES: usize = 2_000;
-const MAX_TABLE_ROWS: usize = 10_000;
-const MAX_TABLE_COLS: usize = 256;
-const MAX_TABLE_CELLS: usize = 2_000_000;
+pub(crate) const MAX_TABLE_ROWS: usize = 10_000;
+pub(crate) const MAX_TABLE_COLS: usize = 256;
+pub(crate) const MAX_TABLE_CELLS: usize = 2_000_000;
 const MAX_TOTAL_CELLS: usize = 4_000_000;
 const MAX_LIST_ENTRIES: usize = 2_000_000;
 const MAX_TOTAL_LIST_ENTRIES: usize = 2_000_000;
@@ -27,7 +31,7 @@ const MAX_PAYLOAD_CACHE: usize = 65_536;
 const CELL_TEXT_OVERHEAD: usize = 16;
 const MAX_TILE_ROWS: u64 = 65_536;
 
-/// Table counters shared by every table of one document.
+/// Table counters shared by every table and chart of one document.
 #[derive(Debug, Default)]
 pub(crate) struct TableBudget {
     tables: usize,
@@ -36,7 +40,7 @@ pub(crate) struct TableBudget {
 }
 
 impl TableBudget {
-    fn charge_table(&mut self) -> Result<(), EasyOfficeError> {
+    pub(crate) fn charge_table(&mut self) -> Result<(), EasyOfficeError> {
         self.tables = self.tables.saturating_add(1);
         if self.tables > MAX_TABLES {
             return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -46,7 +50,7 @@ impl TableBudget {
         Ok(())
     }
 
-    fn charge_cells(&mut self, cells: usize) -> Result<(), EasyOfficeError> {
+    pub(crate) fn charge_cells(&mut self, cells: usize) -> Result<(), EasyOfficeError> {
         self.total_cells = self
             .total_cells
             .checked_add(cells)
@@ -71,15 +75,21 @@ impl TableBudget {
     }
 }
 
-/// A decoded table: display text per cell and the number of cells whose value was not shown.
+/// A decoded table: display text per cell, merged regions, cell hyperlinks and extracted pictures.
 #[derive(Debug)]
 pub(crate) struct TableRead {
     pub grid: Vec<Vec<String>>,
     /// Merged regions as declared by the file (validated by the rich table).
     pub merges: Vec<CellMerge>,
+    /// Cell-level hyperlinks indexed by UTF-8 byte offsets inside `grid[row][col]`.
+    pub links: Vec<TableCellLink>,
+    /// Picture drawables (`(object_id, fallback_equation_alt)`) anchored inside cells, in cell order.
+    pub cell_images: Vec<(u64, Option<String>)>,
     pub unsupported: usize,
-    /// Attachment marks (pictures, fields) found inside cell text and not imported.
+    /// Attachment marks found inside cell text that could not be imported.
     pub cell_objects: usize,
+    /// Hyperlink marks inside cells whose scheme or syntax was rejected.
+    pub unsafe_links: usize,
 }
 
 #[derive(Debug)]
@@ -92,29 +102,6 @@ pub(crate) enum TableOutcome {
 
 fn reference(m: &Message, field: u32) -> Option<u64> {
     m.bytes(field).and_then(read_reference)
-}
-
-/// Text of a rich-text cell storage and the number of attachment marks (pictures, fields) that
-/// were left out: control characters and attachment marks removed, line separators turned into
-/// spaces, trailing paragraph breaks trimmed.
-pub(crate) fn cell_plain_text(
-    storage: &Message,
-    field: u32,
-) -> Result<(String, usize), EasyOfficeError> {
-    let raw = storage.text(field)?;
-    let mut out = String::with_capacity(raw.len());
-    let mut attachments = 0usize;
-    for c in raw.chars() {
-        match c {
-            '\u{2028}' => out.push(' '),
-            '\n' | '\t' => out.push(c),
-            '\u{FFFC}' => attachments += 1,
-            c if c.is_control() => {}
-            c => out.push(c),
-        }
-    }
-    out.truncate(out.trim_end_matches('\n').len());
-    Ok((out, attachments))
 }
 
 /// Sorted `(key, value)` pairs for fast lookup by key.
@@ -213,8 +200,11 @@ struct CellContext<'a> {
     rich_text: KeyedList<u64>,
     strings: KeyedList<&'a str>,
     formats: KeyedList<FormatSpec<'a>>,
-    payload_cache: FastU64Map<(Rc<str>, usize)>,
+    payload_cache: FastU64Map<Rc<RichCellDecoded>>,
+    links: Vec<TableCellLink>,
+    cell_images: Vec<(u64, Option<String>)>,
     cell_objects: usize,
+    unsafe_links: usize,
 }
 
 enum Rendered {
@@ -249,13 +239,20 @@ impl<'a> CellContext<'a> {
             strings,
             formats,
             payload_cache: FastU64Map::default(),
+            links: Vec::new(),
+            cell_images: Vec::new(),
             cell_objects: 0,
+            unsafe_links: 0,
         })
     }
 
-    fn payload_text(&mut self, payload_id: u64) -> (Rc<str>, usize) {
+    fn payload_decoded(
+        &mut self,
+        payload_id: u64,
+        images: &mut PageImages<'_>,
+    ) -> Result<Rc<RichCellDecoded>, EasyOfficeError> {
         if let Some(cached) = self.payload_cache.get(&payload_id) {
-            return (Rc::clone(&cached.0), cached.1);
+            return Ok(Rc::clone(cached));
         }
         let storage = self
             .objects
@@ -266,20 +263,23 @@ impl<'a> CellContext<'a> {
             .and_then(|id| self.objects.get(id))
             .filter(|o| o.type_id == ty::STORAGE)
             .and_then(|o| Message::parse(&o.payload).ok());
-        let (text, objects) = storage
-            .and_then(|st| cell_plain_text(&st, crate::pages_schema::storage::TEXT).ok())
-            .unwrap_or_default();
-        let rc: Rc<str> = Rc::from(text.into_boxed_str());
+        let decoded = match storage {
+            Some(st) => decode_rich_cell_storage(self.objects, images, &st)?,
+            None => RichCellDecoded::default(),
+        };
+        let rc = Rc::new(decoded);
         if self.payload_cache.len() < MAX_PAYLOAD_CACHE {
-            self.payload_cache
-                .insert(payload_id, (Rc::clone(&rc), objects));
+            self.payload_cache.insert(payload_id, Rc::clone(&rc));
         }
-        (rc, objects)
+        Ok(rc)
     }
 
     fn render(
         &mut self,
+        row: usize,
+        col: usize,
         packed: &PackedCell,
+        images: &mut PageImages<'_>,
         text_budget: &mut DecodeBudget,
     ) -> Result<Rendered, EasyOfficeError> {
         if packed.kind == cell::TYPE_EMPTY {
@@ -289,18 +289,36 @@ impl<'a> CellContext<'a> {
             let Some(payload) = lookup(&self.rich_text, u64::from(key)) else {
                 return Ok(Rendered::Unsupported);
             };
-            let (rc, objects) = self.payload_text(payload);
-            self.cell_objects = self.cell_objects.saturating_add(objects);
-            if !rc.is_empty() {
+            let decoded = self.payload_decoded(payload, images)?;
+            self.cell_objects = self.cell_objects.saturating_add(decoded.cell_objects);
+            self.unsafe_links = self.unsafe_links.saturating_add(decoded.unsafe_links);
+            for (start, end, url) in &decoded.links {
+                if self.links.len() >= MAX_CELL_MARK_ENTRIES {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 표 셀 하이퍼링크 총수 한도 초과".to_string(),
+                    ));
+                }
+                text_budget.charge(url.len(), "Pages 표 셀 하이퍼링크")?;
+                self.links.push(TableCellLink {
+                    row: row as u32,
+                    col: col as u32,
+                    start: *start,
+                    end: *end,
+                    url: url.clone(),
+                });
+            }
+            for (did, eq_alt) in &decoded.images {
+                self.cell_images.push((*did, eq_alt.clone()));
+            }
+            if !decoded.text.is_empty() {
                 text_budget.charge(
-                    rc.len().saturating_add(CELL_TEXT_OVERHEAD),
+                    decoded.text.len().saturating_add(CELL_TEXT_OVERHEAD),
                     "Pages 표 서식 셀 텍스트",
                 )?;
             }
-            return Ok(Rendered::Text(rc.as_ref().to_string()));
+            return Ok(Rendered::Text(decoded.text.clone()));
         }
         if matches!(packed.kind, cell::TYPE_STRING | cell::TYPE_ERROR) {
-            // String cells show their text; error cells show the cached error text.
             let Some(text) = packed
                 .string_key
                 .and_then(|key| lookup(&self.strings, u64::from(key)))
@@ -364,21 +382,27 @@ fn dimensions(model: &Message) -> Result<(usize, usize), TableOutcome> {
 /// Reads one row of a tile into `grid`; returns the number of unsupported cells.
 fn fill_row(
     ctx: &mut CellContext,
+    row_idx: usize,
     row: &Message,
     cols: usize,
     cells: &mut [String],
+    images: &mut PageImages<'_>,
     text_budget: &mut DecodeBudget,
 ) -> Result<usize, EasyOfficeError> {
     let buf = row.bytes(table::ROW_CELL_BUFFER).unwrap_or(&[]);
     let offsets = row.bytes(table::ROW_CELL_OFFSETS).unwrap_or(&[]);
     let mut unsupported = 0usize;
-    for (slot, pair) in cells.iter_mut().zip(offsets.chunks_exact(2).take(cols)) {
+    for (col_idx, (slot, pair)) in cells
+        .iter_mut()
+        .zip(offsets.chunks_exact(2).take(cols))
+        .enumerate()
+    {
         let offset = u16::from_le_bytes([pair[0], pair[1]]);
         if offset == table::NO_CELL_OFFSET {
             continue;
         }
         let rendered = match parse_cell(buf, usize::from(offset)) {
-            Some(p) => Some(ctx.render(&p, text_budget)?),
+            Some(p) => Some(ctx.render(row_idx, col_idx, &p, images, text_budget)?),
             None => None,
         };
         match rendered {
@@ -400,6 +424,7 @@ fn fill_tiles(
     tiles: &Message,
     grid: &mut [Vec<String>],
     cols: usize,
+    images: &mut PageImages<'_>,
     text_budget: &mut DecodeBudget,
 ) -> Result<usize, EasyOfficeError> {
     let tile_rows = tiles
@@ -417,12 +442,13 @@ fn fill_tiles(
         };
         let tile = Message::parse(&tile_obj.payload)?;
         tile.for_each_sub(table::TILE_ROWS, |row| {
-            let target = row
+            let abs_row = row
                 .varint(table::ROW_INDEX)
-                .and_then(|i| absolute_row(tile_id, tile_rows, i))
-                .and_then(|r| grid.get_mut(r));
-            if let Some(cells) = target {
-                unsupported += fill_row(ctx, &row, cols, cells, text_budget)?;
+                .and_then(|i| absolute_row(tile_id, tile_rows, i));
+            if let Some(r_idx) = abs_row {
+                if let Some(cells) = grid.get_mut(r_idx) {
+                    unsupported += fill_row(ctx, r_idx, &row, cols, cells, images, text_budget)?;
+                }
             }
             Ok(())
         })
@@ -435,6 +461,7 @@ pub(crate) fn read_table(
     objects: &ObjectTable,
     info: &ArchiveObject,
     budget: &mut TableBudget,
+    images: &mut PageImages<'_>,
     text_budget: &mut DecodeBudget,
 ) -> Result<TableOutcome, EasyOfficeError> {
     budget.charge_table()?;
@@ -467,15 +494,18 @@ pub(crate) fn read_table(
     )?;
     let mut grid = vec![vec![String::new(); cols]; rows];
     let unsupported = match store.sub(table::STORE_TILES)? {
-        Some(tiles) => fill_tiles(&mut ctx, &tiles, &mut grid, cols, text_budget)?,
+        Some(tiles) => fill_tiles(&mut ctx, &tiles, &mut grid, cols, images, text_budget)?,
         None => 0,
     };
     let merges = merge::read_merges(objects, &model_msg, &store);
     Ok(TableOutcome::Read(TableRead {
         grid,
         merges,
+        links: ctx.links,
+        cell_images: ctx.cell_images,
         unsupported,
         cell_objects: ctx.cell_objects,
+        unsafe_links: ctx.unsafe_links,
     }))
 }
 
@@ -483,6 +513,7 @@ pub(crate) fn read_table(
 mod tests {
     use super::*;
     use crate::pages_schema::storage;
+    use std::collections::HashMap;
 
     fn varint(mut v: u64, out: &mut Vec<u8>) {
         loop {
@@ -595,13 +626,14 @@ mod tests {
             insert_obj(objects, 15, ty::TABLE_INFO, f_ref(table::INFO_MODEL, 14));
         };
 
-        // 1 row x 10 cols = 160 KiB fits comfortably inside 1 MiB budget.
+        let files = HashMap::new();
         make_table(&mut objects, 1);
         let info_ok = objects.get(15).unwrap().clone();
         let mut tbudget = TableBudget::default();
+        let mut imgs1 = PageImages::new(&objects, &files);
         let mut dbudget = DecodeBudget::with_limit(1024 * 1024);
         let TableOutcome::Read(read) =
-            read_table(&objects, &info_ok, &mut tbudget, &mut dbudget).unwrap()
+            read_table(&objects, &info_ok, &mut tbudget, &mut imgs1, &mut dbudget).unwrap()
         else {
             panic!("expected TableOutcome::Read");
         };
@@ -609,13 +641,19 @@ mod tests {
         assert_eq!(read.grid[0].len(), cols);
         assert!(read.grid[0].iter().all(|c| c.len() == 16 * 1024));
 
-        // 80 rows x 10 cols = 800 * 16 KiB = 12.8 MiB trips 1 MiB budget fail-closed.
         make_table(&mut objects, 80);
         let info_over = objects.get(15).unwrap().clone();
         let mut tbudget2 = TableBudget::default();
+        let mut imgs2 = PageImages::new(&objects, &files);
         let mut dbudget2 = DecodeBudget::with_limit(1024 * 1024);
         assert!(matches!(
-            read_table(&objects, &info_over, &mut tbudget2, &mut dbudget2),
+            read_table(
+                &objects,
+                &info_over,
+                &mut tbudget2,
+                &mut imgs2,
+                &mut dbudget2
+            ),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))
         ));
     }

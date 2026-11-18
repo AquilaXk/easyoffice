@@ -95,8 +95,18 @@ pub(crate) mod ty {
     pub const MOVIE: u32 = 3007;
     pub const GROUP: u32 = 3008;
     pub const CONNECTION_LINE: u32 = 3009;
-    /// Chart drawable. 검증 필요
+    /// Chart drawable and legacy pre-UFF chart/grid. 검증 필요
+    pub const CHART_LEGACY: u32 = 5000;
+    pub const CHART_GRID_LEGACY: u32 = 5002;
     pub const CHART: u32 = 5021;
+    /// Annotation author, change session, caption info, standalone equation, section. 검증 필요
+    pub const AUTHOR: u32 = 212;
+    pub const CAPTION_INFO: u32 = 633;
+    pub const EQUATION: u32 = 2015;
+    pub const DEPRECATED_AUTHOR: u32 = 2061;
+    pub const CHANGE_SESSION: u32 = 2062;
+    /// Section archive (`TP.SectionArchive`). 확인 (fixture section table)
+    pub const SECTION: u32 = 10011;
 }
 
 /// Hyperlink field. 검증 필요: public notes only; no fixture link.
@@ -128,21 +138,27 @@ pub(crate) mod settings {
     pub const NOTE_NUMBERING: u32 = 32;
     pub const NUMBERING_PER_PAGE: u64 = 1;
     pub const NUMBERING_PER_SECTION: u64 = 2;
+    /// Facing pages (spreads with distinct left/even and right/odd pages). 검증 필요
+    pub const FACING_PAGES: u32 = 34;
 }
 
 /// Column style properties. 확인 for a single column against the fixtures (`11.7.1.1 = 1`);
-/// the unequal layout is 검증 필요 (public notes only).
+/// gap fractions and the unequal layout are 검증 필요 (public notes only).
 pub(crate) mod column {
     /// Properties message of a column style.
     pub const PROPS: u32 = 11;
+    /// Explicit single-column override (`columns_null`). 검증 필요
+    pub const COLUMNS_NULL: u32 = 6;
     /// Columns message inside the properties.
     pub const COLUMNS: u32 = 7;
     /// Equal columns `{ count = 1, gap = 2 }`.
     pub const EQUAL: u32 = 1;
     pub const EQUAL_COUNT: u32 = 1;
-    /// Unequal columns `{ first = 1, repeated { gap, width } = 2 }`.
+    pub const EQUAL_GAP: u32 = 2; // 검증 필요
+    /// Unequal columns `{ first = 1, repeated { gap = 1, width = 2 } = 2 }`.
     pub const UNEQUAL: u32 = 2;
     pub const UNEQUAL_FOLLOWING: u32 = 2;
+    pub const UNEQUAL_GAP: u32 = 1; // 검증 필요
 }
 
 /// Shape / text box field numbers. 확인 (fixture objects file)
@@ -174,6 +190,11 @@ pub(crate) mod drawable {
     /// Accessibility description (alternative text). 검증 필요: public notes only; the
     /// fixtures carry no description.
     pub const DESCRIPTION: u32 = 8;
+    /// Title and caption object references and visibility flags. 검증 필요
+    pub const TITLE: u32 = 10;
+    pub const CAPTION: u32 = 11;
+    pub const TITLE_HIDDEN: u32 = 12;
+    pub const CAPTION_HIDDEN: u32 = 13;
 }
 
 /// Floating-drawables list field numbers. 검증 필요 (see [`ty::FLOATING_DRAWABLES`]).
@@ -207,10 +228,74 @@ pub(crate) mod data_info {
     pub const FILE_NAME: u32 = 4;
 }
 
-/// Field numbers of the document root.
+/// Field numbers of the document root (`TP.DocumentArchive`).
 pub(crate) mod root {
     /// Reference to the body text storage. 확인
     pub const BODY_STORAGE: u32 = 4;
+    /// Reference to `TP.SettingsArchive`. 검증 필요
+    pub const SETTINGS: u32 = 7;
+    /// Paper dimensions and page/header/footer margins in PostScript points. 확인
+    pub const PAGE_WIDTH: u32 = 30;
+    pub const PAGE_HEIGHT: u32 = 31;
+    pub const LEFT_MARGIN: u32 = 32;
+    pub const RIGHT_MARGIN: u32 = 33;
+    pub const TOP_MARGIN: u32 = 34;
+    pub const BOTTOM_MARGIN: u32 = 35;
+    pub const HEADER_MARGIN: u32 = 36;
+    pub const FOOTER_MARGIN: u32 = 37;
+}
+
+/// Section archive (`TP.SectionArchive`, type 10011) field numbers. 검증 필요
+pub(crate) mod section {
+    pub const INHERIT_PREVIOUS_HEADER_FOOTER: u32 = 17;
+    pub const FIRST_PAGE_DIFFERENT: u32 = 18;
+    pub const EVEN_ODD_PAGES_DIFFERENT: u32 = 19;
+    pub const FIRST_TEMPLATE_PAGE: u32 = 23;
+    pub const EVEN_TEMPLATE_PAGE: u32 = 24;
+    pub const ODD_TEMPLATE_PAGE: u32 = 25;
+    pub const FIRST_PAGE_HIDES_HEADER_FOOTER: u32 = 28;
+}
+
+/// Number attachment (`TSWP.NumberAttachmentArchive`, type 2043). 검증 필요
+pub(crate) mod number_attachment {
+    pub const SUPER: u32 = 1;
+    pub const KIND: u32 = 2;
+    pub const KIND_PAGE_NUMBER: u64 = 0;
+    pub const KIND_PAGE_COUNT: u64 = 1;
+}
+
+/// Tracked changes (`TSWP.ChangeArchive` 2060, `ChangeSessionArchive` 2062, `Author` 212). 검증 필요
+pub(crate) mod change {
+    pub const KIND: u32 = 1;
+    pub const KIND_INSERTION: u64 = 1;
+    pub const KIND_DELETION: u64 = 2;
+    pub const SESSION: u32 = 2;
+    pub const SESSION_AUTHOR: u32 = 2;
+    pub const AUTHOR_NAME: u32 = 1;
+}
+
+/// Equations (`TSD.ImageArchive` proto2 extensions 100..=103 and `TSWP.EquationInfoArchive` 2015). 검증 필요
+pub(crate) mod equation {
+    pub const IMAGE_EXT_FIRST: u32 = 100;
+    pub const IMAGE_EXT_LAST: u32 = 103;
+    pub const INFO_FIELDS: [u32; 3] = [2, 3, 4];
+    pub const NESTED_FIELDS: [u32; 2] = [1, 2];
+    pub const MAX_EQUATION_BYTES: usize = 64 * 1024;
+}
+
+/// Charts (`TSCH.ChartDrawableArchive` 5021 extension 10000 = `TSCH.ChartArchive`, `5000`). 검증 필요
+pub(crate) mod chart {
+    pub const EXTENSION: u32 = 10000;
+    pub const CHART_TYPE: u32 = 1;
+    pub const GRID: u32 = 7;
+    pub const GRID_ROW_NAMES: u32 = 1;
+    pub const GRID_COL_NAMES: u32 = 2;
+    pub const GRID_ROWS: u32 = 3;
+    pub const ROW_VALUES: u32 = 1;
+    pub const VAL_NUMBER: u32 = 1;
+    pub const VAL_LEGACY_DATE: u32 = 2;
+    pub const VAL_DURATION: u32 = 3;
+    pub const VAL_DATE: u32 = 4;
 }
 
 /// Field numbers of a text storage.

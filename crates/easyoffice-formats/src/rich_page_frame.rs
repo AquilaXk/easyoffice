@@ -4,7 +4,7 @@
 //! format's body reader; this module holds what the writers and the readers share.
 
 use crate::rich_document::{
-    RichBinding, RichBindingKind, RichField, RichPageMargins, RichPaper, RichParagraph,
+    RichBinding, RichBindingKind, RichColumns, RichField, RichPageMargins, RichPaper, RichParagraph,
 };
 use crate::rich_run_writers::docx_run_properties;
 
@@ -71,6 +71,41 @@ pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>, binding: Rich
             m.top, m.right, m.bottom, m.left, m.header, m.footer, binding.gutter
         )
     })
+}
+
+/// `w:cols` for the section properties when `columns` has more than one column; empty otherwise.
+pub(crate) fn docx_cols_xml(
+    columns: Option<RichColumns>,
+    paper: Option<&RichPaper>,
+    margins: Option<&RichPageMargins>,
+) -> String {
+    let Some(cols) = columns.filter(|c| c.count > 1) else {
+        return String::new();
+    };
+    let count = cols.count.min(16);
+    let gap = cols.gap_twips;
+    if cols.equal {
+        return format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\"/>");
+    }
+    let page_w = paper.copied().unwrap_or(RichPaper::A4).width;
+    let side = margins.map_or(2880, |m| m.left.saturating_add(m.right));
+    let usable = page_w
+        .saturating_sub(side)
+        .saturating_sub(u32::from(gap) * u32::from(count - 1))
+        .max(u32::from(count) * 144);
+    let first_w = (usable / 3).max(144);
+    let rest_w = usable.saturating_sub(first_w) / u32::from(count - 1);
+    let mut xml = format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\" w:equalWidth=\"0\">");
+    for i in 0..count {
+        let w = if i == 0 { first_w } else { rest_w.max(144) };
+        if i + 1 < count {
+            xml.push_str(&format!("<w:col w:w=\"{w}\" w:space=\"{gap}\"/>"));
+        } else {
+            xml.push_str(&format!("<w:col w:w=\"{w}\"/>"));
+        }
+    }
+    xml.push_str("</w:cols>");
+    xml
 }
 
 pub(crate) const DOCX_SETTINGS_PART: &str = "word/settings.xml";

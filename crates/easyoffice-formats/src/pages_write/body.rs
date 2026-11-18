@@ -56,6 +56,7 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
     p.left_indent_twips.is_some()
         || p.first_line_indent_twips.is_some()
         || p.line_spacing_percent.is_some()
+        || p.columns.is_some()
 }
 
 fn look_of(run: &RichRun) -> CharLook {

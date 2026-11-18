@@ -10,7 +10,8 @@ use crate::pdf_writer::{
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
 use crate::rich_document::{
-    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, TOC_BOOKMARK_PREFIX,
+    RichAlignment, RichBlock, RichColumns, RichDocument, RichListKind, RichParagraph,
+    TOC_BOOKMARK_PREFIX,
 };
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
@@ -22,13 +23,13 @@ use crate::rich_link_writers::{
 };
 use crate::rich_list_writers::{docx_num_pr, docx_numbering_xml, list_kind_of, plan_lists};
 use crate::rich_page_frame::{
-    docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper, docx_settings,
-    odt_field, DOCX_FOOTER_PART, DOCX_HEADER_PART, DOCX_SETTINGS_PART,
+    docx_cols_xml, docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper,
+    docx_settings, odt_field, DOCX_FOOTER_PART, DOCX_HEADER_PART, DOCX_SETTINGS_PART,
 };
 use crate::rich_run_writers::{
     docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
 };
-use crate::rich_table_writers::push_docx_table;
+use crate::rich_table_writers::{markdown_table_rows, push_docx_table};
 use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
     is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
@@ -141,6 +142,7 @@ fn push_docx_paragraph(
     run: Option<usize>,
     links: &mut DocxLinks,
     field: &(String, &str),
+    sect_pr: Option<&str>,
 ) {
     out.push_str("<w:p>");
     let style = if let Some(role) = p.toc {
@@ -166,6 +168,7 @@ fn push_docx_paragraph(
         || !layout.is_empty()
         || !tabs.is_empty()
         || p.page_break_before
+        || sect_pr.is_some()
     {
         out.push_str("<w:pPr>");
         if let Some(s) = style {
@@ -181,6 +184,9 @@ fn push_docx_paragraph(
         out.push_str(&layout);
         if let Some(j) = jc {
             out.push_str(&format!("<w:jc w:val=\"{j}\"/>"));
+        }
+        if let Some(sp) = sect_pr {
+            out.push_str(sp);
         }
         out.push_str("</w:pPr>");
     }
@@ -264,12 +270,42 @@ pub(crate) fn docx_rich_entries(
     let mut links = DocxLinks::default();
     let mut toc_scope = TocScope::docx();
     let mut toc_field_cache = None;
+    let pg_sz = docx_paper(doc.page_frame.paper.as_ref());
+    let pg_mar = docx_page_margins(doc.page_frame.margins.as_ref(), doc.page_frame.binding);
+    let mut section_end_cols: Vec<Option<Option<RichColumns>>> = vec![None; doc.blocks.len()];
+    let mut seen_later_para: Option<Option<RichColumns>> = None;
+    let mut last_para_cols: Option<RichColumns> = None;
+    for (idx, block) in doc.blocks.iter().enumerate().rev() {
+        if let RichBlock::Paragraph(p) = block {
+            if seen_later_para.is_none() {
+                last_para_cols = p.columns;
+            } else if seen_later_para != Some(p.columns) {
+                section_end_cols[idx] = Some(p.columns);
+            }
+            seen_later_para = Some(p.columns);
+        }
+    }
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
         match block {
             RichBlock::Paragraph(p) => {
                 let edges = docx_field_edges_cached(&doc.blocks, index, &mut toc_field_cache);
-                push_docx_paragraph(&mut body, p, lists.block_run[index], &mut links, &edges);
+                let inline_sect = section_end_cols[index].map(|cols| {
+                    let cols_xml = docx_cols_xml(
+                        cols,
+                        doc.page_frame.paper.as_ref(),
+                        doc.page_frame.margins.as_ref(),
+                    );
+                    format!("<w:sectPr><w:type w:val=\"continuous\"/>{pg_sz}{pg_mar}{cols_xml}</w:sectPr>")
+                });
+                push_docx_paragraph(
+                    &mut body,
+                    p,
+                    lists.block_run[index],
+                    &mut links,
+                    &edges,
+                    inline_sect.as_deref(),
+                );
             }
             RichBlock::Image(img) => {
                 let picture = media.add(DOCX_MEDIA_DIR, img);
@@ -281,7 +317,7 @@ pub(crate) fn docx_rich_entries(
                 body.push_str(&docx_image_paragraph(img, picture.ordinal, &rel_id));
             }
             RichBlock::Table(table) => {
-                push_docx_table(&mut body, table);
+                push_docx_table(&mut body, table, &mut links);
                 // A table cannot end the body or touch another table without a paragraph.
                 body.push_str("<w:p/>");
             }
@@ -296,11 +332,14 @@ pub(crate) fn docx_rich_entries(
         frame.relationships.push_str(rel);
         frame.content_types.push_str(content_type);
     }
+    let last_cols_xml = docx_cols_xml(
+        last_para_cols,
+        doc.page_frame.paper.as_ref(),
+        doc.page_frame.margins.as_ref(),
+    );
     body.push_str(&format!(
-        "<w:sectPr>{}{}{}</w:sectPr>",
+        "<w:sectPr>{}{pg_sz}{pg_mar}{last_cols_xml}</w:sectPr>",
         frame.section,
-        docx_paper(doc.page_frame.paper.as_ref()),
-        docx_page_margins(doc.page_frame.margins.as_ref(), doc.page_frame.binding)
     ));
     body.push_str("</w:body></w:document>");
 
@@ -721,11 +760,7 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
                 flush(&mut parts, &mut list_buf);
                 ordinal = 0;
                 if table.rows.iter().any(|r| !r.is_empty()) {
-                    let rows = table
-                        .rows
-                        .iter()
-                        .map(|row| row.iter().map(|c| escape_markdown_cell(c)).collect())
-                        .collect();
+                    let rows = markdown_table_rows(table, escape_markdown_cell);
                     parts.push(CommonMarkCodec::render(&[MarkdownBlock::Table(rows)]));
                 }
             }

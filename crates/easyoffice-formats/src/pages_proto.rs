@@ -161,6 +161,33 @@ impl<'a> Message<'a> {
         })
     }
 
+    /// First fixed64 value of field `number`, reinterpreted as `f64`.
+    pub fn double(&self, number: u32) -> Option<f64> {
+        self.fields.iter().find_map(|f| match f.value {
+            WireValue::Fixed64(v) if f.number == number => Some(f64::from_bits(v)),
+            _ => None,
+        })
+    }
+
+    /// First floating-point value of field `number` (either fixed32 or fixed64), as `f32`.
+    pub fn float_any(&self, number: u32) -> Option<f32> {
+        self.fields.iter().find_map(|f| {
+            if f.number != number {
+                return None;
+            }
+            match f.value {
+                WireValue::Fixed32(v) => Some(f32::from_bits(v)),
+                WireValue::Fixed64(v) => Some(f64::from_bits(v) as f32),
+                _ => None,
+            }
+        })
+    }
+
+    /// Parses raw submessage bytes at one level deeper than `self` (enforces [`MAX_PROTO_DEPTH`]).
+    pub fn parse_sub(&self, buf: &'a [u8]) -> Result<Self, EasyOfficeError> {
+        Self::parse_at(buf, self.depth.saturating_add(1))
+    }
+
     /// First length-delimited value of field `number`.
     pub fn bytes(&self, number: u32) -> Option<&'a [u8]> {
         self.fields.iter().find_map(|f| match f.value {

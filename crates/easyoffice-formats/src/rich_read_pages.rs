@@ -9,10 +9,14 @@
 //! values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
 
+mod changes;
+mod charts;
+pub(crate) mod equations;
 mod floating;
 mod marks;
 mod notes;
 mod numbering;
+mod sections;
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -336,9 +340,12 @@ struct StorageTables {
     char_styles: AttrTable,
     list_styles: AttrTable,
     list_levels: AttrTable,
+    layout_styles: AttrTable,
     attachments: AttrTable,
     /// Hyperlink runs (the value is the hyperlink object, `None` outside a link).
     links: AttrTable,
+    /// Merged UTF-16 `[start, end)` intervals of tracked deletions to omit from body text.
+    deleted_ranges: Vec<(u64, u64)>,
     /// Footnote marks in text order; only the main flow reads them, so the number shown at a
     /// mark equals the footnote's number in the appendix.
     footnote_marks: Vec<FootnoteMark>,
@@ -349,14 +356,17 @@ impl StorageTables {
         st: &Message,
         footnote_marks: Vec<FootnoteMark>,
         links: AttrTable,
+        deleted_ranges: Vec<(u64, u64)>,
     ) -> Result<Self, EasyOfficeError> {
         Ok(Self {
             footnote_marks,
             links,
+            deleted_ranges,
             para_styles: AttrTable::parse(st, storage::PARA_STYLE_TABLE)?,
             char_styles: AttrTable::parse(st, storage::CHAR_STYLE_TABLE)?,
             list_styles: AttrTable::parse(st, storage::LIST_STYLE_TABLE)?,
             list_levels: AttrTable::parse_values(st, storage::LIST_LEVEL_TABLE)?,
+            layout_styles: AttrTable::parse(st, storage::LAYOUT_STYLE_TABLE)?,
             attachments: AttrTable::parse(st, storage::ATTACHMENT_TABLE)?,
         })
     }
@@ -446,6 +456,8 @@ struct Reader<'a> {
     quiet: bool,
     settings: DocumentSettings,
     text_budget: DecodeBudget,
+    body_width_pt: f32,
+    body_height_pt: f32,
 }
 
 impl<'a> Reader<'a> {
@@ -517,8 +529,15 @@ impl<'a> Reader<'a> {
         &mut self,
         t: &StorageTables,
         start: u64,
+        flow: Flow,
     ) -> (RichParagraph, Option<Rc<Fmt>>) {
         let mut para = RichParagraph::default();
+        if flow == Flow::Body {
+            para.columns = t
+                .layout_styles
+                .at(start)
+                .and_then(|id| self.resolve_columns(id));
+        }
         let pfmt = t.para_styles.at(start).map(|id| self.style_fmt(id));
         if let Some(f) = &pfmt {
             para.alignment = f.align.and_then(alignment_of);
@@ -583,23 +602,40 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    /// Splits one line at character-style and hyperlink boundaries into runs and collects its
-    /// attachments in a single UTF-16 pass.
+    /// Splits one line at character-style, hyperlink and deletion boundaries into runs and
+    /// collects its non-inline attachments in a single UTF-16 pass.
     fn convert_line(
         &mut self,
         t: &StorageTables,
         line: &str,
         start: u64,
         pfmt: Option<&Fmt>,
-    ) -> Result<(LineContent, u64), EasyOfficeError> {
+    ) -> Result<(LineContent, u64, bool), EasyOfficeError> {
         let mut style_cuts = t.char_styles.boundaries_after(start).peekable();
         let mut link_cuts = t.links.boundaries_after(start).peekable();
         let mut fn_cursor = t.footnote_marks.partition_point(|m| m.index < start);
+        let mut del_cursor = t.deleted_ranges.partition_point(|&(_, end)| end <= start);
         let mut content = LineContent::default();
         let mut cur = String::new();
         let mut seg_start = start;
         let mut utf16 = start;
+        let mut all_deleted = !line.is_empty();
         for ch in line.chars() {
+            while del_cursor < t.deleted_ranges.len() && t.deleted_ranges[del_cursor].1 <= utf16 {
+                del_cursor += 1;
+            }
+            let deleted = del_cursor < t.deleted_ranges.len()
+                && t.deleted_ranges[del_cursor].0 <= utf16
+                && utf16 < t.deleted_ranges[del_cursor].1;
+            if deleted {
+                self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
+                while style_cuts.next_if(|c| *c <= utf16).is_some() {}
+                while link_cuts.next_if(|c| *c <= utf16).is_some() {}
+                utf16 += ch.len_utf16() as u64;
+                seg_start = utf16;
+                continue;
+            }
+            all_deleted = false;
             let mut cut = false;
             while style_cuts.next_if(|c| *c <= utf16).is_some() {
                 cut = true;
@@ -612,7 +648,15 @@ impl<'a> Reader<'a> {
                 seg_start = utf16;
             }
             if ch == '\u{FFFC}' || ch == storage::FOOTNOTE_MARK_CHAR {
-                content.attachments.extend(t.attachments.exact(utf16));
+                if ch == '\u{FFFC}' {
+                    if let Some(att_id) = t.attachments.exact(utf16) {
+                        if let Some(eq_text) = self.inline_equation_at_attachment(att_id)? {
+                            cur.push_str(&eq_text);
+                        } else {
+                            content.attachments.push(att_id);
+                        }
+                    }
+                }
                 while fn_cursor < t.footnote_marks.len()
                     && t.footnote_marks[fn_cursor].index < utf16
                 {
@@ -632,7 +676,7 @@ impl<'a> Reader<'a> {
             utf16 += ch.len_utf16() as u64;
         }
         self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
-        Ok((content, utf16 - start))
+        Ok((content, utf16 - start, all_deleted))
     }
 
     fn convert_storage(
@@ -642,28 +686,31 @@ impl<'a> Reader<'a> {
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let text = st.text(storage::TEXT)?;
         self.text_budget.charge(text.len(), "Pages 본문 텍스트")?;
+        let deleted_ranges = if flow == Flow::Body {
+            self.deleted_ranges(st, &text)?
+        } else {
+            Vec::new()
+        };
         let marks = if flow == Flow::Body {
-            self.footnote_marks(st)?
+            self.footnote_marks(st, &deleted_ranges)?
         } else {
             Vec::new()
         };
         let links = self.link_table(st)?;
-        let tables = StorageTables::parse(st, marks, links)?;
+        let tables = StorageTables::parse(st, marks, links, deleted_ranges)?;
         self.note_marks(st, flow)?;
-        if flow == Flow::Body {
-            self.note_columns(st)?;
-        }
         let mut blocks = Vec::new();
         let mut pos: u64 = 0;
         let (mut page_breaks, mut section_breaks) = (0usize, 0usize);
         let mut offset = 0usize;
         for line in text.split(ends_paragraph) {
-            match text[offset + line.len()..].chars().next() {
+            let term = text[offset + line.len()..].chars().next();
+            match term {
                 Some(PAGE_BREAK) => page_breaks += 1,
                 Some(SECTION_BREAK) => section_breaks += 1,
                 _ => {}
             }
-            offset += line.len() + 1;
+            offset += line.len() + term.map_or(0, char::len_utf8);
             self.paragraphs += 1;
             if self.paragraphs > MAX_PARAGRAPHS {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -671,11 +718,12 @@ impl<'a> Reader<'a> {
                 ));
             }
             let start = pos;
-            let (mut para, pfmt) = self.paragraph_header(&tables, start);
-            let (content, len_u16) = self.convert_line(&tables, line, start, pfmt.as_deref())?;
+            let (mut para, pfmt) = self.paragraph_header(&tables, start, flow);
+            let (content, len_u16, all_deleted) =
+                self.convert_line(&tables, line, start, pfmt.as_deref())?;
             pos = start.saturating_add(len_u16).saturating_add(1);
             para.runs = content.runs;
-            if !para.runs.is_empty() || content.attachments.is_empty() {
+            if !all_deleted && (!para.runs.is_empty() || content.attachments.is_empty()) {
                 blocks.push(RichBlock::Paragraph(para));
             }
             for att in content.attachments {
@@ -687,8 +735,8 @@ impl<'a> Reader<'a> {
         Ok(blocks)
     }
 
-    /// Resolves an attachment to table, picture or shape-text blocks, counting anything else as
-    /// skipped. Nested text takes pictures only.
+    /// Resolves an attachment to table, chart, equation, picture or shape-text blocks, counting
+    /// anything else as skipped. Nested text takes pictures and equations only.
     fn attachment_blocks(
         &mut self,
         att_id: u64,
@@ -702,6 +750,9 @@ impl<'a> Reader<'a> {
             self.skip("쪽 번호·쪽 수 필드");
             return Ok(Vec::new());
         }
+        if let Some(eq_obj) = self.object(att_id, ty::EQUATION) {
+            return self.read_standalone_equation(eq_obj, false);
+        }
         let drawable = self
             .object(att_id, ty::ATTACHMENT)
             .and_then(|o| Message::parse(&o.payload).ok())
@@ -713,17 +764,20 @@ impl<'a> Reader<'a> {
         match self.objects.get(did) {
             Some(o)
                 if flow == Flow::Nested
-                    && matches!(o.type_id, ty::TABLE_INFO | ty::SHAPE_WITH_TEXT) =>
+                    && matches!(
+                        o.type_id,
+                        ty::TABLE_INFO | ty::SHAPE_WITH_TEXT | ty::CHART | ty::CHART_LEGACY
+                    ) =>
             {
                 self.skip(NESTED_UNSUPPORTED);
                 Ok(Vec::new())
             }
-            Some(o) if o.type_id == ty::TABLE_INFO => Ok(self
-                .read_table(o)?
-                .map(RichBlock::Table)
-                .into_iter()
-                .collect()),
-            Some(o) if o.type_id == ty::IMAGE => Ok(self.read_picture(o)?.into_iter().collect()),
+            Some(o) if o.type_id == ty::TABLE_INFO => self.read_table_blocks(o),
+            Some(o) if o.type_id == ty::IMAGE => self.read_picture_or_equation(o, false),
+            Some(o) if o.type_id == ty::EQUATION => self.read_standalone_equation(o, false),
+            Some(o) if matches!(o.type_id, ty::CHART | ty::CHART_LEGACY) => {
+                self.read_chart(o, false)
+            }
             Some(o) if o.type_id == ty::SHAPE_WITH_TEXT => {
                 let blocks = self.shape_blocks(o)?;
                 if blocks.is_empty() {
@@ -757,19 +811,51 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_table(&mut self, info: &ArchiveObject) -> Result<Option<RichTable>, EasyOfficeError> {
-        match read_table(self.objects, info, &mut self.tables, &mut self.text_budget)? {
+    fn read_table_blocks(
+        &mut self,
+        info: &ArchiveObject,
+    ) -> Result<Vec<RichBlock>, EasyOfficeError> {
+        match read_table(
+            self.objects,
+            info,
+            &mut self.tables,
+            &mut self.images,
+            &mut self.text_budget,
+        )? {
             TableOutcome::Read(t) => {
                 self.skip_many("표 셀의 읽을 수 없는 값(문자열·기간 등)", t.unsupported);
                 self.skip_many("표 셀 안의 개체(그림·필드 등)", t.cell_objects);
-                let (table, dropped) = RichTable::with_merges(t.grid, t.merges);
-                self.skip_many("범위를 벗어나거나 겹치는 표 병합 영역", dropped);
-                Ok(Some(table))
+                self.skip_many(marks::UNSAFE_LINK, t.unsafe_links);
+                let (table, dropped_merges, dropped_links) =
+                    RichTable::with_merges_and_links(t.grid, t.merges, t.links);
+                self.skip_many("범위를 벗어나거나 겹치는 표 병합 영역", dropped_merges);
+                self.skip_many(marks::UNSAFE_LINK, dropped_links);
+                let mut out = Vec::with_capacity(1 + t.cell_images.len());
+                out.push(RichBlock::Table(table));
+                for (did, eq_alt) in t.cell_images {
+                    let Some(img_obj) = self.object(did, ty::IMAGE) else {
+                        self.skip("표 셀 안의 개체(그림·필드 등)");
+                        continue;
+                    };
+                    match self
+                        .images
+                        .read_with_fallback_alt(img_obj, eq_alt.as_deref())?
+                    {
+                        PageImage::Picture { image, cropped } => {
+                            if cropped {
+                                self.report_many(CROPPED, 1);
+                            }
+                            out.push(RichBlock::Image(image));
+                        }
+                        PageImage::Skipped(why) => self.report_many(why, 1),
+                    }
+                }
+                Ok(out)
             }
-            TableOutcome::Absent => Ok(None),
+            TableOutcome::Absent => Ok(Vec::new()),
             TableOutcome::Skipped(why) => {
                 self.skip(why);
-                Ok(None)
+                Ok(Vec::new())
             }
         }
     }
@@ -783,7 +869,8 @@ fn object_kind(type_id: u32) -> &'static str {
         ty::MOVIE => "동영상·오디오",
         ty::GROUP => "개체 그룹",
         ty::CONNECTION_LINE => "선·연결선",
-        ty::CHART => "차트",
+        ty::CHART | ty::CHART_LEGACY => "차트",
+        ty::EQUATION => "방정식",
         ty::TOC => "목차",
         ty::TABLE_INFO => "표",
         _ => "그림·도형 등 개체",
@@ -802,6 +889,19 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
     let root_msg = Message::parse(&root_obj.payload)?;
     let body_id = reference(&root_msg, root::BODY_STORAGE)
         .ok_or_else(|| corrupt("본문 저장소 참조가 없습니다"))?;
+    let settings = reference(&root_msg, root::SETTINGS)
+        .and_then(|id| pkg.objects.get(id))
+        .filter(|o| o.type_id == ty::SETTINGS)
+        .or_else(|| {
+            pkg.objects
+                .objects
+                .values()
+                .find(|o| o.type_id == ty::SETTINGS)
+        })
+        .and_then(|o| Message::parse(&o.payload).ok())
+        .map(|m| DocumentSettings::read(&m))
+        .unwrap_or_default();
+    let setup = sections::read_page_setup(&root_msg, settings.facing_pages);
     let mut reader = Reader {
         objects: &pkg.objects,
         skipped: BTreeMap::new(),
@@ -812,18 +912,14 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         images: PageImages::new(&pkg.objects, &pkg.data_files),
         quiet: false,
         text_budget: DecodeBudget::with_limit(MAX_CONVERTED_TEXT_BYTES),
-        settings: pkg
-            .objects
-            .objects
-            .values()
-            .find(|o| o.type_id == ty::SETTINGS)
-            .and_then(|o| Message::parse(&o.payload).ok())
-            .map(|m| DocumentSettings::read(&m))
-            .unwrap_or_default(),
+        settings,
+        body_width_pt: setup.body_width_pt,
+        body_height_pt: setup.body_height_pt,
     };
     let body = reader
         .storage_message(body_id)
         .ok_or_else(|| corrupt("본문 저장소를 읽을 수 없습니다"))?;
+    let page_frame = reader.build_page_frame(setup, &body)?;
     let mut blocks = reader.convert_storage(&body, Flow::Body)?;
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
         blocks.pop();
@@ -839,7 +935,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         warnings.push(PAGE_LAYOUT_NOTE.to_string());
     }
     warnings.push(
-        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장하는 기능은 실험적입니다(본문·제목·정렬·기본 글자 서식만 씁니다)."
+        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 표의 테두리·셀 배경·열 너비·동영상·오디오 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장하는 기능은 실험적입니다(본문·제목·정렬·기본 글자 서식만 씁니다)."
             .to_string(),
     );
     let title = blocks
@@ -854,7 +950,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         .unwrap_or_default();
     Ok((
         RichDocument {
-            page_frame: Default::default(),
+            page_frame,
             title,
             blocks,
             official_agency: None,

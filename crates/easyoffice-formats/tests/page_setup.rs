@@ -32,11 +32,9 @@ fn doc(paper: Option<RichPaper>, margins: Option<RichPageMargins>) -> RichDocume
         })],
         official_agency: None,
         page_frame: RichPageFrame {
-            header: Vec::new(),
-            footer: Vec::new(),
             margins,
             paper,
-            binding: Default::default(),
+            ..RichPageFrame::default()
         },
     }
 }
