@@ -28,6 +28,8 @@ pub(crate) mod ods_styles;
 pub(crate) mod ods_view;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
+#[path = "sheet_fonts.rs"]
+pub(crate) mod sheet_fonts;
 #[path = "sheet_links.rs"]
 pub(crate) mod sheet_links;
 #[path = "sheet_look.rs"]
@@ -88,6 +90,7 @@ pub(crate) mod xlsx_styles;
 pub(crate) mod xlsx_view;
 
 pub use sheet_filter::*;
+pub use sheet_fonts::*;
 pub use sheet_links::*;
 pub use sheet_look::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
@@ -145,6 +148,8 @@ const FORMULA_HIDDEN_BIT: u64 = 1 << 26;
 const FORCE_LOCKED_BIT: u64 = 1 << 27;
 /// The cell carries a hyperlink: the writers give it the spreadsheet program's hyperlink look (PD-223).
 const LINK_BIT: u64 = 1 << 28;
+const FONT_SHIFT: u32 = 29;
+const FONT_MASK: u64 = 0x7FF;
 const SIZE_SHIFT: u32 = 40;
 /// A colour word of [`StyleKey::colors`]: the colour is set (bit 24) and its RGB (bits 0..=23). The
 /// fill takes the low word and the font colour the high one, so each compares as one masked word.
@@ -205,6 +210,9 @@ pub struct CellStyle {
     pub fill: Option<u32>,
     /// Font colour as `0xRRGGBB`; `None` is the automatic colour (PD-227).
     pub font_color: Option<u32>,
+    /// Font family id: `0` keeps the workbook default font, `1..=MAX_FONT_FACES` names the 1-based
+    /// entry in [`SheetStyling::fonts`] (PD-244).
+    pub font: u16,
 }
 
 /// Style identity for $O(1)$ word comparison and hashing: one packed 64-bit word
@@ -324,6 +332,21 @@ impl StyleKey {
     }
 
     #[inline]
+    pub(crate) const fn font(self) -> u16 {
+        ((self.bits >> FONT_SHIFT) & FONT_MASK) as u16
+    }
+
+    /// The key with the font family id replaced (workbook-wide ids differ from a sheet's).
+    #[inline]
+    pub(crate) const fn with_font(self, id: u16) -> Self {
+        Self {
+            bits: (self.bits & !(FONT_MASK << FONT_SHIFT))
+                | (((id as u64) & FONT_MASK) << FONT_SHIFT),
+            ..self
+        }
+    }
+
+    #[inline]
     pub(crate) const fn fill(self) -> Option<u32> {
         word_color(self.colors)
     }
@@ -333,11 +356,12 @@ impl StyleKey {
         word_color(self.colors >> FONT_COLOR_SHIFT)
     }
 
-    /// The key reduced to what the font element of a style depends on: the flags, the size and the colour.
+    /// The key reduced to what the font element of a style depends on: the flags, the family, the size and the colour.
     #[inline]
     pub(crate) const fn font_part(self) -> Self {
         Self {
-            bits: self.bits & (FLAGS_MASK | LINK_BIT | (!0u64 << SIZE_SHIFT)),
+            bits: self.bits
+                & (FLAGS_MASK | LINK_BIT | (FONT_MASK << FONT_SHIFT) | (!0u64 << SIZE_SHIFT)),
             colors: self.colors & (COLOR_WORD_MASK << FONT_COLOR_SHIFT),
             borders: NO_BORDERS,
         }
@@ -378,6 +402,7 @@ impl CellStyle {
             && !self.formula_hidden
             && self.fill.is_none()
             && self.font_color.is_none()
+            && self.font == 0
     }
 
     #[inline]
@@ -387,6 +412,7 @@ impl CellStyle {
             .map_or(0u64, |s| ((s * 100.0).round() as u32) as u64);
         StyleKey {
             bits: (centi << SIZE_SHIFT)
+                | ((u64::from(self.font) & FONT_MASK) << FONT_SHIFT)
                 | (u64::from(self.force_locked) * FORCE_LOCKED_BIT)
                 | (u64::from(self.formula_hidden) * FORMULA_HIDDEN_BIT)
                 | (u64::from(self.unlocked) * UNLOCKED_BIT)
@@ -417,6 +443,10 @@ pub struct SheetStyling {
     pub num_fmts: Arc<Vec<String>>,
     /// Number formats a reader replaced with General because they broke a bound (PD-193).
     pub num_fmts_rejected: u32,
+    /// Non-default font family names: the cell id `1..=n` names entry `0..n` (PD-244).
+    pub fonts: Arc<Vec<String>>,
+    /// Font names a reader replaced with the default font because they broke a bound (PD-244).
+    pub fonts_rejected: u32,
     /// Merged ranges (each more than one cell).
     pub merges: Vec<CellBox>,
     /// Hidden rows and columns as sorted, disjoint, zero-based inclusive runs.

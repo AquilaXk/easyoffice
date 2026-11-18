@@ -321,6 +321,8 @@
   function printStyle(td, st) {
     if (!st) return;
     const s = td.style;
+    if (st.fontSize) s.fontSize = st.fontSize;
+    if (st.fontFamily) s.fontFamily = st.fontFamily;
     if (st.textAlign) s.textAlign = st.textAlign;
     s.verticalAlign = st.verticalAlign || "bottom";
     if (st.wrap) s.whiteSpace = "pre-wrap";

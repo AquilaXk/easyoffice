@@ -620,6 +620,25 @@
     return { codes, intern };
   }
 
+  function internFonts() {
+    const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
+    const limit = codec?.MAX_FONTS ?? 512;
+    const names = [];
+    const entries = new Map();
+    const intern = (raw) => {
+      const clean = codec?.normalizeFontFamily ? codec.normalizeFontFamily(raw) : "";
+      if (!clean) return 0;
+      const key = clean.toLowerCase();
+      let at = entries.get(key);
+      if (at === undefined) {
+        at = names.length < limit ? names.push(clean) : 0;
+        entries.set(key, at);
+      }
+      return at;
+    };
+    return { names, intern };
+  }
+
   // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
   // sheet names. `raw` is the formula when present, otherwise the typed value.
   function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths, rulesBySheet, layoutBySheet) {
@@ -636,11 +655,12 @@
       const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
       const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
       const numFmts = internNumFmts();
+      const fonts = internFonts();
       const cells = [];
       for (const ref of Object.keys(store)) {
         const entry = store[ref];
         const raw = String(entry?.formula || entry?.value || "");
-        const style = codec ? codec.styleToPayload(entry?.style, numFmts.intern) : null;
+        const style = codec ? codec.styleToPayload(entry?.style, numFmts.intern, fonts.intern) : null;
         if (!raw && !style) continue;
         const t = entry?.formula ? undefined : cellTypeApi?.wireTag(raw, entry?.t);
         const cell = { ref, raw };
@@ -651,6 +671,7 @@
       const columns = buildColumnsPayload(columnWidths?.[name]);
       const sheet = columns.length > 0 ? { name, cells, columns } : { name, cells };
       if (numFmts.codes.length > 0) sheet.numFmts = numFmts.codes;
+      if (fonts.names.length > 0) sheet.fonts = fonts.names;
       // The arrays that spill (PD-217): the cells they filled are in `cells` as values.
       const spillAreas = host.__EASYOFFICE_SHEET_SPILL__?.areasOf(store) || [];
       if (spillAreas.length > 0) sheet.spills = spillAreas;

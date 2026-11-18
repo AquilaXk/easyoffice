@@ -184,8 +184,9 @@
       const value = keepComputedValue ? prevEntry.value : textVal;
       const fontWeight = td.style.fontWeight || "", fontStyle = td.style.fontStyle || "";
       const textDecoration = td.style.textDecoration || "", fontSize = td.style.fontSize || "";
+      const fontFamily = host.__EASYOFFICE_SHEET_STYLE_CODEC__?.normalizeFontFamily?.(td.style.fontFamily) || "";
       const numFmt = td._nf || "", look = td._st;
-      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt || lookApi?.hasLook(look));
+      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || fontFamily || numFmt || lookApi?.hasLook(look));
       if (value === "" && formula === "" && !hasStyle && !prevEntry?.link) {
         delete map[ref];
         return;
@@ -195,6 +196,7 @@
       if (ct) cellEntry.t = ct;
       if (hasStyle) {
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
+        if (fontFamily) cellEntry.style.fontFamily = fontFamily;
         if (numFmt) cellEntry.style.numFmt = numFmt;
         for (const key of lookApi?.hasLook(look) ? lookApi.LOOK_KEYS : []) if (look[key]) cellEntry.style[key] = look[key];
       }

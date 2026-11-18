@@ -14,7 +14,16 @@
   const DIRECT_AREA_CELLS = 4096;
   // Alignment, wrapping and borders (PD-207) are keys of the same style object.
   const look = host.__EASYOFFICE_SHEET_LOOK__;
-  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "numFmt", ...look.LOOK_KEYS];
+  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "fontFamily", "numFmt", ...look.LOOK_KEYS];
+  const MAX_FONTS = 512;
+  const FONT_NAME_RE = /^[^\u0000-\u001f"'\\;{}<>`]{1,64}$/u;
+
+  function normalizeFontFamily(raw) {
+    if (typeof raw !== "string") return "";
+    const t = raw.trim();
+    const inner = /^(['"])(.*)\1$/s.exec(t)?.[2]?.trim() ?? t;
+    return FONT_NAME_RE.test(inner) ? inner : "";
+  }
   const COMMANDS = {
     "sheet-home-bold": "bold",
     "sheet-home-italic": "italic",
@@ -73,12 +82,21 @@
   const MIN_SIZE_PT = 1;
   const MAX_SIZE_PT = 409;
 
-  function styleToPayload(style, internNf) {
+  function styleToPayload(style, internNf, internFn) {
     if (!style) return null;
     const out = {};
     if (style.numFmt && internNf) {
       const nf = internNf(style.numFmt);
       if (nf > 0) out.nf = nf;
+    }
+    const cleanFont = normalizeFontFamily(style.fontFamily);
+    if (cleanFont) {
+      if (internFn) {
+        const fn = internFn(cleanFont);
+        if (fn > 0) out.fn = fn;
+      } else {
+        out.font = cleanFont;
+      }
     }
     if (look.H_ALIGNS.includes(style.textAlign)) out.ha = style.textAlign;
     if (look.V_ALIGNS.includes(style.verticalAlign)) out.va = style.verticalAlign;
@@ -103,11 +121,14 @@
     return Object.keys(out).length > 0 ? out : null;
   }
 
-  function styleFromPayload(payload, codes) {
+  function styleFromPayload(payload, codes, fonts) {
     if (!payload || typeof payload !== "object") return null;
     const code = Number.isInteger(payload.nf) && Array.isArray(codes) ? codes[payload.nf - 1] : "";
+    const rawFont = Number.isInteger(payload.fn) && Array.isArray(fonts) ? fonts[payload.fn - 1] : payload.font;
+    const fontFamily = normalizeFontFamily(rawFont);
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "" };
     if (typeof code === "string" && code !== "") style.numFmt = code;
+    if (fontFamily) style.fontFamily = fontFamily;
     FLAG_KINDS.forEach((kind) => {
       if (payload[kind] === true) writeFlag(style, kind, true);
     });
@@ -141,7 +162,7 @@
 
   function internStyle(style) {
     if (style.wrap) look.markWrap();
-    const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}|${look.lookKey(style)}`;
+    const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.fontFamily || ""}|${style.numFmt || ""}|${look.lookKey(style)}`;
     let shared = internedStyles.get(key);
     if (!shared) {
       shared = Object.freeze(style);
@@ -154,6 +175,7 @@
     const entry = map[ref] || { value: "", formula: "" };
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
     mutate(style);
+    if (!style.fontFamily) delete style.fontFamily;
     if (STYLE_KEYS.some((k) => style[k])) {
       entry.style = internStyle(style);
       map[ref] = entry;
@@ -428,9 +450,48 @@
         }, STATE_DELAY_MS) ?? null;
     }
 
-    return { applyCommand, formatRange, formatNumbers, editStyles, effectiveRange, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
+    function setFontFamily(rawFamily) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        if (formatBlocked(false)) return { count: 0 };
+        const clear = rawFamily === "" || rawFamily === null || rawFamily === undefined;
+        const clean = clear ? "" : normalizeFontFamily(rawFamily);
+        if (!clear && !clean) return { refused: true };
+        const curSheet = getActiveSheetName();
+        const map = snapshotDomSheetCells();
+        sheetDataStore[curSheet] = map;
+        if (clean) {
+          const faces = new Set();
+          Object.keys(map).forEach((ref) => {
+            const f = map[ref]?.style?.fontFamily;
+            if (f) faces.add(f.toLowerCase());
+          });
+          if (!faces.has(clean.toLowerCase()) && faces.size >= MAX_FONTS) return { refused: true };
+        }
+        const rg = effectiveRange();
+        const change = sheetHistory.begin({ range: rg });
+        let count = 0;
+        forEachRef(rg, (ref) => {
+          const cur = map[ref]?.style?.fontFamily || "";
+          if (cur === clean) return;
+          patchCell(map, ref, (st) => {
+            st.fontFamily = clean;
+          });
+          count += 1;
+        });
+        sheetHistory.commit(change);
+        refreshWindowFromModel();
+        saveActiveSheetCellsToWorkbook();
+        refreshFocusedSheetCellPendingSnapshot?.();
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "글꼴: " + count + "칸";
+        return { count };
+      });
+    }
+
+    return { applyCommand, formatRange, formatNumbers, setFontFamily, editStyles, effectiveRange, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;
-  host.__EASYOFFICE_SHEET_STYLE_CODEC__ = { styleToPayload, styleFromPayload, patchCell };
+  host.__EASYOFFICE_SHEET_STYLE_CODEC__ = { styleToPayload, styleFromPayload, patchCell, normalizeFontFamily, MAX_FONTS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

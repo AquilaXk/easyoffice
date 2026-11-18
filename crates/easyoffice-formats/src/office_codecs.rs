@@ -373,14 +373,12 @@ impl OoxmlCodec {
             ));
         }
         let states = sheet_states(active_sheets.len(), stylings);
-        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &states, stylings);
+        let (mut workbook_xml, wb_rels_xml) =
+            build_workbook_parts(active_sheets, &states, stylings);
         let styles_xml = style_table.to_xml();
         let (shared_strings, sst_map, total_str_count) =
             collect_shared_strings(active_sheets, stylings);
         let sst_xml = build_shared_strings_xml(&shared_strings, total_str_count);
-
-        XmlSanitizer::validate_safe_xml(&workbook_xml)?;
-        XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
         XmlSanitizer::validate_safe_xml(&sst_xml)?;
 
         let sheet_tables = unique_table_names(
@@ -412,8 +410,13 @@ impl OoxmlCodec {
                 table_writer.add_sheet(tables, cells, caches.get(i), &style_table.dxf)
             })
             .collect();
+        let wb_slicer_ext = table_writer.slicers.workbook_ext_xml();
+        if !wb_slicer_ext.is_empty() {
+            workbook_xml =
+                workbook_xml.replace("</workbook>", &format!("{wb_slicer_ext}</workbook>"));
+        }
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
-        let (content_types, wb_rels_xml) = if has_spills {
+        let (content_types, mut wb_rels_xml) = if has_spills {
             (
                 crate::sheet_styling::xlsx_parts::build_content_types(active_sheets.len()).replace(
                     "</Types>",
@@ -430,18 +433,26 @@ impl OoxmlCodec {
                 wb_rels_xml,
             )
         };
+        if !table_writer.slicers.wb_rels.is_empty() {
+            wb_rels_xml = wb_rels_xml.replace(
+                "</Relationships>",
+                &format!("{}</Relationships>", table_writer.slicers.wb_rels),
+            );
+        }
         let custom_theme = stylings
             .first()
             .and_then(|s| s.workbook_theme)
             .filter(|&t| t != DEFAULT_THEME);
-        let (content_types, wb_rels_xml) = if let Some(theme) = custom_theme {
-            let _ = theme;
+        let extra_types = format!(
+            "{}{}",
+            table_writer.content_types, table_writer.slicers.content_types
+        );
+        let (content_types, wb_rels_xml) = if custom_theme.is_some() {
             (
                 content_types.replace(
                     "</Types>",
                     &format!(
-                        "{}{}</Types>",
-                        table_writer.content_types,
+                        "{extra_types}{}</Types>",
                         crate::sheet_styling::xlsx_slicers::THEME_CONTENT_OVERRIDE
                     ),
                 ),
@@ -455,13 +466,12 @@ impl OoxmlCodec {
             )
         } else {
             (
-                content_types.replace(
-                    "</Types>",
-                    &format!("{}</Types>", table_writer.content_types),
-                ),
+                content_types.replace("</Types>", &format!("{extra_types}</Types>")),
                 wb_rels_xml,
             )
         };
+        XmlSanitizer::validate_safe_xml(&workbook_xml)?;
+        XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
         let mut entries = vec![
             (
                 "[Content_Types].xml".to_string(),
@@ -523,7 +533,13 @@ impl OoxmlCodec {
             }
         }
 
+        for (_, data) in &table_writer.slicers.parts {
+            if let Ok(xml) = std::str::from_utf8(data) {
+                XmlSanitizer::validate_safe_xml(xml)?;
+            }
+        }
         entries.extend(table_writer.parts);
+        entries.extend(table_writer.slicers.parts);
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
@@ -718,9 +734,15 @@ impl OoxmlCodec {
             if with_styling {
                 let mut styling = scan.styling;
                 styling.num_fmts = Arc::clone(&xf_styles.num_fmts);
+                styling.fonts = Arc::clone(&xf_styles.fonts);
                 state.apply(&mut styling);
-                // The count belongs to the workbook; one sheet carries it.
+                // The counts belong to the workbook; one sheet carries them.
                 styling.num_fmts_rejected = if idx == 0 { xf_styles.rejected } else { 0 };
+                styling.fonts_rejected = if idx == 0 {
+                    xf_styles.fonts_rejected
+                } else {
+                    0
+                };
                 styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);
                 let relationships = sheet_relationships(&entry_by_path, part_path);
                 let links = read_links(sheet_xml, &relationships, &mut link_allowance);
@@ -766,7 +788,7 @@ impl OoxmlCodec {
         }
 
         if with_styling {
-            crate::sheet_styling::xlsx_slicers::read_excel_table_slicers(
+            crate::sheet_styling::xlsx_slicers::read_table_slicer_parts(
                 &entry_by_path,
                 &table_registry.table_ids,
                 &mut stylings,

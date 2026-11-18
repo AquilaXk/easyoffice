@@ -29,7 +29,9 @@ use crate::sheet_styling::sheet_numfmt::{
     builtin_code, NumFmtTable, CUSTOM_BASE, MAX_NUM_FMT_CODE_BYTES,
 };
 use crate::sheet_styling::xlsx_color::DEFAULT_INDEXED;
-use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
+use crate::sheet_styling::{
+    clean_font_name, CellStyle, FontTable, SheetStyling, MAX_FONT_NAME_CHARS, MAX_STYLED_CELLS,
+};
 use crate::{MAX_BIFF8_COL, MAX_BIFF8_ROW};
 
 pub(crate) const FONT: u16 = 0x0031;
@@ -67,34 +69,38 @@ struct ResolvedXf {
     fill: Option<u32>,
     font_color: Option<u32>,
     num_fmt: u16,
+    font: u16,
 }
 
 /// What the XFs of a workbook say about colours and number formats, resolved once the first cell is read.
 struct Resolved {
-    /// Per XF: the fill, the font colour and the number format id, `None` when it has none of them.
+    /// Per XF: the fill, the font colour, the number format id and the font family id, `None` when plain.
     xfs: Vec<Option<ResolvedXf>>,
 }
 
 /// What the cell records of a workbook say about formatting: the styled cells of each worksheet and the
-/// number format codes their ids point into (one table for the workbook, like XLSX).
+/// number format and font family tables their ids point into (one table for the workbook, like XLSX).
 pub(crate) struct XlsStyles {
     pub(crate) sheets: Vec<BTreeMap<(u32, u32), CellStyle>>,
     pub(crate) num_fmts: Arc<Vec<String>>,
     /// Formats of the file that are not read: an id the table does not define or a code over a bound.
     pub(crate) num_fmts_rejected: u32,
+    pub(crate) fonts: Arc<Vec<String>>,
+    pub(crate) fonts_rejected: u32,
 }
 
 /// Reads the fonts, XFs and palette of the workbook globals and the XF of every cell record.
 #[derive(Default)]
 pub(crate) struct XlsStyleReader {
     palette: Vec<u32>,
-    fonts: Vec<u16>,
+    fonts: Vec<(u16, Option<String>)>,
     /// Per XF: the font index, the fill pattern, the foreground colour index and the number format index.
     xfs: Vec<(u16, u32, u16, u16)>,
     /// The codes of the `FORMAT` records by format index.
     formats: HashMap<u16, String>,
     resolved: Option<Resolved>,
     num_fmts: NumFmtTable,
+    font_table: FontTable,
     cells: BTreeMap<(u32, u32), CellStyle>,
     sheets: Vec<BTreeMap<(u32, u32), CellStyle>>,
 }
@@ -118,7 +124,10 @@ impl XlsStyleReader {
         if !in_worksheet {
             match opcode {
                 FONT if self.fonts.len() < MAX_RECORDS => {
-                    self.fonts.push(u16_at(body, 4).unwrap_or(ICV_AUTO_FONT));
+                    self.fonts.push((
+                        u16_at(body, 4).unwrap_or(ICV_AUTO_FONT),
+                        read_font_name(body),
+                    ));
                 }
                 // A short record still takes its number: the XFs after it keep theirs.
                 XF if self.xfs.len() < MAX_RECORDS => {
@@ -175,28 +184,64 @@ impl XlsStyleReader {
     }
 
     fn resolve(&mut self) {
-        let font_rgb = |reader: &Self, ifnt: u16| {
+        let font_record = |ifnt: u16| match ifnt {
             // The font with index 4 does not exist; the indexes after it are one more than the record.
-            let record = match ifnt {
-                0..=3 => usize::from(ifnt),
-                4 => return None,
-                n => usize::from(n) - 1,
-            };
-            reader.fonts.get(record).and_then(|&icv| reader.rgb(icv))
+            0..=3 => Some(usize::from(ifnt)),
+            4 => None,
+            n => Some(usize::from(n) - 1),
+        };
+        let font_rgb = |reader: &Self, ifnt: u16| {
+            reader
+                .fonts
+                .get(font_record(ifnt)?)
+                .and_then(|&(icv, _)| reader.rgb(icv))
         };
         let default_color = font_rgb(self, 0);
+        let default_font = self
+            .fonts
+            .first()
+            .and_then(|(_, n)| n.as_deref())
+            .and_then(clean_font_name)
+            .map(str::to_string);
+        let mut font_ids = vec![u16::MAX; self.fonts.len()];
+        if !font_ids.is_empty() {
+            font_ids[0] = 0;
+        }
         let raw = std::mem::take(&mut self.xfs);
         let mut xfs = Vec::with_capacity(raw.len());
         for &(ifnt, pattern, fore, format) in &raw {
             let font_color = font_rgb(self, ifnt).filter(|rgb| Some(*rgb) != default_color);
+            let font = match font_record(ifnt) {
+                Some(rec) if rec < font_ids.len() => {
+                    if font_ids[rec] == u16::MAX {
+                        font_ids[rec] = match self.fonts[rec].1.as_deref() {
+                            None => 0,
+                            Some(raw_name)
+                                if default_font.as_deref().is_some_and(|d| {
+                                    clean_font_name(raw_name)
+                                        .is_some_and(|c| c.eq_ignore_ascii_case(d))
+                                }) =>
+                            {
+                                0
+                            }
+                            Some(raw_name) => self.font_table.intern(raw_name),
+                        };
+                    }
+                    font_ids[rec]
+                }
+                _ => 0,
+            };
             let fill = (pattern == SOLID).then(|| self.rgb(fore)).flatten();
             let num_fmt = self.num_fmt_id(format);
             xfs.push(
-                (font_color.is_some() || fill.is_some() || num_fmt != 0).then_some(ResolvedXf {
-                    fill,
-                    font_color,
-                    num_fmt,
-                }),
+                (font_color.is_some() || fill.is_some() || num_fmt != 0 || font != 0).then_some(
+                    ResolvedXf {
+                        fill,
+                        font_color,
+                        num_fmt,
+                        font,
+                    },
+                ),
             );
         }
         self.xfs = raw;
@@ -248,6 +293,7 @@ impl XlsStyleReader {
             fill,
             font_color,
             num_fmt,
+            font,
         })) = self
             .resolved
             .as_ref()
@@ -263,6 +309,7 @@ impl XlsStyleReader {
                     fill,
                     font_color,
                     num_fmt,
+                    font,
                     ..CellStyle::default()
                 },
             );
@@ -274,15 +321,42 @@ impl XlsStyleReader {
         self.sheets.push(std::mem::take(&mut self.cells));
     }
 
-    /// The styled cells of every worksheet, in file order, and the number format table.
+    /// The styled cells of every worksheet, in file order, and the number format and font tables.
     pub(crate) fn finish(self) -> XlsStyles {
         let (num_fmts, num_fmts_rejected) = self.num_fmts.finish();
+        let (fonts, fonts_rejected) = self.font_table.finish();
         XlsStyles {
             sheets: self.sheets,
             num_fmts,
             num_fmts_rejected,
+            fonts,
+            fonts_rejected,
         }
     }
+}
+
+/// Reads the `ShortXLUnicodeString` font name at offset 14 of a BIFF8 `FONT` record (MS-XLS 2.4.122).
+fn read_font_name(body: &[u8]) -> Option<String> {
+    let count = usize::from(*body.get(14)?);
+    if count == 0 || count > MAX_FONT_NAME_CHARS {
+        return None;
+    }
+    let wide = (*body.get(15)? & 0x01) != 0;
+    let byte_len = if wide { count * 2 } else { count };
+    let chars = body.get(16..16 + byte_len)?;
+    let name = if wide {
+        let mut units = [0u16; MAX_FONT_NAME_CHARS];
+        for (slot, pair) in units[..count].iter_mut().zip(chars.chunks_exact(2)) {
+            *slot = u16::from_le_bytes([pair[0], pair[1]]);
+        }
+        String::from_utf16(&units[..count]).ok()?
+    } else if chars.is_ascii() {
+        String::from_utf8(chars.to_vec()).ok()?
+    } else {
+        chars.iter().map(|&b| char::from(b)).collect()
+    };
+    let trimmed = name.trim_end_matches('\0').trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// The format index and code of a `FORMAT` record: the index, a character count, `XLUnicodeString` flags,
@@ -805,5 +879,49 @@ mod tests {
         );
         assert!(!cells.contains_key(&(0, 1)) && !cells.contains_key(&(0, 2)));
         assert_eq!(styles.num_fmts_rejected, 2);
+    }
+
+    #[test]
+    fn font_reader_decodes_utf16le_family_and_rejects_truncated_records() {
+        let mut r = XlsStyleReader::default();
+        // Font 0: default "Arial"
+        let mut f0 = vec![0u8; 16];
+        f0[4..6].copy_from_slice(&ICV_AUTO_FONT.to_le_bytes());
+        f0[14] = 5;
+        f0[15] = 0;
+        f0.extend_from_slice(b"Arial");
+        r.record(FONT, &f0, false);
+
+        // Font 1: UTF-16LE "맑은 고딕"
+        let ko = "맑은 고딕";
+        let units: Vec<u16> = ko.encode_utf16().collect();
+        let mut f1 = vec![0u8; 16];
+        f1[4..6].copy_from_slice(&ICV_AUTO_FONT.to_le_bytes());
+        f1[14] = units.len() as u8;
+        f1[15] = 1;
+        for u in units {
+            f1.extend_from_slice(&u.to_le_bytes());
+        }
+        r.record(FONT, &f1, false);
+
+        // Font 2: truncated wide FONT record -> fails closed (`None` -> font 0)
+        let mut f2 = vec![0u8; 16];
+        f2[4..6].copy_from_slice(&ICV_AUTO_FONT.to_le_bytes());
+        f2[14] = 10;
+        f2[15] = 1;
+        f2.extend_from_slice(&[0x41, 0x00]);
+        r.record(FONT, &f2, false);
+
+        r.record(XF, &xf(0, 0, ICV_SYSTEM_TEXT), false);
+        r.record(XF, &xf(1, 0, ICV_SYSTEM_TEXT), false);
+        r.record(XF, &xf(2, 0, ICV_SYSTEM_TEXT), false);
+        r.record(NUMBER, &cell(0, 0, 1), true);
+        r.record(NUMBER, &cell(0, 1, 2), true);
+        r.end_sheet();
+
+        let styles = r.finish();
+        assert_eq!(styles.fonts.as_slice(), [ko]);
+        assert_eq!(styles.sheets[0][&(0, 0)].font, 1);
+        assert!(!styles.sheets[0].contains_key(&(0, 1)));
     }
 }

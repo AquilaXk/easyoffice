@@ -357,7 +357,7 @@
       const cellTypeApi = host.__EASYOFFICE_SHEET_CELL_TYPE__;
       (sheet.cells || []).forEach((cell) => {
         const raw = String(cell.raw ?? "");
-        const style = codec ? codec.styleFromPayload(cell.style, sheet.numFmts) : null;
+        const style = codec ? codec.styleFromPayload(cell.style, sheet.numFmts, sheet.fonts) : null;
         if (!raw && !style) return;
         const isFormula = cell.t !== "s" && raw.startsWith("=");
         const entry = isFormula ? { value: "", formula: raw } : { value: raw, formula: "" };

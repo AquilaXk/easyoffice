@@ -20,8 +20,8 @@ use crate::sheet_styling::sheet_look::{xlsx_color_rgb, BorderEdge, BorderLine, C
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::xlsx_color::ColorScheme;
 use crate::sheet_styling::{
-    format_centipt, CellStyle, HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign,
-    CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
+    clean_font_name, format_centipt, resolve_font_name, CellStyle, FontTable, HAlign, IdMemo,
+    NumFmtTable, SheetStyling, StyleKey, VAlign, CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use crate::XmlSanitizer;
 use std::sync::Arc;
@@ -90,6 +90,8 @@ pub(crate) struct XlsxStyleTable {
     fill_index: HashMap<u32, usize>,
     /// Custom number format codes of the whole workbook.
     num_fmts: NumFmtTable,
+    /// Non-default font family names of the whole workbook (PD-244).
+    font_names: FontTable,
     /// Differential formats of the conditional formatting rules (PD-171).
     pub(crate) dxf: DxfTable,
 }
@@ -106,6 +108,7 @@ impl XlsxStyleTable {
             fills: Vec::new(),
             fill_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
+            font_names: FontTable::default(),
             dxf: DxfTable::build(
                 stylings
                     .iter()
@@ -139,7 +142,8 @@ impl XlsxStyleTable {
                 .map(|style| (style, false));
             for (style, link) in plain.chain(linked) {
                 let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
-                let key = style.key().with_num_fmt(id);
+                let fid = ids.font(style.font, styling, |name| table.font_names.intern(name));
+                let key = style.key().with_num_fmt(id).with_font(fid);
                 let key = if link { key.with_link() } else { key };
                 if key == StyleKey::default() || table.index.contains_key(&key) {
                     continue;
@@ -206,7 +210,10 @@ impl XlsxStyleTable {
         let id = ids.get(style.num_fmt, styling, |code| {
             self.num_fmts.lookup(code).unwrap_or(0)
         });
-        let key = style.key().with_num_fmt(id);
+        let fid = ids.font(style.font, styling, |name| {
+            self.font_names.lookup(name).unwrap_or(0)
+        });
+        let key = style.key().with_num_fmt(id).with_font(fid);
         self.index
             .get(&if link { key.with_link() } else { key })
             .copied()
@@ -231,7 +238,7 @@ impl XlsxStyleTable {
         }
     }
 
-    fn font_xml(key: Option<StyleKey>) -> String {
+    fn font_xml(&self, key: Option<StyleKey>) -> String {
         let mut out = String::from("<font>");
         if let Some(k) = key {
             for (on, tag) in [
@@ -259,7 +266,13 @@ impl XlsxStyleTable {
         } else {
             out.push_str("<sz val=\"11\"/>");
         }
-        out.push_str("<name val=\"Calibri\"/></font>");
+        let name = key
+            .and_then(|k| resolve_font_name(k.font(), self.font_names.names()))
+            .unwrap_or("Calibri");
+        out.push_str(&format!(
+            "<name val=\"{}\"/></font>",
+            XmlSanitizer::escape(name)
+        ));
         out
     }
 
@@ -414,9 +427,9 @@ impl XlsxStyleTable {
         ));
         xml.push_str(&self.num_fmts_xml());
         xml.push_str(&format!("<fonts count=\"{}\">", self.fonts.len() + 1));
-        xml.push_str(&Self::font_xml(None));
+        xml.push_str(&self.font_xml(None));
         for key in &self.fonts {
-            xml.push_str(&Self::font_xml(Some(*key)));
+            xml.push_str(&self.font_xml(Some(*key)));
         }
         xml.push_str("</fonts>");
         xml.push_str(&self.fills_xml());
@@ -485,9 +498,8 @@ fn truthy(attrs: &str, name: &str, default: bool) -> bool {
     }
 }
 
-/// The font of a `font` element: the flags, the size and the colour. An automatic colour and one the
-/// reader cannot resolve are "no colour".
-fn parse_font(body: &str, colors: &ColorScheme) -> CellStyle {
+/// The font of a `font` element: the flags, the size, the colour and the raw `<name val="..."/>`.
+fn parse_font(body: &str, colors: &ColorScheme) -> (CellStyle, Option<String>) {
     let flag = |tag: &str| {
         extract_tags_or_self_closing_with_attrs(body, tag)
             .first()
@@ -504,15 +516,23 @@ fn parse_font(body: &str, colors: &ColorScheme) -> CellStyle {
     let font_color = extract_tags_or_self_closing_with_attrs(body, "color")
         .first()
         .and_then(|(attrs, _)| colors.resolve(attrs).rgb());
-    CellStyle {
-        bold: flag("b"),
-        italic: flag("i"),
-        underline,
-        strike: flag("strike"),
-        size_pt,
-        font_color,
-        ..CellStyle::default()
-    }
+    let name = extract_tags_or_self_closing_with_attrs(body, "name")
+        .first()
+        .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "val"))
+        .map(XmlSanitizer::unescape)
+        .filter(|n| !n.trim().is_empty());
+    (
+        CellStyle {
+            bold: flag("b"),
+            italic: flag("i"),
+            underline,
+            strike: flag("strike"),
+            size_pt,
+            font_color,
+            ..CellStyle::default()
+        },
+        name,
+    )
 }
 
 /// The colour of a `fill` element: a solid pattern's foreground colour (its background colour when
@@ -586,6 +606,8 @@ pub(crate) struct XfStyles {
     pub(crate) link_xfs: Vec<bool>,
     pub(crate) num_fmts: Arc<Vec<String>>,
     pub(crate) rejected: u32,
+    pub(crate) fonts: Arc<Vec<String>>,
+    pub(crate) fonts_rejected: u32,
     /// The colours of the differential formats, for the colour filters (PD-226). Set by the caller
     /// that has the theme.
     pub(crate) dxf_colors: Vec<crate::sheet_styling::xlsx_filter_dxf::DxfColors>,
@@ -655,16 +677,23 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
     let Some(fonts_xml) = extract_tag_bodies(styles_xml, "fonts").into_iter().next() else {
         return XfStyles::default();
     };
-    let fonts: Vec<CellStyle> = extract_tags_or_self_closing_with_attrs(fonts_xml, "font")
-        .into_iter()
-        .take(MAX_FONT_DEFS)
-        .map(|(_, font)| parse_font(font, colors))
-        .collect();
+    let fonts: Vec<(CellStyle, Option<String>)> =
+        extract_tags_or_self_closing_with_attrs(fonts_xml, "font")
+            .into_iter()
+            .take(MAX_FONT_DEFS)
+            .map(|(_, font)| parse_font(font, colors))
+            .collect();
     let default_size = fonts
         .first()
-        .and_then(|f| f.size_pt)
+        .and_then(|(f, _)| f.size_pt)
         .unwrap_or(DEFAULT_SIZE_PT);
-    let default_color = fonts.first().and_then(|f| f.font_color);
+    let default_color = fonts.first().and_then(|(f, _)| f.font_color);
+    let default_font = fonts
+        .first()
+        .and_then(|(_, n)| n.as_deref())
+        .and_then(clean_font_name)
+        .unwrap_or("Calibri")
+        .to_string();
     let fills = parse_fills(styles_xml, colors);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
         return XfStyles::default();
@@ -673,6 +702,11 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
     let borders = parse_borders(styles_xml);
     let link_styles = hyperlink_style_xfs(styles_xml);
     let mut table = NumFmtTable::default();
+    let mut font_table = FontTable::default();
+    let mut font_ids = vec![u16::MAX; fonts.len()];
+    if !font_ids.is_empty() {
+        font_ids[0] = 0;
+    }
     let mut link_xfs = Vec::new();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
@@ -682,7 +716,25 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
                 extract_attr_from_fragment(attrs, name).and_then(|v| v.parse::<u32>().ok())
             };
             let font_id = number("fontId").unwrap_or(0) as usize;
-            let mut style = fonts.get(font_id).copied().unwrap_or_default();
+            let mut style = fonts.get(font_id).map(|(f, _)| *f).unwrap_or_default();
+            if let Some(slot) = font_ids.get(font_id).copied() {
+                style.font = if slot != u16::MAX {
+                    slot
+                } else {
+                    let resolved = match fonts[font_id].1.as_deref() {
+                        None => 0,
+                        Some(raw)
+                            if clean_font_name(raw)
+                                .is_some_and(|c| c.eq_ignore_ascii_case(&default_font)) =>
+                        {
+                            0
+                        }
+                        Some(raw) => font_table.intern(raw),
+                    };
+                    font_ids[font_id] = resolved;
+                    resolved
+                };
+            }
             link_xfs.push(number("xfId").is_some_and(|id| link_styles.contains(&id)));
             if style
                 .size_pt
@@ -723,11 +775,14 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         })
         .collect();
     let (num_fmts, rejected) = table.finish();
+    let (fonts, fonts_rejected) = font_table.finish();
     XfStyles {
         styles,
         link_xfs,
         num_fmts,
         rejected,
+        fonts,
+        fonts_rejected,
         dxf_colors: Vec::new(),
         table_styles: HashMap::new(),
     }

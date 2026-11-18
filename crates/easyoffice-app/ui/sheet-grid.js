@@ -81,7 +81,7 @@
       measurer.eoFamily = cs.fontFamily;
       measurer.eoSize = cs.fontSize;
     }
-    measurer.font = `${td.style.fontStyle || "normal"} ${td.style.fontWeight || "400"} ${td.style.fontSize || measurer.eoSize} ${measurer.eoFamily}`;
+    measurer.font = `${td.style.fontStyle || "normal"} ${td.style.fontWeight || "400"} ${td.style.fontSize || measurer.eoSize} ${td.style.fontFamily || measurer.eoFamily}`;
     return measurer.measureText(text).width;
   }
 
@@ -389,6 +389,7 @@
       td.style.fontStyle = st?.fontStyle || "";
       td.style.textDecoration = st?.textDecoration || "";
       td.style.fontSize = st?.fontSize || "";
+      td.style.fontFamily = st?.fontFamily || "";
       td._st = st;
       // A locked cell of a protected sheet cannot be typed into (PD-216).
       const guard = host.__EASYOFFICE_SHEET_PROTECT__;

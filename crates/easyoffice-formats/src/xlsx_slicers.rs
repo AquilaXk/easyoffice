@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::sheet_styling::sheet_table::MAX_TABLE_TEXT_CHARS;
+use crate::sheet_styling::sheet_table::{SheetTable, MAX_TABLE_TEXT_CHARS};
 use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::{Attrs, XmlEvent, XmlReader};
 use crate::XmlSanitizer;
@@ -21,10 +21,33 @@ pub const MAX_SLICER_POS_PX: u32 = 65_535;
 const DEFAULT_SLICER_W_PX: u32 = 184;
 const DEFAULT_SLICER_H_PX: u32 = 210;
 const EMU_PER_PX: u64 = 9_525;
+const SLICER_ROW_HEIGHT_EMU: u64 = 228_600;
 const MAX_SLICER_XML_EVENTS: usize = 16_384;
 
 pub(crate) const SLICER_EXT_URI: &str = "{E0511CE5-2420-4E05-9A11-511CE5000242}";
 const SLICER_EO_NS: &str = "urn:easyoffice:spreadsheet:slicers:1.0";
+const SLICER_MAIN_2010_NS: &str = concat!(
+    "http://schemas.micro",
+    "soft.com/office/spreadsheetml/2009/9/main"
+);
+const SLICER_MAIN_2013_NS: &str = concat!(
+    "http://schemas.micro",
+    "soft.com/office/spreadsheetml/2010/11/main"
+);
+const SLICER_CACHE_REL_TYPE: &str = concat!(
+    "http://schemas.micro",
+    "soft.com/office/2007/relationships/slicerCache"
+);
+const SLICER_VIEW_REL_TYPE: &str = concat!(
+    "http://schemas.micro",
+    "soft.com/office/2007/relationships/slicer"
+);
+const SLICER_CACHE_CONTENT_TYPE: &str = concat!("application/vnd.ms-ex", "cel.slicerCache+xml");
+const SLICER_VIEW_CONTENT_TYPE: &str = concat!("application/vnd.ms-ex", "cel.slicer+xml");
+const WB_SLICER_CACHES_EXT_URI: &str = "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}";
+const WS_SLICERS_EXT_URI: &str = "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}";
+const TABLE_SLICER_CACHE_EXT_URI: &str = "{2F2917AC-EB37-4324-AD4E-5DD8C200BD13}";
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 pub(crate) const THEME_CONTENT_OVERRIDE: &str =
     "<Override PartName=\"/xl/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>";
@@ -96,7 +119,7 @@ pub(crate) fn parse_eo_slicer(attrs: &Attrs<'_>, max_cols: u32) -> Option<TableS
 }
 
 #[derive(Clone)]
-struct ExcelSlicerCache {
+struct SlicerCacheDef {
     table_id: u32,
     /// 1-based `<tableColumn id="...">` in `[MS-XLSX]` `CT_TableSlicerCache`.
     column_id: u32,
@@ -104,7 +127,7 @@ struct ExcelSlicerCache {
 }
 
 #[derive(Clone)]
-struct ExcelSlicerView {
+struct SlicerViewDef {
     cache: String,
     caption: Option<String>,
     width_px: u32,
@@ -122,7 +145,7 @@ fn emu_to_px(raw: Option<&str>, fallback: u32) -> u32 {
     px.clamp(MIN_SLICER_DIM_PX, MAX_SLICER_DIM_PX)
 }
 
-fn parse_slicer_cache_part(xml: &str) -> Option<(String, ExcelSlicerCache)> {
+fn parse_slicer_cache_part(xml: &str) -> Option<(String, SlicerCacheDef)> {
     let mut reader = XmlReader::with_budget(xml, MAX_SLICER_XML_EVENTS);
     let mut cache_name: Option<String> = None;
     let mut source_name = String::new();
@@ -155,7 +178,7 @@ fn parse_slicer_cache_part(xml: &str) -> Option<(String, ExcelSlicerCache)> {
     let (table_id, column_id) = table_link?;
     Some((
         cache_name?,
-        ExcelSlicerCache {
+        SlicerCacheDef {
             table_id,
             column_id,
             source_name,
@@ -163,7 +186,7 @@ fn parse_slicer_cache_part(xml: &str) -> Option<(String, ExcelSlicerCache)> {
     ))
 }
 
-fn parse_slicer_views_part(xml: &str, out: &mut Vec<ExcelSlicerView>) {
+fn parse_slicer_views_part(xml: &str, out: &mut Vec<SlicerViewDef>) {
     let mut reader = XmlReader::with_budget(xml, MAX_SLICER_XML_EVENTS);
     while let Ok(Some(event)) = reader.next_event() {
         if out.len() >= MAX_SLICERS_TOTAL {
@@ -189,7 +212,7 @@ fn parse_slicer_views_part(xml: &str, out: &mut Vec<ExcelSlicerView>) {
             .filter(|s| !s.is_empty());
         let width_px = emu_to_px(attrs.get("width").as_deref(), DEFAULT_SLICER_W_PX);
         let height_px = emu_to_px(attrs.get("height").as_deref(), DEFAULT_SLICER_H_PX);
-        out.push(ExcelSlicerView {
+        out.push(SlicerViewDef {
             cache,
             caption,
             width_px,
@@ -200,7 +223,7 @@ fn parse_slicer_views_part(xml: &str, out: &mut Vec<ExcelSlicerView>) {
 
 /// Imports native `[MS-XLSX]` `xl/slicerCaches/slicerCache*.xml` + `xl/slicers/slicer*.xml` onto
 /// the matching `(sheet_idx, table_idx)` entries in `stylings` when a table has no `<extLst>` slicers.
-pub(crate) fn read_excel_table_slicers(
+pub(crate) fn read_table_slicer_parts(
     entries: &HashMap<&str, &[u8]>,
     table_ids: &[(u32, usize, usize)],
     stylings: &mut [(String, SheetStyling)],
@@ -219,7 +242,7 @@ pub(crate) fn read_excel_table_slicers(
     cache_paths.sort_unstable();
     cache_paths.truncate(MAX_SLICERS_TOTAL);
 
-    let mut caches: HashMap<String, ExcelSlicerCache> = HashMap::new();
+    let mut caches: HashMap<String, SlicerCacheDef> = HashMap::new();
     for path in cache_paths {
         let Some(xml) = entries.get(path).and_then(|d| std::str::from_utf8(d).ok()) else {
             continue;
@@ -354,4 +377,132 @@ pub(crate) fn build_theme_xml(theme: [u32; 12]) -> String {
         "</a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>",
     ));
     xml
+}
+
+/// Emits standard `[MS-XLSX]` `xl/slicerCaches/slicerCache{k}.xml` (`CT_SlicerCacheDefinition` +
+/// `CT_TableSlicerCache`) and `xl/slicers/slicer{m}.xml` (`CT_Slicers`) parts alongside workbook and
+/// worksheet `<extLst>` / `.rels` / `[Content_Types].xml` overrides (PD-244).
+#[derive(Debug, Default)]
+pub(crate) struct SlicerPackageWriter {
+    cache_count: usize,
+    sheet_view_count: usize,
+    cur_sheet_views_xml: String,
+    wb_cache_refs: String,
+    pub(crate) parts: Vec<(String, Vec<u8>)>,
+    pub(crate) content_types: String,
+    pub(crate) wb_rels: String,
+}
+
+fn escape_slicer_source_name(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' | '\r' | '\t' => {
+                let _ = write!(out, "_x{:04x}_", c as u32);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+impl SlicerPackageWriter {
+    pub(crate) fn add_table(
+        &mut self,
+        table_id: usize,
+        table: &SheetTable,
+        resolved_col_names: &[String],
+    ) {
+        if !table.header || table.slicers.is_empty() {
+            return;
+        }
+        let width = table.width();
+        for s in &table.slicers {
+            if self.cache_count >= MAX_SLICERS_TOTAL {
+                break;
+            }
+            if !s.within_bounds(width) {
+                continue;
+            }
+            let Some(col_name) = resolved_col_names.get(s.col as usize) else {
+                continue;
+            };
+            self.cache_count += 1;
+            let k = self.cache_count;
+            let cache_name = format!("Slicer_{k}");
+            let source_escaped = XmlSanitizer::escape(&escape_slicer_source_name(col_name));
+            let cache_xml = format!(
+                concat!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+                    "<slicerCacheDefinition xmlns=\"{main_ns}\" name=\"{cache_name}\" sourceName=\"{source_escaped}\">",
+                    "<extLst><ext uri=\"{ext_uri}\" xmlns:x15=\"{x15_ns}\">",
+                    "<x15:tableSlicerCache tableId=\"{table_id}\" column=\"{col1}\"/>",
+                    "</ext></extLst></slicerCacheDefinition>"
+                ),
+                main_ns = SLICER_MAIN_2010_NS,
+                cache_name = cache_name,
+                source_escaped = source_escaped,
+                ext_uri = TABLE_SLICER_CACHE_EXT_URI,
+                x15_ns = SLICER_MAIN_2013_NS,
+                table_id = table_id,
+                col1 = s.col + 1,
+            );
+            self.parts.push((
+                format!("xl/slicerCaches/slicerCache{k}.xml"),
+                cache_xml.into_bytes(),
+            ));
+            let _ = write!(
+                self.content_types,
+                "<Override PartName=\"/xl/slicerCaches/slicerCache{k}.xml\" ContentType=\"{SLICER_CACHE_CONTENT_TYPE}\"/>"
+            );
+            let _ = write!(
+                self.wb_rels,
+                "<Relationship Id=\"rIdSc{k}\" Type=\"{SLICER_CACHE_REL_TYPE}\" Target=\"slicerCaches/slicerCache{k}.xml\"/>"
+            );
+            let _ = write!(self.wb_cache_refs, "<x14:slicerCache r:id=\"rIdSc{k}\"/>");
+            let _ = write!(
+                self.cur_sheet_views_xml,
+                "<slicer name=\"{cache_name}\" cache=\"{cache_name}\" caption=\"{}\" columnCount=\"1\" showCaption=\"1\" style=\"SlicerStyleLight1\" lockedPosition=\"0\" rowHeight=\"{SLICER_ROW_HEIGHT_EMU}\" width=\"{}\" height=\"{}\"/>",
+                XmlSanitizer::escape(&s.caption),
+                u64::from(s.width) * EMU_PER_PX,
+                u64::from(s.height) * EMU_PER_PX,
+            );
+        }
+    }
+
+    pub(crate) fn finish_sheet(&mut self, sheet_parts_xml: &mut String, sheet_rels: &mut String) {
+        if self.cur_sheet_views_xml.is_empty() {
+            return;
+        }
+        self.sheet_view_count += 1;
+        let m = self.sheet_view_count;
+        let views = std::mem::take(&mut self.cur_sheet_views_xml);
+        let slicer_xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><slicers xmlns=\"{SLICER_MAIN_2010_NS}\">{views}</slicers>"
+        );
+        self.parts
+            .push((format!("xl/slicers/slicer{m}.xml"), slicer_xml.into_bytes()));
+        let _ = write!(
+            self.content_types,
+            "<Override PartName=\"/xl/slicers/slicer{m}.xml\" ContentType=\"{SLICER_VIEW_CONTENT_TYPE}\"/>"
+        );
+        let _ = write!(
+            sheet_rels,
+            "<Relationship Id=\"rIdSl{m}\" Type=\"{SLICER_VIEW_REL_TYPE}\" Target=\"../slicers/slicer{m}.xml\"/>"
+        );
+        let _ = write!(
+            sheet_parts_xml,
+            "<extLst><ext uri=\"{WS_SLICERS_EXT_URI}\" xmlns:x14=\"{SLICER_MAIN_2010_NS}\" xmlns:r=\"{REL_NS}\"><x14:slicers><x14:slicer r:id=\"rIdSl{m}\"/></x14:slicers></ext></extLst>"
+        );
+    }
+
+    pub(crate) fn workbook_ext_xml(&self) -> String {
+        if self.wb_cache_refs.is_empty() {
+            return String::new();
+        }
+        format!(
+            "<extLst><ext uri=\"{WB_SLICER_CACHES_EXT_URI}\" xmlns:x14=\"{SLICER_MAIN_2010_NS}\"><x14:slicerCaches>{}</x14:slicerCaches></ext></extLst>",
+            self.wb_cache_refs
+        )
+    }
 }

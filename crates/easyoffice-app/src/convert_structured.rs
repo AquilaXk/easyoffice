@@ -16,13 +16,13 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, code_within_bounds, evaluate_table_formulas, frame_paragraph,
-    normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable,
-    OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns, RichDocument,
-    RichField, RichImage, RichListKind, RichListNumber, RichPageFrame, RichParagraph, RichRun,
-    RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue, TableCellLink, MAX_COLUMN_PX,
-    MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TABLE_LINKS,
-    MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    base64_codec, clean_font_name, code_within_bounds, evaluate_table_formulas, frame_paragraph,
+    normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, FontTable,
+    NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns,
+    RichDocument, RichField, RichImage, RichListKind, RichListNumber, RichPageFrame, RichParagraph,
+    RichRun, RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue, TableCellLink,
+    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS,
+    MAX_SIZE_PT, MAX_TABLE_LINKS, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -643,7 +643,12 @@ fn opt_number(obj: &JsonObject, key: &str) -> Result<Option<f64>, EasyOfficeErro
 /// Cell format of the sheet editor (PD-084/PD-089): `{"bold","italic","underline","strike",
 /// "sizePt","nf"}` and the look keys of `sheet_look_json` (`ha`, `va`, `wrap`, `bd`, PD-207); `sizePt` is 1 to 409 points and is stored with two decimals; `nf` is the
 /// 1-based entry of the sheet's `numFmts` (`num_fmt_ids` holds the format id of each entry).
-fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, EasyOfficeError> {
+fn parse_cell_style(
+    obj: &JsonObject,
+    num_fmt_ids: &[u16],
+    font_ids: &[u16],
+    font_table: &mut FontTable,
+) -> Result<CellStyle, EasyOfficeError> {
     let size_pt = opt_number(obj, "sizePt")?
         .map(|pt| {
             if (MIN_SIZE_PT..=MAX_SIZE_PT).contains(&pt) {
@@ -670,6 +675,31 @@ fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, 
                 |n| Ok(n.checked_sub(1).map_or(0, |at| num_fmt_ids[at])),
             )?,
     };
+    let font = match field(obj, "fn") {
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= font_ids.len())
+            .map_or_else(
+                || Err(invalid("구조화 저장: 'fn'이 'fonts' 범위를 벗어났습니다.")),
+                |n| Ok(n.checked_sub(1).map_or(0, |at| font_ids[at])),
+            )?,
+        None => match opt_str(obj, "font")? {
+            None | Some("") => 0,
+            Some(raw) => {
+                let Some(clean) = clean_font_name(raw) else {
+                    return Err(invalid("구조화 저장: 올바르지 않은 셀 글꼴 이름입니다."));
+                };
+                let id = font_table.intern(clean);
+                if id == 0 {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                        "글꼴 이름 수가 한도({MAX_FONT_FACES})를 초과했습니다."
+                    )));
+                }
+                id
+            }
+        },
+    };
     let mut style = CellStyle {
         bold: opt_bool(obj, "bold")?,
         italic: opt_bool(obj, "italic")?,
@@ -677,6 +707,7 @@ fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, 
         strike: opt_bool(obj, "strike")?,
         size_pt,
         num_fmt,
+        font,
         ..CellStyle::default()
     };
     parse_look(obj, &mut style)?;
@@ -699,6 +730,25 @@ fn parse_num_fmts(items: &[StrictJsonValue]) -> Result<(NumFmtTable, Vec<u16>), 
             .filter(|code| code_within_bounds(code))
             .ok_or_else(|| invalid("구조화 저장: 서식 코드는 한도 안의 문자열이어야 합니다."))?;
         ids.push(table.intern(code));
+    }
+    Ok((table, ids))
+}
+
+/// `fonts`: the sheet's non-default font family names (at most `MAX_FONT_FACES`, each validated).
+fn parse_sheet_fonts(items: &[StrictJsonValue]) -> Result<(FontTable, Vec<u16>), EasyOfficeError> {
+    if items.len() > MAX_FONT_FACES {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "글꼴 이름 수가 한도({MAX_FONT_FACES})를 초과했습니다."
+        )));
+    }
+    let mut table = FontTable::default();
+    let mut ids = Vec::with_capacity(items.len());
+    for item in items {
+        let face = item
+            .as_str()
+            .and_then(clean_font_name)
+            .ok_or_else(|| invalid("구조화 저장: 글꼴 이름은 한도 안의 문자열이어야 합니다."))?;
+        ids.push(table.intern(face));
     }
     Ok((table, ids))
 }
@@ -768,6 +818,10 @@ fn parse_sheets(
             Some(v) => parse_num_fmts(as_array(v, "numFmts")?)?,
             None => (NumFmtTable::default(), Vec::new()),
         };
+        let (mut font_table, font_ids) = match field(obj, "fonts") {
+            Some(v) => parse_sheet_fonts(as_array(v, "fonts")?)?,
+            None => (FontTable::default(), Vec::new()),
+        };
         styling.num_fmts = num_fmts.finish().0;
         if let Some(v) = field(obj, "cells") {
             for cell_v in as_array(v, "cells")? {
@@ -778,7 +832,12 @@ fn parse_sheets(
                     .map_err(|_| invalid(format!("구조화 저장: 잘못된 셀 주소 '{a1}'")))?;
                 let key = (coord.row(), coord.col());
                 if let Some(style_v) = field(cell, "style") {
-                    let style = parse_cell_style(as_object(style_v, "style")?, &num_fmt_ids)?;
+                    let style = parse_cell_style(
+                        as_object(style_v, "style")?,
+                        &num_fmt_ids,
+                        &font_ids,
+                        &mut font_table,
+                    )?;
                     if !style.is_plain() {
                         styling.cells.insert(key, style);
                     }
@@ -800,6 +859,7 @@ fn parse_sheets(
                 }
             }
         }
+        styling.fonts = font_table.finish().0;
         if let Some(v) = field(obj, "columns") {
             styling.columns = parse_columns(as_array(v, "columns")?, budget)?;
         }

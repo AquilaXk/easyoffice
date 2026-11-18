@@ -137,13 +137,19 @@ pub fn resolve_code(num_fmt: u16, custom: &[String]) -> Option<&str> {
 /// Workbook-wide format ids of one sheet's cell format ids, resolved once per distinct id: a
 /// writer that numbers the codes of a whole workbook asks for every styled cell, and a hash of the
 /// code text per cell would be the cost of the format.
-pub(crate) struct IdMemo(Vec<u16>);
+pub(crate) struct IdMemo {
+    num_fmts: Vec<u16>,
+    fonts: Vec<u16>,
+}
 
 const UNSET: u16 = u16::MAX;
 
 impl IdMemo {
     pub(crate) const fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            num_fmts: Vec::new(),
+            fonts: Vec::new(),
+        }
     }
 
     /// The id for the cell id `num_fmt` of `styling`; `id_of` maps a code to its workbook-wide id
@@ -158,13 +164,34 @@ impl IdMemo {
             return 0;
         }
         let at = usize::from(num_fmt);
-        if self.0.len() <= at {
-            self.0.resize(at + 1, UNSET);
+        if self.num_fmts.len() <= at {
+            self.num_fmts.resize(at + 1, UNSET);
         }
-        if self.0[at] == UNSET {
-            self.0[at] = resolve_code(num_fmt, &styling.num_fmts).map_or(0, id_of);
+        if self.num_fmts[at] == UNSET {
+            self.num_fmts[at] = resolve_code(num_fmt, &styling.num_fmts).map_or(0, id_of);
         }
-        self.0[at]
+        self.num_fmts[at]
+    }
+
+    /// Workbook-wide font family id for sheet-local `font` (`0` = default font), memoized in `O(1)`.
+    pub(crate) fn font(
+        &mut self,
+        font: u16,
+        styling: &crate::SheetStyling,
+        id_of: impl FnOnce(&str) -> u16,
+    ) -> u16 {
+        if font == 0 {
+            return 0;
+        }
+        let at = usize::from(font);
+        if self.fonts.len() <= at {
+            self.fonts.resize(at + 1, UNSET);
+        }
+        if self.fonts[at] == UNSET {
+            self.fonts[at] =
+                crate::sheet_styling::resolve_font_name(font, &styling.fonts).map_or(0, id_of);
+        }
+        self.fonts[at]
     }
 }
 

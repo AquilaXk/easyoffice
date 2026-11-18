@@ -20,8 +20,9 @@ use crate::sheet_styling::sheet_view::{
     push_level, LevelRun, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS,
 };
 use crate::sheet_styling::{
-    format_centipt, resolve_code, BorderLine, CellBorders, CellStyle, HAlign, IdMemo, NumFmtTable,
-    SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
+    format_centipt, resolve_code, resolve_font_name, BorderLine, CellBorders, CellStyle, FontTable,
+    HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS,
+    MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{CellBox, EasyOfficeError, OdfCodec, XmlSanitizer};
@@ -41,6 +42,8 @@ pub(crate) struct OdsStyleTable {
     width_index: HashMap<u32, usize>,
     /// Custom number format codes of the whole workbook (PD-193); `eonf<id>` data styles.
     num_fmts: NumFmtTable,
+    /// Non-default font family names of the whole workbook (PD-244).
+    font_names: FontTable,
     /// Workbook-wide number format ids in first-use order, each written as one data style.
     data_ids: Vec<u16>,
 }
@@ -53,6 +56,7 @@ impl OdsStyleTable {
             widths: Vec::new(),
             width_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
+            font_names: FontTable::default(),
             data_ids: Vec::new(),
         };
         for styling in stylings {
@@ -66,7 +70,8 @@ impl OdsStyleTable {
                 .filter(|s| !s.is_plain())
             {
                 let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
-                let key = style.key().with_num_fmt(id);
+                let fid = ids.font(style.font, styling, |name| table.font_names.intern(name));
+                let key = style.key().with_num_fmt(id).with_font(fid);
                 if key == StyleKey::default() || table.cell_index.contains_key(&key) {
                     continue;
                 }
@@ -98,8 +103,11 @@ impl OdsStyleTable {
         let id = ids.get(style.num_fmt, styling, |code| {
             self.num_fmts.lookup(code).unwrap_or(0)
         });
+        let fid = ids.font(style.font, styling, |name| {
+            self.font_names.lookup(name).unwrap_or(0)
+        });
         self.cell_index
-            .get(&style.key().with_num_fmt(id))
+            .get(&style.key().with_num_fmt(id).with_font(fid))
             .map(|i| format!("ce{i}"))
     }
 
@@ -151,6 +159,14 @@ impl OdsStyleTable {
             }
             if let Some(rgb) = k.font_color() {
                 props.push_str(&format!(" fo:color=\"#{rgb:06x}\""));
+            }
+            if let Some(name) = resolve_font_name(k.font(), self.font_names.names()) {
+                let esc = XmlSanitizer::escape(name);
+                if name.contains(' ') {
+                    props.push_str(&format!(" fo:font-family=\"'{esc}'\""));
+                } else {
+                    props.push_str(&format!(" fo:font-family=\"{esc}\""));
+                }
             }
             let data = match k.num_fmt() {
                 0 => String::new(),
@@ -414,9 +430,17 @@ fn length_to_px(value: &str) -> Option<f64> {
     Some(number / per_inch * PX_PER_INCH).filter(|px| px.is_finite())
 }
 
-fn parse_text_properties(attrs: &str) -> CellStyle {
+fn parse_text_properties(attrs: &str, font_table: &mut FontTable) -> CellStyle {
     let get = |name: &str| extract_attr_from_fragment(attrs, name);
     let on = |name: &str| get(name).is_some_and(|v| v != "none");
+    let font = get("fo:font-family")
+        .or_else(|| get("style:font-name"))
+        .map(XmlSanitizer::unescape)
+        .and_then(|raw| {
+            let first = raw.split(',').next().unwrap_or(&raw).trim();
+            (!first.is_empty()).then(|| font_table.intern(first))
+        })
+        .unwrap_or(0);
     CellStyle {
         bold: get("fo:font-weight")
             .is_some_and(|w| w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)),
@@ -431,6 +455,7 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
         font_color: get("fo:color")
             .and_then(ods_color)
             .filter(|_| get("style:use-window-font-color") != Some("true")),
+        font,
         ..CellStyle::default()
     }
 }
@@ -445,6 +470,8 @@ pub(crate) struct AutomaticStyles {
     /// with General (PD-193).
     pub(crate) num_fmts: Arc<Vec<String>>,
     pub(crate) num_fmts_rejected: u32,
+    pub(crate) fonts: Arc<Vec<String>>,
+    pub(crate) fonts_rejected: u32,
 }
 
 pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
@@ -454,6 +481,8 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
         table_props: HashMap::new(),
         num_fmts: Arc::default(),
         num_fmts_rejected: 0,
+        fonts: Arc::default(),
+        fonts_rejected: 0,
     };
     let Some((_, auto)) = extract_tags_with_attrs(content_xml, "office:automatic-styles")
         .into_iter()
@@ -464,6 +493,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     styles.table_props = table_props(auto);
     let data_codes = read_data_styles(auto);
     let mut num_fmts = NumFmtTable::default();
+    let mut font_table = FontTable::default();
     for (attrs, body) in extract_tags_with_attrs(auto, "style:style") {
         let (Some(name), Some(family)) = (
             extract_attr_from_fragment(attrs, "style:name"),
@@ -477,7 +507,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
                 .into_iter()
                 .next()
                 .map_or_else(CellStyle::default, |(props, _)| {
-                    parse_text_properties(props)
+                    parse_text_properties(props, &mut font_table)
                 });
             parse_cell_look(body, &mut style);
             let code = extract_attr_from_fragment(attrs, "style:data-style-name")
@@ -501,6 +531,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
         }
     }
     (styles.num_fmts, styles.num_fmts_rejected) = num_fmts.finish();
+    (styles.fonts, styles.fonts_rejected) = font_table.finish();
     styles
 }
 
@@ -785,6 +816,12 @@ impl OdsSink for StyleSink<'_> {
             // The count belongs to the workbook; the first table carries it.
             num_fmts_rejected: if self.tables.is_empty() {
                 self.styles.num_fmts_rejected
+            } else {
+                0
+            },
+            fonts: Arc::clone(&self.styles.fonts),
+            fonts_rejected: if self.tables.is_empty() {
+                self.styles.fonts_rejected
             } else {
                 0
             },

@@ -525,6 +525,7 @@ pub(crate) struct TableWriter {
     count: usize,
     pub(crate) parts: Vec<(String, Vec<u8>)>,
     pub(crate) content_types: String,
+    pub(crate) slicers: crate::sheet_styling::xlsx_slicers::SlicerPackageWriter,
 }
 
 impl TableWriter {
@@ -659,8 +660,10 @@ impl TableWriter {
                 out.rels,
                 "<Relationship Id=\"rIdT{n}\" Type=\"{TABLE_RELATIONSHIP}\" Target=\"../tables/table{n}.xml\"/>"
             );
+            self.slicers.add_table(n, table, &names);
         }
         out.parts_xml.push_str("</tableParts>");
+        self.slicers.finish_sheet(&mut out.parts_xml, &mut out.rels);
         if !fixes.is_empty() {
             out.cells = Some(patched_cells(cells, fixes));
         }

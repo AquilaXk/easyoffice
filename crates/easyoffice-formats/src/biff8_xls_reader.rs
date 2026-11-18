@@ -235,6 +235,7 @@ impl LegacyOle2Codec {
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
         let (num_fmts, rejected) = (styles.num_fmts, styles.num_fmts_rejected);
+        let (fonts, fonts_rejected) = (styles.fonts, styles.fonts_rejected);
         let mut colors = styles.sheets.into_iter();
         let mut states = states.into_iter();
         let mut types = cell_types.into_iter();
@@ -244,6 +245,8 @@ impl LegacyOle2Codec {
                 cell_types: types.next().unwrap_or_default(),
                 num_fmts: std::sync::Arc::clone(&num_fmts),
                 num_fmts_rejected: if index == 0 { rejected } else { 0 },
+                fonts: std::sync::Arc::clone(&fonts),
+                fonts_rejected: if index == 0 { fonts_rejected } else { 0 },
                 links: links.links,
                 links_rejected: links.rejected,
                 ..SheetStyling::default()

@@ -10,10 +10,10 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, resolve_code, CellMerge, CellStyle, DecodedContent,
-    DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
-    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichToc,
-    SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
+    base64_codec, evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle,
+    DecodedContent, DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions,
+    RichAlignment, RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript,
+    RichToc, SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -319,9 +319,57 @@ impl<'a> NumFmtIndex<'a> {
     }
 }
 
-/// `{"bold":true,"sizePt":11.25,"nf":2}`: only the set flags, the explicit size and the format
-/// entry.
-fn write_style(out: &mut String, style: &CellStyle, num_fmts: &NumFmtIndex<'_>) {
+/// The non-default font family names a sheet's cells use, in first-use order, with an `O(1)` lookup
+/// from `CellStyle::font` to its 1-based `"fn"` entry (PD-244).
+struct FontIndex<'a> {
+    names: Vec<&'a str>,
+    entry_of: Vec<u16>,
+}
+
+impl<'a> FontIndex<'a> {
+    fn build(styling: Option<&'a SheetStyling>) -> Self {
+        let mut index = Self {
+            names: Vec::new(),
+            entry_of: Vec::new(),
+        };
+        let Some(styling) = styling.filter(|s| !s.fonts.is_empty()) else {
+            return index;
+        };
+        let slots = styling.fonts.len() + 1;
+        for style in styling.cells.values() {
+            let id = usize::from(style.font);
+            if id == 0 || id >= slots {
+                continue;
+            }
+            if index.entry_of.is_empty() {
+                index.entry_of = vec![0; slots];
+            }
+            if index.entry_of[id] != 0 {
+                continue;
+            }
+            if let Some(name) = resolve_font_name(style.font, &styling.fonts) {
+                index.names.push(name);
+                index.entry_of[id] = index.names.len() as u16;
+            }
+        }
+        index
+    }
+
+    fn entry(&self, font: u16) -> Option<u16> {
+        self.entry_of
+            .get(usize::from(font))
+            .copied()
+            .filter(|&e| e != 0)
+    }
+}
+
+/// `{"bold":true,"sizePt":11.25,"nf":2,"fn":1}`: only the set flags, explicit size, format and font.
+fn write_style(
+    out: &mut String,
+    style: &CellStyle,
+    num_fmts: &NumFmtIndex<'_>,
+    fonts: &FontIndex<'_>,
+) {
     out.push('{');
     let mut first = true;
     for (on, key) in [
@@ -352,6 +400,13 @@ fn write_style(out: &mut String, style: &CellStyle, num_fmts: &NumFmtIndex<'_>) 
         first = false;
         let _ = write!(out, "\"nf\":{entry}");
     }
+    if let Some(entry) = fonts.entry(style.font) {
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let _ = write!(out, "\"fn\":{entry}");
+    }
     let mut wrote = !first;
     write_look(out, style, &mut wrote);
     out.push('}');
@@ -369,6 +424,7 @@ fn write_sheet_cells(
     cells: &[(u32, u32, String)],
     styling: Option<&SheetStyling>,
     num_fmts: &NumFmtIndex<'_>,
+    fonts: &FontIndex<'_>,
     max_rows: Option<u32>,
     max_cols: Option<u32>,
 ) {
@@ -400,7 +456,7 @@ fn write_sheet_cells(
         }
         if let Some(style) = style {
             out.push_str(",\"style\":");
-            write_style(out, style, num_fmts);
+            write_style(out, style, num_fmts, fonts);
         }
         out.push('}');
     }
@@ -421,7 +477,7 @@ fn write_sheet_cells(
         out.push_str("{\"ref\":\"");
         coord.write_a1(out);
         out.push_str("\",\"raw\":\"\",\"style\":");
-        write_style(out, style, num_fmts);
+        write_style(out, style, num_fmts, fonts);
         out.push('}');
     }
 }
@@ -456,13 +512,19 @@ fn write_sheet(
     push_json_str(out, name);
     out.push_str(",\"cells\":[");
     let num_fmts = NumFmtIndex::build(styling);
-    write_sheet_cells(out, cells, styling, &num_fmts, max_rows, max_cols);
+    let fonts = FontIndex::build(styling);
+    write_sheet_cells(out, cells, styling, &num_fmts, &fonts, max_rows, max_cols);
     out.push_str("],\"columns\":[");
     write_columns(out, styling, max_cols);
     out.push(']');
     if !num_fmts.codes.is_empty() {
         out.push_str(",\"numFmts\":[");
         write_list(out, &num_fmts.codes, |out, code| push_json_str(out, code));
+        out.push(']');
+    }
+    if !fonts.names.is_empty() {
+        out.push_str(",\"fonts\":[");
+        write_list(out, &fonts.names, |out, face| push_json_str(out, face));
         out.push(']');
     }
     if let Some(st) = styling.filter(|st| !st.rules.is_empty()) {
@@ -552,6 +614,12 @@ fn decode_response(
                     warnings.push(format!(
                         "서식 코드 {}개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다.",
                         st.num_fmts_rejected
+                    ));
+                }
+                if st.fonts_rejected > 0 {
+                    warnings.push(format!(
+                        "글꼴 이름 {}개는 한도를 넘거나 올바르지 않아 기본 글꼴로 가져왔습니다.",
+                        st.fonts_rejected
                     ));
                 }
             }

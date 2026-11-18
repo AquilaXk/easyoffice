@@ -783,13 +783,10 @@ if (
 }
 
 if (errors.length > 0) {
-  console.error("Repository hygiene check failed:");
-  for (const err of errors) {
-    console.error(`  - ${err}`);
-  }
-  process.exit(1);
+  console.error(["Repository hygiene check failed:", ...errors.map((err) => `  - ${err}`)].join("\n"));
+  process.exitCode = 1;
+} else {
+  console.log(
+    `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked, WebUI CSP/XSS & numeric doc-sync guards verified).`
+  );
 }
-
-console.log(
-  `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked, WebUI CSP/XSS & numeric doc-sync guards verified).`
-);
