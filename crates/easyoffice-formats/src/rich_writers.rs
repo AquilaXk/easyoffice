@@ -22,21 +22,21 @@ use crate::rich_link_writers::{
     docx_linked_run_properties, link_groups, DocxLinks, DOCX_LINK_STYLE_XML,
 };
 use crate::rich_list_writers::{docx_num_pr, docx_numbering_xml, list_kind_of, plan_lists};
+pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_page_frame::{
-    docx_cols_xml, docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper,
-    docx_settings, odt_field, DOCX_FOOTER_PART, DOCX_HEADER_PART, DOCX_SETTINGS_PART,
+    docx_cols_xml, docx_field_run, docx_frame_parts_and_refs, docx_page_margins, docx_paper,
+    docx_settings, odt_field, DOCX_SETTINGS_PART,
 };
 use crate::rich_run_writers::{
     docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
 };
-use crate::rich_table_writers::{markdown_table_rows, push_docx_table};
+use crate::rich_table_writers::push_docx_table;
 use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
     is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
 };
 use crate::{
-    CommonMarkCodec, EasyOfficeError, MarkdownBlock, PdfDocumentModel, PdfPageModel, PdfSerializer,
-    XmlSanitizer, ZipArchiveCodec,
+    EasyOfficeError, PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer, ZipArchiveCodec,
 };
 
 /// `w:spacing/@w:line` value of single line spacing (240ths of a line).
@@ -324,10 +324,8 @@ pub(crate) fn docx_rich_entries(
         }
     }
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
-    let header_part = docx_frame_part(&doc.page_frame.header, true);
-    let footer_part = docx_frame_part(&doc.page_frame.footer, false);
-    let mut frame = docx_frame_refs(header_part.is_some(), footer_part.is_some());
-    let settings = docx_settings(doc.page_frame.binding);
+    let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
+    let settings = docx_settings(doc.page_frame.binding, doc.page_frame.even_odd_different);
     if let Some((_, rel, content_type)) = &settings {
         frame.relationships.push_str(rel);
         frame.content_types.push_str(content_type);
@@ -369,10 +367,13 @@ pub(crate) fn docx_rich_entries(
     for xml in [&body, &core_xml, &styles, &doc_rels]
         .into_iter()
         .chain(numbering.as_ref())
-        .chain(header_part.as_ref())
-        .chain(footer_part.as_ref())
     {
         XmlSanitizer::validate_safe_xml(xml)?;
+    }
+    for (_, part_bytes) in &frame_entries {
+        if let Ok(xml) = std::str::from_utf8(part_bytes) {
+            XmlSanitizer::validate_safe_xml(xml)?;
+        }
     }
 
     let mut entries = vec![
@@ -392,16 +393,9 @@ pub(crate) fn docx_rich_entries(
     if let Some(numbering) = numbering {
         entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
     }
-    // The settings part holds two fixed flags, so it needs no scan.
+    // The settings part holds fixed flags only, so it needs no scan.
     entries.extend(settings.map(|(xml, _, _)| (DOCX_SETTINGS_PART.to_string(), xml.into_bytes())));
-    for (part, xml) in [
-        (DOCX_HEADER_PART, header_part),
-        (DOCX_FOOTER_PART, footer_part),
-    ] {
-        if let Some(xml) = xml {
-            entries.push((part.to_string(), xml.into_bytes()));
-        }
-    }
+    entries.extend(frame_entries);
     entries.extend(media.into_entries());
     Ok(entries)
 }
@@ -597,179 +591,6 @@ pub(crate) use crate::odt_rich_writer::pack_odt_rich;
 
 // ---------------------------------------------------------------- Markdown / TXT / PDF
 
-fn escape_markdown_inline(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 8);
-    let mut prev = None;
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        // `^` opens a superscript and `==` a highlight in the reader; a lone `=` is plain text.
-        let doubled_equals = ch == '=' && (prev == Some('=') || chars.peek() == Some(&'='));
-        if doubled_equals
-            || matches!(
-                ch,
-                '\\' | '`' | '*' | '_' | '~' | '^' | '[' | ']' | '<' | '>' | '|' | '#' | '!'
-            )
-        {
-            out.push('\\');
-        }
-        out.push(ch);
-        prev = Some(ch);
-    }
-    out
-}
-
-/// Table cell text as Markdown: inline marks escaped, except `|`, which the table renderer
-/// escapes itself (single pass without `.replace` allocations).
-fn escape_markdown_cell(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 8);
-    let mut prev = None;
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        let doubled_equals = ch == '=' && (prev == Some('=') || chars.peek() == Some(&'='));
-        if (doubled_equals
-            || matches!(
-                ch,
-                '\\' | '`' | '*' | '_' | '~' | '^' | '[' | ']' | '<' | '>' | '#' | '!'
-            ))
-            && ch != '|'
-        {
-            out.push('\\');
-        }
-        out.push(ch);
-        prev = Some(ch);
-    }
-    out
-}
-
-/// Escapes characters that would start a block construct at the beginning of a line.
-fn escape_markdown_line_start(line: &str) -> String {
-    let trimmed = line.trim_start();
-    let indent = &line[..line.len() - trimmed.len()];
-    if let Some(first) = trimmed.chars().next() {
-        if matches!(first, '-' | '+' | '=') {
-            return format!("{indent}\\{trimmed}");
-        }
-        let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-        if digits > 0 {
-            if let Some(marker @ ('.' | ')')) = trimmed[digits..].chars().next() {
-                return format!(
-                    "{indent}{}\\{marker}{}",
-                    &trimmed[..digits],
-                    &trimmed[digits + 1..]
-                );
-            }
-        }
-    }
-    line.to_string()
-}
-
-fn render_markdown_runs(p: &RichParagraph) -> String {
-    let mut out = String::new();
-    for run in &p.runs {
-        for (l_idx, line) in run.text.split('\n').enumerate() {
-            if l_idx > 0 {
-                out.push_str("\\\n");
-            }
-            let core = line.trim();
-            if core.is_empty() {
-                out.push_str(line);
-                continue;
-            }
-            let lead = &line[..line.len() - line.trim_start().len()];
-            let trail = &line[line.trim_end().len()..];
-            let mut piece = escape_markdown_inline(core);
-            if run.italic {
-                piece = format!("*{piece}*");
-            }
-            if run.bold {
-                piece = format!("**{piece}**");
-            }
-            if run.strike {
-                piece = format!("~~{piece}~~");
-            }
-            if run.underline {
-                piece = format!("<u>{piece}</u>");
-            }
-            out.push_str(lead);
-            out.push_str(&piece);
-            out.push_str(trail);
-        }
-    }
-    out.split('\n')
-        .map(escape_markdown_line_start)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
-    // A document that already opens with a level-1 heading (e.g. an opened Markdown file) keeps
-    // that heading as its title instead of gaining a duplicate title line.
-    let opens_with_h1 = matches!(
-        doc.blocks.first(),
-        Some(RichBlock::Paragraph(p)) if p.heading_level == 1
-    );
-    let mut parts: Vec<String> = if opens_with_h1 {
-        Vec::new()
-    } else {
-        vec![format!(
-            "# {}",
-            escape_markdown_inline(&doc.display_title())
-        )]
-    };
-    let mut list_buf: Vec<String> = Vec::new();
-    let mut ordinal = 0usize;
-    let flush = |parts: &mut Vec<String>, list_buf: &mut Vec<String>| {
-        if !list_buf.is_empty() {
-            parts.push(list_buf.join("\n"));
-            list_buf.clear();
-        }
-    };
-    for block in &doc.blocks {
-        match block {
-            RichBlock::Paragraph(p) if (1..=6).contains(&p.heading_level) => {
-                flush(&mut parts, &mut list_buf);
-                ordinal = 0;
-                let hashes = "#".repeat(usize::from(p.heading_level));
-                parts.push(format!("{hashes} {}", render_markdown_runs(p)));
-            }
-            RichBlock::Paragraph(p) if p.list.is_some() => {
-                let marker = if p.list == Some(RichListKind::Ordered) {
-                    ordinal += 1;
-                    format!("{ordinal}.")
-                } else {
-                    "-".to_string()
-                };
-                list_buf.push(format!("{marker} {}", render_markdown_runs(p)));
-            }
-            RichBlock::Paragraph(p) => {
-                flush(&mut parts, &mut list_buf);
-                ordinal = 0;
-                let text = render_markdown_runs(p);
-                if !text.trim().is_empty() {
-                    parts.push(text);
-                }
-            }
-            RichBlock::Image(img) => {
-                flush(&mut parts, &mut list_buf);
-                ordinal = 0;
-                parts.push(escape_markdown_line_start(&escape_markdown_inline(
-                    img.fallback_text(),
-                )));
-            }
-            RichBlock::Table(table) => {
-                flush(&mut parts, &mut list_buf);
-                ordinal = 0;
-                if table.rows.iter().any(|r| !r.is_empty()) {
-                    let rows = markdown_table_rows(table, escape_markdown_cell);
-                    parts.push(CommonMarkCodec::render(&[MarkdownBlock::Table(rows)]));
-                }
-            }
-        }
-    }
-    flush(&mut parts, &mut list_buf);
-    parts.join("\n\n")
-}
-
 /// Plain-text lines of one block: paragraph text, alt text of a picture, table rows joined by
 /// `cell_sep`.
 fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) {
@@ -915,16 +736,4 @@ pub(crate) fn serialize_pdf_rich(
         watermark_text: options.watermark.clone(),
     });
     (bytes, Vec::new())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn markdown_escapes_block_starters_and_inline_markers() {
-        assert_eq!(escape_markdown_line_start("1. 항목"), "1\\. 항목");
-        assert_eq!(escape_markdown_line_start("- 항목"), "\\- 항목");
-        assert_eq!(escape_markdown_inline("*a*#"), "\\*a\\*\\#");
-    }
 }

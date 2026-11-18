@@ -10,6 +10,7 @@
   // offers close, delete and page number, and the copies on the other pages follow every keystroke.
 
   const KINDS = ["header", "footer"];
+  const ALL_KINDS = ["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"];
   const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
   // The page setup that places them, in twips, as the editor's `data-eo-page` (`doc-page-setup.js`: "width,height,left,
   // right,top,bottom,header,footer"): top and bottom are the distances from the page edge to the body, header and
@@ -79,10 +80,10 @@
 
     // ---- the copies on the paper sheets ------------------------------------------------------
 
-    function copyOf(section) {
+    function copyOf(section, slot = section.dataset.eoHf) {
       const copy = document.createElement("div");
       copy.className = COPY_CLASS;
-      copy.dataset.hf = section.dataset.eoHf;
+      copy.dataset.hf = slot;
       copy.setAttribute("aria-hidden", "true");
       for (const p of section.children) copy.appendChild(p.cloneNode(true));
       for (const el of copy.querySelectorAll("[id], [contenteditable]")) {
@@ -93,13 +94,28 @@
       return copy;
     }
 
+    function sheetSection(kind, pageIndex) {
+      if (pageIndex === 0 && editing === kind) return sectionOf(kind);
+      const cap = kind === "header" ? "Header" : "Footer";
+      if (pageIndex === 0 && editor?.dataset.eoFirstPage === "true") {
+        const first = sectionOf("first" + cap);
+        return hasContent(first) ? first : null;
+      }
+      if (pageIndex % 2 === 1 && editor?.dataset.eoEvenOdd === "true") {
+        const even = sectionOf("even" + cap);
+        if (hasContent(even)) return even;
+      }
+      const base = sectionOf(kind);
+      return hasContent(base) ? base : null;
+    }
+
     const fileName = () => String(deps.getFileName?.() ?? "");
 
     // The header or footer of page `pageNumber` of `total` for printing: the copy a sheet shows, with its fields as text.
     function printCopy(kind, pageNumber, total) {
-      const section = sectionOf(kind);
-      if (!hasContent(section)) return null;
-      const copy = copyOf(section);
+      const section = sheetSection(kind, Math.max(0, (Number(pageNumber) || 1) - 1));
+      if (!section) return null;
+      const copy = copyOf(section, kind);
       for (const field of copy.querySelectorAll("." + FIELD_CLASS)) {
         const text = field.dataset.eoField === "pages" ? total : field.dataset.eoField === "filename" ? fileName() : pageNumber;
         field.parentNode.insertBefore(document.createTextNode(String(text)), field);
@@ -114,10 +130,22 @@
     function paint() {
       const layer = layerOf();
       if (!layer) return;
-      const sections = KINDS.map((kind) => sectionOf(kind)).map((s) => (hasContent(s) || s === sectionOf(editing) ? s : null));
+      const allSections = ALL_KINDS.map((kind) => sectionOf(kind));
       const sheets = layer.children.length;
-      const key = [sections.map((s) => (s ? s.innerHTML : "")).join("\u0001"), editing, sheets, fileName(), editor.dataset.eoPage].join("|");
-      [["data-hf-header", sections[0]], ["data-hf-footer", sections[1]]].forEach(([name, section]) => {
+      const pageCount = Math.max(1, sheets);
+      const anyHeader = Array.from({ length: pageCount }, (_, idx) => sheetSection("header", idx)).find(Boolean) ?? null;
+      const anyFooter = Array.from({ length: pageCount }, (_, idx) => sheetSection("footer", idx)).find(Boolean) ?? null;
+      const sections = [anyHeader, anyFooter];
+      const key = [
+        allSections.map((s) => (s ? s.innerHTML : "")).join("\u0001"),
+        editing,
+        sheets,
+        fileName(),
+        editor.dataset.eoPage,
+        editor.dataset.eoFirstPage,
+        editor.dataset.eoEvenOdd,
+      ].join("|");
+      [["data-hf-header", anyHeader], ["data-hf-footer", anyFooter]].forEach(([name, section]) => {
         if (!section) layer.removeAttribute(name);
         else if (!layer.hasAttribute(name)) layer.setAttribute(name, "");
       });
@@ -128,9 +156,10 @@
       paintedKey = key;
       Array.from(layer.children).forEach((sheet, index) => {
         for (const old of Array.from(sheet.querySelectorAll(":scope > ." + COPY_CLASS))) old.remove();
-        sections.forEach((section, i) => {
-          if (!section || (index === 0 && editing === KINDS[i])) return;
-          sheet.appendChild(copyOf(section));
+        KINDS.forEach((kind) => {
+          const section = sheetSection(kind, index);
+          if (!section || (index === 0 && editing === kind)) return;
+          sheet.appendChild(copyOf(section, kind));
         });
       });
       applyGeometry(sections, layer);
@@ -152,9 +181,13 @@
       const [header, footer] = sections;
       const band = (kind) => px(kind === "header" ? Math.max(0, m.top - m.header) : Math.max(0, m.bottom - m.footer));
       const grown = (kind) => {
-        const live = editing === kind ? sectionOf(kind) : null;
-        const copy = layer.children[0]?.querySelector(":scope > ." + COPY_CLASS + '[data-hf="' + kind + '"]');
-        return Number((live ?? copy)?.offsetHeight) || 0;
+        if (editing === kind) return Number(sectionOf(kind)?.offsetHeight) || 0;
+        let maxH = 0;
+        for (const sh of Array.from(layer.children)) {
+          const h = Number(sh.querySelector(":scope > ." + COPY_CLASS + '[data-hf="' + kind + '"]')?.offsetHeight) || 0;
+          if (h > maxH) maxH = h;
+        }
+        return maxH;
       };
       setVar("--hf-hd", header ? px(m.header) + "px" : null);
       setVar("--hf-band-h", header ? band("header") + "px" : null);

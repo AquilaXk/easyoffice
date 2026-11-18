@@ -6,7 +6,9 @@ use std::borrow::Cow;
 
 use super::{Header, SectionWalker};
 use crate::hwpx_parts::HWPUNIT_PER_TWIP;
-use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
+use crate::rich_document::{
+    frame_paragraph, safe_link_target, RichColumns, MAX_PAGE_FRAME_PARAGRAPHS,
+};
 use crate::rich_page_frame::margins_from_hwpx;
 use crate::xml_stream::{attr, XmlEvent};
 use crate::{
@@ -45,6 +47,13 @@ impl SectionWalker {
             let XmlEvent::Start { name, attrs } = event else {
                 continue;
             };
+            if *name == "hp:visibility"
+                && (attr(attrs, "hideFirstHeader").as_deref() == Some("1")
+                    || attr(attrs, "hideFirstFooter").as_deref() == Some("1"))
+            {
+                self.frame.first_page_different = true;
+                continue;
+            }
             let value = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<u32>().ok());
             if *name == "hp:pagePr" {
                 landscape =
@@ -151,16 +160,24 @@ impl SectionWalker {
         }) else {
             return Ok(false);
         };
-        let kind = usize::from(!is_header);
-        if !matches!(apply.as_str(), "" | "BOTH") {
-            self.left_out.pages = true;
-            return Ok(true);
-        }
-        if self.frame_found[kind] {
+        let base = usize::from(!is_header);
+        let slot = match apply.as_str() {
+            "" | "BOTH" => base,
+            "ODD" => 2 + base,
+            "EVEN" => 4 + base,
+            _ => {
+                self.left_out.pages = true;
+                return Ok(true);
+            }
+        };
+        if self.frame_found[slot] {
             self.left_out.sections = true;
             return Ok(true);
         }
-        self.frame_found[kind] = true;
+        self.frame_found[slot] = true;
+        if slot >= 2 {
+            self.frame.even_odd_different = true;
+        }
         let mut walker = SectionWalker {
             text_budget: self.text_budget.clone(),
             ..Default::default()
@@ -225,12 +242,130 @@ impl SectionWalker {
             paragraphs.truncate(MAX_PAGE_FRAME_PARAGRAPHS);
             self.left_out.long = true;
         }
-        if is_header {
-            self.frame.header = paragraphs;
-        } else {
-            self.frame.footer = paragraphs;
+        match (slot, is_header) {
+            (4, _) => self.frame.even_header = paragraphs,
+            (5, _) => self.frame.even_footer = paragraphs,
+            (0, _) if self.frame_found[2] => {}
+            (1, _) if self.frame_found[3] => {}
+            (_, true) => self.frame.header = paragraphs,
+            (_, false) => self.frame.footer = paragraphs,
         }
         self.text_budget = walker.text_budget;
         Ok(true)
     }
+
+    /// Reads inline controls (`HYPERLINK` field marks, `hp:colPr` column changes, `hp:pageHiding`).
+    pub(super) fn on_ctrl(
+        &mut self,
+        events: &[XmlEvent<'_>],
+        header: &Header,
+    ) -> Result<(), EasyOfficeError> {
+        let (mut begin, mut in_command, mut command) = (false, false, String::new());
+        for event in events {
+            match event {
+                XmlEvent::Start {
+                    name: "hp:fieldBegin",
+                    attrs,
+                } if attr(attrs, "type").as_deref() == Some("HYPERLINK") => {
+                    self.flush_run(header)?;
+                    begin = true;
+                }
+                XmlEvent::Start {
+                    name: "hp:fieldEnd",
+                    ..
+                } => {
+                    self.flush_run(header)?;
+                    self.link = None;
+                }
+                XmlEvent::Start {
+                    name: "hp:stringParam",
+                    attrs,
+                } => {
+                    in_command = begin && attr(attrs, "name").as_deref() == Some("Command");
+                }
+                XmlEvent::Start {
+                    name: "hp:colPr",
+                    attrs,
+                } => {
+                    if let Some(c) =
+                        attr(attrs, "colCount").and_then(|v| v.trim().parse::<u8>().ok())
+                    {
+                        self.current_columns = if c >= 2 {
+                            let equal = attr(attrs, "sameSz").as_deref() != Some("0");
+                            let gap_hwp = attr(attrs, "sameGap")
+                                .and_then(|v| v.trim().parse::<u32>().ok())
+                                .unwrap_or(0);
+                            let gap_twips = u16::try_from(to_twips(gap_hwp)).unwrap_or(u16::MAX);
+                            Some(RichColumns {
+                                count: c.min(16),
+                                equal,
+                                gap_twips,
+                            })
+                        } else {
+                            None
+                        };
+                        if self.tbl_depth == 0 {
+                            if let Some(top) = self.paras.last_mut() {
+                                top.columns = self.current_columns;
+                            }
+                        }
+                    }
+                }
+                XmlEvent::Start {
+                    name: "hp:pageHiding",
+                    attrs,
+                } if attr(attrs, "hideHeader").as_deref() == Some("1")
+                    || attr(attrs, "hideFooter").as_deref() == Some("1") =>
+                {
+                    self.frame.first_page_different = true;
+                }
+                XmlEvent::Text(text) if in_command => command.push_str(text),
+                XmlEvent::End("hp:stringParam") => in_command = false,
+                _ => {}
+            }
+        }
+        if begin {
+            self.link = link_from_command(&command);
+        }
+        Ok(())
+    }
+}
+
+/// The address of a hyperlink field's `Command`: the plain address, `HYPERLINK "address"`, or the form the
+/// word processor writes (`http\://host/path;1;0;0;`, colons escaped and four numbers behind a `;`).
+pub(super) fn link_from_command(command: &str) -> Option<String> {
+    let command = command.trim();
+    let quoted = command
+        .strip_prefix("HYPERLINK")
+        .map(str::trim_start)
+        .and_then(|rest| rest.strip_prefix('"'))
+        .and_then(|rest| rest.strip_suffix('"'));
+    let address = quoted.map_or_else(|| strip_link_flags(command), str::to_string);
+    safe_link_target(&address).map(str::to_string)
+}
+
+/// `address;n;n;n;` with backslash escapes becomes `address`; anything else is returned as it is.
+fn strip_link_flags(command: &str) -> String {
+    let flags = command.strip_suffix(';').and_then(|rest| {
+        let mut parts = rest.rsplitn(4, ';');
+        let numbers = [parts.next()?, parts.next()?, parts.next()?];
+        let address = parts.next()?;
+        numbers
+            .iter()
+            .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            .then_some(address)
+    });
+    let Some(address) = flags else {
+        return command.to_string();
+    };
+    let mut out = String::with_capacity(address.len());
+    let mut chars = address.chars();
+    while let Some(c) = chars.next() {
+        out.push(if c == '\\' {
+            chars.next().unwrap_or(c)
+        } else {
+            c
+        });
+    }
+    out
 }

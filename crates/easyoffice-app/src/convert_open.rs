@@ -13,7 +13,7 @@ use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, resolve_code, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
     RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichToc,
-    SheetStyling, StrictJsonValue, UniversalFormatConverter, CUSTOM_BASE,
+    SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -138,6 +138,24 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
             RichListKind::Ordered => "ordered",
         };
         let _ = write!(out, ",\"list\":\"{token}\"");
+        if p.list_level > 0 {
+            let _ = write!(out, ",\"listLevel\":{}", p.list_level.min(8));
+        }
+        if l == RichListKind::Ordered {
+            if let Some(num) = p
+                .list_number
+                .filter(|&n| n != easyoffice_formats::RichListNumber::default())
+            {
+                let _ = write!(out, ",\"listNumber\":\"{}\"", num.to_wire_code());
+            }
+        }
+    }
+    if let Some(cols) = p.columns.filter(|c| c.count > 1) {
+        let _ = write!(
+            out,
+            ",\"columns\":{{\"count\":{},\"equal\":{},\"gapTwips\":{}}}",
+            cols.count, cols.equal, cols.gap_twips
+        );
     }
     if let Some(v) = p.left_indent_twips {
         let _ = write!(out, ",\"leftIndentTwips\":{v}");
@@ -186,6 +204,26 @@ fn write_merges(out: &mut String, merges: &[CellMerge]) {
     out.push(']');
 }
 
+fn write_table_links(out: &mut String, links: &[TableCellLink]) {
+    if links.is_empty() {
+        return;
+    }
+    out.push_str(",\"links\":[");
+    for (idx, l) in links.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(
+            out,
+            "{{\"row\":{},\"col\":{},\"start\":{},\"end\":{},\"url\":",
+            l.row, l.col, l.start, l.end
+        );
+        push_json_str(out, &l.url);
+        out.push('}');
+    }
+    out.push(']');
+}
+
 fn write_block(out: &mut String, b: &RichBlock) {
     match b {
         RichBlock::Paragraph(p) => write_paragraph(out, p),
@@ -209,6 +247,7 @@ fn write_block(out: &mut String, b: &RichBlock) {
             }
             out.push(']');
             write_merges(out, &table.merges);
+            write_table_links(out, &table.links);
             out.push('}');
         }
     }
@@ -538,11 +577,21 @@ fn decode_response(
     match &decoded.content {
         DecodedContent::Document(doc) => {
             write_page_setup(&mut out, &doc.page_frame);
+            if doc.page_frame.first_page_different {
+                out.push_str("\"firstPageDifferent\":true,");
+            }
+            if doc.page_frame.even_odd_different {
+                out.push_str("\"evenOddDifferent\":true,");
+            }
             out.push_str("\"blocks\":[");
             write_list(&mut out, &doc.blocks, write_block);
             for (key, paragraphs) in [
                 ("header", &doc.page_frame.header),
                 ("footer", &doc.page_frame.footer),
+                ("firstHeader", &doc.page_frame.first_header),
+                ("firstFooter", &doc.page_frame.first_footer),
+                ("evenHeader", &doc.page_frame.even_header),
+                ("evenFooter", &doc.page_frame.even_footer),
             ] {
                 if !paragraphs.is_empty() {
                     let _ = write!(out, "],\"{key}\":[");

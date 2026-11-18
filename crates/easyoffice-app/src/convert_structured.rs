@@ -18,11 +18,11 @@ use std::collections::BTreeMap;
 use easyoffice_formats::{
     base64_codec, code_within_bounds, evaluate_table_formulas, frame_paragraph,
     normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable,
-    OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichField,
-    RichImage, RichListKind, RichPageFrame, RichParagraph, RichRun, RichScript, RichTable, RichToc,
-    SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS,
-    MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX,
-    MIN_SIZE_PT,
+    OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns, RichDocument,
+    RichField, RichImage, RichListKind, RichListNumber, RichPageFrame, RichParagraph, RichRun,
+    RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue, TableCellLink, MAX_COLUMN_PX,
+    MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TABLE_LINKS,
+    MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -172,7 +172,23 @@ pub(crate) fn parse_structured_content(
     let mut budget = Budget(0);
     if let Some(v) = field(entries, "blocks") {
         let mut warnings = Vec::new();
-        let blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
+        let mut blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
+        if let Some(doc_cols) = opt_bounded(entries, "docColumns", 0, 16)?
+            .filter(|&c| c >= 2)
+            .map(|c| RichColumns {
+                count: c as u8,
+                equal: true,
+                gap_twips: 720,
+            })
+        {
+            for block in &mut blocks {
+                if let RichBlock::Paragraph(p) = block {
+                    if p.columns.is_none() {
+                        p.columns = Some(doc_cols);
+                    }
+                }
+            }
+        }
         let doc = RichDocument {
             page_frame: parse_page_frame(entries, &mut budget)?,
             title: String::new(),
@@ -238,13 +254,28 @@ fn parse_page_frame(
             .collect()
     };
     let (margins, paper, binding) = parse_page_setup(entries)?;
+    let first_header = parse("firstHeader")?;
+    let first_footer = parse("firstFooter")?;
+    let even_header = parse("evenHeader")?;
+    let even_footer = parse("evenFooter")?;
+    let first_page_different = opt_bool(entries, "firstPageDifferent")?
+        || !first_header.is_empty()
+        || !first_footer.is_empty();
+    let even_odd_different = opt_bool(entries, "evenOddDifferent")?
+        || !even_header.is_empty()
+        || !even_footer.is_empty();
     Ok(RichPageFrame {
         header: parse("header")?,
         footer: parse("footer")?,
+        first_header,
+        first_footer,
+        even_header,
+        even_footer,
+        first_page_different,
+        even_odd_different,
         margins,
         paper,
         binding,
-        ..RichPageFrame::default()
     })
 }
 
@@ -346,9 +377,23 @@ fn parse_paragraph(
         Some("ordered") => Some(RichListKind::Ordered),
         Some(other) => return Err(invalid(format!("구조화 저장: 알 수 없는 목록 '{other}'"))),
     };
+    let raw_list_level = opt_bounded(obj, "listLevel", 0, 8)?.unwrap_or(0) as u8;
+    let list_level = if list.is_some() { raw_list_level } else { 0 };
+    let list_number = match opt_str(obj, "listNumber")?.filter(|s| !s.is_empty()) {
+        None => None,
+        Some(code) => {
+            let parsed = RichListNumber::from_wire_code(code)
+                .ok_or_else(|| invalid(format!("구조화 저장: 알 수 없는 번호 서식 '{code}'")))?;
+            (list == Some(RichListKind::Ordered)).then_some(parsed)
+        }
+    };
+    let columns = match field(obj, "columns") {
+        None => None,
+        Some(v) => parse_doc_columns(v)?,
+    };
     Ok(RichParagraph {
-        list_level: 0,
-        list_number: None,
+        list_level,
+        list_number,
         runs,
         alignment,
         heading_level,
@@ -369,8 +414,25 @@ fn parse_paragraph(
         toc_page,
         toc_dots,
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
-        ..RichParagraph::default()
+        columns,
     })
+}
+
+fn parse_doc_columns(v: &StrictJsonValue) -> Result<Option<RichColumns>, EasyOfficeError> {
+    let obj = as_object(v, "columns")?;
+    let count = opt_bounded(obj, "count", 1, 16)?
+        .ok_or_else(|| invalid("구조화 저장: 'columns.count'는 1~16 정수여야 합니다."))?
+        as u8;
+    let equal = match field(obj, "equal") {
+        None => true,
+        Some(_) => opt_bool(obj, "equal")?,
+    };
+    let gap_twips = opt_bounded(obj, "gapTwips", 0, i64::from(u16::MAX))?.unwrap_or(720) as u16;
+    Ok((count >= 2).then_some(RichColumns {
+        count,
+        equal,
+        gap_twips,
+    }))
 }
 
 /// Optional integer field within `min..=max`.
@@ -449,8 +511,34 @@ fn parse_merge(item: &StrictJsonValue) -> Result<CellMerge, EasyOfficeError> {
     })
 }
 
-/// The page's `merges` are untrusted: the table re-validates them (one-cell, outside the grid,
-/// overlapping) and the dropped ones are reported.
+fn parse_table_link(item: &StrictJsonValue) -> Result<TableCellLink, EasyOfficeError> {
+    let obj = as_object(item, "links")?;
+    let number = |key: &str| {
+        field(obj, key)
+            .and_then(StrictJsonValue::as_u64)
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "구조화 저장: 표 링크의 '{key}'는 0 이상의 정수여야 합니다."
+                ))
+            })
+    };
+    let raw_url = opt_str(obj, "url")?
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| invalid("구조화 저장: 표 링크에는 'url'이 필요합니다."))?;
+    let url = safe_link_target(raw_url)
+        .ok_or_else(|| invalid("구조화 저장: 허용되지 않는 표 링크 주소입니다."))?
+        .to_string();
+    Ok(TableCellLink {
+        row: number("row")?,
+        col: number("col")?,
+        start: number("start")?,
+        end: number("end")?,
+        url,
+    })
+}
+
+/// The page's `merges` and `links` are untrusted: the table re-validates them and reports dropped ones.
 fn parse_table(
     obj: &JsonObject,
     budget: &mut Budget,
@@ -487,10 +575,28 @@ fn parse_table(
             merges.push(parse_merge(item)?);
         }
     }
-    let (table, dropped) = RichTable::with_merges(rows, merges);
+    let mut links = Vec::new();
+    if let Some(v) = field(obj, "links") {
+        let arr = as_array(v, "links")?;
+        if arr.len() > MAX_TABLE_LINKS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "표 셀 링크 수가 한도({MAX_TABLE_LINKS})를 초과했습니다."
+            )));
+        }
+        for item in arr {
+            budget.take(1)?;
+            links.push(parse_table_link(item)?);
+        }
+    }
+    let (table, dropped, dropped_links) = RichTable::with_merges_and_links(rows, merges, links);
     if dropped > 0 {
         warnings.push(format!(
             "표의 병합 {dropped}곳은 범위를 벗어나거나 겹쳐 저장하지 않았습니다."
+        ));
+    }
+    if dropped_links > 0 {
+        warnings.push(format!(
+            "표의 셀 링크 {dropped_links}곳은 범위를 벗어나거나 겹쳐 저장하지 않았습니다."
         ));
     }
     Ok(table)

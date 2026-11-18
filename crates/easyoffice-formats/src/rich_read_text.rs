@@ -7,9 +7,14 @@
 //! `<mark>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<s>`/`<del>`, `<br>`), links, inline code, and
 //! backslash escapes.
 
-use crate::rich_xml::{push_run, CharFmt};
+use crate::rich_document::{
+    safe_link_target, RichListNumber, RichNumberEnclosure, RichNumberFormat,
+};
+use crate::rich_table::join_cell_paragraphs;
+use crate::rich_xml::{push_linked_run, CharFmt};
 use crate::{
     CommonMarkCodec, EasyOfficeError, RichBlock, RichListKind, RichParagraph, RichRun, RichScript,
+    RichTable, TableCellLink,
 };
 
 const MAX_MARKDOWN_BLOCKS: usize = 1_000_000;
@@ -83,6 +88,8 @@ struct MdInline {
     chars: Vec<char>,
     runs: Vec<RichRun>,
     fmt: CharFmt,
+    link: Option<String>,
+    allow_links: bool,
     buf: String,
     i: usize,
     no_more_single_tilde: bool,
@@ -138,7 +145,7 @@ impl MdInline {
     }
 
     fn flush(&mut self) {
-        push_run(&mut self.runs, &self.buf, &self.fmt);
+        push_linked_run(&mut self.runs, &self.buf, &self.fmt, self.link.as_deref());
         self.buf.clear();
     }
 
@@ -430,16 +437,31 @@ impl MdInline {
         }
     }
 
-    /// Replaces `[text](url)` / `![alt](url)` with its label; otherwise keeps the character.
+    /// Parses `[text](url)` into linked inline runs when `url` passes [`safe_link_target`],
+    /// and replaces `![alt](url)` or unsafe links with their label text.
     fn link_or_image(&mut self, c: char, next: Option<char>) {
+        if !self.allow_links {
+            self.buf.push(c);
+            self.i += 1;
+            return;
+        }
         let i = self.i;
-        let bracket = match (c, next) {
-            ('!', Some('[')) => Some(i + 1),
-            ('[', _) => Some(i),
-            _ => None,
+        let (is_image, bracket) = match (c, next) {
+            ('!', Some('[')) => (true, Some(i + 1)),
+            ('[', _) => (false, Some(i)),
+            _ => (false, None),
         };
-        if let Some((label_range, after)) = bracket.and_then(|b| self.link_span(b)) {
-            self.buf.extend(&self.chars[label_range]);
+        if let Some((label_range, url_range, after)) = bracket.and_then(|b| self.link_span(b)) {
+            let label: String = self.chars[label_range].iter().collect();
+            let raw_url: String = self.chars[url_range].iter().collect();
+            let safe = if is_image {
+                None
+            } else {
+                safe_link_target(raw_url.trim()).map(str::to_string)
+            };
+            self.flush();
+            let sub_runs = parse_md_inline_inner(&label, self.fmt.clone(), safe, false);
+            self.runs.extend(sub_runs);
             self.i = after;
         } else {
             self.buf.push(c);
@@ -447,8 +469,11 @@ impl MdInline {
         }
     }
 
-    /// Label range and the index after `)` for a link whose `[` is at `bracket`.
-    fn link_span(&mut self, bracket: usize) -> Option<(std::ops::Range<usize>, usize)> {
+    /// `(label_range, url_range, after_rparen)` for a link whose `[` is at `bracket`.
+    fn link_span(
+        &mut self,
+        bracket: usize,
+    ) -> Option<(std::ops::Range<usize>, std::ops::Range<usize>, usize)> {
         let close = Self::find_next_char(
             &self.chars,
             bracket + 1,
@@ -466,28 +491,22 @@ impl MdInline {
             &mut self.next_rparen,
             &mut self.no_more_rparen,
         )?;
-        Some((bracket + 1..close, end + 1))
+        Some((bracket + 1..close, close + 2..end, end + 1))
     }
 }
 
-/// Parses inline markers into formatted runs.
-pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
-    if !text.bytes().any(|b| {
-        matches!(
-            b,
-            b'\\' | b'\n' | b'<' | b'*' | b'~' | b'_' | b'`' | b'!' | b'[' | b'^' | b'='
-        )
-    }) {
-        return if text.is_empty() {
-            Vec::new()
-        } else {
-            vec![RichRun::plain(text)]
-        };
-    }
+fn parse_md_inline_inner(
+    text: &str,
+    base_fmt: CharFmt,
+    link: Option<String>,
+    allow_links: bool,
+) -> Vec<RichRun> {
     let mut scanner = MdInline {
         chars: text.chars().collect(),
         runs: Vec::new(),
-        fmt: CharFmt::default(),
+        fmt: base_fmt,
+        link,
+        allow_links,
         buf: String::new(),
         i: 0,
         no_more_single_tilde: false,
@@ -505,10 +524,36 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
     scanner.runs
 }
 
-/// A table cell holds text only: the inline syntax is resolved like a paragraph's and the
-/// formatting it set (bold, italic, code, link, script) is dropped, the text stays.
-fn inline_plain_text(cell: &str) -> String {
-    parse_md_inline(cell).into_iter().map(|r| r.text).collect()
+/// Parses inline markers into formatted runs.
+pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
+    if !text.bytes().any(|b| {
+        matches!(
+            b,
+            b'\\' | b'\n' | b'<' | b'*' | b'~' | b'_' | b'`' | b'!' | b'[' | b'^' | b'='
+        )
+    }) {
+        return if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![RichRun::plain(text)]
+        };
+    }
+    parse_md_inline_inner(text, CharFmt::default(), None, true)
+}
+
+fn paragraph_list(
+    text: &str,
+    list: RichListKind,
+    list_level: u8,
+    list_number: Option<RichListNumber>,
+) -> RichBlock {
+    RichBlock::Paragraph(RichParagraph {
+        runs: parse_md_inline(text),
+        list: Some(list),
+        list_level: list_level.min(8),
+        list_number,
+        ..RichParagraph::default()
+    })
 }
 
 fn paragraph(text: &str, heading: u8, list: Option<RichListKind>) -> RichBlock {
@@ -546,13 +591,20 @@ fn parse_gfm_table_row_line(t: &str) -> Option<Vec<String>> {
     None
 }
 
-fn list_marker(trimmed: &str) -> Option<(RichListKind, std::borrow::Cow<'_, str>)> {
+fn list_marker(
+    trimmed: &str,
+) -> Option<(
+    RichListKind,
+    Option<RichListNumber>,
+    std::borrow::Cow<'_, str>,
+)> {
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
             let rest = rest.trim();
             if let Some(task) = rest.strip_prefix("[ ] ") {
                 return Some((
                     RichListKind::Bullet,
+                    None,
                     format!("\u{2610} {}", task.trim()).into(),
                 ));
             }
@@ -562,22 +614,40 @@ fn list_marker(trimmed: &str) -> Option<(RichListKind, std::borrow::Cow<'_, str>
             {
                 return Some((
                     RichListKind::Bullet,
+                    None,
                     format!("\u{2611} {}", task.trim()).into(),
                 ));
             }
-            return Some((RichListKind::Bullet, rest.into()));
+            return Some((RichListKind::Bullet, None, rest.into()));
         }
     }
     let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
     if (1..=9).contains(&digits) {
         let rest = &trimmed[digits..];
-        for marker in [". ", ") "] {
-            if let Some(body) = rest.strip_prefix(marker) {
-                return Some((RichListKind::Ordered, body.trim().into()));
-            }
+        if let Some(body) = rest.strip_prefix(". ") {
+            return Some((RichListKind::Ordered, None, body.trim().into()));
+        }
+        if let Some(body) = rest.strip_prefix(") ") {
+            return Some((
+                RichListKind::Ordered,
+                Some(RichListNumber {
+                    format: RichNumberFormat::Decimal,
+                    enclosure: RichNumberEnclosure::RightParenthesis,
+                }),
+                body.trim().into(),
+            ));
         }
     }
     None
+}
+
+fn leading_list_level(line: &str) -> u8 {
+    let cols: usize = line
+        .bytes()
+        .take_while(|b| matches!(b, b' ' | b'\t'))
+        .map(|b| if b == b'\t' { 4 } else { 1 })
+        .sum();
+    (cols / 2).min(8) as u8
 }
 
 /// Reads Markdown text into ordered blocks.
@@ -665,6 +735,7 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
         if is_outer_pipe || is_pipeless_table {
             flush(&mut blocks, &mut pending);
             let mut rows: Vec<Vec<String>> = Vec::new();
+            let mut links: Vec<TableCellLink> = Vec::new();
             while i < lines.len() {
                 let t = lines[i].trim();
                 let Some(cells) = (if is_outer_pipe {
@@ -676,7 +747,22 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                     break;
                 };
                 if !(rows.len() == 1 && is_separator_row(&cells)) {
-                    rows.push(cells.iter().map(|c| inline_plain_text(c)).collect());
+                    let r_idx = rows.len() as u32;
+                    let mut row_texts = Vec::with_capacity(cells.len());
+                    for (c_idx, cell) in cells.iter().enumerate() {
+                        let (txt, spans) = join_cell_paragraphs(&[parse_md_inline(cell)]);
+                        for (start, end, url) in spans {
+                            links.push(TableCellLink {
+                                row: r_idx,
+                                col: c_idx as u32,
+                                start,
+                                end,
+                                url,
+                            });
+                        }
+                        row_texts.push(txt);
+                    }
+                    rows.push(row_texts);
                     if rows.len() > MAX_MARKDOWN_BLOCKS {
                         return Err(EasyOfficeError::ResourceBudgetExceeded(
                             "Markdown 블록 수가 허용 예산을 초과했습니다.".to_string(),
@@ -685,12 +771,13 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                 }
                 i += 1;
             }
-            blocks.push(RichBlock::Table(rows.into()));
+            let (table, _, _) = RichTable::with_merges_and_links(rows, Vec::new(), links);
+            blocks.push(RichBlock::Table(table));
             continue;
         }
-        if let Some((kind, body)) = list_marker(trimmed) {
+        if let Some((kind, num, body)) = list_marker(trimmed) {
             flush(&mut blocks, &mut pending);
-            blocks.push(paragraph(&body, 0, Some(kind)));
+            blocks.push(paragraph_list(&body, kind, leading_list_level(line), num));
             i += 1;
             continue;
         }

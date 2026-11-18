@@ -123,10 +123,22 @@
       const scope = resolveSourceScopeKind(sourceFormatOrModule);
       if (scope === "DOC" || scope === "HWP") {
         const saved = docTabStore[scope];
+        const ls = saved?.layoutStyle || {};
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
-        const options = { baseAlign: saved?.layoutStyle?.textAlign, baseLineHeight: saved?.layoutStyle?.lineHeight };
-        return { blocks: savePayload.collectDocBlocks(tempDiv, options), ...savePayload.collectPageFrame(tempDiv, options), ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.payloadOf(saved?.layoutStyle?.eoPage) };
+        const options = {
+          baseAlign: ls.textAlign,
+          baseLineHeight: ls.lineHeight,
+          firstPageDifferent: ls.eoFirstPage === "true",
+          evenOddDifferent: ls.eoEvenOdd === "true",
+        };
+        const docCols = Number.parseInt(ls.columnCount || "0", 10) || 0;
+        return {
+          blocks: savePayload.collectDocBlocks(tempDiv, options),
+          ...(docCols >= 2 ? { docColumns: docCols } : {}),
+          ...savePayload.collectPageFrame(tempDiv, options),
+          ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.payloadOf(ls.eoPage),
+        };
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();

@@ -28,6 +28,9 @@
   const TABLE_FORMULA_RE = /^=\s*([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*$/;
   const CELL_TAG_RE = /^(TD|TH)$/i;
   const HEADING_TAG_RE = /^H([1-6])$/;
+  const COLS_RE = /^(\d+),([01]),(\d+)$/;
+  const FRAME_KINDS = new Set(["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"]);
+  const utf8Encoder = new TextEncoder();
 
   function isSkippedElement(el) {
     const tag = (el.tagName || "").toUpperCase();
@@ -187,6 +190,56 @@
     return String(cell.textContent || "").replaceAll(/\s+/g, " ").trim();
   }
 
+  function readCellContent(cell) {
+    const chars = [];
+    let hasLink = false;
+    function walkCell(node, url) {
+      if (node.nodeType === 3) {
+        const val = String(node.nodeValue || "");
+        for (const ch of val) chars.push({ ch, url });
+        return;
+      }
+      if (node.nodeType !== 1 || isSkippedElement(node)) return;
+      const tag = (node.tagName || "").toUpperCase();
+      const nextUrl = tag === "A" ? (linkTarget(node) ?? url) : url;
+      if (nextUrl) hasLink = true;
+      const children = node.childNodes;
+      if (!children) return;
+      for (let i = 0; i < children.length; i += 1) walkCell(children[i], nextUrl);
+    }
+    walkCell(cell, null);
+    if (!hasLink) return { text: cellText(cell), links: [] };
+    const norm = [];
+    for (const item of chars) {
+      if (/\s/.test(item.ch)) {
+        if (norm.length > 0 && norm[norm.length - 1].ch !== " ") {
+          norm.push({ ch: " ", url: item.url });
+        }
+      } else {
+        norm.push(item);
+      }
+    }
+    if (norm.length > 0 && norm[norm.length - 1].ch === " ") norm.pop();
+    if (norm.length === 0) return { text: "", links: [] };
+    let text = "";
+    let bytePos = 0;
+    const links = [];
+    for (const item of norm) {
+      const len = utf8Encoder.encode(item.ch).length;
+      if (item.url) {
+        const last = links[links.length - 1];
+        if (last && last.end === bytePos && last.url === item.url) {
+          last.end += len;
+        } else {
+          links.push({ start: bytePos, end: bytePos + len, url: item.url });
+        }
+      }
+      text += item.ch;
+      bytePos += len;
+    }
+    return { text, links };
+  }
+
   // A span attribute as a positive integer (`rowspan="0"` and junk count as 1).
   function spanOf(value) {
     return Math.max(1, Math.trunc(Number(value)) || 1);
@@ -276,6 +329,7 @@
     const taken = trs.map(() => []);
     const texts = trs.map(() => []);
     const merges = [];
+    const rawLinks = [];
     trs.forEach((tr, r) => {
       let col = 0;
       const cells = tr.children;
@@ -293,7 +347,9 @@
             texts[r + dr][col + dc] = "";
           }
         }
-        texts[r][col] = cellText(cell);
+        const { text, links } = readCellContent(cell);
+        texts[r][col] = text;
+        links.forEach((l) => rawLinks.push({ row: r, col, start: l.start, end: l.end, url: l.url }));
         if (rowSpan * colSpan > 1) merges.push({ row: r, col, rowSpan, colSpan });
         col += colSpan;
       }
@@ -304,14 +360,21 @@
     const regions = merges
       .map((m) => ({ ...m, row: before[m.row], rowSpan: before[m.row + m.rowSpan] - before[m.row] }))
       .filter((m) => m.rowSpan * m.colSpan > 1);
-    return { texts: rows.filter((row) => row.length > 0), merges: regions };
+    const links = rawLinks
+      .filter((l) => rows[l.row]?.length > 0)
+      .map((l) => ({ ...l, row: before[l.row] }));
+    return { texts: rows.filter((row) => row.length > 0), merges: regions, links };
   }
 
   function buildTableBlock(table) {
-    const { texts, merges } = readTableGrid(table);
+    const { texts, merges, links } = readTableGrid(table);
     const values = evaluateDocTableFormulas(texts);
     const rows = texts.map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })));
-    return merges.length > 0 ? { type: "table", rows, merges } : { type: "table", rows };
+    const keptLinks = links.filter((l) => values[l.row]?.[l.col] === null);
+    const block = { type: "table", rows };
+    if (merges.length > 0) block.merges = merges;
+    if (keptLinks.length > 0) block.links = keptLinks;
+    return block;
   }
 
   // Walks an editor root in document order and returns paragraph/table blocks.
@@ -340,7 +403,12 @@
         if (cur.ctx.bookmark !== undefined) block.bookmark = cur.ctx.bookmark;
         if (cur.ctx.tocPage !== undefined) Object.assign(block, { tocPage: cur.ctx.tocPage, tocDots: cur.ctx.tocDots });
         if (cur.ctx.pageBreak) block.pageBreakBefore = true;
-        if (cur.ctx.list) block.list = cur.ctx.list;
+        if (cur.ctx.list) {
+          block.list = cur.ctx.list;
+          if (cur.ctx.listLevel > 0) block.listLevel = cur.ctx.listLevel;
+          if (cur.ctx.list === "ordered" && cur.ctx.listNumber) block.listNumber = cur.ctx.listNumber;
+        }
+        if (cur.ctx.columns) block.columns = cur.ctx.columns;
         blocks.push(block);
       }
       cur = null;
@@ -415,9 +483,26 @@
 
   function blockContext(node, tag, ctx) {
       const headingMatch = HEADING_TAG_RE.exec(tag);
+      const isContainerList = tag === "UL" || tag === "OL";
+      const inList = isContainerList || ctx.inList === true;
+      const ulDepth = isContainerList ? (ctx.inList ? (ctx.ulDepth || 0) + 1 : 0) : (ctx.ulDepth || 0);
       const listParent = tag === "LI" ? node.parentElement : null;
       let nextList = ctx.list;
-      if (listParent) nextList = (listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet";
+      if (listParent) {
+        const parentTag = (listParent.tagName || "").toUpperCase();
+        if (parentTag === "OL") nextList = "ordered";
+        else if (parentTag === "UL") nextList = "bullet";
+      }
+      const attrLevel = tag === "LI" ? Math.max(0, Number.parseInt(node.dataset?.eoListLevel || "0", 10) || 0) : 0;
+      const listLevel = tag === "LI" ? Math.min(8, ulDepth + attrLevel) : (ctx.listLevel || 0);
+      const listNumber = tag === "LI"
+        ? (nextList === "ordered" && node.dataset?.eoListNum ? String(node.dataset.eoListNum) : undefined)
+        : ctx.listNumber;
+      const colsMatch = COLS_RE.exec(String(node.dataset?.eoCols || ""));
+      const colsCount = colsMatch ? Number(colsMatch[1]) : 0;
+      const columns = colsCount >= 2 && colsCount <= 16
+        ? { count: colsCount, equal: colsMatch[2] === "1", gapTwips: Number(colsMatch[3]) }
+        : ctx.columns;
       return {
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
@@ -426,7 +511,12 @@
         tocPage: tocPage(node),
         tocDots: node.dataset?.eoTocDots === "true",
         pageBreak: node.dataset?.eoBreak === "page",
+        inList,
+        ulDepth,
         list: nextList,
+        listLevel,
+        listNumber,
+        columns,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
       };
     }
@@ -486,15 +576,21 @@
     return blocks;
   }
 
-  // The header and footer sections of an editor root as paragraph blocks, as the `header` and `footer` fields of
-  // the payload; a section without text or field is left out.
+  // The header and footer sections (including first/even page variants) of an editor root as paragraph blocks;
+  // a section without text or field is left out, while explicit first/even flags are preserved.
   function collectPageFrame(root, options = {}) {
     const frame = {};
     for (const section of Array.from(root?.children || [])) {
       const kind = section.dataset?.eoHf;
-      if ((kind !== "header" && kind !== "footer") || Object.hasOwn(frame, kind)) continue;
+      if (!FRAME_KINDS.has(kind) || Object.hasOwn(frame, kind)) continue;
       const blocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph").slice(0, MAX_FRAME_PARAGRAPHS);
       if (blocks.some((b) => b.runs.length > 0)) frame[kind] = blocks;
+    }
+    if (options.firstPageDifferent === true || frame.firstHeader || frame.firstFooter) {
+      frame.firstPageDifferent = true;
+    }
+    if (options.evenOddDifferent === true || frame.evenHeader || frame.evenFooter) {
+      frame.evenOddDifferent = true;
     }
     return frame;
   }

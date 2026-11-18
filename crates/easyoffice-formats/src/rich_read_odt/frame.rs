@@ -4,14 +4,59 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::{length_twips, OdtWalker, StyleProps};
-use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
-use crate::xml_stream::{attr, XmlEvent, XmlReader};
+use crate::rich_document::{
+    frame_paragraph, RichColumns, RichListNumber, RichNumberEnclosure, RichNumberFormat,
+    MAX_PAGE_FRAME_PARAGRAPHS,
+};
+use crate::rich_list_writers::LIST_LEVELS;
+use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichBinding, RichBindingKind, RichBlock, RichListKind, RichPageFrame,
     RichPageMargins, RichPaper, RichParagraph,
 };
 
-/// Margins and header/footer heights of one `style:page-layout`, in twips.
+#[derive(Clone, Copy)]
+pub(super) struct OdtListStyle {
+    pub kind: RichListKind,
+    pub levels: [Option<RichListNumber>; LIST_LEVELS],
+}
+
+impl OdtListStyle {
+    pub const fn new(kind: RichListKind) -> Self {
+        Self {
+            kind,
+            levels: [None; LIST_LEVELS],
+        }
+    }
+}
+
+pub(super) fn parse_odt_list_level_number(attrs: &Attrs<'_>) -> (usize, RichListNumber) {
+    let level = attr(attrs, "text:level")
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map_or(0, |n| n.saturating_sub(1).min(LIST_LEVELS - 1));
+    let format = match attr(attrs, "style:num-format")
+        .as_deref()
+        .unwrap_or("1")
+        .trim()
+    {
+        "a" => RichNumberFormat::LowerLatin,
+        "A" => RichNumberFormat::UpperLatin,
+        "i" => RichNumberFormat::LowerRoman,
+        "I" => RichNumberFormat::UpperRoman,
+        s if s.starts_with('가') => RichNumberFormat::HangulSyllable,
+        _ => RichNumberFormat::Decimal,
+    };
+    let prefix = attr(attrs, "style:num-prefix").unwrap_or_default();
+    let suffix = attr(attrs, "style:num-suffix").unwrap_or(Cow::Borrowed("."));
+    let enclosure = match (prefix.trim(), suffix.trim()) {
+        ("(", ")") => RichNumberEnclosure::Parentheses,
+        ("", ")") => RichNumberEnclosure::RightParenthesis,
+        _ => RichNumberEnclosure::Dot,
+    };
+    (level, RichListNumber { format, enclosure })
+}
+
+/// Margins, columns and header/footer heights of one `style:page-layout`, in twips.
 #[derive(Default, Clone, Copy)]
 struct OdtLayout {
     margin_top: Option<i32>,
@@ -23,6 +68,7 @@ struct OdtLayout {
     mirrored: bool,
     header_height: i32,
     footer_height: i32,
+    columns: Option<RichColumns>,
 }
 
 /// The page layouts of `styles.xml` by name.
@@ -61,6 +107,27 @@ fn read_odt_layouts(xml: &str) -> Result<HashMap<String, OdtLayout>, EasyOfficeE
                     layout.page_height = length("fo:page-height");
                     layout.mirrored =
                         attr(&attrs, "style:page-usage").as_deref() == Some("mirrored");
+                }
+            }
+            XmlEvent::Start {
+                name: "style:columns",
+                attrs,
+            } if part == 0 => {
+                if let Some((_, layout)) = open.as_mut() {
+                    let count = attr(&attrs, "fo:column-count")
+                        .and_then(|v| v.trim().parse::<u16>().ok())
+                        .map_or(1, |n| n.clamp(1, 16) as u8);
+                    if count > 1 {
+                        let gap = attr(&attrs, "fo:column-gap")
+                            .as_deref()
+                            .and_then(length_twips)
+                            .map_or(720, |t| t.max(0).min(i32::from(u16::MAX)) as u16);
+                        layout.columns = Some(RichColumns {
+                            count,
+                            equal: true,
+                            gap_twips: gap,
+                        });
+                    }
                 }
             }
             XmlEvent::Start {
@@ -144,18 +211,18 @@ fn odt_setup(
     }
 }
 
-/// The header and footer of the first master page in `styles.xml`; the left and first-page variants of
-/// the master page are not read.
+/// Reads the header/footer slots (default, first-page, left/even-page) and page columns of the
+/// first master page in `styles.xml`; extra master pages are reported.
 pub(super) fn read_page_frame(
     xml: &str,
     styles: &HashMap<String, StyleProps>,
-    list_styles: &HashMap<String, RichListKind>,
+    list_styles: &HashMap<String, OdtListStyle>,
     warnings: &mut Vec<String>,
-) -> Result<RichPageFrame, EasyOfficeError> {
+) -> Result<(RichPageFrame, Option<RichColumns>), EasyOfficeError> {
     let mut frame = RichPageFrame::default();
     let mut reader = XmlReader::new(xml);
-    let (mut masters, mut variants) = (0usize, false);
-    let mut open: Option<(bool, OdtWalker<'_>)> = None;
+    let (mut masters, mut other_masters) = (0usize, false);
+    let mut open: Option<(&'static str, OdtWalker<'_>)> = None;
     let mut layout_name: Option<String> = None;
     while let Some(event) = reader.next_event()? {
         match event {
@@ -170,20 +237,42 @@ pub(super) fn read_page_frame(
             }
             XmlEvent::Start {
                 name:
-                    "style:header-left" | "style:footer-left" | "style:header-first"
-                    | "style:footer-first",
-                ..
-            } => {
-                variants |= masters == 1;
-                reader.skip_subtree()?;
-            }
-            XmlEvent::Start {
-                name: name @ ("style:header" | "style:footer"),
-                ..
-            } if masters == 1 && open.is_none() => {
+                    tag @ ("style:header" | "style:footer" | "style:header-left" | "style:footer-left"
+                    | "style:header-first" | "style:footer-first"),
+                ref attrs,
+            } if open.is_none() => {
+                if masters != 1 {
+                    other_masters = true;
+                    reader.skip_subtree()?;
+                    continue;
+                }
+                if attr(attrs, "style:display").as_deref() == Some("false") {
+                    reader.skip_subtree()?;
+                    continue;
+                }
+                let slot = match tag {
+                    "style:header" => "header",
+                    "style:footer" => "footer",
+                    "style:header-left" => {
+                        frame.even_odd_different = true;
+                        "even_header"
+                    }
+                    "style:footer-left" => {
+                        frame.even_odd_different = true;
+                        "even_footer"
+                    }
+                    "style:header-first" => {
+                        frame.first_page_different = true;
+                        "first_header"
+                    }
+                    _ => {
+                        frame.first_page_different = true;
+                        "first_footer"
+                    }
+                };
                 let mut walker = OdtWalker::new(styles, list_styles);
                 walker.frame_mode = true;
-                open = Some((name == "style:header", walker));
+                open = Some((slot, walker));
             }
             XmlEvent::Start { name, ref attrs } => {
                 if let Some((_, walker)) = open.as_mut() {
@@ -197,8 +286,11 @@ pub(super) fn read_page_frame(
                     walker.push_inline(&text)?;
                 }
             }
-            XmlEvent::End(name @ ("style:header" | "style:footer")) if open.is_some() => {
-                let Some((header, mut walker)) = open.take() else {
+            XmlEvent::End(
+                "style:header" | "style:footer" | "style:header-left" | "style:footer-left"
+                | "style:header-first" | "style:footer-first",
+            ) if open.is_some() => {
+                let Some((slot, mut walker)) = open.take() else {
                     continue;
                 };
                 warnings.append(&mut walker.warnings);
@@ -215,7 +307,10 @@ pub(super) fn read_page_frame(
                     .iter()
                     .any(|b| !matches!(b, RichBlock::Paragraph(_)))
                 {
-                    warnings.push("머리말·꼬리말의 표·그림은 가져오지 않았습니다.".to_string());
+                    let note = "머리말·꼬리말의 표·그림은 가져오지 않았습니다.".to_string();
+                    if !warnings.contains(&note) {
+                        warnings.push(note);
+                    }
                 }
                 if paragraphs.len() > MAX_PAGE_FRAME_PARAGRAPHS {
                     paragraphs.truncate(MAX_PAGE_FRAME_PARAGRAPHS);
@@ -223,11 +318,13 @@ pub(super) fn read_page_frame(
                         "머리말·꼬리말은 문단 {MAX_PAGE_FRAME_PARAGRAPHS}개까지만 가져왔습니다."
                     ));
                 }
-                debug_assert_eq!(name == "style:header", header);
-                if header {
-                    frame.header = paragraphs;
-                } else {
-                    frame.footer = paragraphs;
+                match slot {
+                    "header" => frame.header = paragraphs,
+                    "footer" => frame.footer = paragraphs,
+                    "even_header" => frame.even_header = paragraphs,
+                    "even_footer" => frame.even_footer = paragraphs,
+                    "first_header" => frame.first_header = paragraphs,
+                    _ => frame.first_footer = paragraphs,
                 }
             }
             XmlEvent::End(name) => {
@@ -237,13 +334,15 @@ pub(super) fn read_page_frame(
             }
         }
     }
-    if variants {
-        warnings.push("첫 쪽·왼쪽 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
+    if other_masters {
+        warnings.push("구역마다 다른 머리말·꼬리말은 첫 구역의 것만 가져왔습니다.".to_string());
     }
     let layouts = read_odt_layouts(xml)?;
+    let mut columns = None;
     if let Some(layout) = layout_name.and_then(|n| layouts.get(&n).copied()) {
+        columns = layout.columns;
         (frame.margins, frame.paper) =
-            odt_setup(layout, !frame.header.is_empty(), !frame.footer.is_empty());
+            odt_setup(layout, frame.has_any_header(), frame.has_any_footer());
         if frame.margins.is_some() && layout.mirrored {
             frame.binding = RichBinding {
                 kind: RichBindingKind::Duplex,
@@ -251,5 +350,5 @@ pub(super) fn read_page_frame(
             };
         }
     }
-    Ok(frame)
+    Ok((frame, columns))
 }

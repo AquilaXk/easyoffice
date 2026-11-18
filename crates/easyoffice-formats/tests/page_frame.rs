@@ -235,7 +235,7 @@ fn a_word_footer_with_a_complex_page_field_reads_as_a_field_run() {
 }
 
 #[test]
-fn first_page_even_page_and_per_section_variants_are_reported_not_kept() {
+fn first_page_variant_is_kept_and_per_section_variants_are_reported() {
     let part = |text: &str| format!("<w:hdr {W}><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:hdr>");
     let document = format!(
         "<w:document {W}><w:body>\
@@ -264,10 +264,8 @@ fn first_page_even_page_and_per_section_variants_are_reported_not_kept() {
     );
     let (doc, warnings) = decode(&bytes, "sections.docx");
     assert_eq!(doc.page_frame.header[0].plain_text(), "첫 구역 기본");
-    assert!(
-        warnings.iter().any(|w| w.contains("첫 쪽·짝수 쪽")),
-        "{warnings:?}"
-    );
+    assert!(doc.page_frame.first_page_different);
+    assert_eq!(doc.page_frame.first_header[0].plain_text(), "첫 쪽 전용");
     assert!(
         warnings.iter().any(|w| w.contains("구역마다")),
         "{warnings:?}"
@@ -379,7 +377,7 @@ fn odt_package(styles: &str) -> Vec<u8> {
 const ODF_NS: &str = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
 
 #[test]
-fn odt_reads_the_first_master_page_and_reports_left_and_first_variants() {
+fn odt_reads_the_first_master_page_with_left_variant_and_ignores_second_master() {
     let styles = format!(
         "<office:document-styles {ODF_NS}><office:master-styles>\
          <style:master-page style:name=\"Standard\">\
@@ -393,10 +391,15 @@ fn odt_reads_the_first_master_page_and_reports_left_and_first_variants() {
     let (doc, warnings) = decode(&odt_package(&styles), "other.odt");
     assert_eq!(doc.page_frame.header.len(), 1);
     assert_eq!(doc.page_frame.header[0].plain_text(), "기본 머리말");
+    assert!(doc.page_frame.even_odd_different);
+    assert_eq!(doc.page_frame.even_header[0].plain_text(), "왼쪽 머리말");
     let footer = &doc.page_frame.footer[0];
     assert_eq!(footer.runs[1].field, Some(RichField::PageNumber));
     assert_eq!(footer.plain_text(), "기본 ");
-    assert!(warnings.iter().any(|w| w.contains("왼쪽")), "{warnings:?}");
+    assert!(
+        warnings.iter().any(|w| w.contains("구역마다")),
+        "{warnings:?}"
+    );
 }
 
 #[test]
@@ -459,10 +462,8 @@ fn hwpx_even_and_odd_headers_and_second_sections_are_reported() {
         "x.hwpx",
     );
     assert_eq!(doc.page_frame.header[0].plain_text(), "양쪽");
-    assert!(
-        warnings.iter().any(|w| w.contains("홀수·짝수")),
-        "{warnings:?}"
-    );
+    assert!(doc.page_frame.even_odd_different);
+    assert_eq!(doc.page_frame.even_header[0].plain_text(), "짝수");
     assert!(
         warnings.iter().any(|w| w.contains("구역마다")),
         "{warnings:?}"

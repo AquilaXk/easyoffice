@@ -113,16 +113,26 @@ pub(crate) const DOCX_SETTINGS_REL_ID: &str = "rIdSettings1";
 const DOCX_SETTINGS_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
 
-/// `word/settings.xml` for a binding that needs it (`w:mirrorMargins` for facing pages, `w:gutterAtTop`), with the
-/// relationship and the content-type override that name it; `None` for one-sided pages.
-pub(crate) fn docx_settings(binding: RichBinding) -> Option<(String, String, String)> {
-    let flag = match binding.kind {
-        RichBindingKind::Single => return None,
-        RichBindingKind::Duplex => "<w:mirrorMargins/>",
-        RichBindingKind::Top => "<w:gutterAtTop/>",
-    };
+/// `word/settings.xml` for a binding or even/odd header setting (`w:evenAndOddHeaders`, `w:mirrorMargins`,
+/// `w:gutterAtTop`), with the relationship and content-type override; `None` when none apply.
+pub(crate) fn docx_settings(
+    binding: RichBinding,
+    even_odd_different: bool,
+) -> Option<(String, String, String)> {
+    let mut flags = String::new();
+    if even_odd_different {
+        flags.push_str("<w:evenAndOddHeaders/>");
+    }
+    match binding.kind {
+        RichBindingKind::Single => {}
+        RichBindingKind::Duplex => flags.push_str("<w:mirrorMargins/>"),
+        RichBindingKind::Top => flags.push_str("<w:gutterAtTop/>"),
+    }
+    if flags.is_empty() {
+        return None;
+    }
     let xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flag}</w:settings>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flags}</w:settings>"
     );
     let rel = format!(
         "<Relationship Id=\"{DOCX_SETTINGS_REL_ID}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/>"
@@ -188,35 +198,79 @@ pub(crate) struct DocxFrameRefs {
     pub content_types: String,
 }
 
-pub(crate) fn docx_frame_refs(header: bool, footer: bool) -> DocxFrameRefs {
+pub(crate) fn docx_frame_parts_and_refs(
+    frame: &crate::RichPageFrame,
+) -> (Vec<(String, Vec<u8>)>, DocxFrameRefs) {
+    let mut entries = Vec::new();
     let mut refs = DocxFrameRefs {
         section: String::new(),
         relationships: String::new(),
         content_types: String::new(),
     };
-    for (present, tag, id, part, kind, content_type) in [
+    let slots = [
         (
-            header,
-            "w:headerReference",
+            &frame.header[..],
+            true,
+            true,
+            "default",
             DOCX_HEADER_REL_ID,
             DOCX_HEADER_PART,
-            "header",
-            DOCX_HEADER_CONTENT_TYPE,
         ),
         (
-            footer,
-            "w:footerReference",
+            &frame.first_header[..],
+            frame.first_page_different,
+            true,
+            "first",
+            "rIdHeader2",
+            "word/header2.xml",
+        ),
+        (
+            &frame.even_header[..],
+            frame.even_odd_different,
+            true,
+            "even",
+            "rIdHeader3",
+            "word/header3.xml",
+        ),
+        (
+            &frame.footer[..],
+            true,
+            false,
+            "default",
             DOCX_FOOTER_REL_ID,
             DOCX_FOOTER_PART,
-            "footer",
-            DOCX_FOOTER_CONTENT_TYPE,
         ),
-    ] {
-        if !present {
+        (
+            &frame.first_footer[..],
+            frame.first_page_different,
+            false,
+            "first",
+            "rIdFooter2",
+            "word/footer2.xml",
+        ),
+        (
+            &frame.even_footer[..],
+            frame.even_odd_different,
+            false,
+            "even",
+            "rIdFooter3",
+            "word/footer3.xml",
+        ),
+    ];
+    for (paragraphs, enabled, is_header, ref_type, id, part) in slots {
+        if !enabled {
             continue;
         }
+        let Some(xml) = docx_frame_part(paragraphs, is_header) else {
+            continue;
+        };
+        let (tag, kind, content_type) = if is_header {
+            ("w:headerReference", "header", DOCX_HEADER_CONTENT_TYPE)
+        } else {
+            ("w:footerReference", "footer", DOCX_FOOTER_CONTENT_TYPE)
+        };
         refs.section
-            .push_str(&format!("<{tag} w:type=\"default\" r:id=\"{id}\"/>"));
+            .push_str(&format!("<{tag} w:type=\"{ref_type}\" r:id=\"{id}\"/>"));
         refs.relationships.push_str(&format!(
             "<Relationship Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{kind}\" Target=\"{}\"/>",
             part.trim_start_matches("word/")
@@ -224,8 +278,12 @@ pub(crate) fn docx_frame_refs(header: bool, footer: bool) -> DocxFrameRefs {
         refs.content_types.push_str(&format!(
             "<Override PartName=\"/{part}\" ContentType=\"{content_type}\"/>"
         ));
+        entries.push((part.to_string(), xml.into_bytes()));
     }
-    refs
+    if frame.first_page_different {
+        refs.section.push_str("<w:titlePg/>");
+    }
+    (entries, refs)
 }
 
 /// An ODF field element for a run (a `text:span` around it when the run has a text style).
@@ -255,17 +313,25 @@ fn odt_pt(twips: u32) -> String {
     }
 }
 
-/// The page layout and master page that give an ODT its page setup, header and footer: `(page layout, master
-/// styles)`. The layout's top margin is the distance to the header, the header's minimum height reaches the
-/// body (and the same for the footer); a part that is absent leaves its margin as the distance to the body.
-pub(crate) fn odt_master_page(
-    header: Option<&str>,
-    footer: Option<&str>,
-    margins: Option<&RichPageMargins>,
-    paper: Option<&RichPaper>,
-    binding: RichBinding,
-) -> (String, String) {
-    let m = margins.copied().unwrap_or(RichPageMargins {
+pub(crate) struct OdtMasterInput<'a> {
+    pub header: Option<&'a str>,
+    pub footer: Option<&'a str>,
+    pub first_header: Option<&'a str>,
+    pub first_footer: Option<&'a str>,
+    pub even_header: Option<&'a str>,
+    pub even_footer: Option<&'a str>,
+    pub first_page_different: bool,
+    pub even_odd_different: bool,
+    pub margins: Option<&'a RichPageMargins>,
+    pub paper: Option<&'a RichPaper>,
+    pub binding: RichBinding,
+    pub columns: Option<RichColumns>,
+}
+
+/// The page layout and master page that give an ODT its page setup, columns, header and footer:
+/// `(page layout, master styles)`.
+pub(crate) fn odt_master_page(inp: OdtMasterInput<'_>) -> (String, String) {
+    let m = inp.margins.copied().unwrap_or(RichPageMargins {
         top: 1191,
         bottom: 1191,
         header: 709,
@@ -273,31 +339,42 @@ pub(crate) fn odt_master_page(
         left: 1134,
         right: 1134,
     });
-    let paper = paper.copied().unwrap_or(RichPaper::A4);
+    let paper = inp.paper.copied().unwrap_or(RichPaper::A4);
     let orientation = if paper.width > paper.height {
         "landscape"
     } else {
         "portrait"
     };
-    let (margin_top, header_height) = match header {
-        Some(_) => (m.header, m.top.saturating_sub(m.header)),
-        None => (m.top, 0),
+    let any_hdr = inp.header.is_some() || inp.first_header.is_some() || inp.even_header.is_some();
+    let any_ftr = inp.footer.is_some() || inp.first_footer.is_some() || inp.even_footer.is_some();
+    let (margin_top, header_height) = if any_hdr {
+        (m.header, m.top.saturating_sub(m.header))
+    } else {
+        (m.top, 0)
     };
-    let (margin_bottom, footer_height) = match footer {
-        Some(_) => (m.footer, m.bottom.saturating_sub(m.footer)),
-        None => (m.bottom, 0),
+    let (margin_bottom, footer_height) = if any_ftr {
+        (m.footer, m.bottom.saturating_sub(m.footer))
+    } else {
+        (m.bottom, 0)
     };
-    // ODF 1.2 has no gutter and no top binding; facing pages are the mirrored page usage.
-    let usage = if binding.kind == RichBindingKind::Duplex {
+    let usage = if inp.binding.kind == RichBindingKind::Duplex {
         " style:page-usage=\"mirrored\""
     } else {
         ""
+    };
+    let cols_xml = match inp.columns.filter(|c| c.count > 1) {
+        Some(cols) => format!(
+            "<style:columns fo:column-count=\"{}\" fo:column-gap=\"{}\"/>",
+            cols.count.min(16),
+            odt_pt(u32::from(cols.gap_twips))
+        ),
+        None => String::new(),
     };
     let layout = format!(
         concat!(
             "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"{}\" ",
             "fo:page-height=\"{}\" style:print-orientation=\"{}\" fo:margin-top=\"{}\" ",
-            "fo:margin-bottom=\"{}\" fo:margin-left=\"{}\" fo:margin-right=\"{}\"{}/>",
+            "fo:margin-bottom=\"{}\" fo:margin-left=\"{}\" fo:margin-right=\"{}\"{}>{}</style:page-layout-properties>",
             "<style:header-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-bottom=\"0pt\"/></style:header-style>",
             "<style:footer-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-top=\"0pt\"/></style:footer-style>",
             "</style:page-layout>"
@@ -310,17 +387,51 @@ pub(crate) fn odt_master_page(
         odt_pt(m.left),
         odt_pt(m.right),
         usage,
+        cols_xml,
         odt_pt(header_height),
         odt_pt(footer_height)
     );
+    let push_variant = |master: &mut String, tag: &str, enabled: bool, body: Option<&str>| {
+        if !enabled {
+            return;
+        }
+        match body {
+            Some(xml) => master.push_str(&format!("<{tag}>{xml}</{tag}>")),
+            None => master.push_str(&format!("<{tag}/>")),
+        }
+    };
     let mut master =
         String::from("<office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"pm1\">");
-    if let Some(xml) = header {
+    if let Some(xml) = inp.header {
         master.push_str(&format!("<style:header>{xml}</style:header>"));
     }
-    if let Some(xml) = footer {
+    push_variant(
+        &mut master,
+        "style:header-left",
+        inp.even_odd_different,
+        inp.even_header,
+    );
+    push_variant(
+        &mut master,
+        "style:header-first",
+        inp.first_page_different,
+        inp.first_header,
+    );
+    if let Some(xml) = inp.footer {
         master.push_str(&format!("<style:footer>{xml}</style:footer>"));
     }
+    push_variant(
+        &mut master,
+        "style:footer-left",
+        inp.even_odd_different,
+        inp.even_footer,
+    );
+    push_variant(
+        &mut master,
+        "style:footer-first",
+        inp.first_page_different,
+        inp.first_footer,
+    );
     master.push_str("</style:master-page></office:master-styles>");
     (layout, master)
 }
@@ -346,20 +457,34 @@ pub(crate) fn odt_styles_xml(
     )
 }
 
-/// The `hp:ctrl` of a header or footer for the first paragraph of a HWPX section; `paragraphs` is the
-/// finished `hp:p` XML of the sub-list.
-pub(crate) fn hwpx_frame_control(header: bool, id: u32, paragraphs: &str) -> String {
+/// The `hp:ctrl` of a header or footer for the first paragraph of a HWPX section; `apply` is `"BOTH"`, `"ODD"` or `"EVEN"`.
+pub(crate) fn hwpx_frame_control_typed(
+    header: bool,
+    id: u32,
+    apply: &str,
+    paragraphs: &str,
+) -> String {
     let tag = if header { "hp:header" } else { "hp:footer" };
     format!(
         concat!(
-            "<hp:ctrl><{tag} id=\"{id}\" applyPageType=\"BOTH\">",
+            "<hp:ctrl><{tag} id=\"{id}\" applyPageType=\"{apply}\">",
             "<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" ",
             "linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" ",
             "hasTextRef=\"0\" hasNumRef=\"0\">{paragraphs}</hp:subList></{tag}></hp:ctrl>"
         ),
         tag = tag,
         id = id,
+        apply = apply,
         paragraphs = paragraphs
+    )
+}
+
+/// `<hp:ctrl><hp:pageHiding .../></hp:ctrl>` hiding header/footer on the first page (`rhwp` `section.rs:2914`).
+pub(crate) fn hwpx_page_hiding_control(hide_header: bool, hide_footer: bool) -> String {
+    format!(
+        "<hp:ctrl><hp:pageHiding hideHeader=\"{}\" hideFooter=\"{}\" hideMasterPage=\"0\" hideBorder=\"0\" hideFill=\"0\" hidePageNum=\"0\"/></hp:ctrl>",
+        u8::from(hide_header),
+        u8::from(hide_footer),
     )
 }
 

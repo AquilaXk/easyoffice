@@ -8,7 +8,7 @@ use crate::rich_document::frame_paragraph;
 use crate::rich_image::check_document_images;
 use crate::rich_image_writers::{odt_image_paragraph, MediaParts, ODT_PICTURE_NAMESPACES};
 use crate::rich_list_writers::{level_of, odt_list_styles_xml, plan_lists, OdtListWriter};
-use crate::rich_page_frame::{odt_master_page, odt_styles_xml};
+use crate::rich_page_frame::{odt_master_page, odt_styles_xml, OdtMasterInput};
 use crate::rich_run_writers::{odt_font_face_decls, odt_text_style_xml, OdtTextKey};
 use crate::rich_table_writers::push_odt_table;
 use crate::rich_toc_writers::{is_toc_block, odt_toc_styles_xml, TocScope};
@@ -33,23 +33,30 @@ pub(crate) fn odt_rich_entries(
     let lists = plan_lists(&doc.blocks);
     let mut open_lists = OdtListWriter::default();
     let mut toc_scope = TocScope::odt();
-    // The header and footer go first so their styles are in the tables the body shares; styles.xml
-    // and content.xml both write the whole set.
-    let [header_xml, footer_xml] =
-        [&doc.page_frame.header, &doc.page_frame.footer].map(|paragraphs| {
-            (!paragraphs.is_empty()).then(|| {
-                let mut xml = String::new();
-                for p in paragraphs {
-                    push_odt_paragraph(
-                        &mut xml,
-                        &frame_paragraph(p),
-                        &mut para_styles,
-                        &mut text_styles,
-                    );
-                }
-                xml
-            })
-        });
+    // Headers and footers go first so their styles enter the shared automatic style tables.
+    let page = &doc.page_frame;
+    let [header_xml, footer_xml, first_hdr_xml, first_ftr_xml, even_hdr_xml, even_ftr_xml] = [
+        (&page.header, true),
+        (&page.footer, true),
+        (&page.first_header, page.first_page_different),
+        (&page.first_footer, page.first_page_different),
+        (&page.even_header, page.even_odd_different),
+        (&page.even_footer, page.even_odd_different),
+    ]
+    .map(|(paragraphs, enabled)| {
+        (enabled && !paragraphs.is_empty()).then(|| {
+            let mut xml = String::new();
+            for p in paragraphs {
+                push_odt_paragraph(
+                    &mut xml,
+                    &frame_paragraph(p),
+                    &mut para_styles,
+                    &mut text_styles,
+                );
+            }
+            xml
+        })
+    });
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
         match (block, lists.block_run[index]) {
@@ -108,11 +115,12 @@ pub(crate) fn odt_rich_entries(
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    let page = &doc.page_frame;
-    let has_frame = header_xml.is_some()
-        || footer_xml.is_some()
-        || page.margins.is_some()
-        || page.paper.is_some();
+    let doc_cols = doc.blocks.iter().find_map(|b| match b {
+        RichBlock::Paragraph(p) => p.columns.filter(|c| c.count > 1),
+        _ => None,
+    });
+    let has_frame =
+        !page.is_empty() || page.margins.is_some() || page.paper.is_some() || doc_cols.is_some();
     let mut listing = media.listing();
     if has_frame {
         listing.insert(0, ("styles.xml".to_string(), "text/xml"));
@@ -127,13 +135,20 @@ pub(crate) fn odt_rich_entries(
         ("content.xml".to_string(), content.into_bytes()),
     ];
     if has_frame {
-        let (layout, master) = odt_master_page(
-            header_xml.as_deref(),
-            footer_xml.as_deref(),
-            page.margins.as_ref(),
-            page.paper.as_ref(),
-            page.binding,
-        );
+        let (layout, master) = odt_master_page(OdtMasterInput {
+            header: header_xml.as_deref(),
+            footer: footer_xml.as_deref(),
+            first_header: first_hdr_xml.as_deref(),
+            first_footer: first_ftr_xml.as_deref(),
+            even_header: even_hdr_xml.as_deref(),
+            even_footer: even_ftr_xml.as_deref(),
+            first_page_different: page.first_page_different,
+            even_odd_different: page.even_odd_different,
+            margins: page.margins.as_ref(),
+            paper: page.paper.as_ref(),
+            binding: page.binding,
+            columns: doc_cols,
+        });
         let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
         XmlSanitizer::validate_safe_xml(&styles_xml)?;
         entries.push(("styles.xml".to_string(), styles_xml.into_bytes()));

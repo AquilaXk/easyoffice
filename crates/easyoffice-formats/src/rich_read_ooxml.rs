@@ -8,31 +8,31 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_document::{
-    highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichToc,
+    highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichColumns, RichToc,
 };
 use crate::rich_page_frame::field_of_instruction;
-use crate::rich_read_images::{
-    drawing_picture, load_docx_frame_targets, DocxMedia, DocxRelationships, DrawingOutcome,
-};
+use crate::rich_read_images::{drawing_picture, DocxMedia, DocxRelationships, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_read_page_setup::{
     binding_of, fitting_setup, page_gutter, page_margins, page_paper,
 };
-use crate::rich_table::TableAssembler;
+use crate::rich_table::{join_cell_paragraphs, TableAssembler};
 use crate::rich_xml::{
     heading_level_from_name, push_linked_run, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
 };
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField, RichImage, RichListKind,
-    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, XmlSanitizer,
-    ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
+    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
+#[path = "rich_read_ooxml/frame.rs"]
+mod frame;
 #[path = "rich_read_ooxml/styles.rs"]
 mod styles;
+use frame::*;
 use styles::*;
 
 /// `w:vMerge` state of a table cell.
@@ -73,6 +73,8 @@ struct ParaState {
     page_break_before: bool,
     /// A page break after text of the paragraph: the next paragraph starts the page.
     page_break_after: bool,
+    /// Inline section break (`w:pPr/w:sectPr`) ending at this paragraph, carrying its columns.
+    sect_end: Option<Option<RichColumns>>,
 }
 
 fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
@@ -84,7 +86,7 @@ fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
     s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
 }
 
-struct Resolver<'a> {
+pub(super) struct Resolver<'a> {
     styles: &'a HashMap<String, DocxStyle>,
     numbering: &'a Numbering,
 }
@@ -188,16 +190,14 @@ impl Resolver<'_> {
     }
 }
 
-fn plain(p: &ParaState) -> String {
-    p.runs.iter().map(|r| r.text.as_str()).collect()
-}
-
 /// A `w:headerReference` or `w:footerReference` of a section.
-struct FrameRef {
-    header: bool,
+pub(super) struct FrameRef {
+    pub(super) header: bool,
     /// `default`, `first` or `even`.
-    kind: String,
-    rel_id: String,
+    pub(super) kind: String,
+    pub(super) rel_id: String,
+    pub(super) section: usize,
+    pub(super) section_title_pg: bool,
 }
 
 /// Elements whose whole subtree is ignored (revisions, fallbacks, deleted text).
@@ -286,7 +286,7 @@ fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
 
 /// Mutable walker state for `word/document.xml` events.
 #[derive(Default)]
-struct DocxWalker {
+pub(super) struct DocxWalker {
     warnings: Vec<String>,
     blocks: Vec<RichBlock>,
     paras: Vec<ParaState>,
@@ -298,7 +298,7 @@ struct DocxWalker {
     cur_text: String,
     tbl_depth: usize,
     table: TableAssembler,
-    cell_paras: Vec<String>,
+    cell_paras: Vec<Vec<RichRun>>,
     /// `w:gridSpan` and `w:vMerge` of the open top-level cell.
     cell_span: u32,
     cell_v_merge: VMerge,
@@ -314,8 +314,12 @@ struct DocxWalker {
     /// Header and footer parts keep page fields as field runs.
     frame_mode: bool,
     frame_refs: Vec<FrameRef>,
-    /// A section shows its own first-page header and footer (`w:titlePg`).
+    /// Whether the first section shows its own first-page header and footer (`w:titlePg`).
     title_pg: bool,
+    section_title_pg: bool,
+    cur_section: usize,
+    section_cols: Option<RichColumns>,
+    sect_block_start: usize,
     /// Instruction text of the open complex field (`w:fldChar` begin to separate) and whether its text is open.
     field_instruction: Option<String>,
     in_instruction: bool,
@@ -429,22 +433,27 @@ impl DocxWalker {
             "w:sectPr" => {
                 self.section_margins = None;
                 self.section_paper = None;
+                self.section_cols = None;
+                self.section_title_pg = false;
             }
             "w:pgMar" => {
                 self.section_margins = page_margins(attrs);
                 self.section_gutter = page_gutter(attrs);
             }
             "w:pgSz" => self.section_paper = page_paper(attrs),
+            "w:cols" => self.section_cols = parse_docx_cols(attrs),
             "w:headerReference" | "w:footerReference" => {
                 if let Some(rel_id) = attr(attrs, "r:id") {
                     self.frame_refs.push(FrameRef {
                         header: name == "w:headerReference",
                         kind: attr(attrs, "w:type").map_or("default".to_string(), Cow::into_owned),
                         rel_id: rel_id.into_owned(),
+                        section: self.cur_section,
+                        section_title_pg: false,
                     });
                 }
             }
-            "w:titlePg" => self.title_pg |= toggle_on(attr(attrs, "w:val").as_deref()),
+            "w:titlePg" => self.section_title_pg |= toggle_on(attr(attrs, "w:val").as_deref()),
             "w:fldSimple" if self.frame_mode => {
                 self.simple_field = attr(attrs, "w:instr")
                     .and_then(|i| field_of_instruction(&i))
@@ -561,6 +570,24 @@ impl DocxWalker {
                 }
                 self.first_margins = self.first_margins.or(self.section_margins);
                 self.first_paper = self.first_paper.or(self.section_paper);
+                let sec = self.cur_section;
+                let tpg = self.section_title_pg;
+                if sec == 0 {
+                    self.title_pg = tpg;
+                }
+                for r in self.frame_refs.iter_mut().rev() {
+                    if r.section != sec {
+                        break;
+                    }
+                    r.section_title_pg = tpg;
+                }
+                self.cur_section += 1;
+                let cols = self.section_cols.take();
+                if let Some(top) = self.paras.last_mut() {
+                    top.sect_end = Some(cols);
+                } else {
+                    self.apply_section_cols(cols);
+                }
             }
             "w:rPr" => self.in_rpr = false,
             "w:pPr" => self.in_ppr = false,
@@ -592,12 +619,13 @@ impl DocxWalker {
             "w:hyperlink" => self.link = None,
             "w:p" => self.finish_paragraph(resolver)?,
             "w:tc" if self.tbl_depth == 1 => {
-                while self.cell_paras.last().is_some_and(String::is_empty) {
-                    self.cell_paras.pop();
-                }
-                let text = self.cell_paras.join("\n");
+                let (text, spans) = join_cell_paragraphs(&self.cell_paras);
                 self.cell_paras.clear();
                 self.text_budget.charge_cell(text.len(), "DOCX 표 셀")?;
+                let (row, col) = self.table.next_coord();
+                if self.cell_v_merge != VMerge::Continue && !spans.is_empty() {
+                    self.table.push_cell_links(row, col, &spans);
+                }
                 self.push_cell(text)?;
             }
             "w:tr" if self.tbl_depth == 1 => self.table.end_row(),
@@ -664,13 +692,25 @@ impl DocxWalker {
         }
     }
 
+    fn apply_section_cols(&mut self, cols: Option<RichColumns>) {
+        if cols.is_some() {
+            for block in &mut self.blocks[self.sect_block_start..] {
+                if let RichBlock::Paragraph(p) = block {
+                    p.columns = cols;
+                }
+            }
+        }
+        self.sect_block_start = self.blocks.len();
+    }
+
     fn finish_paragraph(&mut self, resolver: &Resolver<'_>) -> Result<(), EasyOfficeError> {
         let Some(mut p) = self.paras.pop() else {
             return Ok(());
         };
+        let sect_end = p.sect_end.take();
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
-            self.cell_paras.push(plain(&p));
+            self.cell_paras.push(p.runs);
         } else {
             let carried = p.page_break_before;
             let after = p.page_break_after;
@@ -687,13 +727,16 @@ impl DocxWalker {
             }
             self.pending_page_break |= (carried && !kept) || after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
+            if let Some(cols) = sect_end {
+                self.apply_section_cols(cols);
+            }
         }
         Ok(())
     }
 }
 
 /// Runs the events of one WordprocessingML part (the body or a header/footer) through `walker`.
-fn walk_part(
+pub(super) fn walk_part(
     xml: &str,
     walker: &mut DocxWalker,
     resolver: &Resolver<'_>,
@@ -716,135 +759,6 @@ fn walk_part(
         }
     }
     Ok(())
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct DocxSettings {
-    pub(crate) even_and_odd_headers: bool,
-    pub(crate) mirror_margins: bool,
-    pub(crate) gutter_at_top: bool,
-}
-
-/// Extracted flags from `word/settings.xml` in a single pass.
-fn read_word_settings(settings: Option<&str>) -> Result<DocxSettings, EasyOfficeError> {
-    let mut s = DocxSettings::default();
-    let Some(xml) = settings else {
-        return Ok(s);
-    };
-    for event in XmlReader::new(xml) {
-        if let XmlEvent::Start { name, attrs } = event? {
-            let on = toggle_on(attr(&attrs, "w:val").as_deref());
-            match name {
-                "w:evenAndOddHeaders" => s.even_and_odd_headers = on,
-                "w:mirrorMargins" => s.mirror_margins = on,
-                "w:gutterAtTop" => s.gutter_at_top = on,
-                _ => {}
-            }
-        }
-    }
-    Ok(s)
-}
-
-/// The paragraphs of one header or footer part.
-fn read_frame_part(
-    xml: &str,
-    resolver: &Resolver<'_>,
-    media: &DocxMedia<'_>,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<RichParagraph>, EasyOfficeError> {
-    let mut walker = DocxWalker {
-        frame_mode: true,
-        ..DocxWalker::default()
-    };
-    walk_part(xml, &mut walker, resolver, media)?;
-    warnings.append(&mut walker.warnings);
-    let mut paragraphs = Vec::new();
-    for block in walker.blocks {
-        match block {
-            RichBlock::Paragraph(p) => paragraphs.push(frame_paragraph(&p)),
-            RichBlock::Table(_) => {
-                let note = "머리말·꼬리말의 표는 가져오지 않았습니다.".to_string();
-                if !warnings.contains(&note) {
-                    warnings.push(note);
-                }
-            }
-            RichBlock::Image(_) => {}
-        }
-    }
-    if paragraphs.len() > MAX_PAGE_FRAME_PARAGRAPHS {
-        paragraphs.truncate(MAX_PAGE_FRAME_PARAGRAPHS);
-        warnings.push(format!(
-            "머리말·꼬리말은 문단 {MAX_PAGE_FRAME_PARAGRAPHS}개까지만 가져왔습니다."
-        ));
-    }
-    Ok(paragraphs)
-}
-
-/// The header and footer of the page: the default one of the first section that has one. First-page and
-/// odd/even ones, and ones that differ between sections, are reported and not kept.
-fn read_page_frame_with_targets(
-    targets: &HashMap<String, String>,
-    parts: &[(&str, &str)],
-    resolver: &Resolver<'_>,
-    media: &DocxMedia<'_>,
-    refs: &[FrameRef],
-    title_pg: bool,
-    settings: DocxSettings,
-) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
-    let mut frame = RichPageFrame::default();
-    let mut warnings = Vec::new();
-    if refs.is_empty() {
-        return Ok((frame, warnings));
-    }
-    let even = settings.even_and_odd_headers;
-    let (mut other_pages, mut other_sections) = (false, false);
-    for header in [true, false] {
-        let mut chosen: Option<&str> = None;
-        for r in refs.iter().filter(|r| r.header == header) {
-            let Some(part) = targets.get(&r.rel_id) else {
-                continue;
-            };
-            match r.kind.as_str() {
-                "default" => match chosen {
-                    None => chosen = Some(part),
-                    Some(first) => other_sections |= first != part,
-                },
-                "first" => other_pages |= title_pg,
-                "even" => other_pages |= even,
-                _ => {}
-            }
-        }
-        let paragraphs = match chosen.and_then(|part| checked_part(parts, part)) {
-            Some(xml) => read_frame_part(xml, resolver, media, &mut warnings)?,
-            None => Vec::new(),
-        };
-        if header {
-            frame.header = paragraphs;
-        } else {
-            frame.footer = paragraphs;
-        }
-    }
-    if other_pages {
-        warnings.push("첫 쪽·짝수 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
-    }
-    if other_sections {
-        warnings.push("구역마다 다른 머리말·꼬리말은 첫 구역의 것만 가져왔습니다.".to_string());
-    }
-    Ok((frame, warnings))
-}
-
-#[allow(dead_code)]
-fn read_page_frame(
-    entries: &[crate::ZipArchiveEntry],
-    parts: &[(&str, &str)],
-    resolver: &Resolver<'_>,
-    media: &DocxMedia<'_>,
-    refs: &[FrameRef],
-    title_pg: bool,
-) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
-    let targets = load_docx_frame_targets(entries)?;
-    let settings = read_word_settings(checked_part(parts, "word/settings.xml"))?;
-    read_page_frame_with_targets(&targets, parts, resolver, media, refs, title_pg, settings)
 }
 
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.

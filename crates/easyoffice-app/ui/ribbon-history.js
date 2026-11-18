@@ -344,6 +344,7 @@
       const curCols = Number(docEditor.style.columnCount || "1");
       const cols = curCols >= MAX_DOC_COLUMNS ? 1 : curCols + 1;
       docEditor.style.columnCount = cols > 1 ? String(cols) : "";
+      for (const el of docEditor.querySelectorAll("[data-eo-cols]")) delete el.dataset.eoCols;
     }
 
     // 편집 용지 opens the page setup dialog, 용지 방향 전환 turns the page and 여백 전환 goes to the next margin preset

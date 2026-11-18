@@ -390,6 +390,7 @@ pub(crate) struct TableAssembler {
     rows: Vec<Vec<String>>,
     row: Vec<String>,
     merges: Vec<CellMerge>,
+    links: Vec<TableCellLink>,
     /// Region index that a continuing cell in column `c` extends, by column.
     open: std::collections::HashMap<usize, usize>,
     dropped: usize,
@@ -411,6 +412,27 @@ impl TableAssembler {
     /// Cells in the open row.
     pub fn row_len(&self) -> usize {
         self.row.len()
+    }
+
+    /// Zero-based `(row, col)` of the cell about to be added.
+    pub fn next_coord(&self) -> (u32, u32) {
+        (self.rows.len() as u32, self.row.len() as u32)
+    }
+
+    /// Appends hyperlink spans `(start, end, url)` for `(row, col)`, bounded by [`MAX_TABLE_LINKS`].
+    pub fn push_cell_links(&mut self, row: u32, col: u32, spans: &[(u32, u32, String)]) {
+        for (start, end, url) in spans {
+            if self.links.len() >= MAX_TABLE_LINKS {
+                break;
+            }
+            self.links.push(TableCellLink {
+                row,
+                col,
+                start: *start,
+                end: *end,
+                url: url.clone(),
+            });
+        }
     }
 
     pub fn reset(&mut self) {
@@ -560,9 +582,54 @@ impl TableAssembler {
             .len()
             .saturating_mul(std::mem::size_of::<Vec<String>>());
         budget.charge(header_cost, "표 행 헤더 비용")?;
-        let (table, dropped) = RichTable::with_merges(self.rows, self.merges);
+        let (table, dropped, _) =
+            RichTable::with_merges_and_links(self.rows, self.merges, self.links);
         Ok((table, dropped + self.dropped))
     }
+}
+
+/// Joins the paragraphs of one table cell with `\n` (dropping trailing empty paragraphs) and
+/// extracts merged UTF-8 byte hyperlink spans `(start, end, url)` in a single pass.
+pub(crate) fn join_cell_paragraphs(
+    paras: &[Vec<crate::RichRun>],
+) -> (String, Vec<(u32, u32, String)>) {
+    let mut end_idx = paras.len();
+    while end_idx > 0 && paras[end_idx - 1].iter().all(|r| r.text.is_empty()) {
+        end_idx -= 1;
+    }
+    let active = &paras[..end_idx];
+    if active.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let total_bytes: usize = active
+        .iter()
+        .map(|p| p.iter().map(|r| r.text.len()).sum::<usize>())
+        .sum::<usize>()
+        + active.len().saturating_sub(1);
+    let mut text = String::with_capacity(total_bytes);
+    let mut spans: Vec<(u32, u32, String)> = Vec::new();
+    for (p_idx, runs) in active.iter().enumerate() {
+        if p_idx > 0 {
+            text.push('\n');
+        }
+        for run in runs {
+            if run.text.is_empty() {
+                continue;
+            }
+            let start = text.len();
+            text.push_str(&run.text);
+            let end = text.len();
+            if let (Some(url), Ok(s), Ok(e)) = (&run.link, u32::try_from(start), u32::try_from(end))
+            {
+                if let Some(last) = spans.last_mut().filter(|(_, le, lu)| *le == s && lu == url) {
+                    last.1 = e;
+                } else {
+                    spans.push((s, e, url.clone()));
+                }
+            }
+        }
+    }
+    (text, spans)
 }
 
 /// A cell at an explicit grid address (HWPX `cellAddr`/`cellSpan`).
@@ -573,6 +640,7 @@ pub(crate) struct PlacedCell {
     pub row_span: u32,
     pub col_span: u32,
     pub text: String,
+    pub links: Vec<(u32, u32, String)>,
 }
 
 /// Lays addressed cells out as a grid. Cells at a taken address and cells beyond the size limits
@@ -622,6 +690,7 @@ pub(crate) fn table_from_placed(
     let mut grid = vec![vec![String::new(); cols]; rows];
     let mut anchored = BitGrid::new(rows, cols);
     let mut merges = Vec::new();
+    let mut cell_links: Vec<TableCellLink> = Vec::new();
     for cell in accepted {
         let (r, c) = (cell.row as usize, cell.col as usize);
         if anchored.any_set(r, c, c + 1) {
@@ -630,6 +699,17 @@ pub(crate) fn table_from_placed(
         }
         anchored.set(r, c, c + 1);
         grid[r][c] = cell.text;
+        for (start, end, url) in cell.links {
+            if cell_links.len() < MAX_TABLE_LINKS {
+                cell_links.push(TableCellLink {
+                    row: cell.row,
+                    col: cell.col,
+                    start,
+                    end,
+                    url,
+                });
+            }
+        }
         merges.push(CellMerge {
             row: cell.row,
             col: cell.col,
@@ -637,7 +717,7 @@ pub(crate) fn table_from_placed(
             col_span: cell.col_span,
         });
     }
-    let (table, rejected) = RichTable::with_merges(grid, merges);
+    let (table, rejected, _) = RichTable::with_merges_and_links(grid, merges, cell_links);
     Ok((table, dropped + rejected))
 }
 
@@ -785,6 +865,7 @@ mod tests {
             row_span,
             col_span,
             text: text.to_string(),
+            links: Vec::new(),
         };
         let (t, dropped) = table_from_placed(
             vec![

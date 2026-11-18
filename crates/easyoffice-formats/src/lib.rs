@@ -48,6 +48,7 @@ mod rich_image_probe;
 mod rich_image_writers;
 mod rich_link_writers;
 mod rich_list_writers;
+mod rich_markdown_writer;
 mod rich_page_frame;
 mod rich_read_hwpx;
 mod rich_read_images;

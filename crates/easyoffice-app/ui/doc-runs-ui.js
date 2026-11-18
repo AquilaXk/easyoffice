@@ -468,9 +468,16 @@
 
     // A list item becomes a plain paragraph after the list; the items behind it continue in a new list.
     function itemToParagraph(li) {
-      if (!isListItem(li)) return retag(li, "p");
+      if (!isListItem(li)) {
+        const plain = retag(li, "p");
+        delete plain.dataset.eoListLevel;
+        delete plain.dataset.eoListNum;
+        return plain;
+      }
       const list = li.parentNode;
       const para = retag(li, "p");
+      delete para.dataset.eoListLevel;
+      delete para.dataset.eoListNum;
       const tail = [];
       for (let n = para.nextSibling; n; n = n.nextSibling) tail.push(n);
       const holder = list.parentNode;
@@ -691,11 +698,38 @@
       queueSync();
     }
 
+    function shiftListLevel(delta) {
+      const step = Math.trunc(Number(delta)) || 0;
+      if (step === 0) return { changed: false, blocks: 0 };
+      const pick = () => paragraphTargets().filter((b) => isListItem(b));
+      return runOnParagraphs((blocks) => {
+        let changed = false;
+        blocks.forEach((li) => {
+          const cur = Math.max(0, Math.min(8, Number.parseInt(li.dataset.eoListLevel || "0", 10) || 0));
+          const next = Math.max(0, Math.min(8, cur + step));
+          if (next === cur) return;
+          changed = true;
+          if (next > 0) li.dataset.eoListLevel = String(next);
+          else delete li.dataset.eoListLevel;
+        });
+        return changed;
+      }, "단계를 변경할 목록 항목을 먼저 선택하세요", pick);
+    }
+
+    function handleKeydown(ev) {
+      if (ev.key !== "Tab" || ev.altKey || ev.ctrlKey || ev.metaKey || !isDocModule()) return;
+      const items = paragraphTargets().filter((b) => isListItem(b));
+      if (items.length === 0) return;
+      ev.preventDefault?.();
+      shiftListLevel(ev.shiftKey ? -1 : 1);
+    }
+
     function bind() {
       const root = editor();
       if (!root) return;
       document.addEventListener?.("selectionchange", handleSelectionChange);
       root.addEventListener("beforeinput", handleBeforeInput);
+      root.addEventListener("keydown", handleKeydown);
       Object.entries(RULER_PINS).forEach(([id, prop]) => {
         const pin = document.getElementById(id);
         if (pin) bindRulerPin(pin, prop);
@@ -704,7 +738,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, shiftListLevel, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,

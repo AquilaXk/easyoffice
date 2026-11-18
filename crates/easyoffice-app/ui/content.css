@@ -373,6 +373,14 @@
    page margins around the band (`page-margin-guides.ts`, 14px, same colour as the sheet corners), the badge above its
    top-left corner (`editor.css` .hf-edit-badge) and the dimmed workspace (`#scroll-container.hf-editing`). */
 #doc-editor > section[data-eo-hf] { display: none; }
+#doc-editor li[data-eo-list-level="1"] { margin-left: 24px; }
+#doc-editor li[data-eo-list-level="2"] { margin-left: 48px; }
+#doc-editor li[data-eo-list-level="3"] { margin-left: 72px; }
+#doc-editor li[data-eo-list-level="4"] { margin-left: 96px; }
+#doc-editor li[data-eo-list-level="5"] { margin-left: 120px; }
+#doc-editor li[data-eo-list-level="6"] { margin-left: 144px; }
+#doc-editor li[data-eo-list-level="7"] { margin-left: 168px; }
+#doc-editor li[data-eo-list-level="8"] { margin-left: 192px; }
 /* The areas: the header starts `--hf-hd` below the page's top edge and is at least as high as the space the page
    setup leaves for it (`--hf-band-h`); the footer ends `--hf-ft` above the bottom edge (`--hf-fband-h`). They grow
    with their text, and doc-pages.js moves the body away (`--pg-hf-top`, `--pg-hf-bottom`). */

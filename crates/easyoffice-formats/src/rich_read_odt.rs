@@ -6,11 +6,12 @@ mod frame;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use self::frame::{parse_odt_list_level_number, OdtListStyle};
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
-use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
+use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{push_linked_run, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -160,7 +161,7 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
 fn read_styles_into(
     xml: &str,
     styles: &mut HashMap<String, StyleProps>,
-    lists: &mut HashMap<String, RichListKind>,
+    lists: &mut HashMap<String, OdtListStyle>,
 ) -> Result<(), EasyOfficeError> {
     let mut cur: Option<(String, StyleProps)> = None;
     let mut cur_list: Option<String> = None;
@@ -198,12 +199,19 @@ fn read_styles_into(
                 "text:list-style" => cur_list = attr(attrs, "style:name").map(Cow::into_owned),
                 "text:list-level-style-number" => {
                     if let Some(n) = cur_list.as_ref() {
-                        lists.entry(n.clone()).or_insert(RichListKind::Ordered);
+                        let (lvl, num) = parse_odt_list_level_number(attrs);
+                        let entry = lists
+                            .entry(n.clone())
+                            .or_insert_with(|| OdtListStyle::new(RichListKind::Ordered));
+                        entry.kind = RichListKind::Ordered;
+                        entry.levels[lvl] = Some(num);
                     }
                 }
                 "text:list-level-style-bullet" => {
                     if let Some(n) = cur_list.as_ref() {
-                        lists.entry(n.clone()).or_insert(RichListKind::Bullet);
+                        lists
+                            .entry(n.clone())
+                            .or_insert_with(|| OdtListStyle::new(RichListKind::Bullet));
                     }
                 }
                 "office:body" => break,
@@ -290,16 +298,16 @@ fn count_attr(attrs: &Attrs<'_>, name: &str) -> u32 {
 /// Walker state for ODF `content.xml` events.
 struct OdtWalker<'a> {
     styles: &'a HashMap<String, StyleProps>,
-    list_styles: &'a HashMap<String, RichListKind>,
+    list_styles: &'a HashMap<String, OdtListStyle>,
     title: String,
     warnings: Vec<String>,
     blocks: Vec<RichBlock>,
     paras: Vec<Para>,
     span_fmts: Vec<CharFmt>,
-    list_stack: Vec<RichListKind>,
+    list_stack: Vec<OdtListStyle>,
     tbl_depth: usize,
     table: TableAssembler,
-    cell_paras: Vec<String>,
+    cell_paras: Vec<Vec<RichRun>>,
     /// Row span, column span and repeat count of the open top-level cell.
     cell_shape: (u32, u32, u32),
     /// Merged regions dropped as invalid in this document.
@@ -338,7 +346,7 @@ fn merge_span_fmt(cur: CharFmt, add: CharFmt) -> CharFmt {
 impl<'a> OdtWalker<'a> {
     fn new(
         styles: &'a HashMap<String, StyleProps>,
-        list_styles: &'a HashMap<String, RichListKind>,
+        list_styles: &'a HashMap<String, OdtListStyle>,
     ) -> Self {
         Self {
             styles,
@@ -413,13 +421,13 @@ impl<'a> OdtWalker<'a> {
                 }
             }
             "text:list" => {
-                let kind = attr(attrs, "text:style-name")
+                let entry = attr(attrs, "text:style-name")
                     .as_deref()
                     .and_then(|n| self.list_styles.get(n))
                     .copied()
                     .or_else(|| self.list_stack.last().copied())
-                    .unwrap_or(RichListKind::Bullet);
-                self.list_stack.push(kind);
+                    .unwrap_or_else(|| OdtListStyle::new(RichListKind::Bullet));
+                self.list_stack.push(entry);
             }
             "table:table" => {
                 self.tbl_depth += 1;
@@ -593,12 +601,9 @@ impl<'a> OdtWalker<'a> {
             }
             "text:p" | "text:h" if !self.in_automatic_styles => self.finish_paragraph()?,
             "table:table-cell" if self.tbl_depth == 1 => {
-                while self.cell_paras.last().is_some_and(String::is_empty) {
-                    self.cell_paras.pop();
-                }
-                let text = self.cell_paras.join("\n");
+                let (text, spans) = join_cell_paragraphs(&self.cell_paras);
                 self.cell_paras.clear();
-                self.push_cell(text)?;
+                self.push_cell_with_links(text, &spans)?;
             }
             "table:table-row" if self.tbl_depth == 1 => self.table.end_row(),
             "table:table" => {
@@ -621,15 +626,27 @@ impl<'a> OdtWalker<'a> {
         u32::try_from(MAX_PADDED_COLUMNS.saturating_sub(self.table.row_len())).unwrap_or(0)
     }
 
-    /// Adds the closed cell, repeated as declared (bounded by the row width limit).
-    fn push_cell(&mut self, text: String) -> Result<(), EasyOfficeError> {
+    /// Adds the closed cell (with any hyperlink spans), repeated as declared.
+    fn push_cell_with_links(
+        &mut self,
+        text: String,
+        spans: &[(u32, u32, String)],
+    ) -> Result<(), EasyOfficeError> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
         self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
+        let (r0, c0) = self.table.next_coord();
+        if !spans.is_empty() {
+            self.table.push_cell_links(r0, c0, spans);
+        }
         self.table
             .anchor(text.clone(), row_span, col_span, &mut self.text_budget)?;
         for _ in 1..repeated {
             self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
+            let (rk, ck) = self.table.next_coord();
+            if !spans.is_empty() {
+                self.table.push_cell_links(rk, ck, spans);
+            }
             self.table.cell(text.clone(), &mut self.text_budget)?;
         }
         Ok(())
@@ -646,25 +663,30 @@ impl<'a> OdtWalker<'a> {
         let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
         let images = p.images;
         if self.tbl_depth > 0 {
-            self.cell_paras.push(text);
+            self.cell_paras.push(p.runs);
         } else if text.trim().is_empty() && !p.runs.iter().any(|r| r.field.is_some()) {
             self.pending_page_break |= p.style.page_break_before;
         } else {
             self.text_budget.charge_block(0, "ODT 문단")?;
-            let list = if p.outline > 0 || p.toc.is_some() {
-                None
-            } else if let Some(kind) = self.list_stack.last() {
-                Some(*kind)
+            let (list, list_level, list_number) = if p.outline > 0 || p.toc.is_some() {
+                (None, 0, None)
+            } else if let Some(entry) = self.list_stack.last() {
+                let lvl = (self.list_stack.len() - 1).min(8) as u8;
+                let num = (entry.kind == RichListKind::Ordered)
+                    .then(|| entry.levels[usize::from(lvl)])
+                    .flatten()
+                    .filter(|&n| n != crate::RichListNumber::default());
+                (Some(entry.kind), lvl, num)
             } else if let Some(kind) = p.style.list_kind {
-                Some(kind)
+                (Some(kind), 0, None)
             } else if p.style.list_margin {
-                Some(RichListKind::Bullet)
+                (Some(RichListKind::Bullet), 0, None)
             } else {
-                None
+                (None, 0, None)
             };
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
-                list_level: 0,
-                list_number: None,
+                list_level,
+                list_number,
                 runs: p.runs,
                 alignment: p.style.align,
                 heading_level: p.outline,
@@ -715,7 +737,7 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         )
     })?;
     let mut styles: HashMap<String, StyleProps> = HashMap::new();
-    let mut list_styles: HashMap<String, RichListKind> = HashMap::new();
+    let mut list_styles: HashMap<String, OdtListStyle> = HashMap::new();
     if let Some(s_xml) = checked_part(&parts, "styles.xml") {
         read_styles_into(s_xml, &mut styles, &mut list_styles)?;
     }
@@ -744,14 +766,21 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     let OdtWalker {
         mut title,
         mut warnings,
-        blocks,
+        mut blocks,
         dropped_merges,
         ..
     } = walker;
-    let page_frame = match checked_part(&parts, "styles.xml") {
+    let (page_frame, odt_cols) = match checked_part(&parts, "styles.xml") {
         Some(s_xml) => frame::read_page_frame(s_xml, &styles, &list_styles, &mut warnings)?,
-        None => RichPageFrame::default(),
+        None => (RichPageFrame::default(), None),
     };
+    if let Some(cols) = odt_cols {
+        for block in &mut blocks {
+            if let RichBlock::Paragraph(p) = block {
+                p.columns = p.columns.or(Some(cols));
+            }
+        }
+    }
     if dropped_merges > 0 {
         warnings.push(format!(
             "표의 병합 {dropped_merges}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다."

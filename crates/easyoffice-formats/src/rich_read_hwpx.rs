@@ -14,10 +14,10 @@ use crate::hwpx_parts::{
     LIST_LEFT_MARGIN,
 };
 use crate::office_codecs::checked_zip_xml_entries;
-use crate::rich_document::{normalize_hex_color, safe_link_target};
+use crate::rich_document::{normalize_hex_color, RichColumns};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_list_writers::HwpxNumberingReader;
-use crate::rich_table::{table_from_placed, PlacedCell};
+use crate::rich_table::{join_cell_paragraphs, table_from_placed, PlacedCell};
 use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -275,6 +275,7 @@ struct ParaState {
     para_pr: String,
     style: String,
     images: Vec<RichImage>,
+    columns: Option<RichColumns>,
 }
 
 struct RunState {
@@ -388,6 +389,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         left_indent_twips,
         first_line_indent_twips,
         line_spacing_percent,
+        columns: p.columns,
         ..RichParagraph::default()
     }
 }
@@ -433,14 +435,15 @@ struct SectionWalker {
     cell_span: (u32, u32),
     /// Merged regions and cells dropped as invalid, reported once per document.
     dropped_merges: usize,
-    cell_paras: Vec<String>,
+    cell_paras: Vec<Vec<RichRun>>,
     budget: ImageBudget,
     text_budget: DecodeBudget,
     /// Address of the open hyperlink field (`hp:fieldBegin type="HYPERLINK"` to `hp:fieldEnd`).
     link: Option<String>,
-    /// The header and footer of the page (the first `BOTH` control of each kind) and what was left out.
+    current_columns: Option<RichColumns>,
+    /// The header and footer of the page (`BOTH`/`ODD`/`EVEN` controls) and what was left out.
     frame: RichPageFrame,
-    frame_found: [bool; 2],
+    frame_found: [bool; 6],
     /// Page setup of the first section that gives one.
     margins: Option<RichPageMargins>,
     paper: Option<RichPaper>,
@@ -579,6 +582,9 @@ impl SectionWalker {
                 para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
                 style: attr(attrs, "styleIDRef").unwrap_or_default().into_owned(),
                 images: Vec::new(),
+                columns: (self.tbl_depth == 0)
+                    .then_some(self.current_columns)
+                    .flatten(),
             }),
             "hp:run" => self.runs.push(RunState {
                 char_pr: attr(attrs, "charPrIDRef").unwrap_or_default().into_owned(),
@@ -654,13 +660,10 @@ impl SectionWalker {
                 self.finish_paragraph(header, blocks)?;
             }
             "hp:tc" if self.tbl_depth == 1 => {
-                while self.cell_paras.last().is_some_and(String::is_empty) {
-                    self.cell_paras.pop();
-                }
                 let (row, col) = self.cell_addr.unwrap_or((self.tr_index, self.next_col));
                 let (row_span, col_span) = self.cell_span;
                 self.next_col = col.saturating_add(col_span);
-                let text = self.cell_paras.join("\n");
+                let (text, links) = join_cell_paragraphs(&self.cell_paras);
                 self.text_budget.charge_cell(text.len(), "HWPX 표 셀")?;
                 self.placed.push(PlacedCell {
                     row,
@@ -668,6 +671,7 @@ impl SectionWalker {
                     row_span,
                     col_span,
                     text,
+                    links,
                 });
                 self.cell_paras.clear();
             }
@@ -688,7 +692,7 @@ impl SectionWalker {
     }
 
     /// Moves the text of the open run into the paragraph, as a run of the open hyperlink if there is one.
-    fn flush_run(&mut self, header: &Header) -> Result<(), EasyOfficeError> {
+    pub(super) fn flush_run(&mut self, header: &Header) -> Result<(), EasyOfficeError> {
         let (Some(run), Some(top)) = (self.runs.last_mut(), self.paras.last_mut()) else {
             return Ok(());
         };
@@ -702,43 +706,6 @@ impl SectionWalker {
         Ok(())
     }
 
-    /// A `hp:ctrl` holds field marks: a hyperlink field starts a link, its end mark closes it. Text before
-    /// the mark in the same run stays outside the link. Every other control is ignored.
-    fn on_ctrl(&mut self, events: &[XmlEvent<'_>], header: &Header) -> Result<(), EasyOfficeError> {
-        let (mut begin, mut in_command, mut command) = (false, false, String::new());
-        for event in events {
-            match event {
-                XmlEvent::Start {
-                    name: "hp:fieldBegin",
-                    attrs,
-                } if attr(attrs, "type").as_deref() == Some("HYPERLINK") => {
-                    self.flush_run(header)?;
-                    begin = true;
-                }
-                XmlEvent::Start {
-                    name: "hp:fieldEnd",
-                    ..
-                } => {
-                    self.flush_run(header)?;
-                    self.link = None;
-                }
-                XmlEvent::Start {
-                    name: "hp:stringParam",
-                    attrs,
-                } => {
-                    in_command = begin && attr(attrs, "name").as_deref() == Some("Command");
-                }
-                XmlEvent::Text(text) if in_command => command.push_str(text),
-                XmlEvent::End("hp:stringParam") => in_command = false,
-                _ => {}
-            }
-        }
-        if begin {
-            self.link = link_from_command(&command);
-        }
-        Ok(())
-    }
-
     fn finish_paragraph(
         &mut self,
         header: &Header,
@@ -748,8 +715,7 @@ impl SectionWalker {
             return Ok(());
         };
         if self.tbl_depth > 0 {
-            self.cell_paras
-                .push(p.runs.iter().map(|r| r.text.as_str()).collect());
+            self.cell_paras.push(p.runs);
             return Ok(());
         }
         push_paragraph_blocks(header, p, blocks, &mut self.text_budget)
@@ -773,6 +739,7 @@ impl SectionWalker {
             para_pr: top.para_pr.clone(),
             style: top.style.clone(),
             images: std::mem::take(&mut top.images),
+            columns: top.columns,
         };
         push_paragraph_blocks(header, before, blocks, &mut self.text_budget)
     }
@@ -843,45 +810,6 @@ fn read_section(
         }
     }
     Ok(())
-}
-
-/// The address of a hyperlink field's `Command`: the plain address, `HYPERLINK "address"`, or the form the
-/// word processor writes (`http\://host/path;1;0;0;`, colons escaped and four numbers behind a `;`).
-fn link_from_command(command: &str) -> Option<String> {
-    let command = command.trim();
-    let quoted = command
-        .strip_prefix("HYPERLINK")
-        .map(str::trim_start)
-        .and_then(|rest| rest.strip_prefix('"'))
-        .and_then(|rest| rest.strip_suffix('"'));
-    let address = quoted.map_or_else(|| strip_link_flags(command), str::to_string);
-    safe_link_target(&address).map(str::to_string)
-}
-
-/// `address;n;n;n;` with backslash escapes becomes `address`; anything else is returned as it is.
-fn strip_link_flags(command: &str) -> String {
-    let flags = command.strip_suffix(';').and_then(|rest| {
-        let mut parts = rest.rsplitn(4, ';');
-        let numbers = [parts.next()?, parts.next()?, parts.next()?];
-        let address = parts.next()?;
-        numbers
-            .iter()
-            .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            .then_some(address)
-    });
-    let Some(address) = flags else {
-        return command.to_string();
-    };
-    let mut out = String::with_capacity(address.len());
-    let mut chars = address.chars();
-    while let Some(c) = chars.next() {
-        out.push(if c == '\\' {
-            chars.next().unwrap_or(c)
-        } else {
-            c
-        });
-    }
-    out
 }
 
 /// The page frame read, with the page setup of the first section.
@@ -985,6 +913,9 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         warnings,
     ))
 }
+
+#[cfg(test)]
+use frame::link_from_command;
 
 #[cfg(test)]
 #[path = "rich_read_hwpx/tests.rs"]

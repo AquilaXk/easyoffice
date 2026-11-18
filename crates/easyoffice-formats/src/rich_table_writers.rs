@@ -7,7 +7,7 @@ use crate::rich_table::{CellSpan, RichTable, TableCellLink};
 use crate::rich_writers::{push_docx_text, push_odt_text};
 use crate::XmlSanitizer;
 
-fn slice_cell_links<'a>(
+pub(crate) fn slice_cell_links<'a>(
     links: &'a [TableCellLink],
     cursor: &mut usize,
     row: usize,

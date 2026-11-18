@@ -100,6 +100,14 @@
       spec.data.eoLineSpacing = String(spacing);
     }
     if (block.pageBreakBefore === true) spec.data.eoBreak = "page";
+    const lvl = Number(block.listLevel);
+    if (Number.isInteger(lvl) && lvl >= 1 && lvl <= 8) spec.data.eoListLevel = String(lvl);
+    if (typeof block.listNumber === "string" && block.listNumber) spec.data.eoListNum = block.listNumber;
+    const cols = block.columns;
+    if (cols && Number.isInteger(cols.count) && cols.count >= 2 && cols.count <= 16) {
+      const gap = Number.isInteger(cols.gapTwips) && cols.gapTwips >= 0 ? cols.gapTwips : 720;
+      spec.data.eoCols = cols.count + "," + (cols.equal === false ? 0 : 1) + "," + gap;
+    }
     return spec;
   }
 
@@ -188,20 +196,56 @@
     return { anchors, covered };
   }
 
+  const utf8Encoder = new TextEncoder();
+  const utf8Decoder = new TextDecoder();
+
+  function cellInlineSpecs(text, cellLinks) {
+    if (!cellLinks || cellLinks.length === 0) return [textSpec(text)];
+    const bytes = utf8Encoder.encode(text);
+    const out = [];
+    let pos = 0;
+    for (const link of cellLinks) {
+      const s = Number(link.start);
+      const e = Number(link.end);
+      const href = host.__EASYOFFICE_DOC_LINK__?.normalizeUrl(link.url);
+      if (!href || !Number.isInteger(s) || !Number.isInteger(e) || s < pos || e <= s || e > bytes.length) continue;
+      if (pos < s) out.push(textSpec(utf8Decoder.decode(bytes.subarray(pos, s))));
+      const piece = utf8Decoder.decode(bytes.subarray(s, e));
+      out.push({ ...elSpec("a", [textSpec(piece)], {}, { href }), data: { eoLink: "1" } });
+      pos = e;
+    }
+    if (pos < bytes.length || out.length === 0) out.push(textSpec(utf8Decoder.decode(bytes.subarray(pos))));
+    return out;
+  }
+
   // A table block: merged regions as colspan/rowspan on their top-left cell, covered cells not drawn,
   // and each row's original index so a save can tell which rows of a region were deleted.
   function tableSpec(block) {
     const rows = Array.isArray(block.rows) ? block.rows.map((r) => (Array.isArray(r) ? r : [])) : [];
     const { anchors, covered } = mergeLayout(rows, block.merges);
+    const linksByCell = new Map();
+    (Array.isArray(block.links) ? block.links : []).forEach((l) => {
+      if (!l || !Number.isInteger(l.row) || !Number.isInteger(l.col) || l.row < 0 || l.col < 0) return;
+      const key = cellKey(l.row, l.col);
+      let list = linksByCell.get(key);
+      if (!list) {
+        list = [];
+        linksByCell.set(key, list);
+      }
+      list.push(l);
+    });
+    linksByCell.forEach((list) => list.sort((a, b) => Number(a.start) - Number(b.start)));
     const trs = rows.map((row, r) => {
       const cells = [];
       row.forEach((cell, c) => {
-        if (covered.has(cellKey(r, c))) return;
-        const span = anchors.get(cellKey(r, c));
+        const key = cellKey(r, c);
+        if (covered.has(key)) return;
+        const span = anchors.get(key);
         const attrs = {};
         if (span?.colSpan > 1) attrs.colspan = String(span.colSpan);
         if (span?.rowSpan > 1) attrs.rowspan = String(span.rowSpan);
-        cells.push(elSpec("td", [textSpec(typeof cell === "string" ? cell : cell?.text ?? "")], {}, attrs));
+        const text = typeof cell === "string" ? cell : cell?.text ?? "";
+        cells.push(elSpec("td", cellInlineSpecs(text, linksByCell.get(key)), {}, attrs));
       });
       const tr = elSpec("tr", cells);
       tr.data = { eoRow: String(r) };
@@ -273,9 +317,10 @@
     return nodes;
   }
 
-  // The header and footer of a decoded document as the editor's sections (`doc-page-frame.js`), after the body.
+  // The header and footer sections (including first/even page variants) of a decoded document (`doc-page-frame.js`), after the body.
+  const PAGE_FRAME_KINDS = ["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"];
   function pageFrameNodes(res) {
-    return ["header", "footer"]
+    return PAGE_FRAME_KINDS
       .filter((kind) => Array.isArray(res[kind]) && res[kind].length > 0)
       .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } }));
   }
@@ -414,10 +459,22 @@
       const mod = res.module;
       if (mod === "DOC" || mod === "HWP") {
         next.docTabs = next.docTabs || {};
+        const paraBlocks = (res.blocks || []).filter((b) => b.type === "paragraph");
+        const firstCount = paraBlocks[0]?.columns?.count;
+        const uniformCols = paraBlocks.length > 0 && Number.isInteger(firstCount) && firstCount >= 2
+          && paraBlocks.every((b) => b.columns?.count === firstCount)
+          ? String(firstCount)
+          : "";
         next.docTabs[mod] = {
           editorNodes: [...buildEditorNodes(res.blocks), ...pageFrameNodes(res)],
           // The page setup is the file's own (`doc-page-setup.js`): a file without one does not take the last document's.
-          layoutStyle: { ...(next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" }), ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup)) },
+          layoutStyle: {
+            ...(next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" }),
+            columnCount: uniformCols,
+            eoFirstPage: res.firstPageDifferent ? "true" : "",
+            eoEvenOdd: res.evenOddDifferent ? "true" : "",
+            ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup)),
+          },
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];

@@ -15,8 +15,8 @@ use crate::hwpx_parts::{
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{
-    frame_paragraph, RichAlignment, RichBinding, RichBlock, RichColumns, RichDocument, RichField,
-    RichPageMargins, RichPaper, RichParagraph,
+    frame_paragraph, safe_link_target, RichAlignment, RichBinding, RichBlock, RichColumns,
+    RichDocument, RichField, RichPageMargins, RichPaper, RichParagraph,
 };
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
@@ -24,8 +24,11 @@ use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_
 use crate::rich_list_writers::{
     hwpx_numberings_xml, hwpx_ordered_run_ids, list_kind_of, plan_lists, HWPX_MAX_LIST_LEVEL,
 };
-use crate::rich_page_frame::{hwpx_frame_control, hwpx_number_control};
-use crate::rich_table::{CellSpan, SpanMap};
+use crate::rich_page_frame::{
+    hwpx_frame_control_typed, hwpx_number_control, hwpx_page_hiding_control,
+};
+use crate::rich_table::{CellSpan, SpanMap, TableCellLink};
+use crate::rich_table_writers::slice_cell_links;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
     extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs, strip_tag_blocks,
@@ -376,13 +379,54 @@ impl SectionWriter {
         ));
     }
 
-    fn table_paragraph(&mut self, rows: &[Vec<String>], spans: Option<&SpanMap>) {
+    fn write_table_line_runs(
+        &mut self,
+        line: &str,
+        line_start: usize,
+        cell_links: &[TableCellLink],
+        next_field_id: &mut u32,
+    ) {
+        let line_end = line_start + line.len();
+        let mut pos = 0usize;
+        for link in cell_links {
+            let (s, e) = (link.start as usize, link.end as usize);
+            if e <= line_start || s >= line_end {
+                continue;
+            }
+            let Some(url) = safe_link_target(&link.url).filter(|u| !u.starts_with('#')) else {
+                continue;
+            };
+            let ls = s.max(line_start) - line_start;
+            let le = e.min(line_end) - line_start;
+            if pos < ls {
+                self.run(0, &line[pos..ls]);
+            }
+            *next_field_id += 1;
+            let id = *next_field_id;
+            self.xml.push_str(&hwpx_link_begin(id, url));
+            self.run(0, &line[ls..le]);
+            self.xml.push_str(&hwpx_link_end(id));
+            pos = le;
+        }
+        if pos < line.len() || line.is_empty() {
+            self.run(0, &line[pos..]);
+        }
+    }
+
+    fn table_paragraph(
+        &mut self,
+        rows: &[Vec<String>],
+        spans: Option<&SpanMap>,
+        links: &[TableCellLink],
+        next_field_id: &mut u32,
+    ) {
         let row_cnt = rows.len();
         let col_cnt = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
         let cell_w =
             text_width(self.margins.as_ref(), self.paper.as_ref(), self.binding) / col_cnt as u32;
         let tbl_id = self.next_table_id;
         self.next_table_id += 1;
+        let mut link_cursor = 0usize;
         self.open_paragraph();
         self.xml.push_str("<hp:run charPrIDRef=\"0\">");
         self.xml.push_str(&format!(
@@ -409,15 +453,24 @@ impl SectionWriter {
                         // The anchor's cell covers this position.
                         CellSpan::Covered { .. } => continue,
                     };
+                let cl = slice_cell_links(links, &mut link_cursor, r_idx, c_idx);
                 self.xml.push_str("<hp:tc name=\"\" header=\"0\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"2\">");
                 self.xml.push_str("<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">");
+                let mut line_start = 0usize;
                 for line in cell.split('\n') {
+                    let line_end = line_start + line.len();
                     self.xml.push_str(&format!(
-                        "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>{}</hp:t></hp:run></hp:p>",
+                        "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
                         self.next_para_id,
-                        XmlSanitizer::escape(line)
                     ));
                     self.next_para_id += 1;
+                    if cl.is_empty() {
+                        self.run(0, line);
+                    } else {
+                        self.write_table_line_runs(line, line_start, cl, next_field_id);
+                    }
+                    self.xml.push_str("</hp:p>");
+                    line_start = line_end + 1;
                 }
                 let cell_w_span = cell_w * col_span;
                 let cell_h_span = CELL_HEIGHT * row_span;
@@ -450,7 +503,7 @@ impl HwpxCodec {
             sec.text_paragraph(p);
         }
         for tbl in &payload.tables {
-            sec.table_paragraph(tbl, None);
+            sec.table_paragraph(tbl, None, &[], &mut 0);
         }
         Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::new())
     }
@@ -478,11 +531,16 @@ impl HwpxCodec {
         let list_plan = plan_lists(&doc.blocks);
         let ordered_ids = hwpx_ordered_run_ids(&list_plan);
         let numberings_xml = hwpx_numberings_xml(&list_plan);
-        for (header, paragraphs) in [
-            (true, &doc.page_frame.header),
-            (false, &doc.page_frame.footer),
+        let pf = &doc.page_frame;
+        let eo = pf.even_odd_different;
+        let mut ctrl_id = 0u32;
+        for (header, apply, paragraphs) in [
+            (true, if eo { "ODD" } else { "BOTH" }, &pf.header),
+            (true, "EVEN", &pf.even_header),
+            (false, if eo { "ODD" } else { "BOTH" }, &pf.footer),
+            (false, "EVEN", &pf.even_footer),
         ] {
-            if paragraphs.is_empty() {
+            if (apply == "EVEN" && !eo) || paragraphs.is_empty() {
                 continue;
             }
             let mut fragment = SectionWriter::fragment(sec.next_para_id);
@@ -490,11 +548,21 @@ impl HwpxCodec {
                 shapes.write_paragraph(&mut fragment, &frame_paragraph(p), None);
             }
             sec.next_para_id = fragment.next_para_id;
-            sec.frame_controls.push_str(&hwpx_frame_control(
+            ctrl_id += 1;
+            sec.frame_controls.push_str(&hwpx_frame_control_typed(
                 header,
-                u32::from(!header) + 1,
+                ctrl_id,
+                apply,
                 &fragment.xml,
             ));
+        }
+        if pf.first_page_different {
+            let hide_hdr = pf.first_header.is_empty() && pf.has_any_header();
+            let hide_ftr = pf.first_footer.is_empty() && pf.has_any_footer();
+            if hide_hdr || hide_ftr {
+                sec.frame_controls
+                    .push_str(&hwpx_page_hiding_control(hide_hdr, hide_ftr));
+            }
         }
         for (idx, block) in doc.blocks.iter().enumerate() {
             match block {
@@ -508,7 +576,13 @@ impl HwpxCodec {
                     shapes.write_paragraph(&mut sec, p, ordered_id);
                 }
                 RichBlock::Table(table) => {
-                    sec.table_paragraph(&table.rows, table.span_map().as_ref());
+                    let validated = table.validated_links();
+                    sec.table_paragraph(
+                        &table.rows,
+                        table.span_map().as_ref(),
+                        &validated,
+                        &mut shapes.next_field_id,
+                    );
                 }
                 RichBlock::Image(img) => {
                     let picture = media.add(HWPX_MEDIA_DIR, img);

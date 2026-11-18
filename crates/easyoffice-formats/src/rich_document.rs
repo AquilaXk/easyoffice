@@ -81,6 +81,57 @@ pub struct RichListNumber {
     pub enclosure: RichNumberEnclosure,
 }
 
+impl RichListNumber {
+    /// Canonical compact wire token (`"<format>:<enclosure>"`), zero heap allocation.
+    pub const fn to_wire_code(self) -> &'static str {
+        use RichNumberEnclosure::{Dot, Parentheses, RightParenthesis};
+        use RichNumberFormat::{
+            Decimal, HangulSyllable, LowerLatin, LowerRoman, UpperLatin, UpperRoman,
+        };
+        match (self.format, self.enclosure) {
+            (Decimal, Dot) => "decimal:dot",
+            (Decimal, Parentheses) => "decimal:paren",
+            (Decimal, RightParenthesis) => "decimal:rparen",
+            (LowerLatin, Dot) => "lowerLatin:dot",
+            (LowerLatin, Parentheses) => "lowerLatin:paren",
+            (LowerLatin, RightParenthesis) => "lowerLatin:rparen",
+            (UpperLatin, Dot) => "upperLatin:dot",
+            (UpperLatin, Parentheses) => "upperLatin:paren",
+            (UpperLatin, RightParenthesis) => "upperLatin:rparen",
+            (LowerRoman, Dot) => "lowerRoman:dot",
+            (LowerRoman, Parentheses) => "lowerRoman:paren",
+            (LowerRoman, RightParenthesis) => "lowerRoman:rparen",
+            (UpperRoman, Dot) => "upperRoman:dot",
+            (UpperRoman, Parentheses) => "upperRoman:paren",
+            (UpperRoman, RightParenthesis) => "upperRoman:rparen",
+            (HangulSyllable, Dot) => "hangul:dot",
+            (HangulSyllable, Parentheses) => "hangul:paren",
+            (HangulSyllable, RightParenthesis) => "hangul:rparen",
+        }
+    }
+
+    /// Parses a wire token produced by [`Self::to_wire_code`].
+    pub fn from_wire_code(code: &str) -> Option<Self> {
+        let (fmt_s, enc_s) = code.split_once(':')?;
+        let format = match fmt_s {
+            "decimal" => RichNumberFormat::Decimal,
+            "lowerLatin" => RichNumberFormat::LowerLatin,
+            "upperLatin" => RichNumberFormat::UpperLatin,
+            "lowerRoman" => RichNumberFormat::LowerRoman,
+            "upperRoman" => RichNumberFormat::UpperRoman,
+            "hangul" => RichNumberFormat::HangulSyllable,
+            _ => return None,
+        };
+        let enclosure = match enc_s {
+            "dot" => RichNumberEnclosure::Dot,
+            "paren" => RichNumberEnclosure::Parentheses,
+            "rparen" => RichNumberEnclosure::RightParenthesis,
+            _ => return None,
+        };
+        Some(Self { format, enclosure })
+    }
+}
+
 /// Vertical position of a run relative to the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RichScript {
@@ -266,12 +317,18 @@ pub struct RichPageFrame {
 
 impl RichPageFrame {
     pub fn is_empty(&self) -> bool {
-        self.header.is_empty()
-            && self.footer.is_empty()
-            && self.first_header.is_empty()
-            && self.first_footer.is_empty()
-            && self.even_header.is_empty()
-            && self.even_footer.is_empty()
+        !self.has_any_header()
+            && !self.has_any_footer()
+            && !self.first_page_different
+            && !self.even_odd_different
+    }
+
+    pub fn has_any_header(&self) -> bool {
+        !self.header.is_empty() || !self.first_header.is_empty() || !self.even_header.is_empty()
+    }
+
+    pub fn has_any_footer(&self) -> bool {
+        !self.footer.is_empty() || !self.first_footer.is_empty() || !self.even_footer.is_empty()
     }
 }
 
