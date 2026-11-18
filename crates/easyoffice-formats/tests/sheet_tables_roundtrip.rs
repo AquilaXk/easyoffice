@@ -534,3 +534,174 @@ fn calculated_columns_and_hidden_buttons_round_trip_through_xlsx_and_refuse_over
     assert!(checked[0].tables.is_empty());
     assert_eq!(checked[0].tables_rejected, 1);
 }
+
+#[test]
+fn workbook_theme_and_table_slicers_round_trip_and_import_excel_slicer_caches() {
+    use easyoffice_formats::{TableSlicer, ZipArchiveCodec, ZipSecurityPolicy};
+
+    let custom_theme: [u32; 12] = [
+        0xFFFFFF, 0x111827, 0xF3F4F6, 0x1F2937, 0x0F766E, 0xD97706, 0x4F46E5, 0xDC2626, 0x0284C7,
+        0x65A30D, 0x2563EB, 0x7C3AED,
+    ];
+    let mut t = table("Sales", "A1:C4");
+    t.columns = vec!["지역".into(), "품목".into(), "매출".into()];
+    t.slicers = vec![TableSlicer {
+        col: 0,
+        caption: "지역".into(),
+        left: 36,
+        top: 28,
+        width: 190,
+        height: 220,
+        multi_select: true,
+    }];
+    let styling = SheetStyling {
+        workbook_theme: Some(custom_theme),
+        tables: vec![t],
+        ..SheetStyling::default()
+    };
+    let sheets = vec![("S".to_string(), headers(0, &["지역", "품목", "매출"]))];
+    let packed = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &[styling]).unwrap();
+    let theme_xml = entry(&packed, "xl/theme/theme1.xml");
+    assert!(
+        theme_xml.contains("<a:accent1><a:srgbClr val=\"0F766E\"/></a:accent1>"),
+        "{theme_xml}"
+    );
+
+    // Extra colour schemes inside `<a:extraClrSchemeLst>` must not clobber `<a:themeElements>`.
+    let with_extra_scheme = rebuild(&packed, |path, xml| {
+        if path == "xl/theme/theme1.xml" {
+            xml.replace(
+                "<a:extraClrSchemeLst/>",
+                "<a:extraClrSchemeLst><a:extraClrScheme><a:clrScheme name=\"Alt\"><a:accent1><a:srgbClr val=\"FF00FF\"/></a:accent1></a:clrScheme></a:extraClrScheme></a:extraClrSchemeLst>",
+            )
+        } else {
+            xml
+        }
+    });
+    let back = read_xlsx(&with_extra_scheme);
+    assert_eq!(back[0].workbook_theme, Some(custom_theme));
+    assert_eq!(back[0].tables[0].slicers.len(), 1);
+    assert_eq!(back[0].tables[0].slicers[0].caption, "지역");
+    assert!(back[0].tables[0].slicers[0].multi_select);
+
+    // Native `[MS-XLSX]` `xl/slicerCaches/slicerCache1.xml` + `xl/slicers/slicer1.xml` import.
+    let plain = xlsx(&[(
+        "S",
+        headers(0, &["지역", "품목", "매출"]),
+        vec![table("Sales", "A1:C4")],
+    )]);
+    let mut raw_entries: Vec<(String, Vec<u8>)> =
+        ZipArchiveCodec::unpack(&plain, &ZipSecurityPolicy::default())
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect();
+    raw_entries.push((
+        "xl/slicerCaches/slicerCache1.xml".into(),
+        r#"<?xml version="1.0" encoding="UTF-8"?><slicerCacheDefinition xmlns="urn:spreadsheetml:2009:main" name="Slicer_Item" sourceName="품목"><extLst><ext uri="{470722E0-AACD-4C17-9CDC-17EF765DBC7E}" xmlns:x15="urn:spreadsheetml:2010:main"><x15:tableSlicerCache tableId="1" column="2"/></ext></extLst></slicerCacheDefinition>"#.as_bytes().to_vec(),
+    ));
+    raw_entries.push((
+        "xl/slicers/slicer1.xml".into(),
+        r#"<?xml version="1.0" encoding="UTF-8"?><slicers xmlns="urn:spreadsheetml:2009:main"><slicer name="품목" cache="Slicer_Item" caption="품목 필터" width="1905000" height="2095500"/></slicers>"#.as_bytes().to_vec(),
+    ));
+    let with_excel_slicer = ZipArchiveCodec::pack(&raw_entries).unwrap();
+    let imported = read_xlsx(&with_excel_slicer);
+    assert_eq!(imported[0].tables[0].slicers.len(), 1);
+    assert_eq!(imported[0].tables[0].slicers[0].col, 1);
+    assert_eq!(imported[0].tables[0].slicers[0].caption, "품목 필터");
+    assert_eq!(imported[0].tables[0].slicers[0].width, 200);
+    assert_eq!(imported[0].tables[0].slicers[0].height, 220);
+
+    // Hostile flood of >64 `<eo:slicer>` tags inside `<extLst>` rejects the table part fail-closed.
+    let flood_slicers: String = (0..65)
+        .map(|_| r#"<eo:slicer col="0" caption="a" left="10" top="10" width="180" height="200" multi="0"/>"#)
+        .collect();
+    let flooded = rebuild(&packed, |path, xml| {
+        if path == "xl/tables/table1.xml" {
+            let s = xml.find("<eo:slicers").unwrap();
+            let e = xml.find("</eo:slicers>").unwrap() + "</eo:slicers>".len();
+            format!(
+                "{}<eo:slicers xmlns:eo=\"urn:easyoffice:spreadsheet:slicers:1.0\">{flood_slicers}</eo:slicers>{}",
+                &xml[..s],
+                &xml[e..]
+            )
+        } else {
+            xml
+        }
+    });
+    let rejected = read_xlsx(&flooded);
+    assert!(rejected[0].tables.is_empty());
+    assert_eq!(rejected[0].tables_rejected, 1);
+}
+
+#[test]
+#[ignore]
+fn bench_pd242_theme_and_slicers_xlsx_roundtrip_release() {
+    use easyoffice_formats::TableSlicer;
+    use std::time::Instant;
+
+    let mut table = SheetTable::new("영업표", CellBox::parse("A1:D201").unwrap());
+    table.columns = vec!["지역".into(), "품목".into(), "분기".into(), "매출".into()];
+    table.slicers = vec![
+        TableSlicer {
+            col: 0,
+            caption: "지역".into(),
+            left: 24,
+            top: 24,
+            width: 184,
+            height: 208,
+            multi_select: true,
+        },
+        TableSlicer {
+            col: 1,
+            caption: "품목".into(),
+            left: 220,
+            top: 24,
+            width: 184,
+            height: 208,
+            multi_select: false,
+        },
+    ];
+    let custom_theme = [
+        0xFFFFFF, 0x111827, 0xF3F4F6, 0x1F2937, 0x0F766E, 0xB45309, 0x6B7280, 0xEAB308, 0x0284C7,
+        0x15803D, 0x0369A1, 0x7E22CE,
+    ];
+    let mut cells = vec![
+        (0, 0, "지역".into()),
+        (0, 1, "품목".into()),
+        (0, 2, "분기".into()),
+        (0, 3, "매출".into()),
+    ];
+    let regions = ["서울", "부산", "대전", "광주", "인천"];
+    let items = ["노트북", "모니터", "키보드", "마우스"];
+    for r in 1..=200u32 {
+        cells.push((r, 0, regions[(r as usize) % regions.len()].into()));
+        cells.push((r, 1, items[(r as usize) % items.len()].into()));
+        cells.push((r, 2, format!("Q{}", (r % 4) + 1)));
+        cells.push((r, 3, format!("{}", r * 125)));
+    }
+    let styling = SheetStyling {
+        tables: vec![table],
+        workbook_theme: Some(custom_theme),
+        ..SheetStyling::default()
+    };
+    let sheets = [("Sheet1".to_string(), cells)];
+    let stylings = [styling];
+
+    let iters = 100u32;
+    let t0 = Instant::now();
+    let mut total_bytes = 0usize;
+    for _ in 0..iters {
+        let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &stylings).unwrap();
+        total_bytes += bytes.len();
+        let (_, unpacked) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+        assert_eq!(unpacked[0].1.workbook_theme, Some(custom_theme));
+        assert_eq!(unpacked[0].1.tables[0].slicers.len(), 2);
+    }
+    let elapsed_us = t0.elapsed().as_micros();
+    println!(
+        "pd242_xlsx_theme_slicers_roundtrip: iters={iters} total_us={elapsed_us} avg_us={:.1} avg_bytes={}",
+        elapsed_us as f64 / f64::from(iters),
+        total_bytes / (iters as usize)
+    );
+}

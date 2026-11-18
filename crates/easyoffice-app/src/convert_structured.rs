@@ -191,6 +191,10 @@ pub(crate) fn parse_structured_content(
         {
             first.workbook_protect = crate::sheet_protect_json::parse_workbook_protect(book)?;
         }
+        if let (Some(theme), Some(first)) = (field(entries, "workbookTheme"), stylings.first_mut())
+        {
+            first.workbook_theme = crate::sheet_table_json::parse_workbook_theme(theme)?;
+        }
         return Ok(Some((
             StructuredContent::Workbook(sheets, stylings),
             vec![],

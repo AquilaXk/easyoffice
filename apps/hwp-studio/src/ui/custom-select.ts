@@ -74,6 +74,10 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
   const value = document.createElement('span');
   value.className = 'custom-select-value';
 
+  const sizer = document.createElement('span');
+  sizer.className = 'custom-select-sizer';
+  sizer.setAttribute('aria-hidden', 'true');
+
   const arrow = document.createElement('span');
   arrow.className = 'custom-select-arrow';
   arrow.textContent = '▾';
@@ -83,7 +87,7 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
   menu.className = 'custom-select-menu';
   menu.setAttribute('role', 'listbox');
 
-  trigger.append(value, arrow);
+  trigger.append(value, sizer, arrow);
   select.before(root);
   root.append(trigger, menu, select);
   select.classList.add('native-select-hidden');
@@ -114,6 +118,7 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
 
   const rebuildMenu = () => {
     menu.innerHTML = '';
+    sizer.replaceChildren();
     optionRows.clear();
     selectedRow = null;
     const children = Array.from(select.children);
@@ -129,6 +134,11 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
       } else if (child instanceof HTMLOptionElement) {
         appendRow(child);
       }
+    }
+    for (const option of Array.from(select.options)) {
+      const span = document.createElement('span');
+      span.textContent = option.textContent?.trim() ?? '';
+      sizer.appendChild(span);
     }
   };
 

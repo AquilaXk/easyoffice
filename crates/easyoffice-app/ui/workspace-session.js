@@ -152,7 +152,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // `workbookProtect`: the protection of the workbook (no part of a snapshot); a workbook without one adds nothing.
   function contentFingerprint(snap, workbookProtect) {
     const parts = [
-      snap.docTabs, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames,
+      snap.docTabs, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.workbookTheme, snap.customTableStyles, snap.definedNames,
       snap.sheetFrozen, snap.sheetOrder, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
     ];
     if (workbookProtect) parts.push(workbookProtect);
@@ -228,7 +228,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Fingerprint of one module's document only (file open asks before replacing edited content).
   function moduleFingerprint(snap, mod) {
     if (mod === "SHEET") {
-      const rest = [snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames, snap.sheetFrozen, snap.sheetOrder];
+      const rest = [snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.workbookTheme, snap.customTableStyles, snap.definedNames, snap.sheetFrozen, snap.sheetOrder];
       return hashFingerprint(JSON.stringify(canonicalizeContent(rest, ""))) + "-" + sheetStoreDigest(snap.sheets);
     }
     const parts = {

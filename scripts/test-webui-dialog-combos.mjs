@@ -40,3 +40,15 @@ test("every combo box in a dialog lists all its choices in the width-giving cell
   const sizes = [...paper.querySelectorAll(".custom-select-sizer > span")].map((span) => span.textContent);
   assert.ok(sizes.includes("Letter") && sizes.includes("사용자 정의") && sizes.includes("A4"));
 });
+
+test("hwp-studio overlay dialog combo boxes carry right padding and sizer width so labels never touch the arrow divider", () => {
+  const studioCss = readText(fileURLToPath(new URL("../apps/hwp-studio/src/styles/custom-select.css", import.meta.url)));
+  const studioTs = readText(fileURLToPath(new URL("../apps/hwp-studio/src/ui/custom-select.ts", import.meta.url)));
+  const bodyOf = (sel) => rulesFor(studioCss, [sel]).filter((r) => r.selector.split(",").some((p) => p.trim() === sel)).map((r) => r.body).join(";");
+  const valBody = bodyOf(".custom-select-value");
+  const sizerBody = bodyOf(".dialog-wrap .custom-select-sizer");
+  assert.ok(valBody && sizerBody, "hwp-studio value and sizer rules exist");
+  assert.ok(px(valBody, "padding-right")[0] >= MIN_TEXT_GAP_PX, "hwp-studio value right gap >= 4px");
+  assert.ok(px(sizerBody, "padding-right")[0] >= MIN_TEXT_GAP_PX, "hwp-studio sizer right gap >= 4px");
+  assert.ok(studioTs.includes("custom-select-sizer"), "hwp-studio custom-select builds hidden sizer");
+});

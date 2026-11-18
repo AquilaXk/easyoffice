@@ -105,10 +105,10 @@
 .tool-dialog .custom-select.dialog-select { height: 22px; padding: 0; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
 /* Every combo box in a dialog has the field's inner padding (`.dialog-select`, `dialogs.css` 154-164: 0 4px), the arrow cell of `custom-select.css`, and 4px between its text and the arrow cell's divider. Its width is its longest choice (the hidden sizer shares the text's cell), so no choice is cut and the box keeps its width when the choice changes. */
 .tool-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
-.tool-dialog .custom-select-value { padding-right: 4px; }
+.tool-dialog .custom-select-value { padding-right: 6px; }
 .tool-dialog .custom-select-value, .tool-dialog .custom-select-sizer { grid-area: 1 / 1; }
 .tool-dialog .custom-select-arrow { grid-area: 1 / 2; }
-.tool-dialog .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; padding-right: 4px; white-space: nowrap; }
+.tool-dialog .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; padding-right: 6px; white-space: nowrap; }
 .tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .tool-dialog .dialog-checkbox input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
 /* Note line of a dialog: reference `dialogs.css` 249-275 `.dialog-pdf-note` (MIT, see THIRD_PARTY_NOTICES.md), same name and values; the PDF print dialog uses it for its hint. */
@@ -467,3 +467,34 @@
 .sheet-table-swatch.selected { outline: 2px solid var(--accent-strong); }
 .sheet-table-swatch-cell { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
 .sheet-table-swatch-text { width: 70%; height: 2px; opacity: 0.7; }
+.sheet-table-swatch-text.bold { height: 3px; opacity: 0.92; }
+
+/* New table style, remove duplicates and table slicers (PD-242): tokenized with rhwp-studio chrome tokens only. */
+#sheet-table-style-dialog { width: min(460px, calc(100vw - 32px)); overflow: visible; }
+#sheet-table-style-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
+#sheet-table-style-dialog .dialog-text-input { flex: 1; min-width: 0; }
+.sheet-ts-theme-row { margin-bottom: 0; gap: 3px; flex-wrap: wrap; }
+.sheet-ts-preview { width: 132px; height: 84px; }
+#sheet-table-dedupe-dialog, #sheet-slicer-dialog { width: min(360px, calc(100vw - 32px)); }
+.sheet-check-list { max-height: 184px; overflow-y: auto; margin: 0; padding: 4px 6px; list-style: none; border: 1px solid var(--color-border-light); background: var(--color-surface); }
+.sheet-check-list li { padding: 3px 4px; border-radius: var(--radius-xs); }
+.sheet-check-list li:hover { background: var(--color-hover-bg); }
+.sheet-check-list .dialog-checkbox { width: 100%; display: flex; align-items: center; gap: 6px; }
+.sheet-slicer-layer { grid-area: 2 / 2; position: relative; z-index: 6; pointer-events: none; overflow: hidden; }
+.sheet-slicer-layer[hidden] { display: none; }
+.sheet-slicer-card { position: absolute; pointer-events: auto; display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--color-primary-subtle); border-radius: 0; background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-light); overflow: hidden; user-select: none; outline: none; }
+.sheet-slicer-card:focus-visible { border-color: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-light); }
+.sheet-slicer-head { display: flex; align-items: center; gap: 4px; padding: 5px 6px 4px 8px; border-bottom: 1px solid var(--ui-border-subtle); background: var(--color-surface); cursor: move; }
+.sheet-slicer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-base); font-weight: 600; color: var(--color-primary-dark); }
+.sheet-slicer-actions { display: inline-flex; align-items: center; gap: 1px; }
+.sheet-slicer-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.sheet-slicer-btn .eo-icon { width: 14px; height: 14px; }
+.sheet-slicer-btn:hover:not(:disabled) { border-color: var(--ui-border); background: var(--ui-hover-strong); color: var(--color-text); }
+.sheet-slicer-btn[aria-pressed="true"] { border-color: var(--accent-primary); background: var(--ui-selected); color: var(--color-primary-dark); }
+.sheet-slicer-btn.is-clearable { color: var(--ui-danger); }
+.sheet-slicer-btn:disabled { color: var(--color-text-disabled); cursor: default; }
+.sheet-slicer-items { flex: 1; min-height: 0; padding: 6px 8px 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; background: var(--color-surface); }
+.sheet-slicer-item { display: flex; align-items: center; width: 100%; min-height: 23px; padding: 0 8px; border: 1px solid var(--ui-border-light); border-radius: 0; background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.sheet-slicer-item.selected { border-color: var(--accent-hover); background: var(--ui-selected); color: var(--color-text); }
+.sheet-slicer-item.is-muted { border-color: var(--ui-border-subtle); background: var(--ui-bg-light); color: var(--color-text-disabled); }
+.sheet-slicer-item:hover { border-color: var(--accent-primary); background: var(--color-accent-bg); color: var(--color-text); }

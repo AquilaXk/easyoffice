@@ -17,8 +17,9 @@ use crate::sheet_layout_json::{parse_runs_limited, runs_json};
 use crate::table_style_json::{parse_style_def, write_style_def};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    tables_within_bounds, CellBox, EasyOfficeError, SheetTable, StrictJsonValue, MAX_FILTER_ROWS,
-    MAX_TABLES, MAX_TABLE_TEXT_CHARS,
+    parse_hex_rgb, tables_within_bounds, CellBox, EasyOfficeError, SheetTable, StrictJsonValue,
+    TableSlicer, DEFAULT_THEME, MAX_FILTER_ROWS, MAX_SLICERS_PER_TABLE, MAX_SLICER_DIM_PX,
+    MAX_SLICER_POS_PX, MAX_TABLES, MAX_TABLE_TEXT_CHARS, MIN_SLICER_DIM_PX,
 };
 use std::fmt::Write;
 
@@ -123,10 +124,95 @@ fn parse_table(v: &StrictJsonValue) -> Result<SheetTable, EasyOfficeError> {
             table.calculated_columns = parsed;
         }
     }
+    if let Some(sl_val) = field("slicers").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        if !table.header {
+            return Err(bad("slicers"));
+        }
+        let items = sl_val.as_array().ok_or_else(|| bad("slicers"))?;
+        if items.len() > MAX_SLICERS_PER_TABLE {
+            return Err(over());
+        }
+        let width = table.width();
+        let mut parsed = Vec::with_capacity(items.len());
+        for item in items {
+            parsed.push(parse_slicer(item, width)?);
+        }
+        table.slicers = parsed;
+    }
     if !table.within_bounds() {
         return Err(over());
     }
     Ok(table)
+}
+
+fn parse_slicer(v: &StrictJsonValue, width: u32) -> Result<TableSlicer, EasyOfficeError> {
+    let obj = v.as_object().ok_or_else(|| bad("slicers"))?;
+    let field = |key: &str| StrictJsonValue::get_field(obj, key);
+    let u32_of = |key: &str, lo: u32, hi: u32| -> Result<u32, EasyOfficeError> {
+        field(key)
+            .and_then(StrictJsonValue::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| (lo..=hi).contains(n))
+            .ok_or_else(|| bad("slicers"))
+    };
+    let col = field("col")
+        .and_then(StrictJsonValue::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|&c| c < width)
+        .ok_or_else(|| bad("slicers"))?;
+    let caption = field("caption")
+        .map(|c| text_of(c, "slicers"))
+        .transpose()?
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| bad("slicers"))?;
+    let multi_select = match field("multiSelect") {
+        None | Some(StrictJsonValue::Null) => false,
+        Some(StrictJsonValue::Bool(on)) => *on,
+        Some(_) => return Err(bad("slicers")),
+    };
+    Ok(TableSlicer {
+        col,
+        caption,
+        left: u32_of("left", 0, MAX_SLICER_POS_PX)?,
+        top: u32_of("top", 0, MAX_SLICER_POS_PX)?,
+        width: u32_of("width", MIN_SLICER_DIM_PX, MAX_SLICER_DIM_PX)?,
+        height: u32_of("height", MIN_SLICER_DIM_PX, MAX_SLICER_DIM_PX)?,
+        multi_select,
+    })
+}
+
+/// Parses `"workbookTheme"`: `null` (default Office theme) or an array of 12 6-hex RGB strings.
+pub(crate) fn parse_workbook_theme(
+    v: &StrictJsonValue,
+) -> Result<Option<[u32; 12]>, EasyOfficeError> {
+    if matches!(v, StrictJsonValue::Null) {
+        return Ok(None);
+    }
+    let items = v.as_array().filter(|a| a.len() == 12).ok_or_else(|| {
+        EasyOfficeError::InvalidArgument("workbookTheme은 12색 배열이어야 합니다.".into())
+    })?;
+    let mut out = [0u32; 12];
+    for (slot, item) in out.iter_mut().zip(items) {
+        let raw = item.as_str().ok_or_else(|| {
+            EasyOfficeError::InvalidArgument("workbookTheme 색상은 6자리 16진수여야 합니다.".into())
+        })?;
+        let trimmed = raw.strip_prefix('#').unwrap_or(raw);
+        *slot = parse_hex_rgb(trimmed).ok_or_else(|| {
+            EasyOfficeError::InvalidArgument("workbookTheme 색상은 6자리 16진수여야 합니다.".into())
+        })?;
+    }
+    Ok((out != DEFAULT_THEME).then_some(out))
+}
+
+pub(crate) fn write_workbook_theme(out: &mut String, theme: &[u32; 12]) {
+    out.push('[');
+    for (i, &rgb) in theme.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "\"{:06x}\"", rgb & 0xFF_FFFF);
+    }
+    out.push(']');
 }
 
 /// What a request says of the tables of one sheet: their ranges and, when it sends the tables themselves (names,
@@ -259,6 +345,22 @@ pub(crate) fn tables_json(tables: &[SheetTable]) -> String {
             }
             out.push(']');
         }
+        if !t.slicers.is_empty() {
+            out.push_str(",\"slicers\":[");
+            for (j, s) in t.slicers.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                let _ = write!(out, "{{\"col\":{},\"caption\":\"", s.col);
+                EasyOfficeIpcRouter::escape_json_into(&mut out, &s.caption);
+                let _ = write!(
+                    out,
+                    "\",\"left\":{},\"top\":{},\"width\":{},\"height\":{},\"multiSelect\":{}}}",
+                    s.left, s.top, s.width, s.height, s.multi_select
+                );
+            }
+            out.push(']');
+        }
         out.push('}');
     }
     out.push(']');
@@ -368,5 +470,45 @@ mod tests {
                 && ranges(r#"[3]"#).is_err()
                 && ranges(r#"["A:C"]"#).is_err()
         );
+    }
+
+    #[test]
+    fn slicers_and_workbook_theme_round_trip_and_reject_hostile_inputs() {
+        let valid = r#"[{"name":"T","range":"A1:C4","header":true,"totals":false,"columns":["지역","품목","매출"],"firstColumn":false,"lastColumn":false,"rowStripes":true,"columnStripes":false,"slicers":[{"col":1,"caption":"품목","left":24,"top":32,"width":184,"height":210,"multiSelect":true}]}]"#;
+        let tables = parse(valid).unwrap();
+        assert_eq!(tables[0].slicers.len(), 1);
+        assert_eq!(tables_json(&tables), valid);
+
+        for bad_slicer in [
+            r#"[{"name":"T","range":"A1:B3","header":false,"columns":["a","b"],"slicers":[{"col":0,"caption":"a","left":0,"top":0,"width":180,"height":200}]}]"#,
+            r#"[{"name":"T","range":"A1:B3","columns":["a","b"],"slicers":[{"col":2,"caption":"a","left":0,"top":0,"width":180,"height":200}]}]"#,
+            r#"[{"name":"T","range":"A1:B3","columns":["a","b"],"slicers":[{"col":0,"caption":"","left":0,"top":0,"width":180,"height":200}]}]"#,
+            r#"[{"name":"T","range":"A1:B3","columns":["a","b"],"slicers":[{"col":0,"caption":"a","left":0,"top":0,"width":20,"height":200}]}]"#,
+            r#"[{"name":"T","range":"A1:B3","columns":["a","b"],"slicers":[{"col":0,"caption":"a","left":0,"top":0,"width":180,"height":5000}]}]"#,
+        ] {
+            assert!(parse(bad_slicer).is_err(), "{bad_slicer}");
+        }
+
+        let theme_json = r##"["#ffffff","111827","f3f4f6","1f2937","0f766e","d97706","4f46e5","dc2626","0284c7","65a30d","2563eb","7c3aed"]"##;
+        let parsed_theme = parse_workbook_theme(&StrictJsonValue::parse(theme_json).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed_theme[4], 0x0F766E);
+        let mut encoded = String::new();
+        write_workbook_theme(&mut encoded, &parsed_theme);
+        assert_eq!(
+            encoded,
+            r#"["ffffff","111827","f3f4f6","1f2937","0f766e","d97706","4f46e5","dc2626","0284c7","65a30d","2563eb","7c3aed"]"#
+        );
+        assert!(parse_workbook_theme(&StrictJsonValue::Null)
+            .unwrap()
+            .is_none());
+        for bad_theme in [
+            r#"["ffffff"]"#,
+            r#"123"#,
+            r#"["zzzzzz","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000"]"#,
+        ] {
+            assert!(parse_workbook_theme(&StrictJsonValue::parse(bad_theme).unwrap()).is_err());
+        }
     }
 }

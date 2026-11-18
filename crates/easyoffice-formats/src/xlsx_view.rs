@@ -24,7 +24,7 @@ use std::fmt::Write;
 
 /// Office colours by SpreadsheetML theme index: light 1, dark 1, light 2, dark 2, six accents, the
 /// two hyperlink colours. The palette of a file without a theme part.
-pub(crate) const DEFAULT_THEME: [u32; 12] = [
+pub const DEFAULT_THEME: [u32; 12] = [
     0xFFFFFF, 0x000000, 0xE7E6E6, 0x44546A, 0x4472C4, 0xED7D31, 0xA5A5A5, 0xFFC000, 0x5B9BD5,
     0x70AD47, 0x0563C1, 0x954F72,
 ];
@@ -228,27 +228,35 @@ pub(crate) fn theme_palette(xml: &str) -> [u32; 12] {
         ("folHlink", 11),
     ];
     let mut palette = DEFAULT_THEME;
-    let mut reader = XmlReader::unbounded(xml);
+    let mut reader = XmlReader::with_budget(xml, 16_384);
+    let mut in_scheme = false;
     let mut slot: Option<usize> = None;
     while let Ok(Some(event)) = reader.next_event() {
         match event {
             XmlEvent::Start { name, attrs } => {
                 let local = name.rsplit(':').next().unwrap_or(name);
-                if let Some(&(_, index)) = SLOTS.iter().find(|(n, _)| *n == local) {
-                    slot = Some(index);
-                } else if let Some(index) = slot {
-                    let value = match local {
-                        "srgbClr" => attrs.get("val"),
-                        "sysClr" => attrs.get("lastClr"),
-                        _ => continue,
-                    };
-                    if let Some(rgb) = value.as_deref().and_then(parse_argb) {
-                        palette[index] = rgb;
+                if local == "clrScheme" && !in_scheme {
+                    in_scheme = true;
+                } else if in_scheme {
+                    if let Some(&(_, index)) = SLOTS.iter().find(|(n, _)| *n == local) {
+                        slot = Some(index);
+                    } else if let Some(index) = slot {
+                        let value = match local {
+                            "srgbClr" => attrs.get("val"),
+                            "sysClr" => attrs.get("lastClr"),
+                            _ => continue,
+                        };
+                        if let Some(rgb) = value.as_deref().and_then(parse_argb) {
+                            palette[index] = rgb;
+                        }
                     }
                 }
             }
             XmlEvent::End(name) => {
                 let local = name.rsplit(':').next().unwrap_or(name);
+                if local == "clrScheme" && in_scheme {
+                    break;
+                }
                 if SLOTS.iter().any(|(n, _)| *n == local) {
                     slot = None;
                 }

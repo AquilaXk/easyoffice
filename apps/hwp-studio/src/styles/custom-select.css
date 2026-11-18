@@ -71,9 +71,14 @@
 
 .custom-select-value {
   min-width: 0;
+  padding-right: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.custom-select-sizer {
+  display: none;
 }
 
 .custom-select-arrow {
@@ -180,6 +185,24 @@
 .dialog-wrap .custom-select-trigger {
   padding-left: 6px;
   font-size: var(--font-size-sm);
+}
+
+.dialog-wrap .custom-select-value,
+.dialog-wrap .custom-select-sizer {
+  grid-area: 1 / 1;
+}
+
+.dialog-wrap .custom-select-arrow {
+  grid-area: 1 / 2;
+}
+
+.dialog-wrap .custom-select-sizer {
+  display: grid;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  padding-right: 6px;
+  white-space: nowrap;
 }
 
 .dialog-wrap .custom-select-menu {

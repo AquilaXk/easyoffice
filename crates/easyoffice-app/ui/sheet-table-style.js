@@ -24,8 +24,11 @@
   const EDGES = ["t", "b", "l", "r", "h", "v"];
   const [EDGE_T, EDGE_B, EDGE_L, EDGE_R, EDGE_H, EDGE_V] = EDGES.map((_, i) => i);
   const WEIGHT_PX = { thin: 1, medium: 2, thick: 3, double: 2 };
-  // Office theme slots as SpreadsheetML numbers them (light 1, dark 1, light 2, dark 2, accents 1-6).
-  const THEME = ["ffffff", "000000", "e7e6e6", "44546a", "4472c4", "ed7d31", "a5a5a5", "ffc000", "5b9bd5", "70ad47", "0563c1", "954f72"];
+  // Office theme slots as SpreadsheetML numbers them (light 1, dark 1, light 2, dark 2, accents 1-6, hyperlink, followed hyperlink).
+  const DEFAULT_THEME = Object.freeze(["ffffff", "000000", "e7e6e6", "44546a", "4472c4", "ed7d31", "a5a5a5", "ffc000", "5b9bd5", "70ad47", "0563c1", "954f72"]);
+  let activeTheme = [...DEFAULT_THEME];
+  let themeVersion = 0;
+  const sessionCustomStyles = Object.create(null);
   const BLOCK = 64; // rows per lookup bucket
   const TALL_BLOCKS = 4096; // a table taller than this many buckets is kept in a plain list
   const DARK_FILL_LUMINANCE = 62; // `sheet-look.js`: a fill at or under this is dark, its text is white
@@ -59,12 +62,24 @@
     return ((byte(r1) << 16) | (byte(g1) << 8) | byte(b1)).toString(16).padStart(6, "0");
   }
 
-  // `rrggbb`, or `t<slot>[:tint]` (a built-in style's theme colour), as `rrggbb`; null for none.
+  function normalizeTheme(colors) {
+    if (!Array.isArray(colors) || colors.length !== 12) return null;
+    const out = [];
+    for (const c of colors) {
+      if (typeof c !== "string" || !/^[0-9a-f]{6}$/i.test(c)) return null;
+      out.push(c.toLowerCase());
+    }
+    return out;
+  }
+
+  const isDefaultTheme = (colors) => colors.every((c, i) => c === DEFAULT_THEME[i]);
+
+  // `rrggbb`, or `t<slot>[:tint]` (a style's theme colour), as `rrggbb`; null for none.
   function colorOf(ref) {
     if (!ref) return null;
     if (ref[0] !== "t") return ref;
     const [slot, tint] = ref.slice(1).split(":");
-    const base = THEME[Number(slot)];
+    const base = activeTheme[Number(slot)];
     return base ? applyTint(base, tint ? Number(tint) : 0) : null;
   }
 
@@ -95,7 +110,38 @@
   const compileStyle = (def) => ORDER.map((key) => (def?.[key] ? compileFormat(def[key]) : null));
 
   const compiledPresets = new Map();
-  const compiledDefs = new WeakMap();
+  let compiledDefs = new WeakMap();
+
+  function setTheme(colors) {
+    const next = normalizeTheme(colors) || [...DEFAULT_THEME];
+    if (next.every((c, i) => c === activeTheme[i])) return false;
+    activeTheme = next;
+    compiledPresets.clear();
+    compiledDefs = new WeakMap();
+    themeVersion += 1;
+    return true;
+  }
+
+  const getTheme = () => (isDefaultTheme(activeTheme) ? null : [...activeTheme]);
+  const themeColors = () => [...activeTheme];
+
+  function putCustomStyle(name, def) {
+    if (!name || !def || typeof def !== "object") return;
+    sessionCustomStyles[name] = structuredClone(def);
+    compiledDefs = new WeakMap();
+  }
+
+  function getCustomStyles() {
+    return structuredClone(sessionCustomStyles);
+  }
+
+  function setCustomStyles(map) {
+    for (const k of Object.keys(sessionCustomStyles)) delete sessionCustomStyles[k];
+    for (const [k, v] of Object.entries(map || {})) {
+      if (k && v && typeof v === "object" && !Object.hasOwn(PRESETS, k)) sessionCustomStyles[k] = structuredClone(v);
+    }
+    compiledDefs = new WeakMap();
+  }
 
   // The compiled style a table names, or null when it names none or one nobody defined.
   function styleOf(table) {
@@ -106,7 +152,7 @@
       if (!compiled) compiledPresets.set(name, (compiled = compileStyle(PRESETS[name])));
       return compiled;
     }
-    const def = table.styleDef;
+    const def = table.styleDef || sessionCustomStyles[name];
     if (!def || typeof def !== "object") return null;
     let compiled = compiledDefs.get(def);
     if (!compiled) compiledDefs.set(def, (compiled = compileStyle(def)));
@@ -312,7 +358,7 @@
     const grid = [false, false, false, false];
     for (const side of [1, 3]) grid[side] = !look.fill && !look.edges[side] && !td.style[side === 1 ? "borderBottomStyle" : "borderRightStyle"];
     const shadows = shadowsOf(look, grid);
-    const sig = [look.fill || "", fg, look.bold ? 1 : 0, look.italic ? 1 : 0, shadows.join(",")].join("|");
+    const sig = [themeVersion, look.fill || "", fg, look.bold ? 1 : 0, look.italic ? 1 : 0, shadows.join(",")].join("|");
     if (td._ts === sig) return;
     td._ts = sig;
     const s = td.style;
@@ -368,8 +414,18 @@
   const DEFAULT_STYLE = "TableStyleMedium2";
 
   host.__EASYOFFICE_SHEET_TABLE_STYLE__ = {
+    ORDER,
+    EDGES,
+    WEIGHT_PX,
+    DEFAULT_THEME,
     applyTint,
     colorOf,
+    getTheme,
+    setTheme,
+    themeColors,
+    putCustomStyle,
+    getCustomStyles,
+    setCustomStyles,
     styleOf,
     geometryOf,
     tableAt,

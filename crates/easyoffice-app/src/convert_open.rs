@@ -571,6 +571,13 @@ fn decode_response(
                 out.push_str(",\"workbookProtect\":");
                 out.push_str(&crate::sheet_protect_json::workbook_protect_json(book));
             }
+            if let Some(theme) = styling
+                .first()
+                .and_then(|(_, st)| st.workbook_theme.as_ref())
+            {
+                out.push_str(",\"workbookTheme\":");
+                crate::sheet_table_json::write_workbook_theme(&mut out, theme);
+            }
             out.push('}');
             return Ok(out);
         }

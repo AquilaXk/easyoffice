@@ -458,6 +458,18 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_SHEET_TABLE_TOTALS__",
     ),
     (
+        include_str!("../ui/sheet-table-style-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_TABLE_STYLE_UI__",
+    ),
+    (
+        include_str!("../ui/sheet-table-dedupe.js"),
+        "__EASYOFFICE_CREATE_SHEET_TABLE_DEDUPE_UI__",
+    ),
+    (
+        include_str!("../ui/sheet-slicer.js"),
+        "__EASYOFFICE_CREATE_SHEET_SLICER_UI__",
+    ),
+    (
         include_str!("../ui/sheet-table-ui.js"),
         "__EASYOFFICE_CREATE_SHEET_TABLE_UI__",
     ),

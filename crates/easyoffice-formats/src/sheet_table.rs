@@ -27,6 +27,7 @@ use crate::sheet_filter::{
 };
 use crate::sheet_names::{defined_name_problem, fold_name, NameProblem};
 use crate::sheet_styling::table_style::{is_builtin_table_style, TableStyleDef};
+use crate::sheet_styling::xlsx_slicers::{TableSlicer, MAX_SLICERS_PER_TABLE, MAX_SLICERS_TOTAL};
 use crate::{CellBox, EasyOfficeError};
 
 #[path = "ods_tables.rs"]
@@ -77,6 +78,8 @@ pub struct SheetTable {
     /// from the rows a user hid (PD-226). Empty for a table whose filter has no conditions, or whose
     /// range is too tall for the filter to be applied.
     pub filter_hidden: Vec<(u32, u32)>,
+    /// Visual column filter slicers bound to this table (PD-242).
+    pub slicers: Vec<TableSlicer>,
 }
 
 impl SheetTable {
@@ -99,6 +102,7 @@ impl SheetTable {
             hidden_buttons: Vec::new(),
             calculated_columns: Vec::new(),
             filter_hidden: Vec::new(),
+            slicers: Vec::new(),
         }
     }
 
@@ -156,6 +160,10 @@ impl SheetTable {
                             })
                         })
                     })))
+            && (self.slicers.is_empty()
+                || (self.header
+                    && self.slicers.len() <= MAX_SLICERS_PER_TABLE
+                    && self.slicers.iter().all(|s| s.within_bounds(self.width()))))
             && self.filter_hidden_within_bounds()
     }
 
@@ -237,6 +245,12 @@ pub fn workbook_tables_within_bounds(stylings: &[crate::SheetStyling]) -> bool {
             .map(|t| t.columns.len())
             .sum::<usize>()
             <= MAX_TABLE_COLUMNS_TOTAL
+        && stylings
+            .iter()
+            .flat_map(|s| &s.tables)
+            .map(|t| t.slicers.len())
+            .sum::<usize>()
+            <= MAX_SLICERS_TOTAL
         && stylings.iter().all(|s| tables_within_bounds(&s.tables))
 }
 
@@ -250,6 +264,8 @@ pub struct TableRegistry {
     names: HashSet<String>,
     /// The table parts already read: a part is one table, so a second listing of it is turned away unread.
     parts: HashSet<String>,
+    /// `(table_id, sheet_idx, table_idx)` of admitted XLSX tables for `[MS-XLSX]` `tableSlicerCache` binding.
+    pub(crate) table_ids: Vec<(u32, usize, usize)>,
 }
 
 impl TableRegistry {

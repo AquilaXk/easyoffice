@@ -70,6 +70,9 @@
     const state = { mode: "create", table: null, bound: false };
     let gallery = null;
     let totalsMenu = null;
+    let styleEditor = null;
+    let dedupeUi = null;
+    let slicerUi = null;
 
     const say = (text) => {
       const fb = document.getElementById("status-command-feedback");
@@ -462,6 +465,7 @@
           delete next.filter;
           delete next.filterHidden;
           delete next.hiddenButtons;
+          delete next.slicers;
           return { table: next, text: STATUS.header };
         });
       }
@@ -603,11 +607,31 @@
       });
     }
 
-    // The styles of the workbook's tables that are not built in, by name.
+    // The styles of the workbook's tables and session store that are not built in, by name.
     function customStyles() {
-      const out = {};
+      const out = styleApi.getCustomStyles?.() || {};
       for (const t of everyTable()) if (t.style && t.styleDef && !styleApi.isBuiltIn(t.style) && !out[t.style]) out[t.style] = t.styleDef;
       return out;
+    }
+
+    function saveCustomStyle(styleName, def) {
+      const name = getActiveSheetName();
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        commitIfEditing();
+        if (!allowed(name)) return false;
+        sheetDataStore[name] = snapshotDomSheetCells();
+        const held = tableAtActive();
+        const record = sheetHistory.begin({ parts: ["sheetLayout", "customTableStyles"] });
+        styleApi.putCustomStyle(styleName, def);
+        if (held) {
+          const next = { ...held, style: styleName, styleDef: structuredClone(def) };
+          layoutApi.setTables(name, withTable(name, held, next));
+        }
+        sheetHistory.commit(record);
+        await settle(name, STATUS.style, false);
+        return true;
+      });
     }
 
     // ---- growth over what is typed -----------------------------------------------------------------------------------------
@@ -752,11 +776,14 @@
 
     async function afterCellInput(sheet, ref) {
       await expandAfter(sheet, [ref]);
-      return fillCalculated(sheet, ref);
+      const filled = await fillCalculated(sheet, ref);
+      slicerUi?.syncLayer();
+      return filled;
     }
 
     // ---- the bar ----------------------------------------------------------------------------------------------------------
     function sync() {
+      slicerUi?.syncLayer();
       const bar = $("sheet-table-bar");
       if (!bar) return;
       // The 필터 menu item is checked while the active cell is in a table with buttons.
@@ -772,9 +799,11 @@
       for (const box of bar.querySelectorAll("[data-table-opt]")) box.checked = OPTIONS[box.dataset.tableOpt](table);
       const locked = Boolean(protectApi && protectApi.isOn(getActiveSheetName()));
       for (const el of bar.querySelectorAll("input, button")) el.disabled = locked;
-      // Without a header row there is nothing to carry the buttons.
+      // Without a header row there is nothing to carry the buttons or slicers.
       const buttons = bar.querySelector('[data-table-opt="filterButton"]');
       if (buttons && table.header === false) buttons.disabled = true;
+      const slicerBtn = bar.querySelector('[data-table-act="slicer"]');
+      if (slicerBtn && table.header === false) slicerBtn.disabled = true;
     }
 
     function openGallery() {
@@ -787,15 +816,60 @@
     function bind() {
       if (state.bound) return;
       state.bound = true;
+      styleEditor = host.__EASYOFFICE_CREATE_SHEET_TABLE_STYLE_UI__?.({
+        document,
+        kit,
+        getCustomStyles: customStyles,
+        onSave: (styleName, def) => void saveCustomStyle(styleName, def),
+      });
+      styleEditor?.ensureBound();
+      dedupeUi = host.__EASYOFFICE_CREATE_SHEET_TABLE_DEDUPE_UI__?.({
+        document,
+        kit,
+        sheetDataStore,
+        getActiveSheetName,
+        contextOf,
+        allowed,
+        enqueueWorkspaceHistoryOp,
+        drainInFlightSheetWork,
+        commitIfEditing,
+        snapshotDomSheetCells,
+        sheetHistory,
+        withTable,
+        settle,
+        filter,
+        selectTable,
+        say,
+      });
+      dedupeUi?.ensureBound();
+      slicerUi = host.__EASYOFFICE_CREATE_SHEET_SLICER_UI__?.({
+        document,
+        kit,
+        sheetDataStore,
+        getActiveSheetName,
+        everyTable,
+        allowed,
+        changeTable,
+        filter,
+        say,
+      });
+      slicerUi?.ensureBound();
       gallery = host.__EASYOFFICE_CREATE_SHEET_TABLE_GALLERY__({
         document,
         onPick: (name, def) => {
           const table = tableAtActive();
-          if (table) void setStyle(table, name, def);
+          if (table) void setStyle(table, name, def || customStyles()[name]);
         },
         onClear: () => {
           const table = tableAtActive();
           if (table) void setStyle(table, null, null);
+        },
+        onNewStyle: () => {
+          const name = getActiveSheetName();
+          if (!allowed(name)) return;
+          const table = tableAtActive();
+          const seed = table?.style && !styleApi.isBuiltIn(table.style) ? table.styleDef || customStyles()[table.style] : null;
+          styleEditor?.open(seed);
         },
       });
       gallery.bind();
@@ -816,8 +890,20 @@
         const button = ev.target?.closest?.("[data-table-act]");
         const table = tableAtActive();
         if (!button || !table) return;
-        if (button.dataset.tableAct === "resize") openResize();
-        else if (button.dataset.tableAct === "to-range") void convertToRange(table);
+        const act = button.dataset.tableAct;
+        if (act === "resize") openResize();
+        else if (act === "pivot") {
+          commitIfEditing();
+          sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
+          host.__EASYOFFICE_SHEET_PIVOT__?.openPivotDialogForTable(table);
+        } else if (act === "dedupe") {
+          commitIfEditing();
+          if (allowed(getActiveSheetName())) dedupeUi?.open(table);
+        } else if (act === "slicer") {
+          commitIfEditing();
+          sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
+          slicerUi?.openInsert(table);
+        } else if (act === "to-range") void convertToRange(table);
       });
       const input = $("sheet-table-name");
       input?.addEventListener("keydown", (ev) => {

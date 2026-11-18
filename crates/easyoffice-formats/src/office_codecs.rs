@@ -430,10 +430,38 @@ impl OoxmlCodec {
                 wb_rels_xml,
             )
         };
-        let content_types = content_types.replace(
-            "</Types>",
-            &format!("{}</Types>", table_writer.content_types),
-        );
+        let custom_theme = stylings
+            .first()
+            .and_then(|s| s.workbook_theme)
+            .filter(|&t| t != DEFAULT_THEME);
+        let (content_types, wb_rels_xml) = if let Some(theme) = custom_theme {
+            let _ = theme;
+            (
+                content_types.replace(
+                    "</Types>",
+                    &format!(
+                        "{}{}</Types>",
+                        table_writer.content_types,
+                        crate::sheet_styling::xlsx_slicers::THEME_CONTENT_OVERRIDE
+                    ),
+                ),
+                wb_rels_xml.replace(
+                    "</Relationships>",
+                    &format!(
+                        "{}</Relationships>",
+                        crate::sheet_styling::xlsx_slicers::THEME_WORKBOOK_REL
+                    ),
+                ),
+            )
+        } else {
+            (
+                content_types.replace(
+                    "</Types>",
+                    &format!("{}</Types>", table_writer.content_types),
+                ),
+                wb_rels_xml,
+            )
+        };
         let mut entries = vec![
             (
                 "[Content_Types].xml".to_string(),
@@ -451,6 +479,13 @@ impl OoxmlCodec {
             ("xl/styles.xml".to_string(), styles_xml.into_bytes()),
             ("xl/sharedStrings.xml".to_string(), sst_xml.into_bytes()),
         ];
+
+        if let Some(theme) = custom_theme {
+            entries.push((
+                "xl/theme/theme1.xml".to_string(),
+                crate::sheet_styling::xlsx_slicers::build_theme_xml(theme).into_bytes(),
+            ));
+        }
 
         if has_spills {
             entries.push((
@@ -699,6 +734,7 @@ impl OoxmlCodec {
                     link_color,
                 );
                 styling.tables_rejected = read_sheet_tables(
+                    stylings.len(),
                     sheet_xml,
                     part_path,
                     &entry_by_path,
@@ -730,6 +766,11 @@ impl OoxmlCodec {
         }
 
         if with_styling {
+            crate::sheet_styling::xlsx_slicers::read_excel_table_slicers(
+                &entry_by_path,
+                &table_registry.table_ids,
+                &mut stylings,
+            );
             crate::sheet_styling::xlsx_page::apply_print_names(
                 wb_xml,
                 &workbook_names,
@@ -740,6 +781,7 @@ impl OoxmlCodec {
                     crate::sheet_styling::xlsx_names::read_defined_names(wb_xml, &workbook_names);
                 first.workbook_protect =
                     crate::sheet_styling::xlsx_protect::read_workbook_protection(wb_xml)?;
+                first.workbook_theme = theme.filter(|&t| t != DEFAULT_THEME);
             }
         }
         Ok((parsed_sheets, stylings))

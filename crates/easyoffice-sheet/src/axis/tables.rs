@@ -12,7 +12,7 @@
 //! totals row is deleted as a table without one; this port does the same.
 
 use super::{layout::shift_runs_on_axis, Axis, AxisEdit, EditKind};
-use easyoffice_formats::{fold_name, FilterColumn, SheetTable};
+use easyoffice_formats::{fold_name, FilterColumn, SheetTable, TableSlicer};
 use std::collections::HashSet;
 
 /// `table` after `edit`; `None` when the edit removes it.
@@ -105,6 +105,19 @@ pub fn shift_table(table: &SheetTable, edit: &AxisEdit) -> Option<SheetTable> {
                     out.calculated_columns.clear();
                 }
             }
+            out.slicers = table
+                .slicers
+                .iter()
+                .filter_map(|s| {
+                    let abs = edit
+                        .map_index(range.col0 + s.col)
+                        .filter(|c| (start..=end).contains(c))?;
+                    Some(TableSlicer {
+                        col: abs - start,
+                        ..s.clone()
+                    })
+                })
+                .collect();
         }
     }
     (out.range.row1 - out.range.row0 + 1 >= out.min_rows()).then_some(out)
@@ -290,5 +303,36 @@ mod tests {
             out.columns,
             ["Column1", "Column2", "Column3", "Column4", "x", "y"]
         );
+    }
+
+    #[test]
+    fn column_edits_move_and_drop_table_slicers() {
+        let mut t = sample();
+        t.slicers = vec![
+            TableSlicer {
+                col: 0,
+                caption: "a".into(),
+                left: 24,
+                top: 24,
+                width: 184,
+                height: 208,
+                multi_select: false,
+            },
+            TableSlicer {
+                col: 2,
+                caption: "c".into(),
+                left: 220,
+                top: 24,
+                width: 184,
+                height: 208,
+                multi_select: true,
+            },
+        ];
+        let inserted = shift_table(&t, &edit(Axis::Col, EditKind::Insert, 4, 1)).unwrap();
+        let cols: Vec<u32> = inserted.slicers.iter().map(|s| s.col).collect();
+        assert_eq!(cols, [0, 3]);
+        let deleted = shift_table(&t, &edit(Axis::Col, EditKind::Delete, 4, 1)).unwrap();
+        let cols: Vec<u32> = deleted.slicers.iter().map(|s| s.col).collect();
+        assert_eq!(cols, [0]);
     }
 }

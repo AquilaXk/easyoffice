@@ -591,7 +591,10 @@
               </div>
               <div class="tb-group">
                 <button type="button" class="tb-btn" data-table-act="resize">표 크기 조정</button>
+                <button type="button" class="tb-btn" data-table-act="pivot">피벗 테이블로 요약</button>
+                <button type="button" class="tb-btn" data-table-act="dedupe">중복된 항목 제거</button>
                 <button type="button" class="tb-btn" data-table-act="to-range">범위로 변환</button>
+                <button type="button" class="tb-btn" data-table-act="slicer">슬라이서 삽입</button>
               </div>
               <div class="sb-field-grid sheet-table-options" role="group" aria-label="표 스타일 옵션">
                 <label class="dialog-checkbox"><input type="checkbox" data-table-opt="header" /> 머리글 행</label>
@@ -782,6 +785,7 @@
                 </tbody>
               </table>
               </div>
+              <div id="sheet-slicer-layer" class="sheet-slicer-layer" hidden></div>
               </div>
             </div>
             <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
@@ -1723,6 +1727,57 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-table-style-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-ts-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-ts-dialog-title">새 표 스타일</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-ts-name">이름</label><input id="sheet-ts-name" class="dialog-text-input" type="text" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-ts-element">표 요소</label><select id="sheet-ts-element" class="sb-combo dialog-select"></select><button id="btn-sheet-ts-clear-elem" type="button" class="dialog-btn">지우기</button></div>
+          <div id="sheet-ts-stripe-row" class="dialog-row" hidden><label class="dialog-label" for="sheet-ts-stripe-size">줄무늬 크기</label><input id="sheet-ts-stripe-size" type="number" min="1" max="9" step="1" value="1" class="dialog-input" /></div>
+          <div class="dialog-row"><span class="dialog-label">글꼴</span><label class="dialog-checkbox"><input id="sheet-ts-bold" type="checkbox" /> 굵게</label><label class="dialog-checkbox"><input id="sheet-ts-italic" type="checkbox" /> 기울임꼴</label></div>
+          <div class="dialog-row"><span class="dialog-label">채우기</span><div id="sheet-ts-fill-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="채우기 색" aria-label="채우기 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-ts-fill" type="color" value="#ffffff" aria-label="채우기 색" /><div id="sheet-ts-fill-palette" class="sb-hl-palette" hidden></div></div><div id="sheet-ts-fill-theme" class="sb-hl-palette-row sheet-ts-theme-row" role="group" aria-label="테마 채우기 색"></div></div>
+          <div class="dialog-row"><span class="dialog-label">글자 색</span><div id="sheet-ts-font-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글자 색" aria-label="글자 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-ts-font" type="color" value="#000000" aria-label="글자 색" /><div id="sheet-ts-font-palette" class="sb-hl-palette" hidden></div></div><div id="sheet-ts-font-theme" class="sb-hl-palette-row sheet-ts-theme-row" role="group" aria-label="테마 글자 색"></div></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-ts-border-line">테두리</label><select id="sheet-ts-border-line" class="sb-combo dialog-select"><option value="thin">가는 실선</option><option value="medium">중간 실선</option><option value="thick">굵은 실선</option><option value="double">이중 실선</option></select><div id="sheet-ts-border-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="테두리 색" aria-label="테두리 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-ts-border" type="color" value="#000000" aria-label="테두리 색" /><div id="sheet-ts-border-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><div class="sheet-border-positions" role="group" aria-label="테두리 위치"><button type="button" aria-pressed="false" data-ts-edge="t">위쪽</button><button type="button" aria-pressed="false" data-ts-edge="b">아래쪽</button><button type="button" aria-pressed="false" data-ts-edge="l">왼쪽</button><button type="button" aria-pressed="false" data-ts-edge="r">오른쪽</button><button type="button" aria-pressed="false" data-ts-edge="h">가로 안쪽</button><button type="button" aria-pressed="false" data-ts-edge="v">세로 안쪽</button></div></div>
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><div id="sheet-ts-preview" class="sheet-table-swatch sheet-ts-preview" role="img" aria-label="새 표 스타일 미리 보기"></div></div>
+          <p id="sheet-ts-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-ts-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-table-dedupe-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-dedupe-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-dedupe-dialog-title">중복된 항목 제거</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label">열 선택</span><div class="dialog-btn-group"><button id="btn-sheet-dedupe-all" type="button" class="dialog-btn">모두 선택</button><button id="btn-sheet-dedupe-none" type="button" class="dialog-btn">선택 취소</button></div></div>
+          <ul id="sheet-dedupe-columns" class="dialog-list sheet-check-list" aria-label="중복 항목 검사 열"></ul>
+          <p id="sheet-dedupe-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-dedupe-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-slicer-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-slicer-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-slicer-dialog-title">슬라이서 삽입</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <ul id="sheet-slicer-columns" class="dialog-list sheet-check-list" aria-label="슬라이서 열"></ul>
+          <p id="sheet-slicer-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-slicer-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1957,6 +2012,9 @@
     <script src="./sheet-hidden-rows.js"></script>
     <script src="./sheet-table-bake.js"></script>
     <script src="./sheet-table-totals.js"></script>
+    <script src="./sheet-table-style-ui.js"></script>
+    <script src="./sheet-table-dedupe.js"></script>
+    <script src="./sheet-slicer.js"></script>
     <script src="./sheet-table-ui.js"></script>
     <script src="./sheet-view-state.js"></script>
     <script src="./sheet-protect.js"></script>

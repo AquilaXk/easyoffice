@@ -80,6 +80,8 @@ pub(crate) mod xlsx_protect;
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_sheet_writer.rs"]
 pub(crate) mod xlsx_sheet_writer;
+#[path = "xlsx_slicers.rs"]
+pub(crate) mod xlsx_slicers;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
 #[path = "xlsx_view.rs"]
@@ -110,6 +112,11 @@ pub use table_style::{
 };
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
+pub use xlsx_slicers::{
+    TableSlicer, MAX_SLICERS_PER_TABLE, MAX_SLICERS_TOTAL, MAX_SLICER_DIM_PX, MAX_SLICER_POS_PX,
+    MIN_SLICER_DIM_PX,
+};
+pub use xlsx_view::DEFAULT_THEME;
 
 use crate::cell_type::{pack_cell_pos, CellValueKind};
 use crate::pages_proto::FastU64Map;
@@ -447,6 +454,9 @@ pub struct SheetStyling {
     pub unlocked_cols: Vec<(u32, u32)>,
     /// The protection of the workbook structure (PD-216), carried by the first sheet like the names.
     pub workbook_protect: Option<WorkbookProtection>,
+    /// Non-default 12-slot SpreadsheetML theme palette of the workbook (`xl/theme/theme1.xml`, PD-242),
+    /// carried by the first sheet like `defined_names` and `workbook_protect`.
+    pub workbook_theme: Option<[u32; 12]>,
     /// The arrays that spill, by anchor (PD-217).
     pub spills: Vec<SpillRef>,
     /// The hyperlinks of the cells (PD-218).
@@ -512,6 +522,7 @@ impl SheetStyling {
             && self.unlocked_rows.is_empty()
             && self.unlocked_cols.is_empty()
             && self.workbook_protect.is_none()
+            && self.workbook_theme.is_none()
             && self.spills.is_empty()
             && self.links.is_empty()
             && self.tables.is_empty()

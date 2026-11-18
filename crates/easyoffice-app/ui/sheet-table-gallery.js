@@ -12,6 +12,7 @@
     ["dark", "어둡게"],
   ];
   const CUSTOM_LABEL = "사용자 지정";
+  const NEW_STYLE_LABEL = "새 표 스타일…";
   const CLEAR_LABEL = "지우기";
   const KIND_LABELS = { Light: "밝게", Medium: "보통", Dark: "어둡게" };
   const PER_ROW = 7;
@@ -24,7 +25,7 @@
     return m ? "표 스타일 " + KIND_LABELS[m[1]] + " " + m[2] : name;
   }
 
-  function createSheetTableGallery({ document, onPick, onClear }) {
+  function createSheetTableGallery({ document, onPick, onClear, onNewStyle }) {
     const style = host.__EASYOFFICE_SHEET_TABLE_STYLE__;
     const panel = document.getElementById("sheet-table-gallery");
     let opener = null;
@@ -89,6 +90,17 @@
       if (names.length > 0) panel.appendChild(group(CUSTOM_LABEL, names, options, custom));
       const actions = document.createElement("div");
       actions.className = "sb-hl-palette-actions";
+      if (typeof onNewStyle === "function") {
+        const makeNew = document.createElement("button");
+        makeNew.type = "button";
+        makeNew.dataset.tableStyleNew = "1";
+        makeNew.textContent = NEW_STYLE_LABEL;
+        makeNew.addEventListener("click", () => {
+          close();
+          onNewStyle();
+        });
+        actions.appendChild(makeNew);
+      }
       const clear = document.createElement("button");
       clear.type = "button";
       clear.textContent = CLEAR_LABEL;

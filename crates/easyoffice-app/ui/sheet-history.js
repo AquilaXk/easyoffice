@@ -20,6 +20,8 @@
     sheetColumnWidths: (ctx) => ctx.controller().getColumnWidths(),
     sheetRules: (ctx) => ctx.controller().getSheetRules(),
     sheetLayout: () => host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
+    workbookTheme: () => host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme() ?? null,
+    customTableStyles: () => host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getCustomStyles() ?? {},
     definedNames: () => host.__EASYOFFICE_SHEET_NAMES__.getAll(),
     sheetOrder: (ctx) => host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(ctx.sheetDataStore)),
   };

@@ -1,9 +1,13 @@
 // 참조 구현 (reference implementation): Univer (https://github.com/dream-num/univer, Apache-2.0, Copyright 2023-present DreamNum
 // Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9): `packages/sheets-table/src/commands/commands/add-sheet-table.command.ts`
 // lines 54-70, the default name of a new table: the index starts at the number of tables plus one and moves past every name with the
-// prefix and a number at or over it. Source and license text: `THIRD_PARTY_NOTICES.md`.
-// Modifications: a name the numbering lands on that is taken moves on to the next number; the rest of the plans (the range, the
-// header cells, the refusals, the growth over typed cells) follow the spreadsheet program and are written here.
+// prefix and a number at or over it; and IronCalc (https://github.com/ironcalc/IronCalc, MIT OR Apache-2.0, Copyright 2023-present
+// IronCalc contributors, commit 6dc9e8bae4b8d066276f399de7b3e1cf991c220b): `base/src/functions/spill_functions.rs` lines 60-117
+// (`fn_unique`: typed equality key over blank, canonical f64, boolean, error and case-folded text, keeping first occurrence).
+// Source and license text: `THIRD_PARTY_NOTICES.md`.
+// Modifications: a name the numbering lands on that is taken moves on to the next number; `planDedupe` hashes the selected columns'
+// typed keys in a single O(R * K) pass with 32-bit FNV-1a buckets and compacts only the table's own columns; the rest of the plans
+// follow the spreadsheet program and are written here.
 //
 
 (function (host) {
@@ -267,6 +271,16 @@
       if (hb.length) next.hiddenButtons = hb;
       else delete next.hiddenButtons;
     }
+    if (Array.isArray(next.slicers)) {
+      const sl = header
+        ? next.slicers
+            .map((s) => ({ ...s, abs: old.c1 + s.col }))
+            .filter((s) => s.abs >= box.c1 && s.abs <= box.c2)
+            .map(({ abs, ...rest }) => ({ ...rest, col: abs - box.c1 }))
+        : [];
+      if (sl.length) next.slicers = sl;
+      else delete next.slicers;
+    }
     delete next.filterHidden;
     return { table: next, headerWrites };
   }
@@ -317,9 +331,110 @@
     return null;
   }
 
+  // ---- 중복된 항목 제거 (PD-242) ------------------------------------------------------------------------------------------
+  const MAX_DEDUPE_ROWS = 200000;
+  const ERROR_LITERALS = new Set(["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#GETTING_DATA", "#SPILL!", "#CALC!"]);
+
+  function fnv1aStep(h, str) {
+    let x = h >>> 0;
+    for (let i = 0; i < str.length; i += 1) x = Math.imul(x ^ str.charCodeAt(i), 0x01000193) >>> 0;
+    return x;
+  }
+
+  function cellDedupeKey(entry) {
+    const raw = String(entry?.value ?? "");
+    if (raw === "") return [0, ""];
+    const t = entry?.t || "";
+    if (t === "e" || (!t && ERROR_LITERALS.has(raw.toUpperCase()))) return [4, raw.toUpperCase()];
+    if (t === "b" || (!t && /^(?:true|false)$/i.test(raw))) return [3, raw.length === 4 ? "1" : "0"];
+    if (t !== "s") {
+      const norm = entry?.style?.numFmt ? host.__EASYOFFICE_SHEET_UTILS__?.normalizeFormattedNumericCell?.(raw) ?? raw : raw;
+      const trimmed = norm.trim();
+      if (trimmed !== "") {
+        const n = Number(trimmed);
+        if (Number.isFinite(n)) return [1, String(n === 0 ? 0 : n)];
+      }
+    }
+    return [2, raw.toLowerCase()];
+  }
+
+  function sameTuple(a, b) {
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // Single-pass O(R * K) duplicate scan over `cols` (0-based table column offsets). Keeps first occurrence.
+  function planDedupe({ table, cols, ctx }) {
+    const uniqueCols = [...new Set((cols || []).filter((c) => Number.isInteger(c) && c >= 0 && c < table.columns.length))].sort((a, b) => a - b);
+    if (uniqueCols.length === 0) return { error: "열을 하나 이상 선택" };
+    const b = ctx.boxOf(table);
+    const header = table.header !== false;
+    const totals = table.totals === true;
+    const d1 = b.r1 + (header ? 1 : 0);
+    const d2 = b.r2 - (totals ? 1 : 0);
+    const totalRows = Math.max(0, d2 - d1 + 1);
+    if (totalRows > MAX_DEDUPE_ROWS) return { error: "중복 제거 범위는 200,000행까지" };
+    if (totalRows <= 1) return { removed: 0, remaining: totalRows, table: null, rowMoves: [], clearFrom: 0, box: b };
+
+    const kLen = uniqueCols.length * 2;
+    const buckets = new Map();
+    const keptRows = [];
+    const tuple = new Array(kLen);
+
+    for (let r = d1; r <= d2; r += 1) {
+      let h = 0x811c9dc5;
+      for (let j = 0; j < uniqueCols.length; j += 1) {
+        const [tag, val] = cellDedupeKey(ctx.cellAt(r, b.c1 + uniqueCols[j]));
+        tuple[j * 2] = tag;
+        tuple[j * 2 + 1] = val;
+        h = fnv1aStep(Math.imul(h ^ (tag + 17), 0x01000193) >>> 0, val);
+      }
+      const list = buckets.get(h);
+      if (list) {
+        let dup = false;
+        for (let m = 0; m < list.length; m += 1) {
+          if (sameTuple(list[m], tuple)) {
+            dup = true;
+            break;
+          }
+        }
+        if (dup) continue;
+        list.push(tuple.slice());
+      } else {
+        buckets.set(h, [tuple.slice()]);
+      }
+      keptRows.push(r);
+    }
+
+    const remaining = keptRows.length;
+    const removed = totalRows - remaining;
+    if (removed === 0) return { removed: 0, remaining, table: null, rowMoves: [], clearFrom: 0, box: b };
+
+    const rowMoves = [];
+    for (let i = 0; i < remaining; i += 1) {
+      const dst = d1 + i;
+      if (keptRows[i] !== dst) rowMoves.push([keptRows[i], dst]);
+    }
+    const newR2 = d1 + remaining - 1 + (totals ? 1 : 0);
+    if (totals) rowMoves.push([b.r2, newR2]);
+
+    const next = { ...structuredClone(table), range: rangeText(b.r1, b.c1, newR2, b.c2) };
+    delete next.filterHidden;
+    return {
+      removed,
+      remaining,
+      table: next,
+      rowMoves,
+      clearFrom: newR2 + 1,
+      box: b,
+      reapply: Array.isArray(next.filter) && next.filter.length > 0,
+    };
+  }
+
   host.__EASYOFFICE_SHEET_TABLE_OPS__ = {
     MESSAGES,
     MAX_TABLES,
+    MAX_DEDUPE_ROWS,
     DEFAULT_STYLE,
     parseRange,
     defaultName,
@@ -327,6 +442,8 @@
     planCreate,
     planResize,
     planExpand,
+    planDedupe,
+    cellDedupeKey,
     rangeText,
     straddleConflict,
     normalizeCalc,

@@ -44,7 +44,21 @@
       return Number.isFinite(r1) ? rules.formatRanges([{ row0: r1, col0: c1, row1: r0, col1: c0 }]) : "";
     }
 
+    function tableSourceBox(raw) {
+      const trimmed = String(raw || "").trim();
+      if (!trimmed) return null;
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const table = layoutApi?.tablesOf(getActiveSheetName()).find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+      if (!table) return null;
+      const b = layoutApi.tableBox(table);
+      const r2 = b.r2 - (table.totals === true ? 1 : 0);
+      if (r2 < b.r1) return null;
+      return { box: { row0: b.r1 - 1, col0: b.c1 - 1, row1: r2 - 1, col1: b.c2 - 1 }, table };
+    }
+
     function pivotBox() {
+      const fromTable = tableSourceBox(val("sheet-pivot-range"));
+      if (fromTable) return fromTable.box;
       const boxes = rules.parseRanges(val("sheet-pivot-range"));
       return boxes && boxes.length === 1 ? boxes[0] : null;
     }
@@ -55,13 +69,15 @@
     }
 
     function refreshPivotFields() {
-      const box = pivotBox();
+      const fromTable = tableSourceBox(val("sheet-pivot-range"));
+      const box = fromTable ? fromTable.box : pivotBox();
       const sheet = getActiveSheetName();
       const width = box ? Math.min(box.col1 - box.col0 + 1, PIVOT_MAX_FIELDS) : 0;
       const header = checked("sheet-pivot-header");
       const names = [];
       for (let i = 0; i < width; i += 1) {
-        const text = header ? cellText(sheet, box.row0, box.col0 + i).trim() : "";
+        const tableCol = fromTable && header ? fromTable.table.columns?.[i] || "" : "";
+        const text = tableCol || (header ? cellText(sheet, box.row0, box.col0 + i).trim() : "");
         names.push(text || "열 " + rules.refOf(0, box.col0 + i).replace(/\d+$/, ""));
       }
       const fill = (id, withNone) => {
@@ -233,10 +249,31 @@
       closeDialog("sheet-pivot-dialog");
     }
 
+    function openPivotDialogForTable(table) {
+      if (!table) return false;
+      if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(getActiveSheetName(), "pivotTables") === false) return false;
+      ensurePivotControls();
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const b = layoutApi.tableBox(table);
+      const dataRows = b.r2 - b.r1 + 1 - (table.header === false ? 0 : 1) - (table.totals === true ? 1 : 0);
+      if (dataRows < 1) {
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "요약할 데이터 행이 없음";
+        return false;
+      }
+      setVal("sheet-pivot-range", table.name);
+      setChecked("sheet-pivot-header", table.header !== false);
+      refreshPivotFields();
+      note("sheet-pivot-status", "");
+      return openDialog("sheet-pivot-dialog");
+    }
+
     // The combos have their placeholder from the start, however the dialog gets opened.
     refreshPivotFields();
 
-    return { openPivotDialog, pivotCells };
+    const api = { openPivotDialog, openPivotDialogForTable, pivotCells };
+    host.__EASYOFFICE_SHEET_PIVOT__ = api;
+    return api;
   }
 
   host.__EASYOFFICE_CREATE_SHEET_PIVOT_UI__ = createSheetPivotUi;

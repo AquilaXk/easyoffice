@@ -105,10 +105,14 @@
       return SCOPE_BY_FORMAT[token] || "DOC";
     }
 
-    // The `workbookProtect` field of a sheet save: only a workbook whose structure is protected has one (PD-216).
+    // The `workbookProtect` and `workbookTheme` fields of a sheet save (PD-216, PD-242).
     function workbookProtectField() {
       const protect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
-      return protect ? { workbookProtect: protect } : {};
+      const theme = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme();
+      return {
+        ...(protect ? { workbookProtect: protect } : {}),
+        ...(theme ? { workbookTheme: theme } : {}),
+      };
     }
 
     // Structured save content (PD-073): `blocks` for DOC/HWP/PDF, every sheet for SHEET, `slides`

@@ -58,17 +58,20 @@ fn count_flag(attrs: &Attrs<'_>, name: &str, default: bool) -> Option<bool> {
 /// The table of one part, or `None` when the part is not a table this model can hold.
 #[cfg(test)]
 fn parse_table(xml: &str) -> Option<SheetTable> {
-    parse_table_with(xml, &[])
+    parse_table_with(xml, &[]).map(|(t, _)| t)
 }
 
-/// [`parse_table`] with the colours of the workbook's differential formats, which a colour filter names.
-fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
+/// [`parse_table`] with the colours of the workbook's differential formats, which a colour filter names,
+/// plus the optional 1-based `<table id="...">` attribute for `[MS-XLSX]` `tableSlicerCache` resolution.
+fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<(SheetTable, Option<u32>)> {
     let mut reader = XmlReader::with_budget(xml, MAX_TABLE_PART_EVENTS);
     let mut table: Option<SheetTable> = None;
+    let mut table_id: Option<u32> = None;
     let mut filter = FilterScan::new(dxfs);
     let mut has_filter = false;
     let mut columns: Vec<String> = Vec::new();
     let mut calc_formulas: Vec<Option<String>> = Vec::new();
+    let mut slicers = Vec::new();
     let mut in_calc_formula = false;
     let mut calc_buf = String::new();
     let mut max_columns = 0usize;
@@ -102,6 +105,7 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
         let XmlEvent::Start { name, attrs } = event else {
             continue;
         };
+        let local = name.rsplit(':').next().unwrap_or(name);
         match name {
             "table" if table.is_none() => {
                 let range = attrs
@@ -109,6 +113,7 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
                     .filter(|r| r.contains(':'))
                     .and_then(|r| CellBox::parse(&r))?;
                 let name = attrs.get("displayName").or_else(|| attrs.get("name"))?;
+                table_id = attrs.get("id").and_then(|s| s.trim().parse::<u32>().ok());
                 let mut t = SheetTable::new(name.into_owned(), range);
                 t.header = count_flag(&attrs, "headerRowCount", true)?;
                 t.totals = count_flag(&attrs, "totalsRowCount", false)?;
@@ -139,6 +144,16 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
                 t.row_stripes = flag(&attrs, "showRowStripes");
                 t.column_stripes = flag(&attrs, "showColumnStripes");
             }
+            _ if local == "slicer" && max_columns > 0 => {
+                if slicers.len() >= crate::sheet_styling::xlsx_slicers::MAX_SLICERS_PER_TABLE {
+                    return None;
+                }
+                if let Some(s) =
+                    crate::sheet_styling::xlsx_slicers::parse_eo_slicer(&attrs, max_columns as u32)
+                {
+                    slicers.push(s);
+                }
+            }
             _ => {}
         }
     }
@@ -150,6 +165,9 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
     if calc_formulas.iter().any(Option::is_some) {
         table.calculated_columns = calc_formulas;
     }
+    if table.header && !slicers.is_empty() {
+        table.slicers = slicers;
+    }
     if has_filter && table.header {
         let parsed = filter.finish_unbounded();
         table.hidden_buttons = parsed
@@ -158,7 +176,7 @@ fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
             .unwrap_or_default();
         table.filter = Some(parsed.map(|f| f.columns).unwrap_or_default());
     }
-    Some(table)
+    Some((table, table_id))
 }
 
 /// The directory of a part and a relationship target resolved against it: an absolute target
@@ -260,7 +278,9 @@ fn table_targets(
 }
 
 /// Reads the tables of the worksheet part `part_path` into `tables`; returns how many it turned away.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn read_sheet_tables(
+    sheet_idx: usize,
     sheet_xml: &str,
     part_path: &str,
     entries: &HashMap<&str, &[u8]>,
@@ -279,23 +299,31 @@ pub(crate) fn read_sheet_tables(
     let mut rejected = 0u32;
     for id in &ids {
         // A table part is one table of one sheet: a part listed again is turned away without being read.
-        let table = targets
+        let parsed = targets
             .get(id)
             .and_then(|target| resolve_target(dir, target))
             .filter(|path| registry.claim_part(path))
             .and_then(|path| entries.get(path.as_str()).copied())
             .and_then(|data| std::str::from_utf8(data).ok())
             .and_then(|xml| parse_table_with(xml, dxfs))
-            .map(|mut table| {
+            .map(|(mut table, table_id)| {
                 table.style_def = table
                     .style
                     .as_ref()
                     .and_then(|name| styles.get(name))
                     .cloned();
-                table
+                (table, table_id)
             });
-        let admitted = match table {
-            Some(table) => registry.admit(tables, table)?,
+        let admitted = match parsed {
+            Some((table, table_id)) => {
+                let ok = registry.admit(tables, table)?;
+                if ok {
+                    if let Some(tid) = table_id {
+                        registry.table_ids.push((tid, sheet_idx, tables.len() - 1));
+                    }
+                }
+                ok
+            }
             None => {
                 registry.note_turned_away()?;
                 false
@@ -468,12 +496,14 @@ fn table_xml(
     let bit = |on: bool| u8::from(on);
     let _ = write!(
         out,
-        " showFirstColumn=\"{}\" showLastColumn=\"{}\" showRowStripes=\"{}\" showColumnStripes=\"{}\"/></table>",
+        " showFirstColumn=\"{}\" showLastColumn=\"{}\" showRowStripes=\"{}\" showColumnStripes=\"{}\"/>",
         bit(table.first_column),
         bit(table.last_column),
         bit(table.row_stripes),
         bit(table.column_stripes)
     );
+    crate::sheet_styling::xlsx_slicers::write_table_slicers_ext(&mut out, &table.slicers);
+    out.push_str("</table>");
     out
 }
 
