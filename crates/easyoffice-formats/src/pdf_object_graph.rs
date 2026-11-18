@@ -47,6 +47,7 @@ pub(super) enum PdfObjValue {
     Null,
     Scalar,
     Int(i64),
+    Real(f64),
     Name(String),
     ParenStr(Vec<u8>),
     HexStr(Vec<u8>),
@@ -107,6 +108,17 @@ pub(super) fn resolve_int(
 ) -> Option<i64> {
     match resolve_value(val, objects)? {
         PdfObjValue::Int(n) => Some(*n),
+        _ => None,
+    }
+}
+
+pub(super) fn resolve_num(
+    val: &PdfObjValue,
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> Option<f64> {
+    match resolve_value(val, objects)? {
+        PdfObjValue::Int(n) => Some(*n as f64),
+        PdfObjValue::Real(f) if f.is_finite() => Some(*f),
         _ => None,
     }
 }

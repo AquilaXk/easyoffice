@@ -83,7 +83,7 @@
 
 ### 2.5 시작 화면·변환·오프라인 스마트 도구 (`crates/easyoffice-app`)
 - **시작 화면과 창 세션**: 인수 없이 실행하면 홈 화면(`ui/home-screen.js`: 새 문서 6종·열기·최근 문서 카드)이 뜨고, 문서 하나는 창 하나입니다(`PD-088`). 창별 편집 상태는 `ui/workspace-session.js`가 맡고 모듈별 편집기 패널은 WebUI `ui/`에 있습니다.
-- **포맷 변환**: IPC 명령 `convert_document_format`(`convert_ipc.rs`)이 20종 포맷 사이를 변환합니다.
+- **포맷 변환 및 구조화 리드백(`PD-248`)**: IPC 명령 `convert_document_format`(`convert_ipc.rs`)이 20종 포맷과 Pages 사이를 변환하며 `"action": "inspect"`(`"readback"`)와 `evaluate_sheet` `"action"`·`"sessionAction": "inspect"` 및 `easyoffice-app --inspect <FILE>`(`--sheet`·`--range`·`--max-items`) CLI가 시트 A1 범위·수식·표시 형식·동적 배열·오류 히스토그램·데이터 유효성 위반, 문서·Pages·한글 블록·개요·표 수식·내부 북마크·대체 텍스트 무결성, 슬라이드 밀도, PDF 쪽 규격·북마크·링크·주석·대화형 양식 수를 단일 패스 JSON으로 점검합니다.
 - **100% 오프라인 스마트 보조 (`LocalSmartAssistant`, `smart_tools.rs`)**: 외부 서버 통신 없이 핵심 문장 요약(`summarize_document`), 문장 진단(`diagnose_writing`), 조치 항목 추출(`extract_action_items`), LCS 문서 비교(`diff_documents_lcs`)를 제공합니다.
 - **PII 비식별화 (`DocumentSecurityAuditor`)**: `scan_and_scrub_pii`·`scan_and_scrub_pii_with_metadata`가 주민등록번호·외국인등록번호·연락처·이메일·신용카드(Luhn 검증)·은행 계좌·여권·운전면허·사업자등록번호를 마스킹하고, 메타데이터 항목을 제거한 개수를 보고합니다.
 

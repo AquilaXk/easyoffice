@@ -193,8 +193,12 @@ fn parse_pdf_token(bytes: &[u8], p: usize, limit: usize, depth: usize) -> PdfVal
         .iter()
         .all(|b| b.is_ascii_digit() || matches!(b, b'+' | b'-' | b'.'))
         && tok.iter().any(u8::is_ascii_digit);
-    if looks_numeric && tok_str.parse::<f64>().is_ok_and(f64::is_finite) {
-        return Ok(Some((PdfObjValue::Scalar, k)));
+    if looks_numeric {
+        if let Ok(v) = tok_str.parse::<f64>() {
+            if v.is_finite() {
+                return Ok(Some((PdfObjValue::Real(v), k)));
+            }
+        }
     }
     Err(())
 }

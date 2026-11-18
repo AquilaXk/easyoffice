@@ -8,24 +8,32 @@ use std::fmt;
 /// Default loopback port for the WebUI server.
 pub const DEFAULT_SERVE_PORT: u16 = 8787;
 
+/// Upper bound on `--max-items` for `--inspect` (`PD-248`).
+pub const MAX_INSPECT_ITEMS_ARG: usize = 10_000;
+
 /// Usage text printed by `--help` / `-h`.
 pub const CLI_USAGE: &str = "\
 Usage: easyoffice-app [OPTIONS]
 
 Options:
-  --serve [PORT]   [Developer/testing only - not for end users / 개발·테스트 전용]
-                   Serve the WebUI on http://127.0.0.1:PORT (1-65535).
-                   Without PORT the default 8787 is used and, if busy,
-                   8788-8800 are tried. An explicit PORT never falls back.
-  --open           Open the WebUI in the default browser (implies --serve;
-                   developer/testing only / 개발·테스트 전용).
-  --self-test      Run the engine integrity self-test (alias: --doctor).
-  --bootstrap      Print the workspace bootstrap JSON and exit (alias: --headless).
-  -h, --help       Print this help and exit.
+  --serve [PORT]     [Developer/testing only - not for end users / 개발·테스트 전용]
+                     Serve the WebUI on http://127.0.0.1:PORT (1-65535).
+                     Without PORT the default 8787 is used and, if busy,
+                     8788-8800 are tried. An explicit PORT never falls back.
+  --open             Open the WebUI in the default browser (implies --serve;
+                     developer/testing only / 개발·테스트 전용).
+  --inspect <FILE>   Print structured readback & data-check JSON for FILE and exit
+                     (alias: --readback <FILE>).
+  --sheet <NAME>     Target sheet name for --inspect on spreadsheet files.
+  --range <A1[:B2]>  Target A1 cell/range (e.g. A1:D20 or Sheet1!A1:D20) for --inspect.
+  --max-items <N>    Maximum items returned per readback collection (1-10000, default 1000).
+  --self-test        Run the engine integrity self-test (alias: --doctor).
+  --bootstrap        Print the workspace bootstrap JSON and exit (alias: --headless).
+  -h, --help         Print this help and exit.
 
 End users: install the EasyOffice desktop app; --serve is for development and
 automated UI verification only. / 일반 사용자는 설치형 앱을 사용하세요.
-Opening documents from the command line is not supported yet.";
+Opening documents from the command line is not supported yet (use --inspect <FILE> for JSON readback).";
 
 /// Which port the WebUI server should bind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +57,17 @@ impl ServePort {
     }
 }
 
+/// Options for `--inspect <FILE>` / `--readback <FILE>` (`PD-248`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectArgs {
+    pub path: String,
+    pub sheet: Option<String>,
+    pub range: Option<String>,
+    pub max_items: Option<usize>,
+}
+
 /// Fully parsed command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
     Help,
     SelfTest,
@@ -58,6 +75,7 @@ pub enum CliCommand {
         port: ServePort,
         open_browser: bool,
     },
+    Inspect(InspectArgs),
     Bootstrap,
     /// No arguments: the caller picks WebUI or bootstrap based on platform/environment.
     Implicit,
@@ -67,6 +85,10 @@ pub enum CliCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
     InvalidPort(String),
+    InvalidMaxItems(String),
+    MissingOptionValue(String),
+    InspectModifierWithoutTarget(String),
+    ConflictingOptions(String),
     UnknownOption(String),
     UnsupportedFileArgument(String),
     DuplicateOption(String),
@@ -79,11 +101,22 @@ impl fmt::Display for CliError {
                 f,
                 "invalid port '{value}' for --serve: expected a number from 1 to 65535"
             ),
+            CliError::InvalidMaxItems(value) => write!(
+                f,
+                "invalid value '{value}' for --max-items: expected a number from 1 to {MAX_INSPECT_ITEMS_ARG}"
+            ),
+            CliError::MissingOptionValue(option) => {
+                write!(f, "option '{option}' requires a value")
+            }
+            CliError::InspectModifierWithoutTarget(option) => {
+                write!(f, "option '{option}' requires --inspect <FILE>")
+            }
+            CliError::ConflictingOptions(detail) => write!(f, "conflicting options: {detail}"),
             CliError::UnknownOption(option) => write!(f, "unknown option '{option}'"),
             CliError::UnsupportedFileArgument(path) => write!(
                 f,
                 "opening files from the command line is not supported yet: '{path}' \
-                 (start the WebUI with --serve and open the file from the workspace)"
+                 (start the WebUI with --serve and open the file from the workspace, or use --inspect '{path}')"
             ),
             CliError::DuplicateOption(option) => {
                 write!(f, "option '{option}' was given more than once")
@@ -101,12 +134,46 @@ fn parse_port(value: &str) -> Result<u16, CliError> {
     }
 }
 
+fn parse_max_items(value: &str) -> Result<usize, CliError> {
+    match value.parse::<usize>() {
+        Ok(n) if (1..=MAX_INSPECT_ITEMS_ARG).contains(&n) => Ok(n),
+        _ => Err(CliError::InvalidMaxItems(value.to_string())),
+    }
+}
+
+fn take_option_value<S: AsRef<str>>(
+    args: &[S],
+    index: &mut usize,
+    option_name: &str,
+) -> Result<String, CliError> {
+    let Some(next) = args.get(*index + 1).map(S::as_ref) else {
+        return Err(CliError::MissingOptionValue(option_name.to_string()));
+    };
+    if next.is_empty() || (next.starts_with('-') && next.len() > 1) {
+        return Err(CliError::MissingOptionValue(option_name.to_string()));
+    }
+    *index += 1;
+    Ok(next.to_string())
+}
+
+fn take_inline_value(raw: &str, prefix: &str, option_name: &str) -> Result<String, CliError> {
+    let val = &raw[prefix.len()..];
+    if val.is_empty() {
+        return Err(CliError::MissingOptionValue(option_name.to_string()));
+    }
+    Ok(val.to_string())
+}
+
 /// Parses the arguments that follow the program name.
 pub fn parse_cli_args<S: AsRef<str>>(args: &[S]) -> Result<CliCommand, CliError> {
     let mut self_test = false;
     let mut serve: Option<ServePort> = None;
     let mut open_browser = false;
     let mut bootstrap = false;
+    let mut inspect_path: Option<String> = None;
+    let mut inspect_sheet: Option<String> = None;
+    let mut inspect_range: Option<String> = None;
+    let mut inspect_max_items: Option<usize> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -129,11 +196,67 @@ pub fn parse_cli_args<S: AsRef<str>>(args: &[S]) -> Result<CliCommand, CliError>
                     _ => serve = Some(ServePort::Default),
                 }
             }
+            "--inspect" | "--readback" => {
+                if inspect_path.is_some() {
+                    return Err(CliError::DuplicateOption("--inspect".to_string()));
+                }
+                inspect_path = Some(take_option_value(args, &mut index, arg)?);
+            }
+            "--sheet" => {
+                if inspect_sheet.is_some() {
+                    return Err(CliError::DuplicateOption("--sheet".to_string()));
+                }
+                inspect_sheet = Some(take_option_value(args, &mut index, "--sheet")?);
+            }
+            "--range" => {
+                if inspect_range.is_some() {
+                    return Err(CliError::DuplicateOption("--range".to_string()));
+                }
+                inspect_range = Some(take_option_value(args, &mut index, "--range")?);
+            }
+            "--max-items" => {
+                if inspect_max_items.is_some() {
+                    return Err(CliError::DuplicateOption("--max-items".to_string()));
+                }
+                let val = take_option_value(args, &mut index, "--max-items")?;
+                inspect_max_items = Some(parse_max_items(&val)?);
+            }
             _ if arg.starts_with("--serve=") => {
                 if serve.is_some() {
                     return Err(CliError::DuplicateOption("--serve".to_string()));
                 }
                 serve = Some(ServePort::Explicit(parse_port(&arg["--serve=".len()..])?));
+            }
+            _ if arg.starts_with("--inspect=") => {
+                if inspect_path.is_some() {
+                    return Err(CliError::DuplicateOption("--inspect".to_string()));
+                }
+                inspect_path = Some(take_inline_value(arg, "--inspect=", "--inspect")?);
+            }
+            _ if arg.starts_with("--readback=") => {
+                if inspect_path.is_some() {
+                    return Err(CliError::DuplicateOption("--inspect".to_string()));
+                }
+                inspect_path = Some(take_inline_value(arg, "--readback=", "--readback")?);
+            }
+            _ if arg.starts_with("--sheet=") => {
+                if inspect_sheet.is_some() {
+                    return Err(CliError::DuplicateOption("--sheet".to_string()));
+                }
+                inspect_sheet = Some(take_inline_value(arg, "--sheet=", "--sheet")?);
+            }
+            _ if arg.starts_with("--range=") => {
+                if inspect_range.is_some() {
+                    return Err(CliError::DuplicateOption("--range".to_string()));
+                }
+                inspect_range = Some(take_inline_value(arg, "--range=", "--range")?);
+            }
+            _ if arg.starts_with("--max-items=") => {
+                if inspect_max_items.is_some() {
+                    return Err(CliError::DuplicateOption("--max-items".to_string()));
+                }
+                let val = take_inline_value(arg, "--max-items=", "--max-items")?;
+                inspect_max_items = Some(parse_max_items(&val)?);
             }
             _ if arg.starts_with('-') && arg.len() > 1 => {
                 return Err(CliError::UnknownOption(arg.to_string()));
@@ -141,6 +264,39 @@ pub fn parse_cli_args<S: AsRef<str>>(args: &[S]) -> Result<CliCommand, CliError>
             _ => return Err(CliError::UnsupportedFileArgument(arg.to_string())),
         }
         index += 1;
+    }
+
+    if inspect_path.is_none() {
+        if inspect_sheet.is_some() {
+            return Err(CliError::InspectModifierWithoutTarget(
+                "--sheet".to_string(),
+            ));
+        }
+        if inspect_range.is_some() {
+            return Err(CliError::InspectModifierWithoutTarget(
+                "--range".to_string(),
+            ));
+        }
+        if inspect_max_items.is_some() {
+            return Err(CliError::InspectModifierWithoutTarget(
+                "--max-items".to_string(),
+            ));
+        }
+    }
+
+    if let Some(path) = inspect_path {
+        if self_test || serve.is_some() || open_browser || bootstrap {
+            return Err(CliError::ConflictingOptions(
+                "--inspect cannot be combined with --serve, --open, --self-test, or --bootstrap"
+                    .to_string(),
+            ));
+        }
+        return Ok(CliCommand::Inspect(InspectArgs {
+            path,
+            sheet: inspect_sheet,
+            range: inspect_range,
+            max_items: inspect_max_items,
+        }));
     }
 
     if self_test {
@@ -175,6 +331,7 @@ mod tests {
         assert_eq!(parse(&["-h"]), Ok(CliCommand::Help));
         assert_eq!(parse(&["--serve", "8787", "--help"]), Ok(CliCommand::Help));
         assert!(CLI_USAGE.contains("--serve [PORT]"));
+        assert!(CLI_USAGE.contains("--inspect <FILE>"));
         assert!(CLI_USAGE.contains("--self-test"));
     }
 
@@ -285,6 +442,59 @@ mod tests {
         );
         let empty: [&str; 0] = [];
         assert_eq!(parse_cli_args(&empty), Ok(CliCommand::Implicit));
+    }
+
+    #[test]
+    fn inspect_and_readback_flags_parse_and_reject_invalid_combinations() {
+        assert_eq!(
+            parse(&[
+                "--inspect",
+                "budget.xlsx",
+                "--sheet",
+                "Summary",
+                "--range",
+                "A1:D10",
+                "--max-items",
+                "250"
+            ]),
+            Ok(CliCommand::Inspect(InspectArgs {
+                path: "budget.xlsx".to_string(),
+                sheet: Some("Summary".to_string()),
+                range: Some("A1:D10".to_string()),
+                max_items: Some(250),
+            }))
+        );
+        assert_eq!(
+            parse(&["--readback=report.hwpx", "--max-items=50"]),
+            Ok(CliCommand::Inspect(InspectArgs {
+                path: "report.hwpx".to_string(),
+                sheet: None,
+                range: None,
+                max_items: Some(50),
+            }))
+        );
+        assert_eq!(
+            parse(&["--sheet", "S1"]),
+            Err(CliError::InspectModifierWithoutTarget(
+                "--sheet".to_string()
+            ))
+        );
+        assert_eq!(
+            parse(&["--inspect"]),
+            Err(CliError::MissingOptionValue("--inspect".to_string()))
+        );
+        assert_eq!(
+            parse(&["--inspect", "a.xlsx", "--max-items", "0"]),
+            Err(CliError::InvalidMaxItems("0".to_string()))
+        );
+        assert_eq!(
+            parse(&["--inspect", "a.xlsx", "--max-items", "10001"]),
+            Err(CliError::InvalidMaxItems("10001".to_string()))
+        );
+        assert!(matches!(
+            parse(&["--inspect", "a.xlsx", "--serve"]),
+            Err(CliError::ConflictingOptions(_))
+        ));
     }
 
     #[test]

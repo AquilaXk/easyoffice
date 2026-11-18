@@ -1,4 +1,5 @@
 use easyoffice_app::cli_args::{parse_cli_args, CliCommand, ServePort, CLI_USAGE};
+use easyoffice_app::inspect_cli::run_inspect_cli;
 use easyoffice_app::{run_self_test, serve_webui, EasyOfficeIpcRouter};
 use std::env;
 use std::process::ExitCode;
@@ -34,6 +35,16 @@ fn main() -> ExitCode {
             }
         },
         CliCommand::Serve { port, open_browser } => serve_webui(port, open_browser),
+        CliCommand::Inspect(ref inspect_args) => match run_inspect_cli(inspect_args) {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("Inspect error: {err}");
+                ExitCode::FAILURE
+            }
+        },
         CliCommand::Bootstrap => print_bootstrap(),
         CliCommand::Implicit => {
             let headless = env::var("EASYOFFICE_HEADLESS").is_ok() || env::var("CI").is_ok();

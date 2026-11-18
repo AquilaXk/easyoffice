@@ -170,7 +170,11 @@ impl EasyOfficeIpcRouter {
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
                 return Self::handle_source_file_request(&entries, b64, writers);
             }
-            if Self::optional_json_str(&entries, "action")? == Some("decode") {
+            let action = Self::optional_json_str(&entries, "action")?;
+            if crate::readback::is_inspect_action(action) {
+                return crate::readback::inspect_structured_entries(&entries);
+            }
+            if action == Some("decode") {
                 return Err(EasyOfficeError::InvalidArgument(
                     "decode 요청에는 sourceBase64가 필요합니다.".to_string(),
                 ));

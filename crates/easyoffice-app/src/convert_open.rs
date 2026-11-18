@@ -794,6 +794,10 @@ impl EasyOfficeIpcRouter {
                 .filter(|s| !s.is_empty()),
         };
         let action = Self::optional_json_str(entries, "action")?.unwrap_or("convert");
+        if crate::readback::is_inspect_action(Some(action)) {
+            let query = crate::readback::ReadbackQuery::from_entries(entries)?;
+            return crate::readback::inspect_source_bytes(&bytes, file_name, source_hint, &query);
+        }
         if action == "decode" {
             let max_rows = limit(entries, "maxRows")?;
             let max_cols = limit(entries, "maxCols")?;

@@ -1,5 +1,8 @@
 #[path = "pdf_object_graph.rs"]
 mod pdf_object_graph;
+#[path = "pdf_readback.rs"]
+mod pdf_readback;
+pub use pdf_readback::{PdfPageReadback, PdfReadbackReport};
 
 use crate::decode_budget::DecodeBudget;
 use crate::pdf_stream_parser::{

@@ -259,6 +259,66 @@ impl EasyOfficeIpcRouter {
             ))
         })
     }
+
+    pub(crate) fn handle_get_ribbon_category_commands(
+        payload: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let (mod_owned, cat_owned) = if trimmed.starts_with('{') {
+            let entries = Self::parse_rpc_json_object(trimmed)?;
+            let m = Self::optional_json_str(&entries, "module")?
+                .unwrap_or("DOC")
+                .trim()
+                .to_string();
+            let c = Self::optional_json_str(&entries, "category")?
+                .unwrap_or("home")
+                .trim()
+                .to_string();
+            (m, c)
+        } else {
+            let (m, c) = payload.split_once('|').unwrap_or(("DOC", trimmed));
+            (m.trim().to_string(), c.trim().to_string())
+        };
+        let module = match mod_owned.to_ascii_uppercase().as_str() {
+            "HWP" | "HWPX" => OfficeModuleKind::Hwp,
+            "SHEET" | "XLSX" | "XLS" => OfficeModuleKind::Sheet,
+            "SLIDE" | "PPTX" | "PPT" => OfficeModuleKind::Slide,
+            "PDF" => OfficeModuleKind::Pdf,
+            _ => OfficeModuleKind::Document,
+        };
+        let (category_key, category_label) = match cat_owned.to_ascii_lowercase().as_str() {
+            "home" | "홈" | "편집" => ("home", "홈"),
+            "insert" | "삽입" | "입력" => ("insert", "삽입"),
+            "layout" | "레이아웃" | "쪽·원고지" => ("layout", "레이아웃"),
+            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안"
+            | "표·개체" => ("formulasAndData", "수식·데이터"),
+            "module" | "modulespecific" | "모듈 전용" | "시트·차트" => {
+                ("moduleSpecific", "모듈 전용")
+            }
+            "review" | "검토" | "보안·도구" => ("review", "검토"),
+            "view" | "보기" => ("view", "보기"),
+            _ => ("home", "홈"),
+        };
+        let items: Vec<String> = RibbonCommandRouter::all_commands()
+            .into_iter()
+            .filter(|c| c.module == module && c.category_key == category_key)
+            .map(|c| {
+                format!(
+                    "{{\"id\":\"{}\",\"title\":\"{}\",\"shortcut\":\"{}\",\"category\":\"{}\"}}",
+                    Self::escape_json_str(&c.id),
+                    Self::escape_json_str(c.title),
+                    Self::escape_json_str(c.shortcut),
+                    Self::escape_json_str(category_label)
+                )
+            })
+            .collect();
+        Ok(format!(
+            "{{\"module\":\"{:?}\",\"category\":\"{}\",\"commands\":[{}]}}",
+            module,
+            Self::escape_json_str(&cat_owned),
+            items.join(",")
+        ))
+    }
 }
 
 #[cfg(test)]

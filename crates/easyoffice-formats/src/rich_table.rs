@@ -113,7 +113,7 @@ impl RichTable {
     }
 
     /// Validated, non-overlapping merged regions within the grid for writers.
-    pub(crate) fn validated_merges(&self) -> Vec<CellMerge> {
+    pub fn validated_merges(&self) -> Vec<CellMerge> {
         if self.merges.is_empty() {
             return Vec::new();
         }

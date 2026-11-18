@@ -840,6 +840,7 @@ impl EasyOfficeIpcRouter {
             "linkTarget" => Self::sheet_link_target(entries, owner),
             "sheetRefs" => Self::sheet_session_sheet_refs(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
+            "inspect" | "readback" => crate::readback::inspect_sheet_session(entries, owner),
             "pivot" => Self::sheet_pivot(entries),
             "format" => Self::sheet_format(entries),
             "filter" => Self::sheet_filter(entries),
