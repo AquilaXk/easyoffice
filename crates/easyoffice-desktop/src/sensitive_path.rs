@@ -27,9 +27,14 @@ fn path_segments(path: &Path) -> Vec<String> {
         .unwrap_or(&raw);
     trimmed
         .split(['/', '\\'])
-        .filter(|seg| !seg.is_empty() && !(seg.len() == 2 && seg.as_bytes()[1] == b':'))
+        .filter(|seg| !seg.is_empty() && !is_drive_prefix(seg))
         .map(str::to_owned)
         .collect()
+}
+
+/// A Windows drive segment such as `C:`.
+fn is_drive_prefix(seg: &str) -> bool {
+    seg.len() == 2 && seg.as_bytes()[1] == b':'
 }
 
 fn has_windows_startup_sequence(segments: &[String]) -> bool {
