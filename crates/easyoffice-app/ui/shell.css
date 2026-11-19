@@ -308,6 +308,7 @@
   #eo-print-root .eo-print-sheet-page { display: flex; box-sizing: border-box; }
   #eo-print-root .eo-print-sheet-box { position: relative; flex: none; overflow: hidden; }
   #eo-print-root .eo-print-chart { position: absolute; pointer-events: none; z-index: 2; }
+  #eo-print-root .eo-print-image { position: absolute; pointer-events: none; z-index: 2; object-fit: fill; }
   #eo-print-root .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
   #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
   #eo-print-root .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
@@ -507,3 +508,30 @@
 #sheet-chart-dialog .dialog-text-input { flex: 1; min-width: 0; }
 #sheet-chart-dialog #btn-sheet-chart-delete { margin-right: auto; color: var(--ui-danger); }
 #sheet-chart-dialog #btn-sheet-chart-delete[hidden] { display: none; }
+/* Floating sheet pictures and cell notes (PD-256). */
+#pane-sheet td[data-note="true"] { position: relative; }
+#pane-sheet td[data-note="true"]::after { content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; border-top: 6px solid var(--ui-danger); border-left: 6px solid transparent; pointer-events: none; }
+.sheet-image-layer, .sheet-note-layer { grid-area: 2 / 2; position: relative; pointer-events: none; overflow: hidden; }
+.sheet-image-layer { z-index: 5; }
+.sheet-note-layer { z-index: 7; }
+.sheet-image-layer[hidden], .sheet-note-layer[hidden] { display: none; }
+.sheet-image-card { position: absolute; pointer-events: auto; box-sizing: border-box; border: 1px solid transparent; background: transparent; cursor: move; user-select: none; outline: none; }
+.sheet-image-card:hover { border-color: var(--ui-border-strong); }
+.sheet-image-card.selected, .sheet-image-card:focus-visible { border-color: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-light); }
+.sheet-image-el { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.sheet-image-actions { position: absolute; top: 4px; right: 4px; display: none; align-items: center; gap: 2px; padding: 2px; background: var(--color-surface-raised); border: 1px solid var(--ui-border); border-radius: var(--radius-xs); box-shadow: var(--shadow-light); }
+.sheet-image-card:hover .sheet-image-actions, .sheet-image-card.selected .sheet-image-actions { display: inline-flex; }
+.sheet-image-btn { display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 5px; border: 1px solid transparent; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-secondary); font-size: var(--font-size-xs); cursor: pointer; }
+.sheet-image-btn:hover { border-color: var(--ui-border); background: var(--ui-hover-strong); color: var(--color-text); }
+.sheet-image-btn[data-image-act="delete"]:hover { color: var(--ui-danger); }
+.sheet-image-resize-handle { position: absolute; right: -4px; bottom: -4px; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid var(--ui-surface); background: var(--resize-handle); cursor: nwse-resize; display: none; }
+.sheet-image-card.selected .sheet-image-resize-handle, .sheet-image-card:hover .sheet-image-resize-handle { display: block; }
+.sheet-note-card { position: absolute; pointer-events: auto; min-width: 140px; max-width: 240px; padding: 6px 8px; box-sizing: border-box; background: var(--ui-warning-bg); color: var(--ui-text); border: 1px solid var(--ui-warning-border); border-radius: var(--radius-sm); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-sm); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
+.sheet-note-author { display: block; margin-bottom: 2px; font-weight: 700; color: var(--ui-text); }
+.sheet-note-body { color: var(--ui-text); }
+#sheet-image-dialog, #sheet-note-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-image-dialog .dialog-label, #sheet-note-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
+#sheet-note-dialog .sheet-note-text-row { align-items: flex-start; }
+#sheet-note-dialog .sheet-note-textarea { flex: 1; min-width: 0; height: auto; min-height: 72px; padding: 4px 6px; resize: vertical; font: inherit; font-size: var(--font-size-sm); }
+#sheet-image-dialog #btn-sheet-image-delete, #sheet-note-dialog #btn-sheet-note-delete { margin-right: auto; color: var(--ui-danger); }
+#sheet-note-dialog #btn-sheet-note-delete[hidden] { display: none; }

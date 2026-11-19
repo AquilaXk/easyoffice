@@ -94,6 +94,8 @@
     const tabUi = host.__EASYOFFICE_CREATE_SHEET_TAB_UI__({ document, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document), getTabs: () => tabs, say });
     const tabs = host.__EASYOFFICE_CREATE_SHEET_TABS__({ ...deps, ui: tabUi });
     const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, ui: tabUi });
+    const mediaUi = host.__EASYOFFICE_CREATE_SHEET_MEDIA_UI__?.(deps) ?? null;
+    const noteUi = host.__EASYOFFICE_CREATE_SHEET_NOTE_UI__?.(deps) ?? null;
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -129,6 +131,8 @@
         unlockedRows: json.unlockedRows || [],
         unlockedCols: json.unlockedCols || [],
         tables: json.tables || [],
+        images: (json.images || []).map(({ data, ...rest }) => rest),
+        notes: json.notes || [],
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
         // The in-workbook targets of the cell links move with the cells (PD-218).
@@ -416,6 +420,8 @@
       ...rangesUi.actions,
       ...linkUi.actions,
       ...tableUi.actions,
+      ...(mediaUi?.actions || {}),
+      ...(noteUi?.actions || {}),
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -462,20 +468,23 @@
       visibleItems()[0]?.focus();
     }
 
-    // A right click on a cell that holds a hyperlink opens the two items the reference editor's menu has on a link (하이퍼링크
-    // 고치기..., 하이퍼링크 지우기), on the cell it selects (PD-223).
-    function openLinkMenu(ev) {
-      const td = ev.target?.closest?.("#pane-sheet td[data-link]");
-      if (!td?._link) return;
+    // A right click on a cell opens the hyperlink items (`하이퍼링크 고치기...`, `하이퍼링크 지우기`), the cell note items
+    // (`메모 편집`, `메모 삭제`, `메모 표시/숨기기`), or both when the cell carries both (PD-223, PD-256).
+    function openCellMenu(ev) {
+      const td = ev.target?.closest?.("#pane-sheet td[data-cell]");
+      if (!td) return;
+      const hasLink = Boolean(td.dataset?.link && td._link);
+      const hasNote = td.dataset?.note === "true";
+      if (!hasLink && !hasNote) return;
       ev.preventDefault();
       commitIfEditing();
       deps.selectRange({ r1: td._row, c1: td._col, r2: td._row, c2: td._col });
-      openMenu("link", ev.clientX, ev.clientY);
+      openMenu(hasLink && hasNote ? "link-note" : hasLink ? "link" : "note", ev.clientX, ev.clientY);
     }
 
     function onContextMenu(ev) {
       const th = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
-      if (!th) return openLinkMenu(ev);
+      if (!th) return openCellMenu(ev);
       ev.preventDefault();
       commitIfEditing();
       const axis = th.dataset.col ? "col" : "row";
@@ -549,6 +558,8 @@
       rangesUi.bind();
       linkUi.bind();
       tableUi.bind();
+      mediaUi?.bind();
+      noteUi?.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -573,12 +584,19 @@
       }
     }
 
+    function syncLayers() {
+      mediaUi?.syncLayer();
+      noteUi?.syncLayer();
+    }
+
     // What follows the active sheet: the filter menu's check, and the outline bars.
     function refreshSheetChrome() {
       protectUi.refreshMenu();
       filterUi.refreshMenu();
+      noteUi?.refreshMenu();
       outlineUi.render();
       tableUi.sync();
+      syncLayers();
     }
 
     // The text of a cell was typed: it may become a link, a table next to it grows over it, and a calculated column fills.
@@ -588,7 +606,7 @@
       return linked;
     }
 
-    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open(), autoLink, expandAfter: tableUi.expandAfter };
+    return { run, bind, closeMenu, refreshSheetChrome, syncLayers, openHyperlink: () => linkUi.open(), autoLink, expandAfter: tableUi.expandAfter };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;

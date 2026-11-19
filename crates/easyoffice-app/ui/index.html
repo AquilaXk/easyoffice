@@ -124,12 +124,16 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">삽입</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 만들기</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 개체</span></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="sheet-mod-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 시각화</span></div>
               <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="link-remove" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 제거</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="note-insert" role="menuitem" tabindex="-1"><span class="md-label">메모 삽입</span><span class="md-shortcut">Shift+F2</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="note-toggle-all" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">메모 표시/숨기기</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="data-fn-browser" role="menuitem" tabindex="-1"><span class="md-label">함수 마법사</span></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="data-autosum" role="menuitem" tabindex="-1"><span class="md-label">자동 합계 (SUM)</span></div>
@@ -388,6 +392,7 @@
         aria-label="열 문서 파일 선택"
       />
       <input id="doc-image-input" type="file" hidden accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="그림" />
+      <input id="sheet-image-file-input" type="file" hidden accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="그림" />
 
       <div id="bootstrap-error" class="eo-bootstrap-error" role="alert" hidden>
         <span id="bootstrap-error-text">작업 공간 초기화에 실패했습니다.</span>
@@ -842,7 +847,9 @@
               </table>
               </div>
               <div id="sheet-slicer-layer" class="sheet-slicer-layer" hidden></div>
+              <div id="sheet-image-layer" class="sheet-image-layer" aria-label="그림 영역" hidden></div>
               <div id="sheet-chart-layer" class="sheet-chart-layer" aria-label="차트 영역" hidden></div>
+              <div id="sheet-note-layer" class="sheet-note-layer" aria-label="메모 영역" hidden></div>
               </div>
             </div>
             <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
@@ -1599,6 +1606,40 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-image-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-image-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-image-dialog-title">그림 크기 및 속성</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-image-width">너비 (px)</label><input id="sheet-image-width" type="number" min="1" max="4096" step="1" class="dialog-input" /><label class="dialog-label" for="sheet-image-height">높이 (px)</label><input id="sheet-image-height" type="number" min="1" max="4096" step="1" class="dialog-input" /></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-image-lock-ratio" type="checkbox" checked /> 비율 유지</label><button id="btn-sheet-image-reset" type="button" class="dialog-btn">원래 크기로</button></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-image-alt">대체 텍스트</label><input id="sheet-image-alt" type="text" class="dialog-text-input" maxlength="512" autocomplete="off" /></div>
+          <p id="sheet-image-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-image-delete" type="button" class="dialog-btn">개체 지우기</button>
+          <button id="btn-sheet-image-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-note-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-note-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-note-dialog-title">메모 삽입</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-note-author">작성자</label><input id="sheet-note-author" type="text" class="dialog-text-input" value="작성자" maxlength="128" autocomplete="off" /></div>
+          <div class="dialog-row sheet-note-text-row"><label class="dialog-label" for="sheet-note-text">메모</label><textarea id="sheet-note-text" class="dialog-text-input sheet-note-textarea" rows="4" maxlength="32768"></textarea></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-note-visible" type="checkbox" /> 메모 표시</label></div>
+          <p id="sheet-note-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-note-delete" type="button" class="dialog-btn" hidden>메모 삭제</button>
+          <button id="btn-sheet-note-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-paste-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-paste-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-paste-dialog-title">골라 붙이기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -2208,8 +2249,12 @@
       <div class="md-sep" data-axis="row col"></div>
       <div class="md-item" data-sheet-act="group" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">그룹 묶기</span></div>
       <div class="md-item" data-sheet-act="ungroup" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">그룹 풀기</span></div>
-      <div class="md-item" data-sheet-act="link-edit" data-axis="link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 고치기...</span></div>
-      <div class="md-item" data-sheet-act="link-clear" data-axis="link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 지우기</span></div>
+      <div class="md-item" data-sheet-act="link-edit" data-axis="link link-note" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 고치기...</span></div>
+      <div class="md-item" data-sheet-act="link-clear" data-axis="link link-note" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 지우기</span></div>
+      <div class="md-sep" data-axis="link-note"></div>
+      <div class="md-item" data-sheet-act="note-edit" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 편집</span></div>
+      <div class="md-item" data-sheet-act="note-delete" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 삭제</span></div>
+      <div class="md-item" data-sheet-act="note-toggle" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 표시/숨기기</span></div>
     </div>
     <div id="sheet-totals-menu" class="context-menu" role="menu" aria-label="요약 행 함수" hidden></div>
     <div id="sheet-tab-menu" class="context-menu" role="menu" aria-label="시트 탭 메뉴" hidden>
@@ -2352,6 +2397,8 @@
     <script src="./sheet-tabs.js"></script>
     <script src="./sheet-tab-ui.js"></script>
     <script src="./sheet-tab-menu.js"></script>
+    <script src="./sheet-media-ui.js"></script>
+    <script src="./sheet-note-ui.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>

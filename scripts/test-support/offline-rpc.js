@@ -923,12 +923,122 @@ function offlineSourceConversion(parsed) {
       });
     }
 
+    function shiftSpan0(start, end, op, at0, count, limit0) {
+      if (start === 0 && end === limit0) return [0, limit0];
+      if (op === "insert") {
+        if (end < at0) return [start, end];
+        if (start >= at0) return start + count > limit0 ? null : [start + count, Math.min(limit0, end + count)];
+        return [start, Math.min(limit0, end + count)];
+      }
+      const de = at0 + count - 1;
+      if (end < at0) return [start, end];
+      if (start > de) return [start - count, end === limit0 ? limit0 : end - count];
+      if (start >= at0 && end <= de) return null;
+      if (start < at0) return [start, end > de ? end - count : at0 - 1];
+      return [at0, end - count];
+    }
+
+    function offlineStructure(doc) {
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
+      const edit = {
+        axis: doc.axis,
+        op: doc.op,
+        at: Number(doc.at),
+        count: Number(doc.count),
+        ...(Array.isArray(doc.cols) ? { cols: doc.cols } : {}),
+      };
+      const at0 = Math.max(0, edit.at - 1);
+      const limit0 = edit.axis === "row" ? 1048575 : 16383;
+      const coversCols0 = (c0, c1) => !edit.cols || (c0 >= edit.cols[0] - 1 && c1 <= edit.cols[1] - 1);
+
+      const images = (doc.images || []).flatMap((img) => {
+        const a = img?.anchor || {};
+        const fc = Number(a.fromCol) || 0, fr = Number(a.fromRow) || 0;
+        const tc = Math.max(fc, Number(a.toCol) || fc), tr = Math.max(fr, Number(a.toRow) || fr);
+        if (edit.axis === "row" && !coversCols0(fc, tc)) return [img];
+        const shifted = edit.axis === "row"
+          ? shiftSpan0(fr, tr, edit.op, at0, edit.count, limit0)
+          : shiftSpan0(fc, tc, edit.op, at0, edit.count, limit0);
+        if (!shifted) return [];
+        const [ns, ne] = shifted;
+        const nextAnchor = { ...a };
+        if (edit.axis === "row") {
+          if (edit.op === "delete" && fr >= at0 && fr < at0 + edit.count) nextAnchor.rowOffEmu = 0;
+          nextAnchor.fromRow = ns;
+          nextAnchor.toRow = ne;
+          nextAnchor.topPx = ns * 24 + Math.round((Number(nextAnchor.rowOffEmu) || 0) / 9525);
+        } else {
+          if (edit.op === "delete" && fc >= at0 && fc < at0 + edit.count) nextAnchor.colOffEmu = 0;
+          nextAnchor.fromCol = ns;
+          nextAnchor.toCol = ne;
+          nextAnchor.leftPx = ns * 96 + Math.round((Number(nextAnchor.colOffEmu) || 0) / 9525);
+        }
+        return [{ ...img, anchor: nextAnchor }];
+      });
+
+      const notes = (doc.notes || []).flatMap((n) => {
+        const to = layoutApi ? layoutApi.remapRef(edit, n.ref) : n.ref;
+        return to === null ? [] : [{ ...n, ref: to }];
+      });
+
+      const merges = (doc.merges || []).flatMap((text) => {
+        const [ra, rb] = String(text).split(":");
+        const p = gridUtils?.parseRef(ra), q = gridUtils?.parseRef(rb || ra);
+        if (!p || !q) return [];
+        if (edit.axis === "row" && !coversCols0(p.col - 1, q.col - 1)) return [text];
+        const s0 = (edit.axis === "row" ? p.row : p.col) - 1;
+        const e0 = (edit.axis === "row" ? q.row : q.col) - 1;
+        const sh = shiftSpan0(s0, e0, edit.op, at0, edit.count, limit0);
+        if (!sh) return [];
+        const r1 = edit.axis === "row" ? sh[0] + 1 : p.row, r2 = edit.axis === "row" ? sh[1] + 1 : q.row;
+        const c1 = edit.axis === "col" ? sh[0] + 1 : p.col, c2 = edit.axis === "col" ? sh[1] + 1 : q.col;
+        return r1 === r2 && c1 === c2 ? [] : [gridUtils.refOf(r1, c1) + ":" + gridUtils.refOf(r2, c2)];
+      });
+
+      const widths = (doc.widths || []).flatMap(([col, px]) => {
+        if (edit.axis !== "col" || !layoutApi) return [[col, px]];
+        const mapped = layoutApi.mapIndex(edit, Number(col));
+        return mapped === null ? [] : [[mapped, px]];
+      });
+
+      return {
+        session: doc.session || "offline-s1",
+        formulas: [],
+        changed: [],
+        circular: false,
+        removed: 0,
+        spillAreas: [],
+        merges,
+        hiddenRows: doc.hiddenRows || [],
+        hiddenCols: doc.hiddenCols || [],
+        filter: doc.filter ?? null,
+        outline: doc.outline,
+        page: doc.page,
+        protect: doc.protect ?? null,
+        unlockedRows: doc.unlockedRows || [],
+        unlockedCols: doc.unlockedCols || [],
+        tables: doc.tables || [],
+        images,
+        notes,
+        widths,
+        rules: doc.rules || {},
+      };
+    }
+
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
       if (doc.sessionAction === "protectHash" || doc.sessionAction === "protectVerify") return offlineProtect(doc);
       if (doc.sessionAction === "format") return offlineFormatCells(doc);
       if (doc.sessionAction === "sort") return host.__EASYOFFICE_OFFLINE_SORT__(doc);
       if (doc.sessionAction === "pivot") return offlinePivot(doc);
+      if (doc.sessionAction === "open") return { session: "offline-s1" };
+      if (doc.sessionAction === "close") return { closed: true };
+      if (doc.sessionAction === "structure") return offlineStructure(doc);
+      if (doc.sessionAction === "rules") return { session: doc.session || "offline-s1", cf: { cells: [], bars: [], icons: [], scales: [] } };
+      if (doc.sessionAction === "apply" || doc.sessionAction === "merges" || doc.sessionAction === "tables" || doc.sessionAction === "locks" || doc.sessionAction === "hiddenRows" || doc.sessionAction === "names") {
+        return { session: doc.session || "offline-s1", changed: [], spills: [], circular: false };
+      }
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);
       const explicitAnchor = resolveOptionalAnchorCell(doc);
       const anchorCell = explicitAnchor || "A1";

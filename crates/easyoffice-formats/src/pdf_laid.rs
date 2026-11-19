@@ -224,14 +224,18 @@ impl Canvas {
         }
     }
 
-    fn finish(self, rotation_degrees: u16) -> PdfPageEntry {
-        PdfPageEntry::Laid(PdfLaidPage {
+    fn into_laid(self, rotation_degrees: u16) -> PdfLaidPage {
+        PdfLaidPage {
             page_number: 0,
             rotation_degrees,
             width_pt: self.width,
             height_pt: self.height,
             content: self.ops.join("\n"),
-        })
+        }
+    }
+
+    fn finish(self, rotation_degrees: u16) -> PdfPageEntry {
+        PdfPageEntry::Laid(self.into_laid(rotation_degrees))
     }
 }
 
@@ -453,8 +457,10 @@ pub(crate) fn encode_sheet_pdf(
     shown: &[SheetShown],
 ) -> Result<Vec<u8>, EasyOfficeError> {
     crate::sheet_styling::sheet_chart::validate_workbook_charts(stylings)?;
+    crate::sheet_styling::sheet_media_notes::validate_workbook_sheet_images(stylings)?;
+    crate::sheet_styling::sheet_media_notes::validate_workbook_notes(stylings)?;
     let cell_index = crate::sheet_styling::sheet_chart::SheetCellIndex::build(sheets);
-    let mut entries: Vec<PdfPageEntry> = Vec::new();
+    let mut entries: Vec<crate::pdf_sheet_media::SheetPdfPage> = Vec::new();
     let mut printed_cells = 0u64;
     for (index, (sheet_name, cells)) in sheets.iter().enumerate() {
         let styling = stylings.get(index);
@@ -481,28 +487,9 @@ pub(crate) fn encode_sheet_pdf(
         });
         if page.print_area.is_empty() {
             if let Some(st) = styling {
-                for ch in &st.charts {
-                    let (fc, fr, _, _, tc, tr, _, _) = ch.anchor.effective_two_cell(&st.columns);
-                    let next = used.map_or(
-                        Area {
-                            r1: fr,
-                            c1: fc,
-                            r2: tr,
-                            c2: tc,
-                        },
-                        |a| Area {
-                            r1: a.r1.min(fr),
-                            c1: a.c1.min(fc),
-                            r2: a.r2.max(tr),
-                            c2: a.c2.max(tc),
-                        },
-                    );
-                    let rows = u64::from(next.r2.saturating_sub(next.r1)).saturating_add(1);
-                    let cols = u64::from(next.c2.saturating_sub(next.c1)).saturating_add(1);
-                    if rows.saturating_mul(cols) <= MAX_SHEET_CELLS {
-                        used = Some(next);
-                    }
-                }
+                let tuple_used = used.map(|a| (a.r1, a.c1, a.r2, a.c2));
+                used = crate::pdf_sheet_media::extend_used_bounds(tuple_used, st, MAX_SHEET_CELLS)
+                    .map(|(r1, c1, r2, c2)| Area { r1, c1, r2, c2 });
             }
         }
         let areas: Vec<Area> = if page.print_area.is_empty() {
@@ -568,21 +555,20 @@ pub(crate) fn encode_sheet_pdf(
         }
     }
     if entries.is_empty() {
-        entries.push(Canvas::new(595.0, 842.0).finish(0));
+        entries.push(crate::pdf_sheet_media::SheetPdfPage {
+            laid: Canvas::new(595.0, 842.0).into_laid(0),
+            xobjects: Vec::new(),
+        });
     }
     for (i, entry) in entries.iter_mut().enumerate() {
-        if let PdfPageEntry::Laid(p) = entry {
-            p.page_number = i + 1;
-        }
+        entry.laid.page_number = i + 1;
     }
-    Ok(crate::PdfSerializer::serialize_entries(
-        title, None, &entries,
-    ))
+    Ok(crate::pdf_sheet_media::serialize_sheet_pdf(title, entries))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn sheet_area_pages(
-    entries: &mut Vec<PdfPageEntry>,
+    entries: &mut Vec<crate::pdf_sheet_media::SheetPdfPage>,
     area: Area,
     page: &SheetPage,
     sheet_name: &str,
@@ -819,33 +805,28 @@ fn sheet_area_pages(
                 ys.push(y);
             }
             canvas.grid(&xs, &ys, page.grid_lines, page.headings);
-            if let Some(st) = styling {
-                if !st.charts.is_empty() {
-                    let col_xs = if head_w > 0.0 && xs.len() > 1 {
-                        &xs[1..]
-                    } else {
-                        &xs[..]
-                    };
-                    let row_ys = if head_h > 0.0 && ys.len() > 1 {
-                        &ys[1..]
-                    } else {
-                        &ys[..]
-                    };
-                    crate::pdf_chart::draw_sheet_charts(
-                        &mut canvas,
-                        sheet_name,
-                        sheets,
-                        cell_index,
-                        st,
-                        &page_cols,
-                        &page_rows,
-                        col_xs,
-                        row_ys,
-                        scale,
-                    );
-                }
-            }
-            entries.push(canvas.finish(0));
+            let xobjects = if let Some(st) = styling {
+                crate::pdf_sheet_media::render_sheet_overlays(
+                    &mut canvas,
+                    sheet_name,
+                    sheets,
+                    cell_index,
+                    st,
+                    &page_cols,
+                    &page_rows,
+                    &xs,
+                    &ys,
+                    head_w,
+                    head_h,
+                    scale,
+                )
+            } else {
+                Vec::new()
+            };
+            entries.push(crate::pdf_sheet_media::SheetPdfPage {
+                laid: canvas.into_laid(0),
+                xobjects,
+            });
         }
     }
     Ok(())

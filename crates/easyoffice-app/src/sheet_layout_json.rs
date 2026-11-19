@@ -180,6 +180,16 @@ pub(crate) fn parse_layout(
     {
         styling.pivots = crate::sheet_pivot_json::parse_pivots(v)?;
     }
+    if let Some(v) =
+        StrictJsonValue::get_field(obj, "images").filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        styling.images = crate::sheet_media_notes_json::parse_images(v, &styling.columns)?;
+    }
+    if let Some(v) =
+        StrictJsonValue::get_field(obj, "notes").filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        styling.notes = crate::sheet_media_notes_json::parse_notes(v)?;
+    }
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
     crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
@@ -301,6 +311,14 @@ pub(crate) fn write_layout_split(
             ",\"pivots\":{}",
             crate::sheet_pivot_json::pivots_json(&styling.pivots)
         );
+    }
+    if !styling.images.is_empty() {
+        out.push_str(",\"images\":");
+        crate::sheet_media_notes_json::write_images_json(out, &styling.images);
+    }
+    if !styling.notes.is_empty() {
+        out.push_str(",\"notes\":");
+        crate::sheet_media_notes_json::write_notes_json(out, &styling.notes);
     }
     crate::sheet_view_json::write_view(out, styling);
     crate::sheet_page_json::write_page(out, styling);

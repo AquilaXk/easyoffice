@@ -124,8 +124,10 @@ test("the hidden input accepts exactly the supported extensions", async () => {
   const { sandbox } = await createOpenHarness();
   const exts = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__.SUPPORTED_EXTENSIONS;
   const allInputs = [...INDEX_HTML.matchAll(/<input\b[^>]*\bid="([^"]+)"[^>]*\baccept="([^"]+)"/g)];
-  assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "conv-source-file"]);
-  const inputs = allInputs.filter((m) => m[1] !== "doc-image-input").map((m) => m[2]);
+  assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "sheet-image-file-input", "conv-source-file"]);
+  const imageInputs = allInputs.filter((m) => m[1] === "doc-image-input" || m[1] === "sheet-image-file-input");
+  for (const [, , accept] of imageInputs) assert.equal(accept, ".png,.jpg,.jpeg,image/png,image/jpeg");
+  const inputs = allInputs.filter((m) => m[1] !== "doc-image-input" && m[1] !== "sheet-image-file-input").map((m) => m[2]);
   assert.equal(inputs.length, 2, "workspace picker and converter picker");
   for (const accept of inputs) {
     const byName = (a, b) => a.localeCompare(b);

@@ -364,6 +364,8 @@
     { keys: "Ctrl+Alt+V", action: "sheet-paste-special", module: "SHEET", external: true },
     // Pivot refresh is handled by the pivot bar's key listener when the active cell is inside a pivot table (PD-255).
     { keys: "Alt+F5", action: "sheet-pivot-refresh", module: "SHEET", external: true },
+    // Cell note insertion and editing is handled by sheet-note-ui.js on Shift+F2 (PD-256).
+    { keys: "Shift+F2", action: "sheet-note-edit", module: "SHEET", external: true },
     // Slide module only. `module` gates the binding to the active module (every other module keeps
     // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
     // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over

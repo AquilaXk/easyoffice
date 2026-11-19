@@ -623,6 +623,18 @@ fn decode_response(
                         st.fonts_rejected
                     ));
                 }
+                if st.images_rejected > 0 {
+                    warnings.push(format!(
+                        "{name} 시트의 그림 {}개는 지원하지 않는 형식이거나 손상되어 가져오지 않았습니다.",
+                        st.images_rejected
+                    ));
+                }
+                if st.notes_rejected > 0 {
+                    warnings.push(format!(
+                        "{name} 시트의 메모 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                        st.notes_rejected
+                    ));
+                }
             }
             ("workbook", sheets.len())
         }

@@ -8,8 +8,9 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
 use crate::sheet_styling::table_style::parse_table_styles;
-use crate::sheet_styling::xlsx_charts::{read_sheet_charts, ChartWriter};
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
+use crate::sheet_styling::xlsx_comments::{read_sheet_comments, CommentWriter};
+use crate::sheet_styling::xlsx_drawings::{read_sheet_drawings, DrawingReadBudget, DrawingWriter};
 use crate::sheet_styling::xlsx_filter_dxf::{dxf_bodies, parse_dxf_colors};
 use crate::sheet_styling::xlsx_parts::{combine_sheet_rels, insert_workbook_pivot_caches};
 use crate::sheet_styling::xlsx_pivots::{read_workbook_pivots, PivotWriter};
@@ -413,11 +414,15 @@ impl OoxmlCodec {
                 table_writer.add_sheet(tables, cells, caches.get(i), &style_table.dxf)
             })
             .collect();
-        let mut chart_writer = ChartWriter::new(active_sheets, caches, stylings)?;
-        let chart_parts: Vec<_> = active_sheets
+        let mut drawing_writer = DrawingWriter::new(active_sheets, caches, stylings)?;
+        let drawing_parts: Vec<_> = active_sheets
             .iter()
             .enumerate()
-            .map(|(i, (name, _))| chart_writer.add_sheet(name, stylings.get(i)))
+            .map(|(i, (name, _))| drawing_writer.add_sheet(name, stylings.get(i)))
+            .collect::<Result<_, _>>()?;
+        let mut comment_writer = CommentWriter::new(stylings)?;
+        let comment_parts: Vec<_> = (0..active_sheets.len())
+            .map(|i| comment_writer.add_sheet(i + 1, stylings.get(i)))
             .collect::<Result<_, _>>()?;
         let pivot_writer = PivotWriter::build(active_sheets, caches, stylings)?;
         let wb_slicer_ext = table_writer.slicers.workbook_ext_xml();
@@ -444,6 +449,18 @@ impl OoxmlCodec {
                 wb_rels_xml,
             )
         };
+        let extra_default_types = format!(
+            "{}{}",
+            drawing_writer.default_content_types(),
+            comment_writer.default_content_types()
+        );
+        let content_types = if extra_default_types.is_empty() {
+            content_types
+        } else {
+            const XML_DEFAULT: &str =
+                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>";
+            content_types.replace(XML_DEFAULT, &format!("{XML_DEFAULT}{extra_default_types}"))
+        };
         let extra_wb_rels = format!("{}{}", table_writer.slicers.wb_rels, pivot_writer.wb_rels);
         if !extra_wb_rels.is_empty() {
             wb_rels_xml = wb_rels_xml.replace(
@@ -456,10 +473,11 @@ impl OoxmlCodec {
             .and_then(|s| s.workbook_theme)
             .filter(|&t| t != DEFAULT_THEME);
         let extra_types = format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             table_writer.content_types,
             table_writer.slicers.content_types,
-            chart_writer.content_types,
+            drawing_writer.content_types,
+            comment_writer.content_types,
             pivot_writer.content_types
         );
         let (content_types, wb_rels_xml) = if custom_theme.is_some() {
@@ -525,14 +543,20 @@ impl OoxmlCodec {
                 .get(i)
                 .map_or((String::new(), None), |st| links_xml(&st.links));
             let tables = &sheet_parts[i];
-            let charts_part = &chart_parts[i];
+            let drawing_part = &drawing_parts[i];
+            let comment_part = &comment_parts[i];
             let sheet_xml = build_sheet_xml(
                 tables.cells.as_deref().unwrap_or(cells),
                 caches.get(i),
                 stylings.get(i),
                 &style_table,
                 &sst_map,
-                (&links, &charts_part.drawing_xml, &tables.parts_xml),
+                (
+                    &links,
+                    &drawing_part.drawing_xml,
+                    &comment_part.legacy_drawing_xml,
+                    &tables.parts_xml,
+                ),
                 &HeaderCells::new(&sheet_tables[i]),
             );
             XmlSanitizer::validate_safe_xml(&sheet_xml)?;
@@ -541,7 +565,8 @@ impl OoxmlCodec {
                 sheet_xml.into_bytes(),
             ));
             let extra_rels = combine_sheet_rels(&[
-                charts_part.rels.as_str(),
+                drawing_part.rels.as_str(),
+                comment_part.rels.as_str(),
                 tables.rels.as_str(),
                 pivot_writer.sheet_rels.get(i).map_or("", String::as_str),
             ]);
@@ -561,7 +586,8 @@ impl OoxmlCodec {
         }
         entries.extend(table_writer.parts);
         entries.extend(table_writer.slicers.parts);
-        entries.extend(chart_writer.parts);
+        entries.extend(drawing_writer.into_parts());
+        entries.extend(comment_writer.parts);
         entries.extend(pivot_writer.parts);
         ZipArchiveCodec::pack_compressed(&entries)
     }
@@ -721,7 +747,8 @@ impl OoxmlCodec {
         let mut budget = DecodeBudget::new();
         let mut link_allowance = LinkAllowance::default();
         let mut table_registry = TableRegistry::default();
-        let mut workbook_charts = 0usize;
+        let mut drawing_budget = DrawingReadBudget::default();
+        let mut workbook_notes = 0usize;
         let mut sheet_part_paths: Vec<&str> = Vec::with_capacity(sheet_specs.len());
         for (idx, (sheet_name, target_path, state)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
@@ -790,14 +817,22 @@ impl OoxmlCodec {
                     &xf_styles.dxf_colors,
                     &xf_styles.table_styles,
                 )?;
-                styling.charts_rejected = read_sheet_charts(
+                (styling.charts_rejected, styling.images_rejected) = read_sheet_drawings(
                     &sheet_name,
                     sheet_xml,
                     part_path,
                     &entry_by_path,
                     &styling.columns,
-                    &mut workbook_charts,
+                    &mut drawing_budget,
                     &mut styling.charts,
+                    &mut styling.images,
+                )?;
+                styling.notes_rejected = read_sheet_comments(
+                    sheet_xml,
+                    part_path,
+                    &entry_by_path,
+                    &mut workbook_notes,
+                    &mut styling.notes,
                 )?;
                 if let std::borrow::Cow::Owned(kept) =
                     merges_clear_of_tables(&styling.merges, &styling.tables)

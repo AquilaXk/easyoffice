@@ -475,7 +475,7 @@
   // shows after opening and is written again by the next save; styled blank cells are kept too.
   // The position-bound parts of a sheet in an open answer: merges, hidden rows and columns, the filter
   // (PD-194, PD-198), the view (PD-208) and the tables (PD-224).
-  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "veryHidden", "outline", "page", "protect", "unlockedRows", "unlockedCols", "tables", "charts", "pivots"];
+  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "veryHidden", "outline", "page", "protect", "unlockedRows", "unlockedCols", "tables", "charts", "pivots", "images", "notes"];
 
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
@@ -510,6 +510,14 @@
         }
       });
       host.__EASYOFFICE_SHEET_LINK__?.attach(map, sheet.links);
+      (sheet.notes || []).forEach((note) => {
+        const packed = gridUtils && note?.ref ? gridUtils.packRef(note.ref) : 0;
+        if (packed > 0) maxRow = Math.max(maxRow, Math.floor(packed / 32768));
+      });
+      (sheet.images || []).forEach((img) => {
+        const tr = Number(img?.anchor?.toRow);
+        if (Number.isFinite(tr) && tr >= 0) maxRow = Math.max(maxRow, Math.trunc(tr) + 1);
+      });
       store[sheet.name] = map;
       rowCounts[sheet.name] = Math.max(12, maxRow);
       const widths = columnWidthMap(sheet.columns);

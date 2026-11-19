@@ -637,6 +637,9 @@
         case "sheet-mod-freeze":
           void sheetController.runSheetStructure("freeze-selection");
           break;
+        case "sheet-review-comment":
+          void sheetController.runSheetStructure("note-insert");
+          break;
         default:
           setSheetSummary(execRes);
       }
@@ -852,7 +855,7 @@
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
     const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
-    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc", "document-review-comment"]);
+    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "sheet-review-comment", "pdf-mod-highlight", "doc-mod-toc", "document-review-comment"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
@@ -901,7 +904,7 @@
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
         // The 표 만들기 and 새 메모 dialogs make their own step when confirmed: opening them records none.
-        if (cmdId === "sheet-insert-table" || cmdId === "document-review-comment") {
+        if (cmdId === "sheet-insert-table" || cmdId === "document-review-comment" || cmdId === "sheet-review-comment") {
           // nothing to keep
         } else if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
         else commitDeferredUndoSnapshot(preSnapshot);

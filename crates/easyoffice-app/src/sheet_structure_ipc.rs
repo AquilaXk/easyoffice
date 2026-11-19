@@ -215,23 +215,23 @@ fn moved_layout_json(
         );
     }
     let parsed_widths = field("widths").map(parse_widths).transpose()?;
+    let shifted_cols = parsed_widths
+        .as_ref()
+        .map(|w| shift_widths(w, edit))
+        .unwrap_or_default();
     if let Some(widths_map) = &parsed_widths {
-        let moved = shift_widths(widths_map, edit);
         out.push_str(",\"widths\":[");
-        for (i, (col, px)) in moved.iter().enumerate() {
+        for (i, (col, px)) in shifted_cols.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
             let _ = write!(out, "[{},{px}]", col + 1);
         }
         out.push(']');
+        let _ = widths_map;
     }
     if let Some(v) = field("charts").filter(|v| !matches!(v, StrictJsonValue::Null)) {
         let parsed = crate::sheet_chart_json::parse_charts(v)?;
-        let shifted_cols = parsed_widths
-            .as_ref()
-            .map(|w| shift_widths(w, edit))
-            .unwrap_or_default();
         let moved = crate::sheet_chart_json::shift_charts(&parsed, sheet, edit, &shifted_cols);
         let _ = write!(
             out,
@@ -246,6 +246,27 @@ fn moved_layout_json(
             out,
             ",\"pivots\":{}",
             crate::sheet_pivot_json::pivots_json(&moved)
+        );
+    }
+    if let Some(v) = field("images").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let empty_cols = BTreeMap::new();
+        let base_cols = parsed_widths.as_ref().unwrap_or(&empty_cols);
+        let parsed = crate::sheet_media_notes_json::parse_images_for_structure(v, base_cols)?;
+        let moved =
+            crate::sheet_media_notes_json::shift_structure_images(&parsed, edit, &shifted_cols);
+        let _ = write!(
+            out,
+            ",\"images\":{}",
+            crate::sheet_media_notes_json::structure_images_json(&moved)
+        );
+    }
+    if let Some(v) = field("notes").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let parsed = crate::sheet_media_notes_json::parse_notes(v)?;
+        let moved = crate::sheet_media_notes_json::shift_notes(&parsed, edit);
+        let _ = write!(
+            out,
+            ",\"notes\":{}",
+            crate::sheet_media_notes_json::notes_json(&moved)
         );
     }
     Ok(())

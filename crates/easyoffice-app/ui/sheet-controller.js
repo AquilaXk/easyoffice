@@ -759,6 +759,7 @@
         lookOps?.sync();
         rulesUi?.syncArrow();
         host.__EASYOFFICE_SHEET_TABLE_BAR__?.sync();
+        host.__EASYOFFICE_SHEET_NOTE__?.syncLayer();
       },
       onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
       commitSheetCellEdit,
@@ -860,15 +861,8 @@
       onFilled: () => grid.repaintNumFmt(),
     });
     const structure = host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__({
-      gridUtils,
-      applyCellEdits,
-      document,
-      sheetDataStore,
-      sheetRowCounts,
-      sheetStoreHelpers,
-      grid,
-      getActiveSheetName,
-      getSheetRowCount,
+      gridUtils, applyCellEdits, document, sheetDataStore, sheetRowCounts, sheetStoreHelpers, grid,
+      getActiveSheetName, getActiveModule, getSheetRowCount,
       getRange: () => input.getRange(),
       getSelection: () => input.getSelection(),
       selectAxis: (axis, index, extend) => input.selectAxis(axis, index, extend),
@@ -969,14 +963,14 @@
       openHyperlinkDialog: structure.openHyperlink,
       openPivotDialog: () => rulesUi.openPivotDialog(),
       openChartDialog: (id) => chartUi?.openChartDialog(id),
-      syncChartLayer: () => chartUi?.syncLayer(),
+      syncChartLayer: () => { chartUi?.syncLayer(); structure.syncLayers?.(); },
       getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,
       // The sizes the grid shows and the page setup of the active sheet, for printing (`sheet-page-print.js`).
       printGeometry: () => ({
         page: host.__EASYOFFICE_SHEET_LAYOUT__.pageOf(getActiveSheetName()),
         colWidth: grid.colWidth, colLeft: grid.colLeft, colHidden: grid.colHidden, rowHidden: grid.rowHidden, rowTop: grid.rowTop,
-        charts: host.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(getActiveSheetName()), sheetName: getActiveSheetName(), sheetStore: sheetDataStore,
+        charts: host.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(getActiveSheetName()), images: host.__EASYOFFICE_SHEET_LAYOUT__.imagesOf(getActiveSheetName()), sheetName: getActiveSheetName(), sheetStore: sheetDataStore,
       }),
       replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,

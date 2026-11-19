@@ -43,6 +43,7 @@ mod pdf_chart;
 mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;
+mod pdf_sheet_media;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
 mod pdf_writer;

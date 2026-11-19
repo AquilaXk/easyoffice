@@ -36,6 +36,8 @@ pub(crate) mod sheet_fonts;
 pub(crate) mod sheet_links;
 #[path = "sheet_look.rs"]
 pub(crate) mod sheet_look;
+#[path = "sheet_media_notes.rs"]
+pub(crate) mod sheet_media_notes;
 #[path = "sheet_names.rs"]
 pub(crate) mod sheet_names;
 #[path = "sheet_numfmt.rs"]
@@ -68,6 +70,10 @@ pub(crate) mod xlsx_bounds;
 pub(crate) mod xlsx_charts;
 #[path = "xlsx_color.rs"]
 pub(crate) mod xlsx_color;
+#[path = "xlsx_comments.rs"]
+pub(crate) mod xlsx_comments;
+#[path = "xlsx_drawings.rs"]
+pub(crate) mod xlsx_drawings;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_filter_dxf.rs"]
@@ -104,6 +110,7 @@ pub use sheet_links::*;
 pub use sheet_look::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
 };
+pub use sheet_media_notes::*;
 pub use sheet_names::*;
 pub use sheet_numfmt::*;
 pub use sheet_page::*;
@@ -517,6 +524,14 @@ pub struct SheetStyling {
     pub pivots: Vec<SheetPivotTable>,
     /// Pivot tables a reader turned away because a part was invalid or broke a bound (PD-255).
     pub pivots_rejected: u32,
+    /// Floating pictures attached to the sheet (PD-256).
+    pub images: Vec<SheetFloatingImage>,
+    /// Floating pictures a reader turned away because a part was invalid or unsupported (PD-256).
+    pub images_rejected: u32,
+    /// Cell notes keyed by packed `(row << 32) | col` cell key (PD-256).
+    pub notes: BTreeMap<u64, SheetCellNote>,
+    /// Cell notes a reader turned away because a ref or entry was invalid (PD-256).
+    pub notes_rejected: u32,
 }
 
 /// Sorted, disjoint, zero-based inclusive runs of rows.
@@ -576,6 +591,8 @@ impl SheetStyling {
             && self.tables.is_empty()
             && self.charts.is_empty()
             && self.pivots.is_empty()
+            && self.images.is_empty()
+            && self.notes.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

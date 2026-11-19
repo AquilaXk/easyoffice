@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    resolve_code, run_total, CellBox, CellValueKind, EasyOfficeError, OdsUnpacked, SheetState,
-    SheetStyling,
+    effective_image_two_cell, resolve_code, run_total, CellBox, CellValueKind, EasyOfficeError,
+    OdsUnpacked, SheetState, SheetStyling, MAX_WORKBOOK_NOTES, MAX_WORKBOOK_SHEET_IMAGES,
+    MAX_WORKBOOK_SHEET_IMAGE_BYTES,
 };
 use easyoffice_sheet::{
     compile_for_page, general_display, validate_input, Budget, CompiledNumFmt, EvaluatedCellValue,
@@ -169,6 +170,18 @@ pub(super) fn append_styling_warnings(
                 st.pivots_rejected
             ));
         }
+        if st.images_rejected > 0 {
+            warnings.push(format!(
+                "{name} 시트의 그림 {}개는 지원하지 않는 형식이거나 손상되어 가져오지 않았습니다.",
+                st.images_rejected
+            ));
+        }
+        if st.notes_rejected > 0 {
+            warnings.push(format!(
+                "{name} 시트의 메모 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                st.notes_rejected
+            ));
+        }
     }
 }
 
@@ -185,6 +198,29 @@ pub(super) fn write_workbook_readback(
     stylings: &[(String, SheetStyling)],
     query: &ReadbackQuery,
 ) -> Result<(), EasyOfficeError> {
+    let (mut wb_images, mut wb_image_bytes, mut wb_notes) = (0usize, 0usize, 0usize);
+    for (_, st) in stylings {
+        wb_images = wb_images.saturating_add(st.images.len());
+        wb_notes = wb_notes.saturating_add(st.notes.len());
+        if wb_images > MAX_WORKBOOK_SHEET_IMAGES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "통합 문서 전체 그림 수({wb_images})가 허용 상한({MAX_WORKBOOK_SHEET_IMAGES})을 초과했습니다."
+            )));
+        }
+        if wb_notes > MAX_WORKBOOK_NOTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "통합 문서 전체 메모 수({wb_notes})가 허용 상한({MAX_WORKBOOK_NOTES})을 초과했습니다."
+            )));
+        }
+        for img in &st.images {
+            wb_image_bytes = wb_image_bytes.saturating_add(img.image.bytes().len());
+            if wb_image_bytes > MAX_WORKBOOK_SHEET_IMAGE_BYTES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "통합 문서 그림 총 크기({wb_image_bytes}바이트)가 허용 상한({MAX_WORKBOOK_SHEET_IMAGE_BYTES}바이트)을 초과했습니다."
+                )));
+            }
+        }
+    }
     let mut wb = WorkbookEngine::new();
     for (name, _) in sheets {
         wb.try_add_sheet(name)?;
@@ -512,7 +548,9 @@ pub(super) fn write_session_readback(
         mut rej_fonts,
         mut rej_charts,
         mut rej_pivots,
-    ) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+        mut rej_images,
+        mut rej_notes,
+    ) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     for (_, st) in stylings {
         rej_names = rej_names.saturating_add(st.names_rejected);
         rej_links = rej_links.saturating_add(st.links_rejected);
@@ -522,6 +560,8 @@ pub(super) fn write_session_readback(
         rej_fonts = rej_fonts.saturating_add(st.fonts_rejected);
         rej_charts = rej_charts.saturating_add(st.charts_rejected);
         rej_pivots = rej_pivots.saturating_add(st.pivots_rejected);
+        rej_images = rej_images.saturating_add(st.images_rejected);
+        rej_notes = rej_notes.saturating_add(st.notes_rejected);
     }
 
     let _ = write!(
@@ -552,7 +592,7 @@ pub(super) fn write_session_readback(
     }
     let _ = write!(
         out,
-        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts},\"charts\":{rej_charts},\"pivots\":{rej_pivots}}}}}"
+        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts},\"charts\":{rej_charts},\"pivots\":{rej_pivots},\"images\":{rej_images},\"notes\":{rej_notes}}}}}"
     );
     Ok(())
 }
@@ -615,7 +655,43 @@ fn write_sheet_summary(
             crate::sheet_pivot_json::write_pivot_json(out, pv);
         }
     }
-    out.push_str("],\"tables\":[");
+    let image_count = st.map_or(0, |s| s.images.len());
+    let _ = write!(out, "],\"imageCount\":{image_count},\"images\":[");
+    if let Some(styling) = st {
+        for (i_idx, im) in styling.images.iter().enumerate() {
+            if i_idx > 0 {
+                out.push(',');
+            }
+            let (fc, fr, _, _, tc, tr, _, _) =
+                effective_image_two_cell(&im.anchor, &styling.columns);
+            out.push_str("{\"id\":");
+            push_json_str(out, &im.id);
+            out.push_str(",\"name\":");
+            push_json_str(out, &im.name);
+            out.push_str(",\"alt\":");
+            push_json_str(out, &im.alt);
+            out.push_str(",\"mime\":");
+            push_json_str(out, im.image.format().mime());
+            let _ = write!(out, ",\"bytes\":{}", im.image.bytes().len());
+            out.push_str(",\"fromCell\":\"");
+            if let Ok(coord) = PackedCellCoordinate::new(fr, fc) {
+                coord.write_a1(out);
+            }
+            out.push_str("\",\"toCell\":\"");
+            if let Ok(coord) = PackedCellCoordinate::new(tr, tc) {
+                coord.write_a1(out);
+            }
+            out.push_str("\"}");
+        }
+    }
+    let note_count = st.map_or(0, |s| s.notes.len());
+    let _ = write!(out, "],\"noteCount\":{note_count},\"notes\":");
+    if let Some(notes) = st.map(|s| &s.notes) {
+        crate::sheet_media_notes_json::write_notes_json(out, notes);
+    } else {
+        out.push_str("[]");
+    }
+    out.push_str(",\"tables\":[");
 
     let tables_from_st = st.map(|s| s.tables.as_slice()).unwrap_or(&[]);
     let tables = if !tables_from_st.is_empty() {

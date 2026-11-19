@@ -163,9 +163,10 @@
       const geometry = sheetController.printGeometry();
       const core = host.__EASYOFFICE_SHEET_PAGE_CORE__;
       const areas = core.areaBoxes(geometry.page);
-      if (areas.length === 0 && Array.isArray(geometry.charts) && geometry.charts.length > 0) {
-        for (const ch of geometry.charts) {
-          const a = ch?.anchor;
+      const anchored = [...(geometry.charts || []), ...(geometry.images || [])];
+      if (areas.length === 0 && anchored.length > 0) {
+        for (const obj of anchored) {
+          const a = obj?.anchor;
           if (!a) continue;
           const r1 = Math.max(1, (Number(a.fromRow) || 0) + 1);
           const c1 = Math.max(1, (Number(a.fromCol) || 0) + 1);
@@ -229,6 +230,85 @@
       td.appendChild(holder);
     }
 
+    function spanSum(sizes, fromIdx, toIdx) {
+      let s = 0;
+      const lo = Math.max(0, fromIdx);
+      const hi = Math.min(sizes.length - 1, toIdx);
+      for (let i = lo; i <= hi; i += 1) s += sizes[i];
+      return s;
+    }
+
+    function appendSheetPrintImages(pages, boxes, geometry, page, core) {
+      const images = geometry?.images;
+      const pagePrint = host.__EASYOFFICE_SHEET_PAGE_PRINT__;
+      const utils = host.__EASYOFFICE_SHEET_UTILS__;
+      if (!Array.isArray(images) || images.length === 0 || !pagePrint?.cut || !pagePrint?.scaleOf) return;
+      const px = (v) => Math.round(v * 100) / 100 + "px";
+      const paper = core.paperMm(page);
+      const m = page?.margins;
+      const margin = m
+        ? { top: m.top * 0.0254, bottom: m.bottom * 0.0254, left: m.left * 0.0254, right: m.right * 0.0254 }
+        : { top: 10, bottom: 10, left: 10, right: 10 };
+      const pxPerMm = PX_PER_INCH / 25.4;
+      const boxW = (paper.width - margin.left - margin.right) * pxPerMm;
+      const boxH = (paper.height - margin.top - margin.bottom) * pxPerMm;
+      const headW = page?.headings === true ? 36 : 0;
+      const headH = page?.headings === true ? 22 : 0;
+      const inside = (t, size) => (t && t[0] >= 0 && t[1] < size ? t : null);
+      let pageIdx = 0;
+      for (const box of boxes) {
+        const colSizes = new Float64Array(box.c2 - box.c1 + 1);
+        for (let c = box.c1; c <= box.c2; c += 1) colSizes[c - box.c1] = geometry.colHidden(c) ? 0 : geometry.colWidth(c);
+        const rowSizes = new Float64Array(box.r2 - box.r1 + 1);
+        for (let r = box.r1; r <= box.r2; r += 1) rowSizes[r - box.r1] = geometry.rowHidden(r) ? 0 : geometry.rowTop(r + 1) - geometry.rowTop(r);
+        const totalW = colSizes.reduce((a, b) => a + b, 0) + headW;
+        const totalH = rowSizes.reduce((a, b) => a + b, 0) + headH;
+        const scale = pagePrint.scaleOf(page, totalW, totalH, boxW, boxH);
+        const titleRows = inside(page?.titleRows ? [page.titleRows[0] - box.r1, page.titleRows[1] - box.r1] : null, rowSizes.length);
+        const titleCols = inside(page?.titleCols ? [page.titleCols[0] - box.c1, page.titleCols[1] - box.c1] : null, colSizes.length);
+        const colCut = pagePrint.cut(colSizes, boxW / scale - headW, titleCols);
+        const rowCut = pagePrint.cut(rowSizes, boxH / scale - headH, titleRows);
+        for (const cg of colCut.groups) {
+          for (const rg of rowCut.groups) {
+            const holder = pages[pageIdx++]?.querySelector?.(".eo-print-sheet-box");
+            if (!holder) continue;
+            const tileC1 = box.c1 + cg.first, tileC2 = box.c1 + cg.last;
+            const tileR1 = box.r1 + rg.first, tileR2 = box.r1 + rg.last;
+            const ownStartX = headW + (cg.title && titleCols ? spanSum(colSizes, titleCols[0], titleCols[1]) : 0);
+            const ownStartY = headH + (rg.title && titleRows ? spanSum(rowSizes, titleRows[0], titleRows[1]) : 0);
+            for (const item of images) {
+              const a = item?.anchor;
+              if (!a) continue;
+              const c1 = Math.max(1, (Number(a.fromCol) || 0) + 1);
+              const r1 = Math.max(1, (Number(a.fromRow) || 0) + 1);
+              const c2 = Math.max(c1, (Number(a.toCol) || 0) + 1);
+              const r2 = Math.max(r1, (Number(a.toRow) || 0) + 1);
+              if (r2 < tileR1 || r1 > tileR2 || c2 < tileC1 || c1 > tileC2) continue;
+              const relX = c1 >= tileC1 ? ownStartX + spanSum(colSizes, cg.first, c1 - box.c1 - 1) : ownStartX - spanSum(colSizes, Math.max(0, c1 - box.c1), cg.first - 1);
+              const relY = r1 >= tileR1 ? ownStartY + spanSum(rowSizes, rg.first, r1 - box.r1 - 1) : ownStartY - spanSum(rowSizes, Math.max(0, r1 - box.r1), rg.first - 1);
+              const subX = Math.round((Number(a.colOffEmu) || 0) / 9525);
+              const subY = Math.round((Number(a.rowOffEmu) || 0) / 9525);
+              const w = Math.max(1, Number(a.widthPx) || 240);
+              const h = Math.max(1, Number(a.heightPx) || 160);
+              const imgEl = document.createElement("img");
+              imgEl.className = "eo-print-image";
+              imgEl.dataset.imageId = item.id || "";
+              const url = utils?.docImageUrl?.(item.imageId) || "";
+              const b64 = !url && item.imageId ? utils?.getDocImage?.(item.imageId)?.base64 || "" : "";
+              if (url) imgEl.setAttribute("src", url);
+              else if (b64) imgEl.setAttribute("src", "data:" + (item.mime || "image/png") + ";base64," + b64);
+              imgEl.setAttribute("alt", item.alt || "");
+              imgEl.style.left = px((relX + subX) * scale);
+              imgEl.style.top = px((relY + subY) * scale);
+              imgEl.style.width = px(w * scale);
+              imgEl.style.height = px(h * scale);
+              holder.appendChild(imgEl);
+            }
+          }
+        }
+      }
+    }
+
     function buildSheet(rules) {
       const { map, geometry, core, boxes, page } = sheetPlan();
       const cellAt = (row, col) => {
@@ -246,9 +326,11 @@
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
         if (shown?.c) td.style.color = shown.c;
       };
-      return host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({
+      const pages = host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({
         document, boxes, geometry, page, core, cellAt, rules, pageClass: PAGE_CLASS, renderCell: (td, cell) => renderCell(cell, td),
       });
+      appendSheetPrintImages(pages, boxes, geometry, page, core);
+      return pages;
     }
 
     // ---- slides -----------------------------------------------------------------------------

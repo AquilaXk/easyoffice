@@ -891,6 +891,13 @@
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
       // Merged ranges and hidden rows and columns (PD-194): `merges`, `hiddenRows`, `hiddenCols`.
       Object.assign(sheet, layoutBySheet?.[name]);
+      if (Array.isArray(sheet.images) && sheet.images.length > 0) {
+        const utils = host.__EASYOFFICE_SHEET_UTILS__;
+        sheet.images = sheet.images.map(({ imageId, naturalWidthPx, naturalHeightPx, ...img }) => ({
+          ...img,
+          data: (imageId ? utils?.getDocImage(imageId)?.base64 : "") || img.data || "",
+        }));
+      }
       // The selection, zoom and scroll position of the sheet (PD-208).
       const view = host.__EASYOFFICE_SHEET_VIEW_STATE__?.get(name);
       if (view) sheet.view = view;

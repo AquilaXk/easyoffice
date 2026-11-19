@@ -384,6 +384,8 @@
       // A cell an array filled (PD-217) keeps the address of the formula that made it.
       if (entry?.spillOf) td.dataset.spillOf = entry.spillOf; else delete td.dataset.spillOf;
       host.__EASYOFFICE_SHEET_LINK__?.paint(td, entry?.link, entry);
+      if (layoutApi?.noteAtRef(getSheetName(), td.dataset.cell)) td.dataset.note = "true";
+      else if (td.dataset.note !== undefined) delete td.dataset.note;
       const st = entry?.style;
       td.style.fontWeight = st?.fontWeight || "";
       td.style.fontStyle = st?.fontStyle || "";
