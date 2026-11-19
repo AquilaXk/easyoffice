@@ -406,3 +406,20 @@ fn template_token_scan_is_linear_on_unclosed_openers() {
     )));
     assert!(!contains_template_token("{{ 열림만"));
 }
+
+#[test]
+fn table_formulas_over_tens_of_thousands_of_rows_stay_within_the_operand_budget() {
+    use easyoffice_formats::evaluate_table_formulas;
+    // 6만 행 모두 `=COUNT(ABOVE)`: 행마다 위쪽 전체를 훑는 옛 구현은 제곱 시간이었다.
+    let rows_len = 60_000usize;
+    let mut rows: Vec<Vec<String>> = (0..rows_len)
+        .map(|_| vec!["=COUNT(ABOVE)".to_string()])
+        .collect();
+    rows[0][0] = "7".to_string();
+    assert_finishes_fast("table formulas", || evaluate_table_formulas(&mut rows));
+    // 예산 안쪽 앞부분은 예전과 같은 값이고, 예산을 넘은 뒷부분은 수식 그대로 텍스트로 남는다.
+    assert_eq!(rows[1][0], "1");
+    assert_eq!(rows[5][0], "5");
+    assert_eq!(rows[1_000][0], "1000");
+    assert_eq!(rows[rows_len - 1][0], "=COUNT(ABOVE)");
+}

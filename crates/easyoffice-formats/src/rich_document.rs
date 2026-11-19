@@ -735,15 +735,32 @@ fn fold_table_operands<'a, I: Iterator<Item = &'a str>>(func: TableFormulaFunc, 
     }
 }
 
+/// Cells one table's formulas may read in total (PD-262). A formula over `ABOVE` or `BELOW` reads a
+/// whole column, so a long table of such formulas reads quadratically many cells; real tables stay far
+/// below this (a 1,000-row running total reads half a million).
+pub const MAX_TABLE_FORMULA_OPERANDS: usize = 4_000_000;
+
 /// Replaces word-processor table formulas (`=SUM(ABOVE)`, `=AVERAGE(LEFT)`, … with SUM, AVERAGE,
 /// COUNT, MAX, MIN, PRODUCT over ABOVE, BELOW, LEFT, RIGHT) by their computed values, row by row.
-/// Non-numeric cells are skipped; unrecognized formulas are left as text.
+/// Non-numeric cells are skipped; unrecognized formulas are left as text, and so is every formula that
+/// would read past the [`MAX_TABLE_FORMULA_OPERANDS`] budget of the table.
 pub fn evaluate_table_formulas(rows: &mut [Vec<String>]) {
+    let mut budget = MAX_TABLE_FORMULA_OPERANDS;
     for r in 0..rows.len() {
         for c in 0..rows[r].len() {
             let Some((func, dir)) = parse_table_formula(&rows[r][c]) else {
                 continue;
             };
+            let operands = match dir {
+                TableFormulaDir::Above => r,
+                TableFormulaDir::Below => rows.len() - r - 1,
+                TableFormulaDir::Left => c,
+                TableFormulaDir::Right => rows[r].len() - c - 1,
+            };
+            if operands > budget {
+                continue;
+            }
+            budget -= operands;
             let value = match dir {
                 TableFormulaDir::Above => fold_table_operands(
                     func,
