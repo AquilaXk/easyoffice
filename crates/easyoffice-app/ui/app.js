@@ -7,13 +7,8 @@
   const ribbonCatalog = host.__EASYOFFICE_RIBBON_CATALOG__;
   const desktopBridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
   const {
-    RIBBON_CATEGORY_TOOLS,
-    MODULE_SHORT_BADGES,
-    DEFAULT_HWP_EDITOR_NODES,
-    createEmptySlideStyleFields,
-    createInitialSlideDeckState,
-    createDefaultRibbonState,
-    formatPlatformShortcut,
+    RIBBON_CATEGORY_TOOLS, MODULE_SHORT_BADGES, DEFAULT_HWP_EDITOR_NODES,
+    createEmptySlideStyleFields, createInitialSlideDeckState, createDefaultRibbonState, formatPlatformShortcut,
   } = ribbonCatalog;
 
   const slideDeckState = createInitialSlideDeckState();
@@ -33,16 +28,13 @@
 
   const sheetDataStore = Object.assign(Object.create(null), { Sheet1: null });
   const sheetRowCounts = Object.create(null);
-  let workspaceSession = null;
+  let workspaceSession = null, copilotUi = null;
   let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
     const run = workspaceHistoryQueue.then(opFn, opFn);
-    workspaceHistoryQueue = run.then(
-      () => {},
-      () => {}
-    );
+    workspaceHistoryQueue = run.then(() => {}, () => {});
     return run;
   }
 
@@ -52,27 +44,17 @@
     return run;
   }
 
-  const { parseCellRefParts, normalizeFormattedNumericCell, localScrubPii } =
-    host.__EASYOFFICE_SHEET_UTILS__;
+  const { parseCellRefParts, normalizeFormattedNumericCell, localScrubPii } = host.__EASYOFFICE_SHEET_UTILS__;
   const {
-    isExcludedDocChromeElement,
-    extractEditableDocumentText,
-    collectActiveScrubGroups,
-    applyScrubResultsToGroups,
-    tokenizeFormulaStringLiterals,
+    isExcludedDocChromeElement, extractEditableDocumentText, collectActiveScrubGroups, applyScrubResultsToGroups, tokenizeFormulaStringLiterals,
   } = host.__EASYOFFICE_CREATE_PII_SCRUBBER__({ document, localScrubPii });
 
   const { invokeIpc } = host.__EASYOFFICE_CREATE_IPC_TRANSPORT__({ document, host, desktopBridge });
   const pdfEdit = host.__EASYOFFICE_CREATE_PDF_EDIT__({ document, desktopBridge, getPdfRotationDeg: () => pdfRotationDeg });
   host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
 
-  let sheetController = null;
-  let workspacePanels = null;
-  let slideStudio = null;
-
-  function snapshotDomSheetCells() {
-    return sheetController.snapshotDomSheetCells();
-  }
+  let sheetController = null, workspacePanels = null, slideStudio = null;
+  const snapshotDomSheetCells = () => sheetController.snapshotDomSheetCells();
 
   const sheetStoreHelpers = host.__EASYOFFICE_CREATE_SHEET_STORE__({
     invokeIpc, normalizeFormattedNumericCell, tokenizeFormulaStringLiterals,
@@ -104,7 +86,7 @@
     setPdfRotationDeg: (next) => { pdfRotationDeg = next; },
     getPdfEdit: () => pdfEdit,
     enqueueWorkspaceHistoryOp,
-    onModuleApplied: (mod) => workspaceSession?.applyModuleContext(mod),
+    onModuleApplied: (mod) => { workspaceSession?.applyModuleContext(mod); copilotUi?.onModuleChanged(); },
   });
 
   docRunsUi = host.__EASYOFFICE_CREATE_DOC_RUNS_UI__({
@@ -248,6 +230,15 @@
       saveAs: (format) => hwpSession.saveAs(format), exportPdf: () => hwpSession.exportPdf(), print: () => hwpPrint.print(),
       close: () => windowBridge.requestClose(),
     },
+  });
+
+  copilotUi = host.__EASYOFFICE_CREATE_COPILOT_UI__({
+    document, invokeIpc, sheetDataStore, sheetRowCounts, slideDeckState,
+    getActiveModule: () => activeModule, getActiveSheetName: () => activeSheetName, getActiveSlideIndex: () => activeSlideIndex,
+    getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit,
+    activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
+    restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+    noteActivity: () => workspaceSession?.noteActivity(), extractEditableDocumentText, localScrubPii, isImeComposing: () => isImeComposing, setStatusFeedback,
   });
 
   function setStatusFeedback(text) {
@@ -823,6 +814,7 @@
       "slide-move-down": () => slideStudio.moveDown(),
       "slide-delete": () => slideStudio.removeSlide(),
       palette: () => togglePaletteModal(modal, cmdSearchInput),
+      "copilot-toggle": () => copilotUi.toggle(),
       "file-open": () => fileOpen.openFilePicker(),
       "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),
       "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
@@ -932,6 +924,7 @@
     host.__EASYOFFICE_CUSTOM_SELECT__.enhanceCustomSelects(document);
     void shellChrome.applyStoredTheme();
     shellChrome.bind();
+    copilotUi.bind();
     findReplace.bind();
     workspacePanels.ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
@@ -959,7 +952,7 @@
     workspaceSession.applyModuleContext(activeModule);
     await windowBridge.applyLaunch((mod) => ribbonHistory.activatePane(mod));
     // The start window has no document: gray the menu items that need one.
-    if (windowBridge.isStart) workspaceSession.applyModuleContext(activeModule);
+    if (windowBridge.isStart) { workspaceSession.applyModuleContext(activeModule); copilotUi.onModuleChanged(); }
     windowBridge.bindStatusTooltips();
     hwpHost.onShortcut((combo) => handleForwardedShortcut(combo));
     // The start window has no document of its own: nothing to restore there.

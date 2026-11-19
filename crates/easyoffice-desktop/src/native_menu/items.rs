@@ -602,6 +602,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:filter-reapply", "다시 적용", "filter-reapply"),
     sa!("sheet:filter-clear", "필터 지우기", "filter-clear"),
     item(
+        "tool:copilot",
+        "코파일럿",
+        Some("CmdOrCtrl+Shift+K"),
+        "studio-cmd:copilot-toggle",
+    ),
+    item(
         "tool:diagnose",
         "문장 진단 및 요약",
         None,

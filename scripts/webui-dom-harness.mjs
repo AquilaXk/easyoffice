@@ -161,6 +161,10 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/office-print.js",
   "../crates/easyoffice-app/ui/hwp-session.js",
   "../crates/easyoffice-app/ui/shell-chrome.js",
+  "../crates/easyoffice-app/ui/copilot-catalog.js",
+  "../crates/easyoffice-app/ui/copilot-actions.js",
+  "../crates/easyoffice-app/ui/copilot-model-ui.js",
+  "../crates/easyoffice-app/ui/copilot-ui.js",
   "../crates/easyoffice-app/ui/app.js",
 ].map((relPath) => ({
   relPath,
@@ -716,6 +720,8 @@ class MiniElement extends MiniNode {
       data: ev.data ?? null,
       clientX: ev.clientX ?? 0,
       clientY: ev.clientY ?? 0,
+      pointerId: ev.pointerId ?? 1,
+      isPrimary: ev.isPrimary ?? true,
       timeStamp: ev.timeStamp ?? 0,
       defaultPrevented: false,
       preventDefault() {
@@ -1159,6 +1165,7 @@ export async function createWorkspaceHarness(options = {}) {
     __EASYOFFICE_WORKSPACE_API__: hostEnv.__EASYOFFICE_WORKSPACE_API__,
     __EASYOFFICE_FILE_OPEN_UTILS__: hostEnv.__EASYOFFICE_FILE_OPEN_UTILS__,
     __EASYOFFICE_DOC_RUNS__: hostEnv.__EASYOFFICE_DOC_RUNS__,
+    __EASYOFFICE_COPILOT_CATALOG__: hostEnv.__EASYOFFICE_COPILOT_CATALOG__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",

@@ -622,6 +622,7 @@ const TOOL_HWP: MenuSpec = menu(
 const TOOL_DOC: MenuSpec = menu(
     "도구",
     &[
+        "tool:copilot",
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",
@@ -640,6 +641,7 @@ const TOOL_DOC: MenuSpec = menu(
 const TOOL_OFFICE: MenuSpec = menu(
     "도구",
     &[
+        "tool:copilot",
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",
@@ -657,6 +659,7 @@ const TOOL_OFFICE: MenuSpec = menu(
 const TOOL_SHEET: MenuSpec = menu(
     "도구",
     &[
+        "tool:copilot",
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",
@@ -677,6 +680,7 @@ const TOOL_SHEET: MenuSpec = menu(
 const TOOL_PDF: MenuSpec = menu(
     "도구",
     &[
+        "tool:copilot",
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",

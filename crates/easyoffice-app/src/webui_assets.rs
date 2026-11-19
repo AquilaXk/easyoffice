@@ -29,6 +29,7 @@ const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
 const CSS_ASSETS: &[(&str, &str, &str)] = ui_css_table![
     "content.css",
+    "copilot.css",
     "home.css",
     "menu-bar.css",
     "shell.css",
@@ -40,6 +41,10 @@ const CSS_ASSETS: &[(&str, &str, &str)] = ui_css_table![
 const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "app.js",
     "color-picker.js",
+    "copilot-actions.js",
+    "copilot-catalog.js",
+    "copilot-model-ui.js",
+    "copilot-ui.js",
     "custom-select.js",
     "desktop-bridge.js",
     "doc-image.js",

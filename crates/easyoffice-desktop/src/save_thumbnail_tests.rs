@@ -439,6 +439,7 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
         pdf: None,
         hwp: Some(&save_hwp),
         thumbnail: Some(&draw_thumb),
+        ..ShellWriters::default()
     };
     for target in ["docx", "odt", "hwpx", "hwp"] {
         let payload = format!(

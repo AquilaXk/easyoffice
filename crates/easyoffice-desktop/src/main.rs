@@ -7,6 +7,7 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+mod copilot_http;
 mod doc_hwp;
 mod doc_pdf;
 mod doc_pdf_marks;
@@ -150,6 +151,7 @@ async fn ipc_dispatch(
             pdf: Some(&draw),
             hwp: Some(&save_hwp),
             thumbnail: Some(&draw_thumb),
+            llm: Some(&copilot_http::complete),
         };
         EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
             &command, &payload, &owner, writers,

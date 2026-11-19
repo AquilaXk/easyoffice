@@ -10,6 +10,7 @@
 use easyoffice_formats::{embed_thumbnail, DocumentFormat, EasyOfficeError, OutputCompatibility};
 
 use crate::convert_structured::RichPdfRenderer;
+use crate::copilot::CopilotLlmClient;
 
 /// Writes a document the engine wrote as HWPX out as HWP 5.0 bytes (PD-178).
 pub type RichHwpWriter<'a> = dyn Fn(&[u8]) -> Result<Vec<u8>, String> + 'a;
@@ -26,6 +27,8 @@ pub struct ShellWriters<'a> {
     pub hwp: Option<&'a RichHwpWriter<'a>>,
     /// Draws the first page of an HWPX document as a PNG preview picture (PD-239).
     pub thumbnail: Option<&'a RichThumbnailRenderer<'a>>,
+    /// Executes validated remote HTTPS or local HTTP model requests from the desktop shell.
+    pub llm: Option<&'a CopilotLlmClient<'a>>,
 }
 
 /// The HWP 5.0 bytes of `hwpx`, or the reason there are none: no writer on this host, or the

@@ -29,10 +29,15 @@
     return err;
   }
 
+  function isCopilotAssistantPayload(command, payload) {
+    return command === "run_smart_assistant" && /"action"\s*:\s*"copilot_/.test(String(payload ?? ""));
+  }
+
   function createIpcTransport({ document, desktopBridge }) {
-    function reportFailure(command, msg) {
+    function reportFailure(command, msg, payload) {
       const feedback = document.getElementById("status-command-feedback");
       if (feedback) feedback.textContent = REJECTED_PREFIX + msg;
+      if (isCopilotAssistantPayload(command, payload)) return;
       const targetId = RESULT_TARGETS[command];
       const target = targetId ? document.getElementById(targetId) : null;
       if (target) target.textContent = REJECTED_PREFIX + msg;
@@ -54,43 +59,43 @@
           body: JSON.stringify({ command, payload: String(payload ?? "") }),
         });
       } catch {
-        reportFailure(command, DISCONNECTED_MESSAGE);
+        reportFailure(command, DISCONNECTED_MESSAGE, payload);
         throw connectionError(DISCONNECTED_MESSAGE);
       }
       if (!resp.ok) {
         const errBody = await resp.json().catch(() => ({}));
         const msg = errBody.error || errBody.message || REQUEST_FAILED_MESSAGE + " (" + resp.status + ")";
-        reportFailure(command, msg);
+        reportFailure(command, msg, payload);
         throw reportedError(msg);
       }
       return await resp.json();
     }
 
     // Runs one transport and shows its failure.
-    async function viaTransport(command, run) {
+    async function viaTransport(command, payload, run) {
       try {
         return await run();
       } catch (err) {
         const msg = err?.message || String(err);
-        reportFailure(command, msg);
+        reportFailure(command, msg, payload);
         throw reportedError(msg);
       }
     }
 
     async function invokeIpc(command, payload) {
       if (typeof host.__EASYOFFICE_TEST_IPC__ === "function") {
-        return viaTransport(command, async () => {
+        return viaTransport(command, payload, async () => {
           const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload);
           return typeof raw === "string" ? JSON.parse(raw) : raw;
         });
       }
       if (desktopBridge.isAvailable()) {
-        return viaTransport(command, () => desktopBridge.invokeIpc(command, payload));
+        return viaTransport(command, payload, () => desktopBridge.invokeIpc(command, payload));
       }
       if (isHttpAvailable()) {
         return invokeHttp(command, payload);
       }
-      reportFailure(command, DISCONNECTED_MESSAGE);
+      reportFailure(command, DISCONNECTED_MESSAGE, payload);
       throw connectionError(DISCONNECTED_MESSAGE);
     }
 

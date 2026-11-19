@@ -41,6 +41,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
+    "copilot-toggle": ["DOC", "SHEET", "SLIDE", "PDF"],
     find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE"],
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     "mod-symbol": EDIT_MODULES,
@@ -58,6 +59,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "btn-toggle-para-marks": "para-marks",
     "btn-toggle-doc-grid": "doc-grid",
   };
+  const sharedCatalog = host.__EASYOFFICE_RIBBON_CATALOG__;
+  if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === "Ctrl+Shift+K")) {
+    sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
+      ...sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS,
+      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "SHEET", "SLIDE", "PDF"] },
+    ]);
+  }
   const BLOCKED_SPEC_TAGS = new Set([
     "script", "iframe", "frame", "frameset", "object", "embed", "link", "meta", "style", "base",
     "form", "template", "svg", "math", "portal",
@@ -562,11 +570,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function installActivityTracking() {
       const root = document.documentElement;
+      const isCopilotUiTarget = (t) => Boolean(t?.closest?.("#eo-copilot-shell, #copilot-model-dialog, #btn-copilot-toggle"));
       for (const type of ["input", "change", "eo-doc-mutated"]) {
-        root?.addEventListener?.(type, () => noteActivity(true));
+        root?.addEventListener?.(type, (ev) => {
+          if (!isCopilotUiTarget(ev?.target)) noteActivity(true);
+        });
       }
       root?.addEventListener?.("click", (ev) => {
         const target = ev?.target;
+        if (isCopilotUiTarget(target)) return;
         if (target && typeof target.closest === "function" && target.closest(CLICK_MUTATING_CONTROL_SELECTOR)) {
           noteActivity(false);
         }

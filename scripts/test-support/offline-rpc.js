@@ -71,8 +71,245 @@
     }
   }
 
+  const LOCAL_KINDS = new Set(["ollama", "lmstudio", "local_http"]);
+  const CLOUD_KINDS = new Set(["openai", "anthropic", "google", "deepseek", "openrouter", "mistral", "groq", "xai"]);
+
+  function offlineCopilotTestProvider(doc) {
+    const prov = doc.provider && typeof doc.provider === "object" ? doc.provider : {};
+    const kind = String(prov.kind || "");
+    const url = String(prov.baseUrl || "").trim();
+    if (LOCAL_KINDS.has(kind)) {
+      if (!/^http:\/\/(?:127\.0\.0\.1|\[::1\]):\d{1,5}(?:\/|$)/i.test(url)) {
+        throw new Error("로컬 서버 주소는 http://127.0.0.1:<포트> 또는 http://[::1]:<포트>만 허용됩니다.");
+      }
+      return { status: "ok", message: `로컬 서버 연결 확인 완료 (${prov.model || kind})` };
+    }
+    if (CLOUD_KINDS.has(kind) || kind === "remote_https" || kind === "custom") {
+      if (!url.startsWith("https://")) throw new Error("원격 HTTPS 엔드포인트가 필요합니다.");
+      if (CLOUD_KINDS.has(kind) && !String(prov.apiKey || "").trim()) {
+        throw new Error("API 키를 입력해 주세요.");
+      }
+      return { status: "ok", message: `${kind} 연결 확인 완료 (${prov.model || "기본"})` };
+    }
+    throw new Error("지원하지 않는 제공자 종류입니다.");
+  }
+
+  function offlineCopilotListModels(doc) {
+    const prov = doc.provider && typeof doc.provider === "object" ? doc.provider : {};
+    const kind = String(prov.kind || "");
+    if (!kind) throw new Error("제공자를 먼저 선택해 주세요.");
+    if (CLOUD_KINDS.has(kind) && !String(prov.apiKey || "").trim()) {
+      throw new Error("API 키를 입력해 주세요.");
+    }
+    const mockLiveByKind = {
+      ollama: [{ id: "qwen3:8b", name: "qwen3:8b", contextWindow: 131072, supportsReasoning: true }],
+      lmstudio: [{ id: "local-instruct", name: "local-instruct", contextWindow: 131072, supportsReasoning: false }],
+      openai: [{ id: "o3", name: "o3", contextWindow: 200000, supportsReasoning: true }],
+      anthropic: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", contextWindow: 200000, supportsReasoning: true }],
+      google: [{ id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", contextWindow: 1048576, supportsReasoning: true }],
+      deepseek: [{ id: "deepseek-reasoner", name: "DeepSeek R1", contextWindow: 128000, supportsReasoning: true }],
+    };
+    const models = (mockLiveByKind[kind] || []).map((m) => ({ ...m }));
+    return { status: "ok", provider: kind, live: true, models };
+  }
+
+  function offlineCopilotSheet(mode, prompt, sheetCtx) {
+    const sheetName = String(sheetCtx?.name || "Sheet1");
+    const cells = Array.isArray(sheetCtx?.cells) ? sheetCtx.cells : [];
+    const byCoord = new Map(cells.map((c) => [String(c.coord || "").toUpperCase(), c]));
+    let maxRow = 1;
+    for (const c of cells) {
+      const m = /^([A-Z]+)(\d+)$/.exec(String(c.coord || "").toUpperCase());
+      if (m) maxRow = Math.max(maxRow, Number(m[2]));
+    }
+    if (/목표\s*대비|격차|%/.test(prompt) && maxRow >= 2) {
+      let worstRow = 2;
+      let worstRatio = Infinity;
+      for (let r = 2; r <= maxRow; r += 1) {
+        const b = Number(byCoord.get("B" + r)?.value ?? byCoord.get("B" + r)?.raw);
+        const c = Number(byCoord.get("C" + r)?.value ?? byCoord.get("C" + r)?.raw);
+        if (Number.isFinite(b) && b !== 0 && Number.isFinite(c)) {
+          const ratio = c / b;
+          if (ratio < worstRatio) {
+            worstRatio = ratio;
+            worstRow = r;
+          }
+        }
+      }
+      const worstLabel = String(byCoord.get("A" + worstRow)?.value || byCoord.get("A" + worstRow)?.raw || worstRow + "행");
+      const pctText = Number.isFinite(worstRatio) ? (worstRatio * 100).toFixed(1) + "%" : "확인됨";
+      const reply = `${worstLabel} 항목이 목표 대비 ${pctText}로 가장 큰 격차를 보입니다.`;
+      if (mode !== "edit") {
+        return { status: "ok", mode: "ask", reply, reasoning: "", updatedInPlace: false, operations: [], locations: [] };
+      }
+      const writeCells = [{ coord: "D1", raw: "목표 대비 %", bold: true }];
+      for (let r = 2; r <= maxRow; r += 1) {
+        writeCells.push({ coord: "D" + r, raw: `=C${r}/B${r}`, numFmt: "0.0%", bold: r === worstRow });
+      }
+      const formulaRange = `D2:D${maxRow}`;
+      const gapRange = `A${worstRow}:D${worstRow}`;
+      return {
+        status: "ok",
+        mode: "edit",
+        reply,
+        reasoning: "",
+        updatedInPlace: true,
+        operations: [
+          { op: "sheet.write", sheet: sheetName, cells: writeCells },
+          { op: "sheet.format", sheet: sheetName, range: gapRange, fill: "#fff3cd", bold: true },
+        ],
+        locations: [
+          { module: "SHEET", label: formulaRange, sheet: sheetName, range: formulaRange },
+          { module: "SHEET", label: gapRange, sheet: sheetName, range: gapRange },
+        ],
+      };
+    }
+    if (/합계|평균/.test(prompt) && maxRow >= 2 && mode === "edit") {
+      const sumRow = maxRow + 1;
+      const range = `A${sumRow}:C${sumRow}`;
+      return {
+        status: "ok",
+        mode: "edit",
+        reply: `${sumRow}행에 합계 수식을 추가했습니다.`,
+        reasoning: "",
+        updatedInPlace: true,
+        operations: [
+          {
+            op: "sheet.write",
+            sheet: sheetName,
+            cells: [
+              { coord: "A" + sumRow, raw: "합계", bold: true },
+              { coord: "B" + sumRow, raw: `=SUM(B2:B${maxRow})`, bold: true },
+              { coord: "C" + sumRow, raw: `=SUM(C2:C${maxRow})`, bold: true },
+            ],
+          },
+        ],
+        locations: [{ module: "SHEET", label: range, sheet: sheetName, range }],
+      };
+    }
+    return {
+      status: "ok",
+      mode,
+      reply: `현재 시트(${sheetName})의 데이터 셀 ${cells.length}개를 확인했습니다.`,
+      reasoning: "",
+      updatedInPlace: false,
+      operations: [],
+      locations: [],
+    };
+  }
+
+  function offlineCopilotRun(doc) {
+    const mod = String(doc.module || "DOC").toUpperCase();
+    const mode = mod === "PDF" || doc.mode !== "edit" ? "ask" : "edit";
+    const prompt = String(doc.prompt || "").trim();
+    const ctx = doc.context && typeof doc.context === "object" ? doc.context : {};
+
+    if (mod === "SHEET") return offlineCopilotSheet(mode, prompt, ctx.sheet);
+    if (mod === "DOC") {
+      const paragraphs = Array.isArray(ctx.doc?.paragraphs) ? ctx.doc.paragraphs : [];
+      if (mode === "edit") {
+        const ops = [];
+        if (/개인정보|마스킹/.test(prompt)) ops.push({ op: "doc.scrub_pii" });
+        if (/피동|다듬/.test(prompt) && paragraphs.length > 0) {
+          ops.push({
+            op: "doc.replace_paragraphs",
+            startIndex: 0,
+            endIndex: paragraphs.length - 1,
+            paragraphs: paragraphs.map((p) => String(p).replaceAll("되어지다", "되다").replaceAll("에 의해 ", "")),
+          });
+        } else {
+          ops.push({ op: "doc.append", blocks: [{ tag: "p", text: "핵심 요약: 주요 안건과 실행 항목을 정리했습니다." }] });
+        }
+        return {
+          status: "ok",
+          mode: "edit",
+          reply: "문서 내용을 제자리에서 업데이트했습니다.",
+          reasoning: "",
+          updatedInPlace: true,
+          operations: ops,
+          locations: [{ module: "DOC", label: "문단 1", paragraphIndex: 0 }],
+        };
+      }
+      return {
+        status: "ok",
+        mode: "ask",
+        reply: "문서 핵심 요약: " + (paragraphs[0] || "작성된 문단이 없습니다."),
+        reasoning: "",
+        updatedInPlace: false,
+        operations: [],
+        locations: [],
+      };
+    }
+    if (mod === "SLIDE") {
+      const slides = Array.isArray(ctx.slide?.slides) ? ctx.slide.slides : [];
+      const activeIdx = Number(ctx.slide?.activeIndex || 0);
+      if (mode === "edit") {
+        if (/추가|새\s*슬라이드/.test(prompt)) {
+          const nextIdx = slides.length;
+          return {
+            status: "ok",
+            mode: "edit",
+            reply: `${nextIdx + 1}번 발표 슬라이드와 발표자 노트를 추가했습니다.`,
+            reasoning: "",
+            updatedInPlace: true,
+            operations: [
+              {
+                op: "slide.add",
+                title: "핵심 성과 요약",
+                body: "• 목표 달성 현황 점검\n• 차기 분기 중점 과제",
+                notes: "핵심 지표 변화와 실행 일정을 중심으로 발표합니다.",
+              },
+            ],
+            locations: [{ module: "SLIDE", label: `슬라이드 ${nextIdx + 1}`, slideIndex: nextIdx }],
+          };
+        }
+        return {
+          status: "ok",
+          mode: "edit",
+          reply: `${activeIdx + 1}번 슬라이드의 발표자 노트를 작성했습니다.`,
+          reasoning: "",
+          updatedInPlace: true,
+          operations: [{ op: "slide.update", slideIndex: activeIdx, notes: "슬라이드 핵심 요점을 간결하게 전달합니다." }],
+          locations: [{ module: "SLIDE", label: `슬라이드 ${activeIdx + 1}`, slideIndex: activeIdx }],
+        };
+      }
+      return {
+        status: "ok",
+        mode: "ask",
+        reply: `총 ${slides.length || 1}장의 슬라이드 구성을 확인했습니다.`,
+        reasoning: "",
+        updatedInPlace: false,
+        operations: [],
+        locations: [],
+      };
+    }
+    const pdfText = String(ctx.pdf?.text || "").trim();
+    return {
+      status: "ok",
+      mode: "ask",
+      reply: "PDF 요약: " + (pdfText ? pdfText.slice(0, 120) : `${ctx.pdf?.pageCount || 1}쪽 문서를 확인했습니다.`),
+      reasoning: "",
+      updatedInPlace: false,
+      operations: [],
+      locations: [],
+    };
+  }
+
   function localSmartAssistant(rawInput) {
     let rawText = String(rawInput ?? "");
+    if (rawText.trimStart().startsWith("{")) {
+      let parsedObj = null;
+      try {
+        parsedObj = JSON.parse(rawText);
+      } catch (_err) {
+        parsedObj = null;
+      }
+      if (parsedObj && typeof parsedObj === "object") {
+        if (parsedObj.action === "copilot_test_provider") return offlineCopilotTestProvider(parsedObj);
+        if (parsedObj.action === "copilot_list_models") return offlineCopilotListModels(parsedObj);
+        if (parsedObj.action === "copilot_run") return offlineCopilotRun(parsedObj);
+      }
+    }
     const envelopeText = tryParseAssistantEnvelope(rawText);
     if (envelopeText !== null) {
       rawText = envelopeText;

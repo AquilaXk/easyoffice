@@ -190,6 +190,7 @@
     "sheet:filter": "sheet-act:filter-toggle",
     "sheet:filter-reapply": "sheet-act:filter-reapply",
     "sheet:filter-clear": "sheet-act:filter-clear",
+    "tool:copilot": "studio-cmd:copilot-toggle",
     "tool:diagnose": "studio-cmd:smart-diagnose",
     "tool:scrub-pii": "studio-cmd:scrub-pii",
     "tool:security-audit": "studio-cmd:security-audit",

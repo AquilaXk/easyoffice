@@ -45,6 +45,7 @@
   - 각주(`각주`)·미주(`미주`) 실시간 번호 부여·본문 양방향 이동(`RichNote` · `noteRef`, `DOCX` `word/footnotes.xml`·`word/endnotes.xml` · `ODT` `text:note` 왕복 및 `HWPX` `hp:footNote`·`hp:endNote` 기록, `PD-252`), 새 메모(`RichComment` · `commentId`, `DOCX` `word/comments.xml` · `ODT` `office:annotation` 왕복, `PD-252`), 변경 내용 추적(`RichRevision`: 삽입 `ins`·삭제 `del` 실시간 기록 및 개별/전체 `수락`·`거부`, `DOCX` `w:ins`/`w:del` · `ODT` `text:tracked-changes` 왕복, `PD-252`).
   - 메일 머지(`applyingMailMerge(record:)`): `{{필드명}}` 플레이스홀더에 레코드 사전을 바인딩하여 안내문·계약서·공문서 일괄 생성.
   - 실시간 문서 통계(`DocumentStatistics`, `computeStatistics()`): 단어 수(`wordCount`), 글자 수(`characterCountWithSpaces`, `characterCountWithoutSpaces`), 문단 수(`paragraphCount`), 표 수(`tableCount`), 200자 원고지 매수(`manuscriptPages200`).
+  - 우측 `코파일럿` 대화 사이드바 및 인플레이스 오피스 실행(`PD-253`): `DOC`·`SHEET`·`SLIDE`·`PDF` 모듈 공통 우측 리사이즈 패널(`280px..520px`), `편집`/`질문` 모드 분리, 시트 수식·백분율·격차 행 강조 및 문서 문체 교정·블록 삽입·개인정보 마스킹·슬라이드 생성 인플레이스 실행(`제자리에서 업데이트됨` 배지·위치 칩 클릭 이동·단일 `실행 취소`), 12종 회사별·로컬 AI 제공자 카탈로그·추론 수준 및 SSRF 방어 메모리 전용 API 키 연동.
 
 ### 2.2 Sheet (`WorksheetModel`, `crates/easyoffice-*`)
 - **64비트 비트패킹 좌표 및 고성능 그리드 (`PackedCellCoordinate`)**:

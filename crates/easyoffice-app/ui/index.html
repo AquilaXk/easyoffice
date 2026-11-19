@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="./shell.css" />
     <link rel="stylesheet" href="./content.css" />
     <link rel="stylesheet" href="./home.css" />
+    <link rel="stylesheet" href="./copilot.css" />
   </head>
   <body>
     <div id="app" class="app-shell" data-module="DOC" data-window-kind="document">
@@ -337,6 +338,7 @@
           <div class="menu-item" data-menu="tool">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="review">도구</button>
             <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-kinds="DOC SHEET SLIDE PDF" data-studio-menu-cmd="copilot-toggle" role="menuitem" tabindex="-1"><span class="md-label">코파일럿</span><span class="md-shortcut">Ctrl+Shift+K</span></div>
               <div class="md-item" data-studio-menu-cmd="smart-diagnose" role="menuitem" tabindex="-1"><span class="md-label">문장 진단 및 요약</span></div>
               <div class="md-item" data-studio-menu-cmd="scrub-pii" role="menuitem" tabindex="-1"><span class="md-label">개인정보 스캔/마스킹</span></div>
               <div class="md-item" data-studio-menu-cmd="security-audit" role="menuitem" tabindex="-1"><span class="md-label">문서 보안 검사</span></div>
@@ -368,6 +370,9 @@
         </div>
 
         <div class="topbar-actions" role="toolbar" aria-label="창 도구">
+          <button id="btn-copilot-toggle" class="copilot-topbar-btn" type="button" aria-pressed="false" title="코파일럿 (Ctrl+Shift+K)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="11" height="8.5" rx="2.2" stroke="currentColor" stroke-width="1.4" /><path d="M8 1.8V4M5.8 7.8H5.81M10.2 7.8H10.21M6 10.2H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg><span>코파일럿</span>
+          </button>
           <button id="btn-command-palette" class="palette-btn" type="button" title="명령 팔레트 (Ctrl+/)" aria-label="명령 팔레트 열기">
             <span class="icon-slot" data-icon="search"></span><span class="palette-label">명령 검색</span><kbd id="shortcut-hint">Ctrl+/</kbd>
           </button>
@@ -570,6 +575,7 @@
       </div>
 
       <main class="workspace-grid">
+        <div class="workspace-stage-row">
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
             <p id="hwp-fallback-notice" class="manuscript-notice" role="status" hidden><span id="hwp-fallback-text">한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.</span> <button type="button" id="btn-hwp-use-embed" class="tb-btn" hidden>한글 편집기로 돌아가기</button></p>
@@ -1010,6 +1016,73 @@
           </div>
         </section>
 
+        <section id="eo-copilot-shell" class="eo-copilot-shell" aria-label="코파일럿" hidden>
+          <div
+            id="copilot-resizer"
+            class="eo-copilot-resizer"
+            role="separator"
+            tabindex="0"
+            aria-label="코파일럿 패널 너비 조절"
+            aria-orientation="vertical"
+            aria-controls="copilot-panel"
+            aria-valuemin="280"
+            aria-valuemax="520"
+            aria-valuenow="320"
+            title="드래그하여 너비 조절 · 더블클릭 기본값 복원"
+          ></div>
+          <div id="copilot-panel" class="eo-copilot-panel">
+            <div class="eo-copilot-head">
+              <div class="eo-copilot-brand">
+                <span class="eo-copilot-badge" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="11" height="8.5" rx="2.2" stroke="currentColor" stroke-width="1.4" /><path d="M8 1.8V4M5.8 7.8H5.81M10.2 7.8H10.21M6 10.2H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                </span>
+                <span class="eo-copilot-title">코파일럿</span>
+              </div>
+              <div class="eo-copilot-head-actions">
+                <button id="btn-copilot-new" type="button" class="eo-copilot-head-btn" title="새 대화">새 대화</button>
+                <button id="btn-copilot-settings" type="button" class="eo-copilot-head-btn" title="모델 설정">모델 설정</button>
+                <button id="btn-copilot-close" type="button" class="eo-copilot-head-btn" title="닫기">닫기</button>
+              </div>
+            </div>
+            <div id="copilot-body" class="eo-copilot-body">
+              <div id="copilot-welcome" class="eo-copilot-welcome">
+                <div class="eo-copilot-welcome-title">무엇을 도와드릴까요?</div>
+                <div class="eo-copilot-welcome-sub">현재 문서를 읽고 수식·문단·슬라이드를 제자리에서 바로 다듬습니다.</div>
+                <div id="copilot-examples" class="eo-copilot-examples"></div>
+              </div>
+              <div id="copilot-thread" class="eo-copilot-thread" role="log" aria-live="polite" aria-label="코파일럿 대화 내역"></div>
+            </div>
+            <div class="eo-copilot-composer">
+              <div id="copilot-selection-row" class="eo-copilot-sel-row" hidden>
+                <span id="copilot-selection-label" class="eo-copilot-sel-chip">A1</span>
+              </div>
+              <div class="eo-copilot-input-card">
+                <textarea
+                  id="copilot-input"
+                  class="eo-copilot-textarea"
+                  rows="2"
+                  maxlength="8000"
+                  placeholder="코파일럿에게 물어보기..."
+                  aria-label="코파일럿에게 물어보기"
+                ></textarea>
+                <div class="eo-copilot-composer-bar">
+                  <div class="eo-copilot-composer-tools">
+                    <button id="btn-copilot-mode" type="button" class="eo-copilot-pill-btn eo-copilot-mode-btn" data-mode="edit" title="현재 문서를 직접 편집">편집</button>
+                    <button id="btn-copilot-model" type="button" class="eo-copilot-pill-btn eo-copilot-model-btn" aria-haspopup="menu" aria-expanded="false" title="모델 선택"><span id="copilot-model-btn-text" class="eo-copilot-model-btn-text">모델 선택</span><span class="eo-copilot-caret" aria-hidden="true">▾</span></button>
+                    <div id="copilot-model-menu" class="eo-copilot-model-menu" hidden>
+                      <div id="copilot-model-menu-group" focusgroup="menu nomemory" aria-labelledby="btn-copilot-model"></div>
+                    </div>
+                  </div>
+                  <button id="btn-copilot-send" type="button" class="eo-copilot-send-btn" aria-label="보내기" title="보내기" disabled>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 12.5V3.8M4.5 7.2L8 3.6L11.5 7.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        </div>
+
       </main>
 
       <footer id="status-bar" class="statusbar" role="contentinfo">
@@ -1291,6 +1364,55 @@
         <div class="dialog-footer">
           <button id="btn-smart-diagnose" type="button" class="dialog-btn dialog-btn-primary">진단 실행</button>
           <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="copilot-model-dialog" class="tool-dialog" closedby="any" aria-labelledby="copilot-model-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="copilot-model-dialog-title">모델 설정</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="copilot-provider-kind">제공자</label>
+            <select id="copilot-provider-kind" class="sb-combo dialog-select">
+              <option value="openai" selected>OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google">Google</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="mistral">Mistral</option>
+              <option value="groq">Groq</option>
+              <option value="xai">xAI</option>
+              <option value="ollama">Ollama (로컬 127.0.0.1)</option>
+              <option value="lmstudio">LM Studio (로컬 127.0.0.1)</option>
+              <option value="remote_https">OpenAI 호환 HTTPS API</option>
+              <option value="local_http">사용자 지정 로컬 서버 (127.0.0.1)</option>
+            </select>
+          </div>
+          <div id="copilot-preset-row" class="dialog-row">
+            <label class="dialog-label" for="copilot-provider-preset">사용 가능한 모델</label>
+            <select id="copilot-provider-preset" class="sb-combo dialog-select">
+              <option value="__custom__" selected>목록 불러오기 또는 직접 입력</option>
+            </select>
+            <button id="btn-copilot-fetch-models" type="button" class="dialog-btn">목록 불러오기</button>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="copilot-provider-model">모델 ID</label><input id="copilot-provider-model" class="dialog-text-input" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="API 키 입력 후 자동 조회 또는 직접 입력" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="copilot-provider-url">엔드포인트</label><input id="copilot-provider-url" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" /></div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="copilot-reasoning-effort">추론 수준</label>
+            <select id="copilot-reasoning-effort" class="sb-combo dialog-select">
+              <option value="low">낮음</option>
+              <option value="medium" selected>보통</option>
+              <option value="high">높음</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="copilot-provider-key">API 키</label><input id="copilot-provider-key" class="dialog-text-input" type="password" maxlength="512" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-status-row"><span id="copilot-model-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-copilot-test-provider" type="button" class="dialog-btn">연결 확인</button>
+          <button id="btn-copilot-model-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
     </dialog>
@@ -1988,6 +2110,8 @@
             <tr><td>flate2</td><td>MIT / Apache-2.0</td></tr>
             <tr><td>image</td><td>MIT / Apache-2.0</td></tr>
             <tr><td>serde / serde_json</td><td>MIT / Apache-2.0</td></tr>
+            <tr><td>univer-office-copilot</td><td>Apache-2.0</td></tr>
+            <tr><td>continue</td><td>Apache-2.0</td></tr>
             <tr><td>Noto Sans KR</td><td>OFL</td></tr>
           </tbody>
         </table>
@@ -2189,6 +2313,10 @@
     <script src="./office-print.js"></script>
     <script src="./hwp-session.js"></script>
     <script src="./shell-chrome.js"></script>
+    <script src="./copilot-catalog.js"></script>
+    <script src="./copilot-actions.js"></script>
+    <script src="./copilot-model-ui.js"></script>
+    <script src="./copilot-ui.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
