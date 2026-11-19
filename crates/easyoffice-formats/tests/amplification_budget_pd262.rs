@@ -277,3 +277,69 @@ fn odt_writes_a_comment_body_once_however_many_anchors_it_has() {
         bytes.len()
     );
 }
+
+/// 항목 4: 닫지 않은 문단 태그를 끝없이 여는 입력. 재현 규모는 500만 개(RSS 0.7~1.5 GB)다.
+const OPEN_PARAS: usize = 5_000_000;
+
+fn nested_paragraph_input(open_tag: &str) -> String {
+    open_tag.repeat(OPEN_PARAS)
+}
+
+#[test]
+fn docx_unclosed_paragraphs_hit_the_depth_budget() {
+    let body = nested_paragraph_input("<w:p>");
+    let xml = format!(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>"#
+    );
+    let bytes = ZipArchiveCodec::pack_compressed(&[
+        ("[Content_Types].xml".to_string(), b"<Types/>".to_vec()),
+        ("word/document.xml".to_string(), xml.into_bytes()),
+    ])
+    .expect("pack docx");
+    assert_budget_error(
+        UniversalFormatConverter::decode_rich(&bytes, Some("a.docx")),
+        "docx nested paragraphs",
+    );
+}
+
+#[test]
+fn odt_unclosed_paragraphs_hit_the_depth_budget() {
+    let body = nested_paragraph_input("<text:p>");
+    let xml = format!(
+        r#"<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text>{body}</office:text></office:body></office:document-content>"#
+    );
+    let bytes = ZipArchiveCodec::pack_compressed(&[
+        (
+            "mimetype".to_string(),
+            b"application/vnd.oasis.opendocument.text".to_vec(),
+        ),
+        ("content.xml".to_string(), xml.into_bytes()),
+    ])
+    .expect("pack odt");
+    assert_budget_error(
+        UniversalFormatConverter::decode_rich(&bytes, Some("a.odt")),
+        "odt nested paragraphs",
+    );
+}
+
+#[test]
+fn hwpx_unclosed_paragraphs_hit_the_depth_budget() {
+    let body = nested_paragraph_input("<hp:p>");
+    let xml = format!(
+        r#"<?xml version="1.0"?><hs:sec xmlns:hs="http://www.owpml.org/owpml/2011/section" xmlns:hp="http://www.owpml.org/owpml/2011/paragraph">{body}</hs:sec>"#
+    );
+    let header = r#"<?xml version="1.0"?><hh:head xmlns:hh="http://www.owpml.org/owpml/2011/head" xmlns:hc="http://www.owpml.org/owpml/2011/core"><hh:refList></hh:refList></hh:head>"#;
+    let bytes = ZipArchiveCodec::pack_compressed(&[
+        ("mimetype".to_string(), b"application/hwp+zip".to_vec()),
+        (
+            "Contents/header.xml".to_string(),
+            header.as_bytes().to_vec(),
+        ),
+        ("Contents/section0.xml".to_string(), xml.into_bytes()),
+    ])
+    .expect("pack hwpx");
+    assert_budget_error(
+        UniversalFormatConverter::decode_rich(&bytes, Some("a.hwpx")),
+        "hwpx nested paragraphs",
+    );
+}

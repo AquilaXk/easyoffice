@@ -16,7 +16,7 @@ use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{take_toc_page, toc_role_from_name, CharFmt};
+use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichField, RichImage,
@@ -411,7 +411,10 @@ impl<'a> OdtWalker<'a> {
                 }
                 return Ok(true);
             }
-            "text:p" | "text:h" if !self.in_automatic_styles => self.start_paragraph(name, attrs),
+            "text:p" | "text:h" if !self.in_automatic_styles => {
+                check_paragraph_depth(self.paras.len())?;
+                self.start_paragraph(name, attrs);
+            }
             "text:span" if !self.paras.is_empty() => self.start_span(attrs),
             "text:a" => {
                 self.link = attr(attrs, "xlink:href")

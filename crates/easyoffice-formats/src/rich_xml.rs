@@ -3,7 +3,21 @@
 
 use crate::rich_document::{RichToc, MAX_TOC_LEVEL, MAX_TOC_PAGE};
 use crate::rich_notes::RichRevision;
-use crate::{RichRun, RichScript};
+use crate::{EasyOfficeError, RichRun, RichScript};
+
+/// Deepest open-paragraph stack a reader keeps (a paragraph inside a text box inside a paragraph, and
+/// so on). Real documents stay in single digits; a stream of unclosed paragraph tags does not (PD-262).
+pub(crate) const MAX_OPEN_PARAGRAPHS: usize = 64;
+
+/// Refuses to open another paragraph when `open` paragraphs are already open.
+pub(crate) fn check_paragraph_depth(open: usize) -> Result<(), EasyOfficeError> {
+    if open >= MAX_OPEN_PARAGRAPHS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "열린 문단이 허용 깊이({MAX_OPEN_PARAGRAPHS})를 초과했습니다."
+        )));
+    }
+    Ok(())
+}
 
 /// Boolean OOXML-style toggle value: absent or anything but `0`/`false`/`off`/`none` is true.
 pub(crate) fn toggle_on(value: Option<&str>) -> bool {

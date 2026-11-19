@@ -24,7 +24,7 @@ use crate::rich_image::ImageBudget;
 use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table::{join_cell_paragraphs, table_from_placed_with_layout, PlacedCell};
 use crate::rich_table_style::{CellFill, TableCellBorders};
-use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
+use crate::rich_xml::{check_paragraph_depth, heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock, RichDocument, RichImage,
@@ -489,16 +489,19 @@ impl SectionWalker {
         blocks: &mut Vec<RichBlock>,
     ) -> Result<(), EasyOfficeError> {
         match name {
-            "hp:p" => self.paras.push(ParaState {
-                runs: Vec::new(),
-                para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
-                style: attr(attrs, "styleIDRef").unwrap_or_default().into_owned(),
-                images: Vec::new(),
-                after_blocks: Vec::new(),
-                columns: (self.tbl_depth == 0 && !self.in_note)
-                    .then_some(self.current_columns)
-                    .flatten(),
-            }),
+            "hp:p" => {
+                check_paragraph_depth(self.paras.len())?;
+                self.paras.push(ParaState {
+                    runs: Vec::new(),
+                    para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
+                    style: attr(attrs, "styleIDRef").unwrap_or_default().into_owned(),
+                    images: Vec::new(),
+                    after_blocks: Vec::new(),
+                    columns: (self.tbl_depth == 0 && !self.in_note)
+                        .then_some(self.current_columns)
+                        .flatten(),
+                });
+            }
             "hp:run" => self.runs.push(RunState {
                 char_pr: attr(attrs, "charPrIDRef").unwrap_or_default().into_owned(),
                 text: String::new(),

@@ -17,7 +17,7 @@ use crate::rich_read_page_setup::{
     binding_of, fitting_setup, page_gutter, page_margins, page_paper,
 };
 use crate::rich_table::{join_cell_paragraphs, TableAssembler};
-use crate::rich_xml::{push_linked_run, toggle_on, CharFmt};
+use crate::rich_xml::{check_paragraph_depth, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper, RichRun,
@@ -193,6 +193,9 @@ impl DocxWalker {
             }
         } else if name == "w:sdtContent" && self.sdt_stack.last().copied().flatten().is_some() {
             self.checkbox_sdt_content_depth += 1;
+        }
+        if name == "w:p" {
+            check_paragraph_depth(self.paras.len())?;
         }
         self.track_structure(name, attrs);
         self.track_frame(name, attrs)?;
