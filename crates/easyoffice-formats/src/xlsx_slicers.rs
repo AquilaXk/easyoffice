@@ -141,8 +141,10 @@ fn emu_to_px(raw: Option<&str>, fallback: u32) -> u32 {
     if emu == 0 {
         return fallback;
     }
-    let px = ((emu + EMU_PER_PX / 2) / EMU_PER_PX) as u32;
-    px.clamp(MIN_SLICER_DIM_PX, MAX_SLICER_DIM_PX)
+    let px = emu.saturating_add(EMU_PER_PX / 2) / EMU_PER_PX;
+    u32::try_from(px)
+        .unwrap_or(u32::MAX)
+        .clamp(MIN_SLICER_DIM_PX, MAX_SLICER_DIM_PX)
 }
 
 fn parse_slicer_cache_part(xml: &str) -> Option<(String, SlicerCacheDef)> {

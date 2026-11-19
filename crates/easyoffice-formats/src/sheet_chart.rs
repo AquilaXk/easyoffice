@@ -255,10 +255,14 @@ impl ChartAnchor {
         self.left_px = x0.min(u64::from(u32::MAX)) as u32;
         self.top_px = y0.min(u64::from(u32::MAX)) as u32;
         if x1 > x0 {
-            self.width_px = ((x1 - x0) as u32).clamp(MIN_CHART_WIDTH_PX, MAX_CHART_WIDTH_PX);
+            self.width_px = u32::try_from(x1 - x0)
+                .unwrap_or(u32::MAX)
+                .clamp(MIN_CHART_WIDTH_PX, MAX_CHART_WIDTH_PX);
         }
         if y1 > y0 {
-            self.height_px = ((y1 - y0) as u32).clamp(MIN_CHART_HEIGHT_PX, MAX_CHART_HEIGHT_PX);
+            self.height_px = u32::try_from(y1 - y0)
+                .unwrap_or(u32::MAX)
+                .clamp(MIN_CHART_HEIGHT_PX, MAX_CHART_HEIGHT_PX);
         }
     }
 

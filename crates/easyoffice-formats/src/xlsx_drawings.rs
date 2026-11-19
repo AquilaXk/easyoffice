@@ -511,7 +511,7 @@ fn parse_drawing_anchors(xml: &str) -> Result<Vec<DrawingAnchorRaw>, EasyOfficeE
 
 #[inline]
 fn emu_u64_to_px(emu: u64) -> u32 {
-    ((emu + EMU_PER_PX / 2) / EMU_PER_PX).min(u64::from(u32::MAX)) as u32
+    u32::try_from(emu.saturating_add(EMU_PER_PX / 2) / EMU_PER_PX).unwrap_or(u32::MAX)
 }
 
 fn build_anchor_from_raw(

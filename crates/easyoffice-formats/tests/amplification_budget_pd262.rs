@@ -423,3 +423,102 @@ fn table_formulas_over_tens_of_thousands_of_rows_stay_within_the_operand_budget(
     assert_eq!(rows[1_000][0], "1000");
     assert_eq!(rows[rows_len - 1][0], "=COUNT(ABOVE)");
 }
+
+#[test]
+fn slicer_sizes_beyond_u32_pixels_clamp_instead_of_overflowing() {
+    // 폭은 u64 최댓값(옛 코드는 더하기에서 오버플로), 높이는 2^32+600픽셀(옛 코드는 600으로 잘렸다).
+    let pkg = ZipArchiveCodec::pack_compressed(&[
+        ("xl/workbook.xml".to_string(), br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sales" sheetId="1" r:id="rId1"/></sheets><pivotCaches><pivotCache cacheId="42" r:id="rIdPC42"/></pivotCaches></workbook>"#.to_vec()),
+        ("xl/_rels/workbook.xml.rels".to_string(), br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rIdPC42" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition42.xml"/></Relationships>"#.to_vec()),
+        ("xl/worksheets/sheet1.xml".to_string(), br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Region</t></is></c><c r="B1" t="inlineStr"><is><t>Quarter</t></is></c><c r="C1" t="inlineStr"><is><t>Revenue</t></is></c></row></sheetData></worksheet>"#.to_vec()),
+        ("xl/worksheets/_rels/sheet1.xml.rels".to_string(), br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdPT1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>"#.to_vec()),
+        ("xl/pivotCache/pivotCacheDefinition42.xml".to_string(), br#"<?xml version="1.0"?><pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="1"><cacheSource type="worksheet"><worksheetSource ref="A1:C5" sheet="Sales"/></cacheSource><cacheFields count="3"><cacheField name="Region" numFmtId="0"/><cacheField name="Quarter" numFmtId="0"/><cacheField name="Revenue" numFmtId="0"/></cacheFields></pivotCacheDefinition>"#.to_vec()),
+        ("xl/pivotTables/pivotTable1.xml".to_string(), br#"<?xml version="1.0"?><pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="ExternalPivot" cacheId="42" dataCaption="Values"><location ref="E1:G6" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/><pivotFields count="3"><pivotField axis="axisRow"/><pivotField axis="axisCol"/><pivotField dataField="1"/></pivotFields><rowFields count="1"><field x="0"/></rowFields><colFields count="1"><field x="1"/></colFields><dataFields count="2"><dataField name="Sum of Revenue" fld="2" baseField="0" baseItem="0"/><dataField name="Count of Region" fld="0" subtotal="countNums" baseField="0" baseItem="0"/></dataFields></pivotTableDefinition>"#.to_vec()),
+        ("xl/slicerCaches/slicerCache1.xml".to_string(), concat!(
+            r#"<?xml version="1.0"?><slicerCacheDefinition xmlns="http://schemas.micro"#,
+            r#"soft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region" sourceName="Region"><pivotTables><pivotTable tabId="1" name="ExternalPivot"/></pivotTables><data><tabular pivotCacheId="42"><items count="1"><item n="East" s="1"/></items></tabular></data></slicerCacheDefinition>"#
+        ).as_bytes().to_vec()),
+        ("xl/slicers/slicer1.xml".to_string(), concat!(
+            r#"<?xml version="1.0"?><slicers xmlns="http://schemas.micro"#,
+            r#"soft.com/office/spreadsheetml/2009/9/main"><slicer name="Region Slicer" cache="Slicer_Region" caption="Region Filter" width="18446744073709551615" height="40909569209400"/></slicers>"#
+        ).as_bytes().to_vec()),
+    ]).unwrap();
+
+    let (_, stylings) = OoxmlCodec::unpack_xlsx_with_styling(&pkg).expect("decode");
+    let slicer = &stylings[0].1.pivots[0].slicers[0];
+    assert_eq!((slicer.width, slicer.height), (2_000, 2_000));
+}
+
+#[test]
+fn drawing_extents_beyond_u64_pixels_clamp_instead_of_overflowing() {
+    // 확장 크기가 u64 최댓값이면 옛 코드는 반올림 더하기에서 오버플로했다.
+    let pkg = ZipArchiveCodec::pack_compressed(&[
+        (
+            "[Content_Types].xml".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/></Types>"#.to_vec(),
+        ),
+        (
+            "_rels/.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_vec(),
+        ),
+        (
+            "xl/workbook.xml".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="rId1"/></sheets></workbook>"#.to_vec(),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_vec(),
+        ),
+        (
+            "xl/worksheets/sheet1.xml".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Item</t></is></c></row></sheetData><drawing r:id="rIdDraw1"/></worksheet>"#.to_vec(),
+        ),
+        (
+            "xl/worksheets/_rels/sheet1.xml.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdDraw1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="/xl/drawings/drawing1.xml"/></Relationships>"#.to_vec(),
+        ),
+        (
+            "xl/drawings/drawing1.xml".to_string(),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+                r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">"#,
+                r#"<xdr:oneCellAnchor><xdr:from><xdr:col>2</xdr:col><xdr:colOff>95250</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"#,
+                r#"<xdr:ext cx="18446744073709551615" cy="18446744073709551615"/>"#,
+                r#"<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="1" name="ExtChart"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>"#,
+                r#"<xdr:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">"#,
+                r#"<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rIdC1"/>"#,
+                r#"</a:graphicData></xdr:graphic></xdr:graphicFrame><xdr:clientData/></xdr:oneCellAnchor>"#,
+                // Plain shape without <c:chart> should be ignored cleanly (not counted as rejected)
+                r#"<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:sp/></xdr:twoCellAnchor>"#,
+                // Traversal target must be rejected and counted
+                r#"<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:col><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>8</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Bad"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rIdBad"/></a:graphicData></xdr:graphic></xdr:graphicFrame></xdr:twoCellAnchor>"#,
+                r#"</xdr:wsDr>"#
+            ).as_bytes().to_vec(),
+        ),
+        (
+            "xl/drawings/_rels/drawing1.xml.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdC1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/><Relationship Id="rIdBad" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../../../etc/passwd"/></Relationships>"#.to_vec(),
+        ),
+        (
+            "xl/charts/chart1.xml".to_string(),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+                r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">"#,
+                r#"<c:chart><c:title><c:tx><c:strRef><c:f>Report!$A$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>External Title</c:v></c:pt></c:strCache></c:strRef></c:tx></c:title>"#,
+                r#"<c:plotArea><c:bar3DChart><c:barDir val="bar"/><c:ser><c:idx val="0"/><c:order val="0"/>"#,
+                r#"<c:tx><c:v>Alpha</c:v></c:tx>"#,
+                r#"<c:dLbls><c:dLbl><c:tx><c:v>IgnoredLabel</c:v></c:tx></c:dLbl></c:dLbls>"#,
+                r#"<c:cat><c:numRef><c:f>Report!$A$2:$A$4</c:f></c:numRef></c:cat>"#,
+                r#"<c:val><c:numRef><c:f>Report!$B$2:$B$4</c:f></c:numRef></c:val>"#,
+                r#"</c:ser></c:bar3DChart>"#,
+                r#"<c:catAx><c:axId val="1"/><c:title><c:tx><c:v>AxisTitleShouldNotOverwrite</c:v></c:tx></c:title></c:catAx>"#,
+                r#"</c:plotArea></c:chart></c:chartSpace>"#
+            ).as_bytes().to_vec(),
+        ),
+    ]).unwrap();
+
+    let (_, stylings) = OoxmlCodec::unpack_xlsx_with_styling(&pkg).expect("decode");
+    let chart = &stylings[0].1.charts[0];
+    assert_eq!(chart.anchor.width_px, 1_600);
+    assert_eq!(chart.anchor.height_px, 1_200);
+}
