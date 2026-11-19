@@ -16,6 +16,8 @@
     <link rel="stylesheet" href="./content.css" />
     <link rel="stylesheet" href="./home.css" />
     <link rel="stylesheet" href="./copilot.css" />
+    <link rel="stylesheet" href="./base.css" />
+    <link rel="stylesheet" href="./board.css" />
   </head>
   <body>
     <div id="app" class="app-shell" data-module="DOC" data-window-kind="document">
@@ -31,6 +33,8 @@
                   <button type="button" class="md-item" role="menuitem" data-window-new="HWP" tabindex="-1"><span class="md-label">한글 문서 (HWP)</span></button>
                   <button type="button" class="md-item" role="menuitem" data-window-new="SHEET" tabindex="-1"><span class="md-label">스프레드시트 (XLSX)</span></button>
                   <button type="button" class="md-item" role="menuitem" data-window-new="SLIDE" tabindex="-1"><span class="md-label">프레젠테이션 (PPTX)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="BASE" tabindex="-1"><span class="md-label">데이터베이스 (BASE)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="BOARD" tabindex="-1"><span class="md-label">보드 (BOARD)</span></button>
                   <button type="button" class="md-item" role="menuitem" data-window-new="PDF" tabindex="-1"><span class="md-label">PDF 스튜디오</span></button>
                   <button type="button" class="md-item" role="menuitem" data-window-new="CONV" tabindex="-1"><span class="md-label">포맷 변환기</span></button>
                 </div>
@@ -932,6 +936,10 @@
               </div>
             </div>
           </div>
+
+          <section id="pane-base" class="editor-pane base-pane" hidden aria-label="데이터베이스 편집기"></section>
+
+          <section id="pane-board" class="editor-pane board-pane" hidden aria-label="보드 편집기"></section>
 
           <div id="pane-pdf" class="editor-pane" data-empty="true" hidden>
             <div id="pdf-toolbar" class="formula-bar pdf-toolbar eo-doc-style-bar" role="toolbar" aria-label="PDF 도구줄">
@@ -2394,6 +2402,10 @@
             <tr><td>serde / serde_json</td><td>MIT / Apache-2.0</td></tr>
             <tr><td>univer-office-copilot</td><td>Apache-2.0</td></tr>
             <tr><td>continue</td><td>Apache-2.0</td></tr>
+            <tr><td>Excalidraw</td><td>MIT</td></tr>
+            <tr><td>xyflow</td><td>MIT</td></tr>
+            <tr><td>TanStack Table</td><td>MIT</td></tr>
+            <tr><td>glide-data-grid</td><td>MIT</td></tr>
             <tr><td>Noto Sans KR</td><td>OFL</td></tr>
           </tbody>
         </table>
@@ -2610,6 +2622,11 @@
     <script src="./copilot-actions.js"></script>
     <script src="./copilot-model-ui.js"></script>
     <script src="./copilot-ui.js"></script>
+    <script src="./base-model.js"></script>
+    <script src="./base-studio.js"></script>
+    <script src="./board-router.js"></script>
+    <script src="./board-studio.js"></script>
+    <script src="./base-board-host.js"></script>
     <script src="./app.js"></script>
     <script src="./print-preview.js"></script>
     <script src="./layout-lint-ui.js"></script>

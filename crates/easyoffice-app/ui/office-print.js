@@ -373,7 +373,13 @@
       return slideDeckState.map((slide) => slidePage(slide, aspect, paperClass));
     }
 
-    const BUILDERS = { DOC: buildDocument, SHEET: buildSheet, SLIDE: buildSlides };
+    const BUILDERS = {
+      DOC: buildDocument,
+      SHEET: buildSheet,
+      SLIDE: buildSlides,
+      BASE: (rules) => host.__EASYOFFICE_BASE_BOARD_HOST__.buildPrintPages("BASE", document, rules),
+      BOARD: (rules) => host.__EASYOFFICE_BASE_BOARD_HOST__.buildPrintPages("BOARD", document, rules),
+    };
 
     // ---- the job ----------------------------------------------------------------------------
 

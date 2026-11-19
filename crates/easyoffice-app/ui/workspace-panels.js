@@ -637,6 +637,8 @@
     }
 
     function buildOutlineItems(mod) {
+      const ext = host.__EASYOFFICE_BASE_BOARD_HOST__?.outlineItems?.(mod);
+      if (ext) return ext;
       if (mod === "DOC" || mod === "HWP") return docOutlineItems();
       if (mod === "SHEET") return sheetOutlineItems();
       if (mod === "SLIDE") return slideOutlineItems();

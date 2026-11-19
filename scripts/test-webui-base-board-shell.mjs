@@ -1,0 +1,181 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+
+const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
+
+function createMemoryStorage(initial = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+}
+
+function spyOnConvertIpc(host) {
+  const requests = [];
+  const orig = host.__EASYOFFICE_TEST_IPC__;
+  host.__EASYOFFICE_TEST_IPC__ = async (cmd, payload) => {
+    if (cmd === "convert_document_format") requests.push(JSON.parse(payload));
+    return orig(cmd, payload);
+  };
+  return requests;
+}
+
+test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, XLSX/CSV/TSV save/export, print preview, and Copilot", async () => {
+  const storage = createMemoryStorage();
+  const { document, host, sandbox, downloads, userClick, advanceTimers } = await createWorkspaceHarness({
+    search: "?module=BASE&win=w-base-1",
+    localStorage: storage,
+  });
+  const ipcRequests = spyOnConvertIpc(host);
+
+  assert.equal(document.getElementById("app").dataset.module, "BASE");
+  assert.equal(document.getElementById("pane-base").hidden, false);
+  assert.equal(document.getElementById("doc-style-bar").hidden, true, "DOC style bar must stay hidden in BASE");
+  assert.equal(document.getElementById("app").dataset.dirty, "false", "fresh BASE window is clean");
+  advanceTimers(2000);
+  await flushAsyncTurns(5);
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "fresh BASE window has no beforeunload guard");
+
+  const baseHost = host.__EASYOFFICE_BASE_BOARD_HOST__;
+  const baseStudio = baseHost.getBaseStudio();
+  assert.ok(baseStudio, "baseStudio mounted");
+
+  // Add typed fields and a record -> marks workspace dirty and records undo snapshot
+  baseStudio.addField({ name: "단가", type: "number" });
+  baseStudio.addField({ name: "수량", type: "number" });
+  baseStudio.addField({ name: "합계", type: "formula", formula: "{단가} * {수량}" });
+  const tbl0 = baseStudio.getState().tables[0];
+  const fTitle = tbl0.fields[0].id;
+  const fPrice = tbl0.fields.find((f) => f.name === "단가").id;
+  const fQty = tbl0.fields.find((f) => f.name === "수량").id;
+  baseStudio.addRecord({ [fTitle]: "서버 라이선스", [fPrice]: 1500, [fQty]: 4 });
+
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 1, "adding records marks BASE dirty");
+  assert.match(document.getElementById("pane-base").textContent, /6000/);
+
+  // Undo & Redo via workspace shortcut
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(baseStudio.getState().tables[0].records.length, 0, "Ctrl+Z undoes addRecord");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true, shiftKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(baseStudio.getState().tables[0].records.length, 1, "Ctrl+Shift+Z redoes addRecord");
+
+  // Autosave round-trip under per-window key
+  advanceTimers(2000);
+  await flushAsyncTurns(10);
+  const autosaved = storage.getItem(AUTOSAVE_KEY + ".w-base-1");
+  assert.ok(autosaved && autosaved.includes("서버 라이선스"), "BASE state persisted in workspace autosave");
+
+  // Ctrl+S saves as XLSX via convert_document_format
+  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  await flushAsyncTurns(15);
+  assert.ok(ipcRequests.length >= 1, "Ctrl+S invoked convert_document_format");
+  const xlsxReq = ipcRequests.at(-1);
+  assert.equal(xlsxReq.sourceFormat, "xlsx");
+  assert.equal(xlsxReq.targetFormat, "xlsx");
+  assert.ok(Array.isArray(xlsxReq.sheets) && xlsxReq.sheets.length === 1);
+  assert.ok(downloads.some((d) => d.download.endsWith(".xlsx")), "XLSX download triggered");
+
+  // CSV and TSV export buttons
+  userClick(document.getElementById("btn-base-export-csv"));
+  await flushAsyncTurns(10);
+  assert.equal(ipcRequests.at(-1).targetFormat, "csv");
+  assert.ok(downloads.some((d) => d.download.endsWith(".csv")), "CSV download triggered");
+
+  userClick(document.getElementById("btn-base-export-tsv"));
+  await flushAsyncTurns(10);
+  assert.equal(ipcRequests.at(-1).targetFormat, "tsv");
+  assert.ok(downloads.some((d) => d.download.endsWith(".tsv")), "TSV download triggered");
+
+  // Print preview & Copilot context
+  const ppApi = host.__EASYOFFICE_PRINT_PREVIEW__;
+  assert.ok(ppApi);
+  await ppApi.open();
+  await flushAsyncTurns(10);
+  assert.equal(document.getElementById("print-preview-pane").hidden, false);
+  assert.match(document.getElementById("print-preview-stage").textContent, /서버 라이선스/);
+  ppApi.close();
+
+  const copilotCtx = baseHost.extractCopilotContext("BASE");
+  assert.match(copilotCtx.context.doc.paragraphs.join("\n"), /서버 라이선스/);
+});
+
+test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Delete key, PDF save, print preview, and Copilot", async () => {
+  const { document, host, sandbox, downloads, userClick, advanceTimers } = await createWorkspaceHarness({
+    search: "?module=BOARD&win=w-board-1",
+  });
+  const ipcRequests = spyOnConvertIpc(host);
+
+  assert.equal(document.getElementById("app").dataset.module, "BOARD");
+  assert.equal(document.getElementById("pane-board").hidden, false);
+  assert.equal(document.getElementById("doc-style-bar").hidden, true, "DOC style bar must stay hidden in BOARD");
+  assert.equal(document.getElementById("app").dataset.dirty, "false");
+  advanceTimers(2000);
+  await flushAsyncTurns(5);
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0);
+
+  const boardHost = host.__EASYOFFICE_BASE_BOARD_HOST__;
+  const boardStudio = boardHost.getBoardStudio();
+  assert.ok(boardStudio, "boardStudio mounted");
+
+  // Zooming/fitting empty or clean board must NOT mark window dirty
+  boardStudio.setZoom(150);
+  await flushAsyncTurns(5);
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "viewport zoom alone does not mark BOARD dirty");
+
+  // Adding shapes, chart, and obstacle-avoiding orthogonal connector marks dirty and supports Undo/Redo
+  const a = boardStudio.addNode({ kind: "shape", shapeType: "roundRect", x: 80, y: 120, w: 150, h: 80, text: "요청 수집" });
+  const blocker = boardStudio.addNode({ kind: "shape", shapeType: "rect", x: 280, y: 100, w: 140, h: 120, text: "장애물 게이트웨이" });
+  const b = boardStudio.addNode({ kind: "shape", shapeType: "diamond", x: 500, y: 120, w: 150, h: 80, text: "승인 판정" });
+  const chart = boardStudio.addNode({ kind: "chart", chartType: "column", x: 80, y: 280, w: 320, h: 200, title: "처리량 추이" });
+  assert.ok(blocker && chart);
+  const conn = boardStudio.addConnector({ fromId: a.id, toId: b.id, routing: "orthogonal", label: "검증 경로" });
+  assert.ok(conn);
+  const route = boardStudio.getConnectorRoute(conn.id);
+  assert.equal(route.avoidedObstacles, true, "orthogonal connector avoids middle blocker");
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 1);
+
+  // Undo & Redo
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(boardStudio.getState().connectors.length, 0, "Ctrl+Z undoes connector creation");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true, shiftKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(boardStudio.getState().connectors.length, 1, "Ctrl+Shift+Z restores connector");
+
+  // Delete key removes selected node and incident connectors
+  boardStudio.selectNode(b.id);
+  sandbox.dispatchWindowKeydown({ key: "Delete" });
+  await flushAsyncTurns(5);
+  assert.equal(boardStudio.getState().nodes.some((n) => n.id === b.id), false);
+  assert.equal(boardStudio.getState().connectors.length, 0, "incident connector cleaned up with deleted node");
+
+  // Ctrl+S saves BOARD as vector PDF via pptx -> pdf convert_document_format
+  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  await flushAsyncTurns(15);
+  assert.ok(ipcRequests.length >= 1, "Ctrl+S invoked convert_document_format for BOARD");
+  const pdfReq = ipcRequests.at(-1);
+  assert.equal(pdfReq.sourceFormat, "pptx");
+  assert.equal(pdfReq.targetFormat, "pdf");
+  assert.ok(Array.isArray(pdfReq.slides) && pdfReq.slides[0].elements.length >= 3);
+  assert.ok(downloads.some((d) => d.download.endsWith(".pdf")), "PDF download triggered");
+
+  // Element analysis dialog + Print preview + Copilot context
+  userClick(document.getElementById("btn-board-analyze"));
+  assert.match(document.getElementById("board-analysis-body").textContent, /전체 요소/);
+
+  const ppApi = host.__EASYOFFICE_PRINT_PREVIEW__;
+  await ppApi.open();
+  await flushAsyncTurns(10);
+  assert.equal(document.getElementById("print-preview-pane").hidden, false);
+  ppApi.close();
+
+  const copilotCtx = boardHost.extractCopilotContext("BOARD");
+  assert.match(copilotCtx.selection.range, /요소 3개/);
+});

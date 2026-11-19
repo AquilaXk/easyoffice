@@ -353,6 +353,11 @@
         return pdfParts.join("\n");
       }
 
+      const paneBase = document.getElementById("pane-base");
+      if (paneBase && !paneBase.hidden) return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractPlainText?.("BASE") || "";
+      const paneBoard = document.getElementById("pane-board");
+      if (paneBoard && !paneBoard.hidden) return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractPlainText?.("BOARD") || "";
+
       return extractWalkableText(document.getElementById("doc-editor"), false);
     }
 

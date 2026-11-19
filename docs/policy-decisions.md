@@ -4402,3 +4402,44 @@
 - **Alternatives rejected** 슬라이드 개체 겹침을 무정렬 $O(N^2)$ 전체 비교로만 검사하는 방식(밀집 슬라이드에서 불필요한 비교 급증 — `x0` 정렬 스위프-라인 조기 종료로 해결), 실시간 인쇄 미리보기마다 `#eo-print-root`와 `adoptedStyleSheets`를 덮어쓰는 방식(실제 `Ctrl+P` 인쇄 작업과 상태 충돌 — 비파괴 `buildPreview()`로 분리).
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
 - **Revisit when** 헤드리스 스크린샷 출력에 픽셀 단위 기준 이미지 비교(`--diff-baseline`) 모드를 추가할 때.
+
+## PD-259. 관계형 데이터베이스 모듈(`BASE`: 9종 타입 필드·수식·단일 패스 필터/정렬/그룹화·데이터시트/보드/일정 3종 뷰·데이터 검증·`XLSX`/`CSV`/`TSV` 내보내기)
+
+- **Status** Implemented (QA 요청 2026-11-20). 앱·데스크톱·UI: `crates/easyoffice-app/ui/{base-model.js,base-studio.js,base-board-host.js,base.css,icons.js,home-screen.js,window-bridge.js,shell-chrome.js,ribbon-catalog.js,ribbon-history.js,workspace-session.js,workspace-tools.js,workspace-panels.js,office-print.js,print-preview.js,copilot-actions.js,pii-dom-scrubber.js,app.js,index.html}`, `crates/easyoffice-app/src/webui_assets.rs`, `crates/easyoffice-desktop/src/{windows.rs,preview/source.rs}`, `crates/easyoffice-desktop/src/native_menu/{items,layout}.rs`, `scripts/{webui-dom-harness,test-base-engine-pd259,test-webui-base-board-shell,test-webui-windows,test-webui-hwp-shell,test-webui-shell-chrome}.mjs`, `docs/product-spec.md`, `TODO.md`.
+- **Context** 워크북 격자(`SHEET`) 외에 레코드·스키마 단위로 외래키 관계, 타입 검증, 보드·일정 다중 뷰 전환을 제공하는 관계형 테이블 전용 모듈(`BASE`)이 `TODO.md`에 남아 있었다.
+- **Decision (`PD-259`)**
+  1. **9종 타입 필드·O(1) 관계 색인·재귀하강 수식 엔진(`base-model.js`)**:
+     - 다중 테이블(최대 `32`개, 테이블당 필드 `64`개·레코드 `10,000`건·셀 `8,192`자) 위에 `text`·`number`·`select`·`multiSelect`·`date`(`YYYY-MM-DD`)·`checkbox`·`url`(`http`/`https` 한정)·외래키 `relation`(`O(1)` `Map` 역색인 표시 및 `rollupSum` 집계)·`formula` 9종 필드를 구현했다.
+     - 수식 필드는 `eval`/`new Function` 없이 순수 재귀하강 파서·AST 평가기(`{필드명}` 참조, 산술·문자열 `&`·비교, 17종 내장 함수 `IF`·`AND`·`OR`·`NOT`·`ROUND`·`ABS`·`MIN`·`MAX`·`SUM`·`LEN`·`UPPER`·`LOWER`·`TRIM`·`CONCAT`·`LEFT`·`RIGHT`·`COALESCE`, 깊이 상한 `MAX_FORMULA_DEPTH = 32`, 방문 집합 `#CYCLE!`·`#DIV/0!`·`#ERROR!` 방어)로 평가한다.
+     - 필터(`AND`/`OR` 12종 연산자)·다중 열 정렬(숫자/날짜/한국어 `ko` 콜레이터)·그룹화 집계(`count`·숫자 `sum`)를 단일 패스 쿼리 파이프라인으로 처리하며 데이터 유효성 위반이나 상한 초과·프로토타입 오염 키 입력은 상태 변경 없이 즉시 거부한다.
+  2. **공식 한국어 명칭 3종 동기화 뷰 및 `XLSX`·`CSV`·`TSV` 내보내기(`base-studio.js` · `base.css`)**:
+     - 참조 앱(`rhwp-studio` `ko.ts`) 크롬·토큰(`tokens.css`, 리터럴 색상 0건)과 표준 오피스 데이터베이스 공식 한국어 명칭(`데이터베이스`, `데이터시트 보기`, `보드`, `일정`, `새 테이블`, `새 레코드`, `필드 추가`, `필터`, `정렬`, `그룹화 기준`, `유효성 검사`, `XLSX로 내보내기`, `CSV로 내보내기`, `TSV로 내보내기`)만 사용했다.
+     - 빈 초기 상태(`PD-176`: 레코드 0건)로 시작하며 `데이터시트 보기` 인라인 편집·유효성 오류 배지, `보드` 드래그/선택 상태 이동, `일정` 월간 그리드 배치가 하나의 스토어로 즉시 동기화된다.
+     - 새 IPC 명령 추가 없이(15종 유지) 기존 `convert_document_format`에 다중 시트 페이로드(`XLSX`)와 단일 테이블 페이로드·UTF-8 BOM RFC 4180(`CSV`/`TSV`)을 연결하고 창 단위 `실행 취소`/`다시 실행`·자동 저장·`인쇄 미리보기`·`코파일럿` 문맥 추출을 통합했다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 오프라인 단일 번들 정책을 유지하기 위해 런타임 npm 번들 의존성은 추가하지 않는다. (2) 기존 `convert_document_format` `XLSX`/`CSV`/`TSV` 코덱, `sheet-utils.js`(`colIndexToLetters`·`bytesToBase64`), `save-payload.js`(`sanitizeFileBaseName`), `copilot-ui.js`, `tokens.css`를 그대로 재사용했다. (3) 참조 앱(`rhwp` `MIT`)의 하단 `.sheet-tab-bar`·`.eo-doc-style-bar` 크롬과 `THIRD_PARTY_NOTICES.md` 등재 오픈소스 헤드리스 테이블·데이터그리드 엔진(`MIT`)의 무할당 영숫자 청크 비교(`compareAlphanumeric`)·필터·그룹 버킷 및 행 번호 마커·하단 새 레코드 셀·필 배지 구조를 이식해 최적화했다.
+- **Measured** `node --test scripts/test-base-engine-pd259.mjs`: 레코드 `5,000`건 × 수식·필터·다중 정렬·그룹화 단일 패스 쿼리 `13.89 ms`.
+- **Why** 정형 데이터에 타입 무결성·외래키 관계·그리드/칸반/일정 다중 뷰를 제공하면서도 표준 `XLSX`/`CSV`/`TSV` 파일로 즉시 내보낼 수 있게 한다.
+- **Trade-offs** 외부 SQL 서버 연결 대신 단일 창 오프라인 관계형 문서 스토어와 표준 스프레드시트/구분자 파일 내보내기에 집중한다.
+- **Alternatives rejected** 수식 평가에 `new Function`을 쓰는 방식(CSP 위반 및 코드 주입 위험 — 순수 재귀하강 AST 평가기로 해결), 관계·롤업 조회마다 대상 테이블 전체를 선형 스캔하는 방식($O(N \cdot M)$ 지연 — `buildStateIndex` `O(1)` `Map` 색인으로 해결).
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-base-engine-pd259.mjs scripts/test-webui-base-board-shell.mjs`, `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`.
+- **Revisit when** 외부 `CSV`/`XLSX` 파일을 `BASE` 스키마 추론과 함께 직접 관계형 테이블로 가져오는 경로를 확장할 때.
+
+## PD-260. 무한 캔버스 보드 모듈(`BOARD`: 도형·텍스트·그림·네이티브 차트·Hanan 격자 A* 직교/곡선 커넥터 자동 라우팅·요소 분석·벡터 PDF 저장)
+
+- **Status** Implemented (QA 요청 2026-11-20). 앱·데스크톱·UI: `crates/easyoffice-app/ui/{board-router.js,board-studio.js,base-board-host.js,board.css,icons.js,home-screen.js,window-bridge.js,shell-chrome.js,ribbon-catalog.js,ribbon-history.js,workspace-session.js,workspace-tools.js,workspace-panels.js,office-print.js,print-preview.js,copilot-actions.js,pii-dom-scrubber.js,app.js,index.html}`, `crates/easyoffice-app/src/webui_assets.rs`, `crates/easyoffice-desktop/src/{windows.rs,preview/source.rs}`, `crates/easyoffice-desktop/src/native_menu/{items,layout}.rs`, `scripts/{webui-dom-harness,test-board-engine-pd260,test-webui-base-board-shell,test-webui-windows,test-webui-hwp-shell,test-webui-shell-chrome}.mjs`, `docs/product-spec.md`, `TODO.md`.
+- **Context** 아키텍처 다이어그램·업무 흐름도·지표 차트를 페이지 경계 제약 없이 배치하고 장애물을 우회하는 연결선과 그래프 위상 분석·벡터 PDF 출력을 수행하는 무한 캔버스 보드 모듈(`BOARD`)이 `TODO.md` 마지막 기능 항목으로 남아 있었다.
+- **Decision (`PD-260`)**
+  1. **포트 기하·Hanan 직교 격자 장애물 회피 A* 라우터 및 3-색 DFS 요소 분석기(`board-router.js`)**:
+     - 요소 4방향 연결점(`top`·`right`·`bottom`·`left` 및 `auto` 최적 방향 해석)에서 법선 스텁(`18pt`)과 장애물 패딩(`14pt`) 후보선을 모아 유한 Hanan 직교 격자(`MAX_GRID_AXIS = 48`, 코리더 필터 + 지연 장애물 정제) 위에서 `Float64Array`/`Int32Array` 이진 최소 힙 A* 탐색(꺾임 페널티 `28pt`, 동일선상 점 압축)으로 장애물 내부를 가로지르지 않는 90° `직각 연결선`을 계산한다.
+     - `곡선 연결선`은 포트 법선 탄젠트 비례 제어점 기반 3차 베지어 경로로 계산하며, `analyzeBoard`는 $O(V + E)$ 인접 리스트와 3-색 반복 DFS로 요소 종류별 개수·연결선 수·연결 그룹 수·시작/종점/고립 요소·순환 연결 여부·최다 연결 허브·캔버스 경계 상자를 산출한다.
+  2. **무한 팬/줌 캔버스 스튜디오·5종 네이티브 차트·가로 A4 인쇄·순수 벡터 PDF 저장(`board-studio.js` · `board.css`)**:
+     - 참조 앱(`rhwp-studio` `ko.ts`)과 표준 오피스 공식 한국어 명칭(`보드`, `선택`, `도형`, `텍스트`, `그림`, `차트`, `직각 연결선`, `곡선 연결선`, `맨 앞으로 가져오기`, `맨 뒤로 보내기`, `개체 지우기`, `요소 분석`, `인쇄`, `PDF로 저장…`, `전체 맞춤`) 및 `tokens.css` 변수만 사용했다(리터럴 색상 0건).
+     - 빈 캔버스(`PD-176`)에서 시작해 `25%..400%` 줌·드래그 팬(뷰포트 이동만으로는 수정 표시를 켜지 않음), 6종 벡터 도형, 인라인 편집 텍스트, PNG/JPEG 매직 바이트 검증 + `registerDocImage` 핸들 그림(단일 `32 MiB`·총합 `128 MiB`·요소 `512`개·연결선 `1,024`개·좌표 `±100,000` 상한), `renderChartSvg` 재사용 5종 네이티브 벡터 차트, 드래그·8방향 리사이즈 중 `<g.board-connector>` 제자리 실시간 재라우팅을 제공한다.
+     - 인쇄·`인쇄 미리보기`는 가로 A4(`297×210mm`) 자동 축척 벡터 스테이지를 생성하며, `Ctrl+S`·`PDF로 저장…`은 새 IPC 명령 추가 없이 `convert_document_format`(`pptx -> pdf`, `encode_slide_pdf`)을 재사용해 순수 벡터 PDF로 저장한다(이로써 `TODO.md`의 모든 소프트웨어 기능 구현 항목을 100% 완결했다).
+- **재사용 판단 (구현 원칙 3단계)** (1) 런타임 외부 브라우저 패키지를 추가하지 않는다. (2) 기존 `registerDocImage`·`renderChartSvg`·`sheet-dialog-kit.js`·`office-print.js`·`copilot-ui.js`·`encode_slide_pdf`·`tokens.css`를 그대로 재사용했다. (3) 참조 앱(`rhwp` `MIT`)의 도형·차트 한국어 명칭·그룹형 도구 모음과 `THIRD_PARTY_NOTICES.md` 등재 오픈소스 화이트보드·노드 그래프 엔진(`MIT`)의 비균일 격자 A* 직각 라우터(`BinaryStateHeap` decrease-key·역방향 금지·16-케이스 굽힘 추정·동일선 정점 압축), 곡률 제어 3차 베지어(`calculateControlOffset`·`getControlWithCurvature`·`getBezierEdgeCenter`), 직각 모서리 굽힘(`getBend`), 좌하단 플로팅 줌 아일랜드·연결 포트·리사이즈 핸들 크롬을 형식화 배열 구조로 이식·최적화했다.
+- **Measured** `node --test scripts/test-board-engine-pd260.mjs`: 요소 `100`개 + 장애물 회피 직교 연결선 `120`개 A* 라우팅 및 `analyzeBoard` 위상 분석 합산 `17.40 ms`.
+- **Why** 순서도·아키텍처 보드·차트 대시보드를 무한 캔버스에서 작성하고 요소를 옮겨도 직교/곡선 연결선이 장애물을 피해 자동 유지되며 인쇄와 벡터 PDF까지 한 흐름으로 이어지게 한다.
+- **Trade-offs** PDF 출력 시 슬라이드 벡터 스키마(`SlideBox`) 위에서 연결선 선분을 축 정렬 세그먼트 도형으로 정규화해 출력하며 화면·인쇄 미리보기에서는 원본 SVG 직교/베지어 화살표를 그대로 그린다.
+- **Alternatives rejected** 픽셀 격자 전체에 대해 매 프레임 무제한 A*를 돌리는 방식(넓은 캔버스에서 메모리·시간 폭증 — 포트·장애물 모서리 Hanan 유한 격자로 해결), 뷰포트 줌·팬만으로도 문서를 수정됨(`dirty`)으로 표시하는 방식(열람만으로 불필요한 저장 확인 발생 — 지문 계산에서 `viewport` 분리로 해결).
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
+- **Revisit when** 보드 전용 네이티브 아카이브 확장자 열기나 다중 선택 정렬·배분 도구를 추가할 때.

@@ -317,6 +317,122 @@ Copyright 2023-2026 Continue Dev, Inc.
 Licensed under the Apache License, Version 2.0 (see full text above).
 ```
 
+## Excalidraw (MIT)
+
+Source: https://github.com/excalidraw/excalidraw (commit `091bc0e9d86fef5727c3f4d148a73e441b064ed1`, Copyright (c) 2020 Excalidraw).
+Nothing is vendored or linked at runtime; the non-uniform obstacle-padded grid A* orthogonal elbow arrow router (`packages/element/src/elbowArrow.ts`: `BinaryHeap` with `rescoreElement`, 16-case `estimateSegmentCount` heuristic, reverse-heading prohibition `flipHeading`, segment midpoint obstacle rejection, `removeElbowArrowShortSegments`, and `getElbowArrowCornerPoints`) and the floating island surface layout (`packages/excalidraw/components/Island.scss`) were adapted into `crates/easyoffice-app/ui/{board-router.js,board-studio.js,board.css}` (`PD-260`).
+
+```
+MIT License
+
+Copyright (c) 2020 Excalidraw
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## xyflow (MIT)
+
+Source: https://github.com/xyflow/xyflow (commit `29ab9e001c2ba320c9d84b00c729c745132d9145`, Copyright (c) 2019-2025 webkid GmbH).
+Nothing is vendored or linked at runtime; the curvature-aware cubic Bezier edge control offset and midpoint calculation (`packages/system/src/utils/edges/bezier-edge.ts`: `calculateControlOffset`, `getControlWithCurvature`, `getBezierEdgeCenter`), smooth step corner rounding (`packages/system/src/utils/edges/smoothstep-edge.ts`: `getBend`), and node handle / resizer / bottom-left viewport controls chrome (`packages/system/src/styles/{style,node-resizer}.css`) were adapted into `crates/easyoffice-app/ui/{board-router.js,board-studio.js,board.css}` (`PD-260`).
+
+```
+MIT License
+
+Copyright (c) 2019-2025 webkid GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## TanStack Table (MIT)
+
+Source: https://github.com/TanStack/table (commit `1cfb2e57cbfecf25e3d4ee1bda32fbd65e4e0327`, Copyright (c) 2016 Tanner Linsley).
+Nothing is vendored or linked at runtime; the zero-allocation chunked alphanumeric comparator (`packages/table-core/src/features/row-sorting/sortFns.ts`: `compareAlphanumeric`, `findChunkEnd`, `compareNumericChunks`, `parseSmallInt`, `countRemainingChunks`), column filter predicates (`packages/table-core/src/features/column-filtering/filterFns.ts`), and grouped row model bucket folding (`packages/table-core/src/features/column-grouping/createGroupedRowModel.ts`) were adapted into `crates/easyoffice-app/ui/base-model.js` (`PD-259`).
+
+```
+MIT License
+
+Copyright (c) 2016 Tanner Linsley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## glide-data-grid (MIT)
+
+Source: https://github.com/glideapps/glide-data-grid (commit `0875d78cc41535a39f8b417ff88ce1ebe129c7451` / `0875d78cc41535a39f8b417ff88ce1ebe129c363`, Copyright (c) 2021 typeguard, Inc.).
+Nothing is vendored or linked at runtime; the datasheet row marker cell, pill bubble badge cell, and trailing inline new-row cell surface patterns (`packages/core/src/cells/{bubble-cell,marker-cell,new-row-cell}.tsx`) were adapted into `crates/easyoffice-app/ui/{base-studio.js,base.css}` (`PD-259`).
+
+```
+MIT License
+
+Copyright (c) 2021 typeguard, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rust dependencies compiled into the rhwp WebAssembly module
 
 These are the crates statically linked into `vendor/rhwp-core/rhwp_bg.wasm` (built from the pinned rhwp commit with Rust 1.93.1 and wasm-pack 0.14.0, see `vendor/rhwp-core/PROVENANCE.json`). The list and texts below are generated offline by `scripts/generate-wasm-notices.mjs` from `cargo metadata` and the crates' own license and NOTICE files, and must be regenerated whenever the WebAssembly package is rebuilt.

@@ -28,6 +28,8 @@ const FRAME_PROBE_HTML: &str = include_str!("../ui/frame-probe.html");
 const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
 const CSS_ASSETS: &[(&str, &str, &str)] = ui_css_table![
+    "base.css",
+    "board.css",
     "content.css",
     "copilot.css",
     "home.css",
@@ -40,6 +42,11 @@ const CSS_ASSETS: &[(&str, &str, &str)] = ui_css_table![
 
 const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "app.js",
+    "base-board-host.js",
+    "base-model.js",
+    "base-studio.js",
+    "board-router.js",
+    "board-studio.js",
     "color-picker.js",
     "copilot-actions.js",
     "copilot-catalog.js",

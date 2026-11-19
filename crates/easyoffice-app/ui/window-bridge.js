@@ -7,7 +7,7 @@
   // dialog, reads files and tracks paths; this page only ever sees display names, kinds and bytes.
   // In the developer-only `--serve` mode the same model is emulated with `window.open`.
 
-  const MODULES = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]);
+  const MODULES = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF", "CONV"]);
   const START = "START";
   const APP_TITLE = "EasyOffice";
   const UNTITLED = "제목 없음";

@@ -41,6 +41,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "window-new:slide",
     ),
+    item(
+        "file:new-base",
+        "데이터베이스 (BASE)",
+        None,
+        "window-new:base",
+    ),
+    item("file:new-board", "보드 (BOARD)", None, "window-new:board"),
     item("file:new-pdf", "PDF 스튜디오", None, "window-new:pdf"),
     item("file:new-conv", "포맷 변환기", None, "window-new:conv"),
     item("file:open", "열기…", Some("CmdOrCtrl+O"), "file-open"),

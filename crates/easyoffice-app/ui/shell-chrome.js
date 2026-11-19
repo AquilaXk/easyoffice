@@ -24,6 +24,8 @@
     "file:new-hwp": "window-new:hwp",
     "file:new-sheet": "window-new:sheet",
     "file:new-slide": "window-new:slide",
+    "file:new-base": "window-new:base",
+    "file:new-board": "window-new:board",
     "file:new-pdf": "window-new:pdf",
     "file:new-conv": "window-new:conv",
     "file:open": "file-open",

@@ -100,7 +100,7 @@ test("the start window keeps the menu bar and status bar around the start screen
 });
 
 test("each launch module opens its own pane", async () => {
-  for (const [mod, pane] of [["DOC", "pane-doc"], ["SLIDE", "pane-slide"], ["PDF", "pane-pdf"], ["CONV", "pane-converter"]]) {
+  for (const [mod, pane] of [["DOC", "pane-doc"], ["SLIDE", "pane-slide"], ["BASE", "pane-base"], ["BOARD", "pane-board"], ["PDF", "pane-pdf"], ["CONV", "pane-converter"]]) {
     const { document } = await openWindow(`?module=${mod}&win=w-${mod}`);
     assert.equal(document.getElementById(pane).hidden, false, mod);
     assert.equal(document.getElementById("app").dataset.module, mod);
@@ -114,7 +114,7 @@ test("the start window shows creation buttons and the recent list", async () => 
   assert.equal(document.getElementById("app").dataset.windowKind, "start");
   assert.equal(document.getElementById("home-screen").hidden, false);
   const kinds = document.querySelectorAll("#home-screen [data-window-new]").map((b) => b.dataset.windowNew);
-  assert.deepEqual(kinds, ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]);
+  assert.deepEqual(kinds, ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF", "CONV"]);
   assert.ok(document.querySelector("#home-screen [data-file-open]"));
   const recent = document.querySelectorAll("#home-screen .home-recent-card[data-recent-id]");
   assert.deepEqual(recent.map((b) => b.querySelector(".home-recent-name").textContent.trim()), ["예산.xlsx", "계획.hwpx"]);
@@ -283,7 +283,7 @@ test("File menu: new document kinds, open, recent, save and close call the windo
     assert.ok(labels.includes(wanted), `File menu has ${wanted}: ${labels.join("|")}`);
   }
   const kinds = fileMenu.querySelectorAll("[data-window-new]").map((b) => b.dataset.windowNew);
-  assert.deepEqual(kinds, ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]);
+  assert.deepEqual(kinds, ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF", "CONV"]);
 
   userClick(fileMenu.querySelector('[data-window-new="HWP"]'));
   await flushAsyncTurns();

@@ -30,7 +30,9 @@ impl Source {
             WindowKind::Pdf => Self::Pdf,
             _ if is_text(extension) => Self::Text,
             WindowKind::Doc | WindowKind::Sheet | WindowKind::Slide => Self::Document,
-            WindowKind::Start | WindowKind::Conv => return None,
+            WindowKind::Start | WindowKind::Conv | WindowKind::Base | WindowKind::Board => {
+                return None
+            }
         })
     }
 

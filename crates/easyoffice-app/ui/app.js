@@ -259,7 +259,7 @@
   const DROP_HINT = "파일을 놓으면 문서를 엽니다";
   const NEW_DOCUMENT_LABELS = {
     DOC: "문서 (DOCX)", HWP: "한글 문서 (HWP)", SHEET: "스프레드시트 (XLSX)",
-    SLIDE: "프레젠테이션 (PPTX)", PDF: "PDF 스튜디오", CONV: "포맷 변환기",
+    SLIDE: "프레젠테이션 (PPTX)", BASE: "데이터베이스 (BASE)", BOARD: "보드 (BOARD)", PDF: "PDF 스튜디오", CONV: "포맷 변환기",
   };
 
   function executePaletteItem(item) {
@@ -945,6 +945,7 @@
     workspacePanels.renderModuleOutline("DOC");
     sheetController.updateSheetSelectionAndAggregates("A1");
     slideStudio.bind();
+    host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), noteActivity: () => workspaceSession?.noteActivity() });
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(
       host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.guessClientPlatform()

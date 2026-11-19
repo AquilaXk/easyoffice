@@ -16,6 +16,8 @@ pub enum WindowKind {
     Hwp,
     Sheet,
     Slide,
+    Base,
+    Board,
     Pdf,
     Conv,
 }
@@ -54,6 +56,8 @@ impl WindowKind {
             b"hwp" => Some(Self::Hwp),
             b"sheet" => Some(Self::Sheet),
             b"slide" => Some(Self::Slide),
+            b"base" => Some(Self::Base),
+            b"board" => Some(Self::Board),
             b"pdf" => Some(Self::Pdf),
             b"conv" => Some(Self::Conv),
             _ => None,
@@ -68,6 +72,8 @@ impl WindowKind {
             Self::Hwp => "HWP",
             Self::Sheet => "SHEET",
             Self::Slide => "SLIDE",
+            Self::Base => "BASE",
+            Self::Board => "BOARD",
             Self::Pdf => "PDF",
             Self::Conv => "CONV",
         }
@@ -454,12 +460,16 @@ mod tests {
     #[test]
     fn kinds_parse_and_map_extensions() {
         assert_eq!(WindowKind::parse("hwp"), Some(WindowKind::Hwp));
+        assert_eq!(WindowKind::parse("base"), Some(WindowKind::Base));
+        assert_eq!(WindowKind::parse("BOARD"), Some(WindowKind::Board));
         assert_eq!(WindowKind::parse(" START "), Some(WindowKind::Start));
         // PD-098: the start window is a regular workspace window, not a compact one.
         for kind in [
             WindowKind::Start,
             WindowKind::Doc,
             WindowKind::Hwp,
+            WindowKind::Base,
+            WindowKind::Board,
             WindowKind::Conv,
         ] {
             assert_eq!(kind.inner_size(), (1280.0, 860.0));

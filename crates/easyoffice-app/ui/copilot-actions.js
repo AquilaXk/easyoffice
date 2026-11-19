@@ -103,6 +103,9 @@
       if (mod === "SLIDE") {
         return "슬라이드 " + (getActiveSlideIndex() + 1);
       }
+      if (mod === "BASE" || mod === "BOARD") {
+        return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod)?.selection?.range || "";
+      }
       if (mod === "DOC") {
         const sel = host.getSelection?.();
         const editor = document.getElementById("doc-editor");
@@ -198,6 +201,7 @@
       }
       if (mod === "DOC") return { selection: label ? { range: label } : {}, context: { doc: extractDocContext() } };
       if (mod === "SLIDE") return { selection: { slideIndex: getActiveSlideIndex() }, context: { slide: extractSlideContext() } };
+      if (mod === "BASE" || mod === "BOARD") return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod) || { selection: {}, context: {} };
       if (mod === "PDF") return { selection: {}, context: { pdf: extractPdfContext() } };
       return { selection: {}, context: {} };
     }

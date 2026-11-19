@@ -82,8 +82,16 @@
   - 페이지 90도 단위 회전(`rotatePage(at:clockwiseDegrees:)`), 빈 페이지 삽입(`insertBlankPage(at:)`), 페이지 삭제(`deletePage(at:)`), 순서 재배치(`reorderPage(from:to:)`), 지정 페이지 추출(`extractPages(oneBasedPageNumbers:newTitle:)`), 분할(`split(atOneBasedPage:)`), 다중 PDF 병합(`merge(documents:mergedTitle:)`).
   - `convertToEditableDocument(targetFormat:)`, `convertToPresentation()`, `fromDocument(_:)`, `fromWorksheet(_:range:)`, `fromPresentation(_:)`를 통한 오피스 문서·시트·슬라이드 ↔ PDF 양방향 변환.
 
-### 2.5 시작 화면·변환·오프라인 스마트 도구 (`crates/easyoffice-app`)
-- **시작 화면과 창 세션**: 인수 없이 실행하면 홈 화면(`ui/home-screen.js`: 새 문서 6종·열기·최근 문서 카드)이 뜨고, 문서 하나는 창 하나입니다(`PD-088`). 창별 편집 상태는 `ui/workspace-session.js`가 맡고 모듈별 편집기 패널은 WebUI `ui/`에 있습니다.
+### 2.5 관계형 데이터베이스 (`BASE`, `ui/base-model.js` · `ui/base-studio.js`, `PD-259`) 및 무한 캔버스 보드 (`BOARD`, `ui/board-router.js` · `ui/board-studio.js`, `PD-260`)
+- **관계형 데이터베이스 (`BASE`, `PD-259`)**:
+  - 다중 테이블(최대 `32`개) × 9종 타입 필드(`text`·`number`·`select`·`multiSelect`·`date`·`checkbox`·`url`·외래키 `relation` 및 `rollupSum`·재귀하강 파서 기반 `{필드}` `formula`), 데이터 유효성 검사(`required`·숫자 `min`/`max`·문자열 `maxLength`·허용 선택지·`http`/`https` URL·관계 레코드 검증), 단일 패스 필터(`AND`/`OR` 12종 연산자)·다중 정렬·그룹화 쿼리 파이프라인.
+  - 3종 실시간 동기화 뷰(`데이터시트 보기`·드래그 카드 `보드`·월간 `일정`), `실행 취소`/`다시 실행`·창 자동 저장·인쇄 미리보기, 그리고 `convert_document_format` 기반 `XLSX`(다중 테이블 시트)·UTF-8 BOM `CSV`·`TSV` 내보내기.
+- **무한 캔버스 보드 (`BOARD`, `PD-260`)**:
+  - 무한 팬·줌(`25%..400%`·`전체 맞춤`) 월드 좌표계 위 6종 벡터 도형(`직사각형`·`모서리가 둥근 직사각형`·`타원`·`마름모`·`오른쪽 화살표`·`설명선`), 텍스트, `registerDocImage` 핸들 기반 PNG/JPEG 그림, 5종 네이티브 벡터 차트(`묶은 세로 막대형`·`묶은 가로 막대형`·`꺾은선형`·`원형`·`분산형`).
+  - 4방향 포트 해석기 + Hanan 직교 격자 장애물 회피 A* `직각 연결선` 및 3차 베지어 `곡선 연결선` 실시간 재라우팅, 3-색 DFS $O(V + E)$ `요소 분석`(연결 그룹·시작/종점/고립 요소·순환 연결·최다 연결 요소·캔버스 범위), 가로 A4 인쇄·인쇄 미리보기 및 순수 벡터 `PDF` 저장(`encode_slide_pdf`).
+
+### 2.6 시작 화면·변환·오프라인 스마트 도구 (`crates/easyoffice-app`)
+- **시작 화면과 창 세션**: 인수 없이 실행하면 홈 화면(`ui/home-screen.js`: 새 문서 8종·열기·최근 문서 카드)이 뜨고, 문서 하나는 창 하나입니다(`PD-088`). 창별 편집 상태는 `ui/workspace-session.js`가 맡고 모듈별 편집기 패널은 WebUI `ui/`에 있습니다.
 - **포맷 변환, 구조화 리드백(`PD-248`), 레이아웃 린트·헤드리스 쪽 스크린샷·창 내 실시간 인쇄 미리보기(`PD-258`)**: IPC 명령 `convert_document_format`(`convert_ipc.rs`)이 20종 포맷과 Pages 사이를 변환하며 `"action": "inspect"`(`"readback"`)와 `evaluate_sheet` `"action"`·`"sessionAction": "inspect"` 및 `easyoffice-app --inspect <FILE>`(`--sheet`·`--range`·`--max-items`) CLI가 시트 A1 범위·수식·표시 형식·동적 배열·오류 히스토그램·데이터 유효성 위반, 문서·Pages·한글 블록·개요·표 수식·내부 북마크·대체 텍스트 무결성, 문서·슬라이드 레이아웃 린트(`layoutLint`: 개체 넘침 `overflow`·개체 겹침 `overlap`·빈 자리표시자 `emptyPlaceholder`), 슬라이드 밀도, PDF 쪽 규격·북마크·링크·주석·대화형 양식 수를 단일 패스 JSON으로 점검합니다. 데스크톱 바이너리 `EasyOffice --render-pages <FILE> --out-dir <DIR> [--pages <SPEC>] [--dpi <36..=300>]`(별칭 `--screenshot`)는 창을 띄우지 않고 20종 포맷과 `.pages`의 다중 쪽 PNG 스크린샷을 생성하며, WebUI는 `도구 ▸ 문서 검사…` 대화상자와 `파일 ▸ 인쇄 미리보기`(우측 도킹형 실시간 페이지 미리보기: `한 쪽`/`두 쪽`·`폭 맞춤`/`쪽 맞춤`·쪽 이동·인쇄)를 제공합니다.
 - **100% 오프라인 스마트 보조 (`LocalSmartAssistant`, `smart_tools.rs`)**: 외부 서버 통신 없이 핵심 문장 요약(`summarize_document`), 문장 진단(`diagnose_writing`), 조치 항목 추출(`extract_action_items`), LCS 문서 비교(`diff_documents_lcs`)를 제공합니다.
 - **PII 비식별화 (`DocumentSecurityAuditor`)**: `scan_and_scrub_pii`·`scan_and_scrub_pii_with_metadata`가 주민등록번호·외국인등록번호·연락처·이메일·신용카드(Luhn 검증)·은행 계좌·여권·운전면허·사업자등록번호를 마스킹하고, 메타데이터 항목을 제거한 개수를 보고합니다.

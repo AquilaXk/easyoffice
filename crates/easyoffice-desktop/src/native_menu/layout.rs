@@ -72,11 +72,13 @@ pub const MINIMIZE: &str = "@minimize";
 pub const CLOSE_WINDOW: &str = "@close-window";
 
 /// The items of the 새 문서 submenu.
-pub const NEW_DOC_IDS: [&str; 6] = [
+pub const NEW_DOC_IDS: [&str; 8] = [
     "file:new-doc",
     "file:new-hwp",
     "file:new-sheet",
     "file:new-slide",
+    "file:new-base",
+    "file:new-board",
     "file:new-pdf",
     "file:new-conv",
 ];

@@ -97,6 +97,7 @@
     const SCOPE_BY_FORMAT = Object.freeze({
       xlsx: "SHEET", xls: "SHEET", ods: "SHEET", csv: "SHEET", tsv: "SHEET", sheet: "SHEET",
       pptx: "SLIDE", ppsx: "SLIDE", ppt: "SLIDE", odp: "SLIDE", slide: "SLIDE",
+      base: "BASE", board: "BOARD",
       pdf: "PDF",
       hwp: "HWP", hwt: "HWP", hwpx: "HWP", hwtx: "HWP",
     });
@@ -154,6 +155,9 @@
           syncActiveSlideDomStylesToDeck();
         }
         return host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.serializeDeckPayload(slideDeckState, document, extractEditableDocumentText);
+      }
+      if (scope === "BASE" || scope === "BOARD") {
+        return host.__EASYOFFICE_BASE_BOARD_HOST__.buildConversionContent(scope, resolveSaveFileBase(scope));
       }
       const lines = [];
       document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)").forEach((el) => {
@@ -307,12 +311,13 @@
       }
     }
 
-    const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf" };
+    const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", BASE: "xlsx", BOARD: "pdf", PDF: "pdf" };
     const BIDIRECTIONAL_SAVE_EXTS = {
       DOC: new Set(["docx", "odt", "rtf", "md", "txt", "hwpx"]),
       HWP: new Set(["hwpx"]),
       SHEET: new Set(["xlsx", "xls", "ods", "csv", "tsv"]),
       SLIDE: new Set(["pptx", "ppsx", "odp"]),
+      BASE: new Set(["xlsx", "csv", "tsv"]),
     };
 
     function openedExtensionOf(mod) {
@@ -347,7 +352,7 @@
         ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
         : defaultSaveSpecForModule(curMod, saveAs);
       const dstExt = spec.ext || "docx";
-      let srcExt = dstExt;
+      let srcExt = curMod === "BASE" ? "xlsx" : curMod === "BOARD" ? "pptx" : dstExt;
       let title = resolveSaveFileBase(curMod);
       let content;
       if (isConv) {

@@ -119,7 +119,7 @@ test("icons are inserted as SVG elements and replace glyph text", async () => {
 
 test("every control has an accessible name (0 unlabeled controls in every module and theme)", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-a11y" });
-  for (const mod of ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]) {
+  for (const mod of ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF", "CONV"]) {
     switchModule(document, mod);
     await flushAsyncTurns(10);
     assert.deepEqual(unlabeledControls(document), [], `unlabeled controls in ${mod}`);

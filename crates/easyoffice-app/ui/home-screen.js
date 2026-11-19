@@ -21,11 +21,13 @@
     { kind: "HWP", icon: "file-hwp", title: "한글 문서" },
     { kind: "SHEET", icon: "file-sheet", title: "스프레드시트" },
     { kind: "SLIDE", icon: "file-slide", title: "프레젠테이션" },
+    { kind: "BASE", icon: "file-base", title: "데이터베이스" },
+    { kind: "BOARD", icon: "file-board", title: "보드" },
     { kind: "PDF", icon: "file-pdf", title: "PDF 스튜디오" },
     { kind: "CONV", icon: "file-convert", title: "포맷 변환기" },
   ]);
   const KIND_LABELS = Object.freeze({
-    DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF",
+    DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", BASE: "데이터베이스", BOARD: "보드", PDF: "PDF",
   });
   const PREVIEW_LINES = ["home-preview-line is-wide", "home-preview-line", "home-preview-line is-short", "home-preview-line is-wide"];
   const PREVIEW_CELLS = 6;

@@ -149,6 +149,7 @@
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
         tabTitles: readTabTitles(),
+        ...(host.__EASYOFFICE_BASE_BOARD_HOST__?.captureSnapshotFields?.() || {}),
       };
     }
 
@@ -193,6 +194,8 @@
         HWP: getHwpHost?.()?.paneForModule() || document.getElementById("pane-doc"),
         SHEET: document.getElementById("pane-sheet"),
         SLIDE: document.getElementById("pane-slide"),
+        BASE: document.getElementById("pane-base"),
+        BOARD: document.getElementById("pane-board"),
         PDF: document.getElementById("pane-pdf"),
         CONV: document.getElementById("pane-converter"),
       };
@@ -262,6 +265,7 @@
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
       }
+      host.__EASYOFFICE_BASE_BOARD_HOST__?.restoreSnapshotFields?.(snap);
     }
 
     // The pdf, view, theme and document-name parts of a whole snapshot.

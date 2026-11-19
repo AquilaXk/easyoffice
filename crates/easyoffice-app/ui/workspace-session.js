@@ -13,7 +13,7 @@
 const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   const MAX_NODE_SPEC_DEPTH = 64;
 
-  const ALL_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"];
+  const ALL_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF", "CONV"];
   const DOC_MODULES = ["DOC", "HWP"];
   const EDIT_MODULES = ["DOC", "HWP", "SHEET", "SLIDE"];
   const DOC_SHEET_MODULES = ["DOC", "HWP", "SHEET"];
@@ -41,8 +41,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
-    "copilot-toggle": ["DOC", "SHEET", "SLIDE", "PDF"],
-    find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE"],
+    "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
+    find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     "mod-symbol": EDIT_MODULES,
     "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
@@ -63,7 +63,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === "Ctrl+Shift+K")) {
     sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
       ...sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS,
-      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "SHEET", "SLIDE", "PDF"] },
+      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"] },
     ]);
   }
   const BLOCKED_SPEC_TAGS = new Set([
@@ -164,6 +164,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     const parts = [
       snap.docTabs, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.workbookTheme, snap.customTableStyles, snap.definedNames,
       snap.sheetFrozen, snap.sheetOrder, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
+      snap.baseState, snap.boardState?.nodes, snap.boardState?.connectors,
     ];
     if (workbookProtect) parts.push(workbookProtect);
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, ""))) + "-" + sheetStoreDigest(snap.sheets);
@@ -245,6 +246,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       DOC: [snap.docTabs?.DOC],
       HWP: [snap.docTabs?.HWP],
       SLIDE: [snap.slides],
+      BASE: [snap.baseState],
+      BOARD: [snap.boardState?.nodes, snap.boardState?.connectors],
       PDF: [snap.pdfStudio, snap.pdfRotationDeg],
     }[mod] || [];
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));

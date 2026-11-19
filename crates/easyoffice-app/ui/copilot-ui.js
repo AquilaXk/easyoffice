@@ -4,7 +4,7 @@
   "use strict";
 
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "PDF"]);
+  const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 520;
   const DEFAULT_WIDTH = 320;
@@ -28,6 +28,14 @@
     PDF: Object.freeze([
       { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 요약해 주세요." },
       { label: "주요 항목 정리", prompt: "문서의 주요 항목과 수치를 정리해 주세요." },
+    ]),
+    BASE: Object.freeze([
+      { label: "테이블 데이터 요약", prompt: "현재 테이블 레코드와 집계 수치를 요약해 주세요." },
+      { label: "이상치 및 누락 점검", prompt: "누락된 값이나 주의할 항목을 정리해 주세요." },
+    ]),
+    BOARD: Object.freeze([
+      { label: "보드 흐름 요약", prompt: "현재 보드의 연결 흐름과 핵심 요소를 설명해 주세요." },
+      { label: "구조 개선 제안", prompt: "단계 누락이나 병목 구간이 있는지 분석해 주세요." },
     ]),
   });
 

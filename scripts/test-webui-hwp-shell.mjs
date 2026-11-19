@@ -284,7 +284,7 @@ test("home actions use one SVG icon per format and one shared accent token", asy
     names[card.dataset.windowNew] = card.querySelector(".home-action-icon").dataset.icon;
   }
   assert.equal(new Set(Object.values(names)).size, Object.keys(names).length, "every card has its own icon");
-  assert.deepEqual(Object.keys(names).sort((a, b) => a.localeCompare(b)), ["CONV", "DOC", "HWP", "PDF", "SHEET", "SLIDE"]);
+  assert.deepEqual(Object.keys(names).sort((a, b) => a.localeCompare(b)), ["BASE", "BOARD", "CONV", "DOC", "HWP", "PDF", "SHEET", "SLIDE"]);
   const source = read("icons.js");
   for (const name of Object.values(names)) assert.ok(new RegExp(String.raw`"?${name}"?:\s*\[`).test(source), `${name} is drawn in icons.js`);
   // PD-098: no per-module colours; every card icon uses the single accent token.
