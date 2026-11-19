@@ -380,7 +380,7 @@ impl DocxWalker {
                         self.cur_text.clear();
                     }
                     let prev_jc = top.jc.take().unwrap_or_else(|| "left".to_string());
-                    let prev_runs = std::mem::take(&mut top.runs);
+                    let prev_runs = top.take_runs();
                     top.zones.push((prev_jc, prev_runs));
                     top.jc = Some(next_jc.to_string());
                     return Ok(());
@@ -410,7 +410,7 @@ impl DocxWalker {
     fn note_page_break(&mut self) {
         let before_text = self.cur_text.trim().is_empty();
         if let Some(top) = self.paras.last_mut() {
-            if before_text && top.runs.iter().all(|r| r.text.trim().is_empty()) {
+            if before_text && top.runs_are_blank() {
                 top.page_break_before = true;
             } else {
                 top.page_break_after = true;

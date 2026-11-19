@@ -33,6 +33,41 @@ pub(super) struct ParaState {
     pub(super) zones: Vec<(String, Vec<RichRun>)>,
     pub(super) task_checkbox: Option<bool>,
     pub(super) strip_task_space: bool,
+    /// Runs before this index are known to hold only blank text (see [`Self::runs_are_blank`]).
+    pub(super) blank_prefix: usize,
+    /// A run with text was seen, so the paragraph's runs are not all blank.
+    pub(super) has_text_run: bool,
+}
+
+impl ParaState {
+    /// Whether every run so far is blank. Each call scans only the runs added since the last one, so
+    /// a page break after each of N blank runs costs O(N), not O(N^2) (PD-262). The last run is never
+    /// cached because later text can still be appended to it.
+    pub(super) fn runs_are_blank(&mut self) -> bool {
+        if self.runs.len() < self.blank_prefix {
+            self.blank_prefix = 0;
+            self.has_text_run = false;
+        }
+        if self.has_text_run {
+            return false;
+        }
+        let stable = self.runs.len().saturating_sub(1);
+        while self.blank_prefix < stable {
+            if !self.runs[self.blank_prefix].text.trim().is_empty() {
+                self.has_text_run = true;
+                return false;
+            }
+            self.blank_prefix += 1;
+        }
+        self.runs.last().is_none_or(|r| r.text.trim().is_empty())
+    }
+
+    /// Takes the runs and forgets what was known about them.
+    pub(super) fn take_runs(&mut self) -> Vec<RichRun> {
+        self.blank_prefix = 0;
+        self.has_text_run = false;
+        std::mem::take(&mut self.runs)
+    }
 }
 
 #[inline]

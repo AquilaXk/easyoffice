@@ -343,3 +343,39 @@ fn hwpx_unclosed_paragraphs_hit_the_depth_budget() {
         "hwpx nested paragraphs",
     );
 }
+
+/// 시간 상한 시험의 여유 폭: 수정 후 코드는 이 값의 1/10 안에 끝난다.
+const LINEAR_TIME_LIMIT_SECS: u64 = 5;
+
+fn assert_finishes_fast<T>(what: &str, work: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let out = work();
+    let took = start.elapsed();
+    assert!(
+        took.as_secs() < LINEAR_TIME_LIMIT_SECS,
+        "{what}: took {took:?}, a linear pass finishes well under {LINEAR_TIME_LIMIT_SECS}s"
+    );
+    out
+}
+
+#[test]
+fn docx_page_breaks_after_blank_runs_decode_in_linear_time() {
+    // 굵게/보통을 번갈아 쓴 공백 런이라 합쳐지지 않고, 쪽 나눔마다 앞선 런이 전부 공백이다.
+    let runs: String = (0..200_000)
+        .map(|i| {
+            let rpr = if i % 2 == 0 { "<w:rPr><w:b/></w:rPr>" } else { "" };
+            format!(r#"<w:r>{rpr}<w:t xml:space="preserve"> </w:t></w:r><w:r><w:br w:type="page"/></w:r>"#)
+        })
+        .collect();
+    let xml = format!(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>{runs}</w:p></w:body></w:document>"#
+    );
+    let bytes = ZipArchiveCodec::pack_compressed(&[
+        ("[Content_Types].xml".to_string(), b"<Types/>".to_vec()),
+        ("word/document.xml".to_string(), xml.into_bytes()),
+    ])
+    .expect("pack docx");
+    assert_finishes_fast("docx page breaks", || {
+        UniversalFormatConverter::decode_rich(&bytes, Some("a.docx")).expect("decode")
+    });
+}
