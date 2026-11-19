@@ -170,6 +170,11 @@ pub(crate) fn parse_layout(
     if let Some(v) = StrictJsonValue::get_field(obj, "spills") {
         styling.spills = parse_spills(v)?;
     }
+    if let Some(v) =
+        StrictJsonValue::get_field(obj, "charts").filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        styling.charts = crate::sheet_chart_json::parse_charts(v)?;
+    }
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
     crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
@@ -276,6 +281,13 @@ pub(crate) fn write_layout_split(
             out,
             ",\"tables\":{}",
             crate::sheet_table_json::tables_json(tables)
+        );
+    }
+    if !styling.charts.is_empty() {
+        let _ = write!(
+            out,
+            ",\"charts\":{}",
+            crate::sheet_chart_json::charts_json(&styling.charts)
         );
     }
     crate::sheet_view_json::write_view(out, styling);

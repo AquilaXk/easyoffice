@@ -305,7 +305,8 @@
   #eo-print-root .eo-print-flow table { break-inside: avoid; }
   /* The pages of a sheet (sheet-page-print.js): the cells of one page at the grid's sizes, scaled; grid lines only when the page setup asks. */
   #eo-print-root .eo-print-sheet-page { display: flex; box-sizing: border-box; }
-  #eo-print-root .eo-print-sheet-box { flex: none; overflow: hidden; }
+  #eo-print-root .eo-print-sheet-box { position: relative; flex: none; overflow: hidden; }
+  #eo-print-root .eo-print-chart { position: absolute; pointer-events: none; z-index: 2; }
   #eo-print-root .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
   #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
   #eo-print-root .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
@@ -498,3 +499,10 @@
 .sheet-slicer-item.selected { border-color: var(--accent-hover); background: var(--ui-selected); color: var(--color-text); }
 .sheet-slicer-item.is-muted { border-color: var(--ui-border-subtle); background: var(--ui-bg-light); color: var(--color-text-disabled); }
 .sheet-slicer-item:hover { border-color: var(--accent-primary); background: var(--color-accent-bg); color: var(--color-text); }
+.tool-dialog:modal { overscroll-behavior: contain; }
+.tool-dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
+#sheet-chart-dialog { width: min(420px, calc(100vw - 32px)); overflow: visible; }
+#sheet-chart-dialog .dialog-label { width: 72px; min-width: 72px; flex-shrink: 0; }
+#sheet-chart-dialog .dialog-text-input { flex: 1; min-width: 0; }
+#sheet-chart-dialog #btn-sheet-chart-delete { margin-right: auto; color: var(--ui-danger); }
+#sheet-chart-dialog #btn-sheet-chart-delete[hidden] { display: none; }

@@ -8,6 +8,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
 use crate::sheet_styling::table_style::parse_table_styles;
+use crate::sheet_styling::xlsx_charts::{read_sheet_charts, ChartWriter};
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
 use crate::sheet_styling::xlsx_filter_dxf::{dxf_bodies, parse_dxf_colors};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
@@ -410,6 +411,12 @@ impl OoxmlCodec {
                 table_writer.add_sheet(tables, cells, caches.get(i), &style_table.dxf)
             })
             .collect();
+        let mut chart_writer = ChartWriter::new(active_sheets, caches, stylings)?;
+        let chart_parts: Vec<_> = active_sheets
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| chart_writer.add_sheet(name, stylings.get(i)))
+            .collect::<Result<_, _>>()?;
         let wb_slicer_ext = table_writer.slicers.workbook_ext_xml();
         if !wb_slicer_ext.is_empty() {
             workbook_xml =
@@ -444,8 +451,10 @@ impl OoxmlCodec {
             .and_then(|s| s.workbook_theme)
             .filter(|&t| t != DEFAULT_THEME);
         let extra_types = format!(
-            "{}{}",
-            table_writer.content_types, table_writer.slicers.content_types
+            "{}{}{}",
+            table_writer.content_types,
+            table_writer.slicers.content_types,
+            chart_writer.content_types
         );
         let (content_types, wb_rels_xml) = if custom_theme.is_some() {
             (
@@ -510,13 +519,14 @@ impl OoxmlCodec {
                 .get(i)
                 .map_or((String::new(), None), |st| links_xml(&st.links));
             let tables = &sheet_parts[i];
+            let charts_part = &chart_parts[i];
             let sheet_xml = build_sheet_xml(
                 tables.cells.as_deref().unwrap_or(cells),
                 caches.get(i),
                 stylings.get(i),
                 &style_table,
                 &sst_map,
-                (&links, &tables.parts_xml),
+                (&links, &charts_part.drawing_xml, &tables.parts_xml),
                 &HeaderCells::new(&sheet_tables[i]),
             );
             XmlSanitizer::validate_safe_xml(&sheet_xml)?;
@@ -524,7 +534,23 @@ impl OoxmlCodec {
                 format!("xl/worksheets/sheet{}.xml", i + 1),
                 sheet_xml.into_bytes(),
             ));
-            if let Some(rels) = merge_relationships(link_rels, &tables.rels) {
+            let extra_rels = if charts_part.rels.is_empty() {
+                tables.rels.as_str()
+            } else if tables.rels.is_empty() {
+                charts_part.rels.as_str()
+            } else {
+                ""
+            };
+            let combined_extra_rels;
+            let extra_rels =
+                if extra_rels.is_empty() && !charts_part.rels.is_empty() && !tables.rels.is_empty()
+                {
+                    combined_extra_rels = format!("{}{}", charts_part.rels, tables.rels);
+                    combined_extra_rels.as_str()
+                } else {
+                    extra_rels
+                };
+            if let Some(rels) = merge_relationships(link_rels, extra_rels) {
                 XmlSanitizer::validate_safe_xml(&rels)?;
                 entries.push((
                     format!("xl/worksheets/_rels/sheet{}.xml.rels", i + 1),
@@ -540,6 +566,7 @@ impl OoxmlCodec {
         }
         entries.extend(table_writer.parts);
         entries.extend(table_writer.slicers.parts);
+        entries.extend(chart_writer.parts);
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
@@ -698,6 +725,7 @@ impl OoxmlCodec {
         let mut budget = DecodeBudget::new();
         let mut link_allowance = LinkAllowance::default();
         let mut table_registry = TableRegistry::default();
+        let mut workbook_charts = 0usize;
         for (idx, (sheet_name, target_path, state)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
                 .get_key_value(target_path.as_str())
@@ -764,6 +792,15 @@ impl OoxmlCodec {
                     &mut styling.tables,
                     &xf_styles.dxf_colors,
                     &xf_styles.table_styles,
+                )?;
+                styling.charts_rejected = read_sheet_charts(
+                    &sheet_name,
+                    sheet_xml,
+                    part_path,
+                    &entry_by_path,
+                    &styling.columns,
+                    &mut workbook_charts,
+                    &mut styling.charts,
                 )?;
                 if let std::borrow::Cow::Owned(kept) =
                     merges_clear_of_tables(&styling.merges, &styling.tables)

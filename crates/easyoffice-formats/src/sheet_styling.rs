@@ -26,6 +26,8 @@ pub(crate) mod ods_protect;
 pub(crate) mod ods_styles;
 #[path = "ods_view.rs"]
 pub(crate) mod ods_view;
+#[path = "sheet_chart.rs"]
+pub(crate) mod sheet_chart;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
 #[path = "sheet_fonts.rs"]
@@ -60,6 +62,8 @@ pub(crate) mod structured_ref;
 pub(crate) mod table_style;
 #[path = "xlsx_bounds.rs"]
 pub(crate) mod xlsx_bounds;
+#[path = "xlsx_charts.rs"]
+pub(crate) mod xlsx_charts;
 #[path = "xlsx_color.rs"]
 pub(crate) mod xlsx_color;
 #[path = "xlsx_filter.rs"]
@@ -89,6 +93,7 @@ pub(crate) mod xlsx_styles;
 #[path = "xlsx_view.rs"]
 pub(crate) mod xlsx_view;
 
+pub use sheet_chart::*;
 pub use sheet_filter::*;
 pub use sheet_fonts::*;
 pub use sheet_links::*;
@@ -499,6 +504,10 @@ pub struct SheetStyling {
     pub tables_rejected: u32,
     /// Merged ranges a reader left out because they shared cells with a table (PD-224).
     pub merges_dropped: u32,
+    /// Charts attached to the sheet (PD-254).
+    pub charts: Vec<SheetChart>,
+    /// Charts a reader turned away because a part was invalid or broke a bound (PD-254).
+    pub charts_rejected: u32,
 }
 
 /// Sorted, disjoint, zero-based inclusive runs of rows.
@@ -556,6 +565,7 @@ impl SheetStyling {
             && self.spills.is_empty()
             && self.links.is_empty()
             && self.tables.is_empty()
+            && self.charts.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

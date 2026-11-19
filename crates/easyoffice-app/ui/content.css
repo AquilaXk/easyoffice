@@ -736,3 +736,116 @@
   resize: vertical;
   font-family: var(--font-family-ui);
 }
+.sheet-chart-layer {
+  grid-area: 2 / 2;
+  position: relative;
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sheet-chart-layer[hidden] {
+  display: none;
+}
+.sheet-chart-card {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--color-primary-subtle);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-light);
+  overflow: hidden;
+  user-select: none;
+  outline: none;
+}
+.sheet-chart-card:focus-visible,
+.sheet-chart-card.is-selected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-light);
+}
+.sheet-chart-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: var(--color-surface);
+  cursor: move;
+}
+.sheet-chart-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
+.sheet-chart-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.sheet-chart-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.sheet-chart-btn:hover {
+  border-color: var(--ui-border);
+  background: var(--ui-hover-strong);
+  color: var(--color-text);
+}
+.sheet-chart-btn[data-chart-act="delete"]:hover {
+  color: var(--ui-danger);
+}
+.sheet-chart-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.sheet-chart-body .eo-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.sheet-chart-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--ui-border) 50%);
+}
+.eo-print-sheet-box {
+  position: relative;
+}
+.eo-print-chart {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+.eo-print-chart .eo-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

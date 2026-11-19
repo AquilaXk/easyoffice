@@ -136,9 +136,7 @@
       return Boolean(ae?.tagName === "TD" && ae.dataset?.cell);
     }
 
-    let refocusAfterRender = false;
-    let rulesUi = null;
-    let lookOps = null;
+    let refocusAfterRender = false, rulesUi = null, lookOps = null, chartUi = null;
     // `input` is created right below; the grid only calls these hooks after both exist.
     const grid = host.__EASYOFFICE_CREATE_SHEET_GRID__({
       document,
@@ -283,6 +281,7 @@
         if (sheetCellFocusState.has(td)) syncSheetCellFocusBaseline(td, true);
         else if (document.activeElement === td) ensureSheetCellFocusEntry(td, getActiveSheetName());
       });
+      chartUi?.syncLayer();
     }
 
     function ensureSheetCellFocusEntry(td, sheetName) {
@@ -412,7 +411,9 @@
         }
         sheetDataStore[curSheet] = snapshotDomSheetCells();
         const liveEval = await evaluateLiveFormulaTargets(sheetDataStore, curSheet);
-        if (!liveEval || epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) {
+        if (epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) return;
+        if (!liveEval) {
+          chartUi?.syncLayer();
           return;
         }
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
@@ -467,6 +468,7 @@
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }
+        chartUi?.syncLayer();
         announceCircularReference(rpcRes?.circular);
         // Unreached cells keep their shown value; ask again until the engine has them all.
         if (
@@ -920,6 +922,11 @@
     });
     sheetRules.on("repaint", () => grid.repaintFx());
     sheetRules.on("readCells", (sheet, ref) => String(sheetDataStore[sheet]?.[ref]?.value ?? ""));
+    chartUi = host.__EASYOFFICE_CREATE_SHEET_CHART_UI__?.({
+      document, grid, sheetDataStore, getActiveSheetName, getActiveModule,
+      getSelectionRange: () => input.getRange(), getExtent: () => getSheetExtent(getActiveSheetName()),
+      snapshotDomSheetCells, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, sheetHistory, focusAnchor: () => input.focusAnchor(),
+    }) ?? null;
 
     // Switching sheets and the view each sheet keeps (`sheet-view-live.js`).
     function performSwitchSheetTabAsync(target) {
@@ -961,12 +968,15 @@
       openDataValidationDialog: () => rulesUi.openDataValidationDialog(),
       openHyperlinkDialog: structure.openHyperlink,
       openPivotDialog: () => rulesUi.openPivotDialog(),
+      openChartDialog: (id) => chartUi?.openChartDialog(id),
+      syncChartLayer: () => chartUi?.syncLayer(),
       getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,
       // The sizes the grid shows and the page setup of the active sheet, for printing (`sheet-page-print.js`).
       printGeometry: () => ({
         page: host.__EASYOFFICE_SHEET_LAYOUT__.pageOf(getActiveSheetName()),
-        colWidth: grid.colWidth, colHidden: grid.colHidden, rowHidden: grid.rowHidden, rowTop: grid.rowTop,
+        colWidth: grid.colWidth, colLeft: grid.colLeft, colHidden: grid.colHidden, rowHidden: grid.rowHidden, rowTop: grid.rowTop,
+        charts: host.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(getActiveSheetName()), sheetName: getActiveSheetName(), sheetStore: sheetDataStore,
       }),
       replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,

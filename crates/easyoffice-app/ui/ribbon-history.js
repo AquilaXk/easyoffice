@@ -206,6 +206,7 @@
       }
       workspacePanels.renderModuleOutline(mod);
       getSheetController()?.syncSheetFormatToolbar?.();
+      getSheetController()?.syncChartLayer?.();
       host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
       void getHwpHost?.()?.onModuleActivated(mod);
     }
@@ -623,6 +624,7 @@
         case "sheet-mod-chart":
         case "sheet-insert-chart":
           sheetController.applySheetChartSummary(execRes);
+          sheetController.openChartDialog?.();
           break;
         case "sheet-mod-condfmt":
           sheetController.openConditionalFormatDialog();

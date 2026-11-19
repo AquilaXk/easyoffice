@@ -97,7 +97,7 @@
       if (out.length + colCut.groups.length * rowCut.groups.length > MAX_PRINT_PAGES) throw new Error(MSG_TOO_BIG);
       for (const cg of colCut.groups) {
         for (const rg of rowCut.groups) {
-          out.push(tilePage({ document, box, cg, rg, colSizes, rowSizes, titleRows: inside(titleRows, rowSizes.length), titleCols: inside(titleCols, colSizes.length), page, scale, margin, paperClass, pageClass, headW, headH, cellAt, renderCell }));
+          out.push(tilePage({ document, box, cg, rg, colSizes, rowSizes, titleRows: inside(titleRows, rowSizes.length), titleCols: inside(titleCols, colSizes.length), geometry, page, scale, margin, paperClass, pageClass, headW, headH, cellAt, renderCell }));
         }
       }
     }
@@ -160,8 +160,76 @@
       table.style.transformOrigin = "0 0";
     }
     holder.appendChild(table);
+    appendChartOverlays(holder, t);
     el.appendChild(holder);
     return el;
+  }
+
+  function spanSum(sizes, fromIdx, toIdx) {
+    let s = 0;
+    const lo = Math.max(0, fromIdx);
+    const hi = Math.min(sizes.length - 1, toIdx);
+    for (let i = lo; i <= hi; i += 1) s += sizes[i];
+    return s;
+  }
+
+  function appendChartOverlays(holder, t) {
+    const charts = t.geometry?.charts;
+    const svgApi = host.__EASYOFFICE_SHEET_CHART_SVG__;
+    if (!Array.isArray(charts) || charts.length === 0 || !svgApi?.renderChartSvg) return;
+    const { document, box, cg, rg, colSizes, rowSizes, scale, headW, headH } = t;
+    const tileC1 = box.c1 + cg.first;
+    const tileC2 = box.c1 + cg.last;
+    const tileR1 = box.r1 + rg.first;
+    const tileR2 = box.r1 + rg.last;
+    const titleW = cg.title && t.titleCols ? spanSum(colSizes, t.titleCols[0], t.titleCols[1]) : 0;
+    const titleH = rg.title && t.titleRows ? spanSum(rowSizes, t.titleRows[0], t.titleRows[1]) : 0;
+    const ownStartX = headW + titleW;
+    const ownStartY = headH + titleH;
+
+    for (const chart of charts) {
+      const a = chart?.anchor;
+      if (!a) continue;
+      const c1 = Math.max(1, (Number(a.fromCol) || 0) + 1);
+      const r1 = Math.max(1, (Number(a.fromRow) || 0) + 1);
+      const c2 = Math.max(c1, (Number(a.toCol) || 0) + 1);
+      const r2 = Math.max(r1, (Number(a.toRow) || 0) + 1);
+      if (r2 < tileR1 || r1 > tileR2 || c2 < tileC1 || c1 > tileC2) continue;
+
+      const relX = c1 >= tileC1
+        ? ownStartX + spanSum(colSizes, cg.first, c1 - box.c1 - 1)
+        : ownStartX - spanSum(colSizes, Math.max(0, c1 - box.c1), cg.first - 1);
+      const relY = r1 >= tileR1
+        ? ownStartY + spanSum(rowSizes, rg.first, r1 - box.r1 - 1)
+        : ownStartY - spanSum(rowSizes, Math.max(0, r1 - box.r1), rg.first - 1);
+      const subX = t.geometry.colLeft && Number(a.left) >= 56
+        ? Math.max(0, Math.min(48, Number(a.left) - 56 - t.geometry.colLeft(c1)))
+        : 0;
+      const subY = t.geometry.rowTop && Number(a.top) >= 26
+        ? Math.max(0, Math.min(24, Number(a.top) - 26 - t.geometry.rowTop(r1)))
+        : 0;
+      const w = Math.max(180, Number(a.width) || 420);
+      const h = Math.max(140, Number(a.height) || 260);
+      const wrap = document.createElement("div");
+      wrap.className = "eo-print-chart";
+      wrap.dataset.chartId = chart.id || "";
+      wrap.style.left = px((relX + subX) * scale);
+      wrap.style.top = px((relY + subY) * scale);
+      wrap.style.width = px(w * scale);
+      wrap.style.height = px(h * scale);
+      wrap.appendChild(
+        svgApi.renderChartSvg({
+          document,
+          chart,
+          sheetName: t.geometry.sheetName || "Sheet1",
+          sheetDataStore: t.geometry.sheetStore || {},
+          width: w,
+          height: h,
+          forPrint: true,
+        })
+      );
+      holder.appendChild(wrap);
+    }
   }
 
   function sized(document, tag, prop, size) {

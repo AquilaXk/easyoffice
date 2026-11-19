@@ -24,8 +24,8 @@ const BODY_LINE_PITCH_PT: f64 = 16.0;
 const FRAME_FONT_PT: f64 = 10.0;
 const FRAME_LINE_PT: f64 = 12.0;
 /// The sizes the sheet window draws with (`sheet-grid.js`: `DEFAULT_COL_W`, `ROW_H`), in CSS px.
-const DEFAULT_COL_PX: f64 = 96.0;
-const ROW_PX: f64 = 24.0;
+pub(crate) const DEFAULT_COL_PX: f64 = 96.0;
+pub(crate) const ROW_PX: f64 = 24.0;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;
 const SHEET_FONT_PT: f64 = 10.0;
@@ -35,6 +35,8 @@ const CELL_PAD_PT: f64 = 4.0;
 const DEFAULT_SHEET_MARGIN_MM: f64 = 10.0;
 const WIDE_SHEET_COLUMNS: u32 = 8;
 const MIN_SCALE: f64 = 0.1;
+/// Points per CSS pixel (72 pt/in / 96 px/in).
+pub(crate) const PDF_PT_PER_PX: f64 = PT_PER_PX;
 /// A fill with a luminance (0..=255) up to this is dark: its automatic text is white (PD-227).
 const DARK_FILL_LUMINANCE: u32 = 62;
 /// Pages and printed cells a sheet may make (the page's print caps, `sheet-page-print.js`).
@@ -77,12 +79,12 @@ fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) ->
 }
 
 /// Text width in points at `size` pt.
-fn width_pt(text: &str, size: f64) -> f64 {
+pub(crate) fn width_pt(text: &str, size: f64) -> f64 {
     f64::from(mixed_units(text)) * size / 1000.0
 }
 
 /// The three operands of `rg` for `0xRRGGBB`.
-fn rgb_ops(rgb: u32) -> String {
+pub(crate) fn rgb_ops(rgb: u32) -> String {
     let channel = |shift: u32| f64::from((rgb >> shift) & 0xFF) / 255.0;
     format!("{:.3} {:.3} {:.3}", channel(16), channel(8), channel(0))
 }
@@ -95,7 +97,7 @@ fn auto_text_color(fill: Option<u32>) -> Option<u32> {
 }
 
 /// One page being drawn: the content stream in PDF user space (origin bottom left).
-struct Canvas {
+pub(crate) struct Canvas {
     width: f64,
     height: f64,
     ops: Vec<String>,
@@ -110,7 +112,7 @@ impl Canvas {
         }
     }
 
-    fn text(&mut self, x: f64, y: f64, size: f64, text: &str) {
+    pub(crate) fn text(&mut self, x: f64, y: f64, size: f64, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -118,7 +120,7 @@ impl Canvas {
     }
 
     /// Text in the colour `rgb` (the fill colour of the path state stays as it was after it).
-    fn colored_text(&mut self, x: f64, y: f64, size: f64, text: &str, rgb: u32) {
+    pub(crate) fn colored_text(&mut self, x: f64, y: f64, size: f64, text: &str, rgb: u32) {
         if text.is_empty() {
             return;
         }
@@ -130,11 +132,67 @@ impl Canvas {
     }
 
     /// A filled box with the corner `(x, y)` at the bottom left.
-    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32) {
+    pub(crate) fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32) {
         self.ops.push(format!(
             "q {} rg {x:.2} {y:.2} {w:.2} {h:.2} re f Q",
             rgb_ops(rgb)
         ));
+    }
+
+    pub(crate) fn stroke_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32, width: f64) {
+        self.ops.push(format!(
+            "q {width:.2} w {} RG {x:.2} {y:.2} {w:.2} {h:.2} re S Q",
+            rgb_ops(rgb)
+        ));
+    }
+
+    pub(crate) fn stroke_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, rgb: u32, width: f64) {
+        self.ops.push(format!(
+            "q {width:.2} w {} RG {x1:.2} {y1:.2} m {x2:.2} {y2:.2} l S Q",
+            rgb_ops(rgb)
+        ));
+    }
+
+    pub(crate) fn stroke_polyline(&mut self, pts: &[(f64, f64)], rgb: u32, width: f64) {
+        if pts.len() < 2 {
+            return;
+        }
+        let mut op = format!(
+            "q {width:.2} w 1 J 1 j {} RG {:.2} {:.2} m",
+            rgb_ops(rgb),
+            pts[0].0,
+            pts[0].1
+        );
+        for &(x, y) in &pts[1..] {
+            let _ = write!(op, " {x:.2} {y:.2} l");
+        }
+        op.push_str(" S Q");
+        self.ops.push(op);
+    }
+
+    pub(crate) fn fill_polygon(&mut self, pts: &[(f64, f64)], rgb: u32) {
+        if pts.len() < 3 {
+            return;
+        }
+        let mut op = format!("q {} rg {:.2} {:.2} m", rgb_ops(rgb), pts[0].0, pts[0].1);
+        for &(x, y) in &pts[1..] {
+            let _ = write!(op, " {x:.2} {y:.2} l");
+        }
+        op.push_str(" h f Q");
+        self.ops.push(op);
+    }
+
+    pub(crate) fn push_raw_op(&mut self, op: String) {
+        self.ops.push(op);
+    }
+
+    pub(crate) fn push_clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.ops
+            .push(format!("q {x:.2} {y:.2} {w:.2} {h:.2} re W n"));
+    }
+
+    pub(crate) fn pop_clip(&mut self) {
+        self.ops.push("Q".to_string());
     }
 
     fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
@@ -365,7 +423,7 @@ fn is_number(text: &str) -> bool {
 }
 
 /// `text` cut at the end so that it is at most `width` pt wide.
-fn fit_text(text: &str, size: f64, width: f64) -> String {
+pub(crate) fn fit_text(text: &str, size: f64, width: f64) -> String {
     let mut out = String::new();
     for c in text.chars() {
         out.push(c);
@@ -394,16 +452,18 @@ pub(crate) fn encode_sheet_pdf(
     stylings: &[SheetStyling],
     shown: &[SheetShown],
 ) -> Result<Vec<u8>, EasyOfficeError> {
+    crate::sheet_styling::sheet_chart::validate_workbook_charts(stylings)?;
+    let cell_index = crate::sheet_styling::sheet_chart::SheetCellIndex::build(sheets);
     let mut entries: Vec<PdfPageEntry> = Vec::new();
     let mut printed_cells = 0u64;
-    for (index, (_, cells)) in sheets.iter().enumerate() {
+    for (index, (sheet_name, cells)) in sheets.iter().enumerate() {
         let styling = stylings.get(index);
         let page = styling.map(|s| s.page.clone()).unwrap_or_default();
         let by_cell: HashMap<(u32, u32), &str> = cells
             .iter()
             .map(|(r, c, t)| ((*r, *c), t.as_str()))
             .collect();
-        let used = cells.iter().fold(None, |acc: Option<Area>, &(r, c, _)| {
+        let mut used = cells.iter().fold(None, |acc: Option<Area>, &(r, c, _)| {
             Some(acc.map_or(
                 Area {
                     r1: r,
@@ -419,6 +479,32 @@ pub(crate) fn encode_sheet_pdf(
                 },
             ))
         });
+        if page.print_area.is_empty() {
+            if let Some(st) = styling {
+                for ch in &st.charts {
+                    let (fc, fr, _, _, tc, tr, _, _) = ch.anchor.effective_two_cell(&st.columns);
+                    let next = used.map_or(
+                        Area {
+                            r1: fr,
+                            c1: fc,
+                            r2: tr,
+                            c2: tc,
+                        },
+                        |a| Area {
+                            r1: a.r1.min(fr),
+                            c1: a.c1.min(fc),
+                            r2: a.r2.max(tr),
+                            c2: a.c2.max(tc),
+                        },
+                    );
+                    let rows = u64::from(next.r2.saturating_sub(next.r1)).saturating_add(1);
+                    let cols = u64::from(next.c2.saturating_sub(next.c1)).saturating_add(1);
+                    if rows.saturating_mul(cols) <= MAX_SHEET_CELLS {
+                        used = Some(next);
+                    }
+                }
+            }
+        }
         let areas: Vec<Area> = if page.print_area.is_empty() {
             used.into_iter().collect()
         } else {
@@ -472,6 +558,9 @@ pub(crate) fn encode_sheet_pdf(
                 &mut entries,
                 area,
                 &setup,
+                sheet_name,
+                sheets,
+                &cell_index,
                 (styling, shown.get(index)),
                 &by_cell,
                 page.is_default(),
@@ -491,10 +580,14 @@ pub(crate) fn encode_sheet_pdf(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sheet_area_pages(
     entries: &mut Vec<PdfPageEntry>,
     area: Area,
     page: &SheetPage,
+    sheet_name: &str,
+    sheets: &[crate::OdsUnpacked],
+    cell_index: &crate::sheet_styling::sheet_chart::SheetCellIndex<'_>,
     (styling, shown): (Option<&SheetStyling>, Option<&SheetShown>),
     cells: &HashMap<(u32, u32), &str>,
     unset: bool,
@@ -651,12 +744,15 @@ fn sheet_area_pages(
                 y -= h;
                 ys.push(y);
             }
+            let mut page_cols: Vec<u32> = Vec::with_capacity(cols.len());
+            let mut page_rows: Vec<u32> = Vec::with_capacity(rows.len());
             for &i in &rows {
                 let h = row_sizes[i] * scale;
                 if h <= 0.0 {
                     continue;
                 }
                 let r = area.r1 + i as u32;
+                page_rows.push(r);
                 let mut x = x0;
                 if head_w > 0.0 {
                     let label = (r + 1).to_string();
@@ -673,7 +769,11 @@ fn sheet_area_pages(
                     if w <= 0.0 {
                         continue;
                     }
-                    let at = (r, area.c1 + k as u32);
+                    let c = area.c1 + k as u32;
+                    if !xs_done {
+                        page_cols.push(c);
+                    }
+                    let at = (r, c);
                     let look = styling.and_then(|s| s.cells.get(&at));
                     let fill = look.and_then(|style| style.fill);
                     if let Some(rgb) = fill {
@@ -719,6 +819,32 @@ fn sheet_area_pages(
                 ys.push(y);
             }
             canvas.grid(&xs, &ys, page.grid_lines, page.headings);
+            if let Some(st) = styling {
+                if !st.charts.is_empty() {
+                    let col_xs = if head_w > 0.0 && xs.len() > 1 {
+                        &xs[1..]
+                    } else {
+                        &xs[..]
+                    };
+                    let row_ys = if head_h > 0.0 && ys.len() > 1 {
+                        &ys[1..]
+                    } else {
+                        &ys[..]
+                    };
+                    crate::pdf_chart::draw_sheet_charts(
+                        &mut canvas,
+                        sheet_name,
+                        sheets,
+                        cell_index,
+                        st,
+                        &page_cols,
+                        &page_rows,
+                        col_xs,
+                        row_ys,
+                        scale,
+                    );
+                }
+            }
             entries.push(canvas.finish(0));
         }
     }

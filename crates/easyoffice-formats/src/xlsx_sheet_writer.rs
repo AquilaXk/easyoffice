@@ -234,7 +234,7 @@ pub(crate) fn build_sheet_xml(
     styling: Option<&SheetStyling>,
     style_table: &XlsxStyleTable,
     sst_map: &SharedStringMap<'_>,
-    (links_xml, table_parts): (&str, &str),
+    (links_xml, drawing_xml, table_parts): (&str, &str, &str),
     headers: &HeaderCells,
 ) -> String {
     let blank = String::new();
@@ -335,6 +335,7 @@ pub(crate) fn build_sheet_xml(
         sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
     }
+    sheet_xml.push_str(drawing_xml);
     sheet_xml.push_str(table_parts);
     sheet_xml.push_str("</worksheet>");
     sheet_xml

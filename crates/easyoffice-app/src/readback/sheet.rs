@@ -157,6 +157,12 @@ pub(super) fn append_styling_warnings(
                 st.fonts_rejected
             ));
         }
+        if st.charts_rejected > 0 {
+            warnings.push(format!(
+                "{name} 시트의 차트 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                st.charts_rejected
+            ));
+        }
     }
 }
 
@@ -491,8 +497,15 @@ pub(super) fn write_session_readback(
     }
 
     let defined_names_count = session.workbook().names().len();
-    let (mut rej_names, mut rej_links, mut rej_tables, mut rej_merges, mut rej_fmts, mut rej_fonts) =
-        (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+    let (
+        mut rej_names,
+        mut rej_links,
+        mut rej_tables,
+        mut rej_merges,
+        mut rej_fmts,
+        mut rej_fonts,
+        mut rej_charts,
+    ) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     for (_, st) in stylings {
         rej_names = rej_names.saturating_add(st.names_rejected);
         rej_links = rej_links.saturating_add(st.links_rejected);
@@ -500,6 +513,7 @@ pub(super) fn write_session_readback(
         rej_merges = rej_merges.saturating_add(st.merges_dropped);
         rej_fmts = rej_fmts.saturating_add(st.num_fmts_rejected);
         rej_fonts = rej_fonts.saturating_add(st.fonts_rejected);
+        rej_charts = rej_charts.saturating_add(st.charts_rejected);
     }
 
     let _ = write!(
@@ -530,7 +544,7 @@ pub(super) fn write_session_readback(
     }
     let _ = write!(
         out,
-        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts}}}}}"
+        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts},\"charts\":{rej_charts}}}}}"
     );
     Ok(())
 }
@@ -570,10 +584,20 @@ fn write_sheet_summary(
     let dv_count = st.map_or(0, |s| s.rules.dv.len());
     let cf_count = st.map_or(0, |s| s.rules.cf.len());
     let link_count = st.map_or(0, |s| s.links.len());
+    let chart_count = st.map_or(0, |s| s.charts.len());
     let _ = write!(
         out,
-        ",\"rows\":{max_r},\"cols\":{max_c},\"mergeCount\":{merge_count},\"hiddenRowCount\":{hidden_rows},\"hiddenColCount\":{hidden_cols},\"protected\":{protected},\"validationRuleCount\":{dv_count},\"conditionalRuleCount\":{cf_count},\"linkCount\":{link_count},\"spillCount\":{spill_count},\"tables\":["
+        ",\"rows\":{max_r},\"cols\":{max_c},\"mergeCount\":{merge_count},\"hiddenRowCount\":{hidden_rows},\"hiddenColCount\":{hidden_cols},\"protected\":{protected},\"validationRuleCount\":{dv_count},\"conditionalRuleCount\":{cf_count},\"linkCount\":{link_count},\"spillCount\":{spill_count},\"chartCount\":{chart_count},\"charts\":["
     );
+    if let Some(charts) = st.map(|s| s.charts.as_slice()) {
+        for (c_idx, ch) in charts.iter().enumerate() {
+            if c_idx > 0 {
+                out.push(',');
+            }
+            crate::sheet_chart_json::write_chart_json(out, ch, true);
+        }
+    }
+    out.push_str("],\"tables\":[");
 
     let tables_from_st = st.map(|s| s.tables.as_slice()).unwrap_or(&[]);
     let tables = if !tables_from_st.is_empty() {

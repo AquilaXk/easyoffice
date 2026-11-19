@@ -276,6 +276,28 @@
       locations.push({ module: "SHEET", label, sheet: sheetName, range: label });
     }
 
+    function executeSheetChart(op, sheetName, locations) {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (guard?.isOn(sheetName)) {
+        throw new Error("보호된 시트에서는 차트를 추가할 수 없습니다.");
+      }
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const svgApi = host.__EASYOFFICE_SHEET_CHART_SVG__;
+      if (!layoutApi || !svgApi) {
+        throw new Error("차트 모듈을 사용할 수 없습니다.");
+      }
+      const existing = layoutApi.chartsOf(sheetName);
+      const created = svgApi.createChartModel({
+        sheetName,
+        sheetDataStore,
+        existingCharts: existing,
+        spec: op,
+      });
+      layoutApi.setCharts(sheetName, [...existing, created]);
+      const label = created.title || created.dataRange;
+      locations.push({ module: "SHEET", label, sheet: sheetName, range: created.dataRange });
+    }
+
     async function flushSheetEvaluationAndFormats(sheetName) {
       const sc = getSheetController();
       if (!sc) return;
@@ -444,12 +466,13 @@
       for (const op of operations) {
         if (!op || typeof op !== "object") throw new Error("유효하지 않은 코파일럿 작업 항목입니다.");
         const kind = String(op.op || op.type || op.kind || "").trim();
-        if (kind === "sheet.write" || kind === "sheet.format") {
+        if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart") {
           const sheetName = String(op.sheet || getActiveSheetName());
           if (!sheetDataStore[sheetName]) sheetDataStore[sheetName] = Object.create(null);
           touchedSheet = sheetName;
           if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
-          else executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+          else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+          else executeSheetChart(op, sheetName, derivedLocations);
         } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
           touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
         } else if (kind === "slide.add" || kind === "slide.update") {

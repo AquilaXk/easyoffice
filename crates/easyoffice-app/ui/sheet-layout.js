@@ -21,6 +21,12 @@
   // `foldedRows`, `foldedCols`, which are hidden like `hiddenRows` but belong to the groups.
 
   const MAX_MERGES = 100000;
+  const MAX_CHARTS_PER_SHEET = 64;
+  const MAX_CHART_SERIES = 32;
+  const CHART_TYPES = Object.freeze(["column", "bar", "line", "pie", "scatter"]);
+  const CHART_TYPE_SET = new Set(CHART_TYPES);
+  const CHART_LEGENDS = Object.freeze(["right", "bottom", "top", "none", "left"]);
+  const CHART_LEGEND_SET = new Set(CHART_LEGENDS);
   const BLOCK = 64; // merge lookup buckets, in rows
   const TALL_BLOCKS = 4096; // a merge taller than this many buckets is kept in a plain list
 
@@ -29,7 +35,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], index: null, rows: null };
   }
 
   function entry(name) {
@@ -52,7 +58,8 @@
         !layout.protect &&
         layout.unlockedRows.length === 0 &&
         layout.unlockedCols.length === 0 &&
-        layout.tables.length === 0)
+        layout.tables.length === 0 &&
+        layout.charts.length === 0)
     );
   }
 
@@ -319,6 +326,7 @@
     if (layout.unlockedRows?.length) out.unlockedRows = layout.unlockedRows.map((r) => [r[0], r[1]]);
     if (layout.unlockedCols?.length) out.unlockedCols = layout.unlockedCols.map((r) => [r[0], r[1]]);
     if (layout.tables?.length) out.tables = structuredClone(layout.tables);
+    if (layout.charts?.length) out.charts = structuredClone(layout.charts);
     return out;
   }
 
@@ -351,6 +359,83 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
+  function normalizeChartAnchor(raw) {
+    const a = raw && typeof raw === "object" ? raw : {};
+    const fcNum = Number(a.fromCol);
+    const frNum = Number(a.fromRow);
+    const fromCol = Math.max(0, Math.min(16383, Number.isFinite(fcNum) ? Math.trunc(fcNum) : 4));
+    const fromRow = Math.max(0, Math.min(1048575, Number.isFinite(frNum) ? Math.trunc(frNum) : 1));
+    const tcNum = Number(a.toCol);
+    const trNum = Number(a.toRow);
+    const toCol = Math.max(fromCol, Math.min(16383, Number.isFinite(tcNum) ? Math.trunc(tcNum) : fromCol + 6));
+    const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(trNum) ? Math.trunc(trNum) : fromRow + 11));
+    const leftNum = Number(a.left);
+    const topNum = Number(a.top);
+    const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : 56 + fromCol * 96)));
+    const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : 26 + fromRow * 24)));
+    const width = Math.max(180, Math.min(1600, Math.round(Number(a.width) || 420)));
+    const height = Math.max(140, Math.min(1200, Math.round(Number(a.height) || 260)));
+    return { fromCol, fromRow, toCol, toRow, left, top, width, height };
+  }
+
+  function trimUtf8(str, maxBytes) {
+    const s = String(str ?? "");
+    if (s.length * 3 <= maxBytes) return s;
+    const enc = new TextEncoder();
+    if (enc.encode(s).length <= maxBytes) return s;
+    let out = "";
+    let used = 0;
+    for (const ch of s) {
+      const b = enc.encode(ch).length;
+      if (used + b > maxBytes) break;
+      out += ch;
+      used += b;
+    }
+    return out;
+  }
+
+  function chartsFromJson(rawList) {
+    if (rawList === undefined || rawList === null) return [];
+    if (!Array.isArray(rawList)) throw new Error("차트 목록 형식이 올바르지 않습니다.");
+    if (rawList.length > MAX_CHARTS_PER_SHEET) {
+      throw new Error("시트당 차트 수 한도(" + MAX_CHARTS_PER_SHEET + "개)를 초과했습니다.");
+    }
+    return rawList.map((item, idx) => {
+      if (!item || typeof item !== "object") throw new Error("차트 항목이 올바르지 않습니다.");
+      const chartType = String(item.chartType || "");
+      if (!CHART_TYPE_SET.has(chartType)) {
+        throw new Error("지원하지 않는 차트 종류입니다: " + chartType);
+      }
+      let series;
+      if (item.series !== undefined && item.series !== null) {
+        if (!Array.isArray(item.series)) throw new Error("차트 계열 형식이 올바르지 않습니다.");
+        if (item.series.length > MAX_CHART_SERIES) {
+          throw new Error("차트 계열 수 한도(" + MAX_CHART_SERIES + "개)를 초과했습니다.");
+        }
+        series = item.series.map((s) => {
+          if (!s || typeof s !== "object") throw new Error("차트 계열 항목이 올바르지 않습니다.");
+          const out = {};
+          if (typeof s.name === "string") out.name = trimUtf8(s.name, 512);
+          if (typeof s.nameRef === "string" && s.nameRef.trim()) out.nameRef = trimUtf8(s.nameRef.trim(), 512);
+          if (typeof s.categoriesRef === "string" && s.categoriesRef.trim()) out.categoriesRef = trimUtf8(s.categoriesRef.trim(), 512);
+          if (typeof s.valuesRef === "string" && s.valuesRef.trim()) out.valuesRef = trimUtf8(s.valuesRef.trim(), 512);
+          return out;
+        });
+      }
+      const out = {
+        id: trimUtf8(item.id || "chart-" + (idx + 1), 128),
+        chartType,
+        title: trimUtf8(item.title ?? "", 512),
+        dataRange: trimUtf8(String(item.dataRange ?? "").trim(), 512),
+        switchRowCol: item.switchRowCol === true,
+        legend: CHART_LEGEND_SET.has(item.legend) ? item.legend : "right",
+        anchor: normalizeChartAnchor(item.anchor),
+      };
+      if (series && series.length > 0) out.series = series;
+      return out;
+    });
+  }
+
   function fromJson(json) {
     const layout = blank();
     const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
@@ -377,6 +462,7 @@
     layout.unlockedRows = runs(json?.unlockedRows);
     layout.unlockedCols = runs(json?.unlockedCols);
     layout.tables = Array.isArray(json?.tables) ? structuredClone(json.tables) : [];
+    layout.charts = chartsFromJson(json?.charts);
     return layout;
   }
 
@@ -390,19 +476,32 @@
   }
 
   function replaceAll(all) {
-    for (const name of Object.keys(bySheet)) delete bySheet[name];
+    const nextMap = Object.create(null);
     for (const name of Object.keys(all || {})) {
       const layout = fromJson(all[name]);
-      if (!isEmpty(layout)) bySheet[name] = layout;
+      if (!isEmpty(layout)) nextMap[name] = layout;
     }
+    for (const name of Object.keys(bySheet)) delete bySheet[name];
+    Object.assign(bySheet, nextMap);
     touch();
   }
 
   // Replaces one sheet's layout with the JSON the engine answered.
   function setSheet(name, json) {
+    const prevCharts = json && json.charts === undefined ? bySheet[name]?.charts : undefined;
     const layout = fromJson(json);
+    if (prevCharts?.length && layout.charts.length === 0) layout.charts = structuredClone(prevCharts);
     if (isEmpty(layout)) delete bySheet[name];
     else bySheet[name] = layout;
+    touch();
+  }
+
+  const chartsOf = (name) => bySheet[name]?.charts || [];
+  function setCharts(name, charts) {
+    const next = chartsFromJson(charts);
+    const layout = entry(name);
+    layout.charts = next;
+    if (isEmpty(layout)) delete bySheet[name];
     touch();
   }
 
@@ -716,6 +815,12 @@
     replaceAll,
     setSheet,
     toJson,
+    chartsOf,
+    setCharts,
     MAX_MERGES,
+    MAX_CHARTS_PER_SHEET,
+    MAX_CHART_SERIES,
+    CHART_TYPES,
+    CHART_LEGENDS,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

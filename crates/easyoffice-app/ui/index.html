@@ -828,6 +828,7 @@
               </table>
               </div>
               <div id="sheet-slicer-layer" class="sheet-slicer-layer" hidden></div>
+              <div id="sheet-chart-layer" class="sheet-chart-layer" aria-label="차트 영역" hidden></div>
               </div>
             </div>
             <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
@@ -1541,6 +1542,42 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-pivot-apply" type="button" class="dialog-btn dialog-btn-primary">만들기</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-chart-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-chart-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-chart-title">차트 삽입</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="sheet-chart-type">차트 종류</label>
+            <select id="sheet-chart-type" class="sb-combo dialog-select">
+              <option value="column" selected>묶은 세로 막대형</option>
+              <option value="bar">묶은 가로 막대형</option>
+              <option value="line">꺾은선형</option>
+              <option value="pie">원형</option>
+              <option value="scatter">분산형</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-chart-range">데이터 범위</label><input id="sheet-chart-range" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-chart-heading">차트 제목</label><input id="sheet-chart-heading" type="text" class="dialog-text-input" maxlength="160" autocomplete="off" /></div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="sheet-chart-legend">범례</label>
+            <select id="sheet-chart-legend" class="sb-combo dialog-select">
+              <option value="right" selected>오른쪽</option>
+              <option value="bottom">아래쪽</option>
+              <option value="top">위쪽</option>
+              <option value="none">없음</option>
+            </select>
+          </div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-chart-switch" type="checkbox" /> 행/열 전환</label></div>
+          <p id="sheet-chart-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-chart-delete" type="button" class="dialog-btn" hidden>삭제</button>
+          <button id="btn-sheet-chart-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -2284,6 +2321,8 @@
     <script src="./sheet-look-ui.js"></script>
     <script src="./sheet-filter.js"></script>
     <script src="./sheet-filter-ui.js"></script>
+    <script src="./sheet-chart-svg.js"></script>
+    <script src="./sheet-chart-ui.js"></script>
     <script src="./sheet-sort-ui.js"></script>
     <script src="./sheet-view-ui.js"></script>
     <script src="./sheet-page.js"></script>

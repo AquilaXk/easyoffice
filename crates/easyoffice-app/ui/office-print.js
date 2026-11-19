@@ -159,10 +159,23 @@
     // without one prints its used range on A4, turned when it is wide (`sheet-page-print.js`).
     function sheetPlan() {
       const map = sheetController.snapshotDomSheetCells();
-      const { range } = usedRange(map);
+      let { range } = usedRange(map);
       const geometry = sheetController.printGeometry();
       const core = host.__EASYOFFICE_SHEET_PAGE_CORE__;
       const areas = core.areaBoxes(geometry.page);
+      if (areas.length === 0 && Array.isArray(geometry.charts) && geometry.charts.length > 0) {
+        for (const ch of geometry.charts) {
+          const a = ch?.anchor;
+          if (!a) continue;
+          const r1 = Math.max(1, (Number(a.fromRow) || 0) + 1);
+          const c1 = Math.max(1, (Number(a.fromCol) || 0) + 1);
+          const r2 = Math.max(r1, (Number(a.toRow) || 0) + 1);
+          const c2 = Math.max(c1, (Number(a.toCol) || 0) + 1);
+          range = range
+            ? { r1: Math.min(range.r1, r1), c1: Math.min(range.c1, c1), r2: Math.max(range.r2, r2), c2: Math.max(range.c2, c2) }
+            : { r1, c1, r2, c2 };
+        }
+      }
       if (areas.length === 0 && !range) throw new Error(MSG_EMPTY);
       const boxes = areas.length > 0 ? areas : [{ r1: range.r1, c1: range.c1, r2: range.r2, c2: range.c2 }];
       const wide = range !== null && range.c2 - range.c1 + 1 > WIDE_SHEET_COLUMNS;

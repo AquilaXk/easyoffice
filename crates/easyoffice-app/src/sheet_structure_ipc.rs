@@ -214,8 +214,9 @@ fn moved_layout_json(
             crate::sheet_table_json::tables_json(&moved)
         );
     }
-    if let Some(v) = field("widths") {
-        let moved = shift_widths(&parse_widths(v)?, edit);
+    let parsed_widths = field("widths").map(parse_widths).transpose()?;
+    if let Some(widths_map) = &parsed_widths {
+        let moved = shift_widths(widths_map, edit);
         out.push_str(",\"widths\":[");
         for (i, (col, px)) in moved.iter().enumerate() {
             if i > 0 {
@@ -224,6 +225,19 @@ fn moved_layout_json(
             let _ = write!(out, "[{},{px}]", col + 1);
         }
         out.push(']');
+    }
+    if let Some(v) = field("charts").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let parsed = crate::sheet_chart_json::parse_charts(v)?;
+        let shifted_cols = parsed_widths
+            .as_ref()
+            .map(|w| shift_widths(w, edit))
+            .unwrap_or_default();
+        let moved = crate::sheet_chart_json::shift_charts(&parsed, sheet, edit, &shifted_cols);
+        let _ = write!(
+            out,
+            ",\"charts\":{}",
+            crate::sheet_chart_json::charts_json(&moved)
+        );
     }
     Ok(())
 }

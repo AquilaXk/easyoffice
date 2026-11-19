@@ -84,6 +84,8 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "ribbon-history.js",
     "save-payload.js",
     "sheet-cell-write.js",
+    "sheet-chart-svg.js",
+    "sheet-chart-ui.js",
     "sheet-clipboard.js",
     "sheet-color-ui.js",
     "sheet-controller.js",

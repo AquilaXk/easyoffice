@@ -39,6 +39,7 @@ pub mod pages_proto;
 mod pages_schema;
 mod pages_table;
 mod pages_write;
+mod pdf_chart;
 mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;
