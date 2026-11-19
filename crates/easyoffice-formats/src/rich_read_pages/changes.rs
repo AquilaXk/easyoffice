@@ -222,7 +222,10 @@ impl Reader<'_> {
 
         let mut out = Vec::new();
         for (start, _, end, chg_id) in spans {
-            let excerpt = clean_excerpt(slice_u16(&text, &u16_map, start, end));
+            let raw = slice_u16(&text, &u16_map, start, end);
+            // Spans may overlap, so the scan is charged even when the excerpt turns out empty.
+            self.text_budget.charge(raw.len(), "Pages 변경 추적 범위")?;
+            let excerpt = clean_excerpt(raw);
             if excerpt.is_empty() {
                 continue;
             }

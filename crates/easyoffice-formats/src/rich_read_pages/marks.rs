@@ -348,18 +348,21 @@ impl Reader<'_> {
         found.dedup_by_key(|(i, _)| *i);
         let mut out = Vec::new();
         let mut unreadable = 0usize;
+        // Anchors may name one comment text over and over: it is read once, each use is still charged.
+        let mut read_texts: std::collections::HashMap<u64, Option<String>> =
+            std::collections::HashMap::new();
         for (_, id) in found {
             let text = self
                 .objects
                 .get(id)
                 .and_then(|o| Message::parse(&o.payload).ok())
                 .and_then(|m| reference(&m, 1))
-                .and_then(|cid| self.objects.get(cid))
-                .filter(|o| o.type_id == ty::COMMENT_TEXT || o.type_id == ty::COMMENT_TEXT_V2)
-                .and_then(|o| Message::parse(&o.payload).ok())
-                .and_then(|m| m.string(1).ok().flatten())
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty());
+                .and_then(|cid| {
+                    read_texts
+                        .entry(cid)
+                        .or_insert_with(|| self.comment_text_of(cid))
+                        .clone()
+                });
             match text {
                 Some(t) => {
                     self.text_budget
@@ -371,6 +374,17 @@ impl Reader<'_> {
         }
         self.skip_many(UNREADABLE_COMMENT, unreadable);
         Ok(out)
+    }
+
+    /// Trimmed text of the comment text object `cid`, when it is one and holds any.
+    fn comment_text_of(&self, cid: u64) -> Option<String> {
+        self.objects
+            .get(cid)
+            .filter(|o| o.type_id == ty::COMMENT_TEXT || o.type_id == ty::COMMENT_TEXT_V2)
+            .and_then(|o| Message::parse(&o.payload).ok())
+            .and_then(|m| m.string(1).ok().flatten())
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
     }
 
     fn mark_kind(&self, table: u32, id: u64, type_id: u32, flow: Flow) -> Option<String> {
@@ -549,6 +563,7 @@ mod tests {
             runs: 0,
             tables: TableBudget::default(),
             fmt_cache: crate::pages_proto::FastU64Map::default(),
+            nested_reads: crate::pages_proto::FastU64Map::default(),
             images: PageImages::new(&objects, &data_files),
             quiet: false,
             text_budget: DecodeBudget::with_limit(64 * 1024),
