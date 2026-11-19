@@ -399,8 +399,12 @@ test("editor frame: the window capability is local-only, global Tauri stays off 
   const conf = JSON.parse(readRel("crates/easyoffice-desktop/tauri.conf.json"));
   assert.equal(conf.app.withGlobalTauri, false);
   assert.equal(conf.app.security.csp["frame-src"], "'self'");
+  assert.equal(conf.app.security.csp["img-src"], "'self' data: blob:");
   assert.equal(conf.app.security.csp["base-uri"], "'none'");
   assert.equal(conf.app.security.csp["object-src"], "'none'");
+  const mainCsp = readRel("crates/easyoffice-app/src/http_server.rs").match(/MAIN_CSP:\s*&str\s*=\s*"([^"]+)"/)[1];
+  const ciSmokeCsp = readRel(".github/workflows/ci.yml").match(/\$csp\s+-ne\s+"([^"]+)"/)[1];
+  assert.equal(ciSmokeCsp, mainCsp, "Windows --serve CI smoke test CSP must match http_server.rs MAIN_CSP");
   // The editor document is answered with the --serve policy (no ipc: endpoints) by the app protocol hook.
   const windows = readRel("crates/easyoffice-desktop/src/window_commands.rs");
   assert.match(windows, /\.on_web_resource_request\([^)]*\|request, response\|/);
