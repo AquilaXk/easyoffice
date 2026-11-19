@@ -379,3 +379,30 @@ fn docx_page_breaks_after_blank_runs_decode_in_linear_time() {
         UniversalFormatConverter::decode_rich(&bytes, Some("a.docx")).expect("decode")
     });
 }
+
+#[test]
+fn template_token_scan_is_linear_on_unclosed_openers() {
+    use easyoffice_formats::layout_lint::contains_template_token;
+    // 닫는 표지 하나 앞에 여는 표지 80만 개(160만 자): 옛 구현은 여는 표지마다 끝까지 다시 훑었다.
+    let text = format!("{}}}}}", "{{".repeat(800_000));
+    assert_finishes_fast("template token scan", || {
+        assert!(
+            !contains_template_token(&text),
+            "inner holds a nested opener, then nothing"
+        );
+    });
+    // 의미는 그대로: 토큰은 찾고, 공백·개행·65자 이상 내부는 거른다.
+    assert!(contains_template_token("앞 {{날짜}} 뒤"));
+    assert!(contains_template_token("{{{{x}}"));
+    assert!(contains_template_token("{{ }} {{ a b }}"));
+    assert!(!contains_template_token("{{a\nb}}"));
+    assert!(!contains_template_token(&format!(
+        "{{{{{}}}}}",
+        "a".repeat(65)
+    )));
+    assert!(contains_template_token(&format!(
+        "{{{{{}}}}}",
+        "a".repeat(64)
+    )));
+    assert!(!contains_template_token("{{ 열림만"));
+}

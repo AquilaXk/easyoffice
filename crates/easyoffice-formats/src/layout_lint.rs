@@ -76,26 +76,40 @@ impl LayoutLintReport {
 }
 
 /// Checks for `{{...}}` template/mail-merge tokens with 1..=64 non-whitespace chars and no newlines.
+///
+/// One left-to-right pass (PD-262): the first `}}` after an opener is remembered while openers move
+/// past it, and an opener whose inner text holds another `{{` hands over to that opener, so a text of
+/// many unclosed openers is not rescanned from every one of them.
 #[inline]
 pub fn contains_template_token(text: &str) -> bool {
-    let mut rest = text;
-    while let Some(open) = rest.find("{{") {
-        let after_open = &rest[open + 2..];
-        let Some(close) = after_open.find("}}") else {
-            break;
+    let mut pos = 0usize;
+    let mut close_cache: Option<usize> = None;
+    while let Some(open_rel) = text[pos..].find("{{") {
+        let inner_start = pos + open_rel + 2;
+        let close = match close_cache.filter(|&c| c >= inner_start) {
+            Some(c) => c,
+            None => match text[inner_start..].find("}}") {
+                Some(c) => inner_start + c,
+                None => return false,
+            },
         };
-        let inner = &after_open[..close];
+        close_cache = Some(close);
+        let inner = &text[inner_start..close];
         if let Some(nested) = inner.find("{{") {
-            rest = &after_open[nested..];
+            pos = inner_start + nested;
             continue;
         }
         if !inner.contains(['\n', '\r']) {
-            let non_ws = inner.chars().filter(|c| !c.is_whitespace()).count();
+            let non_ws = inner
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .take(65)
+                .count();
             if (1..=64).contains(&non_ws) {
                 return true;
             }
         }
-        rest = &after_open[close + 2..];
+        pos = close + 2;
     }
     false
 }

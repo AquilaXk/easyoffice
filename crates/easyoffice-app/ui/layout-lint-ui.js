@@ -43,28 +43,34 @@
     return officePrint?.getActiveModule?.() || appEl?.dataset?.module || "DOC";
   }
 
+  // One left-to-right pass (PD-262), same walk as the engine's `contains_template_token`: the first
+  // "}}" after an opener is remembered, and an opener whose inner text holds another "{{" hands over to it.
   function containsTemplateToken(text) {
     const str = String(text ?? "");
     let pos = 0;
-    while (pos < str.length) {
+    let closeCache = -1;
+    for (;;) {
       const open = str.indexOf("{{", pos);
       if (open < 0) return false;
-      const afterOpen = open + 2;
-      const close = str.indexOf("}}", afterOpen);
+      const innerStart = open + 2;
+      const close = closeCache >= innerStart ? closeCache : str.indexOf("}}", innerStart);
       if (close < 0) return false;
-      const inner = str.slice(afterOpen, close);
-      const nested = inner.indexOf("{{");
-      if (nested >= 0) {
-        pos = afterOpen + nested;
+      closeCache = close;
+      const nested = str.indexOf("{{", innerStart);
+      if (nested >= 0 && nested < close) {
+        pos = nested;
         continue;
       }
+      const inner = str.slice(innerStart, close);
       if (!inner.includes("\n") && !inner.includes("\r")) {
-        const nonWs = Array.from(inner).filter((ch) => ch.trim() !== "").length;
+        let nonWs = 0;
+        for (const ch of inner) {
+          if (ch.trim() !== "" && (nonWs += 1) > 64) break;
+        }
         if (nonWs >= 1 && nonWs <= 64) return true;
       }
       pos = close + 2;
     }
-    return false;
   }
 
   function isDefaultSlidePrompt(trimmed) {
@@ -844,6 +850,7 @@
     lintWorkspace,
     lintWorkspaceSync,
     jumpToIssue,
+    containsTemplateToken,
   };
   host.__EASYOFFICE_LAYOUT_LINT__ = api;
 
