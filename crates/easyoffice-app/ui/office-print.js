@@ -435,7 +435,90 @@
       return true;
     }
 
-    return { prepare, print, remove, isSupported: (moduleCode) => Object.hasOwn(BUILDERS, moduleCode) };
+    function createPreviewRuleEnv(baseEnv) {
+      if (typeof baseEnv.CSSStyleSheet === "function") return baseEnv;
+      return {
+        CSSStyleSheet: class PreviewStyleSheet {
+          constructor() {
+            this.cssRules = [];
+          }
+          insertRule(text, at = this.cssRules.length) {
+            this.cssRules.splice(at, 0, {
+              cssText: text,
+              style: {
+                props: {},
+                setProperty(k, v) {
+                  this.props[k] = v;
+                },
+              },
+            });
+            return at;
+          }
+        },
+      };
+    }
+
+    async function buildPreview() {
+      const mod = getActiveModule();
+      const build = BUILDERS[mod];
+      if (!build) throw new Error(MSG_UNSUPPORTED);
+      await warmSheetFormats();
+      const baseRules = createPageRules(createPreviewRuleEnv(env));
+      const paperByClass = new Map();
+      const rules = {
+        sheet: baseRules.sheet,
+        classFor(w, h) {
+          const cls = baseRules.classFor(w, h);
+          paperByClass.set(cls, { width: Number(w), height: Number(h) });
+          return cls;
+        },
+      };
+      let pages;
+      try {
+        pages = build(rules);
+      } finally {
+        sheetFormats = null;
+      }
+      const rulesCss = Array.from(rules.sheet.cssRules, (r) => r.cssText);
+      let fallbackPaper = PORTRAIT_MM;
+      let flowMargin = DOC_MARGIN_MM + "mm";
+      for (const cssText of rulesCss) {
+        const m = /^@page\s*\{\s*size:\s*([\d.]+)mm\s+([\d.]+)mm;\s*margin:\s*([^;]+);/.exec(cssText);
+        if (m) {
+          fallbackPaper = { width: Number(m[1]), height: Number(m[2]) };
+          flowMargin = m[3].trim();
+        }
+      }
+      const pageSizesMm = pages.map((page) => {
+        const tokens = String(page?.className || "").split(/\s+/);
+        for (const tok of tokens) {
+          if (paperByClass.has(tok)) return paperByClass.get(tok);
+        }
+        return fallbackPaper;
+      });
+      return {
+        module: mod,
+        pages,
+        paperMm: pageSizesMm[0] || fallbackPaper,
+        pageSizesMm,
+        flowMargin,
+        rulesCss,
+      };
+    }
+
+    const api = {
+      prepare,
+      print,
+      remove,
+      buildPreview,
+      isSupported: (moduleCode) => Object.hasOwn(BUILDERS, moduleCode),
+      getActiveModule,
+      slideDeckState,
+      sheetController,
+      notify,
+    };
+    host.__EASYOFFICE_OFFICE_PRINT__ = api;
+    return api;
   }
 
   host.__EASYOFFICE_CREATE_OFFICE_PRINT__ = createOfficePrint;

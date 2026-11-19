@@ -28,6 +28,7 @@ pub mod ffi;
 pub mod http_server;
 pub mod hwp_bundle;
 pub mod inspect_cli;
+mod layout_lint_json;
 mod page_setup_json;
 #[cfg(test)]
 mod perf_bench;

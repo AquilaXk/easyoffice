@@ -411,6 +411,11 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
         }
         out.push(']');
     }
+    out.push(',');
+    crate::layout_lint_json::write_layout_lint_property(
+        out,
+        &easyoffice_formats::lint_document(doc),
+    );
 }
 
 fn write_usize_list(out: &mut String, items: &[usize]) {
@@ -631,7 +636,11 @@ pub(super) fn write_slides_readback(out: &mut String, slides: &[DecodedSlide], m
     write_usize_list(out, &empty);
     out.push_str("],\"denseSlides\":[");
     write_usize_list(out, &dense);
-    out.push_str("]}");
+    out.push_str("]},");
+    crate::layout_lint_json::write_layout_lint_property(
+        out,
+        &easyoffice_formats::lint_legacy_slides(slides),
+    );
 }
 
 pub(super) fn write_pdf_readback(out: &mut String, report: &PdfReadbackReport, max_items: usize) {

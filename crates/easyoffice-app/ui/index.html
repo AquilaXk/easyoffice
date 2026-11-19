@@ -53,6 +53,7 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="page-setup" role="menuitem" tabindex="-1"><span class="md-label">쪽 설정…</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-set" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 설정</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-clear" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 해제</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리보기</span></div>
               <div class="md-item" data-kinds="DOC SHEET SLIDE" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-window-close="true" role="menuitem" tabindex="-1"><span class="md-label">닫기</span><span class="md-shortcut">Ctrl+W</span></div>
@@ -351,6 +352,7 @@
               <div class="md-item" data-studio-menu-cmd="smart-diagnose" role="menuitem" tabindex="-1"><span class="md-label">문장 진단 및 요약</span></div>
               <div class="md-item" data-studio-menu-cmd="scrub-pii" role="menuitem" tabindex="-1"><span class="md-label">개인정보 스캔/마스킹</span></div>
               <div class="md-item" data-studio-menu-cmd="security-audit" role="menuitem" tabindex="-1"><span class="md-label">문서 보안 검사</span></div>
+              <div class="md-item" data-kinds="DOC SLIDE" data-verify-act="doc-inspect" role="menuitem" tabindex="-1"><span class="md-label">문서 검사…</span></div>
               <div class="md-item" data-studio-menu-cmd="bench-run" role="menuitem" tabindex="-1"><span class="md-label">문서 엔진 성능 진단</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-track" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">변경 내용 추적</span></div>
@@ -1054,6 +1056,33 @@
           </div>
         </section>
 
+        <aside id="print-preview-pane" class="print-preview-pane" aria-label="인쇄 미리보기" hidden>
+          <div class="print-preview-toolbar" role="toolbar" aria-label="인쇄 미리보기 도구">
+            <span class="print-preview-title">인쇄 미리보기</span>
+            <div class="print-preview-group" role="group" aria-label="쪽 모양">
+              <button id="btn-pp-single" type="button" class="dialog-btn print-preview-btn" aria-pressed="true">한 쪽</button>
+              <button id="btn-pp-spread" type="button" class="dialog-btn print-preview-btn" aria-pressed="false">두 쪽</button>
+            </div>
+            <div class="print-preview-group" role="group" aria-label="배율">
+              <button id="btn-pp-zoom-out" type="button" class="dialog-btn print-preview-btn" aria-label="축소" title="축소">−</button>
+              <span id="pp-zoom-label" class="print-preview-status">100%</span>
+              <button id="btn-pp-zoom-in" type="button" class="dialog-btn print-preview-btn" aria-label="확대" title="확대">+</button>
+              <button id="btn-pp-fit-width" type="button" class="dialog-btn print-preview-btn">폭 맞춤</button>
+              <button id="btn-pp-fit-page" type="button" class="dialog-btn print-preview-btn">쪽 맞춤</button>
+            </div>
+            <div class="print-preview-group" role="group" aria-label="쪽 이동">
+              <button id="btn-pp-prev" type="button" class="dialog-btn print-preview-btn" aria-label="이전 쪽" title="이전 쪽">‹</button>
+              <span id="pp-page-status" class="print-preview-status" aria-live="polite">1 / 1 쪽</span>
+              <button id="btn-pp-next" type="button" class="dialog-btn print-preview-btn" aria-label="다음 쪽" title="다음 쪽">›</button>
+            </div>
+            <div class="print-preview-actions">
+              <button id="btn-pp-print" type="button" class="dialog-btn dialog-btn-primary print-preview-btn">인쇄</button>
+              <button id="btn-pp-close" type="button" class="dialog-btn print-preview-btn">닫기</button>
+            </div>
+          </div>
+          <div id="print-preview-stage" class="print-preview-stage" data-arrangement="single" tabindex="0" aria-label="인쇄 미리보기 용지"></div>
+        </aside>
+
         <section id="eo-copilot-shell" class="eo-copilot-shell" aria-label="코파일럿" hidden>
           <div
             id="copilot-resizer"
@@ -1208,6 +1237,21 @@
           <button id="btn-doc-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
           <button id="btn-doc-link-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-inspect-dialog" class="tool-dialog" aria-labelledby="doc-inspect-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-inspect-title">문서 검사</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="doc-inspect-section-head">검사 결과</div>
+          <div id="doc-inspect-summary" class="doc-inspect-summary" role="status" aria-live="polite">문제가 발견되지 않았습니다.</div>
+          <ul id="doc-inspect-list" class="dialog-list doc-inspect-list" aria-label="검사 결과"></ul>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-inspect-rerun" type="button" class="dialog-btn">다시 검사</button>
+          <button id="btn-doc-inspect-close" type="button" class="dialog-btn dialog-btn-primary" data-dialog-close>닫기</button>
         </div>
       </div>
     </dialog>
@@ -2567,5 +2611,7 @@
     <script src="./copilot-model-ui.js"></script>
     <script src="./copilot-ui.js"></script>
     <script src="./app.js"></script>
+    <script src="./print-preview.js"></script>
+    <script src="./layout-lint-ui.js"></script>
   </body>
 </html>

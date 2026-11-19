@@ -21,6 +21,7 @@ mod macos_language;
 mod open_feedback;
 mod open_link;
 mod os_recent;
+mod page_screenshot;
 mod pdf_edit_budget;
 mod pdf_edit_build;
 mod pdf_edit_engine;
@@ -399,6 +400,9 @@ fn main() {
     // standard input and output connected to it. It must not start anything of the shell.
     if std::env::args().nth(1).as_deref() == Some(pdf_edit_wire::WORKER_ARG) {
         std::process::exit(pdf_edit_worker::run());
+    }
+    if let Some(code) = page_screenshot::maybe_run_cli() {
+        std::process::exit(code);
     }
     // Before any webview exists: WebKitGTK reads these variables when it starts.
     #[cfg(target_os = "linux")]

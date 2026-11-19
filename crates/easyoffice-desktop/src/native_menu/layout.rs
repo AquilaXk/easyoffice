@@ -172,6 +172,7 @@ const FILE_DOC: MenuSpec = menu(
         "file:save",
         "file:save-as",
         S,
+        "file:print-preview",
         "file:print",
     ],
 );
@@ -188,6 +189,7 @@ const FILE_PAGE_SETUP: MenuSpec = menu(
         "file:save-as",
         S,
         "page:paper",
+        "file:print-preview",
         "file:print",
     ],
 );
@@ -206,6 +208,7 @@ const FILE_SHEET: MenuSpec = menu(
         "sheet:page-setup",
         "sheet:print-area-set",
         "sheet:print-area-clear",
+        "file:print-preview",
         "file:print",
     ],
 );
@@ -626,6 +629,7 @@ const TOOL_DOC: MenuSpec = menu(
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",
+        "tool:doc-inspect",
         "tool:bench-run",
         S,
         "tool:review-track",
@@ -645,6 +649,7 @@ const TOOL_OFFICE: MenuSpec = menu(
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:security-audit",
+        "tool:doc-inspect",
         "tool:bench-run",
         S,
         "tool:review-track",

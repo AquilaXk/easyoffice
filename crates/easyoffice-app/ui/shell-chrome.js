@@ -31,6 +31,7 @@
     "file:save": "studio-save",
     "file:save-as": "file-save-as",
     "file:export-pdf": "hwp-export-pdf",
+    "file:print-preview": "verify-act:print-preview",
     "file:print": "print",
     "file:close": "window-close",
     "edit:undo": "studio-cmd:studio-undo",
@@ -194,6 +195,7 @@
     "tool:diagnose": "studio-cmd:smart-diagnose",
     "tool:scrub-pii": "studio-cmd:scrub-pii",
     "tool:security-audit": "studio-cmd:security-audit",
+    "tool:doc-inspect": "verify-act:doc-inspect",
     "tool:bench-run": "studio-cmd:bench-run",
     "tool:review-track": "studio-cmd:review-track",
     "tool:review-accept-all": "studio-cmd:review-accept-all",
@@ -272,6 +274,7 @@
     const click = (selector) => document.querySelector(selector)?.click();
     return {
       "studio-cmd": (cmd) => click(`.md-item[data-studio-menu-cmd="${cmd}"]`),
+      "verify-act": (act) => click(`.md-item[data-verify-act="${act}"]`),
       "sheet-act": (act) => click(`.md-item[data-sheet-act="${act}"]`),
       "sheet-numfmt": (action) => click(`.md-item[data-sheet-numfmt="${action}"]`),
       "sheet-paste": (action) => click(`.md-item[data-sheet-paste="${action}"]`),

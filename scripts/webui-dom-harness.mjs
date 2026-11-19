@@ -173,6 +173,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/copilot-model-ui.js",
   "../crates/easyoffice-app/ui/copilot-ui.js",
   "../crates/easyoffice-app/ui/app.js",
+  "../crates/easyoffice-app/ui/print-preview.js",
+  "../crates/easyoffice-app/ui/layout-lint-ui.js",
 ].map((relPath) => ({
   relPath,
   resolvedPath: cjsRequire.resolve(relPath),

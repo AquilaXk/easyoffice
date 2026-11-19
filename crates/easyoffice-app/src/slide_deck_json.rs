@@ -692,5 +692,9 @@ pub(crate) fn write_slide_deck_readback(
     write_list(out, &empty);
     out.push_str("],\"denseSlides\":[");
     write_list(out, &dense);
-    let _ = write!(out, "],\"missingAltImageCount\":{missing_alt}}}");
+    let _ = write!(out, "],\"missingAltImageCount\":{missing_alt}}},");
+    crate::layout_lint_json::write_layout_lint_property(
+        out,
+        &easyoffice_formats::lint_slide_deck(deck),
+    );
 }

@@ -591,3 +591,56 @@
   #eo-print-root .slide-canvas-layer { position: absolute; inset: 0; overflow: hidden; }
   #eo-print-root .slide-el-handle { display: none; }
 }
+
+/* Docked live print preview pane and document layout inspector dialog (PD-258). */
+.print-preview-pane { display: flex; flex-direction: column; width: min(460px, 44vw); min-width: 320px; flex-shrink: 0; border-left: 1px solid var(--ui-border-light); background: var(--doc-workspace); color: var(--ui-text); overflow: hidden; }
+.print-preview-pane[hidden], .app-shell[data-hwp-embed="true"] .print-preview-pane { display: none; }
+.print-preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 8px; background: var(--ui-bg-light); border-bottom: 1px solid var(--ui-border-light); flex-shrink: 0; }
+.print-preview-title { font-size: var(--font-size-base); font-weight: 700; color: var(--color-primary-dark); margin-right: 4px; white-space: nowrap; }
+.print-preview-group, .print-preview-actions { display: inline-flex; align-items: center; gap: 2px; }
+.print-preview-actions { margin-left: auto; }
+.print-preview-btn { min-width: 24px; height: 22px; padding: 0 6px; font-size: var(--font-size-sm); white-space: nowrap; }
+.print-preview-btn[aria-pressed="true"] { background: var(--ui-selected); border-color: var(--accent-primary); color: var(--color-primary-dark); font-weight: 600; }
+:root[data-theme-effective="dark"] .print-preview-btn[aria-pressed="true"] { color: var(--ui-text); }
+.print-preview-status { min-width: 44px; padding: 0 4px; text-align: center; font-size: var(--font-size-sm); color: var(--ui-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.print-preview-stage { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 14px; background: var(--doc-workspace); outline: none; }
+.print-preview-stage[data-arrangement="spread"] { display: grid; grid-template-columns: repeat(2, max-content); justify-content: center; align-items: start; gap: 14px; }
+.print-preview-sheet { position: relative; flex: 0 0 auto; box-sizing: border-box; background: var(--doc-paper); color: var(--caret-color); border: 1px solid var(--page-edge); box-shadow: var(--shadow-light); overflow: hidden; }
+.print-preview-sheet[data-current-page="true"] { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
+.print-preview-empty { padding: 24px 16px; text-align: center; font-size: var(--font-size-base); color: var(--ui-text-muted); }
+.print-preview-pane .eo-print-page, .print-preview-pane .eo-print-flow { width: 100%; height: 100%; margin: 0; box-sizing: border-box; overflow: hidden; background: var(--doc-paper); color: var(--caret-color); }
+.print-preview-pane .eo-print-doc-page { position: relative; }
+.print-preview-pane .eo-print-body { position: absolute; overflow: hidden; }
+.print-preview-pane .eo-print-unit { position: absolute; left: 0; right: 0; }
+.print-preview-pane .eo-print-pageno { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 10pt; line-height: 1; }
+.print-preview-pane .eo-print-sheet-page { display: flex; box-sizing: border-box; }
+.print-preview-pane .eo-print-sheet-box { position: relative; flex: none; overflow: hidden; }
+.print-preview-pane .eo-print-chart { position: absolute; pointer-events: none; z-index: 2; }
+.print-preview-pane .eo-print-image { position: absolute; pointer-events: none; z-index: 2; object-fit: fill; }
+.print-preview-pane .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
+.print-preview-pane .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
+.print-preview-pane .eo-print-grid td { border-color: currentcolor; }
+.print-preview-pane .eo-print-num { text-align: right; }
+.print-preview-pane .eo-print-fill { display: flex; }
+.print-preview-pane .eo-print-fill > i { flex: 1 1 0; min-width: 0; overflow: hidden; font-style: normal; }
+.print-preview-pane .eo-print-fill > i::before { content: attr(data-fill); }
+.print-preview-pane .eo-print-b { font-weight: 700; }
+.print-preview-pane .eo-print-i { font-style: italic; }
+.print-preview-pane .eo-print-u { text-decoration: underline; }
+.print-preview-pane .eo-print-s { text-decoration: line-through; }
+.print-preview-pane .slide-stage { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
+.print-preview-pane .slide-lower-zone { overflow: hidden; }
+.print-preview-pane :is(.slide-title-zone h2, .slide-lower-zone p):empty::before { content: none; }
+.print-preview-pane .slide-el-handle { display: none; }
+#doc-inspect-dialog { width: min(520px, calc(100vw - 32px)); }
+.doc-inspect-section-head { font-weight: 700; font-size: var(--font-size-sm); color: var(--color-primary-dark); margin-bottom: 6px; }
+.doc-inspect-summary { padding: 6px 10px; margin-bottom: 8px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-bg-light); color: var(--ui-text); font-size: var(--font-size-sm); line-height: 1.45; }
+#doc-inspect-dialog .doc-inspect-list { max-height: 260px; margin-bottom: 0; }
+#doc-inspect-dialog .doc-inspect-list:empty::before { content: "문제가 발견되지 않았습니다."; }
+#doc-inspect-dialog .doc-inspect-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--ui-border-subtle); white-space: normal; cursor: default; }
+#doc-inspect-dialog .doc-inspect-item:last-child { border-bottom: 0; }
+.doc-inspect-badge { flex-shrink: 0; display: inline-flex; align-items: center; padding: 1px 6px; border-radius: var(--radius-sm); border: 1px solid var(--ui-border); background: var(--ui-accent-bg); color: var(--color-primary-dark); font-size: var(--font-size-xs); font-weight: 700; white-space: nowrap; }
+.doc-inspect-badge[data-kind="overflow"] { background: var(--ui-danger-soft); border-color: var(--ui-danger); color: var(--ui-danger); }
+.doc-inspect-badge[data-kind="overlap"] { background: var(--ui-warning-bg); border-color: var(--ui-warning-border); color: var(--ui-warning-text); }
+.doc-inspect-desc { flex: 1 1 auto; min-width: 0; font-size: var(--font-size-sm); color: var(--ui-text); line-height: 1.4; overflow-wrap: anywhere; }
+.doc-inspect-jump-btn { flex-shrink: 0; height: 22px; padding: 0 8px; font-size: var(--font-size-xs); }

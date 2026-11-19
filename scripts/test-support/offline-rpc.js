@@ -539,9 +539,127 @@ function offlinePasswordLoss(request) {
   return found.some((pwd) => pwd && !holds.includes(pwd.kind));
 }
 
+  function hasOfflineTemplateToken(text) {
+    const str = String(text ?? "");
+    const m = /\{\{([^\r\n{}]{1,64})\}\}/.exec(str);
+    return Boolean(m && m[1].trim().length > 0);
+  }
+
+  function buildOfflineLayoutLint(model) {
+    const issues = [];
+    const counts = { overflow: 0, overlap: 0, emptyPlaceholder: 0 };
+    const pushIssue = (kind, pageOrSlide, blockIndex, targetId, message) => {
+      counts[kind] += 1;
+      issues.push({ kind, pageOrSlide, blockIndex, targetId, message });
+    };
+
+    if (Array.isArray(model.slides)) {
+      const aspectDims = { "16:9": [960, 540], "4:3": [720, 540], A4: [841.89, 595.28] };
+      const [stageW, stageH] = aspectDims[model.aspect] || [960, 540];
+      const stageArea = stageW * stageH;
+      model.slides.forEach((s, sIdx) => {
+        const slideNo = sIdx + 1;
+        const els = Array.isArray(s?.elements) ? s.elements : [];
+        els.forEach((el) => {
+          if (!el || !el.id) return;
+          const x = Number(el.x), y = Number(el.y), w = Number(el.w), h = Number(el.h);
+          if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)
+              || x < -0.5 || y < -0.5 || x + w > stageW + 0.5 || y + h > stageH + 0.5) {
+            pushIssue("overflow", slideNo, null, el.id, `슬라이드 ${slideNo} 개체 '${el.id}'가 스테이지 경계 밖으로 벗어났습니다.`);
+          }
+          if (el.kind === "textbox") {
+            const txt = String(el.text ?? "");
+            if (!txt.trim() || hasOfflineTemplateToken(txt)) {
+              pushIssue("emptyPlaceholder", slideNo, null, el.id, `슬라이드 ${slideNo} 글상자 '${el.id}' 자리표시자가 비어 있습니다.`);
+            }
+          }
+        });
+        const boxes = els
+          .map((el, idx) => ({ el, idx, x0: Number(el?.x), y0: Number(el?.y), x1: Number(el?.x) + Number(el?.w), y1: Number(el?.y) + Number(el?.h) }))
+          .filter((b) => b.el?.id && Number.isFinite(b.x0) && Number.isFinite(b.y0) && Number.isFinite(b.x1) && Number.isFinite(b.y1)
+            && !(b.el.kind === "shape" && (b.x1 - b.x0) * (b.y1 - b.y0) >= stageArea * 0.9))
+          .sort((a, b) => (a.x0 - b.x0) || (a.idx - b.idx));
+        for (let i = 0; i < boxes.length; i += 1) {
+          for (let j = i + 1; j < boxes.length; j += 1) {
+            if (boxes[j].x0 >= boxes[i].x1 - 1) break;
+            const ix = Math.min(boxes[i].x1, boxes[j].x1) - Math.max(boxes[i].x0, boxes[j].x0);
+            const iy = Math.min(boxes[i].y1, boxes[j].y1) - Math.max(boxes[i].y0, boxes[j].y0);
+            if (ix > 1 && iy > 1 && ix * iy > 4) {
+              const first = els[Math.min(boxes[i].idx, boxes[j].idx)];
+              pushIssue("overlap", slideNo, null, first.id, `슬라이드 ${slideNo} 개체 '${first.id}'가 다른 개체와 겹쳤습니다.`);
+            }
+          }
+        }
+        const layout = String(s?.layout || "titleAndContent");
+        const title = String(s?.title ?? "");
+        const bullets = Array.isArray(s?.bullets) ? s.bullets : [];
+        if (layout !== "blank" && !title.trim()) {
+          pushIssue("emptyPlaceholder", slideNo, null, `slide-${slideNo}-title`, `슬라이드 ${slideNo}의 제목이 비어 있습니다.`);
+        }
+        if ((layout === "titleAndContent" || layout === "twoColumn") && !bullets.some((b) => String(b || "").trim()) && els.length === 0) {
+          pushIssue("emptyPlaceholder", slideNo, null, `slide-${slideNo}-body`, `슬라이드 ${slideNo}의 본문이 비어 있습니다.`);
+        }
+      });
+    } else if (Array.isArray(model.blocks)) {
+      const contentWPt = 481.89;
+      model.blocks.forEach((b, idx) => {
+        if (!b || typeof b !== "object") return;
+        if (b.type === "image") {
+          const wPt = Number(b.widthEmu || 0) / 12700;
+          if (wPt > contentWPt + 1) {
+            pushIssue("overflow", 1, idx, `block-${idx}`, `그림(블록 ${idx})이 본문 가용 폭을 초과합니다.`);
+          }
+          return;
+        }
+        if (b.type === "table") {
+          const widths = Array.isArray(b.colWidthsTwips) ? b.colWidthsTwips : [];
+          const sumPt = widths.reduce((acc, w) => acc + (Number(w) || 0) / 20, 0);
+          if (sumPt > contentWPt + 1) {
+            pushIssue("overflow", 1, idx, `table-${idx}`, `표(블록 ${idx}) 열 너비가 본문 폭을 초과합니다.`);
+          }
+          const rows = Array.isArray(b.rows) ? b.rows : [];
+          if (rows.length > 0) {
+            let allEmpty = true;
+            let hasTok = false;
+            for (const r of rows) {
+              for (const c of Array.isArray(r) ? r : []) {
+                const txt = String(typeof c === "string" ? c : c?.value ?? c?.text ?? "");
+                if (txt.trim()) {
+                  allEmpty = false;
+                  if (!hasTok && hasOfflineTemplateToken(txt)) hasTok = true;
+                }
+              }
+            }
+            if (allEmpty) pushIssue("emptyPlaceholder", 1, idx, `table-${idx}`, `표(블록 ${idx})의 모든 셀이 비어 있습니다.`);
+            else if (hasTok) pushIssue("emptyPlaceholder", 1, idx, `table-${idx}`, `표(블록 ${idx})에 미치환 자리표시자가 있습니다.`);
+          }
+          return;
+        }
+        const text = (Array.isArray(b.runs) ? b.runs : []).map((r) => String(r?.text || "")).join("");
+        if (Number(b.heading) > 0 && !text.trim()) {
+          pushIssue("emptyPlaceholder", 1, idx, `block-${idx}`, `제목 문단(블록 ${idx})이 비어 있습니다.`);
+        } else if (text.trim() && hasOfflineTemplateToken(text)) {
+          pushIssue("emptyPlaceholder", 1, idx, `block-${idx}`, `문단(블록 ${idx})에 미치환 자리표시자가 있습니다.`);
+        }
+      });
+    }
+
+    return {
+      issueCount: issues.length,
+      overflowCount: counts.overflow,
+      overlapCount: counts.overlap,
+      emptyPlaceholderCount: counts.emptyPlaceholder,
+      truncated: false,
+      issues,
+    };
+  }
+
 function offlineSourceConversion(parsed) {
     const decoded = offlineDecodeSource(parsed);
     if (parsed.action === "decode") return decoded;
+    if (parsed.action === "inspect" || parsed.action === "readback") {
+      return { ...decoded, action: parsed.action, layoutLint: buildOfflineLayoutLint(decoded) };
+    }
     const b64 = encodeUtf8Base64(JSON.stringify(decoded.blocks || decoded.sheets || decoded.slides || []));
     return {
       sourceFormat: decoded.format, targetFormat: String(parsed.targetFormat || "hwpx"),
@@ -1242,6 +1360,15 @@ function offlineSourceConversion(parsed) {
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
           if (parsed.sourceBase64 !== undefined) return offlineSourceConversion(parsed);
+          if (parsed.action === "inspect" || parsed.action === "readback") {
+            return {
+              status: "OK",
+              action: parsed.action,
+              kind: Array.isArray(parsed.slides) ? "slideDeck" : "document",
+              format: String(parsed.sourceFormat || "docx").toLowerCase(),
+              layoutLint: buildOfflineLayoutLint(parsed),
+            };
+          }
           if (offlinePasswordLoss(parsed)) return { refused: "passwordLoss" };
           fields = parseConvertJsonFields(parsed);
         } else {

@@ -22,6 +22,7 @@ pub mod hwp_eqedit;
 pub mod hwpx_codec;
 mod hwpx_parts;
 mod hwpx_unpack;
+pub mod layout_lint;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 mod odf_package;
@@ -111,6 +112,10 @@ pub use embedded_thumbnail::{
     MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
 };
 pub use hwp_eqedit::*;
+pub use layout_lint::{
+    lint_document, lint_legacy_slides, lint_slide_deck, LayoutIssue, LayoutIssueKind,
+    LayoutLintReport, MAX_LINT_ISSUES,
+};
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;

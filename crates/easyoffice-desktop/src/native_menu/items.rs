@@ -63,6 +63,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("CmdOrCtrl+E"),
         "hwp-export-pdf",
     ),
+    item(
+        "file:print-preview",
+        "인쇄 미리보기",
+        None,
+        "verify-act:print-preview",
+    ),
     item("file:print", "인쇄…", Some("CmdOrCtrl+P"), "print"),
     item("file:close", "닫기", Some("CmdOrCtrl+W"), "window-close"),
     item("edit:undo", "되돌리기", None, "studio-cmd:studio-undo"),
@@ -624,6 +630,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "문서 보안 검사",
         None,
         "studio-cmd:security-audit",
+    ),
+    item(
+        "tool:doc-inspect",
+        "문서 검사…",
+        None,
+        "verify-act:doc-inspect",
     ),
     item(
         "tool:bench-run",
