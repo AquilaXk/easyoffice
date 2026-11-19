@@ -4443,3 +4443,23 @@
 - **Alternatives rejected** 픽셀 격자 전체에 대해 매 프레임 무제한 A*를 돌리는 방식(넓은 캔버스에서 메모리·시간 폭증 — 포트·장애물 모서리 Hanan 유한 격자로 해결), 뷰포트 줌·팬만으로도 문서를 수정됨(`dirty`)으로 표시하는 방식(열람만으로 불필요한 저장 확인 발생 — 지문 계산에서 `viewport` 분리로 해결).
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
 - **Revisit when** 보드 전용 네이티브 아카이브 확장자 열기나 다중 선택 정렬·배분 도구를 추가할 때.
+
+## PD-261. Windows 심볼릭 링크·NTFS 정션(`mklink /J`) 저장·열기 검증 및 경로 정규화·민감 경로 차단 강화
+
+- **Status** Implemented (QA 요청 2026-11-20). 데스크톱: `crates/easyoffice-desktop/src/{sensitive_path.rs,windows.rs,window_commands.rs,save_file.rs,save_file_tests.rs}`, `crates/easyoffice-desktop/src/window_commands/tests.rs`, `TODO.md`.
+- **Context** `TODO.md`에 남아 있던 Windows 파일/디렉터리 심볼릭 링크(`symlink_file`·`symlink_dir`)와 NTFS 디렉터리 정션(`mklink /J`, `IO_REPARSE_TAG_MOUNT_POINT`)의 열기·제자리 저장·다른 이름으로 저장 동작을 검증하면서, 상위 디렉터리 심볼릭 링크·정션을 경유한 숨김 파일(`.env` 등)·자격증명 파일(`.npmrc` 등)·Windows 시작 프로그램(`Start Menu\Programs\Startup`) 접근 차단과 `\\?\` 확장 경로 정규화 일관성을 함께 완비했다.
+- **Decision (`PD-261`)**
+  1. **`OpenTarget::of` 전 경로 `ensure_safe_symlink_target` 강제 및 Windows 시작 프로그램 폴더 차단(`window_commands.rs` · `sensitive_path.rs`)**:
+     - 리프 파일이 일반 파일이더라도 상위 디렉터리가 심볼릭 링크나 NTFS 정션(`FileType::is_symlink() == false`)일 수 있으므로 `OpenTarget::of`가 `fs::canonicalize` 직후 항상 `ensure_safe_symlink_target(&canonical)`을 호출하도록 통일했다(`save_file::resolve_link`와 동일 기준).
+     - `sensitive_path.rs`의 경로 세그먼트 분리를 `/`·`\` 및 `\\?\` 확장 접두사 공통 파서로 통합하고 연속 3세그먼트 `Start Menu / Programs / Startup`(대소문자 무시)을 민감 자동 실행 경로에 추가했다(일반 `Documents\Startup` 폴더 오탐 없음).
+  2. **Windows `\\?\` 확장 경로 키 정규화 및 표시 경로 정리(`windows.rs`)**:
+     - `normalize_windows_path_key`가 `\\?\UNC\`·`\\?\X:\` 접두사 제거, `/`→`\` 통일, 소문자화를 수행해 정션·심볼릭 링크·직접 경로가 동일한 창 중복 방지 키(`path_key`)로 수렴하게 했다.
+     - `strip_windows_verbatim`이 `MAX_PATH` 안전 범위(`< 248`자)에서 `shown` 경로의 `\\?\` 접두사를 제거해 최근 문서 목록에 깔끔한 일반 경로만 저장되도록 했다(실제 읽기·저장용 `canonical`은 긴 경로 호환을 위해 그대로 유지).
+  3. **실제 Windows 러너(`windows-latest`) 심볼릭 링크·NTFS 정션(`mklink /J`) 열기·저장 테스트 추가(`window_commands/tests.rs` · `save_file_tests.rs`)**:
+     - 파일 심볼릭 링크(다른 확장자 대상 포함)·디렉터리 심볼릭 링크·NTFS 정션(`cmd /c mklink /J`)에 대해 열기, 창 키 일치, 제자리 저장(`save_in_place`), 원자적 쓰기(`write_document_bytes`), 링크/정션 보존, 임시 파일 무잔류, 끊어진 링크/정션 거부, 숨김·자격증명·시작 프로그램 경로 거부를 자동 검증한다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 외부 크레이트(`dunce` 등 추가 의존성)를 새로 도입하지 않는다. (2) 표준 라이브러리 `std::fs::canonicalize`, `std::os::windows::fs`, `MetadataExt`를 그대로 재사용했다. (3) 기존 `PD-109`·`PD-177` 원자적 저장·민감 경로 가드를 Windows 리파스 포인트와 `\\?\` 프리픽스까지 포괄하도록 확장했다.
+- **Why** Windows에서 사용자가 문서 폴더를 NTFS 정션이나 심볼릭 링크로 구성했을 때도 열기·제자리 저장·중복 창 포커스가 정확히 동작하면서 자격증명·자동 실행 경로 우회는 막는다.
+- **Trade-offs** `248`자 이상의 초장문 Windows 경로에서는 Win32 호환성을 위해 `shown`에도 `\\?\` 접두사를 유지한다.
+- **Alternatives rejected** 모든 `FILE_ATTRIBUTE_REPARSE_POINT`를 일괄 거부하는 방식(OneDrive 클라우드 동기화 폴더의 정상 문서를 열지 못하게 됨 — `canonicalize` 후 대상 경로 검증으로 해결).
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop` (macOS·Linux·Windows CI).
+- **Revisit when** 네트워크 드라이브(SMB DFS 리파스 포인트) 위 파일 잠금 정책을 세분화할 때.

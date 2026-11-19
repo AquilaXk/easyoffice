@@ -167,13 +167,64 @@ pub fn display_name(path: &Path) -> String {
     name.chars().take(200).collect()
 }
 
-/// Comparison key of a canonical path. Windows file names are case-insensitive.
-pub fn path_key(path: &Path) -> String {
-    let raw = path.to_string_lossy().into_owned();
-    if cfg!(windows) {
-        raw.to_lowercase()
+/// Normalizes a Windows path string for case-insensitive identity comparison: strips extended-length
+/// verbatim prefixes (`\\?\UNC\` and `\\?\X:\`), normalizes `/` separators to `\`, and lowercases.
+pub fn normalize_windows_path_key(raw: &str) -> String {
+    let unified = raw.replace('/', "\\");
+    let stripped = if unified
+        .get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case(r"\\?\UNC\"))
+    {
+        format!(r"\\{}", &unified[8..])
+    } else if let Some(rest) = unified.strip_prefix(r"\\?\") {
+        if rest.as_bytes().get(1) == Some(&b':') {
+            rest.to_owned()
+        } else {
+            unified
+        }
     } else {
-        raw
+        unified
+    };
+    stripped.to_lowercase()
+}
+
+/// Strips Windows `\\?\` verbatim prefix for display and recent-document persistence when the
+/// resulting path is valid UTF-8 and stays safely under `MAX_PATH` (`< 248` UTF-16 code units).
+/// Keeps `\\?\` on long or non-UTF-8 paths.
+#[cfg(windows)]
+pub fn strip_windows_verbatim(path: std::path::PathBuf) -> std::path::PathBuf {
+    let Some(raw) = path.to_str() else {
+        return path;
+    };
+    let candidate = if raw
+        .get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case(r"\\?\UNC\"))
+    {
+        Some(format!(r"\\{}", &raw[8..]))
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        (rest.as_bytes().get(1) == Some(&b':')).then(|| rest.to_owned())
+    } else {
+        None
+    };
+    match candidate {
+        Some(clean) if clean.encode_utf16().count() < 248 => std::path::PathBuf::from(clean),
+        _ => path,
+    }
+}
+
+#[cfg(not(windows))]
+pub fn strip_windows_verbatim(path: std::path::PathBuf) -> std::path::PathBuf {
+    path
+}
+
+/// Comparison key of a canonical path. Windows file names are case-insensitive and canonicalize
+/// with `\\?\` verbatim prefixes.
+pub fn path_key(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if cfg!(windows) {
+        normalize_windows_path_key(&raw)
+    } else {
+        raw.into_owned()
     }
 }
 
@@ -588,6 +639,22 @@ mod tests {
         assert_eq!(
             path_key(&PathBuf::from("C:/Docs/A.DOCX")),
             path_key(&PathBuf::from("c:/docs/a.docx"))
+        );
+        assert_eq!(
+            path_key(&PathBuf::from(r"\\?\C:\Docs\A.DOCX")),
+            path_key(&PathBuf::from(r"C:\docs\a.docx"))
+        );
+    }
+
+    #[test]
+    fn windows_path_key_unifies_verbatim_separators_and_unc() {
+        assert_eq!(
+            normalize_windows_path_key("C:/Docs/보고서.DOCX"),
+            normalize_windows_path_key(r"\\?\c:\docs\보고서.docx")
+        );
+        assert_eq!(
+            normalize_windows_path_key(r"\\?\UNC\Server\Share\Doc.HWPX"),
+            normalize_windows_path_key(r"\\server\share\doc.hwpx")
         );
     }
 

@@ -264,6 +264,9 @@ fn resolve_link(path: &Path) -> std::io::Result<PathBuf> {
         }
         _ => {
             ensure_safe_symlink_target(path)?;
+            if let Ok(canon_existing) = fs::canonicalize(path) {
+                ensure_safe_symlink_target(&canon_existing)?;
+            }
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
                 if let Ok(canon_parent) = fs::canonicalize(parent) {
                     if in_sensitive_credential_dir(&canon_parent) {

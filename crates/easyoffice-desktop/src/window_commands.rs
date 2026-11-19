@@ -507,18 +507,14 @@ struct OpenTarget {
 impl OpenTarget {
     fn of(path: &Path) -> std::io::Result<Self> {
         let canonical = fs::canonicalize(path)?;
+        crate::sensitive_path::ensure_safe_symlink_target(&canonical)?;
         let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
-        if is_link {
-            crate::sensitive_path::ensure_safe_symlink_target(&canonical)?;
-        } else if !crate::sensitive_path::in_sensitive_credential_dir(path)
-            && crate::sensitive_path::in_sensitive_credential_dir(&canonical)
-        {
-            return Err(crate::sensitive_path::sensitive_symlink_error());
-        }
         let shown = if is_link {
-            std::path::absolute(path).unwrap_or_else(|_| canonical.clone())
+            crate::windows::strip_windows_verbatim(
+                std::path::absolute(path).unwrap_or_else(|_| canonical.clone()),
+            )
         } else {
-            canonical.clone()
+            crate::windows::strip_windows_verbatim(canonical.clone())
         };
         Ok(Self { canonical, shown })
     }

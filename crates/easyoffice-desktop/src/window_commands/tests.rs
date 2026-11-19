@@ -336,6 +336,19 @@ fn symlinks_to_dotfiles_and_credential_dirs_are_refused() {
         panic!("expected PermissionDenied for {via_dir:?}");
     };
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    // Ancestor directory link into a non-sensitive folder still refuses dotfiles and credential files.
+    let home_sim = dir.join("home_sim");
+    fs::create_dir_all(&home_sim).unwrap();
+    fs::write(home_sim.join(".env"), b"SECRET=1").unwrap();
+    fs::write(home_sim.join(".npmrc"), b"//registry/:_authToken=x").unwrap();
+    let home_link = dir.join("home_link");
+    std::os::unix::fs::symlink(&home_sim, &home_link).unwrap();
+    for name in [".env", ".npmrc"] {
+        let Err(err) = OpenTarget::of(&home_link.join(name)) else {
+            panic!("expected PermissionDenied for ancestor link to {name}");
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
     // PD-177: a symlink to a non-hidden document store file outside sensitive dirs still opens.
     let allowed = dir.join("store").join("a1b2c3.bin");
     fs::create_dir_all(allowed.parent().unwrap()).unwrap();
@@ -449,4 +462,145 @@ fn window_limit_bounds_concurrent_windows() {
     assert!(err.contains("동시에 열 수 있는 문서 창 한도"));
     registry.remove("win-0");
     assert!(check_window_limit(&registry).is_ok());
+}
+
+#[cfg(windows)]
+fn make_ntfs_junction(junction: &Path, target: &Path) {
+    let out = std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(junction)
+        .arg(target)
+        .output()
+        .expect("cmd mklink /J executed");
+    assert!(
+        out.status.success(),
+        "mklink /J failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_symlinks_and_ntfs_junctions_open_save_and_refuse_sensitive_targets() {
+    use std::os::windows::fs::{symlink_dir, symlink_file, MetadataExt};
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+    let dir = scratch_dir("win-link-junction");
+    let real = dir.join("data").join("a1b2c3.bin");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, b"old-win").unwrap();
+
+    // 1. File symbolic link with a different extension opens as DOCX and saves in-place to target.
+    let link = dir.join("분기 보고서.docx");
+    symlink_file(&real, &link).unwrap();
+    let OpenTarget { canonical, shown } = OpenTarget::of(&link).unwrap();
+    assert_eq!(canonical, fs::canonicalize(&real).unwrap());
+    assert_eq!(display_name(&shown), "분기 보고서.docx");
+    assert!(!shown.to_string_lossy().starts_with(r"\\?\"));
+    assert_eq!(WindowKind::for_path(&shown), Some(WindowKind::Doc));
+
+    let state = AppWindows::new(None);
+    let fingerprint = Fingerprint::of(&canonical).unwrap();
+    locked(&state.files).track_opened("doc-win-1", canonical, shown, fingerprint);
+    let tracked = locked(&state.files).get("doc-win-1").unwrap();
+    assert!(tracked.extension_matches("docx"));
+    crate::save_file::save_in_place(&tracked.path, &tracked.fingerprint, b"new-win", |_| false)
+        .unwrap();
+    assert_eq!(fs::read(&real).unwrap(), b"new-win");
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+
+    // 2. NTFS directory junction (`mklink /J`) deduplicates path_key, opens cleanly, and saves in-place.
+    let real_docs = dir.join("real_docs");
+    fs::create_dir_all(&real_docs).unwrap();
+    let real_doc = real_docs.join("기획안.docx");
+    fs::write(&real_doc, b"junc-old").unwrap();
+    let junction_docs = dir.join("junction_docs");
+    make_ntfs_junction(&junction_docs, &real_docs);
+
+    let via_junc = OpenTarget::of(&junction_docs.join("기획안.docx")).unwrap();
+    let direct = OpenTarget::of(&real_doc).unwrap();
+    assert_eq!(path_key(&via_junc.canonical), path_key(&direct.canonical));
+    assert!(!via_junc.shown.to_string_lossy().starts_with(r"\\?\"));
+    let junc_fp = Fingerprint::of(&via_junc.canonical).unwrap();
+    crate::save_file::save_in_place(&via_junc.canonical, &junc_fp, b"junc-new", |_| false).unwrap();
+    assert_eq!(fs::read(&real_doc).unwrap(), b"junc-new");
+    assert_ne!(
+        fs::symlink_metadata(&junction_docs)
+            .unwrap()
+            .file_attributes()
+            & FILE_ATTRIBUTE_REPARSE_POINT,
+        0
+    );
+
+    // 3. Symlinks and NTFS junctions into dotfiles, `.ssh`, or Windows Startup are refused.
+    let ssh_dir = dir.join(".ssh");
+    fs::create_dir_all(&ssh_dir).unwrap();
+    fs::write(ssh_dir.join("id_rsa"), b"secret").unwrap();
+    let startup_dir = dir.join("Start Menu").join("Programs").join("Startup");
+    fs::create_dir_all(&startup_dir).unwrap();
+    fs::write(startup_dir.join("autorun.bat"), b"rem").unwrap();
+    let home_sim = dir.join("home_sim");
+    fs::create_dir_all(&home_sim).unwrap();
+    fs::write(home_sim.join(".env"), b"SECRET=1").unwrap();
+    fs::write(home_sim.join(".npmrc"), b"token").unwrap();
+
+    let bad_file_link = dir.join("비밀키.docx");
+    symlink_file(ssh_dir.join("id_rsa"), &bad_file_link).unwrap();
+    assert_eq!(
+        OpenTarget::of(&bad_file_link).err().unwrap().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let dir_sym_home = dir.join("sym_home");
+    symlink_dir(&home_sim, &dir_sym_home).unwrap();
+    assert_eq!(
+        OpenTarget::of(&dir_sym_home.join(".env"))
+            .err()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let junc_ssh = dir.join("junc_ssh");
+    make_ntfs_junction(&junc_ssh, &ssh_dir);
+    assert_eq!(
+        OpenTarget::of(&junc_ssh.join("id_rsa"))
+            .err()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let junc_startup = dir.join("junc_startup");
+    make_ntfs_junction(&junc_startup, &startup_dir);
+    assert_eq!(
+        OpenTarget::of(&junc_startup.join("autorun.bat"))
+            .err()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let junc_home = dir.join("junc_home");
+    make_ntfs_junction(&junc_home, &home_sim);
+    assert_eq!(
+        OpenTarget::of(&junc_home.join(".npmrc"))
+            .err()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    // 4. Dangling NTFS junction fails closed.
+    let gone_dir = dir.join("gone_target");
+    fs::create_dir_all(&gone_dir).unwrap();
+    let dangling_junc = dir.join("dangling_junc");
+    make_ntfs_junction(&dangling_junc, &gone_dir);
+    fs::remove_dir_all(&gone_dir).unwrap();
+    assert!(OpenTarget::of(&dangling_junc.join("doc.docx")).is_err());
+
+    let _ = fs::remove_dir_all(&dir);
 }

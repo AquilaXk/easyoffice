@@ -1,33 +1,60 @@
-//! Guard against symlinks pointing to sensitive credential and autostart files (PD-177).
+//! Guard against symlinks and NTFS junctions pointing to sensitive credential and autostart files (PD-177, PD-261).
 
 use std::path::Path;
 
-const SENSITIVE_DIRS: &[&[u8]] = &[
-    b".ssh",
-    b".gnupg",
-    b".aws",
-    b".kube",
-    b".git",
-    b".docker",
-    b"gcloud",
-    b"launchagents",
-    b"launchdaemons",
-    b"autostart",
-    b"systemd",
+const SENSITIVE_DIRS: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".kube",
+    ".git",
+    ".docker",
+    "gcloud",
+    "launchagents",
+    "launchdaemons",
+    "autostart",
+    "systemd",
 ];
 
-const SENSITIVE_FILES: &[&[u8]] = &[b".pypirc", b".npmrc", b".netrc", b"credentials.toml"];
+const SENSITIVE_FILES: &[&str] = &[".pypirc", ".npmrc", ".netrc", "credentials.toml"];
+
+fn path_segments(path: &Path) -> Vec<String> {
+    let raw = path.to_string_lossy();
+    let trimmed = raw
+        .strip_prefix(r"\\?\UNC\")
+        .or_else(|| raw.strip_prefix(r"\\?\unc\"))
+        .or_else(|| raw.strip_prefix(r"\\?\"))
+        .unwrap_or(&raw);
+    trimmed
+        .split(['/', '\\'])
+        .filter(|seg| !seg.is_empty() && !(seg.len() == 2 && seg.as_bytes()[1] == b':'))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn has_windows_startup_sequence(segments: &[String]) -> bool {
+    segments.windows(3).any(|w| {
+        w[0].eq_ignore_ascii_case("start menu")
+            && w[1].eq_ignore_ascii_case("programs")
+            && w[2].eq_ignore_ascii_case("startup")
+    })
+}
+
+fn segments_in_sensitive_dir(segments: &[String]) -> bool {
+    if segments.iter().any(|part| {
+        let base = part.split(':').next().unwrap_or(part);
+        SENSITIVE_DIRS
+            .iter()
+            .any(|dir| base.eq_ignore_ascii_case(dir))
+    }) {
+        return true;
+    }
+    has_windows_startup_sequence(segments)
+}
 
 pub fn in_sensitive_credential_dir(path: &Path) -> bool {
-    path.components().any(|comp| match comp {
-        std::path::Component::Normal(part) => {
-            let bytes = part.as_encoded_bytes();
-            SENSITIVE_DIRS
-                .iter()
-                .any(|dir| bytes.eq_ignore_ascii_case(dir))
-        }
-        _ => false,
-    })
+    let segments = path_segments(path);
+    segments_in_sensitive_dir(&segments)
 }
 
 pub fn sensitive_symlink_error() -> std::io::Error {
@@ -37,21 +64,18 @@ pub fn sensitive_symlink_error() -> std::io::Error {
     )
 }
 
-/// Rejects symlink targets pointing at hidden dotfiles (`.zshrc`, `.env`, …) or inside sensitive
+/// Rejects targets pointing at hidden dotfiles (`.zshrc`, `.env`, …) or inside sensitive
 /// credential/autostart directories (`.ssh`, `.gnupg`, `.aws`, `.kube`, `LaunchAgents`, `LaunchDaemons`,
-/// `.config/autostart`, `.config/systemd`, `.cargo/credentials.toml`, `.pypirc`, `.npmrc`, `.netrc`)
-/// while allowing normal non-hidden targets regardless of extension (PD-177).
+/// `.config/autostart`, `.config/systemd`, Windows `Start Menu\Programs\Startup`,
+/// `.cargo/credentials.toml`, `.pypirc`, `.npmrc`, `.netrc`) while allowing normal non-hidden
+/// targets regardless of extension (PD-177, PD-261).
 pub fn ensure_safe_symlink_target(canonical: &Path) -> std::io::Result<()> {
-    let is_dotfile = canonical
-        .file_name()
-        .is_some_and(|name| name.as_encoded_bytes().starts_with(b"."));
-    let is_sensitive_file = canonical.file_name().is_some_and(|name| {
-        let bytes = name.as_encoded_bytes();
-        SENSITIVE_FILES
-            .iter()
-            .any(|f| bytes.eq_ignore_ascii_case(f))
-    });
-    if is_dotfile || is_sensitive_file || in_sensitive_credential_dir(canonical) {
+    let segments = path_segments(canonical);
+    let raw_leaf = segments.last().map_or("", String::as_str);
+    let leaf = raw_leaf.split(':').next().unwrap_or(raw_leaf);
+    let is_dotfile = leaf.starts_with('.');
+    let is_sensitive_file = SENSITIVE_FILES.iter().any(|f| leaf.eq_ignore_ascii_case(f));
+    if is_dotfile || is_sensitive_file || segments_in_sensitive_dir(&segments) {
         return Err(sensitive_symlink_error());
     }
     Ok(())
@@ -83,6 +107,11 @@ mod tests {
             "/home/user/.netrc",
             "/home/user/.zshrc",
             "/home/user/.env",
+            r"C:\Users\user\AppData\Roaming\Windows\Start Menu\Programs\Startup\autorun.bat",
+            r"\\?\C:\ProgramData\Windows\Start Menu\Programs\Startup\autorun.exe",
+            r"\\?\C:\Users\user\.ssh\id_rsa",
+            r"C:\Users\user\credentials.toml::$DATA",
+            r"C:\Users\user\.env:stream",
         ];
         for path in blocked {
             assert!(
@@ -95,6 +124,8 @@ mod tests {
             "/home/user/Documents/report.docx",
             "/Users/user/Desktop/test.hwp",
             "/tmp/safe.hwpx",
+            r"C:\Users\user\Documents\Startup\pitch.pptx",
+            r"\\?\C:\Users\user\Documents\분기 보고서.docx",
         ];
         for path in allowed {
             assert!(

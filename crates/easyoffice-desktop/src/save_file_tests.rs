@@ -536,3 +536,113 @@ fn outcomes_serialize_for_the_webview() {
         );
     }
 }
+
+#[cfg(windows)]
+fn make_ntfs_junction(junction: &Path, target: &Path) {
+    let out = std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(junction)
+        .arg(target)
+        .output()
+        .expect("cmd mklink /J executed");
+    assert!(
+        out.status.success(),
+        "mklink /J failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_symlink_and_ntfs_junction_writes_update_target_and_refuse_sensitive_paths() {
+    use std::os::windows::fs::{symlink_dir, symlink_file, MetadataExt};
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+    let dir = scratch_dir("win-symlink-junction");
+    let real = dir.join("real").join("원본.docx");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, b"old").unwrap();
+
+    // 1. Direct write through file symbolic link updates target and keeps the link.
+    let link = dir.join("바로가기.docx");
+    symlink_file(&real, &link).unwrap();
+    let written = write_document_bytes(&link, b"new-bytes").unwrap();
+    assert_eq!(written.bytes, 9);
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read(&real).unwrap(), b"new-bytes");
+    assert_no_leftovers(&dir);
+    assert_no_leftovers(real.parent().unwrap());
+
+    // Dangling file symlink is refused without creating the missing target.
+    let dangling = dir.join("끊김.docx");
+    symlink_file(dir.join("nowhere.docx"), &dangling).unwrap();
+    assert!(write_document_bytes(&dangling, b"x").is_err());
+    assert!(!dir.join("nowhere.docx").exists());
+
+    // 2. Write through NTFS directory junction (`mklink /J`) updates target folder and keeps junction.
+    let real_folder = dir.join("real_folder");
+    fs::create_dir_all(&real_folder).unwrap();
+    let junc_folder = dir.join("junc_folder");
+    make_ntfs_junction(&junc_folder, &real_folder);
+
+    let junc_doc = junc_folder.join("보고서.docx");
+    write_document_bytes(&junc_doc, b"via-junction").unwrap();
+    assert_eq!(
+        fs::read(real_folder.join("보고서.docx")).unwrap(),
+        b"via-junction"
+    );
+    assert_ne!(
+        fs::symlink_metadata(&junc_folder)
+            .unwrap()
+            .file_attributes()
+            & FILE_ATTRIBUTE_REPARSE_POINT,
+        0
+    );
+    assert_no_leftovers(&junc_folder);
+    assert_no_leftovers(&real_folder);
+
+    // 3. Writes through file symlink, directory symlink, or NTFS junction into `.ssh`, dotfiles,
+    // or Windows Startup autostart folder are refused with PermissionDenied.
+    let ssh_dir = dir.join(".ssh");
+    fs::create_dir_all(&ssh_dir).unwrap();
+    let startup_dir = dir.join("Start Menu").join("Programs").join("Startup");
+    fs::create_dir_all(&startup_dir).unwrap();
+    let home_sim = dir.join("home_sim");
+    fs::create_dir_all(&home_sim).unwrap();
+    fs::write(home_sim.join(".env"), b"untouched").unwrap();
+
+    let dir_sym_ssh = dir.join("sym_ssh");
+    symlink_dir(&ssh_dir, &dir_sym_ssh).unwrap();
+    assert_eq!(
+        write_document_bytes(&dir_sym_ssh.join("authorized_keys"), b"bad")
+            .unwrap_err()
+            .to_string(),
+        "쓰기 권한이 없습니다."
+    );
+    assert!(!ssh_dir.join("authorized_keys").exists());
+
+    let junc_startup = dir.join("junc_startup");
+    make_ntfs_junction(&junc_startup, &startup_dir);
+    assert_eq!(
+        write_document_bytes(&junc_startup.join("autorun.bat"), b"bad")
+            .unwrap_err()
+            .to_string(),
+        "쓰기 권한이 없습니다."
+    );
+    assert!(!startup_dir.join("autorun.bat").exists());
+
+    let junc_home = dir.join("junc_home");
+    make_ntfs_junction(&junc_home, &home_sim);
+    assert_eq!(
+        write_document_bytes(&junc_home.join(".env"), b"bad")
+            .unwrap_err()
+            .to_string(),
+        "쓰기 권한이 없습니다."
+    );
+    assert_eq!(fs::read(home_sim.join(".env")).unwrap(), b"untouched");
+
+    let _ = fs::remove_dir_all(&dir);
+}
