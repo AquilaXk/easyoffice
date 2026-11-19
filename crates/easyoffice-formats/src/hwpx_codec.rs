@@ -275,12 +275,9 @@ impl ShapeTables {
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
                 if let Some(key) = run.note_ref {
-                    let note_text = self
-                        .notes_by_key
-                        .get(&key)
-                        .map(String::as_str)
-                        .unwrap_or("");
-                    sec.note_run(char_pr, key.0, note_text);
+                    // The first reference takes the body; a repeat is written empty (PD-262).
+                    let note_text = self.notes_by_key.remove(&key).unwrap_or_default();
+                    sec.note_run(char_pr, key.0, &note_text);
                 } else if let Some(field) = run.field {
                     sec.field_run(char_pr, field, &self.file_text);
                 } else {

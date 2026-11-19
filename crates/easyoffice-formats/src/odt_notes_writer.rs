@@ -19,7 +19,10 @@ use crate::XmlSanitizer;
 pub(crate) struct OdtNotesContext {
     pub(crate) track_changes: bool,
     regions: Vec<(String, RichRevision, String)>,
+    /// Bodies not yet written: the first reference takes its body out, a repeat is written without one,
+    /// so a note referenced N times costs one body, not N (PD-262).
     note_by_key: HashMap<(RichNoteKind, u32), String>,
+    /// Same rule for comment annotations, which a comment with many anchors opens again and again.
     comment_by_id: HashMap<u32, RichComment>,
 }
 
@@ -98,9 +101,9 @@ fn push_odt_note_paragraphs(out: &mut String, text: &str) {
     }
 }
 
-fn open_odt_comment(body: &mut String, cid: u32, comment_by_id: &HashMap<u32, RichComment>) {
+fn open_odt_comment(body: &mut String, cid: u32, comment_by_id: &mut HashMap<u32, RichComment>) {
     let _ = write!(body, "<office:annotation office:name=\"cmt{cid}\">");
-    if let Some(c) = comment_by_id.get(&cid) {
+    if let Some(c) = comment_by_id.remove(&cid) {
         let author = XmlSanitizer::escape(&c.author);
         let date = XmlSanitizer::escape(&c.date);
         let _ = write!(
@@ -167,7 +170,7 @@ pub(crate) fn push_odt_paragraph_runs(
         if cur_comment != want_comment {
             close_odt_comment(body, &mut cur_comment);
             if let Some(cid) = want_comment {
-                open_odt_comment(body, cid, &ctx.comment_by_id);
+                open_odt_comment(body, cid, &mut ctx.comment_by_id);
                 cur_comment = Some(cid);
             }
         }
@@ -194,12 +197,12 @@ pub(crate) fn push_odt_paragraph_runs(
                 RichNoteKind::Footnote => ("ftn", "footnote"),
                 RichNoteKind::Endnote => ("edn", "endnote"),
             };
-            let note_text = ctx.note_by_key.get(&(kind, id)).map_or("", String::as_str);
+            let note_text = ctx.note_by_key.remove(&(kind, id)).unwrap_or_default();
             let _ = write!(
                 body,
                 "<text:note text:id=\"{prefix}{id}\" text:note-class=\"{class}\"><text:note-citation>{id}</text:note-citation><text:note-body>"
             );
-            push_odt_note_paragraphs(body, note_text);
+            push_odt_note_paragraphs(body, &note_text);
             body.push_str("</text:note-body></text:note>");
             continue;
         }

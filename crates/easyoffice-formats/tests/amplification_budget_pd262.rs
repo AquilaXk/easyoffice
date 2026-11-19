@@ -1,7 +1,10 @@
 //! PD-262: 작은 입력이 수백 MB 메모리·수십 초 CPU로 증폭되는 경로(피벗 필드 이름, 반복 참조 파트,
 //! 각주 본문 복제, 중첩 문단, 표 수식, 쪽 나눔, 템플릿 토큰 스캔)는 상한에서 Fail-Closed로 끝나야 한다.
 
-use easyoffice_formats::{EasyOfficeError, OoxmlCodec, ZipArchiveCodec};
+use easyoffice_formats::{
+    DocumentFormat, EasyOfficeError, OoxmlCodec, RichBlock, RichComment, RichDocument, RichNote,
+    RichNoteKind, RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec,
+};
 
 fn assert_budget_error<T>(result: Result<T, EasyOfficeError>, what: &str) {
     match result {
@@ -171,7 +174,7 @@ fn comments_repeat_reference_xlsx(vml: bool) -> Vec<u8> {
 fn comments_part_referenced_by_every_sheet_is_read_once() {
     let bytes = comments_repeat_reference_xlsx(false);
     assert!(
-        bytes.len() < 8 * 1024 * 1024,
+        bytes.len() < REFS * MAX_BYTES_PER_REF,
         "fixture is {} bytes",
         bytes.len()
     );
@@ -185,5 +188,92 @@ fn comments_part_referenced_by_every_sheet_is_read_once() {
     assert!(
         rejected >= 3,
         "second references must be turned away, got {rejected}"
+    );
+}
+
+/// 항목 3 재현 규모(60 KB 각주 x 15만 참조)는 수정 전 코드에서 9 GB를 먹으므로 RED 단계에서는
+/// `REFS`를 줄여 돌렸다. 수정 후에는 원 규모로 둔다.
+const REFS: usize = 150_000;
+
+/// 표식 하나가 정당하게 쓰는 바이트 상한. 60 KB 본문을 되풀이하면 이 값의 수백 배가 된다.
+const MAX_BYTES_PER_REF: usize = 512;
+
+fn note_ref_run(kind: RichNoteKind) -> RichRun {
+    RichRun {
+        note_ref: Some((kind, 1)),
+        ..RichRun::default()
+    }
+}
+
+fn doc_with_repeated_note_refs(kind: RichNoteKind) -> RichDocument {
+    let runs = (0..REFS).map(|_| note_ref_run(kind)).collect();
+    RichDocument {
+        notes: vec![RichNote {
+            id: 1,
+            kind,
+            text: "가".repeat(20_000),
+        }],
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs,
+            ..RichParagraph::default()
+        })],
+        ..RichDocument::default()
+    }
+}
+
+fn assert_small_output(format: DocumentFormat, what: &str) {
+    let doc = doc_with_repeated_note_refs(RichNoteKind::Footnote);
+    let bytes = UniversalFormatConverter::encode_rich(&doc, format, None).expect(what);
+    assert!(
+        bytes.len() < REFS * MAX_BYTES_PER_REF,
+        "{what}: one 60 KB note referenced {REFS} times wrote {} bytes",
+        bytes.len()
+    );
+}
+
+#[test]
+fn odt_writes_a_note_body_once_however_often_it_is_referenced() {
+    assert_small_output(DocumentFormat::Odt, "odt");
+}
+
+#[test]
+fn hwpx_writes_a_note_body_once_however_often_it_is_referenced() {
+    assert_small_output(DocumentFormat::Hwpx, "hwpx");
+}
+
+#[test]
+fn odt_writes_a_comment_body_once_however_many_anchors_it_has() {
+    // 메모 앵커 사이에 일반 런을 끼워 매번 새 annotation이 열리게 한다.
+    let runs: Vec<RichRun> = (0..REFS)
+        .flat_map(|_| {
+            [
+                RichRun {
+                    text: "a".into(),
+                    comment_id: Some(1),
+                    ..RichRun::default()
+                },
+                RichRun::plain("b"),
+            ]
+        })
+        .collect();
+    let doc = RichDocument {
+        comments: vec![RichComment {
+            id: 1,
+            author: "김검토".into(),
+            date: "2026-11-19T09:30:00Z".into(),
+            text: "가".repeat(20_000),
+        }],
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs,
+            ..RichParagraph::default()
+        })],
+        ..RichDocument::default()
+    };
+    let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Odt, None)
+        .expect("odt comments");
+    assert!(
+        bytes.len() < REFS * MAX_BYTES_PER_REF,
+        "one comment with {REFS} anchors wrote {} bytes",
+        bytes.len()
     );
 }
