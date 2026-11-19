@@ -9,7 +9,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
 };
 use crate::sheet_styling::table_style::parse_table_styles;
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
-use crate::sheet_styling::xlsx_comments::{read_sheet_comments, CommentWriter};
+use crate::sheet_styling::xlsx_comments::{read_sheet_comments, CommentWriter, WorkbookComments};
 use crate::sheet_styling::xlsx_drawings::{read_sheet_drawings, DrawingReadBudget, DrawingWriter};
 use crate::sheet_styling::xlsx_filter_dxf::{dxf_bodies, parse_dxf_colors};
 use crate::sheet_styling::xlsx_parts::{combine_sheet_rels, insert_workbook_pivot_caches};
@@ -748,7 +748,7 @@ impl OoxmlCodec {
         let mut link_allowance = LinkAllowance::default();
         let mut table_registry = TableRegistry::default();
         let mut drawing_budget = DrawingReadBudget::default();
-        let mut workbook_notes = 0usize;
+        let mut workbook_comments = WorkbookComments::default();
         let mut sheet_part_paths: Vec<&str> = Vec::with_capacity(sheet_specs.len());
         for (idx, (sheet_name, target_path, state)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
@@ -831,7 +831,7 @@ impl OoxmlCodec {
                     sheet_xml,
                     part_path,
                     &entry_by_path,
-                    &mut workbook_notes,
+                    &mut workbook_comments,
                     &mut styling.notes,
                 )?;
                 if let std::borrow::Cow::Owned(kept) =

@@ -106,3 +106,84 @@ fn pivot_cache_field_names_shared_by_many_pivots_hit_the_budget() {
         "pivot field-name amplification",
     );
 }
+
+/// 항목 2: 120 MiB comments 파트 하나를 시트 4개가 같은 파트로 참조한다.
+fn comments_repeat_reference_xlsx(vml: bool) -> Vec<u8> {
+    let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+    let sheets: String = (1..=4)
+        .map(|i| format!(r#"<sheet name="S{i}" sheetId="{i}" r:id="rId{i}"/>"#))
+        .collect();
+    entries.push((
+        "xl/workbook.xml".into(),
+        format!(r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{OFFICE_REL}"><sheets>{sheets}</sheets></workbook>"#).into_bytes(),
+    ));
+    let wb_rels: Vec<(String, String)> = (1..=4)
+        .map(|i| (format!("rId{i}"), format!("worksheets/sheet{i}.xml")))
+        .collect();
+    let wb_rels_ref: Vec<(&str, &str, &str)> = wb_rels
+        .iter()
+        .map(|(a, c)| (a.as_str(), "worksheet", c.as_str()))
+        .collect();
+    entries.push(("xl/_rels/workbook.xml.rels".into(), rels(&wb_rels_ref)));
+    // 공백 100B마다 탭·줄바꿈·CR 중 하나를 해시로 골라 끼운다. 공백만이라 XML 이벤트는 생기지 않고,
+    // 압축비는 팩커 상한(90) 아래다. 파트 크기는 약 120 MiB.
+    let blank = " ".repeat(100);
+    let pad: String = (0..(120 * 1024 * 1024 / 101) as u64)
+        .map(|i| {
+            let ws =
+                ["\t", "\n", "\r"][((i.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) % 3) as usize];
+            format!("{blank}{ws}")
+        })
+        .collect();
+    let comments = format!(
+        r#"<?xml version="1.0"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>a</author></authors><commentList>{pad}<comment ref="A1" authorId="0"><text><t>x</t></text></comment></commentList></comments>"#
+    );
+    entries.push(("xl/comments1.xml".into(), comments.into_bytes()));
+    for s in 1..=4 {
+        let legacy = if vml {
+            r#"<legacyDrawing r:id="rIdV"/>"#
+        } else {
+            ""
+        };
+        entries.push((
+            format!("xl/worksheets/sheet{s}.xml"),
+            format!(r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{OFFICE_REL}"><sheetData/>{legacy}</worksheet>"#).into_bytes(),
+        ));
+        let mut items = vec![("rIdC", "comments", "../comments1.xml")];
+        if vml {
+            items.push(("rIdV", "vmlDrawing", "../drawings/vmlDrawing1.vml"));
+        }
+        entries.push((
+            format!("xl/worksheets/_rels/sheet{s}.xml.rels"),
+            rels(&items),
+        ));
+    }
+    if vml {
+        entries.push((
+            "xl/drawings/vmlDrawing1.vml".into(),
+            b"<xml xmlns:v=\"urn:schemas-microsoft-com:vml\"></xml>".to_vec(),
+        ));
+    }
+    ZipArchiveCodec::pack_compressed(&entries).expect("pack comments fixture")
+}
+
+#[test]
+fn comments_part_referenced_by_every_sheet_is_read_once() {
+    let bytes = comments_repeat_reference_xlsx(false);
+    assert!(
+        bytes.len() < 8 * 1024 * 1024,
+        "fixture is {} bytes",
+        bytes.len()
+    );
+    let (_, stylings) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).expect("decode");
+    let with_notes = stylings.iter().filter(|(_, s)| !s.notes.is_empty()).count();
+    assert!(
+        with_notes <= 1,
+        "the same comments part fed {with_notes} sheets"
+    );
+    let rejected: u32 = stylings.iter().map(|(_, s)| s.notes_rejected).sum();
+    assert!(
+        rejected >= 3,
+        "second references must be turned away, got {rejected}"
+    );
+}

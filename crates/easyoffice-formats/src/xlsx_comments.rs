@@ -34,6 +34,14 @@ const SHEET_VML_NS: &str = concat!("urn:schemas-micro", "soft-com:office:ex", "c
 const MAX_COMMENTS_XML_EVENTS: usize = 65_536;
 const MAX_VML_XML_EVENTS: usize = 131_072;
 
+/// Workbook-wide comment reading state: the note count and the parts already read. A comments or
+/// VML part belongs to one sheet, so a second sheet naming it is turned away unread (PD-262).
+#[derive(Default)]
+pub(crate) struct WorkbookComments {
+    notes: usize,
+    parts: HashSet<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct SheetCommentPart {
     pub(crate) legacy_drawing_xml: String,
@@ -593,7 +601,7 @@ pub(crate) fn read_sheet_comments(
     sheet_xml: &str,
     part_path: &str,
     entries: &HashMap<&str, &[u8]>,
-    workbook_notes: &mut usize,
+    workbook: &mut WorkbookComments,
     notes_out: &mut std::collections::BTreeMap<u64, SheetCellNote>,
 ) -> Result<u32, EasyOfficeError> {
     let SheetCommentRels {
@@ -606,7 +614,6 @@ pub(crate) fn read_sheet_comments(
 
     let mut visible_set = HashSet::new();
     let legacy_rids = sheet_legacy_rids(sheet_xml)?;
-    let mut seen_vml = HashSet::new();
     let vml_paths: Vec<Option<String>> = if legacy_rids.is_empty() {
         vml_rels.into_values().collect()
     } else {
@@ -619,7 +626,7 @@ pub(crate) fn read_sheet_comments(
         let Some(vml_path) = path_opt else {
             continue;
         };
-        if !seen_vml.insert(vml_path.clone()) {
+        if !workbook.parts.insert(vml_path.clone()) {
             continue;
         }
         if let Some(vml_xml) = entries
@@ -631,14 +638,14 @@ pub(crate) fn read_sheet_comments(
     }
 
     let mut rejected = 0u32;
-    let mut seen_comments = HashSet::new();
     let mut seen_in_sheet = 0usize;
     for target_opt in comment_targets {
         let Some(comment_path) = target_opt else {
             rejected = rejected.saturating_add(1);
             continue;
         };
-        if !seen_comments.insert(comment_path.clone()) {
+        if !workbook.parts.insert(comment_path.clone()) {
+            rejected = rejected.saturating_add(1);
             continue;
         }
         let Some(comments_xml) = entries
@@ -652,7 +659,7 @@ pub(crate) fn read_sheet_comments(
             comments_xml,
             &visible_set,
             &mut seen_in_sheet,
-            workbook_notes,
+            &mut workbook.notes,
             notes_out,
         )?);
     }
