@@ -67,6 +67,7 @@ mod operators;
 mod parser;
 mod parser_array;
 mod pivot;
+mod pivot_dynamic;
 mod recalc;
 mod rules;
 mod sheet_sort;
@@ -102,6 +103,9 @@ pub use memo::{CellMap, CoordHasher, DetMap, DetSet, DetWordHasher, FastMap, Mem
 pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::compile_formula_expr;
 pub use pivot::{PivotError, PivotSpec};
+pub use pivot_dynamic::{
+    DynamicPivotSpec, DynamicPivotSummary, PivotFieldFilter, MAX_PIVOT_FIELDS,
+};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
     RuleUpdates, SpillArea,

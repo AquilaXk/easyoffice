@@ -11,6 +11,8 @@ use crate::sheet_styling::table_style::parse_table_styles;
 use crate::sheet_styling::xlsx_charts::{read_sheet_charts, ChartWriter};
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
 use crate::sheet_styling::xlsx_filter_dxf::{dxf_bodies, parse_dxf_colors};
+use crate::sheet_styling::xlsx_parts::{combine_sheet_rels, insert_workbook_pivot_caches};
+use crate::sheet_styling::xlsx_pivots::{read_workbook_pivots, PivotWriter};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
 use crate::sheet_styling::xlsx_view::{apply_tint, theme_palette, DEFAULT_THEME};
@@ -417,11 +419,13 @@ impl OoxmlCodec {
             .enumerate()
             .map(|(i, (name, _))| chart_writer.add_sheet(name, stylings.get(i)))
             .collect::<Result<_, _>>()?;
+        let pivot_writer = PivotWriter::build(active_sheets, caches, stylings)?;
         let wb_slicer_ext = table_writer.slicers.workbook_ext_xml();
         if !wb_slicer_ext.is_empty() {
             workbook_xml =
                 workbook_xml.replace("</workbook>", &format!("{wb_slicer_ext}</workbook>"));
         }
+        insert_workbook_pivot_caches(&mut workbook_xml, &pivot_writer.wb_pivot_caches);
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, mut wb_rels_xml) = if has_spills {
             (
@@ -440,10 +444,11 @@ impl OoxmlCodec {
                 wb_rels_xml,
             )
         };
-        if !table_writer.slicers.wb_rels.is_empty() {
+        let extra_wb_rels = format!("{}{}", table_writer.slicers.wb_rels, pivot_writer.wb_rels);
+        if !extra_wb_rels.is_empty() {
             wb_rels_xml = wb_rels_xml.replace(
                 "</Relationships>",
-                &format!("{}</Relationships>", table_writer.slicers.wb_rels),
+                &format!("{extra_wb_rels}</Relationships>"),
             );
         }
         let custom_theme = stylings
@@ -451,10 +456,11 @@ impl OoxmlCodec {
             .and_then(|s| s.workbook_theme)
             .filter(|&t| t != DEFAULT_THEME);
         let extra_types = format!(
-            "{}{}{}",
+            "{}{}{}{}",
             table_writer.content_types,
             table_writer.slicers.content_types,
-            chart_writer.content_types
+            chart_writer.content_types,
+            pivot_writer.content_types
         );
         let (content_types, wb_rels_xml) = if custom_theme.is_some() {
             (
@@ -534,23 +540,12 @@ impl OoxmlCodec {
                 format!("xl/worksheets/sheet{}.xml", i + 1),
                 sheet_xml.into_bytes(),
             ));
-            let extra_rels = if charts_part.rels.is_empty() {
-                tables.rels.as_str()
-            } else if tables.rels.is_empty() {
-                charts_part.rels.as_str()
-            } else {
-                ""
-            };
-            let combined_extra_rels;
-            let extra_rels =
-                if extra_rels.is_empty() && !charts_part.rels.is_empty() && !tables.rels.is_empty()
-                {
-                    combined_extra_rels = format!("{}{}", charts_part.rels, tables.rels);
-                    combined_extra_rels.as_str()
-                } else {
-                    extra_rels
-                };
-            if let Some(rels) = merge_relationships(link_rels, extra_rels) {
+            let extra_rels = combine_sheet_rels(&[
+                charts_part.rels.as_str(),
+                tables.rels.as_str(),
+                pivot_writer.sheet_rels.get(i).map_or("", String::as_str),
+            ]);
+            if let Some(rels) = merge_relationships(link_rels, &extra_rels) {
                 XmlSanitizer::validate_safe_xml(&rels)?;
                 entries.push((
                     format!("xl/worksheets/_rels/sheet{}.xml.rels", i + 1),
@@ -567,6 +562,7 @@ impl OoxmlCodec {
         entries.extend(table_writer.parts);
         entries.extend(table_writer.slicers.parts);
         entries.extend(chart_writer.parts);
+        entries.extend(pivot_writer.parts);
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
@@ -726,6 +722,7 @@ impl OoxmlCodec {
         let mut link_allowance = LinkAllowance::default();
         let mut table_registry = TableRegistry::default();
         let mut workbook_charts = 0usize;
+        let mut sheet_part_paths: Vec<&str> = Vec::with_capacity(sheet_specs.len());
         for (idx, (sheet_name, target_path, state)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
                 .get_key_value(target_path.as_str())
@@ -819,12 +816,14 @@ impl OoxmlCodec {
                         styling.tab_color = Some(rgb);
                     }
                 }
+                sheet_part_paths.push(part_path);
                 stylings.push((sheet_name.clone(), styling));
             }
             parsed_sheets.push((sheet_name, scan.cells));
         }
 
         if with_styling {
+            read_workbook_pivots(&entry_by_path, wb_xml, &sheet_part_paths, &mut stylings)?;
             crate::sheet_styling::xlsx_slicers::read_table_slicer_parts(
                 &entry_by_path,
                 &table_registry.table_ids,

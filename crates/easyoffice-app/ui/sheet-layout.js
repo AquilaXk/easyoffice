@@ -35,7 +35,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], index: null, rows: null };
   }
 
   function entry(name) {
@@ -59,7 +59,8 @@
         layout.unlockedRows.length === 0 &&
         layout.unlockedCols.length === 0 &&
         layout.tables.length === 0 &&
-        layout.charts.length === 0)
+        layout.charts.length === 0 &&
+        layout.pivots.length === 0)
     );
   }
 
@@ -327,6 +328,7 @@
     if (layout.unlockedCols?.length) out.unlockedCols = layout.unlockedCols.map((r) => [r[0], r[1]]);
     if (layout.tables?.length) out.tables = structuredClone(layout.tables);
     if (layout.charts?.length) out.charts = structuredClone(layout.charts);
+    if (layout.pivots?.length) out.pivots = structuredClone(layout.pivots);
     return out;
   }
 
@@ -463,6 +465,11 @@
     layout.unlockedCols = runs(json?.unlockedCols);
     layout.tables = Array.isArray(json?.tables) ? structuredClone(json.tables) : [];
     layout.charts = chartsFromJson(json?.charts);
+    layout.pivots = host.__EASYOFFICE_SHEET_PIVOT_MODEL__
+      ? host.__EASYOFFICE_SHEET_PIVOT_MODEL__.pivotsFromJson(json?.pivots)
+      : Array.isArray(json?.pivots)
+        ? structuredClone(json.pivots)
+        : [];
     return layout;
   }
 
@@ -489,8 +496,10 @@
   // Replaces one sheet's layout with the JSON the engine answered.
   function setSheet(name, json) {
     const prevCharts = json && json.charts === undefined ? bySheet[name]?.charts : undefined;
+    const prevPivots = json && json.pivots === undefined ? bySheet[name]?.pivots : undefined;
     const layout = fromJson(json);
     if (prevCharts?.length && layout.charts.length === 0) layout.charts = structuredClone(prevCharts);
+    if (prevPivots?.length && layout.pivots.length === 0) layout.pivots = structuredClone(prevPivots);
     if (isEmpty(layout)) delete bySheet[name];
     else bySheet[name] = layout;
     touch();
@@ -504,6 +513,47 @@
     if (isEmpty(layout)) delete bySheet[name];
     touch();
   }
+
+  const pivotBoxes = new WeakMap();
+  const pivotsOf = (name) => bySheet[name]?.pivots || [];
+  function setPivots(name, pivots) {
+    const model = host.__EASYOFFICE_SHEET_PIVOT_MODEL__;
+    const next = model ? model.pivotsFromJson(pivots) : structuredClone(pivots || []);
+    const layout = entry(name);
+    layout.pivots = next;
+    if (isEmpty(layout)) delete bySheet[name];
+    touch();
+  }
+
+  function parseRef1(refText) {
+    const gridParse = host.__EASYOFFICE_SHEET_GRID_UTILS__?.parseRef;
+    if (gridParse) return gridParse(refText);
+    const p = host.__EASYOFFICE_SHEET_RULES__?.parseCell(refText);
+    return p ? { row: p.row + 1, col: p.col + 1 } : null;
+  }
+
+  function pivotBox(pivot) {
+    const loc = String(pivot?.location || "");
+    const held = pivot && typeof pivot === "object" ? pivotBoxes.get(pivot) : null;
+    if (held && held.location === loc) return held;
+    const [rawA, rawB] = loc.split(":");
+    const a = parseRef1(rawA);
+    const b = parseRef1(rawB ?? rawA);
+    const box = a && b
+      ? { location: loc, r1: Math.min(a.row, b.row), c1: Math.min(a.col, b.col), r2: Math.max(a.row, b.row), c2: Math.max(a.col, b.col) }
+      : { location: loc, r1: 1, c1: 1, r2: 0, c2: 0 };
+    if (pivot && typeof pivot === "object") pivotBoxes.set(pivot, box);
+    return box;
+  }
+
+  function pivotsIn(name, r1, c1, r2, c2) {
+    return pivotsOf(name).filter((p) => {
+      const b = pivotBox(p);
+      return b.r2 >= b.r1 && b.r1 <= r2 && b.r2 >= r1 && b.c1 <= c2 && b.c2 >= c1;
+    });
+  }
+
+  const pivotAt = (name, row1, col1) => pivotsIn(name, row1, col1, row1, col1)[0] || null;
 
   // ---- the auto filter ---------------------------------------------------------------------------
   const filterOf = (name) => bySheet[name]?.filter || null;
@@ -817,6 +867,11 @@
     toJson,
     chartsOf,
     setCharts,
+    pivotsOf,
+    setPivots,
+    pivotBox,
+    pivotsIn,
+    pivotAt,
     MAX_MERGES,
     MAX_CHARTS_PER_SHEET,
     MAX_CHART_SERIES,

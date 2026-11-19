@@ -163,6 +163,12 @@ pub(super) fn append_styling_warnings(
                 st.charts_rejected
             ));
         }
+        if st.pivots_rejected > 0 {
+            warnings.push(format!(
+                "{name} 시트의 피벗 테이블 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                st.pivots_rejected
+            ));
+        }
     }
 }
 
@@ -505,7 +511,8 @@ pub(super) fn write_session_readback(
         mut rej_fmts,
         mut rej_fonts,
         mut rej_charts,
-    ) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+        mut rej_pivots,
+    ) = (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     for (_, st) in stylings {
         rej_names = rej_names.saturating_add(st.names_rejected);
         rej_links = rej_links.saturating_add(st.links_rejected);
@@ -514,6 +521,7 @@ pub(super) fn write_session_readback(
         rej_fmts = rej_fmts.saturating_add(st.num_fmts_rejected);
         rej_fonts = rej_fonts.saturating_add(st.fonts_rejected);
         rej_charts = rej_charts.saturating_add(st.charts_rejected);
+        rej_pivots = rej_pivots.saturating_add(st.pivots_rejected);
     }
 
     let _ = write!(
@@ -544,7 +552,7 @@ pub(super) fn write_session_readback(
     }
     let _ = write!(
         out,
-        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts},\"charts\":{rej_charts}}}}}"
+        "],\"rejectedCounts\":{{\"names\":{rej_names},\"links\":{rej_links},\"tables\":{rej_tables},\"merges\":{rej_merges},\"numFmts\":{rej_fmts},\"fonts\":{rej_fonts},\"charts\":{rej_charts},\"pivots\":{rej_pivots}}}}}"
     );
     Ok(())
 }
@@ -585,6 +593,7 @@ fn write_sheet_summary(
     let cf_count = st.map_or(0, |s| s.rules.cf.len());
     let link_count = st.map_or(0, |s| s.links.len());
     let chart_count = st.map_or(0, |s| s.charts.len());
+    let pivot_count = st.map_or(0, |s| s.pivots.len());
     let _ = write!(
         out,
         ",\"rows\":{max_r},\"cols\":{max_c},\"mergeCount\":{merge_count},\"hiddenRowCount\":{hidden_rows},\"hiddenColCount\":{hidden_cols},\"protected\":{protected},\"validationRuleCount\":{dv_count},\"conditionalRuleCount\":{cf_count},\"linkCount\":{link_count},\"spillCount\":{spill_count},\"chartCount\":{chart_count},\"charts\":["
@@ -595,6 +604,15 @@ fn write_sheet_summary(
                 out.push(',');
             }
             crate::sheet_chart_json::write_chart_json(out, ch, true);
+        }
+    }
+    let _ = write!(out, "],\"pivotCount\":{pivot_count},\"pivots\":[");
+    if let Some(pivots) = st.map(|s| s.pivots.as_slice()) {
+        for (p_idx, pv) in pivots.iter().enumerate() {
+            if p_idx > 0 {
+                out.push(',');
+            }
+            crate::sheet_pivot_json::write_pivot_json(out, pv);
         }
     }
     out.push_str("],\"tables\":[");

@@ -173,7 +173,8 @@
    rule manager = style-dialog.ts:69 (560), validation = options-dialog.ts:30 (480), pivot = formula-dialog.ts:75 (420), alert = confirm-dialog.ts:14-26 (360, body 16px 20px, line-height 1.6, pre-line). */
 #sheet-cf-dialog { width: min(560px, calc(100vw - 32px)); }
 #sheet-dv-dialog { width: min(480px, calc(100vw - 32px)); }
-#sheet-pivot-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-pivot-dialog { width: min(460px, calc(100vw - 32px)); overflow: visible; }
+#sheet-pivot-dialog .dialog-label { min-width: 68px; flex-shrink: 0; }
 #sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-numfmt-dialog { width: min(440px, calc(100vw - 32px)); }
 #sheet-paste-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open list of five choices reaches below the short dialog */

@@ -239,6 +239,15 @@ fn moved_layout_json(
             crate::sheet_chart_json::charts_json(&moved)
         );
     }
+    if let Some(v) = field("pivots").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let parsed = crate::sheet_pivot_json::parse_pivots(v)?;
+        let moved = crate::sheet_pivot_json::shift_pivots(&parsed, sheet, edit);
+        let _ = write!(
+            out,
+            ",\"pivots\":{}",
+            crate::sheet_pivot_json::pivots_json(&moved)
+        );
+    }
     Ok(())
 }
 

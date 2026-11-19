@@ -47,6 +47,55 @@ pub(crate) fn build_content_types(sheet_count: usize) -> String {
 
 use crate::XlsxCachedValue;
 
+/// Inserts `<pivotCaches>...</pivotCaches>` in `xl/workbook.xml` right before `<extLst` (if
+/// present) or before `</workbook>`, preserving ECMA-376 `CT_Workbook` element ordering.
+pub(crate) fn insert_workbook_pivot_caches(workbook_xml: &mut String, pivot_caches_xml: &str) {
+    if pivot_caches_xml.is_empty() {
+        return;
+    }
+    let pos = workbook_xml
+        .find("<extLst")
+        .or_else(|| workbook_xml.rfind("</workbook>"))
+        .unwrap_or(workbook_xml.len());
+    workbook_xml.insert_str(pos, pivot_caches_xml);
+}
+
+/// Concatenates non-empty worksheet `<Relationship .../>` XML fragments.
+pub(crate) fn combine_sheet_rels(fragments: &[&str]) -> String {
+    let total: usize = fragments.iter().map(|s| s.len()).sum();
+    let mut out = String::with_capacity(total);
+    for frag in fragments {
+        out.push_str(frag);
+    }
+    out
+}
+
+/// Resolves an OOXML relationship `target` relative to `dir`, rejecting `..` path traversal.
+pub(crate) fn resolve_zip_target(dir: &str, target: &str) -> Option<String> {
+    let mut parts: Vec<&str> = Vec::new();
+    let joined;
+    let path = if let Some(absolute) = target.strip_prefix('/') {
+        absolute
+    } else {
+        joined = if dir.is_empty() {
+            target.to_string()
+        } else {
+            format!("{dir}/{target}")
+        };
+        &joined
+    };
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            other => parts.push(other),
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
 /// What one cell holds when it is written: its stored text, the value its formula gave, and the area
 /// of the array it spills (PD-217).
 pub(crate) struct CellContent<'a> {

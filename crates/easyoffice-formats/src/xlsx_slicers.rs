@@ -328,6 +328,180 @@ pub(crate) fn read_table_slicer_parts(
     }
 }
 
+#[derive(Clone)]
+struct PivotSlicerCacheDef {
+    source_name: String,
+    pivot_cache_id: Option<u32>,
+    targets: Vec<(Option<u32>, String)>,
+}
+
+fn parse_pivot_slicer_cache_part(xml: &str) -> Option<(String, PivotSlicerCacheDef)> {
+    let mut reader = XmlReader::with_budget(xml, MAX_SLICER_XML_EVENTS);
+    let mut cache_name: Option<String> = None;
+    let mut source_name = String::new();
+    let mut pivot_cache_id: Option<u32> = None;
+    let mut targets: Vec<(Option<u32>, String)> = Vec::new();
+    let mut is_table_slicer = false;
+    while let Ok(Some(event)) = reader.next_event() {
+        let XmlEvent::Start { name, attrs } = event else {
+            continue;
+        };
+        let local = name.rsplit(':').next().unwrap_or(name);
+        match local {
+            "slicerCacheDefinition" if cache_name.is_none() => {
+                cache_name = attrs.get("name").map(|s| s.into_owned());
+                source_name = attrs
+                    .get("sourceName")
+                    .map(|s| s.into_owned())
+                    .unwrap_or_default();
+            }
+            "tableSlicerCache" => is_table_slicer = true,
+            "tabular" | "olap" => {
+                if let Some(cid) = attrs
+                    .get("pivotCacheId")
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                {
+                    pivot_cache_id = Some(cid);
+                }
+            }
+            "pivotTable" => {
+                if let Some(pt_name) = attrs.get("name").filter(|s| !s.trim().is_empty()) {
+                    let tab_id = attrs
+                        .get("tabId")
+                        .and_then(|s| s.trim().parse::<u32>().ok());
+                    targets.push((tab_id, pt_name.into_owned()));
+                }
+            }
+            _ => {}
+        }
+    }
+    if is_table_slicer || (targets.is_empty() && pivot_cache_id.is_none()) {
+        return None;
+    }
+    Some((
+        cache_name?,
+        PivotSlicerCacheDef {
+            source_name,
+            pivot_cache_id,
+            targets,
+        },
+    ))
+}
+
+/// Imports `[MS-XLSX]` pivot slicers (`<tabular>` / `<olap>` + `<pivotTables><pivotTable .../>`)
+/// onto matching [`crate::SheetPivotTable`]s when `<extLst>` did not already define them.
+pub(crate) fn read_pivot_slicer_parts(
+    entries: &HashMap<&str, &[u8]>,
+    stylings: &mut [(String, SheetStyling)],
+) {
+    if stylings.iter().all(|(_, st)| st.pivots.is_empty()) {
+        return;
+    }
+    let mut cache_paths: Vec<&str> = entries
+        .keys()
+        .copied()
+        .filter(|p| p.starts_with("xl/slicerCaches/") && p.ends_with(".xml"))
+        .collect();
+    if cache_paths.is_empty() {
+        return;
+    }
+    cache_paths.sort_unstable();
+    cache_paths.truncate(MAX_SLICERS_TOTAL);
+
+    let mut caches: HashMap<String, PivotSlicerCacheDef> = HashMap::new();
+    for path in cache_paths {
+        let Some(xml) = entries.get(path).and_then(|d| std::str::from_utf8(d).ok()) else {
+            continue;
+        };
+        if let Some((name, cache)) = parse_pivot_slicer_cache_part(xml) {
+            caches.insert(name, cache);
+        }
+    }
+    if caches.is_empty() {
+        return;
+    }
+
+    let mut slicer_paths: Vec<&str> = entries
+        .keys()
+        .copied()
+        .filter(|p| p.starts_with("xl/slicers/") && p.ends_with(".xml"))
+        .collect();
+    slicer_paths.sort_unstable();
+    slicer_paths.truncate(MAX_SLICERS_TOTAL);
+
+    let mut views = Vec::new();
+    for path in slicer_paths {
+        if let Some(xml) = entries.get(path).and_then(|d| std::str::from_utf8(d).ok()) {
+            parse_slicer_views_part(xml, &mut views);
+        }
+    }
+
+    let mut total_added = 0usize;
+    for view in views {
+        if total_added >= MAX_SLICERS_TOTAL {
+            break;
+        }
+        let Some(cache) = caches.get(&view.cache) else {
+            continue;
+        };
+        let target_pos = stylings.iter().enumerate().find_map(|(s_idx, (_, st))| {
+            let tab_1 = (s_idx + 1) as u32;
+            st.pivots.iter().enumerate().find_map(|(p_idx, pv)| {
+                let matched_target = cache.targets.iter().any(|(tid, pt_name)| {
+                    tid.is_none_or(|t| t == tab_1) && pv.name.eq_ignore_ascii_case(pt_name)
+                });
+                let matched_cache =
+                    cache.targets.is_empty() && cache.pivot_cache_id == Some(pv.cache_id);
+                (matched_target || matched_cache).then_some((s_idx, p_idx))
+            })
+        });
+        let Some((s_idx, p_idx)) = target_pos else {
+            continue;
+        };
+        let pivot = &mut stylings[s_idx].1.pivots[p_idx];
+        if pivot.slicers.len() >= crate::MAX_PIVOT_SLICERS {
+            continue;
+        }
+        let src_folded = crate::sheet_names::fold_name(&cache.source_name);
+        let Some(col) = pivot
+            .field_names
+            .iter()
+            .position(|f| crate::sheet_names::fold_name(f) == src_folded)
+            .map(|c| c as u32)
+        else {
+            continue;
+        };
+        if pivot.slicers.iter().any(|s| s.col == col) {
+            continue;
+        }
+        let raw_cap = view
+            .caption
+            .or_else(|| (!cache.source_name.is_empty()).then(|| cache.source_name.clone()))
+            .unwrap_or_else(|| format!("Column{}", col + 1));
+        let mut caption = String::new();
+        for ch in raw_cap.chars() {
+            if caption.len() + ch.len_utf8() > crate::MAX_PIVOT_TEXT_BYTES {
+                break;
+            }
+            caption.push(ch);
+        }
+        let slot = pivot.slicers.len() as u32;
+        let slicer = crate::PivotSlicer {
+            col,
+            caption,
+            left: (24 + slot * 200).min(MAX_SLICER_POS_PX),
+            top: 24,
+            width: view.width_px,
+            height: view.height_px,
+            multi_select: false,
+        };
+        if slicer.check_bounds(pivot.known_source_width()).is_ok() {
+            pivot.slicers.push(slicer);
+            total_added += 1;
+        }
+    }
+}
+
 /// Builds a compliant DrawingML `xl/theme/theme1.xml` (ECMA-376 Part 1 §20.1.6) from SpreadsheetML's
 /// 12 theme slots (`lt1`, `dk1`, `lt2`, `dk2`, `accent1..6`, `hlink`, `folHlink`).
 pub(crate) fn build_theme_xml(theme: [u32; 12]) -> String {

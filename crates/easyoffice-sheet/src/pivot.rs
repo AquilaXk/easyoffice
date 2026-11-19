@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Rows between two clock reads.
-const CLOCK_ROWS: u32 = 1024;
+pub(crate) const CLOCK_ROWS: u32 = 1024;
 pub const MAX_PIVOT_CELLS: usize = 100_000;
 
 /// What a pivot takes from its range: offsets are columns counted from the range's first column.
@@ -36,10 +36,12 @@ pub enum PivotError {
     TooLarge,
     /// The deadline passed before every row was read.
     TimedOut,
+    /// The dynamic pivot specification is invalid or out of range.
+    InvalidSpec,
 }
 
 /// Display text and case-folded canonical form of a pivot key cell.
-fn normalize_pivot_key(v: EvaluatedCellValue) -> (String, String) {
+pub(crate) fn normalize_pivot_key(v: EvaluatedCellValue) -> (String, String) {
     let disp = match v {
         EvaluatedCellValue::Number(n) => crate::coercion::format_general_number(n),
         EvaluatedCellValue::Text(s) => match crate::coercion::parse_strict_number(&s) {
@@ -61,7 +63,10 @@ fn pivot_total_key() -> (String, String) {
 }
 
 /// Numeric contribution of a pivot value cell (`COUNT` also counts non-empty non-numbers).
-fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) -> Option<f64> {
+pub(crate) fn pivot_numeric_value(
+    val: &EvaluatedCellValue,
+    aggregation: PivotAggregation,
+) -> Option<f64> {
     if let EvaluatedCellValue::Number(num) = val {
         return Some(*num);
     }
@@ -72,7 +77,7 @@ fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) 
 }
 
 #[derive(Debug, Clone, Copy)]
-struct PivotAccumulator {
+pub(crate) struct PivotAccumulator {
     count: usize,
     sum: f64,
     mean: f64,
@@ -96,7 +101,7 @@ impl Default for PivotAccumulator {
 
 impl PivotAccumulator {
     #[inline]
-    fn add(&mut self, val: f64) {
+    pub(crate) fn add(&mut self, val: f64) {
         self.count += 1;
         self.sum += val;
         let delta = val - self.mean;
@@ -112,7 +117,7 @@ impl PivotAccumulator {
     }
 
     #[inline]
-    fn result(&self, agg: PivotAggregation) -> f64 {
+    pub(crate) fn result(&self, agg: PivotAggregation) -> f64 {
         if self.count == 0 {
             return 0.0;
         }

@@ -42,6 +42,8 @@ pub(crate) mod sheet_names;
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_page.rs"]
 pub(crate) mod sheet_page;
+#[path = "sheet_pivot.rs"]
+pub(crate) mod sheet_pivot;
 #[path = "sheet_protect.rs"]
 pub(crate) mod sheet_protect;
 #[path = "sheet_rules.rs"]
@@ -80,6 +82,8 @@ pub(crate) mod xlsx_names;
 pub(crate) mod xlsx_page;
 #[path = "xlsx_parts.rs"]
 pub(crate) mod xlsx_parts;
+#[path = "xlsx_pivots.rs"]
+pub(crate) mod xlsx_pivots;
 #[path = "xlsx_protect.rs"]
 pub(crate) mod xlsx_protect;
 #[path = "xlsx_sheet.rs"]
@@ -103,6 +107,7 @@ pub use sheet_look::{
 pub use sheet_names::*;
 pub use sheet_numfmt::*;
 pub use sheet_page::*;
+pub use sheet_pivot::*;
 pub use sheet_protect::*;
 pub use sheet_rules::*;
 pub use sheet_spill::*;
@@ -508,6 +513,10 @@ pub struct SheetStyling {
     pub charts: Vec<SheetChart>,
     /// Charts a reader turned away because a part was invalid or broke a bound (PD-254).
     pub charts_rejected: u32,
+    /// Pivot tables anchored on the sheet (PD-255).
+    pub pivots: Vec<SheetPivotTable>,
+    /// Pivot tables a reader turned away because a part was invalid or broke a bound (PD-255).
+    pub pivots_rejected: u32,
 }
 
 /// Sorted, disjoint, zero-based inclusive runs of rows.
@@ -566,6 +575,7 @@ impl SheetStyling {
             && self.links.is_empty()
             && self.tables.is_empty()
             && self.charts.is_empty()
+            && self.pivots.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

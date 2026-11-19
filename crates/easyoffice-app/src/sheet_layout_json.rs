@@ -175,6 +175,11 @@ pub(crate) fn parse_layout(
     {
         styling.charts = crate::sheet_chart_json::parse_charts(v)?;
     }
+    if let Some(v) =
+        StrictJsonValue::get_field(obj, "pivots").filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        styling.pivots = crate::sheet_pivot_json::parse_pivots(v)?;
+    }
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
     crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
@@ -288,6 +293,13 @@ pub(crate) fn write_layout_split(
             out,
             ",\"charts\":{}",
             crate::sheet_chart_json::charts_json(&styling.charts)
+        );
+    }
+    if !styling.pivots.is_empty() {
+        let _ = write!(
+            out,
+            ",\"pivots\":{}",
+            crate::sheet_pivot_json::pivots_json(&styling.pivots)
         );
     }
     crate::sheet_view_json::write_view(out, styling);

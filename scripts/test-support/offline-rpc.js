@@ -908,11 +908,27 @@ function offlineSourceConversion(parsed) {
       return { ok: !doc.pwd || doc.pwd.hash === offlineDigest(password) };
     }
 
+    function offlinePivot(doc) {
+      const model = host.__EASYOFFICE_SHEET_PIVOT_MODEL__;
+      if (!model) throw new Error("피벗 모델을 불러올 수 없습니다.");
+      const defaultSheet = resolveDefaultSheetFromDocJs(doc);
+      const workbook = buildLocalWorkbookFromJson(doc, defaultSheet);
+      const canonicalUpper = resolveCanonicalSheetUpper(workbook.knownSheets, defaultSheet);
+      if (!canonicalUpper) throw new Error("InvalidArgument: 피벗 대상 시트를 찾을 수 없습니다.");
+      const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
+      return model.computePivotWithReader(doc, (row0, col0) => {
+        const ref = rulesApi.refOf(row0, col0);
+        const typed = readWorkbookTypedCell(workbook, canonicalUpper, ref, 0);
+        return { ...typed, display: formatFormulaValue(typed) };
+      });
+    }
+
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
       if (doc.sessionAction === "protectHash" || doc.sessionAction === "protectVerify") return offlineProtect(doc);
       if (doc.sessionAction === "format") return offlineFormatCells(doc);
       if (doc.sessionAction === "sort") return host.__EASYOFFICE_OFFLINE_SORT__(doc);
+      if (doc.sessionAction === "pivot") return offlinePivot(doc);
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);
       const explicitAnchor = resolveOptionalAnchorCell(doc);
       const anchorCell = explicitAnchor || "A1";

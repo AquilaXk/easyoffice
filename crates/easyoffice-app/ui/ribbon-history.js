@@ -96,6 +96,7 @@
       getController: getSheetController,
       push: (record) => workspaceHistory.pushRecord(record),
     });
+    sheetHistory.runtime = { getController: getSheetController, getActiveModule, getActiveSheetCellRef };
 
     const getHistoryMutationEpoch = () => workspaceHistory.getEpoch();
     const pushRawUndoSnapshot = (snap) => workspaceHistory.pushRecord(snap);
@@ -207,6 +208,7 @@
       workspacePanels.renderModuleOutline(mod);
       getSheetController()?.syncSheetFormatToolbar?.();
       getSheetController()?.syncChartLayer?.();
+      host.__EASYOFFICE_SHEET_PIVOT__?.syncBar?.();
       host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
       void getHwpHost?.()?.onModuleActivated(mod);
     }

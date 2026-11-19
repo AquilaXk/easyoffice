@@ -1,24 +1,27 @@
 // 참조 구현 (reference implementation): Univer (https://github.com/dream-num/univer, Apache-2.0, Copyright 2023-present DreamNum
 // Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9): `packages/sheets-table/src/models/table-filter.ts` lines 27-82
 // (`TableFilters`: per-column filter conditions and filtered-out rows). Source and license text: `THIRD_PARTY_NOTICES.md`.
-// Modifications: interactive table slicers (`슬라이서 삽입` dialog and floating `.sheet-slicer-card` cards over `#sheet-frame`)
-// scanning distinct column values in a single O(R) pass and synchronizing bidirectionally with `sheet-filter.js`.
+// Modifications: interactive table and pivot slicers (`슬라이서 삽입` dialog and floating `.sheet-slicer-card` cards over `#sheet-frame`)
+// scanning distinct column values in a single O(R) pass and synchronizing bidirectionally with `sheet-filter.js` and `sheet-pivot-ui.js`.
 
 (function (host) {
   "use strict";
 
   const MAX_SLICERS_PER_TABLE = 64;
+  const MAX_SLICERS_PER_PIVOT = 32;
   const MAX_SLICERS_TOTAL = 256;
   const MAX_SLICER_ITEMS = 2000;
   const MAX_SCAN_ROWS = 200000;
   const DEFAULT_WIDTH = 184;
   const DEFAULT_HEIGHT = 208;
+  const DEFAULT_PIVOT_HEIGHT = 210;
   const BASE_LEFT = 24;
   const BASE_TOP = 24;
   const STEP_X = 196;
   const STEP_Y = 24;
   const MAX_POS = 65535;
   const BLANK_LABEL = "(빈 셀)";
+  const STRICT_NUM_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
   function compareItems(a, b) {
     if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
@@ -46,10 +49,32 @@
     const normalizeNum = (raw) => host.__EASYOFFICE_SHEET_UTILS__.normalizeFormattedNumericCell(raw);
     const { $, openDialog, closeDialog, note } = kit;
     let activeTable = null;
+    let activePivot = null;
+    let activePivotSheet = "";
     let bound = false;
 
     function checkboxes() {
       return [...($("sheet-slicer-columns")?.querySelectorAll("input[data-slicer-col]") || [])];
+    }
+
+    function populateColumns(columns) {
+      const list = $("sheet-slicer-columns");
+      if (!list) return;
+      list.replaceChildren();
+      columns.forEach((colName, idx) => {
+        const item = document.createElement("li");
+        const label = document.createElement("label");
+        label.className = "dialog-checkbox";
+        const input = document.createElement("input");
+        input.setAttribute("type", "checkbox");
+        input.type = "checkbox";
+        input.checked = false;
+        input.dataset.slicerCol = String(idx);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(" " + colName));
+        item.appendChild(label);
+        list.appendChild(item);
+      });
     }
 
     function openInsert(table) {
@@ -60,37 +85,70 @@
         return false;
       }
       ensureBound();
+      activePivot = null;
+      activePivotSheet = "";
       activeTable = table;
-      const list = $("sheet-slicer-columns");
-      if (list) {
-        list.replaceChildren();
-        table.columns.forEach((colName, idx) => {
-          const item = document.createElement("li");
-          const label = document.createElement("label");
-          label.className = "dialog-checkbox";
-          const input = document.createElement("input");
-          input.setAttribute("type", "checkbox");
-          input.type = "checkbox";
-          input.checked = false;
-          input.dataset.slicerCol = String(idx);
-          label.appendChild(input);
-          label.appendChild(document.createTextNode(" " + colName));
-          item.appendChild(label);
-          list.appendChild(item);
-        });
-      }
+      populateColumns(table.columns);
       note("sheet-slicer-status", "");
       openDialog("sheet-slicer-dialog");
       checkboxes()[0]?.focus?.();
       return true;
     }
 
+    function openDialogForPivot(pivot) {
+      const sheet = getActiveSheetName();
+      const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (!pivot || (protectApi && !protectApi.guardAction(sheet, "pivotTables"))) return false;
+      const fields = Array.isArray(pivot.fieldNames) ? pivot.fieldNames : [];
+      if (pivot.hasHeader === false || fields.length === 0) {
+        say("머리글 행이 있는 피벗 테이블에만 슬라이서를 넣을 수 있음");
+        return false;
+      }
+      ensureBound();
+      activeTable = null;
+      activePivot = pivot;
+      activePivotSheet = sheet;
+      populateColumns(fields);
+      note("sheet-slicer-status", "");
+      openDialog("sheet-slicer-dialog");
+      checkboxes()[0]?.focus?.();
+      return true;
+    }
+
+    function everyPivot() {
+      return Object.keys(layoutApi.getAll()).flatMap((sh) => layoutApi.pivotsOf(sh));
+    }
+
     function totalSlicers() {
-      return everyTable().reduce((sum, t) => sum + (Array.isArray(t.slicers) ? t.slicers.length : 0), 0);
+      const tableCount = everyTable().reduce((sum, t) => sum + (Array.isArray(t.slicers) ? t.slicers.length : 0), 0);
+      const pivotCount = everyPivot().reduce((sum, p) => sum + (Array.isArray(p.slicers) ? p.slicers.length : 0), 0);
+      return tableCount + pivotCount;
+    }
+
+    function sheetSlicerCount(sheet) {
+      const tCount = layoutApi.tablesOf(sheet).reduce((sum, t) => sum + (Array.isArray(t.slicers) ? t.slicers.length : 0), 0);
+      const pCount = layoutApi.pivotsOf(sheet).reduce((sum, p) => sum + (Array.isArray(p.slicers) ? p.slicers.length : 0), 0);
+      return tCount + pCount;
+    }
+
+    function anchorBesideBox(b) {
+      const frame = $("sheet-frame");
+      const edgeTd = document.querySelector?.('#pane-sheet td[data-cell="' + refOf(b.r1, b.c2) + '"]');
+      if (frame?.getBoundingClientRect && edgeTd?.getBoundingClientRect) {
+        const fr = frame.getBoundingClientRect();
+        const tr = edgeTd.getBoundingClientRect();
+        if (fr.width > 0 && tr.width > 0) {
+          return {
+            left: Math.max(BASE_LEFT, Math.min(Math.max(BASE_LEFT, Math.round(fr.width - DEFAULT_WIDTH - 16)), Math.round(tr.right - fr.left + 16))),
+            top: Math.max(BASE_TOP, Math.round(tr.top - fr.top)),
+          };
+        }
+      }
+      return { left: Math.min(960, 48 + b.c2 * 100), top: BASE_TOP };
     }
 
     function submitInsert() {
-      if (!activeTable) return;
+      if (!activeTable && !activePivot) return;
       const cols = checkboxes()
         .filter((b) => b.checked)
         .map((b) => Number(b.dataset.slicerCol));
@@ -98,37 +156,47 @@
         note("sheet-slicer-status", "열을 하나 이상 선택");
         return;
       }
+      if (activePivot) {
+        const targetPivot = activePivot;
+        const targetSheet = activePivotSheet || getActiveSheetName();
+        const existingCount = Array.isArray(targetPivot.slicers) ? targetPivot.slicers.length : 0;
+        if (existingCount + cols.length > MAX_SLICERS_PER_PIVOT || totalSlicers() + cols.length > MAX_SLICERS_TOTAL) {
+          note("sheet-slicer-status", "슬라이서 개수 한도를 초과함");
+          return;
+        }
+        const countBefore = sheetSlicerCount(targetSheet);
+        const anchor = anchorBesideBox(layoutApi.pivotBox(targetPivot));
+        const added = cols.map((col, k) => {
+          const n = countBefore + k;
+          return {
+            col,
+            caption: targetPivot.fieldNames?.[col] || "열 " + (col + 1),
+            left: Math.min(MAX_POS, anchor.left + (n % 3) * STEP_X),
+            top: Math.min(MAX_POS, anchor.top + Math.floor(n / 3) * STEP_Y),
+            width: DEFAULT_WIDTH,
+            height: DEFAULT_PIVOT_HEIGHT,
+            multiSelect: false,
+          };
+        });
+        closeDialog("sheet-slicer-dialog");
+        void host.__EASYOFFICE_SHEET_PIVOT__?.insertPivotSlicers?.(targetSheet, targetPivot.name, added);
+        return;
+      }
+
       const existingCount = Array.isArray(activeTable.slicers) ? activeTable.slicers.length : 0;
       if (existingCount + cols.length > MAX_SLICERS_PER_TABLE || totalSlicers() + cols.length > MAX_SLICERS_TOTAL) {
         note("sheet-slicer-status", "슬라이서 개수 한도를 초과함");
         return;
       }
       const target = activeTable;
-      const sheetCountBefore = layoutApi
-        .tablesOf(getActiveSheetName())
-        .reduce((sum, t) => sum + (Array.isArray(t.slicers) ? t.slicers.length : 0), 0);
-      const anchor = (() => {
-        const b = layoutApi.tableBox(target);
-        const frame = $("sheet-frame");
-        const edgeTd = document.querySelector?.('#pane-sheet td[data-cell="' + refOf(b.r1, b.c2) + '"]');
-        if (frame?.getBoundingClientRect && edgeTd?.getBoundingClientRect) {
-          const fr = frame.getBoundingClientRect();
-          const tr = edgeTd.getBoundingClientRect();
-          if (fr.width > 0 && tr.width > 0) {
-            return {
-              left: Math.max(BASE_LEFT, Math.min(Math.max(BASE_LEFT, Math.round(fr.width - DEFAULT_WIDTH - 16)), Math.round(tr.right - fr.left + 16))),
-              top: Math.max(BASE_TOP, Math.round(tr.top - fr.top)),
-            };
-          }
-        }
-        return { left: Math.min(960, 48 + b.c2 * 100), top: BASE_TOP };
-      })();
+      const countBefore = sheetSlicerCount(getActiveSheetName());
+      const anchor = anchorBesideBox(layoutApi.tableBox(target));
       closeDialog("sheet-slicer-dialog");
       void changeTable(target, (held) => {
         if (held.header === false) return { error: "머리글 행이 있는 표에만 슬라이서를 넣을 수 있음" };
         const prev = Array.isArray(held.slicers) ? [...held.slicers] : [];
         cols.forEach((col, k) => {
-          const n = sheetCountBefore + k;
+          const n = countBefore + k;
           prev.push({
             col,
             caption: held.columns[col] || "Column" + (col + 1),
@@ -148,6 +216,15 @@
     function cellDisplayVal(entry) {
       let val = entry?.value === undefined || entry?.value === null ? "" : String(entry.value);
       if (entry?.style?.numFmt && val !== "") val = normalizeNum(val);
+      return val;
+    }
+
+    function pivotKeyVal(entry) {
+      let val = cellDisplayVal(entry);
+      if (entry?.t !== "s" && val.trim() !== "" && STRICT_NUM_RE.test(val.trim())) {
+        const n = Number(val.trim());
+        if (Number.isFinite(n)) val = String(Math.round(n * 1e10) / 1e10);
+      }
       return val;
     }
 
@@ -204,6 +281,118 @@
       return items;
     }
 
+    function resolvePivotSource1(pivot) {
+      if (pivot.sourceTable) {
+        const targetLower = pivot.sourceTable.toLowerCase();
+        const candidateSheets = [pivot.sourceSheet, ...Object.keys(layoutApi.getAll())];
+        for (const sh of candidateSheets) {
+          if (!sh) continue;
+          const tbl = layoutApi.tablesOf(sh).find((t) => String(t.name).toLowerCase() === targetLower);
+          if (tbl) {
+            const b = layoutApi.tableBox(tbl);
+            return {
+              sheet: sh,
+              r1: b.r1,
+              c1: b.c1,
+              r2: b.r2 - (tbl.totals === true ? 1 : 0),
+              c2: b.c2,
+              hasHeader: tbl.header !== false,
+            };
+          }
+        }
+      }
+      const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__?.parseRef;
+      const [rawA, rawB] = String(pivot.sourceRange || "").split(":");
+      const a = parse ? parse(rawA) : null;
+      const b = parse ? parse(rawB ?? rawA) : null;
+      if (!a || !b) return null;
+      return {
+        sheet: pivot.sourceSheet,
+        r1: Math.min(a.row, b.row),
+        c1: Math.min(a.col, b.col),
+        r2: Math.max(a.row, b.row),
+        c2: Math.max(a.col, b.col),
+        hasHeader: pivot.hasHeader !== false,
+      };
+    }
+
+    // Single-pass O(R) scan of distinct keys in 0-based `fieldCol` of `pivot`'s source range/table.
+    function collectPivotItems(pivot, fieldCol) {
+      const src = resolvePivotSource1(pivot);
+      if (!src || src.r2 < src.r1) return [];
+      const d1 = src.r1 + (src.hasHeader ? 1 : 0);
+      const d2 = Math.min(src.r2, d1 + MAX_SCAN_ROWS - 1);
+      const absCol = src.c1 + fieldCol;
+      const map = sheetDataStore[src.sheet] || {};
+      const otherConds = (pivot.filters || []).filter((c) => c.col !== fieldCol);
+      const compiledOthers = otherConds.map((oc) => ({
+        absCol: src.c1 + oc.col,
+        set: new Set((oc.values || []).filter((v) => v !== "").map((v) => String(v).toLowerCase())),
+        blank: Boolean(oc.blank),
+      }));
+      const seen = new Map();
+      let hasBlank = false;
+      let blankHasData = false;
+      for (let r = d1; r <= d2; r += 1) {
+        let survivesOther = true;
+        for (let i = 0; i < compiledOthers.length; i += 1) {
+          const co = compiledOthers[i];
+          const v = pivotKeyVal(map[refOf(r, co.absCol)]);
+          if (!(v === "" ? co.blank : co.set.has(v.toLowerCase()))) {
+            survivesOther = false;
+            break;
+          }
+        }
+        const entry = map[refOf(r, absCol)];
+        const val = pivotKeyVal(entry);
+        if (val === "") {
+          hasBlank = true;
+          if (survivesOther) blankHasData = true;
+          continue;
+        }
+        const canon = val.toLowerCase();
+        const existing = seen.get(canon);
+        if (existing) {
+          if (survivesOther) existing.hasData = true;
+        } else if (seen.size < MAX_SLICER_ITEMS) {
+          const num = entry?.t !== "s" && val.trim() !== "" && Number.isFinite(Number(val)) ? Number(val) : null;
+          seen.set(canon, { key: val, label: val, isBlank: false, num, hasData: survivesOther });
+        }
+      }
+      const items = [...seen.values()].sort(compareItems);
+      if (hasBlank) items.push({ key: "", label: BLANK_LABEL, isBlank: true, num: null, hasData: blankHasData });
+      return items;
+    }
+
+    function nextSelectionCriteria(items, cond, multiSelect, item, additive) {
+      const listed = Boolean(cond && (Array.isArray(cond.values) || cond.blank !== undefined));
+      const pickedValues = new Set(listed ? cond.values || [] : items.filter((i) => !i.isBlank).map((i) => i.key));
+      let pickedBlank = listed ? Boolean(cond.blank) : items.some((i) => i.isBlank);
+
+      const multi = Boolean(multiSelect || additive);
+      if (!multi) {
+        pickedValues.clear();
+        pickedBlank = false;
+        if (item.isBlank) pickedBlank = true;
+        else pickedValues.add(item.key);
+      } else if (item.isBlank) {
+        if (pickedBlank && pickedValues.size === 0) return undefined;
+        pickedBlank = !pickedBlank;
+      } else if (pickedValues.has(item.key)) {
+        if (pickedValues.size === 1 && !pickedBlank) return undefined;
+        pickedValues.delete(item.key);
+      } else {
+        pickedValues.add(item.key);
+      }
+
+      const nonBlankTotal = items.filter((i) => !i.isBlank).length;
+      const hasBlankItem = items.some((i) => i.isBlank);
+      const allChosen = pickedValues.size === nonBlankTotal && (!hasBlankItem || pickedBlank);
+      return allChosen
+        ? null
+        : { ...(pickedBlank ? { blank: true } : {}), values: [...pickedValues] };
+    }
+
     async function applyItemClick(sheet, table, slicerIdx, item, additive) {
       const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
       if (protectApi && protectApi.isOn(sheet) && !protectApi.guardAction(sheet, "autoFilter")) return;
@@ -217,33 +406,23 @@
       const absCol = b.c1 + slicer.col;
       const items = collectItems(sheet, held, absCol);
       const cond = (held.filter || []).find((c) => c.col === absCol);
-      const listed = Boolean(cond && (Array.isArray(cond.values) || cond.blank !== undefined));
-      const pickedValues = new Set(listed ? cond.values || [] : items.filter((i) => !i.isBlank).map((i) => i.key));
-      let pickedBlank = listed ? Boolean(cond.blank) : items.some((i) => i.isBlank);
-
-      const multi = Boolean(slicer.multiSelect || additive);
-      if (!multi) {
-        pickedValues.clear();
-        pickedBlank = false;
-        if (item.isBlank) pickedBlank = true;
-        else pickedValues.add(item.key);
-      } else if (item.isBlank) {
-        if (pickedBlank && pickedValues.size === 0) return;
-        pickedBlank = !pickedBlank;
-      } else if (pickedValues.has(item.key)) {
-        if (pickedValues.size === 1 && !pickedBlank) return;
-        pickedValues.delete(item.key);
-      } else {
-        pickedValues.add(item.key);
-      }
-
-      const nonBlankTotal = items.filter((i) => !i.isBlank).length;
-      const hasBlankItem = items.some((i) => i.isBlank);
-      const allChosen = pickedValues.size === nonBlankTotal && (!hasBlankItem || pickedBlank);
-      const criteria = allChosen
-        ? null
-        : { ...(pickedBlank ? { blank: true } : {}), values: [...pickedValues] };
+      const criteria = nextSelectionCriteria(items, cond, slicer.multiSelect, item, additive);
+      if (criteria === undefined) return;
       await filter.setCriteria(absCol, criteria, held.name);
+    }
+
+    async function applyPivotItemClick(sheet, pivot, slicerIdx, item, additive) {
+      const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (protectApi && protectApi.isOn(sheet) && !protectApi.guardAction(sheet, "pivotTables")) return;
+      const held = layoutApi.pivotsOf(sheet).find((p) => p.name === pivot.name);
+      if (!held) return;
+      const slicer = held.slicers?.[slicerIdx];
+      if (!slicer) return;
+      const items = collectPivotItems(held, slicer.col);
+      const cond = (held.filters || []).find((c) => c.col === slicer.col);
+      const criteria = nextSelectionCriteria(items, cond, slicer.multiSelect, item, additive);
+      if (criteria === undefined) return;
+      await host.__EASYOFFICE_SHEET_PIVOT__?.applySlicerFilter?.(sheet, held.name, slicer.col, criteria);
     }
 
     function updateSlicerMeta(table, slicerIdx, patch, statusText) {
@@ -265,7 +444,7 @@
       });
     }
 
-    function bindDrag(headEl, cardEl, table, slicerIdx, initialLeft, initialTop) {
+    function bindDrag(headEl, cardEl, initialLeft, initialTop, onCommitPos) {
       headEl.addEventListener("mousedown", (ev) => {
         if (ev.button !== 0 || ev.target?.closest?.("button")) return;
         const sheet = getActiveSheetName();
@@ -285,7 +464,7 @@
           document.removeEventListener("mousemove", onMove);
           document.removeEventListener("mouseup", onUp);
           if (curLeft !== initialLeft || curTop !== initialTop) {
-            void updateSlicerMeta(table, slicerIdx, { left: curLeft, top: curTop }, "슬라이서 이동");
+            onCommitPos(curLeft, curTop);
           }
         };
         document.addEventListener("mousemove", onMove);
@@ -293,10 +472,8 @@
       });
     }
 
-    function renderCard(sheet, table, slicer, slicerIdx) {
-      const b = layoutApi.tableBox(table);
-      const absCol = b.c1 + slicer.col;
-      const cond = (table.filter || []).find((c) => c.col === absCol);
+    function buildCardDom(spec) {
+      const { slicer, cond, items, datasetProp, datasetVal, onToggleMulti, onClear, onRemove, onMovePos, onItemClick } = spec;
       const listed = Boolean(cond && (Array.isArray(cond.values) || cond.blank !== undefined));
       const picked = listed ? new Set(cond.values || []) : null;
       const pickedBlank = listed ? Boolean(cond.blank) : true;
@@ -304,7 +481,7 @@
       const iconsApi = host.__EASYOFFICE_ICONS__;
       const card = document.createElement("div");
       card.className = "sheet-slicer-card" + (listed ? " is-filtered" : "");
-      card.dataset.slicerTable = table.name;
+      card.dataset[datasetProp] = datasetVal;
       card.dataset.slicerCol = String(slicer.col);
       card.tabIndex = 0;
       card.style.left = slicer.left + "px";
@@ -316,13 +493,13 @@
       card.addEventListener("keydown", (ev) => {
         if ((ev.key === "Delete" || ev.key === "Backspace") && ev.target === card) {
           ev.preventDefault?.();
-          void removeSlicer(table, slicerIdx);
+          onRemove();
         } else if (ev.altKey && (ev.key === "s" || ev.key === "S")) {
           ev.preventDefault?.();
-          void updateSlicerMeta(table, slicerIdx, { multiSelect: !slicer.multiSelect }, "슬라이서 다중 선택");
+          onToggleMulti();
         } else if (ev.altKey && (ev.key === "c" || ev.key === "C") && cond) {
           ev.preventDefault?.();
-          void filter.setCriteria(absCol, null, table.name);
+          onClear();
         }
       });
 
@@ -344,9 +521,7 @@
       multiBtn.setAttribute("aria-label", "다중 선택");
       multiBtn.setAttribute("aria-pressed", slicer.multiSelect ? "true" : "false");
       if (iconsApi?.setIcon) iconsApi.setIcon(document, multiBtn, "slicer-multi");
-      multiBtn.addEventListener("click", () => {
-        void updateSlicerMeta(table, slicerIdx, { multiSelect: !slicer.multiSelect }, "슬라이서 다중 선택");
-      });
+      multiBtn.addEventListener("click", onToggleMulti);
 
       const clearBtn = document.createElement("button");
       clearBtn.type = "button";
@@ -356,9 +531,7 @@
       clearBtn.setAttribute("aria-label", "필터 해제");
       clearBtn.disabled = !cond;
       if (iconsApi?.setIcon) iconsApi.setIcon(document, clearBtn, "filter-clear");
-      clearBtn.addEventListener("click", () => {
-        void filter.setCriteria(absCol, null, table.name);
-      });
+      clearBtn.addEventListener("click", onClear);
 
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
@@ -367,20 +540,17 @@
       removeBtn.title = "슬라이서 삭제 (Delete)";
       removeBtn.setAttribute("aria-label", "슬라이서 삭제");
       if (iconsApi?.setIcon) iconsApi.setIcon(document, removeBtn, "close");
-      removeBtn.addEventListener("click", () => {
-        void removeSlicer(table, slicerIdx);
-      });
+      removeBtn.addEventListener("click", onRemove);
 
       actions.appendChild(multiBtn);
       actions.appendChild(clearBtn);
       actions.appendChild(removeBtn);
       head.appendChild(actions);
       card.appendChild(head);
-      bindDrag(head, card, table, slicerIdx, slicer.left, slicer.top);
+      bindDrag(head, card, slicer.left, slicer.top, onMovePos);
 
       const body = document.createElement("div");
       body.className = "sheet-slicer-items";
-      const items = collectItems(sheet, table, absCol);
       for (const item of items) {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -389,19 +559,55 @@
         btn.dataset.slicerValue = item.key;
         btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
         btn.textContent = item.label;
-        btn.addEventListener("click", (ev) => {
-          void applyItemClick(sheet, table, slicerIdx, item, Boolean(ev.ctrlKey || ev.metaKey));
-        });
+        btn.addEventListener("click", (ev) => onItemClick(item, Boolean(ev.ctrlKey || ev.metaKey)));
         body.appendChild(btn);
       }
       card.appendChild(body);
       return card;
     }
 
+    function renderTableCard(sheet, table, slicer, slicerIdx) {
+      const b = layoutApi.tableBox(table);
+      const absCol = b.c1 + slicer.col;
+      const cond = (table.filter || []).find((c) => c.col === absCol);
+      const items = collectItems(sheet, table, absCol);
+      return buildCardDom({
+        slicer,
+        cond,
+        items,
+        datasetProp: "slicerTable",
+        datasetVal: table.name,
+        onToggleMulti: () => void updateSlicerMeta(table, slicerIdx, { multiSelect: !slicer.multiSelect }, "슬라이서 다중 선택"),
+        onClear: () => void filter.setCriteria(absCol, null, table.name),
+        onRemove: () => void removeSlicer(table, slicerIdx),
+        onMovePos: (left, top) => void updateSlicerMeta(table, slicerIdx, { left, top }, "슬라이서 이동"),
+        onItemClick: (item, additive) => void applyItemClick(sheet, table, slicerIdx, item, additive),
+      });
+    }
+
+    function renderPivotCard(sheet, pivot, slicer, slicerIdx) {
+      const cond = (pivot.filters || []).find((c) => c.col === slicer.col);
+      const items = collectPivotItems(pivot, slicer.col);
+      const pivotApi = host.__EASYOFFICE_SHEET_PIVOT__;
+      return buildCardDom({
+        slicer,
+        cond,
+        items,
+        datasetProp: "slicerPivot",
+        datasetVal: pivot.name,
+        onToggleMulti: () => void pivotApi?.updatePivotSlicerMeta?.(sheet, pivot.name, slicerIdx, { multiSelect: !slicer.multiSelect }, "슬라이서 다중 선택"),
+        onClear: () => void pivotApi?.applySlicerFilter?.(sheet, pivot.name, slicer.col, null),
+        onRemove: () => void pivotApi?.removePivotSlicer?.(sheet, pivot.name, slicerIdx),
+        onMovePos: (left, top) => void pivotApi?.updatePivotSlicerMeta?.(sheet, pivot.name, slicerIdx, { left, top }, "슬라이서 이동"),
+        onItemClick: (item, additive) => void applyPivotItemClick(sheet, pivot, slicerIdx, item, additive),
+      });
+    }
+
     function syncLayer() {
+      host.__EASYOFFICE_SHEET_PIVOT__?.syncBar?.();
       const layer = $("sheet-slicer-layer");
       if (!layer) return;
-      if (getActiveModule && getActiveModule() !== "SHEET") {
+      if ((getActiveModule && getActiveModule() !== "SHEET") || $("pane-sheet")?.hidden) {
         layer.hidden = true;
         return;
       }
@@ -411,7 +617,16 @@
         if (table.header === false || !Array.isArray(table.slicers)) continue;
         table.slicers.forEach((slicer, idx) => {
           if (slicer && slicer.col >= 0 && slicer.col < table.columns.length) {
-            cards.push(renderCard(sheet, table, slicer, idx));
+            cards.push(renderTableCard(sheet, table, slicer, idx));
+          }
+        });
+      }
+      for (const pivot of layoutApi.pivotsOf(sheet)) {
+        if (pivot.hasHeader === false || !Array.isArray(pivot.slicers)) continue;
+        const maxCol = Array.isArray(pivot.fieldNames) && pivot.fieldNames.length > 0 ? pivot.fieldNames.length : Infinity;
+        pivot.slicers.forEach((slicer, idx) => {
+          if (slicer && slicer.col >= 0 && slicer.col < maxCol) {
+            cards.push(renderPivotCard(sheet, pivot, slicer, idx));
           }
         });
       }
@@ -427,7 +642,9 @@
       layoutApi.onChange(syncLayer);
     }
 
-    return { openInsert, syncLayer, ensureBound };
+    const api = { openInsert, openDialogForPivot, syncLayer, ensureBound };
+    host.__EASYOFFICE_SHEET_SLICER__ = api;
+    return api;
   }
 
   host.__EASYOFFICE_CREATE_SHEET_SLICER_UI__ = createSheetSlicerUi;
