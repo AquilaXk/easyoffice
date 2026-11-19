@@ -12,7 +12,7 @@ use crate::rich_page_frame::{
     odt_master_page, odt_styles_xml, split_horizontal_zones, OdtMasterInput,
 };
 use crate::rich_run_writers::{odt_font_face_decls, odt_text_style_xml, OdtTextKey};
-use crate::rich_table_writers::push_odt_table;
+use crate::rich_table_writers::{push_odt_table, OdtTableStyles};
 use crate::rich_toc_writers::{is_toc_block, odt_toc_styles_xml, TocScope};
 use crate::rich_writers::{odt_para_style_xml, push_odt_paragraph, OdtParaKey, StyleTable};
 use crate::{EasyOfficeError, OdfCodec, RichBlock, RichDocument, XmlSanitizer, ZipArchiveCodec};
@@ -31,6 +31,7 @@ pub(crate) fn odt_rich_entries(
     let mut media = MediaParts::new();
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
     let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
+    let mut table_styles = OdtTableStyles::new();
     let mut body = String::with_capacity(1024);
     let lists = plan_lists(&doc.blocks);
     let mut open_lists = OdtListWriter::default();
@@ -93,7 +94,9 @@ pub(crate) fn odt_rich_entries(
             RichBlock::Paragraph(p) => {
                 push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
             }
-            RichBlock::Table(table) => push_odt_table(&mut body, table),
+            RichBlock::Table(table) => {
+                push_odt_table(&mut body, table, &mut table_styles, &mut media)
+            }
             RichBlock::Image(img) => {
                 let picture = media.add(ODT_MEDIA_DIR, img);
                 body.push_str(&odt_image_paragraph(img, picture.ordinal, &picture.path));
@@ -110,11 +113,14 @@ pub(crate) fn odt_rich_entries(
     for (idx, key) in text_styles.keys.iter().enumerate() {
         run_styles.push_str(&odt_text_style_xml(idx + 1, key));
     }
+    let mut table_auto_styles = String::new();
+    table_styles.write_automatic_styles(&mut table_auto_styles);
     let mut styles = String::from("<office:automatic-styles>");
     if doc.blocks.iter().any(is_toc_block) {
         styles.push_str(&odt_toc_styles_xml());
     }
     styles.push_str(&run_styles);
+    styles.push_str(&table_auto_styles);
     styles.push_str(&odt_list_styles_xml(&lists));
     styles.push_str("</office:automatic-styles>");
     let font_decls = odt_font_face_decls(&text_styles.keys);

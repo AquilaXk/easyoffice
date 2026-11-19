@@ -65,6 +65,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/doc-link.js",
   "../crates/easyoffice-app/ui/doc-toc.js",
   "../crates/easyoffice-app/ui/doc-table-grid.js",
+  "../crates/easyoffice-app/ui/doc-image.js",
+  "../crates/easyoffice-app/ui/doc-table-style.js",
   "../crates/easyoffice-app/ui/doc-table.js",
   "../crates/easyoffice-app/ui/doc-pages-core.js",
   "../crates/easyoffice-app/ui/doc-pages.js",
@@ -163,7 +165,7 @@ const PROD_APP_SCRIPTS = [
   resolvedPath: cjsRequire.resolve(relPath),
 }));
 
-const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img"]);
+const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img", "col"]);
 
 function decodeHtmlEntities(str) {
   return String(str || "")

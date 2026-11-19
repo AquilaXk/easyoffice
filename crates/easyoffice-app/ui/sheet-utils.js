@@ -619,23 +619,11 @@
     }
     const style = {};
     const styleProps = [
-      "fontWeight",
-      "fontStyle",
-      "textDecoration",
-      "fontSize",
-      "color",
-      "backgroundColor",
-      "borderStyle",
-      "columnCount",
-      "padding",
-      "paddingLeft",
-      "paddingRight",
-      "textIndent",
-      "fontFamily",
-      "lineHeight",
-      "textAlign",
-      "outline",
-      "transform",
+      "fontWeight", "fontStyle", "textDecoration", "fontSize", "color", "backgroundColor",
+      "borderStyle", "borderTop", "borderRight", "borderBottom", "borderLeft",
+      "width", "height", "tableLayout", "columnCount",
+      "padding", "paddingLeft", "paddingRight", "textIndent",
+      "fontFamily", "lineHeight", "textAlign", "outline", "transform",
     ];
     if (node.style) {
       styleProps.forEach((prop) => {

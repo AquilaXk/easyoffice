@@ -349,6 +349,7 @@ const INSERT_DOC: MenuSpec = menu(
     "입력",
     &[
         "insert:shape",
+        "insert:image",
         "insert:chart",
         S,
         "insert:footnote",
@@ -551,6 +552,10 @@ const TABLE_DOC: MenuSpec = menu(
         S,
         "table:split",
         "table:merge",
+        "table:col-equal",
+        S,
+        "table:border-bg",
+        "table:cell-props",
         S,
         "table:sum",
         "table:doc-formula",

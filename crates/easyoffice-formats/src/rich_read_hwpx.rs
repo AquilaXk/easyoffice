@@ -7,8 +7,10 @@ use std::collections::HashMap;
 
 mod frame;
 mod objects;
+mod table_style;
 
-use self::objects::{is_drawing_shape, NoteFormatSpec, OLE_SKIP_WARNING};
+use self::objects::{is_drawing_shape, HwpxMedia, NoteFormatSpec, OLE_SKIP_WARNING};
+use self::table_style::BorderFillReader;
 
 use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::section_xml;
@@ -18,19 +20,20 @@ use crate::hwpx_parts::{
 };
 use crate::office_codecs::checked_zip_xml_entries;
 use crate::rich_document::{normalize_hex_color, RichColumns};
-use crate::rich_image::{safe_package_path, ImageBudget};
+use crate::rich_image::ImageBudget;
 use crate::rich_list_writers::HwpxNumberingReader;
-use crate::rich_table::{join_cell_paragraphs, table_from_placed, PlacedCell};
+use crate::rich_table::{join_cell_paragraphs, table_from_placed_with_layout, PlacedCell};
+use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock, RichDocument, RichImage,
     RichListKind, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
-    ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
-const EMU_PER_HWPUNIT: u64 = 127;
+pub(super) const EMU_PER_HWPUNIT: u64 = 127;
 
 #[derive(Default, Clone)]
 struct ParaShape {
@@ -61,6 +64,7 @@ struct Header {
     chars: HashMap<String, CharFmt>,
     paras: HashMap<String, ParaShape>,
     styles: HashMap<String, StyleInfo>,
+    border_fills: HashMap<String, (CellFill, TableCellBorders)>,
     numberings: HwpxNumberingReader,
 }
 
@@ -68,6 +72,7 @@ struct Header {
 #[derive(Default)]
 struct HeaderBuilder {
     header: Header,
+    border_fills: BorderFillReader,
     cur_char: Option<(String, CharFmt)>,
     cur_para: Option<(String, ParaShape, bool)>,
     intent_seen: bool,
@@ -83,11 +88,13 @@ impl HeaderBuilder {
         self.cur_para.as_mut().map(|(_, p, _)| p)
     }
 
-    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
         self.header.numberings.on_start(name, attrs);
+        self.border_fills.on_start(name, attrs)?;
         if !self.on_char_start(name, attrs) {
             self.on_para_start(name, attrs);
         }
+        Ok(())
     }
 
     /// Fonts and character shapes; `false` when `name` is not one of them.
@@ -233,6 +240,7 @@ impl HeaderBuilder {
 
     fn on_end(&mut self, name: &str) {
         self.header.numberings.on_end(name);
+        self.border_fills.on_end(name);
         match name {
             "hh:charPr" => {
                 if let Some((id, f)) = self.cur_char.take() {
@@ -273,12 +281,13 @@ fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
     let mut builder = HeaderBuilder::default();
     for ev in XmlReader::new(xml) {
         match ev? {
-            XmlEvent::Start { name, attrs } => builder.on_start(name, &attrs),
+            XmlEvent::Start { name, attrs } => builder.on_start(name, &attrs)?,
             XmlEvent::End(name) => builder.on_end(name),
             XmlEvent::Text(text) => builder.header.numberings.on_text(&text),
         }
     }
     builder.header.numberings.check_budget()?;
+    builder.header.border_fills = builder.border_fills.entries;
     Ok(builder.header)
 }
 
@@ -430,6 +439,7 @@ struct SectionWalker {
     t_depth: usize,
     tbl_depth: usize,
     in_cell: bool,
+    tbl_no_adjust: bool,
     placed: Vec<PlacedCell>,
     table_images: Vec<RichImage>,
     table_captions: Vec<RichBlock>,
@@ -439,6 +449,9 @@ struct SectionWalker {
     next_col: u32,
     cell_addr: Option<(u32, u32)>,
     cell_span: (u32, u32),
+    cell_border_fill_id: Option<String>,
+    cell_sz_width: Option<u32>,
+    cell_images: Vec<RichImage>,
     /// Merged regions and cells dropped as invalid, reported once per document.
     dropped_merges: usize,
     cell_paras: Vec<Vec<RichRun>>,
@@ -465,78 +478,6 @@ struct SectionWalker {
     endnotes: Vec<RichBlock>,
     nest_depth: u8,
     in_note: bool,
-}
-
-/// Binary item id -> package entry, from the `opf:item` manifest of `Contents/content.hpf`.
-struct HwpxMedia<'a> {
-    by_id: HashMap<String, &'a ZipArchiveEntry>,
-}
-
-impl<'a> HwpxMedia<'a> {
-    fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
-        let mut by_id = HashMap::new();
-        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
-            entries.iter().map(|e| (e.path.as_str(), e)).collect();
-        let Some(&hpf) = entry_by_path.get("Contents/content.hpf") else {
-            return Ok(Self { by_id });
-        };
-        let xml = std::str::from_utf8(&hpf.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8("Contents/content.hpf UTF-8 오류".to_string())
-        })?;
-        for event in XmlReader::new(xml) {
-            let XmlEvent::Start { name, attrs } = event? else {
-                continue;
-            };
-            let (Some(id), Some(href)) = (attr(&attrs, "id"), attr(&attrs, "href")) else {
-                continue;
-            };
-            let entry =
-                safe_package_path(&href).and_then(|path| entry_by_path.get(path.as_str()).copied());
-            if let (true, Some(entry)) = (name == "opf:item", entry) {
-                by_id.insert(id.to_string(), entry);
-            }
-        }
-        Ok(Self { by_id })
-    }
-}
-
-/// Fields of one `hp:pic`.
-#[derive(Default)]
-struct PictureFields<'e> {
-    item: Option<Cow<'e, str>>,
-    size: Option<(u64, u64)>,
-    alt: String,
-}
-
-fn scan_picture<'e>(events: &[XmlEvent<'e>]) -> PictureFields<'e> {
-    let mut fields = PictureFields::default();
-    let mut in_comment = false;
-    for event in events {
-        match event {
-            XmlEvent::Start { name, attrs } => match *name {
-                "hc:img" if fields.item.is_none() => fields.item = attr(attrs, "binaryItemIDRef"),
-                "hp:curSz" | "hp:sz" if fields.size.is_none() => {
-                    let side = |key| {
-                        attr(attrs, key)
-                            .and_then(|v| v.trim().parse::<u64>().ok())
-                            .filter(|v| *v > 0)
-                    };
-                    fields.size = side("width").zip(side("height")).and_then(|(w, h)| {
-                        Some((
-                            w.checked_mul(EMU_PER_HWPUNIT)?,
-                            h.checked_mul(EMU_PER_HWPUNIT)?,
-                        ))
-                    });
-                }
-                "hp:shapeComment" => in_comment = true,
-                _ => {}
-            },
-            XmlEvent::Text(text) if in_comment => fields.alt.push_str(text),
-            XmlEvent::End(name) if *name == "hp:shapeComment" => in_comment = false,
-            _ => {}
-        }
-    }
-    fields
 }
 
 impl SectionWalker {
@@ -585,6 +526,7 @@ impl SectionWalker {
                     self.table_images.clear();
                     self.table_captions.clear();
                     self.in_cell = false;
+                    self.tbl_no_adjust = attr(attrs, "noAdjust").as_deref() == Some("1");
                     self.tr_index = 0;
                 }
             }
@@ -594,6 +536,9 @@ impl SectionWalker {
                 self.cell_paras.clear();
                 self.cell_addr = None;
                 self.cell_span = (1, 1);
+                self.cell_border_fill_id = attr(attrs, "borderFillIDRef").map(Cow::into_owned);
+                self.cell_sz_width = None;
+                self.cell_images.clear();
             }
             "hp:cellAddr" if self.tbl_depth == 1 => {
                 self.cell_addr = Some((
@@ -606,6 +551,12 @@ impl SectionWalker {
                     count_attr(attrs, "rowSpan", 1).max(1),
                     count_attr(attrs, "colSpan", 1).max(1),
                 );
+            }
+            "hp:cellSz" if self.tbl_depth == 1 && self.in_cell && self.cell_sz_width.is_none() => {
+                self.cell_sz_width = attr(attrs, "width")
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .map(|hu| hu / u64::from(HWPUNIT_PER_TWIP))
+                    .and_then(|tw| u32::try_from(tw).ok());
             }
             _ => {}
         }
@@ -642,6 +593,11 @@ impl SectionWalker {
                 self.next_col = col.saturating_add(col_span);
                 let (text, links) = join_cell_paragraphs(&self.cell_paras);
                 self.text_budget.charge_cell(text.len(), "HWPX 표 셀")?;
+                let style = self
+                    .cell_border_fill_id
+                    .take()
+                    .and_then(|id| header.border_fills.get(&id).copied())
+                    .unwrap_or((CellFill::none(), TableCellBorders::default()));
                 self.placed.push(PlacedCell {
                     row,
                     col,
@@ -649,6 +605,9 @@ impl SectionWalker {
                     col_span,
                     text,
                     links,
+                    width_twips: self.cell_sz_width.take(),
+                    style,
+                    images: std::mem::take(&mut self.cell_images),
                 });
                 self.cell_paras.clear();
             }
@@ -658,8 +617,9 @@ impl SectionWalker {
                 if self.tbl_depth == 0 {
                     if !self.placed.is_empty() {
                         self.text_budget.charge_block(0, "HWPX 표")?;
-                        let (table, dropped) = table_from_placed(
+                        let (table, dropped) = table_from_placed_with_layout(
                             std::mem::take(&mut self.placed),
+                            self.tbl_no_adjust,
                             &mut self.text_budget,
                         )?;
                         self.dropped_merges += dropped;

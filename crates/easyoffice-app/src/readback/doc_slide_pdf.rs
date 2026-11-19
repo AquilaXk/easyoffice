@@ -7,7 +7,7 @@ use std::fmt::Write;
 use easyoffice_formats::rich_document::toc_bookmark_number;
 use easyoffice_formats::{
     evaluate_table_formulas, DecodedSlide, PdfReadbackReport, RichAlignment, RichBindingKind,
-    RichBlock, RichDocument, RichField, RichListKind, RichParagraph,
+    RichBlock, RichDocument, RichField, RichImage, RichListKind, RichParagraph,
 };
 
 use super::{push_json_str, push_opt_json_str};
@@ -145,6 +145,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
     let mut checked_task_count = 0usize;
     let mut table_count = 0usize;
     let mut image_count = 0usize;
+    let mut missing_alt_image_count = 0usize;
     let mut equation_count = 0usize;
     let mut link_count = 0usize;
     let mut word_count = 0usize;
@@ -156,6 +157,8 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
     let mut outline: Vec<(usize, u8, String, Option<u32>)> = Vec::new();
     let mut empty_headings: Vec<usize> = Vec::new();
     let mut missing_alt_images: Vec<usize> = Vec::new();
+    type ReadbackImageEntry<'a> = (usize, Option<(u32, u32)>, &'a RichImage);
+    let mut image_entries: Vec<ReadbackImageEntry<'_>> = Vec::new();
     let mut broken_bookmarks: Vec<(usize, String)> = Vec::new();
     let mut irregular_tables: Vec<usize> = Vec::new();
 
@@ -238,10 +241,29 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
                         }
                     }
                 }
+                let cell_imgs = t.validated_cell_images();
+                image_count += cell_imgs.len();
+                let mut table_missing_alt = false;
+                for ci in cell_imgs {
+                    if image_entries.len() < max_items {
+                        image_entries.push((idx, Some((ci.row, ci.col)), &ci.image));
+                    }
+                    if ci.image.alt().trim().is_empty() {
+                        missing_alt_image_count += 1;
+                        table_missing_alt = true;
+                    }
+                }
+                if table_missing_alt {
+                    missing_alt_images.push(idx);
+                }
             }
             RichBlock::Image(img) => {
                 image_count += 1;
+                if image_entries.len() < max_items {
+                    image_entries.push((idx, None, img));
+                }
                 if img.alt().trim().is_empty() {
+                    missing_alt_image_count += 1;
                     missing_alt_images.push(idx);
                 }
             }
@@ -250,7 +272,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
 
     let _ = write!(
         out,
-        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"taskItemCount\":{task_count},\"checkedTaskCount\":{checked_task_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
+        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"taskItemCount\":{task_count},\"checkedTaskCount\":{checked_task_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"missingAltImageCount\":{missing_alt_image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
         doc.blocks.len()
     );
     for (i, (b_idx, level, text, bm)) in outline.iter().enumerate() {
@@ -277,6 +299,26 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
             out.push(',');
         }
         write_doc_block_summary(out, idx, block);
+    }
+
+    out.push_str("],\"images\":[");
+    for (i, (b_idx, cell_pos, img)) in image_entries.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        match cell_pos {
+            Some((r, c)) => {
+                let _ = write!(
+                    out,
+                    "{{\"tableBlockIndex\":{b_idx},\"row\":{r},\"col\":{c},"
+                );
+            }
+            None => {
+                let _ = write!(out, "{{\"blockIndex\":{b_idx},");
+            }
+        }
+        write_readback_image_meta(out, img);
+        out.push('}');
     }
 
     out.push_str("],\"checks\":{\"emptyHeadings\":[");
@@ -391,9 +433,12 @@ fn write_doc_block_summary(out: &mut String, index: usize, block: &RichBlock) {
             }
             let row_count = rows_eval.len();
             let col_count = rows_eval.iter().map(Vec::len).max().unwrap_or(0);
+            let has_custom_widths = t.validated_col_widths().is_some();
+            let styled_cell_count = t.validated_cell_styles().len();
+            let cell_image_count = t.validated_cell_images().len();
             let _ = write!(
                 out,
-                "{{\"index\":{index},\"type\":\"table\",\"rows\":{row_count},\"cols\":{col_count},\"mergeCount\":{},\"linkCount\":{},\"formulaCellCount\":{formula_cells},\"cells\":[",
+                "{{\"index\":{index},\"type\":\"table\",\"rows\":{row_count},\"cols\":{col_count},\"mergeCount\":{},\"linkCount\":{},\"formulaCellCount\":{formula_cells},\"hasCustomColWidths\":{has_custom_widths},\"styledCellCount\":{styled_cell_count},\"cellImageCount\":{cell_image_count},\"cells\":[",
                 t.merges.len(),
                 t.links.len()
             );
@@ -421,19 +466,24 @@ fn write_doc_block_summary(out: &mut String, index: usize, block: &RichBlock) {
             out.push_str("]}");
         }
         RichBlock::Image(img) => {
-            let (width_emu, height_emu) = img.display_emu();
-            let _ = write!(
-                out,
-                "{{\"index\":{index},\"type\":\"image\",\"format\":\"{}\",\"bytes\":{},\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":",
-                img.format().extension(),
-                img.bytes().len(),
-                img.width_px(),
-                img.height_px(),
-            );
-            push_json_str(out, img.alt());
+            let _ = write!(out, "{{\"index\":{index},\"type\":\"image\",");
+            write_readback_image_meta(out, img);
             out.push('}');
         }
     }
+}
+
+fn write_readback_image_meta(out: &mut String, img: &RichImage) {
+    let (width_emu, height_emu) = img.display_emu();
+    let _ = write!(
+        out,
+        "\"format\":\"{}\",\"bytes\":{},\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":",
+        img.format().extension(),
+        img.bytes().len(),
+        img.width_px(),
+        img.height_px(),
+    );
+    push_json_str(out, img.alt());
 }
 
 pub(super) fn write_slides_readback(out: &mut String, slides: &[DecodedSlide], max_items: usize) {

@@ -169,7 +169,7 @@ fn equations_and_table_cell_pictures_preserve_across_rich_decode_and_docx_pages_
     );
     let (doc, warnings) = decode_rich_hwpx(&bytes);
     assert!(warnings.is_empty(), "{warnings:?}");
-    assert_eq!(doc.blocks.len(), 5);
+    assert_eq!(doc.blocks.len(), 3);
 
     let RichBlock::Paragraph(p0) = &doc.blocks[0] else {
         panic!("para 0");
@@ -181,26 +181,26 @@ fn equations_and_table_cell_pictures_preserve_across_rich_decode_and_docx_pages_
     };
     assert_eq!(tbl.rows[0][0], "수식 셀 $$\\sqrt{x^2 + 1}$$");
     assert_eq!(tbl.rows[0][1], "캡션 대체 설명");
+    assert_eq!(tbl.cell_images.len(), 2);
 
-    let RichBlock::Image(im1) = &doc.blocks[2] else {
-        panic!("cell image 1");
-    };
-    assert_eq!(im1.bytes(), png.as_slice());
-    assert_eq!(im1.alt(), "셀 첫 그림");
-    assert_eq!(im1.display_emu(), (2000 * 127, 1500 * 127));
+    assert_eq!((tbl.cell_images[0].row, tbl.cell_images[0].col), (0, 0));
+    assert_eq!(tbl.cell_images[0].image.bytes(), png.as_slice());
+    assert_eq!(tbl.cell_images[0].image.alt(), "셀 첫 그림");
+    assert_eq!(
+        tbl.cell_images[0].image.display_emu(),
+        (2000 * 127, 1500 * 127)
+    );
 
-    let RichBlock::Image(im2) = &doc.blocks[3] else {
-        panic!("cell image 2");
-    };
-    assert_eq!(im2.bytes(), jpg.as_slice());
-    assert_eq!(im2.alt(), "캡션 대체 설명");
+    assert_eq!((tbl.cell_images[1].row, tbl.cell_images[1].col), (0, 1));
+    assert_eq!(tbl.cell_images[1].image.bytes(), jpg.as_slice());
+    assert_eq!(tbl.cell_images[1].image.alt(), "캡션 대체 설명");
 
-    let RichBlock::Paragraph(tcap) = &doc.blocks[4] else {
+    let RichBlock::Paragraph(tcap) = &doc.blocks[2] else {
         panic!("table caption");
     };
     assert_eq!(tcap.plain_text(), "표 1. 실험 결과");
 
-    // Verify end-to-end conversion from HWPX into DOCX and Pages preserves equations & cell pictures!
+    // Verify end-to-end conversion from HWPX into DOCX preserves cell_images and Pages preserves total images!
     for target in [DocumentFormat::Docx, DocumentFormat::Pages] {
         let converted =
             UniversalFormatConverter::convert(&bytes, Some("hwpx"), target).expect("convert");
@@ -209,12 +209,35 @@ fn equations_and_table_cell_pictures_preserve_across_rich_decode_and_docx_pages_
         let DecodedContent::Document(back_doc) = back.content else {
             panic!();
         };
-        let img_count = back_doc
-            .blocks
-            .iter()
-            .filter(|b| matches!(b, RichBlock::Image(_)))
-            .count();
-        assert_eq!(img_count, 2, "{target:?} kept both table-cell pictures");
+        if target == DocumentFormat::Docx {
+            let back_tbl = back_doc
+                .blocks
+                .iter()
+                .find_map(|b| match b {
+                    RichBlock::Table(t) => Some(t),
+                    _ => None,
+                })
+                .expect("converted DOCX table");
+            assert_eq!(
+                back_tbl.cell_images.len(),
+                2,
+                "Docx kept both table-cell pictures in tbl.cell_images"
+            );
+        } else {
+            let total_images: usize = back_doc
+                .blocks
+                .iter()
+                .map(|b| match b {
+                    RichBlock::Image(_) => 1,
+                    RichBlock::Table(t) => t.cell_images.len(),
+                    RichBlock::Paragraph(_) => 0,
+                })
+                .sum();
+            assert_eq!(
+                total_images, 2,
+                "{target:?} kept both table-cell pictures (top-level + cell_images)"
+            );
+        }
         assert!(back_doc.blocks.iter().any(
             |b| matches!(b, RichBlock::Paragraph(p) if p.plain_text().contains("\\frac{a + 1}{b - 1}"))
         ));

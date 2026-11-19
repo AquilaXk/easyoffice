@@ -74,8 +74,10 @@
 
   const SCRIPT_TAGS = { superscript: "sup", subscript: "sub" };
   const PX_PER_TWIP = 1 / 15; // 1 twip = 1/20 pt, 1 pt = 4/3 px
+  const EMU_PER_PX = 9525;
   const IMAGE_FORMATS = new Set(["png", "jpg"]);
   const IMAGE_ID_RE = /^[A-Za-z0-9+/=]+$/;
+  const TABLE_BORDER_SIDES = [["top", "borderTop"], ["right", "borderRight"], ["bottom", "borderBottom"], ["left", "borderLeft"]];
 
   function twipsToPx(twips) {
     return String(Math.round(twips * PX_PER_TWIP * 1000) / 1000) + "px";
@@ -120,13 +122,23 @@
       return elSpec("p", [textSpec(String(block.alt || "[그림]"))]);
     }
     const alt = String(block.alt ?? "");
-    const spec = elSpec("img", [], {}, { class: "doc-inline-image", contenteditable: "false", title: alt });
+    const widthEmu = Number(block.widthEmu) || 0;
+    const heightEmu = Number(block.heightEmu) || 0;
+    const style = widthEmu > 0 && heightEmu > 0
+      ? {
+          width: Math.max(1, Math.round(widthEmu / EMU_PER_PX)) + "px",
+          height: Math.max(1, Math.round(heightEmu / EMU_PER_PX)) + "px",
+        }
+      : {};
+    const spec = elSpec("img", [], style, { class: "doc-inline-image", contenteditable: "false", title: alt });
     spec.data = {
       eoImageId: utils.registerDocImage(base64, format),
       eoImageFormat: format,
-      eoImageWidthEmu: String(Number(block.widthEmu) || 0),
-      eoImageHeightEmu: String(Number(block.heightEmu) || 0),
+      eoImageWidthEmu: String(widthEmu),
+      eoImageHeightEmu: String(heightEmu),
       eoImageAlt: alt,
+      eoImageNaturalWidthPx: String(Number(block.widthPx) || 0),
+      eoImageNaturalHeightPx: String(Number(block.heightPx) || 0),
     };
     return spec;
   }
@@ -218,6 +230,27 @@
     return out;
   }
 
+  function applyDecodedCellStyle(tdSpec, styleEntry) {
+    const ts = host.__EASYOFFICE_DOC_TABLE_STYLE__;
+    if (!ts || !styleEntry || typeof styleEntry !== "object") return;
+    const rgb = ts.normalizeHex6(styleEntry.fill);
+    if (rgb) {
+      tdSpec.data.eoFill = rgb;
+      tdSpec.style.backgroundColor = "#" + rgb;
+    }
+    const b = styleEntry.borders;
+    if (b && typeof b === "object") {
+      const slots = TABLE_BORDER_SIDES.map(([side]) => ts.normalizeEdgeSlot(b[side]));
+      if (slots.some((s) => s !== "-")) {
+        tdSpec.data.eoBorders = slots.join(",");
+        slots.forEach((slot, idx) => {
+          const css = ts.edgeToCss(slot);
+          if (css) tdSpec.style[TABLE_BORDER_SIDES[idx][1]] = css;
+        });
+      }
+    }
+  }
+
   // A table block: merged regions as colspan/rowspan on their top-left cell, covered cells not drawn,
   // and each row's original index so a save can tell which rows of a region were deleted.
   function tableSpec(block) {
@@ -235,6 +268,23 @@
       list.push(l);
     });
     linksByCell.forEach((list) => list.sort((a, b) => Number(a.start) - Number(b.start)));
+    const stylesByCell = new Map();
+    (Array.isArray(block.cellStyles) ? block.cellStyles : []).forEach((s) => {
+      if (s && Number.isInteger(s.row) && Number.isInteger(s.col) && s.row >= 0 && s.col >= 0) {
+        stylesByCell.set(cellKey(s.row, s.col), s);
+      }
+    });
+    const imagesByCell = new Map();
+    (Array.isArray(block.cellImages) ? block.cellImages : []).forEach((im) => {
+      if (!im || !Number.isInteger(im.row) || !Number.isInteger(im.col) || im.row < 0 || im.col < 0) return;
+      const key = cellKey(im.row, im.col);
+      let list = imagesByCell.get(key);
+      if (!list) {
+        list = [];
+        imagesByCell.set(key, list);
+      }
+      list.push(im);
+    });
     const trs = rows.map((row, r) => {
       const cells = [];
       row.forEach((cell, c) => {
@@ -245,12 +295,36 @@
         if (span?.colSpan > 1) attrs.colspan = String(span.colSpan);
         if (span?.rowSpan > 1) attrs.rowspan = String(span.rowSpan);
         const text = typeof cell === "string" ? cell : cell?.text ?? "";
-        cells.push(elSpec("td", cellInlineSpecs(text, linksByCell.get(key)), {}, attrs));
+        const cellLinks = linksByCell.get(key);
+        const inlineKids = cellInlineSpecs(text, cellLinks);
+        const imgs = imagesByCell.get(key);
+        const children = imgs?.length
+          ? [...(text === "" && (!cellLinks || cellLinks.length === 0) ? [] : inlineKids), ...imgs.map(imageSpec)]
+          : inlineKids;
+        const td = elSpec("td", children, {}, attrs);
+        applyDecodedCellStyle(td, stylesByCell.get(key));
+        cells.push(td);
       });
       const tr = elSpec("tr", cells);
       tr.data = { eoRow: String(r) };
       return tr;
     });
+    if (Array.isArray(block.colWidthsTwips) && block.colWidthsTwips.length > 0) {
+      const colSpecs = [];
+      let sumPx = 0;
+      for (const rawW of block.colWidthsTwips) {
+        const twips = Math.round(Number(rawW) || 0);
+        if (twips <= 0) continue;
+        const px = Math.max(1, Math.round(twips * PX_PER_TWIP));
+        const col = elSpec("col", [], { width: px + "px" });
+        col.data = { eoColTwips: String(twips) };
+        colSpecs.push(col);
+        sumPx += px;
+      }
+      if (colSpecs.length > 0) {
+        return elSpec("table", [elSpec("colgroup", colSpecs), elSpec("tbody", trs)], { tableLayout: "fixed", width: sumPx + "px" }, { class: "doc-inline-table" });
+      }
+    }
     return elSpec("table", [elSpec("tbody", trs)], {}, { class: "doc-inline-table" });
   }
 

@@ -61,7 +61,14 @@
     "table-sum": "블록 합계",
   };
   // Items of the table menu that mean something only with the caret in a table.
-  const TABLE_ONLY_COMMANDS = new Set([...Object.keys(COMMAND_LABELS), "doc-mod-tableformula", "hwp-mod-border"]);
+  const TABLE_ONLY_COMMANDS = new Set([
+    ...Object.keys(COMMAND_LABELS),
+    "table-border-bg",
+    "table-cell-props",
+    "table-col-equal",
+    "doc-mod-tableformula",
+    "hwp-mod-border",
+  ]);
   const MSG_DONE = " 완료";
   const MSG_OUTSIDE = "표 안에서 사용";
   const MSG_NO_FORMULA = "수식 없음";
@@ -141,11 +148,15 @@
 
     const recalculate = () => applyAtCaret(calculate);
     const autoSum = () => applyAtCaret(OPERATIONS["table-sum"]);
+    const docImage = host.__EASYOFFICE_CREATE_DOC_IMAGE__?.(deps) ?? null;
+    const tableStyle = host.__EASYOFFICE_CREATE_DOC_TABLE_STYLE__?.({ ...deps, grid, selectionAt, rectOf, placeCaret }) ?? null;
 
-    const handles = (cmd) => Object.hasOwn(OPERATIONS, cmd);
+    const handles = (cmd) => Object.hasOwn(OPERATIONS, cmd) || Boolean(docImage?.handles(cmd)) || Boolean(tableStyle?.handles(cmd));
 
-    // Runs a table menu command at the caret as one undo step; the status line tells the result.
+    // Runs a table menu command (or document image / table style command) at the caret.
     function run(cmd) {
+      if (docImage?.handles(cmd)) return docImage.run(cmd);
+      if (tableStyle?.handles(cmd)) return tableStyle.run(cmd);
       const sel = selectionAt();
       if (!sel) {
         setFeedback?.(MSG_OUTSIDE);
@@ -181,6 +192,7 @@
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         if (TABLE_ONLY_COMMANDS.has(item.dataset.studioMenuCmd)) item.setAttribute("aria-disabled", inTable ? "false" : "true");
       }
+      docImage?.syncResizer?.();
     }
 
     function bind() {
@@ -188,6 +200,8 @@
       document.addEventListener?.("selectionchange", syncMenu);
       const menu = document.querySelector('.menu-item[data-menu="table"]');
       for (const type of ["mouseenter", "focusin", "click"]) menu?.addEventListener(type, syncMenu);
+      docImage?.bind();
+      tableStyle?.bind();
       syncMenu();
     }
 

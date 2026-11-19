@@ -16,15 +16,18 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, clean_font_name, code_within_bounds, evaluate_table_formulas, frame_paragraph,
-    normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, FontTable,
+    check_document_images, clean_font_name, code_within_bounds, frame_paragraph,
+    normalize_hex_color, safe_link_target, CellStyle, EasyOfficeError, FontTable, ImageBudget,
     NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns,
-    RichDocument, RichField, RichImage, RichListKind, RichListNumber, RichPageFrame, RichParagraph,
-    RichRun, RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue, TableCellLink,
-    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS,
-    MAX_SIZE_PT, MAX_TABLE_LINKS, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame, RichParagraph, RichRun,
+    RichScript, RichToc, SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_FONT_FACES,
+    MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
+
+#[path = "convert_structured_table.rs"]
+pub(crate) mod convert_structured_table;
 
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::page_setup_json::parse_page_setup;
@@ -134,7 +137,7 @@ fn opt_color(obj: &JsonObject, key: &str) -> Result<Option<String>, EasyOfficeEr
     }
 }
 
-fn as_array<'a>(
+pub(super) fn as_array<'a>(
     v: &'a StrictJsonValue,
     what: &str,
 ) -> Result<&'a [StrictJsonValue], EasyOfficeError> {
@@ -142,15 +145,18 @@ fn as_array<'a>(
         .ok_or_else(|| invalid(format!("구조화 저장: '{what}'는 배열이어야 합니다.")))
 }
 
-fn as_object<'a>(v: &'a StrictJsonValue, what: &str) -> Result<&'a JsonObject, EasyOfficeError> {
+pub(super) fn as_object<'a>(
+    v: &'a StrictJsonValue,
+    what: &str,
+) -> Result<&'a JsonObject, EasyOfficeError> {
     v.as_object()
         .ok_or_else(|| invalid(format!("구조화 저장: '{what}' 항목은 객체여야 합니다.")))
 }
 
-struct Budget(usize);
+pub(super) struct Budget(usize);
 
 impl Budget {
-    fn take(&mut self, n: usize) -> Result<(), EasyOfficeError> {
+    pub(super) fn take(&mut self, n: usize) -> Result<(), EasyOfficeError> {
         self.0 = self.0.saturating_add(n);
         if self.0 > MAX_STRUCTURED_ITEMS {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
@@ -195,6 +201,7 @@ pub(crate) fn parse_structured_content(
             blocks,
             official_agency: None,
         };
+        check_document_images(&doc)?;
         let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);
         return Ok(Some((content, warnings)));
     }
@@ -471,153 +478,27 @@ fn opt_script(run: &JsonObject) -> Result<RichScript, EasyOfficeError> {
     }
 }
 
-/// Picture block: base64 bytes (validated by [`RichImage::new`], so the PD-096 limits apply
-/// again on every save), alternative text and an optional display size in EMU.
-fn parse_image(obj: &JsonObject) -> Result<RichImage, EasyOfficeError> {
-    let encoded = opt_str(obj, "base64")?
-        .ok_or_else(|| invalid("구조화 저장: 그림에는 'base64'가 필요합니다."))?;
-    if encoded.len() / 4 * 3 > MAX_IMAGE_BYTES + 3 {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "그림 크기가 한도({MAX_IMAGE_BYTES}바이트)를 넘었습니다."
-        )));
-    }
-    let bytes = base64_codec::decode(encoded)
-        .ok_or_else(|| invalid("구조화 저장: 그림 'base64'가 올바르지 않습니다."))?;
-    let mut image = RichImage::new(bytes, opt_str(obj, "alt")?.unwrap_or(""))?;
-    let width = opt_bounded(obj, "widthEmu", 1, i64::MAX)?;
-    let height = opt_bounded(obj, "heightEmu", 1, i64::MAX)?;
-    if let (Some(w), Some(h)) = (width, height) {
-        image.set_display_emu(w as u64, h as u64)?;
-    }
-    Ok(image)
-}
-
-/// `{"row","col","rowSpan","colSpan"}`: non-negative integers. Values past `u32` saturate, so the
-/// table's own validation drops them like any other region outside the grid.
-fn parse_merge(item: &StrictJsonValue) -> Result<CellMerge, EasyOfficeError> {
-    let obj = as_object(item, "merges")?;
-    let number = |key: &str| {
-        field(obj, key)
-            .and_then(StrictJsonValue::as_u64)
-            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
-            .ok_or_else(|| {
-                invalid(format!(
-                    "구조화 저장: 병합의 '{key}'는 0 이상의 정수여야 합니다."
-                ))
-            })
-    };
-    Ok(CellMerge {
-        row: number("row")?,
-        col: number("col")?,
-        row_span: number("rowSpan")?,
-        col_span: number("colSpan")?,
-    })
-}
-
-fn parse_table_link(item: &StrictJsonValue) -> Result<TableCellLink, EasyOfficeError> {
-    let obj = as_object(item, "links")?;
-    let number = |key: &str| {
-        field(obj, key)
-            .and_then(StrictJsonValue::as_u64)
-            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
-            .ok_or_else(|| {
-                invalid(format!(
-                    "구조화 저장: 표 링크의 '{key}'는 0 이상의 정수여야 합니다."
-                ))
-            })
-    };
-    let raw_url = opt_str(obj, "url")?
-        .filter(|u| !u.is_empty())
-        .ok_or_else(|| invalid("구조화 저장: 표 링크에는 'url'이 필요합니다."))?;
-    let url = safe_link_target(raw_url)
-        .ok_or_else(|| invalid("구조화 저장: 허용되지 않는 표 링크 주소입니다."))?
-        .to_string();
-    Ok(TableCellLink {
-        row: number("row")?,
-        col: number("col")?,
-        start: number("start")?,
-        end: number("end")?,
-        url,
-    })
-}
-
-/// The page's `merges` and `links` are untrusted: the table re-validates them and reports dropped ones.
-fn parse_table(
-    obj: &JsonObject,
-    budget: &mut Budget,
-    warnings: &mut Vec<String>,
-) -> Result<RichTable, EasyOfficeError> {
-    let rows_v =
-        field(obj, "rows").ok_or_else(|| invalid("구조화 저장: 표에는 'rows'가 필요합니다."))?;
-    let mut rows = Vec::new();
-    for row_v in as_array(rows_v, "rows")? {
-        let mut row = Vec::new();
-        for cell_v in as_array(row_v, "rows[]")? {
-            budget.take(1)?;
-            let text = match cell_v {
-                StrictJsonValue::Str(s) => s.clone(),
-                StrictJsonValue::Object(cell) => {
-                    let text = opt_str(cell, "text")?.unwrap_or("");
-                    // A computed value sent by the editor wins over the formula text.
-                    match opt_str(cell, "value")?.filter(|v| !v.trim().is_empty()) {
-                        Some(value) => value.to_string(),
-                        None => text.to_string(),
-                    }
-                }
-                _ => return Err(invalid("구조화 저장: 표 셀은 문자열 또는 객체여야 합니다.")),
-            };
-            row.push(text);
-        }
-        rows.push(row);
-    }
-    evaluate_table_formulas(&mut rows);
-    let mut merges = Vec::new();
-    if let Some(v) = field(obj, "merges") {
-        for item in as_array(v, "merges")? {
-            budget.take(1)?;
-            merges.push(parse_merge(item)?);
-        }
-    }
-    let mut links = Vec::new();
-    if let Some(v) = field(obj, "links") {
-        let arr = as_array(v, "links")?;
-        if arr.len() > MAX_TABLE_LINKS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "표 셀 링크 수가 한도({MAX_TABLE_LINKS})를 초과했습니다."
-            )));
-        }
-        for item in arr {
-            budget.take(1)?;
-            links.push(parse_table_link(item)?);
-        }
-    }
-    let (table, dropped, dropped_links) = RichTable::with_merges_and_links(rows, merges, links);
-    if dropped > 0 {
-        warnings.push(format!(
-            "표의 병합 {dropped}곳은 범위를 벗어나거나 겹쳐 저장하지 않았습니다."
-        ));
-    }
-    if dropped_links > 0 {
-        warnings.push(format!(
-            "표의 셀 링크 {dropped_links}곳은 범위를 벗어나거나 겹쳐 저장하지 않았습니다."
-        ));
-    }
-    Ok(table)
-}
-
 fn parse_blocks(
     items: &[StrictJsonValue],
     budget: &mut Budget,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<RichBlock>, EasyOfficeError> {
     let mut blocks = Vec::with_capacity(items.len());
+    let mut img_budget = ImageBudget::default();
     for item in items {
         budget.take(1)?;
         let obj = as_object(item, "blocks")?;
         match opt_str(obj, "type")? {
             Some("paragraph") => blocks.push(RichBlock::Paragraph(parse_paragraph(obj, budget)?)),
-            Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget, warnings)?)),
-            Some("image") => blocks.push(RichBlock::Image(parse_image(obj)?)),
+            Some("table") => blocks.push(RichBlock::Table(convert_structured_table::parse_table(
+                obj,
+                budget,
+                &mut img_budget,
+                warnings,
+            )?)),
+            Some("image") => blocks.push(RichBlock::Image(
+                convert_structured_table::parse_image_budgeted(obj, &mut img_budget)?,
+            )),
             other => {
                 return Err(invalid(format!(
                     "구조화 저장: 알 수 없는 블록 유형 {:?}",

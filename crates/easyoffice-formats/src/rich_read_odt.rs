@@ -2,11 +2,13 @@
 //! paragraph alignment, `text:h` outline levels, list paragraphs, and tables in position.
 
 mod frame;
+mod table;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use self::frame::{parse_odt_list_level_bullet, parse_odt_list_level_number, OdtListStyle};
+use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
@@ -162,6 +164,7 @@ fn read_styles_into(
     xml: &str,
     styles: &mut HashMap<String, StyleProps>,
     lists: &mut HashMap<String, OdtListStyle>,
+    table_styles: &mut OdtTableStylesMap,
 ) -> Result<(), EasyOfficeError> {
     let mut cur: Option<(String, StyleProps)> = None;
     let mut cur_list: Option<String> = None;
@@ -175,7 +178,9 @@ fn read_styles_into(
                         _ => None,
                     };
                     let parent = attr(attrs, "style:parent-style-name").map(Cow::into_owned);
+                    let family = attr(attrs, "style:family").unwrap_or_default();
                     cur = attr(attrs, "style:name").map(|n| {
+                        table_styles.start_style(n.to_string(), &family);
                         (
                             n.to_string(),
                             StyleProps {
@@ -186,6 +191,8 @@ fn read_styles_into(
                         )
                     });
                 }
+                "style:table-column-properties" => table_styles.on_col_props(attrs),
+                "style:table-cell-properties" => table_styles.on_cell_props(attrs),
                 "style:paragraph-properties" => {
                     if let Some((_, p)) = cur.as_mut() {
                         apply_paragraph_properties(p, attrs);
@@ -218,6 +225,7 @@ fn read_styles_into(
             },
             XmlEvent::End(name) => match name {
                 "style:style" => {
+                    table_styles.finish_style();
                     if let Some((n, p)) = cur.take() {
                         styles.insert(n, p);
                     }
@@ -298,6 +306,7 @@ fn count_attr(attrs: &Attrs<'_>, name: &str) -> u32 {
 struct OdtWalker<'a> {
     styles: &'a HashMap<String, StyleProps>,
     list_styles: &'a HashMap<String, OdtListStyle>,
+    table_styles: &'a OdtTableStylesMap,
     title: String,
     warnings: Vec<String>,
     blocks: Vec<RichBlock>,
@@ -306,6 +315,7 @@ struct OdtWalker<'a> {
     list_stack: Vec<OdtListStyle>,
     tbl_depth: usize,
     table: TableAssembler,
+    table_state: OdtTableState,
     cell_paras: Vec<Vec<RichRun>>,
     /// Row span, column span and repeat count of the open top-level cell.
     cell_shape: (u32, u32, u32),
@@ -346,10 +356,12 @@ impl<'a> OdtWalker<'a> {
     fn new(
         styles: &'a HashMap<String, StyleProps>,
         list_styles: &'a HashMap<String, OdtListStyle>,
+        table_styles: &'a OdtTableStylesMap,
     ) -> Self {
         Self {
             styles,
             list_styles,
+            table_styles,
             title: String::new(),
             warnings: Vec::new(),
             blocks: Vec::new(),
@@ -358,6 +370,7 @@ impl<'a> OdtWalker<'a> {
             list_stack: Vec::new(),
             tbl_depth: 0,
             table: TableAssembler::default(),
+            table_state: OdtTableState::default(),
             cell_paras: Vec::new(),
             cell_shape: (1, 1, 1),
             dropped_merges: 0,
@@ -432,7 +445,11 @@ impl<'a> OdtWalker<'a> {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
                     self.table.reset();
+                    self.table_state.reset();
                 }
+            }
+            "table:table-column" if self.tbl_depth == 1 => {
+                self.table_state.on_table_column(attrs, self.table_styles);
             }
             "table:table-row" if self.tbl_depth == 1 => self.table.start_row(),
             "table:table-cell" if self.tbl_depth == 1 => {
@@ -442,6 +459,7 @@ impl<'a> OdtWalker<'a> {
                     count_attr(attrs, "table:number-columns-spanned"),
                     count_attr(attrs, "table:number-columns-repeated"),
                 );
+                self.table_state.start_cell(attrs, self.table_styles);
             }
             "table:covered-table-cell" if self.tbl_depth == 1 => {
                 let repeated = count_attr(attrs, "table:number-columns-repeated");
@@ -542,7 +560,7 @@ impl<'a> OdtWalker<'a> {
     }
 
     /// Reads a `draw:frame` (events span its start to its end): an embedded PNG/JPEG becomes a
-    /// picture of the open paragraph; text boxes, charts and anything else are skipped.
+    /// picture of the open paragraph or table cell; text boxes, charts and anything else are skipped.
     fn on_frame(
         &mut self,
         events: &[XmlEvent<'_>],
@@ -552,7 +570,10 @@ impl<'a> OdtWalker<'a> {
             self.warn_once(UNSUPPORTED_OBJECT_NOTE);
             return Ok(());
         };
-        if self.tbl_depth > 0 || self.paras.is_empty() {
+        if self.tbl_depth > 1
+            || (self.tbl_depth == 1 && !self.table_state.in_cell)
+            || (self.tbl_depth == 0 && self.paras.is_empty())
+        {
             self.warn_once("표 안의 그림은 가져오지 않았습니다.");
             return Ok(());
         }
@@ -577,7 +598,9 @@ impl<'a> OdtWalker<'a> {
             // An out-of-range size keeps the default derived from the pixels.
             let _ = image.set_display_emu(w, h);
         }
-        if let Some(top) = self.paras.last_mut() {
+        if self.tbl_depth == 1 {
+            self.table_state.cell_images.push(image);
+        } else if let Some(top) = self.paras.last_mut() {
             top.images.push(image);
         }
         Ok(())
@@ -609,8 +632,12 @@ impl<'a> OdtWalker<'a> {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
                     self.text_budget.charge_block(0, "ODT 표")?;
-                    let (table, dropped) =
+                    let (mut table, dropped) =
                         std::mem::take(&mut self.table).finish(&mut self.text_budget)?;
+                    if let Some(widths) = self.table_state.resolve_col_widths(table.column_count())
+                    {
+                        table.col_widths_twips = widths;
+                    }
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
                 }
@@ -625,7 +652,7 @@ impl<'a> OdtWalker<'a> {
         u32::try_from(MAX_PADDED_COLUMNS.saturating_sub(self.table.row_len())).unwrap_or(0)
     }
 
-    /// Adds the closed cell (with any hyperlink spans), repeated as declared.
+    /// Adds the closed cell (with any hyperlink spans, style, and images), repeated as declared.
     fn push_cell_with_links(
         &mut self,
         text: String,
@@ -633,10 +660,17 @@ impl<'a> OdtWalker<'a> {
     ) -> Result<(), EasyOfficeError> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
+        let (cell_style, cell_images) = self.table_state.finish_cell();
         self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
         let (r0, c0) = self.table.next_coord();
         if !spans.is_empty() {
             self.table.push_cell_links(r0, c0, spans);
+        }
+        if let Some((fill, borders)) = cell_style {
+            self.table.push_cell_style(r0, c0, fill, borders);
+        }
+        if !cell_images.is_empty() {
+            self.table.push_cell_images(r0, c0, cell_images.clone());
         }
         self.table
             .anchor(text.clone(), row_span, col_span, &mut self.text_budget)?;
@@ -645,6 +679,15 @@ impl<'a> OdtWalker<'a> {
             let (rk, ck) = self.table.next_coord();
             if !spans.is_empty() {
                 self.table.push_cell_links(rk, ck, spans);
+            }
+            if let Some((fill, borders)) = cell_style {
+                self.table.push_cell_style(rk, ck, fill, borders);
+            }
+            if !cell_images.is_empty() {
+                for img in &cell_images {
+                    self.budget.charge(img.bytes().len())?;
+                }
+                self.table.push_cell_images(rk, ck, cell_images.clone());
             }
             self.table.cell(text.clone(), &mut self.text_budget)?;
         }
@@ -744,13 +787,14 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     })?;
     let mut styles: HashMap<String, StyleProps> = HashMap::new();
     let mut list_styles: HashMap<String, OdtListStyle> = HashMap::new();
+    let mut table_styles = OdtTableStylesMap::default();
     if let Some(s_xml) = checked_part(&parts, "styles.xml") {
-        read_styles_into(s_xml, &mut styles, &mut list_styles)?;
+        read_styles_into(s_xml, &mut styles, &mut list_styles, &mut table_styles)?;
     }
-    read_styles_into(xml, &mut styles, &mut list_styles)?;
+    read_styles_into(xml, &mut styles, &mut list_styles, &mut table_styles)?;
     resolve_style_parents(&mut styles);
 
-    let mut walker = OdtWalker::new(&styles, &list_styles);
+    let mut walker = OdtWalker::new(&styles, &list_styles, &table_styles);
     let mut reader = XmlReader::new(xml);
     while let Some(event) = reader.next_event()? {
         match event {
@@ -814,56 +858,6 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     ))
 }
 
-/// Fields of one `draw:frame` holding a `draw:image`.
-struct Frame {
-    href: String,
-    alt: String,
-    size_emu: Option<(u64, u64)>,
-}
-
-fn read_frame(events: &[XmlEvent<'_>]) -> Option<Frame> {
-    let mut href = None;
-    let mut size_emu = None;
-    let (mut desc, mut title) = (String::new(), String::new());
-    let mut capture: Option<&str> = None;
-    for (idx, event) in events.iter().enumerate() {
-        match event {
-            XmlEvent::Start { name, attrs } => match *name {
-                "draw:frame" if idx == 0 => {
-                    let side = |key| {
-                        attr(attrs, key)
-                            .as_deref()
-                            .and_then(length_emu)
-                            .filter(|e| *e >= 1.0)
-                    };
-                    size_emu = side("svg:width")
-                        .zip(side("svg:height"))
-                        .map(|(w, h)| (w.round() as u64, h.round() as u64));
-                }
-                "draw:image" if href.is_none() => {
-                    href = attr(attrs, "xlink:href").map(Cow::into_owned);
-                }
-                "svg:desc" => capture = Some("desc"),
-                "svg:title" => capture = Some("title"),
-                _ => {}
-            },
-            XmlEvent::Text(text) => match capture {
-                Some("desc") => desc.push_str(text),
-                Some(_) => title.push_str(text),
-                None => {}
-            },
-            XmlEvent::End(name) if *name == "svg:desc" || *name == "svg:title" => capture = None,
-            XmlEvent::End(_) => {}
-        }
-    }
-    let alt = if desc.trim().is_empty() { title } else { desc };
-    Some(Frame {
-        href: href?,
-        alt,
-        size_emu,
-    })
-}
-
 fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], link: Option<&str>, text: &str) {
     if let Some(p) = paras.last_mut() {
         push_linked_run(
@@ -876,102 +870,5 @@ fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], link: Option<&str>, te
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn odt_resolves_parent_style_inheritance_and_cycle_guard() {
-        let styles_xml = r##"<office:document-styles>
-            <office:styles>
-                <style:style style:name="ParentPara" style:family="paragraph">
-                    <style:paragraph-properties fo:text-align="center" fo:line-height="150%"/>
-                    <style:text-properties fo:font-weight="bold" fo:color="#112233"/>
-                </style:style>
-                <style:style style:name="Cycle1" style:parent-style-name="Cycle2"/>
-                <style:style style:name="Cycle2" style:parent-style-name="Cycle1"/>
-            </office:styles>
-        </office:document-styles>"##;
-        let auto_xml = r#"<office:document-content>
-            <office:automatic-styles>
-                <style:style style:name="P1" style:parent-style-name="ParentPara">
-                    <style:text-properties fo:font-style="italic"/>
-                </style:style>
-            </office:automatic-styles>
-        </office:document-content>"#;
-        let mut styles = HashMap::new();
-        let mut lists = HashMap::new();
-        read_styles_into(styles_xml, &mut styles, &mut lists).unwrap();
-        read_styles_into(auto_xml, &mut styles, &mut lists).unwrap();
-        resolve_style_parents(&mut styles);
-        let p1 = styles.get("P1").expect("P1 resolved");
-        assert_eq!(p1.align, Some(RichAlignment::Center));
-        assert_eq!(p1.line_percent, Some(150));
-        assert!(p1.fmt.bold);
-        assert!(p1.fmt.italic);
-        assert_eq!(p1.fmt.color.as_deref(), Some("112233"));
-    }
-
-    #[test]
-    fn hostile_on_frame_charges_image_budget_before_clone_or_decode() {
-        let entry = ZipArchiveEntry {
-            path: "Pictures/bad.bin".to_string(),
-            data: vec![0u8; 1024],
-            crc32: 0,
-        };
-        let mut by_path = HashMap::new();
-        by_path.insert("Pictures/bad.bin", &entry);
-        let styles = HashMap::new();
-        let lists = HashMap::new();
-        let mut walker = OdtWalker::new(&styles, &lists);
-        walker.paras.push(Para {
-            runs: Vec::new(),
-            style: StyleProps::default(),
-            outline: 0,
-            toc: None,
-            bookmark: None,
-            toc_dots: false,
-            base: CharFmt::default(),
-            images: Vec::new(),
-        });
-        let frame_xml = r#"<draw:frame><draw:image xlink:href="Pictures/bad.bin"/></draw:frame>"#;
-        let events: Vec<XmlEvent<'_>> = XmlReader::new(frame_xml)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        for _ in 0..crate::MAX_IMAGES_PER_DOCUMENT {
-            walker.on_frame(&events, &by_path).unwrap();
-        }
-        assert!(matches!(
-            walker.on_frame(&events, &by_path),
-            Err(EasyOfficeError::ResourceBudgetExceeded(_))
-        ));
-    }
-
-    #[test]
-    fn hostile_odt_runs_exceeding_decode_budget_fail_closed() {
-        let styles = HashMap::new();
-        let lists = HashMap::new();
-        let mut walker = OdtWalker::new(&styles, &lists);
-        walker.text_budget = DecodeBudget::with_limit(256);
-        let xml = format!(
-            "<office:document-content>{}</office:document-content>",
-            "<text:p>hello</text:p>".repeat(8)
-        );
-        let mut reader = XmlReader::new(&xml);
-        let mut hit = None;
-        while let Some(ev) = reader.next_event().unwrap() {
-            let res = match ev {
-                XmlEvent::Start { name, ref attrs } => walker.on_start(name, attrs).map(|_| ()),
-                XmlEvent::Text(text) => walker.push_inline(&text),
-                XmlEvent::End(name) => walker.on_end(name),
-            };
-            if let Err(err) = res {
-                hit = Some(err);
-                break;
-            }
-        }
-        assert!(matches!(
-            hit,
-            Some(EasyOfficeError::ResourceBudgetExceeded(_))
-        ));
-    }
-}
+#[path = "rich_read_odt/tests.rs"]
+mod tests;

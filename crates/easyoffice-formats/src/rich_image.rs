@@ -194,34 +194,51 @@ pub(crate) fn truncate_alt(mut alt: String) -> String {
     alt
 }
 
-/// Enforces the per-document picture count and total byte limits (fail closed).
-pub(crate) fn check_document_images(doc: &RichDocument) -> Result<(), EasyOfficeError> {
+/// Enforces the per-document picture count and total byte limits (fail closed) across both
+/// top-level image blocks and inline table-cell images.
+pub fn check_document_images(doc: &RichDocument) -> Result<(), EasyOfficeError> {
     let mut count = 0usize;
     let mut total = 0usize;
-    for block in &doc.blocks {
-        if let RichBlock::Image(img) = block {
-            count += 1;
-            total = total.saturating_add(img.bytes.len());
+    let mut charge = |img: &RichImage| -> Result<(), EasyOfficeError> {
+        if img.bytes.len() > MAX_IMAGE_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "그림 크기({}바이트)가 한도({MAX_IMAGE_BYTES}바이트)를 넘었습니다.",
+                img.bytes.len()
+            )));
         }
-    }
-    if count > MAX_IMAGES_PER_DOCUMENT || total > MAX_TOTAL_IMAGE_BYTES {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "문서의 그림이 한도(개수 {MAX_IMAGES_PER_DOCUMENT}, 합계 {MAX_TOTAL_IMAGE_BYTES}바이트)를 넘었습니다."
-        )));
+        count += 1;
+        total = total.saturating_add(img.bytes.len());
+        if count > MAX_IMAGES_PER_DOCUMENT || total > MAX_TOTAL_IMAGE_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "문서의 그림이 한도(개수 {MAX_IMAGES_PER_DOCUMENT}, 합계 {MAX_TOTAL_IMAGE_BYTES}바이트)를 넘었습니다."
+            )));
+        }
+        Ok(())
+    };
+    for block in &doc.blocks {
+        match block {
+            RichBlock::Image(img) => charge(img)?,
+            RichBlock::Table(table) => {
+                for ci in &table.cell_images {
+                    charge(&ci.image)?;
+                }
+            }
+            RichBlock::Paragraph(_) => {}
+        }
     }
     Ok(())
 }
 
 /// Running picture count and byte total of a document being read (PD-096 limits).
 #[derive(Default)]
-pub(crate) struct ImageBudget {
+pub struct ImageBudget {
     count: usize,
     bytes: usize,
 }
 
 impl ImageBudget {
     /// Counts one picture of `len` bytes; fails closed when a document limit is exceeded.
-    pub(crate) fn charge(&mut self, len: usize) -> Result<(), EasyOfficeError> {
+    pub fn charge(&mut self, len: usize) -> Result<(), EasyOfficeError> {
         self.count += 1;
         self.bytes = self.bytes.saturating_add(len);
         if self.count > MAX_IMAGES_PER_DOCUMENT || self.bytes > MAX_TOTAL_IMAGE_BYTES {

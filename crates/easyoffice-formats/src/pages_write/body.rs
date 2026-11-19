@@ -394,6 +394,32 @@ pub(super) fn write_body<'a>(
                 attachment_entries.push(entry(offset, Some(att_id)));
                 text.push('\u{FFFC}');
                 offset += 1;
+
+                for ci in tbl.validated_cell_images() {
+                    lines += 1;
+                    if lines > MAX_PARAGRAPHS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "Pages 쓰기: 문단 수가 열기 한도를 넘었습니다".to_string(),
+                        ));
+                    }
+                    close_link(&mut active_link, &mut smartfield_entries, offset);
+                    text.push('\n');
+                    offset += 1;
+                    let img_att_id = write_image_attachment(
+                        bp,
+                        styles,
+                        &ci.image,
+                        &mut image_data,
+                        &mut next_image_num,
+                    )?;
+                    paragraph_entries.push(entry(offset, Some(styles.body)));
+                    push_run_change(&mut list_levels, offset, 0);
+                    push_run_change(&mut list_styles, offset, styles.list);
+                    push_run_change(&mut layout_styles, offset, styles.body_column);
+                    attachment_entries.push(entry(offset, Some(img_att_id)));
+                    text.push('\u{FFFC}');
+                    offset += 1;
+                }
             }
             RichBlock::Image(img) => {
                 lines += 1;

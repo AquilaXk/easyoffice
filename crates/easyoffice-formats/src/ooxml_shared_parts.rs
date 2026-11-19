@@ -29,22 +29,52 @@ pub(crate) fn core_properties_xml(title: &str) -> String {
 
 /// Writes `w:tblPr` and `w:tblGrid`, which must precede the first `w:tr` (ECMA-376 §17.4.38).
 pub(crate) fn push_docx_table_properties(out: &mut String, rows: &[Vec<String>]) {
+    push_docx_table_properties_with_widths(out, rows, None);
+}
+
+/// Writes `w:tblPr` (with fixed table layout when explicit column widths are provided) and
+/// `w:tblGrid`.
+pub(crate) fn push_docx_table_properties_with_widths(
+    out: &mut String,
+    rows: &[Vec<String>],
+    col_widths_twips: Option<&[u32]>,
+) {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    let custom = col_widths_twips.filter(|w| w.len() == cols);
+    out.push_str("<w:tblPr>");
+    if let Some(widths) = custom {
+        let sum: u64 = widths.iter().map(|&w| u64::from(w)).sum();
+        out.push_str(&format!("<w:tblW w:w=\"{sum}\" w:type=\"dxa\"/>"));
+    } else {
+        out.push_str("<w:tblW w:w=\"0\" w:type=\"auto\"/>");
+    }
     out.push_str(concat!(
-        "<w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders>",
+        "<w:tblBorders>",
         "<w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
         "<w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
         "<w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
         "<w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
         "<w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
         "<w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>",
-        "</w:tblBorders><w:tblLook w:val=\"04A0\" w:firstRow=\"1\" w:lastRow=\"0\" ",
+        "</w:tblBorders>",
+    ));
+    if custom.is_some() {
+        out.push_str("<w:tblLayout w:type=\"fixed\"/>");
+    }
+    out.push_str(concat!(
+        "<w:tblLook w:val=\"04A0\" w:firstRow=\"1\" w:lastRow=\"0\" ",
         "w:firstColumn=\"1\" w:lastColumn=\"0\" w:noHBand=\"0\" w:noVBand=\"1\"/></w:tblPr>"
     ));
-    let width = DOCX_TEXT_WIDTH_TWIPS / cols;
     out.push_str("<w:tblGrid>");
-    for _ in 0..cols {
-        out.push_str(&format!("<w:gridCol w:w=\"{width}\"/>"));
+    if let Some(widths) = custom {
+        for &w in widths {
+            out.push_str(&format!("<w:gridCol w:w=\"{w}\"/>"));
+        }
+    } else {
+        let width = DOCX_TEXT_WIDTH_TWIPS / cols;
+        for _ in 0..cols {
+            out.push_str(&format!("<w:gridCol w:w=\"{width}\"/>"));
+        }
     }
     out.push_str("</w:tblGrid>");
 }

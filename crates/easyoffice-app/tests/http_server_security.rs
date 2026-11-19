@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const EXPECTED_MAIN_CSP: &str =
-    "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'\r\n";
+    "Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'\r\n";
 const EXPECTED_XFO_DENY: &str = "X-Frame-Options: DENY\r\n";
 
 fn send_raw_http_request(port: u16, raw_request: &[u8], timeout: Duration) -> String {

@@ -8,215 +8,31 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{
-    highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichColumns, RichToc,
-};
+use crate::rich_document::{toc_bookmark_number, RichColumns};
 use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{drawing_picture, DocxMedia, DocxRelationships, DrawingOutcome};
-use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
+use crate::rich_read_numbering::{read_numbering, Numbering};
 use crate::rich_read_page_setup::{
     binding_of, fitting_setup, page_gutter, page_margins, page_paper,
 };
 use crate::rich_table::{join_cell_paragraphs, TableAssembler};
-use crate::rich_xml::{
-    heading_level_from_name, push_linked_run, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
-};
+use crate::rich_xml::{push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField, RichImage, RichListKind,
-    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
-    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
+    EasyOfficeError, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper, RichRun,
+    XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
+    MAX_TOTAL_IMAGE_BYTES,
 };
 
 #[path = "rich_read_ooxml/frame.rs"]
 mod frame;
 #[path = "rich_read_ooxml/styles.rs"]
 mod styles;
+#[path = "rich_read_ooxml/table.rs"]
+mod table;
 use frame::*;
 use styles::*;
-
-/// `w:vMerge` state of a table cell.
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum VMerge {
-    #[default]
-    None,
-    Restart,
-    Continue,
-}
-
-/// `w:gridSpan/@w:val`, at least 1; an unreadable value is 1 and a huge one is left for the
-/// table assembler to reject.
-fn grid_span(attrs: &Attrs<'_>) -> u32 {
-    attr(attrs, "w:val")
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX).max(1))
-}
-
-#[derive(Default)]
-struct ParaState {
-    runs: Vec<crate::RichRun>,
-    style_id: Option<String>,
-    jc: Option<String>,
-    num_id: Option<String>,
-    /// `w:numPr/w:ilvl`, 0 when absent or unreadable.
-    ilvl: Option<usize>,
-    outline: Option<u8>,
-    images: Vec<RichImage>,
-    left_indent: Option<u32>,
-    first_line: Option<i32>,
-    line_percent: Option<u16>,
-    /// Number of a `_Toc` bookmark that starts in the paragraph.
-    bookmark: Option<u32>,
-    /// `w:leader` of the paragraph's right tab stop (a TOC entry's page number).
-    tab_leader: Option<String>,
-    /// `w:pageBreakBefore`, or a page break before any text of the paragraph.
-    page_break_before: bool,
-    /// A page break after text of the paragraph: the next paragraph starts the page.
-    page_break_after: bool,
-    /// Inline section break (`w:pPr/w:sectPr`) ending at this paragraph, carrying its columns.
-    sect_end: Option<Option<RichColumns>>,
-    /// Horizontal header/footer zones split by `w:ptab w:alignment="center|right"` (`PD-249`).
-    zones: Vec<(String, Vec<crate::RichRun>)>,
-    /// Word 2010 `w14:checkbox` SDT state (`Some(checked)`) and single separator space stripper (`PD-250`).
-    task_checkbox: Option<bool>,
-    strip_task_space: bool,
-}
-
-fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
-    jc.and_then(RichAlignment::parse)
-}
-
-#[inline]
-fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
-    s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
-}
-
-pub(super) struct Resolver<'a> {
-    styles: &'a HashMap<String, DocxStyle>,
-    numbering: &'a Numbering,
-}
-
-impl Resolver<'_> {
-    fn resolve_style_chain(&self, start_id: &str) -> (u8, Option<RichListKind>) {
-        let mut heading = 0u8;
-        let mut list_from_style = None;
-        let mut cur_id = Some(start_id);
-        for _ in 0..MAX_STYLE_INHERIT_DEPTH {
-            let Some(id) = cur_id else {
-                break;
-            };
-            if heading == 0 {
-                heading = heading_level_from_name(id);
-            }
-            let Some(st) = self.styles.get(id) else {
-                break;
-            };
-            if let Some(name) = st.name.as_deref() {
-                if heading == 0 {
-                    heading = heading_level_from_name(name);
-                }
-                if list_from_style.is_none() {
-                    if starts_with_ignore_ascii_case(name, "list bullet") {
-                        list_from_style = Some(RichListKind::Bullet);
-                    } else if starts_with_ignore_ascii_case(name, "list number") {
-                        list_from_style = Some(RichListKind::Ordered);
-                    }
-                }
-            }
-            if heading == 0 {
-                if let Some(lvl) = st.outline_lvl.filter(|&l| l < 9) {
-                    heading = (lvl + 1).min(6);
-                }
-            }
-            cur_id = st.based_on.as_deref();
-        }
-        (heading, list_from_style)
-    }
-
-    /// The table-of-contents role of the paragraph style (its id or its name).
-    fn toc_role(&self, style_id: &str) -> Option<RichToc> {
-        toc_role_from_name(style_id).or_else(|| {
-            let name = self.styles.get(style_id)?.name.as_deref()?;
-            toc_role_from_name(name)
-        })
-    }
-
-    fn finish(&self, mut p: ParaState) -> RichParagraph {
-        let toc = p.style_id.as_deref().and_then(|id| self.toc_role(id));
-        let (mut heading, style_list) = p
-            .style_id
-            .as_deref()
-            .map_or((0, None), |id| self.resolve_style_chain(id));
-        if toc.is_some() {
-            heading = 0;
-        } else if heading == 0 {
-            if let Some(level) = p.outline.filter(|l| *l < 9) {
-                heading = (level + 1).min(6);
-            }
-        }
-        let level = p.ilvl.unwrap_or(0).min(LIST_LEVELS - 1);
-        let numbered = p
-            .num_id
-            .as_deref()
-            .filter(|id| *id != "0")
-            .map(|id| self.numbering.level(id, level));
-        // A list style names the kind (as before); the number format is the level's own when
-        // the numbering agrees on the kind.
-        let (mut list, mut list_number) = match (heading, style_list, numbered) {
-            (1.., ..) => (None, None),
-            (_, Some(kind), def) => (
-                Some(kind),
-                def.filter(|d| d.kind == kind).and_then(|d| d.number),
-            ),
-            (_, None, Some(def)) => (Some(def.kind), def.number),
-            (_, None, None) => (None, None),
-        };
-        let mut task_checked = false;
-        let mut list_level = if list.is_some() { level as u8 } else { 0 };
-        if heading == 0 && toc.is_none() {
-            if let Some(checked) = p.task_checkbox {
-                list = Some(RichListKind::Task);
-                task_checked = checked;
-                list_number = None;
-                list_level = if p.ilvl.is_some() {
-                    level as u8
-                } else if p.first_line == Some(-360)
-                    && p.left_indent
-                        .is_some_and(|l| (720..=6480).contains(&l) && l % 720 == 0)
-                {
-                    let recovered = ((p.left_indent.unwrap_or(720) / 720) - 1) as u8;
-                    p.left_indent = None;
-                    p.first_line = None;
-                    recovered
-                } else {
-                    0
-                };
-            }
-        }
-        let toc_page = match toc {
-            Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
-            _ => None,
-        };
-        RichParagraph {
-            list_level,
-            list_number,
-            task_checked,
-            alignment: alignment(p.jc.as_deref()),
-            runs: p.runs,
-            heading_level: heading,
-            list,
-            left_indent_twips: p.left_indent,
-            first_line_indent_twips: p.first_line,
-            line_spacing_percent: p.line_percent,
-            toc,
-            bookmark: p.bookmark,
-            toc_page,
-            toc_dots: toc_page.is_some() && p.tab_leader.as_deref().is_none_or(|l| l == "dot"),
-            page_break_before: p.page_break_before,
-            ..RichParagraph::default()
-        }
-    }
-}
+use table::{grid_span, DocxTableState, VMerge};
 
 /// A `w:headerReference` or `w:footerReference` of a section.
 pub(super) struct FrameRef {
@@ -254,44 +70,6 @@ fn toc_bookmark_link(name: &str) -> Option<String> {
     toc_bookmark_number(name).map(|_| format!("#{name}"))
 }
 
-/// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
-fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_>) {
-    let val = attr(attrs, "w:val");
-    let val = val.as_deref();
-    match name {
-        "w:b" => fmt.bold = toggle_on(val),
-        "w:i" => fmt.italic = toggle_on(val),
-        "w:strike" | "w:dstrike" => fmt.strike = toggle_on(val),
-        "w:u" => fmt.underline = toggle_on(val),
-        "w:rFonts" => {
-            fmt.font = ["w:ascii", "w:hAnsi", "w:eastAsia"]
-                .iter()
-                .find_map(|k| attr(attrs, k))
-                .filter(|f| !f.trim().is_empty())
-                .map(Cow::into_owned);
-        }
-        "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
-        "w:color" => fmt.color = val.and_then(normalize_hex_color),
-        "w:highlight" => fmt.highlight = val.and_then(highlight_name_to_hex),
-        "w:vertAlign" => {
-            fmt.script = match val {
-                Some("superscript") => RichScript::Superscript,
-                Some("subscript") => RichScript::Subscript,
-                _ => RichScript::Normal,
-            };
-        }
-        "w:shd" => {
-            if let Some(fill) = attr(attrs, "w:fill")
-                .as_deref()
-                .and_then(normalize_hex_color)
-            {
-                fmt.highlight = Some(fill);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// `w:spacing` (auto line rule, 240ths of a line) and `w:ind` of a paragraph.
 fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
@@ -326,6 +104,7 @@ pub(super) struct DocxWalker {
     cur_text: String,
     tbl_depth: usize,
     table: TableAssembler,
+    table_state: DocxTableState,
     cell_paras: Vec<Vec<RichRun>>,
     /// `w:gridSpan` and `w:vMerge` of the open top-level cell.
     cell_span: u32,
@@ -410,6 +189,9 @@ impl DocxWalker {
         }
         self.track_structure(name, attrs);
         self.track_frame(name, attrs)?;
+        if self.tbl_depth == 1 && !self.in_ppr && !self.in_rpr {
+            self.table_state.on_start(name, attrs);
+        }
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val").as_deref());
@@ -430,6 +212,7 @@ impl DocxWalker {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
                     self.table.reset();
+                    self.table_state.reset_table();
                 }
             }
             "w:tr" if self.tbl_depth == 1 => self.table.start_row(),
@@ -437,6 +220,7 @@ impl DocxWalker {
                 self.cell_paras.clear();
                 self.cell_span = 1;
                 self.cell_v_merge = VMerge::None;
+                self.table_state.start_cell();
             }
             "w:gridSpan" if self.tbl_depth == 1 => self.cell_span = grid_span(attrs),
             "w:vMerge" if self.tbl_depth == 1 => {
@@ -720,23 +504,42 @@ impl DocxWalker {
             }
             "w:hyperlink" => self.link = None,
             "w:p" => self.finish_paragraph(resolver)?,
+            "w:tblPr" | "w:tblGrid" | "w:tcBorders" | "w:tcPr"
+                if self.tbl_depth == 1 && !self.in_ppr && !self.in_rpr =>
+            {
+                self.table_state.on_end(name);
+            }
             "w:tc" if self.tbl_depth == 1 => {
                 let (text, spans) = join_cell_paragraphs(&self.cell_paras);
                 self.cell_paras.clear();
                 self.text_budget.charge_cell(text.len(), "DOCX 표 셀")?;
                 let (row, col) = self.table.next_coord();
-                if self.cell_v_merge != VMerge::Continue && !spans.is_empty() {
-                    self.table.push_cell_links(row, col, &spans);
+                let (fill, borders, images) = self.table_state.finish_cell(self.cell_span);
+                if self.cell_v_merge != VMerge::Continue {
+                    if !spans.is_empty() {
+                        self.table.push_cell_links(row, col, &spans);
+                    }
+                    self.table.push_cell_style(row, col, fill, borders);
+                    if !images.is_empty() {
+                        self.table.push_cell_images(row, col, images);
+                    }
                 }
                 self.push_cell(text)?;
             }
-            "w:tr" if self.tbl_depth == 1 => self.table.end_row(),
+            "w:tr" if self.tbl_depth == 1 => {
+                self.table.end_row();
+                self.table_state.finish_row();
+            }
             "w:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
                 if self.tbl_depth == 0 && !self.table.is_empty() {
                     self.text_budget.charge_block(0, "DOCX 표")?;
-                    let (table, dropped) =
+                    let (mut table, dropped) =
                         std::mem::take(&mut self.table).finish(&mut self.text_budget)?;
+                    if let Some(widths) = self.table_state.resolve_col_widths(table.column_count())
+                    {
+                        table.col_widths_twips = widths;
+                    }
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
                 }
@@ -758,7 +561,7 @@ impl DocxWalker {
         Ok(())
     }
 
-    /// Records the picture of a `w:drawing` in the open paragraph, or a warning when skipped.
+    /// Records the picture of a `w:drawing` in the open paragraph or table cell, or a warning when skipped.
     fn on_drawing(
         &mut self,
         events: &[XmlEvent<'_>],
@@ -771,7 +574,10 @@ impl DocxWalker {
                 return Ok(());
             }
         };
-        if self.tbl_depth > 0 || self.paras.is_empty() {
+        if self.tbl_depth > 1
+            || (self.tbl_depth == 1 && !self.table_state.in_cell)
+            || self.paras.is_empty()
+        {
             self.warn_once("표 안의 그림은 가져오지 않았습니다.".to_string());
             return Ok(());
         }
@@ -782,7 +588,9 @@ impl DocxWalker {
                 "DOCX 그림이 문서당 한도(개수·합계 크기)를 넘었습니다.".to_string(),
             ));
         }
-        if let Some(top) = self.paras.last_mut() {
+        if self.tbl_depth == 1 {
+            self.table_state.cell_images.push(img);
+        } else if let Some(top) = self.paras.last_mut() {
             top.images.push(img);
         }
         Ok(())
@@ -860,7 +668,7 @@ impl DocxWalker {
 }
 
 /// Runs the events of one WordprocessingML part (the body or a header/footer) through `walker`.
-pub(super) fn walk_part(
+fn walk_part(
     xml: &str,
     walker: &mut DocxWalker,
     resolver: &Resolver<'_>,

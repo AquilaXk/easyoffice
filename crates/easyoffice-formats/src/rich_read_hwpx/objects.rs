@@ -9,11 +9,87 @@
 //! 5642-5778행, `parse_equation` 6835-6920행, `parse_note_pr_children` 1277-1545행).
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
-use super::{push_text, scan_picture, Header, HwpxMedia, SectionWalker};
+use super::{push_text, Header, SectionWalker, EMU_PER_HWPUNIT};
 use crate::hwp_eqedit::convert_eqedit_to_latex;
-use crate::xml_stream::{attr, Attrs, XmlEvent};
-use crate::{EasyOfficeError, RichBlock, RichImage, RichParagraph, RichRun, RichScript};
+use crate::rich_image::safe_package_path;
+use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
+use crate::{
+    EasyOfficeError, RichBlock, RichImage, RichParagraph, RichRun, RichScript, ZipArchiveEntry,
+};
+
+/// Binary item id -> package entry, from the `opf:item` manifest of `Contents/content.hpf`.
+pub(super) struct HwpxMedia<'a> {
+    pub(super) by_id: HashMap<String, &'a ZipArchiveEntry>,
+}
+
+impl<'a> HwpxMedia<'a> {
+    pub(super) fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
+        let mut by_id = HashMap::new();
+        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
+            entries.iter().map(|e| (e.path.as_str(), e)).collect();
+        let Some(&hpf) = entry_by_path.get("Contents/content.hpf") else {
+            return Ok(Self { by_id });
+        };
+        let xml = std::str::from_utf8(&hpf.data).map_err(|_| {
+            EasyOfficeError::InvalidUtf8("Contents/content.hpf UTF-8 오류".to_string())
+        })?;
+        for event in XmlReader::new(xml) {
+            let XmlEvent::Start { name, attrs } = event? else {
+                continue;
+            };
+            let (Some(id), Some(href)) = (attr(&attrs, "id"), attr(&attrs, "href")) else {
+                continue;
+            };
+            let entry =
+                safe_package_path(&href).and_then(|path| entry_by_path.get(path.as_str()).copied());
+            if let (true, Some(entry)) = (name == "opf:item", entry) {
+                by_id.insert(id.to_string(), entry);
+            }
+        }
+        Ok(Self { by_id })
+    }
+}
+
+/// Fields of one `hp:pic`.
+#[derive(Default)]
+struct PictureFields<'e> {
+    item: Option<Cow<'e, str>>,
+    size: Option<(u64, u64)>,
+    alt: String,
+}
+
+fn scan_picture<'e>(events: &[XmlEvent<'e>]) -> PictureFields<'e> {
+    let mut fields = PictureFields::default();
+    let mut in_comment = false;
+    for event in events {
+        match event {
+            XmlEvent::Start { name, attrs } => match *name {
+                "hc:img" if fields.item.is_none() => fields.item = attr(attrs, "binaryItemIDRef"),
+                "hp:curSz" | "hp:sz" if fields.size.is_none() => {
+                    let side = |key| {
+                        attr(attrs, key)
+                            .and_then(|v| v.trim().parse::<u64>().ok())
+                            .filter(|v| *v > 0)
+                    };
+                    fields.size = side("width").zip(side("height")).and_then(|(w, h)| {
+                        Some((
+                            w.checked_mul(EMU_PER_HWPUNIT)?,
+                            h.checked_mul(EMU_PER_HWPUNIT)?,
+                        ))
+                    });
+                }
+                "hp:shapeComment" => in_comment = true,
+                _ => {}
+            },
+            XmlEvent::Text(text) if in_comment => fields.alt.push_str(text),
+            XmlEvent::End(name) if *name == "hp:shapeComment" => in_comment = false,
+            _ => {}
+        }
+    }
+    fields
+}
 
 pub(super) const MAX_EQUATION_BYTES: usize = 64 * 1024;
 pub(super) const MAX_HWPX_NEST_DEPTH: u8 = 16;
@@ -423,7 +499,13 @@ impl SectionWalker {
                             self.cell_paras.push(vec![RichRun::plain(row.join("\t"))]);
                         }
                     }
-                    RichBlock::Image(img) => self.table_images.push(img),
+                    RichBlock::Image(img) => {
+                        if self.tbl_depth == 1 && self.in_cell {
+                            self.cell_images.push(img);
+                        } else {
+                            self.table_images.push(img);
+                        }
+                    }
                 }
             }
         } else if let Some(top) = self.paras.last_mut() {
@@ -494,7 +576,9 @@ impl SectionWalker {
         if let Some((w, h)) = fields.size {
             let _ = image.set_display_emu(w, h);
         }
-        if self.tbl_depth > 0 {
+        if self.tbl_depth == 1 && self.in_cell {
+            self.cell_images.push(image);
+        } else if self.tbl_depth > 0 {
             self.table_images.push(image);
         } else if let Some(top) = self.paras.last_mut() {
             top.images.push(image);

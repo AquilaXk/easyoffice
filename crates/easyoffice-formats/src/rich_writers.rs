@@ -32,7 +32,7 @@ use crate::rich_page_frame::{
 use crate::rich_run_writers::{
     docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
 };
-use crate::rich_table_writers::push_docx_table;
+use crate::rich_table_writers::{push_docx_table, DocxTableContext};
 use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
     is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
@@ -346,7 +346,14 @@ pub(crate) fn docx_rich_entries(
                 body.push_str(&docx_image_paragraph(img, picture.ordinal, &rel_id));
             }
             RichBlock::Table(table) => {
-                push_docx_table(&mut body, table, &mut links);
+                let mut ctx = DocxTableContext {
+                    links: &mut links,
+                    media: &mut media,
+                    image_rels: &mut image_rels,
+                    first_image_rel: DOCX_FIRST_IMAGE_REL,
+                    media_dir: DOCX_MEDIA_DIR,
+                };
+                push_docx_table(&mut body, table, &mut ctx);
                 // A table cannot end the body or touch another table without a paragraph.
                 body.push_str("<w:p/>");
             }
@@ -681,6 +688,27 @@ fn flush_pdf_text(
     entries.extend(text_entries(&page, 1, pass.as_mut()));
 }
 
+fn push_pdf_image_page(
+    entries: &mut Vec<PdfPageEntry>,
+    img: &crate::RichImage,
+    image: crate::pdf_image::PdfImageObject,
+) {
+    let (cx, cy) = img.display_emu();
+    let (width_pt, height_pt) = fit_within(
+        emu_to_points(cx),
+        emu_to_points(cy),
+        PDF_IMAGE_MAX_WIDTH_PT,
+        PDF_IMAGE_MAX_HEIGHT_PT,
+    );
+    entries.push(PdfPageEntry::Image(PdfImagePage {
+        page_number: 0,
+        rotation_degrees: 0,
+        image,
+        width_pt,
+        height_pt,
+    }));
+}
+
 /// Text pages with every embeddable picture on a page of its own, in document order; pictures
 /// the PDF writer cannot embed are printed as alternative text.
 fn pdf_entries(
@@ -691,29 +719,30 @@ fn pdf_entries(
     let mut entries = Vec::new();
     let mut lines = Vec::new();
     for block in &doc.blocks {
-        let embedded = match block {
-            RichBlock::Image(img) => pdf_image_object(img).map(|object| (img, object)),
-            _ => None,
-        };
-        let Some((img, image)) = embedded else {
-            push_plain_lines(block, " | ", &mut lines);
-            continue;
-        };
-        flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
-        let (cx, cy) = img.display_emu();
-        let (width_pt, height_pt) = fit_within(
-            emu_to_points(cx),
-            emu_to_points(cy),
-            PDF_IMAGE_MAX_WIDTH_PT,
-            PDF_IMAGE_MAX_HEIGHT_PT,
-        );
-        entries.push(PdfPageEntry::Image(PdfImagePage {
-            page_number: 0,
-            rotation_degrees: 0,
-            image,
-            width_pt,
-            height_pt,
-        }));
+        match block {
+            RichBlock::Image(img) => {
+                if let Some(image) = pdf_image_object(img) {
+                    flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
+                    push_pdf_image_page(&mut entries, img, image);
+                } else {
+                    push_plain_lines(block, " | ", &mut lines);
+                }
+            }
+            RichBlock::Table(table) => {
+                push_plain_lines(block, " | ", &mut lines);
+                for ci in table.validated_cell_images() {
+                    if let Some(image) = pdf_image_object(&ci.image) {
+                        flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
+                        push_pdf_image_page(&mut entries, &ci.image, image);
+                    } else {
+                        lines.push(ci.image.fallback_text().to_string());
+                    }
+                }
+            }
+            RichBlock::Paragraph(_) => {
+                push_plain_lines(block, " | ", &mut lines);
+            }
+        }
     }
     flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
     for (idx, entry) in entries.iter_mut().enumerate() {
@@ -738,7 +767,12 @@ pub(crate) fn serialize_pdf_rich(
         .or_else(|| doc.official_agency.clone());
     let highlight = options.highlight.as_ref().filter(|h| !h.text.is_empty());
     let mut pass = highlight.map(HighlightPass::new);
-    if doc.blocks.iter().any(|b| matches!(b, RichBlock::Image(_))) {
+    let has_images = doc.blocks.iter().any(|b| match b {
+        RichBlock::Image(_) => true,
+        RichBlock::Table(t) => !t.cell_images.is_empty(),
+        RichBlock::Paragraph(_) => false,
+    });
+    if has_images {
         let mut entries = pdf_entries(doc, stamp.clone(), &mut pass);
         if entries.iter().any(|e| matches!(e, PdfPageEntry::Image(_))) {
             options.rotate(&mut entries);

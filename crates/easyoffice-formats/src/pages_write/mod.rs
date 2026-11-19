@@ -94,6 +94,12 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
                         .iter()
                         .filter(|l| body::valid_pages_link(&l.url).is_none())
                         .count();
+                    if !t.col_widths_twips.is_empty() {
+                        loss.formats += 1;
+                    }
+                    if !t.cell_styles.is_empty() {
+                        loss.formats += t.validated_cell_styles().len().max(1);
+                    }
                 }
             }
             RichBlock::Image(_) => {}
@@ -207,6 +213,13 @@ fn expected_blocks(doc: &RichDocument) -> Vec<ExpectedBlock> {
                     })
                     .collect();
                 out.push(ExpectedBlock::Table(grid, merges));
+                for ci in t.validated_cell_images() {
+                    out.push(ExpectedBlock::Image(
+                        ci.image.format(),
+                        ci.image.width_px(),
+                        ci.image.height_px(),
+                    ));
+                }
             }
             RichBlock::Image(img) => {
                 out.push(ExpectedBlock::Image(

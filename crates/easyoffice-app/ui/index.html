@@ -104,6 +104,7 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">입력</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 개체</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
@@ -288,6 +289,10 @@
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 나누기</span></div>
               <div class="md-item" data-studio-menu-cmd="table-merge" role="menuitem" tabindex="-1"><span class="md-label">셀 합치기</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-col-equal" role="menuitem" tabindex="-1"><span class="md-label">셀 너비를 같게</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">셀 테두리/배경</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표/셀 속성</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="table-sum" role="menuitem" tabindex="-1"><span class="md-label">블록 합계</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-tableformula" role="menuitem" tabindex="-1"><span class="md-label">표 셀 수식 계산</span></div>
@@ -374,6 +379,7 @@
         accept=".docx,.doc,.odt,.rtf,.md,.markdown,.txt,.hwp,.hwpx,.hwt,.hwtx,.xlsx,.xls,.ods,.csv,.tsv,.pptx,.ppt,.ppsx,.odp,.pdf,.pages"
         aria-label="열 문서 파일 선택"
       />
+      <input id="doc-image-input" type="file" hidden accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="그림" />
 
       <div id="bootstrap-error" class="eo-bootstrap-error" role="alert" hidden>
         <span id="bootstrap-error-text">작업 공간 초기화에 실패했습니다.</span>
@@ -409,6 +415,7 @@
         <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기" aria-label="표 만들기"><span class="tb-sprite icon-table"></span><span class="tb-label">표</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입" aria-label="도형 삽입"><span class="tb-sprite icon-shape"></span><span class="tb-label">도형</span></button>
+          <button type="button" class="tb-btn" data-kinds="DOC" data-studio-cmd="insert-image" title="그림" aria-label="그림"><span class="tb-sprite icon-image"></span><span class="tb-label">그림</span></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
@@ -587,6 +594,14 @@
                     [한글(HWP/HWPX) 200자 원고지 격자 및 기관 표제부 레이아웃 활성]
                   </p>
                 </article>
+                <div id="doc-image-resizer" class="doc-image-resizer" hidden aria-hidden="true">
+                  <span class="doc-image-handle" data-resize-dir="nw"></span>
+                  <span class="doc-image-handle" data-resize-dir="ne"></span>
+                  <span class="doc-image-handle" data-resize-dir="sw"></span>
+                  <span class="doc-image-handle" data-resize-dir="se"></span>
+                  <span class="doc-image-handle" data-resize-dir="e"></span>
+                  <span class="doc-image-handle" data-resize-dir="s"></span>
+                </div>
               </div>
             </div>
           </div>
@@ -1862,6 +1877,65 @@
       </div>
     </dialog>
 
+    <dialog id="doc-image-size-dialog" class="tool-dialog" aria-labelledby="doc-image-size-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-image-size-title">그림</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-section">
+            <div class="dialog-section-title">크기</div>
+            <div class="dialog-row"><label class="dialog-label" for="doc-image-width-mm">너비</label><input id="doc-image-width-mm" type="number" min="1" max="500" step="0.1" class="dialog-input" /><span class="dialog-unit">mm</span></div>
+            <div class="dialog-row"><label class="dialog-label" for="doc-image-height-mm">높이</label><input id="doc-image-height-mm" type="number" min="1" max="500" step="0.1" class="dialog-input" /><span class="dialog-unit">mm</span></div>
+            <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-image-keep-ratio" type="checkbox" />비율 유지</label><button id="btn-doc-image-reset-size" type="button" class="dialog-btn">원래 크기로</button></div>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-image-size-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-cell-border-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="doc-cell-border-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-cell-border-title">셀 테두리/배경</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-tabs" role="tablist" aria-label="셀 테두리/배경">
+          <button type="button" class="dialog-tab active" role="tab" id="doc-cb-tab-border" aria-selected="true" aria-controls="doc-cb-pane-border" data-doc-cb-tab="border">테두리</button>
+          <button type="button" class="dialog-tab" role="tab" id="doc-cb-tab-bg" aria-selected="false" aria-controls="doc-cb-pane-bg" tabindex="-1" data-doc-cb-tab="bg">배경</button>
+        </div>
+        <div class="dialog-body" id="doc-cb-pane-border" role="tabpanel" aria-labelledby="doc-cb-tab-border" data-doc-cb-pane="border">
+          <div class="dialog-row"><span class="dialog-label">선 종류</span><div class="sheet-line-grid" role="radiogroup" aria-label="선 종류"><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thin" title="가는 실선" aria-label="가는 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thick" title="굵은 실선" aria-label="굵은 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dashed" title="파선" aria-label="파선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dotted" title="점선" aria-label="점선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="double" title="이중 실선" aria-label="이중 실선"></button></div></div>
+          <div class="dialog-row"><span class="dialog-label">색</span><div id="doc-cell-border-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="색" aria-label="색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="doc-cell-border-color" type="color" value="#000000" aria-label="색" /><div id="doc-cell-border-color-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><div class="dialog-btn-group" role="group" aria-label="미리 보기"><button type="button" data-border-preset="none">없음</button><button type="button" data-border-preset="outer">바깥쪽</button><button type="button" data-border-preset="inner">안쪽</button><button type="button" data-border-preset="all">모두</button></div></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><svg id="doc-cell-border-preview" class="sheet-border-preview" viewBox="0 0 120 72" role="img" aria-label="미리 보기"></svg><div class="sheet-border-positions" role="group" aria-label="테두리"><button type="button" aria-pressed="false" data-border-pos="t">위쪽</button><button type="button" aria-pressed="false" data-border-pos="b">아래쪽</button><button type="button" aria-pressed="false" data-border-pos="l">왼쪽</button><button type="button" aria-pressed="false" data-border-pos="r">오른쪽</button><button type="button" aria-pressed="false" data-border-pos="h">가로 중심선</button><button type="button" aria-pressed="false" data-border-pos="v">세로 중심선</button></div></div>
+        </div>
+        <div class="dialog-body" id="doc-cb-pane-bg" role="tabpanel" aria-labelledby="doc-cb-tab-bg" data-doc-cb-pane="bg" hidden>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-cell-bg-none" type="radio" name="doc-cell-bg-mode" value="none" />채우기 없음</label><label class="dialog-checkbox"><input id="doc-cell-bg-solid" type="radio" name="doc-cell-bg-mode" value="solid" />면색</label></div>
+          <div class="dialog-row"><span class="dialog-label">면색</span><div id="doc-cell-bg-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="면색" aria-label="면색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="doc-cell-bg-color" type="color" value="#ffffff" aria-label="면색" /><div id="doc-cell-bg-color-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label">견본</span><output id="doc-cell-bg-sample" class="sheet-color-sample"></output></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-cell-border-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-table-props-dialog" class="tool-dialog" aria-labelledby="doc-table-props-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-table-props-title">표/셀 속성</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-section">
+            <div class="dialog-section-title">셀 크기</div>
+            <div class="dialog-row"><label class="dialog-label" for="doc-table-col-width">너비</label><input id="doc-table-col-width" type="number" min="2.5" max="500" step="0.1" class="dialog-input" /><span class="dialog-unit">mm</span></div>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-table-props-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="about-dialog" class="tool-dialog" aria-labelledby="about-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1991,6 +2065,8 @@
     <script src="./doc-link.js"></script>
     <script src="./doc-toc.js"></script>
     <script src="./doc-table-grid.js"></script>
+    <script src="./doc-image.js"></script>
+    <script src="./doc-table-style.js"></script>
     <script src="./doc-table.js"></script>
     <script src="./doc-pages-core.js"></script>
     <script src="./doc-pages.js"></script>

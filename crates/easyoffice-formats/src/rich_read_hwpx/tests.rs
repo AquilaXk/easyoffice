@@ -1,4 +1,5 @@
 use super::*;
+use crate::zip_codec::ZipArchiveEntry;
 
 #[test]
 fn a_hyperlink_command_is_read_in_the_three_known_forms() {

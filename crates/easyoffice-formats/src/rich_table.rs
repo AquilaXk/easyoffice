@@ -9,6 +9,8 @@
 //! declare many large regions.
 
 use crate::decode_budget::DecodeBudget;
+use crate::rich_image::RichImage;
+pub use crate::rich_table_style::*;
 use crate::EasyOfficeError;
 
 /// Largest row or column span of one region (15 bits, so a cell state fits in a `u32`).
@@ -47,12 +49,16 @@ pub struct TableCellLink {
     pub url: String,
 }
 
-/// A table: rows of final cell text, merged regions over them, and cell-level hyperlink spans.
+/// A table: rows of final cell text, merged regions over them, hyperlink spans, column widths,
+/// per-cell shading/borders, and inline cell pictures.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichTable {
     pub rows: Vec<Vec<String>>,
     pub merges: Vec<CellMerge>,
     pub links: Vec<TableCellLink>,
+    pub col_widths_twips: Vec<u32>,
+    pub cell_styles: Vec<TableCellStyleEntry>,
+    pub cell_images: Vec<TableCellImage>,
 }
 
 impl From<Vec<Vec<String>>> for RichTable {
@@ -67,6 +73,9 @@ impl RichTable {
             rows,
             merges: Vec::new(),
             links: Vec::new(),
+            col_widths_twips: Vec::new(),
+            cell_styles: Vec::new(),
+            cell_images: Vec::new(),
         }
     }
 
@@ -79,6 +88,9 @@ impl RichTable {
                 rows,
                 merges,
                 links: Vec::new(),
+                col_widths_twips: Vec::new(),
+                cell_styles: Vec::new(),
+                cell_images: Vec::new(),
             },
             dropped,
         )
@@ -98,6 +110,9 @@ impl RichTable {
                 rows,
                 merges,
                 links,
+                col_widths_twips: Vec::new(),
+                cell_styles: Vec::new(),
+                cell_images: Vec::new(),
             },
             dropped_merges,
             dropped_links,
@@ -118,6 +133,76 @@ impl RichTable {
             return Vec::new();
         }
         validate_merges(&self.rows, &self.merges).0
+    }
+
+    /// Column widths clamped to [`MIN_COL_WIDTH_TWIPS`]..=[`MAX_COL_WIDTH_TWIPS`] when
+    /// `self.col_widths_twips.len() == max_cols && max_cols > 0`.
+    pub fn validated_col_widths(&self) -> Option<Vec<u32>> {
+        let max_cols = self.column_count();
+        if max_cols == 0 || self.col_widths_twips.len() != max_cols {
+            return None;
+        }
+        Some(
+            self.col_widths_twips
+                .iter()
+                .map(|&w| w.clamp(MIN_COL_WIDTH_TWIPS, MAX_COL_WIDTH_TWIPS))
+                .collect(),
+        )
+    }
+
+    /// In-bounds, non-default cell styles capped at [`MAX_STYLED_TABLE_CELLS`], sorted by
+    /// `((row as u64) << 32) | (col as u64)` and deduplicated (last entry wins).
+    pub fn validated_cell_styles(&self) -> Vec<TableCellStyleEntry> {
+        if self.cell_styles.is_empty() || self.rows.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<TableCellStyleEntry> = self
+            .cell_styles
+            .iter()
+            .copied()
+            .filter(|e| {
+                (!e.fill.is_none() || !e.borders.is_unspecified())
+                    && usize::try_from(e.row)
+                        .ok()
+                        .zip(usize::try_from(e.col).ok())
+                        .is_some_and(|(r, c)| self.rows.get(r).and_then(|row| row.get(c)).is_some())
+            })
+            .take(MAX_STYLED_TABLE_CELLS)
+            .collect();
+        out.sort_by_key(|e| (u64::from(e.row) << 32) | u64::from(e.col));
+        let mut write = 0usize;
+        for read in 0..out.len() {
+            if write > 0
+                && out[write - 1].row == out[read].row
+                && out[write - 1].col == out[read].col
+            {
+                out[write - 1] = out[read];
+            } else {
+                out[write] = out[read];
+                write += 1;
+            }
+        }
+        out.truncate(write);
+        out
+    }
+
+    /// In-bounds inline cell images, stably sorted by `((row as u64) << 32) | (col as u64)`.
+    pub fn validated_cell_images(&self) -> Vec<&TableCellImage> {
+        if self.cell_images.is_empty() || self.rows.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<&TableCellImage> = self
+            .cell_images
+            .iter()
+            .filter(|ci| {
+                usize::try_from(ci.row)
+                    .ok()
+                    .zip(usize::try_from(ci.col).ok())
+                    .is_some_and(|(r, c)| self.rows.get(r).and_then(|row| row.get(c)).is_some())
+            })
+            .collect();
+        out.sort_by_key(|ci| (u64::from(ci.row) << 32) | u64::from(ci.col));
+        out
     }
 
     /// Width of the widest row.
@@ -270,13 +355,13 @@ impl SpanMap {
 }
 
 /// Row-major bit grid.
-struct BitGrid {
+pub(super) struct BitGrid {
     words_per_row: usize,
     words: Vec<u64>,
 }
 
 impl BitGrid {
-    fn new(rows: usize, cols: usize) -> Self {
+    pub(super) fn new(rows: usize, cols: usize) -> Self {
         let words_per_row = cols.div_ceil(WORD_BITS);
         Self {
             words_per_row,
@@ -305,13 +390,13 @@ impl BitGrid {
         base + lo / WORD_BITS..base + hi.div_ceil(WORD_BITS)
     }
 
-    fn any_set(&self, row: usize, lo: usize, hi: usize) -> bool {
+    pub(super) fn any_set(&self, row: usize, lo: usize, hi: usize) -> bool {
         let base = row * self.words_per_row;
         self.row_words(row, lo, hi)
             .any(|i| self.words[i] & Self::mask(i - base, lo, hi) != 0)
     }
 
-    fn set(&mut self, row: usize, lo: usize, hi: usize) {
+    pub(super) fn set(&mut self, row: usize, lo: usize, hi: usize) {
         let base = row * self.words_per_row;
         for i in self.row_words(row, lo, hi) {
             self.words[i] |= Self::mask(i - base, lo, hi);
@@ -399,6 +484,9 @@ pub(crate) struct TableAssembler {
     row: Vec<String>,
     merges: Vec<CellMerge>,
     links: Vec<TableCellLink>,
+    col_widths_twips: Vec<u32>,
+    cell_styles: Vec<TableCellStyleEntry>,
+    cell_images: Vec<TableCellImage>,
     /// Region index that a continuing cell in column `c` extends, by column.
     open: std::collections::HashMap<usize, usize>,
     dropped: usize,
@@ -425,6 +513,32 @@ impl TableAssembler {
     /// Zero-based `(row, col)` of the cell about to be added.
     pub fn next_coord(&self) -> (u32, u32) {
         (self.rows.len() as u32, self.row.len() as u32)
+    }
+
+    pub fn push_cell_style(
+        &mut self,
+        row: u32,
+        col: u32,
+        fill: CellFill,
+        borders: TableCellBorders,
+    ) {
+        if (fill.is_none() && borders.is_unspecified())
+            || self.cell_styles.len() >= MAX_STYLED_TABLE_CELLS
+        {
+            return;
+        }
+        self.cell_styles.push(TableCellStyleEntry {
+            row,
+            col,
+            fill,
+            borders,
+        });
+    }
+
+    pub fn push_cell_images(&mut self, row: u32, col: u32, images: Vec<RichImage>) {
+        for image in images {
+            self.cell_images.push(TableCellImage { row, col, image });
+        }
     }
 
     /// Appends hyperlink spans `(start, end, url)` for `(row, col)`, bounded by [`MAX_TABLE_LINKS`].
@@ -590,8 +704,22 @@ impl TableAssembler {
             .len()
             .saturating_mul(std::mem::size_of::<Vec<String>>());
         budget.charge(header_cost, "표 행 헤더 비용")?;
-        let (table, dropped, _) =
+        let (mut table, dropped, _) =
             RichTable::with_merges_and_links(self.rows, self.merges, self.links);
+        table.col_widths_twips = self.col_widths_twips;
+        table.col_widths_twips = table.validated_col_widths().unwrap_or_default();
+        table.cell_styles = self.cell_styles;
+        table.cell_styles = table.validated_cell_styles();
+        table.cell_images = self.cell_images;
+        table.cell_images.retain(|ci| {
+            usize::try_from(ci.row)
+                .ok()
+                .zip(usize::try_from(ci.col).ok())
+                .is_some_and(|(r, c)| table.rows.get(r).and_then(|row| row.get(c)).is_some())
+        });
+        table
+            .cell_images
+            .sort_by_key(|ci| (u64::from(ci.row) << 32) | u64::from(ci.col));
         Ok((table, dropped + self.dropped))
     }
 }
@@ -640,257 +768,10 @@ pub(crate) fn join_cell_paragraphs(
     (text, spans)
 }
 
-/// A cell at an explicit grid address (HWPX `cellAddr`/`cellSpan`).
-#[derive(Debug)]
-pub(crate) struct PlacedCell {
-    pub row: u32,
-    pub col: u32,
-    pub row_span: u32,
-    pub col_span: u32,
-    pub text: String,
-    pub links: Vec<(u32, u32, String)>,
-}
-
-/// Lays addressed cells out as a grid. Cells at a taken address and cells beyond the size limits
-/// are dropped and counted; a span that does not fit is reduced to one cell. The grid is as large
-/// as the farthest accepted cell or region.
-pub(crate) fn table_from_placed(
-    cells: Vec<PlacedCell>,
-    budget: &mut DecodeBudget,
-) -> Result<(RichTable, usize), EasyOfficeError> {
-    let mut dropped = 0usize;
-    let (mut rows, mut cols) = (0usize, 0usize);
-    let mut accepted: Vec<PlacedCell> = Vec::with_capacity(cells.len());
-    for mut cell in cells {
-        let (r, c) = (cell.row as usize, cell.col as usize);
-        let fits = |rs: u32, cs: u32| {
-            let (row_end, col_end) = (r.saturating_add(rs as usize), c.saturating_add(cs as usize));
-            let area = rows
-                .max(row_end)
-                .checked_mul(cols.max(col_end))
-                .is_some_and(|n| n <= MAX_PLACED_GRID_CELLS);
-            area && col_end <= MAX_PADDED_COLUMNS
-        };
-        let spans_ok = (1..=MAX_MERGE_SPAN).contains(&cell.row_span)
-            && (1..=MAX_MERGE_SPAN).contains(&cell.col_span);
-        if !(spans_ok && fits(cell.row_span, cell.col_span)) {
-            if cell.row_span != 1 || cell.col_span != 1 {
-                dropped += 1;
-            }
-            (cell.row_span, cell.col_span) = (1, 1);
-            if !fits(1, 1) {
-                dropped += 1;
-                continue;
-            }
-        }
-        rows = rows.max(r + cell.row_span as usize);
-        cols = cols.max(c + cell.col_span as usize);
-        accepted.push(cell);
-    }
-    let header_cost = rows.saturating_mul(std::mem::size_of::<Vec<String>>());
-    let slots_cost = rows
-        .saturating_mul(cols)
-        .saturating_mul(std::mem::size_of::<String>());
-    budget.charge(
-        header_cost.saturating_add(slots_cost),
-        "HWPX 표 그리드 슬롯 선차감",
-    )?;
-    let mut grid = vec![vec![String::new(); cols]; rows];
-    let mut anchored = BitGrid::new(rows, cols);
-    let mut merges = Vec::new();
-    let mut cell_links: Vec<TableCellLink> = Vec::new();
-    for cell in accepted {
-        let (r, c) = (cell.row as usize, cell.col as usize);
-        if anchored.any_set(r, c, c + 1) {
-            dropped += 1;
-            continue;
-        }
-        anchored.set(r, c, c + 1);
-        grid[r][c] = cell.text;
-        for (start, end, url) in cell.links {
-            if cell_links.len() < MAX_TABLE_LINKS {
-                cell_links.push(TableCellLink {
-                    row: cell.row,
-                    col: cell.col,
-                    start,
-                    end,
-                    url,
-                });
-            }
-        }
-        merges.push(CellMerge {
-            row: cell.row,
-            col: cell.col,
-            row_span: cell.row_span,
-            col_span: cell.col_span,
-        });
-    }
-    let (table, rejected, _) = RichTable::with_merges_and_links(grid, merges, cell_links);
-    Ok((table, dropped + rejected))
-}
+#[path = "rich_table_placed.rs"]
+mod placed;
+pub(crate) use placed::*;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn grid(rows: usize, cols: usize) -> Vec<Vec<String>> {
-        vec![vec![String::new(); cols]; rows]
-    }
-
-    fn merge(row: u32, col: u32, row_span: u32, col_span: u32) -> CellMerge {
-        CellMerge {
-            row,
-            col,
-            row_span,
-            col_span,
-        }
-    }
-
-    #[test]
-    fn valid_regions_are_kept_sorted() {
-        let (t, dropped) =
-            RichTable::with_merges(grid(4, 4), vec![merge(2, 2, 2, 2), merge(0, 0, 1, 3)]);
-        assert_eq!(dropped, 0);
-        assert_eq!(t.merges, vec![merge(0, 0, 1, 3), merge(2, 2, 2, 2)]);
-    }
-
-    #[test]
-    fn overlapping_out_of_range_and_huge_regions_are_dropped() {
-        let (t, dropped) = RichTable::with_merges(
-            grid(3, 3),
-            vec![
-                merge(0, 0, 2, 2),
-                merge(1, 1, 2, 2),
-                merge(2, 2, 2, 1),
-                merge(0, 2, 1, 2),
-                merge(0, 0, u32::MAX, u32::MAX),
-                merge(u32::MAX, u32::MAX, 2, 2),
-                merge(1, 0, 0, 2),
-                merge(2, 0, 1, 1),
-            ],
-        );
-        assert_eq!(t.merges, vec![merge(0, 0, 2, 2)]);
-        assert_eq!(dropped, 6);
-    }
-
-    #[test]
-    fn ragged_rows_reject_regions_over_missing_cells() {
-        let rows = vec![vec!["a".into(), "b".into()], vec!["c".into()]];
-        let (t, dropped) = RichTable::with_merges(rows, vec![merge(0, 0, 2, 2), merge(0, 0, 1, 2)]);
-        assert_eq!(t.merges, vec![merge(0, 0, 1, 2)]);
-        assert_eq!(dropped, 1);
-    }
-
-    #[test]
-    fn grid_over_the_limit_drops_every_region() {
-        let (t, dropped) = RichTable::with_merges(grid(2_001, 2_001), vec![merge(0, 0, 2, 2)]);
-        assert!(t.merges.is_empty());
-        assert_eq!(dropped, 1);
-    }
-
-    #[test]
-    fn many_large_overlapping_regions_stay_within_the_work_budget() {
-        let rows = 2_000usize;
-        let candidates = vec![merge(0, 0, 2_000, 1_000); 200_000];
-        let started = std::time::Instant::now();
-        let (t, dropped) = RichTable::with_merges(grid(rows, 1_000), candidates);
-        assert_eq!(t.merges.len(), 1);
-        assert_eq!(dropped, 199_999);
-        assert!(started.elapsed().as_secs() < 5);
-    }
-
-    #[test]
-    fn span_map_marks_anchor_and_covered_cells() {
-        let (t, _) = RichTable::with_merges(grid(3, 3), vec![merge(0, 1, 2, 2)]);
-        let map = t.span_map().expect("merged");
-        assert_eq!(map.at(0, 0), CellSpan::Plain);
-        assert_eq!(
-            map.at(0, 1),
-            CellSpan::Anchor {
-                row_span: 2,
-                col_span: 2
-            }
-        );
-        assert_eq!(
-            map.at(1, 2),
-            CellSpan::Covered {
-                row_offset: 1,
-                col_offset: 1
-            }
-        );
-        assert_eq!(map.at(2, 2), CellSpan::Plain);
-        assert_eq!(map.at(9, 9), CellSpan::Plain);
-        assert!(RichTable::new(grid(2, 2)).span_map().is_none());
-    }
-
-    #[test]
-    fn stale_regions_are_revalidated_by_span_map() {
-        let mut t = RichTable::with_merges(grid(3, 3), vec![merge(1, 1, 2, 2)]).0;
-        t.rows.truncate(2);
-        assert!(t.span_map().is_none());
-    }
-
-    #[test]
-    fn assembler_pads_column_spans_and_continues_vertical_regions() {
-        let mut b = DecodeBudget::default();
-        let mut a = TableAssembler::default();
-        a.start_row();
-        a.spanning("가".into(), 2, &mut b).unwrap();
-        a.restart("나".into(), 1, &mut b).unwrap();
-        a.end_row();
-        a.start_row();
-        a.cell("x".into(), &mut b).unwrap();
-        a.cell("y".into(), &mut b).unwrap();
-        a.continue_above(String::new(), 1, &mut b).unwrap();
-        a.end_row();
-        let (t, dropped) = a.finish(&mut b).unwrap();
-        assert_eq!(dropped, 0);
-        assert_eq!(t.rows[0].len(), 3);
-        assert_eq!(t.merges, vec![merge(0, 0, 1, 2), merge(0, 2, 2, 1)]);
-    }
-
-    #[test]
-    fn assembler_ignores_orphan_continuations_and_huge_spans() {
-        let mut b = DecodeBudget::default();
-        let mut a = TableAssembler::default();
-        a.start_row();
-        a.continue_above(String::new(), 1, &mut b).unwrap();
-        a.spanning("a".into(), u32::MAX, &mut b).unwrap();
-        a.anchor("b".into(), u32::MAX, 1, &mut b).unwrap();
-        a.end_row();
-        let (t, dropped) = a.finish(&mut b).unwrap();
-        assert_eq!(t.rows[0].len(), 3);
-        assert!(t.merges.is_empty());
-        assert_eq!(dropped, 2);
-    }
-
-    #[test]
-    fn placed_cells_make_a_grid_and_drop_duplicates_and_far_cells() {
-        let mut b = DecodeBudget::default();
-        let cell = |row, col, row_span, col_span, text: &str| PlacedCell {
-            row,
-            col,
-            row_span,
-            col_span,
-            text: text.to_string(),
-            links: Vec::new(),
-        };
-        let (t, dropped) = table_from_placed(
-            vec![
-                cell(0, 0, 1, 2, "a"),
-                cell(0, 2, 2, 1, "b"),
-                cell(1, 0, 1, 1, "c"),
-                cell(1, 0, 1, 1, "dup"),
-                cell(0, u32::MAX, 1, 1, "far"),
-                cell(9_999_999, 0, 1, 1, "tall"),
-            ],
-            &mut b,
-        )
-        .unwrap();
-        assert_eq!(t.rows.len(), 2);
-        assert_eq!(t.rows[0], vec!["a", "", "b"]);
-        assert_eq!(t.rows[1][0], "c");
-        assert_eq!(t.merges, vec![merge(0, 0, 1, 2), merge(0, 2, 2, 1)]);
-        assert_eq!(dropped, 3);
-    }
-}
+#[path = "rich_table_tests.rs"]
+mod tests;

@@ -8,10 +8,11 @@
 //! Document metadata (template flag, issuing agency, approval lines) lives in OPF `opf:meta`.
 
 use crate::hwpx_parts::{
-    header_xml, header_xml_with_lists, hwpx_col_ctrl_xml, manifest_xml, section_properties_xml,
+    header_xml, header_xml_with_all, hwpx_col_ctrl_xml, manifest_xml, section_properties_xml,
     text_width, HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML,
     DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER,
-    HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
+    HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, MAX_HWPX_BORDER_FILLS, NS_PARAGRAPH, NS_SECTION,
+    SETTINGS_XML, VERSION_XML,
 };
 pub(crate) use crate::hwpx_unpack::section_xml;
 use crate::office_codecs::checked_part;
@@ -28,7 +29,8 @@ use crate::rich_list_writers::{
 use crate::rich_page_frame::{
     hwpx_frame_control_typed, hwpx_number_control, hwpx_page_hiding_control,
 };
-use crate::rich_table::{CellSpan, SpanMap, TableCellLink};
+use crate::rich_table::{CellSpan, RichTable, TableCellLink};
+use crate::rich_table_style::{next_cell_style, slice_cell_images, CellFill, TableCellBorders};
 use crate::rich_table_writers::slice_cell_links;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies, extract_tags_with_attrs,
@@ -81,6 +83,8 @@ struct ShapeTables {
     style_map: std::collections::HashMap<u8, usize>,
     fonts: Vec<String>,
     font_map: std::collections::HashMap<String, usize>,
+    border_fills: Vec<(CellFill, TableCellBorders)>,
+    border_fill_map: std::collections::HashMap<(CellFill, TableCellBorders), u32>,
     next_field_id: u32,
     /// Text a file-name field is written as.
     file_text: String,
@@ -116,9 +120,33 @@ impl ShapeTables {
             style_map: std::collections::HashMap::new(),
             fonts: Vec::new(),
             font_map: std::collections::HashMap::new(),
+            border_fills: Vec::new(),
+            border_fill_map: std::collections::HashMap::new(),
             next_field_id: 0,
             file_text: String::new(),
         }
+    }
+
+    fn border_fill_id(
+        &mut self,
+        fill: CellFill,
+        borders: TableCellBorders,
+    ) -> Result<u32, EasyOfficeError> {
+        if fill.is_none() && borders.is_unspecified() {
+            return Ok(2);
+        }
+        if let Some(&id) = self.border_fill_map.get(&(fill, borders)) {
+            return Ok(id);
+        }
+        if self.border_fills.len() + 2 >= MAX_HWPX_BORDER_FILLS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "HWPX 테두리·배경 정의 수가 한도({MAX_HWPX_BORDER_FILLS})를 초과했습니다."
+            )));
+        }
+        self.border_fills.push((fill, borders));
+        let id = (self.border_fills.len() + 2) as u32;
+        self.border_fill_map.insert((fill, borders), id);
+        Ok(id)
     }
 
     /// Index (1-based, 0 is the default face) of a font name.
@@ -423,23 +451,39 @@ impl SectionWriter {
 
     fn table_paragraph(
         &mut self,
-        rows: &[Vec<String>],
-        spans: Option<&SpanMap>,
-        links: &[TableCellLink],
-        next_field_id: &mut u32,
-    ) {
-        let row_cnt = rows.len();
-        let col_cnt = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-        let cell_w =
+        table: &RichTable,
+        shapes: &mut ShapeTables,
+        media: &mut MediaParts,
+    ) -> Result<(), EasyOfficeError> {
+        let spans = table.span_map();
+        let links = table.validated_links();
+        let styles = table.validated_cell_styles();
+        let images = table.validated_cell_images();
+        let col_widths_hu: Option<Vec<u32>> = table.validated_col_widths().map(|widths| {
+            widths
+                .into_iter()
+                .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))
+                .collect()
+        });
+        let row_cnt = table.rows.len();
+        let col_cnt = table.column_count().max(1);
+        let default_cell_w =
             text_width(self.margins.as_ref(), self.paper.as_ref(), self.binding) / col_cnt as u32;
+        let total_w = col_widths_hu.as_ref().map_or_else(
+            || default_cell_w * col_cnt as u32,
+            |hu| hu.iter().copied().fold(0u32, u32::saturating_add),
+        );
+        let no_adjust = if col_widths_hu.is_some() { "1" } else { "0" };
         let tbl_id = self.next_table_id;
         self.next_table_id += 1;
         let mut link_cursor = 0usize;
+        let mut style_cursor = 0usize;
+        let mut img_cursor = 0usize;
         self.open_paragraph();
         self.xml.push_str("<hp:run charPrIDRef=\"0\">");
         self.xml.push_str(&format!(
             concat!(
-                "<hp:tbl id=\"{id}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"2\" noAdjust=\"0\">",
+                "<hp:tbl id=\"{id}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"2\" noAdjust=\"{no_adjust}\">",
                 "<hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>",
                 "<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>",
                 "<hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/>",
@@ -448,39 +492,74 @@ impl SectionWriter {
             id = tbl_id,
             rows = row_cnt,
             cols = col_cnt,
-            w = cell_w * col_cnt as u32,
+            no_adjust = no_adjust,
+            w = total_w,
             h = CELL_HEIGHT * row_cnt as u32
         ));
-        for (r_idx, row) in rows.iter().enumerate() {
+        for (r_idx, row) in table.rows.iter().enumerate() {
             self.xml.push_str("<hp:tr>");
             for (c_idx, cell) in row.iter().enumerate() {
-                let (row_span, col_span) =
-                    match spans.map_or(CellSpan::Plain, |m| m.at(r_idx, c_idx)) {
-                        CellSpan::Plain => (1, 1),
-                        CellSpan::Anchor { row_span, col_span } => (row_span, col_span),
-                        // The anchor's cell covers this position.
-                        CellSpan::Covered { .. } => continue,
-                    };
-                let cl = slice_cell_links(links, &mut link_cursor, r_idx, c_idx);
-                self.xml.push_str("<hp:tc name=\"\" header=\"0\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"2\">");
+                let (row_span, col_span) = match spans
+                    .as_ref()
+                    .map_or(CellSpan::Plain, |m| m.at(r_idx, c_idx))
+                {
+                    CellSpan::Plain => (1, 1),
+                    CellSpan::Anchor { row_span, col_span } => (row_span, col_span),
+                    // The anchor's cell covers this position.
+                    CellSpan::Covered { .. } => continue,
+                };
+                let cl = slice_cell_links(&links, &mut link_cursor, r_idx, c_idx);
+                let bf_id = match next_cell_style(&styles, &mut style_cursor, r_idx, c_idx) {
+                    Some((fill, borders)) => shapes.border_fill_id(fill, borders)?,
+                    None => 2,
+                };
+                let cell_imgs = slice_cell_images(&images, &mut img_cursor, r_idx, c_idx);
+                self.xml.push_str(&format!(
+                    "<hp:tc name=\"\" header=\"0\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{bf_id}\">"
+                ));
                 self.xml.push_str("<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">");
-                let mut line_start = 0usize;
-                for line in cell.split('\n') {
-                    let line_end = line_start + line.len();
+                if !cell.is_empty() || !cl.is_empty() || cell_imgs.is_empty() {
+                    let mut line_start = 0usize;
+                    for line in cell.split('\n') {
+                        let line_end = line_start + line.len();
+                        self.xml.push_str(&format!(
+                            "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
+                            self.next_para_id,
+                        ));
+                        self.next_para_id += 1;
+                        if cl.is_empty() {
+                            self.run(0, line);
+                        } else {
+                            self.write_table_line_runs(
+                                line,
+                                line_start,
+                                cl,
+                                &mut shapes.next_field_id,
+                            );
+                        }
+                        self.xml.push_str("</hp:p>");
+                        line_start = line_end + 1;
+                    }
+                }
+                for ci in cell_imgs {
+                    let picture = media.add(HWPX_MEDIA_DIR, &ci.image);
                     self.xml.push_str(&format!(
-                        "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
+                        "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">{}</hp:p>",
                         self.next_para_id,
+                        hwpx_picture_run(
+                            &ci.image,
+                            picture.ordinal,
+                            &format!("image{}", picture.part)
+                        ),
                     ));
                     self.next_para_id += 1;
-                    if cl.is_empty() {
-                        self.run(0, line);
-                    } else {
-                        self.write_table_line_runs(line, line_start, cl, next_field_id);
-                    }
-                    self.xml.push_str("</hp:p>");
-                    line_start = line_end + 1;
                 }
-                let cell_w_span = cell_w * col_span;
+                let cell_w_span = col_widths_hu
+                    .as_ref()
+                    .and_then(|hu| hu.get(c_idx..c_idx + col_span as usize))
+                    .map_or(default_cell_w * col_span, |s| {
+                        s.iter().copied().fold(0u32, u32::saturating_add)
+                    });
                 let cell_h_span = CELL_HEIGHT * row_span;
                 self.xml.push_str(&format!(
                     "</hp:subList><hp:cellAddr colAddr=\"{c_idx}\" rowAddr=\"{r_idx}\"/><hp:cellSpan colSpan=\"{col_span}\" rowSpan=\"{row_span}\"/><hp:cellSz width=\"{cell_w_span}\" height=\"{cell_h_span}\"/><hp:cellMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/></hp:tc>"
@@ -489,6 +568,7 @@ impl SectionWriter {
             self.xml.push_str("</hp:tr>");
         }
         self.xml.push_str("</hp:tbl></hp:run></hp:p>");
+        Ok(())
     }
 }
 
@@ -507,11 +587,14 @@ impl HwpxCodec {
 
     pub fn pack(payload: &HwpxPayload) -> Result<Vec<u8>, EasyOfficeError> {
         let mut sec = SectionWriter::new();
+        let mut shapes = ShapeTables::new();
+        let mut media = MediaParts::new();
         for p in &payload.paragraphs {
             sec.text_paragraph(p);
         }
         for tbl in &payload.tables {
-            sec.table_paragraph(tbl, None, &[], &mut 0);
+            let rich = RichTable::new(tbl.clone());
+            sec.table_paragraph(&rich, &mut shapes, &mut media)?;
         }
         Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::new())
     }
@@ -584,13 +667,7 @@ impl HwpxCodec {
                     shapes.write_paragraph(&mut sec, p, ordered_id);
                 }
                 RichBlock::Table(table) => {
-                    let validated = table.validated_links();
-                    sec.table_paragraph(
-                        &table.rows,
-                        table.span_map().as_ref(),
-                        &validated,
-                        &mut shapes.next_field_id,
-                    );
+                    sec.table_paragraph(table, &mut shapes, &mut media)?;
                 }
                 RichBlock::Image(img) => {
                     let picture = media.add(HWPX_MEDIA_DIR, img);
@@ -598,12 +675,13 @@ impl HwpxCodec {
                 }
             }
         }
-        let header = header_xml_with_lists(
+        let header = header_xml_with_all(
             &shapes.char_shapes,
             &shapes.para_shapes,
             &shapes.styles,
             &shapes.fonts,
             Some(&numberings_xml),
+            &shapes.border_fills,
         );
         let meta = HwpxPayload {
             title: doc.display_title(),

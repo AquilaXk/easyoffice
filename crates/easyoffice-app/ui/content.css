@@ -538,3 +538,8 @@
   #doc-editor [data-eo-pg~="m"] { margin-top: var(--pg-mt, 0px) !important; }
   #doc-editor [data-eo-pg~="b"]::before { content: ""; float: left; width: 100%; height: var(--pg-fh, 0px); shape-outside: var(--pg-shape, none); }
 }
+
+#doc-editor .doc-inline-table td .doc-inline-image,
+#doc-editor .doc-inline-table th .doc-inline-image {
+  margin: 2px 0;
+}

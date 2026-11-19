@@ -37,7 +37,7 @@
     const bar = document.querySelector(".studio-menubar");
     if (!bar) return kind;
     for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds]")]) {
-      el.hidden = !el.dataset.kinds.split(" ").includes(kind);
+      el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled);
     }
     for (const menu of bar.querySelectorAll(":scope > .menu-item")) {
       if (menu.hidden) menu.classList.remove("open");

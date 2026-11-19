@@ -273,6 +273,79 @@
   }
 
   const TABLE_SECTION_TAGS = new Set(["THEAD", "TBODY", "TFOOT"]);
+  const BORDER_SIDE_NAMES = ["top", "right", "bottom", "left"];
+  const BORDER_LINE_KINDS = new Set(["thin", "thick", "dashed", "dotted", "double"]);
+  const CELL_HEX6_RE = /^#?([0-9a-fA-F]{6})$/;
+
+  function readCellStyleEntry(cell, row, col) {
+    const data = cell.dataset || {};
+    const fillMatch = CELL_HEX6_RE.exec(String(data.eoFill || "").trim());
+    const fill = fillMatch ? fillMatch[1].toUpperCase() : "";
+    const borders = {};
+    if (data.eoBorders) {
+      const slots = String(data.eoBorders).split(",");
+      BORDER_SIDE_NAMES.forEach((side, idx) => {
+        const raw = String(slots[idx] || "").trim();
+        if (!raw || raw === "-") return;
+        if (raw === "none") {
+          borders[side] = "none";
+          return;
+        }
+        const [kindRaw, colorRaw] = raw.split(":");
+        const kind = String(kindRaw || "").toLowerCase();
+        const cm = CELL_HEX6_RE.exec(String(colorRaw || "").trim());
+        if (BORDER_LINE_KINDS.has(kind) && cm) borders[side] = kind + ":" + cm[1].toUpperCase();
+      });
+    }
+    const hasBorders = Object.keys(borders).length > 0;
+    if (!fill && !hasBorders) return null;
+    const entry = { row, col };
+    if (fill) entry.fill = fill;
+    if (hasBorders) entry.borders = borders;
+    return entry;
+  }
+
+  function readCellImagesIn(cell, row, col) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__;
+    if (!utils || typeof cell.querySelectorAll !== "function") return [];
+    const out = [];
+    for (const img of cell.querySelectorAll("img[data-eo-image-id]")) {
+      const data = img.dataset || {};
+      const stored = utils.getDocImage(data.eoImageId);
+      if (!stored) continue;
+      const entry = { row, col, format: stored.format, base64: stored.base64, alt: String(data.eoImageAlt ?? "") };
+      const w = Number(data.eoImageWidthEmu);
+      const h = Number(data.eoImageHeightEmu);
+      if (w > 0 && h > 0) Object.assign(entry, { widthEmu: w, heightEmu: h });
+      out.push(entry);
+    }
+    return out;
+  }
+
+  function readColWidthsTwips(table, colCount) {
+    if (colCount <= 0 || !table.children) return [];
+    let cg = null;
+    for (let i = 0; i < table.children.length; i += 1) {
+      if ((table.children[i].tagName || "").toUpperCase() === "COLGROUP") {
+        cg = table.children[i];
+        break;
+      }
+    }
+    if (!cg || !cg.children) return [];
+    const raw = [];
+    for (let i = 0; i < cg.children.length; i += 1) {
+      const col = cg.children[i];
+      if ((col.tagName || "").toUpperCase() !== "COL") continue;
+      const stored = Math.round(Number(col.dataset?.eoColTwips) || 0);
+      const fromStyle = pxValue(col.style?.width);
+      const twips = stored > 0 ? stored : fromStyle !== null && fromStyle > 0 ? Math.round(fromStyle * TWIPS_PER_PX) : 0;
+      if (twips > 0) raw.push(twips);
+    }
+    if (raw.length === 0) return [];
+    const out = raw.slice(0, colCount);
+    while (out.length < colCount) out.push(out.at(-1) || 2160);
+    return out;
+  }
 
   function collectTableRows(table) {
     const trs = [];
@@ -330,6 +403,8 @@
     const texts = trs.map(() => []);
     const merges = [];
     const rawLinks = [];
+    const rawStyles = [];
+    const rawImages = [];
     trs.forEach((tr, r) => {
       let col = 0;
       const cells = tr.children;
@@ -350,6 +425,9 @@
         const { text, links } = readCellContent(cell);
         texts[r][col] = text;
         links.forEach((l) => rawLinks.push({ row: r, col, start: l.start, end: l.end, url: l.url }));
+        const styleEntry = readCellStyleEntry(cell, r, col);
+        if (styleEntry) rawStyles.push(styleEntry);
+        readCellImagesIn(cell, r, col).forEach((im) => rawImages.push(im));
         if (rowSpan * colSpan > 1) merges.push({ row: r, col, rowSpan, colSpan });
         col += colSpan;
       }
@@ -363,17 +441,29 @@
     const links = rawLinks
       .filter((l) => rows[l.row]?.length > 0)
       .map((l) => ({ ...l, row: before[l.row] }));
-    return { texts: rows.filter((row) => row.length > 0), merges: regions, links };
+    const cellStyles = rawStyles
+      .filter((s) => rows[s.row]?.length > 0)
+      .map((s) => ({ ...s, row: before[s.row] }));
+    const cellImages = rawImages
+      .filter((im) => rows[im.row]?.length > 0)
+      .map((im) => ({ ...im, row: before[im.row] }));
+    const keptRows = rows.filter((row) => row.length > 0);
+    const colCount = keptRows.reduce((m, row) => Math.max(m, row.length), 0);
+    const colWidthsTwips = readColWidthsTwips(table, colCount);
+    return { texts: keptRows, merges: regions, links, colWidthsTwips, cellStyles, cellImages };
   }
 
   function buildTableBlock(table) {
-    const { texts, merges, links } = readTableGrid(table);
+    const { texts, merges, links, colWidthsTwips, cellStyles, cellImages } = readTableGrid(table);
     const values = evaluateDocTableFormulas(texts);
     const rows = texts.map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })));
     const keptLinks = links.filter((l) => values[l.row]?.[l.col] === null);
     const block = { type: "table", rows };
     if (merges.length > 0) block.merges = merges;
     if (keptLinks.length > 0) block.links = keptLinks;
+    if (colWidthsTwips.length > 0) block.colWidthsTwips = colWidthsTwips;
+    if (cellStyles.length > 0) block.cellStyles = cellStyles;
+    if (cellImages.length > 0) block.cellImages = cellImages;
     return block;
   }
 

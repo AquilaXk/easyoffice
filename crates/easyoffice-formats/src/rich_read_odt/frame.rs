@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use super::table::OdtTableStylesMap;
 use super::{length_twips, OdtWalker, StyleProps};
 use crate::rich_document::{
     frame_paragraph, RichColumns, RichListNumber, RichNumberEnclosure, RichNumberFormat,
@@ -241,6 +242,7 @@ pub(super) fn read_page_frame(
     warnings: &mut Vec<String>,
 ) -> Result<(RichPageFrame, Option<RichColumns>), EasyOfficeError> {
     let mut frame = RichPageFrame::default();
+    let empty_table_styles = OdtTableStylesMap::default();
     let mut reader = XmlReader::new(xml);
     let (mut masters, mut other_masters) = (0usize, false);
     let mut open: Option<(&'static str, OdtWalker<'_>)> = None;
@@ -292,7 +294,7 @@ pub(super) fn read_page_frame(
                         "first_footer"
                     }
                 };
-                let mut walker = OdtWalker::new(styles, list_styles);
+                let mut walker = OdtWalker::new(styles, list_styles, &empty_table_styles);
                 walker.frame_mode = true;
                 region = None;
                 open = Some((slot, walker));

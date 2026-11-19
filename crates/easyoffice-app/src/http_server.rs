@@ -121,7 +121,7 @@ pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
 /// the `default-src` fallback (`frame-src` -> `child-src` -> `default-src`), so the editor frame
 /// needs no relaxation here; only `/hwp-studio/*` gets its own policy (`hwp_bundle::STUDIO_CSP`).
 const MAIN_CSP: &str =
-    "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
+    "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
 
 fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
     write_http_bytes(stream, status, content_type, MAIN_CSP, "", body.as_bytes());

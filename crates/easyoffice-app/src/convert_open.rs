@@ -10,10 +10,10 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle,
-    DecodedContent, DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions,
-    RichAlignment, RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript,
-    RichToc, SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
+    evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle, DecodedContent,
+    DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
+    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichToc,
+    SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -21,6 +21,7 @@ use std::fmt::Write;
 
 use crate::convert_hwp::ShellWriters;
 use crate::convert_password::{accepts_loss, password_lost, REFUSED_PASSWORD_LOSS};
+use crate::convert_structured::convert_structured_table::{write_image_fields, write_table_extras};
 use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::page_setup_json::write_page_setup;
@@ -175,16 +176,8 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
 
 /// Picture block of the editor model: the encoded bytes travel as base64 and come back unchanged.
 fn write_image(out: &mut String, img: &RichImage) {
-    let (width_emu, height_emu) = img.display_emu();
-    let _ = write!(
-        out,
-        "{{\"type\":\"image\",\"format\":\"{}\",\"base64\":\"{}\",\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":",
-        img.format().extension(),
-        base64_codec::encode(img.bytes()),
-        img.width_px(),
-        img.height_px(),
-    );
-    push_json_str(out, img.alt());
+    out.push_str("{\"type\":\"image\",");
+    write_image_fields(out, img);
     out.push('}');
 }
 
@@ -252,6 +245,7 @@ fn write_block(out: &mut String, b: &RichBlock) {
             out.push(']');
             write_merges(out, &table.merges);
             write_table_links(out, &table.links);
+            write_table_extras(out, table);
             out.push('}');
         }
     }

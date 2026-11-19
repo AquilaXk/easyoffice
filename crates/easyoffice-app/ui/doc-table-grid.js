@@ -90,6 +90,79 @@
     return { changed: true, cell: tr.firstChild ?? cell };
   }
 
+  const TWIPS_PER_PX = 15;
+  const MIN_COL_PX = 24;
+  const DEFAULT_COL_TWIPS = 2160;
+  const findColgroup = (table) => Array.from(table.children || []).find((el) => tagOf(el) === "COLGROUP") ?? null;
+  const colsOf = (cg) => (cg ? Array.from(cg.children || []).filter((el) => tagOf(el) === "COL") : []);
+
+  function syncTableWidthFromCols(table) {
+    const cols = colsOf(findColgroup(table));
+    if (cols.length === 0) return;
+    let sumPx = 0;
+    for (const col of cols) {
+      const twips = Math.max(TWIPS_PER_PX, Math.round(Number(col.dataset.eoColTwips) || DEFAULT_COL_TWIPS));
+      const px = Math.max(1, Math.round(twips / TWIPS_PER_PX));
+      col.dataset.eoColTwips = String(twips);
+      col.style.width = px + "px";
+      sumPx += px;
+    }
+    table.style.tableLayout = "fixed";
+    table.style.width = sumPx + "px";
+  }
+
+  function measureDefaultColTwips(table, layout) {
+    const count = Math.max(1, layout.width);
+    const tablePx = Number(table.getBoundingClientRect?.()?.width) || 600;
+    const measured = new Array(count).fill(0);
+    for (const [cell, pos] of layout.at) {
+      if (pos.colSpan === 1 && !measured[pos.col]) measured[pos.col] = Number(cell.getBoundingClientRect?.()?.width) || 0;
+    }
+    const realistic = measured.every((w) => w > 0) && Math.abs(measured.reduce((a, b) => a + b, 0) - tablePx) <= count * 8;
+    const fallbackPx = Math.max(MIN_COL_PX, Math.round(tablePx / count));
+    return measured.map((w) => Math.max(MIN_COL_PX * TWIPS_PER_PX, Math.round(realistic ? w : fallbackPx) * TWIPS_PER_PX));
+  }
+
+  function ensureColgroup(table, layout) {
+    const doc = table.ownerDocument;
+    const cg = findColgroup(table) ?? table.insertBefore(doc.createElement("colgroup"), table.firstChild ?? null);
+    const existing = colsOf(cg);
+    const defaults = measureDefaultColTwips(table, layout);
+    while (existing.length < layout.width) {
+      const col = doc.createElement("col");
+      col.dataset.eoColTwips = String(defaults[existing.length] ?? DEFAULT_COL_TWIPS);
+      cg.appendChild(col);
+      existing.push(col);
+    }
+    while (existing.length > layout.width) existing.pop().remove();
+    syncTableWidthFromCols(table);
+    return existing;
+  }
+
+  function syncColgroupOnInsert(table, line, refCol) {
+    const cg = findColgroup(table);
+    const cols = colsOf(cg);
+    if (cols.length === 0) return;
+    const freshCol = table.ownerDocument.createElement("col");
+    freshCol.dataset.eoColTwips = String(Number(cols[Math.min(refCol, cols.length - 1)]?.dataset?.eoColTwips) || DEFAULT_COL_TWIPS);
+    cg.insertBefore(freshCol, cols[line] ?? null);
+    syncTableWidthFromCols(table);
+  }
+
+  function syncColgroupOnDelete(table, left, right) {
+    const cg = findColgroup(table);
+    const cols = colsOf(cg);
+    if (!cg) return;
+    for (let c = Math.min(right, cols.length - 1); c >= left && c >= 0; c -= 1) cols[c]?.remove();
+    if (colsOf(cg).length === 0) {
+      cg.remove();
+      table.style.tableLayout = "";
+      table.style.width = "";
+      return;
+    }
+    syncTableWidthFromCols(table);
+  }
+
   function insertColumn(table, cell, left) {
     const layout = layoutOf(table);
     const pos = layout.at.get(cell);
@@ -112,6 +185,7 @@
       placeCell(layout, tr, fresh, line);
       if (row === pos.row) made = fresh;
     });
+    syncColgroupOnInsert(table, line, pos.col);
     return { changed: true, cell: made ?? cell };
   }
 
@@ -153,6 +227,7 @@
       if (overlap >= pos.colSpan) cell.remove();
       else cell.colSpan = pos.colSpan - overlap;
     }
+    syncColgroupOnDelete(table, left, right);
     const after = layoutOf(table);
     return { changed: true, cell: after.slots[row][Math.min(left, after.slots[row].length - 1)] };
   }
@@ -328,7 +403,24 @@
     return null;
   }
 
+  function equalizeColumns(table, from, to) {
+    const layout = layoutOf(table);
+    const rect = rectOf(layout, from, to);
+    if (!rect || layout.width < 2) return { changed: false };
+    const c1 = rect.left === rect.right ? 0 : rect.left;
+    const c2 = rect.left === rect.right ? layout.width - 1 : rect.right;
+    if (c2 <= c1) return { changed: false };
+    const cols = ensureColgroup(table, layout);
+    let sum = 0;
+    for (let c = c1; c <= c2; c += 1) sum += Number(cols[c].dataset.eoColTwips) || DEFAULT_COL_TWIPS;
+    const each = Math.max(MIN_COL_PX * TWIPS_PER_PX, Math.round(sum / (c2 - c1 + 1)));
+    for (let c = c1; c <= c2; c += 1) cols[c].dataset.eoColTwips = String(each);
+    syncTableWidthFromCols(table);
+    return { changed: true, cell: from };
+  }
+
   host.__EASYOFFICE_DOC_TABLE_GRID__ = {
     layoutOf, rectOf, insertRow, insertColumn, deleteRows, deleteColumns, mergeCells, splitCell, blockSum, cellIn, tableAt,
+    findColgroup, colsOf, syncTableWidthFromCols, measureDefaultColTwips, ensureColgroup, equalizeColumns,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

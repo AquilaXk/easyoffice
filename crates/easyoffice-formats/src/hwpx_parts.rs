@@ -5,9 +5,12 @@
 //! style (`style id="0"`) plus optional heading styles; every paragraph and run in
 //! `section0.xml` refers to these IDs.
 
+use crate::rich_table_style::{CellFill, TableBorderEdge, TableBorderKind, TableCellBorders};
 use crate::{
     RichBinding, RichBindingKind, RichColumns, RichPageMargins, RichPaper, RichScript, XmlSanitizer,
 };
+
+pub(crate) const MAX_HWPX_BORDER_FILLS: usize = 4_096;
 
 pub(crate) const NS_HEAD: &str = "http://www.owpml.org/owpml/2011/head";
 pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
@@ -71,6 +74,49 @@ fn border_fill(id: u32, line_type: &str) -> String {
     xml.push_str(
         "<hh:diagonal type=\"SOLID\" width=\"0.1 mm\" color=\"#000000\"/></hh:borderFill>",
     );
+    xml
+}
+
+fn push_border_edge_xml(xml: &mut String, side: &str, edge: TableBorderEdge) {
+    let (line_type, width, colored) = match edge.kind() {
+        TableBorderKind::Unspecified => ("SOLID", "0.12 mm", false),
+        TableBorderKind::None => ("NONE", "0.12 mm", false),
+        TableBorderKind::Thin => ("SOLID", "0.12 mm", true),
+        TableBorderKind::Thick => ("SOLID", "0.4 mm", true),
+        TableBorderKind::Dashed => ("DASH", "0.15 mm", true),
+        TableBorderKind::Dotted => ("DOT", "0.15 mm", true),
+        TableBorderKind::Double => ("DOUBLE_SLIM", "0.4 mm", true),
+    };
+    xml.push_str("<hh:");
+    xml.push_str(side);
+    xml.push_str(" type=\"");
+    xml.push_str(line_type);
+    xml.push_str("\" width=\"");
+    xml.push_str(width);
+    xml.push_str("\" color=\"#");
+    if colored {
+        edge.write_hex(xml);
+    } else {
+        xml.push_str("000000");
+    }
+    xml.push_str("\"/>");
+}
+
+fn custom_border_fill_xml(id: usize, fill: CellFill, borders: TableCellBorders) -> String {
+    let mut xml = format!(
+        "<hh:borderFill id=\"{id}\" threeD=\"0\" shadow=\"0\" centerLine=\"NONE\" breakCellSeparateLine=\"0\"><hh:slash type=\"NONE\" Crooked=\"0\" isCounter=\"0\"/><hh:backSlash type=\"NONE\" Crooked=\"0\" isCounter=\"0\"/>"
+    );
+    push_border_edge_xml(&mut xml, "leftBorder", borders.left);
+    push_border_edge_xml(&mut xml, "rightBorder", borders.right);
+    push_border_edge_xml(&mut xml, "topBorder", borders.top);
+    push_border_edge_xml(&mut xml, "bottomBorder", borders.bottom);
+    xml.push_str("<hh:diagonal type=\"SOLID\" width=\"0.1 mm\" color=\"#000000\"/>");
+    if !fill.is_none() {
+        xml.push_str("<hc:fillBrush><hc:winBrush faceColor=\"#");
+        fill.write_hex(&mut xml);
+        xml.push_str("\" hatchColor=\"#999999\" alpha=\"0\"/></hc:fillBrush>");
+    }
+    xml.push_str("</hh:borderFill>");
     xml
 }
 
@@ -246,12 +292,31 @@ pub(crate) fn header_xml_with(
 }
 
 /// [`header_xml_with`] with explicit `hh:numberings` XML when `numberings_xml` is `Some`.
+#[allow(dead_code)]
 pub(crate) fn header_xml_with_lists(
     char_shapes: &[HwpxCharShape],
     para_shapes: &[HwpxParaShape],
     extra_styles: &[HwpxStyle],
     extra_fonts: &[String],
     numberings_xml: Option<&str>,
+) -> String {
+    header_xml_with_all(
+        char_shapes,
+        para_shapes,
+        extra_styles,
+        extra_fonts,
+        numberings_xml,
+        &[],
+    )
+}
+
+pub(crate) fn header_xml_with_all(
+    char_shapes: &[HwpxCharShape],
+    para_shapes: &[HwpxParaShape],
+    extra_styles: &[HwpxStyle],
+    extra_fonts: &[String],
+    numberings_xml: Option<&str>,
+    extra_border_fills: &[(CellFill, TableCellBorders)],
 ) -> String {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hh:head xmlns:hh=\"{NS_HEAD}\" xmlns:hc=\"{NS_CORE}\" version=\"1.4\" secCnt=\"1\">"
@@ -280,9 +345,15 @@ pub(crate) fn header_xml_with_lists(
     }
     xml.push_str("</hh:fontfaces>");
 
-    xml.push_str("<hh:borderFills itemCnt=\"2\">");
+    xml.push_str(&format!(
+        "<hh:borderFills itemCnt=\"{}\">",
+        2 + extra_border_fills.len()
+    ));
     xml.push_str(&border_fill(1, "NONE"));
     xml.push_str(&border_fill(2, "SOLID"));
+    for (idx, &(fill, borders)) in extra_border_fills.iter().enumerate() {
+        xml.push_str(&custom_border_fill_xml(idx + 3, fill, borders));
+    }
     xml.push_str("</hh:borderFills>");
 
     xml.push_str(&format!(

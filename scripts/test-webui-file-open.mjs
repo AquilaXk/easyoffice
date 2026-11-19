@@ -123,7 +123,9 @@ test("Ctrl+O is in the single shortcut table, labelled in the File menu, and ope
 test("the hidden input accepts exactly the supported extensions", async () => {
   const { sandbox } = await createOpenHarness();
   const exts = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__.SUPPORTED_EXTENSIONS;
-  const inputs = [...INDEX_HTML.matchAll(/accept="([^"]+)"/g)].map((m) => m[1]);
+  const allInputs = [...INDEX_HTML.matchAll(/<input\b[^>]*\bid="([^"]+)"[^>]*\baccept="([^"]+)"/g)];
+  assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "conv-source-file"]);
+  const inputs = allInputs.filter((m) => m[1] !== "doc-image-input").map((m) => m[2]);
   assert.equal(inputs.length, 2, "workspace picker and converter picker");
   for (const accept of inputs) {
     const byName = (a, b) => a.localeCompare(b);

@@ -66,6 +66,7 @@ mod rich_rtf_table;
 mod rich_rtf_writer;
 mod rich_run_writers;
 mod rich_table;
+mod rich_table_style;
 mod rich_table_writers;
 mod rich_toc_writers;
 mod rich_writers;
@@ -116,13 +117,17 @@ pub use rich_document::{
     MAX_PAGE_MARGIN_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
-    RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,
-    MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,
+    check_document_images, ImageBudget, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES,
+    MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,
 };
 pub use rich_image_probe::RichImageFormat;
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
+};
+pub use rich_table_style::{
+    CellFill, TableBorderEdge, TableBorderKind, TableCellBorders, TableCellImage,
+    TableCellStyleEntry, MAX_COL_WIDTH_TWIPS, MAX_STYLED_TABLE_CELLS, MIN_COL_WIDTH_TWIPS,
 };
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
