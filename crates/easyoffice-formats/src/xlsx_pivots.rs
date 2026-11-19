@@ -10,8 +10,9 @@ use crate::sheet_styling::sheet_chart::{parse_sheet_and_box, SheetCellIndex};
 use crate::sheet_styling::sheet_pivot::{
     resolve_pivot_source, validate_workbook_pivots, CacheCell, PivotAggKind, PivotFilterCriteria,
     PivotSlicer, PivotValueField, SharedItemsCol, SheetPivotTable, MAX_PIVOTS_PER_SHEET,
-    MAX_PIVOT_AXIS_FIELDS, MAX_PIVOT_FILTERS, MAX_PIVOT_FILTER_VALUES, MAX_PIVOT_SLICERS,
-    MAX_PIVOT_TEXT_BYTES, MAX_PIVOT_VALUE_FIELDS, MAX_WORKBOOK_PIVOTS,
+    MAX_PIVOT_AXIS_FIELDS, MAX_PIVOT_FIELD_NAMES_BYTES, MAX_PIVOT_FILTERS, MAX_PIVOT_FILTER_VALUES,
+    MAX_PIVOT_SLICERS, MAX_PIVOT_TEXT_BYTES, MAX_PIVOT_VALUE_FIELDS, MAX_WORKBOOK_PIVOTS,
+    MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES,
 };
 use crate::sheet_styling::xlsx_parts::resolve_zip_target;
 use crate::sheet_styling::xlsx_slicers::{MAX_SLICER_DIM_PX, MAX_SLICER_POS_PX, MIN_SLICER_DIM_PX};
@@ -497,6 +498,7 @@ fn parse_cache_definition(xml: &str) -> ParseOutcome<ParsedCacheDef> {
     let mut reader = XmlReader::with_budget(xml, MAX_PIVOT_XML_EVENTS);
     let mut def = ParsedCacheDef::default();
     let mut saw_root = false;
+    let mut field_name_bytes = 0usize;
     loop {
         let ev = match reader.next_event() {
             Ok(Some(e)) => e,
@@ -547,6 +549,12 @@ fn parse_cache_definition(xml: &str) -> ParseOutcome<ParsedCacheDef> {
                     if fname.len() > MAX_PIVOT_TEXT_BYTES {
                         return ParseOutcome::Budget(budget_err(
                             "피벗 캐시 필드 이름이 길이 상한을 초과했습니다.",
+                        ));
+                    }
+                    field_name_bytes += fname.len();
+                    if field_name_bytes > MAX_PIVOT_FIELD_NAMES_BYTES {
+                        return ParseOutcome::Budget(budget_err(
+                            "피벗 캐시 필드 이름 총 길이가 상한을 초과했습니다.",
                         ));
                     }
                     def.field_names.push(fname.into_owned());
@@ -818,6 +826,7 @@ pub(crate) fn read_workbook_pivots(
         .collect();
 
     let mut workbook_total = 0usize;
+    let mut workbook_field_name_bytes = 0usize;
     for (s_idx, &part_path) in sheet_part_paths.iter().enumerate() {
         let rels = rels_of_part(entries, part_path, PIVOT_TABLE_REL);
         if rels.is_empty() {
@@ -895,6 +904,18 @@ pub(crate) fn read_workbook_pivots(
                 pt.source_table = cache_def.source_table;
             }
             pt.field_names = cache_def.field_names;
+            if !pt.source_range.is_empty()
+                && pt.field_names.len() > pt.known_source_width() as usize
+            {
+                rejected = rejected.saturating_add(1);
+                continue;
+            }
+            workbook_field_name_bytes += pt.field_name_bytes();
+            if workbook_field_name_bytes > MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES {
+                return Err(budget_err(format!(
+                    "통합 문서 전체 피벗 필드 이름 총 길이가 상한({MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES}B)을 초과했습니다."
+                )));
+            }
             for vf in &mut pt.value_fields {
                 if vf.name.trim().is_empty() {
                     vf.name = pt

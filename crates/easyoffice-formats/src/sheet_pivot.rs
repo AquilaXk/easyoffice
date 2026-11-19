@@ -20,6 +20,10 @@ pub const MAX_PIVOT_VALUE_FIELDS: usize = 16;
 pub const MAX_PIVOT_SLICERS: usize = 32;
 pub const MAX_PIVOT_FILTER_VALUES: usize = 2_000;
 pub const MAX_PIVOT_TEXT_BYTES: usize = 512;
+/// 캐시 정의 하나(또는 피벗 하나)가 가질 수 있는 필드 이름 바이트 합(PD-262).
+pub(crate) const MAX_PIVOT_FIELD_NAMES_BYTES: usize = 256 * 1024;
+/// 통합 문서 전체 피벗이 복제해 들고 있는 필드 이름 바이트 합(PD-262).
+pub(crate) const MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_PIVOT_FILTERS: usize = 64;
 
 /// Aggregation function of a pivot value field.
@@ -197,6 +201,11 @@ impl SheetPivotTable {
         self.field_names.len() as u32
     }
 
+    /// Sum of the field-name bytes this pivot owns (each pivot holds its own copy).
+    pub(crate) fn field_name_bytes(&self) -> usize {
+        self.field_names.iter().map(String::len).sum()
+    }
+
     pub fn check_budgets(&self) -> Result<(), EasyOfficeError> {
         check_text_len("name", &self.name)?;
         check_text_len("sourceSheet", &self.source_sheet)?;
@@ -256,6 +265,11 @@ impl SheetPivotTable {
         }
         for fname in &self.field_names {
             check_text_len("fieldName", fname)?;
+        }
+        if self.field_name_bytes() > MAX_PIVOT_FIELD_NAMES_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "피벗 필드 이름 총 길이가 허용 상한({MAX_PIVOT_FIELD_NAMES_BYTES}B)을 초과했습니다."
+            )));
         }
 
         let has_range = !self.source_range.trim().is_empty();
