@@ -35,6 +35,7 @@ fn docx_with_repeated_picture_of(png: &[u8], references: usize) -> Vec<u8> {
             RichImage::new(png.to_vec(), "그림").unwrap(),
         )],
         official_agency: None,
+        ..RichDocument::default()
     };
     let docx = UniversalFormatConverter::encode_rich(&single, DocumentFormat::Docx, None).unwrap();
     let entries = ZipArchiveCodec::unpack(&docx, &ZipSecurityPolicy::default()).unwrap();

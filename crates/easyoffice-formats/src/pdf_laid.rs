@@ -183,6 +183,9 @@ impl Canvas {
 fn frame_text(p: &RichParagraph, number: usize, total: usize, title: &str) -> String {
     let mut out = String::new();
     for run in &p.runs {
+        if crate::rich_notes::is_deleted_run(run) {
+            continue;
+        }
         match run.field {
             Some(RichField::PageNumber) => {
                 let _ = write!(out, "{number}");

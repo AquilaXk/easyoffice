@@ -162,20 +162,44 @@
     return scriptTag ? elSpec(scriptTag, [spec]) : spec;
   }
 
-  function runSpecs(runs) {
+  function runSpecs(runs, noteSeq) {
     const out = [];
+    const wire = host.__EASYOFFICE_DOC_NOTES_WIRE__;
+    const pushPiece = wire ? wire.pushWrappedPiece : (target, piece) => target.push(piece);
     (runs || []).forEach((run) => {
+      const cidNum = Number(run?.commentId);
+      const cid = Number.isInteger(cidNum) && cidNum >= 1 ? String(cidNum) : "";
+      const rev = wire ? wire.normalizeDecodedRev(run?.revision) : null;
       if (Object.hasOwn(FIELD_MARKS, run.field)) {
-        out.push(formatSpec(fieldSpec(FIELD_MARKS[run.field]), run));
+        pushPiece(out, formatSpec(fieldSpec(FIELD_MARKS[run.field]), run), cid, rev);
         return;
       }
-      const lines = String(run.text ?? "").split("\n");
+      const nr = run?.noteRef;
+      if (nr && (nr.kind === "footnote" || nr.kind === "endnote") && Number.isInteger(Number(nr.id)) && Number(nr.id) >= 1) {
+        const seq = noteSeq ? ((noteSeq[nr.kind] = (noteSeq[nr.kind] || 0) + 1)) : 1;
+        const sup = {
+          ...elSpec("sup", [textSpec(seq + ")")], {}, { class: "eo-note-ref", contenteditable: "false" }),
+          data: { eoNoteKind: nr.kind, eoNoteId: String(Number(nr.id)) },
+        };
+        pushPiece(out, sup, cid, rev);
+        return;
+      }
+      const rawText = String(run.text ?? "");
+      if (rawText === "" && cid) {
+        const pt = {
+          ...elSpec("span", [], {}, { class: "eo-comment-range eo-comment-point", contenteditable: "false" }),
+          data: { eoCommentId: cid },
+        };
+        pushPiece(out, pt, "", rev);
+        return;
+      }
+      const lines = rawText.split("\n");
       lines.forEach((line, idx) => {
-        if (idx > 0) out.push(elSpec("br"));
+        if (idx > 0) pushPiece(out, elSpec("br"), cid, rev);
         if (!line) return;
         const styled = formatSpec(textSpec(line), run);
         const href = host.__EASYOFFICE_DOC_LINK__?.normalizeUrl(run.link);
-        out.push(href ? { ...elSpec("a", [styled], {}, { href }), data: { eoLink: "1" } } : styled);
+        pushPiece(out, href ? { ...elSpec("a", [styled], {}, { href }), data: { eoLink: "1" } } : styled, cid, rev);
       });
     });
     return out;
@@ -345,6 +369,7 @@
 
   function buildEditorNodes(blocks) {
     const nodes = [];
+    const noteSeq = { footnote: 0, endnote: 0 };
     let openList = null;
     let openToc = null;
     (blocks || []).forEach((block) => {
@@ -369,7 +394,7 @@
         return;
       }
       const style = block.align ? { textAlign: block.align } : {};
-      const inline = runSpecs(block.runs);
+      const inline = runSpecs(block.runs, noteSeq);
       const heading = Number(block.heading) || 0;
       if (heading >= 1 && heading <= 6) {
         openList = null;
@@ -432,6 +457,8 @@
         return { ...elSpec("section", children, {}, { class: "eo-page-frame" }), data: { eoHf: kind, eoHfZones: "true" } };
       });
   }
+
+  const annotationSectionSpecs = (res) => host.__EASYOFFICE_DOC_NOTES_WIRE__?.annotationSectionSpecs(res) ?? [];
 
   // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.
   function columnWidthMap(columns) {
@@ -574,13 +601,14 @@
           ? String(firstCount)
           : "";
         next.docTabs[mod] = {
-          editorNodes: [...buildEditorNodes(res.blocks), ...pageFrameNodes(res)],
+          editorNodes: [...buildEditorNodes(res.blocks), ...annotationSectionSpecs(res), ...pageFrameNodes(res)],
           // The page setup is the file's own (`doc-page-setup.js`): a file without one does not take the last document's.
           layoutStyle: {
             ...(next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" }),
             columnCount: uniformCols,
             eoFirstPage: res.firstPageDifferent ? "true" : "",
             eoEvenOdd: res.evenOddDifferent ? "true" : "",
+            eoTrackChanges: res.trackChanges === true ? "true" : "",
             ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup)),
           },
         };

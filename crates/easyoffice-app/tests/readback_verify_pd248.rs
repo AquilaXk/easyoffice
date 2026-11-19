@@ -319,6 +319,7 @@ fn document_pages_and_hwpx_readback_extract_outline_equations_tables_and_integri
             }),
             ..RichPageFrame::default()
         },
+        ..RichDocument::default()
     };
 
     for fmt in [

@@ -3,6 +3,10 @@
 //! (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text); RTF lives in `rich_rtf_writer.rs`. User text
 //! is always escaped for the target syntax and never parsed.
 
+use crate::docx_notes_writer::{
+    build_docx_note_parts, push_docx_paragraph_runs, push_docx_text_tagged,
+};
+use crate::odt_notes_writer::{push_odt_paragraph_runs, OdtNotesContext};
 use crate::pdf_highlight::HighlightPass;
 use crate::pdf_image::pdf_image_object;
 use crate::pdf_writer::{
@@ -18,20 +22,17 @@ use crate::rich_image_writers::{
     docx_content_types, docx_image_paragraph, docx_image_relationship, emu_to_points, MediaParts,
     DOCX_PICTURE_NAMESPACES,
 };
-use crate::rich_link_writers::{
-    docx_linked_run_properties, link_groups, DocxLinks, DOCX_LINK_STYLE_XML,
-};
+use crate::rich_link_writers::{DocxLinks, DOCX_LINK_STYLE_XML};
 use crate::rich_list_writers::{
     docx_num_pr, docx_numbering_xml, has_docx_numbering, list_kind_of, plan_lists,
 };
 pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
+use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
-    docx_cols_xml, docx_field_run, docx_frame_parts_and_refs, docx_page_margins, docx_paper,
-    docx_settings, odt_field, DOCX_SETTINGS_PART,
+    docx_cols_xml, docx_frame_parts_and_refs, docx_page_margins, docx_paper, docx_settings,
+    DOCX_SETTINGS_PART,
 };
-use crate::rich_run_writers::{
-    docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
-};
+use crate::rich_run_writers::OdtTextKey;
 use crate::rich_table_writers::{push_docx_table, DocxTableContext};
 use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
@@ -93,21 +94,7 @@ fn docx_styles_xml(has_toc: bool) -> String {
 }
 
 pub(crate) fn push_docx_text(out: &mut String, text: &str) {
-    for (l_idx, line) in text.split('\n').enumerate() {
-        if l_idx > 0 {
-            out.push_str("<w:br/>");
-        }
-        for (t_idx, seg) in line.split('\t').enumerate() {
-            if t_idx > 0 {
-                out.push_str("<w:tab/>");
-            }
-            if !seg.is_empty() {
-                out.push_str("<w:t xml:space=\"preserve\">");
-                out.push_str(&XmlSanitizer::escape(seg));
-                out.push_str("</w:t>");
-            }
-        }
-    }
+    push_docx_text_tagged(out, text, "w:t");
 }
 
 /// WordprocessingML `w:spacing` (line height, 240 = single) and `w:ind` for a paragraph, in
@@ -225,36 +212,7 @@ fn push_docx_paragraph(
             glyph = glyph,
         ));
     }
-    for (link, group) in link_groups(&p.runs) {
-        match link.map(|url| url.strip_prefix('#').ok_or(url)) {
-            Some(Ok(anchor)) => out.push_str(&format!(
-                "<w:hyperlink w:anchor=\"{anchor}\" w:history=\"1\">"
-            )),
-            Some(Err(url)) => out.push_str(&format!(
-                "<w:hyperlink r:id=\"{}\" w:history=\"1\">",
-                links.rel_id(url)
-            )),
-            None => {}
-        }
-        for run in group {
-            let properties = docx_run_properties(run);
-            if let Some(field) = run.field {
-                out.push_str(&docx_field_run(field, &properties));
-                continue;
-            }
-            out.push_str("<w:r>");
-            out.push_str(&if link.is_some() {
-                docx_linked_run_properties(&properties)
-            } else {
-                properties
-            });
-            push_docx_text(out, &run.text);
-            out.push_str("</w:r>");
-        }
-        if link.is_some() {
-            out.push_str("</w:hyperlink>");
-        }
-    }
+    push_docx_paragraph_runs(out, p, links);
     out.push_str(&docx_toc_page(p));
     if let Some(number) = p.bookmark {
         out.push_str(&format!("<w:bookmarkEnd w:id=\"{number}\"/>"));
@@ -361,7 +319,14 @@ pub(crate) fn docx_rich_entries(
     }
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
     let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
-    let settings = docx_settings(doc.page_frame.binding, doc.page_frame.even_odd_different);
+    let note_parts = build_docx_note_parts(doc)?;
+    frame.relationships.push_str(&note_parts.relationships);
+    frame.content_types.push_str(&note_parts.content_types);
+    let settings = docx_settings(
+        doc.page_frame.binding,
+        doc.page_frame.even_odd_different,
+        doc.track_changes,
+    );
     if let Some((_, rel, content_type)) = &settings {
         frame.relationships.push_str(rel);
         frame.content_types.push_str(content_type);
@@ -431,6 +396,7 @@ pub(crate) fn docx_rich_entries(
     }
     // The settings part holds fixed flags only, so it needs no scan.
     entries.extend(settings.map(|(xml, _, _)| (DOCX_SETTINGS_PART.to_string(), xml.into_bytes())));
+    entries.extend(note_parts.entries);
     entries.extend(frame_entries);
     entries.extend(media.into_entries());
     Ok(entries)
@@ -493,6 +459,7 @@ pub(crate) fn push_odt_paragraph(
     p: &RichParagraph,
     para_styles: &mut StyleTable<OdtParaKey>,
     text_styles: &mut StyleTable<OdtTextKey>,
+    notes_ctx: &mut OdtNotesContext,
 ) {
     let level = if (1..=6).contains(&p.heading_level) {
         p.heading_level
@@ -526,31 +493,7 @@ pub(crate) fn push_odt_paragraph(
             "<text:bookmark-start text:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
         ));
     }
-    for (link, group) in link_groups(&p.runs) {
-        if let Some(url) = link {
-            body.push_str(&format!(
-                "<text:a xlink:type=\"simple\" xlink:href=\"{}\">",
-                XmlSanitizer::escape(url)
-            ));
-        }
-        for run in group {
-            let key = odt_text_key(run);
-            if let Some(field) = run.field {
-                let style = (!odt_text_key_is_plain(&key)).then(|| text_styles.intern(&key));
-                body.push_str(&odt_field(field, style));
-            } else if odt_text_key_is_plain(&key) {
-                push_odt_text(body, &run.text);
-            } else {
-                let t = text_styles.intern(&key);
-                body.push_str(&format!("<text:span text:style-name=\"T{t}\">"));
-                push_odt_text(body, &run.text);
-                body.push_str("</text:span>");
-            }
-        }
-        if link.is_some() {
-            body.push_str("</text:a>");
-        }
-    }
+    push_odt_paragraph_runs(body, p, text_styles, notes_ctx);
     body.push_str(&odt_toc_page(p));
     if let Some(number) = p.bookmark {
         body.push_str(&format!(
@@ -627,11 +570,37 @@ pub(crate) use crate::odt_rich_writer::pack_odt_rich;
 
 // ---------------------------------------------------------------- Markdown / TXT / PDF
 
+fn paragraph_plain_with_notes(
+    p: &RichParagraph,
+    ordinals: &std::collections::HashMap<(RichNoteKind, u32), usize>,
+) -> String {
+    let mut out = String::new();
+    for run in &p.runs {
+        if is_deleted_run(run) {
+            continue;
+        }
+        if let Some(key) = run.note_ref {
+            if let Some(&ord) = ordinals.get(&key) {
+                out.push_str(&format!("[{ord}]"));
+            }
+        } else {
+            out.push_str(&run.text);
+        }
+    }
+    out
+}
+
 /// Plain-text lines of one block: paragraph text, alt text of a picture, table rows joined by
 /// `cell_sep`.
-fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) {
+fn push_plain_lines(
+    block: &RichBlock,
+    cell_sep: &str,
+    ordinals: &std::collections::HashMap<(RichNoteKind, u32), usize>,
+    lines: &mut Vec<String>,
+) {
     match block {
         RichBlock::Paragraph(p) => {
+            let text = paragraph_plain_with_notes(p, ordinals);
             if p.list == Some(RichListKind::Task) && !(1..=6).contains(&p.heading_level) {
                 let indent = "  ".repeat(usize::from(p.list_level.min(8)));
                 let mark = if p.task_checked {
@@ -639,9 +608,9 @@ fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) 
                 } else {
                     "\u{2610}"
                 };
-                lines.push(format!("{indent}{mark} {}", p.plain_text()));
+                lines.push(format!("{indent}{mark} {text}"));
             } else {
-                lines.push(p.plain_text());
+                lines.push(text);
             }
         }
         RichBlock::Image(img) => lines.push(img.fallback_text().to_string()),
@@ -653,15 +622,24 @@ fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) 
     }
 }
 
+fn push_plain_notes_appendix(ordered: &[(crate::RichNote, usize)], lines: &mut Vec<String>) {
+    for (note, ord) in ordered {
+        let single_line = note.text.replace('\n', " ");
+        lines.push(format!("[{ord}] {single_line}"));
+    }
+}
+
 /// Ordered plain text: optional title line, paragraph text, table rows joined by `cell_sep`.
 pub(crate) fn render_plain_text(doc: &RichDocument, cell_sep: &str, with_title: bool) -> String {
-    let mut lines = Vec::with_capacity(doc.blocks.len() + 1);
+    let (ordered_notes, ordinals) = collect_note_ordinals(doc);
+    let mut lines = Vec::with_capacity(doc.blocks.len() + ordered_notes.len() + 1);
     if with_title {
         lines.push(doc.display_title());
     }
     for block in &doc.blocks {
-        push_plain_lines(block, cell_sep, &mut lines);
+        push_plain_lines(block, cell_sep, &ordinals, &mut lines);
     }
+    push_plain_notes_appendix(&ordered_notes, &mut lines);
     lines.join("\n")
 }
 
@@ -716,6 +694,7 @@ fn pdf_entries(
     mut stamp: Option<String>,
     pass: &mut Option<HighlightPass<'_>>,
 ) -> Vec<PdfPageEntry> {
+    let (ordered_notes, ordinals) = collect_note_ordinals(doc);
     let mut entries = Vec::new();
     let mut lines = Vec::new();
     for block in &doc.blocks {
@@ -725,11 +704,11 @@ fn pdf_entries(
                     flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
                     push_pdf_image_page(&mut entries, img, image);
                 } else {
-                    push_plain_lines(block, " | ", &mut lines);
+                    push_plain_lines(block, " | ", &ordinals, &mut lines);
                 }
             }
             RichBlock::Table(table) => {
-                push_plain_lines(block, " | ", &mut lines);
+                push_plain_lines(block, " | ", &ordinals, &mut lines);
                 for ci in table.validated_cell_images() {
                     if let Some(image) = pdf_image_object(&ci.image) {
                         flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
@@ -740,10 +719,11 @@ fn pdf_entries(
                 }
             }
             RichBlock::Paragraph(_) => {
-                push_plain_lines(block, " | ", &mut lines);
+                push_plain_lines(block, " | ", &ordinals, &mut lines);
             }
         }
     }
+    push_plain_notes_appendix(&ordered_notes, &mut lines);
     flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
     for (idx, entry) in entries.iter_mut().enumerate() {
         match entry {

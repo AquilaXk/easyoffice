@@ -26,6 +26,7 @@ use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_
 use crate::rich_list_writers::{
     hwpx_numberings_xml, hwpx_ordered_run_ids, list_kind_of, plan_lists, HWPX_MAX_LIST_LEVEL,
 };
+use crate::rich_notes::{is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
     hwpx_frame_control_typed, hwpx_number_control, hwpx_page_hiding_control,
 };
@@ -88,6 +89,7 @@ struct ShapeTables {
     next_field_id: u32,
     /// Text a file-name field is written as.
     file_text: String,
+    notes_by_key: std::collections::HashMap<(RichNoteKind, u32), String>,
 }
 
 fn hex_rgb(hex: &str) -> Option<u32> {
@@ -124,6 +126,7 @@ impl ShapeTables {
             border_fill_map: std::collections::HashMap::new(),
             next_field_id: 0,
             file_text: String::new(),
+            notes_by_key: std::collections::HashMap::new(),
         }
     }
 
@@ -255,6 +258,9 @@ impl ShapeTables {
                 self.next_field_id
             });
             for run in group {
+                if is_deleted_run(run) {
+                    continue;
+                }
                 let font = run.font.as_ref().map_or(0, |f| self.font_index(f));
                 let shape = HwpxCharShape {
                     bold: base.bold || run.bold,
@@ -268,7 +274,14 @@ impl ShapeTables {
                     script: run.script,
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
-                if let Some(field) = run.field {
+                if let Some(key) = run.note_ref {
+                    let note_text = self
+                        .notes_by_key
+                        .get(&key)
+                        .map(String::as_str)
+                        .unwrap_or("");
+                    sec.note_run(char_pr, key.0, note_text);
+                } else if let Some(field) = run.field {
                     sec.field_run(char_pr, field, &self.file_text);
                 } else {
                     sec.run(char_pr, &run.text);
@@ -412,6 +425,22 @@ impl SectionWriter {
         };
         self.xml.push_str(&format!(
             "<hp:run charPrIDRef=\"{char_pr}\">{inner}</hp:run>"
+        ));
+    }
+
+    fn note_run(&mut self, char_pr: usize, kind: RichNoteKind, text: &str) {
+        let tag = match kind {
+            RichNoteKind::Footnote => "hp:footNote",
+            RichNoteKind::Endnote => "hp:endNote",
+        };
+        let mut paras = String::new();
+        for line in text.split('\n') {
+            paras.push_str("<hp:p paraPrIDRef=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>");
+            paras.push_str(&XmlSanitizer::escape(line));
+            paras.push_str("</hp:t></hp:run></hp:p>");
+        }
+        self.xml.push_str(&format!(
+            "<hp:run charPrIDRef=\"{char_pr}\"><hp:ctrl><{tag}><hp:subList>{paras}</hp:subList></{tag}></hp:ctrl></hp:run>"
         ));
     }
 
@@ -616,6 +645,9 @@ impl HwpxCodec {
         let mut sec = SectionWriter::new();
         let mut shapes = ShapeTables::new();
         shapes.file_text = doc.display_title();
+        for note in doc.validated_notes() {
+            shapes.notes_by_key.insert((note.kind, note.id), note.text);
+        }
         sec.margins = doc.page_frame.margins;
         sec.paper = doc.page_frame.paper;
         sec.binding = doc.page_frame.binding;

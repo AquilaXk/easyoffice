@@ -108,6 +108,7 @@
               <div class="md-item" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 개체</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-endnote" role="menuitem" tabindex="-1"><span class="md-label">미주</span></div>
               <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
@@ -137,7 +138,7 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="review">주석</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="pdf-mod-highlight" role="menuitem" tabindex="-1"><span class="md-label">형광펜·밑줄 주석</span></div>
-              <div class="md-item" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">검토 메모 스레드</span></div>
+              <div class="md-item" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="format" data-kinds="DOC HWP SHEET SLIDE">
@@ -341,8 +342,10 @@
               <div class="md-item" data-studio-menu-cmd="security-audit" role="menuitem" tabindex="-1"><span class="md-label">문서 보안 검사</span></div>
               <div class="md-item" data-studio-menu-cmd="bench-run" role="menuitem" tabindex="-1"><span class="md-label">문서 엔진 성능 진단</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-track" role="menuitem" tabindex="-1"><span class="md-label">변경 내용 추적</span></div>
-              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">검토 메모 스레드</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-track" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">변경 내용 추적</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-accept-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 수락</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-reject-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 거부</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
               <div class="md-item" data-studio-menu-cmd="review-verify" role="menuitem" tabindex="-1"><span class="md-label">문서 구조 보안 검사</span></div>
               <div class="md-item" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">문서 통계·글자 수</span></div>
               <div class="md-sep"></div>
@@ -427,6 +430,7 @@
           <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말" aria-label="머리말"><span class="tb-sprite icon-header"></span><span class="tb-label">머리말</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footer" title="꼬리말" aria-label="꼬리말"><span class="tb-sprite icon-footer"></span><span class="tb-label">꼬리말</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" title="각주" aria-label="각주"><span class="tb-sprite icon-footnote"></span><span class="tb-label">각주</span></button>
+          <button type="button" class="tb-btn" data-kinds="DOC" data-studio-cmd="mod-endnote" title="미주" aria-label="미주"><span class="tb-sprite icon-endnote"></span><span class="tb-label">미주</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+/)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
         </div>
         <div class="tb-group tb-headerfooter-group" data-hf-group hidden>
@@ -603,6 +607,13 @@
                   <span class="doc-image-handle" data-resize-dir="s"></span>
                 </div>
               </div>
+              <aside id="doc-review-pane" class="doc-review-pane" aria-labelledby="doc-review-title" hidden>
+                <div class="doc-review-head">
+                  <span id="doc-review-title" class="doc-review-title">메모</span>
+                  <button id="btn-doc-review-close" type="button" class="dialog-btn doc-review-close">닫기</button>
+                </div>
+                <div id="doc-review-list" class="doc-review-list"></div>
+              </aside>
             </div>
           </div>
 
@@ -1936,6 +1947,22 @@
       </div>
     </dialog>
 
+    <dialog id="doc-comment-dialog" class="tool-dialog" aria-labelledby="doc-comment-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-comment-dialog-title">새 메모</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row doc-comment-row">
+            <label class="dialog-label" for="doc-comment-input">내용</label>
+            <textarea id="doc-comment-input" class="dialog-text-input doc-comment-textarea" rows="3" maxlength="65536"></textarea>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-comment-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button id="btn-doc-comment-cancel" type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="about-dialog" class="tool-dialog" aria-labelledby="about-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -2066,6 +2093,8 @@
     <script src="./doc-toc.js"></script>
     <script src="./doc-table-grid.js"></script>
     <script src="./doc-image.js"></script>
+    <script src="./doc-notes.js"></script>
+    <script src="./doc-notes-ui.js"></script>
     <script src="./doc-table-style.js"></script>
     <script src="./doc-table.js"></script>
     <script src="./doc-pages-core.js"></script>

@@ -5,9 +5,12 @@
 //! (`\slN\slmult1`). Run formatting: bold, italic, underline, strike, size, font, color,
 //! highlight, and super/subscript. The reader in `rich_read_rtf.rs` parses all of these back.
 
+use std::collections::HashMap;
+
 use crate::rich_document::{
     RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun, RichScript,
 };
+use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_rtf_table::rtf_table_lines;
 use crate::rich_run_writers::{has_extra_run_format, RtfRunTables};
 use crate::rich_writers::heading_half_points;
@@ -187,7 +190,11 @@ fn line_spacing_240ths(percent: u16) -> u32 {
 }
 
 /// One RTF paragraph line (`\pard\plain ... \par`).
-fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
+fn rtf_paragraph_line(
+    p: &RichParagraph,
+    tables: &RtfRunTables,
+    ordinals: &HashMap<(RichNoteKind, u32), usize>,
+) -> String {
     let mut line = String::from("\\pard\\plain");
     if let Some(a) = p.alignment {
         line.push_str(rtf_alignment_word(a));
@@ -220,6 +227,27 @@ fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
     }
     line.push(' ');
     for run in &p.runs {
+        if is_deleted_run(run) {
+            continue;
+        }
+        if let Some(key) = run.note_ref {
+            let ord = ordinals.get(&key).copied().unwrap_or(1);
+            let note_run = RichRun {
+                text: format!("[{ord}]"),
+                bold: run.bold,
+                italic: run.italic,
+                underline: run.underline,
+                strike: run.strike,
+                size_half_pt: run.size_half_pt,
+                font: run.font.clone(),
+                color: run.color.clone(),
+                highlight: run.highlight.clone(),
+                script: RichScript::Superscript,
+                ..RichRun::default()
+            };
+            push_rtf_run(&mut line, &note_run, tables, &base);
+            continue;
+        }
         push_rtf_run(&mut line, run, tables, &base);
     }
     line.push_str("\\par");
@@ -260,16 +288,22 @@ fn push_rtf_run(line: &mut String, run: &RichRun, tables: &RtfRunTables, base: &
 }
 
 pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
-    let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + 6);
+    let (notes, ordinals) = collect_note_ordinals(doc);
+    let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + notes.len() + 6);
     lines.push("{\\rtf1\\ansi\\deff0".to_string());
     lines.push(format!(
         "{{\\info{{\\title {}}}}}",
         RtfCodec::escape_rtf_text(&doc.display_title())
     ));
-    let tables = RtfRunTables::collect(doc.blocks.iter().flat_map(|b| match b {
-        RichBlock::Paragraph(p) => p.runs.iter(),
-        RichBlock::Table(_) | RichBlock::Image(_) => [].iter(),
-    }));
+    let tables = RtfRunTables::collect(
+        doc.blocks
+            .iter()
+            .flat_map(|b| match b {
+                RichBlock::Paragraph(p) => p.runs.as_slice(),
+                RichBlock::Table(_) | RichBlock::Image(_) => &[],
+            })
+            .filter(|r| !is_deleted_run(r)),
+    );
     lines.extend(tables.header_lines());
     let has_list = doc
         .blocks
@@ -281,19 +315,34 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     let mut table_idx = 0usize;
     for block in &doc.blocks {
         match block {
-            RichBlock::Paragraph(p) => lines.push(rtf_paragraph_line(p, &tables)),
+            RichBlock::Paragraph(p) => {
+                if !p.runs.is_empty() && p.runs.iter().all(is_deleted_run) {
+                    continue;
+                }
+                lines.push(rtf_paragraph_line(p, &tables, &ordinals));
+            }
             RichBlock::Image(img) => {
                 let stand_in = RichParagraph {
                     runs: vec![RichRun::plain(img.fallback_text())],
                     ..RichParagraph::default()
                 };
-                lines.push(rtf_paragraph_line(&stand_in, &tables));
+                lines.push(rtf_paragraph_line(&stand_in, &tables, &ordinals));
             }
             RichBlock::Table(table) => {
                 lines.extend(rtf_table_lines(table, table_idx));
                 table_idx += 1;
             }
         }
+    }
+    for (note, ord) in notes {
+        let note_para = RichParagraph {
+            runs: vec![RichRun::plain(format!(
+                "[{ord}] {}",
+                note.text.replace('\n', " ")
+            ))],
+            ..RichParagraph::default()
+        };
+        lines.push(rtf_paragraph_line(&note_para, &tables, &ordinals));
     }
     lines.push("}".to_string());
     lines.join("\n")

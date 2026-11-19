@@ -901,6 +901,7 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             title,
             blocks: reader.blocks,
             official_agency: None,
+            ..RichDocument::default()
         },
         warnings,
     ))

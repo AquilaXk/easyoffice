@@ -34,6 +34,7 @@ fn doc(blocks: Vec<RichBlock>) -> RichDocument {
         title: "쓰기".to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

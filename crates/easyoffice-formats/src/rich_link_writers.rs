@@ -7,12 +7,8 @@ use std::collections::HashMap;
 use crate::rich_document::safe_link_target;
 use crate::{RichRun, XmlSanitizer};
 
-/// Consecutive non-empty runs (and field runs) split into groups that share one safe link (`None` for plain text).
-pub(crate) fn link_groups(runs: &[RichRun]) -> Vec<(Option<&str>, Vec<&RichRun>)> {
-    groups_by(runs, safe_link_target)
-}
-
-/// [`link_groups`] for a format without bookmarks (HWPX): an in-document `#_Toc` target is plain text.
+/// Consecutive non-empty runs (and field runs) split into groups that share one safe link (`None` for plain text)
+/// for a format without bookmarks (HWPX): an in-document `#_Toc` target is plain text.
 pub(crate) fn external_link_groups(runs: &[RichRun]) -> Vec<(Option<&str>, Vec<&RichRun>)> {
     groups_by(runs, |raw| {
         safe_link_target(raw).filter(|url| !url.starts_with('#'))
@@ -24,10 +20,9 @@ fn groups_by<'a>(
     accept: impl Fn(&'a str) -> Option<&'a str>,
 ) -> Vec<(Option<&'a str>, Vec<&'a RichRun>)> {
     let mut groups: Vec<(Option<&str>, Vec<&RichRun>)> = Vec::new();
-    for run in runs
-        .iter()
-        .filter(|r| !r.text.is_empty() || r.field.is_some())
-    {
+    for run in runs.iter().filter(|r| {
+        !r.text.is_empty() || r.field.is_some() || r.note_ref.is_some() || r.comment_id.is_some()
+    }) {
         let link = run.link.as_deref().and_then(&accept);
         match groups.last_mut() {
             Some((last, members)) if *last == link => members.push(run),

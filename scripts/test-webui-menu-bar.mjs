@@ -284,7 +284,7 @@ test("menu and toolbar labels name what their command does", async () => {
     ...document.querySelectorAll(".md-label").map((el) => el.textContent),
     ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
   ];
-  for (const promised of ["모양 복사", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "미주", "(F)"]) {
+  for (const promised of ["모양 복사", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "(F)"]) {
     assert.ok(!named.some((text) => text.includes(promised)), `${promised} is not a feature of the app`);
   }
 });

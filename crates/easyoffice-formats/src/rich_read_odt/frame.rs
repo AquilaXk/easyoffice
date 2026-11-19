@@ -12,8 +12,8 @@ use crate::rich_document::{
 use crate::rich_list_writers::LIST_LEVELS;
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichBinding, RichBindingKind, RichBlock, RichListKind, RichPageFrame,
-    RichPageMargins, RichPaper, RichParagraph,
+    EasyOfficeError, RichBinding, RichBindingKind, RichBlock, RichDocument, RichListKind,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, XmlSanitizer,
 };
 
 #[derive(Clone, Copy)]
@@ -401,4 +401,58 @@ pub(super) fn read_page_frame(
         }
     }
     Ok((frame, columns))
+}
+
+pub(super) fn finalize_odt_document(
+    walker: OdtWalker<'_>,
+    styles_xml: Option<&str>,
+    meta_xml: Option<&[u8]>,
+) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
+    let styles = walker.styles;
+    let list_styles = walker.list_styles;
+    let mut title = walker.title;
+    let mut warnings = walker.warnings;
+    let mut blocks = walker.blocks;
+    let dropped_merges = walker.dropped_merges;
+    let odt_notes = walker.notes;
+
+    let (page_frame, odt_cols) = match styles_xml {
+        Some(s_xml) => read_page_frame(s_xml, styles, list_styles, &mut warnings)?,
+        None => (RichPageFrame::default(), None),
+    };
+    if let Some(cols) = odt_cols {
+        for block in &mut blocks {
+            if let RichBlock::Paragraph(p) = block {
+                p.columns = p.columns.or(Some(cols));
+            }
+        }
+    }
+    if dropped_merges > 0 {
+        warnings.push(format!(
+            "표의 병합 {dropped_merges}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다."
+        ));
+    }
+    if title.is_empty() {
+        if let Some(m_bytes) = meta_xml {
+            if let Ok(m) = std::str::from_utf8(m_bytes) {
+                title = crate::rtf_xml_helpers::extract_tag_bodies(m, "dc:title")
+                    .into_iter()
+                    .next()
+                    .map(XmlSanitizer::unescape)
+                    .unwrap_or_default();
+            }
+        }
+    }
+    Ok((
+        RichDocument {
+            page_frame,
+            title,
+            blocks,
+            official_agency: None,
+            notes: odt_notes.notes,
+            comments: odt_notes.comments,
+            track_changes: odt_notes.track_changes,
+        },
+        warnings,
+    ))
 }

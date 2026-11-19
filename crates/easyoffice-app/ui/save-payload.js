@@ -37,8 +37,9 @@
     if (SKIP_TAGS.has(tag)) return true;
     if (el.id === "hwp-manuscript-preview") return true;
     if (el.classList?.contains("doc-table-toolbar")) return true;
-    // The header and footer of the page are read apart from the body (`collectPageFrame`).
-    if (el.dataset?.eoHf !== undefined) return true;
+    // The header/footer and note/comment metadata sections are read apart from body blocks.
+    const ds = el.dataset;
+    if (ds && (ds.eoHf !== undefined || ds.eoNotes !== undefined || ds.eoComments !== undefined)) return true;
     return typeof el.hasAttribute === "function" && el.hasAttribute("hidden");
   }
 
@@ -71,15 +72,33 @@
   function styleFormat(el, fmt) {
     const tag = (el.tagName || "").toUpperCase();
     const st = el.style || {};
+    const ds = el.dataset || {};
+    const isRev = ds.eoRevId !== undefined && (tag === "INS" || tag === "DEL");
+    const rawCommentId = ds.eoCommentId !== undefined ? Number(ds.eoCommentId) : NaN;
+    const commentId = Number.isInteger(rawCommentId) && rawCommentId >= 1 ? rawCommentId : fmt.commentId;
+    let revision = fmt.revision;
+    if (isRev) {
+      const revId = Number(ds.eoRevId);
+      if (Number.isInteger(revId) && revId >= 1) {
+        revision = {
+          id: revId,
+          kind: tag === "DEL" ? "delete" : "insert",
+          author: String(ds.eoRevAuthor || "작성자"),
+          date: String(ds.eoRevDate || ""),
+        };
+      }
+    }
     const weight = String(st.fontWeight || "").trim().toLowerCase();
     const deco = String(st.textDecoration || st.textDecorationLine || "").toLowerCase();
     const next = {
       bold: fmt.bold || tag === "STRONG" || tag === "B" || weight === "bold" || weight === "bolder" || Number(weight) >= 600,
       italic: fmt.italic || tag === "EM" || tag === "I" || String(st.fontStyle || "").toLowerCase() === "italic",
-      underline: fmt.underline || tag === "U" || tag === "INS" || deco.includes("underline"),
-      strike: fmt.strike || tag === "S" || tag === "STRIKE" || tag === "DEL" || deco.includes("line-through"),
+      underline: fmt.underline || tag === "U" || (tag === "INS" && !isRev) || deco.includes("underline"),
+      strike: fmt.strike || tag === "S" || tag === "STRIKE" || (tag === "DEL" && !isRev) || deco.includes("line-through"),
       script: SCRIPT_TAGS[tag] || fmt.script,
       link: tag === "A" ? linkTarget(el) : fmt.link,
+      commentId,
+      revision,
     };
     return mergeRunValues(el, fmt, next);
   }
@@ -380,15 +399,26 @@
     );
   }
 
+  function sameRevision(ra, rb) {
+    if (!ra && !rb) return true;
+    if (!ra || !rb) return false;
+    return ra.id === rb.id && ra.kind === rb.kind && ra.author === rb.author && ra.date === rb.date;
+  }
+
   function sameFormat(a, b) {
     return Boolean(
       a &&
+        !a.field &&
+        !a.noteRef &&
+        !a._keepEmpty &&
         runFlags(a) === runFlags(b) &&
         a.sizeHalfPt === b.size &&
         a.font === b.font &&
         a.color === b.color &&
         a.highlight === b.highlight &&
-        a.link === b.link
+        a.link === b.link &&
+        a.commentId === b.commentId &&
+        sameRevision(a.revision, b.revision)
     );
   }
 
@@ -483,7 +513,10 @@
         runs[0].text = runs[0].text.replace(/^ +/, "");
         runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/ +$/, "").replace(/\n$/, "").replace(/ +$/, "");
       }
-      const kept = runs.filter((r) => r.text.length > 0 || r.field);
+      const kept = runs.filter((r) => r.text.length > 0 || r.field || r.noteRef || r._keepEmpty);
+      kept.forEach((r) => {
+        delete r._keepEmpty;
+      });
       if (kept.length > 0 || cur.blank) {
         const block = { type: "paragraph", runs: kept };
         Object.assign(block, cur.ctx.layout);
@@ -505,38 +538,50 @@
       cur = null;
     }
 
-    function appendText(text, ctx, fmt) {
-      if (!text) return;
-      if (!cur) cur = { ctx, runs: [] };
-      const last = cur.runs[cur.runs.length - 1];
-      if (!last?.field && sameFormat(last, fmt)) {
-        last.text += text;
-        return;
-      }
-      const run = { text };
+    function applyFmtFields(run, fmt, includeLink) {
       if (fmt.script) run.script = fmt.script;
-      if (fmt.link) run.link = fmt.link;
+      if (includeLink && fmt.link) run.link = fmt.link;
+      if (fmt.commentId !== undefined) run.commentId = fmt.commentId;
+      if (fmt.revision) run.revision = { ...fmt.revision };
       BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
       });
       VALUE_KEYS.forEach((k) => {
         if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
       });
-      cur.runs.push(run);
+      return run;
+    }
+
+    function appendText(text, ctx, fmt) {
+      if (!text) return;
+      if (!cur) cur = { ctx, runs: [] };
+      const last = cur.runs[cur.runs.length - 1];
+      if (sameFormat(last, fmt)) {
+        last.text += text;
+        return;
+      }
+      cur.runs.push(applyFmtFields({ text }, fmt, true));
     }
 
     // A page-number field (`doc-page-frame.js`) is a run of its own with the format around it.
     function walkField(node, ctx, fmt) {
       if (!cur) cur = { ctx, runs: [] };
-      const run = { text: "", field: FIELD_KEYS[node.dataset.eoField] };
-      if (fmt.script) run.script = fmt.script;
-      BOOL_KEYS.forEach((k) => {
-        if (fmt[k]) run[k] = true;
-      });
-      VALUE_KEYS.forEach((k) => {
-        if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
-      });
-      cur.runs.push(run);
+      cur.runs.push(applyFmtFields({ text: "", field: FIELD_KEYS[node.dataset.eoField] }, fmt, false));
+    }
+
+    function walkNoteRef(node, ctx, fmt) {
+      const kind = node.dataset.eoNoteKind;
+      const id = Number(node.dataset.eoNoteId);
+      if (!Number.isInteger(id) || id < 1) return;
+      if (!cur) cur = { ctx, runs: [] };
+      cur.runs.push(applyFmtFields({ text: "", noteRef: { kind, id } }, fmt, false));
+    }
+
+    function walkPointComment(node, ctx, fmt) {
+      const cid = Number(node.dataset.eoCommentId);
+      if (!Number.isInteger(cid) || cid < 1) return;
+      if (!cur) cur = { ctx, runs: [] };
+      cur.runs.push(applyFmtFields({ text: "", commentId: cid, _keepEmpty: true }, { ...fmt, commentId: cid }, false));
     }
 
     function walkTextNode(node, ctx, fmt) {
@@ -645,6 +690,12 @@
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       if (FIELD_KEYS[node.dataset?.eoField]) return walkField(node, ctx, fmt);
+      if (tag === "SUP" && (node.dataset?.eoNoteKind === "footnote" || node.dataset?.eoNoteKind === "endnote")) {
+        return walkNoteRef(node, ctx, fmt);
+      }
+      if (tag === "SPAN" && node.dataset?.eoCommentId !== undefined && node.classList?.contains("eo-comment-point")) {
+        return walkPointComment(node, ctx, fmt);
+      }
       const nextFmt = styleFormat(node, fmt);
       const childNodes = node.childNodes;
       if (!BLOCK_TAGS.has(tag)) {
@@ -690,6 +741,68 @@
       frame.evenOddDifferent = true;
     }
     return frame;
+  }
+
+  const MAX_ANNOTATION_ITEMS = 2048;
+
+  function collectDocAnnotations(root) {
+    const out = {};
+    if (!root) return out;
+    if (root.dataset?.eoTrackChanges === "true") out.trackChanges = true;
+    const refKeys = new Set();
+    const commentIds = new Set();
+    const scanBody = (node) => {
+      for (const child of node.childNodes || []) {
+        if (child.nodeType !== 1) continue;
+        const tag = (child.tagName || "").toUpperCase();
+        const ds = child.dataset;
+        if (tag === "FOOTER" || child.id === "hwp-manuscript-preview" || (ds && (ds.eoNotes !== undefined || ds.eoComments !== undefined || ds.eoHf !== undefined))) continue;
+        if (tag === "SUP" && (ds?.eoNoteKind === "footnote" || ds?.eoNoteKind === "endnote")) {
+          const id = Number(ds.eoNoteId);
+          if (Number.isInteger(id) && id >= 1) refKeys.add(ds.eoNoteKind + ":" + id);
+          continue;
+        }
+        if (ds?.eoCommentId !== undefined) {
+          const cid = Number(ds.eoCommentId);
+          if (Number.isInteger(cid) && cid >= 1) commentIds.add(cid);
+        }
+        scanBody(child);
+      }
+    };
+    scanBody(root);
+    const notes = [];
+    for (const kind of ["footnote", "endnote"]) {
+      for (const sec of Array.from(root.children || [])) {
+        if (sec.dataset?.eoNotes !== kind) continue;
+        for (const item of Array.from(sec.children || [])) {
+          if (notes.length >= MAX_ANNOTATION_ITEMS) break;
+          if (!item.classList?.contains("eo-doc-note-item")) continue;
+          const id = Number(item.dataset?.eoNoteId);
+          if (!Number.isInteger(id) || id < 1 || !refKeys.has(kind + ":" + id)) continue;
+          const bodies = item.querySelectorAll ? Array.from(item.querySelectorAll(".eo-doc-note-body")) : [];
+          const text = (bodies.length > 0 ? bodies.map((b) => String(b.textContent || "")).join("\n") : String(item.textContent || "")).slice(0, 65536);
+          notes.push({ id, kind, text });
+        }
+      }
+    }
+    if (notes.length > 0) out.notes = notes;
+    const comments = [];
+    for (const sec of Array.from(root.children || [])) {
+      if (sec.dataset?.eoComments === undefined) continue;
+      for (const art of Array.from(sec.children || [])) {
+        if (comments.length >= MAX_ANNOTATION_ITEMS) break;
+        const id = Number(art.dataset?.eoCommentId);
+        if (!Number.isInteger(id) || id < 1 || !commentIds.has(id)) continue;
+        comments.push({
+          id,
+          author: String(art.dataset?.eoAuthor || "작성자").slice(0, 128),
+          date: String(art.dataset?.eoDate || "").slice(0, 64),
+          text: String(art.textContent || "").slice(0, 65536),
+        });
+      }
+    }
+    if (comments.length > 0) out.comments = comments;
+    return out;
   }
 
   function plainParagraphBlocks(lines) {
@@ -820,6 +933,7 @@
   host.__EASYOFFICE_SAVE_PAYLOAD__ = {
     collectDocBlocks,
     collectPageFrame,
+    collectDocAnnotations,
     plainParagraphBlocks,
     evaluateDocTableFormulas,
     buildSheetsPayload,

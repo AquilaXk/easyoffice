@@ -32,6 +32,7 @@ fn doc(lines: &[&str]) -> RichDocument {
             })
             .collect(),
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

@@ -73,7 +73,12 @@
 
   function isTrailingMetaNode(node) {
     if (!node || node.nodeType !== 1) return false;
-    return String(node.tagName || "").toUpperCase() === "FOOTER" || node.id === "hwp-manuscript-preview" || node.dataset?.eoHf !== undefined;
+    const ds = node.dataset;
+    return (
+      String(node.tagName || "").toUpperCase() === "FOOTER" ||
+      node.id === "hwp-manuscript-preview" ||
+      Boolean(ds && (ds.eoHf !== undefined || ds.eoNotes !== undefined || ds.eoComments !== undefined))
+    );
   }
 
   function topBodyBlock(root, range) {

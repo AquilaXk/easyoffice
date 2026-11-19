@@ -22,6 +22,7 @@
         eoPage: "",
         eoFirstPage: "",
         eoEvenOdd: "",
+        eoTrackChanges: "",
         styleRole: "",
         showCtrlMarks: "",
         showParaMarks: "true",
@@ -41,6 +42,7 @@
       eoPage: editor.dataset.eoPage || "",
       eoFirstPage: editor.dataset.eoFirstPage || "",
       eoEvenOdd: editor.dataset.eoEvenOdd || "",
+      eoTrackChanges: editor.dataset.eoTrackChanges || "",
       styleRole: editor.dataset.styleRole || "",
       showCtrlMarks: editor.dataset.showCtrlMarks || "",
       showParaMarks: editor.dataset.showParaMarks || "",
@@ -64,6 +66,7 @@
       "eoPage",
       "eoFirstPage",
       "eoEvenOdd",
+      "eoTrackChanges",
       "styleRole",
       "showCtrlMarks",
       "showParaMarks",
@@ -727,11 +730,13 @@
       syncDocStyleBarFromTarget(editor ? getFocusedDocBlock(editor) : null);
       computeDocTableSummary();
       tools.computeSmartStats();
+      host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
     }
 
     const STUDIO_CONTAINER_CLASSES = [
       "eo-hwp-header",
       "eo-doc-toc",
+      "eo-doc-notes",
       "eo-doc-footnote",
       "eo-process-flow",
       "eo-criteria-panel",
@@ -740,6 +745,7 @@
     function isNonParagraphStudioContainer(el) {
       if (el?.nodeType !== 1) return false;
       if (isExcludedDocChromeElement(el)) return true;
+      if (el.dataset?.eoNotes !== undefined || el.dataset?.eoComments !== undefined) return true;
       const tag = (el.tagName || "").toUpperCase();
       if (tag === "HEADER" || tag === "NAV" || tag === "ASIDE") return true;
       return STUDIO_CONTAINER_CLASSES.some((cls) => el.classList?.contains(cls));
@@ -841,15 +847,6 @@
       return true;
     }
 
-    function docEffectFootnote(docEditor, summary) {
-      const idx = docEditor.querySelectorAll(".eo-doc-footnote").length + 1;
-      const aside = document.createElement("aside");
-      aside.className = "eo-doc-footnote";
-      aside.dataset.docFootnote = "true";
-      aside.textContent = "각주 " + idx + ") [" + summary + "] 표준 문서 관리 지침 및 근거 조항 참조";
-      insertBeforePageLayer(docEditor, aside);
-    }
-
     function docEffectMailMerge(docEditor, summary) {
       mergeTokensInTextNodes(docEditor);
       docEditor
@@ -891,7 +888,6 @@
     }
 
     const DOC_MODULE_EFFECTS = {
-      "doc-mod-footnote": docEffectFootnote,
       "doc-mod-mailmerge": docEffectMailMerge,
       "hwp-mod-header": docEffectHwpHeader,
       "hwp-mod-field": docEffectHwpField,

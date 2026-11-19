@@ -29,6 +29,7 @@ fn sample() -> RichDocument {
             para("세부", 3, None),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -133,6 +134,7 @@ fn with_targets() -> RichDocument {
             heading("세부", 3, 2),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

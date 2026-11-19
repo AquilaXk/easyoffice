@@ -120,6 +120,7 @@ fn flat_document(
         title,
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -222,6 +223,7 @@ impl UniversalFormatConverter {
                     title: String::new(),
                     blocks,
                     official_agency: None,
+                    ..RichDocument::default()
                 })
             }
             DocumentFormat::Rtf => {

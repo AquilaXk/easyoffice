@@ -27,8 +27,8 @@
     "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "TD", "TH", "BLOCKQUOTE", "PRE",
     "SECTION", "ARTICLE", "HEADER", "FIGCAPTION", "DD", "DT", "ASIDE", "CAPTION",
   ]);
-  // Runs are flattened inside the nearest container; links keep their own run scope.
-  const CONTAINER_TAGS = new Set([...BLOCK_TAGS, "A"]);
+  // Runs are flattened inside the nearest container; links and tracked revisions keep their own run scope.
+  const CONTAINER_TAGS = new Set([...BLOCK_TAGS, "A", "INS", "DEL"]);
   const STRUCTURAL_TAGS = new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR", "UL", "OL", "DL"]);
   const NAMED_HIGHLIGHTS = { yellow: "FFFF00", lime: "00FF00", cyan: "00FFFF", pink: "FF00FF" };
   const FONT_RE = /^[^\u0000-\u001f"'\\;{}<>`]{1,64}$/u;
@@ -141,6 +141,7 @@
   // Formatting of elements that were not created by the run engine (pasted or opened content).
   function readLegacyFormat(el) {
     const tag = (el.tagName || "").toUpperCase();
+    if ((tag === "INS" || tag === "DEL") && el.dataset?.eoRevId !== undefined) return {};
     const fmt = { ...TAG_FORMAT[tag] };
     if (tag !== "SPAN" && tag !== "FONT") return fmt;
     return Object.assign(fmt, readInlineStyleFormat(el.style || {}));

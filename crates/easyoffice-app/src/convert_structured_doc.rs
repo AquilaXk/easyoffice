@@ -133,5 +133,6 @@ pub(crate) fn slides_to_document(slides: &[SlideTriple], title: &str) -> RichDoc
         title: title.to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     }
 }

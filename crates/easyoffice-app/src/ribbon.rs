@@ -463,7 +463,7 @@ impl RibbonCommandRouter {
                     },
                     "review" => [
                         ("review-track", "변경 내용 추적", "Shift+Cmd+E"),
-                        ("review-comment", "검토 메모 스레드", "Alt+Cmd+C"),
+                        ("review-comment", "새 메모", "Alt+Cmd+C"),
                         ("review-verify", "문서 구조 보안 검사", "Ctrl+Cmd+V"),
                         ("review-stats", "문서 통계·글자 수", "Shift+Cmd+I"),
                     ],

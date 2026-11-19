@@ -77,6 +77,7 @@ fn sample() -> RichDocument {
             binding: Default::default(),
             ..RichPageFrame::default()
         },
+        ..RichDocument::default()
     }
 }
 

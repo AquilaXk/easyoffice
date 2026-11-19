@@ -26,6 +26,7 @@ fn sample() -> RichDocument {
             para("셋째 쪽", true),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -193,6 +194,7 @@ fn bookmarked_page_start() -> RichDocument {
             heading("결론", 2, true),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

@@ -115,6 +115,7 @@ fn sample_rich_doc() -> (Vec<u8>, Vec<u8>, RichDocument) {
             para("문서 말미"),
         ],
         official_agency: None,
+        ..RichDocument::default()
     };
     (png, jpg, doc)
 }

@@ -100,6 +100,7 @@ fn sample_three_zone_doc() -> RichDocument {
             even_odd_different: true,
             ..RichPageFrame::default()
         },
+        ..RichDocument::default()
     }
 }
 
@@ -212,6 +213,7 @@ fn stacked_same_alignment_header_lines_remain_separate_paragraphs_in_docx_and_od
             ],
             ..RichPageFrame::default()
         },
+        ..RichDocument::default()
     };
     let docx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
     let hdr_xml = entry_utf8(&docx, "word/header1.xml");

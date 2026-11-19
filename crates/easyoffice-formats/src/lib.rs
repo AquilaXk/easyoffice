@@ -15,6 +15,7 @@ mod crc32;
 pub mod csv_markdown_codecs;
 mod decode_budget;
 pub mod deflate;
+mod docx_notes_writer;
 pub mod embedded_thumbnail;
 pub mod hwp5_codec;
 pub mod hwp_eqedit;
@@ -24,6 +25,7 @@ mod hwpx_unpack;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 mod odf_package;
+mod odt_notes_writer;
 mod odt_rich_writer;
 pub mod office_codecs;
 pub mod ole2_codec;
@@ -50,6 +52,7 @@ mod rich_image_writers;
 mod rich_link_writers;
 mod rich_list_writers;
 mod rich_markdown_writer;
+pub mod rich_notes;
 mod rich_page_frame;
 mod rich_read_hwpx;
 mod rich_read_images;
@@ -121,6 +124,11 @@ pub use rich_image::{
     MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,
 };
 pub use rich_image_probe::RichImageFormat;
+pub use rich_notes::{
+    RichComment, RichNote, RichNoteKind, RichRevision, RichRevisionKind, MAX_ACTIVE_COMMENT_RANGES,
+    MAX_AUTHOR_BYTES, MAX_COMMENTS_PER_DOCUMENT, MAX_DATE_BYTES, MAX_NOTES_PER_DOCUMENT,
+    MAX_NOTE_TEXT_BYTES, MAX_REVISIONS_PER_DOCUMENT,
+};
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,

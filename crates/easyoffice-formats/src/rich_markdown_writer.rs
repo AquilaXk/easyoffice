@@ -6,6 +6,7 @@ use crate::rich_document::{
     safe_link_target, RichBlock, RichDocument, RichListKind, RichNumberEnclosure, RichParagraph,
     RichScript,
 };
+use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_table_writers::markdown_table_rows;
 use crate::{CommonMarkCodec, MarkdownBlock};
 
@@ -90,6 +91,18 @@ fn escape_link_destination(url: &str) -> String {
 fn render_markdown_runs(p: &RichParagraph) -> String {
     let mut out = String::new();
     for run in &p.runs {
+        if is_deleted_run(run) {
+            continue;
+        }
+        if let Some((kind, id)) = run.note_ref {
+            let prefix = if kind == RichNoteKind::Footnote {
+                "fn"
+            } else {
+                "en"
+            };
+            out.push_str(&format!("[^{prefix}{id}]"));
+            continue;
+        }
         let safe_url = run
             .link
             .as_deref()
@@ -164,6 +177,9 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
     };
     for block in &doc.blocks {
         match block {
+            RichBlock::Paragraph(p) if !p.runs.is_empty() && p.runs.iter().all(is_deleted_run) => {
+                continue;
+            }
             RichBlock::Paragraph(p) if (1..=6).contains(&p.heading_level) => {
                 flush(&mut parts, &mut list_buf);
                 ordinals = [0; 9];
@@ -229,6 +245,26 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
         }
     }
     flush(&mut parts, &mut list_buf);
+    let (notes, _) = collect_note_ordinals(doc);
+    if !notes.is_empty() {
+        let mut defs = Vec::with_capacity(notes.len());
+        for (note, _) in notes {
+            let prefix = if note.kind == RichNoteKind::Footnote {
+                "fn"
+            } else {
+                "en"
+            };
+            let mut lines = note.text.split('\n');
+            let first = lines.next().unwrap_or("");
+            let mut def = format!("[^{prefix}{}]: {first}", note.id);
+            for cont in lines {
+                def.push_str("\n    ");
+                def.push_str(cont);
+            }
+            defs.push(def);
+        }
+        parts.push(defs.join("\n"));
+    }
     parts.join("\n\n")
 }
 

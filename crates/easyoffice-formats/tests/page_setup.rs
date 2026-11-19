@@ -36,6 +36,7 @@ fn doc(paper: Option<RichPaper>, margins: Option<RichPageMargins>) -> RichDocume
             paper,
             ..RichPageFrame::default()
         },
+        ..RichDocument::default()
     }
 }
 

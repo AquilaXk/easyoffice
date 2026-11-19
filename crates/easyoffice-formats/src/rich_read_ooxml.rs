@@ -4,11 +4,12 @@
 //! body.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{toc_bookmark_number, RichColumns};
+use crate::rich_notes::{RichNoteKind, RichRevision, RichRevisionKind};
 use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{drawing_picture, DocxMedia, DocxRelationships, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering};
@@ -26,11 +27,14 @@ use crate::{
 
 #[path = "rich_read_ooxml/frame.rs"]
 mod frame;
+#[path = "rich_read_ooxml/notes.rs"]
+mod notes;
 #[path = "rich_read_ooxml/styles.rs"]
 mod styles;
 #[path = "rich_read_ooxml/table.rs"]
 mod table;
 use frame::*;
+use notes::{read_docx_comments, read_docx_notes};
 use styles::*;
 use table::{grid_span, DocxTableState, VMerge};
 
@@ -44,8 +48,8 @@ pub(super) struct FrameRef {
     pub(super) section_title_pg: bool,
 }
 
-/// Elements whose whole subtree is ignored (revisions, fallbacks, deleted text).
-const SKIPPED_ELEMENTS: [&str; 11] = [
+/// Elements whose whole subtree is ignored (fallbacks, property-change metadata, field instructions).
+const SKIPPED_ELEMENTS: [&str; 9] = [
     "mc:Fallback",
     "w:rPrChange",
     "w:pPrChange",
@@ -53,10 +57,8 @@ const SKIPPED_ELEMENTS: [&str; 11] = [
     "w:tblPrChange",
     "w:trPrChange",
     "w:tcPrChange",
-    "w:del",
     "w:moveFrom",
     "w:instrText",
-    "w:delText",
 ];
 const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 2] = ["w:pict", "w:object"];
 const DRAWING_ELEMENT: &str = "w:drawing";
@@ -144,6 +146,11 @@ pub(super) struct DocxWalker {
     text_budget: DecodeBudget,
     sdt_stack: Vec<Option<bool>>,
     checkbox_sdt_content_depth: usize,
+    pub(super) revision_stack: Vec<RichRevision>,
+    pub(super) revision_count: usize,
+    pub(super) in_del_text: bool,
+    pub(super) active_comment_ranges: Vec<u32>,
+    pub(super) comment_has_runs: HashSet<u32>,
 }
 
 const MAX_SDT_DEPTH: usize = 16;
@@ -189,6 +196,7 @@ impl DocxWalker {
         }
         self.track_structure(name, attrs);
         self.track_frame(name, attrs)?;
+        self.on_start_note_or_review(name, attrs)?;
         if self.tbl_depth == 1 && !self.in_ppr && !self.in_rpr {
             self.table_state.on_start(name, attrs);
         }
@@ -412,7 +420,11 @@ impl DocxWalker {
             self.text_budget.charge(text.len(), "DOCX 확인란 기호")?;
             return Ok(());
         }
-        if self.in_t {
+        let in_delete = self
+            .revision_stack
+            .last()
+            .is_some_and(|r| r.kind == RichRevisionKind::Delete);
+        if (self.in_t && !in_delete) || (self.in_del_text && in_delete) {
             self.text_budget.charge(text.len(), "DOCX 텍스트")?;
             self.cur_text.push_str(text);
         } else if self.in_instruction {
@@ -440,6 +452,10 @@ impl DocxWalker {
                 }
             }
             "w:t" => self.in_t = false,
+            "w:delText" => self.in_del_text = false,
+            "w:ins" | "w:del" if !self.in_ppr && !self.in_rpr => {
+                self.revision_stack.pop();
+            }
             "w:instrText" => self.in_instruction = false,
             "w:fldSimple" => self.simple_field = None,
             "w:sectPr" => {
@@ -486,21 +502,15 @@ impl DocxWalker {
                             }
                         }
                         if !self.cur_text.is_empty() {
-                            let link_len = self.link.as_deref().map_or(0, str::len);
-                            self.text_budget.charge_run(link_len, "DOCX 런")?;
+                            self.flush_current_run_text()?;
                         }
-                        push_linked_run(
-                            &mut top.runs,
-                            &self.cur_text,
-                            &self.fmt,
-                            self.link.as_deref(),
-                        );
                     }
                 }
                 self.cur_text.clear();
                 self.in_run = false;
                 self.in_rpr = false;
                 self.in_t = false;
+                self.in_del_text = false;
             }
             "w:hyperlink" => self.link = None,
             "w:p" => self.finish_paragraph(resolver)?,
@@ -627,10 +637,13 @@ impl DocxWalker {
             let last_runs = std::mem::take(&mut p.runs);
             zones.push((last_jc, last_runs));
             for (jc, runs) in zones {
-                if runs
-                    .iter()
-                    .any(|r| r.field.is_some() || !r.text.trim().is_empty())
-                {
+                if runs.iter().any(|r| {
+                    r.field.is_some()
+                        || r.note_ref.is_some()
+                        || r.comment_id.is_some()
+                        || r.revision.is_some()
+                        || !r.text.trim().is_empty()
+                }) {
                     self.text_budget.charge_block(0, "DOCX 문단")?;
                     let zone_state = ParaState {
                         runs,
@@ -647,10 +660,13 @@ impl DocxWalker {
             let carried = p.page_break_before;
             let after = p.page_break_after;
             let mut kept = false;
-            if p.runs
-                .iter()
-                .any(|r| r.field.is_some() || !r.text.trim().is_empty())
-            {
+            if p.runs.iter().any(|r| {
+                r.field.is_some()
+                    || r.note_ref.is_some()
+                    || r.comment_id.is_some()
+                    || r.revision.is_some()
+                    || !r.text.trim().is_empty()
+            }) {
                 self.text_budget.charge_block(0, "DOCX 문단")?;
                 let mut paragraph = resolver.finish(p);
                 paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
@@ -730,6 +746,23 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         ..DocxWalker::default()
     };
     walk_part(doc_xml, &mut walker, &resolver, &media)?;
+    let mut notes = Vec::new();
+    read_docx_notes(
+        checked_part(&parts, "word/footnotes.xml"),
+        RichNoteKind::Footnote,
+        &mut notes,
+        &mut walker.text_budget,
+    )?;
+    read_docx_notes(
+        checked_part(&parts, "word/endnotes.xml"),
+        RichNoteKind::Endnote,
+        &mut notes,
+        &mut walker.text_budget,
+    )?;
+    let comments = read_docx_comments(
+        checked_part(&parts, "word/comments.xml"),
+        &mut walker.text_budget,
+    )?;
     let settings = read_word_settings(checked_part(&parts, "word/settings.xml"))?;
     let (mut page_frame, frame_warnings) = read_page_frame_with_targets(
         &docx_rels.frame_targets,
@@ -768,6 +801,9 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             blocks: walker.blocks,
             official_agency: None,
             page_frame,
+            notes,
+            comments,
+            track_changes: settings.track_revisions,
         },
         warnings,
     ))

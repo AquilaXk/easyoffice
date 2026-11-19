@@ -2,24 +2,26 @@
 //! paragraph alignment, `text:h` outline levels, list paragraphs, and tables in position.
 
 mod frame;
+mod notes;
 mod table;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use self::frame::{parse_odt_list_level_bullet, parse_odt_list_level_number, OdtListStyle};
+use self::notes::OdtNotesState;
 use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{push_linked_run, take_toc_page, toc_role_from_name, CharFmt};
+use crate::rich_xml::{take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichField, RichImage,
-    RichListKind, RichPageFrame, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
-    ZipArchiveEntry, ZipSecurityPolicy,
+    RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
+    ZipSecurityPolicy,
 };
 
 const EMU_PER_INCH: f64 = 914_400.0;
@@ -331,6 +333,7 @@ struct OdtWalker<'a> {
     /// Header and footer text: a page-number field is kept as a field run.
     frame_mode: bool,
     in_field: bool,
+    notes: OdtNotesState,
 }
 
 /// Merges a span's character format into the enclosing format.
@@ -381,6 +384,7 @@ impl<'a> OdtWalker<'a> {
             pending_page_break: false,
             frame_mode: false,
             in_field: false,
+            notes: OdtNotesState::default(),
         }
     }
 
@@ -391,7 +395,16 @@ impl<'a> OdtWalker<'a> {
                 self.title = attr(attrs, "title").unwrap_or_default().into_owned()
             }
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
-            "text:note" | "office:annotation" | "text:tracked-changes" => return Ok(true),
+            "office:annotation-end" | "text:change-start" | "text:change-end" | "text:change" => {
+                self.notes.on_marker_start(
+                    name,
+                    attrs,
+                    &mut self.paras,
+                    &self.span_fmts,
+                    self.link.as_deref(),
+                    &mut self.text_budget,
+                )?;
+            }
             "draw:custom-shape" => {
                 if !self.warnings.iter().any(|w| w == UNSUPPORTED_OBJECT_NOTE) {
                     self.warnings.push(UNSUPPORTED_OBJECT_NOTE.to_string());
@@ -549,7 +562,8 @@ impl<'a> OdtWalker<'a> {
         let link_len = self.link.as_deref().map_or(0, str::len);
         self.text_budget
             .charge_run(text.len().saturating_add(link_len), "ODT 런")?;
-        push_inline(&mut self.paras, &self.span_fmts, self.link.as_deref(), text);
+        self.notes
+            .push_text(&mut self.paras, &self.span_fmts, self.link.as_deref(), text);
         Ok(())
     }
 
@@ -703,10 +717,16 @@ impl<'a> OdtWalker<'a> {
             _ => None,
         };
         let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+        let has_special_run = p.runs.iter().any(|r| {
+            r.field.is_some()
+                || r.note_ref.is_some()
+                || r.comment_id.is_some()
+                || r.revision.is_some()
+        });
         let images = p.images;
         if self.tbl_depth > 0 {
             self.cell_paras.push(p.runs);
-        } else if text.trim().is_empty() && !p.runs.iter().any(|r| r.field.is_some()) {
+        } else if text.trim().is_empty() && !has_special_run {
             self.pending_page_break |= p.style.page_break_before;
         } else {
             self.text_budget.charge_block(0, "ODT 문단")?;
@@ -795,6 +815,7 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     resolve_style_parents(&mut styles);
 
     let mut walker = OdtWalker::new(&styles, &list_styles, &table_styles);
+    walker.notes.init_annotation_ends(xml)?;
     let mut reader = XmlReader::new(xml);
     while let Some(event) = reader.next_event()? {
         match event {
@@ -803,6 +824,19 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             } => {
                 let frame = reader.collect_subtree(event)?;
                 walker.on_frame(&frame, &entry_by_path)?;
+            }
+            XmlEvent::Start {
+                name: name @ ("text:tracked-changes" | "text:note" | "office:annotation"),
+                ..
+            } => {
+                let sub = reader.collect_subtree(event)?;
+                walker.notes.on_subtree(
+                    name,
+                    &sub,
+                    &mut walker.paras,
+                    walker.link.as_deref(),
+                    &mut walker.text_budget,
+                )?;
             }
             XmlEvent::Start { name, ref attrs } => {
                 if walker.on_start(name, attrs)? {
@@ -813,60 +847,11 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             XmlEvent::End(name) => walker.on_end(name)?,
         }
     }
-    let OdtWalker {
-        mut title,
-        mut warnings,
-        mut blocks,
-        dropped_merges,
-        ..
-    } = walker;
-    let (page_frame, odt_cols) = match checked_part(&parts, "styles.xml") {
-        Some(s_xml) => frame::read_page_frame(s_xml, &styles, &list_styles, &mut warnings)?,
-        None => (RichPageFrame::default(), None),
-    };
-    if let Some(cols) = odt_cols {
-        for block in &mut blocks {
-            if let RichBlock::Paragraph(p) = block {
-                p.columns = p.columns.or(Some(cols));
-            }
-        }
-    }
-    if dropped_merges > 0 {
-        warnings.push(format!(
-            "표의 병합 {dropped_merges}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다."
-        ));
-    }
-    if title.is_empty() {
-        if let Some(&meta) = entry_by_path.get("meta.xml") {
-            if let Ok(m) = std::str::from_utf8(&meta.data) {
-                title = crate::rtf_xml_helpers::extract_tag_bodies(m, "dc:title")
-                    .into_iter()
-                    .next()
-                    .map(XmlSanitizer::unescape)
-                    .unwrap_or_default();
-            }
-        }
-    }
-    Ok((
-        RichDocument {
-            page_frame,
-            title,
-            blocks,
-            official_agency: None,
-        },
-        warnings,
-    ))
-}
-
-fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], link: Option<&str>, text: &str) {
-    if let Some(p) = paras.last_mut() {
-        push_linked_run(
-            &mut p.runs,
-            text,
-            &span_fmts.last().cloned().unwrap_or_default(),
-            link,
-        );
-    }
+    frame::finalize_odt_document(
+        walker,
+        checked_part(&parts, "styles.xml"),
+        entry_by_path.get("meta.xml").map(|e| e.data.as_slice()),
+    )
 }
 
 #[cfg(test)]

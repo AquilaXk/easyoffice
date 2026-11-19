@@ -888,6 +888,7 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             title,
             blocks,
             official_agency,
+            ..RichDocument::default()
         },
         warnings,
     ))

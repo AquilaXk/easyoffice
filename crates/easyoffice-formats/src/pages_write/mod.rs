@@ -136,6 +136,20 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
                 + p.runs.iter().filter(|r| body::run_loses_format(r)).count();
         }
     }
+    let validated_notes = doc.validated_notes();
+    let validated_comments = doc.validated_comments();
+    loss.elements += validated_comments.len()
+        + doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                RichBlock::Paragraph(p) => {
+                    Some(p.runs.iter().filter(|r| r.revision.is_some()).count())
+                }
+                _ => None,
+            })
+            .sum::<usize>();
+    loss.formats += validated_notes.len() + usize::from(doc.track_changes);
     loss
 }
 
@@ -147,14 +161,19 @@ enum ExpectedBlock {
 }
 
 fn expected_blocks(doc: &RichDocument) -> Vec<ExpectedBlock> {
-    let mut out = Vec::with_capacity(doc.blocks.len());
+    let (notes, ordinals) = crate::rich_notes::collect_note_ordinals(doc);
+    let mut out = Vec::with_capacity(doc.blocks.len() + notes.len());
     for block in &doc.blocks {
         match block {
             RichBlock::Paragraph(p) => {
                 let text: String = p
                     .runs
                     .iter()
-                    .map(|r| body::clean(&r.text).replace('\u{2028}', " "))
+                    .filter(|r| !crate::rich_notes::is_deleted_run(r))
+                    .map(|r| match r.note_ref {
+                        Some(key) => format!("[{}]", ordinals.get(&key).copied().unwrap_or(1)),
+                        None => body::clean(&r.text).replace('\u{2028}', " "),
+                    })
                     .collect();
                 out.push(ExpectedBlock::Paragraph(text));
             }
@@ -229,6 +248,11 @@ fn expected_blocks(doc: &RichDocument) -> Vec<ExpectedBlock> {
                 ));
             }
         }
+    }
+    for (note, ord) in notes {
+        let note_text = body::clean(&format!("[{ord}] {}", note.text.replace('\n', " ")))
+            .replace('\u{2028}', " ");
+        out.push(ExpectedBlock::Paragraph(note_text));
     }
     while matches!(out.last(), Some(ExpectedBlock::Paragraph(s)) if s.is_empty()) {
         out.pop();

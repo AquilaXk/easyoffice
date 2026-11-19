@@ -115,6 +115,7 @@ fn written_list_levels_and_number_formats_read_back() {
         title: "목록".into(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes =
         UniversalFormatConverter::encode_rich(&original, DocumentFormat::Docx, None).unwrap();

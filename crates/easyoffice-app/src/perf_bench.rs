@@ -124,6 +124,7 @@ fn large_document() -> RichDocument {
         title: "대용량 보고서".to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

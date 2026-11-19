@@ -15,6 +15,7 @@ pub(crate) struct DocxSettings {
     pub(crate) even_and_odd_headers: bool,
     pub(crate) mirror_margins: bool,
     pub(crate) gutter_at_top: bool,
+    pub(crate) track_revisions: bool,
 }
 
 /// Parses `w:cols` attributes into [`RichColumns`] (`None` when single-column).
@@ -50,6 +51,7 @@ pub(super) fn read_word_settings(settings: Option<&str>) -> Result<DocxSettings,
                 "w:evenAndOddHeaders" => s.even_and_odd_headers = on,
                 "w:mirrorMargins" => s.mirror_margins = on,
                 "w:gutterAtTop" => s.gutter_at_top = on,
+                "w:trackRevisions" => s.track_revisions = on,
                 _ => {}
             }
         }

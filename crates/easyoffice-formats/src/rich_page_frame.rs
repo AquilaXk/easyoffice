@@ -113,15 +113,20 @@ pub(crate) const DOCX_SETTINGS_REL_ID: &str = "rIdSettings1";
 const DOCX_SETTINGS_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
 
-/// `word/settings.xml` for a binding or even/odd header setting (`w:evenAndOddHeaders`, `w:mirrorMargins`,
-/// `w:gutterAtTop`), with the relationship and content-type override; `None` when none apply.
+/// `word/settings.xml` for a binding, even/odd header, or tracked-changes setting
+/// (`w:evenAndOddHeaders`, `w:mirrorMargins`, `w:gutterAtTop`, `w:trackRevisions`), with the
+/// relationship and content-type override; `None` when none apply.
 pub(crate) fn docx_settings(
     binding: RichBinding,
     even_odd_different: bool,
+    track_changes: bool,
 ) -> Option<(String, String, String)> {
     let mut flags = String::new();
     if even_odd_different {
         flags.push_str("<w:evenAndOddHeaders/>");
+    }
+    if track_changes {
+        flags.push_str("<w:trackRevisions/>");
     }
     match binding.kind {
         RichBindingKind::Single => {}

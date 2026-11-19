@@ -40,6 +40,7 @@ fn document() -> (RichDocument, Vec<Vec<u8>>) {
         title: "공유 그림".into(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     (doc, expected)
 }

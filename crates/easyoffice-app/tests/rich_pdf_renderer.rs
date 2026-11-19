@@ -49,6 +49,7 @@ impl Recorder {
                 ..RichParagraph::default()
             })],
             official_agency: None,
+            ..RichDocument::default()
         };
         Ok(UniversalFormatConverter::encode_rich_pdf(&doc, &PdfWriteOptions::default()).0)
     }
@@ -166,6 +167,7 @@ fn a_source_file_saved_as_pdf_is_rendered_by_the_host() {
                 ..RichParagraph::default()
             })],
             official_agency: None,
+            ..RichDocument::default()
         },
         DocumentFormat::Docx,
         None,
@@ -190,6 +192,7 @@ fn source_document() -> RichDocument {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

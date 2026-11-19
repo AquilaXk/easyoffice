@@ -39,12 +39,8 @@
     return { range: cmdId === "sheet-data-sort" ? full : sheetController.getSelectionRange(), parts: ["sheetRowCounts"] };
   }
 
-  function docEffectTrack({ docEditor }) {
-    const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
-    if (!firstP) return;
-    const nextOn = firstP.dataset.highlighted !== "true";
-    firstP.dataset.highlighted = nextOn ? "true" : "false";
-    firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
+  function docEffectTrack() {
+    host.__EASYOFFICE_DOC_NOTES_API__?.toggleTrackChanges?.(undefined, { undo: false, feedback: false });
   }
 
   function viewEffectTheme() {
@@ -210,6 +206,7 @@
       }
       workspacePanels.renderModuleOutline(mod);
       getSheetController()?.syncSheetFormatToolbar?.();
+      host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
       void getHwpHost?.()?.onModuleActivated(mod);
     }
 
@@ -407,8 +404,12 @@
       workspacePanels.renderModuleOutline(getActiveModule());
     }
 
-    // A document edits links in the link dialog; the embedded HWP surface keeps the note.
+    // A document edits links and comments in their dialogs; the embedded HWP surface keeps the note.
     function docEffectInsertLink(args) {
+      if (!args.cmdId.startsWith("document-")) docEffectInsertNote(args);
+    }
+
+    function docEffectReviewComment(args) {
       if (!args.cmdId.startsWith("document-")) docEffectInsertNote(args);
     }
 
@@ -432,7 +433,10 @@
     const DOC_EXACT_EFFECTS = {
       "hwp-mod-border": docEffectBorder,
       "doc-mod-toc": docEffectToc,
-      "doc-mod-footnote": docEffectModuleSpecific,
+      "doc-mod-footnote": () => {
+        host.__EASYOFFICE_DOC_NOTES_API__?.insertNote?.("footnote", undefined, { undo: false, feedback: false });
+        getWorkspacePanels().computeSmartStats();
+      },
       "doc-mod-mailmerge": docEffectModuleSpecific,
       "hwp-mod-header": docEffectModuleSpecific,
       "hwp-mod-field": docEffectModuleSpecific,
@@ -449,7 +453,7 @@
       "-insert-shape": docEffectInsertNote,
       "-insert-link": docEffectInsertLink,
       "-data-fn-browser": docEffectInsertNote,
-      "-review-comment": docEffectInsertNote,
+      "-review-comment": docEffectReviewComment,
       "-insert-table": docEffectInsertTable,
       "-data-autosum": () => getDocTable().autoSum(),
       "-data-sort": docEffectSort,
@@ -844,7 +848,7 @@
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
     const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
-    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
+    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc", "document-review-comment"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
@@ -863,8 +867,9 @@
       if (SHEET_PAGE_COMMANDS.has(cmdId)) return Promise.resolve(getSheetController().runSheetStructure("page-setup"));
       // The page break splits the block at the caret in the page, like Ctrl+Enter in the editor.
       if (cmdId === "doc-mod-page-break") return Promise.resolve(getDocPages().insertPageBreak());
-      // The link dialog opens at once, while the selection is still in the editor; the command itself still runs.
+      // The link and comment dialogs open at once, while the selection is still in the editor; the command itself still runs.
       if (cmdId === "document-insert-link") getDocLink().open();
+      if (cmdId === "document-review-comment") host.__EASYOFFICE_DOC_NOTES_API__?.openNewCommentDialog?.();
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
         await sheetController.commitPendingFocusedSheetCell(true);
@@ -891,8 +896,8 @@
         }
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
-        // The 표 만들기 dialog makes its own step when it is confirmed: opening it records none.
-        if (cmdId === "sheet-insert-table") {
+        // The 표 만들기 and 새 메모 dialogs make their own step when confirmed: opening them records none.
+        if (cmdId === "sheet-insert-table" || cmdId === "document-review-comment") {
           // nothing to keep
         } else if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
         else commitDeferredUndoSnapshot(preSnapshot);

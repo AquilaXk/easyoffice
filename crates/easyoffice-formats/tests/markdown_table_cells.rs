@@ -52,6 +52,7 @@ fn cell_text_with_markdown_characters_survives_a_markdown_round_trip() {
             .into(),
         )],
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes =
         UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Markdown, None).unwrap();

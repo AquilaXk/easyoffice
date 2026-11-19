@@ -23,6 +23,7 @@ fn encode(blocks: Vec<RichBlock>) -> String {
         title: "RTF 왕복".to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Rtf, None).unwrap();
     String::from_utf8(bytes).unwrap()

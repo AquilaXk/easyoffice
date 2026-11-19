@@ -25,6 +25,7 @@ fn doc(runs: Vec<RichRun>) -> RichDocument {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

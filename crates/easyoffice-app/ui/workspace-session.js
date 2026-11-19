@@ -44,7 +44,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE"],
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     "mod-symbol": EDIT_MODULES,
-    "insert-image": ["DOC"], "table-border-bg": ["DOC"], "table-cell-props": ["DOC"], "table-col-equal": ["DOC"],
+    "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
+    "table-border-bg": ["DOC"], "table-cell-props": ["DOC"], "table-col-equal": ["DOC"],
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
     ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),

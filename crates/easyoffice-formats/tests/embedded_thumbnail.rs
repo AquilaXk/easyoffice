@@ -33,6 +33,7 @@ fn rich() -> RichDocument {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -418,6 +419,7 @@ fn single_pass_encode_rich_with_thumbnail_beats_two_pass_rewrite() {
         title: "성능 비교".to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let rounds = 40;
     let t0 = std::time::Instant::now();

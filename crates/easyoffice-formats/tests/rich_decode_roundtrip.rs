@@ -116,6 +116,7 @@ fn assert_document_roundtrip(format: DocumentFormat, name: &str, blocks: Vec<Ric
         title: "라운드트립".to_string(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, format, None).unwrap();
     let first = UniversalFormatConverter::decode_rich(&bytes, Some(name)).unwrap();

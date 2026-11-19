@@ -8,6 +8,10 @@
 
 use crate::pdf_writer::PdfWriteOptions;
 use crate::rich_image::RichImage;
+use crate::rich_notes::{
+    is_deleted_run, validate_comments, validate_notes, RichComment, RichNote, RichNoteKind,
+    RichRevision,
+};
 use crate::rich_table::RichTable;
 use crate::{
     DocumentFormat, EasyOfficeError, HwpxCodec, UniversalDocumentModel, UniversalFormatConverter,
@@ -165,6 +169,12 @@ pub struct RichRun {
     pub link: Option<String>,
     /// A field that the page fills in; `text` is empty. Only header and footer paragraphs carry one.
     pub field: Option<RichField>,
+    /// Inline footnote or endnote reference (`(RichNoteKind, id)`).
+    pub note_ref: Option<(RichNoteKind, u32)>,
+    /// Comment anchor ID referencing [`RichComment::id`] in [`RichDocument::comments`].
+    pub comment_id: Option<u32>,
+    /// Tracked-change revision metadata (`Insert` or `Delete`) when tracked.
+    pub revision: Option<RichRevision>,
 }
 
 /// A value the page fills in at each page it is drawn on.
@@ -341,6 +351,9 @@ pub fn frame_paragraph(p: &RichParagraph) -> RichParagraph {
             .iter()
             .map(|r| RichRun {
                 link: None,
+                note_ref: None,
+                comment_id: None,
+                revision: None,
                 ..r.clone()
             })
             .collect(),
@@ -505,7 +518,11 @@ pub struct RichParagraph {
 
 impl RichParagraph {
     pub fn plain_text(&self) -> String {
-        self.runs.iter().map(|r| r.text.as_str()).collect()
+        self.runs
+            .iter()
+            .filter(|r| r.note_ref.is_none() && !is_deleted_run(r))
+            .map(|r| r.text.as_str())
+            .collect()
     }
 }
 
@@ -528,9 +545,25 @@ pub struct RichDocument {
     pub official_agency: Option<String>,
     /// Header and footer of every page.
     pub page_frame: RichPageFrame,
+    /// Footnotes and endnotes attached to inline `note_ref` runs.
+    pub notes: Vec<RichNote>,
+    /// Review comments attached to runs (or point anchor runs) via `comment_id`.
+    pub comments: Vec<RichComment>,
+    /// Whether tracked changes (`Insert` / `Delete` revisions) are enabled on this document.
+    pub track_changes: bool,
 }
 
 impl RichDocument {
+    /// Returns notes deduplicated by `(kind, id)` within document and text byte bounds.
+    pub fn validated_notes(&self) -> Vec<RichNote> {
+        validate_notes(&self.notes)
+    }
+
+    /// Returns comments deduplicated by `id` within document and field byte bounds.
+    pub fn validated_comments(&self) -> Vec<RichComment> {
+        validate_comments(&self.comments)
+    }
+
     pub(crate) fn display_title(&self) -> String {
         if self.title.trim().is_empty() {
             "문서".to_string()
@@ -842,7 +875,6 @@ mod tests {
     #[test]
     fn flattening_keeps_block_text_and_tables() {
         let doc = RichDocument {
-            page_frame: Default::default(),
             title: "t".into(),
             blocks: vec![
                 RichBlock::Paragraph(RichParagraph {
@@ -851,7 +883,7 @@ mod tests {
                 }),
                 RichBlock::Table(grid(&[&["1"]]).into()),
             ],
-            official_agency: None,
+            ..RichDocument::default()
         };
         let model = doc.to_universal_model();
         assert_eq!(model.paragraphs, vec!["가나".to_string()]);

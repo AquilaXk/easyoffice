@@ -22,7 +22,7 @@
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { label: "문자표 기호 삽입 완료" },
-    "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
+    "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주" },
   };
 
   function describeConversionSpec(res) {
@@ -126,6 +126,7 @@
         const ls = saved?.layoutStyle || {};
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
+        if (ls.eoTrackChanges === "true") tempDiv.dataset.eoTrackChanges = "true";
         const options = {
           baseAlign: ls.textAlign,
           baseLineHeight: ls.lineHeight,
@@ -137,6 +138,7 @@
           blocks: savePayload.collectDocBlocks(tempDiv, options),
           ...(docCols >= 2 ? { docColumns: docCols } : {}),
           ...savePayload.collectPageFrame(tempDiv, options),
+          ...savePayload.collectDocAnnotations(tempDiv),
           ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.payloadOf(ls.eoPage),
         };
       }
@@ -652,17 +654,7 @@
       return true;
     }
 
-    function appendDocFootnoteBlock(editor) {
-      const idx = (editor?.querySelectorAll(".eo-doc-footnote").length || 0) + 1;
-      const aside = document.createElement("aside");
-      aside.className = "eo-doc-footnote";
-      aside.dataset.docFootnote = "true";
-      aside.textContent = "각주 " + idx + ") 표준 행정 문서 관리 지침 및 근거 조항 참조";
-      editor?.appendChild(aside);
-      computeSmartStats();
-    }
-
-    function applyFallbackInsertMod(cmd, editor, textTarget) {
+    function applyFallbackInsertMod(cmd, _editor, textTarget) {
       if (cmd === "mod-symbol") {
         // A text node at the caret: the paragraph's inline runs keep their markup.
         if (!insertTextAtSelection(SYMBOL_TABLE_CHAR) && textTarget) {
@@ -674,7 +666,8 @@
         getDocRuns?.()?.refreshToolbarFromSelection?.();
         computeSmartStats();
       } else if (cmd === "mod-footnote") {
-        appendDocFootnoteBlock(editor);
+        host.__EASYOFFICE_DOC_NOTES_API__?.insertNote?.("footnote", undefined, { undo: false, feedback: false });
+        computeSmartStats();
       }
     }
 

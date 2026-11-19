@@ -4,6 +4,7 @@
 //! Content, automatic styles, embedded pictures, lists and master page styles
 //! are generated and packed into a standard ODF ZIP container.
 
+use crate::odt_notes_writer::OdtNotesContext;
 use crate::rich_document::frame_paragraph;
 use crate::rich_image::check_document_images;
 use crate::rich_image_writers::{odt_image_paragraph, MediaParts, ODT_PICTURE_NAMESPACES};
@@ -36,6 +37,8 @@ pub(crate) fn odt_rich_entries(
     let lists = plan_lists(&doc.blocks);
     let mut open_lists = OdtListWriter::default();
     let mut toc_scope = TocScope::odt();
+    let mut frame_notes_ctx = OdtNotesContext::default();
+    let mut notes_ctx = OdtNotesContext::new(doc);
     // Headers and footers go first so their styles enter the shared automatic style tables.
     let page = &doc.page_frame;
     let [header_xml, footer_xml, first_hdr_xml, first_ftr_xml, even_hdr_xml, even_ftr_xml] = [
@@ -63,6 +66,7 @@ pub(crate) fn odt_rich_entries(
                             &frame_paragraph(p),
                             &mut para_styles,
                             &mut text_styles,
+                            &mut frame_notes_ctx,
                         );
                         xml.push_str(&format!("</{tag}>"));
                     }
@@ -74,6 +78,7 @@ pub(crate) fn odt_rich_entries(
                         &frame_paragraph(p),
                         &mut para_styles,
                         &mut text_styles,
+                        &mut frame_notes_ctx,
                     );
                 }
             }
@@ -85,14 +90,26 @@ pub(crate) fn odt_rich_entries(
         match (block, lists.block_run[index]) {
             (RichBlock::Paragraph(p), Some(run)) => {
                 open_lists.enter(&mut body, &lists, run, level_of(p));
-                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
+                push_odt_paragraph(
+                    &mut body,
+                    p,
+                    &mut para_styles,
+                    &mut text_styles,
+                    &mut notes_ctx,
+                );
                 continue;
             }
             _ => open_lists.leave(&mut body),
         }
         match block {
             RichBlock::Paragraph(p) => {
-                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
+                push_odt_paragraph(
+                    &mut body,
+                    p,
+                    &mut para_styles,
+                    &mut text_styles,
+                    &mut notes_ctx,
+                );
             }
             RichBlock::Table(table) => {
                 push_odt_table(&mut body, table, &mut table_styles, &mut media)
@@ -126,6 +143,7 @@ pub(crate) fn odt_rich_entries(
     let font_decls = odt_font_face_decls(&text_styles.keys);
     let styles = format!("{font_decls}{styles}");
 
+    let tracked_changes_xml = notes_ctx.tracked_changes_xml();
     let content = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content ",
@@ -134,12 +152,14 @@ pub(crate) fn odt_rich_entries(
             "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" ",
             "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
-            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" {}",
-            "office:version=\"1.2\" title=\"{}\">{}<office:body><office:text>{}</office:text></office:body></office:document-content>"
+            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" {}",
+            "office:version=\"1.2\" title=\"{}\">{}<office:body><office:text>{}{}</office:text></office:body></office:document-content>"
         ),
         ODT_PICTURE_NAMESPACES,
         XmlSanitizer::escape(&doc.display_title()),
         styles,
+        tracked_changes_xml,
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;

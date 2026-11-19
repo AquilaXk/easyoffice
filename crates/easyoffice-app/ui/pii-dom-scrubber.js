@@ -46,6 +46,8 @@
     if (tag === "FOOTER") return true;
     if (el.id === "hwp-manuscript-preview") return true;
     if (el.classList?.contains("doc-table-toolbar")) return true;
+    if (el.classList?.contains("eo-note-ref") || el.classList?.contains("eo-doc-note-num")) return true;
+    if (el.dataset?.eoComments !== undefined) return true;
     return false;
   }
 

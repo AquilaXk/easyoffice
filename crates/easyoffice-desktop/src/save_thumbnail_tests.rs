@@ -33,6 +33,7 @@ fn rich() -> RichDocument {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -375,6 +376,7 @@ fn non_hangul_documents_draw_and_embed_first_page_thumbnails_automatically() {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     };
     for (name, bytes) in [
         (
@@ -498,6 +500,7 @@ fn generic_fallback_draws_ink_even_when_bundled_noto_is_absent() {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     };
     let docx_bytes =
         UniversalFormatConverter::encode_rich(&latin_doc, DocumentFormat::Docx, None).unwrap();

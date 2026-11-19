@@ -190,6 +190,7 @@ fn test_hwpx_huge_row_addr_table_bomb_fails_closed() {
             },
         )],
         official_agency: None,
+        ..easyoffice_formats::RichDocument::default()
     };
     let base_hwpx =
         UniversalFormatConverter::encode_rich(&base_doc, DocumentFormat::Hwpx, None).unwrap();
@@ -284,6 +285,7 @@ fn test_hwpx_table_outside_p_does_not_duplicate_paragraphs() {
             },
         )],
         official_agency: None,
+        ..easyoffice_formats::RichDocument::default()
     };
     let base_hwpx =
         UniversalFormatConverter::encode_rich(&base_doc, DocumentFormat::Hwpx, None).unwrap();

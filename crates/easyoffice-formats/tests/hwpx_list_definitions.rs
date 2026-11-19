@@ -22,6 +22,7 @@ fn header_of(blocks: Vec<RichBlock>) -> String {
         title: "목록".into(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None).unwrap();
     let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
@@ -115,6 +116,7 @@ fn hwpx_writes_and_roundtrips_list_levels_number_formats_and_separate_runs() {
         title: "다단계".into(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None).unwrap();
     let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
@@ -197,6 +199,7 @@ fn hwpx_header_with_excessive_numbering_heads_fails_closed() {
         title: "상한".into(),
         blocks: vec![item(RichListKind::Ordered, "일")],
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None).unwrap();
     let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();

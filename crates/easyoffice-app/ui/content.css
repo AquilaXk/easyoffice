@@ -543,3 +543,196 @@
 #doc-editor .doc-inline-table th .doc-inline-image {
   margin: 2px 0;
 }
+
+/* ─── 각주 · 미주 · 새 메모 · 변경 내용 추적 ─────────────────────────────── */
+#doc-editor sup.eo-note-ref {
+  font-size: 0.72em;
+  line-height: 0;
+  color: var(--accent-strong);
+  cursor: pointer;
+  user-select: none;
+  padding: 0 1px;
+}
+#doc-editor sup.eo-note-ref:hover {
+  text-decoration: underline;
+}
+
+#doc-editor section.eo-doc-notes {
+  position: relative;
+  margin: 20px 0 0;
+  padding: 8px 0 0;
+  border: 0;
+  background: transparent;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: var(--ui-text-secondary);
+}
+#doc-editor section.eo-doc-notes:hover {
+  background: transparent;
+}
+#doc-editor section.eo-doc-notes::before {
+  content: "";
+  display: block;
+  width: 140px;
+  border-top: 1px solid var(--ui-border-strong);
+  margin-bottom: 6px;
+}
+#doc-editor .eo-doc-note-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 2px 0;
+  font-size: 9.5pt;
+}
+#doc-editor .eo-doc-note-num {
+  flex-shrink: 0;
+  color: var(--accent-strong);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+#doc-editor .eo-doc-note-num:hover {
+  text-decoration: underline;
+}
+#doc-editor .eo-doc-note-body {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 9.5pt;
+}
+
+#doc-editor span.eo-comment-range {
+  background: var(--ui-warning-bg);
+  border-bottom: 1px solid var(--ui-warning-border);
+}
+#doc-editor span.eo-comment-point {
+  display: inline-block;
+  width: 6px;
+  height: 0.9em;
+  vertical-align: baseline;
+  background: var(--ui-warning-border);
+  border-radius: var(--radius-xs);
+  margin: 0 1px;
+}
+
+#doc-editor ins.eo-rev-ins {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  background: var(--ui-accent-bg-light);
+}
+#doc-editor del.eo-rev-del {
+  color: var(--ui-danger);
+  text-decoration: line-through;
+  background: var(--ui-danger-soft);
+}
+
+.doc-studio-grid:has(> #doc-review-pane:not([hidden])) {
+  grid-template-columns: 20px minmax(0, 1fr) 260px;
+}
+.doc-review-pane[hidden] {
+  display: none;
+}
+.doc-review-pane {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ui-surface-raised);
+  border-left: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+}
+.doc-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--ui-bg-light);
+  border-bottom: 1px solid var(--ui-border);
+}
+.doc-review-title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.doc-review-close,
+.doc-review-btn {
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+.doc-review-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.doc-review-card {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.doc-review-card--insert {
+  border-left: 3px solid var(--accent-primary);
+}
+.doc-review-card--delete {
+  border-left: 3px solid var(--ui-danger);
+}
+.doc-review-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--ui-text-muted);
+}
+.doc-review-card-meta strong {
+  color: var(--ui-text);
+}
+.doc-review-quote {
+  font-size: var(--font-size-sm);
+  color: var(--ui-text-secondary);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--ui-warning-border);
+  overflow-wrap: anywhere;
+}
+.doc-review-text {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--ui-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.doc-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+#doc-comment-dialog {
+  width: min(400px, calc(100vw - 32px));
+}
+#doc-comment-dialog .doc-comment-row {
+  align-items: flex-start;
+}
+#doc-comment-dialog .doc-comment-row .dialog-label {
+  padding-top: var(--space-1);
+}
+#doc-comment-dialog .doc-comment-textarea {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 76px;
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.45;
+  resize: vertical;
+  font-family: var(--font-family-ui);
+}

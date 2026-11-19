@@ -43,6 +43,7 @@ fn sample() -> RichDocument {
             }),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

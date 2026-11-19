@@ -34,6 +34,7 @@ fn docx_bytes() -> Vec<u8> {
             RichBlock::Table(vec![vec!["가".into(), "나".into()]].into()),
         ],
         official_agency: None,
+        ..RichDocument::default()
     };
     UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap()
 }
@@ -374,6 +375,7 @@ fn source_file_convert_evaluates_table_formulas_and_preserves_metadata_title() {
             .into(),
         )],
         official_agency: None,
+        ..RichDocument::default()
     };
     let src_bytes =
         UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
@@ -650,6 +652,7 @@ fn rich_sample(png: &[u8]) -> RichDocument {
             RichBlock::Image(RichImage::new(png.to_vec(), "작은 \"그림\"").unwrap()),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -836,6 +839,7 @@ fn decode_answer_is_byte_exact_for_documents_workbooks_and_slides() {
             RichBlock::Table(table),
         ],
         official_agency: None,
+        ..RichDocument::default()
     };
     let json = decode_response(
         &decoded(DecodedContent::Document(document)),

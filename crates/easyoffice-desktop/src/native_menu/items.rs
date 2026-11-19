@@ -154,6 +154,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("insert:image", "그림", None, "studio-cmd:insert-image"),
     item("insert:chart", "차트 개체", None, "studio-cmd:insert-chart"),
     item("insert:footnote", "각주", None, "studio-cmd:mod-footnote"),
+    item("insert:endnote", "미주", None, "studio-cmd:mod-endnote"),
     item("insert:symbol", "문자표", None, "studio-cmd:mod-symbol"),
     item("insert:link", "하이퍼링크", None, "studio-cmd:insert-link"),
     item(
@@ -631,8 +632,20 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:review-track",
     ),
     item(
+        "tool:review-accept-all",
+        "모든 변경 내용 수락",
+        None,
+        "studio-cmd:review-accept-all",
+    ),
+    item(
+        "tool:review-reject-all",
+        "모든 변경 내용 거부",
+        None,
+        "studio-cmd:review-reject-all",
+    ),
+    item(
         "tool:review-comment",
-        "검토 메모 스레드",
+        "새 메모",
         None,
         "studio-cmd:review-comment",
     ),

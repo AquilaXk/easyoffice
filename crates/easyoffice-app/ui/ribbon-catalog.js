@@ -79,7 +79,7 @@
     ],
     review: [
       { suffix: "review-track", title: "변경 내용 추적", shortcut: "⇧⌘E" },
-      { suffix: "review-comment", title: "검토 메모 스레드", shortcut: "⌥⌘C" },
+      { suffix: "review-comment", title: "새 메모", shortcut: "⌥⌘C" },
       { suffix: "review-verify", title: "문서 구조 보안 검사", shortcut: "⌃⌘V" },
       { suffix: "review-stats", title: "문서 통계·글자 수", shortcut: "⇧⌘I" },
     ],
@@ -94,7 +94,7 @@
   const MODULE_SPECIFIC_SPECS = {
     DOC: [
       { id: "doc-mod-toc", title: "자동 목차 생성", shortcut: "⌃⌥T" },
-      { id: "doc-mod-footnote", title: "각주·미주 삽입", shortcut: "⌥⌘F" },
+      { id: "doc-mod-footnote", title: "각주", shortcut: "⌥⌘F" },
       { id: "doc-mod-mailmerge", title: "메일 머지 치환", shortcut: "⌃⌘M" },
       { id: "doc-mod-tableformula", title: "표 셀 수식 계산", shortcut: "⌃⌘=" },
     ],

@@ -7,7 +7,8 @@ use std::fmt::Write;
 use easyoffice_formats::rich_document::toc_bookmark_number;
 use easyoffice_formats::{
     evaluate_table_formulas, DecodedSlide, PdfReadbackReport, RichAlignment, RichBindingKind,
-    RichBlock, RichDocument, RichField, RichImage, RichListKind, RichParagraph,
+    RichBlock, RichDocument, RichField, RichImage, RichListKind, RichNoteKind, RichParagraph,
+    RichRevision,
 };
 
 use super::{push_json_str, push_opt_json_str};
@@ -153,6 +154,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
     let mut chars_no_spaces = 0usize;
     let mut footnote_section = false;
     let mut table_formula_count = 0usize;
+    let mut revision_count = 0usize;
 
     let mut outline: Vec<(usize, u8, String, Option<u32>)> = Vec::new();
     let mut empty_headings: Vec<usize> = Vec::new();
@@ -161,6 +163,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
     let mut image_entries: Vec<ReadbackImageEntry<'_>> = Vec::new();
     let mut broken_bookmarks: Vec<(usize, String)> = Vec::new();
     let mut irregular_tables: Vec<usize> = Vec::new();
+    let mut revisions: Vec<(usize, &RichRevision, &str)> = Vec::new();
 
     for (idx, block) in doc.blocks.iter().enumerate() {
         match block {
@@ -194,6 +197,12 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
                     }
                 }
                 for r in &p.runs {
+                    if let Some(rev) = &r.revision {
+                        revision_count += 1;
+                        if revisions.len() < max_items {
+                            revisions.push((idx, rev, r.text.as_str()));
+                        }
+                    }
                     if let Some(url) = &r.link {
                         link_count += 1;
                         if let Some(name) = url.strip_prefix('#') {
@@ -270,10 +279,21 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
         }
     }
 
+    let validated_notes = doc.validated_notes();
+    let validated_comments = doc.validated_comments();
+    let footnote_count = validated_notes
+        .iter()
+        .filter(|n| n.kind == RichNoteKind::Footnote)
+        .count();
+    let endnote_count = validated_notes.len() - footnote_count;
+    footnote_section |= !validated_notes.is_empty();
+
     let _ = write!(
         out,
-        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"taskItemCount\":{task_count},\"checkedTaskCount\":{checked_task_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"missingAltImageCount\":{missing_alt_image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
-        doc.blocks.len()
+        "\"statistics\":{{\"blockCount\":{},\"paragraphCount\":{para_count},\"headingCount\":{heading_count},\"listItemCount\":{list_count},\"taskItemCount\":{task_count},\"checkedTaskCount\":{checked_task_count},\"tableCount\":{table_count},\"imageCount\":{image_count},\"missingAltImageCount\":{missing_alt_image_count},\"equationCount\":{equation_count},\"footnoteSectionPresent\":{footnote_section},\"footnoteCount\":{footnote_count},\"endnoteCount\":{endnote_count},\"commentCount\":{},\"revisionCount\":{revision_count},\"trackChanges\":{},\"linkCount\":{link_count},\"wordCount\":{word_count},\"charCountWithSpaces\":{chars_with_spaces},\"charCountWithoutSpaces\":{chars_no_spaces}}},\"outline\":[",
+        doc.blocks.len(),
+        validated_comments.len(),
+        doc.track_changes
     );
     for (i, (b_idx, level, text, bm)) in outline.iter().enumerate() {
         if i > 0 {
@@ -337,6 +357,60 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
         out.push('}');
     }
     let _ = write!(out, "],\"tableFormulaCount\":{table_formula_count}}}");
+    if !validated_notes.is_empty() {
+        out.push_str(",\"notes\":[");
+        for (i, n) in validated_notes.iter().take(max_items).enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"id\":{},\"kind\":\"{}\",\"text\":",
+                n.id,
+                n.kind.wire_name()
+            );
+            push_json_str(out, &n.text);
+            out.push('}');
+        }
+        out.push(']');
+    }
+    if !validated_comments.is_empty() {
+        out.push_str(",\"comments\":[");
+        for (i, c) in validated_comments.iter().take(max_items).enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "{{\"id\":{},\"author\":", c.id);
+            push_json_str(out, &c.author);
+            out.push_str(",\"date\":");
+            push_json_str(out, &c.date);
+            out.push_str(",\"text\":");
+            push_json_str(out, &c.text);
+            out.push('}');
+        }
+        out.push(']');
+    }
+    if !revisions.is_empty() {
+        out.push_str(",\"revisions\":[");
+        for (i, (b_idx, rev, text)) in revisions.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"blockIndex\":{b_idx},\"id\":{},\"kind\":\"{}\",\"author\":",
+                rev.id,
+                rev.kind.wire_name()
+            );
+            push_json_str(out, &rev.author);
+            out.push_str(",\"date\":");
+            push_json_str(out, &rev.date);
+            out.push_str(",\"text\":");
+            push_json_str(out, text);
+            out.push('}');
+        }
+        out.push(']');
+    }
 }
 
 fn write_usize_list(out: &mut String, items: &[usize]) {

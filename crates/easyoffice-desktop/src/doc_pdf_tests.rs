@@ -86,6 +86,7 @@ fn document(extra_paragraphs: usize) -> RichDocument {
         title: "보고서".into(),
         blocks,
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -164,6 +165,7 @@ fn list_items_get_their_bullet_and_number() {
             item(RichListKind::Ordered, "마바"),
         ],
         official_agency: None,
+        ..RichDocument::default()
     };
     let numbered = hwpx_to_pdf(&hwpx(&doc), &PdfWriteOptions::default(), &fonts).unwrap();
     assert_searchable(&numbered, "123.");

@@ -94,6 +94,7 @@ fn document() -> RichDocument {
             ),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

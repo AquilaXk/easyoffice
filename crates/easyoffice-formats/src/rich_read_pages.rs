@@ -441,6 +441,7 @@ fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> RichRun {
         // The paragraph style's font is the template default, so only a character style counts.
         font: c.and_then(|f| f.font.clone()),
         script: pick(c, p, |f| f.script).unwrap_or_default(),
+        ..RichRun::default()
     }
 }
 
@@ -954,6 +955,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
             title,
             blocks,
             official_agency: None,
+            ..RichDocument::default()
         },
         warnings,
     ))

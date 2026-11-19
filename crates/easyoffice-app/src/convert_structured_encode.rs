@@ -791,6 +791,7 @@ fn encode_structured_with_thumbnail(
                         title: title.to_string(),
                         blocks,
                         official_agency: None,
+                        ..RichDocument::default()
                     };
                     encode_rich_for_host(&doc, format, None, thumbnail, None)
                 }

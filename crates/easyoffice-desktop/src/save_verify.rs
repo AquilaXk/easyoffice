@@ -221,6 +221,7 @@ mod tests {
                 },
             )],
             official_agency: None,
+            ..easyoffice_formats::RichDocument::default()
         };
         UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Pages, None).unwrap()
     }

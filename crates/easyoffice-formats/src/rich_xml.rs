@@ -2,6 +2,7 @@
 //! reader lives in [`crate::xml_stream`].
 
 use crate::rich_document::{RichToc, MAX_TOC_LEVEL, MAX_TOC_PAGE};
+use crate::rich_notes::RichRevision;
 use crate::{RichRun, RichScript};
 
 /// Boolean OOXML-style toggle value: absent or anything but `0`/`false`/`off`/`none` is true.
@@ -73,11 +74,30 @@ pub(crate) fn push_linked_run(
     fmt: &CharFmt,
     link: Option<&str>,
 ) {
+    push_annotated_run(runs, text, fmt, link, None, None);
+}
+
+/// [`push_linked_run`] preserving `comment_id` and `revision`; runs never merge across distinct
+/// `note_ref`, `comment_id`, or `revision` boundaries.
+pub(crate) fn push_annotated_run(
+    runs: &mut Vec<RichRun>,
+    text: &str,
+    fmt: &CharFmt,
+    link: Option<&str>,
+    comment_id: Option<u32>,
+    revision: Option<&RichRevision>,
+) {
     if text.is_empty() {
         return;
     }
     if let Some(last) = runs.last_mut() {
-        if last.field.is_none() && fmt.matches_run(last) && last.link.as_deref() == link {
+        if last.field.is_none()
+            && last.note_ref.is_none()
+            && last.comment_id == comment_id
+            && last.revision.as_ref() == revision
+            && fmt.matches_run(last)
+            && last.link.as_deref() == link
+        {
             last.text.push_str(text);
             return;
         }
@@ -95,6 +115,9 @@ pub(crate) fn push_linked_run(
         color: fmt.color.clone(),
         highlight: fmt.highlight.clone(),
         script: fmt.script,
+        note_ref: None,
+        comment_id,
+        revision: revision.cloned(),
     });
 }
 

@@ -22,7 +22,9 @@ use std::fmt::Write;
 use crate::convert_hwp::ShellWriters;
 use crate::convert_password::{accepts_loss, password_lost, REFUSED_PASSWORD_LOSS};
 use crate::convert_structured::convert_structured_table::{write_image_fields, write_table_extras};
-use crate::convert_structured::{encode_source_target, StructuredContent};
+use crate::convert_structured::{
+    convert_structured_notes, encode_source_target, StructuredContent,
+};
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::page_setup_json::write_page_setup;
 use crate::sheet_look_json::write_look;
@@ -102,6 +104,7 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
                 push_json_str(out, v);
             }
         }
+        convert_structured_notes::write_run_annotations(out, r);
         out.push('}');
     }
     out.push(']');
@@ -664,6 +667,10 @@ fn decode_response(
                     write_list(&mut out, paragraphs, write_paragraph);
                 }
             }
+            out.push(']');
+            convert_structured_notes::write_doc_root_notes(&mut out, doc);
+            out.push('}');
+            return Ok(out);
         }
         DecodedContent::Workbook(sheets) => {
             out.push_str("\"sheets\":[");

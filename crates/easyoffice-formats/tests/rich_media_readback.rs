@@ -45,6 +45,7 @@ fn sample(png: &[u8], jpeg: &[u8]) -> RichDocument {
             RichBlock::Image(RichImage::new(jpeg.to_vec(), "").unwrap()),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -214,6 +215,7 @@ fn readers_fail_closed_when_a_package_holds_too_many_pictures() {
         title: "많은 그림".to_string(),
         blocks: vec![RichBlock::Image(img.clone()); MAX_IMAGES_PER_DOCUMENT],
         official_agency: None,
+        ..RichDocument::default()
     };
     let odt = encode(&doc, DocumentFormat::Odt);
     let extra_odt = repack(&odt, |p, data| {

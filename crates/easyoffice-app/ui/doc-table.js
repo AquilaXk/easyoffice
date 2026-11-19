@@ -149,13 +149,15 @@
     const recalculate = () => applyAtCaret(calculate);
     const autoSum = () => applyAtCaret(OPERATIONS["table-sum"]);
     const docImage = host.__EASYOFFICE_CREATE_DOC_IMAGE__?.(deps) ?? null;
+    const docNotes = host.__EASYOFFICE_CREATE_DOC_NOTES_UI__?.(deps) ?? null;
     const tableStyle = host.__EASYOFFICE_CREATE_DOC_TABLE_STYLE__?.({ ...deps, grid, selectionAt, rectOf, placeCaret }) ?? null;
 
-    const handles = (cmd) => Object.hasOwn(OPERATIONS, cmd) || Boolean(docImage?.handles(cmd)) || Boolean(tableStyle?.handles(cmd));
+    const handles = (cmd) => Object.hasOwn(OPERATIONS, cmd) || Boolean(docImage?.handles(cmd)) || Boolean(docNotes?.handles(cmd)) || Boolean(tableStyle?.handles(cmd));
 
-    // Runs a table menu command (or document image / table style command) at the caret.
+    // Runs a table menu command (or document image / notes / table style command) at the caret.
     function run(cmd) {
       if (docImage?.handles(cmd)) return docImage.run(cmd);
+      if (docNotes?.handles(cmd)) return docNotes.run(cmd);
       if (tableStyle?.handles(cmd)) return tableStyle.run(cmd);
       const sel = selectionAt();
       if (!sel) {
@@ -193,6 +195,7 @@
         if (TABLE_ONLY_COMMANDS.has(item.dataset.studioMenuCmd)) item.setAttribute("aria-disabled", inTable ? "false" : "true");
       }
       docImage?.syncResizer?.();
+      docNotes?.syncAll?.();
     }
 
     function bind() {
@@ -201,6 +204,7 @@
       const menu = document.querySelector('.menu-item[data-menu="table"]');
       for (const type of ["mouseenter", "focusin", "click"]) menu?.addEventListener(type, syncMenu);
       docImage?.bind();
+      docNotes?.bind();
       tableStyle?.bind();
       syncMenu();
     }

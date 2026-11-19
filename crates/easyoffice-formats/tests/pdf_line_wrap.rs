@@ -157,6 +157,7 @@ mod write_options {
                 ..RichParagraph::default()
             })],
             official_agency: None,
+            ..RichDocument::default()
         }
     }
 

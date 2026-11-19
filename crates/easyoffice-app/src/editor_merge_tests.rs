@@ -46,6 +46,7 @@ fn encode(table: RichTable, format: DocumentFormat) -> Vec<u8> {
         title: "병합".into(),
         blocks: vec![RichBlock::Table(table)],
         official_agency: None,
+        ..RichDocument::default()
     };
     UniversalFormatConverter::encode_rich(&doc, format, None).unwrap()
 }

@@ -38,6 +38,7 @@ fn doc_of(table: RichTable) -> RichDocument {
         title: "병합".into(),
         blocks: vec![RichBlock::Table(table)],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 

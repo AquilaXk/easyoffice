@@ -353,6 +353,7 @@ const INSERT_DOC: MenuSpec = menu(
         "insert:chart",
         S,
         "insert:footnote",
+        "insert:endnote",
         "insert:symbol",
         "insert:link",
         S,
@@ -618,6 +619,24 @@ const TOOL_HWP: MenuSpec = menu(
         "tool:palette",
     ],
 );
+const TOOL_DOC: MenuSpec = menu(
+    "도구",
+    &[
+        "tool:diagnose",
+        "tool:scrub-pii",
+        "tool:security-audit",
+        "tool:bench-run",
+        S,
+        "tool:review-track",
+        "tool:review-accept-all",
+        "tool:review-reject-all",
+        "tool:review-comment",
+        "tool:review-verify",
+        "tool:review-stats",
+        S,
+        "tool:palette",
+    ],
+);
 const TOOL_OFFICE: MenuSpec = menu(
     "도구",
     &[
@@ -681,7 +700,7 @@ const DOC: [&MenuSpec; 11] = [
     &FORMAT_TEXT,
     &PAGE_DOC,
     &TABLE_DOC,
-    &TOOL_OFFICE,
+    &TOOL_DOC,
     &WINDOW,
     &HELP,
 ];

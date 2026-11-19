@@ -26,6 +26,8 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
+#[path = "convert_structured_notes.rs"]
+pub(crate) mod convert_structured_notes;
 #[path = "convert_structured_table.rs"]
 pub(crate) mod convert_structured_table;
 
@@ -153,12 +155,16 @@ pub(super) fn as_object<'a>(
         .ok_or_else(|| invalid(format!("구조화 저장: '{what}' 항목은 객체여야 합니다.")))
 }
 
-pub(super) struct Budget(usize);
+#[derive(Default)]
+pub(super) struct Budget {
+    items: usize,
+    pub(super) revisions: usize,
+}
 
 impl Budget {
     pub(super) fn take(&mut self, n: usize) -> Result<(), EasyOfficeError> {
-        self.0 = self.0.saturating_add(n);
-        if self.0 > MAX_STRUCTURED_ITEMS {
+        self.items = self.items.saturating_add(n);
+        if self.items > MAX_STRUCTURED_ITEMS {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "구조화 저장 항목 수가 한도({MAX_STRUCTURED_ITEMS})를 초과했습니다."
             )));
@@ -175,7 +181,7 @@ pub(crate) type ParsedStructured = (StructuredContent, Vec<String>);
 pub(crate) fn parse_structured_content(
     entries: &JsonObject,
 ) -> Result<Option<ParsedStructured>, EasyOfficeError> {
-    let mut budget = Budget(0);
+    let mut budget = Budget::default();
     if let Some(v) = field(entries, "blocks") {
         let mut warnings = Vec::new();
         let mut blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
@@ -195,11 +201,17 @@ pub(crate) fn parse_structured_content(
                 }
             }
         }
+        let notes = convert_structured_notes::parse_doc_notes(entries, &mut budget)?;
+        let comments = convert_structured_notes::parse_doc_comments(entries, &mut budget)?;
+        let track_changes = opt_bool(entries, "trackChanges")?;
         let doc = RichDocument {
             page_frame: parse_page_frame(entries, &mut budget)?,
             title: String::new(),
             blocks,
             official_agency: None,
+            notes,
+            comments,
+            track_changes,
         };
         check_document_images(&doc)?;
         let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);
@@ -310,6 +322,8 @@ fn parse_paragraph(
                 .ok_or_else(|| invalid("구조화 저장: run에는 'text'가 필요합니다."))?
                 .as_str()
                 .ok_or_else(|| invalid("구조화 저장: run 'text'는 문자열이어야 합니다."))?;
+            let (note_ref, comment_id, revision) =
+                convert_structured_notes::parse_run_annotations(run, budget)?;
             runs.push(RichRun {
                 field: opt_run_field(run)?,
                 link: opt_link(run)?,
@@ -323,6 +337,9 @@ fn parse_paragraph(
                 color: opt_color(run, "color")?,
                 highlight: opt_color(run, "highlight")?,
                 script: opt_script(run)?,
+                note_ref,
+                comment_id,
+                revision,
             });
         }
     }

@@ -53,6 +53,7 @@ fn document() -> RichDocument {
             item("다시 첫째", RichListKind::Ordered, 0, None),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -189,6 +190,7 @@ fn docx_without_lists_has_no_numbering_part() {
         title: "본문".into(),
         blocks: vec![body("문단")],
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
     let parts = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();

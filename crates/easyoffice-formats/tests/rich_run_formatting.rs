@@ -49,6 +49,7 @@ fn sample() -> RichDocument {
             }),
         ],
         official_agency: None,
+        ..RichDocument::default()
     }
 }
 
@@ -147,6 +148,7 @@ fn rtf_plain_text_and_tables_still_decode_after_the_run_reader() {
             }),
         ],
         official_agency: None,
+        ..RichDocument::default()
     };
     let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Rtf, None).unwrap();
     assert_eq!(decode_blocks(&bytes, "t.rtf"), doc.blocks);
@@ -170,6 +172,7 @@ fn heading_runs_keep_only_explicit_size_overrides() {
             ..RichParagraph::default()
         })],
         official_agency: None,
+        ..RichDocument::default()
     };
     for (format, name) in [
         (DocumentFormat::Docx, "h.docx"),

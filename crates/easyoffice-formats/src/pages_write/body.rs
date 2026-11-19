@@ -19,6 +19,7 @@ use super::tables::{write_table_attachment, TableWriteBudget};
 use super::wire::{float, msg, reference, string, varint, Fld};
 use crate::pages_schema::{drawable, geometry, hyperlink, image, storage, ty};
 use crate::rich_image::check_document_images;
+use crate::rich_notes::{collect_note_ordinals, is_deleted_run};
 use crate::rich_table::safe_cell_link_url;
 use crate::{
     normalize_hex_color, EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField,
@@ -248,6 +249,7 @@ pub(super) fn write_body<'a>(
     section_id: Option<u64>,
 ) -> Result<u64, EasyOfficeError> {
     check_document_images(doc)?;
+    let (notes, ordinals) = collect_note_ordinals(doc);
     let doc_comp = bp.document();
 
     let mut text = String::new();
@@ -322,7 +324,13 @@ pub(super) fn write_body<'a>(
                 push_run_change(&mut layout_styles, offset, cstyle);
 
                 for run in &paragraph.runs {
-                    let piece = clean(&run.text);
+                    if is_deleted_run(run) {
+                        continue;
+                    }
+                    let piece = match run.note_ref {
+                        Some(key) => format!("[{}]", ordinals.get(&key).copied().unwrap_or(1)),
+                        None => clean(&run.text),
+                    };
                     if piece.is_empty() {
                         continue;
                     }
@@ -332,7 +340,10 @@ pub(super) fn write_body<'a>(
                             "Pages 쓰기: 글자 구간 수가 열기 한도를 넘었습니다".to_string(),
                         ));
                     }
-                    let look = look_of(run);
+                    let mut look = look_of(run);
+                    if run.note_ref.is_some() {
+                        look.script = CharLook::script_code(crate::RichScript::Superscript);
+                    }
                     let wanted = if look.is_plain() {
                         None
                     } else {
@@ -448,6 +459,30 @@ pub(super) fn write_body<'a>(
                 offset += 1;
             }
         }
+    }
+    for (note, ord) in notes {
+        lines += 1;
+        if lines > MAX_PARAGRAPHS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages 쓰기: 문단 수가 열기 한도를 넘었습니다".to_string(),
+            ));
+        }
+        if lines > 1 {
+            close_link(&mut active_link, &mut smartfield_entries, offset);
+            text.push('\n');
+            offset += 1;
+        }
+        paragraph_entries.push(entry(offset, Some(styles.body)));
+        push_run_change(&mut list_levels, offset, 0);
+        push_run_change(&mut list_styles, offset, styles.list);
+        push_run_change(&mut layout_styles, offset, styles.body_column);
+        if current_char.is_some() {
+            character_entries.push((offset, None));
+            current_char = None;
+        }
+        let note_text = clean(&format!("[{ord}] {}", note.text.replace('\n', " ")));
+        text.push_str(&note_text);
+        offset += note_text.encode_utf16().count() as u64;
     }
 
     if lines == 0 {
