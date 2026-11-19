@@ -560,6 +560,20 @@ fn write_readback_image_meta(out: &mut String, img: &RichImage) {
     push_json_str(out, img.alt());
 }
 
+pub(super) fn write_slide_deck_readback(
+    out: &mut String,
+    deck: &easyoffice_formats::RichSlideDeck,
+    max_items: usize,
+) {
+    crate::slide_deck_json::write_slide_deck_readback(
+        out,
+        deck,
+        max_items,
+        push_json_str,
+        write_usize_list,
+    );
+}
+
 pub(super) fn write_slides_readback(out: &mut String, slides: &[DecodedSlide], max_items: usize) {
     let mut untitled: Vec<usize> = Vec::new();
     let mut empty: Vec<usize> = Vec::new();

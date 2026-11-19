@@ -160,15 +160,26 @@
       const slides = slideDeckState.slice(0, MAX_CONTEXT_SLIDES).map((s, index) => {
         const body = String(s?.lower || "");
         const bullets = body.split(/\n+/).map((t) => t.trim()).filter(Boolean);
+        const elements = (Array.isArray(s?.elements) ? s.elements : []).slice(0, 32).map((el) => ({
+          id: String(el.id || ""),
+          kind: String(el.kind || ""),
+          x: Number(el.x || 0),
+          y: Number(el.y || 0),
+          w: Number(el.w || 0),
+          h: Number(el.h || 0),
+          text: String(el.text || el.title || el.alt || "").slice(0, 160),
+        }));
         return {
           index,
           title: String(s?.title || ""),
           bullets,
           body,
           notes: String(s?.notes || ""),
+          layout: String(s?.layout || "titleAndContent"),
+          elements,
         };
       });
-      return { activeIndex: getActiveSlideIndex(), slides };
+      return { activeIndex: getActiveSlideIndex(), aspect: String(slideDeckState[0]?.aspect || "16:9"), slides };
     }
 
     function extractPdfContext() {
@@ -412,8 +423,12 @@
     }
 
     function executeSlideOperation(kind, op, locations) {
-      const panels = getWorkspacePanels();
-      panels?.syncActiveSlideDomStylesToDeck?.();
+      const codec = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__;
+      const aspect = String(slideDeckState[0]?.aspect || "16:9");
+      const normEls = (list) =>
+        Array.isArray(list) && codec
+          ? list.slice(0, 64).map((e, i) => codec.normalizeSlideElement(e, aspect, "el-" + (i + 1))).filter(Boolean)
+          : undefined;
       const bulletBody = Array.isArray(op.bullets) ? op.bullets.map((b) => String(b ?? "")).join("\n") : undefined;
       if (kind === "slide.add") {
         if (slideDeckState.length >= MAX_CONTEXT_SLIDES) {
@@ -425,9 +440,11 @@
           title: String(op.title || "새 슬라이드"),
           lower: bulletBody !== undefined ? bulletBody : String(op.body ?? op.lower ?? ""),
           notes: String(op.notes || ""),
-          transition: String(op.transition || base?.transition || "fade"),
+          transition: codec ? codec.normalizeTransition(op.transition || base?.transition) : String(op.transition || base?.transition || "fade"),
           ...empty,
-          aspect: String(base?.aspect || "16:9"),
+          aspect,
+          layout: codec ? codec.normalizeLayout(op.layout) : "titleAndContent",
+          elements: normEls(op.elements) || [],
         });
         const idx = slideDeckState.length - 1;
         locations.push({ module: "SLIDE", label: "슬라이드 " + (idx + 1), slideIndex: idx });
@@ -442,10 +459,24 @@
         throw new Error("유효하지 않은 슬라이드 번호입니다.");
       }
       const target = slideDeckState[rawIdx];
+      if (!Array.isArray(target.elements)) target.elements = [];
+      if (kind === "slide.add_element") {
+        const elSpec = op.element && typeof op.element === "object" ? op.element : op;
+        const created = codec?.normalizeSlideElement?.(elSpec, aspect, "el-" + (target.elements.length + 1));
+        if (!created) throw new Error("유효하지 않은 슬라이드 개체 항목입니다.");
+        if (target.elements.length >= 256) throw new Error("슬라이드당 개체 수 한도를 초과했습니다.");
+        target.elements.push(created);
+        locations.push({ module: "SLIDE", label: "슬라이드 " + (rawIdx + 1), slideIndex: rawIdx });
+        return rawIdx;
+      }
       if (op.title !== undefined) target.title = String(op.title);
       if (bulletBody !== undefined) target.lower = bulletBody;
       else if (op.body !== undefined || op.lower !== undefined) target.lower = String(op.body ?? op.lower ?? "");
       if (op.notes !== undefined) target.notes = String(op.notes);
+      if (op.layout !== undefined && codec) target.layout = codec.normalizeLayout(op.layout);
+      if (op.transition !== undefined && codec) target.transition = codec.normalizeTransition(op.transition);
+      const replacedEls = normEls(op.elements);
+      if (replacedEls !== undefined) target.elements = replacedEls;
       locations.push({ module: "SLIDE", label: "슬라이드 " + (rawIdx + 1), slideIndex: rawIdx });
       return rawIdx;
     }
@@ -457,6 +488,7 @@
       if (operations.length > MAX_OPERATIONS) {
         throw new Error("코파일럿 작업 개수가 허용 상한(64개)을 초과했습니다.");
       }
+      if (mod === "SLIDE") getWorkspacePanels()?.syncActiveSlideDomStylesToDeck?.();
       const beforeSnap = captureWorkspaceSnapshot(false);
       const derivedLocations = [];
       let touchedSheet = null;
@@ -475,7 +507,7 @@
           else executeSheetChart(op, sheetName, derivedLocations);
         } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
           touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
-        } else if (kind === "slide.add" || kind === "slide.update") {
+        } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
           focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
         } else {
           throw new Error("지원하지 않는 코파일럿 작업입니다: " + kind);

@@ -182,6 +182,7 @@
       }
       if (!skipTabBufferSync && curMod === "SLIDE" && mod !== "SLIDE") {
         workspacePanels.syncActiveSlideDomStylesToDeck();
+        host.__EASYOFFICE_SLIDE_CANVAS__?.onLeaveModule?.();
       }
       if (!skipTabBufferSync && (curMod === "DOC" || curMod === "HWP") && mod !== curMod) {
         workspacePanels.saveActiveDocTabState();
@@ -656,6 +657,7 @@
     const SLIDE_TRANSITIONS = ["fade", "push", "zoom", "none"];
 
     function slideTitleEffect(cmdId, ctx) {
+      if (host.__EASYOFFICE_SLIDE_CANVAS__?.applyFormatting?.(cmdId)) return true;
       const { titleZone } = ctx;
       if (!titleZone) return false;
       const toggle = SLIDE_TITLE_TOGGLES[cmdId];
@@ -701,7 +703,8 @@
         stageBox.dataset.presenterMode = stageBox.dataset.presenterMode !== "true" ? "true" : "false";
         getWorkspacePanels().syncActiveSlideDomStylesToDeck();
       }
-      document.getElementById("btn-slide-laser")?.click();
+      if (document.getElementById("slide-laser-dot")?.hidden) document.getElementById("btn-slide-laser")?.click();
+      host.__EASYOFFICE_SLIDE_CANVAS__?.startPresenterShow?.();
     }
 
     function slideCycleTransition(ctx) {
@@ -715,6 +718,7 @@
 
     const insertSlideObjectHandler = (cmdId, execRes) => {
       getWorkspacePanels().insertSlideStageObject(cmdId, execRes);
+      host.__EASYOFFICE_SLIDE_CANVAS__?.dialogs?.openForRibbonCommand?.(cmdId);
       return true;
     };
     const appendSlideNoteHandler = (cmdId, execRes, ctx) => {
@@ -767,7 +771,8 @@
       "slide-layout-margins": ({ stageBox }) => {
         stageBox.style.padding = cyclePreset(SLIDE_PADDINGS, stageBox.style.padding);
       },
-      "slide-mod-snap": toggleStageOutline,
+      "slide-mod-master": () => host.__EASYOFFICE_SLIDE_CANVAS__?.dialogs?.openForRibbonCommand?.("slide-mod-master"),
+      "slide-mod-snap": (ctx) => { host.__EASYOFFICE_SLIDE_CANVAS__?.toggleSnap?.(); toggleStageOutline(ctx); },
       "slide-review-track": toggleStageOutline,
     };
 
@@ -790,7 +795,7 @@
       const handled = slideTitleEffect(cmdId, ctx) || slideContentEffect(cmdId, execRes, ctx);
       if (!handled && ctx.stageBox) slideStageEffect(cmdId, execRes, ctx);
       const metaStatus = document.getElementById("slide-meta-status");
-      if (metaStatus && execRes?.summary && cmdId !== "slide-mod-transition") {
+      if (metaStatus && execRes?.summary && cmdId !== "slide-mod-transition" && cmdId !== "slide-mod-master") {
         metaStatus.textContent =
           "슬라이드 " + (getActiveSlideIndex() + 1) + " / " + slideDeckState.length + " · " + execRes.summary;
       }
@@ -855,7 +860,7 @@
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
     const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
-    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "sheet-review-comment", "pdf-mod-highlight", "doc-mod-toc", "document-review-comment"]);
+    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "sheet-review-comment", "pdf-mod-highlight", "doc-mod-toc", "document-review-comment", "slide-mod-master"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
@@ -904,7 +909,7 @@
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
         // The 표 만들기 and 새 메모 dialogs make their own step when confirmed: opening them records none.
-        if (cmdId === "sheet-insert-table" || cmdId === "document-review-comment" || cmdId === "sheet-review-comment") {
+        if (cmdId === "sheet-insert-table" || cmdId === "document-review-comment" || cmdId === "sheet-review-comment" || cmdId === "slide-mod-master") {
           // nothing to keep
         } else if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
         else commitDeferredUndoSnapshot(preSnapshot);

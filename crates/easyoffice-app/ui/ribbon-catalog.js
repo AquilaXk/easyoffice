@@ -164,6 +164,8 @@
       stageOutline: "",
       stageLayoutState: "",
       aspect: "16:9",
+      layout: "titleAndContent",
+      elements: [],
     };
   }
 

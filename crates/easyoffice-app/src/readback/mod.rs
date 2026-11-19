@@ -259,7 +259,7 @@ pub fn inspect_source_bytes(
         return Ok(out);
     }
 
-    let (decoded, styling) = UniversalFormatConverter::decode_rich_with_styling(bytes, hint)?;
+    let (decoded, styling, slide_deck) = UniversalFormatConverter::decode_rich_full(bytes, hint)?;
     let mut warnings = decoded.warnings.clone();
     if matches!(decoded.content, DecodedContent::Workbook(_)) {
         sheet::append_styling_warnings(&styling, &mut warnings);
@@ -287,7 +287,11 @@ pub fn inspect_source_bytes(
             doc_slide_pdf::write_document_readback(&mut out, doc, query.max_items);
         }
         DecodedContent::Slides(slides) => {
-            doc_slide_pdf::write_slides_readback(&mut out, slides, query.max_items);
+            if let Some(deck) = slide_deck.as_ref() {
+                doc_slide_pdf::write_slide_deck_readback(&mut out, deck, query.max_items);
+            } else {
+                doc_slide_pdf::write_slides_readback(&mut out, slides, query.max_items);
+            }
         }
     }
     out.push('}');
@@ -336,6 +340,10 @@ pub(crate) fn inspect_structured_entries(
         StructuredContent::Document(doc, PdfWriteOptions { .. }) => {
             write_envelope_prefix(&mut out, file_name, fmt, "document", title, 0, &warnings);
             doc_slide_pdf::write_document_readback(&mut out, &doc, query.max_items);
+        }
+        StructuredContent::SlideDeck(deck) => {
+            write_envelope_prefix(&mut out, file_name, fmt, "slides", title, 0, &warnings);
+            doc_slide_pdf::write_slide_deck_readback(&mut out, &deck, query.max_items);
         }
         StructuredContent::Slides(slides) => {
             write_envelope_prefix(&mut out, file_name, fmt, "slides", title, 0, &warnings);

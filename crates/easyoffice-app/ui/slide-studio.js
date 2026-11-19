@@ -84,6 +84,19 @@
     let elapsedSeconds = 0;
     let clockTimer = null;
     let returnFocusEl = null;
+    const slideCanvas = host.__EASYOFFICE_CREATE_SLIDE_CANVAS__?.(deps, {
+      scheduleThumbRefresh: () => scheduleThumbRefresh(),
+      startShow: (fromCur, opts) => startShow(fromCur, opts),
+      onLeave: () => {
+        slideDialogs?.closeAll?.();
+        endShow();
+      },
+    });
+    const slideDialogs = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_DIALOGS__?.(deps, slideCanvas) : null;
+    if (slideCanvas) {
+      slideCanvas.dialogs = slideDialogs;
+      host.__EASYOFFICE_SLIDE_CANVAS__ = slideCanvas;
+    }
 
     function setFeedback(text) {
       const fb = byId("status-command-feedback");
@@ -229,10 +242,17 @@
       renderThumbs(activeIdx);
       updateToolbarState(activeIdx);
       const aspect = deckAspect();
+      const layout = deck[activeIdx]?.layout || "titleAndContent";
       const stage = byId("slide-stage-box");
-      if (stage) stage.dataset.aspect = aspect;
+      if (stage) {
+        stage.dataset.aspect = aspect;
+        stage.dataset.layout = layout;
+      }
       const select = byId("slide-aspect-select");
       if (select) select.value = aspect;
+      const layoutSel = byId("slide-layout-select");
+      if (layoutSel) layoutSel.value = layout;
+      slideCanvas?.render?.();
     }
 
     // ---- editing: typing-granular undo snapshots for the stage zones and notes -----------------
@@ -404,6 +424,7 @@
       frame.id = "slide-show-frame";
       frame.className = "slide-show-frame";
       frame.dataset.transition = slide.transition || "fade";
+      frame.dataset.layout = slide.layout || "titleAndContent";
       const title = document.createElement("h2");
       title.id = "slide-show-title";
       title.textContent = slide.title || "";
@@ -425,6 +446,10 @@
       }
       frame.appendChild(title);
       frame.appendChild(body);
+      if (Array.isArray(slide.elements) && slide.elements.length > 0) {
+        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, deckAspect());
+        if (layer) frame.appendChild(layer);
+      }
       viewport.replaceChildren(frame);
       paintShowChrome();
     }
@@ -464,7 +489,7 @@
       }
     }
 
-    function startShow(fromCurrent) {
+    function startShow(fromCurrent, options = {}) {
       if (showing || getActiveModule() !== "SLIDE" || deck.length === 0) return;
       getPanels().syncActiveSlideDomStylesToDeck();
       closeMenu();
@@ -475,7 +500,7 @@
       returnFocusEl = document.activeElement;
       const overlay = byId("slide-show-overlay");
       delete overlay.dataset.screen;
-      byId("slide-show-presenter").hidden = true;
+      byId("slide-show-presenter").hidden = !options.presenter;
       overlay.hidden = false;
       document.activeElement?.blur?.();
       overlay.focus?.();
@@ -548,6 +573,7 @@
       if (getActiveModule() === "SLIDE" && list && target && list.contains?.(target)) {
         if (handleThumbKeydown(e)) return true;
       }
+      if (slideCanvas?.handleKeydown?.(e)) return true;
       return false;
     }
 
@@ -579,6 +605,8 @@
       bindMenu();
       bindShow();
       bindEditing();
+      slideCanvas?.bind?.();
+      slideDialogs?.bind?.();
     }
 
     return {

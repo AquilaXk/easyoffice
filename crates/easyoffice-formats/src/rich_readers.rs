@@ -168,7 +168,7 @@ impl UniversalFormatConverter {
         bytes: &[u8],
         file_name_hint: Option<&str>,
     ) -> Result<DecodedDocument, EasyOfficeError> {
-        Ok(Self::decode_rich_inner(bytes, file_name_hint, false)?.0)
+        Ok(Self::decode_rich_inner(bytes, file_name_hint, false, false)?.0)
     }
 
     /// Decodes `bytes` into the structured editor model together with per-sheet styling in a
@@ -178,7 +178,25 @@ impl UniversalFormatConverter {
         bytes: &[u8],
         file_name_hint: Option<&str>,
     ) -> Result<(DecodedDocument, Vec<(String, crate::SheetStyling)>), EasyOfficeError> {
-        Self::decode_rich_inner(bytes, file_name_hint, true)
+        let (doc, styling, _) = Self::decode_rich_inner(bytes, file_name_hint, true, false)?;
+        Ok((doc, styling))
+    }
+
+    /// Decodes `bytes` into the structured editor model together with per-sheet styling and
+    /// optional rich coordinate slide deck for `.pptx`/`.ppsx`/`.odp`.
+    #[allow(clippy::type_complexity)]
+    pub fn decode_rich_full(
+        bytes: &[u8],
+        file_name_hint: Option<&str>,
+    ) -> Result<
+        (
+            DecodedDocument,
+            Vec<(String, crate::SheetStyling)>,
+            Option<crate::RichSlideDeck>,
+        ),
+        EasyOfficeError,
+    > {
+        Self::decode_rich_inner(bytes, file_name_hint, true, true)
     }
 
     #[allow(clippy::type_complexity)]
@@ -186,10 +204,19 @@ impl UniversalFormatConverter {
         bytes: &[u8],
         file_name_hint: Option<&str>,
         with_styling: bool,
-    ) -> Result<(DecodedDocument, Vec<(String, crate::SheetStyling)>), EasyOfficeError> {
+        with_slide_deck: bool,
+    ) -> Result<
+        (
+            DecodedDocument,
+            Vec<(String, crate::SheetStyling)>,
+            Option<crate::RichSlideDeck>,
+        ),
+        EasyOfficeError,
+    > {
         let format = detect_for_open(bytes, file_name_hint)?;
         let mut warnings: Vec<String> = Vec::new();
         let mut styling: Vec<(String, crate::SheetStyling)> = Vec::new();
+        let mut slide_deck: Option<crate::RichSlideDeck> = None;
         let content = match format {
             DocumentFormat::Docx => {
                 let (doc, w) = read_docx(bytes)?;
@@ -293,7 +320,14 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Pptx | DocumentFormat::Ppsx => {
                 warnings.push(NOTE_SLIDE.to_string());
-                DecodedContent::Slides(OoxmlCodec::unpack_pptx(bytes)?.slides)
+                if with_slide_deck {
+                    let deck = OoxmlCodec::unpack_pptx_rich(bytes)?;
+                    let legacy = deck.to_legacy_slides();
+                    slide_deck = Some(deck);
+                    DecodedContent::Slides(legacy)
+                } else {
+                    DecodedContent::Slides(OoxmlCodec::unpack_pptx(bytes)?.slides)
+                }
             }
             DocumentFormat::Ppt => {
                 warnings.push(NOTE_SLIDE.to_string());
@@ -307,7 +341,14 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Odp => {
                 warnings.push(NOTE_SLIDE.to_string());
-                DecodedContent::Slides(OdfCodec::unpack_odp(bytes)?.1)
+                if with_slide_deck {
+                    let deck = OdfCodec::unpack_odp_rich(bytes)?;
+                    let legacy = deck.to_legacy_slides();
+                    slide_deck = Some(deck);
+                    DecodedContent::Slides(legacy)
+                } else {
+                    DecodedContent::Slides(OdfCodec::unpack_odp(bytes)?.1)
+                }
             }
         };
         let title = match &content {
@@ -323,6 +364,7 @@ impl UniversalFormatConverter {
                 warnings,
             },
             styling,
+            slide_deck,
         ))
     }
 }

@@ -20,9 +20,9 @@ use easyoffice_formats::{
     normalize_hex_color, safe_link_target, CellStyle, EasyOfficeError, FontTable, ImageBudget,
     NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns,
     RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame, RichParagraph, RichRun,
-    RichScript, RichToc, SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_FONT_FACES,
-    MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
-    MIN_COLUMN_PX, MIN_SIZE_PT,
+    RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue, MAX_COLUMN_PX,
+    MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL,
+    MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -56,6 +56,7 @@ pub(crate) enum StructuredContent {
     /// Sheets plus their cell formatting and column widths (one SheetStyling per sheet).
     Workbook(Vec<OdsUnpacked>, Vec<SheetStyling>),
     Slides(Vec<SlideTriple>),
+    SlideDeck(RichSlideDeck),
 }
 
 pub(crate) fn invalid(msg: impl Into<String>) -> EasyOfficeError {
@@ -139,7 +140,7 @@ fn opt_color(obj: &JsonObject, key: &str) -> Result<Option<String>, EasyOfficeEr
     }
 }
 
-pub(super) fn as_array<'a>(
+pub(crate) fn as_array<'a>(
     v: &'a StrictJsonValue,
     what: &str,
 ) -> Result<&'a [StrictJsonValue], EasyOfficeError> {
@@ -147,7 +148,7 @@ pub(super) fn as_array<'a>(
         .ok_or_else(|| invalid(format!("구조화 저장: '{what}'는 배열이어야 합니다.")))
 }
 
-pub(super) fn as_object<'a>(
+pub(crate) fn as_object<'a>(
     v: &'a StrictJsonValue,
     what: &str,
 ) -> Result<&'a JsonObject, EasyOfficeError> {
@@ -156,13 +157,13 @@ pub(super) fn as_object<'a>(
 }
 
 #[derive(Default)]
-pub(super) struct Budget {
+pub(crate) struct Budget {
     items: usize,
     pub(super) revisions: usize,
 }
 
 impl Budget {
-    pub(super) fn take(&mut self, n: usize) -> Result<(), EasyOfficeError> {
+    pub(crate) fn take(&mut self, n: usize) -> Result<(), EasyOfficeError> {
         self.items = self.items.saturating_add(n);
         if self.items > MAX_STRUCTURED_ITEMS {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
@@ -236,8 +237,12 @@ pub(crate) fn parse_structured_content(
         )));
     }
     if let Some(v) = field(entries, "slides") {
-        return parse_slides(as_array(v, "slides")?, &mut budget)
-            .map(|s| Some((StructuredContent::Slides(s), vec![])));
+        return crate::slide_deck_json::parse_slide_deck(
+            entries,
+            as_array(v, "slides")?,
+            &mut budget,
+        )
+        .map(|d| Some((StructuredContent::SlideDeck(d), vec![])));
     }
     Ok(None)
 }
@@ -778,34 +783,6 @@ fn parse_sheets(
         stylings.push(styling);
     }
     Ok((sheets, stylings))
-}
-fn parse_slides(
-    items: &[StrictJsonValue],
-    budget: &mut Budget,
-) -> Result<Vec<SlideTriple>, EasyOfficeError> {
-    let mut slides = Vec::with_capacity(items.len());
-    for item in items {
-        budget.take(1)?;
-        let obj = as_object(item, "slides")?;
-        let mut bullets = Vec::new();
-        if let Some(v) = field(obj, "bullets") {
-            for b in as_array(v, "bullets")? {
-                budget.take(1)?;
-                let text = b
-                    .as_str()
-                    .ok_or_else(|| invalid("구조화 저장: 'bullets' 항목은 문자열이어야 합니다."))?;
-                if !text.trim().is_empty() {
-                    bullets.push(text.to_string());
-                }
-            }
-        }
-        slides.push((
-            opt_str(obj, "title")?.unwrap_or("").to_string(),
-            bullets,
-            opt_str(obj, "notes")?.unwrap_or("").to_string(),
-        ));
-    }
-    Ok(slides)
 }
 
 pub use crate::convert_structured_encode::RichPdfRenderer;

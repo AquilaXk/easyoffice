@@ -5,134 +5,145 @@
 //! tree, `p:nvSpPr`/`p:spPr`/`p:txBody` on each shape, slide titles in a title placeholder shape,
 //! speaker notes in real notes slides, and the presentation title in `docProps/core.xml`.
 
-use crate::decode_budget::DecodeBudget;
-use crate::office_codecs::validate_zip_xml_entries;
 use crate::ooxml_shared_parts::{
     core_properties_xml, drawingml_theme_xml, CORE_PROPERTIES_CONTENT_TYPE,
     CORE_PROPERTIES_REL_TYPE, PML_CLR_MAP, PML_SP_TREE_HEADER,
 };
+use crate::rich_image_writers::MediaParts;
+use crate::rich_slide::{
+    RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, SlideTransition,
+    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
+};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements, extract_tag_bodies,
 };
+use crate::sheet_chart::{ChartKind, ChartLegendPos};
+use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, OoxmlCodec, OoxmlPptxPayload, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy,
+    EasyOfficeError, OoxmlCodec, OoxmlPptxPayload, RichImageFormat, XmlSanitizer, ZipArchiveCodec,
+    ZipArchiveEntry,
 };
 use std::collections::HashSet;
+use std::fmt::Write;
 
-const PML_NS: &str = concat!(
+pub(crate) const PML_NS: &str = concat!(
     "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" ",
     "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" ",
     "xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\""
 );
 const REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_BASE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const CT_PREFIX: &str = "application/vnd.openxmlformats-officedocument";
-const SLIDESHOW_MAIN_CT: &str =
+pub(crate) const CT_PREFIX: &str = "application/vnd.openxmlformats-officedocument";
+pub(crate) const SLIDESHOW_MAIN_CT: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml";
-const PRESENTATION_MAIN_CT: &str =
+pub(crate) const PRESENTATION_MAIN_CT: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
-const MAX_PPTX_SLIDES: usize = 2_000;
+pub(crate) const MAX_PPTX_SLIDES: usize = 2_000;
 
-fn rels_xml(rels: &[(&str, &str, String)]) -> String {
+pub(crate) fn rels_xml<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(rels: &[(A, B, C)]) -> Vec<u8> {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"{REL_NS}\">"
     );
     for (id, rel_type, target) in rels {
-        let full_type = if rel_type.starts_with("http") {
-            (*rel_type).to_string()
+        let rt = rel_type.as_ref();
+        let (sep, base) = if rt.starts_with("http") {
+            ("", "")
         } else {
-            format!("{REL_BASE}/{rel_type}")
+            ("/", REL_BASE)
         };
-        xml.push_str(&format!(
-            "<Relationship Id=\"{id}\" Type=\"{full_type}\" Target=\"{target}\"/>"
-        ));
+        let _ = write!(
+            xml,
+            "<Relationship Id=\"{}\" Type=\"{base}{sep}{rt}\" Target=\"{}\"/>",
+            id.as_ref(),
+            target.as_ref()
+        );
     }
     xml.push_str("</Relationships>");
-    xml
+    xml.into_bytes()
 }
 
-fn push_paragraphs(out: &mut String, lines: &[&str]) {
-    let mut wrote = false;
-    for line in lines {
-        out.push_str("<a:p><a:r><a:rPr lang=\"ko-KR\" dirty=\"0\"/><a:t>");
-        out.push_str(&XmlSanitizer::escape(line));
-        out.push_str("</a:t></a:r></a:p>");
-        wrote = true;
-    }
-    if !wrote {
-        out.push_str("<a:p><a:endParaRPr lang=\"ko-KR\" dirty=\"0\"/></a:p>");
-    }
-}
-
-/// One placeholder text shape with explicit geometry.
-fn push_text_shape(
-    out: &mut String,
-    id: u32,
-    name: &str,
-    placeholder: &str,
-    geometry: Option<(u64, u64, u64, u64)>,
-    lines: &[&str],
-) {
-    out.push_str(&format!(
-        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr>{placeholder}</p:nvPr></p:nvSpPr>"
-    ));
-    match geometry {
-        Some((x, y, cx, cy)) => out.push_str(&format!(
-            "<p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>"
-        )),
-        None => out.push_str("<p:spPr/>"),
-    }
-    out.push_str("<p:txBody><a:bodyPr/><a:lstStyle/>");
-    push_paragraphs(out, lines);
-    out.push_str("</p:txBody></p:sp>");
-}
-
-fn slide_xml(title: &str, bullets: &[String]) -> String {
+pub(crate) fn notes_slide_xml(notes: &str) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:notes {PML_NS}><p:cSld><p:spTree>{}<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Notes Placeholder 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>",
+        crate::ooxml_shared_parts::PML_SP_TREE_HEADER
     );
-    let title_lines: Vec<&str> = if title.is_empty() {
-        Vec::new()
-    } else {
-        vec![title]
-    };
-    push_text_shape(
-        &mut xml,
-        2,
-        "Title 1",
-        "<p:ph type=\"title\"/>",
-        Some((457_200, 274_638, 8_229_600, 1_143_000)),
-        &title_lines,
-    );
-    let bullet_lines: Vec<&str> = bullets.iter().map(String::as_str).collect();
-    push_text_shape(
-        &mut xml,
-        3,
-        "Content Placeholder 2",
-        "<p:ph idx=\"1\"/>",
-        Some((457_200, 1_600_200, 8_229_600, 4_525_963)),
-        &bullet_lines,
-    );
-    xml.push_str("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
+    for line in notes.split('\n') {
+        let _ = write!(
+            xml,
+            "<a:p><a:r><a:rPr lang=\"ko-KR\" dirty=\"0\"/><a:t>{}</a:t></a:r></a:p>",
+            XmlSanitizer::escape(line)
+        );
+    }
+    xml.push_str("</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>");
     xml
 }
 
-fn notes_slide_xml(notes: &str) -> String {
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:notes {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}"
-    );
-    let lines: Vec<&str> = notes.split('\n').collect();
-    push_text_shape(
-        &mut xml,
-        2,
-        "Notes Placeholder 1",
-        "<p:ph type=\"body\" idx=\"1\"/>",
-        None,
-        &lines,
-    );
-    xml.push_str("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>");
-    xml
+pub(crate) fn resolve_ppt(base: &str, target: &str) -> Result<String, EasyOfficeError> {
+    if target.contains('\\') {
+        return Err(EasyOfficeError::SecurityViolation(format!(
+            "허용되지 않는 PPTX 경로 구분자입니다: {target}"
+        )));
+    }
+    crate::sheet_styling::xlsx_parts::resolve_zip_target(base, target)
+        .filter(|p| p.starts_with("ppt/"))
+        .ok_or_else(|| {
+            EasyOfficeError::SecurityViolation(format!(
+                "PPTX 관계 대상 경로가 패키지 밖을 가리킵니다: {target}"
+            ))
+        })
+}
+
+pub(crate) fn read_ppt_rels(
+    xml: &str,
+    base: &str,
+) -> Result<std::collections::HashMap<String, String>, EasyOfficeError> {
+    let mut map = std::collections::HashMap::new();
+    for (attrs, _) in extract_balanced_elements(xml, "Relationship") {
+        let (Some(id), Some(target)) = (
+            extract_attr_from_fragment(attrs, "Id"),
+            extract_attr_from_fragment(attrs, "Target"),
+        ) else {
+            continue;
+        };
+        if extract_attr_from_fragment(attrs, "TargetMode") == Some("External") {
+            continue;
+        }
+        let b = if target.starts_with("ppt/") { "" } else { base };
+        map.insert(id.to_string(), resolve_ppt(b, target)?);
+    }
+    Ok(map)
+}
+
+pub(crate) fn parse_slide_size_aspect(
+    pres_xml: &str,
+) -> Result<(SlideAspect, f64, f64), EasyOfficeError> {
+    for (attrs, _) in extract_balanced_elements(pres_xml, "p:sldSz") {
+        let (Some(cxs), Some(cys)) = (
+            extract_attr_from_fragment(attrs, "cx"),
+            extract_attr_from_fragment(attrs, "cy"),
+        ) else {
+            continue;
+        };
+        let (Ok(cx), Ok(cy)) = (cxs.trim().parse::<u64>(), cys.trim().parse::<u64>()) else {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PPTX 슬라이드 크기(p:sldSz) 값이 올바르지 않습니다.".to_string(),
+            ));
+        };
+        if cx > 0 && cy > 0 {
+            return Ok(SlideAspect::from_emu(cx, cy));
+        }
+    }
+    Ok((SlideAspect::Standard4x3, 1.0, 1.0))
+}
+
+pub(crate) fn utf8_entry<'a>(
+    entry: &'a ZipArchiveEntry,
+    label: &str,
+) -> Result<&'a str, EasyOfficeError> {
+    let xml = std::str::from_utf8(&entry.data)
+        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{label} UTF-8 오류")))?;
+    XmlSanitizer::validate_safe_xml(xml)?;
+    Ok(xml)
 }
 
 fn shape_paragraph_texts(sp_body: &str) -> Vec<String> {
@@ -148,42 +159,7 @@ fn shape_paragraph_texts(sp_body: &str) -> Vec<String> {
         .collect()
 }
 
-fn is_title_placeholder(sp_body: &str) -> bool {
-    extract_balanced_elements(sp_body, "p:ph")
-        .iter()
-        .any(|(attrs, _)| {
-            matches!(
-                extract_attr_from_fragment(attrs, "type"),
-                Some("title") | Some("ctrTitle")
-            )
-        })
-}
-
-fn resolve_rel_target(base_dir: &str, target: &str) -> String {
-    if let Some(abs) = target.strip_prefix('/') {
-        return abs.to_string();
-    }
-    let mut parts: Vec<&str> = base_dir.split('/').filter(|s| !s.is_empty()).collect();
-    for seg in target.split('/') {
-        match seg {
-            ".." => {
-                parts.pop();
-            }
-            "." | "" => {}
-            other => parts.push(other),
-        }
-    }
-    parts.join("/")
-}
-
-fn utf8_entry<'a>(entry: &'a ZipArchiveEntry, label: &str) -> Result<&'a str, EasyOfficeError> {
-    let xml = std::str::from_utf8(&entry.data)
-        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{label} UTF-8 오류")))?;
-    XmlSanitizer::validate_safe_xml(xml)?;
-    Ok(xml)
-}
-
-fn extract_notes_xml_text(notes_xml: &str) -> Option<String> {
+pub(crate) fn extract_notes_xml_text(notes_xml: &str) -> Option<String> {
     let mut non_empty = Vec::new();
     let mut saw_included = false;
     for sp in extract_tag_bodies(notes_xml, "p:sp") {
@@ -218,248 +194,555 @@ fn extract_notes_xml_text(notes_xml: &str) -> Option<String> {
     }
 }
 
-/// Reads speaker notes from the notes slide related to `slide_path`, if any.
-fn read_notes_slide(
-    entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
-    slide_path: &str,
-) -> Result<Option<String>, EasyOfficeError> {
-    let (dir, file) = slide_path.rsplit_once('/').unwrap_or(("", slide_path));
-    let rels_path = format!("{dir}/_rels/{file}.rels");
-    let Some(&rels_entry) = entry_map.get(rels_path.as_str()) else {
-        return Ok(None);
+const AX_ID_CAT: &str = "64052224";
+const AX_ID_VAL: &str = "64055552";
+const MAX_CHART_XML_EVENTS: usize = 65_536;
+const CHART_CT: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+
+pub(crate) fn finish_pptx_package(
+    deck: &RichSlideDeck,
+    slideshow: bool,
+    slide_entries: Vec<(String, Vec<u8>)>,
+    media: MediaParts,
+    charts: Vec<(usize, String)>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let (emu_w, emu_h) = deck.aspect.dimensions_emu();
+    let has_notes = deck.slides.iter().any(|s| !s.notes.is_empty());
+    let main_ct = if slideshow {
+        SLIDESHOW_MAIN_CT
+    } else {
+        PRESENTATION_MAIN_CT
     };
-    let rels = utf8_entry(rels_entry, &rels_path)?;
-    for (attrs, _) in extract_balanced_elements(rels, "Relationship") {
-        let is_notes =
-            extract_attr_from_fragment(attrs, "Type").is_some_and(|t| t.ends_with("/notesSlide"));
-        let Some(target) = extract_attr_from_fragment(attrs, "Target") else {
-            continue;
-        };
-        if !is_notes {
-            continue;
-        }
-        let notes_path = resolve_rel_target(dir, target);
-        let Some(&notes_entry) = entry_map.get(notes_path.as_str()) else {
-            continue;
-        };
-        let notes_xml = utf8_entry(notes_entry, &notes_path)?;
-        if let Some(notes) = extract_notes_xml_text(notes_xml) {
-            return Ok(Some(notes));
+    let pml = format!("{CT_PREFIX}.presentationml");
+    let mut ct = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"{main_ct}\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"{pml}.slideMaster+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"{CT_PREFIX}.theme+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"{CORE_PROPERTIES_CONTENT_TYPE}\"/>"
+    );
+    for fmt in [RichImageFormat::Png, RichImageFormat::Jpeg] {
+        if media.has_format(fmt) {
+            let _ = write!(
+                ct,
+                "<Default Extension=\"{}\" ContentType=\"{}\"/>",
+                fmt.extension(),
+                fmt.mime()
+            );
         }
     }
-    Ok(None)
+    for layout in SlideMasterLayout::ALL {
+        let _ = write!(ct, "<Override PartName=\"/ppt/slideLayouts/slideLayout{}.xml\" ContentType=\"{pml}.slideLayout+xml\"/>", layout.layout_index());
+    }
+    if has_notes {
+        let _ = write!(ct, "<Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"{CT_PREFIX}.theme+xml\"/><Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"{pml}.notesMaster+xml\"/>");
+    }
+    for (idx, slide) in deck.slides.iter().enumerate() {
+        let n = idx + 1;
+        let _ = write!(
+            ct,
+            "<Override PartName=\"/ppt/slides/slide{n}.xml\" ContentType=\"{pml}.slide+xml\"/>"
+        );
+        if !slide.notes.is_empty() {
+            let _ = write!(ct, "<Override PartName=\"/ppt/notesSlides/notesSlide{n}.xml\" ContentType=\"{pml}.notesSlide+xml\"/>");
+        }
+    }
+    for (c_num, _) in &charts {
+        let _ = write!(
+            ct,
+            "<Override PartName=\"/ppt/charts/chart{c_num}.xml\" ContentType=\"{CHART_CT}\"/>"
+        );
+    }
+    ct.push_str("</Types>");
+
+    let notes_lst = if has_notes {
+        "<p:notesMasterIdLst><p:notesMasterId r:id=\"rIdNotesMaster1\"/></p:notesMasterIdLst>"
+    } else {
+        ""
+    };
+    let mut pres_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:presentation {PML_NS}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdMaster1\"/></p:sldMasterIdLst>{notes_lst}<p:sldIdLst>");
+    let mut pres_rels: Vec<(String, &'static str, String)> =
+        Vec::with_capacity(deck.slides.len() + 3);
+    for idx in 0..deck.slides.len() {
+        let (n, rid) = (idx + 1, format!("rId{}", idx + 1));
+        let _ = write!(pres_xml, "<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 255 + n);
+        pres_rels.push((rid, "slide", format!("slides/slide{n}.xml")));
+    }
+    let _ = write!(pres_xml, "</p:sldIdLst><p:sldSz cx=\"{emu_w}\" cy=\"{emu_h}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>");
+    pres_rels.extend([
+        (
+            "rIdMaster1".into(),
+            "slideMaster",
+            "slideMasters/slideMaster1.xml".into(),
+        ),
+        ("rIdTheme1".into(), "theme", "theme/theme1.xml".into()),
+    ]);
+    if has_notes {
+        pres_rels.push((
+            "rIdNotesMaster1".into(),
+            "notesMaster",
+            "notesMasters/notesMaster1.xml".into(),
+        ));
+    }
+
+    let mut master_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldMaster {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld>{PML_CLR_MAP}<p:sldLayoutIdLst>");
+    let mut master_rels: Vec<(String, &'static str, String)> = Vec::new();
+    for layout in SlideMasterLayout::ALL {
+        let k = layout.layout_index();
+        let _ = write!(
+            master_xml,
+            "<p:sldLayoutId id=\"{}\" r:id=\"rId{k}\"/>",
+            2_147_483_648u64 + k as u64
+        );
+        master_rels.push((
+            format!("rId{k}"),
+            "slideLayout",
+            format!("../slideLayouts/slideLayout{k}.xml"),
+        ));
+    }
+    master_xml.push_str("</p:sldLayoutIdLst></p:sldMaster>");
+    master_rels.push(("rId6".into(), "theme", "../theme/theme1.xml".into()));
+
+    let mut entries: Vec<(String, Vec<u8>)> = vec![
+        ("[Content_Types].xml".into(), ct.into_bytes()),
+        (
+            "_rels/.rels".into(),
+            rels_xml(&[
+                ("rId1", "officeDocument", "ppt/presentation.xml"),
+                ("rId2", CORE_PROPERTIES_REL_TYPE, "docProps/core.xml"),
+            ]),
+        ),
+        (
+            "docProps/core.xml".into(),
+            core_properties_xml(&deck.title).into_bytes(),
+        ),
+        ("ppt/presentation.xml".into(), pres_xml.into_bytes()),
+        (
+            "ppt/_rels/presentation.xml.rels".into(),
+            rels_xml(&pres_rels),
+        ),
+        (
+            "ppt/slideMasters/slideMaster1.xml".into(),
+            master_xml.into_bytes(),
+        ),
+        (
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels".into(),
+            rels_xml(&master_rels),
+        ),
+        (
+            "ppt/theme/theme1.xml".into(),
+            drawingml_theme_xml("EasyOffice").into_bytes(),
+        ),
+    ];
+    let layout_rels = rels_xml(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]);
+    for layout in SlideMasterLayout::ALL {
+        let k = layout.layout_index();
+        let l_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldLayout {PML_NS} type=\"{}\" preserve=\"1\"><p:cSld name=\"{}\"><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>", layout.ooxml_type(), layout.ooxml_name());
+        entries.push((
+            format!("ppt/slideLayouts/slideLayout{k}.xml"),
+            l_xml.into_bytes(),
+        ));
+        entries.push((
+            format!("ppt/slideLayouts/_rels/slideLayout{k}.xml.rels"),
+            layout_rels.clone(),
+        ));
+    }
+    if has_notes {
+        let nm = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:notesMaster {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld>{PML_CLR_MAP}</p:notesMaster>");
+        entries.push(("ppt/notesMasters/notesMaster1.xml".into(), nm.into_bytes()));
+        entries.push((
+            "ppt/notesMasters/_rels/notesMaster1.xml.rels".into(),
+            rels_xml(&[("rId1", "theme", "../theme/theme2.xml")]),
+        ));
+        entries.push((
+            "ppt/theme/theme2.xml".into(),
+            drawingml_theme_xml("EasyOffice Notes").into_bytes(),
+        ));
+    }
+    entries.extend(slide_entries);
+    entries.extend(media.into_entries());
+    for (c, x) in charts {
+        entries.push((format!("ppt/charts/chart{c}.xml"), x.into_bytes()));
+    }
+    for (path, data) in &entries {
+        if path.ends_with(".xml") || path.ends_with(".rels") {
+            let xml = std::str::from_utf8(data)
+                .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{path} UTF-8 오류")))?;
+            XmlSanitizer::validate_safe_xml(xml)?;
+        }
+    }
+    ZipArchiveCodec::pack_compressed(&entries)
+}
+
+fn push_chart_pts(
+    xml: &mut String,
+    tag: &str,
+    fref: &str,
+    num: bool,
+    vals: impl Iterator<Item = String>,
+    len: usize,
+) {
+    let (rf, ch, fmt) = if num {
+        (
+            "c:numRef",
+            "c:numCache",
+            "<c:formatCode>General</c:formatCode>",
+        )
+    } else {
+        ("c:strRef", "c:strCache", "")
+    };
+    let _ = write!(
+        xml,
+        "<{tag}><{rf}><c:f>{fref}</c:f><{ch}>{fmt}<c:ptCount val=\"{len}\"/>"
+    );
+    for (i, v) in vals.enumerate() {
+        let _ = write!(xml, "<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>");
+    }
+    let _ = write!(xml, "</{ch}></{rf}></{tag}>");
+}
+
+pub(crate) fn build_slide_chart_xml(
+    chart_type: ChartKind,
+    title: &str,
+    categories: &[String],
+    series: &[SlideChartSeries],
+    legend: ChartLegendPos,
+) -> String {
+    let mut xml = String::with_capacity(2_048);
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><c:lang val=\"ko-KR\"/><c:chart>");
+    if title.is_empty() {
+        xml.push_str("<c:autoTitleDeleted val=\"1\"/>");
+    } else {
+        let _ = write!(xml, "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:t>{}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title><c:autoTitleDeleted val=\"0\"/>", XmlSanitizer::escape(title));
+    }
+    xml.push_str("<c:plotArea><c:layout/>");
+    let scatter = chart_type == ChartKind::Scatter;
+    let (cat_tag, val_tag) = if scatter {
+        ("c:xVal", "c:yVal")
+    } else {
+        ("c:cat", "c:val")
+    };
+    let num_cats = scatter
+        && !categories.is_empty()
+        && categories
+            .iter()
+            .all(|c| c.trim().parse::<f64>().is_ok_and(f64::is_finite));
+    let mut ser_xml = String::new();
+    for (idx, ser) in series.iter().enumerate() {
+        let _ = write!(
+            ser_xml,
+            "<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/><c:tx><c:v>{}</c:v></c:tx>",
+            XmlSanitizer::escape(&ser.name)
+        );
+        if !categories.is_empty() {
+            push_chart_pts(
+                &mut ser_xml,
+                cat_tag,
+                "Chart!$A$1",
+                num_cats,
+                categories.iter().map(|c| {
+                    if num_cats {
+                        c.trim().to_string()
+                    } else {
+                        XmlSanitizer::escape(c)
+                    }
+                }),
+                categories.len(),
+            );
+        }
+        push_chart_pts(
+            &mut ser_xml,
+            val_tag,
+            "Chart!$B$1",
+            true,
+            ser.values.iter().map(|v| v.to_string()),
+            ser.values.len(),
+        );
+        ser_xml.push_str("</c:ser>");
+    }
+    if chart_type == ChartKind::Pie {
+        let _ = write!(xml, "<c:pieChart><c:varyColors val=\"1\"/>{ser_xml}<c:firstSliceAng val=\"0\"/></c:pieChart>");
+    } else {
+        let (tag, hdr, extra, cp, vp) = match chart_type {
+            ChartKind::Bar => (
+                "c:barChart",
+                "<c:barDir val=\"bar\"/><c:grouping val=\"clustered\"/>",
+                "",
+                "l",
+                "b",
+            ),
+            ChartKind::Column => (
+                "c:barChart",
+                "<c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>",
+                "",
+                "b",
+                "l",
+            ),
+            ChartKind::Line => (
+                "c:lineChart",
+                "<c:grouping val=\"standard\"/>",
+                "<c:marker val=\"1\"/>",
+                "b",
+                "l",
+            ),
+            ChartKind::Scatter => (
+                "c:scatterChart",
+                "<c:scatterStyle val=\"lineMarker\"/>",
+                "",
+                "b",
+                "l",
+            ),
+            ChartKind::Pie => unreachable!(),
+        };
+        let ax = if scatter { "c:valAx" } else { "c:catAx" };
+        let _ = write!(xml, "<{tag}>{hdr}{ser_xml}{extra}<c:axId val=\"{AX_ID_CAT}\"/><c:axId val=\"{AX_ID_VAL}\"/></{tag}><{ax}><c:axId val=\"{AX_ID_CAT}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"{cp}\"/><c:crossAx val=\"{AX_ID_VAL}\"/></{ax}><c:valAx><c:axId val=\"{AX_ID_VAL}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"{vp}\"/><c:majorGridlines/><c:crossAx val=\"{AX_ID_CAT}\"/></c:valAx>");
+    }
+    xml.push_str("</c:plotArea>");
+    if let Some(pos) = legend.ooxml_val() {
+        let _ = write!(
+            xml,
+            "<c:legend><c:legendPos val=\"{pos}\"/><c:overlay val=\"0\"/></c:legend>"
+        );
+    }
+    xml.push_str("<c:plotVisOnly val=\"1\"/></c:chart></c:chartSpace>");
+    xml
+}
+
+pub(crate) type DecodedSlideChart = (
+    ChartKind,
+    String,
+    Vec<String>,
+    Vec<SlideChartSeries>,
+    ChartLegendPos,
+);
+
+pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, EasyOfficeError> {
+    fn loc(n: &str) -> &str {
+        n.rsplit(':').next().unwrap_or(n)
+    }
+    fn over() -> EasyOfficeError {
+        EasyOfficeError::ResourceBudgetExceeded(format!(
+            "슬라이드 차트 포인트 수({MAX_SLIDE_CHART_POINTS}) 초과"
+        ))
+    }
+    let mut reader = XmlReader::with_budget(xml, MAX_CHART_XML_EVENTS);
+    let (mut cd, mut pd, mut td, mut ld, mut bd, mut sd, mut x_d, mut d) =
+        (0usize, 0, 0, 0, 0, 0, 0, 0);
+    let (mut slot, mut tk, mut pt_i, mut pt_n) = ("", "", 0usize, 0usize);
+    let (mut kind, mut title, mut legend) = (None, String::new(), ChartLegendPos::None);
+    let (mut cats, mut series, mut buf, mut s_name, mut s_cats, mut s_vals) = (
+        Vec::new(),
+        Vec::new(),
+        String::new(),
+        String::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    while let Some(ev) = reader.next_event()? {
+        match ev {
+            XmlEvent::Start { name, attrs } => {
+                d += 1;
+                match loc(name) {
+                    "chart" if cd == 0 => cd = d,
+                    "plotArea" if cd > 0 && pd == 0 => pd = d,
+                    "title" if cd > 0 && pd == 0 && td == 0 => td = d,
+                    "legend" if cd > 0 && pd == 0 && ld == 0 => {
+                        ld = d;
+                        legend = ChartLegendPos::Right;
+                    }
+                    "legendPos" if ld > 0 => {
+                        if let Some(v) = attr(&attrs, "val") {
+                            legend = ChartLegendPos::from_ooxml(&v);
+                        }
+                    }
+                    "t" | "v" if td > 0 => {
+                        tk = "title";
+                        buf.clear();
+                    }
+                    "barChart" | "bar3DChart" if pd > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Column);
+                        bd = d;
+                    }
+                    "barDir" if bd > 0 && attr(&attrs, "val").as_deref() == Some("bar") => {
+                        kind = Some(ChartKind::Bar)
+                    }
+                    "lineChart" | "line3DChart" if pd > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Line)
+                    }
+                    "pieChart" | "pie3DChart" | "doughnutChart" if pd > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Pie)
+                    }
+                    "scatterChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Scatter),
+                    "ser" if pd > 0 && sd == 0 => {
+                        if series.len() >= MAX_SLIDE_CHART_SERIES {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                                "슬라이드 차트 계열 수({MAX_SLIDE_CHART_SERIES}) 초과"
+                            )));
+                        }
+                        sd = d;
+                        s_name.clear();
+                        s_cats.clear();
+                        s_vals.clear();
+                        slot = "";
+                        x_d = 0;
+                    }
+                    tag @ ("tx" | "cat" | "xVal" | "val" | "yVal")
+                        if sd > 0 && d == sd + 1 && slot.is_empty() =>
+                    {
+                        slot = match tag {
+                            "tx" => "tx",
+                            "cat" | "xVal" => "cat",
+                            _ => "val",
+                        };
+                        x_d = d;
+                        pt_n = 0;
+                    }
+                    "ptCount"
+                        if !slot.is_empty()
+                            && attr(&attrs, "val")
+                                .and_then(|s| s.trim().parse::<usize>().ok())
+                                .unwrap_or(0)
+                                > MAX_SLIDE_CHART_POINTS =>
+                    {
+                        return Err(over())
+                    }
+                    "pt" if !slot.is_empty() => {
+                        pt_n += 1;
+                        if pt_n > MAX_SLIDE_CHART_POINTS {
+                            return Err(over());
+                        }
+                        pt_i = attr(&attrs, "idx")
+                            .and_then(|s| s.trim().parse::<usize>().ok())
+                            .unwrap_or(pt_n - 1);
+                    }
+                    "v" | "t" if !slot.is_empty() => {
+                        tk = "slot";
+                        buf.clear();
+                    }
+                    _ => {}
+                }
+            }
+            XmlEvent::Text(t) if !tk.is_empty() => buf.push_str(&t),
+            XmlEvent::End(name) => {
+                let l = loc(name);
+                if tk == "title" && matches!(l, "t" | "v") {
+                    tk = "";
+                    title.push_str(&buf);
+                    buf.clear();
+                } else if tk == "slot" && matches!(l, "v" | "t") {
+                    tk = "";
+                    let v = buf.trim().to_string();
+                    buf.clear();
+                    match slot {
+                        "tx" if s_name.is_empty() => s_name = v,
+                        "cat" if pt_i < MAX_SLIDE_CHART_POINTS => s_cats.push((pt_i, v)),
+                        "val" if pt_i < MAX_SLIDE_CHART_POINTS => {
+                            let n = v.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(
+                                || EasyOfficeError::InvalidArgument(format!("차트 수치 오류: {v}")),
+                            )?;
+                            s_vals.push((pt_i, n));
+                        }
+                        _ => {}
+                    }
+                }
+                if d == x_d {
+                    slot = "";
+                    x_d = 0;
+                }
+                if d == sd {
+                    if cats.is_empty() && !s_cats.is_empty() {
+                        cats.resize(
+                            s_cats.iter().map(|(i, _)| *i).max().unwrap_or(0) + 1,
+                            String::new(),
+                        );
+                        for (i, c) in s_cats.drain(..) {
+                            cats[i] = c;
+                        }
+                    }
+                    let mut values = s_vals
+                        .iter()
+                        .map(|(i, _)| *i)
+                        .max()
+                        .map_or_else(Vec::new, |m| vec![0.0; m + 1]);
+                    for (i, n) in s_vals.drain(..) {
+                        values[i] = n;
+                    }
+                    series.push(SlideChartSeries {
+                        name: std::mem::take(&mut s_name),
+                        values,
+                    });
+                    sd = 0;
+                }
+                for dp in [&mut bd, &mut td, &mut ld, &mut pd, &mut cd] {
+                    if *dp == d {
+                        *dp = 0;
+                    }
+                }
+                d = d.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    let kind = kind.ok_or_else(|| {
+        EasyOfficeError::CorruptedContainer("PPTX 차트 유형을 판별할 수 없습니다.".to_string())
+    })?;
+    Ok((kind, title, cats, series, legend))
 }
 
 impl OoxmlCodec {
     pub fn pack_pptx(payload: &OoxmlPptxPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let has_notes = payload.slides.iter().any(|(_, _, n)| !n.is_empty());
-        let main_ct = if payload.is_slideshow {
-            SLIDESHOW_MAIN_CT
-        } else {
-            PRESENTATION_MAIN_CT
-        };
-        let pml = format!("{CT_PREFIX}.presentationml");
-        let mut content_types = format!(
-            concat!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-                "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
-                "<Override PartName=\"/ppt/presentation.xml\" ContentType=\"{main_ct}\"/>",
-                "<Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"{pml}.slideMaster+xml\"/>",
-                "<Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"{pml}.slideLayout+xml\"/>",
-                "<Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"{ct}.theme+xml\"/>",
-                "<Override PartName=\"/docProps/core.xml\" ContentType=\"{core}\"/>"
-            ),
-            main_ct = main_ct,
-            pml = pml,
-            ct = CT_PREFIX,
-            core = CORE_PROPERTIES_CONTENT_TYPE
+        let mut deck = RichSlideDeck::from_legacy_slides(
+            &payload.title,
+            payload.is_slideshow,
+            payload.slides.clone(),
         );
-        if has_notes {
-            content_types.push_str(&format!(
-                "<Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"{CT_PREFIX}.theme+xml\"/><Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"{pml}.notesMaster+xml\"/>"
-            ));
+        deck.aspect = SlideAspect::Standard4x3;
+        for s in &mut deck.slides {
+            s.transition = SlideTransition::None;
         }
-        for (idx, (_, _, notes)) in payload.slides.iter().enumerate() {
-            let n = idx + 1;
-            content_types.push_str(&format!(
-                "<Override PartName=\"/ppt/slides/slide{n}.xml\" ContentType=\"{pml}.slide+xml\"/>"
-            ));
-            if !notes.is_empty() {
-                content_types.push_str(&format!(
-                    "<Override PartName=\"/ppt/notesSlides/notesSlide{n}.xml\" ContentType=\"{pml}.notesSlide+xml\"/>"
+        crate::pptx_rich::pack_pptx_rich(&deck, payload.is_slideshow)
+    }
+
+    pub(crate) fn ordered_pptx_slides<'a>(
+        pres_xml: &str,
+        entries: &'a [ZipArchiveEntry],
+        entry_map: &std::collections::HashMap<&str, &'a ZipArchiveEntry>,
+        rel_targets: &std::collections::HashMap<String, String>,
+    ) -> Result<Vec<&'a ZipArchiveEntry>, EasyOfficeError> {
+        let (mut ordered, mut seen, mut cnt) = (Vec::new(), HashSet::new(), 0usize);
+        for (attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
+            cnt += 1;
+            if cnt > MAX_PPTX_SLIDES * 4 {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PPTX 슬라이드 참조 수 한도를 초과했습니다.".to_string(),
+                ));
+            }
+            let rid = extract_attr_from_fragment(attrs, "r:id")
+                .or_else(|| extract_attr_from_fragment(attrs, "id"));
+            if let Some(&entry) = rid
+                .and_then(|r| rel_targets.get(r))
+                .and_then(|p| entry_map.get(p.as_str()))
+            {
+                if seen.insert(entry.path.as_str()) {
+                    if ordered.len() >= MAX_PPTX_SLIDES {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
+                        ));
+                    }
+                    ordered.push(entry);
+                }
+            }
+        }
+        if ordered.is_empty() {
+            ordered = Self::pptx_slides_by_number(entries);
+            if ordered.len() > MAX_PPTX_SLIDES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
                 ));
             }
         }
-        content_types.push_str("</Types>");
-
-        let root_rels = rels_xml(&[
-            ("rId1", "officeDocument", "ppt/presentation.xml".to_string()),
-            (
-                "rId2",
-                CORE_PROPERTIES_REL_TYPE,
-                "docProps/core.xml".to_string(),
-            ),
-        ]);
-
-        let mut pres_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:presentation {PML_NS}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdMaster1\"/></p:sldMasterIdLst>"
-        );
-        if has_notes {
-            pres_xml.push_str("<p:notesMasterIdLst><p:notesMasterId r:id=\"rIdNotesMaster1\"/></p:notesMasterIdLst>");
-        }
-        pres_xml.push_str("<p:sldIdLst>");
-        let mut pres_rels: Vec<(&str, &str, String)> = Vec::new();
-        let slide_ids: Vec<String> = (1..=payload.slides.len())
-            .map(|i| format!("rId{i}"))
-            .collect();
-        for (i, rid) in slide_ids.iter().enumerate() {
-            let n = i + 1;
-            pres_xml.push_str(&format!("<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 255 + n));
-            pres_rels.push((rid.as_str(), "slide", format!("slides/slide{n}.xml")));
-        }
-        pres_xml.push_str("</p:sldIdLst><p:sldSz cx=\"9144000\" cy=\"6858000\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>");
-        pres_rels.push((
-            "rIdMaster1",
-            "slideMaster",
-            "slideMasters/slideMaster1.xml".to_string(),
-        ));
-        pres_rels.push(("rIdTheme1", "theme", "theme/theme1.xml".to_string()));
-        if has_notes {
-            pres_rels.push((
-                "rIdNotesMaster1",
-                "notesMaster",
-                "notesMasters/notesMaster1.xml".to_string(),
-            ));
-        }
-        let pres_rels_xml = rels_xml(&pres_rels);
-
-        let slide_master_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldMaster {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld>{PML_CLR_MAP}<p:sldLayoutIdLst><p:sldLayoutId id=\"2147483649\" r:id=\"rId1\"/></p:sldLayoutIdLst></p:sldMaster>"
-        );
-        let slide_master_rels = rels_xml(&[
-            (
-                "rId1",
-                "slideLayout",
-                "../slideLayouts/slideLayout1.xml".to_string(),
-            ),
-            ("rId2", "theme", "../theme/theme1.xml".to_string()),
-        ]);
-        let slide_layout_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldLayout {PML_NS} type=\"obj\" preserve=\"1\"><p:cSld name=\"Title and Content\"><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
-        );
-        let slide_layout_rels = rels_xml(&[(
-            "rId1",
-            "slideMaster",
-            "../slideMasters/slideMaster1.xml".to_string(),
-        )]);
-        let core_xml = core_properties_xml(&payload.title);
-
-        let mut entries: Vec<(String, Vec<u8>)> = vec![
-            (
-                "[Content_Types].xml".to_string(),
-                content_types.into_bytes(),
-            ),
-            ("_rels/.rels".to_string(), root_rels.into_bytes()),
-            ("docProps/core.xml".to_string(), core_xml.into_bytes()),
-            ("ppt/presentation.xml".to_string(), pres_xml.into_bytes()),
-            (
-                "ppt/_rels/presentation.xml.rels".to_string(),
-                pres_rels_xml.into_bytes(),
-            ),
-            (
-                "ppt/slideMasters/slideMaster1.xml".to_string(),
-                slide_master_xml.into_bytes(),
-            ),
-            (
-                "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_string(),
-                slide_master_rels.into_bytes(),
-            ),
-            (
-                "ppt/slideLayouts/slideLayout1.xml".to_string(),
-                slide_layout_xml.into_bytes(),
-            ),
-            (
-                "ppt/slideLayouts/_rels/slideLayout1.xml.rels".to_string(),
-                slide_layout_rels.into_bytes(),
-            ),
-            (
-                "ppt/theme/theme1.xml".to_string(),
-                drawingml_theme_xml("EasyOffice").into_bytes(),
-            ),
-        ];
-        if has_notes {
-            let notes_master_xml = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:notesMaster {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld>{PML_CLR_MAP}</p:notesMaster>"
-            );
-            entries.push((
-                "ppt/notesMasters/notesMaster1.xml".to_string(),
-                notes_master_xml.into_bytes(),
-            ));
-            entries.push((
-                "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
-                rels_xml(&[("rId1", "theme", "../theme/theme2.xml".to_string())]).into_bytes(),
-            ));
-            entries.push((
-                "ppt/theme/theme2.xml".to_string(),
-                drawingml_theme_xml("EasyOffice Notes").into_bytes(),
-            ));
-        }
-
-        for (idx, (s_title, bullets, notes)) in payload.slides.iter().enumerate() {
-            let n = idx + 1;
-            entries.push((
-                format!("ppt/slides/slide{n}.xml"),
-                slide_xml(s_title, bullets).into_bytes(),
-            ));
-            let mut slide_rels = vec![(
-                "rId1",
-                "slideLayout",
-                "../slideLayouts/slideLayout1.xml".to_string(),
-            )];
-            if !notes.is_empty() {
-                slide_rels.push((
-                    "rId2",
-                    "notesSlide",
-                    format!("../notesSlides/notesSlide{n}.xml"),
-                ));
-                entries.push((
-                    format!("ppt/notesSlides/notesSlide{n}.xml"),
-                    notes_slide_xml(notes).into_bytes(),
-                ));
-                entries.push((
-                    format!("ppt/notesSlides/_rels/notesSlide{n}.xml.rels"),
-                    rels_xml(&[
-                        (
-                            "rId1",
-                            "notesMaster",
-                            "../notesMasters/notesMaster1.xml".to_string(),
-                        ),
-                        ("rId2", "slide", format!("../slides/slide{n}.xml")),
-                    ])
-                    .into_bytes(),
-                ));
-            }
-            entries.push((
-                format!("ppt/slides/_rels/slide{n}.xml.rels"),
-                rels_xml(&slide_rels).into_bytes(),
-            ));
-        }
-
-        for (path, data) in &entries {
-            if path.ends_with(".xml") || path.ends_with(".rels") {
-                let xml = std::str::from_utf8(data)
-                    .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{path} UTF-8 오류")))?;
-                XmlSanitizer::validate_safe_xml(xml)?;
-            }
-        }
-
-        ZipArchiveCodec::pack_compressed(&entries)
+        Ok(ordered)
     }
 
     /// Presentation title: core properties first, then the root attributes, then a default.
-    fn pptx_title(
+    pub(crate) fn pptx_title(
         entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
         pres_xml: &str,
     ) -> String {
@@ -478,36 +761,7 @@ impl OoxmlCodec {
             .unwrap_or_else(|| "발표자료".to_string())
     }
 
-    /// Relationship id to normalized `ppt/...` target path.
-    fn pptx_relationship_targets(
-        entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
-    ) -> Result<std::collections::HashMap<String, String>, EasyOfficeError> {
-        let mut rel_targets = std::collections::HashMap::new();
-        let Some(&rels_entry) = entry_map.get("ppt/_rels/presentation.xml.rels") else {
-            return Ok(rel_targets);
-        };
-        let rels_xml = utf8_entry(rels_entry, "ppt/_rels/presentation.xml.rels")?;
-        for (r_attrs, _) in extract_balanced_elements(rels_xml, "Relationship") {
-            let (Some(id), Some(target)) = (
-                extract_attr_from_fragment(r_attrs, "Id"),
-                extract_attr_from_fragment(r_attrs, "Target"),
-            ) else {
-                continue;
-            };
-            // Relative to `ppt/`, with `.` and `..` segments resolved; a `ppt/...` target is
-            // accepted as already complete (writers that forget the base).
-            let normalized = if target.starts_with("ppt/") {
-                target.to_string()
-            } else {
-                resolve_rel_target("ppt", target)
-            };
-            rel_targets.insert(id.to_string(), normalized);
-        }
-        Ok(rel_targets)
-    }
-
-    /// Fallback slide order: `ppt/slides/slideN.xml` sorted by number then path.
-    fn pptx_slides_by_number(entries: &[ZipArchiveEntry]) -> Vec<&ZipArchiveEntry> {
+    pub(crate) fn pptx_slides_by_number(entries: &[ZipArchiveEntry]) -> Vec<&ZipArchiveEntry> {
         let slide_num = |path: &str| {
             path.strip_prefix("ppt/slides/slide")
                 .and_then(|s| s.strip_suffix(".xml"))
@@ -526,159 +780,34 @@ impl OoxmlCodec {
         slide_entries
     }
 
-    /// Extracts table rows from `<p:graphicFrame>` `<a:tbl>`/`<a:tr>`/`<a:tc>` on a slide.
-    fn pptx_slide_table_lines(s_xml: &str) -> Vec<String> {
-        let mut lines = Vec::new();
-        for gf in extract_tag_bodies(s_xml, "p:graphicFrame") {
-            for tbl in extract_tag_bodies(gf, "a:tbl") {
-                for tr in extract_tag_bodies(tbl, "a:tr") {
-                    let cells: Vec<String> = extract_tag_bodies(tr, "a:tc")
-                        .into_iter()
-                        .map(|tc| {
-                            shape_paragraph_texts(tc)
-                                .into_iter()
-                                .filter(|s| !s.is_empty())
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        })
-                        .collect();
-                    if cells.iter().any(|c| !c.is_empty()) {
-                        lines.push(cells.join("\t"));
-                    }
-                }
-            }
-        }
-        lines
-    }
-
-    /// Title and bullet texts of one slide (title placeholder first, legacy layout otherwise).
-    fn pptx_slide_title_and_bullets(s_xml: &str) -> (String, Vec<String>) {
-        let shapes = extract_tag_bodies(s_xml, "p:sp");
-        let table_lines = Self::pptx_slide_table_lines(s_xml);
-        if let Some(t_idx) = shapes.iter().position(|sp| is_title_placeholder(sp)) {
-            let title_text = shape_paragraph_texts(shapes[t_idx])
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let mut bullets: Vec<String> = shapes
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != t_idx)
-                .flat_map(|(_, sp)| shape_paragraph_texts(sp))
-                .filter(|s| !s.is_empty())
-                .collect();
-            bullets.extend(table_lines);
-            return (title_text, bullets);
-        }
-        let xml_no_gf = crate::rtf_xml_helpers::strip_tag_blocks(s_xml, "p:graphicFrame");
-        let mut bullets: Vec<String> = if extract_tag_bodies(&xml_no_gf, "a:p").is_empty() {
-            extract_tag_bodies(&xml_no_gf, "a:t")
-                .into_iter()
-                .map(XmlSanitizer::unescape)
-                .collect()
-        } else {
-            shape_paragraph_texts(&xml_no_gf)
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-        bullets.extend(table_lines);
-        let legacy_title = match extract_attr(s_xml, "<p:sld", "title") {
-            Some(t) => XmlSanitizer::unescape(t),
-            None if bullets.is_empty() => String::new(),
-            None => bullets.remove(0),
-        };
-        (legacy_title, bullets)
-    }
-
     pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
-        let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        validate_zip_xml_entries(&entries)?;
-        let entry_map: std::collections::HashMap<&str, &ZipArchiveEntry> =
-            entries.iter().map(|e| (e.path.as_str(), e)).collect();
-        let &pres_entry = entry_map.get("ppt/presentation.xml").ok_or_else(|| {
-            EasyOfficeError::CorruptedContainer(
-                "PPTX 필수 엔트리 'ppt/presentation.xml'이 누락되었습니다.".to_string(),
-            )
-        })?;
-        let pres_xml = utf8_entry(pres_entry, "ppt/presentation.xml")?;
-
-        let title = Self::pptx_title(&entry_map, pres_xml);
-        let slideshow_ct = entry_map
-            .get("[Content_Types].xml")
-            .and_then(|e| std::str::from_utf8(&e.data).ok())
-            .is_some_and(|ct| ct.contains(SLIDESHOW_MAIN_CT));
-        let is_slideshow =
-            slideshow_ct || extract_attr(pres_xml, "<p:presentation", "slideshow") == Some("1");
-
-        let mut budget = DecodeBudget::new();
-        budget.charge(pres_xml.len(), "PPTX 프레젠테이션")?;
-
-        let rel_targets = Self::pptx_relationship_targets(&entry_map)?;
-        let mut ordered_slide_entries: Vec<&ZipArchiveEntry> = Vec::new();
-        let mut seen_paths: HashSet<&str> = HashSet::new();
-        let mut sld_id_count = 0usize;
-        for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
-            sld_id_count += 1;
-            if sld_id_count > MAX_PPTX_SLIDES * 4 {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "PPTX 슬라이드 참조 수 한도를 초과했습니다.".to_string(),
-                ));
-            }
-            let rid = extract_attr_from_fragment(sld_id_attrs, "r:id")
-                .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"));
-            let target = rid.and_then(|rid| rel_targets.get(rid));
-            if let Some(&entry) = target.and_then(|path| entry_map.get(path.as_str())) {
-                if seen_paths.insert(entry.path.as_str()) {
-                    if ordered_slide_entries.len() >= MAX_PPTX_SLIDES {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
-                        ));
-                    }
-                    ordered_slide_entries.push(entry);
-                }
-            }
-        }
-        if ordered_slide_entries.is_empty() {
-            ordered_slide_entries = Self::pptx_slides_by_number(&entries);
-            if ordered_slide_entries.len() > MAX_PPTX_SLIDES {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "PPTX 슬라이드 수 한도를 초과했습니다.".to_string(),
-                ));
-            }
-        }
-
-        let mut slides = Vec::with_capacity(ordered_slide_entries.len());
-        for s_entry in ordered_slide_entries {
-            let s_xml = utf8_entry(s_entry, "ppt/slides/slide.xml")?;
-            budget.charge(s_xml.len(), "PPTX 슬라이드 XML")?;
-            let (s_title, bullets) = Self::pptx_slide_title_and_bullets(s_xml);
-            let notes = match read_notes_slide(&entry_map, &s_entry.path)? {
-                Some(n) => n,
-                None => extract_attr(s_xml, "<p:sld", "notes")
-                    .map(XmlSanitizer::unescape)
-                    .unwrap_or_default(),
-            };
-            budget.charge_block(s_title.len(), "PPTX 슬라이드 제목")?;
-            for bullet in &bullets {
-                budget.charge_run(bullet.len(), "PPTX 슬라이드 텍스트")?;
-            }
-            budget.charge(notes.len(), "PPTX 슬라이드 노트")?;
-            slides.push((s_title, bullets, notes));
-        }
-
+        let deck = crate::pptx_rich::unpack_pptx_rich(bytes)?;
+        let slides = deck.to_legacy_slides();
         Ok(OoxmlPptxPayload {
-            title,
-            is_slideshow,
+            title: deck.title,
+            is_slideshow: deck.is_slideshow,
             slides,
         })
+    }
+
+    pub fn pack_pptx_rich(
+        deck: &crate::rich_slide::RichSlideDeck,
+        is_slideshow: bool,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        crate::pptx_rich::pack_pptx_rich(deck, is_slideshow)
+    }
+
+    pub fn unpack_pptx_rich(
+        bytes: &[u8],
+    ) -> Result<crate::rich_slide::RichSlideDeck, EasyOfficeError> {
+        crate::pptx_rich::unpack_pptx_rich(bytes)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ZipSecurityPolicy;
 
     #[test]
     fn pptx_slide_extracts_graphic_frame_table_cells() {
@@ -696,11 +825,27 @@ mod tests {
             "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
             "</p:spTree></p:cSld></p:sld>"
         );
-        let (title, bullets) = OoxmlCodec::pptx_slide_title_and_bullets(slide_xml);
+        let bytes = ZipArchiveCodec::pack(&[
+            (
+                "[Content_Types].xml".into(),
+                b"<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"
+                    .to_vec(),
+            ),
+            (
+                "ppt/presentation.xml".into(),
+                format!("<p:presentation {PML_NS}><p:sldIdLst/></p:presentation>").into_bytes(),
+            ),
+            (
+                "ppt/slides/slide1.xml".into(),
+                slide_xml.as_bytes().to_vec(),
+            ),
+        ])
+        .unwrap();
+        let (title, bullets, _) = &OoxmlCodec::unpack_pptx(&bytes).unwrap().slides[0];
         assert_eq!(title, "분기 실적");
         assert_eq!(
             bullets,
-            vec![
+            &vec![
                 "요약 항목".to_string(),
                 "항목\t매출".to_string(),
                 "1분기\t1200".to_string()
@@ -746,118 +891,69 @@ mod tests {
         let repeated_ids = (1..=500)
             .map(|i| format!("<p:sldId id=\"{}\" r:id=\"rId2\"/>", 256 + i))
             .collect::<String>();
-        let dup_rels = rels_xml(&[("rId2", "slide", "slides/slide1.xml".to_string())]);
+        let dup_rels = rels_xml(&[("rId2", "slide", "slides/slide1.xml")]);
         let mut found_rels = false;
         for (path, data) in &mut entries {
             if path == "ppt/presentation.xml" {
                 *data = format!(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
-                     <p:presentation {PML_NS}><p:sldIdLst>{repeated_ids}</p:sldIdLst></p:presentation>"
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:presentation {PML_NS}><p:sldIdLst>{repeated_ids}</p:sldIdLst></p:presentation>"
                 )
                 .into_bytes();
             } else if path == "ppt/_rels/presentation.xml.rels" {
-                *data = dup_rels.clone().into_bytes();
+                *data = dup_rels.clone();
                 found_rels = true;
             }
         }
         if !found_rels {
-            entries.push((
-                "ppt/_rels/presentation.xml.rels".to_string(),
-                dup_rels.into_bytes(),
-            ));
+            entries.push(("ppt/_rels/presentation.xml.rels".into(), dup_rels));
         }
         let dup_bytes = ZipArchiveCodec::pack(&entries).unwrap();
-        let unpacked = OoxmlCodec::unpack_pptx(&dup_bytes).unwrap();
-        assert_eq!(unpacked.slides.len(), 1);
+        assert_eq!(OoxmlCodec::unpack_pptx(&dup_bytes).unwrap().slides.len(), 1);
+
+        let build_pkg = |count: usize, with_notes: bool| -> Vec<u8> {
+            let mut ids = String::new();
+            let mut rels = Vec::with_capacity(count);
+            let mut entries = vec![(
+                "[Content_Types].xml".into(),
+                b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>".to_vec(),
+            )];
+            if with_notes {
+                let txt = "A".repeat(300_000);
+                entries.push(("ppt/notesSlides/notesSlide1.xml".into(), format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:notes {PML_NS}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{txt}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>"
+                ).into_bytes()));
+            }
+            let note_rel = rels_xml(&[("rId1", "notesSlide", "../notesSlides/notesSlide1.xml")]);
+            for i in 1..=count {
+                let rid = format!("rId{i}");
+                entries.push((format!("ppt/slides/slide{i}.xml"), b"<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree/></p:cSld></p:sld>".to_vec()));
+                if with_notes {
+                    entries.push((
+                        format!("ppt/slides/_rels/slide{i}.xml.rels"),
+                        note_rel.clone(),
+                    ));
+                }
+                let _ = write!(ids, "<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 256 + i);
+                rels.push((rid, "slide", format!("slides/slide{i}.xml")));
+            }
+            entries.push(("ppt/_rels/presentation.xml.rels".into(), rels_xml(&rels)));
+            entries.push((
+                "ppt/presentation.xml".into(),
+                format!("<p:presentation {PML_NS}><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>")
+                    .into_bytes(),
+            ));
+            ZipArchiveCodec::pack(&entries).unwrap()
+        };
 
         // 2. Excess slide count (> MAX_PPTX_SLIDES) fails closed.
-        let mut over_ids = String::new();
-        let mut over_rels = Vec::new();
-        for i in 1..=(MAX_PPTX_SLIDES + 1) {
-            let rid = format!("rId{i}");
-            over_ids.push_str(&format!("<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 256 + i));
-            over_rels.push((rid, "slide", format!("slides/slide{i}.xml")));
-        }
-        let over_rel_refs: Vec<(&str, &str, String)> = over_rels
-            .iter()
-            .map(|(a, b, c)| (a.as_str(), *b, c.clone()))
-            .collect();
-        let mut over_entries = vec![
-            (
-                "[Content_Types].xml".to_string(),
-                b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>".to_vec(),
-            ),
-            (
-                "ppt/_rels/presentation.xml.rels".to_string(),
-                rels_xml(&over_rel_refs).into_bytes(),
-            ),
-            (
-                "ppt/presentation.xml".to_string(),
-                format!("<p:presentation {PML_NS}><p:sldIdLst>{over_ids}</p:sldIdLst></p:presentation>").into_bytes(),
-            ),
-        ];
-        for i in 1..=(MAX_PPTX_SLIDES + 1) {
-            over_entries.push((format!("ppt/slides/slide{i}.xml"), b"<p:sld/>".to_vec()));
-        }
-        let over_bytes = ZipArchiveCodec::pack(&over_entries).unwrap();
+        let over_bytes = build_pkg(MAX_PPTX_SLIDES + 1, false);
         assert!(matches!(
             OoxmlCodec::unpack_pptx(&over_bytes),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))
         ));
 
         // 3. Shared giant notesSlide referenced by many unique small slides trips DecodeBudget.
-        let big_note_text = "A".repeat(300_000);
-        let note_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
-             <p:notes {PML_NS}><p:cSld><p:spTree>\
-             <p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr>\
-             <p:txBody><a:p><a:r><a:t>{big_note_text}</a:t></a:r></a:p></p:txBody></p:sp>\
-             </p:spTree></p:cSld></p:notes>"
-        );
-        let slide_count = 950usize; // 950 * 300KB = 285MB > 256MiB DecodeBudget
-        let mut amp_entries = vec![
-            (
-                "[Content_Types].xml".to_string(),
-                b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"></Types>".to_vec(),
-            ),
-            ("ppt/notesSlides/notesSlide1.xml".to_string(), note_xml.into_bytes()),
-        ];
-        let mut sld_ids = String::new();
-        let mut pres_rels = Vec::new();
-        for i in 1..=slide_count {
-            let rid = format!("rId{i}");
-            let path = format!("ppt/slides/slide{i}.xml");
-            let rel_path = format!("ppt/slides/_rels/slide{i}.xml.rels");
-            amp_entries.push((
-                path,
-                b"<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree/></p:cSld></p:sld>".to_vec(),
-            ));
-            amp_entries.push((
-                rel_path,
-                rels_xml(&[(
-                    "rId1",
-                    "notesSlide",
-                    "../notesSlides/notesSlide1.xml".to_string(),
-                )])
-                .into_bytes(),
-            ));
-            sld_ids.push_str(&format!("<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 256 + i));
-            pres_rels.push((rid, "slide", format!("slides/slide{i}.xml")));
-        }
-        let rel_refs: Vec<(&str, &str, String)> = pres_rels
-            .iter()
-            .map(|(a, b, c)| (a.as_str(), *b, c.clone()))
-            .collect();
-        amp_entries.push((
-            "ppt/_rels/presentation.xml.rels".to_string(),
-            rels_xml(&rel_refs).into_bytes(),
-        ));
-        amp_entries.push((
-            "ppt/presentation.xml".to_string(),
-            format!("<p:presentation {PML_NS}><p:sldIdLst>{sld_ids}</p:sldIdLst></p:presentation>")
-                .into_bytes(),
-        ));
-        let amp_bytes = ZipArchiveCodec::pack(&amp_entries).unwrap();
+        let amp_bytes = build_pkg(950, true);
         assert!(matches!(
             OoxmlCodec::unpack_pptx(&amp_bytes),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))

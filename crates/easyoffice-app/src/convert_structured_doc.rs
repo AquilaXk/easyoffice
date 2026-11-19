@@ -3,7 +3,8 @@
 
 use easyoffice_formats::{
     DocumentFormat, EasyOfficeError, PdfHighlight, PdfHighlightKind, PdfWriteOptions, RichBlock,
-    RichDocument, RichListKind, RichParagraph, RichRun,
+    RichDocument, RichListKind, RichParagraph, RichRun, RichSlideDeck, RichTable, SlideElement,
+    SlidePlaceholderRole,
 };
 
 use crate::convert_structured::{field, invalid, opt_bounded, opt_str, JsonObject, SlideTriple};
@@ -127,6 +128,123 @@ pub(crate) fn slides_to_document(slides: &[SlideTriple], title: &str) -> RichDoc
             push(bullet, 0, Some(RichListKind::Bullet), false);
         }
         push(notes, 0, None, true);
+    }
+    RichDocument {
+        page_frame: Default::default(),
+        title: title.to_string(),
+        blocks,
+        official_agency: None,
+        ..RichDocument::default()
+    }
+}
+
+pub(crate) fn slide_deck_to_document(deck: &RichSlideDeck, title: &str) -> RichDocument {
+    let mut blocks = Vec::new();
+    let push_line = |blocks: &mut Vec<RichBlock>,
+                     text: &str,
+                     heading_level: u8,
+                     list: Option<RichListKind>,
+                     italic: bool| {
+        if text.trim().is_empty() {
+            return;
+        }
+        blocks.push(RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun {
+                italic,
+                ..RichRun::plain(text)
+            }],
+            heading_level,
+            list,
+            ..RichParagraph::default()
+        }));
+    };
+    for slide in &deck.slides {
+        push_line(
+            &mut blocks,
+            &slide.title,
+            SLIDE_TITLE_HEADING_LEVEL,
+            None,
+            false,
+        );
+        for bullet in &slide.bullets {
+            push_line(&mut blocks, bullet, 0, Some(RichListKind::Bullet), false);
+        }
+        for el in &slide.elements {
+            match el {
+                SlideElement::TextBox {
+                    text,
+                    bold,
+                    italic,
+                    underline,
+                    color,
+                    role,
+                    ..
+                } if !text.trim().is_empty() => {
+                    let hl = if slide.title.is_empty() && *role == Some(SlidePlaceholderRole::Title)
+                    {
+                        SLIDE_TITLE_HEADING_LEVEL
+                    } else {
+                        0
+                    };
+                    blocks.push(RichBlock::Paragraph(RichParagraph {
+                        runs: vec![RichRun {
+                            bold: *bold,
+                            italic: *italic,
+                            underline: *underline,
+                            color: color.clone(),
+                            ..RichRun::plain(text)
+                        }],
+                        heading_level: hl,
+                        ..RichParagraph::default()
+                    }));
+                }
+                SlideElement::Shape {
+                    text, bold, color, ..
+                } if !text.trim().is_empty() => {
+                    blocks.push(RichBlock::Paragraph(RichParagraph {
+                        runs: vec![RichRun {
+                            bold: *bold,
+                            color: color.clone(),
+                            ..RichRun::plain(text)
+                        }],
+                        ..RichParagraph::default()
+                    }));
+                }
+                SlideElement::Image { image, .. } => {
+                    blocks.push(RichBlock::Image(image.clone()));
+                }
+                SlideElement::Table { rows, .. } => {
+                    blocks.push(RichBlock::Table(RichTable::from(rows.clone())));
+                }
+                SlideElement::Chart {
+                    title: ct,
+                    categories,
+                    series,
+                    ..
+                } => {
+                    if !ct.trim().is_empty() {
+                        push_line(&mut blocks, ct, 0, None, false);
+                    }
+                    let mut grid = Vec::new();
+                    let mut hdr = vec!["항목".to_string()];
+                    hdr.extend(series.iter().map(|s| s.name.clone()));
+                    grid.push(hdr);
+                    let len = categories
+                        .len()
+                        .max(series.iter().map(|s| s.values.len()).max().unwrap_or(0));
+                    for i in 0..len {
+                        let mut r = vec![categories.get(i).cloned().unwrap_or_default()];
+                        for s in series {
+                            r.push(s.values.get(i).map(|v| format!("{v}")).unwrap_or_default());
+                        }
+                        grid.push(r);
+                    }
+                    blocks.push(RichBlock::Table(RichTable::from(grid)));
+                }
+                _ => {}
+            }
+        }
+        push_line(&mut blocks, &slide.notes, 0, None, true);
     }
     RichDocument {
         page_frame: Default::default(),

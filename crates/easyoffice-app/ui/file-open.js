@@ -654,11 +654,7 @@
         next.activeSheetCellRef = active ? host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(active[0], active[1]) : "A1";
         if (typeof replaceColumnWidths === "function") replaceColumnWidths(columnWidths);
       } else if (mod === "SLIDE") {
-        const slides = Array.isArray(res.slides) ? res.slides : [];
-        next.slides = (slides.length > 0 ? slides : [{ title: "", bullets: [], notes: "" }]).map((s) => ({
-          title: s.title || "", lower: (s.bullets || []).join("\n"), notes: s.notes || "",
-          transition: "fade", ...createEmptySlideStyleFields(),
-        }));
+        next.slides = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.hydrateDecodedDeck(res, createEmptySlideStyleFields);
         next.activeSlideIndex = 0;
       } else if (mod === "PDF") {
         applyPdf(next, res, name);

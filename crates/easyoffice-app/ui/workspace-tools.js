@@ -153,18 +153,7 @@
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
           syncActiveSlideDomStylesToDeck();
         }
-        const slides = slideDeckState.map((s) => {
-          let extraText = "";
-          if (Array.isArray(s.insertedNodes) && s.insertedNodes.length > 0) {
-            const extraDiv = document.createElement("div");
-            extraDiv.className = "sheet-table";
-            restoreDomChildren(extraDiv, s.insertedNodes, document);
-            extraText = extractEditableDocumentText(extraDiv);
-          }
-          const bullets = [s.lower || "", extraText].join("\n").split(/\n+/).map((t) => t.trim()).filter(Boolean);
-          return { title: (s.title || "").trim(), bullets, notes: (s.notes || "").trim() };
-        });
-        return { slides };
+        return host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.serializeDeckPayload(slideDeckState, document, extractEditableDocumentText);
       }
       const lines = [];
       document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)").forEach((el) => {

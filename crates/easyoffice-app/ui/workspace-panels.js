@@ -282,6 +282,7 @@
         slide.stageOutline = stageBox.style.outline || "";
         slide.stageLayoutState = stageBox.dataset.layoutState || "";
         slide.presenterMode = stageBox.dataset.presenterMode || "";
+        slide.layout = stageBox.dataset.layout || slide.layout || "titleAndContent";
       }
     }
 
@@ -303,6 +304,7 @@
       if (stageBox) {
         stageBox.style.padding = slide?.stagePadding || "";
         stageBox.style.outline = slide?.stageOutline || "";
+        stageBox.dataset.layout = slide?.layout || "titleAndContent";
         if (slide?.stageLayoutState) {
           stageBox.dataset.layoutState = slide.stageLayoutState;
         } else {

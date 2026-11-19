@@ -244,6 +244,30 @@
       const slides = Array.isArray(ctx.slide?.slides) ? ctx.slide.slides : [];
       const activeIdx = Number(ctx.slide?.activeIndex || 0);
       if (mode === "edit") {
+        if (/도형|글상자|차트|표|레이아웃/.test(prompt)) {
+          const ops = [];
+          if (/두\s*개의\s*내용/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "twoColumn" });
+          else if (/제목\s*슬라이드/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "titleSlide" });
+          else if (/빈\s*화면/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "blank" });
+          if (/도형/.test(prompt)) {
+            ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "shape", shapeType: "roundRect", x: 480, y: 150, w: 220, h: 96, text: "핵심 지표" } });
+          } else if (/차트/.test(prompt)) {
+            ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "chart", chartType: "column", x: 460, y: 240, w: 360, h: 190, title: "실적 요약" } });
+          } else if (/글상자/.test(prompt)) {
+            ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "textbox", x: 100, y: 140, w: 320, h: 80, text: "요약 설명" } });
+          }
+          if (ops.length > 0) {
+            return {
+              status: "ok",
+              mode: "edit",
+              reply: `${activeIdx + 1}번 슬라이드의 레이아웃과 개체를 업데이트했습니다.`,
+              reasoning: "",
+              updatedInPlace: true,
+              operations: ops,
+              locations: [{ module: "SLIDE", label: `슬라이드 ${activeIdx + 1}`, slideIndex: activeIdx }],
+            };
+          }
+        }
         if (/추가|새\s*슬라이드/.test(prompt)) {
           const nextIdx = slides.length;
           return {
@@ -545,7 +569,12 @@ function offlineSourceConversion(parsed) {
       return { structuredTables: 0, body: parsed.sheets.map((s) => (s.cells || []).map((c) => c.ref + "=" + c.raw).join("\n")).join("\n") };
     }
     if (Array.isArray(parsed.slides)) {
-      return { structuredTables: 0, body: parsed.slides.map((s) => [s.title, ...(s.bullets || []), s.notes].join("\n")).join("\n") };
+      const structuredTables = parsed.slides.reduce((acc, s) => acc + (Array.isArray(s.elements) ? s.elements.filter((e) => e?.kind === "table").length : 0), 0);
+      const body = parsed.slides.map((s) => {
+        const elTxt = Array.isArray(s.elements) ? s.elements.map((e) => e?.text || e?.title || e?.alt || "").filter(Boolean) : [];
+        return [s.title, ...(s.bullets || []), ...elTxt, s.notes].join("\n");
+      }).join("\n");
+      return { structuredTables, body };
     }
     if (parsed.blocks !== undefined || parsed.sheets !== undefined || parsed.slides !== undefined) {
       throw new Error("InvalidArgument: 구조화 저장 필드는 배열이어야 합니다.");

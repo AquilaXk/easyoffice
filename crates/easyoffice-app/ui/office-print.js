@@ -341,6 +341,7 @@
       const stage = document.createElement("div");
       stage.className = "slide-stage";
       stage.dataset.aspect = aspect;
+      stage.dataset.layout = slide.layout || "titleAndContent";
       const titleZone = document.createElement("div");
       titleZone.className = "slide-title-zone";
       const heading = document.createElement("h2");
@@ -356,6 +357,10 @@
       if (Array.isArray(slide.insertedNodes) && slide.insertedNodes.length > 0) restoreDomChildren(lowerZone, slide.insertedNodes, document);
       stage.appendChild(titleZone);
       stage.appendChild(lowerZone);
+      if (Array.isArray(slide.elements) && slide.elements.length > 0) {
+        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, aspect, { forPrint: true });
+        if (layer) stage.appendChild(layer);
+      }
       page.appendChild(stage);
       return page;
     }

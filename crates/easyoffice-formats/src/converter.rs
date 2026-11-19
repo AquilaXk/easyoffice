@@ -276,6 +276,44 @@ impl UniversalFormatConverter {
         }
     }
 
+    pub fn encode_rich_slides(
+        deck: &crate::RichSlideDeck,
+        format: DocumentFormat,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        match format {
+            DocumentFormat::Pptx | DocumentFormat::Ppsx => {
+                crate::pptx_rich::pack_pptx_rich(deck, format == DocumentFormat::Ppsx)
+            }
+            DocumentFormat::Odp => crate::odp_rich::pack_odp_rich(deck),
+            DocumentFormat::Pdf => crate::pdf_slide::encode_slide_pdf(deck, &deck.title),
+            DocumentFormat::Ppt => {
+                let legacy = deck.to_legacy_slides();
+                LegacyOle2Codec::pack_ppt(&LegacyPptPayload {
+                    title: deck.title.clone(),
+                    slides: legacy
+                        .into_iter()
+                        .zip(deck.slides.iter())
+                        .map(|((s_title, bullets, notes), s)| LegacyPptSlide {
+                            title: s_title,
+                            bullets,
+                            notes,
+                            theme: "SignatureLavender".to_string(),
+                            transition: format!("{:?}", s.transition),
+                        })
+                        .collect(),
+                })
+            }
+            _ => Self::encode(
+                &UniversalDocumentModel {
+                    title: deck.title.clone(),
+                    slides: deck.to_legacy_slides(),
+                    ..UniversalDocumentModel::default()
+                },
+                format,
+            ),
+        }
+    }
+
     pub fn decode(
         bytes: &[u8],
         format_hint: Option<&str>,

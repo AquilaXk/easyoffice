@@ -15,7 +15,9 @@ use easyoffice_sheet::{
 use crate::convert_hwp::{write_hwp, RichThumbnailRenderer, ShellWriters};
 use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured::StructuredContent;
-use crate::convert_structured_doc::{is_document_format, slides_to_document};
+use crate::convert_structured_doc::{
+    is_document_format, slide_deck_to_document, slides_to_document,
+};
 use crate::eval_limit::evaluate_for_file;
 use crate::sheet_display::{show_cells, Show};
 use crate::sheet_links_xls::xls_links;
@@ -796,6 +798,20 @@ fn encode_structured_with_thumbnail(
                     encode_rich_for_host(&doc, format, None, thumbnail, None)
                 }
             }
+        }
+        StructuredContent::SlideDeck(deck) if format == DocumentFormat::Pdf => {
+            easyoffice_formats::encode_slide_pdf(deck, title)
+        }
+        StructuredContent::SlideDeck(deck) if is_document_format(format) => {
+            let doc = slide_deck_to_document(deck, title);
+            encode_rich_for_host(&doc, format, None, thumbnail, None)
+        }
+        StructuredContent::SlideDeck(deck) => {
+            let mut titled = deck.clone();
+            if !title.trim().is_empty() {
+                titled.title = title.to_string();
+            }
+            UniversalFormatConverter::encode_rich_slides(&titled, format)
         }
         StructuredContent::Slides(slides) if is_document_format(format) => {
             let doc = slides_to_document(slides, title);

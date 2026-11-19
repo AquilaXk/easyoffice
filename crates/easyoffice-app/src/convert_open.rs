@@ -12,8 +12,8 @@
 use easyoffice_formats::{
     evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
-    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichToc,
-    SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
+    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichSlideDeck,
+    RichToc, SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -563,9 +563,30 @@ fn write_list<T>(out: &mut String, items: &[T], mut write: impl FnMut(&mut Strin
     }
 }
 
+#[cfg(test)]
 fn decode_response(
     decoded: &DecodedDocument,
     styling: &[(String, SheetStyling)],
+    file_name: &str,
+    source_bytes: usize,
+    max_rows: Option<u32>,
+    max_cols: Option<u32>,
+) -> Result<String, EasyOfficeError> {
+    decode_response_with_deck(
+        decoded,
+        styling,
+        None,
+        file_name,
+        source_bytes,
+        max_rows,
+        max_cols,
+    )
+}
+
+fn decode_response_with_deck(
+    decoded: &DecodedDocument,
+    styling: &[(String, SheetStyling)],
+    slide_deck: Option<&RichSlideDeck>,
     file_name: &str,
     source_bytes: usize,
     max_rows: Option<u32>,
@@ -716,16 +737,24 @@ fn decode_response(
             return Ok(out);
         }
         DecodedContent::Slides(slides) => {
-            out.push_str("\"slides\":[");
-            write_list(&mut out, slides, |out, (title, bullets, notes)| {
-                out.push_str("{\"title\":");
-                push_json_str(out, title);
-                out.push_str(",\"bullets\":[");
-                write_list(out, bullets, |out, b| push_json_str(out, b));
-                out.push_str("],\"notes\":");
-                push_json_str(out, notes);
-                out.push('}');
-            });
+            if let Some(deck) = slide_deck {
+                crate::slide_deck_json::write_slide_deck_decode_fields(
+                    &mut out,
+                    deck,
+                    push_json_str,
+                );
+            } else {
+                out.push_str("\"slides\":[");
+                write_list(&mut out, slides, |out, (title, bullets, notes)| {
+                    out.push_str("{\"title\":");
+                    push_json_str(out, title);
+                    out.push_str(",\"bullets\":[");
+                    write_list(out, bullets, |out, b| push_json_str(out, b));
+                    out.push_str("],\"notes\":");
+                    push_json_str(out, notes);
+                    out.push('}');
+                });
+            }
         }
     }
     out.push_str("]}");
@@ -757,9 +786,10 @@ fn into_structured(
     content: DecodedContent,
     styling: &[(String, SheetStyling)],
     pdf: PdfWriteOptions,
+    slide_deck: Option<RichSlideDeck>,
 ) -> StructuredContent {
-    match content {
-        DecodedContent::Document(mut doc) => {
+    match (content, slide_deck) {
+        (DecodedContent::Document(mut doc), _) => {
             for block in &mut doc.blocks {
                 if let RichBlock::Table(table) = block {
                     evaluate_table_formulas(&mut table.rows);
@@ -767,14 +797,15 @@ fn into_structured(
             }
             StructuredContent::Document(doc, pdf)
         }
-        DecodedContent::Workbook(sheets) => {
+        (DecodedContent::Workbook(sheets), _) => {
             let stylings = sheets
                 .iter()
                 .map(|(name, _)| styling_of(styling, name).cloned().unwrap_or_default())
                 .collect();
             StructuredContent::Workbook(sheets, stylings)
         }
-        DecodedContent::Slides(slides) => StructuredContent::Slides(slides),
+        (DecodedContent::Slides(_), Some(deck)) => StructuredContent::SlideDeck(deck),
+        (DecodedContent::Slides(slides), None) => StructuredContent::Slides(slides),
     }
 }
 
@@ -818,11 +849,12 @@ impl EasyOfficeIpcRouter {
         if action == "decode" {
             let max_rows = limit(entries, "maxRows")?;
             let max_cols = limit(entries, "maxCols")?;
-            let (decoded, styling) =
-                UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
-            return decode_response(
+            let (decoded, styling, slide_deck) =
+                UniversalFormatConverter::decode_rich_full(&bytes, source_hint)?;
+            return decode_response_with_deck(
                 &decoded,
                 &styling,
+                slide_deck.as_ref(),
                 file_name.unwrap_or(""),
                 bytes.len(),
                 max_rows,
@@ -848,8 +880,8 @@ impl EasyOfficeIpcRouter {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("변환_문서");
-        let (decoded, styling) =
-            UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
+        let (decoded, styling, slide_deck) =
+            UniversalFormatConverter::decode_rich_full(&bytes, source_hint)?;
         let decoded_title = decoded.title.trim();
         let title = if !decoded_title.is_empty()
             && !matches!(
@@ -858,11 +890,15 @@ impl EasyOfficeIpcRouter {
             ) {
             decoded_title.to_string()
         } else {
-            fallback_title.to_string()
+            slide_deck
+                .as_ref()
+                .map(|d| d.title.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| fallback_title.to_string())
         };
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
-        let content = into_structured(decoded.content, &styling, pdf_options);
+        let content = into_structured(decoded.content, &styling, pdf_options, slide_deck);
         if !allow_loss && password_lost(&content, dst_fmt) {
             return Ok(REFUSED_PASSWORD_LOSS.to_string());
         }

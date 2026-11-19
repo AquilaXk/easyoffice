@@ -25,6 +25,7 @@ mod hwpx_unpack;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 mod odf_package;
+pub mod odp_rich;
 mod odt_notes_writer;
 mod odt_rich_writer;
 pub mod office_codecs;
@@ -44,9 +45,11 @@ mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;
 mod pdf_sheet_media;
+pub mod pdf_slide;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
 mod pdf_writer;
+pub mod pptx_rich;
 pub mod rich_document;
 mod rich_image;
 mod rich_image_probe;
@@ -70,6 +73,7 @@ pub mod rich_readers;
 mod rich_rtf_table;
 mod rich_rtf_writer;
 mod rich_run_writers;
+pub mod rich_slide;
 mod rich_table;
 mod rich_table_style;
 mod rich_table_writers;
@@ -113,6 +117,7 @@ pub use output_compatibility::OutputCompatibility;
 pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
 pub use pdf_laid::{CellShown, SheetShown};
+pub use pdf_slide::encode_slide_pdf;
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
@@ -132,6 +137,7 @@ pub use rich_notes::{
     MAX_NOTE_TEXT_BYTES, MAX_REVISIONS_PER_DOCUMENT,
 };
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
+pub use rich_slide::*;
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
 };
