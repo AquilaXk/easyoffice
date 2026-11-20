@@ -82,17 +82,18 @@ fn test_indirect_second_arg_evaluation_and_error_propagation() {
         EvaluatedCellValue::Error(FormulaError::DivByZero)
     );
 
+    // A false second argument reads the text as R1C1 (PD-270), and `A1` is no R1C1 reference.
     assert_eq!(
         sheet.evaluate_formula_str("=INDIRECT(\"A1\", FALSE)"),
-        EvaluatedCellValue::Error(FormulaError::Value)
+        EvaluatedCellValue::Error(FormulaError::Ref)
     );
     assert_eq!(
         sheet.evaluate_formula_str("=INDIRECT(\"A1\", 0)"),
-        EvaluatedCellValue::Error(FormulaError::Value)
+        EvaluatedCellValue::Error(FormulaError::Ref)
     );
     assert_eq!(
         sheet.evaluate_formula_str("=INDIRECT(\"A1\", \"FALSE\")"),
-        EvaluatedCellValue::Error(FormulaError::Value)
+        EvaluatedCellValue::Error(FormulaError::Ref)
     );
     assert_eq!(
         sheet.evaluate_formula_str("=INDIRECT(\"A1\", \"invalid\")"),
@@ -100,7 +101,7 @@ fn test_indirect_second_arg_evaluation_and_error_propagation() {
     );
     assert_eq!(
         sheet.evaluate_formula_str("=SUM(INDIRECT(\"A1:A2\", FALSE))"),
-        EvaluatedCellValue::Error(FormulaError::Value)
+        EvaluatedCellValue::Error(FormulaError::Ref)
     );
 }
 
