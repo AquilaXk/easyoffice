@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::rich_document::{safe_link_target, RichDocument, RichParagraph};
+use crate::rich_document::{safe_link_target, RichBlock, RichDocument, RichParagraph};
 use crate::rich_notes::{
     is_deleted_run, truncate_utf8_bytes, RichComment, RichNoteKind, RichRevision, RichRevisionKind,
     MAX_AUTHOR_BYTES, MAX_DATE_BYTES,
@@ -24,6 +24,11 @@ pub(crate) struct OdtNotesContext {
     note_by_key: HashMap<(RichNoteKind, u32), String>,
     /// Same rule for comment annotations, which a comment with many anchors opens again and again.
     comment_by_id: HashMap<u32, RichComment>,
+    /// Body paragraphs still to come that carry each comment. A comment over several paragraphs gets one
+    /// `office:annotation` and its `office:annotation-end` in the last of them.
+    comment_paras_left: HashMap<u32, usize>,
+    /// The comment whose annotation is still open at the end of the previous paragraph.
+    open_comment: Option<u32>,
 }
 
 impl OdtNotesContext {
@@ -38,11 +43,21 @@ impl OdtNotesContext {
             .into_iter()
             .map(|c| (c.id, c))
             .collect();
+        let mut comment_paras_left: HashMap<u32, usize> = HashMap::new();
+        for block in &doc.blocks {
+            if let RichBlock::Paragraph(p) = block {
+                for cid in comment_ids_of(p) {
+                    *comment_paras_left.entry(cid).or_default() += 1;
+                }
+            }
+        }
         Self {
             track_changes: doc.track_changes,
             regions: Vec::new(),
             note_by_key,
             comment_by_id,
+            comment_paras_left,
+            open_comment: None,
         }
     }
 
@@ -93,6 +108,17 @@ impl OdtNotesContext {
     }
 }
 
+/// The distinct comments whose anchors are in `p`, in order of appearance.
+fn comment_ids_of(p: &RichParagraph) -> Vec<u32> {
+    let mut ids: Vec<u32> = Vec::new();
+    for cid in p.runs.iter().filter_map(|r| r.comment_id) {
+        if !ids.contains(&cid) {
+            ids.push(cid);
+        }
+    }
+    ids
+}
+
 fn push_odt_note_paragraphs(out: &mut String, text: &str) {
     for line in text.split('\n') {
         out.push_str("<text:p>");
@@ -136,7 +162,11 @@ pub(crate) fn push_odt_paragraph_runs(
     text_styles: &mut StyleTable<OdtTextKey>,
     ctx: &mut OdtNotesContext,
 ) {
-    let mut cur_comment: Option<u32> = None;
+    let comment_ids = comment_ids_of(p);
+    let mut cur_comment: Option<u32> = ctx.open_comment.take();
+    if cur_comment.is_some_and(|cid| !comment_ids.contains(&cid)) {
+        close_odt_comment(body, &mut cur_comment);
+    }
     let mut cur_ins: Option<(&RichRevision, String)> = None;
     let mut cur_link: Option<&str> = None;
 
@@ -247,5 +277,20 @@ pub(crate) fn push_odt_paragraph_runs(
         body.push_str("</text:a>");
     }
     close_odt_insert_rev(body, &mut cur_ins);
-    close_odt_comment(body, &mut cur_comment);
+    for cid in &comment_ids {
+        if let Some(left) = ctx.comment_paras_left.get_mut(cid) {
+            *left = left.saturating_sub(1);
+        }
+    }
+    match cur_comment {
+        Some(cid)
+            if ctx
+                .comment_paras_left
+                .get(&cid)
+                .is_some_and(|&left| left > 0) =>
+        {
+            ctx.open_comment = Some(cid);
+        }
+        _ => close_odt_comment(body, &mut cur_comment),
+    }
 }

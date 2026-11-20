@@ -545,3 +545,83 @@ fn pivots_with_calculated_and_date_group_fields_are_read_and_saved() {
     assert_eq!(again[0].1.pivots[0].field_names, ["Day", "Amount"]);
     assert_eq!(again[0].1.pivots[0].row_fields, [0]);
 }
+
+/// 같은 메모가 여러 문단에 걸쳐 있으면 ODT에는 `office:annotation` 하나와 끝 문단의
+/// `office:annotation-end`만 쓰고, 읽으면 메모 하나가 세 문단의 범위를 그대로 덮어야 한다.
+fn three_paragraph_comment_doc() -> RichDocument {
+    let paragraph = |text: &str| {
+        RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun {
+                text: text.to_string(),
+                comment_id: Some(1),
+                ..RichRun::default()
+            }],
+            ..RichParagraph::default()
+        })
+    };
+    RichDocument {
+        comments: vec![RichComment {
+            id: 1,
+            author: "김검토".into(),
+            date: "2026-11-19T09:30:00Z".into(),
+            text: "세 문단에 걸친 메모".into(),
+        }],
+        blocks: vec![paragraph("첫째"), paragraph("둘째"), paragraph("셋째")],
+        ..RichDocument::default()
+    }
+}
+
+fn decode_document(bytes: &[u8], hint: &str) -> RichDocument {
+    let out = UniversalFormatConverter::decode_rich(bytes, Some(hint)).expect("decode");
+    let easyoffice_formats::DecodedContent::Document(doc) = out.content else {
+        panic!("document expected");
+    };
+    doc
+}
+
+fn assert_one_comment_over_three_paragraphs(doc: &RichDocument, what: &str) {
+    assert_eq!(doc.comments.len(), 1, "{what}: {:?}", doc.comments);
+    assert_eq!(doc.comments[0].text, "세 문단에 걸친 메모", "{what}");
+    let anchored: Vec<_> = doc
+        .blocks
+        .iter()
+        .map(|b| match b {
+            RichBlock::Paragraph(p) => p
+                .runs
+                .iter()
+                .any(|r| r.comment_id == Some(doc.comments[0].id)),
+            _ => false,
+        })
+        .collect();
+    assert_eq!(anchored, [true, true, true], "{what}");
+}
+
+#[test]
+fn odt_keeps_one_comment_over_several_paragraphs() {
+    let odt = UniversalFormatConverter::encode_rich(
+        &three_paragraph_comment_doc(),
+        DocumentFormat::Odt,
+        None,
+    )
+    .expect("encode odt");
+    assert_one_comment_over_three_paragraphs(&decode_document(&odt, "a.odt"), "odt");
+}
+
+#[test]
+fn docx_to_odt_to_docx_keeps_one_comment_and_its_range() {
+    let docx = UniversalFormatConverter::encode_rich(
+        &three_paragraph_comment_doc(),
+        DocumentFormat::Docx,
+        None,
+    )
+    .expect("encode docx");
+    let via_docx = decode_document(&docx, "a.docx");
+    assert_one_comment_over_three_paragraphs(&via_docx, "docx");
+    let odt =
+        UniversalFormatConverter::encode_rich(&via_docx, DocumentFormat::Odt, None).expect("odt");
+    let via_odt = decode_document(&odt, "a.odt");
+    assert_one_comment_over_three_paragraphs(&via_odt, "odt");
+    let docx2 =
+        UniversalFormatConverter::encode_rich(&via_odt, DocumentFormat::Docx, None).expect("docx2");
+    assert_one_comment_over_three_paragraphs(&decode_document(&docx2, "b.docx"), "docx again");
+}
