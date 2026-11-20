@@ -18,6 +18,8 @@
     const { diffSegments } = host.__EASYOFFICE_COPILOT_DIFF__;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     let overlays = [];
+    // 덧씌움이 원래 문단보다 길어질 때 뒤 문단을 밀려고 임시로 넣은 아래 여백(원래 값을 적어 둔다).
+    let pushes = [];
 
     const clip = (text) => clipCodePoints(String(text ?? ""), MAX_ENTRY_CHARS);
 
@@ -86,7 +88,7 @@
       const location = { module: "SLIDE", slideIndex: index };
       const fields = [["제목", op.title, slide.title], ["본문", bullets ?? op.body ?? op.lower, slide.lower], ["노트", op.notes, slide.notes]];
       for (const [name, next, prev] of fields) {
-        if (next !== undefined) entries.push(change("replace", `슬라이드 ${index + 1} ${name}`, prev || "", next, location));
+        if (next !== undefined) entries.push(change(prev ? "replace" : "insert", `슬라이드 ${index + 1} ${name}`, prev || "", next, location));
       }
     }
 
@@ -158,6 +160,7 @@
       });
     }
 
+    // 옮김[turn-changes] 시작
     const KIND_LABELS = { replace: "변경", insert: "추가", format: "서식", mask: "가림" };
 
     function side(name, caption, segments, keep) {
@@ -198,6 +201,8 @@
       }
       return row;
     }
+
+    // 옮김[turn-changes] 끝
 
     function renderList(changes, onLocate) {
       const list = document.createElement("div");
@@ -255,12 +260,24 @@
         for (const node of segmentNodes(entry.segments)) box.appendChild(node);
         container.appendChild(box);
         overlays.push(box);
+        // 새 글이 더 길면 덧씌움이 뒤 문단을 가린다: 마지막 문단의 아래 여백을 늘려 자리를 만든다. 여백은 저장되는 서식이 아니라 문서에 남지 않는다.
+        const extra = entry.docAppend ? 0 : box.offsetHeight - height;
+        if (Number.isFinite(extra) && extra > 1) {
+          const bottom = Number.parseFloat(win.getComputedStyle?.(last)?.marginBottom) || 0;
+          pushes.push({ el: last, prev: last.style.getPropertyValue("margin-bottom") });
+          last.style.setProperty("margin-bottom", `${bottom + extra}px`);
+        }
       }
     }
 
     function clear() {
       for (const box of overlays) box.remove();
       overlays = [];
+      for (const { el, prev } of pushes.reverse()) {
+        if (prev) el.style.setProperty("margin-bottom", prev);
+        else el.style.removeProperty("margin-bottom");
+      }
+      pushes = [];
     }
 
     return { buildChanges, fingerprint, renderList, showDocOverlays, clear, blockText, MAX_ENTRIES };

@@ -126,6 +126,8 @@ SOFTWARE.
 
 ## univer-office-copilot (Apache-2.0)
 
+The per-turn change list of the copilot panel (`web/src/features/copilot/turn-changes.tsx`, commit `3dfa757d8643b6f3d2072daf5c4357d2c6a3f451`: the item list with a place label and a kind tag, the before and after sides of each item, the "show more" limit and the locate button, lines 84-141 and 309-318) was ported into `crates/easyoffice-app/ui/copilot-preview.js` as plain DOM and `copilot.css` (`PD-268`); the original compares two saved file versions, this one reads the places a model's operations will change.
+
 Source: https://github.com/dream-num/univer-office-copilot (Copyright DreamNum Co., Ltd.).
 Nothing is vendored or linked at runtime; the right-hand Copilot sidebar interaction patterns (`web/src/app/copilot-panel.tsx` bounded pointer/keyboard width resizing, `web/src/features/copilot/assistant-ui/welcome.tsx` and `thread.tsx` empty-state examples, in-place update status chips, bottom-row composer layout, `web/src/features/copilot/model-picker.tsx` in-composer model & reasoning-effort picker, `web/src/features/settings/index.tsx` model settings dialog, and `server/src/modules/providers/{index,models,endpoint}.ts` SSRF validation and `/models` discovery) were adapted as plain JavaScript, token-driven CSS, and safe Rust in `crates/easyoffice-app/ui/{copilot.css,copilot-catalog.js,copilot-actions.js,copilot-model-ui.js,copilot-ui.js}`, `crates/easyoffice-app/src/copilot/`, and `crates/easyoffice-desktop/src/copilot_http.rs` (`PD-253`). The request-id keyed cancel of a running model request (`server/src/modules/copilot/index.ts`, one abort handle per request) is the design behind `crates/easyoffice-app/src/copilot/cancel.rs` (`PD-267`); the Rust version closes the request's socket instead of aborting a fetch, and no source lines were copied. Each adapted file starts with a header naming its source.
 
@@ -310,6 +312,8 @@ Nothing is vendored or linked at runtime; the right-hand Copilot sidebar interac
 
 ## continue (Apache-2.0)
 
+For the second copilot round (`PD-268`, commit `5522c6f44ca0ac3528b37244818fbfa39b5af470`), `core/llm/countTokens.ts:282-336` (`pruneLinesFromTop`, `pruneLinesFromBottom`) and `core/autocomplete/templating/index.ts:251-285` (the excess shared between the text before and after the cursor in proportion to their sizes) were ported into `crates/easyoffice-app/src/copilot/window.rs` with bytes instead of tokens, so the selection is sent first and the paragraphs around it fill what is left of the context. The stream delta shapes (`packages/fetch/src/stream.ts:54-99` `parseDataLine`/`parseSseLine`, `core/llm/llms/OpenAI.ts:686`, `core/llm/llms/Anthropic.ts:346-360`) and the JSON-array stream of the Gemini endpoint (`core/llm/llms/Gemini.ts:369-455` `processGeminiResponse`) were ported into `crates/easyoffice-app/src/copilot/stream.rs`.
+
 Source: https://github.com/continuedev/continue (Copyright Continue Dev, Inc.).
 Nothing is vendored or linked at runtime; the company-by-company provider and model preset definitions (`packages/llm-info/src/providers/{openai,anthropic,gemini,mistral,xAI,ollama}.ts`) and the wire protocol adapters (`core/llm/llms/{Anthropic,Gemini,OpenAI,Deepseek,OpenRouter,Groq,Mistral,xAI,Ollama,LMStudio}.ts`: Anthropic `/v1/messages` with `x-api-key`, `anthropic-version`, alternating turn coalescing, and `thinking` token budgets; Google `/v1beta/models/{model}:generateContent` with `x-goog-api-key` header, `systemInstruction`, consecutive role merging, and `thinkingConfig`; OpenAI-compatible `/chat/completions` with `reasoning_effort` and `/models` discovery) were adapted into `crates/easyoffice-app/src/copilot/{providers,llm_client,types}.rs` and `crates/easyoffice-app/ui/copilot-catalog.js` (`PD-253`). Each adapted file starts with a header naming its source, and the full Apache License 2.0 text immediately above applies identically.
 
@@ -323,6 +327,8 @@ Licensed under the Apache License, Version 2.0 (see full text above).
 Source: https://github.com/steven-tey/novel (commit `fa95098e66476c466faebb8211baa5869c101a9c`, Copyright Steven Tey). Nothing is vendored or linked at runtime. The selection command set (improve, fix, shorter, longer acting on the selected text) is taken from `apps/web/components/tailwind/generative/ai-selector-commands.tsx:5-26`, and the role sentence of each instruction from `apps/web/app/api/generate/route.ts:54-102` (`improve`, `shorter`, `longer`, `fix`), translated into Korean in `crates/easyoffice-app/src/copilot/prompt.rs` (`command_directive`, `PD-267`). The "no more than 200 characters" and "use Markdown" sentences were left out because the result replaces whole paragraphs. The license text is the Apache License 2.0 reproduced above.
 
 ## plate (MIT)
+
+For the second copilot round (`PD-268`), the word-level text diff (`packages/platejs/src/ai/react/aiOutputLanding.internal.ts:212-387`: `diffSequences`, `textTokens`, `textEdits`) and the accept/reject decision of the pending change (`packages/platejs/src/ai/react/AIChatPlugin.ts:449-470`, commit `7f423b58dc7b19ce1170bee7c5824dda4f54d27d`) were ported into `crates/easyoffice-app/ui/copilot-diff.js`, and the Markdown joiner that holds a half-written mark until it closes (`apps/www/src/registry/lib/markdown-joiner-transform.ts:60-233`, stable branch commit `e401aaf96b4b23cb524096ec4f118046e8ba1c6b`) into `crates/easyoffice-app/ui/copilot-stream.js`. `streamInsertChunk` (`packages/ai/src/react/ai-chat/streaming/streamInsertChunk.ts`) was read and not ported: it deserializes streamed Markdown into editor nodes, and the copilot streams only the reply text and applies validated JSON operations.
 
 Source: https://github.com/udecode/plate (commit `67de7de401b603c4a71e4283587286517348b093`, Copyright (c) Ziad Beyens, Dylan Schiemann, Joe Anderson, Felix Feng). Nothing is vendored or linked at runtime. The rule sentences of the selection commands (improve writing, fix spelling and grammar, make longer, make shorter, summarize, translate) are taken from `apps/www/src/registry/components/editor/ai-menu.tsx:516-584, 606-619`, `apps/www/src/registry/app/api/ai/command/prompt/common.ts:9-12`, `getGeneratePrompt.ts:75,142` and `getEditPrompt.ts:169`, translated into Korean in `crates/easyoffice-app/src/copilot/prompt.rs`. The regenerate rule (restore the target the request was made for, send nothing when it cannot be restored, then ask again) is ported from `reload` in `packages/platejs/src/ai/react/AIChatPlugin.ts:1703-1736` and `regenerate` in `packages/platejs/src/ai/react/useAIChat.ts:235-238` into `crates/easyoffice-app/ui/copilot-ui.js` (`regenerateLast`) and `copilot-actions.js` (`snapshotTarget`), with a text snapshot of the target in place of node keys (`PD-267`).
 
@@ -381,6 +387,8 @@ THE SOFTWARE.
 
 ## Excalidraw (MIT)
 
+For the second copilot round (`PD-268`, commit `2c3dcc06ec807e81ab9437eceb1a8f7a3c590743`), the collaborator pointer (`packages/excalidraw/clients.ts:60-203` `renderRemoteCursors`: the arrow with the vertices (0,0), (0,14), (4,9), (11,8), the white outline of width 6 under the body of width 2, the label position and padding, the edge clamp with the 0.3 opacity and the hidden label, the press ring of radius 15), `easeOut` (`packages/common/src/utils.ts:253-255`) and the keyed frame loop (`packages/excalidraw/renderer/animation.ts:30-211` `AnimationController`) were ported into `crates/easyoffice-app/ui/copilot-cursor.js` and `copilot.css` as an SVG pointer and a vanilla frame loop. The original draws a remote pointer where the received coordinates say; the glide between two places uses the same loop with `easeOut`.
+
 Source: https://github.com/excalidraw/excalidraw (commit `091bc0e9d86fef5727c3f4d148a73e441b064ed1`, Copyright (c) 2020 Excalidraw).
 Nothing is vendored or linked at runtime; the non-uniform obstacle-padded grid A* orthogonal elbow arrow router (`packages/element/src/elbowArrow.ts`: `BinaryHeap` with `rescoreElement`, 16-case `estimateSegmentCount` heuristic, reverse-heading prohibition `flipHeading`, segment midpoint obstacle rejection, `removeElbowArrowShortSegments`, and `getElbowArrowCornerPoints`) and the floating island surface layout (`packages/excalidraw/components/Island.scss`) were adapted into `crates/easyoffice-app/ui/{board-router.js,board-studio.js,board.css}` (`PD-260`).
 
@@ -388,6 +396,146 @@ Nothing is vendored or linked at runtime; the non-uniform obstacle-padded grid A
 MIT License
 
 Copyright (c) 2020 Excalidraw
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## typed.js (MIT, release v2.1.0)
+
+Source: https://github.com/mattboldt/typed.js (tag `v2.1.0`, commit `3daa3a4760dff3c563964ef0935b64ccfb0b22f8`, Copyright (c) 2023 Matt Boldt). Later releases are under the GPL-3.0 and are not used. Nothing is vendored or linked at runtime. The typing loop (`src/typed.js:30-57` stop and start, `:89-110` begin, `:112-196` typewrite, `:198-217` keepTyping, `:219-241` doneTyping, `:318-325` setPauseStatus, `:329-345` toggleBlinking, `:347-353` humanizer) was ported into `crates/easyoffice-app/ui/copilot-typing.js` (`PD-268`) as a callback loop that works on code points. The `^N` pause and the backtick skip syntax were left out because they would eat those characters from a document's text.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2023 Matt Boldt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## y-prosemirror (MIT)
+
+Source: https://github.com/yjs/y-prosemirror (commit `47a7385201bcefb55fcd5f1c8df23f48f46fa223`, Copyright (c) 2019 Kevin Jahns). Nothing is vendored or linked at runtime. The remote cursor of `src/cursor-plugin.js:25-62` (`defaultCursorBuilder`: the caret bar with a name label, `defaultSelectionBuilder`: a selection coloured with the user colour, the `maxsize` clamp of positions) and the demo styles `demo/prosemirror.html:36-68` (a caret with a 1px line on each side, the selection at 0.3 opacity) were re-expressed in `crates/easyoffice-app/ui/copilot-cursor.js` (`setSelection`, `setCaret`, `setIdle`) and `copilot.css` as overlay boxes drawn over the editor instead of decorations inside it (`PD-268`).
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2019 Kevin Jahns <kevin.jahns@protonmail.com>.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## LibreChat (MIT)
+
+Source: https://github.com/danny-avila/LibreChat (commit `4700c44eb77c142b4f9f8b87476924f22890eb39`, Copyright (c) 2026 LibreChat). Nothing is vendored or linked at runtime. No lines were copied. The `final` and `failureSeen` rule of `packages/chat/src/core/transport/sse.ts:176-258` (`reconnectToStream`: a stream that ends before its final frame is an error, and an error already told is not told again) and the skipping of a frame of the wrong shape (`emitFrame`, `:22-35`) are followed by `createStreamSession` in `crates/easyoffice-app/ui/copilot-stream.js` (`PD-268`). The original re-attaches to a server-side stream; a copilot request cannot be re-attached, so the page keeps the text it has and takes the whole answer when it arrives.
+
+```
+MIT License
+
+Copyright (c) 2026 LibreChat
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## partial-json-parser-js (MIT)
+
+Source: https://github.com/promplate/partial-json-parser-js (commit `86fd4bcbff1e32f80dd33e62318221702905a8f0`, Copyright (c) 2023 Promplate Dev Team). Nothing is vendored or linked at runtime. The incomplete-JSON reader (`src/index.ts:7-189`, `src/options.ts`) was ported into `parseJSON` in `crates/easyoffice-app/ui/copilot-stream.js` (`PD-268`) with every partial type allowed and the infinity and NaN forms left out, to show the reply of a model's JSON answer while it is still being written.
+
+```
+MIT License
+
+Copyright (c) 2023 Promplate Dev Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Tauri JavaScript API (MIT OR Apache-2.0, used under MIT)
+
+Source: https://github.com/tauri-apps/tauri (commit `9bc364d8bfec2abd377268fb408e94d3c711cc19`, Copyright (c) 2017 - Present Tauri Apps Contributors). Nothing is vendored or linked at runtime. `packages/api/src/core.ts:69-75, 119-222` (`transformCallback`, `Channel`: messages carry the index they were sent with and a later one waits for the missing ones) was ported into `createStreamChannel` in `crates/easyoffice-app/ui/copilot-stream.js` without the `@tauri-apps/api` bundle (`PD-268`). The Rust side uses `tauri::ipc::JavaScriptChannelId`, a dependency the shell already has.
+
+```
+MIT License
+
+Copyright (c) 2017 - Present Tauri Apps Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9758,3 +9906,31 @@ Sources: https://github.com/qpdf/qpdf at `4eba9589` (Copyright (c) 2005-2021 Jay
 | `crates/easyoffice-desktop/src/pdf_edit_annots.rs` | qpdf `libqpdf/QPDFMatrix.cc`: constructors 6-24, `concat` 63-78, `translate` 86-90, `transform` 111-116, `transformRectangle` 118-132; `libqpdf/QPDFAcroFormDocumentHelper.cc` `transformAnnotations` 1095 and 1164-1165 | 19+16+5+6+15+3 = 64 | Only the translation to the crop box origin is applied; the source's change of the appearance stream matrix (1146-1160) is not translated because the page copier owns those objects. Rust: about 56 lines translated, about 36 adapted |
 
 Searched and not usable: qpdf keeps no `/OCProperties` of its own when pages are copied (`TODO-pages.md` lists it as open) and has no writer for it; pdfcpu reads it for validation (`pkg/pdfcpu/validate/optionalContent.go`) and adds one watermark layer to an existing list (`pkg/pdfcpu/stamp.go` 1165-1240) but does not combine the lists of two files (`pkg/pdfcpu/merge.go` has page labels and layers nowhere); the other candidates read it for display only or do not read the catalog at all. `pdf_edit_oc.rs`, `pdf_edit_value.rs` and `pdf_edit_carry.rs` are therefore written here.
+
+### sse-core (MIT OR Apache-2.0, used under MIT)
+
+Source: https://github.com/PizzasBear/sse-rs (commit `aad868a4d388af83d0b93b6ba6a83fc54ec74f12`, crate `sse-core` 0.2.3, Copyright (c) 2026 Max Shteimberg). `crates/easyoffice-app/src/copilot/sse.rs` ports the `SseDecoder` state machine of `sse-core/src/decode.rs` (`Mode`, `next`, `consume_until_newline`, the payload limit and the corrupt-event recovery, and its tests `hard_parse`, `test_valueless_fields`, `test_valueless_data_respects_the_limit`) onto byte slices with no dependency (`PD-053`, `PD-268`); the `id:` and `retry:` fields are skipped because a model request is never resumed. Used under the MIT license:
+
+```
+MIT License
+
+Copyright (c) 2026 Max Shteimberg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

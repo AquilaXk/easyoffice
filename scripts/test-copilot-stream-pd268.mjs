@@ -150,3 +150,17 @@ test("a plain-text answer streams as it is and a rewritten reply starts the join
   session.accept({ requestId: "p", seq: 1, text: "글입니다" });
   assert.equal(shown.at(-1), "그냥 글입니다");
 });
+
+test("a hostile stream cannot make the live reader throw or spin: deep nesting, an endless string, a gap of garbage", () => {
+  const started = performance.now();
+  assert.equal(extractReply("{" + "[".repeat(MAX_LIVE_PARSE_CHARS - 2)), "", "a deep nesting is read as no reply, not as a crash");
+  assert.equal(extractReply('{"reply":"' + "가".repeat(MAX_LIVE_PARSE_CHARS - 20)).length, MAX_LIVE_PARSE_CHARS - 20);
+  assert.equal(extractReply('{"reply" "x"} }}} {{{'), "");
+  assert.ok(performance.now() - started < 2000, "bounded work for the largest live text");
+  const session = createStreamSession({ requestId: "h", onText: () => {} });
+  // 평범한 글은 상한 안에서만 보이고, 넘으면 그 뒤 조각은 받지 않는다(최종 응답이 온전한 글을 갖고 있다).
+  let taken = 0;
+  for (let seq = 0; seq < 200; seq += 1) taken += session.accept({ requestId: "h", seq, text: "x".repeat(2000) }) ? 1 : 0;
+  assert.ok(taken > 0 && taken < 200, `the live text stops at the limit after ${taken} pieces`);
+  assert.ok(session.shown.length <= MAX_LIVE_PARSE_CHARS + 2000);
+});

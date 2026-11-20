@@ -824,6 +824,7 @@
   flex-shrink: 0;
 }
 
+/* 옮김[excalidraw-yprosemirror-css] 시작 */
 /* ── 코파일럿 포인터·캐럿·선택 강조 (PD-268) ──────────────────────────────────────────
    포인터 모양과 이름표 자리는 excalidraw 협업자 포인터(`clients.ts:60-203`), 캐럿과 선택 강조는 y-prosemirror의 원격 커서
    (`demo/prosemirror.html:36-68`: 양옆 1px 줄, 색 + 투명도 0.3)를 옮겼다. 참조 앱에 없는 부품이라 모서리는 직각이고 그림자·그러데이션이 없다. */
@@ -938,6 +939,8 @@
     animation: none;
   }
 }
+
+/* 옮김[excalidraw-yprosemirror-css] 끝 */
 
 /* ── 적용 전 변경 목록과 문서 위 삭제·삽입 표시 (PD-268) ────────────────────────────────
    표시 색은 문서의 변경 추적 표시(`#doc-editor ins.eo-rev-ins`, `del.eo-rev-del`)와 같은 토큰이다. 참조 앱에 없는 부품이라 모서리는 직각이다. */

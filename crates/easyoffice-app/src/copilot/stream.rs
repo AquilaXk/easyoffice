@@ -45,6 +45,7 @@ fn read_delta(kind: ProviderKind, event: &MessageEvent) -> Option<Delta> {
     Some(delta)
 }
 
+// 옮김[continue-delta] 시작
 fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
     let Some(choice) = StrictJsonValue::get_field(root, "choices")
         .and_then(StrictJsonValue::as_array)
@@ -119,6 +120,7 @@ fn read_google(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
         }
     }
 }
+// 옮김[continue-delta] 끝
 
 /// SSE 조각에서 읽히는 이벤트마다 델타를 낸다. 모르는 모양의 이벤트는 건너뛴다. 오류 이벤트나 이벤트 크기 상한을 만나면 거기서 멈춘다.
 fn read_sse_deltas(

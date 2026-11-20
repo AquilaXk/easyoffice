@@ -331,9 +331,9 @@
    * JSON이 아니면(`{`로 시작하지 않으면) 글 전체가 답글이다. 연산(`operations`)은 여기서 읽지 않는다: 전송이 끝난 뒤 엔진이 검증한 결과만 쓴다.
    */
   function extractReply(raw) {
+    if (String(raw ?? "").length > MAX_LIVE_PARSE_CHARS) return null;
     const text = String(raw ?? "").replace(/^\s+/, "").replace(FENCE_OPEN, "");
     if (!text.startsWith("{")) return text;
-    if (text.length > MAX_LIVE_PARSE_CHARS) return null;
     try {
       const parsed = parseJSON(text);
       return typeof parsed?.reply === "string" ? parsed.reply : "";

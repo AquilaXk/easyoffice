@@ -244,6 +244,7 @@
         if (down) ring.removeAttribute("hidden");
         else ring.setAttribute("hidden", "");
       },
+      // 옮김[yprosemirror-widgets] 시작
       /** 선택 강조: 뷰포트 좌표의 사각형들. 비우면 지운다. */
       setSelection(rects) {
         const nodes = [];
@@ -274,6 +275,7 @@
       setIdle(idle) {
         caret.classList.toggle("is-idle", Boolean(idle));
       },
+      // 옮김[yprosemirror-widgets] 끝
     };
   }
 
