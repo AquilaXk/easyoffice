@@ -6,8 +6,8 @@
 //! exhaustion or a hang. Each cell read starts its own step budget.
 
 use crate::{
-    CellRange, EvalContext, EvaluatedCellValue, PackedCellCoordinate, PivotAggregation,
-    PivotTableSummary, SheetEngine, WorkbookEngine,
+    CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
+    PivotAggregation, PivotTableSummary, SheetEngine, WorkbookEngine,
 };
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -62,22 +62,68 @@ fn pivot_total_key() -> (String, String) {
     ("Total".to_string(), "total".to_string())
 }
 
-/// Numeric contribution of a pivot value cell (`COUNT` also counts non-empty non-numbers).
-pub(crate) fn pivot_numeric_value(
+/// A quiet NaN with this prefix carries a [`FormulaError`] in its low bits: a pivot answer that is an error
+/// (the value field held one) travels in the same `f64` grids as a number (PD-263).
+const ERROR_NAN: u64 = 0x7FF8_0000_0000_0000;
+const ERROR_NAN_MASK: u64 = !0xF;
+
+const PIVOT_ERRORS: [FormulaError; 9] = [
+    FormulaError::DivByZero,
+    FormulaError::Value,
+    FormulaError::Ref,
+    FormulaError::Cycle,
+    FormulaError::Name,
+    FormulaError::Na,
+    FormulaError::Num,
+    FormulaError::Spill,
+    FormulaError::Calc,
+];
+
+/// The `f64` a pivot grid holds for the error `err`.
+pub fn pivot_error_value(err: FormulaError) -> f64 {
+    let id = PIVOT_ERRORS.iter().position(|e| *e == err).unwrap_or(1);
+    f64::from_bits(ERROR_NAN | (id as u64 + 1))
+}
+
+/// The error a pivot grid value stands for, `None` for a number.
+pub fn pivot_error_of(value: f64) -> Option<FormulaError> {
+    let bits = value.to_bits();
+    if !value.is_nan() || bits & ERROR_NAN_MASK != ERROR_NAN {
+        return None;
+    }
+    PIVOT_ERRORS
+        .get((bits & 0xF).checked_sub(1)? as usize)
+        .copied()
+}
+
+/// What a pivot value cell adds to its group.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PivotInput {
+    Number(f64),
+    Error(FormulaError),
+}
+
+/// Contribution of a pivot value cell: a number adds itself, an error spoils every aggregation but `Count`, and
+/// `Count` counts every non-empty cell (as `COUNTA`, errors and text included); other text adds nothing.
+pub(crate) fn pivot_input(
     val: &EvaluatedCellValue,
     aggregation: PivotAggregation,
-) -> Option<f64> {
-    if let EvaluatedCellValue::Number(num) = val {
-        return Some(*num);
+) -> Option<PivotInput> {
+    let count = aggregation == PivotAggregation::Count;
+    match val {
+        EvaluatedCellValue::Number(num) => Some(PivotInput::Number(*num)),
+        EvaluatedCellValue::Error(err) if !count => Some(PivotInput::Error(*err)),
+        EvaluatedCellValue::Empty => None,
+        other => {
+            (count && !other.to_display_string().is_empty()).then_some(PivotInput::Number(1.0))
+        }
     }
-    let counts_non_empty = aggregation == PivotAggregation::Count
-        && !matches!(val, EvaluatedCellValue::Empty)
-        && !val.to_display_string().is_empty();
-    counts_non_empty.then_some(1.0)
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PivotAccumulator {
+    /// The first error among the values: the answer of every aggregation but `Count` (PD-263).
+    error: Option<FormulaError>,
     count: usize,
     sum: f64,
     mean: f64,
@@ -89,6 +135,7 @@ pub(crate) struct PivotAccumulator {
 impl Default for PivotAccumulator {
     fn default() -> Self {
         Self {
+            error: None,
             count: 0,
             sum: 0.0,
             mean: 0.0,
@@ -101,7 +148,17 @@ impl Default for PivotAccumulator {
 
 impl PivotAccumulator {
     #[inline]
-    pub(crate) fn add(&mut self, val: f64) {
+    pub(crate) fn add_input(&mut self, input: PivotInput) {
+        match input {
+            PivotInput::Number(num) => self.add(num),
+            PivotInput::Error(err) => {
+                self.error.get_or_insert(err);
+            }
+        }
+    }
+
+    #[inline]
+    fn add(&mut self, val: f64) {
         self.count += 1;
         self.sum += val;
         let delta = val - self.mean;
@@ -118,6 +175,9 @@ impl PivotAccumulator {
 
     #[inline]
     pub(crate) fn result(&self, agg: PivotAggregation) -> f64 {
+        if let Some(err) = self.error {
+            return pivot_error_value(err);
+        }
         if self.count == 0 {
             return 0.0;
         }
@@ -212,11 +272,14 @@ fn tally(
             if rows.keys.len() * cols.keys.len() > max_cells {
                 return Err(PivotError::TooLarge);
             }
-            if let Some(num) = pivot_numeric_value(&value_at(vc)?, spec.agg) {
-                cell_buckets.entry((r_idx, c_idx)).or_default().add(num);
-                rows.accs[r_idx].add(num);
-                cols.accs[c_idx].add(num);
-                grand_acc.add(num);
+            if let Some(input) = pivot_input(&value_at(vc)?, spec.agg) {
+                cell_buckets
+                    .entry((r_idx, c_idx))
+                    .or_default()
+                    .add_input(input);
+                rows.accs[r_idx].add_input(input);
+                cols.accs[c_idx].add_input(input);
+                grand_acc.add_input(input);
             }
         }
     }

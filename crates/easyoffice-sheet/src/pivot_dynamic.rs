@@ -5,7 +5,7 @@
 //! cross-filtered `available_field_items` while enforcing explicit cell budgets and wall-clock deadlines.
 
 use crate::memo::FastMap;
-use crate::pivot::{normalize_pivot_key, pivot_numeric_value, PivotAccumulator, CLOCK_ROWS};
+use crate::pivot::{normalize_pivot_key, pivot_input, PivotAccumulator, CLOCK_ROWS};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, PackedCellCoordinate, PivotAggregation, PivotError,
     WorkbookEngine,
@@ -447,11 +447,11 @@ fn tally_dynamic(
             };
 
             for (v_idx, &(val_slot, agg)) in val_slots.iter().enumerate() {
-                if let Some(num) = pivot_numeric_value(&row_vals[val_slot], agg) {
-                    buckets[cell_base + v_idx].add(num);
-                    row_accs[r_idx * val_count + v_idx].add(num);
-                    col_accs[c_idx * val_count + v_idx].add(num);
-                    grand_accs[v_idx].add(num);
+                if let Some(input) = pivot_input(&row_vals[val_slot], agg) {
+                    buckets[cell_base + v_idx].add_input(input);
+                    row_accs[r_idx * val_count + v_idx].add_input(input);
+                    col_accs[c_idx * val_count + v_idx].add_input(input);
+                    grand_accs[v_idx].add_input(input);
                 }
             }
         }

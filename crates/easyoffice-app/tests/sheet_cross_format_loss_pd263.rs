@@ -89,3 +89,20 @@ fn xlsx_counts_the_pivot_fields_its_cache_rebuild_drops() {
         assert!(!w.contains(kept), "XLSX holds {kept}: {w}");
     }
 }
+
+#[test]
+fn a_pivot_answer_over_an_error_value_is_sent_as_the_error_literal() {
+    let cells = r#"[{"cell":"A1","value":"Key"},{"cell":"B1","value":"Val"},
+        {"cell":"A2","value":"a"},{"cell":"B2","value":"10"},
+        {"cell":"A3","value":"a"},{"cell":"B3","value":"=1/0"},
+        {"cell":"A4","value":"b"},{"cell":"B4","value":"5"}]"#;
+    let json = EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        &format!(
+            r#"{{"sessionAction":"pivot","sheet":"S","cells":{cells},"range":"A1:B4","row":0,"value":1,"agg":"sum"}}"#
+        ),
+    )
+    .unwrap();
+    assert!(json.contains(r##""rowTotals":["#DIV/0!",5]"##), "{json}");
+    assert!(json.contains(r##""grandTotal":"#DIV/0!""##), "{json}");
+}

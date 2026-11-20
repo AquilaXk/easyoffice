@@ -102,7 +102,7 @@ pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, DetMap, DetSet, DetWordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::compile_formula_expr;
-pub use pivot::{PivotError, PivotSpec};
+pub use pivot::{pivot_error_of, pivot_error_value, PivotError, PivotSpec};
 pub use pivot_dynamic::{
     DynamicPivotSpec, DynamicPivotSummary, PivotFieldFilter, MAX_PIVOT_FIELDS,
 };

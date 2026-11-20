@@ -9,7 +9,7 @@ use easyoffice_formats::{
     EasyOfficeError, StrictJsonValue, MAX_PIVOT_FILTER_VALUES, MAX_PIVOT_TEXT_BYTES,
 };
 use easyoffice_sheet::{
-    CellRange, DynamicPivotSpec, DynamicPivotSummary, PivotAggregation, PivotError,
+    pivot_error_of, CellRange, DynamicPivotSpec, DynamicPivotSummary, PivotAggregation, PivotError,
     PivotFieldFilter, PivotSpec, MAX_PIVOT_FIELDS,
 };
 use std::collections::BTreeMap;
@@ -54,6 +54,9 @@ fn aggregation(name: &str) -> Result<PivotAggregation, EasyOfficeError> {
 fn number(out: &mut String, n: f64) {
     if n.is_finite() {
         let _ = write!(out, "{n}");
+    } else if let Some(err) = pivot_error_of(n) {
+        // An aggregation over an error value answers that error (PD-263).
+        let _ = write!(out, "\"{}\"", err.code());
     } else {
         out.push_str("null");
     }
