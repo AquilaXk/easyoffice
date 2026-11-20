@@ -170,4 +170,32 @@ mod tests {
         assert!(!format_for_page("@", "007").unwrap().numeric);
         assert!(format_for_page("0.00", "abc").is_none());
     }
+
+    #[test]
+    fn a_number_in_a_text_format_cell_shows_as_text_does() {
+        use easyoffice_formats::CellValueKind::Number;
+        for raw in [
+            "1e10",
+            "10000000000",
+            "1.5E-7",
+            "123456789012345678",
+            "0.30000000000000004",
+            "-42",
+        ] {
+            let num: f64 = raw.parse().unwrap();
+            let text_function = crate::format_number_with_code(num, "@").unwrap();
+            let shown = format_for_page_typed("@", raw, Number).unwrap();
+            assert_eq!(shown.text, text_function, "{raw}");
+        }
+        assert_eq!(
+            format_for_page_typed("@", "1e10", Number).unwrap().text,
+            "10000000000"
+        );
+        let text = easyoffice_formats::CellValueKind::Text;
+        assert_eq!(
+            format_for_page_typed("@", "1e10", text).unwrap().text,
+            "1e10"
+        );
+        assert_eq!(format_for_page("@", "007").unwrap().text, "007");
+    }
 }

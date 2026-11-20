@@ -648,7 +648,13 @@ pub(crate) fn format_typed_cell_with(
             None
         }
         easyoffice_formats::CellValueKind::Number | easyoffice_formats::CellValueKind::Formula => {
-            format_cell_with(compiled, raw)
+            // A number in a text-format cell shows the way `TEXT(n, "@")` writes it, not as the stored text (`1e10`).
+            match raw.trim().parse::<f64>() {
+                Ok(num) if num.is_finite() && compiled.is_text_only() => {
+                    compiled.render_number(num).ok().map(|s| (s, false))
+                }
+                _ => format_cell_with(compiled, raw),
+            }
         }
     }
 }

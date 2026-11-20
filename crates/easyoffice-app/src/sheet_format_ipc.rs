@@ -12,7 +12,7 @@
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{code_within_bounds, CellValueKind, EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::{format_cell_value, format_typed_cell_value};
+use easyoffice_sheet::format_typed_cell_value;
 use std::fmt::Write;
 
 /// Codes in one request (the engine keeps 256 compiled formats).
@@ -55,11 +55,12 @@ fn render_item(
             .ok_or_else(|| invalid("서식 'values' 항목은 문자열이어야 합니다."))?;
         let shown = (raw.len() <= MAX_VALUE_BYTES)
             .then(|| {
-                if text_only {
-                    format_typed_cell_value(code, raw, CellValueKind::Text)
+                let kind = if text_only {
+                    CellValueKind::Text
                 } else {
-                    format_cell_value(code, raw)
-                }
+                    CellValueKind::infer(raw)
+                };
+                format_typed_cell_value(code, raw, kind)
             })
             .flatten();
         let Some(shown) = shown else {
@@ -178,6 +179,14 @@ mod tests {
             answer,
             r#"{"items":[{"t":["2023-03-15"],"c":{}},{"t":["007"],"c":{}}]}"#
         );
+    }
+
+    #[test]
+    fn a_number_under_the_text_format_shows_as_the_text_function_writes_it() {
+        let answer =
+            call(r#"{"sessionAction":"format","items":[{"code":"@","values":["1e10","12"]}]}"#)
+                .unwrap();
+        assert_eq!(answer, r#"{"items":[{"t":["10000000000","12"],"c":{}}]}"#);
     }
 
     #[test]
