@@ -41,8 +41,9 @@ pub const MAX_FACES: usize = 25_000;
 pub const MAX_SESSION_BYTES: u64 = 512 * 1024 * 1024;
 /// Maximum concurrent font file reads allowed across the process.
 pub const MAX_CONCURRENT_FONT_READS: usize = 4;
-/// Maximum requests for the same font file allowed per window session.
-pub const MAX_FILE_REQUESTS_PER_SESSION: u32 = 4;
+/// Maximum requests for the same font file allowed per window session. The page keeps the bytes of a file over reconnects, so a
+/// window asks again only after the file left the page's 128 MiB cache; 16 leaves room for that and still stops a loop.
+pub const MAX_FILE_REQUESTS_PER_SESSION: u32 = 16;
 /// Longest family or style text the editor accepts.
 const MAX_NAME_CHARS: usize = 1024;
 /// Most alias names kept for a face (the editor accepts 32).

@@ -628,3 +628,43 @@ test("fonts: a file evicted while it loads is not counted in the cache size when
   assert.equal(reads.length, before, "file 3 is still cached");
   assert.equal(fontReplies(studio).filter((r) => "data" in r.params).length, 5);
 });
+
+test("fonts: the bytes of a file stay cached over reconnects, so a window asks the shell for a file once, not once per connection", async () => {
+  const fonts = fontsApi({ faces: [rawFace(7, 0, "Batang")] });
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fonts.api } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  for (let connection = 1; connection <= 6; connection += 1) {
+    sendFontEvent(studio, { requestId: connection, op: "read", face: "7:0", revision: "00ff00ff00ff00ff" });
+    await settle();
+    await hostApi.reconnect();
+    await settle();
+  }
+  assert.equal(fonts.calls.read.length, 1, "the shell counts every read of a file against the window; six connections read it once");
+  assert.equal(fontReplies(studio).filter((r) => "data" in r.params).length, 6);
+});
+
+test("fonts: a file read again is the last one to leave the cache", async () => {
+  const MiB = 1024 * 1024;
+  const sizes = { 1: 60 * MiB, 2: 60 * MiB, 3: 60 * MiB, 4: 60 * MiB };
+  const reads = [];
+  const faces = [1, 2, 3, 4].map((n) => rawFace(n, 0, "Face " + n));
+  const systemFonts = {
+    list: async () => ({ revision: "00ff", faces }),
+    read: async (_revision, file) => {
+      reads.push(file);
+      const buffer = new ArrayBuffer(8);
+      Object.defineProperty(buffer, "byteLength", { value: sizes[file] });
+      return buffer;
+    },
+  };
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  let id = 0;
+  for (const file of [1, 2, 3, 2, 4, 2]) {
+    sendFontEvent(studio, { requestId: (id += 1), op: "read", face: file + ":0", revision: "00ff" });
+    await settle();
+  }
+  assert.deepEqual(reads, [1, 2, 3, 4], "file 2 was used again and again, so it stayed while the idle files left");
+});

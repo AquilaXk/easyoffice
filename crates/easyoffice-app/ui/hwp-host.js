@@ -292,8 +292,8 @@
       fonts.listing = null;
       fonts.revision = "";
       fonts.files = new Map();
-      fonts.cache.clear();
-      fonts.cacheBytes = 0;
+      // The byte cache outlives a connection: the shell counts every read of a file against the window (the file numbers are
+      // those of the process's one catalog), so a reconnect asks again for the files the window already holds only if they left.
     }
 
     // The list is asked for once per connection (a repeated request gets the same list), so the
@@ -323,10 +323,14 @@
       throw new Error("글꼴 바이트를 해석하지 못했습니다.");
     }
 
-    // The bytes of font file `file`, read once while they stay in the cache.
+    // The bytes of font file `file`, read once while they stay in the cache. A file used again becomes the last to leave it.
     function fontFileBytes(file) {
       const cached = fonts.cache.get(file);
-      if (cached) return cached.pending;
+      if (cached) {
+        fonts.cache.delete(file);
+        fonts.cache.set(file, cached);
+        return cached.pending;
+      }
       const generation = fonts.generation;
       const entry = { size: 0, pending: null };
       entry.pending = Promise.resolve().then(() => systemFonts.read(fonts.revision, file)).then((raw) => {
