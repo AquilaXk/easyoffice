@@ -198,7 +198,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> ValResult {
-        if args.len() < 2 || args.len() % 2 != 0 {
+        if args.len() < 2 || !args.len().is_multiple_of(2) {
             return Err(FormulaError::Value);
         }
         let to_bool = |v: &V| match v {

@@ -75,7 +75,7 @@ pub fn decode_utf16be_swar(bytes: &[u8]) -> Result<String, EasyOfficeError> {
 
 #[inline]
 fn decode_utf16_swar<const BE: bool>(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         let msg = if BE {
             "UTF-16BE 바이트 길이가 짝수가 아닙니다."
         } else {
@@ -168,7 +168,7 @@ fn decode_one_utf16_unit<const BE: bool>(
 
 /// Baseline two-pass `Vec<u16>` UTF-16LE decoder retained for benchmark verification.
 pub fn decode_utf16le_vec_baseline(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
         ));
@@ -314,7 +314,7 @@ pub(crate) fn read_len_prefixed_utf16le(
             "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
         ));
     };
-    if byte_len % 2 != 0 || end > bound {
+    if !byte_len.is_multiple_of(2) || end > bound {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
         ));

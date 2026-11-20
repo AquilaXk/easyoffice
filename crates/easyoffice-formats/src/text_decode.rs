@@ -20,7 +20,7 @@ fn invalid(label: &str, detail: &str) -> EasyOfficeError {
 }
 
 fn decode_utf16be(bytes: &[u8], label: &str) -> Result<String, EasyOfficeError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(invalid(label, "UTF-16BE 바이트 길이가 짝수가 아닙니다."));
     }
     decode_utf16be_swar(bytes)
@@ -28,7 +28,7 @@ fn decode_utf16be(bytes: &[u8], label: &str) -> Result<String, EasyOfficeError> 
 }
 
 fn decode_utf16le(bytes: &[u8], label: &str) -> Result<String, EasyOfficeError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(invalid(label, "UTF-16LE 바이트 길이가 짝수가 아닙니다."));
     }
     decode_utf16le_swar(bytes)

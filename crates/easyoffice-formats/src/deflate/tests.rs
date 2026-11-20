@@ -139,7 +139,7 @@ fn test_bit_flips_and_truncations_never_pass_the_budget_or_panic() {
         seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let mut mutated = packed.clone();
         let pos = (usize::from(draw[0]) << 8 | usize::from(draw[1])) % mutated.len();
-        if draw[2] % 4 == 0 {
+        if draw[2].is_multiple_of(4) {
             mutated.truncate(pos);
         } else {
             mutated[pos] ^= 1 << (draw[2] % 8);

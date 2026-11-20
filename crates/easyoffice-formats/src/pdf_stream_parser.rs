@@ -532,7 +532,7 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
     }
     let mut mapped = String::with_capacity(bytes.len());
     let mut any_hit = false;
-    if cm.is_two_byte && bytes.len() % 2 == 0 {
+    if cm.is_two_byte && bytes.len().is_multiple_of(2) {
         for pair in bytes.chunks_exact(2) {
             let code = u16::from_be_bytes([pair[0], pair[1]]);
             if code <= 0xFF
@@ -763,7 +763,7 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
     }
     if out.starts_with("\u{00FE}\u{00FF}") && out.chars().all(|c| (c as u32) <= 0xFF) {
         let raw: Vec<u8> = out.chars().skip(2).map(|c| c as u8).collect();
-        if raw.len() % 2 == 0 {
+        if raw.len().is_multiple_of(2) {
             let units: Vec<u16> = raw
                 .chunks_exact(2)
                 .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))

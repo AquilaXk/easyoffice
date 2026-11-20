@@ -85,7 +85,7 @@ impl<'a> Bytes<'a> {
 
 /// The text of UTF-16LE `bytes` up to the first zero (which must be there).
 fn zero_terminated(bytes: &[u8]) -> Option<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return None;
     }
     let end = bytes

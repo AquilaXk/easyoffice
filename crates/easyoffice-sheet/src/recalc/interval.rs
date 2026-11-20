@@ -99,7 +99,7 @@ mod tests {
         let mut next_id = 0u32;
         for step in 0..6_000 {
             let r = xorshift(&mut x);
-            if r % 4 != 0 || oracle.is_empty() {
+            if !r.is_multiple_of(4) || oracle.is_empty() {
                 let low = (xorshift(&mut x) % 2_000) as u32;
                 let span = match xorshift(&mut x) % 4 {
                     0 => 0,

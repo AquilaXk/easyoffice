@@ -319,7 +319,9 @@ fn tally_dynamic(
     let mut grand_accs: Vec<PivotAccumulator> = vec![PivotAccumulator::default(); val_count];
 
     for r_off in first_row..row_count {
-        if (r_off as u32) % CLOCK_ROWS == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
+        if (r_off as u32).is_multiple_of(CLOCK_ROWS)
+            && deadline.is_some_and(|d| Instant::now() >= d)
+        {
             return Err(PivotError::TimedOut);
         }
         let row_idx = min_r + r_off as u32;

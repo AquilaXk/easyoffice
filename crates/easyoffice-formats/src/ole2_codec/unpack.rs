@@ -246,7 +246,7 @@ impl<'a> Ole2Reader<'a> {
         let base = idx * Ole2ContainerCodec::DIR_ENTRY_SIZE;
         let name_byte_len = read_u16_le(&self.dir_bytes, base + ENTRY_NAME_LEN_OFFSET)? as usize;
         if !(MIN_ENTRY_NAME_BYTES..=MAX_ENTRY_NAME_BYTES).contains(&name_byte_len)
-            || name_byte_len % 2 != 0
+            || !name_byte_len.is_multiple_of(2)
         {
             return Err(EasyOfficeError::CorruptedContainer(format!(
                 "OLE2 디렉터리 엔트리 이름 길이 오류: {name_byte_len}"

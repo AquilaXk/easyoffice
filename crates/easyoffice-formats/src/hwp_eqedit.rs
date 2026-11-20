@@ -43,7 +43,7 @@ fn decode_surrogate_pair(bytes: &[u8], cursor: usize, high: u16) -> Option<char>
 }
 
 pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(EasyOfficeError::CorruptedContainer(
             "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아닙니다.".to_string(),
         ));

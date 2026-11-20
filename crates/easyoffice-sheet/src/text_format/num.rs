@@ -140,7 +140,7 @@ fn group_thousands(digits: &str) -> String {
     let mut out = String::with_capacity(bytes.len() + bytes.len() / 3);
     for (idx, &b) in bytes.iter().enumerate() {
         let remaining = bytes.len() - idx;
-        if idx > 0 && remaining % 3 == 0 && bytes[idx - 1].is_ascii_digit() {
+        if idx > 0 && remaining.is_multiple_of(3) && bytes[idx - 1].is_ascii_digit() {
             out.push(',');
         }
         out.push(char::from(b));

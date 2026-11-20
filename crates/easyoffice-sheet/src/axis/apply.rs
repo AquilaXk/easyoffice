@@ -126,7 +126,7 @@ impl WorkbookEngine {
         for (si, engine) in self.sheets().iter().enumerate() {
             for (&coord, raw) in &engine.cells {
                 scanned += 1;
-                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
+                if scanned.is_multiple_of(CLOCK_STRIDE) && started.elapsed() > budget.time {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
                         "수식이 너무 많아 제한 시간 안에 참조를 옮기지 못했습니다.".to_string(),
                     ));
@@ -228,7 +228,7 @@ impl WorkbookEngine {
                     continue;
                 }
                 scanned += 1;
-                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
+                if scanned.is_multiple_of(CLOCK_STRIDE) && started.elapsed() > budget.time {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
                         "수식이 너무 많아 제한 시간 안에 시트 이름을 옮기지 못했습니다."
                             .to_string(),

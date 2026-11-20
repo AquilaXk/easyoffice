@@ -144,7 +144,7 @@ impl LegacyOle2Codec {
         let plc_end = plc_start.checked_add(lcb).ok_or_else(|| {
             EasyOfficeError::CorruptedContainer("DOC CLX PlcPcd 오버플로".to_string())
         })?;
-        if lcb < 16 || (lcb - 4) % 12 != 0 || plc_end > clx_slice.len() {
+        if lcb < 16 || !(lcb - 4).is_multiple_of(12) || plc_end > clx_slice.len() {
             return Err(EasyOfficeError::CorruptedContainer(
                 "DOC CLX PlcPcd 길이가 유효하지 않습니다.".to_string(),
             ));
@@ -616,7 +616,7 @@ impl LegacyOle2Codec {
                 ));
             }
             if s_type == Self::RT_SLIDE_ATOM {
-                if (a_end - a_start) % 2 == 0 {
+                if (a_end - a_start).is_multiple_of(2) {
                     if let Ok(meta) = decode_utf16le(&data[a_start..a_end]) {
                         if let Some((th, tr)) = meta.split_once('|') {
                             slide.theme = th.to_string();

@@ -207,7 +207,7 @@ impl SheetEngine {
         depth: usize,
     ) -> ValResult {
         let n = args.len();
-        if n < 2 || (n > 3 && n % 2 == 0) {
+        if n < 2 || (n > 3 && n.is_multiple_of(2)) {
             return Err(FormulaError::Value);
         }
         let data = self.arg_grid(args, 0, env, ctx, depth)?;

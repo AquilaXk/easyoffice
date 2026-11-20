@@ -29,7 +29,7 @@ fn rule(ranges: &str, priority: u32, kind: CfKind) -> CfRule {
     CfRule {
         ranges: boxes(ranges),
         priority,
-        stop_if_true: priority % 2 == 0,
+        stop_if_true: priority.is_multiple_of(2),
         kind,
         style,
     }

@@ -754,7 +754,7 @@ impl Hwp5Codec {
         }
         if slice.len() >= 4 {
             let n = read_u32_le(slice, 0)? as usize;
-            if 4 + n == slice.len() && n % 2 == 0 {
+            if 4 + n == slice.len() && n.is_multiple_of(2) {
                 if let Ok(decoded) = decode_utf16le(&slice[4..]) {
                     if Self::is_printable_text(&decoded) {
                         *agency_name = decoded;
@@ -763,7 +763,7 @@ impl Hwp5Codec {
                 }
             }
         }
-        if slice.len() % 2 == 0 && !slice.is_empty() {
+        if slice.len().is_multiple_of(2) && !slice.is_empty() {
             if let Ok(decoded) = decode_utf16le(slice) {
                 if Self::is_printable_text(&decoded) {
                     *agency_name = decoded;
@@ -934,7 +934,7 @@ impl Hwp5Codec {
                 }
             }
         }
-        if start + 4 <= end && (end - (start + 4)) % 2 == 0 {
+        if start + 4 <= end && (end - (start + 4)).is_multiple_of(2) {
             let payload_slice = &data[start + 4..end];
             if payload_slice.len() > 65_536 {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(

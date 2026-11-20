@@ -909,7 +909,7 @@ impl EasyOfficeIpcRouter {
 
         let bytes = hex.as_bytes();
         if !bytes.iter().any(|b| b.is_ascii_whitespace()) {
-            if bytes.len() % 2 != 0 {
+            if !bytes.len().is_multiple_of(2) {
                 return Err(EasyOfficeError::InvalidArgument(
                     "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
                 ));
@@ -933,7 +933,7 @@ impl EasyOfficeIpcRouter {
             .copied()
             .filter(|b| !b.is_ascii_whitespace())
             .collect();
-        if cleaned.len() % 2 != 0 {
+        if !cleaned.len().is_multiple_of(2) {
             return Err(EasyOfficeError::InvalidArgument(
                 "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
             ));

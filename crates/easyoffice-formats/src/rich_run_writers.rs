@@ -91,7 +91,7 @@ pub(crate) fn odt_text_key_is_plain(key: &OdtTextKey) -> bool {
 }
 
 fn odt_points(half_pt: u16) -> String {
-    if half_pt % 2 == 0 {
+    if half_pt.is_multiple_of(2) {
         format!("{}pt", half_pt / 2)
     } else {
         format!("{}.5pt", half_pt / 2)

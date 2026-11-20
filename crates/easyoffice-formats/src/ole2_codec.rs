@@ -196,7 +196,9 @@ impl Ole2SecurityGuard {
             return Err(EasyOfficeError::CorruptedContainer(format!("유효하지 않은 OLE2 버전/섹터 시프트(v{major_ver}, shift={sector_shift}/{mini_shift})")));
         }
         let sector_size = 1usize << (sector_shift as usize);
-        if container_bytes.len() < sector_size * 2 || container_bytes.len() % sector_size != 0 {
+        if container_bytes.len() < sector_size * 2
+            || !container_bytes.len().is_multiple_of(sector_size)
+        {
             return Err(EasyOfficeError::CorruptedContainer(
                 "OLE2 컨테이너 크기가 섹터 크기 배수가 아닙니다.".to_string(),
             ));
@@ -348,7 +350,9 @@ impl Ole2SecurityGuard {
                 )))
             }
         };
-        if container_bytes.len() < sector_size * 2 || container_bytes.len() % sector_size != 0 {
+        if container_bytes.len() < sector_size * 2
+            || !container_bytes.len().is_multiple_of(sector_size)
+        {
             return Err(EasyOfficeError::CorruptedContainer(
                 "OLE2 컨테이너 크기가 섹터 크기 배수가 아닙니다.".to_string(),
             ));

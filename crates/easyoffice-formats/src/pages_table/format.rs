@@ -202,7 +202,7 @@ fn write_number(out: &mut String, d: Decimal, st: &NumberStyle) -> Option<()> {
     for i in (places..total).rev() {
         buf[pos] = digit(i);
         pos += 1;
-        if st.thousands && i > places && (i - places) % THOUSANDS_GROUP == 0 {
+        if st.thousands && i > places && (i - places).is_multiple_of(THOUSANDS_GROUP) {
             buf[pos] = b',';
             pos += 1;
         }

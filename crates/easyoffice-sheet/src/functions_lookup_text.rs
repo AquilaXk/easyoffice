@@ -797,7 +797,7 @@ impl SheetEngine {
     }
 
     fn logical_ifs(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
-        if args.len() < 2 || args.len() % 2 != 0 {
+        if args.len() < 2 || !args.len().is_multiple_of(2) {
             return Err(FormulaError::Value);
         }
         for pair in args.chunks(2) {

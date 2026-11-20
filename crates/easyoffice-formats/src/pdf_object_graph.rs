@@ -700,7 +700,7 @@ pub(super) fn apply_flate_decode_parms_at(
     }
     match predictor {
         2 => {
-            if bpc_u != 8 || data.len() % row_bytes != 0 {
+            if bpc_u != 8 || !data.len().is_multiple_of(row_bytes) {
                 return Err("PDF TIFF Predictor 2 스트림 길이가 행 크기의 배수가 아닙니다.");
             }
             for row in data.chunks_exact_mut(row_bytes) {
@@ -714,7 +714,7 @@ pub(super) fn apply_flate_decode_parms_at(
             let stride = row_bytes
                 .checked_add(1)
                 .ok_or("PDF PNG Predictor stride 오버플로우입니다.")?;
-            if data.len() % stride != 0 {
+            if !data.len().is_multiple_of(stride) {
                 return Err("PDF PNG Predictor 스트림 길이가 stride의 배수가 아닙니다.");
             }
             let mut out = vec![0u8; (data.len() / stride) * row_bytes];

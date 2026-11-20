@@ -85,7 +85,7 @@ fn kanji(n: usize) -> String {
             } else {
                 digit(n / 10).to_string()
             };
-            let ones = if n % 10 == 0 {
+            let ones = if n.is_multiple_of(10) {
                 String::new()
             } else {
                 digit(n % 10).to_string()
