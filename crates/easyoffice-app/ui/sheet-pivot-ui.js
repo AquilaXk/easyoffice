@@ -678,6 +678,18 @@
           plans.push({ sheet: t.sheet, oldName: held.name, oldBox, newBox, built, working });
         }
         if (plans.length === 0) return false;
+        const blocked = model.refreshBlockedBy(plans, layoutApi);
+        if (blocked) {
+          say(blocked);
+          return false;
+        }
+        if (plans.some((plan) => model.coversOtherData(plan, sheetDataStore[plan.sheet], rules.refOf))) {
+          const replace = await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("replace-pivot-cells");
+          if (!replace) {
+            say("피벗 새로 고침 취소");
+            return false;
+          }
+        }
 
         const bySheet = {};
         for (const plan of plans) {

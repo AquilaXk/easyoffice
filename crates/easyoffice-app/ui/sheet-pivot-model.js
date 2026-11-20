@@ -815,6 +815,42 @@
     return { cells: built.cells, rows: built.rows };
   }
 
+  const boxesOverlap1 = (a, b) => a.r2 >= a.r1 && b.r2 >= b.r1 && a.r1 <= b.r2 && a.r2 >= b.r1 && a.c1 <= b.c2 && a.c2 >= b.c1;
+
+  // Why a refresh may not go on: a grown pivot may not cover another pivot table (one of the refresh or one that stays), a table
+  // or its own source (the same rule as 데이터 원본 변경). `plans` hold `{ sheet, oldName, newBox, working }`; `layout` is the sheet
+  // layout (`pivotsOf`, `pivotBox`, `tablesIn`). `null` when the refresh may go on.
+  function refreshBlockedBy(plans, layout) {
+    for (const plan of plans) {
+      const { sheet, newBox, working } = plan;
+      const src = working.sourceSheet === sheet ? parseSingleBox0(working.sourceRange) : null;
+      if (src && boxesOverlap1(newBox, { r1: src.row0 + 1, c1: src.col0 + 1, r2: src.row1 + 1, c2: src.col1 + 1 })) {
+        return "피벗 테이블 배치 영역이 데이터 원본 범위와 겹칩니다.";
+      }
+      const staying = layout.pivotsOf(sheet)
+        .filter((p) => !plans.some((q) => q.sheet === sheet && q.oldName === p.name))
+        .map((p) => layout.pivotBox(p));
+      const refreshed = plans.filter((q) => q !== plan && q.sheet === sheet).map((q) => q.newBox);
+      if ([...staying, ...refreshed].some((b) => boxesOverlap1(b, newBox)) || layout.tablesIn(sheet, newBox.r1, newBox.c1, newBox.r2, newBox.c2).length > 0) {
+        return "피벗 테이블 영역이 다른 표 또는 피벗 테이블과 겹칩니다.";
+      }
+    }
+    return null;
+  }
+
+  // Whether the grown pivot of `plan` covers a cell of `cells` (the sheet's cell map) outside its old area that holds a value or a formula.
+  function coversOtherData({ oldBox, newBox }, cells, refOf) {
+    if (!cells) return false;
+    for (let r = newBox.r1; r <= newBox.r2; r += 1) {
+      for (let c = newBox.c1; c <= newBox.c2; c += 1) {
+        if (r >= oldBox.r1 && r <= oldBox.r2 && c >= oldBox.c1 && c <= oldBox.c2) continue;
+        const cur = cells[refOf(r - 1, c - 1)];
+        if (cur && (String(cur.value ?? "") !== "" || String(cur.formula ?? "") !== "")) return true;
+      }
+    }
+    return false;
+  }
+
   host.__EASYOFFICE_SHEET_PIVOT_MODEL__ = {
     MAX_PIVOTS_PER_SHEET,
     MAX_PIVOTS_TOTAL,
@@ -836,5 +872,7 @@
     normalizePivotResult,
     buildPivotSheetCells,
     pivotCells,
+    refreshBlockedBy,
+    coversOtherData,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

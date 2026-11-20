@@ -33,6 +33,8 @@ pub enum ConfirmKind {
     RestoreHwpAutosave,
     /// A module with unsaved edits would be replaced by the file being opened.
     ReplaceUnsavedModule,
+    /// A refreshed pivot table grows over cells that hold data.
+    ReplacePivotCells,
 }
 
 pub struct ConfirmSpec {
@@ -81,6 +83,12 @@ impl ConfirmKind {
                 title: "저장하지 않은 편집 내용",
                 message: "이 모듈에 저장하지 않은 편집 내용이 있습니다.\n파일을 열면 현재 내용이 바뀝니다 (실행 취소로 되돌릴 수 있습니다). 계속할까요?",
                 accept: "계속",
+                cancel: CANCEL,
+            },
+            Self::ReplacePivotCells => ConfirmSpec {
+                title: "피벗 테이블 새로 고침",
+                message: "대상 셀에 이미 데이터가 있습니다. 바꾸시겠습니까?",
+                accept: "바꾸기",
                 cancel: CANCEL,
             },
         }
@@ -185,13 +193,14 @@ pub async fn confirm_close(
 mod tests {
     use super::*;
 
-    const ALL: [ConfirmKind; 6] = [
+    const ALL: [ConfirmKind; 7] = [
         ConfirmKind::PasswordFreeSave,
         ConfirmKind::PasswordFreeSaveSheet,
         ConfirmKind::ReplaceUnsavedHwp,
         ConfirmKind::HwpxFallbackHwp,
         ConfirmKind::RestoreHwpAutosave,
         ConfirmKind::ReplaceUnsavedModule,
+        ConfirmKind::ReplacePivotCells,
     ];
 
     fn parse(name: &str) -> Result<ConfirmKind, serde_json::Error> {
@@ -223,6 +232,10 @@ mod tests {
         assert_eq!(
             parse("replace-unsaved-module").unwrap(),
             ConfirmKind::ReplaceUnsavedModule
+        );
+        assert_eq!(
+            parse("replace-pivot-cells").unwrap(),
+            ConfirmKind::ReplacePivotCells
         );
         for bad in [
             "",

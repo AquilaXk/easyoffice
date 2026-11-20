@@ -666,3 +666,96 @@ test("Scenario 5: save-payload serializes sheets[i].pivots, file-open restores r
     /ResourceBudgetExceeded/
   );
 });
+
+// ---- refresh that grows over other cells (PD-263) --------------------------------------------------
+
+const growingPivot = (location, name = "P") => ({
+  name,
+  cacheId: 1,
+  sourceSheet: "Sheet1",
+  sourceRange: "A1:B5",
+  hasHeader: true,
+  location,
+  fieldNames: ["지역", "수량"],
+  rowFields: [0],
+  colFields: [],
+  filterFields: [],
+  valueFields: [{ col: 1, agg: "sum", name: "합계: 수량" }],
+  filters: [],
+  slicers: [],
+});
+
+async function openGrowingPivot({ extraCells = [], extraPivots = [] }) {
+  const h = await openSheet();
+  await loadFixture(h, {
+    sheets: [{
+      name: "Sheet1",
+      cells: [
+        { ref: "A1", raw: "지역" }, { ref: "B1", raw: "수량" },
+        { ref: "A2", raw: "서울" }, { ref: "B2", raw: "100" },
+        { ref: "A3", raw: "부산" }, { ref: "B3", raw: "200" },
+        { ref: "A4", raw: "대전" }, { ref: "B4", raw: "10" },
+        { ref: "A5", raw: "광주" }, { ref: "B5", raw: "20" },
+        { ref: "D1", raw: "지역" }, { ref: "E1", raw: "합계: 수량" },
+        { ref: "D2", raw: "서울" }, { ref: "E2", raw: "100" },
+        { ref: "D3", raw: "부산" }, { ref: "E3", raw: "200" },
+        { ref: "D4", raw: "Total" }, { ref: "E4", raw: "300" },
+        ...extraCells,
+      ],
+      pivots: [growingPivot("D1:E4"), ...extraPivots],
+    }],
+  });
+  // The source holds two more regions than the pivot shows: a refresh grows it from D1:E4 to D1:E6.
+  cell(h.document, "D2").focus();
+  await flushAsyncTurns(2);
+  return h;
+}
+
+const refreshWithGrowth = async (h) => {
+  h.userClick(h.document.querySelector('#sheet-pivot-bar [data-pivot-act="refresh"]'));
+  await flushAsyncTurns(16);
+};
+
+test("PD-263: a refresh that grows over cells holding data asks first and leaves everything as it was when declined", async () => {
+  const h = await openGrowingPivot({ extraCells: [{ ref: "D6", raw: "방해" }] });
+  const asked = [];
+  h.host.confirm = (text) => { asked.push(text); return false; };
+  await refreshWithGrowth(h);
+  assert.equal(asked.length, 1, "one question before the cells are replaced");
+  assert.match(asked[0], /바꾸시겠습니까/);
+  assert.equal(cell(h.document, "D6").textContent, "방해", "declined: the cell is kept");
+  assert.equal(pivots(h, "Sheet1")[0].location, "D1:E4", "declined: the pivot did not grow");
+
+  h.host.confirm = (text) => { asked.push(text); return true; };
+  await refreshWithGrowth(h);
+  assert.equal(asked.length, 2);
+  assert.equal(pivots(h, "Sheet1")[0].location, "D1:E6");
+  assert.notEqual(cell(h.document, "D6").textContent, "방해", "accepted: the pivot wrote over it");
+  await undo(h);
+  assert.equal(cell(h.document, "D6").textContent, "방해", "one undo brings the cell back");
+});
+
+test("PD-263: a refresh that grows over cells without data, and one that stays inside its own area, ask nothing", async () => {
+  const h = await openGrowingPivot({});
+  let asked = 0;
+  h.host.confirm = () => { asked += 1; return true; };
+  await refreshWithGrowth(h);
+  assert.equal(asked, 0);
+  assert.equal(pivots(h, "Sheet1")[0].location, "D1:E6");
+  await refreshWithGrowth(h);
+  assert.equal(asked, 0, "the second refresh has the same size");
+});
+
+test("PD-263: a refresh that would cover another pivot table is refused", async () => {
+  const other = growingPivot("D6:E7", "Q");
+  const h = await openGrowingPivot({
+    extraCells: [{ ref: "D6", raw: "지역" }, { ref: "E6", raw: "합계: 수량" }, { ref: "D7", raw: "서울" }, { ref: "E7", raw: "100" }],
+    extraPivots: [other],
+  });
+  let asked = 0;
+  h.host.confirm = () => { asked += 1; return true; };
+  await refreshWithGrowth(h);
+  assert.equal(asked, 0, "overlap with a pivot table is not a question");
+  assert.equal(pivots(h, "Sheet1").find((p) => p.name === "P").location, "D1:E4");
+  assert.equal(cell(h.document, "D6").textContent, "지역");
+});
