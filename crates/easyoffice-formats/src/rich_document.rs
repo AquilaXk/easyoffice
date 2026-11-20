@@ -556,6 +556,18 @@ pub struct RichDocument {
     pub track_changes: bool,
 }
 
+/// The headings of the header and footer appendix, and the prefixes it puts before first-page and even-page text.
+const COPY_HEADINGS: [&str; 2] = ["머리글", "바닥글"];
+const COPY_PREFIXES: [&str; 2] = ["[첫 쪽] ", "[짝수 쪽] "];
+
+fn is_frame_text(text: &str, frame_texts: &std::collections::HashSet<String>) -> bool {
+    let bare = COPY_PREFIXES
+        .iter()
+        .find_map(|prefix| text.strip_prefix(prefix))
+        .unwrap_or(text);
+    COPY_HEADINGS.contains(&text) || frame_texts.contains(bare)
+}
+
 impl RichDocument {
     /// Returns notes deduplicated by `(kind, id)` within document and text byte bounds.
     pub fn validated_notes(&self) -> Vec<RichNote> {
@@ -568,12 +580,27 @@ impl RichDocument {
     }
 
     /// The blocks a writer that writes the page frame writes: the blocks without the header and footer copies a Pages reader
-    /// appends (a copy section runs from a [`RichParagraph::frame_copy`] paragraph to the next paragraph that is not one).
+    /// appends. A [`RichParagraph::frame_copy`] paragraph is left out only while its text is still the frame's own (a header or
+    /// footer paragraph, or the appendix heading); a paragraph the user changed or wrote is body text and is kept. A copy section
+    /// runs from a skipped paragraph to the next paragraph that is not skipped.
     pub fn body_blocks(&self) -> impl Iterator<Item = &RichBlock> {
+        let frame = &self.page_frame;
+        let frame_texts: std::collections::HashSet<String> = [
+            &frame.header,
+            &frame.footer,
+            &frame.first_header,
+            &frame.first_footer,
+            &frame.even_header,
+            &frame.even_footer,
+        ]
+        .into_iter()
+        .flatten()
+        .map(RichParagraph::plain_text)
+        .collect();
         let mut in_copy = false;
         self.blocks.iter().filter(move |block| {
             if let RichBlock::Paragraph(p) = block {
-                in_copy = p.frame_copy;
+                in_copy = p.frame_copy && is_frame_text(&p.plain_text(), &frame_texts);
             }
             !in_copy
         })

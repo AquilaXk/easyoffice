@@ -225,3 +225,46 @@ test("PD-263: the header and footer copies a Pages file shows after the body sta
     ["HEADER-TEXT", true],
   ]);
 });
+
+test("PD-264: a paragraph the user types in loses the frame-copy mark, an untouched copy keeps it", async () => {
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const decodedResponse = {
+    status: "OK", action: "decode", fileName: "a.pages", format: "pages", module: "DOC", kind: "document", title: "a",
+    sourceBytes: 1, specification: "Pages", itemCount: 3, warnings: [],
+    header: [{ type: "paragraph", runs: [{ text: "HEADER-TEXT" }] }],
+    blocks: [
+      { type: "paragraph", runs: [{ text: "본문" }] },
+      { type: "paragraph", frameCopy: true, runs: [{ text: "HEADER-TEXT" }] },
+      { type: "paragraph", frameCopy: true, runs: [{ text: "" }] },
+    ],
+  };
+  const selection = { focusNode: null, rangeCount: 0 };
+  const testIpc = async (cmd, rawPayload) => {
+    const body = typeof rawPayload === "string" && rawPayload.trimStart().startsWith("{") ? JSON.parse(rawPayload) : null;
+    if (cmd === "convert_document_format" && body?.action === "decode") return decodedResponse;
+    return offline[cmd](rawPayload);
+  };
+  const h = await createWorkspaceHarness({ search: "?module=DOC&win=w-pd264-type", testIpc, selection });
+  await flushAsyncTurns(6);
+  await h.host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("a.pages", new Uint8Array([80, 75, 3, 4]));
+  await flushAsyncTurns(6);
+  const editor = h.document.getElementById("doc-editor");
+  const copies = [...editor.querySelectorAll("[data-eo-frame-copy]")];
+  assert.equal(copies.length, 2);
+  // The caret goes into the empty copy (the paragraph the browser made by splitting) and a letter is typed.
+  const target = copies[1];
+  target.textContent = "새 글";
+  selection.focusNode = target.firstChild;
+  editor.dispatchEvent({ type: "input", target: editor, inputType: "insertText" });
+  await flushAsyncTurns(3);
+  assert.deepEqual(copies.map((p) => [p.textContent, p.dataset.eoFrameCopy === "1"]), [["HEADER-TEXT", true], ["새 글", false]]);
+});

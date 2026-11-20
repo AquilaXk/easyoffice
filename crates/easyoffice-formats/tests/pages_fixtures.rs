@@ -550,3 +550,37 @@ fn header_and_footer_appendix_does_not_pile_up_over_open_save_cycles() {
         doc = next;
     }
 }
+
+/// A copy paragraph the user changed or wrote after the appendix is body text and is saved (PD-264).
+#[test]
+fn text_written_after_the_header_appendix_is_saved_as_body_text() {
+    let (mut doc, _) = open("eo-pages-objects.pages");
+    let mut written = RichParagraph {
+        runs: vec![RichRun::plain("부록 끝에 쓴 글")],
+        ..RichParagraph::default()
+    };
+    // The browser copies the mark to the paragraph a split creates.
+    written.frame_copy = true;
+    doc.blocks.push(RichBlock::Paragraph(written));
+    let saved =
+        UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Pages, None).expect("save");
+    let reopened = UniversalFormatConverter::decode_rich(&saved, Some("w.pages")).expect("reopen");
+    let DecodedContent::Document(next) = reopened.content else {
+        panic!("document");
+    };
+    assert_eq!(
+        paragraphs(&next)
+            .iter()
+            .filter(|p| p.plain_text() == "부록 끝에 쓴 글")
+            .count(),
+        1
+    );
+    // The untouched copies still do not pile up.
+    assert_eq!(
+        paragraphs(&next)
+            .iter()
+            .filter(|p| p.plain_text() == "머리말: Pages 객체 테스트 문서")
+            .count(),
+        1
+    );
+}

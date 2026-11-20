@@ -495,8 +495,10 @@
 
     // The browser copies a block's attributes to the half it splits off; the break stays on the first half.
     function onInput(ev) {
-      if (ev.inputType !== "insertParagraph") return;
       const block = caretBlock();
+      // A paragraph the user types in is no longer a copy of the page frame's text (a new half keeps the mark the browser copied).
+      if (block?.dataset.eoFrameCopy) delete block.dataset.eoFrameCopy;
+      if (ev.inputType !== "insertParagraph") return;
       if (block?.dataset.eoBreak && block.previousElementSibling?.dataset.eoBreak) delete block.dataset.eoBreak;
     }
 
