@@ -196,13 +196,7 @@ fn the_third_series_follows_the_recursion_with_the_reference_coefficients() {
     let args = EtsArgs::new(&values, &timeline);
     let mut model = fit_model(&args, 0.0).unwrap();
 
-    let xs: Vec<f64> = (0..values.len()).map(|i| i as f64).collect();
-    let (_, slope) = fit_line(&xs, &values);
-    let init = Init {
-        level: values[0] - slope,
-        trend: slope,
-        seasonal: Vec::new(),
-    };
+    let init = initial_states(&values, 1);
     // `Params` keeps the Holt form: beta = alpha * beta*.
     let (alpha, beta) = (
         numbers_in(REFERENCE_3, "alpha")[0],

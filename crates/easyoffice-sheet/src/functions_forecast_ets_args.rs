@@ -1,39 +1,27 @@
-//! `FORECAST.ETS`, `FORECAST.ETS.CONFINT`, `FORECAST.ETS.SEASONALITY` and `FORECAST.ETS.STAT` (PD-272):
-//! the arguments and errors of the function documentation, over the calculation in
-//! `functions_forecast_ets.rs`.
+//! Sheet-engine adapter for `FORECAST.ETS`, `FORECAST.ETS.CONFINT`, `FORECAST.ETS.SEASONALITY` and
+//! `FORECAST.ETS.STAT`: reads dynamic array arguments, normalizes calendar-month date timelines,
+//! connects evaluation step and memory budgets, and maps errors to sheet values.
 //!
-//! That file is the only one with code under the MPL-2.0 (the calculation, ported from a spreadsheet
-//! program; to be replaced by a clean-room one). This file is this engine's own code and only reads
-//! the arguments, applies the documented rules, and turns the numbers and errors of the calculation
-//! into values.
-//!
-//! Rules from the function documentation: the target date must not be before the end of the
-//! timeline (`#NUM!`), the timeline needs a constant step (`#NUM!`), the seasonality is 0 (none), 1
-//! (detect, the default) or a whole number up to 8,760 (`#NUM!` otherwise), `data_completion` is 0 or
-//! 1, `aggregation` is 1 to 7 (the documentation names 0 as the default average; 0 is the average
-//! too), the confidence level is between 0 and 1 without the ends (default 0.95), a values range of
-//! another size than the timeline is `#N/A`, and `statistic_type` is 1 to 8 (alpha, beta, gamma,
-//! MASE, SMAPE, MAE, RMSE, step size). The documentation gives no error for an argument outside its
-//! list (`aggregation`, `data_completion`, `statistic_type`) or for a series too short for its
-//! seasonality: this engine answers `#NUM!`. A text, blank or boolean in the series is `#VALUE!`
-//! and an error there is that error. The budget limits (series, prediction steps, work) answer
-//! `#VALUE!`. The prediction interval of a seasonal series is simulated; the random numbers come
-//! from a generator with a fixed seed, so a cell has the same value in every calculation.
+//! All exponential smoothing numerics live in `functions_forecast_ets_cr` (Apache-2.0 clean-room,
+//! `docs/forecast-ets-cleanroom.md`).
 
 use crate::array::{Env, Grid, Val};
 use crate::array_eval::ValResult;
-use crate::functions_date_fin::civil_from_serial;
-use crate::functions_dist::dist_value;
-use crate::functions_forecast_ets::{
-    Budget, FormulaError as EtsError, ScETSForecastCalculation, ScETSType, ScInterpreterContext,
+use crate::functions_date_fin::{civil_from_serial, days_in_month, serial_from_civil};
+use crate::functions_forecast_ets_cr::{
+    forecast_ets_confint_many, forecast_ets_many, forecast_ets_seasonality_bounded,
+    forecast_ets_stat_many, BudgetFn, EtsArgs, EtsError, MAX_SEASONALITY,
 };
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError as E, SheetEngine};
 use std::sync::Arc;
 
-/// Longest seasonal period of the documentation (one year of hours).
-const MAX_SEASONALITY: f64 = 8760.0;
 const DEFAULT_CONFIDENCE: f64 = 0.95;
-const RNG_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+/// Serial bounds within which `civil_from_serial` and `serial_from_civil` represent calendar dates
+/// without integer overflow.
+const MIN_DATE_SERIAL: f64 = -700_000.0;
+const MAX_DATE_SERIAL: f64 = 3_000_000.0;
+const MAX_TARGET_SERIAL: f64 = 1e9;
+const TOD_TOLERANCE: f64 = 1e-9;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -145,125 +133,121 @@ fn numbers(grid: &Grid) -> Result<Numbers, E> {
 
 /// `x` when it is a whole number from `lo` to `hi`, else `#NUM!`.
 fn whole(x: f64, lo: f64, hi: f64) -> Result<f64, E> {
-    if x.fract() == 0.0 && (lo..=hi).contains(&x) {
+    if x.is_finite() && x.fract() == 0.0 && (lo..=hi).contains(&x) {
         Ok(x)
     } else {
         Err(E::Num)
     }
 }
 
-fn gaussinv(p: f64) -> f64 {
-    dist_value("NORM.S.INV", &[p]).unwrap_or(f64::NAN)
-}
-
-/// The error value of an error of the calculation.
 fn error_value(error: EtsError) -> E {
     match error {
-        EtsError::NoValue | EtsError::IllegalFPOperation | EtsError::IllegalArgument => E::Num,
-        EtsError::DivisionByZero => E::DivByZero,
-        EtsError::NoError | EtsError::UnknownState | EtsError::Aborted => E::Value,
+        EtsError::SizeMismatch => E::Na,
+        EtsError::NonFinite
+        | EtsError::DuplicateTimeline
+        | EtsError::BudgetExceeded
+        | EtsError::TooManyPoints => E::Value,
+        _ => E::Num,
     }
 }
 
-/// What the calculation takes once the arguments are read and checked.
-struct EtsRequest<'a> {
-    e_ets_type: ScETSType,
-    /// The timeline.
-    mat_x: &'a [f64],
-    /// The values.
-    mat_y: &'a [f64],
-    /// The target dates, or the statistic types of the `EtsStat*` kinds; unused for `EtsSeason`.
-    t_mat: &'a [f64],
-    /// Seasonal period: 0 none, 1 detect, more is that length.
-    n_smpl_in_prd: usize,
-    b_data_completion: bool,
-    /// 1 AVERAGE, 2 COUNT, 3 COUNTA, 4 MAX, 5 MEDIAN, 6 MIN, 7 SUM.
-    n_aggregation: i32,
-    f_pi_level: f64,
-}
-
-/// The second half of `ScInterpreter::ScForecast_Ets`: runs the calculation the request names and
-/// gives the numbers of the result matrix (one for `EtsSeason`).
-fn sc_forecast_ets(
-    req: &EtsRequest<'_>,
-    context: ScInterpreterContext<'_>,
-) -> Result<Vec<f64>, EtsError> {
-    use ScETSType::{EtsAdd, EtsMult, EtsPIAdd, EtsPIMult, EtsSeason, EtsStatAdd, EtsStatMult};
-    let e_ets_type = req.e_ets_type;
-    if matches!(e_ets_type, EtsPIAdd | EtsPIMult) && !(0.0..=1.0).contains(&req.f_pi_level) {
-        return Err(EtsError::IllegalArgument);
+/// Maps a variable-length calendar timeline (monthly, quarterly, semi-annual or annual date
+/// serials sharing one day-of-month or end-of-month anchor) onto continuous month coordinates
+/// `year * 12 + (month - 1)`. Returns `None` when the timeline is not such a calendar series.
+fn calendar_month_timeline(
+    timeline: &[f64],
+    targets: Option<&[f64]>,
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    let first = *timeline.first()?;
+    if !(MIN_DATE_SERIAL..=MAX_DATE_SERIAL).contains(&first) {
+        return None;
     }
-    let is_stat = matches!(e_ets_type, EtsStatAdd | EtsStatMult);
-    if is_stat && req.t_mat.iter().any(|&t| !(1..=9).contains(&(t as i32))) {
-        return Err(EtsError::IllegalArgument);
-    }
-    let needs_target = e_ets_type != EtsSeason;
-    if needs_target && req.t_mat.is_empty() {
-        return Err(EtsError::IllegalArgument);
-    }
-
-    let mut a_ets_calc = ScETSForecastCalculation::new(req.mat_x.len(), context);
-    if !a_ets_calc.preprocess_data_range(
-        req.mat_x,
-        req.mat_y,
-        req.n_smpl_in_prd,
-        req.b_data_completion,
-        req.n_aggregation,
-        (needs_target && !is_stat).then_some(req.t_mat),
-        e_ets_type,
-    ) {
-        return Err(a_ets_calc.get_error());
-    }
-
-    let result = match e_ets_type {
-        EtsAdd | EtsMult => a_ets_calc.get_forecast_range(req.t_mat),
-        EtsPIAdd | EtsPIMult if a_ets_calc.b_eds() => {
-            a_ets_calc.get_eds_prediction_intervals(req.t_mat, req.f_pi_level)
+    let tod = first - first.floor();
+    let mut ymd = Vec::with_capacity(timeline.len());
+    let mut all_eom = true;
+    let mut max_day = 1_i64;
+    for &t in timeline {
+        if !(MIN_DATE_SERIAL..=MAX_DATE_SERIAL).contains(&t) {
+            return None;
         }
-        EtsPIAdd | EtsPIMult => a_ets_calc.get_ets_prediction_intervals(req.t_mat, req.f_pi_level),
-        EtsStatAdd | EtsStatMult => a_ets_calc.get_statistic_value(req.t_mat),
-        EtsSeason => vec![a_ets_calc.get_samples_in_period()],
-    };
-    match a_ets_calc.get_error() {
-        EtsError::NoError => Ok(result),
-        error => Err(error),
+        let day_serial = t.floor();
+        if ((t - day_serial) - tod).abs() > TOD_TOLERANCE {
+            return None;
+        }
+        let (y, m, d) = civil_from_serial(day_serial as i64);
+        all_eom &= d == days_in_month(y, m);
+        max_day = max_day.max(d);
+        ymd.push((y, m, d));
     }
+    let anchor_day = if all_eom {
+        31
+    } else if ymd
+        .iter()
+        .all(|&(y, m, d)| d == max_day.min(days_in_month(y, m)))
+    {
+        max_day
+    } else {
+        return None;
+    };
+    let month_timeline: Vec<f64> = ymd
+        .iter()
+        .map(|&(y, m, _)| (y * 12 + (m - 1)) as f64)
+        .collect();
+    let last_serial = timeline.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let last_month = month_timeline
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let anchor_serial = |k: i64| -> f64 {
+        let y = k.div_euclid(12);
+        let m = k.rem_euclid(12) + 1;
+        let d = anchor_day.min(days_in_month(y, m));
+        serial_from_civil(y, m, d) as f64 + tod
+    };
+    let mapped_targets = match targets {
+        None => Vec::new(),
+        Some(ts) => ts
+            .iter()
+            .map(|&target| {
+                if !target.is_finite() {
+                    return f64::NAN;
+                }
+                if target > MAX_TARGET_SERIAL {
+                    return last_month + (target - last_serial) / 30.436_875;
+                }
+                if target < MIN_DATE_SERIAL {
+                    return last_month - 1.0;
+                }
+                let (ty, tm, _) = civil_from_serial(target.floor() as i64);
+                let mut k = ty * 12 + (tm - 1);
+                while anchor_serial(k) > target {
+                    k -= 1;
+                }
+                while anchor_serial(k + 1) <= target {
+                    k += 1;
+                }
+                let s0 = anchor_serial(k);
+                let s1 = anchor_serial(k + 1);
+                k as f64 + (target - s0) / (s1 - s0)
+            })
+            .collect(),
+    };
+    Some((month_timeline, mapped_targets))
 }
 
-/// The percentile of a list with linear interpolation (`ScInterpreter::GetPercentile`).
-fn percentile(list: &mut [f64], p: f64) -> f64 {
-    if list.len() == 1 {
-        return list[0];
-    }
-    list.sort_by(f64::total_cmp);
-    let position = p * (list.len() - 1) as f64;
-    // a position one rounding step below a whole number is that number
-    let nearest = position.round();
-    let floor = if (position - nearest).abs() <= 5e-15 * nearest.abs() {
-        nearest
-    } else {
-        position.floor()
-    };
-    let index = (floor as usize).min(list.len() - 1);
-    let diff = position - floor;
-    if diff <= 0.0 || index + 1 >= list.len() {
-        list[index]
-    } else {
-        list[index] + diff * (list[index + 1] - list[index])
-    }
-}
-
-/// A generator of numbers in [0, 1) with a fixed seed (SplitMix64).
-struct FixedRng(u64);
-
-impl FixedRng {
-    fn next_f64(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^= z >> 31;
-        (z >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+fn eval_kind(
+    kind: Kind,
+    args: &EtsArgs<'_>,
+    selector: &[f64],
+    confidence: f64,
+    budget: BudgetFn<'_>,
+) -> Result<Vec<f64>, EtsError> {
+    match kind {
+        Kind::Forecast => forecast_ets_many(selector, args, budget),
+        Kind::Confint => forecast_ets_confint_many(selector, args, confidence, budget),
+        Kind::Seasonality => Ok(vec![forecast_ets_seasonality_bounded(args, budget)? as f64]),
+        Kind::Stat => forecast_ets_stat_many(selector, args, budget),
     }
 }
 
@@ -278,12 +262,8 @@ impl SheetEngine {
         self.eval_val(arg, env, ctx, depth + 1)?.into_grid()
     }
 
-    /// The four functions: `FORECAST.ETS(target_date, values, timeline, [seasonality],
-    /// [data_completion], [aggregation])`, `FORECAST.ETS.CONFINT(target_date, values, timeline,
-    /// [confidence_level], [seasonality], [data_completion], [aggregation])`,
-    /// `FORECAST.ETS.SEASONALITY(values, timeline, [data_completion], [aggregation])` and
-    /// `FORECAST.ETS.STAT(values, timeline, statistic_type, [seasonality], [data_completion],
-    /// [aggregation])`. An array of target dates (statistic types) gives an array of the same shape.
+    /// `FORECAST.ETS`, `FORECAST.ETS.CONFINT`, `FORECAST.ETS.SEASONALITY` and `FORECAST.ETS.STAT`.
+    /// An array of target dates (or statistic types) returns an array of the same shape.
     pub(crate) fn fn_forecast_ets(
         &self,
         name: &str,
@@ -313,20 +293,22 @@ impl SheetEngine {
         let completion = self.arg_number(args, lay.completion, 1.0, env, ctx, depth)?;
         let aggregation = self.arg_number(args, lay.aggregation, 1.0, env, ctx, depth)?;
 
-        // a values range of another size than the timeline
         if (values.rows, values.cols) != (timeline.rows, timeline.cols) {
             return Err(E::Na);
         }
         let values = numbers(&values)?;
         let timeline = numbers(&timeline)?;
         let selector = selector.as_deref().map(numbers).transpose()?;
-        let seasonality = whole(seasonality, 0.0, MAX_SEASONALITY)?;
+        let seasonality = whole(seasonality, 0.0, MAX_SEASONALITY as f64)?;
         let completion = whole(completion, 0.0, 1.0)?;
         let aggregation = whole(aggregation, 0.0, 7.0)?;
         if matches!(lay.kind, Kind::Confint) && !(confidence > 0.0 && confidence < 1.0) {
             return Err(E::Num);
         }
         if let Some(selector) = &selector {
+            if selector.data.is_empty() {
+                return Err(E::Num);
+            }
             match lay.kind {
                 Kind::Stat => {
                     for &t in &selector.data {
@@ -334,7 +316,6 @@ impl SheetEngine {
                     }
                 }
                 _ => {
-                    // the target date is not before the end of the timeline
                     let end = timeline.data.iter().copied().fold(f64::MIN, f64::max);
                     if selector.data.iter().any(|&t| t < end) {
                         return Err(E::Num);
@@ -343,40 +324,38 @@ impl SheetEngine {
             }
         }
 
-        let request = EtsRequest {
-            e_ets_type: match lay.kind {
-                Kind::Forecast => ScETSType::EtsAdd,
-                Kind::Confint => ScETSType::EtsPIAdd,
-                Kind::Seasonality => ScETSType::EtsSeason,
-                Kind::Stat => ScETSType::EtsStatAdd,
-            },
-            mat_x: &timeline.data,
-            mat_y: &values.data,
-            t_mat: selector.as_ref().map_or(&[], |s| &s.data),
-            n_smpl_in_prd: seasonality as usize,
-            b_data_completion: completion != 0.0,
-            // the documented default 0 is the average, which is 1 for the calculation
-            n_aggregation: if aggregation == 0.0 {
-                1
-            } else {
-                aggregation as i32
-            },
-            f_pi_level: confidence,
+        let sel_slice = selector.as_ref().map_or(&[][..], |s| &s.data);
+        let ets_args = EtsArgs {
+            values: &values.data,
+            timeline: &timeline.data,
+            seasonality,
+            data_completion: completion,
+            aggregation: Some(aggregation),
         };
-        let mut rng = FixedRng(RNG_SEED);
-        let mut rand = || rng.next_f64();
-        let mut budget = |charge: Budget| match charge {
-            Budget::Steps(n) => ctx.charge_steps(n).is_ok(),
-            Budget::Bytes(n) => ctx.charge_array_extra_bytes(n).is_ok(),
+        let mut budget = |steps: usize, bytes: usize| -> bool {
+            (steps == 0 || ctx.charge_steps(steps).is_ok())
+                && (bytes == 0 || ctx.charge_array_extra_bytes(bytes).is_ok())
         };
-        let context = ScInterpreterContext {
-            civil_from_serial,
-            gaussinv,
-            percentile,
-            rand: &mut rand,
-            budget: &mut budget,
+        let result = match eval_kind(lay.kind, &ets_args, sel_slice, confidence, &mut budget) {
+            Err(EtsError::NoConstantStep) => {
+                let target_input =
+                    matches!(lay.kind, Kind::Forecast | Kind::Confint).then_some(sel_slice);
+                let (month_tl, month_targets) =
+                    calendar_month_timeline(&timeline.data, target_input).ok_or(E::Num)?;
+                let month_args = EtsArgs {
+                    timeline: &month_tl,
+                    ..ets_args
+                };
+                let mapped_sel = if target_input.is_some() {
+                    &month_targets
+                } else {
+                    sel_slice
+                };
+                eval_kind(lay.kind, &month_args, mapped_sel, confidence, &mut budget)
+                    .map_err(error_value)?
+            }
+            other => other.map_err(error_value)?,
         };
-        let result = sc_forecast_ets(&request, context).map_err(error_value)?;
 
         let cells: Vec<V> = result
             .into_iter()
@@ -395,142 +374,6 @@ impl SheetEngine {
             _ => Ok(Val::scalar(
                 cells.into_iter().next().unwrap_or(V::Error(E::Value)),
             )),
-        }
-    }
-}
-
-/// The test vectors of the original (`tests/data/forecast_ets_vectors.txt`) through the calculation, and
-/// the limits of the calculation. The values are the original program's: where the function
-/// documentation gives another error, the integration tests (`tests/sheet_forecast_ets.rs`) hold
-/// the documented one and the cases here only check that an error comes.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const VECTORS: &str = include_str!("../tests/data/forecast_ets_vectors.txt");
-
-    struct Case {
-        name: String,
-        kinds: Vec<ScETSType>,
-        select: Vec<f64>,
-        values: Vec<f64>,
-        timeline: Vec<f64>,
-        params: Vec<f64>,
-        expect: Vec<String>,
-    }
-
-    fn numbers_of(line: &str, key: &str) -> Vec<f64> {
-        let list = line.strip_prefix(key).unwrap_or_default();
-        list.split_whitespace()
-            .map(|n| n.parse().unwrap())
-            .collect()
-    }
-
-    fn cases() -> Vec<Case> {
-        let mut out: Vec<Case> = Vec::new();
-        for line in VECTORS.lines().filter(|l| !l.starts_with('#')) {
-            let word = line.split_whitespace().next().unwrap_or("");
-            match word {
-                "case" => {
-                    let mut parts = line.split_whitespace().skip(1);
-                    let name = parts.next().unwrap().to_string();
-                    let kinds = match parts.next().unwrap() {
-                        "add" => vec![ScETSType::EtsAdd],
-                        "mult" => vec![ScETSType::EtsMult],
-                        "both" => vec![ScETSType::EtsAdd, ScETSType::EtsMult],
-                        _ => vec![ScETSType::EtsStatMult],
-                    };
-                    out.push(Case {
-                        name,
-                        kinds,
-                        select: vec![],
-                        values: vec![],
-                        timeline: vec![],
-                        params: vec![],
-                        expect: vec![],
-                    });
-                }
-                "select" => out.last_mut().unwrap().select = numbers_of(line, "select"),
-                "values" => out.last_mut().unwrap().values = numbers_of(line, "values"),
-                "timeline" => out.last_mut().unwrap().timeline = numbers_of(line, "timeline"),
-                "params" => out.last_mut().unwrap().params = numbers_of(line, "params"),
-                "expect" => {
-                    out.last_mut().unwrap().expect =
-                        line.split_whitespace().skip(1).map(String::from).collect();
-                }
-                _ => {}
-            }
-        }
-        out
-    }
-
-    /// Runs a calculation with a budget that never ends (`limit` steps) and a fixed generator.
-    fn run(
-        kind: ScETSType,
-        (select, values, timeline): (&[f64], &[f64], &[f64]),
-        params: &[f64],
-        limit: usize,
-    ) -> Result<Vec<f64>, EtsError> {
-        let mut rng = FixedRng(RNG_SEED);
-        let mut rand = || rng.next_f64();
-        let mut steps = 0usize;
-        let mut budget = |charge: Budget| match charge {
-            Budget::Steps(n) => {
-                steps += n;
-                steps <= limit
-            }
-            Budget::Bytes(n) => n <= 128 * 1024 * 1024,
-        };
-        let context = ScInterpreterContext {
-            civil_from_serial,
-            gaussinv,
-            percentile,
-            rand: &mut rand,
-            budget: &mut budget,
-        };
-        let request = EtsRequest {
-            e_ets_type: kind,
-            mat_x: timeline,
-            mat_y: values,
-            t_mat: select,
-            n_smpl_in_prd: params.first().map_or(1, |&p| p as usize),
-            b_data_completion: params.get(1).is_none_or(|&p| p != 0.0),
-            n_aggregation: params.get(2).map_or(1, |&p| p as i32),
-            f_pi_level: 0.95,
-        };
-        sc_forecast_ets(&request, context)
-    }
-
-    const NO_LIMIT: usize = usize::MAX;
-
-    #[test]
-    fn the_original_test_vectors_give_the_original_values() {
-        let cases = cases();
-        assert_eq!(cases.len(), 21);
-        for case in &cases {
-            for &kind in &case.kinds {
-                let got = run(
-                    kind,
-                    (&case.select, &case.values, &case.timeline),
-                    &case.params,
-                    NO_LIMIT,
-                );
-                if case.expect[0].starts_with('#') {
-                    assert!(got.is_err(), "{} {kind:?}: {got:?}", case.name);
-                    continue;
-                }
-                let got = got.unwrap_or_else(|e| panic!("{} {kind:?}: {e:?}", case.name));
-                assert_eq!(got.len(), case.expect.len(), "{} {kind:?}", case.name);
-                for (i, (g, e)) in got.iter().zip(&case.expect).enumerate() {
-                    let e: f64 = e.parse().unwrap();
-                    // the original compares 9 significant digits
-                    assert!(
-                        (g - e).abs() <= 1e-9 * e.abs().max(1e-3),
-                        "{} {kind:?} #{i}: {g} against {e}",
-                        case.name
-                    );
-                }
-            }
         }
     }
 }

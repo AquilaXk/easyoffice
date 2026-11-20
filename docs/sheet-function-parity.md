@@ -6,7 +6,7 @@
 
 - 기준 목록 521개 중 우리 엔진은 **505개**(PD-270 전 480개, PD-271 전 494개, PD-272 전 501개), 없는 것은 **16개**(전 41개, PD-271 전 27개, PD-272 전 20개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`FILTERXML`은 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
 - 참조 엔진: A 496개, B 497개, C 403개가 기준 목록에 든다.
-- 없는 16개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `FILTERXML`은 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 우리는 PD-272에서 따로 구현).
+- 없는 16개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `FILTERXML`은 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 우리는 PD-273 클린룸 구현).
 
 ## 범주별 수
 
@@ -78,25 +78,25 @@
 
 옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,350줄과 시험 약 900줄이다.
 
-### `FORECAST.ETS` 계열 4개 (PD-272)
+### `FORECAST.ETS` 계열 4개 (PD-273)
 
-참조 A의 `statistical/forecast.rs`는 네 함수를 `#N/IMPL!`를 돌려주는 빈 함수로 두었고 참조 B의 `forecast-ets*`도 빈 클래스다(앞의 비교표가 참조 A에 O를 준 것은 이름이 있다는 뜻이다). 허용 라이선스의 구현이 없어 QA 결정(2026-11-21)으로 MPL-2.0 원본을 쓰고 나중에 클린룸 구현으로 바꾼다. 원본의 예측 계산 클래스(1,148줄)를 새 파일 `functions_forecast_ets.rs` 하나(976줄)에만 옮겼고, 인수 읽기와 문서의 오류 규칙은 직접 쓴 `functions_forecast_ets_args.rs`(405줄, 시험 제외)가 맡는다. 값은 원본 시험 자료 21건(`tests/data/forecast_ets_vectors.txt`)과 모두 같다.
+참조 A의 `statistical/forecast.rs`는 네 함수를 `#N/IMPL!`를 돌려주는 빈 함수로 두었고 참조 B의 `forecast-ets*`도 빈 클래스다(앞의 비교표가 참조 A에 O를 준 것은 이름이 있다는 뜻이다). 기존 MPL-2.0 이식본(PD-272)을 삭제하고 공개 명세와 통계 교과서·논문만으로 작성한 Apache-2.0 클린룸 상태 공간 지수 평활(`functions_forecast_ets_cr.rs`, `functions_forecast_ets_opt.rs`, `functions_forecast_ets_args.rs`, 명세 `docs/forecast-ets-cleanroom.md`)로 교체했다. 상자 제약 Nelder-Mead 심플렉스 탐색만 BSD-3-Clause 과학 계산 라이브러리의 구조를 따랐다(`THIRD_PARTY_NOTICES.md`).
 
-| 인수·오류 | 이 엔진(함수 문서) | 원본 |
-|---|---|---|
-| 대상 날짜가 시계열 끝보다 앞 | `#NUM!` | 시작 앞만 오류, 안은 보간값 |
-| 대상 날짜가 시계열 끝 | `FORECAST.ETS`는 끝 값, `.CONFINT`는 `#NUM!` | 같음 |
-| 일정한 간격이 없는 시계열 | `#NUM!` | `#VALUE!` |
-| 값과 시계열 크기가 다름 | `#N/A` | `#VALUE!`(내부 오류 502) |
-| 시즌 길이 | 0~8,760의 정수, 아니면 `#NUM!` | 상한 없음 |
-| 시즌 길이가 시계열의 절반 초과 | `#NUM!` | `#VALUE!` |
-| `aggregation` | 0(평균)~7, 아니면 `#NUM!` | 0은 같은 날짜를 오류(`#VALUE!`), 평균은 첫 값만 남김 |
-| `data_completion` | 0, 1, 아니면 `#NUM!` | 같음 |
-| `confidence_level` | 0 초과 1 미만, 아니면 `#NUM!` | 0~1 포함 |
-| `statistic_type` | 1~8, 아니면 `#NUM!` | 1~9(9는 시즌 길이) |
-| 값·시계열의 글·빈 칸·논리값 | `#VALUE!`, 오류 값은 그 오류 | 숫자 아닌 것은 오류 |
+| 인수·오류 | 이 엔진(함수 문서·클린룸) |
+|---|---|
+| 대상 날짜가 시계열 끝보다 앞 | `#NUM!` |
+| 대상 날짜가 시계열 끝 | `FORECAST.ETS`는 끝 값, `.CONFINT`는 `#NUM!` |
+| 일정한 간격이 없는 시계열 | `#NUM!`(달·분기·연 단위 날짜 일련번호는 달 번호로 정규화) |
+| 값과 시계열 크기가 다름 | `#N/A` |
+| 시즌 길이 | 0~8,760의 정수, 아니면 `#NUM!`(`SEASONALITY` 탐지 없음은 `0`) |
+| 시즌 길이가 시계열의 절반 초과 | `#NUM!` |
+| `aggregation` | 생략·0·1(평균)~7, 아니면 `#NUM!` |
+| `data_completion` | 0, 1, 아니면 `#NUM!`(누락 30% 초과는 `#NUM!`) |
+| `confidence_level` | 0 초과 1 미만, 아니면 `#NUM!` |
+| `statistic_type` | 1~8, 아니면 `#NUM!`(베타·감마는 상태 공간 값, SMAPE는 비율) |
+| 값·시계열의 글·빈 칸·논리값 | `#VALUE!`, 오류 값은 그 오류 |
 
-통계 2번(베타, 추세)과 3번(감마, 계절)은 원본 변수 이름이 문서와 반대지만 같은 값이다. 원본과 다른 곳은 파일 머리의 `CHANGE` 표시에 있다. 시즌이 있는 계열의 `.CONFINT`는 원본이 난수로 시뮬레이션하는데 이 엔진은 고정 시드를 써서 같은 입력이면 같은 값이다. 시계열 길이 32,768, 예측 단계 4,096, 평가 단계(`MAX_EVAL_STEPS`와 마감), 배열 예산을 넘으면 `#VALUE!`다. 원본의 값이 기준 앱의 값과 같은지는 대조하지 못했다(`TODO.md`).
+신뢰구간은 비계절·계절 모두 상태 공간 닫힌 식 분산으로 계산해 재계산마다 같은 값을 돌려준다. 계절 주기 탐지는 Wiener-Khinchin 기수-2 FFT로 `O(N log N)`에 수행하며 시계열 길이 32,768, 예측 거리 `10^9` 걸음, 평가 단계(`MAX_EVAL_STEPS`와 마감), 배열 예산을 넘으면 Fail-Closed로 거부한다. 기준 앱의 비공개 평활 계수 선택 목적함수와의 미세 차이는 `docs/forecast-ets-cleanroom.md` 9장에 기록했다.
 
 ### 문서의 오류 값을 확인한 함수
 
@@ -172,7 +172,7 @@
 
 ## 전체 비교표
 
-"우리"는 이 브랜치 기준이다. O는 있음, -는 없음이다. 참조 열의 O는 이름이 있다는 뜻이고 몸체가 없는 이름도 센다(`FORECAST.ETS` 계열, 참조 B의 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`). `FORECAST.ETS` 계열의 우리 O는 MPL 원본의 구현이다(PD-272).
+"우리"는 이 브랜치 기준이다. O는 있음, -는 없음이다. 참조 열의 O는 이름이 있다는 뜻이고 몸체가 없는 이름도 센다(`FORECAST.ETS` 계열, 참조 B의 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`). `FORECAST.ETS` 계열의 우리 O는 클린룸 구현이다(PD-273).
 
 | 함수 | 우리 | 참조 A | 참조 B | 참조 C | 범주 |
 |---|:-:|:-:|:-:|:-:|---|

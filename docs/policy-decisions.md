@@ -4805,7 +4805,8 @@
 
 ## PD-272. FORECAST.ETS 계열 4개: MPL-2.0 원본 예외와 클린룸 대체 예정
 
-- **Status** Implemented (QA 승인 2026-11-21). 엔진 `crates/easyoffice-sheet`: `functions_forecast_ets.rs`(MPL-2.0 코드, 이 파일 하나), `functions_forecast_ets_args.rs`(직접 쓴 어댑터). 시험 `tests/sheet_forecast_ets.rs`, 자료 `tests/data/forecast_ets_vectors.txt`. 작업을 시작할 때와 끝낼 때 마지막 PD 번호는 271이었고 이 항목이 272다.
+- **Status** Superseded
+- **Superseded by PD-273**: `functions_forecast_ets.rs`와 `tests/data/forecast_ets_vectors.txt`(MPL-2.0 원본) 및 `THIRD_PARTY_NOTICES.md`의 MPL-2.0 고지 예외를 모두 삭제하고 Apache-2.0 클린룸 구현(`functions_forecast_ets_cr.rs`, `functions_forecast_ets_opt.rs`, `functions_forecast_ets_args.rs`)으로 교체했다(QA 승인 2026-11-21). 함수 등록 수(313종)와 문서 기반 인수·오류 계약은 PD-273이 이어받는다.
 - **Context** PD-271이 `FORECAST.ETS`, `.CONFINT`, `.SEASONALITY`, `.STAT`를 허용 라이선스 구현이 없어 남겼다. 참조 A·B는 빈 함수고 지수 평활 크레이트는 기준 앱과 같은 값을 낸다는 근거가 없다. R `forecast`는 GPL-3다. 가장 가까운 구현은 MPL-2.0의 스프레드시트 프로그램뿐이다.
 - **Decision (`PD-272`)**
   1. **MPL 예외는 허용 원본이 없을 때만**이고 이 함수 4개에 한정한다. MPL 코드는 새 파일 `functions_forecast_ets.rs` 하나에만 둔다. 다른 파일에는 MPL 코드를 넣지 않고 이 파일에는 Apache 코드를 섞지 않는다. 엔진과는 직접 쓴 `functions_forecast_ets_args.rs`가 잇는다(인수 읽기, 문서의 오류 규칙, 난수·마감·배열 예산 연결). 나중에 클린룸 구현으로 바꾼다(`TODO.md`, `THIRD_PARTY_NOTICES.md`에 "클린룸 대체 예정"). 바꾸면 MPL 항목과 이 예외를 지운다.
@@ -4822,3 +4823,18 @@
 - **Alternatives rejected** 계속 `#NAME?`로 두는 것(QA가 MPL 원본을 허용), MPL 코드를 여러 파일에 나누는 것(격리 규칙), 지수 평활을 직접 새로 짜는 것(기준 앱과 같은 값인지 확인할 수단이 없다), 시뮬레이션에 엔진의 `RAND` 상태를 쓰는 것(재계산마다 값이 바뀐다), 위생 가드 줄 상한을 풀거나 파일을 `src` 밖으로 빼는 것.
 - **Verified by** `cargo test -p easyoffice-sheet`(원본 자료 21건, 통합 시험 17건), `--self-test`(함수 313종), 위생 검사, `node --test scripts/test-*.mjs`. 위생 가드는 MPL이나 원본 이름 때문에 막지 않았다: 이름은 파일 머리 주석(출처 표시가 있으면 면제)과 `THIRD_PARTY_NOTICES.md`에만 있다.
 - **Revisit when** 기준 앱의 `FORECAST.ETS` 출력을 얻을 때(원본 값과 대조, 문서와 다른 오류), 클린룸 구현이 준비될 때(MPL 파일과 예외를 지운다).
+
+## PD-273. FORECAST.ETS 계열 클린룸 전환과 MPL-2.0 예외 제거
+
+- **Status** Implemented (QA 승인 2026-11-21). 엔진 `crates/easyoffice-sheet`: `functions_forecast_ets_cr.rs`, `functions_forecast_ets_opt.rs`, `functions_forecast_ets_args.rs`. 명세 `docs/forecast-ets-cleanroom.md`, 시험 `tests/sheet_forecast_ets.rs`.
+- **Context** PD-272가 임시 허용한 MPL-2.0 계산 파일(`functions_forecast_ets.rs`)과 시험 자료(`tests/data/forecast_ets_vectors.txt`)를 제거하고 허용 라이선스 코드만 남긴다. 공개 실측 3계열 대조 결과 이전 MPL 원본(계열 1 첫 점 `3,868,499` `+0.27%`, 계열 2 첫 점 `-2.18%`·최대 `17%`, 계열 3 첫 점 `-0.85%`)과 클린룸(계열 1 첫 점 `3,875,481` `+0.45%`·최대 `2.7%`, 계열 2 첫 점 `437.076` `-0.013%`·최대 `9.1%`, 계열 3 첫 점 `171.361` `-0.85%`) 모두 기준 앱과 수 % 차이가 나며, 계열 2 오차와 계절 신뢰구간 비율 식 일치(`1e-12`)는 클린룸이 더 낫다.
+- **Decision (`PD-273`)**
+  1. **MPL-2.0 완전 제거**: `functions_forecast_ets.rs`, `tests/data/forecast_ets_vectors.txt`, `THIRD_PARTY_NOTICES.md`의 MPL-2.0 절을 삭제한다.
+  2. **수치 모형과 알고리즘**: 계절 주기가 있으면 `ETS(A,A,A)`, 없으면 `ETS(A,A,N)` 상태 공간 오차 보정 모형과 닫힌 식 예측 분산을 쓴다(시뮬레이션 난수 제거). 비계절 경로는 실측 계열 3에서 기준 계수 `(0.5, 0.499)` 주입 시 예측값과 `CONFINT` 폭 모두 `1e-9`로 재현된 규칙(첫 관측 수준 고정 + 전체 계열 최소제곱 기울기, `σ² = SSE/N`)을 쓴다. 계절 경로는 주기 탐지와 `CONFINT(h)/CONFINT(1)` 확장 비율만 기준 앱과 `1e-12`로 맞고 순환식·끝점 고정 처리와 계수 선택 목적함수는 기준 앱과 다르다. 계절 주기 미탐지 시 `FORECAST.ETS.SEASONALITY`는 문서대로 `0`을 돌려주며, 달·분기·연 단위 날짜 일련번호 시간축은 `civil_from_serial`·`serial_from_civil`로 연속 달 좌표에 사상한다.
+  3. **저수준·배치 최적화**: (a) 계절 주기 자동 탐지는 차분 자기상관을 Wiener-Khinchin 정리와 하드웨어 비트 반전(`usize::reverse_bits`) 기수-2 FFT로 계산해 `O(N·K)`를 `O(N log N)`으로 줄였다(20,000점·최대 주기 8,760 시험 디버그 1.59s → 0.17s, 릴리스 0.11s → 0.05s). (b) 평활 계수 탐색은 6점 격자 상위 3점에서 스택 고정 배열 `[f64; 3]` 상자 제약 Nelder-Mead 심플렉스(BSD-3-Clause 과학 계산 라이브러리 구조 차용, 힙 할당 0)를 돌려 대각선 능선을 따라 수렴한다(항공 승객 144점 SSE 상대 오차 `1e-6` → `5e-13`). (c) 극단 크기(`|exp| > 450`) 입력은 IEEE-754 지수 비트 추출(`to_bits`/`from_bits`)로 `2^±shift` 무손실 스케일링해 `SSE` 오버플로·언더플로를 막는다. (d) 배열 목표 날짜·통계 종류는 모형을 한 번만 적합해 일괄 평가한다.
+  4. **상한(Fail-Closed)**: 입력·완성 격자 32,768점, 계절 주기 8,760, 예측 거리 `10^9` 걸음, 탐색 평가 1,500회 상한을 두고 모든 루프가 `EvalContext` 단계·메모리·마감 예산을 충전한다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트: MIT/Apache-2.0 시계열 예측 크레이트는 계절 ETS 미구현이고 선형대수 의존성을 추가하며, 참조 A·B는 빈 함수다. (2) 기존 의존성 재사용: `NORM.S.INV`, `civil_from_serial`·`serial_from_civil`, 동적 배열 격자, `EvalContext` 예산을 그대로 연결했다. (3) 이식·최적화: 상태 공간 식과 FFT 자기상관은 공개 교과서·논문에서 직접 구현하고 상자 제약 Nelder-Mead 심플렉스만 BSD-3-Clause 과학 계산 라이브러리에서 이식해 스택 배열로 최적화했다(`THIRD_PARTY_NOTICES.md`).
+- **Why** 저장소에서 유일하던 MPL-2.0 예외를 없애 전체 엔진을 허용 라이선스로 단일화하고, 시뮬레이션 신뢰구간과 이차 시간 계절 탐지를 닫힌 식과 `O(N log N)` FFT로 바꾼다.
+- **Trade-offs** 기준 앱의 비공개 평활 계수 선택 목적함수(비계절·계절 공통)와 계절 경로의 순환식·끝점 고정 처리 및 `STAT` 오차 열 정의가 교과서식과 달라 예측값과 `CONFINT` 폭이 기준 앱 실측과 차이가 난다(`docs/forecast-ets-cleanroom.md` 9장, `1e-6` 오라클 시험 3건은 `#[ignore]` 유지).
+- **Verified by** `cargo test -p easyoffice-sheet`(단위 36건 + 통합 15건 통과), `--self-test`(함수 313종), `check-repo-hygiene.mjs`.
+- **Revisit when** 기준 앱의 추가 실측 통합 문서로 평활 계수 목적함수와 `STAT` 오차 열 정의가 확인될 때.

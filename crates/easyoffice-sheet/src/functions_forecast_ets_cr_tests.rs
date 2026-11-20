@@ -73,12 +73,21 @@ fn air_model(init: &Init, params: Params, period: usize) -> Model {
             y: AIR.to_vec(),
             last: 144.0,
             step: 1.0,
+            scale: Scale { down: 1.0, up: 1.0 },
         },
         period,
         params,
         pass,
         ring,
         fitted,
+    }
+}
+
+fn air_ten_point_line_init() -> Init {
+    Init {
+        level: 118.46666666666665,
+        trend: 2.0606060606060583,
+        seasonal: Vec::new(),
     }
 }
 
@@ -92,8 +101,10 @@ fn heuristic_initial_states_match_an_independent_computation() {
     }
     close(init.seasonal.iter().sum::<f64>(), 0.0, 1e-12);
     let line = initial_states(&AIR, 1);
-    close(line.level, 118.46666666666665, 1e-12);
-    close(line.trend, 2.0606060606060583, 1e-12);
+    let xs: Vec<f64> = (0..AIR.len()).map(|i| i as f64).collect();
+    let (_, expected_slope) = fit_line(&xs, &AIR);
+    close(line.trend, expected_slope, 1e-12);
+    close(line.level, AIR[0] - expected_slope, 1e-12);
     assert!(line.seasonal.is_empty());
 }
 
@@ -143,7 +154,7 @@ fn seasonal_forecast_matches_the_bsd_library() {
 
 #[test]
 fn trend_only_recursion_and_forecast_match_the_bsd_library() {
-    let init = initial_states(&AIR, 1);
+    let init = air_ten_point_line_init();
     let params = Params {
         alpha: 0.5,
         beta: 0.2,
@@ -253,14 +264,14 @@ fn search_reaches_the_optimum_found_by_an_independent_simplex_search() {
     // tolerances) found for the same initial states.
     let seasonal = optimize(&AIR, &air_init());
     let (pass, _, _) = pass_of(&air_init(), seasonal);
-    close(pass.sse, 22354.4283562043, 1e-6);
-    let line = initial_states(&AIR, 1);
+    close(pass.sse, 22354.4283562043, 1e-9);
+    let line = air_ten_point_line_init();
     let trend = optimize(&AIR, &line);
     let mut ring = Vec::new();
     close(
         run(&AIR, &line, trend, &mut ring, |_| {}).sse,
         161865.11842056934,
-        1e-6,
+        1e-9,
     );
 }
 
@@ -314,15 +325,18 @@ fn a_line_is_forecast_exactly() {
         0.0,
         1e-9,
     );
-    assert_eq!(forecast_ets_seasonality_cr(&args), Ok(1));
+    assert_eq!(forecast_ets_seasonality_cr(&args), Ok(0));
 }
 
 #[test]
-fn the_last_time_returns_the_one_step_fit() {
+fn the_last_time_returns_the_last_value_and_has_no_interval() {
     let timeline = months();
     let args = EtsArgs::new(&AIR, &timeline);
-    let model = fit_model(&args, 1.0).unwrap();
-    assert_eq!(forecast_ets_cr(144.0, &args).unwrap(), model.fitted[143]);
+    assert_eq!(forecast_ets_cr(144.0, &args).unwrap(), AIR[143]);
+    assert_eq!(
+        forecast_ets_confint_cr(144.0, &args, 0.95),
+        Err(EtsError::TargetBeforeEnd)
+    );
 }
 
 #[test]
@@ -386,7 +400,7 @@ fn a_constant_series_has_no_scale() {
     let args = EtsArgs::new(&values, &timeline);
     close(forecast_ets_cr(20.0, &args).unwrap(), 5.0, 1e-12);
     assert_eq!(forecast_ets_stat_cr(&args, 4.0), Err(EtsError::ZeroScale));
-    assert_eq!(forecast_ets_seasonality_cr(&args), Ok(1));
+    assert_eq!(forecast_ets_seasonality_cr(&args), Ok(0));
 }
 
 #[test]
@@ -428,7 +442,7 @@ fn missing_points_are_filled_and_counted() {
     .unwrap();
     assert!(filled.is_finite() && (filled - zeros).abs() > 1e-6);
     let options = parse_options(&args, 1.0).unwrap();
-    let series = build_series(&args, &options).unwrap();
+    let series = build_series(&args, &options, &mut |_, _| true).unwrap();
     // The grid runs from month 1 to month 143 (month 144 is dropped too).
     assert_eq!(series.y.len(), 143);
     // The filled point is the straight line between its neighbors.
@@ -478,7 +492,7 @@ fn repeated_times_follow_the_aggregation_argument() {
             ..args
         };
         let options = parse_options(&args, 1.0).unwrap();
-        build_series(&args, &options).unwrap().y
+        build_series(&args, &options, &mut |_, _| true).unwrap().y
     };
     assert_eq!(grid(0.0), [1.0, 4.0, 4.0, 5.0, 8.0]);
     assert_eq!(grid(1.0), grid(0.0));
@@ -683,4 +697,79 @@ fn a_long_series_with_the_longest_period_stays_within_its_budget() {
     // Detection on the same length is bounded by the lag limit too.
     let auto = EtsArgs::new(&values, &timeline);
     assert!(forecast_ets_seasonality_cr(&auto).is_ok());
+}
+
+#[test]
+fn fft_autocorrelation_matches_the_direct_sum() {
+    let n = 500usize;
+    let d: Vec<f64> = (0..n)
+        .map(|t| (t as f64 * 0.52).sin() + 0.3 * (t as f64 * 1.9).cos())
+        .collect();
+    let mean = d.iter().sum::<f64>() / n as f64;
+    let centered: Vec<f64> = d.iter().map(|v| v - mean).collect();
+    let c0: f64 = centered.iter().map(|v| v * v).sum();
+    let max_lag = 240usize;
+    let mut unlimited = |_: usize, _: usize| true;
+    let direct = autocorr_direct(&centered, c0, max_lag, &mut unlimited).unwrap();
+    let fft = autocorr_fft(&centered, max_lag, &mut unlimited).unwrap();
+    for (k, (a, b)) in direct.iter().zip(&fft).enumerate() {
+        assert!((a - b).abs() <= 1e-13, "lag {k}: {a} vs {b}");
+    }
+}
+
+#[test]
+fn extreme_magnitudes_scale_without_underflow_or_overflow() {
+    let timeline = months();
+    let base_args = EtsArgs::new(&AIR, &timeline);
+    let base_f = forecast_ets_cr(150.0, &base_args).unwrap();
+    let base_ci = forecast_ets_confint_cr(150.0, &base_args, 0.95).unwrap();
+    let base_rmse = forecast_ets_stat_cr(&base_args, 7.0).unwrap();
+    let base_smape = forecast_ets_stat_cr(&base_args, 5.0).unwrap();
+    for factor in [1e-250_f64, 1e250_f64] {
+        let scaled: Vec<f64> = AIR.iter().map(|v| v * factor).collect();
+        let args = EtsArgs::new(&scaled, &timeline);
+        let f = forecast_ets_cr(150.0, &args).unwrap();
+        let ci = forecast_ets_confint_cr(150.0, &args, 0.95).unwrap();
+        let rmse = forecast_ets_stat_cr(&args, 7.0).unwrap();
+        let smape = forecast_ets_stat_cr(&args, 5.0).unwrap();
+        assert!(
+            ((f / factor) - base_f).abs() <= 1e-11 * base_f,
+            "{factor}: {f}"
+        );
+        assert!(
+            ((ci / factor) - base_ci).abs() <= 1e-11 * base_ci,
+            "{factor}: {ci}"
+        );
+        assert!(
+            ((rmse / factor) - base_rmse).abs() <= 1e-11 * base_rmse,
+            "{factor}: {rmse}"
+        );
+        close(smape, base_smape, 1e-11);
+    }
+}
+
+#[test]
+fn step_and_byte_budgets_fail_closed() {
+    let timeline = months();
+    let args = EtsArgs::new(&AIR, &timeline);
+    let mut tiny_steps = {
+        let mut left = 3usize;
+        move |steps: usize, _: usize| {
+            if steps > left {
+                false
+            } else {
+                left -= steps;
+                true
+            }
+        }
+    };
+    assert_eq!(
+        forecast_ets_many(&[150.0], &args, &mut tiny_steps),
+        Err(EtsError::BudgetExceeded)
+    );
+    let mut tiny_bytes = |_: usize, bytes: usize| bytes <= 64;
+    assert_eq!(
+        forecast_ets_many(&[150.0], &args, &mut tiny_bytes),
+        Err(EtsError::BudgetExceeded)
+    );
 }
