@@ -1279,6 +1279,9 @@ dependencies = [
 [[package]]
 name = "easyoffice-formats"
 version = "0.1.0"
+dependencies = [
+ "crc32fast",
+]
 
 [[package]]
 name = "easyoffice-layout"

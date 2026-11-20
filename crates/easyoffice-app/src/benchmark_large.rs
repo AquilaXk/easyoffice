@@ -3,7 +3,9 @@
 //! ratios in release builds, and with loose floors so shared CI runners do not flake.
 
 use crate::benchmark::{BenchmarkSuiteResult, EngineBenchmarkReport};
-use crate::benchmark_baselines::recalculate_all_uncompiled_baseline;
+use crate::benchmark_baselines::{
+    crc32_byte_by_byte_baseline, recalculate_all_uncompiled_baseline,
+};
 use crate::benchmark_real::RELEASE_GATING;
 use easyoffice_formats::IeeeCrc32;
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
@@ -74,16 +76,15 @@ fn pseudo_random_bytes(len: usize) -> Vec<u8> {
 /// 1 MiB buffer, plus the 4 KiB / 64 KiB scalar-vs-reference equivalence.
 pub fn bench_crc32_hardware(rounds: usize) -> BenchmarkSuiteResult {
     let payload = pseudo_random_bytes(CRC_LARGE_BYTES);
-    let mut eq = [4_096usize, 65_536, CRC_LARGE_BYTES].iter().all(|&n| {
-        IeeeCrc32::checksum(&payload[..n])
-            == IeeeCrc32::checksum_byte_by_byte_baseline(&payload[..n])
-    });
+    let mut eq = [4_096usize, 65_536, CRC_LARGE_BYTES]
+        .iter()
+        .all(|&n| IeeeCrc32::checksum(&payload[..n]) == crc32_byte_by_byte_baseline(&payload[..n]));
     let (mut base, mut opt) = (Vec::new(), Vec::new());
     let mut digest = 0u32;
     for round in 0..=rounds {
         let run_base = || {
             let t = Instant::now();
-            let v = IeeeCrc32::checksum_byte_by_byte_baseline(black_box(&payload));
+            let v = crc32_byte_by_byte_baseline(black_box(&payload));
             (t.elapsed().as_micros() as u64, v)
         };
         let run_opt = || {
@@ -107,13 +108,13 @@ pub fn bench_crc32_hardware(rounds: usize) -> BenchmarkSuiteResult {
     }
     suite(
         "crc32_hardware_1mib",
-        "Runtime-detected CRC-32 (PCLMULQDQ / CRC32 instruction, scalar fallback)",
+        "crc32fast CRC-32 (PCLMULQDQ / CRC32 instruction, scalar fallback)",
         "1 MiB pseudo-random buffer, byte-wise table baseline vs dispatch path",
         rounds,
         base,
         opt,
         eq,
-        format!("{}:{digest:08x}", IeeeCrc32::hardware_path_name()),
+        format!("crc32fast:{digest:08x}"),
     )
 }
 

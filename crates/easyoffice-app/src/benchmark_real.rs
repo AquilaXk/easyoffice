@@ -2,6 +2,7 @@
 //! recalculation paths (including DEFLATE compression) instead of small synthetic inputs, and
 //! report both elapsed time and output size.
 
+use crate::benchmark_baselines::crc32_byte_by_byte_baseline;
 use easyoffice_formats::{
     DocumentFormat, IeeeCrc32, UniversalDocumentModel, UniversalFormatConverter,
 };
@@ -221,7 +222,7 @@ fn crc_case(case_id: &'static str, bytes: usize, passes: usize) -> RealPathResul
             (state >> 16) as u8
         })
         .collect();
-    let expected = IeeeCrc32::checksum_byte_by_byte_baseline(&payload);
+    let expected = crc32_byte_by_byte_baseline(&payload);
     let t0 = Instant::now();
     let mut last = 0u32;
     for _ in 0..passes {
@@ -230,10 +231,7 @@ fn crc_case(case_id: &'static str, bytes: usize, passes: usize) -> RealPathResul
     let elapsed_us = t0.elapsed().as_micros() as u64;
     RealPathResult {
         case_id,
-        workload: format!(
-            "{bytes} bytes x {passes} passes, CRC-32 ({})",
-            IeeeCrc32::hardware_path_name()
-        ),
+        workload: format!("{bytes} bytes x {passes} passes, CRC-32 (crc32fast)"),
         input_bytes: bytes * passes,
         output_bytes: 4,
         elapsed_us: elapsed_us.max(1),

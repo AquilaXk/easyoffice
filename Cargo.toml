@@ -16,11 +16,17 @@ default-members = [
     "crates/easyoffice-app",
 ]
 
+# PD-268: the engine crates use maintained crates under permissive licences instead of re-implementing
+# them. The versions here are the ones the desktop shell and the rhwp checkout already resolve, so
+# `Cargo.lock` gains no second copy of any of them.
+[workspace.dependencies]
+crc32fast = "1.5"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-rust-version = "1.85"
+rust-version = "1.88"
 
 # PD-101: the desktop shell turns page SVGs into searchable PDFs with svg2pdf. rhwp pins a vendored
 # copy with deterministic object order and PDF fixes; the patch only affects crates that depend on

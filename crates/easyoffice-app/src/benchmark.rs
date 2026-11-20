@@ -11,7 +11,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use crate::benchmark_baselines::{
-    deflate_zlib_scalar_baseline, inflate_zlib_scalar_baseline,
+    crc32_byte_by_byte_baseline, deflate_zlib_scalar_baseline, inflate_zlib_scalar_baseline,
     recalculate_all_uncompiled_baseline, scalar_vec_range_agg_baseline,
 };
 use crate::benchmark_real::{RealPathResult, RELEASE_GATING};
@@ -139,14 +139,14 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         let t0 = Instant::now();
         let mut a = 0u32;
         for _ in 0..16 {
-            a ^= IeeeCrc32::checksum_byte_by_byte_baseline(black_box(&crc_payload));
+            a ^= crc32_byte_by_byte_baseline(black_box(&crc_payload));
         }
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
         let mut b = 0u32;
         for _ in 0..16 {
-            b ^= IeeeCrc32::checksum_scalar(black_box(&crc_payload));
+            b ^= IeeeCrc32::checksum(black_box(&crc_payload));
         }
         let dt_b = t1.elapsed().as_micros() as u64;
 
@@ -317,8 +317,8 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
     let suites = vec![
         build(
             "crc32_slicing_by_8",
-            "Scalar slicing-by-16 IEEE 802.3 CRC-32",
-            "1 MiB (64 KiB x 16) ZIP/OOXML container stream, scalar path only",
+            "crc32fast IEEE 802.3 CRC-32 against a byte-at-a-time baseline",
+            "1 MiB (64 KiB x 16) ZIP/OOXML container stream",
             crc_base_samples,
             crc_opt_samples,
             crc_eq,

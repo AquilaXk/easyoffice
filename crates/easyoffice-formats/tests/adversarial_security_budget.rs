@@ -89,15 +89,15 @@ fn test_crc32_and_base64_parity_and_correctness() {
     // CRC-32 validation against standard reference vectors
     let test_data = b"The quick brown fox jumps over the lazy dog";
     let crc = IeeeCrc32::checksum(test_data);
-    let scalar_crc = IeeeCrc32::checksum_scalar(test_data);
     assert_eq!(crc, 0x414FA339);
-    assert_eq!(scalar_crc, 0x414FA339);
 
-    // Large buffer parity between scalar and hardware paths
+    // A large buffer matches the incremental form over two halves
     let large_data = vec![0xABu8; 1024 * 128];
-    let crc_large = IeeeCrc32::checksum(&large_data);
-    let scalar_large = IeeeCrc32::checksum_scalar(&large_data);
-    assert_eq!(crc_large, scalar_large);
+    let (head, tail) = large_data.split_at(large_data.len() / 2);
+    assert_eq!(
+        IeeeCrc32::checksum(&large_data),
+        IeeeCrc32::update(IeeeCrc32::checksum(head), tail)
+    );
 
     // Base64 roundtrip
     let b64_encoded = base64_codec::encode(test_data);

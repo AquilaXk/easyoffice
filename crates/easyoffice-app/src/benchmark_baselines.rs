@@ -9,6 +9,31 @@ use easyoffice_sheet::{
 };
 use std::collections::{HashMap, HashSet};
 
+const CRC32_TABLE: [u32; 256] = {
+    let mut table = [0u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut crc = i as u32;
+        let mut bit = 0;
+        while bit < 8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+            bit += 1;
+        }
+        table[i] = crc;
+        i += 1;
+    }
+    table
+};
+
+/// One table lookup per byte (reflected `0xEDB88320`), the plain CRC-32 the adapter is timed against.
+pub(crate) fn crc32_byte_by_byte_baseline(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for &b in bytes {
+        crc = (crc >> 8) ^ CRC32_TABLE[((crc ^ u32::from(b)) & 0xFF) as usize];
+    }
+    !crc
+}
+
 fn adler32_byte_by_byte_baseline(bytes: &[u8]) -> u32 {
     let mut s1: u32 = 1;
     let mut s2: u32 = 0;
