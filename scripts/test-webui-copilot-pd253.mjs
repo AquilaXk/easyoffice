@@ -575,3 +575,70 @@ test("상한 초과 및 허용되지 않은 작업 페이로드는 Fail-Closed�
   assert.ok(msg3.querySelector(".eo-copilot-reply--error"), "unknown operation kind fails closed");
 });
 
+
+test("엔드포인트 주소를 바꾸고 새 키를 넣지 않으면 저장된 키를 지우고 새 주소로 보내지 않는다 (PD-253)", async () => {
+  const seenRequests = [];
+  const { document, sandbox, userClick } = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-copilot-key-url",
+    testIpc: async (command, payload) => {
+      if (command === "run_smart_assistant") {
+        const parsed = JSON.parse(payload);
+        seenRequests.push(parsed);
+        if (parsed.action === "copilot_list_models") {
+          return { status: "ok", provider: "remote_https", live: true, models: [{ id: "m1", name: "m1", contextWindow: 8000, supportsReasoning: false }] };
+        }
+      }
+      const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+      const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+        getActiveModule: () => "DOC",
+        ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+        ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+        contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+        moduleSpecs: cat.MODULE_SPECS,
+        localRibbonState: cat.createDefaultRibbonState(),
+      });
+      return offline[command](payload);
+    },
+  });
+  await flushAsyncTurns(12);
+  userClick(document.getElementById("btn-copilot-toggle"));
+
+  const dlg = document.getElementById("copilot-model-dialog");
+  const field = (id, value) => {
+    const el = document.getElementById(id);
+    el.value = value;
+    el.dispatchEvent({ type: "change", target: el });
+  };
+  const configure = async (url, key) => {
+    userClick(document.getElementById("btn-copilot-settings"));
+    field("copilot-provider-kind", "remote_https");
+    field("copilot-provider-url", url);
+    field("copilot-provider-model", "m1");
+    document.getElementById("copilot-provider-key").value = key;
+    userClick(document.getElementById("btn-copilot-model-ok"));
+    await flushAsyncTurns(8);
+    assert.equal(dlg.open, false);
+  };
+  const send = async (text) => {
+    const input = document.getElementById("copilot-input");
+    input.value = text;
+    input.dispatchEvent({ type: "input", target: input });
+    userClick(document.getElementById("btn-copilot-send"));
+    await flushAsyncTurns(12);
+    return seenRequests.filter((r) => r.action === "copilot_run").at(-1);
+  };
+
+  await configure("https://a.example/v1", "sk-for-a-only-5521");
+  const toA = await send("첫째 질문");
+  assert.equal(toA.provider.baseUrl, "https://a.example/v1");
+  assert.equal(toA.provider.apiKey, "sk-for-a-only-5521", "the key goes to the address it was entered for");
+
+  await configure("https://b.example/v1", "");
+  const toB = await send("둘째 질문");
+  assert.equal(toB.provider.baseUrl, "https://b.example/v1");
+  assert.equal(toB.provider.apiKey, "", "the saved key is not sent to another address");
+
+  await configure("https://a.example/v1", "");
+  const back = await send("셋째 질문");
+  assert.equal(back.provider.apiKey, "", "the key was dropped when the address changed, not parked");
+});

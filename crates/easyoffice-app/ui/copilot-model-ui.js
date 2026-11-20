@@ -28,9 +28,13 @@
     let reasoningEffort = catalog.DEFAULT_REASONING_EFFORT;
 
     const keysByProvider = new Map();
+    // The address each saved key was entered for: a key is sent to that address only (PD-253).
+    const keyUrlsByProvider = new Map();
     const urlsByProvider = new Map();
     const modelsByProvider = new Map();
     const discoveredByProvider = new Map();
+
+    const keyFor = (kind, baseUrl) => (keyUrlsByProvider.get(kind) === baseUrl ? keysByProvider.get(kind) || "" : "");
 
     function isConfigured() {
       if (!providerKind || !providerModel) return false;
@@ -61,7 +65,7 @@
         kind: providerKind,
         baseUrl: providerBaseUrl,
         model: providerModel,
-        apiKey: providerKind ? (keysByProvider.get(providerKind) || "") : "",
+        apiKey: providerKind ? keyFor(providerKind, providerBaseUrl) : "",
         reasoningEffort: canReason ? reasoningEffort : "",
       };
     }
@@ -352,7 +356,7 @@
         refreshTxt.textContent = "모델 목록 새로 고침";
         refreshBtn.appendChild(refreshTxt);
         refreshBtn.addEventListener("click", () => {
-          void discoverModelsLive(providerKind, providerBaseUrl, keysByProvider.get(providerKind) || "", true);
+          void discoverModelsLive(providerKind, providerBaseUrl, keyFor(providerKind, providerBaseUrl), true);
         });
         footerWrap.appendChild(refreshBtn);
       }
@@ -521,8 +525,7 @@
       const typedKey = String(byId("copilot-provider-key")?.value || "").trim();
       const effort = byId("copilot-reasoning-effort")?.value || catalog.DEFAULT_REASONING_EFFORT;
       const baseUrl = rawUrl || prov.defaultBaseUrl;
-      const savedUrl = urlsByProvider.get(kind) || prov.defaultBaseUrl;
-      const canReuseSavedKey = baseUrl === savedUrl;
+      const canReuseSavedKey = baseUrl === keyUrlsByProvider.get(kind);
       return {
         kind,
         prov,
@@ -642,6 +645,11 @@
       modelsByProvider.set(draft.kind, providerModel);
       if (draft.typedKey) {
         keysByProvider.set(draft.kind, draft.typedKey);
+        keyUrlsByProvider.set(draft.kind, draft.baseUrl);
+      } else if (!draft.apiKey) {
+        // The address changed and no new key came with it: the saved key is dropped, never sent to the new address.
+        keysByProvider.delete(draft.kind);
+        keyUrlsByProvider.delete(draft.kind);
       }
 
       closeDialog();
