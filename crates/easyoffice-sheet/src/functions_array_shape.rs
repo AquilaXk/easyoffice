@@ -1,5 +1,5 @@
 //! `TAKE`, `DROP`, `TOCOL`, `TOROW`, `VSTACK`, `HSTACK`, `CHOOSEROWS`, `CHOOSECOLS`, `EXPAND`, `WRAPROWS`,
-//! `WRAPCOLS` and `ISOMITTED` (PD-217): arrays cut, joined and reshaped.
+//! `WRAPCOLS`, `ISOMITTED` (PD-217) and `TRIMRANGE`: arrays cut, joined and reshaped.
 //!
 //! 참조 구현: IronCalc `base/src/functions/lookup_and_reference/drop_take.rs` (`fn_take` 13-69,
 //! `fn_drop` 72-125), `tocol_torow.rs` (`fn_tocol`, `fn_torow`, `flatten_array_impl`),
@@ -7,7 +7,8 @@
 //! (`fn_expand`), `wrapcols_wraprows.rs` (`fn_wrapcols`, `fn_wraprows`, `flatten_vector`,
 //! `get_pad_with`), `information/isomitted.rs` (기준 커밋 01b39c1ad26252f7b6c810440e8433a932daee07).
 //! MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH, 2023-present IronCalc contributors, 2026-present
-//! IronCalc GmbH. The bodies are ported onto this engine's grid; a size that is left out
+//! IronCalc GmbH. `TRIMRANGE` is IronCalc `lookup_and_reference/trimrange.rs` (`fn_trimrange` 29-134,
+//! 기준 커밋 f93662006b8fb1c401dc870bbda26c5d60ac6037). The bodies are ported onto this engine's grid; a size that is left out
 //! (`TAKE(a,,2)`) means the whole side, every result is checked against the array budget, and an
 //! omitted `LAMBDA` parameter is a variable bound to nothing instead of an empty argument.
 
@@ -391,6 +392,84 @@ impl SheetEngine {
             Grid::build_with_links_checked(ctx, count, lines, |r, c| at(c * count + r))?
         };
         Ok(Val::grid(out))
+    }
+
+    /// `TRIMRANGE(range, [trim_rows], [trim_cols])`: blank outer rows and columns cut off (0 none, 1
+    /// leading, 2 trailing, 3 both); `#REF!` when nothing is left.
+    pub(crate) fn fn_trimrange(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if args.is_empty() || args.len() > 3 {
+            return Err(FormulaError::Value);
+        }
+        let grid = self.shape_grid(&args[0], env, ctx, depth)?;
+        let mut mode = |i: usize| -> Result<i64, FormulaError> {
+            Ok(self.arg_number(args, i, 3.0, env, ctx, depth)?.trunc() as i64)
+        };
+        let (trim_rows, trim_cols) = (mode(1)?, mode(2)?);
+        if !(0..=3).contains(&trim_rows) || !(0..=3).contains(&trim_cols) {
+            return Err(FormulaError::Value);
+        }
+        let row_blank = |r: usize| (0..grid.cols).all(|c| matches!(grid.get(r, c), V::Empty));
+        let col_blank = |c: usize| (0..grid.rows).all(|r| matches!(grid.get(r, c), V::Empty));
+        let bounds = |len: usize, trim: i64, blank: &dyn Fn(usize) -> bool| {
+            let start = if trim & 1 != 0 {
+                (0..len).find(|&i| !blank(i)).unwrap_or(len)
+            } else {
+                0
+            };
+            let end = if trim & 2 != 0 {
+                (0..len).rev().find(|&i| !blank(i)).map_or(0, |i| i + 1)
+            } else {
+                len
+            };
+            start..end
+        };
+        let rows = bounds(grid.rows, trim_rows, &row_blank);
+        let cols = bounds(grid.cols, trim_cols, &col_blank);
+        if rows.start >= rows.end || cols.start >= cols.end {
+            return Err(FormulaError::Ref);
+        }
+        Ok(Val::grid(slice(ctx, &grid, rows, cols)?))
+    }
+
+    /// `INDEX(array, row, [column])` on an array that is not a reference: a zero or left out number
+    /// gives the whole column or row, a negative one is `#VALUE!`, one past the array is `#REF!`.
+    pub(crate) fn fn_index_grid(
+        &self,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        let grid = self.shape_grid(&args[0], env, ctx, depth)?;
+        let mut number = |i: usize| -> Result<Option<i64>, FormulaError> {
+            match args.get(i) {
+                None | Some(Expr::Missing) => Ok(None),
+                Some(_) => Ok(Some(
+                    self.arg_number(args, i, 0.0, env, ctx, depth)?.trunc() as i64,
+                )),
+            }
+        };
+        let (mut row, mut col) = (number(1)?, number(2)?);
+        if row.is_some_and(|n| n < 0) || col.is_some_and(|n| n < 0) {
+            return Err(FormulaError::Value);
+        }
+        // One number on a single row or column picks the element.
+        if args.len() == 2 && grid.rows == 1 {
+            (row, col) = (None, row);
+        }
+        let line = |n: Option<i64>, len: usize| match n.unwrap_or(0) {
+            0 => Ok(0..len),
+            n if n as usize <= len => Ok(n as usize - 1..n as usize),
+            _ => Err(FormulaError::Ref),
+        };
+        let (rows, cols) = (line(row, grid.rows)?, line(col, grid.cols)?);
+        Ok(Val::grid(slice(ctx, &grid, rows, cols)?))
     }
 
     /// `ISOMITTED(parameter)`: whether the call left a `LAMBDA` parameter out.

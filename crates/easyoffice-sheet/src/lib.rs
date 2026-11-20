@@ -40,6 +40,7 @@ mod functions_eng;
 mod functions_fin;
 mod functions_fin_args;
 mod functions_imtrig;
+mod functions_info_ref;
 mod functions_lambda;
 mod functions_lookup;
 mod functions_lookup_ref;
@@ -53,6 +54,7 @@ mod functions_spill;
 mod functions_stat_a;
 mod functions_stat_tests;
 mod functions_text_bytes;
+mod functions_text_split;
 mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;

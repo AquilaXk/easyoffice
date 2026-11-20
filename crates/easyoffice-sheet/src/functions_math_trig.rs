@@ -1,12 +1,18 @@
 //! Reciprocal and inverse hyperbolic functions, the significance rounding variants and bankers
 //! rounding (PD-205): `ACOSH`, `ASINH`, `ATANH`, `ACOT`, `ACOTH`, `COT`, `COTH`, `CSC`, `CSCH`,
-//! `SEC`, `SECH`, `CEILING.MATH`, `CEILING.PRECISE`, `FLOOR.MATH`, `FLOOR.PRECISE`, `ROUNDBANK`.
+//! `SEC`, `SECH`, `CEILING.MATH`, `CEILING.PRECISE`, `FLOOR.MATH`, `FLOOR.PRECISE`, `ROUNDBANK`,
+//! `ISO.CEILING` and `PERCENTOF`.
 //!
 //! Reference implementation: `packages/engine-formula/src/functions/math/{acosh,asinh,atanh,acot,
 //! acoth,cot,coth,csc,csch,sec,sech,ceiling-math,ceiling-precise,floor-math,floor-precise,
 //! roundbank}/index.ts` and `src/engine/utils/math-kit.ts` (`ceil`, `floor`) of the Univer formula
 //! engine, commit `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present
 //! DreamNum Co., Ltd. See `THIRD_PARTY_NOTICES.md`.
+//!
+//! `ISO.CEILING` and `PERCENTOF` are IronCalc `base/src/functions/math_and_trigonometry/mathematical.rs`
+//! (`fn_iso_ceiling` 852-855, `fn_percentof` 1265-1281), 기준 커밋
+//! f93662006b8fb1c401dc870bbda26c5d60ac6037, MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH,
+//! 2023-present IronCalc contributors, 2026-present IronCalc GmbH.
 //!
 //! Arguments read like the reference: a blank cell is 0, a logical value is 1 or 0, numeric text is
 //! converted and other text is `#VALUE!`. A result that is not a finite number is `#NUM!`.
@@ -160,6 +166,34 @@ impl SheetEngine {
         }
     }
 
+    /// `PERCENTOF(subset, total)`: the sum of `subset` as a share of the sum of `total`.
+    ///
+    pub(crate) fn eval_percentof(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Fallible<EvaluatedCellValue> {
+        if args.len() != 2 {
+            return Err(FormulaError::Value);
+        }
+        let sum_of = |arg: &Expr, ctx: &mut EvalContext<'_>| {
+            self.eval_streaming_range_agg_ctx("SUM", std::slice::from_ref(arg), ctx, depth)
+        };
+        let part = sum_of(&args[0], ctx)?;
+        let total = sum_of(&args[1], ctx)?;
+        match (part, total) {
+            (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(0.0)) => {
+                Err(FormulaError::DivByZero)
+            }
+            (EvaluatedCellValue::Number(p), EvaluatedCellValue::Number(t)) => {
+                Ok(EvaluatedCellValue::Number(p / t))
+            }
+            (EvaluatedCellValue::Error(e), _) | (_, EvaluatedCellValue::Error(e)) => Err(e),
+            _ => Err(FormulaError::Value),
+        }
+    }
+
     pub(crate) fn eval_math_trig_func(
         &self,
         name: &str,
@@ -167,6 +201,12 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Fallible<EvaluatedCellValue> {
+        // `ISO.CEILING` is `CEILING.PRECISE`.
+        let name = if name == "ISO.CEILING" {
+            "CEILING.PRECISE"
+        } else {
+            name
+        };
         let (min, max) = match name {
             "ROUNDBANK" => (2, 2),
             "CEILING.MATH" | "FLOOR.MATH" => (1, 3),

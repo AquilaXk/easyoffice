@@ -35,6 +35,9 @@ pub(crate) fn is_spill_fn(name: &str) -> bool {
             | "WRAPROWS"
             | "WRAPCOLS"
             | "ISOMITTED"
+            | "TEXTSPLIT"
+            | "TRIMRANGE"
+            | "ARRAYTOTEXT"
     )
 }
 
@@ -119,6 +122,93 @@ pub(crate) fn is_lifted_fn(name: &str) -> bool {
             | "ISEVEN"
             | "ISODD"
             | "HYPERLINK"
+            | "ACOSH"
+            | "ASINH"
+            | "ATANH"
+            | "ACOT"
+            | "ACOTH"
+            | "COT"
+            | "COTH"
+            | "CSC"
+            | "CSCH"
+            | "SEC"
+            | "SECH"
+            | "COMBIN"
+            | "COMBINA"
+            | "FACTDOUBLE"
+            | "SQRTPI"
+            | "ROUNDBANK"
+            | "CEILING.MATH"
+            | "CEILING.PRECISE"
+            | "FLOOR.MATH"
+            | "FLOOR.PRECISE"
+            | "ISO.CEILING"
+            | "BASE"
+            | "DECIMAL"
+            | "ARABIC"
+            | "ROMAN"
+            | "CLEAN"
+            | "UNICHAR"
+            | "UNICODE"
+            | "ENCODEURL"
+            | "NUMBERVALUE"
+            | "DOLLAR"
+            | "FIXED"
+            | "TEXTBEFORE"
+            | "TEXTAFTER"
+            | "LENB"
+            | "LEFTB"
+            | "RIGHTB"
+            | "MIDB"
+            | "FINDB"
+            | "SEARCHB"
+            | "REPLACEB"
+            | "ASC"
+            | "DBCS"
+            | "WEEKDAY"
+            | "WEEKNUM"
+            | "ISOWEEKNUM"
+            | "DATEVALUE"
+            | "TIMEVALUE"
+            | "EOMONTH"
+            | "DAYS360"
+            | "DATEDIF"
+            | "YEARFRAC"
+            | "BITAND"
+            | "BITOR"
+            | "BITXOR"
+            | "BITLSHIFT"
+            | "BITRSHIFT"
+            | "HEX2DEC"
+            | "DEC2HEX"
+            | "BIN2DEC"
+            | "DEC2BIN"
+            | "OCT2DEC"
+            | "DEC2OCT"
+            | "BIN2HEX"
+            | "BIN2OCT"
+            | "OCT2BIN"
+            | "OCT2HEX"
+            | "HEX2BIN"
+            | "HEX2OCT"
+            | "DELTA"
+            | "GESTEP"
+            | "ERF"
+            | "ERFC"
+            | "ERF.PRECISE"
+            | "ERFC.PRECISE"
+            | "PHI"
+            | "GAUSS"
+            | "FISHER"
+            | "FISHERINV"
+            | "NORM.DIST"
+            | "NORMDIST"
+            | "NORM.INV"
+            | "NORMINV"
+            | "NORM.S.DIST"
+            | "NORMSDIST"
+            | "NORM.S.INV"
+            | "NORMSINV"
     )
 }
 
@@ -140,8 +230,22 @@ pub(crate) fn arrayish(expr: &Expr) -> bool {
                 || name == "TRANSPOSE"
                 || is_array_fn(name)
                 || (name == "XLOOKUP" && xlookup_returns_array(args))
+                || (name == "INDEX" && index_returns_line(args))
                 || (is_lifted_fn(name) && args.iter().any(arrayish))
         }
+        _ => false,
+    }
+}
+
+/// `INDEX` that gives a row, a column or the whole range: a zero or left out row or column number, or
+/// a row number alone on a range of more than one row and column (the numbers are read as written).
+pub(crate) fn index_returns_line(args: &[Expr]) -> bool {
+    let zero = |e: &Expr| {
+        matches!(e.peeled(), Expr::Missing) || matches!(e.peeled(), Expr::Number(n) if *n == 0.0)
+    };
+    match args {
+        [array, row] => arrayish(array) && !matches!(row.peeled(), Expr::Missing),
+        [_, row, col] => zero(row) || zero(col),
         _ => false,
     }
 }
@@ -188,6 +292,13 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
             let name = f.name.as_str();
             let args = &f.args;
             if is_spill_fn(name) || (name == "HYPERLINK" && (1..=2).contains(&args.len())) {
+                return true;
+            }
+            if name == "INDEX" && index_returns_line(args) {
+                return true;
+            }
+            // `TYPE` of an array is 64, which only the array evaluator can tell.
+            if name == "TYPE" && args.first().is_some_and(arrayish) {
                 return true;
             }
             if name == "SUMPRODUCT" {

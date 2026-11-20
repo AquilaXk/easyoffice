@@ -43,6 +43,66 @@ fn split_indirect_sheet_bang(s: &str) -> Result<Option<(&str, &str)>, FormulaErr
     Ok(None)
 }
 
+/// One R1C1 number after `R` or `C`: `[n]` relative to `current`, `n` absolute (1-based), none the
+/// current one. Returns the 0-based position and the rest of the text.
+fn r1c1_axis(rest: &str, current: u32) -> Result<(u32, &str), FormulaError> {
+    let digits = |t: &str| t.bytes().take_while(u8::is_ascii_digit).count();
+    let position = if let Some(inner) = rest.strip_prefix('[') {
+        let (num, tail) = inner.split_once(']').ok_or(FormulaError::Ref)?;
+        let offset: i64 = num.parse().map_err(|_| FormulaError::Ref)?;
+        let at = i64::from(current) + offset;
+        (u32::try_from(at).map_err(|_| FormulaError::Ref)?, tail)
+    } else {
+        let n = digits(rest);
+        if n == 0 {
+            (current, rest)
+        } else {
+            let value: u32 = rest[..n].parse().map_err(|_| FormulaError::Ref)?;
+            (value.checked_sub(1).ok_or(FormulaError::Ref)?, &rest[n..])
+        }
+    };
+    Ok(position)
+}
+
+/// An R1C1 cell such as `R2C3` or `R[-1]C[1]` written as A1 text, relative to the cell `current`.
+fn r1c1_cell_to_a1(token: &str, current: (u32, u32)) -> Result<String, FormulaError> {
+    let upper = token.trim().to_ascii_uppercase();
+    let rest = upper.strip_prefix('R').ok_or(FormulaError::Ref)?;
+    let (row, rest) = r1c1_axis(rest, current.0)?;
+    let rest = rest.strip_prefix('C').ok_or(FormulaError::Ref)?;
+    let (col, rest) = r1c1_axis(rest, current.1)?;
+    if !rest.is_empty() {
+        return Err(FormulaError::Ref);
+    }
+    let coord = PackedCellCoordinate::new(row, col).map_err(|_| FormulaError::Ref)?;
+    Ok(format!(
+        "{}{}",
+        PackedCellCoordinate::format_col_label(coord.col()),
+        coord.row() + 1
+    ))
+}
+
+/// The A1 text of an R1C1 reference `[sheet!]cell[:cell]`.
+fn r1c1_to_a1(text: &str, current: (u32, u32)) -> Result<String, FormulaError> {
+    let side = |raw: &str| -> Result<String, FormulaError> {
+        match split_indirect_sheet_bang(raw)? {
+            Some((sheet, cell)) => Ok(format!("{sheet}!{}", r1c1_cell_to_a1(cell, current)?)),
+            None => r1c1_cell_to_a1(raw, current),
+        }
+    };
+    match split_once_unquoted_colon(text)? {
+        Some((a, b)) => {
+            let cell_b = split_indirect_sheet_bang(b)?.map_or(b, |(_, cell)| cell);
+            Ok(format!(
+                "{}:{}",
+                side(a)?,
+                r1c1_cell_to_a1(cell_b, current)?
+            ))
+        }
+        None => side(text),
+    }
+}
+
 fn split_once_unquoted_colon(s: &str) -> Result<Option<(&str, &str)>, FormulaError> {
     let bytes = s.as_bytes();
     let mut in_quotes = false;
@@ -189,13 +249,19 @@ impl SheetEngine {
         if args.is_empty() || args.len() > 2 {
             return Err(FormulaError::Value);
         }
-        let ref_str = self
+        let mut ref_str = self
             .eval_arg_val(&args[0], ctx, depth + 1)?
             .to_display_string();
         if args.len() == 2 {
-            let mode_val = self.eval_arg_val(&args[1], ctx, depth + 1)?;
-            if mode_val.as_bool() != Some(true) {
-                return Err(FormulaError::Value);
+            // The second argument chooses A1 (TRUE) or R1C1 (FALSE) text; R1C1 is read relative to the
+            // formula cell and handled as the A1 text it stands for.
+            let a1_style = self
+                .eval_arg_val(&args[1], ctx, depth + 1)?
+                .as_bool()
+                .ok_or(FormulaError::Value)?;
+            if !a1_style {
+                let current = ctx.current_coord.map_or((0, 0), |c| (c.row(), c.col()));
+                ref_str = r1c1_to_a1(ref_str.trim(), current)?;
             }
         }
         let trimmed = ref_str.trim();
@@ -275,6 +341,67 @@ impl SheetEngine {
         let range =
             CellRange::parse(&format!("{lhs_tok}:{rhs_tok}")).map_err(|_| FormulaError::Ref)?;
         self.qualify_indirect_range(lhs_sh, range, ctx)
+    }
+
+    /// `INDEX(range, 0, c)`, `INDEX(range, r, 0)`, `INDEX(range, 0, 0)` and `INDEX(range, r)` of a 2-D
+    /// range give the column, the row or the whole range as a reference; a single cell is left to the
+    /// scalar `INDEX`.
+    fn extract_index_line_ref<'b>(
+        &self,
+        args: &'b [Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
+        if !(2..=3).contains(&args.len()) {
+            return Ok(None);
+        }
+        let Some((sheet_opt, base, false)) =
+            self.extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
+        else {
+            return Ok(None);
+        };
+        let (rows, cols) = base.dimensions();
+        let mut number = |i: usize| -> Result<Option<i64>, FormulaError> {
+            match args.get(i) {
+                None | Some(Expr::Missing) => Ok(None),
+                Some(arg) => Ok(Some(self.eval_arg_num(arg, ctx, depth + 1)?.trunc() as i64)),
+            }
+        };
+        let (row, col) = (number(1)?, number(2)?);
+        let (row_all, col_all) = if args.len() == 3 {
+            (row.unwrap_or(0) == 0, col.unwrap_or(0) == 0)
+        } else if rows > 1 && cols > 1 {
+            (false, true)
+        } else {
+            return Ok(None);
+        };
+        let pick = |all: bool, n: Option<i64>, len: usize| -> Option<(u32, u32)> {
+            if all {
+                return Some((0, len as u32 - 1));
+            }
+            let n = n?;
+            (1..=len as i64)
+                .contains(&n)
+                .then(|| (n as u32 - 1, n as u32 - 1))
+        };
+        let (Some((r0, r1)), Some((c0, c1))) = (pick(row_all, row, rows), pick(col_all, col, cols))
+        else {
+            return Ok(None);
+        };
+        if r0 == r1 && c0 == c1 {
+            return Ok(None);
+        }
+        let (min_r, min_c) = (
+            base.start.row().min(base.end.row()),
+            base.start.col().min(base.end.col()),
+        );
+        let corner = |r: u32, c: u32| PackedCellCoordinate::new(min_r + r, min_c + c);
+        let range = CellRange::new(
+            corner(r0, c0).map_err(|_| FormulaError::Ref)?,
+            corner(r1, c1).map_err(|_| FormulaError::Ref)?,
+        )
+        .map_err(|_| FormulaError::Ref)?;
+        Ok(Some((sheet_opt, range, false)))
     }
 
     fn extract_offset_ref<'b>(
@@ -395,6 +522,9 @@ impl SheetEngine {
                 let resolved = self.extract_offset_ref(&f.args, ctx, depth)?;
                 self.note_dynamic_read(resolved.as_ref(), ctx);
                 Ok(resolved)
+            }
+            Expr::FuncCall(f) if f.name == "INDEX" => {
+                self.extract_index_line_ref(&f.args, ctx, depth)
             }
             _ => Ok(None),
         }

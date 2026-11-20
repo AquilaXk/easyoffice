@@ -32,7 +32,7 @@ struct Ymd {
     d: i64,
 }
 
-fn is_leap(y: i64) -> bool {
+pub(crate) fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
@@ -44,6 +44,12 @@ pub(crate) fn days_in_month(y: i64, m: i64) -> i64 {
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     }
+}
+
+/// `(year, month, day)` of a serial number.
+pub(crate) fn year_month_day(serial: i64) -> (i64, i64, i64) {
+    let Ymd { y, m, d } = ymd(serial);
+    (y, m, d)
 }
 
 fn ymd(serial: i64) -> Ymd {

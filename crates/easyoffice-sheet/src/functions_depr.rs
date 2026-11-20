@@ -1,14 +1,19 @@
-//! Depreciation and loan interest functions: `VDB`, `AMORLINC`, `ISPMT` (PD-201).
+//! Depreciation and loan interest functions: `VDB`, `AMORLINC`, `ISPMT` (PD-201) and `AMORDEGRC`.
 //!
 //! Reference implementation: `packages/engine-formula/src/functions/financial/{vdb,amorlinc,ispmt}/
 //! index.ts` and `src/basics/financial.ts` (`calculateDDB`) of the Univer formula engine, commit
 //! `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present DreamNum Co.,
 //! Ltd. See `THIRD_PARTY_NOTICES.md`.
 //!
+//! `AMORDEGRC` is IronCalc `base/src/functions/financial/financial_depreciation.rs` (`amor_degrc` 276-333,
+//! `amor_first_depr_linc` 177-212, `amor_depr_coeff`, `amor_round`, `fn_amordegrc` 494-574; 기준 커밋
+//! f93662006b8fb1c401dc870bbda26c5d60ac6037, MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH,
+//! 2023-present IronCalc contributors, 2026-present IronCalc GmbH) on this engine's day counts.
+//!
 //! `VDB` walks one period at a time, so the number of periods it covers is limited to
 //! [`MAX_VDB_PERIODS`] (over it the result is `#NUM!`).
 
-use crate::functions_coupon::days_by_basis;
+use crate::functions_coupon::{days_by_basis, is_leap, year_month_day};
 use crate::functions_fin_args::ArgRule;
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
@@ -19,6 +24,103 @@ const MAX_VDB_PERIODS: f64 = 10_000.0;
 
 fn num(v: f64) -> Fallible<EvaluatedCellValue> {
     Ok(EvaluatedCellValue::Number(v))
+}
+
+/// Days of the calendar year the AMOR functions divide the first period by.
+fn amor_days_in_year(date: i64, basis: i64) -> f64 {
+    match basis {
+        1 if is_leap(year_month_day(date).0) => 366.0,
+        1 | 3 => 365.0,
+        _ => 360.0,
+    }
+}
+
+/// A late February day of a leap year counted as 28 February on the actual-day bases.
+fn amor_fix_29_february(date: i64, basis: i64) -> i64 {
+    let (y, m, d) = year_month_day(date);
+    if (basis == 1 || basis == 3) && is_leap(y) && m == 2 && d >= 28 {
+        date - (d - 28)
+    } else {
+        date
+    }
+}
+
+/// Depreciation of the first (possibly part) period and the asset life it gives.
+fn amor_first_depr(
+    (cost, salvage, rate, life): (f64, f64, f64, f64),
+    (purchased, first_period): (i64, i64),
+    basis: i64,
+) -> (f64, f64) {
+    let days_in_year = amor_days_in_year(purchased, basis);
+    let (purchased, first_period) = (
+        amor_fix_29_february(purchased, basis),
+        amor_fix_29_february(first_period, basis),
+    );
+    let first_len = days_by_basis(purchased, first_period, basis).0;
+    let first_temp = first_len / days_in_year * rate * cost;
+    let first = if first_temp == 0.0 {
+        cost * rate
+    } else {
+        first_temp
+    };
+    let asset_life = if first_temp == 0.0 { life } else { life + 1.0 };
+    (first.min(cost - salvage), asset_life)
+}
+
+/// The depreciation coefficient that grows with the asset life.
+fn amor_depr_coeff(asset_life: f64) -> f64 {
+    if (3.0..=4.0).contains(&asset_life) {
+        1.5
+    } else if (5.0..=6.0).contains(&asset_life) {
+        2.0
+    } else if asset_life > 6.0 {
+        2.5
+    } else {
+        1.0
+    }
+}
+
+/// Rounded at 13 significant digits first, then to the nearest whole number.
+fn amor_round(x: f64) -> f64 {
+    ((x * 1e13).round() / 1e13).round()
+}
+
+fn amor_degrc(
+    (cost, salvage, period, rate): (f64, f64, f64, f64),
+    dates: (i64, i64),
+    basis: i64,
+) -> f64 {
+    let life = (1.0 / rate).ceil();
+    if cost == salvage || period > life {
+        return 0.0;
+    }
+    let depr_rate = rate * amor_depr_coeff(life);
+    let (first_linc, asset_life) = amor_first_depr((cost, salvage, depr_rate, life), dates, basis);
+    let first = amor_round(first_linc);
+    if period == 0.0 {
+        return first;
+    }
+    let near = |x: f64, y: f64| (x - y).abs() < 0.0001;
+    let (mut counted, mut depr, mut rate_now, mut remain) = (1.0, 0.0, depr_rate, cost - first);
+    while counted <= period {
+        counted += 1.0;
+        let last_but_one = near(asset_life - counted, 2.0);
+        let temp = if last_but_one {
+            remain * 0.5
+        } else {
+            rate_now * remain
+        };
+        if last_but_one {
+            rate_now = 1.0;
+        }
+        depr = if remain < salvage {
+            (remain - salvage).max(0.0)
+        } else {
+            temp
+        };
+        remain -= depr;
+    }
+    amor_round(depr)
 }
 
 /// Double-declining depreciation of one period (`calculateDDB`).
@@ -134,6 +236,7 @@ impl SheetEngine {
         match name {
             "VDB" => self.fin_vdb(args, ctx, depth),
             "AMORLINC" => self.fin_amorlinc(args, ctx, depth),
+            "AMORDEGRC" => self.fin_amordegrc(args, ctx, depth),
             "ISPMT" => {
                 let a = self.fin_args(args, (4, 4), ArgRule::BoolOk, ctx, depth)?;
                 let (rate, per, nper, pv) = (a.num(0)?, a.num(1)?, a.num(2)?, a.num(3)?);
@@ -226,6 +329,36 @@ impl SheetEngine {
         } else {
             yearly
         })
+    }
+
+    fn fin_amordegrc(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Fallible<EvaluatedCellValue> {
+        let a = self.fin_args(args, (6, 7), ArgRule::Strict, ctx, depth)?;
+        let (purchased, first_period) = (a.date(1)?, a.date(2)?);
+        let (cost, salvage, period, rate) = (a.num(0)?, a.num(3)?, a.num(4)?, a.num(5)?);
+        let basis = a.int_or(6, 0.0)?;
+        let life = 1.0 / rate;
+        if cost < 0.0
+            || salvage < 0.0
+            || salvage > cost
+            || period < 0.0
+            || rate <= 0.0
+            || purchased >= first_period
+            || ![0.0, 1.0, 3.0, 4.0].contains(&basis)
+            || (0.0..=3.0).contains(&life)
+            || (4.0..5.0).contains(&life)
+        {
+            return Err(FormulaError::Num);
+        }
+        num(amor_degrc(
+            (cost, salvage, period, rate),
+            (purchased, first_period),
+            basis as i64,
+        ))
     }
 
     pub(crate) fn fin_sln(

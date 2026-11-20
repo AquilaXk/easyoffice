@@ -340,8 +340,8 @@ fn filter_if_empty_range_is_its_values() {
     assert_eq!(model._get_text("G1"), "30");
     assert_eq!(model._get_text("G2"), "#VALUE!");
     assert_eq!(model._get_text("G3"), "#VALUE!");
-    // DIFFERS: `ISREF` is not one of this engine's functions.
-    assert_eq!(model._get_text("G4"), "#NAME?");
+    // `FILTER` gives an array, not a reference.
+    assert_eq!(model._get_text("G4"), "FALSE");
     assert_eq!(model._get_text("G5"), "#VALUE!");
     assert_eq!(model._get_text("G6"), "11");
 }

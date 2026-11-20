@@ -5,7 +5,7 @@
 //! reads ranges keeps working on array results.
 
 use crate::array::{virtual_sheet_name, Closure, Env, Grid, Val, MAX_LAMBDA_DEPTH};
-use crate::array_class::{arrayish, is_lifted_fn, needs_array};
+use crate::array_class::{arrayish, index_returns_line, is_lifted_fn, needs_array};
 use crate::{
     BinaryOp, CellRange, EvalContext, EvaluatedCellValue as V, Expr, FormulaError,
     PackedCellCoordinate, SheetEngine,
@@ -319,6 +319,20 @@ impl SheetEngine {
             "EXPAND" => self.fn_expand(args, env, ctx, depth),
             "WRAPROWS" | "WRAPCOLS" => self.fn_wrap(name == "WRAPROWS", args, env, ctx, depth),
             "ISOMITTED" => self.fn_isomitted(args, env),
+            "TYPE" if args.len() == 1 && arrayish(&args[0]) => {
+                let grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
+                // An array is 64; a single value is its own type.
+                Ok(Val::scalar(V::Number(match grid.data.as_slice() {
+                    [V::Text(_)] => 2.0,
+                    [V::Boolean(_)] => 4.0,
+                    [V::Error(_)] => 16.0,
+                    [_] => 1.0,
+                    _ => 64.0,
+                })))
+            }
+            "TRIMRANGE" => self.fn_trimrange(args, env, ctx, depth),
+            "TEXTSPLIT" => self.fn_textsplit(args, env, ctx, depth),
+            "ARRAYTOTEXT" => self.fn_arraytotext(args, env, ctx, depth),
             "IF" => self.fn_if_array(args, env, ctx, depth),
             "IFERROR" | "IFNA" => self.fn_iferror_array(name == "IFNA", args, env, ctx, depth),
             "IFS" => self.fn_ifs_array(args, env, ctx, depth),
@@ -330,6 +344,19 @@ impl SheetEngine {
                     .is_some_and(|a| Self::bound_ref(a, env).is_none() && needs_array(a)) =>
             {
                 Ok(Val::error(FormulaError::Value))
+            }
+            "INDEX" if index_returns_line(args) => {
+                let mark = ctx.temp.len();
+                let call = Expr::func_call(
+                    name.to_string(),
+                    self.substitute_args(args, env, ctx, depth)?,
+                );
+                let grid = self.read_ref_grid(&call, ctx, depth);
+                ctx.temp.truncate(mark);
+                match grid? {
+                    Some(grid) => Ok(Val::grid(grid)),
+                    None => self.fn_index_grid(args, env, ctx, depth),
+                }
             }
             "INDIRECT" | "OFFSET" => {
                 let mark = ctx.temp.len();
