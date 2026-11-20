@@ -332,8 +332,9 @@ fn hwpx_unclosed_paragraphs_hit_the_depth_budget() {
     );
 }
 
-/// 시간 상한 시험의 여유 폭: 수정 후 코드는 이 값의 1/10 안에 끝난다.
-const LINEAR_TIME_LIMIT_SECS: u64 = 5;
+/// 시간 상한 시험의 여유 폭. 선형 처리는 느린 CI 실행기의 디버그 빌드에서도 몇 초 안에 끝나고,
+/// 막으려는 이차 처리는 같은 입력(약 20만 단위)에서 분 단위가 걸려 이 값으로도 충분히 가른다.
+const LINEAR_TIME_LIMIT_SECS: u64 = 15;
 
 fn assert_finishes_fast<T>(what: &str, work: impl FnOnce() -> T) -> T {
     let start = std::time::Instant::now();
