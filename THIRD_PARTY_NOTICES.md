@@ -126,7 +126,7 @@ SOFTWARE.
 ## univer-office-copilot (Apache-2.0)
 
 Source: https://github.com/dream-num/univer-office-copilot (Copyright DreamNum Co., Ltd.).
-Nothing is vendored or linked at runtime; the right-hand Copilot sidebar interaction patterns (`web/src/app/copilot-panel.tsx` bounded pointer/keyboard width resizing, `web/src/features/copilot/assistant-ui/welcome.tsx` and `thread.tsx` empty-state examples, in-place update status chips, bottom-row composer layout, `web/src/features/copilot/model-picker.tsx` in-composer model & reasoning-effort picker, `web/src/features/settings/index.tsx` model settings dialog, and `server/src/modules/providers/{index,models,endpoint}.ts` SSRF validation and `/models` discovery) were adapted as plain JavaScript, token-driven CSS, and safe Rust in `crates/easyoffice-app/ui/{copilot.css,copilot-catalog.js,copilot-actions.js,copilot-model-ui.js,copilot-ui.js}`, `crates/easyoffice-app/src/copilot/`, and `crates/easyoffice-desktop/src/copilot_http.rs` (`PD-253`). Each adapted file starts with a header naming its source.
+Nothing is vendored or linked at runtime; the right-hand Copilot sidebar interaction patterns (`web/src/app/copilot-panel.tsx` bounded pointer/keyboard width resizing, `web/src/features/copilot/assistant-ui/welcome.tsx` and `thread.tsx` empty-state examples, in-place update status chips, bottom-row composer layout, `web/src/features/copilot/model-picker.tsx` in-composer model & reasoning-effort picker, `web/src/features/settings/index.tsx` model settings dialog, and `server/src/modules/providers/{index,models,endpoint}.ts` SSRF validation and `/models` discovery) were adapted as plain JavaScript, token-driven CSS, and safe Rust in `crates/easyoffice-app/ui/{copilot.css,copilot-catalog.js,copilot-actions.js,copilot-model-ui.js,copilot-ui.js}`, `crates/easyoffice-app/src/copilot/`, and `crates/easyoffice-desktop/src/copilot_http.rs` (`PD-253`). The request-id keyed cancel of a running model request (`server/src/modules/copilot/index.ts`, one abort handle per request) is the design behind `crates/easyoffice-app/src/copilot/cancel.rs` (`PD-267`); the Rust version closes the request's socket instead of aborting a fetch, and no source lines were copied. Each adapted file starts with a header naming its source.
 
 ```
                                  Apache License
@@ -316,6 +316,10 @@ Nothing is vendored or linked at runtime; the company-by-company provider and mo
 Copyright 2023-2026 Continue Dev, Inc.
 Licensed under the Apache License, Version 2.0 (see full text above).
 ```
+
+## novel (Apache-2.0)
+
+Source: https://github.com/steven-tey/novel. Nothing is vendored or linked at runtime and no source lines were copied; the grouping of selection commands in `apps/web/components/tailwind/generative/ai-selector-commands.tsx` (improve, fix, shorter, longer acting on the selected text) is the structure behind the selection commands of the copilot panel (`crates/easyoffice-app/ui/copilot-ui.js`, `crates/easyoffice-app/src/copilot/prompt.rs`, `PD-267`). The instructions sent to the model are written for this project in Korean. The license text is the Apache License 2.0 reproduced above.
 
 ## Excalidraw (MIT)
 
