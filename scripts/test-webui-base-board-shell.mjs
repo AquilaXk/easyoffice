@@ -112,7 +112,12 @@ test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, edit packag
   ppApi.close();
 
   const copilotCtx = baseHost.extractCopilotContext("BASE");
-  assert.match(copilotCtx.context.doc.paragraphs.join("\n"), /서버 라이선스/);
+  const base = copilotCtx.context.base;
+  assert.ok(base.tables.length >= 1 && base.table, "the table names reach the model");
+  assert.ok(base.fields.length > 0 && base.fields.every((f) => f.name && f.type), "each field has a name and a type");
+  assert.match(base.records.map((r) => r.join(" ")).join("\n"), /서버 라이선스/);
+  assert.equal(base.totalRecords >= base.records.length, true);
+  assert.equal(copilotCtx.context.doc, undefined, "the table is not passed off as document paragraphs");
 });
 
 test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Delete key, edit package save, PDF export, print preview, and Copilot", async () => {
@@ -198,4 +203,8 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
 
   const copilotCtx = boardHost.extractCopilotContext("BOARD");
   assert.match(copilotCtx.selection.range, /요소 3개/);
+  const board = copilotCtx.context.board;
+  assert.equal(board.totalNodes, 3);
+  assert.ok(board.nodes.every((n) => n.id && n.kind), "each element carries an id and a kind");
+  assert.equal(copilotCtx.context.doc, undefined);
 });

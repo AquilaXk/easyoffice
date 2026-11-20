@@ -5,12 +5,25 @@
 
   const SVG_NS = "http://www.w3.org/2000/svg";
   const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
+  // These have no edit operations (the engine strips them): the panel stays in ask mode.
+  const ASK_ONLY_MODULES = new Set(["PDF", "BASE", "BOARD"]);
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 520;
   const DEFAULT_WIDTH = 320;
   const MAX_MESSAGES = 64;
   const MAX_HISTORY_ITEMS = 12;
   const MAX_PROMPT_CHARS = 8000;
+
+  // The selection commands (the engine writes the instruction for each id, `copilot/prompt.rs`).
+  const SELECTION_COMMANDS = Object.freeze([
+    { id: "rewrite", label: "다시 쓰기" },
+    { id: "summarize", label: "요약" },
+    { id: "shorten", label: "더 짧게" },
+    { id: "lengthen", label: "더 길게" },
+    { id: "fix_spelling", label: "맞춤법 수정" },
+    { id: "translate", label: "번역" },
+  ]);
+  const COMMAND_MODULES = new Set(["DOC", "SLIDE"]);
 
   const MODULE_EXAMPLES = Object.freeze({
     SHEET: Object.freeze([
@@ -151,6 +164,8 @@
     let preferredMode = "edit";
     let running = false;
     let activeRunToken = 0;
+    let activeRequestId = "";
+    let regenerating = false;
     let turnCounter = 0;
     let dragState = null;
     const messages = [];
@@ -172,7 +187,7 @@
     }
 
     function effectiveMode(mod = getActiveModule()) {
-      return mod === "PDF" ? "ask" : preferredMode;
+      return ASK_ONLY_MODULES.has(mod) ? "ask" : preferredMode;
     }
 
     function applyWidthStyle(width) {
@@ -189,14 +204,66 @@
     function syncSelectionBadge() {
       const selRow = byId("copilot-selection-row");
       const selText = byId("copilot-selection-label");
-      if (!selRow || !selText) return;
-      if (!isOpen || !isModuleSupported()) {
-        selRow.hidden = true;
-        return;
+      if (selRow && selText) {
+        if (!isOpen || !isModuleSupported()) {
+          selRow.hidden = true;
+        } else {
+          const label = copilotActions.getSelectionLabel(getActiveModule());
+          selRow.hidden = !label;
+          if (label) selText.textContent = label;
+        }
       }
-      const label = copilotActions.getSelectionLabel(getActiveModule());
-      selRow.hidden = !label;
-      if (label) selText.textContent = label;
+      syncCommandRow();
+      syncMessageActions();
+    }
+
+    // The selection commands show while a text selection in the document (or slide title or body) can take an edit.
+    function syncCommandRow() {
+      const row = byId("copilot-command-row");
+      if (!row) return;
+      const mod = getActiveModule();
+      row.hidden = !(
+        isOpen && isModuleSupported() && !running && !regenerating && COMMAND_MODULES.has(mod) &&
+        effectiveMode(mod) === "edit" && copilotActions.getCommandTarget(mod)
+      );
+    }
+
+    function buildCommandRow() {
+      const row = byId("copilot-command-row");
+      if (!row) return;
+      const chips = SELECTION_COMMANDS.map(({ id, label }) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "eo-copilot-chip-btn";
+        chip.textContent = label;
+        // The selection stays in the document while the chip is pressed.
+        chip.addEventListener("mousedown", (ev) => ev.preventDefault());
+        chip.addEventListener("click", () => {
+          const mod = getActiveModule();
+          const target = copilotActions.getCommandTarget(mod);
+          if (target) void runTurn({ prompt: label, command: id, target, mode: "edit", mod });
+        });
+        return chip;
+      });
+      row.replaceChildren(...chips);
+    }
+
+    // Undo and regenerate follow the document: a user edit after the answer turns them off without a redraw.
+    function actionDisabled(action, msg) {
+      if (!msg) return true;
+      const undoGone = Boolean(msg.applied) && !msg.undone && !copilotActions.canUndoTurn(msg.id);
+      return action === "undo" ? undoGone : undoGone || running || regenerating;
+    }
+
+    function syncMessageActions() {
+      const threadEl = byId("copilot-thread");
+      if (!threadEl) return;
+      for (const className of ["eo-copilot-undo-btn", "eo-copilot-chip-btn"]) {
+        for (const btn of threadEl.querySelectorAll("." + className)) {
+          const msg = messages.find((m) => m.id === btn.dataset.turn);
+          btn.disabled = actionDisabled(btn.dataset.copilotAction, msg);
+        }
+      }
     }
 
     function syncComposerControls() {
@@ -209,7 +276,7 @@
       if (modeBtn) {
         modeBtn.textContent = curMode === "edit" ? "편집" : "질문";
         modeBtn.dataset.mode = curMode;
-        modeBtn.disabled = running || mod === "PDF";
+        modeBtn.disabled = running || ASK_ONLY_MODULES.has(mod);
         modeBtn.setAttribute("title", curMode === "edit" ? "현재 문서를 직접 편집" : "읽기 전용 질문");
       }
       modelUi.syncModelButton();
@@ -245,7 +312,7 @@
         btn.appendChild(buildExampleArrowIcon(document));
         btn.addEventListener("click", () => {
           if (!inputEl) return;
-          preferredMode = mod === "PDF" ? "ask" : "edit";
+          preferredMode = ASK_ONLY_MODULES.has(mod) ? "ask" : "edit";
           inputEl.value = ex.prompt;
           autoGrowTextarea(inputEl);
           renderWelcome();
@@ -279,8 +346,9 @@
       }
 
       const locs = Array.isArray(msg.locations) ? msg.locations : [];
-      const showUndo = !msg.undone && copilotActions.canUndoTurn(msg.id);
-      if (locs.length > 0 || showUndo) {
+      const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id);
+      const showRegenerate = !msg.pending && Boolean(msg.request) && messages.at(-1) === msg;
+      if (locs.length > 0 || showUndo || showRegenerate) {
         const chipRow = document.createElement("div");
         chipRow.className = "eo-copilot-chip-row";
         for (const loc of locs) {
@@ -300,6 +368,9 @@
           const undoBtn = document.createElement("button");
           undoBtn.type = "button";
           undoBtn.className = "eo-copilot-undo-btn";
+          undoBtn.dataset.turn = msg.id;
+          undoBtn.dataset.copilotAction = "undo";
+          undoBtn.disabled = actionDisabled("undo", msg);
           undoBtn.textContent = "실행 취소";
           undoBtn.addEventListener("click", () => {
             void copilotActions.undoLastTurn(msg.id).then((restored) => {
@@ -310,6 +381,17 @@
             });
           });
           chipRow.appendChild(undoBtn);
+        }
+        if (showRegenerate) {
+          const regenBtn = document.createElement("button");
+          regenBtn.type = "button";
+          regenBtn.className = "eo-copilot-chip-btn";
+          regenBtn.dataset.turn = msg.id;
+          regenBtn.dataset.copilotAction = "regenerate";
+          regenBtn.disabled = actionDisabled("regenerate", msg);
+          regenBtn.textContent = "다시 생성";
+          regenBtn.addEventListener("click", () => void regenerateLast());
+          chipRow.appendChild(regenBtn);
         }
         wrap.appendChild(chipRow);
       }
@@ -395,30 +477,35 @@
       });
     }
 
-    async function submitPrompt() {
-      if (running || !isModuleSupported()) return;
-      const inputEl = byId("copilot-input");
-      const prompt = String(inputEl?.value || "").trim().slice(0, MAX_PROMPT_CHARS);
-      if (!prompt) return;
+    function newRequestId() {
+      return "cp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) + "-" + turnCounter;
+    }
 
+    // Puts the question and a pending answer in the thread and starts the run. `null` when it cannot start (a run is
+    // going, or no model is set up: then the settings open and the draft stays).
+    function startTurn(request, { clearInput = false } = {}) {
+      if (running || regenerating || !isModuleSupported()) return null;
       modelUi.closeMenu(false);
       if (!modelUi.isConfigured()) {
         modelUi.openDialog(undefined, undefined, "전송하기 전에 API 키를 입력하거나 로컬 모델을 선택해 주세요.");
-        return;
+        return null;
       }
-      const mod = getActiveModule();
-      const mode = effectiveMode(mod);
+      const mod = request.mod || getActiveModule();
+      const mode = request.mode || effectiveMode(mod);
       const history = buildHistoryPayload();
-      const { selection, context } = copilotActions.extractContext(mod);
+      const { selection, context } = copilotActions.extractContext(mod, { target: request.target });
 
-      if (inputEl) {
-        inputEl.value = "";
-        autoGrowTextarea(inputEl);
+      if (clearInput) {
+        const inputEl = byId("copilot-input");
+        if (inputEl) {
+          inputEl.value = "";
+          autoGrowTextarea(inputEl);
+        }
       }
       if (messages.length >= MAX_MESSAGES) messages.splice(0, messages.length - MAX_MESSAGES + 2);
       turnCounter += 1;
       const turnId = "turn-" + turnCounter;
-      messages.push({ id: turnId + "-u", role: "user", text: prompt });
+      messages.push({ id: turnId + "-u", role: "user", text: request.prompt });
       const assistantEntry = {
         id: turnId,
         role: "assistant",
@@ -426,46 +513,57 @@
         reply: "",
         reasoning: "",
         updatedInPlace: false,
+        applied: false,
         locations: [],
         undone: false,
         error: false,
+        request: { prompt: request.prompt, command: request.command || "", target: request.target || null, mode, mod },
       };
       messages.push(assistantEntry);
 
       running = true;
       activeRunToken += 1;
-      const myToken = activeRunToken;
+      activeRequestId = newRequestId();
       renderThread();
       syncComposerControls();
+      return { assistantEntry, turnId, mod, mode, selection, context, history, token: activeRunToken, requestId: activeRequestId, request };
+    }
 
+    async function finishTurn(turn) {
+      const { assistantEntry, turnId, mod, mode, token } = turn;
       try {
         const req = {
           action: "copilot_run",
+          requestId: turn.requestId,
           mode,
           module: mod,
-          prompt,
-          history,
-          selection,
-          context,
+          prompt: turn.request.prompt,
+          history: turn.history,
+          selection: turn.selection,
+          context: turn.context,
           provider: modelUi.currentProviderPayload(),
         };
+        if (turn.request.command) req.command = turn.request.command;
         const res = await invokeIpc("run_smart_assistant", JSON.stringify(req));
-        if (myToken !== activeRunToken) return;
+        if (token !== activeRunToken) return;
         const ops = Array.isArray(res?.operations) ? res.operations : [];
         const appliedRes = await copilotActions.applyOperations(mod, mode, ops, turnId);
         const explicitLocs = normalizeLocations(res?.locations, mod);
         assistantEntry.pending = false;
         assistantEntry.reply = String(res?.reply || "요청을 처리했습니다.");
         assistantEntry.reasoning = String(res?.reasoning || "");
+        assistantEntry.applied = appliedRes.applied;
         assistantEntry.updatedInPlace = mode === "edit" && (Boolean(res?.updatedInPlace) || appliedRes.applied);
         assistantEntry.locations = explicitLocs.length > 0 ? explicitLocs : appliedRes.locations;
+        const dropped = Number(res?.droppedOperations) || 0;
+        if (dropped > 0) setStatusFeedback?.("형식이 맞지 않는 작업 " + dropped + "개를 건너뛰었습니다");
       } catch (err) {
-        if (myToken !== activeRunToken) return;
+        if (token !== activeRunToken) return;
         assistantEntry.pending = false;
         assistantEntry.error = true;
         assistantEntry.reply = String(err?.message || "코파일럿 요청 처리에 실패했습니다.");
       } finally {
-        if (myToken === activeRunToken) {
+        if (token === activeRunToken) {
           running = false;
           renderThread();
           syncComposerControls();
@@ -473,10 +571,49 @@
       }
     }
 
+    function runTurn(request, options) {
+      const turn = startTurn(request, options);
+      return turn ? finishTurn(turn) : undefined;
+    }
+
+    function submitPrompt() {
+      const inputEl = byId("copilot-input");
+      const prompt = String(inputEl?.value || "").trim().slice(0, MAX_PROMPT_CHARS);
+      if (!prompt) return undefined;
+      return runTurn({ prompt }, { clearInput: true });
+    }
+
+    // The last answer again, for the same request. An edit it made is taken back first (the undo is gone once the
+    // user edited, and so is this).
+    async function regenerateLast() {
+      if (running || regenerating) return;
+      const last = messages.at(-1);
+      const asked = messages.at(-2);
+      if (last?.role !== "assistant" || last.pending || !last.request || asked?.role !== "user") return;
+      if (!modelUi.isConfigured()) {
+        modelUi.openDialog(undefined, undefined, "전송하기 전에 API 키를 입력하거나 로컬 모델을 선택해 주세요.");
+        return;
+      }
+      regenerating = true;
+      syncMessageActions();
+      try {
+        if (last.applied && !last.undone && !(await copilotActions.undoLastTurn(last.id))) {
+          renderThread();
+          return;
+        }
+        messages.splice(-2, 2);
+      } finally {
+        regenerating = false;
+      }
+      await runTurn(last.request);
+    }
+
     function stopActiveRun() {
       if (!running) return;
       activeRunToken += 1;
       running = false;
+      // The engine closes the model connection; the answer that may still arrive is dropped by the token.
+      void Promise.resolve(invokeIpc("run_smart_assistant", JSON.stringify({ action: "copilot_cancel", requestId: activeRequestId }))).catch(() => {});
       const last = messages.at(-1);
       if (last?.pending) {
         last.pending = false;
@@ -558,7 +695,7 @@
         syncComposerControls();
       });
       byId("btn-copilot-mode")?.addEventListener("click", () => {
-        if (running || getActiveModule() === "PDF") return;
+        if (running || ASK_ONLY_MODULES.has(getActiveModule())) return;
         preferredMode = preferredMode === "edit" ? "ask" : "edit";
         syncComposerControls();
       });
@@ -566,6 +703,7 @@
         if (running) stopActiveRun();
         else void submitPrompt();
       });
+      buildCommandRow();
 
       const inputEl = byId("copilot-input");
       inputEl?.addEventListener("input", () => {
@@ -581,8 +719,9 @@
         }
       });
 
-      document.addEventListener("focusin", () => syncSelectionBadge());
-      document.addEventListener("keyup", () => syncSelectionBadge());
+      for (const type of ["focusin", "keyup", "input", "click"]) {
+        document.addEventListener(type, () => syncSelectionBadge());
+      }
       host.addEventListener?.("resize", () => {
         applyWidthStyle(panelWidth);
         modelUi.repositionMenu();

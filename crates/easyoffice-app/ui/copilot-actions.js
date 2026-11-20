@@ -4,7 +4,10 @@
   "use strict";
 
   const MAX_CONTEXT_CELLS = 512;
-  const MAX_CONTEXT_PARAGRAPHS = 128;
+  // The engine puts this many paragraphs in the prompt (`MAX_PROMPT_DOC_PARAGRAPHS`) and answers for the same limit.
+  const MAX_CONTEXT_PARAGRAPHS = 200;
+  // A selection command on a later block is sent with empty entries up to it (the engine reads 2,048 at most).
+  const MAX_COMMAND_BLOCK_INDEX = 2047;
   const MAX_CONTEXT_SLIDES = 64;
   const MAX_CONTEXT_TEXT_CHARS = 24000;
   const MAX_OPERATIONS = 64;
@@ -142,20 +145,56 @@
       return { name: sheetName, cells };
     }
 
-    function extractDocContext() {
+    // One entry per block, empty ones included, so that an index in the context is the block index an operation
+    // names. A command target past the window is sent too (its neighbours stay empty); `omittedParagraphs` counts
+    // the blocks that were left out.
+    function extractDocContext(span) {
       const editor = document.getElementById("doc-editor");
       const blocks = docBlocksOf(editor);
+      const lastSent = span ? Math.max(MAX_CONTEXT_PARAGRAPHS - 1, span.end) : MAX_CONTEXT_PARAGRAPHS - 1;
+      const count = Math.min(blocks.length, lastSent + 1);
       const paragraphs = [];
-      for (let i = 0; i < blocks.length && paragraphs.length < MAX_CONTEXT_PARAGRAPHS; i += 1) {
-        const text = String(blocks[i].textContent || "").trim();
-        if (text) paragraphs.push(text.slice(0, MAX_CONTEXT_TEXT_CHARS));
+      for (let i = 0; i < count; i += 1) {
+        const wanted = i < MAX_CONTEXT_PARAGRAPHS || (span && i >= span.start && i <= span.end);
+        paragraphs.push(wanted ? String(blocks[i].textContent || "").trim().slice(0, MAX_CONTEXT_TEXT_CHARS) : "");
       }
       let selectedText = "";
       const sel = host.getSelection?.();
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editor?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
         selectedText = String(sel.getRangeAt(0).toString?.() || "").slice(0, MAX_CONTEXT_TEXT_CHARS);
       }
-      return { paragraphs, selectedText };
+      return { paragraphs, selectedText, omittedParagraphs: blocks.length - count };
+    }
+
+    function blockIndexOf(node, editor) {
+      let cur = node && node.nodeType === 1 ? node : node?.parentElement;
+      while (cur && cur.parentElement !== editor) cur = cur.parentElement;
+      return cur ? docBlocksOf(editor).indexOf(cur) : -1;
+    }
+
+    // Where a selection command works: the blocks a text selection in the document touches, or the slide title or
+    // body a selection sits in. `null` when there is nothing selected there.
+    function getCommandTarget(mod = getActiveModule()) {
+      const sel = host.getSelection?.();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+      const range = sel.getRangeAt(0);
+      if (mod === "DOC") {
+        const editor = document.getElementById("doc-editor");
+        if (!editor || !editor.contains(range.commonAncestorContainer)) return null;
+        const first = blockIndexOf(range.startContainer, editor);
+        const last = blockIndexOf(range.endContainer, editor);
+        if (first < 0 || last < first || last > MAX_COMMAND_BLOCK_INDEX) return null;
+        const chars = Array.from(String(range.toString?.() || "").trim()).length;
+        return { selection: { range: "선택 텍스트 " + Math.min(chars, 999) + "자", paragraphIndex: first, paragraphEnd: last } };
+      }
+      if (mod === "SLIDE") {
+        for (const [id, slideField] of [["slide-title-zone", "title"], ["slide-lower-zone", "body"]]) {
+          if (document.getElementById(id)?.contains(range.commonAncestorContainer)) {
+            return { selection: { range: "슬라이드 " + (getActiveSlideIndex() + 1), slideIndex: getActiveSlideIndex(), slideField } };
+          }
+        }
+      }
+      return null;
     }
 
     function extractSlideContext() {
@@ -194,14 +233,20 @@
       return { text: rawText, pageCount };
     }
 
-    function extractContext(mod = getActiveModule()) {
+    function extractContext(mod = getActiveModule(), { target } = {}) {
       const label = getSelectionLabel(mod);
       if (mod === "SHEET") {
         const sheet = getActiveSheetName();
         return { selection: { sheet, range: label || "A1" }, context: { sheet: extractSheetContext() } };
       }
-      if (mod === "DOC") return { selection: label ? { range: label } : {}, context: { doc: extractDocContext() } };
-      if (mod === "SLIDE") return { selection: { slideIndex: getActiveSlideIndex() }, context: { slide: extractSlideContext() } };
+      if (mod === "DOC") {
+        const sel = target?.selection;
+        const span = sel ? { start: sel.paragraphIndex, end: sel.paragraphEnd } : null;
+        return { selection: sel ? { ...sel } : label ? { range: label } : {}, context: { doc: extractDocContext(span) } };
+      }
+      if (mod === "SLIDE") {
+        return { selection: target?.selection ? { ...target.selection } : { slideIndex: getActiveSlideIndex() }, context: { slide: extractSlideContext() } };
+      }
       if (mod === "BASE" || mod === "BOARD") return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod) || { selection: {}, context: {} };
       if (mod === "PDF") return { selection: {}, context: { pdf: extractPdfContext() } };
       return { selection: {}, context: {} };
@@ -487,7 +532,7 @@
     }
 
     async function applyOperations(mod, mode, operations, turnId) {
-      if (mode !== "edit" || mod === "PDF" || !Array.isArray(operations) || operations.length === 0) {
+      if (mode !== "edit" || mod === "PDF" || mod === "BASE" || mod === "BOARD" || !Array.isArray(operations) || operations.length === 0) {
         return { applied: false, locations: [] };
       }
       if (operations.length > MAX_OPERATIONS) {
@@ -509,7 +554,11 @@
           const kind = String(op.op || op.type || op.kind || "").trim();
           if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart") {
             const sheetName = String(op.sheet || getActiveSheetName());
-            if (!sheetDataStore[sheetName]) sheetDataStore[sheetName] = Object.create(null);
+            if (!Object.hasOwn(sheetDataStore, sheetName)) {
+              // The active sheet may not have a store entry yet; a name the model made up must not create one.
+              if (sheetName !== getActiveSheetName()) throw new Error("없는 시트입니다: " + sheetName);
+              sheetDataStore[sheetName] = Object.create(null);
+            }
             touchedSheet = sheetName;
             if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
             else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
@@ -551,16 +600,23 @@
 
       commitDeferredUndoSnapshot(beforeSnap);
       noteActivity?.();
-      lastUndoEntry = { turnId, snapshot: beforeSnap };
+      lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
       return { applied: true, locations: derivedLocations };
     }
 
+    // A restore would drop whatever the user did after the turn, so the undo is gone once the history moved.
     function canUndoTurn(turnId) {
+      return Boolean(lastUndoEntry && lastUndoEntry.turnId === turnId && getHistoryMutationEpoch?.() === lastUndoEntry.epoch);
+    }
+
+    // Whether this turn still has an undo entry, usable or not (it stops being usable once the user edited).
+    function hasUndoEntry(turnId) {
       return Boolean(lastUndoEntry && lastUndoEntry.turnId === turnId);
     }
 
     async function undoLastTurn(turnId) {
       if (!lastUndoEntry || (turnId !== undefined && lastUndoEntry.turnId !== turnId)) return false;
+      if (getHistoryMutationEpoch?.() !== lastUndoEntry.epoch) return false;
       const snap = lastUndoEntry.snapshot;
       lastUndoEntry = null;
       await restoreWorkspaceSnapshot(snap, undefined, { keepProtections: true });
@@ -626,8 +682,10 @@
     return {
       getSelectionLabel,
       extractContext,
+      getCommandTarget,
       applyOperations,
       canUndoTurn,
+      hasUndoEntry,
       undoLastTurn,
       locateTarget,
       clearUndo: () => {

@@ -256,20 +256,26 @@
     return "";
   }
 
+  // The limits match what the engine accepts (`MAX_BASE_*`, `MAX_BOARD_*` in `copilot/types.rs`); it refuses a request over
+  // them, so the page cuts first and tells the engine how much there is (`totalRecords`, `totalNodes`).
+  const COPILOT_MAX_TABLES = 64, COPILOT_MAX_FIELDS = 64, COPILOT_MAX_RECORDS = 100, COPILOT_MAX_NODES = 256, COPILOT_MAX_CONNECTORS = 1024, COPILOT_MAX_TEXT = 200;
+  const clipText = (v) => String(v ?? "").slice(0, COPILOT_MAX_TEXT);
+
   function extractCopilotContext(mod) {
     if (mod === "BASE" && baseStudio) {
       const M = host.__EASYOFFICE_BASE_MODEL__, st = baseStudio.getState();
       const tbl = M.getTable(st, st.activeTableId) || st.tables?.[0];
       const q = tbl ? M.queryTableView(st, tbl.id) : { fields: [], rows: [] };
+      const fields = q.fields.slice(0, COPILOT_MAX_FIELDS);
       return {
         selection: { range: tbl?.name || "테이블 1" },
         context: {
-          doc: {
-            paragraphs: [
-              `테이블: ${tbl?.name || "테이블 1"} · 보기: ${tbl?.view || "grid"} · 레코드: ${q.rows.length}건`,
-              ...q.rows.slice(0, 64).map((r) => q.fields.map((f) => `${f.name}=${r.displays[f.id] || ""}`).join(", ")),
-            ],
-            selectedText: "",
+          base: {
+            tables: (st.tables || []).slice(0, COPILOT_MAX_TABLES).map((t) => clipText(t.name)),
+            table: clipText(tbl?.name || "테이블 1"),
+            fields: fields.map((f) => ({ name: clipText(f.name), type: String(f.type || "text") })),
+            records: q.rows.slice(0, COPILOT_MAX_RECORDS).map((r) => fields.map((f) => clipText(r.displays[f.id]))),
+            totalRecords: q.rows.length,
           },
         },
       };
@@ -280,12 +286,10 @@
       return {
         selection: { range: `요소 ${rep.totalNodes}개 · 연결선 ${rep.connectorCount}개` },
         context: {
-          doc: {
-            paragraphs: [
-              `보드 요약: 요소 ${rep.totalNodes}개, 연결선 ${rep.connectorCount}개, 그룹 ${rep.connectedComponents || 0}개`,
-              ...(st.nodes || []).slice(0, 64).map((n) => `[${n.kind}] ${n.text || n.title || n.alt || n.id} (${n.x},${n.y})`),
-            ],
-            selectedText: "",
+          board: {
+            nodes: (st.nodes || []).slice(0, COPILOT_MAX_NODES).map((n) => ({ id: clipText(n.id), kind: String(n.kind || ""), text: clipText(n.text || n.title || n.alt) })),
+            connectors: (st.connectors || []).slice(0, COPILOT_MAX_CONNECTORS).map((c) => ({ from: clipText(c.fromId), to: clipText(c.toId) })),
+            totalNodes: (st.nodes || []).length,
           },
         },
       };
