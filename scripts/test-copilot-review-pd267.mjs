@@ -145,10 +145,13 @@ function cssRules(file) {
 }
 
 test("a selection on paper (page, slide stage, PDF card) is the reference app's translucent blue in both themes", () => {
-  // `rhwp-studio/src/engine/selection-renderer.ts:94`: the selection overlay colour.
-  const reference = fs.readFileSync(new URL("../third_party/rhwp/rhwp-studio/src/engine/selection-renderer.ts", import.meta.url), "utf8");
-  const colour = reference.match(/background:(rgba\(51,144,255,0\.35\))/)?.[1];
-  assert.ok(colour, "the reference overlay colour is in the reference source");
+  // `rhwp-studio/src/engine/selection-renderer.ts:94`: the selection overlay colour. The reference
+  // checkout is optional (CI `checks` has none), so the pinned value is checked against it only when present.
+  const colour = "rgba(51,144,255,0.35)";
+  const referencePath = new URL("../third_party/rhwp/rhwp-studio/src/engine/selection-renderer.ts", import.meta.url);
+  if (fs.existsSync(referencePath)) {
+    assert.ok(fs.readFileSync(referencePath, "utf8").includes(`background:${colour}`), "the reference overlay colour is in the reference source");
+  }
   const rules = cssRules("content.css").filter((r) => r.selector.includes("::selection"));
   assert.ok(rules.length >= 1, "content.css paints the paper selection");
   const selectors = rules.flatMap((r) => r.selector.split(",").map((s) => s.trim()));
