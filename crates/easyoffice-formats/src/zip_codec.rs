@@ -209,9 +209,12 @@ impl ZipArchiveCodec {
         entries: &[E],
         packed: &[Option<Vec<u8>>],
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        // The host system is fixed so the bytes do not depend on the OS that writes them (the crate
+        // otherwise picks DOS on Windows and Unix elsewhere for "version made by" and the attributes).
         let options = SimpleFileOptions::default()
             .compression_method(CompressionMethod::Stored)
-            .last_modified_time(DateTime::default());
+            .last_modified_time(DateTime::default())
+            .system(zip::System::Unix);
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
         for (entry, deflated) in entries.iter().zip(packed) {
             writer
