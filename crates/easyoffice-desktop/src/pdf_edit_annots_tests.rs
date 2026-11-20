@@ -286,3 +286,29 @@ fn annotations_beyond_the_three_kinds_are_still_reported() {
     );
     assert_eq!(page_annots(&read(&built.bytes)).len(), 1);
 }
+
+#[test]
+fn a_page_placed_many_times_cannot_multiply_the_annotations_past_the_total() {
+    use crate::pdf_edit_engine::PdfEngine;
+    use crate::pdf_edit_overlay::Overlay;
+    use crate::pdf_edit_wire::PagePlan;
+    let engine = InProcessEngine::new(Arc::new(Database::new()));
+    // One annotation of about 65,000 nodes, within its own limit and the total when read once.
+    let each = crate::pdf_edit_budget::MAX_VALUE_NODES - 100;
+    let file = Arc::new(annotated("5 0 R", vec![ink_with(each, 0)]));
+    let copies = crate::pdf_edit_budget::MAX_CARRIED_NODES / each + 2;
+    let place = |count: usize| {
+        let pages = vec![
+            PagePlan {
+                source: 0,
+                index: 0,
+                turn: 0
+            };
+            count
+        ];
+        engine.build(&[Arc::clone(&file)], &pages, &Overlay::default())
+    };
+    assert!(place(2).is_ok());
+    let err = place(copies).unwrap_err();
+    assert!(err.contains("합계"), "{err}");
+}

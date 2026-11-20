@@ -362,6 +362,24 @@ fn hostile_attachment_trees_are_refused() {
     assert!(refused(many).contains("첨부 파일"));
 }
 
+#[test]
+fn the_attachments_of_all_joined_files_together_are_limited() {
+    let names = |from: usize| -> String {
+        (from..from + MAX_ATTACHMENTS / 2 + 1)
+            .map(|n| format!("(n{n:05}) << >> "))
+            .collect()
+    };
+    let file = |from: usize| {
+        let catalog = format!("/Names << /EmbeddedFiles << /Names [{}] >> >>", names(from));
+        one_page(&catalog, "", &[])
+    };
+    let engine = engine();
+    let mut session = EditSession::open(file(0), &engine).unwrap();
+    session.merge(vec![file(10_000)], &engine).unwrap();
+    let err = session.render(None, &engine).unwrap_err();
+    assert!(err.contains("첨부 파일"), "{err}");
+}
+
 // ---- metadata -----------------------------------------------------------------------------------
 
 fn xmp(body: &str) -> String {

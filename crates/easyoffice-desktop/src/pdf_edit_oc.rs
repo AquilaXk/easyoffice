@@ -27,18 +27,70 @@ use hayro_syntax::Pdf as ReadPdf;
 /// What the layer list is called in a sentence about a limit.
 pub const WHAT: &str = "선택적 내용(레이어) 정보";
 
-/// The `/OCProperties` of `pdf`, if it has them.
-pub fn read(pdf: &ReadPdf, budget: &mut Budget) -> Result<Option<Value>, String> {
+/// The entries of `/OCProperties` and of its default configuration that are arrays; a file may
+/// write any of them as an object of its own (`/D 8 0 R`, `/OFF 9 0 R`).
+const LIST_KEYS: [&str; 6] = ["OFF", "ON", "Order", "RBGroups", "Locked", "AS"];
+
+/// The `/OCProperties` of `pdf`, if it has them, with `/OCGs`, `/D` and the lists of the default
+/// configuration written in place instead of behind references, one step deep: the lists of
+/// several files are joined by [`combine`], which reads them where they are written. What is
+/// behind a reference but is not an array (or dictionary for `/D`) is left out and said so.
+pub fn read(
+    pdf: &ReadPdf,
+    budget: &mut Budget,
+    warnings: &mut Warnings,
+) -> Result<Option<Value>, String> {
     let xref = pdf.xref();
-    let props = xref
+    let Some(props) = xref
         .get::<Dict<'_>>(xref.root_id())
-        .and_then(|catalog| catalog.get::<Dict<'_>>(b"OCProperties"));
-    props
-        .map(|dict| {
-            Value::read(&MaybeRef::NotRef(Object::Dict(dict)), budget)
-                .map_err(|refused| refused.sentence(WHAT))
-        })
-        .transpose()
+        .and_then(|catalog| catalog.get::<Dict<'_>>(b"OCProperties"))
+    else {
+        return Ok(None);
+    };
+    let mut value = Value::read(&MaybeRef::NotRef(Object::Dict(props)), budget)
+        .map_err(|refused| refused.sentence(WHAT))?;
+    unfold(pdf, &mut value, "OCGs", false, (budget, warnings))?;
+    unfold(pdf, &mut value, "D", true, (budget, warnings))?;
+    if let Some(config) = value.get_mut(b"D") {
+        for key in LIST_KEYS {
+            unfold(pdf, config, key, false, (budget, warnings))?;
+        }
+    }
+    Ok(Some(value))
+}
+
+/// Replaces the reference under `key` of the dictionary `dict` by the object it names (a
+/// dictionary when `want_dict`, else an array); any other object, or none, removes the entry.
+fn unfold(
+    pdf: &ReadPdf,
+    dict: &mut Value,
+    key: &str,
+    want_dict: bool,
+    (budget, warnings): (&mut Budget, &mut Warnings),
+) -> Result<(), String> {
+    let Some(&Value::Ref(id)) = dict.get(key.as_bytes()) else {
+        return Ok(());
+    };
+    let named = pdf.xref().get::<Object<'_>>(id.into());
+    match named {
+        Some(object @ Object::Array(_)) if !want_dict => {
+            let inline = Value::read(&MaybeRef::NotRef(object), budget)
+                .map_err(|refused| refused.sentence(WHAT))?;
+            dict.set(key.as_bytes(), inline);
+        }
+        Some(object @ Object::Dict(_)) if want_dict => {
+            let inline = Value::read(&MaybeRef::NotRef(object), budget)
+                .map_err(|refused| refused.sentence(WHAT))?;
+            dict.set(key.as_bytes(), inline);
+        }
+        _ => {
+            dict.remove(key.as_bytes());
+            warnings.push(format!(
+                "{WHAT}의 {key}를 읽을 수 없어 저장하지 않았습니다."
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The entries of the array `key` of the default configuration of `props`.

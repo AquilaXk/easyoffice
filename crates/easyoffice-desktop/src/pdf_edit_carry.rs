@@ -16,10 +16,14 @@
 
 use crate::pdf_edit_annots::{lost_sentence, scan_page, Lost};
 use crate::pdf_edit_attach::{self, Attachment};
-use crate::pdf_edit_budget::{Deadline, MAX_TOTAL_ANNOTS, MAX_XMP_BYTES, PAGES_PER_CHECK_MASK};
+use crate::pdf_edit_budget::{
+    Deadline, MAX_ATTACHMENTS, MAX_CARRIED_NODES, MAX_TOTAL_ANNOTS, MAX_XMP_BYTES,
+    PAGES_PER_CHECK_MASK,
+};
 use crate::pdf_edit_labels;
 use crate::pdf_edit_oc;
 use crate::pdf_edit_preserve::too_many_annots;
+use crate::pdf_edit_value::Refused;
 use crate::pdf_edit_value::{Budget, Value};
 use crate::pdf_edit_wire::{PagePlan, MAX_WARNINGS, MAX_WARNING_BYTES};
 use hayro_syntax::object::{Dict, MaybeRef, ObjRef, Object, Stream};
@@ -70,6 +74,8 @@ pub struct Carry {
     page_labels: Option<Value>,
     /// The metadata stream of the file of the first page.
     metadata: Option<(usize, ObjRef)>,
+    /// The nodes of the annotations written so far: a page placed again writes them again.
+    written_nodes: usize,
     /// The objects of each source that are copied together with its pages.
     roots: BTreeMap<usize, Vec<ObjRef>>,
 }
@@ -130,13 +136,18 @@ impl Carry {
         pages: &[PagePlan],
     ) -> Result<(), String> {
         let mut labels = BTreeMap::new();
+        let mut attached = 0usize;
         for (&source, pdf) in parsed {
             note_catalog(pdf, &mut self.warnings);
-            if let Some(list) = pdf_edit_oc::read(pdf, &mut self.budget)? {
+            if let Some(list) = pdf_edit_oc::read(pdf, &mut self.budget, &mut self.warnings)? {
                 self.add_roots(source, &list);
                 self.layers.push((source, list));
             }
             let files = pdf_edit_attach::read(pdf, &mut self.budget)?;
+            attached += files.len();
+            if attached > MAX_ATTACHMENTS {
+                return Err(pdf_edit_attach::too_many_in_all());
+            }
             for file in &files {
                 self.add_roots(source, file.spec());
             }
@@ -176,7 +187,7 @@ impl Carry {
 
     /// Writes the carried annotations of page `index` of `source` and returns their references.
     pub fn write_page_annots(
-        &self,
+        &mut self,
         out: &mut Pdf,
         next: &mut Ref,
         (source, index): (usize, usize),
@@ -188,6 +199,10 @@ impl Carry {
         };
         let mut written = Vec::with_capacity(found.len());
         for annot in found {
+            self.written_nodes = self.written_nodes.saturating_add(annot.node_count());
+            if self.written_nodes > MAX_CARRIED_NODES {
+                return Err(Refused::Total.sentence("주석"));
+            }
             *total_annots += 1;
             if *total_annots > MAX_TOTAL_ANNOTS {
                 return Err(too_many_annots());

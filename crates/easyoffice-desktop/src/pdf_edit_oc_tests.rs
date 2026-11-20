@@ -180,14 +180,23 @@ fn a_base_state_of_off_is_kept_for_a_single_file() {
     assert!(card(&rebuilt(on.clone()).bytes) == card(&on));
 }
 
-/// A file with its own layers and one drawing under each; `hidden` says which of them is off.
-fn two_layer_file(red_hidden: bool) -> Vec<u8> {
+/// A file with its own layers and one drawing under each; `red_hidden` says whether the red one is
+/// off. With `indirect` the layer array, the default configuration and its `/OFF` array are objects
+/// of their own (`7 0 R`, `8 0 R`, `9 0 R`) instead of being written in the catalog.
+fn two_layer_file_with(red_hidden: bool, indirect: bool) -> Vec<u8> {
     let off = if red_hidden { "6 0 R" } else { "" };
-    let catalog = format!("/OCProperties << /OCGs [5 0 R 6 0 R] /D << /OFF [{off}] >> >>");
-    let more = vec![
+    let mut more = vec![
         "<< /Type /OCG /Name (Blue) >>".to_string(),
         "<< /Type /OCG /Name (Red) >>".to_string(),
     ];
+    let catalog = if indirect {
+        more.push("[5 0 R 6 0 R]".to_string());
+        more.push("<< /OFF 9 0 R >>".to_string());
+        more.push(format!("[{off}]"));
+        "/OCProperties << /OCGs 7 0 R /D 8 0 R >>".to_string()
+    } else {
+        format!("/OCProperties << /OCGs [5 0 R 6 0 R] /D << /OFF [{off}] >> >>")
+    };
     one_page_with(
         &catalog,
         "/Resources << /Properties << /A 5 0 R /B 6 0 R >> >>",
@@ -195,6 +204,67 @@ fn two_layer_file(red_hidden: bool) -> Vec<u8> {
         "",
         &more,
     )
+}
+
+fn two_layer_file(red_hidden: bool) -> Vec<u8> {
+    two_layer_file_with(red_hidden, false)
+}
+
+#[test]
+fn layers_listed_through_indirect_objects_keep_their_state_in_one_file_and_in_a_merge() {
+    let engine = InProcessEngine::new(Arc::new(Database::new()));
+    let hidden = two_layer_file_with(true, true);
+    let shown = two_layer_file_with(false, true);
+    let (shot_hidden, shot_shown) = (card(&hidden), card(&shown));
+    assert!(
+        shot_hidden != shot_shown,
+        "the files differ in what they show"
+    );
+    assert!(
+        card(&rebuilt(hidden.clone()).bytes) == shot_hidden,
+        "one file"
+    );
+    for (first, second) in [
+        (hidden.clone(), shown.clone()),
+        (shown.clone(), hidden.clone()),
+    ] {
+        let mut session = EditSession::open(first, &engine).unwrap();
+        session.merge(vec![second], &engine).unwrap();
+        let built = session.render(None, &engine).unwrap();
+        let out = read(&built.bytes);
+        let props = catalog_of(&out).get::<Dict<'_>>(b"OCProperties").unwrap();
+        assert_eq!(
+            ids(props.get::<Array<'_>>(b"OCGs")).len(),
+            4,
+            "every layer is listed"
+        );
+        let config = props
+            .get::<Dict<'_>>(b"D")
+            .expect("the default configuration");
+        let off = ids(config.get::<Array<'_>>(b"OFF"));
+        assert_eq!(off.len(), 1, "the layer one file hid stays hidden");
+        assert_eq!(name_of(&out, off[0]), "Red");
+    }
+    // What the first page shows is what its own file showed.
+    let mut session = EditSession::open(hidden, &engine).unwrap();
+    session.merge(vec![shown], &engine).unwrap();
+    assert!(card(&session.render(None, &engine).unwrap().bytes) == shot_hidden);
+}
+
+#[test]
+fn a_layer_list_that_cannot_be_read_is_reported_not_dropped_silently() {
+    // `/OFF` is an indirect object that is not an array: the file's own viewers ignore it, and the
+    // result says that the list was not kept.
+    let catalog = "/OCProperties << /OCGs [5 0 R] /D << /OFF 6 0 R >> >>";
+    let more = vec![
+        "<< /Type /OCG /Name (A) >>".to_string(),
+        "(text)".to_string(),
+    ];
+    let built = rebuilt(one_page_with(catalog, "", "", "", &more));
+    assert_eq!(
+        built.warnings,
+        ["선택적 내용(레이어) 정보의 OFF를 읽을 수 없어 저장하지 않았습니다."]
+    );
 }
 
 #[test]

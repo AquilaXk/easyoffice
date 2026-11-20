@@ -44,6 +44,8 @@ pub enum Refused {
     Nodes,
     /// The objects carried over in one build together hold more than [`MAX_CARRIED_NODES`] nodes.
     Total,
+    /// A number that is not finite once it is a single-precision real (the writer cannot write it).
+    Number,
 }
 
 impl Refused {
@@ -53,6 +55,9 @@ impl Refused {
             Self::Deep => format!("{what}의 중첩이 허용 깊이({MAX_VALUE_DEPTH}단계)를 초과합니다."),
             Self::Nodes => {
                 format!("{what}의 크기가 허용 한도(항목 {MAX_VALUE_NODES}개)를 초과합니다.")
+            }
+            Self::Number => {
+                format!("{what}에 쓸 수 없는 숫자(너무 크거나 유한하지 않음)가 있습니다.")
             }
             Self::Total => format!(
                 "원본에서 그대로 옮길 정보의 합계가 한도(항목 {MAX_CARRIED_NODES}개)를 초과합니다."
@@ -156,6 +161,20 @@ impl Value {
         }
     }
 
+    /// The number of nodes the value holds (what a read of it costs against the limits).
+    pub fn node_count(&self) -> usize {
+        match self {
+            Self::Array(items) => 1 + items.iter().map(Self::node_count).sum::<usize>(),
+            Self::Dict(entries) => {
+                1 + entries
+                    .iter()
+                    .map(|(_, value)| 1 + value.node_count())
+                    .sum::<usize>()
+            }
+            _ => 1,
+        }
+    }
+
     /// Every reference inside, in order of appearance.
     pub fn refs(&self, out: &mut Vec<ObjRef>) {
         match self {
@@ -236,8 +255,10 @@ fn read_raw(
             let float = n.as_f64();
             if float.fract() == 0.0 && float.abs() <= f64::from(i32::MAX) {
                 Value::Int(float as i32)
-            } else {
+            } else if (float as f32).is_finite() {
                 Value::Real(float as f32)
+            } else {
+                return Err(Refused::Number);
             }
         }
         Object::String(s) => Value::Str(s.as_bytes().to_vec()),
@@ -347,6 +368,16 @@ mod tests {
         assert!(Refused::Deep
             .sentence("선택적 내용")
             .contains("선택적 내용"));
+    }
+
+    #[test]
+    fn a_number_that_is_no_finite_real_is_refused() {
+        // Sixty digits are no integer here and overflow a single-precision real: the writer would
+        // have to write `inf`, which is not a number of the format.
+        let huge = format!("[1 {}]", "9".repeat(60));
+        assert_eq!(value_of(&huge).unwrap_err(), Refused::Number);
+        assert!(value_of("[16777217 2147483647 -2147483648 3.5]").is_ok());
+        assert!(Refused::Number.sentence("주석").contains("숫자"));
     }
 
     #[test]

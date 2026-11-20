@@ -25,7 +25,7 @@ use crate::pdf_edit_value::{Budget, Value};
 use hayro_syntax::object::{Dict, ObjRef, Object};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::Ref;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const WHAT: &str = "첨부 파일";
 const TREE: &str = "첨부 파일 이름 트리";
@@ -56,15 +56,24 @@ impl Attachment {
         &self.spec
     }
 
-    /// `entry.renamed`: the name with a control character after it, so that it differs.
-    fn renamed(&mut self) {
-        self.name.push('\u{1}');
-        if self.raw.starts_with(&[0xFE, 0xFF]) {
-            self.raw.extend_from_slice(&[0x00, 0x01]);
-        } else {
-            self.raw.push(0x01);
+    /// `entry.renamed` applied `times` times to the name this one was read with: a control
+    /// character after it for each time, so that it differs.
+    fn renamed(&mut self, original: &Self, times: usize) {
+        self.name = original.name.clone() + &"\u{1}".repeat(times);
+        self.raw = original.raw.clone();
+        for _ in 0..times {
+            if original.raw.starts_with(&[0xFE, 0xFF]) {
+                self.raw.extend_from_slice(&[0x00, 0x01]);
+            } else {
+                self.raw.push(0x01);
+            }
         }
     }
+}
+
+/// The sentence for more attachments in all the sources of a result than a source may list.
+pub fn too_many_in_all() -> String {
+    format!("{WHAT}의 합계가 한도({MAX_ATTACHMENTS})를 초과합니다.")
 }
 
 fn is_dict(object: &Object<'_>) -> bool {
@@ -109,10 +118,25 @@ pub fn read(pdf: &ReadPdf, budget: &mut Budget) -> Result<Vec<Attachment>, Strin
 /// (`uniqueNameTreeEntry`).
 pub fn combine(lists: Vec<Vec<Attachment>>) -> Option<Value> {
     let mut taken: HashSet<String> = HashSet::new();
+    // How many times each name was renamed so far, so that a name shared by many files does not
+    // start from the beginning for each of them.
+    let mut renames: HashMap<String, usize> = HashMap::new();
     let mut all: Vec<Attachment> = Vec::new();
     for mut attachment in lists.into_iter().flatten() {
-        while taken.contains(&attachment.name) {
-            attachment.renamed();
+        if taken.contains(&attachment.name) {
+            let original = Attachment {
+                raw: attachment.raw.clone(),
+                name: attachment.name.clone(),
+                spec: Value::Null,
+            };
+            let times = renames.entry(original.name.clone()).or_insert(0);
+            loop {
+                *times += 1;
+                attachment.renamed(&original, *times);
+                if !taken.contains(&attachment.name) {
+                    break;
+                }
+            }
         }
         taken.insert(attachment.name.clone());
         all.push(attachment);
@@ -189,6 +213,19 @@ mod tests {
                 b"a\x01\x01\x01".to_vec()
             ]
         );
+    }
+
+    #[test]
+    fn many_files_with_one_name_are_renamed_without_a_search_for_each_name() {
+        let lists: Vec<Vec<Attachment>> = (0..MAX_ATTACHMENTS)
+            .map(|_| vec![attachment("a")])
+            .collect();
+        let started = std::time::Instant::now();
+        let joined = combine(lists).unwrap();
+        let all = keys(&joined);
+        assert_eq!(all.len(), MAX_ATTACHMENTS);
+        assert_eq!(all.last().map(Vec::len), Some(MAX_ATTACHMENTS));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[test]
