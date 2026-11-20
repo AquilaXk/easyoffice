@@ -7,6 +7,7 @@ material that is pinned, vendored or bundled, with the notices their licenses re
 
 Source: https://github.com/edwardkim/rhwp (pinned at the commit recorded in `config/rhwp-upstream.json`, version 0.8.7).
 It is consumed unmodified as the read-only submodule `third_party/rhwp` (PD-076).
+The selection colour on paper, `rgba(51,144,255,0.35)` in `crates/easyoffice-app/ui/content.css`, is the overlay colour of `rhwp-studio/src/engine/selection-renderer.ts:94` (PD-267).
 This notice also covers what is derived from it and shipped: the prebuilt WebAssembly package in `vendor/rhwp-core` (PD-081), the rhwp-studio editor sources that the `apps/hwp-studio` overlay bundles, the HWPX OWPML `hh:numberings`, `hh:bullets` and `hh:paraHead` multi-level list schema adapted into `crates/easyoffice-formats/src/rich_list_writers.rs` (PD-234, from `src/serializer/hwpx/header.rs` lines 448-460 and 792-958, rewritten against this repository's streaming writer and reader with a packed `u64` key, a 32-byte stack buffer and an 8,192-head budget), the HWPX OWPML drawing shapes (`hp:rect`, `hp:ellipse`, `hp:polygon`, `hp:curve`, `hp:arc`, `hp:line`, `hp:connectLine`, `hp:container`, `hp:textart`, `hp:drawText`, `hp:caption`), `hp:equation` scripts, table-cell `hp:pic` attachments, and `hp:footNote` / `hp:endNote` / `hp:footNotePr` / `hp:endNotePr` controls adapted into `crates/easyoffice-formats/src/rich_read_hwpx/objects.rs` and `frame.rs` (PD-247, from `src/parser/hwpx/section.rs` lines 1277-1545, 2692-2745, 4464-5050, 5642-5778, and 6835-6920, rewritten against this repository's `XmlReader` with a 16-level nesting cap, a 10,000-note cap, and a 64 KiB equation script cap), and the rhwp-studio code adapted into the EasyOffice WebUI (PD-098): `crates/easyoffice-app/ui/tokens.css` (from `rhwp-studio/src/styles/base.css`, values unchanged, icon-sprite tokens left out) and `crates/easyoffice-app/ui/theme.js` (from `rhwp-studio/src/core/theme.ts` and `public/theme-init.js`, rewritten as plain JavaScript with the same `data-theme-mode` / `data-theme-effective` attributes), `crates/easyoffice-app/ui/menu-bar.css` (from `rhwp-studio/src/styles/menu-bar.css`, same selectors and values) `crates/easyoffice-app/ui/toolbar.css` (surface, border, hover and separator values of `toolbar.css`, `style-bar.css` and `status-bar.css`) and the dialog row and note rules of `crates/easyoffice-app/ui/shell.css` (`.dialog-row`, `.dialog-label`, `.dialog-input`, `.dialog-pdf-note` from `rhwp-studio/src/styles/dialogs.css`), the edit-paper dialog `crates/easyoffice-app/ui/doc-page-setup.js` (the paper list, the field layout and the body-size check of `rhwp-studio/src/ui/page-setup-dialog.ts` and `rhwp-studio/src/core/page-body-limits.ts`, rewritten as plain JavaScript) with the section, margin grid and orientation card rules of `shell.css` (`.dialog-section`, `.margin-grid`, `.icon-radio-card` from `dialogs.css`). Each of these files starts with a header naming its source.
 
 ```
@@ -319,7 +320,64 @@ Licensed under the Apache License, Version 2.0 (see full text above).
 
 ## novel (Apache-2.0)
 
-Source: https://github.com/steven-tey/novel. Nothing is vendored or linked at runtime and no source lines were copied; the grouping of selection commands in `apps/web/components/tailwind/generative/ai-selector-commands.tsx` (improve, fix, shorter, longer acting on the selected text) is the structure behind the selection commands of the copilot panel (`crates/easyoffice-app/ui/copilot-ui.js`, `crates/easyoffice-app/src/copilot/prompt.rs`, `PD-267`). The instructions sent to the model are written for this project in Korean. The license text is the Apache License 2.0 reproduced above.
+Source: https://github.com/steven-tey/novel (commit `fa95098e66476c466faebb8211baa5869c101a9c`, Copyright Steven Tey). Nothing is vendored or linked at runtime. The selection command set (improve, fix, shorter, longer acting on the selected text) is taken from `apps/web/components/tailwind/generative/ai-selector-commands.tsx:5-26`, and the role sentence of each instruction from `apps/web/app/api/generate/route.ts:54-102` (`improve`, `shorter`, `longer`, `fix`), translated into Korean in `crates/easyoffice-app/src/copilot/prompt.rs` (`command_directive`, `PD-267`). The "no more than 200 characters" and "use Markdown" sentences were left out because the result replaces whole paragraphs. The license text is the Apache License 2.0 reproduced above.
+
+## plate (MIT)
+
+Source: https://github.com/udecode/plate (commit `67de7de401b603c4a71e4283587286517348b093`, Copyright (c) Ziad Beyens, Dylan Schiemann, Joe Anderson, Felix Feng). Nothing is vendored or linked at runtime. The rule sentences of the selection commands (improve writing, fix spelling and grammar, make longer, make shorter, summarize, translate) are taken from `apps/www/src/registry/components/editor/ai-menu.tsx:516-584, 606-619`, `apps/www/src/registry/app/api/ai/command/prompt/common.ts:9-12`, `getGeneratePrompt.ts:75,142` and `getEditPrompt.ts:169`, translated into Korean in `crates/easyoffice-app/src/copilot/prompt.rs`. The regenerate rule (restore the target the request was made for, send nothing when it cannot be restored, then ask again) is ported from `reload` in `packages/platejs/src/ai/react/AIChatPlugin.ts:1703-1736` and `regenerate` in `packages/platejs/src/ai/react/useAIChat.ts:235-238` into `crates/easyoffice-app/ui/copilot-ui.js` (`regenerateLast`) and `copilot-actions.js` (`snapshotTarget`), with a text snapshot of the target in place of node keys (`PD-267`).
+
+```
+The MIT License (MIT)
+
+Copyright (c) Ziad Beyens, Dylan Schiemann, Joe Anderson, Felix Feng
+
+Unless otherwise specified in a LICENSE file within an individual package directory,
+this license applies to all files in this repository outside of those package directories.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+## unicode-substring (MIT)
+
+Source: https://github.com/lautis/unicode-substring (commit `088e12b6197e1fd13f227a6b86b41044b7fe5f75`). The surrogate-pair test of `charAt` (`index.js:1-11`) and the code point walk of `slice` (`index.js:13-29`) are adapted into `clipCodePoints` in `crates/easyoffice-app/ui/copilot-text.js`, so a text sent to the copilot engine is cut on a code point (`PD-267`).
+
+```
+Copyright (c) 2015 Ville Lautanala
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
 
 ## Excalidraw (MIT)
 
