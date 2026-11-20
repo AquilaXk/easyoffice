@@ -60,6 +60,7 @@ mod functions_text_bytes;
 mod functions_text_locale;
 mod functions_text_split;
 mod functions_trend;
+mod functions_unavailable;
 #[cfg(test)]
 mod functions_unit_tests;
 mod functions_xml;
