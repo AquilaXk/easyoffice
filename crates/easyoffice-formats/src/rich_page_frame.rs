@@ -378,7 +378,7 @@ pub(crate) fn odt_field(field: RichField, run_text_style: Option<usize>) -> Stri
 }
 
 /// Twips as an ODF point length (`36pt`, `7.5pt`): exact to a twip.
-fn odt_pt(twips: u32) -> String {
+pub(crate) fn odt_pt(twips: u32) -> String {
     let (whole, hundredths) = (twips / 20, twips % 20 * 5);
     if hundredths == 0 {
         format!("{whole}pt")

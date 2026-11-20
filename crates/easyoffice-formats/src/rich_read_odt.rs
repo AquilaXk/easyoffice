@@ -19,8 +19,8 @@ use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS
 use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichField, RichImage,
-    RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
+    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns, RichDocument, RichField,
+    RichImage, RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
     ZipSecurityPolicy,
 };
 
@@ -52,6 +52,8 @@ struct StyleProps {
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
     page_break_before: bool,
+    /// Columns of a section style (`style:section-properties`); a count of 1 stands for one column.
+    columns: Option<RichColumns>,
 }
 
 /// A CSS/ODF length (`36pt`, `0.5in`, `1.27cm`, `12.7mm`, `48px`) in EMU.
@@ -162,6 +164,22 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
     p.page_break_before = attr(attrs, "fo:break-before").as_deref() == Some("page");
 }
 
+/// The columns a `style:columns` element sets: count, equal widths and the gap (720 twips when unreadable).
+fn section_columns(attrs: &Attrs<'_>) -> RichColumns {
+    let count = attr(attrs, "fo:column-count")
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .map_or(1, |n| n.clamp(1, 16) as u8);
+    let gap_twips = attr(attrs, "fo:column-gap")
+        .as_deref()
+        .and_then(length_twips)
+        .map_or(720, |t| t.clamp(0, i32::from(u16::MAX)) as u16);
+    RichColumns {
+        count,
+        equal: true,
+        gap_twips,
+    }
+}
+
 fn read_styles_into(
     xml: &str,
     styles: &mut HashMap<String, StyleProps>,
@@ -192,6 +210,11 @@ fn read_styles_into(
                             },
                         )
                     });
+                }
+                "style:columns" => {
+                    if let Some((_, p)) = cur.as_mut() {
+                        p.columns = Some(section_columns(attrs));
+                    }
                 }
                 "style:table-column-properties" => table_styles.on_col_props(attrs),
                 "style:table-cell-properties" => table_styles.on_cell_props(attrs),
@@ -324,6 +347,8 @@ struct OdtWalker<'a> {
     /// Merged regions dropped as invalid in this document.
     dropped_merges: usize,
     in_automatic_styles: bool,
+    /// The columns of the open `text:section`s, innermost last.
+    sections: Vec<Option<RichColumns>>,
     budget: ImageBudget,
     text_budget: DecodeBudget,
     /// Address of the open `text:a`, when it is a safe link.
@@ -378,6 +403,7 @@ impl<'a> OdtWalker<'a> {
             cell_shape: (1, 1, 1),
             dropped_merges: 0,
             in_automatic_styles: false,
+            sections: Vec::new(),
             budget: ImageBudget::default(),
             text_budget: DecodeBudget::new(),
             link: None,
@@ -395,6 +421,12 @@ impl<'a> OdtWalker<'a> {
                 self.title = attr(attrs, "title").unwrap_or_default().into_owned()
             }
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
+            "text:section" => {
+                let columns = attr(attrs, "text:style-name")
+                    .and_then(|n| self.styles.get(n.as_ref()))
+                    .and_then(|s| s.columns);
+                self.sections.push(columns);
+            }
             "office:annotation-end" | "text:change-start" | "text:change-end" | "text:change" => {
                 self.notes.on_marker_start(
                     name,
@@ -638,6 +670,9 @@ impl<'a> OdtWalker<'a> {
             "text:list" => {
                 self.list_stack.pop();
             }
+            "text:section" => {
+                self.sections.pop();
+            }
             "text:p" | "text:h" if !self.in_automatic_styles => self.finish_paragraph()?,
             "table:table-cell" if self.tbl_depth == 1 => {
                 let (text, spans) = join_cell_paragraphs(&self.cell_paras);
@@ -772,6 +807,7 @@ impl<'a> OdtWalker<'a> {
                 toc_dots: toc_page.is_some() && p.toc_dots,
                 page_break_before: p.style.page_break_before
                     | std::mem::take(&mut self.pending_page_break),
+                columns: self.sections.last().copied().flatten(),
                 ..RichParagraph::default()
             }));
         }

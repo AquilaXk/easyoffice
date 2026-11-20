@@ -10,13 +10,15 @@ use crate::rich_image::check_document_images;
 use crate::rich_image_writers::{odt_image_paragraph, MediaParts, ODT_PICTURE_NAMESPACES};
 use crate::rich_list_writers::{level_of, odt_list_styles_xml, plan_lists, OdtListWriter};
 use crate::rich_page_frame::{
-    odt_master_page, odt_styles_xml, split_horizontal_zones, OdtMasterInput,
+    odt_master_page, odt_pt, odt_styles_xml, split_horizontal_zones, OdtMasterInput,
 };
 use crate::rich_run_writers::{odt_font_face_decls, odt_text_style_xml, OdtTextKey};
 use crate::rich_table_writers::{push_odt_table, OdtTableStyles};
 use crate::rich_toc_writers::{is_toc_block, odt_toc_styles_xml, TocScope};
 use crate::rich_writers::{odt_para_style_xml, push_odt_paragraph, OdtParaKey, StyleTable};
-use crate::{EasyOfficeError, OdfCodec, RichBlock, RichDocument, XmlSanitizer, ZipArchiveCodec};
+use crate::{
+    EasyOfficeError, OdfCodec, RichBlock, RichColumns, RichDocument, XmlSanitizer, ZipArchiveCodec,
+};
 
 const ODT_MEDIA_DIR: &str = "Pictures";
 
@@ -85,8 +87,33 @@ pub(crate) fn odt_rich_entries(
             xml
         })
     });
+    // The columns of a paragraph make a `text:section`; the blocks after a paragraph stay in its section.
+    let mut section: Option<RichColumns> = None;
+    let mut section_styles: Vec<RichColumns> = Vec::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
+        if let RichBlock::Paragraph(p) = block {
+            let wanted = p.columns.filter(|c| c.count > 1);
+            if wanted != section && !is_toc_block(block) {
+                open_lists.leave(&mut body);
+                if section.is_some() {
+                    body.push_str("</text:section>");
+                }
+                if let Some(cols) = wanted {
+                    let number = match section_styles.iter().position(|c| *c == cols) {
+                        Some(at) => at + 1,
+                        None => {
+                            section_styles.push(cols);
+                            section_styles.len()
+                        }
+                    };
+                    body.push_str(&format!(
+                        "<text:section text:style-name=\"Sect{number}\" text:name=\"Section{index}\">"
+                    ));
+                }
+                section = wanted;
+            }
+        }
         match (block, lists.block_run[index]) {
             (RichBlock::Paragraph(p), Some(run)) => {
                 open_lists.enter(&mut body, &lists, run, level_of(p));
@@ -122,6 +149,9 @@ pub(crate) fn odt_rich_entries(
     }
     open_lists.leave(&mut body);
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
+    if section.is_some() {
+        body.push_str("</text:section>");
+    }
 
     let mut run_styles = String::new();
     for (idx, key) in para_styles.keys.iter().enumerate() {
@@ -137,6 +167,14 @@ pub(crate) fn odt_rich_entries(
         styles.push_str(&odt_toc_styles_xml());
     }
     styles.push_str(&run_styles);
+    for (number, cols) in section_styles.iter().enumerate() {
+        styles.push_str(&format!(
+            "<style:style style:name=\"Sect{}\" style:family=\"section\"><style:section-properties><style:columns fo:column-count=\"{}\" fo:column-gap=\"{}\"/></style:section-properties></style:style>",
+            number + 1,
+            cols.count.min(16),
+            odt_pt(u32::from(cols.gap_twips))
+        ));
+    }
     styles.push_str(&table_auto_styles);
     styles.push_str(&odt_list_styles_xml(&lists));
     styles.push_str("</office:automatic-styles>");
@@ -163,12 +201,7 @@ pub(crate) fn odt_rich_entries(
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    let doc_cols = doc.blocks.iter().find_map(|b| match b {
-        RichBlock::Paragraph(p) => p.columns.filter(|c| c.count > 1),
-        _ => None,
-    });
-    let has_frame =
-        !page.is_empty() || page.margins.is_some() || page.paper.is_some() || doc_cols.is_some();
+    let has_frame = !page.is_empty() || page.margins.is_some() || page.paper.is_some();
     let mut listing = media.listing();
     if has_frame {
         listing.insert(0, ("styles.xml".to_string(), "text/xml"));
@@ -195,7 +228,7 @@ pub(crate) fn odt_rich_entries(
             margins: page.margins.as_ref(),
             paper: page.paper.as_ref(),
             binding: page.binding,
-            columns: doc_cols,
+            columns: None,
         });
         let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
         XmlSanitizer::validate_safe_xml(&styles_xml)?;
