@@ -3,6 +3,7 @@ import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, commandItem, studioItem } from "./test-support/modules.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
+import { REDUCED_MOTION, acceptProposal } from "./test-support/copilot-accept.mjs";
 
 // Minimal valid 2x3 PNG (RGBA, valid PNG signature + IHDR + IDAT + IEND).
 const VALID_PNG_BYTES = Uint8Array.from(
@@ -521,6 +522,7 @@ test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 �
     localRibbonState: cat.createDefaultRibbonState(),
   });
   const { document, userClick, host } = await openSlideHarness({
+    matchMedia: REDUCED_MOTION,
     testIpc: async (command, payload) => {
       if (command === "run_smart_assistant") {
         const parsed = JSON.parse(String(payload));
@@ -546,6 +548,7 @@ test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 �
   input.dispatchEvent({ type: "input", target: input });
   userClick($(document, "btn-copilot-send"));
   await flushAsyncTurns(16);
+  assert.ok(await acceptProposal(document, userClick), "the answer waits for 수락");
 
   const req = seenCopilotPayloads.at(-1);
   assert.ok(req, "copilot_run payload captured");

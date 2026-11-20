@@ -102,6 +102,26 @@
     const { colName, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     let lastUndoEntry = null;
+    let activeRun = null;
+
+    // 접근성: 움직임 줄이기를 켠 사용자에게는 포인터·타이핑 연출 없이 바로 적용한다.
+    const isReducedMotion = () => host.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+    const preview = host.__EASYOFFICE_CREATE_COPILOT_PREVIEW__({ document, win: host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName });
+    const cursorApi = host.__EASYOFFICE_COPILOT_CURSOR__;
+    const performer = host.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({
+      document,
+      win: host,
+      docBlocksOf,
+      getWorkspacePanels,
+      slideDeckState,
+      getActiveSlideIndex,
+      getActiveSheetName,
+      getSheetController,
+      blockText: preview.blockText,
+      isReducedMotion,
+      createCursor: () => cursorApi.createCopilotCursor({ document, win: host }),
+      createTypist: host.__EASYOFFICE_COPILOT_TYPING__.createTypist,
+    });
 
     function getSelectionLabel(mod = getActiveModule()) {
       if (mod === "SHEET") {
@@ -561,15 +581,19 @@
       return rawIdx;
     }
 
-    async function applyOperations(mod, mode, operations, turnId) {
-      if (mode !== "edit" || mod === "PDF" || mod === "BASE" || mod === "BOARD" || !Array.isArray(operations) || operations.length === 0) {
+    const canApply = (mod, mode, operations) =>
+      mode === "edit" && mod !== "PDF" && mod !== "BASE" && mod !== "BOARD" && Array.isArray(operations) && operations.length > 0;
+
+    // `options.beforeSnap`: 연출이 시작되기 전에 뜬 스냅숏. 연출이 임시로 쓴 것은 이미 되돌린 뒤라 그 스냅숏이 되돌리기 한 단계의 앞 상태다.
+    async function applyOperations(mod, mode, operations, turnId, options = {}) {
+      if (!canApply(mod, mode, operations)) {
         return { applied: false, locations: [] };
       }
       if (operations.length > MAX_OPERATIONS) {
         throw new Error("코파일럿 작업 개수가 허용 상한(64개)을 초과했습니다.");
       }
       if (mod === "SLIDE") getWorkspacePanels()?.syncActiveSlideDomStylesToDeck?.();
-      const beforeSnap = captureWorkspaceSnapshot(false);
+      const beforeSnap = options.beforeSnap || captureWorkspaceSnapshot(false);
       const startEpoch = getHistoryMutationEpoch?.();
       const derivedLocations = [];
       let touchedSheet = null;
@@ -632,6 +656,26 @@
       noteActivity?.();
       lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
       return { applied: true, locations: derivedLocations };
+    }
+
+    /**
+     * 포인터가 편집할 곳으로 가서 선택하고 글을 한 자씩 쳐 넣는 연출을 한 뒤 연산을 적용한다. 적용은 연출이 끝난 다음 한 번이고 되돌리기도 한 단계다.
+     * 연출을 멈추면(중지, 손을 댐) 쓰던 부분까지만 적용한다. 움직임 줄이기가 켜져 있으면 연출 없이 바로 적용한다.
+     */
+    async function applyOperationsAnimated(mod, mode, operations, turnId) {
+      if (!canApply(mod, mode, operations)) return { applied: false, locations: [] };
+      const beforeSnap = captureWorkspaceSnapshot(false);
+      const run = performer.perform(mod, operations);
+      activeRun = run;
+      let result;
+      try {
+        result = await run.done;
+      } finally {
+        activeRun = null;
+      }
+      if (result.operations.length === 0) return { applied: false, locations: [], interrupted: result.interrupted };
+      const applied = await applyOperations(mod, mode, result.operations, turnId, { beforeSnap });
+      return { ...applied, interrupted: result.interrupted };
     }
 
     // A restore would drop whatever the user did after the turn, so the undo is gone once the history moved.
@@ -715,6 +759,14 @@
       getCommandTarget,
       snapshotTarget,
       applyOperations,
+      applyOperationsAnimated,
+      stopPerformance: () => activeRun?.stop(),
+      isPerforming: () => activeRun !== null,
+      buildChanges: preview.buildChanges,
+      fingerprint: preview.fingerprint,
+      renderChangeList: preview.renderList,
+      showDocPreview: preview.showDocOverlays,
+      clearPreview: preview.clear,
       canUndoTurn,
       hasUndoEntry,
       undoLastTurn,

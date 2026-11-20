@@ -13,6 +13,11 @@ const wellFormed = (text) => text.isWellFormed();
 function loadText() {
   const env = {};
   loadUiModule(UI("copilot-text.js"), env);
+  loadUiModule(UI("copilot-diff.js"), env);
+  loadUiModule(UI("copilot-typing.js"), env);
+  loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform.js"), env);
   return env.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints;
 }
 
@@ -41,6 +46,11 @@ test("clipCodePoints cuts at a code point and never leaves half a surrogate pair
 function makeActions(texts, selectedText = "") {
   const env = {};
   loadUiModule(UI("copilot-text.js"), env);
+  loadUiModule(UI("copilot-diff.js"), env);
+  loadUiModule(UI("copilot-typing.js"), env);
+  loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const blocks = [];
@@ -127,6 +137,11 @@ test("BASE and BOARD context cut every text at a code point", () => {
     __EASYOFFICE_CREATE_BOARD_STUDIO__: () => ({ getState: () => board, analyze: () => ({ totalNodes: 1, connectorCount: 1 }) }),
   };
   loadUiModule(UI("copilot-text.js"), env);
+  loadUiModule(UI("copilot-diff.js"), env);
+  loadUiModule(UI("copilot-typing.js"), env);
+  loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("base-board-host.js"), env);
   env.__EASYOFFICE_BASE_BOARD_HOST__.init({ document: { getElementById: () => null }, env: { addEventListener() {} }, invokeIpc: async () => ({}) });
   const texts = (value) => JSON.stringify(value).match(/"[^"]*"/g).map((q) => JSON.parse(q));

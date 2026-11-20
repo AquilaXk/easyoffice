@@ -823,3 +823,205 @@
 #copilot-model-dialog .dialog-btn {
   flex-shrink: 0;
 }
+
+/* ── 코파일럿 포인터·캐럿·선택 강조 (PD-268) ──────────────────────────────────────────
+   포인터 모양과 이름표 자리는 excalidraw 협업자 포인터(`clients.ts:60-203`), 캐럿과 선택 강조는 y-prosemirror의 원격 커서
+   (`demo/prosemirror.html:36-68`: 양옆 1px 줄, 색 + 투명도 0.3)를 옮겼다. 참조 앱에 없는 부품이라 모서리는 직각이고 그림자·그러데이션이 없다. */
+.doc-scroll-container {
+  position: relative;
+}
+.eo-copilot-cursor-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  pointer-events: none;
+  user-select: none;
+}
+.eo-copilot-cursor-layer[hidden] {
+  display: none;
+}
+.eo-copilot-selection-layer {
+  position: absolute;
+  inset: 0;
+}
+.eo-copilot-selection {
+  position: absolute;
+  background: var(--accent-primary);
+  opacity: 0.3;
+}
+.eo-copilot-text-caret {
+  position: absolute;
+  width: 0;
+  border-left: 1px solid var(--accent-primary);
+  border-right: 1px solid var(--accent-primary);
+  margin-left: -1px;
+}
+.eo-copilot-text-caret.is-idle {
+  animation: eo-copilot-blink 1s steps(1) infinite;
+}
+@keyframes eo-copilot-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.eo-copilot-pointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 11px;
+  height: 14px;
+  will-change: transform;
+}
+.eo-copilot-pointer.is-off {
+  opacity: 0.3;
+}
+.eo-copilot-arrow {
+  display: block;
+  overflow: visible;
+}
+.eo-copilot-arrow-outline {
+  fill: var(--ui-text-on-accent);
+  stroke: var(--ui-text-on-accent);
+  stroke-width: 6;
+  stroke-linejoin: round;
+}
+.eo-copilot-arrow-body {
+  fill: var(--accent-primary);
+  stroke: var(--accent-primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.eo-copilot-ring {
+  position: absolute;
+  left: -15px;
+  top: -15px;
+  overflow: visible;
+}
+.eo-copilot-ring[hidden] {
+  display: none;
+}
+.eo-copilot-ring circle {
+  fill: none;
+}
+.eo-copilot-ring-outline {
+  stroke: color-mix(in srgb, var(--ui-text-on-accent) 53%, transparent);
+  stroke-width: 3;
+}
+.eo-copilot-ring-body {
+  stroke: var(--accent-primary);
+  stroke-width: 1;
+}
+.eo-copilot-label {
+  position: absolute;
+  left: 4.5px;
+  top: 15px;
+  box-sizing: border-box;
+  padding: 4px 7px;
+  font-family: var(--font-family-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+  color: var(--ui-text-on-accent);
+  background: var(--accent-primary);
+  border: 1px solid var(--ui-text-on-accent);
+  border-radius: 0;
+}
+.eo-copilot-label[hidden] {
+  display: none;
+}
+:root[data-theme-effective="dark"] .eo-copilot-label {
+  color: var(--ui-bg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .eo-copilot-text-caret.is-idle {
+    animation: none;
+  }
+}
+
+/* ── 적용 전 변경 목록과 문서 위 삭제·삽입 표시 (PD-268) ────────────────────────────────
+   표시 색은 문서의 변경 추적 표시(`#doc-editor ins.eo-rev-ins`, `del.eo-rev-del`)와 같은 토큰이다. 참조 앱에 없는 부품이라 모서리는 직각이다. */
+.eo-copilot-review-btn {
+  border-radius: 0;
+}
+.eo-copilot-changes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.eo-copilot-change {
+  border: 1px solid var(--ui-border);
+  border-radius: 0;
+  background: var(--ui-surface);
+}
+.eo-copilot-change-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.eo-copilot-change-label {
+  min-width: 0;
+  padding: 0;
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+:root[data-theme-effective="dark"] .eo-copilot-change-label {
+  color: var(--accent-strong);
+}
+.eo-copilot-change-kind {
+  flex: 0 0 auto;
+  font-size: var(--font-size-sm);
+  color: var(--ui-text-muted);
+}
+.eo-copilot-change-side {
+  padding: var(--space-2) var(--space-3);
+}
+.eo-copilot-change-side + .eo-copilot-change-side {
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.eo-copilot-change-caption {
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--ui-text-hint);
+}
+.eo-copilot-diff {
+  max-height: 160px;
+  overflow: auto;
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  color: var(--ui-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.eo-copilot-change-more {
+  font-size: var(--font-size-sm);
+  color: var(--ui-text-muted);
+}
+ins.eo-copilot-ins {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  background: var(--ui-accent-bg-light);
+}
+del.eo-copilot-del {
+  color: var(--ui-danger);
+  text-decoration: line-through;
+  background: var(--ui-danger-soft);
+}
+.eo-copilot-diff-block {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

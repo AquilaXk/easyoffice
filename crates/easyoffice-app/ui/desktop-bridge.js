@@ -113,11 +113,23 @@
     }
   }
 
-  async function invokeIpc(command, payload) {
-    const raw = await callShell(IPC_COMMAND, {
-      command: String(command),
-      payload: String(payload ?? ""),
-    });
+  // The copilot's streamed answer comes back over a Tauri IPC channel the page names in the request (PD-268). It needs no
+  // permission of its own: the channel id travels as a command argument, and the shell sends pieces to this page only.
+  function canStream() {
+    return typeof shellInternals()?.transformCallback === "function" && typeof host.__EASYOFFICE_COPILOT_STREAM__?.createStreamChannel === "function";
+  }
+
+  async function invokeIpc(command, payload, options) {
+    const args = { command: String(command), payload: String(payload ?? "") };
+    const streamApi = host.__EASYOFFICE_COPILOT_STREAM__;
+    const channel = options?.stream && canStream() ? streamApi.createStreamChannel(shellInternals(), options.stream.onPiece) : null;
+    if (channel) args.onStream = streamApi.CHANNEL_PREFIX + channel.id;
+    let raw;
+    try {
+      raw = await callShell(IPC_COMMAND, args);
+    } finally {
+      channel?.cleanup();
+    }
     if (typeof raw !== "string") return raw;
     try {
       return JSON.parse(raw);
@@ -232,5 +244,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, pdfEdit, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, openLink, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, canStream, invokeIpc, saveFile, pdfExport, pdfEdit, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, openLink, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

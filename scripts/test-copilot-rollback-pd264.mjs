@@ -12,6 +12,11 @@ function actions({ restore, epoch }) {
   const env = {};
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-text.js"), env);
+  loadUiModule(UI("copilot-diff.js"), env);
+  loadUiModule(UI("copilot-typing.js"), env);
+  loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const calls = [];
   const instance = env.__EASYOFFICE_CREATE_COPILOT_ACTIONS__({

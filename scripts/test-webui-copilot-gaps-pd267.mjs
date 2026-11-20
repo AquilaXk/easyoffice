@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createSelection } from "./test-support/doc-run-harness.mjs";
+import { REDUCED_MOTION, acceptProposal } from "./test-support/copilot-accept.mjs";
 
 // PD-267: stopping a request for real, asking again for the last answer, the dropped-operation notice and the
 // selection commands in the copilot panel.
@@ -10,6 +11,7 @@ async function open({ run, module = "DOC", selection }) {
   const seen = [];
   const harness = await createWorkspaceHarness({
     search: `?module=${module}&win=w-copilot-gaps-${module}`,
+    matchMedia: REDUCED_MOTION,
     selection,
     testIpc: async (command, payload) => {
       if (command === "run_smart_assistant") {
@@ -47,7 +49,8 @@ async function open({ run, module = "DOC", selection }) {
   const runs = () => seen.filter((r) => r.action === "copilot_run");
   const assistants = () => document.querySelectorAll("#copilot-thread .eo-copilot-msg--assistant");
   const button = (scope, label) => Array.from(scope.querySelectorAll("button")).find((b) => b.textContent.trim() === label);
-  return { ...harness, seen, send, runs, assistants, button, input };
+  const accept = () => acceptProposal(document, userClick);
+  return { ...harness, seen, send, runs, assistants, button, input, accept };
 }
 
 test("stop sends a cancel for the running request and shows it stopped", async () => {
@@ -102,24 +105,28 @@ test("regenerate asks the same prompt again and replaces the last answer", async
 
 test("regenerate in edit mode takes the earlier edit back before applying the new one", async () => {
   let n = 0;
-  const { document, userClick, send, assistants, button } = await open({
+  const { document, userClick, send, assistants, button, accept } = await open({
     run: () => ({ status: "ok", mode: "edit", updatedInPlace: true, reply: "ok", operations: [{ op: "doc.append", text: "추가 " + (n += 1) }] }),
   });
   const editor = document.getElementById("doc-editor");
   await send("문단을 추가해 주세요");
+  assert.equal(editor.textContent.includes("추가 1"), false, "nothing is written until 수락");
+  await accept();
   assert.ok(editor.textContent.includes("추가 1"));
   userClick(button(assistants()[0], "다시 생성"));
   await flushAsyncTurns(24);
+  await accept();
   assert.ok(editor.textContent.includes("추가 2"));
   assert.equal(editor.textContent.includes("추가 1"), false, "the first answer's edit was undone");
 });
 
 test("regenerate and undo are gone once the user edited after the answer", async () => {
-  const { document, send, assistants, button } = await open({
+  const { document, send, assistants, button, accept } = await open({
     run: () => ({ status: "ok", mode: "edit", updatedInPlace: true, reply: "ok", operations: [{ op: "doc.append", text: "추가" }] }),
   });
   const editor = document.getElementById("doc-editor");
   await send("문단을 추가해 주세요");
+  await accept();
   assert.ok(button(assistants()[0], "실행 취소") && !button(assistants()[0], "실행 취소").disabled);
   const p = editor.querySelector("p");
   editor.dispatchEvent({ type: "focus", target: editor });
@@ -138,7 +145,7 @@ function rangeOver(node, text) {
 test("a text selection shows the selection commands and runs the chosen one on that selection", async () => {
   const selection = createSelection();
   Object.defineProperty(selection, "isCollapsed", { get() { return !this._range || this._range.collapsed === true; } });
-  const { document, userClick, runs, assistants, seen } = await open({
+  const { document, userClick, runs, assistants, seen, accept } = await open({
     selection,
     run: (req) => ({ status: "ok", mode: "edit", updatedInPlace: true, reply: "다듬음", operations: [{ op: "doc.replace_paragraphs", replacements: [{ index: req.selection.paragraphIndex, text: "새 문장" }] }] }),
   });
@@ -162,6 +169,8 @@ test("a text selection shows the selection commands and runs the chosen one on t
   assert.equal(req.prompt, "요약");
   assert.equal(req.selection.paragraphIndex, 0);
   assert.equal(req.selection.paragraphEnd, 0);
+  assert.notEqual(editor.querySelectorAll("p")[0].textContent, "새 문장", "the proposal waits for 수락");
+  await accept();
   assert.equal(editor.querySelectorAll("p")[0].textContent, "새 문장", "the result went through the replace_paragraphs path");
   assert.match(assistants()[0].textContent, /다듬음/);
 

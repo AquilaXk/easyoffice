@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { REDUCED_MOTION, acceptProposal } from "./test-support/copilot-accept.mjs";
 import { switchModule, createMemoryStorage } from "./test-support/modules.mjs";
 
 const COPILOT_CSS = fs.readFileSync(new URL("../crates/easyoffice-app/ui/copilot.css", import.meta.url), "utf8");
@@ -148,7 +149,7 @@ test("코파일럿 패널은 기본 닫힘이며 모듈 가시성, 진입점 토
 });
 
 test("SHEET 편집 모드는 목표 대비 % 수식·백분율 서식·최대 격차 강조를 제자리에서 반영하고 D2:D5 칩 선택 이동과 실행 취소를 수행한다", async () => {
-  const { document, userClick } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-copilot-sheet" });
+  const { document, userClick } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-copilot-sheet", matchMedia: REDUCED_MOTION });
   await flushAsyncTurns(12);
   await seedRevenueSheet(document);
 
@@ -177,6 +178,8 @@ test("SHEET 편집 모드는 목표 대비 % 수식·백분율 서식·최대 �
 
   input.dispatchEvent({ type: "keydown", key: "Enter" });
   await flushAsyncTurns(20);
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="D2"]').textContent, "", "nothing is written before the change is accepted");
+  assert.ok(await acceptProposal(document, userClick), "the answer waits for 수락");
 
   const userMsg = document.querySelector("#copilot-thread .eo-copilot-msg--user");
   const assistantMsg = document.querySelector("#copilot-thread .eo-copilot-msg--assistant");
@@ -270,7 +273,7 @@ test("질문 모드는 시트를 변경하지 않으며 PDF 모듈은 질문 모
 });
 
 test("DOC 및 SLIDE 편집 모드는 인플레이스 문서·슬라이드 반영, 위치 칩 이동, 실행 취소 복원을 수행한다", async () => {
-  const { document, userClick } = await createWorkspaceHarness({ search: "?module=DOC&win=w-copilot-doc-slide" });
+  const { document, userClick } = await createWorkspaceHarness({ search: "?module=DOC&win=w-copilot-doc-slide", matchMedia: REDUCED_MOTION });
   await flushAsyncTurns(12);
 
   const editor = document.getElementById("doc-editor");
@@ -286,6 +289,8 @@ test("DOC 및 SLIDE 편집 모드는 인플레이스 문서·슬라이드 반영
   input.dispatchEvent({ type: "input", target: input });
   userClick(document.getElementById("btn-copilot-send"));
   await flushAsyncTurns(16);
+  assert.ok(editor.textContent.includes("010-1234-5678"), "the document is untouched until the change is accepted");
+  assert.ok(await acceptProposal(document, userClick));
 
   assert.ok(!editor.textContent.includes("010-1234-5678"), "PII phone number masked in place");
   assert.ok(editor.querySelectorAll("p, h2, ul, ol").length >= 2, "summary block appended");
@@ -308,6 +313,7 @@ test("DOC 및 SLIDE 편집 모드는 인플레이스 문서·슬라이드 반영
   input.dispatchEvent({ type: "input", target: input });
   userClick(document.getElementById("btn-copilot-send"));
   await flushAsyncTurns(16);
+  assert.ok(await acceptProposal(document, userClick));
 
   const thumbs = document.querySelectorAll("#slide-thumb-list .slide-thumb");
   assert.equal(thumbs.length, 2, "new slide added in place");
@@ -518,6 +524,7 @@ test("상한 초과 및 허용되지 않은 작업 페이로드는 Fail-Closed�
   let stubResponse = null;
   const { document, sandbox, userClick } = await createWorkspaceHarness({
     search: "?module=SHEET&win=w-copilot-bounds",
+    matchMedia: REDUCED_MOTION,
     testIpc: async (command, payload) => {
       if (command === "run_smart_assistant" && stubResponse) {
         return stubResponse;
@@ -545,6 +552,7 @@ test("상한 초과 및 허용되지 않은 작업 페이로드는 Fail-Closed�
     input.dispatchEvent({ type: "input", target: input });
     userClick(document.getElementById("btn-copilot-send"));
     await flushAsyncTurns(12);
+    await acceptProposal(document, userClick);
     return document.querySelectorAll("#copilot-thread .eo-copilot-msg--assistant").at(-1);
   };
 
@@ -647,6 +655,7 @@ test("작업 목록 중간에서 실패하면 앞서 한 문서 변경을 되돌
   let stubResponse = null;
   const { document, sandbox, userClick } = await createWorkspaceHarness({
     search: "?module=DOC&win=w-copilot-atomic",
+    matchMedia: REDUCED_MOTION,
     testIpc: async (command, payload) => {
       if (command === "run_smart_assistant" && stubResponse) return stubResponse;
       const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
@@ -672,6 +681,7 @@ test("작업 목록 중간에서 실패하면 앞서 한 문서 변경을 되돌
     input.dispatchEvent({ type: "input", target: input });
     userClick(document.getElementById("btn-copilot-send"));
     await flushAsyncTurns(12);
+    await acceptProposal(document, userClick);
     return document.querySelectorAll("#copilot-thread .eo-copilot-msg--assistant").at(-1);
   };
   const before = editor.textContent;

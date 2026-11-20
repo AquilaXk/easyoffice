@@ -49,7 +49,7 @@
     isExcludedDocChromeElement, extractEditableDocumentText, collectActiveScrubGroups, applyScrubResultsToGroups, tokenizeFormulaStringLiterals,
   } = host.__EASYOFFICE_CREATE_PII_SCRUBBER__({ document, localScrubPii });
 
-  const { invokeIpc } = host.__EASYOFFICE_CREATE_IPC_TRANSPORT__({ document, host, desktopBridge });
+  const { invokeIpc, canStream: canStreamIpc } = host.__EASYOFFICE_CREATE_IPC_TRANSPORT__({ document, host, desktopBridge });
   const pdfEdit = host.__EASYOFFICE_CREATE_PDF_EDIT__({ document, desktopBridge, getPdfRotationDeg: () => pdfRotationDeg });
   host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
 
@@ -233,7 +233,7 @@
   });
 
   copilotUi = host.__EASYOFFICE_CREATE_COPILOT_UI__({
-    document, invokeIpc, sheetDataStore, sheetRowCounts, slideDeckState,
+    document, invokeIpc, canStreamIpc, sheetDataStore, sheetRowCounts, slideDeckState,
     getActiveModule: () => activeModule, getActiveSheetName: () => activeSheetName, getActiveSlideIndex: () => activeSlideIndex,
     getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit,
     activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,

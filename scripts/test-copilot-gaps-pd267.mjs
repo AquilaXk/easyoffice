@@ -50,6 +50,11 @@ function createActions({ texts = [], epoch = () => 1, selection = null, slides =
   const env = {};
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-text.js"), env);
+  loadUiModule(UI("copilot-diff.js"), env);
+  loadUiModule(UI("copilot-typing.js"), env);
+  loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const dom = fakeDocument(texts);
   env.getSelection = () => selection;

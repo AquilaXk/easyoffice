@@ -82,15 +82,22 @@
       }
     }
 
-    async function invokeIpc(command, payload) {
+    // Only the desktop shell can stream an answer (the test hook says so with `streaming`); the `--serve` preview answers whole.
+    function canStream() {
+      if (typeof host.__EASYOFFICE_TEST_IPC__ === "function") return host.__EASYOFFICE_TEST_IPC__.streaming === true;
+      return desktopBridge.isAvailable() && desktopBridge.canStream?.() === true;
+    }
+
+    // `options.stream = { onPiece }` asks for the model's text pieces while the request runs; the answer itself still arrives whole.
+    async function invokeIpc(command, payload, options) {
       if (typeof host.__EASYOFFICE_TEST_IPC__ === "function") {
         return viaTransport(command, payload, async () => {
-          const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload);
+          const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload, options);
           return typeof raw === "string" ? JSON.parse(raw) : raw;
         });
       }
       if (desktopBridge.isAvailable()) {
-        return viaTransport(command, payload, () => desktopBridge.invokeIpc(command, payload));
+        return viaTransport(command, payload, () => desktopBridge.invokeIpc(command, payload, options));
       }
       if (isHttpAvailable()) {
         return invokeHttp(command, payload);
@@ -99,7 +106,7 @@
       throw connectionError(DISCONNECTED_MESSAGE);
     }
 
-    return { invokeIpc };
+    return { invokeIpc, canStream };
   }
 
   host.__EASYOFFICE_CREATE_IPC_TRANSPORT__ = createIpcTransport;

@@ -12,7 +12,8 @@
   const DEFAULT_WIDTH = 320;
   const MAX_MESSAGES = 64;
   const MAX_HISTORY_ITEMS = 12;
-  const MAX_PROMPT_CHARS = 8000;
+  // 엔진이 받는 질문의 상한(UTF-8 바이트). 글자 수가 아니라 바이트로 맞춘다(`copilot-text.js` `clipUtf8Bytes`).
+  const MAX_PROMPT_BYTES = 16384;
 
   // The selection commands (the engine writes the instruction for each id, `copilot/prompt.rs`).
   const SELECTION_COMMANDS = Object.freeze([
@@ -152,6 +153,7 @@
     const {
       document,
       invokeIpc,
+      canStreamIpc,
       getActiveModule,
       isImeComposing,
       setStatusFeedback,
@@ -166,6 +168,7 @@
     let activeRunToken = 0;
     let activeRequestId = "";
     let regenerating = false;
+    const streamApi = host.__EASYOFFICE_COPILOT_STREAM__;
     let turnCounter = 0;
     let dragState = null;
     const messages = [];
@@ -251,6 +254,7 @@
     // Undo and regenerate follow the document: a user edit after the answer turns them off without a redraw.
     function actionDisabled(action, msg) {
       if (!msg) return true;
+      if (action === "accept" || action === "reject") return running || regenerating;
       const undoGone = Boolean(msg.applied) && !msg.undone && !copilotActions.canUndoTurn(msg.id);
       return action === "undo" ? undoGone : undoGone || running || regenerating;
     }
@@ -346,11 +350,25 @@
       }
 
       const locs = Array.isArray(msg.locations) ? msg.locations : [];
+      const proposing = msg.change?.state === "pending";
       const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id);
       const showRegenerate = !msg.pending && Boolean(msg.request) && messages.at(-1) === msg;
-      if (locs.length > 0 || showUndo || showRegenerate) {
+      if (locs.length > 0 || showUndo || showRegenerate || proposing) {
         const chipRow = document.createElement("div");
         chipRow.className = "eo-copilot-chip-row";
+        if (proposing) {
+          for (const [action, label, handler] of [["accept", "수락", acceptChange], ["reject", "거절", rejectChange]]) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "eo-copilot-chip-btn eo-copilot-review-btn";
+            btn.dataset.turn = msg.id;
+            btn.dataset.copilotAction = action;
+            btn.disabled = actionDisabled(action, msg);
+            btn.textContent = label;
+            btn.addEventListener("click", () => void handler(msg));
+            chipRow.appendChild(btn);
+          }
+        }
         for (const loc of locs) {
           const chip = document.createElement("button");
           chip.type = "button";
@@ -396,16 +414,27 @@
         wrap.appendChild(chipRow);
       }
 
+      if (proposing) {
+        wrap.appendChild(copilotActions.renderChangeList(msg.change.changes, (loc) => void copilotActions.locateTarget(loc).then(() => syncSelectionBadge())));
+      } else if (msg.change?.state === "rejected") {
+        const note = document.createElement("div");
+        note.className = "eo-copilot-inplace-row";
+        note.textContent = "거절함";
+        wrap.appendChild(note);
+      }
+
+      if (msg.reply) {
+        const replyEl = document.createElement("div");
+        replyEl.className = "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : "");
+        replyEl.dataset.turnReply = msg.id;
+        replyEl.textContent = msg.reply;
+        wrap.appendChild(replyEl);
+      }
       if (msg.pending) {
         const loading = document.createElement("div");
         loading.className = "eo-copilot-loading";
         loading.textContent = "응답 생성 중…";
         wrap.appendChild(loading);
-      } else if (msg.reply) {
-        const replyEl = document.createElement("div");
-        replyEl.className = "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : "");
-        replyEl.textContent = msg.reply;
-        wrap.appendChild(replyEl);
       }
       return wrap;
     }
@@ -490,6 +519,7 @@
         modelUi.openDialog(undefined, undefined, "전송하기 전에 API 키를 입력하거나 로컬 모델을 선택해 주세요.");
         return null;
       }
+      dismissPreview();
       const mod = request.mod || getActiveModule();
       const mode = request.mode || effectiveMode(mod);
       const history = buildHistoryPayload();
@@ -529,9 +559,38 @@
       return { assistantEntry, turnId, mod, mode, selection, context, history, token: activeRunToken, requestId: activeRequestId, request };
     }
 
+    // 스트림으로 온 글이 늘 때마다 대기 중인 답글을 그 자리에서 고쳐 쓴다(조각마다 스레드를 다시 그리지 않는다).
+    function showStreamed(entry, text, token) {
+      if (token !== activeRunToken) return;
+      entry.reply = text;
+      const node = byId("copilot-thread")?.querySelector(`[data-turn-reply="${entry.id}"]`);
+      if (node) {
+        node.textContent = text;
+        const bodyEl = byId("copilot-body");
+        if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight || 0;
+      } else {
+        renderThread();
+      }
+    }
+
+    // 연산이 있는 편집 응답은 적용하지 않고 바뀔 곳을 보여 준다. 수락해야 적용한다.
+    function propose(entry, mod, operations) {
+      const changes = copilotActions.buildChanges(mod, operations);
+      entry.change = { state: "pending", mod, operations, changes, fingerprint: copilotActions.fingerprint(mod, operations) };
+      if (mod === "DOC") copilotActions.showDocPreview(changes);
+    }
+
+    function dismissPreview() {
+      for (const msg of messages) {
+        if (msg.change?.state === "pending") msg.change.state = "rejected";
+      }
+      copilotActions.clearPreview();
+    }
+
     async function finishTurn(turn) {
       const { assistantEntry, turnId, mod, mode, token } = turn;
       try {
+        const streaming = Boolean(canStreamIpc?.());
         const req = {
           action: "copilot_run",
           requestId: turn.requestId,
@@ -544,17 +603,19 @@
           provider: modelUi.currentProviderPayload(),
         };
         if (turn.request.command) req.command = turn.request.command;
-        const res = await invokeIpc("run_smart_assistant", JSON.stringify(req));
+        if (streaming) req.stream = true;
+        // 모델이 쓰는 글을 받는 대로 답글에 보인다. 연산은 보이지 않고, 전송이 끝나 엔진이 검증한 뒤의 응답으로만 쓴다.
+        const session = streaming ? streamApi.createStreamSession({ requestId: turn.requestId, onText: (text) => showStreamed(assistantEntry, text, token) }) : null;
+        const res = await invokeIpc("run_smart_assistant", JSON.stringify(req), session ? { stream: { onPiece: (piece) => session.accept(piece) } } : undefined);
         if (token !== activeRunToken) return;
+        session?.finish();
         const ops = Array.isArray(res?.operations) ? res.operations : [];
-        const appliedRes = await copilotActions.applyOperations(mod, mode, ops, turnId);
         const explicitLocs = normalizeLocations(res?.locations, mod);
         assistantEntry.pending = false;
         assistantEntry.reply = String(res?.reply || "요청을 처리했습니다.");
         assistantEntry.reasoning = String(res?.reasoning || "");
-        assistantEntry.applied = appliedRes.applied;
-        assistantEntry.updatedInPlace = mode === "edit" && (Boolean(res?.updatedInPlace) || appliedRes.applied);
-        assistantEntry.locations = explicitLocs.length > 0 ? explicitLocs : appliedRes.locations;
+        assistantEntry.locations = explicitLocs;
+        if (mode === "edit" && ops.length > 0) propose(assistantEntry, mod, ops);
         const dropped = Number(res?.droppedOperations) || 0;
         if (dropped > 0) setStatusFeedback?.("형식이 맞지 않는 작업 " + dropped + "개를 건너뛰었습니다");
       } catch (err) {
@@ -571,6 +632,44 @@
       }
     }
 
+    // 수락: 문서가 미리보기를 본 때와 같으면 포인터·타이핑 연출과 함께 적용한다(되돌리기는 한 단계).
+    async function acceptChange(msg) {
+      const change = msg?.change;
+      if (!change || change.state !== "pending" || running || regenerating) return;
+      copilotActions.clearPreview();
+      if (copilotActions.fingerprint(change.mod, change.operations) !== change.fingerprint) {
+        change.state = "stale";
+        setStatusFeedback?.("문서가 바뀌어 적용할 수 없습니다");
+        renderThread();
+        return;
+      }
+      change.state = "accepted";
+      running = true;
+      renderThread();
+      syncComposerControls();
+      try {
+        const appliedRes = await copilotActions.applyOperationsAnimated(change.mod, "edit", change.operations, msg.id);
+        msg.applied = appliedRes.applied;
+        msg.updatedInPlace = appliedRes.applied;
+        if (msg.locations.length === 0) msg.locations = appliedRes.locations;
+        if (appliedRes.interrupted) setStatusFeedback?.("코파일럿 편집을 중지했습니다");
+      } catch (err) {
+        msg.error = true;
+        msg.reply = String(err?.message || "코파일럿 편집을 적용하지 못했습니다.");
+      } finally {
+        running = false;
+        renderThread();
+        syncComposerControls();
+      }
+    }
+
+    function rejectChange(msg) {
+      if (msg?.change?.state !== "pending" || running || regenerating) return;
+      msg.change.state = "rejected";
+      copilotActions.clearPreview();
+      renderThread();
+    }
+
     function runTurn(request, options) {
       const turn = startTurn(request, options);
       return turn ? finishTurn(turn) : undefined;
@@ -578,7 +677,7 @@
 
     function submitPrompt() {
       const inputEl = byId("copilot-input");
-      const prompt = host.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints(String(inputEl?.value || "").trim(), MAX_PROMPT_CHARS);
+      const prompt = host.__EASYOFFICE_COPILOT_TEXT__.clipUtf8Bytes(String(inputEl?.value || "").trim(), MAX_PROMPT_BYTES);
       if (!prompt) return undefined;
       return runTurn({ prompt }, { clearInput: true });
     }
@@ -597,6 +696,10 @@
       regenerating = true;
       syncMessageActions();
       try {
+        if (last.change?.state === "pending") {
+          last.change.state = "rejected";
+          copilotActions.clearPreview();
+        }
         if (last.applied && !last.undone) {
           if (!(await copilotActions.undoLastTurn(last.id))) {
             renderThread();
@@ -620,6 +723,11 @@
 
     function stopActiveRun() {
       if (!running) return;
+      // 연출 중이면 쓰던 부분까지 남기고 멈춘다(요청은 이미 끝났다).
+      if (copilotActions.isPerforming()) {
+        copilotActions.stopPerformance();
+        return;
+      }
       activeRunToken += 1;
       running = false;
       // The engine closes the model connection; the answer that may still arrive is dropped by the token.
@@ -694,6 +802,7 @@
       byId("btn-copilot-close")?.addEventListener("click", () => setOpen(false));
       byId("btn-copilot-new")?.addEventListener("click", () => {
         stopActiveRun();
+        dismissPreview();
         messages.length = 0;
         copilotActions.clearUndo();
         const inputEl = byId("copilot-input");
@@ -717,6 +826,9 @@
 
       const inputEl = byId("copilot-input");
       inputEl?.addEventListener("input", () => {
+        // 질문은 UTF-8 바이트 상한까지만 받는다(예전 `maxlength`는 글자 수라 한글이 엔진 상한을 넘었다).
+        const clipped = host.__EASYOFFICE_COPILOT_TEXT__.clipUtf8Bytes(inputEl.value, MAX_PROMPT_BYTES);
+        if (clipped !== inputEl.value) inputEl.value = clipped;
         autoGrowTextarea(inputEl);
         renderWelcome();
         syncComposerControls();
@@ -744,7 +856,10 @@
       bind,
       toggle,
       setOpen,
-      onModuleChanged: () => syncPanelChrome(),
+      onModuleChanged: () => {
+        dismissPreview();
+        syncPanelChrome();
+      },
       syncSelection: () => syncSelectionBadge(),
     };
   }
