@@ -499,36 +499,43 @@
       let touchedDoc = false;
       let focusSlideIdx = null;
 
-      for (const op of operations) {
-        if (!op || typeof op !== "object") throw new Error("유효하지 않은 코파일럿 작업 항목입니다.");
-        const kind = String(op.op || op.type || op.kind || "").trim();
-        if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart") {
-          const sheetName = String(op.sheet || getActiveSheetName());
-          if (!sheetDataStore[sheetName]) sheetDataStore[sheetName] = Object.create(null);
-          touchedSheet = sheetName;
-          if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
-          else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
-          else executeSheetChart(op, sheetName, derivedLocations);
-        } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
-          touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
-        } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
-          focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
-        } else {
-          throw new Error("지원하지 않는 코파일럿 작업입니다: " + kind);
+      // The operations apply as a whole: one that fails (an unknown kind, a protected cell, a range over the limit) puts back what
+      // the ones before it changed, so a reply never leaves the document half edited.
+      try {
+        for (const op of operations) {
+          if (!op || typeof op !== "object") throw new Error("유효하지 않은 코파일럿 작업 항목입니다.");
+          const kind = String(op.op || op.type || op.kind || "").trim();
+          if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart") {
+            const sheetName = String(op.sheet || getActiveSheetName());
+            if (!sheetDataStore[sheetName]) sheetDataStore[sheetName] = Object.create(null);
+            touchedSheet = sheetName;
+            if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+            else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+            else executeSheetChart(op, sheetName, derivedLocations);
+          } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
+            touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
+          } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
+            focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
+          } else {
+            throw new Error("지원하지 않는 코파일럿 작업입니다: " + kind);
+          }
         }
-      }
 
-      if (touchedSheet) await flushSheetEvaluationAndFormats(touchedSheet);
-      if (touchedDoc) {
-        const panels = getWorkspacePanels();
-        panels?.saveActiveDocTabState?.();
-        panels?.computeSmartStats?.();
-        panels?.renderModuleOutline?.("DOC");
-      }
-      if (focusSlideIdx !== null) {
-        const panels = getWorkspacePanels();
-        panels?.renderSlideDeck?.(focusSlideIdx);
-        panels?.renderModuleOutline?.("SLIDE");
+        if (touchedSheet) await flushSheetEvaluationAndFormats(touchedSheet);
+        if (touchedDoc) {
+          const panels = getWorkspacePanels();
+          panels?.saveActiveDocTabState?.();
+          panels?.computeSmartStats?.();
+          panels?.renderModuleOutline?.("DOC");
+        }
+        if (focusSlideIdx !== null) {
+          const panels = getWorkspacePanels();
+          panels?.renderSlideDeck?.(focusSlideIdx);
+          panels?.renderModuleOutline?.("SLIDE");
+        }
+      } catch (err) {
+        await restoreWorkspaceSnapshot(beforeSnap, undefined, { keepProtections: true }).catch(() => {});
+        throw err;
       }
 
       commitDeferredUndoSnapshot(beforeSnap);

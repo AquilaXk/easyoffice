@@ -642,3 +642,55 @@ test("엔드포인트 주소를 바꾸고 새 키를 넣지 않으면 저장된 
   const back = await send("셋째 질문");
   assert.equal(back.provider.apiKey, "", "the key was dropped when the address changed, not parked");
 });
+
+test("작업 목록 중간에서 실패하면 앞서 한 문서 변경을 되돌리고 되돌리기 단계를 남기지 않으며, 성공하면 한 단계로 되돌린다", async () => {
+  let stubResponse = null;
+  const { document, sandbox, userClick } = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-copilot-atomic",
+    testIpc: async (command, payload) => {
+      if (command === "run_smart_assistant" && stubResponse) return stubResponse;
+      const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+      const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+        getActiveModule: () => "DOC",
+        ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+        ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+        contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+        moduleSpecs: cat.MODULE_SPECS,
+        localRibbonState: cat.createDefaultRibbonState(),
+      });
+      return offline[command](payload);
+    },
+  });
+  await flushAsyncTurns(10);
+  userClick(document.getElementById("btn-copilot-toggle"));
+  await selectLocalOllama(document, userClick);
+  const input = document.getElementById("copilot-input");
+  const editor = document.getElementById("doc-editor");
+  const runPrompt = async (operations) => {
+    stubResponse = { status: "ok", mode: "edit", updatedInPlace: true, operations };
+    input.value = "문단을 추가해 주세요";
+    input.dispatchEvent({ type: "input", target: input });
+    userClick(document.getElementById("btn-copilot-send"));
+    await flushAsyncTurns(12);
+    return document.querySelectorAll("#copilot-thread .eo-copilot-msg--assistant").at(-1);
+  };
+  const before = editor.textContent;
+
+  const failed = await runPrompt([
+    { op: "doc.append", text: "앞서 추가한 문단" },
+    { op: "shell.exec", cmd: "id" },
+  ]);
+  assert.ok(failed.querySelector(".eo-copilot-reply--error"), "a failing operation reports an error");
+  assert.equal(failed.querySelector(".eo-copilot-undo-btn"), null, "nothing was applied, so there is nothing to undo");
+  assert.equal(editor.textContent, before, "the paragraph of the earlier operation is gone");
+
+  const ok = await runPrompt([
+    { op: "doc.append", text: "첫 문단" },
+    { op: "doc.append", text: "둘째 문단" },
+  ]);
+  assert.ok(ok.querySelector(".eo-copilot-undo-btn"));
+  assert.ok(editor.textContent.includes("첫 문단") && editor.textContent.includes("둘째 문단"));
+  userClick(ok.querySelector(".eo-copilot-undo-btn"));
+  await flushAsyncTurns(12);
+  assert.equal(editor.textContent, before, "one undo takes both operations back");
+});
