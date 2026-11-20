@@ -4,7 +4,8 @@
 
 use crate::benchmark_baselines::crc32_byte_by_byte_baseline;
 use easyoffice_formats::{
-    DocumentFormat, IeeeCrc32, UniversalDocumentModel, UniversalFormatConverter,
+    DocumentFormat, IeeeCrc32, PdfDocumentModel, PdfPageModel, PdfSerializer,
+    UniversalDocumentModel, UniversalFormatConverter,
 };
 use easyoffice_sheet::SheetEngine;
 use std::hint::black_box;
@@ -121,6 +122,94 @@ fn document_case(
         output_bytes: out.len(),
         elapsed_us: elapsed_us.max(1),
         equivalence_verified: verified && out.len() < DOC_OUTPUT_CEILING_BYTES,
+    }
+}
+
+const PDF_PAGES: usize = 300;
+const PDF_LINES_PER_PAGE: usize = 30;
+const PDF_OUTPUT_CEILING_BYTES: usize = 8_000_000;
+const SHEET_PDF_ROWS: u32 = 300;
+const SHEET_PDF_COLS: u32 = 20;
+
+/// The document of `document_case` written as a PDF by the engine's own page writer, then read back.
+fn docx_to_pdf_case(source: &[u8]) -> RealPathResult {
+    let t0 = Instant::now();
+    let out =
+        UniversalFormatConverter::convert(black_box(source), Some("docx"), DocumentFormat::Pdf)
+            .expect("benchmark source converts to pdf");
+    let elapsed_us = t0.elapsed().as_micros() as u64;
+    let pages = PdfSerializer::parse(&out)
+        .map(|doc| doc.pages.len())
+        .unwrap_or(0);
+    RealPathResult {
+        case_id: "docx_to_pdf_1mb",
+        workload: format!("{DOC_PARAGRAPHS}-paragraph document, convert docx to pdf"),
+        input_bytes: source.len(),
+        output_bytes: out.len(),
+        elapsed_us: elapsed_us.max(1),
+        equivalence_verified: pages > 0 && out.len() < PDF_OUTPUT_CEILING_BYTES,
+    }
+}
+
+/// Text pages written and read back by the engine's PDF writer and reader.
+fn pdf_text_case() -> RealPathResult {
+    let pages = (1..=PDF_PAGES)
+        .map(|n| PdfPageModel {
+            page_number: n,
+            rotation_degrees: 0,
+            body_text: (0..PDF_LINES_PER_PAGE)
+                .map(|l| format!("page {n} line {l} 예산 집행 계획"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            approval_stamp: None,
+        })
+        .collect();
+    let model = PdfDocumentModel {
+        title: "대용량 PDF".to_string(),
+        pages,
+        watermark_text: None,
+    };
+    let t0 = Instant::now();
+    let bytes = PdfSerializer::serialize(black_box(&model));
+    let parsed = PdfSerializer::parse(black_box(&bytes));
+    let elapsed_us = t0.elapsed().as_micros() as u64;
+    RealPathResult {
+        case_id: "pdf_text_300_pages_write_read",
+        workload: format!("{PDF_PAGES} pages x {PDF_LINES_PER_PAGE} lines, write + read"),
+        input_bytes: PDF_PAGES * PDF_LINES_PER_PAGE,
+        output_bytes: bytes.len(),
+        elapsed_us: elapsed_us.max(1),
+        equivalence_verified: parsed.is_ok_and(|doc| doc == model)
+            && bytes.len() < PDF_OUTPUT_CEILING_BYTES,
+    }
+}
+
+/// A sheet printed as PDF pages (the laid-out page writer: page setup, grid, repeated headings).
+fn xlsx_to_pdf_case() -> RealPathResult {
+    let cells = (0..SHEET_PDF_ROWS)
+        .flat_map(|r| (0..SHEET_PDF_COLS).map(move |c| (r, c, format!("{}", r * 131 + c * 7))))
+        .collect();
+    let model = UniversalDocumentModel {
+        title: "인쇄 시트".to_string(),
+        sheet_cells: cells,
+        ..Default::default()
+    };
+    let xlsx = UniversalFormatConverter::encode(&model, DocumentFormat::Xlsx).expect("xlsx packs");
+    let t0 = Instant::now();
+    let out =
+        UniversalFormatConverter::convert(black_box(&xlsx), Some("xlsx"), DocumentFormat::Pdf)
+            .expect("xlsx converts to pdf");
+    let elapsed_us = t0.elapsed().as_micros() as u64;
+    let pages = PdfSerializer::parse(&out)
+        .map(|doc| doc.pages.len())
+        .unwrap_or(0);
+    RealPathResult {
+        case_id: "xlsx_to_pdf_6k_cells",
+        workload: format!("{SHEET_PDF_ROWS}x{SHEET_PDF_COLS} cells, convert xlsx to pdf"),
+        input_bytes: xlsx.len(),
+        output_bytes: out.len(),
+        elapsed_us: elapsed_us.max(1),
+        equivalence_verified: pages > 0 && out.len() < PDF_OUTPUT_CEILING_BYTES,
     }
 }
 
@@ -257,6 +346,9 @@ pub fn run_real_path_benchmarks() -> Vec<RealPathResult> {
             DocumentFormat::Hwpx,
             &model.paragraphs,
         ),
+        docx_to_pdf_case(&source),
+        pdf_text_case(),
+        xlsx_to_pdf_case(),
         xlsx_case(),
         recalc_case(),
         recalc_10k_case(),
@@ -292,7 +384,7 @@ mod tests {
         for r in &results {
             eprintln!("{}", r.to_json());
         }
-        assert_eq!(results.len(), 7);
+        assert_eq!(results.len(), 10);
         real_path_gate(&results).unwrap();
         let docx = &results[0];
         assert!(docx.output_bytes < DOC_OUTPUT_CEILING_BYTES, "{docx:?}");
