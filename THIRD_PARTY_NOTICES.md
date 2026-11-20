@@ -10332,3 +10332,12 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 ```
+
+## FORECAST.ETS clean-room reference material (documents only, no code)
+
+`crates/easyoffice-sheet/src/functions_forecast_ets_cr.rs` (Apache-2.0) is written from public documents. No code is copied. The record of every rule and choice is `docs/forecast-ets-cleanroom.md`; its sources S1 to S5 are the vendor function documents below.
+
+- Microsoft Excel function documents, read on 2026-11-21: FORECAST.ETS, FORECAST.ETS.CONFINT, FORECAST.ETS.SEASONALITY, FORECAST.ETS.STAT and "Forecasting functions (reference)", at `https://support.microsoft.com/en-us/excel/functions/forecast-ets-function`, `.../forecast-ets-confint-function`, `.../forecast-ets-seasonality-function`, `.../forecast-ets-stat-function`, `.../forecasting-functions-reference`. Used for the argument rules and error conditions only.
+- Hyndman and Athanasopoulos, *Forecasting: Principles and Practice*, 3rd ed. (https://otexts.com/fpp3/, CC BY-NC-SA 4.0). Only the published formulas (sections 2.8, 5.8, 8.1, 8.3, 8.5 to 8.7, 9.1) are used; no text is copied.
+- statsmodels (BSD-3-Clause, https://www.statsmodels.org). It was run outside the repository with fixed initial states and fixed coefficients to produce reference numbers for the tests (`functions_forecast_ets_cr_tests.rs`). Nothing of it is vendored or linked.
+- Kolda, Lewis and Torczon, "Optimization by Direct Search", SIAM Review 45(3), 2003 (doi:10.1137/S0036144502428893), for the shape of the coordinate search.
