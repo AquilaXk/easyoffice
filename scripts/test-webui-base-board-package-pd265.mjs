@@ -186,3 +186,33 @@ test("the edit package extensions open in a BASE or BOARD window", async () => {
   assert.equal(kindOf("a.EOBOARD"), "BOARD");
   assert.equal(kindOf("a.pdf"), "PDF");
 });
+
+test("a BOARD file whose model is refused registers none of its pictures", async () => {
+  const { host } = await createWorkspaceHarness({ search: "?module=BOARD&win=w-board-reg" });
+  const utils = host.__EASYOFFICE_SHEET_UTILS__;
+  const registered = [];
+  const original = utils.registerDocImage;
+  Object.defineProperty(utils, "registerDocImage", { value: (...args) => { registered.push(args); return original(...args); }, configurable: true });
+  const media = [{ path: "media/img-1.png", mediaType: "image/png", base64: PNG_1X1 }];
+  const image = { id: "i1", kind: "image", x: 0, y: 0, w: 50, h: 50, media: "media/img-1.png" };
+  const bad = { nodes: [image, { id: "t1", kind: "text", x: 9e9, y: 0, w: 10, h: 10, text: "범위 밖" }] };
+  const refused = await host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("나쁨.eoboard", packageOf({ kind: "board", model: JSON.stringify(bad), media }));
+  assert.equal(refused.ok, false);
+  assert.equal(registered.length, 0, "nothing was put in the picture store");
+  const good = await host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("좋음.eoboard", packageOf({ kind: "board", model: JSON.stringify({ nodes: [image] }), media }));
+  assert.equal(good.ok, true);
+  assert.equal(registered.length, 1);
+});
+
+test("saving a BASE with no database editor mounted fails instead of writing an empty database", async () => {
+  const { loadUiModule } = await import("./test-support/load-ui-module.mjs");
+  const env = { document: {}, __EASYOFFICE_BASE_MODEL__: {} };
+  loadUiModule(new URL("../crates/easyoffice-app/ui/base-board-host.js", import.meta.url), env);
+  const api = env.__EASYOFFICE_BASE_BOARD_HOST__;
+  const requests = [];
+  api.init({ document: { getElementById: () => null, addEventListener() {} }, env: { addEventListener() {} }, invokeIpc: async (...a) => requests.push(a) });
+  const saved = await api.savePackage("BASE", async () => ({ ok: true }), "x");
+  assert.equal(saved.ok, false);
+  assert.match(saved.failure, /데이터베이스/);
+  assert.equal(requests.length, 0, "no package was requested");
+});

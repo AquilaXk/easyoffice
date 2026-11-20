@@ -150,8 +150,10 @@
 
   // The `convert_document_format` request that builds the package of the open BASE or BOARD document.
   function buildPackageRequest(mod) {
-    const M = host.__EASYOFFICE_BASE_MODEL__;
-    if (mod === "BASE") return { action: "encode_package", kind: "base", model: JSON.stringify(baseStudio ? baseStudio.getState() : M.createInitialBaseState()), media: [] };
+    if (mod === "BASE") {
+      if (!baseStudio) throw new Error("데이터베이스를 사용할 수 없습니다.");
+      return { action: "encode_package", kind: "base", model: JSON.stringify(baseStudio.getState()), media: [] };
+    }
     if (!boardStudio) throw new Error("보드를 사용할 수 없습니다.");
     const { model, media } = boardPackageParts();
     return { action: "encode_package", kind: "board", model: JSON.stringify(model), media };
@@ -183,13 +185,10 @@
     for (const node of nodes) {
       if (node?.kind === "image" && !paths.has(node.media)) throw new Error("그림 파일이 패키지에 없습니다: " + String(node.media));
     }
+    // The model is checked first (an image node stands in with a placeholder id); the pictures go into the store only once it is accepted.
+    const checked = host.__EASYOFFICE_BOARD_CODEC__.normalizeBoardState({ ...model, nodes: nodes.map((node) => (node?.kind === "image" ? { ...node, imageId: node.media } : node)) }, true);
     const idByPath = new Map(media.map((item) => [item.path, utils.registerDocImage(item.base64, item.mediaType === "image/jpeg" ? "jpg" : "png")]));
-    const withImages = nodes.map((node) => {
-      if (node?.kind !== "image") return node;
-      const { media: path, ...rest } = node;
-      return { ...rest, imageId: idByPath.get(path) };
-    });
-    const state = host.__EASYOFFICE_BOARD_CODEC__.normalizeBoardState({ ...model, nodes: withImages }, true);
+    const state = { ...checked, nodes: checked.nodes.map((node) => (node.kind === "image" ? { ...node, imageId: idByPath.get(node.imageId) } : node)) };
     return { fields: { boardState: { nodes: state.nodes, connectors: state.connectors, viewport: state.viewport } }, itemCount: state.nodes.length };
   }
 
