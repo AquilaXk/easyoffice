@@ -598,7 +598,7 @@ const DESKTOP_SHELL_PERMISSIONS = new Set(
 // Extensions `WindowKind::for_extension` opens (crates/easyoffice-desktop/src/windows.rs).
 const DESKTOP_OPENABLE_EXTENSIONS = [
   "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "hwp", "hwpx", "hwt", "hwtx",
-  "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp", "pdf",
+  "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp", "eobase", "eoboard", "pdf",
 ];
 const desktopConfigFull = path.join(ROOT, DESKTOP_SHELL_CONFIG);
 if (fs.existsSync(desktopConfigFull)) {

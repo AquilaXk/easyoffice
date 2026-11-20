@@ -20,6 +20,8 @@ export const REQUIRED_ASSOCIATIONS = new Map([
   ["ods", "Editor"],
   ["pptx", "Editor"],
   ["odp", "Editor"],
+  ["eobase", "Editor"],
+  ["eoboard", "Editor"],
   ["pdf", "Viewer"],
 ]);
 
@@ -33,6 +35,8 @@ export const REQUIRED_MIME_TYPES = new Map([
   ["ods", "application/vnd.oasis.opendocument.spreadsheet"],
   ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
   ["odp", "application/vnd.oasis.opendocument.presentation"],
+  ["eobase", "application/vnd.easyoffice.base+zip"],
+  ["eoboard", "application/vnd.easyoffice.board+zip"],
   ["pdf", "application/pdf"],
 ]);
 

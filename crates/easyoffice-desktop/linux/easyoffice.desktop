@@ -13,4 +13,4 @@ StartupWMClass={{exec}}
 Icon={{icon}}
 Terminal=false
 Categories=Office;
-MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.oasis.opendocument.text;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.oasis.opendocument.spreadsheet;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.oasis.opendocument.presentation;application/pdf;
+MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.oasis.opendocument.text;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.oasis.opendocument.spreadsheet;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.oasis.opendocument.presentation;application/vnd.easyoffice.base+zip;application/vnd.easyoffice.board+zip;application/pdf;

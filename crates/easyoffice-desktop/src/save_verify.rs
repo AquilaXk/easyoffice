@@ -16,6 +16,8 @@
 //!   HWP also needs a `FileHeader` stream that starts with the HWP signature;
 //! * PDF: the header, a `startxref` and the `%%EOF` marker within the last kilobyte.
 //!
+//! * `.eobase` / `.eoboard` (PD-265): the package reader of the engine itself, which refuses a
+//!   package whose model, manifest or pictures it would not open.
 //! * Pages (experimental writer, PD-162): the ZIP walk and the engine's own Pages reader, which must
 //!   open the bytes as a document. This is circular: the reader is the engine's, not the app's, so
 //!   it shows that the next EasyOffice open accepts the file, not that Pages does.
@@ -23,6 +25,7 @@
 //! Hangul documents are checked at container level only: decoding their records needs rhwp, so a
 //! record-level fault in the page's HWP/HWPX output is not caught here.
 
+use easyoffice_formats::native_package::{read_package, PackageKind};
 use easyoffice_formats::{
     ContainerFamily, DecodedContent, DocumentFormat, EasyOfficeError, FormatDetector,
     Ole2ContainerCodec, Ole2SecurityGuard, UniversalFormatConverter, ZipArchiveCodec,
@@ -54,6 +57,10 @@ const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
 
 /// Refuses bytes that are not a complete document of the format the extension names.
 pub fn verify_document_bytes(extension: &str, bytes: &[u8]) -> Result<(), EasyOfficeError> {
+    // The BASE and BOARD edit packages (PD-265): the reader that opens them next is the check.
+    if let Some(kind) = PackageKind::from_extension(extension) {
+        return read_package(kind, bytes).map(|_| ());
+    }
     let format = DocumentFormat::from_extension(extension)
         .ok_or_else(|| EasyOfficeError::UnsupportedExtension(extension.to_string()))?;
     FormatDetector::detect(bytes, Some(extension))?;
@@ -191,6 +198,24 @@ mod tests {
             verify_document_bytes(format.extension(), &bytes)
                 .unwrap_or_else(|err| panic!(".{} refused: {err}", format.extension()));
         }
+    }
+
+    #[test]
+    fn the_edit_packages_pass_under_their_own_extension_only() {
+        use easyoffice_formats::native_package::{write_package, NativePackage};
+        let package = |kind| NativePackage {
+            kind,
+            model: "{}".to_string(),
+            media: Vec::new(),
+        };
+        let base = write_package(&package(PackageKind::Base)).unwrap();
+        let board = write_package(&package(PackageKind::Board)).unwrap();
+        verify_document_bytes("eobase", &base).unwrap();
+        verify_document_bytes("EOBOARD", &board).unwrap();
+        assert!(verify_document_bytes("eoboard", &base).is_err());
+        assert!(verify_document_bytes("eobase", &base[..base.len() / 2]).is_err());
+        assert!(verify_document_bytes("xlsx", &base).is_err());
+        assert!(verify_document_bytes("eobase", &encoded(DocumentFormat::Xlsx)).is_err());
     }
 
     #[test]

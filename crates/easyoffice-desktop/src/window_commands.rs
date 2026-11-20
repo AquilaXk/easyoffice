@@ -806,7 +806,7 @@ pub async fn open_file_in_new_window(
             &[
                 "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "pages", "hwp", "hwpx",
                 "hwt", "hwtx", "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp",
-                "pdf",
+                "eobase", "eoboard", "pdf",
             ],
         )
         .pick_file(move |picked| {

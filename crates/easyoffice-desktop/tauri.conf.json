@@ -67,6 +67,8 @@
       { "ext": ["ods"], "name": "EasyOffice.Ods", "description": "스프레드시트 (ODS)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.oasis.opendocument.spreadsheet" },
       { "ext": ["pptx"], "name": "EasyOffice.Pptx", "description": "프레젠테이션 (PPTX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
       { "ext": ["odp"], "name": "EasyOffice.Odp", "description": "프레젠테이션 (ODP)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.oasis.opendocument.presentation" },
+      { "ext": ["eobase"], "name": "EasyOffice.Base", "description": "데이터베이스 (BASE)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.easyoffice.base+zip" },
+      { "ext": ["eoboard"], "name": "EasyOffice.Board", "description": "보드 (BOARD)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.easyoffice.board+zip" },
       { "ext": ["pdf"], "name": "EasyOffice.Pdf", "description": "PDF 문서", "role": "Viewer", "rank": "Alternate", "mimeType": "application/pdf" }
     ],
     "macOS": {

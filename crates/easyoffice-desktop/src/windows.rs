@@ -96,6 +96,8 @@ impl WindowKind {
             b"hwp" | b"hwpx" | b"hwt" | b"hwtx" => Some(Self::Hwp),
             b"xlsx" | b"xls" | b"ods" | b"csv" | b"tsv" => Some(Self::Sheet),
             b"pptx" | b"ppt" | b"ppsx" | b"odp" => Some(Self::Slide),
+            b"eobase" => Some(Self::Base),
+            b"eoboard" => Some(Self::Board),
             b"pdf" => Some(Self::Pdf),
             _ => None,
         }
@@ -533,6 +535,11 @@ mod tests {
         assert_eq!(WindowKind::for_extension("csv"), Some(WindowKind::Sheet));
         assert_eq!(WindowKind::for_extension("ppsx"), Some(WindowKind::Slide));
         assert_eq!(WindowKind::for_extension("pdf"), Some(WindowKind::Pdf));
+        assert_eq!(WindowKind::for_extension("eobase"), Some(WindowKind::Base));
+        assert_eq!(
+            WindowKind::for_extension("EOBOARD"),
+            Some(WindowKind::Board)
+        );
         assert_eq!(WindowKind::for_extension("exe"), None);
         assert_eq!(
             WindowKind::for_path(&PathBuf::from("C:/문서/보고서.HWP")),
