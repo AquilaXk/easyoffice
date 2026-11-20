@@ -77,28 +77,36 @@
 }
 
 #slide-toolbar,
-#pdf-toolbar {
+#pdf-toolbar,
+#base-toolbar,
+#board-toolbar {
   height: 56px;
   padding: 2px 8px;
 }
 
 #icon-toolbar .tb-group,
 #slide-toolbar .tb-group,
-#pdf-toolbar .tb-group {
+#pdf-toolbar .tb-group,
+#base-toolbar .tb-group,
+#board-toolbar .tb-group {
   align-items: stretch;
   gap: 0;
 }
 
 #icon-toolbar .tb-sep,
 #slide-toolbar .tb-sep,
-#pdf-toolbar .tb-sep {
+#pdf-toolbar .tb-sep,
+#base-toolbar .tb-sep,
+#board-toolbar .tb-sep {
   width: 1px;
   height: auto;
 }
 
 #icon-toolbar .tb-btn,
 #slide-toolbar .tb-btn,
-#pdf-toolbar .tb-btn {
+#pdf-toolbar .tb-btn,
+#base-toolbar .tb-btn,
+#board-toolbar .tb-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -219,7 +227,9 @@
 #doc-style-bar,
 #sheet-formula-bar,
 #slide-toolbar,
-#pdf-toolbar {
+#pdf-toolbar,
+#base-toolbar,
+#board-toolbar {
   background: var(--color-bg);
   border-bottom: 1px solid var(--ui-border);
   white-space: nowrap;

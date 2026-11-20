@@ -20,56 +20,10 @@
   display: none;
 }
 
-.board-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  min-height: 36px;
-  height: auto;
-  padding: var(--space-2) var(--space-6);
-  background: var(--ui-bg);
-  border-bottom: 1px solid var(--ui-border);
-  font-size: var(--font-size-base);
-  flex-shrink: 0;
-}
-
 .board-tools-group {
   margin-left: auto;
 }
 
-.board-tb-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: var(--control-height-md);
-  padding: 0 var(--space-5);
-  border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-md);
-  background: var(--ui-surface);
-  color: var(--ui-text);
-  font-family: var(--font-family-ui);
-  font-size: var(--font-size-base);
-  font-weight: 400;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.board-tb-btn:hover {
-  background: var(--ui-hover);
-  border-color: var(--ui-border-strong);
-}
-
-.board-tb-btn.active,
-.board-tb-btn[aria-pressed="true"] {
-  background: var(--ui-selected);
-  border-color: var(--accent-primary);
-  color: var(--accent-strong);
-  font-weight: 600;
-}
-
-.board-tb-btn:focus-visible,
 .board-ctrl-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -1px;
@@ -81,8 +35,6 @@
   min-height: 0;
   overflow: hidden;
   background-color: var(--doc-workspace);
-  background-image: radial-gradient(circle, var(--ui-border) 1px, transparent 1px);
-  background-size: 20px 20px;
   cursor: grab;
   user-select: none;
 }
@@ -91,7 +43,7 @@
   cursor: grabbing;
 }
 
-/* Floating bottom-left zoom island (`.xy-flow__controls` + `Island.scss`) */
+/* Bottom-left zoom control (`.xy-flow__controls`) */
 .board-controls {
   position: absolute;
   left: var(--space-6);
@@ -100,9 +52,7 @@
   display: inline-flex;
   align-items: center;
   background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-light);
+  border: 1px solid var(--ui-border-light);
   overflow: hidden;
   cursor: default;
 }
@@ -196,7 +146,7 @@
 
 .board-connector-label-bg {
   fill: var(--ui-surface);
-  stroke: var(--ui-border);
+  stroke: var(--ui-border-light);
   stroke-width: 1px;
 }
 
@@ -218,14 +168,9 @@
   position: absolute;
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: var(--radius-lg);
   cursor: move;
   outline: none;
   user-select: none;
-}
-
-.board-node--shape {
-  filter: drop-shadow(0 1px 2px var(--ui-border-subtle));
 }
 
 .board-node:hover {
@@ -235,12 +180,12 @@
 .board-node.is-selected,
 .board-node:focus-visible {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px var(--ui-focus-soft);
+  outline: 1px solid var(--accent-primary);
 }
 
 .board-node.is-connect-source {
   border-color: var(--accent-strong);
-  box-shadow: 0 0 0 2px var(--ui-selected);
+  outline: 1px solid var(--accent-strong);
 }
 
 .board-shape-svg {
@@ -273,8 +218,6 @@
   padding: var(--space-4) var(--space-5);
   background: var(--ui-surface);
   border-color: var(--ui-border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
 }
 
 .board-node-text {
@@ -300,8 +243,6 @@
 .board-node--image {
   background: var(--doc-paper);
   border-color: var(--ui-border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
 }
 
 .board-node-image {
@@ -315,8 +256,6 @@
 .board-node--chart {
   background: var(--doc-paper);
   border-color: var(--ui-border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
   overflow: hidden;
 }
 
@@ -327,7 +266,6 @@
   height: 7px;
   box-sizing: border-box;
   border: 1px solid var(--doc-paper);
-  border-radius: var(--radius-xs);
   background: var(--accent-primary);
   display: none;
   z-index: 3;
@@ -353,7 +291,6 @@
   height: 7px;
   padding: 0;
   border: 1.5px solid var(--doc-paper);
-  border-radius: var(--radius-pill);
   background: var(--accent-primary);
   display: none;
   cursor: crosshair;
@@ -385,8 +322,8 @@
 }
 
 .board-analysis-grid dt {
-  color: var(--ui-text-secondary);
-  font-weight: 600;
+  color: var(--ui-text-muted);
+  font-weight: 700;
 }
 
 .board-analysis-grid dd {

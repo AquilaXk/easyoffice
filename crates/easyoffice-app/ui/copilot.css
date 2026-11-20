@@ -26,7 +26,7 @@
   color: var(--ui-text-secondary);
   background: transparent;
   border: 1px solid var(--ui-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   cursor: pointer;
   flex-shrink: 0;
   white-space: nowrap;
@@ -86,7 +86,8 @@
 .eo-copilot-resizer:hover,
 .eo-copilot-resizer:focus-visible,
 .eo-copilot-shell[data-resizing="true"] .eo-copilot-resizer {
-  box-shadow: inset -2px 0 0 var(--resize-handle);
+  border-right: 2px solid var(--resize-handle);
+  box-sizing: border-box;
   outline: none;
 }
 
@@ -129,7 +130,7 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   background: var(--ui-accent-bg);
   color: var(--accent-ink);
   border: 1px solid var(--ui-border-light);
@@ -209,12 +210,6 @@
   color: var(--ui-text);
 }
 
-.eo-copilot-welcome-sub {
-  font-size: var(--font-size-base);
-  font-weight: 400;
-  line-height: 1.7;
-  color: var(--ui-text-secondary);
-}
 
 .eo-copilot-examples {
   display: flex;
@@ -238,7 +233,7 @@
   color: var(--ui-text);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
@@ -275,7 +270,7 @@
   padding: var(--space-4) var(--space-5);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   color: var(--ui-text);
 }
 
@@ -330,7 +325,7 @@
   color: var(--ui-text);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -351,7 +346,7 @@
   color: var(--ui-text-secondary);
   background: var(--ui-surface);
   border: 1px solid var(--ui-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
@@ -424,7 +419,7 @@
   color: var(--ui-text-secondary);
   background: var(--ui-surface);
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 
 .eo-copilot-input-card {
@@ -434,13 +429,11 @@
   padding: var(--space-4);
   background: var(--ui-surface);
   border: 1px solid var(--ui-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
+  border-radius: 0;
 }
 
 .eo-copilot-input-card:focus-within {
   border-color: var(--color-focus-border);
-  box-shadow: 0 0 0 2px var(--ui-focus-soft);
 }
 
 .eo-copilot-textarea {
@@ -530,7 +523,7 @@
   background: var(--ui-surface-raised);
   color: var(--ui-text);
   border: 1px solid var(--ui-border-strong);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-dropdown);
 }
 
@@ -609,7 +602,7 @@
   color: var(--ui-text);
   background: transparent;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -686,7 +679,7 @@
   padding: var(--space-2) var(--space-1);
   text-align: center;
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--ui-bg-light);
 }
 
@@ -733,7 +726,7 @@
   color: var(--ui-text-muted);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-xs);
+  border-radius: 0;
 }
 
 .eo-copilot-pill-btn:hover:not(:disabled) {
@@ -766,7 +759,7 @@
   height: var(--control-height-md);
   padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 0;
   background: var(--accent-primary);
   color: var(--ui-text-on-accent);
   cursor: pointer;
