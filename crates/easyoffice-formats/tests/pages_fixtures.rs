@@ -518,3 +518,35 @@ fn lists_fixture_levels_and_number_formats() {
     assert_eq!(item("알파벳(a-b-c) 형식 첫 번째").1, Some(latin));
     assert_eq!(item("가나다 형식 첫 번째").1, Some(hangul));
 }
+
+/// The header and footer are shown after the body as appendix paragraphs and held in the page frame. Saving as Pages writes the
+/// frame, so the appendix must not be written as body text too: each generation would then read its own earlier appendix again
+/// and show the header one more time (PD-263).
+#[test]
+fn header_and_footer_appendix_does_not_pile_up_over_open_save_cycles() {
+    const HEADER: &str = "머리말: Pages 객체 테스트 문서";
+    let count = |doc: &RichDocument, text: &str| {
+        paragraphs(doc)
+            .iter()
+            .filter(|p| p.plain_text() == text)
+            .count()
+    };
+    let (mut doc, _) = open("eo-pages-objects.pages");
+    for generation in 1..=4 {
+        assert_eq!(count(&doc, HEADER), 1, "generation {generation}");
+        assert_eq!(count(&doc, "머리글"), 1, "generation {generation}");
+        assert_eq!(count(&doc, "바닥글"), 1, "generation {generation}");
+        let saved = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Pages, None)
+            .expect("save as pages");
+        let reopened =
+            UniversalFormatConverter::decode_rich(&saved, Some("again.pages")).expect("reopen");
+        let DecodedContent::Document(next) = reopened.content else {
+            panic!("expected a document");
+        };
+        assert!(
+            !next.page_frame.header.is_empty(),
+            "the frame keeps the header"
+        );
+        doc = next;
+    }
+}

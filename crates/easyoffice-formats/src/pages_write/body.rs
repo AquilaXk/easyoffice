@@ -277,7 +277,7 @@ pub(super) fn write_body<'a>(
         }
     };
 
-    for block in &doc.blocks {
+    for block in doc.body_blocks() {
         match block {
             RichBlock::Paragraph(paragraph) => {
                 lines += 1;

@@ -514,6 +514,9 @@ pub struct RichParagraph {
     pub toc_page: Option<u32>,
     /// Whether the tab before the page number is filled with dots (else it is blank).
     pub toc_dots: bool,
+    /// The paragraph shows, after the body, text that the document also holds elsewhere (the header and footer of a Pages file,
+    /// which are in the page frame). A writer that writes the frame leaves it out: [`RichDocument::body_blocks`] skips it.
+    pub frame_copy: bool,
 }
 
 impl RichParagraph {
@@ -562,6 +565,18 @@ impl RichDocument {
     /// Returns comments deduplicated by `id` within document and field byte bounds.
     pub fn validated_comments(&self) -> Vec<RichComment> {
         validate_comments(&self.comments)
+    }
+
+    /// The blocks a writer that writes the page frame writes: the blocks without the header and footer copies a Pages reader
+    /// appends (a copy section runs from a [`RichParagraph::frame_copy`] paragraph to the next paragraph that is not one).
+    pub fn body_blocks(&self) -> impl Iterator<Item = &RichBlock> {
+        let mut in_copy = false;
+        self.blocks.iter().filter(move |block| {
+            if let RichBlock::Paragraph(p) = block {
+                in_copy = p.frame_copy;
+            }
+            !in_copy
+        })
     }
 
     pub(crate) fn display_title(&self) -> String {

@@ -23,6 +23,16 @@ fn non_empty(block: &RichBlock) -> bool {
     }
 }
 
+/// Marks the paragraphs of a header or footer appendix as copies of what the page frame holds.
+fn frame_copies(mut blocks: Vec<RichBlock>) -> Vec<RichBlock> {
+    for block in &mut blocks {
+        if let RichBlock::Paragraph(p) = block {
+            p.frame_copy = true;
+        }
+    }
+    blocks
+}
+
 fn heading(text: &str) -> RichBlock {
     RichBlock::Paragraph(RichParagraph {
         runs: vec![RichRun::plain(text)],
@@ -177,21 +187,29 @@ impl Reader<'_> {
             (note_heading, self.footnote_blocks(body)?),
             (
                 HEADER_HEADING,
-                self.appendix_header_footer_blocks(body, header_footer::HEADERS)?,
+                frame_copies(self.appendix_header_footer_blocks(body, header_footer::HEADERS)?),
             ),
             (
                 FOOTER_HEADING,
-                self.appendix_header_footer_blocks(body, header_footer::FOOTERS)?,
+                frame_copies(self.appendix_header_footer_blocks(body, header_footer::FOOTERS)?),
             ),
             (COMMENT_HEADING, comments),
             (CHANGE_HEADING, changes),
         ];
         let mut out = Vec::new();
         for (title, blocks) in sections {
-            if !blocks.is_empty() {
-                out.push(heading(title));
-                out.extend(blocks);
+            if blocks.is_empty() {
+                continue;
             }
+            let mut head = heading(title);
+            // The heading of a header or footer section belongs to its copy, which starts with the paragraph that follows it.
+            if let (RichBlock::Paragraph(h), Some(RichBlock::Paragraph(first))) =
+                (&mut head, blocks.first())
+            {
+                h.frame_copy = first.frame_copy;
+            }
+            out.push(head);
+            out.extend(blocks);
         }
         Ok(out)
     }

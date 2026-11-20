@@ -78,7 +78,7 @@ impl PagesWriteLoss {
 /// Counts what [`pack_pages`] does not write.
 pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
     let mut loss = PagesWriteLoss::default();
-    for block in &doc.blocks {
+    for block in doc.body_blocks() {
         match block {
             RichBlock::Paragraph(p) => {
                 loss.elements += usize::from(p.toc.is_some());
@@ -140,8 +140,7 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
     let validated_comments = doc.validated_comments();
     loss.elements += validated_comments.len()
         + doc
-            .blocks
-            .iter()
+            .body_blocks()
             .filter_map(|b| match b {
                 RichBlock::Paragraph(p) => {
                     Some(p.runs.iter().filter(|r| r.revision.is_some()).count())
@@ -163,7 +162,7 @@ enum ExpectedBlock {
 fn expected_blocks(doc: &RichDocument) -> Vec<ExpectedBlock> {
     let (notes, ordinals) = crate::rich_notes::collect_note_ordinals(doc);
     let mut out = Vec::with_capacity(doc.blocks.len() + notes.len());
-    for block in &doc.blocks {
+    for block in doc.body_blocks() {
         match block {
             RichBlock::Paragraph(p) => {
                 let text: String = p
