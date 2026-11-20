@@ -329,10 +329,11 @@
       if (boxes) listeners.repaint?.();
     }
 
-    // The serial number of the local date (days since 1899-12-30), the day period rules count from.
+    // The serial number of the local date (days since 1899-12-30, or since 1904-01-01 in a 1904 workbook), the day period rules count from.
     function todaySerial() {
       const d = new Date();
-      return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000);
+      const epoch = host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
+      return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - epoch) / 86400000);
     }
 
     // What the session is told: priority is the list order.

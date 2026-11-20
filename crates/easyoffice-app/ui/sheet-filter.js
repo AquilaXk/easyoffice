@@ -261,7 +261,8 @@
   function todaySerial() {
     const DateCtor = host.Date || Date;
     const d = new DateCtor();
-    return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000);
+    const epoch = host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
+    return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - epoch) / 86400000);
   }
 
   host.__EASYOFFICE_SHEET_FILTER_CORE__ = {

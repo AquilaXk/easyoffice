@@ -725,6 +725,9 @@ fn decode_response_with_deck(
                 out.push_str(",\"workbookTheme\":");
                 crate::sheet_table_json::write_workbook_theme(&mut out, theme);
             }
+            if styling.first().is_some_and(|(_, st)| st.date1904) {
+                out.push_str(",\"date1904\":true");
+            }
             out.push('}');
             return Ok(out);
         }

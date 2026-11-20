@@ -114,6 +114,7 @@
       return {
         ...(protect ? { workbookProtect: protect } : {}),
         ...(theme ? { workbookTheme: theme } : {}),
+        ...(host.__EASYOFFICE_SHEET_UTILS__.getDate1904() ? { date1904: true } : {}),
       };
     }
 

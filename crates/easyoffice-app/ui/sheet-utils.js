@@ -959,7 +959,14 @@
     isTextEntry: (entry) => entry?.t === "s" || entry?.style?.numFmt === "@",
   };
 
+  // The workbook counts its dates from 1904 (the file's own setting, PD-263); a save sends it back.
+  let workbookDate1904 = false;
+
   host.__EASYOFFICE_SHEET_UTILS__ = {
+    getDate1904: () => workbookDate1904,
+    setDate1904: (on) => {
+      workbookDate1904 = on === true;
+    },
     asciiUpperJs,
     quoteFormulaSheetName,
     isFormulaStringJs,

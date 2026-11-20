@@ -231,6 +231,9 @@ pub(crate) fn parse_structured_content(
         {
             first.workbook_theme = crate::sheet_table_json::parse_workbook_theme(theme)?;
         }
+        if let Some(first) = stylings.first_mut() {
+            first.date1904 = opt_bool(entries, "date1904")?;
+        }
         return Ok(Some((
             StructuredContent::Workbook(sheets, stylings),
             vec![],

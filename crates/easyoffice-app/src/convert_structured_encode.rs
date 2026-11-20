@@ -766,6 +766,9 @@ fn encode_structured_with_thumbnail(
             encode_rich_for_host(&doc, format, cache.as_ref(), thumbnail, native_layout_bytes)
         }
         StructuredContent::Workbook(page_sheets, stylings) => {
+            // The values, displays and date filters of the workbook count from its own date system (PD-263).
+            let _date_system =
+                easyoffice_sheet::enter_date_system(stylings.first().is_some_and(|st| st.date1904));
             // The cells an array filled are its formula's results: the engine gives them (and they come
             // back from `with_spilled_cells` and `add_spilled_cells` below), whatever text the page sent.
             let engine_sheets = without_spilled_cells(page_sheets, stylings);
