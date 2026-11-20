@@ -4,6 +4,11 @@ use crate::{
     ContainerFamily, EasyOfficeError, FormatDetector, ZipEntryDescriptor, ZipSecurityGuard,
     ZipSecurityPolicy,
 };
+use std::io::{Cursor, Write};
+use zip::read::{ArchiveOffset, Config};
+use zip::result::ZipError;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 /// Extracted entry from a PKZIP container.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,16 +148,10 @@ impl ZipArchiveCodec {
             })
             .collect();
         ZipSecurityGuard::validate_archive(&descriptors, &policy)?;
-
-        let mut out: Vec<u8> = Vec::with_capacity(1024);
-        let mut central_dir: Vec<u8> = Vec::with_capacity(entries.len() * 64);
-
         for entry in entries {
-            let path = entry.entry_path();
-            let data = entry.entry_data();
+            let (path, data) = (entry.entry_path(), entry.entry_data());
             ZipSecurityGuard::validate_entry_path(path)?;
-            let path_bytes = path.as_bytes();
-            if path_bytes.len() > u16::MAX as usize {
+            if path.len() > u16::MAX as usize {
                 return Err(EasyOfficeError::InvalidArgument(format!(
                     "ZIP 엔트리 경로가 너무 깁니다: {path}"
                 )));
@@ -163,96 +162,86 @@ impl ZipArchiveCodec {
                     max: u32::MAX as usize,
                 });
             }
-
-            let local_header_offset =
-                u32::try_from(out.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
-                    actual: out.len(),
-                    max: u32::MAX as usize,
-                })?;
-            let crc = Self::crc32(data);
-            let uncomp_size_u32 = data.len() as u32;
-            let name_len = path_bytes.len() as u16;
-
-            let (method, compressed_payload): (u16, std::borrow::Cow<'_, [u8]>) =
-                if use_deflate && !data.is_empty() && !Self::must_store(path) {
-                    let deflated = crate::deflate::deflate_raw(data);
-                    // Extremely redundant data can compress past the reader's bomb-ratio limit;
-                    // such entries are stored so the archive stays readable by our own policy.
-                    let within_ratio = !ratio_guard
-                        || data.len() <= deflated.len().saturating_mul(Self::MAX_PACKED_RATIO);
-                    if deflated.len() < data.len() && within_ratio {
-                        (Self::METHOD_DEFLATE, std::borrow::Cow::Owned(deflated))
-                    } else {
-                        (Self::METHOD_STORE, std::borrow::Cow::Borrowed(data))
-                    }
-                } else {
-                    (Self::METHOD_STORE, std::borrow::Cow::Borrowed(data))
-                };
-            let comp_size_u32 = compressed_payload.len() as u32;
-
-            // Local File Header (30 bytes + file name)
-            out.extend_from_slice(&Self::LOCAL_FILE_HEADER_SIG.to_le_bytes());
-            out.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
-            out.extend_from_slice(&0u16.to_le_bytes()); // general purpose bit flag
-            out.extend_from_slice(&method.to_le_bytes());
-            out.extend_from_slice(&0u16.to_le_bytes()); // mod time
-            out.extend_from_slice(&0x0021u16.to_le_bytes()); // mod date
-            out.extend_from_slice(&crc.to_le_bytes());
-            out.extend_from_slice(&comp_size_u32.to_le_bytes());
-            out.extend_from_slice(&uncomp_size_u32.to_le_bytes());
-            out.extend_from_slice(&name_len.to_le_bytes());
-            out.extend_from_slice(&0u16.to_le_bytes()); // extra field length
-            out.extend_from_slice(path_bytes);
-            out.extend_from_slice(&compressed_payload);
-
-            // Central Directory Header (46 bytes + file name)
-            central_dir.extend_from_slice(&Self::CENTRAL_DIR_HEADER_SIG.to_le_bytes());
-            central_dir.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
-            central_dir.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // flags
-            central_dir.extend_from_slice(&method.to_le_bytes());
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // mod time
-            central_dir.extend_from_slice(&0x0021u16.to_le_bytes()); // mod date
-            central_dir.extend_from_slice(&crc.to_le_bytes());
-            central_dir.extend_from_slice(&comp_size_u32.to_le_bytes());
-            central_dir.extend_from_slice(&uncomp_size_u32.to_le_bytes());
-            central_dir.extend_from_slice(&name_len.to_le_bytes());
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // extra len
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // comment len
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // disk number
-            central_dir.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
-            central_dir.extend_from_slice(&0u32.to_le_bytes()); // external attrs
-            central_dir.extend_from_slice(&local_header_offset.to_le_bytes());
-            central_dir.extend_from_slice(path_bytes);
         }
 
-        let cd_offset = u32::try_from(out.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
-            actual: out.len(),
-            max: u32::MAX as usize,
-        })?;
-        let cd_size =
-            u32::try_from(central_dir.len()).map_err(|_| EasyOfficeError::PayloadTooLarge {
-                actual: central_dir.len(),
-                max: u32::MAX as usize,
-            })?;
-        let entry_count = u16::try_from(entries.len()).map_err(|_| {
-            EasyOfficeError::ResourceBudgetExceeded(
-                "ZIP 아카이브 엔트리 수(u16)가 상한을 초과했습니다.".to_string(),
-            )
-        })?;
-        out.extend_from_slice(&central_dir);
+        // The crate decides nothing about stored entries, so the first pass stores what must be
+        // stored and deflates the rest. A deflated entry that did not shrink or passed the ratio
+        // limit is then stored in a second pass (rare: only very redundant or random data).
+        let mut stored: Vec<bool> = entries
+            .iter()
+            .map(|e| !use_deflate || e.entry_data().is_empty() || Self::must_store(e.entry_path()))
+            .collect();
+        loop {
+            let archive = Self::write_archive(entries, &stored)?;
+            let unworthy =
+                Self::entries_not_worth_deflating(&archive, entries, &stored, ratio_guard)?;
+            if unworthy.is_empty() {
+                return Ok(archive);
+            }
+            for index in unworthy {
+                stored[index] = true;
+            }
+        }
+    }
 
-        // End of Central Directory Record (22 bytes)
-        out.extend_from_slice(&Self::END_OF_CENTRAL_DIR_SIG.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes()); // disk number
-        out.extend_from_slice(&0u16.to_le_bytes()); // cd start disk
-        out.extend_from_slice(&entry_count.to_le_bytes());
-        out.extend_from_slice(&entry_count.to_le_bytes());
-        out.extend_from_slice(&cd_size.to_le_bytes());
-        out.extend_from_slice(&cd_offset.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes()); // comment length
+    /// Writes the entries in order with the fixed 1980-01-01 time stamp, deflating those not marked
+    /// in `stored`.
+    fn write_archive<E: AsZipEntry>(
+        entries: &[E],
+        stored: &[bool],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (entry, &store) in entries.iter().zip(stored) {
+            let options = SimpleFileOptions::default().last_modified_time(DateTime::default());
+            let options = if store {
+                options.compression_method(CompressionMethod::Stored)
+            } else {
+                options
+                    .compression_method(CompressionMethod::Deflated)
+                    .compression_level(Some(i64::from(crate::deflate::COMPRESSION_LEVEL)))
+            };
+            writer
+                .start_file(entry.entry_path(), options)
+                .map_err(zip_write_error)?;
+            writer
+                .write_all(entry.entry_data())
+                .map_err(|err| zip_write_error(err.into()))?;
+        }
+        writer
+            .finish()
+            .map(Cursor::into_inner)
+            .map_err(zip_write_error)
+    }
 
-        Ok(out)
+    /// Indices of deflated entries whose packed form is not smaller than the data, or whose size
+    /// ratio passes [`Self::MAX_PACKED_RATIO`] when `ratio_guard` is set (extremely redundant data
+    /// would pass the reader's bomb limit).
+    fn entries_not_worth_deflating<E: AsZipEntry>(
+        archive: &[u8],
+        entries: &[E],
+        stored: &[bool],
+        ratio_guard: bool,
+    ) -> Result<Vec<usize>, EasyOfficeError> {
+        if stored.iter().all(|&s| s) {
+            return Ok(Vec::new());
+        }
+        let mut reader = ZipArchive::new(Cursor::new(archive)).map_err(zip_read_error)?;
+        let mut unworthy = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if stored[index] {
+                continue;
+            }
+            let packed = reader
+                .by_index_raw(index)
+                .map_err(zip_read_error)?
+                .compressed_size() as usize;
+            let len = entry.entry_data().len();
+            let within_ratio = !ratio_guard || len <= packed.saturating_mul(Self::MAX_PACKED_RATIO);
+            if packed >= len || !within_ratio {
+                unworthy.push(index);
+            }
+        }
+        Ok(unworthy)
     }
 
     pub fn unpack(
@@ -347,12 +336,13 @@ impl ZipArchiveCodec {
             });
         }
 
+        // The crate looks for the last record signature and tolerates data after it; the
+        // strict trailer match, the single-disk rule and the directory bounds stay here.
         let eocd_offset = Self::find_eocd_offset(bytes).ok_or_else(|| {
             EasyOfficeError::CorruptedContainer(
                 "PKZIP End of Central Directory(0x06054B50) 레코드를 찾을 수 없습니다.".to_string(),
             )
         })?;
-
         let disk_num = read_u16_le(bytes, eocd_offset + 4)?;
         let cd_start_disk = read_u16_le(bytes, eocd_offset + 6)?;
         let disk_entries = read_u16_le(bytes, eocd_offset + 8)? as usize;
@@ -364,7 +354,6 @@ impl ZipArchiveCodec {
         }
         let cd_size = read_u32_le(bytes, eocd_offset + 12)? as usize;
         let cd_offset = read_u32_le(bytes, eocd_offset + 16)? as usize;
-
         if cd_offset
             .checked_add(cd_size)
             .is_none_or(|end| end > eocd_offset)
@@ -374,221 +363,100 @@ impl ZipArchiveCodec {
             ));
         }
 
+        // Offset 0 is fixed: no data may precede the archive (the crate would detect and skip it).
+        let mut archive = ZipArchive::with_config(
+            Config {
+                archive_offset: ArchiveOffset::Known(0),
+            },
+            Cursor::new(bytes),
+        )
+        .map_err(zip_read_error)?;
+        // The crate keeps one entry per exact name, so a shorter list than the directory
+        // announces means a path appears twice.
+        if archive.len() != total_entries {
+            return Err(EasyOfficeError::SecurityViolation(
+                "중복되거나 파일/디렉터리가 충돌하는 ZIP 엔트리 경로가 감지되었습니다".to_string(),
+            ));
+        }
+
         let mut descriptors: Vec<ZipEntryDescriptor> = Vec::with_capacity(total_entries.min(4096));
-        let mut raw_records: Vec<(String, u16, u32, usize, usize, usize)> =
-            Vec::with_capacity(total_entries.min(4096));
-
-        let mut cursor = cd_offset;
-        let cd_end = cd_offset + cd_size;
-
-        for _ in 0..total_entries {
-            if cursor + 46 > cd_end {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "PKZIP Central Directory 헤더가 절단되었습니다.".to_string(),
-                ));
-            }
-            let sig = read_u32_le(bytes, cursor)?;
-            if sig != Self::CENTRAL_DIR_HEADER_SIG {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "PKZIP Central Directory 시그니처(0x02014B50) 불일치".to_string(),
-                ));
-            }
-
-            let flags = read_u16_le(bytes, cursor + 8)?;
-            let method = read_u16_le(bytes, cursor + 10)?;
-            let crc32 = read_u32_le(bytes, cursor + 16)?;
-            let compressed_size = read_u32_le(bytes, cursor + 20)? as usize;
-            let uncompressed_size = read_u32_le(bytes, cursor + 24)? as usize;
-            let name_len = read_u16_le(bytes, cursor + 28)? as usize;
-            let extra_len = read_u16_le(bytes, cursor + 30)? as usize;
-            let comment_len = read_u16_le(bytes, cursor + 32)? as usize;
-            let local_offset = read_u32_le(bytes, cursor + 42)? as usize;
-
-            let name_start = cursor + 46;
-            let name_end = name_start.checked_add(name_len).ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer("ZIP 이름 길이 오버플로".to_string())
-            })?;
-            let next_cursor = name_end
-                .checked_add(extra_len)
-                .and_then(|v| v.checked_add(comment_len))
-                .ok_or_else(|| {
-                    EasyOfficeError::CorruptedContainer("ZIP 메타데이터 길이 오버플로".to_string())
-                })?;
-
-            if next_cursor > cd_end {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "PKZIP Central Directory 엔트리 경계 초과".to_string(),
-                ));
-            }
-
-            let path = std::str::from_utf8(&bytes[name_start..name_end])
+        let mut records: Vec<CentralRecord> = Vec::with_capacity(total_entries.min(4096));
+        for index in 0..archive.len() {
+            let file = archive.by_index_raw(index).map_err(zip_read_error)?;
+            let path = std::str::from_utf8(file.name_raw())
                 .map_err(|_| {
                     EasyOfficeError::InvalidUtf8(
                         "ZIP 엔트리 경로가 유효한 UTF-8이 아닙니다.".to_string(),
                     )
                 })?
                 .to_string();
-
-            let is_encrypted = (flags & 0x0001) != 0;
+            let method = match file.compression() {
+                CompressionMethod::Stored => Self::METHOD_STORE,
+                CompressionMethod::Deflated => Self::METHOD_DEFLATE,
+                other => {
+                    return Err(EasyOfficeError::CorruptedContainer(format!(
+                        "지원하지 않는 ZIP 압축 방식({other:?})입니다 (Store=0, Deflate=8 전용)."
+                    )));
+                }
+            };
             descriptors.push(ZipEntryDescriptor::new(
                 path.clone(),
-                compressed_size as u64,
-                uncompressed_size as u64,
-                is_encrypted,
+                file.compressed_size(),
+                file.size(),
+                file.encrypted(),
             ));
-            raw_records.push((
+            records.push(CentralRecord {
                 path,
                 method,
-                crc32,
-                compressed_size,
-                uncompressed_size,
-                local_offset,
-            ));
-
-            cursor = next_cursor;
-        }
-
-        if cursor != cd_end {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PKZIP Central Directory 엔트리 총 크기 불일치".to_string(),
-            ));
+                expected_crc: file.crc32(),
+                comp_size: file.compressed_size() as usize,
+                uncomp_size: file.size() as usize,
+                local_offset: file.header_start() as usize,
+                data_start: file.data_start().map_or(0, |start| start as usize),
+            });
         }
 
         ZipSecurityGuard::validate_archive(&descriptors, policy)?;
 
         let mut totals = [0_u64; ZIP_BUDGET_SLOTS];
-
-        struct ParsedEntry {
-            path: String,
-            method: u16,
-            expected_crc: u32,
-            uncomp_size: usize,
-            data_start: usize,
-            data_end: usize,
-        }
-
-        let mut parsed_entries = Vec::with_capacity(raw_records.len());
-        let mut spans = Vec::with_capacity(raw_records.len());
-
-        for (path, method, expected_crc, comp_size, uncomp_size, local_offset) in raw_records {
-            if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "지원하지 않는 ZIP 압축 방식({method})입니다 (Store=0, Deflate=8 전용)."
-                )));
-            }
-            if method == Self::METHOD_STORE && comp_size != uncomp_size {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "Store 엔트리({path})의 압축 크기({comp_size})와 원본 크기({uncomp_size})가 일치하지 않습니다."
-                )));
-            }
-            if local_offset + 30 > cd_offset {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "ZIP 로컬 파일 헤더 오프셋({local_offset})이 유효하지 않습니다."
-                )));
-            }
-            let local_sig = read_u32_le(bytes, local_offset)?;
-            if local_sig != Self::LOCAL_FILE_HEADER_SIG {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "PKZIP 로컬 파일 헤더 시그니처(0x04034B50) 불일치".to_string(),
-                ));
-            }
-            let local_flags = read_u16_le(bytes, local_offset + 6)?;
-            if (local_flags & 0x0001) != 0 {
-                return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                    crate::DocumentFormat::Docx,
-                ));
-            }
-            let local_method = read_u16_le(bytes, local_offset + 8)?;
-            let local_crc = read_u32_le(bytes, local_offset + 14)?;
-            let local_comp_size = read_u32_le(bytes, local_offset + 18)? as usize;
-            let local_uncomp_size = read_u32_le(bytes, local_offset + 22)? as usize;
-            if local_method != method {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "ZIP 로컬 파일 헤더와 Central Directory 압축 방식 불일치: {path}"
-                )));
-            }
-            if (local_flags & 0x0008) == 0
-                && (local_crc != expected_crc
-                    || local_comp_size != comp_size
-                    || local_uncomp_size != uncomp_size)
-            {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "ZIP 로컬 파일 헤더와 Central Directory 크기/CRC 메타데이터 불일치: {path}"
-                )));
-            }
-            let local_name_len = read_u16_le(bytes, local_offset + 26)? as usize;
-            let local_extra_len = read_u16_le(bytes, local_offset + 28)? as usize;
-            let local_name_start = local_offset + 30;
-            let local_name_end = local_name_start
-                .checked_add(local_name_len)
-                .ok_or_else(|| {
-                    EasyOfficeError::CorruptedContainer(
-                        "ZIP 로컬 헤더 이름 오프셋 오버플로".to_string(),
-                    )
-                })?;
-            if local_name_end > cd_offset
-                || &bytes[local_name_start..local_name_end] != path.as_bytes()
-            {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "ZIP 로컬 파일 헤더와 Central Directory 엔트리 경로 불일치: {path}"
-                )));
-            }
-            let data_start = local_name_end.checked_add(local_extra_len).ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer("ZIP 로컬 헤더 오프셋 오버플로".to_string())
-            })?;
-            let data_end = data_start.checked_add(comp_size).ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer("ZIP 데이터 크기 오버플로".to_string())
-            })?;
-
-            if data_end > cd_offset {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "ZIP 엔트리({path}) 데이터가 Central Directory 경계를 침범합니다."
-                )));
-            }
-
-            spans.push((local_offset, data_end));
-            parsed_entries.push(ParsedEntry {
-                path,
-                method,
-                expected_crc,
-                uncomp_size,
-                data_start,
-                data_end,
-            });
+        let mut spans = Vec::with_capacity(records.len());
+        for record in &records {
+            let data_end = Self::check_local_header(bytes, record, cd_offset)?;
+            spans.push((record.local_offset, data_end));
         }
 
         spans.sort_unstable_by_key(|&(start, _)| start);
-        for i in 1..spans.len() {
-            let prev_end = spans[i - 1].1;
-            let next_start = spans[i].0;
-            if prev_end > next_start {
+        for pair in spans.windows(2) {
+            if pair[0].1 > pair[1].0 {
                 return Err(EasyOfficeError::SecurityViolation(
                     "ZIP 로컬 엔트리 구간 중첩(오버래핑 ZIP) 감지".to_string(),
                 ));
             }
         }
 
-        for entry in parsed_entries {
-            if !path_filter(&entry.path) {
+        for record in records {
+            if !path_filter(&record.path) {
                 continue;
             }
 
-            let slot = policy.slot(&entry.path);
+            let slot = policy.slot(&record.path);
             let (max_single, max_total) = policy.limits(slot);
-            let compressed_slice = &bytes[entry.data_start..entry.data_end];
-            let payload = if entry.method == Self::METHOD_STORE {
+            let compressed_slice = &bytes[record.data_start..record.data_start + record.comp_size];
+            let payload = if record.method == Self::METHOD_STORE {
                 compressed_slice.to_vec()
             } else {
+                // The crate's own entry reader inflates without an output limit, so the raw bytes
+                // go through the budgeted inflater instead.
                 let decompressed = crate::deflate::inflate_raw_sized(
                     compressed_slice,
                     max_single as usize,
-                    entry.uncomp_size,
+                    record.uncomp_size,
                 )?;
-                if decompressed.len() != entry.uncomp_size {
+                if decompressed.len() != record.uncomp_size {
                     return Err(EasyOfficeError::CorruptedContainer(format!(
                         "Deflate 엔트리({}) 복원 크기 불일치 (expected: {}, actual: {})",
-                        entry.path,
-                        entry.uncomp_size,
+                        record.path,
+                        record.uncomp_size,
                         decompressed.len()
                     )));
                 }
@@ -604,15 +472,15 @@ impl ZipArchiveCodec {
             }
 
             let actual_crc = Self::crc32(&payload);
-            if actual_crc != entry.expected_crc {
+            if actual_crc != record.expected_crc {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
                     "ZIP 엔트리({}) CRC-32 체크섬 불일치 (expected: {:#010x}, actual: {:#010x})",
-                    entry.path, entry.expected_crc, actual_crc
+                    record.path, record.expected_crc, actual_crc
                 )));
             }
 
             if visit(ZipArchiveEntry {
-                path: entry.path,
+                path: record.path,
                 data: payload,
                 crc32: actual_crc,
             }) {
@@ -621,6 +489,66 @@ impl ZipArchiveCodec {
         }
 
         Ok(false)
+    }
+
+    /// Cross-checks the local file header of `record` against its central directory entry (the
+    /// crate reads the directory and ignores the local copy) and returns where its data ends.
+    fn check_local_header(
+        bytes: &[u8],
+        record: &CentralRecord,
+        cd_offset: usize,
+    ) -> Result<usize, EasyOfficeError> {
+        let (path, local_offset) = (&record.path, record.local_offset);
+        if record.method == Self::METHOD_STORE && record.comp_size != record.uncomp_size {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "Store 엔트리({path})의 압축 크기({})와 원본 크기({})가 일치하지 않습니다.",
+                record.comp_size, record.uncomp_size
+            )));
+        }
+        if local_offset + 30 > cd_offset {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "ZIP 로컬 파일 헤더 오프셋({local_offset})이 유효하지 않습니다."
+            )));
+        }
+        if read_u32_le(bytes, local_offset)? != Self::LOCAL_FILE_HEADER_SIG {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PKZIP 로컬 파일 헤더 시그니처(0x04034B50) 불일치".to_string(),
+            ));
+        }
+        let local_flags = read_u16_le(bytes, local_offset + 6)?;
+        if (local_flags & 0x0001) != 0 {
+            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                crate::DocumentFormat::Docx,
+            ));
+        }
+        if read_u16_le(bytes, local_offset + 8)? != record.method {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "ZIP 로컬 파일 헤더와 Central Directory 압축 방식 불일치: {path}"
+            )));
+        }
+        let metadata_matches = read_u32_le(bytes, local_offset + 14)? == record.expected_crc
+            && read_u32_le(bytes, local_offset + 18)? as usize == record.comp_size
+            && read_u32_le(bytes, local_offset + 22)? as usize == record.uncomp_size;
+        if (local_flags & 0x0008) == 0 && !metadata_matches {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "ZIP 로컬 파일 헤더와 Central Directory 크기/CRC 메타데이터 불일치: {path}"
+            )));
+        }
+        let local_name_len = read_u16_le(bytes, local_offset + 26)? as usize;
+        let name_start = local_offset + 30;
+        let name_end = name_start + local_name_len;
+        if name_end > cd_offset || &bytes[name_start..name_end] != path.as_bytes() {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "ZIP 로컬 파일 헤더와 Central Directory 엔트리 경로 불일치: {path}"
+            )));
+        }
+        let data_end = record.data_start.saturating_add(record.comp_size);
+        if data_end > cd_offset {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "ZIP 엔트리({path}) 데이터가 Central Directory 경계를 침범합니다."
+            )));
+        }
+        Ok(data_end)
     }
 
     fn find_eocd_offset(bytes: &[u8]) -> Option<usize> {
@@ -670,6 +598,25 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, EasyOfficeError> {
         bytes[offset + 2],
         bytes[offset + 3],
     ]))
+}
+
+/// What the central directory says about one entry, with the offsets the crate resolved.
+struct CentralRecord {
+    path: String,
+    method: u16,
+    expected_crc: u32,
+    comp_size: usize,
+    uncomp_size: usize,
+    local_offset: usize,
+    data_start: usize,
+}
+
+fn zip_read_error(err: ZipError) -> EasyOfficeError {
+    EasyOfficeError::CorruptedContainer(format!("PKZIP 아카이브를 읽을 수 없습니다: {err}"))
+}
+
+fn zip_write_error(err: ZipError) -> EasyOfficeError {
+    EasyOfficeError::InvalidArgument(format!("PKZIP 아카이브를 쓸 수 없습니다: {err}"))
 }
 
 #[cfg(test)]

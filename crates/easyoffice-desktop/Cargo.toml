@@ -24,11 +24,11 @@ tauri = { version = "2", features = ["custom-protocol"] }
 tauri-plugin-dialog = "2"
 # Random per-window command token (shell_caller.rs): the version tauri already uses.
 getrandom = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 tauri-plugin-single-instance = "2"
-# PD-101: searchable PDF export of the Hangul editor's page SVGs (shell only; the engine crates stay
-# dependency-free, PD-053/095).
+# PD-101: searchable PDF export of the Hangul editor's page SVGs (shell only: the engine crates do
+# not render pages).
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
 usvg = { version = "0.45", default-features = false, features = ["text"] }
 fontdb = "0.23"
@@ -47,11 +47,11 @@ pdf-writer = "0.12"
 # file (the edit path asks for no image decoders because it copies pages and never draws them; the
 # card renderer below turns them on for the whole build), `hayro-write` copies a page and the
 # objects it uses into a new file, and `flate2` (already in the graph through it) counts what a
-# stream inflates to before anything allocates for it. Shell only: the engine crates stay
-# dependency-free (PD-053/095).
+# stream inflates to before anything allocates for it. Shell only: the engine crates do not read
+# PDF streams yet (PD-269 lists PDF as the third replacement step).
 hayro-syntax = { version = "0.9", default-features = false, features = ["std"] }
 hayro-write = "0.9"
-flate2 = "1"
+flate2 = { workspace = true }
 # PD-179: the first page of a recent PDF as a start-window card picture, drawn in the PDF worker process
 # (`pdf_first_page.rs`). Default features: the standard-font substitutes and the predefined CMaps.
 hayro = "0.9"
