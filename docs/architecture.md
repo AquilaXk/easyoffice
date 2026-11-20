@@ -1,6 +1,8 @@
 # EasyOffice 시스템 아키텍처 (System Architecture)
 
-이 문서는 `EasyOffice` (`0.1.0`)의 모듈 계층 구조, 비트 수준 컨테이너 코덱, 데이터 흐름, Fail-Closed 보안 경계, 결정론적 테스트 및 macOS 릴리스 패키징 아키텍처를 설명합니다.
+이 문서는 `EasyOffice` (`0.1.0`)의 크레이트 구조와 의존 정책, 비트 수준 컨테이너 코덱, 데이터 흐름, Fail-Closed 보안 경계, IPC·Tauri 셸, PDF 편집 워커 격리, 코파일럿 네트워크 경로, BASE·BOARD 패키지, 릴리스 패키징을 설명합니다. 근거 파일 경로를 항목마다 적었고, 결정 이력은 [policy-decisions.md](policy-decisions.md)에 있습니다.
+
+마지막 코드 대조: 2026-11-20(`acf29cd5`).
 
 ---
 
@@ -8,7 +10,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph ShellLayer["Desktop Shell (macOS WKWebView / Windows WebView2)"]
+    subgraph ShellLayer["Desktop Shell (macOS WKWebView / Windows WebView2 / Linux WebKitGTK)"]
         Desktop["easyoffice-desktop (Tauri v2)\n- 문서별 창, 단일 인스턴스, 제자리 저장, 파일 연결\n- 실행 파일에 내장된 WebUI + 프로세스 내 IPC"]
     end
     subgraph AppLayer["App Layer"]
@@ -20,9 +22,13 @@ flowchart TD
         Layout["easyoffice-layout\n- 조판 엔진"]
     end
     Desktop --> App
+    Desktop --> Formats
+    Desktop --> Sheet
     App --> Formats
     App --> Sheet
     App --> Layout
+    Sheet --> Formats
+    Layout --> Formats
 ```
 
 ### 디렉터리 구조 (Directory Layout)
@@ -36,6 +42,11 @@ EasyOffice/
 │   ├── easyoffice-layout/                         # 시그니처 라벤더 토큰, A4 다단/원고지, KS X 6101 공문서, 슬라이드/PDF 레이아웃
 │   ├── easyoffice-app/                            # 15종 IPC 라우터, 루프백 HTTP 서버(--serve), C-ABI FFI, WebUI(ui/)
 │   └── easyoffice-desktop/                        # 데스크톱 셸(Tauri v2, Windows WebView2 / macOS WKWebView): EasyOffice.exe + NSIS 설치 프로그램, EasyOffice.app + .dmg (PD-094)
+├── apps/
+│   ├── hwp-studio/                                # 고정된 rhwp 업스트림 위의 한글 편집기 오버레이(임베드 전용)
+│   └── quicklook/                                 # macOS Finder 빠른 보기 확장과 C ABI 크레이트(별도 워크스페이스)
+├── vendor/                                        # 패치한 사본: svg2pdf(RHWP_PATCHES.md), PDF 쪽 복사기(PATCHES.md, PD-266), rhwp WASM(PROVENANCE.json)
+├── third_party/rhwp/                              # 고정 커밋의 얕은 sparse 체크아웃(추적하지 않음, PD-076)
 ├── scripts/
 │   ├── check-repo-hygiene.mjs                     # 외부 서비스명·AI 흔적·수치 정합성·XSS·데스크톱 셸 권한 가드
 │   ├── generate-desktop-icons.mjs                 # 파비콘 디자인 기반 데스크톱 앱 아이콘(PNG/ICO/ICNS) 결정론적 생성기
@@ -44,13 +55,37 @@ EasyOffice/
 │   ├── policy-decisions.md                        # 정책 결정 기록 (SSOT)
 │   ├── design-system.md                           # UI 디자인 기준 (참조 앱/rhwp-studio 토큰, PD-098)
 │   ├── product-spec.md                            # 올인원 오피스 통합 기능 명세
-│   └── architecture.md                            # 시스템 아키텍처 문서
+│   ├── architecture.md                            # 시스템 아키텍처 문서
+│   ├── DEVELOPMENT.md                             # 개발 환경·검증·이식 규칙
+│   ├── format-support.md                          # 포맷별 지원 범위·상한
+│   └── performance.md                             # 측정값과 병목
 └── .github/
     ├── release.yml                                # GitHub Release 노트 자동 분류 설정
     └── workflows/
         ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS 데스크톱 셸·.app·.dmg + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
         └── release.yml                            # macOS 유니버설 .dmg, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
 ```
+
+### 1.1 크레이트 의존 정책 (PD-053, PD-095, PD-101)
+
+| 크레이트 | 역할 | 외부 의존 | 워크스페이스 내부 의존 |
+| :--- | :--- | :--- | :--- |
+| `easyoffice-formats` | 포맷 레지스트리, 컨테이너·문서 코덱, 보안 가드, `native_package.rs` | 없음 | 없음 |
+| `easyoffice-sheet` | 수식 엔진, 피벗, 재계산 DAG | 없음 | formats |
+| `easyoffice-layout` | 쪽·슬라이드 조판 모델(`domain.rs`) | 없음 | formats |
+| `easyoffice-app` | IPC 라우터, 코파일럿 엔진, 변환·열기, `--serve`, WebUI(`ui/`) | 없음 | formats, sheet, layout |
+| `easyoffice-desktop` | Tauri v2 셸, OS 통합, PDF 내보내기·편집, 코파일럿 HTTP 전송 | 있음(아래) | app, formats, sheet |
+
+- **엔진 크레이트(formats·sheet·layout·app)는 `[dependencies]`에 외부 크레이트가 없습니다.** 각 `Cargo.toml`의 `[dependencies]`는 워크스페이스 내부 경로뿐입니다. 공급망 표면을 좁히고 오프라인·폐쇄망 빌드를 지키기 위한 PD-053의 결정입니다. 같은 일을 하는 외부 구현이 필요하면 소스를 읽고 안전한 Rust로 이식합니다(PD-095, 규칙은 [DEVELOPMENT.md](DEVELOPMENT.md)).
+- **외부 의존은 데스크톱 셸에만 둡니다**(PD-101). 이유는 PDF 글꼴 서브셋·`ToUnicode`, PDF 객체 복사, TLS, OS 창 같은 일을 자체 구현하면 이식 한도를 크게 넘기 때문입니다. 용도별로 묶으면 다음과 같습니다(`crates/easyoffice-desktop/Cargo.toml`).
+  - 창·IPC·대화상자·단일 인스턴스·업데이트: Tauri v2와 플러그인.
+  - 검색 가능한 PDF 내보내기와 카드 미리보기: SVG→PDF 변환, SVG 파서·래스터, 글꼴 DB, PDF 쓰기(PD-101, PD-142, PD-179).
+  - PDF 스튜디오 편집: PDF 구문 읽기, 쪽 복사, 스트림 크기 계산(PD-170, 워커 프로세스 안에서만 실행).
+  - 네트워크: `ureq` + OS TLS(`native-tls`). 번들 TLS 라이브러리는 없습니다(PD-103, PD-253).
+  - OS별: macOS `objc2*`, Windows `windows-sys`, Unix `libc`.
+- 새 외부 의존은 전이 의존의 라이선스(MIT·Apache-2.0·BSD·Zlib 등)를 확인한 뒤 `THIRD_PARTY_NOTICES.md`에 올립니다(PD-101 3항).
+- 워크스페이스 `[patch.crates-io]`(루트 `Cargo.toml`)는 세 곳을 바꿉니다. SVG→PDF 변환기는 `vendor/svg2pdf`(PD-101), PDF 쪽 복사기는 `vendor/` 아래의 패치 사본(PD-266, 바꾼 곳은 그 폴더의 `PATCHES.md`), rhwp는 `third_party/rhwp`(PD-142)입니다. 엔진 크레이트는 이 셋을 링크하지 않습니다.
+- `apps/quicklook/rust`는 별도 워크스페이스라 위 표에 들어가지 않습니다(`apps/quicklook/rust/Cargo.toml`의 `[workspace]`).
 
 ---
 
@@ -81,8 +116,8 @@ macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 
    - `http_server` 모듈(`--serve <port>`)은 **개발·자동 검증 전용**(릴리스에 배포하지 않음, PD-086)이며 `127.0.0.1` 루프백 전용 HTTP 서버를 구동하며, 모든 응답 상태코드(`200`, `400`, `403`, `404`, `413`, `500`, `503`)에 `Content-Security-Policy` 헤더(`default-src 'self'`)를 강제하고 `ConnectionSlotGuard`(동시 32슬롯 상한, 슬롯 포화 시 즉시 `503` 반환, 패닉 발생 시 `catch_unwind` 복구)와 연결당 3초 데드라인으로 Slowloris 점유를 방어하며, 요청 본문 상한은 `POST /api/ipc` 16MiB(`MAX_IPC_HTTP_BODY_BYTES`), 그 밖의 경로 1MiB(`MAX_HTTP_BODY_BYTES`)입니다. 프로덕션 `ui/` 계층은 엔진 미연결 환경에서 모의 응답으로 대체하지 않고 즉시 실행을 거부합니다. `--serve`는 개발·미리보기 경로이며, Windows 사용자 배포는 아래 데스크톱 셸을 씁니다.
 5. **`crates/easyoffice-desktop` (Windows 데스크톱 셸: Tauri v2·WebView2, `EasyOffice.exe`, PD-074)**
    - `tauri.conf.json`의 `frontendDist`(`../easyoffice-app/ui`)를 빌드 시 실행 파일에 포함하고, 창은 내장 출처(`http://tauri.localhost`)만 표시합니다(`on_navigation`이 다른 URL 이동을 거부). HTTP 서버, 브라우저, 원격 콘텐츠를 쓰지 않습니다.
-   - 셸 명령은 엔진 두 개와 창 명령 열 개와 미리보기 명령 하나와 메뉴 상태 명령 하나(`report_menu_state`, macOS만)와 끝내기 명령 하나(`quit_app`, PD-121)(PD-088, PD-106)입니다. 창 모델은 **문서 하나 = 창 하나**이며 `windows.rs`(창 종류·시작 주소·제목·창 레지스트리·정규 경로로 같은 파일 창 찾기·대기 열기 큐·닫기 판단), `recent.rs`(최근 문서, 페이지에는 id·이름·종류만), `window_commands.rs`(창 생성·네이티브 열기 대화상자·끌어 놓기·`CloseRequested`·명령 10종), `app_commands.rs`(앱 명령의 단일 목록), `window_state.rs`(마지막 창 크기·위치·최대화를 18바이트 레코드로 기억, PD-099), `os_recent.rs`(macOS 시스템 최근 항목 등록, PD-099), `preview/`(시작 창 카드의 미리보기: 파일 안에 든 그림을 시크로 읽는 OLE2·ZIP 리더, 그림이 없는 한글 문서는 rhwp로 첫 쪽을 그린 PNG(전용 스레드·마감·동시 2개 상한), 캐시, 명령 `get_recent_preview`, PD-106·PD-142)로 나뉩니다. 창 명령 `open_document_window(kind)`·`open_file_in_new_window()`·`take_pending_open()`·`abandon_tracked_open()`(PD-177: 페이지가 열지 못한 파일의 경로 점유·추적을 놓음)·`report_window_state(name, dirty)`·`close_current_window()`·`end_close_prompt()`·`ack_close_prompt()`(PD-113)·`list_recent_documents()`·`open_recent_document(id)`는 경로를 받지도 돌려주지도 않으며, 파일 바이트와 표시 이름만 창 이름을 키로 한 큐로 새 창에 전달됩니다. `confirm_dialog(kind)`(`confirm_dialog.rs`, PD-120)는 호출한 창 위에 네이티브 확인 창을 띄워 수락 여부만 돌려줍니다. WKWebView는 `window.confirm`을 구현하지 않아 늘 취소로 답하기 때문이며, 페이지는 정해진 확인 종류 이름(enum 5종)만 보내고 문구·단추는 Rust 상수입니다. 닫을 때의 저장 확인은 `confirm_close()`(PD-136)가 같은 방식으로 저장 / 저장 안 함 / 취소 세 단추의 창을 띄우고, 문서 이름은 창 레지스트리의 표시 이름을 셸이 직접 써서 문구를 만듭니다(페이지는 아무것도 보내지 않고 `save`·`discard`·`cancel` 한 낱말만 돌려받음). `ipc_dispatch(command, payload)`는 `EasyOfficeIpcRouter::dispatch`의 15종 명령을 프로세스 안에서 호출해 JSON 문자열을 돌려주고, 실패 시 `--serve`의 HTTP 400 본문과 같은 `{"status":"error","message"}`로 거부합니다. `save_document_file(fileName, base64)`는 Rust에서 기본 저장 대화상자(`tauri-plugin-dialog`)를 열고, 사용자가 고른 경로에 임시 파일 기록 후 이름 바꾸기로 저장합니다. WebView는 파일 이름만 제안하며 경로를 넘기지 않고, 저장 결과도 파일 이름(`name`)만 받습니다. `inPlace` 인수가 참이고 창이 같은 확장자의 파일을 추적하면(`tracked_files.rs`: 창 이름 ↔ 경로·지문, Rust 전용) 대화상자 없이 같은 폴더 임시 파일 + `sync_all` + 이름 바꾸기로 원본을 교체하고, 지문(크기·수정 시각)이 열 때와 다르면 네이티브 확인 창을 띄웁니다(PD-093). `tauri-plugin-single-instance`는 첫 플러그인으로 등록되어 두 번째 실행의 인수를 `launch_files`→`route_launch_files`→`open_path`(시작 창과 같은 열기 큐)로 보냅니다. NSIS `fileAssociations`는 창 모델이 여는 확장자만 등록합니다.
-   - `build.rs`의 `AppManifest`가 `app_commands.rs`의 목록(22종)을 기본 거부로 선언하고, `capabilities/main-window.json`이 `main`·`doc-*` 창에 정확히 그 목록의 `allow-*`만 허용합니다(PD-088). core·shell·fs·http·dialog 권한은 WebView에 주지 않습니다. CSP는 WebUI와 같은 `default-src 'self'`에 셸 IPC 출처(`connect-src 'self' ipc: http://ipc.localhost`)만 더합니다.
+   - 셸이 WebView에 여는 앱 명령은 33개이며 `app_commands.rs`의 `APP_COMMANDS`가 유일한 목록입니다(테스트가 `capabilities/main-window.json`과 1:1로 대조, `main.rs`). 창 모델은 **문서 하나 = 창 하나**이며 `windows.rs`(창 종류·시작 주소·제목·창 레지스트리·정규 경로로 같은 파일 창 찾기·대기 열기 큐·닫기 판단), `recent.rs`(최근 문서, 페이지에는 id·이름·종류만), `window_commands.rs`(창 생성·네이티브 열기 대화상자·끌어 놓기·`CloseRequested`·명령 10종), `app_commands.rs`(앱 명령의 단일 목록), `window_state.rs`(마지막 창 크기·위치·최대화를 18바이트 레코드로 기억, PD-099), `os_recent.rs`(macOS 시스템 최근 항목 등록, PD-099), `preview/`(시작 창 카드의 미리보기: 파일 안에 든 그림을 시크로 읽는 OLE2·ZIP 리더, 그림이 없는 한글 문서는 rhwp로 첫 쪽을 그린 PNG(전용 스레드·마감·동시 2개 상한), 캐시, 명령 `get_recent_preview`, PD-106·PD-142)로 나뉩니다. 창 명령 `open_document_window(kind)`·`open_file_in_new_window()`·`take_pending_open()`·`abandon_tracked_open()`(PD-177: 페이지가 열지 못한 파일의 경로 점유·추적을 놓음)·`report_window_state(name, dirty)`·`close_current_window()`·`end_close_prompt()`·`ack_close_prompt()`(PD-113)·`list_recent_documents()`·`open_recent_document(id)`는 경로를 받지도 돌려주지도 않으며, 파일 바이트와 표시 이름만 창 이름을 키로 한 큐로 새 창에 전달됩니다. `confirm_dialog(kind)`(`confirm_dialog.rs`, PD-120)는 호출한 창 위에 네이티브 확인 창을 띄워 수락 여부만 돌려줍니다. WKWebView는 `window.confirm`을 구현하지 않아 늘 취소로 답하기 때문이며, 페이지는 정해진 확인 종류 이름(enum 5종)만 보내고 문구·단추는 Rust 상수입니다. 닫을 때의 저장 확인은 `confirm_close()`(PD-136)가 같은 방식으로 저장 / 저장 안 함 / 취소 세 단추의 창을 띄우고, 문서 이름은 창 레지스트리의 표시 이름을 셸이 직접 써서 문구를 만듭니다(페이지는 아무것도 보내지 않고 `save`·`discard`·`cancel` 한 낱말만 돌려받음). `ipc_dispatch(command, payload)`는 `EasyOfficeIpcRouter::dispatch`의 15종 명령을 프로세스 안에서 호출해 JSON 문자열을 돌려주고, 실패 시 `--serve`의 HTTP 400 본문과 같은 `{"status":"error","message"}`로 거부합니다. `save_document_file(fileName, base64)`는 Rust에서 기본 저장 대화상자(`tauri-plugin-dialog`)를 열고, 사용자가 고른 경로에 임시 파일 기록 후 이름 바꾸기로 저장합니다. WebView는 파일 이름만 제안하며 경로를 넘기지 않고, 저장 결과도 파일 이름(`name`)만 받습니다. `inPlace` 인수가 참이고 창이 같은 확장자의 파일을 추적하면(`tracked_files.rs`: 창 이름 ↔ 경로·지문, Rust 전용) 대화상자 없이 같은 폴더 임시 파일 + `sync_all` + 이름 바꾸기로 원본을 교체하고, 지문(크기·수정 시각)이 열 때와 다르면 네이티브 확인 창을 띄웁니다(PD-093). `tauri-plugin-single-instance`는 첫 플러그인으로 등록되어 두 번째 실행의 인수를 `launch_files`→`route_launch_files`→`open_path`(시작 창과 같은 열기 큐)로 보냅니다. NSIS `fileAssociations`는 창 모델이 여는 확장자만 등록합니다.
+   - `build.rs`의 `AppManifest`가 `app_commands.rs`의 목록(33종)을 기본 거부로 선언하고, `capabilities/main-window.json`이 `main`·`doc-*` 창에 정확히 그 목록의 `allow-*`만 허용합니다(PD-088). core·shell·fs·http·dialog 권한은 WebView에 주지 않습니다. CSP는 WebUI와 같은 `default-src 'self'`에 셸 IPC 출처(`connect-src 'self' ipc: http://ipc.localhost`)만 더합니다.
    - 검색 가능한 PDF(PD-101): `pdf_export.rs`가 한글 편집기의 쪽 SVG를 `svg2pdf`·SVG 파서 크레이트·글꼴 DB 크레이트·PDF 쓰기 크레이트(셸에만 둔 의존성, 엔진 크레이트는 무의존)로 글꼴 부분집합과 `ToUnicode`가 든 PDF로 바꾸고, `pdf_job.rs`의 명령 셋(`pdf_export_start`·`pdf_export_pages`·`pdf_export_finish`, PD-123)이 저장 위치를 먼저 고르고 쪽을 10쪽씩 받아 PDF에 쌓은 뒤 원자적으로 저장하고 OS 기본 앱으로 엽니다. 쪽 수·바이트 상한은 변환 전에 `checked_*`로 확인하고 글꼴 DB는 프로세스당 한 번만 만듭니다. 문서 글꼴 이름은 `pdf_font_fallbacks.rs`의 정렬된 정적 표(이진 탐색)로 설치된 한국어 시스템 글꼴 목록을 덧붙여 대체합니다. 한글 창 파일 메뉴의 "PDF로 내보내기"는 데스크톱에서만 보이며 `hwp-session.js`가 임베드 포트로 쪽 SVG를 10쪽씩 받아 셸에 넘깁니다. macOS 네이티브 파일 메뉴에는 `PDF로 내보내기…`(⌘E)·`인쇄…`(⌘P)가 있습니다. 변환기와 다른 이름으로 저장의 문서→PDF도 같은 경로를 씁니다(PD-167): 셸이 `ipc_dispatch`에서 `dispatch_with_pdf_renderer`로 엔진 요청을 받고, 엔진이 쓴 HWPX를 `doc_pdf.rs`가 rhwp로 쪽 배치해 `PdfAssembler`로 PDF를 만듭니다. 셸이 없거나(`--serve`) 실패하면 엔진 PDF로 대체합니다.
    - PDF 스튜디오 편집(PD-170): 열린 PDF를 셸이 한 번 받아 두고(`pdf_edit_open`), 회전·스탬프·워터마크·병합·분할을 쪽 목록 계획으로만 바꾼 뒤 저장할 때 PDF 읽기 크레이트·PDF 쪽 복사 크레이트로 원본의 그림·글꼴·배치를 복사해 새 PDF를 씁니다(`pdf_edit_*.rs`, 셸에만 둔 의존성). PDF를 읽고 쓰는 일은 모두 셸 바이너리의 숨은 하위 명령인 자식 프로세스(`pdf_edit_worker.rs`, 바이트 프로토콜 `pdf_edit_wire.rs`)에서 하고, `pdf_edit_supervisor.rs`가 마감(60초)과 상주 메모리(1.5GiB)를 넘으면 kill합니다. 크기·개체·쪽·트리 깊이·리소스 항목·압축 해제 예산은 `pdf_edit_budget.rs`·`pdf_edit_inspect.rs`·`pdf_edit_scan.rs`가 자식 안에서 세고 넘으면 거부합니다. 명령은 `pdf_edit_open`·`pdf_edit_apply`·`pdf_edit_split_merge`·`pdf_edit_save`입니다.
    - 네이티브 메뉴 막대(PD-102, macOS만. PD-121): `native_menu.rs`가 앱·파일·편집·보기·입력·서식·쪽·표·도구·윈도우·도움말 메뉴를 만들고, 페이지의 메뉴 줄은 참조 앱처럼 모든 OS의 모든 창에서 그대로 그립니다(Windows·Linux는 네이티브 막대 없이 페이지 메뉴 줄만, 한글 창은 편집기 자체 메뉴 줄). Windows·Linux의 끝내기는 `quit_app` 명령(`Ctrl+Q`, 메뉴 항목 없음)이 `app_quit.rs` 큐를 시작합니다. 사용자 지정 항목은 정적 표 한 벌(`ITEMS`)의 id로 포커스 창에서 `window.__EASYOFFICE_NATIVE_MENU__(id)`를 실행합니다. 페이지의 `shell-chrome.js` 표와 1:1로 대조하며 동작은 단축키 동작 표의 이름이거나 페이지 메뉴 항목을 누르는 동작이라 같은 핸들러가 실행됩니다. 이벤트 권한은 더하지 않습니다. 끝내기(PD-119: macOS 앱 메뉴·Dock 종료, Windows·Linux는 `Ctrl+Q`)는 모든 OS가 `app_quit.rs`의 큐 하나로 창마다 기존 닫기 확인을 거쳐 한 창씩 종료하고, 테마·업데이트 확인 체크와 비활성 항목은 창이 `report_menu_state`로 알린 상태를 `menu_state.rs`가 포커스 창 기준으로 막대에 반영하며(macOS 전용), 두 명령(`report_menu_state`는 macOS 빌드에만)은 셸 토큰·capability 대상입니다.
@@ -135,3 +170,63 @@ HWP 엔진·편집기의 기반인 rhwp는 수정하지 않는 읽기 전용 서
 - **문서·시트·슬라이드 인쇄와 찾기 (PD-169)**: `Ctrl+P`와 `인쇄…`는 앞에 있는 모듈의 인쇄를 부릅니다. 한글은 위의 `hwp-print.js`, 문서·시트·슬라이드는 `ui/office-print.js`가 편집기 내용(복제, id 제거)·사용 범위 표·슬라이드 한 장씩을 같은 `#eo-print-root`에 쌓고 같은 `print_webview` 경로로 인쇄합니다. 문서·시트의 `Ctrl+F`/`Ctrl+F2`는 `ui/find-replace.js` 대화상자(`#find-dialog`)이며, 일치 색인은 `find-core.js`(블록별 일치, 문자열 연산), 원본은 `find-doc.js`(문단·셀 단위 텍스트 노드 표)와 `find-sheet.js`(셀)입니다.
 - **설치된 글꼴 (PD-128)**: 한글 편집기는 PC에 설치된 글꼴로 문서가 지정한 글꼴을 그립니다. 셸 명령 `list_system_fonts`·`read_system_font`(`font_catalog.rs`)가 PDF 내보내기와 같은 글꼴 DB에서 목록(이름·스타일·굵기와 창마다 새로 정하는 `revision`과 파일 번호, 경로 없음)과 글꼴 파일 하나(64MiB·글꼴 서명·창당 512MiB 상한, Fail-Closed)를 줍니다. 편집기 프레임은 셸 명령에 닿지 못하므로 임베드 포트의 `shell_fonts` 이벤트로 셸 페이지(`hwp-host.js`)에 요청하고, 셸이 토큰 있는 명령을 불러 `hostFontsReply`로 바이트를 전송합니다(capability `host-fonts-v1`). 편집기의 호스트 글꼴 계약이 문서가 쓰는 글꼴만 지연해서 `FontFace`로 등록하며, 없으면 번들 글꼴 그대로입니다.
 - **한글 열기·저장·자동 저장 (PD-085)**: `ui/hwp-session.js`가 한글 문서 수명주기를 소유합니다. `file-open.js`가 HWP 계열을 `detect_format`(이름 힌트+앞 16바이트) 검사 후 `loadFile`로 편집기에 넘기고(64 MiB, rhwp 실패 시 명시 안내가 붙은 텍스트 전용 디코드로 대체), 저장은 `exportHwp`/`exportHwpx` 바이트를 편집기의 `verifyBytes`(오버레이 확장 RPC, 버려지는 문서로 재파싱)로 검증한 뒤 기존 전달 경로로 내보내고 실제 성공 때만 `notifySaved`를 호출합니다. 수정 상태는 오버레이가 보내는 `dirty_changed`/`edited` 이벤트로 추적해 `workspace-session.js`의 이탈 경고에 합치고, 자동 저장은 IndexedDB(`easyoffice.hwp.autosave.v1`, 탭당 1건)에 디바운스로 쓰며 복원 전 `detect_format`으로 검증합니다.
+
+---
+
+## 6. IPC와 Tauri 셸 경계 (PD-074, PD-083, PD-088)
+
+```text
+WebView(ui/*.js) --invoke(헤더: 창 토큰)--> 셸 앱 명령 33개 --> EasyOfficeIpcRouter::dispatch (15종, 프로세스 안)
+                                                         \--> 셸 전용 처리(저장·PDF·창·업데이트)
+```
+
+- **엔진 IPC는 15종입니다.** `EasyOfficeIpcRouter::dispatch_inner`(`crates/easyoffice-app/src/lib.rs`)가 명령 이름으로 분기하고, 알 수 없는 이름은 `InvalidArgument`로 거부합니다. 같은 15종을 `--serve`의 `POST /api/ipc`도 노출합니다. 새 기능은 명령을 늘리지 않고 기존 명령의 `action` 필드로 붙입니다. 코파일럿은 `run_smart_assistant`, BASE·BOARD 패키지는 `convert_document_format`을 씁니다.
+- **페이로드는 16 MiB(`MAX_IPC_HTTP_BODY_BYTES`, `http_server.rs`)를 넘으면 명령을 읽기 전에 거부합니다.** 셸은 HTTP 서버를 거치지 않으므로 상한 검사는 `dispatch_inner` 안에 있습니다(PD-177). 파일 하나는 Base64 전에 10 MiB입니다(`convert_open.rs`의 `MAX_SOURCE_BYTES`, PD-150).
+- **WebView는 앱 명령 33개만 부릅니다.** 목록은 `crates/easyoffice-desktop/src/app_commands.rs`의 `APP_COMMANDS`입니다. `build.rs`가 이를 기본 거부로 선언하고 `capabilities/main-window.json`이 `main`·`doc-*` 창에만 허용합니다. core·shell·fs·http·dialog·updater 플러그인 권한은 WebView에 없습니다. 목록·`build.rs`·capability가 어긋나면 `main.rs`의 시험이 실패합니다.
+- **창마다 무작위 토큰이 있습니다**(`shell_caller.rs`, PD-083). 토큰은 최상위 문서에만 정의되고 앱 명령은 `x-easyoffice-shell` 헤더로 보냅니다. 불투명 출처로 격리한 한글 편집기 iframe은 토큰을 읽지 못하므로 앱 명령을 부를 수 없습니다.
+- **WebView는 파일 경로를 받지 않습니다**(PD-088). 열기·저장·최근 문서는 셸이 경로를 쥐고 페이지에는 파일 이름과 바이트만 줍니다. 저장은 임시 파일을 거쳐 원자적으로 바꾸고(`save_file.rs`), 저장 전에 "다음에 여는 엔진이 받아들이는가"를 `save_verify.rs`가 확인합니다(PD-109). 심볼릭 링크와 민감 경로는 `sensitive_path.rs`가 막습니다(PD-261).
+- **내장 WebUI만 표시합니다.** `tauri.conf.json`의 `frontendDist`가 `crates/easyoffice-app/ui`를 실행 파일에 포함하고, 다른 URL로의 이동은 `on_navigation`이 거부합니다. CSP는 `default-src 'self'`에 `connect-src 'self' ipc: http://ipc.localhost`만 더합니다. 코파일럿 요청도 WebView가 아니라 셸의 Rust가 보냅니다(8절).
+- **`--serve` 루프백 서버는 개발·CI 전용입니다**(PD-086). 릴리스 자산에 들어가지 않습니다.
+
+## 7. PDF 편집 워커 격리 (PD-170, PD-245, PD-266)
+
+PDF를 읽고 쓰는 일은 신뢰할 수 없는 입력을 구문 분석하는 일이라 셸 프로세스 밖에서 합니다.
+
+- **프로세스 분리.** 셸이 자기 바이너리를 `EasyOffice --pdf-edit-worker`(`WORKER_ARG`, `pdf_edit_wire.rs`)로 다시 띄웁니다. 워커에는 창·IPC·파일 경로가 없고 표준 입출력으로 받은 바이트만 있습니다. 프레임 프로토콜은 `pdf_edit_wire.rs`, 감독은 `pdf_edit_supervisor.rs`, 워커 본체는 `pdf_edit_worker.rs`입니다.
+- **감독자가 끝냅니다.** 10 ms마다 시계와 워커의 상주 메모리를 보고(`MEMORY_POLL`), 작업 마감 60초(`WORK_DEADLINE`, 분할 600초)나 메모리 1.5 GiB(`MAX_CHILD_RSS_BYTES`)를 넘으면 kill합니다. 미리보기는 8초·1 GiB로 더 짧습니다. 사용자에게는 고정 문장 하나만 돌아가고 셸과 다른 창은 영향을 받지 않습니다. 동시 작업은 2개입니다(`MAX_ACTIVE_JOBS`).
+- **OS별 제한**(`pdf_edit_os.rs`). Windows는 작업 개체(job object)에 프로세스 메모리 한도와 `KILL_ON_JOB_CLOSE`를 겁니다. Linux는 주소 공간 한도(8 GiB)를 겁니다. macOS는 상주 메모리 폴링만 씁니다. 제한을 걸지 못하면 워커를 돌리지 않고 끝냅니다.
+- **입력 예산**(`pdf_edit_budget.rs`). 원본 파일 10 MiB, 한 번의 편집 세션 256 MiB·원본 64개, 객체 1,000,000개, 쪽 5,000, 쪽 트리 깊이 64, 쪽 내용 64 MiB, 스트림 압축 해제 256 MiB(합계 1 GiB), 출력 256 MiB, 주석 쪽당 2,048·합계 16,384. 한도를 넘으면 저장·열기를 거부합니다.
+- **원본 객체 보존 저장.** 편집은 쪽 목록 계획으로만 쌓고 저장할 때 `pdf_edit_build.rs`가 원본의 그림·글꼴·배치를 복사해 새 PDF를 씁니다. 링크·북마크·양식(`pdf_edit_preserve.rs`·`pdf_edit_outlines.rs`·`pdf_edit_forms.rs`, PD-245)에 이어, 숨긴 레이어·FreeText/Ink/Stamp 주석·쪽 레이블·첨부 파일·XMP를 옮기고(`pdf_edit_oc.rs`·`pdf_edit_annots.rs`·`pdf_edit_labels.rs`·`pdf_edit_attach.rs`·`pdf_edit_carry.rs`, PD-266) 옮기지 못한 항목은 워커가 `WARNING` 프레임으로 알립니다(문장 1,024바이트·16개 이하, 넘기면 `MSG_WORKER_DIED`). 증분 저장은 쓰지 않습니다. 쪽을 새 객체 공간으로 복사하는 구조라서 전자서명은 유지되지 않습니다.
+- **격리 시험.** `crates/easyoffice-desktop/tests/pdf_isolation.rs`가 악성 파일마다 워커가 죽고, 고정 문장이 돌아오고, 시험 프로세스가 다음 요청을 처리하는지 확인합니다.
+
+## 8. 코파일럿 네트워크 경로 (PD-253, PD-267)
+
+앱에 모델은 내장하지 않습니다. 사용자가 등록한 제공자(클라우드 12종 설정, 로컬 서버 포함)로만 요청합니다.
+
+```text
+copilot-ui.js --run_smart_assistant{action:"copilot_run", requestId}--> copilot::handle_copilot_ipc_entries
+   --> 요청 본문·검증(copilot/*.rs) --> CopilotLlmRequest --> 셸 copilot_http.rs (ureq + OS TLS) --> 제공자
+```
+
+- **분기.** `run_smart_assistant`가 `action`이 `copilot_`로 시작하는 JSON을 `copilot::handle_copilot_ipc_entries`(`copilot/mod.rs`)로 넘깁니다. 처리하는 액션은 `copilot_test_provider`·`copilot_list_models`·`copilot_run`·`copilot_cancel` 네 개입니다. 엔진은 전송기를 모르고, 셸이 `ShellWriters.llm`으로 전송 함수를 주입합니다. 전송기가 없는 `--serve`는 원격 HTTPS를 거부하고 로컬 HTTP(`send_local_http`)만 보냅니다(`copilot/llm_client.rs`의 `dispatch_transport`).
+- **SSRF 고정.** `copilot/ssrf.rs`가 주소를 검증합니다. 원격은 `https://`만 허용하고 자격 증명·쿼리·프래그먼트·`..` 경로·비표준 진법 IP·내부 도메인 접미사를 거부하며, 사설·예약 IPv4 대역과 비전역 IPv6를 비트 마스크로 막습니다. 로컬 제공자는 포트가 명시된 `http://127.0.0.1:<포트>`와 `http://[::1]:<포트>`만 받습니다(`copilot_http.rs`의 `is_exact_loopback`). 셸의 `copilot_http.rs`는 검증한 공인 IP를 `ureq` 리졸버에 고정해(`.resolver(...)`) 연결 시점에 DNS가 다른 주소를 돌려줘도 따르지 않게 하고, 리다이렉트 0(`.redirects(0)`)·`https_only`·`Accept-Encoding: identity`·헤더 문자 검사를 적용합니다. 요청과 응답은 각 512 KiB까지입니다(`MAX_LLM_REQUEST_BYTES`·`MAX_LLM_RESPONSE_BYTES`, `copilot/types.rs`). 연결 15초, 읽기 90초 제한이 있습니다.
+- **취소.** 화면이 `requestId`(영숫자·`-`·`_` 64바이트 이하)를 붙여 보내고, 중지하면 같은 ID로 `copilot_cancel`을 보냅니다. `copilot/cancel.rs`의 등록부가 진행 중인 요청의 소켓 복제본을 쥐고 있다가 `shutdown`해서 막힌 연결·쓰기·읽기를 바로 끝냅니다. 동시 요청은 64개, 등록 전에 먼저 온 취소는 32개까지 기억합니다. HTTPS는 TLS 커넥터 훅(`CancellableTls`)이 핸드셰이크 전에 소켓을 등록합니다. 연결 단계(DNS·TCP 15초 안)에는 소켓이 없어 취소가 연결이 끝난 뒤에 적용됩니다.
+- **키는 세션 메모리에만 둡니다.** API 키는 디스크·웹 스토리지·URL·로그에 남기지 않습니다. 주소를 바꾸고 새 키를 넣지 않으면 저장 키를 지웁니다(PD-264).
+- **문맥 경계.** 문서 데이터는 `<document_context>` 안에만 넣고 데이터 속 같은 태그는 `&lt;`로 바꿉니다(`copilot/context.rs`, PD-267). 문맥이 상한을 넘으면 `[이하 N… 생략]`을 넣고, 선택 명령은 대상을 다 싣지 못하면 모델을 부르지 않고 거부합니다. 모델이 돌려준 작업은 형식·범위·개수 검사(`copilot/operations.rs`)를 거치며 버린 수를 `droppedOperations`로 알립니다. PDF·BASE·BOARD는 질문 전용이라 작업을 만들지 않습니다.
+- **상한.** 프롬프트 16 KiB, 대화 기록 32, 시트 셀 10,000, 문서 문단 2,048, 슬라이드 256(PD-253). 모델 출력은 8,192 토큰까지입니다(PD-267).
+
+## 9. BASE·BOARD 패키지 형식 (PD-265)
+
+`.eobase`(BASE, `application/vnd.easyoffice.base+zip`)와 `.eoboard`(BOARD, `application/vnd.easyoffice.board+zip`)는 편집 원본입니다. XLSX·CSV·TSV(BASE)와 PDF(BOARD)는 내보내기이며 저장과 섞이지 않습니다. 구현은 `crates/easyoffice-formats/src/native_package.rs`입니다.
+
+| 파트 | 내용 |
+| :--- | :--- |
+| `mimetype` | 첫 파트, 무압축. 패키지 종류의 미디어 유형 |
+| `manifest.json` | `format`(`easyoffice-base`/`easyoffice-board`), `formatVersion`(현재 1), `media` 목록(`path`·`mediaType`·`bytes`) |
+| `model.json` | 모듈 모델(엄격 JSON) |
+| `media/<이름>.png\|jpg` | BOARD 그림. 모델이 파트 경로로 가리킴 |
+
+- **읽기는 Fail-Closed입니다.** 패키지 10 MiB, `model.json` 12 MiB, `manifest.json` 256 KiB, 압축 해제 합계 32 MiB, 파트 515개(그림 512), 이름 규칙 `[a-z0-9_-]` 40자 이하, JSON 중첩 32단계·중복 키 거부(`StrictJsonValue`). 목록에 없는 파트, 있어야 하는데 없는 파트, 구조가 깨진 그림, 더 새로운 `formatVersion`이 하나라도 있으면 파일 전체를 거부합니다. 선언 크기를 검사한 뒤에 풉니다.
+- **쓰기는 다시 읽어 확인합니다.** 쓴 바이트를 같은 읽기로 검사해 통과할 때만 돌려줍니다. 데스크톱 저장 검증(`save_verify.rs`)도 같은 읽기를 씁니다.
+- **IPC.** `convert_document_format`의 `decode`(열기)와 `encode_package`(저장)가 `native_package_ipc.rs`를 거칩니다. 모델의 의미 검사는 화면이 합니다(`base-model.js`의 `hydrateBaseState`, `board-studio.js`의 엄격 정규화).
+- **파일 연결.** `tauri.conf.json`이 두 확장자를 등록하고 셸이 `WindowKind::Base`·`Board` 창으로 엽니다(`windows.rs`).
