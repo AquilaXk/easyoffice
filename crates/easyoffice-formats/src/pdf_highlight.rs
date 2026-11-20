@@ -5,11 +5,9 @@
 //! bottom-left, bottom-right as viewers write them), `/C`, `/Contents` and `/F 4`, plus an
 //! appearance stream `/AP /N` so a viewer that does not draw its own shows the same marks.
 //!
-//! Reference implementations (structure only, no code copied): the annotation dictionary keys and
-//! `AnnotationType::Highlight` / `Underline` of pdf-writer 0.15 (MIT OR Apache-2.0,
-//! `src/annotations.rs` lines 172-287, `quad_points`), and the highlight appearance of the pdf.js
-//! editor (Apache-2.0), a rectangle filled with the color under `/BM /Multiply` so the text stays
-//! readable. The engine has no crate dependencies, so the writer is written here.
+//! The dictionaries are written with the `pdf-writer` crate (PD-269). The highlight appearance is
+//! that of the pdf.js editor (Apache-2.0, structure only, no code copied): a rectangle filled with
+//! the color under `/BM /Multiply` so the text stays readable.
 //!
 //! The phrase is searched in the source lines (before the lines are broken), so an occurrence
 //! that crosses a line or page break is found; each output line it touches gets its own quad,
@@ -18,9 +16,12 @@
 
 use crate::pdf_text_wrap::units_before;
 use crate::pdf_writer::{
-    pdf_text_string, LaidPage, PdfObjectWriter, PDF_BODY_FIRST_BASELINE_PT, PDF_BODY_LINE_PITCH_PT,
-    PDF_TEXT_FONT_PT, PDF_TEXT_MARGIN_PT,
+    LaidPage, PDF_BODY_FIRST_BASELINE_PT, PDF_BODY_LINE_PITCH_PT, PDF_TEXT_FONT_PT,
+    PDF_TEXT_MARGIN_PT,
 };
+use ::pdf_writer::types::{AnnotationFlags, AnnotationType, BlendMode};
+use ::pdf_writer::writers::ExtGraphicsState;
+use ::pdf_writer::{Finish, Name, Pdf, Rect, Ref, TextStr};
 
 /// Most annotations written to one document; the rest of the occurrences are left out.
 pub const MAX_HIGHLIGHT_ANNOTATIONS: usize = 10_000;
@@ -30,8 +31,6 @@ const QUAD_ABOVE_BASELINE_PT: f64 = 10.0;
 /// An underline is drawn this far over the bottom of its quad, 1 pt thick.
 const UNDERLINE_OFFSET_PT: f64 = 1.5;
 const UNDERLINE_WIDTH_PT: f64 = 1.0;
-/// `/F` flag "print": the annotation is printed with the page.
-const FLAG_PRINT: u8 = 4;
 
 /// What the annotation looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,48 +254,45 @@ fn appearance_content(a: &PageAnnotation) -> String {
     }
 }
 
-/// Writes the annotation as object `annot_id` and its appearance stream as `ap_id`.
-pub(crate) fn write_annotation(
-    w: &mut PdfObjectWriter,
-    annot_id: usize,
-    ap_id: usize,
-    page_obj: usize,
-    a: &PageAnnotation,
-) {
+/// A page coordinate for the writer: rounded to three decimals like the appearance stream's.
+fn pt(value: f64) -> f32 {
+    (value * 1000.0).round() as f32 / 1000.0
+}
+
+/// Writes the annotation as object `annot` and its appearance stream as `ap`.
+pub(crate) fn write_annotation(pdf: &mut Pdf, annot: Ref, ap: Ref, page: Ref, a: &PageAnnotation) {
     let bbox = bounding_box(&a.quads);
-    let rect = format!(
-        "[{} {} {} {}]",
-        num(bbox.x0),
-        num(bbox.y0),
-        num(bbox.x1),
-        num(bbox.y1)
-    );
-    let quad_points = a
-        .quads
-        .iter()
-        .flat_map(|q| [q.x0, q.y1, q.x1, q.y1, q.x0, q.y0, q.x1, q.y0])
-        .map(num)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let subtype = match a.kind {
-        PdfHighlightKind::Highlight => "Highlight",
-        PdfHighlightKind::Underline => "Underline",
+    let rect = Rect::new(pt(bbox.x0), pt(bbox.y0), pt(bbox.x1), pt(bbox.y1));
+    let [red, green, blue] = a.color.map(|c| pt(f64::from(c) / 255.0));
+    let kind = match a.kind {
+        PdfHighlightKind::Highlight => AnnotationType::Highlight,
+        PdfHighlightKind::Underline => AnnotationType::Underline,
     };
-    w.object(
-        annot_id,
-        &format!(
-            "<< /Type /Annot /Subtype /{subtype} /Rect {rect} /QuadPoints [{quad_points}] /C [{}] /F {FLAG_PRINT} /Contents {} /P {page_obj} 0 R /AP << /N {ap_id} 0 R >> >>",
-            color_components(a.color),
-            pdf_text_string(&a.contents)
-        ),
+    let mut annotation = pdf.annotation(annot);
+    annotation
+        .subtype(kind)
+        .rect(rect)
+        .contents(TextStr(&a.contents))
+        .page(page)
+        .flags(AnnotationFlags::PRINT)
+        .color_rgb(red, green, blue);
+    annotation.quad_points(
+        a.quads
+            .iter()
+            .flat_map(|q| [q.x0, q.y1, q.x1, q.y1, q.x0, q.y0, q.x1, q.y0])
+            .map(pt),
     );
-    w.stream(
-        ap_id,
-        &format!(
-            " /Type /XObject /Subtype /Form /BBox {rect} /Resources << /ExtGState << /GS << /Type /ExtGState /BM /Multiply >> >> >>"
-        ),
-        &appearance_content(a),
-    );
+    annotation.appearance().normal().stream(ap);
+    annotation.finish();
+
+    let content = appearance_content(a);
+    let mut form = pdf.form_xobject(ap, content.as_bytes());
+    form.bbox(rect);
+    form.resources()
+        .ext_g_states()
+        .insert(Name(b"GS"))
+        .start::<ExtGraphicsState>()
+        .blend_mode(BlendMode::Multiply);
 }
 
 #[cfg(test)]

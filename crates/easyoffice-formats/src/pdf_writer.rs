@@ -6,13 +6,21 @@
 //! font for this well-known name, so no font binary ships with EasyOffice (see
 //! `docs/policy-decisions.md`). A `ToUnicode` CMap keeps text extraction exact. Document
 //! information strings use PDFDocEncoding for ASCII and UTF-16BE with a byte-order mark otherwise.
+//!
+//! The objects (catalog, page tree, pages, fonts, pictures, annotations, information dictionary) and
+//! the cross-reference table are written by the `pdf-writer` crate (PD-269, step 4). This file
+//! keeps what is the engine's own: which objects a page needs and their numbers, the page
+//! content (line breaking, mixed fonts, watermark and stamp markers) and the `/PageNumber` entry the
+//! engine's reader looks for.
 
 use crate::pdf_highlight::{write_annotation, HighlightPass, PageAnnotation, PdfHighlight};
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
-use std::fmt::Write as _;
+use ::pdf_writer::types::{CidFontType, FontFlags, SystemInfo};
+use ::pdf_writer::writers::Resources;
+use ::pdf_writer::{Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use std::ops::Range;
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
@@ -34,15 +42,6 @@ pub(crate) const PDF_IMAGE_MARGIN_PT: u64 = 54;
 const KOREAN_CID_FONT: &str = "HYGoThic-Medium";
 /// Predefined horizontal CMap mapping UCS-2 code units to Adobe-Korea1 CIDs (PDF 1.4 Table 5.15).
 const KOREAN_CMAP: &str = "UniKS-UCS2-H";
-
-/// Encodes a PDF text string (ISO 32000-1 §7.9.2.2): literal for ASCII, UTF-16BE+BOM otherwise.
-pub(crate) fn pdf_text_string(text: &str) -> String {
-    if text.is_ascii() {
-        format!("({})", escape_pdf_text(text))
-    } else {
-        format!("<FEFF{}>", encode_utf16be_hex_impl(text))
-    }
-}
 
 /// Whether the Latin font (Helvetica, WinAnsi) shows `c`: ASCII and the Latin-1 letters and signs (the middle dot among them).
 fn in_latin_font(c: char) -> bool {
@@ -260,40 +259,6 @@ fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>, annotated: 
 
 const TO_UNICODE_CMAP: &str = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
 
-pub(crate) struct PdfObjectWriter {
-    out: Vec<u8>,
-    offsets: Vec<usize>,
-}
-
-impl PdfObjectWriter {
-    fn line(&mut self, line: &str) {
-        self.out.extend_from_slice(line.as_bytes());
-        self.out.push(b'\n');
-    }
-
-    pub(crate) fn object(&mut self, id: usize, body: &str) {
-        self.offsets[id] = self.out.len();
-        self.line(&format!("{id} 0 obj"));
-        self.line(body);
-        self.line("endobj");
-    }
-
-    pub(crate) fn stream(&mut self, id: usize, dict_extra: &str, data: &str) {
-        self.stream_bytes(id, dict_extra, data.as_bytes());
-    }
-
-    fn stream_bytes(&mut self, id: usize, dict_extra: &str, data: &[u8]) {
-        self.offsets[id] = self.out.len();
-        self.line(&format!("{id} 0 obj"));
-        self.line(&format!("<<{dict_extra} /Length {} >>", data.len()));
-        self.line("stream");
-        self.out.extend_from_slice(data);
-        self.out.push(b'\n');
-        self.line("endstream");
-        self.line("endobj");
-    }
-}
-
 /// Page settings a PDF save can carry besides the text: rotation of every page, the watermark
 /// shown on text pages, and the approval stamp on the first page. The default writes none.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -347,56 +312,77 @@ pub(crate) enum PdfPageEntry {
     Laid(PdfLaidPage),
 }
 
-/// Object numbers of one page: page, content stream, and optional image / soft mask.
+/// Object numbers of one page: page, content stream, and its pictures and annotations.
 struct PagePlan {
-    page_obj: usize,
-    content_obj: usize,
-    image_obj: Option<usize>,
-    mask_obj: Option<usize>,
-    /// Object numbers of the pictures of a laid page and their soft masks, in resource order.
-    xobject_objs: Vec<(usize, Option<usize>)>,
-    /// Object numbers of the page's annotations and their appearance streams.
-    annotations: Vec<(usize, usize)>,
+    page: Ref,
+    content: Ref,
+    /// The picture of a picture page and its soft mask.
+    image: Option<Ref>,
+    mask: Option<Ref>,
+    /// The pictures of a laid page and their soft masks, in resource order.
+    xobjects: Vec<(Ref, Option<Ref>)>,
+    /// The page's annotations and their appearance streams.
+    annotations: Vec<(Ref, Ref)>,
+}
+
+impl PagePlan {
+    /// The `/XObject` resource of the page: `/Im1` of a picture page, the named pictures of a
+    /// laid page. Nothing is written for a page without pictures.
+    fn xobject_resources(&self, entry: &PdfPageEntry, resources: &mut Resources<'_>) {
+        if let Some(image) = self.image {
+            resources.x_objects().pair(Name(b"Im1"), image);
+        }
+        if let PdfPageEntry::Laid(page) = entry {
+            if !page.xobjects.is_empty() {
+                let mut pictures = resources.x_objects();
+                for ((name, _), &(picture, _)) in page.xobjects.iter().zip(&self.xobjects) {
+                    pictures.pair(Name(name.as_bytes()), picture);
+                }
+            }
+        }
+    }
 }
 
 /// Assigns object numbers in page order (first page object is 3); returns the next free number.
 fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
     let mut next = 3usize;
+    let mut take = || {
+        let id = next;
+        next = next.checked_add(1)?;
+        object_ref_checked(id)
+    };
     let mut plans = Vec::with_capacity(entries.len());
     for entry in entries {
-        let page_obj = next;
-        let content_obj = next.checked_add(1)?;
-        next = next.checked_add(2)?;
-        let (mut image_obj, mut mask_obj) = (None, None);
-        let mut xobject_objs = Vec::new();
+        let page = take()?;
+        let content = take()?;
+        let (mut image, mut mask) = (None, None);
+        let mut xobjects = Vec::new();
         match entry {
             PdfPageEntry::Image(page) => {
-                image_obj = Some(next);
-                next = next.checked_add(1)?;
+                image = Some(take()?);
                 if page.image.soft_mask.is_some() {
-                    mask_obj = Some(next);
-                    next = next.checked_add(1)?;
+                    mask = Some(take()?);
                 }
             }
             PdfPageEntry::Laid(page) => {
-                for (_, image) in &page.xobjects {
-                    let image_id = next;
-                    next = next.checked_add(1)?;
-                    let mask_id = image.soft_mask.is_some().then_some(next);
-                    if mask_id.is_some() {
-                        next = next.checked_add(1)?;
-                    }
-                    xobject_objs.push((image_id, mask_id));
+                for (_, picture) in &page.xobjects {
+                    let picture_ref = take()?;
+                    let mask_ref = if picture.soft_mask.is_some() {
+                        Some(take()?)
+                    } else {
+                        None
+                    };
+                    xobjects.push((picture_ref, mask_ref));
                 }
             }
             PdfPageEntry::Text(..) => {}
         }
         plans.push(PagePlan {
-            page_obj,
-            content_obj,
-            image_obj,
-            mask_obj,
-            xobject_objs,
+            page,
+            content,
+            image,
+            mask,
+            xobjects,
             annotations: Vec::new(),
         });
     }
@@ -428,111 +414,150 @@ impl PdfSerializer {
         watermark: Option<&str>,
         entries: &[PdfPageEntry],
     ) -> Vec<u8> {
-        let page_count = entries.len();
         let (mut plans, latin_font_obj) = plan_objects(entries).expect("PDF object count overflow");
-        let kids_refs = plans
-            .iter()
-            .map(|p| format!("{} 0 R", p.page_obj))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let korean_font_obj = latin_font_obj
-            .checked_add(1)
-            .expect("PDF object count overflow");
-        let cid_font_obj = latin_font_obj
-            .checked_add(2)
-            .expect("PDF object count overflow");
-        let descriptor_obj = latin_font_obj
-            .checked_add(3)
-            .expect("PDF object count overflow");
-        let cmap_obj = latin_font_obj
-            .checked_add(4)
-            .expect("PDF object count overflow");
-        let info_obj = latin_font_obj
-            .checked_add(5)
-            .expect("PDF object count overflow");
+        let fonts = FontObjects::at(latin_font_obj);
         // Annotation objects follow the document objects.
-        let mut total_objects = info_obj.checked_add(1).expect("PDF object count overflow");
+        let mut next_free = latin_font_obj
+            .checked_add(FontObjects::COUNT)
+            .expect("PDF object count overflow");
         for (entry, plan) in entries.iter().zip(&mut plans) {
             if let PdfPageEntry::Text(_, annotations) = entry {
                 for _ in annotations {
-                    let ap_obj = total_objects
-                        .checked_add(1)
-                        .expect("PDF object count overflow");
-                    plan.annotations.push((total_objects, ap_obj));
-                    total_objects = total_objects
-                        .checked_add(2)
-                        .expect("PDF object count overflow");
+                    plan.annotations
+                        .push((object_ref(next_free), object_ref(next_free + 1)));
+                    next_free = next_free.checked_add(2).expect("PDF object count overflow");
                 }
             }
         }
 
-        let mut w = PdfObjectWriter {
-            out: Vec::with_capacity(4096),
-            offsets: vec![0; total_objects],
-        };
-        w.line("%PDF-1.4");
-        w.object(1, "<< /Type /Catalog /Pages 2 0 R >>");
-        w.object(
-            2,
-            &format!("<< /Type /Pages /Count {page_count} /Kids [{kids_refs}] >>"),
-        );
-
-        let fonts = format!("/Font << /F1 {latin_font_obj} 0 R /F2 {korean_font_obj} 0 R >>");
+        let mut pdf = Pdf::with_capacity(4096);
+        pdf.set_version(1, 4);
+        pdf.catalog(CATALOG_REF).pages(PAGES_REF);
+        pdf.pages(PAGES_REF)
+            .count(i32::try_from(entries.len()).expect("PDF object count overflow"))
+            .kids(plans.iter().map(|plan| plan.page));
         for (entry, plan) in entries.iter().zip(&plans) {
-            write_page(&mut w, entry, plan, &fonts, watermark);
+            write_page(&mut pdf, entry, plan, &fonts, watermark);
         }
+        fonts.write(&mut pdf);
+        pdf.document_info(fonts.info)
+            .title(TextStr(title))
+            .producer(TextStr("EasyOffice"));
+        // The crate ends the file at `%%EOF`; the file ends with a line break like every text
+        // file, so line-based tools and the readers of this crate see a complete last line.
+        let mut bytes = pdf.finish();
+        bytes.push(b'\n');
+        bytes
+    }
+}
 
-        w.object(
-            latin_font_obj,
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-        );
-        w.object(
-            korean_font_obj,
-            &format!(
-                "<< /Type /Font /Subtype /Type0 /BaseFont /{KOREAN_CID_FONT}-{KOREAN_CMAP} /Encoding /{KOREAN_CMAP} /DescendantFonts [{cid_font_obj} 0 R] /ToUnicode {cmap_obj} 0 R >>"
-            ),
-        );
-        w.object(
-            cid_font_obj,
-            &format!(
-                "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /{KOREAN_CID_FONT} /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 1 >> /FontDescriptor {descriptor_obj} 0 R /DW 1000 /W {} >>",
-                crate::pdf_text_wrap::cid_ascii_widths()
-            ),
-        );
-        w.object(
-            descriptor_obj,
-            &format!(
-                "<< /Type /FontDescriptor /FontName /{KOREAN_CID_FONT} /Flags 4 /FontBBox [-6 -145 1003 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>"
-            ),
-        );
-        w.stream(
-            cmap_obj,
-            " /Type /CMap /CMapName /Adobe-Identity-UCS",
-            TO_UNICODE_CMAP,
-        );
-        w.object(
-            info_obj,
-            &format!(
-                "<< /Title {} /Producer (EasyOffice) >>",
-                pdf_text_string(title)
-            ),
-        );
-        write_trailer(&mut w, total_objects, info_obj);
-        w.out
+/// The document-level objects every file has: catalog 1 and page tree 2 come first, then the
+/// pages, then the fonts and the information dictionary.
+const CATALOG_REF: Ref = Ref::new(1);
+const PAGES_REF: Ref = Ref::new(2);
+
+/// Object numbers are small counts; one past `i32::MAX` objects is not a file anyone can write.
+fn object_ref(id: usize) -> Ref {
+    object_ref_checked(id).expect("PDF object count overflow")
+}
+
+fn object_ref_checked(id: usize) -> Option<Ref> {
+    i32::try_from(id).ok().map(Ref::new)
+}
+
+/// Object numbers of the two page fonts and what they point to, in the order they are written.
+struct FontObjects {
+    latin: Ref,
+    korean: Ref,
+    cid: Ref,
+    descriptor: Ref,
+    cmap: Ref,
+    info: Ref,
+}
+
+impl FontObjects {
+    /// Latin font, Korean font, its descendant, descriptor, `ToUnicode` map and information dictionary.
+    const COUNT: usize = 6;
+
+    fn at(first: usize) -> Self {
+        let next = |offset: usize| {
+            object_ref(
+                first
+                    .checked_add(offset)
+                    .expect("PDF object count overflow"),
+            )
+        };
+        Self {
+            latin: next(0),
+            korean: next(1),
+            cid: next(2),
+            descriptor: next(3),
+            cmap: next(4),
+            info: next(5),
+        }
+    }
+
+    /// The `/Font` resource of a page.
+    fn resources(&self, resources: &mut Resources<'_>) {
+        let mut fonts = resources.fonts();
+        fonts.pair(Name(b"F1"), self.latin);
+        fonts.pair(Name(b"F2"), self.korean);
+    }
+
+    fn write(&self, pdf: &mut Pdf) {
+        pdf.type1_font(self.latin)
+            .base_font(Name(b"Helvetica"))
+            .encoding_predefined(Name(b"WinAnsiEncoding"));
+        let korean_name = format!("{KOREAN_CID_FONT}-{KOREAN_CMAP}");
+        pdf.type0_font(self.korean)
+            .base_font(Name(korean_name.as_bytes()))
+            .encoding_predefined(Name(KOREAN_CMAP.as_bytes()))
+            .descendant_font(self.cid)
+            .to_unicode(self.cmap);
+        let mut cid_font = pdf.cid_font(self.cid);
+        cid_font
+            .subtype(CidFontType::Type0)
+            .base_font(Name(KOREAN_CID_FONT.as_bytes()))
+            .system_info(SystemInfo {
+                registry: Str(b"Adobe"),
+                ordering: Str(b"Korea1"),
+                supplement: 1,
+            })
+            .font_descriptor(self.descriptor)
+            .default_width(1000.0);
+        cid_font
+            .widths()
+            .consecutive(1, crate::pdf_text_wrap::cid_ascii_widths());
+        cid_font.finish();
+        pdf.font_descriptor(self.descriptor)
+            .name(Name(KOREAN_CID_FONT.as_bytes()))
+            .flags(FontFlags::SYMBOLIC)
+            .bbox(Rect::new(-6.0, -145.0, 1003.0, 880.0))
+            .italic_angle(0.0)
+            .ascent(880.0)
+            .descent(-120.0)
+            .cap_height(880.0)
+            .stem_v(93.0);
+        pdf.cmap(self.cmap, TO_UNICODE_CMAP.as_bytes())
+            .name(Name(b"Adobe-Identity-UCS"));
     }
 }
 
 fn write_page(
-    w: &mut PdfObjectWriter,
+    pdf: &mut Pdf,
     entry: &PdfPageEntry,
     plan: &PagePlan,
-    fonts: &str,
+    fonts: &FontObjects,
     watermark: Option<&str>,
 ) {
-    let mut media = format!("0 0 {PDF_PAGE_WIDTH_PT} {PDF_PAGE_HEIGHT_PT}");
-    let (page_number, rotation, xobjects, body) = match (entry, plan.image_obj) {
+    let a4 = Rect::new(
+        0.0,
+        0.0,
+        PDF_PAGE_WIDTH_PT as f32,
+        PDF_PAGE_HEIGHT_PT as f32,
+    );
+    let (page_number, rotation, media_box, body) = match (entry, plan.image) {
         (PdfPageEntry::Laid(page), _) => {
-            media = format!("0 0 {:.2} {:.2}", page.width_pt, page.height_pt);
             let mut content = page.content.clone();
             if let Some(wm) = watermark {
                 let (font_tag, operand) = tj_operand(&format!("[WM] {wm}"));
@@ -541,105 +566,62 @@ fn write_page(
                     page.height_pt - 30.0
                 ));
             }
+            let media_box = Rect::new(0.0, 0.0, page.width_pt as f32, page.height_pt as f32);
             (
                 page.page_number,
                 i32::from(page.rotation_degrees),
-                laid_xobject_resources(page, plan),
+                media_box,
                 content,
             )
         }
         (PdfPageEntry::Text(page, annotations), _) => (
             page.page_number,
             page.rotation_degrees,
-            String::new(),
+            a4,
             page_content_stream(page, watermark, !annotations.is_empty()),
         ),
-        (PdfPageEntry::Image(page), Some(image_obj)) => (
+        (PdfPageEntry::Image(page), Some(_)) => (
             page.page_number,
             i32::from(page.rotation_degrees),
-            format!(" /XObject << /Im1 {image_obj} 0 R >>"),
+            a4,
             image_content_stream(page),
         ),
         (PdfPageEntry::Image(_), None) => return,
     };
-    let annots = if plan.annotations.is_empty() {
-        String::new()
-    } else {
-        let refs: Vec<String> = plan
-            .annotations
-            .iter()
-            .map(|(annot, _)| format!("{annot} 0 R"))
-            .collect();
-        format!(" /Annots [{}]", refs.join(" "))
-    };
-    w.object(
-        plan.page_obj,
-        &format!(
-            "<< /Type /Page /Parent 2 0 R /PageNumber {page_number} /Rotate {rotation} /MediaBox [{media}] /Resources << {fonts}{xobjects} >> /Contents {} 0 R{annots} >>",
-            plan.content_obj
-        ),
-    );
-    w.stream(plan.content_obj, "", &body);
-    if let (PdfPageEntry::Image(page), Some(image_obj)) = (entry, plan.image_obj) {
-        write_image_objects(w, &page.image, image_obj, plan.mask_obj);
-    }
-    if let PdfPageEntry::Laid(page) = entry {
-        for ((_, image), &(image_obj, mask_obj)) in page.xobjects.iter().zip(&plan.xobject_objs) {
-            write_image_objects(w, image, image_obj, mask_obj);
+    {
+        let mut page = pdf.page(plan.page);
+        page.parent(PAGES_REF).pair(
+            Name(b"PageNumber"),
+            i32::try_from(page_number).unwrap_or(i32::MAX),
+        );
+        page.rotate(rotation).media_box(media_box);
+        let mut resources = page.resources();
+        fonts.resources(&mut resources);
+        plan.xobject_resources(entry, &mut resources);
+        resources.finish();
+        page.contents(plan.content);
+        if !plan.annotations.is_empty() {
+            page.annotations(plan.annotations.iter().map(|&(annot, _)| annot));
         }
     }
-    if let PdfPageEntry::Text(_, annotations) = entry {
-        for (annotation, (annot_id, ap_id)) in annotations.iter().zip(&plan.annotations) {
-            write_annotation(w, *annot_id, *ap_id, plan.page_obj, annotation);
+    pdf.stream(plan.content, body.as_bytes());
+    match entry {
+        PdfPageEntry::Image(page) => {
+            if let Some(image) = plan.image {
+                page.image.write(pdf, image, plan.mask);
+            }
+        }
+        PdfPageEntry::Laid(page) => {
+            for ((_, image), &(image_ref, mask_ref)) in page.xobjects.iter().zip(&plan.xobjects) {
+                image.write(pdf, image_ref, mask_ref);
+            }
+        }
+        PdfPageEntry::Text(_, annotations) => {
+            for (annotation, &(annot_ref, ap_ref)) in annotations.iter().zip(&plan.annotations) {
+                write_annotation(pdf, annot_ref, ap_ref, plan.page, annotation);
+            }
         }
     }
-}
-
-/// The ` /XObject << /Name N 0 R ... >>` resource entry of a laid page, empty without pictures.
-fn laid_xobject_resources(page: &PdfLaidPage, plan: &PagePlan) -> String {
-    if page.xobjects.is_empty() {
-        return String::new();
-    }
-    let mut entry = String::from(" /XObject <<");
-    for ((name, _), &(image_obj, _)) in page.xobjects.iter().zip(&plan.xobject_objs) {
-        let _ = write!(entry, " /{name} {image_obj} 0 R");
-    }
-    entry.push_str(" >>");
-    entry
-}
-
-fn write_image_objects(
-    w: &mut PdfObjectWriter,
-    image: &PdfImageObject,
-    image_obj: usize,
-    mask_obj: Option<usize>,
-) {
-    let mut dict = image.dict.clone();
-    if let Some(mask) = mask_obj {
-        dict.push_str(&format!(" /SMask {mask} 0 R"));
-    }
-    w.stream_bytes(image_obj, &dict, &image.data);
-    if let (Some(mask), Some(soft)) = (mask_obj, image.soft_mask.as_deref()) {
-        w.stream_bytes(mask, &soft.dict, &soft.data);
-    }
-}
-
-fn write_trailer(w: &mut PdfObjectWriter, total_objects: usize, info_obj: usize) {
-    let xref_offset = w.out.len();
-    w.line("xref");
-    w.line(&format!("0 {total_objects}"));
-    w.line("0000000000 65535 f ");
-    let offsets = std::mem::take(&mut w.offsets);
-    for offset in offsets.iter().skip(1) {
-        w.line(&format!("{offset:010} 00000 n "));
-    }
-    w.line("trailer");
-    w.line(&format!(
-        "<< /Size {total_objects} /Root 1 0 R /Info {info_obj} 0 R >>"
-    ));
-    w.line("startxref");
-    w.line(&xref_offset.to_string());
-    w.line("%%EOF");
 }
 
 #[cfg(test)]
@@ -671,7 +653,11 @@ mod tests {
             page_number: 1,
             rotation_degrees: 0,
             image: crate::pdf_image::PdfImageObject {
-                dict: String::new(),
+                width: 1,
+                height: 1,
+                gray: true,
+                bits: 8,
+                codec: crate::pdf_image::ImageCodec::Dct,
                 data: Vec::new(),
                 soft_mask: None,
             },

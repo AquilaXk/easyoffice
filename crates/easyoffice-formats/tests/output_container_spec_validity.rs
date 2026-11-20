@@ -483,7 +483,8 @@ fn pdf_title_is_utf16be_with_bom_when_non_ascii() {
 
     let ascii = pdf_with_title("Budget (2026)");
     let ascii_raw = String::from_utf8_lossy(&ascii);
-    assert!(ascii_raw.contains("/Title (Budget \\(2026\\))"));
+    // Balanced parentheses need no escape in a PDF literal string (ISO 32000-1 §7.3.4.2).
+    assert!(ascii_raw.contains("/Title (Budget (2026))"));
     assert_eq!(PdfSerializer::parse(&ascii).unwrap().title, "Budget (2026)");
 }
 
@@ -498,13 +499,18 @@ fn pdf_korean_font_uses_resolvable_standard_cjk_reference() {
     assert!(raw.contains("/Encoding /UniKS-UCS2-H"));
     assert!(raw.contains("/Subtype /CIDFontType0"));
     assert!(raw.contains("/BaseFont /HYGoThic-Medium"));
-    assert!(raw.contains("/Registry (Adobe) /Ordering (Korea1) /Supplement 1"));
+    assert!(raw.contains("/Registry (Adobe)"));
+    assert!(raw.contains("/Ordering (Korea1)"));
+    assert!(raw.contains("/Supplement 1"));
     assert!(raw.contains("/Type /FontDescriptor"));
     assert!(raw.contains("/FontName /HYGoThic-Medium"));
     assert!(raw.contains("/ToUnicode"));
-    let catalog_line = raw.lines().find(|l| l.contains("/Type /Catalog")).unwrap();
+    let catalog = raw
+        .split("endobj")
+        .find(|object| object.contains("/Type /Catalog"))
+        .unwrap();
     assert!(
-        !catalog_line.contains("/Title"),
+        !catalog.contains("/Title"),
         "카탈로그에는 /Title 키가 없습니다."
     );
     let parsed = PdfSerializer::parse(&bytes).unwrap();

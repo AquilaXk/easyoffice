@@ -239,13 +239,22 @@ fn pdf_embeds_jpeg_as_dct_and_opaque_png_idat_unchanged() {
     let pdf = encode(&doc, DocumentFormat::Pdf);
     assert!(contains(&pdf, b"/Filter /DCTDecode"));
     assert!(contains(&pdf, &jpeg), "JPEG bytes pass through");
-    assert!(contains(&pdf, b"/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns 40 >>"));
+    assert!(contains(&pdf, b"/Filter /FlateDecode"));
+    for entry in [
+        &b"/Predictor 15"[..],
+        b"/Colors 3",
+        b"/BitsPerComponent 8",
+        b"/Columns 40",
+    ] {
+        assert!(contains(&pdf, entry), "{}", String::from_utf8_lossy(entry));
+    }
     // The PNG's IDAT payload (zlib stream) is stored as is.
     let idat_len = u32::from_be_bytes(png[8 + 25..8 + 29].try_into().unwrap()) as usize;
     let idat = &png[8 + 25 + 8..8 + 25 + 8 + idat_len];
     assert!(contains(&pdf, idat));
-    assert!(contains(&pdf, b"/XObject << /Im1 "));
-    assert!(contains(&pdf, b"/Type /Page "));
+    assert!(contains(&pdf, b"/XObject <<"));
+    assert!(contains(&pdf, b"/Im1 "));
+    assert!(contains(&pdf, b"/Type /Page\n"));
 }
 
 #[test]
@@ -253,14 +262,10 @@ fn pdf_splits_rgba_png_into_color_and_soft_mask_streams() {
     let doc = doc_with(vec![RichImage::new(make_png(16, 8, 6, 4), "투명").unwrap()]);
     let pdf = encode(&doc, DocumentFormat::Pdf);
     assert!(contains(&pdf, b"/SMask "));
-    assert!(contains(
-        &pdf,
-        b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode"
-    ));
-    assert!(contains(
-        &pdf,
-        b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode"
-    ));
+    for color_space in [&b"/ColorSpace /DeviceGray"[..], b"/ColorSpace /DeviceRGB"] {
+        assert!(contains(&pdf, color_space));
+    }
+    assert!(contains(&pdf, b"/Filter /FlateDecode"));
 }
 
 #[test]

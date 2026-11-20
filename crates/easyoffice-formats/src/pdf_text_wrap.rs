@@ -45,9 +45,8 @@ fn cid_units(c: char) -> u32 {
 
 /// The `/W` entry of the Korean font: the ASCII CIDs (1..=95, in code order) take the Helvetica widths, so a space between
 /// Korean words is a Latin space and not half an em.
-pub(crate) fn cid_ascii_widths() -> String {
-    let widths: Vec<String> = HELVETICA_WIDTHS.iter().map(u16::to_string).collect();
-    format!("[1 [{}]]", widths.join(" "))
+pub(crate) fn cid_ascii_widths() -> impl Iterator<Item = f32> {
+    HELVETICA_WIDTHS.iter().map(|&width| f32::from(width))
 }
 
 /// Width of `text` as the writer will show it (one font for the whole string), in thousandths of

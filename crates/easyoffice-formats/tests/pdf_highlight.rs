@@ -225,7 +225,7 @@ fn the_phrase_is_written_as_an_escaped_text_string() {
         &doc(&["x (a\\b) y"]),
         highlight("(a\\b)", PdfHighlightKind::Highlight),
     );
-    assert!(pdf.contains("/Contents (\\(a\\\\b\\))"), "{pdf}");
+    assert!(pdf.contains("/Contents ((a\\\\b))"), "{pdf}");
     let (pdf, _) = write(
         &doc(&["가나다"]),
         highlight("나", PdfHighlightKind::Highlight),

@@ -8,10 +8,11 @@ use crate::rich_image_probe::{
     png_idat_stream, probe_jpeg, probe_png, PngHeader, PNG_COLOR_PALETTE,
 };
 use crate::{deflate_zlib, inflate_zlib, RichImage, RichImageFormat};
+use ::pdf_writer::types::Predictor;
+use ::pdf_writer::{Filter, Finish, Pdf, Ref};
 
 /// Largest pixel count whose alpha channel is decoded and split (bounds decode memory).
 const PDF_MAX_ALPHA_PIXELS: u64 = 16_000_000;
-const PNG_PREDICTOR_OPTIMUM: u8 = 15;
 const GRAY_COMPONENTS: u8 = 1;
 const RGB_COMPONENTS: u8 = 3;
 const PNG_FILTER_NONE: u8 = 0;
@@ -20,17 +21,74 @@ const PNG_FILTER_UP: u8 = 2;
 const PNG_FILTER_AVERAGE: u8 = 3;
 const PNG_FILTER_PAETH: u8 = 4;
 
-/// An image XObject: dictionary entries (without `/Length`), stream bytes and optional soft mask.
+/// How the samples of an image XObject are compressed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageCodec {
+    /// A JPEG file's bytes, as they are.
+    Dct,
+    /// Deflate data; `predictor` is set when it still carries PNG scanline filters.
+    Flate { predictor: Option<PngPredictor> },
+}
+
+/// The `/DecodeParms` of PNG data passed through with its scanline filters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PngPredictor {
+    pub colors: u8,
+    pub columns: u32,
+}
+
+/// An image XObject: its sample format, stream bytes and optional soft mask.
 pub(crate) struct PdfImageObject {
-    pub dict: String,
+    pub width: u32,
+    pub height: u32,
+    pub gray: bool,
+    pub bits: u8,
+    pub codec: ImageCodec,
     pub data: Vec<u8>,
     pub soft_mask: Option<Box<PdfImageObject>>,
 }
 
-fn image_dict(width: u32, height: u32, color_space: &str, bits: u8, filter: &str) -> String {
-    format!(
-        " /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /{color_space} /BitsPerComponent {bits} /Filter /{filter}"
-    )
+impl PdfImageObject {
+    /// Writes the picture as object `id`, pointing at `mask` for its soft mask, and the soft mask
+    /// itself as object `mask`.
+    pub(crate) fn write(&self, pdf: &mut Pdf, id: Ref, mask: Option<Ref>) {
+        let mut image = pdf.image_xobject(id, &self.data);
+        image.width(to_i32(self.width)).height(to_i32(self.height));
+        if self.gray {
+            image.color_space().device_gray();
+        } else {
+            image.color_space().device_rgb();
+        }
+        image.bits_per_component(i32::from(self.bits));
+        match self.codec {
+            ImageCodec::Dct => {
+                image.filter(Filter::DctDecode);
+            }
+            ImageCodec::Flate { predictor } => {
+                image.filter(Filter::FlateDecode);
+                if let Some(predictor) = predictor {
+                    image
+                        .decode_parms()
+                        .predictor(Predictor::PngOptimum)
+                        .colors(i32::from(predictor.colors))
+                        .bits_per_component(i32::from(self.bits))
+                        .columns(to_i32(predictor.columns));
+                }
+            }
+        }
+        if let Some(mask) = mask {
+            image.s_mask(mask);
+        }
+        image.finish();
+        if let (Some(mask), Some(soft)) = (mask, self.soft_mask.as_deref()) {
+            soft.write(pdf, mask, None);
+        }
+    }
+}
+
+/// Picture sizes are bounded by the probes (`rich_image_probe.rs`), far below `i32::MAX`.
+fn to_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 /// Builds the XObject for `img`, or `None` when the picture must be replaced by its alt text.
@@ -43,13 +101,17 @@ pub(crate) fn pdf_image_object(img: &RichImage) -> Option<PdfImageObject> {
 
 fn jpeg_object(bytes: &[u8]) -> Option<PdfImageObject> {
     let header = probe_jpeg(bytes).ok()?;
-    let color_space = match header.components {
-        GRAY_COMPONENTS => "DeviceGray",
-        RGB_COMPONENTS => "DeviceRGB",
+    let gray = match header.components {
+        GRAY_COMPONENTS => true,
+        RGB_COMPONENTS => false,
         _ => return None,
     };
     Some(PdfImageObject {
-        dict: image_dict(header.width, header.height, color_space, 8, "DCTDecode"),
+        width: header.width,
+        height: header.height,
+        gray,
+        bits: 8,
+        codec: ImageCodec::Dct,
         data: bytes.to_vec(),
         soft_mask: None,
     })
@@ -69,24 +131,17 @@ fn png_object(bytes: &[u8]) -> Option<PdfImageObject> {
 
 fn png_opaque_object(bytes: &[u8], header: &PngHeader) -> PdfImageObject {
     let colors = header.channels();
-    let color_space = if colors == 1 {
-        "DeviceGray"
-    } else {
-        "DeviceRGB"
-    };
-    let mut dict = image_dict(
-        header.width,
-        header.height,
-        color_space,
-        header.bit_depth,
-        "FlateDecode",
-    );
-    dict.push_str(&format!(
-        " /DecodeParms << /Predictor {PNG_PREDICTOR_OPTIMUM} /Colors {colors} /BitsPerComponent {} /Columns {} >>",
-        header.bit_depth, header.width
-    ));
     PdfImageObject {
-        dict,
+        width: header.width,
+        height: header.height,
+        gray: colors == 1,
+        bits: header.bit_depth,
+        codec: ImageCodec::Flate {
+            predictor: Some(PngPredictor {
+                colors: colors as u8,
+                columns: header.width,
+            }),
+        },
         data: png_idat_stream(bytes),
         soft_mask: None,
     }
@@ -106,20 +161,17 @@ fn png_alpha_object(bytes: &[u8], header: &PngHeader) -> Option<PdfImageObject> 
     }
     unfilter_scanlines(&mut raw, row_bytes, bytes_per_pixel)?;
     let (color, alpha) = split_alpha(&raw, stride, bytes_per_pixel);
-    let color_space = if bytes_per_pixel == 2 {
-        "DeviceGray"
-    } else {
-        "DeviceRGB"
+    let plane = |gray: bool, samples: &[u8], soft_mask| PdfImageObject {
+        width: header.width,
+        height: header.height,
+        gray,
+        bits: 8,
+        codec: ImageCodec::Flate { predictor: None },
+        data: deflate_zlib(samples),
+        soft_mask,
     };
-    Some(PdfImageObject {
-        dict: image_dict(header.width, header.height, color_space, 8, "FlateDecode"),
-        data: deflate_zlib(&color),
-        soft_mask: Some(Box::new(PdfImageObject {
-            dict: image_dict(header.width, header.height, "DeviceGray", 8, "FlateDecode"),
-            data: deflate_zlib(&alpha),
-            soft_mask: None,
-        })),
-    })
+    let mask = plane(true, &alpha, None);
+    Some(plane(bytes_per_pixel == 2, &color, Some(Box::new(mask))))
 }
 
 /// Separates unfiltered `[color..., alpha]` pixels into a color plane and an alpha plane.
