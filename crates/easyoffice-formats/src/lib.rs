@@ -10,7 +10,6 @@ mod cell_type;
 mod code_pages;
 pub mod converter;
 pub(crate) mod cp949;
-mod cp949_tables;
 mod crc32;
 pub mod csv_markdown_codecs;
 mod decode_budget;
