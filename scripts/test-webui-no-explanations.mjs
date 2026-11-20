@@ -85,3 +85,33 @@ test("the status line never shows an internal module id in parentheses", () => {
   assert.match(UI("workspace-history.js"), /say\(isUndo \? "실행 취소" : "다시 실행"\)/);
   assert.doesNotMatch(UI("ribbon-history.js"), MODULE_ID);
 });
+
+// The Copilot panel and the BASE and BOARD windows carry labels, values and status or error messages, never an instruction (PD-265).
+
+const INSTRUCTION = /(?:하세요|하십시오|해 주세요|눌러|클릭해|입력 후|직접 입력|하려면|예:)/;
+const stringLiterals = (source) => [...source.matchAll(/"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2]);
+
+test("the Copilot panel has no welcome sentence and no placeholder that instructs", () => {
+  assert.equal(INDEX_HTML.includes("eo-copilot-welcome-sub"), false, "the welcome sub line explained the panel");
+  assert.equal(UI("copilot.css").includes("eo-copilot-welcome-sub"), false);
+  const copilotHtml = INDEX_HTML.slice(INDEX_HTML.indexOf('id="eo-copilot-shell"'), INDEX_HTML.indexOf('id="eo-copilot-shell"') + 9000);
+  assert.doesNotMatch(copilotHtml, /title="[^"]*(?:드래그|더블클릭)/);
+  const dialog = INDEX_HTML.match(/<dialog id="copilot-model-dialog"[\s\S]*?<\/dialog>/)?.[0] ?? "";
+  assert.ok(dialog.length > 0);
+  for (const [, text] of dialog.matchAll(/placeholder="([^"]*)"/g)) assert.doesNotMatch(text, INSTRUCTION, "model dialog placeholder: " + text);
+  for (const [, text] of dialog.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)) assert.doesNotMatch(text, INSTRUCTION, "model dialog paragraph: " + text.trim());
+});
+
+test("the placeholders and messages written by the Copilot, BASE and BOARD scripts do not instruct", () => {
+  for (const name of ["copilot-model-ui.js", "copilot-ui.js", "base-studio.js", "board-studio.js", "base-board-host.js"]) {
+    const source = UI(name);
+    for (const m of source.matchAll(/placeholder\s*=\s*([^;]+);/g)) {
+      for (const literal of stringLiterals(m[1])) assert.doesNotMatch(literal, INSTRUCTION, name + " placeholder: " + literal);
+    }
+    for (const m of source.matchAll(/(?:notify|setFeedback)\(([^;\n]*)\)/g)) {
+      for (const literal of stringLiterals(m[1])) assert.doesNotMatch(literal, INSTRUCTION, name + " message: " + literal);
+    }
+    for (const m of source.matchAll(/el\("p", "base-empty-hint", ("[^"]*")\)/g)) assert.doesNotMatch(m[1], INSTRUCTION, name + " hint: " + m[1]);
+  }
+  assert.equal(/mkInput\([^)]*"예:/.test(UI("base-studio.js")), false, "the field dialog fields carry no example text");
+});

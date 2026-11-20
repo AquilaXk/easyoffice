@@ -350,7 +350,7 @@
         if (conn.label) {
           const textW = Math.max(28, conn.label.length * 10 + 10);
           if (!lblBg) {
-            lblBg = svgEl(doc, "rect", { class: "board-connector-label-bg", height: 20, rx: 3 });
+            lblBg = svgEl(doc, "rect", { class: "board-connector-label-bg", height: 20 });
             lblText = svgEl(doc, "text", { class: "board-connector-label", "text-anchor": "middle" });
             g.appendChild(lblBg);
             g.appendChild(lblText);
@@ -474,7 +474,7 @@
 
     function handleConnectClick(nodeId, port) {
       const routing = mode === "connect-curved" ? "curved" : "orthogonal";
-      if (!pendingConnect) { pendingConnect = { fromId: nodeId, fromPort: port || "auto", routing }; renderNodes(); notify("도착 요소를 클릭해 연결선을 완성하세요."); return; }
+      if (!pendingConnect) { pendingConnect = { fromId: nodeId, fromPort: port || "auto", routing }; renderNodes(); return; }
       if (pendingConnect.fromId === nodeId) { pendingConnect = null; renderNodes(); return; }
       const conn = addConnector({ fromId: pendingConnect.fromId, toId: nodeId, fromPort: pendingConnect.fromPort, toPort: port || "auto", routing: pendingConnect.routing });
       pendingConnect = null;
@@ -824,7 +824,10 @@
     function mount(targetEl) {
       root = targetEl || root || $("pane-board");
       if (!root) return false;
-      const tbBtn = (id, text, aria, pressed) => domEl(doc, "button", { id, type: "button", className: "tb-btn board-tb-btn" + (pressed === "true" ? " active" : ""), text, "aria-label": aria, "aria-pressed": pressed });
+      // A toolbar button in the reference format: the sprite icon above the label (`toolbar.css`).
+      const tbBtn = (id, icon, text, pressed) => domEl(doc, "button", { id, type: "button", className: "tb-btn" + (pressed === "true" ? " active" : ""), "aria-label": text, "aria-pressed": pressed }, [
+        domEl(doc, "span", { className: "tb-sprite icon-" + icon, "aria-hidden": "true" }), domEl(doc, "span", { className: "tb-label", text }),
+      ]);
       const ctrlBtn = (id, text, aria, extraCls = "") => domEl(doc, "button", { id, type: "button", className: ("board-ctrl-btn " + extraCls).trim(), text, "aria-label": aria });
       const sep = () => domEl(doc, "span", { className: "tb-sep", "aria-hidden": "true" });
       const grp = (cls, items) => domEl(doc, "div", { className: ("tb-group " + cls).trim() }, items);
@@ -833,15 +836,15 @@
       imageInputEl = domEl(doc, "input", { id: "board-image-file-input", type: "file", accept: ".png,.jpg,.jpeg,image/png,image/jpeg", hidden: true, "aria-label": "그림 파일 선택" });
 
       const bar = domEl(doc, "div", { id: "board-toolbar", className: "eo-doc-style-bar board-toolbar", role: "toolbar", "aria-label": "보드 도구 모음" }, [
-        grp("", [tbBtn("btn-board-select", "선택", null, "true")]),
+        grp("", [tbBtn("btn-board-select", "pointer", "선택", "true")]),
         sep(),
-        grp("", [tbBtn("btn-board-add-shape", "도형"), shapeSelectEl, tbBtn("btn-board-add-text", "텍스트"), tbBtn("btn-board-add-image", "그림"), imageInputEl, tbBtn("btn-board-add-chart", "차트")]),
+        grp("", [tbBtn("btn-board-add-shape", "shape", "도형"), shapeSelectEl, tbBtn("btn-board-add-text", "char-shape", "텍스트"), tbBtn("btn-board-add-image", "image", "그림"), imageInputEl, tbBtn("btn-board-add-chart", "grid", "차트")]),
         sep(),
-        grp("", [tbBtn("btn-board-connect-ortho", "직각 연결선", null, "false"), tbBtn("btn-board-connect-curved", "곡선 연결선", null, "false")]),
+        grp("", [tbBtn("btn-board-connect-ortho", "hyperlink", "직각 연결선", "false"), tbBtn("btn-board-connect-curved", "hyperlink", "곡선 연결선", "false")]),
         sep(),
-        grp("", [tbBtn("btn-board-front", "맨 앞으로 가져오기"), tbBtn("btn-board-back", "맨 뒤로 보내기"), tbBtn("btn-board-delete", "개체 지우기")]),
+        grp("", [tbBtn("btn-board-front", "arrow-up", "맨 앞으로 가져오기"), tbBtn("btn-board-back", "arrow-down", "맨 뒤로 보내기"), tbBtn("btn-board-delete", "remove", "개체 지우기")]),
         sep(),
-        grp("board-tools-group", [tbBtn("btn-board-analyze", "요소 분석"), tbBtn("btn-board-print", "인쇄"), tbBtn("btn-board-export-pdf", "PDF로 내보내기")]),
+        grp("board-tools-group", [tbBtn("btn-board-analyze", "find", "요소 분석"), tbBtn("btn-board-print", "paste", "인쇄"), tbBtn("btn-board-export-pdf", "stamp", "PDF로 내보내기")]),
       ]);
 
       zoomLabelEl = ctrlBtn("btn-board-zoom-reset", "100%", "배율 100%로 초기화", "board-zoom-pct");

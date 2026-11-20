@@ -1103,7 +1103,7 @@
             aria-valuemin="280"
             aria-valuemax="520"
             aria-valuenow="320"
-            title="드래그하여 너비 조절 · 더블클릭 기본값 복원"
+            title="너비 조절"
           ></div>
           <div id="copilot-panel" class="eo-copilot-panel">
             <div class="eo-copilot-head">
@@ -1122,7 +1122,6 @@
             <div id="copilot-body" class="eo-copilot-body">
               <div id="copilot-welcome" class="eo-copilot-welcome">
                 <div class="eo-copilot-welcome-title">무엇을 도와드릴까요?</div>
-                <div class="eo-copilot-welcome-sub">현재 문서를 읽고 수식·문단·슬라이드를 제자리에서 바로 다듬습니다.</div>
                 <div id="copilot-examples" class="eo-copilot-examples"></div>
               </div>
               <div id="copilot-thread" class="eo-copilot-thread" role="log" aria-live="polite" aria-label="코파일럿 대화 내역"></div>
@@ -1482,11 +1481,11 @@
           <div id="copilot-preset-row" class="dialog-row">
             <label class="dialog-label" for="copilot-provider-preset">사용 가능한 모델</label>
             <select id="copilot-provider-preset" class="sb-combo dialog-select">
-              <option value="__custom__" selected>목록 불러오기 또는 직접 입력</option>
+              <option value="__custom__" selected>직접 입력…</option>
             </select>
             <button id="btn-copilot-fetch-models" type="button" class="dialog-btn">목록 불러오기</button>
           </div>
-          <div class="dialog-row"><label class="dialog-label" for="copilot-provider-model">모델 ID</label><input id="copilot-provider-model" class="dialog-text-input" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="API 키 입력 후 자동 조회 또는 직접 입력" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="copilot-provider-model">모델 ID</label><input id="copilot-provider-model" class="dialog-text-input" type="text" maxlength="256" autocomplete="off" spellcheck="false" /></div>
           <div class="dialog-row"><label class="dialog-label" for="copilot-provider-url">엔드포인트</label><input id="copilot-provider-url" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" /></div>
           <div class="dialog-row">
             <label class="dialog-label" for="copilot-reasoning-effort">추론 수준</label>

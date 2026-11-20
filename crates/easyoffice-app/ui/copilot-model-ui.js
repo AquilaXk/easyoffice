@@ -417,7 +417,7 @@
       }
       const customOpt = document.createElement("option");
       customOpt.value = CUSTOM_MODEL_SENTINEL;
-      customOpt.textContent = list.length > 0 ? "직접 입력…" : "목록 불러오기 또는 직접 입력";
+      customOpt.textContent = "직접 입력…";
       opts.push(customOpt);
       presetSelect.replaceChildren(...opts);
       const hasMatch = Boolean(currentModelId) && list.some((m) => m.id === currentModelId);
@@ -458,17 +458,7 @@
       if (urlInput) {
         urlInput.placeholder = prov.defaultBaseUrl || (prov.isLocal ? "http://127.0.0.1:11434/v1" : "https://api.example.com/v1");
       }
-      if (modelInput) {
-        modelInput.placeholder = prov.requiresKey
-          ? "API 키 입력 후 확인 시 자동 조회 (또는 직접 입력)"
-          : "목록 불러오기 또는 모델 ID 직접 입력";
-      }
-      if (keyInput) {
-        const hasSavedKey = Boolean(keysByProvider.get(kind));
-        keyInput.placeholder = hasSavedKey
-          ? "메모리에 저장됨"
-          : (prov.requiresKey ? `${prov.label} API 키 입력` : "선택 사항");
-      }
+      if (keyInput) keyInput.placeholder = keysByProvider.get(kind) ? "저장됨" : "";
     }
 
     function openDialog(overrideKind, overrideModel, initialStatus = "") {

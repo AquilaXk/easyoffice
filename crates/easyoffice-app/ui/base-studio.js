@@ -1,7 +1,7 @@
 // 참조 구현 (reference implementation): rhwp-studio (MIT, Copyright (c) 2025-2026 Edward Kim; see `THIRD_PARTY_NOTICES.md`)
 // 크롬·시트 탭·대화상자 프레임 및 glide-data-grid (`glideapps/glide-data-grid`, MIT, Copyright (c) 2021 typeguard, Inc.,
 // commit 0875d78cc41535a39f8b417ff88ce1ebe129c363, `packages/core/src/cells/{bubble-cell,marker-cell,new-row-cell}.tsx`;
-// see `THIRD_PARTY_NOTICES.md`) · 마이크로소프트 오피스 (Lists / Access) 공식 한국어 화면 명칭을 적용한 데이터베이스 스튜디오 UI.
+// see `THIRD_PARTY_NOTICES.md`) 데이터베이스 스튜디오 UI.
 
 (function (host) {
   "use strict";
@@ -70,6 +70,10 @@
       if (onClick) b.addEventListener("click", onClick);
       return b;
     };
+    // A toolbar button in the reference format: the sprite icon above the label (`toolbar.css`).
+    const mkTbBtn = (icon, label, onClick, id) =>
+      appendAll(mkBtn("tb-btn", "", onClick, id, label), setAttr(el("span", "tb-sprite icon-" + icon), "aria-hidden", "true"), el("span", "tb-label", label));
+    const setTbLabel = (btn, text) => { btn.querySelector(".tb-label").textContent = text; };
     const mkSel = (cls, aria, id) => {
       const s = el("select", cls);
       if (id) s.id = id;
@@ -124,20 +128,20 @@
       const toolbar = setAttr(setAttr(el("div", "eo-doc-style-bar base-toolbar"), "role", "toolbar"), "aria-label", "데이터베이스 도구 모음");
       toolbar.id = "base-toolbar";
       const grpEdit = appendAll(el("div", "tb-group"),
-        mkBtn("tb-btn base-tb-btn", "새 레코드", () => addRecord({}), "btn-base-add-record"),
-        mkBtn("tb-btn base-tb-btn", "필드 추가", () => openFieldDialog(null), "btn-base-add-field")
+        mkTbBtn("add", "새 레코드", () => addRecord({}), "btn-base-add-record"),
+        mkTbBtn("table", "필드 추가", () => openFieldDialog(null), "btn-base-add-field")
       );
       const sep1 = setAttr(el("span", "tb-sep"), "aria-hidden", "true");
-      const btnFilter = setAttr(mkBtn("tb-btn base-tb-btn", "필터", () => toggleQueryPanel("filter"), "btn-base-filter"), "aria-pressed", "false");
-      const btnSort = setAttr(mkBtn("tb-btn base-tb-btn", "정렬", () => toggleQueryPanel("sort"), "btn-base-sort"), "aria-pressed", "false");
+      const btnFilter = setAttr(mkTbBtn("find", "필터", () => toggleQueryPanel("filter"), "btn-base-filter"), "aria-pressed", "false");
+      const btnSort = setAttr(mkTbBtn("arrow-down", "정렬", () => toggleQueryPanel("sort"), "btn-base-sort"), "aria-pressed", "false");
       const groupSelect = mkSel("sb-select base-group-select", "그룹화 기준", "base-group-select");
       groupSelect.addEventListener("change", () => setGroupBy(groupSelect.value));
       const grpQuery = appendAll(el("div", "tb-group"), btnFilter, btnSort, groupSelect);
       const sep2 = setAttr(el("span", "tb-sep"), "aria-hidden", "true");
       const grpExport = appendAll(el("div", "tb-group base-export-group"),
-        mkBtn("tb-btn base-tb-btn", "XLSX로 내보내기", () => { void exportAs("xlsx"); }, "btn-base-export-xlsx"),
-        mkBtn("tb-btn base-tb-btn", "CSV로 내보내기", () => { void exportAs("csv"); }, "btn-base-export-csv"),
-        mkBtn("tb-btn base-tb-btn", "TSV로 내보내기", () => { void exportAs("tsv"); }, "btn-base-export-tsv")
+        mkTbBtn("grid", "XLSX로 내보내기", () => { void exportAs("xlsx"); }, "btn-base-export-xlsx"),
+        mkTbBtn("grid", "CSV로 내보내기", () => { void exportAs("csv"); }, "btn-base-export-csv"),
+        mkTbBtn("grid", "TSV로 내보내기", () => { void exportAs("tsv"); }, "btn-base-export-tsv")
       );
       const viewTabs = setAttr(setAttr(el("div", "base-view-tabs"), "role", "tablist"), "aria-label", "보기 전환");
       viewTabs.id = "base-view-tabs";
@@ -159,7 +163,7 @@
       const btnAddTable = mkBtn("sheet-tab-btn sheet-tab-add base-add-table-btn", "+ 새 테이블", () => addTable({}), "btn-base-add-table", "새 테이블");
       const tableTabs = setAttr(setAttr(el("div", "sheet-tabs base-table-tabs"), "role", "tablist"), "aria-label", "테이블 목록");
       tableTabs.id = "base-table-tabs";
-      appendAll(bottomBar, btnAddTable, tableTabs);
+      appendAll(bottomBar, tableTabs, btnAddTable);
 
       byId("base-field-dialog")?.remove?.();
       const fieldDlg = buildFieldDialogDom();
@@ -188,9 +192,9 @@
       const nameInput = mkInput("base-field-name", "text", "dialog-text-input base-dlg-input", "필드 이름");
       const typeSelect = mkSel("sb-select base-dlg-select", "필드 유형", "base-field-type");
       for (const ft of M.FIELD_TYPES) addOpt(typeSelect, ft, M.FIELD_TYPE_LABELS[ft]);
-      const optsInput = mkInput("base-field-options", "text", "dialog-text-input base-dlg-input", "선택 옵션 (쉼표 구분)", "대기, 진행 중, 완료");
+      const optsInput = mkInput("base-field-options", "text", "dialog-text-input base-dlg-input", "선택 옵션 (쉼표 구분)");
       const relSelect = mkSel("sb-select base-dlg-select", "연결 테이블", "base-field-relation-table");
-      const formulaInput = mkInput("base-field-formula", "text", "dialog-text-input base-dlg-input", "수식", "예: ROUND({금액} * 1.1, 0)");
+      const formulaInput = mkInput("base-field-formula", "text", "dialog-text-input base-dlg-input", "수식");
 
       const reqCheck = mkInput("base-field-required", "checkbox", "", "필수 입력");
       const reqLabel = setAttr(el("label", "dialog-checkbox"), "for", "base-field-required");
@@ -570,7 +574,7 @@
       if (chosen) { table.kanbanFieldId = chosen.id; sel.value = chosen.id; }
       sel.addEventListener("change", () => setViewSetting((t) => { t.kanbanFieldId = sel.value; }));
       wrap.appendChild(appendAll(el("div", "base-subview-bar"), lbl, sel));
-      if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "보드로 분류할 필드가 없습니다.")); return wrap; }
+      if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "선택 유형 필드 없음")); return wrap; }
 
       const multi = chosen.type === "multiSelect", options = chosen.options || [];
       const columns = [...options.map((o) => ({ key: o, label: o })), { key: "", label: "미분류" }];
@@ -655,7 +659,7 @@
         mkBtn("dialog-btn", "오늘", () => setViewSetting((t) => { t.calendarMonth = currentMonthStr(); }), "btn-base-cal-today")
       );
       wrap.appendChild(appendAll(el("div", "base-subview-bar base-cal-header"), lbl, fSel, navGroup));
-      if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "일정 보기를 사용하려면 날짜 유형 필드를 추가하세요.")); return wrap; }
+      if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "날짜 유형 필드 없음")); return wrap; }
 
       const byDate = new Map();
       for (const row of query.rows) {
@@ -706,9 +710,9 @@
         btn.setAttribute("aria-selected", active ? "true" : "false");
       }
       const fCount = (table.filters || []).length, sCount = (table.sorts || []).length;
-      refs.btnFilter.textContent = fCount > 0 ? `필터 (${fCount})` : "필터";
+      setTbLabel(refs.btnFilter, fCount > 0 ? `필터 (${fCount})` : "필터");
       refs.btnFilter.setAttribute("aria-pressed", String(queryPanel === "filter" || fCount > 0));
-      refs.btnSort.textContent = sCount > 0 ? `정렬 (${sCount})` : "정렬";
+      setTbLabel(refs.btnSort, sCount > 0 ? `정렬 (${sCount})` : "정렬");
       refs.btnSort.setAttribute("aria-pressed", String(queryPanel === "sort" || sCount > 0));
 
       refs.groupSelect.replaceChildren();

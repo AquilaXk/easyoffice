@@ -1,7 +1,7 @@
 // 참조 구현 (reference implementation): TanStack Table (`TanStack/table`, MIT, Copyright (c) 2016 Tanner Linsley,
 // commit 1cfb2e57cbfecf25e3d4ee1bda32fbd65e4e0327, `packages/table-core/src/features/row-sorting/sortFns.ts`,
 // `column-filtering/filterFns.ts`, `column-grouping/createGroupedRowModel.ts`; see `THIRD_PARTY_NOTICES.md`) 및
-// 참조 앱 (`rhwp-studio`, MIT, Copyright (c) 2025-2026 Edward Kim) · 마이크로소프트 오피스 (Access / Lists) 표준 한국어 스키마.
+// 참조 앱 (`rhwp-studio`, MIT, Copyright (c) 2025-2026 Edward Kim) 한국어 스키마.
 
 (function (host) {
   "use strict";
