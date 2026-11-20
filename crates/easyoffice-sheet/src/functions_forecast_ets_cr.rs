@@ -776,3 +776,7 @@ pub fn forecast_ets_stat_cr(args: &EtsArgs, statistic_type: f64) -> Fallible<f64
 #[cfg(test)]
 #[path = "functions_forecast_ets_cr_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "functions_forecast_ets_cr_excel_tests.rs"]
+mod excel_tests;

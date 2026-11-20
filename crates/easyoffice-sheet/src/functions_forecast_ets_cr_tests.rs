@@ -680,22 +680,3 @@ fn a_long_series_with_the_longest_period_stays_within_its_budget() {
     let auto = EtsArgs::new(&values, &timeline);
     assert!(forecast_ets_seasonality_cr(&auto).is_ok());
 }
-
-/// Values from the reference app arrive from QA later. Fill the numbers and remove the ignore.
-///
-/// TODO(QA): FORECAST.ETS, CONFINT, SEASONALITY and STAT of the airline series with default
-/// arguments, then with explicit seasonality 0 and 12, data_completion 0 and a timeline with gaps,
-/// aggregation 0 to 7 with repeated times, and the SMAPE unit (percent or ratio).
-#[test]
-#[ignore = "TODO: reference-app values from QA (docs/forecast-ets-cleanroom.md section 9)"]
-fn reference_app_values() {
-    let timeline = months();
-    let args = EtsArgs::new(&AIR, &timeline);
-    let _ = (
-        forecast_ets_cr(145.0, &args),
-        forecast_ets_confint_cr(145.0, &args, 0.95),
-        forecast_ets_seasonality_cr(&args),
-        forecast_ets_stat_cr(&args, 1.0),
-    );
-    todo!("compare with the reference app values");
-}
