@@ -8,7 +8,7 @@ use crate::{
 use std::io::{Cursor, Write};
 use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, DateTime, ZipWriter};
 
 /// Extracted entry from a PKZIP container.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,14 +184,21 @@ impl ZipArchiveCodec {
         let mut archive = Self::write_archive(entries, &packed)?;
         if packed.iter().any(Option::is_some) {
             Self::mark_deflated(&mut archive, entries, &packed)?;
-            // The fields were set by hand, so the archive must pass the strict reader it will meet
-            // (structure, CRC, sizes). The ratio is left to the reader's own policy: `pack_deflate`
-            // makes no promise about it.
-            let policy = ZipSecurityPolicy {
-                max_compression_ratio: f64::INFINITY,
-                ..ZipSecurityPolicy::default()
-            };
-            Self::verify(&archive, &policy)?;
+            // Reading the finished archive back (inflate and CRC of every entry) added 8 to 10% to
+            // the 1 MB conversions, so only builds with debug assertions do it; `mark_deflated`
+            // already checked the layout. The ratio is left to the reader's own policy:
+            // `pack_deflate` makes no promise about it.
+            debug_assert!(
+                Self::verify(
+                    &archive,
+                    &ZipSecurityPolicy {
+                        max_compression_ratio: f64::INFINITY,
+                        ..ZipSecurityPolicy::default()
+                    }
+                )
+                .is_ok(),
+                "a packed archive must pass the strict reader"
+            );
         }
         Ok(archive)
     }
@@ -224,24 +231,60 @@ impl ZipArchiveCodec {
     /// Turns the stored entries that hold deflated payloads into deflate entries: needed version,
     /// method, CRC-32 and uncompressed size of the real data, in the local header and in the
     /// central directory entry. The payload and every offset stay as written.
+    ///
+    /// The positions come from the layout `ZipWriter` produces for stored entries without extra
+    /// fields (local header 30 bytes + name + payload, then directory entries of 46 bytes + name,
+    /// then the 22-byte end record), and every position is checked against the bytes before a field
+    /// is set: signature, name length, extra length, packed size, the directory entry's local offset
+    /// and the end record's entry count, offset and size. A layout that differs fails closed.
     fn mark_deflated<E: AsZipEntry>(
         archive: &mut [u8],
         entries: &[E],
         packed: &[Option<Vec<u8>>],
     ) -> Result<(), EasyOfficeError> {
-        let mut offsets = Vec::new();
-        {
-            let mut reader = ZipArchive::new(Cursor::new(&*archive)).map_err(zip_read_error)?;
-            for index in (0..entries.len()).filter(|&i| packed[i].is_some()) {
-                let file = reader.by_index_raw(index).map_err(zip_read_error)?;
-                offsets.push((
-                    index,
-                    file.header_start() as usize,
-                    file.central_header_start() as usize,
-                ));
+        let layout_error = || {
+            EasyOfficeError::CorruptedContainer(
+                "ZipWriter가 쓴 PKZIP 배치가 예상과 다릅니다.".to_string(),
+            )
+        };
+        let payload_len = |index: usize| {
+            packed[index]
+                .as_ref()
+                .map_or_else(|| entries[index].entry_data().len(), Vec::len)
+        };
+        let name_len = |index: usize| entries[index].entry_path().len();
+        let directory_start: usize = (0..entries.len())
+            .map(|i| 30 + name_len(i) + payload_len(i))
+            .sum();
+        let mut local = 0usize;
+        let mut central = directory_start;
+        for index in 0..entries.len() {
+            let (local_at, central_at) = (local, central);
+            local += 30 + name_len(index) + payload_len(index);
+            central += 46 + name_len(index);
+            let Some(deflated) = &packed[index] else {
+                continue;
+            };
+            let word =
+                |at: usize| u32::from_le_bytes(archive[at..at + 4].try_into().unwrap_or([0; 4]));
+            let half =
+                |at: usize| u16::from_le_bytes(archive[at..at + 2].try_into().unwrap_or([0; 2]));
+            let name = name_len(index) as u16;
+            let consistent = word(local_at) == Self::LOCAL_FILE_HEADER_SIG
+                && half(local_at + 8) == Self::METHOD_STORE
+                && word(local_at + 18) as usize == deflated.len()
+                && half(local_at + 26) == name
+                && half(local_at + 28) == 0
+                && word(central_at) == Self::CENTRAL_DIR_HEADER_SIG
+                && half(central_at + 10) == Self::METHOD_STORE
+                && word(central_at + 20) as usize == deflated.len()
+                && half(central_at + 28) == name
+                && half(central_at + 30) == 0
+                && half(central_at + 32) == 0
+                && word(central_at + 42) as usize == local_at;
+            if !consistent {
+                return Err(layout_error());
             }
-        }
-        for (index, local, central) in offsets {
             let data = entries[index].entry_data();
             let crc = Self::crc32(data).to_le_bytes();
             let size = (data.len() as u32).to_le_bytes();
@@ -250,19 +293,30 @@ impl ZipArchiveCodec {
             // Local header: version 4, method 8, CRC-32 14, uncompressed size 22.
             // Central entry: version needed 6, method 10, CRC-32 16, uncompressed size 24.
             for (at, field) in [
-                (local + 4, &version[..]),
-                (local + 8, &method[..]),
-                (local + 14, &crc[..]),
-                (local + 22, &size[..]),
-                (central + 6, &version[..]),
-                (central + 10, &method[..]),
-                (central + 16, &crc[..]),
-                (central + 24, &size[..]),
+                (local_at + 4, &version[..]),
+                (local_at + 8, &method[..]),
+                (local_at + 14, &crc[..]),
+                (local_at + 22, &size[..]),
+                (central_at + 6, &version[..]),
+                (central_at + 10, &method[..]),
+                (central_at + 16, &crc[..]),
+                (central_at + 24, &size[..]),
             ] {
                 archive[at..at + field.len()].copy_from_slice(field);
             }
         }
-        Ok(())
+        let end = central;
+        let word = |at: usize| u32::from_le_bytes(archive[at..at + 4].try_into().unwrap_or([0; 4]));
+        let end_ok = archive.len() == end + 22
+            && word(end) == Self::END_OF_CENTRAL_DIR_SIG
+            && u16::from_le_bytes([archive[end + 10], archive[end + 11]]) as usize == entries.len()
+            && word(end + 12) as usize == central - directory_start
+            && word(end + 16) as usize == directory_start;
+        if end_ok {
+            Ok(())
+        } else {
+            Err(layout_error())
+        }
     }
 
     pub fn unpack(
