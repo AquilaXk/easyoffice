@@ -15,6 +15,9 @@ use super::types::{ChunkSink, CopilotLlmRequest, HttpMethod, MAX_LLM_RESPONSE_BY
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const LOCAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_IO_TIMEOUT: Duration = Duration::from_secs(90);
+/// 읽기가 이 간격마다 깨어나 취소 여부를 본다. Windows에서는 다른 스레드의 `shutdown`이 막힌 `recv`를
+/// 늘 깨우지는 않아서 소켓 닫기에만 기댈 수 없다.
+const CANCEL_POLL: Duration = Duration::from_millis(200);
 /// 스트림은 읽기 사이에 이만큼 조용하면 끊긴 것으로 본다(모델이 첫 글자를 내기까지의 시간도 여기에 든다).
 pub const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 조각이 끊기지 않고 와도 스트림 전체가 이 시간을 넘으면 끝낸다. 출력 상한(8,192 토큰)을 느린 로컬 모델이 채우는 시간을 넉넉히 덮는다.
@@ -52,11 +55,12 @@ pub fn send_local_http_streaming(
     let mut stream = TcpStream::connect_timeout(&addr, LOCAL_CONNECT_TIMEOUT)
         .map_err(|err| io_failure(req, format!("로컬 모델 서버에 연결할 수 없습니다: {err}")))?;
     req.cancel.attach(&stream);
-    let _ = stream.set_read_timeout(Some(if req.stream {
+    let idle_limit = if req.stream {
         STREAM_IDLE_TIMEOUT
     } else {
         LOCAL_IO_TIMEOUT
-    }));
+    };
+    let _ = stream.set_read_timeout(Some(CANCEL_POLL));
     let deadline = req.stream.then(|| Instant::now() + STREAM_TOTAL_LIMIT);
     let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
 
@@ -98,7 +102,11 @@ pub fn send_local_http_streaming(
     let mut buf = [0u8; 8192];
     let mut hdr_end_cache: Option<usize> = None;
     let mut feed = BodyFeed::default();
+    let mut last_data = Instant::now();
     loop {
+        req.cancel
+            .check()
+            .map_err(EasyOfficeError::InvalidArgument)?;
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
             return Err(EasyOfficeError::InvalidArgument(
                 STREAM_DEADLINE_MESSAGE.to_string(),
@@ -106,7 +114,16 @@ pub fn send_local_http_streaming(
         }
         match stream.read(&mut buf) {
             Ok(0) => break,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) && last_data.elapsed() < idle_limit =>
+            {
+                continue;
+            }
             Ok(n) => {
+                last_data = Instant::now();
                 if raw.len().saturating_add(n) > max_wire {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
                         "로컬 모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string(),
