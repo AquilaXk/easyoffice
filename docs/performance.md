@@ -1,6 +1,6 @@
 # 성능 측정과 병목 (참조 앱 대비, 경로별 프로파일)
 
-이 문서는 측정 결과와 최적화 후보를 적는다. 셸 PDF 내보내기의 후보 2·3·4와 병목 1~4는 PD-163으로 처리했고 결과는 4.1절에 있다. 문서→PDF 경로(PD-167)의 측정은 4.2절에 있다. 병목 10(ODS 열기)과 후보 8, DOCX·ODT·HWPX·XLSX 열기의 XML 읽기는 PD-168로 처리했고 결과는 4.3절에 있다. 시트 조건부 서식·데이터 유효성 평가(PD-171)의 측정은 4.5절에, 열기 응답 JSON·안전 XML 검사·엄격 JSON 파서(PD-186)는 4.6절에, WebUI 화면 경로(시트·문서·슬라이드)의 측정과 개선은 4.7절에 있다. 나머지는 아직 구현하지 않았다. 아래 수치는 모두 이 저장소의 측정 하네스로 직접 잰 값이고, 못 잰 것은 "못 잼"으로 적었다. 측정 기준 커밋은 `bac25cf`(main)이다. 그 뒤 main에 올라온 커밋(`f729ebb`까지)은 시트·XLS 저장, Pages 읽기, 웹 UI를 바꿨고 PDF·미리보기·Quick Look 경로는 건드리지 않아 다시 재지 않았다(XLS 저장·시트 정렬 값은 달라졌을 수 있다).
+이 문서는 측정 결과와 최적화 후보를 적는다. 셸 PDF 내보내기의 후보 2·3·4와 병목 1~4는 PD-163으로 처리했고 결과는 4.1절에 있다. 문서→PDF 경로(PD-167)의 측정은 4.2절에 있다. 병목 10(ODS 열기)과 후보 8, DOCX·ODT·HWPX·XLSX 열기의 XML 읽기는 PD-168로 처리했고 결과는 4.3절에 있다. 시트 조건부 서식·데이터 유효성 평가(PD-171)의 측정은 4.5절에, 열기 응답 JSON·안전 XML 검사·엄격 JSON 파서(PD-186)는 4.6절에, WebUI 화면 경로(시트·문서·슬라이드)의 측정과 개선은 4.7절에 있다. 엔진 `--self-test` 벤치마크의 2026-11-20 측정과 이전 값 비교는 7절에 있다. 나머지는 아직 구현하지 않았다. 아래 수치는 모두 이 저장소의 측정 하네스로 직접 잰 값이고, 못 잰 것은 "못 잼"으로 적었다. 측정 기준 커밋은 `bac25cf`(main)이다. 그 뒤 main에 올라온 커밋(`f729ebb`까지)은 시트·XLS 저장, Pages 읽기, 웹 UI를 바꿨고 PDF·미리보기·Quick Look 경로는 건드리지 않아 다시 재지 않았다(XLS 저장·시트 정렬 값은 달라졌을 수 있다).
 
 ## 1. 측정 방법과 환경
 
@@ -439,3 +439,59 @@ node scripts/bench-webui.mjs --app <easyoffice-app> --chrome <브라우저> --ui
 - 최대 RSS가 컸던 원인은 쪽·스레드마다 한 글꼴 파일 전체 복사가 대부분이었다(4.1절에서 제거). 남은 RSS(전 면 매핑, 병렬 스레드, 쪽 객체)의 분해는 하지 않았다.
 - 줄 단위 핫스팟(디버그 정보 없이 `sample`만 사용). 줄이 필요하면 `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`로 따로 빌드해야 한다(전체 재빌드).
 - 벽시계 값은 측정 중 기기 부하의 영향을 받았다. 낮은 부하에서 다시 재면 우리 쪽 벽시계 수치는 더 낮아질 가능성이 크다(1차와 2차 차이로 보인다).
+
+## 7. `--self-test` 벤치마크 (2026-11-20)
+
+엔진의 결정론적 벤치마크(`crates/easyoffice-app/src/benchmark*.rs`)를 `cargo run -p easyoffice-app -- --self-test`로 돌린 값이다. 각 스위트는 기준 구현과 최적화 구현을 같은 입력으로 5라운드 교대 실행하고(`bench_rounds=5`) 두 결과가 같은지(`eq=true`)를 먼저 검사한다. 속도 하한은 release에서만 판정한다(PD-082, `benchmark_large.rs`의 `performance_gate`).
+
+### 7.1 환경
+
+| 항목 | 값 |
+|---|---|
+| 날짜 | 2026-11-20 |
+| 기기 | Apple M4 Pro, 12코어 |
+| OS | macOS 27.0.1 (aarch64) |
+| Rust | 1.93.1 (`.github/rust-toolchain-version`, CI와 같은 버전) |
+| 기준 커밋 | `acf29cd5` |
+| 빌드 | release: `cargo run --release -p easyoffice-app -- --self-test`를 3번 실행해 항목별 중앙값. debug: `cargo run -p easyoffice-app -- --self-test` 1번 |
+| 결과 | release 3번, debug 1번 모두 `PASSED`, `eq=true` |
+| 부하 | 측정 중 다른 세션이 같은 기기를 썼다. load average가 12코어에서 약 20~25였다. 절대 시간은 부하에 따라 흔들리므로 배율을 먼저 본다 |
+
+### 7.2 스위트별 결과 (기준 구현 → 최적화 구현)
+
+이전 값은 PD-082가 기록한 x86_64(i7-1165G7) release 3회 중앙값("이후" 열)이다. 기기와 CPU 명령이 달라(x86_64는 PCLMULQDQ, aarch64는 `crc` 명령) 시간과 배율을 직접 비교할 수 없다. 같은 표에 두는 것은 하네스가 같다는 점만 근거로 한다.
+
+| 스위트 | 이전: x86_64 release | 이번: M4 Pro release | 이번: M4 Pro debug |
+|---|---|---|---|
+| `crc32_slicing_by_8` | 1,866→302 µs (6.13x) | 2,038→251 µs (7.88x) | 3,899→3,751 µs (1.04x) |
+| `crc32_hardware_1mib` | 2,112→34 µs (61.9x) | 2,180→108 µs (19.95x) | 3,393→3,198 µs (1.06x) |
+| `deflate_zlib_roundtrip` | 279→74 µs (3.74x) | 250→45 µs (5.91x) | 1,460→742 µs (1.97x) |
+| `utf16_swar_and_xml_unescape` | 146→82 µs (1.78x) | 69→41 µs (1.68x) | 829→631 µs (1.31x) |
+| `sheet_dag_bitset_eval` | 2,051→242 µs (8.52x) | 808→144 µs (5.61x) | 9,390→2,621 µs (3.58x) |
+| `swar_csv_xml_and_zero_alloc_range_agg` | 1,095→336 µs (3.26x) | 476→141 µs (3.61x) | 6,299→1,545 µs (4.08x) |
+| `sheet_recalc_10k_rows` (5만 셀) | 87,609→10,845 µs (7.94x) | 26,791→4,235 µs (6.31x) | 272,504→63,927 µs (4.26x) |
+
+배율은 release 세 번의 배율 중앙값이다. 시간 열은 세 번의 중앙값이라 두 시간의 비가 배율과 조금 다를 수 있다.
+
+### 7.3 실제 경로
+
+| 경로 | 이전: x86_64 release | 이번: M4 Pro release | 이번: M4 Pro debug |
+|---|---|---|---|
+| `docx_to_docx_1mb` | 37.2 ms / 184,948 B | 10.6 ms / 182,640 B | 130.4 ms / 182,640 B |
+| `docx_to_hwpx_1mb` | 42.1 ms / 234,482 B | 11.8 ms / 226,193 B | 143.2 ms / 226,193 B |
+| `xlsx_100k_cells_pack_unpack` | 166.3 ms / 746,161 B | 44.6 ms / 511,074 B | 857.2 ms / 511,074 B |
+| `sheet_recalc_5000_targets` | 2.4 ms | 0.90 ms | 18.4 ms |
+| `sheet_recalc_10k_rows` | 16.4 ms | 7.65 ms | 155.2 ms |
+| `crc32_64kib_x64` | 0.14 ms | 0.40 ms | 12.6 ms |
+| `crc32_1mib_x8` | 0.28 ms | 0.78 ms | 26.0 ms |
+
+출력 바이트 수가 이전과 다른 항목(DOCX·HWPX·XLSX)은 그 사이 코드가 바뀐 것이고, 원인은 따로 확인하지 않았다. 같은 입력의 시간 비교로 읽지 않는다.
+
+### 7.4 읽는 법과 한계
+
+- release는 세 번 모두 속도 하한(`crc32_slicing_by_8` 2.0배, `crc32_hardware_1mib` 2.0배, `sheet_dag_bitset_eval` 1.1배, `sheet_recalc_10k_rows` 2.0배)을 넘었다.
+- debug 값은 검사 비용이 섞여 있어 `crc32_*`가 1배 근처다. 하한을 판정하지 않는다(`timingGated:false`).
+- `crc32_hardware_1mib`은 aarch64에서는 PCLMULQDQ가 아니라 `crc` 명령 경로를 쓴다(`crc32.rs` 머리 주석). x86_64 이전 값과 배율이 다른 원인은 따로 재지 않았다.
+- 같은 기기에서 이전 커밋과 이번 커밋을 번갈아 재지 않았다. 이전 값과의 차이를 코드 변경의 효과로 읽을 수 없다.
+- Windows·Linux는 못 잼.
+
