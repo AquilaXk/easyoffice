@@ -77,7 +77,7 @@ EasyOffice/
 | `easyoffice-desktop` | Tauri v2 셸, OS 통합, PDF 내보내기·편집, 코파일럿 HTTP 전송 | 있음(아래) | app, formats, sheet |
 
 - **엔진 크레이트도 허용 라이선스(MIT, Apache-2.0, BSD, Zlib)의 유지되는 크레이트를 그대로 씁니다**(PD-269가 PD-053·PD-095의 무의존 방침을 대체). 같은 기능을 직접 짠 코드와 크레이트를 두 벌 두지 않고, 원본의 버그 수정과 사양 변경은 업데이트로 받습니다. 크레이트 버전은 데스크톱 셸과 rhwp가 이미 푸는 버전에 맞춰 `Cargo.lock`에 중복 버전이 늘지 않게 하고, 루트 `Cargo.toml`의 `[workspace.dependencies]`에서 한곳에서 정합니다.
-- **크레이트는 얇은 어댑터 뒤에 둡니다.** 상한과 Fail-Closed(ZIP 폭탄·항목 수·총 해제 크기, 경로 순회·대소문자 충돌, XXE·DTD, JSON 깊이·크기)는 크레이트 바깥 래퍼에 남기고, 크레이트가 상한 없이 끝까지 읽는 경로(`zip`의 항목 읽기 등)는 쓰지 않거나 상한 있는 읽기로 감쌉니다. 1단계(PD-269)에서 바뀐 기반 코덱은 `formats`의 `crc32.rs`(crc32fast), `base64_codec.rs`(base64), `sha_digest.rs`(sha1·sha2), `cp949.rs`(문자 인코딩 크레이트), `deflate.rs`(DEFLATE·Adler-32 크레이트), `zip_codec.rs`(zip)입니다. 이어서 XLSX·XLS·ODS, PDF, HWP·HWPX 순으로 바꿉니다.
+- **크레이트는 얇은 어댑터 뒤에 둡니다.** 상한과 Fail-Closed(ZIP 폭탄·항목 수·총 해제 크기, 경로 순회·대소문자 충돌, XXE·DTD, JSON 깊이·크기)는 크레이트 바깥 래퍼에 남기고, 크레이트가 상한 없이 끝까지 읽는 경로(`zip`의 항목 읽기 등)는 쓰지 않거나 상한 있는 읽기로 감쌉니다. 1단계(PD-269)에서 바뀐 기반 코덱은 `formats`의 `crc32.rs`(crc32fast), `base64_codec.rs`(base64), `sha_digest.rs`(sha1·sha2), `cp949.rs`(문자 인코딩 크레이트), `deflate.rs`(DEFLATE·Adler-32 크레이트), `zip_codec.rs`(zip), `json_out.rs`(serde_json: JSON 출력의 이스케이프·직렬화 한곳, 입력 파서 `strict_json*.rs`는 보안 경계라 직접 유지)입니다. 이어서 XLSX·XLS·ODS, PDF, HWP·HWPX 순으로 바꿉니다.
 - **외부 의존은 데스크톱 셸에만 둡니다**(PD-101). 이유는 PDF 글꼴 서브셋·`ToUnicode`, PDF 객체 복사, TLS, OS 창 같은 일을 자체 구현하면 이식 한도를 크게 넘기 때문입니다. 용도별로 묶으면 다음과 같습니다(`crates/easyoffice-desktop/Cargo.toml`).
   - 창·IPC·대화상자·단일 인스턴스·업데이트: Tauri v2와 플러그인.
   - 검색 가능한 PDF 내보내기와 카드 미리보기: SVG→PDF 변환, SVG 파서·래스터, 글꼴 DB, PDF 쓰기(PD-101, PD-142, PD-179).
