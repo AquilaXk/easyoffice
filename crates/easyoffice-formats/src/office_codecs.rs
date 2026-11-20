@@ -70,9 +70,6 @@ const XLSX_ROOT_RELS: &str = concat!(
 
 type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
 
-/// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents. A hidden sheet is written as
-/// `state="hidden"` or `state="veryHidden"`, and the book opens on the first sheet that is shown
-/// (ECMA-376 18.2.19 `sheet@state`, 18.2.1 `bookViews`).
 /// Whether `workbookPr` of the workbook part says the dates count from 1904.
 fn read_date1904(wb_xml: &str) -> bool {
     extract_tags_or_self_closing_with_attrs(wb_xml, "workbookPr")
@@ -82,6 +79,9 @@ fn read_date1904(wb_xml: &str) -> bool {
         .is_some_and(|v| matches!(v.trim(), "1" | "true"))
 }
 
+/// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents. A hidden sheet is written as
+/// `state="hidden"` or `state="veryHidden"`, and the book opens on the first sheet that is shown
+/// (ECMA-376 18.2.19 `sheet@state`, 18.2.1 `bookViews`).
 fn build_workbook_parts(
     active_sheets: &[OdsUnpacked],
     states: &[SheetState],
