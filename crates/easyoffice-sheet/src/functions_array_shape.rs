@@ -7,8 +7,10 @@
 //! (`fn_expand`), `wrapcols_wraprows.rs` (`fn_wrapcols`, `fn_wraprows`, `flatten_vector`,
 //! `get_pad_with`), `information/isomitted.rs` (기준 커밋 01b39c1ad26252f7b6c810440e8433a932daee07).
 //! MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH, 2023-present IronCalc contributors, 2026-present
-//! IronCalc GmbH. `TRIMRANGE` is IronCalc `lookup_and_reference/trimrange.rs` (`fn_trimrange` 29-134,
-//! 기준 커밋 f93662006b8fb1c401dc870bbda26c5d60ac6037). The bodies are ported onto this engine's grid; a size that is left out
+//! IronCalc GmbH. `TRIMRANGE` is IronCalc `lookup_and_reference/trimrange.rs` (`is_blank` 8-10,
+//! `row_is_empty` 13-15, `col_is_empty` 18-20, `fn_trimrange` 34-134; 기준 커밋
+//! f93662006b8fb1c401dc870bbda26c5d60ac6037) with the same helpers and branches. The bodies are
+//! ported onto this engine's grid; a size that is left out
 //! (`TAKE(a,,2)`) means the whole side, every result is checked against the array budget, and an
 //! omitted `LAMBDA` parameter is a variable bound to nothing instead of an empty argument.
 
@@ -51,6 +53,21 @@ fn slice(
         let (rr, cc) = (rows.start + r, cols.start + c);
         (grid.get(rr, cc).clone(), grid.link_id(rr, cc))
     })
+}
+
+/// Returns true if an array cell counts as a blank/empty cell for TRIMRANGE purposes.
+fn is_blank(node: &V) -> bool {
+    matches!(node, V::Empty)
+}
+
+/// Returns true if every cell in row `r` is blank.
+fn row_is_empty(data: &Grid, r: usize) -> bool {
+    (0..data.cols).all(|c| is_blank(data.get(r, c)))
+}
+
+/// Returns true if every row has a blank value at column index `col`.
+fn col_is_empty(data: &Grid, col: usize) -> bool {
+    (0..data.rows).all(|r| is_blank(data.get(r, col)))
 }
 
 /// The padding value of `EXPAND`/`WRAP*`: `#N/A` unless one is given.
@@ -394,8 +411,17 @@ impl SheetEngine {
         Ok(Val::grid(out))
     }
 
-    /// `TRIMRANGE(range, [trim_rows], [trim_cols])`: blank outer rows and columns cut off (0 none, 1
-    /// leading, 2 trailing, 3 both); `#REF!` when nothing is left.
+    /// `=TRIMRANGE(range, [trim_rows], [trim_cols])`
+    ///
+    /// Trims blank rows and/or columns from the outer edges of a range or array.
+    ///
+    /// trim_rows / trim_cols:
+    ///   * 0 - no trimming
+    ///   * 1 - trim leading (top / left) blanks only
+    ///   * 2 - trim trailing (bottom / right) blanks only
+    ///   * 3 - trim both leading and trailing blanks (default)
+    ///
+    /// Returns `#REF!` if every cell in the range is blank.
     pub(crate) fn fn_trimrange(
         &self,
         args: &[Expr],
@@ -406,35 +432,80 @@ impl SheetEngine {
         if args.is_empty() || args.len() > 3 {
             return Err(FormulaError::Value);
         }
-        let grid = self.shape_grid(&args[0], env, ctx, depth)?;
-        let mut mode = |i: usize| -> Result<i64, FormulaError> {
-            Ok(self.arg_number(args, i, 3.0, env, ctx, depth)?.trunc() as i64)
+
+        let data = self.shape_grid(&args[0], env, ctx, depth)?;
+
+        let trim_rows = if args.len() >= 2 {
+            self.arg_number(args, 1, 3.0, env, ctx, depth)? as i32
+        } else {
+            3
         };
-        let (trim_rows, trim_cols) = (mode(1)?, mode(2)?);
-        if !(0..=3).contains(&trim_rows) || !(0..=3).contains(&trim_cols) {
+
+        let trim_cols = if args.len() == 3 {
+            self.arg_number(args, 2, 3.0, env, ctx, depth)? as i32
+        } else {
+            3
+        };
+
+        if !matches!(trim_rows, 0..=3) {
+            // trim_rows must be 0, 1, 2, or 3
             return Err(FormulaError::Value);
         }
-        let row_blank = |r: usize| (0..grid.cols).all(|c| matches!(grid.get(r, c), V::Empty));
-        let col_blank = |c: usize| (0..grid.rows).all(|r| matches!(grid.get(r, c), V::Empty));
-        let bounds = |len: usize, trim: i64, blank: &dyn Fn(usize) -> bool| {
-            let start = if trim & 1 != 0 {
-                (0..len).find(|&i| !blank(i)).unwrap_or(len)
-            } else {
-                0
-            };
-            let end = if trim & 2 != 0 {
-                (0..len).rev().find(|&i| !blank(i)).map_or(0, |i| i + 1)
-            } else {
-                len
-            };
-            start..end
+        if !matches!(trim_cols, 0..=3) {
+            // trim_cols must be 0, 1, 2, or 3
+            return Err(FormulaError::Value);
+        }
+
+        let num_rows = data.rows;
+        let num_cols = data.cols;
+
+        // Determine row slice bounds
+        let row_start = if trim_rows == 1 || trim_rows == 3 {
+            (0..num_rows)
+                .find(|&r| !row_is_empty(&data, r))
+                .unwrap_or(num_rows)
+        } else {
+            0
         };
-        let rows = bounds(grid.rows, trim_rows, &row_blank);
-        let cols = bounds(grid.cols, trim_cols, &col_blank);
-        if rows.start >= rows.end || cols.start >= cols.end {
+        let row_end = if trim_rows == 2 || trim_rows == 3 {
+            (0..num_rows)
+                .rev()
+                .find(|&r| !row_is_empty(&data, r))
+                .map(|r| r + 1)
+                .unwrap_or(0)
+        } else {
+            num_rows
+        };
+
+        // Determine column slice bounds
+        let col_start = if trim_cols == 1 || trim_cols == 3 {
+            (0..num_cols)
+                .find(|&c| !col_is_empty(&data, c))
+                .unwrap_or(num_cols)
+        } else {
+            0
+        };
+        let col_end = if trim_cols == 2 || trim_cols == 3 {
+            (0..num_cols)
+                .rev()
+                .find(|&c| !col_is_empty(&data, c))
+                .map(|c| c + 1)
+                .unwrap_or(0)
+        } else {
+            num_cols
+        };
+
+        if row_start >= row_end || col_start >= col_end {
+            // TRIMRANGE result is empty
             return Err(FormulaError::Ref);
         }
-        Ok(Val::grid(slice(ctx, &grid, rows, cols)?))
+
+        Ok(Val::grid(slice(
+            ctx,
+            &data,
+            row_start..row_end,
+            col_start..col_end,
+        )?))
     }
 
     /// `INDEX(array, row, [column])` on an array that is not a reference: a zero or left out number

@@ -11,10 +11,10 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// (PD-217): array 6 (`FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `RANDARRAY`), `LET` and `LAMBDA`,
 /// and the six that call a lambda (`MAP`, `REDUCE`, `SCAN`, `BYROW`, `BYCOL`, `MAKEARRAY`), then the 12 that cut,
 /// join and reshape arrays (`TAKE`, `DROP`, `TOCOL`, `TOROW`, `VSTACK`, `HSTACK`, `CHOOSEROWS`, `CHOOSECOLS`,
-/// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 11 of the function parity bundle (PD-270): text 2
-/// (`TEXTSPLIT`, `ARRAYTOTEXT`), `TRIMRANGE`, information 5
+/// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 14 of the function parity bundle (PD-270): text 5
+/// (`TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`), `TRIMRANGE`, information 5
 /// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`.
-pub const CANONICAL_FUNCTIONS: [&str; 299] = [
+pub const CANONICAL_FUNCTIONS: [&str; 302] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -314,6 +314,9 @@ pub const CANONICAL_FUNCTIONS: [&str; 299] = [
     "PERCENTOF",
     "ISO.CEILING",
     "AMORDEGRC",
+    "REGEXTEST",
+    "REGEXEXTRACT",
+    "REGEXREPLACE",
 ];
 
 /// The numeric values among `vals`.
@@ -593,10 +596,9 @@ impl SheetEngine {
             | "IMCOT" | "IMCOTH" | "IMLOG" => self.eval_im_trig_func(name, args, ctx, depth),
             "ACOSH" | "ASINH" | "ATANH" | "ACOT" | "ACOTH" | "COT" | "COTH" | "CSC" | "CSCH"
             | "SEC" | "SECH" | "CEILING.MATH" | "CEILING.PRECISE" | "FLOOR.MATH"
-            | "FLOOR.PRECISE" | "ROUNDBANK" | "ISO.CEILING" => {
-                self.eval_math_trig_func(name, args, ctx, depth)
-            }
-            "PERCENTOF" => self.eval_percentof(args, ctx, depth),
+            | "FLOOR.PRECISE" | "ROUNDBANK" => self.eval_math_trig_func(name, args, ctx, depth),
+            "ISO.CEILING" => self.fn_iso_ceiling(args, ctx, depth),
+            "PERCENTOF" => self.fn_percentof(args, ctx, depth),
             "ISREF" | "SHEET" | "SHEETS" | "CELL" | "INFO" => {
                 self.eval_info_ref_func(name, args, ctx, depth)
             }

@@ -1,9 +1,9 @@
 //! Function parity bundle (PD-270): the functions that were missing (`TEXTSPLIT`, `ARRAYTOTEXT`,
-//! `TRIMRANGE`, `ISREF`, `SHEET`, `SHEETS`, `CELL`,
+//! `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `ISREF`, `SHEET`, `SHEETS`, `CELL`,
 //! `INFO`, `PERCENTOF`, `ISO.CEILING`, `AMORDEGRC`) and the accuracy fixes of existing functions.
 //! The values are the ones of the functions' documented examples, or of the reference engine's
 //! tests (`DIFFERS` marks a case where the documented behaviour is followed instead).
-//! Hostile inputs (many delimiters, long results) have to fail closed.
+//! Hostile inputs (many delimiters, huge patterns, long results) have to fail closed.
 #![allow(clippy::unwrap_used)]
 
 mod dynamic_support;
@@ -366,4 +366,79 @@ fn an_empty_cell_in_an_array_reads_as_blank_for_one_value_functions() {
     assert_eq!(model._get_text("E2"), "TRUE");
     assert_eq!(model._get_text("F2"), "FALSE");
     assert_eq!(model._get_text("G2"), "0");
+}
+
+#[test]
+fn regextest_and_regexextract() {
+    assert_eq!(eval("=REGEXTEST(\"abc123\",\"^[a-z0-9]+$\")"), "TRUE");
+    assert_eq!(eval("=REGEXTEST(\"Hello\",\"hello\")"), "FALSE");
+    assert_eq!(eval("=REGEXTEST(\"Hello\",\"hello\",1)"), "TRUE");
+    assert_eq!(eval("=REGEXTEST(\"text\",\"[\")"), "#VALUE!");
+    assert_eq!(eval("=REGEXEXTRACT(\"foo 42 bar 7\",\"[0-9]+\")"), "42");
+    assert_eq!(eval("=REGEXEXTRACT(\"nothing\",\"[0-9]+\")"), "#N/A");
+    assert_eq!(
+        eval("=REGEXEXTRACT(\"2024-01-15\",\"(\\d+)-(\\d+)\",2)"),
+        "2024"
+    );
+    // DIFFERS: mode 0 gives the whole first match, not the first group.
+    assert_eq!(
+        eval("=REGEXEXTRACT(\"2024-01-15\",\"(\\d+)-\\d+\")"),
+        "2024-01"
+    );
+    let mut model = new_empty_model();
+    model._set("A1", "=REGEXEXTRACT(\"LonelyPlanet\",\"[A-Z][a-z]+\",1)");
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "Lonely");
+    assert_eq!(model._get_text("B1"), "Planet");
+}
+
+#[test]
+fn regexreplace_replaces_all_or_one_match() {
+    assert_eq!(eval("=REGEXREPLACE(\"aabbcc\",\"[a-c]\",\"x\")"), "xxxxxx");
+    assert_eq!(
+        eval("=REGEXREPLACE(\"a1b2c3\",\"[0-9]\",\"#\",2)"),
+        "a1b#c3"
+    );
+    assert_eq!(
+        eval("=REGEXREPLACE(\"a1b2c3\",\"[0-9]\",\"#\",-1)"),
+        "a1b2c#"
+    );
+    assert_eq!(
+        eval("=REGEXREPLACE(\"a1b2c3\",\"[0-9]\",\"#\",9)"),
+        "a1b2c3"
+    );
+    assert_eq!(
+        eval("=REGEXREPLACE(\"john smith\",\"(\\w+) (\\w+)\",\"$2 $1\")"),
+        "smith john"
+    );
+    assert_eq!(eval("=REGEXREPLACE(\"text\",\"[\",\"x\")"), "#VALUE!");
+}
+
+#[test]
+fn regex_functions_fail_closed_on_hostile_patterns() {
+    let mut model = new_empty_model();
+    // A catastrophic-backtracking pattern runs in linear time in this engine.
+    model._set("A1", "=REGEXTEST(REPT(\"a\",5000)&\"b\",\"^(a+)+$\")");
+    // A pattern past the length limit, a counted repeat past the program size limit and a deep
+    // nesting are `#VALUE!`.
+    model._set("A2", "=REGEXTEST(\"a\",REPT(\"a\",5000))");
+    model._set(
+        "A3",
+        "=REGEXTEST(\"a\",\"(((a{1000}){1000}){1000}){1000}\")",
+    );
+    model._set(
+        "A4",
+        "=REGEXTEST(\"a\",REPT(\"(\",100)&\"a\"&REPT(\")\",100))",
+    );
+    // A replacement that grows the text past the cell limit is `#VALUE!`.
+    model._set(
+        "A5",
+        "=REGEXREPLACE(REPT(\"a\",20000),\"a\",REPT(\"b\",100))",
+    );
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "FALSE");
+    assert_eq!(model._get_text("A2"), "#VALUE!");
+    assert_eq!(model._get_text("A3"), "#VALUE!");
+    assert_eq!(model._get_text("A4"), "#VALUE!");
+    assert_eq!(model._get_text("A5"), "#VALUE!");
 }

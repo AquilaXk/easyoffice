@@ -1307,6 +1307,7 @@ name = "easyoffice-sheet"
 version = "0.1.0"
 dependencies = [
  "easyoffice-formats",
+ "regex",
 ]
 
 [[package]]

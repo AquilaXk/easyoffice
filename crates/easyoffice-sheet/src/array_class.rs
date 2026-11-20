@@ -37,6 +37,9 @@ pub(crate) fn is_spill_fn(name: &str) -> bool {
             | "ISOMITTED"
             | "TEXTSPLIT"
             | "TRIMRANGE"
+            | "REGEXTEST"
+            | "REGEXEXTRACT"
+            | "REGEXREPLACE"
             | "ARRAYTOTEXT"
     )
 }

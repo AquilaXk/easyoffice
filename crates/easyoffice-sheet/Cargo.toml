@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 easyoffice-formats = { path = "../easyoffice-formats" }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }

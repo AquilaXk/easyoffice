@@ -331,6 +331,9 @@ impl SheetEngine {
                 })))
             }
             "TRIMRANGE" => self.fn_trimrange(args, env, ctx, depth),
+            "REGEXTEST" => self.fn_regextest(args, env, ctx, depth),
+            "REGEXEXTRACT" => self.fn_regexextract(args, env, ctx, depth),
+            "REGEXREPLACE" => self.fn_regexreplace(args, env, ctx, depth),
             "TEXTSPLIT" => self.fn_textsplit(args, env, ctx, depth),
             "ARRAYTOTEXT" => self.fn_arraytotext(args, env, ctx, depth),
             "IF" => self.fn_if_array(args, env, ctx, depth),

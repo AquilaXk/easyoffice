@@ -49,6 +49,7 @@ mod functions_math;
 mod functions_math_trig;
 mod functions_matrix;
 mod functions_odd;
+mod functions_regex;
 mod functions_regression;
 mod functions_spill;
 mod functions_stat_a;

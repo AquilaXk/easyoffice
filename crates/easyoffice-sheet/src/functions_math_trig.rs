@@ -10,7 +10,7 @@
 //! DreamNum Co., Ltd. See `THIRD_PARTY_NOTICES.md`.
 //!
 //! `ISO.CEILING` and `PERCENTOF` are IronCalc `base/src/functions/math_and_trigonometry/mathematical.rs`
-//! (`fn_iso_ceiling` 852-855, `fn_percentof` 1265-1281), 기준 커밋
+//! (`fn_iso_ceiling` 852-855, `fn_percentof` 1265-1281, same names and branches), 기준 커밋
 //! f93662006b8fb1c401dc870bbda26c5d60ac6037, MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH,
 //! 2023-present IronCalc contributors, 2026-present IronCalc GmbH.
 //!
@@ -167,8 +167,7 @@ impl SheetEngine {
     }
 
     /// `PERCENTOF(subset, total)`: the sum of `subset` as a share of the sum of `total`.
-    ///
-    pub(crate) fn eval_percentof(
+    pub(crate) fn fn_percentof(
         &self,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
@@ -177,21 +176,33 @@ impl SheetEngine {
         if args.len() != 2 {
             return Err(FormulaError::Value);
         }
-        let sum_of = |arg: &Expr, ctx: &mut EvalContext<'_>| {
+        // `fn_sum` of the reference: the streaming `SUM` over one argument
+        let fn_sum = |arg: &Expr, ctx: &mut EvalContext<'_>| {
             self.eval_streaming_range_agg_ctx("SUM", std::slice::from_ref(arg), ctx, depth)
         };
-        let part = sum_of(&args[0], ctx)?;
-        let total = sum_of(&args[1], ctx)?;
-        match (part, total) {
-            (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(0.0)) => {
-                Err(FormulaError::DivByZero)
-            }
-            (EvaluatedCellValue::Number(p), EvaluatedCellValue::Number(t)) => {
-                Ok(EvaluatedCellValue::Number(p / t))
-            }
-            (EvaluatedCellValue::Error(e), _) | (_, EvaluatedCellValue::Error(e)) => Err(e),
-            _ => Err(FormulaError::Value),
+        let part = match fn_sum(&args[0], ctx)? {
+            EvaluatedCellValue::Number(v) => v,
+            _ => return Err(FormulaError::Value),
+        };
+        let total = match fn_sum(&args[1], ctx)? {
+            EvaluatedCellValue::Number(v) => v,
+            _ => return Err(FormulaError::Value),
+        };
+        if total == 0.0 {
+            // Division by zero
+            return Err(FormulaError::DivByZero);
         }
+        Ok(EvaluatedCellValue::Number(part / total))
+    }
+
+    pub(crate) fn fn_iso_ceiling(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Fallible<EvaluatedCellValue> {
+        // ISO.CEILING is equivalent to CEILING.PRECISE
+        self.eval_math_trig_func("CEILING.PRECISE", args, ctx, depth)
     }
 
     pub(crate) fn eval_math_trig_func(
@@ -201,12 +212,6 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Fallible<EvaluatedCellValue> {
-        // `ISO.CEILING` is `CEILING.PRECISE`.
-        let name = if name == "ISO.CEILING" {
-            "CEILING.PRECISE"
-        } else {
-            name
-        };
         let (min, max) = match name {
             "ROUNDBANK" => (2, 2),
             "CEILING.MATH" | "FLOOR.MATH" => (1, 3),

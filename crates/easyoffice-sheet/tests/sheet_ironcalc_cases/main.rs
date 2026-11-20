@@ -94,5 +94,6 @@ mod text_functions_byte_variants;
 mod text_functions_fn_arraytotext;
 mod text_functions_fn_char_code;
 mod text_functions_fn_clean;
+mod text_functions_fn_regex;
 mod text_functions_fn_textsplit;
 mod text_functions_fn_unicode;
