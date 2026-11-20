@@ -65,7 +65,7 @@ pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
             left: m.left,
             right: m.right,
         }),
-        binding: (binding != RichBinding::default()).then(|| BindingOut {
+        binding: (binding != RichBinding::default()).then_some(BindingOut {
             kind: match binding.kind {
                 RichBindingKind::Single => "single",
                 RichBindingKind::Duplex => "duplex",
