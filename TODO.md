@@ -35,7 +35,7 @@
 - [ ] 레코드 만 건 격자: 관계 칸 옵션은 지연 생성으로 줄였으나(2,000건 0.35초) 1만 건은 다시 그리기가 3.3초라 행 가상화가 남음(`base-studio.js` `renderGridView`)
 
 ## 시트 함수 (PD-270·PD-271·PD-272, 비교표 `docs/sheet-function-parity.md`)
-- [ ] FORECAST.ETS MPL 구현을 클린룸으로 대체(`functions_forecast_ets.rs`와 `tests/data/forecast_ets_vectors.txt`가 MPL-2.0 원본, 대체하면 `THIRD_PARTY_NOTICES.md` 항목과 PD-272 예외를 지운다)
+- [ ] FORECAST.ETS MPL 구현을 클린룸으로 대체(`functions_forecast_ets.rs`와 `tests/data/forecast_ets_vectors.txt`가 MPL-2.0 원본, 대체하면 `THIRD_PARTY_NOTICES.md` 항목과 PD-272 예외를 지운다). 클린룸 구현은 브랜치 `feat/forecast-ets-cleanroom`에 있다. 기준 앱 예제(월별 57점)와 대조하면 두 구현 모두 예측값이 1~3%, 신뢰구간이 35~40% 다르고 α는 0.65 대 0.251이다. 계절 주기(12)와 신뢰구간 비율 식은 맞는다. 평활 계수·초기값·σ² 결정 방식을 찾으려면 기준 앱 실측 계열이 더 필요하다(명세 9장)
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열 값(원본 엔진의 평활 계수 탐색은 기준 앱과 다를 수 있다, 시즌 없는 계열은 특히), `aggregation` 0의 뜻(문서는 평균이라 하면서 같은 날짜는 `#VALUE!`라 함), `statistic_type` 범위 밖·`data_completion`·`aggregation` 범위 밖의 오류 값(문서에 없어 `#NUM!`), 같은 날짜가 있는 시계열, 시즌이 긴 계열의 `.CONFINT`(원본은 난수 시뮬레이션, 여기는 고정 시드), 대상 날짜가 시계열 안일 때(문서는 `#NUM!`, 원본은 보간값)
 - [ ] `GETPIVOTDATA`를 앱에 연결: 평가 요청에 시트별 `pivots`를 싣고(`sheet_pivot_json::parse_pivots`, 표 처리 옆 `lib.rs`) `WorkbookEngine::set_pivot_tables`에 넣는다. 페이지 JS가 요청에 `pivots`를 더해야 한다. 지금은 등록이 없어 `#REF!`
 - [ ] `GROUPBY`·`PIVOTBY`: 함수 목록(여러 열 집계), 만들어 붙이는 머리글·합계 글 문구(`Total`, `<항목> Total`, `Group`, `Value`)를 기준 앱 출력과 대조
