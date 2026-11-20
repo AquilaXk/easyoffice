@@ -298,11 +298,17 @@ fn check_manifest(
     if listed.len() != media.len() {
         return Err(refuse("manifest의 그림 목록이 패키지의 그림과 다릅니다."));
     }
+    let mut seen = HashSet::with_capacity(listed.len());
     for item in listed {
         let item = item
             .as_object()
             .ok_or_else(|| refuse("media 항목은 객체여야 합니다."))?;
         let path = StrictJsonValue::get_str(item, "path").unwrap_or("");
+        if !seen.insert(path) {
+            return Err(refuse(format!(
+                "manifest의 그림 경로가 중복되었습니다: {path}"
+            )));
+        }
         let part = media
             .iter()
             .find(|part| part.path == path)

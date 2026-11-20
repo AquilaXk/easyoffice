@@ -315,6 +315,44 @@ fn a_manifest_item_without_a_part_or_with_a_wrong_size_is_refused() {
 }
 
 #[test]
+fn a_picture_listed_twice_in_the_manifest_is_refused() {
+    let (a, b) = (make_png(8, 8, 2, 3), make_png(9, 9, 2, 3));
+    let item = |path: &str, bytes: usize| {
+        format!(r#"{{"path":"{path}","mediaType":"image/png","bytes":{bytes}}}"#)
+    };
+    let mut parts = good_parts();
+    parts[0].1 = BOARD_MIME.as_bytes().to_vec();
+    parts.push(("media/a.png", a.clone()));
+    parts.push(("media/b.png", b.clone()));
+    // Two items for a.png and none for b.png: the count matches, each item matches a part, and b.png is never listed.
+    parts[1].1 = manifest(
+        "easyoffice-board",
+        1,
+        &format!(
+            "{},{}",
+            item("media/a.png", a.len()),
+            item("media/a.png", a.len())
+        ),
+    )
+    .into_bytes();
+    let err = read_package(PackageKind::Board, &pack(&parts))
+        .expect_err("a duplicated manifest item")
+        .to_string();
+    assert!(err.contains("중복"), "{err}");
+    parts[1].1 = manifest(
+        "easyoffice-board",
+        1,
+        &format!(
+            "{},{}",
+            item("media/a.png", a.len()),
+            item("media/b.png", b.len())
+        ),
+    )
+    .into_bytes();
+    read_package(PackageKind::Board, &pack(&parts)).unwrap();
+}
+
+#[test]
 fn a_part_that_is_not_a_sound_picture_is_refused() {
     for bytes in [
         b"GIF89a....".to_vec(),
