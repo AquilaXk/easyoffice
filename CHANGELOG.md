@@ -2,6 +2,11 @@
 
 사용자에게 보이는 변화만 날짜별로 적습니다. 최신 날짜가 위에 있습니다. 2026-11-14 이전은 [docs/policy-decisions.md](docs/policy-decisions.md)와 git 이력에 있고, 괄호의 PD 번호는 그 문서의 결정 항목입니다.
 
+## 2026-11-21
+
+- 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `FILTERXML`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 310종). `WEBSERVICE`와 `RTD`는 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `FILTERXML`은 DOCTYPE과 지나치게 깊거나 큰 XML, 비용이 큰 질의를 거부합니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일과 `FORECAST.ETS` 계열은 남았습니다(PD-271).
+- XLSX로 저장할 때 `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `PERCENTOF`, `GROUPBY`, `PIVOTBY`에 `_xlfn.` 접두를 붙입니다.
+
 ## 2026-11-20
 
 - 시트 함수를 기준 목록과 대조했습니다. `TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`, `PERCENTOF`, `ISO.CEILING`, `AMORDEGRC`를 더했고(내장 함수 302종), `INDEX`·`CHOOSE`가 참조를 돌려주고 `ADDRESS`·`ACCRINTM`·`NETWORKDAYS` 계열·`CHAR`·`TYPE` 등 30건의 결과를 문서에 맞췄습니다. 한 값 함수 87개가 범위·배열을 원소별로 계산합니다(PD-270).
