@@ -4,7 +4,8 @@
 
 ## 2026-11-21
 
-- 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 309종). `WEBSERVICE`, `RTD`, `FILTERXML`은 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일, `FILTERXML`, `FORECAST.ETS` 계열은 남았습니다(PD-271).
+- 시트 함수 `FORECAST.ETS`, `FORECAST.ETS.CONFINT`, `FORECAST.ETS.SEASONALITY`, `FORECAST.ETS.STAT`를 더했습니다(내장 함수 313종). 지수 평활 계산은 MPL-2.0 원본을 파일 하나에 옮긴 것이고 값은 나중에 기준 앱과 대조합니다(PD-272).
+- 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 309종). `WEBSERVICE`, `RTD`, `FILTERXML`은 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일, `FILTERXML`은 남았습니다(PD-271).
 - XLSX로 저장할 때 `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `PERCENTOF`, `GROUPBY`, `PIVOTBY`에 `_xlfn.` 접두를 붙입니다.
 
 ## 2026-11-20
