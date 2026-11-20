@@ -18,6 +18,7 @@ mod convert_password;
 mod convert_structured;
 mod convert_structured_doc;
 mod convert_structured_encode;
+mod convert_structured_loss;
 pub mod copilot;
 #[cfg(test)]
 mod editor_merge_tests;

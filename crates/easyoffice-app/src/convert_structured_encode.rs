@@ -18,6 +18,7 @@ use crate::convert_structured::StructuredContent;
 use crate::convert_structured_doc::{
     is_document_format, slide_deck_to_document, slides_to_document,
 };
+use crate::convert_structured_loss::{warn_unsaved_pivot_fields, warn_unsaved_sheet_objects};
 use crate::eval_limit::evaluate_for_file;
 use crate::sheet_display::{show_cells, Show};
 use crate::sheet_links_xls::xls_links;
@@ -285,6 +286,7 @@ fn encode_xls(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let (computed, computed_stylings, formulas) = computed_sheets(sheets, stylings)?;
+    warn_unsaved_sheet_objects(stylings, "XLS", warnings);
     if formulas > 0 {
         warnings.push(format!(
             "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
@@ -361,6 +363,7 @@ fn encode_delimited(
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let label = format.extension().to_uppercase();
     let (computed, computed_stylings, _) = computed_sheets(sheets, stylings)?;
+    warn_unsaved_sheet_objects(stylings, &label, warnings);
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
     show_cells(&mut cells, computed_stylings.first(), Show::Values);
@@ -753,11 +756,13 @@ fn encode_structured_with_thumbnail(
             let sheets: &[OdsUnpacked] = &engine_sheets;
             match format {
                 DocumentFormat::Xlsx => {
+                    warn_unsaved_pivot_fields(stylings, warnings);
                     let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
                     let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
                     OoxmlCodec::pack_xlsx_multi_styled(&out_sheets, &caches, &out_stylings)
                 }
                 DocumentFormat::Ods => {
+                    warn_unsaved_sheet_objects(stylings, "ODS", warnings);
                     let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
                     let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
                     OdfCodec::pack_ods_multi_styled_with_cache(&out_sheets, &caches, &out_stylings)
