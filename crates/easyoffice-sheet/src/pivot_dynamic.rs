@@ -129,7 +129,7 @@ struct CompiledFilter {
     allow_blank: bool,
 }
 
-fn normalize_filter_text(raw: &str) -> String {
+pub(crate) fn normalize_filter_text(raw: &str) -> String {
     let trimmed = match crate::coercion::parse_strict_number(raw) {
         Some(n) => crate::coercion::format_general_number(n),
         None => raw.to_string(),
@@ -154,7 +154,7 @@ fn exceeds_cell_budget(rows: usize, cols: usize, vals: usize, max_cells: usize) 
 }
 
 #[inline]
-fn is_cell_blank(v: &EvaluatedCellValue) -> bool {
+pub(crate) fn is_cell_blank(v: &EvaluatedCellValue) -> bool {
     match v {
         EvaluatedCellValue::Empty => true,
         EvaluatedCellValue::Text(s) => s.is_empty(),

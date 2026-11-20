@@ -51,7 +51,7 @@
 - **64비트 비트패킹 좌표 및 고성능 그리드 (`PackedCellCoordinate`)**:
   - 행(상위 32비트)과 열(하위 32비트)을 단일 `UInt64`에 패킹한 `PackedCellCoordinate`와 ECMA-376 경계(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)를 검증하는 `CellAddress`, 범위 확장 상한(`maxExpandedCellCount = 100,000`)을 강제하는 `CellRange`를 제공합니다.
   - 범위 그리드 일괄 평가(`evaluateGrid(in:)`), 열 기준 정렬(`sortedRows(in:byColumnOffset:ascending:)`), 조건 필터링(`filteredRows(in:byColumnOffset:predicate:)`), 조건부 서식(`ConditionalFormatRule`: `greaterThan`, `lessThan`, `between`, `containsText`, `duplicateValues`), 데이터 유효성 검사(`DataValidationRule`: `numberRange`, `allowedList`, `nonEmptyText`, `maxTextLength`)를 지원합니다.
-- **결정론적 수식 엔진 (309종 내장 함수, `WorksheetModel.supportedFunctionNames`)**
+- **결정론적 수식 엔진 (310종 내장 함수, `WorksheetModel.supportedFunctionNames`)**
   - 수학/삼각 및 조건부 집계 (36종) `ABS`, `AVERAGE`, `AVERAGEIF`, `AVERAGEIFS`, `CEILING`, `COUNT`, `COUNTA`, `COUNTBLANK`, `COUNTIF`, `COUNTIFS`, `EXP`, `FLOOR`, `INT`, `LN`, `LOG10`, `MAX`, `MAXIFS`, `MIN`, `MINIFS`, `MOD`, `MROUND`, `PI`, `POWER`, `PRODUCT`, `QUOTIENT`, `ROUND`, `ROUNDDOWN`, `ROUNDUP`, `SIGN`, `SQRT`, `SUM`, `SUMIF`, `SUMIFS`, `SUMPRODUCT`, `SUMSQ`, `TRUNC`
   - 통계 (18종) `AVEDEV`, `CORREL`, `FORECAST`, `GEOMEAN`, `HARMEAN`, `INTERCEPT`, `LARGE`, `MEDIAN`, `MODE`, `PERCENTILE`, `QUARTILE`, `RANK`, `SLOPE`, `SMALL`, `STDEV`, `STDEVP`, `VAR`, `VARP`
   - 논리 및 정보 (15종) `AND`, `FALSE`, `IF`, `IFERROR`, `IFNA`, `IFS`, `ISBLANK`, `ISERROR`, `ISNUMBER`, `ISTEXT`, `NOT`, `OR`, `SWITCH`, `TRUE`, `XOR`

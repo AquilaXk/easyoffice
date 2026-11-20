@@ -18,6 +18,8 @@ pub struct WorkbookEngine {
     name_budget: Arc<AtomicUsize>,
     sheet_by_name: crate::FastMap<String, usize>,
     sheet_by_id: crate::FastMap<u16, usize>,
+    /// The pivot tables `GETPIVOTDATA` reads, with the name of the sheet each one is on (PD-271).
+    pub(crate) pivot_tables: Arc<Vec<(String, crate::PivotTableDef)>>,
 }
 
 impl Clone for WorkbookEngine {
@@ -35,6 +37,7 @@ impl Clone for WorkbookEngine {
             name_budget: budget,
             sheet_by_name: self.sheet_by_name.clone(),
             sheet_by_id: self.sheet_by_id.clone(),
+            pivot_tables: Arc::clone(&self.pivot_tables),
         }
     }
 }
