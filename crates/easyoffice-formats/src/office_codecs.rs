@@ -73,6 +73,15 @@ type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
 /// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents. A hidden sheet is written as
 /// `state="hidden"` or `state="veryHidden"`, and the book opens on the first sheet that is shown
 /// (ECMA-376 18.2.19 `sheet@state`, 18.2.1 `bookViews`).
+/// Whether `workbookPr` of the workbook part says the dates count from 1904.
+fn read_date1904(wb_xml: &str) -> bool {
+    extract_tags_or_self_closing_with_attrs(wb_xml, "workbookPr")
+        .into_iter()
+        .next()
+        .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "date1904"))
+        .is_some_and(|v| matches!(v.trim(), "1" | "true"))
+}
+
 fn build_workbook_parts(
     active_sheets: &[OdsUnpacked],
     states: &[SheetState],
@@ -85,6 +94,9 @@ fn build_workbook_parts(
     let mut workbook_xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
     );
+    if stylings.first().is_some_and(|st| st.date1904) {
+        workbook_xml.push_str("<workbookPr date1904=\"1\"/>");
+    }
     if let Some(protect) = stylings.first().and_then(|st| st.workbook_protect.as_ref()) {
         workbook_xml
             .push_str(&crate::sheet_styling::xlsx_protect::workbook_protection_xml(protect));
@@ -734,6 +746,8 @@ impl OoxmlCodec {
             _ => XfStyles::default(),
         };
         // The differential formats are listed once for every reader of them (an empty entry takes an id).
+        let date1904 = read_date1904(wb_xml);
+        xf_styles.date1904 = date1904;
         let dxf_list = styles_xml.map(dxf_bodies).unwrap_or_default();
         let dxf_styles = parse_dxf_styles(&dxf_list);
         if let (Some(colors), Some(styles)) = (&colors, styles_xml) {
@@ -875,6 +889,7 @@ impl OoxmlCodec {
                 first.workbook_protect =
                     crate::sheet_styling::xlsx_protect::read_workbook_protection(wb_xml)?;
                 first.workbook_theme = theme.filter(|&t| t != DEFAULT_THEME);
+                first.date1904 = date1904;
             }
         }
         Ok((parsed_sheets, stylings))

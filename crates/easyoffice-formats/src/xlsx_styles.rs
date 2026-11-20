@@ -613,6 +613,8 @@ pub(crate) struct XfStyles {
     pub(crate) dxf_colors: Vec<crate::sheet_styling::xlsx_filter_dxf::DxfColors>,
     /// The custom table styles of `tableStyles` by name (PD-231). Set by the caller that has the theme.
     pub(crate) table_styles: HashMap<String, crate::sheet_styling::table_style::TableStyleDef>,
+    /// The workbook counts its dates from 1904 (`workbookPr date1904`); set by the caller that has the workbook part.
+    pub(crate) date1904: bool,
 }
 
 /// `numFmtId` -> `formatCode` of the `numFmts` element.
@@ -785,6 +787,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         fonts_rejected,
         dxf_colors: Vec::new(),
         table_styles: HashMap::new(),
+        date1904: false,
     }
 }
 

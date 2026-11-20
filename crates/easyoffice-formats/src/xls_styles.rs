@@ -87,6 +87,8 @@ pub(crate) struct XlsStyles {
     pub(crate) num_fmts_rejected: u32,
     pub(crate) fonts: Arc<Vec<String>>,
     pub(crate) fonts_rejected: u32,
+    /// `DATEMODE` says the dates count from 1904 (PD-263).
+    pub(crate) date1904: bool,
 }
 
 /// Reads the fonts, XFs and palette of the workbook globals and the XF of every cell record.
@@ -103,7 +105,11 @@ pub(crate) struct XlsStyleReader {
     font_table: FontTable,
     cells: BTreeMap<(u32, u32), CellStyle>,
     sheets: Vec<BTreeMap<(u32, u32), CellStyle>>,
+    date1904: bool,
 }
+
+/// `DATEMODE` (MS-XLS 2.4.77): 1 when the workbook counts its dates from 1904-01-01.
+const DATEMODE: u16 = 0x0022;
 
 fn u16_at(body: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes([*body.get(at)?, *body.get(at + 1)?]))
@@ -151,6 +157,7 @@ impl XlsStyleReader {
                     }
                 }
                 PALETTE => self.palette = read_palette(body),
+                DATEMODE => self.date1904 = u16_at(body, 0) == Some(1),
                 _ => {}
             }
             return;
@@ -331,6 +338,7 @@ impl XlsStyleReader {
             num_fmts_rejected,
             fonts,
             fonts_rejected,
+            date1904: self.date1904,
         }
     }
 }

@@ -231,6 +231,8 @@ struct SheetScanner<'s> {
     link_xfs: &'s [bool],
     link_styled: Vec<(u32, u32)>,
     want_styling: bool,
+    /// ISO date cells (`t="d"`) count from 1904 (PD-263).
+    date1904: bool,
     cells: Vec<(u32, u32, String)>,
     styling: SheetStyling,
     /// First master formula text of each shared formula index with the cell it sits in.
@@ -616,7 +618,7 @@ impl<'s> SheetScanner<'s> {
                 _ => (raw.into_owned(), crate::CellValueKind::Boolean),
             },
             "e" => (decode_xlsx_escapes(raw), crate::CellValueKind::Error),
-            "d" => match crate::iso_serial::iso_to_serial(&raw, false) {
+            "d" => match crate::iso_serial::iso_to_serial(&raw, self.date1904) {
                 Some(serial) => (serial, crate::CellValueKind::Number),
                 None => (raw.trim().to_string(), crate::CellValueKind::Text),
             },
@@ -741,6 +743,7 @@ pub(crate) fn scan_worksheet(
         link_xfs: &xf.link_xfs,
         link_styled: Vec::new(),
         want_styling,
+        date1904: xf.date1904,
         cells: Vec::new(),
         styling: SheetStyling::default(),
         masters: HashMap::new(),

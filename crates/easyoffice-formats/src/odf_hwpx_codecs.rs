@@ -355,6 +355,8 @@ impl OdfCodec {
             content.push_str(&crate::sheet_styling::ods_protect::body_attrs(protect));
         }
         content.push('>');
+        content
+            .push_str(&crate::sheet_styling::ods_date_system::calculation_settings_xml(stylings));
 
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
         let active_sheets = if sheets.is_empty() {
@@ -722,6 +724,7 @@ impl OdfCodec {
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
         crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
+        crate::sheet_styling::ods_date_system::read_date_system(&content_xml, &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok(stylings)
     }
@@ -742,6 +745,7 @@ impl OdfCodec {
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
         crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
+        crate::sheet_styling::ods_date_system::read_date_system(&content_xml, &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))
     }

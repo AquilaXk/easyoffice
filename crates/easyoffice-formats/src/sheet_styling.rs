@@ -10,6 +10,8 @@ use std::sync::Arc;
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
 #[path = "ods_bounds.rs"]
 pub(crate) mod ods_bounds;
+#[path = "ods_date_system.rs"]
+pub(crate) mod ods_date_system;
 #[path = "ods_filter.rs"]
 pub(crate) mod ods_filter;
 #[path = "ods_grid.rs"]
@@ -504,6 +506,9 @@ pub struct SheetStyling {
     /// Non-default 12-slot SpreadsheetML theme palette of the workbook (`xl/theme/theme1.xml`, PD-242),
     /// carried by the first sheet like `defined_names` and `workbook_protect`.
     pub workbook_theme: Option<[u32; 12]>,
+    /// The workbook counts its dates from 1904-01-01 (XLSX `workbookPr date1904`, XLS `DATEMODE`, ODS `table:null-date`), not from
+    /// 1899-12-30: a serial 1,462 lower for the same day (PD-263). Carried by the first sheet like `workbook_theme`.
+    pub date1904: bool,
     /// The arrays that spill, by anchor (PD-217).
     pub spills: Vec<SpillRef>,
     /// The hyperlinks of the cells (PD-218).
@@ -586,6 +591,7 @@ impl SheetStyling {
             && self.unlocked_cols.is_empty()
             && self.workbook_protect.is_none()
             && self.workbook_theme.is_none()
+            && !self.date1904
             && self.spills.is_empty()
             && self.links.is_empty()
             && self.tables.is_empty()

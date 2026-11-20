@@ -276,6 +276,12 @@ impl LegacyOle2Codec {
         stream.extend_from_slice(&0u32.to_le_bytes());
         stream.extend_from_slice(&0x0006u32.to_le_bytes());
 
+        // DATEMODE (MS-XLS 2.4.77): the dates count from 1904 when the first sheet's styling says so.
+        if stylings.first().is_some_and(|st| st.date1904) {
+            stream.extend_from_slice(&0x0022u16.to_le_bytes());
+            stream.extend_from_slice(&2u16.to_le_bytes());
+            stream.extend_from_slice(&1u16.to_le_bytes());
+        }
         stream.extend(default_font_record());
         if let Some(plan) = &colors {
             plan.font_records(&mut stream);
