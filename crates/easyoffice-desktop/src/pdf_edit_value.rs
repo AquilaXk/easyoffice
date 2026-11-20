@@ -17,7 +17,7 @@
 //! the number of nodes are limited (fail closed, [`Refused`]).
 
 use crate::pdf_edit_budget::{MAX_CARRIED_NODES, MAX_VALUE_DEPTH, MAX_VALUE_NODES};
-use hayro_syntax::object::{MaybeRef, ObjRef, Object};
+use hayro_syntax::object::{Dict, MaybeRef, ObjRef, Object};
 use hayro_write::pdf_writer::{Name, Null, Obj, Ref, Str};
 
 /// An object as it is written, minus streams (a stream is always an indirect object, carried as a
@@ -78,11 +78,47 @@ impl Value {
         read_raw(raw, 1, &mut own, &mut total.0)
     }
 
+    /// The entries of `dict` whose key `keep` accepts, as a dictionary value; the other entries
+    /// are not read (they use none of the limits).
+    pub fn read_dict(
+        dict: &Dict<'_>,
+        keep: impl Fn(&[u8]) -> bool,
+        total: &mut Budget,
+    ) -> Result<Self, Refused> {
+        let mut own = MAX_VALUE_NODES;
+        spend(&mut own, &mut total.0)?;
+        let mut entries = Vec::new();
+        for (key, item) in dict.entries() {
+            if keep(key.as_ref()) {
+                spend(&mut own, &mut total.0)?;
+                entries.push((
+                    key.as_ref().to_vec(),
+                    read_raw(&item, 2, &mut own, &mut total.0)?,
+                ));
+            }
+        }
+        Ok(Self::Dict(entries))
+    }
+
     /// The entry `key` of a dictionary.
     pub fn get(&self, key: &[u8]) -> Option<&Self> {
         match self {
             Self::Dict(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
             _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Self> {
+        match self {
+            Self::Dict(entries) => entries.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    /// Removes the entry `key` of a dictionary.
+    pub fn remove(&mut self, key: &[u8]) {
+        if let Self::Dict(entries) = self {
+            entries.retain(|(k, _)| k != key);
         }
     }
 

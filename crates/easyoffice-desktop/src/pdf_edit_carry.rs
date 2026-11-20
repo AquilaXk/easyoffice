@@ -13,35 +13,20 @@
 //! against ISO 32000-1 §12.5.6.1 (annotation types), §14.7 (structure tree) and §12.6.4.17
 //! (JavaScript).
 
-use crate::pdf_edit_budget::{Deadline, MAX_PAGE_ANNOTS};
+use crate::pdf_edit_annots::{lost_sentence, scan_page, Lost};
+use crate::pdf_edit_budget::{Deadline, MAX_TOTAL_ANNOTS};
 use crate::pdf_edit_oc;
+use crate::pdf_edit_preserve::too_many_annots;
 use crate::pdf_edit_value::{Budget, Value};
 use crate::pdf_edit_wire::{PagePlan, MAX_WARNINGS, MAX_WARNING_BYTES};
-use hayro_syntax::object::{Dict, Name, ObjRef};
+use hayro_syntax::object::{Dict, ObjRef};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::writers::Catalog;
-use hayro_write::pdf_writer::{Name as WName, Ref};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use hayro_write::pdf_writer::{Name as WName, Pdf, Ref};
+use std::collections::{BTreeMap, HashMap};
 
 /// The reference in the result of each object the copier was asked for, by source.
 pub type Copies = HashMap<(usize, ObjRef), Ref>;
-
-/// Annotation subtypes the result writes (or, for `Popup`, does not need: the text of a pop-up is
-/// the `/Contents` of the annotation it belongs to). Every other subtype is counted as lost.
-const KEPT_SUBTYPES: [&str; 8] = [
-    "Link",
-    "Highlight",
-    "Underline",
-    "StrikeOut",
-    "Squiggly",
-    "Text",
-    "Widget",
-    "Popup",
-];
-/// Longest annotation subtype name quoted in a warning (characters); the name comes from the file.
-const MAX_SUBTYPE_CHARS: usize = 24;
-/// Most subtype names listed in one warning.
-const MAX_LISTED_SUBTYPES: usize = 6;
 
 /// The sentences about what the result does not keep, without repeats and within the limits the
 /// wire allows.
@@ -74,6 +59,8 @@ pub struct Carry {
     budget: Budget,
     /// The `/OCProperties` of each source that has them.
     layers: Vec<(usize, Value)>,
+    /// The free text, ink and stamp annotations of each (source, page) that is used.
+    annots: HashMap<(usize, usize), Vec<Value>>,
     /// The objects of each source that are copied together with its pages.
     roots: BTreeMap<usize, Vec<ObjRef>>,
 }
@@ -86,44 +73,81 @@ impl Carry {
         deadline: &Deadline,
     ) -> Result<Self, String> {
         let mut carry = Self::default();
-        let mut lost: BTreeMap<String, usize> = BTreeMap::new();
-        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut lost = Lost::new();
         for (n, plan) in pages.iter().enumerate() {
             if n & 63 == 0 {
                 deadline.check()?;
             }
-            if !seen.insert((plan.source, plan.index)) {
+            let key = (plan.source, plan.index);
+            if carry.annots.contains_key(&key) {
                 continue;
             }
             let pdf = parsed
                 .get(&plan.source)
                 .ok_or("쪽의 원본 PDF가 없습니다.")?;
             let page = pdf.pages().get(plan.index).ok_or("없는 쪽을 가리킵니다.")?;
-            count_lost_annots(page.raw(), &mut lost)?;
+            let found = scan_page(page, &mut carry.budget, &mut lost)?;
+            for value in &found {
+                carry.add_roots(plan.source, value);
+            }
+            carry.annots.insert(key, found);
         }
         if !lost.is_empty() {
-            carry.warnings.push(lost_annots_sentence(&lost));
+            carry.warnings.push(lost_sentence(&lost));
         }
         for (&source, pdf) in parsed {
             note_catalog(pdf, &mut carry.warnings);
             if let Some(list) = pdf_edit_oc::read(pdf, &mut carry.budget)? {
+                carry.add_roots(source, &list);
                 carry.layers.push((source, list));
             }
         }
-        for (source, list) in &carry.layers {
-            carry
-                .roots
-                .entry(*source)
-                .or_default()
-                .extend(refs_of(list));
-        }
         Ok(carry)
+    }
+
+    /// Asks for the objects `value` names to be copied with the pages of `source`.
+    fn add_roots(&mut self, source: usize, value: &Value) {
+        let roots = self.roots.entry(source).or_default();
+        let mut found = Vec::new();
+        value.refs(&mut found);
+        for object in found {
+            if !roots.contains(&object) {
+                roots.push(object);
+            }
+        }
     }
 
     /// The objects of `source` that are copied in the same call as its pages, so that they get the
     /// same new references the pages' own objects get.
     pub fn roots(&self, source: usize) -> &[ObjRef] {
         self.roots.get(&source).map_or(&[], Vec::as_slice)
+    }
+
+    /// Writes the carried annotations of page `index` of `source` and returns their references.
+    pub fn write_page_annots(
+        &self,
+        out: &mut Pdf,
+        next: &mut Ref,
+        (source, index): (usize, usize),
+        copies: &Copies,
+        total_annots: &mut usize,
+    ) -> Result<Vec<Ref>, String> {
+        let Some(found) = self.annots.get(&(source, index)) else {
+            return Ok(Vec::new());
+        };
+        let mut written = Vec::with_capacity(found.len());
+        for annot in found {
+            *total_annots += 1;
+            if *total_annots > MAX_TOTAL_ANNOTS {
+                return Err(too_many_annots());
+            }
+            let id = next.bump();
+            annot
+                .translate(&|r| copies.get(&(source, r)).copied())
+                .write(out.indirect(id));
+            written.push(id);
+        }
+        Ok(written)
     }
 
     /// Writes what the catalog of the result holds besides the pages.
@@ -137,69 +161,6 @@ impl Carry {
             layers.write(catalog.insert(WName(b"OCProperties")));
         }
     }
-}
-
-/// The references inside `value`, each once.
-fn refs_of(value: &Value) -> Vec<ObjRef> {
-    let mut all = Vec::new();
-    value.refs(&mut all);
-    let mut seen = HashSet::new();
-    all.retain(|r| seen.insert(*r));
-    all
-}
-
-/// Counts the annotations of a page whose subtype the result does not write, by subtype.
-fn count_lost_annots(page: &Dict<'_>, lost: &mut BTreeMap<String, usize>) -> Result<(), String> {
-    let Some(annots) = page.get::<hayro_syntax::object::Array<'_>>(b"Annots") else {
-        return Ok(());
-    };
-    for (idx, annot) in annots.iter::<Dict<'_>>().enumerate() {
-        if idx >= MAX_PAGE_ANNOTS {
-            return Err(crate::pdf_edit_preserve::too_many_page_annots());
-        }
-        let Some(subtype) = annot.get::<Name<'_>>(b"Subtype") else {
-            continue;
-        };
-        if !KEPT_SUBTYPES.contains(&subtype.as_str()) {
-            *lost.entry(printable(subtype.as_str())).or_default() += 1;
-        }
-    }
-    Ok(())
-}
-
-/// A name from the file as plain text for a sentence: letters and digits only, cut short.
-fn printable(name: &str) -> String {
-    let text: String = name
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(MAX_SUBTYPE_CHARS)
-        .collect();
-    if text.is_empty() {
-        "?".to_string()
-    } else {
-        text
-    }
-}
-
-fn lost_annots_sentence(lost: &BTreeMap<String, usize>) -> String {
-    let total: usize = lost.values().sum();
-    let mut kinds: Vec<(&String, &usize)> = lost.iter().collect();
-    kinds.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    let listed: Vec<String> = kinds
-        .iter()
-        .take(MAX_LISTED_SUBTYPES)
-        .map(|(name, count)| format!("{name} {count}"))
-        .collect();
-    let more = kinds.len().saturating_sub(MAX_LISTED_SUBTYPES);
-    let tail = if more > 0 {
-        format!(" 외 {more}종")
-    } else {
-        String::new()
-    };
-    format!(
-        "지원하지 않는 주석 {total}개는 저장하지 못했습니다 ({}{tail}).",
-        listed.join(", ")
-    )
 }
 
 /// The catalog entries that the result does not write, as a sentence each.
@@ -245,21 +206,5 @@ mod tests {
         assert_eq!(all.len(), MAX_WARNINGS);
         assert_eq!(all[0], "a");
         assert!(all[1].len() <= MAX_WARNING_BYTES && all[1].chars().all(|c| c == '한'));
-    }
-
-    #[test]
-    fn the_sentence_for_lost_annotations_lists_the_most_common_kinds() {
-        let lost: BTreeMap<String, usize> = [("Square", 2), ("Line", 5), ("Caret", 1)]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        assert_eq!(
-            lost_annots_sentence(&lost),
-            "지원하지 않는 주석 8개는 저장하지 못했습니다 (Line 5, Square 2, Caret 1)."
-        );
-        let many: BTreeMap<String, usize> = (0..9).map(|n| (format!("K{n}"), 1)).collect();
-        assert!(lost_annots_sentence(&many).ends_with("K5 1 외 3종)."));
-        assert_eq!(printable("A/B<script>\u{0}"), "ABscript");
-        assert_eq!(printable("/"), "?");
     }
 }

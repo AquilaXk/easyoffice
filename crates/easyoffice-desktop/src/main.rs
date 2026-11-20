@@ -22,6 +22,7 @@ mod open_feedback;
 mod open_link;
 mod os_recent;
 mod page_screenshot;
+mod pdf_edit_annots;
 mod pdf_edit_budget;
 mod pdf_edit_build;
 mod pdf_edit_carry;
@@ -718,6 +719,8 @@ mod path_leak_tests;
 mod hostile_svg;
 #[cfg(all(test, unix))]
 mod named_pipe_support;
+#[cfg(test)]
+mod pdf_edit_annots_tests;
 #[cfg(test)]
 mod pdf_edit_carry_tests;
 #[cfg(test)]

@@ -521,14 +521,16 @@ pub fn preserve_page_annots(
         if let Some(annot_ref) = added {
             *total_annots += 1;
             if *total_annots > MAX_TOTAL_ANNOTS {
-                return Err(format!(
-                    "문서 전체의 주석 수가 한도({MAX_TOTAL_ANNOTS})를 초과합니다."
-                ));
+                return Err(too_many_annots());
             }
             kept.push(annot_ref);
         }
     }
     Ok(kept)
+}
+
+pub fn too_many_annots() -> String {
+    format!("문서 전체의 주석 수가 한도({MAX_TOTAL_ANNOTS})를 초과합니다.")
 }
 
 pub fn too_many_page_annots() -> String {

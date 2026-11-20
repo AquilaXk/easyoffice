@@ -216,6 +216,14 @@ pub fn build(
             &mut seen_markups,
         )?;
         page_annots[n].extend(kept);
+        let carried = carry.write_page_annots(
+            &mut out,
+            &mut next,
+            (plan.source, plan.index),
+            &copied.objects,
+            &mut total_annots,
+        )?;
+        page_annots[n].extend(carried);
         if let (Some(markup), Some(cache)) = (&overlay.markup, interp_caches.get(&plan.source)) {
             let added = add_page_phrase_markups(
                 &mut out,
