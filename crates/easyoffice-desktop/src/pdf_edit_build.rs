@@ -27,6 +27,7 @@
 
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
+    PAGES_PER_CHECK_MASK,
 };
 use crate::pdf_edit_carry::{skipped_fields_sentence, Carry, Copies};
 use crate::pdf_edit_forms::{process_forms, write_catalog_acroform, PageGeom};
@@ -45,8 +46,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 const PRODUCER: &str = "EasyOffice";
-/// Pages between two looks at the deadline, as a mask (a power of two minus one).
-const PAGES_PER_CHECK_MASK: usize = 63;
 const ORIGINAL_FORM: Name<'static> = Name(b"P");
 const OVERLAY_FORM: Name<'static> = Name(b"W");
 

@@ -120,3 +120,125 @@ fn a_signature_field_is_reported_and_not_written() {
         ["전자서명 등 지원하지 않는 양식 필드 1개는 저장하지 못했습니다."]
     );
 }
+
+/// A file of `pages` pages, each with a free text, an ink and a stamp annotation, two layers (one
+/// hidden), page labels and ten attachments: what the carry reads and writes, at the size of a
+/// long report.
+fn bench_file(pages: usize) -> Vec<u8> {
+    let first_page = 3u32;
+    let first_extra = first_page + pages as u32;
+    let kids: Vec<String> = (0..pages)
+        .map(|n| format!("{} 0 R", first_page + n as u32))
+        .collect();
+    // Objects after the pages: 2 layers, 1 appearance form, 1 embedded file, 10 file specs, then
+    // three annotations for each page.
+    let (layer_on, layer_off, form, data) = (
+        first_extra,
+        first_extra + 1,
+        first_extra + 2,
+        first_extra + 3,
+    );
+    let specs: Vec<u32> = (0..10).map(|n| first_extra + 4 + n).collect();
+    let annots_at = first_extra + 14;
+    let names: String = specs
+        .iter()
+        .enumerate()
+        .map(|(n, s)| format!("(f{n:02}.txt) {s} 0 R "))
+        .collect();
+    let catalog = format!(
+        "/OCProperties << /OCGs [{layer_on} 0 R {layer_off} 0 R] /D << /OFF [{layer_off} 0 R] >> >> \
+         /PageLabels << /Nums [0 << /S /r >> 4 << /S /D >>] >> \
+         /Names << /EmbeddedFiles << /Names [{names}] >> >>"
+    );
+    let mut objects = vec![
+        (1, format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>")),
+        (
+            2,
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+                kids.join(" ")
+            ),
+        ),
+    ];
+    for n in 0..pages as u32 {
+        let at = annots_at + n * 3;
+        objects.push((
+            first_page + n,
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Annots [{at} 0 R {} 0 R {} 0 R] >>",
+                at + 1,
+                at + 2
+            ),
+        ));
+    }
+    let content = "0 1 0 rg 0 0 100 60 re f";
+    objects.push((layer_on, "<< /Type /OCG /Name (On) >>".to_string()));
+    objects.push((layer_off, "<< /Type /OCG /Name (Off) >>".to_string()));
+    objects.push((
+        form,
+        format!("<< /Type /XObject /Subtype /Form /BBox [0 0 100 60] /Length {} >>\nstream\n{content}\nendstream", content.len()),
+    ));
+    objects.push((
+        data,
+        "<< /Type /EmbeddedFile /Length 5 >>\nstream\nhello\nendstream".to_string(),
+    ));
+    for spec in &specs {
+        objects.push((
+            *spec,
+            format!("<< /Type /Filespec /F (a) /EF << /F {data} 0 R >> >>"),
+        ));
+    }
+    for _ in 0..pages {
+        for kind in ["FreeText", "Ink", "Stamp"] {
+            let extra = if kind == "Ink" {
+                "/InkList [[10 10 50 50 90 10]]"
+            } else {
+                ""
+            };
+            objects.push((
+                objects.len() as u32 + 1,
+                format!("<< /Type /Annot /Subtype /{kind} /Rect [10 10 110 70] {extra} /AP << /N {form} 0 R >> /OC {layer_on} 0 R >>"),
+            ));
+        }
+    }
+    hand_written_with_xref(&objects, "")
+}
+
+#[test]
+fn bench_pd266_carry_cost() {
+    let pages = 300;
+    let file = bench_file(pages);
+    let engine = engine();
+    let session = EditSession::open(file.clone(), &engine).expect("the file opens");
+    let built = session.render(None, &engine).expect("warm-up");
+    assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+
+    let parsed: std::collections::BTreeMap<usize, hayro_syntax::Pdf> = [(
+        0usize,
+        crate::pdf_edit_inspect::open_pdf(&Arc::new(file)).unwrap(),
+    )]
+    .into();
+    let plan: Vec<crate::pdf_edit_wire::PagePlan> = (0..pages)
+        .map(|index| crate::pdf_edit_wire::PagePlan {
+            source: 0,
+            index,
+            turn: 0,
+        })
+        .collect();
+    let deadline = crate::pdf_edit_fixtures::deadline();
+    let runs = 10u32;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        crate::pdf_edit_carry::Carry::plan(&parsed, &plan, &deadline).unwrap();
+    }
+    let planning = started.elapsed() / runs;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        session.render(None, &engine).unwrap();
+    }
+    let whole = started.elapsed() / runs;
+    eprintln!(
+        "[PD-266 bench] {pages} pages x (3 annotations + layers + labels + attachments): scan avg={planning:?}, whole build avg={whole:?} ({} B)",
+        built.bytes.len()
+    );
+}

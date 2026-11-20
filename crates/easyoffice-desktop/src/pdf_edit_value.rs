@@ -88,14 +88,16 @@ impl Value {
         let mut own = MAX_VALUE_NODES;
         spend(&mut own, &mut total.0)?;
         let mut entries = Vec::new();
-        for (key, item) in dict.entries() {
-            if keep(key.as_ref()) {
-                spend(&mut own, &mut total.0)?;
-                entries.push((
-                    key.as_ref().to_vec(),
-                    read_raw(&item, 2, &mut own, &mut total.0)?,
-                ));
-            }
+        // Only the keys that are kept are parsed: the others (a pop-up, the page) may be large.
+        for key in dict.keys().filter(|key| keep(key.as_ref())) {
+            let Some(item) = dict.get_raw::<Object<'_>>(key.as_ref()) else {
+                continue;
+            };
+            spend(&mut own, &mut total.0)?;
+            entries.push((
+                key.as_ref().to_vec(),
+                read_raw(&item, 2, &mut own, &mut total.0)?,
+            ));
         }
         Ok(Self::Dict(entries))
     }

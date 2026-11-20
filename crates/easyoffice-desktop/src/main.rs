@@ -23,6 +23,7 @@ mod open_link;
 mod os_recent;
 mod page_screenshot;
 mod pdf_edit_annots;
+mod pdf_edit_attach;
 mod pdf_edit_budget;
 mod pdf_edit_build;
 mod pdf_edit_carry;
@@ -30,6 +31,7 @@ mod pdf_edit_engine;
 mod pdf_edit_forms;
 mod pdf_edit_inspect;
 mod pdf_edit_job;
+mod pdf_edit_labels;
 mod pdf_edit_oc;
 mod pdf_edit_os;
 mod pdf_edit_outlines;
@@ -39,6 +41,7 @@ mod pdf_edit_scan;
 mod pdf_edit_session;
 mod pdf_edit_supervisor;
 mod pdf_edit_text_pos;
+mod pdf_edit_tree;
 mod pdf_edit_value;
 mod pdf_edit_wire;
 mod pdf_edit_worker;
@@ -723,6 +726,8 @@ mod named_pipe_support;
 mod pdf_edit_annots_tests;
 #[cfg(test)]
 mod pdf_edit_carry_tests;
+#[cfg(test)]
+mod pdf_edit_catalog_tests;
 #[cfg(test)]
 mod pdf_edit_fixtures;
 #[cfg(test)]

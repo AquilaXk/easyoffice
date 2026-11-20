@@ -6,24 +6,27 @@
 //! the result does not keep becomes a sentence in [`Warnings`], which travels with the PDF to the
 //! page (`pdf_edit_wire.rs`, `WARNING`), instead of being left out without a word.
 //!
-//! Library choice (the three steps of the implementation rule): (1) `hayro-syntax` already reads
-//! the objects and nothing in the dependency graph lists what a PDF holds beyond its pages;
-//! (2) the reference implementations (pdf.js `src/core/catalog.js`, which reads the same catalog
-//! entries) only read them for display, so nothing was ported; (3) the checks below are written
-//! against ISO 32000-1 §12.5.6.1 (annotation types), §14.7 (structure tree) and §12.6.4.17
-//! (JavaScript).
+//! Library choice (the three steps of the implementation rule): (1) `hayro-syntax` reads the
+//! objects, `hayro-write` copies them, and nothing in the dependency graph lists what a PDF holds
+//! beyond its pages; (2) the JavaScript PDF viewers read the same catalog entries for display
+//! only, so nothing was ported; (3) the checks below are written against ISO 32000-1 §12.5.6.1
+//! (annotation types), §14.7 (structure tree), §12.6.4.17 (JavaScript) and §14.3.2 (metadata
+//! streams); the entries each part writes are in `pdf_edit_oc.rs`, `pdf_edit_annots.rs`,
+//! `pdf_edit_labels.rs` and `pdf_edit_attach.rs`.
 
 use crate::pdf_edit_annots::{lost_sentence, scan_page, Lost};
-use crate::pdf_edit_budget::{Deadline, MAX_TOTAL_ANNOTS};
+use crate::pdf_edit_attach::{self, Attachment};
+use crate::pdf_edit_budget::{Deadline, MAX_TOTAL_ANNOTS, MAX_XMP_BYTES, PAGES_PER_CHECK_MASK};
+use crate::pdf_edit_labels;
 use crate::pdf_edit_oc;
 use crate::pdf_edit_preserve::too_many_annots;
 use crate::pdf_edit_value::{Budget, Value};
 use crate::pdf_edit_wire::{PagePlan, MAX_WARNINGS, MAX_WARNING_BYTES};
-use hayro_syntax::object::{Dict, ObjRef};
+use hayro_syntax::object::{Dict, MaybeRef, ObjRef, Object, Stream};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::writers::Catalog;
 use hayro_write::pdf_writer::{Name as WName, Pdf, Ref};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The reference in the result of each object the copier was asked for, by source.
 pub type Copies = HashMap<(usize, ObjRef), Ref>;
@@ -61,6 +64,12 @@ pub struct Carry {
     layers: Vec<(usize, Value)>,
     /// The free text, ink and stamp annotations of each (source, page) that is used.
     annots: HashMap<(usize, usize), Vec<Value>>,
+    /// The attachments of each source.
+    attachments: Vec<(usize, Vec<Attachment>)>,
+    /// The `/PageLabels` of the result.
+    page_labels: Option<Value>,
+    /// The metadata stream of the file of the first page.
+    metadata: Option<(usize, ObjRef)>,
     /// The objects of each source that are copied together with its pages.
     roots: BTreeMap<usize, Vec<ObjRef>>,
 }
@@ -73,48 +82,90 @@ impl Carry {
         deadline: &Deadline,
     ) -> Result<Self, String> {
         let mut carry = Self::default();
+        carry.scan_pages(parsed, pages, deadline)?;
+        carry.scan_catalogs(parsed, pages)?;
+        for roots in carry.roots.values_mut() {
+            let mut seen = HashSet::new();
+            roots.retain(|object| seen.insert(*object));
+        }
+        Ok(carry)
+    }
+
+    /// The annotations of every page that is used (once, however often the page is placed).
+    fn scan_pages(
+        &mut self,
+        parsed: &BTreeMap<usize, ReadPdf>,
+        pages: &[PagePlan],
+        deadline: &Deadline,
+    ) -> Result<(), String> {
         let mut lost = Lost::new();
         for (n, plan) in pages.iter().enumerate() {
-            if n & 63 == 0 {
+            if n & PAGES_PER_CHECK_MASK == 0 {
                 deadline.check()?;
             }
             let key = (plan.source, plan.index);
-            if carry.annots.contains_key(&key) {
+            if self.annots.contains_key(&key) {
                 continue;
             }
             let pdf = parsed
                 .get(&plan.source)
                 .ok_or("쪽의 원본 PDF가 없습니다.")?;
             let page = pdf.pages().get(plan.index).ok_or("없는 쪽을 가리킵니다.")?;
-            let found = scan_page(page, &mut carry.budget, &mut lost)?;
+            let found = scan_page(page, &mut self.budget, &mut lost)?;
             for value in &found {
-                carry.add_roots(plan.source, value);
+                self.add_roots(plan.source, value);
             }
-            carry.annots.insert(key, found);
+            self.annots.insert(key, found);
         }
         if !lost.is_empty() {
-            carry.warnings.push(lost_sentence(&lost));
+            self.warnings.push(lost_sentence(&lost));
         }
+        Ok(())
+    }
+
+    /// What each source's catalog holds: layers, attachments, page labels, metadata.
+    fn scan_catalogs(
+        &mut self,
+        parsed: &BTreeMap<usize, ReadPdf>,
+        pages: &[PagePlan],
+    ) -> Result<(), String> {
+        let mut labels = BTreeMap::new();
         for (&source, pdf) in parsed {
-            note_catalog(pdf, &mut carry.warnings);
-            if let Some(list) = pdf_edit_oc::read(pdf, &mut carry.budget)? {
-                carry.add_roots(source, &list);
-                carry.layers.push((source, list));
+            note_catalog(pdf, &mut self.warnings);
+            if let Some(list) = pdf_edit_oc::read(pdf, &mut self.budget)? {
+                self.add_roots(source, &list);
+                self.layers.push((source, list));
+            }
+            let files = pdf_edit_attach::read(pdf, &mut self.budget)?;
+            for file in &files {
+                self.add_roots(source, file.spec());
+            }
+            if !files.is_empty() {
+                self.attachments.push((source, files));
+            }
+            if let Some(found) = pdf_edit_labels::read(pdf)? {
+                labels.insert(source, found);
             }
         }
-        Ok(carry)
+        self.page_labels = pdf_edit_labels::combine(&labels, pages);
+        // The information dictionary comes from the file of the first page; so does the metadata.
+        if let Some((source, pdf)) = pages
+            .first()
+            .and_then(|p| Some((p.source, parsed.get(&p.source)?)))
+        {
+            if let Some(stream) = read_metadata(pdf)? {
+                self.add_roots(source, &Value::Ref(stream));
+                self.metadata = Some((source, stream));
+            }
+        }
+        Ok(())
     }
 
     /// Asks for the objects `value` names to be copied with the pages of `source`.
     fn add_roots(&mut self, source: usize, value: &Value) {
-        let roots = self.roots.entry(source).or_default();
         let mut found = Vec::new();
         value.refs(&mut found);
-        for object in found {
-            if !roots.contains(&object) {
-                roots.push(object);
-            }
-        }
+        self.roots.entry(source).or_default().extend(found);
     }
 
     /// The objects of `source` that are copied in the same call as its pages, so that they get the
@@ -160,7 +211,49 @@ impl Carry {
         if let Some(layers) = pdf_edit_oc::combine(lists, &mut self.warnings) {
             layers.write(catalog.insert(WName(b"OCProperties")));
         }
+        if let Some(labels) = &self.page_labels {
+            labels.write(catalog.insert(WName(b"PageLabels")));
+        }
+        let files: Vec<Vec<Attachment>> = self
+            .attachments
+            .iter()
+            .map(|(source, list)| {
+                list.iter()
+                    .map(|file| file.translate(&|r| copies.get(&(*source, r)).copied()))
+                    .collect()
+            })
+            .collect();
+        if let Some(names) = pdf_edit_attach::combine(files) {
+            names.write(catalog.insert(WName(b"Names")));
+        }
+        if let Some(stream) = self
+            .metadata
+            .and_then(|(source, id)| copies.get(&(source, id)))
+        {
+            catalog.pair(WName(b"Metadata"), *stream);
+        }
     }
+}
+
+/// The metadata stream of `pdf`, when it has one that is not larger than the limit.
+fn read_metadata(pdf: &ReadPdf) -> Result<Option<ObjRef>, String> {
+    let xref = pdf.xref();
+    let Some(MaybeRef::Ref(id)) = xref
+        .get::<Dict<'_>>(xref.root_id())
+        .and_then(|catalog| catalog.get_raw::<Object<'_>>(b"Metadata"))
+    else {
+        return Ok(None);
+    };
+    let Some(stream) = xref.get::<Stream<'_>>(id.into()) else {
+        return Ok(None);
+    };
+    if stream.raw_data().len() > MAX_XMP_BYTES {
+        return Err(format!(
+            "XMP 메타데이터가 허용 크기({}MiB)를 초과합니다.",
+            MAX_XMP_BYTES / 1_048_576
+        ));
+    }
+    Ok(Some(id))
 }
 
 /// The catalog entries that the result does not write, as a sentence each.
