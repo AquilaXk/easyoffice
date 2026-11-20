@@ -104,7 +104,8 @@ impl Legacy {
                     };
                     cells.push((row, col, b_str));
                 } else if cell_type == "d" {
-                    cells.push((row, col, raw_v.trim().to_string()));
+                    let iso = crate::iso_serial::iso_to_serial(&raw_v, false);
+                    cells.push((row, col, iso.unwrap_or_else(|| raw_v.trim().to_string())));
                 } else {
                     cells.push((row, col, decode_xlsx_escapes_owned(raw_v)));
                 }

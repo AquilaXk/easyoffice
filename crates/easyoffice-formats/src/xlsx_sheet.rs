@@ -616,7 +616,10 @@ impl<'s> SheetScanner<'s> {
                 _ => (raw.into_owned(), crate::CellValueKind::Boolean),
             },
             "e" => (decode_xlsx_escapes(raw), crate::CellValueKind::Error),
-            "d" => (raw.trim().to_string(), crate::CellValueKind::Text),
+            "d" => match crate::iso_serial::iso_to_serial(&raw, false) {
+                Some(serial) => (serial, crate::CellValueKind::Number),
+                None => (raw.trim().to_string(), crate::CellValueKind::Text),
+            },
             _ => {
                 let decoded = decode_xlsx_escapes(raw);
                 let k = if crate::cell_numbers::numeric_cell_value(&decoded).is_some()

@@ -852,7 +852,7 @@ mod tests {
                 } else if e.path == "xl/worksheets/sheet1.xml" {
                     (
                         e.path,
-                        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c><c r=\"C1\"><is><t>Inline_x0020_NoType</t></is></c><c r=\"D1\" t=\"d\"><v> 2026-11-10 </v></c></row></sheetData></worksheet>".to_vec(),
+                        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c><c r=\"C1\"><is><t>Inline_x0020_NoType</t></is></c><c r=\"D1\" t=\"d\"><v> 2026-11-10 </v></c><c r=\"E1\" t=\"d\"><v>2026-11-10T12:00:00</v></c><c r=\"F1\" t=\"d\"><v>1900-01-01</v></c><c r=\"G1\" t=\"d\"><v>1900-03-01</v></c><c r=\"H1\" t=\"d\"><v>12:00:00</v></c><c r=\"I1\" t=\"d\"><v>not a date</v></c></row></sheetData></worksheet>".to_vec(),
                     )
                 } else {
                     (e.path, e.data)
@@ -867,7 +867,12 @@ mod tests {
                 (0, 0, "Hello\nWorld".to_string()),
                 (0, 1, "😀".to_string()),
                 (0, 2, "Inline NoType".to_string()),
-                (0, 3, "2026-11-10".to_string()),
+                (0, 3, "46336".to_string()),
+                (0, 4, "46336.5".to_string()),
+                (0, 5, "1".to_string()),
+                (0, 6, "61".to_string()),
+                (0, 7, "0.5".to_string()),
+                (0, 8, "not a date".to_string()),
             ]
         );
     }
