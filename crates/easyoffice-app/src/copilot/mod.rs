@@ -3,17 +3,22 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use std::fmt::Write as _;
 
+pub mod cancel;
+pub mod context;
 pub mod llm_client;
+pub mod operations;
+pub mod prompt;
 pub mod providers;
 pub mod ssrf;
 pub mod types;
+pub mod wire;
 
 pub use types::{CopilotLlmClient, CopilotLlmRequest, HttpMethod};
 
 use providers::{chat_endpoint_target, models_endpoint_target};
 use types::{
-    parse_provider_config, parse_run_request, push_json_str, CopilotLocation, CopilotMode,
-    CopilotModule, CopilotOperation, CopilotRunResponse, DocBlock,
+    parse_provider_config, parse_run_request, push_json_str, CopilotLocation, CopilotOperation,
+    CopilotRunResponse, DocBlock,
 };
 
 pub fn handle_copilot_ipc(
@@ -38,6 +43,7 @@ pub(crate) fn handle_copilot_ipc_entries(
         "copilot_test_provider" => handle_test_provider(entries, llm),
         "copilot_list_models" => handle_list_models(entries, llm),
         "copilot_run" => handle_run(entries, llm),
+        "copilot_cancel" => handle_cancel(entries),
         other => Err(EasyOfficeError::InvalidArgument(format!(
             "지원하지 않는 코파일럿 액션입니다: {other}"
         ))),
@@ -100,23 +106,40 @@ fn handle_run(
     llm: Option<&CopilotLlmClient<'_>>,
 ) -> Result<String, EasyOfficeError> {
     let req = parse_run_request(entries)?;
+    // 취소 신호는 요청이 끝날 때까지 등록해 둔다. requestId가 없는 요청은 취소할 수 없다.
+    let (cancel_handle, _registration) = match StrictJsonValue::get_str(entries, "requestId") {
+        Some(id) => {
+            let (handle, guard) = cancel::register(id)?;
+            (handle, Some(guard))
+        }
+        None => (cancel::CancelHandle::default(), None),
+    };
     let target = chat_endpoint_target(&req.provider);
     let endpoint = ssrf::validate_provider_target(
         req.provider.kind.is_local_loopback(),
         &req.provider.base_url,
         target,
     )?;
-    let mut response = llm_client::run_remote_or_local(&req, &endpoint, llm)?;
+    let mut response = llm_client::run_remote_or_local(&req, &endpoint, llm, cancel_handle)?;
 
     // Fail-closed read-only invariant across all providers.
-    if req.mode == CopilotMode::Ask || req.module == CopilotModule::Pdf {
+    if req.is_read_only() {
         response.operations.clear();
+        response.dropped_operations = 0;
         response.updated_in_place = false;
     } else {
         response.updated_in_place = !response.operations.is_empty();
     }
 
     Ok(serialize_run_response(&response))
+}
+
+fn handle_cancel(entries: &[(String, StrictJsonValue)]) -> Result<String, EasyOfficeError> {
+    let id = StrictJsonValue::get_str(entries, "requestId").ok_or_else(|| {
+        EasyOfficeError::InvalidArgument("copilot_cancel에는 'requestId'가 필요합니다.".to_string())
+    })?;
+    let found = cancel::cancel_request(id)?;
+    Ok(format!("{{\"status\":\"ok\",\"cancelled\":{found}}}"))
 }
 
 pub fn serialize_run_response(resp: &CopilotRunResponse) -> String {
@@ -129,8 +152,8 @@ pub fn serialize_run_response(resp: &CopilotRunResponse) -> String {
     push_json_str(&mut out, &resp.reasoning);
     let _ = write!(
         out,
-        ",\"updatedInPlace\":{},\"operations\":[",
-        resp.updated_in_place
+        ",\"updatedInPlace\":{},\"droppedOperations\":{},\"operations\":[",
+        resp.updated_in_place, resp.dropped_operations
     );
     for (idx, op) in resp.operations.iter().enumerate() {
         if idx > 0 {
@@ -225,6 +248,39 @@ fn write_operation_json(out: &mut String, op: &CopilotOperation) {
             if let Some(fmt) = num_fmt {
                 out.push_str(",\"numFmt\":");
                 push_json_str(out, fmt);
+            }
+            out.push('}');
+        }
+        CopilotOperation::SheetChart {
+            sheet,
+            chart_type,
+            data_range,
+            title,
+            legend,
+            switch_row_col,
+            width,
+            height,
+        } => {
+            out.push_str("{\"kind\":\"sheet.chart\",\"sheet\":");
+            push_json_str(out, sheet);
+            let _ = write!(
+                out,
+                ",\"chartType\":\"{}\",\"dataRange\":",
+                chart_type.as_str()
+            );
+            push_json_str(out, data_range);
+            out.push_str(",\"title\":");
+            push_json_str(out, title);
+            let _ = write!(
+                out,
+                ",\"legend\":\"{}\",\"switchRowCol\":{switch_row_col}",
+                legend.as_str()
+            );
+            if let Some(w) = width {
+                let _ = write!(out, ",\"width\":{w}");
+            }
+            if let Some(h) = height {
+                let _ = write!(out, ",\"height\":{h}");
             }
             out.push('}');
         }

@@ -4,11 +4,41 @@ use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use easyoffice_sheet::{CellRange, PackedCellCoordinate};
 use std::net::SocketAddr;
 
+use super::cancel::CancelHandle;
+use super::context::{parse_context, parse_selection, CopilotContext, SelectionContext};
+
 pub const MAX_PROMPT_BYTES: usize = 16_384;
 pub const MAX_HISTORY_ITEMS: usize = 32;
 pub const MAX_HISTORY_ITEM_BYTES: usize = 16_384;
+/// 요청 문맥으로 받는 시트 셀 수 상한.
 pub const MAX_SHEET_CELLS: usize = 10_000;
+/// 모델이 한 번에 쓸 수 있는 셀 수 상한. 화면 쪽 적용 상한(`copilot-actions.js` `MAX_WRITE_CELLS`)과 같다.
+/// 화면이 넘는 작업을 통째로 거부하고 되돌리므로 서버가 먼저 같은 기준으로 거른다.
+pub const MAX_SHEET_WRITE_CELLS: usize = 1_024;
+/// 쓰기·서식·차트 범위의 셀 수 상한(`copilot-actions.js` `MAX_RANGE_CELLS`와 같다).
+pub const MAX_SHEET_RANGE_CELLS: usize = 4_096;
+/// 차트 한 개의 계열 수 상한(`sheet-layout.js` `MAX_CHART_SERIES`). 범주 열(행) 하나를 더한다.
+pub const MAX_CHART_SERIES: usize = 32;
+pub const MAX_CHART_TITLE_CHARS: usize = 160;
+pub const MIN_CHART_WIDTH: u64 = 180;
+pub const MAX_CHART_WIDTH: u64 = 1_600;
+pub const MIN_CHART_HEIGHT: u64 = 140;
+pub const MAX_CHART_HEIGHT: u64 = 1_200;
 pub const MAX_DOC_PARAGRAPHS: usize = 2_048;
+/// 모델 프롬프트에 싣는 문단 수. 클라이언트가 보내는 문단 수(`MAX_CONTEXT_PARAGRAPHS`)와 같다.
+pub const MAX_PROMPT_DOC_PARAGRAPHS: usize = 200;
+pub const MAX_PROMPT_SHEET_CELLS: usize = 300;
+pub const MAX_PROMPT_SLIDES: usize = 64;
+pub const MAX_PROMPT_PDF_CHARS: usize = 12_000;
+pub const MAX_PROMPT_CONTEXT_BYTES: usize = 24 * 1024;
+pub const MAX_BASE_TABLES: usize = 64;
+pub const MAX_BASE_FIELDS: usize = 64;
+pub const MAX_BASE_RECORDS: usize = 100;
+pub const MAX_BASE_TEXT_BYTES: usize = 1_024;
+pub const MAX_BOARD_NODES: usize = 256;
+pub const MAX_BOARD_CONNECTORS: usize = 1_024;
+pub const MAX_BOARD_TEXT_BYTES: usize = 1_024;
+pub const MAX_OUTPUT_TOKENS: u32 = 8_192;
 pub const MAX_SLIDES: usize = 256;
 pub const MAX_SLIDE_BULLETS: usize = 64;
 pub const MAX_TEXT_CONTEXT_BYTES: usize = 2 * 1024 * 1024;
@@ -49,6 +79,8 @@ pub struct CopilotLlmRequest {
     pub resolved_addrs: Vec<SocketAddr>,
     pub headers: Vec<(String, String)>,
     pub body_json: String,
+    /// 요청 취소 신호. 전송 계층이 소켓을 등록하고 취소 때 끊는다.
+    pub cancel: CancelHandle,
 }
 
 /// Host-supplied HTTP(S) completion callback (e.g. desktop OS TLS transport).
@@ -85,6 +117,8 @@ pub enum CopilotModule {
     Doc,
     Slide,
     Pdf,
+    Base,
+    Board,
 }
 
 impl CopilotModule {
@@ -94,7 +128,14 @@ impl CopilotModule {
             Self::Doc => "DOC",
             Self::Slide => "SLIDE",
             Self::Pdf => "PDF",
+            Self::Base => "BASE",
+            Self::Board => "BOARD",
         }
+    }
+
+    /// 편집 연산이 없는 모듈. 질문 답변만 받는다.
+    pub fn is_ask_only(self) -> bool {
+        matches!(self, Self::Pdf | Self::Base | Self::Board)
     }
 
     pub fn parse(raw: &str) -> Result<Self, EasyOfficeError> {
@@ -103,6 +144,8 @@ impl CopilotModule {
             "DOC" | "HWP" => Ok(Self::Doc),
             "SLIDE" => Ok(Self::Slide),
             "PDF" => Ok(Self::Pdf),
+            "BASE" => Ok(Self::Base),
+            "BOARD" => Ok(Self::Board),
             other => Err(EasyOfficeError::InvalidArgument(format!(
                 "지원하지 않는 코파일럿 문서 모듈입니다: {other}"
             ))),
@@ -271,78 +314,51 @@ pub struct HistoryMessage {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SelectionContext {
-    pub sheet: Option<String>,
-    pub range: Option<String>,
-    pub paragraph_index: Option<usize>,
-    pub slide_index: Option<usize>,
+/// 선택 영역 명령. 모델에 보내는 지시문은 `prompt.rs`가 명령마다 따로 쓴다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopilotCommand {
+    Rewrite,
+    Summarize,
+    Shorten,
+    Lengthen,
+    FixSpelling,
+    Translate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SheetCellInput {
-    pub coord: String,
-    pub raw: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SheetContext {
-    pub name: String,
-    pub cells: Vec<SheetCellInput>,
-}
-
-impl Default for SheetContext {
-    fn default() -> Self {
-        Self {
-            name: "Sheet1".to_string(),
-            cells: Vec::new(),
+impl CopilotCommand {
+    pub fn parse_optional(raw: &str) -> Result<Option<Self>, EasyOfficeError> {
+        match raw.trim() {
+            "" => Ok(None),
+            "rewrite" => Ok(Some(Self::Rewrite)),
+            "summarize" => Ok(Some(Self::Summarize)),
+            "shorten" => Ok(Some(Self::Shorten)),
+            "lengthen" => Ok(Some(Self::Lengthen)),
+            "fix_spelling" => Ok(Some(Self::FixSpelling)),
+            "translate" => Ok(Some(Self::Translate)),
+            other => Err(EasyOfficeError::InvalidArgument(format!(
+                "지원하지 않는 선택 영역 명령입니다: {other}"
+            ))),
         }
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DocContext {
-    pub paragraphs: Vec<String>,
-    pub selected_text: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SlideItem {
-    pub title: String,
-    pub bullets: Vec<String>,
-    pub notes: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SlideContext {
-    pub active_index: usize,
-    pub slides: Vec<SlideItem>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PdfContext {
-    pub text: String,
-    pub page_count: usize,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CopilotContext {
-    pub sheet: Option<SheetContext>,
-    pub doc: Option<DocContext>,
-    pub slide: Option<SlideContext>,
-    pub pdf: Option<PdfContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopilotRunRequest {
     pub mode: CopilotMode,
     pub module: CopilotModule,
+    pub command: Option<CopilotCommand>,
     pub prompt: String,
     pub history: Vec<HistoryMessage>,
     pub selection: SelectionContext,
     pub context: CopilotContext,
     pub provider: ProviderConfig,
+}
+
+impl CopilotRunRequest {
+    /// 질문 모드이거나 편집 연산이 없는 모듈이면 모델이 돌려준 연산은 전부 버린다.
+    pub fn is_read_only(&self) -> bool {
+        self.mode == CopilotMode::Ask || self.module.is_ask_only()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -401,6 +417,82 @@ pub enum CopilotOperation {
         bullets: Option<Vec<String>>,
         notes: Option<String>,
     },
+    SheetChart {
+        sheet: String,
+        chart_type: ChartType,
+        data_range: String,
+        title: String,
+        legend: ChartLegend,
+        switch_row_col: bool,
+        width: Option<u32>,
+        height: Option<u32>,
+    },
+}
+
+/// 화면 쪽 `CHART_TYPES`(`sheet-layout.js`)와 같은 종류.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartType {
+    Column,
+    Bar,
+    Line,
+    Pie,
+    Scatter,
+}
+
+impl ChartType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Column => "column",
+            Self::Bar => "bar",
+            Self::Line => "line",
+            Self::Pie => "pie",
+            Self::Scatter => "scatter",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "column" => Some(Self::Column),
+            "bar" => Some(Self::Bar),
+            "line" => Some(Self::Line),
+            "pie" => Some(Self::Pie),
+            "scatter" => Some(Self::Scatter),
+            _ => None,
+        }
+    }
+}
+
+/// 화면 쪽 `CHART_LEGENDS`와 같은 범례 위치.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartLegend {
+    Right,
+    Bottom,
+    Top,
+    Left,
+    None,
+}
+
+impl ChartLegend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Right => "right",
+            Self::Bottom => "bottom",
+            Self::Top => "top",
+            Self::Left => "left",
+            Self::None => "none",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "right" => Some(Self::Right),
+            "bottom" => Some(Self::Bottom),
+            "top" => Some(Self::Top),
+            "left" => Some(Self::Left),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -420,6 +512,8 @@ pub struct CopilotRunResponse {
     pub reasoning: String,
     pub updated_in_place: bool,
     pub operations: Vec<CopilotOperation>,
+    /// 모델이 보냈지만 형식·범위·개수 검사에서 버린 작업 수.
+    pub dropped_operations: usize,
     pub locations: Vec<CopilotLocation>,
 }
 
@@ -446,15 +540,22 @@ pub fn is_valid_a1_coord(raw: &str) -> bool {
         && PackedCellCoordinate::parse_a1(t).is_ok()
 }
 
-pub fn is_valid_range_ref(raw: &str) -> bool {
+/// 셀 범위 문자열을 해석한다. 문자 집합·길이·셀 수(`MAX_SHEET_RANGE_CELLS`)를 넘으면 `None`.
+pub fn parse_bounded_range(raw: &str) -> Option<CellRange> {
     let t = raw.trim();
     if t.is_empty() || t.len() > 40 || !t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b':') {
-        return false;
+        return None;
     }
-    CellRange::parse(t).is_ok_and(|r| r.cell_count() <= MAX_SHEET_CELLS)
+    CellRange::parse(t)
+        .ok()
+        .filter(|r| r.cell_count() <= MAX_SHEET_RANGE_CELLS)
 }
 
-fn opt_str<'a>(
+pub fn is_valid_range_ref(raw: &str) -> bool {
+    parse_bounded_range(raw).is_some()
+}
+
+pub(super) fn opt_str<'a>(
     entries: &'a [(String, StrictJsonValue)],
     key: &str,
 ) -> Result<Option<&'a str>, EasyOfficeError> {
@@ -467,7 +568,7 @@ fn opt_str<'a>(
     }
 }
 
-fn opt_scalar_string(
+pub(super) fn opt_scalar_string(
     entries: &[(String, StrictJsonValue)],
     key: &str,
 ) -> Result<String, EasyOfficeError> {
@@ -537,6 +638,7 @@ pub fn parse_run_request(
 ) -> Result<CopilotRunRequest, EasyOfficeError> {
     let mode = CopilotMode::parse(opt_str(entries, "mode")?.unwrap_or("ask"))?;
     let module = CopilotModule::parse(opt_str(entries, "module")?.unwrap_or("DOC"))?;
+    let command = CopilotCommand::parse_optional(opt_str(entries, "command")?.unwrap_or(""))?;
     let prompt_raw = opt_str(entries, "prompt")?.unwrap_or("");
     if prompt_raw.len() > MAX_PROMPT_BYTES {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
@@ -556,9 +658,14 @@ pub fn parse_run_request(
     let context = parse_context(entries)?;
     let provider = parse_provider_config(entries)?;
 
+    if command.is_some() {
+        validate_command_target(mode, module, &selection, &context)?;
+    }
+
     Ok(CopilotRunRequest {
         mode,
         module,
+        command,
         prompt,
         history,
         selection,
@@ -611,299 +718,36 @@ fn parse_history(
     Ok(out)
 }
 
-fn parse_selection(
-    entries: &[(String, StrictJsonValue)],
-) -> Result<SelectionContext, EasyOfficeError> {
-    let Some(val) = StrictJsonValue::get_field(entries, "selection") else {
-        return Ok(SelectionContext::default());
-    };
-    if matches!(val, StrictJsonValue::Null) {
-        return Ok(SelectionContext::default());
+/// 선택 영역 명령은 편집 모드의 문서·슬라이드 텍스트에서만 받고, 대상 위치가 있어야 한다.
+fn validate_command_target(
+    mode: CopilotMode,
+    module: CopilotModule,
+    selection: &SelectionContext,
+    context: &CopilotContext,
+) -> Result<(), EasyOfficeError> {
+    let invalid = |msg: &str| Err(EasyOfficeError::InvalidArgument(msg.to_string()));
+    if mode != CopilotMode::Edit {
+        return invalid("선택 영역 명령은 편집 모드에서만 쓸 수 있습니다.");
     }
-    if let Some(raw_str) = val.as_str() {
-        let trimmed = raw_str.trim();
-        if trimmed.len() > 100 {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "선택 범위 문자열이 너무 깁니다.".to_string(),
-            ));
-        }
-        return Ok(SelectionContext {
-            range: (!trimmed.is_empty()).then(|| trimmed.to_string()),
-            ..SelectionContext::default()
-        });
-    }
-    let obj = val.as_object().ok_or_else(|| {
-        EasyOfficeError::InvalidArgument("'selection' 필드는 객체여야 합니다.".to_string())
-    })?;
-    let sheet = opt_str(obj, "sheet")?
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string);
-    let range = opt_str(obj, "range")?
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string);
-    if range.as_ref().is_some_and(|r| r.len() > 100) {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(
-            "선택 범위 문자열이 너무 깁니다.".to_string(),
-        ));
-    }
-    let paragraph_index = StrictJsonValue::get_field(obj, "paragraphIndex")
-        .and_then(StrictJsonValue::as_u64)
-        .and_then(|v| usize::try_from(v).ok());
-    let slide_index = StrictJsonValue::get_field(obj, "slideIndex")
-        .and_then(StrictJsonValue::as_u64)
-        .and_then(|v| usize::try_from(v).ok());
-    Ok(SelectionContext {
-        sheet,
-        range,
-        paragraph_index,
-        slide_index,
-    })
-}
-
-fn parse_context(entries: &[(String, StrictJsonValue)]) -> Result<CopilotContext, EasyOfficeError> {
-    let Some(val) = StrictJsonValue::get_field(entries, "context") else {
-        return Ok(CopilotContext::default());
-    };
-    if matches!(val, StrictJsonValue::Null) {
-        return Ok(CopilotContext::default());
-    }
-    let obj = val.as_object().ok_or_else(|| {
-        EasyOfficeError::InvalidArgument("'context' 필드는 객체여야 합니다.".to_string())
-    })?;
-
-    let sheet = if let Some(s_val) = StrictJsonValue::get_field(obj, "sheet") {
-        if matches!(s_val, StrictJsonValue::Null) {
-            None
-        } else {
-            let s_obj = s_val.as_object().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument("'context.sheet'는 객체여야 합니다.".to_string())
-            })?;
-            let name = opt_str(s_obj, "name")?
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or("Sheet1")
-                .to_string();
-            let cells = parse_sheet_cells(s_obj)?;
-            Some(SheetContext { name, cells })
-        }
-    } else {
-        None
-    };
-
-    let doc = if let Some(d_val) = StrictJsonValue::get_field(obj, "doc") {
-        if matches!(d_val, StrictJsonValue::Null) {
-            None
-        } else {
-            let d_obj = d_val.as_object().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument("'context.doc'는 객체여야 합니다.".to_string())
-            })?;
-            Some(parse_doc_context(d_obj)?)
-        }
-    } else {
-        None
-    };
-
-    let slide = if let Some(sl_val) = StrictJsonValue::get_field(obj, "slide") {
-        if matches!(sl_val, StrictJsonValue::Null) {
-            None
-        } else {
-            let sl_obj = sl_val.as_object().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument("'context.slide'는 객체여야 합니다.".to_string())
-            })?;
-            Some(parse_slide_context(sl_obj)?)
-        }
-    } else {
-        None
-    };
-
-    let pdf = if let Some(p_val) = StrictJsonValue::get_field(obj, "pdf") {
-        if matches!(p_val, StrictJsonValue::Null) {
-            None
-        } else {
-            let p_obj = p_val.as_object().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument("'context.pdf'는 객체여야 합니다.".to_string())
-            })?;
-            let text = opt_str(p_obj, "text")?.unwrap_or("").to_string();
-            if text.len() > MAX_TEXT_CONTEXT_BYTES {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "PDF 추출 텍스트 크기가 상한을 초과했습니다.".to_string(),
-                ));
+    match module {
+        CopilotModule::Doc => {
+            let (Some(start), end) = (selection.paragraph_index, selection.paragraph_end) else {
+                return invalid("선택 영역 명령에는 선택한 문단 위치가 필요합니다.");
+            };
+            let last = end.unwrap_or(start);
+            let known = context.doc.as_ref().map_or(0, |doc| doc.paragraphs.len());
+            if last < start || last >= known {
+                return invalid("선택한 문단 범위가 올바르지 않습니다.");
             }
-            let page_count = StrictJsonValue::get_field(p_obj, "pageCount")
-                .and_then(StrictJsonValue::as_u64)
-                .and_then(|v| usize::try_from(v).ok())
-                .unwrap_or(0);
-            Some(PdfContext { text, page_count })
+            Ok(())
         }
-    } else {
-        None
-    };
-
-    Ok(CopilotContext {
-        sheet,
-        doc,
-        slide,
-        pdf,
-    })
-}
-
-fn parse_sheet_cells(
-    obj: &[(String, StrictJsonValue)],
-) -> Result<Vec<SheetCellInput>, EasyOfficeError> {
-    let Some(cells_val) = StrictJsonValue::get_field(obj, "cells") else {
-        return Ok(Vec::new());
-    };
-    if matches!(cells_val, StrictJsonValue::Null) {
-        return Ok(Vec::new());
-    }
-    let items = cells_val.as_array().ok_or_else(|| {
-        EasyOfficeError::InvalidArgument("'sheet.cells'는 배열이어야 합니다.".to_string())
-    })?;
-    if items.len() > MAX_SHEET_CELLS {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "시트 셀 수({})가 상한({MAX_SHEET_CELLS}개)을 초과했습니다.",
-            items.len()
-        )));
-    }
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let cell_obj = item.as_object().ok_or_else(|| {
-            EasyOfficeError::InvalidArgument("시트 셀 항목은 객체여야 합니다.".to_string())
-        })?;
-        let coord = match opt_str(cell_obj, "coord")? {
-            Some(c) => c,
-            None => match opt_str(cell_obj, "cell")? {
-                Some(c) => c,
-                None => opt_str(cell_obj, "ref")?.unwrap_or(""),
-            },
-        }
-        .trim()
-        .to_string();
-        if coord.is_empty() {
-            continue;
-        }
-        let raw = opt_scalar_string(cell_obj, "raw")?;
-        let value = opt_scalar_string(cell_obj, "value")?;
-        out.push(SheetCellInput { coord, raw, value });
-    }
-    Ok(out)
-}
-
-fn parse_doc_context(obj: &[(String, StrictJsonValue)]) -> Result<DocContext, EasyOfficeError> {
-    let mut total_bytes = 0usize;
-    let paragraphs = match StrictJsonValue::get_field(obj, "paragraphs") {
-        None | Some(StrictJsonValue::Null) => Vec::new(),
-        Some(v) => {
-            let items = v.as_array().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument(
-                    "'doc.paragraphs'는 배열이어야 합니다.".to_string(),
-                )
-            })?;
-            if items.len() > MAX_DOC_PARAGRAPHS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "문서 문단 수({})가 상한({MAX_DOC_PARAGRAPHS}개)을 초과했습니다.",
-                    items.len()
-                )));
+        CopilotModule::Slide => {
+            let known = context.slide.as_ref().map_or(0, |slide| slide.slides.len());
+            match (selection.slide_index, selection.slide_field) {
+                (Some(index), Some(_)) if index < known => Ok(()),
+                _ => invalid("선택 영역 명령에는 선택한 슬라이드 칸이 필요합니다."),
             }
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                let s = item.as_str().ok_or_else(|| {
-                    EasyOfficeError::InvalidArgument(
-                        "'doc.paragraphs' 항목은 문자열이어야 합니다.".to_string(),
-                    )
-                })?;
-                total_bytes = total_bytes.saturating_add(s.len());
-                if total_bytes > MAX_TEXT_CONTEXT_BYTES {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "문서 문단 총 크기가 상한을 초과했습니다.".to_string(),
-                    ));
-                }
-                out.push(s.to_string());
-            }
-            out
         }
-    };
-    let selected_text = opt_str(obj, "selectedText")?.unwrap_or("").to_string();
-    if total_bytes.saturating_add(selected_text.len()) > MAX_TEXT_CONTEXT_BYTES {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(
-            "문서 선택 텍스트 크기가 상한을 초과했습니다.".to_string(),
-        ));
+        _ => invalid("선택 영역 명령은 문서와 슬라이드 텍스트에서만 쓸 수 있습니다."),
     }
-    Ok(DocContext {
-        paragraphs,
-        selected_text,
-    })
-}
-
-fn parse_slide_context(obj: &[(String, StrictJsonValue)]) -> Result<SlideContext, EasyOfficeError> {
-    let active_index = StrictJsonValue::get_field(obj, "activeIndex")
-        .and_then(StrictJsonValue::as_u64)
-        .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(0);
-    let slides = match StrictJsonValue::get_field(obj, "slides") {
-        None | Some(StrictJsonValue::Null) => Vec::new(),
-        Some(v) => {
-            let items = v.as_array().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument("'slide.slides'는 배열이어야 합니다.".to_string())
-            })?;
-            if items.len() > MAX_SLIDES {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "슬라이드 수({})가 상한({MAX_SLIDES}개)을 초과했습니다.",
-                    items.len()
-                )));
-            }
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                let s_obj = item.as_object().ok_or_else(|| {
-                    EasyOfficeError::InvalidArgument("슬라이드 항목은 객체여야 합니다.".to_string())
-                })?;
-                let title = opt_str(s_obj, "title")?.unwrap_or("").to_string();
-                let notes = opt_str(s_obj, "notes")?.unwrap_or("").to_string();
-                let bullets = match StrictJsonValue::get_field(s_obj, "bullets") {
-                    None | Some(StrictJsonValue::Null) => opt_str(s_obj, "body")?
-                        .unwrap_or("")
-                        .lines()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .take(MAX_SLIDE_BULLETS)
-                        .map(ToString::to_string)
-                        .collect(),
-                    Some(bv) => {
-                        let arr = bv.as_array().ok_or_else(|| {
-                            EasyOfficeError::InvalidArgument(
-                                "'slide.bullets'는 문자열 배열이어야 합니다.".to_string(),
-                            )
-                        })?;
-                        if arr.len() > MAX_SLIDE_BULLETS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "슬라이드 글머리 기호 수가 상한을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        let mut bs = Vec::with_capacity(arr.len());
-                        for b in arr {
-                            let s = b.as_str().ok_or_else(|| {
-                                EasyOfficeError::InvalidArgument(
-                                    "'slide.bullets' 항목은 문자열이어야 합니다.".to_string(),
-                                )
-                            })?;
-                            bs.push(s.to_string());
-                        }
-                        bs
-                    }
-                };
-                out.push(SlideItem {
-                    title,
-                    bullets,
-                    notes,
-                });
-            }
-            out
-        }
-    };
-    Ok(SlideContext {
-        active_index,
-        slides,
-    })
 }

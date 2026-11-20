@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use super::ssrf::EndpointTarget;
 use super::types::{
     push_json_str, CopilotRunRequest, HistoryMessage, ProviderConfig, ProviderKind,
-    MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES,
+    ReasoningEffort, MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES, MAX_OUTPUT_TOKENS,
 };
 
 pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
@@ -83,6 +83,26 @@ pub fn models_endpoint_target(provider: &ProviderConfig) -> EndpointTarget<'stat
     }
 }
 
+/// OpenAI 호환 본문의 출력 상한 필드와 값. 공식 OpenAI는 추론 모델이 `max_tokens`를 거부하므로
+/// `max_completion_tokens`를 쓰고, 그 밖의 호환 서버는 널리 받는 `max_tokens`를 쓴다.
+/// 추론 토큰도 상한에 들어가는 제공자는 추론 예산만큼 더한다(Anthropic 경로와 같은 방식).
+/// DeepSeek은 모델별 상한이 8,192라 그대로 둔다.
+fn openai_output_cap(kind: ProviderKind, effort: Option<ReasoningEffort>) -> (&'static str, u32) {
+    let field = if kind == ProviderKind::OpenAi {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
+    let reasoning_counts = matches!(
+        kind,
+        ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Xai
+    );
+    let extra = effort
+        .filter(|_| reasoning_counts)
+        .map_or(0, ReasoningEffort::budget_tokens);
+    (field, MAX_OUTPUT_TOKENS + extra)
+}
+
 pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
     let model = provider.model.trim();
     match provider.kind {
@@ -101,7 +121,11 @@ pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
             let mut out = String::with_capacity(256);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            out.push_str(",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":8}");
+            let (field, _) = openai_output_cap(provider.kind, None);
+            let _ = write!(
+                out,
+                ",\"messages\":[{{\"role\":\"user\",\"content\":\"ping\"}}],\"{field}\":8}}"
+            );
             out
         }
     }
@@ -157,7 +181,7 @@ pub fn build_provider_chat_body(
         ProviderKind::Anthropic => {
             let turns = coalesce_turns(&req.history, user_content);
             let budget = effort.map_or(0, |e| e.budget_tokens());
-            let max_tokens = if budget > 0 { 8192 + budget } else { 8192 };
+            let max_tokens = MAX_OUTPUT_TOKENS + budget;
             let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 512);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
@@ -208,7 +232,10 @@ pub fn build_provider_chat_body(
                 push_json_str(&mut out, text);
                 out.push_str("}]}");
             }
-            out.push_str("],\"generationConfig\":{\"temperature\":0.2,\"maxOutputTokens\":8192");
+            let _ = write!(
+                out,
+                "],\"generationConfig\":{{\"temperature\":0.2,\"maxOutputTokens\":{MAX_OUTPUT_TOKENS}"
+            );
             if budget > 0 {
                 let _ = write!(
                     out,
@@ -235,6 +262,8 @@ pub fn build_provider_chat_body(
             out.push_str(",{\"role\":\"user\",\"content\":");
             push_json_str(&mut out, user_content);
             out.push_str("}]");
+            let (cap_field, cap) = openai_output_cap(req.provider.kind, effort);
+            let _ = write!(out, ",\"{cap_field}\":{cap}");
             if let Some(level) = effort {
                 if req.provider.kind == ProviderKind::DeepSeek {
                     out.push_str(",\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":");

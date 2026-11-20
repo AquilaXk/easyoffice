@@ -2,8 +2,13 @@
 //!
 //! Desktop HTTP(S) model transport using `ureq` + OS `native-tls`, DNS pinning via `ureq::Resolver`,
 //! zero-redirect enforcement, `Accept-Encoding: identity`, and a 512 KiB request/response ceiling.
+//!
+//! Cancellation: HTTPS hands the connected socket to the request's `CancelHandle` from inside the TLS
+//! connector hook, so `copilot_cancel` can shut it down and unblock the handshake, the write and the
+//! read. Loopback HTTP uses the engine's own socket client, which registers its socket the same way.
 
-use easyoffice_app::copilot::llm_client::validate_wire_headers;
+use easyoffice_app::copilot::cancel::{CancelHandle, CANCELLED_MESSAGE};
+use easyoffice_app::copilot::llm_client::{send_local_http, validate_wire_headers};
 use easyoffice_app::copilot::ssrf::is_public_ip;
 use easyoffice_app::copilot::types::{HttpMethod, MAX_LLM_REQUEST_BYTES, MAX_LLM_RESPONSE_BYTES};
 use easyoffice_app::CopilotLlmRequest;
@@ -72,14 +77,57 @@ fn validate_request_guards(req: &CopilotLlmRequest) -> Result<Vec<SocketAddr>, S
     Ok(req.resolved_addrs.clone())
 }
 
-/// Executes a validated chat-completion request over `ureq` + OS `native-tls`.
+/// `native-tls` connector that registers the connected TCP socket with the request's cancel handle
+/// before the handshake, so a cancel can close the connection at any later point.
+struct CancellableTls {
+    inner: native_tls::TlsConnector,
+    cancel: CancelHandle,
+}
+
+impl ureq::TlsConnector for CancellableTls {
+    fn connect(
+        &self,
+        dns_name: &str,
+        io: Box<dyn ureq::ReadWrite>,
+    ) -> Result<Box<dyn ureq::ReadWrite>, ureq::Error> {
+        if let Some(socket) = io.socket() {
+            self.cancel.attach(socket);
+        }
+        if self.cancel.is_cancelled() {
+            return Err(IoError::new(ErrorKind::Interrupted, CANCELLED_MESSAGE).into());
+        }
+        ureq::TlsConnector::connect(&self.inner, dns_name, io)
+    }
+}
+
+/// Executes a validated chat-completion request: loopback HTTP over the engine's socket client,
+/// HTTPS over `ureq` + OS `native-tls`.
 pub fn complete(req: &CopilotLlmRequest) -> Result<String, String> {
     let pinned_addrs = validate_request_guards(req)?;
+    req.cancel.check()?;
+    if !req.is_https {
+        return send_local_http(req).map_err(|err| err.to_string());
+    }
+    complete_https(req, pinned_addrs)
+}
+
+fn complete_https(
+    req: &CopilotLlmRequest,
+    pinned_addrs: Vec<SocketAddr>,
+) -> Result<String, String> {
+    // A connection closed by a cancel surfaces as an I/O error of any kind: report the cancel instead.
+    let or_cancelled = |message: String| -> String {
+        if req.cancel.is_cancelled() {
+            CANCELLED_MESSAGE.to_string()
+        } else {
+            message
+        }
+    };
     let expected_host = req.host.clone();
     let expected_port = req.port;
 
     let mut builder = ureq::AgentBuilder::new()
-        .https_only(req.is_https)
+        .https_only(true)
         .redirects(0)
         .timeout_connect(CONNECT_TIMEOUT)
         .timeout_read(IO_TIMEOUT)
@@ -97,11 +145,12 @@ pub fn complete(req: &CopilotLlmRequest) -> Result<String, String> {
             }
         });
 
-    if req.is_https {
-        let tls = native_tls::TlsConnector::new()
-            .map_err(|_| "OS TLS 커넥터를 초기화하지 못했습니다.".to_string())?;
-        builder = builder.tls_connector(Arc::new(tls));
-    }
+    let tls = native_tls::TlsConnector::new()
+        .map_err(|_| "OS TLS 커넥터를 초기화하지 못했습니다.".to_string())?;
+    builder = builder.tls_connector(Arc::new(CancellableTls {
+        inner: tls,
+        cancel: req.cancel.clone(),
+    }));
 
     let agent = builder.build();
     let mut http_req = match req.method {
@@ -134,7 +183,9 @@ pub fn complete(req: &CopilotLlmRequest) -> Result<String, String> {
                 ureq::ErrorKind::Io => "네트워크 입출력 오류가 발생했습니다",
                 _ => "전송 오류가 발생했습니다",
             };
-            return Err(format!("모델 엔드포인트 요청에 실패했습니다 ({detail})."));
+            return Err(or_cancelled(format!(
+                "모델 엔드포인트 요청에 실패했습니다 ({detail})."
+            )));
         }
     };
 
@@ -151,7 +202,8 @@ pub fn complete(req: &CopilotLlmRequest) -> Result<String, String> {
     resp.into_reader()
         .take(MAX_LLM_RESPONSE_BYTES as u64 + 1)
         .read_to_end(&mut body)
-        .map_err(|_| "모델 응답 본문을 읽지 못했습니다.".to_string())?;
+        .map_err(|_| or_cancelled("모델 응답 본문을 읽지 못했습니다.".to_string()))?;
+    req.cancel.check()?;
 
     if body.len() > MAX_LLM_RESPONSE_BYTES {
         return Err("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string());
@@ -219,6 +271,7 @@ mod tests {
             resolved_addrs: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)],
             headers: vec![("Authorization".to_string(), "Bearer secret-key".to_string())],
             body_json: r#"{"model":"m1","messages":[]}"#.to_string(),
+            cancel: CancelHandle::default(),
         }
     }
 
@@ -309,6 +362,7 @@ mod tests {
                 ("anthropic-version".to_string(), "2023-06-01".to_string()),
             ],
             body_json: String::new(),
+            cancel: CancelHandle::default(),
         };
         let get_out = complete(&get_req).unwrap();
         let get_cap = m_handle.join().unwrap();
@@ -316,5 +370,66 @@ mod tests {
         assert!(get_cap.starts_with("GET /v1/models HTTP/1.1"));
         assert!(get_cap.contains("x-api-key: ant-key"));
         assert!(get_cap.contains("anthropic-version: 2023-06-01"));
+    }
+
+    /// A server that accepts the connection and never answers; `accepted` fires once it is connected.
+    fn spawn_silent_server() -> (u16, std::sync::mpsc::Receiver<()>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = tx.send(());
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+            let mut buf = [0u8; 4096];
+            while matches!(stream.read(&mut buf), Ok(n) if n > 0) {}
+        });
+        (port, rx, handle)
+    }
+
+    #[test]
+    fn cancel_unblocks_a_loopback_request_that_never_gets_an_answer() {
+        let (port, accepted, server) = spawn_silent_server();
+        let req = base_local_req(port);
+        let cancel = req.cancel.clone();
+        let worker = thread::spawn(move || complete(&req));
+        accepted.recv_timeout(Duration::from_secs(5)).unwrap();
+        let started = std::time::Instant::now();
+        cancel.cancel();
+        let err = worker.join().unwrap().unwrap_err();
+        assert!(err.contains("취소"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        server.join().unwrap();
+
+        let done = base_local_req(1);
+        done.cancel.cancel();
+        assert!(
+            complete(&done).unwrap_err().contains("취소"),
+            "a cancelled request never connects"
+        );
+    }
+
+    #[test]
+    fn cancel_unblocks_a_tls_handshake_through_the_connector_hook() {
+        use ureq::TlsConnector as _;
+        let (port, accepted, server) = spawn_silent_server();
+        let client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let cancel = CancelHandle::default();
+        let connector = CancellableTls {
+            inner: native_tls::TlsConnector::new().unwrap(),
+            cancel: cancel.clone(),
+        };
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let outcome = connector.connect("example.com", Box::new(client));
+            let _ = done_tx.send(outcome.is_err());
+        });
+        accepted.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The handshake waits for a server hello that never comes.
+        assert!(done_rx.recv_timeout(Duration::from_millis(300)).is_err());
+        cancel.cancel();
+        assert_eq!(done_rx.recv_timeout(Duration::from_secs(5)), Ok(true));
+        worker.join().unwrap();
+        server.join().unwrap();
     }
 }
