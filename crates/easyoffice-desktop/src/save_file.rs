@@ -182,7 +182,11 @@ impl SaveRequest {
     }
 
     pub fn filter_label(&self) -> String {
-        format!("{} 문서", self.extension.to_ascii_uppercase())
+        match self.extension.as_str() {
+            "eobase" => "데이터베이스 (BASE)".to_string(),
+            "eoboard" => "보드 (BOARD)".to_string(),
+            _ => format!("{} 문서", self.extension.to_ascii_uppercase()),
+        }
     }
 
     pub fn bytes(&self) -> &[u8] {

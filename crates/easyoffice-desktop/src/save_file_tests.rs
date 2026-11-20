@@ -52,6 +52,40 @@ fn parse_keeps_only_the_file_name_and_decodes_bytes() {
 }
 
 #[test]
+fn the_edit_packages_are_saved_under_their_own_names_and_labels() {
+    use easyoffice_formats::native_package::{write_package, NativePackage, PackageKind};
+    let package = |kind| {
+        write_package(&NativePackage {
+            kind,
+            model: "{}".to_string(),
+            media: Vec::new(),
+        })
+        .unwrap()
+    };
+    let base = SaveRequest::parse(
+        "고객.eobase",
+        &base64_codec::encode(&package(PackageKind::Base)),
+    )
+    .unwrap();
+    assert_eq!(base.extension(), "eobase");
+    assert_eq!(base.filter_label(), "데이터베이스 (BASE)");
+    let board = SaveRequest::parse(
+        "흐름.EOBOARD",
+        &base64_codec::encode(&package(PackageKind::Board)),
+    )
+    .unwrap();
+    assert_eq!(board.filter_label(), "보드 (BOARD)");
+    let wrong = SaveRequest::parse(
+        "고객.eoboard",
+        &base64_codec::encode(&package(PackageKind::Base)),
+    );
+    assert!(
+        wrong.is_err(),
+        "a base package under a board name is not written"
+    );
+}
+
+#[test]
 fn shell_made_bytes_get_the_same_name_rules_and_limits() {
     let pdf = document(DocumentFormat::Pdf);
     let req = SaveRequest::from_bytes("C:\\x\\보고서.PDF", pdf).unwrap();
