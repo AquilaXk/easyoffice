@@ -43,6 +43,10 @@ pub(crate) fn is_spill_fn(name: &str) -> bool {
             | "ARRAYTOTEXT"
             | "GROUPBY"
             | "PIVOTBY"
+            | "FORECAST.ETS"
+            | "FORECAST.ETS.CONFINT"
+            | "FORECAST.ETS.SEASONALITY"
+            | "FORECAST.ETS.STAT"
     )
 }
 

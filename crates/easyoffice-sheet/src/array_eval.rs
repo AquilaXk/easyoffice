@@ -333,6 +333,10 @@ impl SheetEngine {
             "TRIMRANGE" => self.fn_trimrange(args, env, ctx, depth),
             "GROUPBY" => self.fn_groupby(args, env, ctx, depth),
             "PIVOTBY" => self.fn_pivotby(args, env, ctx, depth),
+            "FORECAST.ETS"
+            | "FORECAST.ETS.CONFINT"
+            | "FORECAST.ETS.SEASONALITY"
+            | "FORECAST.ETS.STAT" => self.fn_forecast_ets(name, args, env, ctx, depth),
             "REGEXTEST" => self.fn_regextest(args, env, ctx, depth),
             "REGEXEXTRACT" => self.fn_regexextract(args, env, ctx, depth),
             "REGEXREPLACE" => self.fn_regexreplace(args, env, ctx, depth),

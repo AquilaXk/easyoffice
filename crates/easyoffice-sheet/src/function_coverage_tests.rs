@@ -3,7 +3,7 @@
 use crate::SheetEngine;
 
 /// The sources that call the canonical functions: the evaluation test of the workbook tests and the
-/// integration tests of the function bundles (PD-195, PD-201, PD-205, PD-217, PD-270, PD-271).
+/// integration tests of the function bundles (PD-195, PD-201, PD-205, PD-217, PD-270, PD-271, PD-272).
 fn calling_sources() -> String {
     let workbook_tests = include_str!("workbook_tests.rs");
     let start = workbook_tests
@@ -38,6 +38,7 @@ fn calling_sources() -> String {
         include_str!("../tests/sheet_text_locale_functions.rs"),
         include_str!("../tests/sheet_groupby_pivotby.rs"),
         include_str!("../tests/sheet_getpivotdata.rs"),
+        include_str!("../tests/sheet_forecast_ets.rs"),
     ]
     .concat()
 }

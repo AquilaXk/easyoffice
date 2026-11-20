@@ -14,8 +14,8 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 14 of the function parity bundle (PD-270): text 5
 /// (`TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`), `TRIMRANGE`, information 5
 /// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`, then the 4 of the locale and text bundle:
-/// `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY` and `GETPIVOTDATA`.
-pub const CANONICAL_FUNCTIONS: [&str; 309] = [
+/// `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY` and `GETPIVOTDATA`, then the 4 `FORECAST.ETS` functions (PD-272).
+pub const CANONICAL_FUNCTIONS: [&str; 313] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -325,6 +325,10 @@ pub const CANONICAL_FUNCTIONS: [&str; 309] = [
     "GROUPBY",
     "PIVOTBY",
     "GETPIVOTDATA",
+    "FORECAST.ETS",
+    "FORECAST.ETS.CONFINT",
+    "FORECAST.ETS.SEASONALITY",
+    "FORECAST.ETS.STAT",
 ];
 
 /// The numeric values among `vals`.
