@@ -111,7 +111,7 @@ fn pivot_cache_field_names_shared_by_many_pivots_hit_the_budget() {
 }
 
 /// 항목 2: 120 MiB comments 파트 하나를 시트 4개가 같은 파트로 참조한다.
-fn comments_repeat_reference_xlsx(vml: bool) -> Vec<u8> {
+fn comments_repeat_reference_xlsx() -> Vec<u8> {
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let sheets: String = (1..=4)
         .map(|i| format!(r#"<sheet name="S{i}" sheetId="{i}" r:id="rId{i}"/>"#))
@@ -143,28 +143,14 @@ fn comments_repeat_reference_xlsx(vml: bool) -> Vec<u8> {
     );
     entries.push(("xl/comments1.xml".into(), comments.into_bytes()));
     for s in 1..=4 {
-        let legacy = if vml {
-            r#"<legacyDrawing r:id="rIdV"/>"#
-        } else {
-            ""
-        };
         entries.push((
             format!("xl/worksheets/sheet{s}.xml"),
-            format!(r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{OFFICE_REL}"><sheetData/>{legacy}</worksheet>"#).into_bytes(),
+            format!(r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{OFFICE_REL}"><sheetData/></worksheet>"#).into_bytes(),
         ));
-        let mut items = vec![("rIdC", "comments", "../comments1.xml")];
-        if vml {
-            items.push(("rIdV", "vmlDrawing", "../drawings/vmlDrawing1.vml"));
-        }
+        let items = [("rIdC", "comments", "../comments1.xml")];
         entries.push((
             format!("xl/worksheets/_rels/sheet{s}.xml.rels"),
             rels(&items),
-        ));
-    }
-    if vml {
-        entries.push((
-            "xl/drawings/vmlDrawing1.vml".into(),
-            b"<xml xmlns:v=\"urn:schemas-microsoft-com:vml\"></xml>".to_vec(),
         ));
     }
     ZipArchiveCodec::pack_compressed(&entries).expect("pack comments fixture")
@@ -172,7 +158,7 @@ fn comments_repeat_reference_xlsx(vml: bool) -> Vec<u8> {
 
 #[test]
 fn comments_part_referenced_by_every_sheet_is_read_once() {
-    let bytes = comments_repeat_reference_xlsx(false);
+    let bytes = comments_repeat_reference_xlsx();
     assert!(
         bytes.len() < REFS * MAX_BYTES_PER_REF,
         "fixture is {} bytes",
