@@ -35,7 +35,7 @@
     const hasEdgeSpace = raw !== raw.trim();
     const hasNonAlphaNum = !/^\w+$/.test(raw);
     const startsWithDigit = /^\d/.test(raw);
-    const looksLikeCell = /^[A-Za-z]{1,3}\d+$/.test(raw);
+    const looksLikeCell = /^[A-Za-z]{1,3}\d+$/.test(raw) || /^(?:[Rr]\d*)?(?:[Cc]\d*)?$/.test(raw);
     const isReserved = up === "TRUE" || up === "FALSE";
     if (hasEdgeSpace || hasNonAlphaNum || startsWithDigit || looksLikeCell || isReserved) {
       return "'" + raw.replaceAll("'", "''") + "'";

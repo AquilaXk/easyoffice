@@ -664,7 +664,28 @@ pub fn parse_sheet_and_box(default_sheet: &str, raw_ref: &str) -> Option<(String
     Some((sheet, area))
 }
 
-fn needs_sheet_quotes(name: &str) -> bool {
+/// Whether `name` reads as a cell in the R1C1 style: `R`, `C`, `RC`, `R1`, `C1`, `R1C1`.
+fn is_r1c1_like(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let digits = |from: usize| {
+        bytes[from..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count()
+    };
+    let mut end = 0;
+    if matches!(bytes.first(), Some(b'R' | b'r')) {
+        end = 1 + digits(1);
+    }
+    if matches!(bytes.get(end), Some(b'C' | b'c')) {
+        end += 1 + digits(end + 1);
+    }
+    end > 0 && end == bytes.len()
+}
+
+/// Whether a sheet name needs quotes in front of `!`: anything but an ASCII identifier that cannot be read
+/// as a cell (`A1`, `XFD10`, `R1C1`) or a boolean.
+pub fn sheet_name_needs_quotes(name: &str) -> bool {
     if name.is_empty() {
         return true;
     }
@@ -678,8 +699,8 @@ fn needs_sheet_quotes(name: &str) -> bool {
     {
         return true;
     }
-    // Disambiguate names that resemble cell references (e.g., A1, XFD10) or booleans
-    if name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE") {
+    if name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE") || is_r1c1_like(name)
+    {
         return true;
     }
     let split = name.find(|c: char| c.is_ascii_digit());
@@ -695,7 +716,7 @@ fn needs_sheet_quotes(name: &str) -> bool {
 pub fn format_sheet_range_ref(sheet_name: &str, range: CellBox) -> String {
     let mut out = String::with_capacity(sheet_name.len() + 20);
     if !sheet_name.is_empty() {
-        if needs_sheet_quotes(sheet_name) {
+        if sheet_name_needs_quotes(sheet_name) {
             out.push('\'');
             for ch in sheet_name.chars() {
                 if ch == '\'' {
@@ -930,4 +951,27 @@ pub fn parse_chart_number(raw: &str) -> Option<f64> {
             .map(|n| n / 100.0);
     }
     trimmed.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sheet_names_that_read_as_cells_are_quoted_in_chart_references() {
+        let a1 = CellBox::parse("A2:B3").unwrap();
+        for name in [
+            "A1", "XFD10", "R1C1", "r1c1", "R", "C", "RC", "R12", "C3", "RC5", "R2C", "TRUE",
+            "My Sheet", "매출",
+        ] {
+            let quoted = format_sheet_range_ref(name, a1);
+            assert!(quoted.starts_with('\''), "{name}: {quoted}");
+        }
+        for name in ["Sheet1", "Report", "Rows", "Col", "Data_2026", "RCAA1"] {
+            assert_eq!(
+                format_sheet_range_ref(name, a1),
+                format!("{name}!$A$2:$B$3")
+            );
+        }
+    }
 }

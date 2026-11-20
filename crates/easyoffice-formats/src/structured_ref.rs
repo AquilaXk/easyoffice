@@ -461,23 +461,10 @@ pub fn write_group(sref: &StructuredRef) -> String {
 }
 
 fn quote_sheet(name: &str) -> String {
-    let plain = name
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
-    let cell_like = (1..=3).contains(&letters)
-        && name.len() > letters
-        && name.bytes().skip(letters).all(|b| b.is_ascii_digit());
-    if plain
-        && !cell_like
-        && !name.eq_ignore_ascii_case("TRUE")
-        && !name.eq_ignore_ascii_case("FALSE")
-    {
-        name.to_string()
-    } else {
+    if crate::sheet_name_needs_quotes(name) {
         format!("'{}'", name.replace('\'', "''"))
+    } else {
+        name.to_string()
     }
 }
 

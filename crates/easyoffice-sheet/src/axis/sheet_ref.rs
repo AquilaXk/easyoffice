@@ -28,25 +28,9 @@ fn same_sheet(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b) || a.to_lowercase() == b.to_lowercase()
 }
 
-/// Whether a name needs quotes in a formula: anything but an ASCII identifier that cannot be read
-/// as a cell (`A1`, `XFD1048576`) or a boolean.
-fn needs_quotes(name: &str) -> bool {
-    let mut chars = name.chars();
-    let plain_start = chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
-    if !plain_start || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-        return true;
-    }
-    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
-    let digits_only_after = name.bytes().skip(letters).all(|b| b.is_ascii_digit());
-    let cell_like = (1..=3).contains(&letters) && name.len() > letters && digits_only_after;
-    cell_like || name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE")
-}
-
 /// `name` as it is written in front of `!` in a formula.
 pub fn quote_sheet_name(name: &str) -> String {
-    if needs_quotes(name) {
+    if easyoffice_formats::sheet_name_needs_quotes(name) {
         format!("'{}'", name.replace('\'', "''"))
     } else {
         name.to_string()
