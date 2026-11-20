@@ -92,3 +92,19 @@ fn test_floor_edge_cases() {
     assert_eq!(model._get_text("A3"), *"10");
     assert_eq!(model._get_text("A4"), *"9");
 }
+#[test]
+fn test_floor_error_cases() {
+    let mut model = new_empty_model();
+    // Positive number with negative significance should error
+    model._set("A1", "=FLOOR(2.5, -2)");
+    model._set("A2", "=FLOOR(10, -3)");
+
+    // Division by zero
+    model._set("A3", "=FLOOR(5, 0)");
+
+    model.evaluate();
+
+    assert_eq!(model._get_text("A1"), *"#NUM!");
+    assert_eq!(model._get_text("A2"), *"#NUM!");
+    assert_eq!(model._get_text("A3"), *"#DIV/0!");
+}
