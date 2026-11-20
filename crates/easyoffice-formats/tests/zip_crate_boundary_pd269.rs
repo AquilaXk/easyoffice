@@ -377,3 +377,32 @@ fn compressed_output_is_the_same_whatever_else_is_linked() {
         (338, 0x7e4f_04f8)
     );
 }
+
+#[test]
+fn an_end_record_signature_inside_the_directory_is_refused_before_the_crate_reads_it() {
+    // A name or extra field could carry a ZIP64 record for the crate to fall back to.
+    for signature in [
+        [0x50, 0x4B, 0x05, 0x06],
+        [0x50, 0x4B, 0x06, 0x06],
+        [0x50, 0x4B, 0x06, 0x07],
+    ] {
+        let mut archive = stored("abcd.x", b"hello");
+        let cd = central_entry(&archive);
+        archive[cd + 46..cd + 50].copy_from_slice(&signature);
+        assert!(matches!(
+            ZipArchiveCodec::unpack(&archive, &ZipSecurityPolicy::default()),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+    }
+}
+
+#[test]
+fn a_directory_that_does_not_start_where_the_end_record_says_is_refused() {
+    let mut archive = stored("a.xml", b"hello");
+    let cd = central_entry(&archive);
+    archive[cd] = 0;
+    assert!(matches!(
+        ZipArchiveCodec::unpack(&archive, &ZipSecurityPolicy::default()),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+}

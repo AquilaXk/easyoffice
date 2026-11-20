@@ -101,6 +101,7 @@ mod xls_styles;
 mod xml_decl_scan;
 mod xml_stream;
 pub mod zip_codec;
+mod zip_guard;
 mod zip_path_tracker;
 mod zip_policy;
 
@@ -168,6 +169,7 @@ pub use utf16_swar::{
 };
 pub use xls_sheet_names::{sheet_name_problem, SheetNameProblem, MAX_SHEET_NAME_UNITS};
 pub use zip_codec::*;
+pub use zip_guard::{open_guarded, GuardedArchive, GuardedReader, OpenLimits};
 pub use zip_policy::*;
 
 pub const MAX_BIFF8_ROW: u32 = 65_535;

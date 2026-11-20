@@ -1,22 +1,17 @@
 //! The thumbnail entry of a ZIP based document, found through the central directory with seeks.
 //!
-//! The `zip` crate reads the directory and locates the entry; the end record is read here first so
-//! a directory over the shell's limits never reaches the crate, and the entry's raw bytes go through
-//! the engine's budgeted inflater instead of the crate's own (output limit free) decoder.
+//! The `zip` crate reads the directory and locates the entry, opened through the engine's
+//! `open_guarded` so a directory over the shell's limits (or one that would make the crate fall back
+//! to an older end record) never reaches it, and the entry's raw bytes go through the engine's
+//! budgeted inflater instead of the crate's own (output limit free) decoder.
 
-use super::{le_u16, le_u32, read_at, MAX_THUMBNAIL_BYTES};
-use std::io::{Read, Seek, SeekFrom};
-use zip::read::{ArchiveOffset, Config};
+use super::MAX_THUMBNAIL_BYTES;
+use easyoffice_formats::{open_guarded, GuardedReader, OpenLimits};
+use std::io::{Read, Seek};
 use zip::{CompressionMethod, ZipArchive};
 
-const EOCD_SIGNATURE: u32 = 0x0605_4B50;
-const EOCD_FIXED_LEN: usize = 22;
-/// The end record may be followed by a comment of up to 65535 bytes.
-const EOCD_SEARCH_LEN: u64 = 65_535 + EOCD_FIXED_LEN as u64;
 const MAX_ENTRIES: usize = 8_192;
 const MAX_CENTRAL_DIR_BYTES: u32 = 4 * 1024 * 1024;
-const ZIP64_MARKER_16: u16 = 0xFFFF;
-const ZIP64_MARKER_32: u32 = 0xFFFF_FFFF;
 /// Name stems of the thumbnail entries, best first: HWPX, OOXML, ODF, then Pages (`QuickLook/` in
 /// the 2009 package, `preview` and the smaller `preview-web` since 2013; `preview-micro` is a
 /// few hundred bytes wide and never shown).
@@ -59,34 +54,15 @@ fn thumbnail_rank(name: &[u8]) -> Option<usize> {
     })
 }
 
-/// Size and entry count of the central directory, from the end record near the end of the file.
-/// `None` for a ZIP64 marker or a directory over the shell's limits.
-fn central_directory_limits<R: Read + Seek>(src: &mut R) -> Option<(u32, usize)> {
-    let len = src.seek(SeekFrom::End(0)).ok()?;
-    let window = len.min(EOCD_SEARCH_LEN);
-    let mut tail = vec![0_u8; usize::try_from(window).ok()?];
-    read_at(src, len.checked_sub(window)?, &mut tail)?;
-    let at = (0..=tail.len().checked_sub(EOCD_FIXED_LEN)?)
-        .rev()
-        .find(|&i| le_u32(&tail, i) == Some(EOCD_SIGNATURE))?;
-    let entries = le_u16(&tail, at + 10)?;
-    let size = le_u32(&tail, at + 12)?;
-    let offset = le_u32(&tail, at + 16)?;
-    if entries == ZIP64_MARKER_16 || size == ZIP64_MARKER_32 || offset == ZIP64_MARKER_32 {
-        return None;
-    }
-    let entries = usize::from(entries);
-    (size != 0 && size <= MAX_CENTRAL_DIR_BYTES && entries <= MAX_ENTRIES)
-        .then_some((size, entries))
-}
-
-/// The archive in `src` when its end record is within the limits above.
-fn open<R: Read + Seek>(src: &mut R) -> Option<ZipArchive<&mut R>> {
-    central_directory_limits(src)?;
-    let config = Config {
-        archive_offset: ArchiveOffset::Known(0),
+/// The archive in `src` when its end record and directory pass the checks of `open_guarded`
+/// (single end record, no ZIP64, within the shell's limits).
+fn open<R: Read + Seek>(src: &mut R) -> Option<ZipArchive<GuardedReader<&mut R>>> {
+    let limits = OpenLimits {
+        max_entries: MAX_ENTRIES,
+        max_directory_bytes: u64::from(MAX_CENTRAL_DIR_BYTES),
     };
-    ZipArchive::with_config(config, src).ok()
+    let opened = open_guarded(src, limits).ok()?;
+    (opened.total_entries > 0).then_some(opened.archive)
 }
 
 /// What the central directory declares the parts of the package to inflate to, added up. `None`
@@ -152,5 +128,82 @@ mod tests {
             thumbnail_rank("한글문서.pages/QuickLook/Thumbnail.png".as_bytes()),
             Some(3)
         );
+    }
+
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+    use std::io::Cursor;
+
+    /// Records the largest single allocation of the thread that asks for it.
+    struct Tracking;
+
+    thread_local! {
+        static LARGEST: Cell<usize> = const { Cell::new(0) };
+    }
+
+    // SAFETY: every call is forwarded unchanged to the system allocator.
+    unsafe impl GlobalAlloc for Tracking {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let _ = LARGEST.try_with(|largest| largest.set(largest.get().max(layout.size())));
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let _ = LARGEST.try_with(|largest| largest.set(largest.get().max(new_size)));
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Tracking = Tracking;
+
+    const HUGE_COUNT: u64 = 200_000;
+
+    fn eocd(entries: u16, size: u32, offset: u32) -> Vec<u8> {
+        let mut out = vec![0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0];
+        out.extend_from_slice(&entries.to_le_bytes());
+        out.extend_from_slice(&entries.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    /// Padding, then (older to newer) a ZIP64 end record announcing [`HUGE_COUNT`] entries, its
+    /// locator, an end record that points at them, and last the end record that really ends the
+    /// file: one entry whose directory offset has no directory record behind it.
+    fn hostile_archive() -> Vec<u8> {
+        let mut out = vec![0u8; HUGE_COUNT as usize * 47];
+        let eocd64_at = out.len() as u64;
+        out.extend_from_slice(&[0x50, 0x4B, 0x06, 0x06]);
+        out.extend_from_slice(&44u64.to_le_bytes());
+        out.extend_from_slice(&[45, 0, 45, 0]);
+        out.extend_from_slice(&[0; 8]);
+        out.extend_from_slice(&HUGE_COUNT.to_le_bytes());
+        out.extend_from_slice(&HUGE_COUNT.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
+        out.extend_from_slice(&HUGE_COUNT.to_le_bytes());
+        out.extend_from_slice(&[0x50, 0x4B, 0x06, 0x07]);
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&eocd64_at.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&eocd(0xFFFF, 0xFFFF_FFFF, 0xFFFF_FFFF));
+        out.extend_from_slice(&eocd(1, 0, 0));
+        out
+    }
+
+    #[test]
+    fn an_older_zip64_end_record_is_never_tried() {
+        let archive = hostile_archive();
+        LARGEST.with(|largest| largest.set(0));
+        let thumbnail = read_thumbnail(&mut Cursor::new(&archive));
+        let total = declared_total(&mut Cursor::new(&archive));
+        let largest = LARGEST.with(Cell::get);
+        assert!(thumbnail.is_none() && total.is_none());
+        assert!(largest < 8 * 1024 * 1024, "reserved {largest} bytes");
     }
 }
