@@ -176,9 +176,8 @@ pub(super) fn write_workbook_readback(
     stylings: &[(String, SheetStyling)],
     query: &ReadbackQuery,
 ) -> Result<(), EasyOfficeError> {
-    let _date_system = easyoffice_sheet::enter_date_system(
-        stylings.first().is_some_and(|(_, st)| st.date1904),
-    );
+    let _date_system =
+        easyoffice_sheet::enter_date_system(stylings.first().is_some_and(|(_, st)| st.date1904));
     let (mut wb_images, mut wb_image_bytes, mut wb_notes) = (0usize, 0usize, 0usize);
     for (_, st) in stylings {
         wb_images = wb_images.saturating_add(st.images.len());
