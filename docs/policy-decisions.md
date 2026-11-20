@@ -4628,7 +4628,7 @@
 
 ## PD-269. 엔진 크레이트도 허용 라이선스 크레이트를 직접 쓴다: PD-053·PD-095 대체, 1단계 기반 코덱 교체
 
-- **Status** Implemented (QA 결정 2026-11-20). 1단계(기반 코덱)가 끝났다. JSON은 6항의 범위까지만 했다. 2단계(XLSX·XLS·ODS)는 소스 평가만 했고 교체는 하지 않았다(7항, QA 판단 대기). SSE 해석은 크레이트로 바꿨다(8항). 코드: `crates/easyoffice-formats/src/{crc32,base64_codec,sha_digest,cp949,deflate,zip_codec}.rs`, 루트 `Cargo.toml`의 `[workspace.dependencies]`, `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates" 절.
+- **Status** Implemented (QA 결정 2026-11-20). 1단계(기반 코덱)가 끝났다. JSON은 6항의 범위까지만 했다. 2단계(XLSX·XLS·ODS)는 소스 평가만 했고 교체는 하지 않았다(7항, QA 판단 대기). SSE 해석은 크레이트로 바꿨다(8항). 3단계로 XML 스트림 읽기를 크레이트로 바꿨다(10항). 코드: `crates/easyoffice-formats/src/{crc32,base64_codec,sha_digest,cp949,deflate,zip_codec,xml_stream}.rs`, 루트 `Cargo.toml`의 `[workspace.dependencies]`, `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates" 절.
 - **Context** 엔진 크레이트(formats, sheet, layout, app)는 외부 의존 0(PD-053)이었고, 같은 기능을 하는 유지되는 크레이트가 이미 `Cargo.lock`에 있는데도(데스크톱 셸과 rhwp가 쓴다) PD-095가 그 알고리즘을 안전한 Rust로 다시 짜 넣었다. 감사 결과 CRC-32, Base64, SHA, CP949, DEFLATE, ZIP이 그런 재구현이었다. 재구현은 원본의 버그 수정과 사양 변경을 받지 못하고, 같은 기능이 두 벌 생긴다.
 - **Decision (`PD-269`)**
   1. **정책**: PD-053의 "엔진 외부 의존 0"과 PD-095의 "크레이트 대신 알고리즘 이식"을 대체한다. 엔진도 허용 라이선스(MIT, Apache-2.0, BSD, Zlib)의 유지되는 크레이트를 그대로 쓰고, 같은 기능을 두 벌 두지 않으며, 원본의 수정은 업데이트로 받는다. PD-053의 Fail-Closed 상한 자체는 그대로 유효하다.
@@ -4671,10 +4671,40 @@
 
   8. **SSE 해석을 `sse-core` 0.2.3 크레이트로 바꿨다**: `copilot/sse.rs`(425줄, 이식본)를 지우고 `easyoffice-app`이 크레이트를 쓴다(`Cargo.lock`의 새 패키지는 `sse-core` 하나, `bytes`·`memchr`·`thiserror 2`는 이미 있었다). 크레이트의 `SseDecoder::new()` 기본 상한이 512 KiB이고 이벤트의 데이터·이름·id에 각각 걸려, 이식본의 이벤트 상한과 같다. 빈 `data` 줄만 이어 버퍼를 키우는 증폭을 막는 `push_data_newline`이 크레이트에 있다. `retry` 이벤트는 건너뛴다. 이벤트 상한과 빈 줄 증폭은 `copilot/stream.rs`의 시험으로 계속 지킨다.
   9. **미리보기 ZIP**: `crates/easyoffice-desktop/src/preview/zip.rs`가 `open_guarded` 뒤 `central_directory_start()`와 `directory_start`를 대조한다. 마스크가 막는 경로(첫 디렉터리 레코드는 정상, 저장된 항목 데이터 안에 ZIP64 끝 기록·로케이터·끝 기록이 숨고 둘째 레코드가 깨진 아카이브)는 `crates/easyoffice-formats/tests/zip_guard_mask_pd269.rs`가 직접 지난다. 마스크를 끄면 크레이트가 숨은 기록의 개수로 46,400,000바이트를 잡아 시험이 실패한다.
-- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 유지되는 크레이트를 그대로 썼다(위 3항, 모두 `Cargo.lock`에 있던 버전). (2) 이미 쓰는 의존성에 같은 기능이 있어서 새 버전은 들이지 않았다. (3) 이식한 코드는 없다.
+  10. **3단계: XML 스트림 읽기를 크레이트로 바꿨다**(7항이 말한 첫 번째 길). `xml_stream.rs`의 수기 토크나이저(태그 끝 찾기, 속성 해석, 주석·CDATA·처리 명령·DOCTYPE 건너뛰기, SWAR 보조 함수 약 300줄)를 지우고 `Cargo.lock`에 있던 XML 읽기 크레이트 0.42(기능 없음, 새 버전 0개, `[workspace.dependencies]`)의 `Reader::from_str` 위 어댑터로 바꿨다. 크레이트 내부 로직은 다시 짜지 않았다. 호출처 45개 파일이 쓰는 `XmlEvent`·`XmlReader`·`Attrs`·`attr`·`unescape_cow`의 모양은 그대로다.
+
+     | 대상 | 판단 | 이유 |
+     | :--- | :--- | :--- |
+     | `xml_stream.rs`의 토크나이저와 속성 해석 | 지움, 크레이트 어댑터로 교체 | 같은 일을 하는 두 번째 구현이었다 |
+     | `XmlEvent`·`XmlReader`·`Attrs`·`attr`·`unescape_cow` | 모양 유지 | 호출처를 건드리지 않는다 |
+     | `XmlSanitizer::unescape`(`rtf_xml_helpers.rs`) | 남김 | 크레이트의 `unescape`는 알 수 없는 엔티티와 끝나지 않은 `&`를 오류로 돌려주고 `&#1;`·`&#xFFFE;`는 글자로 바꾼다. 호출처 20여 곳이 쓰는 규칙(5종과 XML 1.0 글자의 숫자 참조만 풀고 나머지는 그대로)과 값이 달라진다 |
+     | `rich_xml.rs` | 남김 | 토크나이저가 아니라 글자 서식·런 도우미다 |
+     | `extract_attr_from_fragment`·`extract_tag_bodies`·`extract_tags_with_attrs`·`strip_tag_blocks`(`rtf_xml_helpers.rs`, 25개 파일 226곳) | 남김, 후속 | 이벤트 스트림이 아니라 조각 문자열 검색이다. 바꾸려면 호출처 재작성이 필요해 별도 단계로 둔다 |
+     | `XmlSanitizer::validate_safe_xml`(`xml_decl_scan.rs`) | 남김 | 열기 전에 도는 사전 검사이고 포맷 판별 경로도 쓴다. 읽기 쪽 DOCTYPE 거부와 겹쳐 이중 방어가 된다 |
+     | XML 출력(`XmlSanitizer::escape`와 각 쓰기 코드의 조립) | 남김 | 이 모듈은 읽기 전용이다. 쓰기를 크레이트로 바꾸면 출력 바이트가 달라진다 |
+
+     래퍼가 지키는 Fail-Closed 규칙:
+     - DOCTYPE: 크레이트는 DOCTYPE을 이벤트로만 주므로 래퍼가 `XxeOrExternalEntityDetected`로 거부한다. 전에는 건너뛰었다(PD-178). 호출처는 먼저 `validate_safe_xml`을 돌려 같은 입력을 이미 막았으므로 실제 경로의 결과는 같다. 선언이 없으면 `&xxe;`·`&lol3;`는 풀리지 않고 글자로 남는다(엔티티 확장 없음).
+     - 엔티티: 5종과 XML 1.0 글자의 숫자 참조만 풀고, `&bogus;`·`&#0;`·`&#x0;`·`&#xD800;`·`&#x1;` 등은 쓴 그대로 둔다. 풀이는 `unescape_cow` 한곳이고 글자와 속성 값이 같은 함수를 쓴다. 크레이트가 한 글자열을 `&...;` 단위로 쪼개 주므로 래퍼가 다음 `<`까지 이어 하나의 글자 이벤트로 낸다.
+     - 이벤트 수 예산 600만(`MAX_XML_EVENTS`)은 그대로다. 중첩 깊이 100만(`MAX_XML_DEPTH`, 넘으면 `ResourceBudgetExceeded`)은 새로 뒀다. 크레이트는 열린 요소마다 스택 항목을 두고(전의 읽기는 상태가 없었다) 이를 몇 MiB로 막는 값이다. 전의 200,000단 중첩 시험은 그대로 통과한다.
+     - 잘못된 속성(`=` 없음, 따옴표 없음, 닫히지 않은 값, 태그 안 `<`)과 이름 없는 태그는 태그를 읽을 때 오류로 끝나고, 오류 뒤에는 이벤트가 없다. 속성 수·이름·값 길이에는 상한이 없다(입력 크기와 부분 크기 정책이 막는다). 8 MiB 값과 10만 속성 시험이 선형 시간으로 지난다.
+     - 끝 태그를 짝지어 보지 않고(`check_end_names` 끔, 짝 없는 끝 태그 허용), 이름 앞뒤 공백을 자르며, 이름 공간은 풀지 않는다(`w:p`는 그대로 `w:p`).
+
+     값·바이트 변화(기존 시험은 `cargo test --workspace --no-fail-fast`가 전부 통과했고 기대값을 바꾼 곳은 아래 DOCTYPE 시험 하나다):
+     - 글자·속성 값은 같다. 줄바꿈(CRLF, 단독 CR)·탭·앞뒤 공백을 정규화하지 않고 쓴 그대로 준다(크레이트는 `xml10_content`·`normalized_value` 호출 때만 정규화하는데 그 둘을 쓰지 않는다). 같은 입력은 전과 같은 이벤트를 내며, 옛 토크나이저를 시험 안에 두고 표본과 그 모든 절단·한 글자 바꿔치기를 대조한다(차이는 아래 깨진 마크업 항목 안에서만 허용한다).
+     - 시험 `a_doctype_declaration_is_no_element`를 `a_doctype_declaration_is_refused`로 바꿨다(위 DOCTYPE 규칙).
+     - 깨진 마크업에서만 다르다. 이제 오류인 것: `<!-->`·`<?>`처럼 여는 표시에서 닫히는 주석·처리 명령, `<!x>` 같은 선언 아닌 `<!`, 따옴표가 든 끝 태그, 값 밖에 `<`가 든 속성 목록. 이제 받는 것: `=`로 시작하는 속성 이름(이름의 일부로 읽는다). 폼 피드는 더는 이름 구분자가 아니다(공백은 스페이스·탭·CR·LF). 오류 문구는 "끝 태그가 닫히지 않았습니다"가 "XML 태그가 닫히지 않았습니다"로 합쳐졌다.
+     - 문서 앞의 BOM은 글자 이벤트가 되지 않고 버려진다(전에는 `\u{FEFF}` 글자 이벤트).
+     - 쓰기 경로는 이 모듈을 쓰지 않는다. 자체 시험의 변환 출력 크기는 전후 같다(DOCX 159,116, HWPX 202,589, XLSX 506,760바이트). 운영체제에 따라 달라지는 값은 없다.
+     - 잘못된 UTF-8은 `&str` 경계에서 이미 걸린다(호출처가 바이트를 글자열로 바꿀 때 거부). 어댑터 입력은 `&str`이라 따로 다루지 않는다.
+
+     새 시험(`xml_stream/tests.rs`, 모두 크레이트 경계): 언이스케이프 실패(알 수 없는 엔티티·숫자 참조 15종을 글자와 속성에서), 참조를 가로지른 글자 이벤트, CDATA(빈 것, 안의 `<!DOCTYPE`, 닫히지 않음), 주석·처리 명령 안의 가짜 마크업, 이름 공간 접두, 짝 없는·공백 낀 끝 태그, 중복 속성, 공백·줄바꿈 보존, BOM, DOCTYPE·XXE·billion laughs 거부(이벤트 없음), 잘못된 속성 9종, 10만 속성·1 MiB 이름·깊은 중첩, 깊이 한도 경계.
+
+     **성능**(`--self-test` release, 같은 기기, 교체 전후 3회 중앙값 µs, 교체 전 → 후): `xlsx_100k_cells_pack_unpack` 44,900 → 54,541(+21.5%), `docx_to_docx_1mb` 11,487 → 11,455(-0.3%), `docx_to_hwpx_1mb` 13,558 → 13,099(-3.4%), `utf16_swar_and_xml_unescape` 42 → 41, `swar_csv_xml_and_zero_alloc_range_agg` 118 → 118(뒤 둘은 XML 읽기를 거치지 않는다). 5%를 넘는 느려짐은 XLSX 한 곳이다. XLSX 읽기만 떼어 재면(10만 셀, 시트 XML 약 4 MB) 18.5 → 27.0 ms다. 시트 XML 4.1 MB를 읽기만 했을 때 옛 읽기는 속성 조회 포함 11.5 ms, 속성 조회를 빼면 7.5 ms였다. 새 어댑터는 크레이트 토큰화만 9.0 ms이고, 어댑터까지 15~16 ms(속성 검사 패스와 이벤트 변환 약 6.5 ms 추가), 속성 조회 2회를 더하면 21.5 ms다. XLSX 읽기 전체의 샘플 구성: 크레이트가 토큰마다 입력을 다시 UTF-8 검증하는 호출 12%, 크레이트의 속성 반복자 14%(태그를 읽을 때 검사 1회에 조회마다 다시 파싱), 크레이트 읽기 루프 15%, 어댑터 변환 12%, 엔티티 검사와 `<` 검사 5%, 나머지(해제·할당·셀 해석) 42%. 크레이트 안의 수단으로 해 본 것: `read_event_into`는 슬라이스 읽기에 해당이 없고(이미 입력을 빌린다), 끝 태그 이름 정리·빈 요소 확장·중복 속성 검사를 껐고, 글자 이벤트를 앞서 읽지 않게 했고, 속성 위치 색인을 이벤트에 두는 시도는 +19%로 2점밖에 줄이지 못해 이벤트 크기만 늘리므로 되돌렸으며, 빌드 LTO도 변화가 미미했다. 느려짐은 크레이트 토큰화가 옛 SWAR 직접 구현보다 짧은 속성 태그에서 느린 데서 오며, 어댑터는 그 일부다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 유지되는 크레이트를 그대로 썼다(위 3항, 모두 `Cargo.lock`에 있던 버전). (2) 이미 쓰는 의존성에 같은 기능이 있어서 새 버전은 들이지 않았다. (3) 이식한 코드는 없다. 10항(XML 읽기): (1) `Cargo.lock`의 XML 읽기 크레이트 0.42(MIT)를 그대로 썼다. (2) 같은 기능을 하는 다른 의존성은 없었다. (3) 이식은 하지 않고 7항이 말한 옛 이식본을 지웠다.
 - **Measured** `cargo run --release -p easyoffice-app -- --self-test`를 같은 기기(Apple Silicon)에서 교체 전후 3회씩, 중앙값(µs): `crc32_slicing_by_8` 253 → 38, `crc32_hardware_1mib` 100 → 33, `crc32_64kib_x64` 400 → 150, `crc32_1mib_x8` 804 → 281, `deflate_zlib_roundtrip` 36 → 47(+30%), `docx_to_docx_1mb` 10,999 → 11,797(+7%), `docx_to_hwpx_1mb` 12,369 → 13,406(+8%), `xlsx_100k_cells_pack_unpack` 45,010 → 48,098(+7%), 나머지 시트 재계산·UTF-16·CSV 항목은 오차 안이다. SHA-512 10만 회 반복(시트 보호 확인의 시한 있는 루프)은 21.0 → 8.5 ms다. 느려진 항목은 DEFLATE 압축 한 곳이다. 1 MB DOCX 쓰기 약 11.8 ms 중 압축이 약 5 ms이고 ZIP 배치(`write`)는 25 µs, 헤더 고치기(`mark`)는 50 µs 안팎이라 ZIP 쪽 비용은 1% 아래다. 수준 3의 값으로 파일이 13~17% 작아진다(수준 2는 시간이 교체 전보다 약 7% 줄지만 파일이 5% 커진다).
 - **Verified by** `cargo test --workspace --no-fail-fast`(3,058건 통과, 실패 0), 새 시험 `crates/easyoffice-formats/tests/zip_crate_boundary_pd269.rs`(7건: 선언 크기를 속인 스트림, 앞뒤 덧붙임·EOCD 주석 불일치, ZIP64·외부 압축 방식, 암호 비트, 로컬·중앙 헤더 불일치, 중복 경로, 저장 전환, 그리고 보안 리뷰가 짚은 크레이트·래퍼 불일치 8건: 주석 안 둘째 EOCD, 유니코드 경로·ZIP64·AES 부가 필드, 중앙 디렉터리 뒤 남는 바이트, ZIP64 locator와 0xFFFF 개수, 정책 초과 개수, 데이터 설명자 보관과 틀린 오프셋, 골든 바이트), `deflate/tests.rs`의 비트 뒤집기·절단 시험. CP949는 변경 전 표 해석기와 65,536쌍 전체와 무작위 입력 40만 건을 대조한 뒤 옛 코드를 지웠다. 위생 가드의 이름 검사에서 인코딩 크레이트 이름을 "모든 파일"에서 "마크다운만" 목록으로 옮겼다(엔진 코드가 이제 그 크레이트를 링크한다).
-- **Revisit when** 다음 교체 단계(XLSX·XLS·ODS 등)를 할 때, `code_pages.rs`의 다바이트 표 4장을 인코딩 크레이트로 옮길 때, JSON 방침이 정해질 때, 남은 수기 JSON 출력을 바꿀 때. 데스크톱 `preview/zip.rs`는 `zip` 크레이트와 예산 해제기로 바꿨다(끝 기록 한도는 셸이 먼저 검사한다).
+- **Revisit when** 다음 교체 단계(XLSX·XLS·ODS 등)를 할 때, 속성 조회가 느려 XLSX 읽기에서 크레이트 토큰화 비용이 문제가 될 때(10항), 조각 문자열 검색 도우미를 이벤트 스트림으로 옮길 때, `code_pages.rs`의 다바이트 표 4장을 인코딩 크레이트로 옮길 때, JSON 방침이 정해질 때, 남은 수기 JSON 출력을 바꿀 때. 데스크톱 `preview/zip.rs`는 `zip` 크레이트와 예산 해제기로 바꿨다(끝 기록 한도는 셸이 먼저 검사한다).
 
 ## PD-270. 시트 함수 기준 목록 대조: 없는 함수 14개 이식, 정확도 수정 30건, 배열 인수 원소별 계산 확대
 

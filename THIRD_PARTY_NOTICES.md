@@ -9575,7 +9575,7 @@ SOFTWARE.
 
 ## Engine code adapted from open-source Rust crates
 
-Since PD-269 the engine crates link maintained crates under permissive licences instead of re-implementing them. `crates/easyoffice-formats` depends on `adler2` (`0BSD OR MIT OR Apache-2.0`), `base64` (`MIT OR Apache-2.0`), `crc32fast` (`MIT OR Apache-2.0`), `encoding_rs` (`(Apache-2.0 OR MIT) AND BSD-3-Clause`), `miniz_oxide` (`MIT OR Zlib OR Apache-2.0`), `serde` and `serde_json` (`MIT OR Apache-2.0`), `sha1` and `sha2` (`MIT OR Apache-2.0`) and `zip` (`MIT`, no compression feature on); their transitive crates are the ones counted in the sections above and below (`cargo metadata --locked`). No code of these crates is copied; the licence texts travel in their source packages, and the texts of the three notices that name a copyright holder are kept below. Code that is still ported or re-implemented from another project is listed after them.
+Since PD-269 the engine crates link maintained crates under permissive licences instead of re-implementing them. `crates/easyoffice-formats` depends on `adler2` (`0BSD OR MIT OR Apache-2.0`), `base64` (`MIT OR Apache-2.0`), `crc32fast` (`MIT OR Apache-2.0`), `encoding_rs` (`(Apache-2.0 OR MIT) AND BSD-3-Clause`), `miniz_oxide` (`MIT OR Zlib OR Apache-2.0`), `quick-xml` (`MIT`), `serde` and `serde_json` (`MIT OR Apache-2.0`), `sha1` and `sha2` (`MIT OR Apache-2.0`) and `zip` (`MIT`, no compression feature on); their transitive crates are the ones counted in the sections above and below (`cargo metadata --locked`). No code of these crates is copied; the licence texts travel in their source packages, and the texts of the three notices that name a copyright holder are kept below. Code that is still ported or re-implemented from another project is listed after them.
 
 ### base64 (MIT OR Apache-2.0)
 
@@ -9809,7 +9809,7 @@ SOFTWARE.
 
 ### quick-xml (MIT)
 
-Source: https://github.com/tafia/quick-xml 0.42.0 (`src/reader/slice_reader.rs`, `src/reader/state.rs`, `src/events/attributes.rs`, `src/escape.rs`). `crates/easyoffice-formats/src/xml_stream.rs` follows its pull-reader design in safe Rust without the dependency: events borrow the input string, an empty element yields a start and a deferred end, attributes are parsed on demand, and text is unescaped into a `Cow` that stays borrowed when it has no `&`. The tag grammar and the event budget are this repository's own. Used under the MIT license, whose text is the quick-xml entry of the generated section above (Copyright (c) 2016 Johann Tuffe).
+Source: https://github.com/tafia/quick-xml (version 0.42.0, no optional feature). Linked by `crates/easyoffice-formats/src/xml_stream.rs`, which turns the crate's events into the start, end and text events the document readers consume. No code of the crate is copied (before PD-269 step 3 the file was a port of its pull reader). The refusal of `DOCTYPE`, the event and nesting budgets, the lenient entity rules and the attribute checks around it are the engine's own. Used under the MIT license, whose text is the quick-xml entry of the generated section above (Copyright (c) 2016 Johann Tuffe).
 
 ### calamine (MIT)
 

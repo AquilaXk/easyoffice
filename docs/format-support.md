@@ -17,7 +17,7 @@
 | 포맷 판별 입력 | 512 MiB | `lib.rs` `FormatDetector::MAX_PAYLOAD_BYTES` |
 | ZIP 컨테이너 | 항목 4,096개, 항목 하나 128 MiB, 합계 512 MiB, 압축비 100:1, 경로 순회·NUL·드라이브 문자 거부. 읽기는 `zip` 크레이트가 중앙 디렉터리를 읽고, 해제는 상한 있는 해제기로, 로컬·중앙 헤더 불일치·겹침·중복 경로·ZIP64·암호화·Store·Deflate 밖 방식은 래퍼가 거부 | `zip_policy.rs` `ZipSecurityPolicy::default`, `zip_codec.rs`, PD-269 |
 | 문서 하나가 복원하는 바이트 | 256 MiB | `decode_budget.rs`, PD-175 |
-| XML | `<!ENTITY`와 외부 DTD 거부 | `XmlSanitizer`, PD-053, PD-196 |
+| XML | `<!ENTITY`·`<!DOCTYPE`과 외부 DTD 거부(열기 전 검사와 읽기 어댑터 둘 다), 엔티티는 5종과 XML 1.0 글자의 숫자 참조만 풀기, 이벤트 600만·중첩 깊이 100만. 토큰화는 XML 읽기 크레이트가 하고 상한은 래퍼가 지킴 | `XmlSanitizer`, `xml_stream.rs`, PD-053, PD-196, PD-269 |
 | OLE2 | 512바이트 섹터, FAT 순환 거부, HWP 암호화·배포용 비트 거부 | `ole2_codec.rs`, PD-053 |
 | 저장 | 저장 전에 "다음에 여는 엔진이 받아들이는가"를 확인 | 엔진 `write_package` 재읽기, 셸 `save_verify.rs`, PD-109 |
 
