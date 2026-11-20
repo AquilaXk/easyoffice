@@ -35,7 +35,7 @@ fn clean_zero(v: f64) -> f64 {
 
 /// How ROUND, ROUNDUP, ROUNDDOWN and TRUNC round.
 #[derive(Clone, Copy)]
-enum Rounding {
+pub(crate) enum Rounding {
     Nearest,
     AwayFromZero,
     TowardZero,
@@ -48,7 +48,7 @@ enum Rounding {
 ///
 /// Returns `None` when the result is not a finite number (ROUNDUP of a nonzero number to a
 /// multiple of 10^309 or more).
-fn round_to_digits(value: f64, digits: f64, mode: Rounding) -> Option<f64> {
+pub(crate) fn round_to_digits(value: f64, digits: f64, mode: Rounding) -> Option<f64> {
     let scale = 10f64.powf(digits);
     if scale == 0.0 {
         // Every finite number is less than half a unit at this position.

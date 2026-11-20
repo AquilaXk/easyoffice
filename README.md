@@ -11,7 +11,7 @@ EasyOffice는 문서·스프레드시트·프레젠테이션·PDF·한글(HWP/HW
 | 모듈 | 파일 |
 | :--- | :--- |
 | 문서 | DOCX, DOC, ODT, RTF, MD, TXT |
-| 시트 | XLSX, XLS, ODS, CSV, TSV (내장 함수 302종, 피벗, 차트, 조건부 서식) |
+| 시트 | XLSX, XLS, ODS, CSV, TSV (내장 함수 306종, 피벗, 차트, 조건부 서식) |
 | 슬라이드 | PPTX, PPT, PPSX, ODP (글상자·도형·그림·표·차트 개체, 발표자 보기) |
 | PDF | PDF (주석, 쪽 편집, 원본 객체 보존 저장) |
 | 한글 | HWP, HWPX, HWT, HWTX |

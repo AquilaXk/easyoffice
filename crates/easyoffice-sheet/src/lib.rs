@@ -55,6 +55,7 @@ mod functions_spill;
 mod functions_stat_a;
 mod functions_stat_tests;
 mod functions_text_bytes;
+mod functions_text_locale;
 mod functions_text_split;
 mod functions_trend;
 #[cfg(test)]

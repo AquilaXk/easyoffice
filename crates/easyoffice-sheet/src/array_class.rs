@@ -168,6 +168,8 @@ pub(crate) fn is_lifted_fn(name: &str) -> bool {
             | "REPLACEB"
             | "ASC"
             | "DBCS"
+            | "JIS"
+            | "BAHTTEXT"
             | "WEEKDAY"
             | "WEEKNUM"
             | "ISOWEEKNUM"

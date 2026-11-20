@@ -13,8 +13,9 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// join and reshape arrays (`TAKE`, `DROP`, `TOCOL`, `TOROW`, `VSTACK`, `HSTACK`, `CHOOSEROWS`, `CHOOSECOLS`,
 /// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 14 of the function parity bundle (PD-270): text 5
 /// (`TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`), `TRIMRANGE`, information 5
-/// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`.
-pub const CANONICAL_FUNCTIONS: [&str; 302] = [
+/// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`, then the 4 of the locale and text bundle:
+/// `BAHTTEXT`, `EUROCONVERT`, `JIS` and `PHONETIC`.
+pub const CANONICAL_FUNCTIONS: [&str; 306] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -317,6 +318,10 @@ pub const CANONICAL_FUNCTIONS: [&str; 302] = [
     "REGEXTEST",
     "REGEXEXTRACT",
     "REGEXREPLACE",
+    "BAHTTEXT",
+    "EUROCONVERT",
+    "JIS",
+    "PHONETIC",
 ];
 
 /// The numeric values among `vals`.
@@ -604,7 +609,10 @@ impl SheetEngine {
             }
             "AGGREGATE" => self.eval_aggregate(args, ctx, depth),
             "LENB" | "LEFTB" | "MIDB" | "RIGHTB" | "FINDB" | "SEARCHB" | "REPLACEB" | "ASC"
-            | "DBCS" => self.eval_text_bytes_func(name, args, ctx, depth),
+            | "DBCS" | "JIS" => self.eval_text_bytes_func(name, args, ctx, depth),
+            "BAHTTEXT" => self.fn_bahttext(args, ctx, depth),
+            "EUROCONVERT" => self.fn_euroconvert(args, ctx, depth),
+            "PHONETIC" => self.fn_phonetic(args, ctx, depth),
             "CHISQ.TEST" | "CHITEST" | "F.TEST" | "FTEST" | "T.TEST" | "TTEST"
             | "AVERAGE.WEIGHTED" | "MARGINOFERROR" => {
                 self.eval_stat_tests_func(name, args, ctx, depth)

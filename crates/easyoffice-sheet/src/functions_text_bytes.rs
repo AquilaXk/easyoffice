@@ -1,5 +1,8 @@
 //! Byte text functions (PD-205): `LENB`, `LEFTB`, `MIDB`, `RIGHTB`, `FINDB`, `SEARCHB`,
-//! `REPLACEB`, `ASC`, `DBCS`.
+//! `REPLACEB`, `ASC`, `DBCS` and `JIS`.
+//!
+//! `JIS` is the Japanese name of `DBCS`: the function documentation gives both the same
+//! description (half-width characters to full-width), so it runs the same conversion.
 //!
 //! Reference implementation: `packages/engine-formula/src/functions/text/{lenb,leftb,midb,rightb,
 //! findb,searchb,replaceb,asc,dbcs}/index.ts` of the Univer formula engine, commit
@@ -80,7 +83,7 @@ impl SheetEngine {
         depth: usize,
     ) -> CellResult {
         match name {
-            "LENB" | "ASC" | "DBCS" => {
+            "LENB" | "ASC" | "DBCS" | "JIS" => {
                 check_arity(args, 1, 1)?;
                 let s = self.text_arg(&args[0], ctx, depth)?;
                 match name {
