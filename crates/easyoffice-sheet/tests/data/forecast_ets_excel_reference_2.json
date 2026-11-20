@@ -1,0 +1,108 @@
+{
+ "source": "Results the reference app cached in a published accounting-magazine example workbook (see THIRD_PARTY_NOTICES.md, FORECAST.ETS reference values). Monthly values 2024-01 to 2025-12 (24 points, first-of-month date serials), 12 monthly targets from 2026-01. FORECAST.ETS(target, values, timeline, 12): the seasonality is given, data_completion and aggregation are left at their defaults. Forecasts only. Numeric data only.",
+ "timeline": [
+  45292.0,
+  45323.0,
+  45352.0,
+  45383.0,
+  45413.0,
+  45444.0,
+  45474.0,
+  45505.0,
+  45536.0,
+  45566.0,
+  45597.0,
+  45627.0,
+  45658.0,
+  45689.0,
+  45717.0,
+  45748.0,
+  45778.0,
+  45809.0,
+  45839.0,
+  45870.0,
+  45901.0,
+  45931.0,
+  45962.0,
+  45992.0
+ ],
+ "values": [
+  250.0,
+  265.0,
+  375.0,
+  285.0,
+  300.0,
+  295.0,
+  310.0,
+  325.0,
+  330.0,
+  400.0,
+  425.0,
+  450.0,
+  370.0,
+  360.0,
+  500.0,
+  390.0,
+  400.0,
+  410.0,
+  405.0,
+  415.0,
+  420.0,
+  490.0,
+  500.0,
+  510.0
+ ],
+ "forecast_args": {
+  "seasonality": 12
+ },
+ "forecasts": [
+  {
+   "target": 46023.0,
+   "forecast": 437.13353996150767
+  },
+  {
+   "target": 46054.0,
+   "forecast": 432.10609546416794
+  },
+  {
+   "target": 46082.0,
+   "forecast": 564.1705064815405
+  },
+  {
+   "target": 46113.0,
+   "forecast": 459.214608710674
+  },
+  {
+   "target": 46143.0,
+   "forecast": 469.37251988192884
+  },
+  {
+   "target": 46174.0,
+   "forecast": 470.1856420710558
+  },
+  {
+   "target": 46204.0,
+   "forecast": 473.0154906931009
+  },
+  {
+   "target": 46235.0,
+   "forecast": 486.02493641644566
+  },
+  {
+   "target": 46266.0,
+   "forecast": 491.3953707437446
+  },
+  {
+   "target": 46296.0,
+   "forecast": 561.4481747461308
+  },
+  {
+   "target": 46327.0,
+   "forecast": 578.4829493480669
+  },
+  {
+   "target": 46357.0,
+   "forecast": 605.7859470256337
+  }
+ ]
+}

@@ -1,5 +1,6 @@
-//! The clean-room numerics against the values the reference app cached for its published example
-//! (`tests/data/forecast_ets_excel_reference.json`, source in `THIRD_PARTY_NOTICES.md`).
+//! The clean-room numerics against the values the reference app cached for two published examples
+//! (`tests/data/forecast_ets_excel_reference.json` and `forecast_ets_excel_reference_2.json`,
+//! sources in `THIRD_PARTY_NOTICES.md`).
 //!
 //! What matches: the detected period, and the shape of the interval. What does not: the fitted
 //! smoothing coefficients, so the forecast and the interval width differ by percents. The ignored
@@ -9,6 +10,7 @@
 use super::*;
 
 const REFERENCE: &str = include_str!("../tests/data/forecast_ets_excel_reference.json");
+const REFERENCE_2: &str = include_str!("../tests/data/forecast_ets_excel_reference_2.json");
 
 fn close(a: f64, b: f64, tol: f64) {
     assert!(
@@ -19,9 +21,13 @@ fn close(a: f64, b: f64, tol: f64) {
 
 /// The numbers after every `"key":` in the reference file (an array gives all its numbers).
 fn numbers_of(key: &str) -> Vec<f64> {
+    numbers_in(REFERENCE, key)
+}
+
+fn numbers_in(text: &str, key: &str) -> Vec<f64> {
     let needle = format!("\"{key}\":");
     let mut found = Vec::new();
-    let mut rest = REFERENCE;
+    let mut rest = text;
     while let Some(at) = rest.find(&needle) {
         rest = rest[at + needle.len()..].trim_start();
         let (list, after) = match rest.strip_prefix('[') {
@@ -87,6 +93,20 @@ fn the_detected_period_is_the_reference_period() {
     );
 }
 
+/// A fact of the reference values that no model of the specification explains yet: the forecasts
+/// are `level + h * trend + season(h)` with one trend for all 24 steps, and the forecast twelve
+/// steps after the last point is that point plus twelve trends. In the error-correction recursion
+/// of section 2.1 this holds only when the last one-step error is zero or alpha + gamma is 1.
+#[test]
+fn the_reference_forecast_is_anchored_at_the_last_point() {
+    let r = reference();
+    let trend = (r.forecast[12] - r.forecast[0]) / 12.0;
+    for i in 0..12 {
+        close((r.forecast[i + 12] - r.forecast[i]) / 12.0, trend, 1e-9);
+    }
+    close(r.forecast[11], r.values[56] + 12.0 * trend, 1e-9);
+}
+
 /// The reference intervals follow the closed form of section 5.7 exactly when it is given the
 /// coefficients 0.251, 0.001, 0.001 (state-space form), found by solving the first ratios. The
 /// ratio of the half width at step `h` to the one at step 1 does not depend on the error variance.
@@ -140,4 +160,23 @@ fn forecast_and_interval_match_the_reference_values() {
         numbers_of("stat_alpha_type1_seasonality12")[0],
         1e-3,
     );
+}
+
+/// The second series: 24 monthly points, the period given as 12, forecasts of the next 12 months.
+/// Only the forecasts are known, so this is the target for the fit and nothing else.
+#[test]
+#[ignore = "fit differs from the reference values by percents (docs/forecast-ets-cleanroom.md section 9)"]
+fn the_second_series_forecast_matches_the_reference_values() {
+    let values = numbers_in(REFERENCE_2, "values");
+    let forecast = numbers_in(REFERENCE_2, "forecast");
+    assert_eq!((values.len(), forecast.len()), (24, 12));
+    let timeline = month_numbers(values.len());
+    let args = EtsArgs {
+        seasonality: 12.0,
+        ..EtsArgs::new(&values, &timeline)
+    };
+    for (i, expected) in forecast.iter().enumerate() {
+        let target = (values.len() + i) as f64;
+        close(forecast_ets_cr(target, &args).unwrap(), *expected, 1e-6);
+    }
 }
