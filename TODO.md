@@ -18,6 +18,7 @@
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
+- [ ] PDF 스튜디오 저장: Square·Circle·Line·Polygon·FileAttachment 주석, 태그 구조 트리, 전자서명은 저장하지 못하고 경고만 한다(PD-266, 증분 저장 또는 종류별 복사)
 - [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인(PD-131)
 
 ## Pages 읽기
