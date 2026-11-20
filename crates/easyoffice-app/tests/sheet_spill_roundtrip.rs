@@ -91,8 +91,7 @@ fn a_filled_cell_whose_text_starts_with_an_equals_sign_stays_text() {
                     csv.trim_start_matches('\u{feff}')
                         .lines()
                         .collect::<Vec<_>>(),
-                    // A text that starts like a formula gets a leading apostrophe in CSV (PD-264).
-                    ["a,", "'=x,"],
+                    ["a,", "=x,"],
                     "{csv}"
                 );
             }

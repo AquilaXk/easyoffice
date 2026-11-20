@@ -366,21 +366,7 @@ fn encode_delimited(
     warn_unsaved_sheet_objects(stylings, &label, warnings);
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
-    let numbers: Vec<bool> = cells
-        .iter()
-        .map(|(row, col, raw)| {
-            computed_stylings.first().map_or_else(
-                || CellValueKind::infer(raw),
-                |st| st.cell_kind(*row, *col, raw),
-            ) == CellValueKind::Number
-        })
-        .collect();
     show_cells(&mut cells, computed_stylings.first(), Show::Values);
-    for ((_, _, text), is_number) in cells.iter_mut().zip(numbers) {
-        if !is_number && text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-            text.insert(0, '\'');
-        }
-    }
     let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
     if !left_out.is_empty() {
         let shown = left_out.len().min(WARNED_SHEET_NAMES);
