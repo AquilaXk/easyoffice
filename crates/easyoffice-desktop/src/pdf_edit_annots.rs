@@ -1,3 +1,14 @@
+// 참조 구현: qpdf (https://github.com/qpdf/qpdf, 커밋 4eba9589). (1) `libqpdf/QPDFMatrix.cc`의 생성자(6-24줄),
+// `concat`(63-78줄), `translate`(86-90줄), `transform`(111-116줄), `transformRectangle`(118-132줄)을
+// 옮겼다. (2) `libqpdf/QPDFAcroFormDocumentHelper.cc` `AcroForm::transformAnnotations`의 흐름: 사전이
+// 아닌 주석은 건너뛰고(1095줄) 복사한 주석의 `/Rect`를 변환 행렬로 바꾼다(1164-1165줄). Apache-2.0,
+// Copyright (c) 2005-2021 Jay Berkenbilt, 2022-2026 Jay Berkenbilt and Manfred Holger. 바꾼 점: 변환은
+// 크롭 상자 원점으로 옮기는 평행 이동 하나뿐이다. 원본이 외관 스트림의 `/Matrix`에도 같은 행렬을
+// 곱하는 부분(1146-1160줄)은 옮기지 않았다. 외관 스트림은 쪽 복사기가 복사한 객체라 사전을 바꿀 수
+// 없고, 평행 이동은 `/Rect`만 옮겨도 `/BBox`가 사각형에 맞춰지는 규칙(ISO 32000-1 §12.5.5)에서 같은
+// 결과다. 원본은 `/InkList`·`/CL`을 바꾸지 않지만 여기서는 같은 행렬로 옮긴다. 출처는
+// THIRD_PARTY_NOTICES.md에 있다.
+//
 //! Free text, ink and stamp annotations of the sources in the result (PD-266).
 //!
 //! The annotations that `pdf_edit_preserve.rs` writes again field by field (links, text markup,
@@ -21,7 +32,7 @@
 //! dropped silently (`lost_sentence`).
 
 use crate::pdf_edit_budget::MAX_PAGE_ANNOTS;
-use crate::pdf_edit_preserve::{read_shifted_rect, too_many_page_annots};
+use crate::pdf_edit_preserve::too_many_page_annots;
 use crate::pdf_edit_value::{Budget, Value};
 use hayro_syntax::object::{Array, Dict, Name};
 use hayro_syntax::page::Page;
@@ -119,6 +130,83 @@ pub fn scan_page(
     Ok(carried)
 }
 
+/// A 2x3 matrix `[a b c d e f]` as the format writes it (`QPDFMatrix`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Matrix {
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    e: f64,
+    f: f64,
+}
+
+impl Matrix {
+    /// The identity.
+    fn new() -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// `concat`: this matrix followed by `other`.
+    fn concat(&mut self, other: Self) {
+        let ap = self.a * other.a + self.c * other.b;
+        let bp = self.b * other.a + self.d * other.b;
+        let cp = self.a * other.c + self.c * other.d;
+        let dp = self.b * other.c + self.d * other.d;
+        let ep = self.a * other.e + self.c * other.f + self.e;
+        let fp = self.b * other.e + self.d * other.f + self.f;
+        *self = Self {
+            a: ap,
+            b: bp,
+            c: cp,
+            d: dp,
+            e: ep,
+            f: fp,
+        };
+    }
+
+    fn translate(&mut self, tx: f64, ty: f64) {
+        self.concat(Self {
+            e: tx,
+            f: ty,
+            ..Self::new()
+        });
+    }
+
+    fn transform(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
+        )
+    }
+
+    /// `transformRectangle`: the smallest rectangle that holds the four transformed corners.
+    fn transform_rectangle(&self, [llx, lly, urx, ury]: [f64; 4]) -> [f64; 4] {
+        let corners = [
+            self.transform(llx, lly),
+            self.transform(llx, ury),
+            self.transform(urx, lly),
+            self.transform(urx, ury),
+        ];
+        let fold = |pick: fn(&(f64, f64)) -> f64, join: fn(f64, f64) -> f64, start: f64| {
+            corners.iter().map(pick).fold(start, join)
+        };
+        [
+            fold(|c| c.0, f64::min, f64::INFINITY),
+            fold(|c| c.1, f64::min, f64::INFINITY),
+            fold(|c| c.0, f64::max, f64::NEG_INFINITY),
+            fold(|c| c.1, f64::max, f64::NEG_INFINITY),
+        ]
+    }
+}
+
 /// The annotation with only the listed keys, its rectangle and points moved by (`dx`, `dy`); `None`
 /// when what has to move cannot be read as numbers.
 fn carry_annot(
@@ -129,29 +217,47 @@ fn carry_annot(
 ) -> Result<Option<Value>, String> {
     let mut value = Value::read_dict(annot, |key| KEYS.contains(&key), budget)
         .map_err(|refused| refused.sentence("주석"))?;
-    let Some(rect) = read_shifted_rect(annot, dx, dy) else {
+    let mut cm = Matrix::new();
+    cm.translate(f64::from(dx), f64::from(dy));
+    let Some(rect) = value.get(b"Rect").and_then(rectangle) else {
         return Ok(None);
     };
-    value.set(b"Rect", Value::Array(rect.map(Value::Real).to_vec()));
+    let moved = cm.transform_rectangle(rect);
+    if !moved.iter().all(|n| n.is_finite()) {
+        return Ok(None);
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    value.set(
+        b"Rect",
+        Value::Array(moved.iter().map(|&n| Value::Real(n as f32)).collect()),
+    );
     if let Some(strokes) = value.get_mut(b"InkList") {
-        if !shift_points(strokes, dx, dy) {
+        if !transform_points(strokes, &cm) {
             return Ok(None);
         }
     } else if kind == "Ink" {
         return Ok(None);
     }
     if let Some(line) = value.get_mut(b"CL") {
-        if !shift_points(line, dx, dy) {
+        if !transform_points(line, &cm) {
             value.remove(b"CL");
         }
     }
     Ok(Some(value))
 }
 
-/// Moves the points in `value` (an array of numbers `x y x y ...`, or arrays of them) by
-/// (`dx`, `dy`). `false` when it is not made of such pairs; `value` is then left half moved and
-/// must be dropped.
-fn shift_points(value: &mut Value, dx: f32, dy: f32) -> bool {
+/// The four numbers of a rectangle value.
+fn rectangle(value: &Value) -> Option<[f64; 4]> {
+    let [a, b, c, d] = value.as_array()? else {
+        return None;
+    };
+    Some([a, b, c, d].map(|n| n.as_f32().map_or(f64::NAN, f64::from)))
+        .filter(|rect| rect.iter().all(|n| n.is_finite()))
+}
+
+/// Moves the points in `value` (an array of numbers `x y x y ...`, or arrays of them) with `cm`.
+/// `false` when it is not made of such pairs; `value` is then left half moved and must be dropped.
+fn transform_points(value: &mut Value, cm: &Matrix) -> bool {
     let Value::Array(items) = value else {
         return false;
     };
@@ -159,17 +265,23 @@ fn shift_points(value: &mut Value, dx: f32, dy: f32) -> bool {
         if items.len() % 2 != 0 {
             return false;
         }
-        for (n, item) in items.iter_mut().enumerate() {
-            let at = item.as_f32().unwrap_or_default();
-            let moved = at + if n % 2 == 0 { dx } else { dy };
-            if !moved.is_finite() {
+        for pair in items.chunks_mut(2) {
+            let [x, y] = pair else { return false };
+            let (px, py) = cm.transform(
+                f64::from(x.as_f32().unwrap_or_default()),
+                f64::from(y.as_f32().unwrap_or_default()),
+            );
+            #[allow(clippy::cast_possible_truncation)]
+            let (px, py) = (px as f32, py as f32);
+            if !px.is_finite() || !py.is_finite() {
                 return false;
             }
-            *item = Value::Real(moved);
+            *x = Value::Real(px);
+            *y = Value::Real(py);
         }
         return true;
     }
-    items.iter_mut().all(|item| shift_points(item, dx, dy))
+    items.iter_mut().all(|item| transform_points(item, cm))
 }
 
 /// A name from the file as plain text for a sentence: letters and digits only, cut short.
@@ -230,23 +342,56 @@ mod tests {
 
     #[test]
     fn points_move_in_pairs_and_anything_else_is_refused() {
+        let mut cm = Matrix::new();
+        cm.translate(-1.0, -2.0);
         let numbers = |list: &[f32]| Value::Array(list.iter().map(|&n| Value::Real(n)).collect());
         let mut strokes = Value::Array(vec![numbers(&[1.0, 2.0, 3.0, 4.0]), numbers(&[5.0, 6.0])]);
-        assert!(shift_points(&mut strokes, -1.0, -2.0));
+        assert!(transform_points(&mut strokes, &cm));
         assert_eq!(
             strokes,
             Value::Array(vec![numbers(&[0.0, 0.0, 2.0, 2.0]), numbers(&[4.0, 4.0])])
         );
         assert!(
-            !shift_points(&mut numbers(&[1.0, 2.0, 3.0]), 0.0, 0.0),
+            !transform_points(&mut numbers(&[1.0, 2.0, 3.0]), &cm),
             "odd"
         );
-        assert!(!shift_points(&mut Value::Int(1), 0.0, 0.0), "not an array");
+        assert!(!transform_points(&mut Value::Int(1), &cm), "not an array");
+        let mut far = Matrix::new();
+        far.translate(f64::from(f32::MAX), 0.0);
         assert!(
-            !shift_points(&mut numbers(&[f32::MAX, 1.0]), f32::MAX, 0.0),
+            !transform_points(&mut numbers(&[f32::MAX, 1.0]), &far),
             "overflow"
         );
         let mut mixed = Value::Array(vec![Value::Int(1), Value::Name(b"x".to_vec())]);
-        assert!(!shift_points(&mut mixed, 0.0, 0.0));
+        assert!(!transform_points(&mut mixed, &cm));
+    }
+
+    #[test]
+    fn a_matrix_moves_a_rectangle_and_keeps_it_upright() {
+        let mut cm = Matrix::new();
+        cm.translate(-20.0, -30.0);
+        assert_eq!(
+            cm.transform_rectangle([40.0, 200.0, 140.0, 260.0]),
+            [20.0, 170.0, 120.0, 230.0]
+        );
+        // A turn by 90 degrees (a = 0, b = 1, c = -1, d = 0) maps the corners to another rectangle.
+        let mut turn = Matrix::new();
+        turn.concat(Matrix {
+            a: 0.0,
+            b: 1.0,
+            c: -1.0,
+            d: 0.0,
+            e: 0.0,
+            f: 0.0,
+        });
+        assert_eq!(
+            turn.transform_rectangle([0.0, 0.0, 10.0, 20.0]),
+            [-20.0, 0.0, 0.0, 10.0]
+        );
+        // Corners given the wrong way round give the same rectangle.
+        assert_eq!(
+            cm.transform_rectangle([140.0, 260.0, 40.0, 200.0]),
+            [20.0, 170.0, 120.0, 230.0]
+        );
     }
 }

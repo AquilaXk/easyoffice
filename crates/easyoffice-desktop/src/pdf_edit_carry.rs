@@ -147,7 +147,7 @@ impl Carry {
                 labels.insert(source, found);
             }
         }
-        self.page_labels = pdf_edit_labels::combine(&labels, pages);
+        self.page_labels = pdf_edit_labels::combine(&labels, pages)?;
         // The information dictionary comes from the file of the first page; so does the metadata.
         if let Some((source, pdf)) = pages
             .first()

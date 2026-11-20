@@ -223,6 +223,15 @@ fn with_attachments() -> Vec<u8> {
     )
 }
 
+/// A key as text; a control character at its end (a renamed key) is kept.
+fn renamed_key(key: &[u8]) -> String {
+    let mut text = crate::pdf_edit_preserve::decode_pdf_text(key, false, 256);
+    if key.last() == Some(&1) {
+        text.push('\u{1}');
+    }
+    text
+}
+
 /// The attachments of a result: key, file name and data.
 fn attachments_of(pdf: &ReadPdf) -> Vec<(String, String, String)> {
     let tree = catalog_of(pdf)
@@ -242,7 +251,7 @@ fn attachments_of(pdf: &ReadPdf) -> Vec<(String, String, String)> {
             .map(|s| String::from_utf8_lossy(s.as_bytes()).into_owned())
             .unwrap_or_default();
         found.push((
-            crate::pdf_edit_preserve::decode_pdf_text(key.as_bytes(), false, 256),
+            renamed_key(key.as_bytes()),
             name,
             String::from_utf8_lossy(&data.decoded().unwrap()).into_owned(),
         ));
@@ -312,7 +321,7 @@ fn two_files_with_one_attachment_name_keep_both() {
         .into_iter()
         .map(|(key, _, _)| key)
         .collect();
-    assert_eq!(keys, ["a.txt", "a.txt (2)", "b.txt", "b.txt (2)"]);
+    assert_eq!(keys, ["a.txt", "a.txt\u{1}", "b.txt", "b.txt\u{1}"]);
 }
 
 #[test]
