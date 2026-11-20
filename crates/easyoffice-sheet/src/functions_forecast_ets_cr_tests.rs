@@ -332,8 +332,12 @@ fn statistics_are_consistent_with_the_fit() {
     let stat = |i: f64| forecast_ets_stat_cr(&args, i).unwrap();
     let model = fit_model(&args, 1.0).unwrap();
     close(stat(1.0), model.params.alpha, 0.0);
-    close(stat(2.0), model.params.beta, 0.0);
-    close(stat(3.0), model.params.gamma, 0.0);
+    close(stat(2.0), model.params.alpha * model.params.beta, 1e-15);
+    close(
+        stat(3.0),
+        model.params.gamma * (1.0 - model.params.alpha),
+        1e-15,
+    );
     let (mase, smape, mae, rmse, step) = (stat(4.0), stat(5.0), stat(6.0), stat(7.0), stat(8.0));
     close(rmse * rmse * 144.0, model.pass.sse, 1e-12);
     assert!(mae <= rmse && mae > 0.0);
@@ -343,7 +347,7 @@ fn statistics_are_consistent_with_the_fit() {
     let mut sym = 0.0;
     for (y, f) in AIR.iter().zip(&model.fitted) {
         abs += (y - f).abs();
-        sym += 200.0 * (y - f).abs() / (y + f);
+        sym += 2.0 * (y - f).abs() / (y + f);
     }
     close(mae, abs / 144.0, 1e-12);
     close(smape, sym / 144.0, 1e-12);

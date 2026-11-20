@@ -1,0 +1,77 @@
+{
+ "source": "Results the reference app cached in a public example workbook, non-seasonal annual series of 13 points (date serials, 2009 to 2021), 4 annual targets from 2022 (see THIRD_PARTY_NOTICES.md, FORECAST.ETS reference values). forecast_args: FORECAST.ETS(target, values, timeline, 0, 1) and CONFINT at 0.95; lower and upper are forecast -/+ CONFINT. stat: FORECAST.ETS.STAT(values, timeline, type, 1, 1) with types 1 to 7 (alpha, beta, gamma, MASE, SMAPE, MAE, RMSE); the seasonality argument is 1 (detect). Numeric data only.",
+ "timeline": [
+  39814.0,
+  40179.0,
+  40544.0,
+  40909.0,
+  41275.0,
+  41640.0,
+  42005.0,
+  42370.0,
+  42736.0,
+  43101.0,
+  43466.0,
+  43831.0,
+  44197.0
+ ],
+ "values": [
+  100.0,
+  103.13295071903731,
+  103.24302090163604,
+  107.33021698639537,
+  111.18648793662243,
+  115.89308706471924,
+  120.86473125246958,
+  126.73579246235465,
+  133.49560493007226,
+  136.55761315379047,
+  146.73579246235465,
+  156.55761315379047,
+  163.6273982813009
+ ],
+ "forecast_args": {
+  "seasonality": 0,
+  "data_completion": 1,
+  "confidence": 0.95
+ },
+ "forecasts": [
+  {
+   "target": 44562.0,
+   "forecast": 172.83539376624645,
+   "lower": 167.4677339152328,
+   "upper": 178.2030536172601
+  },
+  {
+   "target": 44927.0,
+   "forecast": 182.10020392755163,
+   "lower": 174.51298112737055,
+   "upper": 189.6874267277327
+  },
+  {
+   "target": 45292.0,
+   "forecast": 191.36501408885684,
+   "lower": 180.30971300501324,
+   "upper": 202.42031517270044
+  },
+  {
+   "target": 45658.0,
+   "forecast": 200.62982425016205,
+   "lower": 185.2310811456809,
+   "upper": 216.0285673546432
+  }
+ ],
+ "stat_args": {
+  "seasonality": 1,
+  "data_completion": 1
+ },
+ "stat": {
+  "alpha": 0.5,
+  "beta": 0.499,
+  "gamma": 2.220446049250313e-16,
+  "mase": 0.6501087854769613,
+  "smape": 0.017117922524959923,
+  "mae": 2.4830247952093543,
+  "rmse": 2.9272968082587285
+ }
+}

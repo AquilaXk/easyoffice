@@ -1,6 +1,6 @@
-//! The clean-room numerics against the values the reference app cached for two published examples
-//! (`tests/data/forecast_ets_excel_reference.json` and `forecast_ets_excel_reference_2.json`,
-//! sources in `THIRD_PARTY_NOTICES.md`).
+//! The clean-room numerics against the values the reference app cached for three published examples
+//! (`tests/data/forecast_ets_excel_reference.json`, `_2.json` and `_3.json`, sources in
+//! `THIRD_PARTY_NOTICES.md`).
 //!
 //! What matches: the detected period, and the shape of the interval. What does not: the fitted
 //! smoothing coefficients, so the forecast and the interval width differ by percents. The ignored
@@ -11,6 +11,7 @@ use super::*;
 
 const REFERENCE: &str = include_str!("../tests/data/forecast_ets_excel_reference.json");
 const REFERENCE_2: &str = include_str!("../tests/data/forecast_ets_excel_reference_2.json");
+const REFERENCE_3: &str = include_str!("../tests/data/forecast_ets_excel_reference_3.json");
 
 fn close(a: f64, b: f64, tol: f64) {
     assert!(
@@ -175,6 +176,66 @@ fn the_second_series_forecast_matches_the_reference_values() {
         seasonality: 12.0,
         ..EtsArgs::new(&values, &timeline)
     };
+    for (i, expected) in forecast.iter().enumerate() {
+        let target = (values.len() + i) as f64;
+        close(forecast_ets_cr(target, &args).unwrap(), *expected, 1e-6);
+    }
+}
+
+/// Third series, no season: 13 annual points. With the reference coefficients (alpha 0.5, state-space
+/// beta 0.499) and the initial state read from the reference values, the clean-room recursion
+/// reproduces every forecast and interval width. The initial state: the first value is the level
+/// (the first one-step error is 0) and the trend is the least squares slope over the whole series.
+/// The error variance is the sum of squared one-step errors over the number of points.
+#[test]
+fn the_third_series_follows_the_recursion_with_the_reference_coefficients() {
+    let values = numbers_in(REFERENCE_3, "values");
+    let forecast = numbers_in(REFERENCE_3, "forecast");
+    let lower = numbers_in(REFERENCE_3, "lower");
+    let timeline = month_numbers(values.len());
+    let args = EtsArgs::new(&values, &timeline);
+    let mut model = fit_model(&args, 0.0).unwrap();
+
+    let xs: Vec<f64> = (0..values.len()).map(|i| i as f64).collect();
+    let (_, slope) = fit_line(&xs, &values);
+    let init = Init {
+        level: values[0] - slope,
+        trend: slope,
+        seasonal: Vec::new(),
+    };
+    // `Params` keeps the Holt form: beta = alpha * beta*.
+    let (alpha, beta) = (
+        numbers_in(REFERENCE_3, "alpha")[0],
+        numbers_in(REFERENCE_3, "beta")[0],
+    );
+    model.params = Params {
+        alpha,
+        beta: beta / alpha,
+        gamma: 0.0,
+    };
+    model.fitted.clear();
+    let fitted = &mut model.fitted;
+    model.pass = run(&values, &init, model.params, &mut model.ring, |f| {
+        fitted.push(f)
+    });
+
+    let z = dist_value("NORM.S.INV", &[0.975]).unwrap();
+    for (i, (expected, low)) in forecast.iter().zip(&lower).enumerate() {
+        let h = i + 1;
+        close(model.predict_steps(h), *expected, 1e-9);
+        close(z * model.error_sd_steps(h), expected - low, 1e-9);
+    }
+}
+
+/// The target for the fit on the third series: the clean-room search does not land on the reference
+/// coefficients (0.5, 0.499), which are not the minimum of the squared one-step error either.
+#[test]
+#[ignore = "the coefficient search differs from the reference app's (docs/forecast-ets-cleanroom.md section 9)"]
+fn the_third_series_forecast_matches_the_reference_values() {
+    let values = numbers_in(REFERENCE_3, "values");
+    let forecast = numbers_in(REFERENCE_3, "forecast");
+    let timeline = month_numbers(values.len());
+    let args = EtsArgs::new(&values, &timeline);
     for (i, expected) in forecast.iter().enumerate() {
         let target = (values.len() + i) as f64;
         close(forecast_ets_cr(target, &args).unwrap(), *expected, 1e-6);

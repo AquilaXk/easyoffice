@@ -721,7 +721,8 @@ pub fn forecast_ets_seasonality_cr(args: &EtsArgs) -> Fallible<usize> {
     Ok(detect_period(&series.y))
 }
 
-/// `FORECAST.ETS.STAT`: statistic 1 to 8 (alpha, beta, gamma, MASE, SMAPE, MAE, RMSE, step).
+/// `FORECAST.ETS.STAT`: statistic 1 to 8 (alpha, beta, gamma, MASE, SMAPE as a ratio, MAE, RMSE,
+/// step). Beta and gamma are the state-space coefficients.
 pub fn forecast_ets_stat_cr(args: &EtsArgs, statistic_type: f64) -> Fallible<f64> {
     if !(statistic_type.fract() == 0.0 && (1.0..=8.0).contains(&statistic_type)) {
         return Err(EtsError::InvalidArgument);
@@ -738,8 +739,9 @@ pub fn forecast_ets_stat_cr(args: &EtsArgs, statistic_type: f64) -> Fallible<f64
     };
     finite(match statistic_type as u8 {
         1 => model.params.alpha,
-        2 => model.params.beta,
-        3 => model.params.gamma,
+        // State-space form, as the reference app returns it (section 5.4).
+        2 => model.params.alpha * model.params.beta,
+        3 => model.params.gamma * (1.0 - model.params.alpha),
         4 => {
             let lag = model.period.max(1);
             let y = &model.series.y;
@@ -761,7 +763,7 @@ pub fn forecast_ets_stat_cr(args: &EtsArgs, statistic_type: f64) -> Fallible<f64
                     if denominator == 0.0 {
                         0.0
                     } else {
-                        200.0 * e.abs() / denominator
+                        2.0 * e.abs() / denominator
                     }
                 })
                 .sum::<f64>()
