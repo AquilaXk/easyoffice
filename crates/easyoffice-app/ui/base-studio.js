@@ -368,6 +368,18 @@
       bar.replaceChildren(panel);
     }
 
+    // Per render: relation field id -> [[record id, label]] of its target table, built the first time a cell of the field is used.
+    let relationOptions = new Map();
+    function relationOptionsOf(field, query) {
+      let list = relationOptions.get(field.id);
+      if (!list) {
+        const target = query.index.tablesById.get(field.relationTableId), primary = target?.fields?.[0];
+        list = (target?.records || []).map((rec) => [rec.id, (primary ? M.formatCellDisplay(primary, rec.values?.[primary.id], state, query.index) : rec.id) || rec.id]);
+        relationOptions.set(field.id, list);
+      }
+      return list;
+    }
+
     // ---- Cell Controls & Invalid Handling ----
 
     function markInvalid(td, control, msg) {
@@ -430,15 +442,19 @@
           for (const item of items) chips.appendChild(el("span", "base-relation-chip", item.label));
           wrap.appendChild(chips);
         }
-        const targetTbl = query.index.tablesById.get(field.relationTableId), primary = targetTbl?.fields?.[0];
-        const sel = mkSel("base-cell-select", label);
+        const sel = mkSel("base-cell-select", label), curSingle = Array.isArray(val) ? (val[0] || "") : String(val || "");
         addOpt(sel, "", "(연결 없음)");
-        for (const tRec of targetTbl?.records || []) {
-          const optLbl = primary ? M.formatCellDisplay(primary, tRec.values?.[primary.id], state, query.index) : tRec.id;
-          addOpt(sel, tRec.id, optLbl || tRec.id);
-        }
-        const curSingle = Array.isArray(val) ? (val[0] || "") : String(val || "");
+        // The select starts with the one record it holds; the whole list of the target table is put in when it is first used
+        // and is shared by every cell of the field (a cell per row with the whole list in each was rows x records nodes).
+        if (items[0]) addOpt(sel, items[0].id, items[0].label);
         sel.value = curSingle;
+        const fillOptions = () => {
+          sel.replaceChildren();
+          addOpt(sel, "", "(연결 없음)");
+          for (const [recId, optLabel] of relationOptionsOf(field, query)) addOpt(sel, recId, optLabel);
+          sel.value = curSingle;
+        };
+        for (const type of ["focus", "mousedown"]) sel.addEventListener(type, fillOptions, { once: true });
         sel.addEventListener("change", () => commitGridEdit(td, sel, recId, field.id, sel.value ? [sel.value] : [], () => { sel.value = curSingle; }));
         showPrevInvalid(sel); wrap.appendChild(sel); td.appendChild(wrap);
         return;
@@ -455,6 +471,13 @@
       if (field.type === "url" && prevStr) {
         const link = setAttr(el("a", "base-url-link", "열기"), "aria-label", `웹 주소 열기: ${field.name}`);
         link.href = prevStr; link.target = "_blank"; link.rel = "noopener noreferrer";
+        // In the desktop shell the address opens through the shell's own command, which applies its link policy; the preview server lets the anchor open it.
+        link.addEventListener("click", (ev) => {
+          const bridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
+          if (!bridge?.isAvailable?.()) return;
+          ev.preventDefault?.();
+          Promise.resolve(bridge.openLink(prevStr)).catch((err) => setFeedback("웹 주소를 열지 못했습니다: " + (err?.message || String(err))));
+        });
         td.appendChild(link);
       }
     }
@@ -485,12 +508,11 @@
           const gr = el("tr", "base-group-row"), gtd = el("td", "base-group-cell");
           gr.dataset.groupKey = group.key; gtd.colSpan = query.fields.length + 1;
           const arrow = group.collapsed ? "▸ " : "▾ ";
-          const toggle = setAttr(mkBtn("base-group-toggle", `${arrow}${group.label} (${group.count}건)`, () => {
-            const set = new Set(table.collapsedGroups || []);
+          const toggle = setAttr(mkBtn("base-group-toggle", `${arrow}${group.label} (${group.count}건)`, () => setViewSetting((t) => {
+            const set = new Set(t.collapsedGroups || []);
             if (set.has(group.key)) set.delete(group.key); else set.add(group.key);
-            table.collapsedGroups = Array.from(set);
-            render();
-          }, "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
+            t.collapsedGroups = Array.from(set);
+          }), "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
           gtd.appendChild(toggle); gr.appendChild(gtd); tbody.appendChild(gr);
         }
         if (group.collapsed) continue;
@@ -546,7 +568,7 @@
       for (const f of candidates) addOpt(sel, f.id, f.name);
       const chosen = candidates.find((f) => f.id === table.kanbanFieldId) || candidates[0] || null;
       if (chosen) { table.kanbanFieldId = chosen.id; sel.value = chosen.id; }
-      sel.addEventListener("change", () => { table.kanbanFieldId = sel.value; noteActivity(); render(); });
+      sel.addEventListener("change", () => setViewSetting((t) => { t.kanbanFieldId = sel.value; }));
       wrap.appendChild(appendAll(el("div", "base-subview-bar"), lbl, sel));
       if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "보드로 분류할 필드가 없습니다.")); return wrap; }
 
@@ -621,16 +643,16 @@
       for (const f of dateFields) addOpt(fSel, f.id, f.name);
       const chosen = dateFields.find((f) => f.id === table.calendarFieldId) || dateFields[0] || null;
       if (chosen) { table.calendarFieldId = chosen.id; fSel.value = chosen.id; }
-      fSel.addEventListener("change", () => { table.calendarFieldId = fSel.value; noteActivity(); render(); });
+      fSel.addEventListener("change", () => setViewSetting((t) => { t.calendarFieldId = fSel.value; }));
 
       const { year, month } = parseMonthStr(table.calendarMonth);
       const calTitle = el("span", "base-cal-title", `${year}년 ${month}월`);
       calTitle.id = "base-cal-title";
       const navGroup = appendAll(el("div", "base-cal-nav"),
-        mkBtn("dialog-btn", "이전 달", () => { table.calendarMonth = stepMonthStr(table.calendarMonth, -1); noteActivity(); render(); }, "btn-base-cal-prev"),
+        mkBtn("dialog-btn", "이전 달", () => setViewSetting((t) => { t.calendarMonth = stepMonthStr(t.calendarMonth, -1); }), "btn-base-cal-prev"),
         calTitle,
-        mkBtn("dialog-btn", "다음 달", () => { table.calendarMonth = stepMonthStr(table.calendarMonth, 1); noteActivity(); render(); }, "btn-base-cal-next"),
-        mkBtn("dialog-btn", "오늘", () => { table.calendarMonth = currentMonthStr(); noteActivity(); render(); }, "btn-base-cal-today")
+        mkBtn("dialog-btn", "다음 달", () => setViewSetting((t) => { t.calendarMonth = stepMonthStr(t.calendarMonth, 1); }), "btn-base-cal-next"),
+        mkBtn("dialog-btn", "오늘", () => setViewSetting((t) => { t.calendarMonth = currentMonthStr(); }), "btn-base-cal-today")
       );
       wrap.appendChild(appendAll(el("div", "base-subview-bar base-cal-header"), lbl, fSel, navGroup));
       if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "일정 보기를 사용하려면 날짜 유형 필드를 추가하세요.")); return wrap; }
@@ -665,6 +687,7 @@
 
     function render() {
       buildShellDom();
+      relationOptions = new Map();
       const table = activeTable();
       if (!table) return;
       refs.tableTabs.replaceChildren();
@@ -720,10 +743,14 @@
       return getState();
     }
 
+    // One undo step per change that was made: the state before it is taken first and kept only when the change succeeded,
+    // so a refused change (a validation error) leaves no empty step. A host without that split records before the change.
     function runMut(fn, clearInvalid = false) {
-      recordUndo();
+      const before = deps.captureUndo?.();
+      if (!before) recordUndo();
       const res = fn();
       if (!res.ok) { setFeedback(res.error); return res; }
+      if (before) deps.commitUndo(before);
       if (clearInvalid) invalidCell = null;
       noteActivity();
       if (bound) render();
@@ -734,6 +761,8 @@
       return tbl ? runMut(() => fn(tbl), clearInvalid) : { ok: false, error: "활성 테이블이 없습니다." };
     }
 
+    // A view setting (the view, the board or calendar field, the month, a collapsed group) is saved with the model: one undo step each.
+    const setViewSetting = (apply) => withActive((tbl) => { apply(tbl); return { ok: true }; });
     const addTable = (spec = {}) => runMut(() => M.addTable(state, spec), true);
     const addField = (spec = {}) => withActive((t) => M.addField(state, t.id, spec));
     const updateField = (fieldId, patch = {}) => withActive((t) => M.updateField(state, t.id, fieldId, patch));
@@ -762,8 +791,7 @@
     function setView(viewMode) {
       const tbl = activeTable();
       if (!tbl || !M.VIEW_MODES.has(viewMode)) return { ok: false, error: "유효하지 않은 보기 모드입니다." };
-      tbl.view = viewMode; noteActivity();
-      if (bound) render();
+      if (tbl.view !== viewMode) setViewSetting((t) => { t.view = viewMode; });
       return { ok: true, view: viewMode };
     }
 

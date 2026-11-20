@@ -415,7 +415,13 @@
         if (!t) return;
         t.setAttribute("contenteditable", "plaintext-only");
         t.focus?.();
-        const onInput = () => { node.text = String(t.textContent || "").slice(0, MAX_TEXT_CHARS); deps.noteActivity?.(); };
+        // One undo step per edit session: the state before the first change is taken when it comes, not for every key.
+        let undoTaken = false;
+        const onInput = () => {
+          if (!undoTaken) { deps.recordUndo?.(); undoTaken = true; }
+          node.text = String(t.textContent || "").slice(0, MAX_TEXT_CHARS);
+          deps.noteActivity?.();
+        };
         const onBlur = () => { t.removeAttribute("contenteditable"); t.removeEventListener("input", onInput); t.removeEventListener("blur", onBlur); };
         t.addEventListener("input", onInput);
         t.addEventListener("blur", onBlur);

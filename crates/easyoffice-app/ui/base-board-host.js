@@ -8,6 +8,9 @@
   let boardStudio = null;
   let runtime = null;
 
+  // A table id comes from the file, so it goes into a selector escaped.
+  const cssEscape = (value) => (typeof host.CSS?.escape === "function" ? host.CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&"));
+
   function triggerBlobDownload(doc, env, base64Data, fileName) {
     try {
       const URLApi = env?.URL || host.URL;
@@ -63,6 +66,8 @@
         getFileBase: () => resolveModuleFileBase("BASE", "EasyOffice_BASE_문서"),
         setFeedback,
         recordUndo,
+        captureUndo: deps.captureUndo,
+        commitUndo: deps.commitUndo,
         noteActivity,
       });
       baseStudio.bind();
@@ -217,7 +222,7 @@
       return (st.tables || []).map((t, idx) => ({
         label: idx + 1 + ". " + t.name + " (" + (t.records?.length || 0) + "건)",
         action: () => {
-          const btn = runtime?.document?.querySelector(`.base-table-tab[data-table-id="${t.id}"]`);
+          const btn = runtime?.document?.querySelector(`.base-table-tab[data-table-id="${cssEscape(t.id)}"]`);
           btn?.click?.();
         },
         active: t.id === st.activeTableId,

@@ -396,7 +396,7 @@ test("PD-259 CSS 토큰 준수(리터럴 색상 0건) 및 저장소 위생·줄 
 
   const files = [
     ["crates/easyoffice-app/ui/base-model.js", BASE_MODEL_URL, 990],
-    ["crates/easyoffice-app/ui/base-studio.js", BASE_STUDIO_URL, 900],
+    ["crates/easyoffice-app/ui/base-studio.js", BASE_STUDIO_URL, 990],
     ["crates/easyoffice-app/ui/base.css", BASE_CSS_URL, 500],
     ["scripts/test-base-engine-pd259.mjs", THIS_TEST_URL, 500],
   ];

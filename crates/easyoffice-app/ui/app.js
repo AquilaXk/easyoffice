@@ -946,7 +946,7 @@
     workspacePanels.renderModuleOutline("DOC");
     sheetController.updateSheetSelectionAndAggregates("A1");
     slideStudio.bind();
-    host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), noteActivity: () => workspaceSession?.noteActivity() });
+    host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), captureUndo: () => ribbonHistory.captureWorkspaceSnapshot(false), commitUndo: ribbonHistory.commitDeferredUndoSnapshot, noteActivity: () => workspaceSession?.noteActivity() });
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(
       host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.guessClientPlatform()

@@ -475,7 +475,8 @@
     if (field?.type === "checkbox" || typeof val === "boolean") return val ? "TRUE" : "FALSE";
     if (field?.type === "multiSelect") return Array.isArray(val) ? val.join(", ") : String(val);
     if (field?.type === "relation") return resolveRelationDisplay(state, field, val, index);
-    if (typeof val === "number") return Number.isFinite(val) ? String(val) : "";
+    // 15 significant digits, as a spreadsheet shows a number: 0.1 + 0.2 reads 0.3, not 0.30000000000000004.
+    if (typeof val === "number") return Number.isFinite(val) ? String(Number(val.toPrecision(15))) : "";
     return String(val);
   }
 
