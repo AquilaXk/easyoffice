@@ -11,10 +11,11 @@ use easyoffice_formats::{
     RichRevision,
 };
 
-use super::{push_json_str, push_opt_json_str};
+use super::{
+    push_json_preview, push_json_str, push_opt_json_str, truncate_chars, MAX_READBACK_TEXT_CHARS,
+};
 
 const MAX_TABLE_PREVIEW_CELLS: usize = 256;
-const MAX_PDF_TEXT_PREVIEW_CHARS: usize = 512;
 
 fn align_str(a: RichAlignment) -> &'static str {
     match a {
@@ -30,13 +31,6 @@ fn field_str(f: RichField) -> &'static str {
         RichField::PageNumber => "page",
         RichField::TotalPages => "pages",
         RichField::FileName => "filename",
-    }
-}
-
-fn truncate_chars(s: &str, max_chars: usize) -> &str {
-    match s.char_indices().nth(max_chars) {
-        Some((byte_idx, _)) => &s[..byte_idx],
-        None => s,
     }
 }
 
@@ -125,7 +119,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
         }
         let text = frame_zone_text(paras);
         let _ = write!(out, "\"{key}\":{{\"paragraphs\":{},\"text\":", paras.len());
-        push_json_str(out, &text);
+        push_json_preview(out, &text);
         out.push('}');
     }
     out.push_str("}},");
@@ -184,7 +178,12 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
                         empty_headings.push(idx);
                     }
                     if outline.len() < max_items {
-                        outline.push((idx, p.heading_level, text.clone(), p.bookmark));
+                        outline.push((
+                            idx,
+                            p.heading_level,
+                            truncate_chars(&text, MAX_READBACK_TEXT_CHARS).to_string(),
+                            p.bookmark,
+                        ));
                     }
                 }
                 if let Some(kind) = p.list {
@@ -369,7 +368,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
                 n.id,
                 n.kind.wire_name()
             );
-            push_json_str(out, &n.text);
+            push_json_preview(out, &n.text);
             out.push('}');
         }
         out.push(']');
@@ -385,7 +384,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
             out.push_str(",\"date\":");
             push_json_str(out, &c.date);
             out.push_str(",\"text\":");
-            push_json_str(out, &c.text);
+            push_json_preview(out, &c.text);
             out.push('}');
         }
         out.push(']');
@@ -406,7 +405,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
             out.push_str(",\"date\":");
             push_json_str(out, &rev.date);
             out.push_str(",\"text\":");
-            push_json_str(out, text);
+            push_json_preview(out, text);
             out.push('}');
         }
         out.push(']');
@@ -433,7 +432,7 @@ fn write_doc_block_summary(out: &mut String, index: usize, block: &RichBlock) {
             let text = p.plain_text();
             let has_eq = count_equation_markers(&text) > 0;
             let _ = write!(out, "{{\"index\":{index},\"type\":\"paragraph\",\"text\":");
-            push_json_str(out, &text);
+            push_json_preview(out, &text);
             let _ = write!(
                 out,
                 ",\"runCount\":{},\"heading\":{},\"align\":",
@@ -538,7 +537,7 @@ fn write_doc_block_summary(out: &mut String, index: usize, block: &RichBlock) {
                         out.push(',');
                     }
                     budget -= 1;
-                    push_json_str(out, cell);
+                    push_json_preview(out, cell);
                 }
                 out.push(']');
             }
@@ -562,7 +561,7 @@ fn write_readback_image_meta(out: &mut String, img: &RichImage) {
         img.width_px(),
         img.height_px(),
     );
-    push_json_str(out, img.alt());
+    push_json_preview(out, img.alt());
 }
 
 pub(super) fn write_slide_deck_readback(
@@ -574,7 +573,7 @@ pub(super) fn write_slide_deck_readback(
         out,
         deck,
         max_items,
-        push_json_str,
+        push_json_preview,
         write_usize_list,
     );
 }
@@ -615,19 +614,19 @@ pub(super) fn write_slides_readback(out: &mut String, slides: &[DecodedSlide], m
             title.chars().count() + bullets.iter().map(|b| b.chars().count()).sum::<usize>();
         let has_notes = !notes.trim().is_empty();
         let _ = write!(out, "{{\"index\":{idx},\"number\":{},\"title\":", idx + 1);
-        push_json_str(out, title);
+        push_json_preview(out, title);
         let _ = write!(out, ",\"bulletCount\":{},\"bullets\":[", bullets.len());
         for (b_i, b) in bullets.iter().enumerate() {
             if b_i > 0 {
                 out.push(',');
             }
-            push_json_str(out, b);
+            push_json_preview(out, b);
         }
         let _ = write!(
             out,
             "],\"hasNotes\":{has_notes},\"charCount\":{body_chars},\"notes\":"
         );
-        push_json_str(out, notes);
+        push_json_preview(out, notes);
         out.push('}');
     }
     out.push_str("],\"checks\":{\"untitledSlides\":[");
@@ -684,7 +683,7 @@ pub(super) fn write_pdf_readback(out: &mut String, report: &PdfReadbackReport, m
             out.push(',');
         }
         let char_count = p.body_text.chars().count();
-        let preview = truncate_chars(&p.body_text, MAX_PDF_TEXT_PREVIEW_CHARS);
+        let preview = truncate_chars(&p.body_text, MAX_READBACK_TEXT_CHARS);
         let _ = write!(
             out,
             "{{\"pageNumber\":{},\"rotationDegrees\":{},\"widthPt\":{:.2},\"heightPt\":{:.2},\"charCount\":{char_count},\"linkCount\":{},\"markupCount\":{},\"widgetCount\":{},\"approvalStamp\":",

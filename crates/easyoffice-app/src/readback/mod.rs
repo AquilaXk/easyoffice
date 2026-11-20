@@ -28,6 +28,10 @@ use crate::EasyOfficeIpcRouter;
 
 pub const DEFAULT_READBACK_ITEMS: usize = 1_000;
 pub const MAX_READBACK_ITEMS: usize = 10_000;
+/// Longest stretch of one text field an inspect result shows (the cut of the PDF page preview).
+pub(super) const MAX_READBACK_TEXT_CHARS: usize = 512;
+/// Largest inspect result. A document whose listing would outgrow it is refused rather than built.
+pub const MAX_READBACK_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadbackQuery {
@@ -50,6 +54,32 @@ pub(super) fn push_json_str(out: &mut String, s: &str) {
     out.push('"');
     EasyOfficeIpcRouter::escape_json_into(out, s);
     out.push('"');
+}
+
+/// `s` cut to [`MAX_READBACK_TEXT_CHARS`] characters, so one long paragraph is not copied into every list
+/// it appears in.
+pub(super) fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
+}
+
+/// Pushes the preview of a text field as a JSON string.
+pub(super) fn push_json_preview(out: &mut String, s: &str) {
+    push_json_str(out, truncate_chars(s, MAX_READBACK_TEXT_CHARS));
+}
+
+/// Refuses an inspect result over [`MAX_READBACK_OUTPUT_BYTES`].
+fn within_output_ceiling(out: String) -> Result<String, EasyOfficeError> {
+    if out.len() > MAX_READBACK_OUTPUT_BYTES {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "점검 결과({} 바이트)가 출력 상한({} MiB)을 넘었습니다. maxItems를 줄여 다시 시도하세요.",
+            out.len(),
+            MAX_READBACK_OUTPUT_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(out)
 }
 
 pub(super) fn push_opt_json_str(out: &mut String, s: Option<&str>) {
@@ -256,7 +286,7 @@ pub fn inspect_source_bytes(
         );
         doc_slide_pdf::write_pdf_readback(&mut out, &report, query.max_items);
         out.push('}');
-        return Ok(out);
+        return within_output_ceiling(out);
     }
 
     let (decoded, styling, slide_deck) = UniversalFormatConverter::decode_rich_full(bytes, hint)?;
@@ -295,7 +325,7 @@ pub fn inspect_source_bytes(
         }
     }
     out.push('}');
-    Ok(out)
+    within_output_ceiling(out)
 }
 
 pub(crate) fn inspect_structured_entries(
@@ -351,7 +381,7 @@ pub(crate) fn inspect_structured_entries(
         }
     }
     out.push('}');
-    Ok(out)
+    within_output_ceiling(out)
 }
 
 pub(crate) fn inspect_stateless_sheet(
