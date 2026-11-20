@@ -37,6 +37,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
 sse-core = { version = "0.2", default-features = false, features = ["std"] }
+# `FILTERXML` (PD-271): the XPath 1.0 query engine and the XML document model it runs on (the only
+# crates here that no other part of the workspace resolved before).
+sxd-document = "0.3"
+sxd-xpath = "0.4"
 
 [workspace.package]
 version = "0.1.0"

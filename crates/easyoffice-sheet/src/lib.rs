@@ -60,6 +60,7 @@ mod functions_text_split;
 mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
+mod functions_xml;
 mod hidden_rows;
 mod lexer;
 mod lookup_helpers;

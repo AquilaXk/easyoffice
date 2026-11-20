@@ -14,8 +14,8 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 14 of the function parity bundle (PD-270): text 5
 /// (`TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`), `TRIMRANGE`, information 5
 /// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`, then the 4 of the locale and text bundle:
-/// `BAHTTEXT`, `EUROCONVERT`, `JIS` and `PHONETIC`.
-pub const CANONICAL_FUNCTIONS: [&str; 306] = [
+/// `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC` and `FILTERXML`.
+pub const CANONICAL_FUNCTIONS: [&str; 307] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -322,6 +322,7 @@ pub const CANONICAL_FUNCTIONS: [&str; 306] = [
     "EUROCONVERT",
     "JIS",
     "PHONETIC",
+    "FILTERXML",
 ];
 
 /// The numeric values among `vals`.
