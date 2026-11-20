@@ -412,7 +412,7 @@ fn selection_command_keeps_the_result_inside_the_selection() {
         "{}",
         bodies[0]
     );
-    assert!(bodies[0].contains("다시 쓴다"));
+    assert!(bodies[0].contains("글쓰기 도우미"), "{}", bodies[0]);
 
     let outside = r##"{"reply":"x","operations":[{"kind":"doc.replace_paragraphs","replacements":[{"index":1,"text":"a"},{"index":3,"text":"선택 밖"}]}]}"##;
     let o = obj(&run(&doc_command("shorten", selection), outside).0.unwrap());
@@ -479,6 +479,96 @@ fn selection_command_rejects_unusable_requests_before_calling_the_model() {
         );
         assert!(bodies.is_empty());
     }
+}
+
+/// 한 문단이 9,000 bytes인 문서(문맥 상한 24 KiB의 세 문단 남짓)에 선택 영역 명령을 보낸다.
+fn big_doc_command(mode: &str, selection: &str) -> String {
+    let big = format!(r#""{}""#, "가".repeat(3_000));
+    let paragraphs = vec![big; 4].join(",");
+    format!(
+        r#"{{"action":"copilot_run","mode":"{mode}","module":"DOC","command":"summarize","prompt":"요약","selection":{selection},"context":{{"doc":{{"paragraphs":[{paragraphs}]}}}},{REMOTE}}}"#
+    )
+}
+
+#[test]
+fn selection_command_refuses_a_selection_the_context_cannot_hold() {
+    let reply = r#"{"reply":"x"}"#;
+    // 선택 전체가 24 KiB를 넘는다, 앞 문단이 예산을 다 쓴다, 문단 하나가 24 KiB를 넘는다.
+    for selection in [
+        r#"{"paragraphIndex":0,"paragraphEnd":3}"#,
+        r#"{"paragraphIndex":3,"paragraphEnd":3}"#,
+    ] {
+        let (res, bodies) = run(&big_doc_command("edit", selection), reply);
+        let Err(EasyOfficeError::InvalidArgument(msg)) = res else {
+            panic!("{selection}: {res:?}");
+        };
+        assert_eq!(msg, "선택한 범위가 너무 커서 처리할 수 없습니다.");
+        assert!(bodies.is_empty(), "the model is not called: {selection}");
+    }
+    let huge = format!(r#""{}""#, "가".repeat(9_000));
+    let one_huge = big_doc_command("edit", r#"{"paragraphIndex":0}"#).replacen(
+        &format!(r#""{}""#, "가".repeat(3_000)),
+        &huge,
+        1,
+    );
+    let (res, bodies) = run(&one_huge, reply);
+    assert!(
+        matches!(res, Err(EasyOfficeError::InvalidArgument(_))),
+        "{res:?}"
+    );
+    assert!(bodies.is_empty());
+
+    // 선택이 문맥에 다 들어가면 실행하고, 질문 모드는 같은 문서도 앞부분만 싣고 받는다.
+    let (res, bodies) = run(
+        &big_doc_command("edit", r#"{"paragraphIndex":0,"paragraphEnd":1}"#),
+        reply,
+    );
+    res.unwrap();
+    assert!(bodies[0].contains("[1] 가"));
+    let ask =
+        big_doc_command("ask", r#"{"paragraphIndex":3}"#).replace(r#""command":"summarize","#, "");
+    let (res, bodies) = run(&ask, reply);
+    res.unwrap();
+    assert!(bodies[0].contains("[이하 "), "{}", &bodies[0][..200]);
+}
+
+#[test]
+fn slide_command_refuses_a_slide_the_context_cannot_hold() {
+    let title = "가".repeat(400);
+    let slides = vec![format!(r#"{{"title":"{title}"}}"#); 30].join(",");
+    let slide = |index: usize| {
+        format!(
+            r#"{{"action":"copilot_run","mode":"edit","module":"SLIDE","command":"rewrite","prompt":"x","selection":{{"slideIndex":{index},"slideField":"title"}},"context":{{"slide":{{"slides":[{slides}]}}}},{REMOTE}}}"#
+        )
+    };
+    let (res, bodies) = run(&slide(29), r#"{"reply":"x"}"#);
+    assert!(
+        matches!(res, Err(EasyOfficeError::InvalidArgument(_))),
+        "{res:?}"
+    );
+    assert!(bodies.is_empty());
+    run(&slide(2), r#"{"reply":"x"}"#).0.unwrap();
+}
+
+#[test]
+fn base_table_and_field_lists_obey_the_context_limit() {
+    let name = "x".repeat(1_000);
+    let tables = vec![format!(r#""{name}""#); 64].join(",");
+    let ctx = format!(
+        r#","context":{{"base":{{"tables":[{tables}],"table":"t","fields":[],"records":[]}}}}"#
+    );
+    let (res, bodies) = run(&payload("ask", "BASE", &ctx), r#"{"reply":"x"}"#);
+    res.unwrap();
+    assert!(
+        bodies[0].contains("[이하 64테이블 생략]"),
+        "{}",
+        &bodies[0][..300]
+    );
+    assert!(
+        bodies[0].len() < 24 * 1024,
+        "the list did not go in: {}",
+        bodies[0].len()
+    );
 }
 
 fn local_run_payload(port: u16, request_id: &str) -> String {

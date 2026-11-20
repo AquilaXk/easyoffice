@@ -187,7 +187,7 @@ pub fn run_remote_or_local(
         ));
     }
     let headers = build_provider_headers(&req.provider)?;
-    let (system_prompt, user_content) = build_prompts_for_llm(req);
+    let (system_prompt, user_content) = build_prompts_for_llm(req)?;
     let body_json = build_provider_chat_body(req, &system_prompt, &user_content)?;
     let http_req = build_http_req(HttpMethod::Post, endpoint, headers, body_json, cancel);
     let raw_response = dispatch_transport(&http_req, host_llm)?;

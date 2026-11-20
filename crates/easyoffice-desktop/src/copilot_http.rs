@@ -13,7 +13,7 @@ use easyoffice_app::copilot::ssrf::is_public_ip;
 use easyoffice_app::copilot::types::{HttpMethod, MAX_LLM_REQUEST_BYTES, MAX_LLM_RESPONSE_BYTES};
 use easyoffice_app::CopilotLlmRequest;
 use std::io::{Error as IoError, ErrorKind, Read};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,6 +36,11 @@ fn netloc_matches(netloc: &str, expected_host: &str, expected_port: u16) -> bool
         normalize_host_for_netloc(expected_host)
     );
     netloc.eq_ignore_ascii_case(&bare) || netloc.eq_ignore_ascii_case(&norm)
+}
+
+/// 오류 문구가 말하는 대로 `127.0.0.1`과 `::1`만 받는다(`127.0.0.0/8` 나머지는 받지 않는다).
+fn is_exact_loopback(ip: IpAddr) -> bool {
+    ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
 }
 
 fn validate_request_guards(req: &CopilotLlmRequest) -> Result<Vec<SocketAddr>, String> {
@@ -69,7 +74,7 @@ fn validate_request_guards(req: &CopilotLlmRequest) -> Result<Vec<SocketAddr>, S
                     "사설·루프백 또는 내부 네트워크 모델 엔드포인트는 차단되었습니다.".to_string(),
                 );
             }
-        } else if !addr.ip().is_loopback() {
+        } else if !is_exact_loopback(addr.ip()) {
             return Err("로컬 HTTP 엔드포인트는 127.0.0.1 또는 [::1]만 허용됩니다.".to_string());
         }
     }
@@ -216,7 +221,7 @@ fn complete_https(
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::net::{IpAddr, Ipv4Addr, TcpListener};
+    use std::net::TcpListener;
     use std::thread;
 
     fn spawn_once(raw_response: String) -> (u16, thread::JoinHandle<String>) {
@@ -272,6 +277,25 @@ mod tests {
             headers: vec![("Authorization".to_string(), "Bearer secret-key".to_string())],
             body_json: r#"{"model":"m1","messages":[]}"#.to_string(),
             cancel: CancelHandle::default(),
+        }
+    }
+
+    #[test]
+    fn local_http_accepts_only_127_0_0_1_and_ipv6_loopback() {
+        for (ip, accepted) in [
+            (IpAddr::V4(Ipv4Addr::LOCALHOST), true),
+            (IpAddr::V6(Ipv6Addr::LOCALHOST), true),
+            (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), false),
+            (IpAddr::V4(Ipv4Addr::new(127, 255, 255, 254)), false),
+            (IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped()), false),
+        ] {
+            let mut req = base_local_req(11434);
+            req.resolved_addrs = vec![SocketAddr::new(ip, 11434)];
+            let verdict = validate_request_guards(&req);
+            assert_eq!(verdict.is_ok(), accepted, "{ip}: {verdict:?}");
+            if !accepted {
+                assert!(verdict.unwrap_err().contains("127.0.0.1 또는 [::1]만"));
+            }
         }
     }
 
