@@ -130,7 +130,9 @@ fn read_sse_deltas(
 ) -> Result<Vec<Delta>, String> {
     let mut deltas = Vec::new();
     while let Some(event) = decoder.next(&mut chunk) {
-        let SseEvent::Message(event) = event.map_err(|err| err.to_string())? else {
+        let SseEvent::Message(event) =
+            event.map_err(|_| "SSE 이벤트 하나가 허용 크기를 넘었습니다.".to_string())?
+        else {
             continue;
         };
         let Some(delta) = read_delta(kind, &event) else {
