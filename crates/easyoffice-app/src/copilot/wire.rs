@@ -10,7 +10,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 use super::cancel::CANCELLED_MESSAGE;
-use super::types::{CopilotLlmRequest, HttpMethod, MAX_LLM_RESPONSE_BYTES};
+use super::types::{ChunkSink, CopilotLlmRequest, HttpMethod, MAX_LLM_RESPONSE_BYTES};
 
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const LOCAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -26,6 +26,18 @@ fn format_host_header(host: &str, port: u16) -> String {
 
 /// 루프백 HTTP 요청을 보내고 본문을 돌려준다. 취소되면 소켓이 닫히고 `CANCELLED_MESSAGE`로 끝난다.
 pub fn send_local_http(req: &CopilotLlmRequest) -> Result<String, EasyOfficeError> {
+    send_local_http_streaming(req, None)
+}
+
+/// 읽기를 멈추라는 신호를 받아 끝낸 전송의 오류 문구. 호출한 쪽이 멈춘 이유를 알고 있다.
+pub const STREAM_STOPPED_MESSAGE: &str = "모델 응답 스트림 읽기를 멈췄습니다.";
+
+/// `send_local_http`와 같고, `sink`가 있으면 성공(2xx) 응답의 본문(청크 해석을 마친 바이트)을 오는 대로 넘긴다.
+/// `sink`가 `false`를 돌려주면 읽기를 멈추고 `STREAM_STOPPED_MESSAGE`로 끝난다. 끝나면 전체 본문도 돌려주고 상한(512 KiB)은 그대로다.
+pub fn send_local_http_streaming(
+    req: &CopilotLlmRequest,
+    mut sink: Option<&mut ChunkSink<'_>>,
+) -> Result<String, EasyOfficeError> {
     req.cancel
         .check()
         .map_err(EasyOfficeError::InvalidArgument)?;
@@ -42,9 +54,14 @@ pub fn send_local_http(req: &CopilotLlmRequest) -> Result<String, EasyOfficeErro
     let mut wire = String::with_capacity(256 + req.body_json.len());
     let _ = write!(
         wire,
-        "{} {} HTTP/1.1\r\nHost: {host_hdr}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\n",
+        "{} {} HTTP/1.1\r\nHost: {host_hdr}\r\nAccept: {}\r\nAccept-Encoding: identity\r\n",
         req.method.as_str(),
-        req.path
+        req.path,
+        if req.stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }
     );
     if req.method == HttpMethod::Post {
         let _ = write!(
@@ -70,6 +87,7 @@ pub fn send_local_http(req: &CopilotLlmRequest) -> Result<String, EasyOfficeErro
     let mut raw = Vec::with_capacity(8192);
     let mut buf = [0u8; 8192];
     let mut hdr_end_cache: Option<usize> = None;
+    let mut feed = BodyFeed::default();
     loop {
         match stream.read(&mut buf) {
             Ok(0) => break,
@@ -89,7 +107,15 @@ pub fn send_local_http(req: &CopilotLlmRequest) -> Result<String, EasyOfficeErro
                     }
                 }
                 if let Some(hdr_end) = hdr_end_cache {
-                    if http_frame_complete(&raw, hdr_end)? {
+                    let head = parse_head(&raw, hdr_end)?;
+                    if let Some(sink) = sink.as_deref_mut() {
+                        if !feed.deliver(&raw, hdr_end, &head, sink)? {
+                            return Err(EasyOfficeError::InvalidArgument(
+                                STREAM_STOPPED_MESSAGE.to_string(),
+                            ));
+                        }
+                    }
+                    if frame_complete(&raw, hdr_end, &head)? {
                         break;
                     }
                 }
@@ -119,30 +145,73 @@ fn io_failure(req: &CopilotLlmRequest, message: String) -> EasyOfficeError {
     })
 }
 
-fn http_frame_complete(raw: &[u8], hdr_end: usize) -> Result<bool, EasyOfficeError> {
+/// 응답 헤더에서 읽는 것. 헤더 크기·UTF-8·상태 줄·리다이렉트·콘텐츠 인코딩 검사를 이 한 곳에서 한다.
+struct HttpHead {
+    status: u16,
+    chunked: bool,
+    content_length: Option<usize>,
+}
+
+fn parse_head(raw: &[u8], hdr_end: usize) -> Result<HttpHead, EasyOfficeError> {
+    if hdr_end > MAX_HTTP_HEADER_BYTES {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "모델 서버 HTTP 응답 헤더가 너무 큽니다.".to_string(),
+        ));
+    }
     let header_text = std::str::from_utf8(&raw[..hdr_end]).map_err(|_| {
         EasyOfficeError::InvalidArgument("모델 서버 HTTP 응답 헤더가 UTF-8이 아닙니다.".to_string())
     })?;
-    let mut is_chunked = false;
-    let mut content_length: Option<usize> = None;
-    for line in header_text.split("\r\n").skip(1) {
-        if let Some((name, value)) = line.split_once(':') {
-            let k = name.trim();
-            let v = value.trim();
-            if k.eq_ignore_ascii_case("transfer-encoding")
-                && v.to_ascii_lowercase().contains("chunked")
-            {
-                is_chunked = true;
-            } else if k.eq_ignore_ascii_case("content-length") {
-                content_length = v.parse::<usize>().ok();
-            }
+    let mut lines = header_text.split("\r\n");
+    let status = lines
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(
+                "모델 서버의 HTTP 상태 줄을 해석할 수 없습니다.".to_string(),
+            )
+        })?;
+    if (300..400).contains(&status) {
+        return Err(EasyOfficeError::SecurityViolation(
+            "모델 API 리다이렉트는 보안 정책상 허용되지 않습니다.".to_string(),
+        ));
+    }
+    let mut head = HttpHead {
+        status,
+        chunked: false,
+        content_length: None,
+    };
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (name, value) = (name.trim(), value.trim());
+        if name.eq_ignore_ascii_case("content-encoding") && !value.eq_ignore_ascii_case("identity")
+        {
+            return Err(EasyOfficeError::InvalidArgument(
+                "지원하지 않는 콘텐츠 인코딩 응답입니다.".to_string(),
+            ));
+        }
+        if name.eq_ignore_ascii_case("transfer-encoding")
+            && value.to_ascii_lowercase().contains("chunked")
+        {
+            head.chunked = true;
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            head.content_length = value.parse::<usize>().ok();
         }
     }
+    Ok(head)
+}
+
+fn frame_complete(raw: &[u8], hdr_end: usize, head: &HttpHead) -> Result<bool, EasyOfficeError> {
     let body = &raw[hdr_end + 4..];
-    if is_chunked {
+    if head.chunked {
         return Ok(decode_chunked_bounded(body, MAX_LLM_RESPONSE_BYTES)?.is_some());
     }
-    if let Some(cl) = content_length {
+    if let Some(cl) = head.content_length {
         if cl > MAX_LLM_RESPONSE_BYTES {
             return Err(EasyOfficeError::ResourceBudgetExceeded(
                 "모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string(),
@@ -153,82 +222,86 @@ fn http_frame_complete(raw: &[u8], hdr_end: usize) -> Result<bool, EasyOfficeErr
     Ok(false)
 }
 
+/// 성공 응답 본문을 읽은 만큼씩 넘기는 진행 상태. 청크 응답은 완성된 청크만, 그 밖에는 `Content-Length`까지의 새 바이트를 넘긴다.
+#[derive(Default)]
+struct BodyFeed {
+    /// 일반 본문에서 이미 넘긴 바이트 수.
+    delivered: usize,
+    /// 청크 본문에서 다음 청크 크기 줄이 시작하는 자리(본문 안 오프셋).
+    chunk_pos: usize,
+}
+
+impl BodyFeed {
+    /// 새로 읽힌 본문을 `sink`에 넘긴다. `false`면 `sink`가 멈추라고 한 것이다.
+    fn deliver(
+        &mut self,
+        raw: &[u8],
+        hdr_end: usize,
+        head: &HttpHead,
+        sink: &mut ChunkSink<'_>,
+    ) -> Result<bool, EasyOfficeError> {
+        if !(200..300).contains(&head.status) {
+            return Ok(true);
+        }
+        let body = &raw[hdr_end + 4..];
+        if !head.chunked {
+            let end = head
+                .content_length
+                .map_or(body.len(), |cl| cl.min(body.len()));
+            let fresh = &body[self.delivered.min(end)..end];
+            self.delivered = end;
+            return Ok(fresh.is_empty() || sink(fresh));
+        }
+        while let Some(rel_crlf) = body[self.chunk_pos..].windows(2).position(|w| w == b"\r\n") {
+            let size_line = std::str::from_utf8(&body[self.chunk_pos..self.chunk_pos + rel_crlf])
+                .map_err(|_| {
+                EasyOfficeError::InvalidArgument("청크 크기 헤더가 올바르지 않습니다.".to_string())
+            })?;
+            let size = usize::from_str_radix(size_line.split(';').next().unwrap_or("").trim(), 16)
+                .map_err(|_| {
+                    EasyOfficeError::InvalidArgument("청크 크기를 해석할 수 없습니다.".to_string())
+                })?;
+            let data_at = self.chunk_pos + rel_crlf + 2;
+            if size == 0 || data_at + size + 2 > body.len() {
+                break;
+            }
+            self.chunk_pos = data_at + size + 2;
+            if !sink(&body[data_at..data_at + size]) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
 fn parse_http_response(raw: &[u8]) -> Result<String, EasyOfficeError> {
     let Some(hdr_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
         return Err(EasyOfficeError::InvalidArgument(
             "모델 서버의 HTTP 응답 헤더가 올바르지 않습니다.".to_string(),
         ));
     };
-    if hdr_end > MAX_HTTP_HEADER_BYTES {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(
-            "모델 서버 HTTP 응답 헤더가 너무 큽니다.".to_string(),
-        ));
-    }
-    let header_text = std::str::from_utf8(&raw[..hdr_end]).map_err(|_| {
-        EasyOfficeError::InvalidArgument("모델 서버 HTTP 응답 헤더가 UTF-8이 아닙니다.".to_string())
-    })?;
-    let mut lines = header_text.split("\r\n");
-    let status_line = lines.next().unwrap_or("");
-    let status_code = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse::<u16>().ok())
-        .ok_or_else(|| {
-            EasyOfficeError::InvalidArgument(
-                "모델 서버의 HTTP 상태 줄을 해석할 수 없습니다.".to_string(),
-            )
-        })?;
-
-    if (300..400).contains(&status_code) {
-        return Err(EasyOfficeError::SecurityViolation(
-            "모델 API 리다이렉트는 보안 정책상 허용되지 않습니다.".to_string(),
-        ));
-    }
-
-    let mut is_chunked = false;
-    let mut content_length: Option<usize> = None;
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            let name = name.trim();
-            let value = value.trim();
-            if name.eq_ignore_ascii_case("content-encoding")
-                && !value.eq_ignore_ascii_case("identity")
-            {
-                return Err(EasyOfficeError::InvalidArgument(
-                    "지원하지 않는 콘텐츠 인코딩 응답입니다.".to_string(),
-                ));
-            }
-            if name.eq_ignore_ascii_case("transfer-encoding")
-                && value.to_ascii_lowercase().contains("chunked")
-            {
-                is_chunked = true;
-            }
-            if name.eq_ignore_ascii_case("content-length") {
-                content_length = value.parse::<usize>().ok();
-            }
-        }
-    }
-
-    if !(200..300).contains(&status_code) {
+    let head = parse_head(raw, hdr_end)?;
+    if !(200..300).contains(&head.status) {
         return Err(EasyOfficeError::InvalidArgument(format!(
-            "모델 서버가 HTTP {status_code} 오류를 반환했습니다."
+            "모델 서버가 HTTP {} 오류를 반환했습니다.",
+            head.status
         )));
     }
 
     let body_raw = &raw[hdr_end + 4..];
-    let body_bytes = if is_chunked {
+    let body_bytes = if head.chunked {
         decode_chunked_bounded(body_raw, MAX_LLM_RESPONSE_BYTES)?.ok_or_else(|| {
             EasyOfficeError::InvalidArgument("청크 응답 본문이 불완전합니다.".to_string())
         })?
     } else {
-        if let Some(cl) = content_length {
+        if let Some(cl) = head.content_length {
             if cl > MAX_LLM_RESPONSE_BYTES {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
                     "모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string(),
                 ));
             }
         }
-        let slice = match content_length {
+        let slice = match head.content_length {
             Some(cl) if cl <= body_raw.len() => &body_raw[..cl],
             _ => body_raw,
         };

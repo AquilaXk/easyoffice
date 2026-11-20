@@ -9,12 +9,17 @@ pub mod llm_client;
 pub mod operations;
 pub mod prompt;
 pub mod providers;
+pub mod sse;
 pub mod ssrf;
+pub mod stream;
 pub mod types;
 pub mod window;
 pub mod wire;
 
-pub use types::{CopilotLlmClient, CopilotLlmRequest, HttpMethod};
+pub use types::{
+    ChunkSink, CopilotEventSink, CopilotHost, CopilotLlmClient, CopilotLlmRequest,
+    CopilotStreamClient, CopilotStreamEvent, HttpMethod,
+};
 
 use providers::{chat_endpoint_target, models_endpoint_target};
 use types::{
@@ -32,18 +37,26 @@ pub fn handle_copilot_ipc(
             "코파일럿 IPC 요청에 'action' 필드가 필요합니다.".to_string(),
         )
     })?;
-    handle_copilot_ipc_entries(action, &entries, llm)
+    handle_copilot_ipc_entries(
+        action,
+        &entries,
+        CopilotHost {
+            llm,
+            ..CopilotHost::default()
+        },
+    )
 }
 
 pub(crate) fn handle_copilot_ipc_entries(
     action: &str,
     entries: &[(String, StrictJsonValue)],
-    llm: Option<&CopilotLlmClient<'_>>,
+    host: CopilotHost<'_>,
 ) -> Result<String, EasyOfficeError> {
+    let llm = host.llm;
     match action {
         "copilot_test_provider" => handle_test_provider(entries, llm),
         "copilot_list_models" => handle_list_models(entries, llm),
-        "copilot_run" => handle_run(entries, llm),
+        "copilot_run" => handle_run(entries, host),
         "copilot_cancel" => handle_cancel(entries),
         other => Err(EasyOfficeError::InvalidArgument(format!(
             "지원하지 않는 코파일럿 액션입니다: {other}"
@@ -65,7 +78,7 @@ fn handle_test_provider(
         )?;
         return llm_client::test_provider_models_endpoint(&provider, &endpoint, llm);
     }
-    let target = chat_endpoint_target(&provider);
+    let target = chat_endpoint_target(&provider, false);
     let endpoint = ssrf::validate_provider_target(
         provider.kind.is_local_loopback(),
         &provider.base_url,
@@ -102,9 +115,26 @@ fn handle_list_models(
     }
 }
 
+/// 요청이 스트림을 원하고 호스트가 스트림 전송과 이벤트 통로를 모두 댈 수 있으며 조각을 묶을 요청 번호가 있을 때만 스트림으로 받는다.
+fn stream_plan<'a>(
+    entries: &'a [(String, StrictJsonValue)],
+    host: CopilotHost<'a>,
+) -> Option<llm_client::StreamPlan<'a>> {
+    let wanted = StrictJsonValue::get_field(entries, "stream").and_then(StrictJsonValue::as_bool);
+    if wanted != Some(true) {
+        return None;
+    }
+    let request_id = StrictJsonValue::get_str(entries, "requestId")?;
+    Some(llm_client::StreamPlan {
+        request_id,
+        client: host.llm_stream?,
+        events: host.events?,
+    })
+}
+
 fn handle_run(
     entries: &[(String, StrictJsonValue)],
-    llm: Option<&CopilotLlmClient<'_>>,
+    host: CopilotHost<'_>,
 ) -> Result<String, EasyOfficeError> {
     let req = parse_run_request(entries)?;
     // 취소 신호는 요청이 끝날 때까지 등록해 둔다. requestId가 없는 요청은 취소할 수 없다.
@@ -115,13 +145,15 @@ fn handle_run(
         }
         None => (cancel::CancelHandle::default(), None),
     };
-    let target = chat_endpoint_target(&req.provider);
+    let stream = stream_plan(entries, host);
+    let target = chat_endpoint_target(&req.provider, stream.is_some());
     let endpoint = ssrf::validate_provider_target(
         req.provider.kind.is_local_loopback(),
         &req.provider.base_url,
         target,
     )?;
-    let mut response = llm_client::run_remote_or_local(&req, &endpoint, llm, cancel_handle)?;
+    let mut response =
+        llm_client::run_remote_or_local(&req, &endpoint, host.llm, stream, cancel_handle)?;
 
     // Fail-closed read-only invariant across all providers.
     if req.is_read_only() {

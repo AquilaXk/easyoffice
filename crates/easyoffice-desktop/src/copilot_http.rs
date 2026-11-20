@@ -8,14 +8,39 @@
 //! read. Loopback HTTP uses the engine's own socket client, which registers its socket the same way.
 
 use easyoffice_app::copilot::cancel::{CancelHandle, CANCELLED_MESSAGE};
-use easyoffice_app::copilot::llm_client::{send_local_http, validate_wire_headers};
+use easyoffice_app::copilot::llm_client::{send_local_http_streaming, validate_wire_headers};
 use easyoffice_app::copilot::ssrf::is_public_ip;
-use easyoffice_app::copilot::types::{HttpMethod, MAX_LLM_REQUEST_BYTES, MAX_LLM_RESPONSE_BYTES};
-use easyoffice_app::CopilotLlmRequest;
+use easyoffice_app::copilot::types::{
+    ChunkSink, HttpMethod, MAX_LLM_REQUEST_BYTES, MAX_LLM_RESPONSE_BYTES,
+};
+use easyoffice_app::copilot::wire::STREAM_STOPPED_MESSAGE;
+use easyoffice_app::{CopilotLlmRequest, CopilotStreamEvent};
 use std::io::{Error as IoError, ErrorKind, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// What the page receives for one piece of the answer (`requestId` ties it to the question, `seq` counts from 0).
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamPayload {
+    request_id: String,
+    seq: u32,
+    text: String,
+}
+
+/// The page's stream channel: a Tauri IPC channel the page names in the request (`onStream`). Pieces reach that
+/// page only and in order, and the page needs no event permission to receive them.
+pub type StreamChannel = tauri::ipc::Channel<StreamPayload>;
+
+/// Sends one piece of the streamed answer to the page that asked.
+pub fn send_stream_piece(channel: &StreamChannel, event: &CopilotStreamEvent<'_>) {
+    let _ = channel.send(StreamPayload {
+        request_id: event.request_id.to_string(),
+        seq: event.seq,
+        text: event.text.to_string(),
+    });
+}
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const IO_TIMEOUT: Duration = Duration::from_secs(90);
@@ -108,17 +133,60 @@ impl ureq::TlsConnector for CancellableTls {
 /// Executes a validated chat-completion request: loopback HTTP over the engine's socket client,
 /// HTTPS over `ureq` + OS `native-tls`.
 pub fn complete(req: &CopilotLlmRequest) -> Result<String, String> {
+    run(req, None)
+}
+
+/// Same as [`complete`] for a streamed answer: the body goes to `sink` as it arrives (only for a 2xx
+/// response), the whole body is still returned at the end, and the 512 KiB ceiling, the pinned address,
+/// the zero redirects and the cancel handle apply as before. A sink that returns `false` stops the read.
+pub fn complete_stream(
+    req: &CopilotLlmRequest,
+    sink: &mut ChunkSink<'_>,
+) -> Result<String, String> {
+    run(req, Some(sink))
+}
+
+fn run(req: &CopilotLlmRequest, sink: Option<&mut ChunkSink<'_>>) -> Result<String, String> {
     let pinned_addrs = validate_request_guards(req)?;
     req.cancel.check()?;
     if !req.is_https {
-        return send_local_http(req).map_err(|err| err.to_string());
+        return send_local_http_streaming(req, sink).map_err(|err| err.to_string());
     }
-    complete_https(req, pinned_addrs)
+    complete_https(req, pinned_addrs, sink)
+}
+
+/// Reads the body in pieces so a streamed answer reaches the page while the model is still writing.
+fn read_body(
+    reader: impl Read,
+    mut sink: Option<&mut ChunkSink<'_>>,
+    or_cancelled: &dyn Fn(String) -> String,
+) -> Result<Vec<u8>, String> {
+    let mut reader = reader.take(MAX_LLM_RESPONSE_BYTES as u64 + 1);
+    let mut body = Vec::with_capacity(8192);
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|_| or_cancelled("모델 응답 본문을 읽지 못했습니다.".to_string()))?;
+        if n == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(&buf[..n]);
+        if body.len() > MAX_LLM_RESPONSE_BYTES {
+            return Ok(body);
+        }
+        if let Some(sink) = sink.as_deref_mut() {
+            if !sink(&buf[..n]) {
+                return Err(STREAM_STOPPED_MESSAGE.to_string());
+            }
+        }
+    }
 }
 
 fn complete_https(
     req: &CopilotLlmRequest,
     pinned_addrs: Vec<SocketAddr>,
+    sink: Option<&mut ChunkSink<'_>>,
 ) -> Result<String, String> {
     // A connection closed by a cancel surfaces as an I/O error of any kind: report the cancel instead.
     let or_cancelled = |message: String| -> String {
@@ -162,7 +230,14 @@ fn complete_https(
         HttpMethod::Get => agent.get(&req.url),
         HttpMethod::Post => agent.post(&req.url).set("Content-Type", "application/json"),
     }
-    .set("Accept", "application/json")
+    .set(
+        "Accept",
+        if req.stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+    )
     .set("Accept-Encoding", "identity");
 
     for (name, val) in &req.headers {
@@ -203,11 +278,7 @@ fn complete_https(
         }
     }
 
-    let mut body = Vec::with_capacity(8192);
-    resp.into_reader()
-        .take(MAX_LLM_RESPONSE_BYTES as u64 + 1)
-        .read_to_end(&mut body)
-        .map_err(|_| or_cancelled("모델 응답 본문을 읽지 못했습니다.".to_string()))?;
+    let body = read_body(resp.into_reader(), sink, &or_cancelled)?;
     req.cancel.check()?;
 
     if body.len() > MAX_LLM_RESPONSE_BYTES {
@@ -277,6 +348,7 @@ mod tests {
             headers: vec![("Authorization".to_string(), "Bearer secret-key".to_string())],
             body_json: r#"{"model":"m1","messages":[]}"#.to_string(),
             cancel: CancelHandle::default(),
+            stream: false,
         }
     }
 
@@ -387,6 +459,7 @@ mod tests {
             ],
             body_json: String::new(),
             cancel: CancelHandle::default(),
+            stream: false,
         };
         let get_out = complete(&get_req).unwrap();
         let get_cap = m_handle.join().unwrap();
@@ -455,5 +528,70 @@ mod tests {
         assert_eq!(done_rx.recv_timeout(Duration::from_secs(5)), Ok(true));
         worker.join().unwrap();
         server.join().unwrap();
+    }
+
+    #[test]
+    fn a_streamed_answer_reaches_the_sink_in_pieces_and_is_still_returned_whole() {
+        let body = "data: {\"a\":1}\n\ndata: [DONE]\n\n";
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let (port, handle) = spawn_once(resp);
+        let mut req = base_local_req(port);
+        req.stream = true;
+        let mut pieces = Vec::new();
+        let mut sink = |chunk: &[u8]| {
+            pieces.push(chunk.to_vec());
+            true
+        };
+        let out = complete_stream(&req, &mut sink).unwrap();
+        let captured = handle.join().unwrap();
+        assert_eq!(out, body);
+        assert_eq!(pieces.concat(), body.as_bytes());
+        assert!(captured
+            .to_ascii_lowercase()
+            .contains("accept: text/event-stream"));
+    }
+
+    #[test]
+    fn a_stream_the_sink_stops_ends_with_the_stop_reason() {
+        let body = "data: x\n\n".repeat(50);
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let (port, handle) = spawn_once(resp);
+        let mut req = base_local_req(port);
+        req.stream = true;
+        let err = complete_stream(&req, &mut |_| false).unwrap_err();
+        let _ = handle.join();
+        assert!(err.contains("멈췄습니다"), "{err}");
+    }
+
+    #[test]
+    fn the_body_reader_stops_at_the_ceiling_and_hands_pieces_to_the_sink() {
+        let big = vec![b'x'; MAX_LLM_RESPONSE_BYTES + 10_000];
+        let mut seen = 0usize;
+        let mut sink = |chunk: &[u8]| {
+            seen += chunk.len();
+            true
+        };
+        let body = read_body(&big[..], Some(&mut sink), &|m| m).unwrap();
+        assert!(
+            body.len() > MAX_LLM_RESPONSE_BYTES,
+            "the caller rejects a body over the ceiling"
+        );
+        assert!(
+            body.len() <= MAX_LLM_RESPONSE_BYTES + 8192 + 1,
+            "reading stops right after the ceiling: {}",
+            body.len()
+        );
+        assert!(
+            seen <= MAX_LLM_RESPONSE_BYTES,
+            "no piece over the ceiling reaches the page"
+        );
+        let stopped = read_body(&b"abc"[..], Some(&mut |_: &[u8]| false), &|m| m).unwrap_err();
+        assert_eq!(stopped, STREAM_STOPPED_MESSAGE);
     }
 }

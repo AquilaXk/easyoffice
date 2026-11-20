@@ -134,12 +134,15 @@ async fn ipc_dispatch(
     window: WebviewWindow,
     command: String,
     payload: String,
+    on_stream: Option<tauri::ipc::JavaScriptChannelId>,
 ) -> Result<String, IpcError> {
     let probe_command = command.clone();
     let probe_payload = app.try_state::<SmokeProbe>().map(|_| payload.clone());
     // The window label owns the sheet sessions the command opens; they close with the window.
     let owner = window.label().to_string();
     let font_dirs = pdf_job::pdf_font_dirs(&app);
+    // The page's channel for the copilot's streamed text (PD-268). A request that names none gets its answer whole.
+    let stream_channel = on_stream.map(|id| id.channel_on(window.as_ref().clone()));
     let result = tauri::async_runtime::spawn_blocking(move || {
         // A rich document converted to PDF is laid out and drawn here (PD-167); the engine keeps
         // its own PDF as the fallback. The font database is built when a PDF is first drawn. A
@@ -155,11 +158,18 @@ async fn ipc_dispatch(
                 &pdf_fonts::shared_font_db(&font_dirs_thumb),
             )
         };
+        let emit = |event: &easyoffice_app::CopilotStreamEvent<'_>| {
+            if let Some(channel) = &stream_channel {
+                copilot_http::send_stream_piece(channel, event);
+            }
+        };
         let writers = ShellWriters {
             pdf: Some(&draw),
             hwp: Some(&save_hwp),
             thumbnail: Some(&draw_thumb),
             llm: Some(&copilot_http::complete),
+            llm_stream: Some(&copilot_http::complete_stream),
+            copilot_events: stream_channel.is_some().then_some(&emit as _),
         };
         EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
             &command, &payload, &owner, writers,

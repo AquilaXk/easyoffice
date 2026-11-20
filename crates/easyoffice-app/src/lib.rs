@@ -89,7 +89,10 @@ mod webui_assets;
 pub use benchmark::*;
 pub use convert_hwp::{RichHwpWriter, RichThumbnailRenderer, ShellWriters};
 pub use convert_structured::RichPdfRenderer;
-pub use copilot::{CopilotLlmClient, CopilotLlmRequest};
+pub use copilot::{
+    ChunkSink, CopilotEventSink, CopilotHost, CopilotLlmClient, CopilotLlmRequest,
+    CopilotStreamClient, CopilotStreamEvent,
+};
 pub use ffi::*;
 pub use http_server::{
     serve_http_on_listener, serve_http_on_listener_with_handler, serve_webui, ConnectionSlotGuard,
@@ -175,7 +178,9 @@ impl EasyOfficeIpcRouter {
             "undo_ribbon_command" => Self::handle_ribbon_history_step(payload, true),
             "redo_ribbon_command" => Self::handle_ribbon_history_step(payload, false),
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
-            "run_smart_assistant" => Self::handle_run_smart_assistant(payload, writers.llm),
+            "run_smart_assistant" => {
+                Self::handle_run_smart_assistant(payload, writers.copilot_host())
+            }
             "scrub_pii" => Self::handle_scrub_pii(payload),
             "convert_document_format" => Self::handle_convert_document_format(payload, writers),
             "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
@@ -666,7 +671,7 @@ impl EasyOfficeIpcRouter {
 
     fn handle_run_smart_assistant(
         payload: &str,
-        llm: Option<&CopilotLlmClient<'_>>,
+        host: CopilotHost<'_>,
     ) -> Result<String, EasyOfficeError> {
         let trimmed = payload
             .strip_prefix('\u{FEFF}')
@@ -676,7 +681,7 @@ impl EasyOfficeIpcRouter {
             if let Ok(entries) = Self::parse_rpc_json_object(trimmed) {
                 if let Some(action) = StrictJsonValue::get_str(&entries, "action") {
                     if action.starts_with("copilot_") {
-                        return copilot::handle_copilot_ipc_entries(action, &entries, llm);
+                        return copilot::handle_copilot_ipc_entries(action, &entries, host);
                     }
                 }
                 match StrictJsonValue::get_field(&entries, "text") {

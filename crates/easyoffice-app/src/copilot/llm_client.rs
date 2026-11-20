@@ -10,11 +10,12 @@ use super::providers::{
     extract_provider_completion, parse_discovered_models, serialize_models_response,
 };
 use super::ssrf::ValidatedEndpoint;
+use super::stream::StreamAssembler;
 use super::types::{
-    push_json_str, CopilotLlmClient, CopilotLlmRequest, CopilotRunRequest, CopilotRunResponse,
-    HttpMethod, ProviderConfig,
+    push_json_str, CopilotEventSink, CopilotLlmClient, CopilotLlmRequest, CopilotRunRequest,
+    CopilotRunResponse, CopilotStreamClient, CopilotStreamEvent, HttpMethod, ProviderConfig,
 };
-pub use super::wire::send_local_http;
+pub use super::wire::{send_local_http, send_local_http_streaming};
 
 pub fn validate_wire_headers(headers: &[(String, String)]) -> Result<(), EasyOfficeError> {
     if headers.len() > 8 {
@@ -46,22 +47,28 @@ pub fn validate_wire_headers(headers: &[(String, String)]) -> Result<(), EasyOff
     Ok(())
 }
 
+/// 호스트 전송이 돌려준 오류 문구를 오류 종류로 가른다.
+fn host_error(msg: String) -> EasyOfficeError {
+    if msg.contains("리다이렉트") || msg.contains("사설") || msg.contains("보안") {
+        EasyOfficeError::SecurityViolation(msg)
+    } else {
+        EasyOfficeError::InvalidArgument(msg)
+    }
+}
+
+/// 전송 전에 모든 요청이 거치는 검사: 인증 헤더 모양과 이미 온 취소.
+fn precheck(req: &CopilotLlmRequest) -> Result<(), EasyOfficeError> {
+    validate_wire_headers(&req.headers)?;
+    req.cancel.check().map_err(EasyOfficeError::InvalidArgument)
+}
+
 fn dispatch_transport(
     req: &CopilotLlmRequest,
     host_llm: Option<&CopilotLlmClient<'_>>,
 ) -> Result<String, EasyOfficeError> {
-    validate_wire_headers(&req.headers)?;
-    req.cancel
-        .check()
-        .map_err(EasyOfficeError::InvalidArgument)?;
+    precheck(req)?;
     if let Some(client) = host_llm {
-        return client(req).map_err(|msg| {
-            if msg.contains("리다이렉트") || msg.contains("사설") || msg.contains("보안") {
-                EasyOfficeError::SecurityViolation(msg)
-            } else {
-                EasyOfficeError::InvalidArgument(msg)
-            }
-        });
+        return client(req).map_err(host_error);
     }
     if req.is_https {
         return Err(EasyOfficeError::InvalidArgument(
@@ -90,6 +97,7 @@ fn build_http_req(
         headers,
         body_json,
         cancel,
+        stream: false,
     }
 }
 
@@ -175,10 +183,19 @@ pub fn discover_provider_models(
     Ok(serialize_models_response(provider.kind, &discovered, true))
 }
 
+/// 스트림으로 받을 때 호스트가 대는 것: 전송, 모델 글 조각을 화면으로 보내는 통로, 조각을 묶는 요청 번호.
+#[derive(Clone, Copy)]
+pub struct StreamPlan<'a> {
+    pub request_id: &'a str,
+    pub client: &'a CopilotStreamClient<'a>,
+    pub events: &'a CopilotEventSink<'a>,
+}
+
 pub fn run_remote_or_local(
     req: &CopilotRunRequest,
     endpoint: &ValidatedEndpoint,
     host_llm: Option<&CopilotLlmClient<'_>>,
+    stream: Option<StreamPlan<'_>>,
     cancel: CancelHandle,
 ) -> Result<CopilotRunResponse, EasyOfficeError> {
     if req.provider.model.trim().is_empty() {
@@ -188,13 +205,58 @@ pub fn run_remote_or_local(
     }
     let headers = build_provider_headers(&req.provider)?;
     let (system_prompt, user_content) = build_prompts_for_llm(req)?;
-    let body_json = build_provider_chat_body(req, &system_prompt, &user_content)?;
-    let http_req = build_http_req(HttpMethod::Post, endpoint, headers, body_json, cancel);
-    let raw_response = dispatch_transport(&http_req, host_llm)?;
-    let (content, reasoning) = extract_provider_completion(req.provider.kind, &raw_response)?;
+    let body_json = build_provider_chat_body(req, &system_prompt, &user_content, stream.is_some())?;
+    let mut http_req = build_http_req(HttpMethod::Post, endpoint, headers, body_json, cancel);
+    let (content, reasoning) = match stream {
+        Some(plan) => {
+            http_req.stream = true;
+            read_streamed(req, &http_req, plan)?
+        }
+        None => {
+            let raw_response = dispatch_transport(&http_req, host_llm)?;
+            extract_provider_completion(req.provider.kind, &raw_response)?
+        }
+    };
     Ok(parse_and_validate_assistant_output(
         req, &content, reasoning,
     ))
+}
+
+/// 스트림 전송으로 본문을 받으며 모델 글 조각을 화면으로 흘리고, 끝난 뒤 조립한 본문을 돌려준다.
+/// 흘려 보낸 글은 보여 주기만 하고 검증은 돌려주는 본문 전체로 한다.
+fn read_streamed(
+    req: &CopilotRunRequest,
+    http_req: &CopilotLlmRequest,
+    plan: StreamPlan<'_>,
+) -> Result<(String, String), EasyOfficeError> {
+    precheck(http_req)?;
+    let mut assembler = StreamAssembler::new(req.provider.kind);
+    let mut seq = 0u32;
+    let sent = {
+        let mut sink = |chunk: &[u8]| {
+            if let Some(text) = assembler.feed(chunk) {
+                (plan.events)(&CopilotStreamEvent {
+                    request_id: plan.request_id,
+                    seq,
+                    text: &text,
+                });
+                seq += 1;
+            }
+            assembler.failure().is_none()
+        };
+        (plan.client)(http_req, &mut sink)
+    };
+    let raw = match sent {
+        Ok(raw) => raw,
+        // 조립기가 스트림 오류로 읽기를 멈추게 했으면 그 사유가 원인이다.
+        Err(msg) => {
+            return Err(match assembler.failure() {
+                Some(failure) => EasyOfficeError::InvalidArgument(failure.to_string()),
+                None => host_error(msg),
+            })
+        }
+    };
+    assembler.finish(&raw)
 }
 
 fn strip_code_fence(raw: &str) -> &str {

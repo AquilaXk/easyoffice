@@ -81,10 +81,39 @@ pub struct CopilotLlmRequest {
     pub body_json: String,
     /// 요청 취소 신호. 전송 계층이 소켓을 등록하고 취소 때 끊는다.
     pub cancel: CancelHandle,
+    /// 응답을 `text/event-stream`(또는 Gemini의 JSON 배열 스트림)으로 받는다. 전송 계층은 본문이 오는 대로 조각을 넘기고
+    /// 끝나면 지금처럼 전체 본문도 돌려준다.
+    pub stream: bool,
 }
 
 /// Host-supplied HTTP(S) completion callback (e.g. desktop OS TLS transport).
 pub type CopilotLlmClient<'a> = dyn Fn(&CopilotLlmRequest) -> Result<String, String> + 'a;
+
+/// 응답 본문 조각을 받는 콜백. `false`를 돌려주면 전송 계층이 읽기를 멈춘다.
+pub type ChunkSink<'a> = dyn FnMut(&[u8]) -> bool + 'a;
+
+/// `stream`이 켜진 요청을 실행하는 호스트 전송. 본문이 오는 대로 `sink`에 넘기고, 끝나면 전체 본문을 돌려준다.
+pub type CopilotStreamClient<'a> =
+    dyn Fn(&CopilotLlmRequest, &mut ChunkSink<'_>) -> Result<String, String> + 'a;
+
+/// 스트림으로 받은 모델 글 한 조각. 호스트가 화면으로 보낸다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopilotStreamEvent<'a> {
+    pub request_id: &'a str,
+    /// 요청 안에서 0부터 늘어나는 번호. 화면은 빠진 번호가 있으면 스트림 글을 버리고 최종 응답을 쓴다.
+    pub seq: u32,
+    pub text: &'a str,
+}
+
+pub type CopilotEventSink<'a> = dyn Fn(&CopilotStreamEvent<'_>) + 'a;
+
+/// 코파일럿이 호스트(데스크톱 셸)에 기대는 것: 일반 전송, 스트림 전송, 스트림 조각을 화면으로 보내는 통로.
+#[derive(Clone, Copy, Default)]
+pub struct CopilotHost<'a> {
+    pub llm: Option<&'a CopilotLlmClient<'a>>,
+    pub llm_stream: Option<&'a CopilotStreamClient<'a>>,
+    pub events: Option<&'a CopilotEventSink<'a>>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopilotMode {

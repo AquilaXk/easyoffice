@@ -494,14 +494,13 @@ fn big_doc_command(mode: &str, selection: &str) -> String {
 fn selection_command_refuses_a_selection_the_context_cannot_hold() {
     let reply = r#"{"reply":"x"}"#;
     // 선택 전체가 24 KiB를 넘는다, 문단 하나가 24 KiB를 넘는다. 앞 문단이 예산을 쓰는 것은 거부 사유가 아니다(PD-268).
-    for selection in [r#"{"paragraphIndex":0,"paragraphEnd":3}"#] {
-        let (res, bodies) = run(&big_doc_command("edit", selection), reply);
-        let Err(EasyOfficeError::InvalidArgument(msg)) = res else {
-            panic!("{selection}: {res:?}");
-        };
-        assert_eq!(msg, "선택한 범위가 너무 커서 처리할 수 없습니다.");
-        assert!(bodies.is_empty(), "the model is not called: {selection}");
-    }
+    let selection = r#"{"paragraphIndex":0,"paragraphEnd":3}"#;
+    let (res, bodies) = run(&big_doc_command("edit", selection), reply);
+    let Err(EasyOfficeError::InvalidArgument(msg)) = res else {
+        panic!("{selection}: {res:?}");
+    };
+    assert_eq!(msg, "선택한 범위가 너무 커서 처리할 수 없습니다.");
+    assert!(bodies.is_empty(), "the model is not called: {selection}");
     let huge = format!(r#""{}""#, "가".repeat(9_000));
     let one_huge = big_doc_command("edit", r#"{"paragraphIndex":0}"#).replacen(
         &format!(r#""{}""#, "가".repeat(3_000)),

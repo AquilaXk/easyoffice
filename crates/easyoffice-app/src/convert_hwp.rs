@@ -10,7 +10,7 @@
 use easyoffice_formats::{embed_thumbnail, DocumentFormat, EasyOfficeError, OutputCompatibility};
 
 use crate::convert_structured::RichPdfRenderer;
-use crate::copilot::CopilotLlmClient;
+use crate::copilot::{CopilotEventSink, CopilotHost, CopilotLlmClient, CopilotStreamClient};
 
 /// Writes a document the engine wrote as HWPX out as HWP 5.0 bytes (PD-178).
 pub type RichHwpWriter<'a> = dyn Fn(&[u8]) -> Result<Vec<u8>, String> + 'a;
@@ -29,6 +29,20 @@ pub struct ShellWriters<'a> {
     pub thumbnail: Option<&'a RichThumbnailRenderer<'a>>,
     /// Executes validated remote HTTPS or local HTTP model requests from the desktop shell.
     pub llm: Option<&'a CopilotLlmClient<'a>>,
+    /// Executes the same requests as a stream: the response body goes to the callback as it arrives.
+    pub llm_stream: Option<&'a CopilotStreamClient<'a>>,
+    /// Receives the pieces of the model's text for the page (PD-268).
+    pub copilot_events: Option<&'a CopilotEventSink<'a>>,
+}
+
+impl<'a> ShellWriters<'a> {
+    pub(crate) fn copilot_host(&self) -> CopilotHost<'a> {
+        CopilotHost {
+            llm: self.llm,
+            llm_stream: self.llm_stream,
+            events: self.copilot_events,
+        }
+    }
 }
 
 /// The HWP 5.0 bytes of `hwpx`, or the reason there are none: no writer on this host, or the

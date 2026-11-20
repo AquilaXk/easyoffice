@@ -58,9 +58,12 @@ pub fn build_provider_headers(
     }
 }
 
-pub fn chat_endpoint_target(provider: &ProviderConfig) -> EndpointTarget<'_> {
+pub fn chat_endpoint_target(provider: &ProviderConfig, stream: bool) -> EndpointTarget<'_> {
     match provider.kind {
         ProviderKind::Anthropic => EndpointTarget::AnthropicMessages,
+        ProviderKind::Google if stream => EndpointTarget::GoogleStream {
+            model: provider.model.trim(),
+        },
         ProviderKind::Google => EndpointTarget::GoogleGenerate {
             model: provider.model.trim(),
         },
@@ -165,10 +168,12 @@ fn coalesce_turns<'a>(
     turns
 }
 
+/// `stream`이면 Anthropic·OpenAI 호환 본문에 `"stream":true`를 넣는다(Gemini는 주소가 스트림 메서드로 달라지고 본문은 같다).
 pub fn build_provider_chat_body(
     req: &CopilotRunRequest,
     system_prompt: &str,
     user_content: &str,
+    stream: bool,
 ) -> Result<String, EasyOfficeError> {
     let model = req.provider.model.trim();
     if model.is_empty() {
@@ -206,6 +211,9 @@ pub fn build_provider_chat_body(
                 );
             } else {
                 out.push_str(",\"temperature\":0.2");
+            }
+            if stream {
+                out.push_str(",\"stream\":true");
             }
             out.push('}');
             out
@@ -279,6 +287,9 @@ pub fn build_provider_chat_body(
                 }
             } else if !model.contains("reasoner") {
                 out.push_str(",\"temperature\":0.2");
+            }
+            if stream {
+                out.push_str(",\"stream\":true");
             }
             out.push('}');
             out

@@ -38,10 +38,20 @@ pub struct ValidatedEndpoint {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndpointTarget<'a> {
-    OpenAiChat { default_prefix: &'a str },
+    OpenAiChat {
+        default_prefix: &'a str,
+    },
     AnthropicMessages,
-    GoogleGenerate { model: &'a str },
-    ModelsList { default_prefix: &'a str },
+    GoogleGenerate {
+        model: &'a str,
+    },
+    /// 같은 모델의 `streamGenerateContent`(스트림 응답).
+    GoogleStream {
+        model: &'a str,
+    },
+    ModelsList {
+        default_prefix: &'a str,
+    },
 }
 
 struct ParsedUrl<'a> {
@@ -217,6 +227,22 @@ pub fn clean_google_model_segment(raw_model: &str) -> Result<&str, EasyOfficeErr
     Ok(seg)
 }
 
+/// Gemini 호출 경로. 이미 모델 메서드(`:generateContent`·`:streamGenerateContent`)까지 적은 주소는 메서드만 바꾼다.
+fn google_method_path(trimmed: &str, seg: &str, method: &str) -> String {
+    let named = trimmed
+        .strip_suffix(":streamGenerateContent")
+        .or_else(|| trimmed.strip_suffix(":generateContent"));
+    if let Some(base) = named {
+        format!("{base}:{method}")
+    } else if trimmed.is_empty() {
+        format!("/v1beta/models/{seg}:{method}")
+    } else if trimmed.ends_with("/models") {
+        format!("{trimmed}/{seg}:{method}")
+    } else {
+        format!("{trimmed}/models/{seg}:{method}")
+    }
+}
+
 fn resolve_target_path(
     raw_path: &str,
     target: EndpointTarget<'_>,
@@ -246,18 +272,16 @@ fn resolve_target_path(
                 format!("{trimmed}/messages")
             }
         }
-        EndpointTarget::GoogleGenerate { model } => {
-            let seg = clean_google_model_segment(model)?;
-            if trimmed.ends_with(":generateContent") {
-                trimmed.to_string()
-            } else if trimmed.is_empty() {
-                format!("/v1beta/models/{seg}:generateContent")
-            } else if trimmed.ends_with("/models") {
-                format!("{trimmed}/{seg}:generateContent")
-            } else {
-                format!("{trimmed}/models/{seg}:generateContent")
-            }
-        }
+        EndpointTarget::GoogleGenerate { model } => google_method_path(
+            trimmed,
+            clean_google_model_segment(model)?,
+            "generateContent",
+        ),
+        EndpointTarget::GoogleStream { model } => google_method_path(
+            trimmed,
+            clean_google_model_segment(model)?,
+            "streamGenerateContent",
+        ),
         EndpointTarget::ModelsList { default_prefix } => {
             if trimmed.ends_with("/models") || trimmed.ends_with("/tags") {
                 trimmed.to_string()
