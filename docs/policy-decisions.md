@@ -4486,3 +4486,44 @@
 - **Alternatives rejected** 피벗 캐시를 `Arc`로 공유(공개 모델 `field_names` 타입이 바뀌어 피벗 JSON·UI·테스트 전체가 흔들리고, 총 바이트 상한이 같은 메모리 한도를 이미 보장). 표 수식 열 단위 접두합(수식 결과가 뒤 수식의 입력이 되는 행 순서 의미를 보존하려면 방향마다 누적기가 따로 필요해 예산이 더 단순). 출력 초과 시 JSON 중간 자르기(깨진 JSON).
 - **Verified by** `cargo test -p easyoffice-formats --test amplification_budget_pd262 --test pages_amplification_pd262`(재현 입력이 수정 전에 실패하는 것을 먼저 확인), `cargo test -p easyoffice-app --test readback_output_budget_pd262`, `node --test scripts/test-webui-layout-lint-token-pd262.mjs`, 위생·fmt·clippy·전체 테스트·자체 시험.
 - **Revisit when** 같은 본문을 여러 곳에서 참조하는 문서를 ODT·HWPX로 보내는 사용이 실제로 생겨 빈 각주가 문제가 될 때, 또는 400만 셀 예산에 걸리는 정상 표가 보고될 때.
+
+## PD-263. 시트 교차 형식 저장 손실 경고·1904 날짜 체계·피벗 오류값·새로 고침 겹침 확인·`@` 서식 숫자 표시·ISO 날짜 칸·R1C1 시트 이름 인용
+
+- **Status** Implemented (QA 요청 2026-11-20, 전체 리뷰 2차). 엔진 `easyoffice-formats`(`iso_serial.rs`·`ods_date_system.rs`·`office_codecs.rs`·`xls_styles.rs`·`biff8_xls_{codec,reader}.rs`·`sheet_chart.rs`)·`easyoffice-sheet`(`date_system.rs`·`pivot.rs`·`text_format.rs`)·`easyoffice-app`(`convert_structured_loss.rs`·`convert_open.rs`·`sheet_pivot_ipc.rs`·`sheet_format_ipc.rs`), 화면(`sheet-pivot-ui.js`·`sheet-pivot-model.js`·`sheet-utils.js`·`file-open.js`·`workspace-tools.js`), 데스크톱 셸(`confirm_dialog.rs`).
+- **Context** 리뷰어가 재현한 일곱 가지: ODS·XLS·CSV 저장이 차트·그림·메모·피벗·슬라이서를 알리지 않고 버림, 열 때 거부된 차트·피벗이 일반 화면에 안 나옴, `date1904="1"` 파일이 저장 뒤 1904 표시를 잃어 모든 날짜가 1,462일 밀림, 피벗 합계가 오류 칸을 건너뜀, 커진 피벗이 이웃 칸·표·피벗을 말없이 덮음, `1e10`이 `@` 칸의 인쇄에서는 `1e10`·`TEXT`에서는 `10000000000`, `t="d"` 칸이 날짜가 아닌 글자로 읽힘, 시트 이름 `R1C1`이 차트 참조에서 따옴표 없이 쓰임.
+- **Decision (`PD-263`)**
+  1. **저장 손실 경고**: ODS·XLS·CSV·TSV는 차트·그림·메모·피벗 테이블·피벗 슬라이서 개수를 `차트 N개는 XLS에 저장하지 않았습니다.` 꼴로 알린다(PD-227·PD-235 줄 모양). XLSX는 피벗 캐시를 원본 열에서 다시 만들어 열보다 많은 캐시 필드(계산 필드·날짜 묶음)를 쓰지 않으므로 `피벗 계산 필드·날짜 묶음 필드 N개는 XLSX에 저장하지 않았습니다.`로 알린다(필드 이름 수에서 원본 폭을 뺀 값).
+  2. **열기 경고**: `charts_rejected`·`pivots_rejected`를 `images_rejected`·`notes_rejected`와 같은 줄 모양으로 일반 열기 응답에도 싣는다(점검 경로와 한 함수 `push_rejected_object_warnings`).
+  3. **1904 체계**: XLSX `workbookPr date1904`, XLS `DATEMODE`(0x0022), ODS `table:null-date`(1904-01-01만)를 읽어 첫 시트 `SheetStyling.date1904`에 두고 같은 자리에 쓴다. 엔진은 스레드별 날짜 체계(`enter_date_system`)에서 `civil_from_serial`·`serial_from_civil`·요일·`TODAY`·`TEXT`·기간 규칙을 1,462일 어긋난 서수로 계산한다(1900 체계의 60일·0일 특례는 그대로). 내보내기·점검·저장은 통합 문서 자신의 체계로 표시한다.
+  4. **피벗 오류값**: 합계·평균·최소·최대는 값 칸의 첫 오류를 그 묶음·행합·열합·총합의 답으로 한다(스프레드시트 프로그램과 같음). 개수는 오류·글자도 센다(`COUNTA`). 오류는 `f64` 격자 안에서 오류 번호를 담은 조용한 NaN으로 실리고(`pivot_error_value`·`pivot_error_of`) JSON에서는 `"#DIV/0!"` 글자가 되어 칸에 오류 리터럴로 쓰인다.
+  5. **피벗 새로 고침 겹침**: 커진 영역이 다른 피벗·표·자기 원본과 겹치면 막고(`데이터 원본 변경`과 같은 문구), 원래 영역 밖의 값·수식이 있는 칸을 덮으면 `대상 셀에 이미 데이터가 있습니다. 바꾸시겠습니까?`를 먼저 묻는다(네이티브 확인 종류 `replace-pivot-cells`). 아니오면 아무것도 바꾸지 않고, 예면 한 단계 실행 취소로 되돌린다.
+  6. **`@` 서식 숫자**: 숫자로 읽히는 칸이 `@` 서식이면 `TEXT(n, "@")`와 같은 글자로 표시한다(`1e10` → `10000000000`). 글자 칸(`007`)은 그대로.
+  7. **ISO 날짜 칸**: XLSX `t="d"`의 `yyyy-mm-dd`·`yyyy-mm-ddThh:mm:ss`·`hh:mm:ss`를 날짜 체계에 맞는 서수 숫자로 읽는다. 읽을 수 없는 글자는 글자로 둔다.
+  8. **시트 이름 인용**: `R`·`C`·`RC`·`R1`·`C1`·`R1C1` 꼴을 따옴표로 감싼다(차트 참조·구조화 참조·시트 이름 바꾸기·화면 `quoteFormulaSheetName` 모두 `sheet_name_needs_quotes` 한 규칙).
+- **재사용 판단 (구현 원칙 3단계)** (1) 같은 문제를 푼 허용 라이선스 크레이트는 이 저장소의 시트 모델·상한과 맞는 것이 없었다. (2) 이미 쓰는 의존성: `pages_write_loss` 줄 모양, `images_rejected` 경고, `civil_from_serial`·`serial_from_civil`·`format_number_with_code`, 네이티브 확인 대화상자, `데이터 원본 변경`의 겹침 검사를 그대로 확장했다. (3) 이식한 참조 코드는 없다(외부 스프레드시트 구현의 코드를 옮기지 않았고, 날짜 체계의 1,462일 차이와 피벗 오류 동작은 파일 형식 명세와 스프레드시트 프로그램의 동작으로 정했다).
+- **Why** 알리지 않는 손실과 4년 밀린 날짜는 데이터를 말없이 바꾼다. 오류를 건너뛰는 합계는 틀린 숫자를 정상으로 보이게 한다.
+- **Trade-offs** XLSX 저장은 계산 필드·날짜 묶음 필드를 쓰지 않는다(캐시 필드 XML을 그대로 쓰면 Excel이 요구하는 `items`·`groupItems` 대응을 검증할 수 없어 깨진 파일 위험이 더 크다고 보았다). 시트 세션(`evaluate_sheet`의 `open`·`apply`)과 격자 표시는 아직 1900 체계로 계산한다: 열기·저장·내보내기·점검만 1904 체계를 따른다. ODS `office:date-value` 칸은 여전히 글자로 읽는다.
+- **Alternatives rejected** 열 때 1904 서수를 1900으로 옮겨 계산하고 저장 때 되돌리는 방식(날짜 서식이 없는 숫자와 식 안의 상수가 어긋남). 오류를 0으로 세는 피벗.
+- **Verified by** `cargo test -p easyoffice-app --test sheet_cross_format_loss_pd263 --test open_rejected_parts_pd263 --test sheet_date1904_pd263`, `cargo test -p easyoffice-formats --test date1904_pd263`, `cargo test -p easyoffice-sheet --test sheet_pivot_errors_pd263 --test date_system_pd263`, `node --test scripts/test-sheet-quote-names-pd263.mjs scripts/test-sheet-pivot-errors-pd263.mjs scripts/test-webui-sheet-pivots-pd255.mjs scripts/test-webui-sheet-date1904-pd263.mjs`(재현 입력이 수정 전에 실패하는 것을 먼저 확인).
+- **Revisit when** 1904 체계 통합 문서의 격자 표시·시트 세션 계산이 필요해질 때, 또는 계산 필드·날짜 묶음 필드 피벗을 XLSX로 되돌려 써야 할 때.
+
+## PD-264. 문서 교차 저장 손실·Pages 부록 누적·DOCX 구역 머리글·ODT 구역 단, BASE 보드·인쇄·내보내기, 코파일럿 원자성·키 재사용, 글꼴 요청 한도
+
+- **Status** Implemented (QA 요청 2026-11-20, 전체 리뷰 2차). 엔진(`doc_save_loss.rs`·`rich_document.rs`·`rich_read_pages/notes.rs`·`pages_write/`·`rich_writers.rs`·`rich_page_frame.rs`·`odt_rich_writer.rs`·`rich_read_odt.rs`)·앱(`convert_structured*.rs`·`convert_open.rs`)·화면(`base-model.js`·`base-studio.js`·`copilot-actions.js`·`copilot-model-ui.js`·`hwp-host.js`·`file-open.js`·`save-payload.js`)·데스크톱 셸(`font_catalog.rs`).
+- **Context** 리뷰어가 재현한 여덟 가지: Pages 열기→저장 4세대에 `HEADER-TEXT`가 네 번, HWPX·RTF·MD·TXT·PDF 저장이 메모·변경 추적을 알리지 않음, DOCX 구역이 둘 이상이면 머리글·`titlePg`가 마지막 구역에만 붙음, ODT 단 설정이 쪽 전체에 첫 단 하나로 쓰임, 코파일럿 작업 목록이 중간에 실패하면 앞 변경이 남음, 주소를 바꾸고 새 키를 넣지 않으면 저장 키가 새 주소로 감, BASE 보드가 제목 필드를 지움·인쇄가 한 쪽에서 잘림·CSV/TSV 수식 주입, 같은 글꼴을 다섯 번째 연결부터 못 읽음.
+- **Decision (`PD-264`)**
+  1. **Pages 부록 표지**: 머리글·바닥글 부록 문단(제목 포함)에 `RichParagraph.frame_copy`를 달고, 쪽 틀을 쓰는 Pages 쓰기는 `RichDocument::body_blocks()`로 건너뛴다. 표지는 열기 JSON(`frameCopy`)·화면(`data-eo-frame-copy`)·저장 JSON을 거쳐 돌아온다. 각주·댓글 부록은 Pages 쓰기가 개체로 쓰지 않으므로 누적되지 않아 표지가 없다.
+  2. **손실 경고**: HWPX·RTF·MD·TXT·PDF 저장은 `HWPX 저장에서 빠진 메모 N개`·`… 변경 추적 N곳`(HWPX는 `… 첫 쪽 머리글·바닥글 N개`도) 줄을 낸다(`pages_write_loss` 모양).
+  3. **DOCX 구역**: 머리글·꼬리말 참조와 `titlePg`는 첫 구역 `sectPr`에만 쓴다(뒤 구역은 이어받음). `titlePg`는 스키마 순서대로 `cols` 뒤에 둔다. 이 모델은 문서당 쪽 틀 하나라 리더는 첫 구역의 것을 받고 다른 구역의 것은 기존 알림(`구역마다 다른 머리말·꼬리말은 첫 구역의 것만 …`)으로 알린다.
+  4. **ODT 구역 단**: 단이 같은 연속 문단을 `text:section`(자동 스타일 `style:family="section"`의 `style:columns`)으로 쓰고 쪽 배치의 단은 쓰지 않는다. 읽기는 구역 스타일의 단을 문단에 단다(쪽 배치 단은 기존대로 단이 없는 문단에 단다).
+  5. **코파일럿 원자성**: 작업 목록 적용이 어느 단계에서든 실패하면 시작 때 찍은 스냅샷으로 되돌리고 오류를 다시 던진다(되돌리기 단계·`noteActivity`는 만들지 않음). 성공하면 지금처럼 한 단계다.
+  6. **코파일럿 키**: 저장 키는 입력한 주소와 짝(`keyUrlsByProvider`)으로만 쓴다. 확인 때 주소가 바뀌고 새 키가 없으면 저장 키를 지운다. 요청을 만들 때도 주소가 맞는지 다시 본다.
+  7. **BASE 보드**: 기준 필드는 선택·다중 선택만(없으면 안내). 같은 열·옵션 밖 값으로 놓으면 쓰지 않는다. 다중 선택 카드는 가진 옵션마다 열에 나타나고 옮기면 그 열 태그만 바꾼다.
+  8. **BASE 인쇄**: 행 높이 6mm·제목 10mm·여백 10mm로 쪽 높이에서 행 수를 정해 여러 쪽으로 나누고 쪽마다 머리글 행을 반복한다.
+  9. **CSV/TSV 수식 주입**: `=`·`+`·`-`·`@`·탭·CR로 시작하는 글자 값(BASE는 머리글 포함, 숫자 칸 제외)과 시트 CSV/TSV의 글자 칸 앞에 `'`를 붙인다. 숫자는 부호를 지킨다.
+  10. **글꼴 요청**: 측정: 편집기 연결 한 번이 쓰는 글꼴 파일마다 셸 읽기 1회이고 연결이 바뀔 때마다 쪽 캐시가 비어 연결 수만큼 읽었다(시험에서 6회 연결 = 읽기 6회, 5번째부터 셸이 거부). 쪽 바이트 캐시를 연결을 넘어 유지하고 쓴 파일을 마지막에 내보내는 순서(LRU)로 바꿨으며, 창당 같은 파일 요청 한도는 4에서 16으로 올렸다(캐시 밖으로 밀린 뒤의 재읽기 몫).
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트 중 이 저장소의 문서 모델에 맞는 것은 없었다. (2) `pages_write_loss`·`images_rejected` 줄 모양, 기존 스냅샷 복원(`restoreWorkspaceSnapshot`), `text:section`·`w:sectPr` 쓰기 경로, 쪽 캐시를 그대로 확장했다. (3) 이식한 참조 코드는 없다.
+- **Why** 되풀이할수록 늘어나는 본문, 반만 적용된 문서, 다른 주소로 가는 키, 지워진 제목, 잘린 인쇄는 모두 사용자의 작업물을 조용히 바꾼다.
+- **Trade-offs** 다른 구역의 머리글은 문서당 쪽 틀 하나라는 모델 때문에 여전히 첫 구역 것만 가져온다. 복사본 표지는 DOCX 등 다른 형식을 거치면 사라진다(그 형식은 부록을 본문으로 읽는다). 쪽 글꼴 캐시는 편집기를 닫은 뒤에도 쪽이 사는 동안 최대 128MiB를 쥔다.
+- **Verified by** `cargo test -p easyoffice-formats --test pages_fixtures --test docx_sections_frame_pd263 --test odt_sections_columns_pd263`, `cargo test -p easyoffice-app --test doc_cross_format_loss_pd263`, `node --test scripts/test-webui-copilot-pd253.mjs scripts/test-webui-base-board-drop-pd263.mjs scripts/test-base-csv-injection-pd263.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-doc-roundtrip-pd243.mjs`(재현 입력이 수정 전에 실패하는 것을 먼저 확인).
+- **Revisit when** 구역마다 다른 머리글을 편집해야 할 때, 또는 PDF 스튜디오 저장의 주석·레이어·쪽 레이블 보존(이 PD에서 하지 않음)을 다룰 때.

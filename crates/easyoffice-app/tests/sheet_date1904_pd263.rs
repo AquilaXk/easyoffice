@@ -1,9 +1,7 @@
 //! PD-263: a workbook in the 1904 date system keeps it through open and save, and its dates show and export in that system.
 
 use easyoffice_app::EasyOfficeIpcRouter;
-use easyoffice_formats::{
-    CellStyle, OoxmlCodec, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
-};
+use easyoffice_formats::{CellStyle, OoxmlCodec, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// `date1904="1"`, number format 14 and the value 43000 (2021-09-23 in the 1904 system, 2017-09-22 in the 1900 one).
 fn workbook_1904() -> Vec<u8> {
@@ -42,7 +40,11 @@ fn decode(bytes: &[u8]) -> String {
 }
 
 fn convert(decoded: &str, target: &str) -> Vec<u8> {
-    let save = decoded.replacen(r#""action":"decode""#, &format!(r#""targetFormat":"{target}""#), 1);
+    let save = decoded.replacen(
+        r#""action":"decode""#,
+        &format!(r#""targetFormat":"{target}""#),
+        1,
+    );
     let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", &save).unwrap();
     EasyOfficeIpcRouter::decode_base64(&field(&saved, "convertedBase64")).unwrap()
 }
@@ -53,7 +55,10 @@ fn open_and_save_keep_date1904() {
     assert!(decoded.contains("\"date1904\":true"), "{decoded}");
     let saved = convert(&decoded, "xlsx");
     let entries = ZipArchiveCodec::unpack(&saved, &ZipSecurityPolicy::default()).unwrap();
-    let book = entries.iter().find(|e| e.path == "xl/workbook.xml").unwrap();
+    let book = entries
+        .iter()
+        .find(|e| e.path == "xl/workbook.xml")
+        .unwrap();
     assert!(String::from_utf8_lossy(&book.data).contains("date1904=\"1\""));
 }
 
