@@ -349,32 +349,8 @@ impl ZipArchiveCodec {
             });
         }
 
-        // The crate looks for the last record signature and tolerates data after it; the
-        // strict trailer match, the single-disk rule and the directory bounds stay here.
-        let eocd_offset = Self::find_eocd_offset(bytes).ok_or_else(|| {
-            EasyOfficeError::CorruptedContainer(
-                "PKZIP End of Central Directory(0x06054B50) 레코드를 찾을 수 없습니다.".to_string(),
-            )
-        })?;
-        let disk_num = read_u16_le(bytes, eocd_offset + 4)?;
-        let cd_start_disk = read_u16_le(bytes, eocd_offset + 6)?;
-        let disk_entries = read_u16_le(bytes, eocd_offset + 8)? as usize;
-        let total_entries = read_u16_le(bytes, eocd_offset + 10)? as usize;
-        if disk_num != 0 || cd_start_disk != 0 || disk_entries != total_entries {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "다중 디스크 ZIP 아카이브는 지원하지 않습니다.".to_string(),
-            ));
-        }
-        let cd_size = read_u32_le(bytes, eocd_offset + 12)? as usize;
-        let cd_offset = read_u32_le(bytes, eocd_offset + 16)? as usize;
-        if cd_offset
-            .checked_add(cd_size)
-            .is_none_or(|end| end > eocd_offset)
-        {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PKZIP Central Directory 오프셋 또는 크기가 유효하지 않습니다.".to_string(),
-            ));
-        }
+        let end = Self::read_end_record(bytes, policy)?;
+        let (total_entries, cd_offset, cd_end) = (end.total_entries, end.cd_offset, end.cd_end);
 
         // Offset 0 is fixed: no data may precede the archive (the crate would detect and skip it).
         let mut archive = ZipArchive::with_config(
@@ -384,6 +360,15 @@ impl ZipArchiveCodec {
             Cursor::new(bytes),
         )
         .map_err(zip_read_error)?;
+        // The crate chooses its own end record (the last signature it can parse, even inside a
+        // comment) and lets extra fields override what the directory says. Everything below
+        // therefore holds the crate's view to the raw bytes of the directory checked here.
+        if archive.central_directory_start() != cd_offset as u64 {
+            return Err(EasyOfficeError::SecurityViolation(
+                "ZIP Central Directory 위치가 End of Central Directory 기록과 다릅니다."
+                    .to_string(),
+            ));
+        }
         // The crate keeps one entry per exact name, so a shorter list than the directory
         // announces means a path appears twice.
         if archive.len() != total_entries {
@@ -394,8 +379,22 @@ impl ZipArchiveCodec {
 
         let mut descriptors: Vec<ZipEntryDescriptor> = Vec::with_capacity(total_entries.min(4096));
         let mut records: Vec<CentralRecord> = Vec::with_capacity(total_entries.min(4096));
+        let mut next_record = cd_offset;
         for index in 0..archive.len() {
             let file = archive.by_index_raw(index).map_err(zip_read_error)?;
+            let method = method_id(file.compression()).ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer(format!(
+                    "지원하지 않는 ZIP 압축 방식({:?})입니다 (Store=0, Deflate=8 전용).",
+                    file.compression()
+                ))
+            })?;
+            if file.central_header_start() as usize != next_record {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "ZIP Central Directory 항목이 연속하지 않거나 크레이트가 읽은 위치와 다릅니다."
+                        .to_string(),
+                ));
+            }
+            next_record = Self::check_central_record(bytes, next_record, cd_end, &file)?;
             let path = std::str::from_utf8(file.name_raw())
                 .map_err(|_| {
                     EasyOfficeError::InvalidUtf8(
@@ -403,12 +402,6 @@ impl ZipArchiveCodec {
                     )
                 })?
                 .to_string();
-            let method = file.compression().to_u16();
-            if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "지원하지 않는 ZIP 압축 방식({method})입니다 (Store=0, Deflate=8 전용)."
-                )));
-            }
             descriptors.push(ZipEntryDescriptor::new(
                 path.clone(),
                 file.compressed_size(),
@@ -424,6 +417,12 @@ impl ZipArchiveCodec {
                 local_offset: file.header_start() as usize,
                 data_start: file.data_start().map_or(0, |start| start as usize),
             });
+        }
+
+        if next_record != cd_end {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PKZIP Central Directory 엔트리 총 크기 불일치".to_string(),
+            ));
         }
 
         ZipSecurityGuard::validate_archive(&descriptors, policy)?;
@@ -499,6 +498,135 @@ impl ZipArchiveCodec {
         }
 
         Ok(false)
+    }
+
+    /// The strict end record (see [`Self::find_eocd_offset`]) and every limit that must hold before
+    /// the crate allocates for the directory: single disk, no ZIP64, the policy's entry count,
+    /// directory bounds, and no second end record inside the comment.
+    fn read_end_record(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+    ) -> Result<EndRecord, EasyOfficeError> {
+        let eocd_offset = Self::find_eocd_offset(bytes).ok_or_else(|| {
+            EasyOfficeError::CorruptedContainer(
+                "PKZIP End of Central Directory(0x06054B50) 레코드를 찾을 수 없습니다.".to_string(),
+            )
+        })?;
+        let disk_num = read_u16_le(bytes, eocd_offset + 4)?;
+        let cd_start_disk = read_u16_le(bytes, eocd_offset + 6)?;
+        let disk_entries = read_u16_le(bytes, eocd_offset + 8)? as usize;
+        let total_entries = read_u16_le(bytes, eocd_offset + 10)? as usize;
+        if disk_num != 0 || cd_start_disk != 0 || disk_entries != total_entries {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "다중 디스크 ZIP 아카이브는 지원하지 않습니다.".to_string(),
+            ));
+        }
+        let cd_size = read_u32_le(bytes, eocd_offset + 12)? as usize;
+        let cd_offset = read_u32_le(bytes, eocd_offset + 16)? as usize;
+        let zip64_locator = eocd_offset >= ZIP64_LOCATOR_LEN
+            && bytes[eocd_offset - ZIP64_LOCATOR_LEN..].starts_with(&ZIP64_LOCATOR_SIG);
+        if total_entries == usize::from(u16::MAX)
+            || cd_offset == u32::MAX as usize
+            || cd_size == u32::MAX as usize
+            || zip64_locator
+        {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "ZIP64 아카이브는 지원하지 않습니다.".to_string(),
+            ));
+        }
+        if total_entries > policy.max_entries {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "ZIP 엔트리 개수({total_entries})가 허용 상한({})을 초과했습니다.",
+                policy.max_entries
+            )));
+        }
+        let cd_end = cd_offset
+            .checked_add(cd_size)
+            .filter(|&end| end <= eocd_offset)
+            .ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer(
+                    "PKZIP Central Directory 오프셋 또는 크기가 유효하지 않습니다.".to_string(),
+                )
+            })?;
+        // A second end record makes tools disagree on which directory is the archive's: one
+        // inside the comment (the crate accepts it when data follows), or an earlier record whose
+        // comment also reaches the end of the file (the strict search above takes the last).
+        let sig = Self::END_OF_CENTRAL_DIR_SIG.to_le_bytes();
+        let in_comment = bytes[eocd_offset + 22..].windows(4).any(|w| w == sig);
+        let window_start = bytes.len().saturating_sub(22 + 65_535);
+        let earlier_fit = bytes[window_start..eocd_offset]
+            .windows(22)
+            .enumerate()
+            .any(|(at, record)| {
+                let comment_len = usize::from(u16::from_le_bytes([record[20], record[21]]));
+                record.starts_with(&sig) && window_start + at + 22 + comment_len == bytes.len()
+            });
+        if in_comment || earlier_fit {
+            return Err(EasyOfficeError::SecurityViolation(
+                "ZIP에 End of Central Directory 기록이 둘 이상 있습니다.".to_string(),
+            ));
+        }
+        Ok(EndRecord {
+            total_entries,
+            cd_offset,
+            cd_end,
+        })
+    }
+
+    /// Reads the raw central directory record at `start` and requires it to say what the crate
+    /// reports for `file` (name, method, flags, CRC, 32-bit sizes, local offset), with none of the
+    /// extra fields that make the crate replace those values (ZIP64, Unicode path, AES). Returns
+    /// where the record ends.
+    fn check_central_record<R: std::io::Read>(
+        bytes: &[u8],
+        start: usize,
+        cd_end: usize,
+        file: &zip::read::ZipFile<'_, R>,
+    ) -> Result<usize, EasyOfficeError> {
+        let corrupt = |what: &str| {
+            EasyOfficeError::CorruptedContainer(format!("PKZIP Central Directory {what}"))
+        };
+        if start.checked_add(46).is_none_or(|end| end > cd_end) {
+            return Err(corrupt("헤더가 절단되었습니다."));
+        }
+        if read_u32_le(bytes, start)? != Self::CENTRAL_DIR_HEADER_SIG {
+            return Err(corrupt("시그니처(0x02014B50) 불일치"));
+        }
+        let name_len = read_u16_le(bytes, start + 28)? as usize;
+        let extra_len = read_u16_le(bytes, start + 30)? as usize;
+        let comment_len = read_u16_le(bytes, start + 32)? as usize;
+        let name_end = start + 46 + name_len;
+        let extra_end = name_end + extra_len;
+        let end = extra_end + comment_len;
+        if end > cd_end {
+            return Err(corrupt("엔트리 경계 초과"));
+        }
+        let mut extra = &bytes[name_end..extra_end];
+        while extra.len() >= 4 {
+            let tag = u16::from_le_bytes([extra[0], extra[1]]);
+            let len = usize::from(u16::from_le_bytes([extra[2], extra[3]]));
+            if matches!(tag, EXTRA_ZIP64 | EXTRA_UNICODE_PATH | EXTRA_AES) {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "ZIP Central Directory 부가 필드(0x{tag:04X})는 크기·이름·압축 방식을 바꿀 수 있어 허용하지 않습니다."
+                )));
+            }
+            extra = extra
+                .get(4 + len..)
+                .ok_or_else(|| corrupt("부가 필드 길이 초과"))?;
+        }
+        let agrees = read_u16_le(bytes, start + 8)? & 1 == u16::from(file.encrypted())
+            && Some(read_u16_le(bytes, start + 10)?) == method_id(file.compression())
+            && u64::from(read_u32_le(bytes, start + 16)?) == u64::from(file.crc32())
+            && u64::from(read_u32_le(bytes, start + 20)?) == file.compressed_size()
+            && u64::from(read_u32_le(bytes, start + 24)?) == file.size()
+            && u64::from(read_u32_le(bytes, start + 42)?) == file.header_start()
+            && &bytes[start + 46..name_end] == file.name_raw();
+        if !agrees {
+            return Err(EasyOfficeError::SecurityViolation(
+                "ZIP Central Directory 원시 기록이 크레이트가 읽은 값과 다릅니다.".to_string(),
+            ));
+        }
+        Ok(end)
     }
 
     /// Cross-checks the local file header of `record` against its central directory entry (the
@@ -610,6 +738,20 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, EasyOfficeError> {
     ]))
 }
 
+/// The end record's numbers the reader keeps.
+struct EndRecord {
+    total_entries: usize,
+    cd_offset: usize,
+    cd_end: usize,
+}
+
+const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4B, 0x06, 0x07];
+/// Signature (4) plus the locator's fields (16).
+const ZIP64_LOCATOR_LEN: usize = 20;
+const EXTRA_ZIP64: u16 = 0x0001;
+const EXTRA_AES: u16 = 0x9901;
+const EXTRA_UNICODE_PATH: u16 = 0x7075;
+
 /// What the central directory says about one entry, with the offsets the crate resolved.
 struct CentralRecord {
     path: String,
@@ -619,6 +761,18 @@ struct CentralRecord {
     uncomp_size: usize,
     local_offset: usize,
     data_start: usize,
+}
+
+/// The method numbers this reader accepts. Without a compression feature the crate reports
+/// DEFLATE as an unsupported method, which still compares equal to its constant.
+fn method_id(method: CompressionMethod) -> Option<u16> {
+    if method == CompressionMethod::STORE {
+        Some(ZipArchiveCodec::METHOD_STORE)
+    } else if method == CompressionMethod::DEFLATE {
+        Some(ZipArchiveCodec::METHOD_DEFLATE)
+    } else {
+        None
+    }
 }
 
 fn zip_read_error(err: ZipError) -> EasyOfficeError {
