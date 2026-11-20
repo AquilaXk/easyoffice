@@ -33,3 +33,18 @@
 
 ## BASE
 - [ ] 레코드 만 건 격자: 관계 칸 옵션은 지연 생성으로 줄였으나(2,000건 0.35초) 1만 건은 다시 그리기가 3.3초라 행 가상화가 남음(`base-studio.js` `renderGridView`)
+
+## 시트 함수 (PD-270, 비교표 `docs/sheet-function-parity.md`)
+- [ ] 텍스트: `REGEXTEST`·`REGEXEXTRACT`·`REGEXREPLACE`는 정규식 엔진이 필요한데 엔진 크레이트는 외부 의존 0(PD-053). QA가 PD-053 예외(참조 엔진 A가 쓰는 크레이트)를 정하면 이식하고, 그때 XLSX `_xlfn.` 접두 목록에도 `REGEX*`·`TRIMRANGE`·`PERCENTOF`를 더한다(`easyoffice-formats/src/xlsx_formula_text.rs`와 `tests/fixtures/xlsx_future_functions.txt`, 포맷 크레이트 개편 병합 뒤)
+- [ ] 텍스트 나머지: `BAHTTEXT`(참조 B), `JIS`, `PHONETIC`; 온라인 서비스 `DETECTLANGUAGE`·`TRANSLATE`는 대상 아님
+- [ ] 통계: `FORECAST.ETS`·`.CONFINT`·`.SEASONALITY`·`.STAT` 4개(참조 A에 있음, 지수 평활 상태 공간 모형)
+- [ ] 조회·참조: `GROUPBY`·`PIVOTBY`·`GETPIVOTDATA`(피벗 엔진과 맞춰야 함), `IMAGE`(시트 개체 모델), `RTD`는 대상 아님
+- [ ] 재무: `ACCRINT` 기준 1~3과 `ODDFPRICE`·`ODDFYIELD`·`ODDLPRICE` 일부 값이 참조 A 시험(기준 앱 산출값 대조)과 다르다. `base/src/functions/financial/accrint.rs`·`calendar.rs`의 일수 계산을 이식해 대조
+- [ ] 큐브 7개(`CUBE*`), 웹(`WEBSERVICE`·`FILTERXML`), 추가 기능(`CALL`·`REGISTER.ID`·`EUROCONVERT`), `STOCKHISTORY`는 외부 연결이라 대상 아님. `EUROCONVERT`만 환산표를 두면 가능(참조 B에 있음)
+- [ ] 빈 칸이 배열 원소로 한 값 함수에 넘어갈 때 `Expr::Text("")`로 바뀌어 `NOT(범위)`가 `#VALUE!`, `SUM(ABS(A1:A3))`의 빈 칸이 `#VALUE!`가 된다(`array_eval.rs` `literal`). 빈 칸을 가리키는 식 종류가 필요하다
+- [ ] `A1:OFFSET(...)`처럼 함수 호출을 끝으로 하는 범위 연산자, `@` 암묵적 교차 연산자 일부(`COLUMNS(@A1:C1)`, `OFFSET(@B1:B4,...)`)
+- [ ] `TRIMRANGE`에 전체 열·행 참조(`A:A`)를 주면 배열 예산을 넘어 `#SPILL!`; 사용 범위로 먼저 줄여야 한다
+- [ ] `CELL`의 `format`·`width`·`color`·`parentheses`·`prefix`·`protect`·`filename`, `INFO`의 `release`·`osversion`·`directory`·`origin`(파일 이름·서식 정보를 평가 맥락에 실어야 함)
+- [ ] 날짜 글 해석: `DATEVALUE("2026 - 01 - 01")`(구분자 둘레 공백), `"... 24:00:00"` 올림, `DATEDIF`의 지역 날짜 글, 순환 참조 오류 값(`#NUM!` 대신 `#CIRC!`인지 기준 앱 대조)
+- [ ] `ROUNDDOWN((0.1+0.7)*10,0)`처럼 이진 오차를 15자리로 보정한 뒤 자르는 반올림 계열(참조 A는 8, 우리는 7): 기준 앱 값 확인 필요(QA)
+

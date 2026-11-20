@@ -4,6 +4,7 @@
 
 ## 2026-11-20
 
+- 시트 함수를 기준 목록과 대조했습니다. `TEXTSPLIT`, `ARRAYTOTEXT`, `TRIMRANGE`, `ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`, `PERCENTOF`, `ISO.CEILING`, `AMORDEGRC`를 더했고(내장 함수 299종), `INDEX`·`CHOOSE`가 참조를 돌려주고 `ADDRESS`·`ACCRINTM`·`NETWORKDAYS` 계열·`CHAR`·`TYPE` 등 30건의 결과를 문서에 맞췄습니다. 한 값 함수 87개가 범위·배열을 원소별로 계산합니다(PD-270).
 - BASE(관계형 데이터베이스)와 BOARD(무한 캔버스 보드) 모듈을 더했습니다(PD-259, PD-260).
 - BASE·BOARD를 편집 패키지 `.eobase`·`.eoboard`로 저장하고 파일 연결·최근 문서에 올렸습니다. XLSX·CSV·TSV(BASE)와 PDF(BOARD)는 내보내기입니다. 깨진 패키지는 파일 전체를 거부합니다(PD-265).
 - BASE 관계 열이 서로를 가리킬 때 스택 오버플로가 나던 문제를 고쳤습니다. 보드 보기는 선택·다중 선택 열만 기준으로 씁니다. 인쇄는 여러 쪽에 나누고 쪽마다 머리글 행을 반복합니다.
