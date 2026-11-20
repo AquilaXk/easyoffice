@@ -178,6 +178,49 @@ fn assert_same(xml: &str) {
     }
 }
 
+/// Inputs on which the crate reads a malformed construct another way than the owned tokenizer did.
+/// None of them is well-formed XML:
+/// - `<!-->` and `<?>` closed at their own opener; the crate needs the closing `-->` and `?>`;
+/// - `<!` that opens no comment, CDATA section or declaration was a start tag named `!...`;
+/// - an end tag holding a quote reads like a start tag (its `>` can be quoted); the owned one ended
+///   it at the first `>`;
+/// - a `<` right before a character that cannot start a name or right after a quote, and `=` where an
+///   attribute name starts: the crate refuses the first two and reads the third as a part of the name.
+fn is_malformed_construct(xml: &str) -> bool {
+    let bang_garbage = xml.match_indices("<!").any(|(at, _)| {
+        let rest = &xml[at + 2..];
+        !(rest.starts_with("--") || rest.starts_with("[CDATA[") || rest.starts_with("DOCTYPE"))
+    });
+    let end_tag_quote = xml.split("</").skip(1).any(|tail| {
+        tail.split('>')
+            .next()
+            .is_some_and(|t| t.contains(['"', '\'']))
+    });
+    let odd_name_start = xml.as_bytes().windows(2).any(|w| match (w[0], w[1]) {
+        (b'<', next) => b"<=&'\"/ >".contains(&next),
+        (prev, b'=') => b" '\"=".contains(&prev),
+        (b'\'' | b'"', b'<') => true,
+        _ => false,
+    });
+    xml.contains("<!-->") || xml.contains("<?>") || bang_garbage || end_tag_quote || odd_name_start
+}
+
+/// Like [`assert_same`] for inputs the owned tokenizer was lenient with: a difference must come from
+/// one of the constructs of [`is_malformed_construct`].
+fn assert_same_unless_malformed(xml: &str) {
+    let old = legacy_tokenize(xml);
+    let new = tokenize(xml).map(owned);
+    let same = match (&old, &new) {
+        (Ok(old), Ok(new)) => old == new,
+        (Err(_), Err(_)) => true,
+        _ => false,
+    };
+    assert!(
+        same || is_malformed_construct(xml),
+        "{xml:?}: old {old:?}, new {new:?}"
+    );
+}
+
 const SAMPLES: &[&str] = &[
     "<?xml version=\"1.0\"?><a x=\"1&amp;2\"><b/>t&lt;<!-- c --></a>",
     "<a><![CDATA[<x>&amp;]]>t</a>",
@@ -226,25 +269,20 @@ fn tokenizes_nested_elements_attributes_and_entities() {
 }
 
 #[test]
-fn a_doctype_declaration_is_no_element() {
-    // The owned tokenizer read it as a start tag named `!DOCTYPE` (and ended it at the first `>`
-    // inside an internal subset).
+fn a_doctype_declaration_is_refused() {
+    // The earlier reader skipped the declaration (PD-178); a declaration can define entities, so the
+    // reader refuses it with the error of the safe-XML check, whatever it holds or where it is.
     for xml in [
         "<!DOCTYPE a><a/>",
+        "<!doctype a><a/>",
         "<!DOCTYPE a SYSTEM \"a.dtd\"><a/>",
         "<!DOCTYPE a [<!ELEMENT a ANY>]><a/>",
         "<!DOCTYPE a [<!ENTITY x \"]>\">]><a/>",
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE a [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><a>&x;</a>",
+        "<a><!DOCTYPE a></a>",
     ] {
-        let ev = owned(tokenize(xml).unwrap());
-        assert_eq!(
-            ev,
-            vec![
-                Legacy::Start {
-                    name: "a".into(),
-                    attrs: vec![]
-                },
-                Legacy::End("a".into()),
-            ],
+        assert!(
+            matches!(tokenize(xml), Err(EasyOfficeError::XxeOrExternalEntityDetected)),
             "{xml}"
         );
     }
@@ -273,7 +311,7 @@ fn text_and_attributes_borrow_unless_an_entity_needs_decoding() {
 #[test]
 fn reader_matches_the_owned_tokenizer_on_samples() {
     for xml in SAMPLES {
-        assert_same(xml);
+        assert_same_unless_malformed(xml);
     }
 }
 
@@ -282,13 +320,13 @@ fn reader_matches_the_owned_tokenizer_on_mutated_samples() {
     // Every truncation and every single-byte replacement of each sample.
     for xml in SAMPLES.iter().filter(|x| x.is_ascii()) {
         for cut in 0..=xml.len() {
-            assert_same(&xml[..cut]);
+            assert_same_unless_malformed(&xml[..cut]);
         }
         for at in 0..xml.len() {
             for b in *b"<>\"'/=& a" {
                 let mut bytes = xml.as_bytes().to_vec();
                 bytes[at] = b;
-                assert_same(std::str::from_utf8(&bytes).unwrap());
+                assert_same_unless_malformed(std::str::from_utf8(&bytes).unwrap());
             }
         }
     }
@@ -328,7 +366,7 @@ fn event_budget_fails_closed() {
 
 #[test]
 fn hostile_inputs_stay_bounded() {
-    // Deep nesting needs no stack: the reader keeps no element stack.
+    // Deep nesting needs no recursion; the crate's stack of open elements is bounded by MAX_XML_DEPTH.
     let deep = "<a>".repeat(200_000) + &"</a>".repeat(200_000);
     assert_eq!(tokenize(&deep).unwrap().len(), 400_000);
     let mut reader = XmlReader::new(&deep);
@@ -372,4 +410,244 @@ fn swar_tag_and_attr_scans_match_legacy_tokenizer_across_long_tags() {
         );
         assert_same(&padded);
     }
+}
+
+/// The text events of `xml` as strings.
+fn texts(xml: &str) -> Vec<String> {
+    tokenize(xml)
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event {
+            XmlEvent::Text(text) => Some(text.into_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn only_predefined_and_numeric_entities_resolve() {
+    assert_eq!(
+        texts("<a>&lt;&gt;&amp;&quot;&apos;&#65;&#x42;&#X43;</a>"),
+        ["<>&\"'ABC"]
+    );
+    // Anything else stays as written, in text and in attribute values, and ends no read.
+    for literal in [
+        "&bogus;",
+        "&amp",
+        "&",
+        "& ;",
+        "&#;",
+        "&#x;",
+        "&#xZZ;",
+        "&#-1;",
+        "&#99999999999;",
+        "&#x110000;",
+        "&#xD800;",
+        "&#x0;",
+        "&#0;",
+        "&#x1;",
+        "&#xFFFE;",
+        "&lol9;",
+    ] {
+        assert_eq!(texts(&format!("<a>{literal}</a>")), [literal], "{literal}");
+        let tag = format!("<a v=\"{literal}\"/>");
+        let ev = tokenize(&tag).unwrap();
+        let XmlEvent::Start { attrs, .. } = &ev[0] else {
+            panic!("start expected");
+        };
+        assert_eq!(attrs.get("v").unwrap(), literal, "{literal}");
+    }
+}
+
+#[test]
+fn text_stays_one_event_across_references_and_splits_at_markup() {
+    let ev = tokenize("<a>x&amp;y&lt;&lt;z&bogus;<!-- c -->w&#65;</a>").unwrap();
+    let kinds: Vec<_> = ev
+        .iter()
+        .map(|event| match event {
+            XmlEvent::Start { .. } => "start".to_string(),
+            XmlEvent::End(_) => "end".to_string(),
+            XmlEvent::Text(text) => format!("text:{text}"),
+        })
+        .collect();
+    assert_eq!(kinds, ["start", "text:x&y<<z&bogus;", "text:wA", "end"]);
+    // A lone `&` right before markup or the end is text too.
+    assert_eq!(texts("<a>a &</a>"), ["a &"]);
+    assert_eq!(texts("a & b"), ["a & b"]);
+    assert_eq!(texts(&"&".repeat(1 << 16)), ["&".repeat(1 << 16)]);
+}
+
+#[test]
+fn cdata_is_text_as_written_and_apart_from_the_text_around_it() {
+    assert_eq!(
+        texts("<a>1<![CDATA[<x>&amp;]]>2<![CDATA[]]></a>"),
+        ["1", "<x>&amp;", "2", ""]
+    );
+    assert_eq!(texts("<a><![CDATA[<!DOCTYPE a>]]></a>"), ["<!DOCTYPE a>"]);
+    assert!(tokenize("<a><![CDATA[x</a>").is_err());
+}
+
+#[test]
+fn comments_and_processing_instructions_make_no_event() {
+    let xml = "<?xml version=\"1.0\"?><?xml-stylesheet href=\"a.css\"?><a><!-- <b/> <!DOCTYPE x> --><?pi <c/> ?></a>";
+    assert_eq!(
+        owned(tokenize(xml).unwrap()),
+        vec![
+            Legacy::Start {
+                name: "a".into(),
+                attrs: vec![]
+            },
+            Legacy::End("a".into())
+        ]
+    );
+    assert!(tokenize("<a><?pi </a>").is_err());
+    assert!(tokenize("<a><!-- </a>").is_err());
+}
+
+#[test]
+fn names_and_attributes_keep_their_namespace_prefix() {
+    let xml = "<w:p xmlns:w=\"urn:w\" w:val=\"1\" val=\"2\"><w:r/></w:p >";
+    let ev = tokenize(xml).unwrap();
+    let XmlEvent::Start { name, attrs } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(*name, "w:p");
+    assert_eq!(attrs.get("w:val").unwrap(), "1");
+    assert_eq!(attrs.get("val").unwrap(), "2");
+    assert_eq!(attrs.get("xmlns:w").unwrap(), "urn:w");
+    assert!(attrs.get("w").is_none());
+    let XmlEvent::Start { name, attrs } = &ev[1] else {
+        panic!("start expected");
+    };
+    assert_eq!((*name, attrs.iter_raw().count()), ("w:r", 0));
+    assert_eq!(ev[2], XmlEvent::End("w:r"));
+    assert_eq!(ev[3], XmlEvent::End("w:p"));
+}
+
+#[test]
+fn end_tags_need_no_partner_and_may_pad_their_name() {
+    let ev = owned(tokenize("</x><a></b ></ a>").unwrap());
+    assert_eq!(
+        ev,
+        vec![
+            Legacy::End("x".into()),
+            Legacy::Start {
+                name: "a".into(),
+                attrs: vec![]
+            },
+            Legacy::End("b".into()),
+            Legacy::End("a".into()),
+        ]
+    );
+}
+
+#[test]
+fn duplicate_attributes_keep_document_order_and_the_first_one_wins() {
+    let ev = tokenize("<a b=\"1\" c=\"x\" b=\"2\"/>").unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(attrs.get("b").unwrap(), "1");
+    let all: Vec<_> = attrs.iter_raw().collect();
+    assert_eq!(all, [("b", "1"), ("c", "x"), ("b", "2")]);
+}
+
+#[test]
+fn text_and_attribute_whitespace_is_kept_as_written() {
+    // No end-of-line or attribute-value normalization: the readers see the bytes of the file.
+    let ev = tokenize("<a v=\"p\tq\r\nr\ns\"> x\r\ny\rz \t</a>").unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(attrs.get("v").unwrap(), "p\tq\r\nr\ns");
+    assert_eq!(ev[1], XmlEvent::Text(Cow::Borrowed(" x\r\ny\rz \t")));
+}
+
+#[test]
+fn a_leading_byte_order_mark_makes_no_text() {
+    let ev = owned(tokenize("\u{FEFF}<?xml version=\"1.0\"?><a/>").unwrap());
+    assert_eq!(ev.len(), 2);
+    assert_eq!(texts("\u{FEFF}<a>\u{FEFF}</a>"), ["\u{FEFF}"]);
+}
+
+#[test]
+fn declarations_and_entity_attacks_are_refused_before_any_expansion() {
+    let billion_laughs = "<?xml version=\"1.0\"?><!DOCTYPE lolz [<!ENTITY lol \"lol\">\
+        <!ENTITY lol2 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;\">\
+        <!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\">]><lolz>&lol3;</lolz>";
+    let xxe = "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>";
+    let external_dtd = "<!DOCTYPE foo SYSTEM \"http://example.invalid/foo.dtd\"><foo/>";
+    for xml in [billion_laughs, xxe, external_dtd] {
+        let mut reader = XmlReader::new(xml);
+        let result: Result<Vec<_>, _> = (&mut reader).collect();
+        assert!(
+            matches!(result, Err(EasyOfficeError::XxeOrExternalEntityDetected)),
+            "{xml}"
+        );
+        assert!(reader.next().is_none(), "no event after the refusal");
+    }
+    // Without a declaration the same references are only text.
+    assert_eq!(texts("<lolz>&lol3;&xxe;</lolz>"), ["&lol3;&xxe;"]);
+}
+
+#[test]
+fn a_malformed_attribute_list_ends_the_reader() {
+    for xml in [
+        "<a x>",
+        "<a x=1>",
+        "<a x=\"1>",
+        "<a x='1\">",
+        "<a x=\"a<b\"/>",
+        "<a x=\"1\" y/>",
+        "<a x=/>",
+        "< a/>",
+        "<>",
+    ] {
+        let mut reader = XmlReader::new(xml);
+        assert!(reader.next_event().is_err(), "{xml}");
+        assert!(reader.next_event().unwrap().is_none(), "{xml}");
+    }
+}
+
+#[test]
+fn hostile_sizes_are_read_in_linear_time_and_bounded_memory() {
+    // 100,000 attributes in one tag, long names and values, and deep nesting with long names.
+    let many = format!(
+        "<a {}/>",
+        (0..100_000)
+            .map(|i| format!("k{i}=\"v\""))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let ev = tokenize(&many).unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(attrs.iter_raw().count(), 100_000);
+    assert_eq!(attrs.get("k99999").unwrap(), "v");
+
+    let long_name = "n".repeat(1 << 20);
+    let long_tag = format!("<{long_name} {long_name}=\"{long_name}\"/>");
+    let ev = tokenize(&long_tag).unwrap();
+    assert_eq!(ev.len(), 2);
+
+    let nested = format!("<{0}>", "x".repeat(64)).repeat(20_000);
+    assert_eq!(tokenize(&nested).unwrap().len(), 20_000);
+}
+
+#[test]
+fn nesting_depth_fails_closed_past_the_limit() {
+    let at_limit = "<a>".repeat(MAX_XML_DEPTH);
+    assert_eq!(tokenize(&at_limit).unwrap().len(), MAX_XML_DEPTH);
+    let past_limit = "<a>".repeat(MAX_XML_DEPTH + 1);
+    let mut reader = XmlReader::unbounded(&past_limit);
+    let result: Result<Vec<_>, _> = (&mut reader).collect();
+    assert!(matches!(
+        result,
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+    assert!(reader.next().is_none());
+    // Closed elements free their depth, empty elements take none.
+    let wide = "<a><b/></a>".repeat(MAX_XML_DEPTH);
+    assert!(XmlReader::unbounded(&wide).all(|event| event.is_ok()));
 }

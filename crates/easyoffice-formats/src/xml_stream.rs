@@ -1,32 +1,72 @@
-//! Pull reader over a borrowed XML string for the already-validated XML parts of OOXML, ODF and
-//! HWPX. Events borrow the input (`&str` names, `Cow` text), attributes are decoded lazily, and
-//! nothing is allocated unless an entity has to be resolved.
+//! Pull reader over a borrowed XML string for the XML parts of OOXML, ODF and HWPX. Events borrow
+//! the input (`&str` names, `Cow` text), attributes are decoded lazily, and nothing is allocated
+//! unless an entity has to be resolved.
 //!
-//! 참조 구현 (reference implementation): quick-xml 0.42.0 (MIT, Copyright (c) 2016 Johann Tuffe),
-//! https://github.com/tafia/quick-xml. The shape follows `src/reader/slice_reader.rs`
-//! (`Reader::read_event` over a `&'a str`, events borrow the input), `src/reader/state.rs:314-367`
-//! (`emit_start` / `close_expanded_empty`: an empty element yields a start and a deferred end),
-//! `src/events/attributes.rs` (`Attributes` iterator parses attributes on demand) and
-//! `src/escape.rs:236` (`unescape` returns `Cow`, borrowed when there is no `&`). The event
-//! grammar itself is the one of the earlier owned tokenizer, so results stay identical, and the
-//! tag-end search keeps its quote awareness. Safe Rust only. The `quick-xml` crate is already in
-//! `Cargo.lock` (0.42.0); swapping this reader for it is a separate step (PD-269).
+//! The tokenizer is the `quick-xml` crate (MIT, Copyright (c) 2016 Johann Tuffe,
+//! https://github.com/tafia/quick-xml, 0.42.0). This module is its adapter (PD-269): it turns the
+//! crate's events into the three the readers consume, and keeps the engine's rules around it, all
+//! of them Fail-Closed:
 //!
-//! Callers must run [`crate::XmlSanitizer::validate_safe_xml`] first (DOCTYPE, entity
-//! declarations, and external references are rejected there); this reader never resolves
-//! entities beyond the five predefined ones and numeric character references.
+//! - a `<!DOCTYPE` declaration is refused, so no entity can be declared or expanded (the crate
+//!   reports it as an event instead of rejecting it);
+//! - entities resolve to the five predefined ones and numeric references to XML 1.0 characters
+//!   ([`unescape_cow`]); anything else, such as `&bogus;` or `&#0;`, stays as written;
+//! - the number of events ([`MAX_XML_EVENTS`]) and the nesting depth ([`MAX_XML_DEPTH`]) are
+//!   budgeted, and a malformed tag or attribute ends the reader with an error;
+//! - names and attribute values are kept as written (no end-tag matching, no whitespace
+//!   normalization, no namespace resolution), the way the readers were written against.
+//!
+//! Callers still run [`crate::XmlSanitizer::validate_safe_xml`] first for the packages they open.
 
 use crate::{EasyOfficeError, XmlSanitizer};
+use quick_xml::errors::{Error as XmlError, SyntaxError};
+use quick_xml::events::attributes::{AttrError, Attributes};
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::reader::Reader;
 use std::borrow::Cow;
+use std::ops::Range;
 
 /// Upper bound on events read from one XML part by default.
 pub(crate) const MAX_XML_EVENTS: usize = 6_000_000;
+
+/// Deepest element nesting a reader follows. The crate keeps a stack entry for every open element
+/// (the earlier reader kept none), so this bounds that stack to a few MiB however large the part
+/// is. Real documents stay in the tens; the readers cap their own structures far below this.
+pub(crate) const MAX_XML_DEPTH: usize = 1_000_000;
 
 fn corrupt(msg: &str) -> EasyOfficeError {
     EasyOfficeError::CorruptedContainer(msg.to_string())
 }
 
-/// Attribute list of one start tag, kept as the raw text between the name and `>`. It was checked
+fn syntax_error(error: &XmlError) -> EasyOfficeError {
+    corrupt(match error {
+        XmlError::Syntax(SyntaxError::UnclosedPI | SyntaxError::UnclosedXmlDecl) => {
+            "XML 처리 명령이 닫히지 않았습니다."
+        }
+        XmlError::Syntax(SyntaxError::UnclosedComment) => "XML 주석이 닫히지 않았습니다.",
+        XmlError::Syntax(SyntaxError::UnclosedCData) => "CDATA가 닫히지 않았습니다.",
+        XmlError::Syntax(SyntaxError::UnclosedDoctype) => "DOCTYPE 선언이 닫히지 않았습니다.",
+        XmlError::Syntax(
+            SyntaxError::UnclosedTag
+            | SyntaxError::UnclosedSingleQuotedAttributeValue
+            | SyntaxError::UnclosedDoubleQuotedAttributeValue,
+        ) => "XML 태그가 닫히지 않았습니다.",
+        _ => "XML 구문이 올바르지 않습니다.",
+    })
+}
+
+fn attribute_error(error: &AttrError) -> EasyOfficeError {
+    corrupt(match error {
+        AttrError::ExpectedEq(_) => "XML 속성에 '='가 없습니다.",
+        AttrError::UnquotedValue(_) | AttrError::ExpectedValue(_) => {
+            "XML 속성 값에 따옴표가 없습니다."
+        }
+        AttrError::ExpectedQuote(..) => "XML 속성 값이 닫히지 않았습니다.",
+        AttrError::Duplicated(..) => "XML 속성 이름이 겹칩니다.",
+    })
+}
+
+/// Attributes of one start tag, kept as the raw text between the name and `>`. They were checked
 /// when the tag was read, so lookups and iteration cannot fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Attrs<'a> {
@@ -49,13 +89,16 @@ impl<'a> Attrs<'a> {
     }
 
     /// Attributes in document order with their values as written; decode the ones you keep with
-    /// [`unescape_cow`].
+    /// [`unescape_cow`]. A repeated name is listed again, the first one wins in [`Self::get`].
     pub(crate) fn iter_raw(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
-        let raw = self.raw;
-        let mut pos = 0usize;
-        std::iter::from_fn(move || match next_attr(raw, &mut pos) {
-            Ok(Some(pair)) => Some(pair),
-            _ => None,
+        let mut attributes = Attributes::new(self.raw, 0);
+        attributes.with_checks(false);
+        attributes.filter_map(|attribute| {
+            let attribute = attribute.ok()?;
+            match attribute.value {
+                Cow::Borrowed(value) => Some((attribute.key.0, value)),
+                Cow::Owned(_) => None,
+            }
         })
     }
 }
@@ -74,101 +117,6 @@ pub(crate) fn unescape_cow(text: &str) -> Cow<'_, str> {
     }
 }
 
-const SWAR_LO: u64 = 0x0101_0101_0101_0101;
-const SWAR_HI: u64 = 0x8080_8080_8080_8080;
-const SWAR_SPACES: u64 = 0x2020_2020_2020_2020;
-
-#[inline]
-const fn swar_has_zero(word: u64) -> u64 {
-    word.wrapping_sub(SWAR_LO) & !word & SWAR_HI
-}
-
-#[inline]
-const fn swar_has_le_20(word: u64) -> u64 {
-    word.wrapping_sub(SWAR_LO * 0x21) & !word & SWAR_HI
-}
-
-#[inline]
-fn skip_ws(bytes: &[u8], mut i: usize) -> usize {
-    while i + 8 <= bytes.len() {
-        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
-        if word != SWAR_SPACES {
-            break;
-        }
-        i += 8;
-    }
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i
-}
-
-#[inline]
-fn find_attr_name_end(bytes: &[u8], mut i: usize) -> usize {
-    const EQ_MASK: u64 = SWAR_LO * (b'=' as u64);
-    while i + 8 <= bytes.len() {
-        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
-        if (swar_has_le_20(word) | swar_has_zero(word ^ EQ_MASK)) != 0 {
-            break;
-        }
-        i += 8;
-    }
-    while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i
-}
-
-#[inline]
-fn find_ascii_ws(bytes: &[u8], mut i: usize) -> usize {
-    while i + 8 <= bytes.len() {
-        let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
-        if swar_has_le_20(word) != 0 {
-            break;
-        }
-        i += 8;
-    }
-    while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i
-}
-
-/// Reads the attribute at `*pos`: `Ok(None)` at the end, an error for a missing `=` or quote.
-fn next_attr<'a>(
-    raw: &'a str,
-    pos: &mut usize,
-) -> Result<Option<(&'a str, &'a str)>, EasyOfficeError> {
-    let bytes = raw.as_bytes();
-    let mut i = skip_ws(bytes, *pos);
-    if i >= bytes.len() {
-        *pos = i;
-        return Ok(None);
-    }
-    let name_start = i;
-    i = find_attr_name_end(bytes, i);
-    let name = &raw[name_start..i];
-    i = skip_ws(bytes, i);
-    if i >= bytes.len() || bytes[i] != b'=' {
-        return Err(corrupt("XML 속성에 '='가 없습니다."));
-    }
-    i = skip_ws(bytes, i + 1);
-    if i >= bytes.len() || (bytes[i] != b'"' && bytes[i] != b'\'') {
-        return Err(corrupt("XML 속성 값에 따옴표가 없습니다."));
-    }
-    let value_start = i + 1;
-    let Some(value_end) = XmlSanitizer::find_byte_swar(bytes, value_start, bytes[i]) else {
-        return Err(corrupt("XML 속성 값이 닫히지 않았습니다."));
-    };
-    if XmlSanitizer::find_byte_swar(&bytes[value_start..value_end], 0, b'<').is_some() {
-        return Err(corrupt(
-            "XML 속성 값에 금지된 문자 '<'가 포함되어 있습니다.",
-        ));
-    }
-    *pos = value_end + 1;
-    Ok(Some((name, &raw[value_start..value_end])))
-}
-
 /// One event of the document. `Start` of an empty element is followed by its `End`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum XmlEvent<'a> {
@@ -177,66 +125,21 @@ pub(crate) enum XmlEvent<'a> {
     Text(Cow<'a, str>),
 }
 
-/// Index of the `>` that closes the start tag at `from`, skipping quoted attribute values.
-fn find_tag_end(bytes: &[u8], from: usize) -> Option<usize> {
-    const GT_MASK: u64 = SWAR_LO * (b'>' as u64);
-    const DQ_MASK: u64 = SWAR_LO * (b'"' as u64);
-    const SQ_MASK: u64 = SWAR_LO * (b'\'' as u64);
-    let mut i = from;
-    while i < bytes.len() {
-        while i + 8 <= bytes.len() {
-            let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
-            let hit = swar_has_zero(word ^ GT_MASK)
-                | swar_has_zero(word ^ DQ_MASK)
-                | swar_has_zero(word ^ SQ_MASK);
-            if hit != 0 {
-                i += (hit.trailing_zeros() as usize) >> 3;
-                break;
-            }
-            i += 8;
-        }
-        if i >= bytes.len() {
-            break;
-        }
-        match bytes[i] {
-            b'>' => return Some(i),
-            q @ (b'"' | b'\'') => i = XmlSanitizer::find_byte_swar(bytes, i + 1, q)? + 1,
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// Length of the `<!DOCTYPE ...>` declaration at the start of `rest`, including an internal subset
-/// (`[...]`, where `>` is not the end) and quoted literals. A declaration is not an element: it
-/// produces no event (PD-178). Entities it declares are not expanded (only the five predefined
-/// ones are), and the safe-XML check (`XmlSanitizer::validate_safe_xml`) still refuses the
-/// declaration for the packages this reader is given.
-fn doctype_len(rest: &str) -> Result<usize, EasyOfficeError> {
-    let bytes = rest.as_bytes();
-    let mut i = "<!DOCTYPE".len();
-    let mut subset_depth = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'>' if subset_depth == 0 => return Ok(i + 1),
-            b'[' => subset_depth += 1,
-            b']' => subset_depth = subset_depth.saturating_sub(1),
-            q @ (b'"' | b'\'') => {
-                i = XmlSanitizer::find_byte_swar(bytes, i + 1, q)
-                    .ok_or_else(|| corrupt("DOCTYPE의 따옴표가 닫히지 않았습니다."))?;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    Err(corrupt("DOCTYPE 선언이 닫히지 않았습니다."))
+/// Where `part` lies in `xml`. Every string of an event the crate reads from a `&str` is a slice of
+/// that input, so the position follows from the addresses; anything else yields an empty range
+/// that the caller's `get` refuses.
+fn span_in(xml: &str, part: &str) -> Range<usize> {
+    let start = (part.as_ptr() as usize).wrapping_sub(xml.as_ptr() as usize);
+    start..start.saturating_add(part.len())
 }
 
 /// Pull reader: an iterator of events that stops after the first error.
 pub(crate) struct XmlReader<'a> {
     xml: &'a str,
-    pos: usize,
+    reader: Reader<&'a [u8]>,
     pending_end: Option<&'a str>,
+    finished: bool,
+    depth: usize,
     emitted: usize,
     budget: usize,
     last_start_empty: bool,
@@ -249,10 +152,20 @@ impl<'a> XmlReader<'a> {
 
     /// A reader that fails closed once it has produced more than `budget` events.
     pub(crate) fn with_budget(xml: &'a str, budget: usize) -> Self {
+        let mut reader = Reader::from_str(xml);
+        let config = reader.config_mut();
+        // The readers match their own tags, and real files carry stray end tags and bare `&`.
+        config.check_end_names = false;
+        config.allow_unmatched_ends = true;
+        config.allow_dangling_amp = true;
+        // End tag names are trimmed on both sides when they are read.
+        config.trim_markup_names_in_closing_tags = false;
         Self {
             xml,
-            pos: 0,
+            reader,
             pending_end: None,
+            finished: false,
+            depth: 0,
             emitted: 0,
             budget,
             last_start_empty: false,
@@ -307,89 +220,116 @@ impl<'a> XmlReader<'a> {
 
     /// The next event, `None` at the end of the input.
     pub(crate) fn next_event(&mut self) -> Result<Option<XmlEvent<'a>>, EasyOfficeError> {
+        if self.finished {
+            return Ok(None);
+        }
         let result = self.read_event();
         if result.is_err() {
-            self.pos = self.xml.len();
+            self.finished = true;
             self.pending_end = None;
         }
         result
+    }
+
+    fn pull(&mut self) -> Result<Event<'a>, EasyOfficeError> {
+        self.reader
+            .read_event()
+            .map_err(|error| syntax_error(&error))
     }
 
     fn read_event(&mut self) -> Result<Option<XmlEvent<'a>>, EasyOfficeError> {
         if let Some(name) = self.pending_end.take() {
             return Ok(Some(XmlEvent::End(name)));
         }
-        let xml = self.xml;
-        let bytes = xml.as_bytes();
-        while self.pos < bytes.len() {
+        loop {
+            let event = self.pull()?;
+            if matches!(event, Event::Eof) {
+                return Ok(None);
+            }
             if self.emitted > self.budget {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
                     "XML 이벤트 수가 허용 예산을 초과했습니다.".to_string(),
                 ));
             }
-            let i = self.pos;
-            if bytes[i] != b'<' {
-                let end = XmlSanitizer::find_byte_swar(bytes, i, b'<').unwrap_or(bytes.len());
-                self.pos = end;
-                self.emitted += 1;
-                return Ok(Some(XmlEvent::Text(unescape_cow(&xml[i..end]))));
-            }
-            let rest = &xml[i..];
-            match bytes.get(i + 1) {
-                Some(b'!') if rest.starts_with("<!--") => {
-                    let end = rest
-                        .find("-->")
-                        .ok_or_else(|| corrupt("XML 주석이 닫히지 않았습니다."))?;
-                    self.pos = i + end + 3;
-                }
-                Some(b'!') if rest.starts_with("<![CDATA[") => {
-                    let end = rest
-                        .find("]]>")
-                        .ok_or_else(|| corrupt("CDATA가 닫히지 않았습니다."))?;
-                    self.pos = i + end + 3;
+            match event {
+                Event::Start(tag) => return self.read_start_tag(&tag, false).map(Some),
+                Event::Empty(tag) => return self.read_start_tag(&tag, true).map(Some),
+                Event::End(tag) => {
                     self.emitted += 1;
-                    return Ok(Some(XmlEvent::Text(Cow::Borrowed(&rest[9..end]))));
+                    self.depth = self.depth.saturating_sub(1);
+                    let name = self.slice(span_in(self.xml, tag.name().as_ref().trim_ascii()))?;
+                    return Ok(Some(XmlEvent::End(name)));
                 }
-                Some(b'!') if rest.starts_with("<!DOCTYPE") => {
-                    self.pos = i + doctype_len(rest)?;
-                }
-                Some(b'?') => {
-                    let end = rest
-                        .find("?>")
-                        .ok_or_else(|| corrupt("XML 처리 명령이 닫히지 않았습니다."))?;
-                    self.pos = i + end + 2;
-                }
-                Some(b'/') => {
-                    let close = XmlSanitizer::find_byte_swar(bytes, i + 2, b'>')
-                        .ok_or_else(|| corrupt("XML 끝 태그가 닫히지 않았습니다."))?;
-                    self.pos = close + 1;
+                Event::CData(data) => {
                     self.emitted += 1;
-                    return Ok(Some(XmlEvent::End(xml[i + 2..close].trim())));
+                    return Ok(Some(XmlEvent::Text(data.into_inner())));
                 }
-                _ => return self.read_start_tag(i).map(Some),
+                Event::Text(_) | Event::GeneralRef(_) => {
+                    return self.read_text_run(&event).map(Some)
+                }
+                Event::DocType(_) => return Err(EasyOfficeError::XxeOrExternalEntityDetected),
+                Event::Comment(_) | Event::Decl(_) | Event::PI(_) | Event::Eof => {}
             }
         }
-        Ok(None)
     }
 
-    fn read_start_tag(&mut self, i: usize) -> Result<XmlEvent<'a>, EasyOfficeError> {
-        let xml = self.xml;
-        let end = find_tag_end(xml.as_bytes(), i + 1)
-            .ok_or_else(|| corrupt("XML 시작 태그가 닫히지 않았습니다."))?;
-        let mut inner = &xml[i + 1..end];
-        let empty = inner.ends_with('/');
-        if empty {
-            inner = &inner[..inner.len() - 1];
+    fn slice(&self, span: Range<usize>) -> Result<&'a str, EasyOfficeError> {
+        self.xml
+            .get(span)
+            .ok_or_else(|| corrupt("XML 이벤트 위치를 찾지 못했습니다."))
+    }
+
+    /// The input bytes of a text or reference event, where a reference is `&name;`.
+    fn text_span(&self, event: &Event<'a>) -> Result<Range<usize>, EasyOfficeError> {
+        match event {
+            Event::Text(text) => Ok(span_in(self.xml, text)),
+            Event::GeneralRef(name) => {
+                let span = span_in(self.xml, name);
+                Ok(span.start.saturating_sub(1)..span.end + 1)
+            }
+            _ => Err(corrupt("XML 텍스트 이벤트가 아닙니다.")),
         }
-        let name_end = find_ascii_ws(inner.as_bytes(), 0);
-        let name = &inner[..name_end];
+    }
+
+    /// One text event for the characters up to the next tag, comment or CDATA section. The crate
+    /// hands out each `&...;` apart from the text around it; they are joined again here and
+    /// resolved by [`unescape_cow`], so text and attribute values read the same.
+    fn read_text_run(&mut self, first: &Event<'a>) -> Result<XmlEvent<'a>, EasyOfficeError> {
+        let mut span = self.text_span(first)?;
+        // Text and references follow each other until the next `<` (or the end of the input).
+        while self
+            .xml
+            .as_bytes()
+            .get(span.end)
+            .is_some_and(|&b| b != b'<')
+        {
+            let next = self.pull()?;
+            span.end = self.text_span(&next)?.end;
+        }
+        self.emitted += 1;
+        Ok(XmlEvent::Text(unescape_cow(self.slice(span)?)))
+    }
+
+    fn read_start_tag(
+        &mut self,
+        tag: &BytesStart<'a>,
+        empty: bool,
+    ) -> Result<XmlEvent<'a>, EasyOfficeError> {
+        let name_len = tag.name().as_ref().len();
+        let content = self.slice(span_in(self.xml, tag))?;
+        let (name, raw) = content.split_at(name_len);
         if name.is_empty() {
             return Err(corrupt("XML 태그 이름이 비어 있습니다."));
         }
-        let raw = &inner[name_end..];
-        let mut attr_pos = 0usize;
-        while next_attr(raw, &mut attr_pos)?.is_some() {}
-        self.pos = end + 1;
+        check_attributes(raw)?;
+        if !empty {
+            self.depth += 1;
+            if self.depth > MAX_XML_DEPTH {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "XML 중첩 깊이가 허용 한도를 초과했습니다.".to_string(),
+                ));
+            }
+        }
         self.emitted += 1 + usize::from(empty);
         self.last_start_empty = empty;
         self.pending_end = empty.then_some(name);
@@ -398,6 +338,22 @@ impl<'a> XmlReader<'a> {
             attrs: Attrs { raw },
         })
     }
+}
+
+/// Refuses a start tag whose attributes are not `name="value"` pairs, or whose value holds `<`.
+fn check_attributes(raw: &str) -> Result<(), EasyOfficeError> {
+    if raw.is_empty() {
+        return Ok(());
+    }
+    if XmlSanitizer::find_byte_swar(raw.as_bytes(), 0, b'<').is_some() {
+        return Err(corrupt(
+            "XML 속성 값에 금지된 문자 '<'가 포함되어 있습니다.",
+        ));
+    }
+    let mut attributes = Attributes::new(raw, 0);
+    attributes.with_checks(false);
+    attributes
+        .try_for_each(|attribute| attribute.map(drop).map_err(|error| attribute_error(&error)))
 }
 
 impl<'a> Iterator for XmlReader<'a> {
