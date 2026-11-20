@@ -74,3 +74,52 @@ test("a normal relation still shows the title of the record it points at", () =>
   });
   assert.equal(M.queryTableView(loaded.state, "주문").rows[0].displays.o2, "한빛상사");
 });
+
+const relation = (id, target) => ({ id, name: "참조", type: "relation", relationTableId: target });
+
+test("a title field that is a relation to its own table does not recurse", () => {
+  const M = loadModel();
+  const loaded = M.hydrateBaseState({ tables: [{ id: "A", name: "A", fields: [relation("r", "A")], records: [{ id: "ra", values: { r: ["ra"] } }] }] });
+  assert.equal(loaded.ok, true);
+  let rows;
+  assert.doesNotThrow(() => { rows = M.queryTableView(loaded.state, "A").rows; });
+  assert.match(rows[0].displays.r, /#CYCLE!/);
+});
+
+test("two tables whose title fields are relations to each other do not recurse", () => {
+  const M = loadModel();
+  const loaded = M.hydrateBaseState({
+    tables: [
+      { id: "A", name: "A", fields: [relation("ar", "B")], records: [{ id: "ra", values: { ar: ["rb"] } }] },
+      { id: "B", name: "B", fields: [relation("br", "A")], records: [{ id: "rb", values: { br: ["ra"] } }] },
+    ],
+  });
+  assert.equal(loaded.ok, true);
+  for (const id of ["A", "B"]) assert.doesNotThrow(() => M.queryTableView(loaded.state, id), id);
+});
+
+test("a chain of thousands of records, each pointing at the next through a title formula, ends within the nesting limit", () => {
+  const M = loadModel();
+  const count = 4000;
+  const records = Array.from({ length: count }, (_, i) => ({ id: "r" + i, values: i + 1 < count ? { ref: ["r" + (i + 1)] } : {} }));
+  const loaded = M.hydrateBaseState({
+    tables: [{ id: "A", name: "A", fields: [{ id: "t", name: "제목", type: "formula", formula: "{참조}" }, relation("ref", "A")], records }],
+  });
+  assert.equal(loaded.ok, true);
+  const started = performance.now();
+  let rows;
+  assert.doesNotThrow(() => { rows = M.queryTableView(loaded.state, "A").rows; });
+  assert.ok(performance.now() - started < 5000, "the render ends within seconds");
+  assert.match(rows[0].displays.ref, /#CYCLE!/, "the chain is cut at the nesting limit");
+});
+
+test("the relation reads of a plain field are counted against the evaluation budget too", () => {
+  const M = loadModel();
+  const loaded = M.hydrateBaseState({ tables: [{ id: "A", name: "A", fields: [{ id: "n", name: "수", type: "number" }, relation("ref", "A")], records: [{ id: "r0", values: { n: 1, ref: ["r0"] } }] }] });
+  const index = M.buildStateIndex(loaded.state);
+  index.relationWork = { left: 2 };
+  const field = loaded.state.tables[0].fields[1];
+  const items = [0, 1, 2, 3].map(() => M.resolveRelationItems(loaded.state, field, ["r0"], index)[0].label);
+  assert.equal(index.relationWork.left, 0, "each read of the target's first field, a plain one, spent one");
+  assert.deepEqual(items, ["1", "1", "#ERROR!", "#ERROR!"], "past the budget the cell shows the error");
+});

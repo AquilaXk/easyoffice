@@ -9,7 +9,7 @@
   const MAX_TABLES = 32, MAX_FIELDS_PER_TABLE = 64, MAX_RECORDS_PER_TABLE = 10000;
   const MAX_CELL_CHARS = 8192, MAX_FORMULA_DEPTH = 32, MAX_FORMULA_CHARS = 4096;
   const MAX_JSON_BYTES = 64 * 1024 * 1024, MAX_FILTERS = 64, MAX_SORTS = 16, MAX_OPTIONS = 256;
-  const MAX_FORMULA_CACHE = 1024, MS_PER_DAY = 86400000, MAX_RELATION_EVALS = 100000;
+  const MAX_FORMULA_CACHE = 1024, MS_PER_DAY = 86400000, MAX_RELATION_EVALS = 100000, MAX_RELATION_DEPTH = 32;
 
   const VIEW_MODES = new Set(["grid", "kanban", "calendar"]);
   const FIELD_TYPES = Object.freeze(["text", "number", "select", "multiSelect", "date", "checkbox", "url", "relation", "formula"]);
@@ -419,19 +419,27 @@
     return targetTable && recMap && meta ? { ids, index, targetTable, recMap, meta } : null;
   }
 
-  // A formula read through a relation can lead back to the cell being shown (two tables whose title formulas show each other),
-  // or fan out table by table. The cells in the chain are tracked, and one index (one query or one render) pays at most
-  // MAX_RELATION_EVALS such evaluations; past either limit the cell shows the error instead of recursing.
+  // A relation can lead back to the cell being shown: the title of a table is a relation to itself or to a table whose title
+  // points back, or a title formula shows such a relation. It can also fan out or chain table by table. Every record that a
+  // relation resolves is tracked as (table, title field, record) while its title is read: meeting it again, or going
+  // MAX_RELATION_DEPTH deep, gives #CYCLE! instead of recursing. One index (one query or one render) also pays at most
+  // MAX_RELATION_EVALS such reads, counted before the type of the field is looked at; past that the cell shows #ERROR!.
   const relationChain = new Set();
   function readTargetVal(state, ctx, fld, rec) {
-    if (fld.type !== "formula") return rec.values?.[fld.id];
-    const key = `${ctx.targetTable.id}/${fld.id}/${rec.id}`, work = ctx.index.relationWork || (ctx.index.relationWork = { left: MAX_RELATION_EVALS });
-    if (relationChain.has(key)) return "#CYCLE!";
+    const work = ctx.index.relationWork || (ctx.index.relationWork = { left: MAX_RELATION_EVALS });
     if (work.left <= 0) return "#ERROR!";
     work.left -= 1;
+    if (fld.type !== "formula") return rec.values?.[fld.id];
+    // The formula starts at the depth the relations above it have already reached, so MAX_FORMULA_DEPTH counts the whole nesting.
+    return evaluateFormula(fld.formula, rec, ctx.targetTable, state, { index: ctx.index, fieldsMeta: ctx.meta, fieldDepth: relationChain.size });
+  }
+
+  function relationItemLabel(state, ctx, primary, rec) {
+    const key = `${ctx.targetTable.id}/${primary.id}/${rec.id}`;
+    if (relationChain.has(key) || relationChain.size >= MAX_RELATION_DEPTH) return "#CYCLE!";
     relationChain.add(key);
     try {
-      return evaluateFormula(fld.formula, rec, ctx.targetTable, state, { index: ctx.index, fieldsMeta: ctx.meta });
+      return formatCellDisplay(primary, readTargetVal(state, ctx, primary, rec), state, ctx.index) || rec.id;
     } finally {
       relationChain.delete(key);
     }
@@ -443,9 +451,7 @@
     const primary = ctx.meta.primaryField, items = [];
     for (const recId of ctx.ids) {
       const rec = ctx.recMap.get(recId);
-      if (!rec) continue;
-      if (!primary) { items.push({ id: recId, label: recId }); continue; }
-      items.push({ id: recId, label: formatCellDisplay(primary, readTargetVal(state, ctx, primary, rec), state, ctx.index) || recId });
+      if (rec) items.push({ id: recId, label: primary ? relationItemLabel(state, ctx, primary, rec) : recId });
     }
     return items;
   }
