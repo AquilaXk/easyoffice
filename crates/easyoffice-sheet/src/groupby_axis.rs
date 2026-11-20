@@ -11,17 +11,23 @@ use crate::{EvaluatedCellValue as V, FormulaError};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-/// A group: the values of the group columns that lead to it, and the data rows (positions in the
-/// kept rows, ascending) it holds. Node 0 is the group of every row.
+/// A group: how many group columns lead to it, the first data row that made it (its values are read
+/// from that row, never copied), and the data rows (positions in the kept rows, ascending) it
+/// holds. Node 0 is the group of every row.
 pub(crate) struct Node {
-    pub(crate) path: Vec<V>,
+    /// Group columns that lead to the group: its depth, or all columns for a group of a table.
+    pub(crate) level: usize,
+    pub(crate) first_row: u32,
     pub(crate) parent: usize,
     pub(crate) children: Vec<usize>,
     pub(crate) rows: Vec<u32>,
 }
 
-pub(crate) struct Tree {
+pub(crate) struct Tree<'a> {
     pub(crate) nodes: Vec<Node>,
+    /// The value of group column `level` in kept row `row`.
+    key: Box<dyn Fn(usize, usize) -> V + 'a>,
+    table: bool,
     /// The node of the deepest group each kept row is in.
     pub(crate) leaf_of_row: Vec<usize>,
     pub(crate) fields: usize,
@@ -88,23 +94,26 @@ pub(crate) struct Entry {
     pub(crate) kind: Kind,
 }
 
-impl Tree {
+impl<'a> Tree<'a> {
     /// The tree of `fields` group columns over `rows` kept rows; `key(level, row)` is a group
     /// value. In a table every distinct combination is one group under the root.
     pub(crate) fn build(
         fields: usize,
         rows: usize,
         table: bool,
-        key: impl Fn(usize, usize) -> V,
+        key: impl Fn(usize, usize) -> V + 'a,
     ) -> Self {
         let root = Node {
-            path: Vec::new(),
+            level: 0,
+            first_row: 0,
             parent: 0,
             children: Vec::new(),
             rows: (0..rows as u32).collect(),
         };
         let mut tree = Self {
             nodes: vec![root],
+            table,
+            key: Box::new(key),
             leaf_of_row: Vec::with_capacity(rows),
             fields,
         };
@@ -117,16 +126,18 @@ impl Tree {
                 let columns = if table { 0..fields } else { step..step + 1 };
                 let probe = (
                     node,
-                    columns.clone().map(|l| cell_key(&key(l, row))).collect(),
+                    columns
+                        .clone()
+                        .map(|l| cell_key(&(tree.key)(l, row)))
+                        .collect(),
                 );
                 node = match index.get(&probe) {
                     Some(&child) => child,
                     None => {
-                        let mut path = tree.nodes[node].path.clone();
-                        path.extend(columns.map(|l| key(l, row)));
                         let child = tree.nodes.len();
                         tree.nodes.push(Node {
-                            path,
+                            level: columns.end,
+                            first_row: row as u32,
                             parent: node,
                             children: Vec::new(),
                             rows: Vec::new(),
@@ -143,6 +154,25 @@ impl Tree {
         tree
     }
 
+    /// The value of group column `l` of group `node`, read from the row that made the group (or
+    /// the row that made its ancestor at that level).
+    pub(crate) fn value(&self, node: usize, l: usize) -> V {
+        let mut at = node;
+        if !self.table {
+            for _ in 0..self.nodes[node].level - (l + 1) {
+                at = self.nodes[at].parent;
+            }
+        }
+        (self.key)(l, self.nodes[at].first_row as usize)
+    }
+
+    /// The values of the group columns that lead to `node`.
+    pub(crate) fn path(&self, node: usize) -> Vec<V> {
+        (0..self.nodes[node].level)
+            .map(|l| self.value(node, l))
+            .collect()
+    }
+
     /// Orders the children of every group by `sort`: a group column orders its own level, a value
     /// column orders every level by what `aggregate(node, value_column)` gives for the group; the
     /// default is the group value, ascending. In a table the groups are ordered by all keys in turn.
@@ -157,7 +187,7 @@ impl Tree {
             if self.nodes[parent].children.len() < 2 {
                 continue;
             }
-            let level = self.nodes[parent].path.len();
+            let level = self.nodes[parent].level;
             let children = self.nodes[parent].children.clone();
             let mut keyed: Vec<(usize, Vec<(V, bool)>)> = Vec::with_capacity(children.len());
             for &child in &children {
@@ -166,16 +196,16 @@ impl Tree {
                     let mut push = |value: V| keys.push((value, entry.ascending));
                     if entry.column <= fields {
                         if table || entry.column == level + 1 {
-                            push(self.nodes[child].path[entry.column - 1].clone());
+                            push(self.value(child, entry.column - 1));
                         }
                     } else {
                         push(aggregate(&self.nodes[child], entry.column - fields - 1)?);
                     }
                 }
-                let own = self.nodes[child].path.len();
+                let own = self.nodes[child].level;
                 let default_from = if table { 0 } else { own - 1 };
                 for l in default_from..own {
-                    keys.push((self.nodes[child].path[l].clone(), true));
+                    keys.push((self.value(child, l), true));
                 }
                 keyed.push((child, keys));
             }
@@ -246,9 +276,9 @@ impl Tree {
     /// `<item> Total` for a subtotal, `Total` for the grand total, the rest blank.
     pub(crate) fn labels(&self, entry: &Entry) -> Vec<V> {
         let mut labels = match entry.kind {
-            Kind::Leaf => self.nodes[entry.node].path.clone(),
+            Kind::Leaf => self.path(entry.node),
             Kind::Subtotal(level) => {
-                let mut path = self.nodes[entry.node].path.clone();
+                let mut path = self.path(entry.node);
                 let item = path[level].to_display_string();
                 path[level] = V::Text(format!("{item} Total"));
                 path

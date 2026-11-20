@@ -364,3 +364,67 @@ fn groupby_and_pivotby_fail_closed_on_hostile_sizes() {
     assert_eq!(model._get_text("A2"), "#VALUE!");
     assert_eq!(model._get_text("A3"), "20000");
 }
+
+#[test]
+fn groupby_pays_for_its_groups_before_it_makes_them() {
+    // 16 group columns of all different texts over 60,000 rows: every row would start 16 groups
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=GROUPBY(SEQUENCE(60000,16)&\"x\",SEQUENCE(60000),SUM)",
+    );
+    let started = std::time::Instant::now();
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "#SPILL!");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_function_that_compares_with_a_total_pays_for_the_values_it_reads() {
+    // 200,000 groups, each compared with a total of 200,000 values: the steps run out, not the clock
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=GROUPBY(SEQUENCE(200000),SEQUENCE(200000),PERCENTOF,,0)",
+    );
+    let started = std::time::Instant::now();
+    model.evaluate();
+    assert!(
+        ["#VALUE!", "#SPILL!", "#NUM!"].contains(&model._get_text("A1").as_str()),
+        "{}",
+        model._get_text("A1")
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
+    // a small one still works and reads the same total for every group
+    assert_eq!(
+        grid("=GROUPBY(A2:A6,C2:C6,PERCENTOF,,0)", 2, 2)[0][1],
+        "0.697674418604651"
+    );
+}
+
+#[test]
+fn group_labels_are_the_values_of_the_rows_that_made_the_groups() {
+    // a parent written two ways is one group; each group reads its text from its first row
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=GROUPBY({\"East\";\"east\";\"EAST\"},{\"a\";\"b\";\"a\"},SUM,0,0)",
+    );
+    model._set(
+        "D1",
+        "=GROUPBY({\"East\",\"x\";\"east\",\"y\"},{1;2},SUM,0,0)",
+    );
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "East");
+    assert_eq!(model._get_text("D1"), "East");
+    assert_eq!(model._get_text("E1"), "x");
+    assert_eq!(model._get_text("E2"), "y");
+}

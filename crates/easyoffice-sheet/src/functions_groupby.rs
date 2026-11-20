@@ -34,6 +34,10 @@ const MAX_VALUE_COLUMNS: usize = 64;
 /// Rows put into cells, over all rows: the rows times the levels of both axes.
 const MAX_BUCKET_PUSHES: usize = 8_000_000;
 const NO_ENTRY: usize = usize::MAX;
+/// Bytes one group costs before it exists: the group, its row list entries and its index entry.
+const GROUP_NODE_BYTES: usize = 160;
+/// Values a function reads for one evaluation step.
+const STEP_VALUES: usize = 16;
 
 /// What turns the values of a group into one value: a `LAMBDA` (a function named without its
 /// arguments, `SUM`, was made one when the formula was read, see `parser_array.rs`).
@@ -215,13 +219,15 @@ impl SheetEngine {
         &self,
         aggregator: &Aggregator,
         group: Vec<V>,
-        total: Option<Vec<V>>,
+        total: Option<Arc<Grid>>,
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<V, FormulaError> {
-        let column = |values: Vec<V>| Arc::new(Grid::from_rows(values.len(), 1, values));
-        let mut grids = vec![column(group)];
-        grids.extend(total.map(column));
+        // the function reads every value it is given: that work is paid for in steps
+        let work = group.len() + total.as_ref().map_or(0, |t| t.data.len());
+        ctx.charge_steps(1 + work / STEP_VALUES)?;
+        let mut grids = vec![Arc::new(Grid::from_rows(group.len(), 1, group))];
+        grids.extend(total);
         let f = Val::Lambda(Arc::clone(aggregator));
         let call_args = grids.into_iter().map(Val::Grid).collect();
         Ok(single(self.apply_val(&f, call_args, ctx, depth + 1)?))
@@ -362,17 +368,24 @@ impl SheetEngine {
     }
 
     /// The row groups and column groups, in order, and the rows in the cell of every pair.
-    fn build_groups(
+    fn build_groups<'r>(
         &self,
-        req: &Request,
+        req: &'r Request,
         ctx: &mut EvalContext<'_>,
         depth: usize,
-    ) -> Result<Groups, FormulaError> {
+    ) -> Result<Groups<'r>, FormulaError> {
         let rows = req.kept.len();
         let (kr, kc) = (
             req.row_fields.cols,
             req.col_fields.as_ref().map_or(0, |g| g.cols),
         );
+        // the groups, and the lower-cased copy of each key text the index holds, are paid for before
+        // they are made: every row may start a group on every level
+        ctx.charge_array_extra_bytes(
+            rows.saturating_mul(kr + kc)
+                .saturating_mul(GROUP_NODE_BYTES),
+        )?;
+        ctx.charge_array_extra_bytes(req.key_text_bytes())?;
         let mut row_tree = Tree::build(kr, rows, req.table, |l, i| {
             req.row_fields.get(req.kept[i], l).clone()
         });
@@ -382,12 +395,21 @@ impl SheetEngine {
                 .map_or(V::Empty, |g| g.get(req.kept[i], l).clone())
         });
         let all_rows: Vec<u32> = (0..rows as u32).collect();
+        // the column of every row, made once per value column for a function that compares with it
+        let mut all_columns: Vec<Option<Arc<Grid>>> = vec![None; req.values.cols];
         for (tree, sort, table) in [
             (&mut row_tree, &req.row_sort, req.table),
             (&mut col_tree, &req.col_sort, false),
         ] {
             let mut aggregate = |node: &Node, j: usize| {
-                let total = req.wants_total().then(|| req.column(&all_rows, j));
+                let total = if req.wants_total() {
+                    if all_columns[j].is_none() {
+                        all_columns[j] = Some(req.column_grid(&all_rows, j, ctx)?);
+                    }
+                    all_columns[j].clone()
+                } else {
+                    None
+                };
                 self.aggregate(
                     &req.aggregator,
                     req.column(&node.rows, j),
@@ -447,7 +469,7 @@ impl SheetEngine {
     fn write_values(
         &self,
         req: &Request,
-        groups: &Groups,
+        groups: &Groups<'_>,
         shape: &Shape,
         out: &mut [V],
         ctx: &mut EvalContext<'_>,
@@ -458,7 +480,8 @@ impl SheetEngine {
         let wants_total = req.wants_total();
         let (rt, ct) = (&groups.row_tree.nodes, &groups.col_tree.nodes);
         let mut ticks = 0usize;
-        let mut parent_totals: HashMap<(usize, usize), Vec<u32>> = HashMap::new();
+        // the columns of the totals, each made once: (relative_to, row group, column group, value column)
+        let mut totals: HashMap<(i64, usize, usize, usize), Arc<Grid>> = HashMap::new();
         for (ri, re) in groups.row_entries.iter().enumerate() {
             let line = (shape.top + ri) * shape.width;
             for (l, label) in groups.row_tree.labels(re).into_iter().enumerate() {
@@ -469,25 +492,30 @@ impl SheetEngine {
                 if members.is_empty() {
                     continue;
                 }
-                let total_rows: Option<&Vec<u32>> = wants_total.then(|| match req.relative_to {
-                    0 => &ct[ce.node].rows,
-                    1 => &rt[re.node].rows,
-                    2 => &groups.all_rows,
-                    relative_to => {
-                        // the parent row group with this column group, or this row group with
-                        // the parent column group
-                        let key = if relative_to == 3 {
-                            (rt[re.node].parent, ce.node)
-                        } else {
-                            (re.node, ct[ce.node].parent)
-                        };
-                        &*parent_totals
-                            .entry(key)
-                            .or_insert_with(|| intersect(&rt[key.0].rows, &ct[key.1].rows))
-                    }
-                });
                 for j in 0..m {
-                    let total = total_rows.map(|set| req.column(set, j));
+                    let total = if wants_total {
+                        let key = match req.relative_to {
+                            0 => (0, ce.node, 0, j),
+                            1 => (1, re.node, 0, j),
+                            2 => (2, 0, 0, j),
+                            // the parent row group with this column group, or this row group
+                            // with the parent column group
+                            3 => (3, rt[re.node].parent, ce.node, j),
+                            _ => (4, re.node, ct[ce.node].parent, j),
+                        };
+                        if !totals.contains_key(&key) {
+                            let set = match key.0 {
+                                0 => ct[key.1].rows.clone(),
+                                1 => rt[key.1].rows.clone(),
+                                2 => groups.all_rows.clone(),
+                                _ => intersect(&rt[key.1].rows, &ct[key.2].rows),
+                            };
+                            totals.insert(key, req.column_grid(&set, j, ctx)?);
+                        }
+                        totals.get(&key).cloned()
+                    } else {
+                        None
+                    };
                     let group = req.column(members, j);
                     out[line + kr + ci * m + j] =
                         self.aggregate(&req.aggregator, group, total, ctx, depth)?;
@@ -516,7 +544,7 @@ fn entry_of(entries: &[Entry], nodes: usize) -> Vec<usize> {
 }
 
 /// The shown rows of the groups from the group of a data row up to the group of every row.
-fn shown_chain(tree: &Tree, entry_of: &[usize], leaf: usize, out: &mut Vec<usize>) {
+fn shown_chain(tree: &Tree<'_>, entry_of: &[usize], leaf: usize, out: &mut Vec<usize>) {
     out.clear();
     let mut node = leaf;
     loop {
@@ -562,6 +590,32 @@ impl Request {
             .collect()
     }
 
+    /// The same values as a column grid, paid for in the array budget.
+    fn column_grid(
+        &self,
+        rows: &[u32],
+        j: usize,
+        ctx: &mut EvalContext<'_>,
+    ) -> Result<Arc<Grid>, FormulaError> {
+        ctx.charge_array_cells(rows.len(), 1)?;
+        Ok(Arc::new(Grid::from_rows(
+            rows.len(),
+            1,
+            self.column(rows, j),
+        )))
+    }
+
+    /// Bytes of the texts of the group columns in the kept rows.
+    fn key_text_bytes(&self) -> usize {
+        self.kept
+            .iter()
+            .map(|&r| {
+                let line = |g: &Grid| (0..g.cols).map(|c| g.get(r, c).heap_bytes()).sum::<usize>();
+                line(&self.row_fields) + self.col_fields.as_ref().map_or(0, |g| line(g))
+            })
+            .sum()
+    }
+
     /// The name of field `l` of `grid`: its header, or a generated one.
     fn field_name(&self, grid: &Grid, l: usize, generated: &str) -> V {
         if self.has_headers {
@@ -574,7 +628,7 @@ impl Request {
     }
 
     /// The column labels above the values and the field names.
-    fn write_headers(&self, groups: &Groups, shape: &Shape, out: &mut [V]) {
+    fn write_headers(&self, groups: &Groups<'_>, shape: &Shape, out: &mut [V]) {
         let (kr, m) = (self.row_fields.cols, self.values.cols);
         let width = shape.width;
         if let Some(cols) = &self.col_fields {
@@ -608,9 +662,9 @@ impl Request {
 }
 
 /// The groups of both axes.
-struct Groups {
-    row_tree: Tree,
-    col_tree: Tree,
+struct Groups<'r> {
+    row_tree: Tree<'r>,
+    col_tree: Tree<'r>,
     row_entries: Vec<Entry>,
     col_entries: Vec<Entry>,
     /// The kept rows (positions) of every pair of shown row and column, row major.
