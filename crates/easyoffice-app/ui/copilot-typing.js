@@ -73,6 +73,8 @@
       run.at = Math.min(run.stops.length, run.at + run.step);
       const typed = run.text.slice(0, run.stops[run.at - 1]);
       run.onText(typed);
+      // `onText`가 멈추거나 끝냈으면(오류 처리 포함) 이어 쓰지 않는다.
+      if (current !== run) return;
       // 문장 끝에서 쉬었다 이어 쓴다.
       const rest = run.at < run.stops.length;
       if (rest && SENTENCE_END.test(typed)) {

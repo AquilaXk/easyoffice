@@ -153,70 +153,92 @@ fn error_message(err: &StrictJsonValue) -> String {
 }
 
 // 옮김[continue-gemini-array] 시작
-/// `streamGenerateContent`의 본문은 `[{..}\n,{..}\n,{..}]` 모양의 JSON 배열이 조각으로 온다. 배열 괄호를 걷어 내고 `\n,`로 나눠
-/// 읽히는 조각을 델타로 내며, 아직 덜 온 마지막 조각은 다음 조각을 기다린다.
+/// `streamGenerateContent`의 본문은 `[{..}\n,{..}\n,{..}]` 모양의 JSON 배열이 조각으로 온다. 읽힌 객체는 델타로 내고 버리며,
+/// 아직 덜 온 꼬리만 다음 조각까지 보관한다. 배열의 `[`는 스트림 처음에서만 걷고, 끝의 `]`는 그것을 걷어 내야 객체가 읽힐 때만 걷는다
+/// (조각이 객체 안의 `]`에서 끊겨도 건드리지 않는다).
 #[derive(Default)]
 struct JsonArrayReader {
+    /// 아직 읽지 못한 꼬리.
     buffer: Vec<u8>,
+    /// `[`를 걷었거나 배열이 아닌 시작을 확인했다.
+    started: bool,
+}
+
+fn parse_object(bytes: &[u8]) -> Option<Delta> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let parsed = StrictJsonValue::parse(text).ok()?;
+    let object = parsed.as_object()?;
+    let mut delta = Delta::default();
+    if let Some(err) = StrictJsonValue::get_field(object, "error") {
+        delta.error = Some(error_message(err));
+    } else {
+        read_google(object, &mut delta);
+    }
+    Some(delta)
 }
 
 impl JsonArrayReader {
+    /// 앞쪽의 공백과 쉼표, 스트림 처음의 `[`를 걷는다.
+    fn trim_head(&mut self) {
+        let mut cut = 0;
+        while !self.started {
+            match self.buffer.get(cut) {
+                Some(b) if b.is_ascii_whitespace() => cut += 1,
+                Some(b'[') => {
+                    cut += 1;
+                    self.started = true;
+                }
+                Some(_) => self.started = true,
+                None => break,
+            }
+        }
+        while self
+            .buffer
+            .get(cut)
+            .is_some_and(|b| b.is_ascii_whitespace() || *b == b',')
+        {
+            cut += 1;
+        }
+        self.buffer.drain(..cut);
+    }
+
     fn push(&mut self, chunk: &[u8]) -> Result<Vec<Delta>, &'static str> {
         self.buffer.extend_from_slice(chunk);
         if self.buffer.len() > MAX_LLM_RESPONSE_BYTES {
             return Err("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.");
         }
-        if self.buffer.first() == Some(&b'[') {
-            self.buffer.remove(0);
-        }
-        if self.buffer.last() == Some(&b']') {
-            self.buffer.pop();
-        }
-        if self.buffer.first() == Some(&b',') {
-            self.buffer.remove(0);
-        }
-        let parts: Vec<&[u8]> = split_on(&self.buffer, b"\n,");
         let mut deltas = Vec::new();
-        let mut found_incomplete = false;
-        for part in &parts {
-            let parsed = std::str::from_utf8(part)
-                .ok()
-                .and_then(|text| StrictJsonValue::parse(text).ok());
-            let Some(parsed) = parsed.as_ref().and_then(StrictJsonValue::as_object) else {
-                found_incomplete = true;
-                continue;
-            };
-            let mut delta = Delta::default();
-            if let Some(err) = StrictJsonValue::get_field(parsed, "error") {
-                delta.error = Some(error_message(err));
-            } else {
-                read_google(parsed, &mut delta);
+        loop {
+            self.trim_head();
+            if self.buffer.is_empty() {
+                break;
             }
-            deltas.push(delta);
+            if let Some(at) = find_separator(&self.buffer) {
+                // 구분자 앞은 한 객체다. 읽히지 않으면 깨진 조각이라 버린다(남겨 두면 뒤를 막는다).
+                deltas.extend(parse_object(&self.buffer[..at]));
+                self.buffer.drain(..at + 2);
+                continue;
+            }
+            // 구분자가 아직 없다: 지금까지가 온전한 객체면 낸다. 끝의 `]`는 그것을 걷어야 읽힐 때만 배열의 끝이다.
+            let end = self.buffer.trim_ascii_end();
+            let parsed = parse_object(end).or_else(|| {
+                end.strip_suffix(b"]")
+                    .and_then(|rest| parse_object(rest.trim_ascii_end()))
+            });
+            match parsed {
+                Some(delta) => {
+                    deltas.push(delta);
+                    self.buffer.clear();
+                }
+                None => break,
+            }
         }
-        self.buffer = match parts.last() {
-            Some(last) if found_incomplete => last.to_vec(),
-            _ => Vec::new(),
-        };
         Ok(deltas)
     }
 }
 
-fn split_on<'a>(haystack: &'a [u8], needle: &[u8]) -> Vec<&'a [u8]> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut at = 0;
-    while at + needle.len() <= haystack.len() {
-        if &haystack[at..at + needle.len()] == needle {
-            parts.push(&haystack[start..at]);
-            at += needle.len();
-            start = at;
-        } else {
-            at += 1;
-        }
-    }
-    parts.push(&haystack[start..]);
-    parts
+fn find_separator(haystack: &[u8]) -> Option<usize> {
+    haystack.windows(2).position(|w| w == b"\n,")
 }
 // 옮김[continue-gemini-array] 끝
 
@@ -390,6 +412,58 @@ mod tests {
             shown.extend(asm.feed(part));
         }
         assert_eq!(shown, ["완성"]);
+    }
+
+    fn google_part(text: &str) -> String {
+        format!("{{\"candidates\":[{{\"content\":{{\"parts\":[{{\"text\":\"{text}\"}}]}}}}]}}")
+    }
+
+    #[test]
+    fn a_google_array_split_at_a_separator_emits_each_object_once() {
+        // 조각이 `\n,{B}`로 시작해도 이미 낸 `{A}`를 다시 내지 않는다.
+        let (a, b, c) = (google_part("가"), google_part("나"), google_part("다"));
+        let chunks = [format!("[{a}"), format!("\n,{b}"), format!("\n,{c}\n]")];
+        let mut asm = StreamAssembler::new(ProviderKind::Google);
+        let shown: Vec<String> = chunks
+            .iter()
+            .filter_map(|c| asm.feed(c.as_bytes()))
+            .collect();
+        assert_eq!(shown.concat(), "가나다", "{shown:?}");
+        assert!(asm.failure().is_none());
+        assert_eq!(asm.finish("").unwrap().0, "가나다");
+    }
+
+    #[test]
+    fn a_google_array_cut_at_every_byte_gives_the_same_text_once() {
+        let whole = format!(
+            "[{}\n,{}\n,{}\n]",
+            google_part("하나"),
+            google_part("둘"),
+            google_part("셋")
+        );
+        let mut asm = StreamAssembler::new(ProviderKind::Google);
+        let mut shown = String::new();
+        for byte in whole.as_bytes() {
+            if let Some(text) = asm.feed(std::slice::from_ref(byte)) {
+                shown.push_str(&text);
+            }
+        }
+        assert_eq!(shown, "하나둘셋");
+    }
+
+    #[test]
+    fn a_google_chunk_that_happens_to_end_in_a_bracket_is_not_cut() {
+        // 한 객체 안의 `]`에서 조각이 끊겨도 `]`를 걷어 내지 않는다.
+        let whole = format!("[{}\n]", google_part("끝"));
+        let cut = whole.find("}]").unwrap() + 2;
+        let (head, tail) = whole.as_bytes().split_at(cut);
+        assert_eq!(head.last(), Some(&b']'));
+        let mut asm = StreamAssembler::new(ProviderKind::Google);
+        let mut shown = String::new();
+        for part in [head, tail] {
+            shown.extend(asm.feed(part));
+        }
+        assert_eq!(shown, "끝");
     }
 
     #[test]

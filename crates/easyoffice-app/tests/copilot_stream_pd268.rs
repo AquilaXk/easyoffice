@@ -391,3 +391,68 @@ fn a_hostile_stream_over_the_response_limit_is_refused() {
         "{res:?}"
     );
 }
+
+/// 청크 크기 줄이 `usize` 끝까지 가는 응답을 주는 서버 하나로 스트림 요청을 돌린다.
+fn run_against_chunk_size(size_line: &'static str, id: &str) -> Result<String, EasyOfficeError> {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 8192];
+        let mut request = Vec::new();
+        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = conn.read(&mut buf).unwrap();
+            request.extend_from_slice(&buf[..n]);
+        }
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+        let _ = conn.write_all(format!("{head}{size_line}\r\nxx").as_bytes());
+        thread::sleep(Duration::from_millis(100));
+    });
+    let events = |_: &CopilotStreamEvent<'_>| {};
+    let stream = |req: &CopilotLlmRequest, sink: &mut ChunkSink<'_>| -> Result<String, String> {
+        send_local_http_streaming(req, Some(sink)).map_err(|e| e.to_string())
+    };
+    let writers = ShellWriters {
+        llm_stream: Some(&stream),
+        copilot_events: Some(&events),
+        ..ShellWriters::default()
+    };
+    let local = payload(id, r#","stream":true"#).replace(
+        REMOTE,
+        &format!(r#""provider": {{ "kind": "local_http", "baseUrl": "http://127.0.0.1:{port}", "model": "m" }}"#),
+    );
+    let res = EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
+        "run_smart_assistant",
+        &local,
+        "",
+        writers,
+    );
+    server.join().unwrap();
+    res
+}
+
+#[test]
+fn a_chunk_size_at_the_end_of_usize_is_refused_without_overflowing() {
+    for (i, line) in [
+        "ffffffffffffffff",
+        "fffffffffffffffe",
+        "7fffffffffffffff",
+        "80000",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let res = run_against_chunk_size(line, &format!("cp-s-chunk-{i}"));
+        let Err(EasyOfficeError::ResourceBudgetExceeded(_) | EasyOfficeError::InvalidArgument(_)) =
+            res
+        else {
+            panic!("{line}: {res:?}");
+        };
+    }
+    // 상한(512 KiB)을 넘는 크기는 예산 초과로 거부한다.
+    let res = run_against_chunk_size("100000", "cp-s-chunk-big");
+    let Err(EasyOfficeError::InvalidArgument(message)) = res else {
+        panic!("{res:?}");
+    };
+    assert!(message.contains("512 KiB"), "{message}");
+}

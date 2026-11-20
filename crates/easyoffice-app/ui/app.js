@@ -153,6 +153,7 @@
     getSheetController: () => sheetController, getSheetStore: () => sheetDataStore,
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
+    isCapturePaused: () => copilotUi?.isPerforming() === true, whenCaptureAllowed: () => copilotUi?.whenIdle() ?? Promise.resolve(),
     isDesktopShell: () => desktopBridge.isAvailable(),
     onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule), onMenuItemsApplied: () => docTable.syncMenu(),
   });

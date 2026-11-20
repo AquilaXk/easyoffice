@@ -13,12 +13,14 @@ use easyoffice_app::copilot::ssrf::is_public_ip;
 use easyoffice_app::copilot::types::{
     ChunkSink, HttpMethod, MAX_LLM_REQUEST_BYTES, MAX_LLM_RESPONSE_BYTES,
 };
-use easyoffice_app::copilot::wire::STREAM_STOPPED_MESSAGE;
+use easyoffice_app::copilot::wire::{
+    STREAM_DEADLINE_MESSAGE, STREAM_IDLE_TIMEOUT, STREAM_STOPPED_MESSAGE, STREAM_TOTAL_LIMIT,
+};
 use easyoffice_app::{CopilotLlmRequest, CopilotStreamEvent};
 use std::io::{Error as IoError, ErrorKind, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// What the page receives for one piece of the answer (`requestId` ties it to the question, `seq` counts from 0).
 #[derive(Clone, serde::Serialize)]
@@ -160,11 +162,15 @@ fn read_body(
     reader: impl Read,
     mut sink: Option<&mut ChunkSink<'_>>,
     or_cancelled: &dyn Fn(String) -> String,
+    deadline: Option<Instant>,
 ) -> Result<Vec<u8>, String> {
     let mut reader = reader.take(MAX_LLM_RESPONSE_BYTES as u64 + 1);
     let mut body = Vec::with_capacity(8192);
     let mut buf = [0u8; 8192];
     loop {
+        if deadline.is_some_and(|limit| Instant::now() >= limit) {
+            return Err(STREAM_DEADLINE_MESSAGE.to_string());
+        }
         let n = reader
             .read(&mut buf)
             .map_err(|_| or_cancelled("모델 응답 본문을 읽지 못했습니다.".to_string()))?;
@@ -203,9 +209,14 @@ fn complete_https(
         .https_only(true)
         .redirects(0)
         .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(IO_TIMEOUT)
+        // 스트림은 읽기 사이의 유휴 시간만 재고(`STREAM_IDLE_TIMEOUT`) 전체는 `STREAM_TOTAL_LIMIT`로 따로 막는다.
+        // 한꺼번에 받는 요청은 전체 90초다.
+        .timeout_read(if req.stream {
+            STREAM_IDLE_TIMEOUT
+        } else {
+            IO_TIMEOUT
+        })
         .timeout_write(Duration::from_secs(15))
-        .timeout(IO_TIMEOUT)
         .user_agent(&format!("EasyOffice/{}", env!("CARGO_PKG_VERSION")))
         .resolver(move |netloc: &str| {
             if netloc_matches(netloc, &expected_host, expected_port) {
@@ -225,6 +236,9 @@ fn complete_https(
         cancel: req.cancel.clone(),
     }));
 
+    if !req.stream {
+        builder = builder.timeout(IO_TIMEOUT);
+    }
     let agent = builder.build();
     let mut http_req = match req.method {
         HttpMethod::Get => agent.get(&req.url),
@@ -278,7 +292,8 @@ fn complete_https(
         }
     }
 
-    let body = read_body(resp.into_reader(), sink, &or_cancelled)?;
+    let deadline = req.stream.then(|| Instant::now() + STREAM_TOTAL_LIMIT);
+    let body = read_body(resp.into_reader(), sink, &or_cancelled, deadline)?;
     req.cancel.check()?;
 
     if body.len() > MAX_LLM_RESPONSE_BYTES {
@@ -577,7 +592,7 @@ mod tests {
             seen += chunk.len();
             true
         };
-        let body = read_body(&big[..], Some(&mut sink), &|m| m).unwrap();
+        let body = read_body(&big[..], Some(&mut sink), &|m| m, None).unwrap();
         assert!(
             body.len() > MAX_LLM_RESPONSE_BYTES,
             "the caller rejects a body over the ceiling"
@@ -591,7 +606,20 @@ mod tests {
             seen <= MAX_LLM_RESPONSE_BYTES,
             "no piece over the ceiling reaches the page"
         );
-        let stopped = read_body(&b"abc"[..], Some(&mut |_: &[u8]| false), &|m| m).unwrap_err();
+        let stopped =
+            read_body(&b"abc"[..], Some(&mut |_: &[u8]| false), &|m| m, None).unwrap_err();
         assert_eq!(stopped, STREAM_STOPPED_MESSAGE);
+    }
+
+    #[test]
+    fn a_stream_past_its_total_limit_ends_even_while_data_keeps_coming() {
+        // 조각이 끊기지 않고 계속 와도(유휴 타임아웃에 걸리지 않아도) 전체 상한을 넘으면 끝낸다.
+        let endless = std::io::repeat(b'x');
+        let past = std::time::Instant::now() - Duration::from_secs(1);
+        let err = read_body(endless, Some(&mut |_: &[u8]| true), &|m| m, Some(past)).unwrap_err();
+        assert!(err.contains("허용 시간"), "{err}");
+        let far = std::time::Instant::now() + Duration::from_secs(60);
+        let body = read_body(&b"abc"[..], None, &|m| m, Some(far)).unwrap();
+        assert_eq!(body, b"abc");
     }
 }

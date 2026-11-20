@@ -18,8 +18,18 @@
     const { diffSegments } = host.__EASYOFFICE_COPILOT_DIFF__;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     let overlays = [];
-    // 덧씌움이 원래 문단보다 길어질 때 뒤 문단을 밀려고 임시로 넣은 아래 여백(원래 값을 적어 둔다).
-    let pushes = [];
+    // 덧씌움이 원래 문단보다 길어질 때 뒤 문단을 미는 규칙들. 편집 DOM의 인라인 스타일이 아니라 따로 둔 스타일 시트에 넣는다.
+    let pushRules = [];
+    let pushSheet = null;
+
+    function applyPushRules() {
+      if (typeof win.CSSStyleSheet !== "function" || !("adoptedStyleSheets" in document)) return;
+      if (!pushSheet) {
+        pushSheet = new win.CSSStyleSheet();
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, pushSheet];
+      }
+      pushSheet.replaceSync(pushRules.join("\n"));
+    }
 
     const clip = (text) => clipCodePoints(String(text ?? ""), MAX_ENTRY_CHARS);
 
@@ -134,7 +144,12 @@
         const touched = new Set();
         for (const op of ops) {
           for (const rep of Array.isArray(op?.replacements) ? op.replacements : []) touched.add(Number(rep?.index));
-          if (Number.isInteger(op?.startIndex)) touched.add(op.startIndex);
+          if (String(op?.op || op?.type || op?.kind || "") === "doc.replace_paragraphs" && !Array.isArray(op.replacements)) {
+            // 범위 교체(범위를 생략하면 문서 전체)는 범위 안 모든 문단이 바뀌지 않았어야 한다.
+            const start = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
+            const end = Number.isInteger(op.endIndex) ? Math.min(blocks.length - 1, op.endIndex) : blocks.length - 1;
+            for (let i = start; i <= end; i += 1) touched.add(i);
+          }
         }
         return JSON.stringify({ n: blocks.length, t: [...touched].filter(Number.isInteger).sort((a, b) => a - b).map((i) => [i, blocks[i]?.textContent ?? null]) });
       }
@@ -260,12 +275,15 @@
         for (const node of segmentNodes(entry.segments)) box.appendChild(node);
         container.appendChild(box);
         overlays.push(box);
-        // 새 글이 더 길면 덧씌움이 뒤 문단을 가린다: 마지막 문단의 아래 여백을 늘려 자리를 만든다. 여백은 저장되는 서식이 아니라 문서에 남지 않는다.
+        // 새 글이 더 길면 덧씌움이 뒤 문단을 가린다: 마지막 문단의 아래 여백을 규칙으로 늘려 자리를 만든다(문서 DOM은 건드리지 않는다).
         const extra = entry.docAppend ? 0 : box.offsetHeight - height;
         if (Number.isFinite(extra) && extra > 1) {
           const bottom = Number.parseFloat(win.getComputedStyle?.(last)?.marginBottom) || 0;
-          pushes.push({ el: last, prev: last.style.getPropertyValue("margin-bottom") });
-          last.style.setProperty("margin-bottom", `${bottom + extra}px`);
+          const nth = Array.prototype.indexOf.call(editor.children, last) + 1;
+          if (nth > 0) {
+            pushRules.push(`#doc-editor > :nth-child(${nth}) { margin-bottom: ${bottom + extra}px !important; }`);
+            applyPushRules();
+          }
         }
       }
     }
@@ -273,11 +291,11 @@
     function clear() {
       for (const box of overlays) box.remove();
       overlays = [];
-      for (const { el, prev } of pushes.reverse()) {
-        if (prev) el.style.setProperty("margin-bottom", prev);
-        else el.style.removeProperty("margin-bottom");
+      pushRules = [];
+      if (pushSheet) {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== pushSheet);
+        pushSheet = null;
       }
-      pushes = [];
     }
 
     return { buildChanges, fingerprint, renderList, showDocOverlays, clear, blockText, MAX_ENTRIES };

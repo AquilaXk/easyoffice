@@ -7,7 +7,7 @@ use easyoffice_formats::EasyOfficeError;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::cancel::CANCELLED_MESSAGE;
 use super::types::{ChunkSink, CopilotLlmRequest, HttpMethod, MAX_LLM_RESPONSE_BYTES};
@@ -15,6 +15,11 @@ use super::types::{ChunkSink, CopilotLlmRequest, HttpMethod, MAX_LLM_RESPONSE_BY
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const LOCAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_IO_TIMEOUT: Duration = Duration::from_secs(90);
+/// 스트림은 읽기 사이에 이만큼 조용하면 끊긴 것으로 본다(모델이 첫 글자를 내기까지의 시간도 여기에 든다).
+pub const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// 조각이 끊기지 않고 와도 스트림 전체가 이 시간을 넘으면 끝낸다. 출력 상한(8,192 토큰)을 느린 로컬 모델이 채우는 시간을 넉넉히 덮는다.
+pub const STREAM_TOTAL_LIMIT: Duration = Duration::from_secs(600);
+pub const STREAM_DEADLINE_MESSAGE: &str = "모델 응답이 허용 시간(10분)을 넘었습니다.";
 
 fn format_host_header(host: &str, port: u16) -> String {
     if host.contains(':') && !host.starts_with('[') {
@@ -47,7 +52,12 @@ pub fn send_local_http_streaming(
     let mut stream = TcpStream::connect_timeout(&addr, LOCAL_CONNECT_TIMEOUT)
         .map_err(|err| io_failure(req, format!("로컬 모델 서버에 연결할 수 없습니다: {err}")))?;
     req.cancel.attach(&stream);
-    let _ = stream.set_read_timeout(Some(LOCAL_IO_TIMEOUT));
+    let _ = stream.set_read_timeout(Some(if req.stream {
+        STREAM_IDLE_TIMEOUT
+    } else {
+        LOCAL_IO_TIMEOUT
+    }));
+    let deadline = req.stream.then(|| Instant::now() + STREAM_TOTAL_LIMIT);
     let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
 
     let host_hdr = format_host_header(&req.host, req.port);
@@ -89,6 +99,11 @@ pub fn send_local_http_streaming(
     let mut hdr_end_cache: Option<usize> = None;
     let mut feed = BodyFeed::default();
     loop {
+        if deadline.is_some_and(|limit| Instant::now() >= limit) {
+            return Err(EasyOfficeError::InvalidArgument(
+                STREAM_DEADLINE_MESSAGE.to_string(),
+            ));
+        }
         match stream.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
@@ -261,8 +276,15 @@ impl BodyFeed {
                 .map_err(|_| {
                     EasyOfficeError::InvalidArgument("청크 크기를 해석할 수 없습니다.".to_string())
                 })?;
+            // 크기가 상한을 넘으면 더 읽지 않는다. 상한 아래의 크기만 더하므로 덧셈은 넘치지 않는다.
+            if size > MAX_LLM_RESPONSE_BYTES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "모델 응답 청크가 허용 상한(512 KiB)을 초과했습니다.".to_string(),
+                ));
+            }
             let data_at = self.chunk_pos + rel_crlf + 2;
-            if size == 0 || data_at + size + 2 > body.len() {
+            let next = data_at.checked_add(size + 2);
+            if size == 0 || next.is_none_or(|next| next > body.len()) {
                 break;
             }
             self.chunk_pos = data_at + size + 2;

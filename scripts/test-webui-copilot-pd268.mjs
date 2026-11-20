@@ -320,3 +320,168 @@ test("a question is cut at the engine's byte limit, not at a character count", a
   assert.ok(run.prompt.length > 5000, "most of the text is kept: " + run.prompt.length);
   assert.equal(run.prompt.length, 5461);
 });
+
+// ---- 보안 리뷰에서 나온 결함 (PD-268)
+
+const slideAdd = (title, bullets) => ({ op: "slide.add", title, bullets });
+
+async function slideDeck(motion = true, run) {
+  const h = await open({ module: "SLIDE", motion, run });
+  const thumbs = () => h.document.querySelectorAll("#slide-thumb-list .slide-thumb");
+  const text = async (index) => {
+    thumbs()[index].click();
+    await flushAsyncTurns(4);
+    return [h.document.getElementById("slide-title-zone").textContent.trim(), h.document.getElementById("slide-lower-zone").textContent.trim()];
+  };
+  return { ...h, thumbs, text };
+}
+
+test("typing on several slides leaves every slide with its own text", async () => {
+  let call = 0;
+  const h = await slideDeck(true, () => {
+    call += 1;
+    if (call === 1) return answer([slideAdd("둘째 장", ["둘째 본문"]), slideAdd("셋째 장", ["셋째 본문"])]);
+    return answer([
+      { op: "slide.update", index: 0, bullets: ["첫째 장의 새 본문입니다", "두 줄째입니다"] },
+      { op: "slide.update", index: 1, title: "둘째 장의 새 제목" },
+    ]);
+  });
+  await h.send("슬라이드를 만들어 주세요");
+  await acceptProposal(h.document, h.userClick);
+  assert.equal(h.thumbs().length, 3);
+  const before1 = await h.text(1);
+  const before0 = await h.text(0);
+  await h.send("고쳐 주세요");
+  h.userClick(reviewButton(h.document, "accept"));
+  await flushAsyncTurns(6);
+  await h.play(9000);
+  assert.equal(h.document.getElementById("eo-copilot-cursor-layer"), null);
+  assert.deepEqual(await h.text(0), [before0[0], "첫째 장의 새 본문입니다\n두 줄째입니다"], "slide 1 has its own new body");
+  assert.deepEqual(await h.text(1), ["둘째 장의 새 제목", before1[1]], "slide 2 keeps its body: the first slide's text did not land on it");
+  assert.deepEqual((await h.text(2))[1], "셋째 본문");
+});
+
+test("a change to a range of paragraphs is refused when anything in the range changed after the preview", async () => {
+  for (const op of [
+    { op: "doc.replace_paragraphs", startIndex: 0, endIndex: 1, blocks: [{ text: "범위를 바꾼 글" }] },
+    { op: "doc.replace_paragraphs", blocks: [{ text: "전체를 바꾼 글" }] },
+  ]) {
+    const { document, userClick, send, editor } = await open({ run: () => answer([op]) });
+    editor.innerHTML = "<p>첫째 문단</p><p>둘째 문단</p>";
+    const paragraphs = () => Array.from(editor.querySelectorAll("p")).map((p) => p.textContent);
+    await send("바꿔 주세요");
+    editor.querySelectorAll("p")[1].textContent = "그 사이에 고친 둘째 문단";
+    document.getElementById("status-command-feedback").textContent = "";
+    await acceptProposal(document, userClick);
+    assert.deepEqual(paragraphs(), ["첫째 문단", "그 사이에 고친 둘째 문단"], JSON.stringify(op));
+    assert.equal(document.getElementById("status-command-feedback").textContent, "문서가 바뀌어 적용할 수 없습니다");
+  }
+});
+
+test("a slide change without an index goes to the slide that was active when it was proposed", async () => {
+  let call = 0;
+  const h = await slideDeck(false, () => {
+    call += 1;
+    return call === 1 ? answer([slideAdd("둘째 장", ["둘째 본문"])]) : answer([{ op: "slide.update", title: "고친 제목" }]);
+  });
+  await h.send("슬라이드를 만들어 주세요");
+  await acceptProposal(h.document, h.userClick);
+  await h.text(1);
+  await h.send("제목을 고쳐 주세요");
+  const original = (await h.text(1))[0];
+  await h.text(0);
+  await acceptProposal(h.document, h.userClick);
+  assert.equal((await h.text(1))[0], "고친 제목", "the proposal named slide 2 (the active one then)");
+  assert.notEqual(original, "고친 제목");
+  assert.notEqual((await h.text(0))[0], "고친 제목");
+});
+
+test("an error in the middle of the performance still puts the text back and removes the pointer and the listeners", async () => {
+  const { document, userClick, send, play, editor } = await open({ motion: true, run: () => answer([replaceOp(0, "중간에 예외가 나는 새 문장입니다")]) });
+  const p = firstParagraph(editor, "옛 문장");
+  await send("고쳐 주세요");
+  let rects = 0;
+  const original = p.getBoundingClientRect.bind(p);
+  p.getBoundingClientRect = () => {
+    rects += 1;
+    if (rects > 14) throw new Error("boom");
+    return original();
+  };
+  userClick(reviewButton(document, "accept"));
+  await flushAsyncTurns(6);
+  await play(4000);
+  await flushAsyncTurns(10);
+  assert.ok(rects > 14, "the error was reached");
+  assert.equal(p.textContent, "옛 문장", "the temporary text is gone");
+  assert.equal(document.getElementById("eo-copilot-cursor-layer"), null);
+  assert.equal(document.getElementById("btn-copilot-send").getAttribute("aria-label"), "보내기", "the panel is not stuck running");
+  document.dispatchEvent({ type: "keydown", key: "a", target: editor });
+  assert.equal(p.textContent, "옛 문장");
+});
+
+test("the preview does not write into the editor's own styles", async () => {
+  class Sheet {
+    replaceSync(text) { this.text = text; }
+  }
+  const { document, send, editor, host } = await open({ run: () => answer([replaceOp(0, "새 문장 입니다 아주 길게 늘어나서 두 줄이 되는 문장")]), extra: { CSSStyleSheet: Sheet } });
+  document.adoptedStyleSheets = [];
+  const p = firstParagraph(editor, "옛 문장");
+  const proto = Object.getPrototypeOf(p);
+  const saved = Object.getOwnPropertyDescriptor(proto, "offsetHeight");
+  p.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 20 });
+  Object.defineProperty(proto, "offsetHeight", { configurable: true, get() { return String(this.className).includes("eo-copilot-diff-block") ? 80 : 20; } });
+  try {
+    await send("고쳐 주세요");
+    assert.ok(document.querySelector(".eo-copilot-diff-block"));
+    assert.equal(p.getAttribute("style"), null, "no inline style on the paragraph");
+    const rules = document.adoptedStyleSheets.map((sheet) => sheet.text).join("");
+    assert.match(rules, /margin-bottom:\s*60px/, "the room is made by a rule of its own sheet");
+  } finally {
+    if (saved) Object.defineProperty(proto, "offsetHeight", saved);
+    else delete proto.offsetHeight;
+  }
+  void host;
+});
+
+const LONG_TEXT = "임시로 쓰는 글자가 저장되면 안 되는 긴 문장입니다. ".repeat(8).trim();
+
+test("the autosave and the window close do not read the pointer's temporary text", async () => {
+  const storage = new Map();
+  const localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) };
+  const { document, userClick, send, play, editor, host } = await open({ motion: true, run: () => answer([replaceOp(0, LONG_TEXT)]), extra: { localStorage } });
+  const p = firstParagraph(editor, "옛 문장");
+  await send("고쳐 주세요");
+  userClick(reviewButton(document, "accept"));
+  await flushAsyncTurns(6);
+  await play(1100);
+  const typed = p.textContent;
+  assert.ok(typed.length > 0 && typed !== "옛 문장", "typing is under way: " + typed);
+  editor.dispatchEvent({ type: "input", target: p });
+  await play(1400);
+  const record = [...storage.values()].join("");
+  assert.ok(p.textContent.length < LONG_TEXT.length, "the typing is still going when the autosave tick came");
+  assert.ok(!record.includes(typed), "an autosave tick during the performance did not capture the temporary text");
+  await play(9000);
+  assert.equal(p.textContent, LONG_TEXT);
+  // 연출이 끝나면 저장은 다시 돌고 끝난 글을 읽는다(미뤄졌을 뿐 막힌 것이 아니다).
+  editor.dispatchEvent({ type: "input", target: p });
+  await play(2500);
+  assert.ok([...storage.values()].join("").includes(LONG_TEXT), "the autosave ran after the performance");
+});
+
+test("a new conversation during the performance throws the cut operations away", async () => {
+  const { document, userClick, send, play, editor, assistants } = await open({ motion: true, run: () => answer([replaceOp(0, "새 대화로 버려지는 문장입니다 끝까지 가지 않습니다")]) });
+  const p = firstParagraph(editor, "옛 문장");
+  await send("고쳐 주세요");
+  userClick(reviewButton(document, "accept"));
+  await flushAsyncTurns(6);
+  await play(1100);
+  assert.ok(p.textContent !== "옛 문장" && p.textContent.length > 0);
+  userClick(document.getElementById("btn-copilot-new"));
+  await flushAsyncTurns(14);
+  await play(500);
+  assert.equal(p.textContent, "옛 문장", "nothing of the cut change is applied");
+  assert.equal(document.getElementById("eo-copilot-cursor-layer"), null);
+  assert.equal(assistants().length, 0);
+  assert.equal(document.querySelector("#copilot-thread .eo-copilot-undo-btn"), null, "and there is no undo step for it");
+});

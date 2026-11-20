@@ -51,8 +51,18 @@
       return targets.slice(0, MAX_ANIMATED_TARGETS);
     }
 
-    // 수식이나 숫자 글은 쓰다 만 것이 틀린 값이 되므로 통째로 쓰이거나 아예 쓰이지 않는다.
-    const isAtomicText = (text) => text.startsWith("=") || /^[\s\d.,+\-%$₩]+$/.test(text);
+    // 셀 값으로 읽히는 글(수식, 숫자, 백분율, 통화, 괄호 음수, 날짜, 시간, 참거짓)은 쓰다 만 것이 다른 값이 되므로 통째로 쓰이거나 아예 쓰이지 않는다.
+    // 시트의 기존 판정(`inferTag`, `normalizeFormattedNumericCell`)을 먼저 쓰고, 그것이 모르는 날짜·시간·괄호 음수는 아래 모양으로 본다.
+    const VALUE_LIKE = /^[(+-]?\p{Sc}?\s*\d[\d,.\s]*\)?\s*%?$|^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$|^\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]m)?$|^(?:true|false)$/iu;
+    function isAtomicText(text) {
+      const trimmed = text.trim();
+      if (trimmed.startsWith("=")) return true;
+      const tag = host.__EASYOFFICE_SHEET_CELL_TYPE__?.inferTag?.(text);
+      if (tag !== undefined && tag !== "s") return true;
+      const normalized = host.__EASYOFFICE_SHEET_UTILS__?.normalizeFormattedNumericCell?.(text);
+      if (normalized !== undefined && normalized !== trimmed) return true;
+      return VALUE_LIKE.test(trimmed);
+    }
 
     /** `stop`이 가리키는 곳까지만 남긴 연산 복사본. `stop`이 없으면 전부 남긴다. */
     function cutOperations(operations, targets, stop) {
@@ -140,10 +150,11 @@
       const targets = collectTargets(mod, operations);
       const reduced = Boolean(isReducedMotion?.());
       if (reduced || targets.length === 0) {
-        return { done: Promise.resolve({ operations: cutOperations(operations, targets, null), completed: true }), stop() {}, active: false };
+        return { done: Promise.resolve({ operations: cutOperations(operations, targets, null), completed: true, discarded: false }), stop() {}, discard() {}, active: false };
       }
       const cursor = createCursor();
       let stopped = false;
+      let discarded = false;
       let typing = null;
 
       const onHands = (event) => {
@@ -159,6 +170,12 @@
         stopped = true;
         typing?.stop();
         cursor.interrupt();
+      }
+
+      // 쓰던 부분도 적용하지 않고 버린다(새 대화).
+      function discard() {
+        discarded = true;
+        stop();
       }
 
       async function glideTo(rect) {
@@ -182,13 +199,21 @@
 
       async function typeInto(el, text, setText, { speed, totalMs } = {}) {
         typing = createTypist({ onBlink: (idle) => cursor.setIdle(idle), ...(speed ? { typeSpeed: speed, maxTotalMs: totalMs, sentencePauseMs: 40 } : {}) });
+        // 타이머 안에서 던진 오류는 약속이 받지 못한다: 붙잡아 입력을 끝내고 다 기다린 뒤 다시 던진다.
+        let failure = null;
         const result = await typing.type(text, (prefix) => {
-          setText(prefix);
-          const caret = caretAt(el);
-          cursor.setCaret(caret);
-          cursor.place(caret.left + 2, caret.top + caret.height / 2);
+          try {
+            setText(prefix);
+            const caret = caretAt(el);
+            cursor.setCaret(caret);
+            cursor.place(caret.left + 2, caret.top + caret.height / 2);
+          } catch (error) {
+            failure = error;
+            typing.stop();
+          }
         });
         typing = null;
+        if (failure) throw failure;
         return result;
       }
 
@@ -221,7 +246,12 @@
 
       async function slideTarget(t) {
         const panels = getWorkspacePanels();
-        if (t.index !== getActiveSlideIndex()) panels?.renderSlideDeck?.(t.index);
+        // 슬라이드를 바꾸기 전에 임시로 쓴 것을 원래대로 돌린다. 영역(제목·본문)은 슬라이드마다 같은 요소를 쓰므로,
+        // 나중에 돌리면 앞 슬라이드의 원래 글이 지금 슬라이드에 덮인다.
+        if (t.index !== getActiveSlideIndex()) {
+          revertCosmetics();
+          panels?.renderSlideDeck?.(t.index);
+        }
         const el = document.getElementById(t.kind === "slide-title" ? "slide-title-zone" : "slide-lower-zone");
         if (!el) return { typed: 0 };
         remember(el);
@@ -254,29 +284,33 @@
       const drivers = { "doc-replace": docTarget, "doc-append": docTarget, "slide-title": slideTarget, "slide-body": slideTarget, "sheet-cell": sheetTarget };
 
       const done = (async () => {
-        cursor.show();
-        const rect = document.getElementById("eo-copilot-shell")?.getBoundingClientRect?.();
-        cursor.place(rect ? rect.left + 24 : 640, rect ? rect.top + 120 : 200);
         let cutAt = null;
-        for (const target of targets) {
-          if (stopped) {
-            cutAt = { target, typed: 0 };
-            break;
+        try {
+          cursor.show();
+          const rect = document.getElementById("eo-copilot-shell")?.getBoundingClientRect?.();
+          cursor.place(rect ? rect.left + 24 : 640, rect ? rect.top + 120 : 200);
+          for (const target of targets) {
+            if (stopped) {
+              cutAt = { target, typed: 0 };
+              break;
+            }
+            const result = await drivers[target.kind](target);
+            if (stopped || result.completed === false) {
+              cutAt = { target, typed: result.typed ?? 0 };
+              break;
+            }
           }
-          const result = await drivers[target.kind](target);
-          if (stopped || result.completed === false) {
-            cutAt = { target, typed: result.typed ?? 0 };
-            break;
-          }
+        } finally {
+          // 오류가 나도 손 감지 리스너, 포인터, 임시로 쓴 글은 정리한다.
+          for (const type of handEvents) document.removeEventListener(type, onHands, true);
+          cursor.hide();
+          cursor.destroy();
+          revertCosmetics();
         }
-        for (const type of handEvents) document.removeEventListener(type, onHands, true);
-        cursor.hide();
-        cursor.destroy();
-        revertCosmetics();
-        return { operations: cutOperations(operations, targets, cutAt), completed: cutAt === null, interrupted: cutAt !== null };
+        return { operations: discarded ? [] : cutOperations(operations, targets, cutAt), completed: cutAt === null, interrupted: cutAt !== null, discarded };
       })();
 
-      return { done, stop, active: true };
+      return { done, stop, discard, active: true };
     }
 
     return { perform, collectTargets, cutOperations, MAX_ANIMATED_CELLS };

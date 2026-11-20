@@ -456,6 +456,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function captureAndPersist() {
+      // 코파일럿 포인터가 글을 치는 동안은 임시로 쓴 글을 읽지 않는다: 끝난 뒤 다시 잰다.
+      if (deps.isCapturePaused?.()) {
+        scheduleAutosave();
+        return;
+      }
       if (deps.getSheetStore && skipAutosaveForLargeWorkbook(deps.getSheetStore())) return;
       const snap = captureWorkspaceSnapshot(false);
       if (skipAutosaveForLargeWorkbook(snap.sheets)) return;
@@ -472,6 +477,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (autosaveTimer !== null) host.clearTimeout?.(autosaveTimer);
       autosaveTimer = null;
       if (!pendingActivity && !dirty) return;
+      if (deps.isCapturePaused?.()) return;
       try {
         captureAndPersist();
       } catch {
@@ -482,6 +488,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     // Brings what the window knows of its changes up to date: a sheet cell still being edited is committed,
     // then the content is compared with the saved one. A close decides on the answer of `isDirty` after this.
     async function settle() {
+      await deps.whenCaptureAllowed?.();
       await getSheetController?.()?.commitPendingFocusedSheetCell?.(true);
       await runExclusive(() => flushAutosaveNow());
     }

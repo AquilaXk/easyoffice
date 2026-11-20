@@ -224,12 +224,19 @@
       /** `duration` ms 동안 `step(eased)`를 프레임마다 부른다(`eased`는 0에서 1로 `easeOut`을 타고 간다). 가로채이면 `false`로 풀린다. */
       animate(duration, step) {
         interruptMove();
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           pendingMove = resolve;
           controller.start(MOVE, ({ deltaTime, state }) => {
             const elapsed = (state?.elapsed ?? 0) + deltaTime;
             const t = Math.min(1, elapsed / duration);
-            step(easeOut(t));
+            try {
+              step(easeOut(t));
+            } catch (error) {
+              // 단계 함수가 던지면 프레임 루프에서 빠져나와 호출한 쪽에 알린다(그렇지 않으면 약속이 영영 풀리지 않는다).
+              pendingMove = null;
+              reject(error);
+              return null;
+            }
             if (t < 1) return { elapsed };
             pendingMove = null;
             resolve(true);

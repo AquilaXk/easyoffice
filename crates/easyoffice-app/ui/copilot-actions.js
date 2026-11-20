@@ -103,6 +103,13 @@
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     let lastUndoEntry = null;
     let activeRun = null;
+    const idleWaiters = [];
+    // 연출이 끝날 때까지 기다리는 약속(자동 저장과 창 닫기가 임시로 쓴 글을 읽지 않게 한다).
+    const whenIdle = () => (activeRun === null ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve)));
+    function endRun() {
+      activeRun = null;
+      for (const resolve of idleWaiters.splice(0)) resolve();
+    }
 
     // 접근성: 움직임 줄이기를 켠 사용자에게는 포인터·타이핑 연출 없이 바로 적용한다.
     const isReducedMotion = () => host.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
@@ -581,6 +588,16 @@
       return rawIdx;
     }
 
+    function normalizeOperations(mod, operations) {
+      if (mod !== "SLIDE" || !Array.isArray(operations)) return operations;
+      const active = getActiveSlideIndex();
+      return operations.map((op) => {
+        const kind = String(op?.op || op?.type || op?.kind || "").trim();
+        const named = Number.isInteger(op?.index) || Number.isInteger(op?.slideIndex);
+        return op && typeof op === "object" && !named && (kind === "slide.update" || kind === "slide.add_element") ? { ...op, index: active } : op;
+      });
+    }
+
     const canApply = (mod, mode, operations) =>
       mode === "edit" && mod !== "PDF" && mod !== "BASE" && mod !== "BOARD" && Array.isArray(operations) && operations.length > 0;
 
@@ -671,8 +688,9 @@
       try {
         result = await run.done;
       } finally {
-        activeRun = null;
+        endRun();
       }
+      if (result.discarded) return { applied: false, locations: [], interrupted: true, discarded: true };
       if (result.operations.length === 0) return { applied: false, locations: [], interrupted: result.interrupted };
       const applied = await applyOperations(mod, mode, result.operations, turnId, { beforeSnap });
       return { ...applied, interrupted: result.interrupted };
@@ -761,6 +779,11 @@
       applyOperations,
       applyOperationsAnimated,
       stopPerformance: () => activeRun?.stop(),
+      // 쓰던 부분도 적용하지 않고 버린다(새 대화).
+      abortPerformance: () => activeRun?.discard(),
+      whenIdle,
+      // 제안 때 활성 슬라이드를 연산에 고정한다(수락 전에 다른 슬라이드로 옮겨도 제안한 슬라이드에 적용한다).
+      normalizeOperations,
       isPerforming: () => activeRun !== null,
       buildChanges: preview.buildChanges,
       fingerprint: preview.fingerprint,

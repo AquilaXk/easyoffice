@@ -574,7 +574,8 @@
     }
 
     // 연산이 있는 편집 응답은 적용하지 않고 바뀔 곳을 보여 준다. 수락해야 적용한다.
-    function propose(entry, mod, operations) {
+    function propose(entry, mod, rawOperations) {
+      const operations = copilotActions.normalizeOperations(mod, rawOperations);
       const changes = copilotActions.buildChanges(mod, operations);
       entry.change = { state: "pending", mod, operations, changes, fingerprint: copilotActions.fingerprint(mod, operations) };
       if (mod === "DOC") copilotActions.showDocPreview(changes);
@@ -801,6 +802,8 @@
       byId("btn-copilot-toggle")?.addEventListener("click", () => toggle());
       byId("btn-copilot-close")?.addEventListener("click", () => setOpen(false));
       byId("btn-copilot-new")?.addEventListener("click", () => {
+        // 연출 중이면 쓰던 부분도 적용하지 않고 버린다.
+        copilotActions.abortPerformance();
         stopActiveRun();
         dismissPreview();
         messages.length = 0;
@@ -861,6 +864,8 @@
         syncPanelChrome();
       },
       syncSelection: () => syncSelectionBadge(),
+      isPerforming: () => copilotActions.isPerforming(),
+      whenIdle: () => copilotActions.whenIdle(),
     };
   }
 
