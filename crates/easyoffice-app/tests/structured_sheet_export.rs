@@ -333,3 +333,34 @@ mod number_formats {
         assert!(save(&too_many, "xlsx").is_err());
     }
 }
+
+#[test]
+fn csv_and_tsv_save_neutralise_text_a_spreadsheet_would_run_as_a_formula() {
+    let cells = r#""sheets":[{"name":"S","cells":[
+        {"ref":"A1","raw":"=CONCAT(\"=\",\"SUM(A1:A2)\")"},
+        {"ref":"A2","raw":"=\"+cmd\""},
+        {"ref":"A3","raw":"=\"-1+1\""},
+        {"ref":"A4","raw":"=\"@x\""},
+        {"ref":"A5","raw":"-5"},
+        {"ref":"A6","raw":"=-5"},
+        {"ref":"A7","raw":"a=b"},
+        {"ref":"B1","raw":"=\"=1\""}
+    ]}]"#;
+    for (dst, sep) in [("csv", ","), ("tsv", "\t")] {
+        let (_, bytes) = convert(&payload(dst, cells));
+        let text = csv_text(&bytes);
+        assert_eq!(
+            text.lines().collect::<Vec<_>>(),
+            [
+                format!("'=SUM(A1:A2){sep}'=1"),
+                format!("'+cmd{sep}"),
+                format!("'-1+1{sep}"),
+                format!("'@x{sep}"),
+                format!("-5{sep}"),
+                format!("-5{sep}"),
+                format!("a=b{sep}"),
+            ],
+            "{dst}"
+        );
+    }
+}

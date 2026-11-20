@@ -792,15 +792,16 @@
     return (state?.tables || []).map((tbl) => buildSheetForTable(state, tbl, usedUpper));
   }
 
-  const escapeCsvField = (text, delim) => {
-    const s = String(text ?? "");
+  // OWASP CSV injection: a text value a spreadsheet program could read as a formula gets a leading apostrophe; a number keeps its sign.
+  const escapeCsvField = (text, delim, isNumber = false) => {
+    const t = String(text ?? ""), s = !isNumber && /^[=+\-@\t\r]/.test(t) ? "'" + t : t;
     return s.includes(delim) || s.includes('"') || s.includes("\r") || s.includes("\n") ? '"' + s.replaceAll('"', '""') + '"' : s;
   };
 
   function toDelimitedText(state, tableId, delimiter = ",") {
     const delim = delimiter === "\t" ? "\t" : ",", { fields, rows } = queryTableView(state, tableId);
     const lines = [fields.map((f) => escapeCsvField(f.name || "", delim)).join(delim)];
-    for (const rowData of rows) lines.push(fields.map((fld) => escapeCsvField(cellExportScalar(fld, rowData).raw, delim)).join(delim));
+    for (const rowData of rows) lines.push(fields.map((fld) => { const sc = cellExportScalar(fld, rowData); return escapeCsvField(sc.raw, delim, sc.t !== "s"); }).join(delim));
     return "\uFEFF" + lines.join("\r\n");
   }
 
