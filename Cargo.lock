@@ -1280,9 +1280,11 @@ dependencies = [
 name = "easyoffice-formats"
 version = "0.1.0"
 dependencies = [
+ "adler2",
  "base64 0.23.1",
  "crc32fast",
  "encoding_rs",
+ "miniz_oxide 0.9.1",
  "sha1",
  "sha2 0.11.1",
 ]

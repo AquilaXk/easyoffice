@@ -128,10 +128,12 @@ fn comments_repeat_reference_xlsx() -> Vec<u8> {
         .map(|(a, c)| (a.as_str(), "worksheet", c.as_str()))
         .collect();
     entries.push(("xl/_rels/workbook.xml.rels".into(), rels(&wb_rels_ref)));
-    // 공백 100B마다 탭·줄바꿈·CR 중 하나를 해시로 골라 끼운다. 공백만이라 XML 이벤트는 생기지 않고,
-    // 압축비는 팩커 상한(90) 아래다. 파트 크기는 약 120 MiB.
-    let blank = " ".repeat(100);
-    let pad: String = (0..(120 * 1024 * 1024 / 101) as u64)
+    // 공백 40B마다 탭·줄바꿈·CR 중 하나를 해시로 골라 끼운다. 공백만이라 XML 이벤트는 생기지 않고,
+    // 어떤 DEFLATE 구현으로도 압축비는 팩커 상한(90) 아래다(구간마다 일치 하나와 리터럴 하나가
+    // 남는다). 파트 크기는 약 120 MiB. 구간이 100B이던 때는 자체 압축기만 상한 아래였고
+    // miniz_oxide는 상한을 넘겨 파트가 저장 방식으로 들어갔다(PD-269).
+    let blank = " ".repeat(40);
+    let pad: String = (0..(120 * 1024 * 1024 / 41) as u64)
         .map(|i| {
             let ws =
                 ["\t", "\n", "\r"][((i.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) % 3) as usize];

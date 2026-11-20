@@ -16,15 +16,22 @@ default-members = [
     "crates/easyoffice-app",
 ]
 
-# PD-268: the engine crates use maintained crates under permissive licences instead of re-implementing
+# PD-269: the engine crates use maintained crates under permissive licences instead of re-implementing
 # them. The versions here are the ones the desktop shell and the rhwp checkout already resolve, so
 # `Cargo.lock` gains no second copy of any of them.
 [workspace.dependencies]
 crc32fast = "1.5"
 base64 = "0.23"
 encoding_rs = "0.8"
+miniz_oxide = "0.9"
+adler2 = "2"
+# `zip` leaves the DEFLATE backend of `flate2` open; the engine picks the pure Rust one.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 sha1 = "0.11"
 sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [workspace.package]
 version = "0.1.0"
