@@ -20,7 +20,7 @@
 
 use crate::{EasyOfficeError, XmlSanitizer};
 use quick_xml::errors::{Error as XmlError, SyntaxError};
-use quick_xml::events::attributes::{AttrError, Attributes};
+use quick_xml::events::attributes::{AttrError, Attribute, Attributes};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use std::borrow::Cow;
@@ -66,11 +66,26 @@ fn attribute_error(error: &AttrError) -> EasyOfficeError {
     })
 }
 
+/// How many attributes of a tag [`Attrs`] indexes; the rest are parsed again when asked for.
+const INDEXED_ATTRS: usize = 4;
+
+/// Where an indexed attribute lies in the raw text of its tag: name and value as (start, end).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct AttrSpan {
+    name: (u16, u16),
+    value: (u16, u16),
+}
+
 /// Attributes of one start tag, kept as the raw text between the name and `>`. They were checked
-/// when the tag was read, so lookups and iteration cannot fail.
+/// when the tag was read, so lookups and iteration cannot fail. That one pass also notes where the
+/// first few attributes lie, so reading them again does not parse them again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Attrs<'a> {
     raw: &'a str,
+    indexed: u8,
+    /// Whether `spans` holds every attribute.
+    complete: bool,
+    spans: [AttrSpan; INDEXED_ATTRS],
 }
 
 impl<'a> Attrs<'a> {
@@ -90,16 +105,62 @@ impl<'a> Attrs<'a> {
 
     /// Attributes in document order with their values as written; decode the ones you keep with
     /// [`unescape_cow`]. A repeated name is listed again, the first one wins in [`Self::get`].
-    pub(crate) fn iter_raw(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
-        let mut attributes = Attributes::new(self.raw, 0);
-        attributes.with_checks(false);
-        attributes.filter_map(|attribute| {
-            let attribute = attribute.ok()?;
-            match attribute.value {
-                Cow::Borrowed(value) => Some((attribute.key.0, value)),
-                Cow::Owned(_) => None,
-            }
-        })
+    pub(crate) fn iter_raw(&self) -> AttrIter<'a> {
+        AttrIter {
+            attrs: *self,
+            next: 0,
+            parsed: None,
+        }
+    }
+}
+
+type ParsedAttrs<'a> = std::iter::FilterMap<
+    Attributes<'a>,
+    fn(Result<Attribute<'a>, AttrError>) -> Option<(&'a str, &'a str)>,
+>;
+
+/// Iterator of [`Attrs::iter_raw`]: the indexed attributes first, then the others parsed again.
+pub(crate) struct AttrIter<'a> {
+    attrs: Attrs<'a>,
+    next: usize,
+    parsed: Option<ParsedAttrs<'a>>,
+}
+
+impl<'a> Iterator for AttrIter<'a> {
+    type Item = (&'a str, &'a str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let attrs = &self.attrs;
+        if self.next < usize::from(attrs.indexed) {
+            let span = attrs.spans[self.next];
+            self.next += 1;
+            let name = &attrs.raw[usize::from(span.name.0)..usize::from(span.name.1)];
+            let value = &attrs.raw[usize::from(span.value.0)..usize::from(span.value.1)];
+            return Some((name, value));
+        }
+        if attrs.complete {
+            return None;
+        }
+        let skip = usize::from(attrs.indexed);
+        let raw = attrs.raw;
+        self.parsed
+            .get_or_insert_with(|| {
+                let mut attributes = Attributes::new(raw, 0);
+                attributes.with_checks(false);
+                let mut parsed = attributes.filter_map(borrowed_pair as fn(_) -> _);
+                parsed.by_ref().take(skip).for_each(drop);
+                parsed
+            })
+            .next()
+    }
+}
+
+/// The name and value of a well-formed attribute; a malformed one is skipped.
+fn borrowed_pair<'a>(attribute: Result<Attribute<'a>, AttrError>) -> Option<(&'a str, &'a str)> {
+    let attribute = attribute.ok()?;
+    match attribute.value {
+        Cow::Borrowed(value) => Some((attribute.key.0, value)),
+        Cow::Owned(_) => None,
     }
 }
 
@@ -296,6 +357,8 @@ impl<'a> XmlReader<'a> {
     /// resolved by [`unescape_cow`], so text and attribute values read the same.
     fn read_text_run(&mut self, first: &Event<'a>) -> Result<XmlEvent<'a>, EasyOfficeError> {
         let mut span = self.text_span(first)?;
+        // A text piece stops at the first `&`, so one that does not start with it has none.
+        let mut has_references = !matches!(first, Event::Text(text) if !text.starts_with('&'));
         // Text and references follow each other until the next `<` (or the end of the input).
         while self
             .xml
@@ -303,11 +366,17 @@ impl<'a> XmlReader<'a> {
             .get(span.end)
             .is_some_and(|&b| b != b'<')
         {
+            has_references = true;
             let next = self.pull()?;
             span.end = self.text_span(&next)?.end;
         }
         self.emitted += 1;
-        Ok(XmlEvent::Text(unescape_cow(self.slice(span)?)))
+        let text = self.slice(span)?;
+        Ok(XmlEvent::Text(if has_references {
+            unescape_cow(text)
+        } else {
+            Cow::Borrowed(text)
+        }))
     }
 
     fn read_start_tag(
@@ -321,7 +390,7 @@ impl<'a> XmlReader<'a> {
         if name.is_empty() {
             return Err(corrupt("XML 태그 이름이 비어 있습니다."));
         }
-        check_attributes(raw)?;
+        let attrs = read_attributes(raw)?;
         if !empty {
             self.depth += 1;
             if self.depth > MAX_XML_DEPTH {
@@ -333,27 +402,44 @@ impl<'a> XmlReader<'a> {
         self.emitted += 1 + usize::from(empty);
         self.last_start_empty = empty;
         self.pending_end = empty.then_some(name);
-        Ok(XmlEvent::Start {
-            name,
-            attrs: Attrs { raw },
-        })
+        Ok(XmlEvent::Start { name, attrs })
     }
 }
 
-/// Refuses a start tag whose attributes are not `name="value"` pairs, or whose value holds `<`.
-fn check_attributes(raw: &str) -> Result<(), EasyOfficeError> {
+/// Reads the attributes of a start tag in one pass, refusing a list that is not `name="value"`
+/// pairs. The first few are indexed for [`Attrs`].
+fn read_attributes(raw: &str) -> Result<Attrs<'_>, EasyOfficeError> {
+    let mut attrs = Attrs {
+        raw,
+        indexed: 0,
+        complete: true,
+        spans: [AttrSpan::default(); INDEXED_ATTRS],
+    };
     if raw.is_empty() {
-        return Ok(());
+        return Ok(attrs);
     }
-    if XmlSanitizer::find_byte_swar(raw.as_bytes(), 0, b'<').is_some() {
-        return Err(corrupt(
-            "XML 속성 값에 금지된 문자 '<'가 포함되어 있습니다.",
-        ));
-    }
+    let offsets_fit = u16::try_from(raw.len()).is_ok();
     let mut attributes = Attributes::new(raw, 0);
     attributes.with_checks(false);
-    attributes
-        .try_for_each(|attribute| attribute.map(drop).map_err(|error| attribute_error(&error)))
+    for attribute in attributes {
+        let attribute = attribute.map_err(|error| attribute_error(&error))?;
+        let Cow::Borrowed(value) = attribute.value else {
+            continue;
+        };
+        let slot = usize::from(attrs.indexed);
+        if slot < INDEXED_ATTRS && offsets_fit {
+            let (name, value) = (span_in(raw, attribute.key.0), span_in(raw, value));
+            // `raw` is shorter than 64 KiB here, so the positions fit.
+            attrs.spans[slot] = AttrSpan {
+                name: (name.start as u16, name.end as u16),
+                value: (value.start as u16, value.end as u16),
+            };
+            attrs.indexed += 1;
+        } else {
+            attrs.complete = false;
+        }
+    }
+    Ok(attrs)
 }
 
 impl<'a> Iterator for XmlReader<'a> {

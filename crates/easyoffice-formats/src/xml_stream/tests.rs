@@ -597,7 +597,6 @@ fn a_malformed_attribute_list_ends_the_reader() {
         "<a x=1>",
         "<a x=\"1>",
         "<a x='1\">",
-        "<a x=\"a<b\"/>",
         "<a x=\"1\" y/>",
         "<a x=/>",
         "< a/>",
@@ -650,4 +649,50 @@ fn nesting_depth_fails_closed_past_the_limit() {
     // Closed elements free their depth, empty elements take none.
     let wide = "<a><b/></a>".repeat(MAX_XML_DEPTH);
     assert!(XmlReader::unbounded(&wide).all(|event| event.is_ok()));
+}
+
+#[test]
+fn attributes_past_the_index_and_in_long_tags_read_in_order() {
+    // The first four attributes are indexed when the tag is read, the rest are parsed on demand.
+    let tag = "<a a=\"1\" b=\"2\" c=\"3\" d=\"4\" e=\"5&amp;\" f=\"6\" a=\"7\"/>";
+    let ev = tokenize(tag).unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    let all: Vec<_> = attrs.iter_raw().collect();
+    assert_eq!(
+        all,
+        [
+            ("a", "1"),
+            ("b", "2"),
+            ("c", "3"),
+            ("d", "4"),
+            ("e", "5&amp;"),
+            ("f", "6"),
+            ("a", "7")
+        ]
+    );
+    assert_eq!(attrs.get("e").unwrap(), "5&");
+    assert_eq!(attrs.get("a").unwrap(), "1");
+    assert!(attrs.get("g").is_none());
+
+    // A tag longer than 64 KiB has no index; every lookup parses.
+    let long = format!("<a x=\"{}\" y=\"2\"/>", "v".repeat(70_000));
+    let ev = tokenize(&long).unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(attrs.get("x").unwrap().len(), 70_000);
+    assert_eq!(attrs.get("y").unwrap(), "2");
+    assert_eq!(attrs.iter_raw().count(), 2);
+}
+
+#[test]
+fn a_less_than_sign_inside_a_quoted_value_is_read_as_text() {
+    // The tokenizer ends a tag at the first `>` outside quotes, so the value cannot open markup.
+    let ev = tokenize("<a v=\"x<y\"/>").unwrap();
+    let XmlEvent::Start { attrs, .. } = &ev[0] else {
+        panic!("start expected");
+    };
+    assert_eq!(attrs.get("v").unwrap(), "x<y");
 }
