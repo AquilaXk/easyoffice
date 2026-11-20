@@ -546,15 +546,7 @@ pub struct CopilotRunResponse {
     pub locations: Vec<CopilotLocation>,
 }
 
-pub fn escape_json_str_into(out: &mut String, s: &str) {
-    crate::EasyOfficeIpcRouter::escape_json_into(out, s);
-}
-
-pub fn push_json_str(out: &mut String, s: &str) {
-    out.push('"');
-    escape_json_str_into(out, s);
-    out.push('"');
-}
+pub use easyoffice_formats::json_out::push_json_string as push_json_str;
 
 pub fn is_valid_hex_color(raw: &str) -> bool {
     let b = raw.as_bytes();

@@ -10,13 +10,8 @@ use easyoffice_formats::{
 };
 
 use super::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
-use crate::EasyOfficeIpcRouter;
 
-fn push_json_str(out: &mut String, s: &str) {
-    out.push('"');
-    EasyOfficeIpcRouter::escape_json_into(out, s);
-    out.push('"');
-}
+use easyoffice_formats::json_out::push_json_string as push_json_str;
 
 pub(crate) fn write_run_annotations(out: &mut String, r: &RichRun) {
     if let Some((kind, id)) = r.note_ref {

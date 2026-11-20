@@ -22,3 +22,5 @@ embed-hwp-studio = []
 easyoffice-formats = { path = "../easyoffice-formats" }
 easyoffice-sheet = { path = "../easyoffice-sheet" }
 easyoffice-layout = { path = "../easyoffice-layout" }
+serde = { workspace = true }
+serde_json = { workspace = true }

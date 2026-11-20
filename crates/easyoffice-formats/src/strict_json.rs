@@ -187,32 +187,12 @@ impl StrictJsonValue {
         out
     }
 
-    fn write_escaped_str(out: &mut String, s: &str) {
-        out.push('"');
-        for ch in s.chars() {
-            match ch {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                '\u{0008}' => out.push_str("\\b"),
-                '\u{000C}' => out.push_str("\\f"),
-                c if (c as u32) < 0x20 => {
-                    out.push_str(&format!("\\u{:04x}", c as u32));
-                }
-                c => out.push(c),
-            }
-        }
-        out.push('"');
-    }
-
     fn write_json(&self, out: &mut String) {
         match self {
             Self::Null => out.push_str("null"),
             Self::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             Self::Number(n) => out.push_str(n),
-            Self::Str(s) => Self::write_escaped_str(out, s),
+            Self::Str(s) => crate::json_out::push_json_string(out, s),
             Self::Array(items) => {
                 out.push('[');
                 for (idx, item) in items.iter().enumerate() {
@@ -229,7 +209,7 @@ impl StrictJsonValue {
                     if idx > 0 {
                         out.push(',');
                     }
-                    Self::write_escaped_str(out, k);
+                    crate::json_out::push_json_string(out, k);
                     out.push(':');
                     v.write_json(out);
                 }

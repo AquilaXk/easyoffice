@@ -26,11 +26,7 @@ fn invalid(msg: &str) -> EasyOfficeError {
     EasyOfficeError::InvalidArgument(msg.to_string())
 }
 
-fn push_json_string(out: &mut String, text: &str) {
-    out.push('"');
-    out.push_str(&EasyOfficeIpcRouter::escape_json_str(text));
-    out.push('"');
-}
+use easyoffice_formats::json_out::push_json_string;
 
 /// One item: `{t:[...],c:{...}}` for the values of one code.
 fn render_item(

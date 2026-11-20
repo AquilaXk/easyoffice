@@ -6,13 +6,13 @@
 //! limit of `easyoffice_formats::sheet_names` is enforced on input; an input over a limit is refused, not
 //! trimmed.
 
-use crate::EasyOfficeIpcRouter;
+use easyoffice_formats::json_out::{push_json, Items};
 use easyoffice_formats::{
     defined_name_problem, fold_name, DefinedName, EasyOfficeError, StrictJsonValue, MAX_NAMES,
     MAX_NAME_CHARS, MAX_NAME_COMMENT_CHARS, MAX_REFERS_TO_CHARS,
 };
 use easyoffice_sheet::NameIssue;
-use std::fmt::Write;
+use serde::Serialize;
 
 type Fields = [(String, StrictJsonValue)];
 
@@ -94,38 +94,36 @@ pub(crate) fn names_field(entries: &Fields) -> Result<Vec<DefinedName>, EasyOffi
     StrictJsonValue::get_field(entries, "names").map_or_else(|| Ok(Vec::new()), parse_names)
 }
 
-pub(crate) fn write_name(out: &mut String, def: &DefinedName) {
-    out.push_str("{\"name\":\"");
-    EasyOfficeIpcRouter::escape_json_into(out, &def.name);
-    if let Some(scope) = &def.scope {
-        out.push_str("\",\"scope\":\"");
-        EasyOfficeIpcRouter::escape_json_into(out, scope);
+/// One definition as the page reads it; `scope`, `comment` and `hidden` are left out at their defaults.
+#[derive(Serialize)]
+struct NameOut<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<&'a str>,
+    #[serde(rename = "refersTo")]
+    refers_to: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    comment: &'a str,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
+}
+
+impl<'a> NameOut<'a> {
+    fn new(def: &'a DefinedName) -> Self {
+        Self {
+            name: &def.name,
+            scope: def.scope.as_deref(),
+            refers_to: &def.refers_to,
+            comment: &def.comment,
+            hidden: def.hidden,
+        }
     }
-    out.push_str("\",\"refersTo\":\"");
-    EasyOfficeIpcRouter::escape_json_into(out, &def.refers_to);
-    out.push('"');
-    if !def.comment.is_empty() {
-        out.push_str(",\"comment\":\"");
-        EasyOfficeIpcRouter::escape_json_into(out, &def.comment);
-        out.push('"');
-    }
-    if def.hidden {
-        out.push_str(",\"hidden\":true");
-    }
-    out.push('}');
 }
 
 /// `[...]`.
 pub(crate) fn names_json(names: &[DefinedName]) -> String {
     let mut out = String::with_capacity(2 + names.len() * 48);
-    out.push('[');
-    for (i, def) in names.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        write_name(&mut out, def);
-    }
-    out.push(']');
+    push_json(&mut out, &Items(names.iter().map(NameOut::new)));
     out
 }
 
@@ -143,20 +141,20 @@ pub(crate) fn issue_code(issue: NameIssue) -> &'static str {
     }
 }
 
+#[derive(Serialize)]
+struct IssueOut {
+    index: usize,
+    problem: &'static str,
+}
+
 /// `[{"index","problem"}]` for the definitions with a problem.
 pub(crate) fn issues_json(issues: &[(usize, NameIssue)]) -> String {
-    let mut out = String::from("[");
-    for (i, &(index, issue)) in issues.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        let _ = write!(
-            out,
-            "{{\"index\":{index},\"problem\":\"{}\"}}",
-            issue_code(issue)
-        );
-    }
-    out.push(']');
+    let mut out = String::new();
+    let items = issues.iter().map(|&(index, issue)| IssueOut {
+        index,
+        problem: issue_code(issue),
+    });
+    push_json(&mut out, &Items(items));
     out
 }
 
@@ -187,6 +185,33 @@ mod tests {
             },
         ];
         assert_eq!(parse(&names_json(&names)).unwrap(), names);
+    }
+
+    #[test]
+    fn the_answer_keeps_its_key_order_and_leaves_defaults_out() {
+        let names = vec![
+            DefinedName {
+                name: "Prices".into(),
+                refers_to: "Sheet1!$A$1:$A$3".into(),
+                ..DefinedName::default()
+            },
+            DefinedName {
+                name: "세율".into(),
+                scope: Some("내 \"시트\"".into()),
+                refers_to: "0.1".into(),
+                comment: "a\nb".into(),
+                hidden: true,
+            },
+        ];
+        assert_eq!(
+            names_json(&names),
+            r#"[{"name":"Prices","refersTo":"Sheet1!$A$1:$A$3"},{"name":"세율","scope":"내 \"시트\"","refersTo":"0.1","comment":"a\nb","hidden":true}]"#
+        );
+        assert_eq!(names_json(&[]), "[]");
+        assert_eq!(
+            issues_json(&[(0, NameIssue::BadName), (3, NameIssue::Cycle)]),
+            r#"[{"index":0,"problem":"name"},{"index":3,"problem":"cycle"}]"#
+        );
     }
 
     #[test]

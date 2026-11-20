@@ -8,7 +8,7 @@
 //! refused, not trimmed. `linkTargets` of a session request is `{sheet: ["#Sheet1!B5", ...]}`, the
 //! answer's `{sheet: [[old, new], ...]}` for the targets the edit changed.
 
-use crate::EasyOfficeIpcRouter;
+use easyoffice_formats::json_out::{push_json, Items, OrderedObject};
 use easyoffice_formats::{
     link_target, CellBox, CellLink, EasyOfficeError, SheetLinks, StrictJsonValue,
     MAX_LINKS_PER_SHEET, MAX_LINK_TIP_CHARS,
@@ -16,7 +16,7 @@ use easyoffice_formats::{
 use easyoffice_sheet::{
     follow_sheet_change_links, shift_link_targets, AxisEdit, PackedCellCoordinate, SheetChange,
 };
-use std::fmt::Write;
+use serde::Serialize;
 
 type Entries = [(String, StrictJsonValue)];
 
@@ -63,6 +63,15 @@ pub(crate) fn parse_links(v: &StrictJsonValue) -> Result<SheetLinks, EasyOfficeE
     Ok(links)
 }
 
+#[derive(Serialize)]
+struct LinkOut<'a> {
+    #[serde(rename = "ref")]
+    cell: String,
+    target: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    tip: &'a str,
+}
+
 /// `[{"ref","target","tip"}, ...]` for the links inside the first `max_rows` rows and `max_cols`
 /// columns (the editor's grid; `None` is no limit).
 pub(crate) fn links_json(
@@ -70,35 +79,19 @@ pub(crate) fn links_json(
     max_rows: Option<u32>,
     max_cols: Option<u32>,
 ) -> String {
-    let mut out = String::with_capacity(links.len() * 64 + 2);
-    out.push('[');
-    let inside = |&&(row, col): &&(u32, u32)| {
+    let inside = move |&(&(row, col), _): &(&(u32, u32), &CellLink)| {
         max_rows.is_none_or(|m| row < m) && max_cols.is_none_or(|m| col < m)
     };
-    let mut first = true;
-    for ((&(row, col), link), _) in links
+    let items = links
         .iter()
-        .map(|(at, link)| ((at, link), at))
-        .filter(|(_, at)| inside(at))
-    {
-        if !std::mem::take(&mut first) {
-            out.push(',');
-        }
-        let _ = write!(
-            out,
-            "{{\"ref\":\"{}\",\"target\":\"",
-            CellBox::cell(row, col).to_a1()
-        );
-        EasyOfficeIpcRouter::escape_json_into(&mut out, &link.target);
-        out.push('"');
-        if !link.tip.is_empty() {
-            out.push_str(",\"tip\":\"");
-            EasyOfficeIpcRouter::escape_json_into(&mut out, &link.tip);
-            out.push('"');
-        }
-        out.push('}');
-    }
-    out.push(']');
+        .filter(inside)
+        .map(|(&(row, col), link)| LinkOut {
+            cell: CellBox::cell(row, col).to_a1(),
+            target: &link.target,
+            tip: &link.tip,
+        });
+    let mut out = String::with_capacity(links.len() * 64 + 2);
+    push_json(&mut out, &Items(items));
     out
 }
 
@@ -135,26 +128,13 @@ fn parse_link_targets(entries: &Entries) -> Result<Vec<(&str, Vec<&str>)>, EasyO
 /// `,"linkTargets":{sheet: [[old, new], ...]}` for the sheets with a changed target; nothing when the
 /// request has no `linkTargets`.
 fn write_changed_targets(out: &mut String, changed: &[(&str, Vec<(String, String)>)]) {
-    out.push_str(",\"linkTargets\":{");
-    let mut first = true;
-    for (sheet, pairs) in changed.iter().filter(|(_, pairs)| !pairs.is_empty()) {
-        if !std::mem::take(&mut first) {
-            out.push(',');
-        }
-        let _ = write!(out, "\"{}\":[", EasyOfficeIpcRouter::escape_json_str(sheet));
-        for (i, (old, new)) in pairs.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            out.push_str("[\"");
-            EasyOfficeIpcRouter::escape_json_into(out, old);
-            out.push_str("\",\"");
-            EasyOfficeIpcRouter::escape_json_into(out, new);
-            out.push_str("\"]");
-        }
-        out.push(']');
-    }
-    out.push('}');
+    let sheets: Vec<(&str, &[(String, String)])> = changed
+        .iter()
+        .filter(|(_, pairs)| !pairs.is_empty())
+        .map(|(sheet, pairs)| (*sheet, pairs.as_slice()))
+        .collect();
+    out.push_str(",\"linkTargets\":");
+    push_json(out, &OrderedObject(&sheets));
 }
 
 /// The targets of the request's links that `edit` of `sheet` moves, as the answer's `linkTargets`.

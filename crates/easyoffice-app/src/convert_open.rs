@@ -52,12 +52,7 @@ fn limit(entries: &JsonEntries, key: &str) -> Result<Option<u32>, EasyOfficeErro
     }
 }
 
-/// Appends `s` as a JSON string literal.
-fn push_json_str(out: &mut String, s: &str) {
-    out.push('"');
-    EasyOfficeIpcRouter::escape_json_into(out, s);
-    out.push('"');
-}
+use easyoffice_formats::json_out::push_json_string as push_json_str;
 
 fn write_paragraph(out: &mut String, p: &RichParagraph) {
     out.push_str("{\"type\":\"paragraph\",\"runs\":[");

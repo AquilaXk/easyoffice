@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     CellBox, EasyOfficeError, PivotAggKind, PivotFilterCriteria, PivotSlicer, PivotValueField,
     SheetPivotTable, StrictJsonValue, MAX_PIVOTS_PER_SHEET, MAX_PIVOT_AXIS_FIELDS,
@@ -274,11 +273,7 @@ pub(crate) fn parse_pivots(v: &StrictJsonValue) -> Result<Vec<SheetPivotTable>, 
     Ok(out)
 }
 
-fn push_json_str_into(out: &mut String, s: &str) {
-    out.push('"');
-    EasyOfficeIpcRouter::escape_json_into(out, s);
-    out.push('"');
-}
+use easyoffice_formats::json_out::push_json_string as push_json_str_into;
 
 fn push_u32_array(out: &mut String, vals: &[u32]) {
     out.push('[');

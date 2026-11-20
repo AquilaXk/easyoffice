@@ -5,14 +5,46 @@
 //! `MIN_PAGE_BODY_TWIPS` of text room, a side over `MAX_PAGE_MARGIN_TWIPS` or a header or footer distance
 //! beyond its body distance rejects the save.
 
-use std::fmt::Write;
-
+use easyoffice_formats::json_out::push_json;
 use easyoffice_formats::{
     EasyOfficeError, RichBinding, RichBindingKind, RichPageFrame, RichPageMargins, RichPaper,
     MAX_PAGE_MARGIN_TWIPS,
 };
 
 use crate::convert_structured::{field, invalid, opt_bounded, JsonObject};
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct PaperOut {
+    width: u32,
+    height: u32,
+}
+
+#[derive(Serialize)]
+struct MarginsOut {
+    top: u32,
+    bottom: u32,
+    header: u32,
+    footer: u32,
+    left: u32,
+    right: u32,
+}
+
+#[derive(Serialize)]
+struct BindingOut {
+    kind: &'static str,
+    gutter: u32,
+}
+
+#[derive(Serialize)]
+struct PageSetupOut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paper: Option<PaperOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    margins: Option<MarginsOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    binding: Option<BindingOut>,
+}
 
 /// `"pageSetup":{…},` for the open JSON, empty when the file gives no setup.
 pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
@@ -20,37 +52,31 @@ pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
         return;
     }
     let binding = frame.binding;
-    out.push_str("\"pageSetup\":{");
-    let mut sep = "";
-    if let Some(p) = frame.paper {
-        let _ = write!(
-            out,
-            "\"paper\":{{\"width\":{},\"height\":{}}}",
-            p.width, p.height
-        );
-        sep = ",";
-    }
-    if let Some(m) = frame.margins {
-        let _ = write!(
-            out,
-            "{sep}\"margins\":{{\"top\":{},\"bottom\":{},\"header\":{},\"footer\":{},\"left\":{},\"right\":{}}}",
-            m.top, m.bottom, m.header, m.footer, m.left, m.right
-        );
-        sep = ",";
-    }
-    if binding != RichBinding::default() {
-        let kind = match binding.kind {
-            RichBindingKind::Single => "single",
-            RichBindingKind::Duplex => "duplex",
-            RichBindingKind::Top => "top",
-        };
-        let _ = write!(
-            out,
-            "{sep}\"binding\":{{\"kind\":\"{kind}\",\"gutter\":{}}}",
-            binding.gutter
-        );
-    }
-    out.push_str("},");
+    let setup = PageSetupOut {
+        paper: frame.paper.map(|p| PaperOut {
+            width: p.width,
+            height: p.height,
+        }),
+        margins: frame.margins.map(|m| MarginsOut {
+            top: m.top,
+            bottom: m.bottom,
+            header: m.header,
+            footer: m.footer,
+            left: m.left,
+            right: m.right,
+        }),
+        binding: (binding != RichBinding::default()).then(|| BindingOut {
+            kind: match binding.kind {
+                RichBindingKind::Single => "single",
+                RichBindingKind::Duplex => "duplex",
+                RichBindingKind::Top => "top",
+            },
+            gutter: binding.gutter,
+        }),
+    };
+    out.push_str("\"pageSetup\":");
+    push_json(out, &setup);
+    out.push(',');
 }
 
 fn object<'a>(

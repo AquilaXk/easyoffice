@@ -1232,6 +1232,8 @@ dependencies = [
  "easyoffice-formats",
  "easyoffice-layout",
  "easyoffice-sheet",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1250,7 +1252,7 @@ dependencies = [
  "hayro-write",
  "imagesize",
  "libc",
- "miniz_oxide 0.8.9",
+ "miniz_oxide 0.9.1",
  "native-tls",
  "objc2",
  "objc2-app-kit",
@@ -1274,6 +1276,7 @@ dependencies = [
  "ureq",
  "usvg",
  "windows-sys 0.61.2",
+ "zip",
 ]
 
 [[package]]
@@ -1285,6 +1288,8 @@ dependencies = [
  "crc32fast",
  "encoding_rs",
  "miniz_oxide 0.9.1",
+ "serde",
+ "serde_json",
  "sha1",
  "sha2 0.11.1",
  "zip",

@@ -50,11 +50,7 @@ impl Default for ReadbackQuery {
     }
 }
 
-pub(super) fn push_json_str(out: &mut String, s: &str) {
-    out.push('"');
-    EasyOfficeIpcRouter::escape_json_into(out, s);
-    out.push('"');
-}
+pub(super) use easyoffice_formats::json_out::push_json_string as push_json_str;
 
 /// `s` cut to [`MAX_READBACK_TEXT_CHARS`] characters, so one long paragraph is not copied into every list
 /// it appears in.

@@ -23,6 +23,7 @@ pub mod hwpx_codec;
 mod hwpx_parts;
 mod hwpx_unpack;
 mod iso_serial;
+pub mod json_out;
 pub mod layout_lint;
 mod legacy_ole2_codec;
 pub mod native_package;
