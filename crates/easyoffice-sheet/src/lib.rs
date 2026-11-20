@@ -41,6 +41,7 @@ mod functions_fin;
 mod functions_fin_args;
 mod functions_forecast_ets;
 mod functions_forecast_ets_args;
+mod functions_forecast_ets_cr;
 mod functions_groupby;
 mod functions_imtrig;
 mod functions_info_ref;
