@@ -2,26 +2,27 @@
 
 EasyOffice는 문서·스프레드시트·프레젠테이션·PDF·한글(HWP/HWPX) 파일을 한 앱에서 열고 편집하는 오프라인 데스크탑 앱입니다. macOS, Windows, Linux에서 실행합니다.
 
-DOCX, XLSX, PPTX, PDF 같은 오피스 형식과 HWP/HWPX를 한 작업 공간에서 다룹니다. 한글 문서의 파싱과 렌더링은 [rhwp](https://github.com/edwardkim/rhwp)를 기반으로 합니다. 앱은 그 위에 [Tauri](https://tauri.app) 셸을 얹어 파일 열기, 저장, PDF 내보내기, 인쇄, 파일 연결 같은 OS 통합을 제공합니다.
+엔진은 Rust로 짜여 있고 화면은 [Tauri](https://tauri.app) v2 셸 위의 WebUI입니다. 한글 문서의 파싱과 렌더링은 [rhwp](https://github.com/edwardkim/rhwp)를 기반으로 합니다. 셸이 파일 열기, 저장, PDF 내보내기, 인쇄, 파일 연결 같은 OS 통합을 맡습니다.
 
 ![EasyOffice](docs/images/easyoffice-home.png)
 
-## 할 수 있는 일
+## 지원 모듈
 
-현재 EasyOffice는 다음 흐름을 지원합니다.
+| 모듈 | 파일 |
+| :--- | :--- |
+| 문서 | DOCX, DOC, ODT, RTF, MD, TXT |
+| 시트 | XLSX, XLS, ODS, CSV, TSV (내장 함수 288종, 피벗, 차트, 조건부 서식) |
+| 슬라이드 | PPTX, PPT, PPSX, ODP (글상자·도형·그림·표·차트 개체, 발표자 보기) |
+| PDF | PDF (주석, 쪽 편집, 원본 객체 보존 저장) |
+| 한글 | HWP, HWPX, HWT, HWTX |
+| BASE | `.eobase` (관계형 데이터베이스: 표·관계·수식·데이터시트/보드/일정 보기) |
+| BOARD | `.eoboard` (무한 캔버스: 도형·글·그림·차트·연결선) |
+| 코파일럿 | 사용자가 등록한 AI 모델 서버에 연결하는 채팅 패널 (앱에 모델을 내장하지 않음) |
+| 변환 | 20종 포맷 사이의 변환과 일괄 변환 |
 
-* 문서 편집: DOCX, DOC, ODT, RTF, MD, TXT
-* 스프레드시트 편집: XLSX, XLS, ODS, CSV, TSV, 내장 함수 288종, 피벗·차트·조건부 서식
-* 프레젠테이션 편집: PPTX, PPT, PPSX, ODP, 발표자 보기
-* PDF 스튜디오: 주석, 쪽 분할·병합·재배치·회전
-* HWP/HWPX 열기·편집, 저장 전 검증, 자동 저장
-* 20종 포맷 사이의 변환과 일괄 변환
-* Pages(`.pages`) 파일 열기(읽기)
-* PDF로 내보내기와 인쇄
-* 문서마다 새 창으로 열기, 파일 드래그 앤 드롭, 파일 연결
-* 시작 창의 최근 문서와 첫 쪽 미리보기
-* 외부 변경 감지가 있는 제자리 저장
-* macOS Finder의 Quick Look 미리보기·썸네일
+Pages(`.pages`)는 읽기와 실험적 쓰기를 지원합니다. 포맷별 읽기·쓰기·보존 범위와 상한은 [docs/format-support.md](docs/format-support.md), 기능 명세는 [docs/product-spec.md](docs/product-spec.md)에 있습니다.
+
+문서 처리는 모두 로컬에서 합니다. 네트워크를 쓰는 기능은 코파일럿 요청과 하루 1회 업데이트 확인뿐입니다.
 
 ## 다운로드
 
@@ -69,7 +70,13 @@ AppImage는 설치가 필요 없지만 `chmod +x EasyOffice-linux-x64.AppImage` 
 
 ## 개발하기
 
-개발 환경 준비, 빌드·검증 명령, 프로젝트 구조, 지원 포맷 표는 [개발 문서](docs/DEVELOPMENT.md)에 정리해 두었습니다.
+```sh
+node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs   # 한글 편집기 번들 준비
+cargo run -p easyoffice-desktop                                        # 데스크톱 셸 실행
+cargo run -p easyoffice-app -- --self-test                             # 엔진 자체 시험과 벤치마크
+```
+
+Rust는 `.github/rust-toolchain-version`의 1.93.1을 씁니다. 검증 명령 전체, 플랫폼별 패키지 빌드, 오픈소스 이식 규칙은 [개발 문서](docs/DEVELOPMENT.md)에, 구조는 [아키텍처](docs/architecture.md)에, 측정값은 [성능 문서](docs/performance.md)에 있습니다.
 
 ## Credits
 
