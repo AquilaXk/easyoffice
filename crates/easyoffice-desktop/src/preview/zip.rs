@@ -62,7 +62,9 @@ fn open<R: Read + Seek>(src: &mut R) -> Option<ZipArchive<GuardedReader<&mut R>>
         max_directory_bytes: u64::from(MAX_CENTRAL_DIR_BYTES),
     };
     let opened = open_guarded(src, limits).ok()?;
-    (opened.total_entries > 0).then_some(opened.archive)
+    // The directory the crate reads must be the one `open_guarded` checked.
+    (opened.total_entries > 0 && opened.archive.central_directory_start() == opened.directory_start)
+        .then_some(opened.archive)
 }
 
 /// What the central directory declares the parts of the package to inflate to, added up. `None`
