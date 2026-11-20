@@ -2,15 +2,15 @@
 //! `packages/fetch/src/stream.ts:54-99`(`parseDataLine`·`parseSseLine`: `data:` 한 줄의 JSON, `error` 필드는 스트림 오류, `[DONE]`),
 //! `core/llm/llms/OpenAI.ts:686`(`choices[0].delta.content`), `core/llm/llms/Anthropic.ts:346-360`(`content_block_delta`의 `text_delta`·`thinking_delta`),
 //! `core/llm/llms/Gemini.ts:369-455`(`processGeminiResponse`: `streamGenerateContent`가 돌려주는 JSON 배열 조각을 `\n,`로 나눠 읽는다)를 옮겼다.
-//! SSE 줄 해석은 `sse.rs`가 한다.
+//! SSE 줄 해석은 `sse-core` 크레이트가 한다(이벤트 하나의 데이터·이름·id는 각각 512 KiB까지).
 //!
 //! 스트림은 화면에 보여 줄 글을 먼저 흘려 보내는 용도다. 최종 본문은 전송이 끝난 뒤 한꺼번에 검증하므로(`llm_client`),
 //! 스트림이 끊기거나 형식이 틀려도 검증을 건너뛰지 않는다.
 
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
+use sse_core::{MessageEvent, SseDecoder, SseEvent};
 
 use super::providers::extract_provider_completion;
-use super::sse::{MessageEvent, SseDecoder};
 use super::types::{ProviderKind, MAX_LLM_RESPONSE_BYTES};
 
 /// 이벤트 하나가 더한 것.
@@ -70,7 +70,7 @@ fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
 }
 
 fn read_anthropic(root: &[(String, StrictJsonValue)], event: &MessageEvent, delta: &mut Delta) {
-    let kind = StrictJsonValue::get_str(root, "type").unwrap_or(event.event.as_str());
+    let kind = StrictJsonValue::get_str(root, "type").unwrap_or(event.event.as_ref());
     match kind {
         "content_block_delta" => {
             let Some(d) =
@@ -130,7 +130,9 @@ fn read_sse_deltas(
 ) -> Result<Vec<Delta>, String> {
     let mut deltas = Vec::new();
     while let Some(event) = decoder.next(&mut chunk) {
-        let event = event.map_err(|err| err.to_string())?;
+        let SseEvent::Message(event) = event.map_err(|err| err.to_string())? else {
+            continue;
+        };
         let Some(delta) = read_delta(kind, &event) else {
             continue;
         };
@@ -516,5 +518,33 @@ mod tests {
             refused |= asm.failure().is_some();
         }
         assert!(refused, "540 KiB of text is over the 512 KiB limit");
+    }
+
+    // 이벤트 하나의 상한(512 KiB)은 `sse-core`가 지킨다. 그 상한이 스트림 실패로 이어지는지 본다.
+    #[test]
+    fn one_event_over_the_event_limit_fails_the_stream() {
+        let mut asm = StreamAssembler::new(ProviderKind::OpenAi);
+        asm.feed(format!("data: {}\n\n", "a".repeat(600 * 1024)).as_bytes());
+        assert!(asm.failure().is_some());
+    }
+
+    #[test]
+    fn blank_data_lines_alone_cannot_grow_an_event_without_bound() {
+        let mut asm = StreamAssembler::new(ProviderKind::OpenAi);
+        asm.feed("data\n".repeat(600 * 1024).as_bytes());
+        assert!(asm.failure().is_some());
+    }
+
+    #[test]
+    fn feeding_one_byte_at_a_time_reads_the_same_text_as_feeding_it_whole() {
+        let body = "\u{FEFF}: comment\nid: 7\nretry: 42\ndata: {\"choices\":[{\"delta\":{\"content\":\"안녕\"}}]}\r\n\r\ndata: [DONE]\n\n";
+        let mut whole = StreamAssembler::new(ProviderKind::OpenAi);
+        whole.feed(body.as_bytes());
+        let mut bytewise = StreamAssembler::new(ProviderKind::OpenAi);
+        for byte in body.as_bytes() {
+            bytewise.feed(std::slice::from_ref(byte));
+        }
+        assert_eq!(whole.finish("").unwrap().0, "안녕");
+        assert_eq!(bytewise.finish("").unwrap().0, "안녕");
     }
 }

@@ -9,7 +9,6 @@ pub mod llm_client;
 pub mod operations;
 pub mod prompt;
 pub mod providers;
-pub mod sse;
 pub mod ssrf;
 pub mod stream;
 pub mod types;

@@ -9915,7 +9915,7 @@ Searched and not usable: qpdf keeps no `/OCProperties` of its own when pages are
 
 ### sse-core (MIT OR Apache-2.0, used under MIT)
 
-Source: https://github.com/PizzasBear/sse-rs (commit `aad868a4d388af83d0b93b6ba6a83fc54ec74f12`, crate `sse-core` 0.2.3, Copyright (c) 2026 Max Shteimberg). `crates/easyoffice-app/src/copilot/sse.rs` ports the `SseDecoder` state machine of `sse-core/src/decode.rs` (`Mode`, `next`, `consume_until_newline`, the payload limit and the corrupt-event recovery, and its tests `hard_parse`, `test_valueless_fields`, `test_valueless_data_respects_the_limit`) onto byte slices with no dependency (`PD-053`, `PD-268`); the `id:` and `retry:` fields are skipped because a model request is never resumed. Used under the MIT license:
+Source: https://github.com/PizzasBear/sse-rs, crate `sse-core` 0.2.3 (Copyright (c) 2026 Max Shteimberg). `crates/easyoffice-app` depends on it as a crate (`PD-269`; it replaced the earlier port in `copilot/sse.rs`) for the `SseDecoder` state machine of the model response stream. Used under the MIT license:
 
 ```
 MIT License
