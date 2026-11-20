@@ -263,7 +263,10 @@ pub(crate) fn docx_frame_part(paragraphs: &[RichParagraph], header: bool) -> Opt
 /// What the DOCX package gains for a header and a footer part: `(header reference, footer reference)` for the
 /// section properties, the relationships, the content-type overrides.
 pub(crate) struct DocxFrameRefs {
+    /// The header and footer references of the section the frame belongs to (the first one; later sections inherit them).
     pub section: String,
+    /// `<w:titlePg/>` when the first page differs, else empty; it closes the `sectPr` (after `w:cols`).
+    pub title_pg: &'static str,
     pub relationships: String,
     pub content_types: String,
 }
@@ -274,6 +277,7 @@ pub(crate) fn docx_frame_parts_and_refs(
     let mut entries = Vec::new();
     let mut refs = DocxFrameRefs {
         section: String::new(),
+        title_pg: "",
         relationships: String::new(),
         content_types: String::new(),
     };
@@ -351,7 +355,7 @@ pub(crate) fn docx_frame_parts_and_refs(
         entries.push((part.to_string(), xml.into_bytes()));
     }
     if frame.first_page_different {
-        refs.section.push_str("<w:titlePg/>");
+        refs.title_pg = "<w:titlePg/>";
     }
     (entries, refs)
 }

@@ -272,6 +272,10 @@ pub(crate) fn docx_rich_entries(
             seen_later_para = Some(p.columns);
         }
     }
+    let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
+    // The frame belongs to the first section: its references and `titlePg` go on the `sectPr` that ends it, the later sections
+    // inherit them (a section with none of its own would show no header at all).
+    let first_section_end = section_end_cols.iter().position(Option::is_some);
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
         match block {
@@ -283,7 +287,12 @@ pub(crate) fn docx_rich_entries(
                         doc.page_frame.paper.as_ref(),
                         doc.page_frame.margins.as_ref(),
                     );
-                    format!("<w:sectPr><w:type w:val=\"continuous\"/>{pg_sz}{pg_mar}{cols_xml}</w:sectPr>")
+                    let (refs, title_pg) = if first_section_end == Some(index) {
+                        (frame.section.as_str(), frame.title_pg)
+                    } else {
+                        ("", "")
+                    };
+                    format!("<w:sectPr>{refs}<w:type w:val=\"continuous\"/>{pg_sz}{pg_mar}{cols_xml}{title_pg}</w:sectPr>")
                 });
                 push_docx_paragraph(
                     &mut body,
@@ -318,7 +327,6 @@ pub(crate) fn docx_rich_entries(
         }
     }
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
-    let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
     let note_parts = build_docx_note_parts(doc)?;
     frame.relationships.push_str(&note_parts.relationships);
     frame.content_types.push_str(&note_parts.content_types);
@@ -336,9 +344,13 @@ pub(crate) fn docx_rich_entries(
         doc.page_frame.paper.as_ref(),
         doc.page_frame.margins.as_ref(),
     );
+    let (refs, title_pg) = if first_section_end.is_none() {
+        (frame.section.as_str(), frame.title_pg)
+    } else {
+        ("", "")
+    };
     body.push_str(&format!(
-        "<w:sectPr>{}{pg_sz}{pg_mar}{last_cols_xml}</w:sectPr>",
-        frame.section,
+        "<w:sectPr>{refs}{pg_sz}{pg_mar}{last_cols_xml}{title_pg}</w:sectPr>"
     ));
     body.push_str("</w:body></w:document>");
 
