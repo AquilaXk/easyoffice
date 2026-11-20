@@ -21,6 +21,7 @@ default-members = [
 # `Cargo.lock` gains no second copy of any of them.
 [workspace.dependencies]
 crc32fast = "1.5"
+base64 = "0.23"
 
 [workspace.package]
 version = "0.1.0"
