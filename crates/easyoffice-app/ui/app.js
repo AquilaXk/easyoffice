@@ -238,6 +238,7 @@
     getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit,
     activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+    getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch,
     noteActivity: () => workspaceSession?.noteActivity(), extractEditableDocumentText, localScrubPii, isImeComposing: () => isImeComposing, setStatusFeedback,
   });
 

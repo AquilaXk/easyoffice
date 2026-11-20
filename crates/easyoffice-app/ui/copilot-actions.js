@@ -87,6 +87,7 @@
       captureWorkspaceSnapshot,
       restoreWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
+      getHistoryMutationEpoch,
       noteActivity,
       extractEditableDocumentText,
       localScrubPii,
@@ -494,6 +495,7 @@
       }
       if (mod === "SLIDE") getWorkspacePanels()?.syncActiveSlideDomStylesToDeck?.();
       const beforeSnap = captureWorkspaceSnapshot(false);
+      const startEpoch = getHistoryMutationEpoch?.();
       const derivedLocations = [];
       let touchedSheet = null;
       let touchedDoc = false;
@@ -534,7 +536,16 @@
           panels?.renderModuleOutline?.("SLIDE");
         }
       } catch (err) {
-        await restoreWorkspaceSnapshot(beforeSnap, undefined, { keepProtections: true }).catch(() => {});
+        const reason = String(err?.message || err);
+        // The history moved while the operations ran (the user edited): a restore would drop those edits too.
+        if (getHistoryMutationEpoch?.() !== startEpoch) {
+          throw new Error(reason + " (그 사이 다른 편집이 있어 앞서 적용한 변경을 되돌리지 않았습니다)");
+        }
+        try {
+          await restoreWorkspaceSnapshot(beforeSnap, undefined, { keepProtections: true });
+        } catch (restoreErr) {
+          throw new Error(reason + " (앞서 적용한 변경을 되돌리지 못했습니다: " + String(restoreErr?.message || restoreErr) + ")");
+        }
         throw err;
       }
 
