@@ -24,6 +24,7 @@ mod os_recent;
 mod page_screenshot;
 mod pdf_edit_budget;
 mod pdf_edit_build;
+mod pdf_edit_carry;
 mod pdf_edit_engine;
 mod pdf_edit_forms;
 mod pdf_edit_inspect;
@@ -715,6 +716,8 @@ mod path_leak_tests;
 mod hostile_svg;
 #[cfg(all(test, unix))]
 mod named_pipe_support;
+#[cfg(test)]
+mod pdf_edit_carry_tests;
 #[cfg(test)]
 mod pdf_edit_fixtures;
 #[cfg(test)]

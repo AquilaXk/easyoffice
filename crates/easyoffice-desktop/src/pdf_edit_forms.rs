@@ -78,6 +78,8 @@ pub struct FormBuildOutput {
     pub field_refs: Vec<Ref>,
     pub helv_font_ref: Option<Ref>,
     pub need_appearances: bool,
+    /// Widgets of a kind that is not written (a signature field), for a warning.
+    pub skipped_fields: usize,
 }
 
 type WidgetCacheKey = (u32, u32, OverlayKind);
@@ -109,6 +111,7 @@ pub fn process_forms(
     let (mut matched_applicant, mut matched_dept) = (false, false);
     let (mut wrote_custom_ap, mut needs_viewer_ap) = (false, false);
     let mut helv_ref: Option<Ref> = None;
+    let mut skipped_fields = 0usize;
 
     for (out_idx, (plan, geom)) in pages.iter().zip(geoms).enumerate() {
         deadline.check()?;
@@ -133,6 +136,7 @@ pub fn process_forms(
                 continue;
             };
             let Some(mut field) = read_inherited_field(&annot)? else {
+                skipped_fields += 1;
                 continue;
             };
             if field_refs.len() >= MAX_FORM_FIELDS {
@@ -313,6 +317,7 @@ pub fn process_forms(
         field_refs,
         helv_font_ref: helv_ref,
         need_appearances: needs_viewer_ap && !wrote_custom_ap,
+        skipped_fields,
     })
 }
 

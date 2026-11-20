@@ -39,7 +39,7 @@ fn open_and_rebuild(bytes: Vec<u8>, within: Duration) -> Result<usize, String> {
         let engine = InProcessEngine::new(Arc::new(Database::new()));
         let session = EditSession::open(bytes, &engine)?;
         let out = session.render(None, &engine)?;
-        Ok(read(&out).pages().len())
+        Ok(read(&out.bytes).pages().len())
     });
     assert!(started.elapsed() < within, "took {:?}", started.elapsed());
     outcome

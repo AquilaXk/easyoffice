@@ -28,13 +28,14 @@
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
 };
+use crate::pdf_edit_carry::{skipped_fields_sentence, Carry};
 use crate::pdf_edit_forms::{process_forms, write_catalog_acroform, PageGeom};
 use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, resource_entries, Limits};
 use crate::pdf_edit_outlines::preserve_outlines;
 use crate::pdf_edit_overlay::{upright_matrix, Overlay};
 use crate::pdf_edit_preserve::{preserve_page_annots, MarkupKey, PageDestMap};
 use crate::pdf_edit_text_pos::add_page_phrase_markups;
-pub use crate::pdf_edit_wire::{OverlayKind, OverlayMaker, PagePlan};
+pub use crate::pdf_edit_wire::{Built, OverlayKind, OverlayMaker, PagePlan};
 use hayro::hayro_interpret::InterpreterCache;
 use hayro_syntax::page::{Page, Rotation};
 use hayro_syntax::Pdf as ReadPdf;
@@ -149,7 +150,7 @@ pub fn build(
     overlay: &Overlay,
     make_overlay: &mut OverlayMaker<'_>,
     deadline: &Deadline,
-) -> Result<Vec<u8>, String> {
+) -> Result<Built, String> {
     if pages.is_empty() {
         return Err("저장할 쪽이 없습니다.".to_string());
     }
@@ -158,6 +159,7 @@ pub fn build(
     }
     let parsed = parse_used(sources, pages, deadline)?;
     let placements = place_all(&parsed, pages, deadline)?;
+    let mut carry = Carry::plan(&parsed, pages, deadline)?;
 
     let mut next = Ref::new(1);
     let (catalog_ref, tree_ref, info_ref) = (next.bump(), next.bump(), next.bump());
@@ -253,6 +255,11 @@ pub fn build(
         &mut total_annots,
         deadline,
     )?;
+    if forms_out.skipped_fields > 0 {
+        carry
+            .warnings
+            .push(skipped_fields_sentence(forms_out.skipped_fields));
+    }
     let outlines_ref = preserve_outlines(&mut out, &mut next, &dest_map, &parsed, pages, deadline)?;
 
     for (n, ((plan, place), &(page_ref, content_ref))) in
@@ -315,7 +322,10 @@ pub fn build(
     if bytes.len() > MAX_OUTPUT_BYTES {
         return Err(MSG_TOO_BIG.to_string());
     }
-    Ok(bytes)
+    Ok(Built {
+        bytes,
+        warnings: carry.warnings.into_vec(),
+    })
 }
 
 /// The sources the pages come from, parsed (a source nobody uses is not read).

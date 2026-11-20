@@ -85,6 +85,32 @@ test("saving sends the page's rotation and overlay first and writes through the 
   assert.match(feedback(document), /문서 저장 완료 \(계약서-편집\.pdf · 4096B · 3쪽 · 원본 PDF의 그림·글꼴·배치 보존\)/);
 });
 
+test("what the saved file does not keep of the original is shown beside the save result", async () => {
+  const warnings = ["지원하지 않는 주석 2개는 저장하지 못했습니다 (Square 2).", "태그 구조 트리(접근성 정보)는 저장하지 않았습니다."];
+  const { document, userClick } = await createPdfShell({ save: () => ({ status: "saved", name: "계약서-편집.pdf", bytes: 4096, pages: 3, warnings }) });
+  await open(document);
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(12);
+  assert.match(feedback(document), /문서 저장 완료 \(계약서-편집\.pdf · 4096B · 3쪽 · 원본 PDF의 그림·글꼴·배치 보존\) · 참고: 지원하지 않는 주석 2개는 저장하지 못했습니다 \(Square 2\)\. 태그 구조 트리\(접근성 정보\)는 저장하지 않았습니다\./);
+
+  const clean = await createPdfShell();
+  await open(clean.document);
+  clean.userClick(studioItem(clean.document, "studio-save"));
+  await flushAsyncTurns(12);
+  assert.doesNotMatch(feedback(clean.document), /참고:/, "an answer without warnings adds nothing");
+});
+
+test("a split tells what its files do not keep", async () => {
+  const { document, userClick } = await createPdfShell({ splitMerge: () => ({ action: "split", count: 2, pages: 2, sources: 1, turn: 0, stamp: null, watermark: null, warnings: ["문서 스크립트는 보안을 위해 저장하지 않았습니다."] }) });
+  await open(document);
+  userClick(commandItem(document, "pdf-mod-splitmerge"));
+  await flushAsyncTurns(12);
+  choose(document, "each", "");
+  userClick(document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.match(badgeOf(document), /쪽마다 2개 파일로 나누어 저장했습니다 · 참고: 문서 스크립트는 보안을 위해 저장하지 않았습니다\./);
+});
+
 test("the stamp and watermark the apply button put on the card are what the shell lays over the pages", async () => {
   const { document, named, userClick } = await createPdfShell();
   await open(document);

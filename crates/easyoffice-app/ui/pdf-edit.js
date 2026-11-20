@@ -88,11 +88,18 @@
       return active ? "스탬프·워터마크는 저장할 때 원본 PDF 위에 겹쳐 씁니다" : "";
     }
 
-    // Saves the edited PDF (the shell asks where). Resolves { cancelled } or { name, bytes, pages }.
+    // What the written file does not keep of the original, as the status line ends: the shell lists
+    // each loss (annotations, structure it cannot write) and the page says so instead of staying silent.
+    function warningNotes(warnings) {
+      const list = Array.isArray(warnings) ? warnings.map(String).filter(Boolean) : [];
+      return list.length > 0 ? " · 참고: " + list.join(" ") : "";
+    }
+
+    // Saves the edited PDF (the shell asks where). Resolves { cancelled } or { name, bytes, pages, notes }.
     async function save() {
       await syncFromUi();
       const res = await shell().save();
-      return res.status === "cancelled" ? { cancelled: true } : { cancelled: false, name: String(res.name || ""), bytes: res.bytes, pages: res.pages };
+      return res.status === "cancelled" ? { cancelled: true } : { cancelled: false, name: String(res.name || ""), bytes: res.bytes, pages: res.pages, notes: warningNotes(res.warnings) };
     }
 
     // ---- 페이지 분할·병합 dialog ---------------------------------------------------------------
@@ -171,7 +178,7 @@
         const res = await shell().splitMerge(choice);
         if (res.action === "merged") return "PDF " + res.count + "개를 이어 붙였습니다 (총 " + res.pages + "쪽 · 실행 취소로 되돌릴 수 없습니다)";
         if (res.action === "split") {
-          return (choice.mode === "range" ? "쪽 범위 " + res.count + "개를 파일로 나누어 저장했습니다" : "쪽마다 " + res.count + "개 파일로 나누어 저장했습니다");
+          return (choice.mode === "range" ? "쪽 범위 " + res.count + "개를 파일로 나누어 저장했습니다" : "쪽마다 " + res.count + "개 파일로 나누어 저장했습니다") + warningNotes(res.warnings);
         }
         return "페이지 분할·병합을 취소했습니다";
       } catch (err) {

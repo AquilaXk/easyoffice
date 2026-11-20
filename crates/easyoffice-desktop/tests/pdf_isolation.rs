@@ -89,7 +89,8 @@ fn a_file_is_inspected_and_built_by_the_worker() {
             &head(plan(4, 90), 1),
             &mut no_overlay,
         )
-        .expect("built");
+        .expect("built")
+        .bytes;
     assert_eq!(pages_of(&out), 4);
     let pdf = hayro_syntax::Pdf::new(Arc::new(out)).unwrap();
     let rotates: Vec<_> = pdf
@@ -101,6 +102,40 @@ fn a_file_is_inspected_and_built_by_the_worker() {
         rotates,
         ["Horizontal", "Flipped", "Horizontal", "Horizontal"]
     );
+}
+
+#[test]
+fn what_the_result_does_not_keep_comes_back_as_warnings_before_the_answer() {
+    let supervisor = normal();
+    let page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Annots [4 0 R] >>";
+    let file = hand_written_with_xref(
+        &[
+            (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+            (3, page.to_string()),
+            (
+                4,
+                "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] >>".to_string(),
+            ),
+        ],
+        "",
+    );
+    let built = supervisor
+        .build(&[Arc::new(file)], &head(plan(1, 0), 1), &mut no_overlay)
+        .expect("built");
+    assert_eq!(pages_of(&built.bytes), 1);
+    assert_eq!(
+        built.warnings,
+        ["지원하지 않는 주석 1개는 저장하지 못했습니다 (Square 1)."]
+    );
+    let clean = supervisor
+        .build(
+            &[Arc::new(sample_pdf(1, 1, &[]))],
+            &head(plan(1, 0), 1),
+            &mut no_overlay,
+        )
+        .expect("built");
+    assert!(clean.warnings.is_empty());
 }
 
 #[test]
@@ -139,7 +174,8 @@ fn files_are_merged_and_the_overlay_comes_from_the_shell() {
     plan.stamp = Some("승인필".to_string());
     let out = supervisor
         .build(&[first, second], &plan, &mut overlay)
-        .expect("built");
+        .expect("built")
+        .bytes;
     assert_eq!(pages_of(&out), 3);
     // All three pages are 200 x 300: one overlay for the first page (stamp), one for the others.
     asked.sort_by_key(|a| a.2);

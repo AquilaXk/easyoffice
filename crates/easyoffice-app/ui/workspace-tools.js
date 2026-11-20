@@ -275,7 +275,7 @@
           setStatusFeedback("문서 저장 취소 (PDF): 저장 위치를 선택하지 않았습니다");
           return false;
         }
-        setStatusFeedback("문서 저장 완료 (" + res.name + " · " + res.bytes + "B · " + res.pages + "쪽 · 원본 PDF의 그림·글꼴·배치 보존)");
+        setStatusFeedback("문서 저장 완료 (" + res.name + " · " + res.bytes + "B · " + res.pages + "쪽 · 원본 PDF의 그림·글꼴·배치 보존)" + res.notes);
         noteSavedName(res.name);
         return true;
       } catch (err) {

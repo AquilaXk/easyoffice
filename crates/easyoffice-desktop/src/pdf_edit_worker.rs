@@ -22,9 +22,9 @@ use crate::pdf_edit_inspect::inspect;
 use crate::pdf_edit_os::{limit_own_address_space, own_resident_bytes};
 use crate::pdf_edit_overlay::{parse_form, Overlay, MSG_MARKUP_TEXT};
 use crate::pdf_edit_wire::{
-    from_shell_cap, read_frame, split_render_request, write_frame, BuildHead, OverlayKind,
+    from_shell_cap, read_frame, split_render_request, write_frame, BuildHead, Built, OverlayKind,
     EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, REQ_RENDER,
-    RES_ERR, RES_OK, SOURCE,
+    RES_ERR, RES_OK, SOURCE, WARNING,
 };
 use crate::pdf_first_page::first_page_png;
 use std::io::{self, Read, Write};
@@ -77,18 +77,27 @@ fn serve(input: &mut impl Read, output: &mut impl Write) -> io::Result<()> {
     let deadline = Deadline::after(WORK_DEADLINE);
     let (tag, payload) = read_frame(input, from_shell_cap)?;
     let answer = match tag {
-        REQ_INSPECT => inspect(&Arc::new(payload), &deadline).map(|info| {
-            u32::try_from(info.pages)
+        REQ_INSPECT => inspect(&Arc::new(payload), &deadline).map(|info| Built {
+            bytes: u32::try_from(info.pages)
                 .unwrap_or(u32::MAX)
                 .to_le_bytes()
-                .to_vec()
+                .to_vec(),
+            warnings: Vec::new(),
         }),
-        REQ_RENDER => render_request(&payload, &deadline),
+        REQ_RENDER => render_request(&payload, &deadline).map(|bytes| Built {
+            bytes,
+            warnings: Vec::new(),
+        }),
         REQ_BUILD => build_request(&payload, input, output, &deadline),
         _ => Err(MSG_PANIC.to_string()),
     };
     match answer {
-        Ok(bytes) => write_frame(output, RES_OK, &[&bytes]),
+        Ok(built) => {
+            for warning in &built.warnings {
+                write_frame(output, WARNING, &[warning.as_bytes()])?;
+            }
+            write_frame(output, RES_OK, &[&built.bytes])
+        }
         Err(message) => write_frame(output, RES_ERR, &[message.as_bytes()]),
     }
 }
@@ -107,7 +116,7 @@ fn build_request(
     input: &mut impl Read,
     output: &mut impl Write,
     deadline: &Deadline,
-) -> Result<Vec<u8>, String> {
+) -> Result<Built, String> {
     let head = BuildHead::decode(head, MAX_SOURCES, MAX_PAGES).ok_or_else(bad_request)?;
     let mut sources = Vec::with_capacity(head.sources);
     let mut held = 0usize;

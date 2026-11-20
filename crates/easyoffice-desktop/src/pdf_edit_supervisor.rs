@@ -17,8 +17,9 @@ use crate::pdf_edit_budget::{
 use crate::pdf_edit_os::{child_resident_bytes, confine};
 use crate::pdf_edit_wire::{
     decode_overlay_need, from_worker_cap, from_worker_render_cap, read_frame, write_frame,
-    BuildHead, OverlayMaker, EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY,
-    REQ_BUILD, REQ_INSPECT, REQ_RENDER, RES_ERR, RES_OK, SOURCE, WORKER_ARG,
+    BuildHead, Built, OverlayMaker, EXIT_DEADLINE, EXIT_MEMORY, MAX_WARNINGS, NEED_OVERLAY,
+    OVERLAY_FAIL, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, REQ_RENDER, RES_ERR, RES_OK, SOURCE,
+    WARNING, WORKER_ARG,
 };
 use std::io::{self, BufReader, BufWriter, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -75,7 +76,10 @@ impl Supervisor {
             from_worker_cap,
             &mut |_, _, _| Err(MSG_WORKER_DIED.to_string()),
         )?;
-        let bytes: [u8; 4] = answer.try_into().map_err(|_| MSG_WORKER_DIED.to_string())?;
+        let bytes: [u8; 4] = answer
+            .0
+            .try_into()
+            .map_err(|_| MSG_WORKER_DIED.to_string())?;
         Ok(u32::from_le_bytes(bytes) as usize)
     }
 
@@ -90,18 +94,19 @@ impl Supervisor {
             from_worker_render_cap,
             &mut |_, _, _| Err(MSG_WORKER_DIED.to_string()),
         )
+        .map(|(png, _)| png)
     }
 
-    /// The PDF of the plan in `head`, built from `sources`; `make_overlay` is asked for the stamp
-    /// and watermark forms the worker needs.
+    /// The PDF of the plan in `head`, built from `sources`, and the warnings the worker gave;
+    /// `make_overlay` is asked for the stamp and watermark forms the worker needs.
     pub fn build(
         &self,
         sources: &[Arc<Vec<u8>>],
         head: &BuildHead,
         make_overlay: &mut OverlayMaker<'_>,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Built, String> {
         let encoded = head.encode();
-        self.run(
+        let (bytes, warnings) = self.run(
             &|out| {
                 write_frame(out, REQ_BUILD, &[&encoded])?;
                 sources
@@ -110,15 +115,17 @@ impl Supervisor {
             },
             from_worker_cap,
             make_overlay,
-        )
+        )?;
+        Ok(Built { bytes, warnings })
     }
 
+    /// The answer of the worker and the warnings it gave before it.
     fn run(
         &self,
         request: &(dyn Fn(&mut dyn Write) -> io::Result<()> + Sync),
         cap: fn(u8) -> usize,
         make_overlay: &mut OverlayMaker<'_>,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<(Vec<u8>, Vec<String>), String> {
         let _place = self.jobs.claim().ok_or_else(|| MSG_BUSY.to_string())?;
         let mut command = Command::new(&self.exe);
         command
@@ -157,7 +164,8 @@ impl Supervisor {
                 let mut out = BufReader::new(stdout);
                 loop {
                     let frame = read_frame(&mut out, cap);
-                    let last = !matches!(&frame, Ok((tag, _)) if *tag == NEED_OVERLAY);
+                    let last =
+                        !matches!(&frame, Ok((tag, _)) if matches!(*tag, NEED_OVERLAY | WARNING));
                     if frames.send(frame).is_err() || last {
                         break;
                     }
@@ -175,9 +183,16 @@ impl Supervisor {
                 }
             });
             let mut asked = 0usize;
+            let mut warnings: Vec<String> = Vec::new();
             let outcome = loop {
                 match frames_in.recv_timeout(MEMORY_POLL) {
-                    Ok(Ok((RES_OK, payload))) => break Ok(payload),
+                    Ok(Ok((RES_OK, payload))) => break Ok((payload, warnings)),
+                    Ok(Ok((WARNING, payload))) => {
+                        if warnings.len() >= MAX_WARNINGS {
+                            break Err(MSG_WORKER_DIED.to_string());
+                        }
+                        warnings.push(String::from_utf8_lossy(&payload).into_owned());
+                    }
                     Ok(Ok((RES_ERR, payload))) => break Err(sentence(&payload)),
                     Ok(Ok((NEED_OVERLAY, payload))) => {
                         asked += 1;

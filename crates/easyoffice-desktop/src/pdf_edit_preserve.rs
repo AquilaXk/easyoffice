@@ -494,9 +494,7 @@ pub fn preserve_page_annots(
     let mut kept = Vec::new();
     for (idx, annot) in annots.iter::<Dict<'_>>().enumerate() {
         if idx >= MAX_PAGE_ANNOTS {
-            return Err(format!(
-                "쪽 하나의 주석 수가 한도({MAX_PAGE_ANNOTS})를 초과합니다."
-            ));
+            return Err(too_many_page_annots());
         }
         let Some(subtype) = annot.get::<Name<'_>>(b"Subtype") else {
             continue;
@@ -531,6 +529,10 @@ pub fn preserve_page_annots(
         }
     }
     Ok(kept)
+}
+
+pub fn too_many_page_annots() -> String {
+    format!("쪽 하나의 주석 수가 한도({MAX_PAGE_ANNOTS})를 초과합니다.")
 }
 
 pub fn read_shifted_rect(dict: &Dict<'_>, dx: f32, dy: f32) -> Option<[f32; 4]> {

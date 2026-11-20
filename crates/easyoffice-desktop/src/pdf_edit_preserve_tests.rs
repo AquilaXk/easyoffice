@@ -502,7 +502,7 @@ fn preserves_links_outlines_markup_forms_and_pictures_across_rotate_merge_and_sp
         .unwrap();
     session.set_form(Some("홍길동"), Some("기획실")).unwrap();
 
-    let merged_bytes = session.render(None, &eng).expect("render merged");
+    let merged_bytes = session.render(None, &eng).expect("render merged").bytes;
     assert_eq!(
         pictures_by_page(&merged_bytes),
         vec![
@@ -616,7 +616,7 @@ fn preserves_links_outlines_markup_forms_and_pictures_across_rotate_merge_and_sp
 
     // Split pages 2-3 (0-based 1..3): "1장 총칙" survives as a container (no Dest) holding "1.1 정의" -> 0,
     // "2장 부칙" -> 1, and "부록 A" (page 4) is pruned.
-    let split_bytes = session.render(Some(1..3), &eng).expect("split 2-3");
+    let split_bytes = session.render(Some(1..3), &eng).expect("split 2-3").bytes;
     assert_eq!(
         collect_outline_titles_and_pages(&split_bytes),
         vec![
@@ -648,7 +648,7 @@ fn korean_pdf_phrase_highlight_and_new_form_widgets_round_trip_twice() {
     s1.set_markup("제1조 목적", Some("highlight"), Some("#FFEB3B"))
         .unwrap();
     s1.set_form(Some("이순신"), Some("전략기획본부")).unwrap();
-    let saved1 = s1.render(None, &eng).expect("save pass 1");
+    let saved1 = s1.render(None, &eng).expect("save pass 1").bytes;
 
     let pdf1 = read(&saved1);
     let annots1: Vec<Dict<'_>> = pdf1.pages()[0]
@@ -696,7 +696,7 @@ fn korean_pdf_phrase_highlight_and_new_form_widgets_round_trip_twice() {
     s2.set_markup("제2조 효력", Some("highlight"), Some("#90CAF9"))
         .unwrap();
     s2.set_form(Some("강감찬"), None).unwrap();
-    let saved2 = s2.render(None, &eng).expect("save pass 2");
+    let saved2 = s2.render(None, &eng).expect("save pass 2").bytes;
 
     let pdf2 = read(&saved2);
     let hl_count2 = pdf2.pages()[0]
@@ -843,14 +843,14 @@ fn bench_pd245_pdf_preserve_incremental_save() {
         .unwrap();
     session.set_form(Some("홍길동"), Some("기획실")).unwrap();
 
-    let warm = session.render(None, &eng).expect("warmup");
+    let warm = session.render(None, &eng).expect("warmup").bytes;
     assert!(!warm.is_empty());
 
     let iterations = 10u32;
     let start = Instant::now();
     let mut out_len = 0usize;
     for _ in 0..iterations {
-        out_len = session.render(None, &eng).unwrap().len();
+        out_len = session.render(None, &eng).unwrap().bytes.len();
     }
     let avg = start.elapsed() / iterations;
     eprintln!(

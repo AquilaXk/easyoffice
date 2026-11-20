@@ -8,7 +8,7 @@
 use crate::pdf_edit_budget::{MAX_PAGES, MAX_SESSION_BYTES, MAX_SOURCES, MAX_SPLIT_FILES};
 use crate::pdf_edit_engine::PdfEngine;
 use crate::pdf_edit_overlay::{parse_form, parse_markup, Overlay};
-use crate::pdf_edit_wire::PagePlan;
+use crate::pdf_edit_wire::{Built, PagePlan};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -190,12 +190,13 @@ impl EditSession {
         Ok(ranges)
     }
 
-    /// Writes the PDF of `range` of the plan (all of it without one).
+    /// Writes the PDF of `range` of the plan (all of it without one), with the warnings of the
+    /// build.
     pub fn render(
         &self,
         range: Option<Range<usize>>,
         engine: &dyn PdfEngine,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Built, String> {
         let pages = match range {
             Some(range) => self.pages.get(range).ok_or("없는 쪽 범위입니다.")?,
             None => &self.pages[..],

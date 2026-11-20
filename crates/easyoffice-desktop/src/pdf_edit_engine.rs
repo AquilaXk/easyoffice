@@ -8,7 +8,7 @@
 
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_supervisor::Supervisor;
-use crate::pdf_edit_wire::{BuildHead, OverlayKind, PagePlan};
+use crate::pdf_edit_wire::{BuildHead, Built, OverlayKind, PagePlan};
 use crate::pdf_export::{shared_font_db, PdfAssembler};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,13 +18,14 @@ pub trait PdfEngine {
     /// The number of pages of `bytes`, if it is a PDF that passes every budget.
     fn inspect(&self, bytes: &Arc<Vec<u8>>) -> Result<usize, String>;
 
-    /// The PDF made of `pages` of `sources`, with `overlay` laid over them.
+    /// The PDF made of `pages` of `sources`, with `overlay` laid over them, and a sentence for each
+    /// thing of the sources it does not keep.
     fn build(
         &self,
         sources: &[Arc<Vec<u8>>],
         pages: &[PagePlan],
         overlay: &Overlay,
-    ) -> Result<Vec<u8>, String>;
+    ) -> Result<Built, String>;
 }
 
 /// The one-page PDF of an overlay or widget appearance of `width` x `height` points.
@@ -74,7 +75,7 @@ impl PdfEngine for ChildEngine {
         sources: &[Arc<Vec<u8>>],
         pages: &[PagePlan],
         overlay: &Overlay,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Built, String> {
         let head = BuildHead {
             sources: sources.len(),
             pages: pages.to_vec(),
@@ -116,7 +117,7 @@ impl PdfEngine for InProcessEngine {
         sources: &[Arc<Vec<u8>>],
         pages: &[PagePlan],
         overlay: &Overlay,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Built, String> {
         let deadline = crate::pdf_edit_budget::Deadline::after(std::time::Duration::from_secs(60));
         let fonts = Arc::clone(&self.fonts);
         crate::pdf_edit_build::build(

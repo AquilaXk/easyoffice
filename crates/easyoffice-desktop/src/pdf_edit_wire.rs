@@ -12,7 +12,8 @@
 //!   its first page), or [`REQ_BUILD`] (the plan, see [`BuildHead`]) followed by one [`SOURCE`]
 //!   frame per PDF; later [`OVERLAY_REPLY`] / [`OVERLAY_FAIL`].
 //! * worker -> shell: [`NEED_OVERLAY`] (the stamp and watermark are made by the shell, which owns
-//!   the fonts), then exactly one of [`RES_OK`] and [`RES_ERR`].
+//!   the fonts), [`WARNING`] (one sentence about something of the original that the result does
+//!   not keep, sent before the answer of a build), then exactly one of [`RES_OK`] and [`RES_ERR`].
 
 use std::io::{self, Read, Write};
 
@@ -44,6 +45,19 @@ pub const OVERLAY_FAIL: u8 = 6;
 pub const RES_OK: u8 = 10;
 pub const RES_ERR: u8 = 11;
 pub const NEED_OVERLAY: u8 = 12;
+pub const WARNING: u8 = 13;
+
+/// Most warnings a build reports; a worker that sends more is not trusted.
+pub const MAX_WARNINGS: usize = 16;
+/// Longest warning (bytes); the worker cuts its sentences at this length.
+pub const MAX_WARNING_BYTES: usize = 1024;
+
+/// What a build made: the PDF, and a sentence for each thing of the original it could not keep.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Built {
+    pub bytes: Vec<u8>,
+    pub warnings: Vec<String>,
+}
 
 /// Largest frame either side accepts (bytes): a source or a result is at most 256 MiB.
 pub const MAX_FRAME_BYTES: usize = 288 * 1_048_576;
@@ -144,10 +158,11 @@ pub fn from_worker_render_cap(tag: u8) -> usize {
 
 /// Largest payload of each tag the shell accepts from a worker (0: the tag is not expected). A
 /// worker that has been fed a crafted file is not trusted: it may ask for an overlay (nine
-/// bytes), fail with a sentence, or answer; only the answer may be large.
+/// bytes), warn with a sentence, fail with a sentence, or answer; only the answer may be large.
 pub fn from_worker_cap(tag: u8) -> usize {
     match tag {
         NEED_OVERLAY => 9,
+        WARNING => MAX_WARNING_BYTES,
         RES_ERR => 4096,
         RES_OK => MAX_FRAME_BYTES,
         _ => 0,
@@ -413,6 +428,13 @@ mod tests {
         // The right size passes, one byte more does not; unknown tags never do.
         assert!(read_frame(&mut &frame(NEED_OVERLAY, 9)[..], from_worker_cap).is_ok());
         assert!(read_frame(&mut &frame(NEED_OVERLAY, 10)[..], from_worker_cap).is_err());
+        assert!(read_frame(&mut &frame(WARNING, MAX_WARNING_BYTES)[..], from_worker_cap).is_ok());
+        assert!(read_frame(
+            &mut &frame(WARNING, MAX_WARNING_BYTES + 1)[..],
+            from_worker_cap
+        )
+        .is_err());
+        assert!(read_frame(&mut &frame(WARNING, 1)[..], from_shell_cap).is_err());
         assert!(read_frame(&mut &frame(RES_ERR, 4096)[..], from_worker_cap).is_ok());
         assert!(read_frame(&mut &frame(RES_ERR, 4097)[..], from_worker_cap).is_err());
         assert!(read_frame(&mut &frame(RES_OK, 1 << 20)[..], from_worker_cap).is_ok());
