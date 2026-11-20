@@ -73,11 +73,11 @@ EasyOffice/
 | `easyoffice-formats` | 포맷 레지스트리, 컨테이너·문서 코덱, 보안 가드, `native_package.rs` | 있음(기반 코덱 크레이트, 아래) | 없음 |
 | `easyoffice-sheet` | 수식 엔진, 피벗, 재계산 DAG | 없음(아직) | formats |
 | `easyoffice-layout` | 쪽·슬라이드 조판 모델(`domain.rs`) | 없음(아직) | formats |
-| `easyoffice-app` | IPC 라우터, 코파일럿 엔진, 변환·열기, `--serve`, WebUI(`ui/`) | 없음(아직) | formats, sheet, layout |
+| `easyoffice-app` | IPC 라우터, 코파일럿 엔진, 변환·열기, `--serve`, WebUI(`ui/`) | 있음(SSE 해석 `sse-core`) | formats, sheet, layout |
 | `easyoffice-desktop` | Tauri v2 셸, OS 통합, PDF 내보내기·편집, 코파일럿 HTTP 전송 | 있음(아래) | app, formats, sheet |
 
 - **엔진 크레이트도 허용 라이선스(MIT, Apache-2.0, BSD, Zlib)의 유지되는 크레이트를 그대로 씁니다**(PD-269가 PD-053·PD-095의 무의존 방침을 대체). 같은 기능을 직접 짠 코드와 크레이트를 두 벌 두지 않고, 원본의 버그 수정과 사양 변경은 업데이트로 받습니다. 크레이트 버전은 데스크톱 셸과 rhwp가 이미 푸는 버전에 맞춰 `Cargo.lock`에 중복 버전이 늘지 않게 하고, 루트 `Cargo.toml`의 `[workspace.dependencies]`에서 한곳에서 정합니다.
-- **크레이트는 얇은 어댑터 뒤에 둡니다.** 상한과 Fail-Closed(ZIP 폭탄·항목 수·총 해제 크기, 경로 순회·대소문자 충돌, XXE·DTD, JSON 깊이·크기)는 크레이트 바깥 래퍼에 남기고, 크레이트가 상한 없이 끝까지 읽는 경로(`zip`의 항목 읽기 등)는 쓰지 않거나 상한 있는 읽기로 감쌉니다. 1단계(PD-269)에서 바뀐 기반 코덱은 `formats`의 `crc32.rs`(crc32fast), `base64_codec.rs`(base64), `sha_digest.rs`(sha1·sha2), `cp949.rs`(문자 인코딩 크레이트), `deflate.rs`(DEFLATE·Adler-32 크레이트), `zip_codec.rs`(zip), `json_out.rs`(serde_json: JSON 출력의 이스케이프·직렬화 한곳, 입력 파서 `strict_json*.rs`는 보안 경계라 직접 유지)입니다. 이어서 XLSX·XLS·ODS, PDF, HWP·HWPX 순으로 바꿉니다.
+- **크레이트는 얇은 어댑터 뒤에 둡니다.** 상한과 Fail-Closed(ZIP 폭탄·항목 수·총 해제 크기, 경로 순회·대소문자 충돌, XXE·DTD, JSON 깊이·크기)는 크레이트 바깥 래퍼에 남기고, 크레이트가 상한 없이 끝까지 읽는 경로(`zip`의 항목 읽기 등)는 쓰지 않거나 상한 있는 읽기로 감쌉니다. 1단계(PD-269)에서 바뀐 기반 코덱은 `formats`의 `crc32.rs`(crc32fast), `base64_codec.rs`(base64), `sha_digest.rs`(sha1·sha2), `cp949.rs`(문자 인코딩 크레이트), `deflate.rs`(DEFLATE·Adler-32 크레이트), `zip_codec.rs`(zip), `json_out.rs`(serde_json: JSON 출력의 이스케이프·직렬화 한곳, 입력 파서 `strict_json*.rs`는 보안 경계라 직접 유지)입니다. 2단계로 XLSX·XLS·ODS를 평가했으나 크레이트가 상한과 왕복 보존 항목을 다 지키지 못해 자체 코덱을 유지합니다(PD-269 7항). `app`의 SSE 해석은 `sse-core` 크레이트입니다. 이어서 PDF, HWP·HWPX 순으로 바꿉니다.
 - **외부 의존은 데스크톱 셸에만 둡니다**(PD-101). 이유는 PDF 글꼴 서브셋·`ToUnicode`, PDF 객체 복사, TLS, OS 창 같은 일을 자체 구현하면 이식 한도를 크게 넘기 때문입니다. 용도별로 묶으면 다음과 같습니다(`crates/easyoffice-desktop/Cargo.toml`).
   - 창·IPC·대화상자·단일 인스턴스·업데이트: Tauri v2와 플러그인.
   - 검색 가능한 PDF 내보내기와 카드 미리보기: SVG→PDF 변환, SVG 파서·래스터, 글꼴 DB, PDF 쓰기(PD-101, PD-142, PD-179).
@@ -215,7 +215,7 @@ copilot-ui.js --run_smart_assistant{action:"copilot_run", requestId}--> copilot:
 - **취소.** 화면이 `requestId`(영숫자·`-`·`_` 64바이트 이하)를 붙여 보내고, 중지하면 같은 ID로 `copilot_cancel`을 보냅니다. `copilot/cancel.rs`의 등록부가 진행 중인 요청의 소켓 복제본을 쥐고 있다가 `shutdown`해서 막힌 연결·쓰기·읽기를 바로 끝냅니다. 동시 요청은 64개, 등록 전에 먼저 온 취소는 32개까지 기억합니다. HTTPS는 TLS 커넥터 훅(`CancellableTls`)이 핸드셰이크 전에 소켓을 등록합니다. 연결 단계(DNS·TCP 15초 안)에는 소켓이 없어 취소가 연결이 끝난 뒤에 적용됩니다.
 - **키는 세션 메모리에만 둡니다.** API 키는 디스크·웹 스토리지·URL·로그에 남기지 않습니다. 주소를 바꾸고 새 키를 넣지 않으면 저장 키를 지웁니다(PD-264).
 - **문맥 경계.** 문서 데이터는 `<document_context>` 안에만 넣고 데이터 속 같은 태그는 `&lt;`로 바꿉니다(`copilot/context.rs`, PD-267). 문맥이 상한을 넘으면 `[이하 N… 생략]`을 넣고, 선택 명령은 대상을 다 싣지 못하면 모델을 부르지 않고 거부합니다. 모델이 돌려준 작업은 형식·범위·개수 검사(`copilot/operations.rs`)를 거치며 버린 수를 `droppedOperations`로 알립니다. PDF·BASE·BOARD는 질문 전용이라 작업을 만들지 않습니다.
-- **스트리밍.** 요청에 `stream: true`와 `requestId`가 있고 셸이 스트림 전송(`ShellWriters.llm_stream`)과 조각 통로(`copilot_events`)를 모두 주면 모델 응답을 오는 대로 읽습니다(`copilot/stream.rs`, SSE 해석은 `copilot/sse.rs`, Gemini는 JSON 배열 스트림). 글 조각은 Tauri IPC 채널(요청의 `onStream`)로 그 창에만 순서대로 갑니다. 이벤트 권한은 페이지에 주지 않습니다. 스트림은 보여 주기용이고, JSON 연산은 전송이 끝난 뒤 본문 전체로 한 번만 검증합니다. 스트림은 읽기 유휴 60초와 전체 10분, 응답 512 KiB 상한을 따릅니다(`--serve`는 한꺼번에 받습니다).
+- **스트리밍.** 요청에 `stream: true`와 `requestId`가 있고 셸이 스트림 전송(`ShellWriters.llm_stream`)과 조각 통로(`copilot_events`)를 모두 주면 모델 응답을 오는 대로 읽습니다(`copilot/stream.rs`, SSE 해석은 `sse-core` 크레이트, Gemini는 JSON 배열 스트림). 글 조각은 Tauri IPC 채널(요청의 `onStream`)로 그 창에만 순서대로 갑니다. 이벤트 권한은 페이지에 주지 않습니다. 스트림은 보여 주기용이고, JSON 연산은 전송이 끝난 뒤 본문 전체로 한 번만 검증합니다. 스트림은 읽기 유휴 60초와 전체 10분, 응답 512 KiB 상한을 따릅니다(`--serve`는 한꺼번에 받습니다).
 - **적용 전 미리보기와 연출.** 편집 응답은 문서를 바꾸지 않고 패널에 이전·이후 글과 삭제·삽입 표시를 보입니다(`copilot-preview.js`). 수락하면 문서·슬라이드·시트에서 포인터가 이동·선택하고 글을 한 자씩 쳐 넣은 뒤(`copilot-perform.js`) 기존 적용 경로로 한 번 씁니다. 연출이 쓰는 글은 임시이고 되돌리기는 한 단계입니다. 중지하면 쓰던 부분까지만 적용합니다.
 - **상한.** 프롬프트 UTF-8 16,384바이트, 대화 기록 32, 시트 셀 10,000, 문서 문단 2,048, 슬라이드 256(PD-253). 모델 출력은 8,192 토큰까지입니다(PD-267).
 

@@ -7,7 +7,8 @@
 //! type, formula, value) and the shared strings sit in one table that is built once. Here the table
 //! is a single arena string with end offsets, so a cell costs one allocation (its own text) and the
 //! table costs two. The cell rules are those of the earlier substring scanner, so results stay
-//! identical. Safe Rust only, no dependency (PD-053, PD-095).
+//! identical. The cell loop also feeds the style, filter, protection, view and page scans and keeps the
+//! number text as written, which the calamine crate does not (PD-269, step 2), so it stays a port.
 
 use std::borrow::Cow;
 use std::collections::HashMap;

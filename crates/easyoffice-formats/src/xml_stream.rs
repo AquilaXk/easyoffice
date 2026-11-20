@@ -9,7 +9,8 @@
 //! `src/events/attributes.rs` (`Attributes` iterator parses attributes on demand) and
 //! `src/escape.rs:236` (`unescape` returns `Cow`, borrowed when there is no `&`). The event
 //! grammar itself is the one of the earlier owned tokenizer, so results stay identical, and the
-//! tag-end search keeps its quote awareness. Safe Rust only, no dependency (PD-053, PD-095).
+//! tag-end search keeps its quote awareness. Safe Rust only. The `quick-xml` crate is already in
+//! `Cargo.lock` (0.42.0); swapping this reader for it is a separate step (PD-269).
 //!
 //! Callers must run [`crate::XmlSanitizer::validate_safe_xml`] first (DOCTYPE, entity
 //! declarations, and external references are rejected there); this reader never resolves

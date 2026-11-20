@@ -4628,7 +4628,7 @@
 
 ## PD-269. 엔진 크레이트도 허용 라이선스 크레이트를 직접 쓴다: PD-053·PD-095 대체, 1단계 기반 코덱 교체
 
-- **Status** Implemented (QA 결정 2026-11-20). 1단계(기반 코덱)만 끝났다. JSON은 6항의 범위까지만 했다. 코드: `crates/easyoffice-formats/src/{crc32,base64_codec,sha_digest,cp949,deflate,zip_codec}.rs`, 루트 `Cargo.toml`의 `[workspace.dependencies]`, `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates" 절.
+- **Status** Implemented (QA 결정 2026-11-20). 1단계(기반 코덱)가 끝났다. JSON은 6항의 범위까지만 했다. 2단계(XLSX·XLS·ODS)는 소스 평가만 했고 교체는 하지 않았다(7항, QA 판단 대기). SSE 해석은 크레이트로 바꿨다(8항). 코드: `crates/easyoffice-formats/src/{crc32,base64_codec,sha_digest,cp949,deflate,zip_codec}.rs`, 루트 `Cargo.toml`의 `[workspace.dependencies]`, `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates" 절.
 - **Context** 엔진 크레이트(formats, sheet, layout, app)는 외부 의존 0(PD-053)이었고, 같은 기능을 하는 유지되는 크레이트가 이미 `Cargo.lock`에 있는데도(데스크톱 셸과 rhwp가 쓴다) PD-095가 그 알고리즘을 안전한 Rust로 다시 짜 넣었다. 감사 결과 CRC-32, Base64, SHA, CP949, DEFLATE, ZIP이 그런 재구현이었다. 재구현은 원본의 버그 수정과 사양 변경을 받지 못하고, 같은 기능이 두 벌 생긴다.
 - **Decision (`PD-269`)**
   1. **정책**: PD-053의 "엔진 외부 의존 0"과 PD-095의 "크레이트 대신 알고리즘 이식"을 대체한다. 엔진도 허용 라이선스(MIT, Apache-2.0, BSD, Zlib)의 유지되는 크레이트를 그대로 쓰고, 같은 기능을 두 벌 두지 않으며, 원본의 수정은 업데이트로 받는다. PD-053의 Fail-Closed 상한 자체는 그대로 유효하다.
@@ -4644,6 +4644,33 @@
      - 시험 `comments_part_referenced_by_every_sheet_is_read_once`(`amplification_budget_pd262.rs`)의 입력을 바꿨다. 공백 100바이트마다 구분 문자를 끼운 120 MiB 파트가 자체 압축기에서는 압축비 90 아래였지만 크레이트는 90을 넘겨 파트가 저장 방식으로 들어가 시험의 크기 한도를 넘었다. 구간을 40바이트로 줄여 어떤 DEFLATE 구현이든 압축비 90 아래가 되게 했다. 시험이 검사하는 것(같은 주석 파트를 시트마다 한 번만 읽음)은 그대로다.
      - IPC JSON 계약(필드 이름, 숫자 형식, 오류 문구)은 바꾸지 않았다.
   6. **JSON(C안, QA 결정)**: 입력 파서 `strict_json*.rs`는 보안 경계라 그대로 둔다(중복 키 거부, 깊이 32, 숫자 원문 보존: `serde_json`은 `arbitrary_precision`·`preserve_order`가 없어 이를 대신하지 못한다). 출력은 `serde_json` 한 곳(`formats`의 `json_out.rs`)으로 모았다. 문자열 이스케이프 구현 8벌(SWAR 이스케이퍼와 그 래퍼 6개, `StrictJsonValue`의 사본)을 지우고, 이름(`sheet_names_json`)·하이퍼링크(`sheet_links_json`)·쪽 설정(`page_setup_json`)의 출력 조립을 직렬화로 바꿨다. 한국어 오류 문구는 그대로다. 바이트가 바뀌는 곳은 한 군데다. U+0008과 U+000C를 `\u0008`·`\u000c` 대신 `\b`·`\f`로 쓴다(`serde_json`의 표기이고 `StrictJsonValue`가 이미 그렇게 썼으며 JSON 파서가 같은 글자로 읽는다). 이름·링크·쪽 설정의 출력은 기존 정확 일치 시험과 이번에 더한 이름 시험으로 바이트 단위로 고정했다. 이스케이프 속도는 1 MB급 긴 글 31 → 33 ms, 짧은 글 20만 개 1.3 → 1.4 ms(+5~10%)다. 남은 작업: 부분 객체에 이어 붙이는 쓰기(`write_look`, 열기 JSON 조립, `slide_deck_json` 등)는 흐름을 바꿔야 해서 손으로 짠 조립이 남아 있다.
+  7. **2단계 평가: XLSX·XLS·ODS를 크레이트로 바꾸지 않는다(제안)**. 후보 소스를 직접 읽었다: 읽기 크레이트 0.38.0(MIT, 이하 "읽기 크레이트"), rust_xlsxwriter 0.103.0(MIT OR Apache-2.0, 쓰기), umya-spreadsheet 3.1.1(MIT, 읽기·쓰기, MSRV 1.89로 워크스페이스의 1.88보다 높다). 우리 `xlsx_sheet.rs`·`ods_grid.rs`·`biff8_xls_reader.rs`·`cell_type.rs`는 이미 그 읽기 크레이트 0.38의 읽기 루프를 줄 단위로 옮긴 것이라, 같은 일을 하는 두 번째 구현을 걷어 낼 자리가 없다. 크레이트는 코덱이 지키는 항목을 다 덮지 못한다(아래 표, "있음"은 소스에서 API·구조체를 확인한 것이고 왕복 시험은 하지 않았다).
+
+     | 항목 | 우리 코덱 | 읽기 크레이트 | rust_xlsxwriter 쓰기 | umya 읽기·쓰기 |
+     | :--- | :--- | :--- | :--- | :--- |
+     | 값·수식 | 숫자 원문 표기 보존 | 있음. 숫자는 `f64`라 표기를 잃음 | 있음 | 있음 |
+     | 셀 서식 | 있음 | XLSX만(`worksheet_style`) | 있음 | 있음 |
+     | 병합 | 있음 | XLSX·XLS | 있음 | 있음 |
+     | 표 | 스타일·합계 행까지 | 이름·범위·열 이름만 | 있음 | 있음 |
+     | 조건부 서식·유효성 | 있음 | 없음 | 있음 | 있음 |
+     | 피벗 | 있음 | 참조와 캐시 값 읽기만 | 있음 | 있음 |
+     | 슬라이서 | 있음 | 없음 | 없음 | 없음(스타일 전달만) |
+     | 차트 | 있음 | 없음 | 있음 | 있음 |
+     | 메모 | 있음 | 없음(ODS 주석은 건너뜀) | 있음 | 있음 |
+     | 그림 | 있음 | `picture` 기능으로 원본 바이트만 | 있음 | 있음 |
+     | 시트 보호 | 있음 | 없음(셀 잠금 속성만) | 있음 | 있음 |
+     | 이름 | 있음 | 있음 | 있음 | 있음 |
+     | 1904 날짜 | 있음 | 읽기만(`has_1904_epoch`) | 없음 | 있음 |
+     | 하이퍼링크 | 있음 | XLSX 읽기 | 있음 | 있음 |
+     | 화면·윤곽·쪽 설정 | 있음 | 없음 | 있음 | 있음 |
+     | 입력 상한 | 셀 수·행열·문자열·SST·XML 깊이·ZIP 예산 | 없음 | 해당 없음 | 없음 |
+
+     막힌 이유는 네 가지다. (a) 읽기: 크레이트는 시트를 밀집 `Range`(행 × 열 × `Data`)로 할당하고 공유 문자열 전체를 `Vec<String>`으로 먼저 올리며 `uniqueCount`로 `reserve`한다. 1.9 KB XLSX의 한 셀을 5000행 1000열에 두면 RSS 155 MB, 1.1 KB ODS의 반복 행·열은 2천만 셀에서 1.2 GB(크레이트 자체 상한은 1억 셀)가 되고, 우리 코덱은 같은 ODS를 셀 20만 상한에서 3.6 ms에 거부한다. 공유 문자열 300만 항목도 상한 없이 올라온다(우리 상한 1,048,576). 스트리밍 `worksheet_cells_reader`로 `Range`는 피해도 공유 문자열 선적재는 `Xlsx::new`에 있어 막을 수 없다. (b) 값: 크레이트는 `<v>`를 `f64`로 읽어 `1E-3`을 `0.001`, `1.0`을 `1`, `1.5E+10`을 `15000000000`으로 돌려준다. 우리 코덱은 원문을 보존하므로 기존 시험의 기대값과 저장 바이트가 달라진다. ODS 수식은 크레이트가 `of:=SUM([.A1:.A2])` 그대로 주고 우리는 `=SUM(A1:A2)`로 바꾼다. (c) ZIP: 크레이트는 건네받은 바이트를 `zip` 9.8.1 기본 설정(앞쪽 덧붙임 탐지, 마스크 없음)으로 다시 열고 항목은 출력 상한 없는 해제기로 읽는다. `open_guarded`를 먼저 거쳐도 크레이트가 여는 디렉터리가 검사한 디렉터리라는 보장이 없고, 검증된 항목을 다시 묶어 넘기면 해제·압축이 한 번씩 늘어난다. 또 `zip`이 8과 9 두 벌이 되고 `Cargo.lock`에 그 크레이트 말고도 9개 패키지(atoi_simd, fast-float2, debug_unsafe, cfg_aliases, constant_time_eq, nix, typed-path, zeroize_derive, zip 9.8.1)가 새로 들어온다. (d) 한 번에 읽기: XLS는 셀 레코드 순회에서 서식(XF)·링크·셀 유형을, XLSX는 같은 시트 이벤트 흐름에서 서식·필터·보호·보기·쪽 설정을 함께 읽는다. 크레이트를 값에만 쓰면 같은 스트림을 두 번 파싱하고 우리 루프는 그대로 남는다. 쓰기는 rust_xlsxwriter가 슬라이서와 1904를 못 쓰고, 쓴 바이트의 구조가 전부 달라져 `eo:` 확장 속성과 기존 바이트 시험이 모두 깨지며, umya는 읽기 상한이 없고 슬라이서를 버린다.
+
+     그래서 교체하지 않았다. 되살릴 길은 두 가지다. 하나는 이 코덱을 그대로 두고 `xml_stream.rs`(XML 읽기 크레이트를 옮긴 것)만 `Cargo.lock`에 이미 있는 그 크레이트 0.42로 바꾸는 것이다(새 버전 0개, XLSX·ODS·DOCX·HWPX가 함께 쓴다). 다른 하나는 QA가 보존 손실과 상한 약화를 받아들이는 경우의 쓰기 교체인데, 슬라이서·1904·`eo:` 속성을 우리 코드로 후처리하게 되어 두 벌이 오히려 늘어난다.
+
+  8. **SSE 해석을 `sse-core` 0.2.3 크레이트로 바꿨다**: `copilot/sse.rs`(425줄, 이식본)를 지우고 `easyoffice-app`이 크레이트를 쓴다(`Cargo.lock`의 새 패키지는 `sse-core` 하나, `bytes`·`memchr`·`thiserror 2`는 이미 있었다). 크레이트의 `SseDecoder::new()` 기본 상한이 512 KiB이고 이벤트의 데이터·이름·id에 각각 걸려, 이식본의 이벤트 상한과 같다. 빈 `data` 줄만 이어 버퍼를 키우는 증폭을 막는 `push_data_newline`이 크레이트에 있다. `retry` 이벤트는 건너뛴다. 이벤트 상한과 빈 줄 증폭은 `copilot/stream.rs`의 시험으로 계속 지킨다.
+  9. **미리보기 ZIP**: `crates/easyoffice-desktop/src/preview/zip.rs`가 `open_guarded` 뒤 `central_directory_start()`와 `directory_start`를 대조한다. 마스크가 막는 경로(첫 디렉터리 레코드는 정상, 저장된 항목 데이터 안에 ZIP64 끝 기록·로케이터·끝 기록이 숨고 둘째 레코드가 깨진 아카이브)는 `crates/easyoffice-formats/tests/zip_guard_mask_pd269.rs`가 직접 지난다. 마스크를 끄면 크레이트가 숨은 기록의 개수로 46,400,000바이트를 잡아 시험이 실패한다.
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 유지되는 크레이트를 그대로 썼다(위 3항, 모두 `Cargo.lock`에 있던 버전). (2) 이미 쓰는 의존성에 같은 기능이 있어서 새 버전은 들이지 않았다. (3) 이식한 코드는 없다.
 - **Measured** `cargo run --release -p easyoffice-app -- --self-test`를 같은 기기(Apple Silicon)에서 교체 전후 3회씩, 중앙값(µs): `crc32_slicing_by_8` 253 → 38, `crc32_hardware_1mib` 100 → 33, `crc32_64kib_x64` 400 → 150, `crc32_1mib_x8` 804 → 281, `deflate_zlib_roundtrip` 36 → 47(+30%), `docx_to_docx_1mb` 10,999 → 11,797(+7%), `docx_to_hwpx_1mb` 12,369 → 13,406(+8%), `xlsx_100k_cells_pack_unpack` 45,010 → 48,098(+7%), 나머지 시트 재계산·UTF-16·CSV 항목은 오차 안이다. SHA-512 10만 회 반복(시트 보호 확인의 시한 있는 루프)은 21.0 → 8.5 ms다. 느려진 항목은 DEFLATE 압축 한 곳이다. 1 MB DOCX 쓰기 약 11.8 ms 중 압축이 약 5 ms이고 ZIP 배치(`write`)는 25 µs, 헤더 고치기(`mark`)는 50 µs 안팎이라 ZIP 쪽 비용은 1% 아래다. 수준 3의 값으로 파일이 13~17% 작아진다(수준 2는 시간이 교체 전보다 약 7% 줄지만 파일이 5% 커진다).
 - **Verified by** `cargo test --workspace --no-fail-fast`(3,058건 통과, 실패 0), 새 시험 `crates/easyoffice-formats/tests/zip_crate_boundary_pd269.rs`(7건: 선언 크기를 속인 스트림, 앞뒤 덧붙임·EOCD 주석 불일치, ZIP64·외부 압축 방식, 암호 비트, 로컬·중앙 헤더 불일치, 중복 경로, 저장 전환, 그리고 보안 리뷰가 짚은 크레이트·래퍼 불일치 8건: 주석 안 둘째 EOCD, 유니코드 경로·ZIP64·AES 부가 필드, 중앙 디렉터리 뒤 남는 바이트, ZIP64 locator와 0xFFFF 개수, 정책 초과 개수, 데이터 설명자 보관과 틀린 오프셋, 골든 바이트), `deflate/tests.rs`의 비트 뒤집기·절단 시험. CP949는 변경 전 표 해석기와 65,536쌍 전체와 무작위 입력 40만 건을 대조한 뒤 옛 코드를 지웠다. 위생 가드의 이름 검사에서 인코딩 크레이트 이름을 "모든 파일"에서 "마크다운만" 목록으로 옮겼다(엔진 코드가 이제 그 크레이트를 링크한다).

@@ -6,8 +6,9 @@
 //! 참조 구현 (reference implementation): calamine 0.38.0 (MIT, Copyright (c) 2016 Johann Tuffe),
 //! https://github.com/tafia/calamine, `src/ods.rs` (`read_table`, `read_row`): one
 //! pull-reader loop with a state per table, row and cell. The budgets, the repeat rules and the
-//! cell text priority (raw value before the displayed text, PD-178) are this repository's own. Safe Rust
-//! only, no dependency (PD-053, PD-095).
+//! cell text priority (raw value before the displayed text, PD-178) are this repository's own, and
+//! the cells go to a sink instead of a dense `Range`, so the calamine crate is not called here (the
+//! comparison and the reasons are in PD-269, step 2).
 
 use std::borrow::Cow;
 
