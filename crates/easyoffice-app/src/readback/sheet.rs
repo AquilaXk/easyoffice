@@ -14,6 +14,7 @@ use easyoffice_sheet::{
     SpillArea, Verdict, WorkbookEngine,
 };
 
+use crate::convert_open::push_rejected_object_warnings;
 use crate::eval_limit::save_eval_time;
 use crate::sheet_session::LIMITS;
 
@@ -158,30 +159,7 @@ pub(super) fn append_styling_warnings(
                 st.fonts_rejected
             ));
         }
-        if st.charts_rejected > 0 {
-            warnings.push(format!(
-                "{name} 시트의 차트 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
-                st.charts_rejected
-            ));
-        }
-        if st.pivots_rejected > 0 {
-            warnings.push(format!(
-                "{name} 시트의 피벗 테이블 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
-                st.pivots_rejected
-            ));
-        }
-        if st.images_rejected > 0 {
-            warnings.push(format!(
-                "{name} 시트의 그림 {}개는 지원하지 않는 형식이거나 손상되어 가져오지 않았습니다.",
-                st.images_rejected
-            ));
-        }
-        if st.notes_rejected > 0 {
-            warnings.push(format!(
-                "{name} 시트의 메모 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
-                st.notes_rejected
-            ));
-        }
+        push_rejected_object_warnings(name, st, warnings);
     }
 }
 

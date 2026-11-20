@@ -644,18 +644,7 @@ fn decode_response_with_deck(
                         st.fonts_rejected
                     ));
                 }
-                if st.images_rejected > 0 {
-                    warnings.push(format!(
-                        "{name} 시트의 그림 {}개는 지원하지 않는 형식이거나 손상되어 가져오지 않았습니다.",
-                        st.images_rejected
-                    ));
-                }
-                if st.notes_rejected > 0 {
-                    warnings.push(format!(
-                        "{name} 시트의 메모 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
-                        st.notes_rejected
-                    ));
-                }
+                push_rejected_object_warnings(name, st, &mut warnings);
             }
             ("workbook", sheets.len())
         }
@@ -776,6 +765,34 @@ fn estimated_len(content: &DecodedContent) -> usize {
                 .sum(),
             DecodedContent::Slides(slides) => slides.len() * BYTES_PER_BLOCK,
         }
+}
+
+/// Adds the lines for the charts, pivot tables, pictures and notes a reader turned away from `st`, the styling of sheet `name`.
+pub(crate) fn push_rejected_object_warnings(
+    name: &str,
+    st: &SheetStyling,
+    warnings: &mut Vec<String>,
+) {
+    for (what, n, why) in [
+        ("차트", st.charts_rejected, "한도를 넘거나 올바르지 않아"),
+        (
+            "피벗 테이블",
+            st.pivots_rejected,
+            "한도를 넘거나 올바르지 않아",
+        ),
+        (
+            "그림",
+            st.images_rejected,
+            "지원하지 않는 형식이거나 손상되어",
+        ),
+        ("메모", st.notes_rejected, "한도를 넘거나 올바르지 않아"),
+    ] {
+        if n > 0 {
+            warnings.push(format!(
+                "{name} 시트의 {what} {n}개는 {why} 가져오지 않았습니다."
+            ));
+        }
+    }
 }
 
 fn styling_of<'a>(styling: &'a [(String, SheetStyling)], name: &str) -> Option<&'a SheetStyling> {
