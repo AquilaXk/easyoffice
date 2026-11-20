@@ -4692,5 +4692,5 @@
 - **Trade-offs** `ADDRESS` 상대 R1C1은 수식 칸에서 센 차이를 쓰던 전의 결과와 다르다. `ACCRINTM`이 같은 날짜를 `#NUM!`으로 돌려주므로 0을 기대한 시트는 오류가 난다. 참조 시험 243건은 같지 않아 옮기지 않았다(대부분 참조 엔진의 내부 오류 코드와 표시 자릿수 차이).
 - **Alternatives rejected** 정규식을 직접 짜는 방식(수백 줄, 검증된 크레이트가 있다), 빈 칸을 배열 원소로 넘길 때 0이나 빈 글 중 하나로 고정하는 방식(함수마다 읽는 법이 달라 빈 칸 식을 따로 둠).
 - **Verified by** `cargo test -p easyoffice-sheet`(자체 23건 `sheet_function_parity_new`, 참조 시험 533건 `sheet_ironcalc_cases`), `--self-test`(함수 302종), 벤치 전후는 아래 보고에 있다.
-- **추가 (QA 실측 2026-11-20)** 반올림 계열에 유효숫자 15자리 보정을 넣지 않는다. 기준 앱에서 `ROUNDDOWN((0.1+0.7)*10,0)`은 7이다(참조 엔진 A는 8). 엔진 동작은 그대로이고 `tests/sheet_ironcalc_cases/test_fn_round.rs`가 7을 고정한다.
+- **추가 (QA 실측 정정 2026-11-21)** 반올림 계열은 유효숫자 15자리 보정이 있다. 기준 앱에서 `ROUNDDOWN((0.1+0.7)*10,0)`은 8이다(참조 엔진 A와 같다. 같은 날 먼저 낸 7은 정정됨). `ROUND`·`ROUNDUP`·`ROUNDDOWN`·`TRUNC`·`FLOOR`·`CEILING`·`MROUND`를 참조 A 구조로 바꾸고 ulp 보정을 지웠다(`functions_math.rs`, `sig_digits.rs`). `tests/sheet_ironcalc_cases/test_fn_round.rs`가 8을 고정한다.
 - **Revisit when** `ACCRINT` 기준 1~3과 `ODDFPRICE` 계열의 일수 계산을 고칠 때, 빈 칸 원소의 취급을 정할 때.
