@@ -9,6 +9,7 @@
 //! Decoding runs through `UniversalFormatConverter::decode_rich`, so ZIP-bomb ratio/size
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
+use easyoffice_formats::native_package::PackageKind;
 use easyoffice_formats::{
     evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
@@ -870,6 +871,9 @@ impl EasyOfficeIpcRouter {
             return crate::readback::inspect_source_bytes(&bytes, file_name, source_hint, &query);
         }
         if action == "decode" {
+            if let Some(kind) = file_name.and_then(PackageKind::from_file_name) {
+                return Self::decode_native_package(kind, &bytes);
+            }
             let max_rows = limit(entries, "maxRows")?;
             let max_cols = limit(entries, "maxCols")?;
             let (decoded, styling, slide_deck) =

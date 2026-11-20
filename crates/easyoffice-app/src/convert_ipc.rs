@@ -174,6 +174,9 @@ impl EasyOfficeIpcRouter {
             if crate::readback::is_inspect_action(action) {
                 return crate::readback::inspect_structured_entries(&entries);
             }
+            if action == Some("encode_package") {
+                return Self::encode_native_package(&entries);
+            }
             if action == Some("decode") {
                 return Err(EasyOfficeError::InvalidArgument(
                     "decode 요청에는 sourceBase64가 필요합니다.".to_string(),

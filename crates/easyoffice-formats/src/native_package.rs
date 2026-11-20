@@ -108,6 +108,13 @@ pub struct NativePackage {
     pub media: Vec<PackageMedia>,
 }
 
+impl PackageMedia {
+    /// IANA media type of the picture, by the part name.
+    pub fn media_type(&self) -> &'static str {
+        image_format_of(&self.path).map_or("", RichImageFormat::mime)
+    }
+}
+
 fn refuse(detail: impl Into<String>) -> EasyOfficeError {
     EasyOfficeError::CorruptedContainer(detail.into())
 }
@@ -200,10 +207,10 @@ fn manifest_json(kind: PackageKind, media: &[PackageMedia]) -> String {
         if idx > 0 {
             out.push(',');
         }
-        let media_type = image_format_of(&item.path).map_or("", RichImageFormat::mime);
         out.push_str(&format!(
-            "{{\"path\":\"{}\",\"mediaType\":\"{media_type}\",\"bytes\":{}}}",
+            "{{\"path\":\"{}\",\"mediaType\":\"{}\",\"bytes\":{}}}",
             item.path,
+            item.media_type(),
             item.bytes.len()
         ));
     }
@@ -286,9 +293,8 @@ fn check_manifest(
             .iter()
             .find(|part| part.path == path)
             .ok_or_else(|| refuse(format!("manifest에만 있는 그림입니다: {path}")))?;
-        let expected_type = image_format_of(path).map_or("", RichImageFormat::mime);
         let size = StrictJsonValue::get_field(item, "bytes").and_then(StrictJsonValue::as_u64);
-        if StrictJsonValue::get_str(item, "mediaType") != Some(expected_type)
+        if StrictJsonValue::get_str(item, "mediaType") != Some(part.media_type())
             || size != Some(part.bytes.len() as u64)
         {
             return Err(refuse(format!("manifest와 그림 파트가 다릅니다: {path}")));
