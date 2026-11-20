@@ -4463,3 +4463,26 @@
 - **Alternatives rejected** 모든 `FILE_ATTRIBUTE_REPARSE_POINT`를 일괄 거부하는 방식(OneDrive 클라우드 동기화 폴더의 정상 문서를 열지 못하게 됨 — `canonicalize` 후 대상 경로 검증으로 해결).
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop` (macOS·Linux·Windows CI).
 - **Revisit when** 네트워크 드라이브(SMB DFS 리파스 포인트) 위 파일 잠금 정책을 세분화할 때.
+
+## PD-262. 작은 입력이 메모리·CPU로 증폭되는 경로의 상한(피벗 필드 이름·반복 참조 파트·각주 본문 복제·중첩 문단·표 수식·쪽 나눔·토큰 스캔·Pages 표식·EMU 변환·점검 출력)
+
+- **Status** Implemented (QA 요청 2026-11-20, 전체 리뷰 1차). 엔진 `easyoffice-formats`(`sheet_pivot.rs`·`xlsx_pivots.rs`·`xlsx_comments.rs`·`office_codecs.rs`·`odt_notes_writer.rs`·`hwpx_codec.rs`·`rich_xml.rs`·`rich_read_{ooxml,odt,hwpx,pages}`·`rich_document.rs`·`layout_lint.rs`·`xlsx_slicers.rs`·`xlsx_drawings.rs`·`sheet_chart.rs`), 앱 `easyoffice-app`(`readback/`·`ui/layout-lint-ui.js`), CI(`.github/workflows/ci.yml`·`scripts/run-quicklook-tests.mjs`).
+- **Context** 리뷰어가 프로브로 재현한 열한 가지: 160KB XLSX가 RSS 1.03GB, 135KB DOCX가 HWPX 저장에서 9.2GB, 닫지 않은 `<w:p>` 500만 개가 1.15GB, 6만 행 `=SUM(ABOVE)`가 13초, 20만 개 쪽 나눔이 15초, `{{` 160만 자가 86초, Pages 각주 표식 4만 개가 110초, 1.7MB DOCX 점검 결과가 182MB. 모두 입력 크기 대비 출력·작업량의 상한이 없었다.
+- **Decision (`PD-262`)**
+  1. **피벗 필드 이름**: 캐시 정의 하나가 가질 수 있는 필드 이름 바이트 합 256KiB(`MAX_PIVOT_FIELD_NAMES_BYTES`, 읽기와 `check_budgets` 모두), 통합 문서 전체 피벗이 복제해 든 필드 이름 합 4MiB(`MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES`). 원본 범위가 있으면 필드 수가 범위 폭을 넘는 피벗은 거부(`pivots_rejected`). 넘으면 `ResourceBudgetExceeded`.
+  2. **메모·VML 파트**: 통합 문서 전체에서 읽은 파트 경로를 기억하고(`WorkbookComments`) 두 번째 시트의 같은 파트 참조는 읽지 않는다. 메모 파트는 `notes_rejected`에 센다(표 파트 `claim_part`와 같은 규칙).
+  3. **각주·메모 본문 쓰기**: ODT·HWPX는 같은 `(종류, id)` 본문을 첫 참조에만 쓰고 이후는 본문 없는 표식(빈 문단 하나)으로 쓴다. 메모 주석도 같다. 한 번만 참조하는 정상 문서는 출력이 그대로다.
+  4. **열린 문단 깊이**: DOCX·ODT·HWPX 읽기에서 열린 문단 스택 64(`MAX_OPEN_PARAGRAPHS`) 초과 시 `ResourceBudgetExceeded`.
+  5. **문서 표 수식**: 표 하나가 수식으로 읽는 셀 합 400만(`MAX_TABLE_FORMULA_OPERANDS`). 예산을 넘는 수식은 계산하지 않고 수식 텍스트로 남긴다.
+  6. **쪽 나눔**: 문단 런이 모두 공백인지를 증분 커서로 판정(`ParaState::runs_are_blank`). 쪽 나눔마다 런 전체를 다시 훑지 않는다.
+  7. **템플릿 토큰 스캔**: 엔진(`contains_template_token`)과 UI(`containsTemplateToken`) 모두 한 번 훑는 선형 스캔. 의미는 같다(1~64자 비공백, 개행 없음).
+  8. **Pages 표식**: 중첩 저장소(각주·도형 글)를 저장소 id별로 한 번만 변환하고 반복 참조는 문단·글자 구간·텍스트 바이트 예산만 같은 만큼 청구한다. 그림이 든 결과는 캐시하지 않는다. 댓글 텍스트는 개체 id별로 한 번 읽고, 변경 추적은 훑은 원문 길이를 예산에 청구한다.
+  9. **EMU 변환**: 슬라이서·드로잉·차트의 `emu + EMU_PER_PX/2`를 `saturating_add`로, `as u32` 절단을 `u32::try_from(..).unwrap_or(u32::MAX)`로 바꾼다.
+  10. **점검 출력**: 텍스트 필드는 512자 미리보기로 자르고(PDF 미리보기와 같은 값, `MAX_READBACK_TEXT_CHARS`) 결과 총량은 8MiB(`MAX_READBACK_OUTPUT_BYTES`)를 넘으면 `ResourceBudgetExceeded`(`maxItems`를 줄여 다시 시도하라는 안내).
+  11. **CI**: macOS `verify` 잡 `timeout-minutes`를 45에서 60으로(다른 잡과 같은 수준). Quick Look 크레이트 테스트를 호스트 타깃(`--target`)으로 돌려 이어지는 확장 빌드가 같은 rhwp 컴파일 결과를 쓰게 한다(로컬 측정: 타깃을 주고 릴리스 테스트를 컴파일하는 데 3분 32초, 이어서 같은 타깃의 `cargo build --release`는 컴파일 0건·0.22초). CI 로그의 확장 빌드 11.9분 중 aarch64 쪽 6분이 줄 것으로 본다. 캐시 쪽은 rhwp가 경로 의존성이라 `rust-cache`가 산출물을 보관하지 않아 매번 다시 컴파일하는 것을 로그(`Compiling rhwp`)로 확인했고, 경로 의존성 산출물은 체크아웃마다 파일 시각이 바뀌어 `cache-workspace-crates`로도 안정적으로 재사용되지 않아 건드리지 않았다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 같은 문제를 푼 허용 라이선스 크레이트는 찾지 못했다(모두 이 저장소의 읽기·쓰기 경로 안의 상한 문제). (2) 이미 쓰는 의존성: `DecodeBudget`(복원 바이트 예산)·`TableRegistry::claim_part`(표 파트 한 번 읽기)·PDF 미리보기 512자 규칙을 그대로 따랐다. (3) 이식한 참조 코드는 없다(새 의존성 없음, 각 항목은 위 기존 규칙의 적용).
+- **Why** 입력 크기에 비례해야 할 메모리·시간·출력이 입력 크기의 수백~수만 배로 늘면 열기·저장·점검 한 번으로 앱이 멈춘다. 정상 문서(각주 한 번 참조, 열 개 안팎의 문단 깊이, 수천 행 표)는 결과가 그대로다.
+- **Trade-offs** 같은 각주를 여러 곳에서 참조하는 문서는 ODT·HWPX 저장에서 두 번째 참조부터 본문이 빈 각주가 된다(ODF·HWPX 모두 각주 본문을 표식에 인라인으로 두는 형식이라 같은 본문을 가리킬 수단이 없다). 400만 셀을 넘는 표 수식은 계산되지 않는다. Pages 읽기는 같은 저장소를 두 번째로 읽을 때 건너뛴 개체 알림 수를 처음 읽을 때의 수만큼 더한다.
+- **Alternatives rejected** 피벗 캐시를 `Arc`로 공유(공개 모델 `field_names` 타입이 바뀌어 피벗 JSON·UI·테스트 전체가 흔들리고, 총 바이트 상한이 같은 메모리 한도를 이미 보장). 표 수식 열 단위 접두합(수식 결과가 뒤 수식의 입력이 되는 행 순서 의미를 보존하려면 방향마다 누적기가 따로 필요해 예산이 더 단순). 출력 초과 시 JSON 중간 자르기(깨진 JSON).
+- **Verified by** `cargo test -p easyoffice-formats --test amplification_budget_pd262 --test pages_amplification_pd262`(재현 입력이 수정 전에 실패하는 것을 먼저 확인), `cargo test -p easyoffice-app --test readback_output_budget_pd262`, `node --test scripts/test-webui-layout-lint-token-pd262.mjs`, 위생·fmt·clippy·전체 테스트·자체 시험.
+- **Revisit when** 같은 본문을 여러 곳에서 참조하는 문서를 ODT·HWPX로 보내는 사용이 실제로 생겨 빈 각주가 문제가 될 때, 또는 400만 셀 예산에 걸리는 정상 표가 보고될 때.
