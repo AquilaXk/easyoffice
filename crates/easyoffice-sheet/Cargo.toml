@@ -8,5 +8,3 @@ license.workspace = true
 [dependencies]
 easyoffice-formats = { path = "../easyoffice-formats" }
 regex = { workspace = true }
-sxd-document = { workspace = true }
-sxd-xpath = { workspace = true }

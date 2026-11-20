@@ -4,7 +4,7 @@
 
 ## 2026-11-21
 
-- 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `FILTERXML`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 310종). `WEBSERVICE`와 `RTD`는 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `FILTERXML`은 DOCTYPE과 지나치게 깊거나 큰 XML, 비용이 큰 질의를 거부합니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일과 `FORECAST.ETS` 계열은 남았습니다(PD-271).
+- 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 309종). `WEBSERVICE`, `RTD`, `FILTERXML`은 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일, `FILTERXML`, `FORECAST.ETS` 계열은 남았습니다(PD-271).
 - XLSX로 저장할 때 `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `PERCENTOF`, `GROUPBY`, `PIVOTBY`에 `_xlfn.` 접두를 붙입니다.
 
 ## 2026-11-20

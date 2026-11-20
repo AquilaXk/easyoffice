@@ -1,4 +1,4 @@
-//! `WEBSERVICE` and `RTD` (PD-271): names that are known and not served. The results are the ones
+//! `WEBSERVICE`, `RTD` and `FILTERXML` (PD-271): names that are known and not served. The results are the ones
 //! the function documentation names: `#VALUE!` for `WEBSERVICE` ("unable to return the data") and
 //! `#N/A` for `RTD` (no real-time data server). Neither reaches out.
 #![allow(clippy::unwrap_used)]
@@ -27,6 +27,14 @@ fn webservice_and_rtd_give_their_documented_errors() {
     assert_eq!(eval("=WEBSERVICE()"), "#VALUE!");
     assert_eq!(eval("=WEBSERVICE(\"a\",\"b\")"), "#VALUE!");
     assert_eq!(eval("=RTD(\"p\",\"\")"), "#VALUE!");
+}
+
+#[test]
+fn filterxml_is_known_and_gives_the_documented_value_error() {
+    assert_eq!(eval("=FILTERXML(\"<a><b>1</b></a>\",\"//b\")"), "#VALUE!");
+    assert_eq!(eval("=FILTERXML(\"<a>\",\"//b\")"), "#VALUE!");
+    assert_eq!(eval("=FILTERXML(#N/A,\"//b\")"), "#N/A");
+    assert_eq!(eval("=FILTERXML(\"<a/>\")"), "#VALUE!");
 }
 
 #[test]

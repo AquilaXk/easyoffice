@@ -6,7 +6,7 @@ use std::collections::HashMap;
 #[test]
 fn test_all_canonical_functions_evaluated() {
     let names = SheetEngine::supported_function_names();
-    assert_eq!(names.len(), 310);
+    assert_eq!(names.len(), 309);
 
     let mut s = SheetEngine::new("함수검증");
     s.set_cell("A1", "10").unwrap();

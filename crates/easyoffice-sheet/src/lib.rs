@@ -63,7 +63,6 @@ mod functions_trend;
 mod functions_unavailable;
 #[cfg(test)]
 mod functions_unit_tests;
-mod functions_xml;
 mod groupby_axis;
 mod hidden_rows;
 mod lexer;

@@ -14,8 +14,8 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`, then the 14 of the function parity bundle (PD-270): text 5
 /// (`TEXTSPLIT`, `ARRAYTOTEXT`, `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`), `TRIMRANGE`, information 5
 /// (`ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO`), `PERCENTOF`, `ISO.CEILING` and `AMORDEGRC`, then the 4 of the locale and text bundle:
-/// `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `FILTERXML`, `GROUPBY`, `PIVOTBY` and `GETPIVOTDATA`.
-pub const CANONICAL_FUNCTIONS: [&str; 310] = [
+/// `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY` and `GETPIVOTDATA`.
+pub const CANONICAL_FUNCTIONS: [&str; 309] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -322,7 +322,6 @@ pub const CANONICAL_FUNCTIONS: [&str; 310] = [
     "EUROCONVERT",
     "JIS",
     "PHONETIC",
-    "FILTERXML",
     "GROUPBY",
     "PIVOTBY",
     "GETPIVOTDATA",
@@ -615,7 +614,9 @@ impl SheetEngine {
             "LENB" | "LEFTB" | "MIDB" | "RIGHTB" | "FINDB" | "SEARCHB" | "REPLACEB" | "ASC"
             | "DBCS" | "JIS" => self.eval_text_bytes_func(name, args, ctx, depth),
             "GETPIVOTDATA" => self.fn_getpivotdata(args, ctx, depth),
-            "WEBSERVICE" | "RTD" => self.eval_unavailable_func(name, args, ctx, depth),
+            "WEBSERVICE" | "RTD" | "FILTERXML" => {
+                self.eval_unavailable_func(name, args, ctx, depth)
+            }
             "BAHTTEXT" => self.fn_bahttext(args, ctx, depth),
             "EUROCONVERT" => self.fn_euroconvert(args, ctx, depth),
             "PHONETIC" => self.fn_phonetic(args, ctx, depth),

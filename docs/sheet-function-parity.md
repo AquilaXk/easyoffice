@@ -4,9 +4,9 @@
 
 ## 요약
 
-- 기준 목록 521개 중 우리 엔진은 **502개**(PD-270 전 480개, PD-271 전 494개), 없는 것은 **19개**(전 41개, PD-271 전 27개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`는 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
+- 기준 목록 521개 중 우리 엔진은 **501개**(PD-270 전 480개, PD-271 전 494개), 없는 것은 **20개**(전 41개, PD-271 전 27개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`FILTERXML`은 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
 - 참조 엔진: A 496개, B 497개, C 403개가 기준 목록에 든다.
-- 없는 19개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 아래 설명).
+- 없는 20개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `FILTERXML`은 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 아래 설명).
 
 ## 범주별 수
 
@@ -25,9 +25,9 @@
 | 데이터베이스 | 12 | 12 | 0 | 12 | 12 | 12 |
 | 큐브 | 7 | 0 | 7 | 0 | 0 | 0 |
 | 추가 기능·자동화 | 3 | 1 | 2 | 0 | 1 | 0 |
-| 웹 | 3 | 2 | 1 | 1 | 2 | 0 |
+| 웹 | 3 | 1 | 2 | 1 | 2 | 0 |
 
-## 없는 함수 19개
+## 없는 함수 20개
 
 | 범주 | 함수 | 참조 | 사정 |
 |---|---|---|---|
@@ -49,6 +49,7 @@
 | 큐브 | `CUBEVALUE` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 추가 기능·자동화 | `CALL` | - | 외부 라이브러리 호출. 대상 아님. |
 | 추가 기능·자동화 | `REGISTER.ID` | - | 위와 같다. |
+| 웹 | `FILTERXML` | B | 유지되는 XPath 크레이트 없음, 클린룸·대체 크레이트 검토. `sxd-xpath`는 2018년 이후 릴리스가 없고 접두사 이름에서 패닉이 나며 질의 비용 상한을 금지 목록으로 막을 수 없었다(PD-271). 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 | 웹 | `WEBSERVICE` | - | 네트워크 호출. 신뢰할 수 없는 문서에서 열면 안 되므로 대상 아님. 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 
 ## 이번에 이식한 함수 14개
@@ -66,7 +67,7 @@
 
 옮긴 줄과 직접 쓴 줄은 커밋 보고에 있다. 정규식 함수는 엔진 크레이트 외부 의존 0 규칙(PD-053)이 QA 결정으로 폐지되어(PD-269) `regex` 크레이트로 옮겼다.
 
-## PD-271에서 더한 함수 8개와 이름만 아는 2개
+## PD-271에서 더한 함수 7개와 이름만 아는 3개
 
 이식할 원본이 있는 것은 원본 구조대로 옮겼고, 없는 것은 함수 문서를 기준으로 만들었다(출처 없음으로 적는다). 줄 수는 Rust 파일 전체(머리 주석 포함)다.
 
@@ -75,12 +76,11 @@
 | 텍스트 | `BAHTTEXT`, `EUROCONVERT` | `functions_text_locale.rs` | 참조 B `text/bahttext/index.ts` 24-122, `text/euroconvert/index.ts` 24-184 (원본 260줄) | 296 (옮긴 구조 약 250, 직접 쓴 `PHONETIC`·어댑터 약 45) | `BAHTTEXT`는 두 자리 반올림에서 satang을 구하고 100이면 바트로 올린다. 10^15 이상은 `#VALUE!`. `EUROCONVERT`는 원본 환율표와 계산 정밀도 반올림, 문서 예제 4건이 맞는다. |
 | 텍스트 | `JIS` | `functions_text_bytes.rs` | 기존 `DBCS`(참조 B `asc`·`dbcs`) | 1줄(이름 하나를 더함) | 문서가 `DBCS`와 같은 설명을 쓰므로 같은 변환이다. |
 | 텍스트 | `PHONETIC` | `functions_text_locale.rs` | 없음 | 약 20 | 후리가나를 읽지 못해 셀 글자를 돌려준다(범위는 왼쪽 위 칸). XLSX `rPh`는 읽기에서 버려진다. |
-| 웹 | `FILTERXML` | `functions_xml.rs` | 없음. `sxd-xpath`·`sxd-document` 크레이트 | 178 | 입력이 신뢰할 수 없으므로 DOCTYPE·ENTITY 거부, 깊이 128, 노드 2,000개, 질의 256자·훑는 단계 3개·조건절 중첩 금지. 4,000개 노드에서 중첩 조건절이 몇 분 걸리는 것을 측정했다. |
 | 조회·참조 | `GROUPBY`, `PIVOTBY` | `functions_groupby.rs`, `groupby_axis.rs`, `parser_array.rs` | 없음(참조 B는 이름만 있다) | 907 | 문서의 8·11개 인수. 합계·소계 글과 머리글 이름은 우리 선택. 함수 목록 인수는 `#VALUE!`. 훑는 양 800만, 칸 수는 배열 예산. |
 | 조회·참조 | `GETPIVOTDATA` | `functions_pivot_data.rs` | 없음 | 257 | 피벗 정의를 `set_pivot_tables`로 등록해야 한다(앱 연결은 TODO). 원본 행을 한 번 읽어 피벗 엔진 규칙으로 계산한다. |
-| 웹·조회 | `WEBSERVICE`, `RTD` | `functions_unavailable.rs` | 없음 | 40 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`)을 돌려준다. 없는 쪽으로 센다. |
+| 웹·조회 | `WEBSERVICE`, `RTD`, `FILTERXML` | `functions_unavailable.rs` | 없음 | 약 50 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#VALUE!`)을 돌려준다. 없는 쪽으로 센다. `FILTERXML`은 보안 검토로 크레이트 구현을 뺐다. |
 
-옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,450줄과 시험 약 1,050줄이다.
+옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,350줄과 시험 약 900줄이다.
 
 ### `FORECAST.ETS` 계열을 남긴 이유
 
@@ -89,6 +89,7 @@
 ### 문서의 오류 값을 확인한 함수
 
 - `WEBSERVICE`: 자료를 돌려줄 수 없으면 `#VALUE!`. 이름을 알고 이 값을 돌려준다.
+- `FILTERXML`: 읽을 수 없는 XML이면 `#VALUE!`. 질의 구현을 뺐으므로 이름을 알고 항상 이 값을 돌려준다.
 - `RTD`: 실시간 서버가 없으면 `#N/A`. 이름을 알고 이 값을 돌려준다.
 - 큐브 7개: 연결 이름이 통합 문서에 저장된 연결이 아니면 `#NAME?`이 문서의 값이라 지금 동작이 맞다.
 - `IMAGE`: `#BLOCKED!`(보안 설정), `#CONNECT!`(연결 문제). `CALL`·`REGISTER.ID`: XLM 매크로 차단이면 `#BLOCKED!`. `STOCKHISTORY`는 같은 계열이다. 엔진에 이 오류 값이 없어 `#NAME?`를 유지한다(TODO).
@@ -682,5 +683,5 @@
 | `EUROCONVERT` | O | - | O | - | 추가 기능·자동화 |
 | `REGISTER.ID` | - | - | - | - | 추가 기능·자동화 |
 | `ENCODEURL` | O | O | O | - | 웹 |
-| `FILTERXML` | O | - | O | - | 웹 |
+| `FILTERXML` | - | - | O | - | 웹 |
 | `WEBSERVICE` | - | - | - | - | 웹 |
