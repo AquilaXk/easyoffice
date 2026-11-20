@@ -565,7 +565,9 @@
         const rec = activeTable()?.records.find((r) => r.id === recId);
         if (!rec) return;
         if (!multi) { updateCell(recId, chosen.id, toKey); return; }
-        const next = keysOf(rec.values[chosen.id]).filter((k) => k !== "" && k !== fromKey);
+        // The tags outside the field's options stay: only the column the card leaves is taken off.
+        const held = Array.isArray(rec.values[chosen.id]) ? rec.values[chosen.id] : [];
+        const next = held.filter((k) => k !== fromKey);
         if (toKey !== "") next.push(toKey);
         updateCell(recId, chosen.id, next);
       };

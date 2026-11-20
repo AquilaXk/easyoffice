@@ -105,3 +105,16 @@ test("a long table prints on several pages that each repeat the header row and f
   const lastRows = [...pages[pages.length - 1].querySelectorAll("tbody tr")];
   assert.equal(lastRows[lastRows.length - 1].querySelectorAll("td")[0].textContent, "항목 120");
 });
+
+test("a multi-select card with a tag the options lost is not moved, and the tag stays", async () => {
+  const { root, studio } = await openBoard();
+  studio.deleteField("fld-2");
+  const tags = studio.addField({ name: "분류", type: "multiSelect", options: ["A", "B", "C"] }).field;
+  studio.addRecord({ "fld-1": "기획안", [tags.id]: ["A", "B"] });
+  const recId = studio.getState().tables[0].records[0].id;
+  // The option B is taken away; the record still holds it.
+  studio.updateField(tags.id, { name: "분류", type: "multiSelect", options: ["A", "C"] });
+  studio.setView("kanban");
+  drag(root, recId, "A", "C");
+  assert.deepEqual(studio.getState().tables[0].records[0].values[tags.id], ["A", "B"], "the move is refused whole, no tag is dropped");
+});
