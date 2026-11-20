@@ -14,13 +14,14 @@ const WORKSHEET_ONLY: [&str; 3] = ["FILTER", "PY", "SORT"];
 /// distribution names with a dot, the 2013 and later text and logic functions, the dynamic array
 /// family) plus the ones that rule leaves out or lists outside its prefix group but that files
 /// carry with the prefix (`IFS`, `SWITCH`, `TEXTJOIN`, `CONCAT`, `MAXIFS`, `MINIFS`, `XMATCH`,
-/// `IMAGE`, the forecast family, `ANCHORARRAY`, `SINGLE`, `ARRAYTOTEXT`, `VALUETOTEXT`).
+/// `IMAGE`, the forecast family, `ANCHORARRAY`, `SINGLE`, `ARRAYTOTEXT`, `VALUETOTEXT`, the 2024 and later
+/// additions `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE`, `TRIMRANGE`, `PERCENTOF`, `GROUPBY`, `PIVOTBY`).
 /// `tests/fixtures/xlsx_future_functions.txt` holds the list; a test checks this table against it.
 /// `NETWORKDAYS.INTL`, `WORKDAY.INTL`, `ECMA.CEILING` and `ISO.CEILING` are written plain. Sorted,
 /// upper case; a function the engine does not have is listed too, so a formula that names it is
 /// spelled the way the file format wants. Functions of this engine with no entry
 /// (`AVERAGE.WEIGHTED`, `MARGINOFERROR`) are its own and are written as they are.
-const FUTURE: [&str; 160] = [
+const FUTURE: [&str; 167] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -87,6 +88,7 @@ const FUTURE: [&str; 160] = [
     "GAMMA.INV",
     "GAMMALN.PRECISE",
     "GAUSS",
+    "GROUPBY",
     "HSTACK",
     "HYPGEOM.DIST",
     "IFNA",
@@ -124,10 +126,12 @@ const FUTURE: [&str; 160] = [
     "PDURATION",
     "PERCENTILE.EXC",
     "PERCENTILE.INC",
+    "PERCENTOF",
     "PERCENTRANK.EXC",
     "PERCENTRANK.INC",
     "PERMUTATIONA",
     "PHI",
+    "PIVOTBY",
     "POISSON.DIST",
     "PQSOURCE",
     "PYTHON_STR",
@@ -140,6 +144,9 @@ const FUTURE: [&str; 160] = [
     "RANK.AVG",
     "RANK.EQ",
     "REDUCE",
+    "REGEXEXTRACT",
+    "REGEXREPLACE",
+    "REGEXTEST",
     "RRI",
     "SCAN",
     "SEC",
@@ -166,6 +173,7 @@ const FUTURE: [&str; 160] = [
     "TEXTSPLIT",
     "TOCOL",
     "TOROW",
+    "TRIMRANGE",
     "UNICHAR",
     "UNICODE",
     "UNIQUE",
@@ -579,7 +587,7 @@ mod tests {
     fn the_tables_hold_exactly_the_listed_names() {
         let mut future = [listed("spec"), listed("observed")].concat();
         future.sort_unstable();
-        assert_eq!(future.len(), 160, "a name repeats between the sections");
+        assert_eq!(future.len(), 167, "a name repeats between the sections");
         assert_eq!(FUTURE.to_vec(), future);
         let mut worksheet = listed("worksheet");
         worksheet.sort_unstable();

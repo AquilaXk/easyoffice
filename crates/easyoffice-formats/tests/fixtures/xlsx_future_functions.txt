@@ -8,7 +8,9 @@
 #   [worksheet]  written `_xlfn._xlws.NAME`.
 #   [observed]   names the rule does not list as future functions, or lists outside the group,
 #                that files of the spreadsheet application nevertheless carry with `_xlfn.`
-#                (the dynamic array helpers, the 2016 and 2019 additions, the forecast family).
+#                (the dynamic array helpers, the 2016 and 2019 additions, the forecast family, the
+#                2024 and later additions: the regular expression functions, `TRIMRANGE`,
+#                `PERCENTOF`, `GROUPBY`, `PIVOTBY`).
 #                They are test data of this table only; a name found in [spec] never repeats here.
 
 [spec]
@@ -176,12 +178,19 @@ FORECAST.ETS.CONFINT
 FORECAST.ETS.SEASONALITY
 FORECAST.ETS.STAT
 FORECAST.LINEAR
+GROUPBY
 IFS
 IMAGE
 MAXIFS
 MINIFS
+PERCENTOF
+PIVOTBY
+REGEXEXTRACT
+REGEXREPLACE
+REGEXTEST
 SINGLE
 SWITCH
 TEXTJOIN
+TRIMRANGE
 VALUETOTEXT
 XMATCH
