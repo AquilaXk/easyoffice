@@ -563,7 +563,7 @@ mod tests {
             runs: 0,
             tables: TableBudget::default(),
             fmt_cache: crate::pages_proto::FastU64Map::default(),
-            nested_reads: crate::pages_proto::FastU64Map::default(),
+            nested_reads: std::collections::HashMap::new(),
             images: PageImages::new(&objects, &data_files),
             quiet: false,
             text_budget: DecodeBudget::with_limit(64 * 1024),

@@ -18,7 +18,7 @@ mod notes;
 mod numbering;
 mod sections;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use self::marks::FootnoteMark;
@@ -452,8 +452,9 @@ struct Reader<'a> {
     runs: usize,
     tables: TableBudget,
     fmt_cache: FastU64Map<Rc<Fmt>>,
-    /// Nested storages already converted, by storage id (see [`notes::NestedRead`]).
-    nested_reads: FastU64Map<notes::NestedRead>,
+    /// Nested storages already converted, by storage id and the `quiet` state they were read in, which
+    /// decides what is reported as skipped (see [`notes::NestedRead`]).
+    nested_reads: HashMap<(u64, bool), notes::NestedRead>,
     images: PageImages<'a>,
     /// Marks such as page-number fields in headers and footers are not reported as skipped.
     quiet: bool,
@@ -912,7 +913,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         runs: 0,
         tables: TableBudget::default(),
         fmt_cache: FastU64Map::default(),
-        nested_reads: FastU64Map::default(),
+        nested_reads: HashMap::new(),
         images: PageImages::new(&pkg.objects, &pkg.data_files),
         quiet: false,
         text_budget: DecodeBudget::with_limit(MAX_CONVERTED_TEXT_BYTES),

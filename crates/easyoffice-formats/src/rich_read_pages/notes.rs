@@ -53,7 +53,7 @@ impl Reader<'_> {
         let Some(storage_id) = reference(payload, field) else {
             return Ok(Vec::new());
         };
-        if let Some(read) = self.nested_reads.get(&storage_id).cloned() {
+        if let Some(read) = self.nested_reads.get(&(storage_id, self.quiet)).cloned() {
             return self.replay_nested(read);
         }
         let Some(st) = self.storage_message(storage_id) else {
@@ -84,7 +84,7 @@ impl Reader<'_> {
                 text_bytes: before.2 - self.text_budget.remaining(),
                 skipped,
             };
-            self.nested_reads.insert(storage_id, read);
+            self.nested_reads.insert((storage_id, self.quiet), read);
         }
         Ok(blocks)
     }
