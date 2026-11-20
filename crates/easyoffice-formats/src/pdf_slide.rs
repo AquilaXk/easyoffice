@@ -5,16 +5,15 @@ use std::fmt::Write;
 
 use crate::pdf_image::{pdf_image_object, PdfImageObject};
 use crate::pdf_laid::{fit_text, rgb_ops, width_pt};
-use crate::pdf_sheet_media::{serialize_sheet_pdf, SheetPdfPage};
 use crate::pdf_text_wrap::wrap_spans;
-use crate::pdf_writer::{text_ops, PdfLaidPage};
+use crate::pdf_writer::{text_ops, PdfLaidPage, PdfPageEntry};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_slide::{
     RichSlide, RichSlideDeck, SlideBox, SlideChartSeries, SlideElement, SlideMasterLayout,
     SlideShapeType, SlideTextAlign,
 };
 use crate::sheet_chart::{ChartKind, ChartLegendPos};
-use crate::EasyOfficeError;
+use crate::{EasyOfficeError, PdfSerializer};
 
 const PALETTE: [u32; 6] = [0x2563EB, 0xDC2626, 0x16A34A, 0xD97706, 0x7C3AED, 0x0891B2];
 const KAPPA: f64 = 0.552_284_75;
@@ -879,16 +878,18 @@ pub fn encode_slide_pdf(deck: &RichSlideDeck, title: &str) -> Result<Vec<u8>, Ea
         for el in &slide.elements {
             render_element(&mut cv, el);
         }
-        pages.push(SheetPdfPage {
-            laid: PdfLaidPage {
-                page_number: idx + 1,
-                rotation_degrees: 0,
-                width_pt: pw,
-                height_pt: ph,
-                content: cv.ops.join("\n"),
-            },
+        pages.push(PdfPageEntry::Laid(PdfLaidPage {
+            page_number: idx + 1,
+            rotation_degrees: 0,
+            width_pt: pw,
+            height_pt: ph,
+            content: cv.ops.join("\n"),
             xobjects: cv.xobjects,
-        });
+        }));
     }
-    Ok(serialize_sheet_pdf(effective_title, pages))
+    Ok(PdfSerializer::serialize_entries(
+        effective_title,
+        None,
+        &pages,
+    ))
 }

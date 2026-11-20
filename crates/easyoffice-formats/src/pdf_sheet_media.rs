@@ -1,28 +1,17 @@
 //! Spreadsheet floating image XObjects and cell note indicators for PDF output (`PD-256`).
 
 use std::collections::HashMap;
-use std::fmt::Write;
 
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_laid::{fit_text, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX, ROW_PX};
-use crate::pdf_writer::{pdf_text_string, PdfLaidPage, PdfPageEntry};
 use crate::sheet_styling::sheet_chart::{SheetCellIndex, EMU_PER_PX};
 use crate::sheet_styling::sheet_media_notes::effective_image_two_cell;
-use crate::{pack_cell_pos, OdsUnpacked, PdfSerializer, SheetStyling};
-
-const KOREAN_CID_FONT: &str = "HYGoThic-Medium";
-const KOREAN_CMAP: &str = "UniKS-UCS2-H";
-const TO_UNICODE_CMAP: &str = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
+use crate::{pack_cell_pos, OdsUnpacked, SheetStyling};
 
 const NOTE_TRIANGLE_RGB: &str = "0.82 0.14 0.14";
 const FALLBACK_BG_RGB: u32 = 0xF8FAFC;
 const FALLBACK_BORDER_RGB: u32 = 0x94A3B8;
 const FALLBACK_TEXT_RGB: u32 = 0x334155;
-
-pub(crate) struct SheetPdfPage {
-    pub laid: PdfLaidPage,
-    pub xobjects: Vec<(String, PdfImageObject)>,
-}
 
 fn emu_to_pt(emu: u32, scale: f64) -> f64 {
     (f64::from(emu) / EMU_PER_PX as f64) * PDF_PT_PER_PX * scale
@@ -310,193 +299,4 @@ pub(crate) fn render_sheet_overlays(
         );
     }
     draw_sheet_floating_images(canvas, styling, page_cols, page_rows, col_xs, row_ys, scale)
-}
-
-struct SheetPdfPlan {
-    page_obj: usize,
-    content_obj: usize,
-    image_objs: Vec<(String, usize, Option<usize>)>,
-}
-
-struct SheetPdfWriter {
-    out: Vec<u8>,
-    offsets: Vec<usize>,
-}
-
-impl SheetPdfWriter {
-    fn line(&mut self, line: &str) {
-        self.out.extend_from_slice(line.as_bytes());
-        self.out.push(b'\n');
-    }
-
-    fn object(&mut self, id: usize, body: &str) {
-        self.offsets[id] = self.out.len();
-        self.line(&format!("{id} 0 obj"));
-        self.line(body);
-        self.line("endobj");
-    }
-
-    fn stream_bytes(&mut self, id: usize, dict_extra: &str, data: &[u8]) {
-        self.offsets[id] = self.out.len();
-        self.line(&format!("{id} 0 obj"));
-        self.line(&format!("<<{dict_extra} /Length {} >>", data.len()));
-        self.line("stream");
-        self.out.extend_from_slice(data);
-        self.out.push(b'\n');
-        self.line("endstream");
-        self.line("endobj");
-    }
-}
-
-pub(crate) fn serialize_sheet_pdf(title: &str, pages: Vec<SheetPdfPage>) -> Vec<u8> {
-    if pages.iter().all(|p| p.xobjects.is_empty()) {
-        let entries: Vec<PdfPageEntry> = pages
-            .into_iter()
-            .map(|p| PdfPageEntry::Laid(p.laid))
-            .collect();
-        return PdfSerializer::serialize_entries(title, None, &entries);
-    }
-
-    let mut next_id = 3usize;
-    let mut plans = Vec::with_capacity(pages.len());
-    let mut kids_refs = String::new();
-    for (idx, page) in pages.iter().enumerate() {
-        let page_obj = next_id;
-        let content_obj = next_id + 1;
-        next_id += 2;
-        if idx > 0 {
-            kids_refs.push(' ');
-        }
-        let _ = write!(kids_refs, "{page_obj} 0 R");
-        let mut image_objs = Vec::with_capacity(page.xobjects.len());
-        for (name, obj) in &page.xobjects {
-            let img_id = next_id;
-            next_id += 1;
-            let mask_id = if obj.soft_mask.is_some() {
-                let id = next_id;
-                next_id += 1;
-                Some(id)
-            } else {
-                None
-            };
-            image_objs.push((name.clone(), img_id, mask_id));
-        }
-        plans.push(SheetPdfPlan {
-            page_obj,
-            content_obj,
-            image_objs,
-        });
-    }
-
-    let latin_font_obj = next_id;
-    let korean_font_obj = next_id + 1;
-    let cid_font_obj = next_id + 2;
-    let descriptor_obj = next_id + 3;
-    let cmap_obj = next_id + 4;
-    let info_obj = next_id + 5;
-    let total_objects = next_id + 6;
-
-    let mut w = SheetPdfWriter {
-        out: Vec::with_capacity(8192),
-        offsets: vec![0; total_objects],
-    };
-    w.line("%PDF-1.4");
-    w.object(1, "<< /Type /Catalog /Pages 2 0 R >>");
-    w.object(
-        2,
-        &format!(
-            "<< /Type /Pages /Count {} /Kids [{kids_refs}] >>",
-            pages.len()
-        ),
-    );
-
-    let fonts = format!("/Font << /F1 {latin_font_obj} 0 R /F2 {korean_font_obj} 0 R >>");
-    for (page, plan) in pages.iter().zip(&plans) {
-        let xobj_dict = if plan.image_objs.is_empty() {
-            String::new()
-        } else {
-            let mut s = String::from(" /XObject <<");
-            for (name, img_id, _) in &plan.image_objs {
-                let _ = write!(s, " /{name} {img_id} 0 R");
-            }
-            s.push_str(" >>");
-            s
-        };
-        let laid = &page.laid;
-        w.object(
-            plan.page_obj,
-            &format!(
-                "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 {:.2} {:.2}] /Resources << {fonts}{xobj_dict} >> /Contents {} 0 R >>",
-                laid.page_number,
-                laid.rotation_degrees,
-                laid.width_pt,
-                laid.height_pt,
-                plan.content_obj
-            ),
-        );
-        w.stream_bytes(plan.content_obj, "", laid.content.as_bytes());
-        for ((_, obj), &(_, img_id, mask_id)) in page.xobjects.iter().zip(&plan.image_objs) {
-            let mut dict = obj.dict.clone();
-            if let Some(mask) = mask_id {
-                let _ = write!(dict, " /SMask {mask} 0 R");
-            }
-            w.stream_bytes(img_id, &dict, &obj.data);
-            if let (Some(mask), Some(soft)) = (mask_id, obj.soft_mask.as_deref()) {
-                w.stream_bytes(mask, &soft.dict, &soft.data);
-            }
-        }
-    }
-
-    w.object(
-        latin_font_obj,
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    );
-    w.object(
-        korean_font_obj,
-        &format!(
-            "<< /Type /Font /Subtype /Type0 /BaseFont /{KOREAN_CID_FONT}-{KOREAN_CMAP} /Encoding /{KOREAN_CMAP} /DescendantFonts [{cid_font_obj} 0 R] /ToUnicode {cmap_obj} 0 R >>"
-        ),
-    );
-    w.object(
-        cid_font_obj,
-        &format!(
-            "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /{KOREAN_CID_FONT} /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 1 >> /FontDescriptor {descriptor_obj} 0 R /DW 1000 /W {} >>",
-            crate::pdf_text_wrap::cid_ascii_widths()
-        ),
-    );
-    w.object(
-        descriptor_obj,
-        &format!(
-            "<< /Type /FontDescriptor /FontName /{KOREAN_CID_FONT} /Flags 4 /FontBBox [-6 -145 1003 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>"
-        ),
-    );
-    w.stream_bytes(
-        cmap_obj,
-        " /Type /CMap /CMapName /Adobe-Identity-UCS",
-        TO_UNICODE_CMAP.as_bytes(),
-    );
-    w.object(
-        info_obj,
-        &format!(
-            "<< /Title {} /Producer (EasyOffice) >>",
-            pdf_text_string(title)
-        ),
-    );
-
-    let xref_offset = w.out.len();
-    w.line("xref");
-    w.line(&format!("0 {total_objects}"));
-    w.line("0000000000 65535 f ");
-    let offsets = std::mem::take(&mut w.offsets);
-    for offset in offsets.iter().skip(1) {
-        w.line(&format!("{offset:010} 00000 n "));
-    }
-    w.line("trailer");
-    w.line(&format!(
-        "<< /Size {total_objects} /Root 1 0 R /Info {info_obj} 0 R >>"
-    ));
-    w.line("startxref");
-    w.line(&xref_offset.to_string());
-    w.line("%%EOF");
-    w.out
 }

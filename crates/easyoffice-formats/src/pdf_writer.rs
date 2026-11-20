@@ -12,6 +12,7 @@ use crate::pdf_image::PdfImageObject;
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
+use std::fmt::Write as _;
 use std::ops::Range;
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
@@ -328,13 +329,15 @@ pub(crate) struct PdfImagePage {
     pub height_pt: u64,
 }
 
-/// A page of its own size whose content stream is already placed (`pdf_laid.rs`).
+/// A page of its own size whose content stream is already placed (`pdf_laid.rs`), with the pictures
+/// it draws by resource name.
 pub(crate) struct PdfLaidPage {
     pub page_number: usize,
     pub rotation_degrees: u16,
     pub width_pt: f64,
     pub height_pt: f64,
     pub content: String,
+    pub xobjects: Vec<(String, PdfImageObject)>,
 }
 
 /// One output page: text lines, a picture or a laid-out page.
@@ -350,6 +353,8 @@ struct PagePlan {
     content_obj: usize,
     image_obj: Option<usize>,
     mask_obj: Option<usize>,
+    /// Object numbers of the pictures of a laid page and their soft masks, in resource order.
+    xobject_objs: Vec<(usize, Option<usize>)>,
     /// Object numbers of the page's annotations and their appearance streams.
     annotations: Vec<(usize, usize)>,
 }
@@ -363,19 +368,35 @@ fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
         let content_obj = next.checked_add(1)?;
         next = next.checked_add(2)?;
         let (mut image_obj, mut mask_obj) = (None, None);
-        if let PdfPageEntry::Image(page) = entry {
-            image_obj = Some(next);
-            next = next.checked_add(1)?;
-            if page.image.soft_mask.is_some() {
-                mask_obj = Some(next);
+        let mut xobject_objs = Vec::new();
+        match entry {
+            PdfPageEntry::Image(page) => {
+                image_obj = Some(next);
                 next = next.checked_add(1)?;
+                if page.image.soft_mask.is_some() {
+                    mask_obj = Some(next);
+                    next = next.checked_add(1)?;
+                }
             }
+            PdfPageEntry::Laid(page) => {
+                for (_, image) in &page.xobjects {
+                    let image_id = next;
+                    next = next.checked_add(1)?;
+                    let mask_id = image.soft_mask.is_some().then_some(next);
+                    if mask_id.is_some() {
+                        next = next.checked_add(1)?;
+                    }
+                    xobject_objs.push((image_id, mask_id));
+                }
+            }
+            PdfPageEntry::Text(..) => {}
         }
         plans.push(PagePlan {
             page_obj,
             content_obj,
             image_obj,
             mask_obj,
+            xobject_objs,
             annotations: Vec::new(),
         });
     }
@@ -523,7 +544,7 @@ fn write_page(
             (
                 page.page_number,
                 i32::from(page.rotation_degrees),
-                String::new(),
+                laid_xobject_resources(page, plan),
                 content,
             )
         }
@@ -562,11 +583,29 @@ fn write_page(
     if let (PdfPageEntry::Image(page), Some(image_obj)) = (entry, plan.image_obj) {
         write_image_objects(w, &page.image, image_obj, plan.mask_obj);
     }
+    if let PdfPageEntry::Laid(page) = entry {
+        for ((_, image), &(image_obj, mask_obj)) in page.xobjects.iter().zip(&plan.xobject_objs) {
+            write_image_objects(w, image, image_obj, mask_obj);
+        }
+    }
     if let PdfPageEntry::Text(_, annotations) = entry {
         for (annotation, (annot_id, ap_id)) in annotations.iter().zip(&plan.annotations) {
             write_annotation(w, *annot_id, *ap_id, plan.page_obj, annotation);
         }
     }
+}
+
+/// The ` /XObject << /Name N 0 R ... >>` resource entry of a laid page, empty without pictures.
+fn laid_xobject_resources(page: &PdfLaidPage, plan: &PagePlan) -> String {
+    if page.xobjects.is_empty() {
+        return String::new();
+    }
+    let mut entry = String::from(" /XObject <<");
+    for ((name, _), &(image_obj, _)) in page.xobjects.iter().zip(&plan.xobject_objs) {
+        let _ = write!(entry, " /{name} {image_obj} 0 R");
+    }
+    entry.push_str(" >>");
+    entry
 }
 
 fn write_image_objects(

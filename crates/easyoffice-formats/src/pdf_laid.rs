@@ -231,6 +231,7 @@ impl Canvas {
             width_pt: self.width,
             height_pt: self.height,
             content: self.ops.join("\n"),
+            xobjects: Vec::new(),
         }
     }
 
@@ -460,7 +461,7 @@ pub(crate) fn encode_sheet_pdf(
     crate::sheet_styling::sheet_media_notes::validate_workbook_sheet_images(stylings)?;
     crate::sheet_styling::sheet_media_notes::validate_workbook_notes(stylings)?;
     let cell_index = crate::sheet_styling::sheet_chart::SheetCellIndex::build(sheets);
-    let mut entries: Vec<crate::pdf_sheet_media::SheetPdfPage> = Vec::new();
+    let mut entries: Vec<PdfLaidPage> = Vec::new();
     let mut printed_cells = 0u64;
     for (index, (sheet_name, cells)) in sheets.iter().enumerate() {
         let styling = stylings.get(index);
@@ -555,20 +556,20 @@ pub(crate) fn encode_sheet_pdf(
         }
     }
     if entries.is_empty() {
-        entries.push(crate::pdf_sheet_media::SheetPdfPage {
-            laid: Canvas::new(595.0, 842.0).into_laid(0),
-            xobjects: Vec::new(),
-        });
+        entries.push(Canvas::new(595.0, 842.0).into_laid(0));
     }
     for (i, entry) in entries.iter_mut().enumerate() {
-        entry.laid.page_number = i + 1;
+        entry.page_number = i + 1;
     }
-    Ok(crate::pdf_sheet_media::serialize_sheet_pdf(title, entries))
+    let entries: Vec<PdfPageEntry> = entries.into_iter().map(PdfPageEntry::Laid).collect();
+    Ok(crate::PdfSerializer::serialize_entries(
+        title, None, &entries,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn sheet_area_pages(
-    entries: &mut Vec<crate::pdf_sheet_media::SheetPdfPage>,
+    entries: &mut Vec<PdfLaidPage>,
     area: Area,
     page: &SheetPage,
     sheet_name: &str,
@@ -823,10 +824,9 @@ fn sheet_area_pages(
             } else {
                 Vec::new()
             };
-            entries.push(crate::pdf_sheet_media::SheetPdfPage {
-                laid: canvas.into_laid(0),
-                xobjects,
-            });
+            let mut laid = canvas.into_laid(0);
+            laid.xobjects = xobjects;
+            entries.push(laid);
         }
     }
     Ok(())
