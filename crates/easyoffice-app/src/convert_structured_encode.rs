@@ -3,10 +3,10 @@
 //! formats get the displayed grids, and PDF goes through the shell's writer when it offers one.
 
 use easyoffice_formats::{
-    pages_write_loss, CellValueKind, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec,
-    LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument,
-    RichParagraph, RichRun, SheetShown, SheetStyling, SpillRef, UniversalDocumentModel,
-    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    doc_save_loss, pages_write_loss, CellValueKind, CsvCodec, DocumentFormat, EasyOfficeError,
+    LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions,
+    RichBlock, RichDocument, RichParagraph, RichRun, SheetShown, SheetStyling, SpillRef,
+    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
@@ -751,6 +751,8 @@ fn encode_structured_with_thumbnail(
                 title: title.to_string(),
                 ..doc.clone()
             };
+            let label = format.extension().to_uppercase();
+            warnings.extend(doc_save_loss(&doc, format).warnings(&label));
             if format == DocumentFormat::Pdf {
                 let (bytes, notes) = UniversalFormatConverter::encode_rich_pdf(&doc, pdf);
                 warnings.extend(notes);
