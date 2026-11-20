@@ -184,7 +184,7 @@
         try { bytes = utils.base64ToBytes(rawB64); } catch { bytes = null; }
         if (!bytes || bytes.length === 0 || bytes.length > MAX_SINGLE_IMAGE_BYTES) return null;
         const header = parseImageHeaderFallback(bytes);
-        if (!header) return null;
+        if (!header || utils.imageAreaProblem(header)) return null;
         imageId = utils.registerDocImage(rawB64, header.format);
         mime = header.format === "jpg" ? "image/jpeg" : "image/png";
         naturalWidthPx = header.widthPx;
@@ -812,6 +812,7 @@
       if (u8.length > MAX_SINGLE_IMAGE_BYTES) return fail("그림을 넣지 못했습니다: 최대 32 MiB까지 넣을 수 있습니다.");
       const header = parseImageHeaderFallback(u8);
       if (!header) return fail("그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다.");
+      if (utils?.imageAreaProblem(header)) return fail("그림을 넣지 못했습니다: " + utils.imageAreaProblem(header) + ".");
       if (totalDeckImageBytes() + u8.length > MAX_TOTAL_IMAGE_BYTES) return fail("전체 그림 용량 한도(128 MiB)를 초과했습니다.");
       if (ensureElements().length >= MAX_ELEMENTS_PER_SLIDE) return fail("슬라이드당 개체 수 한도(256개)를 초과했습니다.");
 

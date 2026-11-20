@@ -740,6 +740,11 @@
     }
   }
 
+  // The most pixels a picture may have (`MAX_IMAGE_PIXELS` of the engine): a small PNG can declare a size that the browser
+  // would decode into gigabytes. Returns the message for a picture over it, else "".
+  const MAX_IMAGE_PIXELS = 50000000;
+  const imageAreaProblem = (header) => (header && header.widthPx * header.heightPx > MAX_IMAGE_PIXELS ? "그림 화소 수가 한도(5천만)를 넘습니다" : "");
+
   function registerDocImage(base64, format) {
     const b64Str = String(base64);
     const approxBytes = Math.ceil((b64Str.length * 3) / 4);
@@ -980,6 +985,8 @@
     localScrubPii,
     serializeDomChildren,
     restoreDomChildren,
+    MAX_IMAGE_PIXELS,
+    imageAreaProblem,
     registerDocImage,
     getDocImage,
     docImageUrl,

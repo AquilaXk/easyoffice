@@ -182,6 +182,12 @@
         say(error);
         return { ok: false, error };
       }
+      const area = host.__EASYOFFICE_SHEET_UTILS__.imageAreaProblem(header);
+      if (area) {
+        const error = "그림을 넣지 못했습니다: " + area + ".";
+        say(error);
+        return { ok: false, error };
+      }
       const current = layoutApi.imagesOf(sheet);
       if (current.length >= layoutApi.MAX_IMAGES_PER_SHEET) {
         const error = "시트당 그림 수 한도(" + layoutApi.MAX_IMAGES_PER_SHEET + "개)를 초과했습니다.";

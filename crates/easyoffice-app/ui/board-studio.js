@@ -145,6 +145,7 @@
         if (!bytes || bytes.length === 0 || bytes.length > MAX_SINGLE_IMAGE_BYTES) throw new Error("유효하지 않거나 용량 한도를 초과한 그림입니다.");
         const header = parseImageHeader(bytes);
         if (!header) throw new Error("지원하지 않거나 손상된 그림 파일입니다.");
+        if (utils.imageAreaProblem(header)) throw new Error(utils.imageAreaProblem(header) + ".");
         imageId = utils.registerDocImage(rawB64, header.format);
         mime = header.format === "jpg" ? "image/jpeg" : "image/png";
         naturalWidthPx = header.widthPx;
@@ -590,6 +591,7 @@
       if (u8.length > MAX_SINGLE_IMAGE_BYTES) return fail("그림을 넣지 못했습니다: 최대 32 MiB까지 넣을 수 있습니다.");
       const header = parseImageHeader(u8);
       if (!header) return fail("그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다.");
+      if (utils?.imageAreaProblem(header)) return fail("그림을 넣지 못했습니다: " + utils.imageAreaProblem(header) + ".");
       if (totalBoardImageBytes() + u8.length > MAX_TOTAL_IMAGE_BYTES) return fail("전체 그림 용량 한도(128 MiB)를 초과했습니다.");
       if (state.nodes.length >= MAX_NODES) return fail("보드 요소 수 한도(512개)를 초과했습니다.");
       if (!utils?.registerDocImage) return fail("이미지 저장소가 초기화되지 않았습니다.");

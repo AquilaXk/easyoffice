@@ -173,3 +173,36 @@ test("editing the text of a board element is one undo step for the whole session
   untouched.dispatchEvent({ type: "dblclick", target: untouched });
   assert.equal(steps(), base + 1, "opening the editor without typing is no step");
 });
+
+// A PNG that declares 10000 x 10000 pixels (100 million) in a few bytes: the engine refuses it, and so does each picture entry.
+function hugePng() {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(bytes.buffer).setUint32(16, 10000);
+  new DataView(bytes.buffer).setUint32(20, 10000);
+  return bytes;
+}
+
+test("a picture over the pixel limit is refused by the board, the document and the slides", async () => {
+  const board = await createWorkspaceHarness({ search: "?module=BOARD&win=w-board-px" });
+  const boardResult = await board.host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().insertPictureFromBytes(hugePng(), "큰.png");
+  assert.equal(boardResult.ok, false);
+  assert.match(boardResult.error, /화소 수/);
+
+  const doc = await createWorkspaceHarness();
+  const docResult = doc.host.__EASYOFFICE_DOC_IMAGE_API__.insertImageBytes(hugePng(), "큰.png");
+  assert.equal(docResult.changed, false);
+  assert.match(docResult.error, /화소 수/);
+
+  const slides = await createWorkspaceHarness({ search: "?module=SLIDE&win=w-slide-px" });
+  const slideResult = await slides.host.__EASYOFFICE_SLIDE_CANVAS__.insertPictureFromBytes(hugePng(), "큰.png");
+  assert.equal(slideResult.ok, false);
+  assert.match(slideResult.error, /화소 수/);
+});
+
+test("a board file whose picture is over the pixel limit is refused whole", async () => {
+  const { host } = await createWorkspaceHarness({ search: "?module=BOARD&win=w-board-px2" });
+  const codec = host.__EASYOFFICE_BOARD_CODEC__;
+  const base64 = Buffer.from(hugePng()).toString("base64");
+  assert.throws(() => codec.normalizeBoardNode({ kind: "image", data: base64 }, "bn-1"), /화소 수/);
+});

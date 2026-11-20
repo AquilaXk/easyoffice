@@ -161,7 +161,9 @@
       for (const im of existing) total += utils.getDocImage(im.dataset?.eoImageId)?.bytesLen || 0;
       if (total + u8.length > MAX_EDITOR_IMAGE_BYTES) return { error: "그림을 넣지 못했습니다: 전체 그림 용량은 128 MiB를 넘을 수 없습니다" };
       const header = parseImageHeader(u8);
-      return header ? { header } : { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      if (!header) return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      const area = utils.imageAreaProblem(header);
+      return area ? { error: "그림을 넣지 못했습니다: " + area } : { header };
     }
 
     function syncResizerBox() {
