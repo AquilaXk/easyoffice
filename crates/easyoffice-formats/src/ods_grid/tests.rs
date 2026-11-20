@@ -170,9 +170,17 @@ impl Legacy {
             });
         }
         extract_attr_from_fragment(cell_attrs, "office:value")
-            .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
             .or_else(|| extract_attr_from_fragment(cell_attrs, "office:date-value"))
+            .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
             .map(XmlSanitizer::unescape)
+            .map(|v| {
+                // A date value is read as its serial, as the reader does (PD-264).
+                if extract_attr_from_fragment(cell_attrs, "office:value").is_none() {
+                    crate::iso_serial::iso_to_serial(&v, false).unwrap_or(v)
+                } else {
+                    v
+                }
+            })
             .or_else(|| (has_text_p || has_explicit_position).then(String::new))
     }
 

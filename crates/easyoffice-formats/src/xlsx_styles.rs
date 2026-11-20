@@ -918,7 +918,7 @@ mod tests {
             vec![
                 (0, 0, "TRUE".to_string()),
                 (0, 1, "FALSE".to_string()),
-                (0, 2, "2026-11-10".to_string()),
+                (0, 2, "46336".to_string()),
             ]
         );
     }

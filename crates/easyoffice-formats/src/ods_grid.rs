@@ -122,10 +122,12 @@ struct CellBuilder<'a> {
     /// The `text:p` just started was `<text:p/>`: its end event is not a paragraph end.
     empty_paragraph: bool,
     want_text: bool,
+    /// The workbook counts its dates from 1904: a date value is that many days from 1904-01-01 (PD-264).
+    date1904: bool,
 }
 
 impl<'a> CellBuilder<'a> {
-    fn open(attrs: &Attrs<'a>, covered: bool, want_text: bool) -> Self {
+    fn open(attrs: &Attrs<'a>, covered: bool, want_text: bool, date1904: bool) -> Self {
         let mut cell = OdsCell {
             covered,
             col_repeat: 1,
@@ -183,6 +185,7 @@ impl<'a> CellBuilder<'a> {
             paragraph_depth: 0,
             empty_paragraph: false,
             want_text: want_text && !covered,
+            date1904,
         }
     }
 
@@ -305,6 +308,7 @@ impl<'a> CellBuilder<'a> {
     /// the paragraph text, then empty for explicit cells. The paragraphs are what a number format
     /// displays (`1,234`, `11월 11일`), the attributes are what the cell holds (PD-178).
     fn resolve_text(&mut self) -> Option<String> {
+        let date1904 = self.date1904;
         let f = &mut self.fields;
         if let Some(raw) = f.formula.take() {
             return Some(OdfCodec::normalize_ods_formula(&raw));
@@ -314,12 +318,17 @@ impl<'a> CellBuilder<'a> {
             let truthy = flag.eq_ignore_ascii_case("true") || flag == "1";
             return Some(if truthy { "TRUE" } else { "FALSE" }.to_string());
         }
-        if let Some(raw) = f
-            .value
-            .take()
-            .or_else(|| f.date_value.take())
-            .or_else(|| f.string_value.take())
-        {
+        if let Some(raw) = f.value.take() {
+            return Some(raw.into_owned());
+        }
+        // A date cell holds its value as the date (`2026-11-10`, with a time or not): the serial of it in the workbook's system.
+        if let Some(date) = f.date_value.take() {
+            return Some(
+                crate::iso_serial::iso_to_serial(&date, date1904)
+                    .unwrap_or_else(|| date.into_owned()),
+            );
+        }
+        if let Some(raw) = f.string_value.take() {
             return Some(raw.into_owned());
         }
         let has_paragraph = f.paragraph_count > 0;
@@ -335,6 +344,7 @@ impl<'a> CellBuilder<'a> {
 pub(crate) fn walk_ods<S: OdsSink>(
     xml: &str,
     want_text: bool,
+    date1904: bool,
     sink: &mut S,
     budget: &mut DecodeBudget,
 ) -> Result<(), EasyOfficeError> {
@@ -430,6 +440,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
                     attrs,
                     name == "table:covered-table-cell",
                     want_text,
+                    date1904,
                 ));
             }
             _ => {}
@@ -622,7 +633,8 @@ impl TextSink {
 pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
     let mut sink = TextSink::new(false);
     let mut budget = DecodeBudget::new();
-    walk_ods(content_xml, true, &mut sink, &mut budget)?;
+    let date1904 = crate::sheet_styling::ods_date_system::is_date1904(content_xml);
+    walk_ods(content_xml, true, date1904, &mut sink, &mut budget)?;
     Ok(sink.into_sheets())
 }
 
@@ -636,7 +648,8 @@ pub(crate) fn read_ods_sheets_with_styling(
         (StyleSink::new(&styles), ValidationSink::default()),
     );
     let mut budget = DecodeBudget::new();
-    walk_ods(content_xml, true, &mut sinks, &mut budget)?;
+    let date1904 = crate::sheet_styling::ods_date_system::is_date1904(content_xml);
+    walk_ods(content_xml, true, date1904, &mut sinks, &mut budget)?;
     let (mut text, (style, validation)) = sinks;
     let table_spills = std::mem::take(&mut text.table_spills);
     let mut tables = with_rules(content_xml, style.into_tables(), validation);

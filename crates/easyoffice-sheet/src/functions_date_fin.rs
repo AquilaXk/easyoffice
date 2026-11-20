@@ -4,8 +4,8 @@
 use crate::date_system::{from_1900, in_date_1904, to_1900, SERIAL_1904_OFFSET};
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
-const MAX_SERIAL: i64 = 2_958_465;
-const MAX_SERIAL_F: f64 = 2_958_465.0;
+/// 9999-12-31 in the 1900 system (the 1904 system ends 1,462 days earlier: `max_serial`).
+const MAX_SERIAL_1900: i64 = 2_958_465;
 const SECONDS_PER_DAY: i64 = 86_400;
 const MONTHS_PER_YEAR: i64 = 12;
 const EXCEL_EPOCH_DAYS: f64 = 25_569.0;
@@ -14,8 +14,19 @@ const MAX_NETWORKDAYS_SPAN: i64 = 1_000_000;
 const MONTH_BOUNDS: (f64, f64) = (-1_000_000.0, 1_000_000.0);
 const DAY_BOUNDS: (f64, f64) = (-100_000_000.0, 100_000_000.0);
 const TIME_BOUNDS: (f64, f64) = (-1_000_000_000.0, 1_000_000_000.0);
-const SERIAL_BOUNDS_FROM_ZERO: (f64, f64) = (0.0, MAX_SERIAL_F);
-const SERIAL_BOUNDS_FROM_ONE: (f64, f64) = (1.0, MAX_SERIAL_F);
+
+/// The last serial of the current date system (9999-12-31).
+fn max_serial() -> i64 {
+    from_1900(MAX_SERIAL_1900)
+}
+
+fn serial_bounds_from_zero() -> (f64, f64) {
+    (0.0, max_serial() as f64)
+}
+
+fn serial_bounds_from_one() -> (f64, f64) {
+    (1.0, max_serial() as f64)
+}
 /// Default Saturday (bit 5) + Sunday (bit 6) weekend bitmask (`0b110_0000`).
 const DEFAULT_WEEKEND_MASK: u8 = (1 << 5) | (1 << 6);
 
@@ -216,7 +227,7 @@ impl SheetEngine {
         let serial = serial_from_civil(adj_y, adj_m, 1)
             .checked_add(d - 1)
             .ok_or(FormulaError::Num)?;
-        if !(0..=MAX_SERIAL).contains(&serial) {
+        if !(0..=max_serial()).contains(&serial) {
             return Err(FormulaError::Num);
         }
         number(serial as f64)
@@ -230,7 +241,7 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 1, 1)?;
-        let serial = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ZERO, true, ctx, depth)?;
+        let serial = self.arg_i64(&args[0], serial_bounds_from_zero(), true, ctx, depth)?;
         let (y, m, d) = if serial == 0 {
             (1900, 1, 0)
         } else {
@@ -303,8 +314,8 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 2, 3)?;
-        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
-        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let s1 = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], serial_bounds_from_one(), true, ctx, depth)?;
         let method = match args.get(2) {
             Some(arg) if !matches!(arg, Expr::Missing) => self
                 .eval_arg_val(arg, ctx, depth)?
@@ -342,14 +353,14 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 2, 2)?;
-        let start_s = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let start_s = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
         let months = self.arg_i64(&args[1], MONTH_BOUNDS, false, ctx, depth)?;
         let (y, m, d) = civil_from_serial(start_s);
         let (ny, nm) = shift_year_month(y, m, months)?;
         let max_d = days_in_month(ny, nm);
         let nd = if end_of_month { max_d } else { d.min(max_d) };
         let serial = serial_from_civil(ny, nm, nd);
-        if !(1..=MAX_SERIAL).contains(&serial) {
+        if !(1..=max_serial()).contains(&serial) {
             return Err(FormulaError::Num);
         }
         number(serial as f64)
@@ -392,7 +403,7 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 1, 2)?;
-        let serial = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ZERO, true, ctx, depth)?;
+        let serial = self.arg_i64(&args[0], serial_bounds_from_zero(), true, ctx, depth)?;
         let ret_type = match args.get(1) {
             Some(arg) => self.arg_i64(arg, (1.0, 3.0), false, ctx, depth)?,
             None => 1,
@@ -414,7 +425,7 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 1, if is_iso { 1 } else { 2 })?;
-        let serial = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let serial = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
         let ret_type = if is_iso {
             21
         } else if let Some(arg) = args.get(1) {
@@ -451,8 +462,8 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 2, 3)?;
-        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
-        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let s1 = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], serial_bounds_from_one(), true, ctx, depth)?;
         let basis = match args.get(2) {
             Some(arg) if !matches!(arg, Expr::Missing) => {
                 self.arg_i64(arg, (0.0, 4.0), false, ctx, depth)?
@@ -470,8 +481,8 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 3, 3)?;
-        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ZERO, true, ctx, depth)?;
-        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ZERO, true, ctx, depth)?;
+        let s1 = self.arg_i64(&args[0], serial_bounds_from_zero(), true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], serial_bounds_from_zero(), true, ctx, depth)?;
         if s1 > s2 {
             return Err(FormulaError::Num);
         }
@@ -534,7 +545,7 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 2, if is_intl { 4 } else { 3 })?;
-        let mut cur = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let mut cur = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
         let rem = self.arg_i64(&args[1], MONTH_BOUNDS, false, ctx, depth)?;
         let (weekend_mask, holiday_idx) = self.eval_weekend_mask_arg(args, is_intl, ctx, depth)?;
         let holidays = self.eval_holidays(args, holiday_idx, ctx, depth)?;
@@ -542,7 +553,7 @@ impl SheetEngine {
         let mut rem = rem.abs();
         while rem > 0 {
             cur += step;
-            if !(1..=MAX_SERIAL).contains(&cur) {
+            if !(1..=max_serial()).contains(&cur) {
                 return Err(FormulaError::Num);
             }
             if is_workday_with_mask(cur, weekend_mask) && !holidays.contains(&cur) {
@@ -560,8 +571,8 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 2, if is_intl { 4 } else { 3 })?;
-        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
-        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let s1 = self.arg_i64(&args[0], serial_bounds_from_one(), true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], serial_bounds_from_one(), true, ctx, depth)?;
         let (weekend_mask, holiday_idx) = self.eval_weekend_mask_arg(args, is_intl, ctx, depth)?;
         let holidays = self.eval_holidays(args, holiday_idx, ctx, depth)?;
         let (lo, hi, sign) = if s1 <= s2 {

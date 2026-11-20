@@ -155,8 +155,11 @@
     const hiddenRows = host.__EASYOFFICE_CREATE_SHEET_HIDDEN_ROWS_SYNC__({ session, sessionCall: (body) => sessionCall(body), isFormulaStr });
 
     // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
+    // Every request names the workbook's date system when it is 1904, so the engine calculates, formats and filters in it (PD-264).
+    const date1904Field = () => (host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() ? { date1904: true } : {});
+
     function sessionCall(body) {
-      return invokeIpc("evaluate_sheet", JSON.stringify(body));
+      return invokeIpc("evaluate_sheet", JSON.stringify({ ...body, ...date1904Field() }));
     }
 
     function resetSession() {
@@ -668,6 +671,7 @@
           cells,
           ...namesField(),
           ...mergesField(sheets),
+          ...date1904Field(),
         })
       );
       return readExtraValue(rpcRes, sheets, extraTarget, 1);
@@ -760,6 +764,7 @@
         cells,
         ...namesField(),
         ...mergesField(sheets),
+        ...date1904Field(),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
@@ -814,6 +819,7 @@
         cells,
         ...namesField(),
         ...mergesField(sheetsMap),
+        ...date1904Field(),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;

@@ -19,16 +19,18 @@ async function openSheet() {
     localRibbonState: cat.createDefaultRibbonState(),
   });
   const converts = [];
+  const evaluations = [];
   const testIpc = async (command, payload) => {
     const body = typeof payload === "string" && payload.trimStart().startsWith("{") ? JSON.parse(payload) : null;
     if (command === "convert_document_format" && body && !body.action) converts.push(body);
+    if (command === "evaluate_sheet" && body) evaluations.push(body);
     return offline[command](payload);
   };
   const h = await createWorkspaceHarness({ transformHtml: demoHtml, testIpc });
   await openDemoWorkbook(h.document);
   switchModule(h.document, "SHEET");
   await flushAsyncTurns(6);
-  return { h, converts };
+  return { h, converts, evaluations };
 }
 
 async function load(h, model, name) {
@@ -85,4 +87,17 @@ test("the autosave record and the undo snapshot keep the date system, so a resto
   const next = await createWorkspaceHarness({ localStorage: storage });
   await flushAsyncTurns(15);
   assert.equal(next.host.__EASYOFFICE_SHEET_UTILS__.getDate1904(), true, "the restored workbook counts from 1904");
+});
+
+test("every evaluation request of a 1904 workbook names the date system, and a 1900 workbook sends none (PD-264)", async () => {
+  const { h, evaluations } = await openSheet();
+  await load(h, { sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "=DATE(2024,1,1)" }] }], date1904: true }, "a.xlsx");
+  assert.ok(evaluations.length > 0, "the open evaluated the sheet");
+  // Requests of the window before the file was read (closing the old session) are no part of the workbook.
+  assert.equal(evaluations.at(-1).date1904, true);
+  assert.ok(evaluations.filter((b) => b.date1904 === true).length >= 1);
+  evaluations.length = 0;
+  await load(h, { sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "=DATE(2024,1,1)" }] }] }, "b.xlsx");
+  assert.ok(evaluations.length > 0);
+  assert.equal(evaluations.at(-1).date1904, undefined);
 });

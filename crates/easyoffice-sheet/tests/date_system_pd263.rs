@@ -60,3 +60,21 @@ fn the_1900_system_keeps_day_60_and_day_0() {
     assert_eq!(eval(&engine, "=TEXT(0,\"yyyy-mm-dd\")"), text("1900-01-00"));
     assert_eq!(eval(&engine, "=WEEKDAY(DATE(2026,11,10))"), num(3.0));
 }
+
+/// The 1904 system has no day before 1904-01-01 and ends 1,462 days before the 1900 system does.
+#[test]
+fn the_1904_system_has_its_own_first_and_last_day() {
+    let engine = SheetEngine::new("S");
+    let _system = enter_date_system(true);
+    assert_eq!(eval(&engine, "=DATE(1904,1,1)"), num(0.0));
+    assert!(matches!(
+        eval(&engine, "=DATE(1903,12,31)"),
+        EvaluatedCellValue::Error(_)
+    ));
+    assert_eq!(eval(&engine, "=DATE(9999,12,31)"), num(2_957_003.0));
+    assert!(matches!(
+        eval(&engine, "=WEEKDAY(2957004)"),
+        EvaluatedCellValue::Error(_)
+    ));
+    assert_eq!(eval(&engine, "=WEEKDAY(2957003)"), num(6.0));
+}

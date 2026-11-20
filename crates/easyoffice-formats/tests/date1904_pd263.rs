@@ -119,6 +119,32 @@ fn ods_keeps_the_date_system() {
     assert!(!back[0].1.date1904);
 }
 
+/// An ODS date cell holds the date; it reads as the serial of it in the workbook's own system (PD-264).
+#[test]
+fn ods_date_cells_read_as_serials_of_the_system() {
+    for (flag, want) in [(false, "46336"), (true, "44874")] {
+        let ods = OdfCodec::pack_ods_multi_styled(&[("S".to_string(), cells())], &[styling(flag)])
+            .unwrap();
+        let content = part(&ods, "content.xml");
+        let with_date = content.replacen(
+            "</table:table>",
+            "<table:table-row><table:table-cell office:value-type=\"date\" office:date-value=\"2026-11-10\"><text:p>2026-11-10</text:p></table:table-cell><table:table-cell office:value-type=\"date\" office:date-value=\"2026-11-10T12:00:00\"/></table:table-row></table:table>",
+            1,
+        );
+        let patched = patch(&ods, "content.xml", &content, &with_date);
+        let (sheets, _) = OdfCodec::unpack_ods_with_styling(&patched).unwrap();
+        let cells = &sheets[0].1;
+        assert!(
+            cells.contains(&(1, 0, want.to_string())),
+            "{flag}: {cells:?}"
+        );
+        assert!(
+            cells.contains(&(1, 1, format!("{want}.5"))),
+            "{flag}: {cells:?}"
+        );
+    }
+}
+
 /// The package with `find` replaced by `replace` in one part.
 fn patch(bytes: &[u8], path: &str, find: &str, replace: &str) -> Vec<u8> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()).unwrap();

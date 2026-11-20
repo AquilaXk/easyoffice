@@ -48,10 +48,7 @@ fn typed_cells_give_their_raw_value_not_the_displayed_text() {
         "</table:table-row>"
     ));
     let texts: Vec<&str> = cells.iter().map(|c| c.2.as_str()).collect();
-    assert_eq!(
-        texts,
-        ["1234", "0.25", "2026-11-11", "TRUE", "raw", "plain"]
-    );
+    assert_eq!(texts, ["1234", "0.25", "46337", "TRUE", "raw", "plain"]);
 }
 
 #[test]

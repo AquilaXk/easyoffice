@@ -867,6 +867,7 @@ pub(crate) fn parse_ods_styling(
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (StyleSink::new(&styles), ValidationSink::default());
     let mut budget = crate::decode_budget::DecodeBudget::new();
-    walk_ods(content_xml, true, &mut sinks, &mut budget)?;
+    let date1904 = crate::sheet_styling::ods_date_system::is_date1904(content_xml);
+    walk_ods(content_xml, true, date1904, &mut sinks, &mut budget)?;
     Ok(with_rules(content_xml, sinks.0.into_tables(), sinks.1))
 }

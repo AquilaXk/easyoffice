@@ -169,6 +169,11 @@ pub(crate) fn try_fast_sheet_session_borrowed(
     let Some(action) = borrow_opt_str(&entries, "sessionAction")? else {
         return Ok(None);
     };
+    // The request calculates in the workbook's date system (PD-264).
+    let _date_system = easyoffice_sheet::enter_date_system(matches!(
+        StrictJsonBorrow::get_field(&entries, "date1904"),
+        Some(StrictJsonBorrow::Bool(true))
+    ));
     match action {
         "open" => {
             let items = StrictJsonBorrow::get_field(&entries, "sheets")

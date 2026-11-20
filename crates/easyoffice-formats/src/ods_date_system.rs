@@ -18,14 +18,18 @@ pub(crate) fn calculation_settings_xml(stylings: &[SheetStyling]) -> String {
     }
 }
 
-/// Sets `date1904` on the first sheet when the workbook's null date is 1904-01-01.
-pub(crate) fn read_date_system(content_xml: &str, stylings: &mut [(String, SheetStyling)]) {
-    let is_1904 = extract_tags_or_self_closing_with_attrs(content_xml, "table:null-date")
+/// Whether the workbook's null date is 1904-01-01.
+pub(crate) fn is_date1904(content_xml: &str) -> bool {
+    extract_tags_or_self_closing_with_attrs(content_xml, "table:null-date")
         .into_iter()
         .next()
         .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "table:date-value"))
-        .is_some_and(|date| date.trim() == NULL_DATE_1904);
+        .is_some_and(|date| date.trim() == NULL_DATE_1904)
+}
+
+/// Sets `date1904` on the first sheet when the workbook's null date is 1904-01-01.
+pub(crate) fn read_date_system(content_xml: &str, stylings: &mut [(String, SheetStyling)]) {
     if let Some((_, first)) = stylings.first_mut() {
-        first.date1904 = is_1904;
+        first.date1904 = is_date1904(content_xml);
     }
 }

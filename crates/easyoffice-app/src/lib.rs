@@ -400,6 +400,11 @@ impl EasyOfficeIpcRouter {
             return Ok(fast);
         }
         let entries = Self::parse_rpc_json_object(payload)?;
+        // The request calculates, formats and filters in the workbook's date system (PD-264).
+        let _date_system = easyoffice_sheet::enter_date_system(matches!(
+            StrictJsonValue::get_field(&entries, "date1904"),
+            Some(StrictJsonValue::Bool(true))
+        ));
         if let Some(action) = Self::optional_json_str(&entries, "sessionAction")? {
             return Self::handle_sheet_session_action(action, &entries, owner);
         }

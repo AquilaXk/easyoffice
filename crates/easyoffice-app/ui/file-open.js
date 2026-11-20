@@ -644,6 +644,8 @@
         host.__EASYOFFICE_SHEET_PROTECT__.forgetUnlocked();
         next.workbookProtect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
         host.__EASYOFFICE_SHEET_UTILS__.setDate1904(res.date1904);
+        // The displays the page cached belong to the previous workbook's date system.
+        host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.clear?.();
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setTheme(res.workbookTheme ?? null);
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setCustomStyles({});
         next.workbookTheme = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme() ?? null;
