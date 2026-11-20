@@ -317,19 +317,18 @@ fn address_builds_a1_and_r1c1_text() {
 }
 
 #[test]
-fn address_relative_r1c1_counts_from_the_formula_cell() {
+fn address_relative_r1c1_writes_the_number_in_brackets() {
+    // The documented example: `ADDRESS(2,3,2,FALSE)` is `R2C[3]`; the formula cell does not matter.
     let mut s = SheetEngine::new("S");
     s.set_cell("B3", "=ADDRESS(5,5,4,FALSE)").unwrap();
     s.set_cell("B4", "=ADDRESS(5,5,2,FALSE)").unwrap();
     s.set_cell("B5", "=ADDRESS(5,5,3,FALSE)").unwrap();
     s.set_cell("E5", "=ADDRESS(5,5,4,FALSE)").unwrap();
-    assert_eq!(s.evaluate_cell("B3"), text("R[2]C[3]"));
-    assert_eq!(s.evaluate_cell("B4"), text("R5C[3]"));
-    assert_eq!(s.evaluate_cell("B5"), text("RC5"));
-    // the formula cell itself is offset 0, written without brackets
-    assert_eq!(s.evaluate_cell("E5"), text("RC"));
-    // DIFFERS: the reference counts from the sheet origin (`R2C[3]` for row 2, column 3, absolute row)
-    assert_eq!(eval(&s, "=ADDRESS(2,3,2,FALSE)"), text("R2C[2]"));
+    assert_eq!(s.evaluate_cell("B3"), text("R[5]C[5]"));
+    assert_eq!(s.evaluate_cell("B4"), text("R5C[5]"));
+    assert_eq!(s.evaluate_cell("B5"), text("R[5]C5"));
+    assert_eq!(s.evaluate_cell("E5"), text("R[5]C[5]"));
+    assert_eq!(eval(&s, "=ADDRESS(2,3,2,FALSE)"), text("R2C[3]"));
 }
 
 #[test]

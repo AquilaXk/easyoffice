@@ -53,7 +53,8 @@ fn is_workday_with_mask(serial: i64, weekend_mask: u8) -> bool {
 fn compile_weekend_mask(val: &EvaluatedCellValue) -> Result<u8, FormulaError> {
     match val {
         EvaluatedCellValue::Error(e) => Err(*e),
-        EvaluatedCellValue::Empty => Ok(DEFAULT_WEEKEND_MASK),
+        // An empty cell reads as 0, which is no weekend code.
+        EvaluatedCellValue::Empty => Err(FormulaError::Num),
         EvaluatedCellValue::Boolean(_) => Err(FormulaError::Value),
         EvaluatedCellValue::Number(n) => {
             if !n.is_finite() {
@@ -90,6 +91,9 @@ fn compile_weekend_mask(val: &EvaluatedCellValue) -> Result<u8, FormulaError> {
                     return Err(FormulaError::Value);
                 }
                 Ok(mask)
+            } else if s.bytes().all(|b| b == b'0' || b == b'1') {
+                // A string of 0 and 1 of any other length is not a weekend string.
+                Err(FormulaError::Value)
             } else if let Some(n) = crate::coercion::parse_strict_number(s) {
                 compile_weekend_mask(&EvaluatedCellValue::Number(n))
             } else {
@@ -405,13 +409,15 @@ impl SheetEngine {
         check_date_arity(args, 1, 2)?;
         let serial = self.arg_i64(&args[0], serial_bounds_from_zero(), true, ctx, depth)?;
         let ret_type = match args.get(1) {
-            Some(arg) => self.arg_i64(arg, (1.0, 3.0), false, ctx, depth)?,
+            Some(arg) => self.arg_i64(arg, (1.0, 17.0), false, ctx, depth)?,
             None => 1,
         };
+        // Types 11 to 17 number the week from Monday to Sunday (11) through Sunday (17).
         let w = match ret_type {
             1 => (to_1900(serial) - 1).rem_euclid(7) + 1,
             2 => (to_1900(serial) - 2).rem_euclid(7) + 1,
             3 => (to_1900(serial) - 2).rem_euclid(7),
+            11..=17 => (to_1900(serial) - (ret_type - 9)).rem_euclid(7) + 1,
             _ => return Err(FormulaError::Num),
         };
         number(w as f64)
@@ -508,8 +514,13 @@ impl SheetEngine {
                     if let EvaluatedCellValue::Error(e) = v {
                         return Err(e);
                     }
-                    if let Some(n) = v.as_number() {
-                        holidays.insert(n.floor() as i64);
+                    match v {
+                        EvaluatedCellValue::Empty => {}
+                        // A holiday that is not a date is `#VALUE!`.
+                        other => {
+                            let n = other.as_number().ok_or(FormulaError::Value)?;
+                            holidays.insert(n.floor() as i64);
+                        }
                     }
                 }
             }

@@ -245,14 +245,12 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Fallible<EvaluatedCellValue> {
-        let a = self.fin_args(args, (4, 5), ArgRule::Strict, ctx, depth)?;
+        let a = self.fin_args(args, (3, 5), ArgRule::Strict, ctx, depth)?;
         let (issue, settlement) = (a.date(0)?, a.date(1)?);
-        let (rate, par, basis) = (a.num(2)?, a.num(3)?, a.int_or(4, 0.0)?);
-        if rate <= 0.0 || par <= 0.0 || !(0.0..=4.0).contains(&basis) || issue > settlement {
+        // `par` is optional and 1000 when left out; an issue date not before the settlement is `#NUM!`.
+        let (rate, par, basis) = (a.num(2)?, a.num_or(3, 1000.0)?, a.int_or(4, 0.0)?);
+        if rate <= 0.0 || par <= 0.0 || !(0.0..=4.0).contains(&basis) || issue >= settlement {
             return Err(FormulaError::Num);
-        }
-        if issue == settlement {
-            return num(0.0);
         }
         let (days, year) = days_by_basis(issue, settlement, basis as i64);
         num(par * rate * days / year)

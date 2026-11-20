@@ -13,8 +13,8 @@
 //! Ltd. See `THIRD_PARTY_NOTICES.md`.
 //!
 //! Differences from the original: `LOOKUP` reuses the approximate-match binary search of `VLOOKUP`
-//! (type-aware, linear fallback on unsorted data), a relative R1C1 `ADDRESS` is counted from the
-//! formula cell as the file format defines it, the row and column are checked against the sheet size,
+//! (type-aware, linear fallback on unsorted data), a relative R1C1 `ADDRESS` writes the row and column number itself
+//! in brackets as the documented example does (`R2C[3]`), the row and column are checked against the sheet size,
 //! `HYPERLINK` keeps the type of its friendly name, accepts only the link targets of the document
 //! editor (`http`, `https`, `mailto`) or a `#` jump inside the workbook, lifts element-wise over
 //! array arguments, and attaches a compact `u32` handle so wrapper functions (`IF`, `LET`, `LAMBDA`,
@@ -109,25 +109,17 @@ fn address_index(v: &EvaluatedCellValue, max: u32) -> Result<u32, FormulaError> 
     }
 }
 
-/// One R1C1 part: the absolute number, or the offset from the formula cell in brackets.
-fn r1c1_part(label: char, absolute: bool, target: u32, current: u32) -> String {
+/// One R1C1 part: the number, in brackets when it is relative (`ADDRESS(2,3,2,FALSE)` is `R2C[3]`).
+fn r1c1_part(label: char, absolute: bool, target: u32) -> String {
     if absolute {
-        return format!("{label}{target}");
-    }
-    match i64::from(target) - i64::from(current) {
-        0 => label.to_string(),
-        offset => format!("{label}[{offset}]"),
+        format!("{label}{target}")
+    } else {
+        format!("{label}[{target}]")
     }
 }
 
 /// The text of `ADDRESS`: absolute type 1 (row and column), 2 (row), 3 (column) or 4 (none).
-fn address_text(
-    (row, col): (u32, u32),
-    abs_type: u32,
-    a1: bool,
-    current: (u32, u32),
-    sheet: &str,
-) -> String {
+fn address_text((row, col): (u32, u32), abs_type: u32, a1: bool, sheet: &str) -> String {
     let (row_abs, col_abs) = (matches!(abs_type, 1 | 2), matches!(abs_type, 1 | 3));
     let reference = if a1 {
         format!(
@@ -137,8 +129,7 @@ fn address_text(
             if row_abs { "$" } else { "" },
         )
     } else {
-        let r = r1c1_part('R', row_abs, row, current.0 + 1);
-        r + &r1c1_part('C', col_abs, col, current.1 + 1)
+        r1c1_part('R', row_abs, row) + &r1c1_part('C', col_abs, col)
     };
     if sheet.is_empty() {
         reference
@@ -194,7 +185,8 @@ impl SheetEngine {
                 let spec = self
                     .extract_streaming_range_ctx(arg, ctx, depth)?
                     .ok_or(FormulaError::Ref)?;
-                if (spec.3, spec.4) != (rows, cols) {
+                // The result vector may lie the other way round; it is read by position.
+                if (spec.3 != 1 && spec.4 != 1) || spec.3 * spec.4 != rows * cols {
                     return Err(FormulaError::Ref);
                 }
                 spec
@@ -244,7 +236,21 @@ impl SheetEngine {
                 best.map(|(i, _)| i as usize)
             }
         };
-        let (dr, dc) = Line::at(line.result, line.step, hit.ok_or(FormulaError::Na)?);
+        let hit = hit.ok_or(FormulaError::Na)?;
+        let result_step = match (results.3, results.4) {
+            (1, n) if is_vector && n > 1 => (0, 1),
+            (n, 1) if is_vector && n > 1 => (1, 0),
+            _ => line.step,
+        };
+        let result_len = if is_vector {
+            results.3 * results.4
+        } else {
+            line.len
+        };
+        if hit >= result_len {
+            return Err(FormulaError::Na);
+        }
+        let (dr, dc) = Line::at(line.result, result_step, hit);
         match self.eval_streaming_cell_allow_error(&results, dr, dc, ctx, depth)? {
             EvaluatedCellValue::Empty => Ok(EvaluatedCellValue::Number(0.0)),
             v => Ok(v),
@@ -405,13 +411,11 @@ impl SheetEngine {
             address_index(&row, PackedCellCoordinate::MAX_ROWS)?,
             address_index(&col, PackedCellCoordinate::MAX_COLS)?,
         );
-        let current = ctx.current_coord.map_or((0, 0), |c| (c.row(), c.col()));
         let sheet = sheet.map(|v| v.to_display_string()).unwrap_or_default();
         Ok(EvaluatedCellValue::Text(address_text(
             cell,
             abs_type as u32,
             a1,
-            current,
             &sheet,
         )))
     }

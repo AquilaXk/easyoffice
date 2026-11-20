@@ -198,8 +198,10 @@ const ACCRINTM: &[Case] = &[
     Case {
         id: "accrintm#3",
         cells: &[],
+        // DIFFERS: an issue date that is not before the settlement is `#NUM!`, as the function's
+        // documentation says (the reference engine gives 0).
         formula: "=ACCRINTM(\"2012/2/2\",\"2012/2/2\",0.1,1000)",
-        expect: Exp::Num(0.0),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "accrintm#4",

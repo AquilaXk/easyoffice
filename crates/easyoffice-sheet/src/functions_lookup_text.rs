@@ -28,6 +28,28 @@ fn number_cell(v: f64) -> CellResult {
     Ok(EvaluatedCellValue::Number(v))
 }
 
+/// The characters of Windows-1252 bytes 128 to 159 (`\u{0}` where the byte has none).
+const CP1252_HIGH: [char; 32] = [
+    '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}',
+    '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ',
+];
+
+/// The character of Windows-1252 byte `code` (1 to 255), which is the code point except for 128 to 159.
+fn cp1252_char(code: u32) -> char {
+    match code {
+        128..=159 => CP1252_HIGH[(code - 128) as usize],
+        _ => char::from_u32(code).unwrap_or('?'),
+    }
+}
+
+/// The Windows-1252 byte of `ch` when it has one in 128 to 159, else its code point.
+fn cp1252_byte(ch: char) -> u32 {
+    CP1252_HIGH
+        .iter()
+        .position(|&c| c == ch)
+        .map_or(ch as u32, |i| 128 + i as u32)
+}
+
 /// Running character budget for text built piece by piece.
 #[derive(Default)]
 struct TextBudget {
@@ -334,17 +356,28 @@ impl SheetEngine {
             "CHAR" | "UNICHAR" => {
                 check_text_arity(args, 1, 1)?;
                 let code = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i64;
-                if !(1..=MAX_CHAR_CODE).contains(&code) {
+                // `CHAR` is a Windows-1252 byte (1 to 255), `UNICHAR` any scalar value.
+                let max = if name == "CHAR" { 255 } else { MAX_CHAR_CODE };
+                if !(1..=max).contains(&code) {
                     return Err(FormulaError::Value);
                 }
-                let ch = char::from_u32(code as u32).ok_or(FormulaError::Value)?;
+                let ch = if name == "CHAR" {
+                    cp1252_char(code as u32)
+                } else {
+                    char::from_u32(code as u32).ok_or(FormulaError::Value)?
+                };
                 Ok(EvaluatedCellValue::Text(ch.to_string()))
             }
             "CODE" | "UNICODE" => {
                 check_text_arity(args, 1, 1)?;
                 let s = self.text_arg(&args[0], ctx, depth)?;
                 let ch = s.chars().next().ok_or(FormulaError::Value)?;
-                number_cell((ch as u32) as f64)
+                let code = if name == "CODE" {
+                    cp1252_byte(ch)
+                } else {
+                    ch as u32
+                };
+                number_cell(code as f64)
             }
             _ => Err(FormulaError::Name),
         }

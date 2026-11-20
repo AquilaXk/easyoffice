@@ -73,7 +73,11 @@ impl SheetEngine {
         } else {
             (cols, rows)
         };
-        if idx_num < 1 || (idx_num as usize) > bound_limit {
+        // An index below 1 is `#VALUE!`; one past the table is `#REF!`.
+        if idx_num < 1 {
+            return Err(FormulaError::Value);
+        }
+        if (idx_num as usize) > bound_limit {
             return Err(FormulaError::Ref);
         }
         let geom = TableGeometry {
@@ -401,7 +405,16 @@ impl SheetEngine {
     }
 
     fn lookup_index(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
-        check_lookup_arity(args, 2, 3)?;
+        check_lookup_arity(args, 2, 4)?;
+        // `area_num` picks one area of a reference list; a reference here has the one area.
+        if let Some(arg) = args.get(3) {
+            match self.eval_arg_num(arg, ctx, depth)?.trunc() {
+                n if n < 1.0 => return Err(FormulaError::Value),
+                n if n > 1.0 => return Err(FormulaError::Ref),
+                _ => {}
+            }
+        }
+        let args = &args[..args.len().min(3)];
         if let Some(matrix) = self.matrix_expr(&args[0], ctx, depth)? {
             return self.index_matrix(&matrix, args, ctx, depth);
         }
@@ -423,6 +436,10 @@ impl SheetEngine {
         };
         let min_r = range.start.row().min(range.end.row());
         let min_c = range.start.col().min(range.end.col());
+        // A negative number is `#VALUE!`; a number past the range is `#REF!`.
+        if row_num < 0 || col_num < 0 {
+            return Err(FormulaError::Value);
+        }
         let (eff_r, eff_c) = effective_index(args.len(), (row_num, col_num), (rows, cols));
         if eff_r < 1 || eff_c < 1 || (eff_r as usize) > rows || (eff_c as usize) > cols {
             return Err(FormulaError::Ref);

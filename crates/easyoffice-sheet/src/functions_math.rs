@@ -609,9 +609,14 @@ impl SheetEngine {
 
     fn math_base(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
         check_math_arity(args, 2, 3)?;
-        let num = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
+        let raw = self.eval_arg_num(&args[0], ctx, depth)?;
+        let num = raw.trunc();
         let radix = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
-        if !(0.0..9_007_199_254_740_992.0).contains(&num) || !(2.0..=36.0).contains(&radix) {
+        // A negative number is `#NUM!` even when it truncates to 0 (`BASE(-0.5,2)`).
+        if raw < 0.0
+            || !(0.0..9_007_199_254_740_992.0).contains(&num)
+            || !(2.0..=36.0).contains(&radix)
+        {
             return Err(FormulaError::Num);
         }
         let min_len = match args.get(2) {
@@ -653,6 +658,13 @@ impl SheetEngine {
         let radix = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
         if !(2.0..=36.0).contains(&radix) {
             return Err(FormulaError::Num);
+        }
+        // The text is at most 255 characters (`#VALUE!` past that); an empty text is 0.
+        if s.chars().count() > 255 {
+            return Err(FormulaError::Value);
+        }
+        if s.trim().is_empty() {
+            return number_result(0.0);
         }
         let parsed = u128::from_str_radix(s.trim(), radix as u32).map_err(|_| FormulaError::Num)?;
         number_result(parsed as f64)

@@ -184,7 +184,8 @@ impl SheetEngine {
             match at(&value) {
                 Some((v, lid)) if !caught(&v) => (v, lid),
                 Some(_) => at(&fallback).unwrap_or((V::Error(FormulaError::Na), 0)),
-                None => (V::Error(FormulaError::Na), 0),
+                // A place the value does not reach is `#N/A`, which both functions catch.
+                None => at(&fallback).unwrap_or((V::Error(FormulaError::Na), 0)),
             }
         })?;
         Ok(Val::grid(grid))
