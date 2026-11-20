@@ -447,6 +447,7 @@ fn parse_paragraph(
         toc_dots,
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
         columns,
+        frame_copy: opt_bool(obj, "frameCopy")?,
     })
 }
 

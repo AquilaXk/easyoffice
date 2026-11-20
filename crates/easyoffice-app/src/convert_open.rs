@@ -129,6 +129,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if p.page_break_before {
         out.push_str(",\"pageBreakBefore\":true");
     }
+    if p.frame_copy {
+        out.push_str(",\"frameCopy\":true");
+    }
     match p.toc {
         Some(RichToc::Title) => out.push_str(",\"toc\":0"),
         Some(RichToc::Entry(level)) => {

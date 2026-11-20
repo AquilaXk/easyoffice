@@ -185,3 +185,43 @@ test("Tab and Shift+Tab inside list items shift listLevel within 0..8 and undo c
   await flushAsyncTurns(8);
   assert.equal(h.editor.querySelectorAll("li")[1].dataset.eoListLevel, "1");
 });
+
+test("PD-263: the header and footer copies a Pages file shows after the body stay marked through the editor and a save", async () => {
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const decodedResponse = {
+    status: "OK", action: "decode", fileName: "a.pages", format: "pages", module: "DOC", kind: "document", title: "a",
+    sourceBytes: 1, specification: "Pages", itemCount: 3, warnings: [],
+    header: [{ type: "paragraph", runs: [{ text: "HEADER-TEXT" }] }],
+    blocks: [
+      { type: "paragraph", runs: [{ text: "본문" }] },
+      { type: "paragraph", heading: 2, frameCopy: true, runs: [{ text: "머리글" }] },
+      { type: "paragraph", frameCopy: true, runs: [{ text: "HEADER-TEXT" }] },
+    ],
+  };
+  const testIpc = async (cmd, rawPayload) => {
+    const body = typeof rawPayload === "string" && rawPayload.trimStart().startsWith("{") ? JSON.parse(rawPayload) : null;
+    if (cmd === "convert_document_format" && body?.action === "decode") return decodedResponse;
+    return offline[cmd](rawPayload);
+  };
+  const h = await createWorkspaceHarness({ search: "?module=DOC&win=w-pd263-copy", testIpc });
+  await flushAsyncTurns(6);
+  const res = await h.host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("a.pages", new Uint8Array([80, 75, 3, 4]));
+  assert.equal(res.ok, true);
+  await flushAsyncTurns(6);
+  const editor = h.document.getElementById("doc-editor");
+  const blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor, {});
+  assert.deepEqual(blocks.map((b) => [b.runs.map((r) => r.text).join(""), b.frameCopy === true]), [
+    ["본문", false],
+    ["머리글", true],
+    ["HEADER-TEXT", true],
+  ]);
+});

@@ -102,6 +102,8 @@
       spec.data.eoLineSpacing = String(spacing);
     }
     if (block.pageBreakBefore === true) spec.data.eoBreak = "page";
+    // A copy of the page frame's text shown after the body: it stays marked so a save does not write it as body text.
+    if (block.frameCopy === true) spec.data.eoFrameCopy = "1";
     const lvl = Number(block.listLevel);
     if (Number.isInteger(lvl) && lvl >= 1 && lvl <= 8) spec.data.eoListLevel = String(lvl);
     if (typeof block.listNumber === "string" && block.listNumber) spec.data.eoListNum = block.listNumber;

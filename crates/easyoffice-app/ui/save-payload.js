@@ -526,6 +526,7 @@
         if (cur.ctx.bookmark !== undefined) block.bookmark = cur.ctx.bookmark;
         if (cur.ctx.tocPage !== undefined) Object.assign(block, { tocPage: cur.ctx.tocPage, tocDots: cur.ctx.tocDots });
         if (cur.ctx.pageBreak) block.pageBreakBefore = true;
+        if (cur.ctx.frameCopy) block.frameCopy = true;
         if (cur.ctx.list) {
           block.list = cur.ctx.list;
           if (cur.ctx.list === "task") block.checked = Boolean(cur.ctx.checked);
@@ -650,6 +651,7 @@
         tocPage: tocPage(node),
         tocDots: node.dataset?.eoTocDots === "true",
         pageBreak: node.dataset?.eoBreak === "page",
+        frameCopy: node.dataset?.eoFrameCopy === "1",
         inList,
         ulDepth,
         list: nextList,
