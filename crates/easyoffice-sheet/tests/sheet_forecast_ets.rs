@@ -481,7 +481,7 @@ fn point_cap_and_cell_step_budget_fail_closed() {
     // Chaining enough heavy 20,000-point fits in one formula exceeds MAX_EVAL_STEPS and aborts
     // with #VALUE! instead of running unbounded.
     let term = "FORECAST.ETS(20001,SEQUENCE(20000)+SIN(SEQUENCE(20000)),SEQUENCE(20000),8760)";
-    let chained = format!("={}", vec![term; 12].join("+"));
+    let chained = format!("={}", [term; 12].join("+"));
     limited(&mut model, &chained, "#VALUE!", Duration::from_secs(15));
 }
 

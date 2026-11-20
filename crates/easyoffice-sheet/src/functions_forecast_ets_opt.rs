@@ -148,10 +148,10 @@ fn nelder_mead(
     let inv_d = 1.0 / dims as f64;
     while evals < max_evals {
         let (mut xspread, mut fspread) = (0.0_f64, 0.0_f64);
-        for j in 1..=dims {
-            fspread = fspread.max((fsim[j] - fsim[0]).abs());
-            for d in 0..dims {
-                xspread = xspread.max((sim[j][d] - sim[0][d]).abs());
+        for (vertex, &fv) in sim[1..=dims].iter().zip(&fsim[1..=dims]) {
+            fspread = fspread.max((fv - fsim[0]).abs());
+            for (&coord, &base) in vertex[..dims].iter().zip(&sim[0][..dims]) {
+                xspread = xspread.max((coord - base).abs());
             }
         }
         if xspread <= SIMPLEX_XTOL && fspread <= SIMPLEX_FTOL * fsim[0].abs().max(1.0) {
@@ -159,8 +159,8 @@ fn nelder_mead(
         }
         let mut xbar = [0.0; 3];
         for vertex in &sim[..dims] {
-            for d in 0..dims {
-                xbar[d] += vertex[d] * inv_d;
+            for (acc, &coord) in xbar[..dims].iter_mut().zip(&vertex[..dims]) {
+                *acc += coord * inv_d;
             }
         }
         let worst = sim[dims];
@@ -198,14 +198,15 @@ fn nelder_mead(
             break;
         }
         if shrink {
-            for j in 1..=dims {
+            let best = sim[0];
+            for (vertex, fv) in sim[1..=dims].iter_mut().zip(&mut fsim[1..=dims]) {
                 if evals >= max_evals {
                     break;
                 }
-                for d in 0..dims {
-                    sim[j][d] = (sim[0][d] + 0.5 * (sim[j][d] - sim[0][d])).clamp(0.0, 1.0);
+                for (coord, &b) in vertex[..dims].iter_mut().zip(&best[..dims]) {
+                    *coord = (b + 0.5 * (*coord - b)).clamp(0.0, 1.0);
                 }
-                fsim[j] = loss(Params::from_coords(sim[j], seasonal), &mut evals);
+                *fv = loss(Params::from_coords(*vertex, seasonal), &mut evals);
             }
         }
         sort_simplex(&mut sim, &mut fsim, dims + 1);
@@ -216,8 +217,12 @@ fn nelder_mead(
 #[inline]
 fn step_box(xbar: &[f64; 3], worst: &[f64; 3], scale: f64, dims: usize) -> [f64; 3] {
     let mut out = [0.0; 3];
-    for d in 0..dims {
-        out[d] = (xbar[d] + scale * (xbar[d] - worst[d])).clamp(0.0, 1.0);
+    for ((dst, &xb), &w) in out[..dims]
+        .iter_mut()
+        .zip(&xbar[..dims])
+        .zip(&worst[..dims])
+    {
+        *dst = (xb + scale * (xb - w)).clamp(0.0, 1.0);
     }
     out
 }
@@ -347,12 +352,10 @@ pub(crate) fn detect_period_bounded(y: &[f64], budget: BudgetFn) -> Result<usize
         };
         r[k] > bound && r[k] >= r[k - 1] && r[k] > next
     };
-    let mut top = f64::NEG_INFINITY;
-    for k in 2..=max_lag {
-        if is_peak(k) && r[k] > top {
-            top = r[k];
-        }
-    }
+    let top = (2..=max_lag)
+        .filter(|&k| is_peak(k))
+        .map(|k| r[k])
+        .fold(f64::NEG_INFINITY, f64::max);
     if !top.is_finite() {
         return Ok(1);
     }
