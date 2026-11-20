@@ -67,7 +67,7 @@ fn workbook(extra: &[(&str, &str)]) -> WorkbookEngine {
     )
     .unwrap();
     for (cell, formula) in extra {
-        wb.set_cell("Report", cell, formula).unwrap();
+        wb.set_cell("Report", cell, *formula).unwrap();
     }
     wb
 }
