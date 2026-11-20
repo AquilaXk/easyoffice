@@ -11,11 +11,14 @@ use std::fmt::Write as _;
 
 use easyoffice_formats::EasyOfficeError;
 
-use super::context::{BaseContext, BoardContext, DocContext, SelectionContext, SlideField};
+use super::context::{
+    BaseContext, BoardContext, DocContext, SelectionContext, SlideField, SlideItem,
+};
 use super::types::{
     CopilotCommand, CopilotModule, CopilotRunRequest, MAX_PROMPT_CONTEXT_BYTES,
     MAX_PROMPT_DOC_PARAGRAPHS, MAX_PROMPT_PDF_CHARS, MAX_PROMPT_SHEET_CELLS, MAX_PROMPT_SLIDES,
 };
+use super::window::{select_window, Line};
 
 const CONTEXT_TAG: &str = "document_context";
 
@@ -109,33 +112,91 @@ fn selection_too_large() -> EasyOfficeError {
     EasyOfficeError::InvalidArgument("선택한 범위가 너무 커서 처리할 수 없습니다.".to_string())
 }
 
+/// 선택 영역 명령을 위해 앞뒤 문맥을 선택 범위 둘레로 자른 줄들을 쓴다. 선택이 예산을 혼자 넘으면 `None`이다.
+/// 돌려주는 값은 쓰지 못해 남은 줄 수가 아니라 다음에 이어 셀 번호(`싣은 마지막 번호 + 1`)다. 뒤쪽을 자르지 않았으면 `natural_end`다.
+fn write_windowed(
+    out: &mut String,
+    lines: &[Line],
+    span: &std::ops::RangeInclusive<usize>,
+    natural_end: usize,
+    unit: &str,
+) -> Option<usize> {
+    // 생략 안내 두 줄이 들어갈 자리를 남긴다.
+    let budget = MAX_PROMPT_CONTEXT_BYTES.saturating_sub(out.len() + OMIT_NOTICE_RESERVE);
+    let (before, selected, after) = select_window(lines, span, budget)?;
+    let cut_front = lines
+        .iter()
+        .filter(|l| l.index < *span.start())
+        .count()
+        .saturating_sub(before.len());
+    if cut_front > 0 {
+        let _ = writeln!(out, "[앞 {cut_front}{unit} 생략]");
+    }
+    for line in before.iter().chain(selected).chain(after) {
+        out.push_str(&line.text);
+        out.push('\n');
+    }
+    let full_after = lines.iter().filter(|l| l.index > *span.end()).count();
+    if after.len() == full_after {
+        return Some(natural_end.max(span.end() + 1));
+    }
+    Some(
+        after
+            .last()
+            .or(selected.last())
+            .map_or(*span.end(), |l| l.index)
+            + 1,
+    )
+}
+
+/// 생략 안내 줄 두 개가 들어갈 바이트.
+const OMIT_NOTICE_RESERVE: usize = 96;
+
 fn write_doc_context(
     out: &mut String,
     doc: &DocContext,
     selection: &SelectionContext,
     command: bool,
 ) -> Result<(), EasyOfficeError> {
-    // 명령은 선택한 문단이 앞쪽 200개 밖이어도 싣는다.
-    let span = command.then(|| {
+    if command {
+        // 선택을 먼저 싣고 남은 예산으로 앞뒤 문단을 채운다. 선택이 앞쪽 200개 밖이어도 싣는다.
         let start = selection.paragraph_index.unwrap_or(0);
-        start..=selection.paragraph_end.unwrap_or(start)
-    });
-    let mut consumed = 0usize;
-    for (i, p) in doc.paragraphs.iter().enumerate() {
-        let in_span = span.as_ref().is_some_and(|s| s.contains(&i));
-        if i >= MAX_PROMPT_DOC_PARAGRAPHS && !in_span {
-            continue;
+        let span = start..=selection.paragraph_end.unwrap_or(start);
+        let lines: Vec<Line> = doc
+            .paragraphs
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| {
+                (*i < MAX_PROMPT_DOC_PARAGRAPHS || span.contains(i)) && !p.trim().is_empty()
+            })
+            .map(|(i, p)| Line {
+                index: i,
+                text: format!("  [{i}] {}", escape_context_text(p)),
+            })
+            .collect();
+        let natural_end = doc.paragraphs.len().min(MAX_PROMPT_DOC_PARAGRAPHS);
+        let tail = write_windowed(out, &lines, &span, natural_end, "문단")
+            .ok_or_else(selection_too_large)?;
+        let cut = doc.paragraphs.len().saturating_sub(tail);
+        push_omitted(out, cut + doc.omitted_paragraphs, "문단");
+    } else {
+        let mut consumed = 0usize;
+        for (i, p) in doc
+            .paragraphs
+            .iter()
+            .enumerate()
+            .take(MAX_PROMPT_DOC_PARAGRAPHS)
+        {
+            if !p.trim().is_empty()
+                && !push_line(out, &format!("  [{i}] {}", escape_context_text(p)))
+            {
+                break;
+            }
+            consumed = i + 1;
         }
-        if !p.trim().is_empty() && !push_line(out, &format!("  [{i}] {}", escape_context_text(p))) {
-            break;
-        }
-        consumed = i + 1;
+        let cut = doc.paragraphs.len().saturating_sub(consumed);
+        push_omitted(out, cut + doc.omitted_paragraphs, "문단");
     }
-    if span.is_some_and(|s| consumed <= *s.end()) {
-        return Err(selection_too_large());
-    }
-    let cut = doc.paragraphs.len().saturating_sub(consumed);
-    push_omitted(out, cut + doc.omitted_paragraphs, "문단");
     if !doc.selected_text.is_empty() {
         let _ = writeln!(
             out,
@@ -250,6 +311,49 @@ fn write_board_context(out: &mut String, board: &BoardContext) {
     push_omitted(out, board.connectors.len() - linked, "연결선");
 }
 
+fn slide_line(i: usize, s: &SlideItem) -> String {
+    let bullets: Vec<Cow<'_, str>> = s.bullets.iter().map(|b| escape_context_text(b)).collect();
+    format!(
+        "  [{i}] 제목={} | 항목={:?} | 노트={}",
+        escape_context_text(&s.title),
+        bullets,
+        escape_context_text(&s.notes)
+    )
+}
+
+/// 슬라이드 줄을 쓴다. 명령의 대상 슬라이드(`target`)는 앞 64개 밖이어도 먼저 싣고 남은 예산으로 앞뒤를 채운다.
+fn write_slide_context(
+    out: &mut String,
+    slides: &[SlideItem],
+    target: Option<usize>,
+) -> Result<(), EasyOfficeError> {
+    let Some(target) = target else {
+        let mut shown = 0usize;
+        for (i, s) in slides.iter().enumerate().take(MAX_PROMPT_SLIDES) {
+            if !push_line(out, &slide_line(i, s)) {
+                break;
+            }
+            shown += 1;
+        }
+        push_omitted(out, slides.len() - shown, "슬라이드");
+        return Ok(());
+    };
+    let lines: Vec<Line> = slides
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i < MAX_PROMPT_SLIDES || *i == target)
+        .map(|(i, s)| Line {
+            index: i,
+            text: slide_line(i, s),
+        })
+        .collect();
+    let natural_end = slides.len().min(MAX_PROMPT_SLIDES);
+    let tail = write_windowed(out, &lines, &(target..=target), natural_end, "슬라이드")
+        .ok_or_else(selection_too_large)?;
+    push_omitted(out, slides.len().saturating_sub(tail), "슬라이드");
+    Ok(())
+}
+
 pub fn build_context_summary_for_llm(req: &CopilotRunRequest) -> Result<String, EasyOfficeError> {
     let mut out = String::with_capacity(1024);
     let _ = writeln!(
@@ -294,28 +398,11 @@ pub fn build_context_summary_for_llm(req: &CopilotRunRequest) -> Result<String, 
         CopilotModule::Slide => {
             if let Some(slide) = &ctx.slide {
                 let _ = writeln!(out, "현재 슬라이드 인덱스: {}", slide.active_index);
-                let mut shown = 0usize;
-                let target = req.command.and(req.selection.slide_index);
-                let mut target_shown = target.is_none();
-                for (i, s) in slide.slides.iter().enumerate().take(MAX_PROMPT_SLIDES) {
-                    let bullets: Vec<Cow<'_, str>> =
-                        s.bullets.iter().map(|b| escape_context_text(b)).collect();
-                    let line = format!(
-                        "  [{i}] 제목={} | 항목={:?} | 노트={}",
-                        escape_context_text(&s.title),
-                        bullets,
-                        escape_context_text(&s.notes)
-                    );
-                    if !push_line(&mut out, &line) {
-                        break;
-                    }
-                    shown += 1;
-                    target_shown |= target == Some(i);
-                }
-                if !target_shown {
-                    return Err(selection_too_large());
-                }
-                push_omitted(&mut out, slide.slides.len() - shown, "슬라이드");
+                write_slide_context(
+                    &mut out,
+                    &slide.slides,
+                    req.command.and(req.selection.slide_index),
+                )?;
             }
         }
         CopilotModule::Pdf => {

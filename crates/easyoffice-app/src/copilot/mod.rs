@@ -11,6 +11,7 @@ pub mod prompt;
 pub mod providers;
 pub mod ssrf;
 pub mod types;
+pub mod window;
 pub mod wire;
 
 pub use types::{CopilotLlmClient, CopilotLlmRequest, HttpMethod};

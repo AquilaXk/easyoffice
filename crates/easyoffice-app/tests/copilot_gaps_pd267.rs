@@ -493,11 +493,8 @@ fn big_doc_command(mode: &str, selection: &str) -> String {
 #[test]
 fn selection_command_refuses_a_selection_the_context_cannot_hold() {
     let reply = r#"{"reply":"x"}"#;
-    // 선택 전체가 24 KiB를 넘는다, 앞 문단이 예산을 다 쓴다, 문단 하나가 24 KiB를 넘는다.
-    for selection in [
-        r#"{"paragraphIndex":0,"paragraphEnd":3}"#,
-        r#"{"paragraphIndex":3,"paragraphEnd":3}"#,
-    ] {
+    // 선택 전체가 24 KiB를 넘는다, 문단 하나가 24 KiB를 넘는다. 앞 문단이 예산을 쓰는 것은 거부 사유가 아니다(PD-268).
+    for selection in [r#"{"paragraphIndex":0,"paragraphEnd":3}"#] {
         let (res, bodies) = run(&big_doc_command("edit", selection), reply);
         let Err(EasyOfficeError::InvalidArgument(msg)) = res else {
             panic!("{selection}: {res:?}");
@@ -533,7 +530,7 @@ fn selection_command_refuses_a_selection_the_context_cannot_hold() {
 }
 
 #[test]
-fn slide_command_refuses_a_slide_the_context_cannot_hold() {
+fn slide_command_loads_the_target_slide_first() {
     let title = "가".repeat(400);
     let slides = vec![format!(r#"{{"title":"{title}"}}"#); 30].join(",");
     let slide = |index: usize| {
@@ -541,12 +538,13 @@ fn slide_command_refuses_a_slide_the_context_cannot_hold() {
             r#"{{"action":"copilot_run","mode":"edit","module":"SLIDE","command":"rewrite","prompt":"x","selection":{{"slideIndex":{index},"slideField":"title"}},"context":{{"slide":{{"slides":[{slides}]}}}},{REMOTE}}}"#
         )
     };
+    // 대상 슬라이드를 먼저 싣고 남는 예산으로 앞뒤를 채우므로 뒤쪽 슬라이드도 받는다(PD-268).
     let (res, bodies) = run(&slide(29), r#"{"reply":"x"}"#);
+    res.unwrap();
     assert!(
-        matches!(res, Err(EasyOfficeError::InvalidArgument(_))),
-        "{res:?}"
+        bodies[0].contains("[29] 제목="),
+        "the target slide is in the context"
     );
-    assert!(bodies.is_empty());
     run(&slide(2), r#"{"reply":"x"}"#).0.unwrap();
 }
 
