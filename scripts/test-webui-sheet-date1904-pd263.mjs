@@ -60,3 +60,29 @@ test("a 1904 workbook is saved with date1904 and a 1900 workbook opened after it
   assert.equal(h.host.__EASYOFFICE_SHEET_UTILS__.getDate1904(), false);
   assert.equal((await save(h, converts)).date1904, undefined);
 });
+
+const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
+
+test("the autosave record and the undo snapshot keep the date system, so a restored workbook saves in 1904 again (PD-264)", async () => {
+  const { createMemoryStorage } = await import("./test-support/modules.mjs");
+  const storage = createMemoryStorage();
+  const h = await createWorkspaceHarness({ localStorage: storage, transformHtml: demoHtml });
+  await openDemoWorkbook(h.document);
+  switchModule(h.document, "SHEET");
+  await flushAsyncTurns(6);
+  h.host.__EASYOFFICE_SHEET_UTILS__.setDate1904(true);
+  const td = h.document.querySelector('#pane-sheet td[data-cell="A1"]');
+  td.focus();
+  td.textContent = "43000";
+  td.dispatchEvent({ type: "input", target: td });
+  td.dispatchEvent({ type: "keydown", key: "Enter", target: td });
+  await flushAsyncTurns(12);
+  h.advanceTimers(5000);
+  await flushAsyncTurns(10);
+  const record = storage.getItem(AUTOSAVE_KEY);
+  assert.ok(record, "the record is written");
+
+  const next = await createWorkspaceHarness({ localStorage: storage });
+  await flushAsyncTurns(15);
+  assert.equal(next.host.__EASYOFFICE_SHEET_UTILS__.getDate1904(), true, "the restored workbook counts from 1904");
+});

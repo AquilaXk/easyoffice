@@ -647,6 +647,7 @@
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setTheme(res.workbookTheme ?? null);
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setCustomStyles({});
         next.workbookTheme = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme() ?? null;
+        next.date1904 = host.__EASYOFFICE_SHEET_UTILS__.getDate1904();
         next.customTableStyles = {};
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
