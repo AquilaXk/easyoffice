@@ -904,12 +904,6 @@ pub(crate) fn read_workbook_pivots(
                 pt.source_table = cache_def.source_table;
             }
             pt.field_names = cache_def.field_names;
-            if !pt.source_range.is_empty()
-                && pt.field_names.len() > pt.known_source_width() as usize
-            {
-                rejected = rejected.saturating_add(1);
-                continue;
-            }
             workbook_field_name_bytes += pt.field_name_bytes();
             if workbook_field_name_bytes > MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES {
                 return Err(budget_err(format!(

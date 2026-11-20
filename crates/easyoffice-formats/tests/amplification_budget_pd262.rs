@@ -508,3 +508,40 @@ fn drawing_extents_beyond_u64_pixels_clamp_instead_of_overflowing() {
     assert_eq!(chart.anchor.width_px, 1_600);
     assert_eq!(chart.anchor.height_px, 1_200);
 }
+
+/// 계산 필드(`formula`)와 날짜 묶음 필드(`fieldGroup`, `databaseField="0"`)는 원본 열이 없어
+/// 캐시 필드 수가 원본 범위 폭보다 크다. 이런 정상 피벗을 필드 수로 거부하면 안 된다.
+fn derived_field_pivot_xlsx() -> Vec<u8> {
+    ZipArchiveCodec::pack_compressed(&[
+        ("xl/workbook.xml".to_string(), br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets><pivotCaches><pivotCache cacheId="1" r:id="rIdPC"/></pivotCaches></workbook>"#.to_vec()),
+        ("xl/_rels/workbook.xml.rels".to_string(), br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rIdPC" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/></Relationships>"#.to_vec()),
+        ("xl/worksheets/sheet1.xml".to_string(), br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Day</t></is></c><c r="B1" t="inlineStr"><is><t>Amount</t></is></c></row></sheetData></worksheet>"#.to_vec()),
+        ("xl/worksheets/_rels/sheet1.xml.rels".to_string(), br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdPT" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>"#.to_vec()),
+        ("xl/pivotCache/pivotCacheDefinition1.xml".to_string(), br#"<?xml version="1.0"?><pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cacheSource type="worksheet"><worksheetSource ref="A1:B3" sheet="S"/></cacheSource><cacheFields count="4"><cacheField name="Day" numFmtId="14"/><cacheField name="Amount" numFmtId="0"/><cacheField name="Months" numFmtId="0" databaseField="0"><fieldGroup base="0"><rangePr groupBy="months" startDate="2026-01-01T00:00:00" endDate="2026-12-31T00:00:00"/><groupItems count="14"><s v="&lt;2026-01-01"/><s v="Jan"/><s v="&gt;2026-12-31"/></groupItems></fieldGroup></cacheField><cacheField name="Double" numFmtId="0" formula="Amount*2" databaseField="0"/></cacheFields></pivotCacheDefinition>"#.to_vec()),
+        ("xl/pivotTables/pivotTable1.xml".to_string(), br#"<?xml version="1.0"?><pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="Derived" cacheId="1"><location ref="D1:E4"/><rowFields count="1"><field x="0"/></rowFields><dataFields count="1"><dataField name="Total" fld="1"/></dataFields></pivotTableDefinition>"#.to_vec()),
+    ])
+    .expect("pack derived-field pivot")
+}
+
+#[test]
+fn pivots_with_calculated_and_date_group_fields_are_read_and_saved() {
+    let (sheets, stylings) =
+        OoxmlCodec::unpack_xlsx_with_styling(&derived_field_pivot_xlsx()).expect("decode");
+    let st = &stylings[0].1;
+    assert_eq!((st.pivots.len(), st.pivots_rejected), (1, 0));
+    assert_eq!(
+        st.pivots[0].field_names,
+        ["Day", "Amount", "Months", "Double"]
+    );
+
+    let styles: Vec<_> = stylings.iter().map(|(_, s)| s.clone()).collect();
+    let saved = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &styles).expect("save");
+    let (_, again) = OoxmlCodec::unpack_xlsx_with_styling(&saved).expect("decode again");
+    assert_eq!(
+        (again[0].1.pivots.len(), again[0].1.pivots_rejected),
+        (1, 0)
+    );
+    // 저장 쪽은 원본 열에서 캐시를 다시 만들어 계산·묶음 필드는 싣지 않는다(변경 전과 같다).
+    assert_eq!(again[0].1.pivots[0].field_names, ["Day", "Amount"]);
+    assert_eq!(again[0].1.pivots[0].row_fields, [0]);
+}

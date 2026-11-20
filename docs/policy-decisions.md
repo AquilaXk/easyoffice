@@ -4469,7 +4469,7 @@
 - **Status** Implemented (QA 요청 2026-11-20, 전체 리뷰 1차). 엔진 `easyoffice-formats`(`sheet_pivot.rs`·`xlsx_pivots.rs`·`xlsx_comments.rs`·`office_codecs.rs`·`odt_notes_writer.rs`·`hwpx_codec.rs`·`rich_xml.rs`·`rich_read_{ooxml,odt,hwpx,pages}`·`rich_document.rs`·`layout_lint.rs`·`xlsx_slicers.rs`·`xlsx_drawings.rs`·`sheet_chart.rs`), 앱 `easyoffice-app`(`readback/`·`ui/layout-lint-ui.js`), CI(`.github/workflows/ci.yml`·`scripts/run-quicklook-tests.mjs`).
 - **Context** 리뷰어가 프로브로 재현한 열한 가지: 160KB XLSX가 RSS 1.03GB, 135KB DOCX가 HWPX 저장에서 9.2GB, 닫지 않은 `<w:p>` 500만 개가 1.15GB, 6만 행 `=SUM(ABOVE)`가 13초, 20만 개 쪽 나눔이 15초, `{{` 160만 자가 86초, Pages 각주 표식 4만 개가 110초, 1.7MB DOCX 점검 결과가 182MB. 모두 입력 크기 대비 출력·작업량의 상한이 없었다.
 - **Decision (`PD-262`)**
-  1. **피벗 필드 이름**: 캐시 정의 하나가 가질 수 있는 필드 이름 바이트 합 256KiB(`MAX_PIVOT_FIELD_NAMES_BYTES`, 읽기와 `check_budgets` 모두), 통합 문서 전체 피벗이 복제해 든 필드 이름 합 4MiB(`MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES`). 원본 범위가 있으면 필드 수가 범위 폭을 넘는 피벗은 거부(`pivots_rejected`). 넘으면 `ResourceBudgetExceeded`.
+  1. **피벗 필드 이름**: 캐시 정의 하나가 가질 수 있는 필드 이름 바이트 합 256KiB(`MAX_PIVOT_FIELD_NAMES_BYTES`, 읽기와 `check_budgets` 모두), 통합 문서 전체 피벗이 복제해 든 필드 이름 합 4MiB(`MAX_WORKBOOK_PIVOT_FIELD_NAMES_BYTES`). 계산 필드·날짜 묶음 필드는 원본 열이 없어 필드 수가 범위 폭을 넘을 수 있으므로 폭 검사는 두지 않는다(절대 상한은 최대 열 수). 넘으면 `ResourceBudgetExceeded`.
   2. **메모·VML 파트**: 통합 문서 전체에서 읽은 파트 경로를 기억하고(`WorkbookComments`) 두 번째 시트의 같은 파트 참조는 읽지 않는다. 메모 파트는 `notes_rejected`에 센다(표 파트 `claim_part`와 같은 규칙).
   3. **각주·메모 본문 쓰기**: ODT·HWPX는 같은 `(종류, id)` 본문을 첫 참조에만 쓰고 이후는 본문 없는 표식(빈 문단 하나)으로 쓴다. 메모 주석도 같다. 한 번만 참조하는 정상 문서는 출력이 그대로다.
   4. **열린 문단 깊이**: DOCX·ODT·HWPX 읽기에서 열린 문단 스택 64(`MAX_OPEN_PARAGRAPHS`) 초과 시 `ResourceBudgetExceeded`.
