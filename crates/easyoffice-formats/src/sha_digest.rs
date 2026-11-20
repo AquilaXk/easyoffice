@@ -4,12 +4,15 @@
 //! MS-OFFCRYPTO 2.3.4.11): `H0 = hash(salt || password)`, `Hn = hash(H(n-1) || n as u32 LE)` for
 //! `n` in `0..spinCount`.
 //!
-//! The engine crates have no third-party dependency (PD-053), so the algorithms are written here from
-//! the FIPS text; the tests check the standard vectors and a long message. Safe Rust only. The
-//! iteration hashes one block per round (a 64-byte digest and a counter fit one 128-byte block), so it
-//! rewrites the changing bytes of one buffer and allocates nothing per round.
+//! A thin adapter over the RustCrypto `sha1` and `sha2` crates (MIT OR Apache-2.0), which use the
+//! CPU's SHA instructions where they exist. This module keeps the algorithm-name lookup, the spin
+//! loop with its deadline, and a constant-time comparison.
 
 use std::time::Instant;
+
+use sha1::Sha1 as Sha1Core;
+use sha2::digest::FixedOutputReset;
+use sha2::{Digest, Sha256, Sha384, Sha512};
 
 /// The hash functions a password digest may use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,38 +44,13 @@ impl Sha {
         }
     }
 
-    const fn block(self) -> usize {
-        match self {
-            Self::Sha1 | Self::Sha256 => 64,
-            Self::Sha384 | Self::Sha512 => 128,
-        }
-    }
-
     pub(crate) fn digest(self, message: &[u8]) -> Vec<u8> {
-        let mut state = State::new(self);
-        let block = self.block();
-        let mut chunks = message.chunks_exact(block);
-        for chunk in &mut chunks {
-            state.compress(chunk);
+        match self {
+            Self::Sha1 => Sha1Core::digest(message).to_vec(),
+            Self::Sha256 => Sha256::digest(message).to_vec(),
+            Self::Sha384 => Sha384::digest(message).to_vec(),
+            Self::Sha512 => Sha512::digest(message).to_vec(),
         }
-        // The rest, `0x80`, zeros and the bit length (8 bytes; 16 for the 128-byte block).
-        let rest = chunks.remainder();
-        let length_bytes = block / 8;
-        let tail_len = if rest.len() + 1 + length_bytes > block {
-            2 * block
-        } else {
-            block
-        };
-        let mut tail_buf = [0u8; 256];
-        let tail = &mut tail_buf[..tail_len];
-        tail[..rest.len()].copy_from_slice(rest);
-        tail[rest.len()] = 0x80;
-        let bits = (message.len() as u128) * 8;
-        tail[tail_len - length_bytes..].copy_from_slice(&bits.to_be_bytes()[16 - length_bytes..]);
-        for chunk in tail.chunks_exact(block) {
-            state.compress(chunk);
-        }
-        state.output()
     }
 
     /// `Hn = hash(H(n-1) || n as u32 LE)` for `n` in `0..rounds`, starting from `seed` (a digest of
@@ -83,380 +61,32 @@ impl Sha {
         rounds: u32,
         deadline: Option<Instant>,
     ) -> Option<Vec<u8>> {
-        let n = self.len();
-        debug_assert_eq!(seed.len(), n);
-        let block = self.block();
-        let length_bytes = block / 8;
-        // One stack block: digest, counter, `0x80`, zeros, bit length of `n + 4` bytes.
-        let mut buf_arr = [0u8; 128];
-        let buf = &mut buf_arr[..block];
-        buf[..n].copy_from_slice(seed);
-        buf[n + 4] = 0x80;
-        let bits = ((n + 4) as u128) * 8;
-        buf[block - length_bytes..].copy_from_slice(&bits.to_be_bytes()[16 - length_bytes..]);
         match self {
-            Self::Sha1 => {
-                let block64: &mut [u8; 64] = (&mut buf_arr[..64]).try_into().unwrap();
-                for round in 0..rounds {
-                    if round & 0xFFF == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
-                        return None;
-                    }
-                    block64[20..24].copy_from_slice(&round.to_le_bytes());
-                    let mut st = State::SHA1_IV;
-                    compress_sha1(&mut st, block64);
-                    for (dst, w) in block64[..20].chunks_exact_mut(4).zip(st.iter()) {
-                        dst.copy_from_slice(&w.to_be_bytes());
-                    }
-                }
-            }
-            Self::Sha256 => {
-                let block64: &mut [u8; 64] = (&mut buf_arr[..64]).try_into().unwrap();
-                for round in 0..rounds {
-                    if round & 0xFFF == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
-                        return None;
-                    }
-                    block64[32..36].copy_from_slice(&round.to_le_bytes());
-                    let mut st = State::SHA256_IV;
-                    compress_sha256(&mut st, block64);
-                    for (dst, w) in block64[..32].chunks_exact_mut(4).zip(st.iter()) {
-                        dst.copy_from_slice(&w.to_be_bytes());
-                    }
-                }
-            }
-            Self::Sha384 => {
-                for round in 0..rounds {
-                    if round & 0xFFF == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
-                        return None;
-                    }
-                    buf_arr[48..52].copy_from_slice(&round.to_le_bytes());
-                    let mut st = State::SHA384_IV;
-                    compress_sha512(&mut st, &buf_arr);
-                    for (dst, w) in buf_arr[..48].chunks_exact_mut(8).zip(st.iter()) {
-                        dst.copy_from_slice(&w.to_be_bytes());
-                    }
-                }
-            }
-            Self::Sha512 => {
-                for round in 0..rounds {
-                    if round & 0xFFF == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
-                        return None;
-                    }
-                    buf_arr[64..68].copy_from_slice(&round.to_le_bytes());
-                    let mut st = State::SHA512_IV;
-                    compress_sha512(&mut st, &buf_arr);
-                    for (dst, w) in buf_arr[..64].chunks_exact_mut(8).zip(st.iter()) {
-                        dst.copy_from_slice(&w.to_be_bytes());
-                    }
-                }
-            }
-        }
-        Some(buf_arr[..n].to_vec())
-    }
-}
-
-enum State {
-    Sha1([u32; 5]),
-    Sha256([u32; 8]),
-    Wide([u64; 8], usize),
-}
-
-impl State {
-    const SHA1_IV: [u32; 5] = [
-        0x6745_2301,
-        0xEFCD_AB89,
-        0x98BA_DCFE,
-        0x1032_5476,
-        0xC3D2_E1F0,
-    ];
-    const SHA256_IV: [u32; 8] = [
-        0x6A09_E667,
-        0xBB67_AE85,
-        0x3C6E_F372,
-        0xA54F_F53A,
-        0x510E_527F,
-        0x9B05_688C,
-        0x1F83_D9AB,
-        0x5BE0_CD19,
-    ];
-    const SHA384_IV: [u64; 8] = [
-        0xCBBB_9D5D_C105_9ED8,
-        0x629A_292A_367C_D507,
-        0x9159_015A_3070_DD17,
-        0x152F_ECD8_F70E_5939,
-        0x6733_2667_FFC0_0B31,
-        0x8EB4_4A87_6858_1511,
-        0xDB0C_2E0D_64F9_8FA7,
-        0x47B5_481D_BEFA_4FA4,
-    ];
-    const SHA512_IV: [u64; 8] = [
-        0x6A09_E667_F3BC_C908,
-        0xBB67_AE85_84CA_A73B,
-        0x3C6E_F372_FE94_F82B,
-        0xA54F_F53A_5F1D_36F1,
-        0x510E_527F_ADE6_82D1,
-        0x9B05_688C_2B3E_6C1F,
-        0x1F83_D9AB_FB41_BD6B,
-        0x5BE0_CD19_137E_2179,
-    ];
-
-    fn new(sha: Sha) -> Self {
-        match sha {
-            Sha::Sha1 => Self::Sha1(Self::SHA1_IV),
-            Sha::Sha256 => Self::Sha256(Self::SHA256_IV),
-            Sha::Sha384 => Self::Wide(Self::SHA384_IV, 48),
-            Sha::Sha512 => Self::Wide(Self::SHA512_IV, 64),
+            Self::Sha1 => iterate_with::<Sha1Core>(seed, rounds, deadline),
+            Self::Sha256 => iterate_with::<Sha256>(seed, rounds, deadline),
+            Self::Sha384 => iterate_with::<Sha384>(seed, rounds, deadline),
+            Self::Sha512 => iterate_with::<Sha512>(seed, rounds, deadline),
         }
     }
+}
 
-    fn compress(&mut self, block: &[u8]) {
-        match self {
-            Self::Sha1(s) => compress_sha1(s, block),
-            Self::Sha256(s) => compress_sha256(s, block),
-            Self::Wide(s, _) => compress_sha512(s, block),
+/// The spin loop for one hash function; the hasher is reset in place so no round allocates.
+fn iterate_with<D: Digest + FixedOutputReset>(
+    seed: &[u8],
+    rounds: u32,
+    deadline: Option<Instant>,
+) -> Option<Vec<u8>> {
+    let mut hasher = D::new();
+    let mut current = seed.to_vec();
+    for round in 0..rounds {
+        if round & 0xFFF == 0 && deadline.is_some_and(|d| Instant::now() >= d) {
+            return None;
         }
+        Digest::update(&mut hasher, &current);
+        Digest::update(&mut hasher, round.to_le_bytes());
+        current.copy_from_slice(&Digest::finalize_reset(&mut hasher));
     }
-
-    fn write_output(&self, out: &mut [u8]) {
-        match self {
-            Self::Sha1(s) => {
-                for (dst, w) in out[..20].chunks_exact_mut(4).zip(s.iter()) {
-                    dst.copy_from_slice(&w.to_be_bytes());
-                }
-            }
-            Self::Sha256(s) => {
-                for (dst, w) in out[..32].chunks_exact_mut(4).zip(s.iter()) {
-                    dst.copy_from_slice(&w.to_be_bytes());
-                }
-            }
-            Self::Wide(s, len) => {
-                for (dst, w) in out[..*len].chunks_exact_mut(8).zip(s.iter()) {
-                    dst.copy_from_slice(&w.to_be_bytes());
-                }
-            }
-        }
-    }
-
-    fn output(&self) -> Vec<u8> {
-        let len = match self {
-            Self::Sha1(_) => 20,
-            Self::Sha256(_) => 32,
-            Self::Wide(_, len) => *len,
-        };
-        let mut out = vec![0u8; len];
-        self.write_output(&mut out);
-        out
-    }
-}
-
-fn compress_sha1(state: &mut [u32; 5], block: &[u8]) {
-    let mut w = [0u32; 80];
-    for (i, word) in block.chunks_exact(4).enumerate() {
-        w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-    }
-    for i in 16..80 {
-        w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-    }
-    let [mut a, mut b, mut c, mut d, mut e] = *state;
-    for (i, &word) in w.iter().enumerate() {
-        let (f, k) = match i {
-            0..=19 => ((b & c) | (!b & d), 0x5A82_7999),
-            20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
-            40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
-            _ => (b ^ c ^ d, 0xCA62_C1D6),
-        };
-        let t = a
-            .rotate_left(5)
-            .wrapping_add(f)
-            .wrapping_add(e)
-            .wrapping_add(k)
-            .wrapping_add(word);
-        e = d;
-        d = c;
-        c = b.rotate_left(30);
-        b = a;
-        a = t;
-    }
-    for (s, v) in state.iter_mut().zip([a, b, c, d, e]) {
-        *s = s.wrapping_add(v);
-    }
-}
-
-const K256: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-fn compress_sha256(state: &mut [u32; 8], block: &[u8]) {
-    let mut w = [0u32; 64];
-    for (i, word) in block.chunks_exact(4).enumerate() {
-        w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-    }
-    for i in 16..64 {
-        let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-        let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[i - 7])
-            .wrapping_add(s1);
-    }
-    let mut v = *state;
-    for i in 0..64 {
-        let s1 = v[4].rotate_right(6) ^ v[4].rotate_right(11) ^ v[4].rotate_right(25);
-        let ch = (v[4] & v[5]) ^ (!v[4] & v[6]);
-        let t1 = v[7]
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(K256[i])
-            .wrapping_add(w[i]);
-        let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
-        let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
-        let t2 = s0.wrapping_add(maj);
-        v = [
-            t1.wrapping_add(t2),
-            v[0],
-            v[1],
-            v[2],
-            v[3].wrapping_add(t1),
-            v[4],
-            v[5],
-            v[6],
-        ];
-    }
-    for (s, x) in state.iter_mut().zip(v) {
-        *s = s.wrapping_add(x);
-    }
-}
-
-const K512: [u64; 80] = [
-    0x428a2f98d728ae22,
-    0x7137449123ef65cd,
-    0xb5c0fbcfec4d3b2f,
-    0xe9b5dba58189dbbc,
-    0x3956c25bf348b538,
-    0x59f111f1b605d019,
-    0x923f82a4af194f9b,
-    0xab1c5ed5da6d8118,
-    0xd807aa98a3030242,
-    0x12835b0145706fbe,
-    0x243185be4ee4b28c,
-    0x550c7dc3d5ffb4e2,
-    0x72be5d74f27b896f,
-    0x80deb1fe3b1696b1,
-    0x9bdc06a725c71235,
-    0xc19bf174cf692694,
-    0xe49b69c19ef14ad2,
-    0xefbe4786384f25e3,
-    0x0fc19dc68b8cd5b5,
-    0x240ca1cc77ac9c65,
-    0x2de92c6f592b0275,
-    0x4a7484aa6ea6e483,
-    0x5cb0a9dcbd41fbd4,
-    0x76f988da831153b5,
-    0x983e5152ee66dfab,
-    0xa831c66d2db43210,
-    0xb00327c898fb213f,
-    0xbf597fc7beef0ee4,
-    0xc6e00bf33da88fc2,
-    0xd5a79147930aa725,
-    0x06ca6351e003826f,
-    0x142929670a0e6e70,
-    0x27b70a8546d22ffc,
-    0x2e1b21385c26c926,
-    0x4d2c6dfc5ac42aed,
-    0x53380d139d95b3df,
-    0x650a73548baf63de,
-    0x766a0abb3c77b2a8,
-    0x81c2c92e47edaee6,
-    0x92722c851482353b,
-    0xa2bfe8a14cf10364,
-    0xa81a664bbc423001,
-    0xc24b8b70d0f89791,
-    0xc76c51a30654be30,
-    0xd192e819d6ef5218,
-    0xd69906245565a910,
-    0xf40e35855771202a,
-    0x106aa07032bbd1b8,
-    0x19a4c116b8d2d0c8,
-    0x1e376c085141ab53,
-    0x2748774cdf8eeb99,
-    0x34b0bcb5e19b48a8,
-    0x391c0cb3c5c95a63,
-    0x4ed8aa4ae3418acb,
-    0x5b9cca4f7763e373,
-    0x682e6ff3d6b2b8a3,
-    0x748f82ee5defb2fc,
-    0x78a5636f43172f60,
-    0x84c87814a1f0ab72,
-    0x8cc702081a6439ec,
-    0x90befffa23631e28,
-    0xa4506cebde82bde9,
-    0xbef9a3f7b2c67915,
-    0xc67178f2e372532b,
-    0xca273eceea26619c,
-    0xd186b8c721c0c207,
-    0xeada7dd6cde0eb1e,
-    0xf57d4f7fee6ed178,
-    0x06f067aa72176fba,
-    0x0a637dc5a2c898a6,
-    0x113f9804bef90dae,
-    0x1b710b35131c471b,
-    0x28db77f523047d84,
-    0x32caab7b40c72493,
-    0x3c9ebe0a15c9bebc,
-    0x431d67c49c100d4c,
-    0x4cc5d4becb3e42b6,
-    0x597f299cfc657e2a,
-    0x5fcb6fab3ad6faec,
-    0x6c44198c4a475817,
-];
-
-fn compress_sha512(state: &mut [u64; 8], block: &[u8]) {
-    let mut w = [0u64; 80];
-    for (i, word) in block.chunks_exact(8).enumerate() {
-        w[i] = u64::from_be_bytes([
-            word[0], word[1], word[2], word[3], word[4], word[5], word[6], word[7],
-        ]);
-    }
-    for i in 16..80 {
-        let s0 = w[i - 15].rotate_right(1) ^ w[i - 15].rotate_right(8) ^ (w[i - 15] >> 7);
-        let s1 = w[i - 2].rotate_right(19) ^ w[i - 2].rotate_right(61) ^ (w[i - 2] >> 6);
-        w[i] = w[i - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[i - 7])
-            .wrapping_add(s1);
-    }
-    let mut v = *state;
-    for i in 0..80 {
-        let s1 = v[4].rotate_right(14) ^ v[4].rotate_right(18) ^ v[4].rotate_right(41);
-        let ch = (v[4] & v[5]) ^ (!v[4] & v[6]);
-        let t1 = v[7]
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(K512[i])
-            .wrapping_add(w[i]);
-        let s0 = v[0].rotate_right(28) ^ v[0].rotate_right(34) ^ v[0].rotate_right(39);
-        let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
-        let t2 = s0.wrapping_add(maj);
-        v = [
-            t1.wrapping_add(t2),
-            v[0],
-            v[1],
-            v[2],
-            v[3].wrapping_add(t1),
-            v[4],
-            v[5],
-            v[6],
-        ];
-    }
-    for (s, x) in state.iter_mut().zip(v) {
-        *s = s.wrapping_add(x);
-    }
+    Some(current)
 }
 
 /// Whether `a` and `b` are equal, looking at every byte of the shorter-or-equal length so the time
@@ -554,41 +184,5 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
         assert!(constant_time_eq(b"", b""));
-    }
-
-    #[test]
-    #[ignore]
-    fn bench_sha_digest_release() {
-        let seed = Sha::Sha512.digest(b"salt-and-password");
-        let rounds = 100_000u32;
-
-        // Baseline: allocating `State::output()` per round.
-        let mut baseline_buf = [0u8; 128];
-        baseline_buf[..64].copy_from_slice(&seed);
-        baseline_buf[68] = 0x80;
-        let bits = (68u128 * 8).to_be_bytes();
-        baseline_buf[112..128].copy_from_slice(&bits);
-        let t_base = std::time::Instant::now();
-        for round in 0..rounds {
-            baseline_buf[64..68].copy_from_slice(&round.to_le_bytes());
-            let mut st = State::new(Sha::Sha512);
-            st.compress(&baseline_buf);
-            let vec_out = st.output();
-            baseline_buf[..64].copy_from_slice(&vec_out);
-        }
-        let elapsed_base = t_base.elapsed();
-
-        let t0 = std::time::Instant::now();
-        let out = Sha::Sha512
-            .iterate(std::hint::black_box(&seed), rounds, None)
-            .unwrap();
-        let elapsed = t0.elapsed();
-        assert_eq!(out, &baseline_buf[..64]);
-        println!(
-            "bench_sha_digest_release: SHA-512 {rounds} rounds alloc-baseline {:.2} ms vs 0-alloc {:.2} ms ({:.2} us/iter)",
-            elapsed_base.as_secs_f64() * 1000.0,
-            elapsed.as_secs_f64() * 1000.0,
-            elapsed.as_secs_f64() * 1_000_000.0 / f64::from(rounds)
-        );
     }
 }
