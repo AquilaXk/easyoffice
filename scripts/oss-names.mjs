@@ -8,7 +8,6 @@ import { createHash } from "node:crypto";
 export const NAME_HASHES = new Set([
   "ae60c9f2c692f51a08cdf4a2e74fc9c1cfca6573dc02848bcd56a4ce35e7531f",
   "86a3381e40ff3052771afc7ad7e945bed670b88072049353b3bce67adb5cdc6b",
-  "c84571aacaeb100f48d40177463aff9572b07d2405ce2b23fb8b5424157b143d",
   "2bf7cf76a6c689d745dd4b181ab341c4f93792685f2bb72db5e57856ee48935a",
   "f5d3dd4cbe3bbe127d051bc2b21f3349d2f902e2acde01a48e1862221d7a71aa",
   "4011393f356a69582a25dfd73603b974b88e7df6fec0b75793c6155c365e691c",
@@ -46,6 +45,7 @@ export const NAME_HASHES = new Set([
 
 /** Crate names rejected in Markdown only; code, Cargo manifests and vendored sources need them to build. */
 export const MARKDOWN_NAME_HASHES = new Set([
+  "c84571aacaeb100f48d40177463aff9572b07d2405ce2b23fb8b5424157b143d",
   "26ad9c47dd4c00ae4de281d2e7608d16f67810ee1b8c5bad301ea780af2df7aa",
   "cba664e970cf9df2f113417f94070f32cfdb7b726f0874348a45f468b9e36598",
   "24d7e1e68f06be6457d28679000bd0c44edbed16d00e4443562a706b6bb2bc37",

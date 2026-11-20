@@ -14,7 +14,7 @@
   - `PdfSerializer`(ISO 32000), `CsvCodec`(RFC 4180 `.csv`/`.tsv`), `CommonMarkCodec`(`.md`), `RtfCodec`(`.rtf`), UTF-8 `.txt`.
   - Pages(`.pages`, IWA + Snappy 변형 + protobuf, 자체 디코더)는 보기·변환 원본으로 엽니다. Pages로 저장은 실험적이며 본문 글자·제목·정렬·기본 글자 서식만 씁니다(PD-162).
   - `RichDocument`가 DOCX·HWPX·ODT·RTF·Markdown·TXT·PDF에서 블록 순서와 글자 단위 서식을 유지합니다.
-- **비트 수준 엔진 최적화**: 하드웨어 가속·slicing-by-8 `IeeeCrc32`, DEFLATE, SWAR 기반 UTF-16·XML·CSV 스캔, 64비트 `PackedCellCoordinate`(상위 32비트 행·하위 32비트 열), `SectorBitset`, `checked_*` 산술. `unsafe`는 CRC-32 intrinsics, C-ABI 브리지, Quick Look 래퍼, 데스크톱 셸의 OS 호출(프로세스 제한·글꼴 매핑)에만 둡니다. `--self-test`가 벤치마크와 결과 동일성을 검사합니다.
+- **비트 수준 엔진 최적화**: `crc32fast`를 감싼 `IeeeCrc32`, DEFLATE 크레이트를 감싼 DEFLATE 어댑터, SWAR 기반 UTF-16·XML·CSV 스캔, 64비트 `PackedCellCoordinate`(상위 32비트 행·하위 32비트 열), `SectorBitset`, `checked_*` 산술. `unsafe`는 C-ABI 브리지, Quick Look 래퍼, 데스크톱 셸의 OS 호출(프로세스 제한·글꼴 매핑)에만 둡니다. `--self-test`가 벤치마크와 결과 동일성을 검사합니다.
 - **시트 엔진**(`SheetEngine`, `WorkbookEngine`): 수학·통계·논리·찾기·텍스트·재무(`PMT`, `NPV`, `IRR` 등)·날짜/시간·정보를 아우르는 **288종 내장 함수**, 슬롯 메모를 쓰는 의존성 DAG, 피벗(`compute_pivot`), 차트, 조건부 서식·유효성 검사. 셀 서식과 열 너비는 XLSX/ODS에 저장·복원됩니다.
 - **오프라인 스마트 도구와 보안**: 출력 바이트를 `FormatDetector`로 사후 검증하는 `UniversalFormatConverter` 일괄 변환, `LocalSmartAssistant`(핵심 문장 요약, 문장 진단, 문서 비교), fail-closed `FormatDetector`·`XmlSanitizer`·`DocumentSecurityAuditor`(매직 바이트 위조, ZIP 폭탄, 경로 순회, XXE, 개인정보 비식별화).
 - **PDF 스튜디오**: 원본 PDF의 그림·글꼴·링크·북마크·양식·주석·숨긴 레이어·쪽 레이블·첨부·XMP를 보존하는 쪽 편집과 저장(PD-170, PD-245, PD-266). PDF 읽기·쓰기는 셸이 띄우는 별도 워커 프로세스에서 하며, 옮기지 못한 항목은 경고로 알립니다.
@@ -115,14 +115,14 @@ cargo run -p easyoffice-desktop     # 데스크톱 셸 실행
 
 새로 짜기 전에 비슷한 기능을 구현한 오픈소스를 먼저 찾고, 다음 순서로 판단해 결과를 결정 기록(PD)에 적습니다.
 
-1. 허용 라이선스의 유지되는 크레이트·라이브러리를 그대로 쓸 수 있는가. 엔진 크레이트(`formats`·`sheet`·`layout`·`app`)는 외부 의존이 0이라(PD-053, PD-095) 쓸 수 없습니다. 셸 크레이트는 PD-101의 절차(전이 의존 라이선스 확인)를 거쳐 추가합니다.
+1. 허용 라이선스의 유지되는 크레이트·라이브러리를 그대로 쓸 수 있는가. 엔진 크레이트(`formats`·`sheet`·`layout`·`app`)도 쓸 수 있습니다(PD-269가 PD-053·PD-095의 무의존 방침을 대체). 버전은 데스크톱 셸이 이미 푸는 것에 맞추고 루트 `Cargo.toml`의 `[workspace.dependencies]`에 한곳으로 둡니다. 전이 의존의 라이선스를 확인하고 `THIRD_PARTY_NOTICES.md`에 올립니다(PD-101의 절차). 크레이트는 얇은 어댑터로만 감싸고 크레이트 내부 로직을 다시 짜지 않으며, 상한·Fail-Closed는 어댑터에 남깁니다. 같은 기능을 직접 짠 코드와 두 벌 두지 않습니다.
 2. 이미 쓰는 의존성이나 기존 모듈에 같은 기능이 있는가.
-3. 없을 때만 참조 구현의 함수를 안전한 Rust(엔진) 또는 바닐라 JS(WebUI)로 이식하고 비트·워드 단위로 최적화합니다. 측정 전후 수치를 남깁니다.
+3. 없을 때만 참조 구현의 함수를 안전한 Rust(엔진) 또는 바닐라 JS(WebUI)로 이식하고 비트·워드 단위로 최적화합니다. 측정 전후 수치를 남깁니다. 크레이트로 바꿀 때도 `cargo run --release -p easyoffice-app -- --self-test`를 같은 기기에서 3회씩 돌려 중앙값을 비교합니다.
 
 이식할 때 지키는 규칙은 다음과 같습니다.
 
 - **허용 라이선스만.** MIT, Apache-2.0, BSD, Zlib, OFL 등. GPL·LGPL·AGPL·MPL 계열은 복사하지 않습니다.
-- **원본 구조를 유지합니다.** 원본의 모듈 경계·함수 이름·알고리즘 순서를 따라 옮기고, 바꾼 점은 주석이나 결정 기록에 적습니다. 원본을 우리 방식으로 다시 설계하지 않습니다.
+- **원본 구조를 유지합니다**(이식한 코드에 해당). 원본의 모듈 경계·함수 이름·알고리즘 순서를 따라 옮기고, 바꾼 점은 주석이나 결정 기록에 적습니다. 원본을 우리 방식으로 다시 설계하지 않습니다.
 - **출처 주석.** 파일 머리 주석에 "참조 구현", 라이선스, 저작권자, 원본 경로·줄 범위를 적습니다.
 - **`THIRD_PARTY_NOTICES.md`.** 가져온 코드와 데이터의 출처와 라이선스 전문을 올립니다. 이 파일이 타 프로젝트 이름을 쓸 수 있는 유일한 곳입니다. 다른 문서·주석·커밋에서는 "참조 앱"·"참조 구현"처럼 역할로 씁니다.
 - **vendor 사본.** 패치한 의존 사본은 `vendor/` 아래에 두고, 폴더의 `PATCHES.md`(svg2pdf 사본은 `RHWP_PATCHES.md`)에 출처 버전·바꾼 파일과 줄 수·다시 적용할 곳을 적습니다. 루트 `Cargo.toml`의 `[patch.crates-io]`로 연결합니다.

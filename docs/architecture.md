@@ -66,17 +66,18 @@ EasyOffice/
         └── release.yml                            # macOS 유니버설 .dmg, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
 ```
 
-### 1.1 크레이트 의존 정책 (PD-053, PD-095, PD-101)
+### 1.1 크레이트 의존 정책 (PD-269, PD-101)
 
 | 크레이트 | 역할 | 외부 의존 | 워크스페이스 내부 의존 |
 | :--- | :--- | :--- | :--- |
-| `easyoffice-formats` | 포맷 레지스트리, 컨테이너·문서 코덱, 보안 가드, `native_package.rs` | 없음 | 없음 |
-| `easyoffice-sheet` | 수식 엔진, 피벗, 재계산 DAG | 없음 | formats |
-| `easyoffice-layout` | 쪽·슬라이드 조판 모델(`domain.rs`) | 없음 | formats |
-| `easyoffice-app` | IPC 라우터, 코파일럿 엔진, 변환·열기, `--serve`, WebUI(`ui/`) | 없음 | formats, sheet, layout |
+| `easyoffice-formats` | 포맷 레지스트리, 컨테이너·문서 코덱, 보안 가드, `native_package.rs` | 있음(기반 코덱 크레이트, 아래) | 없음 |
+| `easyoffice-sheet` | 수식 엔진, 피벗, 재계산 DAG | 없음(아직) | formats |
+| `easyoffice-layout` | 쪽·슬라이드 조판 모델(`domain.rs`) | 없음(아직) | formats |
+| `easyoffice-app` | IPC 라우터, 코파일럿 엔진, 변환·열기, `--serve`, WebUI(`ui/`) | 없음(아직) | formats, sheet, layout |
 | `easyoffice-desktop` | Tauri v2 셸, OS 통합, PDF 내보내기·편집, 코파일럿 HTTP 전송 | 있음(아래) | app, formats, sheet |
 
-- **엔진 크레이트(formats·sheet·layout·app)는 `[dependencies]`에 외부 크레이트가 없습니다.** 각 `Cargo.toml`의 `[dependencies]`는 워크스페이스 내부 경로뿐입니다. 공급망 표면을 좁히고 오프라인·폐쇄망 빌드를 지키기 위한 PD-053의 결정입니다. 같은 일을 하는 외부 구현이 필요하면 소스를 읽고 안전한 Rust로 이식합니다(PD-095, 규칙은 [DEVELOPMENT.md](DEVELOPMENT.md)).
+- **엔진 크레이트도 허용 라이선스(MIT, Apache-2.0, BSD, Zlib)의 유지되는 크레이트를 그대로 씁니다**(PD-269가 PD-053·PD-095의 무의존 방침을 대체). 같은 기능을 직접 짠 코드와 크레이트를 두 벌 두지 않고, 원본의 버그 수정과 사양 변경은 업데이트로 받습니다. 크레이트 버전은 데스크톱 셸과 rhwp가 이미 푸는 버전에 맞춰 `Cargo.lock`에 중복 버전이 늘지 않게 하고, 루트 `Cargo.toml`의 `[workspace.dependencies]`에서 한곳에서 정합니다.
+- **크레이트는 얇은 어댑터 뒤에 둡니다.** 상한과 Fail-Closed(ZIP 폭탄·항목 수·총 해제 크기, 경로 순회·대소문자 충돌, XXE·DTD, JSON 깊이·크기)는 크레이트 바깥 래퍼에 남기고, 크레이트가 상한 없이 끝까지 읽는 경로(`zip`의 항목 읽기 등)는 쓰지 않거나 상한 있는 읽기로 감쌉니다. 1단계(PD-269)에서 바뀐 기반 코덱은 `formats`의 `crc32.rs`(crc32fast), `base64_codec.rs`(base64), `sha_digest.rs`(sha1·sha2), `cp949.rs`(문자 인코딩 크레이트), `deflate.rs`(DEFLATE·Adler-32 크레이트), `zip_codec.rs`(zip)입니다. 이어서 XLSX·XLS·ODS, PDF, HWP·HWPX 순으로 바꿉니다.
 - **외부 의존은 데스크톱 셸에만 둡니다**(PD-101). 이유는 PDF 글꼴 서브셋·`ToUnicode`, PDF 객체 복사, TLS, OS 창 같은 일을 자체 구현하면 이식 한도를 크게 넘기 때문입니다. 용도별로 묶으면 다음과 같습니다(`crates/easyoffice-desktop/Cargo.toml`).
   - 창·IPC·대화상자·단일 인스턴스·업데이트: Tauri v2와 플러그인.
   - 검색 가능한 PDF 내보내기와 카드 미리보기: SVG→PDF 변환, SVG 파서·래스터, 글꼴 DB, PDF 쓰기(PD-101, PD-142, PD-179).
@@ -91,11 +92,12 @@ EasyOffice/
 
 ## 2. 크로스플랫폼 Rust 멀티 크레이트 코어 및 루프백 WebUI 서버 아키텍처
 
-macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 외부 런타임 의존성이 없는 순수 Rust 표준 라이브러리(`std`) 기반 4개 워크스페이스 크레이트와 로컬 루프백 WebUI 계층을 제공합니다.
+macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 Rust 크레이트 4개(기반 코덱은 유지되는 크레이트를 어댑터로 감싸 씁니다, PD-269)와 로컬 루프백 WebUI 계층을 제공합니다.
 
-1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·RFC 1951/1950 DEFLATE·Slicing-by-8 CRC-32·SWAR UTF-16LE 코덱)**
+1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·RFC 1951/1950 DEFLATE 어댑터·CRC-32 어댑터·SWAR UTF-16LE 코덱)**
    - 20종 `DocumentFormat` 및 `ContainerFamily` 메타데이터, 확장자-매직 바이트(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, `{\rtf1`, UTF-8) 교차 검증(`FormatDetector::detect`, 최대 입력 `512 MiB`)을 수행합니다.
-   - `IeeeCrc32`(`crc32.rs`)는 `static` slicing-by-16 테이블로 16바이트 단위 스칼라 CRC-32를 계산하고, 64바이트 이상 입력은 실행 시간 CPU 검출로 x86_64 PCLMULQDQ 폴딩·aarch64 CRC 명령 경로를 쓰며(미지원 CPU는 스칼라 폴백, `unsafe`는 `#[target_feature]` 함수 둘로 한정, PD-082), `deflate` 모듈은 64비트 워드 리필 `BitReader`, 9비트 1단계 `fast_lut` 고정/동적 허프만 디코더, `distance == 1` 바이트 반복(`out.resize`) 및 비겹침(`out.extend_from_within`) 고속 경로, 8바이트 `u64` SWAR XOR LZ77 매처, $O(1)$ `LENGTH_CODE_LUT`·`DIST_CODE_LUT`, RFC 1950 `NMAX = 5552` 지연 모듈로 `adler32` 및 `deflate_zlib`·`inflate_zlib`을 제공합니다.
+   - `IeeeCrc32`(`crc32.rs`)는 `crc32fast`(x86_64 PCLMULQDQ·aarch64 CRC 명령 자동 선택)를 감싸고, `deflate` 모듈은 DEFLATE 크레이트의 압축·해제 위에 출력 상한(`ResourceBudgetExceeded`), 선언 크기를 믿지 않는 점진 버퍼, 소비한 입력 바이트 수, RFC 1950 트레일러 규칙(`inflate_auto`)과 Adler-32 크레이트 기반 `adler32`를 더해 `deflate_raw`·`inflate_raw`·`deflate_zlib`·`inflate_zlib`을 제공합니다(PD-269).
+   - `ZipArchiveCodec`(`zip_codec.rs`)은 `zip` 크레이트로 중앙 디렉터리를 읽고 아카이브를 씁니다. 항목 본문은 크레이트의 상한 없는 해제 대신 원시 바이트를 `deflate`의 예산 해제기에 넘기고, 로컬·중앙 헤더 대조, 겹침 검사, 중복 경로, EOCD 정확 일치, ZIP64·다중 디스크·암호화 거부는 래퍼에 둡니다.
    - `ZipSecurityGuard::validate_archive_entries`는 엔트리 수(`4,096`), 단일 엔트리(`128 MiB`), 전체 해제 용량(`512 MiB`), 압축비(`100:1`), 경로 순회(`..`, 선행 `/`, `\`, NUL 바이트, Windows 드라이브 문자 `C:`)를 검증합니다.
    - `Ole2SecurityGuard`와 `Ole2ContainerCodec`은 `SectorBitset`(`Vec<u64>`, 1비트=1섹터)으로 힙 할당 없이 FAT 체인 순환 참조를 $O(1)$에 탐지하고, HWP 5.0 `FileHeader` 암호화(`0x02`)·배포용 문서(`0x04`) 비트를 차단합니다. `LegacyOle2Codec::pack_xls`는 `HashMap<String, u32>`로 BIFF8 공유 문자열 테이블(SST)을 $O(1)$에 인덱싱합니다.
    - `rtf_xml_helpers`는 64비트 SWAR ASCII 배치 경로 기반 `decode_utf16le_swar`·`encode_utf16le_swar`와 단일 패스 엔티티 디코더 `unescape_xml_single_pass`를 제공하며, `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 포함합니다.

@@ -9575,11 +9575,11 @@ SOFTWARE.
 
 ## Engine code adapted from open-source Rust crates
 
-The engine crates keep zero crate dependencies (PD-053); where a permissively licensed crate is measurably faster, its algorithm is re-implemented in safe Rust inside the engine and recorded here (PD-095).
+Since PD-269 the engine crates link maintained crates under permissive licences instead of re-implementing them. `crates/easyoffice-formats` depends on `adler2` (`0BSD OR MIT OR Apache-2.0`), `base64` (`MIT OR Apache-2.0`), `crc32fast` (`MIT OR Apache-2.0`), `encoding_rs` (`(Apache-2.0 OR MIT) AND BSD-3-Clause`), `flate2` (`MIT OR Apache-2.0`, only to select its pure Rust backend for `zip`), `miniz_oxide` (`MIT OR Zlib OR Apache-2.0`), `sha1` and `sha2` (`MIT OR Apache-2.0`) and `zip` (`MIT`); their transitive crates are the ones counted in the sections above and below (`cargo metadata --locked`). No code of these crates is copied; the licence texts travel in their source packages, and the texts of the three notices that name a copyright holder are kept below. Code that is still ported or re-implemented from another project is listed after them.
 
 ### base64 (MIT OR Apache-2.0)
 
-Source: https://github.com/marshallpierce/rust-base64 (v0.22). `crates/easyoffice-formats/src/base64_codec.rs` follows its `GeneralPurpose` engine block layout (6 bytes per 64-bit word on encode, a 256-entry decode table and 8-symbol blocks on decode). Used under the MIT license:
+Source: https://github.com/marshallpierce/rust-base64 (v0.23). Linked by `crates/easyoffice-formats/src/base64_codec.rs`, which only fixes the padding, whitespace and empty-input contract. Used under the MIT license:
 
 ```
 The MIT License (MIT)
@@ -9607,9 +9607,7 @@ THE SOFTWARE.
 
 ### miniz_oxide (MIT OR Zlib OR Apache-2.0, used under MIT)
 
-Source: https://github.com/Frommi/miniz_oxide (version 0.8.9; licensed `MIT OR Zlib OR Apache-2.0`, used here under MIT).
-`crates/easyoffice-formats/src/deflate/compress.rs` is an independent safe-Rust implementation that follows the approach of miniz_oxide's fast compression levels (single-pass hash-chain LZ77, per-block dynamic Huffman codes with length-limited code construction, cheapest-of stored / fixed / dynamic block selection). No miniz_oxide crate is linked and no source file is vendored; the notice is kept because the algorithmic structure is derived from it.
-The inflate path in `crates/easyoffice-formats/src/deflate.rs` is likewise an independent safe-Rust implementation that follows miniz_oxide's fast-decode design (two-level Huffman lookup tables, bulk bit-buffer refill with a multi-symbol fast loop, chunked match copy into a flat output buffer); this notice covers it as well.
+Source: https://github.com/Frommi/miniz_oxide (version 0.9.1; licensed `MIT OR Zlib OR Apache-2.0`, used here under MIT). Linked by `crates/easyoffice-formats/src/deflate.rs` for raw DEFLATE and zlib compression and decompression; the output budget and the zlib trailer rules around it are the engine's own.
 
 ```
 MIT License
@@ -9638,12 +9636,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### encoding_rs (EUC-KR decoder and index, (Apache-2.0 OR MIT) AND BSD-3-Clause)
+### encoding_rs (EUC-KR decoder and legacy code page tables, (Apache-2.0 OR MIT) AND BSD-3-Clause)
 
-Source: https://github.com/hsivonen/encoding_rs (v0.8.44, `src/euc_kr.rs` and the `index-euc-kr` data in `src/data.rs`; code `Apache-2.0 OR MIT`, Copyright Mozilla Foundation, table data BSD-3-Clause from the WHATWG Encoding Standard).
-`crates/easyoffice-formats/src/cp949.rs` follows the structure of its EUC-KR decoder (lead and trail byte ranges, a sorted Hangul offset table with an exact-complement UHC lookup) as independent safe Rust, and `crates/easyoffice-formats/src/cp949_tables.rs` holds the symbol (rows 0xA1..=0xAC) and Hanja (rows 0xCA..=0xFD) cells of the same `index-euc-kr` table, flattened to two `u16` arrays. The crate itself is not linked into the engine crates (PD-053, PD-095).
+Source: https://github.com/hsivonen/encoding_rs (v0.8.44; code `Apache-2.0 OR MIT`, Copyright Mozilla Foundation, table data BSD-3-Clause from the WHATWG Encoding Standard).
+`crates/easyoffice-formats/src/cp949.rs` links the crate's `EUC_KR` decoder (code page 949) and keeps only the three decode policies of the readers.
 
-`crates/easyoffice-formats/src/code_pages.rs` reads four tables in `crates/easyoffice-formats/src/code_page_data/` (`sbcs.bin`, `sjis.bin`, `gbk.bin`, `big5.bin`): for the single-byte code pages 874 and 1250..=1258 (the `index-windows-*` tables) and, for every lead and trail byte pair of Shift_JIS, GBK and Big5 (the `index-jis0208`, `index-gb18030` and `index-big5` tables), the character that v0.8.44 of the crate returns, written as little-endian `u16` (cells that are unassigned or lie beyond U+FFFF are 0). No code of the crate is copied or linked into the engine crates (PD-053, PD-095); the lookup is independent safe Rust. The table data notice:
+`crates/easyoffice-formats/src/code_pages.rs` still reads four tables in `crates/easyoffice-formats/src/code_page_data/` (`sbcs.bin`, `sjis.bin`, `gbk.bin`, `big5.bin`): for the single-byte code pages 874 and 1250..=1258 (the `index-windows-*` tables) and, for every lead and trail byte pair of Shift_JIS, GBK and Big5 (the `index-jis0208`, `index-gb18030` and `index-big5` tables), the character that v0.8.44 of the crate returns, written as little-endian `u16` (cells that are unassigned or lie beyond U+FFFF are 0). Moving these pages onto the crate is the next step of the replacement order of PD-269. The table data notice:
 
 ```
 Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
