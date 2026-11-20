@@ -33,6 +33,7 @@ sha1 = "0.11"
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
 
 [workspace.package]
 version = "0.1.0"
