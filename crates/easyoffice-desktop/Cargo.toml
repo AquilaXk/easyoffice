@@ -27,6 +27,7 @@ getrandom = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri-plugin-single-instance = "2"
+zip = { workspace = true }
 # PD-101: searchable PDF export of the Hangul editor's page SVGs (shell only: the engine crates do
 # not render pages).
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
@@ -99,4 +100,4 @@ objc2 = "0.6"
 tempfile = "3"
 # Tests read the compressed content streams of the exported PDF (PD-131); already in the graph
 # through svg2pdf.
-miniz_oxide = "0.8"
+miniz_oxide = { workspace = true }

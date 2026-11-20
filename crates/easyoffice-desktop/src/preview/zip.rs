@@ -1,23 +1,22 @@
 //! The thumbnail entry of a ZIP based document, found through the central directory with seeks.
+//!
+//! The `zip` crate reads the directory and locates the entry; the end record is read here first so
+//! a directory over the shell's limits never reaches the crate, and the entry's raw bytes go through
+//! the engine's budgeted inflater instead of the crate's own (output limit free) decoder.
 
 use super::{le_u16, le_u32, read_at, MAX_THUMBNAIL_BYTES};
 use std::io::{Read, Seek, SeekFrom};
+use zip::read::{ArchiveOffset, Config};
+use zip::{CompressionMethod, ZipArchive};
 
 const EOCD_SIGNATURE: u32 = 0x0605_4B50;
-const CENTRAL_SIGNATURE: u32 = 0x0201_4B50;
-const LOCAL_SIGNATURE: u32 = 0x0403_4B50;
 const EOCD_FIXED_LEN: usize = 22;
 /// The end record may be followed by a comment of up to 65535 bytes.
 const EOCD_SEARCH_LEN: u64 = 65_535 + EOCD_FIXED_LEN as u64;
-const CENTRAL_FIXED_LEN: usize = 46;
-const LOCAL_FIXED_LEN: usize = 30;
 const MAX_ENTRIES: usize = 8_192;
 const MAX_CENTRAL_DIR_BYTES: u32 = 4 * 1024 * 1024;
 const ZIP64_MARKER_16: u16 = 0xFFFF;
 const ZIP64_MARKER_32: u32 = 0xFFFF_FFFF;
-const METHOD_STORED: u16 = 0;
-const METHOD_DEFLATED: u16 = 8;
-const FLAG_ENCRYPTED: u16 = 1;
 /// Name stems of the thumbnail entries, best first: HWPX, OOXML, ODF, then Pages (`QuickLook/` in
 /// the 2009 package, `preview` and the smaller `preview-web` since 2013; `preview-micro` is a
 /// few hundred bytes wide and never shown).
@@ -30,14 +29,6 @@ const STEMS: [&str; 6] = [
     "preview-web",
 ];
 const EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "bmp"];
-
-struct CentralEntry {
-    flags: u16,
-    method: u16,
-    compressed: u32,
-    uncompressed: u32,
-    local_offset: u32,
-}
 
 fn strip_pages_dir_prefix(name: &str) -> &str {
     let Some((dir, rest)) = name.split_once('/') else {
@@ -68,8 +59,9 @@ fn thumbnail_rank(name: &[u8]) -> Option<usize> {
     })
 }
 
-/// Offset and size of the central directory, from the end record near the end of the file.
-fn find_central_directory<R: Read + Seek>(src: &mut R) -> Option<(u64, u32, usize)> {
+/// Size and entry count of the central directory, from the end record near the end of the file.
+/// `None` for a ZIP64 marker or a directory over the shell's limits.
+fn central_directory_limits<R: Read + Seek>(src: &mut R) -> Option<(u32, usize)> {
     let len = src.seek(SeekFrom::End(0)).ok()?;
     let window = len.min(EOCD_SEARCH_LEN);
     let mut tail = vec![0_u8; usize::try_from(window).ok()?];
@@ -83,109 +75,59 @@ fn find_central_directory<R: Read + Seek>(src: &mut R) -> Option<(u64, u32, usiz
     if entries == ZIP64_MARKER_16 || size == ZIP64_MARKER_32 || offset == ZIP64_MARKER_32 {
         return None;
     }
-    Some((u64::from(offset), size, usize::from(entries)))
+    let entries = usize::from(entries);
+    (size != 0 && size <= MAX_CENTRAL_DIR_BYTES && entries <= MAX_ENTRIES)
+        .then_some((size, entries))
 }
 
-/// Whether the entry may be read at all: not encrypted and within the picture limit.
-fn is_readable(entry: &CentralEntry) -> bool {
-    let limit = u32::try_from(MAX_THUMBNAIL_BYTES).unwrap_or(u32::MAX);
-    entry.flags & FLAG_ENCRYPTED == 0 && entry.compressed <= limit && entry.uncompressed <= limit
-}
-
-/// The best-ranked readable thumbnail entry of the central directory, with its sizes and position.
-fn find_entry(directory: &[u8], entries: usize) -> Option<CentralEntry> {
-    let mut best: Option<(usize, CentralEntry)> = None;
-    let mut at = 0_usize;
-    for _ in 0..entries.min(MAX_ENTRIES) {
-        if le_u32(directory, at)? != CENTRAL_SIGNATURE {
-            return None;
-        }
-        let name_len = usize::from(le_u16(directory, at + 28)?);
-        let extra_len = usize::from(le_u16(directory, at + 30)?);
-        let comment_len = usize::from(le_u16(directory, at + 32)?);
-        let name_start = at.checked_add(CENTRAL_FIXED_LEN)?;
-        let name = directory.get(name_start..name_start.checked_add(name_len)?)?;
-        if let Some(rank) = thumbnail_rank(name).filter(|r| best.as_ref().is_none_or(|b| *r < b.0))
-        {
-            let entry = CentralEntry {
-                flags: le_u16(directory, at + 8)?,
-                method: le_u16(directory, at + 10)?,
-                compressed: le_u32(directory, at + 20)?,
-                uncompressed: le_u32(directory, at + 24)?,
-                local_offset: le_u32(directory, at + 42)?,
-            };
-            if is_readable(&entry) {
-                if rank == 0 {
-                    return Some(entry);
-                }
-                best = Some((rank, entry));
-            }
-        }
-        at = name_start
-            .checked_add(name_len)?
-            .checked_add(extra_len)?
-            .checked_add(comment_len)?;
-    }
-    best.map(|(_, entry)| entry)
-}
-
-fn read_entry_data<R: Read + Seek>(src: &mut R, entry: &CentralEntry) -> Option<Vec<u8>> {
-    if !is_readable(entry) {
-        return None;
-    }
-    let mut local = [0_u8; LOCAL_FIXED_LEN];
-    let local_offset = u64::from(entry.local_offset);
-    read_at(src, local_offset, &mut local)?;
-    if le_u32(&local, 0)? != LOCAL_SIGNATURE {
-        return None;
-    }
-    let skip = u64::from(le_u16(&local, 26)?).checked_add(u64::from(le_u16(&local, 28)?))?;
-    let data_at = local_offset
-        .checked_add(LOCAL_FIXED_LEN as u64)?
-        .checked_add(skip)?;
-    let mut data = vec![0_u8; usize::try_from(entry.compressed).ok()?];
-    read_at(src, data_at, &mut data)?;
-    match entry.method {
-        METHOD_STORED => Some(data),
-        METHOD_DEFLATED => easyoffice_formats::inflate_raw(&data, MAX_THUMBNAIL_BYTES).ok(),
-        _ => None,
-    }
+/// The archive in `src` when its end record is within the limits above.
+fn open<R: Read + Seek>(src: &mut R) -> Option<ZipArchive<&mut R>> {
+    central_directory_limits(src)?;
+    let config = Config {
+        archive_offset: ArchiveOffset::Known(0),
+    };
+    ZipArchive::with_config(config, src).ok()
 }
 
 /// What the central directory declares the parts of the package to inflate to, added up. `None`
-/// when the directory cannot be read (damaged, ZIP64) or has more than [`MAX_ENTRIES`] entries.
+/// when the directory cannot be read (damaged, ZIP64) or is over the shell's limits.
 pub fn declared_total<R: Read + Seek>(src: &mut R) -> Option<u64> {
-    let (offset, size, entries) = find_central_directory(src)?;
-    if size == 0 || size > MAX_CENTRAL_DIR_BYTES || entries > MAX_ENTRIES {
-        return None;
-    }
-    let mut directory = vec![0_u8; usize::try_from(size).ok()?];
-    read_at(src, offset, &mut directory)?;
-    let mut at = 0_usize;
+    let mut archive = open(src)?;
     let mut total = 0_u64;
-    for _ in 0..entries {
-        if le_u32(&directory, at)? != CENTRAL_SIGNATURE {
-            return None;
-        }
-        total = total.checked_add(u64::from(le_u32(&directory, at + 24)?))?;
-        at = at
-            .checked_add(CENTRAL_FIXED_LEN)?
-            .checked_add(usize::from(le_u16(&directory, at + 28)?))?
-            .checked_add(usize::from(le_u16(&directory, at + 30)?))?
-            .checked_add(usize::from(le_u16(&directory, at + 32)?))?;
+    for index in 0..archive.len() {
+        total = total.checked_add(archive.by_index_raw(index).ok()?.size())?;
     }
     Some(total)
 }
 
 pub fn read_thumbnail<R: Read + Seek>(src: &mut R) -> Option<Vec<u8>> {
-    let (offset, size, entries) = find_central_directory(src)?;
-    if size == 0 || size > MAX_CENTRAL_DIR_BYTES {
-        return None;
+    let mut archive = open(src)?;
+    let limit = u64::try_from(MAX_THUMBNAIL_BYTES).ok()?;
+    // The best-ranked entry that may be read at all (not encrypted, within the picture limit);
+    // the first one in directory order wins a tie.
+    let mut candidates: Vec<(usize, usize)> = archive
+        .file_names()
+        .enumerate()
+        .filter_map(|(index, name)| Some((thumbnail_rank(name.as_bytes())?, index)))
+        .collect();
+    candidates.sort_by_key(|&(rank, index)| (rank, index));
+    for (_, index) in candidates {
+        let mut file = archive.by_index_raw(index).ok()?;
+        if file.encrypted() || file.compressed_size() > limit || file.size() > limit {
+            continue;
+        }
+        let method = file.compression();
+        let mut data = Vec::with_capacity(usize::try_from(file.compressed_size()).ok()?);
+        file.by_ref().take(limit + 1).read_to_end(&mut data).ok()?;
+        return if method == CompressionMethod::STORE {
+            Some(data)
+        } else if method == CompressionMethod::DEFLATE {
+            easyoffice_formats::inflate_raw(&data, MAX_THUMBNAIL_BYTES).ok()
+        } else {
+            None
+        };
     }
-    let mut directory = vec![0_u8; usize::try_from(size).ok()?];
-    read_at(src, offset, &mut directory)?;
-    let entry = find_entry(&directory, entries)?;
-    read_entry_data(src, &entry)
+    None
 }
 
 #[cfg(test)]
