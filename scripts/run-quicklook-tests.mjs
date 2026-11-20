@@ -5,7 +5,7 @@
 // (`node scripts/checkout-rhwp.mjs`).
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { MIN_MACOS, repoRoot, rustRoot } from "./quicklook-config.mjs";
+import { MIN_MACOS, RUST_TARGETS, repoRoot, rustRoot } from "./quicklook-config.mjs";
 
 if (process.platform !== "darwin") {
   console.log("[quicklook] non-macOS platform; skipping the Quick Look crate checks");
@@ -15,8 +15,11 @@ if (process.platform !== "darwin") {
 const manifest = join(rustRoot, "Cargo.toml");
 run("cargo", ["fmt", "--manifest-path", manifest, "--", "--check"]);
 run("cargo", ["clippy", "--manifest-path", manifest, "--locked", "--all-targets", "--", "-D", "warnings"]);
-// Release: the hostile-input tests render real documents, which takes minutes in a debug build.
-run("cargo", ["test", "--manifest-path", manifest, "--locked", "--release"]);
+// Release: the hostile-input tests render real documents, which takes minutes in a debug build. The
+// explicit host target puts the artifacts where `build-quicklook-macos.mjs` builds that architecture, so
+// the minutes spent compiling rhwp here are not spent again by the extension build (PD-262).
+const hostTarget = process.arch === "arm64" ? RUST_TARGETS.arm64 : RUST_TARGETS.x86_64;
+run("cargo", ["test", "--manifest-path", manifest, "--locked", "--release", "--target", hostTarget]);
 
 function run(command, args) {
   console.log(`[quicklook] ${command} ${args.join(" ")}`);
