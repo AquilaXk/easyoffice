@@ -540,8 +540,7 @@
     function renderKanbanView(table, query) {
       const wrap = el("div", "base-kanban-wrap"), lbl = setAttr(el("label", "base-subview-label", "기준 필드"), "for", "base-kanban-field-select");
       const sel = mkSel("sb-select", "보드 기준 필드", "base-kanban-field-select");
-      const selectFields = query.fields.filter((f) => f.type === "select");
-      const candidates = selectFields.length > 0 ? selectFields : query.fields.filter((f) => f.type !== "formula");
+      const candidates = query.fields.filter((f) => f.type === "select" || f.type === "multiSelect");
       for (const f of candidates) addOpt(sel, f.id, f.name);
       const chosen = candidates.find((f) => f.id === table.kanbanFieldId) || candidates[0] || null;
       if (chosen) { table.kanbanFieldId = chosen.id; sel.value = chosen.id; }
@@ -549,12 +548,26 @@
       wrap.appendChild(appendAll(el("div", "base-subview-bar"), lbl, sel));
       if (!chosen) { wrap.appendChild(el("p", "base-empty-hint", "보드로 분류할 필드가 없습니다.")); return wrap; }
 
-      const columns = [...(chosen.options || []).map((o) => ({ key: o, label: o })), { key: "", label: "미분류" }];
+      const multi = chosen.type === "multiSelect", options = chosen.options || [];
+      const columns = [...options.map((o) => ({ key: o, label: o })), { key: "", label: "미분류" }];
       const buckets = new Map(columns.map((c) => [c.key, []]));
-      for (const row of query.rows) {
-        const v = String(row.values[chosen.id] ?? "").trim();
-        buckets.get(buckets.has(v) ? v : "").push(row);
-      }
+      const keysOf = (value) => {
+        const own = (Array.isArray(value) ? value : [value]).map((v) => String(v ?? "").trim()).filter((v) => buckets.has(v) && v !== "");
+        return own.length > 0 ? own : [""];
+      };
+      for (const row of query.rows) for (const key of keysOf(row.values[chosen.id])) buckets.get(key).push(row);
+      // A card moves from its column to another one of the field's options (or to 미분류); the same column, or a value
+      // outside the options, writes nothing, and a multi-select card keeps the tags of its other columns.
+      const moveCard = (recId, fromKey, toKey) => {
+        if (toKey === fromKey || (toKey !== "" && !options.includes(toKey))) return;
+        const rec = activeTable()?.records.find((r) => r.id === recId);
+        if (!rec) return;
+        if (!multi) { updateCell(recId, chosen.id, toKey); return; }
+        const next = keysOf(rec.values[chosen.id]).filter((k) => k !== "" && k !== fromKey);
+        if (toKey !== "") next.push(toKey);
+        updateCell(recId, chosen.id, next);
+      };
+      let draggedFromKey = "";
       const colsEl = el("div", "base-kanban-columns"), primaryField = query.fields[0];
       for (const col of columns) {
         const colEl = el("div", "base-kanban-col");
@@ -564,7 +577,7 @@
           e.preventDefault?.();
           const recId = e.dataTransfer?.getData?.("text/plain") || draggedRecordId;
           draggedRecordId = "";
-          if (recId) updateCell(recId, chosen.id, col.key);
+          if (recId) moveCard(recId, draggedFromKey, col.key);
         });
         const items = buckets.get(col.key) || [];
         const colHead = appendAll(el("div", "base-kanban-col-head"), el("span", "base-kanban-col-title", col.label), el("span", "base-kanban-count", String(items.length)));
@@ -572,7 +585,7 @@
         for (const row of items) {
           const recId = row.record.id, card = setAttr(el("article", "base-kanban-card"), "draggable", "true");
           card.dataset.recordId = recId;
-          card.addEventListener("dragstart", (e) => { draggedRecordId = recId; e.dataTransfer?.setData?.("text/plain", recId); });
+          card.addEventListener("dragstart", (e) => { draggedRecordId = recId; draggedFromKey = col.key; e.dataTransfer?.setData?.("text/plain", recId); });
           const titleTxt = (primaryField ? row.displays[primaryField.id] : "") || "(제목 없음)";
           card.appendChild(el("div", "base-kanban-card-title", titleTxt));
           const badges = el("div", "base-kanban-badges");
@@ -586,10 +599,11 @@
           const moveSel = mkSel("sb-select base-kanban-move-select", `상태 변경: ${titleTxt}`);
           for (const optCol of columns) addOpt(moveSel, optCol.key, optCol.label);
           moveSel.value = col.key;
-          moveSel.addEventListener("change", () => updateCell(recId, chosen.id, moveSel.value));
+          moveSel.addEventListener("change", () => moveCard(recId, col.key, moveSel.value));
           card.appendChild(moveSel); cardsEl.appendChild(card);
         }
-        appendAll(colEl, colHead, cardsEl, mkBtn("base-kanban-add-btn", "+ 새 레코드", () => addRecord({ [chosen.id]: col.key }), "", `${col.label} 새 레코드`));
+        const fresh = multi ? (col.key ? [col.key] : []) : col.key;
+        appendAll(colEl, colHead, cardsEl, mkBtn("base-kanban-add-btn", "+ 새 레코드", () => addRecord({ [chosen.id]: fresh }), "", `${col.label} 새 레코드`));
         colsEl.appendChild(colEl);
       }
       wrap.appendChild(colsEl);
