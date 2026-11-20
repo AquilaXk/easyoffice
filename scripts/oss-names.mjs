@@ -96,6 +96,7 @@ export const STANDARD_IDENTIFIERS_B64 = [
   "QWRvYmUtSWRlbnRpdHktVUNT",
   "QWRvYmUtSWRlbnRpdHktMA==",
   "L1JlZ2lzdHJ5IChBZG9iZSk=",
+  "U3RyKGIiQWRvYmUiKQ==",
   "UG93ZXJQb2ludCBEb2N1bWVudA==",
   "aHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS9vZmZpY2Uvd29yZC8yMDEwL3dvcmRtbA==",
 ];

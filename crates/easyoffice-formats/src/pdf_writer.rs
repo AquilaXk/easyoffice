@@ -8,7 +8,7 @@
 //! information strings use PDFDocEncoding for ASCII and UTF-16BE with a byte-order mark otherwise.
 //!
 //! The objects (catalog, page tree, pages, fonts, pictures, annotations, information dictionary) and
-//! the cross-reference table are written by the `pdf-writer` crate (PD-269, step 4). This file
+//! the cross-reference table are written by the PDF writing crate the engine links (PD-269, step 4). This file
 //! keeps what is the engine's own: which objects a page needs and their numbers, the page
 //! content (line breaking, mixed fonts, watermark and stamp markers) and the `/PageNumber` entry the
 //! engine's reader looks for.

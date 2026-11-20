@@ -5,9 +5,10 @@
 //! bottom-left, bottom-right as viewers write them), `/C`, `/Contents` and `/F 4`, plus an
 //! appearance stream `/AP /N` so a viewer that does not draw its own shows the same marks.
 //!
-//! The dictionaries are written with the `pdf-writer` crate (PD-269). The highlight appearance is
-//! that of the pdf.js editor (Apache-2.0, structure only, no code copied): a rectangle filled with
-//! the color under `/BM /Multiply` so the text stays readable.
+//! The dictionaries are written with the PDF writing crate the engine links (PD-269). The highlight
+//! appearance is that of a browser PDF viewer's editor (structure only, no code copied; see
+//! THIRD_PARTY_NOTICES.md): a rectangle filled with the color under `/BM /Multiply` so the text
+//! stays readable.
 //!
 //! The phrase is searched in the source lines (before the lines are broken), so an occurrence
 //! that crosses a line or page break is found; each output line it touches gets its own quad,

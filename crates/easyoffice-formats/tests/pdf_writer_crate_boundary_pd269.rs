@@ -1,4 +1,4 @@
-//! The engine's PDF writer builds its dictionaries and cross-reference table with the `pdf-writer`
+//! The engine's PDF writer builds its dictionaries and cross-reference table with a PDF writing
 //! crate (PD-269, step 4). These tests hold what the crate does not promise: the same input writes
 //! the same bytes on every run and every operating system, the table points at the objects it
 //! lists, and the engine's own reader still accepts the result.

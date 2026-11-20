@@ -9575,7 +9575,7 @@ SOFTWARE.
 
 ## Engine code adapted from open-source Rust crates
 
-Since PD-269 the engine crates link maintained crates under permissive licences instead of re-implementing them. `crates/easyoffice-formats` depends on `adler2` (`0BSD OR MIT OR Apache-2.0`), `base64` (`MIT OR Apache-2.0`), `crc32fast` (`MIT OR Apache-2.0`), `encoding_rs` (`(Apache-2.0 OR MIT) AND BSD-3-Clause`), `miniz_oxide` (`MIT OR Zlib OR Apache-2.0`), `quick-xml` (`MIT`), `serde` and `serde_json` (`MIT OR Apache-2.0`), `sha1` and `sha2` (`MIT OR Apache-2.0`) and `zip` (`MIT`, no compression feature on); their transitive crates are the ones counted in the sections above and below (`cargo metadata --locked`). No code of these crates is copied; the licence texts travel in their source packages, and the texts of the three notices that name a copyright holder are kept below. Code that is still ported or re-implemented from another project is listed after them.
+Since PD-269 the engine crates link maintained crates under permissive licences instead of re-implementing them. `crates/easyoffice-formats` depends on `adler2` (`0BSD OR MIT OR Apache-2.0`), `base64` (`MIT OR Apache-2.0`), `crc32fast` (`MIT OR Apache-2.0`), `encoding_rs` (`(Apache-2.0 OR MIT) AND BSD-3-Clause`), `miniz_oxide` (`MIT OR Zlib OR Apache-2.0`), `pdf-writer` 0.12 (`MIT OR Apache-2.0`, PD-269 step 4: the PDF dictionaries and cross-reference table of `pdf_writer.rs`, `pdf_image.rs` and `pdf_highlight.rs`; the version the desktop shell links, so the lock file holds one copy), `quick-xml` (`MIT`), `serde` and `serde_json` (`MIT OR Apache-2.0`), `sha1` and `sha2` (`MIT OR Apache-2.0`) and `zip` (`MIT`, no compression feature on); their transitive crates are the ones counted in the sections above and below (`cargo metadata --locked`). No code of these crates is copied; the licence texts travel in their source packages, and the texts of the three notices that name a copyright holder are kept below. Code that is still ported or re-implemented from another project is listed after them.
 
 ### base64 (MIT OR Apache-2.0)
 
@@ -9803,9 +9803,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### PDF text markup annotations (structure reference)
+### PDF text markup annotations (appearance reference)
 
-`crates/easyoffice-formats/src/pdf_highlight.rs` writes highlight and underline annotations (ISO 32000-1 §12.5.6.10). It follows the annotation dictionary layout of pdf-writer 0.15 (https://github.com/typst/pdf-writer, `src/annotations.rs` `AnnotationType::Highlight` / `Underline` and `quad_points`; MIT OR Apache-2.0, authors Laurenz and Martin Haug) and the highlight appearance of the pdf.js editor (https://github.com/mozilla/pdf.js, Apache-2.0): a rectangle filled with the color under the multiply blend mode. No source is copied and no crate is linked; the notice is kept because the structure is derived from them.
+`crates/easyoffice-formats/src/pdf_highlight.rs` writes highlight and underline annotations (ISO 32000-1 §12.5.6.10) through the `pdf-writer` crate (PD-269 step 4; its licence text is the pdf-writer entry of the generated section above). The highlight appearance follows the pdf.js editor (https://github.com/mozilla/pdf.js, Apache-2.0): a rectangle filled with the color under the multiply blend mode. No source of either project is copied; the notice is kept because the appearance is derived from pdf.js.
 
 ### quick-xml (MIT)
 
