@@ -23,7 +23,7 @@ function spyOnConvertIpc(host) {
   return requests;
 }
 
-test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, XLSX/CSV/TSV save/export, print preview, and Copilot", async () => {
+test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, edit package save, XLSX/CSV/TSV export, print preview, and Copilot", async () => {
   const storage = createMemoryStorage();
   const { document, host, sandbox, downloads, userClick, advanceTimers } = await createWorkspaceHarness({
     search: "?module=BASE&win=w-base-1",
@@ -71,15 +71,25 @@ test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, XLSX/CSV/TS
   const autosaved = storage.getItem(AUTOSAVE_KEY + ".w-base-1");
   assert.ok(autosaved && autosaved.includes("서버 라이선스"), "BASE state persisted in workspace autosave");
 
-  // Ctrl+S saves as XLSX via convert_document_format
-  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  // The XLSX button is an export: it writes the file and leaves the window unsaved.
+  userClick(document.getElementById("btn-base-export-xlsx"));
   await flushAsyncTurns(15);
-  assert.ok(ipcRequests.length >= 1, "Ctrl+S invoked convert_document_format");
   const xlsxReq = ipcRequests.at(-1);
   assert.equal(xlsxReq.sourceFormat, "xlsx");
   assert.equal(xlsxReq.targetFormat, "xlsx");
   assert.ok(Array.isArray(xlsxReq.sheets) && xlsxReq.sheets.length === 1);
   assert.ok(downloads.some((d) => d.download.endsWith(".xlsx")), "XLSX download triggered");
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 1, "an export does not clear the unsaved mark");
+
+  // Ctrl+S saves the edit package (.eobase) with the whole model, and that clears the unsaved mark.
+  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  await flushAsyncTurns(15);
+  const saveReq = ipcRequests.at(-1);
+  assert.equal(saveReq.action, "encode_package");
+  assert.equal(saveReq.kind, "base");
+  assert.match(JSON.parse(saveReq.model).tables[0].fields.map((f) => f.name).join(","), /합계/);
+  assert.ok(downloads.some((d) => d.download.endsWith(".eobase")), "edit package download triggered");
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "saving the package clears the unsaved mark");
 
   // CSV and TSV export buttons
   userClick(document.getElementById("btn-base-export-csv"));
@@ -105,7 +115,7 @@ test("PD-259 BASE shell integration: launch, undo/redo, dirty guard, XLSX/CSV/TS
   assert.match(copilotCtx.context.doc.paragraphs.join("\n"), /서버 라이선스/);
 });
 
-test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Delete key, PDF save, print preview, and Copilot", async () => {
+test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Delete key, edit package save, PDF export, print preview, and Copilot", async () => {
   const { document, host, sandbox, downloads, userClick, advanceTimers } = await createWorkspaceHarness({
     search: "?module=BOARD&win=w-board-1",
   });
@@ -156,15 +166,25 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
   assert.equal(boardStudio.getState().nodes.some((n) => n.id === b.id), false);
   assert.equal(boardStudio.getState().connectors.length, 0, "incident connector cleaned up with deleted node");
 
-  // Ctrl+S saves BOARD as vector PDF via pptx -> pdf convert_document_format
-  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  // The PDF button is an export and leaves the window unsaved.
+  userClick(document.getElementById("btn-board-export-pdf"));
   await flushAsyncTurns(15);
-  assert.ok(ipcRequests.length >= 1, "Ctrl+S invoked convert_document_format for BOARD");
   const pdfReq = ipcRequests.at(-1);
   assert.equal(pdfReq.sourceFormat, "pptx");
   assert.equal(pdfReq.targetFormat, "pdf");
   assert.ok(Array.isArray(pdfReq.slides) && pdfReq.slides[0].elements.length >= 3);
   assert.ok(downloads.some((d) => d.download.endsWith(".pdf")), "PDF download triggered");
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 1, "an export does not clear the unsaved mark");
+
+  // Ctrl+S saves the edit package (.eoboard) with nodes and connectors.
+  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  await flushAsyncTurns(15);
+  const saveReq = ipcRequests.at(-1);
+  assert.equal(saveReq.action, "encode_package");
+  assert.equal(saveReq.kind, "board");
+  assert.ok(JSON.parse(saveReq.model).nodes.length >= 3);
+  assert.ok(downloads.some((d) => d.download.endsWith(".eoboard")), "edit package download triggered");
+  assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "saving the package clears the unsaved mark");
 
   // Element analysis dialog + Print preview + Copilot context
   userClick(document.getElementById("btn-board-analyze"));

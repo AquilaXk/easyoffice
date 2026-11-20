@@ -918,7 +918,7 @@
   }
 
   const KNOWN_DOC_EXTENSIONS = [
-    "docx?", "hwpx?", "hwtx?", "hwt", "xlsx?", "ods", "csv", "tsv", "pptx?", "ppsx", "odp", "odt", "pdf", "rtf", "md", "markdown", "txt", "pages",
+    "docx?", "hwpx?", "hwtx?", "hwt", "xlsx?", "ods", "csv", "tsv", "pptx?", "ppsx", "odp", "odt", "pdf", "rtf", "md", "markdown", "txt", "pages", "eobase", "eoboard",
   ];
   const KNOWN_DOC_EXT_RE = new RegExp(String.raw`\.(?:${KNOWN_DOC_EXTENSIONS.join("|")})$`, "i");
 

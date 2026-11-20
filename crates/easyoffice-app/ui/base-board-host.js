@@ -117,6 +117,88 @@
     return { aspect: payload.aspect || "16:9", slides: payload.slides };
   }
 
+  // ---- edit package (.eobase / .eoboard, PD-265) ----------------------------------------------------------------------
+  // The package holds the module's model; PDF and XLSX are exports. The engine builds and reads the container and checks
+  // its limits (`native_package.rs`); the model is checked here by the module's own reader before anything is replaced.
+
+  const PACKAGE_EXT = Object.freeze({ BASE: "eobase", BOARD: "eoboard" });
+  const MODEL_VERSION = 1;
+
+  function boardPackageParts() {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__, state = boardStudio.getState();
+    const media = [], pathByImage = new Map();
+    const nodes = state.nodes.map((node) => {
+      if (node.kind !== "image") return node;
+      let path = pathByImage.get(node.imageId);
+      if (!path) {
+        const image = utils.getDocImage(node.imageId);
+        if (!image) throw new Error("그림 데이터를 찾을 수 없어 저장하지 못했습니다: " + (node.alt || node.id));
+        path = "media/img-" + (media.length + 1) + "." + (image.format === "jpg" ? "jpg" : "png");
+        media.push({ path, base64: image.base64 });
+        pathByImage.set(node.imageId, path);
+      }
+      const { imageId, ...rest } = node;
+      return { ...rest, media: path };
+    });
+    return { model: { version: MODEL_VERSION, nodes, connectors: state.connectors, viewport: state.viewport }, media };
+  }
+
+  // The `convert_document_format` request that builds the package of the open BASE or BOARD document.
+  function buildPackageRequest(mod) {
+    const M = host.__EASYOFFICE_BASE_MODEL__;
+    if (mod === "BASE") return { action: "encode_package", kind: "base", model: JSON.stringify(baseStudio ? baseStudio.getState() : M.createInitialBaseState()), media: [] };
+    if (!boardStudio) throw new Error("보드를 사용할 수 없습니다.");
+    const { model, media } = boardPackageParts();
+    return { action: "encode_package", kind: "board", model: JSON.stringify(model), media };
+  }
+
+  async function savePackage(mod, deliver, fileBase) {
+    let reply;
+    try {
+      reply = await runtime.invokeIpc("convert_document_format", JSON.stringify(buildPackageRequest(mod)));
+    } catch (err) {
+      return { ok: false, failure: err?.message || String(err) };
+    }
+    const base64 = String(reply?.convertedBase64 || "");
+    if (!base64) return { ok: false, failure: "패키지 결과가 비어 있습니다" };
+    const delivery = await deliver(base64, fileBase, PACKAGE_EXT[mod]);
+    return { ...delivery, bytes: Number(reply.outputBytes) || 0 };
+  }
+
+  function parseModelText(text) {
+    let model;
+    try { model = JSON.parse(String(text)); } catch { throw new Error("파일의 모델을 읽을 수 없습니다."); }
+    if (!model || typeof model !== "object" || Array.isArray(model)) throw new Error("파일의 모델 형식이 올바르지 않습니다.");
+    return model;
+  }
+
+  function decodeBoardModel(model, media) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__, paths = new Set(media.map((item) => item.path));
+    const nodes = Array.isArray(model.nodes) ? model.nodes : [];
+    for (const node of nodes) {
+      if (node?.kind === "image" && !paths.has(node.media)) throw new Error("그림 파일이 패키지에 없습니다: " + String(node.media));
+    }
+    const idByPath = new Map(media.map((item) => [item.path, utils.registerDocImage(item.base64, item.mediaType === "image/jpeg" ? "jpg" : "png")]));
+    const withImages = nodes.map((node) => {
+      if (node?.kind !== "image") return node;
+      const { media: path, ...rest } = node;
+      return { ...rest, imageId: idByPath.get(path) };
+    });
+    const state = host.__EASYOFFICE_BOARD_CODEC__.normalizeBoardState({ ...model, nodes: withImages }, true);
+    return { fields: { boardState: { nodes: state.nodes, connectors: state.connectors, viewport: state.viewport } }, itemCount: state.nodes.length };
+  }
+
+  // The decoded reply of an opened package as the workspace snapshot fields it replaces; throws when the model is not valid.
+  function decodePackage(reply) {
+    const model = parseModelText(reply.model);
+    if (reply.module === "BASE") {
+      const hydrated = host.__EASYOFFICE_BASE_MODEL__.hydrateBaseState(model);
+      if (!hydrated.ok) throw new Error(hydrated.error);
+      return { fields: { baseState: hydrated.state }, itemCount: hydrated.state.tables.length };
+    }
+    return decodeBoardModel(model, Array.isArray(reply.media) ? reply.media : []);
+  }
+
   function buildPrintPages(mod, doc, rules) {
     if (mod === "BASE") {
       if (!baseStudio) throw new Error("인쇄할 내용이 없습니다.");
@@ -214,6 +296,8 @@
     captureSnapshotFields,
     restoreSnapshotFields,
     buildConversionContent,
+    savePackage,
+    decodePackage,
     buildPrintPages,
     outlineItems,
     extractPlainText,

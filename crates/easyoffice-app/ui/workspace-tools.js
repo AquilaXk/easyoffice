@@ -312,13 +312,14 @@
       }
     }
 
-    const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", BASE: "xlsx", BOARD: "pdf", PDF: "pdf" };
+    const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", BASE: "eobase", BOARD: "eoboard", PDF: "pdf" };
     const BIDIRECTIONAL_SAVE_EXTS = {
       DOC: new Set(["docx", "odt", "rtf", "md", "txt", "hwpx"]),
       HWP: new Set(["hwpx"]),
       SHEET: new Set(["xlsx", "xls", "ods", "csv", "tsv"]),
       SLIDE: new Set(["pptx", "ppsx", "odp"]),
-      BASE: new Set(["xlsx", "csv", "tsv"]),
+      BASE: new Set(["eobase"]),
+      BOARD: new Set(["eoboard"]),
     };
 
     function openedExtensionOf(mod) {
@@ -340,6 +341,24 @@
       return { ext: fallbackExt, inPlace: false };
     }
 
+    // BASE and BOARD save their own edit package (.eobase / .eoboard); XLSX, CSV and PDF are exports and leave the saved state alone.
+    async function saveEditPackage(mod, spec) {
+      const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;
+      const label = spec.ext.toUpperCase();
+      const saved = await host.__EASYOFFICE_BASE_BOARD_HOST__.savePackage(mod, deliver, resolveSaveFileBase(mod));
+      if (saved.cancelled) {
+        setStatusFeedback("문서 저장 취소 (" + label + "): 저장 위치를 선택하지 않았습니다");
+        return false;
+      }
+      if (!saved.ok) {
+        setStatusFeedback("문서 저장 실패 (" + label + "): " + (saved.failure || saved.error || "파일 다운로드를 시작하지 못했습니다"));
+        return false;
+      }
+      setStatusFeedback("문서 저장 완료 (" + saved.name + " · " + saved.bytes + "B)");
+      noteSavedName(saved.name);
+      return true;
+    }
+
     // `saveAs` and lossy decode formats always ask where to save (the shell's save dialog), never overwriting the opened file.
     async function runSaveActiveModuleDocument(closing, saveAs) {
       await sheetController.commitPendingFocusedSheetCell(true);
@@ -353,7 +372,8 @@
         ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
         : defaultSaveSpecForModule(curMod, saveAs);
       const dstExt = spec.ext || "docx";
-      let srcExt = curMod === "BASE" ? "xlsx" : curMod === "BOARD" ? "pptx" : dstExt;
+      if (curMod === "BASE" || curMod === "BOARD") return saveEditPackage(curMod, spec);
+      let srcExt = dstExt;
       let title = resolveSaveFileBase(curMod);
       let content;
       if (isConv) {

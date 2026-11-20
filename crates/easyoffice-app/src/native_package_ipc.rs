@@ -40,6 +40,8 @@ impl EasyOfficeIpcRouter {
         push_str_field(&mut out, "module", module);
         out.push(',');
         push_str_field(&mut out, "format", kind.extension());
+        out.push(',');
+        push_str_field(&mut out, "kind", kind.id());
         out.push_str(",\"model\":\"");
         Self::escape_json_into(&mut out, &package.model);
         out.push_str("\",\"media\":[");
@@ -63,11 +65,7 @@ impl EasyOfficeIpcRouter {
     /// when the same reader that opens them accepts them.
     pub(crate) fn encode_native_package(entries: &JsonEntries) -> Result<String, EasyOfficeError> {
         let kind = Self::optional_json_str(entries, "kind")?
-            .and_then(|name| match name {
-                "base" => Some(PackageKind::Base),
-                "board" => Some(PackageKind::Board),
-                _ => None,
-            })
+            .and_then(PackageKind::from_id)
             .ok_or_else(|| invalid("kind는 base 또는 board여야 합니다."))?;
         let model = Self::optional_json_str(entries, "model")?
             .ok_or_else(|| invalid("model이 필요합니다."))?

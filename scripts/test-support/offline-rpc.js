@@ -753,6 +753,7 @@ function offlineSourceConversion(parsed) {
     hwp: "HWP", hwpx: "HWP", hwt: "HWP", hwtx: "HWP",
     xlsx: "SHEET", xls: "SHEET", ods: "SHEET", csv: "SHEET", tsv: "SHEET",
     pptx: "SLIDE", ppt: "SLIDE", ppsx: "SLIDE", odp: "SLIDE", pdf: "PDF",
+    eobase: "BASE", eoboard: "BOARD",
   };
   const FIXTURE_PREFIX = "EOFIXTURE:";
 
@@ -772,6 +773,11 @@ function offlineSourceConversion(parsed) {
     const text = new TextDecoder("utf-8").decode(bytes);
     const base = { status: "OK", action: "decode", fileName, format: ext, module: SOURCE_MODULES[ext],
       title: "", sourceBytes: bytes.length, specification: "오프라인 테스트 디코더", warnings: [] };
+    // The edit package the offline `encode_package` made: its model and pictures as JSON (the real container is the engine's).
+    if (ext === "eobase" || ext === "eoboard") {
+      const pkg = JSON.parse(text);
+      return { ...base, kind: ext === "eobase" ? "base" : "board", model: pkg.model, media: (pkg.media || []).map((m) => ({ ...m, mediaType: m.path.endsWith(".jpg") ? "image/jpeg" : "image/png" })) };
+    }
     if (text.startsWith(FIXTURE_PREFIX)) {
       const model = JSON.parse(text.slice(FIXTURE_PREFIX.length));
       let kind = "document";
@@ -1359,6 +1365,10 @@ function offlineSourceConversion(parsed) {
         let fields;
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
+          if (parsed.action === "encode_package") {
+            const json = JSON.stringify({ kind: parsed.kind, model: parsed.model, media: parsed.media });
+            return { status: "OK", format: parsed.kind === "base" ? "eobase" : "eoboard", outputBytes: json.length, convertedBase64: encodeUtf8Base64(json), warnings: [] };
+          }
           if (parsed.sourceBase64 !== undefined) return offlineSourceConversion(parsed);
           if (parsed.action === "inspect" || parsed.action === "readback") {
             return {

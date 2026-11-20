@@ -16,7 +16,7 @@
   const MAX_HWP_LABEL = "64 MiB";
   const HWP_EXTENSIONS = new Set(["hwp", "hwpx", "hwt", "hwtx"]);
   const GRID_LIMITS = { maxRows: 1048576, maxCols: 16384 }; // the sheet editor addresses the full XLSX grid (A..XFD)
-  const MODULE_LABELS = { DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF 스튜디오" };
+  const MODULE_LABELS = { DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", BASE: "데이터베이스", BOARD: "보드", PDF: "PDF 스튜디오" };
   const SUPPORTED_EXTENSIONS = [
     "docx", "doc", "odt", "rtf", "md", "markdown", "txt",
     "hwp", "hwpx", "hwt", "hwtx",
@@ -24,6 +24,8 @@
     "pptx", "ppt", "ppsx", "odp",
     "pdf", "pages",
   ];
+  // What the workspace picker offers on top of the converter's: the edit packages of BASE and BOARD (PD-265).
+  const PACKAGE_EXTENSIONS = ["eobase", "eoboard"];
 
   function baseName(raw) {
     return String(raw || "").split(/[\\/]/).pop().trim();
@@ -662,6 +664,11 @@
       } else if (mod === "SLIDE") {
         next.slides = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.hydrateDecodedDeck(res, createEmptySlideStyleFields);
         next.activeSlideIndex = 0;
+      } else if (mod === "BASE" || mod === "BOARD") {
+        // A package whose model is not valid is refused whole, before any state is replaced.
+        const decoded = host.__EASYOFFICE_BASE_BOARD_HOST__.decodePackage(res);
+        Object.assign(next, decoded.fields);
+        res.itemCount = decoded.itemCount;
       } else if (mod === "PDF") {
         applyPdf(next, res, name);
       } else {
@@ -680,6 +687,8 @@
     const ITEM_UNIT_BY_KIND = new Map([
       ["workbook", "개 시트"],
       ["slides", "개 슬라이드"],
+      ["base", "개 테이블"],
+      ["board", "개 요소"],
     ]);
     const DEFAULT_ITEM_UNIT = "개 블록";
 
@@ -914,7 +923,7 @@
 
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
-    MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore,
+    MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, PACKAGE_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore,
     converterSourceProblem, converterFormatOption,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

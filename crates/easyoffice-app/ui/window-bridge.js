@@ -19,6 +19,8 @@
     HWP: ["hwp", "hwpx", "hwt", "hwtx"],
     SHEET: ["xlsx", "xls", "ods", "csv", "tsv"],
     SLIDE: ["pptx", "ppt", "ppsx", "odp"],
+    BASE: ["eobase"],
+    BOARD: ["eoboard"],
     PDF: ["pdf"],
   });
   // Smoke step the second window reports once it has loaded (`smoke_steps.rs`).

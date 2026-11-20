@@ -105,7 +105,7 @@ test("PD-260: 빈 초기 상태·4종 노드(도형 6종/텍스트/PNG 그림 �
     ["btn-board-delete", "개체 지우기"],
     ["btn-board-analyze", "요소 분석"],
     ["btn-board-print", "인쇄"],
-    ["btn-board-export-pdf", "PDF로 저장…"],
+    ["btn-board-export-pdf", "PDF로 내보내기"],
     ["btn-board-zoom-reset", "100%"],
     ["btn-board-fit-all", "전체 맞춤"],
   ];

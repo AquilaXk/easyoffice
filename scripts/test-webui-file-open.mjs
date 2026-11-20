@@ -122,7 +122,7 @@ test("Ctrl+O is in the single shortcut table, labelled in the File menu, and ope
 
 test("the hidden input accepts exactly the supported extensions", async () => {
   const { sandbox } = await createOpenHarness();
-  const exts = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__.SUPPORTED_EXTENSIONS;
+  const { SUPPORTED_EXTENSIONS: exts, PACKAGE_EXTENSIONS } = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__;
   const allInputs = [...INDEX_HTML.matchAll(/<input\b[^>]*\bid="([^"]+)"[^>]*\baccept="([^"]+)"/g)];
   assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "sheet-image-file-input", "slide-image-file-input", "conv-source-file"]);
   const imageIds = new Set(["doc-image-input", "sheet-image-file-input", "slide-image-file-input"]);
@@ -130,10 +130,10 @@ test("the hidden input accepts exactly the supported extensions", async () => {
   for (const [, , accept] of imageInputs) assert.equal(accept, ".png,.jpg,.jpeg,image/png,image/jpeg");
   const inputs = allInputs.filter((m) => !imageIds.has(m[1])).map((m) => m[2]);
   assert.equal(inputs.length, 2, "workspace picker and converter picker");
-  for (const accept of inputs) {
-    const byName = (a, b) => a.localeCompare(b);
-    assert.deepEqual(accept.split(",").map((e) => e.replace(/^\./, "")).sort(byName), [...exts].sort(byName));
-  }
+  const byName = (a, b) => a.localeCompare(b);
+  const names = (accept) => accept.split(",").map((e) => e.replace(/^\./, "")).sort(byName);
+  assert.deepEqual(names(inputs[0]), [...exts, ...PACKAGE_EXTENSIONS].sort(byName), "the workspace picker also opens the BASE and BOARD edit packages");
+  assert.deepEqual(names(inputs[1]), [...exts].sort(byName), "the converter has no edit package as a source");
 });
 
 test("opening a DOCX-style model loads formatted blocks into the DOC module and names the tab", async () => {

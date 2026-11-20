@@ -9,7 +9,7 @@
   const MAX_TABLES = 32, MAX_FIELDS_PER_TABLE = 64, MAX_RECORDS_PER_TABLE = 10000;
   const MAX_CELL_CHARS = 8192, MAX_FORMULA_DEPTH = 32, MAX_FORMULA_CHARS = 4096;
   const MAX_JSON_BYTES = 64 * 1024 * 1024, MAX_FILTERS = 64, MAX_SORTS = 16, MAX_OPTIONS = 256;
-  const MAX_FORMULA_CACHE = 1024, MS_PER_DAY = 86400000;
+  const MAX_FORMULA_CACHE = 1024, MS_PER_DAY = 86400000, MAX_RELATION_EVALS = 100000;
 
   const VIEW_MODES = new Set(["grid", "kanban", "calendar"]);
   const FIELD_TYPES = Object.freeze(["text", "number", "select", "multiSelect", "date", "checkbox", "url", "relation", "formula"]);
@@ -419,9 +419,23 @@
     return targetTable && recMap && meta ? { ids, index, targetTable, recMap, meta } : null;
   }
 
-  const readTargetVal = (state, ctx, fld, rec) => (
-    fld.type === "formula" ? evaluateFormula(fld.formula, rec, ctx.targetTable, state, { index: ctx.index, fieldsMeta: ctx.meta }) : rec.values?.[fld.id]
-  );
+  // A formula read through a relation can lead back to the cell being shown (two tables whose title formulas show each other),
+  // or fan out table by table. The cells in the chain are tracked, and one index (one query or one render) pays at most
+  // MAX_RELATION_EVALS such evaluations; past either limit the cell shows the error instead of recursing.
+  const relationChain = new Set();
+  function readTargetVal(state, ctx, fld, rec) {
+    if (fld.type !== "formula") return rec.values?.[fld.id];
+    const key = `${ctx.targetTable.id}/${fld.id}/${rec.id}`, work = ctx.index.relationWork || (ctx.index.relationWork = { left: MAX_RELATION_EVALS });
+    if (relationChain.has(key)) return "#CYCLE!";
+    if (work.left <= 0) return "#ERROR!";
+    work.left -= 1;
+    relationChain.add(key);
+    try {
+      return evaluateFormula(fld.formula, rec, ctx.targetTable, state, { index: ctx.index, fieldsMeta: ctx.meta });
+    } finally {
+      relationChain.delete(key);
+    }
+  }
 
   function resolveRelationItems(state, field, rawValue, indexOpt) {
     const ctx = lookupRelationTarget(state, field, rawValue, indexOpt);
@@ -842,6 +856,20 @@
     };
   }
 
+  // What a state read from a file must hold on top of its shape: unique ids (they key the relation index, the views and the
+  // records' values), and relations that point at a table of the file.
+  function checkStateLinks(tables) {
+    const dup = (items) => { const seen = new Set(); return items.find((item) => seen.size === seen.add(item.id).size)?.id; };
+    const tableIds = new Set(tables.map((t) => t.id));
+    const problems = [
+      [dup(tables), "테이블 ID가 중복되었습니다"],
+      ...tables.flatMap((t) => [[dup(t.fields), "필드 ID가 중복되었습니다"], [dup(t.records), "레코드 ID가 중복되었습니다"],
+        [t.fields.find((f) => f.type === "relation" && !tableIds.has(f.relationTableId))?.name, "관계 필드가 없는 테이블을 가리킵니다"]]),
+    ];
+    const hit = problems.find(([found]) => found !== undefined);
+    return hit ? fail(`${hit[1]}: ${hit[0]}`) : { ok: true };
+  }
+
   function hydrateBaseState(raw) {
     let parsed = raw;
     if (typeof raw === "string") {
@@ -874,6 +902,8 @@
       nextTableSeq: Math.max(tables.length + 1, Number(parsed.nextTableSeq) || tables.length + 1),
       nextFieldSeq: Math.max(1, Number(parsed.nextFieldSeq) || 1), nextRecordSeq: Math.max(1, Number(parsed.nextRecordSeq) || 1), tables,
     };
+    const linked = checkStateLinks(tables);
+    if (!linked.ok) return linked;
     const idx = buildStateIndex(nextState);
     for (const tbl of tables) {
       for (const rec of tbl.records) {

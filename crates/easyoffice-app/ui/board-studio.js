@@ -156,6 +156,35 @@
     return { id, kind: "chart", x, y, w, h, chartType: Object.hasOwn(CHART_LABELS, raw.chartType) ? raw.chartType : "column", title: String(raw.title ?? "차트").slice(0, 160), legend: ["right", "bottom", "top", "left", "none"].includes(raw.legend) ? raw.legend : "right", ...sanitizeChart(raw.categories, raw.series) };
   }
 
+  // The nodes and connectors of a board model, checked one by one. `strict` (a file being opened) refuses the whole
+  // model at the first node or connector that is not valid, so nothing is silently lost; otherwise (a restored
+  // snapshot) such an entry is left out and counted, and every other node still comes back.
+  function normalizeBoardState(next, strict) {
+    const rawNodes = Array.isArray(next?.nodes) ? next.nodes : [], rawConns = Array.isArray(next?.connectors) ? next.connectors : [];
+    if (strict && (rawNodes.length > MAX_NODES || rawConns.length > MAX_CONNECTORS)) throw new Error("보드 요소 또는 연결선 수가 한도를 넘었습니다.");
+    const nodes = [], ids = new Set(), conns = [];
+    let dropped = Math.max(0, rawNodes.length - MAX_NODES) + Math.max(0, rawConns.length - MAX_CONNECTORS);
+    const keep = (make) => { try { return make(); } catch (err) { if (strict) throw err; dropped += 1; return null; } };
+    rawNodes.slice(0, MAX_NODES).forEach((raw, i) => {
+      const node = keep(() => {
+        const n = normalizeBoardNode(raw, "bn-" + (i + 1));
+        if (ids.has(n.id)) throw new Error("요소 ID가 중복되었습니다: " + n.id);
+        return n;
+      });
+      if (node) { ids.add(node.id); nodes.push(node); }
+    });
+    rawConns.slice(0, MAX_CONNECTORS).forEach((c, i) => {
+      const conn = keep(() => {
+        if (!c || !ids.has(String(c.fromId)) || !ids.has(String(c.toId)) || c.fromId === c.toId) throw new Error("연결선이 없는 요소를 가리킵니다.");
+        return { id: String(c.id || "bc-" + (i + 1)).slice(0, 64), fromId: String(c.fromId), toId: String(c.toId), fromPort: c.fromPort || "auto", toPort: c.toPort || "auto", routing: c.routing === "curved" ? "curved" : "orthogonal", label: String(c.label ?? "").slice(0, 128) };
+      });
+      if (conn) conns.push(conn);
+    });
+    const vp = next?.viewport || {};
+    const viewport = { panX: round2(clamp(Number(vp.panX) || 0, MIN_COORD, MAX_COORD)), panY: round2(clamp(Number(vp.panY) || 0, MIN_COORD, MAX_COORD)), zoom: clamp(Math.round(Number(vp.zoom) || 100), MIN_ZOOM, MAX_ZOOM) };
+    return { nodes, connectors: conns, viewport, dropped };
+  }
+
   function buildShapeSvg(doc, node) {
     const vw = Math.max(24, Math.round(node.w)), vh = Math.max(20, Math.round(node.h));
     const sw = clamp(Number(node.strokeWidthPt ?? 2), 0, 24), pad = Math.max(1, sw / 2), st = node.shapeType || "rect";
@@ -727,7 +756,7 @@
     }
 
     async function exportPdf(title) {
-      if (state.nodes.length === 0) { notify("PDF로 저장할 보드 요소가 없습니다."); return null; }
+      if (state.nodes.length === 0) { notify("PDF로 내보낼 보드 요소가 없습니다."); return null; }
       const invokeIpc = deps.invokeIpc || host.__EASYOFFICE_INVOKE_BACKEND__;
       if (typeof invokeIpc !== "function") throw new Error("PDF 변환 백엔드를 사용할 수 없습니다.");
       const payload = toSlideDeckPdfPayload(title), res = await invokeIpc("convert_document_format", JSON.stringify(payload));
@@ -804,7 +833,7 @@
         sep(),
         grp("", [tbBtn("btn-board-front", "맨 앞으로 가져오기"), tbBtn("btn-board-back", "맨 뒤로 보내기"), tbBtn("btn-board-delete", "개체 지우기")]),
         sep(),
-        grp("board-tools-group", [tbBtn("btn-board-analyze", "요소 분석"), tbBtn("btn-board-print", "인쇄"), tbBtn("btn-board-export-pdf", "PDF로 저장…")]),
+        grp("board-tools-group", [tbBtn("btn-board-analyze", "요소 분석"), tbBtn("btn-board-print", "인쇄"), tbBtn("btn-board-export-pdf", "PDF로 내보내기")]),
       ]);
 
       zoomLabelEl = ctrlBtn("btn-board-zoom-reset", "100%", "배율 100%로 초기화", "board-zoom-pct");
@@ -875,16 +904,12 @@
     const getState = () => ({ nodes: state.nodes.map((n) => ({ ...n })), connectors: state.connectors.map((c) => ({ ...c })), viewport: { ...state.viewport } });
 
     function replaceState(nextState) {
-      const nextNodes = Array.isArray(nextState?.nodes) ? nextState.nodes.slice(0, MAX_NODES) : [];
-      state.nodes = nextNodes.map((n, i) => normalizeBoardNode(n, "bn-" + (i + 1)));
-      const validIds = new Set(state.nodes.map((n) => n.id));
-      state.connectors = (Array.isArray(nextState?.connectors) ? nextState.connectors.slice(0, MAX_CONNECTORS) : [])
-        .filter((c) => c && validIds.has(String(c.fromId)) && validIds.has(String(c.toId)) && c.fromId !== c.toId)
-        .map((c, i) => ({ id: String(c.id || "bc-" + (i + 1)).slice(0, 64), fromId: String(c.fromId), toId: String(c.toId), fromPort: c.fromPort || "auto", toPort: c.toPort || "auto", routing: c.routing === "curved" ? "curved" : "orthogonal", label: String(c.label ?? "").slice(0, 128) }));
-      const vp = nextState?.viewport || {};
-      state.viewport = { panX: round2(clamp(Number(vp.panX) || 0, MIN_COORD, MAX_COORD)), panY: round2(clamp(Number(vp.panY) || 0, MIN_COORD, MAX_COORD)), zoom: clamp(Math.round(Number(vp.zoom) || 100), MIN_ZOOM, MAX_ZOOM) };
+      const next = normalizeBoardState(nextState, false);
+      state.nodes = next.nodes; state.connectors = next.connectors; state.viewport = next.viewport;
       selectedNodeId = null; selectedConnectorId = null; pendingConnect = null;
       renderAll();
+      if (next.dropped > 0) notify("복원하지 못한 항목 " + next.dropped + "개를 건너뛰었습니다.");
+      return { dropped: next.dropped };
     }
 
     const getConnectorRoute = (id) => routeCache.get(id) || (state.connectors.find((c) => c.id === id) ? router?.routeConnector(state.connectors.find((c) => c.id === id), nodeMap(), state.nodes) : null);
@@ -902,5 +927,5 @@
   }
 
   host.__EASYOFFICE_CREATE_BOARD_STUDIO__ = createBoardStudio;
-  host.__EASYOFFICE_BOARD_CODEC__ = { SHAPE_LABELS, CHART_LABELS, createInitialBoardState, normalizeBoardNode };
+  host.__EASYOFFICE_BOARD_CODEC__ = { SHAPE_LABELS, CHART_LABELS, createInitialBoardState, normalizeBoardNode, normalizeBoardState };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

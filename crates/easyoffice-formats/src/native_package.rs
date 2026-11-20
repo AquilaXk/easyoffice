@@ -64,6 +64,20 @@ impl PackageKind {
         Self::from_extension(name.rsplit_once('.')?.1)
     }
 
+    /// The `kind` name of the IPC requests and replies.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Base => "base",
+            Self::Board => "board",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        [Self::Base, Self::Board]
+            .into_iter()
+            .find(|kind| kind.id() == id)
+    }
+
     pub fn extension(self) -> &'static str {
         match self {
             Self::Base => "eobase",
