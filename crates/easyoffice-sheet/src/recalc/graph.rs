@@ -160,7 +160,8 @@ pub(crate) fn collect_refs(
             | Expr::Name(_)
             | Expr::Array(_)
             | Expr::Var(_)
-            | Expr::Missing => {}
+            | Expr::Missing
+            | Expr::Blank => {}
         }
     }
     out.sort_unstable();

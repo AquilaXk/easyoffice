@@ -73,7 +73,7 @@ impl SheetEngine {
         }
         match expr {
             Expr::Shared(shared) => self.eval_val(&shared.expr, env, ctx, depth),
-            Expr::Missing => Ok(Val::scalar(V::Empty)),
+            Expr::Missing | Expr::Blank => Ok(Val::scalar(V::Empty)),
             Expr::Array(lit) => Ok(Val::grid(Grid::from_rows_checked(
                 ctx,
                 lit.rows,
@@ -649,7 +649,7 @@ pub(crate) fn literal(value: &V) -> Expr {
         V::Text(t) => Expr::Text(t.clone()),
         V::Boolean(b) => Expr::Boolean(*b),
         V::Error(e) => Expr::ErrorLiteral(*e),
-        V::Empty => Expr::Text(String::new()),
+        V::Empty => Expr::Blank,
     }
 }
 

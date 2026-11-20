@@ -171,6 +171,7 @@ fn collect_patches(
         | Expr::Boolean(_)
         | Expr::ErrorLiteral(_)
         | Expr::Missing
+        | Expr::Blank
         | Expr::Name(_)
         | Expr::Var(_)
         | Expr::Array(_)

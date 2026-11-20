@@ -735,6 +735,7 @@ impl SheetEngine {
         }
         let res = match expr {
             Expr::Missing => EvaluatedCellValue::Number(0.0),
+            Expr::Blank => EvaluatedCellValue::Empty,
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
             Expr::Text(s) => {
                 if s.len() > Self::MAX_CELL_TEXT_CHARS

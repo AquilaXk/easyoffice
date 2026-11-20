@@ -442,6 +442,10 @@ impl SheetEngine {
         if let EvaluatedCellValue::Error(e) = val {
             return Err(e);
         }
+        // An empty cell is 0 where a number is wanted.
+        if val == EvaluatedCellValue::Empty {
+            return Ok(0.0);
+        }
         val.as_number().ok_or(FormulaError::Value)
     }
 

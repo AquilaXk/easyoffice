@@ -209,6 +209,7 @@ fn is_leaf(expr: &Expr) -> bool {
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
             | Expr::Missing
+            | Expr::Blank
     )
 }
 

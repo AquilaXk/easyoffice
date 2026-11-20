@@ -794,7 +794,8 @@ impl<'x> DepScanner<'x> {
                 | Expr::Name(_)
                 | Expr::Array(_)
                 | Expr::Var(_)
-                | Expr::Missing => {}
+                | Expr::Missing
+                | Expr::Blank => {}
             }
         }
     }

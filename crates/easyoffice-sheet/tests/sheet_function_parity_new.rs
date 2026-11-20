@@ -347,3 +347,23 @@ fn indirect_reads_r1c1_text() {
     assert_eq!(model._get_text("D8"), "#REF!");
     assert_eq!(model._get_text("D9"), "#REF!");
 }
+
+#[test]
+fn an_empty_cell_in_an_array_reads_as_blank_for_one_value_functions() {
+    let mut model = new_empty_model();
+    model._set("A1", "1");
+    model._set("A3", "3");
+    model._set("B1", "=SUM(ABS(A1:A3))");
+    model._set("C1", "=NOT(A1:A3)");
+    model._set("D1", "=LEN(A1:A3)");
+    model._set("E1", "=ISBLANK(A1:A3)");
+    model._set("F1", "=ISNUMBER(A1:A3)");
+    model._set("G1", "=ROUND(A1:A3,1)");
+    model.evaluate();
+    assert_eq!(model._get_text("B1"), "4");
+    assert_eq!(model._get_text("C2"), "TRUE");
+    assert_eq!(model._get_text("D2"), "0");
+    assert_eq!(model._get_text("E2"), "TRUE");
+    assert_eq!(model._get_text("F2"), "FALSE");
+    assert_eq!(model._get_text("G2"), "0");
+}

@@ -77,6 +77,8 @@ pub enum Expr {
     Boolean(bool),
     ErrorLiteral(FormulaError),
     Missing,
+    /// An empty cell handed to a function as an array element: it reads as blank (0 or "").
+    Blank,
     Cell(PackedCellCoordinate),
     Range(CellRange),
     SheetCell(Box<SheetCellExpr>),
