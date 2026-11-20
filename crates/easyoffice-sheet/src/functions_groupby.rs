@@ -24,6 +24,7 @@ use crate::array::{Closure, Env, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::groupby_axis::{intersect, Entry, Kind, Node, SortKey, Totals, Tree};
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
+use std::collections::hash_map::Entry as MapEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -503,16 +504,18 @@ impl SheetEngine {
                             3 => (3, rt[re.node].parent, ce.node, j),
                             _ => (4, re.node, ct[ce.node].parent, j),
                         };
-                        if !totals.contains_key(&key) {
-                            let set = match key.0 {
-                                0 => ct[key.1].rows.clone(),
-                                1 => rt[key.1].rows.clone(),
-                                2 => groups.all_rows.clone(),
-                                _ => intersect(&rt[key.1].rows, &ct[key.2].rows),
-                            };
-                            totals.insert(key, req.column_grid(&set, j, ctx)?);
-                        }
-                        totals.get(&key).cloned()
+                        Some(match totals.entry(key) {
+                            MapEntry::Occupied(done) => Arc::clone(done.get()),
+                            MapEntry::Vacant(slot) => {
+                                let set = match key.0 {
+                                    0 => ct[key.1].rows.clone(),
+                                    1 => rt[key.1].rows.clone(),
+                                    2 => groups.all_rows.clone(),
+                                    _ => intersect(&rt[key.1].rows, &ct[key.2].rows),
+                                };
+                                Arc::clone(slot.insert(req.column_grid(&set, j, ctx)?))
+                            }
+                        })
                     } else {
                         None
                     };
