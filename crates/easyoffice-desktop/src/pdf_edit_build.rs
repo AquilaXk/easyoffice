@@ -28,7 +28,7 @@
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
 };
-use crate::pdf_edit_carry::{skipped_fields_sentence, Carry};
+use crate::pdf_edit_carry::{skipped_fields_sentence, Carry, Copies};
 use crate::pdf_edit_forms::{process_forms, write_catalog_acroform, PageGeom};
 use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, resource_entries, Limits};
 use crate::pdf_edit_outlines::preserve_outlines;
@@ -164,7 +164,8 @@ pub fn build(
     let mut next = Ref::new(1);
     let (catalog_ref, tree_ref, info_ref) = (next.bump(), next.bump(), next.bump());
     let mut out = Pdf::new();
-    let forms = copy_pages(&mut out, &mut next, &parsed, pages, deadline)?;
+    let copied = copy_pages(&mut out, &mut next, &parsed, pages, &carry, deadline)?;
+    let forms = &copied.forms;
     let overlays = copy_overlays(
         &mut out,
         &mut next,
@@ -314,6 +315,7 @@ pub fn build(
         catalog.outlines(outlines_ref);
     }
     write_catalog_acroform(&mut catalog, &forms_out);
+    carry.write_catalog(&mut catalog, &copied.objects);
     catalog.finish();
     let count = i32::try_from(page_refs.len()).map_err(|_| "쪽 수가 너무 많습니다.")?;
     out.pages(tree_ref).count(count).kids(page_refs);
@@ -377,17 +379,29 @@ fn place_all(
     Ok(placements)
 }
 
+/// What the copier made of the pages and of the objects asked for with them.
+struct Copied {
+    /// The form of each (source, page).
+    forms: HashMap<(usize, usize), Ref>,
+    /// The new reference of each object [`Carry::roots`] named.
+    objects: Copies,
+}
+
 /// Copies the chosen pages of each source into `out`, one call per source so that objects the
-/// pages share (a font used on every page) are copied once. Returns the form of each
-/// (source, page).
+/// pages share (a font used on every page) are copied once. The objects `carry` asks for go in the
+/// same call: they get the same new reference as the page's own copy of the same object.
 fn copy_pages(
     out: &mut Pdf,
     next: &mut Ref,
     parsed: &BTreeMap<usize, ReadPdf>,
     pages: &[PagePlan],
+    carry: &Carry,
     deadline: &Deadline,
-) -> Result<HashMap<(usize, usize), Ref>, String> {
-    let mut forms = HashMap::new();
+) -> Result<Copied, String> {
+    let mut copied = Copied {
+        forms: HashMap::new(),
+        objects: HashMap::new(),
+    };
     for (&source, pdf) in parsed {
         deadline.check()?;
         let indexes: BTreeSet<usize> = pages
@@ -395,24 +409,36 @@ fn copy_pages(
             .filter(|p| p.source == source)
             .map(|p| p.index)
             .collect();
+        let roots = carry.roots(source);
         let queries: Vec<ExtractionQuery> = indexes
             .iter()
             .map(|&i| ExtractionQuery::new_xobject(i))
+            .chain(roots.iter().map(|&r| ExtractionQuery::new_object(r)))
             .collect();
-        let copied = extract(
+        let result = extract(
             pdf,
             Box::new(|| next.bump()),
             ChunkSettings::default(),
             &queries,
         )
         .map_err(|_| "쪽을 복사하지 못했습니다.".to_string())?;
-        out.extend(&copied.chunk);
-        for (&index, root) in indexes.iter().zip(copied.root_refs) {
-            let form = root.map_err(|_| "쪽을 복사하지 못했습니다.".to_string())?;
-            forms.insert((source, index), form);
+        out.extend(&result.chunk);
+        let mut answers = result.root_refs.into_iter();
+        for &index in &indexes {
+            let form = answers
+                .next()
+                .and_then(Result::ok)
+                .ok_or("쪽을 복사하지 못했습니다.")?;
+            copied.forms.insert((source, index), form);
+        }
+        // An object that does not exist has no copy; whoever asked for it writes `null`.
+        for (&object, answer) in roots.iter().zip(answers) {
+            if let Ok(new) = answer {
+                copied.objects.insert((source, object), new);
+            }
         }
     }
-    Ok(forms)
+    Ok(copied)
 }
 
 /// Key of an overlay: the shown size (to a hundredth of a point) and whether it has the stamp (only

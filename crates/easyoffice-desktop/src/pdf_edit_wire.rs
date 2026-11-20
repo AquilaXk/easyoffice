@@ -53,10 +53,20 @@ pub const MAX_WARNINGS: usize = 16;
 pub const MAX_WARNING_BYTES: usize = 1024;
 
 /// What a build made: the PDF, and a sentence for each thing of the original it could not keep.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq)]
 pub struct Built {
     pub bytes: Vec<u8>,
     pub warnings: Vec<String>,
+}
+
+/// The size only: the bytes of a file never go into an assertion message or a log line.
+impl std::fmt::Debug for Built {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Built")
+            .field("bytes", &self.bytes.len())
+            .field("warnings", &self.warnings)
+            .finish()
+    }
 }
 
 /// Largest frame either side accepts (bytes): a source or a result is at most 256 MiB.

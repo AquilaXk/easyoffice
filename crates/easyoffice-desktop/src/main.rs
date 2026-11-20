@@ -29,6 +29,7 @@ mod pdf_edit_engine;
 mod pdf_edit_forms;
 mod pdf_edit_inspect;
 mod pdf_edit_job;
+mod pdf_edit_oc;
 mod pdf_edit_os;
 mod pdf_edit_outlines;
 mod pdf_edit_overlay;
@@ -37,6 +38,7 @@ mod pdf_edit_scan;
 mod pdf_edit_session;
 mod pdf_edit_supervisor;
 mod pdf_edit_text_pos;
+mod pdf_edit_value;
 mod pdf_edit_wire;
 mod pdf_edit_worker;
 mod pdf_export;
@@ -722,6 +724,8 @@ mod pdf_edit_carry_tests;
 mod pdf_edit_fixtures;
 #[cfg(test)]
 mod pdf_edit_hostile_tests;
+#[cfg(test)]
+mod pdf_edit_oc_tests;
 #[cfg(test)]
 mod pdf_edit_preserve_tests;
 #[cfg(test)]

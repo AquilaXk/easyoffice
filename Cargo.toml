@@ -27,6 +27,9 @@ rust-version = "1.85"
 # svg2pdf (the engine crates do not).
 [patch.crates-io]
 svg2pdf = { path = "vendor/svg2pdf" }
+# PD-266: the PDF studio keeps optional content, so the page copier must not strip `/OC` and must copy
+# an object on request (`vendor/hayro-write/PATCHES.md`; a few lines on top of 0.9.0, nothing else).
+hayro-write = { path = "vendor/hayro-write" }
 # PD-142: the shell draws the first page of a Hangul document with the pinned rhwp checkout
 # (`config/rhwp-upstream.json`; the crates.io release is a different version). It is a patch, not
 # a `path` dependency, because `cargo fmt --all` follows path dependencies into the sparse checkout

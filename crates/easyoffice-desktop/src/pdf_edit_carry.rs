@@ -14,10 +14,17 @@
 //! (JavaScript).
 
 use crate::pdf_edit_budget::{Deadline, MAX_PAGE_ANNOTS};
+use crate::pdf_edit_oc;
+use crate::pdf_edit_value::{Budget, Value};
 use crate::pdf_edit_wire::{PagePlan, MAX_WARNINGS, MAX_WARNING_BYTES};
-use hayro_syntax::object::{Dict, Name};
+use hayro_syntax::object::{Dict, Name, ObjRef};
 use hayro_syntax::Pdf as ReadPdf;
-use std::collections::{BTreeMap, HashSet};
+use hayro_write::pdf_writer::writers::Catalog;
+use hayro_write::pdf_writer::{Name as WName, Ref};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// The reference in the result of each object the copier was asked for, by source.
+pub type Copies = HashMap<(usize, ObjRef), Ref>;
 
 /// Annotation subtypes the result writes (or, for `Popup`, does not need: the text of a pop-up is
 /// the `/Contents` of the annotation it belongs to). Every other subtype is counted as lost.
@@ -64,6 +71,11 @@ impl Warnings {
 #[derive(Debug, Default)]
 pub struct Carry {
     pub warnings: Warnings,
+    budget: Budget,
+    /// The `/OCProperties` of each source that has them.
+    layers: Vec<(usize, Value)>,
+    /// The objects of each source that are copied together with its pages.
+    roots: BTreeMap<usize, Vec<ObjRef>>,
 }
 
 impl Carry {
@@ -92,11 +104,48 @@ impl Carry {
         if !lost.is_empty() {
             carry.warnings.push(lost_annots_sentence(&lost));
         }
-        for pdf in parsed.values() {
+        for (&source, pdf) in parsed {
             note_catalog(pdf, &mut carry.warnings);
+            if let Some(list) = pdf_edit_oc::read(pdf, &mut carry.budget)? {
+                carry.layers.push((source, list));
+            }
+        }
+        for (source, list) in &carry.layers {
+            carry
+                .roots
+                .entry(*source)
+                .or_default()
+                .extend(refs_of(list));
         }
         Ok(carry)
     }
+
+    /// The objects of `source` that are copied in the same call as its pages, so that they get the
+    /// same new references the pages' own objects get.
+    pub fn roots(&self, source: usize) -> &[ObjRef] {
+        self.roots.get(&source).map_or(&[], Vec::as_slice)
+    }
+
+    /// Writes what the catalog of the result holds besides the pages.
+    pub fn write_catalog(&mut self, catalog: &mut Catalog<'_>, copies: &Copies) {
+        let lists: Vec<Value> = self
+            .layers
+            .iter()
+            .map(|(source, list)| list.translate(&|r| copies.get(&(*source, r)).copied()))
+            .collect();
+        if let Some(layers) = pdf_edit_oc::combine(lists, &mut self.warnings) {
+            layers.write(catalog.insert(WName(b"OCProperties")));
+        }
+    }
+}
+
+/// The references inside `value`, each once.
+fn refs_of(value: &Value) -> Vec<ObjRef> {
+    let mut all = Vec::new();
+    value.refs(&mut all);
+    let mut seen = HashSet::new();
+    all.retain(|r| seen.insert(*r));
+    all
 }
 
 /// Counts the annotations of a page whose subtype the result does not write, by subtype.

@@ -23,7 +23,18 @@ pub(crate) fn rebuilt(file: Vec<u8>) -> Built {
 /// A one-page document. `catalog` and `annots` are added to the catalog and to the page's
 /// `/Annots`; `more` are the objects from number 5 on.
 pub(crate) fn one_page(catalog: &str, annots: &str, more: &[String]) -> Vec<u8> {
-    let content = "0 0 1 rg 10 10 80 80 re f";
+    one_page_with(catalog, "", "0 0 1 rg 10 10 80 80 re f", annots, more)
+}
+
+/// The same with the page's `/Resources` entry (a whole `/Resources << ... >>` or nothing) and its
+/// content stream.
+pub(crate) fn one_page_with(
+    catalog: &str,
+    resources: &str,
+    content: &str,
+    annots: &str,
+    more: &[String],
+) -> Vec<u8> {
     let mut objects = vec![
         (1, format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>")),
         (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
@@ -31,7 +42,7 @@ pub(crate) fn one_page(catalog: &str, annots: &str, more: &[String]) -> Vec<u8> 
             3,
             format!(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R \
-                 /Annots [{annots}] >>"
+                 {resources} /Annots [{annots}] >>"
             ),
         ),
         (

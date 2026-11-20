@@ -71,6 +71,12 @@ pub const MAX_PAGE_GLYPHS: usize = 200_000;
 pub const MAX_ADDED_MARKUPS: usize = 2_000;
 /// Most interactive form fields preserved across one output PDF (PD-245).
 pub const MAX_FORM_FIELDS: usize = 2_048;
+/// Most nodes (numbers, names, strings, arrays, dictionaries) read from one object that is carried
+/// over as it is, and the deepest nesting followed (PD-266).
+pub const MAX_VALUE_NODES: usize = 65_536;
+pub const MAX_VALUE_DEPTH: usize = 32;
+/// Most nodes held at once from all the objects carried over in one build (PD-266).
+pub const MAX_CARRIED_NODES: usize = 1_000_000;
 /// How long one request may run before the worker is killed.
 pub const WORK_DEADLINE: Duration = Duration::from_secs(60);
 /// How long a split may take in all (each file has the deadline of a request of its own).
