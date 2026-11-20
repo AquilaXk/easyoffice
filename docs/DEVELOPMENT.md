@@ -67,7 +67,7 @@ EasyOffice/
 - macOS 11.0 (Big Sur) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 `.dmg`; 데스크톱 셸 빌드에는 Rust 1.93+, Node.js, Xcode 명령줄 도구 필요)
 - Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.93+ 필요)
 - Linux x64(AppImage·deb·rpm) 또는 arm64(deb): WebKitGTK 4.1과 glibc 2.35 이상, 예를 들어 Ubuntu 22.04, Debian 12, Fedora (데스크톱 셸 빌드에는 Rust 1.93+와 WebKitGTK 4.1 개발 패키지 필요)
-- 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.85+(워크스페이스 MSRV). 데스크톱 셸 크레이트는 1.93이 필요하고 CI는 1.93.1로 고정합니다(`.github/rust-toolchain-version`)
+- 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.88+(워크스페이스 MSRV, PD-269). 데스크톱 셸 크레이트는 1.93이 필요하고 CI는 1.93.1로 고정합니다(`.github/rust-toolchain-version`)
 
 ### 고정 툴체인
 

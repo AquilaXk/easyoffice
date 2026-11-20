@@ -655,7 +655,9 @@ if (fs.existsSync(desktopConfigFull)) {
     if (DESKTOP_SHELL_PERMISSIONS.size < 9) errors.push(`${APP_COMMANDS_FILE} must list the app commands (found ${DESKTOP_SHELL_PERMISSIONS.size})`);
   }
 }
-const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".as_chunks::<", ".floor_char_boundary("];
+// The workspace MSRV is 1.88 (the crates of PD-269 need it). `is_multiple_of` and `as_chunks` are stable by
+// then; `floor_char_boundary` (1.91) is not.
+const POST_MSRV_RUST_APIS = [".floor_char_boundary("];
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel.startsWith("crates/") && rel.endsWith("/Cargo.toml")) {
@@ -664,18 +666,18 @@ for (const file of files) {
       // The desktop shell's floor is set by its Tauri v2 dependencies, not by the engine crates;
       // it must declare that floor explicitly and may never go below the workspace MSRV (PD-074).
       const declared = tomlText.match(/^rust-version\s*=\s*"(\d+)\.(\d+)"/m);
-      if (!declared || Number(declared[1]) !== 1 || Number(declared[2]) < 85) {
-        errors.push(`Crate manifest ${rel} must declare an explicit rust-version >= 1.85 (Tauri toolchain floor).`);
+      if (!declared || Number(declared[1]) !== 1 || Number(declared[2]) < 88) {
+        errors.push(`Crate manifest ${rel} must declare an explicit rust-version >= 1.88 (Tauri toolchain floor).`);
       }
     } else if (!tomlText.includes("rust-version.workspace = true")) {
-      errors.push(`Crate manifest ${rel} is missing 'rust-version.workspace = true' for MSRV 1.85 enforcement.`);
+      errors.push(`Crate manifest ${rel} is missing 'rust-version.workspace = true' for MSRV 1.88 enforcement.`);
     }
   }
   if (rel.startsWith("crates/") && rel.endsWith(".rs")) {
     const rsText = fs.readFileSync(file, "utf8");
-    for (const api of POST_185_RUST_APIS) {
+    for (const api of POST_MSRV_RUST_APIS) {
       if (rsText.includes(api)) {
-        errors.push(`Post-Rust-1.85 API '${api}' detected in ${rel} (breaks MSRV 1.85).`);
+        errors.push(`Post-Rust-1.88 API '${api}' detected in ${rel} (breaks MSRV 1.88).`);
       }
     }
   }

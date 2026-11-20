@@ -3,7 +3,7 @@ name = "easyoffice-desktop"
 version.workspace = true
 edition.workspace = true
 # Tauri v2 (tauri, tauri-build, tauri-plugin-dialog 2.x) requires Rust 1.90 and the pinned rhwp
-# (PD-142) builds with 1.93; the engine crates keep the workspace MSRV 1.85 (PD-074).
+# (PD-142) builds with 1.93; the engine crates keep the workspace MSRV 1.88 (PD-074, PD-269).
 rust-version = "1.93"
 license.workspace = true
 description = "EasyOffice desktop shell (Tauri v2: WebView2 on Windows, WKWebView on macOS) hosting the embedded WebUI"

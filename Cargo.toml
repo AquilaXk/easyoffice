@@ -33,12 +33,6 @@ sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# The workspace MSRV is 1.88 (the crates of PD-269 need it), but the hygiene guard keeps refusing
-# `is_multiple_of` and the other APIs newer than the former 1.85 baseline, so clippy must not
-# suggest them to the engine crates.
-[workspace.lints.clippy]
-manual_is_multiple_of = "allow"
-
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
