@@ -11,6 +11,7 @@ const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name
 function actions({ restore, epoch }) {
   const env = {};
   loadUiModule(UI("sheet-refs.js"), env);
+  loadUiModule(UI("copilot-text.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const calls = [];
   const instance = env.__EASYOFFICE_CREATE_COPILOT_ACTIONS__({

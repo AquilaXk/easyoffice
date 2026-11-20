@@ -93,6 +93,16 @@
 }
 .slide-stage,
 .pdf-page-card { color: var(--ui-text); }
+/* A selection on paper is the reference editor's translucent blue overlay (rhwp-studio
+   `src/engine/selection-renderer.ts:94`, `rgba(51,144,255,0.35)`), so dark text stays readable on the
+   white paper in both themes. Without a rule the browser paints its own highlight, and under the dark
+   `color-scheme` (set on the root by `theme.js`) that is a dark navy. */
+#doc-editor::selection,
+#doc-editor ::selection,
+.slide-stage::selection,
+.slide-stage ::selection,
+.pdf-page-card::selection,
+.pdf-page-card ::selection { background: rgba(51, 144, 255, 0.35); }
 #doc-editor {
   width: 794px;
   max-width: 794px;

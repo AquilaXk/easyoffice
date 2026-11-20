@@ -10,6 +10,9 @@
   const MAX_COMMAND_BLOCK_INDEX = 2047;
   const MAX_CONTEXT_SLIDES = 64;
   const MAX_CONTEXT_TEXT_CHARS = 24000;
+  // A paragraph a selection command works on is sent whole up to one code point past the engine's 24 KiB context
+  // (`MAX_PROMPT_CONTEXT_BYTES`): a longer one is cut here, stays over the limit, and the engine refuses the command.
+  const MAX_COMMAND_SPAN_CHARS = 24 * 1024 + 1;
   const MAX_OPERATIONS = 64;
   const MAX_WRITE_CELLS = 1024;
   const MAX_RANGE_CELLS = 4096;
@@ -97,6 +100,7 @@
     } = deps;
 
     const { colName, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
+    const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     let lastUndoEntry = null;
 
     function getSelectionLabel(mod = getActiveModule()) {
@@ -155,13 +159,14 @@
       const count = Math.min(blocks.length, lastSent + 1);
       const paragraphs = [];
       for (let i = 0; i < count; i += 1) {
-        const wanted = i < MAX_CONTEXT_PARAGRAPHS || (span && i >= span.start && i <= span.end);
-        paragraphs.push(wanted ? String(blocks[i].textContent || "").trim().slice(0, MAX_CONTEXT_TEXT_CHARS) : "");
+        const inSpan = Boolean(span) && i >= span.start && i <= span.end;
+        const limit = inSpan ? MAX_COMMAND_SPAN_CHARS : MAX_CONTEXT_TEXT_CHARS;
+        paragraphs.push(inSpan || i < MAX_CONTEXT_PARAGRAPHS ? clipCodePoints(String(blocks[i].textContent || "").trim(), limit) : "");
       }
       let selectedText = "";
       const sel = host.getSelection?.();
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editor?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
-        selectedText = String(sel.getRangeAt(0).toString?.() || "").slice(0, MAX_CONTEXT_TEXT_CHARS);
+        selectedText = clipCodePoints(sel.getRangeAt(0).toString?.() || "", MAX_CONTEXT_TEXT_CHARS);
       }
       return { paragraphs, selectedText, omittedParagraphs: blocks.length - count };
     }
@@ -197,6 +202,30 @@
       return null;
     }
 
+    // What a selection command's target holds right now, as one string: the text of the selected blocks, or the title or
+    // body of the selected slide. `null` when the target is gone. Regenerate sends nothing when this differs from the
+    // snapshot taken with the first request (plate `useAIChat`/`AIChatPlugin` `reload`: restore the target, and stop
+    // when it cannot be restored).
+    function snapshotTarget(mod, target) {
+      const sel = target?.selection;
+      if (!sel) return null;
+      if (mod === "DOC") {
+        const blocks = docBlocksOf(document.getElementById("doc-editor"));
+        const texts = [];
+        for (let i = sel.paragraphIndex; i <= sel.paragraphEnd; i += 1) {
+          if (!blocks[i]) return null;
+          texts.push(String(blocks[i].textContent || "").trim());
+        }
+        return JSON.stringify(texts);
+      }
+      if (mod === "SLIDE") {
+        getWorkspacePanels()?.syncActiveSlideDomStylesToDeck?.();
+        const slide = slideDeckState[sel.slideIndex];
+        return slide ? JSON.stringify([sel.slideField, String(sel.slideField === "title" ? slide.title : slide.lower || "")]) : null;
+      }
+      return null;
+    }
+
     function extractSlideContext() {
       const panels = getWorkspacePanels();
       panels?.syncActiveSlideDomStylesToDeck?.();
@@ -210,7 +239,7 @@
           y: Number(el.y || 0),
           w: Number(el.w || 0),
           h: Number(el.h || 0),
-          text: String(el.text || el.title || el.alt || "").slice(0, 160),
+          text: clipCodePoints(el.text || el.title || el.alt || "", 160),
         }));
         return {
           index,
@@ -226,9 +255,10 @@
     }
 
     function extractPdfContext() {
-      const rawText = String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "")
-        .trim()
-        .slice(0, MAX_CONTEXT_TEXT_CHARS);
+      const rawText = clipCodePoints(
+        String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "").trim(),
+        MAX_CONTEXT_TEXT_CHARS,
+      );
       const pageCount = Number(getPdfEdit?.()?.pageCount?.() || 1) || 1;
       return { text: rawText, pageCount };
     }
@@ -683,6 +713,7 @@
       getSelectionLabel,
       extractContext,
       getCommandTarget,
+      snapshotTarget,
       applyOperations,
       canUndoTurn,
       hasUndoEntry,

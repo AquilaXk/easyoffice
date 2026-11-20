@@ -49,6 +49,7 @@ function selectionOver(startNode, endNode, text = "선택") {
 function createActions({ texts = [], epoch = () => 1, selection = null, slides = [], sheetStore = { S: {} }, activeModule = "DOC", restore = async () => {} } = {}) {
   const env = {};
   loadUiModule(UI("sheet-refs.js"), env);
+  loadUiModule(UI("copilot-text.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const dom = fakeDocument(texts);
   env.getSelection = () => selection;

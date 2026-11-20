@@ -259,7 +259,7 @@
   // The limits match what the engine accepts (`MAX_BASE_*`, `MAX_BOARD_*` in `copilot/types.rs`); it refuses a request over
   // them, so the page cuts first and tells the engine how much there is (`totalRecords`, `totalNodes`).
   const COPILOT_MAX_TABLES = 64, COPILOT_MAX_FIELDS = 64, COPILOT_MAX_RECORDS = 100, COPILOT_MAX_NODES = 256, COPILOT_MAX_CONNECTORS = 1024, COPILOT_MAX_TEXT = 200;
-  const clipText = (v) => String(v ?? "").slice(0, COPILOT_MAX_TEXT);
+  const clipText = (v) => host.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints(v, COPILOT_MAX_TEXT);
 
   function extractCopilotContext(mod) {
     if (mod === "BASE" && baseStudio) {

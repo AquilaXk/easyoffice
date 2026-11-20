@@ -173,6 +173,37 @@ test("a text selection shows the selection commands and runs the chosen one on t
   assert.equal(seen.filter((r) => r.action === "copilot_run").length, 1);
 });
 
+test("regenerate of a command asks again only while its blocks are what they were", async () => {
+  const selection = createSelection();
+  Object.defineProperty(selection, "isCollapsed", { get() { return !this._range || this._range.collapsed === true; } });
+  const { document, userClick, runs, assistants, button } = await open({
+    selection,
+    run: () => ({ status: "ok", mode: "edit", updatedInPlace: false, reply: "손볼 곳이 없습니다", operations: [] }),
+  });
+  const editor = document.getElementById("doc-editor");
+  const target = editor.querySelectorAll("p")[0];
+  selection.addRange(rangeOver(target, "고칠 문장"));
+  document.dispatchEvent({ type: "keyup" });
+  await flushAsyncTurns(3);
+  const row = document.getElementById("copilot-command-row");
+  userClick(Array.from(row.querySelectorAll("button")).find((b) => b.textContent.trim() === "맞춤법 수정"));
+  await flushAsyncTurns(16);
+  assert.equal(runs().length, 1);
+
+  userClick(button(assistants()[0], "다시 생성"));
+  await flushAsyncTurns(16);
+  assert.equal(runs().length, 2, "the blocks are the same, so it asks again");
+  assert.equal(runs()[1].command, "fix_spelling");
+  assert.deepEqual(runs()[1].selection, runs()[0].selection);
+
+  target.textContent = target.textContent + " 직접 고침";
+  userClick(button(assistants()[0], "다시 생성"));
+  await flushAsyncTurns(16);
+  assert.equal(runs().length, 2, "the target changed, nothing is sent");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "선택한 내용이 바뀌어 다시 생성할 수 없습니다");
+  assert.equal(assistants().length, 1, "the answer stays");
+});
+
 test("BASE and BOARD questions go to the engine as table and board context, and the panel stays in ask mode", async () => {
   for (const [module, key] of [["BASE", "base"], ["BOARD", "board"]]) {
     const { document, send, runs } = await open({ module, run: () => ({ status: "ok", mode: "ask", reply: "답", operations: [] }) });

@@ -517,7 +517,7 @@
         locations: [],
         undone: false,
         error: false,
-        request: { prompt: request.prompt, command: request.command || "", target: request.target || null, mode, mod },
+        request: { prompt: request.prompt, command: request.command || "", target: request.target || null, targetSnapshot: copilotActions.snapshotTarget(mod, request.target), mode, mod },
       };
       messages.push(assistantEntry);
 
@@ -578,7 +578,7 @@
 
     function submitPrompt() {
       const inputEl = byId("copilot-input");
-      const prompt = String(inputEl?.value || "").trim().slice(0, MAX_PROMPT_CHARS);
+      const prompt = host.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints(String(inputEl?.value || "").trim(), MAX_PROMPT_CHARS);
       if (!prompt) return undefined;
       return runTurn({ prompt }, { clearInput: true });
     }
@@ -597,7 +597,17 @@
       regenerating = true;
       syncMessageActions();
       try {
-        if (last.applied && !last.undone && !(await copilotActions.undoLastTurn(last.id))) {
+        if (last.applied && !last.undone) {
+          if (!(await copilotActions.undoLastTurn(last.id))) {
+            renderThread();
+            return;
+          }
+          last.undone = true;
+        }
+        // A command is asked again for the blocks or slide field it was asked for. When those changed (an edit moved the
+        // index, or the text is not what the answer was written for), nothing is sent.
+        if (last.request.target && copilotActions.snapshotTarget(last.request.mod, last.request.target) !== last.request.targetSnapshot) {
+          setStatusFeedback?.("선택한 내용이 바뀌어 다시 생성할 수 없습니다");
           renderThread();
           return;
         }
