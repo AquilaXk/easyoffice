@@ -186,6 +186,13 @@ fn euroconvert_reads_the_triangulation_precision_as_a_vba_integer() {
 }
 
 #[test]
+fn euroconvert_overflow_is_num_error() {
+    assert_eq!(eval("=EUROCONVERT(1E+308,\"EUR\",\"ITL\",TRUE)"), "#NUM!");
+    assert_eq!(eval("=EUROCONVERT(1E+308,\"EUR\",\"ITL\")"), "#NUM!");
+    assert_eq!(eval("=EUROCONVERT(1E+308,\"EUR\",\"EUR\")"), "1E+308");
+}
+
+#[test]
 fn euroconvert_takes_no_multi_cell_argument() {
     let mut model = new_empty_model();
     model._set("B1", "1.2");

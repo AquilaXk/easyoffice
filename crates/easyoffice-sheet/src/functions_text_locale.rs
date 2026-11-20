@@ -170,6 +170,15 @@ const MAX_TRIANGULATION_PRECISION: f64 = 32767.0;
 /// the reference app never rounds the intermediate euro value to more than 15 decimals.
 const MAX_EURO_DECIMALS: f64 = 15.0;
 
+/// A number as a cell value; a value that overflowed is `#NUM!`.
+fn finite_num(x: f64) -> CellResult {
+    if x.is_finite() {
+        Ok(V::Number(x))
+    } else {
+        Err(FormulaError::Num)
+    }
+}
+
 /// Rounds half away from zero, as the reference app's `ROUND` does.
 fn round_half_away_from_zero(value: f64, decimals: f64) -> Result<f64, FormulaError> {
     round_to_digits(value, decimals, Rounding::Nearest).ok_or(FormulaError::Num)
@@ -240,7 +249,7 @@ impl SheetEngine {
         };
         // The same currency on both sides returns the number as it is, without rounding.
         if source_currency.code == target_currency.code {
-            return Ok(V::Number(number_value));
+            return finite_num(number_value);
         }
         let mut result = if source_currency.code == EURO {
             number_value * target_currency.rate
@@ -255,7 +264,7 @@ impl SheetEngine {
         if !is_full_precision {
             result = round_half_away_from_zero(result, f64::from(target_currency.precision))?;
         }
-        Ok(V::Number(result))
+        finite_num(result)
     }
 
     /// The decimals the intermediate euro value is rounded to, or the error the argument gives.
