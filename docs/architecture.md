@@ -199,7 +199,7 @@ PDF를 읽고 쓰는 일은 신뢰할 수 없는 입력을 구문 분석하는 �
 - **원본 객체 보존 저장.** 편집은 쪽 목록 계획으로만 쌓고 저장할 때 `pdf_edit_build.rs`가 원본의 그림·글꼴·배치를 복사해 새 PDF를 씁니다. 링크·북마크·양식(`pdf_edit_preserve.rs`·`pdf_edit_outlines.rs`·`pdf_edit_forms.rs`, PD-245)에 이어, 숨긴 레이어·FreeText/Ink/Stamp 주석·쪽 레이블·첨부 파일·XMP를 옮기고(`pdf_edit_oc.rs`·`pdf_edit_annots.rs`·`pdf_edit_labels.rs`·`pdf_edit_attach.rs`·`pdf_edit_carry.rs`, PD-266) 옮기지 못한 항목은 워커가 `WARNING` 프레임으로 알립니다(문장 1,024바이트·16개 이하, 넘기면 `MSG_WORKER_DIED`). 증분 저장은 쓰지 않습니다. 쪽을 새 객체 공간으로 복사하는 구조라서 전자서명은 유지되지 않습니다.
 - **격리 시험.** `crates/easyoffice-desktop/tests/pdf_isolation.rs`가 악성 파일마다 워커가 죽고, 고정 문장이 돌아오고, 시험 프로세스가 다음 요청을 처리하는지 확인합니다.
 
-## 8. 코파일럿 네트워크 경로 (PD-253, PD-267)
+## 8. 코파일럿 네트워크 경로 (PD-253, PD-267, PD-268)
 
 앱에 모델은 내장하지 않습니다. 사용자가 등록한 제공자(클라우드 12종 설정, 로컬 서버 포함)로만 요청합니다.
 
@@ -213,7 +213,9 @@ copilot-ui.js --run_smart_assistant{action:"copilot_run", requestId}--> copilot:
 - **취소.** 화면이 `requestId`(영숫자·`-`·`_` 64바이트 이하)를 붙여 보내고, 중지하면 같은 ID로 `copilot_cancel`을 보냅니다. `copilot/cancel.rs`의 등록부가 진행 중인 요청의 소켓 복제본을 쥐고 있다가 `shutdown`해서 막힌 연결·쓰기·읽기를 바로 끝냅니다. 동시 요청은 64개, 등록 전에 먼저 온 취소는 32개까지 기억합니다. HTTPS는 TLS 커넥터 훅(`CancellableTls`)이 핸드셰이크 전에 소켓을 등록합니다. 연결 단계(DNS·TCP 15초 안)에는 소켓이 없어 취소가 연결이 끝난 뒤에 적용됩니다.
 - **키는 세션 메모리에만 둡니다.** API 키는 디스크·웹 스토리지·URL·로그에 남기지 않습니다. 주소를 바꾸고 새 키를 넣지 않으면 저장 키를 지웁니다(PD-264).
 - **문맥 경계.** 문서 데이터는 `<document_context>` 안에만 넣고 데이터 속 같은 태그는 `&lt;`로 바꿉니다(`copilot/context.rs`, PD-267). 문맥이 상한을 넘으면 `[이하 N… 생략]`을 넣고, 선택 명령은 대상을 다 싣지 못하면 모델을 부르지 않고 거부합니다. 모델이 돌려준 작업은 형식·범위·개수 검사(`copilot/operations.rs`)를 거치며 버린 수를 `droppedOperations`로 알립니다. PDF·BASE·BOARD는 질문 전용이라 작업을 만들지 않습니다.
-- **상한.** 프롬프트 16 KiB, 대화 기록 32, 시트 셀 10,000, 문서 문단 2,048, 슬라이드 256(PD-253). 모델 출력은 8,192 토큰까지입니다(PD-267).
+- **스트리밍.** 요청에 `stream: true`와 `requestId`가 있고 셸이 스트림 전송(`ShellWriters.llm_stream`)과 조각 통로(`copilot_events`)를 모두 주면 모델 응답을 오는 대로 읽습니다(`copilot/stream.rs`, SSE 해석은 `copilot/sse.rs`, Gemini는 JSON 배열 스트림). 글 조각은 Tauri IPC 채널(요청의 `onStream`)로 그 창에만 순서대로 갑니다. 이벤트 권한은 페이지에 주지 않습니다. 스트림은 보여 주기용이고, JSON 연산은 전송이 끝난 뒤 본문 전체로 한 번만 검증합니다. 스트림은 읽기 유휴 60초와 전체 10분, 응답 512 KiB 상한을 따릅니다(`--serve`는 한꺼번에 받습니다).
+- **적용 전 미리보기와 연출.** 편집 응답은 문서를 바꾸지 않고 패널에 이전·이후 글과 삭제·삽입 표시를 보입니다(`copilot-preview.js`). 수락하면 문서·슬라이드·시트에서 포인터가 이동·선택하고 글을 한 자씩 쳐 넣은 뒤(`copilot-perform.js`) 기존 적용 경로로 한 번 씁니다. 연출이 쓰는 글은 임시이고 되돌리기는 한 단계입니다. 중지하면 쓰던 부분까지만 적용합니다.
+- **상한.** 프롬프트 UTF-8 16,384바이트, 대화 기록 32, 시트 셀 10,000, 문서 문단 2,048, 슬라이드 256(PD-253). 모델 출력은 8,192 토큰까지입니다(PD-267).
 
 ## 9. BASE·BOARD 패키지 형식 (PD-265)
 
