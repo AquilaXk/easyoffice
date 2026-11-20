@@ -120,7 +120,7 @@
   function buildPrintPages(mod, doc, rules) {
     if (mod === "BASE") {
       if (!baseStudio) throw new Error("인쇄할 내용이 없습니다.");
-      return [baseStudio.buildPrintPage(doc, rules)];
+      return baseStudio.buildPrintPages(doc, rules);
     }
     if (mod === "BOARD") {
       if (!boardStudio) throw new Error("인쇄할 내용이 없습니다.");

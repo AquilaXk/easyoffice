@@ -13,6 +13,8 @@
     { id: "calendar", label: "일정" },
   ]);
   const pad2 = (n) => String(n).padStart(2, "0");
+  // Printed table (mm): the page margin, the height of every row and of the title, and a little room the paper keeps free.
+  const PRINT_MARGIN_MM = 10, PRINT_ROW_MM = 6, PRINT_TITLE_MM = 10, PRINT_GUARD_MM = 2;
 
   function parseMonthStr(raw) {
     const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(raw || ""));
@@ -822,48 +824,64 @@
       return { ok: true, format: fmt, fileBase, base64, sheets, res: ipcRes, delivery };
     }
 
-    function buildPrintPage(docArg, rules) {
+    // The printed pages of the active table: the rows are cut by the paper's height (every row is PRINT_ROW_MM high, the title is on
+    // the first page only) and each page repeats the header row.
+    function buildPrintPages(docArg, rules) {
       const d = docArg || doc, tbl = activeTable();
       if (!tbl) throw new Error("인쇄할 내용이 없습니다.");
       const { fields, rows } = M.queryTableView(state, tbl.id);
       if (rows.length === 0) throw new Error("인쇄할 내용이 없습니다.");
-      const wide = fields.length > 6;
-      const paperClass = rules?.classFor ? rules.classFor(wide ? 297 : 210, wide ? 210 : 297) : "";
-      const page = d.createElement("div");
-      page.className = ("eo-print-page " + paperClass).trim();
-      const titleEl = d.createElement("h3");
-      titleEl.textContent = tbl.name || "데이터베이스";
-      page.appendChild(titleEl);
-      const tableEl = d.createElement("table");
-      tableEl.className = "eo-print-sheet";
-      const thead = d.createElement("thead"), htr = d.createElement("tr");
-      for (const fld of fields) {
-        const th = d.createElement("th");
-        th.textContent = fld.name || "";
-        htr.appendChild(th);
-      }
-      thead.appendChild(htr);
-      const tbody = d.createElement("tbody");
-      for (const row of rows) {
-        const tr = d.createElement("tr");
-        for (const fld of fields) {
-          const td = d.createElement("td");
-          if (fld.type === "number") td.className = "eo-print-num";
-          td.textContent = row.displays[fld.id] ?? "";
-          tr.appendChild(td);
+      const wide = fields.length > 6, paperHeight = wide ? 210 : 297;
+      const paperClass = rules?.classFor ? rules.classFor(wide ? 297 : 210, paperHeight) : "";
+      const room = paperHeight - 2 * PRINT_MARGIN_MM - PRINT_GUARD_MM;
+      const rowsOnFirst = Math.max(1, Math.floor((room - PRINT_TITLE_MM) / PRINT_ROW_MM) - 1);
+      const rowsOnOther = Math.max(1, Math.floor(room / PRINT_ROW_MM) - 1);
+      const pages = [];
+      for (let from = 0; from < rows.length; ) {
+        const first = pages.length === 0, take = first ? rowsOnFirst : rowsOnOther;
+        const page = d.createElement("div");
+        page.className = ("eo-print-page base-print-page " + paperClass).trim();
+        if (first) {
+          const titleEl = d.createElement("h3");
+          titleEl.textContent = tbl.name || "데이터베이스";
+          titleEl.style.height = PRINT_TITLE_MM + "mm";
+          page.appendChild(titleEl);
         }
-        tbody.appendChild(tr);
+        const tableEl = d.createElement("table");
+        tableEl.className = "eo-print-sheet";
+        const thead = d.createElement("thead"), htr = d.createElement("tr");
+        htr.style.height = PRINT_ROW_MM + "mm";
+        for (const fld of fields) {
+          const th = d.createElement("th");
+          th.textContent = fld.name || "";
+          htr.appendChild(th);
+        }
+        thead.appendChild(htr);
+        const tbody = d.createElement("tbody");
+        for (const row of rows.slice(from, from + take)) {
+          const tr = d.createElement("tr");
+          tr.style.height = PRINT_ROW_MM + "mm";
+          for (const fld of fields) {
+            const td = d.createElement("td");
+            if (fld.type === "number") td.className = "eo-print-num";
+            td.textContent = row.displays[fld.id] ?? "";
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        tableEl.appendChild(thead);
+        tableEl.appendChild(tbody);
+        page.appendChild(tableEl);
+        pages.push(page);
+        from += take;
       }
-      tableEl.appendChild(thead);
-      tableEl.appendChild(tbody);
-      page.appendChild(tableEl);
-      return page;
+      return pages;
     }
 
     const api = {
       bind, render, getState, setState, resetBlank,
       addTable, addField, updateField, deleteField, addRecord, updateCell, deleteRecord,
-      setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPage,
+      setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;
     return api;

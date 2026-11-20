@@ -79,3 +79,29 @@ test("a multi-select card moves between columns and keeps its other tags", async
   drag(root, recId, "C", "");
   assert.deepEqual(studio.getState().tables[0].records[0].values[tags.id], ["B"]);
 });
+
+const mmOf = (el) => Number.parseFloat(el.style.height);
+
+test("a long table prints on several pages that each repeat the header row and fit the paper", async () => {
+  const { document, studio } = await openBoard();
+  for (let i = 1; i <= 120; i += 1) studio.addRecord({ "fld-1": `항목 ${i}` });
+  const sizes = [];
+  const rules = { classFor: (w, h) => { sizes.push([w, h]); return "paper"; } };
+  const pages = studio.buildPrintPages(document, rules);
+  assert.ok(pages.length > 1, `pages: ${pages.length}`);
+  assert.deepEqual(sizes[0], [210, 297]);
+  let printed = 0;
+  pages.forEach((page, index) => {
+    const rows = [...page.querySelectorAll("tbody tr")];
+    printed += rows.length;
+    assert.equal(page.querySelectorAll("thead th").length, 4, `page ${index + 1} repeats the header row`);
+    const title = page.querySelector("h3");
+    assert.equal(Boolean(title), index === 0, "only the first page has the title");
+    const used = (title ? mmOf(title) : 0) + (rows.length + 1) * mmOf(page.querySelector("thead tr"));
+    assert.ok(used + 20 <= 297, `page ${index + 1} holds ${used}mm of rows`);
+    assert.ok(page.className.includes("base-print-page"));
+  });
+  assert.equal(printed, 120);
+  const lastRows = [...pages[pages.length - 1].querySelectorAll("tbody tr")];
+  assert.equal(lastRows[lastRows.length - 1].querySelectorAll("td")[0].textContent, "항목 120");
+});
