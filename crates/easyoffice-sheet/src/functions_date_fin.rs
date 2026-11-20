@@ -1,6 +1,7 @@
 //! Date, time, and cell-inspection functions, including `WORKDAY.INTL` and `NETWORKDAYS.INTL`
 //! backed by a 7-bit `u8` weekend bitmask (reference implementation: MIT License, Copyright (c) Sutoiku, Inc.; see `THIRD_PARTY_NOTICES.md`).
 
+use crate::date_system::{from_1900, in_date_1904, to_1900, SERIAL_1904_OFFSET};
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 const MAX_SERIAL: i64 = 2_958_465;
@@ -32,7 +33,7 @@ fn number(v: f64) -> Result<EvaluatedCellValue, FormulaError> {
 
 #[inline]
 fn is_workday_with_mask(serial: i64, weekend_mask: u8) -> bool {
-    let weekday_mon0 = (serial - 2).rem_euclid(7) as u8;
+    let weekday_mon0 = (to_1900(serial) - 2).rem_euclid(7) as u8;
     ((weekend_mask >> weekday_mon0) & 1) == 0
 }
 
@@ -138,7 +139,13 @@ fn date_today_now(is_today: bool, args: &[Expr]) -> Result<EvaluatedCellValue, F
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(FALLBACK_UNIX_SECS);
-    let days = EXCEL_EPOCH_DAYS + ((secs / SECONDS_PER_DAY as u64) as f64);
+    let epoch = EXCEL_EPOCH_DAYS
+        - if in_date_1904() {
+            SERIAL_1904_OFFSET as f64
+        } else {
+            0.0
+        };
+    let days = epoch + ((secs / SECONDS_PER_DAY as u64) as f64);
     number(if is_today {
         days
     } else {
@@ -391,9 +398,9 @@ impl SheetEngine {
             None => 1,
         };
         let w = match ret_type {
-            1 => (serial - 1).rem_euclid(7) + 1,
-            2 => (serial - 2).rem_euclid(7) + 1,
-            3 => (serial - 2).rem_euclid(7),
+            1 => (to_1900(serial) - 1).rem_euclid(7) + 1,
+            2 => (to_1900(serial) - 2).rem_euclid(7) + 1,
+            3 => (to_1900(serial) - 2).rem_euclid(7),
             _ => return Err(FormulaError::Num),
         };
         number(w as f64)
@@ -416,7 +423,7 @@ impl SheetEngine {
             1
         };
         if ret_type == 21 {
-            let thu = serial + 3 - (serial - 2).rem_euclid(7);
+            let thu = serial + 3 - (to_1900(serial) - 2).rem_euclid(7);
             let (iso_y, _, _) = civil_from_serial(thu);
             let jan1 = serial_from_civil(iso_y, 1, 1);
             return number(((thu - jan1) / 7 + 1) as f64);
@@ -433,7 +440,7 @@ impl SheetEngine {
         };
         let (y, _, _) = civil_from_serial(serial);
         let jan1 = serial_from_civil(y, 1, 1);
-        let jan1_off = ((jan1 - 1).rem_euclid(7) - week_start).rem_euclid(7);
+        let jan1_off = ((to_1900(jan1) - 1).rem_euclid(7) - week_start).rem_euclid(7);
         number(((serial - jan1 + jan1_off) / 7 + 1) as f64)
     }
 
@@ -800,7 +807,7 @@ fn checked_f64_to_i64(n: f64, min: f64, max: f64) -> Result<i64, FormulaError> {
 
 pub(crate) fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
     if y == 1900 && m == 2 && d == 29 {
-        return 60;
+        return from_1900(60);
     }
     let yr = y - if m <= 2 { 1 } else { 0 };
     let era = if yr >= 0 { yr } else { yr - 399 } / 400;
@@ -809,14 +816,11 @@ pub(crate) fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let doy = (153 * mp + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let raw = era * 146_097 + doe - 719_468 + 25_569;
-    if raw <= 60 {
-        raw - 1
-    } else {
-        raw
-    }
+    from_1900(if raw <= 60 { raw - 1 } else { raw })
 }
 
 pub(crate) fn civil_from_serial(serial: i64) -> (i64, i64, i64) {
+    let serial = to_1900(serial);
     if serial == 60 {
         return (1900, 2, 29);
     }

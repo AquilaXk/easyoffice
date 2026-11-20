@@ -14,6 +14,7 @@ pub mod coercion;
 mod compile;
 mod criteria;
 mod dag;
+mod date_system;
 mod deadline;
 mod dyn_reads;
 mod eval_context;
@@ -95,6 +96,7 @@ pub use cell_display::{
 pub use cell_kind::{CellValueKind, TypedCellChange};
 pub use coercion::*;
 pub(crate) use dag::expr_contains_subtotal;
+pub use date_system::{enter_date_system, in_date_1904, DateSystemGuard, SERIAL_1904_OFFSET};
 pub use deadline::MAX_EVAL_TIME;
 pub use expr::*;
 pub use functions::*;

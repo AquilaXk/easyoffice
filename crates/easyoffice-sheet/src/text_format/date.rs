@@ -35,7 +35,7 @@ const KO_AM: &str = "오전";
 const KO_PM: &str = "오후";
 
 fn civil_from_serial_display(days: i64) -> (i64, i64, i64) {
-    if days == 0 {
+    if days == 0 && !crate::in_date_1904() {
         (1900, 1, 0)
     } else {
         crate::functions_date_fin::civil_from_serial(days)
@@ -88,7 +88,7 @@ impl DateParts {
             y,
             mo,
             d,
-            weekday: ((days + 6) % 7) as usize,
+            weekday: ((crate::date_system::to_1900(days) + 6) % 7) as usize,
             hour: day_secs / 3600,
             minute: (day_secs % 3600) / 60,
             second: day_secs % 60,

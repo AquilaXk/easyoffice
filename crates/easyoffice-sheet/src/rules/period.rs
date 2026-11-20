@@ -11,6 +11,7 @@
 //! Sunday to Saturday as in the file formats, and "today" is passed in (the page sends the local
 //! date), not read from a clock inside the rule.
 
+use crate::date_system::{from_1900, to_1900};
 use crate::functions_date_fin::{civil_from_serial, serial_from_civil};
 use easyoffice_formats::TimePeriod;
 
@@ -23,7 +24,7 @@ pub(crate) fn utc_today() -> i64 {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
-    UNIX_EPOCH_SERIAL + secs / SECONDS_PER_DAY
+    from_1900(UNIX_EPOCH_SERIAL + secs / SECONDS_PER_DAY)
 }
 
 /// First day of the month that is `step` months from the month of `day`.
@@ -36,7 +37,7 @@ pub(crate) fn month_start(day: i64, step: i64) -> i64 {
 /// Sunday of the week of `day`.
 pub(crate) fn week_start(day: i64) -> i64 {
     // Serial 1 is a Sunday, so serials 1, 8, 15, ... start weeks.
-    day - (day - 1).rem_euclid(7)
+    day - (to_1900(day) - 1).rem_euclid(7)
 }
 
 /// First and last serial (inclusive) of `period` when today is `today`.
