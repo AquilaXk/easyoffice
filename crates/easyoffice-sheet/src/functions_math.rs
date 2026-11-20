@@ -1,12 +1,14 @@
+//! 참조 구현: IronCalc `base/src/functions/math_and_trigonometry/mathematical.rs` (commit
+//! f93662006b8fb1c401dc870bbda26c5d60ac6037, `MIT OR Apache-2.0`, Copyright 2023 EqualTo GmbH,
+//! Copyright 2023-present IronCalc contributors, Copyright 2026-present IronCalc GmbH): `Rounding`,
+//! `round_to_digits`, `round_result` (lines 1310-1362) for ROUND, ROUNDUP, ROUNDDOWN and TRUNC;
+//! `fn_floor` and `fn_ceiling` (lines 702-767) as `ceiling_floor`; `fn_mround` (lines 930-978).
+use crate::sig_digits::{to_precision, EXCEL_PRECISION};
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 type CellResult = Result<EvaluatedCellValue, FormulaError>;
 
-const MAX_ROUND_DIGITS: f64 = 300.0;
-const MIN_ROUND_DIGITS: f64 = -309.0;
 const MAX_FACTORIAL_ARG: f64 = 170.0;
-const ROUND_NUDGE_ULPS: f64 = 2.0;
-const SNAP_ULPS: f64 = 4.0;
 const LOG_BASE_EPSILON: f64 = 1e-15;
 
 fn check_math_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
@@ -31,71 +33,51 @@ fn clean_zero(v: f64) -> f64 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RoundMode {
+/// How ROUND, ROUNDUP, ROUNDDOWN and TRUNC round.
+#[derive(Clone, Copy)]
+enum Rounding {
     Nearest,
-    Up,
-    Down,
+    AwayFromZero,
+    TowardZero,
 }
 
-/// Rounds `scaled` (already multiplied by the digit factor) in the given mode.
-fn round_scaled(mode: RoundMode, scaled: f64, num: f64, exp: i32) -> f64 {
-    let abs_s = scaled.abs();
-    let near_integer = exp > 0 && (abs_s - abs_s.round()).abs() <= abs_s * f64::EPSILON * SNAP_ULPS;
-    match mode {
-        RoundMode::Nearest if exp > 0 => {
-            let nudge = abs_s * f64::EPSILON * ROUND_NUDGE_ULPS;
-            (scaled + nudge.copysign(scaled)).round()
-        }
-        RoundMode::Nearest => scaled.round(),
-        RoundMode::Up => if near_integer {
-            abs_s.round()
-        } else {
-            abs_s.ceil()
-        }
-        .copysign(num),
-        RoundMode::Down => if near_integer {
-            abs_s.round()
-        } else {
-            abs_s.floor()
-        }
-        .copysign(num),
+/// `value` (already at 15 significant digits) rounded at `digits` decimals (an integer, negative
+/// for tens, hundreds, ...). The scaled value is taken at 15 significant digits before rounding,
+/// so binary noise does not cross a rounding boundary: 1.005 * 100 is 100.49999999999999 in binary
+/// and ROUND(1.005, 2) is 1.01.
+///
+/// Returns `None` when the result is not a finite number (ROUNDUP of a nonzero number to a
+/// multiple of 10^309 or more).
+fn round_to_digits(value: f64, digits: f64, mode: Rounding) -> Option<f64> {
+    let scale = 10f64.powf(digits);
+    if scale == 0.0 {
+        // Every finite number is less than half a unit at this position.
+        return match mode {
+            Rounding::AwayFromZero if value != 0.0 => None,
+            _ => Some(0.0),
+        };
     }
-}
-
-/// ROUND / ROUNDUP / ROUNDDOWN / TRUNC core.
-fn round_digits(mode: RoundMode, num: f64, digits: f64) -> Result<f64, FormulaError> {
-    let d_trunc = digits.trunc();
-    if d_trunc >= MAX_ROUND_DIGITS {
-        return Ok(num);
-    }
-    let underflow = || {
-        if mode == RoundMode::Up {
-            Err(FormulaError::Num)
-        } else {
-            Ok(0.0)
-        }
-    };
-    if d_trunc <= MIN_ROUND_DIGITS {
-        return underflow();
-    }
-    let exp = d_trunc as i32;
-    let factor = 10f64.powi(exp);
-    if !factor.is_finite() || factor == 0.0 {
-        return if exp > 0 { Ok(num) } else { underflow() };
-    }
-    let scaled = num * factor;
+    let scaled = value * scale;
     if !scaled.is_finite() {
-        return Ok(num);
+        // The position is past the last digit a number this large has.
+        return Some(value);
     }
-    let res = round_scaled(mode, scaled, num, exp) / factor;
-    if !res.is_finite() {
-        return Err(FormulaError::Num);
-    }
-    Ok(clean_zero(res))
+    let scaled = to_precision(scaled, EXCEL_PRECISION);
+    let rounded = match mode {
+        Rounding::Nearest => scaled.round(),
+        Rounding::AwayFromZero if value > 0.0 => scaled.ceil(),
+        Rounding::AwayFromZero => scaled.floor(),
+        Rounding::TowardZero => scaled.trunc(),
+    };
+    let result = rounded / scale;
+    result.is_finite().then_some(result)
 }
 
-/// CEILING / FLOOR core with significance `sig`.
+fn round_result(value: f64, digits: f64, mode: Rounding) -> Result<f64, FormulaError> {
+    round_to_digits(value, digits, mode).ok_or(FormulaError::Num)
+}
+
+/// CEILING / FLOOR core with significance `sig`; the ratio is taken at 15 significant digits.
 fn ceiling_floor(is_ceiling: bool, num: f64, sig: f64) -> CellResult {
     if sig == 0.0 {
         return if !is_ceiling && num != 0.0 {
@@ -107,16 +89,11 @@ fn ceiling_floor(is_ceiling: bool, num: f64, sig: f64) -> CellResult {
     if num > 0.0 && sig < 0.0 {
         return Err(FormulaError::Num);
     }
-    let q = num / sig;
-    let q_adj = if (q - q.round()).abs() <= q.abs() * f64::EPSILON * SNAP_ULPS {
-        q.round()
-    } else {
-        q
-    };
+    let ratio = to_precision(num / sig, EXCEL_PRECISION);
     number_result(if is_ceiling {
-        q_adj.ceil() * sig
+        ratio.ceil() * sig
     } else {
-        q_adj.floor() * sig
+        ratio.floor() * sig
     })
 }
 
@@ -359,11 +336,15 @@ impl SheetEngine {
             None => 0.0,
         };
         let mode = match name {
-            "ROUND" => RoundMode::Nearest,
-            "ROUNDUP" => RoundMode::Up,
-            _ => RoundMode::Down,
+            "ROUND" => Rounding::Nearest,
+            "ROUNDUP" => Rounding::AwayFromZero,
+            _ => Rounding::TowardZero,
         };
-        number_result(round_digits(mode, num, digits)?)
+        number_result(clean_zero(round_result(
+            to_precision(num, EXCEL_PRECISION),
+            digits.trunc(),
+            mode,
+        )?))
     }
 
     fn math_mround(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
@@ -376,9 +357,7 @@ impl SheetEngine {
         if (num > 0.0 && mult < 0.0) || (num < 0.0 && mult > 0.0) {
             return Err(FormulaError::Num);
         }
-        let q = num / mult;
-        let nudge = q.abs() * f64::EPSILON * ROUND_NUDGE_ULPS;
-        number_result(clean_zero((q + nudge.copysign(q)).round() * mult))
+        number_result(clean_zero((num / mult).round() * mult))
     }
 
     fn math_randbetween(

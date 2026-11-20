@@ -75,6 +75,7 @@ mod pivot_dynamic;
 mod recalc;
 mod rules;
 mod sheet_sort;
+mod sig_digits;
 mod sort_keys;
 mod sort_refs;
 mod special;
