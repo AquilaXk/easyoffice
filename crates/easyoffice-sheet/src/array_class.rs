@@ -42,6 +42,8 @@ pub(crate) fn is_spill_fn(name: &str) -> bool {
             | "REGEXREPLACE"
             | "ARRAYTOTEXT"
             | "FILTERXML"
+            | "GROUPBY"
+            | "PIVOTBY"
     )
 }
 

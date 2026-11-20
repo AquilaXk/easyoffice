@@ -694,7 +694,8 @@ impl<'a> Parser<'a> {
                 std::borrow::Cow::Owned(s) => s,
                 _ => name.to_ascii_uppercase(),
             };
-            self.saw_scope |= canonical == "LET" || canonical == "LAMBDA";
+            self.saw_scope |=
+                matches!(canonical.as_str(), "LET" | "LAMBDA" | "GROUPBY" | "PIVOTBY");
             // A name that is no function may be a defined name that holds a `LAMBDA`.
             self.saw_name |= !crate::names::is_function(&canonical);
             if canonical == "ANCHORARRAY" {

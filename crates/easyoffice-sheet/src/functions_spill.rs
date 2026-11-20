@@ -28,7 +28,7 @@ fn kind_rank(v: &V) -> u8 {
 }
 
 /// Compares two sort keys; blanks are last whatever the direction.
-fn sort_key_cmp(a: &V, b: &V, ascending: bool) -> Ordering {
+pub(crate) fn sort_key_cmp(a: &V, b: &V, ascending: bool) -> Ordering {
     let (ra, rb) = (kind_rank(a), kind_rank(b));
     if ra == 4 || rb == 4 {
         return ra.cmp(&rb);
@@ -50,7 +50,7 @@ fn sort_key_cmp(a: &V, b: &V, ascending: bool) -> Ordering {
 
 /// A value as a hash key: texts without case, numbers by their bits (zero without sign).
 #[derive(Hash, PartialEq, Eq)]
-enum CellKey {
+pub(crate) enum CellKey {
     Number(u64),
     Boolean(bool),
     Text(String),
@@ -58,7 +58,7 @@ enum CellKey {
     Empty,
 }
 
-fn cell_key(v: &V) -> CellKey {
+pub(crate) fn cell_key(v: &V) -> CellKey {
     match v {
         V::Number(n) => CellKey::Number(if *n == 0.0 { 0 } else { n.to_bits() }),
         V::Boolean(b) => CellKey::Boolean(*b),

@@ -39,6 +39,7 @@ mod functions_dist_more;
 mod functions_eng;
 mod functions_fin;
 mod functions_fin_args;
+mod functions_groupby;
 mod functions_imtrig;
 mod functions_info_ref;
 mod functions_lambda;
@@ -61,6 +62,7 @@ mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
 mod functions_xml;
+mod groupby_axis;
 mod hidden_rows;
 mod lexer;
 mod lookup_helpers;

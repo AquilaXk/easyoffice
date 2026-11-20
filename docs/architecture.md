@@ -18,7 +18,7 @@ flowchart TD
     end
     subgraph CoreLayer["Engine Layer (Rust)"]
         Formats["easyoffice-formats\n- 20종 포맷 레지스트리, 매직 바이트 가드, 코덱"]
-        Sheet["easyoffice-sheet\n- 307종 수식 엔진, 피벗"]
+        Sheet["easyoffice-sheet\n- 309종 수식 엔진, 피벗"]
         Layout["easyoffice-layout\n- 조판 엔진"]
     end
     Desktop --> App
