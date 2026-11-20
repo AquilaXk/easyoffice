@@ -26,6 +26,7 @@ mod hwpx_unpack;
 mod iso_serial;
 pub mod layout_lint;
 mod legacy_ole2_codec;
+pub mod native_package;
 pub mod odf_hwpx_codecs;
 mod odf_package;
 pub mod odp_rich;
