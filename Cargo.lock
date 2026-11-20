@@ -1284,7 +1284,6 @@ dependencies = [
  "base64 0.23.1",
  "crc32fast",
  "encoding_rs",
- "flate2",
  "miniz_oxide 0.9.1",
  "sha1",
  "sha2 0.11.1",

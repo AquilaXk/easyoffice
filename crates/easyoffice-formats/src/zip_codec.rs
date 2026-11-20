@@ -164,47 +164,47 @@ impl ZipArchiveCodec {
             }
         }
 
-        // The crate decides nothing about stored entries, so the first pass stores what must be
-        // stored and deflates the rest. A deflated entry that did not shrink or passed the ratio
-        // limit is then stored in a second pass (rare: only very redundant or random data).
-        let mut stored: Vec<bool> = entries
+        // The crate only lays the archive out. DEFLATE is the engine's own (`deflate.rs`, one
+        // backend whatever else is linked), so each entry is compressed here, kept only when it
+        // shrank and passes the ratio limit, and written as the payload of a stored entry whose
+        // method, size and CRC fields are then set to the real ones (same length, nothing moves).
+        let packed: Vec<Option<Vec<u8>>> = entries
             .iter()
-            .map(|e| !use_deflate || e.entry_data().is_empty() || Self::must_store(e.entry_path()))
+            .map(|e| {
+                let data = e.entry_data();
+                if !use_deflate || data.is_empty() || Self::must_store(e.entry_path()) {
+                    return None;
+                }
+                let deflated = crate::deflate::deflate_raw(data);
+                let within_ratio = !ratio_guard
+                    || data.len() <= deflated.len().saturating_mul(Self::MAX_PACKED_RATIO);
+                (deflated.len() < data.len() && within_ratio).then_some(deflated)
+            })
             .collect();
-        loop {
-            let archive = Self::write_archive(entries, &stored)?;
-            let unworthy =
-                Self::entries_not_worth_deflating(&archive, entries, &stored, ratio_guard)?;
-            if unworthy.is_empty() {
-                return Ok(archive);
-            }
-            for index in unworthy {
-                stored[index] = true;
-            }
+        let mut archive = Self::write_archive(entries, &packed)?;
+        if packed.iter().any(Option::is_some) {
+            Self::mark_deflated(&mut archive, entries, &packed)?;
         }
+        Ok(archive)
     }
 
-    /// Writes the entries in order with the fixed 1980-01-01 time stamp, deflating those not marked
-    /// in `stored`.
+    /// Writes the entries in order with the fixed 1980-01-01 time stamp, every one as a stored
+    /// entry holding `packed` when present and the data otherwise.
     fn write_archive<E: AsZipEntry>(
         entries: &[E],
-        stored: &[bool],
+        packed: &[Option<Vec<u8>>],
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .last_modified_time(DateTime::default());
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-        for (entry, &store) in entries.iter().zip(stored) {
-            let options = SimpleFileOptions::default().last_modified_time(DateTime::default());
-            let options = if store {
-                options.compression_method(CompressionMethod::Stored)
-            } else {
-                options
-                    .compression_method(CompressionMethod::Deflated)
-                    .compression_level(Some(i64::from(crate::deflate::COMPRESSION_LEVEL)))
-            };
+        for (entry, deflated) in entries.iter().zip(packed) {
             writer
                 .start_file(entry.entry_path(), options)
                 .map_err(zip_write_error)?;
+            let payload = deflated.as_deref().unwrap_or_else(|| entry.entry_data());
             writer
-                .write_all(entry.entry_data())
+                .write_all(payload)
                 .map_err(|err| zip_write_error(err.into()))?;
         }
         writer
@@ -213,35 +213,48 @@ impl ZipArchiveCodec {
             .map_err(zip_write_error)
     }
 
-    /// Indices of deflated entries whose packed form is not smaller than the data, or whose size
-    /// ratio passes [`Self::MAX_PACKED_RATIO`] when `ratio_guard` is set (extremely redundant data
-    /// would pass the reader's bomb limit).
-    fn entries_not_worth_deflating<E: AsZipEntry>(
-        archive: &[u8],
+    /// Turns the stored entries that hold deflated payloads into deflate entries: needed version,
+    /// method, CRC-32 and uncompressed size of the real data, in the local header and in the
+    /// central directory entry. The payload and every offset stay as written.
+    fn mark_deflated<E: AsZipEntry>(
+        archive: &mut [u8],
         entries: &[E],
-        stored: &[bool],
-        ratio_guard: bool,
-    ) -> Result<Vec<usize>, EasyOfficeError> {
-        if stored.iter().all(|&s| s) {
-            return Ok(Vec::new());
-        }
-        let mut reader = ZipArchive::new(Cursor::new(archive)).map_err(zip_read_error)?;
-        let mut unworthy = Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
-            if stored[index] {
-                continue;
-            }
-            let packed = reader
-                .by_index_raw(index)
-                .map_err(zip_read_error)?
-                .compressed_size() as usize;
-            let len = entry.entry_data().len();
-            let within_ratio = !ratio_guard || len <= packed.saturating_mul(Self::MAX_PACKED_RATIO);
-            if packed >= len || !within_ratio {
-                unworthy.push(index);
+        packed: &[Option<Vec<u8>>],
+    ) -> Result<(), EasyOfficeError> {
+        let mut offsets = Vec::new();
+        {
+            let mut reader = ZipArchive::new(Cursor::new(&*archive)).map_err(zip_read_error)?;
+            for index in (0..entries.len()).filter(|&i| packed[i].is_some()) {
+                let file = reader.by_index_raw(index).map_err(zip_read_error)?;
+                offsets.push((
+                    index,
+                    file.header_start() as usize,
+                    file.central_header_start() as usize,
+                ));
             }
         }
-        Ok(unworthy)
+        for (index, local, central) in offsets {
+            let data = entries[index].entry_data();
+            let crc = Self::crc32(data).to_le_bytes();
+            let size = (data.len() as u32).to_le_bytes();
+            let version = Self::VERSION_NEEDED.to_le_bytes();
+            let method = Self::METHOD_DEFLATE.to_le_bytes();
+            // Local header: version 4, method 8, CRC-32 14, uncompressed size 22.
+            // Central entry: version needed 6, method 10, CRC-32 16, uncompressed size 24.
+            for (at, field) in [
+                (local + 4, &version[..]),
+                (local + 8, &method[..]),
+                (local + 14, &crc[..]),
+                (local + 22, &size[..]),
+                (central + 6, &version[..]),
+                (central + 10, &method[..]),
+                (central + 16, &crc[..]),
+                (central + 24, &size[..]),
+            ] {
+                archive[at..at + field.len()].copy_from_slice(field);
+            }
+        }
+        Ok(())
     }
 
     pub fn unpack(
@@ -390,15 +403,12 @@ impl ZipArchiveCodec {
                     )
                 })?
                 .to_string();
-            let method = match file.compression() {
-                CompressionMethod::Stored => Self::METHOD_STORE,
-                CompressionMethod::Deflated => Self::METHOD_DEFLATE,
-                other => {
-                    return Err(EasyOfficeError::CorruptedContainer(format!(
-                        "지원하지 않는 ZIP 압축 방식({other:?})입니다 (Store=0, Deflate=8 전용)."
-                    )));
-                }
-            };
+            let method = file.compression().to_u16();
+            if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
+                return Err(EasyOfficeError::CorruptedContainer(format!(
+                    "지원하지 않는 ZIP 압축 방식({method})입니다 (Store=0, Deflate=8 전용)."
+                )));
+            }
             descriptors.push(ZipEntryDescriptor::new(
                 path.clone(),
                 file.compressed_size(),

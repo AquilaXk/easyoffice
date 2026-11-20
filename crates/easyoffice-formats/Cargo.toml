@@ -10,8 +10,6 @@ adler2 = { workspace = true }
 base64 = { workspace = true }
 crc32fast = { workspace = true }
 encoding_rs = { workspace = true }
-# Backend choice for the DEFLATE of `zip` (see the workspace manifest).
-flate2 = { workspace = true }
 miniz_oxide = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }

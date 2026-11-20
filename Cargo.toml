@@ -25,9 +25,10 @@ base64 = "0.23"
 encoding_rs = "0.8"
 miniz_oxide = "0.9"
 adler2 = "2"
-# `zip` leaves the DEFLATE backend of `flate2` open; the engine picks the pure Rust one.
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+# The engine lays out ZIP archives with `zip` but compresses with its own DEFLATE adapter, so no
+# compression feature of `zip` is on (the output must not depend on what else is linked).
+flate2 = "1"
+zip = { version = "8", default-features = false }
 sha1 = "0.11"
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
