@@ -169,3 +169,65 @@ test("a sheet with nothing in it: Ctrl+Down goes to the last row, Ctrl+Up to the
   assert.equal(jump(view, "T50", 0, 1), "T50");
   assert.ok(reads < 10, `the empty rows were read ${reads} times`);
 });
+
+// ---- the keys to the next and previous sheet (PD-290) -------------------------------------------------------------
+
+const key = (name, mods = {}) => ({ key: name, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+
+test("Ctrl+PageDown goes to the next sheet and Ctrl+PageUp to the previous one, on every platform", () => {
+  for (const mac of [false, true]) {
+    assert.equal(nav.sheetStep(key("PageDown", { ctrlKey: true }), mac), 1);
+    assert.equal(nav.sheetStep(key("PageUp", { ctrlKey: true }), mac), -1);
+  }
+});
+
+test("Option+Right and Option+Left go to the next and previous sheet on a Mac only", () => {
+  assert.equal(nav.sheetStep(key("ArrowRight", { altKey: true }), true), 1);
+  assert.equal(nav.sheetStep(key("ArrowLeft", { altKey: true }), true), -1);
+  assert.equal(nav.sheetStep(key("ArrowRight", { altKey: true }), false), 0, "Alt+Right is the system's elsewhere");
+  assert.equal(nav.sheetStep(key("ArrowLeft", { altKey: true }), false), 0);
+});
+
+test("the other keys that look alike are no sheet step", () => {
+  for (const mac of [false, true]) {
+    for (const ev of [
+      key("PageDown"), // the page move of the cell
+      key("PageDown", { altKey: true }), // a screen of columns
+      key("PageDown", { metaKey: true }),
+      key("PageDown", { ctrlKey: true, altKey: true }),
+      key("PageDown", { ctrlKey: true, metaKey: true }),
+      key("PageDown", { ctrlKey: true, shiftKey: true }), // selects across sheets in the spreadsheet program
+      key("PageUp", { ctrlKey: true, shiftKey: true }),
+      key("ArrowRight"),
+      key("ArrowRight", { ctrlKey: true }),
+      key("ArrowRight", { altKey: true, shiftKey: true }),
+      key("ArrowRight", { altKey: true, ctrlKey: true }),
+      key("ArrowRight", { altKey: true, metaKey: true }),
+      key("ArrowDown", { altKey: true }),
+      key("Home", { ctrlKey: true }),
+      key("", {}),
+      {},
+    ]) {
+      assert.equal(nav.sheetStep(ev, mac), 0, JSON.stringify(ev) + " " + mac);
+    }
+  }
+});
+
+test("the target is the neighbour among the shown sheets, with no wrap at either end", () => {
+  const shown = ["첫째", "둘째", "셋째"];
+  assert.equal(nav.sheetTarget(shown, "첫째", 1), "둘째");
+  assert.equal(nav.sheetTarget(shown, "둘째", 1), "셋째");
+  assert.equal(nav.sheetTarget(shown, "셋째", 1), null, "the last sheet stays");
+  assert.equal(nav.sheetTarget(shown, "둘째", -1), "첫째");
+  assert.equal(nav.sheetTarget(shown, "첫째", -1), null, "the first sheet stays");
+  assert.equal(nav.sheetTarget(["하나"], "하나", 1), null);
+  assert.equal(nav.sheetTarget([], "하나", 1), null);
+});
+
+test("a sheet that is not shown, and a step that is no step, have no target", () => {
+  const shown = ["A", "C"];
+  assert.equal(nav.sheetTarget(shown, "B", 1), null, "the active sheet is not among the shown ones");
+  assert.equal(nav.sheetTarget(shown, "A", 0), null);
+  assert.equal(nav.sheetTarget(shown, "A", Number.NaN), null);
+  assert.equal(nav.sheetTarget(shown, "A", 1), "C", "a hidden sheet between them is passed over");
+});

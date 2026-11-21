@@ -5157,3 +5157,19 @@
 - **Verified by** `node --test scripts/test-webui-sheet-print-rules.mjs` 7개: 채우기·글자색·글꼴 비트(칸 자신의 채우기 위), 화면의 `--cf-bg`·`--cf-fg`·`cf-bold`와 같은 값, 서식 없는 칸의 규칙 채우기, 규칙 테두리와 이웃 칸이 마주 보는 변, 칸 자신의 변 위에 덮기, 규칙 없는 시트는 이전과 같음, 격자 밖 좌표(0, 음수, `NaN`, 소수, 2^31)와 없는 시트의 답은 없음. 규칙 읽기를 끈 인쇄 대 켠 인쇄의 전후 캡처(`.scratch/shots/`).
 - **Revisit when** 데이터 막대·아이콘 집합을 인쇄할 때, 엔진 PDF에 규칙 서식을 그릴 때.
 
+## PD-290. Ctrl+PageDown·Ctrl+PageUp과 macOS Option+→·←로 다음·이전 시트로 이동
+
+- **Status** Implemented (QA 요청 2026-11-22). 화면 `crates/easyoffice-app/ui/sheet-nav.js`(`sheetStep`, `sheetTarget`, 순수 규칙), `sheet-input.js`(`onKeydown`), `sheet-controller.js`(`stepSheet`). 시험 `scripts/test-sheet-nav.mjs`(순수 규칙), `scripts/test-webui-sheet-tab-keys.mjs`(DOM 하니스).
+- **Context** PD-280은 Ctrl+PageUp·PageDown을 칸을 옮기지 않는 키로만 두고 시트 이동을 남겼다. 표 계산 프로그램(한국어 문서)은 Ctrl+PageDown이 다음 시트, Ctrl+PageUp이 이전 시트이고 macOS에서는 Option+→·←도 같다.
+- **Decision (`PD-290`)**
+  1. **키**: Ctrl+PageDown(다음), Ctrl+PageUp(이전)은 모든 플랫폼에서 물리 Ctrl 키(`ctrlKey`)만이다. macOS는 Option+→(다음), Option+←(이전)을 더한다. Shift, Cmd, 다른 보조 키가 함께 오면 단계가 아니다(Ctrl+Shift+PageDown은 표 계산 프로그램에서 시트를 묶어 고르는 키라 이 화면에는 대응 상태가 없고 이전처럼 아무 일도 하지 않는다). macOS가 아닌 곳에서 Alt+→는 건드리지 않는다. 플랫폼은 창의 `guessClientPlatform`(`navigator.platform`)으로 가른다.
+  2. **대상**: 탭 줄에 보이는 시트의 순서에서 현재 시트 옆이다(숨긴 시트는 건너뜀). 처음·마지막 시트에서는 돌아가지 않고 머문다(표 계산 프로그램도 그렇다). 시트 하나뿐이면 아무 일도 없다. 키는 가로채므로(`preventDefault`) 칸은 움직이지 않는다.
+  3. **편집 중**: 칸을 편집하는 중에는 키를 글자 입력에 둔다(Option+←는 글자 단위 이동). 수식 입력 중 시트를 넘겨 참조를 넣는 동작(PD-279)은 이번에 바꾸지 않았다.
+  4. **전환**: 탭 클릭과 같은 `switchSheetTab`(작업 공간 실행 취소 대기열, 편집 칸 확정, 시트별 선택·스크롤 복원, 상태줄 "시트 탭 전환")이다. 전환이 끝나면 새 시트의 선택 칸으로 포커스를 돌려 키를 이어 누를 수 있다.
+  5. **브라우저**: 일반 브라우저 탭에서 Ctrl+PageDown은 브라우저가 탭 이동에 쓰므로 페이지가 받지 못한다(데스크톱 셸은 받는다).
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 라이브러리를 그대로: 키 규칙은 표 계산 프로그램 동작이라 가져올 것이 없다. (2) 이미 쓰는 의존성: 이동 규칙 모듈 `sheet-nav.js`(순수 함수), 탭 줄의 보이는 시트 목록(`visibleOf`), 탭 전환(`switchSheetTab`)을 그대로 이었다. (3) 이식: 참조 시트 구현의 시트 전환 명령은 키 바인딩을 이 형태로 갖지 않아 옮긴 코드 없음(0줄).
+- **Why** 시트가 여럿인 통합 문서를 키보드로 훑는 흐름을 표 계산 프로그램과 맞춘다.
+- **Trade-offs** 플랫폼 판별이 `navigator.platform`이라 이 값이 맥을 알리지 않는 환경에서는 Option+→·←가 동작하지 않는다(Ctrl+PageDown·PageUp은 동작). Windows·Linux에는 Option+→에 해당하는 키가 없다.
+- **Verified by** `node --test scripts/test-sheet-nav.mjs` 새 시험 5개(키 조합 표: Ctrl, Option, 섞인 보조 키 14종은 단계 아님, 양 끝에서 돌지 않음, 숨은 시트·없는 시트·시트 하나), `node --test scripts/test-webui-sheet-tab-keys.mjs` 8개(탭 줄 순서로 이동, 끝에서 멈춤, `preventDefault`, 숨은 시트 건너뜀, macOS Option+→·←, 다른 플랫폼은 없음, Shift·Alt·Ctrl+화살표 등 다른 키, 편집 중, 전환 뒤 편집 내용 유지와 포커스 복귀), 실제 WebKit 단계(`scripts/webkit-dom`).
+- **Revisit when** 시트를 묶어 고르는 Ctrl+Shift+PageDown을 넣을 때, 창 크기·플랫폼을 셸이 알려 주도록 바꿀 때.
+

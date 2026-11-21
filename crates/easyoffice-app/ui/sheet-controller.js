@@ -489,6 +489,14 @@
       pushCellUndoSnapshotIfNeeded,
       retractCellUndoSnapshot,
       switchSheet: (name) => performSwitchSheetTabAsync(name),
+      // The next (1) or previous (-1) shown sheet in tab order, as the keys of `sheet-nav.js` ask for (PD-290).
+      stepSheet: (step) => {
+        const keys = [...new Set([...Object.keys(sheetDataStore), getActiveSheetName()])];
+        const shown = host.__EASYOFFICE_SHEET_TAB_STRIP__.visibleOf(keys);
+        const target = host.__EASYOFFICE_SHEET_NAV__.sheetTarget(shown, getActiveSheetName(), step);
+        // The key goes on working in the new sheet: the focus comes back to its selected cell.
+        if (target !== null) void switchSheetTab(target).then(() => input.focusAnchor()).catch(() => {});
+      },
       ensureSheetCellFocusEntry,
       syncSheetCellFocusBaseline,
       ensurePendingSnapshot,

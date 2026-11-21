@@ -552,6 +552,8 @@
       return true;
     }
 
+    const isMacClient = () => host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.guessClientPlatform?.().platform === "macOS";
+
     function onKeydown(ev) {
       // Alt+Down opens the drop-down of an auto filter header (sheet-filter-ui.js): it moves nothing.
       if (ev.altKey && ev.key === "ArrowDown" && !ev.ctrlKey && !ev.metaKey) return;
@@ -561,6 +563,14 @@
       const st = td ? stateOf(td) : null;
       const editing = isEditing(st);
       const mod = ev.ctrlKey || ev.metaKey;
+      // Ctrl+PageDown and Ctrl+PageUp (on a Mac also Option+Right and Option+Left) go to the next and previous sheet (PD-290); a cell
+      // being edited keeps the keys for its text.
+      const sheetStep = !editing && api.stepSheet ? nav.sheetStep(ev, isMacClient()) : 0;
+      if (sheetStep !== 0) {
+        ev.preventDefault();
+        api.stepSheet(sheetStep);
+        return;
+      }
       if (ARROWS[ev.key]) return handleArrow(ev, st, editing);
       if (ev.key === "Enter" || ev.key === "Tab") return handleEnterTab(ev, editing);
       if (ev.key === "Escape") return handleEscapeKey(ev, editing, td);

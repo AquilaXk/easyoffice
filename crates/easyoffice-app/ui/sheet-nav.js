@@ -12,8 +12,8 @@
 // functions of a small sheet view (`hasValue`, `mergeAt`, `rowHidden`, `colHidden`, sheet and data extent) that move
 // one cell, a merged range counts as one cell of its top-left value and is left past its far edge. A walk that starts
 // past the last used row or column does not scan the empty cells (the reference visits each one). The reference wraps
-// the arrow keys at the sheet edge; here they stop there. Home, Ctrl+Home, Ctrl+End and the page moves are not in the
-// reference and are written for the spreadsheet application's rules. Univer's command, selection service and shortcut
+// the arrow keys at the sheet edge; here they stop there. Home, Ctrl+Home, Ctrl+End, the page moves and the keys to the next
+// and previous sheet (PD-290) are not in the reference and are written for the spreadsheet application's rules. Univer's command, selection service and shortcut
 // tables are not used.
 (function (host) {
   "use strict";
@@ -150,5 +150,25 @@
     return { r: clamp(view.dataRows, 1, view.maxRows), c: clamp(view.dataCols, 1, view.maxCols) };
   }
 
-  host.__EASYOFFICE_SHEET_NAV__ = { step, jump, cycle, afterTabs, page, home, end };
+  // The keys that go to the next or previous sheet (PD-290): Ctrl+PageDown and Ctrl+PageUp, and on a Mac Option+Right and Option+Left
+  // (the Option+Arrow of the text editing is the same key, so the caller leaves it to the text while a cell is edited). Shift
+  // with them selects across sheets in the spreadsheet program, which this page has no state for: it is no step. Returns 1, -1 or 0.
+  // The page keys of the cell move (PageDown without Ctrl, Alt+PageDown) stay with `page`.
+  function sheetStep(ev, mac) {
+    if (ev.shiftKey) return 0;
+    const { key } = ev;
+    if ((key === "PageDown" || key === "PageUp") && ev.ctrlKey && !ev.metaKey && !ev.altKey) return key === "PageDown" ? 1 : -1;
+    if (mac && (key === "ArrowRight" || key === "ArrowLeft") && ev.altKey && !ev.ctrlKey && !ev.metaKey) return key === "ArrowRight" ? 1 : -1;
+    return 0;
+  }
+
+  // The sheet `step` places from `active` among the shown sheets in tab order, null at the first or last sheet (the spreadsheet
+  // program does not wrap) and when `active` is not a shown sheet.
+  function sheetTarget(shown, active, step) {
+    const at = shown.indexOf(active);
+    const to = at + step;
+    return at >= 0 && step !== 0 && to >= 0 && to < shown.length ? shown[to] : null;
+  }
+
+  host.__EASYOFFICE_SHEET_NAV__ = { step, jump, cycle, afterTabs, page, home, end, sheetStep, sheetTarget };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
