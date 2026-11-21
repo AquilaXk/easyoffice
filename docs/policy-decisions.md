@@ -5190,3 +5190,16 @@
 - **Verified by** `cargo test -p easyoffice-app --test sheet_getpivotdata_payload` 16개(답 11종, 피벗 없음, 없는 시트, 읽을 수 없는 원본, 시트 접두 원본, 세션의 만들기·원본 변경·지우기, 디코드한 파일의 피벗, 시트당·전체·세션 개수 상한은 요청 거부, 한글 긴 이름·긴 필터 항목·긴 값 이름·긴 원본 시트·축·값·필터 항목 초과·바이트 초과 피벗 8종은 그 피벗만 빠지고 다른 식이 계산됨, 열 번호 밖, 시트 전체 원본), `cargo test -p easyoffice-sheet --test sheet_getpivotdata` 새 시험 2개(등록 바이트 한도와 이전 등록 유지, 원본에 없는 열의 필터는 `#REF!`이고 패닉 없음), `node --test scripts/test-webui-sheet-getpivotdata.mjs` 6개(이름·필드 이름·슬라이서를 보내지 않음, 값 필드 없는 피벗은 보내지 않음, 긴 이름이 있어도 다른 식의 값), 실제 WebKit 2단계(피벗을 만들고 `GETPIVOTDATA` 6개의 값, 원본을 바꾸고 새로 고쳐 값 갱신, 피벗 삭제 뒤 `#REF!`, 한글 171자 이름과 300자 필터 항목이 든 피벗만 `#REF!`이고 `=1+2`는 3). 전체 검증: `node --test scripts/test-*.mjs` 2,138개 중 2,137개 통과·실패 0·건너뜀 1, WebKit 31단계 통과, `cargo test --workspace --exclude easyoffice-desktop` 3,181개 통과·실패 0·무시 76, `cargo test -p easyoffice-desktop` 694개 통과·실패 0·무시 9, clippy `-D warnings`(데스크톱 포함), fmt, `--self-test` 통과.
 - **Revisit when** 새로 고치기 전까지 옛 값을 보이게 맞출 때, 피벗 정의를 세션에 한 번에 보내야 할 만큼 시트가 많아질 때.
 
+## PD-295. 릴리스 실행 파일과 Quick Look 확장에서 심볼 표를 제거함
+
+- **Status** Implemented (QA 요청 2026-11-22, 경량화). 루트 `Cargo.toml` `[profile.release]`, `scripts/build-quicklook-macos.mjs`. 크기 분석은 `docs/performance.md` 8장.
+- **Context** PD-276 뒤에도 데스크톱 64.1 MB, 엔진 CLI 13.8 MB였고 macOS universal dmg는 111 MB였다. 분석(8장)에서 코드는 함수 하나로 줄일 곳이 없이 평평했고(가장 큰 함수 190 KiB), 크기의 큰 몫은 임베드한 글꼴 20.2 MB와 아키텍처 중복이었다. 이 둘은 글꼴·릴리스 구성을 건드려야 해서 제안으로 남겼다. 코드가 아닌 쪽에서 동작을 안 바꾸고 줄일 수 있는 것은 심볼 표뿐이었다(링크 편집 구간 5.4 MB, Quick Look 조각은 4 MB).
+- **Decision (`PD-295`)**
+  1. 릴리스 프로필 `strip = "debuginfo"`를 `"symbols"`로 바꾼다. `panic = "unwind"`, thin LTO, 코드 단위 1은 그대로다.
+  2. Quick Look 확장은 `swiftc`로 묶은 조각마다 `xcrun strip`을 한 번 돌린 뒤 `lipo`·`codesign`한다. 서명은 `strip` 뒤에 하므로 바뀐 파일에 붙는다.
+- **Measured** macOS arm64, 같은 조건의 릴리스 빌드 전후. 데스크톱 64,103,952 → 59,644,048 B(-7.0%), CLI 13,750,704 → 12,955,888 B(-5.8%), Quick Look 미리보기 조각 15,035,920 → 11,824,304 B(-21.4%), 썸네일 13,478,768 → 10,660,752 B(-20.9%). CLI `--self-test` 실제 경로 5회 번갈아 측정은 `docx_to_pdf_1mb` 21.4 → 21.4 ms, `xlsx_100k_cells_pack_unpack` 52.4 → 51.7 ms, `sheet_recalc_10k_rows` 7.8 → 7.7 ms로 편차 안이다.
+- **Trade-offs** 크래시 보고서와 디버거에서 Rust 프레임 이름이 사라진다(`panic`은 `catch_unwind`로 잡고 메시지만 낸다). 필요하면 같은 커밋을 `CARGO_PROFILE_RELEASE_STRIP=none`으로 다시 빌드해 심볼을 얻는다. 크기 값은 macOS arm64만 쟀고 Windows·Linux 실행 파일은 못 쟀다.
+- **Alternatives rejected** Quick Look 조각에 `strip -x`(지역 심볼만): -1.4 MB로 `strip`(-3.2 MB)의 절반이다. 글꼴 가변화·부분 집합화, dmg 분리, `wasm-opt`, Quick Look 공유 프레임워크는 글꼴·릴리스 구성·고정 산출물을 바꾸므로 이번에는 구현하지 않고 8.5절에 근거와 함께 올렸다.
+- **Verified by** 위 전후 바이트, `codesign --verify --strict`(새 Quick Look 조각 둘), 아래 검증 모음.
+- **Revisit when** 심볼이 필요한 크래시 신고가 들어올 때(심볼 파일을 따로 보관하는 쪽으로), 8.5절 후보 중 하나를 구현할 때.
+

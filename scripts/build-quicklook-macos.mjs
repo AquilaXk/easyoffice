@@ -70,6 +70,10 @@ function buildExtension(ext) {
       "-Xlinker", "-dead_strip",
       ...ext.frameworks.flatMap((framework) => ["-framework", framework]),
     ]);
+    // PD-295: nothing reads the symbol table at run time (the FFI catches panics with `catch_unwind`),
+    // and the 16,000 symbols of the linked rhwp library are a fifth of each slice. The codesign below
+    // runs after this and signs the stripped file.
+    run("xcrun", ["strip", output]);
     return output;
   });
   const executable = join(macosDir, ext.moduleName);

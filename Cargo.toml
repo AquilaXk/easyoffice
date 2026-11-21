@@ -74,10 +74,12 @@ rhwp = { path = "third_party/rhwp" }
 # engine CLI 17.1 -> 13.6 MB on macOS arm64; benchmarks unchanged within noise), and debug information is
 # stripped from the packages. Fat LTO saved 2.5 MB more but took 1.4x the build time of thin. Panics keep unwinding
 # because the shell catches them around the PDF worker, saving and export (`catch_unwind`).
+# PD-295: the symbol table goes too (it is only read by debuggers and crash symbolication, never by the
+# program), 64.1 -> 59.6 MB desktop and 13.8 -> 13.0 MB engine CLI on macOS arm64.
 [profile.release]
 lto = "thin"
 codegen-units = 1
-strip = "debuginfo"
+strip = "symbols"
 
 [profile.dev.package.quick-xml]
 opt-level = 3
