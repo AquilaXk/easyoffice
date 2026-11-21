@@ -276,10 +276,22 @@
     }));
   }
 
-  // The pivot tables of a sheet, for `GETPIVOTDATA` (PD-292): where each one is, its source, its fields and its filters. The
-  // slicers and the field names are the page's own.
+  // The pivot tables of a sheet, for `GETPIVOTDATA` (PD-292): where each one is, its source, its fields and its filters, and
+  // nothing else (a name or a field name can be long and the engine does not read them). A table with no source range or no
+  // value field has nothing to answer with and is not sent.
   function pivotPayload(name, layoutApi) {
-    return (layoutApi?.get?.(name)?.pivots || []).map(({ slicers, fieldNames, ...pivot }) => pivot);
+    return (layoutApi?.get?.(name)?.pivots || [])
+      .filter((p) => p.sourceRange && p.valueFields?.length)
+      .map((p) => ({
+        sourceSheet: p.sourceSheet,
+        sourceRange: p.sourceRange,
+        hasHeader: p.hasHeader,
+        location: p.location,
+        rowFields: p.rowFields,
+        colFields: p.colFields,
+        valueFields: p.valueFields,
+        filters: p.filters,
+      }));
   }
 
   const PAYLOADS = { merges: mergePayload, tables: tablePayload, pivots: pivotPayload };

@@ -25,19 +25,56 @@ const PIVOT = {
   slicers: [{ col: 0, caption: "지역", left: 300, top: 40, width: 184, height: 210, multiSelect: false }],
 };
 
-const harnessLayout = async () => (await createWorkspaceHarness()).host.__EASYOFFICE_SHEET_LAYOUT__;
-
-test("the engine is told a pivot table without the slicers and the field names the page keeps", async () => {
-  const layout = await harnessLayout();
-  const spill = (await createWorkspaceHarness()).host.__EASYOFFICE_SHEET_SPILL__;
+test("the engine is told what it reads of a pivot table and nothing the page keeps for itself", async () => {
+  const h = await createWorkspaceHarness();
+  const { __EASYOFFICE_SHEET_SPILL__: spill, __EASYOFFICE_SHEET_LAYOUT__: layout } = h.host;
   layout.setPivots("S", [PIVOT]);
   const [sent] = spill.pivotPayload("S", layout);
   const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-  assert.deepEqual(Object.keys(sent).sort(byName), Object.keys(PIVOT).filter((k) => k !== "slicers" && k !== "fieldNames").sort(byName));
+  assert.deepEqual(Object.keys(sent).sort(byName), ["colFields", "filters", "hasHeader", "location", "rowFields", "sourceRange", "sourceSheet", "valueFields"]);
   assert.equal(sent.location, "F3:I6");
   assert.deepEqual(sent.valueFields, [{ col: 2, agg: "sum", name: "합계: 매출" }]);
   assert.deepEqual(spill.pivotPayload("None", layout), []);
   assert.deepEqual(spill.blockerPayload("pivots", "S", layout), spill.pivotPayload("S", layout));
+});
+
+test("a long name and long filter items: the name is not sent, and a table with no value field is left out", async () => {
+  const h = await createWorkspaceHarness();
+  const { __EASYOFFICE_SHEET_SPILL__: spill, __EASYOFFICE_SHEET_LAYOUT__: layout } = h.host;
+  const long = "가".repeat(255);
+  layout.setPivots("S", [
+    { ...PIVOT, name: long, filters: [{ col: 0, values: [long.repeat(3)], blank: false }] },
+    { ...PIVOT, name: "값 없음", location: "A20:B21", valueFields: [] },
+  ]);
+  const sent = spill.pivotPayload("S", layout);
+  assert.equal(sent.length, 1, "only the table that can answer");
+  assert.equal(sent[0].name, undefined, "the name is not sent");
+  assert.equal(sent[0].filters[0].values[0], long.repeat(3), "the filter items are the engine's to bound, they are sent as they are");
+});
+
+test("a pivot table whose content the engine bounds does not stop the evaluation of the other formulas", async () => {
+  const requests = [];
+  const harness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
+    tauriInvoke: async (command, args) => {
+      if (command === "get_workspace_bootstrap") return JSON.stringify({ platform: "macOS", shortcutModifier: "⌘", sheetSessions: false, openTabs: [] });
+      if (command === "evaluate_sheet") {
+        const body = JSON.parse(args.payload);
+        requests.push(body);
+        return { targetValues: body.targets.map((t) => (t.cell === "H9" ? "3" : "")), circular: false };
+      }
+      return { status: "ok" };
+    },
+  });
+  switchModule(harness.document, "SHEET");
+  await flushAsyncTurns();
+  const long = "가".repeat(255);
+  harness.host.__EASYOFFICE_SHEET_LAYOUT__.setPivots("Sheet1", [{ ...PIVOT, name: long, filters: [{ col: 0, values: [long.repeat(3)], blank: false }] }]);
+  await type({ ...harness, requests }, "H9", "=1+2");
+  const sent = requests.filter((r) => !r.sessionAction && Array.isArray(r.targets)).at(-1);
+  assert.ok(sent, "a request was sent");
+  assert.equal(sent.pivots.Sheet1[0].name, undefined, "the long name does not travel");
+  assert.equal(harness.document.querySelector('#pane-sheet td[data-cell="H9"]').textContent, "3", "the other formula has its value");
 });
 
 test("a request without a session carries the pivot tables of the sheets that have some", async () => {
@@ -47,7 +84,7 @@ test("a request without a session carries the pivot tables of the sheets that ha
   const field = spill.mergesField(["S", "T"], layout);
   assert.deepEqual(Object.keys(field), ["pivots"], "no merge and no table, nothing of them");
   assert.deepEqual(Object.keys(field.pivots), ["S"]);
-  assert.equal(field.pivots.S[0].name, "피벗 테이블1");
+  assert.equal(field.pivots.S[0].location, "F3:I6");
   assert.deepEqual(spill.mergesField(["T"], layout), {});
 });
 
