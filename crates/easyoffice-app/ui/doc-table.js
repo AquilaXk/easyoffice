@@ -4,7 +4,7 @@
   // The tables of the document editor. `표 만들기` puts an empty grid after the block the caret is in, else at
   // the end of the document, so a blank document gets one too. The other table commands (rows and columns,
   // merge and split, block sum, cell formulas) act on the table the caret is in, one undo step each, and Tab
-  // moves between cells. The save payload and the file reader use the same
+  // moves between cells (`doc-table-tab.js`). The save payload and the file reader use the same
   // `table.doc-inline-table > tbody > tr > td` shape; the structure edits are in `doc-table-grid.js`.
 
   const TABLE_CLASS = "doc-inline-table";
@@ -100,15 +100,16 @@
       return { table, from, to: grid.cellIn(table, range.endContainer, range.endOffset) ?? from };
     }
 
-    function placeCaret(node) {
+    function placeCaretAt(node, offset) {
       const sel = env.getSelection?.();
       const range = document.createRange?.();
       if (!node || !sel || !range) return;
-      range.setStart(node, 0);
-      range.setEnd(node, 0);
+      range.setStart(node, offset);
+      range.setEnd(node, offset);
       sel.removeAllRanges();
       sel.addRange(range);
     }
+    const placeCaret = (node) => placeCaretAt(node, 0);
 
     const rectOf = ({ table, from, to }) => grid.rectOf(grid.layoutOf(table), from, to);
 
@@ -174,19 +175,15 @@
       return result;
     }
 
-    // Tab goes to the next cell, Shift+Tab to the previous one; Tab in the last cell adds a row (document editor habit).
+    const tableTab = host.__EASYOFFICE_CREATE_DOC_TABLE_TAB__({ grid, withUndo, placeCaretAt });
+
+    // Tab and Shift+Tab move between cells, and Tab in the last cell adds a row (`doc-table-tab.js`).
     function onKeydown(ev) {
       if (ev.key !== "Tab" || ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing) return;
       const sel = selectionAt();
       if (!sel) return;
       ev.preventDefault?.();
-      const cells = Array.from(grid.layoutOf(sel.table).at.keys());
-      const next = cells.indexOf(sel.from) + (ev.shiftKey ? -1 : 1);
-      if (next >= 0 && next < cells.length) placeCaret(cells[next]);
-      else if (next >= cells.length) {
-        const added = withUndo(() => grid.insertRow(sel.table, cells.at(-1), false));
-        placeCaret(added.cell);
-      }
+      tableTab.handleTab(sel, ev.shiftKey);
     }
 
     function syncMenu() {

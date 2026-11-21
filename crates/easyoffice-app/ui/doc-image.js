@@ -422,5 +422,7 @@
     return api;
   }
 
+  // The parts of the editor that are not the body (page frames, notes, comments, the footer layer), for the paste and Tab code.
+  host.__EASYOFFICE_DOC_PAGE_META__ = { isTrailingMetaNode };
   host.__EASYOFFICE_CREATE_DOC_IMAGE__ = createDocImage;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
