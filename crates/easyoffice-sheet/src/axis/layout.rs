@@ -11,7 +11,7 @@
 //! loses all its cells disappears; inserted rows and columns have the default width.
 
 use super::{Axis, AxisEdit};
-use easyoffice_formats::CellBox;
+use easyoffice_formats::{CellBox, RowHeights};
 use std::collections::BTreeMap;
 
 fn span_of(b: &CellBox, axis: Axis) -> (u32, u32) {
@@ -83,4 +83,104 @@ pub fn shift_widths(widths: &BTreeMap<u32, u32>, edit: &AxisEdit) -> BTreeMap<u3
         .iter()
         .filter_map(|(&col, &px)| Some((edit.map_index(col)?, px)))
         .collect()
+}
+
+/// Row heights (zero-based row to height) after a row edit. A deleted row loses its height, the rows after it move,
+/// and an inserted row takes the height a user set on the row above it, as the spreadsheet program's insert copies the
+/// format of the row above (PD-277); a height that follows the content is not copied. A column edit and a row edit
+/// bounded to some columns leave them as they are.
+pub fn shift_row_heights(heights: &RowHeights, edit: &AxisEdit) -> RowHeights {
+    if edit.axis == Axis::Col || edit.cols.is_some() {
+        return heights.clone();
+    }
+    let mut out: RowHeights = heights
+        .iter()
+        .filter_map(|(&row, &height)| Some((edit.map_index(row)?, height)))
+        .collect();
+    let above = edit
+        .at
+        .checked_sub(1)
+        .and_then(|row| heights.get(&row))
+        .filter(|height| height.custom);
+    if let (super::EditKind::Insert, Some(&height)) = (edit.kind, above) {
+        let end = edit.at.saturating_add(edit.count).min(edit.limit());
+        out.extend((edit.at..end).map(|row| (row, height)));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::axis::EditKind;
+
+    fn heights(rows: &[(u32, &str, bool)]) -> RowHeights {
+        rows.iter()
+            .map(|&(row, pt, custom)| {
+                (
+                    row,
+                    easyoffice_formats::RowHeight::parse(pt, custom).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    fn edit(axis: Axis, kind: EditKind, at: u32, count: u32) -> AxisEdit {
+        AxisEdit::new(axis, kind, at, count).unwrap()
+    }
+
+    #[test]
+    fn rows_move_with_an_insertion_and_the_new_rows_copy_the_row_above() {
+        let before = heights(&[(1, "30", true), (4, "40", true), (6, "20", false)]);
+        let after = shift_row_heights(&before, &edit(Axis::Row, EditKind::Insert, 2, 2));
+        assert_eq!(
+            after,
+            heights(&[
+                (1, "30", true),
+                (2, "30", true),
+                (3, "30", true),
+                (6, "40", true),
+                (8, "20", false)
+            ])
+        );
+        // An inserted row below a row that follows its content has no height of its own.
+        let auto_above = heights(&[(1, "30", false)]);
+        assert_eq!(
+            shift_row_heights(&auto_above, &edit(Axis::Row, EditKind::Insert, 2, 1)),
+            auto_above
+        );
+        // At the first row there is no row above.
+        assert_eq!(
+            shift_row_heights(
+                &heights(&[(0, "30", true)]),
+                &edit(Axis::Row, EditKind::Insert, 0, 1)
+            ),
+            heights(&[(1, "30", true)])
+        );
+    }
+
+    #[test]
+    fn a_deletion_drops_the_heights_of_its_rows_and_closes_the_gap() {
+        let before = heights(&[
+            (1, "30", true),
+            (2, "35", true),
+            (3, "40", true),
+            (5, "45", false),
+        ]);
+        let after = shift_row_heights(&before, &edit(Axis::Row, EditKind::Delete, 2, 2));
+        assert_eq!(after, heights(&[(1, "30", true), (3, "45", false)]));
+    }
+
+    #[test]
+    fn a_column_edit_and_a_column_bounded_row_edit_keep_them() {
+        let before = heights(&[(1, "30", true), (4, "40", true)]);
+        assert_eq!(
+            shift_row_heights(&before, &edit(Axis::Col, EditKind::Insert, 0, 3)),
+            before
+        );
+        let bounded = edit(Axis::Row, EditKind::Delete, 0, 1)
+            .with_cols(1, 2)
+            .unwrap();
+        assert_eq!(shift_row_heights(&before, &bounded), before);
+    }
 }

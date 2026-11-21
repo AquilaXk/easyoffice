@@ -55,6 +55,7 @@ impl OoxmlCodec {
                     .any(|c| c.1 >= Self::MAX_XLSX_COLS)
                 || styling.merges.len() > crate::MAX_MERGES
                 || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS
+                || !crate::row_heights_within_bounds(&styling.row_heights, Self::MAX_XLSX_ROWS)
                 || styling.filter.as_ref().is_some_and(|f| {
                     !f.within_bounds()
                         || f.range.row1 >= Self::MAX_XLSX_ROWS
@@ -62,7 +63,7 @@ impl OoxmlCodec {
                 });
             if layout {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "XLSX 병합·숨김 범위가 허용 범위를 초과했습니다.".to_string(),
+                    "XLSX 병합·숨김·행 높이 범위가 허용 범위를 초과했습니다.".to_string(),
                 ));
             }
             if !styling.view_within_bounds(Self::MAX_XLSX_ROWS, Self::MAX_XLSX_COLS) {

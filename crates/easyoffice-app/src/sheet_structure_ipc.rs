@@ -4,13 +4,13 @@
 //! Request: `{session, sheet, axis: "row"|"col", op: "insert"|"delete", at, count}` (`at` is the
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
-//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols` (see `sheet_layout_json`),
+//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights` (see `sheet_layout_json`),
 //! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`), `tables` (see `sheet_table_json`) and `rules`
 //! `{sheet: {cf, dv}}` of every sheet, and the row and column groups `outline` (`sheet_view_json`).
 //!
 //! Answer: the session's `formulas` (`[{sheet, cell, value}]`, the text of every formula the edit
 //! rewrote, by new position), the `changed` values, `circular`, and the moved `merges`,
-//! `hiddenRows`, `hiddenCols`, `tables` (the ones the edit did not remove), `filter` (`null` when the edit removed it; `filterReapply: true` when
+//! `hiddenRows`, `hiddenCols`, `rowHeights`, `tables` (the ones the edit did not remove), `filter` (`null` when the edit removed it; `filterReapply: true` when
 //! it dropped a column's condition, so the page evaluates the others again), `widths` and the
 //! `outline` and `rules` that changed. A request's `linkTargets` `{sheet: ["#Sheet1!B5", ...]}` (the
 //! in-workbook targets of the links of each sheet) answers `linkTargets` `{sheet: [[old, new], ...]}`
@@ -22,7 +22,8 @@
 
 use crate::sheet_filter_json::{filter_json, parse_filter};
 use crate::sheet_layout_json::{
-    merges_json, parse_hidden_cols, parse_hidden_rows, parse_merges, runs_json,
+    merges_json, parse_hidden_cols, parse_hidden_rows, parse_merges, parse_row_heights,
+    row_heights_json, runs_json,
 };
 use crate::sheet_page_json::moved_page_json;
 use crate::sheet_protect_json::{moved_protect_json, moved_runs_json, parse_protection};
@@ -35,8 +36,9 @@ use easyoffice_formats::{
     INSERT_COLUMNS, INSERT_ROWS, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
-    shift_boxes, shift_filter, shift_outline, shift_rules, shift_runs, shift_tables, shift_widths,
-    Axis, AxisEdit, AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
+    shift_boxes, shift_filter, shift_outline, shift_row_heights, shift_rules, shift_runs,
+    shift_tables, shift_widths, Axis, AxisEdit, AxisEditReport, EditKind, RecalcOutcome,
+    RecalcSession,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -148,6 +150,10 @@ fn moved_layout_json(
             rows
         };
         let _ = write!(out, ",\"hiddenRows\":{}", runs_json(&moved));
+    }
+    if let Some(v) = field("rowHeights") {
+        let moved = shift_row_heights(&parse_row_heights(v)?, edit);
+        let _ = write!(out, ",\"rowHeights\":{}", row_heights_json(&moved));
     }
     if let Some(v) = field("hiddenCols") {
         let cols = parse_hidden_cols(v)?;

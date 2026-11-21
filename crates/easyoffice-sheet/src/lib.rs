@@ -98,8 +98,8 @@ pub mod workbook;
 pub use axis::{
     follow_sheet_change_links, follow_sheet_change_names, quote_sheet_name, rewrite_sheet_names,
     shift_boxes, shift_filter, shift_levels, shift_link_targets, shift_names, shift_outline,
-    shift_runs, shift_table, shift_tables, shift_widths, Axis, AxisBudget, AxisEdit,
-    AxisEditReport, EditKind, FilterShift, SheetChange,
+    shift_row_heights, shift_runs, shift_table, shift_tables, shift_widths, Axis, AxisBudget,
+    AxisEdit, AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use cell_display::{
     compile_for_page, format_for_page, format_for_page_typed, general_display, CellText,

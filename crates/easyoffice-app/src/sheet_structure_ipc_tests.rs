@@ -83,6 +83,38 @@ fn inserting_a_row_rewrites_formulas_and_moves_the_page_layout() {
 }
 
 #[test]
+fn row_heights_follow_a_row_edit_and_a_bad_height_changes_nothing() {
+    let id = open_with(&[("S!A1", "1")]);
+    let edit = |op: &str, at: u32, count: u32, heights: &str| {
+        format!(
+            r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"{op}","at":{at},"count":{count},"rowHeights":{heights}}}"#
+        )
+    };
+    let heights = "[[2,30],[5,40.5],[7,21,0]]";
+    // Rows 3 and 4 open below row 2 and take its height; the rest move down by two.
+    let inserted = call(&edit("insert", 3, 2, heights));
+    assert_eq!(
+        field(&inserted, "rowHeights").to_json_string(),
+        "[[2,30],[3,30],[4,30],[7,40.5],[9,21,0]]"
+    );
+    let deleted = call(&edit("delete", 4, 2, heights));
+    assert_eq!(
+        field(&deleted, "rowHeights").to_json_string(),
+        "[[2,30],[5,21,0]]"
+    );
+    let cols = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"col","op":"insert","at":1,"count":1,"rowHeights":{heights}}}"#
+    ));
+    assert_eq!(field(&cols, "rowHeights").to_json_string(), heights);
+    for bad in ["[[2,0]]", "[[2,410]]", "[[0,20]]", "[[2,\"20\"]]", "{}"] {
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", &edit("insert", 1, 1, bad)).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
 fn bad_requests_and_missing_sessions_are_refused() {
     let id = open_with(&[("S!A1", "1")]);
     for body in [

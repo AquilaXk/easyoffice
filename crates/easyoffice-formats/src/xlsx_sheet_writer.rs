@@ -207,6 +207,9 @@ pub(crate) fn group_cells_by_row<'a>(
         for row in summary_rows(st) {
             rows_map.entry(row).or_default();
         }
+        for &row in st.row_heights.keys() {
+            rows_map.entry(row).or_default();
+        }
         for &(start, end) in &st.unlocked_rows {
             let (s, e) = clamp_run(start, end);
             for row in s..=e {
@@ -273,6 +276,11 @@ pub(crate) fn build_sheet_xml(
             if hidden { " hidden=\"1\"" } else { "" }
         );
         if let Some(st) = styling {
+            crate::sheet_styling::sheet_row_height::xlsx_row_attrs(
+                &st.row_heights,
+                row,
+                &mut sheet_xml,
+            );
             let level = level_at(&st.outline.rows, row);
             if level > 0 {
                 let _ = write!(sheet_xml, " outlineLevel=\"{level}\"");

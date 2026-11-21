@@ -15,6 +15,9 @@ use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
 use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
 use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value, parse_hex_rgb};
+use crate::sheet_styling::sheet_row_height::{
+    ods_row_style_xml, read_ods_row_properties, RowHeight, RowHeights, MAX_ROW_HEIGHTS,
+};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{
     push_level, LevelRun, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS,
@@ -40,6 +43,9 @@ pub(crate) struct OdsStyleTable {
     cell_index: HashMap<StyleKey, usize>,
     widths: Vec<u32>,
     width_index: HashMap<u32, usize>,
+    /// Distinct row heights of the workbook, in first-use order: `ro<N>` names entry `N - 1` (PD-277).
+    row_heights: Vec<RowHeight>,
+    row_height_index: HashMap<RowHeight, usize>,
     /// Custom number format codes of the whole workbook (PD-193); `eonf<id>` data styles.
     num_fmts: NumFmtTable,
     /// Non-default font family names of the whole workbook (PD-244).
@@ -55,6 +61,8 @@ impl OdsStyleTable {
             cell_index: HashMap::new(),
             widths: Vec::new(),
             width_index: HashMap::new(),
+            row_heights: Vec::new(),
+            row_height_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
             font_names: FontTable::default(),
             data_ids: Vec::new(),
@@ -87,8 +95,19 @@ impl OdsStyleTable {
                     table.widths.len()
                 });
             }
+            for &height in styling.row_heights.values() {
+                table.row_height_index.entry(height).or_insert_with(|| {
+                    table.row_heights.push(height);
+                    table.row_heights.len()
+                });
+            }
         }
         table
+    }
+
+    /// The name of the row style of a row with this height.
+    pub(crate) fn row_style_name(&self, height: RowHeight) -> Option<String> {
+        self.row_height_index.get(&height).map(|i| format!("ro{i}"))
     }
 
     pub(crate) fn cell_style_name(
@@ -124,7 +143,7 @@ impl OdsStyleTable {
 
     /// `<office:automatic-styles>` element (empty string when there is nothing to declare).
     pub(crate) fn automatic_styles_xml(&self) -> String {
-        if self.cells.is_empty() && self.widths.is_empty() {
+        if self.cells.is_empty() && self.widths.is_empty() && self.row_heights.is_empty() {
             return String::new();
         }
         let mut xml = String::from("<office:automatic-styles>");
@@ -139,6 +158,9 @@ impl OdsStyleTable {
                 i + 1,
                 f64::from(px) / PX_PER_INCH
             ));
+        }
+        for (i, &height) in self.row_heights.iter().enumerate() {
+            xml.push_str(&ods_row_style_xml(i + 1, height));
         }
         for (i, &k) in self.cells.iter().enumerate() {
             let mut props = String::new();
@@ -464,6 +486,8 @@ fn parse_text_properties(attrs: &str, font_table: &mut FontTable) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
+    /// Heights a user set, by row style name (PD-277).
+    pub(crate) rows: HashMap<String, RowHeight>,
     /// Tab colours and hidden states of the table styles (PD-208, PD-209).
     pub(crate) table_props: HashMap<String, TableProps>,
     /// Custom number format codes the cell styles refer to, and how many codes were replaced
@@ -478,6 +502,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     let mut styles = AutomaticStyles {
         cells: HashMap::new(),
         columns: HashMap::new(),
+        rows: HashMap::new(),
         table_props: HashMap::new(),
         num_fmts: Arc::default(),
         num_fmts_rejected: 0,
@@ -528,6 +553,19 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
                     .clamp(f64::from(MIN_COLUMN_PX), f64::from(MAX_COLUMN_PX));
                 styles.columns.insert(name, px as u32);
             }
+        } else if family == "table-row" {
+            let height =
+                extract_tags_or_self_closing_with_attrs(body, "style:table-row-properties")
+                    .into_iter()
+                    .next()
+                    .and_then(|(props, _)| {
+                        read_ods_row_properties(props, |v| {
+                            length_to_px(v).map(|px| px / PX_PER_INCH * PT_PER_INCH)
+                        })
+                    });
+            if let Some(height) = height {
+                styles.rows.insert(name, height);
+            }
         }
     }
     (styles.num_fmts, styles.num_fmts_rejected) = num_fmts.finish();
@@ -568,6 +606,9 @@ pub(crate) struct StyleSink<'s> {
     /// The rows in `filtered`, counted as they are added (a sum over the runs per row would be quadratic).
     filtered_total: u64,
     next_filtered: bool,
+    /// The heights of the rows of the table being read, and the one the next row has.
+    row_heights: RowHeights,
+    next_height: Option<RowHeight>,
 }
 
 impl<'s> StyleSink<'s> {
@@ -593,6 +634,8 @@ impl<'s> StyleSink<'s> {
             filtered: Vec::new(),
             filtered_total: 0,
             next_filtered: false,
+            row_heights: RowHeights::new(),
+            next_height: None,
         }
     }
 
@@ -647,6 +690,21 @@ impl<'s> StyleSink<'s> {
         }
     }
 
+    /// Keeps the height of the rows `self.row..self.row + repeat`; a repeated band is the sheet's default look, not a
+    /// height someone set row by row, so only bounded blocks are kept (as for styles).
+    fn record_row_height(&mut self, repeat: u32) {
+        let Some(height) = self.next_height.take() else {
+            return;
+        };
+        let in_grid = u64::from(self.row) + u64::from(repeat) <= u64::from(OdfCodec::MAX_ROWS) + 1;
+        if in_grid && repeat <= 1024 && self.row_heights.len() + repeat as usize <= MAX_ROW_HEIGHTS
+        {
+            for r in self.row..self.row + repeat {
+                self.row_heights.insert(r, height);
+            }
+        }
+    }
+
     /// Keeps the link of the cells `col..col + col_repeat` of the rows `self.row..self.row + repeat`; a
     /// repeated band is not individual linking, so only bounded blocks are kept (as for styles).
     fn record_link(&mut self, col: u32, repeat: u32, col_repeat: u32, href: &str, title: &str) {
@@ -697,10 +755,15 @@ impl OdsSink for StyleSink<'_> {
         self.links = LinkCollector::default();
         self.filtered = Vec::new();
         self.filtered_total = 0;
+        self.row_heights = RowHeights::new();
     }
 
     fn row_filtered(&mut self, filtered: bool) {
         self.next_filtered = filtered;
+    }
+
+    fn row_style(&mut self, style: Option<&str>) {
+        self.next_height = style.and_then(|name| self.styles.rows.get(name).copied());
     }
 
     fn group(&mut self, columns: bool, display: bool, open: bool) {
@@ -751,6 +814,7 @@ impl OdsSink for StyleSink<'_> {
 
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
         self.record_group(0, self.row, self.row.saturating_add(repeat - 1));
+        self.record_row_height(repeat);
         let mut col = 0u32;
         for cell in cells {
             let style = cell
@@ -829,6 +893,7 @@ impl OdsSink for StyleSink<'_> {
             hidden: std::mem::take(&mut self.hidden),
             outline: self.settled_outline(),
             filtered_rows: std::mem::take(&mut self.filtered),
+            row_heights: std::mem::take(&mut self.row_heights),
             ..SheetStyling::default()
         };
         let links = std::mem::take(&mut self.links);

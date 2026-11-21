@@ -30,7 +30,7 @@ mod tables;
 pub use apply::{AxisBudget, AxisEditReport};
 pub use filter::{shift_filter, FilterShift};
 pub use formula::rewrite_formula_refs;
-pub use layout::{shift_boxes, shift_runs, shift_widths};
+pub use layout::{shift_boxes, shift_row_heights, shift_runs, shift_widths};
 pub use links::{follow_sheet_change_links, shift_link_targets};
 pub use names::{follow_sheet_change_names, shift_names};
 pub use outline::{shift_levels, shift_outline};

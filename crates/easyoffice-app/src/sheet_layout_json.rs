@@ -5,9 +5,9 @@
 //! inclusive. Input over a limit is refused, not trimmed.
 
 use easyoffice_formats::{
-    normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, SheetFilter,
-    SheetStyling, SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
-    MAX_SPILL_REFS,
+    normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, RowHeight, RowHeights,
+    SheetFilter, SheetStyling, SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
+    MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -147,6 +147,55 @@ pub(crate) fn parse_hidden_cols(v: &StrictJsonValue) -> Result<Vec<(u32, u32)>, 
     parse_runs(v, LAST_COL, "hiddenCols")
 }
 
+/// `rowHeights`: `[[row, points], ...]` or `[row, points, 0]` for a height that follows the content, rows 1-based
+/// (PD-277). Input over a limit or with a height that is not a finite number of points in 0..=409 is refused.
+pub(crate) fn parse_row_heights(v: &StrictJsonValue) -> Result<RowHeights, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad("rowHeights"))?;
+    if items.len() > MAX_ROW_HEIGHTS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "행 높이 수가 한도({MAX_ROW_HEIGHTS})를 초과했습니다."
+        )));
+    }
+    let mut heights = RowHeights::new();
+    for item in items {
+        let entry = item
+            .as_array()
+            .filter(|p| (2..=3).contains(&p.len()))
+            .ok_or_else(|| bad("rowHeights"))?;
+        let row = entry[0]
+            .as_u64()
+            .filter(|n| (1..=u64::from(LAST_ROW) + 1).contains(n))
+            .map(|n| n as u32 - 1);
+        let custom = entry.get(2).map_or(Some(true), |flag| match flag.as_u64() {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            _ => None,
+        });
+        let height = match (&entry[1], custom) {
+            (StrictJsonValue::Number(points), Some(custom)) => RowHeight::parse(points, custom),
+            _ => None,
+        };
+        match (row, height) {
+            (Some(row), Some(height)) => heights.insert(row, height),
+            _ => return Err(bad("rowHeights")),
+        };
+    }
+    Ok(heights)
+}
+
+pub(crate) fn row_heights_json(heights: &RowHeights) -> String {
+    let mut out = String::from("[");
+    for (i, (row, height)) in heights.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "[{},{}", row + 1, height.points_text());
+        out.push_str(if height.custom { "]" } else { ",0]" });
+    }
+    out.push(']');
+    out
+}
+
 /// Reads the layout fields of a sheet object into `styling`.
 pub(crate) fn parse_layout(
     obj: &[(String, StrictJsonValue)],
@@ -160,6 +209,9 @@ pub(crate) fn parse_layout(
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "hiddenCols") {
         styling.hidden_cols = parse_hidden_cols(v)?;
+    }
+    if let Some(v) = StrictJsonValue::get_field(obj, "rowHeights") {
+        styling.row_heights = parse_row_heights(v)?;
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
@@ -284,6 +336,13 @@ pub(crate) fn write_layout_split(
     if !styling.hidden_cols.is_empty() {
         let _ = write!(out, ",\"hiddenCols\":{}", runs_json(&styling.hidden_cols));
     }
+    if !styling.row_heights.is_empty() {
+        let _ = write!(
+            out,
+            ",\"rowHeights\":{}",
+            row_heights_json(&styling.row_heights)
+        );
+    }
     if let Some(filter) = filter {
         let _ = write!(
             out,
@@ -348,6 +407,48 @@ mod tests {
             out,
             r#","merges":["A1:B2","D4:D6"],"hiddenRows":[[3,5],[9,9]],"hiddenCols":[[2,2]]"#
         );
+    }
+
+    #[test]
+    fn row_heights_round_trip_through_json_with_the_custom_flag() {
+        let mut styling = SheetStyling::default();
+        let sheet = json(r#"{"rowHeights":[[3,30],[5,14.4,1],[9,21.75,0]]}"#);
+        parse_layout(sheet.as_object().unwrap(), &mut styling).unwrap();
+        assert_eq!(styling.row_heights.len(), 3);
+        assert!(styling.row_heights[&2].custom && !styling.row_heights[&8].custom);
+        assert_eq!(styling.row_heights[&4].centipt, 1440);
+        let mut out = String::new();
+        write_layout(&mut out, &styling);
+        assert_eq!(out, r#","rowHeights":[[3,30],[5,14.4],[9,21.75,0]]"#);
+    }
+
+    #[test]
+    fn hostile_row_heights_are_refused() {
+        let flood = format!("{{\"rowHeights\":[{}]}}", vec!["[1,20]"; 100_001].join(","));
+        let mut texts = vec![
+            r#"{"rowHeights":[[0,20]]}"#.to_string(),
+            r#"{"rowHeights":[[1048577,20]]}"#.to_string(),
+            r#"{"rowHeights":[[1,0]]}"#.to_string(),
+            r#"{"rowHeights":[[1,-3]]}"#.to_string(),
+            r#"{"rowHeights":[[1,409.01]]}"#.to_string(),
+            r#"{"rowHeights":[[1,1e999]]}"#.to_string(),
+            r#"{"rowHeights":[[1,"20"]]}"#.to_string(),
+            r#"{"rowHeights":[[1,null]]}"#.to_string(),
+            r#"{"rowHeights":[[1,20,2]]}"#.to_string(),
+            r#"{"rowHeights":[[1,20,true]]}"#.to_string(),
+            r#"{"rowHeights":[[1]]}"#.to_string(),
+            r#"{"rowHeights":[1,20]}"#.to_string(),
+            r#"{"rowHeights":{"1":20}}"#.to_string(),
+        ];
+        texts.push(flood);
+        for text in texts {
+            let v = json(&text);
+            assert!(
+                parse_layout(v.as_object().unwrap(), &mut SheetStyling::default()).is_err(),
+                "{}",
+                &text[..text.len().min(60)]
+            );
+        }
     }
 
     #[test]

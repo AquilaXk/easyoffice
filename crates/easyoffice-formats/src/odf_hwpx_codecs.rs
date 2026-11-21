@@ -487,6 +487,10 @@ impl OdfCodec {
                     grid.entry(row).or_default();
                 }
             }
+            // The rows with a height are written, empty ones too, to carry it (PD-277).
+            for &row in st.row_heights.keys() {
+                grid.entry(row).or_default();
+            }
             // The rows a filter hides are written, empty ones too, to carry their visibility (PD-226).
             for row in st.filter_hidden_runs().flat_map(|&(a, b)| a..=b) {
                 grid.entry(row).or_default();
@@ -553,7 +557,13 @@ impl OdfCodec {
             } else {
                 ""
             };
-            content.push_str(&format!("<table:table-row{visibility}>"));
+            let height_style = styling
+                .and_then(|st| st.row_heights.get(&row))
+                .and_then(|&height| style_table.row_style_name(height))
+                .map_or(String::new(), |name| {
+                    format!(" table:style-name=\"{name}\"")
+                });
+            content.push_str(&format!("<table:table-row{visibility}{height_style}>"));
             let mut expected_col: u32 = 0;
             for (col, raw) in row_cells {
                 if col > expected_col {

@@ -50,6 +50,8 @@ pub(crate) mod sheet_page;
 pub(crate) mod sheet_pivot;
 #[path = "sheet_protect.rs"]
 pub(crate) mod sheet_protect;
+#[path = "sheet_row_height.rs"]
+pub(crate) mod sheet_row_height;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
 #[path = "sheet_spill.rs"]
@@ -118,6 +120,9 @@ pub use sheet_numfmt::*;
 pub use sheet_page::*;
 pub use sheet_pivot::*;
 pub use sheet_protect::*;
+pub use sheet_row_height::{
+    row_heights_within_bounds, RowHeight, RowHeights, MAX_ROW_HEIGHTS, MAX_ROW_HEIGHT_CENTIPT,
+};
 pub use sheet_rules::*;
 pub use sheet_spill::*;
 pub use sheet_table::{
@@ -455,6 +460,8 @@ pub struct SheetStyling {
     /// [`CellValueKind::infer`] (PD-241).
     pub cell_types: FastU64Map<CellValueKind>,
     pub columns: BTreeMap<u32, u32>,
+    /// Heights of rows by zero-based row, and whether a user set them (PD-277).
+    pub row_heights: RowHeights,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
     /// Custom number format codes: the cell id `CUSTOM_BASE + n` names entry `n` (PD-193). A
@@ -573,6 +580,7 @@ impl SheetStyling {
         self.cells.is_empty()
             && self.cell_types.is_empty()
             && self.columns.is_empty()
+            && self.row_heights.is_empty()
             && self.rules.is_empty()
             && self.merges.is_empty()
             && self.hidden_rows.is_empty()
