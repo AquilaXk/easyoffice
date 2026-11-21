@@ -250,31 +250,50 @@
       sel.addRange(range);
     }
 
-    // A boundary that sits on the editor itself (a select-all) is pulled in to the first and last block of the body, so the
-    // frames around the body are not deleted with it.
+    const TABLE_STRUCTURE = new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR"]);
+
+    // The table whose rows a boundary sits on (not a boundary inside a cell), or null.
+    function structureTable(root, node) {
+      if (!isElement(node) || !TABLE_STRUCTURE.has(tagOf(node))) return null;
+      let table = node;
+      for (let el = node.parentNode; el && el !== root; el = el.parentNode) if (tagOf(el) === "TABLE") table = el;
+      return tagOf(table) === "TABLE" ? table : null;
+    }
+
+    const indexIn = (node) => Array.from(node.parentNode.childNodes).indexOf(node);
+
+    // The boundaries of the range pulled to places that delete whole blocks, never part of the frame around the body or of a
+    // table's rows. A boundary on the editor itself (a select-all) goes to the first and last block of the body, a boundary
+    // on the rows of a table to just before or after that table: the table is deleted whole or not at all. False when the
+    // range is not a text selection (it lies in the rows of one table).
     function clampToBody(root, range) {
-      const body = Array.from(root.childNodes).filter((n) => !isFrame(n));
-      if (body.length === 0) return false;
       const kids = Array.from(root.childNodes);
+      if (kids.every(isFrame)) return false;
       if (range.startContainer === root) {
-        const first = kids.slice(range.startOffset).find((n) => !isFrame(n)) ?? body.at(-1);
-        range.setStart(first, 0);
+        const first = kids.slice(range.startOffset).find((n) => !isFrame(n));
+        if (first) range.setStart(root, kids.indexOf(first));
       }
       if (range.endContainer === root) {
-        const last = kids.slice(0, range.endOffset).findLast((n) => !isFrame(n)) ?? body[0];
-        range.setEnd(last, last.nodeType === 3 ? last.data.length : last.childNodes.length);
+        const last = kids.slice(0, range.endOffset).findLast((n) => !isFrame(n));
+        if (last) range.setEnd(root, kids.indexOf(last) + 1);
       }
+      const from = structureTable(root, range.startContainer);
+      const to = structureTable(root, range.endContainer);
+      if (from && from === to) return false;
+      if (from) range.setStart(from.parentNode, indexIn(from));
+      if (to) range.setEnd(to.parentNode, indexIn(to) + 1);
       return true;
     }
 
     // A selection is deleted first, as the reference does before it inserts. A selection over several cells, from outside a
     // table into it, or into a frame keeps its content (nothing is deleted) and the paste goes in at its start. Returns that
-    // start: the boundary of a range that was deleted moves to the parent of the first block when the ends are in two
-    // blocks, so the point is taken before the deletion (the node it names is cut, never removed).
+    // start, or null when the selection could not be used. The boundary of a range that was deleted moves to the parent of the
+    // first block when the ends are in two blocks, so the point is taken before the deletion (the node it names is cut, never
+    // removed; a boundary on the editor itself names a place between blocks, which stays).
     function deleteSelection(root, range) {
-      if (!clampToBody(root, range)) return null;
+      if (!clampToBody(root, range)) return { start: { node: range.startContainer, offset: range.startOffset }, deleted: false };
       const start = { node: range.startContainer, offset: range.startOffset };
-      if (closestCell(root, range.startContainer) !== closestCell(root, range.endContainer) || zoneOf(root, range.startContainer) !== zoneOf(root, range.endContainer)) return start;
+      if (closestCell(root, range.startContainer) !== closestCell(root, range.endContainer) || zoneOf(root, range.startContainer) !== zoneOf(root, range.endContainer)) return { start, deleted: false };
       const startBlock = leafBlockOf(root, range.startContainer);
       const endBlock = leafBlockOf(root, range.endContainer);
       range.deleteContents();
@@ -282,7 +301,7 @@
         while (endBlock.firstChild) startBlock.appendChild(endBlock.firstChild);
         endBlock.parentNode.removeChild(endBlock);
       }
-      return start;
+      return { start, deleted: true };
     }
 
     const closestCell = (root, node) => {
@@ -486,11 +505,18 @@
       const sel = env.getSelection?.();
       const range = sel?.rangeCount > 0 ? sel.getRangeAt(0) : null;
       const inside = range && root.contains(range.startContainer) && root.contains(range.endContainer);
+      // Nothing to put in (a line break alone in a header) leaves the selection where it is.
+      const zone = inside ? zoneOf(root, range.startContainer) : null;
+      const insertable = zone ? blocks.some((item) => item.type === "text" && item.runs.some((run) => !run.br)) : blocks.length > 0;
+      if (!insertable) {
+        setFeedback?.(MSG_NO_CONTENT);
+        return false;
+      }
       let done = false;
       withUndo(() => {
         const cut = inside && !range.collapsed ? deleteSelection(root, range) : null;
         const live = inside ? sel.getRangeAt(0) : null;
-        const at = cut ?? (live ? { node: live.startContainer, offset: live.startOffset } : appendPoint(root));
+        const at = cut?.start ?? (live ? { node: live.startContainer, offset: live.startOffset } : appendPoint(root));
         const located = leafBlockAt(root, at.node, at.offset);
         const zone = zoneOf(root, located.block);
         const caret = zone ? insertInline(root, located.block, located.node, located.offset, blocks) : insertBlocks(root, blocks, located);
@@ -498,7 +524,7 @@
           placeCaretAt(caret.node, caret.offset);
           done = true;
         }
-        return { changed: done };
+        return { changed: done || cut?.deleted === true };
       });
       return done;
     }
@@ -548,6 +574,8 @@
       if (!root || !data) return;
       event.preventDefault?.();
       const html = data.getData("text/html") || "";
+      // The size of the HTML is the first thing looked at: over the bound it is neither cleaned nor read.
+      const oversized = html.length > host.__EASYOFFICE_DOC_PASTE_MODEL__.LIMITS.MAX_HTML_CHARS;
       const text = data.getData("text/plain") || "";
       const rtf = data.getData("text/rtf") || "";
       const sel = env.getSelection?.();
@@ -567,6 +595,11 @@
           }
         }
       }
+      if (oversized) {
+        if (text) pasteText(text, MSG_TOO_LARGE);
+        else setFeedback?.(MSG_TEXT_TOO_LARGE);
+        return;
+      }
       if (!html) {
         pasteText(text);
         return;
@@ -576,7 +609,8 @@
         pasteExternalHtml(html, text);
         return;
       }
-      // The pictures come from the RTF; the page is read again when they are ready, so the caret is taken then.
+      // The pictures come from the RTF. The paste goes in when they are ready, at the caret of that time, and only if the
+      // document window and a caret in it are still there (the user may have gone elsewhere meanwhile).
       void (async () => {
         let merged = html;
         try {
@@ -584,6 +618,9 @@
         } catch {
           // without the pictures the rest is still pasted
         }
+        const now = env.getSelection?.();
+        const caret = now?.rangeCount > 0 ? now.getRangeAt(0).startContainer : null;
+        if (!isDocModule() || !caret || !editor()?.contains(caret)) return;
         pasteExternalHtml(merged, text);
       })();
     }

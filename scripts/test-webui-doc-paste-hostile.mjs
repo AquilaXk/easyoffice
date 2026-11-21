@@ -186,6 +186,47 @@ test("control characters of the text are dropped, line ends of every kind split 
   assert.deepEqual(shapes(t.editor), ["p[앞abc]", "p[d]", "p[e f뒤]"]);
 });
 
+test("character formats are read once per element, not once per ancestor of every text", async () => {
+  const t = await editorWithCaret();
+  const runs = t.host.__EASYOFFICE_DOC_RUNS__;
+  const original = runs.readLegacyFormat;
+  let reads = 0;
+  runs.readLegacyFormat = (el) => {
+    reads += 1;
+    return original(el);
+  };
+  try {
+    await t.paste(clipboard({ html: "<span>".repeat(98) + "x<i></i>".repeat(500) + "</span>".repeat(98), text: "t" }));
+  } finally {
+    runs.readLegacyFormat = original;
+  }
+  assert.ok(t.editor.textContent.includes("x"), "the content was pasted");
+  assert.ok(reads <= 98 + 500 + 10, "reads " + reads);
+});
+
+test("the element and format reads have a budget: over it the paste is refused as a whole", async () => {
+  refused(await limited({ MAX_FORMAT_READS: 50 }, "<h1>제목</h1>" + "<b>x</b>".repeat(100)));
+});
+
+test("HTML over the size bound is not even cleaned: the check is the first thing the paste does", async () => {
+  const t = await editorWithCaret();
+  const sanitize = t.host.__EASYOFFICE_DOC_PASTE_SANITIZE__;
+  const original = sanitize.sanitizeOfficeHtml;
+  let calls = 0;
+  sanitize.sanitizeOfficeHtml = (html) => {
+    calls += 1;
+    return original(html);
+  };
+  try {
+    await t.paste(clipboard({ html: "<p>" + "가".repeat(4 * 1024 * 1024 + 1) + "</p>", text: "글자만", rtf: "{\\rtf1 \\pict}" }));
+  } finally {
+    sanitize.sanitizeOfficeHtml = original;
+  }
+  assert.equal(calls, 0);
+  assert.equal(t.editor.textContent, "앞글자만뒤");
+  assert.equal(t.feedback(), "붙여넣을 내용이 너무 커서 글자만 붙였습니다");
+});
+
 // ---- random markup -------------------------------------------------------------------------------------------
 
 test("random tag soup never throws and never leaves anything but the editor's own elements", async () => {

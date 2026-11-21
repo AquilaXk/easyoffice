@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { clipboard, openPasteEditor, shape, shapes } from "./test-support/paste-harness.mjs";
+import { flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // Paste into the document editor (doc-paste.js, doc-paste-model.js): the branches of the reference's onPaste, and what each
 // kind of clipboard becomes in the editor's DOM.
@@ -253,4 +255,57 @@ test("an editor copy pastes back with its run formats", async () => {
   t.caretAt(paragraphAt(t).firstChild, 1);
   await t.paste(clipboard({ html: '<p><span class="eo-run" data-eo-bold="true" data-eo-size="28" data-eo-color="FF0000" style="font-weight: bold; font-size: 14pt; color: #FF0000">복사</span></p>' }));
   assert.equal(shape(paragraphAt(t)), "p[x|span(b,s28,cFF0000)[복사]]");
+});
+
+test("a paste that has nothing to insert leaves the selection alone", async () => {
+  const t = await openPasteEditor({ markup: '<section data-eo-hf="header"><p>머리말글</p></section><p>본문</p>' });
+  const para = t.editor.querySelector("section").querySelector("p");
+  t.select(para.firstChild, 1, para.firstChild, 3);
+  const before = t.steps();
+  await t.paste(clipboard({ text: "\n" }));
+  assert.equal(para.textContent, "머리말글", "nothing was deleted");
+  assert.equal(t.steps(), before, "and no step was made");
+});
+
+const TABLE_A = '<table class="doc-inline-table"><tbody><tr><td>a</td><td>b</td></tr></tbody></table>';
+const TABLE_B = '<table class="doc-inline-table"><tbody><tr><td>c</td></tr></tbody></table>';
+
+test("select all over a body that starts and ends with a table leaves no empty table", async () => {
+  const t = await openPasteEditor({ markup: `<section data-eo-hf="header"><p>머리</p></section>${TABLE_A}<p>중간</p>${TABLE_B}` });
+  t.select(t.editor, 0, t.editor, t.editor.childNodes.length);
+  await t.paste(clipboard({ text: "새" }));
+  assert.equal(t.editor.querySelectorAll("table").length, 0);
+  assert.equal(t.editor.querySelector("section").textContent, "머리");
+  assert.equal(t.editor.textContent, "머리새");
+});
+
+test("a boundary on the table itself is pulled out of the table: the table goes whole or stays whole", async () => {
+  const t = await openPasteEditor({ markup: `<p>앞</p>${TABLE_A}<p>뒤끝</p>` });
+  const tbody = t.editor.querySelector("tbody");
+  t.select(tbody, 0, t.editor.childNodes[2].firstChild, 1);
+  await t.paste(clipboard({ text: "새" }));
+  assert.equal(t.editor.querySelectorAll("table").length, 0, "no shell of the table");
+  assert.equal(t.editor.textContent, "앞새끝");
+  const inside = await openPasteEditor({ markup: TABLE_A });
+  const body = inside.editor.querySelector("tbody");
+  inside.select(body, 0, body, 1);
+  await inside.paste(clipboard({ text: "새" }));
+  assert.equal(inside.editor.querySelectorAll("td").length, 2, "a selection of rows is not deleted");
+});
+
+test("the pictures of an RTF paste are not put in once the module or the caret has gone", async () => {
+  const png = Buffer.from(PNG_1x1, "base64").toString("hex");
+  const data = () => clipboard({ html: '<p><img src="file:///C:\\clip_image001.png">내용</p>', rtf: `{\\rtf1{\\pict\\pngblip ${png}}}` });
+  const t = await openPasteEditor({ paragraphs: ["앞뒤"] });
+  t.caretAt(paragraphAt(t).firstChild, 1);
+  t.editor.dispatchEvent({ type: "paste", clipboardData: data() });
+  switchModule(t.document, "SHEET");
+  await flushAsyncTurns(30);
+  assert.equal(t.editor.textContent, "앞뒤", "another module is showing");
+  const moved = await openPasteEditor({ paragraphs: ["앞뒤"] });
+  moved.caretAt(paragraphAt(moved).firstChild, 1);
+  moved.editor.dispatchEvent({ type: "paste", clipboardData: data() });
+  moved.selection.removeAllRanges();
+  await flushAsyncTurns(30);
+  assert.equal(moved.editor.textContent, "앞뒤", "the caret is gone");
 });

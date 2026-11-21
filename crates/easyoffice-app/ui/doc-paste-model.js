@@ -23,6 +23,7 @@
   const LIMITS = {
     MAX_HTML_CHARS: 4 * 1024 * 1024,
     MAX_NODES: 300000,
+    MAX_FORMAT_READS: 150000,
     MAX_DEPTH: 100,
     MAX_BLOCKS: 20000,
     MAX_RUNS: 200000,
@@ -51,6 +52,8 @@
   const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
   const COLLAPSIBLE_SPACE = /[ \t\r\n\f]+/g;
 
+  const NO_FORMAT = Object.freeze({});
+
   class PasteLimitError extends Error {}
 
   // ---------------------------------------------------------------- reading one document
@@ -59,7 +62,7 @@
     const R = host.__EASYOFFICE_DOC_RUNS__;
     const links = host.__EASYOFFICE_DOC_LINK__;
     const utils = host.__EASYOFFICE_SHEET_UTILS__;
-    const spent = { nodes: 0, blocks: 0, runs: 0, chars: 0, images: 0, imageBytes: 0, cells: 0 };
+    const spent = { formatReads: 0, nodes: 0, blocks: 0, runs: 0, chars: 0, images: 0, imageBytes: 0, cells: 0 };
 
     const over = (key, limit, add = 1) => {
       spent[key] += add;
@@ -67,16 +70,12 @@
     };
     const tagOf = (node) => String(node.tagName || "").toLowerCase();
 
-    // The character format of a text node: the formats of the inline elements around it, outermost first.
-    function formatOf(text, body) {
-      const chain = [];
-      for (let el = text.parentNode; el && el !== body; el = el.parentNode) chain.push(el);
-      const fmt = {};
-      for (let i = chain.length - 1; i >= 0; i -= 1) {
-        const el = chain[i];
-        Object.assign(fmt, R.isRunElement(el) ? R.readRunFormat(el) : R.readLegacyFormat(el));
-      }
-      return fmt;
+    // The character format an element adds to the one it is inside: `ctx.fmt` is carried down the walk, so each element is read
+    // once (reading every ancestor of every text again is quadratic in the depth). Null when it adds nothing.
+    function ownFormat(el) {
+      over("formatReads", LIMITS.MAX_FORMAT_READS);
+      const own = R.isRunElement(el) ? R.readRunFormat(el) : R.readLegacyFormat(el);
+      return Object.keys(own).length > 0 ? own : null;
     }
 
     function alignOf(el) {
@@ -102,7 +101,7 @@
       else block.runs.push(run);
     }
 
-    function addText(ctx, node, body) {
+    function addText(ctx, node) {
       let data = String(node.data ?? "").replace(CONTROL_CHARS, "");
       if (data === "") return;
       if (!ctx.pre) {
@@ -117,10 +116,10 @@
       if (ctx.pre) {
         data.split(/\r\n|\r|\n/).forEach((line, i) => {
           if (i > 0) addRun(block, { br: true });
-          if (line) addRun(block, { text: line, fmt: formatOf(node, body), href: ctx.href });
+          if (line) addRun(block, { text: line, fmt: ctx.fmt, href: ctx.href });
         });
       } else {
-        addRun(block, { text: data, fmt: formatOf(node, body), href: ctx.href });
+        addRun(block, { text: data, fmt: ctx.fmt, href: ctx.href });
       }
     }
 
@@ -178,7 +177,7 @@
       return rows;
     }
 
-    function readTable(table, body, depth) {
+    function readTable(table, depth, fmt) {
       const trs = rowsOf(table);
       if (trs.length > LIMITS.MAX_TABLE_ROWS) throw new PasteLimitError("rows");
       const rows = [];
@@ -191,8 +190,8 @@
           const colSpan = spanOf(cell, "colspan");
           width += colSpan;
           if (width > LIMITS.MAX_TABLE_COLS) throw new PasteLimitError("cols");
-          const inner = newContext({ inCell: true });
-          visitChildren(cell, inner, body, depth + 1);
+          const inner = newContext({ inCell: true, fmt });
+          visitChildren(cell, inner, depth + 1);
           flush(inner);
           return { colSpan, rowSpan: spanOf(cell, "rowspan"), blocks: inner.blocks };
         }));
@@ -203,33 +202,33 @@
     // ------------------------------------------------------------ the walk
 
     function newContext(extra = {}) {
-      return { blocks: [], cur: null, pre: false, href: null, align: null, listItem: null, listProps: null, lists: [], inCell: false, ...extra };
+      return { blocks: [], cur: null, fmt: NO_FORMAT, pre: false, href: null, align: null, listItem: null, listProps: null, lists: [], inCell: false, ...extra };
     }
 
-    function visitChildren(el, ctx, body, depth) {
-      for (const child of Array.from(el.childNodes)) visit(child, ctx, body, depth);
+    function visitChildren(el, ctx, depth) {
+      for (const child of Array.from(el.childNodes)) visit(child, ctx, depth);
     }
 
-    function openTextBlock(el, ctx, body, depth, tag) {
+    function openTextBlock(el, ctx, depth, tag) {
       flush(ctx);
       const keepAlign = ctx.align;
       ctx.align = alignOf(el) ?? keepAlign;
       ctx.cur = newBlock(tag, propsOf(ctx));
-      visitChildren(el, ctx, body, depth);
+      visitChildren(el, ctx, depth);
       flush(ctx);
       ctx.align = keepAlign;
     }
 
-    function openList(el, ctx, body, depth, tag) {
+    function openList(el, ctx, depth, tag) {
       flush(ctx);
       const task = el.dataset?.eoList === "task";
       ctx.lists.push({ kind: tag === "ol" ? "ol" : task ? "task" : "ul" });
-      visitChildren(el, ctx, body, depth);
+      visitChildren(el, ctx, depth);
       flush(ctx);
       ctx.lists.pop();
     }
 
-    function openListItem(el, ctx, body, depth) {
+    function openListItem(el, ctx, depth) {
       flush(ctx);
       const list = ctx.lists.at(-1) ?? { kind: "ul" };
       const props = {
@@ -242,14 +241,22 @@
       ctx.listItem = "li";
       ctx.listProps = props;
       ctx.cur = newBlock("li", props);
-      visitChildren(el, ctx, body, depth);
+      visitChildren(el, ctx, depth);
       flush(ctx);
       [ctx.listItem, ctx.listProps] = saved;
     }
 
-    function visitElement(el, ctx, body, depth) {
+    function visitElement(el, ctx, depth) {
+      if (DROPPED_TAGS.has(tagOf(el)) || el.hasAttribute?.("hidden") || el.style?.display === "none") return;
+      const outer = ctx.fmt;
+      const own = ownFormat(el);
+      if (own) ctx.fmt = { ...outer, ...own };
+      dispatchElement(el, ctx, depth);
+      ctx.fmt = outer;
+    }
+
+    function dispatchElement(el, ctx, depth) {
       const tag = tagOf(el);
-      if (DROPPED_TAGS.has(tag) || el.hasAttribute?.("hidden") || el.style?.display === "none") return;
       if (tag === "br") {
         addRun(ensureBlock(ctx), { br: true });
       } else if (tag === "img") {
@@ -260,51 +267,51 @@
         }
       } else if (tag === "table") {
         flush(ctx);
-        if (ctx.inCell) return visitChildren(el, ctx, body, depth);
-        const table = readTable(el, body, depth);
+        if (ctx.inCell) return visitChildren(el, ctx, depth);
+        const table = readTable(el, depth, ctx.fmt);
         if (table) ctx.blocks.push(table);
       } else if (tag === "td" || tag === "th" || TABLE_PARTS.has(tag)) {
         flush(ctx);
-        visitChildren(el, ctx, body, depth);
+        visitChildren(el, ctx, depth);
         flush(ctx);
       } else if (tag === "ul" || tag === "ol") {
-        openList(el, ctx, body, depth, tag);
+        openList(el, ctx, depth, tag);
       } else if (tag === "li") {
-        openListItem(el, ctx, body, depth);
+        openListItem(el, ctx, depth);
       } else if (HEADINGS.has(tag)) {
-        openTextBlock(el, ctx, body, depth, tag);
+        openTextBlock(el, ctx, depth, tag);
       } else if (TEXT_BLOCK_TAGS.has(tag)) {
         const keepPre = ctx.pre;
         ctx.pre = ctx.pre || tag === "pre" || tag === "listing" || tag === "xmp";
-        openTextBlock(el, ctx, body, depth, ctx.listItem ?? "p");
+        openTextBlock(el, ctx, depth, ctx.listItem ?? "p");
         ctx.pre = keepPre;
       } else if (CONTAINER_TAGS.has(tag)) {
         flush(ctx);
         const keepAlign = ctx.align;
         ctx.align = alignOf(el) ?? keepAlign;
-        visitChildren(el, ctx, body, depth);
+        visitChildren(el, ctx, depth);
         flush(ctx);
         ctx.align = keepAlign;
       } else if (tag === "a") {
         const keepHref = ctx.href;
         ctx.href = links.normalizeUrl(el.getAttribute?.("href")) ?? keepHref;
-        visitChildren(el, ctx, body, depth);
+        visitChildren(el, ctx, depth);
         ctx.href = keepHref;
       } else {
-        visitChildren(el, ctx, body, depth);
+        visitChildren(el, ctx, depth);
       }
     }
 
-    function visit(node, ctx, body, depth) {
+    function visit(node, ctx, depth) {
       over("nodes", LIMITS.MAX_NODES);
       if (depth > LIMITS.MAX_DEPTH) throw new PasteLimitError("depth");
-      if (node.nodeType === 3) addText(ctx, node, body);
-      else if (node.nodeType === 1) visitElement(node, ctx, body, depth + 1);
+      if (node.nodeType === 3) addText(ctx, node);
+      else if (node.nodeType === 1) visitElement(node, ctx, depth + 1);
     }
 
     function read(body) {
       const ctx = newContext();
-      visitChildren(body, ctx, body, 0);
+      visitChildren(body, ctx, 0);
       flush(ctx);
       return ctx.blocks;
     }
@@ -315,7 +322,8 @@
   // `{ blocks }` for pasted HTML, or `{ error }`: "empty", "parse" or "limit" (the HTML is refused, not cut).
   function parseHtml(html, env) {
     if (typeof html !== "string" || html.length === 0) return { error: "empty" };
-    if (html.length > LIMITS.MAX_HTML_CHARS) return { error: "limit" };
+    // The bound is on what the clipboard held (`doc-paste.js` looks at that); pictures filled in from the RTF come on top of it.
+    if (html.length > LIMITS.MAX_HTML_CHARS + Math.ceil((LIMITS.MAX_TOTAL_IMAGE_BYTES * 4) / 3)) return { error: "limit" };
     try {
       const parsed = new env.DOMParser().parseFromString(html, "text/html");
       if (!parsed?.body) return { error: "parse" };

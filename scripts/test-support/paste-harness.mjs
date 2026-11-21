@@ -53,14 +53,21 @@ export class PasteRange {
       const startChain = ancestors(sc);
       const endChain = ancestors(ec);
       const common = startChain.find((node) => endChain.includes(node));
-      const startBranch = startChain[startChain.indexOf(common) - 1];
-      const endBranch = endChain[endChain.indexOf(common) - 1];
-      cutPartial(sc, so, true);
-      for (let cur = sc; cur !== startBranch; cur = cur.parentNode) removeBetween(cur.parentNode, cur.parentNode.childNodes.indexOf(cur) + 1, cur.parentNode.childNodes.length);
-      cutPartial(ec, eo, false);
-      for (let cur = ec; cur !== endBranch; cur = cur.parentNode) removeBetween(cur.parentNode, 0, cur.parentNode.childNodes.indexOf(cur));
+      // The child of the common ancestor on each side, or null when the boundary is on the common ancestor itself.
+      const startBranch = sc === common ? null : startChain[startChain.indexOf(common) - 1];
+      const endBranch = ec === common ? null : endChain[endChain.indexOf(common) - 1];
+      if (startBranch) {
+        cutPartial(sc, so, true);
+        for (let cur = sc; cur !== startBranch; cur = cur.parentNode) removeBetween(cur.parentNode, cur.parentNode.childNodes.indexOf(cur) + 1, cur.parentNode.childNodes.length);
+      }
+      if (endBranch) {
+        cutPartial(ec, eo, false);
+        for (let cur = ec; cur !== endBranch; cur = cur.parentNode) removeBetween(cur.parentNode, 0, cur.parentNode.childNodes.indexOf(cur));
+      }
       const kids = common.childNodes;
-      removeBetween(common, kids.indexOf(startBranch) + 1, kids.indexOf(endBranch));
+      const from = startBranch ? kids.indexOf(startBranch) + 1 : so;
+      const to = endBranch ? kids.indexOf(endBranch) : eo;
+      removeBetween(common, from, to);
     }
     // The range collapses as the DOM says: at the start when the start node holds the end node, else after the first
     // ancestor of the start node that does.
