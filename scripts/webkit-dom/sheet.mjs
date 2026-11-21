@@ -217,4 +217,74 @@ export const sheetSteps = [
     await page.waitForFunction(() => getComputedStyle(document.querySelector('#pane-sheet td[data-cell="G11"]')).borderRightColor !== "rgb(255, 0, 0)", null, { timeout: 5000 });
     assert.notEqual(await color("G10", "borderBottomColor"), RED, "replacing the rules takes the edges off");
   }],
+
+  ["the default row height sets the height of every row in the real layout, and a drag with every row selected changes it (PD-286)", async (page) => {
+    const height = (ref) => page.$eval(td(ref), (el) => el.getBoundingClientRect().height);
+    const top = (ref) => page.$eval(td(ref), (el) => el.getBoundingClientRect().top);
+    assert.deepEqual([await height("B3"), await height("B9")], [24, 24]);
+    // Ctrl+A, then the edge of row 3 dragged 16 px down with the real mouse.
+    const drag = async (dy) => {
+      const edge = await page.locator('#pane-sheet tbody tr[data-row="3"] .row-resizer').boundingBox();
+      const [x, y] = [edge.x + edge.width / 2, edge.y + edge.height / 2];
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 4 });
+      await page.mouse.up();
+    };
+    await page.click(td("B2"));
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await drag(16);
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1") === 30);
+    assert.equal(await height("B3"), 40);
+    assert.equal(await height("B9"), 40, "every row, not the pressed one only");
+    assert.equal((await top("B9")) - (await top("B3")), 6 * 40, "the rows are stacked at the default height");
+    assert.deepEqual(await page.evaluate(() => window.__EASYOFFICE_SHEET_LAYOUT__.getAll().Sheet1), { defaultRowHeight: [30] });
+    // Without every row selected the same drag sets that row only.
+    await page.click(td("B2"));
+    await drag(20);
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.rowHeightsOf("Sheet1")?.has(3));
+    assert.equal(await height("B3"), 60);
+    assert.equal(await height("B4"), 40);
+    assert.equal(await page.evaluate(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1")), 30);
+  }],
+
+  ["Ctrl+PageUp and Ctrl+PageDown move between the sheets with the real keyboard, Option+Arrow does on a Mac (PD-290)", async (page) => {
+    const tab = () => page.$eval("#sheet-tab-bar .sheet-tab-btn.active", (el) => el.dataset.sheetTab);
+    await page.click("#btn-add-sheet-tab");
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    await page.click(td("B2"));
+    await page.keyboard.press("Control+PageUp");
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
+    await page.keyboard.press("Control+PageUp");
+    assert.equal(await tab(), "Sheet1", "the first sheet stays");
+    await page.keyboard.press("Control+PageDown");
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    await page.keyboard.press("Control+PageDown");
+    assert.equal(await tab(), "Sheet2", "the last sheet stays, and the keys work again in the sheet that was switched to");
+    const mac = await page.evaluate(() => /mac/i.test(navigator.platform));
+    await page.keyboard.press("Alt+ArrowLeft");
+    if (mac) await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
+    else assert.equal(await tab(), "Sheet2", "Alt+Left is not a sheet key outside a Mac");
+  }],
+
+  ["a printed sheet carries the fill, text color and bold a conditional format gave its cells (PD-289)", async (page) => {
+    for (const [ref, value] of [["B2", "1"], ["B3", "5"]]) {
+      await page.click(td(ref));
+      await page.keyboard.type(value);
+      await page.keyboard.press("Enter");
+    }
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_RULES__.set("Sheet1", { cf: [{ r: "B2:B3", t: "cellIs", op: "greaterThan", a: "3", b: "", stop: false, fl: 1, bg: "#ffc7ce", fg: "#9c0006" }], dv: [] }));
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="B3"]').style.getPropertyValue("--cf-bg") === "#ffc7ce", null, { timeout: 5000 });
+    await page.evaluate(() => {
+      window.print = () => {};
+      window.__EASYOFFICE_NATIVE_MENU__("file:print");
+    });
+    await page.waitForSelector("#eo-print-root td", { state: "attached" });
+    const printed = await page.$$eval("#eo-print-root td", (cells) => cells.map((c) => ({ text: c.textContent, fill: getComputedStyle(c).backgroundColor, color: getComputedStyle(c).color, bold: c.classList.contains("eo-print-b") })));
+    const five = printed.find((c) => c.text === "5");
+    assert.deepEqual([five.fill, five.color], ["rgb(255, 199, 206)", "rgb(156, 0, 6)"]);
+    assert.equal(five.bold, true, "the rule's bold flag is the print class of a bold cell (the print rules apply on paper only)");
+    const one = printed.find((c) => c.text === "1");
+    assert.notEqual(one.fill, "rgb(255, 199, 206)", "a cell the rule does not match prints plain");
+  }],
 ];
