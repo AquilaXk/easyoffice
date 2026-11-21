@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 import { click, createRunHarness, p, rangeOf, textNodeOf } from "./test-support/doc-run-harness.mjs";
+import { PasteRange, createPasteSelection } from "./test-support/paste-harness.mjs";
 
 // IME composition and the undo step it leaves (doc-ime.js, rhwp-studio `onCompositionStart`/`onCompositionEnd`/`onInput`):
 // nothing is recorded while the composition runs, and one step is recorded when it ends, if it left text.
@@ -120,4 +121,74 @@ test("the pending format of a caret waits while a composition runs, and applies 
   assert.equal(beforeInput({ inputType: "insertText", data: "ㅎ" }).defaultPrevented, false, "the composition writes its own text");
   h.editor.dispatchEvent({ type: "compositionend" });
   assert.equal(beforeInput({ inputType: "insertText", data: "X" }).defaultPrevented, true, "the next typed character takes the format");
+});
+
+async function openWithSelection() {
+  const selection = createPasteSelection();
+  const h = await createWorkspaceHarness({ selection });
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(10);
+  const editor = h.document.getElementById("doc-editor");
+  editor.replaceChildren();
+  const para = h.document.createElement("p");
+  para.appendChild(h.document.createTextNode("앞뒤"));
+  editor.appendChild(para);
+  editor.focus();
+  await flushAsyncTurns(10);
+  const fire = (type, init = {}) => editor.dispatchEvent({ type, target: para, isComposing: false, ...init });
+  const steps = () => h.host.__EASYOFFICE_WORKSPACE_HISTORY__.sizes().undo;
+  return { ...h, editor, para, selection, fire, steps };
+}
+
+test("a composition that replaced a selection is recorded even when it is cancelled, so the old text can come back", async () => {
+  const t = await openWithSelection();
+  t.selection.addRange(new PasteRange(t.para.firstChild, 0, t.para.firstChild, 1));
+  const before = t.steps();
+  t.fire("compositionstart");
+  t.fire("beforeinput", { inputType: "insertCompositionText", data: "ㅎ", isComposing: true });
+  t.para.firstChild.data = "ㅎ뒤";
+  t.fire("input", { inputType: "insertCompositionText", data: "ㅎ", isComposing: true });
+  t.fire("beforeinput", { inputType: "deleteCompositionText", isComposing: true });
+  t.para.firstChild.data = "뒤";
+  t.fire("input", { inputType: "deleteCompositionText", data: null, isComposing: true });
+  t.fire("compositionend", { data: "" });
+  assert.equal(t.steps(), before + 1, "the replaced text has its step");
+});
+
+test("a composition on a caret that is cancelled still leaves no step", async () => {
+  const t = await openWithSelection();
+  t.selection.addRange(new PasteRange(t.para.firstChild, 1));
+  const before = t.steps();
+  t.fire("compositionstart");
+  t.fire("compositionend", { data: "" });
+  assert.equal(t.steps(), before);
+});
+
+test("a composition that never ends does not hold the shortcuts: the editor losing the focus or another module showing ends it", async () => {
+  const t = await openWithSelection();
+  const undoWorks = async () => {
+    t.fire("beforeinput", { inputType: "insertText", data: "x" });
+    t.para.firstChild.data = "앞뒤x";
+    t.fire("input", { inputType: "insertText", data: "x" });
+    t.fire("blur");
+    t.fire("focus");
+    t.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+    await flushAsyncTurns(20);
+    return t.editor.querySelector("p").textContent === "앞뒤";
+  };
+  t.fire("compositionstart");
+  t.fire("blur");
+  assert.equal(await undoWorks(), true, "blur ended the composition");
+  const u = await openWithSelection();
+  u.fire("compositionstart");
+  switchModule(u.document, "SHEET");
+  await flushAsyncTurns(10);
+  switchModule(u.document, "DOC");
+  await flushAsyncTurns(10);
+  u.fire("beforeinput", { inputType: "insertText", data: "x" });
+  u.editor.querySelector("p").firstChild.data = "앞뒤x";
+  u.fire("input", { inputType: "insertText", data: "x" });
+  u.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(20);
+  assert.equal(u.editor.querySelector("p").textContent, "앞뒤", "the module switch ended the composition");
 });

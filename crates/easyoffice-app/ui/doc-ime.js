@@ -23,12 +23,14 @@
   const charCount = (text) => Array.from(String(text ?? "")).length;
 
   function createDocIme(deps) {
-    const { getActiveModule, getDocTab, captureWorkspaceSnapshot, pushRawUndoSnapshot, getEpoch, markDocStale, computeStats } = deps;
+    const { getActiveModule, getDocTab, captureWorkspaceSnapshot, pushRawUndoSnapshot, getEpoch, markDocStale, computeStats, selectionIsRange } = deps;
     let composing = false;
     // The length in characters of the composing text after the last update (ref `compositionLength`).
     let compositionLength = 0;
     // The snapshot taken at `compositionstart`, pushed at `compositionend`.
     let pending = null;
+    // The composition started over a selection: the browser replaces the selected text, so that is a change of its own.
+    let replacedSelection = false;
     let typingEpoch = -1;
 
     const inDocument = () => SCRIPT_MODULES.has(getActiveModule());
@@ -36,10 +38,10 @@
     // The document as it was before this typing run, or null when the run has its snapshot already (or there is no
     // saved document state to go back to). The saved tab state, not the live DOM, is the state before: the live DOM may
     // already hold the first change when the snapshot is asked for.
-    function takeRunSnapshot() {
+    function takeRunSnapshot(force = false) {
       const mod = getActiveModule();
       const tab = SCRIPT_MODULES.has(mod) ? getDocTab(mod) : null;
-      if (!tab || typingEpoch === getEpoch()) return null;
+      if (!tab || (!force && typingEpoch === getEpoch())) return null;
       const before = structuredClone(tab);
       const snapshot = captureWorkspaceSnapshot(false);
       snapshot.docTabs[mod] = before;
@@ -59,18 +61,35 @@
     function onCompositionStart() {
       composing = true;
       compositionLength = 0;
-      pending = takeRunSnapshot();
+      replacedSelection = Boolean(selectionIsRange?.());
+      // A selection that the composition replaces is recorded as a step of its own, also when this typing run has one: the
+      // reference deletes the selection first, as its own command, and the composition is a second one.
+      pending = takeRunSnapshot(replacedSelection);
     }
 
-    // Ref `onCompositionEnd`: the flags are reset first, then the composition is recorded once if it left text.
+    // Ref `onCompositionEnd`: the flags are reset first, then the composition is recorded once if it left text. A composition
+    // that replaced a selection is recorded whatever it left, so the replaced text can come back.
     function onCompositionEnd() {
       const finalLength = compositionLength;
       const snapshot = pending;
+      const replaced = replacedSelection;
+      abandon();
+      if (snapshot && (finalLength > 0 || replaced)) recordRun(snapshot);
+      computeStats();
+    }
+
+    // The composition is over without the end event (the focus went, another module showed): nothing is waiting for it.
+    function abandon() {
       composing = false;
       compositionLength = 0;
       pending = null;
-      if (snapshot && finalLength > 0) recordRun(snapshot);
-      computeStats();
+      replacedSelection = false;
+    }
+
+    // The editor loses the focus: a composition still running ends here, and the typing run ends.
+    function onBlur() {
+      if (composing) onCompositionEnd();
+      resetRun();
     }
 
     // A typed character outside a composition: the run's snapshot, before the browser changes the text.
@@ -97,14 +116,14 @@
 
     function bind(editor) {
       editor.addEventListener("focus", resetRun);
-      editor.addEventListener("blur", resetRun);
+      editor.addEventListener("blur", onBlur);
       editor.addEventListener("compositionstart", onCompositionStart);
       editor.addEventListener("compositionend", onCompositionEnd);
       editor.addEventListener("beforeinput", onBeforeInput);
       editor.addEventListener("input", onInput);
     }
 
-    return { bind, isComposing: () => composing, onCompositionStart, onCompositionEnd, onBeforeInput, onInput, resetRun };
+    return { bind, abandon, isComposing: () => composing && inDocument(), onCompositionStart, onCompositionEnd, onBeforeInput, onInput, resetRun };
   }
 
   host.__EASYOFFICE_CREATE_DOC_IME__ = createDocIme;

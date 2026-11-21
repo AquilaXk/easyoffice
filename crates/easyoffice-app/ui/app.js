@@ -85,7 +85,7 @@
     setPdfRotationDeg: (next) => { pdfRotationDeg = next; },
     getPdfEdit: () => pdfEdit,
     enqueueWorkspaceHistoryOp,
-    onModuleApplied: (mod) => { workspaceSession?.applyModuleContext(mod); copilotUi?.onModuleChanged(); },
+    onModuleApplied: (mod) => { docIme?.abandon(); workspaceSession?.applyModuleContext(mod); copilotUi?.onModuleChanged(); },
   });
 
   docIme = host.__EASYOFFICE_CREATE_DOC_IME__({
@@ -93,6 +93,7 @@
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
     getEpoch: ribbonHistory.getHistoryMutationEpoch, markDocStale: () => workspacePanels.markActiveDocTabStale(),
     computeStats: () => workspacePanels.computeSmartStats(),
+    selectionIsRange: () => { const r = host.getSelection?.()?.rangeCount ? host.getSelection().getRangeAt(0) : null; return Boolean(r && !r.collapsed && document.getElementById("doc-editor")?.contains(r.startContainer)); },
   });
   docRunsUi = host.__EASYOFFICE_CREATE_DOC_RUNS_UI__({
     document, getActiveModule: () => activeModule, saveDocState: () => workspacePanels.saveActiveDocTabState(), isComposing: docIme.isComposing,

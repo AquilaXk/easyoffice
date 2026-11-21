@@ -77,8 +77,12 @@
       const dest = isUndo ? redoStack : undoStack;
       const command = source.at(-1);
       if (!command) return null;
+      // The step leaves by identity: while it was applied a new step may have been recorded on top of it, or the record may
+      // have ended. A step that is gone does not come back as its inverse.
       const commit = (inverse) => {
-        source.pop();
+        const at = source.lastIndexOf(command);
+        if (at < 0) return;
+        source.splice(at, 1);
         dest.push(inverse);
         live += weigh(inverse) - weigh(command);
         if (isUndo) enforceBudgetAfterUndo();

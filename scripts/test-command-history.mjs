@@ -105,6 +105,29 @@ test("a step that throws after it moved keeps the stacks as they were moved", as
   assert.deepEqual([h.sizes().undo, h.sizes().redo], [0, 1]);
 });
 
+test("a step recorded while another is being applied is not the one that moves, and the weights stay true", async () => {
+  const h = makeHistory();
+  h.record(step("a", 10));
+  await h.undo(async (command, commit) => {
+    h.record(step("b", 20));
+    await Promise.resolve();
+    commit(step("ra", 5));
+  });
+  assert.equal(h.peekUndoTop().id, "b", "the new step stays");
+  assert.equal(h.peekRedoTop().id, "ra");
+  assert.deepEqual(h.sizes(), { undo: 1, redo: 1, bytes: 25 });
+});
+
+test("a record that ended while a step was applied does not get the step back", async () => {
+  const h = makeHistory();
+  h.record(step("a", 10));
+  await h.undo(async (command, commit) => {
+    h.clear();
+    commit(step("ra", 5));
+  });
+  assert.deepEqual(h.sizes(), { undo: 0, redo: 0, bytes: 0 });
+});
+
 test("an empty stack answers null and canUndo/canRedo follow the stacks", async () => {
   const h = makeHistory();
   assert.equal(await h.undo(moveAs(step("x"))), null);
