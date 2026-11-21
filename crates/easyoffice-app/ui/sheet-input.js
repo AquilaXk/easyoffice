@@ -131,6 +131,13 @@
       return at ? protectApi.visibleEntry(api.getSheetName(), at.row, at.col, entry) : entry;
     }
 
+    // The box of the cell being edited grows with its text (PD-280).
+    const editBox = host.__EASYOFFICE_SHEET_EDIT_BOX__.createEditBox({
+      document,
+      isFixedRow: (td) => Boolean(host.__EASYOFFICE_SHEET_LAYOUT__?.rowHeightsOf(api.getSheetName())?.has(td._row)),
+      rowHeightOf: (td) => grid.rowHeight(td._row),
+    });
+
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const viewport = () => document.getElementById("sheet-viewport");
     const stateOf = (td) => sheetCellFocusState.get(td);
@@ -566,6 +573,7 @@
         st.editBaseline = raw;
       }
       placeCaret(td);
+      editBox.fit(td);
       point.refresh();
     }
 
@@ -578,6 +586,7 @@
       }
       delete td.dataset.editMode;
       td.classList.remove("editing");
+      editBox.release(td);
       // The caret scrolled a long text inside the cell; the finished cell shows its text from the start again.
       td.scrollLeft = 0;
       point.editedEnded();
@@ -634,6 +643,7 @@
       }
       const formulaInput = document.getElementById("formula-input");
       if (formulaInput && api.getActiveSheetCellRef() === td.dataset.cell) formulaInput.value = rawText;
+      editBox.fit(td);
       refreshChrome();
       point.afterInput();
     }
