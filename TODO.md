@@ -41,7 +41,6 @@
 
 ## 시트 함수 (PD-270·PD-271·PD-273, 비교표 `docs/sheet-function-parity.md`)
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열의 비공개 평활 계수 선택 목적함수(0.001 격자), 계절 경로의 순환식·끝점 고정 처리, `STAT`의 MAE·RMSE·MASE 오차 열 정의, 같은 날짜가 있을 때 `aggregation` 생략·`0` 동작, 범위 밖 인수와 시계열 안 대상 날짜의 오류 값(`docs/forecast-ets-cleanroom.md` 9장)
-- [ ] `GETPIVOTDATA`를 앱에 연결: 평가 요청에 시트별 `pivots`를 싣고(`sheet_pivot_json::parse_pivots`, 표 처리 옆 `lib.rs`) `WorkbookEngine::set_pivot_tables`에 넣는다. 페이지 JS가 요청에 `pivots`를 더해야 한다. 지금은 등록이 없어 `#REF!`
 - [ ] `GROUPBY`·`PIVOTBY`: 함수 목록(여러 열 집계), 만들어 붙이는 머리글·합계 글 문구(`Total`, `<항목> Total`, `Group`, `Value`)를 기준 앱 출력과 대조
 - [ ] `#BLOCKED!`·`#CONNECT!` 오류 값: `IMAGE`(문서에 명시)·`CALL`·`REGISTER.ID`(XLM 매크로 차단)·`STOCKHISTORY`에 필요하다. 지금은 `#NAME?`. 오류 값 종류를 더하려면 포맷·앱·페이지의 오류 목록을 함께 고친다
 - [ ] `PHONETIC`: XLSX `rPh` 후리가나를 읽어 셀에 보관하고 저장에도 쓴다(`xlsx_sheet.rs`, 포맷 크레이트 개편 병합 뒤). 지금은 셀 글자를 돌려준다

@@ -73,7 +73,7 @@
 | 텍스트 | `JIS` | `functions_text_bytes.rs` | 기존 `DBCS`(참조 B `asc`·`dbcs`) | 1줄(이름 하나를 더함) | 문서가 `DBCS`와 같은 설명을 쓰므로 같은 변환이다. |
 | 텍스트 | `PHONETIC` | `functions_text_locale.rs` | 없음 | 약 20 | 후리가나를 읽지 못해 셀 글자를 돌려준다(범위는 왼쪽 위 칸). XLSX `rPh`는 읽기에서 버려진다. |
 | 조회·참조 | `GROUPBY`, `PIVOTBY` | `functions_groupby.rs`, `groupby_axis.rs`, `parser_array.rs` | 없음(참조 B는 이름만 있다) | 907 | 문서의 8·11개 인수. 합계·소계 글과 머리글 이름은 우리 선택. 함수 목록 인수는 `#VALUE!`. 훑는 양 800만, 칸 수는 배열 예산. |
-| 조회·참조 | `GETPIVOTDATA` | `functions_pivot_data.rs` | 없음 | 257 | 피벗 정의를 `set_pivot_tables`로 등록해야 한다(앱 연결은 TODO). 원본 행을 한 번 읽어 피벗 엔진 규칙으로 계산한다. |
+| 조회·참조 | `GETPIVOTDATA` | `functions_pivot_data.rs` | 없음 | 257 | 피벗 정의를 `set_pivot_tables`로 등록해야 한다(앱은 평가 요청과 세션의 `pivots`로 등록, PD-292). 원본 행을 한 번 읽어 피벗 엔진 규칙으로 계산한다. |
 | 웹·조회 | `WEBSERVICE`, `RTD`, `FILTERXML` | `functions_unavailable.rs` | 없음 | 약 50 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#VALUE!`)을 돌려준다. 없는 쪽으로 센다. `FILTERXML`은 보안 검토로 크레이트 구현을 뺐다. |
 
 옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,350줄과 시험 약 900줄이다.
