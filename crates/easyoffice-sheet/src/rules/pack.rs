@@ -35,6 +35,10 @@ const GRADIENT: u32 = 1 << 23;
 /// In word 0: the rows of a sheet need 20 bits (`PackedCellCoordinate::MAX_ROWS` is 2^20), the top bit says a border word follows.
 const BORDER: u32 = 1 << 31;
 const ROW_MASK: u32 = (1 << 20) - 1;
+const _: () = assert!(
+    PackedCellCoordinate::MAX_ROWS <= ROW_MASK + 1,
+    "a row no longer fits the 20 bits of word 0"
+);
 
 type EdgeWords = [u32; 4];
 

@@ -241,11 +241,14 @@
   // differ keeps them until the row is changed (`readCfForm` in `sheet-rules-ui.js`).
 
   const BORDER_SIDES = ["t", "r", "b", "l"];
+  // The lines the row offers: a conditional format takes the thin family only (the spreadsheet program's dialog has no thick or
+  // double line for it). A rule from a file may draw others; the row then shows a thin line and leaves the rule's edges alone.
+  const BORDER_LINES = ["thin", "dashed", "dotted"];
 
   // The edges a rule draws for the row's inputs `{ on, line, color, sides }`: `{ t, r, b, l }` of `"<line>:<rrggbb>"` for the ticked
-  // sides, null when the row is off or no side is ticked or the line or color is not one a border can have.
+  // sides, null when the row is off or no side is ticked or the line or color is not one the row offers.
   function borderFromControls({ on, line, color, sides }) {
-    const text = on ? host.__EASYOFFICE_SHEET_LOOK__.edgeText(line, color) : null;
+    const text = on && BORDER_LINES.includes(line) ? host.__EASYOFFICE_SHEET_LOOK__.edgeText(line, color) : null;
     if (!text) return null;
     const bd = {};
     for (const side of BORDER_SIDES) if (sides.includes(side)) bd[side] = text;
@@ -259,11 +262,12 @@
     const sides = BORDER_SIDES.filter((side) => look.parseEdge(bd?.[side]));
     if (sides.length === 0) return { on: false, line: "thin", color: "#000000", sides: BORDER_SIDES.slice() };
     const first = look.parseEdge(bd[sides[0]]);
-    return { on: true, line: first.line, color: "#" + first.color, sides };
+    return { on: true, line: BORDER_LINES.includes(first.line) ? first.line : "thin", color: "#" + first.color, sides };
   }
 
   host.__EASYOFFICE_SHEET_CF_PRESETS__ = {
     BORDER_SIDES,
+    BORDER_LINES,
     borderFromControls,
     controlsFromBorder,
     FORMATS,

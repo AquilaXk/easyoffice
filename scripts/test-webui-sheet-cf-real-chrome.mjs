@@ -336,13 +336,13 @@ test("the custom format shows a rule's border row and the manager draws what it 
   for (let i = 0; i < 4; i += 1) await key("ArrowDown", SHIFT);
   await chooseFromMenu(["조건부 서식"], "새 규칙…");
   assert.equal(await dialogOpen("sheet-cf-dialog"), true);
-  await js(`(() => { for (const [id, value] of [["sheet-cf-bd-on", true], ["sheet-cf-bd-line", "double"], ["sheet-cf-bd", "#0000ff"], ["sheet-cf-bg-on", false]]) { const el = document.getElementById(id); if (typeof value === "boolean") el.checked = value; else el.value = value; el.dispatchEvent(new Event("change", { bubbles: true })); } })()`);
+  await js(`(() => { for (const [id, value] of [["sheet-cf-bd-on", true], ["sheet-cf-bd-line", "dashed"], ["sheet-cf-bd", "#0000ff"], ["sheet-cf-bg-on", false]]) { const el = document.getElementById(id); if (typeof value === "boolean") el.checked = value; else el.value = value; el.dispatchEvent(new Event("change", { bubbles: true })); } })()`);
   await typeInto("sheet-cf-a", "3");
   await shoot("manager-border-row");
   await js(`document.getElementById("btn-sheet-cf-apply").click()`);
-  await until(async () => (await computed("B5", "borderRightColor")) === "rgb(0, 0, 255)", "the double blue outline");
-  assert.equal(await computed("B5", "borderRightStyle"), "solid", "a double line is a slot border plus a shadow");
-  assert.match(await js(`document.querySelector(${JSON.stringify(td("B5"))}).style.getPropertyValue("--lk-shadow")`), /#0000ff/);
+  await until(async () => (await computed("B5", "borderRightColor")) === "rgb(0, 0, 255)", "the dashed blue outline");
+  assert.equal(await computed("B5", "borderRightStyle"), "dashed");
+  assert.equal(await computed("B4", "borderBottomStyle"), "dashed", "the top edge of B5 sits in the slot of the cell above");
   await js(`document.getElementById("sheet-cf-dialog").close()`);
   await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({})`);
   await until(async () => (await computed("B5", "borderRightColor")) !== "rgb(0, 0, 255)", "replacing the rules takes the edges off");

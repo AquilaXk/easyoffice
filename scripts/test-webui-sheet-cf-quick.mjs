@@ -426,13 +426,18 @@ test("the format list ends with the red border, a thin red outline that sets not
 
 test("the border row of the custom format: inputs make edges, edges fill inputs, and nothing ticked is no border", () => {
   const sides = ["t", "r", "b", "l"];
-  assert.deepEqual(P.borderFromControls({ on: true, line: "double", color: "#0000ff", sides }), { t: "double:0000ff", r: "double:0000ff", b: "double:0000ff", l: "double:0000ff" });
+  assert.deepEqual(P.BORDER_LINES, ["thin", "dashed", "dotted"], "the thin family, as the spreadsheet program's dialog offers");
+  assert.deepEqual(P.borderFromControls({ on: true, line: "dashed", color: "#0000ff", sides }), { t: "dashed:0000ff", r: "dashed:0000ff", b: "dashed:0000ff", l: "dashed:0000ff" });
+  assert.equal(P.borderFromControls({ on: true, line: "double", color: "#0000ff", sides }), null, "no thick or double line for a conditional format");
+  assert.equal(P.borderFromControls({ on: true, line: "thick", color: "#0000ff", sides }), null);
   assert.deepEqual(P.borderFromControls({ on: true, line: "dotted", color: "#112233", sides: ["l", "t"] }), { t: "dotted:112233", l: "dotted:112233" });
   assert.equal(P.borderFromControls({ on: false, line: "thin", color: "#000000", sides }), null);
   assert.equal(P.borderFromControls({ on: true, line: "thin", color: "#000000", sides: [] }), null);
   assert.equal(P.borderFromControls({ on: true, line: "wavy", color: "#000000", sides }), null);
   assert.equal(P.borderFromControls({ on: true, line: "thin", color: "red", sides }), null);
-  assert.deepEqual(P.controlsFromBorder({ r: "thick:00ff00", b: "thin:ff0000" }), { on: true, line: "thick", color: "#00ff00", sides: ["r", "b"] });
+  assert.deepEqual(P.controlsFromBorder({ r: "dashed:00ff00", b: "thin:ff0000" }), { on: true, line: "dashed", color: "#00ff00", sides: ["r", "b"] });
+  assert.equal(P.controlsFromBorder({ r: "thick:00ff00" }).line, "thin", "a line the row does not offer shows as thin");
+  assert.equal(P.controlsFromBorder({ r: "double:00ff00" }).line, "thin");
   assert.deepEqual(P.controlsFromBorder(undefined), { on: false, line: "thin", color: "#000000", sides });
   assert.deepEqual(P.controlsFromBorder({ t: "nonsense" }).on, false, "an edge that is not one is no edge");
 });
@@ -480,26 +485,27 @@ test("the manager's border row shows a rule's edges, keeps edges it cannot show 
   rulesUi.openConditionalFormatDialog();
   doc.querySelector('#sheet-cf-list li[data-index="0"]').click();
   assert.equal(doc.getElementById("sheet-cf-bd-on").checked, true);
-  assert.equal(doc.getElementById("sheet-cf-bd-line").value, "double", "the line of the first edge");
-  assert.equal(doc.getElementById("sheet-cf-bd").value, "#0000ff");
+  assert.equal(doc.getElementById("sheet-cf-bd-line").value, "thin", "a double line is not one the row offers: it shows as thin");
+  assert.equal(doc.getElementById("sheet-cf-bd").value, "#0000ff", "the color of the first edge");
   assert.deepEqual(sideBoxes(doc), [true, false, false, true]);
+  assert.deepEqual(Array.from(doc.getElementById("sheet-cf-bd-line").querySelectorAll("option"), (o) => o.value), ["thin", "dashed", "dotted"]);
 
   await apply();
   assert.deepEqual(rules.get("Sheet1").cf[0].bd, mixed, "an untouched row keeps the rule's own edges, one line kind per side included");
 
-  field(doc, "sheet-cf-bd-line", "thick");
+  field(doc, "sheet-cf-bd-line", "dashed");
   await apply();
-  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "thick:0000ff", l: "thick:0000ff" }, "a changed row writes its inputs on the ticked sides");
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "dashed:0000ff", l: "dashed:0000ff" }, "a changed row writes its inputs on the ticked sides");
 
   field(doc, "sheet-cf-bd-r", true);
   field(doc, "sheet-cf-bd", "#ff0000");
   await apply();
-  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "thick:ff0000", r: "thick:ff0000", l: "thick:ff0000" });
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "dashed:ff0000", r: "dashed:ff0000", l: "dashed:ff0000" });
 
   for (const side of ["t", "r", "b", "l"]) field(doc, "sheet-cf-bd-" + side, false);
   await apply();
   assert.match(doc.getElementById("sheet-cf-status").textContent, /변을 하나 이상/);
-  assert.equal(rules.get("Sheet1").cf[0].bd.t, "thick:ff0000", "a refused form stores nothing");
+  assert.equal(rules.get("Sheet1").cf[0].bd.t, "dashed:ff0000", "a refused form stores nothing");
 
   field(doc, "sheet-cf-bd-on", false);
   await apply();
