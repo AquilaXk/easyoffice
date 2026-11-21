@@ -16,7 +16,6 @@
 
 ## 배포
 - [ ] 릴리스 발행 잡의 쓰기 403 원인 확정: 다음 릴리스 실행에서 "Record the token's release access…" 경고와 "Create or update the GitHub Release" 로그의 `x-accepted-github-permissions`·`x-github-request-id`를 보고 원인을 확정함. 워크플로 파일 차이 가설은 태그 push 실행에서 맞지 않았고 403은 수동 실행에서만 났다(PD-283 6항 (d))
-- [ ] v0.2.1에 조건부 서식 메뉴(`2c5b3816`) 포함
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
