@@ -770,7 +770,7 @@
       kit
     );
 
-    // The conditional formatting submenu of the 서식 menu and its quick dialogs (PD-281).
+    // The conditional formatting submenu of the 서식 menu and its quick dialogs (PD-282).
     const quickUi = host.__EASYOFFICE_CREATE_SHEET_CF_QUICK_UI__({
       document,
       kit,

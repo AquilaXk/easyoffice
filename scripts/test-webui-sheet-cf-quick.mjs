@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
-// The conditional formatting submenu (PD-281): the quick dialogs of the cell highlight and top/bottom rules with their live
+// The conditional formatting submenu (PD-282): the quick dialogs of the cell highlight and top/bottom rules with their live
 // preview, the galleries, clearing rules, and the preview and scope of the rule manager.
 
 const ui = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));

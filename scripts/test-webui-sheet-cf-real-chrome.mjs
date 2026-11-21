@@ -5,7 +5,7 @@ import path from "node:path";
 import { REPO, sleep, startBrowser, startEngine, startUiServer } from "./bench-webui-support.mjs";
 import { findChrome } from "./hwp-studio-harness.mjs";
 
-// The conditional formatting menu in a real headless browser against the real engine (PD-281): the nested submenus opened by
+// The conditional formatting menu in a real headless browser against the real engine (PD-282): the nested submenus opened by
 // the mouse, the quick dialogs with their live preview, the galleries, clearing, undo and the rule manager, driven over CDP with
 // the browser's own profile. It needs a built `easyoffice-app` (`EO_APP`, or `target-193/debug` or `target/debug` of this
 // checkout) and a Chrome (`CHROME_PATH` or the usual install places); without them the tests are skipped. With `EO_SHOTS` set to

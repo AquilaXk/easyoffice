@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The conditional formatting submenu of the 서식 menu (PD-281): the cell highlight and top/bottom rules, which open a small
+  // The conditional formatting submenu of the 서식 menu (PD-282): the cell highlight and top/bottom rules, which open a small
   // dialog that previews the rule on the sheet while its value or format changes, the data bar, color scale and icon set galleries,
   // which add a rule at once, and the new rule, clear rules and manage rules items. The presets and the rule builders are in
   // sheet-cf-presets.js, the preview of a rule in sheet-cf-preview.js; the rules are stored by sheet-rules.js and the dialog to
