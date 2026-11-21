@@ -15,7 +15,8 @@
 - [ ] Windows 로그오프·종료에서 저장 안 된 창이 있으면 종료 화면에 "저장하지 않은 문서"가 뜨고 저장 확인이 이어지는지, 취소하면 앱이 남는지(PD-191). Linux `kill -TERM`·로그아웃에서 같은 확인(PD-191)
 
 ## 배포
-- [ ] 릴리스 발행 잡의 쓰기 403 원인 확정: 다음 릴리스 실행에서 "Record the token's release access…" 경고와 "Create or update the GitHub Release" 로그의 `x-accepted-github-permissions`·`x-github-request-id`를 보고 PD-283 6항(대상 커밋과 main의 워크플로 파일 차이 가설)을 확정하거나 고침
+- [ ] 릴리스 발행 잡의 쓰기 403 원인 확정: 다음 릴리스 실행에서 "Record the token's release access…" 경고와 "Create or update the GitHub Release" 로그의 `x-accepted-github-permissions`·`x-github-request-id`를 보고 원인을 확정함. 워크플로 파일 차이 가설은 태그 push 실행에서 맞지 않았고 403은 수동 실행에서만 났다(PD-283 6항 (d))
+- [ ] WebKit DPR 1.5에서 시트 칸의 1px 위 테두리(이웃 칸 아래선)가 칠해지지 않음: 행 위치가 소수 좌표(예: 241.656)일 때. 밝은·어두운 테마 공통. 1·1.25·1.75·2·3배는 정상
 - [ ] v0.2.1에 조건부 서식 메뉴(`2c5b3816`) 포함
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
