@@ -225,6 +225,8 @@ export const sheetSteps = [
     // A cell of the table's own row, from a cell inside the table, is `[@Column]`.
     await page.click(td("D3"));
     await page.keyboard.type("=");
+    // D3 holds a value; the edit replaces it only once the typed "=" shows, so point after that.
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="D3"]')?.textContent === "=");
     await page.click(td("C3"));
     assert.equal(await cellText(page, "D3"), "=[@매출]");
     await page.keyboard.press("Enter");
