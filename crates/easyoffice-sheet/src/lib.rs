@@ -113,7 +113,9 @@ pub use deadline::MAX_EVAL_TIME;
 pub use expr::*;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
-pub use functions_pivot_data::{PivotTableDef, PivotValueDef, MAX_REGISTERED_PIVOTS};
+pub use functions_pivot_data::{
+    PivotTableDef, PivotValueDef, MAX_REGISTERED_PIVOTS, MAX_REGISTERED_PIVOT_BYTES,
+};
 pub use memo::{CellMap, CoordHasher, DetMap, DetSet, DetWordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::compile_formula_expr;

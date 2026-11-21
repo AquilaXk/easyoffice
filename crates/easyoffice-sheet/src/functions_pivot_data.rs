@@ -26,6 +26,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Pivot tables one workbook may register.
 pub const MAX_REGISTERED_PIVOTS: usize = 128;
+/// Heap bytes all the registered pivot tables of one workbook may hold (filter items, captions, sheet names).
+pub const MAX_REGISTERED_PIVOT_BYTES: usize = 16 * 1024 * 1024;
 /// Field and item pairs of one call (a formula takes 255 arguments).
 const MAX_PIVOT_PAIRS: usize = 126;
 
@@ -52,9 +54,33 @@ pub struct PivotTableDef {
     pub filters: Vec<PivotFieldFilter>,
 }
 
+impl PivotTableDef {
+    /// Estimated heap bytes of the definition: its text and its lists.
+    pub fn heap_bytes(&self) -> usize {
+        let text = |s: &String| std::mem::size_of::<String>() + s.len();
+        std::mem::size_of::<Self>()
+            + self.source_sheet.len()
+            + (self.row_fields.len() + self.col_fields.len()) * std::mem::size_of::<usize>()
+            + self
+                .values
+                .iter()
+                .map(|v| std::mem::size_of::<PivotValueDef>() + v.caption.len())
+                .sum::<usize>()
+            + self
+                .filters
+                .iter()
+                .map(|f| {
+                    std::mem::size_of::<PivotFieldFilter>()
+                        + f.allowed_values.iter().map(text).sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+}
+
 impl WorkbookEngine {
     /// Replaces the pivot tables `GETPIVOTDATA` finds on `sheet`. Fails, changing nothing, when the
-    /// sheet is unknown or the workbook would hold more than [`MAX_REGISTERED_PIVOTS`]. Set them
+    /// sheet is unknown or the workbook would hold more than [`MAX_REGISTERED_PIVOTS`] tables or
+    /// [`MAX_REGISTERED_PIVOT_BYTES`] bytes of them. Set them
     /// before the first calculation: a result already calculated is not worked out again.
     pub fn set_pivot_tables(
         &mut self,
@@ -81,6 +107,14 @@ impl WorkbookEngine {
         if all.len() > MAX_REGISTERED_PIVOTS {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "피벗 테이블은 통합 문서에 {MAX_REGISTERED_PIVOTS}개까지 둘 수 있습니다."
+            )));
+        }
+        let bytes = all
+            .iter()
+            .fold(0usize, |sum, (_, t)| sum.saturating_add(t.heap_bytes()));
+        if bytes > MAX_REGISTERED_PIVOT_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "피벗 테이블 정의는 통합 문서에 {MAX_REGISTERED_PIVOT_BYTES}B까지 둘 수 있습니다."
             )));
         }
         self.pivot_tables = std::sync::Arc::new(all);
@@ -220,6 +254,10 @@ impl SheetEngine {
                 normalize_pivot_key(item).1
             };
             picks.push((column, key));
+        }
+        // a filter on a column the source does not have cannot be judged
+        if table.filters.iter().any(|f| f.col_offset >= source.cols) {
+            return Err(FormulaError::Ref);
         }
         let filters = FilterSet::new(&table.filters);
         let mut sum = PivotAccumulator::default();

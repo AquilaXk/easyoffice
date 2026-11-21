@@ -201,6 +201,77 @@ fn set_pivot_tables_checks_the_sheet_and_the_bound() {
     assert!(wb.set_pivot_tables("s", vec![table(); 128]).is_ok());
 }
 
+/// A table whose filters hold `values` items of `bytes` bytes each.
+fn heavy_table(values: usize, bytes: usize) -> PivotTableDef {
+    PivotTableDef {
+        location: range("A1:B2"),
+        source_sheet: "S".to_string(),
+        source: range("A1:B2"),
+        has_header: true,
+        row_fields: vec![0],
+        col_fields: vec![],
+        values: vec![],
+        filters: vec![PivotFieldFilter {
+            col_offset: 0,
+            allowed_values: vec!["x".repeat(bytes); values],
+            allow_blank: false,
+        }],
+    }
+}
+
+#[test]
+fn set_pivot_tables_bounds_the_text_the_registrations_hold_and_keeps_the_earlier_ones() {
+    let mut wb = WorkbookEngine::new();
+    for name in ["S", "T", "U"] {
+        wb.add_sheet(name);
+    }
+    // 2,000 items of 512 bytes is 1 MB: fifteen of them fit the bound, the sixteenth is refused whichever sheet holds it.
+    for name in ["S", "T", "U"] {
+        assert!(wb
+            .set_pivot_tables(name, vec![heavy_table(2_000, 512)])
+            .is_ok());
+    }
+    let err = wb
+        .set_pivot_tables("S", vec![heavy_table(2_000, 512); 14])
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            easyoffice_formats::EasyOfficeError::ResourceBudgetExceeded(_)
+        ),
+        "{err}"
+    );
+    // the refusal changed nothing: the tables of T and U and the one of S are still there
+    assert!(wb
+        .set_pivot_tables("T", vec![heavy_table(2_000, 512)])
+        .is_ok());
+    // a registration that replaces a sheet's tables counts without the tables it replaces
+    assert!(wb
+        .set_pivot_tables("S", vec![heavy_table(2_000, 512); 13])
+        .is_ok());
+}
+
+#[test]
+fn a_filter_on_a_column_the_source_does_not_have_is_ref_error_and_not_a_panic() {
+    let mut wb = workbook(&[("F1", "=GETPIVOTDATA(\"합계: Sales\",$A$3)")]);
+    assert_eq!(wb.evaluate_cell("Report", "F1"), num(143.0 - 100.0));
+    let mut table = heavy_table(0, 0);
+    table.location = range("A3:D6");
+    table.source_sheet = "Data".to_string();
+    table.source = range("A1:C7");
+    table.values = vec![PivotValueDef {
+        column: 2,
+        aggregation: PivotAggregation::Sum,
+        caption: "합계: Sales".to_string(),
+    }];
+    table.filters[0].col_offset = 3;
+    wb.set_pivot_tables("Report", vec![table]).unwrap();
+    assert_eq!(
+        wb.evaluate_cell("Report", "F1"),
+        V::Error(easyoffice_sheet::FormulaError::Ref)
+    );
+}
+
 #[test]
 fn getpivotdata_spoils_like_the_pivot_engine_and_fails_closed_on_a_cycle() {
     let mut wb = workbook(&[("F1", "=GETPIVOTDATA(\"합계: Sales\",A3)")]);
