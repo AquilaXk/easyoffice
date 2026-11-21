@@ -327,8 +327,12 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `--generate-notes` (used when docs/releases/v<version>.md is missing) lists the merged pull
+    # requests, which the token may read only with `pull-requests: read`; without it the release
+    # create call fails with 403 "Resource not accessible by integration".
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
