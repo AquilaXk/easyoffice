@@ -73,7 +73,7 @@ body:
     id: version
     attributes:
       label: 앱 버전 / App version
-      description: 앱의 도움말 메뉴에서 정보를 열면 버전이 보입니다. / Open About from the Help menu to see the version.
+      description: 앱의 도움말 메뉴에서 제품 정보를 열면 버전이 보입니다. / Open About from the Help menu to see the version.
       placeholder: "예: 0.2.0"
     validations:
       required: true
