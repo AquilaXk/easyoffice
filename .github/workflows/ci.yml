@@ -266,6 +266,64 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  # The WebUI in a real WebKit, the engine of the macOS web view (PD-281). The Node suites run the page in a test
+  # double whose NodeList is an array; this job drives the page served by `easyoffice-app --serve` with real focus, key,
+  # mouse and clipboard events. The `verify` job builds the desktop shell, not the engine binary, so there is no build
+  # to reuse: a debug build of `easyoffice-app` alone. `playwright-core` is not a repository dependency; the pinned
+  # version is installed into a temporary directory here, and a missing browser or binary fails the job.
+  webkit-dom:
+    name: webkit-dom
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_VERSION: "1.56.1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Setup Node.js for the browser driver
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+
+      # Cargo reads the manifest of every workspace dependency, including the desktop shell's rhwp path (PD-142).
+      - name: Check out the pinned rhwp upstream (sparse, shallow)
+        run: node scripts/checkout-rhwp.mjs
+
+      - name: Set up the pinned Rust toolchain (PD-147)
+        id: rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: rust-${{ steps.rust.outputs.version }}
+
+      - name: Build the engine binary (debug)
+        run: cargo build -p easyoffice-app
+
+      - name: Install the pinned browser driver and WebKit
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pw"
+          npm install --prefix "$RUNNER_TEMP/pw" --no-save --no-audit --no-fund --ignore-scripts "playwright-core@$PLAYWRIGHT_VERSION"
+          node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install webkit
+
+      - name: Run the WebKit DOM suite
+        env:
+          EO_APP: ${{ github.workspace }}/target/debug/easyoffice-app
+          EO_PW_DIR: ${{ runner.temp }}/pw
+        run: node scripts/webkit-dom/run.mjs "$RUNNER_TEMP/webkit-dom-captures"
+
+      - name: Upload the captures of the failed steps
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: webkit-dom-captures
+          path: ${{ runner.temp }}/webkit-dom-captures
+          retention-days: 7
+          if-no-files-found: ignore
+
   # The Linux desktop shell builds on Ubuntu 22.04, the baseline the release packages are built on. The
   # fast `checks` job stays free of the WebKitGTK packages. The x64 packages are built and their
   # structure is checked as in the release; the arm64 deb is built only by the release. The release
