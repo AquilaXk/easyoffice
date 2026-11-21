@@ -70,6 +70,15 @@ rhwp = { path = "third_party/rhwp" }
 # PD-269: the engine's parsers and codecs are crates now. Unoptimised (debug) builds of them made the
 # linear-time budget tests in `amplification_budget_pd262.rs` several times slower than the code they
 # replaced, so dev and test builds optimise these crates while the workspace crates stay debuggable.
+# Release builds: thin LTO and one code unit make the shipped binaries smaller (desktop 73.2 -> 63.9 MB,
+# engine CLI 17.1 -> 13.6 MB on macOS arm64; benchmarks unchanged within noise), and debug information is
+# stripped from the packages. Fat LTO saved 2.5 MB more but took 1.4x the build time of thin. Panics keep unwinding
+# because the shell catches them around the PDF worker, saving and export (`catch_unwind`).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
 [profile.dev.package.quick-xml]
 opt-level = 3
 [profile.dev.package.miniz_oxide]

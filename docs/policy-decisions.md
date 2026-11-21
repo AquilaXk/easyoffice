@@ -4881,3 +4881,17 @@
 - **Decision (`PD-274`)** (1) 노트는 `docs/releases/v<버전>.md`에 `## 변경 사항`(한국어)과 `## Changes`(영어)로 직접 쓴다. 사용자에게 보이는 변화만 짧게 적고 PD·PR 번호는 넣지 않는다. (2) 릴리스 작업은 파일이 있으면 `--notes-file`로 쓰고 없으면 `--generate-notes`를 쓴다. (3) 드래프트를 다시 실행하면 같은 규칙으로 본문을 다시 쓰고, 게시된 릴리스는 본문을 건드리지 않는다. (4) README는 태그라인과 `## 할 수 있는 일` 목록 구조로 맞춘다. (5) **외부 신고(QA 결정 2026-11-21, PD-086 개정 2의 "이슈·템플릿 금지"를 이 범위만 풀음)**: 외부에서는 버그 신고만 이슈로 받는다. 허용 파일은 `.github/ISSUE_TEMPLATE/bug_report.yml`, `config.yml`(빈 이슈 끔, 보안 신고는 비공개 Security Advisories로 안내)과 `CONTRIBUTING.md`뿐이다. 기능 요청과 PR은 받지 않고, PR 템플릿·다른 이슈 양식·라벨 설정은 계속 금지한다(`scripts/intake-rules.mjs`, 위생 가드와 `scripts/test-intake-rules.mjs`가 막음). 내부 할 일은 `TODO.md` 하나로 관리한다. 들어온 신고는 재현한 뒤 TODO로 옮기고, 고치면 커밋 메시지에 이슈 번호 없이 이슈를 닫는다. 커밋 메시지 규칙(번호 참조 없음)과 충돌하지 않는다.
 - **Verified by** `node --test scripts/test-release-notes-file.mjs scripts/test-intake-rules.mjs`, `check-repo-hygiene.mjs`.
 - **Revisit when** 노트 파일을 빠뜨린 릴리스가 생길 때.
+
+## PD-276. 릴리스 빌드에 thin LTO·단일 코드 단위·디버그 정보 제거를 켬
+
+- **Status** Implemented (QA 요청 2026-11-21). 루트 `Cargo.toml` `[profile.release]`.
+- **Context** 릴리스 프로필이 없어 기본값(LTO 없음, 코드 단위 16, 디버그 정보 포함)으로 배포했다. macOS arm64 데스크톱 실행 파일이 73.2 MB였다.
+- **Decision (`PD-276`)** `lto = "thin"`, `codegen-units = 1`, `strip = "debuginfo"`. `panic`은 `unwind`로 둔다. 셸이 PDF 워커·저장·내보내기에서 패닉을 `catch_unwind`로 잡기 때문이다.
+- **Measured** 같은 기기, `cargo build --release -p easyoffice-desktop -p easyoffice-app`:
+  - 기본값: 데스크톱 73.2 MB, 엔진 CLI 17.1 MB, 빌드 142초.
+  - thin: 데스크톱 63.9 MB(−12.7%), 엔진 CLI 13.6 MB(−20.6%), 빌드 336초.
+  - fat: 데스크톱 61.4 MB(−16.1%), 엔진 CLI 13.2 MB(−22.6%), 빌드 482초.
+  - `--self-test` 실제 경로(문서 저장·변환·XLSX 10만 셀·시트 재계산)는 세 설정 모두 3회 측정 편차 안이다.
+- **Alternatives rejected** fat LTO: thin보다 2.5 MB 작지만 빌드가 1.4배 걸리고 CI 패키지 빌드 시간 한도에 가깝다. `panic = "abort"`: 패닉 복구 경로를 깬다. `opt-level = "s"`: 엔진 핫 경로가 느려질 수 있어 측정 없이 쓰지 않는다.
+- **Revisit when** 실행 파일 구성(글꼴·번들 자산·렌더러)을 분석해 크기를 더 줄일 때, CI 빌드 시간이 한도에 닿을 때.
+
