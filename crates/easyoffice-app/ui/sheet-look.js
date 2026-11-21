@@ -348,8 +348,13 @@
     if (st.fill) s.backgroundColor = "#" + st.fill;
     const fg = textColorOf(st);
     if (fg) s.color = "#" + fg;
+    printEdges(s, st.border);
+  }
+
+  // The edges `{ t, r, b, l }` of a printed cell through the CSS object model.
+  function printEdges(s, border) {
     for (const side of SIDES) {
-      const css = edgeCss(st.border?.[side]);
+      const css = edgeCss(border?.[side]);
       if (!css) continue;
       const name = "border" + SIDE_CSS[side];
       s[name + "Style"] = css.style;
@@ -358,8 +363,24 @@
     }
   }
 
+  // The classes of the printed page for the font flags of a rule (`1` bold, `2` italic, `4` underline, `8` strike).
+  const PRINT_FLAG_CLASSES = [[1, "eo-print-b"], [2, "eo-print-i"], [4, "eo-print-u"], [8, "eo-print-s"]];
+
+  // The look the conditional formats give a printed cell (PD-289), as `td[data-cf]` gives it on the grid (`styles.css`): the fill and
+  // the text color of the rule replace the cell's, its font flags add to the cell's, and `edges` (the cell's own with the edges of the
+  // rules laid over, `overlayRuleEdges`) replace the cell's. `fx` is the rule's answer (`sheet-rules.js` `lookAt`). Data bars and icons
+  // are not printed.
+  function printRule(td, fx, edges) {
+    const s = td.style;
+    if (fx?.bg) s.backgroundColor = fx.bg;
+    if (fx?.fg) s.color = fx.fg;
+    for (const [bit, name] of PRINT_FLAG_CLASSES) if ((fx?.flags | 0) & bit) td.classList.add(name);
+    printEdges(s, edges);
+  }
+
   host.__EASYOFFICE_SHEET_LOOK__ = {
     printStyle,
+    printRule,
     edgeCss,
     overlayRuleEdges,
     H_ALIGNS,

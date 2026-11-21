@@ -428,6 +428,12 @@
 
     const hasBorders = (sheet) => borderCells.has(sheet);
 
+    // The appearance the rules give the cell at (row, col), 1-based as the grid counts: `{ bg, fg, flags, hide, border, bar, icon }`
+    // as the engine answered, or undefined. The grid reads it through `paintTd`; the print reads it here (PD-289).
+    function lookAt(sheet, row, col) {
+      return row >= 1 && col >= 1 ? fx.get(sheet)?.get((row - 1) * MAX_COLS + (col - 1)) : undefined;
+    }
+
     // `own`, the border of the cell at (row, col) (1-based), with the edges the rules draw on it and around it laid over (see
     // `overlayRuleEdges`); `own` itself on a sheet whose rules draw none.
     function withEdges(sheet, row, col, own) {
@@ -588,6 +594,7 @@
       fxAt,
       borderAt,
       hasBorders,
+      lookAt,
       withEdges,
       borderStamp: () => borderStamp,
       colorRuns,

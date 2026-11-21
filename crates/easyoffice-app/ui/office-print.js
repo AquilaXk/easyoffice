@@ -29,6 +29,7 @@
   const MSG_UNSUPPORTED = "이 모듈은 인쇄를 지원하지 않습니다.";
   const MSG_EMPTY = "인쇄할 내용이 없습니다.";
   const MSG_OPENING = "인쇄 대화상자를 여는 중…";
+  const RULE_EDGE_SIDES = ["t", "r", "b", "l"];
   const STYLE_CLASSES = [["bold", "eo-print-b"], ["italic", "eo-print-i"], ["underline", "eo-print-u"], ["strike", "eo-print-s"]];
   const TITLE_STYLE_PROPS = ["fontWeight", "fontStyle", "textDecoration", "color", "fontSize"];
 
@@ -311,12 +312,23 @@
 
     function buildSheet(rules) {
       const { map, geometry, core, boxes, page } = sheetPlan();
+      // What the conditional formats give a cell (PD-289): the answer the grid paints from, and the edges of the cell with the rules'
+      // laid over. Null where the rules give the cell nothing to print.
+      const ruleApi = host.__EASYOFFICE_SHEET_RULES__;
+      const ruleOf = (row, col, own) => {
+        const fx = ruleApi?.lookAt(geometry.sheetName, row, col);
+        const edges = ruleApi?.withEdges(geometry.sheetName, row, col, own?.border);
+        const ruledEdges = edges !== own?.border && RULE_EDGE_SIDES.some((side) => edges?.[side]);
+        return fx?.bg || fx?.fg || fx?.flags || ruledEdges ? { fx, edges } : null;
+      };
       const cellAt = (row, col) => {
         const entry = map[gridUtils.refOf(row, col)];
         const text = entry && entry.value != null ? String(entry.value) : "";
-        return entry && (text !== "" || entry.style) ? { text, entry } : null;
+        const rule = ruleOf(row, col, entry?.style);
+        if (entry && (text !== "" || entry.style)) return { text, entry, rule };
+        return rule ? { text: "", entry: {}, rule } : null;
       };
-      const renderCell = ({ text, entry }, td) => {
+      const renderCell = ({ text, entry, rule }, td) => {
         const code = codeOf(entry);
         const fmtKey = entry?.t === "s" && code !== "@" ? "\u0000" + code : code;
         const shown = code && !(entry?.t === "s" && !code.includes("@")) ? sheetFormats?.get(fmtKey)?.get(text) : null;
@@ -324,6 +336,7 @@
         if (shown?.f) fillCell(td, shown.t, shown.f);
         else td.textContent = shown ? shown.t : isTextEntry(entry) ? text : gridUtils.formatGeneral(text);
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
+        if (rule) host.__EASYOFFICE_SHEET_LOOK__?.printRule(td, rule.fx, rule.edges);
         if (shown?.c) td.style.color = shown.c;
       };
       const pages = host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({
