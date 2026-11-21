@@ -103,8 +103,9 @@ test("control words are not read as data: letters, minus and digits after a back
   assert.deepEqual(Array.from(only.bytes), [0xab, 0xcd, 0xef, ...PNG]);
 });
 
-test("a group with fewer than 32 hex digits is skipped, an odd digit at the end is dropped", () => {
-  assert.equal(images.extractRtfPictures("{\\pict\\pngblip 0123456789abcdef}").length, 0);
+test("a group with fewer than 32 hex digits keeps its place with no bytes, an odd digit at the end is dropped", () => {
+  const short = images.extractRtfPictures("{\\pict\\pngblip 0123456789abcdef}");
+  assert.deepEqual(short.map((p) => p.bytes.length), [0]);
   const [odd] = images.extractRtfPictures(`{\\pict\\pngblip ${hex(PNG)}f}`);
   assert.equal(odd.bytes.length, PNG.length);
 });
@@ -204,13 +205,15 @@ function dibRecord({ type = 81, x = 0, y = 0, w = 2, h = 2, cx = 0, cy = 0, size
 }
 
 test("the bitmap records of an EMF come out with their rectangles", () => {
-  const { dibs, bounds } = images.extractEmfDibs(emfWith(dibRecord({ x: 10, y: 20, w: 4, h: 3, cx: 8, cy: 6 }), dibRecord({ type: 80, x: 1, y: 2, w: 5, h: 7 })));
+  const emf = emfWith(dibRecord({ x: 10, y: 20, w: 4, h: 3, cx: 8, cy: 6 }), dibRecord({ type: 80, x: 1, y: 2, w: 5, h: 7 }));
+  const { dibs, bounds } = images.extractEmfDibs(emf);
   assert.equal(dibs.length, 2);
   assert.deepEqual([dibs[0].x, dibs[0].y, dibs[0].w, dibs[0].h], [10, 20, 8, 6], "STRETCHDIBITS has its own size");
   assert.deepEqual([dibs[1].x, dibs[1].y, dibs[1].w, dibs[1].h], [1, 2, 5, 7], "SETDIBITSTODEVICE keeps the source size");
   assert.deepEqual(bounds, { x: 0, y: 0, w: 100, h: 100 });
-  assert.deepEqual(Array.from(dibs[0].bmp.subarray(0, 2)), [0x42, 0x4d]);
-  assert.equal(new DataView(dibs[0].bmp.buffer, dibs[0].bmp.byteOffset).getUint32(10, true), 14 + 40);
+  const bmp = images.pieceBmp(emf, dibs[0]);
+  assert.deepEqual(Array.from(bmp.subarray(0, 2)), [0x42, 0x4d]);
+  assert.equal(new DataView(bmp.buffer, bmp.byteOffset).getUint32(10, true), 14 + 40);
 });
 
 test("a hostile EMF yields nothing and throws nothing", () => {
@@ -227,7 +230,108 @@ test("a hostile EMF yields nothing and throws nothing", () => {
   for (const [name, emf] of Object.entries(cases)) assert.equal(images.extractEmfDibs(emf).dibs.length, 0, name);
 });
 
-test("an EMF with thousands of bitmap records is cut at the bound", () => {
+test("an EMF with thousands of bitmap records is refused (fail-closed)", () => {
   const records = Array.from({ length: images.LIMITS.MAX_EMF_PIECES + 50 }, () => dibRecord());
-  assert.equal(images.extractEmfDibs(emfWith(...records)).dibs.length, images.LIMITS.MAX_EMF_PIECES);
+  assert.equal(images.extractEmfDibs(emfWith(...records)).dibs.length, 0);
+});
+
+// ---- amplification: records that point at the same bytes -------------------------------------------------------
+
+// An EMF whose `count` bitmap records all point at one `bitsBytes` long block at its end.
+function sharedBitsEmf(count, bitsBytes, { w = 2, h = 2 } = {}) {
+  const recBytes = 128;
+  const head = emfWith();
+  const blobStart = head.length - 20 + count * recBytes;
+  const out = new Uint8Array(blobStart + bitsBytes + 20);
+  out.set(head.subarray(0, 88), 0);
+  for (let i = 0; i < count; i += 1) {
+    const at = 88 + i * recBytes;
+    const v = new DataView(out.buffer, at, recBytes);
+    v.setUint32(0, 81, true);
+    v.setUint32(4, recBytes, true);
+    v.setUint32(48, 80, true);
+    v.setUint32(52, 40, true);
+    v.setUint32(56, blobStart - at, true);
+    v.setUint32(60, bitsBytes, true);
+    v.setUint32(80, 40, true);
+    v.setInt32(84, w, true);
+    v.setInt32(88, h, true);
+  }
+  new DataView(out.buffer).setUint32(blobStart + bitsBytes, 14, true);
+  new DataView(out.buffer).setUint32(blobStart + bitsBytes + 4, 20, true);
+  return out;
+}
+
+test("256 records that point at one 16 MiB block would copy 4 GiB: the EMF is refused by the sum of its BMP bytes", () => {
+  const emf = sharedBitsEmf(256, 16 * 1024 * 1024);
+  const { result, ms } = timed(() => images.extractEmfDibs(emf));
+  assert.equal(result.dibs.length, 0);
+  assert.ok(ms < 200, `took ${ms} ms`);
+  assert.equal(images.extractEmfDibs(sharedBitsEmf(1, 16 * 1024 * 1024)).dibs.length, 1, "one such piece is fine");
+});
+
+test("pieces are bounded by the sum of their pixels, not only one by one", () => {
+  const piece = (n) => emfWith(...Array.from({ length: n }, () => dibRecord({ w: 4000, h: 4000 })));
+  assert.equal(images.extractEmfDibs(piece(2)).dibs.length, 2);
+  assert.equal(images.extractEmfDibs(piece(3)).dibs.length, 0);
+});
+
+// A canvas and an image decoder that only record what they are asked.
+function fakeBrowser() {
+  const log = { canvases: [], live: 0, maxLive: 0, blobs: 0 };
+  class Blob {
+    constructor(parts) {
+      this.size = parts.reduce((n, p) => n + p.byteLength, 0);
+    }
+    async arrayBuffer() {
+      return PNG.buffer.slice(PNG.byteOffset, PNG.byteOffset + PNG.byteLength);
+    }
+  }
+  const dims = { width: 1, height: 1 };
+  return {
+    log,
+    dims,
+    env: {
+      Blob,
+      createImageBitmap: async () => {
+        log.live += 1;
+        log.maxLive = Math.max(log.maxLive, log.live);
+        return { width: dims.width, height: dims.height, close: () => { log.live -= 1; } };
+      },
+      document: {
+        createElement: () => {
+          const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {} }), toBlob: (done) => done(new Blob([PNG])) };
+          log.canvases.push(canvas);
+          return canvas;
+        },
+      },
+    },
+  };
+}
+
+test("one big piece is held to the canvas side limit too, and every piece is let go as soon as it is drawn", async () => {
+  const fake = fakeBrowser();
+  fake.dims.width = 5000;
+  fake.dims.height = 5000;
+  const emf = emfWith(dibRecord({ w: 5000, h: 5000 }));
+  const out = await images.inlineOfficeClipboardImages('<img src="file:///a.emz">', `{\\rtf1 ${pict("\\emfblip", emf)}}`, fake.env);
+  assert.match(out, /data:image\/png;base64,/);
+  assert.ok(fake.log.canvases[0].width <= images.LIMITS.MAX_CANVAS_SIDE && fake.log.canvases[0].height <= images.LIMITS.MAX_CANVAS_SIDE, JSON.stringify(fake.log.canvases[0]));
+  assert.equal(fake.log.live, 0);
+  const several = emfWith(dibRecord({ x: 0, w: 4, h: 4 }), dibRecord({ x: 10, w: 4, h: 4 }), dibRecord({ x: 20, w: 4, h: 4 }));
+  await images.inlineOfficeClipboardImages('<img src="file:///a.emz">', `{\\rtf1 ${pict("\\emfblip", several)}}`, fake.env);
+  assert.equal(fake.log.maxLive, 1, "one decoded piece at a time");
+});
+
+test("a group that is too short keeps its place: the picture after it does not move to the first tag", async () => {
+  const rtf = `{\\rtf1 {\\pict\\pngblip 00ff}${pict("\\pngblip", PNG)}}`;
+  const html = '<img src="file:///a.png"><img src="file:///b.png">';
+  const out = await images.inlineOfficeClipboardImages(html, rtf, {});
+  assert.ok(out.startsWith('<img src="file:///a.png"><img src="data:image/png;base64,'), out);
+});
+
+test("a letter with a different lower case form does not shift the scan of the clean-up", () => {
+  const out = sanitizeOfficeHtml("\u0130".repeat(20) + "<script>alert(1)</script>x<style>p{}</style>y");
+  assert.ok(!out.toLowerCase().includes("<script") && !out.includes("alert") && !out.toLowerCase().includes("<style"), out);
+  assert.ok(out.endsWith("xy"));
 });

@@ -40,7 +40,8 @@
   }
 
   function sanitizeOfficeHtml(html) {
-    const lower = html.toLowerCase();
+    // ASCII only: `toLowerCase` of a letter like U+0130 gives two code units and every index after it would be off.
+    const lower = html.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
     let out = "";
     let index = 0;
     while (index < html.length) {

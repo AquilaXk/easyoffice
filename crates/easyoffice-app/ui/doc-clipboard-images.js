@@ -18,8 +18,9 @@
   // paragraph while it reads the HTML, `doc-paste-model.js`), the BMP branch of `bytesToDataUrl` (`extractRtfPictures` never
   // answers a BMP), the console logging.
   // The clipboard is not trusted input, and the reference has no bounds, so they are added (fail-closed): the RTF text is
-  // refused above a length, the pictures per clipboard, the pieces per EMF and the pixels of a piece are counted, the
-  // canvas keeps the reference's 4000 pixel side, and the scans are single passes (the reference's `\pict` pattern and
+  // refused above a length, the pictures per clipboard are counted, and an EMF is refused when the sum of its pieces' BMP
+  // bytes or pixels, or their number, is over a bound (records can point at the same bytes), a piece is built only
+  // when it is drawn, the canvas keeps the reference's 4000 pixel side for one piece too, and the scans are single passes (the reference's `\pict` pattern and
   // `<img\b[^>]*>` pattern re-scan to the end of the text for every start that has no end, which is quadratic).
 
   const EMR_SETDIBITSTODEVICE = 80;
@@ -28,14 +29,16 @@
   const MAX_RTF_CHARS = 32 * 1024 * 1024;
   const MAX_RTF_PICTURES = 32;
   const MAX_EMF_PIECES = 256;
-  const MAX_PIECE_PIXELS = 64 * 1024 * 1024;
+  const MAX_PIECE_PIXELS = 32 * 1024 * 1024;
+  const MAX_EMF_TOTAL_PIXELS = 32 * 1024 * 1024;
+  const MAX_EMF_BMP_BYTES = 32 * 1024 * 1024;
   const MAX_CANVAS_SIDE = 4000;
   const MAX_COMPOSE_SCALE = 4;
   const MIN_PICTURE_HEX_DIGITS = 32;
   // The record header and the DIB fields up to `cbBits` end at byte 64.
   const MIN_DIB_RECORD_BYTES = 64;
 
-  const LIMITS = { MAX_RTF_CHARS, MAX_RTF_PICTURES, MAX_EMF_PIECES, MAX_PIECE_PIXELS, MAX_CANVAS_SIDE };
+  const LIMITS = { MAX_RTF_CHARS, MAX_RTF_PICTURES, MAX_EMF_PIECES, MAX_PIECE_PIXELS, MAX_EMF_TOTAL_PIXELS, MAX_EMF_BMP_BYTES, MAX_CANVAS_SIDE };
 
   // Value of an ASCII hex digit by character code, -1 for anything else.
   const HEX_VALUE = new Int8Array(128).fill(-1);
@@ -91,6 +94,9 @@
 
   // Every bitmap record of an EMF with its destination rectangle. A grouped picture (logo and letters) comes as several
   // pieces in one EMF; the largest piece alone would leave half a picture, so all are returned and drawn where they belong.
+  // A piece is only described here (where its header and bits are); the BMP is built when the piece is drawn (`pieceBmp`).
+  // Records may point at the same bytes, so the pieces are counted by what they would cost: the sum of their BMP bytes
+  // and the sum of their pixels are bounded, and an EMF over either bound gives no piece at all (fail-closed).
   function extractEmfDibs(emf) {
     const dibs = [];
     if (emf.byteLength < 44) return { dibs, bounds: null };
@@ -102,13 +108,20 @@
     const by2 = view.getInt32(20, true);
     const bounds = bx2 >= bx && by2 >= by ? { x: bx, y: by, w: bx2 - bx + 1, h: by2 - by + 1 } : null;
     let offset = 0;
-    while (offset + 8 <= emf.byteLength && dibs.length < MAX_EMF_PIECES) {
+    let bytes = 0;
+    let pixels = 0;
+    while (offset + 8 <= emf.byteLength) {
       const type = view.getUint32(offset, true);
       const size = view.getUint32(offset + 4, true);
       if (size < 8 || offset + size > emf.byteLength) break;
       if ((type === EMR_STRETCHDIBITS || type === EMR_SETDIBITSTODEVICE) && size >= MIN_DIB_RECORD_BYTES) {
         const piece = readDibRecord(emf, view, offset, type);
-        if (piece) dibs.push(piece);
+        if (piece) {
+          bytes += 14 + piece.bmiLength + piece.bitsLength;
+          pixels += piece.srcW * piece.srcH;
+          if (dibs.length >= MAX_EMF_PIECES || bytes > MAX_EMF_BMP_BYTES || pixels > MAX_EMF_TOTAL_PIXELS) return { dibs: [], bounds };
+          dibs.push(piece);
+        }
       }
       offset += size;
       if (type === EMR_EOF) break;
@@ -128,14 +141,18 @@
     const cxDest = stretched ? view.getInt32(offset + 72, true) : 0;
     const cyDest = stretched ? view.getInt32(offset + 76, true) : 0;
     if (cbBmi < 12 || cbBits <= 0 || offset + offBmi + cbBmi > emf.byteLength || offset + offBits + cbBits > emf.byteLength) return null;
-    const bmi = emf.subarray(offset + offBmi, offset + offBmi + cbBmi);
-    const bits = emf.subarray(offset + offBits, offset + offBits + cbBits);
-    const bmiView = new DataView(bmi.buffer, bmi.byteOffset, bmi.byteLength);
+    const bmiView = new DataView(emf.buffer, emf.byteOffset + offset + offBmi, cbBmi);
     const srcW = Math.abs(bmiView.getInt32(4, true));
     const srcH = Math.abs(bmiView.getInt32(8, true));
     if (srcW <= 0 || srcH <= 0 || srcW * srcH > MAX_PIECE_PIXELS) return null;
-    return { bmp: dibToBmpFile(bmi, bits), x: xDest, y: yDest, w: cxDest > 0 ? cxDest : srcW, h: cyDest > 0 ? cyDest : srcH };
+    return {
+      bmiAt: offset + offBmi, bmiLength: cbBmi, bitsAt: offset + offBits, bitsLength: cbBits, srcW, srcH,
+      x: xDest, y: yDest, w: cxDest > 0 ? cxDest : srcW, h: cyDest > 0 ? cyDest : srcH,
+    };
   }
+
+  // The BMP file of a piece: copied from the EMF when the piece is drawn and let go right after it is decoded.
+  const pieceBmp = (emf, d) => dibToBmpFile(emf.subarray(d.bmiAt, d.bmiAt + d.bmiLength), emf.subarray(d.bitsAt, d.bitsAt + d.bitsLength));
 
   const toBlob = (canvas) => new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
 
@@ -143,52 +160,44 @@
   async function emfToPngBlob(emf, env) {
     const { dibs } = extractEmfDibs(emf);
     if (dibs.length === 0) return null;
-    const bitmaps = [];
-    try {
-      for (const d of dibs) {
-        try {
-          bitmaps.push({ bmp: await env.createImageBitmap(new env.Blob([d.bmp], { type: "image/bmp" })), d });
-        } catch {
-          // a piece that does not decode is left out; the others are still drawn
-        }
-      }
-      if (bitmaps.length === 0) return null;
-      // One piece: the original pixels, no resampling.
-      if (bitmaps.length === 1 && dibs.length === 1) {
-        const only = bitmaps[0];
-        const canvas = env.document.createElement("canvas");
-        canvas.width = only.bmp.width;
-        canvas.height = only.bmp.height;
-        canvas.getContext("2d")?.drawImage(only.bmp, 0, 0);
-        return await toBlob(canvas);
-      }
-      // Several pieces: the union of their destination rectangles is the canvas. The header's `rclBounds` includes the
-      // empty margin around the picture and makes a pasted picture loose, so it is not used.
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const { d } of bitmaps) {
-        minX = Math.min(minX, d.x);
-        minY = Math.min(minY, d.y);
-        maxX = Math.max(maxX, d.x + d.w);
-        maxY = Math.max(maxY, d.y + d.h);
-      }
-      const spanW = Math.max(1, Math.round(maxX - minX));
-      const spanH = Math.max(1, Math.round(maxY - minY));
+    // The canvas comes from the descriptions, so a piece can be drawn and let go as soon as it is decoded. One piece keeps
+    // its own pixels (no resampling) unless it is over the side limit; several pieces use the union of their rectangles
+    // (the header's `rclBounds` includes the empty margin around the picture and makes a pasted picture loose).
+    let minX = 0;
+    let minY = 0;
+    let spanW = dibs[0].srcW;
+    let spanH = dibs[0].srcH;
+    let scale = 1;
+    if (dibs.length > 1) {
+      minX = Math.min(...dibs.map((d) => d.x));
+      minY = Math.min(...dibs.map((d) => d.y));
+      spanW = Math.max(1, Math.round(Math.max(...dibs.map((d) => d.x + d.w)) - minX));
+      spanH = Math.max(1, Math.round(Math.max(...dibs.map((d) => d.y + d.h)) - minY));
       // The scale keeps the source resolution of the pieces (at most 4 times) inside the side limit.
-      const natural = bitmaps.reduce((most, { bmp, d }) => Math.max(most, d.w > 0 ? bmp.width / d.w : 1), 1);
-      const scale = Math.min(MAX_COMPOSE_SCALE, Math.max(1, natural), MAX_CANVAS_SIDE / Math.max(spanW, spanH));
-      const canvas = env.document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(spanW * scale));
-      canvas.height = Math.max(1, Math.round(spanH * scale));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      for (const { bmp, d } of bitmaps) ctx.drawImage(bmp, (d.x - minX) * scale, (d.y - minY) * scale, d.w * scale, d.h * scale);
-      return await toBlob(canvas);
-    } finally {
-      for (const { bmp } of bitmaps) bmp.close?.();
+      scale = Math.max(1, dibs.reduce((most, d) => Math.max(most, d.w > 0 ? d.srcW / d.w : 1), 1));
+      scale = Math.min(MAX_COMPOSE_SCALE, scale);
     }
+    scale = Math.min(scale, MAX_CANVAS_SIDE / Math.max(spanW, spanH));
+    const canvas = env.document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(spanW * scale));
+    canvas.height = Math.max(1, Math.round(spanH * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    let drawn = 0;
+    for (const d of dibs) {
+      let bitmap = null;
+      try {
+        bitmap = await env.createImageBitmap(new env.Blob([pieceBmp(emf, d)], { type: "image/bmp" }));
+        if (dibs.length === 1) ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        else ctx.drawImage(bitmap, (d.x - minX) * scale, (d.y - minY) * scale, d.w * scale, d.h * scale);
+        drawn += 1;
+      } catch {
+        // a piece that does not decode is left out; the others are still drawn
+      } finally {
+        bitmap?.close?.();
+      }
+    }
+    return drawn > 0 ? await toBlob(canvas) : null;
   }
 
   // The pictures of an RTF text in document order. A group that is no picture form keeps its place with empty bytes, so the
@@ -204,8 +213,9 @@
       const body = rtf.slice(start + 5, end);
       from = end + 1;
       const bytes = pictureBytes(body);
-      if (!bytes) continue;
-      if (/\\pngblip\b/.test(body)) pictures.push({ bytes, mime: "image/png" });
+      // A group with too little data keeps its place with empty bytes: the n-th picture stays the n-th tag.
+      if (!bytes) pictures.push({ bytes: new Uint8Array(0), mime: "" });
+      else if (/\\pngblip\b/.test(body)) pictures.push({ bytes, mime: "image/png" });
       else if (/\\jpegblip\b/.test(body)) pictures.push({ bytes, mime: "image/jpeg" });
       else if (/\\(?:wmetafile\d*|emfblip)\b/.test(body)) pictures.push({ bytes, mime: "image/emf" });
       else pictures.push({ bytes: new Uint8Array(0), mime: "" });
@@ -268,7 +278,6 @@
         out += tag;
         continue;
       }
-      while (pictIndex < pictures.length && !pictures[pictIndex].bytes.byteLength) pictIndex += 1;
       const picture = pictures[pictIndex];
       pictIndex += 1;
       const url = picture ? await bytesToDataUrl(picture.bytes, picture.mime, env) : null;
@@ -279,5 +288,5 @@
     return out + html.slice(at);
   }
 
-  host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__ = { LIMITS, extractEmfDibs, extractRtfPictures, needsRtfImageInlining, inlineOfficeClipboardImages };
+  host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__ = { LIMITS, extractEmfDibs, pieceBmp, extractRtfPictures, needsRtfImageInlining, inlineOfficeClipboardImages };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
