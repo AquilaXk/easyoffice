@@ -316,7 +316,7 @@
         say("배열의 일부분을 변경할 수 없음");
         return Promise.resolve(null);
       }
-      const extra = plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "";
+      const extra = (plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "") + (options?.note || "");
       const label = mode === "all" && !transpose ? "붙여넣기" : "골라 붙이기";
       const merges = core.planMerges({ snap, mode, transpose, target, grid });
       return api.applyCellEdits(plan.edits, label + extra, plan.widths, merges);
@@ -342,15 +342,15 @@
       return true;
     }
 
-    // The cells of the clipboard's HTML table (a spreadsheet program's or a page's), with their formats; null when the
-    // clipboard holds none, or when it is the app's own copy, which answers with its richer snapshot (formulas, hyperlinks).
+    // The cells of the clipboard's HTML table (a spreadsheet program's or a page's), with their formats: `{ block }`, or `{}`
+    // when the clipboard holds none or is the app's own copy, which answers with its richer snapshot (formulas, hyperlinks),
+    // or `{ refused }` when the table is over a bound.
     function htmlBlockOf(html, text) {
       const htmlApi = host.__EASYOFFICE_SHEET_CLIP_HTML__;
-      if (!html || !htmlApi) return null;
-      if (!htmlApi.htmlIsFromSpreadsheet(html) && internal && internal.text === text) return null;
+      if (!html || !htmlApi) return {};
+      if (!htmlApi.htmlIsFromSpreadsheet(html) && internal && internal.text === text) return {};
       const { block, refused } = htmlApi.parseClipboardHtml(html, { styleFromPayload: host.__EASYOFFICE_SHEET_STYLE_CODEC__.styleFromPayload });
-      if (refused) say("표가 커서 서식 없이 글자만 붙임");
-      return block || null;
+      return refused ? { refused } : { block: block || null };
     }
 
     function onPaste(ev, range) {
@@ -358,10 +358,10 @@
       const read = (type) => (data && typeof data.getData === "function" ? data.getData(type) || "" : "");
       const text = read("text/plain") || read("text");
       ev.preventDefault();
-      const rich = htmlBlockOf(read("text/html"), text);
-      if (rich) return pasteBlock(rich, range);
+      const { block, refused } = htmlBlockOf(read("text/html"), text);
+      if (block) return pasteBlock(block, range);
       if (!text) return Promise.resolve(false);
-      return pasteBlock(blockOf(text), range);
+      return pasteBlock(blockOf(text), range, refused ? { note: " (표가 커서 서식 없이 글자만)" } : undefined);
     }
 
     // Menu commands read the system clipboard; the in-app copy answers when it is unavailable.

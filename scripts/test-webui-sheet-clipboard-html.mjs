@@ -279,7 +279,7 @@ test("HTML over the bound pastes the text and says so; a clipboard without a tab
   await select(d, "E1");
   await pasteHtml(d, "<table><tr><td rowspan=100000 colspan=100>a</td></tr></table>", "글자만");
   assert.equal(cell(d, "E1").textContent, "글자만");
-  assert.equal(feedback(d), "붙여넣기: 1칸");
+  assert.equal(feedback(d), "붙여넣기 (표가 커서 서식 없이 글자만): 1칸");
   await select(d, "E3");
   await pasteHtml(d, "<p>문단</p>", "문단");
   assert.equal(cell(d, "E3").textContent, "문단");
