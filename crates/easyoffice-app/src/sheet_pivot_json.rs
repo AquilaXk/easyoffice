@@ -206,71 +206,79 @@ pub(crate) fn parse_pivots(v: &StrictJsonValue) -> Result<Vec<SheetPivotTable>, 
             items.len()
         )));
     }
-    let mut out = Vec::with_capacity(items.len());
-    for (idx, item) in items.iter().enumerate() {
-        let obj = item.as_object().ok_or_else(|| bad("pivots"))?;
-        let name = match opt_text(obj, "name")? {
-            Some(s) if !s.trim().is_empty() => s,
-            Some(_) => return Err(bad("name")),
-            None => format!("피벗 테이블{}", idx + 1),
-        };
-        let cache_id = match StrictJsonValue::get_field(obj, "cacheId") {
-            None | Some(StrictJsonValue::Null) => 1,
-            Some(v) => v
-                .as_u64()
-                .and_then(|n| u32::try_from(n).ok())
-                .filter(|&n| n >= 1)
-                .ok_or_else(|| bad("cacheId"))?,
-        };
-        let source_sheet = opt_text(obj, "sourceSheet")?.unwrap_or_default();
-        let source_range = opt_text(obj, "sourceRange")?.unwrap_or_default();
-        let source_table = opt_text(obj, "sourceTable")?;
-        let has_header = opt_bool(obj, "hasHeader", true)?;
-        let location = opt_text(obj, "location")?
-            .as_deref()
-            .and_then(CellBox::parse)
-            .filter(|b| b.row1 <= LAST_ROW && b.col1 <= LAST_COL)
-            .ok_or_else(|| bad("location"))?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| parse_pivot(idx, item))
+        .collect()
+}
 
-        let field_names = match StrictJsonValue::get_field(obj, "fieldNames")
-            .filter(|v| !matches!(v, StrictJsonValue::Null))
-        {
-            None => Vec::new(),
-            Some(v) => {
-                let arr = v.as_array().ok_or_else(|| bad("fieldNames"))?;
-                if arr.len() > (LAST_COL as usize + 1) {
-                    return Err(over("피벗 필드 이름이 최대 열 수를 초과했습니다."));
-                }
-                let mut names = Vec::with_capacity(arr.len());
-                for f in arr {
-                    let s = f.as_str().ok_or_else(|| bad("fieldNames"))?;
-                    check_text("fieldNames", s)?;
-                    names.push(s.to_string());
-                }
-                names
+/// One pivot table of a `pivots` array; `idx` is its place, which a missing name counts from.
+pub(crate) fn parse_pivot(
+    idx: usize,
+    item: &StrictJsonValue,
+) -> Result<SheetPivotTable, EasyOfficeError> {
+    let obj = item.as_object().ok_or_else(|| bad("pivots"))?;
+    let name = match opt_text(obj, "name")? {
+        Some(s) if !s.trim().is_empty() => s,
+        Some(_) => return Err(bad("name")),
+        None => format!("피벗 테이블{}", idx + 1),
+    };
+    let cache_id = match StrictJsonValue::get_field(obj, "cacheId") {
+        None | Some(StrictJsonValue::Null) => 1,
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|&n| n >= 1)
+            .ok_or_else(|| bad("cacheId"))?,
+    };
+    let source_sheet = opt_text(obj, "sourceSheet")?.unwrap_or_default();
+    let source_range = opt_text(obj, "sourceRange")?.unwrap_or_default();
+    let source_table = opt_text(obj, "sourceTable")?;
+    let has_header = opt_bool(obj, "hasHeader", true)?;
+    let location = opt_text(obj, "location")?
+        .as_deref()
+        .and_then(CellBox::parse)
+        .filter(|b| b.row1 <= LAST_ROW && b.col1 <= LAST_COL)
+        .ok_or_else(|| bad("location"))?;
+
+    let field_names = match StrictJsonValue::get_field(obj, "fieldNames")
+        .filter(|v| !matches!(v, StrictJsonValue::Null))
+    {
+        None => Vec::new(),
+        Some(v) => {
+            let arr = v.as_array().ok_or_else(|| bad("fieldNames"))?;
+            if arr.len() > (LAST_COL as usize + 1) {
+                return Err(over("피벗 필드 이름이 최대 열 수를 초과했습니다."));
             }
-        };
+            let mut names = Vec::with_capacity(arr.len());
+            for f in arr {
+                let s = f.as_str().ok_or_else(|| bad("fieldNames"))?;
+                check_text("fieldNames", s)?;
+                names.push(s.to_string());
+            }
+            names
+        }
+    };
 
-        let pivot = SheetPivotTable {
-            name,
-            cache_id,
-            source_sheet,
-            source_range,
-            source_table,
-            has_header,
-            location,
-            field_names,
-            row_fields: parse_u32_array(obj, "rowFields", MAX_PIVOT_AXIS_FIELDS)?,
-            col_fields: parse_u32_array(obj, "colFields", MAX_PIVOT_AXIS_FIELDS)?,
-            filter_fields: parse_u32_array(obj, "filterFields", MAX_PIVOT_AXIS_FIELDS)?,
-            value_fields: parse_value_fields(obj)?,
-            filters: parse_filters(obj)?,
-            slicers: parse_slicers(obj)?,
-        };
-        pivot.check_budgets()?;
-        out.push(pivot);
-    }
-    Ok(out)
+    let pivot = SheetPivotTable {
+        name,
+        cache_id,
+        source_sheet,
+        source_range,
+        source_table,
+        has_header,
+        location,
+        field_names,
+        row_fields: parse_u32_array(obj, "rowFields", MAX_PIVOT_AXIS_FIELDS)?,
+        col_fields: parse_u32_array(obj, "colFields", MAX_PIVOT_AXIS_FIELDS)?,
+        filter_fields: parse_u32_array(obj, "filterFields", MAX_PIVOT_AXIS_FIELDS)?,
+        value_fields: parse_value_fields(obj)?,
+        filters: parse_filters(obj)?,
+        slicers: parse_slicers(obj)?,
+    };
+    pivot.check_budgets()?;
+    Ok(pivot)
 }
 
 use easyoffice_formats::json_out::push_json_string as push_json_str_into;

@@ -388,37 +388,77 @@ fn a_session_refuses_more_pivots_than_a_workbook_may_hold() {
 }
 
 #[test]
-fn pivots_with_oversize_parts_are_refused() {
-    over_budget(&format!(
-        r#"{{"Report":[{}]}}"#,
+fn a_pivot_over_a_bound_is_left_out_and_cannot_stop_the_other_formulas() {
+    let value = r#"{"col":2,"agg":"sum","name":"x"}"#;
+    let long_item = "가".repeat(MAX_PIVOT_TEXT_BYTES / 3 + 1);
+    let big_filters = vec![
+        format!(
+            r#"{{"col":0,"values":[{}],"blank":false}}"#,
+            vec![format!("\"{}\"", "x".repeat(MAX_PIVOT_TEXT_BYTES)); 200].join(",")
+        );
+        64
+    ]
+    .join(",");
+    let many_items = vec!["\"v\""; MAX_PIVOT_FILTER_VALUES + 1].join(",");
+    let bad = [
+        // a name a page lets a user type to 255 characters: 171 Korean letters are over 512 bytes
+        with("\"name\"", "피벗 테이블1", &"가".repeat(171)),
+        // a filter item copied from a long cell
+        with("\"filters\"", "\"East\"", &format!("\"{long_item}\"")),
+        with("\"valueFields\"", "합계: 매출", &long_item),
+        with("\"sourceSheet\"", "Data", &long_item),
+        // lists over their bounds
         with(
             "\"rowFields\":[0]",
             "[0]",
-            &format!("[{}]", numbers(MAX_PIVOT_AXIS_FIELDS + 1))
-        )
-    ));
-    let value = r#"{"col":2,"agg":"sum","name":"x"}"#;
-    over_budget(&format!(
-        r#"{{"Report":[{}]}}"#,
+            &format!("[{}]", numbers(MAX_PIVOT_AXIS_FIELDS + 1)),
+        ),
         with(
             "\"valueFields\"",
             r#"[{"col":2,"agg":"sum","name":"합계: 매출"}]"#,
-            &format!("[{}]", vec![value; MAX_PIVOT_VALUE_FIELDS + 1].join(","))
-        )
-    ));
-    over_budget(&format!(
-        r#"{{"Report":[{}]}}"#,
+            &format!("[{}]", vec![value; MAX_PIVOT_VALUE_FIELDS + 1].join(",")),
+        ),
         with(
-            "\"name\"",
-            "피벗 테이블1",
-            &"가".repeat(MAX_PIVOT_TEXT_BYTES)
-        )
-    ));
-    let values = vec!["\"v\""; MAX_PIVOT_FILTER_VALUES + 1].join(",");
-    over_budget(&format!(
-        r#"{{"Report":[{}]}}"#,
-        with("\"filters\"", r#"["East","West"]"#, &format!("[{values}]"))
-    ));
+            "\"filters\"",
+            r#"["East","West"]"#,
+            &format!("[{many_items}]"),
+        ),
+        // every bound kept and the table still over its share of the bytes
+        with(
+            "\"filters\"",
+            r#"[{"col":0,"values":["East","West"],"blank":false}]"#,
+            &format!("[{big_filters}]"),
+        ),
+    ];
+    let extra = r#"{"sheet":"Report","cell":"F20","value":"=GETPIVOTDATA(\"합계: 매출\",$H$3)"},{"sheet":"Report","cell":"F21","value":"=1+2"}"#;
+    let mut want = expected();
+    want.extend(["#REF!".to_string(), "3".to_string()]);
+    for variant in bad {
+        let bad = variant.replace("A3:D6", "H3:I4");
+        let answer = call(&format!(
+            r#"{{"sheet":"Report","sheets":["Data","Report"],"cells":[{DATA},{},{extra}],
+              "pivots":{{"Report":[{PIVOT},{bad}]}},
+              "targets":[{},{{"sheet":"Report","cell":"F20"}},{{"sheet":"Report","cell":"F21"}}]}}"#,
+            formula_cells(),
+            targets()
+        ))
+        .unwrap();
+        assert_eq!(values(&answer), want, "{variant:.120}");
+        // a session takes the same list and answers for the other table
+        let opened = call(r#"{"sessionAction":"open","sheets":["Data","Report"]}"#).unwrap();
+        let id = json_str_field(&opened, "session").to_string();
+        call(&format!(
+            r#"{{"sessionAction":"apply","session":"{id}","recalc":true,"changes":[{DATA},{},{extra}]}}"#,
+            formula_cells()
+        ))
+        .unwrap();
+        let told = call(&format!(
+            r#"{{"sessionAction":"pivots","session":"{id}","sheet":"Report","pivots":[{PIVOT},{bad}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(changed_value(&told, "F1").as_deref(), Some("43"), "{told}");
+        assert_eq!(changed_value(&told, "F20"), None, "{variant:.120}: {told}");
+    }
 }
 
 #[test]

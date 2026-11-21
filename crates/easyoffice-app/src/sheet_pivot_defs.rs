@@ -1,13 +1,14 @@
 //! The pivot tables `GETPIVOTDATA` finds (PD-292): the `pivots` of a request, read by
-//! `sheet_pivot_json::parse_pivots` (its bounds apply), as the definitions the engine registers.
+//! `sheet_pivot_json::parse_pivot` (its bounds apply), as the definitions the engine registers.
 
-use crate::sheet_pivot_json::parse_pivots;
+use crate::sheet_pivot_json::parse_pivot;
 use easyoffice_formats::{
     parse_sheet_and_box, CellBox, EasyOfficeError, PivotAggKind, SheetPivotTable, StrictJsonValue,
+    MAX_PIVOTS_PER_SHEET,
 };
 use easyoffice_sheet::{
     CellRange, PackedCellCoordinate, PivotAggregation, PivotFieldFilter, PivotTableDef,
-    PivotValueDef, MAX_REGISTERED_PIVOTS,
+    PivotValueDef, MAX_REGISTERED_PIVOTS, MAX_REGISTERED_PIVOT_BYTES,
 };
 
 fn bad() -> EasyOfficeError {
@@ -40,7 +41,7 @@ fn pivot_def(sheet: &str, pivot: &SheetPivotTable) -> Option<PivotTableDef> {
     };
     let (source_sheet, source) = parse_sheet_and_box(held_in, &pivot.source_range)?;
     let columns = |fields: &[u32]| fields.iter().map(|&c| c as usize).collect();
-    Some(PivotTableDef {
+    let def = PivotTableDef {
         location: range_of(pivot.location)?,
         source_sheet,
         source: range_of(source)?,
@@ -65,10 +66,14 @@ fn pivot_def(sheet: &str, pivot: &SheetPivotTable) -> Option<PivotTableDef> {
                 allow_blank: f.blank,
             })
             .collect(),
-    })
+    };
+    // Each table gets its share of what a workbook may hold, so the tables of one request never outgrow it.
+    (def.heap_bytes() <= MAX_REGISTERED_PIVOT_BYTES / MAX_REGISTERED_PIVOTS).then_some(def)
 }
 
-/// The pivot tables of `sheet` from a `pivots` array (null: none).
+/// The pivot tables of `sheet` from a `pivots` array (null: none). A table whose own content is over a bound (a
+/// text, a list, its bytes) is left out and answers `#REF!`, so it cannot stop the other formulas of the workbook;
+/// the number of tables of a sheet is a bound of the request and refuses all of it.
 pub(crate) fn pivot_defs(
     sheet: &str,
     value: &StrictJsonValue,
@@ -76,10 +81,22 @@ pub(crate) fn pivot_defs(
     if matches!(value, StrictJsonValue::Null) {
         return Ok(Vec::new());
     }
-    Ok(parse_pivots(value)?
-        .iter()
-        .filter_map(|pivot| pivot_def(sheet, pivot))
-        .collect())
+    let items = value.as_array().ok_or_else(bad)?;
+    if items.len() > MAX_PIVOTS_PER_SHEET {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "시트 피벗 테이블 수({})가 허용 상한({MAX_PIVOTS_PER_SHEET})을 초과했습니다.",
+            items.len()
+        )));
+    }
+    let mut defs = Vec::with_capacity(items.len());
+    for (idx, item) in items.iter().enumerate() {
+        match parse_pivot(idx, item) {
+            Ok(pivot) => defs.extend(pivot_def(sheet, &pivot)),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(defs)
 }
 
 /// The `pivots` field of a request without a session: `{"Sheet1": [pivot, ...], ...}`; nothing when absent. The
