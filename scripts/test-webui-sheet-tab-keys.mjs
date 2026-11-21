@@ -4,7 +4,7 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
-// The keys to the next and previous sheet (PD-290): Ctrl+PageDown and Ctrl+PageUp, and on a Mac Option+Right and Option+Left,
+// The keys to the next and previous sheet (PD-291): Ctrl+PageDown and Ctrl+PageUp, and on a Mac Option+Right and Option+Left,
 // through the real input handler of the sheet and the tab strip.
 
 const SHEETS = ["가", "나", "다", "라"];

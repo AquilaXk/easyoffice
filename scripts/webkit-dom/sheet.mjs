@@ -248,7 +248,7 @@ export const sheetSteps = [
     assert.equal(await page.evaluate(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1")), 30);
   }],
 
-  ["Ctrl+PageUp and Ctrl+PageDown move between the sheets with the real keyboard, Option+Arrow does on a Mac (PD-290)", async (page) => {
+  ["Ctrl+PageUp and Ctrl+PageDown move between the sheets with the real keyboard, Option+Arrow does on a Mac (PD-291)", async (page) => {
     const tab = () => page.$eval("#sheet-tab-bar .sheet-tab-btn.active", (el) => el.dataset.sheetTab);
     await page.click("#btn-add-sheet-tab");
     await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");

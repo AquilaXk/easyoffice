@@ -563,7 +563,7 @@
       const st = td ? stateOf(td) : null;
       const editing = isEditing(st);
       const mod = ev.ctrlKey || ev.metaKey;
-      // Ctrl+PageDown and Ctrl+PageUp (on a Mac also Option+Right and Option+Left) go to the next and previous sheet (PD-290); a cell
+      // Ctrl+PageDown and Ctrl+PageUp (on a Mac also Option+Right and Option+Left) go to the next and previous sheet (PD-291); a cell
       // being edited keeps the keys for its text.
       const sheetStep = !editing && api.stepSheet ? nav.sheetStep(ev, isMacClient()) : 0;
       if (sheetStep !== 0) {

@@ -13,7 +13,7 @@
 // one cell, a merged range counts as one cell of its top-left value and is left past its far edge. A walk that starts
 // past the last used row or column does not scan the empty cells (the reference visits each one). The reference wraps
 // the arrow keys at the sheet edge; here they stop there. Home, Ctrl+Home, Ctrl+End, the page moves and the keys to the next
-// and previous sheet (PD-290) are not in the reference and are written for the spreadsheet application's rules. Univer's command, selection service and shortcut
+// and previous sheet (PD-291) are not in the reference and are written for the spreadsheet application's rules. Univer's command, selection service and shortcut
 // tables are not used.
 (function (host) {
   "use strict";
@@ -150,7 +150,7 @@
     return { r: clamp(view.dataRows, 1, view.maxRows), c: clamp(view.dataCols, 1, view.maxCols) };
   }
 
-  // The keys that go to the next or previous sheet (PD-290): Ctrl+PageDown and Ctrl+PageUp, and on a Mac Option+Right and Option+Left
+  // The keys that go to the next or previous sheet (PD-291): Ctrl+PageDown and Ctrl+PageUp, and on a Mac Option+Right and Option+Left
   // (the Option+Arrow of the text editing is the same key, so the caller leaves it to the text while a cell is edited). Shift
   // with them selects across sheets in the spreadsheet program, which this page has no state for: it is no step. Returns 1, -1 or 0.
   // The page keys of the cell move (PageDown without Ctrl, Alt+PageDown) stay with `page`.

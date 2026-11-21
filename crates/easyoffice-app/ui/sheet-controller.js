@@ -489,7 +489,7 @@
       pushCellUndoSnapshotIfNeeded,
       retractCellUndoSnapshot,
       switchSheet: (name) => performSwitchSheetTabAsync(name),
-      // The next (1) or previous (-1) shown sheet in tab order, as the keys of `sheet-nav.js` ask for (PD-290).
+      // The next (1) or previous (-1) shown sheet in tab order, as the keys of `sheet-nav.js` ask for (PD-291).
       stepSheet: (step) => {
         const keys = [...new Set([...Object.keys(sheetDataStore), getActiveSheetName()])];
         const shown = host.__EASYOFFICE_SHEET_TAB_STRIP__.visibleOf(keys);

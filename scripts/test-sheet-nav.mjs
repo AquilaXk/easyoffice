@@ -170,7 +170,7 @@ test("a sheet with nothing in it: Ctrl+Down goes to the last row, Ctrl+Up to the
   assert.ok(reads < 10, `the empty rows were read ${reads} times`);
 });
 
-// ---- the keys to the next and previous sheet (PD-290) -------------------------------------------------------------
+// ---- the keys to the next and previous sheet (PD-291) -------------------------------------------------------------
 
 const key = (name, mods = {}) => ({ key: name, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
 
