@@ -2,7 +2,9 @@ use super::cf::truthy;
 use super::expr_shift::RuleExprTemplate;
 use super::shift::shift_formula;
 use crate::{EvalContext, PackedCellCoordinate, WorkbookEngine};
-use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, DefinedName, SheetRules};
+use easyoffice_formats::{
+    parse_sqref, CellBorders, CfKind, CfRule, CfStyle, DefinedName, SheetRules,
+};
 
 fn rule_expr(ranges: &str, expr: &str) -> CfRule {
     CfRule {
@@ -14,6 +16,7 @@ fn rule_expr(ranges: &str, expr: &str) -> CfRule {
             bg: Some(0xFF_00_00),
             fg: None,
             flags: 0,
+            border: CellBorders::NONE,
         },
     }
 }

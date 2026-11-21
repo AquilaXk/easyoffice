@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use crate::sheet_styling::sheet_look::ods_border_attrs;
 use crate::sheet_styling::sheet_rules::{
     CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvKind, SheetRules, TextOp,
     ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS,
@@ -233,6 +234,7 @@ impl OdsRuleTable {
             if let Some(bg) = s.bg {
                 let _ = write!(cell, " fo:background-color=\"#{bg:06x}\"");
             }
+            cell.push_str(&ods_border_attrs(s.border));
             let mut text = String::new();
             if let Some(fg) = s.fg {
                 let _ = write!(text, " fo:color=\"#{fg:06x}\"");

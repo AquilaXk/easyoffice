@@ -370,7 +370,7 @@ fn total_cell_pressure_evicts_older_sessions_first() {
 
 /// One rule that paints every cell of `range` whose number is above zero.
 fn paint_positive(range: &str) -> SheetRules {
-    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, Cmp};
+    use easyoffice_formats::{parse_sqref, CellBorders, CfKind, CfRule, CfStyle, Cmp};
     SheetRules {
         cf: vec![CfRule {
             ranges: parse_sqref(range),
@@ -385,6 +385,7 @@ fn paint_positive(range: &str) -> SheetRules {
                 bg: Some(0xFFC7CE),
                 fg: None,
                 flags: 0,
+                border: CellBorders::NONE,
             },
         }],
         ..SheetRules::default()

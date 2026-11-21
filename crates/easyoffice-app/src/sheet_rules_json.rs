@@ -5,10 +5,11 @@
 //! Every limit of `easyoffice_formats::sheet_rules` is enforced on input; an input over a limit is
 //! refused, not trimmed.
 
+use crate::sheet_look_json::{parse_borders, write_borders};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::base64_codec;
 use easyoffice_formats::{
-    format_sqref, icon_set_index, parse_sqref, CfKind, CfRule, CfStyle, CfValue, Cmp,
+    format_sqref, icon_set_index, parse_sqref, CellBorders, CfKind, CfRule, CfStyle, CfValue, Cmp,
     DataValidation, DvAlert, DvKind, EasyOfficeError, SheetRules, StrictJsonValue, TextOp,
     TimePeriod, ValueKind, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
 };
@@ -181,8 +182,17 @@ fn cf_rule(v: &StrictJsonValue) -> Result<CfRule, EasyOfficeError> {
             bg: color(f, "bg")?,
             fg: color(f, "fg")?,
             flags: u8::try_from(count(f, "fl", 0)? & 0xF).unwrap_or(0),
+            border: borders(f)?,
         },
     })
+}
+
+/// The `bd` of a rule: `{"t":"thin:ff0000", ...}`, the edge format of a cell's border (`sheet_look_json`).
+fn borders(f: &Fields) -> Result<CellBorders, EasyOfficeError> {
+    match StrictJsonValue::get_field(f, "bd") {
+        None | Some(StrictJsonValue::Null) => Ok(CellBorders::NONE),
+        Some(v) => parse_borders(v).map_err(|_| bad("bd")),
+    }
 }
 
 fn validation(v: &StrictJsonValue) -> Result<DataValidation, EasyOfficeError> {
@@ -389,6 +399,10 @@ pub(crate) fn rules_json(rules: &SheetRules) -> String {
         if let Some(c) = r.style.fg {
             rgb(&mut out, "fg", c);
         }
+        if !r.style.border.is_none() {
+            out.push_str(",\"bd\":");
+            write_borders(&mut out, &r.style.border);
+        }
         let _ = write!(out, ",\"fl\":{}}}", r.style.flags);
     }
     out.push_str("],\"dv\":[");
@@ -428,9 +442,20 @@ pub(crate) fn visuals_json(visuals: &[CellVisual]) -> String {
         }
         let _ = write!(out, "{c}");
     }
+    out.push(']');
+    if !packed.borders.is_empty() {
+        out.push_str(",\"bd\":[");
+        for (i, set) in packed.borders.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "[{},{},{},{}]", set[0], set[1], set[2], set[3]);
+        }
+        out.push(']');
+    }
     let _ = write!(
         out,
-        "],\"w\":\"{}\"}}",
+        ",\"w\":\"{}\"}}",
         base64_codec::encode(&packed.word_bytes())
     );
     out
@@ -463,6 +488,87 @@ mod tests {
         assert_eq!(rules.cf.len(), 7);
         assert_eq!(rules.dv[0].alert, DvAlert::Warning);
         assert!(rules.dv[0].allow_blank);
+    }
+
+    #[test]
+    fn a_rule_border_survives_json_and_a_bad_one_is_refused() {
+        let rules = round_trip(
+            r##"{"cf":[{"r":"A1:A9","p":1,"t":"dup","bg":"#FFC7CE","bd":{"t":"thin:ff0000","l":"double:0000ff"}}]}"##,
+        );
+        let border = rules.cf[0].style.border;
+        assert_eq!(border.top.line().payload(), Some("thin"));
+        assert_eq!(border.top.rgb(), 0xFF0000);
+        assert_eq!(border.left.line().payload(), Some("double"));
+        assert!(border.right.is_none() && border.bottom.is_none());
+        assert!(rules_json(&rules).contains(r#""bd":{"t":"thin:ff0000","l":"double:0000ff"}"#));
+        for bad in [
+            r#"{"cf":[{"r":"A1","t":"dup","bd":{"x":"thin:ff0000"}}]}"#,
+            r#"{"cf":[{"r":"A1","t":"dup","bd":{"t":"wavy:ff0000"}}]}"#,
+            r#"{"cf":[{"r":"A1","t":"dup","bd":{"t":"thin:ff00"}}]}"#,
+            r#"{"cf":[{"r":"A1","t":"dup","bd":{"t":"thin"}}]}"#,
+            r#"{"cf":[{"r":"A1","t":"dup","bd":"thin:ff0000"}]}"#,
+            r#"{"cf":[{"r":"A1","t":"dup","bd":{"t":5}}]}"#,
+        ] {
+            assert!(
+                parse_rules(&StrictJsonValue::parse(bad).unwrap()).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    /// Sizes the rule border adds (PD-284): `cargo test -p easyoffice-app --release border_size_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement harness"]
+    fn border_size_report() {
+        use easyoffice_formats::{BorderEdge, BorderLine};
+        use easyoffice_sheet::PackedCellCoordinate;
+        // The model before the border: the fields it had.
+        #[allow(dead_code)]
+        struct OldStyle(Option<u32>, Option<u32>, u8);
+        println!(
+            "CfStyle {} -> {} bytes, CellVisual {} bytes",
+            std::mem::size_of::<OldStyle>(),
+            std::mem::size_of::<CfStyle>(),
+            std::mem::size_of::<CellVisual>()
+        );
+        let red = BorderEdge::new(BorderLine::Thin, 0xFF0000);
+        let outline = CellBorders {
+            top: red,
+            right: red,
+            bottom: red,
+            left: red,
+        };
+        let cells = |n: u32, bg: Option<u32>, border: CellBorders| -> Vec<CellVisual> {
+            (0..n)
+                .map(|i| CellVisual {
+                    coord: PackedCellCoordinate::new(i % 100_000, i / 100_000).unwrap(),
+                    bg,
+                    fg: None,
+                    flags: 0,
+                    bar: None,
+                    icon: None,
+                    hide_value: false,
+                    border,
+                })
+                .collect()
+        };
+        for n in [1_000_u32, 100_000, 1_000_000] {
+            for (name, bg, border) in [
+                ("fill only      ", Some(0xFFC7CE), CellBorders::NONE),
+                ("fill + border  ", Some(0xFFC7CE), outline),
+                ("border only    ", None, outline),
+            ] {
+                let visuals = cells(n, bg, border);
+                let start = std::time::Instant::now();
+                let json = visuals_json(&visuals);
+                println!(
+                    "{n:>9} cells {name}: {:>9} bytes of JSON ({:.1} per cell), {:>6.1} ms",
+                    json.len(),
+                    json.len() as f64 / f64::from(n),
+                    start.elapsed().as_secs_f64() * 1e3
+                );
+            }
+        }
     }
 
     #[test]

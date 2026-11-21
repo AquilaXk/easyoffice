@@ -8,6 +8,7 @@ use crate::rtf_xml_helpers::{
     extract_tags_with_attrs,
 };
 use crate::sheet_styling::ods_grid::{OdsCell, OdsSink};
+use crate::sheet_styling::sheet_look::ods_borders_from;
 use crate::sheet_styling::sheet_rules::ods_rules::range_from_ods;
 use crate::sheet_styling::sheet_rules::{
     icon_set_index, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert,
@@ -44,6 +45,7 @@ pub(crate) fn parse_rule_styles(content_xml: &str) -> HashMap<String, CfStyle> {
             extract_tags_or_self_closing_with_attrs(body, "style:table-cell-properties").first()
         {
             style.bg = color_of(a, "fo:background-color");
+            style.border = ods_borders_from(|name| extract_attr_from_fragment(a, name));
         }
         if let Some((a, _)) =
             extract_tags_or_self_closing_with_attrs(body, "style:text-properties").first()

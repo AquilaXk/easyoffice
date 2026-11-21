@@ -20,6 +20,8 @@ use crate::sheet_styling::sheet_rules::{
     MAX_RULE_TEXT_CHARS,
 };
 use crate::sheet_styling::table_style::{table_styles_xml, TableStyleDef, MAX_TABLE_STYLES};
+use crate::sheet_styling::xlsx_color::ColorScheme;
+use crate::sheet_styling::xlsx_dxf_border::{dxf_border_xml, parse_dxf_border};
 use crate::sheet_table::{unique_name, SheetTable};
 use crate::XmlSanitizer;
 
@@ -144,6 +146,7 @@ impl DxfTable {
                     "<fill><patternFill><bgColor rgb=\"FF{bg:06X}\"/></patternFill></fill>"
                 );
             }
+            xml.push_str(&dxf_border_xml(s.border));
             xml.push_str("</dxf>");
         }
         for &(font, color) in &self.colors {
@@ -215,8 +218,9 @@ fn first_formula_texts(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Styles of the `<dxf>` entries `dxfs` (`xlsx_filter_dxf::dxf_bodies` of `styles.xml`), in file order.
-pub(crate) fn parse_dxf_styles(dxfs: &[&str]) -> Vec<CfStyle> {
+/// Styles of the `<dxf>` entries `dxfs` (`xlsx_filter_dxf::dxf_bodies` of `styles.xml`), in file order. The colours of the
+/// borders resolve through `colors` (theme and indexed colours); the fill and the font colour read `rgb` only.
+pub(crate) fn parse_dxf_styles(dxfs: &[&str], colors: &ColorScheme) -> Vec<CfStyle> {
     dxfs.iter()
         .take(MAX_RULES_PER_SHEET)
         .map(|dxf| {
@@ -249,6 +253,7 @@ pub(crate) fn parse_dxf_styles(dxfs: &[&str]) -> Vec<CfStyle> {
                         .and_then(|(a, _)| rgb_of(a))
                 });
             }
+            style.border = parse_dxf_border(dxf, colors);
             style
         })
         .collect()

@@ -1,8 +1,8 @@
 //! A sheet name with XML metacharacters stays well-formed in an ODS that carries rules (external review M-15).
 
 use easyoffice_formats::{
-    parse_sqref, CfKind, CfRule, CfStyle, Cmp, DocumentFormat, OdfCodec, SheetRules, SheetStyling,
-    ZipArchiveCodec, ZipSecurityPolicy, FLAG_BOLD,
+    parse_sqref, CellBorders, CfKind, CfRule, CfStyle, Cmp, DocumentFormat, OdfCodec, SheetRules,
+    SheetStyling, ZipArchiveCodec, ZipSecurityPolicy, FLAG_BOLD,
 };
 
 const NAMES: [&str; 4] = ["A&B", "큰\"따옴표\"", "<태그>", "It's & \"both\" <1>"];
@@ -12,6 +12,7 @@ fn styled_with_rule() -> SheetStyling {
         bg: Some(0xFFC7CE),
         fg: Some(0x9C0006),
         flags: FLAG_BOLD,
+        border: CellBorders::NONE,
     };
     let cf = CfRule {
         ranges: parse_sqref("A1:A3"),

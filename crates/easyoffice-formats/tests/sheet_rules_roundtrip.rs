@@ -1,8 +1,9 @@
 //! Conditional formatting and data validation survive XLSX writing and reading (PD-171).
 
 use easyoffice_formats::{
-    CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, OdfCodec,
-    OoxmlCodec, SheetRules, SheetStyling, TextOp, TimePeriod, ValueKind, FLAG_BOLD, FLAG_ITALIC,
+    CellBorders, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind,
+    OdfCodec, OoxmlCodec, SheetRules, SheetStyling, TextOp, TimePeriod, ValueKind, FLAG_BOLD,
+    FLAG_ITALIC,
 };
 
 fn boxes(text: &str) -> Vec<CellBox> {
@@ -14,6 +15,7 @@ fn red() -> CfStyle {
         bg: Some(0xFFC7CE),
         fg: Some(0x9C0006),
         flags: FLAG_BOLD | FLAG_ITALIC,
+        border: CellBorders::NONE,
     }
 }
 

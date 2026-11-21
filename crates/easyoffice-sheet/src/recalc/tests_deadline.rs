@@ -227,7 +227,7 @@ fn a_cell_cut_off_in_the_middle_never_keeps_a_value_it_made_up() {
 
 #[test]
 fn rules_read_the_cut_off_cells_as_the_page_shows_them_and_follow_when_they_are_computed() {
-    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, Cmp, SheetRules};
+    use easyoffice_formats::{parse_sqref, CellBorders, CfKind, CfRule, CfStyle, Cmp, SheetRules};
     let mut session = session_with(heavy_workbook(6), MAX_EVAL_TIME);
     assert!(!session.recalculate().timed_out);
     session.set_cell("Sheet1", at("A1"), "1000000000").unwrap();
@@ -247,6 +247,7 @@ fn rules_read_the_cut_off_cells_as_the_page_shows_them_and_follow_when_they_are_
                 bg: Some(0xFF_C7_CE),
                 fg: None,
                 flags: 0,
+                border: CellBorders::NONE,
             },
         }],
         ..SheetRules::default()
@@ -693,7 +694,7 @@ fn matrix_n3_ops_respect_step_and_time_deadlines() {
 
 #[test]
 fn cf_session_deadline_stops_set_rules_and_recovers_on_next_update() {
-    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, SheetRules};
+    use easyoffice_formats::{parse_sqref, CellBorders, CfKind, CfRule, CfStyle, SheetRules};
     let mut wb = WorkbookEngine::new();
     let _ = wb.add_sheet("Sheet1");
     for row in 1..=6 {
@@ -711,6 +712,7 @@ fn cf_session_deadline_stops_set_rules_and_recovers_on_next_update() {
                 bg: Some(0xFF_00_00),
                 fg: None,
                 flags: 0,
+                border: CellBorders::NONE,
             },
         }],
         ..SheetRules::default()

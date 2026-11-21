@@ -78,6 +78,21 @@ impl BorderEdge {
     pub const fn is_none(self) -> bool {
         self.0 == 0
     }
+
+    /// The packed word (line kind in bits 24..=26, RGB below), as the page's border table carries it.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// The edge a packed word names; a word with an unknown line kind or stray high bits is no edge.
+    pub const fn from_bits(bits: u32) -> Self {
+        let line = bits >> LINE_SHIFT;
+        if line == 0 || line > BorderLine::Double as u32 {
+            Self::NONE
+        } else {
+            Self(bits)
+        }
+    }
 }
 
 /// The four edges of a cell, top, right, bottom, left.
@@ -90,8 +105,42 @@ pub struct CellBorders {
 }
 
 impl CellBorders {
+    pub const NONE: Self = Self {
+        top: BorderEdge::NONE,
+        right: BorderEdge::NONE,
+        bottom: BorderEdge::NONE,
+        left: BorderEdge::NONE,
+    };
+
     pub const fn is_none(&self) -> bool {
         self.top.is_none() && self.right.is_none() && self.bottom.is_none() && self.left.is_none()
+    }
+
+    /// The edges of `self`, each replaced by the edge of `lower` where `self` has none (a rule of higher
+    /// priority keeps its own sides, a lower one fills in the others).
+    pub const fn or(self, lower: Self) -> Self {
+        Self {
+            top: if self.top.is_none() {
+                lower.top
+            } else {
+                self.top
+            },
+            right: if self.right.is_none() {
+                lower.right
+            } else {
+                self.right
+            },
+            bottom: if self.bottom.is_none() {
+                lower.bottom
+            } else {
+                self.bottom
+            },
+            left: if self.left.is_none() {
+                lower.left
+            } else {
+                self.left
+            },
+        }
     }
 }
 
@@ -261,9 +310,15 @@ pub(crate) fn xlsx_color_rgb(attrs: &str) -> u32 {
         .unwrap_or(BORDER_DEFAULT_RGB)
 }
 
+/// Bytes of an `fo:border*` value a reader looks at (`0.74pt double #112233` is 21); a longer value is no edge.
+pub(crate) const MAX_ODS_BORDER_VALUE_BYTES: usize = 64;
+
 /// `0.74pt solid #112233` (an `fo:border*` value) as an edge: the line kind from the style word
 /// and the width, the color from the hex word.
 pub(crate) fn ods_border_edge(value: &str) -> BorderEdge {
+    if value.len() > MAX_ODS_BORDER_VALUE_BYTES {
+        return BorderEdge::NONE;
+    }
     let mut width_pt = 0.0f64;
     let mut line = BorderLine::None;
     let mut rgb = BORDER_DEFAULT_RGB;
@@ -299,6 +354,45 @@ pub(crate) fn ods_border_value(edge: BorderEdge) -> String {
         BorderLine::Double => ("1.5pt", "double"),
     };
     format!("{width} {word} #{:06x}", edge.rgb())
+}
+
+/// The `fo:border-<side>` attributes (and the double line's width) of `borders` for a cell style, each led by a space.
+pub(crate) fn ods_border_attrs(borders: CellBorders) -> String {
+    let mut out = String::new();
+    for (side, edge) in [
+        ("top", borders.top),
+        ("right", borders.right),
+        ("bottom", borders.bottom),
+        ("left", borders.left),
+    ] {
+        if edge.is_none() {
+            continue;
+        }
+        out.push_str(&format!(" fo:border-{side}=\"{}\"", ods_border_value(edge)));
+        if edge.line() == BorderLine::Double {
+            out.push_str(&format!(
+                " style:border-line-width-{side}=\"0.5pt 0.5pt 0.5pt\""
+            ));
+        }
+    }
+    out
+}
+
+/// The edges a cell style's properties name: `fo:border` for every side, `fo:border-<side>` over it. `get` reads one attribute.
+pub(crate) fn ods_borders_from<'a>(get: impl Fn(&str) -> Option<&'a str>) -> CellBorders {
+    let all = get("fo:border").map(ods_border_edge);
+    let edge = |side: &str| {
+        get(&format!("fo:border-{side}"))
+            .map(ods_border_edge)
+            .or(all)
+            .unwrap_or_default()
+    };
+    CellBorders {
+        top: edge("top"),
+        right: edge("right"),
+        bottom: edge("bottom"),
+        left: edge("left"),
+    }
 }
 
 #[cfg(test)]

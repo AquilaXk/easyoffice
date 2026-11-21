@@ -2,8 +2,8 @@ use super::*;
 use crate::recalc::{CellChange, RecalcSession};
 use crate::{PackedCellCoordinate, WorkbookEngine};
 use easyoffice_formats::{
-    parse_sqref, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, TextOp, TimePeriod,
-    ValueKind, FLAG_BOLD,
+    parse_sqref, BorderEdge, BorderLine, CellBorders, CfStyle, CfValue, Cmp, DataValidation,
+    DvAlert, DvKind, TextOp, TimePeriod, ValueKind, FLAG_BOLD,
 };
 use std::collections::HashMap;
 
@@ -24,6 +24,7 @@ const MARK: CfStyle = CfStyle {
     bg: Some(0xFFC7CE),
     fg: Some(0x9C0006),
     flags: FLAG_BOLD,
+    border: CellBorders::NONE,
 };
 
 fn rule(ranges: &str, priority: u32, kind: CfKind) -> CfRule {
@@ -351,6 +352,7 @@ fn priority_decides_conflicts_and_stop_if_true_ends_the_list() {
         bg: Some(0x222222),
         fg: Some(0x333333),
         flags: 0,
+        border: CellBorders::NONE,
     };
     let merged = eval(&wb, vec![second.clone(), first.clone()]);
     assert_eq!(
@@ -360,6 +362,45 @@ fn priority_decides_conflicts_and_stop_if_true_ends_the_list() {
     first.stop_if_true = true;
     let stopped = eval(&wb, vec![second, first]);
     assert_eq!((stopped["A1"].bg, stopped["A1"].fg), (Some(0x111111), None));
+}
+
+fn edge(line: BorderLine, rgb: u32) -> BorderEdge {
+    BorderEdge::new(line, rgb)
+}
+
+#[test]
+fn borders_merge_per_side_by_priority() {
+    let wb = book(&["10", "1"]);
+    let mut first = rule("A1:A2", 1, cell_is(Cmp::Greater, "5", ""));
+    first.style = CfStyle {
+        border: CellBorders {
+            top: edge(BorderLine::Thin, 0xFF0000),
+            ..CellBorders::NONE
+        },
+        ..CfStyle::default()
+    };
+    let mut second = rule("A1:A2", 2, cell_is(Cmp::Greater, "0", ""));
+    second.style = CfStyle {
+        border: CellBorders {
+            top: edge(BorderLine::Double, 0x0000FF),
+            bottom: edge(BorderLine::Dotted, 0x00FF00),
+            ..CellBorders::NONE
+        },
+        ..CfStyle::default()
+    };
+    let map = eval(&wb, vec![second.clone(), first.clone()]);
+    // A1 matches both: the first rule keeps its top side, the second one gives the bottom.
+    assert_eq!(map["A1"].border.top, edge(BorderLine::Thin, 0xFF0000));
+    assert_eq!(map["A1"].border.bottom, edge(BorderLine::Dotted, 0x00FF00));
+    assert!(map["A1"].border.left.is_none());
+    // A2 matches only the second.
+    assert_eq!(map["A2"].border.top, edge(BorderLine::Double, 0x0000FF));
+    // A cell whose rules draw nothing but a border is a visual, not "no formatting".
+    assert!(!map["A1"].is_none());
+    // stop_if_true keeps the lower rule's sides out.
+    first.stop_if_true = true;
+    let stopped = eval(&wb, vec![second, first]);
+    assert!(stopped["A1"].border.bottom.is_none());
 }
 
 #[test]
@@ -393,6 +434,7 @@ fn visuals_pack_and_unpack() {
             bar: None,
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         },
         CellVisual {
             coord: coord("XFD1048576"),
@@ -407,6 +449,7 @@ fn visuals_pack_and_unpack() {
             }),
             icon: Some(Icon { set: 19, index: 4 }),
             hide_value: true,
+            border: CellBorders::NONE,
         },
         CellVisual {
             coord: coord("C3"),
@@ -416,12 +459,48 @@ fn visuals_pack_and_unpack() {
             bar: None,
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         },
     ];
     let packed = encode_visuals(&visuals);
     assert_eq!(decode_visuals(&packed), visuals);
     assert_eq!(packed.palette.len(), 3);
     assert_eq!(packed.words.len(), 3 + 3 + 2);
+    assert!(packed.borders.is_empty());
+}
+
+#[test]
+fn border_sets_are_tabled_once_and_survive_the_last_row() {
+    let red = CellBorders {
+        top: edge(BorderLine::Thin, 0xFF0000),
+        right: edge(BorderLine::Thin, 0xFF0000),
+        bottom: edge(BorderLine::Thin, 0xFF0000),
+        left: edge(BorderLine::Thin, 0xFF0000),
+    };
+    let blue_left = CellBorders {
+        left: edge(BorderLine::Double, 0x0000FF),
+        ..CellBorders::NONE
+    };
+    let with = |a1: &str, bg: Option<u32>, border| CellVisual {
+        coord: coord(a1),
+        bg,
+        border,
+        ..CellVisual::blank(coord(a1))
+    };
+    let visuals = vec![
+        with("A1", None, red),
+        with("A2", Some(0xFFC7CE), red),
+        with("B2", None, blue_left),
+        with("XFD1048576", None, red),
+        with("C3", None, CellBorders::NONE),
+    ];
+    let packed = encode_visuals(&visuals);
+    assert_eq!(
+        packed.borders.len(),
+        2,
+        "two distinct sets, however many cells"
+    );
+    assert_eq!(decode_visuals(&packed), visuals);
 }
 
 // ---- memory held by the rules ------------------------------------------------------------------

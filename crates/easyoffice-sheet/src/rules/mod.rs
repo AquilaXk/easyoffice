@@ -22,7 +22,7 @@ use crate::{CellMap, EvalContext, PackedCellCoordinate, WorkbookEngine};
 use cf::{apply_plan, locality, make_plan, truthy, Hit, Locality, Plan};
 use data::{prepare_formulas, StatsCache, BLANK_SCAN_CELLS};
 pub(crate) use data::{Cells, SheetCells};
-use easyoffice_formats::{CellBox, CfKind, CfRule, SheetRules};
+use easyoffice_formats::{CellBorders, CellBox, CfKind, CfRule, SheetRules};
 
 pub use axis_shift::shift_rules;
 pub use pack::{decode_visuals, encode_visuals, PackedVisuals};
@@ -59,6 +59,8 @@ pub struct CellVisual {
     pub icon: Option<Icon>,
     /// The cell's value is hidden behind a bar or an icon.
     pub hide_value: bool,
+    /// The sides the matching rules draw over the cell's own borders (a side with no edge is left as it is).
+    pub border: CellBorders,
 }
 
 impl CellVisual {
@@ -71,6 +73,7 @@ impl CellVisual {
             bar: None,
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         }
     }
 
@@ -81,6 +84,7 @@ impl CellVisual {
             && self.flags == 0
             && self.bar.is_none()
             && self.icon.is_none()
+            && self.border.is_none()
     }
 }
 
@@ -307,6 +311,7 @@ impl RuleRuntime {
                     v.bg = v.bg.or(rule.style.bg);
                     v.fg = v.fg.or(rule.style.fg);
                     v.flags |= rule.style.flags;
+                    v.border = v.border.or(rule.style.border);
                 }
                 Hit::Color(c) => v.bg = v.bg.or(Some(*c)),
                 Hit::Bar(b) if v.bar.is_none() => {

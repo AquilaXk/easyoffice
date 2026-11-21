@@ -7,6 +7,7 @@
 //! [`SheetRules::unsupported`] so the caller can warn instead of dropping them silently.
 
 use crate::rtf_xml_helpers::format_col_letters;
+use crate::sheet_styling::sheet_look::CellBorders;
 
 // The readers and writers of the model sit beside it; they are internal to the crate.
 #[path = "ods_rules.rs"]
@@ -203,11 +204,14 @@ pub struct CfStyle {
     pub fg: Option<u32>,
     /// `FLAG_*` bits.
     pub flags: u8,
+    /// The four sides a differential format can set (`dxf/border`); a side with no edge is left as the cell has it. Diagonals
+    /// and the inner lines of a table do not apply to a rule and are not kept.
+    pub border: CellBorders,
 }
 
 impl CfStyle {
     pub const fn is_plain(&self) -> bool {
-        self.bg.is_none() && self.fg.is_none() && self.flags == 0
+        self.bg.is_none() && self.fg.is_none() && self.flags == 0 && self.border.is_none()
     }
 }
 

@@ -39,7 +39,7 @@ fn parse_edge(value: &StrictJsonValue) -> Result<BorderEdge, EasyOfficeError> {
     Ok(BorderEdge::new(line, rgb))
 }
 
-fn parse_borders(value: &StrictJsonValue) -> Result<CellBorders, EasyOfficeError> {
+pub(crate) fn parse_borders(value: &StrictJsonValue) -> Result<CellBorders, EasyOfficeError> {
     let obj = value
         .as_object()
         .ok_or_else(|| invalid("구조화 저장: 'bd'는 객체여야 합니다."))?;
@@ -149,19 +149,24 @@ pub(crate) fn write_look(out: &mut String, style: &CellStyle, wrote: &mut bool) 
     }
     if !style.borders.is_none() {
         key(out, "bd");
-        out.push('{');
-        let mut first = true;
-        let b = &style.borders;
-        for (side, edge) in [("t", b.top), ("r", b.right), ("b", b.bottom), ("l", b.left)] {
-            let Some(line) = edge.line().payload() else {
-                continue;
-            };
-            if !first {
-                out.push(',');
-            }
-            first = false;
-            let _ = write!(out, "\"{side}\":\"{line}:{:06x}\"", edge.rgb());
-        }
-        out.push('}');
+        write_borders(out, &style.borders);
     }
+}
+
+/// `{"t":"thin:112233","r":"double:000000"}`: the edges `borders` has, the sides in the order top, right, bottom, left.
+pub(crate) fn write_borders(out: &mut String, borders: &CellBorders) {
+    out.push('{');
+    let mut first = true;
+    let b = borders;
+    for (side, edge) in [("t", b.top), ("r", b.right), ("b", b.bottom), ("l", b.left)] {
+        let Some(line) = edge.line().payload() else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let _ = write!(out, "\"{side}\":\"{line}:{:06x}\"", edge.rgb());
+    }
+    out.push('}');
 }

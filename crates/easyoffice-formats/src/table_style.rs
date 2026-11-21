@@ -594,7 +594,10 @@ mod tests {
         );
         let list = dxf_bodies(xml);
         assert_eq!(list.len(), 3);
-        let rule = crate::sheet_styling::sheet_rules::xlsx_rules::parse_dxf_styles(&list);
+        let rule = crate::sheet_styling::sheet_rules::xlsx_rules::parse_dxf_styles(
+            &list,
+            &ColorScheme::default(),
+        );
         assert_eq!(
             rule[1].bg,
             Some(0xFF0000),

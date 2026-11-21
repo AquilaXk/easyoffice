@@ -14,7 +14,7 @@ use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
 use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
 use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
-use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value, parse_hex_rgb};
+use crate::sheet_styling::sheet_look::{ods_border_attrs, ods_borders_from, parse_hex_rgb};
 use crate::sheet_styling::sheet_row_height::{
     ods_row_style_xml, read_ods_row_properties, RowHeight, RowHeights, MAX_ROW_HEIGHTS,
 };
@@ -23,9 +23,8 @@ use crate::sheet_styling::sheet_view::{
     push_level, LevelRun, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS,
 };
 use crate::sheet_styling::{
-    format_centipt, resolve_code, resolve_font_name, BorderLine, CellBorders, CellStyle, FontTable,
-    HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS,
-    MIN_COLUMN_PX,
+    format_centipt, resolve_code, resolve_font_name, CellStyle, FontTable, HAlign, IdMemo,
+    NumFmtTable, SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{CellBox, EasyOfficeError, OdfCodec, XmlSanitizer};
@@ -253,23 +252,7 @@ fn cell_look_xml(k: StyleKey) -> String {
     if let Some(rgb) = k.fill() {
         cell.push_str(&format!(" fo:background-color=\"#{rgb:06x}\""));
     }
-    let b = k.borders();
-    for (side, edge) in [
-        ("top", b.top),
-        ("right", b.right),
-        ("bottom", b.bottom),
-        ("left", b.left),
-    ] {
-        if edge.is_none() {
-            continue;
-        }
-        cell.push_str(&format!(" fo:border-{side}=\"{}\"", ods_border_value(edge)));
-        if edge.line() == BorderLine::Double {
-            cell.push_str(&format!(
-                " style:border-line-width-{side}=\"0.5pt 0.5pt 0.5pt\""
-            ));
-        }
-    }
+    cell.push_str(&ods_border_attrs(k.borders()));
     let mut xml = String::new();
     if !cell.is_empty() {
         xml.push_str(&format!("<style:table-cell-properties{cell}/>"));
@@ -311,19 +294,7 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
     style.v_align = get("style:vertical-align").map_or(VAlign::Bottom, VAlign::from_ods);
     style.wrap = get("fo:wrap-option") == Some("wrap");
     style.fill = get("fo:background-color").and_then(ods_color);
-    let all = get("fo:border").map(ods_border_edge);
-    let edge = |side: &str| {
-        get(&format!("fo:border-{side}"))
-            .map(ods_border_edge)
-            .or(all)
-            .unwrap_or_default()
-    };
-    style.borders = CellBorders {
-        top: edge("top"),
-        right: edge("right"),
-        bottom: edge("bottom"),
-        left: edge("left"),
-    };
+    style.borders = ods_borders_from(get);
 }
 
 /// `<table:table-column>` elements for the custom widths and the column groups (empty string when

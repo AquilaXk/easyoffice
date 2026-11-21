@@ -1,24 +1,29 @@
 //! Bit-packed form of the cell appearances sent to the page.
 //!
 //! Colours are deduplicated into a palette (a colour scale uses a few hundred distinct colours at
-//! most), and each cell is two to four 32-bit words:
+//! most) and border sets into a table (a rule draws the same few sets on thousands of cells), and
+//! each cell is two to five 32-bit words:
 //!
 //! ```text
-//! word 0   row (zero-based)
+//! word 0   bits  0..20  row (zero-based)     bit 31 has border
 //! word 1   bits  0..14  column            bit 18 has background   bit 21 has icon
 //!          bits 14..18  style flags       bit 19 has font colour  bit 22 hide value
 //!                                         bit 20 has data bar     bit 23 gradient bar
 //!          bits 24..32  icon: set << 3 | index
 //! word 2   (background or font colour)   bits 0..16 background palette index, 16..32 font colour
-//! word 3   (data bar)  bits 0..16 colour palette index, 16..24 length + 128, 24..32 axis percent
+//! word 3   (border)    bits 0..16 index into the border table
+//! word 4   (data bar)  bits 0..16 colour palette index, 16..24 length + 128, 24..32 axis percent
 //! ```
 //!
-//! A cell with no flag set means "no formatting": the page clears whatever it showed there.
+//! A cell with no flag set means "no formatting": the page clears whatever it showed there. A
+//! border set is the four edge words of `BorderEdge::bits` (top, right, bottom, left).
 
 use super::{Bar, CellVisual, Icon};
 use crate::{CellMap, PackedCellCoordinate};
+use easyoffice_formats::{BorderEdge, CellBorders};
+use std::collections::HashMap;
 
-/// Palette indexes are 16 bits; a colour past the limit reuses the last palette entry.
+/// Palette and border table indexes are 16 bits; an entry past the limit reuses the last one.
 pub const MAX_PALETTE: usize = 0xFFFF;
 
 const BG: u32 = 1 << 18;
@@ -27,11 +32,18 @@ const BAR: u32 = 1 << 20;
 const ICON: u32 = 1 << 21;
 const HIDE: u32 = 1 << 22;
 const GRADIENT: u32 = 1 << 23;
+/// In word 0: the rows of a sheet need 20 bits (`PackedCellCoordinate::MAX_ROWS` is 2^20), the top bit says a border word follows.
+const BORDER: u32 = 1 << 31;
+const ROW_MASK: u32 = (1 << 20) - 1;
+
+type EdgeWords = [u32; 4];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PackedVisuals {
     /// `0xRRGGBB` colours.
     pub palette: Vec<u32>,
+    /// The border sets the cells name, each as the packed words of its top, right, bottom and left edge.
+    pub borders: Vec<EdgeWords>,
     pub words: Vec<u32>,
 }
 
@@ -67,11 +79,48 @@ impl Palette {
     }
 }
 
+fn edge_words(b: CellBorders) -> EdgeWords {
+    [b.top.bits(), b.right.bits(), b.bottom.bits(), b.left.bits()]
+}
+
+/// The distinct border sets of an answer. Cells next to each other mostly share a set, so the last one found is
+/// checked before the map.
+#[derive(Default)]
+struct BorderTable {
+    sets: Vec<EdgeWords>,
+    index: HashMap<EdgeWords, u16>,
+    last: Option<(EdgeWords, u32)>,
+}
+
+impl BorderTable {
+    fn id(&mut self, borders: CellBorders) -> u32 {
+        let words = edge_words(borders);
+        if let Some((last, id)) = self.last {
+            if last == words {
+                return id;
+            }
+        }
+        let id = match self.index.get(&words) {
+            Some(&i) => u32::from(i),
+            None if self.sets.len() >= MAX_PALETTE => (MAX_PALETTE - 1) as u32,
+            None => {
+                let i = self.sets.len() as u16;
+                self.sets.push(words);
+                self.index.insert(words, i);
+                u32::from(i)
+            }
+        };
+        self.last = Some((words, id));
+        id
+    }
+}
+
 pub fn encode_visuals(visuals: &[CellVisual]) -> PackedVisuals {
     let mut palette = Palette {
         colors: Vec::new(),
         index: CellMap::default(),
     };
+    let mut borders = BorderTable::default();
     let mut words = Vec::with_capacity(visuals.len() * 3);
     for v in visuals {
         let mut head = v.coord.col() & 0x3FFF | u32::from(v.flags & 0xF) << 14;
@@ -93,12 +142,16 @@ pub fn encode_visuals(visuals: &[CellVisual]) -> PackedVisuals {
         if v.bar.is_some_and(|b| b.gradient) {
             head |= GRADIENT;
         }
-        words.push(v.coord.row());
+        let bordered = !v.border.is_none();
+        words.push(v.coord.row() & ROW_MASK | if bordered { BORDER } else { 0 });
         words.push(head);
         if v.bg.is_some() || v.fg.is_some() {
             let bg = v.bg.map_or(0, |c| palette.id(c));
             let fg = v.fg.map_or(0, |c| palette.id(c));
             words.push(bg | fg << 16);
+        }
+        if bordered {
+            words.push(borders.id(v.border));
         }
         if let Some(bar) = v.bar {
             let color = palette.id(bar.color);
@@ -111,6 +164,7 @@ pub fn encode_visuals(visuals: &[CellVisual]) -> PackedVisuals {
     }
     PackedVisuals {
         palette: palette.colors,
+        borders: borders.sets,
         words,
     }
 }
@@ -122,8 +176,9 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
     let mut at = 0;
     let words = &packed.words;
     while at + 1 < words.len() {
-        let (row, head) = (words[at], words[at + 1]);
+        let (first, head) = (words[at], words[at + 1]);
         at += 2;
+        let row = first & ROW_MASK;
         let coord = PackedCellCoordinate((u64::from(row) << 32) | u64::from(head & 0x3FFF));
         let mut v = CellVisual {
             coord,
@@ -133,6 +188,7 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
             bar: None,
             icon: None,
             hide_value: head & HIDE != 0,
+            border: CellBorders::NONE,
         };
         if head & (BG | FG) != 0 {
             let Some(w) = words.get(at).copied() else {
@@ -145,6 +201,21 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
             if head & FG != 0 {
                 v.fg = color(w >> 16);
             }
+        }
+        if first & BORDER != 0 {
+            let Some(w) = words.get(at).copied() else {
+                return Vec::new();
+            };
+            at += 1;
+            let Some(set) = packed.borders.get((w & 0xFFFF) as usize) else {
+                return Vec::new();
+            };
+            v.border = CellBorders {
+                top: BorderEdge::from_bits(set[0]),
+                right: BorderEdge::from_bits(set[1]),
+                bottom: BorderEdge::from_bits(set[2]),
+                left: BorderEdge::from_bits(set[3]),
+            };
         }
         if head & BAR != 0 {
             let Some(w) = words.get(at).copied() else {
@@ -176,6 +247,7 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use easyoffice_formats::BorderLine;
 
     fn coord(row: u32, col: u32) -> PackedCellCoordinate {
         PackedCellCoordinate::new(row, col).unwrap()
@@ -196,11 +268,42 @@ mod tests {
             }),
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         }];
         let packed = encode_visuals(&visuals);
         let bytes = packed.word_bytes();
         assert_eq!(bytes.len(), packed.words.len() * 4);
         assert!(bytes.capacity() >= bytes.len());
+    }
+
+    #[test]
+    fn decode_visuals_rejects_a_border_word_that_is_missing_or_names_no_set() {
+        let one = encode_visuals(&[CellVisual {
+            coord: coord(2, 3),
+            border: CellBorders {
+                top: BorderEdge::new(BorderLine::Thin, 0xFF0000),
+                ..CellBorders::NONE
+            },
+            ..CellVisual::blank(coord(2, 3))
+        }]);
+        assert_eq!(decode_visuals(&one).len(), 1);
+
+        let mut truncated = one.clone();
+        truncated.words.pop();
+        assert!(decode_visuals(&truncated).is_empty());
+
+        let mut no_table = one.clone();
+        no_table.borders.clear();
+        assert!(decode_visuals(&no_table).is_empty());
+
+        let mut far = one.clone();
+        *far.words.last_mut().unwrap() = 0xFFFF;
+        assert!(decode_visuals(&far).is_empty());
+
+        // A set with an unknown line kind or stray bits draws nothing.
+        let mut junk = one;
+        junk.borders[0] = [0xFF00_0000, 7 << 24, 0x0800_0000, 0];
+        assert!(decode_visuals(&junk)[0].border.is_none());
     }
 
     #[test]
@@ -213,6 +316,7 @@ mod tests {
             bar: None,
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         }]);
         bg_truncated.words.pop();
         assert!(decode_visuals(&bg_truncated).is_empty());
@@ -230,6 +334,7 @@ mod tests {
             }),
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         }]);
         bar_truncated.words.pop();
         assert!(decode_visuals(&bar_truncated).is_empty());
@@ -242,6 +347,7 @@ mod tests {
             bar: None,
             icon: None,
             hide_value: false,
+            border: CellBorders::NONE,
         }]);
         orphan_tail.words.push(0xDEAD_BEEF);
         assert!(decode_visuals(&orphan_tail).is_empty());

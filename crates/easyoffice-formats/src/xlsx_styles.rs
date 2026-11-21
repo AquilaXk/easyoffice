@@ -16,9 +16,12 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
 use crate::sheet_styling::sheet_filter::color_criteria;
-use crate::sheet_styling::sheet_look::{xlsx_color_rgb, BorderEdge, BorderLine, CellBorders};
+use crate::sheet_styling::sheet_look::{
+    xlsx_color_rgb, BorderEdge, BorderLine, CellBorders, BORDER_DEFAULT_RGB,
+};
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::xlsx_color::ColorScheme;
+use crate::sheet_styling::xlsx_dxf_border::edge_xml;
 use crate::sheet_styling::{
     clean_font_name, format_centipt, resolve_font_name, CellStyle, FontTable, HAlign, IdMemo,
     NumFmtTable, SheetStyling, StyleKey, VAlign, CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
@@ -314,11 +317,8 @@ impl XlsxStyleTable {
             ("top", borders.top),
             ("bottom", borders.bottom),
         ] {
-            match edge.line().xlsx() {
-                Some(style) => out.push_str(&format!(
-                    "<{tag} style=\"{style}\"><color rgb=\"FF{:06X}\"/></{tag}>",
-                    edge.rgb()
-                )),
+            match edge_xml(tag, edge) {
+                Some(side) => out.push_str(&side),
                 None => out.push_str(&format!("<{tag}/>")),
             }
         }
@@ -564,19 +564,32 @@ fn parse_fills(styles_xml: &str, colors: &ColorScheme) -> Vec<Option<u32>> {
         .collect()
 }
 
-/// One edge of a `border` element: the style word and the color of the side `tag`.
-fn parse_border_edge(body: &str, tag: &str) -> BorderEdge {
+/// Bytes of a side's `style` value and of a `color` element's attributes a reader looks at (the longest style name is
+/// 16, a theme colour with a tint is about 50); an edge over a bound is no edge.
+const MAX_EDGE_STYLE_BYTES: usize = 32;
+const MAX_EDGE_COLOR_ATTR_BYTES: usize = 256;
+
+/// One edge of a `border` element: the style word and the color of the side `tag`. `color` reads the attributes of
+/// the side's `color` element (a cell border does not resolve theme colours, a differential format does).
+pub(crate) fn parse_border_edge(body: &str, tag: &str, color: impl Fn(&str) -> u32) -> BorderEdge {
     let Some((attrs, inner)) = extract_tags_or_self_closing_with_attrs(body, tag)
         .into_iter()
         .next()
     else {
         return BorderEdge::NONE;
     };
-    let line =
-        extract_attr_from_fragment(attrs, "style").map_or(BorderLine::None, BorderLine::from_xlsx);
+    let line = extract_attr_from_fragment(attrs, "style")
+        .filter(|style| style.len() <= MAX_EDGE_STYLE_BYTES)
+        .map_or(BorderLine::None, BorderLine::from_xlsx);
     let rgb = extract_tags_or_self_closing_with_attrs(inner, "color")
         .first()
-        .map_or(0, |(color, _)| xlsx_color_rgb(color));
+        .map_or(0, |(attrs, _)| {
+            if attrs.len() > MAX_EDGE_COLOR_ATTR_BYTES {
+                BORDER_DEFAULT_RGB
+            } else {
+                color(attrs)
+            }
+        });
     BorderEdge::new(line, rgb)
 }
 
@@ -589,10 +602,10 @@ fn parse_borders(styles_xml: &str) -> Vec<CellBorders> {
         .into_iter()
         .take(MAX_BORDER_DEFS)
         .map(|(_, border)| CellBorders {
-            top: parse_border_edge(border, "top"),
-            right: parse_border_edge(border, "right"),
-            bottom: parse_border_edge(border, "bottom"),
-            left: parse_border_edge(border, "left"),
+            top: parse_border_edge(border, "top", xlsx_color_rgb),
+            right: parse_border_edge(border, "right", xlsx_color_rgb),
+            bottom: parse_border_edge(border, "bottom", xlsx_color_rgb),
+            left: parse_border_edge(border, "left", xlsx_color_rgb),
         })
         .collect()
 }

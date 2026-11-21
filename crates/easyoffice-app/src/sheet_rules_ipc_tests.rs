@@ -45,6 +45,20 @@ fn unpack(json: &str) -> Vec<CellVisual> {
         .filter(|s| !s.is_empty())
         .map(|s| s.parse().unwrap())
         .collect();
+    // `"bd":[[t,r,b,l],..]` follows the palette when a cell has a border.
+    let after_pal = &json[pal_end + 1..];
+    let borders = after_pal
+        .strip_prefix(",\"bd\":[[")
+        .map(|rest| &rest[..rest.find("]]").unwrap()])
+        .map(|sets| {
+            sets.split("],[")
+                .map(|set| {
+                    let edges: Vec<u32> = set.split(',').map(|e| e.parse().unwrap()).collect();
+                    [edges[0], edges[1], edges[2], edges[3]]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let w_start = json.find("\"w\":\"").unwrap() + 5;
     let w = &json[w_start..w_start + json[w_start..].find('"').unwrap()];
     let bytes = EasyOfficeIpcRouter::decode_base64(w).unwrap();
@@ -52,7 +66,11 @@ fn unpack(json: &str) -> Vec<CellVisual> {
         .chunks_exact(4)
         .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
         .collect();
-    decode_visuals(&PackedVisuals { palette, words })
+    decode_visuals(&PackedVisuals {
+        palette,
+        borders,
+        words,
+    })
 }
 
 fn a1(v: &CellVisual) -> String {
@@ -102,6 +120,30 @@ fn a_session_formats_cells_and_reports_only_what_an_edit_changed() {
 }
 
 #[test]
+fn a_rule_border_reaches_the_page_in_the_border_table() {
+    let id = open();
+    apply(
+        &id,
+        &[cell("A1", "5"), cell("A2", "50"), cell("A3", "60")].join(","),
+    );
+    let rules = r##"{"cf":[{"r":"A1:A3","p":1,"t":"cellIs","op":"greaterThan","a":"10","bd":{"t":"thin:ff0000","r":"thin:ff0000","b":"thin:ff0000","l":"thin:ff0000"}}],"dv":[]}"##;
+    let answer = session_call(&format!(
+        "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{rules}}}"
+    ));
+    assert!(
+        answer.contains(",\"bd\":[[33488896,33488896,33488896,33488896]]"),
+        "{answer}"
+    );
+    let visuals = unpack(&answer);
+    assert_eq!(visuals.iter().map(a1).collect::<Vec<_>>(), ["A2", "A3"]);
+    for v in &visuals {
+        assert_eq!(v.border.top.rgb(), 0xFF0000);
+        assert_eq!(v.border.left.line().payload(), Some("thin"));
+        assert!(v.bg.is_none(), "a border alone paints no fill");
+    }
+}
+
+#[test]
 fn validate_answers_with_the_rule_alert() {
     let id = open();
     session_call(&format!(
@@ -148,6 +190,48 @@ fn json_field<'a>(json: &'a str, key: &str) -> &'a str {
     &json[start..start + json[start..].find('"').unwrap()]
 }
 
+/// The rules JSON saved into a file of `target` and opened again, as the page reads them.
+fn saved_and_reopened(target: &str, sheets: &str) -> easyoffice_formats::SheetRules {
+    let saved = dispatch(
+        "convert_document_format",
+        &format!("{{\"targetFormat\":\"{target}\",\"title\":\"r\",{sheets}}}"),
+    );
+    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+    let opened = dispatch(
+        "convert_document_format",
+        &format!(
+            "{{\"action\":\"decode\",\"fileName\":\"r.{target}\",\"sourceBase64\":\"{}\"}}",
+            EasyOfficeIpcRouter::encode_base64(&bytes)
+        ),
+    );
+    let start = opened
+        .find("\"rules\":")
+        .unwrap_or_else(|| panic!("{target}: {opened}"))
+        + 8;
+    let rules_json = &opened[start..];
+    let parsed = StrictJsonValue::parse(&rules_json[..balanced_end(rules_json)]).unwrap();
+    crate::sheet_rules_json::parse_rules(&parsed).unwrap()
+}
+
+#[test]
+fn a_rule_border_survives_save_and_reopen_in_xlsx_and_ods() {
+    let rules = r##"{"cf":[
+      {"r":"A1:A9","p":1,"t":"cellIs","op":"greaterThan","a":"1","bd":{"t":"thin:ff0000","r":"thin:ff0000","b":"thin:ff0000","l":"thin:ff0000"}},
+      {"r":"B1:B9","p":2,"t":"dup","bg":"#FFC7CE","fg":"#9C0006","fl":1,"bd":{"t":"double:0000ff","l":"dashed:00ff00"}}
+    ],"dv":[]}"##;
+    let sheets =
+        format!("\"sheets\":[{{\"name\":\"S\",\"cells\":[{{\"ref\":\"A1\",\"raw\":\"5\"}}],\"rules\":{rules}}}]");
+    let want =
+        crate::sheet_rules_json::parse_rules(&StrictJsonValue::parse(rules).unwrap()).unwrap();
+    assert!(!want.cf[0].style.border.is_none());
+    for target in ["xlsx", "ods"] {
+        let got = saved_and_reopened(target, &sheets);
+        let styles =
+            |r: &easyoffice_formats::SheetRules| r.cf.iter().map(|c| c.style).collect::<Vec<_>>();
+        assert_eq!(styles(&got), styles(&want), "{target}");
+    }
+}
+
 #[test]
 fn rules_survive_save_and_reopen_in_xlsx_and_ods() {
     let sheets = format!(
@@ -164,27 +248,8 @@ fn rules_survive_save_and_reopen_in_xlsx_and_ods() {
         .unwrap(),
     )
     .unwrap();
-    for (target, file) in [("xlsx", "r.xlsx"), ("ods", "r.ods")] {
-        let saved = dispatch(
-            "convert_document_format",
-            &format!("{{\"targetFormat\":\"{target}\",\"title\":\"r\",{sheets}}}"),
-        );
-        let bytes =
-            EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
-        let opened = dispatch(
-            "convert_document_format",
-            &format!(
-                "{{\"action\":\"decode\",\"fileName\":\"{file}\",\"sourceBase64\":\"{}\"}}",
-                EasyOfficeIpcRouter::encode_base64(&bytes)
-            ),
-        );
-        let start = opened
-            .find("\"rules\":")
-            .unwrap_or_else(|| panic!("{target}: {opened}"))
-            + 8;
-        let rules_json = &opened[start..];
-        let parsed = StrictJsonValue::parse(&rules_json[..balanced_end(rules_json)]).unwrap();
-        let got = crate::sheet_rules_json::parse_rules(&parsed).unwrap();
+    for target in ["xlsx", "ods"] {
+        let got = saved_and_reopened(target, &sheets);
         assert_eq!(got.cf.len(), want_rules.cf.len(), "{target}");
         assert_eq!(got.dv.len(), want_rules.dv.len(), "{target}");
         assert_eq!(got.cf[0].kind, want_rules.cf[0].kind, "{target}");

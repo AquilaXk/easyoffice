@@ -749,7 +749,7 @@ impl OoxmlCodec {
         let date1904 = read_date1904(wb_xml);
         xf_styles.date1904 = date1904;
         let dxf_list = styles_xml.map(dxf_bodies).unwrap_or_default();
-        let dxf_styles = parse_dxf_styles(&dxf_list);
+        let dxf_styles = parse_dxf_styles(&dxf_list, &colors.clone().unwrap_or_default());
         if let (Some(colors), Some(styles)) = (&colors, styles_xml) {
             xf_styles.dxf_colors = parse_dxf_colors(&dxf_list, colors);
             xf_styles.table_styles = parse_table_styles(styles, &dxf_list, colors);
