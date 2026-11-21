@@ -317,6 +317,36 @@ export const sheetSteps = [
     await shows("H4", "#REF!");
   }],
 
+  ["a pivot table with a long name and a long filter item answers #REF! alone and the other formulas keep their values (PD-292)", async (page) => {
+    const rows = [["지역", "분기", "매출"], ["East", "Q1", "10"], ["East", "Q2", "20"], ["West", "Q1", "5"], ["West", "Q2", "7"]];
+    await page.click(td("A1"));
+    await paste(page, { "text/plain": asText(rows) });
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="C5"]')?.textContent === "7");
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_PIVOT__.openPivotDialog());
+    await page.click("#btn-sheet-pivot-apply");
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.pivotsOf(document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab).length === 1);
+    // A second pivot table with a name of 171 Korean letters (over 512 bytes) and a filter item of 300 letters, the way a long cell
+    // reaches a filter. It lies where A20 is.
+    const kept = await page.evaluate(() => {
+      const layout = window.__EASYOFFICE_SHEET_LAYOUT__;
+      const sheet = document.querySelector("#sheet-tab-bar .sheet-tab-btn.active").dataset.sheetTab;
+      const [first] = layout.pivotsOf(sheet);
+      const long = { ...first, name: "가".repeat(171), location: "A20:D23", filters: [{ col: 0, values: ["East", "West", "가".repeat(300)], blank: false }] };
+      layout.setPivots(sheet, [first, long]);
+      return layout.pivotsOf(sheet).length;
+    });
+    assert.equal(kept, 2, "the page keeps both tables");
+    const enter = async (ref, text, shown) => {
+      await page.click(td(ref));
+      await page.keyboard.type(text);
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(([r, t]) => document.querySelector(`#pane-sheet td[data-cell="${r}"]`)?.textContent === t, [ref, shown], { timeout: 5000 });
+    };
+    await enter("H2", '=GETPIVOTDATA("매출",$A$1)', "42");
+    await enter("H3", '=GETPIVOTDATA("매출",$A$20)', "#REF!");
+    await enter("H4", "=1+2", "3");
+  }],
+
   ["a printed sheet carries the fill, text color and bold a conditional format gave its cells (PD-289)", async (page) => {
     for (const [ref, value] of [["B2", "1"], ["B3", "5"]]) {
       await page.click(td(ref));
