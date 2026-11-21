@@ -81,6 +81,12 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 
+# PD-295: build scripts and proc-macro dylibs run inside the compiler and the build, they are not
+# shipped, so they stay unstripped (a stripped macro dylib that rustc cannot load fails the build with
+# "can't find crate").
+[profile.release.build-override]
+strip = "none"
+
 [profile.dev.package.quick-xml]
 opt-level = 3
 [profile.dev.package.miniz_oxide]

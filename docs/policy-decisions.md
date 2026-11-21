@@ -5197,8 +5197,9 @@
 - **Decision (`PD-295`)**
   1. 릴리스 프로필 `strip = "debuginfo"`를 `"symbols"`로 바꾼다. `panic = "unwind"`, thin LTO, 코드 단위 1은 그대로다.
   2. Quick Look 확장은 `swiftc`로 묶은 조각마다 `xcrun strip`을 한 번 돌린 뒤 `lipo`·`codesign`한다. 서명은 `strip` 뒤에 하므로 바뀐 파일에 붙는다.
+  3. `[profile.release.build-override] strip = "none"`을 루트 `Cargo.toml`과 `apps/quicklook/rust/Cargo.toml`에 둔다. 릴리스 `strip`은 빌드 스크립트와 proc-macro dylib에도 걸리는데(`-v` 로그에서 proc-macro 컴파일에 `-C strip=debuginfo`가 붙는 것을 확인했다), 이 파일들은 컴파일러 안에서 돌 뿐 배포하지 않으므로 뺄 이유가 없다. 개발 기기에서 Quick Look 빌드가 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽은 것(같은 조건 재시도 8번은 성공, 원인 미확인)을 막으려는 방어다. 배포 파일의 크기는 그대로다.
 - **Measured** macOS arm64, 같은 조건의 릴리스 빌드 전후. 데스크톱 64,103,952 → 59,644,048 B(-7.0%), CLI 13,750,704 → 12,955,888 B(-5.8%), Quick Look 미리보기 조각 15,035,920 → 11,824,304 B(-21.4%), 썸네일 13,478,768 → 10,660,752 B(-20.9%). CLI `--self-test` 실제 경로 5회 번갈아 측정은 `docx_to_pdf_1mb` 21.4 → 21.4 ms, `xlsx_100k_cells_pack_unpack` 52.4 → 51.7 ms, `sheet_recalc_10k_rows` 7.8 → 7.7 ms로 편차 안이다.
-- **Trade-offs** 크래시 보고서와 디버거에서 Rust 프레임 이름이 사라진다(`panic`은 `catch_unwind`로 잡고 메시지만 낸다). 필요하면 같은 커밋을 `CARGO_PROFILE_RELEASE_STRIP=none`으로 다시 빌드해 심볼을 얻는다. 크기 값은 macOS arm64만 쟀고 Windows·Linux 실행 파일은 못 쟀다.
+- **Trade-offs** 크래시 보고서와 디버거에서 Rust 프레임 이름이 사라진다(`panic`은 `catch_unwind`로 잡고 메시지만 낸다). 심볼이 필요하면 같은 커밋을 `CARGO_PROFILE_RELEASE_STRIP=debuginfo cargo build --release -p easyoffice-desktop`(Quick Look은 `scripts/build-quicklook-macos.mjs`의 `xcrun strip` 줄을 빼고)로 다시 빌드한다. 릴리스 바이너리는 같은 소스·같은 도구체인이어야 주소가 맞으므로 릴리스 때 심볼이 든 빌드를 따로 보관하지는 않는다. 크기 값은 macOS arm64만 쟀고 Windows·Linux 실행 파일은 못 쟀다.
 - **Alternatives rejected** Quick Look 조각에 `strip -x`(지역 심볼만): -1.4 MB로 `strip`(-3.2 MB)의 절반이다. 글꼴 가변화·부분 집합화, dmg 분리, `wasm-opt`, Quick Look 공유 프레임워크는 글꼴·릴리스 구성·고정 산출물을 바꾸므로 이번에는 구현하지 않고 8.5절에 근거와 함께 올렸다.
 - **Verified by** 위 전후 바이트, `codesign --verify --strict`(새 Quick Look 조각 둘), 아래 검증 모음.
 - **Revisit when** 심볼이 필요한 크래시 신고가 들어올 때(심볼 파일을 따로 보관하는 쪽으로), 8.5절 후보 중 하나를 구현할 때.

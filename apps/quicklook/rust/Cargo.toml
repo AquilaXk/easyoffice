@@ -40,6 +40,10 @@ lto = true
 codegen-units = 1
 strip = "debuginfo"
 
+# PD-295: build scripts and proc-macro dylibs stay unstripped (see the root `Cargo.toml`).
+[profile.release.build-override]
+strip = "none"
+
 [dev-dependencies]
 # Builds hostile HWPX packages for the tests (the same zip version rhwp's own tests use).
 zip = { version = "8.5", default-features = false, features = ["deflate"] }

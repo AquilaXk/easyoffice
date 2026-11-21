@@ -572,5 +572,5 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 
 - 크기는 macOS arm64만 쟀다. 다른 OS의 실행 파일 구성은 설치본 크기와 deb 안의 파일 크기로만 짐작했다.
 - `cargo bloat`의 크레이트별 값은 심볼 이름으로 나눈 추정이다(제네릭 인스턴스는 호출한 쪽이 아니라 정의한 크레이트로 센다).
-- 이 기기의 `cargo build --target aarch64-apple-darwin`은 릴리스 프로필 `strip = "debuginfo"`일 때 `rustversion` 매크로 크레이트를 못 불러 Quick Look 크레이트 빌드가 실패했다(`can't find crate for rustversion`). `CARGO_PROFILE_RELEASE_STRIP=none`을 주면 같은 소스가 빌드된다. 위 Quick Look 값은 그렇게 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과이고, 최종 조각은 스크립트의 `strip`을 거친다. CI 기기에서는 재현하지 않았다.
+- Quick Look 크레이트 빌드가 이 기기에서 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽었다. 같은 `strip = "debuginfo"` 프로필로 다시 여덟 번(문자 코덱 크레이트 하나만 일곱 번, 전체 한 번) 빌드했을 때는 모두 성공했고 원인은 확인하지 못했다. 방어로 두 `Cargo.toml`에 `[profile.release.build-override] strip = "none"`을 뒀다(PD-295). 8.4절의 Quick Look 값은 첫 실패 뒤 `CARGO_PROFILE_RELEASE_STRIP=none`으로 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과다.
 
