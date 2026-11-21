@@ -91,3 +91,15 @@
 .base-field-dialog .dialog-label { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); font-size: var(--font-size-base); font-weight: 400; color: var(--ui-text-secondary); }
 .base-dlg-input, .base-dlg-select { width: 100%; box-sizing: border-box; }
 .base-danger-btn { color: var(--ui-danger); border-color: var(--ui-danger); }
+/* 칸 선택 (PD-294): 범위는 옅은 바탕과 바깥 테두리, 활성 칸은 안쪽 2px 테두리. data-sel 토큰: s 범위 안, t b l r 범위의 변, a 활성 칸 */
+.base-grid-table { -webkit-user-select: none; user-select: none; }
+.base-grid-table:focus { outline: none; }
+.base-grid-table .base-cell-input:not([readonly]) { -webkit-user-select: text; user-select: text; }
+.base-grid-table .base-cell-input[readonly] { pointer-events: none; cursor: default; }
+.base-grid-table .base-grid-row td[data-sel] { position: relative; background: var(--ui-selected); }
+.base-grid-table .base-grid-row td[data-sel]::after { content: ""; position: absolute; inset: 0; pointer-events: none; border: 0 solid var(--accent-primary); }
+.base-grid-table .base-grid-row td[data-sel~="t"]::after { border-top-width: 1px; }
+.base-grid-table .base-grid-row td[data-sel~="b"]::after { border-bottom-width: 1px; }
+.base-grid-table .base-grid-row td[data-sel~="l"]::after { border-left-width: 1px; }
+.base-grid-table .base-grid-row td[data-sel~="r"]::after { border-right-width: 1px; }
+.base-grid-table .base-grid-row td[data-sel~="a"] { background: var(--ui-surface); outline: 2px solid var(--accent-primary); outline-offset: -2px; }

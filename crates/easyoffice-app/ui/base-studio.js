@@ -96,6 +96,8 @@
 
     const activeTable = () => M.getTable(state, state.activeTableId);
     const setFeedback = (msg) => { deps.setFeedback?.(String(msg || "")); };
+    // Cell selection, keys, clipboard of the datasheet (`base-cell-select.js`): it outlives a redraw, so an edit keeps the selection.
+    const cellSel = host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__(doc, { updateCells: (edits) => updateCells(edits), setFeedback, relationIds: (field, text) => relationIds(field, text) });
     const recordUndo = () => { deps.recordUndo?.(); };
     const noteActivity = () => { deps.noteActivity?.(); };
     const byId = (id) => doc.getElementById(id);
@@ -387,6 +389,19 @@
       return list;
     }
 
+    // The record ids that a pasted text of labels ("Kim, Lee") stands for. A text that is no label stays as it is, for the model to check.
+    const relationLabels = new WeakMap();
+    function relationIds(field, text) {
+      const list = relationOptions.get(field.id) || relationOptionsOf(field, { index: M.buildStateIndex(state) });
+      let byLabel = relationLabels.get(list);
+      if (!byLabel) {
+        byLabel = new Map();
+        for (const [id, label] of list) if (!byLabel.has(label)) byLabel.set(label, id);
+        relationLabels.set(list, byLabel);
+      }
+      return text.split(",").map((s) => s.trim()).filter(Boolean).map((s) => byLabel.get(s) || s);
+    }
+
     // ---- Cell Controls & Invalid Handling ----
 
     function markInvalid(td, control, msg) {
@@ -539,9 +554,12 @@
       const widthKey = table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|");
       gridWin = host.__EASYOFFICE_BASE_GRID_WINDOW__.createGridWindow(doc, {
         groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
-        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey,
+        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, onRowBuilt: cellSel.rowBuilt,
       });
       const tbody = gridWin.tbody, itemCount = gridWin.count;
+      // The selection is kept while the table is drawn again for an edit; another table, filter, sort or group starts without one.
+      const viewKey = JSON.stringify([table.id, table.filters, table.filterConjunction, table.sorts, table.groupByFieldId, table.collapsedGroups]);
+      cellSel.bind({ tbl: tblEl, wrap, win: gridWin, fields: query.fields }, viewKey);
       setAttr(tblEl, "aria-rowcount", String(itemCount + 3)); setAttr(headRow, "aria-rowindex", "1");
 
       const newRowTr = setAttr(el("tr", "base-new-record-row"), "aria-rowindex", String(itemCount + 2));
@@ -728,6 +746,7 @@
       refs.groupSelect.value = table.groupByFieldId || "";
 
       renderQueryBar(table);
+      cellSel.beforeRender();
       gridWin?.dispose();
       gridWin = null;
       const query = M.queryTableView(state, table.id);
@@ -735,7 +754,7 @@
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
       refs.viewport.replaceChildren(viewNode);
-      gridWin?.attach(viewNode, viewNode.querySelector("table"));
+      if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else cellSel.release();
     }
 
     // ---- Public Studio API ----
@@ -799,6 +818,14 @@
       }
       invalidCell = null; noteActivity();
       if (bound) render();
+      return res;
+    }
+
+    // Many cells in one undo step and one redraw (a paste, Delete over a range): `edits` are `{ recordId, fieldId, value }`; the cells whose value the
+    // field refuses are left as they are and counted in the feedback.
+    function updateCells(edits) {
+      const res = withActive((tbl) => M.updateCells(state, tbl.id, edits), true);
+      if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
       return res;
     }
 
@@ -924,8 +951,8 @@
 
     const api = {
       bind, render, getState, setState, resetBlank,
-      addTable, addField, updateField, deleteField, addRecord, updateCell, deleteRecord,
-      setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
+      addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,
+      selection: cellSel.selection, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;
     return api;

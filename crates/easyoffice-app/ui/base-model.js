@@ -770,6 +770,22 @@
     return { ok: true, value: res.value };
   }
 
+  // Many cells at once (a paste, a clear: PD-294): the checks of `updateCell` for each edit `{ recordId, fieldId, value }`, with the table's
+  // records and the relation index built once, not for each cell. An edit that fails is left out and counted; the others are written.
+  function updateCells(state, tableId, edits) {
+    const table = getTable(state, tableId);
+    if (!table) return fail("대상 테이블을 찾을 수 없습니다.");
+    const fieldsById = new Map(table.fields.map((f) => [f.id, f])), recordsById = new Map(table.records.map((r) => [r.id, r]));
+    const index = buildStateIndex(state);
+    let applied = 0, failed = 0, error = "";
+    for (const { recordId, fieldId, value } of edits) {
+      const field = fieldsById.get(fieldId), record = recordsById.get(recordId);
+      const res = field && record ? validateCellValue(field, value, state, index) : fail("대상 셀을 찾을 수 없습니다.");
+      if (res.ok) { record.values[fieldId] = res.value; applied += 1; } else { failed += 1; error ||= res.error; }
+    }
+    return applied > 0 ? { ok: true, applied, failed, error } : fail(error || "바꿀 칸이 없습니다.");
+  }
+
   function deleteRecord(state, tableId, recordId) {
     const table = getTable(state, tableId), idx = table ? table.records.findIndex((r) => r.id === recordId) : -1;
     if (idx < 0) return fail("삭제할 레코드를 찾을 수 없습니다.");
@@ -927,7 +943,7 @@
     VIEW_MODES, FIELD_TYPES, FIELD_TYPE_LABELS, FILTER_OPS, FILTER_OP_LABELS,
     createInitialBaseState, buildStateIndex, getTable, validateCellValue, compileFormula, evaluateFormula,
     resolveRelationDisplay, resolveRelationItems, rollupSum, formatCellDisplay, queryTableView,
-    addTable, addField, updateField, deleteField, addRecord, updateCell, deleteRecord,
+    addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,
     toSheetsPayload, toDelimitedText, serializeBaseState, hydrateBaseState,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
