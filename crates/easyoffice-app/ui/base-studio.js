@@ -54,6 +54,9 @@
     let state = M.createInitialBaseState(), rootEl = deps.rootEl || null, bound = false;
     let queryPanel = "", draftFilters = [], draftConjunction = "and", draftSorts = [];
     let editingFieldId = null, draggedRecordId = "", invalidCell = null, refs = null;
+    // The rows of the datasheet around the visible ones (`base-grid-window.js`); the scroll offset, the measured row heights and the fixed column widths outlive a redraw.
+    let gridWin = null;
+    const gridMemo = { key: "", top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, margin: 0 }, gridWidths = new Map();
 
     const el = (tag, cls, text) => {
       const n = doc.createElement(tag);
@@ -505,39 +508,43 @@
       }
       thead.appendChild(headRow);
 
-      const tbody = el("tbody");
-      let rowNum = 0;
-      for (const group of query.groups) {
-        if (table.groupByFieldId) {
-          const gr = el("tr", "base-group-row"), gtd = el("td", "base-group-cell");
-          gr.dataset.groupKey = group.key; gtd.colSpan = query.fields.length + 1;
-          const arrow = group.collapsed ? "▸ " : "▾ ";
-          const toggle = setAttr(mkBtn("base-group-toggle", `${arrow}${group.label} (${group.count}건)`, () => setViewSetting((t) => {
-            const set = new Set(t.collapsedGroups || []);
-            if (set.has(group.key)) set.delete(group.key); else set.add(group.key);
-            t.collapsedGroups = Array.from(set);
-          }), "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
-          gtd.appendChild(toggle); gr.appendChild(gtd); tbody.appendChild(gr);
+      // Only the rows around the visible ones are built (`base-grid-window.js`); a short table is built whole.
+      const buildGroupRow = (group) => {
+        const gr = el("tr", "base-group-row"), gtd = el("td", "base-group-cell");
+        gr.dataset.groupKey = group.key; gtd.colSpan = query.fields.length + 1;
+        const arrow = group.collapsed ? "▸ " : "▾ ";
+        const toggle = setAttr(mkBtn("base-group-toggle", `${arrow}${group.label} (${group.count}건)`, () => setViewSetting((t) => {
+          const set = new Set(t.collapsedGroups || []);
+          if (set.has(group.key)) set.delete(group.key); else set.add(group.key);
+          t.collapsedGroups = Array.from(set);
+        }), "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
+        gtd.appendChild(toggle); gr.appendChild(gtd);
+        return gr;
+      };
+      const buildDataRow = (rowData, rowNum) => {
+        const tr = el("tr", "base-grid-row");
+        tr.dataset.recordId = rowData.record.id;
+        tr.appendChild(appendAll(el("td", "base-row-index"),
+          el("span", "base-row-num", String(rowNum + 1)),
+          mkBtn("base-row-delete-btn", "×", () => deleteRecord(rowData.record.id), "", "레코드 삭제")
+        ));
+        for (const field of query.fields) {
+          const td = el("td", "base-grid-cell");
+          td.dataset.fieldId = field.id; td.dataset.fieldType = field.type;
+          buildCellControl(td, rowData, field, rowNum, query);
+          tr.appendChild(td);
         }
-        if (group.collapsed) continue;
-        for (const rowData of group.records) {
-          const tr = el("tr", "base-grid-row");
-          tr.dataset.recordId = rowData.record.id;
-          tr.appendChild(appendAll(el("td", "base-row-index"),
-            el("span", "base-row-num", String(rowNum + 1)),
-            mkBtn("base-row-delete-btn", "×", () => deleteRecord(rowData.record.id), "", "레코드 삭제")
-          ));
-          for (const field of query.fields) {
-            const td = el("td", "base-grid-cell");
-            td.dataset.fieldId = field.id; td.dataset.fieldType = field.type;
-            buildCellControl(td, rowData, field, rowNum, query);
-            tr.appendChild(td);
-          }
-          tbody.appendChild(tr); rowNum += 1;
-        }
-      }
+        return tr;
+      };
+      const widthKey = table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|");
+      gridWin = host.__EASYOFFICE_BASE_GRID_WINDOW__.createGridWindow(doc, {
+        groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
+        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey,
+      });
+      const tbody = gridWin.tbody, itemCount = gridWin.count;
+      setAttr(tblEl, "aria-rowcount", String(itemCount + 3)); setAttr(headRow, "aria-rowindex", "1");
 
-      const newRowTr = el("tr", "base-new-record-row");
+      const newRowTr = setAttr(el("tr", "base-new-record-row"), "aria-rowindex", String(itemCount + 2));
       const newRowIdx = el("td", "base-row-index base-new-row-marker", "+");
       const newRowCell = el("td", "base-new-record-cell");
       newRowCell.colSpan = query.fields.length;
@@ -545,7 +552,7 @@
       appendAll(newRowTr, newRowIdx, newRowCell);
       tbody.appendChild(newRowTr);
 
-      const tfoot = el("tfoot"), footRow = el("tr", "base-grid-footer");
+      const tfoot = el("tfoot"), footRow = setAttr(el("tr", "base-grid-footer"), "aria-rowindex", String(itemCount + 3));
       footRow.appendChild(el("td", "base-footer-count", query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`));
       for (const field of query.fields) {
         const sum = query.numericSums[field.id];
@@ -721,11 +728,14 @@
       refs.groupSelect.value = table.groupByFieldId || "";
 
       renderQueryBar(table);
+      gridWin?.dispose();
+      gridWin = null;
       const query = M.queryTableView(state, table.id);
       const viewNode = table.view === "kanban" ? renderKanbanView(table, query)
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
       refs.viewport.replaceChildren(viewNode);
+      gridWin?.attach(viewNode, viewNode.querySelector("table"));
     }
 
     // ---- Public Studio API ----
@@ -736,13 +746,13 @@
     function setState(next) {
       const res = M.hydrateBaseState(next);
       if (!res.ok) { setFeedback(res.error); return res; }
-      state = res.state; invalidCell = null;
+      state = res.state; invalidCell = null; gridMemo.key = "";
       if (bound) render();
       return { ok: true, state: getState() };
     }
 
     function resetBlank() {
-      state = M.createInitialBaseState(); invalidCell = null; queryPanel = "";
+      state = M.createInitialBaseState(); invalidCell = null; queryPanel = ""; gridMemo.key = "";
       if (bound) render();
       return getState();
     }

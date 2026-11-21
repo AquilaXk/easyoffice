@@ -614,6 +614,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## TanStack Virtual (MIT)
+
+Source: https://github.com/TanStack/virtual (commit `eb1cb7c9d1709b6fd2ecc773988ffbb095cd4f61`, Copyright (c) 2021-present Tanner Linsley).
+Nothing is vendored or linked at runtime; the row range maths of `packages/virtual-core/src/index.ts` (`findNearestBinarySearch` 2778-2805, `findNearestBinarySearchFlat` 2807-2826, the single-lane `calculateRangeImpl` 2828-2866 with the end clamp of `calculateRange` 1883-1921, `defaultRangeExtractor` 98-113, and the single-lane Float64Array layout of `getMeasurements` 1731-1767) was ported into `crates/easyoffice-app/ui/base-virtual.js` (`PD-290`): the start and size of each row in a typed array, a binary search for the first visible row, a forward walk to the last, and the extra rows on both sides. The `Virtualizer` class (scroll element observers, the size cache, lanes, smooth scroll) was not taken; `crates/easyoffice-app/ui/base-grid-window.js` is EasyOffice code.
+
+```
+MIT License
+
+Copyright (c) 2021-present Tanner Linsley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## glide-data-grid (MIT)
 
 Source: https://github.com/glideapps/glide-data-grid (commit `0875d78cc41535a39f8b417ff88ce1ebe129c7451` / `0875d78cc41535a39f8b417ff88ce1ebe129c363`, Copyright (c) 2021 typeguard, Inc.).

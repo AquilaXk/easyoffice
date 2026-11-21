@@ -83,7 +83,7 @@ export async function runSteps({ browser, baseUrl, captureDir, groups }) {
       const started = Date.now();
       try {
         await page.goto(`${baseUrl}/?module=${module}&win=webkit-dom`);
-        await page.waitForSelector(module === "SHEET" ? "#pane-sheet td[data-cell]" : "#doc-editor");
+        await page.waitForSelector({ SHEET: "#pane-sheet td[data-cell]", BASE: "#pane-base .base-grid-table" }[module] || "#doc-editor");
         await body(page);
         console.log(`ok   ${module.toLowerCase()}: ${name} (${Date.now() - started} ms)`);
       } catch (err) {

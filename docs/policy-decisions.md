@@ -5062,3 +5062,34 @@
 - **Trade-offs** 1.5배가 아닌 다른 비정수 배율(1.1, 1.33 등)이나 창 구성에서 같은 일치가 생기면 그 배율에서는 여전히 사라질 수 있다. 일치 조건은 뷰포트 위쪽 정수 높이의 홀짝에도 달려 있어 이 규칙은 이들을 일반적으로 풀지 못한다. 새 배율에서 같은 증상이 보고되면 같은 방식으로 그 배율의 `@media`를 더한다. 열 경계(세로선)는 고치기 전 시험이 첫 실패(위쪽 선)에서 멈춰 따로 재지 않았다. 고친 뒤에는 네 변 모두 통과해서 가로 보정은 두지 않았다.
 - **Verified by** WebKit 시험에 1.5·1.25·1.75·3배 단계를 더함(2배는 기존 단계를 같은 도우미로 옮김): 고치기 전 1.5배 단계가 `1.5x light: ... top line at 463,289 is rgb(255,255,255), the border is rgb(51,51,51)`로 실패하는 것을 확인했고 고친 뒤 16단계 모두 통과. `node --test scripts/test-*.mjs` 2,075개 중 2,074개 통과·실패 0·건너뜀 1(실제 Chrome 시험 포함), `cargo test --workspace` 3,835개 통과·실패 0·무시 85, clippy `-D warnings`, fmt, `--self-test` 통과. 밝은·어두운 테마의 1.5배·1배 전후 캡처.
 - **Revisit when** 다른 배율에서 같은 증상이 보고될 때, 뷰포트 테두리나 격자 머리 높이를 바꿀 때, WebKit이 장치 픽셀 한 칸 미만의 테두리 칠하기를 고칠 때.
+
+## PD-290. BASE 데이터시트 행 가상화: 보이는 행과 위아래 12행만 DOM에 두고 나머지는 빈 행의 높이로 대신함
+
+- **Status** Implemented (QA 요청 2026-11-22). `crates/easyoffice-app/ui/{base-virtual.js,base-grid-window.js}`(새 파일), `base-studio.js`(`renderGridView`, `render`), `base.css`, `index.html`, `src/webui_assets.rs`, 시험 `scripts/test-base-virtual-pd290.mjs`·`scripts/test-webui-base-grid-window-pd290.mjs`·`scripts/webkit-dom/base.mjs`.
+- **Context** `renderGridView`가 레코드 수만큼 행과 칸 컨트롤을 만들어서 1만 건을 다시 그리는 데 3초 이상 걸렸다(Chrome 헤드리스 쉘 측정: 만든 뒤 화면에 그려질 때까지 3.7초, 셀 하나를 고친 뒤 다시 그리기 9.2초). 10만 건은 590초 안에 끝나지 않았다. 레코드 상한은 모델이 테이블당 1만 건으로 막으므로 10만 건은 측정용이다(`hydrateBaseState`를 우회).
+- **Decision (`PD-290`)**
+  1. 데이터시트 행(그룹을 쓰면 그룹 행 포함)이 120개를 넘으면 보이는 행과 위아래 12행만 만든다. 위아래 빈 행(`tr.base-grid-spacer`)의 높이가 나머지를 대신해 스크롤 길이는 전체 목록과 같다. 120개 이하는 전부 그리므로 모양과 동작이 이전과 같다.
+  2. 행 높이는 24px로 가정하지 않는다. 관계 칸의 칩이 줄바꿈되면 행이 38~46px라서 한 높이로 계산하면 스크롤 위치가 어긋나고 빈 곳이 생긴다. 만든 행의 높이를 `getBoundingClientRect`로 재서(1/64px 단위) 항목별로 기억하고, 아직 만들지 않은 행은 첫 창의 평균으로 어림한다. 보이는 줄 위에 만든 행이 어림과 다르면 스크롤 위치를 같은 만큼 옮겨 화면이 움직이지 않게 한다.
+  3. 열 너비는 첫 창을 그린 뒤 `<colgroup>`으로 고정한다(`table-layout: fixed`). 스크롤하면서 열이 흔들리지 않는다. 너비는 필드 구성 키로 기억해 다시 그릴 때 그대로 쓴다.
+  4. 셀을 고쳐 다시 그릴 때 스크롤 위치(가로·세로)와 측정한 높이를 이어 간다. 이전에는 격자 요소를 새로 만들어 맨 위로 돌아갔다. 새 문서(`setState`)와 다른 테이블은 맨 위에서 시작한다.
+  5. 편집 중인 컨트롤이 있는 행이 창 밖으로 나가면 그 컨트롤을 먼저 `blur`해 입력을 확정한다(안 하면 입력이 사라진다).
+  6. 접근성: `table`에 `aria-rowcount`(머리 1 + 항목 + 새 레코드 행 + 합계 행), 행마다 `aria-rowindex`.
+  7. 인쇄(`buildPrintPages`), 내보내기, 코파일럿 문맥, 일반 텍스트 추출은 DOM이 아니라 모델의 `queryTableView`를 읽으므로 가상화와 무관하게 전체 레코드를 쓴다. 정렬·필터·그룹도 모델 쪽이라 그대로다.
+- **Reuse 판단 (구현 원칙 3단계)** (1) 라이브러리를 그대로 쓸 수 없다. TanStack Virtual `virtual-core`(MIT)는 TypeScript ESM이고 `Virtualizer` 클래스가 스크롤 요소 관찰과 크기 캐시에 묶여 있어 번들러 없는 클래식 스크립트 페이지에 넣을 수 없다. clusterize.js(MIT)는 고정 높이와 문자열 HTML 행을 전제로 해서 칸마다 이벤트가 붙은 컨트롤을 쓰는 이 격자에 맞지 않는다. (2) 이미 쓰는 의존성에 행 가상화가 없다. (3) 그래서 `virtual-core`(commit `eb1cb7c9d1709b6fd2ecc773988ffbb095cd4f61`, `packages/virtual-core/src/index.ts`)의 범위 계산 함수를 `base-virtual.js`로 옮겼다: `findNearestBinarySearch`, `findNearestBinarySearchFlat`, 한 줄 목록의 `calculateRangeImpl`과 끝 보정, `defaultRangeExtractor`, `Float64Array` 시작·크기 배치(`getMeasurements`). 객체 배열 대신 두 칸 단위 타입 배열, 여유 행은 인덱스 배열 대신 양 끝 두 값으로 줄였다. 옮긴 코드 약 42줄(`base-virtual.js` 코드 50줄 중), 직접 쓴 코드는 `base-grid-window.js` 171줄과 `base-studio.js` 44줄 추가·34줄 삭제, `base.css` 3줄이다. glide-data-grid의 범위 계산은 캔버스 격자용이라 DOM 행 창에 쓰지 않았다. 출처는 파일 머리 주석과 `THIRD_PARTY_NOTICES.md`.
+- **Measured** Chrome 헤드리스 쉘 1217, 뷰 1280x800, 필드 9종(관계·수식·다중 선택 포함). 단위 ms. 다시 그리기는 `setState`·`updateCell` 호출이 끝날 때까지, 화면은 그 뒤 두 프레임까지.
+
+  | 건수 | 동작 | 이전 | 이후 |
+  |---|---|---|---|
+  | 1,000 | 첫 렌더 / 화면까지 | 79 / 398 | 32 / 9 |
+  | 1,000 | 편집 뒤 다시 그리기 / 화면까지 | 83 / 489 | 22 / 19 |
+  | 10,000 | 첫 렌더 / 화면까지 | 723 / 3,030 | 64 / 13 |
+  | 10,000 | 편집 뒤 다시 그리기 / 화면까지 | 1,345 / 7,807 | 30 / 9 |
+  | 10,000 | 한 화면 스크롤(두 프레임 포함) | 275 | 23 |
+  | 100,000 | 첫 렌더 / 화면까지 | 590초에 미완료 | 207 / 13 |
+  | 100,000 | 편집 뒤 다시 그리기 / 화면까지 | 미측정 | 169 / 8 |
+  | 100,000 | 한 화면 스크롤 | 미측정 | 21 |
+
+  WebKit(Playwright 1.56.1) 1만 건: 첫 렌더 1,001 → 72, 화면까지 7,407 → 25, 편집 뒤 1,605 → 30(화면까지 5,504 → 22). 1만 건 다시 그리기 목표 100ms 이하를 Chrome 30ms, WebKit 30ms로 만족한다. 이후 시간의 대부분은 `queryTableView`다(10만 건 편집 169ms 중 대부분).
+- **Trade-offs** (1) 창 밖 행은 DOM에 없으므로 브라우저 찾기(Ctrl+F)가 창 밖 글자를 못 찾는다. (2) 안 만든 행의 높이는 어림이라 스크롤바 길이가 행을 지나면서 조금 바뀐다. (3) 열 너비는 첫 창으로 고정되어, 그 뒤에 나온 더 긴 내용(합계 글자 등)은 칸을 넓히지 못하고 잘린다(합계 칸은 말줄임). 같은 필드 구성이면 이후 다시 그릴 때도 처음 너비를 쓴다. (4) 현재 BASE 격자에는 칸 선택과 방향키 행 이동이 없고(칸은 네이티브 입력 컨트롤), 행 높이 설정도 없다. 그래서 방향키·선택·행 높이 설정을 새로 만들지 않았다. Tab으로 아래 행들을 지나는 흐름이 창 밖 행에서도 이어지는 것을 시험으로 확인했다. (5) 정렬을 바꾸거나 필터로 항목 수가 같게 줄어드는 경우 같은 길이면 측정 높이를 이어 받는데, 만든 행은 항상 다시 재서 고치므로 틀려도 스크롤 위치의 어림만 어긋난다.
+- **Verified by** DOM 하니스 시험 14개(`test-webui-base-grid-window-pd290.mjs`)와 범위 계산 시험 6개(`test-base-virtual-pd290.mjs`): 창을 끄면(`WINDOW_MIN_ITEMS`를 크게) 창 시험 7개가 실패하는 것을 확인했고, 스크롤 보정 줄을 끄면 `rows built above the view that are taller than estimated` 시험이 실패하는 것을 확인했다. 실제 브라우저 단계 10개(`scripts/webkit-dom/base.mjs`: 스크롤 뒤 빈 곳 없음, 두 높이의 행, 위로 스크롤 시 화면 점프 없음, 열 너비, 편집 뒤 스크롤 위치, 스크롤로 벗어난 입력 확정, Tab 80행 이동, 정렬·필터·그룹, 뷰 높이 변화)를 WebKit과 Chrome 헤드리스에서 모두 통과(`EO_BROWSER=chromium`으로 Chrome). 밝은·어두운 테마, Chrome·WebKit, 맨 위와 `r500` 위치의 전후 캡처: 100건과 1만 건 맨 위는 Chrome에서 시계 영역 2~5픽셀(차이 1) 외 같고 WebKit 1만 건 맨 위는 아래 테이블 탭 글자 400픽셀의 안티앨리어싱 차이 외 같다. `r500` 위치는 일부 행 글자가 1px 어긋난다. `node --test scripts/test-*.mjs` 2,095개 중 2,094개 통과·실패 0·건너뜀 1, `cargo test --workspace --exclude easyoffice-desktop` 3,141개 통과·실패 0·무시 76, clippy `-D warnings`, fmt, `--self-test`, 위생 검사 통과.
+- **Revisit when** 격자에 칸 선택·방향키 이동·행 높이 설정을 넣을 때(`scrollToIndex` 계산을 `base-virtual.js`에 더한다), 모델의 레코드 상한(1만 건)을 올릴 때, 관계 칸 칩의 줄바꿈 모양을 고칠 때(행 높이가 24px로 균일해진다), `queryTableView`가 편집 뒤 다시 그리기의 대부분이 될 때(증분 갱신).

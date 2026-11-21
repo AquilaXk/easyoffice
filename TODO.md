@@ -39,7 +39,6 @@
 - [ ] 선택 영역 명령 이름(더 짧게·더 길게·맞춤법 수정·번역)을 상용 오피스 코파일럿 한국어 문구와 대조(QA 필요, PD-267)
 
 ## BASE
-- [ ] 레코드 만 건 격자: 관계 칸 옵션은 지연 생성으로 줄였으나(2,000건 0.35초) 1만 건은 다시 그리기가 3.3초라 행 가상화가 남음(`base-studio.js` `renderGridView`)
 
 ## 시트 함수 (PD-270·PD-271·PD-273, 비교표 `docs/sheet-function-parity.md`)
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열의 비공개 평활 계수 선택 목적함수(0.001 격자), 계절 경로의 순환식·끝점 고정 처리, `STAT`의 MAE·RMSE·MASE 오차 열 정의, 같은 날짜가 있을 때 `aggregation` 생략·`0` 동작, 범위 밖 인수와 시계열 안 대상 날짜의 오류 값(`docs/forecast-ets-cleanroom.md` 9장)

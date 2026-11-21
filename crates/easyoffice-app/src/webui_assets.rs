@@ -43,8 +43,10 @@ const CSS_ASSETS: &[(&str, &str, &str)] = ui_css_table![
 const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "app.js",
     "base-board-host.js",
+    "base-grid-window.js",
     "base-model.js",
     "base-studio.js",
+    "base-virtual.js",
     "board-router.js",
     "board-studio.js",
     "color-picker.js",

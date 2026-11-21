@@ -23,6 +23,9 @@
 .base-grid-wrap { flex: 1 1 auto; min-height: 0; background: var(--ui-surface); border: 0; overflow: auto; }
 .base-grid-table { min-width: 100%; width: max-content; border-collapse: separate; border-spacing: 0; table-layout: auto; font-size: var(--font-size-base); }
 .base-grid-table th:not(.base-grid-corner), .base-grid-table td:not(:first-child) { min-width: 144px; }
+.base-grid-table.is-fixed { table-layout: fixed; }
+.base-grid-table.is-fixed .base-footer-sum { overflow: hidden; text-overflow: ellipsis; }
+.base-grid-table .base-grid-spacer td { padding: 0; border-width: 0; }
 .base-grid-table th, .base-grid-table td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; border-style: solid; border-color: var(--ui-border-light); text-align: left; vertical-align: middle; }
 .base-grid-table thead th { position: sticky; top: 0; z-index: 2; height: 26px; background: var(--ui-bg-light); color: var(--ui-text-muted); font-size: var(--font-size-base); font-weight: 700; user-select: none; }
 .base-grid-corner { width: 56px; min-width: 56px; text-align: center; }
