@@ -906,16 +906,23 @@
     // Applies a new column width to the live header cell and the table width.
     columnWidthOf = colWidth;
 
-    function applyColWidth(c, px) {
-      const w = setColWidth(c, px);
-      repaintNumFmtColumn(c);
-      const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
-      if (th) th.style.width = w + "px";
+    // Sets the widths of several columns (`[[column, px], ...]`) and brings the page up to date once: the row heights of wrapped
+    // cells are worked out one time for the lot, not once per column. Returns the widths as set.
+    function applyColWidths(list) {
+      const set = list.map(([c, px]) => {
+        const w = setColWidth(c, px);
+        repaintNumFmtColumn(c);
+        const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
+        if (th) th.style.width = w + "px";
+        return w;
+      });
       if (wrapRowsPossible() && rowFit.sync()) renderWindow(true);
       const table = tableEl();
       if (table && view) syncTableWidth(table, view);
-      return w;
+      return set;
     }
+
+    const applyColWidth = (c, px) => applyColWidths([[c, px]])[0];
 
     function visibleRowSpan() {
       const vp = viewportEl();
@@ -951,7 +958,7 @@
     return {
       MAX_ROWS, MAX_COLS, ROW_H, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
-      applyColWidth, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W,
+      applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W,
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),

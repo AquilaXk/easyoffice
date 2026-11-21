@@ -43,7 +43,7 @@ function fitOf(map, extra = {}) {
 }
 const textW = (text) => [...text].length * 8 + PADDING_PX;
 const E = (value, style, extra = {}) => ({ value, formula: "", style, ...extra });
-const widthOf = async (fit, col, resolve) => (await fit.widthsFor([col], resolve)).find((w) => w.col === col)?.width;
+const widthOf = async (fit, col, resolve) => (await fit.widthsFor([col], resolve)).widths.find((w) => w.col === col)?.width;
 
 test("a column is as wide as its widest cell and the cell's padding", async () => {
   const map = { A1: E("가나다"), A2: E("가나다라마바사"), A3: E("짧음"), B1: E("x") };
@@ -71,7 +71,7 @@ test("a cell with line breaks counts by its longest line, and a wrapped cell cou
 test("hidden columns, hidden rows and merged cells are left out; an empty column goes back to the default width", async () => {
   const map = { A1: E("일"), A2: E("보이지 않는 아주 긴 행의 글자"), A3: E("병합된 셀의 아주 아주 긴 글자"), B1: E("") };
   const fit = fitOf(map, { isRowHidden: (r) => r === 2, mergeAt: (r, c) => (r === 3 && c === 1 ? { r1: 3, c1: 1, r2: 3, c2: 2 } : null), isColHidden: (c) => c === 3 });
-  const out = await fit.widthsFor([1, 2, 3]);
+  const { widths: out } = await fit.widthsFor([1, 2, 3]);
   assert.deepEqual(out, [{ col: 1, width: 36 }, { col: 2, width: 96 }], "column 3 is hidden: not listed; column 2 has no content");
 });
 
@@ -112,7 +112,21 @@ test("the drop-down button of a filter header cell adds its width", async () => 
 });
 
 test("a page that cannot measure gets no widths", async () => {
-  assert.equal(await fitOf({ A1: E("가") }, { measure: () => null }).widthsFor([1]), null);
+  assert.deepEqual(await fitOf({ A1: E("가") }, { measure: () => null }).widthsFor([1]), { refused: "measure" });
+});
+
+test("a fit that needs more measurements or more time than its budget is refused whole", async () => {
+  const map = {};
+  for (let i = 0; i < 300000; i += 1) map["A" + (i + 1)] = E("가".repeat(1 + (i % 50)) + i);
+  let calls = 0;
+  const grows = fitOf(map, { measure: () => (calls += 1, calls * 0.001) });
+  assert.deepEqual(await grows.widthsFor([1]), { refused: "budget" });
+  assert.ok(calls <= 200001, "the count ends the fit (" + calls + ")");
+  let clock = 0;
+  const many = {};
+  for (let i = 0; i < 1000; i += 1) many["A" + (i + 1)] = E("글자" + i);
+  const late = fitOf(many, { now: () => clock, measure: () => ((clock += 10), 1) });
+  assert.deepEqual(await late.widthsFor([1]), { refused: "budget" }, "a slow canvas ends the fit by time");
 });
 
 test("the columns a double click fits: the selected ones when the pressed one is among them, else the pressed one", () => {

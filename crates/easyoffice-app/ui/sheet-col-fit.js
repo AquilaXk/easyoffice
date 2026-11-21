@@ -26,10 +26,27 @@
   const GLYPH_EM = 1.5; // no glyph is wider than this many em: a text this short cannot beat the widest so far
   const BASE_FONT_PX = 13;
   const MEMO_LIMIT = 50000;
+  const MAX_MEASURES = 200000; // canvas measurements one fit may make
+  const BUDGET_MS = 1500; // and the time it may take
+  const CLOCK_EVERY = 256; // measurements between two looks at the clock
   const DEFAULT_FONT = `normal 400 ${BASE_FONT_PX}px\u0000`;
 
   function createColFit(deps) {
-    const { getMap, packRef, measure, isColHidden, isRowHidden, mergeAt, headerCells, formatGeneral, defaultWidth, minWidth, maxWidth } = deps;
+    const { getMap, packRef, measure: measureText, isColHidden, isRowHidden, mergeAt, headerCells, formatGeneral, defaultWidth, minWidth, maxWidth } = deps;
+    let measures = 0;
+    let started = 0;
+    let overBudget = false;
+    const now = deps.now || (() => host.performance?.now?.() ?? Date.now());
+    // One canvas measurement, counted; null when the page cannot measure, and the budget ends the fit by setting `overBudget`.
+    function measure(font, family, text) {
+      measures += 1;
+      if (measures > MAX_MEASURES || (measures % CLOCK_EVERY === 0 && now() - started > BUDGET_MS)) {
+        overBudget = true;
+        return null;
+      }
+      return measureText(font, family, text);
+    }
+
     // Widths by font and then by text: a sheet repeats its values, so a text is measured once per font.
     const memo = new Map();
     let memoSize = 0;
@@ -95,13 +112,17 @@
     }
 
     /**
-     * The widths that fit the content of `cols` (1-based columns): `[{ col, width }]`, a column once, hidden columns left
-     * out. `resolveFormats(wanted)` answers the shown text of formatted values ({@link Map} code -> Map(value -> { t })).
-     * `null` when the page cannot measure.
+     * The widths that fit the content of `cols` (1-based columns): `{ widths: [{ col, width }] }`, a column once, hidden columns
+     * left out. `resolveFormats(wanted)` answers the shown text of formatted values ({@link Map} code -> Map(value -> { t })).
+     * `{ refused: "measure" }` when the page cannot measure, `{ refused: "budget" }` when the fit needs more than 200,000
+     * measurements or 1.5 s: no width is changed from a half-done fit.
      */
     async function widthsFor(cols, resolveFormats) {
       const colSet = new Set(cols.filter((c) => !isColHidden(c)));
-      if (colSet.size === 0) return [];
+      if (colSet.size === 0) return { widths: [] };
+      measures = 0;
+      overBudget = false;
+      started = now();
       const map = getMap() || {};
       const wanted = resolveFormats ? wantedFormats(map, colSet) : new Map();
       const formatted = wanted.size > 0 ? await resolveFormats(wanted) : new Map();
@@ -124,13 +145,15 @@
         const px = Number.parseFloat(entry.style?.fontSize) || BASE_FONT_PX;
         if (text.length * px * GLYPH_EM + extra <= widest) continue;
         const w = lineWidth(fontOf(entry.style), text);
-        if (w === null) return null;
+        if (w === null) return { refused: overBudget ? "budget" : "measure" };
         if (w + extra > widest) best.set(col, w + extra);
       }
-      return [...colSet].map((col) => {
-        const text = best.get(col);
-        return { col, width: text === undefined ? defaultWidth : Math.max(minWidth, Math.min(maxWidth, Math.ceil(text + PADDING_PX))) };
-      });
+      return {
+        widths: [...colSet].map((col) => {
+          const text = best.get(col);
+          return { col, width: text === undefined ? defaultWidth : Math.max(minWidth, Math.min(maxWidth, Math.ceil(text + PADDING_PX))) };
+        }),
+      };
     }
 
     return { widthsFor };

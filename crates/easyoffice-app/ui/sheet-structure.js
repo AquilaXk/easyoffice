@@ -329,14 +329,14 @@
         });
         const display = host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
         const fitted = await fit.widthsFor(cols, display?.resolveAll ? (wanted) => display.resolveAll(wanted) : null);
-        if (!fitted) {
-          say("글꼴을 잴 수 없어 열 너비를 맞추지 못함");
+        if (fitted.refused) {
+          say(fitted.refused === "budget" ? "열 너비를 맞추기에 시트가 너무 큼" : "글꼴을 잴 수 없어 열 너비를 맞추지 못함");
           return false;
         }
-        const changed = fitted.filter(({ col, width }) => grid.colWidth(col) !== Math.max(grid.MIN_COL_W, Math.min(grid.MAX_COL_W, Math.round(width))));
+        const changed = fitted.widths.filter(({ col, width }) => grid.colWidth(col) !== Math.max(grid.MIN_COL_W, Math.min(grid.MAX_COL_W, Math.round(width))));
         if (changed.length === 0) return false;
         const change = sheetHistory.begin({ parts: ["sheetColumnWidths"] });
-        for (const { col, width } of changed) grid.applyColWidth(col, width);
+        grid.applyColWidths(changed.map(({ col, width }) => [col, width]));
         sheetHistory.commit(change);
         refreshChrome();
         say("열 너비 자동 맞춤: " + changed.length + "열");
