@@ -12,10 +12,11 @@
 //       (the transpose step sits between the copied matrix and the paste; this reference leaves it
 //        unwritten, so the turn-over follows the behaviour of another office engine: behaviour
 //        only, no code is taken from it)
-//   packages/sheets-ui/src/services/clipboard/utils.ts :31-88 (`getRepeatRange`: a copied block
+// and, at commit 4767b3b309467c283bbd52b725536ca73861e0fc (same license):
+//   packages/sheets-ui/src/services/clipboard/utils.ts :30-95 (`getRepeatRange`: a copied block
 //       repeats over a selection that is a whole multiple of it; `isStrictMode` needs both the rows
 //       and the columns to divide, as the spreadsheet programs do, otherwise one copy is pasted at
-//       the top left), and controllers/clipboard/utils.ts :388-461 (`getClearAndSetMergeMutations`:
+//       the top left), and controllers/clipboard/utils.ts :440-531 (`getClearAndSetMergeMutations`:
 //       the merges inside the pasted area go, the merges of the block are added)
 // Differences: the cell model holds no borders, so there is no "all but border" mode; a column
 // width paste does not cycle; when rows and columns are turned over a formula's references follow

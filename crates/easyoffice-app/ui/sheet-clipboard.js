@@ -342,10 +342,24 @@
       return true;
     }
 
+    // The cells of the clipboard's HTML table (a spreadsheet program's or a page's), with their formats; null when the
+    // clipboard holds none, or when it is the app's own copy, which answers with its richer snapshot (formulas, hyperlinks).
+    function htmlBlockOf(html, text) {
+      const htmlApi = host.__EASYOFFICE_SHEET_CLIP_HTML__;
+      if (!html || !htmlApi) return null;
+      if (!htmlApi.htmlIsFromSpreadsheet(html) && internal && internal.text === text) return null;
+      const { block, refused } = htmlApi.parseClipboardHtml(html, { styleFromPayload: host.__EASYOFFICE_SHEET_STYLE_CODEC__.styleFromPayload });
+      if (refused) say("표가 커서 서식 없이 글자만 붙임");
+      return block || null;
+    }
+
     function onPaste(ev, range) {
       const data = dataOf(ev);
-      const text = data && typeof data.getData === "function" ? data.getData("text/plain") || data.getData("text") : "";
+      const read = (type) => (data && typeof data.getData === "function" ? data.getData(type) || "" : "");
+      const text = read("text/plain") || read("text");
       ev.preventDefault();
+      const rich = htmlBlockOf(read("text/html"), text);
+      if (rich) return pasteBlock(rich, range);
       if (!text) return Promise.resolve(false);
       return pasteBlock(blockOf(text), range);
     }

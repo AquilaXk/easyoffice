@@ -102,6 +102,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-cell-write.js",
     "sheet-chart-svg.js",
     "sheet-chart-ui.js",
+    "sheet-clip-html.js",
     "sheet-clipboard.js",
     "sheet-color-ui.js",
     "sheet-controller.js",

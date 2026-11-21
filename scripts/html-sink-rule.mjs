@@ -37,6 +37,7 @@ const CLEARABLE = new Set(["innerHTML", "srcdoc"]);
  */
 export const PARSE_ALLOWED = new Map([
   ["crates/easyoffice-app/ui/hwp-print.js", "page SVG, whitelist sanitizer"],
+  ["crates/easyoffice-app/ui/sheet-clip-html.js", "clipboard table, inert document, text and attributes are read and nothing is imported"],
   ["apps/hwp-studio/src/command/print-pages.ts", "editor print SVG page"],
 ]);
 
