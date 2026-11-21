@@ -111,4 +111,24 @@ export const paste = (page, formats) =>
     return event.defaultPrevented;
   }, Object.entries(formats));
 
-export const tempCaptureDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "eo-webkit-dom-"));
+/**
+ * The colors of the device pixels `points` (`{ name: [x, y] }`) of a real screenshot of the page, as `{ name: [r, g, b] }`.
+ * The screenshot is drawn into a canvas of the page and read back, so what is measured is what the browser painted,
+ * not what the style says.
+ */
+export async function pixelsAt(page, points) {
+  const png = (await page.screenshot()).toString("base64");
+  return page.evaluate(async ([data, at]) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${data}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0);
+    return Object.fromEntries(Object.entries(at).map(([name, [x, y]]) => [name, [...ctx.getImageData(x, y, 1, 1).data.slice(0, 3)]]));
+  }, [png, points]);
+}
+
+export const tempCaptureDir =() => fs.mkdtempSync(path.join(os.tmpdir(), "eo-webkit-dom-"));

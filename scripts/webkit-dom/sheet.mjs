@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { paste } from "./support.mjs";
+import { paste, pixelsAt } from "./support.mjs";
 
 // The sheet steps of the WebKit suite: what a real browser does that the test doubles of `scripts/test-*.mjs` do not
 // (a NodeList without array methods, real focus, real key and mouse input, layout measured by the engine).
@@ -26,6 +26,70 @@ async function pasteTable(page) {
   await page.click(td("B2"));
   assert.equal(await paste(page, { "text/html": TABLE_HTML, "text/plain": asText([["글자만", "글자만"]]) }), true, "the page takes the paste over");
   await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="B2"]')?.textContent === "이름");
+}
+
+// Two blocks with an outline: the pen's border around C3:D4 (the automatic color follows the theme) and the red edges of a
+// conditional format on B8:B9. `above` and `left` own the top and left line (a shared edge is drawn in the cell before).
+const OUTLINES = [
+  { name: "the border of C3:D4", tl: "C3", tr: "D3", bl: "C4", above: "C2", left: "B3" },
+  { name: "the red rule edges of B8:B9", tl: "B8", tr: "B8", bl: "B9", above: "B7", left: "A8" },
+];
+const RED_EDGE = "thin:ff0000";
+
+async function drawOutlines(page) {
+  await page.click(td("C3"));
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.evaluate(() => document.querySelector('[data-sheet-look="border-outer"]').click());
+  for (const [ref, value] of [["B8", "4"], ["B9", "5"]]) {
+    await page.click(td(ref));
+    await page.keyboard.type(value);
+    await page.keyboard.press("Enter");
+  }
+  await page.evaluate((edge) => window.__EASYOFFICE_SHEET_RULES__.set("Sheet1", {
+    cf: [{ r: "B8:B9", t: "cellIs", op: "greaterThan", a: "3", b: "", stop: false, fl: 0, bd: { t: edge, r: edge, b: edge, l: edge } }],
+    dv: [],
+  }), RED_EDGE);
+  await page.click(td("H14"));
+}
+
+// Where the four lines of `outline` run in device pixels (the last device row or column of each line, in the middle of
+// the cell next to it) and the color of the border that draws each.
+const edgePoints = (page, outline, scale) =>
+  page.evaluate(([o, s]) => {
+    const cell = (ref) => document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+    const box = (ref) => cell(ref).getBoundingClientRect();
+    const color = (ref, prop) => getComputedStyle(cell(ref))[prop].match(/\d+/g).slice(0, 3).map(Number);
+    const [tl, tr, bl] = [box(o.tl), box(o.tr), box(o.bl)];
+    const midX = Math.round(((tl.left + tl.right) / 2) * s);
+    const midY = Math.round(((tl.top + tl.bottom) / 2) * s);
+    return {
+      points: {
+        top: [midX, Math.round(tl.top * s) - 1],
+        bottom: [midX, Math.round(bl.bottom * s) - 1],
+        left: [Math.round(tl.left * s) - 1, midY],
+        right: [Math.round(tr.right * s) - 1, midY],
+      },
+      owner: { top: color(o.above, "borderBottomColor"), bottom: color(o.bl, "borderBottomColor"), left: color(o.left, "borderRightColor"), right: color(o.tr, "borderRightColor") },
+      grid: color("H16", "borderBottomColor"),
+    };
+  }, [outline, scale]);
+
+async function assertOutlinesPainted(page, scale, label) {
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((mode) => window.__EASYOFFICE_THEME__.setMode(mode), theme);
+    await page.waitForFunction((mode) => document.documentElement.dataset.themeEffective === mode, theme);
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    for (const outline of OUTLINES) {
+      const { points, owner, grid } = await edgePoints(page, outline, scale);
+      const painted = await pixelsAt(page, points);
+      for (const side of Object.keys(points)) {
+        const near = painted[side].every((channel, i) => Math.abs(channel - owner[side][i]) <= 2);
+        assert.ok(near, `${label} ${theme}: ${outline.name}, ${side} line at ${points[side]} is rgb(${painted[side]}), the border is rgb(${owner[side]})`);
+        assert.notDeepEqual(owner[side], grid, `${label} ${theme}: ${outline.name}, the ${side} line has the grid line's color, the test cannot tell them apart`);
+      }
+    }
+  }
 }
 
 export const sheetSteps = [
@@ -85,6 +149,25 @@ export const sheetSteps = [
     assert.equal(await page.$eval(td("B14"), (el) => el.classList.contains("edit-grow")), true);
     await page.keyboard.press("Escape");
     assert.equal(await widthOf(page, "B14"), before);
+  }],
+
+  ["cell border and rule edge lines show in the pixels of a 1x screenshot, light and dark", async (page) => {
+    await drawOutlines(page);
+    await assertOutlinesPainted(page, 1, "1x");
+  }],
+
+  ["the same lines show at 2x", async (page) => {
+    const context = await page.context().browser().newContext({ viewport: { width: 1100, height: 700 }, deviceScaleFactor: 2 });
+    try {
+      const retina = await context.newPage();
+      retina.setDefaultTimeout(8000);
+      await retina.goto(page.url().replace("win=webkit-dom", "win=webkit-dom-2x"));
+      await retina.waitForSelector("#pane-sheet td[data-cell]");
+      await drawOutlines(retina);
+      await assertOutlinesPainted(retina, 2, "2x");
+    } finally {
+      await context.close();
+    }
   }],
 
   ["Enter and Tab walk a selected range and keep it", async (page) => {
