@@ -42,9 +42,11 @@
       const mod = getActiveModule();
       const tab = SCRIPT_MODULES.has(mod) ? getDocTab(mod) : null;
       if (!tab || (!force && typingEpoch === getEpoch())) return null;
-      const before = structuredClone(tab);
+      // A forced snapshot is taken at `compositionstart`, where the live document is still the state before: it is the saved
+      // state of the run only for a run that has not started, so the live one is used.
+      const before = force ? null : structuredClone(tab);
       const snapshot = captureWorkspaceSnapshot(false);
-      snapshot.docTabs[mod] = before;
+      if (before) snapshot.docTabs[mod] = before;
       return snapshot;
     }
 

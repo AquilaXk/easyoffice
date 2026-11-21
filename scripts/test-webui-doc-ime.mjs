@@ -192,3 +192,22 @@ test("a composition that never ends does not hold the shortcuts: the editor losi
   await flushAsyncTurns(20);
   assert.equal(u.editor.querySelector("p").textContent, "앞뒤", "the module switch ended the composition");
 });
+
+test("the step of a replaced selection goes back to the text as it was then, also after typing in the same run", async () => {
+  const t = await openWithSelection();
+  t.fire("beforeinput", { inputType: "insertText", data: "x" });
+  t.para.firstChild.data = "앞뒤x";
+  t.fire("input", { inputType: "insertText", data: "x" });
+  t.selection.addRange(new PasteRange(t.para.firstChild, 0, t.para.firstChild, 1));
+  t.fire("compositionstart");
+  t.fire("beforeinput", { inputType: "insertCompositionText", data: "ㅎ", isComposing: true });
+  t.para.firstChild.data = "ㅎ뒤x";
+  t.fire("input", { inputType: "insertCompositionText", data: "ㅎ", isComposing: true });
+  t.fire("beforeinput", { inputType: "deleteCompositionText", isComposing: true });
+  t.para.firstChild.data = "뒤x";
+  t.fire("input", { inputType: "deleteCompositionText", data: null, isComposing: true });
+  t.fire("compositionend", { data: "" });
+  t.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(20);
+  assert.equal(t.editor.querySelector("p").textContent, "앞뒤x");
+});
