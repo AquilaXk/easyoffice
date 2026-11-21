@@ -25,7 +25,7 @@ const FRAME_FONT_PT: f64 = 10.0;
 const FRAME_LINE_PT: f64 = 12.0;
 /// The sizes the sheet window draws with (`sheet-grid.js`: `DEFAULT_COL_W`, `ROW_H`), in CSS px.
 pub(crate) const DEFAULT_COL_PX: f64 = 96.0;
-pub(crate) const ROW_PX: f64 = 24.0;
+pub(crate) const ROW_PX: f64 = crate::sheet_styling::GRID_ROW_PX;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;
 const SHEET_FONT_PT: f64 = 10.0;
@@ -76,6 +76,16 @@ fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) ->
     out.extend(std::iter::repeat_n(ch, copies));
     out.push_str(&text[at..]);
     out
+}
+
+/// The height of `row` on the page in points: none for a hidden row, else its height, the sheet's default row height or
+/// the grid's row height, times `scale` (PD-287).
+pub(crate) fn row_height_pt(styling: &SheetStyling, row: u32, scale: f64) -> f64 {
+    if styling.row_hidden(row) {
+        0.0
+    } else {
+        styling.row_height_px(row, ROW_PX) * PDF_PT_PER_PX * scale
+    }
 }
 
 /// Text width in points at `size` pt.
@@ -457,6 +467,18 @@ pub(crate) fn encode_sheet_pdf(
     stylings: &[SheetStyling],
     shown: &[SheetShown],
 ) -> Result<Vec<u8>, EasyOfficeError> {
+    // A height the file formats cannot hold would make a row (or a page of them) of any size.
+    if !stylings.iter().all(|s| {
+        crate::row_heights_within_bounds(
+            &s.row_heights,
+            s.default_row_height,
+            crate::OoxmlCodec::MAX_XLSX_ROWS,
+        )
+    }) {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "PDF 행 높이가 허용 범위를 초과하여 저장할 수 없습니다.".to_string(),
+        ));
+    }
     crate::sheet_styling::sheet_chart::validate_workbook_charts(stylings)?;
     crate::sheet_styling::sheet_media_notes::validate_workbook_sheet_images(stylings)?;
     crate::sheet_styling::sheet_media_notes::validate_workbook_notes(stylings)?;
@@ -620,7 +642,7 @@ fn sheet_area_pages(
             if styling.is_some_and(|s| s.row_hidden(r)) || in_runs(hidden_rows, r) {
                 0.0
             } else {
-                ROW_PX * PT_PER_PX
+                styling.map_or(ROW_PX, |s| s.row_height_px(r, ROW_PX)) * PT_PER_PX
             }
         })
         .collect();

@@ -5112,3 +5112,17 @@
 - **Verified by** `cargo test -p easyoffice-formats --test sheet_default_row_height` 7개(XLSX 쓰기·읽기·그룹 수준과 함께, 악의적 값 9개와 경계값, 범위 밖 쓰기 거부, ODS 왕복·끝 띠·악의적 띠 12종), 앱 JSON 시험 3개, `node --test scripts/test-webui-sheet-default-row-height.mjs` 17개(모델, 행 맞춤, 레이아웃 JSON, 파일이 연 시트의 행 높이·창·여백, 전체 선택 끌기·더블클릭·실행 취소, 일부 선택이 기본값을 건드리지 않음)와 기존 행 높이 시험 50개.
 - **Revisit when** 글꼴을 따르는 기본값을 격자에 반영할 때, 시트 전체를 고르는 모서리 단추를 둘 때, 이미지·차트 위치를 행 높이에 맞출 때.
 
+## PD-287. 시트 PDF가 행 높이로 행 위치와 그림 위치를 계산함
+
+- **Status** Implemented (QA 요청 2026-11-22). `crates/easyoffice-formats/src/pdf_laid.rs`(`row_height_pt`, `encode_sheet_pdf`의 범위 검사), `pdf_chart.rs`, `pdf_sheet_media.rs`, `sheet_row_height.rs`(`SheetStyling::row_height_px`). 시험 `crates/easyoffice-formats/tests/sheet_pdf_row_heights.rs`.
+- **Context** PD-278·PD-286이 행 높이와 기본 행 높이를 모델에 저장했지만 시트 PDF는 모든 행을 24px로 그려, 높이를 정한 시트의 PDF가 화면·파일과 달랐다. 그림·차트도 칸에 걸친 두 칸 앵커의 아래쪽 행 위치를 24px 행으로 셌다.
+- **Decision (`PD-287`)**
+  1. **행 높이**: 보이는 행의 높이는 `row_heights`의 그 행 높이, 없으면 사용자가 정한 기본 행 높이(PD-286), 없으면 격자 24px이다. `row_heights`는 내용을 따르는 `ht`(`custom` 거짓)도 쓴다. 파일의 `ht`가 그 프로그램이 잰 실제 높이라서다. 페이지를 거친 저장 요청에는 사용자가 정한 높이만 있어 화면과 같다. 글꼴을 따르는 기본값은 격자 24px을 그대로 둔다(PD-286 5항). 숨은 행은 0이다. PDF의 줄바꿈 행 높이는 이번에도 계산하지 않는다.
+  2. **그림·차트 위치**: 칸에 두 칸 앵커(`from`·`to` 행과 EMU 오프셋)가 있으면 행 위치를 같은 `row_height_pt`로 센다. 이전에는 `pdf_chart.rs`와 `pdf_sheet_media.rs`가 같은 함수를 하나씩 따로 가졌고 둘 다 24px였다. 한 함수로 합쳤다. 두 칸 앵커가 없고 픽셀 좌표만 있는 그림은 픽셀을 24px 행으로 칸에 옮기는 기존 변환(`sync_grid_from_px`)을 쓴다(TODO.md).
+  3. **상한**: `encode_sheet_pdf`는 시트의 행 높이와 기본 행 높이가 모델 범위(0 초과 409pt 이하, 시트당 100,000행, 1,048,576행 안)를 벗어나면 PDF를 만들지 않고 거부한다(`ResourceBudgetExceeded`). 파일 읽기와 페이지 JSON은 이미 범위 밖 값을 걸러 오지만 호출부가 모델을 직접 채울 수 있어서다. 쪽 수와 칸 수 상한(5,000쪽, 20만 칸)은 그대로여서 409pt 행을 많이 둔 시트는 쪽 상한에서 막힌다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 PDF 크레이트를 그대로: PDF 쓰기 크레이트는 연산자를 쓰는 층이고 시트 쪽 배치(쪽 나누기·반복 행·배율)를 하지 않아 이 저장소의 기존 배치 코드(`pdf_laid.rs`)가 그대로 맞다. (2) 이미 쓰는 의존성: 쪽 배치의 `row_sizes`와 그림·차트의 `y_at_row`가 쓰던 자리에 모델의 행 높이를 넣었다. (3) 옮긴 코드 없음.
+- **Why** 행 높이를 정한 시트가 PDF에서도 화면·파일과 같은 쪽 나눔과 그림 위치를 갖게 한다.
+- **Trade-offs** 두 칸 앵커가 없는 그림은 24px 기준 그대로다. 행 높이가 저장된 파일(`ht`)을 PDF로 바꾸면 화면(24px 격자)과 달리 파일의 실제 높이를 쓴다. 높이가 다른 행이 많을수록 쪽당 행 수가 달라진다.
+- **Verified by** `cargo test -p easyoffice-formats --test sheet_pdf_row_heights` 7개: 행 사각형의 y·높이를 PDF 연산자에서 읽어 행마다 24px·정한 높이·기본 행 높이·숨은 행을 확인하고, 이미지의 `cm` 행렬로 두 칸 앵커의 높이(140px → 105pt)와 위쪽 위치(첫 행 16px 늘어남 → 12pt)를 확인하고, 범위 밖 높이 5종 거부를 확인한다. 고치기 전 코드(`row_sizes`를 24px로 되돌림)에서 3개가 `row 1: 18 pt, 80 px` 등으로 실패한다.
+- **Revisit when** 픽셀 좌표만 가진 그림·차트를 행 높이에 맞출 때, PDF에서 줄바꿈 행 높이를 계산할 때.
+

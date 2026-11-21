@@ -6,7 +6,9 @@
 
 use std::fmt::Write;
 
-use crate::pdf_laid::{fit_text, rgb_ops, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX, ROW_PX};
+use crate::pdf_laid::{
+    fit_text, rgb_ops, row_height_pt, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX,
+};
 use crate::sheet_styling::sheet_chart::{
     parse_chart_number, ChartKind, ChartLegendPos, ResolvedSeriesData, SheetCellIndex, SheetChart,
     EMU_PER_PX, MAX_SERIES_PER_CHART,
@@ -41,14 +43,6 @@ fn col_width_pt(styling: &SheetStyling, col: u32, scale: f64) -> f64 {
         .map_or(DEFAULT_COL_PX, |px| f64::from(*px))
         * PDF_PT_PER_PX
         * scale
-}
-
-fn row_height_pt(styling: &SheetStyling, row: u32, scale: f64) -> f64 {
-    if styling.row_hidden(row) {
-        0.0
-    } else {
-        ROW_PX * PDF_PT_PER_PX * scale
-    }
 }
 
 fn x_at_col(

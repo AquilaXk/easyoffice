@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::pdf_image::PdfImageObject;
-use crate::pdf_laid::{fit_text, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX, ROW_PX};
+use crate::pdf_laid::{fit_text, row_height_pt, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX};
 use crate::sheet_styling::sheet_chart::{SheetCellIndex, EMU_PER_PX};
 use crate::sheet_styling::sheet_media_notes::effective_image_two_cell;
 use crate::{pack_cell_pos, OdsUnpacked, SheetStyling};
@@ -31,14 +31,6 @@ fn col_width_pt(styling: &SheetStyling, col: u32, scale: f64) -> f64 {
         .map_or(DEFAULT_COL_PX, |px| f64::from(*px))
         * PDF_PT_PER_PX
         * scale
-}
-
-fn row_height_pt(styling: &SheetStyling, row: u32, scale: f64) -> f64 {
-    if styling.row_hidden(row) {
-        0.0
-    } else {
-        ROW_PX * PDF_PT_PER_PX * scale
-    }
 }
 
 fn x_at_col(
