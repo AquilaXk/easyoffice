@@ -304,6 +304,46 @@
       });
     }
 
+    // Fits the width of `cols` to their content as ONE undoable step (`sheet-col-fit.js`); the widths are the grid's own,
+    // so a fitted column saves like a dragged one.
+    function fitColumns(cols) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        commitIfEditing();
+        const name = getActiveSheetName();
+        if (protectApi && !protectApi.guardAction(name, "formatColumns")) return false;
+        sheetDataStore[name] = snapshotDomSheetCells();
+        const hasFilters = Boolean(layoutApi.filterOf(name)) || layoutApi.tablesOf(name).length > 0;
+        const fit = host.__EASYOFFICE_CREATE_SHEET_COL_FIT__({
+          getMap: () => sheetDataStore[name],
+          packRef: grid.packRef,
+          measure: grid.measureText,
+          isColHidden: (c) => layoutApi.colHidden(name, c),
+          isRowHidden: (r) => Boolean(layoutApi.rowHidden(name, r)),
+          mergeAt: (r, c) => layoutApi.mergeAt(name, r, c),
+          headerCells: (r, c) => hasFilters && layoutApi.filterOwnerAt(name, r, c) !== undefined,
+          formatGeneral: host.__EASYOFFICE_SHEET_GRID_UTILS__.formatGeneral,
+          defaultWidth: grid.DEFAULT_COL_W,
+          minWidth: grid.MIN_COL_W,
+          maxWidth: grid.MAX_COL_W,
+        });
+        const display = host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
+        const fitted = await fit.widthsFor(cols, display?.resolveAll ? (wanted) => display.resolveAll(wanted) : null);
+        if (!fitted) {
+          say("글꼴을 잴 수 없어 열 너비를 맞추지 못함");
+          return false;
+        }
+        const changed = fitted.filter(({ col, width }) => grid.colWidth(col) !== Math.max(grid.MIN_COL_W, Math.min(grid.MAX_COL_W, Math.round(width))));
+        if (changed.length === 0) return false;
+        const change = sheetHistory.begin({ parts: ["sheetColumnWidths"] });
+        for (const { col, width } of changed) grid.applyColWidth(col, width);
+        sheetHistory.commit(change);
+        refreshChrome();
+        say("열 너비 자동 맞춤: " + changed.length + "열");
+        return true;
+      });
+    }
+
     // Merging keeps the anchor cell's content and clears the other cells of the range.
     function merge() {
       const rg = getRange();
@@ -533,8 +573,20 @@
       }
     }
 
+    // A double click on the edge of a column header fits the column (the selected columns when it is one of them).
+    function fitFromEdge(ev) {
+      const handle = ev.target?.closest?.(".col-resizer");
+      if (!handle) return false;
+      ev.preventDefault();
+      const pressed = grid.colIndex(handle.dataset.colResizer || "A");
+      const rg = getRange();
+      void fitColumns(host.__EASYOFFICE_SHEET_COL_FIT__.columnsToFit(pressed, { axis: getSelection().axis, c1: rg.c1, c2: rg.c2 }));
+      return true;
+    }
+
     // A double click on the thick edge of a header after a hidden run shows that run again.
     function onDblClick(ev) {
+      if (fitFromEdge(ev)) return;
       const th = ev.target?.closest?.("#pane-sheet th[data-hidden-run]");
       if (!th) return;
       const box = th.getBoundingClientRect();

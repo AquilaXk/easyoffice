@@ -93,6 +93,15 @@
     return host.__EASYOFFICE_SHEET_LINE_COUNT__(text, width, (t) => measurer.measureText(t).width);
   }
 
+  // Width of one line of `text` in `font` (a CSS font without the family) and the cell's own `family`, else the sheet's;
+  // null when the page cannot measure (yet).
+  function measureLine(td, font, family, text) {
+    if (td && !measurer?.eoFamily) textWidth(td, "");
+    if (!measurer?.eoFamily) return null;
+    measurer.font = font + " " + (family ? '"' + family.replaceAll('"', "") + '", ' : "") + measurer.eoFamily;
+    return measurer.measureText(text).width;
+  }
+
   // Width of a column in px (set by the grid that owns the page's sheet).
   let columnWidthOf = null;
 
@@ -942,7 +951,8 @@
     return {
       MAX_ROWS, MAX_COLS, ROW_H, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
-      applyColWidth, layoutChanged, rowAtVisible,
+      applyColWidth, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W,
+      measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
