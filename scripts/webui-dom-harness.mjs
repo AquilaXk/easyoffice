@@ -138,6 +138,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-point-ui.js",
   "../crates/easyoffice-app/ui/sheet-nav.js",
   "../crates/easyoffice-app/ui/sheet-edit-box.js",
+  "../crates/easyoffice-app/ui/sheet-selection-chrome.js",
+  "../crates/easyoffice-app/ui/sheet-mouse.js",
   "../crates/easyoffice-app/ui/sheet-input.js",
   "../crates/easyoffice-app/ui/sheet-sort.js",
   "../crates/easyoffice-app/ui/sheet-ops.js",
