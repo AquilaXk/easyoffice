@@ -159,6 +159,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/sheet-delta.js",
   "../crates/easyoffice-app/ui/sheet-history.js",
+  "../crates/easyoffice-app/ui/command-history.js",
   "../crates/easyoffice-app/ui/workspace-history.js",
   "../crates/easyoffice-app/ui/ribbon-history.js",
   "../crates/easyoffice-app/ui/workspace-session.js",

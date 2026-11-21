@@ -237,6 +237,7 @@ function stacksOf() {
   const loaded = {};
   loadUiModule(UI("sheet-refs.js"), loaded);
   loadUiModule(UI("sheet-delta.js"), loaded);
+  loadUiModule(UI("command-history.js"), loaded);
   loadUiModule(UI("workspace-history.js"), loaded);
   const feedback = { textContent: "" };
   const document = { getElementById: (id) => (id === "status-command-feedback" ? feedback : null) };

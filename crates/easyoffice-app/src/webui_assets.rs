@@ -48,6 +48,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "board-router.js",
     "board-studio.js",
     "color-picker.js",
+    "command-history.js",
     "copilot-actions.js",
     "copilot-catalog.js",
     "copilot-cursor.js",

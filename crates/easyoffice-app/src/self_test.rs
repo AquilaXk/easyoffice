@@ -583,6 +583,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/index.html"), "./hwp-print.js"),
     (include_str!("../ui/index.html"), "./hwp-session.js"),
     (include_str!("../ui/app.js"), "compositionstart"),
+    (
+        include_str!("../ui/command-history.js"),
+        "CREATE_COMMAND_HISTORY",
+    ),
 ];
 
 fn check_embedded_assets() -> Result<(), EasyOfficeError> {
