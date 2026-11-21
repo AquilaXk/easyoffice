@@ -5109,7 +5109,7 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트를 그대로: XLSX·ODS 쓰기까지 하는 유지되는 크레이트 가운데 우리 `SheetStyling`·ODS 행 스타일 표·페이지 JSON에 맞는 것이 없다. 읽기 전용 크레이트는 시트 서식을 모델에 두지 않는다. (2) 이미 쓰는 의존성: PD-278의 `RowHeight`·범위 검사·`xlsx_row_attrs`·ODS 행 스타일 표(`ro<N>`)·`rowFit`·`sheetLayout` 실행 취소 부분을 그대로 이었다. (3) 이식: 허용 라이선스(MIT 또는 Apache-2.0) 시트 구현의 `get_default_column_width`(시트에 `sheetFormatPr`가 하나, 숫자가 아니면 프로그램 기본값)의 구조만 따랐고 옮긴 줄은 0이다(`THIRD_PARTY_NOTICES.md`). 행 쪽 속성, 범위, ODS 띠는 ECMA-376 18.3.1.81과 ODF 1.2 17.17에서 직접 썼다.
 - **Why** 모든 행을 같은 높이로 맞춘 파일이 열면 24px로 돌아가고 저장하면 높이가 사라지는 문제와, 전체 선택 뒤 행 높이가 한 행에만 먹는 문제를 표 계산 프로그램의 동작에 맞춘다.
 - **Trade-offs** 글꼴을 따르는 기본값(대부분의 파일이 15pt 등으로 적는 값)은 격자에 반영하지 않는다. ODS는 쓸 때 파일이 한 띠(최대 1,048,576행 반복 한 줄)만큼 커진다. 마지막 행에서 1,024행 이내에 쓴 행이 있으면 끝 띠가 짧아 읽을 때 기본값으로 보지 않는다. 기본 행 높이를 가진 시트의 이미지·차트 위치(`left_px`·`top_px`)는 24px 행으로 계산한 채 남는다(PD-287). 전체 선택(Ctrl+A)은 이 화면에서 데이터 범위만 고르므로 `whole` 표시로 구분했고, 표 계산 프로그램처럼 시트 전체를 고르는 모서리 단추는 없다.
-- **Verified by** `cargo test -p easyoffice-formats --test sheet_default_row_height` 7개(XLSX 쓰기·읽기·그룹 수준과 함께, 악의적 값 9개와 경계값, 범위 밖 쓰기 거부, ODS 왕복·끝 띠·악의적 띠 12종), 앱 JSON 시험 3개, `node --test scripts/test-webui-sheet-default-row-height.mjs` 17개(모델, 행 맞춤, 레이아웃 JSON, 파일이 연 시트의 행 높이·창·여백, 전체 선택 끌기·더블클릭·실행 취소, 일부 선택이 기본값을 건드리지 않음)와 기존 행 높이 시험 50개.
+- **Verified by** `cargo test -p easyoffice-formats --test sheet_default_row_height` 7개: XLSX 쓰기·읽기(`customHeight` 유무)와 그룹 수준 옆의 `sheetFormatPr`, 기본값이 없으면 요소를 쓰지 않음, `NaN`·`inf`·음수·0·409.5·`1e400`·글자·빈 값·4,096자 값은 기본값 없음(409와 0.01은 읽음), 범위 밖 기본값 쓰기 거부, ODS 왕복(모든 행의 기본 스타일, 끝 띠, 행마다 정한 높이는 남음), 쓸 수 없는 끝 띠(`NaN`, 999pt, 음수, 2,048자 길이, 높이 없음, 없는 스타일, 마지막 행에 닿지 않거나 넘는 띠, 반복 횟수가 숫자가 아님). 앱 JSON 시험 2개(왕복, 악의적 값 12종 거부). `node --test scripts/test-webui-sheet-default-row-height.mjs` 17개: 모델, 행 맞춤(기준 높이가 다른 행, 큰 글꼴, 큰 기본값), 레이아웃 JSON, 파일이 연 시트의 행 높이·창·여백·스크롤, 전체 선택 끌기·더블클릭·실행 취소, 일부 선택이 기본값을 건드리지 않음. 실제 WebKit 단계(실제 마우스 끌기: 전체 선택 뒤 24px → 40px로 모든 행, 선택 없이 끌면 한 행). 전후 캡처 `.scratch/shots/rows-before.png`·`rows-after.png`.
 - **Revisit when** 글꼴을 따르는 기본값을 격자에 반영할 때, 시트 전체를 고르는 모서리 단추를 둘 때, 이미지·차트 위치를 행 높이에 맞출 때.
 
 ## PD-287. 시트 PDF가 행 높이로 행 위치와 그림 위치를 계산함
@@ -5123,7 +5123,7 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 PDF 크레이트를 그대로: PDF 쓰기 크레이트는 연산자를 쓰는 층이고 시트 쪽 배치(쪽 나누기·반복 행·배율)를 하지 않아 이 저장소의 기존 배치 코드(`pdf_laid.rs`)가 그대로 맞다. (2) 이미 쓰는 의존성: 쪽 배치의 `row_sizes`와 그림·차트의 `y_at_row`가 쓰던 자리에 모델의 행 높이를 넣었다. (3) 옮긴 코드 없음.
 - **Why** 행 높이를 정한 시트가 PDF에서도 화면·파일과 같은 쪽 나눔과 그림 위치를 갖게 한다.
 - **Trade-offs** 두 칸 앵커가 없는 그림은 24px 기준 그대로다. 행 높이가 저장된 파일(`ht`)을 PDF로 바꾸면 화면(24px 격자)과 달리 파일의 실제 높이를 쓴다. 높이가 다른 행이 많을수록 쪽당 행 수가 달라진다.
-- **Verified by** `cargo test -p easyoffice-formats --test sheet_pdf_row_heights` 7개: 행 사각형의 y·높이를 PDF 연산자에서 읽어 행마다 24px·정한 높이·기본 행 높이·숨은 행을 확인하고, 이미지의 `cm` 행렬로 두 칸 앵커의 높이(140px → 105pt)와 위쪽 위치(첫 행 16px 늘어남 → 12pt)를 확인하고, 범위 밖 높이 5종 거부를 확인한다. 고치기 전 코드(`row_sizes`를 24px로 되돌림)에서 3개가 `row 1: 18 pt, 80 px` 등으로 실패한다.
+- **Verified by** `cargo test -p easyoffice-formats --test sheet_pdf_row_heights` 7개: 행 사각형의 y·높이를 PDF 연산자에서 읽어 행마다 24px·정한 높이·기본 행 높이·숨은 행을 확인하고, 이미지의 `cm` 행렬로 두 칸 앵커의 높이(140px → 105pt)와 위쪽 위치(첫 행 16px 늘어남 → 12pt)를 확인하고, 범위 밖 높이 5종 거부를 확인한다. 고치기 전 코드(`row_sizes`를 24px로 되돌림)에서 3개가 `row 1: 18 pt, 80 px` 등으로 실패한다. 전후 PDF 캡처 `.scratch/shots/pdf-before-1.png`·`pdf-after-1.png`(기본 행 높이 30pt, 둘째 행 60pt, 다섯째 행 15pt, 둘째~다섯째 행에 걸친 그림).
 - **Revisit when** 픽셀 좌표만 가진 그림·차트를 행 높이에 맞출 때, PDF에서 줄바꿈 행 높이를 계산할 때.
 
 ## PD-288. XLSX 규칙 서식(`dxf`)의 채우기·글자색이 테마·`indexed` 색을 풂
@@ -5154,7 +5154,7 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 라이브러리를 그대로: 이 화면의 규칙 답을 종이에 옮기는 것은 우리 `fx` 모델에 묶여 있어 맞는 것이 없다. (2) 이미 쓰는 의존성: `sheet-rules.js`의 규칙 답 저장소, `withEdges`·`overlayRuleEdges`, `printStyle`의 변 칠하기(함수로 뗌), 인쇄 CSS의 글꼴 클래스를 그대로 썼다. (3) 옮긴 코드 없음(0줄).
 - **Why** 조건부 서식이 있는 시트를 인쇄하면 화면과 같은 색·굵기·테두리가 종이에 나오게 한다.
 - **Trade-offs** 칸마다 규칙 답을 두 번 읽는다(Map 조회 둘, 규칙 변이 없는 시트는 하나). 인쇄 칸 수 상한(20만)이 그대로 상한이다. 엔진 PDF 내보내기(`pdf_laid.rs`)는 이번에도 규칙 서식을 그리지 않는다(칸의 서식만 그림).
-- **Verified by** `node --test scripts/test-webui-sheet-print-rules.mjs` 7개: 채우기·글자색·글꼴 비트(칸 자신의 채우기 위), 화면의 `--cf-bg`·`--cf-fg`·`cf-bold`와 같은 값, 서식 없는 칸의 규칙 채우기, 규칙 테두리와 이웃 칸이 마주 보는 변, 칸 자신의 변 위에 덮기, 규칙 없는 시트는 이전과 같음, 격자 밖 좌표(0, 음수, `NaN`, 소수, 2^31)와 없는 시트의 답은 없음. 규칙 읽기를 끈 인쇄 대 켠 인쇄의 전후 캡처(`.scratch/shots/`).
+- **Verified by** `node --test scripts/test-webui-sheet-print-rules.mjs` 7개: 채우기·글자색·글꼴 비트(칸 자신의 채우기 위), 화면의 `--cf-bg`·`--cf-fg`·`cf-bold`와 같은 값, 서식 없는 칸의 규칙 채우기, 규칙 테두리와 이웃 칸이 마주 보는 변, 칸 자신의 변 위에 덮기, 규칙 없는 시트는 이전과 같음, 격자 밖 좌표(0, 음수, `NaN`, 소수, 2^31)와 없는 시트의 답은 없음. 실제 WebKit 단계(엔진이 계산한 규칙 답이 인쇄 칸의 `background-color`·`color`·굵게 클래스로 나옴). 규칙 읽기를 끈 인쇄 대 켠 인쇄의 전후 캡처(`.scratch/shots/print-before.png`·`print-after.png`, 인쇄 미디어 에뮬레이션).
 - **Revisit when** 데이터 막대·아이콘 집합을 인쇄할 때, 엔진 PDF에 규칙 서식을 그릴 때.
 
 ## PD-290. Ctrl+PageDown·Ctrl+PageUp과 macOS Option+→·←로 다음·이전 시트로 이동
@@ -5170,6 +5170,6 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 라이브러리를 그대로: 키 규칙은 표 계산 프로그램 동작이라 가져올 것이 없다. (2) 이미 쓰는 의존성: 이동 규칙 모듈 `sheet-nav.js`(순수 함수), 탭 줄의 보이는 시트 목록(`visibleOf`), 탭 전환(`switchSheetTab`)을 그대로 이었다. (3) 이식: 참조 시트 구현의 시트 전환 명령은 키 바인딩을 이 형태로 갖지 않아 옮긴 코드 없음(0줄).
 - **Why** 시트가 여럿인 통합 문서를 키보드로 훑는 흐름을 표 계산 프로그램과 맞춘다.
 - **Trade-offs** 플랫폼 판별이 `navigator.platform`이라 이 값이 맥을 알리지 않는 환경에서는 Option+→·←가 동작하지 않는다(Ctrl+PageDown·PageUp은 동작). Windows·Linux에는 Option+→에 해당하는 키가 없다.
-- **Verified by** `node --test scripts/test-sheet-nav.mjs` 새 시험 5개(키 조합 표: Ctrl, Option, 섞인 보조 키 14종은 단계 아님, 양 끝에서 돌지 않음, 숨은 시트·없는 시트·시트 하나), `node --test scripts/test-webui-sheet-tab-keys.mjs` 8개(탭 줄 순서로 이동, 끝에서 멈춤, `preventDefault`, 숨은 시트 건너뜀, macOS Option+→·←, 다른 플랫폼은 없음, Shift·Alt·Ctrl+화살표 등 다른 키, 편집 중, 전환 뒤 편집 내용 유지와 포커스 복귀), 실제 WebKit 단계(`scripts/webkit-dom`).
+- **Verified by** `node --test scripts/test-sheet-nav.mjs` 새 시험 5개(키 조합 표: Ctrl, Option, 섞인 보조 키 14종은 단계 아님, 양 끝에서 돌지 않음, 숨은 시트·없는 시트·시트 하나), `node --test scripts/test-webui-sheet-tab-keys.mjs` 8개(탭 줄 순서로 이동, 끝에서 멈춤, `preventDefault`, 숨은 시트 건너뜀, macOS Option+→·←, 다른 플랫폼은 없음, Shift·Alt·Ctrl+화살표 등 다른 키, 편집 중, 전환 뒤 편집 내용 유지와 포커스 복귀), 실제 WebKit 단계(`scripts/webkit-dom`: Control+PageUp·PageDown을 실제 키로 눌러 시트가 바뀌고 양 끝에서 멈추며 전환 뒤에도 키가 이어짐). PD-286~PD-290 전체 검증: `node --test scripts/test-*.mjs` 2,112개 중 2,111개 통과·실패 0·건너뜀 1, WebKit 19단계 통과, `cargo test --workspace --exclude easyoffice-desktop` 3,163개 통과·실패 0·무시 76, `cargo test -p easyoffice-desktop` 694개 통과·실패 0·무시 9, clippy `-D warnings`(데스크톱 포함), fmt, `--self-test` 통과.
 - **Revisit when** 시트를 묶어 고르는 Ctrl+Shift+PageDown을 넣을 때, 창 크기·플랫폼을 셸이 알려 주도록 바꿀 때.
 
