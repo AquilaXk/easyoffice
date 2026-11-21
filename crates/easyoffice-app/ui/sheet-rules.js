@@ -287,6 +287,9 @@
       else fx.delete(sheet);
     }
 
+    // Whether the sheet holds the engine's answer for its rules (an answer may be empty); a sheet cleared of it must be answered again.
+    const hasFx = (sheet) => fx.has(sheet);
+
     // Re-reads whether a check box rule exists; true when any did before or does now, since the
     // cells then need painting again.
     function refreshBoxes() {
@@ -506,6 +509,7 @@
       payloadFor,
       applyPacked,
       clearFx,
+      hasFx,
       fxAt,
       colorRuns,
       paintTd,

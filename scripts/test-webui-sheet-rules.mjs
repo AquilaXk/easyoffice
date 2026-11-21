@@ -206,6 +206,25 @@ test("a sheet with rules but no formulas still syncs the session and shows the e
   rules.replaceAll({});
 });
 
+test("a sheet whose look was cleared (an undo or redo of its rules) is answered again for rules the session already holds", async () => {
+  const engine = fakeEngine(() => packWords([{ row: 0, col: 0, bg: 0x00ff00 }]));
+  const { store, rules } = await storeWith(engine);
+  rules.set("Sheet1", { cf: [{ r: "A1", t: "cellIs", op: "greaterThan", a: "1", bg: "#00ff00", fl: 0 }], dv: [] });
+  const sheets = { Sheet1: { A1: { value: "5", formula: "" } } };
+  const count = () => engine.calls.filter((c) => c === "rules").length;
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(count(), 1);
+  assert.equal(rules.hasFx("Sheet1"), true);
+  rules.clearFx("Sheet1");
+  assert.equal(rules.fxAt("Sheet1", "A1"), undefined, "the look is gone");
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(count(), 2, "the same rules are sent again");
+  assert.equal(rules.fxAt("Sheet1", "A1").bg, "#00ff00");
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(count(), 2, "and once the look is back they are not sent again");
+  rules.replaceAll({});
+});
+
 test("deltas in an apply answer update only the cells they name, and a dropped sheet loses its look", async () => {
   const engine = fakeEngine(() => packWords([{ row: 0, col: 0, bg: 0x111111 }, { row: 1, col: 0, bg: 0x222222 }]));
   const { store, rules } = await storeWith(engine);

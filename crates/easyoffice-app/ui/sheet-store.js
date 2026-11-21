@@ -474,14 +474,15 @@
       }
     }
 
-    // Sends a sheet's rules when they differ from what the session holds; the answer is the
-    // appearance of every formatted cell, which replaces what the page showed.
+    // Sends a sheet's rules when they differ from what the session holds, or when the page dropped the appearance the session
+    // answered with (an undo or a redo of the rules clears it); the answer is the appearance of every formatted cell, which
+    // replaces what the page showed.
     async function syncRules(names) {
       if (!rulesApi) return;
       for (const name of names) {
         const payload = rulesApi.payloadFor(name);
         const sent = session.rules.get(name);
-        if (sent === payload || (sent === undefined && rulesApi.isEmpty(rulesApi.get(name)))) continue;
+        if ((sent === payload && rulesApi.hasFx(name)) || (sent === undefined && rulesApi.isEmpty(rulesApi.get(name)))) continue;
         const res = await sessionCall({
           sessionAction: "rules",
           session: session.id,
@@ -491,8 +492,8 @@
         if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
         if (rulesApi.isEmpty(rulesApi.get(name))) session.rules.delete(name);
         else session.rules.set(name, payload);
-        if (res.refused) rulesApi.clearFx(name);
-        else rulesApi.applyPacked(name, res.cf, true);
+        // Refused rules show nothing; the empty answer is still the session's answer, so they are not sent again.
+        rulesApi.applyPacked(name, res.refused ? null : res.cf, true);
       }
     }
 
