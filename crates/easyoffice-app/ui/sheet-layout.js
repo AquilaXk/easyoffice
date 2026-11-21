@@ -34,13 +34,13 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], rowHeights: new Map(), filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], rowHeights: new Map(), defaultRowHeight: null, filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
   }
 
   const entry = (name) => bySheet[name] || (bySheet[name] = blank());
 
   function isEmpty(l) {
-    return !l || (!l.merges.length && !l.hiddenRows.length && !l.hiddenCols.length && !l.rowHeights.size && !l.filter && !l.freeze && !l.tabColor && !l.hidden && !l.veryHidden && !l.outline && !l.page && !l.protect && !l.unlockedRows.length && !l.unlockedCols.length && !l.tables.length && !l.charts.length && !l.pivots.length && !l.images.length && !l.notes.length);
+    return !l || (!l.merges.length && !l.hiddenRows.length && !l.hiddenCols.length && !l.rowHeights.size && l.defaultRowHeight === null && !l.filter && !l.freeze && !l.tabColor && !l.hidden && !l.veryHidden && !l.outline && !l.page && !l.protect && !l.unlockedRows.length && !l.unlockedCols.length && !l.tables.length && !l.charts.length && !l.pivots.length && !l.images.length && !l.notes.length);
   }
 
   function touch() {
@@ -309,6 +309,8 @@
     if (layout.hiddenRows.length) out.hiddenRows = layout.hiddenRows.map((r) => [r[0], r[1]]);
     if (layout.hiddenCols.length) out.hiddenCols = layout.hiddenCols.map((r) => [r[0], r[1]]);
     if (layout.rowHeights?.size) out.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.toJson(layout.rowHeights);
+    const defaultHeight = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.defaultToJson(layout.defaultRowHeight);
+    if (defaultHeight) out.defaultRowHeight = defaultHeight;
     if (layout.filter) out.filter = filterToJson(layout.filter);
     if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
     if (layout.tabColor) out.tabColor = layout.tabColor;
@@ -554,6 +556,7 @@
     layout.hiddenRows = runs(json?.hiddenRows);
     layout.hiddenCols = runs(json?.hiddenCols);
     layout.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.fromJson(json?.rowHeights);
+    layout.defaultRowHeight = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.defaultFromJson(json?.defaultRowHeight);
     layout.filter = json?.filter ? filterFromJson(json.filter) : null;
     const rows = Number(json?.freeze?.rows) || 0;
     const cols = Number(json?.freeze?.cols) || 0;
@@ -605,6 +608,8 @@
     const prevPivots = json && json.pivots === undefined ? prev?.pivots : undefined;
     const prevImages = json && json.images === undefined ? prev?.images : undefined;
     const prevNotes = json && json.notes === undefined ? prev?.notes : undefined;
+    // The engine's answer to a row or column edit does not carry the default row height: the sheet keeps its own.
+    const prevDefault = json && json.defaultRowHeight === undefined ? prev?.defaultRowHeight : null;
     let hydrated = json;
     if (Array.isArray(json?.images) && prev?.images?.length) {
       const byId = new Map(prev.images.map((im) => [im.id, im]));
@@ -618,6 +623,7 @@
       };
     }
     const layout = fromJson(hydrated);
+    if (prevDefault) layout.defaultRowHeight = prevDefault;
     if (prevCharts?.length && layout.charts.length === 0) layout.charts = structuredClone(prevCharts);
     if (prevPivots?.length && layout.pivots.length === 0) layout.pivots = structuredClone(prevPivots);
     if (prevImages?.length && layout.images.length === 0) layout.images = structuredClone(prevImages);
@@ -940,6 +946,9 @@
   // The heights a user set (`sheet-row-height.js`): a `Map` of the row to points, replaced whole.
   const rowHeightsOf = (name) => bySheet[name]?.rowHeights || null;
   const setRowHeights = (name, map) => setView(name, "rowHeights", map);
+  // The default row height in points (`sheet-row-height.js`), null for the grid's own: the height of every row with none of its own.
+  const defaultRowHeightOf = (name) => bySheet[name]?.defaultRowHeight ?? null;
+  const setDefaultRowHeight = (name, pt) => setView(name, "defaultRowHeight", host.__EASYOFFICE_SHEET_ROW_HEIGHT__.defaultFromJson([pt]));
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
@@ -967,7 +976,7 @@
     tablesOf, tablesIn, tableBox, setTables, settleTableHeaders, tableColumnRenames, resetTableHeaders, tableNamed, tableAt, setTableColumn, copiedTables,
     filterOf, setFilter, setTableFilterHidden, setTableFilter, filterOwnerAt, hiddenRunsOf, sameHiddenRuns, NO_RUNS, clearTableFilter, filterToJson,
     colHidden, hiddenColRuns, freezeOf, setFreeze, tabColorOf, setTabColor, hiddenOf, veryHiddenOf, setHiddenSheet,
-    outlineOf, setOutline, rowHeightsOf, setRowHeights, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
+    outlineOf, setOutline, rowHeightsOf, setRowHeights, defaultRowHeightOf, setDefaultRowHeight, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
     getAll, replaceAll, setSheet, toJson, chartsOf, setCharts, pivotsOf, setPivots, pivotBox, pivotsIn, pivotAt,
     imagesOf, setImages, notesOf, setNotes, noteAtRef, parseImageHeader, normalizeImageAnchor, trimUtf8,
     MAX_MERGES, MAX_CHARTS_PER_SHEET, MAX_CHART_SERIES, CHART_TYPES, CHART_LEGENDS,

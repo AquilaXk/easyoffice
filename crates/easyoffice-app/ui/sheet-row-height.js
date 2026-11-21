@@ -44,6 +44,22 @@
 
   const toJson = (map) => [...map].sort((a, b) => a[0] - b[0]).map(([row, pt]) => [row, pt]);
 
+  // The default row height of a sheet (PD-286), the height of every row that has none of its own: the engine's `defaultRowHeight`
+  // is `[pt]` for one a user set and `[pt, 0]` for one that follows the font, which the page keeps at its grid row height, so
+  // only the first is kept (as points). A value that is not a usable height is no default (null).
+  const defaultFromJson = (item) => (Array.isArray(item) && item.length >= 1 && item.length <= 2 && item[1] !== 0 && validPt(item[0]) ? item[0] : null);
+  const defaultToJson = (pt) => (validPt(pt) ? [pt] : null);
+  // The grid row height in px: the default when a user set one, else the grid's own `gridPx`.
+  const baseOf = (pt, gridPx) => (validPt(pt) ? ptToPx(pt) : gridPx);
+  // The default for a height in px (clamped to what a row may be), in points as the files keep it.
+  const defaultPtOf = (px) => {
+    const clamped = clampPx(px);
+    return clamped >= ptToPx(MAX_PT) ? MAX_PT : pxToPt(clamped);
+  };
+  // Whether the selection is every row of the sheet (a whole-sheet selection or a row selection from the first row to the last):
+  // its height is the sheet's default.
+  const coversAllRows = (selection) => Boolean(selection) && (selection.whole === true || (selection.axis === "row" && selection.r1 <= 1 && selection.r2 >= MAX_ROW));
+
   // `[[row, px], ...]` in row order: what the grid lays out.
   const pxEntries = (map) => [...map].sort((a, b) => a[0] - b[0]).map(([row, pt]) => [row, ptToPx(pt)]);
 
@@ -74,5 +90,6 @@
 
   host.__EASYOFFICE_SHEET_ROW_HEIGHT__ = Object.freeze({
     fromJson, toJson, pxEntries, withHeight, withoutRows, rowsToSet, ptToPx, pxToPt, clampPx, MIN_PX, MAX_ROW_HEIGHTS,
+    defaultFromJson, defaultToJson, baseOf, defaultPtOf, coversAllRows, MAX_ROW,
   });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

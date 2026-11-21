@@ -61,7 +61,7 @@ test("a drag on the edge of a header sets the selected rows when the pressed one
 
 function fit(map, extra = {}) {
   return RF.__EASYOFFICE_CREATE_ROW_FIT__({
-    rowH: 24,
+    rowH: () => 24,
     maxRows: MAX_ROWS,
     getSheetName: () => "S",
     getMap: () => map,

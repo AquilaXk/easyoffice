@@ -35,10 +35,13 @@
     // `axis`: "row" or "col" while a whole row or column header is selected, else null.
     // `span`: the range Enter and Tab walk the active cell through (it is not the corners ar..cr then), else null.
     // `tabFrom`: the cell the current row of Tabs started from, which the Enter after it returns to the column of.
-    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, span: null, tabFrom: null };
+    // `whole`: the selection is the whole sheet (Ctrl+A), which is as far as the sheet's data goes here; the row height of it is the
+    // sheet's default (PD-286).
+    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, whole: false, span: null, tabFrom: null };
     // A selection that is set (not walked) drops the walk and the Tab row.
     const resetNav = (axis) => {
       sel.axis = axis;
+      sel.whole = false;
       sel.span = null;
       sel.tabFrom = null;
     };
@@ -255,6 +258,7 @@
 
     function selectAll() {
       resetNav(null);
+      sel.whole = true;
       const ext = api.getExtent();
       sel.ar = 1;
       sel.ac = 1;

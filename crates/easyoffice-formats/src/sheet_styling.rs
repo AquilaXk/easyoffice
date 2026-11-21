@@ -123,7 +123,8 @@ pub use sheet_page::*;
 pub use sheet_pivot::*;
 pub use sheet_protect::*;
 pub use sheet_row_height::{
-    row_heights_within_bounds, RowHeight, RowHeights, MAX_ROW_HEIGHTS, MAX_ROW_HEIGHT_CENTIPT,
+    row_heights_within_bounds, RowHeight, RowHeights, GRID_ROW_PX, MAX_ROW_HEIGHTS,
+    MAX_ROW_HEIGHT_CENTIPT,
 };
 pub use sheet_rules::*;
 pub use sheet_spill::*;
@@ -464,6 +465,9 @@ pub struct SheetStyling {
     pub columns: BTreeMap<u32, u32>,
     /// Heights of rows by zero-based row, and whether a user set them (PD-278).
     pub row_heights: RowHeights,
+    /// The height of the rows that have none of their own (XLSX `sheetFormatPr`, the ODS band that ends a table). Only
+    /// a default a user set (`custom`) changes how the page draws the sheet (PD-286).
+    pub default_row_height: Option<RowHeight>,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
     /// Custom number format codes: the cell id `CUSTOM_BASE + n` names entry `n` (PD-193). A
@@ -583,6 +587,7 @@ impl SheetStyling {
             && self.cell_types.is_empty()
             && self.columns.is_empty()
             && self.row_heights.is_empty()
+            && self.default_row_height.is_none()
             && self.rules.is_empty()
             && self.merges.is_empty()
             && self.hidden_rows.is_empty()

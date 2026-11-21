@@ -55,7 +55,11 @@ impl OoxmlCodec {
                     .any(|c| c.1 >= Self::MAX_XLSX_COLS)
                 || styling.merges.len() > crate::MAX_MERGES
                 || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS
-                || !crate::row_heights_within_bounds(&styling.row_heights, Self::MAX_XLSX_ROWS)
+                || !crate::row_heights_within_bounds(
+                    &styling.row_heights,
+                    styling.default_row_height,
+                    Self::MAX_XLSX_ROWS,
+                )
                 || styling.filter.as_ref().is_some_and(|f| {
                     !f.within_bounds()
                         || f.range.row1 >= Self::MAX_XLSX_ROWS

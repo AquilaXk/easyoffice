@@ -16,6 +16,7 @@
 //! the active pane) are read as well, which the reference leaves out (it ignores all of them).
 
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::sheet_row_height::RowHeight;
 use crate::sheet_styling::sheet_view::{Freeze, ViewState, MAX_OUTLINE_LEVEL};
 use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent};
@@ -64,6 +65,8 @@ pub(crate) struct ViewScan {
     pub(crate) tab_indexed: Option<usize>,
     pub(crate) summary_above: bool,
     pub(crate) summary_left: bool,
+    /// `sheetFormatPr` `defaultRowHeight` and `customHeight` (PD-286).
+    pub(crate) default_row_height: Option<RowHeight>,
 }
 
 /// `value` as a count of frozen rows or columns. Both writers of this value exist: whole numbers
@@ -105,6 +108,12 @@ impl ViewScan {
                 "pane" if self.in_view => self.pane(attrs),
                 "selection" if self.in_view => self.selection(attrs),
                 "tabColor" => self.tab(attrs),
+                "sheetFormatPr" => {
+                    self.default_row_height = RowHeight::parse_default(
+                        attrs.get("defaultRowHeight").as_deref(),
+                        attrs.get("customHeight").as_deref(),
+                    );
+                }
                 "outlinePr" => {
                     self.summary_above = off(attrs, "summaryBelow");
                     self.summary_left = off(attrs, "summaryRight");
@@ -144,6 +153,14 @@ impl ViewScan {
             (None, Some((from, to))) => Some(ViewState::selecting(from, from, to)),
             (None, None) => None,
         };
+    }
+
+    /// Gives `styling` what the scan found: the frozen pane, the view, the tab colour and the default row height.
+    pub(crate) fn apply_to(&self, styling: &mut SheetStyling) {
+        styling.freeze = self.freeze;
+        styling.view = self.state();
+        styling.tab_color = self.tab_rgb;
+        styling.default_row_height = self.default_row_height;
     }
 
     /// The selection, zoom and scroll position the scan found.
@@ -466,10 +483,17 @@ pub(crate) fn sheet_format_pr_xml(styling: &SheetStyling) -> String {
         styling.outline.max_level(false),
         styling.outline.max_level(true),
     );
-    if rows == 0 && cols == 0 {
+    let default = styling.default_row_height;
+    if rows == 0 && cols == 0 && default.is_none() {
         return String::new();
     }
-    let mut xml = String::from("<sheetFormatPr defaultRowHeight=\"15\"");
+    let mut xml = format!(
+        "<sheetFormatPr defaultRowHeight=\"{}\"",
+        default.map_or_else(|| "15".to_string(), RowHeight::points_text)
+    );
+    if default.is_some_and(|h| h.custom) {
+        xml.push_str(" customHeight=\"1\"");
+    }
     if rows > 0 {
         let _ = write!(xml, " outlineLevelRow=\"{rows}\"");
     }

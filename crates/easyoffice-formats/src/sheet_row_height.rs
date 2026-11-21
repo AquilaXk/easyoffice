@@ -7,6 +7,14 @@
 //! commit 4767b3b309467c283bbd52b725536ca73861e0fc. The reference stores no file format; the file side
 //! (`<row ht customHeight>`, `style:row-height`, `style:use-optimal-row-height`) follows ECMA-376 18.3.1.73
 //! and ODF 1.2 section 17.17, and the 409 pt ceiling is the one the spreadsheet programs keep.
+//!
+//! The default row height of a sheet (PD-286: `<sheetFormatPr defaultRowHeight customHeight>`, the row style of the band
+//! that ends an ODS table) is kept in `SheetStyling::default_row_height`. 참조 구현: IronCalc
+//! `xlsx/src/import/worksheets.rs` lines 255-270 (`get_default_column_width`: the one `sheetFormatPr` of the sheet, an
+//! attribute that is not a number falls back to the program's default), Apache-2.0 or MIT, Copyright (c) IronCalc
+//! contributors, commit 87b684bb04a87c63bdd6343c29036450b1cfd358. The reference reads the column width only; the row
+//! side (`customHeight`, the range check, the ODS band) follows ECMA-376 18.3.1.81 and ODF 1.2 section 17.17. No line is
+//! copied.
 
 use crate::sheet_styling::format_centipt;
 use crate::xml_stream::Attrs;
@@ -18,6 +26,11 @@ use std::fmt::Write;
 pub const MAX_ROW_HEIGHT_CENTIPT: u32 = 40_900;
 /// Rows with a height one sheet may carry.
 pub const MAX_ROW_HEIGHTS: usize = 100_000;
+/// Longest text a default row height may be written as; a longer value is not a height.
+const MAX_HEIGHT_TEXT: usize = 32;
+/// The height the page draws a row at when a sheet has no default row height of a user, in CSS pixels (`sheet-grid.js`
+/// `ROW_H`).
+pub const GRID_ROW_PX: f64 = 24.0;
 
 const PX_PER_PT: f64 = 4.0 / 3.0;
 
@@ -52,6 +65,13 @@ impl RowHeight {
         Self::from_points(text.trim().parse().ok()?, custom)
     }
 
+    /// The default row height of an attribute pair (`defaultRowHeight`, `customHeight`): none for a missing value, a
+    /// value that is not a height or one longer than any height is written.
+    pub(crate) fn parse_default(height: Option<&str>, custom: Option<&str>) -> Option<Self> {
+        let text = height.filter(|t| t.len() <= MAX_HEIGHT_TEXT)?;
+        Self::parse(text, matches!(custom.map(str::trim), Some("1" | "true")))
+    }
+
     /// The height in points as text without trailing zeros (`1575` -> `15.75`).
     pub fn points_text(self) -> String {
         format_centipt(self.centipt)
@@ -63,19 +83,37 @@ impl RowHeight {
     }
 }
 
-/// Whether `heights` fit the model of a sheet with `max_row` rows: at most [`MAX_ROW_HEIGHTS`] rows, all inside the sheet,
-/// every height in range.
-pub fn row_heights_within_bounds(heights: &RowHeights, max_row: u32) -> bool {
+/// Whether `heights` and the sheet's default row height fit the model of a sheet with `max_row` rows: at most
+/// [`MAX_ROW_HEIGHTS`] rows, all inside the sheet, every height in range.
+pub fn row_heights_within_bounds(
+    heights: &RowHeights,
+    default: Option<RowHeight>,
+    max_row: u32,
+) -> bool {
+    let in_range = |h: &RowHeight| (1..=MAX_ROW_HEIGHT_CENTIPT).contains(&h.centipt);
     heights.len() <= MAX_ROW_HEIGHTS
         && heights
             .last_key_value()
             .is_none_or(|(&row, _)| row < max_row)
-        && heights
-            .values()
-            .all(|h| (1..=MAX_ROW_HEIGHT_CENTIPT).contains(&h.centipt))
+        && heights.values().all(in_range)
+        && default.as_ref().is_none_or(in_range)
 }
 
 impl SheetStyling {
+    /// The height in CSS pixels of the visible `row` as the page draws it: the height of the row, else the default row
+    /// height a user set, else `grid_px`. A default that follows the font (`customHeight` off) is the program's own
+    /// measure and the page keeps its grid row height for it.
+    pub fn row_height_px(&self, row: u32, grid_px: f64) -> f64 {
+        self.row_heights.get(&row).map_or_else(
+            || {
+                self.default_row_height
+                    .filter(|h| h.custom)
+                    .map_or(grid_px, RowHeight::px)
+            },
+            |h| h.px(),
+        )
+    }
+
     /// Records the height of the `row` element `attrs` belong to (`ht`, `customHeight`). A value that is not a finite
     /// height of 0..=409 pt is ignored, and the sheet takes no more than [`MAX_ROW_HEIGHTS`] rows.
     pub(crate) fn record_xlsx_row_height(&mut self, attrs: &Attrs<'_>, row: u32) {
@@ -107,17 +145,17 @@ pub(crate) fn xlsx_row_attrs(heights: &RowHeights, row: u32, xml: &mut String) {
     }
 }
 
-/// The height a `style:table-row-properties` element sets, when a user set it (`style:use-optimal-row-height="false"`):
-/// a row that follows its content has no height of its own here, the program that reads the file measures it.
+/// The height a `style:table-row-properties` element sets. It is `custom` when a user set it
+/// (`style:use-optimal-row-height="false"`); a row that follows its content has no height of its own, the program that
+/// reads the file measures it, so only the band that ends a table keeps such a height (as the sheet's default).
 pub(crate) fn read_ods_row_properties(
     props: &str,
     length_to_pt: impl Fn(&str) -> Option<f64>,
 ) -> Option<RowHeight> {
     use crate::rtf_xml_helpers::extract_attr_from_fragment as attr;
-    if attr(props, "style:use-optimal-row-height") != Some("false") {
-        return None;
-    }
-    RowHeight::from_points(length_to_pt(attr(props, "style:row-height")?)?, true)
+    let custom = attr(props, "style:use-optimal-row-height") == Some("false");
+    let text = attr(props, "style:row-height").filter(|t| t.len() <= MAX_HEIGHT_TEXT)?;
+    RowHeight::from_points(length_to_pt(text)?, custom)
 }
 
 /// The automatic style `ro<index>` of one distinct row height: `style:row-height` in points and whether the row follows its content.
@@ -153,8 +191,8 @@ mod tests {
     fn bounds_check_count_rows_and_values() {
         let one = RowHeight::parse("20", true).unwrap();
         let mut heights = RowHeights::from([(5, one)]);
-        assert!(row_heights_within_bounds(&heights, 6));
-        assert!(!row_heights_within_bounds(&heights, 5));
+        assert!(row_heights_within_bounds(&heights, None, 6));
+        assert!(!row_heights_within_bounds(&heights, None, 5));
         heights.insert(
             1,
             RowHeight {
@@ -162,7 +200,7 @@ mod tests {
                 custom: true,
             },
         );
-        assert!(!row_heights_within_bounds(&heights, 6));
+        assert!(!row_heights_within_bounds(&heights, None, 6));
         heights.insert(
             1,
             RowHeight {
@@ -170,8 +208,8 @@ mod tests {
                 custom: true,
             },
         );
-        assert!(!row_heights_within_bounds(&heights, 6));
+        assert!(!row_heights_within_bounds(&heights, None, 6));
         let many: RowHeights = (0..=MAX_ROW_HEIGHTS as u32).map(|r| (r, one)).collect();
-        assert!(!row_heights_within_bounds(&many, u32::MAX));
+        assert!(!row_heights_within_bounds(&many, None, u32::MAX));
     }
 }

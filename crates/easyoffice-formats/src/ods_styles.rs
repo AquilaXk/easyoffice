@@ -94,7 +94,11 @@ impl OdsStyleTable {
                     table.widths.len()
                 });
             }
-            for &height in styling.row_heights.values() {
+            for &height in styling
+                .row_heights
+                .values()
+                .chain(&styling.default_row_height)
+            {
                 table.row_height_index.entry(height).or_insert_with(|| {
                     table.row_heights.push(height);
                     table.row_heights.len()
@@ -457,7 +461,8 @@ fn parse_text_properties(attrs: &str, font_table: &mut FontTable) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
-    /// Heights a user set, by row style name (PD-278).
+    /// Row heights by row style name, with whether a user set them (PD-278). A height that follows the content is kept
+    /// for the band that ends a table, which is the default row height of the sheet (PD-286).
     pub(crate) rows: HashMap<String, RowHeight>,
     /// Tab colours and hidden states of the table styles (PD-208, PD-209).
     pub(crate) table_props: HashMap<String, TableProps>,
@@ -544,6 +549,9 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     styles
 }
 
+/// Rows a repeated band may have and still be read as rows of their own, not as the look of the whole sheet.
+const MAX_ROW_BLOCK: u32 = 1024;
+
 /// Rows one table may list as hidden by a filter; more are not recorded.
 const MAX_FILTERED_ROWS: u32 = 1_048_576;
 
@@ -580,6 +588,8 @@ pub(crate) struct StyleSink<'s> {
     /// The heights of the rows of the table being read, and the one the next row has.
     row_heights: RowHeights,
     next_height: Option<RowHeight>,
+    /// The height of the band of rows that ends the table being read: its default row height (PD-286).
+    default_height: Option<RowHeight>,
 }
 
 impl<'s> StyleSink<'s> {
@@ -607,6 +617,7 @@ impl<'s> StyleSink<'s> {
             next_filtered: false,
             row_heights: RowHeights::new(),
             next_height: None,
+            default_height: None,
         }
     }
 
@@ -661,15 +672,22 @@ impl<'s> StyleSink<'s> {
         }
     }
 
-    /// Keeps the height of the rows `self.row..self.row + repeat`; a repeated band is the sheet's default look, not a
-    /// height someone set row by row, so only bounded blocks are kept (as for styles).
+    /// Keeps the height of the rows `self.row..self.row + repeat` a user set. A repeated band is the sheet's default look,
+    /// not a height someone set row by row, so only bounded blocks are kept (as for styles); the band that runs to the
+    /// last row of the grid gives the sheet its default row height, whoever set it (PD-286).
     fn record_row_height(&mut self, repeat: u32) {
         let Some(height) = self.next_height.take() else {
             return;
         };
-        let in_grid = u64::from(self.row) + u64::from(repeat) <= u64::from(OdfCodec::MAX_ROWS) + 1;
-        if in_grid && repeat <= 1024 && self.row_heights.len() + repeat as usize <= MAX_ROW_HEIGHTS
-        {
+        let end = u64::from(self.row) + u64::from(repeat);
+        if end > u64::from(OdfCodec::MAX_ROWS) + 1 {
+            return;
+        }
+        if repeat > MAX_ROW_BLOCK {
+            if end == u64::from(OdfCodec::MAX_ROWS) + 1 {
+                self.default_height = Some(height);
+            }
+        } else if height.custom && self.row_heights.len() + repeat as usize <= MAX_ROW_HEIGHTS {
             for r in self.row..self.row + repeat {
                 self.row_heights.insert(r, height);
             }
@@ -727,6 +745,7 @@ impl OdsSink for StyleSink<'_> {
         self.filtered = Vec::new();
         self.filtered_total = 0;
         self.row_heights = RowHeights::new();
+        self.default_height = None;
     }
 
     fn row_filtered(&mut self, filtered: bool) {
@@ -865,8 +884,13 @@ impl OdsSink for StyleSink<'_> {
             outline: self.settled_outline(),
             filtered_rows: std::mem::take(&mut self.filtered),
             row_heights: std::mem::take(&mut self.row_heights),
+            default_row_height: self.default_height.take(),
             ..SheetStyling::default()
         };
+        // A row that has the default height is not a height of its own (the writer styles every row with it).
+        if let Some(default) = styling.default_row_height {
+            styling.row_heights.retain(|_, height| *height != default);
+        }
         let links = std::mem::take(&mut self.links);
         (styling.links, styling.links_rejected) = (links.links, links.rejected);
         styling.normalize_locks();

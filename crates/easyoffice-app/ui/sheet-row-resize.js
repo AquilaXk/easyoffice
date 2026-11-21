@@ -43,6 +43,19 @@
       grid.layoutChanged();
     }
 
+    // Every row of the sheet is selected: a height set on one edge is the sheet's default row height, and it replaces the heights of the
+    // rows (PD-286, as the spreadsheet program does after "select all").
+    function allRowsSelected() {
+      const rg = getRange();
+      return RH.coversAllRows({ ...getSelection(), r1: rg.r1, r2: rg.r2 });
+    }
+
+    // The default row height (points, null for none) and the heights of the rows, both at once.
+    function applyAll(name, defaultPt, map) {
+      layoutApi.setDefaultRowHeight(name, defaultPt);
+      apply(name, map);
+    }
+
     function onMouseDown(ev) {
       const handle = ev.button ? null : ev.target?.closest?.(".row-resizer");
       if (!handle) return;
@@ -53,11 +66,16 @@
       if (!(pressed >= 1)) return;
       commitIfEditing();
       const [first, last] = spanOf(pressed);
-      drag = { name, first, last, startY: ev.clientY, startH: grid.rowHeight(pressed), before: heightsOf(name), step: sheetHistory.begin({ parts: ["sheetLayout"] }), moved: false };
+      drag = { name, first, last, all: allRowsSelected(), startY: ev.clientY, startH: grid.rowHeight(pressed), before: heightsOf(name), step: sheetHistory.begin({ parts: ["sheetLayout"] }), moved: false };
     }
 
     function onMouseMove(ev) {
       if (!drag) return;
+      if (drag.all) {
+        drag.moved = true;
+        applyAll(drag.name, RH.defaultPtOf(drag.startH + ev.clientY - drag.startY), new Map());
+        return;
+      }
       const next = RH.withHeight(drag.before, drag.first, drag.last, drag.startH + ev.clientY - drag.startY);
       if (next === null) {
         say("행 높이를 지정한 행이 너무 많음");
@@ -74,7 +92,8 @@
     }
 
     // Gives rows `first..last` back to their content as ONE undoable step.
-    function fitRows(first, last) {
+    // `all`: every row is selected, so the sheet's default row height goes too.
+    function fitRows(first, last, all = false) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
@@ -82,12 +101,13 @@
         if (!guarded(name)) return false;
         sheetDataStore[name] = snapshotDomSheetCells();
         const before = heightsOf(name);
-        const next = RH.withoutRows(before, first, last);
-        if (next.size === before.size) return false;
+        const beforeDefault = layoutApi.defaultRowHeightOf(name);
+        const next = all ? new Map() : RH.withoutRows(before, first, last);
+        if (next.size === before.size && !(all && beforeDefault !== null)) return false;
         const step = sheetHistory.begin({ parts: ["sheetLayout"] });
-        apply(name, next);
+        applyAll(name, all ? null : beforeDefault, next);
         if (grid.rowFitOverBudget()) {
-          apply(name, before);
+          applyAll(name, beforeDefault, before);
           say("행 높이를 맞추기에 시트가 너무 큼");
           return false;
         }
@@ -102,7 +122,8 @@
       const pressed = Number(handle?.parentElement?.dataset?.row);
       if (!(pressed >= 1)) return;
       ev.preventDefault();
-      void fitRows(...spanOf(pressed));
+      const all = allRowsSelected();
+      void fitRows(...(all ? [1, RH.MAX_ROW] : spanOf(pressed)), all);
     }
 
     function bind() {

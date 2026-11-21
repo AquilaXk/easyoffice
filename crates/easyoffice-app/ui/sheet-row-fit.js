@@ -32,11 +32,15 @@
   // A scrolled box stops growing near 33 million px: the grid's rows plus the extra height of the taller rows stay
   // under this, and the rows past the budget keep the plain height (fail closed).
   const MAX_TOTAL_PX = 30000000;
+  const MIN_EXTRA_BUDGET = 2000000;
 
   function createRowFit(deps) {
+    // `rowH()` is the height of a row with none of its own on the active sheet: the grid's row height, or the sheet's default row height
+    // (PD-286). The extra heights of a sheet are relative to the one it had at its last `sync()`.
     const { rowH, maxRows, getSheetName, getMap, columnWidth, isRowHidden, isMerged, measure, packRef, customHeights } = deps;
     const now = deps.now || (() => host.performance?.now?.() ?? Date.now());
-    const extraBudget = MAX_TOTAL_PX - maxRows * rowH;
+    // The rows' own height may already fill the scrolled box (a tall default row height): the taller rows still get this much.
+    const extraBudgetOf = (base) => Math.max(MAX_TOTAL_PX - maxRows * base, MIN_EXTRA_BUDGET);
     const look = host.__EASYOFFICE_SHEET_LOOK__;
     const lineCache = new Map();
     const bySheet = Object.create(null);
@@ -45,7 +49,7 @@
     let started = 0;
     let overBudget = false;
 
-    const emptyState = () => ({ rows: [], extra: [], total: 0, heights: new Map(), clipped: new Set(), min: rowH });
+    const emptyState = () => ({ rows: [], extra: [], total: 0, heights: new Map(), clipped: new Set(), min: rowH(), base: rowH() });
     const stateOf = () => bySheet[getSheetName()] || (bySheet[getSheetName()] = emptyState());
 
     // Lines `text` takes in `width` px of `font` (an explicit line break starts a new line); `measure` answers null while the page cannot measure.
@@ -92,7 +96,7 @@
     }
 
     // The rows whose cells ask for more than the grid's row height, by the tallest need.
-    function autoHeights() {
+    function autoHeights(base) {
       const auto = new Map();
       const map = getMap();
       if (!map || !measure) return auto;
@@ -102,14 +106,14 @@
         const st = entry.style;
         if (!st) continue;
         const px = fontPx(st);
-        if (!st.wrap && Math.ceil(px * SINGLE_LINE_RATIO) <= rowH) continue;
+        if (!st.wrap && Math.ceil(px * SINGLE_LINE_RATIO) <= base) continue;
         const packed = packRef(ref);
         if (packed <= 0) continue;
         const col = packed & 32767;
         const row = (packed - col) / 32768;
         if (isRowHidden(row) || isMerged(row, col)) continue;
         const h = Math.min(MAX_ROW_PX, cellHeight(st, String(entry.value ?? ""), columnWidth(col) - 13, px));
-        if (h > rowH && h > (auto.get(row) || 0)) auto.set(row, h);
+        if (h > base && h > (auto.get(row) || 0)) auto.set(row, h);
       }
       return auto;
     }
@@ -120,22 +124,24 @@
       measures = 0;
       started = now();
       overBudget = false;
-      const heights = autoHeights();
+      const base = rowH();
+      const extraBudget = extraBudgetOf(base);
+      const heights = autoHeights(base);
       const clipped = new Set();
       for (const [row, px] of customHeights ? customHeights() : []) {
         if (isRowHidden(row)) continue;
         // A user's height under what the cells need cuts them off (a wrapped cell stops wrapping).
         if ((heights.get(row) || 0) > px) clipped.add(row);
-        if (px === rowH) heights.delete(row);
+        if (px === base) heights.delete(row);
         else heights.set(row, px);
       }
       const all = [...heights.keys()].sort((a, b) => a - b);
       const rows = [];
       const extra = [];
       let acc = 0;
-      let min = rowH;
+      let min = base;
       for (const row of all) {
-        const next = acc + heights.get(row) - rowH;
+        const next = acc + heights.get(row) - base;
         if (next > extraBudget) {
           heights.delete(row);
           continue;
@@ -146,8 +152,8 @@
         extra.push(acc);
       }
       const same = (a, b) => a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
-      const changed = !same(heights, state.heights) || !same(new Map([...clipped].map((r) => [r, 1])), new Map([...state.clipped].map((r) => [r, 1])));
-      Object.assign(state, { rows, extra, total: acc, heights, clipped, min });
+      const changed = base !== state.base || !same(heights, state.heights) || !same(new Map([...clipped].map((r) => [r, 1])), new Map([...state.clipped].map((r) => [r, 1])));
+      Object.assign(state, { rows, extra, total: acc, heights, clipped, min, base });
       return changed;
     }
 
@@ -168,7 +174,7 @@
       sync,
       extraBefore,
       extraTotal: () => stateOf().total,
-      heightOf: (row) => stateOf().heights.get(row) || rowH,
+      heightOf: (row) => stateOf().heights.get(row) || rowH(),
       isClipped: (row) => stateOf().clipped.has(row),
       // The shortest row: the window must hold enough rows to fill the viewport.
       minHeight: () => stateOf().min,

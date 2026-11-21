@@ -10447,6 +10447,10 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### IronCalc sheet default size read (MIT OR Apache-2.0, used under MIT)
+
+Source: https://github.com/ironcalc/IronCalc (`xlsx/src/import/worksheets.rs` lines 255-270 (`get_default_column_width`: the one `sheetFormatPr` of the sheet, an attribute that is not a number falls back to the program's default); commit 87b684bb04a87c63bdd6343c29036450b1cfd358, used under the MIT license, Copyright (c) IronCalc contributors). `crates/easyoffice-formats/src/sheet_row_height.rs` (`RowHeight::parse_default`) and `xlsx_view.rs` (`ViewScan`, `sheetFormatPr`) take the structure for the default row height (PD-286): one `sheetFormatPr` per sheet, a value that is not a usable number leaves the program's default. Modifications: the reference reads the column width only; the row height, `customHeight`, the 0..=409 pt range, the length cap, the writer and the ODS band that ends a table follow ECMA-376 18.3.1.81 and ODF 1.2 section 17.17 and have no counterpart in the reference. No line is copied (0 lines).
+
 ### Reference documents, textbooks, papers and empirical datasets (no code)
 
 - Microsoft Excel function documents, read on 2026-11-21: FORECAST.ETS, FORECAST.ETS.CONFINT, FORECAST.ETS.SEASONALITY, FORECAST.ETS.STAT and "Forecasting functions (reference)", at `https://support.microsoft.com/en-us/excel/functions/forecast-ets-function`, `.../forecast-ets-confint-function`, `.../forecast-ets-seasonality-function`, `.../forecast-ets-stat-function`, `.../forecasting-functions-reference`. Used for the argument rules and error conditions only.

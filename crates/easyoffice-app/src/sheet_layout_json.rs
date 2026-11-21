@@ -183,6 +183,33 @@ pub(crate) fn parse_row_heights(v: &StrictJsonValue) -> Result<RowHeights, EasyO
     Ok(heights)
 }
 
+/// `defaultRowHeight`: `[points]` for a default a user set or `[points, 0]` for one that follows the font (PD-286). A
+/// value that is not a finite number of points in 0..=409 is refused, as in `rowHeights`.
+pub(crate) fn parse_default_row_height(v: &StrictJsonValue) -> Result<RowHeight, EasyOfficeError> {
+    let entry = v
+        .as_array()
+        .filter(|p| (1..=2).contains(&p.len()))
+        .ok_or_else(|| bad("defaultRowHeight"))?;
+    let custom = entry.get(1).map_or(Some(true), |flag| match flag.as_u64() {
+        Some(0) => Some(false),
+        Some(1) => Some(true),
+        _ => None,
+    });
+    match (&entry[0], custom) {
+        (StrictJsonValue::Number(points), Some(custom)) => RowHeight::parse(points, custom),
+        _ => None,
+    }
+    .ok_or_else(|| bad("defaultRowHeight"))
+}
+
+pub(crate) fn default_row_height_json(height: RowHeight) -> String {
+    format!(
+        "[{}{}]",
+        height.points_text(),
+        if height.custom { "" } else { ",0" }
+    )
+}
+
 pub(crate) fn row_heights_json(heights: &RowHeights) -> String {
     let mut out = String::from("[");
     for (i, (row, height)) in heights.iter().enumerate() {
@@ -212,6 +239,9 @@ pub(crate) fn parse_layout(
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "rowHeights") {
         styling.row_heights = parse_row_heights(v)?;
+    }
+    if let Some(v) = StrictJsonValue::get_field(obj, "defaultRowHeight") {
+        styling.default_row_height = Some(parse_default_row_height(v)?);
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
@@ -343,6 +373,13 @@ pub(crate) fn write_layout_split(
             row_heights_json(&styling.row_heights)
         );
     }
+    if let Some(height) = styling.default_row_height {
+        let _ = write!(
+            out,
+            ",\"defaultRowHeight\":{}",
+            default_row_height_json(height)
+        );
+    }
     if let Some(filter) = filter {
         let _ = write!(
             out,
@@ -447,6 +484,54 @@ mod tests {
                 parse_layout(v.as_object().unwrap(), &mut SheetStyling::default()).is_err(),
                 "{}",
                 &text[..text.len().min(60)]
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_row_height_round_trips_with_the_custom_flag() {
+        for (text, out) in [
+            (
+                r#"{"defaultRowHeight":[30]}"#,
+                r#","defaultRowHeight":[30]"#,
+            ),
+            (
+                r#"{"defaultRowHeight":[14.4,0]}"#,
+                r#","defaultRowHeight":[14.4,0]"#,
+            ),
+            (
+                r#"{"defaultRowHeight":[409,1]}"#,
+                r#","defaultRowHeight":[409]"#,
+            ),
+        ] {
+            let mut styling = SheetStyling::default();
+            parse_layout(json(text).as_object().unwrap(), &mut styling).unwrap();
+            let mut written = String::new();
+            write_layout(&mut written, &styling);
+            assert_eq!(written, out);
+        }
+    }
+
+    #[test]
+    fn hostile_default_row_heights_are_refused() {
+        for text in [
+            r#"{"defaultRowHeight":[0]}"#,
+            r#"{"defaultRowHeight":[-1]}"#,
+            r#"{"defaultRowHeight":[409.01]}"#,
+            r#"{"defaultRowHeight":[1e999]}"#,
+            r#"{"defaultRowHeight":["20"]}"#,
+            r#"{"defaultRowHeight":[null]}"#,
+            r#"{"defaultRowHeight":[20,2]}"#,
+            r#"{"defaultRowHeight":[20,true]}"#,
+            r#"{"defaultRowHeight":[]}"#,
+            r#"{"defaultRowHeight":[20,1,0]}"#,
+            r#"{"defaultRowHeight":20}"#,
+            r#"{"defaultRowHeight":{"pt":20}}"#,
+        ] {
+            let v = json(text);
+            assert!(
+                parse_layout(v.as_object().unwrap(), &mut SheetStyling::default()).is_err(),
+                "{text}"
             );
         }
     }

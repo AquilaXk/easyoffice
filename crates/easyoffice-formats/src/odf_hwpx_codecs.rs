@@ -20,13 +20,16 @@ pub type OdsUnpacked = (String, Vec<(u32, u32, String)>);
 /// Unpacked multi-sheet ODF spreadsheet (`Vec<(sheet_name, cells)>`).
 pub type OdsMultiUnpacked = Vec<(String, Vec<(u32, u32, String)>)>;
 
-/// Appends the empty-row filler for a gap of `gap` rows.
-fn push_empty_rows(content: &mut String, gap: u32) {
+/// Appends the empty-row filler for a gap of `gap` rows; `style_attr` is the row style of the sheet's default row height
+/// (` table:style-name="ro1"`), empty for none.
+fn push_empty_rows(content: &mut String, gap: u32, style_attr: &str) {
     if gap == 1 {
-        content.push_str("<table:table-row><table:table-cell/></table:table-row>");
+        content.push_str(&format!(
+            "<table:table-row{style_attr}><table:table-cell/></table:table-row>"
+        ));
     } else {
         content.push_str(&format!(
-            "<table:table-row table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
+            "<table:table-row{style_attr} table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
         ));
     }
 }
@@ -522,6 +525,14 @@ impl OdfCodec {
             content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
         }
         let mut expected_row: u32 = 0;
+        // The rows with no height of their own take the default row height; the band after the last row says it for the
+        // rest of the sheet (PD-286).
+        let default_style = styling
+            .and_then(|st| st.default_row_height)
+            .and_then(|height| style_table.row_style_name(height))
+            .map_or(String::new(), |name| {
+                format!(" table:style-name=\"{name}\"")
+            });
         let mut ids = IdMemo::new();
         let no_levels = crate::Outline::default();
         let outline = styling.map_or(&no_levels, |st| &st.outline);
@@ -538,7 +549,7 @@ impl OdfCodec {
         for (row, row_cells) in grid {
             if row > expected_row {
                 groups.close_all(content);
-                push_empty_rows(content, row - expected_row);
+                push_empty_rows(content, row - expected_row, &default_style);
             }
             if row == 0 && header_end.is_some() {
                 content.push_str("<table:table-header-rows>");
@@ -560,9 +571,10 @@ impl OdfCodec {
             let height_style = styling
                 .and_then(|st| st.row_heights.get(&row))
                 .and_then(|&height| style_table.row_style_name(height))
-                .map_or(String::new(), |name| {
-                    format!(" table:style-name=\"{name}\"")
-                });
+                .map_or_else(
+                    || default_style.clone(),
+                    |name| format!(" table:style-name=\"{name}\""),
+                );
             content.push_str(&format!("<table:table-row{visibility}{height_style}>"));
             let mut expected_col: u32 = 0;
             for (col, raw) in row_cells {
@@ -621,6 +633,9 @@ impl OdfCodec {
             }
         }
         groups.close_all(content);
+        if !default_style.is_empty() && expected_row <= Self::MAX_ROWS {
+            push_empty_rows(content, Self::MAX_ROWS + 1 - expected_row, &default_style);
+        }
         content.push_str(&crate::sheet_styling::structured_cells::names_xml(
             rules.stylings,
             rules.sheet_names,

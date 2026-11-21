@@ -441,7 +441,7 @@ test("lines are counted by words, by characters in a wide word and by explicit b
 function fit(map, measure = (text, width) => Math.ceil((text.length * 10) / width), widthOf = () => 113, maxRows = MAX) {
   const refs = loadUiModule(UI("sheet-refs.js"), {}).__EASYOFFICE_SHEET_REFS__;
   return RF.__EASYOFFICE_CREATE_ROW_FIT__({
-    rowH: 24,
+    rowH: () => 24,
     maxRows,
     getSheetName: () => "S",
     getMap: () => map,

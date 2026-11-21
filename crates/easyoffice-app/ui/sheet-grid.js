@@ -37,9 +37,12 @@
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     let widthCacheVersion = -1;
     const layoutOf = () => layoutApi?.get(getSheetName()) || null;
+    // The height of a row with none of its own: the grid's `ROW_H` (the stylesheet's), or the default row height of the sheet when a user
+    // set one (PD-286).
+    const rowBase = () => host.__EASYOFFICE_SHEET_ROW_HEIGHT__.baseOf(layoutApi?.defaultRowHeightOf(getSheetName()), ROW_H);
     // Rows follow the height of their wrapped cells (PD-207); `null` where the page cannot measure text.
     const rowFit = host.__EASYOFFICE_CREATE_ROW_FIT__?.({
-      rowH: ROW_H,
+      rowH: rowBase,
       maxRows: MAX_ROWS,
       getSheetName,
       getMap: getMap || (() => null),
@@ -71,7 +74,8 @@
       return tdByPacked.values().next().value || null;
     };
     // Row heights are looked up only once a wrapped or large cell exists, a row has a height of a user, or one has been fitted before (it may be gone now).
-    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any() || Boolean(rowHeightsOf()));
+    // A default row height other than the grid's moves every row, and a large font needs more than a short default row has.
+    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any() || Boolean(rowHeightsOf()) || rowBase() !== ROW_H);
     // Works the row heights out again; a sync that ran out of its budget leaves the rest of the rows plain and says so.
     function syncRows() {
       const changed = rowFit.sync();
@@ -133,7 +137,7 @@
     // Top edge of `row` and the height of the rows between `first` and `last`, hidden rows counting 0.
     function rowTop(row) {
       const hidden = layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0;
-      return (row - 1 - hidden) * ROW_H + (rowFit ? rowFit.extraBefore(row) : 0);
+      return (row - 1 - hidden) * rowBase() + (rowFit ? rowFit.extraBefore(row) : 0);
     }
 
     // Height of the visible rows from `row` to the last one, with the taller rows counted at their height.
@@ -141,12 +145,12 @@
       const name = getSheetName();
       const hiddenAfter = layoutApi ? layoutApi.rowsHiddenTotal(name) - layoutApi.rowsHiddenBefore(name, row) : 0;
       const extra = rowFit ? rowFit.extraTotal() - rowFit.extraBefore(row) : 0;
-      return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter) * ROW_H + extra;
+      return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter) * rowBase() + extra;
     }
 
     // The row whose band holds the vertical offset `y` of the scrolled content.
     function rowAtY(y) {
-      if (!rowFit || !rowFit.any()) return rowAtVisible(Math.max(0, Math.floor(y / ROW_H)));
+      if (!rowFit || !rowFit.any()) return rowAtVisible(Math.max(0, Math.floor(y / rowBase())));
       // Rows under the grid's height put the row below the guess too, so the search covers the whole sheet.
       let lo = 1;
       let hi = MAX_ROWS;
@@ -250,7 +254,7 @@
         const first = rowAtY(vp.scrollTop + frozenHeight(fr));
         const top = visibleIndexOf(first);
         // Rows under the grid's height put more of them in the viewport: the last one is found by its position.
-        const visible = rowFit?.any() ? visibleIndexOf(rowAtY(vp.scrollTop + vp.clientHeight)) - top + 1 : Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
+        const visible = rowFit?.any() ? visibleIndexOf(rowAtY(vp.scrollTop + vp.clientHeight)) - top + 1 : Math.ceil((vp.clientHeight - HEAD_H) / rowBase()) + 1;
         return {
           layout: true,
           fr,
@@ -672,7 +676,7 @@
         const { rows: fr, cols: fc } = frozenCounts();
         const viewH = vp.clientHeight - HEAD_H;
         const top = rowTop(row);
-        const bottom = top + (rowFit ? rowFit.heightOf(row) : ROW_H);
+        const bottom = top + (rowFit ? rowFit.heightOf(row) : rowBase());
         if (row > fr && top < vp.scrollTop + frozenHeight(fr)) vp.scrollTop = top - frozenHeight(fr);
         else if (row > fr && bottom > vp.scrollTop + viewH) vp.scrollTop = bottom - viewH;
         const left = colLeft(col);
@@ -706,7 +710,7 @@
 
     function visibleRowSpan() {
       const vp = viewportEl();
-      if (hasLayout(vp)) return Math.max(1, Math.floor((vp.clientHeight - HEAD_H) / ROW_H) - 1);
+      if (hasLayout(vp)) return Math.max(1, Math.floor((vp.clientHeight - HEAD_H) / rowBase()) - 1);
       return 20;
     }
 
@@ -736,9 +740,9 @@
     }
 
     return {
-      MAX_ROWS, MAX_COLS, ROW_H, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
+      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
-      applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? ROW_H, rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
+      applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
