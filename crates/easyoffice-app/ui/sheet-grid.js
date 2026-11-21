@@ -9,50 +9,12 @@
   const OVERSCAN_ROWS = 8, OVERSCAN_COLS = 2, FALLBACK_ROWS = 60, FALLBACK_COLS = 40, DEFAULT_COLS = 8, MIN_ROWS = 12;
 
   const { PACK_STRIDE, colName, colIndex, packCoord, packRef, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
+  // The cell text helpers (`sheet-grid-text.js`), the selection classes (`sheet-grid-selection.js`) and the layout classes
+  // (`sheet-grid-layout-paint.js`) are loaded before this file.
 
-  const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
+  const { isNumericText, formatGeneral, cloneSheetStore, measureWrapped, measureLine, setColumnWidthLookup, setDisplayValue, readTdValue } = host.__EASYOFFICE_SHEET_GRID_TEXT__;
   // Rows beyond each edge of the window whose formatted text is fetched ahead of a scroll.
   const NUMFMT_PREFETCH_ROWS = 60;
-  const NUMERIC_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-
-  function isNumericText(text) {
-    const t = normalizeFormattedNumericCell(text);
-    return t !== "" && NUMERIC_RE.test(t);
-  }
-
-  // "General" display: long decimals (float noise such as 0.30000000000000004 or
-  // 1266.66666666667) show at most 10 significant digits; the raw value is kept for editing.
-  function formatGeneral(raw) {
-    const t = String(raw ?? "");
-    if (!/^-?\d*\.\d+$/.test(t)) return t;
-    const digits = t.replace(/[-.]/g, "").replace(/^0+/, "");
-    if (digits.length <= 10) return t;
-    const n = Number(t);
-    return Number.isFinite(n) ? String(Number(n.toPrecision(10))) : t;
-  }
-
-  // Copies a workbook model (sheet -> cell -> {value, formula, style}) ~4x faster than a JSON
-  // round-trip, which matters for undo snapshots of sheets with tens of thousands of cells. A frozen
-  // (shared) style object is kept as it is.
-  function cloneSheetStore(store) {
-    const out = Object.create(null);
-    Object.keys(store || {}).forEach((name) => {
-      const src = store[name] || {};
-      const dst = Object.create(null);
-      Object.keys(src).forEach((ref) => {
-        const e = src[ref];
-        if (!e) return;
-        const copy = { ...e };
-        if (e.style) {
-          copy.style = Object.isFrozen(e.style) ? e.style : { ...e.style };
-          host.__EASYOFFICE_SHEET_LOOK__?.noteRowFit(e.style);
-        }
-        dst[ref] = copy;
-      });
-      out[name] = dst;
-    });
-    return out;
-  }
 
   function hasLayout(vp) {
     return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
@@ -64,108 +26,16 @@
     return Number(raw) || 0;
   }
 
-  // Width of `text` in the cell's font, from one shared canvas; -1 when the page cannot measure.
-  let measurer;
-  function textWidth(td, text) {
-    if (measurer === undefined) {
-      try {
-        measurer = td.ownerDocument.createElement("canvas").getContext("2d") || null;
-      } catch {
-        measurer = null;
-      }
-    }
-    if (!measurer) return -1;
-    if (!measurer.eoFamily) {
-      const cs = host.getComputedStyle?.(td);
-      if (!cs?.fontFamily) return -1;
-      measurer.eoFamily = cs.fontFamily;
-      measurer.eoSize = cs.fontSize;
-    }
-    measurer.font = `${td.style.fontStyle || "normal"} ${td.style.fontWeight || "400"} ${td.style.fontSize || measurer.eoSize} ${td.style.fontFamily || measurer.eoFamily}`;
-    return measurer.measureText(text).width;
-  }
-
-  // Lines `text` takes in `width` px of `font`; null when the page cannot measure (yet).
-  function measureWrapped(td, text, width, font) {
-    if (td && !measurer?.eoFamily) textWidth(td, "");
-    if (!measurer?.eoFamily) return null;
-    measurer.font = font + " " + measurer.eoFamily;
-    return host.__EASYOFFICE_SHEET_LINE_COUNT__(text, width, (t) => measurer.measureText(t).width);
-  }
-
-  // Width of one line of `text` in `font` (a CSS font without the family) and the cell's own `family`, else the sheet's;
-  // null when the page cannot measure (yet).
-  function measureLine(td, font, family, text) {
-    if (td && !measurer?.eoFamily) textWidth(td, "");
-    if (!measurer?.eoFamily) return null;
-    measurer.font = font + " " + (family ? '"' + family.replaceAll('"', "") + '", ' : "") + measurer.eoFamily;
-    return measurer.measureText(text).width;
-  }
-
-  // Width of a column in px (set by the grid that owns the page's sheet).
-  let columnWidthOf = null;
-
-  // A formatted number wider than its cell shows as hash marks (padding 6px each side, 1px border).
-  function fitToCell(td, text) {
-    const room = td._col > 0 && columnWidthOf ? columnWidthOf(td._col) - 13 : NaN;
-    if (!(room > 0)) return text;
-    const fit = host.__EASYOFFICE_SHEET_NUMFMT__?.fitNumber;
-    return fit ? fit(text, room, (t) => textWidth(td, t)) : text;
-  }
-
-  // Shows `value` with the cell's number format (`td._nf`, PD-193) or else the General format; the
-  // raw value is remembered for editing and saving. The section color of a format rides on a custom
-  // property, so it never lands in the inline font properties the sheet model reads back; the
-  // common red is the theme's negative color.
-  const SECTION_RED = "#ff0000";
-
-  function setDisplayValue(td, value) {
-    const raw = String(value ?? "");
-    const nf = td._nf;
-    const textTyped = td._ct === "s" || nf === "@";
-    const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw, td._ct) : null;
-    let shown = formatted ? formatted.t : textTyped ? raw : formatGeneral(raw);
-    if (formatted && !textTyped && isNumericText(raw)) shown = fitToCell(td, shown);
-    if (td.textContent !== shown) td.textContent = shown;
-    if (shown === raw) {
-      if (td.dataset.raw !== undefined) {
-        delete td.dataset.raw;
-        delete td.dataset.display;
-      }
-    } else {
-      // An unchanged attribute is not written again: a write restyles the cell.
-      if (td.dataset.raw !== raw) td.dataset.raw = raw;
-      if (td.dataset.display !== shown) td.dataset.display = shown;
-    }
-    td.classList.toggle("num", !textTyped && isNumericText(raw));
-    const color = formatted?.c || "";
-    if (color || td._nfColor) {
-      td._nfColor = color;
-      const red = color === SECTION_RED;
-      td.style.setProperty("--nf-color", red ? "" : color);
-      td.classList.toggle("nf-colored", color !== "" && !red);
-      td.classList.toggle("nf-red", red);
-    }
-  }
-
-  function readTdValue(td) {
-    const text = (td.textContent || "").trim();
-    if (td.dataset.raw !== undefined && text === td.dataset.display) return td.dataset.raw;
-    return text;
-  }
-
   function createSheetGrid(deps) {
     const { document, getSheetName, getEntry, getExtent, getCursor, hooks, getMap } = deps;
     const widthsBySheet = Object.create(null);
     const fallback = { firstRow: 1, cols: DEFAULT_COLS };
     const tdByPacked = new Map(), colHeadByCol = new Map(), rowHeadByRow = new Map();
-    let selectedTd = null, widthCacheSheet = null, view = null, spacerTop = null, spacerBottom = null;
-    const rangeTds = [], activeColHeads = [], activeRowHeads = [];
+    let widthCacheSheet = null, view = null, spacerTop = null, spacerBottom = null;
     let widthCacheCols = [], widthCachePrefix = [];
     // Hidden rows and columns and merged ranges of the active sheet (PD-194).
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     let widthCacheVersion = -1;
-    let layoutApplied = false;
     const layoutOf = () => layoutApi?.get(getSheetName()) || null;
     // Rows follow the height of their wrapped cells (PD-207); `null` where the page cannot measure text.
     const rowFit = host.__EASYOFFICE_CREATE_ROW_FIT__?.({
@@ -696,71 +566,9 @@
       return true;
     }
 
-    // The header right after a hidden run carries a thick edge on that side and the run's bounds
-    // (`data-hidden-run="first-last"`), which a double click on the edge shows again.
-    function markHiddenEdge(th, axis, run) {
-      th.classList.toggle("hidden-edge-" + axis, Boolean(run));
-      if (run) th.dataset.hiddenRun = run[0] + "-" + run[1];
-      else if (th.dataset.hiddenRun) delete th.dataset.hiddenRun;
-    }
-
-    // Hidden rows and columns get `sheet-hidden`; a merged range paints from its anchor cell
-    // (`merge-anchor` with its size in `--mw`/`--mh`) over the cells it covers (`merge-cover`).
-    function applyLayoutClasses() {
-      const layout = layoutOf();
-      const empty = !layout || layoutApi.isEmpty(layout);
-      if (empty && !layoutApplied) return;
-      layoutApplied = !empty;
-      const name = getSheetName();
-      const runs = layout?.hiddenRows || [];
-      const colRuns = layout?.hiddenCols || [];
-      const filter = layout?.filter || null;
-      const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
-      const tableStyle = layout?.tables?.length > 0 ? host.__EASYOFFICE_SHEET_TABLE_STYLE__ : null;
-      const filtered = filter !== null || tableStyle !== null;
-      const hasColRuns = !empty && colRuns.length > 0;
-      const hiddenColSet = hasColRuns ? new Set() : null;
-      for (const [c, th] of colHeadByCol) {
-        const hid = hasColRuns && layoutApi.colHidden(name, c);
-        if (hid) hiddenColSet.add(c);
-        th.classList.toggle("sheet-hidden", hid);
-        markHiddenEdge(th, "col", hasColRuns ? layoutApi.runAt(colRuns, c - 1) : null);
-      }
-      const skipped = filter !== null && filter.hidden.length > 0;
-      for (const [r, th] of rowHeadByRow) {
-        markHiddenEdge(th, "row", empty ? null : layoutApi.runAt(runs, r - 1));
-        th.classList.toggle("filter-row", skipped && r > filter.range.r1 && r <= filter.range.r2);
-      }
-      seedDomMaps();
-      const hasMerges = Boolean(!empty && layout?.merges && layout.merges.length > 0);
-      for (const td of tdByPacked.values()) {
-        const r = td._row;
-        const c = td._col;
-        td.classList.toggle("sheet-hidden", hiddenColSet ? hiddenColSet.has(c) : false);
-        // The header cells of the sheet's filter and of the tables with filter buttons carry the button (PD-226, PD-232); a button on
-        // each header cell of a table that has them (the reference of the table filter, `THIRD_PARTY_NOTICES.md`).
-        // The panel opens by the same answer (`filterOwnerAt`).
-        const owner = filtered ? layoutApi.filterOwnerAt(name, r, c) : undefined;
-        const head = owner !== undefined;
-        const on = head && (owner === null ? filterCols.has(c) : layoutApi.tablesOf(name).find((t) => t.name === owner).filter.some((x) => x.col === c));
-        td.classList.toggle("filter-head", head);
-        td.classList.toggle("filter-on", on);
-        // The totals-row cells of a table carry the function list's arrow while selected (PD-232).
-        const table = tableStyle?.tableAt(name, r, c);
-        td.classList.toggle("totals-cell", Boolean(table && table.totals === true && layoutApi.tableBox(table).r2 === r));
-        const m = hasMerges ? layoutApi.mergeAt(name, r, c) : null;
-        const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
-        td.classList.toggle("merge-anchor", anchor);
-        td.classList.toggle("merge-cover", Boolean(m) && !anchor);
-        if (anchor) {
-          td.style.setProperty("--mw", colLeft(m.c2 + 1) - colLeft(m.c1) + "px");
-          td.style.setProperty("--mh", rowTop(m.r2 + 1) - rowTop(m.r1) + "px");
-        } else if (td.style.getPropertyValue("--mw")) {
-          td.style.removeProperty("--mw");
-          td.style.removeProperty("--mh");
-        }
-      }
-    }
+    const applyLayoutClasses = host.__EASYOFFICE_CREATE_SHEET_GRID_LAYOUT_PAINT__({
+      layoutApi, layoutOf, getSheetName, tdByPacked, colHeadByCol, rowHeadByRow, seedDomMaps, colLeft, rowTop,
+    });
 
     // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
     function layoutChanged() {
@@ -815,58 +623,7 @@
       return found;
     }
 
-    function paintSelectionRange(rg) {
-      seedDomMaps();
-      if (selectedTd) {
-        selectedTd.classList.remove("selected-cell");
-        selectedTd = null;
-      }
-      for (let i = 0; i < rangeTds.length; i += 1) rangeTds[i].classList.remove("in-range");
-      rangeTds.length = 0;
-      for (let i = 0; i < activeColHeads.length; i += 1) activeColHeads[i].classList.remove("active-axis");
-      activeColHeads.length = 0;
-      for (let i = 0; i < activeRowHeads.length; i += 1) activeRowHeads[i].classList.remove("active-axis");
-      activeRowHeads.length = 0;
-      if (!rg) return;
-      const ar = rg.ar ?? rg.r1;
-      const ac = rg.ac ?? rg.c1;
-      const anchor = tdByPacked.get(packCoord(ar, ac));
-      if (anchor) {
-        anchor.classList.add("selected-cell");
-        selectedTd = anchor;
-      }
-      const v = view;
-      const mr1 = v ? Math.max(rg.r1, v.r0) : rg.r1;
-      const mr2 = v ? Math.min(rg.r2, v.r1) : rg.r2;
-      const mc1 = v ? Math.max(rg.c1, v.c0) : rg.c1;
-      const mc2 = v ? Math.min(rg.c2, v.c1) : rg.c2;
-      if (rg.r1 !== rg.r2 || rg.c1 !== rg.c2) {
-        for (let r = mr1; r <= mr2; r += 1) {
-          const rowBase = r * PACK_STRIDE;
-          for (let c = mc1; c <= mc2; c += 1) {
-            const td = tdByPacked.get(rowBase + c);
-            if (td) {
-              td.classList.add("in-range");
-              rangeTds.push(td);
-            }
-          }
-        }
-      }
-      for (let c = mc1; c <= mc2; c += 1) {
-        const th = colHeadByCol.get(c);
-        if (th) {
-          th.classList.add("active-axis");
-          activeColHeads.push(th);
-        }
-      }
-      for (let r = mr1; r <= mr2; r += 1) {
-        const th = rowHeadByRow.get(r);
-        if (th) {
-          th.classList.add("active-axis");
-          activeRowHeads.push(th);
-        }
-      }
-    }
+    const paintSelectionRange = host.__EASYOFFICE_CREATE_SHEET_GRID_SELECTION__({ tdByPacked, colHeadByCol, rowHeadByRow, seedDomMaps, getView: () => view });
 
     // Repaints every materialized cell from the model (keeps the elements, so focus survives).
     function refreshCells() {
@@ -927,7 +684,7 @@
     }
 
     // Applies a new column width to the live header cell and the table width.
-    columnWidthOf = colWidth;
+    setColumnWidthLookup(colWidth);
 
     // Sets the widths of several columns (`[[column, px], ...]`) and brings the page up to date once: the row heights of wrapped
     // cells are worked out one time for the lot, not once per column. Returns the widths as set.
