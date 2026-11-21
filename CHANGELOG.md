@@ -2,7 +2,7 @@
 
 사용자에게 보이는 변화만 날짜별로 적습니다. 최신 날짜가 위에 있습니다. 2026-11-14 이전은 [docs/policy-decisions.md](docs/policy-decisions.md)와 git 이력에 있고, 괄호의 PD 번호는 그 문서의 결정 항목입니다.
 
-## 2026-11-21
+## 2026-11-21 (v0.2.0)
 
 - 시트 함수 `FORECAST.ETS`, `FORECAST.ETS.CONFINT`, `FORECAST.ETS.SEASONALITY`, `FORECAST.ETS.STAT`를 더했습니다(내장 함수 313종). 상태 공간 지수 평활(`ETS(A,A,A)`·`ETS(A,A,N)`)과 닫힌 식 신뢰구간으로 계산합니다(PD-273).
 - 시트 함수 `BAHTTEXT`, `EUROCONVERT`, `JIS`, `PHONETIC`, `GROUPBY`, `PIVOTBY`, `GETPIVOTDATA`를 더했습니다(내장 함수 309종). `WEBSERVICE`, `RTD`, `FILTERXML`은 이름을 인식하고 함수 문서의 오류 값을 돌려줍니다. `GETPIVOTDATA`를 앱의 피벗과 잇는 일, `FILTERXML`은 남았습니다(PD-271).

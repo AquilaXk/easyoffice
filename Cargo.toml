@@ -48,7 +48,7 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 sse-core = { version = "0.2", default-features = false, features = ["std"] }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.88"
