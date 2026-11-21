@@ -33,7 +33,8 @@ before(async () => {
   const port = 20000 + Math.floor(Math.random() * 20000);
   const engine = startEngine(APP, port);
   await sleep(800);
-  const server = await startUiServer({ enginePort: port, port: port + 1 });
+  // `EO_UI_DIR` serves another copy of the page (the before-and-after shots of a change run the same steps on both).
+  const server = await startUiServer({ enginePort: port, port: port + 1, ui: process.env.EO_UI_DIR || undefined });
   const browser = await startBrowser({ chrome: CHROME, debugPort: port + 2, url: `http://127.0.0.1:${port + 1}/?module=SHEET&win=cf-real-chrome`, width: 1280, height: 860 });
   ctx = { engine, server, browser, cdp: browser.cdp };
   await sleep(1000);
@@ -275,6 +276,76 @@ test("the rule manager lists the rules of the selection or of the sheet with a p
   await key("z", CTRL);
   await sleep(300);
   assert.equal((await rulesOf()).length, 1, "clearing the sheet is one undo step");
+});
+
+// ---- the border of a format (PD-284) -------------------------------------------------------------------------------------
+
+const RED = "rgb(255, 0, 0)";
+const computed = (ref, prop) => js(`getComputedStyle(document.querySelector(${JSON.stringify(td(ref))}))[${JSON.stringify(prop)}]`);
+// Opens the drop-down of a dialog's format list (the page draws its own, so it is in the screenshots).
+async function openFormatList() {
+  const at = await centerOf(`document.getElementById("sheet-cfq-format-select").parentElement.querySelector(".custom-select-trigger")`);
+  await mouse("mouseMoved", at.x, at.y);
+  await mouse("mousePressed", at.x, at.y);
+  await mouse("mouseReleased", at.x, at.y);
+  await sleep(150);
+}
+
+test("the format list of the quick dialogs draws a thin red outline from the engine's answer, in one undo step", { skip }, async () => {
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({})`);
+  await click("B2");
+  for (let i = 0; i < 4; i += 1) await key("ArrowDown", SHIFT);
+  await chooseFromMenu(["조건부 서식", "셀 강조 규칙"], "보다 큼…");
+  await typeInto("sheet-cfq-a", "3");
+  await openFormatList();
+  const labels = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll("#sheet-cfq-dialog .custom-select-option")].map((o) => o.textContent))`));
+  assert.deepEqual(labels.slice(-2), ["빨강 테두리", "사용자 지정 형식…"]);
+  // The drop-down is longer than the dialog under it, so the dialog is scrolled to show the whole list.
+  await js(`document.querySelector('#sheet-cfq-dialog .custom-select-option[data-value="custom"]').scrollIntoView({ block: "nearest" })`);
+  await sleep(100);
+  await shoot("format-list");
+  const option = await centerOf(`document.querySelector('#sheet-cfq-dialog .custom-select-option[data-value="red-border"]')`);
+  await mouse("mouseMoved", option.x, option.y);
+  await mouse("mousePressed", option.x, option.y);
+  await mouse("mouseReleased", option.x, option.y);
+  await until(async () => (await computed("B5", "borderRightColor")) === RED, "the outline of B5 is drawn");
+  assert.equal(await computed("B4", "borderBottomColor"), RED, "the top edge of B5 sits in the slot of the cell above");
+  assert.equal(await computed("A5", "borderRightColor"), RED, "and its left edge in the slot of the cell before it");
+  assert.equal(await computed("B6", "borderBottomColor"), RED);
+  assert.notEqual(await computed("B3", "borderRightColor"), RED, "B3 is not greater than 3");
+  assert.equal((await look("B5")).bg, "", "a border alone paints no fill");
+  assert.equal((await rulesOf())[0].bd.t, "thin:ff0000");
+  await shoot("red-border-preview");
+  await ok();
+  await click("B2");
+  await shoot("red-border-sheet");
+  await key("z", CTRL);
+  await sleep(300);
+  assert.deepEqual(await rulesOf(), [], "one undo takes the rule away");
+  await until(async () => (await computed("B5", "borderRightColor")) !== RED, "the outline is gone after undo");
+  assert.notEqual(await computed("B4", "borderBottomColor"), RED);
+  await key("y", CTRL);
+  await sleep(300);
+  assert.equal((await rulesOf()).length, 1, "redo brings the rule back");
+  await until(async () => (await computed("B5", "borderRightColor")) === RED, "the outline is back after redo");
+});
+
+test("the custom format shows a rule's border row and the manager draws what it stores", { skip }, async () => {
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({})`);
+  await click("B2");
+  for (let i = 0; i < 4; i += 1) await key("ArrowDown", SHIFT);
+  await chooseFromMenu(["조건부 서식"], "새 규칙…");
+  assert.equal(await dialogOpen("sheet-cf-dialog"), true);
+  await js(`(() => { for (const [id, value] of [["sheet-cf-bd-on", true], ["sheet-cf-bd-line", "double"], ["sheet-cf-bd", "#0000ff"], ["sheet-cf-bg-on", false]]) { const el = document.getElementById(id); if (typeof value === "boolean") el.checked = value; else el.value = value; el.dispatchEvent(new Event("change", { bubbles: true })); } })()`);
+  await typeInto("sheet-cf-a", "3");
+  await shoot("manager-border-row");
+  await js(`document.getElementById("btn-sheet-cf-apply").click()`);
+  await until(async () => (await computed("B5", "borderRightColor")) === "rgb(0, 0, 255)", "the double blue outline");
+  assert.equal(await computed("B5", "borderRightStyle"), "solid", "a double line is a slot border plus a shadow");
+  assert.match(await js(`document.querySelector(${JSON.stringify(td("B5"))}).style.getPropertyValue("--lk-shadow")`), /#0000ff/);
+  await js(`document.getElementById("sheet-cf-dialog").close()`);
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({})`);
+  await until(async () => (await computed("B5", "borderRightColor")) !== "rgb(0, 0, 255)", "replacing the rules takes the edges off");
 });
 
 test("the custom format of a quick dialog opens the manager with the rule", { skip }, async () => {

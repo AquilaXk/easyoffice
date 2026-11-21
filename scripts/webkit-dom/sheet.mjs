@@ -106,4 +106,24 @@ export const sheetSteps = [
     assert.equal(await active(page), "B3");
     assert.deepEqual(await sortedRefs(page), ["B2", "B3", "C2", "C3"]);
   }],
+
+  ["a rule's border comes back in the engine's answer and is drawn in the slots of the cells that share each edge (PD-284)", async (page) => {
+    const RED = "rgb(255, 0, 0)";
+    for (const [ref, value] of [["G10", "1"], ["G11", "5"]]) {
+      await page.click(td(ref));
+      await page.keyboard.type(value);
+      await page.keyboard.press("Enter");
+    }
+    const outline = { t: "thin:ff0000", r: "thin:ff0000", b: "thin:ff0000", l: "thin:ff0000" };
+    await page.evaluate((bd) => window.__EASYOFFICE_SHEET_RULES__.set("Sheet1", { cf: [{ r: "G10:G11", t: "cellIs", op: "greaterThan", a: "3", b: "", stop: false, fl: 0, bd }], dv: [] }), outline);
+    const color = (ref, prop) => page.$eval(td(ref), (el, name) => getComputedStyle(el)[name], prop);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('#pane-sheet td[data-cell="G11"]')).borderRightColor === "rgb(255, 0, 0)", null, { timeout: 5000 });
+    assert.equal(await color("G10", "borderBottomColor"), RED, "the top edge of G11 sits in the slot of the cell above");
+    assert.equal(await color("F11", "borderRightColor"), RED, "and its left edge in the slot of the cell before it");
+    assert.equal(await color("G11", "borderBottomColor"), RED);
+    assert.notEqual(await color("G10", "borderRightColor"), RED, "G10 is not greater than 3");
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_RULES__.replaceAll({}));
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('#pane-sheet td[data-cell="G11"]')).borderRightColor !== "rgb(255, 0, 0)", null, { timeout: 5000 });
+    assert.notEqual(await color("G10", "borderBottomColor"), RED, "replacing the rules takes the edges off");
+  }],
 ];
