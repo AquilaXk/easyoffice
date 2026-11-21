@@ -4873,3 +4873,11 @@
 - **Trade-offs** 기준 앱의 비공개 평활 계수 선택 목적함수(비계절·계절 공통)와 계절 경로의 순환식·끝점 고정 처리 및 `STAT` 오차 열 정의가 교과서식과 달라 예측값과 `CONFINT` 폭이 기준 앱 실측과 차이가 난다(`docs/forecast-ets-cleanroom.md` 9장, `1e-6` 오라클 시험 3건은 `#[ignore]` 유지).
 - **Verified by** `cargo test -p easyoffice-sheet`(단위 36건 + 통합 15건 통과), `--self-test`(함수 313종), `check-repo-hygiene.mjs`.
 - **Revisit when** 기준 앱의 추가 실측 통합 문서로 평활 계수 목적함수와 `STAT` 오차 열 정의가 확인될 때.
+
+## PD-274. 릴리스 노트를 직접 쓴 두 언어 파일로 둠
+
+- **Status** Implemented (QA 요청 2026-11-21). `docs/releases/v<버전>.md`, `.github/workflows/release.yml`, 시험 `scripts/test-release-notes-file.mjs`.
+- **Context** 릴리스 본문이 `--generate-notes`로 만든 커밋·PR 목록이라 사용자가 읽기 어렵다. 참조 앱은 한국어·영어 두 절의 짧은 글머리표를 쓴다.
+- **Decision (`PD-274`)** (1) 노트는 `docs/releases/v<버전>.md`에 `## 변경 사항`(한국어)과 `## Changes`(영어)로 직접 쓴다. 사용자에게 보이는 변화만 짧게 적고 PD·PR 번호는 넣지 않는다. (2) 릴리스 작업은 파일이 있으면 `--notes-file`로 쓰고 없으면 `--generate-notes`를 쓴다. (3) 드래프트를 다시 실행하면 같은 규칙으로 본문을 다시 쓰고, 게시된 릴리스는 본문을 건드리지 않는다. (4) README는 태그라인과 `## 할 수 있는 일` 목록 구조로 맞춘다.
+- **Verified by** `node --test scripts/test-release-notes-file.mjs`, `check-repo-hygiene.mjs`.
+- **Revisit when** 노트 파일을 빠뜨린 릴리스가 생길 때.

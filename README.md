@@ -1,24 +1,24 @@
 # EasyOffice
 
+**문서·시트·슬라이드·PDF·한글을 한 앱에서 여는 오프라인 올인원 오피스**
+
 EasyOffice는 문서·스프레드시트·프레젠테이션·PDF·한글(HWP/HWPX) 파일을 한 앱에서 열고 편집하는 오프라인 데스크탑 앱입니다. macOS, Windows, Linux에서 실행합니다.
 
 엔진은 Rust로 짜여 있고 화면은 [Tauri](https://tauri.app) v2 셸 위의 WebUI입니다. 한글 문서의 파싱과 렌더링은 [rhwp](https://github.com/edwardkim/rhwp)를 기반으로 합니다. 셸이 파일 열기, 저장, PDF 내보내기, 인쇄, 파일 연결 같은 OS 통합을 맡습니다.
 
 ![EasyOffice](docs/images/easyoffice-home.png)
 
-## 지원 모듈
+## 할 수 있는 일
 
-| 모듈 | 파일 |
-| :--- | :--- |
-| 문서 | DOCX, DOC, ODT, RTF, MD, TXT |
-| 시트 | XLSX, XLS, ODS, CSV, TSV (내장 함수 313종, 피벗, 차트, 조건부 서식) |
-| 슬라이드 | PPTX, PPT, PPSX, ODP (글상자·도형·그림·표·차트 개체, 발표자 보기) |
-| PDF | PDF (주석, 쪽 편집, 원본 객체 보존 저장) |
-| 한글 | HWP, HWPX, HWT, HWTX |
-| BASE | `.eobase` (관계형 데이터베이스: 표·관계·수식·데이터시트/보드/일정 보기) |
-| BOARD | `.eoboard` (무한 캔버스: 도형·글·그림·차트·연결선) |
-| 코파일럿 | 사용자가 등록한 AI 모델 서버에 연결하는 채팅 패널 (앱에 모델을 내장하지 않음) |
-| 변환 | 20종 포맷 사이의 변환과 일괄 변환 |
+* 문서 편집 (DOCX, DOC, ODT, RTF, MD, TXT)
+* 시트 편집: 내장 함수 313종, 피벗, 차트, 조건부 서식 (XLSX, XLS, ODS, CSV, TSV)
+* 슬라이드 편집과 발표자 보기: 글상자·도형·그림·표·차트 개체 (PPTX, PPT, PPSX, ODP)
+* PDF 보기와 편집: 주석, 쪽 편집, 원본 객체 보존 저장 (PDF)
+* 한글 문서 열기와 편집 (HWP, HWPX, HWT, HWTX)
+* BASE: 표·관계·수식과 데이터시트·보드·일정 보기를 갖춘 관계형 데이터베이스 (`.eobase`)
+* BOARD: 도형·글·그림·차트·연결선을 놓는 무한 캔버스 (`.eoboard`)
+* 코파일럿: 사용자가 등록한 AI 모델 서버에 연결하는 채팅 패널 (앱에 모델을 내장하지 않음)
+* 20종 포맷 사이의 변환과 일괄 변환
 
 Pages(`.pages`)는 읽기와 실험적 쓰기를 지원합니다. 포맷별 읽기·쓰기·보존 범위와 상한은 [docs/format-support.md](docs/format-support.md), 기능 명세는 [docs/product-spec.md](docs/product-spec.md)에 있습니다.
 

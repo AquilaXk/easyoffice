@@ -357,7 +357,7 @@ jobs:
       # A draft stays invisible to /releases/latest, so neither the download links, the update notice nor
       # latest.json (PD-103) point at it until QA publishes it; a pre-release version (1.2.3-rc.1) is
       # flagged so /releases/latest never serves it either. A rerun on an existing release only replaces
-      # its assets; it never turns a published release back into a draft. The release's target commit must
+      # its assets (a draft also takes the notes file again; a published release keeps its body); it never turns a published release back into a draft. The release's target commit must
       # match the assets (PD-146): a rerun on a draft (no tag yet) moves the target to this commit and drops
       # uploaded files this run does not have; a published release (its tag exists) keeps its commit, so a
       # rerun from another commit fails and only the same commit may replace the assets.
@@ -371,9 +371,15 @@ jobs:
         run: |
           set -euo pipefail
           FILES=(release-assets/*)
+          # Hand-written notes (docs/releases/v<version>.md) win over generated ones.
+          NOTES_FILE="docs/releases/v${VERSION}.md"
           if IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$IS_DRAFT" = true ]; then
-              gh release edit "$TAG" --target "$TARGET_SHA" --repo "$GITHUB_REPOSITORY"
+              EDIT_FLAGS=(--target "$TARGET_SHA" --repo "$GITHUB_REPOSITORY")
+              if [ -f "$NOTES_FILE" ]; then
+                EDIT_FLAGS+=(--notes-file "$NOTES_FILE")
+              fi
+              gh release edit "$TAG" "${EDIT_FLAGS[@]}"
               gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | while read -r NAME; do
                 if [ ! -e "release-assets/$NAME" ]; then
                   gh release delete-asset "$TAG" "$NAME" --yes --repo "$GITHUB_REPOSITORY"
@@ -391,7 +397,12 @@ jobs:
               gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
             fi
           else
-            FLAGS=(--target "$TARGET_SHA" --title "EasyOffice v${VERSION}" --generate-notes --repo "$GITHUB_REPOSITORY")
+            FLAGS=(--target "$TARGET_SHA" --title "EasyOffice v${VERSION}" --repo "$GITHUB_REPOSITORY")
+            if [ -f "$NOTES_FILE" ]; then
+              FLAGS+=(--notes-file "$NOTES_FILE")
+            else
+              FLAGS+=(--generate-notes)
+            fi
             if [ "$DRAFT" = true ]; then
               FLAGS+=(--draft)
             fi
