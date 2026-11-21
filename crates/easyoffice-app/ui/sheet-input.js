@@ -103,6 +103,27 @@
       feedback,
     });
 
+    const point = host.__EASYOFFICE_CREATE_SHEET_POINT_UI__({
+      document,
+      grid,
+      feedback,
+      getSheetName: () => api.getSheetName(),
+      getActiveCell: () => ({ r: sel.ar, c: sel.ac }),
+      refOf: (r, c) => grid.refOf(r, c),
+      quoteSheet: (name) => host.__EASYOFFICE_SHEET_UTILS__.quoteFormulaSheetName(name),
+      gridTdOf: (el) => gridTdOf(el),
+      stateOf: (td) => stateOf(td),
+      editable: (td) => !protectApi || protectApi.cellEditable(api.getSheetName(), td._row, td._col, td._st),
+      setMode: (td, mode) => markEditing(td, stateOf(td), mode),
+      afterWrite: (td) => onInput(td),
+      stepFrom: (from, dr, dc, jump) => stepFrom(from, dr, dc, jump),
+      cancelEdit: (td) => cancelEdit(td),
+      resumeCell: (row, col, mode) => resumeCell(row, col, mode),
+      finishCell: (commit) => finishCell(commit),
+      restoreBar: () => restoreBar(),
+      switchSheet: (name) => api.switchSheet(name),
+    });
+
     // The entry of a cell as a fill may read it: a formula a protected sheet hides is a value (PD-216).
     function visibleEntryOf(ref) {
       const entry = api.getEntry(ref);
@@ -249,7 +270,7 @@
         badge.textContent = host.__EASYOFFICE_SHEET_NAMES__?.nameOfRange(api.getSheetName(), getRange()) || ref;
       }
       const formulaInput = document.getElementById("formula-input");
-      if (formulaInput && document.activeElement !== formulaInput) {
+      if (formulaInput && document.activeElement !== formulaInput && !point.holdsBar()) {
         // A protected sheet does not show the formula of a cell whose format hides it (PD-216).
         const hidden = protectApi?.formulaHidden(api.getSheetName(), sel.ar, sel.ac, activeTd ? activeTd._st : api.getEntry(ref)?.style);
         // A cell an array filled shows the formula of the array, dimmed: it cannot be edited on its own (PD-217).
@@ -278,6 +299,7 @@
       }
       const out = document.getElementById("sheet-eval-result");
       if (out) out.setAttribute("title", out.textContent || "");
+      point.refresh();
       api.onSelectionChanged?.();
     }
 
@@ -432,8 +454,7 @@
       return { r: nr, c: nc };
     }
 
-    function jumpTarget(dr, dc, extend) {
-      const from = { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac };
+    function jumpTarget(dr, dc, from) {
       if (!inGridBounds(from.r + dr, from.c + dc)) return from;
       const nr = from.r + dr;
       const nc = from.c + dc;
@@ -454,10 +475,20 @@
       return { r: nr, c: nc };
     }
 
+    // The cell a pointed reference moves to from `from`: a jump to the edge of the data, or a step over the hidden rows and columns.
+    function stepFrom(from, dr, dc, jump) {
+      if (jump) return jumpTarget(dr, dc, from);
+      let nr = from.r + dr;
+      let nc = from.c + dc;
+      while (dr && inGridBounds(nr, nc) && grid.rowHidden?.(nr)) nr += dr;
+      while (dc && inGridBounds(nr, nc) && grid.colHidden?.(nc)) nc += dc;
+      return { r: clamp(nr, 1, grid.MAX_ROWS), c: clamp(nc, 1, grid.MAX_COLS) };
+    }
+
     function moveBy(dr, dc, opts) {
       const { extend, jump } = opts;
       if (jump) {
-        const t = jumpTarget(dr, dc, extend);
+        const t = jumpTarget(dr, dc, { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac });
         select(t.r, t.c, extend);
         return;
       }
@@ -535,6 +566,7 @@
         st.editBaseline = raw;
       }
       placeCaret(td);
+      point.refresh();
     }
 
     function endEdit(td) {
@@ -548,6 +580,7 @@
       td.classList.remove("editing");
       // The caret scrolled a long text inside the cell; the finished cell shows its text from the start again.
       td.scrollLeft = 0;
+      point.editedEnded();
     }
 
     function cancelEdit(td) {
@@ -602,6 +635,33 @@
       const formulaInput = document.getElementById("formula-input");
       if (formulaInput && api.getActiveSheetCellRef() === td.dataset.cell) formulaInput.value = rawText;
       refreshChrome();
+      point.afterInput();
+    }
+
+    // The cell an entry that went on in the formula bar comes back to: edited again, with the mode it had.
+    function resumeCell(row, col, mode) {
+      grid.ensureVisible(row, col);
+      const td = tdAt(row, col);
+      if (!td) return null;
+      td.focus({ preventScroll: true });
+      startEdit(td, mode, false);
+      return isEditing(stateOf(td)) ? td : null;
+    }
+
+    // Enter (`commit`) or Esc on the cell being edited; false when no cell is.
+    function finishCell(commit) {
+      const td = gridTdOf(document.activeElement);
+      if (!td || !isEditing(stateOf(td))) return false;
+      if (commit) handleEnterTab({ key: "Enter", shiftKey: false, preventDefault() {} }, true);
+      else cancelEdit(td);
+      return true;
+    }
+
+    // Esc in the formula bar: the bar shows the cell again and the grid has the focus.
+    function restoreBar() {
+      document.getElementById("formula-input")?.blur?.();
+      refreshChrome();
+      focusAnchor();
     }
 
     // ---- keyboard --------------------------------------------------------------------------
@@ -662,6 +722,7 @@
       if (ev.altKey && ev.key === "ArrowDown" && !ev.ctrlKey && !ev.metaKey) return;
       const td = gridTdOf(ev.target) || tdAt(sel.ar, sel.ac);
       if (handleCompositionKey(ev, td)) return;
+      if (point.key(ev)) return;
       const st = td ? stateOf(td) : null;
       const editing = isEditing(st);
       const mod = ev.ctrlKey || ev.metaKey;
@@ -765,6 +826,8 @@
       }
       const head = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
       if (head) {
+        const axis = head.dataset.col ? "col" : "row";
+        if (point.press(ev, { axis, index: axis === "col" ? grid.colIndex(head.dataset.col) : Number(head.dataset.row) })) return;
         ev.preventDefault();
         if (head.dataset.col) selectAxis("col", grid.colIndex(head.dataset.col), Boolean(ev.shiftKey));
         else selectAxis("row", Number(head.dataset.row), Boolean(ev.shiftKey));
@@ -773,9 +836,16 @@
       const td = gridTdOf(ev.target);
       if (!td) return;
       const st = stateOf(td);
-      if (st?.mode && document.activeElement === td) return;
+      if (st?.mode && document.activeElement === td) {
+        point.clearPoint();
+        return;
+      }
       const p = grid.parseRef(td.dataset.cell);
       if (!p) return;
+      if (point.press(ev, { r: p.row, c: p.col })) {
+        drag = { active: true, point: true };
+        return;
+      }
       ev.preventDefault();
       commitIfEditing();
       drag = { active: true };
@@ -810,6 +880,10 @@
         if (p) fill.over(p.row, p.col);
         return;
       }
+      if (drag?.point) {
+        if (p) point.over({ r: p.row, c: p.col });
+        return;
+      }
       if (p && (p.row !== sel.cr || p.col !== sel.cc)) {
         sel.cr = p.row;
         sel.cc = p.col;
@@ -820,6 +894,7 @@
     function onMouseUp() {
       const wasResize = Boolean(resize);
       drag = null;
+      point.release();
       resize = null;
       if (wasResize) document.documentElement?.dispatchEvent?.({ type: "eo-doc-mutated" });
     }
@@ -868,6 +943,7 @@
       const vp = viewport();
       if (!vp || delegatesBound) return;
       delegatesBound = true;
+      point.bind();
       vp.addEventListener("keydown", onKeydown);
       vp.addEventListener("beforeinput", onBeforeInput);
       vp.addEventListener("compositionstart", onCompositionStart);
@@ -902,6 +978,9 @@
       runClipboardCommand,
       shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),
+      handleBarKey: point.barKey,
+      detachForSwitch: point.detach,
+      afterSheetSwitch: point.afterSwitch,
     };
   }
 

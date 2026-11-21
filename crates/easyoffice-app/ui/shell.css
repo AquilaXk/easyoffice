@@ -54,6 +54,7 @@
 #status-command-feedback { flex: 0 1 auto; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
 .statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
+.statusbar-sheet-mode { flex-shrink: 0; font-weight: 600; color: var(--ui-text); }
 /* The zoom buttons are the reference status bar's icon button (`status-bar.css` .stb-icon-btn: 24x24, no radius, a transparent 1px border; hover: the hover fill and the strong border; 18px icon). */
 .statusbar-zoom-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); }
 .statusbar-zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border-strong); }

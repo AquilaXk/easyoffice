@@ -621,6 +621,7 @@
     const formulaInputEl = document.getElementById("formula-input");
     if (formulaInputEl && evalBtn) {
       formulaInputEl.addEventListener("keydown", (ev) => {
+        if (sheetController.handleFormulaBarKey(ev)) return;
         if (ev.key === "Enter") {
           ev.preventDefault();
           evalBtn.click();

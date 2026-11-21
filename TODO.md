@@ -56,7 +56,8 @@
 
 
 ## 시트 UI 이식 1차 이후 (PD-275)
-- [ ] 수식 입력 중 셀 눌러 참조 넣기(포인트 모드)와 F4 순환이 없다. 수식 편집 상태에서 셀 클릭은 입력을 확정한다. 원본은 `THIRD_PARTY_NOTICES.md`의 참조 시트 구현 중 수식 UI 패키지(`prompt.service.ts`, `reference-absolute.operation.ts`, `controllers/shortcuts/prompt.shortcut.ts`)이고 편집 칸이 문서 편집기라 td 편집·수식 입력줄에 맞춰 새로 엮어야 한다(다음 브랜치)
+- [ ] 포인트 모드가 열 머리글 끌기로 여러 열·행을 잡지 못하고(클릭·Shift+클릭만), 병합 칸은 왼쪽 위 칸 하나만 넣고, 표 열 이름(구조적 참조)·정의된 이름은 넣지 않는다(PD-279)
+- [ ] 다른 시트로 넘어간 수식 입력에서 수식이 완성형(`)` 뒤)이 되면 셀 클릭이 무시되고 Enter·Esc만 듣는다(표 계산 프로그램은 확정하고 이동). 다른 통합 문서 참조(`[책]시트!A1`)와 3차원 참조는 없다(PD-279)
 - [ ] 시트 기본 행 높이(`sheetFormatPr defaultRowHeight customHeight`, 전체 선택 뒤 행 높이)를 읽고 쓰지 않는다. 행마다 `ht`만 다룬다(PD-278)
 - [ ] PDF 내보내기·시트 PDF 그림 위치가 행 높이(`row_heights`)를 쓰지 않고 24px 행으로 계산한다(PD-278)
 - [ ] 실제 표 계산 프로그램이 복사한 HTML 표본으로 `sheet-clip-html.js` 대조(현재 시험 자료는 알려진 출력 모양을 따라 쓴 것)

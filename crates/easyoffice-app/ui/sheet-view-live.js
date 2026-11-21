@@ -82,7 +82,7 @@
     }
 
     async function switchTo(target) {
-      await flushFocusedSheetCellBeforeSwitch();
+      await flushFocusedSheetCellBeforeSwitch(target);
       if (!sheetDataStore.Sheet1 && getActiveSheetName() === "Sheet1") {
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }

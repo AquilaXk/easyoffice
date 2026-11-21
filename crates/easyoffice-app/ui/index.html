@@ -690,13 +690,16 @@
                   <button type="button" id="btn-name-box-list" class="sheet-name-arrow" aria-label="이름 목록" tabindex="-1">&#9662;</button>
                   <ul id="sheet-name-box-list" class="sheet-name-box-list" role="listbox" aria-label="이름 목록" hidden></ul>
                 </span>
-                <input
-                  id="formula-input"
-                  class="sb-select sb-formula-input"
-                  type="text"
-                  value=""
-                  aria-label="수식 입력줄"
-                />
+                <span class="sb-formula-wrap">
+                  <input
+                    id="formula-input"
+                    class="sb-select sb-formula-input"
+                    type="text"
+                    value=""
+                    aria-label="수식 입력줄"
+                  />
+                  <span id="sheet-formula-colors" class="sb-formula-colors" aria-hidden="true" hidden></span>
+                </span>
               </div>
               <div class="tb-group">
                 <button id="btn-eval-formula" type="button" class="tb-btn">수식 계산</button>
@@ -1168,6 +1171,7 @@
           <span id="status-doc-filename" class="statusbar-doc-path">제목 없음 — 1쪽</span>
         </span>
         <span class="statusbar-diag-group">
+          <span id="status-sheet-mode" class="statusbar-sheet-mode" hidden></span>
           <span id="status-sheet-agg"></span>
           <span id="status-command-feedback">준비 완료</span>
         </span>
@@ -2581,6 +2585,7 @@
     <script src="./sheet-fill-ui.js"></script>
     <script src="./sheet-paste-ui.js"></script>
     <script src="./sheet-formula-point.js"></script>
+    <script src="./sheet-point-ui.js"></script>
     <script src="./sheet-input.js"></script>
     <script src="./sheet-sort.js"></script>
     <script src="./sheet-ops.js"></script>

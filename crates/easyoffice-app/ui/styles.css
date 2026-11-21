@@ -28,7 +28,7 @@ select:focus-visible,
 }
 .app-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .topbar { position: relative; z-index: 1000; display: flex; align-items: center; justify-content: space-between; height: 28px; flex-shrink: 0; padding: 0 8px; background: var(--ui-bg-light); border-bottom: 1px solid var(--ui-border-light); gap: 8px; }
-.eo-doc-style-bar[hidden], .statusbar-left-group[hidden], #status-sheet-agg[hidden], .eo-bootstrap-error[hidden] { display: none; }
+.eo-doc-style-bar[hidden], .statusbar-left-group[hidden], #status-sheet-agg[hidden], #status-sheet-mode[hidden], .sb-formula-colors[hidden], .eo-bootstrap-error[hidden] { display: none; }
 .eo-bootstrap-error { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 6px 12px; font-size: 12px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 .tb-btn:disabled { opacity: 0.4; cursor: default; }
 .tb-btn:disabled:hover { background: transparent; outline: none; color: inherit; }
@@ -279,6 +279,9 @@ select:focus-visible,
 .app-shell:not([data-module="SHEET"]) #status-sheet-agg {
   display: none;
 }
+.app-shell:not([data-module="SHEET"]) #status-sheet-mode {
+  display: none;
+}
 .statusbar-doc-path {
   color: var(--accent-primary);
   font-weight: 500;
@@ -483,7 +486,11 @@ select:focus-visible,
 #pane-sheet:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #pane-sheet #sheet-formula-bar { margin: 0; padding: 0 8px; flex-wrap: nowrap; }
 .sb-formula-field { flex: 1 1 auto; min-width: 0; }
+.sb-formula-wrap { position: relative; display: flex; flex: 1 1 auto; min-width: 120px; }
 .sb-formula-input { flex: 1 1 auto; min-width: 120px; }
+/* The text of the formula bar in the colours of its references: a copy laid over the input, whose own text lets go while it shows. */
+.sb-formula-colors { position: absolute; inset: 0; box-sizing: border-box; display: flex; align-items: center; padding: 0 7px; overflow: hidden; pointer-events: none; white-space: pre; font: inherit; color: var(--ui-text); }
+.eo-doc-style-bar .sb-formula-input.colored { color: transparent; caret-color: var(--ui-text); }
 #pane-sheet .formula-result { flex: 0 1 auto; min-width: 0; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pane-sheet .sheet-surface { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; border-width: 0; }
 .sheet-viewport { flex: 1 1 auto; min-height: 220px; overflow: auto; position: relative; background: var(--ui-surface); border-width: 1px; border-style: solid; border-color: var(--ui-border-light); outline: none; }
@@ -568,6 +575,8 @@ select:focus-visible,
 .sheet-grid td.merge-anchor.selected-cell::after { outline: 2px solid var(--table-selection-stroke); outline-offset: -2px; background: var(--ui-surface); }
 /* Fill handle (sheet-fill-ui.js): the reference editor's table object handle (`table-selection.css` .table-object-handle: the selection stroke colour, a 1px paper-colour edge; 8px, `table-object-renderer.ts:80`), and the outline of the cells a drag would fill (`.table-object-border`: 2px, the selection stroke). */
 .sheet-viewport .sheet-fill-handle { position: absolute; z-index: 4; box-sizing: border-box; width: 8px; height: 8px; background: var(--table-selection-stroke); border: 1px solid var(--doc-paper); cursor: crosshair; }
+.sheet-viewport .sheet-ref-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+.sheet-viewport .sheet-ref-box { position: absolute; z-index: 3; box-sizing: border-box; outline: 2px solid var(--ui-text-muted); outline-offset: -2px; pointer-events: none; }
 .sheet-viewport .sheet-fill-preview { position: absolute; z-index: 3; outline: 2px dashed var(--table-selection-stroke); outline-offset: -2px; pointer-events: none; }
 #pane-hwp:not([hidden]) { display: flex; flex-direction: column; position: relative; height: 100%; min-height: 0; overflow: hidden; }
 /* Drop highlight while a file is dragged over the window; the reference editor's value (`editor.css` 83-87). */
@@ -595,3 +604,22 @@ select:focus-visible,
 .sheet-grid td.spill-r { --spill-r: inset -1px 0 0 0 var(--table-selection-stroke); }
 /* A cell an array filled shows the formula of the array dimmed in the formula bar. */
 #pane-sheet #sheet-formula-bar .sb-formula-input.spill-ghost { color: var(--ui-text-disabled); }
+/* The colour of a reference of a formula being edited: box on the grid, text of the cell, text of the formula bar. */
+.sheet-viewport .sheet-ref-box[data-color="0"] { outline-color: var(--sheet-ref-0, var(--accent-primary)); }
+.sheet-viewport .sheet-ref-box[data-color="1"] { outline-color: var(--sheet-ref-1, var(--accent-primary)); }
+.sheet-viewport .sheet-ref-box[data-color="2"] { outline-color: var(--sheet-ref-2, var(--accent-primary)); }
+.sheet-viewport .sheet-ref-box[data-color="3"] { outline-color: var(--sheet-ref-3, var(--accent-primary)); }
+.sheet-viewport .sheet-ref-box[data-color="4"] { outline-color: var(--sheet-ref-4, var(--accent-primary)); }
+.sheet-viewport .sheet-ref-box[data-color="5"] { outline-color: var(--sheet-ref-5, var(--accent-primary)); }
+.sb-formula-colors span[data-color="0"] { color: var(--sheet-ref-0, var(--accent-primary)); }
+.sb-formula-colors span[data-color="1"] { color: var(--sheet-ref-1, var(--accent-primary)); }
+.sb-formula-colors span[data-color="2"] { color: var(--sheet-ref-2, var(--accent-primary)); }
+.sb-formula-colors span[data-color="3"] { color: var(--sheet-ref-3, var(--accent-primary)); }
+.sb-formula-colors span[data-color="4"] { color: var(--sheet-ref-4, var(--accent-primary)); }
+.sb-formula-colors span[data-color="5"] { color: var(--sheet-ref-5, var(--accent-primary)); }
+::highlight(eo-ref-0) { color: var(--sheet-ref-0, var(--accent-primary)); }
+::highlight(eo-ref-1) { color: var(--sheet-ref-1, var(--accent-primary)); }
+::highlight(eo-ref-2) { color: var(--sheet-ref-2, var(--accent-primary)); }
+::highlight(eo-ref-3) { color: var(--sheet-ref-3, var(--accent-primary)); }
+::highlight(eo-ref-4) { color: var(--sheet-ref-4, var(--accent-primary)); }
+::highlight(eo-ref-5) { color: var(--sheet-ref-5, var(--accent-primary)); }

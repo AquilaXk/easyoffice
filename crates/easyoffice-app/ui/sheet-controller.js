@@ -597,8 +597,8 @@
 
     // The step pushed at the first change of a cell goes when the entry is cancelled: nothing was entered.
     function retractCellUndoSnapshot(st) {
-      if (st?.undoRecord) sheetHistory.retract(st.undoRecord);
-      if (st) st.undoRecord = null;
+      if (st.undoRecord) sheetHistory.retract(st.undoRecord);
+      st.undoRecord = null;
     }
 
     function releaseCellFocus(td, keepFocus) {
@@ -695,8 +695,10 @@
       return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus));
     }
 
-    async function flushFocusedSheetCellBeforeSwitch() {
+    // `target` is the sheet the window switches to: a formula that waits for a reference goes on there instead of being entered.
+    async function flushFocusedSheetCellBeforeSwitch(target) {
       const activeEl = document.activeElement;
+      if (input.detachForSwitch(target)) return drainInFlightSheetWork();
       if (activeEl && sheetCellFocusState.has(activeEl)) {
         await commitSheetCellEdit(activeEl, false);
       } else if (
@@ -769,10 +771,11 @@
       },
       onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
       commitSheetCellEdit,
-      ensureSheetCellFocusEntry,
-      syncSheetCellFocusBaseline,
       pushCellUndoSnapshotIfNeeded,
       retractCellUndoSnapshot,
+      switchSheet: (name) => performSwitchSheetTabAsync(name),
+      ensureSheetCellFocusEntry,
+      syncSheetCellFocusBaseline,
       ensurePendingSnapshot,
       schedulePendingSnapshot,
       applyCellEdits,
@@ -815,6 +818,7 @@
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = "시트 탭 전환: " + target;
         structure.refreshSheetChrome();
+        input.afterSheetSwitch(target);
       },
     });
 
@@ -959,6 +963,7 @@
       evaluateActiveSheetFormulaBar,
       flushFocusedSheetCellBeforeSwitch,
       commitPendingFocusedSheetCell,
+      handleFormulaBarKey: (ev) => input.handleBarKey(ev),
       bindSheetCellEvents,
       runSheetClipboardCommand,
       runSheetStructure: structure.run,
