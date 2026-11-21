@@ -282,12 +282,15 @@
       };
     }
 
-    function paintTd(td, entry) {
+    // `keepText`: the cell is being typed in, so its text and its type stay what they are (the model has not got them yet).
+    function paintTd(td, entry, keepText = false) {
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
       td._nf = entry?.style?.numFmt || "";
-      td._ct = formula ? "" : (entry?.t || "");
-      setDisplayValue(td, value);
+      if (!keepText) {
+        td._ct = formula ? "" : (entry?.t || "");
+        setDisplayValue(td, value);
+      }
       if (formula) td.dataset.formula = formula;
       else delete td.dataset.formula;
       // A cell an array filled (PD-217) keeps the address of the formula that made it.
@@ -630,13 +633,14 @@
     const paintSelectionRange = host.__EASYOFFICE_CREATE_SHEET_GRID_SELECTION__({ tdByPacked, colHeadByCol, rowHeadByRow, seedDomMaps, getView: () => view });
 
     // Repaints every materialized cell from the model (keeps the elements, so focus survives).
-    function refreshCells() {
+    // `isTyping(td)` marks a cell that keeps the text it is typed in.
+    function refreshCells(isTyping = null) {
       const tbody = tbodyEl();
       if (!tbody) return [];
       seedDomMaps();
       const tds = [];
       for (const td of tdByPacked.values()) {
-        paintTd(td, getEntry(td.dataset.cell));
+        paintTd(td, getEntry(td.dataset.cell), isTyping ? isTyping(td) : false);
         tds.push(td);
       }
       applyLayoutClasses();

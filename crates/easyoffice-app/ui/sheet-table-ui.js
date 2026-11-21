@@ -122,7 +122,7 @@
     // The last step of a command that changed the layout or the cells: the grid, the formulas, the bar.
     async function settle(name, text, recalc = true) {
       grid.layoutChanged();
-      refreshWindowFromModel();
+      refreshWindowFromModel(true);
       if (recalc) await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       refreshChrome();
       sync();

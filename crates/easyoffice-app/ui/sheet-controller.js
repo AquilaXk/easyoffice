@@ -276,8 +276,16 @@
       refreshChrome: () => input.refreshChrome(),
     });
 
-    function refreshWindowFromModel() {
-      grid.refreshCells().forEach((td) => {
+    // A step that runs after a cell entry (the growth of a table, a paste) shows the model when it ends, by which time the next
+    // cell may be typed in. `keepTyping` lets that cell keep its text and its edit.
+    const isTyped = (td) => {
+      const st = sheetCellFocusState.get(td);
+      return Boolean(st && (st.mode || st.userEdited));
+    };
+
+    function refreshWindowFromModel(keepTyping = false) {
+      grid.refreshCells(keepTyping ? isTyped : null).forEach((td) => {
+        if (keepTyping && isTyped(td)) return;
         if (sheetCellFocusState.has(td)) syncSheetCellFocusBaseline(td, true);
         else if (document.activeElement === td) ensureSheetCellFocusEntry(td, getActiveSheetName());
       });
@@ -366,7 +374,7 @@
         let updatedActiveSheet = false;
         // The cells an array fills changed: the window shows them again (PD-217).
         if (liveEval.spillsChanged && getActiveModule() === "SHEET") {
-          refreshWindowFromModel();
+          refreshWindowFromModel(true);
           updatedActiveSheet = true;
         }
         formulaTargets.forEach((target, idx) => {
@@ -389,7 +397,7 @@
             const td = grid.getTdByRef(target.cell);
             const focusSt = td ? sheetCellFocusState.get(td) : null;
             if (!td || !isFormulaStr(td.dataset.formula || "")) return;
-            if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;
+            if ((!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) || focusSt?.mode) return;
             const isEditingFormulaInPlace =
               !forceFocusedDisplay &&
               document.activeElement === td &&
@@ -403,12 +411,12 @@
         });
         // A formula in a table's header cell is fixed as the text of its result (PD-224).
         if (host.__EASYOFFICE_SHEET_LAYOUT__.settleTableHeaders(sheetDataStore[curSheet], curSheet)) {
-          refreshWindowFromModel();
+          refreshWindowFromModel(true);
           updatedActiveSheet = true;
         }
         // A header cell that got new text names its column anew: the formulas that name the column follow (PD-225).
         sheetStoreHelpers.followTableHeaders(sheetDataStore, () => {
-          refreshWindowFromModel();
+          refreshWindowFromModel(true);
           void recalculateActiveSheetFormulas();
         });
         if (updatedActiveSheet && getActiveModule() === "SHEET") {

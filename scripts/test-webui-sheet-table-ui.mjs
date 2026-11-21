@@ -445,6 +445,32 @@ test("a header cell beside the table that is empty is named Column<n> and writte
   assert.equal(cell(h.document, "E1").textContent, "Notes", "the text that was there stays");
 });
 
+test("a cell typed in while the growth of the table is still settling keeps its text and its edit", async () => {
+  const h = await openSheet();
+  const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
+  const table = { name: "Sales", range: "A1:C3", header: true, totals: false, columns: ["a", "b", "c"], style: "TableStyleMedium2", firstColumn: false, lastColumn: false, rowStripes: true, columnStripes: false };
+  const cells = [["A1", "a"], ["B1", "b"], ["C1", "c"], ["A2", "1"], ["B2", "2"], ["C2", "3"], ["A3", "4"], ["B3", "5"], ["C3", "6"]].map(([ref, raw]) => ({ ref, raw }));
+  await pickFile(h.document, makeFixtureFile("n.xlsx", { sheets: [{ name: "Sheet1", cells, tables: [table] }] }));
+  await flushAsyncTurns(8);
+  // D2 is entered, which makes the table grow a column as a step that runs after the entry; the next cell is typed in at once.
+  const d2 = cell(h.document, "D2");
+  d2.focus();
+  typeText(h.document, "x");
+  key(d2, "Enter");
+  const b2 = cell(h.document, "B2");
+  b2.focus();
+  typeText(h.document, "=");
+  await flushAsyncTurns(24);
+  assert.equal(tables(h)[0].range, "A1:D3", "the table grew");
+  assert.equal(b2.textContent, "=", "the cell being typed in keeps what was typed");
+  assert.equal(b2.dataset.editMode, "enter", "and stays in its edit");
+  assert.equal(h.document.activeElement, b2);
+  typeText(h.document, "1");
+  key(b2, "Enter");
+  await flushAsyncTurns(24);
+  assert.equal(cell(h.document, "B2").dataset.formula, "=1", "the entry is made as typed");
+});
+
 test("turning the header on does not use a row above that holds a formula in any column, even one that results in nothing", async () => {
   const h = await openSheet();
   const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
