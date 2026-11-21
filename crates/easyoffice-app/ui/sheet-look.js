@@ -261,6 +261,19 @@
     };
   }
 
+  // The border a cell is drawn with when conditional formats draw edges too (PD-284): the edges a rule draws on the cell
+  // (`here`) and the facing edges of the cells around it win over the cell's own, the way the style of a rule wins over the
+  // cell's. A shared edge is drawn once (see `resolveEdges`), so a neighbour's rule edge must reach this cell's side as well.
+  // `own` and the rule edges are `{ t, r, b, l }` or undefined; the result is a plain object that is not kept.
+  function overlayRuleEdges(own, here, above, right, below, left) {
+    return {
+      t: here?.t || above?.b || own?.t,
+      r: here?.r || right?.l || own?.r,
+      b: here?.b || below?.t || own?.b,
+      l: here?.l || left?.r || own?.l,
+    };
+  }
+
   // The fill and text color go through custom properties and attributes, as the conditional format colors do:
   // the selection, the conditional format and the number format color keep their own place above them in CSS.
   // Explicit black text on a cell with no fill is marked `black`: the dark theme shows it as the theme's text.
@@ -347,6 +360,8 @@
 
   host.__EASYOFFICE_SHEET_LOOK__ = {
     printStyle,
+    edgeCss,
+    overlayRuleEdges,
     H_ALIGNS,
     V_ALIGNS,
     LINES,

@@ -122,7 +122,7 @@
         const format = formatById(val("sheet-cfq-format-select"));
         const { rule, error } = P.quickRule(kind, readValues(), format, range);
         $("btn-sheet-cfq-ok").disabled = Boolean(error);
-        paint($("sheet-cfq-sample"), error || format.id === P.CUSTOM_FORMAT.id ? null : { t: "style", bg: format.bg, fg: format.fg });
+        paint($("sheet-cfq-sample"), error || format.id === P.CUSTOM_FORMAT.id ? null : { t: "style", bg: format.bg, fg: format.fg, bd: format.bd });
         if (error || format.id === P.CUSTOM_FORMAT.id) return revert();
         const key = JSON.stringify(rule);
         if (key === shown) return;

@@ -61,6 +61,7 @@
     "sheet-cf-bar-neg",
     "sheet-cf-bg",
     "sheet-cf-fg",
+    "sheet-cf-bd",
   ];
   const LIST_KINDS = new Set(["list", "listMultiple"]);
   const DEFAULT_MESSAGE = "입력한 값이 이 셀에 설정된 제한을 만족하지 않습니다.";
@@ -334,7 +335,41 @@
       setChecked("sheet-cf-fg-on", true);
       setVal("sheet-cf-fg", "#9c0006");
       for (const id of ["bold", "italic", "underline", "strike"]) setChecked("sheet-cf-" + id, false);
+      fillBorderRow(null);
       setChecked("sheet-cf-stop-if-true", false);
+    }
+
+    // The border row of the form (PD-284): `bd` is the edges of the rule being shown, null for none. The edges the form cannot show
+    // (a rule from a file may draw a different line on each side) stay as they are until the row is changed.
+    const BORDER_IDS = { t: "sheet-cf-bd-t", r: "sheet-cf-bd-r", b: "sheet-cf-bd-b", l: "sheet-cf-bd-l" };
+    const borderState = { shown: null, key: "" };
+
+    function borderControls() {
+      return {
+        on: checked("sheet-cf-bd-on"),
+        line: val("sheet-cf-bd-line"),
+        color: val("sheet-cf-bd"),
+        sides: presets.BORDER_SIDES.filter((side) => checked(BORDER_IDS[side])),
+      };
+    }
+
+    function fillBorderRow(bd) {
+      const controls = presets.controlsFromBorder(bd);
+      setChecked("sheet-cf-bd-on", controls.on);
+      setSelect("sheet-cf-bd-line", controls.line);
+      setVal("sheet-cf-bd", controls.color);
+      for (const side of presets.BORDER_SIDES) setChecked(BORDER_IDS[side], controls.sides.includes(side));
+      borderState.shown = bd || null;
+      borderState.key = JSON.stringify(borderControls());
+    }
+
+    // The edges the row says: the rule's own when the row was left as it was shown, else what its inputs make. `undefined` when no
+    // side is ticked on a row that is on.
+    function readBorderRow() {
+      const controls = borderControls();
+      if (!controls.on) return null;
+      if (borderState.shown && JSON.stringify(controls) === borderState.key) return borderState.shown;
+      return presets.borderFromControls(controls) || undefined;
     }
 
     function fillCfForm(rule) {
@@ -415,6 +450,7 @@
       setChecked("sheet-cf-italic", flags & 2);
       setChecked("sheet-cf-underline", flags & 4);
       setChecked("sheet-cf-strike", flags & 8);
+      fillBorderRow(rule.bd);
     }
 
     function selectCf(index) {
@@ -509,7 +545,10 @@
           (checked("sheet-cf-italic") ? 2 : 0) |
           (checked("sheet-cf-underline") ? 4 : 0) |
           (checked("sheet-cf-strike") ? 8 : 0);
-        if (!rule.bg && !rule.fg && !rule.fl) return { error: "배경, 글자 색, 글꼴 중 하나는 정해야 합니다." };
+        const bd = readBorderRow();
+        if (bd === undefined) return { error: "테두리를 그릴 변을 하나 이상 고르세요." };
+        if (bd) rule.bd = { ...bd };
+        if (!rule.bg && !rule.fg && !rule.fl && !rule.bd) return { error: "배경, 글자 색, 글꼴, 테두리 중 하나는 정해야 합니다." };
       }
       return { rule };
     }

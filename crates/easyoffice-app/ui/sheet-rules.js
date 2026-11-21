@@ -7,6 +7,8 @@
   // and painted onto the cells the grid materializes.
 
   const MAX_COLS = 16384;
+  // The rows of a packed cell are 20 bits of its first word (the top bit says a border follows).
+  const ROW_MASK = 0xfffff;
 
   // Icon sets of the file formats, lowest icon first: [shape, color]. A shape is minimal SVG
   // markup on a 24x24 grid; it is drawn as a CSS mask over the cell, so the color comes from the
@@ -188,7 +190,34 @@
     return boxes.some((b) => row >= b.row0 && row <= b.row1 && col >= b.col0 && col <= b.col1);
   }
 
-  // Packed appearances (see `pack.rs`): palette + base64 of little-endian u32 words.
+  // The line kinds of a packed border edge (`BorderEdge::bits`, kind in bits 24..26), as the cell borders name them.
+  const EDGE_LINES = ["", "thin", "thick", "dashed", "dotted", "double"];
+  const BORDER_SIDES = ["t", "r", "b", "l"];
+
+  // One packed edge as the `"<line>:<rrggbb>"` text of a cell border; "" for no edge or a word that is none (an unknown line
+  // kind or stray bits).
+  function edgeText(bits) {
+    if (!Number.isInteger(bits) || bits < 0 || bits > 0xffffffff) return "";
+    const line = EDGE_LINES[bits >>> 24];
+    return line ? line + ":" + (bits & 0xffffff).toString(16).padStart(6, "0") : "";
+  }
+
+  // The `{ t, r, b, l }` of a border table entry (four packed edges), or undefined when it draws nothing or is no entry.
+  function borderOfSet(set) {
+    if (!Array.isArray(set) || set.length !== 4) return undefined;
+    const out = {};
+    let any = false;
+    BORDER_SIDES.forEach((side, i) => {
+      const text = edgeText(set[i]);
+      if (text) {
+        out[side] = text;
+        any = true;
+      }
+    });
+    return any ? out : undefined;
+  }
+
+  // Packed appearances (see `pack.rs`): palette + border table + base64 of little-endian u32 words.
   function decodePacked(packed) {
     const out = [];
     if (!packed || typeof packed.w !== "string") return out;
@@ -196,19 +225,26 @@
     const view = new DataView(bytes.buffer);
     const words = Math.floor(bytes.length / 4);
     const pal = Array.isArray(packed.pal) ? packed.pal : [];
+    const borders = Array.isArray(packed.bd) ? packed.bd : [];
     const color = (i) => (i < pal.length ? hex(pal[i]) : "");
     let at = 0;
     while (at + 1 < words) {
-      const row = view.getUint32(at * 4, true);
+      const first = view.getUint32(at * 4, true);
       const head = view.getUint32((at + 1) * 4, true);
       at += 2;
-      const fx = { row, col: head & 0x3fff, flags: (head >>> 14) & 0xf, hide: (head & (1 << 22)) !== 0 };
+      const fx = { row: first & ROW_MASK, col: head & 0x3fff, flags: (head >>> 14) & 0xf, hide: (head & (1 << 22)) !== 0 };
       if (head & ((1 << 18) | (1 << 19))) {
         if (at >= words) break;
         const w = view.getUint32(at * 4, true);
         at += 1;
         if (head & (1 << 18)) fx.bg = color(w & 0xffff);
         if (head & (1 << 19)) fx.fg = color(w >>> 16);
+      }
+      if (first >>> 31) {
+        if (at >= words) break;
+        const border = borderOfSet(borders[view.getUint32(at * 4, true) & 0xffff]);
+        at += 1;
+        if (border) fx.border = border;
       }
       if (head & (1 << 20)) {
         if (at >= words) break;
@@ -249,7 +285,7 @@
     const rules = new Map(); // sheet -> { cf: [], dv: [] }
     const fx = new Map(); // sheet -> Map(row * MAX_COLS + col -> fx)
     const boxCache = new WeakMap(); // rule object -> parsed ranges
-    const listeners = { changed: null, repaint: null, readCells: null };
+    const listeners = { changed: null, repaint: null, readCells: null, relook: null };
     let version = 0;
     // Some validation is a check box: the grid then asks each cell it paints (see `paintBox`).
     let hasBoxes = false;
@@ -282,9 +318,20 @@
       return out;
     }
 
+    // Cells per sheet whose appearance has a border, and a number that moves whenever a border appears, changes or goes: the
+    // grid draws a border with the look of its cell (`borderAt`), so it paints the looks again when the number moved.
+    const borderCells = new Map();
+    let borderStamp = 0;
+
     function clearFx(sheet) {
-      if (sheet === undefined) fx.clear();
-      else fx.delete(sheet);
+      if (sheet === undefined) {
+        if (borderCells.size > 0) borderStamp += 1;
+        borderCells.clear();
+        fx.clear();
+      } else {
+        if (borderCells.delete(sheet)) borderStamp += 1;
+        fx.delete(sheet);
+      }
     }
 
     // Whether the sheet holds the engine's answer for its rules (an answer may be empty); a sheet cleared of it must be answered again.
@@ -352,16 +399,41 @@
     function applyPacked(sheet, packed, replace) {
       let map = fx.get(sheet);
       if (!map || replace) {
+        if (borderCells.delete(sheet)) borderStamp += 1;
         map = new Map();
         fx.set(sheet, map);
       }
+      let withBorder = borderCells.get(sheet) || 0;
       for (const f of decodePacked(packed)) {
         const key = f.row * MAX_COLS + f.col;
-        const empty = !f.bg && !f.fg && !f.flags && !f.bar && !f.icon;
+        const empty = !f.bg && !f.fg && !f.flags && !f.bar && !f.icon && !f.border;
+        const before = map.get(key);
+        if (before?.border || f.border) {
+          borderStamp += 1;
+          withBorder += (f.border ? 1 : 0) - (before?.border ? 1 : 0);
+        }
         if (empty) map.delete(key);
         else map.set(key, f);
       }
+      if (withBorder > 0) borderCells.set(sheet, withBorder);
+      else borderCells.delete(sheet);
       listeners.repaint?.();
+    }
+
+    // The edges the rules draw on the cell at (row, col), 1-based as the grid counts: `{ t, r, b, l }` of
+    // `"<line>:<rrggbb>"`, or undefined.
+    function borderAt(sheet, row, col) {
+      return borderCells.has(sheet) && row >= 1 && col >= 1 ? fx.get(sheet)?.get((row - 1) * MAX_COLS + (col - 1))?.border : undefined;
+    }
+
+    const hasBorders = (sheet) => borderCells.has(sheet);
+
+    // `own`, the border of the cell at (row, col) (1-based), with the edges the rules draw on it and around it laid over (see
+    // `overlayRuleEdges`); `own` itself on a sheet whose rules draw none.
+    function withEdges(sheet, row, col, own) {
+      if (!borderCells.has(sheet)) return own;
+      const at = (dr, dc) => borderAt(sheet, row + dr, col + dc);
+      return host.__EASYOFFICE_SHEET_LOOK__.overlayRuleEdges(own, at(0, 0), at(-1, 0), at(0, 1), at(1, 0), at(0, -1));
     }
 
     // The fill and text colours the rules give the cells of column `col` (1-based) in rows `r1`..`r2`, as the
@@ -413,6 +485,9 @@
     // Paints the rule appearance onto a grid cell. Colours and bars go through custom properties
     // and classes, never through the inline font properties the sheet model reads back.
     function paintTd(td, sheet) {
+      // A cell painted before the edges of the rules last moved gets its look drawn again (`relook`), as the edges around it changed.
+      if (td._edgeStamp !== undefined && td._edgeStamp !== borderStamp) listeners.relook?.(td);
+      td._edgeStamp = borderStamp;
       paintFx(td, sheet);
       paintBox(td, sheet);
     }
@@ -511,6 +586,10 @@
       clearFx,
       hasFx,
       fxAt,
+      borderAt,
+      hasBorders,
+      withEdges,
+      borderStamp: () => borderStamp,
       colorRuns,
       paintTd,
       validationAt,

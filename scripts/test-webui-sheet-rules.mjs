@@ -12,11 +12,24 @@ const RUST_SETS = fs.readFileSync(
 );
 
 function packWords(entries) {
-  // Mirrors `pack.rs`: row, head, [colors], [bar].
+  // Mirrors `pack.rs`: row (top bit: has border), head, [colors], [border set index], [bar]. `border` is `{ t, r, b, l }` of
+  // `"<line>:<rrggbb>"` edges; the table holds each distinct set once.
   const palette = [];
   const id = (rgb) => {
     let i = palette.indexOf(rgb);
     if (i < 0) i = palette.push(rgb) - 1;
+    return i;
+  };
+  const LINES = ["", "thin", "thick", "dashed", "dotted", "double"];
+  const table = [];
+  const setId = (border) => {
+    const set = ["t", "r", "b", "l"].map((side) => {
+      const [line, rgb] = (border[side] || ":").split(":");
+      return line ? (LINES.indexOf(line) << 24) + parseInt(rgb, 16) : 0;
+    });
+    const key = JSON.stringify(set);
+    let i = table.findIndex((s) => JSON.stringify(s) === key);
+    if (i < 0) i = table.push(set) - 1;
     return i;
   };
   const words = [];
@@ -28,15 +41,16 @@ function packWords(entries) {
     if (e.icon) head |= (1 << 21) | (((e.icon.set << 3) | e.icon.index) << 24);
     if (e.hide) head |= 1 << 22;
     if (e.bar?.gradient) head |= 1 << 23;
-    words.push(e.row, head >>> 0);
+    words.push((e.row | (e.border ? 0x80000000 : 0)) >>> 0, head >>> 0);
     if (e.bg !== undefined || e.fg !== undefined) {
       words.push(((e.bg !== undefined ? id(e.bg) : 0) | ((e.fg !== undefined ? id(e.fg) : 0) << 16)) >>> 0);
     }
+    if (e.border) words.push(setId(e.border));
     if (e.bar) words.push((id(e.bar.color) | ((e.bar.pct + 128) << 16) | (e.bar.start << 24)) >>> 0);
   }
   const bytes = Buffer.alloc(words.length * 4);
   words.forEach((w, i) => bytes.writeUInt32LE(w >>> 0, i * 4));
-  return { pal: palette, w: bytes.toString("base64") };
+  return { pal: palette, ...(table.length > 0 ? { bd: table } : {}), w: bytes.toString("base64") };
 }
 
 async function load() {
@@ -59,6 +73,59 @@ test("packed appearances decode into colors, flags, bars and icons", async () =>
   assert.deepEqual([b.row, b.col, b.icon, b.hide], [1048575, 16383, { set: 19, index: 4 }, true]);
   assert.equal(c.bg, undefined);
   assert.deepEqual(rules.decodePacked({ pal: [], w: "" }), []);
+});
+
+test("a packed border decodes into edge texts and keeps the last row", async () => {
+  const { rules } = await load();
+  const red = { t: "thin:ff0000", r: "thin:ff0000", b: "thin:ff0000", l: "thin:ff0000" };
+  const packed = packWords([
+    { row: 0, col: 0, border: red },
+    { row: 1048575, col: 16383, bg: 0xffc7ce, border: { l: "double:0000ff", b: "dotted:000000" } },
+    { row: 5, col: 1, border: red, bar: { pct: 10, start: 0, color: 0x638ec6, gradient: false } },
+  ]);
+  assert.equal(packed.bd.length, 2, "two distinct sets");
+  const [a, b, c] = rules.decodePacked(packed);
+  assert.deepEqual(a.border, red);
+  assert.deepEqual([b.row, b.col, b.bg, b.border], [1048575, 16383, "#ffc7ce", { b: "dotted:000000", l: "double:0000ff" }]);
+  assert.deepEqual([c.row, c.border, c.bar.pct], [5, red, 10], "the border word comes before the bar word");
+});
+
+test("a border word that names no set, or a set with unknown line kinds, draws nothing", async () => {
+  const { rules } = await load();
+  const packed = packWords([{ row: 3, col: 2, border: { t: "thin:ff0000" } }]);
+  assert.equal(rules.decodePacked({ ...packed, bd: [] })[0].border, undefined, "no table");
+  const word = (set) => rules.decodePacked({ ...packed, bd: [set] })[0].border;
+  assert.equal(word([0, 0, 0, 0]), undefined);
+  assert.equal(word([6 << 24, 0xff << 24, 2 ** 32, -1]), undefined, "unknown kinds, stray bits, out of range");
+  assert.equal(word([1.5, "thin", null, {}]), undefined);
+  assert.equal(word([1 << 24]), undefined, "a set has four edges");
+  assert.deepEqual(word([(2 << 24) + 0x123456, 0, 0, 0]), { t: "thick:123456" });
+});
+
+test("rule edges are tracked per sheet with a number that moves when they change", async () => {
+  const { rules } = await load();
+  const border = { t: "thin:ff0000" };
+  const stamp0 = rules.borderStamp();
+  assert.equal(rules.hasBorders("Sheet1"), false);
+  rules.applyPacked("Sheet1", packWords([{ row: 1, col: 2, border }, { row: 4, col: 4, bg: 0xff0000 }]), true);
+  assert.equal(rules.hasBorders("Sheet1"), true);
+  assert.deepEqual(rules.borderAt("Sheet1", 2, 3), border, "1-based as the grid counts");
+  assert.equal(rules.borderAt("Sheet1", 5, 5), undefined, "a fill alone has no edges");
+  assert.equal(rules.borderAt("Sheet1", 0, 0), undefined);
+  assert.equal(rules.borderAt("Other", 2, 3), undefined);
+  const stamp1 = rules.borderStamp();
+  assert.notEqual(stamp1, stamp0);
+  rules.applyPacked("Sheet1", packWords([{ row: 4, col: 4, bg: 0x00ff00 }]), false);
+  assert.equal(rules.borderStamp(), stamp1, "a change that touches no edge does not move it");
+  rules.applyPacked("Sheet1", packWords([{ row: 1, col: 2 }]), false);
+  assert.equal(rules.hasBorders("Sheet1"), false, "a delta that clears the cell takes its edges away");
+  assert.notEqual(rules.borderStamp(), stamp1);
+  rules.applyPacked("Sheet1", packWords([{ row: 1, col: 2, border }]), false);
+  const stamp2 = rules.borderStamp();
+  rules.clearFx("Sheet1");
+  assert.equal(rules.hasBorders("Sheet1"), false);
+  assert.notEqual(rules.borderStamp(), stamp2, "dropping the answer drops the edges");
+  rules.replaceAll({});
 });
 
 test("the icon set order matches the engine's", async () => {
@@ -529,7 +596,7 @@ test("colour fields use the shell's palette popup and no visible native colour i
 
 // ---- which rows a rule kind shows ------------------------------------------------------------
 
-const STYLE_ROWS = ["배경", "글자", "글꼴"];
+const STYLE_ROWS = ["배경", "글자", "글꼴", "테두리", "테두리 변"];
 const CF_VISIBLE = {
   cellIs: ["조건", ...STYLE_ROWS],
   text: ["텍스트", ...STYLE_ROWS],

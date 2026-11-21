@@ -228,6 +228,61 @@ test("a border on the ring's facing side shows in the cell before the range", as
   assert.match(cell(h.document, "B1").style.getPropertyValue("--lk-shadow"), /inset 0px -1px 0 0/);
 });
 
+// ---- the edges conditional formats draw over the cell's own (PD-284) ----------------------------------------------------
+
+const THIN_RED = (1 << 24) + 0xff0000;
+const DOUBLE_BLUE = (5 << 24) + 0x0000ff;
+
+// The packed answer of the engine for one cell (`pack.rs`): `set` is the four edge words of its border.
+function borderAnswer(row, col, set) {
+  const bytes = Buffer.alloc(12);
+  bytes.writeUInt32LE((row | 0x80000000) >>> 0, 0);
+  bytes.writeUInt32LE(col, 4);
+  bytes.writeUInt32LE(0, 8);
+  return { pal: [], bd: [set], w: bytes.toString("base64") };
+}
+
+test("an edge a rule draws is painted with the cell's look and wins over the cell's own edge", async () => {
+  const h = await createHarness();
+  const model = { sheets: [{ name: "표", cells: [{ ref: "B2", raw: "x", style: { bd: { r: "thin:000000", b: "thin:000000" } } }, { ref: "C2", raw: "y" }, { ref: "B3", raw: "z" }] }] };
+  await openModel(h, model);
+  const rules = h.document.defaultView.__EASYOFFICE_SHEET_RULES__;
+  const prop = (ref, name) => cell(h.document, ref).style[name];
+  assert.equal(prop("B2", "borderRightColor"), "var(--color-text)", "the cell's own edge");
+
+  // B2 draws its right and top edges in red, double blue at the bottom.
+  rules.applyPacked("표", borderAnswer(1, 1, [THIN_RED, THIN_RED, DOUBLE_BLUE, 0]), true);
+  assert.equal(prop("B2", "borderRightColor"), "#ff0000", "the rule's edge over the cell's own");
+  assert.equal(prop("B2", "borderBottomColor"), "#0000ff", "the rule's double line over the cell's own edge");
+  assert.match(cell(h.document, "B2").style.getPropertyValue("--lk-shadow"), /inset 0px -2px 0 0 #0000ff/, "the rest of the double line is a shadow");
+  assert.equal(prop("B1", "borderBottomColor"), "#ff0000", "the top edge sits in the slot of the cell above");
+  assert.equal(prop("B1", "borderBottomStyle"), "solid");
+  assert.equal(prop("C2", "borderLeftStyle"), "", "the neighbour's own left edge is its right neighbour's slot, not drawn here");
+
+  // A rule edge on C2's left is drawn in B2's right slot and beats the red one of B2 (the later cell wins).
+  rules.applyPacked("표", borderAnswer(1, 2, [0, 0, 0, (3 << 24) + 0x00ff00]), false);
+  assert.equal(prop("B2", "borderRightColor"), "#00ff00");
+  assert.equal(prop("B2", "borderRightStyle"), "dashed");
+
+  // Taking the answer away puts the cell's own edges back.
+  rules.applyPacked("표", { pal: [], w: "" }, true);
+  assert.equal(prop("B2", "borderRightColor"), "var(--color-text)");
+  assert.equal(prop("B1", "borderBottomStyle"), "", "the slot above is plain again");
+  assert.equal(cell(h.document, "B2").style.getPropertyValue("--lk-shadow"), "");
+});
+
+test("replacing the rules of the sheet takes their edges off the cells", async () => {
+  const h = await createHarness();
+  await openModel(h);
+  const rules = h.document.defaultView.__EASYOFFICE_SHEET_RULES__;
+  rules.applyPacked("표", borderAnswer(1, 1, [THIN_RED, THIN_RED, THIN_RED, THIN_RED]), true);
+  assert.equal(cell(h.document, "B2").style.borderRightStyle, "solid");
+  rules.clearFx("표");
+  rules.applyPacked("표", { pal: [], w: "" }, false);
+  assert.equal(cell(h.document, "B2").style.borderRightStyle, "", "an answer with no cells after a cleared one");
+  assert.equal(cell(h.document, "B1").style.borderBottomStyle, "");
+});
+
 test("the save payload carries the look and a reopened sheet shows it", async () => {
   const h = await createHarness();
   await openModel(h);

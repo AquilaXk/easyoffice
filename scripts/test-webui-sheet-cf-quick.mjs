@@ -12,6 +12,7 @@ const ui = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name
 const source = (name) => fs.readFileSync(ui(name), "utf8");
 
 const env = {};
+loadUiModule(ui("sheet-look.js"), env);
 loadUiModule(ui("sheet-cf-presets.js"), env);
 loadUiModule(ui("sheet-cf-preview.js"), env);
 const P = env.__EASYOFFICE_SHEET_CF_PRESETS__;
@@ -404,6 +405,119 @@ test("a rule applied outside what the list shows switches the list to the whole 
   assert.equal(doc.getElementById("sheet-cf-scope-select").value, "sheet");
   assert.equal(doc.querySelectorAll("#sheet-cf-list li").length, 1);
   assert.equal(rules.get("Sheet1").cf[0].r, "H1:H9");
+});
+
+// ---- the border of a format (PD-284) --------------------------------------------------------------------------------------
+
+const RED_EDGE = "thin:ff0000";
+const RED_OUTLINE = { t: RED_EDGE, r: RED_EDGE, b: RED_EDGE, l: RED_EDGE };
+const redBorder = () => P.FORMATS.find((f) => f.id === "red-border");
+
+test("the format list ends with the red border, a thin red outline that sets nothing else", () => {
+  assert.deepEqual(P.FORMATS.map((f) => f.label), [
+    "진한 빨강 텍스트가 있는 연한 빨강 채우기", "진한 노랑 텍스트가 있는 노랑 채우기", "진한 녹색 텍스트가 있는 녹색 채우기", "연한 빨강 채우기", "빨강 텍스트", "빨강 테두리",
+  ]);
+  const rule = P.quickRule("greater", { a: "1" }, redBorder(), "A1:B2").rule;
+  assert.deepEqual(rule, { r: "A1:B2", t: "cellIs", op: "greaterThan", a: "1", b: "", stop: false, fl: 0, bd: RED_OUTLINE });
+  rule.bd.t = "double:000000";
+  assert.equal(redBorder().bd.t, RED_EDGE, "a rule does not share the format's edges");
+  assert.equal(P.quickRule("dup", { unique: "dup" }, P.FORMATS[0], "A1").rule.bd, undefined, "the other formats draw no edge");
+});
+
+test("the border row of the custom format: inputs make edges, edges fill inputs, and nothing ticked is no border", () => {
+  const sides = ["t", "r", "b", "l"];
+  assert.deepEqual(P.borderFromControls({ on: true, line: "double", color: "#0000ff", sides }), { t: "double:0000ff", r: "double:0000ff", b: "double:0000ff", l: "double:0000ff" });
+  assert.deepEqual(P.borderFromControls({ on: true, line: "dotted", color: "#112233", sides: ["l", "t"] }), { t: "dotted:112233", l: "dotted:112233" });
+  assert.equal(P.borderFromControls({ on: false, line: "thin", color: "#000000", sides }), null);
+  assert.equal(P.borderFromControls({ on: true, line: "thin", color: "#000000", sides: [] }), null);
+  assert.equal(P.borderFromControls({ on: true, line: "wavy", color: "#000000", sides }), null);
+  assert.equal(P.borderFromControls({ on: true, line: "thin", color: "red", sides }), null);
+  assert.deepEqual(P.controlsFromBorder({ r: "thick:00ff00", b: "thin:ff0000" }), { on: true, line: "thick", color: "#00ff00", sides: ["r", "b"] });
+  assert.deepEqual(P.controlsFromBorder(undefined), { on: false, line: "thin", color: "#000000", sides });
+  assert.deepEqual(P.controlsFromBorder({ t: "nonsense" }).on, false, "an edge that is not one is no edge");
+});
+
+test("a rule's preview draws its edges as custom properties of the sample", async () => {
+  assert.deepEqual(PV.previewOf({ t: "cellIs", bd: RED_OUTLINE }, ICON_SETS), { kind: "style", text: "123", bg: "", fg: "", flags: 0, bd: RED_OUTLINE });
+  const { doc, win } = await pageHarness();
+  const el = doc.createElement("div");
+  win.__EASYOFFICE_SHEET_CF_PREVIEW__.paint(el, { t: "cellIs", bd: { t: RED_EDGE, b: "double:000000" } }, ICON_SETS, () => "");
+  const sample = el.querySelector(".cfp-text");
+  assert.equal(sample.style.getPropertyValue("--cfp-bt"), "1px solid #ff0000");
+  assert.equal(sample.style.getPropertyValue("--cfp-bb"), "3px double var(--color-text)", "black is the theme's text color");
+  assert.equal(sample.style.getPropertyValue("--cfp-br"), "");
+});
+
+test("choosing the red border in a quick dialog shows it on the sheet and accepting it is one undo step", async () => {
+  const { rulesUi, rules, doc, pushed } = await pageHarness();
+  await rulesUi.runCfAction("quick-greater");
+  const options = Array.from(doc.getElementById("sheet-cfq-format-select").querySelectorAll("option"), (o) => o.textContent);
+  assert.deepEqual(options.slice(-2), ["빨강 테두리", "사용자 지정 형식…"]);
+  field(doc, "sheet-cfq-a", "3");
+  field(doc, "sheet-cfq-format-select", "red-border");
+  const [rule] = rules.get("Sheet1").cf;
+  assert.deepEqual([rule.bd, rule.bg, rule.fg], [RED_OUTLINE, undefined, undefined], "the preview is on the sheet");
+  assert.equal(doc.getElementById("sheet-cfq-sample").querySelector(".cfp-text").style.getPropertyValue("--cfp-bl"), "1px solid #ff0000");
+  assert.equal(pushed.length, 0);
+  doc.getElementById("btn-sheet-cfq-ok").click();
+  await flushAsyncTurns();
+  assert.equal(pushed.length, 1);
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, RED_OUTLINE);
+  assert.match(rules.payloadFor("Sheet1"), /"bd":\{"t":"thin:ff0000","r":"thin:ff0000","b":"thin:ff0000","l":"thin:ff0000"\}/, "the session is told the edges");
+  rules.replaceAll({});
+});
+
+const mixed = { t: "double:0000ff", l: "dotted:00ff00" };
+const sideBoxes = (doc) => ["t", "r", "b", "l"].map((s) => doc.getElementById("sheet-cf-bd-" + s).checked);
+
+test("the manager's border row shows a rule's edges, keeps edges it cannot show and writes the ones it makes", async () => {
+  const cf = [{ r: "B2:B3", t: "cellIs", op: "greaterThan", a: "1", b: "", bg: "#ffc7ce", fl: 0, bd: mixed }, { r: "C4", t: "dup", fl: 0, bg: "#ffc7ce" }];
+  const { rulesUi, rules, doc } = await pageHarness({ sheetRules: { Sheet1: { cf, dv: [] } } });
+  const apply = async () => {
+    doc.getElementById("btn-sheet-cf-apply").click();
+    await flushAsyncTurns();
+  };
+  rulesUi.openConditionalFormatDialog();
+  doc.querySelector('#sheet-cf-list li[data-index="0"]').click();
+  assert.equal(doc.getElementById("sheet-cf-bd-on").checked, true);
+  assert.equal(doc.getElementById("sheet-cf-bd-line").value, "double", "the line of the first edge");
+  assert.equal(doc.getElementById("sheet-cf-bd").value, "#0000ff");
+  assert.deepEqual(sideBoxes(doc), [true, false, false, true]);
+
+  await apply();
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, mixed, "an untouched row keeps the rule's own edges, one line kind per side included");
+
+  field(doc, "sheet-cf-bd-line", "thick");
+  await apply();
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "thick:0000ff", l: "thick:0000ff" }, "a changed row writes its inputs on the ticked sides");
+
+  field(doc, "sheet-cf-bd-r", true);
+  field(doc, "sheet-cf-bd", "#ff0000");
+  await apply();
+  assert.deepEqual(rules.get("Sheet1").cf[0].bd, { t: "thick:ff0000", r: "thick:ff0000", l: "thick:ff0000" });
+
+  for (const side of ["t", "r", "b", "l"]) field(doc, "sheet-cf-bd-" + side, false);
+  await apply();
+  assert.match(doc.getElementById("sheet-cf-status").textContent, /변을 하나 이상/);
+  assert.equal(rules.get("Sheet1").cf[0].bd.t, "thick:ff0000", "a refused form stores nothing");
+
+  field(doc, "sheet-cf-bd-on", false);
+  await apply();
+  assert.equal(rules.get("Sheet1").cf[0].bd, undefined, "the row off draws none");
+  assert.equal(rules.get("Sheet1").cf[0].bg, "#ffc7ce");
+
+  // A border alone is a format; no format at all is not.
+  doc.querySelector('#sheet-cf-list li[data-index="1"]').click();
+  assert.equal(doc.getElementById("sheet-cf-bd-on").checked, false);
+  assert.deepEqual(sideBoxes(doc), [true, true, true, true], "turning the row on draws the whole outline");
+  field(doc, "sheet-cf-bg-on", false);
+  await apply();
+  assert.match(doc.getElementById("sheet-cf-status").textContent, /테두리 중 하나/);
+  field(doc, "sheet-cf-bd-on", true);
+  await apply();
+  assert.deepEqual(rules.get("Sheet1").cf[1].bd, { t: "thin:000000", r: "thin:000000", b: "thin:000000", l: "thin:000000" });
+  assert.equal(rules.get("Sheet1").cf[1].bg, undefined);
+  rules.replaceAll({});
 });
 
 test("no array method is called on a list the page returns (a NodeList or an HTMLCollection has none)", () => {

@@ -27,6 +27,7 @@
     { id: "green-fill-dark-green", label: "진한 녹색 텍스트가 있는 녹색 채우기", bg: "#c6efce", fg: "#006100" },
     { id: "red-fill", label: "연한 빨강 채우기", bg: "#ffc7ce" },
     { id: "red-text", label: "빨강 텍스트", fg: "#9c0006" },
+    { id: "red-border", label: "빨강 테두리", bd: { t: "thin:ff0000", r: "thin:ff0000", b: "thin:ff0000", l: "thin:ff0000" } },
   ];
   const CUSTOM_FORMAT = { id: "custom", label: "사용자 지정 형식…" };
 
@@ -102,6 +103,7 @@
     const rule = { r: range, ...spec.build(values), stop: false, fl: 0 };
     if (style.bg) rule.bg = style.bg;
     if (style.fg) rule.fg = style.fg;
+    if (style.bd) rule.bd = { ...style.bd };
     return { rule };
   }
 
@@ -234,7 +236,36 @@
     return out;
   }
 
+  // ---- the border row of the custom format form (PD-284) ----------------------------------------------------------------------
+  // The form has one line kind and one color for the sides it ticks, as the cell border dialog's presets do; a rule with edges that
+  // differ keeps them until the row is changed (`readCfForm` in `sheet-rules-ui.js`).
+
+  const BORDER_SIDES = ["t", "r", "b", "l"];
+
+  // The edges a rule draws for the row's inputs `{ on, line, color, sides }`: `{ t, r, b, l }` of `"<line>:<rrggbb>"` for the ticked
+  // sides, null when the row is off or no side is ticked or the line or color is not one a border can have.
+  function borderFromControls({ on, line, color, sides }) {
+    const text = on ? host.__EASYOFFICE_SHEET_LOOK__.edgeText(line, color) : null;
+    if (!text) return null;
+    const bd = {};
+    for (const side of BORDER_SIDES) if (sides.includes(side)) bd[side] = text;
+    return Object.keys(bd).length > 0 ? bd : null;
+  }
+
+  // The row's inputs for the edges `bd` of a rule: the line and color of its first edge, the sides it has. A rule with none is off
+  // with every side ticked, so turning the row on draws the whole outline.
+  function controlsFromBorder(bd) {
+    const look = host.__EASYOFFICE_SHEET_LOOK__;
+    const sides = BORDER_SIDES.filter((side) => look.parseEdge(bd?.[side]));
+    if (sides.length === 0) return { on: false, line: "thin", color: "#000000", sides: BORDER_SIDES.slice() };
+    const first = look.parseEdge(bd[sides[0]]);
+    return { on: true, line: first.line, color: "#" + first.color, sides };
+  }
+
   host.__EASYOFFICE_SHEET_CF_PRESETS__ = {
+    BORDER_SIDES,
+    borderFromControls,
+    controlsFromBorder,
     FORMATS,
     CUSTOM_FORMAT,
     QUICK,

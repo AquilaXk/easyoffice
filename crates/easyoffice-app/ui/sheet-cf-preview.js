@@ -47,7 +47,7 @@
       case undefined:
         return null;
       default:
-        return { kind: "style", text: SAMPLE_TEXT, bg: rule.bg || "", fg: rule.fg || "", flags: rule.fl || 0 };
+        return { kind: "style", text: SAMPLE_TEXT, bg: rule.bg || "", fg: rule.fg || "", flags: rule.fl || 0, ...(rule.bd ? { bd: rule.bd } : {}) };
     }
   }
 
@@ -63,6 +63,18 @@
     el.style.setProperty("--cfp-color", color);
     if (gradient) el.dataset.gradient = towardEnd ? "end" : "start";
     return el;
+  }
+
+  // The edges of a rule (`{ t, r, b, l }` of `"<line>:<rrggbb>"`) as the custom properties the sample's CSS reads; black is the
+  // theme's text color, as on the grid.
+  function paintEdges(el, border) {
+    const look = host.__EASYOFFICE_SHEET_LOOK__;
+    for (const [side, name] of [["t", "top"], ["r", "right"], ["b", "bottom"], ["l", "left"]]) {
+      const css = look?.edgeCss(border?.[side]);
+      if (!css) continue;
+      const color = css.color === "#000000" ? "var(--color-text)" : css.color;
+      el.style.setProperty("--cfp-b" + side, `${css.width} ${css.style} ${color}`);
+    }
   }
 
   // Builds the preview into `el` (a `.cfp` box). A rule without one leaves it empty.
@@ -93,6 +105,7 @@
       text.textContent = look.text;
       if (look.bg) text.style.setProperty("--cfp-bg", look.bg);
       if (look.fg) text.style.setProperty("--cfp-fg", look.fg);
+      paintEdges(text, look.bd);
       for (const [name, bit] of [["bold", 1], ["italic", 2], ["underline", 4], ["strike", 8]]) {
         if (look.flags & bit) text.classList.add("cfp-" + name);
       }

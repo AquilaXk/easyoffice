@@ -209,9 +209,13 @@
       if (say) say.textContent = "행 높이를 맞추기에 시트가 너무 커서 일부 행은 기본 높이로 둠";
       return changed;
     }
-    // The look of a cell as the page paints it: neighbours decide the shared edges.
+    // The look of a cell as the page paints it: neighbours decide the shared edges, and the edges the rules draw come over the cell's
+    // own (PD-284). A rule edge changes the look of the cells beside it too: the rules ask for a "relook" when their edges moved.
     const lookApi = host.__EASYOFFICE_SHEET_LOOK__;
-    const borderAt = (r, c) => (r < 1 || c < 1 ? undefined : getEntry(refOf(r, c))?.style?.border);
+    const borderAt = (r, c) => (r < 1 || c < 1 ? undefined : host.__EASYOFFICE_SHEET_RULES__.withEdges(getSheetName(), r, c, getEntry(refOf(r, c))?.style?.border));
+    const paintLook = (td, m = layoutApi?.mergeAt(getSheetName(), td._row, td._col)) =>
+      lookApi?.paintTd(td, td._st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);
+    host.__EASYOFFICE_SHEET_RULES__?.on("relook", (td) => paintLook(td));
 
     const viewportEl = () => document.getElementById("sheet-viewport");
     const tbodyEl = () => document.querySelector("#pane-sheet tbody");
@@ -433,10 +437,7 @@
         if (editable) td.removeAttribute("tabindex");
         else td.setAttribute("tabindex", "-1");
       }
-      if (lookApi) {
-        const m = layoutApi?.mergeAt(getSheetName(), td._row, td._col);
-        lookApi.paintTd(td, st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);
-      }
+      paintLook(td);
       host.__EASYOFFICE_SHEET_TABLE_STYLE__?.paintTd(td, getSheetName());
       host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, getSheetName());
     }
