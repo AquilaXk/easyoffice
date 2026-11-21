@@ -63,6 +63,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "custom-select.js",
     "desktop-bridge.js",
     "doc-image.js",
+    "doc-ime.js",
     "doc-link.js",
     "doc-notes-ui.js",
     "doc-notes.js",

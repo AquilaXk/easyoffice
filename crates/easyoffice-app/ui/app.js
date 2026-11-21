@@ -14,7 +14,6 @@
   const slideDeckState = createInitialSlideDeckState();
   const localRibbonState = createDefaultRibbonState();
 
-  let isImeComposing = false;
   let activeModule = "DOC";
   let activeSheetName = "Sheet1";
   let activeSheetCellRef = "A1";
@@ -29,7 +28,7 @@
   const sheetDataStore = Object.assign(Object.create(null), { Sheet1: null });
   const sheetRowCounts = Object.create(null);
   let workspaceSession = null, copilotUi = null;
-  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docIme = null, docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -89,8 +88,14 @@
     onModuleApplied: (mod) => { workspaceSession?.applyModuleContext(mod); copilotUi?.onModuleChanged(); },
   });
 
+  docIme = host.__EASYOFFICE_CREATE_DOC_IME__({
+    getActiveModule: () => activeModule, getDocTab: (mod) => docTabStore[mod],
+    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
+    getEpoch: ribbonHistory.getHistoryMutationEpoch, markDocStale: () => workspacePanels.markActiveDocTabStale(),
+    computeStats: () => workspacePanels.computeSmartStats(),
+  });
   docRunsUi = host.__EASYOFFICE_CREATE_DOC_RUNS_UI__({
-    document, getActiveModule: () => activeModule, saveDocState: () => workspacePanels.saveActiveDocTabState(),
+    document, getActiveModule: () => activeModule, saveDocState: () => workspacePanels.saveActiveDocTabState(), isComposing: docIme.isComposing,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
   });
@@ -240,7 +245,7 @@
     activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch,
-    noteActivity: () => workspaceSession?.noteActivity(), extractEditableDocumentText, localScrubPii, isImeComposing: () => isImeComposing, setStatusFeedback,
+    noteActivity: () => workspaceSession?.noteActivity(), extractEditableDocumentText, localScrubPii, isImeComposing: docIme.isComposing, setStatusFeedback,
   });
 
   function setStatusFeedback(text) {
@@ -690,49 +695,13 @@
 
   function setupSmartAndSecurityHandlers() {
     const editor = document.getElementById("doc-editor");
-    let docTypingSnapshotEpoch = -1;
-    function ensureDocTypingSnapshot() {
-      if (activeModule !== "DOC" && activeModule !== "HWP") return;
-      if (
-        docTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch() &&
-        docTabStore[activeModule]
-      ) {
-        const prevDocTab = structuredClone(docTabStore[activeModule]);
-        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
-        preSnap.docTabs[activeModule] = prevDocTab;
-        ribbonHistory.pushRawUndoSnapshot(preSnap);
-        docTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
-      }
-    }
     if (editor) {
-      editor.addEventListener("focus", () => {
-        docTypingSnapshotEpoch = -1;
-        workspacePanels.saveActiveDocTabState();
-      });
-      editor.addEventListener("blur", () => {
-        docTypingSnapshotEpoch = -1;
-        workspacePanels.saveActiveDocTabState();
-      });
+      docIme.bind(editor);
+      editor.addEventListener("focus", () => workspacePanels.saveActiveDocTabState());
+      editor.addEventListener("blur", () => workspacePanels.saveActiveDocTabState());
       editor.addEventListener("click", (ev) => {
         const block = workspacePanels.findEditableDocBlock(ev.target, editor);
         if (block) workspacePanels.setActiveDocBlock(block);
-      });
-      editor.addEventListener("compositionstart", () => {
-        isImeComposing = true;
-      });
-      editor.addEventListener("compositionend", () => {
-        isImeComposing = false;
-        workspacePanels.computeSmartStats();
-      });
-      editor.addEventListener("beforeinput", () => {
-        ensureDocTypingSnapshot();
-      });
-      editor.addEventListener("input", () => {
-        if (activeModule === "DOC" || activeModule === "HWP") {
-          ensureDocTypingSnapshot();
-          workspacePanels.markActiveDocTabStale();
-        }
-        if (!isImeComposing) workspacePanels.computeSmartStats();
       });
       workspacePanels.computeSmartStats();
     }
@@ -910,7 +879,7 @@
     });
 
     host.addEventListener("keydown", (e) => {
-      if (e.isComposing || isImeComposing) return;
+      if (e.isComposing || docIme.isComposing()) return;
       if (modal?.open) {
         handleOpenPaletteKeydown(e, modal, cmdSearchInput);
         return;

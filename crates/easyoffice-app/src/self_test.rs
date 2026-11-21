@@ -582,7 +582,8 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/index.html"), "./hwp-host.js"),
     (include_str!("../ui/index.html"), "./hwp-print.js"),
     (include_str!("../ui/index.html"), "./hwp-session.js"),
-    (include_str!("../ui/app.js"), "compositionstart"),
+    (include_str!("../ui/doc-ime.js"), "compositionstart"),
+    (include_str!("../ui/app.js"), "CREATE_DOC_IME"),
     (
         include_str!("../ui/command-history.js"),
         "CREATE_COMMAND_HISTORY",

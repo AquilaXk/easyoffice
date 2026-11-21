@@ -69,7 +69,7 @@
   }
 
   function createDocRunsUi(deps) {
-    const { document, getActiveModule, captureWorkspaceSnapshot, commitDeferredUndoSnapshot, saveDocState } = deps;
+    const { document, getActiveModule, captureWorkspaceSnapshot, commitDeferredUndoSnapshot, saveDocState, isComposing } = deps;
     const R = host.__EASYOFFICE_DOC_RUNS__;
     let lastRange = null;
     let pending = null;
@@ -707,8 +707,9 @@
 
     // ------------------------------------------------------------ pending format typing
 
+    // A composition (`doc-ime.js`) writes the text itself and is one undo step at its end; the pending format waits for the next typed character.
     function handleBeforeInput(ev) {
-      if (!pending || ev.isComposing || ev.inputType !== "insertText" || !ev.data) return;
+      if (!pending || ev.isComposing || isComposing?.() || ev.inputType !== "insertText" || !ev.data) return;
       const root = editor();
       const range = currentRange();
       if (!root || !range?.collapsed || range.startContainer !== pending.node || range.startOffset !== pending.offset) {
