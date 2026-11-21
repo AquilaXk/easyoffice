@@ -642,10 +642,12 @@
     // The rows a user or a filter hid changed (a hide, a filter, an undo): the formulas that leave hidden rows out are calculated
     // again, and only those in the engine (PD-232).
     // It runs after the step that changed them (an undo restores the cells after the layout).
+    // The same for the pivot tables `GETPIVOTDATA` reads: a create, an edit, a delete and an undo of one (PD-292).
+    const layoutStale = () => sheetStoreHelpers.hiddenRowsStale(getActiveSheetName()) || sheetStoreHelpers.pivotsStale();
     host.__EASYOFFICE_SHEET_LAYOUT__.onChange(() => {
-      if (getActiveModule() !== "SHEET" || !sheetStoreHelpers.hiddenRowsStale(getActiveSheetName())) return;
+      if (getActiveModule() !== "SHEET" || !layoutStale()) return;
       void enqueueWorkspaceHistoryOp(async () => {
-        if (sheetStoreHelpers.hiddenRowsStale(getActiveSheetName())) await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        if (layoutStale()) await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       }).catch(() => {});
     });
     sheetRules.on("repaint", () => grid.repaintFx());

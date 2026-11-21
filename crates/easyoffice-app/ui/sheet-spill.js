@@ -276,14 +276,22 @@
     }));
   }
 
-  // What the engine is told of `kind` (`merges` or `tables`) for a sheet.
-  const blockerPayload = (kind, name, layoutApi) => (kind === "tables" ? tablePayload : mergePayload)(name, layoutApi);
+  // The pivot tables of a sheet, for `GETPIVOTDATA` (PD-292): where each one is, its source, its fields and its filters. The
+  // slicers and the field names are the page's own.
+  function pivotPayload(name, layoutApi) {
+    return (layoutApi?.get?.(name)?.pivots || []).map(({ slicers, fieldNames, ...pivot }) => pivot);
+  }
 
-  // The `merges` and `tables` fields of a request without a session: `{ "Sheet1": ["A1:B2"] }` (tables: their objects),
-  // nothing when no sheet has one.
+  const PAYLOADS = { merges: mergePayload, tables: tablePayload, pivots: pivotPayload };
+
+  // What the engine is told of `kind` (`merges`, `tables` or `pivots`) for a sheet.
+  const blockerPayload = (kind, name, layoutApi) => PAYLOADS[kind](name, layoutApi);
+
+  // The `merges`, `tables` and `pivots` fields of a request without a session: `{ "Sheet1": ["A1:B2"] }` (tables and pivots: their
+  // objects), nothing when no sheet has one.
   function mergesField(names, layoutApi) {
     const out = {};
-    for (const kind of ["merges", "tables"]) {
+    for (const kind of Object.keys(PAYLOADS)) {
       const byName = {};
       for (const name of names) {
         const list = blockerPayload(kind, name, layoutApi);
@@ -327,6 +335,7 @@
     areasOf,
     lockPayload,
     mergePayload,
+    pivotPayload,
     blockerPayload,
     mergesField,
     hiddenRowsField,

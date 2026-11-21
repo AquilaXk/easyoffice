@@ -142,10 +142,11 @@
       names: null,
       // The lock payload of each protected sheet the session was told (see `syncLocks`).
       locks: new Map(),
-      // The merges and the table ranges of each sheet the session was told, and the layout version they were read at
-      // (see `syncMerges`).
+      // The merges, the table ranges and the pivot tables of each sheet the session was told, and the layout version they
+      // were read at (see `syncMerges`, PD-292).
       merges: new Map(),
       tables: new Map(),
+      pivots: new Map(),
       // The hidden rows each sheet was told (see `syncMerges`, PD-232).
       hiddenRows: new Map(),
       mergesVersion: -1,
@@ -173,6 +174,7 @@
       session.locks = new Map();
       session.merges = new Map();
       session.tables = new Map();
+      session.pivots = new Map();
       session.hiddenRows = new Map();
       session.mergesVersion = -1;
     }
@@ -384,7 +386,7 @@
       if (session.mergesVersion === version) return false;
       let changed = false;
       for (const name of names) {
-        for (const kind of ["merges", "tables"]) {
+        for (const kind of ["merges", "tables", "pivots"]) {
           const blockerObj = spillApi.blockerPayload(kind, name, layoutApi);
           const payload = JSON.stringify(blockerObj);
           if ((session[kind].get(name) ?? "[]") === payload) continue;
@@ -978,6 +980,10 @@
       renameTableColumns,
       followTableHeaders,
       hiddenRowsStale: (name) => hiddenRows.stale(name),
+      // Whether a sheet of the session has other pivot tables than the layout has now (a create, an edit, a delete or an undo).
+      pivotsStale: () =>
+        session.id !== null &&
+        session.sheetKey.split("\u0000").some((name) => (session.pivots.get(name) ?? "[]") !== JSON.stringify(spillApi?.pivotPayload(name, host.__EASYOFFICE_SHEET_LAYOUT__) ?? [])),
       enableSheetSessions,
       scrubSheetStoreMap,
     };
