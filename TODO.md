@@ -51,5 +51,6 @@
 - [ ] `A1:OFFSET(...)`처럼 함수 호출을 끝으로 하는 범위 연산자, `@` 암묵적 교차 연산자 일부(`COLUMNS(@A1:C1)`, `OFFSET(@B1:B4,...)`)
 - [ ] `TRIMRANGE`에 전체 열·행 참조(`A:A`)를 주면 배열 예산을 넘어 `#SPILL!`; 사용 범위로 먼저 줄여야 한다
 - [ ] `CELL`의 `format`·`width`·`color`·`parentheses`·`prefix`·`protect`·`filename`, `INFO`의 `release`·`osversion`·`directory`·`origin`(파일 이름·서식 정보를 평가 맥락에 실어야 함)
+- [ ] 의존 라이선스 자동 검사(MPL은 수정 없는 링크일 때 고지 확인, GPL 계열 거부)
 - [ ] 날짜 글 해석: `DATEVALUE("2026 - 01 - 01")`(구분자 둘레 공백), `"... 24:00:00"` 올림, `DATEDIF`의 지역 날짜 글, 순환 참조 오류 값(`#NUM!` 대신 `#CIRC!`인지 기준 앱 대조)
 
