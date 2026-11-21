@@ -5126,3 +5126,18 @@
 - **Verified by** `cargo test -p easyoffice-formats --test sheet_pdf_row_heights` 7개: 행 사각형의 y·높이를 PDF 연산자에서 읽어 행마다 24px·정한 높이·기본 행 높이·숨은 행을 확인하고, 이미지의 `cm` 행렬로 두 칸 앵커의 높이(140px → 105pt)와 위쪽 위치(첫 행 16px 늘어남 → 12pt)를 확인하고, 범위 밖 높이 5종 거부를 확인한다. 고치기 전 코드(`row_sizes`를 24px로 되돌림)에서 3개가 `row 1: 18 pt, 80 px` 등으로 실패한다.
 - **Revisit when** 픽셀 좌표만 가진 그림·차트를 행 높이에 맞출 때, PDF에서 줄바꿈 행 높이를 계산할 때.
 
+## PD-288. XLSX 규칙 서식(`dxf`)의 채우기·글자색이 테마·`indexed` 색을 풂
+
+- **Status** Implemented (QA 요청 2026-11-22). `crates/easyoffice-formats/src/xlsx_rules.rs`(`parse_dxf_styles`). 시험 `crates/easyoffice-formats/tests/sheet_rules_dxf_colors.rs`.
+- **Context** PD-284는 규칙 서식의 테두리 색만 `ColorScheme`(`rgb`, 테마와 `tint`, `indexed`)으로 풀었고 채우기(`bgColor`·`fgColor`)와 글자색(`font/color`)은 `rgb` 속성만 읽었다. 표 계산 프로그램은 조건부 서식에 테마색(예: 강조 2, 40% 밝게)을 자주 쓰므로 그런 규칙은 서식이 없는 것처럼 열렸고 저장하면 사라졌다.
+- **Decision (`PD-288`)**
+  1. 채우기와 글자색도 테두리와 같은 `ColorScheme::resolve`로 푼다(`rgb`가 `theme`보다, `theme`이 `indexed`보다 앞). 테마는 통합 문서의 테마(없으면 기본 Office 테마), `indexed`는 통합 문서의 `indexedColors`를 기본 표 위에 덮은 팔레트다. 같은 `ColorScheme`을 표 서식의 `dxf`(`table_style.rs`)도 쓴다.
+  2. 자동(`auto`)·시스템 전경(`indexed` 64)·읽을 수 없는 색(범위 밖 테마 번호, 범위 밖 `tint`, 숫자가 아닌 값, 8·6자가 아닌 `rgb`)은 색 없음이다. 채우기는 `bgColor`가 색 없음이면 `fgColor`를 본다. 테두리의 자동 색은 검정이지만 채우기·글자색은 "색 없음"이라 규칙의 다른 서식이 그대로 보인다.
+  3. 쓸 때는 풀린 RGB를 `rgb`로 쓴다(테마 참조는 보존하지 않는다). 테마를 바꾸면 규칙 색이 따라 바뀌는 성질은 가져오지 않는다.
+  4. `rgb` 속성은 8자(`AARRGGBB`)나 6자만 받는다. 이전 읽기는 아무 길이든 뒤 6자를 잘라 썼다(7자 `#`가 붙은 값 등). 표 계산 프로그램은 8자만 쓴다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트를 그대로: `dxf`를 읽는 크레이트가 없다(PD-284 재사용 판단과 같다). (2) 이미 쓰는 의존성: `xlsx_color.rs`의 `ColorScheme::resolve`(PD-227, 셀 채우기·글자색과 테두리가 쓴다)를 호출만 바꿨다. (3) 옮긴 코드 없음(0줄, 2곳 호출 교체).
+- **Why** 테마색을 쓴 조건부 서식이 열 때 사라지지 않게 한다. 셀 서식·테두리와 규칙 서식이 같은 색 해석을 쓴다.
+- **Trade-offs** 테마를 다시 쓰는 파일을 열고 저장하면 규칙의 색이 그 시점의 RGB로 굳는다. 틴트 계산은 셀 서식과 같은 부동소수 HLS라 표 계산 프로그램의 정수 HLS와 한 채널에서 1~2 단계 다를 수 있다(강조 1, 80% 밝게는 `DAE3F3` 대 `D9E1F2`).
+- **Verified by** `cargo test -p easyoffice-formats --test sheet_rules_dxf_colors` 6개: `rgb` 그대로, 테마와 틴트(강조 2 40% 밝게 `F4B183`), 통합 문서 테마, `indexed`와 `indexedColors` 덮어쓰기, 자동·시스템 전경·`rgb`와 `theme`·`indexed` 우선순위, 악의적 값 19종(범위 밖 테마·틴트, `NaN`, `1e400`, 30만 자 속성)이 색 없음으로 읽히고 규칙의 나머지 서식은 남음.
+- **Revisit when** 규칙 색의 테마 참조를 보존할 때, 틴트를 정수 HLS로 맞출 때.
+

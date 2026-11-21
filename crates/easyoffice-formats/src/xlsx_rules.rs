@@ -219,7 +219,8 @@ fn first_formula_texts(body: &str) -> Vec<String> {
 }
 
 /// Styles of the `<dxf>` entries `dxfs` (`xlsx_filter_dxf::dxf_bodies` of `styles.xml`), in file order. The colours of the
-/// borders resolve through `colors` (theme and indexed colours); the fill and the font colour read `rgb` only.
+/// fill, the font and the borders resolve through `colors` (`rgb`, theme with its tint, `indexed`; PD-288); an automatic or
+/// unreadable colour is no colour.
 pub(crate) fn parse_dxf_styles(dxfs: &[&str], colors: &ColorScheme) -> Vec<CfStyle> {
     dxfs.iter()
         .take(MAX_RULES_PER_SHEET)
@@ -244,13 +245,13 @@ pub(crate) fn parse_dxf_styles(dxfs: &[&str], colors: &ColorScheme) -> Vec<CfSty
                 }
                 style.fg = extract_tags_or_self_closing_with_attrs(font, "color")
                     .first()
-                    .and_then(|(a, _)| rgb_of(a));
+                    .and_then(|(a, _)| colors.resolve(a).rgb());
             }
             if let Some(fill) = extract_tag_bodies(dxf, "fill").into_iter().next() {
                 style.bg = ["bgColor", "fgColor"].iter().find_map(|tag| {
                     extract_tags_or_self_closing_with_attrs(fill, tag)
                         .first()
-                        .and_then(|(a, _)| rgb_of(a))
+                        .and_then(|(a, _)| colors.resolve(a).rgb())
                 });
             }
             style.border = parse_dxf_border(dxf, colors);
