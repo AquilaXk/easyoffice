@@ -119,6 +119,9 @@
     return -1;
   }
 
+  // Why a table of HTML is pasted as its text (the reasons of `sheet-clip-html.js`).
+  const REFUSALS = { size: "표가 커서", cells: "칸이 많아", style: "스타일이 많아", merges: "병합이 많아" };
+
   function createSheetClipboard(api) {
     const { grid, isFormulaStr } = api;
     const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -290,6 +293,11 @@
       const mode = options?.mode || "all";
       const transpose = Boolean(options?.transpose);
       const target = { r1: range.r1, c1: range.c1, r2: range.r2, c2: range.c2 };
+      const refusal = core.refusalOf({ snap, mode, transpose, target });
+      if (refusal) {
+        say(refusal === "merges" ? "붙여넣을 병합이 너무 많음" : "붙여넣을 칸이 너무 많음");
+        return Promise.resolve(null);
+      }
       const plan = core.planPaste({
         snap,
         mode,
@@ -319,6 +327,10 @@
       const extra = (plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "") + (options?.note || "");
       const label = mode === "all" && !transpose ? "붙여넣기" : "골라 붙이기";
       const merges = core.planMerges({ snap, mode, transpose, target, grid });
+      if (merges?.refused) {
+        say("붙여넣을 병합이 너무 많음");
+        return Promise.resolve(null);
+      }
       return api.applyCellEdits(plan.edits, label + extra, plan.widths, merges);
     }
 
@@ -348,6 +360,7 @@
     function htmlBlockOf(html, text) {
       const htmlApi = host.__EASYOFFICE_SHEET_CLIP_HTML__;
       if (!html || !htmlApi) return {};
+      if (html.length > htmlApi.LIMITS.HTML_CHARS) return { refused: "size" };
       if (!htmlApi.htmlIsFromSpreadsheet(html) && internal && internal.text === text) return {};
       const { block, refused } = htmlApi.parseClipboardHtml(html, { styleFromPayload: host.__EASYOFFICE_SHEET_STYLE_CODEC__.styleFromPayload });
       return refused ? { refused } : { block: block || null };
@@ -361,7 +374,7 @@
       const { block, refused } = htmlBlockOf(read("text/html"), text);
       if (block) return pasteBlock(block, range);
       if (!text) return Promise.resolve(false);
-      return pasteBlock(blockOf(text), range, refused ? { note: " (표가 커서 서식 없이 글자만)" } : undefined);
+      return pasteBlock(blockOf(text), range, refused ? { note: ` (${REFUSALS[refused] || "표가 커서"} 서식 없이 글자만)` } : undefined);
     }
 
     // Menu commands read the system clipboard; the in-app copy answers when it is unavailable.

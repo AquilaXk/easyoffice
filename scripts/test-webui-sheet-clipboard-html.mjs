@@ -6,14 +6,11 @@ import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 // Cells pasted from the HTML of a spreadsheet program or another table: merges, formats, numbers, text marks, empty
 // cells, the bounds. The fixtures are written after the layout such programs export (a style sheet with
-// classes, `x:` attributes on the cells); the product names are put in at run time so this file names none.
+// classes, `x:` attributes on the cells). The markers are the identifiers `scripts/oss-names.mjs` lists, in lower case.
 
-const word = (...codes) => String.fromCharCode(...codes);
-const PROGRAM = word(69, 120, 99, 101, 108);
-const VENDOR = word(109, 105, 99, 114, 111, 115, 111, 102, 116);
 const NBSP = "\u00a0";
-
-const fill = (html) => html.replaceAll("__PROG__", PROGRAM).replaceAll("__VENDOR__", VENDOR);
+const NS_O = "urn:schemas-microsoft-com:office:office";
+const NS_X = "urn:schemas-microsoft-com:office:excel";
 
 const STYLE = `
 td { padding-top:1px; color:windowtext; font-size:11.0pt; font-weight:400; font-family:"맑은 고딕", monospace; mso-number-format:General; text-align:general; vertical-align:bottom; border:none; white-space:nowrap; }
@@ -24,7 +21,7 @@ td { padding-top:1px; color:windowtext; font-size:11.0pt; font-weight:400; font-
 .xl69 { color:#FF0000; font-style:italic; text-decoration:underline; font-size:14.0pt; }
 `;
 
-const SHEET_HTML = fill(`<html xmlns:o="urn:schemas-__VENDOR__-com:office:office" xmlns:x="urn:schemas-__VENDOR__-com:office:__PROG__"><head><meta name=ProgId content=__PROG__.Sheet><style>${STYLE}</style></head><body>
+const SHEET_HTML = `<html xmlns:o="${NS_O}" xmlns:x="${NS_X}"><head><meta name=ProgId content=excel.sheet><style>${STYLE}</style></head><body>
 <table border=0 cellpadding=0 cellspacing=0 style='border-collapse:collapse;table-layout:fixed'>
 <col width=87 style='width:65pt'><col width=64 span=2 style='width:48pt'>
 <tr height=20 style='height:15.0pt'><td class=xl65>이름</td><td class=xl65>점수</td><td class=xl65>비율</td></tr>
@@ -36,7 +33,7 @@ const SHEET_HTML = fill(`<html xmlns:o="urn:schemas-__VENDOR__-com:office:office
 <tr><td>${NBSP}</td><td class=xl65>${NBSP}</td><td>줄1<br style='mso-data-placement:same-cell'>줄2</td></tr>
 <tr><td x:num="3" x:fmla="=SUM(A1:A2)">3</td><td><span style='mso-spacerun:yes'>${NBSP}${NBSP}</span>7</td><td>  가운데   공백
  줄바꿈  </td></tr>
-</table></body></html>`);
+</table></body></html>`;
 
 const MODEL = {
   sheets: [{ name: "표", cells: [{ ref: "A1", raw: "옛값" }, { ref: "B1", raw: "옛값2", style: { bold: true } }, { ref: "C2", raw: "남음" }, { ref: "F1", raw: "옛F" }] }],
@@ -89,7 +86,7 @@ test("the markers of a spreadsheet program's HTML are found, a plain table is no
   assert.equal(api.htmlIsFromSpreadsheet(SHEET_HTML), true);
   assert.equal(api.htmlIsFromSpreadsheet("<table><tr><td class=xl65>a</td></tr></table>"), true, "the class of a cell, unquoted");
   assert.equal(api.htmlIsFromSpreadsheet('<table><tr><td class="xl7">a</td></tr></table>'), true, "and quoted");
-  assert.equal(api.htmlIsFromSpreadsheet(fill('<meta name=ProgId content="__PROG__.Sheet">')), true);
+  assert.equal(api.htmlIsFromSpreadsheet('<meta name=ProgId content="excel.sheet">'), true);
   assert.equal(api.htmlIsFromSpreadsheet("<table><tr><td>a</td></tr></table>"), false);
   assert.equal(api.htmlIsFromSpreadsheet(""), false);
 });
@@ -265,7 +262,7 @@ test("the table is pasted at the selection and a program's HTML wins over a stal
   d.activeElement.dispatchEvent({ type: "copy", target: d.activeElement, clipboardData: { setData: (t, v) => (store[t] = v), getData: (t) => store[t] || "" } });
   assert.equal(store["text/plain"], "옛값2");
   await select(d, "E5");
-  await pasteHtml(d, fill(`<meta name=ProgId content=__PROG__.Sheet><table><tr><td class=xl65 style='font-weight:700'>옛값2</td></tr></table>`), "옛값2");
+  await pasteHtml(d, `<meta name=ProgId content=excel.sheet><table><tr><td class=xl65 style='font-weight:700'>옛값2</td></tr></table>`, "옛값2");
   assert.equal(cell(d, "E5").textContent, "옛값2");
   assert.equal(cell(d, "E5").style.fontWeight, "600");
   await select(d, "E7");
@@ -279,7 +276,7 @@ test("HTML over the bound pastes the text and says so; a clipboard without a tab
   await select(d, "E1");
   await pasteHtml(d, "<table><tr><td rowspan=100000 colspan=100>a</td></tr></table>", "글자만");
   assert.equal(cell(d, "E1").textContent, "글자만");
-  assert.equal(feedback(d), "붙여넣기 (표가 커서 서식 없이 글자만): 1칸");
+  assert.equal(feedback(d), "붙여넣기 (칸이 많아 서식 없이 글자만): 1칸");
   await select(d, "E3");
   await pasteHtml(d, "<p>문단</p>", "문단");
   assert.equal(cell(d, "E3").textContent, "문단");

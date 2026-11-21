@@ -165,6 +165,19 @@
     touch();
   }
 
+  // Adds the merges of a pasted block in one pass and one version step. The rectangles do not overlap each other and lie where
+  // the caller has just cleared (`removeMerges`), so none replaces another; a single cell or an upside-down rectangle is no
+  // merge, and the sheet's bound ends the list.
+  function addMerges(name, list) {
+    const layout = entry(name);
+    for (const m of list) {
+      if (layout.merges.length >= MAX_MERGES) break;
+      if (m.r2 >= m.r1 && m.c2 >= m.c1 && (m.r2 > m.r1 || m.c2 > m.c1)) layout.merges.push({ r1: m.r1, c1: m.c1, r2: m.r2, c2: m.c2 });
+    }
+    layout.index = null;
+    touch();
+  }
+
   // Unmerges every merge that touches the range; returns how many it removed.
   function removeMerges(name, r1, c1, r2, c2) {
     const layout = entry(name);
@@ -945,7 +958,7 @@
   host.__EASYOFFICE_SHEET_LAYOUT__ = {
     mapIndex, remapRef, get: (name) => bySheet[name] || null, version: () => version, onChange: (fn) => listeners.push(fn),
     isEmpty, runContains, runAt, addRun, removeRun, hiddenBefore, hiddenTotal, visibleToIndex,
-    mergeAt, mergesIn, addMerge, removeMerges, setHidden, rowHidden, rowsHiddenBefore, rowsHiddenTotal, rowAtVisible,
+    mergeAt, mergesIn, addMerge, addMerges, removeMerges, setHidden, rowHidden, rowsHiddenBefore, rowsHiddenTotal, rowAtVisible,
     tablesOf, tablesIn, tableBox, setTables, settleTableHeaders, tableColumnRenames, resetTableHeaders, tableNamed, tableAt, setTableColumn, copiedTables,
     filterOf, setFilter, setTableFilterHidden, setTableFilter, filterOwnerAt, hiddenRunsOf, sameHiddenRuns, NO_RUNS, clearTableFilter, filterToJson,
     colHidden, hiddenColRuns, freezeOf, setFreeze, tabColorOf, setTabColor, hiddenOf, veryHiddenOf, setHiddenSheet,

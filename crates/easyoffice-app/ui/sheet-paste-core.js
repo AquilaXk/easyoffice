@@ -28,6 +28,10 @@
   "use strict";
 
   const MODES = Object.freeze(["all", "values", "formats", "formulas", "widths"]);
+  // The cells one paste writes, covered cells of every copy included (a whole column of a copied cell is a million).
+  const MAX_PASTE_CELLS = 2000000;
+  const DEFAULT_MAX_MERGES = 100000; // the sheet layout's own bound, when the layout is not loaded
+  const maxMerges = () => host.__EASYOFFICE_SHEET_LAYOUT__?.MAX_MERGES ?? DEFAULT_MAX_MERGES;
 
   // A style as a paste or fill writes it: the frozen-panes flag (kept on A1) does not travel.
   function plainStyle(style) {
@@ -91,6 +95,31 @@
     return { outRows, outCols, tiles };
   }
 
+  // How many copies of a block of `outRows` x `outCols` the `target` takes, without listing them (`getRepeatRange` strict).
+  function repeatCount(outRows, outCols, target) {
+    const rows = target.r2 - target.r1 + 1;
+    const cols = target.c2 - target.c1 + 1;
+    return rows % outRows === 0 && cols % outCols === 0 ? (rows / outRows) * (cols / outCols) : 1;
+  }
+
+  const carriesMerges = (snap, mode) => (mode === "all" || mode === "formats") && (snap.rows !== null || snap.rich === true) && (snap.merges || []).length > 0;
+
+  /**
+   * Why a paste is not made: `"cells"` when it would write over two million cells, `"merges"` when it would add more merges
+   * than a sheet holds, else null. Counts by arithmetic: nothing is built.
+   */
+  function refusalOf(opts) {
+    const { snap, mode, transpose, target } = opts;
+    if (mode === "widths" || snap.cells.length === 0) return null;
+    const outRows = transpose ? snap.cols : snap.cells.length;
+    const outCols = transpose ? snap.cells.length : snap.cols;
+    if (outRows === 0 || outCols === 0) return null;
+    const copies = repeatCount(outRows, outCols, target);
+    if (copies * outRows * outCols > MAX_PASTE_CELLS) return "cells";
+    if (carriesMerges(snap, mode) && copies * snap.merges.length > maxMerges()) return "merges";
+    return null;
+  }
+
   // The area a paste covers: the copies together, from the target's top left.
   function areaOf(snap, transpose, target) {
     const { outRows, outCols, tiles } = layoutOf(snap, transpose, target);
@@ -105,6 +134,7 @@
     const { snap, mode, transpose, target, grid } = opts;
     // Text from outside has no format: it leaves the merges where they are.
     if ((mode !== "all" && mode !== "formats") || !snap.cells.length || (snap.rows === null && snap.rich !== true)) return null;
+    if (refusalOf(opts) === "merges") return { refused: "merges" };
     const area = areaOf(snap, transpose, target);
     const add = [];
     const { tiles } = layoutOf(snap, transpose, target);
@@ -203,5 +233,5 @@
     return out;
   }
 
-  host.__EASYOFFICE_SHEET_PASTE_CORE__ = { MODES, planPaste, planMerges, areaOf, getRepeatRange, transposed, plainStyle };
+  host.__EASYOFFICE_SHEET_PASTE_CORE__ = { MODES, MAX_PASTE_CELLS, planPaste, planMerges, refusalOf, areaOf, getRepeatRange, transposed, plainStyle };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

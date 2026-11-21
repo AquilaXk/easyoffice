@@ -85,7 +85,7 @@
       const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
       const { clear, add } = merges;
       layout.removeMerges(sheet, clear.r1, clear.c1, clear.r2, clear.c2);
-      for (const m of add) layout.addMerge(sheet, m.r1, m.c1, m.r2, m.c2);
+      layout.addMerges(sheet, add);
       grid.layoutChanged();
     }
 
@@ -103,7 +103,7 @@
         const change = sheetHistory.begin({ refs: edits.map((edit) => edit.ref), parts });
         const protectedSheet = Boolean(host.__EASYOFFICE_SHEET_PROTECT__?.isOn(curSheet));
         for (const edit of edits) writeEdit(map, edit, curSheet, protectedSheet);
-        for (const col of widthCols) grid.applyColWidth(Number(col), widths[col]);
+        if (widthCols.length > 0) grid.applyColWidths(widthCols.map((col) => [Number(col), widths[col]]));
         if (mergesChange) writeMerges(merges, curSheet);
         sheetHistory.commit(change);
         // A table next to what was written grows over it in a step of its own (PD-231).

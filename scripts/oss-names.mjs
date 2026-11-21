@@ -90,7 +90,9 @@ export const EXEMPT_PREFIXES = [
 
 // Standard identifiers (PDF character collection and CMap names, a PDF dictionary value, an OLE2 stream
 // name of the binary presentation format) that spell a product or company name inside a format
-// specification; Base64 so they stay out of the source text.
+// specification; Base64 so they stay out of the source text. The last five are the markers a spreadsheet
+// program's clipboard HTML carries (an XML namespace, the ProgId value, the workbook element, a style
+// property prefix): the clipboard reader has to match them as written, in lower case.
 export const STANDARD_IDENTIFIERS_B64 = [
   "QWRvYmUtS29yZWEx",
   "QWRvYmUtSWRlbnRpdHktVUNT",
@@ -99,6 +101,11 @@ export const STANDARD_IDENTIFIERS_B64 = [
   "U3RyKGIiQWRvYmUiKQ==",
   "UG93ZXJQb2ludCBEb2N1bWVudA==",
   "aHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS9vZmZpY2Uvd29yZC8yMDEwL3dvcmRtbA==",
+  "dXJuOnNjaGVtYXMtbWljcm9zb2Z0LWNvbTpvZmZpY2U6ZXhjZWw=",
+  "dXJuOnNjaGVtYXMtbWljcm9zb2Z0LWNvbTpvZmZpY2U6b2ZmaWNl",
+  "ZXhjZWwuc2hlZXQ=",
+  "ZXhjZWx3b3JrYm9vaw==",
+  "bXNvLWV4Y2Vs",
 ];
 
 // A file that adapts a published implementation names it in its leading comment block (license and

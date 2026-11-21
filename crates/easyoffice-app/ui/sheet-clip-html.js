@@ -28,14 +28,21 @@
   "use strict";
 
   const LIMITS = Object.freeze({
-    HTML_CHARS: 32 * 1024 * 1024,
-    STYLE_CHARS: 1024 * 1024,
+    HTML_CHARS: 8 * 1024 * 1024,
+    MARKER_CHARS: 64 * 1024, // the start of the HTML the markers are looked for in
+    STYLE_CHARS: 512 * 1024, // all style elements together
+    STYLE_ELEMENTS: 16,
     RULES: 5000,
     DECLARATIONS: 64, // properties one rule or one element holds
+    VALUE_CHARS: 256, // a declaration value, an attribute value
+    SELECTOR_CHARS: 256,
+    CLASS_ATTR_CHARS: 1024,
+    STYLE_ATTR_CHARS: 65536,
     CELLS: 1000000, // cells of the block, covered cells of a merge included
     CELL_CHARS: 32767, // what a cell holds
     NUMBER_FORMATS: 64, // distinct formats one paste brings
   });
+  const DEFAULT_MAX_MERGES = 100000; // the sheet layout's own bound, when the layout is not loaded
   const MAX_ROWS = 1048576;
   const MAX_COLS = 16384;
   const PX_PER_PT = 4 / 3;
@@ -45,25 +52,24 @@
   const BLOCK_TAGS = new Set(["DIV", "P", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6"]);
   const SIDES = ["t", "r", "b", "l"];
   const SIDE_PROP = { t: "border-top", r: "border-right", b: "border-bottom", l: "border-left" };
-  // The names a spreadsheet program's HTML spells; written with character codes so the guard that keeps product names
-  // out of the sources has nothing to read here.
-  const word = (...codes) => String.fromCharCode(...codes);
-  const PROGRAM = word(101, 120, 99, 101, 108);
-  const VENDOR = word(109, 105, 99, 114, 111, 115, 111, 102, 116);
-  const SPREADSHEET_MARKERS = [
-    // class names of the program's cells (`class=xl65`, quoted or not)
-    /<td[^>]*\sclass\s*=\s*["']?[^"'>\s]*\bxl\d/i,
-    new RegExp(String.raw`xmlns:x\s*=\s*["']urn:schemas-${VENDOR}-com:office:${PROGRAM}["']`, "i"),
-    new RegExp(String.raw`ProgId["']?\s+content\s*=\s*["']?${PROGRAM}\.Sheet`, "i"),
-    new RegExp(String.raw`xmlns:o\s*=\s*["']urn:schemas-${VENDOR}-com:office:office["']`, "i"),
-    new RegExp(`@mso-|mso-${PROGRAM}`, "i"),
-    new RegExp(`<x:${PROGRAM}workbook>`, "i"),
+  // What a spreadsheet program's clipboard HTML carries near its start, in lower case: its XML namespaces, the ProgId value,
+  // the workbook element and the prefix of its style properties (`scripts/oss-names.mjs` lists them as identifiers).
+  const MARKERS = [
+    "urn:schemas-microsoft-com:office:excel",
+    "urn:schemas-microsoft-com:office:office",
+    "excel.sheet",
+    "excelworkbook",
+    "mso-excel",
+    "@mso-",
   ];
+  // The class of a cell (`class=xl65`, quoted or not); run on the first 64 KiB only and closed at both ends.
+  const CELL_CLASS = /\sclass\s*=\s*["']?xl\d/;
 
-  /** Whether `html` is what a spreadsheet program copies (an app's own copy never is). */
+  /** Whether `html` is what a spreadsheet program copies (an app's own copy never is). Looks at the first 64 KiB only. */
   function htmlIsFromSpreadsheet(html) {
     if (!html) return false;
-    return SPREADSHEET_MARKERS.some((marker) => marker.test(html));
+    const head = html.slice(0, LIMITS.MARKER_CHARS).toLowerCase();
+    return MARKERS.some((marker) => head.includes(marker)) || CELL_CLASS.test(head);
   }
 
   // ---- the style text ----------------------------------------------------------------------------------
@@ -89,7 +95,7 @@
   }
 
   // `{ property: value }` of a declaration list; later declarations win. A prototype-less object: a property named
-  // `__proto__` is just a key.
+  // `__proto__` is just a key. A value over 256 characters is dropped, more than 64 properties refuse the whole block.
   function parseDeclarations(text) {
     const out = Object.create(null);
     let count = 0;
@@ -97,32 +103,74 @@
       const at = part.indexOf(":");
       if (at <= 0) continue;
       const name = part.slice(0, at).trim().toLowerCase();
-      const value = part.slice(at + 1).replace(/!important\s*$/i, "").trim();
-      if (name === "" || value === "") continue;
-      if (!(name in out) && (count += 1) > LIMITS.DECLARATIONS) break;
-      out[name] = value;
+      if (name === "") continue;
+      if (!(name in out) && (count += 1) > LIMITS.DECLARATIONS) throw new RangeError("style");
+      const value = part.slice(at + 1).trim();
+      if (value === "" || value.length > LIMITS.VALUE_CHARS) continue;
+      out[name] = value.replace(/!important$/i, "").trim();
     }
     return out;
   }
 
+  // `text` without its comments, in one pass; a comment that never ends takes the rest.
+  function withoutComments(text) {
+    const pieces = [];
+    let pos = 0;
+    for (;;) {
+      const open = text.indexOf("/*", pos);
+      if (open < 0) break;
+      pieces.push(text.slice(pos, open));
+      const close = text.indexOf("*/", open + 2);
+      if (close < 0) return pieces.join("");
+      pos = close + 2;
+    }
+    pieces.push(text.slice(pos));
+    return pieces.join("");
+  }
+
+  // The position after the block that opens at `open` (a `{`) with nested blocks, or the end of the text.
+  function afterBlock(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i += 1) {
+      const ch = text.charCodeAt(i);
+      if (ch === 123) depth += 1;
+      else if (ch === 125 && (depth -= 1) === 0) return i + 1;
+    }
+    return text.length;
+  }
+
   // The rules of the style sheets as `selector -> declarations` (a rule with a selector list is one rule per selector).
-  // A text scanner: comments and at-rules are skipped, and the raw text is kept because a style sheet object would drop the
-  // properties of the program (`mso-number-format`).
+  // A single pass over the text: comments and at-rules are skipped, and the raw text is kept because a style sheet object would
+  // drop the properties of the program (`mso-number-format`). Over the bounds (elements, characters, rules, properties of a
+  // rule) the block is refused whole.
   function readStyleRules(sheets) {
+    if (sheets.length > LIMITS.STYLE_ELEMENTS) throw new RangeError("style");
     const rules = new Map();
     let count = 0;
+    let chars = 0;
     for (const raw of sheets) {
-      const text = raw.slice(0, LIMITS.STYLE_CHARS).replace(/\/\*[\s\S]*?\*\/|<!--|-->/g, "");
-      const block = /([^{}]+)\{([^{}]*)\}/g;
-      let match;
-      while ((match = block.exec(text)) !== null) {
-        const selectors = match[1].trim();
-        if (selectors.startsWith("@")) continue;
-        const declarations = parseDeclarations(match[2]);
+      if ((chars += raw.length) > LIMITS.STYLE_CHARS) throw new RangeError("style");
+      const text = withoutComments(raw).split("<!--").join("").split("-->").join("");
+      let pos = 0;
+      while (pos < text.length) {
+        const open = text.indexOf("{", pos);
+        if (open < 0) break;
+        const before = text.slice(pos, open);
+        const selectors = before.slice(before.lastIndexOf("}") + 1).trim();
+        if (selectors.startsWith("@")) {
+          pos = afterBlock(text, open);
+          continue;
+        }
+        const close = text.indexOf("}", open + 1);
+        if (close < 0) break;
+        const body = text.slice(open + 1, close);
+        pos = close + 1;
+        if (selectors === "" || selectors.length > LIMITS.SELECTOR_CHARS) continue;
+        const declarations = parseDeclarations(body);
         for (const selector of selectors.split(",")) {
           const key = selector.trim().toLowerCase();
           if (key === "") continue;
-          if ((count += 1) > LIMITS.RULES) return rules;
+          if ((count += 1) > LIMITS.RULES) throw new RangeError("style");
           rules.set(key, Object.assign(rules.get(key) || Object.create(null), declarations));
         }
       }
@@ -131,7 +179,13 @@
   }
 
   const RESOLVED_CELLS = 50000; // looks one parse remembers
-  const attrOf = (el, name) => (typeof el.getAttribute === "function" ? el.getAttribute(name) : null);
+  // An attribute value; null when it is absent or longer than its bound (256 characters; the class list 1,024; the style 64 Ki).
+  function attrOf(el, name) {
+    const value = typeof el.getAttribute === "function" ? el.getAttribute(name) : null;
+    if (value === null || value === undefined) return null;
+    const bound = name === "style" ? LIMITS.STYLE_ATTR_CHARS : name === "class" ? LIMITS.CLASS_ATTR_CHARS : LIMITS.VALUE_CHARS;
+    return value.length > bound ? null : value;
+  }
   const elementKey = (el) => `${el.tagName}|${attrOf(el, "class") ?? ""}|${attrOf(el, "id") ?? ""}|${attrOf(el, "style") ?? ""}`;
   const classesOf = (el) => (attrOf(el, "class") || "").split(/\s+/).filter(Boolean);
 
@@ -170,12 +224,31 @@
 
   // Length in px; null when the text is not a length.
   function pxOf(text) {
-    const m = /^(\d*\.?\d+)\s*(px|pt|in|cm|mm|pc)?$/i.exec(String(text ?? "").trim());
+    const m = /^(\d+(?:\.\d+)?|\.\d+)\s*(px|pt|in|cm|mm|pc)?$/i.exec(String(text ?? "").trim());
     if (!m) return null;
     const n = Number(m[1]);
     const unit = (m[2] || "px").toLowerCase();
     const per = { px: 1, pt: PX_PER_PT, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pc: 16 }[unit];
     return n * per;
+  }
+
+  // The words of a value: split at white space outside parentheses, one linear pass.
+  function tokensOf(text) {
+    const tokens = [];
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text.charCodeAt(i);
+      if (ch === 40) depth += 1;
+      else if (ch === 41 && depth > 0) depth -= 1;
+      const blank = depth === 0 && (ch === 32 || (ch >= 9 && ch <= 13));
+      if (blank) {
+        if (start >= 0) tokens.push(text.slice(start, i));
+        start = -1;
+      } else if (start < 0) start = i;
+    }
+    if (start >= 0) tokens.push(text.slice(start));
+    return tokens;
   }
 
   // The edge text of a border value (`.5pt solid windowtext`): `"<line>:<rrggbb>"`, or null for no border.
@@ -185,7 +258,7 @@
     let px = 1;
     let line = "thin";
     let color = "000000";
-    for (const token of text.split(/\s+(?![^(]*\))/)) {
+    for (const token of tokensOf(text)) {
       const width = { thin: 1, medium: 3, thick: 5, hairline: 1 }[token] ?? pxOf(token);
       if (width !== null && width !== undefined) px = width;
       else if (token === "none" || token === "hidden") return null;
@@ -384,6 +457,7 @@
     const covered = new Set();
     const bds = new Map();
     const merges = [];
+    const maxMerges = host.__EASYOFFICE_SHEET_LAYOUT__?.MAX_MERGES ?? DEFAULT_MAX_MERGES;
     const formats = [];
     const payloadStyles = new Map();
     // A cell with the same tag, class, id and style attribute under the same row and table looks the same: resolved once.
@@ -450,7 +524,10 @@
               if (payload.bd) bds.set(key, payload.bd);
             }
           }
-          if (rowSpan > 1 || colSpan > 1) merges.push({ r1: row, c1: col, r2: row + rowSpan - 1, c2: col + colSpan - 1 });
+          if (rowSpan > 1 || colSpan > 1) {
+            if (merges.length >= maxMerges) throw new RangeError("merges");
+            merges.push({ r1: row, c1: col, r2: row + rowSpan - 1, c2: col + colSpan - 1 });
+          }
           rowCount = Math.max(rowCount, row + rowSpan);
           colCount = Math.max(colCount, col + colSpan);
           col += colSpan;
@@ -492,8 +569,9 @@
    * `{ refused }` when a bound is passed.
    */
   function parseClipboardHtml(html, { parseDocument = inertDocument, styleFromPayload }) {
-    if (typeof html !== "string" || html === "" || !/<t[dh][\s>]/i.test(html)) return { block: null };
+    if (typeof html !== "string" || html === "") return { block: null };
     if (html.length > LIMITS.HTML_CHARS) return { refused: "size" };
+    if (!/<t[dh][\s>]/i.test(html)) return { block: null };
     try {
       const doc = parseDocument(html);
       const root = doc?.documentElement || doc?.body;
@@ -504,5 +582,5 @@
     }
   }
 
-  host.__EASYOFFICE_SHEET_CLIP_HTML__ = Object.freeze({ LIMITS, htmlIsFromSpreadsheet, parseClipboardHtml, readStyleRules, decodeMsoNumberFormat, colorOf, edgeOf });
+  host.__EASYOFFICE_SHEET_CLIP_HTML__ = Object.freeze({ LIMITS, htmlIsFromSpreadsheet, parseClipboardHtml, readStyleRules, decodeMsoNumberFormat, colorOf, edgeOf, pxOf });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
