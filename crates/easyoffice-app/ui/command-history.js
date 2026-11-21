@@ -52,6 +52,9 @@
       live = 0;
     }
 
+    // The redo steps a recorded step swept away, for `retract`.
+    const sweptRedo = new WeakMap();
+
     // Ref `recordWithoutExecute`: the change is already in the document, only the way back is recorded. A step that is
     // over the byte bound on its own ends the record (PD-221).
     function record(command) {
@@ -61,11 +64,28 @@
         return false;
       }
       for (const dropped of redoStack) live -= dropped.bytes;
+      if (redoStack.length > 0) sweptRedo.set(command, [...redoStack]);
       redoStack.length = 0;
       undoStack.push(command);
       live += weight;
       if (undoStack.length > maxSteps) live -= weigh(undoStack.shift());
       enforceBudget();
+      return true;
+    }
+
+    // Takes back a step the change of which was dropped before it was used (a cell entry cancelled with Esc): it leaves
+    // when it is the newest step, and the redo steps it swept away come back. Not in the reference, whose steps run on
+    // execute.
+    function retract(command) {
+      if (undoStack.at(-1) !== command) return false;
+      undoStack.pop();
+      live -= weigh(command);
+      const swept = sweptRedo.get(command);
+      if (swept) {
+        redoStack.push(...swept);
+        for (const step of swept) live += step.bytes;
+        sweptRedo.delete(command);
+      }
       return true;
     }
 
@@ -93,6 +113,7 @@
 
     return {
       record,
+      retract,
       clear,
       undo: (apply) => step(true, apply),
       redo: (apply) => step(false, apply),

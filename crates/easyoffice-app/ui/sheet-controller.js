@@ -591,8 +591,14 @@
 
     function pushCellUndoSnapshotIfNeeded(td, st, effectiveRaw) {
       if (!st || st.snapshotPushed || effectiveRaw === st.initialRaw) return;
-      sheetHistory.commit(st.pendingSnapshot ?? captureCellBeforeEdit(td, st), { compact: false });
+      st.undoRecord = sheetHistory.commit(st.pendingSnapshot ?? captureCellBeforeEdit(td, st), { compact: false });
       st.snapshotPushed = true;
+    }
+
+    // The step pushed at the first change of a cell goes when the entry is cancelled: nothing was entered.
+    function retractCellUndoSnapshot(st) {
+      if (st?.undoRecord) sheetHistory.retract(st.undoRecord);
+      if (st) st.undoRecord = null;
     }
 
     function releaseCellFocus(td, keepFocus) {
@@ -766,6 +772,7 @@
       ensureSheetCellFocusEntry,
       syncSheetCellFocusBaseline,
       pushCellUndoSnapshotIfNeeded,
+      retractCellUndoSnapshot,
       ensurePendingSnapshot,
       schedulePendingSnapshot,
       applyCellEdits,

@@ -95,6 +95,7 @@
       getActiveSheetCellRef,
       getController: getSheetController,
       push: (record) => workspaceHistory.pushRecord(record),
+      retract: (record) => workspaceHistory.retractRecord(record),
     });
     sheetHistory.runtime = { getController: getSheetController, getActiveModule, getActiveSheetCellRef };
 

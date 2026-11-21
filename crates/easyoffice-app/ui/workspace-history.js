@@ -58,6 +58,11 @@
       stacks.record(record);
     }
 
+    // A step that was recorded for a change that did not happen (a cell entry cancelled with Esc).
+    function retractRecord(record) {
+      if (record && stacks.retract(record)) bumpEpoch();
+    }
+
     // Protecting or lifting a protection cannot be undone: the record of steps ends there (PD-216).
     function clear() {
       bumpEpoch();
@@ -133,6 +138,7 @@
 
     return {
       pushRecord,
+      retractRecord,
       clear,
       getEpoch,
       bumpEpoch,

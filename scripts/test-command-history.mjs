@@ -32,6 +32,21 @@ test("a new step empties the redo stack (ref execute/recordWithoutExecute)", asy
   assert.equal(h.sizes().bytes, 2);
 });
 
+test("a retracted step leaves the stack and brings back the redo steps it swept away", async () => {
+  const h = makeHistory();
+  h.record(step(1));
+  h.record(step(2));
+  await h.undo(moveAs(step("r2")));
+  const typed = step(3);
+  h.record(typed);
+  assert.deepEqual([h.sizes().undo, h.sizes().redo], [2, 0]);
+  assert.equal(h.retract(step(3)), false, "only the step itself can be retracted");
+  assert.equal(h.retract(typed), true);
+  assert.deepEqual(h.sizes(), { undo: 1, redo: 1, bytes: 2 });
+  assert.equal(h.peekRedoTop().id, "r2");
+  assert.equal(h.retract(typed), false, "a step is retracted once");
+});
+
 test("the oldest step leaves when the stack passes its step count", () => {
   const h = makeHistory();
   for (let id = 1; id <= MAX_STEPS + 3; id += 1) h.record(step(id));

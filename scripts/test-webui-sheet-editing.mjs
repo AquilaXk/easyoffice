@@ -98,6 +98,25 @@ test("Enter, Shift+Enter, Tab and Esc follow the spreadsheet editing contract", 
   assert.equal(activeRef(document), "C4", "arrow keys keep working after Esc");
 });
 
+test("an entry dropped with Esc leaves no undo step, and a committed one is a single step", async () => {
+  const { document, sandbox } = await openSheet();
+  const b4 = cell(document, "B4");
+  b4.focus();
+  typeText(document, "700");
+  key(b4, "Enter");
+  await flushAsyncTurns();
+  const c3 = cell(document, "C3");
+  c3.focus();
+  const before = c3.textContent;
+  typeText(document, "999");
+  key(c3, "Escape");
+  await flushAsyncTurns();
+  assert.equal(cell(document, "C3").textContent, before);
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(12);
+  assert.equal(cell(document, "B4").textContent, "680", "the first undo takes back the 700, not an entry that never happened");
+});
+
 test("arrow keys: ready mode moves; F2 edit mode keeps the caret keys; enter mode commits and moves", async () => {
   const { document } = await openSheet();
   const b2 = cell(document, "B2");

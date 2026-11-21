@@ -563,6 +563,7 @@
       if (r.formula) td.dataset.formula = r.formula;
       else delete td.dataset.formula;
       st.userEdited = false;
+      api.retractCellUndoSnapshot(st);
       endEdit(td);
       api.syncSheetCellFocusBaseline(td, true);
       refreshChrome();

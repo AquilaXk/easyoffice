@@ -51,7 +51,7 @@
   }
 
   function createSheetHistory(deps) {
-    const { sheetDataStore, sheetRowCounts, getActiveModule, getActiveSheetName, getActiveSheetCellRef, getController, push } = deps;
+    const { sheetDataStore, sheetRowCounts, getActiveModule, getActiveSheetName, getActiveSheetCellRef, getController, push, retract } = deps;
     const D = host.__EASYOFFICE_SHEET_DELTA__;
     const ctx = { sheetDataStore, sheetRowCounts, controller: getController };
 
@@ -254,7 +254,7 @@
     // The sheet's state as a partial snapshot, for a change that builds the state it leads to from this one.
     const current = () => ({ scope: "sheet", ...readView(), ...readParts(ALL_PARTS) });
 
-    return { begin, commit, swap, snapshotOf, restoreRowCounts, wouldChange, current };
+    return { begin, commit, retract, swap, snapshotOf, restoreRowCounts, wouldChange, current };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_HISTORY__ = createSheetHistory;
