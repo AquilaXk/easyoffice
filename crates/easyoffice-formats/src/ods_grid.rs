@@ -92,7 +92,7 @@ pub(crate) trait OdsSink {
     fn group(&mut self, _columns: bool, _display: bool, _open: bool) {}
     /// Called before each `row`: the row is one an auto filter hides (`table:visibility="filter"`).
     fn row_filtered(&mut self, _filtered: bool) {}
-    /// Called before each `row`: the `table:style-name` of the row, unescaped (its height, PD-277).
+    /// Called before each `row`: the `table:style-name` of the row, unescaped (its height, PD-278).
     fn row_style(&mut self, _style: Option<&str>) {}
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError>;
     fn table_end(&mut self);

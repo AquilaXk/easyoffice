@@ -1,5 +1,5 @@
 //! Row heights and the `customHeight` flag survive an XLSX and an ODS round trip, and a file that names an unusable
-//! height or too many of them is read without them (PD-277).
+//! height or too many of them is read without them (PD-278).
 
 use easyoffice_formats::{
     OdfCodec, OoxmlCodec, RowHeight, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,

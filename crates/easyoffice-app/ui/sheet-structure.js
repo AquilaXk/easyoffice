@@ -50,7 +50,7 @@
     const linkApi = host.__EASYOFFICE_SHEET_LINK__;
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const menu = () => document.getElementById("sheet-header-menu");
-    // The height of a row by hand: the drag of the edge of its header and the fit (PD-277).
+    // The height of a row by hand: the drag of the edge of its header and the fit (PD-278).
     const rowResize = host.__EASYOFFICE_CREATE_SHEET_ROW_RESIZE__({ ...deps, sheetDataStore });
     // The auto filter (PD-198) shares this module's menu wiring and undo steps.
     const filter = host.__EASYOFFICE_CREATE_SHEET_FILTER__({ ...deps, sheetDataStore, sheetStoreHelpers });

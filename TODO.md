@@ -56,7 +56,7 @@
 
 
 ## 시트 UI 이식 1차 이후 (PD-275)
-- [ ] 행 높이 저장 모델(QA 결정): 행 경계 더블클릭 맞춤과 큰 글꼴 한 줄 행의 높이. 지금 행 높이는 줄바꿈 칸에서만 파생된다
-- [ ] 필터 목록: 검색 중 첫 줄을 "(검색 결과 모두 선택)"으로(화면 글자가 바뀌므로 전후 캡처 필요)
-- [ ] 수식 입력 중 셀 눌러 참조 넣기(포인트 모드)와 F4 순환이 없다. 수식 편집 상태에서 셀 클릭은 입력을 확정한다
+- [ ] 수식 입력 중 셀 눌러 참조 넣기(포인트 모드)와 F4 순환이 없다. 수식 편집 상태에서 셀 클릭은 입력을 확정한다. 원본은 `THIRD_PARTY_NOTICES.md`의 참조 시트 구현 중 수식 UI 패키지(`prompt.service.ts`, `reference-absolute.operation.ts`, `controllers/shortcuts/prompt.shortcut.ts`)이고 편집 칸이 문서 편집기라 td 편집·수식 입력줄에 맞춰 새로 엮어야 한다(다음 브랜치)
+- [ ] 시트 기본 행 높이(`sheetFormatPr defaultRowHeight customHeight`, 전체 선택 뒤 행 높이)를 읽고 쓰지 않는다. 행마다 `ht`만 다룬다(PD-278)
+- [ ] PDF 내보내기·시트 PDF 그림 위치가 행 높이(`row_heights`)를 쓰지 않고 24px 행으로 계산한다(PD-278)
 - [ ] 실제 표 계산 프로그램이 복사한 HTML 표본으로 `sheet-clip-html.js` 대조(현재 시험 자료는 알려진 출력 모양을 따라 쓴 것)

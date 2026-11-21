@@ -148,7 +148,7 @@ pub(crate) fn parse_hidden_cols(v: &StrictJsonValue) -> Result<Vec<(u32, u32)>, 
 }
 
 /// `rowHeights`: `[[row, points], ...]` or `[row, points, 0]` for a height that follows the content, rows 1-based
-/// (PD-277). Input over a limit or with a height that is not a finite number of points in 0..=409 is refused.
+/// (PD-278). Input over a limit or with a height that is not a finite number of points in 0..=409 is refused.
 pub(crate) fn parse_row_heights(v: &StrictJsonValue) -> Result<RowHeights, EasyOfficeError> {
     let items = v.as_array().ok_or_else(|| bad("rowHeights"))?;
     if items.len() > MAX_ROW_HEIGHTS {

@@ -1,4 +1,4 @@
-//! Row heights of a worksheet (PD-277): the height of a row and whether a user set it (`customHeight` in
+//! Row heights of a worksheet (PD-278): the height of a row and whether a user set it (`customHeight` in
 //! XLSX, `style:use-optimal-row-height="false"` in ODS), kept beside the cell values in [`SheetStyling`].
 //!
 //! 참조 구현: Univer `packages/sheets/src/commands/mutations/set-worksheet-row-height.mutation.ts`

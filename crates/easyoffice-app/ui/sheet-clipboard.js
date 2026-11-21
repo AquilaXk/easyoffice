@@ -1,3 +1,13 @@
+// Range clipboard of the sheet editor. The system clipboard read of the toolbar and menu paste (PD-278) follows:
+//
+// 참조 구현 (reference implementation): Univer (https://github.com/dream-num/univer, Apache-2.0,
+// Copyright 2023-present DreamNum Co., Ltd., commit 4767b3b309467c283bbd52b725536ca73861e0fc):
+//   packages/sheets-ui/src/services/clipboard/clipboard.service.ts :414-431 (`paste(item)`: the text and the HTML of a
+//       `ClipboardItem` by its `types` and `getType`)
+//   packages/ui/src/services/clipboard/clipboard-interface.service.ts :236-262 (`read`, `readText`: a refusal falls back;
+//       the reference shows a notice)
+// Modifications: the reference reads the item whole; here a table over the size bound is not read at all, and a refusal or
+// a missing `read` gives the text alone (no notice) the way the page pasted before.
 (function (host) {
   "use strict";
 

@@ -541,7 +541,7 @@ select:focus-visible,
 .sheet-grid { --rh: 24px; }
 .sheet-grid .row-resizer { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: row-resize; z-index: 6; }
 .sheet-grid .row-resizer:hover { background: var(--accent-strong); opacity: 0.45; }
-/* Row heights (PD-277): a row under the grid's height takes its own (`--rh`), and a row whose height cuts its cells off keeps them on one line. */
+/* Row heights (PD-278): a row under the grid's height takes its own (`--rh`), and a row whose height cuts its cells off keeps them on one line. */
 .sheet-grid tr.row-short > th, .sheet-grid tr.row-short > td { height: var(--rh); line-height: calc(var(--rh) - 1px) !important; padding-top: 0 !important; padding-bottom: 0 !important; }
 .sheet-grid tr.row-clip > td { white-space: nowrap !important; }
 .sheet-grid tr.sheet-spacer td, .sheet-grid td.sheet-spacer-y { padding: 0; border-width: 0; line-height: 0; }

@@ -87,7 +87,7 @@ pub fn shift_widths(widths: &BTreeMap<u32, u32>, edit: &AxisEdit) -> BTreeMap<u3
 
 /// Row heights (zero-based row to height) after a row edit. A deleted row loses its height, the rows after it move,
 /// and an inserted row takes the height a user set on the row above it, as the spreadsheet program's insert copies the
-/// format of the row above (PD-277); a height that follows the content is not copied. A column edit and a row edit
+/// format of the row above (PD-278); a height that follows the content is not copied. A column edit and a row edit
 /// bounded to some columns leave them as they are.
 pub fn shift_row_heights(heights: &RowHeights, edit: &AxisEdit) -> RowHeights {
     if edit.axis == Axis::Col || edit.cols.is_some() {

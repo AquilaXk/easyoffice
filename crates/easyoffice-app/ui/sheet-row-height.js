@@ -1,4 +1,4 @@
-// Row heights a user set (PD-277), the `customHeight` rows of a spreadsheet file. A sheet's `rowHeights` is a `Map` of the
+// Row heights a user set (PD-278), the `customHeight` rows of a spreadsheet file. A sheet's `rowHeights` is a `Map` of the
 // 1-based row to its height in points; every other row follows its content (`sheet-row-fit.js`). Setting a height turns the
 // automatic height of the row off, and fitting a row (a double click on the edge of its header) gives the row back to its
 // content, which is what taking it out of the map does.

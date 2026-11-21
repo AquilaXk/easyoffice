@@ -7,7 +7,7 @@ import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
 import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
-// Row heights (PD-277): the heights a user set, kept in the layout and in the file; the rows that follow their content (wrapped
+// Row heights (PD-278): the heights a user set, kept in the layout and in the file; the rows that follow their content (wrapped
 // text and large fonts), never under the grid's row height; a double click on the edge of a row header gives the rows back
 // to their content; a drag on the edge sets the height; each is one undo step; the grid draws rows of any height in place.
 

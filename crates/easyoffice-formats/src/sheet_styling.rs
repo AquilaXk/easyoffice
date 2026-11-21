@@ -460,7 +460,7 @@ pub struct SheetStyling {
     /// [`CellValueKind::infer`] (PD-241).
     pub cell_types: FastU64Map<CellValueKind>,
     pub columns: BTreeMap<u32, u32>,
-    /// Heights of rows by zero-based row, and whether a user set them (PD-277).
+    /// Heights of rows by zero-based row, and whether a user set them (PD-278).
     pub row_heights: RowHeights,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,

@@ -43,7 +43,7 @@ pub(crate) struct OdsStyleTable {
     cell_index: HashMap<StyleKey, usize>,
     widths: Vec<u32>,
     width_index: HashMap<u32, usize>,
-    /// Distinct row heights of the workbook, in first-use order: `ro<N>` names entry `N - 1` (PD-277).
+    /// Distinct row heights of the workbook, in first-use order: `ro<N>` names entry `N - 1` (PD-278).
     row_heights: Vec<RowHeight>,
     row_height_index: HashMap<RowHeight, usize>,
     /// Custom number format codes of the whole workbook (PD-193); `eonf<id>` data styles.
@@ -486,7 +486,7 @@ fn parse_text_properties(attrs: &str, font_table: &mut FontTable) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
-    /// Heights a user set, by row style name (PD-277).
+    /// Heights a user set, by row style name (PD-278).
     pub(crate) rows: HashMap<String, RowHeight>,
     /// Tab colours and hidden states of the table styles (PD-208, PD-209).
     pub(crate) table_props: HashMap<String, TableProps>,

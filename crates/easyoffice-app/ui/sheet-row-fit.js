@@ -1,4 +1,4 @@
-// Row heights (PD-207, PD-277). A row a user gave a height keeps it (`sheet-row-height.js`); every other row is as tall as its tallest
+// Row heights (PD-207, PD-278). A row a user gave a height keeps it (`sheet-row-height.js`); every other row is as tall as its tallest
 // cell needs, never under the grid's row height: a wrapped cell by its lines, any cell by its font. Heights are derived from the sheet
 // model and the layout (never stored by this module), so undo, file open and structure edits only have to call `sync()`.
 //

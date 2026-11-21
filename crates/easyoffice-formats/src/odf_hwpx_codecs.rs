@@ -487,7 +487,7 @@ impl OdfCodec {
                     grid.entry(row).or_default();
                 }
             }
-            // The rows with a height are written, empty ones too, to carry it (PD-277).
+            // The rows with a height are written, empty ones too, to carry it (PD-278).
             for &row in st.row_heights.keys() {
                 grid.entry(row).or_default();
             }

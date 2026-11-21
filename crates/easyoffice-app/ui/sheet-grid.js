@@ -178,7 +178,7 @@
       isMerged: (r, c) => Boolean(layoutApi?.mergeAt(getSheetName(), r, c)),
       measure: (text, width, font) => measureWrapped(sampleTd(), text, width, font),
       packRef,
-      // The heights a user set, as `[[row, px], ...]` (PD-277).
+      // The heights a user set, as `[[row, px], ...]` (PD-278).
       customHeights: () => (rowHeightsOf() ? host.__EASYOFFICE_SHEET_ROW_HEIGHT__.pxEntries(rowHeightsOf()) : []),
     });
     function rowHeightsOf() {

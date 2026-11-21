@@ -1,4 +1,4 @@
-// Row heights by hand (PD-277): dragging the bottom edge of a row header sets the height of that row, or of every selected
+// Row heights by hand (PD-278): dragging the bottom edge of a row header sets the height of that row, or of every selected
 // row when it is one of them, and a double click on the edge gives the row (or the selected rows) back to its content. A
 // drag is one undo step, and so is a fit.
 //
