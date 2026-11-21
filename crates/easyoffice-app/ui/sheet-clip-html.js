@@ -423,7 +423,7 @@
     return rows;
   };
 
-  const cellsOf = (row) => (row.childNodes || []).filter((c) => c.nodeType === 1 && CELL_TAGS.has(String(c.tagName).toUpperCase()));
+  const cellsOf = (row) => Array.from(row.childNodes || []).filter((c) => c.nodeType === 1 && CELL_TAGS.has(String(c.tagName).toUpperCase()));
 
   // A table inside a cell belongs to that cell's text, not to the paste.
   function isNested(table) {

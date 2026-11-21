@@ -80,6 +80,29 @@ function parse(h, html) {
   return win.__EASYOFFICE_SHEET_CLIP_HTML__.parseClipboardHtml(html, { styleFromPayload: win.__EASYOFFICE_SHEET_STYLE_CODEC__.styleFromPayload });
 }
 
+test("the table is read when childNodes is a NodeList without array methods (real browsers)", async () => {
+  const h = await open();
+  const win = h.document.defaultView;
+  // A NodeList has no `filter`; the harness's own helpers need the rest of the array methods.
+  const nodeList = (nodes) => Object.assign(nodes.slice(), { filter: undefined });
+  const wrap = (node) => {
+    if (node.nodeType !== 1) return;
+    node.childNodes.forEach(wrap);
+    node.childNodes = nodeList(node.childNodes);
+  };
+  win.DOMParser = class {
+    parseFromString(html) {
+      const root = h.document.createElement("div");
+      root.innerHTML = html;
+      wrap(root);
+      return { documentElement: root };
+    }
+  };
+  const { block } = parse(h, SHEET_HTML);
+  assert.equal(block.cells.length, 8);
+  assert.equal(block.cells[0][0].value, "이름");
+});
+
 test("the markers of a spreadsheet program's HTML are found, a plain table is not one", async () => {
   const h = await open();
   const api = h.document.defaultView.__EASYOFFICE_SHEET_CLIP_HTML__;
