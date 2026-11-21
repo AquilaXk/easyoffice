@@ -507,7 +507,7 @@ select:focus-visible,
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Edit box (PD-280): sheet-edit-box.js sets `--ew`, `--eh` and `--ch` (the cell's own height). The cell being edited becomes a block that lies over the cells to its right and below; its bottom margin gives back the height it takes, so the row keeps its height. */
-.sheet-grid td.edit-grow { display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); overflow: hidden; }
+.sheet-grid td.edit-grow { --ew: 96px; --eh: auto; --ch: 24px; display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); overflow: hidden; }
 .sheet-grid td.edit-measure { display: block; width: max-content; }
 .sheet-grid td.edit-grow.edit-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Table style (PD-231): sheet-table-style.js sets `--ts-fill`, `--ts-fg` and `--ts-shadow`. It lies under the cell's own fill and colour (the block below) and under conditional formats; a table cell has no border of its own width: its grid line and the table's lines are shadows, so a line runs unbroken across the cell edges. */
