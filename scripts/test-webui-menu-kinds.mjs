@@ -142,7 +142,7 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", CF: "@cf", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function rustLayout() {
   const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
@@ -229,21 +229,44 @@ test("the page reports the menu kind to the shell with its menu state", () => {
 
 // The rows of a menu as the page shows them and as the native bar lists them: a label per item, "-" for a separator and
 // "label > ..." for a submenu.
-const pageRows = (container) =>
-  container.children
+// A gallery panel (data bars, color scales, icon sets) holds titled grids of tiles: the tiles are its rows, and the title of
+// each group after the first stands for the native menu's separator.
+const pageRows = (container) => {
+  let titled = false;
+  return container.children
     .filter((el) => !el.hidden)
-    .map((el) => {
-      if (el.classList.contains("md-sep")) return "-";
+    .flatMap((el) => {
+      if (el.classList.contains("md-sep")) return ["-"];
+      if (el.classList.contains("cfg-title")) {
+        const separator = titled ? ["-"] : [];
+        titled = true;
+        return separator;
+      }
+      if (el.classList.contains("cfg-grid")) return el.children.map((tile) => tile.querySelector(":scope > .md-label").textContent);
       const label = el.querySelector(":scope > .md-label").textContent;
       const panel = el.querySelector(":scope > .md-sub-panel");
-      return panel ? `${label} > ${pageRows(panel).join(" | ")}` : label;
+      return [panel ? `${label} > ${pageRows(panel).join(" | ")}` : label];
     });
+};
+
+// The submenus of the 조건부 서식 menu (`CfSubmenu` of layout.rs) by the token the menu lists them with.
+function cfSubmenus() {
+  const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  const lines = (text) => text.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
+  return new Map([...src.matchAll(/CfSubmenu \{\s*token: "([^"]+)",\s*title: "([^"]+)",\s*lines: &\[([\s\S]*?)\],\s*\}/g)].map((m) => [m[1], { title: m[2], lines: lines(m[3]) }]));
+}
 
 function nativeRows(menu) {
   const labels = rustLabels();
+  const cf = cfSubmenus();
+  const rowsOf = (lines) =>
+    lines.map((line) => {
+      const sub = cf.get(line);
+      return sub ? `${sub.title} > ${rowsOf(sub.lines).join(" | ")}` : labels.get(line) ?? line;
+    });
   return menu.lines.map((line) => {
-    const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"] }[line];
-    if (submenu) return `${submenu[0]} > ${submenuLines(submenu[1]).map((id) => labels.get(id) ?? id).join(" | ")}`;
+    const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"], "@cf": ["조건부 서식", "CF"] }[line];
+    if (submenu) return `${submenu[0]} > ${rowsOf(submenuLines(submenu[1])).join(" | ")}`;
     return labels.get(line) ?? line;
   });
 }

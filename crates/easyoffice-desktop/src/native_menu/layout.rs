@@ -62,6 +62,8 @@ pub const NUMFMT: &str = "@numfmt";
 pub const ALIGN: &str = "@align";
 /// The 테두리 submenu of the spreadsheet's 서식 menu ([`BORDER_LINES`]).
 pub const BORDER: &str = "@border";
+/// The 조건부 서식 submenu of the spreadsheet's 서식 menu ([`CF_LINES`]; its own submenus are [`CF_SUBMENUS`]).
+pub const CF: &str = "@cf";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -125,6 +127,140 @@ pub const BORDER_LINES: [&str; 16] = [
     SEPARATOR,
     "format:border-color",
 ];
+/// The lines of the 조건부 서식 submenu: five submenus, then new rule, clear rules and manage rules.
+pub const CF_LINES: [&str; 9] = [
+    "@cf-highlight",
+    "@cf-top",
+    "@cf-bars",
+    "@cf-scales",
+    "@cf-icons",
+    SEPARATOR,
+    "format:cf-new",
+    "@cf-clear",
+    "format:cf-manage",
+];
+
+/// A submenu of the 조건부 서식 menu: the token its parent lists, its title and its lines.
+pub struct CfSubmenu {
+    pub token: &'static str,
+    pub title: &'static str,
+    pub lines: &'static [&'static str],
+}
+
+pub const CF_SUBMENUS: [CfSubmenu; 6] = [
+    CfSubmenu {
+        token: "@cf-highlight",
+        title: "셀 강조 규칙",
+        lines: &[
+            "format:cf-quick-greater",
+            "format:cf-quick-less",
+            "format:cf-quick-between",
+            "format:cf-quick-equal",
+            "format:cf-quick-text",
+            "format:cf-quick-date",
+            "format:cf-quick-dup",
+            SEPARATOR,
+            "format:cf-more-highlight",
+        ],
+    },
+    CfSubmenu {
+        token: "@cf-top",
+        title: "상위/하위 규칙",
+        lines: &[
+            "format:cf-quick-top",
+            "format:cf-quick-top-percent",
+            "format:cf-quick-bottom",
+            "format:cf-quick-bottom-percent",
+            "format:cf-quick-above",
+            "format:cf-quick-below",
+            SEPARATOR,
+            "format:cf-more-top",
+        ],
+    },
+    CfSubmenu {
+        token: "@cf-bars",
+        title: "데이터 막대",
+        lines: &[
+            "format:cf-bar-grad-blue",
+            "format:cf-bar-grad-green",
+            "format:cf-bar-grad-red",
+            "format:cf-bar-grad-orange",
+            "format:cf-bar-grad-lightblue",
+            "format:cf-bar-grad-purple",
+            SEPARATOR,
+            "format:cf-bar-solid-blue",
+            "format:cf-bar-solid-green",
+            "format:cf-bar-solid-red",
+            "format:cf-bar-solid-orange",
+            "format:cf-bar-solid-lightblue",
+            "format:cf-bar-solid-purple",
+            SEPARATOR,
+            "format:cf-more-bar",
+        ],
+    },
+    CfSubmenu {
+        token: "@cf-scales",
+        title: "색조",
+        lines: &[
+            "format:cf-scale-gyr",
+            "format:cf-scale-ryg",
+            "format:cf-scale-gwr",
+            "format:cf-scale-rwg",
+            "format:cf-scale-bwr",
+            "format:cf-scale-rwb",
+            "format:cf-scale-wr",
+            "format:cf-scale-rw",
+            "format:cf-scale-gw",
+            "format:cf-scale-wg",
+            "format:cf-scale-gy",
+            "format:cf-scale-yg",
+            SEPARATOR,
+            "format:cf-more-scale",
+        ],
+    },
+    CfSubmenu {
+        token: "@cf-icons",
+        title: "아이콘 집합",
+        lines: &[
+            "format:cf-icons-3arrows",
+            "format:cf-icons-3arrowsgray",
+            "format:cf-icons-3triangles",
+            "format:cf-icons-4arrowsgray",
+            "format:cf-icons-4arrows",
+            "format:cf-icons-5arrowsgray",
+            "format:cf-icons-5arrows",
+            SEPARATOR,
+            "format:cf-icons-3trafficlights1",
+            "format:cf-icons-3trafficlights2",
+            "format:cf-icons-3signs",
+            "format:cf-icons-4trafficlights",
+            "format:cf-icons-4redtoblack",
+            SEPARATOR,
+            "format:cf-icons-3symbols",
+            "format:cf-icons-3symbols2",
+            "format:cf-icons-3flags",
+            SEPARATOR,
+            "format:cf-icons-3stars",
+            "format:cf-icons-4rating",
+            "format:cf-icons-5rating",
+            "format:cf-icons-5quarters",
+            "format:cf-icons-5boxes",
+            SEPARATOR,
+            "format:cf-more-icons",
+        ],
+    },
+    CfSubmenu {
+        token: "@cf-clear",
+        title: "규칙 지우기",
+        lines: &["format:cf-clear-selection", "format:cf-clear-sheet"],
+    },
+];
+
+/// The submenu a token of [`CF_LINES`] stands for.
+pub fn cf_submenu(token: &str) -> Option<&'static CfSubmenu> {
+    CF_SUBMENUS.iter().find(|sub| sub.token == token)
+}
+
 /// The items of the 테마 submenu.
 pub const THEME_IDS: [&str; 3] = ["view:theme-system", "view:theme-light", "view:theme-dark"];
 
@@ -434,6 +570,7 @@ const FORMAT_SHEET: MenuSpec = menu(
         ALIGN,
         "format:wrap",
         BORDER,
+        CF,
         "format:cell-format",
     ],
 );
@@ -779,6 +916,20 @@ pub fn layout(kind: MenuKind) -> &'static [&'static MenuSpec] {
     }
 }
 
+/// The ids of the 조건부 서식 submenu and of the submenus in it.
+#[cfg(test)]
+fn cf_ids() -> Vec<&'static str> {
+    let mut ids = Vec::new();
+    for line in CF_LINES {
+        match cf_submenu(line) {
+            Some(sub) => ids.extend(sub.lines.iter().filter(|id| **id != SEPARATOR)),
+            None if line != SEPARATOR => ids.push(line),
+            None => {}
+        }
+    }
+    ids
+}
+
 /// Every id of the table a kind's bar holds (the submenus and system items expanded; the quit
 /// item is not one of the table).
 #[cfg(test)]
@@ -792,6 +943,7 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 NUMFMT => ids.extend(NUMFMT_LINES.iter().filter(|line| **line != SEPARATOR)),
                 ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
+                CF => ids.extend(cf_ids()),
                 QUIT_ID => {}
                 line if line == SEPARATOR || line.starts_with('@') => {}
                 id => ids.push(id),

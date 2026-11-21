@@ -116,11 +116,11 @@ const _: () = assert!(ITEMS.len() <= ItemMask::CAPACITY);
 
 /// A set of indexes of [`ITEMS`] (the items a window cannot use).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ItemMask([u128; 2]);
+pub struct ItemMask([u128; 3]);
 
 impl ItemMask {
     /// How many indexes the set can hold.
-    pub const CAPACITY: usize = 2 * u128::BITS as usize;
+    pub const CAPACITY: usize = 3 * u128::BITS as usize;
 
     pub fn insert(&mut self, index: usize) {
         self.0[index / u128::BITS as usize] |= 1u128 << (index % u128::BITS as usize);

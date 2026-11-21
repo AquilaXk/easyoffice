@@ -315,12 +315,16 @@ test("the conditional formatting dialog builds rules from its fields and keeps t
   field(document, "sheet-cf-mid", false);
   userClick(document.getElementById("btn-sheet-cf-apply"));
   await flushAsyncTurns();
-  assert.deepEqual(rules.get("Sheet1").cf[1].stops.map((s) => s.k), ["min", "max"]);
+  assert.deepEqual(rules.get("Sheet1").cf.map((r) => r.t), ["scale", "cellIs"], "a new rule is the first of the list");
+  assert.deepEqual(rules.get("Sheet1").cf[0].stops.map((s) => s.k), ["min", "max"]);
 
+  userClick(document.getElementById("btn-sheet-cf-down"));
+  await flushAsyncTurns();
+  assert.deepEqual(rules.get("Sheet1").cf.map((r) => r.t), ["cellIs", "scale"]);
+  assert.equal(JSON.parse(rules.payloadFor("Sheet1")).cf[1].p, 2, "the list order is the priority");
   userClick(document.getElementById("btn-sheet-cf-up"));
   await flushAsyncTurns();
   assert.deepEqual(rules.get("Sheet1").cf.map((r) => r.t), ["scale", "cellIs"]);
-  assert.equal(JSON.parse(rules.payloadFor("Sheet1")).cf[1].p, 2, "the list order is the priority");
 
   userClick(document.getElementById("btn-sheet-cf-delete"));
   await flushAsyncTurns();

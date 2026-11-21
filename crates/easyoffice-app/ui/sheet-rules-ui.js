@@ -88,13 +88,18 @@
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const { $, val, checked, setVal, setChecked, bindColors, setSelect, openDialog, closeDialog, fillOptions, note } = kit;
 
-    // The current selection as "A1:B9" (1-based grid range -> sqref).
-    function selectionText() {
+    // The current selection as the boxes the rules use (1-based grid range -> zero-based boxes), and as "A1:B9".
+    function selectionBoxes() {
       const r = getRange();
-      return rules.formatRanges([{ row0: r.r1 - 1, col0: r.c1 - 1, row1: r.r2 - 1, col1: r.c2 - 1 }]);
+      return [{ row0: r.r1 - 1, col0: r.c1 - 1, row1: r.r2 - 1, col1: r.c2 - 1 }];
     }
 
-    // Applies `mutate` to a copy of the active sheet's rules as one undoable step.
+    function selectionText() {
+      return rules.formatRanges(selectionBoxes());
+    }
+
+    // Applies `mutate` to a copy of the active sheet's rules as one undoable step. A `mutate` that answers `false` changed
+    // nothing, and no step is made.
     function commitRules(mutate) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
@@ -102,10 +107,31 @@
         // Conditional formatting and validation are formats of the cells (PD-216).
         if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(sheet, "formatCells") === false) return false;
         const next = structuredClone(rules.get(sheet));
-        mutate(next);
+        if (mutate(next) === false) return false;
         const record = sheetHistory.begin({ parts: ["sheetRules"] });
         rules.set(sheet, next);
         sheetHistory.commit(record);
+        return true;
+      });
+    }
+
+    // A change that shows on the sheet before it is accepted (a dialog that previews): `beginStep` keeps the rules as they are and
+    // the undo record, `finishStep` puts the accepted rules in and pushes the record, so the whole change is one step and a
+    // dialog that is cancelled leaves none (the caller puts `before` back).
+    function beginStep() {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        const sheet = getActiveSheetName();
+        return { sheet, before: structuredClone(rules.get(sheet)), record: sheetHistory.begin({ parts: ["sheetRules"] }) };
+      });
+    }
+
+    function finishStep(step, next) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        // Rules the preview already put in are left as they are: setting them again drops the engine's answer for them, which the
+        // session does not send twice for the same rules.
+        if (JSON.stringify(rules.get(step.sheet)) !== JSON.stringify(next)) rules.set(step.sheet, next);
+        sheetHistory.commit(step.record);
         return true;
       });
     }
@@ -116,7 +142,15 @@
 
     // ---- conditional formatting dialog ---------------------------------------------------------
 
-    const cf = { selected: -1, ready: false };
+    // `scope` is what the list shows: the rules that meet the selection, or all of the sheet's.
+    const cf = { selected: -1, ready: false, scope: "selection" };
+    const presets = host.__EASYOFFICE_SHEET_CF_PRESETS__;
+    const previews = host.__EASYOFFICE_SHEET_CF_PREVIEW__;
+
+    // The indexes of the rules the list shows (indexes into the sheet's whole list, whose order is the priority).
+    function shownIndexes() {
+      return presets.rulesInScope(rules.get(getActiveSheetName()).cf, cf.scope, selectionBoxes(), rules.parseRanges);
+    }
 
     function describe(rule) {
       const kind = TYPE_LABELS[rule.t] || rule.t;
@@ -226,20 +260,34 @@
         const li = ev.target.closest?.("li[data-index]");
         if (li) selectCf(Number(li.dataset.index));
       });
+      $("sheet-cf-scope-select")?.addEventListener("change", () => {
+        cf.scope = val("sheet-cf-scope-select") === "sheet" ? "sheet" : "selection";
+        if (!shownIndexes().includes(cf.selected)) selectCf(-1);
+        else renderCfList();
+      });
     }
 
+    // One row per shown rule: its number in the whole list, what it says and what it looks like.
     function renderCfList() {
       const list = $("sheet-cf-list");
       if (!list) return;
       list.replaceChildren();
-      rules.get(getActiveSheetName()).cf.forEach((rule, index) => {
+      const all = rules.get(getActiveSheetName()).cf;
+      for (const index of shownIndexes()) {
         const li = document.createElement("li");
         li.dataset.index = String(index);
         li.setAttribute("role", "option");
         li.setAttribute("aria-selected", index === cf.selected ? "true" : "false");
-        li.textContent = index + 1 + ". " + describe(rule);
+        const text = document.createElement("span");
+        text.className = "cf-row-text";
+        text.textContent = index + 1 + ". " + describe(all[index]);
+        const preview = document.createElement("span");
+        preview.className = "cfp";
+        previews.paint(preview, all[index], rules.ICON_SETS, rules.iconMask);
+        li.appendChild(text);
+        li.appendChild(preview);
         list.appendChild(li);
-      });
+      }
     }
 
     function defaultCfForm() {
@@ -476,11 +524,14 @@
       await commitRules((next) => {
         if (index >= 0 && index < next.cf.length) next.cf[index] = rule;
         else {
-          next.cf.push(rule);
-          cf.selected = next.cf.length - 1;
+          // A new rule is the first of the list, as the spreadsheet program puts it (the highest priority).
+          next.cf.unshift(rule);
+          cf.selected = 0;
         }
       });
-      renderCfList();
+      // A rule outside what the list shows would vanish from it, so the list then shows the whole sheet.
+      if (cf.scope === "selection" && !shownIndexes().includes(cf.selected)) setSelect("sheet-cf-scope-select", "sheet");
+      else renderCfList();
       note("sheet-cf-status", "규칙을 적용했습니다.");
     }
 
@@ -491,11 +542,12 @@
       selectCf(-1);
     }
 
+    // Moves the selected rule past its neighbour in the list as it is shown (a rule the list hides stays where it is).
     async function moveCf(delta) {
       const index = cf.selected;
-      const to = index + delta;
-      const size = rules.get(getActiveSheetName()).cf.length;
-      if (index < 0 || to < 0 || to >= size) return;
+      const shown = shownIndexes();
+      const to = shown[shown.indexOf(index) + delta];
+      if (index < 0 || to === undefined) return;
       await commitRules((next) => {
         const [moved] = next.cf.splice(index, 1);
         next.cf.splice(to, 0, moved);
@@ -507,11 +559,16 @@
     // The two dialogs change formats of the cells, so a protected sheet opens neither without 셀 서식 (PD-216).
     const rulesBlocked = () => host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(getActiveSheetName(), "formatCells") === false;
 
-    function openConditionalFormatDialog() {
+    // Opens the manager on its rules for the selection. `draft` is a rule the form starts with (the quick dialogs' custom format
+    // and `기타 규칙…`); it is a new rule until 적용.
+    function openConditionalFormatDialog(draft) {
       if (rulesBlocked()) return;
       ensureCfControls();
       cf.selected = -1;
-      defaultCfForm();
+      cf.scope = "selection";
+      setSelect("sheet-cf-scope-select", "selection");
+      if (draft?.t) fillCfForm(draft);
+      else defaultCfForm();
       renderCfList();
       note("sheet-cf-status", "");
       return openDialog("sheet-cf-dialog");
@@ -713,6 +770,24 @@
       kit
     );
 
+    // The conditional formatting submenu of the 서식 menu and its quick dialogs (PD-281).
+    const quickUi = host.__EASYOFFICE_CREATE_SHEET_CF_QUICK_UI__({
+      document,
+      kit,
+      rules,
+      sheetDataStore,
+      getActiveSheetName,
+      getRange,
+      selectionBoxes,
+      selectionText,
+      commitRules,
+      beginStep,
+      finishStep,
+      isBlocked: rulesBlocked,
+      openManager: openConditionalFormatDialog,
+    });
+    quickUi.bind();
+
     // The dialogs answer their kind selects from the start, however they get opened.
     bindCfLayout();
     defaultCfForm();
@@ -721,6 +796,7 @@
 
     return {
       openConditionalFormatDialog,
+      runCfAction: quickUi.run,
       openDataValidationDialog,
       openPivotDialog: pivotUi.openPivotDialog,
       gateEntry,

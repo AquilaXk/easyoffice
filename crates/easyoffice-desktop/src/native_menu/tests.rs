@@ -57,7 +57,7 @@ fn page_actions_are_plain_names_with_an_optional_argument() {
         assert!(
             argument
                 .bytes()
-                .all(|b| b.is_ascii_lowercase() || b == b'-'),
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
             "{}",
             spec.action
         );
@@ -757,6 +757,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             layout::ALIGN,
             "format:wrap",
             layout::BORDER,
+            layout::CF,
             "format:cell-format",
         ]
     );
@@ -865,8 +866,56 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
                 && !id.starts_with("format:align-")
                 && !id.starts_with("format:valign-")
                 && !id.starts_with("format:border-")
+                && !id.starts_with("format:cf-")
                 && *id != "format:wrap"),
             "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn the_conditional_formatting_menu_has_the_submenus_and_items_of_the_page() {
+    let s = layout::SEPARATOR;
+    let top: Vec<&str> = layout::CF_LINES
+        .iter()
+        .map(|line| match layout::cf_submenu(line) {
+            Some(sub) => sub.title,
+            None if *line == s => s,
+            None => spec(line).label,
+        })
+        .collect();
+    assert_eq!(
+        top,
+        [
+            "셀 강조 규칙",
+            "상위/하위 규칙",
+            "데이터 막대",
+            "색조",
+            "아이콘 집합",
+            s,
+            "새 규칙…",
+            "규칙 지우기",
+            "규칙 관리…",
+        ]
+    );
+    let counts: Vec<usize> = layout::CF_SUBMENUS
+        .iter()
+        .map(|sub| sub.lines.iter().filter(|line| **line != s).count())
+        .collect();
+    assert_eq!(counts, [8, 7, 13, 13, 21, 2]);
+    // The id of an item is `format:cf-` and the argument of its page action, so the two cannot drift apart.
+    let ids = layout::table_ids(MenuKind::Sheet);
+    let cf: Vec<&str> = ids
+        .iter()
+        .copied()
+        .filter(|id| id.starts_with("format:cf-"))
+        .collect();
+    assert_eq!(cf.len(), 8 + 7 + 13 + 13 + 21 + 2 + 2);
+    for id in cf {
+        let argument = &id["format:cf-".len()..];
+        assert_eq!(
+            action_for(id),
+            Some(format!("sheet-cf:{argument}").as_str())
         );
     }
 }
@@ -885,7 +934,8 @@ fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
         assert!(
             action.starts_with("sheet-numfmt:")
                 || action.starts_with("sheet-act:")
-                || action.starts_with("sheet-look:"),
+                || action.starts_with("sheet-look:")
+                || action.starts_with("sheet-cf:"),
             "{id}"
         );
         let script = dispatch_script(id).unwrap();

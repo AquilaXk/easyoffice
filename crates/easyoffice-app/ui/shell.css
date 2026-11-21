@@ -250,6 +250,34 @@
 .tool-dialog .sheet-names-list { max-height: 200px; }
 .tool-dialog .sheet-names-list:empty::before { content: "이름 없음"; }
 .tool-dialog .sheet-names-list li > span { overflow: hidden; text-overflow: ellipsis; }
+/* The preview of a conditional formatting rule (sheet-cf-preview.js): a data bar, the colors of a scale, the icons of a set, or "123" in the look of the rule. Colors come from custom properties. */
+.cfp { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 72px; height: 20px; font-size: var(--font-size-sm); pointer-events: none; }
+.cfp:empty { display: none; }
+.cfp-seg { flex: 1 1 0; align-self: stretch; background: var(--cfp-color, transparent); }
+.cfp-seg[data-gradient="end"] { background: linear-gradient(to right, var(--cfp-color, transparent), transparent); }
+.cfp-seg[data-gradient="start"] { background: linear-gradient(to right, transparent, var(--cfp-color, transparent)); }
+.cfp-icon { flex: none; width: 18px; height: 18px; background: var(--cfp-color, transparent); -webkit-mask: var(--cfp-icon-mask, none) center / contain no-repeat; mask: var(--cfp-icon-mask, none) center / contain no-repeat; }
+.cfp[data-kind="icons"] { min-width: 0; }
+.cfp-text { display: flex; align-items: center; justify-content: center; align-self: stretch; width: 100%; background: var(--cfp-bg, transparent); color: var(--cfp-fg, var(--color-text)); }
+.cfp-bold { font-weight: 700; }
+.cfp-italic { font-style: italic; }
+.cfp-underline { text-decoration: underline; }
+.cfp-strike { text-decoration: line-through; }
+.cfp-underline.cfp-strike { text-decoration: underline line-through; }
+#sheet-cf-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tool-dialog .dialog-list .cf-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tool-dialog .dialog-list li .cfp { height: 18px; border: 1px solid var(--color-border-light); }
+#sheet-cfq-dialog .dialog-label[data-cfq-lead] { width: auto; min-width: 150px; }
+#sheet-cfq-dialog #sheet-cfq-sample { border: 1px solid var(--color-border-light); }
+/* The galleries of the 조건부 서식 submenu: tiles in titled groups. The tile's name is its tooltip and its hidden label. */
+.cfg-panel { max-width: none; max-height: calc(100vh - 16px); overflow-y: auto; }
+.cfg-title { padding: 4px 12px 2px; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.cfg-grid { display: flex; flex-wrap: wrap; gap: 4px; max-width: 244px; padding: 2px 8px 6px; }
+#sheet-cf-gallery-icons .cfg-grid { max-width: 340px; }
+.md-item.cfg-tile { width: auto; padding: 3px; border: 1px solid var(--color-border-light); }
+.cfg-tile .cfp { min-width: 56px; }
+.cfg-tile .cfp[data-kind="icons"] { min-width: 0; }
+.cfg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Last of the dialog display rules, so a hidden row, stack or control stays hidden. */
 .tool-dialog [hidden] { display: none; }
 /* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */

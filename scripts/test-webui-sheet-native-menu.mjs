@@ -14,7 +14,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 function sheetItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu/items.rs");
   const table = itemTable(source);
-  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
+  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste|cf)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
 }
 
 const selectorOf = ({ name, argument }) => `.md-item[data-${name}="${argument}"]`;
@@ -29,6 +29,7 @@ test("the table holds the 11 number-format items, the 41 row, column, hide, merg
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
   assert.equal(items.filter((i) => i.name === "sheet-act").length, 41);
+  assert.equal(items.filter((i) => i.name === "sheet-cf").length, 66, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, clear and manage rules");
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });
 
