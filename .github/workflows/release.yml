@@ -54,6 +54,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
       draft: ${{ steps.meta.outputs.draft }}
+      skip: ${{ steps.published.outputs.skip }}
     steps:
       # First step, before anything uses the value: the version ends up in a tag, a JSON build
       # override and a release title, so only a plain semantic version passes. A release that is
@@ -102,6 +103,45 @@ jobs:
             echo "draft=$DRAFT"
           } >> "$GITHUB_OUTPUT"
 
+      # A published release is final (PD-283): its packages, signatures and latest.json are what installed
+      # apps verify and update from, so nothing rebuilds or replaces them. QA publishing a draft creates the
+      # tag, and that tag push starts this workflow again on the commit the draft was built from; without
+      # this step it would build for over an hour and then upload over the public assets. `/releases/tags`
+      # lists published releases only: a draft or a missing release answers 404 and the run goes on as before.
+      # A tag push with a public release stops here (every later job is skipped); a manual run that would
+      # publish a public version fails at once instead of building first (publish=false builds stay allowed).
+      - name: Stop when this version's release is already public
+        id: published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -uo pipefail
+          ERR_FILE="$RUNNER_TEMP/release-lookup.err"
+          PUBLISHED=false
+          if DRAFT_FLAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .draft 2>"$ERR_FILE"); then
+            if [ "$DRAFT_FLAG" = false ]; then
+              PUBLISHED=true
+            fi
+          elif ! grep -q 'HTTP 404' "$ERR_FILE"; then
+            cat "$ERR_FILE" >&2
+            echo "::error::Could not read the release of $TAG"
+            exit 1
+          fi
+          SKIP=false
+          if [ "$PUBLISHED" = true ]; then
+            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INPUT_PUBLISH" = true ]; then
+              echo "::error::$TAG is already published; its assets are never replaced. Release a new version, or run with publish=false for a trial build"
+              exit 1
+            fi
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+              echo "::notice::$TAG is already published; nothing is rebuilt or uploaded"
+              SKIP=true
+            fi
+          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -120,6 +160,7 @@ jobs:
   release-macos:
     name: Build macOS Release Artifacts
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: macos-15
     # The universal build compiles two targets with thin LTO and one codegen unit (PD-276); it took 50 min before LTO.
     timeout-minutes: 120
@@ -205,6 +246,7 @@ jobs:
   build-windows-release:
     name: Build Windows x64 Installer & Release Artifacts
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -268,6 +310,7 @@ jobs:
   build-linux-release:
     name: Build ${{ matrix.platform }} Release Artifacts
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -322,7 +365,7 @@ jobs:
     name: Publish Combined GitHub Release
     needs: [prepare, release-macos, build-windows-release, build-linux-release]
     # publish=false (workflow_dispatch only) stops after the build jobs, leaving the Actions artifacts.
-    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    if: needs.prepare.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.publish)
     concurrency:
       group: release-publish-${{ needs.prepare.outputs.version }}
       cancel-in-progress: false
@@ -359,13 +402,36 @@ jobs:
       - name: Write the combined SHA-256 checksums
         run: node scripts/release-assets.mjs checksums release-assets
 
+      # The REST docs say a release create or update call fails (404, or 403 "Resource not accessible by
+      # integration") when its target commit adds or changes files under .github/workflows relative to the
+      # default branch, and that the Actions GITHUB_TOKEN cannot be authorized for it. The target here is the
+      # commit this run was started on, and a build takes over an hour, so a workflow change pushed to main
+      # in the meantime puts the target in that state. This step only records the evidence (it never writes
+      # and never prints the token): the status and the permission headers of a release read, and the
+      # workflow files that differ between the target and the default branch (PD-283).
+      - name: Record the token's release access and the workflow drift of the target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          gh api -i "repos/$GITHUB_REPOSITORY/releases?per_page=1" 2>&1 | grep -iE '^(HTTP/|x-accepted-github-permissions:|x-github-request-id:)' || true
+          DEFAULT_BRANCH=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch || true)
+          if [ -n "$DEFAULT_BRANCH" ]; then
+            DRIFT=$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/${TARGET_SHA}...${DEFAULT_BRANCH}" --jq '.files[]? | select(.filename | startswith(".github/workflows/")) | .filename' || true)
+            if [ -n "$DRIFT" ]; then
+              echo "::warning::The release target $TARGET_SHA differs from $DEFAULT_BRANCH in workflow files, so the release write may be refused with 403 (docs/DEVELOPMENT.md has the manual steps): $(echo "$DRIFT" | tr '\n' ' ')"
+            fi
+          fi
+
       # A draft stays invisible to /releases/latest, so neither the download links, the update notice nor
       # latest.json (PD-103) point at it until QA publishes it; a pre-release version (1.2.3-rc.1) is
-      # flagged so /releases/latest never serves it either. A rerun on an existing release only replaces
-      # its assets (a draft also takes the notes file again; a published release keeps its body); it never turns a published release back into a draft. The release's target commit must
-      # match the assets (PD-146): a rerun on a draft (no tag yet) moves the target to this commit and drops
-      # uploaded files this run does not have; a published release (its tag exists) keeps its commit, so a
-      # rerun from another commit fails and only the same commit may replace the assets.
+      # flagged so /releases/latest never serves it either. A rerun only replaces the assets of a draft
+      # (it also takes the notes file again); it never turns a published release back into a draft. The
+      # release's target commit must match the assets (PD-146): a rerun on a draft (no tag yet) moves the
+      # target to this commit and drops uploaded files this run does not have. A published release is
+      # final (PD-283): its tag, body and assets are never written again, so a run that finds one fails
+      # before any upload. The first write of each kind runs through `gh_logged`, which keeps only the
+      # status and the permission and request-id headers of the API exchange for the next failure analysis.
       - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -375,28 +441,34 @@ jobs:
           TARGET_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          gh_logged() {
+            local LOG STATUS=0
+            LOG=$(mktemp)
+            GH_DEBUG=api gh "$@" 2>"$LOG" || STATUS=$?
+            grep -iE '^(< HTTP/|< x-accepted-github-permissions:|< x-github-request-id:)' "$LOG" >&2 || true
+            if [ "$STATUS" -ne 0 ]; then
+              tail -n 2 "$LOG" >&2
+            fi
+            return "$STATUS"
+          }
           FILES=(release-assets/*)
           # Hand-written notes (docs/releases/v<version>.md) win over generated ones.
           NOTES_FILE="docs/releases/v${VERSION}.md"
           if IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
-            if [ "$IS_DRAFT" = true ]; then
-              EDIT_FLAGS=(--target "$TARGET_SHA" --repo "$GITHUB_REPOSITORY")
-              if [ -f "$NOTES_FILE" ]; then
-                EDIT_FLAGS+=(--notes-file "$NOTES_FILE")
-              fi
-              gh release edit "$TAG" "${EDIT_FLAGS[@]}"
-              gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | while read -r NAME; do
-                if [ ! -e "release-assets/$NAME" ]; then
-                  gh release delete-asset "$TAG" "$NAME" --yes --repo "$GITHUB_REPOSITORY"
-                fi
-              done
-            else
-              TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
-              if [ "$TAG_SHA" != "$TARGET_SHA" ]; then
-                echo "::error::$TAG is already published at $TAG_SHA; refusing to replace its assets from $TARGET_SHA"
-                exit 1
-              fi
+            if [ "$IS_DRAFT" != true ]; then
+              echo "::error::$TAG is already published; its assets are never replaced (PD-283)"
+              exit 1
             fi
+            EDIT_FLAGS=(--target "$TARGET_SHA" --repo "$GITHUB_REPOSITORY")
+            if [ -f "$NOTES_FILE" ]; then
+              EDIT_FLAGS+=(--notes-file "$NOTES_FILE")
+            fi
+            gh_logged release edit "$TAG" "${EDIT_FLAGS[@]}"
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | while read -r NAME; do
+              if [ ! -e "release-assets/$NAME" ]; then
+                gh release delete-asset "$TAG" "$NAME" --yes --repo "$GITHUB_REPOSITORY"
+              fi
+            done
             gh release upload "$TAG" "${FILES[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             if [ "$DRAFT" = false ]; then
               gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
@@ -414,5 +486,5 @@ jobs:
             if [[ "$VERSION" == *-* ]]; then
               FLAGS+=(--prerelease)
             fi
-            gh release create "$TAG" "${FILES[@]}" "${FLAGS[@]}"
+            gh_logged release create "$TAG" "${FILES[@]}" "${FLAGS[@]}"
           fi
