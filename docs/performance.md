@@ -495,7 +495,7 @@ node scripts/bench-webui.mjs --app <easyoffice-app> --chrome <브라우저> --ui
 - 같은 기기에서 이전 커밋과 이번 커밋을 번갈아 재지 않았다. 이전 값과의 차이를 코드 변경의 효과로 읽을 수 없다.
 - Windows·Linux는 못 잼.
 
-## 8. 실행 파일·번들·설치본 크기 (2026-11-22, PD-295)
+## 8. 실행 파일·번들·설치본 크기 (2026-11-22, PD-293)
 
 macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38fda`. 분석 원본은 `cargo bloat`(크레이트·함수), `size -m`(구간), 자산별 brotli 크기(품질 11, tauri 릴리스와 같은 설정)다.
 
@@ -541,7 +541,7 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 - universal이라 UI 자산(글꼴 20.2 MB, wasm 3.1 MB)이 두 아키텍처 조각에 한 번씩, 합쳐서 두 번 들어간다. 글꼴은 압축이 안 되므로 dmg에서 약 40 MB가 글꼴이다.
 - Quick Look 확장 둘이 각각 rhwp 전체를 정적으로 묶는다(`.text` 7.3 MB 중 rhwp 2.5 MB). 확장마다 아키텍처 둘이라 조각이 4개, 합계 58.5 MB다.
 
-### 8.4 적용한 것 (PD-295)
+### 8.4 적용한 것 (PD-293)
 
 | 변경 | 전 | 후 | 차이 |
 |---|---|---|---|
@@ -572,5 +572,5 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 
 - 크기는 macOS arm64만 쟀다. 다른 OS의 실행 파일 구성은 설치본 크기와 deb 안의 파일 크기로만 짐작했다.
 - `cargo bloat`의 크레이트별 값은 심볼 이름으로 나눈 추정이다(제네릭 인스턴스는 호출한 쪽이 아니라 정의한 크레이트로 센다).
-- Quick Look 크레이트 빌드가 이 기기에서 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽었다. 같은 `strip = "debuginfo"` 프로필로 다시 여덟 번(문자 코덱 크레이트 하나만 일곱 번, 전체 한 번) 빌드했을 때는 모두 성공했고 원인은 확인하지 못했다. 방어로 두 `Cargo.toml`에 `[profile.release.build-override] strip = "none"`을 뒀다(PD-295). 8.4절의 Quick Look 값은 첫 실패 뒤 `CARGO_PROFILE_RELEASE_STRIP=none`으로 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과다.
+- Quick Look 크레이트 빌드가 이 기기에서 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽었다. 같은 `strip = "debuginfo"` 프로필로 다시 여덟 번(문자 코덱 크레이트 하나만 일곱 번, 전체 한 번) 빌드했을 때는 모두 성공했고 원인은 확인하지 못했다. 방어로 두 `Cargo.toml`에 `[profile.release.build-override] strip = "none"`을 뒀다(PD-293). 8.4절의 Quick Look 값은 첫 실패 뒤 `CARGO_PROFILE_RELEASE_STRIP=none`으로 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과다.
 

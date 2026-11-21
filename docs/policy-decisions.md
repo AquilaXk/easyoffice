@@ -5190,11 +5190,11 @@
 - **Verified by** `cargo test -p easyoffice-app --test sheet_getpivotdata_payload` 16개(답 11종, 피벗 없음, 없는 시트, 읽을 수 없는 원본, 시트 접두 원본, 세션의 만들기·원본 변경·지우기, 디코드한 파일의 피벗, 시트당·전체·세션 개수 상한은 요청 거부, 한글 긴 이름·긴 필터 항목·긴 값 이름·긴 원본 시트·축·값·필터 항목 초과·바이트 초과 피벗 8종은 그 피벗만 빠지고 다른 식이 계산됨, 열 번호 밖, 시트 전체 원본), `cargo test -p easyoffice-sheet --test sheet_getpivotdata` 새 시험 2개(등록 바이트 한도와 이전 등록 유지, 원본에 없는 열의 필터는 `#REF!`이고 패닉 없음), `node --test scripts/test-webui-sheet-getpivotdata.mjs` 6개(이름·필드 이름·슬라이서를 보내지 않음, 값 필드 없는 피벗은 보내지 않음, 긴 이름이 있어도 다른 식의 값), 실제 WebKit 2단계(피벗을 만들고 `GETPIVOTDATA` 6개의 값, 원본을 바꾸고 새로 고쳐 값 갱신, 피벗 삭제 뒤 `#REF!`, 한글 171자 이름과 300자 필터 항목이 든 피벗만 `#REF!`이고 `=1+2`는 3). 전체 검증: `node --test scripts/test-*.mjs` 2,138개 중 2,137개 통과·실패 0·건너뜀 1, WebKit 31단계 통과, `cargo test --workspace --exclude easyoffice-desktop` 3,181개 통과·실패 0·무시 76, `cargo test -p easyoffice-desktop` 694개 통과·실패 0·무시 9, clippy `-D warnings`(데스크톱 포함), fmt, `--self-test` 통과.
 - **Revisit when** 새로 고치기 전까지 옛 값을 보이게 맞출 때, 피벗 정의를 세션에 한 번에 보내야 할 만큼 시트가 많아질 때.
 
-## PD-295. 릴리스 실행 파일과 Quick Look 확장에서 심볼 표를 제거함
+## PD-293. 릴리스 실행 파일과 Quick Look 확장에서 심볼 표를 제거함
 
 - **Status** Implemented (QA 요청 2026-11-22, 경량화). 루트 `Cargo.toml` `[profile.release]`, `scripts/build-quicklook-macos.mjs`. 크기 분석은 `docs/performance.md` 8장.
 - **Context** PD-276 뒤에도 데스크톱 64.1 MB, 엔진 CLI 13.8 MB였고 macOS universal dmg는 111 MB였다. 분석(8장)에서 코드는 함수 하나로 줄일 곳이 없이 평평했고(가장 큰 함수 190 KiB), 크기의 큰 몫은 임베드한 글꼴 20.2 MB와 아키텍처 중복이었다. 이 둘은 글꼴·릴리스 구성을 건드려야 해서 제안으로 남겼다. 코드가 아닌 쪽에서 동작을 안 바꾸고 줄일 수 있는 것은 심볼 표뿐이었다(링크 편집 구간 5.4 MB, Quick Look 조각은 4 MB).
-- **Decision (`PD-295`)**
+- **Decision (`PD-293`)**
   1. 릴리스 프로필 `strip = "debuginfo"`를 `"symbols"`로 바꾼다. `panic = "unwind"`, thin LTO, 코드 단위 1은 그대로다.
   2. Quick Look 확장은 `swiftc`로 묶은 조각마다 `xcrun strip`을 한 번 돌린 뒤 `lipo`·`codesign`한다. 서명은 `strip` 뒤에 하므로 바뀐 파일에 붙는다.
   3. `[profile.release.build-override] strip = "none"`을 루트 `Cargo.toml`과 `apps/quicklook/rust/Cargo.toml`에 둔다. 릴리스 `strip`은 빌드 스크립트와 proc-macro dylib에도 걸리는데(`-v` 로그에서 proc-macro 컴파일에 `-C strip=debuginfo`가 붙는 것을 확인했다), 이 파일들은 컴파일러 안에서 돌 뿐 배포하지 않으므로 뺄 이유가 없다. 개발 기기에서 Quick Look 빌드가 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽은 것(같은 조건 재시도 8번은 성공, 원인 미확인)을 막으려는 방어다. 배포 파일의 크기는 그대로다.

@@ -40,7 +40,7 @@ lto = true
 codegen-units = 1
 strip = "debuginfo"
 
-# PD-295: build scripts and proc-macro dylibs stay unstripped (see the root `Cargo.toml`).
+# PD-293: build scripts and proc-macro dylibs stay unstripped (see the root `Cargo.toml`).
 [profile.release.build-override]
 strip = "none"
 
