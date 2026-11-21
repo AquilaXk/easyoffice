@@ -106,6 +106,19 @@
     return rows;
   }
 
+  // Index of `row` in the ascending list `rows`, -1 when it is not there (binary search).
+  function indexOfRow(rows, row) {
+    let lo = 0;
+    let hi = rows.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid] === row) return mid;
+      if (rows[mid] < row) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return -1;
+  }
+
   function createSheetClipboard(api) {
     const { grid, isFormulaStr } = api;
     const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -150,7 +163,20 @@
       const widths = [];
       for (let c = range.c1; c <= range.c2; c += 1) widths.push(grid.colHidden?.(c) ? 0 : grid.colWidth(c));
       const text = cells.map((line) => line.map((cell) => quoteField(cell ? cell.formula || cell.value : "")).join("\t")).join("\n");
-      return { text, rows, c1: range.c1, cols, cells, widths };
+      return { text, rows, c1: range.c1, cols, cells, widths, merges: mergesOfCopy(range, rows) };
+    }
+
+    // The merges inside the copied range, as offsets in the copied block; a merge that a filtered-out row cuts is left out.
+    function mergesOfCopy(range, rows) {
+      const found = layout?.mergesIn(sheetName(), range.r1, range.c1, range.r2, range.c2) || [];
+      const out = [];
+      for (const m of found) {
+        if (m.r1 < range.r1 || m.r2 > range.r2 || m.c1 < range.c1 || m.c2 > range.c2) continue;
+        const first = indexOfRow(rows, m.r1);
+        if (first < 0 || rows[first + (m.r2 - m.r1)] !== m.r2) continue;
+        out.push({ r1: first, c1: m.c1 - range.c1, r2: first + (m.r2 - m.r1), c2: m.c2 - range.c1 });
+      }
+      return out;
     }
 
     // Moves one end of a reference; null when it leaves the grid.
@@ -278,12 +304,9 @@
         say("붙일 " + (mode === "widths" ? "열 너비" : "서식") + " 없음");
         return Promise.resolve(null);
       }
-      const single = snap.cells.length === 1 && snap.cells[0].length === 1;
-      const rowsN = transpose ? snap.cols : snap.cells.length;
-      const colsN = transpose ? snap.cells.length : snap.cols;
-      const spread = single && (range.r2 > range.r1 || range.c2 > range.c1);
-      const pasteRows = spread ? range.r2 - range.r1 + 1 : rowsN;
-      const pasteCols = spread ? range.c2 - range.c1 + 1 : colsN;
+      const area = core.areaOf(snap, transpose, target);
+      const pasteRows = area.r2 - area.r1 + 1;
+      const pasteCols = area.c2 - area.c1 + 1;
       if (cutsMerge(target, pasteRows, pasteCols)) {
         say("병합 셀과 겹침");
         return Promise.resolve(null);
@@ -295,7 +318,8 @@
       }
       const extra = plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "";
       const label = mode === "all" && !transpose ? "붙여넣기" : "골라 붙이기";
-      return api.applyCellEdits(plan.edits, label + extra, plan.widths);
+      const merges = core.planMerges({ snap, mode, transpose, target, grid });
+      return api.applyCellEdits(plan.edits, label + extra, plan.widths, merges);
     }
 
     function remember(snap) {

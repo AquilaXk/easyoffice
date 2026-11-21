@@ -79,7 +79,7 @@
       getEntry: (ref) => api.getEntry(ref),
       getSheetName: () => api.getSheetName(),
       feedback,
-      applyCellEdits: (edits, label, widths) => api.applyCellEdits(edits, label, widths),
+      applyCellEdits: (edits, label, widths, merges) => api.applyCellEdits(edits, label, widths, merges),
       clearExisting: (range, dropLinks) => api.clearExisting(range, dropLinks),
     });
     const pasteUi = host.__EASYOFFICE_CREATE_SHEET_PASTE_UI__({

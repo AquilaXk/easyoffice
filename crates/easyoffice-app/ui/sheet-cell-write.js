@@ -5,7 +5,8 @@
   // operation. An edit is `{ ref, value, formula }` plus an optional `style`: absent keeps the
   // cell's style, null removes it, an object replaces it; an optional `link` (PD-218) replaces the cell's
   // hyperlink (`null` removes it), and an edit without one leaves it. `widths` ({ column: px }) are applied in
-  // the same undo step.
+  // the same undo step. `merges` ({ clear, add }, the paste of formatted cells): the merges inside `clear` ({ r1, c1, r2, c2 })
+  // go and the ranges of `add` are merged, in that step too.
 
   function createSheetCellWriter(deps) {
     const {
@@ -79,8 +80,18 @@
       }
     }
 
-    function applyCellEdits(edits, label, widths) {
+    // The merges of a paste: the old ones inside the area go, the pasted ones are added (the layout replaces what they overlap).
+    function writeMerges(merges, sheet) {
+      const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const { clear, add } = merges;
+      layout.removeMerges(sheet, clear.r1, clear.c1, clear.r2, clear.c2);
+      for (const m of add) layout.addMerge(sheet, m.r1, m.c1, m.r2, m.c2);
+      grid.layoutChanged();
+    }
+
+    function applyCellEdits(edits, label, widths, merges) {
       const widthCols = widths ? Object.keys(widths) : [];
+      const mergesChange = Boolean(merges) && (merges.add.length > 0 || host.__EASYOFFICE_SHEET_LAYOUT__.mergesIn(getActiveSheetName(), merges.clear.r1, merges.clear.c1, merges.clear.r2, merges.clear.c2).length > 0);
       if (edits.length === 0 && widthCols.length === 0) return Promise.resolve(false);
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
@@ -88,10 +99,12 @@
         const map = snapshotDomSheetCells();
         sheetDataStore[curSheet] = map;
         if (!editsAllowed(edits, curSheet, map, widthCols.length)) return false;
-        const change = sheetHistory.begin({ refs: edits.map((edit) => edit.ref), parts: widthCols.length > 0 ? ["sheetColumnWidths"] : [] });
+        const parts = [...(widthCols.length > 0 ? ["sheetColumnWidths"] : []), ...(mergesChange ? ["sheetLayout"] : [])];
+        const change = sheetHistory.begin({ refs: edits.map((edit) => edit.ref), parts });
         const protectedSheet = Boolean(host.__EASYOFFICE_SHEET_PROTECT__?.isOn(curSheet));
         for (const edit of edits) writeEdit(map, edit, curSheet, protectedSheet);
         for (const col of widthCols) grid.applyColWidth(Number(col), widths[col]);
+        if (mergesChange) writeMerges(merges, curSheet);
         sheetHistory.commit(change);
         // A table next to what was written grows over it in a step of its own (PD-231).
         host.__EASYOFFICE_SHEET_TABLE_BAR__?.expandAfter(curSheet, edits.filter((e) => e.value !== "" || e.formula !== "").map((e) => e.ref));
