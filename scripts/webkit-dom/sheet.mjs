@@ -51,6 +51,11 @@ async function drawOutlines(page) {
     dv: [],
   }), RED_EDGE);
   await page.click(td("H14"));
+  // The rule's edges arrive with the engine's answer, after the call returns; sample only once B7 and B9 carry them.
+  await page.waitForFunction(() => ["B7", "B9"].every((ref) => {
+    const el = document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+    return el && getComputedStyle(el).borderBottomColor === "rgb(255, 0, 0)";
+  }));
 }
 
 // Where the four lines of `outline` run in device pixels (the last device row or column of each line, in the middle of
