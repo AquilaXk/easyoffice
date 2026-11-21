@@ -138,6 +138,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-media-ui.js",
     "sheet-names-ui.js",
     "sheet-names.js",
+    "sheet-nav.js",
     "sheet-note-ui.js",
     "sheet-numfmt-display.js",
     "sheet-numfmt-ui.js",

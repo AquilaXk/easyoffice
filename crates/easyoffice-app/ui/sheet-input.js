@@ -48,23 +48,23 @@
   //   edit   - started by F2 / double-click. Left/Right move the caret; Up/Down commit and move.
   // Enter commits and moves down (Shift+Enter up), Tab commits and moves right (Shift+Tab left),
   // Esc cancels and restores. Keys pressed while an IME composes are never interpreted.
-  // Ctrl+Arrow: jump to the edge of the contiguous data block (or the next block).
-  function jumpLimit(dr, dc, ext) {
-    if (dr > 0) return ext.dataRows;
-    return dc > 0 ? ext.dataCols : 0;
-  }
-
-  function isPastData(dr, dc, nr, nc, limit) {
-    if (dr > 0) return nr > limit;
-    return dc > 0 && nc > limit;
-  }
+  // Ctrl+Arrow, Enter and Tab inside a range, Home, End and the page keys are the rules of sheet-nav.js (PD-280).
 
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
     // Sheet protection (PD-216); absent in pages that do not load it.
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
+    const nav = host.__EASYOFFICE_SHEET_NAV__;
     // `axis`: "row" or "col" while a whole row or column header is selected, else null.
-    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null };
+    // `span`: the range Enter and Tab walk the active cell through (it is not the corners ar..cr then), else null.
+    // `tabFrom`: the cell the current row of Tabs started from, which the Enter after it returns to the column of.
+    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, span: null, tabFrom: null };
+    // A selection that is set (not walked) drops the walk and the Tab row.
+    const resetNav = (axis) => {
+      sel.axis = axis;
+      sel.span = null;
+      sel.tabFrom = null;
+    };
     const bound = new WeakSet();
     let delegatesBound = false;
     let drag = null;
@@ -148,6 +148,7 @@
     }
 
     function getRange() {
+      if (sel.span) return { ...sel.span };
       return {
         r1: Math.min(sel.ar, sel.cr),
         r2: Math.max(sel.ar, sel.cr),
@@ -314,7 +315,7 @@
     function updateSelection(cellRef) {
       const p = grid.parseRef(cellRef) || { row: 1, col: 1 };
       if (p.row !== sel.ar || p.col !== sel.ac) {
-        sel.axis = null;
+        resetNav(null);
         sel.ar = sel.cr = p.row;
         sel.ac = sel.cc = p.col;
         grid.ensureVisible(p.row, p.col);
@@ -355,7 +356,7 @@
         r = merged.r1;
         c = merged.c1;
       }
-      sel.axis = null;
+      resetNav(null);
       if (extend) {
         sel.cr = r;
         sel.cc = c;
@@ -370,7 +371,7 @@
 
     // Selects a range (the cells of a fill) with its first cell as the anchor.
     function setRange(rg) {
-      sel.axis = null;
+      resetNav(null);
       sel.ar = rg.r1;
       sel.ac = rg.c1;
       sel.cr = rg.r2;
@@ -382,7 +383,7 @@
       const last = { row: grid.MAX_ROWS, col: grid.MAX_COLS };
       Object.assign(sel, s);
       const [r1, r2, c1, c2] = [Math.min(s.ar, s.cr), Math.max(s.ar, s.cr), Math.min(s.ac, s.cc), Math.max(s.ac, s.cc)];
-      sel.axis = c1 === 1 && c2 >= last.col ? "row" : r1 === 1 && r2 >= last.row ? "col" : null;
+      resetNav(c1 === 1 && c2 >= last.col ? "row" : r1 === 1 && r2 >= last.row ? "col" : null);
       refreshChrome();
     }
 
@@ -395,7 +396,7 @@
       commitIfEditing();
       setRange({ r1, c1, r2: clamp(rg.r2, r1, grid.MAX_ROWS), c2: clamp(rg.c2, c1, grid.MAX_COLS) });
       const whole = rg.c1 === 1 && rg.c2 >= grid.MAX_COLS ? "row" : rg.r1 === 1 && rg.r2 >= grid.MAX_ROWS ? "col" : null;
-      sel.axis = whole;
+      resetNav(whole);
       grid.ensureVisible(r1, c1);
       focusAnchor();
       refreshChrome();
@@ -417,12 +418,12 @@
         sel.ac = 1;
         sel.cc = grid.MAX_COLS;
       }
-      sel.axis = axis;
+      resetNav(axis);
       refreshChrome();
     }
 
     function selectAll() {
-      sel.axis = null;
+      resetNav(null);
       const ext = api.getExtent();
       sel.ar = 1;
       sel.ac = 1;
@@ -435,38 +436,19 @@
       return rr >= 1 && cc >= 1 && rr <= grid.MAX_ROWS && cc <= grid.MAX_COLS;
     }
 
-    // Ctrl+Arrow from a populated run: walk to the last populated cell of that run.
-    function jumpAlongData(nr, nc, dr, dc) {
-      let r = nr;
-      let c = nc;
-      while (inGridBounds(r + dr, c + dc) && api.hasValue(r + dr, c + dc)) {
-        r += dr;
-        c += dc;
-      }
-      return { r, c };
-    }
-
-    // Ctrl+Arrow across a gap: stop at the next populated cell or at the sheet edge.
-    function jumpAcrossGap(from, dr, dc, limit) {
-      let nr = from.r + dr;
-      let nc = from.c + dc;
-      while (inGridBounds(nr, nc) && !api.hasValue(nr, nc)) {
-        if (isPastData(dr, dc, nr, nc, limit)) {
-          return { r: dr > 0 ? grid.MAX_ROWS : from.r, c: dc > 0 ? grid.MAX_COLS : from.c };
-        }
-        nr += dr;
-        nc += dc;
-      }
-      if (!inGridBounds(nr, nc)) return { r: dr < 0 ? 1 : from.r, c: dc < 0 ? 1 : from.c };
-      return { r: nr, c: nc };
-    }
-
-    function jumpTarget(dr, dc, from) {
-      if (!inGridBounds(from.r + dr, from.c + dc)) return from;
-      const nr = from.r + dr;
-      const nc = from.c + dc;
-      if (api.hasValue(from.r, from.c) && api.hasValue(nr, nc)) return jumpAlongData(nr, nc, dr, dc);
-      return jumpAcrossGap(from, dr, dc, jumpLimit(dr, dc, api.getExtent()));
+    // The sheet as the movement rules of sheet-nav.js read it.
+    function navView() {
+      const ext = api.getExtent();
+      return {
+        maxRows: grid.MAX_ROWS,
+        maxCols: grid.MAX_COLS,
+        dataRows: ext.dataRows,
+        dataCols: ext.dataCols,
+        hasValue: (r, c) => api.hasValue(r, c),
+        mergeAt: (r, c) => grid.mergeAt?.(r, c) || null,
+        rowHidden: (r) => Boolean(grid.rowHidden?.(r)),
+        colHidden: (c) => Boolean(grid.colHidden?.(c)),
+      };
     }
 
     // The next cell in direction `(dr, dc)` that may be selected: a protected sheet that keeps locked (or unlocked)
@@ -484,35 +466,44 @@
 
     // The cell a pointed reference moves to from `from`: a jump to the edge of the data, or a step over the hidden rows and columns.
     function stepFrom(from, dr, dc, jump) {
-      if (jump) return jumpTarget(dr, dc, from);
-      let nr = from.r + dr;
-      let nc = from.c + dc;
-      while (dr && inGridBounds(nr, nc) && grid.rowHidden?.(nr)) nr += dr;
-      while (dc && inGridBounds(nr, nc) && grid.colHidden?.(nc)) nc += dc;
-      return { r: clamp(nr, 1, grid.MAX_ROWS), c: clamp(nc, 1, grid.MAX_COLS) };
+      return jump ? nav.jump(navView(), from, dr, dc) : nav.step(navView(), from, dr, dc);
     }
 
+    // Arrow keys, with Ctrl (`jump`) to the edge of the data and with Shift (`extend`) from the moving end of the range.
+    // A walk through the range (Enter, Tab) ends here: the range is then reshaped from the active cell.
     function moveBy(dr, dc, opts) {
       const { extend, jump } = opts;
-      if (jump) {
-        const t = jumpTarget(dr, dc, { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac });
-        select(t.r, t.c, extend);
+      if (sel.span) {
+        sel.span = null;
+        sel.cr = sel.ar;
+        sel.cc = sel.ac;
+      }
+      const to = stepFrom({ r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac }, dr, dc, jump);
+      const next = extend || jump ? to : stepSelectable(to.r, to.c, dr, dc);
+      select(next.r, next.c, extend);
+    }
+
+    // Enter and Tab (`dr`, `dc` is one of the four steps). With several cells selected the active cell walks through
+    // them and the range stays; a row of Tabs sends the Enter after it back to the column it started in.
+    function walk(dr, dc) {
+      const range = getRange();
+      const view = navView();
+      const at = { r: sel.ar, c: sel.ac };
+      if (range.r1 !== range.r2 || range.c1 !== range.c2) {
+        const next = nav.cycle(view, range, at, dr, dc);
+        Object.assign(sel, { ar: next.r, ac: next.c, cr: next.r, cc: next.c, span: range, tabFrom: null });
+        grid.ensureVisible(next.r, next.c);
+        focusAnchor();
+        refreshChrome();
         return;
       }
-      let baseR = extend ? sel.cr : sel.ar;
-      let baseC = extend ? sel.cc : sel.ac;
-      // Leave a merged range past its far edge, and step over hidden rows and columns.
-      const merged = grid.mergeAt?.(baseR, baseC);
-      if (merged) {
-        if (dr > 0) baseR = merged.r2;
-        if (dc > 0) baseC = merged.c2;
-      }
-      let nr = baseR + dr;
-      let nc = baseC + dc;
-      while (dr && inGridBounds(nr, nc) && grid.rowHidden?.(nr)) nr += dr;
-      while (dc && inGridBounds(nr, nc) && grid.colHidden?.(nc)) nc += dc;
-      if (!extend) ({ r: nr, c: nc } = stepSelectable(nr, nc, dr, dc));
-      select(nr, nc, extend);
+      const tabbing = dc > 0 && !dr;
+      const origin = tabbing ? sel.tabFrom || at : null;
+      const base = dr > 0 && sel.tabFrom ? sel.tabFrom : at;
+      const to = nav.step(view, base, dr, dc);
+      const next = stepSelectable(to.r, to.c, dr, dc);
+      select(next.r, next.c, false);
+      sel.tabFrom = origin;
     }
 
     // ---- edit modes ------------------------------------------------------------------------
@@ -687,11 +678,7 @@
       if (editing && st.mode === "edit" && dc !== 0) return;
       ev.preventDefault();
       const mod = ev.ctrlKey || ev.metaKey;
-      if (editing) {
-        select((sel.ar + dr), sel.ac + dc, false);
-        return;
-      }
-      moveBy(dr, dc, { extend: ev.shiftKey, jump: mod });
+      moveBy(dr, dc, { extend: !editing && ev.shiftKey, jump: !editing && mod });
     }
 
     function handleEnterTab(ev, editing) {
@@ -699,32 +686,35 @@
       if (editing) commitIfEditing();
       const dr = ev.key === "Enter" ? (ev.shiftKey ? -1 : 1) : 0;
       const dc = ev.key === "Enter" ? 0 : ev.shiftKey ? -1 : 1;
-      const next = stepSelectable(sel.ar + dr, sel.ac + dc, dr, dc);
-      select(next.r, next.c, false);
+      walk(dr, dc);
     }
 
+    // The columns one screen to the side holds (Alt+PageDown).
+    function visibleColSpan() {
+      const vp = viewport();
+      if (!(vp?.clientWidth > 0)) return 8;
+      const left = vp.scrollLeft || 0;
+      return Math.max(1, grid.colAtX(left + vp.clientWidth - grid.ROW_HEAD_W) - grid.colAtX(left) - 1);
+    }
+
+    // Home, Ctrl+End and the page keys; with Shift they move the end of the range the active cell started.
     function handleNavKey(ev, editing) {
       const mod = ev.ctrlKey || ev.metaKey;
       if (editing) return false;
-      const base = ev.shiftKey;
-      if (ev.key === "Home") {
-        ev.preventDefault();
-        select(mod ? 1 : sel.ar, 1, base);
-        return true;
+      const extend = ev.shiftKey;
+      const view = navView();
+      const from = { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac };
+      let to = null;
+      if (ev.key === "Home") to = nav.home(view, { r: sel.ar, c: sel.ac }, mod);
+      else if (ev.key === "End" && mod) to = nav.end(view);
+      else if ((ev.key === "PageDown" || ev.key === "PageUp") && !mod) {
+        const sign = ev.key === "PageDown" ? 1 : -1;
+        to = ev.altKey ? nav.page(view, from, 0, sign, visibleColSpan()) : nav.page(view, from, sign, 0, grid.visibleRowSpan());
       }
-      if (ev.key === "End" && mod) {
-        ev.preventDefault();
-        const ext = api.getExtent();
-        select(Math.max(1, ext.dataRows), Math.max(1, ext.dataCols), base);
-        return true;
-      }
-      if (ev.key === "PageDown" || ev.key === "PageUp") {
-        ev.preventDefault();
-        const span = grid.visibleRowSpan() * (ev.key === "PageDown" ? 1 : -1);
-        select((base ? sel.cr : sel.ar) + span, base ? sel.cc : sel.ac, base);
-        return true;
-      }
-      return false;
+      if (!to) return false;
+      ev.preventDefault();
+      select(to.r, to.c, extend);
+      return true;
     }
 
     function onKeydown(ev) {
