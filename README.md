@@ -78,6 +78,10 @@ cargo run -p easyoffice-app -- --self-test                             # 엔진 
 
 Rust는 `.github/rust-toolchain-version`의 1.93.1을 씁니다. 검증 명령 전체, 플랫폼별 패키지 빌드, 오픈소스 이식 규칙은 [개발 문서](docs/DEVELOPMENT.md)에, 구조는 [아키텍처](docs/architecture.md)에, 측정값은 [성능 문서](docs/performance.md)에 있습니다.
 
+## 문제 신고
+
+버그는 [이슈 양식](https://github.com/AquilaXk/easyoffice/issues/new/choose)으로 신고해 주세요. 기능 요청과 PR은 받지 않습니다. 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)에, 보안 문제 신고는 [SECURITY.md](SECURITY.md)에 있습니다.
+
 ## Credits
 
 EasyOffice는 [rhwp](https://github.com/edwardkim/rhwp)(MIT)를 기반으로 합니다. HWP 엔진을 공개해 주신 개발자분께 감사드립니다. 가져다 쓴 코드의 출처와 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있습니다.

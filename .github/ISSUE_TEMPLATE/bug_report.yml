@@ -1,0 +1,125 @@
+name: 버그 신고 / Bug report
+description: 앱에서 생긴 문제를 알려 주세요. / Report a problem in the app.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        기능 요청과 PR은 받지 않습니다. 버그 신고만 받습니다. 보안 문제는 이슈로 올리지 말고 [SECURITY.md](https://github.com/AquilaXk/easyoffice/blob/main/SECURITY.md)의 비공개 신고를 이용해 주세요.
+
+        Feature requests and pull requests are not accepted. Only bug reports are. Do not file security problems here; use the private report described in [SECURITY.md](https://github.com/AquilaXk/easyoffice/blob/main/SECURITY.md).
+
+        한글(HWP/HWPX) 문서 문제는 먼저 한글 엔진 원본 데모에서 같은 파일과 순서로 확인해 주세요. 거기서도 같은 문제가 나면 원본 엔진 저장소에 신고해 주세요.
+
+        For HWP/HWPX problems, first try the same file and steps in the upstream HWP engine demo. If it happens there too, report it to the upstream engine repository.
+
+        - 한글 엔진 원본 데모 / upstream HWP engine demo: https://edwardkim.github.io/rhwp/
+        - 원본 엔진 저장소 / upstream engine repository: https://github.com/edwardkim/rhwp/issues
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: 모듈 / Module
+      options:
+        - 문서 / Document
+        - 시트 / Sheet
+        - 슬라이드 / Slides
+        - PDF
+        - 한글 (HWP/HWPX) / HWP
+        - BASE
+        - BOARD
+        - 코파일럿 / Copilot
+        - 변환 / Conversion
+        - 기타 / Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 운영체제 / Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux (Ubuntu/Debian 계열)
+        - Linux (Fedora/RHEL 계열)
+        - Linux (기타 / other)
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS 버전 / OS version
+      placeholder: "예: macOS 15.4, Windows 11 24H2, Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: 설치 형태 / Install package
+      options:
+        - dmg (macOS)
+        - Windows 설치 프로그램 / Windows installer
+        - deb (Linux)
+        - rpm (Linux)
+        - AppImage (Linux)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 앱 버전 / App version
+      description: 앱의 도움말 메뉴에서 정보를 열면 버전이 보입니다. / Open About from the Help menu to see the version.
+      placeholder: "예: 0.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 절차 / Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 결과 / Expected result
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 결과 / Actual result
+      description: 화면 캡처나 오류 문구를 붙여 주세요. / Add screenshots or error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: file
+    attributes:
+      label: 문제 파일 / Sample file
+      description: |
+        문제가 나는 파일을 끌어다 놓아 첨부해 주세요. 확장자가 막히면 zip으로 묶어 주세요.
+        Drag the file here to attach it. Zip it if the extension is not allowed.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 확인 / Checklist
+      options:
+        - label: 첨부한 파일에 개인정보와 기밀이 없습니다. / The attached files contain no personal or confidential data.
+          required: true
+        - label: 최신 버전에서 다시 확인했습니다. / I confirmed the problem on the latest version.
+          required: true

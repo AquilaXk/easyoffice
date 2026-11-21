@@ -18,6 +18,7 @@ import { verifyOverrides } from "./hwp-studio-overrides.mjs";
 import { checkFonts } from "./verify-fonts.mjs";
 import { findBareSorts, isSortRuleScoped } from "./sort-comparator-rule.mjs";
 import { findHtmlSinkViolations } from "./html-sink-rule.mjs";
+import { findIntakeViolations } from "./intake-rules.mjs";
 import { findServeReleaseViolations } from "./release-serve-rule.mjs";
 import { checkDesktopBundleConfig } from "./desktop-file-associations.mjs";
 
@@ -398,6 +399,7 @@ try {
   // Windows refuses to check out a path segment named CON, PRN, AUX, NUL, COM1-9 or LPT1-9,
   // with or without an extension, so such a file breaks the Windows CI checkout.
   const WINDOWS_RESERVED_SEGMENT = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.[^.]*)*$/i;
+  for (const violation of findIntakeViolations(trackedList)) errors.push(`External intake rule (PD-274): ${violation}`);
   for (const tracked of trackedList) {
     if (tracked.split("/").some((segment) => WINDOWS_RESERVED_SEGMENT.test(segment))) {
       errors.push(`Path uses a name Windows reserves and cannot check out: ${tracked}`);
