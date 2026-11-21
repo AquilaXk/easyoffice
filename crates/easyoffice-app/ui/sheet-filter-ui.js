@@ -166,7 +166,8 @@
       const locked = readOnly(state);
       if (data.kind === "all") {
         const mixed = allState();
-        row._label.textContent = "(모두 선택)";
+        // With a search typed, the first row selects what the search found (the spreadsheet program's wording).
+        row._label.textContent = state.query === "" ? "(모두 선택)" : "(검색 결과 모두 선택)";
         row._count.textContent = "";
         row._box.checked = mixed === "true";
         row._box.indeterminate = mixed === "mixed";

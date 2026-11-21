@@ -427,6 +427,7 @@ test("a list cut at its limit is read-only until a search narrows it", async () 
   h.advanceTimers(300);
   await flushAsyncTurns(10);
   assert.equal(d.getElementById("sheet-filter-count").textContent, "2 / 2");
+  assert.equal(labels(d)[0], "(검색 결과 모두 선택)", "while a search is typed, the first row selects its results");
   assert.equal(d.getElementById("btn-sheet-filter-ok").disabled, false);
   assert.equal(h.requests.at(-1).query, "가");
   await click(h, d.getElementById("btn-sheet-filter-ok"));
