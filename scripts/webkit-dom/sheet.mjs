@@ -92,6 +92,21 @@ async function assertOutlinesPainted(page, scale, label) {
   }
 }
 
+// The page again in a window of device pixel ratio `scale`, with the same outlines drawn.
+async function atScale(page, scale) {
+  const context = await page.context().browser().newContext({ viewport: { width: 1100, height: 700 }, deviceScaleFactor: scale });
+  try {
+    const screen = await context.newPage();
+    screen.setDefaultTimeout(8000);
+    await screen.goto(page.url().replace("win=webkit-dom", `win=webkit-dom-${scale}x`));
+    await screen.waitForSelector("#pane-sheet td[data-cell]");
+    await drawOutlines(screen);
+    await assertOutlinesPainted(screen, scale, `${scale}x`);
+  } finally {
+    await context.close();
+  }
+}
+
 export const sheetSteps = [
   ["a table of HTML is pasted with its cells, numbers and formats (NodeList rows)", async (page) => {
     await pasteTable(page);
@@ -156,19 +171,7 @@ export const sheetSteps = [
     await assertOutlinesPainted(page, 1, "1x");
   }],
 
-  ["the same lines show at 2x", async (page) => {
-    const context = await page.context().browser().newContext({ viewport: { width: 1100, height: 700 }, deviceScaleFactor: 2 });
-    try {
-      const retina = await context.newPage();
-      retina.setDefaultTimeout(8000);
-      await retina.goto(page.url().replace("win=webkit-dom", "win=webkit-dom-2x"));
-      await retina.waitForSelector("#pane-sheet td[data-cell]");
-      await drawOutlines(retina);
-      await assertOutlinesPainted(retina, 2, "2x");
-    } finally {
-      await context.close();
-    }
-  }],
+  ...[2, 1.5, 1.25, 1.75, 3].map((scale) => [`the same lines show at ${scale}x`, (page) => atScale(page, scale)]),
 
   ["Enter and Tab walk a selected range and keep it", async (page) => {
     await page.click(td("B2"));

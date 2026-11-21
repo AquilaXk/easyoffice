@@ -398,6 +398,10 @@
 /* Outline (PD-208): sheet-outline-ui.js draws a lane per level beside the row numbers and above the column letters; the frame leaves them no room until a group exists. */
 .sheet-frame { flex: 1 1 auto; min-height: 220px; min-width: 0; display: grid; grid-template-columns: var(--outline-w, 0px) minmax(0, 1fr); grid-template-rows: var(--outline-h, 0px) minmax(0, 1fr); background: var(--ui-bg-light); }
 .sheet-frame > .sheet-viewport { grid-area: 2 / 2; min-height: 0; }
+/* WebKit at 1.5 device pixels per px (PD-285): the viewport's 1px border is 1 device pixel wide (0.6667px) but takes up 0.65625px of layout (1/64 steps), so the grid starts that far under an
+   integer. A cell edge in its own color then begins on exactly a half device pixel, where the edge's top and bottom round to the same line and the border is not painted at all. One layout step
+   (1/64px) moves the grid off that tie. */
+@media (resolution: 1.5dppx) { .sheet-frame > .sheet-viewport { top: 0.015625px; } }
 .sheet-outline { position: relative; overflow: hidden; background: var(--ui-bg-light); user-select: none; }
 .sheet-outline[hidden] { display: none; }
 .sheet-outline-rows { grid-area: 2 / 1; }
