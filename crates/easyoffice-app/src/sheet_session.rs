@@ -816,7 +816,7 @@ fn parse_changes(
 
 impl EasyOfficeIpcRouter {
     /// Handles an `evaluate_sheet` payload that carries `sessionAction` (IPC contract actions:
-    /// open, apply, rules, locks, merges, tables, hiddenRows, tableColumn, structure, names,
+    /// open, apply, rules, locks, merges, tables, pivots, hiddenRows, tableColumn, structure, names,
     /// nameCheck, nameValues, linkTarget, sheetRefs, validate, pivot, format, filter, sort,
     /// protectHash, protectVerify, close).
     pub(crate) fn handle_sheet_session_action(
@@ -831,6 +831,7 @@ impl EasyOfficeIpcRouter {
             "locks" => Self::sheet_session_locks(entries, owner),
             "merges" => Self::sheet_session_blockers(entries, owner, false),
             "tables" => Self::sheet_session_blockers(entries, owner, true),
+            "pivots" => Self::sheet_session_pivots(entries, owner),
             "hiddenRows" => Self::sheet_session_hidden_rows(entries, owner),
             "tableColumn" => Self::table_column_rewrites(entries),
             "structure" => Self::sheet_session_structure(entries, owner),

@@ -8,7 +8,7 @@ use crate::sheet_session::{
 use crate::sheet_table_json::TablesField;
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{CellBox, EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::RecalcError;
+use easyoffice_sheet::{PivotTableDef, RecalcError};
 use std::time::Instant;
 
 /// What `set_blockers` is told: the merged ranges of a sheet, its tables, or the rows it hides (PD-232).
@@ -16,6 +16,8 @@ pub(crate) enum Blockers {
     Merges(Vec<CellBox>),
     Tables(TablesField),
     HiddenRows(HiddenRowRuns),
+    /// The pivot tables `GETPIVOTDATA` finds (PD-292).
+    Pivots(Vec<PivotTableDef>),
 }
 
 impl Registry {
@@ -43,6 +45,7 @@ impl Registry {
             Blockers::HiddenRows((hidden, filtered)) => {
                 session.set_sheet_hidden_rows(sheet, hidden, filtered)
             }
+            Blockers::Pivots(pivots) => session.set_sheet_pivot_tables(sheet, pivots),
             Blockers::Tables(TablesField {
                 tables: Some(tables),
                 ..
@@ -83,6 +86,25 @@ impl EasyOfficeIpcRouter {
             Blockers::HiddenRows(runs),
             Instant::now(),
         )? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
+        }
+    }
+
+    /// `pivots` `{session, sheet, pivots}`: `pivots` is the sheet's pivot tables (`sheet_pivot_json`), which
+    /// `GETPIVOTDATA` reads; the formulas that call it are calculated again (PD-292).
+    pub(crate) fn sheet_session_pivots(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let pivots = match StrictJsonValue::get_field(entries, "pivots") {
+            None => Vec::new(),
+            Some(v) => crate::sheet_pivot_defs::pivot_defs(sheet, v)?,
+        };
+        match registry().set_blockers(id, owner, sheet, Blockers::Pivots(pivots), Instant::now())? {
             Applied::Done(json) => Ok(json),
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),

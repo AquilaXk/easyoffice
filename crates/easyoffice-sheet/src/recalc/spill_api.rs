@@ -88,6 +88,21 @@ impl RecalcSession {
         Ok(())
     }
 
+    /// Tells the session the pivot tables `GETPIVOTDATA` finds on `sheet` (an empty list: none). The formulas that call
+    /// it are volatile, so the next [`recalculate`](Self::recalculate) works them out again against the new tables (PD-292).
+    pub fn set_sheet_pivot_tables(
+        &mut self,
+        sheet: &str,
+        tables: Vec<crate::PivotTableDef>,
+    ) -> Result<(), super::RecalcError> {
+        if self.over_budget {
+            return Err(super::RecalcError::OverBudget);
+        }
+        self.wb
+            .set_pivot_tables(sheet, tables)
+            .map_err(super::RecalcError::Invalid)
+    }
+
     /// Tells the session the tables of `sheet` (an empty list: none). An array that would be placed in or cross
     /// one is `#SPILL!`, as for merged ranges (PD-224).
     pub fn set_sheet_tables(

@@ -63,6 +63,7 @@ mod sheet_names_ipc;
 mod sheet_names_ipc_tests;
 mod sheet_names_json;
 mod sheet_page_json;
+mod sheet_pivot_defs;
 mod sheet_pivot_ipc;
 mod sheet_pivot_json;
 mod sheet_protect_ipc;
@@ -376,6 +377,12 @@ impl EasyOfficeIpcRouter {
                         sheet.set_spill_tables(field.boxes);
                     }
                 }
+            }
+        }
+        // The pivot tables `GETPIVOTDATA` finds (PD-292). The sheets that are not in the request are left out, as for tables.
+        for (name, pivots) in sheet_pivot_defs::pivots_by_sheet(entries)? {
+            if wb.sheet(&name).is_some() {
+                wb.set_pivot_tables(&name, pivots)?;
             }
         }
         for (sh, addr, val, kind) in cell_triples {
