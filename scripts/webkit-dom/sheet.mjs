@@ -267,6 +267,56 @@ export const sheetSteps = [
     else assert.equal(await tab(), "Sheet2", "Alt+Left is not a sheet key outside a Mac");
   }],
 
+  ["GETPIVOTDATA reads the pivot table the page made, and its value follows the source once the pivot table is refreshed (PD-292)", async (page) => {
+    const rows = [["지역", "분기", "매출"], ["East", "Q1", "10"], ["East", "Q2", "20"], ["West", "Q1", "5"], ["West", "Q2", "7"]];
+    await page.click(td("A1"));
+    await paste(page, { "text/plain": asText(rows) });
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="C5"]')?.textContent === "7");
+    const tab = () => page.$eval("#sheet-tab-bar .sheet-tab-btn.active", (el) => el.dataset.sheetTab);
+    const enter = async (ref, text) => {
+      await page.click(td(ref));
+      await page.keyboard.type(text);
+      await page.keyboard.press("Enter");
+    };
+    const shows = (ref, text) => page.waitForFunction(([r, t]) => document.querySelector(`#pane-sheet td[data-cell="${r}"]`)?.textContent === t, [ref, text], { timeout: 5000 });
+    // The pivot table: region down, quarter across, the sum of the sales. It lands on a new sheet of its own.
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_PIVOT__.openPivotDialog());
+    assert.equal(await page.inputValue("#sheet-pivot-range"), "A1:C5");
+    await page.selectOption("#sheet-pivot-col-select", "1");
+    await page.click("#btn-sheet-pivot-apply");
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.pivotsOf(document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab).length === 1);
+    const report = await tab();
+    assert.notEqual(report, "Sheet1", "the pivot table is on its own sheet");
+    // Formulas outside the table: the grand total, a region, a region and a quarter, and what is not in the table.
+    const formulas = [
+      ["H2", '=GETPIVOTDATA("매출",$A$1)', "42"],
+      ["H3", '=GETPIVOTDATA("합계: 매출",$B$3)', "42"],
+      ["H4", '=GETPIVOTDATA("매출",$A$1,"지역","East")', "30"],
+      ["H5", '=GETPIVOTDATA("매출",$A$1,"지역","west","분기","Q2")', "7"],
+      ["H6", '=GETPIVOTDATA("매출",$A$1,"지역","North")', "#REF!"],
+      ["H7", '=GETPIVOTDATA("매출",$K$20)', "#REF!"],
+    ];
+    for (const [ref, formula, value] of formulas) {
+      await enter(ref, formula);
+      await shows(ref, value);
+    }
+    // A source value changes: the table says the old number until it is refreshed; after the refresh the formulas follow.
+    await page.click("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab='Sheet1']");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="C2"]')?.textContent === "10");
+    await enter("C2", "110");
+    await page.click(`#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${report}"]`);
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="H2"]') !== null);
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_PIVOT__.refreshAllPivots());
+    await shows("H2", "142");
+    await shows("H4", "130");
+    assert.equal(await cellText(page, "H5"), "7");
+    // The pivot table is deleted: the formulas have nothing to read.
+    await page.click(td("A1"));
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_PIVOT__.deletePivot());
+    await shows("H2", "#REF!");
+    await shows("H4", "#REF!");
+  }],
+
   ["a printed sheet carries the fill, text color and bold a conditional format gave its cells (PD-289)", async (page) => {
     for (const [ref, value] of [["B2", "1"], ["B3", "5"]]) {
       await page.click(td(ref));
