@@ -33,12 +33,14 @@ const CLEARABLE = new Set(["innerHTML", "srcdoc"]);
 /**
  * `parseFromString` uses that stay, by root-relative path. `hwp-print.js` reads one page SVG that the
  * editor frame sends, refuses a document type declaration, keeps only listed elements and attributes,
- * and only then imports the tree.
+ * and only then imports the tree. `doc-paste-model.js` parses pasted HTML into an inert document and never imports a
+ * node of it: it builds a model of text and validated values (clean-up before the parse, whitelist of elements, limits).
  */
 export const PARSE_ALLOWED = new Map([
   ["crates/easyoffice-app/ui/hwp-print.js", "page SVG, whitelist sanitizer"],
   ["crates/easyoffice-app/ui/sheet-clip-html.js", "clipboard table, inert document, text and attributes are read and nothing is imported"],
   ["apps/hwp-studio/src/command/print-pages.ts", "editor print SVG page"],
+  ["crates/easyoffice-app/ui/doc-paste-model.js", "pasted HTML in an inert document, only text and validated values are copied out"],
 ]);
 
 /** Returns one message per violation, each with the 1-based line of the sink. */

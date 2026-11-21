@@ -28,7 +28,7 @@
   const sheetDataStore = Object.assign(Object.create(null), { Sheet1: null });
   const sheetRowCounts = Object.create(null);
   let workspaceSession = null, copilotUi = null;
-  let docIme = null, docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docIme = null, docPaste = null, docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -99,6 +99,7 @@
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
   });
+  docPaste = host.__EASYOFFICE_CREATE_DOC_PASTE__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getActiveModule: () => activeModule });
   docLink = host.__EASYOFFICE_CREATE_DOC_LINK__({
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
   });
@@ -906,6 +907,7 @@
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
     docLink.bind();
+    docPaste.bind();
     docToc.bind(); docTable.bind(); docPageSetup.bind();
     docPages.attach(document.getElementById("doc-editor"));
     docPageFrame.attach(document.getElementById("doc-editor"), docPages);

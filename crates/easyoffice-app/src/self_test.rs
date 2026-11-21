@@ -588,6 +588,7 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/command-history.js"),
         "CREATE_COMMAND_HISTORY",
     ),
+    (include_str!("../ui/doc-paste.js"), "CREATE_DOC_PASTE"),
 ];
 
 fn check_embedded_assets() -> Result<(), EasyOfficeError> {

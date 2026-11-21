@@ -827,7 +827,7 @@
   host.__EASYOFFICE_DOC_RUNS__ = {
     RUN_CLASS, PROPS, BOOL_PROPS, BOOL_PROP_SET, VALUE_PROPS, DATA_KEY, MIXED, DEFAULT_HALF_PT, MIN_HALF_PT, MAX_HALF_PT,
     normalizeColor, normalizeFont, normalizeProp, normalizePatch, ptToHalfPt, halfPtToCss,
-    isRunElement, readRunFormat, readLegacyFormat, fromModelRun, buildRunSpec, formatOfText, applyFormat, isolateRangeText, queryFormat, wordRangeAt,
+    isRunElement, readRunFormat, readLegacyFormat, createRun, fromModelRun, buildRunSpec, formatOfText, applyFormat, isolateRangeText, queryFormat, wordRangeAt,
     insertFormattedText, blocksInRange, blockOf, containerOf, collectTextNodes, textOffsetOf,
     pointAtTextOffset, normalizeContainer, comparePoints, cssSizeToHalfPt,
   };

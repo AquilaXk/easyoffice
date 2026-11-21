@@ -190,36 +190,47 @@
     const selectImage = (img) => { selectedImg = img; syncResizerBox(); };
     const clearSelection = () => { selectedImg = null; const box = resizerEl(); if (box) box.hidden = true; };
 
-    function insertImageBytes(bytes, mimeOrName) {
+    // The picture element for `bytes` (registered, sized for the body or for `cell` of `table`), or `{ error }` when the
+    // quota or the header refuses it. The element is not in the page yet; the paste path and the file picker both use it.
+    function createImageElement(bytes, mimeOrName, place = null) {
       const root = editor();
-      if (!root || !utils) return { changed: false, error: "편집 영역을 찾을 수 없습니다" };
+      if (!root || !utils) return { error: "편집 영역을 찾을 수 없습니다" };
       const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
       const checked = checkQuotaAndHeader(root, u8);
-      if (checked.error) {
-        setFeedback?.(checked.error);
-        return { changed: false, error: checked.error };
-      }
+      if (checked.error) return { error: checked.error };
       const { format, widthPx, heightPx } = checked.header;
-      const range = getRange?.() ?? null;
-      const tbl = range ? grid.tableAt(root, range.startContainer) : null;
-      const cell = tbl?.classList?.contains("doc-inline-table") ? grid.cellIn(tbl, range.startContainer, range.startOffset) : null;
-      const { widthEmu, heightEmu } = initialSizeEmu(widthPx, heightPx, cell ? cellMaxWidthEmu(tbl, cell) : BODY_MAX_WIDTH_EMU);
+      const { widthEmu, heightEmu } = initialSizeEmu(widthPx, heightPx, place ? cellMaxWidthEmu(place.table, place.cell) : BODY_MAX_WIDTH_EMU);
       const alt = altFromHint(mimeOrName);
       const id = utils.registerDocImage(utils.bytesToBase64(u8), format);
       const url = utils.docImageUrl(id);
+      const img = document.createElement("img");
+      img.className = "doc-inline-image";
+      img.setAttribute("contenteditable", "false");
+      if (url) img.setAttribute("src", url);
+      img.setAttribute("alt", alt);
+      if (alt) img.setAttribute("title", alt);
+      Object.assign(img.dataset, {
+        eoImageId: id, eoImageFormat: format, eoImageAlt: alt,
+        eoImageNaturalWidthPx: String(widthPx), eoImageNaturalHeightPx: String(heightPx),
+      });
+      applyImageSizeEmu(img, widthEmu, heightEmu);
+      return { img };
+    }
+
+    function insertImageBytes(bytes, mimeOrName) {
+      const root = editor();
+      if (!root || !utils) return { changed: false, error: "편집 영역을 찾을 수 없습니다" };
+      const range = getRange?.() ?? null;
+      const tbl = range ? grid.tableAt(root, range.startContainer) : null;
+      const cell = tbl?.classList?.contains("doc-inline-table") ? grid.cellIn(tbl, range.startContainer, range.startOffset) : null;
+      const made = createImageElement(bytes, mimeOrName, cell ? { table: tbl, cell } : null);
+      if (made.error) {
+        setFeedback?.(made.error);
+        return { changed: false, error: made.error };
+      }
+      const { img } = made;
 
       const res = withUndo(() => {
-        const img = document.createElement("img");
-        img.className = "doc-inline-image";
-        img.setAttribute("contenteditable", "false");
-        if (url) img.setAttribute("src", url);
-        img.setAttribute("alt", alt);
-        if (alt) img.setAttribute("title", alt);
-        Object.assign(img.dataset, {
-          eoImageId: id, eoImageFormat: format, eoImageAlt: alt,
-          eoImageNaturalWidthPx: String(widthPx), eoImageNaturalHeightPx: String(heightPx),
-        });
-        applyImageSizeEmu(img, widthEmu, heightEmu);
         if (cell) {
           if (isLonePlaceholderCell(cell)) cell.replaceChildren();
           cell.appendChild(img);
@@ -417,7 +428,7 @@
     const handles = (cmd) => cmd === CMD_INSERT_IMAGE;
     const run = (cmd) => (cmd === CMD_INSERT_IMAGE ? ($("doc-image-input")?.click(), { changed: false, openedPicker: true }) : { changed: false });
 
-    const api = { bind, handles, run, insertImageBytes, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
+    const api = { bind, handles, run, insertImageBytes, createImageElement, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
     host.__EASYOFFICE_DOC_IMAGE_API__ = api;
     return api;
   }

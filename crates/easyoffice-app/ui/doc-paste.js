@@ -1,0 +1,599 @@
+(function (host) {
+  "use strict";
+
+  // Paste into the document editor (`#doc-editor`). Reference implementation: `onPaste` of rhwp-studio
+  // (https://github.com/edwardkim/rhwp, commit 1a76570e833917d15817415a53c09ad61ab3203f,
+  // `rhwp-studio/src/engine/input-handler-keyboard.ts` lines 1934-2072, with `pasteExternalHtml` 2130-2170,
+  // `pastePlainText` 419-438 and `pasteImageFile` 2173-2230, MIT, Copyright (c) 2025-2026 Edward Kim). The branches keep the
+  // reference's order: the paste is taken over from the browser (`preventDefault`); in a header, footer or note only the plain
+  // text is pasted (as one line); a picture file on the clipboard becomes a picture; HTML is cleaned (`doc-paste-sanitize.js`),
+  // the pictures of an office or Hangul clipboard are filled in from its RTF (`doc-clipboard-images.js`), and the result goes
+  // in (`doc-paste-model.js` reads it, this file puts it in); when the HTML is refused or has nothing in it, the plain text
+  // goes in, one paragraph per line; the last branch is plain text.
+  // The adapter differences: the reference keeps its own clipboard (`pasteInternal`) for what was copied inside the
+  // editor, here the copy of the browser carries the runs as `span.eo-run` data attributes and takes the same path as any
+  // HTML; there is no form mode and no object selection; the Hangul clipboard's document model (`[data-hwpjson]`) is not
+  // read (that is the Hangul editor frame's); a selection is deleted and the paste is one undo step (`withUndo`).
+  //
+  // Where the content goes: the first block of the paste joins the block at the caret, the blocks in between follow it, and
+  // the last block joins what was after the caret (`rhwp-studio` splits the paragraph at the caret the same way). Tables
+  // and pictures come between the two halves. In a list the new paragraphs are items of that list; in a table cell a
+  // pasted table is flattened to paragraphs.
+
+  const TEXT_BLOCK = /^(?:P|H[1-6]|LI|BLOCKQUOTE|PRE|DIV|DD|DT|FIGCAPTION)$/;
+  const CELL_TAGS = new Set(["TD", "TH"]);
+  const LIST_TAGS = new Set(["UL", "OL"]);
+  // What the browser copies to the half of a split block and must not be on both: the page break mark and the frame copy mark.
+  const SPLIT_UNIQUE_DATA = ["eoBreak", "eoFrameCopy"];
+  const MSG_TOO_LARGE = "붙여넣을 내용이 너무 커서 글자만 붙였습니다";
+  const MSG_TEXT_TOO_LARGE = "붙여넣을 내용이 너무 큽니다";
+  const MSG_NO_CONTENT = "붙일 클립보드 내용이 없습니다";
+  const MSG_DONE = "붙여넣기 완료";
+
+  const tagOf = (el) => String(el?.tagName || "").toUpperCase();
+  const isElement = (node) => node?.nodeType === 1;
+
+  // The block that keeps the part of `block` after the point `(node, offset)`: the nodes after the point move into a clone of
+  // each ancestor up to `block`, so a run that the point is inside is split in two runs of the same format.
+  function splitUpTo(block, node, offset) {
+    let parent = node;
+    let next;
+    if (node.nodeType === 3) {
+      next = offset >= node.data.length ? node.nextSibling : offset <= 0 ? node : node.splitText(offset);
+      parent = node.parentNode;
+    } else {
+      next = node.childNodes[offset] ?? null;
+    }
+    let right = null;
+    for (;;) {
+      const copy = parent.cloneNode(false);
+      if (right) copy.appendChild(right);
+      while (next) {
+        const following = next.nextSibling;
+        copy.appendChild(next);
+        next = following;
+      }
+      right = copy;
+      if (parent === block) break;
+      next = parent.nextSibling;
+      parent = parent.parentNode;
+    }
+    return right;
+  }
+
+  // A block with no text, or with only the line break that keeps an empty block open.
+  const isEmptyBlock = (block) => !Array.from(block.childNodes).some((n) => (n.nodeType === 3 ? n.data !== "" : tagOf(n) !== "BR" || n !== block.lastChild));
+
+  function createDocPaste(deps) {
+    const { document, env, withUndo, setFeedback, getActiveModule } = deps;
+    const R = () => host.__EASYOFFICE_DOC_RUNS__;
+    const grid = () => host.__EASYOFFICE_DOC_TABLE_GRID__;
+    const editor = () => document.getElementById("doc-editor");
+    const isDocModule = () => ["DOC", "HWP"].includes(getActiveModule());
+
+    // ------------------------------------------------------------ building nodes
+
+    function runNode(run) {
+      if (run.br) return document.createElement("br");
+      const text = document.createTextNode(run.text);
+      if (!run.fmt || Object.keys(run.fmt).length === 0) return text;
+      const span = R().createRun(document, run.fmt);
+      span.appendChild(text);
+      return span;
+    }
+
+    // The inline nodes of runs; neighbours with the same address share one link element.
+    function inlineNodes(runs) {
+      const nodes = [];
+      let link = null;
+      let href = null;
+      for (const run of runs) {
+        const node = runNode(run);
+        if (!run.href) {
+          link = null;
+          href = null;
+          nodes.push(node);
+          continue;
+        }
+        if (link === null || href !== run.href) {
+          link = document.createElement("a");
+          link.setAttribute("href", run.href);
+          link.dataset.eoLink = "1";
+          href = run.href;
+          nodes.push(link);
+        }
+        link.appendChild(node);
+      }
+      return nodes;
+    }
+
+    function appendInline(parent, runs) {
+      for (const node of inlineNodes(runs)) parent.appendChild(node);
+    }
+
+    function styleBlock(el, item) {
+      if (item.align) el.style.textAlign = item.align;
+      return el;
+    }
+
+    function listElement(item) {
+      const list = document.createElement(item.list === "ol" ? "ol" : "ul");
+      if (item.list === "task") {
+        list.className = "eo-task-list";
+        list.dataset.eoList = "task";
+      }
+      return list;
+    }
+
+    function listItemElement(item) {
+      const li = styleBlock(document.createElement("li"), item);
+      if (item.level > 0) li.dataset.eoListLevel = String(item.level);
+      if (item.list === "task") li.dataset.eoChecked = item.checked ? "true" : "false";
+      appendInline(li, item.runs);
+      if (item.runs.length === 0) li.appendChild(document.createElement("br"));
+      return li;
+    }
+
+    function plainBlockElement(item) {
+      const tag = /^h[1-6]$/.test(item.tag) ? item.tag : "p";
+      const el = styleBlock(document.createElement(tag), item);
+      appendInline(el, item.runs);
+      if (item.runs.length === 0) el.appendChild(document.createElement("br"));
+      return el;
+    }
+
+    function cellNodes(blocks, place) {
+      const nodes = blocksToNodes(flattenTables(blocks), place);
+      if (nodes.length === 1 && tagOf(nodes[0]) === "P" && !nodes[0].getAttribute("style")) return Array.from(nodes[0].childNodes);
+      return nodes.length === 0 ? [document.createElement("br")] : nodes;
+    }
+
+    function tableElement(item) {
+      const table = document.createElement("table");
+      table.className = "doc-inline-table";
+      const body = document.createElement("tbody");
+      table.appendChild(body);
+      for (const row of item.rows) {
+        const tr = document.createElement("tr");
+        for (const cellItem of row) {
+          const td = document.createElement("td");
+          if (cellItem.colSpan > 1) td.colSpan = cellItem.colSpan;
+          if (cellItem.rowSpan > 1) td.rowSpan = cellItem.rowSpan;
+          for (const node of cellNodes(cellItem.blocks, { table, cell: td })) td.appendChild(node);
+          tr.appendChild(td);
+        }
+        body.appendChild(tr);
+      }
+      return table;
+    }
+
+    function imageElement(item, place) {
+      const made = host.__EASYOFFICE_DOC_IMAGE_API__?.createImageElement(item.bytes, item.hint, place);
+      if (made?.error) setFeedback?.(made.error);
+      return made?.img ?? null;
+    }
+
+    const sameList = (el, item) => tagOf(el) === (item.list === "ol" ? "OL" : "UL") && (el.dataset.eoList === "task") === (item.list === "task");
+
+    // The block-level nodes of blocks, consecutive list items in one list.
+    function blocksToNodes(blocks, place) {
+      const nodes = [];
+      let list = null;
+      for (const item of blocks) {
+        if (item.type === "text" && item.list) {
+          if (!list || !sameList(list, item)) {
+            list = listElement(item);
+            nodes.push(list);
+          }
+          list.appendChild(listItemElement(item));
+          continue;
+        }
+        list = null;
+        const node = item.type === "text" ? plainBlockElement(item) : item.type === "image" ? imageElement(item, place) : tableElement(item);
+        if (node) nodes.push(node);
+      }
+      return nodes;
+    }
+
+    // ------------------------------------------------------------ the place of the caret
+
+    // The children of the editor that are not the body: the frames of header and footer, the notes, the footer layer.
+    const isFrame = (el) => host.__EASYOFFICE_DOC_PAGE_META__.isTrailingMetaNode(el);
+
+    // The frame that holds the node, if any.
+    const zoneOf = (root, node) => {
+      for (let el = isElement(node) ? node : node?.parentNode; el && el !== root; el = el.parentNode) if (isFrame(el)) return el;
+      return null;
+    };
+
+    // The leaf block that holds the point, made when the point is between blocks. Returns `{ block, node, offset }`.
+    function leafBlockAt(root, node, offset) {
+      let block = null;
+      for (let el = isElement(node) ? node : node.parentNode; el && el !== root; el = el.parentNode) {
+        if (TEXT_BLOCK.test(tagOf(el)) || CELL_TAGS.has(tagOf(el))) {
+          block = el;
+          break;
+        }
+      }
+      const holder = isElement(node) ? node : node.parentNode;
+      const holdsBlocks = block && Array.from(block.childNodes).some((n) => isElement(n) && TEXT_BLOCK.test(tagOf(n)) && tagOf(n) !== "DIV");
+      if (block && !holdsBlocks) return { block, node, offset };
+      // A point between blocks (the editor itself, a cell that holds paragraphs): an empty paragraph there. Anywhere else (a
+      // table row, a list) the paste goes after the last block of the body.
+      if (holder !== root && !CELL_TAGS.has(tagOf(holder))) {
+        const end = appendPoint(root);
+        return end.node === root ? leafBlockAt(root, root, end.offset) : leafBlockAt(root, end.node, end.offset);
+      }
+      const fresh = emptyParagraph();
+      const ref = node.nodeType === 3 ? node : holder.childNodes[offset] ?? null;
+      holder.insertBefore(fresh, ref && ref.parentNode === holder ? ref : null);
+      if (node.nodeType === 3) {
+        fresh.insertBefore(node, null);
+        fresh.removeChild(fresh.firstChild);
+        return { block: fresh, node, offset };
+      }
+      return { block: fresh, node: fresh, offset: 0 };
+    }
+
+    function endPoint(block) {
+      const last = block.lastChild;
+      return { node: block, offset: tagOf(last) === "BR" ? block.childNodes.length - 1 : block.childNodes.length };
+    }
+
+    function placeCaretAt(node, offset) {
+      const sel = env.getSelection?.();
+      const range = document.createRange?.();
+      if (!node || !sel || !range) return;
+      range.setStart(node, offset);
+      range.setEnd(node, offset);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    // A boundary that sits on the editor itself (a select-all) is pulled in to the first and last block of the body, so the
+    // frames around the body are not deleted with it.
+    function clampToBody(root, range) {
+      const body = Array.from(root.childNodes).filter((n) => !isFrame(n));
+      if (body.length === 0) return false;
+      const kids = Array.from(root.childNodes);
+      if (range.startContainer === root) {
+        const first = kids.slice(range.startOffset).find((n) => !isFrame(n)) ?? body.at(-1);
+        range.setStart(first, 0);
+      }
+      if (range.endContainer === root) {
+        const last = kids.slice(0, range.endOffset).findLast((n) => !isFrame(n)) ?? body[0];
+        range.setEnd(last, last.nodeType === 3 ? last.data.length : last.childNodes.length);
+      }
+      return true;
+    }
+
+    // A selection is deleted first, as the reference does before it inserts. A selection over several cells, from outside a
+    // table into it, or into a frame keeps its content (nothing is deleted) and the paste goes in at its start. Returns that
+    // start: the boundary of a range that was deleted moves to the parent of the first block when the ends are in two
+    // blocks, so the point is taken before the deletion (the node it names is cut, never removed).
+    function deleteSelection(root, range) {
+      if (!clampToBody(root, range)) return null;
+      const start = { node: range.startContainer, offset: range.startOffset };
+      if (closestCell(root, range.startContainer) !== closestCell(root, range.endContainer) || zoneOf(root, range.startContainer) !== zoneOf(root, range.endContainer)) return start;
+      const startBlock = leafBlockOf(root, range.startContainer);
+      const endBlock = leafBlockOf(root, range.endContainer);
+      range.deleteContents();
+      if (startBlock && endBlock && startBlock !== endBlock && endBlock.parentNode && !startBlock.contains(endBlock) && !endBlock.contains(startBlock)) {
+        while (endBlock.firstChild) startBlock.appendChild(endBlock.firstChild);
+        endBlock.parentNode.removeChild(endBlock);
+      }
+      return start;
+    }
+
+    const closestCell = (root, node) => {
+      for (let el = isElement(node) ? node : node?.parentNode; el && el !== root; el = el.parentNode) if (CELL_TAGS.has(tagOf(el))) return el;
+      return null;
+    };
+    const leafBlockOf = (root, node) => {
+      for (let el = isElement(node) ? node : node?.parentNode; el && el !== root; el = el.parentNode) if (TEXT_BLOCK.test(tagOf(el))) return el;
+      return null;
+    };
+
+    // ------------------------------------------------------------ putting the model in
+
+    function insertAfter(anchor, node) {
+      anchor.parentNode.insertBefore(node, anchor.nextSibling);
+      return node;
+    }
+
+    function cleanTail(tail) {
+      tail.removeAttribute("id");
+      for (const key of SPLIT_UNIQUE_DATA) delete tail.dataset[key];
+      return tail;
+    }
+
+    const runChars = (runs) => (runs ?? []).reduce((sum, run) => sum + (run.text?.length ?? 0), 0);
+    const flattenTables = (blocks) => blocks.flatMap((item) => (item.type === "table" ? flattenTables(item.rows.flat().flatMap((cell) => cell.blocks)) : [item]));
+
+    // The point after `chars` characters of text inside `holder`, found again after neighbouring text nodes were merged.
+    function caretIn(root, holder, chars) {
+      const hit = R().pointAtTextOffset(root, chars, false, undefined, holder);
+      return hit.node === root ? { node: holder, offset: 0 } : hit;
+    }
+
+    // A paste into one line: header, footer, notes.
+    function insertInline(root, block, node, offset, blocks) {
+      const runs = [];
+      for (const item of blocks) {
+        if (item.type !== "text") continue;
+        if (runs.length > 0 && item.runs.length > 0) runs.push({ text: " ", fmt: {}, href: null });
+        runs.push(...item.runs.filter((run) => !run.br));
+      }
+      if (runs.length === 0) return null;
+      const tail = cleanTail(splitUpTo(block, node, offset));
+      const headChars = block.textContent.length;
+      appendInline(block, runs);
+      while (tail.firstChild) block.appendChild(tail.firstChild);
+      R().normalizeContainer(block);
+      return caretIn(root, block, headChars + runChars(runs));
+    }
+
+    // A table cell's own text: the paragraphs of the paste are lines of that text, and pictures follow it.
+    function insertIntoCellText(root, located, items) {
+      const { block } = located;
+      const place = tablePlace(root, block);
+      const lines = items[0].runs;
+      if (isEmptyBlock(block)) block.replaceChildren();
+      const tail = splitUpTo(block, located.node, located.offset);
+      const headChars = block.textContent.length;
+      appendInline(block, lines);
+      let sawPicture = false;
+      for (const item of items.slice(1)) {
+        const img = imageElement(item, place);
+        if (img) block.appendChild(img);
+        sawPicture = sawPicture || Boolean(img);
+      }
+      while (tail.firstChild) block.appendChild(tail.firstChild);
+      if (!block.firstChild) block.appendChild(document.createElement("br"));
+      R().normalizeContainer(block);
+      return sawPicture ? endPoint(block) : caretIn(root, block, headChars + runChars(lines));
+    }
+
+    // A paste into a list item: text becomes items of the list; a table or picture ends the list there and the rest of
+    // the list follows it. Returns where the pasted nodes end and the list that holds what came after, if the list ended.
+    function placeInList(block, items, place) {
+      let list = block.parentNode;
+      let anchor = block;
+      let rest = null;
+      for (const item of items) {
+        let node;
+        if (item.type === "text") {
+          node = list ? listItemElement({ ...item, list: null, level: 0 }) : plainBlockElement(item);
+        } else {
+          node = item.type === "image" ? imageElement(item, place) : tableElement(item);
+          if (node && list) {
+            rest = list.cloneNode(false);
+            while (anchor.nextSibling) rest.appendChild(anchor.nextSibling);
+            anchor = list;
+            list = null;
+          }
+        }
+        if (node) anchor = insertAfter(anchor, node);
+      }
+      return { anchor, rest };
+    }
+
+    // The part after the caret goes behind what was put in, or back into the block when the paste was inline only.
+    function attachTail(block, tail, anchor, rest, spread, needsTail) {
+      if (!spread) {
+        while (tail.firstChild) block.appendChild(tail.firstChild);
+        return;
+      }
+      const keep = !isEmptyBlock(tail);
+      if (rest) {
+        if (keep) rest.insertBefore(tail, rest.firstChild);
+        if (rest.firstChild) insertAfter(anchor, rest);
+        else if (!keep) insertAfter(anchor, emptyParagraph());
+      } else if (keep) {
+        insertAfter(anchor, tail);
+      } else if (needsTail && tagOf(block) !== "LI") {
+        // A table or a picture cannot end the page: an empty paragraph follows it.
+        tail.replaceChildren(document.createElement("br"));
+        insertAfter(anchor, tail);
+      }
+    }
+
+    // The paragraph the caret is in when it is empty: the heading level and alignment of the pasted first block.
+    function adoptBlockLook(block, lead) {
+      const heading = /^h[1-6]$/.test(lead.tag) ? document.createElement(lead.tag) : null;
+      const target = heading ?? block;
+      if (heading) {
+        for (const key of Object.keys(block.dataset)) heading.dataset[key] = block.dataset[key];
+        block.parentNode.insertBefore(heading, block);
+        block.parentNode.removeChild(block);
+      }
+      if (lead.align && !target.style.textAlign) target.style.textAlign = lead.align;
+      return target;
+    }
+
+    function emptyParagraph() {
+      const p = document.createElement("p");
+      p.appendChild(document.createElement("br"));
+      return p;
+    }
+
+    // Everything of the model into the block at the point. Returns the place for the caret.
+    function insertBlocks(root, blocks, located) {
+      let { block } = located;
+      const place = tablePlace(root, block);
+      const items = closestCell(root, block) ? flattenTables(blocks) : blocks.slice();
+      if (CELL_TAGS.has(tagOf(block))) return insertIntoCellText(root, located, flattenForCell(items));
+      const inList = tagOf(block) === "LI" && LIST_TAGS.has(tagOf(block.parentNode));
+      const wasEmpty = isEmptyBlock(block);
+      if (wasEmpty) block.replaceChildren();
+      delete block.dataset.eoFrameCopy;
+      const tail = cleanTail(splitUpTo(block, located.node, located.offset));
+      // The first block of the paste joins the text before the caret, the last one the text after it. An empty paragraph
+      // takes the heading level and the alignment of the first block instead.
+      const lead = items[0]?.type === "text" ? items.shift() : null;
+      if (lead && wasEmpty && tagOf(block) === "P") block = adoptBlockLook(block, lead);
+      const headChars = block.textContent.length;
+      if (lead) appendInline(block, lead.runs);
+      const final = items.at(-1);
+      const last = final?.type === "text" && (inList || (final.tag === "p" && !final.list)) ? items.pop() : null;
+      let anchor = block;
+      let rest = null;
+      if (inList) ({ anchor, rest } = placeInList(block, items, place));
+      else for (const node of blocksToNodes(items, place)) anchor = insertAfter(anchor, node);
+      const spread = anchor !== block || last !== null;
+      const needsTail = last !== null || tagOf(anchor) === "TABLE" || tagOf(anchor) === "IMG" || rest !== null;
+      if (last) {
+        if (isEmptyBlock(tail)) adoptBlockLook(tail, last);
+        const first = tail.firstChild;
+        for (const node of inlineNodes(last.runs)) tail.insertBefore(node, first);
+      }
+      attachTail(block, tail, anchor, rest, spread, needsTail);
+      if (!block.firstChild) block.appendChild(document.createElement("br"));
+      R().normalizeContainer(block);
+      if (root.contains(tail)) R().normalizeContainer(tail);
+      if (!spread) return caretIn(root, block, headChars + runChars(lead?.runs));
+      if (last) return caretIn(root, tail, runChars(last.runs));
+      if (root.contains(tail)) return { node: tail, offset: 0 };
+      return endPoint(tagOf(anchor) === "UL" || tagOf(anchor) === "OL" ? anchor.lastChild : anchor);
+    }
+
+    function tablePlace(root, block) {
+      const table = grid().tableAt(root, block);
+      const cell = table?.classList?.contains("doc-inline-table") ? grid().cellIn(table, block, 0) : null;
+      return cell ? { table, cell } : null;
+    }
+
+    // A paste into the text of a cell: the paragraphs of the paste become lines of that text, the pictures come after it.
+    function flattenForCell(items) {
+      const runs = [];
+      const pictures = [];
+      for (const item of items) {
+        if (item.type === "image") pictures.push(item);
+        else if (item.type === "text") {
+          if (runs.length > 0) runs.push({ br: true });
+          runs.push(...item.runs);
+        }
+      }
+      return [{ type: "text", tag: "p", list: null, runs }, ...pictures];
+    }
+
+    // ------------------------------------------------------------ the events
+
+    // The model into the editor as one undo step; false when there was nowhere to put it.
+    function insertModel(blocks) {
+      const root = editor();
+      if (!root) return false;
+      const sel = env.getSelection?.();
+      const range = sel?.rangeCount > 0 ? sel.getRangeAt(0) : null;
+      const inside = range && root.contains(range.startContainer) && root.contains(range.endContainer);
+      let done = false;
+      withUndo(() => {
+        const cut = inside && !range.collapsed ? deleteSelection(root, range) : null;
+        const live = inside ? sel.getRangeAt(0) : null;
+        const at = cut ?? (live ? { node: live.startContainer, offset: live.startOffset } : appendPoint(root));
+        const located = leafBlockAt(root, at.node, at.offset);
+        const zone = zoneOf(root, located.block);
+        const caret = zone ? insertInline(root, located.block, located.node, located.offset, blocks) : insertBlocks(root, blocks, located);
+        if (caret) {
+          placeCaretAt(caret.node, caret.offset);
+          done = true;
+        }
+        return { changed: done };
+      });
+      return done;
+    }
+
+    // With no caret in the editor the paste goes after the last block of the body.
+    function appendPoint(root) {
+      const last = Array.from(root.childNodes).filter((n) => isElement(n) && TEXT_BLOCK.test(tagOf(n)) && !zoneOf(root, n)).at(-1);
+      if (last) return { node: last, offset: last.childNodes.length };
+      return { node: root, offset: root.childNodes.length };
+    }
+
+    async function pasteImageFile(file) {
+      const api = host.__EASYOFFICE_DOC_IMAGE_API__;
+      if (!api) return;
+      try {
+        api.insertImageBytes(new Uint8Array(await file.arrayBuffer()), file.type || file.name);
+      } catch {
+        setFeedback?.("그림을 넣지 못했습니다");
+      }
+    }
+
+    // Ref `pastePlainText`. `doneMessage` is what the status line says when the text went in.
+    function pasteText(text, doneMessage = MSG_DONE) {
+      const parsed = host.__EASYOFFICE_DOC_PASTE_MODEL__.parseText(text);
+      if (parsed.error === "limit") return setFeedback?.(MSG_TEXT_TOO_LARGE);
+      if (parsed.error) return setFeedback?.(MSG_NO_CONTENT);
+      if (insertModel(parsed.blocks)) setFeedback?.(doneMessage);
+    }
+
+    // Ref `pasteExternalHtml`: cleaned HTML, and the plain text when the HTML has nothing to paste or is refused.
+    function pasteExternalHtml(html, text) {
+      const cleaned = host.__EASYOFFICE_DOC_PASTE_SANITIZE__.sanitizeOfficeHtml(html);
+      const parsed = host.__EASYOFFICE_DOC_PASTE_MODEL__.parseHtml(cleaned, env);
+      if (parsed.blocks) {
+        if (insertModel(parsed.blocks)) setFeedback?.(MSG_DONE);
+        return;
+      }
+      if (text) pasteText(text, parsed.error === "limit" ? MSG_TOO_LARGE : MSG_DONE);
+      else if (parsed.error === "limit") setFeedback?.(MSG_TEXT_TOO_LARGE);
+    }
+
+    // Ref `onPaste`.
+    function onPaste(event) {
+      if (!isDocModule()) return;
+      const root = editor();
+      const data = event.clipboardData;
+      if (!root || !data) return;
+      event.preventDefault?.();
+      const html = data.getData("text/html") || "";
+      const text = data.getData("text/plain") || "";
+      const rtf = data.getData("text/rtf") || "";
+      const sel = env.getSelection?.();
+      const caretNode = sel?.rangeCount > 0 ? sel.getRangeAt(0).startContainer : null;
+      // A header, footer or note takes the plain text only.
+      if (caretNode && root.contains(caretNode) && zoneOf(root, caretNode)) {
+        if (text) pasteText(text);
+        return;
+      }
+      // A picture file on the clipboard becomes a picture.
+      for (const item of Array.from(data.items || [])) {
+        if (item.kind === "file" && String(item.type).startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            void pasteImageFile(file);
+            return;
+          }
+        }
+      }
+      if (!html) {
+        pasteText(text);
+        return;
+      }
+      const images = host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__;
+      if (!images.needsRtfImageInlining(html, rtf)) {
+        pasteExternalHtml(html, text);
+        return;
+      }
+      // The pictures come from the RTF; the page is read again when they are ready, so the caret is taken then.
+      void (async () => {
+        let merged = html;
+        try {
+          merged = await images.inlineOfficeClipboardImages(html, rtf, env);
+        } catch {
+          // without the pictures the rest is still pasted
+        }
+        pasteExternalHtml(merged, text);
+      })();
+    }
+
+    function bind() {
+      editor()?.addEventListener("paste", onPaste);
+    }
+
+    return { bind, onPaste, insertModel };
+  }
+
+  host.__EASYOFFICE_CREATE_DOC_PASTE__ = createDocPaste;
+})(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
