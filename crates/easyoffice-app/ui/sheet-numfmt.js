@@ -135,15 +135,40 @@
   const presetById = (id) => PRESETS.find((p) => p.id === id) || null;
 
   // Date and time codes of the Korean profile of date-format.ts (period before the time).
-  const KO_DATES = ["yyyy-MM-dd", "yyyy. mm. dd.", 'yyyy"년" m"월" d"일"', "mm-dd", 'm"월" d"일"'];
-  const KO_TIMES = ["h:mm:ss", "h:mm", "AM/PM hh:mm", "AM/PM h:mm", "AM/PM h:mm:ss"];
-  const KO_DATE_TIMES = ["mm-dd AM/PM hh:mm"];
+  // The Korean-locale built-in codes of the spreadsheet file format (ids 31 to 34: the date with the year, month and day
+  // words, the hour and minute words, with seconds) and the long date with the weekday follow the profile.
+  const KO_DATES = ["yyyy-MM-dd", "yyyy. mm. dd.", 'yyyy"년" m"월" d"일"', '[$-412]yyyy"년" m"월" d"일" dddd', 'yyyy"년" m"월"', "mm-dd", 'm"월" d"일"'];
+  const KO_TIMES = ["h:mm:ss", "h:mm", "[$-412]AM/PM hh:mm", "[$-412]AM/PM h:mm", "[$-412]AM/PM h:mm:ss", 'h"시" mm"분"', 'h"시" mm"분" ss"초"'];
+  const KO_DATE_TIMES = ["yyyy-m-d h:mm", "[$-412]mm-dd AM/PM hh:mm"];
   const DATE_CODES = Object.freeze([...KO_DATES, ...KO_DATE_TIMES]);
   const TIME_CODES = Object.freeze(KO_TIMES);
   // 1930-08-05 13:30:30, the sample of the original's date list.
   const DATE_SAMPLE = "11175.562847222222";
 
-  const FRACTION_CODES = Object.freeze(["# ?/?", "# ??/??", "# ???/???", "?/2", "?/4", "?/8", "?/16", "?/10", "?/100"]);
+  // The fraction list of the dialog: up to one, two or three digits of the denominator, or the halves to hundredths.
+  const FRACTION_CODES = Object.freeze(["# ?/?", "# ??/??", "# ???/???", "# ?/2", "# ?/4", "# ?/8", "# ?/16", "# ?/10", "# ?/100"]);
+
+  // The 기타 category: the postal and resident registration number, and the number read in Hanja or Hangul digits.
+  const SPECIAL_CODES = Object.freeze(["00000", "000000-0000000", "[DBNum1]General", "[DBNum2]General", "[DBNum3]General", "[DBNum4]General"]);
+
+  // The names the list shows for the codes whose text is no help (the fractions, the 기타 category).
+  const LIST_LABELS = Object.freeze({
+    "# ?/?": "한 자리 분모",
+    "# ??/??": "두 자리 분모",
+    "# ???/???": "세 자리 분모",
+    "# ?/2": "2를 분모로",
+    "# ?/4": "4를 분모로",
+    "# ?/8": "8을 분모로",
+    "# ?/16": "16을 분모로",
+    "# ?/10": "10을 분모로",
+    "# ?/100": "100을 분모로",
+    "00000": "우편 번호",
+    "000000-0000000": "주민 등록 번호",
+    "[DBNum1]General": "숫자(한자)",
+    "[DBNum2]General": "숫자(갖은 한자)",
+    "[DBNum3]General": "숫자(전각)",
+    "[DBNum4]General": "숫자(한글)",
+  });
 
   // Negative number styles of formatdetail.ts (NUMBERFORMAT, CURRENCYFORMAT): how a negative value reads.
   const NEGATIVES = Object.freeze([
@@ -200,6 +225,7 @@
     const c = String(code || "");
     if (isDefaultFormat(c)) return "general";
     if (isTextFormat(c)) return "text";
+    if (SPECIAL_CODES.includes(c)) return "special";
     const literal = c.split(";")[0];
     const plain = mask(literal).text;
     if (/E[+-]/i.test(plain)) return "scientific";
@@ -238,6 +264,8 @@
     TIME_CODES,
     DATE_SAMPLE,
     FRACTION_CODES,
+    SPECIAL_CODES,
+    LIST_LABELS,
     NEGATIVES,
     presetById,
     isDefaultFormat,

@@ -342,3 +342,56 @@ test("opening the cell format dialog fills every field with the cell's current f
   assert.notEqual($("sheet-numfmt-negative-select").value, "");
   assert.equal($("sheet-align-v-select").value, "bottom");
 });
+
+test("the dialog's categories are the spreadsheet program's twelve, in its order (PD-280)", async () => {
+  const h = await createHarness();
+  await openModel(h);
+  cell(h.document, "A1").focus();
+  await flushAsyncTurns(2);
+  await click(h, action(h.document, "dialog"));
+  const labels = [...h.document.getElementById("sheet-numfmt-kind-select").querySelectorAll("option")].map((o) => o.textContent);
+  assert.deepEqual(labels, ["일반", "숫자", "통화", "회계", "날짜", "시간", "백분율", "분수", "지수", "텍스트", "기타", "사용자 지정"]);
+});
+
+test("the fraction and 기타 lists carry names, and the 기타 codes are sorted into their own category", async () => {
+  const h = await createHarness();
+  await openModel(h);
+  cell(h.document, "A1").focus();
+  await flushAsyncTurns(2);
+  await click(h, action(h.document, "dialog"));
+  const $ = (id) => h.document.getElementById(id);
+  const pick = async (kind) => {
+    $("sheet-numfmt-kind-select").value = kind;
+    $("sheet-numfmt-kind-select").dispatchEvent({ type: "change", target: $("sheet-numfmt-kind-select") });
+    await flushAsyncTurns(8);
+    return [...$("sheet-numfmt-list-select").querySelectorAll("option")].map((o) => [o.value, o.textContent]);
+  };
+  const fractions = await pick("fraction");
+  assert.deepEqual(fractions.map(([code]) => code), ["# ?/?", "# ??/??", "# ???/???", "# ?/2", "# ?/4", "# ?/8", "# ?/16", "# ?/10", "# ?/100"]);
+  assert.equal(fractions[0][1], "한 자리 분모");
+  assert.equal(fractions[8][1], "100을 분모로");
+  const special = await pick("special");
+  assert.deepEqual(special.map(([, label]) => label), ["우편 번호", "주민 등록 번호", "숫자(한자)", "숫자(갖은 한자)", "숫자(전각)", "숫자(한글)"]);
+  assert.equal($("sheet-numfmt-code").value, "00000", "the first entry of the list is the code");
+  assert.equal(h.document.querySelector('[data-numfmt-field="list"]').hidden, false);
+  assert.equal(h.document.querySelector('[data-numfmt-field="decimals"]').hidden, true);
+  for (const [code] of special) assert.equal(N.patternKind(code), "special", code);
+  for (const code of N.FRACTION_CODES) assert.equal(N.patternKind(code), "fraction", code);
+  const times = await pick("time");
+  assert.ok(times.some(([code]) => code === 'h"시" mm"분"') && times.some(([code]) => code === 'h"시" mm"분" ss"초"'));
+  for (const [code] of times) assert.equal(N.patternKind(code), "time", code);
+  for (const [code] of await pick("date")) assert.equal(N.patternKind(code), "date", code);
+  assert.ok(N.TIME_CODES.includes("[$-412]AM/PM h:mm") && N.DATE_CODES.some((code) => code.includes("[$-412]") && code.includes("dddd")), "the names that depend on the language carry the Korean locale tag");
+});
+
+test("a cell with a time code from before the locale tag opens on the same entry of the list", async () => {
+  const h = await createHarness();
+  await openModel(h, { sheets: [{ name: "표", numFmts: ["AM/PM h:mm"], cells: [{ ref: "A1", raw: "0.75", style: { nf: 1 } }] }] });
+  cell(h.document, "A1").focus();
+  await flushAsyncTurns(2);
+  await click(h, action(h.document, "dialog"));
+  const $ = (id) => h.document.getElementById(id);
+  assert.equal($("sheet-numfmt-kind-select").value, "time");
+  assert.equal($("sheet-numfmt-list-select").value, "[$-412]AM/PM h:mm");
+  assert.equal($("sheet-numfmt-code").value, "AM/PM h:mm", "the cell's own code is not changed by opening the dialog");
+});

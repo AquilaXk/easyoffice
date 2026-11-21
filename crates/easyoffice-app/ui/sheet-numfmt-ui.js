@@ -6,20 +6,23 @@
   // the format lists come from sheet-numfmt.js (ported from the reference spreadsheet engine); the
   // text a code shows comes from the engine through sheet-numfmt-display.js.
 
-  // [value, label] of the dialog's categories.
+  // [value, label] of the dialog's categories, in the order of the spreadsheet program's cell format dialog.
   const KINDS = [
     ["general", "일반"],
     ["number", "숫자"],
     ["currency", "통화"],
     ["accounting", "회계"],
-    ["percent", "백분율"],
     ["date", "날짜"],
     ["time", "시간"],
-    ["scientific", "지수"],
+    ["percent", "백분율"],
     ["fraction", "분수"],
+    ["scientific", "지수"],
     ["text", "텍스트"],
+    ["special", "기타"],
     ["custom", "사용자 지정"],
   ];
+  // The categories that choose their code from a list.
+  const LIST_KINDS = new Set(["date", "time", "fraction", "special"]);
   // The fields each category shows.
   const FIELDS = {
     number: ["decimals", "thousands", "negative"],
@@ -30,6 +33,7 @@
     date: ["list"],
     time: ["list"],
     fraction: ["list"],
+    special: ["list"],
   };
   const MENU_PRESETS = new Set(["general", "number", "currency", "accounting", "percent", "date", "time", "text"]);
   const SAMPLE_NUMBER = "-1234.5678";
@@ -90,20 +94,22 @@
       kit.fireChange(el);
     }
 
-    const listCodes = (kind) => (kind === "date" ? N.DATE_CODES : kind === "time" ? N.TIME_CODES : N.FRACTION_CODES);
+    const LISTS = { date: N.DATE_CODES, time: N.TIME_CODES, fraction: N.FRACTION_CODES, special: N.SPECIAL_CODES };
+    const LIST_SAMPLES = { fraction: "0.7", special: "1234567" };
+    const listCodes = (kind) => LISTS[kind];
 
-    // The list of a date, time or fraction category: the codes, labelled with what they show once
-    // the engine has answered.
+    // The list of a date, time, fraction or 기타 category: the codes, labelled with their name where they have one
+    // and else with what they show once the engine has answered.
     function fillList(kind, selected) {
       const codes = listCodes(kind);
-      setOptions("sheet-numfmt-list-select", codes.map((code) => [code, code]), selected);
-      const raw = kind === "fraction" ? "0.7" : N.DATE_SAMPLE;
+      setOptions("sheet-numfmt-list-select", codes.map((code) => [code, N.LIST_LABELS[code] || code]), selected);
+      const raw = LIST_SAMPLES[kind] || N.DATE_SAMPLE;
       void Promise.all(codes.map((code) => D.preview(code, [raw]))).then((shown) => {
         const select = $("sheet-numfmt-list-select");
         if (!select || kindOfSelect() !== kind) return;
         kit.optionsOf(select).forEach((opt, at) => {
           const text = shown[at]?.[0]?.t;
-          if (text) opt.textContent = text;
+          if (text && !N.LIST_LABELS[codes[at]]) opt.textContent = text;
         });
       });
     }
@@ -128,7 +134,7 @@
         note("sheet-numfmt-status", "서식 코드가 한도를 넘음");
         return;
       }
-      const raw = N.isNumberText(anchor.raw) ? anchor.raw.trim() : kind === "date" || kind === "time" ? N.DATE_SAMPLE : SAMPLE_NUMBER;
+      const raw = N.isNumberText(anchor.raw) ? anchor.raw.trim() : kind === "date" || kind === "time" ? N.DATE_SAMPLE : kind === "special" ? LIST_SAMPLES.special : SAMPLE_NUMBER;
       const token = (sampleToken += 1);
       const [shown] = N.isDefaultFormat(code) ? [null] : await D.preview(code, [raw]);
       if (token !== sampleToken) return;
@@ -152,7 +158,7 @@
       if (building) return;
       const kind = kindOfSelect();
       syncFieldRows(kind);
-      if (kind === "date" || kind === "time" || kind === "fraction") {
+      if (LIST_KINDS.has(kind)) {
         if (!kit.optionsOf($("sheet-numfmt-list-select")).some((o) => listCodes(kind).includes(o.value))) fillList(kind, "");
         setVal("sheet-numfmt-code", val("sheet-numfmt-list-select"));
       } else if (kind !== "custom") {
@@ -164,7 +170,7 @@
     function onKindChange() {
       if (building) return;
       const kind = kindOfSelect();
-      if (kind === "date" || kind === "time" || kind === "fraction") fillList(kind, "");
+      if (LIST_KINDS.has(kind)) fillList(kind, "");
       rebuild();
     }
 
@@ -187,13 +193,15 @@
     function loadFields(code) {
       let kind = N.patternKind(code);
       building = true;
-      if ((kind === "date" || kind === "time" || kind === "fraction") && !listCodes(kind).includes(code)) kind = "custom";
+      // A code listed before the Korean names carried their locale tag is still the listed entry.
+      const listed = LIST_KINDS.has(kind) ? listCodes(kind).find((c) => c === code || c === "[$-412]" + code) : undefined;
+      if (LIST_KINDS.has(kind) && !listed) kind = "custom";
       setSelect("sheet-numfmt-kind-select", kind);
       setVal("sheet-numfmt-decimals", String(N.decimalsOf(code, 2)));
       setChecked("sheet-numfmt-thousands", code.includes("#,##"));
       setSelect("sheet-numfmt-symbol-select", N.CURRENCY_SYMBOLS.find((s) => code.includes(s)) || N.DEFAULT_CURRENCY);
       setSelect("sheet-numfmt-negative-select", negativeOf(code));
-      if (kind === "date" || kind === "time" || kind === "fraction") fillList(kind, code);
+      if (LIST_KINDS.has(kind)) fillList(kind, listed);
       setVal("sheet-numfmt-code", code);
       syncFieldRows(kind);
       building = false;
