@@ -86,6 +86,13 @@ impl Ole2ContainerCodec {
 
         let mut container = Self::build_header(&plan, first_minifat_sector, minifat_sector_count);
         let mut dir_bytes = vec![0u8; dir_sector_count * Self::SECTOR_SIZE];
+        // The format wants "no stream" in the sibling and child ids of an entry that is not used.
+        for unused in dir_bytes
+            .chunks_exact_mut(Self::DIR_ENTRY_SIZE)
+            .skip(nodes.len())
+        {
+            unused[68..80].fill(0xFF);
+        }
         for (entry_idx, node) in nodes.iter().enumerate() {
             Self::write_dir_entry(&mut dir_bytes, entry_idx, node)?;
         }
