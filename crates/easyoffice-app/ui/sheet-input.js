@@ -753,7 +753,7 @@
 
     // ---- mouse -----------------------------------------------------------------------------
     function onMouseDown(ev) {
-      if (ev.button) return;
+      if (ev.button || ev.target?.closest?.(".row-resizer")) return;
       const handle = ev.target?.closest?.(".col-resizer");
       if (handle) {
         ev.preventDefault();

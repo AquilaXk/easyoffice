@@ -34,13 +34,13 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], rowHeights: new Map(), filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
   }
 
   const entry = (name) => bySheet[name] || (bySheet[name] = blank());
 
   function isEmpty(l) {
-    return !l || (!l.merges.length && !l.hiddenRows.length && !l.hiddenCols.length && !l.filter && !l.freeze && !l.tabColor && !l.hidden && !l.veryHidden && !l.outline && !l.page && !l.protect && !l.unlockedRows.length && !l.unlockedCols.length && !l.tables.length && !l.charts.length && !l.pivots.length && !l.images.length && !l.notes.length);
+    return !l || (!l.merges.length && !l.hiddenRows.length && !l.hiddenCols.length && !l.rowHeights.size && !l.filter && !l.freeze && !l.tabColor && !l.hidden && !l.veryHidden && !l.outline && !l.page && !l.protect && !l.unlockedRows.length && !l.unlockedCols.length && !l.tables.length && !l.charts.length && !l.pivots.length && !l.images.length && !l.notes.length);
   }
 
   function touch() {
@@ -308,6 +308,7 @@
     }
     if (layout.hiddenRows.length) out.hiddenRows = layout.hiddenRows.map((r) => [r[0], r[1]]);
     if (layout.hiddenCols.length) out.hiddenCols = layout.hiddenCols.map((r) => [r[0], r[1]]);
+    if (layout.rowHeights?.size) out.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.toJson(layout.rowHeights);
     if (layout.filter) out.filter = filterToJson(layout.filter);
     if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
     if (layout.tabColor) out.tabColor = layout.tabColor;
@@ -552,6 +553,7 @@
       (Array.isArray(list) ? list : []).filter((p) => Array.isArray(p) && p[0] >= 1 && p[1] >= p[0]).map((p) => [p[0], p[1]]);
     layout.hiddenRows = runs(json?.hiddenRows);
     layout.hiddenCols = runs(json?.hiddenCols);
+    layout.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.fromJson(json?.rowHeights);
     layout.filter = json?.filter ? filterFromJson(json.filter) : null;
     const rows = Number(json?.freeze?.rows) || 0;
     const cols = Number(json?.freeze?.cols) || 0;
@@ -935,6 +937,9 @@
   // Rows and columns whose own format is unlocked, as runs.
   const unlockedOf = (name, axis) => bySheet[name]?.[axis === "row" ? "unlockedRows" : "unlockedCols"] || [];
   const setUnlocked = (name, axis, runs) => setView(name, axis === "row" ? "unlockedRows" : "unlockedCols", runs.map((r) => [r[0], r[1]]));
+  // The heights a user set (`sheet-row-height.js`): a `Map` of the row to points, replaced whole.
+  const rowHeightsOf = (name) => bySheet[name]?.rowHeights || null;
+  const setRowHeights = (name, map) => setView(name, "rowHeights", map);
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
@@ -962,7 +967,7 @@
     tablesOf, tablesIn, tableBox, setTables, settleTableHeaders, tableColumnRenames, resetTableHeaders, tableNamed, tableAt, setTableColumn, copiedTables,
     filterOf, setFilter, setTableFilterHidden, setTableFilter, filterOwnerAt, hiddenRunsOf, sameHiddenRuns, NO_RUNS, clearTableFilter, filterToJson,
     colHidden, hiddenColRuns, freezeOf, setFreeze, tabColorOf, setTabColor, hiddenOf, veryHiddenOf, setHiddenSheet,
-    outlineOf, setOutline, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
+    outlineOf, setOutline, rowHeightsOf, setRowHeights, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
     getAll, replaceAll, setSheet, toJson, chartsOf, setCharts, pivotsOf, setPivots, pivotBox, pivotsIn, pivotAt,
     imagesOf, setImages, notesOf, setNotes, noteAtRef, parseImageHeader, normalizeImageAnchor, trimUtf8,
     MAX_MERGES, MAX_CHARTS_PER_SHEET, MAX_CHART_SERIES, CHART_TYPES, CHART_LEGENDS,

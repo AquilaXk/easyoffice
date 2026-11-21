@@ -15,7 +15,6 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
-use crate::sheet_styling::sheet_row_height::read_xlsx_row;
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, parse_merge, MAX_MERGES};
@@ -275,7 +274,7 @@ impl<'s> SheetScanner<'s> {
         if self.want_styling {
             self.record_row_group(attrs);
             self.record_row_lock(attrs);
-            read_xlsx_row(attrs, self.row, &mut self.styling);
+            self.styling.record_xlsx_row_height(attrs, self.row);
         }
         Ok(())
     }

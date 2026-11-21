@@ -1155,6 +1155,18 @@ function offlineSourceConversion(parsed) {
         return mapped === null ? [] : [[mapped, px]];
       });
 
+      // The heights follow a row edit as the engine moves them: an inserted row copies the user's height of the row above.
+      const rowHeights = (doc.rowHeights || []).flatMap(([row, pt, flag]) => {
+        if (edit.axis !== "row" || edit.cols || !layoutApi) return [[row, pt, ...(flag === undefined ? [] : [flag])]];
+        const mapped = layoutApi.mapIndex(edit, Number(row));
+        return mapped === null ? [] : [[mapped, pt, ...(flag === undefined ? [] : [flag])]];
+      });
+      if (edit.axis === "row" && !edit.cols && edit.op === "insert") {
+        const above = (doc.rowHeights || []).find(([row, , flag]) => row === edit.at - 1 && flag !== 0);
+        for (let i = 0; above && i < edit.count; i += 1) rowHeights.push([edit.at + i, above[1]]);
+        rowHeights.sort((a, b) => a[0] - b[0]);
+      }
+
       return {
         session: doc.session || "offline-s1",
         formulas: [],
@@ -1163,6 +1175,7 @@ function offlineSourceConversion(parsed) {
         removed: 0,
         spillAreas: [],
         merges,
+        rowHeights,
         hiddenRows: doc.hiddenRows || [],
         hiddenCols: doc.hiddenCols || [],
         filter: doc.filter ?? null,

@@ -154,6 +154,8 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-protect.js",
     "sheet-refs.js",
     "sheet-row-fit.js",
+    "sheet-row-height.js",
+    "sheet-row-resize.js",
     "sheet-rules-ui.js",
     "sheet-rules.js",
     "sheet-slicer.js",

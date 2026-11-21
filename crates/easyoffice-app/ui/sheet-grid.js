@@ -45,7 +45,7 @@
         const copy = { ...e };
         if (e.style) {
           copy.style = Object.isFrozen(e.style) ? e.style : { ...e.style };
-          if (e.style.wrap) host.__EASYOFFICE_SHEET_LOOK__?.markWrap();
+          host.__EASYOFFICE_SHEET_LOOK__?.noteRowFit(e.style);
         }
         dst[ref] = copy;
       });
@@ -178,7 +178,12 @@
       isMerged: (r, c) => Boolean(layoutApi?.mergeAt(getSheetName(), r, c)),
       measure: (text, width, font) => measureWrapped(sampleTd(), text, width, font),
       packRef,
+      // The heights a user set, as `[[row, px], ...]` (PD-277).
+      customHeights: () => (rowHeightsOf() ? host.__EASYOFFICE_SHEET_ROW_HEIGHT__.pxEntries(rowHeightsOf()) : []),
     });
+    function rowHeightsOf() {
+      return layoutApi?.rowHeightsOf(getSheetName()) || null;
+    }
     // Frozen rows and columns stay in the window whatever the scroll (PD-208).
     const freeze = host.__EASYOFFICE_CREATE_SHEET_FREEZE__?.({
       layoutApi,
@@ -195,8 +200,15 @@
       seedDomMaps();
       return tdByPacked.values().next().value || null;
     };
-    // Row heights are looked up only once a wrapped cell exists, or one has been fitted before (it may be gone now).
-    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any());
+    // Row heights are looked up only once a wrapped or large cell exists, a row has a height of a user, or one has been fitted before (it may be gone now).
+    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any() || Boolean(rowHeightsOf()));
+    // Works the row heights out again; a sync that ran out of its budget leaves the rest of the rows plain and says so.
+    function syncRows() {
+      const changed = rowFit.sync();
+      const say = rowFit.overBudget() && document.getElementById("status-command-feedback");
+      if (say) say.textContent = "행 높이를 맞추기에 시트가 너무 커서 일부 행은 기본 높이로 둠";
+      return changed;
+    }
     // The look of a cell as the page paints it: neighbours decide the shared edges.
     const lookApi = host.__EASYOFFICE_SHEET_LOOK__;
     const borderAt = (r, c) => (r < 1 || c < 1 ? undefined : getEntry(refOf(r, c))?.style?.border);
@@ -260,10 +272,10 @@
 
     // The row whose band holds the vertical offset `y` of the scrolled content.
     function rowAtY(y) {
-      const guess = rowAtVisible(Math.max(0, Math.floor(y / ROW_H)));
-      if (!rowFit || !rowFit.any()) return guess;
+      if (!rowFit || !rowFit.any()) return rowAtVisible(Math.max(0, Math.floor(y / ROW_H)));
+      // Rows under the grid's height put the row below the guess too, so the search covers the whole sheet.
       let lo = 1;
-      let hi = guess;
+      let hi = MAX_ROWS;
       while (lo < hi) {
         const mid = (lo + hi + 1) >> 1;
         if (rowTop(mid) <= y) lo = mid;
@@ -274,15 +286,24 @@
 
     const visibleIndexOf = (row) => row - 1 - (layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0);
 
-    // Sets the height of every materialized row to its fitted height (a plain row keeps the stylesheet's).
+    // Sets the height of every materialized row to its height (a plain row keeps the stylesheet's). A row under the stylesheet's
+    // takes its height from `--rh` (`row-short`), and a row whose height cuts its cells off keeps them on one line (`row-clip`).
     function applyRowHeights(tbody) {
       if (!rowFit) return;
       for (const tr of tbody.children) {
         const r = rowOf(tr);
         if (r === 0) continue;
+        const th = tr.children[0];
+        if (!th._rz) (th._rz = th.appendChild(document.createElement("span"))).className = "row-resizer"; // the edge to drag (the first rows come with the page)
         const h = rowFit.heightOf(r);
-        const want = h > ROW_H ? h + "px" : "";
-        if (tr.style.height !== want) tr.style.height = want;
+        const want = h === ROW_H ? "" : h + "px";
+        if (tr.style.height !== want) {
+          tr.style.height = want;
+          if (h < ROW_H) tr.style.setProperty("--rh", want);
+          else tr.style.removeProperty("--rh");
+        }
+        tr.classList.toggle("row-short", h < ROW_H);
+        tr.classList.toggle("row-clip", rowFit.isClipped(r));
       }
     }
 
@@ -354,7 +375,8 @@
         const { rows: fr, cols: fc } = frozenCounts();
         const first = rowAtY(vp.scrollTop + frozenHeight(fr));
         const top = visibleIndexOf(first);
-        const visible = Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
+        // Rows under the grid's height put more of them in the viewport: the last one is found by its position.
+        const visible = rowFit?.any() ? visibleIndexOf(rowAtY(vp.scrollTop + vp.clientHeight)) - top + 1 : Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
         return {
           layout: true,
           fr,
@@ -742,7 +764,7 @@
     // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
     function layoutChanged() {
       widthCacheSheet = null;
-      if (wrapRowsPossible()) rowFit.sync();
+      if (wrapRowsPossible()) syncRows();
       return renderWindow(true);
     }
 
@@ -856,7 +878,7 @@
         tds.push(td);
       }
       applyLayoutClasses();
-      if (wrapRowsPossible() && rowFit.sync()) renderWindow(true);
+      if (wrapRowsPossible() && syncRows()) renderWindow(true);
       return tds;
     }
 
@@ -916,7 +938,7 @@
         if (th) th.style.width = w + "px";
         return w;
       });
-      if (wrapRowsPossible() && rowFit.sync()) renderWindow(true);
+      if (wrapRowsPossible() && syncRows()) renderWindow(true);
       const table = tableEl();
       if (table && view) syncTableWidth(table, view);
       return set;
@@ -958,7 +980,7 @@
     return {
       MAX_ROWS, MAX_COLS, ROW_H, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
-      applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W,
+      applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? ROW_H, rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),

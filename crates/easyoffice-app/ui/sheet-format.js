@@ -161,7 +161,7 @@
   const internedStyles = new Map();
 
   function internStyle(style) {
-    if (style.wrap) look.markWrap();
+    look.noteRowFit(style);
     const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.fontFamily || ""}|${style.numFmt || ""}|${look.lookKey(style)}`;
     let shared = internedStyles.get(key);
     if (!shared) {

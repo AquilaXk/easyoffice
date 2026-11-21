@@ -13,6 +13,7 @@ const parseRef = (text) => {
 };
 const refOf = (r, c) => String.fromCharCode(64 + c) + r;
 const env = { __EASYOFFICE_SHEET_GRID_UTILS__: { refOf, parseRef } };
+loadUiModule(UI("sheet-row-height.js"), env);
 loadUiModule(UI("sheet-layout.js"), env);
 loadUiModule(UI("sheet-outline.js"), env);
 const O = env.__EASYOFFICE_SHEET_OUTLINE__;

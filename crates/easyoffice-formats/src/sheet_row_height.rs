@@ -75,22 +75,24 @@ pub fn row_heights_within_bounds(heights: &RowHeights, max_row: u32) -> bool {
             .all(|h| (1..=MAX_ROW_HEIGHT_CENTIPT).contains(&h.centipt))
 }
 
-/// Records the height of the `row` element `attrs` belong to (`ht`, `customHeight`). A value that is not a finite
-/// height of 0..=409 pt is ignored, and the sheet takes no more than [`MAX_ROW_HEIGHTS`] rows.
-pub(crate) fn read_xlsx_row(attrs: &Attrs<'_>, row: u32, styling: &mut SheetStyling) {
-    if styling.row_heights.len() >= MAX_ROW_HEIGHTS {
-        return;
-    }
-    let (mut ht, mut custom) = (None, false);
-    for (name, value) in attrs.iter_raw() {
-        match name.strip_prefix("eo:").unwrap_or(name) {
-            "ht" => ht = ht.or(Some(value)),
-            "customHeight" => custom = matches!(value.trim(), "1" | "true"),
-            _ => {}
+impl SheetStyling {
+    /// Records the height of the `row` element `attrs` belong to (`ht`, `customHeight`). A value that is not a finite
+    /// height of 0..=409 pt is ignored, and the sheet takes no more than [`MAX_ROW_HEIGHTS`] rows.
+    pub(crate) fn record_xlsx_row_height(&mut self, attrs: &Attrs<'_>, row: u32) {
+        if self.row_heights.len() >= MAX_ROW_HEIGHTS {
+            return;
         }
-    }
-    if let Some(height) = ht.and_then(|text| RowHeight::parse(text, custom)) {
-        styling.row_heights.insert(row, height);
+        let (mut ht, mut custom) = (None, false);
+        for (name, value) in attrs.iter_raw() {
+            match name.strip_prefix("eo:").unwrap_or(name) {
+                "ht" => ht = ht.or(Some(value)),
+                "customHeight" => custom = matches!(value.trim(), "1" | "true"),
+                _ => {}
+            }
+        }
+        if let Some(height) = ht.and_then(|text| RowHeight::parse(text, custom)) {
+            self.row_heights.insert(row, height);
+        }
     }
 }
 
