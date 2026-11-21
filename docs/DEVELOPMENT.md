@@ -137,6 +137,27 @@ cargo run -p easyoffice-desktop     # 데스크톱 셸 실행
 
 릴리스 노트는 `docs/releases/v<버전>.md`에 한국어(`## 변경 사항`)·영어(`## Changes`)로 직접 쓴다. 파일이 있으면 릴리스 작업이 본문으로 쓰고, 없으면 자동 생성 노트를 쓴다(PD-274).
 
+**공개된 릴리스는 다시 빌드하지 않습니다(PD-283).** QA가 드래프트를 공개하면 태그가 생기고 그 태그 push가 릴리스 작업을 다시 시작합니다. 태그의 릴리스가 이미 공개돼 있으면 `prepare` 잡이 빌드와 발행을 모두 건너뛰고, 어떤 경로로도 공개된 자산을 덮어쓰지 않습니다. 공개된 버전을 고쳐 내려면 새 버전(태그)으로 냅니다. 수동 실행(`publish=true`)이 공개된 버전을 가리키면 빌드 전에 실패합니다.
+
+**발행 잡이 `403 Resource not accessible by integration`으로 실패했을 때.** 빌드 잡이 끝났다면 산출물은 Actions 아티팩트에 남아 있습니다. 공식 문서는 릴리스 만들기·고치기의 대상 커밋이 기본 브랜치와 비교해 `.github/workflows/` 파일을 더하거나 바꾸면 `GITHUB_TOKEN`으로는 권한을 줄 수 없다고 적습니다. 빌드가 한 시간 넘게 걸려 그 사이 main에 워크플로 변경을 올리면 이 상태가 됩니다(발행 잡의 "Record the token's release access…" 단계가 어긋난 워크플로 파일을 경고로 남깁니다). 실패한 쓰기의 상태 줄과 `x-accepted-github-permissions`·`x-github-request-id`는 "Create or update the GitHub Release" 단계 로그에 남습니다. 드래프트는 로컬에서 이렇게 채웁니다. 대상 커밋은 그 실행의 `headSha`입니다.
+
+```bash
+RUN=<run id>; VER=<버전>
+SHA=$(gh run view "$RUN" --json headSha --jq .headSha)
+gh run download "$RUN" -p 'release-*' -D .scratch/release-dl
+mkdir -p .scratch/release-assets
+find .scratch/release-dl -type f -exec mv {} .scratch/release-assets/ \;
+node scripts/release-assets.mjs manifest .scratch/release-assets "$VER"     # latest.json
+node scripts/release-assets.mjs checksums .scratch/release-assets          # SHA256SUMS.txt
+gh release create "v$VER" .scratch/release-assets/* --draft --target "$SHA" \
+  --title "EasyOffice v$VER" --notes-file "docs/releases/v$VER.md"
+# 드래프트가 이미 있으면 create 대신:
+#   gh release edit "v$VER" --target "$SHA" --notes-file "docs/releases/v$VER.md"
+#   gh release upload "v$VER" .scratch/release-assets/* --clobber
+```
+
+개인 계정으로 워크플로 파일이 다른 커밋을 대상으로 삼으려면 `gh auth refresh -s workflow`로 `workflow` 범위가 있어야 합니다. 드래프트 확인 뒤 QA가 공개하며, 공개된 릴리스에는 `upload --clobber`를 쓰지 않습니다.
+
 **업데이트.** 설치된 앱은 하루 1회 이하로 새 릴리스를 확인합니다(도움말 메뉴에서 끌 수 있습니다). 새 버전이 있으면 카드에 **설치하고 다시 시작**이 나타나며, 앱이 릴리스에서 패키지를 내려받아 앱에 들어 있는 공개 키로 서명을 확인한 뒤 설치하고 다시 시작합니다. 저장하지 않은 변경 사항이 있는 창이 있으면 설치하지 않고, 서명이 맞지 않는 패키지는 설치하지 않습니다. `.deb`·`.rpm` 업데이트는 관리자 권한을 요청하며, 업데이터가 다루지 못하는 설치 형태는 릴리스 페이지에서 직접 받습니다(카드에 버튼이 있습니다). 릴리스에는 패키지마다 `.sig` 파일과 업데이터가 읽는 `latest.json`도 들어 있습니다.
 
 #### macOS

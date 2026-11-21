@@ -15,6 +15,8 @@
 - [ ] Windows 로그오프·종료에서 저장 안 된 창이 있으면 종료 화면에 "저장하지 않은 문서"가 뜨고 저장 확인이 이어지는지, 취소하면 앱이 남는지(PD-191). Linux `kill -TERM`·로그아웃에서 같은 확인(PD-191)
 
 ## 배포
+- [ ] 릴리스 발행 잡의 쓰기 403 원인 확정: 다음 릴리스 실행에서 "Record the token's release access…" 경고와 "Create or update the GitHub Release" 로그의 `x-accepted-github-permissions`·`x-github-request-id`를 보고 PD-283 6항(대상 커밋과 main의 워크플로 파일 차이 가설)을 확정하거나 고침
+- [ ] v0.2.1에 조건부 서식 메뉴(`2c5b3816`) 포함
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
