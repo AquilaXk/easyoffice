@@ -495,3 +495,82 @@ node scripts/bench-webui.mjs --app <easyoffice-app> --chrome <브라우저> --ui
 - 같은 기기에서 이전 커밋과 이번 커밋을 번갈아 재지 않았다. 이전 값과의 차이를 코드 변경의 효과로 읽을 수 없다.
 - Windows·Linux는 못 잼.
 
+## 8. 실행 파일·번들·설치본 크기 (2026-11-22, PD-295)
+
+macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38fda`. 분석 원본은 `cargo bloat`(크레이트·함수), `size -m`(구간), 자산별 brotli 크기(품질 11, tauri 릴리스와 같은 설정)다.
+
+### 8.1 실행 파일 구성 (심볼 제거 전)
+
+| 항목 | 데스크톱 `EasyOffice` | CLI `easyoffice-app` |
+|---|---|---|
+| 파일 | 64,103,952 B | 13,750,704 B |
+| 코드(`__text`) | 24.8 MB | 7.1 MB |
+| 읽기 전용 데이터(`__const`) | 28.9 MB | 4.3 MB |
+| 예외·언와인드 표(`__eh_frame` + `__gcc_except_tab`) | 2.9 MB | 0.7 MB |
+| 링크 편집(`__LINKEDIT`, 심볼 표 포함) | 5.4 MB | 1.2 MB |
+
+- 데스크톱의 `__const` 28.9 MB 중 24.7 MB는 임베드한 UI 자산이다. 나머지 약 4 MB는 코드의 정적 표다. `include_bytes!`로 들어가는 자산은 없다. 배포 코드의 `include_str!`도 없다(시험의 소스 계약 검사만 쓴다). UI는 `tauri.conf.json`의 `frontendDist`(`crates/easyoffice-app/ui`)를 `tauri-codegen`이 파일마다 brotli로 눌러 실행 파일에 넣는다. CLI는 `embed-hwp-studio` 기능이 꺼져 있어 편집기 번들이 없다.
+- 코드는 평평하다. 가장 큰 함수가 190 KiB(`main::inner` 클로저)이고 그다음부터 76 KiB 이하다. 한 함수를 고쳐서 크게 줄일 곳이 없다.
+- 데스크톱 `.text` 23.7 MiB의 크레이트별 상위: `std` 4.0, `rhwp` 3.8, `easyoffice_formats` 2.7, `easyoffice_sheet` 1.3, `tauri` 1.1, `tokio` 0.98, `easyoffice_app` 0.88, 셸 본체 0.82, `hayro_syntax` 0.50, `zune_jpeg` 0.37 MiB. 나머지 151개 크레이트가 2.1 MiB.
+- `cargo tree -d`의 중복 버전(`base64` 3개, `brotli` 2개, `hashbrown` 2개 등)은 거의 전부 tauri·rhwp 안쪽 의존이고, 이 저장소의 `Cargo.toml`로는 하나로 합칠 수 없다. `image`의 기능은 이미 `default-features = false`이며 `tiff`·`bmp`는 고정한 rhwp가 켠다.
+
+### 8.2 임베드한 UI 자산 (`crates/easyoffice-app/ui`, 235개 파일)
+
+| 묶음 | 원본 | brotli 후 | 비고 |
+|---|---|---|---|
+| 글꼴 `hwp-studio/fonts` (woff2 28개) | 20.43 MB | 20.22 MB | 이미 woff2라 거의 안 줄어든다. 실행 파일의 약 1/3 |
+| `rhwp_bg.wasm` | 11.82 MB | 3.13 MB | `vendor/rhwp-core`의 미리 빌드한 산출물(해시 고정) |
+| 편집기 JS·CSS | 2.22 MB | 0.34 MB | |
+| 편집기 그림(`icon_small_ko*.svg` 2개 0.92 MB), HTML, 매니페스트 | 1.03 MB | 0.20 MB | |
+| 우리 UI(JS·CSS·HTML) | 3.49 MB | 0.85 MB | |
+| 합계 | 38.98 MB | 24.74 MB | |
+
+글꼴 상위: D2Coding Bold·Regular 3.46 MB, NotoSerifKR 2.0 MB, Pretendard 9가중치 6.90 MB(가중치마다 0.69~0.80 MB), NanumGothicCoding 1.57 MB, NanumMyeongjo 1.87 MB, NotoSansKR 1.71 MB. 편집기 번들의 글꼴 이름 28개는 모두 코드가 참조한다(미사용 글꼴 없음).
+
+중복: 같은 파일이 둘로 들어가는 자산은 없다. 소스 트리에서 `third_party/rhwp/assets/fonts`와 `ui/hwp-studio/fonts`가 바이트 같은 사본이지만 앞쪽은 빌드 입력이라 설치본에 안 들어간다. NotoSansKR Regular만 형식을 달리해 둘이 들어간다. woff2 0.56 MB(UI)와 TTF 2.52 MB(`pdf-fonts/`, PDF 글꼴 대체용 리소스).
+
+### 8.3 설치본 (v0.2.1)
+
+| 자산 | 크기 | 구성 |
+|---|---|---|
+| macOS dmg (universal) | 111.2 MB | `.app` 190 MB(압축 전): 데스크톱 132.8 MB(x86_64 68.7 + arm64 64.0), Quick Look 미리보기 30.8 MB(15.7 + 15.0), 썸네일 27.7 MB(14.2 + 13.5), `pdf-fonts` TTF 2.5 MB |
+| Windows 설치 파일 | 39.5 MB | NSIS |
+| Linux deb x64 | 46.3 MB | `usr/bin/EasyOffice` 73.6 MB(ELF) + TTF 2.5 MB |
+| Linux AppImage x64 | 124.9 MB | 미분석(런타임 라이브러리 번들이 대부분일 것으로 보이나 풀어 보지 않았다) |
+
+- universal이라 UI 자산(글꼴 20.2 MB, wasm 3.1 MB)이 두 아키텍처 조각에 한 번씩, 합쳐서 두 번 들어간다. 글꼴은 압축이 안 되므로 dmg에서 약 40 MB가 글꼴이다.
+- Quick Look 확장 둘이 각각 rhwp 전체를 정적으로 묶는다(`.text` 7.3 MB 중 rhwp 2.5 MB). 확장마다 아키텍처 둘이라 조각이 4개, 합계 58.5 MB다.
+
+### 8.4 적용한 것 (PD-295)
+
+| 변경 | 전 | 후 | 차이 |
+|---|---|---|---|
+| 릴리스 `strip = "symbols"`, 데스크톱 | 64,103,952 B | 59,644,048 B | -4,459,904 B (-7.0%) |
+| 릴리스 `strip = "symbols"`, CLI | 13,750,704 B | 12,955,888 B | -794,816 B (-5.8%) |
+| Quick Look 미리보기 조각(arm64) `strip` | 15,035,920 B | 11,824,304 B | -3,211,616 B (-21.4%) |
+| Quick Look 썸네일 조각(arm64) `strip` | 13,478,768 B | 10,660,752 B | -2,818,016 B (-20.9%) |
+
+- 속도: CLI `--self-test` 실제 경로를 전·후 바이너리로 5회씩 번갈아 쟀다. `docx_to_pdf_1mb` 중앙값 21.4 → 21.4 ms, `xlsx_100k_cells_pack_unpack` 52.4 → 51.7 ms, `sheet_recalc_10k_rows` 7.8 → 7.7 ms. 코드는 그대로이고 심볼 표만 빠지므로 편차 안이다.
+- Quick Look 전 값은 v0.2.1 릴리스의 조각이다. 같은 소스에서 `strip`만 달리한 조각의 시험 값(15,035,920 → 11,897,120 B)과 새로 빌드한 값이 비슷하다. 새 조각은 `codesign --verify --strict`를 통과했고 진입점(`LC_MAIN`)과 `_NSExtensionMain` 가져오기가 남아 있다. 확장을 Quick Look이 실제로 불러 렌더하는 것은 이 기기에서 못 봤다.
+- Windows·Linux는 못 잼. Linux deb의 실행 파일(73.6 MB)은 심볼 표를 가진 상태라 줄어드는 폭이 macOS보다 클 가능성이 있으나 재지 않았다.
+
+### 8.5 제안만 한 것 (구현하지 않음)
+
+| 후보 | 예상 | 위험·이유 |
+|---|---|---|
+| macOS를 universal 하나에서 arm64·x64 dmg 둘로 | 사용자당 dmg가 약 111 MB에서 약 55 MB로 `[추정]`(조각 하나가 반) | `.github/` 릴리스 워크플로, `latest.json`의 `darwin-aarch64`·`darwin-x86_64` 항목, 업데이트 서명 대상이 바뀐다 |
+| Pretendard 9가중치(6.9 MB)를 가변 글꼴 하나로 | 실행 파일 약 -4.9 MB `[추정: 가변 woff2 약 2 MB]` | 글꼴 파일과 `fonts.json`·해시 검증, 편집기 글꼴 목록, 가중치별 글리프 폭이 바뀐다. 문서 조판 폭이 달라질 수 있어 QA가 정해야 한다 |
+| 글꼴 부분 집합화(문서에서 안 쓰는 글리프 제거) | 큰 폭 | 글자가 빠질 위험. OFL은 개조본 이름 변경 조건(예약 글꼴 이름)이 있을 수 있다 |
+| D2Coding 둘(3.46 MB)·미사용 가중치를 필요할 때 내려받기 | -3.5 MB~ | 오프라인 우선 원칙과 어긋난다 |
+| `rhwp_bg.wasm`에 `wasm-opt -Oz` | 3.13 MB brotli에서 한 자리 % `[추정]` | 고정한 산출물의 해시·출처(`PROVENANCE.json`)가 바뀌고 wasm-opt가 이 기기에 없다 |
+| PDF 글꼴 TTF 2.52 MB를 없애고 UI의 woff2를 읽어 쓰기 | 설치본 약 -1 MB(TTF 압축 0.9 MB) | woff2 해독 의존이 늘고 PDF 워커 경로가 바뀐다 |
+| Quick Look 두 확장이 rhwp를 공유 프레임워크로 | 아키텍처 조각당 약 -10 MB, 합계 약 -20 MB `[추정]` | 샌드박스 확장의 프레임워크 적재·서명 구조 변경. 크다 |
+| tauri·tokio 등 UI 껍데기 크레이트에만 `opt-level = "s"` | 실행 파일 약 -0.6 MB `[추정: 해당 코드 약 2.8 MB의 20%]` | 이득이 작고 PD-276의 "측정 없이 쓰지 않는다"를 다시 열어야 한다 |
+| `panic = "abort"`, fat LTO | | PD-276이 이미 기각(패닉 복구 경로, 빌드 시간) |
+
+### 8.6 한계
+
+- 크기는 macOS arm64만 쟀다. 다른 OS의 실행 파일 구성은 설치본 크기와 deb 안의 파일 크기로만 짐작했다.
+- `cargo bloat`의 크레이트별 값은 심볼 이름으로 나눈 추정이다(제네릭 인스턴스는 호출한 쪽이 아니라 정의한 크레이트로 센다).
+- 이 기기의 `cargo build --target aarch64-apple-darwin`은 릴리스 프로필 `strip = "debuginfo"`일 때 `rustversion` 매크로 크레이트를 못 불러 Quick Look 크레이트 빌드가 실패했다(`can't find crate for rustversion`). `CARGO_PROFILE_RELEASE_STRIP=none`을 주면 같은 소스가 빌드된다. 위 Quick Look 값은 그렇게 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과이고, 최종 조각은 스크립트의 `strip`을 거친다. CI 기기에서는 재현하지 않았다.
+
