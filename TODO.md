@@ -21,6 +21,8 @@
 - [ ] PDF 스튜디오 저장: Square·Circle·Line·Polygon·FileAttachment 주석, 태그 구조 트리, 전자서명은 저장하지 못하고 경고만 한다(PD-266, 증분 저장 또는 종류별 복사)
 - [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인(PD-131)
 - [ ] 엔진 PDF 읽기를 크레이트로 바꿀지 QA 결정: 그대로 두기, 워커 프로세스로 옮기기, 읽기 크레이트를 포크해 해제 상한 넣기(PD-269 12항)
+- [ ] 엔진 HWP·HWPX 읽기를 rhwp 파서로 바꿀지: 파서를 워커 프로세스로 격리하고 편집기 모델 ↔ `RichDocument` 변환을 새로 짜야 한다(PD-269 13항)
+- [ ] CI 세 운영체제에서 `ole2_writer_boundary_pd269.rs`의 고정 해시가 같은지 확인(PD-269 13항)
 - [ ] 엔진·셸 PDF 상한 표 통합 여부(객체 65,536 대 1,000,000, 쪽 트리 노드 4,096 대 100,000, PD-269 11항)
 - [ ] CI 세 운영체제에서 `the_bytes_are_the_same_on_every_operating_system`의 고정 해시가 같은지 확인(PD-269 11항)
 
