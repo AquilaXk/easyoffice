@@ -97,6 +97,7 @@ cargo test -p easyoffice-desktop
 
 - 위생 가드는 타 서비스·앱·오픈소스 이름, AI 흔적, 줄 수 상한, 수치 정합성(문서 숫자 동기화), XSS·CSP·셸 권한 계약을 검사합니다.
 - 커밋 메시지는 `node scripts/check-commit-messages.mjs <base> <head>`(전체 SHA)로 검사합니다. 제목은 한국어 한 줄이고 `[Feat]`·`[Fix]`·`[Test]`·`[Chore]`·`[Docs]` 접두사를 붙입니다.
+- 실제 WebKit DOM 시험(CI `webkit-dom`, PD-281)은 `cargo build -p easyoffice-app` 뒤 `mkdir -p .scratch/pw && npm install --prefix .scratch/pw --ignore-scripts playwright-core@1.56.1 && node .scratch/pw/node_modules/playwright-core/cli.js install webkit`으로 한 번 준비하고 `EO_PW_DIR=$PWD/.scratch/pw node scripts/webkit-dom/run.mjs`로 돌립니다(브라우저 위치는 `PLAYWRIGHT_BROWSERS_PATH`, 엔진 위치는 `EO_APP`). 일반 `node --test`에는 들어가지 않으며 브라우저가 없으면 실패합니다.
 - `--self-test`는 포맷·수식·보안 불변식과 벤치마크의 결과 동일성을 확인합니다. 속도 하한은 release 빌드에서만 판정합니다(PD-082). 측정값은 [performance.md](performance.md)에 있습니다.
 
 ### 한글 편집기 번들 준비

@@ -4979,3 +4979,18 @@
 - **Trade-offs** 기타·분수·시간 목록의 한국어 형식은 표 계산 프로그램 문서 페이지에서 목록 전체를 확인하지 못해 알려진 형식과 참조 구현의 한국어 프로필로 채웠다(실제 프로그램과 항목 수·이름이 다를 수 있다). Ctrl+Home은 틀 고정을 무시하고 A1로 간다(그 프로그램은 틀 고정이면 고정되지 않은 첫 칸일 수 있다, 확인 못 함). 돈 뒤 저장되는 화면 상태(시트 전환 복원)는 범위 대신 활성 칸으로 줄어든다. 편집 중 격자를 스크롤하면 편집 칸의 오른쪽 한계가 다음 입력까지 갱신되지 않는다.
 - **Verified by** `node --test scripts/test-*.mjs`(이동 순수 규칙 15개, 이동 DOM 하니스 12개: 이전 코드에서 8개가 실패함을 확인, 편집 칸 12개, 서식 목록 3개), 실제 헤드리스 크롬 흐름 9개(별도 프로필, CDP 키·마우스 입력: 값 입력, Ctrl+방향키, 범위 Enter·Tab, Tab 뒤 Enter, Home·End·페이지 키, 편집 칸 오른쪽·아래 넓힘, 행 높이를 정한 줄바꿈 칸, 서식 대화상자 목록과 엔진 표본), 밝은·어두운 테마 전후 캡처.
 - **Revisit when** Ctrl+PageUp·PageDown 시트 이동, 전화 번호 형식, 틀 고정에서의 Ctrl+Home, 조건부 서식 UI를 다룰 때.
+
+## PD-281. CI에 실제 WebKit DOM 시험 잡(`webkit-dom`)
+
+- **Status** Implemented (QA 승인 2026-11-21). `scripts/webkit-dom/`(`run.mjs`, `support.mjs`, `sheet.mjs`, `doc.mjs`), `.github/workflows/ci.yml`의 macOS 잡 `webkit-dom`.
+- **Context** `node --test`의 DOM 시험은 가짜 DOM 하니스에서 돈다. 하니스가 `childNodes`를 배열로 줘서, 실제 `NodeList`에 `filter`가 없어 표 HTML 붙여넣기가 행을 못 읽던 오류를 놓쳤다(수정은 `c4c8e5e0`). macOS 앱의 웹뷰와 같은 WebKit에서 페이지를 돌려 이런 차이를 잡는다.
+- **Decision (`PD-281`)**
+  1. 엔진 `easyoffice-app --serve`가 올린 페이지를 실제 WebKit으로 열고 실제 키·마우스·클립보드 이벤트로 조작한다. 한 단계마다 새 페이지를 열어 서로 영향을 주지 않으며, 실패해도 나머지 단계를 계속 돌려 한 번에 모두 보인다.
+  2. 단계는 시트(표 HTML 붙여넣기, 반복 붙여넣기, 수식 포인트 모드의 클릭·F4, 편집 칸 넓힘, 범위 안 Enter·Tab)와 문서(Office HTML 붙여넣기, 선택 교체, 표 Tab)로 한정한다. 합쳐서 10초 안팎이다.
+  3. 브라우저 구동은 `playwright-core`이며 리포 의존성(`package.json`)에 넣지 않는다. CI 잡이 고정 버전 `1.56.1`을 임시 디렉터리에 설치하고 `EO_PW_DIR`로 알린다. 엔진 바이너리·패키지·브라우저가 없으면 건너뛰지 않고 이 잡이 실패한다. `scripts/test-*.mjs` 일반 시험에는 섞지 않는다(파일 이름을 `test-`로 시작하지 않음).
+  4. 잡은 `verify`와 별개의 macOS 잡이다. `verify`는 데스크톱 셸을 빌드하고 엔진 바이너리는 빌드하지 않아 재사용할 산출물이 없다. `easyoffice-app`만 debug로 빌드한다. 권한은 `contents: read`, 제한 시간 30분이며 실패하면 단계별 스크린샷·페이지 글·콘솔 줄을 아티팩트로 올린다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스(Apache-2.0)의 유지되는 브라우저 구동 라이브러리 `playwright-core`를 그대로 쓴다. (2) 이미 쓰는 의존성에는 WebKit을 구동하는 것이 없다(기존 헤드리스 Chrome 시험은 CDP 직접 구동). (3) 이식한 코드는 없다.
+- **Why** 가짜 DOM이 실제 브라우저와 어긋나는 곳(컬렉션 타입, 포커스, 선택, 레이아웃)은 하니스를 다듬어서는 막을 수 없고, 같은 엔진에서 돌려야 드러난다.
+- **Trade-offs** 붙여넣기는 시스템 클립보드가 아니라 `ClipboardEvent`를 페이지에 직접 보낸다(WebKit이 클립보드 읽기 권한을 묻기 때문). 그래서 클립보드 읽기 API 경로는 이 잡이 보지 않는다. macOS 러너와 WebKit 빌드가 바뀌면 단계가 흔들릴 수 있어 버전을 고정했다. 로컬 실행은 `docs/DEVELOPMENT.md`.
+- **Verified by** 로컬 WebKit(2215)에서 9단계 통과. `sheet-clip-html.js`의 `Array.from`을 되돌린 엔진에서 표 붙여넣기 두 단계가 실패함을 확인했다(원복).
+- **Revisit when** 시트·문서 단계를 늘릴 때, Windows·Linux 웹뷰용 시험을 만들 때, 클립보드 읽기 API 경로를 검증할 때.
