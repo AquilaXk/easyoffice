@@ -11,6 +11,13 @@
     let drag = null;
     let resize = null;
 
+    const HEAD_SELECTOR = "#pane-sheet th[data-col], #pane-sheet th[data-row]";
+
+    // A column or row header as the point mode takes it: `{ axis, index }`.
+    function headTarget(head) {
+      return head.dataset.col ? { axis: "col", index: grid.colIndex(head.dataset.col) } : { axis: "row", index: Number(head.dataset.row) };
+    }
+
     function onMouseDown(ev) {
       if (ev.button || ev.target?.closest?.(".row-resizer")) return;
       const handle = ev.target?.closest?.(".col-resizer");
@@ -21,10 +28,12 @@
         resize = { col, startX: ev.clientX, startW: grid.colWidth(col) };
         return;
       }
-      const head = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
+      const head = ev.target?.closest?.(HEAD_SELECTOR);
       if (head) {
-        const axis = head.dataset.col ? "col" : "row";
-        if (point.press(ev, { axis, index: axis === "col" ? grid.colIndex(head.dataset.col) : Number(head.dataset.row) })) return;
+        if (point.press(ev, headTarget(head))) {
+          drag = { active: true, point: true };
+          return;
+        }
         ev.preventDefault();
         if (head.dataset.col) selectAxis("col", grid.colIndex(head.dataset.col), Boolean(ev.shiftKey));
         else selectAxis("row", Number(head.dataset.row), Boolean(ev.shiftKey));
@@ -78,7 +87,9 @@
         return;
       }
       if (drag?.point) {
-        if (p) point.over({ r: p.row, c: p.col });
+        const head = ev.target?.closest?.(HEAD_SELECTOR);
+        if (head) point.over(headTarget(head));
+        else if (p) point.over({ r: p.row, c: p.col });
         return;
       }
       if (p && (p.row !== sel.cr || p.col !== sel.cc)) {

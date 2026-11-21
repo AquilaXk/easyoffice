@@ -160,6 +160,99 @@ export const sheetSteps = [
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="E5"]').textContent === "0", null, { timeout: 3000 });
   }],
 
+  ["a drag over the column or row headers while a formula is typed writes the columns or the rows (PD-296)", async (page) => {
+    const center = async (selector) => {
+      const box = await page.locator(selector).boundingBox();
+      return [box.x + box.width / 2, box.y + box.height / 2];
+    };
+    const dragBetween = async (from, to) => {
+      const [x, y] = await center(from);
+      const [x2, y2] = await center(to);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x2, y2, { steps: 6 });
+      await page.mouse.up();
+    };
+    await page.click(td("E5"));
+    await page.keyboard.type("=SUM(");
+    await dragBetween('#pane-sheet th[data-col="B"]', '#pane-sheet th[data-col="D"]');
+    assert.equal(await cellText(page, "E5"), "=SUM(B:D");
+    await dragBetween('#pane-sheet th[data-row="2"]', '#pane-sheet th[data-row="4"]');
+    assert.equal(await cellText(page, "E5"), "=SUM(2:4", "a second drag replaces the reference");
+    assert.equal(await page.textContent("#status-sheet-mode"), "참조");
+  }],
+
+  ["a click on a merged cell while a formula is typed writes the whole merged range (PD-296)", async (page) => {
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_LAYOUT__.addMerge("Sheet1", 8, 3, 9, 4));
+    await page.click(td("B12"));
+    await page.keyboard.type("=SUM(");
+    await page.click(td("D9"));
+    assert.equal(await cellText(page, "B12"), "=SUM(C8:D9", "a click on the cell at the bottom right takes the range");
+    await page.keyboard.type(")");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="B12"]').dataset.formula === "=SUM(C8:D9)");
+  }],
+
+  ["the cells of a table column are pointed as its structured reference, and the engine reads it back (PD-296)", async (page) => {
+    const rows = [["지역", "분기", "매출", "배수"], ["East", "Q1", "10", "1"], ["East", "Q2", "20", "2"], ["West", "Q1", "5", "3"], ["West", "Q2", "7", "4"]];
+    await page.click(td("A1"));
+    await paste(page, { "text/plain": asText(rows) });
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="D5"]')?.textContent === "4");
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_LAYOUT__.setTables("Sheet1", [{ name: "표1", range: "A1:D5", header: true, totals: false, columns: ["지역", "분기", "매출", "배수"], style: "TableStyleMedium2", rowStripes: true }]));
+    const shows = (ref, text) => page.waitForFunction(([r, t]) => document.querySelector(`#pane-sheet td[data-cell="${r}"]`)?.textContent === t, [ref, text], { timeout: 5000 });
+    const formulaOf = (ref) => page.$eval(td(ref), (el) => el.dataset.formula);
+    // The whole data of a column, dragged with the real mouse from outside the table.
+    await page.click(td("E8"));
+    await page.keyboard.type("=SUM(");
+    const first = await page.locator(td("C2")).boundingBox();
+    const last = await page.locator(td("C5")).boundingBox();
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width / 2, last.y + last.height / 2, { steps: 6 });
+    await page.mouse.up();
+    assert.equal(await cellText(page, "E8"), "=SUM(표1[매출]");
+    await page.keyboard.type(")");
+    await page.keyboard.press("Enter");
+    await shows("E8", "42");
+    assert.equal(await formulaOf("E8"), "=SUM(표1[매출])");
+    // A cell of the formula's own row outside the table is the `#This Row` of the table.
+    await page.click(td("E3"));
+    await page.keyboard.type("=");
+    await page.click(td("C3"));
+    assert.equal(await cellText(page, "E3"), "=표1[[#This Row],[매출]]");
+    await page.keyboard.press("Enter");
+    await shows("E3", "20");
+    // A cell of the table's own row, from a cell inside the table, is `[@Column]`.
+    await page.click(td("D3"));
+    await page.keyboard.type("=");
+    await page.click(td("C3"));
+    assert.equal(await cellText(page, "D3"), "=[@매출]");
+    await page.keyboard.press("Enter");
+    await shows("D3", "20");
+    assert.equal(await formulaOf("D3"), "=[@매출]");
+  }],
+
+  ["a click after a finished formula on another sheet enters the formula and selects the cell clicked (PD-296)", async (page) => {
+    await page.click("#btn-add-sheet-tab");
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    await page.click('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
+    await page.click(td("E5"));
+    await page.keyboard.type("=SUM(");
+    await page.click('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]');
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    await page.click(td("A1"));
+    await page.keyboard.type(")");
+    assert.equal(await page.inputValue("#formula-input"), "=SUM(Sheet2!A1)");
+    await page.click(td("C3"));
+    await page.waitForFunction(() => document.querySelector("#active-cell-ref")?.textContent === "C3");
+    assert.equal(await page.$eval("#sheet-tab-bar .sheet-tab-btn.active", (el) => el.dataset.sheetTab), "Sheet2", "the sheet clicked stays");
+    assert.equal(await page.$eval("#status-sheet-mode", (el) => el.hidden), true);
+    await page.click('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="E5"]')?.dataset.formula === "=SUM(Sheet2!A1)");
+  }],
+
   ["the cell being edited widens with its text and goes back on Esc", async (page) => {
     const before = await widthOf(page, "B14");
     await page.click(td("B14"));

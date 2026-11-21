@@ -745,6 +745,7 @@
       applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
+      mergesIn: (r1, c1, r2, c2) => layoutApi?.mergesIn(getSheetName(), r1, c1, r2, c2) ?? [],
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
       getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells,

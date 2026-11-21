@@ -100,6 +100,13 @@
       finishCell: (commit) => finishCell(commit),
       restoreBar: () => restoreBar(),
       switchSheet: (name) => api.switchSheet(name),
+      selectTarget: (target) => {
+        if (!target.axis) return select(target.r, target.c, false);
+        selectAxis(target.axis, target.index, false);
+        focusAnchor();
+      },
+      tablesIn: (sheet, r1, c1, r2, c2) => host.__EASYOFFICE_SHEET_LAYOUT__.tablesIn(sheet, r1, c1, r2, c2),
+      tableBox: (table) => host.__EASYOFFICE_SHEET_LAYOUT__.tableBox(table),
     });
 
     // The entry of a cell as a fill may read it: a formula a protected sheet hides is a value (PD-216).

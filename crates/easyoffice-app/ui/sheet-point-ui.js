@@ -1,11 +1,13 @@
 (function (host) {
   "use strict";
 
-  // Point mode of the formula editor (PD-279): while a formula is typed in a cell or in the formula bar, a click, a drag, a
-  // Shift+click or an arrow key on the grid writes the reference of the cells at the caret (after `=`, an operator, `(` or `,`),
-  // a tab of another sheet puts the sheet in front of it, F2 turns between the entry and the edit of the text, F4 cycles the
-  // `$` of the reference at the caret, and every reference of the formula gets a colour that is drawn on the text and as a box
-  // on the grid. Which places take a reference, the colours and the F4 cycle are `sheet-formula-point.js`; this file ties them
+  // Point mode of the formula editor (PD-279, PD-296): while a formula is typed in a cell or in the formula bar, a click, a drag
+  // (over cells, or over the column or row headers), a Shift+click or an arrow key on the grid writes the reference of the cells
+  // at the caret (after `=`, an operator, `(` or `,`). A merged range is written whole, and the cells of a table as its structured
+  // reference where `sheet-formula-point.js` has one. A press where no reference is awaited, with the entry out on another
+  // sheet, enters the formula on its own sheet and selects what it hit. A tab of another sheet puts the sheet in front of it,
+  // F2 turns between the entry and the edit of the text, F4 cycles the `$` of the reference at the caret, and every reference
+  // of the formula gets a colour that is drawn on the text and as a box on the grid. Which places take a reference, the colours and the F4 cycle are `sheet-formula-point.js`; this file ties them
   // to the two places a formula is edited. The pointed reference is a state of the edit (`point`): typing, the caret keys and a
   // click in the text end it.
   //
@@ -35,11 +37,16 @@
     let dragging = null;
     let writing = false;
     let detaching = false;
+    // A press that ends the entry out on another sheet is under way (see `leave`).
+    let leaving = false;
     let painted = false;
     let layer = null;
     let boxes = [];
     let shown = { spans: [], colors: [] };
     let paletteSet = false;
+    // The cells a structured reference of the entry stands for, by its text: `{ sheet, rg }`. The page wrote it from those
+    // cells; one that was typed is not known and has no box.
+    const known = new Map();
 
     const palette = () => host.__EASYOFFICE_SHEET_CHART_SVG__?.CHART_PALETTE ?? [];
     const colorCount = () => Math.max(1, palette().length);
@@ -140,16 +147,22 @@
       return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
     }
 
+    // The sheet and the cells a reference of the formula points at, when it is on the sheet on show (else null).
+    function targetOf(span) {
+      const here = deps.getSheetName();
+      const found = span.ref === null
+        ? known.get(span.token)
+        : { sheet: span.sheet ? P.sheetOf(span.sheet) : session ? session.sheet : here, rg: P.rangeOf(span.ref) };
+      return found?.rg && found.sheet.toLowerCase() === here.toLowerCase() ? found.rg : null;
+    }
+
     // The boxes of the references that point at the sheet on show.
     function paintBoxes() {
       const vp = byId("sheet-viewport");
       if (!vp) return;
-      const here = deps.getSheetName();
-      const origin = session ? session.sheet : here;
       const items = [];
       shown.spans.forEach((span, i) => {
-        const target = span.sheet ? P.sheetOf(span.sheet) : origin;
-        const rg = target.toLowerCase() === here.toLowerCase() ? P.rangeOf(span.ref) : null;
+        const rg = targetOf(span);
         if (rg) items.push({ rg, color: shown.colors[i] });
       });
       if (!layer) {
@@ -204,7 +217,7 @@
       const bar = barEl();
       const copy = byId("sheet-formula-colors");
       if (!bar || !copy) return;
-      const spans = editing ? P.refSpans(bar.value) : [];
+      const spans = editing ? P.colorSpans(bar.value) : [];
       const colors = P.colorIndexes(spans, colorCount());
       copy.hidden = spans.length === 0;
       bar.classList.toggle("colored", spans.length > 0);
@@ -246,7 +259,7 @@
       if (!s && !painted) return;
       painted = Boolean(s);
       applyPalette();
-      shown.spans = s ? P.refSpans(s.text()) : [];
+      shown.spans = s ? P.colorSpans(s.text()) : [];
       shown.colors = P.colorIndexes(shown.spans, colorCount());
       paintBoxes();
       paintCellText(s, shown.spans, shown.colors);
@@ -270,9 +283,39 @@
       };
     }
 
+    // The range grown over every merged range it touches, until no more is touched (the whole merged range is one cell).
+    function withMerges(rg) {
+      let box = rg;
+      for (;;) {
+        const grown = grid.mergesIn(box.r1, box.c1, box.r2, box.c2).reduce(
+          (all, m) => ({ r1: Math.min(all.r1, m.r1), c1: Math.min(all.c1, m.c1), r2: Math.max(all.r2, m.r2), c2: Math.max(all.c2, m.c2) }),
+          box
+        );
+        if (grown.r1 === box.r1 && grown.c1 === box.c1 && grown.r2 === box.r2 && grown.c2 === box.c2) return box;
+        box = grown;
+      }
+    }
+
+    // The cell of the entry, when it is on the sheet on show: a cell of the formula's own row is `#This Row`.
+    function entryCell() {
+      const here = deps.getSheetName();
+      if (!session) return { ...deps.getActiveCell() };
+      const at = session.sheet.toLowerCase() === here.toLowerCase() ? grid.parseRef(session.ref) : null;
+      return at ? { r: at.row, c: at.col } : null;
+    }
+
+    // `Table1[Column]` and its kin for cells of the one table of the sheet on show that hold them, else null.
+    function structuredOf(rg) {
+      const sheet = deps.getSheetName();
+      const tables = deps.tablesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
+      return tables.length === 1 ? P.structuredRef(rg, tables[0], deps.tableBox(tables[0]), entryCell()) : null;
+    }
+
     function writeRef(s, ctx, anchor, focus, axis) {
-      const rg = rangeBetween(anchor, focus, axis);
-      const out = P.applyRef(s.read().text, ctx, prefixOf() + P.rangeText(rg, axis));
+      const rg = axis ? rangeBetween(anchor, focus, axis) : withMerges(rangeBetween(anchor, focus, null));
+      const structured = axis ? null : structuredOf(rg);
+      if (structured) known.set(structured, { sheet: deps.getSheetName(), rg });
+      const out = P.applyRef(s.read().text, ctx, structured ?? prefixOf() + P.rangeText(rg, axis));
       point = { start: out.start, end: out.end, anchor, focus, axis };
       writing = true;
       s.write(out.text, out.caret);
@@ -284,8 +327,12 @@
       return { start: point.start, end: point.end };
     }
 
+    // The cell a header stands for: the first of its column or row.
+    const headCell = (head) => (head.axis === "col" ? { r: 1, c: head.index } : { r: head.index, c: 1 });
+
     // A press on a cell (`target` is `{ r, c }`) or on a header (`{ axis, index }`) of the grid while a formula is being edited.
-    // Returns true when the press is a pointing and the edit keeps its focus.
+    // Returns true when the press is a pointing and the edit keeps its focus. With the entry out on another sheet and the
+    // formula finished, the press ends the entry (see `leave`).
     function press(ev, target) {
       const s = surface();
       if (!s) return false;
@@ -293,25 +340,23 @@
       if (ctx.mode === "none") {
         if (!session) return false;
         ev.preventDefault();
-        feedback("Enter로 확정하거나 Esc로 취소");
+        void leave(target);
         return true;
       }
       ev.preventDefault();
-      const cell = target.axis ? (target.axis === "col" ? { r: 1, c: target.index } : { r: target.index, c: 1 }) : mergedCell(target);
+      const axis = target.axis ?? null;
+      const cell = axis ? headCell(target) : target;
       const anchor = ev.shiftKey ? (point?.anchor ?? deps.getActiveCell()) : cell;
-      writeRef(s, ctx, anchor, cell, target.axis ?? null);
-      dragging = target.axis ? null : { s };
+      writeRef(s, ctx, anchor, cell, axis);
+      dragging = { s, axis };
       return true;
     }
 
-    function mergedCell(cell) {
-      const merged = grid.mergeAt?.(cell.r, cell.c);
-      return merged ? { r: merged.r1, c: merged.c1 } : cell;
-    }
-
-    function over(cell) {
-      if (!dragging || !point || point.axis) return;
-      writeRef(dragging.s, pointedCtx(), point.anchor, mergedCell(cell), null);
+    // The mouse over a cell or a header (as `press` takes them) while the button is held: a drag that began on a cell goes on
+    // over cells, one that began on a column or row header over the headers of that axis.
+    function over(target) {
+      if (!dragging || !point || point.axis !== dragging.axis || (target.axis ?? null) !== dragging.axis) return;
+      writeRef(dragging.s, pointedCtx(), point.anchor, dragging.axis ? headCell(target) : target, dragging.axis);
     }
 
     function release() {
@@ -320,11 +365,7 @@
 
     // The reference the caret is in as the cells it was pointed from and to, when it is on the sheet on show.
     function seedOf(ctx) {
-      const span = ctx.span;
-      if (!span) return null;
-      const here = deps.getSheetName();
-      const target = span.sheet ? P.sheetOf(span.sheet) : session ? session.sheet : here;
-      const rg = target.toLowerCase() === here.toLowerCase() ? P.rangeOf(span.ref) : null;
+      const rg = ctx.span ? targetOf(ctx.span) : null;
       return rg && !rg.axis ? { anchor: { r: rg.r1, c: rg.c1 }, focus: { r: rg.r2, c: rg.c2 } } : null;
     }
 
@@ -449,6 +490,27 @@
       }
     }
 
+    // A press on a cell or a header where no reference is awaited, with the entry out on another sheet: the formula is entered
+    // on its own sheet like Enter does, then the sheet the press was made on comes back and the press selects what it hit.
+    async function leave(target) {
+      if (leaving) return;
+      leaving = true;
+      try {
+        const shownSheet = deps.getSheetName();
+        await finish(true);
+        if (session) return;
+        try {
+          await deps.switchSheet(shownSheet);
+        } catch {
+          feedback("누른 시트로 돌아가지 못함");
+          return;
+        }
+        deps.selectTarget(target);
+      } finally {
+        leaving = false;
+      }
+    }
+
     // A key in the formula bar (called by the bar's key handler); true when it was taken.
     function barKey(ev) {
       if (session && (ev.key === "Enter" || ev.key === "Escape")) {
@@ -473,6 +535,7 @@
     function endBarEdit() {
       barDirty = false;
       point = null;
+      known.clear();
       refresh();
     }
 
@@ -484,6 +547,7 @@
     function editEnded() {
       if (detaching) return;
       point = null;
+      known.clear();
       refresh();
     }
 

@@ -9,7 +9,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 
 const ui = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));
 const env = {};
-for (const name of ["sheet-refs.js", "sheet-ref-tokens.js", "sheet-formula-point.js"]) loadUiModule(ui(name), env);
+for (const name of ["sheet-refs.js", "sheet-ref-tokens.js", "sheet-table-totals.js", "sheet-formula-point.js"]) loadUiModule(ui(name), env);
 const P = env.__EASYOFFICE_SHEET_FORMULA_POINT__;
 
 const f4 = (text, caret = text.length) => P.cycleRef(text, caret);
@@ -158,4 +158,62 @@ test("refSpans skips text literals, structured references, names, and a literal 
   assert.deepEqual(P.refSpans("A1+B2"), [], "text that is not a formula");
   const [span] = P.refSpans("=SUM('My Sheet'!$A$1:B2)");
   assert.deepEqual({ start: span.start, end: span.end, sheet: span.sheet, ref: span.ref }, { start: 5, end: 23, sheet: "'My Sheet'!", ref: "$A$1:B2" });
+});
+
+// A table `매출` over B2:E7: the header on row 2, data rows 3..6, a totals row on 7, columns 부문, 1분기, 분기 합계, a.b.
+const TABLE = { name: "매출", columns: ["부문", "1분기", "분기 합계", "a.b"], header: true, totals: true };
+const BOX = { r1: 2, c1: 2, r2: 7, c2: 5 };
+const rect = (r1, c1, r2, c2) => ({ r1, c1, r2, c2, axis: null });
+const refOf = (rg, at = null) => P.structuredRef(rg, TABLE, BOX, at);
+
+test("a whole data column is `Table[Column]`, several are `Table[[A]:[B]]`, and a name with a sign takes double brackets", () => {
+  assert.equal(refOf(rect(3, 3, 6, 3)), "매출[1분기]");
+  assert.equal(refOf(rect(3, 4, 6, 4)), "매출[분기 합계]");
+  assert.equal(refOf(rect(3, 5, 6, 5)), "매출[[a.b]]");
+  assert.equal(refOf(rect(3, 2, 6, 4)), "매출[[부문]:[분기 합계]]");
+});
+
+test("a cell of the formula's own row is `[@Column]` inside the table and `Table[[#This Row],[Column]]` outside it", () => {
+  assert.equal(refOf(rect(4, 3, 4, 3), { r: 4, c: 5 }), "[@1분기]", "the formula is in the table, same row");
+  assert.equal(refOf(rect(4, 4, 4, 4), { r: 4, c: 5 }), "[@[분기 합계]]");
+  assert.equal(refOf(rect(4, 5, 4, 5), { r: 4, c: 2 }), "[@[a.b]]");
+  assert.equal(refOf(rect(4, 3, 4, 4), { r: 4, c: 2 }), "[@[1분기]:[분기 합계]]");
+  assert.equal(refOf(rect(4, 3, 4, 3), { r: 4, c: 9 }), "매출[[#This Row],[1분기]]", "the formula is in the same row, outside the table");
+  assert.equal(refOf(rect(4, 3, 4, 4), { r: 4, c: 9 }), "매출[[#This Row],[1분기]:[분기 합계]]");
+});
+
+test("what is no whole column and no cell of the formula's row stays an A1 reference", () => {
+  assert.equal(refOf(rect(4, 3, 4, 3), { r: 5, c: 9 }), null, "another row");
+  assert.equal(refOf(rect(4, 3, 4, 3)), null, "no formula cell on this sheet");
+  assert.equal(refOf(rect(3, 3, 5, 3)), null, "part of a column");
+  assert.equal(refOf(rect(2, 3, 6, 3)), null, "with the header");
+  assert.equal(refOf(rect(3, 3, 7, 3)), null, "with the totals row");
+  assert.equal(refOf(rect(3, 1, 6, 3)), null, "a cell outside the table");
+  assert.equal(refOf({ r1: 1, c1: 3, r2: 1048576, c2: 3, axis: "col" }), null, "a whole sheet column");
+});
+
+test("a table without a header or a totals row has its data from the first to the last row", () => {
+  const bare = { name: "t", columns: ["x", "y"], header: false, totals: false };
+  assert.equal(P.structuredRef(rect(2, 2, 7, 2), bare, BOX, null), "t[x]");
+  assert.equal(P.structuredRef(rect(2, 2, 6, 2), bare, BOX, null), null);
+});
+
+test("a column name that is empty or missing gives no structured reference", () => {
+  assert.equal(P.structuredRef(rect(3, 3, 6, 3), { ...TABLE, columns: ["부문", "", "c", "d"] }, BOX, null), null);
+  assert.equal(P.structuredRef(rect(3, 5, 6, 5), { ...TABLE, columns: ["부문", "b"] }, BOX, null), null);
+});
+
+test("a structured reference is a span of the formula: the point replaces it, the colours count it, F4 and refSpans skip it", () => {
+  const text = "=SUM(매출[1분기])+B3";
+  const spans = P.colorSpans(text);
+  assert.deepEqual(spans.map((s) => s.token), ["매출[1분기]", "B3"]);
+  assert.equal(spans[0].ref, null);
+  assert.deepEqual(P.refSpans(text).map((s) => s.token), ["B3"]);
+  const ctx = P.pointContext(text, "=SUM(매출[1분기]".length);
+  assert.deepEqual({ mode: ctx.mode, start: ctx.start, end: ctx.end }, { mode: "replace", start: 5, end: 12 });
+  assert.equal(P.applyRef(text, ctx, "C3").text, "=SUM(C3)+B3");
+  assert.equal(P.cycleRef(text, "=SUM(매출[1분기".length), null, "F4 has nothing to cycle in it");
+  const unqualified = P.colorSpans("=[@Q1]*2");
+  assert.deepEqual(unqualified.map((s) => s.token), ["[@Q1]"]);
+  assert.equal(P.colorSpans('="매출[x]"').length, 0, "not inside a text literal");
 });

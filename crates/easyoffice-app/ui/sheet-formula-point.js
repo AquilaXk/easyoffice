@@ -17,11 +17,25 @@
 // (spaces between are skipped), never the `%`, `#` and `@` the reference's `matchRefDrawToken` accepts, and never inside a
 // text literal or a quoted sheet name. A selected text is replaced by the reference. The cycle covers the cell, range, column
 // and row forms of the pattern and writes letters in upper case.
+//
+// Structured references (PD-296): neither the reference above nor IronCalc has a point that writes a table's column (IronCalc
+// turns a structured reference into a range while it parses and never writes one; the reference only rewrites the
+// `[@Column]` of a calculated column, Univer `sheets-table/src/commands/utils/calculated-column.ts` lines 89-140, Apache-2.0,
+// Copyright 2023-present DreamNum Co., Ltd., commit ac29fd8aaa3ce43cd1f672e75a596da22c132616; IronCalc `base/src/expressions/
+// parser/stringify.rs`, MIT OR Apache-2.0, commit f93662006b8fb1c401dc870bbda26c5d60ac6037; both read, no code taken), so the text a
+// pointed range of a table becomes follows the spreadsheet program's help page for tables ("Use table names in formulas",
+// on by default): the whole data of a column is `Table[Column]`, several columns `Table[[A]:[B]]`, a cell in the formula's
+// own row `[@Column]` in the table and `Table[[#This Row],[Column]]` outside it, and anything else (part of a column, the
+// header, the totals row) stays an A1 range. The spelling of a column name is that of `sheet-table-totals.js` (`columnRef`),
+// which the formula bar and the totals row use; the engine reads the text back through `structured_ref.rs`.
 (function (host) {
   "use strict";
 
   const { TOKEN_RE } = host.__EASYOFFICE_SHEET_REF_TOKENS__;
   const refsApi = () => host.__EASYOFFICE_SHEET_REFS__;
+  const totalsApi = () => host.__EASYOFFICE_SHEET_TABLE_TOTALS__;
+  // The characters of a table's name in front of its bracket group.
+  const TABLE_NAME_CHAR = /[\p{L}\p{N}_.]/u;
 
   // A reference is pointed after `=`, an operator, `(` or `,`.
   const POINT_AFTER = "=+-*/^&<>(,";
@@ -49,6 +63,25 @@
     return spans;
   }
 
+  // The structured references of a formula text as `{ start, end, token, sheet: "", ref: null }`: a bracket group and the
+  // table's name in front of it (`Table1[Q1]`, `[@Q1]`). A text that is not a formula has none, nor has a literal.
+  function structuredSpans(text) {
+    const spans = [];
+    if (!text.startsWith("=")) return spans;
+    const open = openQuoteAt(text);
+    for (const m of text.matchAll(TOKEN_RE)) {
+      if (m[2] !== undefined || m[0][0] !== "[" || (open >= 0 && m.index > open)) continue;
+      let start = m.index;
+      while (start > 0 && TABLE_NAME_CHAR.test(text[start - 1])) start -= 1;
+      const end = m.index + m[0].length;
+      spans.push({ start, end, token: text.slice(start, end), sheet: "", ref: null });
+    }
+    return spans;
+  }
+
+  // Every reference that gets a colour and a box, in text order: the cells and the structured references.
+  const colorSpans = (text) => [...refSpans(text), ...structuredSpans(text)].sort((a, b) => a.start - b.start);
+
   // Whether `caret` stands inside a text literal or a quoted sheet name.
   function insideQuotes(text, caret) {
     let double = false;
@@ -74,7 +107,7 @@
   // `start`..`end` is the text the reference takes the place of.
   function pointContext(text, from, to = from) {
     if (!text.startsWith("=")) return NONE;
-    const spans = refSpans(text);
+    const spans = colorSpans(text);
     const hit = to > from ? spans.find((s) => s.start < to && s.end > from) : spans.find((s) => from > s.start && from <= s.end);
     if (hit) return { mode: "replace", start: hit.start, end: hit.end, span: hit };
     return canPointAt(text, from, to) ? { mode: "add", start: from, end: to, span: null } : NONE;
@@ -120,6 +153,29 @@
   function sheetOf(prefix) {
     const name = prefix.slice(0, -1);
     return name.startsWith("'") ? name.slice(1, -1).replaceAll("''", "'") : name;
+  }
+
+  // The structured reference a pointed range `rg` (`{ r1, c1, r2, c2, axis }`) of the table `table` (`{ name, columns, header,
+  // totals }`, its cells `box`) is written as, or null for an A1 range. `at` is the cell of the formula `{ r, c }` when it is on
+  // the table's sheet, else null; a cell in its row is the table's `#This Row`.
+  function structuredRef(rg, table, box, at) {
+    const first = box.r1 + (table.header === false ? 0 : 1);
+    const last = box.r2 - (table.totals === true ? 1 : 0);
+    if (rg.axis || rg.r1 < first || rg.r2 > last || rg.c1 < box.c1 || rg.c2 > box.c2) return null;
+    const from = table.columns[rg.c1 - box.c1];
+    const to = table.columns[rg.c2 - box.c1];
+    if (!from || !to) return null;
+    const { escapeColumn, columnRef } = totalsApi();
+    const one = rg.c1 === rg.c2;
+    const columns = "[" + escapeColumn(from) + "]" + (one ? "" : ":[" + escapeColumn(to) + "]");
+    if (rg.r1 === rg.r2 && at && at.r === rg.r1) {
+      if (at.c < box.c1 || at.c > box.c2) return table.name + "[[#This Row]," + columns + "]";
+      // The spreadsheet program writes a name with a blank in double brackets here (`[@[Sales Amount]]`).
+      const plain = one && !/\s/.test(from) && !columnRef("", from).startsWith("[[");
+      return "[@" + (plain ? escapeColumn(from) : columns) + "]";
+    }
+    if (rg.r1 !== first || rg.r2 !== last) return null;
+    return one ? columnRef(table.name, from) : table.name + "[" + columns + "]";
   }
 
   // Ref `buildFormulaTextRuns`: references get the colours of a palette of `count` in the order they first appear, and the
@@ -200,5 +256,5 @@
     };
   }
 
-  host.__EASYOFFICE_SHEET_FORMULA_POINT__ = { refSpans, pointContext, applyRef, rangeText, rangeOf, sheetOf, colorIndexes, cycleRef };
+  host.__EASYOFFICE_SHEET_FORMULA_POINT__ = { refSpans, colorSpans, pointContext, applyRef, rangeText, rangeOf, sheetOf, structuredRef, colorIndexes, cycleRef };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
