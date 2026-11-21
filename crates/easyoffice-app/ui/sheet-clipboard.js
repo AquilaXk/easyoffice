@@ -49,13 +49,31 @@
     }
   }
 
+  // The system clipboard's text, and its HTML when the page may read it (`clipboard.read()`, which asks the person once); a
+  // page without the permission, or without `read`, gets the text only, as `readText` always gave it. A table whose HTML is
+  // over the bound is not read at all: `tooBig` stands for the refusal (a UTF-8 character is at most 4 bytes, three is the
+  // most a table of the allowed size needs on average).
   async function readSystem() {
     const clip = host.navigator?.clipboard;
-    if (!clip || typeof clip.readText !== "function") return "";
+    const limit = host.__EASYOFFICE_SHEET_CLIP_HTML__?.LIMITS.HTML_CHARS * 3;
+    if (clip && typeof clip.read === "function") {
+      try {
+        for (const item of await clip.read()) {
+          const html = item.types?.includes("text/html") ? await item.getType("text/html") : null;
+          const plain = item.types?.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
+          if (html && html.size > limit) return { text: plain, html: "", tooBig: true };
+          if (html || plain) return { text: plain, html: html ? await html.text() : "" };
+        }
+        return { text: "", html: "" };
+      } catch {
+        // No permission, or the clipboard holds something else: the text alone, if it can be read.
+      }
+    }
+    if (!clip || typeof clip.readText !== "function") return { text: "", html: "" };
     try {
-      return (await clip.readText()) || "";
+      return { text: (await clip.readText()) || "", html: "" };
     } catch {
-      return "";
+      return { text: "", html: "" };
     }
   }
 
@@ -377,11 +395,17 @@
       return pasteBlock(blockOf(text), range, refused ? { note: ` (${REFUSALS[refused] || "표가 커서"} 서식 없이 글자만)` } : undefined);
     }
 
-    // Menu commands read the system clipboard; the in-app copy answers when it is unavailable.
+    // Menu commands read the system clipboard, a table of its HTML first (the paste event's way, `htmlBlockOf`); the in-app copy
+    // answers when it is unavailable.
     // False when there is nothing to paste, null when the paste was refused (and said so).
     async function pasteFromClipboard(range, options) {
-      const text = (await readSystem()) || internal?.text || "";
-      return text ? pasteBlock(blockOf(text), range, options) : false;
+      const system = await readSystem();
+      const text = system.text || internal?.text || "";
+      const { block, refused } = system.tooBig ? { refused: "size" } : htmlBlockOf(system.html, text);
+      if (block) return pasteBlock(block, range, options);
+      if (!text) return false;
+      const note = refused ? ` (${REFUSALS[refused] || "표가 커서"} 서식 없이 글자만)` : "";
+      return pasteBlock(blockOf(text), range, note ? { ...options, note: (options?.note || "") + note } : options);
     }
 
     async function pasteSpecial(range, options) {

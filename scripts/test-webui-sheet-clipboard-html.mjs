@@ -39,8 +39,8 @@ const MODEL = {
   sheets: [{ name: "표", cells: [{ ref: "A1", raw: "옛값" }, { ref: "B1", raw: "옛값2", style: { bold: true } }, { ref: "C2", raw: "남음" }, { ref: "F1", raw: "옛F" }] }],
 };
 
-async function open() {
-  const h = await createWorkspaceHarness();
+async function open(options) {
+  const h = await createWorkspaceHarness(options);
   switchModule(h.document, "SHEET");
   await flushAsyncTurns();
   await pickFile(h.document, makeFixtureFile("표.xlsx", MODEL));
@@ -293,4 +293,77 @@ test("골라 붙이기 of a table: 값 leaves the formats, 서식 leaves the con
   assert.ok(plan("values").edits.every((e) => !("style" in e)));
   assert.ok(plan("formats").edits.every((e) => e.value === "그대로" && "style" in e));
   assert.deepEqual(plan("widths").widths, { 5: 87, 6: 64, 7: 64 });
+});
+
+// ---- the toolbar and menu paste reads the system clipboard's HTML (`navigator.clipboard.read()`) ------------------
+
+const item = (types) => ({ types: Object.keys(types), getType: async (t) => ({ size: types[t].length, text: async () => types[t] }) });
+const toolbarPaste = async (h) => {
+  h.userClick(h.document.querySelector('.tb-btn[data-studio-cmd="clip-paste"]'));
+  await flushAsyncTurns(20);
+};
+
+test("the toolbar paste takes the table of the clipboard's HTML with its formats, as a paste event does", async () => {
+  const clipboard = { read: async () => [item({ "text/html": SHEET_HTML, "text/plain": "이름\t점수\t비율" })], readText: async () => "이름\t점수\t비율" };
+  const h = await open({ clipboard });
+  const d = h.document;
+  await select(d, "E1");
+  await toolbarPaste(h);
+  assert.equal(cell(d, "E1").textContent, "이름");
+  assert.equal(cell(d, "E1").style.fontWeight, "600", "the bold of the table came with it");
+  assert.equal(cell(d, "E4").textContent, "병합", "and the merged cell");
+  assert.ok(h.host.__EASYOFFICE_SHEET_LAYOUT__.mergeAt("표", 4, 5), "with its merge");
+});
+
+test("a clipboard that refuses the read, has no read, or holds no table pastes the text as before", async () => {
+  const denied = await open({ clipboard: { read: async () => { throw new Error("NotAllowedError"); }, readText: async () => "글자만" } });
+  await select(denied.document, "E1");
+  await toolbarPaste(denied);
+  assert.equal(cell(denied.document, "E1").textContent, "글자만", "no permission: the text");
+
+  const noRead = await open({ clipboard: { readText: async () => "읽기만" } });
+  await select(noRead.document, "E1");
+  await toolbarPaste(noRead);
+  assert.equal(cell(noRead.document, "E1").textContent, "읽기만", "no read(): the text");
+
+  const plainOnly = await open({ clipboard: { read: async () => [item({ "text/plain": "그냥" })], readText: async () => "그냥" } });
+  await select(plainOnly.document, "E1");
+  await toolbarPaste(plainOnly);
+  assert.equal(cell(plainOnly.document, "E1").textContent, "그냥", "text only");
+
+  const para = await open({ clipboard: { read: async () => [item({ "text/html": "<p>문단</p>", "text/plain": "문단" })], readText: async () => "문단" } });
+  await select(para.document, "E1");
+  await toolbarPaste(para);
+  assert.equal(cell(para.document, "E1").textContent, "문단", "HTML with no table: the text");
+});
+
+test("a table over the bounds pastes the text and says so; a clipboard of an image does nothing", async () => {
+  const over = await open({ clipboard: { read: async () => [item({ "text/html": "<table><tr><td rowspan=100000 colspan=100>a</td></tr></table>", "text/plain": "글자만" })], readText: async () => "글자만" } });
+  await select(over.document, "E1");
+  await toolbarPaste(over);
+  assert.equal(cell(over.document, "E1").textContent, "글자만", "the bound refuses the table, not the text");
+
+  const big = await open({ clipboard: { read: async () => [{ types: ["text/html", "text/plain"], getType: async (t) => (t === "text/html" ? { size: 40 * 1024 * 1024, text: async () => assert.fail("a table that size is not read") } : { size: 3, text: async () => "큰표" }) }], readText: async () => "큰표" } });
+  await select(big.document, "E1");
+  await toolbarPaste(big);
+  assert.equal(cell(big.document, "E1").textContent, "큰표", "40 MB of HTML is not read, the text is pasted");
+
+  const image = await open({ clipboard: { read: async () => [item({ "image/png": "x" })], readText: async () => "" } });
+  await select(image.document, "E1");
+  await toolbarPaste(image);
+  assert.equal(cell(image.document, "E1").textContent, "");
+});
+
+test("골라 붙이기 reads the clipboard's table too: 값 leaves the formats of the table out", async () => {
+  const clipboard = { read: async () => [item({ "text/html": SHEET_HTML, "text/plain": "이름" })], readText: async () => "이름" };
+  const h = await open({ clipboard });
+  const d = h.document;
+  await select(d, "E1");
+  h.userClick(d.querySelector('.md-item[data-sheet-paste="special"]'));
+  d.getElementById("sheet-paste-kind-select").value = "values";
+  h.userClick(d.getElementById("btn-sheet-paste-apply"));
+  await flushAsyncTurns(20);
+  assert.equal(cell(d, "E1").textContent, "이름");
+  assert.notEqual(cell(d, "E1").style.fontWeight, "600", "values only");
+  assert.equal(cell(d, "E4").textContent, "병합", "the whole table was read, not its first line");
 });
