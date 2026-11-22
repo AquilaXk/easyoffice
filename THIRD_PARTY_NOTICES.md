@@ -9346,7 +9346,7 @@ The editor bundle ships only fonts under the SIL Open Font License 1.1, pinned b
 | Nanum Myeongjo | Bold, ExtraBold, Regular | Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com), | `assets/fonts/licenses/NanumMyeongjo-OFL.txt` |
 | Noto Sans KR | Bold, ExtraLight, Regular | Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' | `assets/fonts/licenses/NotoSansKR-OFL.txt` |
 | Noto Serif KR | Bold, Regular | Copyright 2012 Google Inc. All Rights Reserved. | `assets/fonts/licenses/NotoSerifKR-OFL.txt` |
-| Pretendard | Black, Bold, ExtraBold, ExtraLight, Light, Medium, Regular, SemiBold, Thin | Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), | `assets/fonts/licenses/Pretendard-OFL.txt` |
+| Pretendard | Variable (wght 100-900, v1.3.9) | Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), | `assets/fonts/licenses/Pretendard-OFL.txt` |
 | Spoqa Han Sans | Regular | Copyright (c) 2015-10-09 Spoqa (spoqa.com), with Reserved Font Name Spoqa Han Sans. | `assets/fonts/licenses/SpoqaHanSans-OFL.txt` |
 
 The SIL Open Font License, Version 1.1 applies to each family under the terms in the file named above; the full text is not repeated here.

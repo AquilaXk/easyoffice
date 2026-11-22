@@ -328,8 +328,8 @@ mod tests {
             Some("assets/index-Dxr1V8VE.js")
         );
         assert_eq!(
-            sanitize_relative_path("/hwp-studio/fonts/Pretendard-Bold.woff2").as_deref(),
-            Some("fonts/Pretendard-Bold.woff2")
+            sanitize_relative_path("/hwp-studio/fonts/PretendardVariable.woff2").as_deref(),
+            Some("fonts/PretendardVariable.woff2")
         );
     }
 

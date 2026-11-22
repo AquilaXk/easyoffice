@@ -53,6 +53,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/command/safe-cut.ts",
   // EasyOffice-only modules (참조 앱 port): custom select combo boxes, color picker palette, font authoring policy, font-set dialog rules and popup coordinator.
   "src/core/font-authoring-policy.ts",
+  // EasyOffice-only module: the nine static Pretendard catalog names served by the one variable file (PD-298).
+  "src/core/pretendard-variable.ts",
   "src/ui/toolbar-popup.ts",
   "src/ui/custom-select.ts",
   "src/ui/color-picker.ts",

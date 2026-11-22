@@ -35,21 +35,16 @@ the bundled file must equal the official file, or `woff2-compression`).
 | NotoSansKR-Regular.woff2 | Noto Sans KR | Regular | SIL OFL 1.1 (`licenses/NotoSansKR-OFL.txt`) | 0.54 | Google Fonts (google/fonts ofl/notosanskr) |
 | NotoSerifKR-Bold.woff2 | Noto Serif KR | Bold | SIL OFL 1.1 (`licenses/NotoSerifKR-OFL.txt`) | 0.99 | Google Fonts (google/fonts ofl/notoserifkr) |
 | NotoSerifKR-Regular.woff2 | Noto Serif KR | Regular | SIL OFL 1.1 (`licenses/NotoSerifKR-OFL.txt`) | 0.93 | Google Fonts (google/fonts ofl/notoserifkr) |
-| Pretendard-Black.woff2 | Pretendard | Black | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.76 | [Pretendard-Black.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Black.woff2) (byte-identical) |
-| Pretendard-Bold.woff2 | Pretendard | Bold | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.75 | [Pretendard-Bold.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Bold.woff2) (byte-identical) |
-| Pretendard-ExtraBold.woff2 | Pretendard | ExtraBold | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.76 | [Pretendard-ExtraBold.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-ExtraBold.woff2) (byte-identical) |
-| Pretendard-ExtraLight.woff2 | Pretendard | ExtraLight | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.70 | [Pretendard-ExtraLight.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-ExtraLight.woff2) (byte-identical) |
-| Pretendard-Light.woff2 | Pretendard | Light | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.72 | [Pretendard-Light.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Light.woff2) (byte-identical) |
-| Pretendard-Medium.woff2 | Pretendard | Medium | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.74 | [Pretendard-Medium.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Medium.woff2) (byte-identical) |
-| Pretendard-Regular.woff2 | Pretendard | Regular | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.73 | [Pretendard-Regular.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2) (byte-identical) |
-| Pretendard-SemiBold.woff2 | Pretendard | SemiBold | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.75 | [Pretendard-SemiBold.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-SemiBold.woff2) (byte-identical) |
-| Pretendard-Thin.woff2 | Pretendard | Thin | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 0.66 | [Pretendard-Thin.woff2](https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Thin.woff2) (byte-identical) |
+| PretendardVariable.woff2 | Pretendard | Variable (wght 100-900) | SIL OFL 1.1 (`licenses/Pretendard-OFL.txt`) | 1.96 | [web/variable/woff2/PretendardVariable.woff2](https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip) in the official v1.3.9 release zip (byte-identical) |
 | SpoqaHanSans-Regular.woff2 | Spoqa Han Sans | Regular | SIL OFL 1.1 (`licenses/SpoqaHanSans-OFL.txt`) | 0.29 | [SpoqaHanSansRegular.woff2](https://raw.githubusercontent.com/spoqa/spoqa-han-sans/master/Subset/SpoqaHanSans/SpoqaHanSansRegular.woff2) (byte-identical) |
 
-Total: 28 files, 19.44 MiB (20387796 bytes).
+Total: 20 files, 14.82 MiB (15544008 bytes).
 
 ## Notes
 
+- Pretendard is one variable woff2 (weights 100 to 900) instead of nine static files (PD-298). The editor's font
+  catalog still names one file per weight, so `apps/hwp-studio/src/core/pretendard-variable.ts` serves each name
+  ("Pretendard Bold" and so on) from the variable file with the FontFace weight descriptor pinned to that weight.
 - Reserved-name families: Pretendard and Spoqa Han Sans are the official woff2 files unchanged; Nanum Gothic,
   Nanum Myeongjo and Nanum Gothic Coding are WOFF2 compressions of the TTFs in google/fonts, and D2Coding of the
   TTFs in the official 1.3.2 release zip (the earlier rhwp copies were subsets, i.e. Modified Versions, #144).

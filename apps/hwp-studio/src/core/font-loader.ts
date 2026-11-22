@@ -7,6 +7,8 @@
  *   - only fonts bundled with EasyOffice (assets/fonts, listed at build time in
  *     __EO_BUNDLED_FONT_FILES__) are ever requested. External (CDN) entries and catalog
  *     entries without a shipped file are skipped, so nothing is fetched from the network.
+ *   - the nine static Pretendard catalog files are served by the one variable file with the
+ *     weight descriptor pinned to the weight of the catalog name (PD-298, ./pretendard-variable.ts).
  */
 
 import {
@@ -19,6 +21,7 @@ import {
   type ProjectedWebFontEntry,
 } from '@/core/font-rule-runtime.ts';
 import { filterAuthoringFontFamilies, isAuthoringBlockedFontFamily } from './font-authoring-policy';
+import { variableFaceFor } from './pretendard-variable';
 
 type FontEntry = ProjectedWebFontEntry;
 
@@ -99,9 +102,9 @@ const BUNDLED_FONT_FILES: ReadonlySet<string> = new Set(
   typeof __EO_BUNDLED_FONT_FILES__ === 'undefined' ? [] : __EO_BUNDLED_FONT_FILES__,
 );
 
-/** True for catalog entries whose font file ships with EasyOffice. */
+/** True for catalog entries whose font file ships with EasyOffice, directly or as the Pretendard variable file (PD-298). */
 function isBundledFontFile(file: string): boolean {
-  return BUNDLED_FONT_FILES.has(file);
+  return BUNDLED_FONT_FILES.has(variableFaceFor(file)?.file ?? file);
 }
 
 // Options are accepted for upstream signature compatibility; external web fonts are always off.
@@ -338,8 +341,10 @@ export async function loadWebFonts(
       try {
         for (const entry of entries) {
           const fmt = entry.format ?? 'woff2';
-          const face = new FontFace(entry.name, `url(${entry.file}) format('${fmt}')`, {
+          const variable = variableFaceFor(entry.file);
+          const face = new FontFace(entry.name, `url(${variable?.file ?? entry.file}) format('${fmt}')`, {
             display: 'swap',
+            ...(variable ? { weight: variable.weight } : {}),
             ...(entry.unicodeRange ? { unicodeRange: entry.unicodeRange } : {}),
           });
           const result = await face.load();

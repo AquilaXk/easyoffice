@@ -29,7 +29,7 @@
     {
       "id": "core/font-loader",
       "strategy": "fork",
-      "reason": "Registers fonts only through FontFace (no injected style element), only requests the OFL fonts bundled in assets/fonts (CDN and non-shipped catalog entries are never fetched), and filters authoring-blocked commercial families from REGISTERED_FONTS and OS font detection (src/core/font-authoring-policy.ts)."
+      "reason": "Registers fonts only through FontFace (no injected style element), only requests the OFL fonts bundled in assets/fonts (CDN and non-shipped catalog entries are never fetched), filters authoring-blocked commercial families from REGISTERED_FONTS and OS font detection (src/core/font-authoring-policy.ts), and serves the nine static Pretendard catalog files from the one variable file with the weight descriptor pinned per catalog name (src/core/pretendard-variable.ts, PD-298)."
     },
     {
       "id": "command/print-pages",
