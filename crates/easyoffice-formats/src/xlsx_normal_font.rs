@@ -39,13 +39,21 @@ pub(crate) fn normal_font_id(styles_xml: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// The name and the size text (points, no trailing zeros) of `font`, falling back to the Korean standard default.
+pub(crate) fn written_font_pair(font: Option<&crate::DefaultFont>) -> (String, String) {
+    match font {
+        Some(f) => {
+            let centi = (f.size_pt() * 100.0).round() as u32;
+            (f.name().to_string(), format_centipt(centi))
+        }
+        None => {
+            let centi = (crate::STANDARD_FONT_SIZE_PT * 100.0).round() as u32;
+            (crate::STANDARD_FONT_NAME.to_string(), format_centipt(centi))
+        }
+    }
+}
+
 /// The name and the size text (points, no trailing zeros) of the font 0 a workbook writes: the first sheet's default font.
 pub(crate) fn written_default_font(first: Option<&SheetStyling>) -> (String, String) {
-    let default = SheetStyling::default();
-    let styling = first.unwrap_or(&default);
-    let centi = (styling.default_font_size_pt() * 100.0).round() as u32;
-    (
-        styling.default_font_name().to_string(),
-        format_centipt(centi),
-    )
+    written_font_pair(first.and_then(|s| s.default_font.as_ref()))
 }

@@ -288,10 +288,9 @@ fn a_styling_with_only_a_width_is_not_empty() {
     assert!(!styling.is_empty());
 }
 
-/// ODS has no sheet-wide width the page reads (the unstyled columns follow the table's default), so a save to ODS writes
-/// none and reads none (the decision is in PD-303).
+/// ODS carries the sheet-wide default column width via `eo:` attributes and column band (PD-308).
 #[test]
-fn ods_does_not_carry_it() {
+fn ods_carries_it() {
     let styling = SheetStyling {
         default_col_width: width(Some(20.0), Some(10)),
         ..SheetStyling::default()
@@ -301,5 +300,5 @@ fn ods_does_not_carry_it() {
         .unwrap()
         .remove(0)
         .1;
-    assert_eq!(back.default_col_width, None);
+    assert_eq!(back.default_col_width, styling.default_col_width);
 }

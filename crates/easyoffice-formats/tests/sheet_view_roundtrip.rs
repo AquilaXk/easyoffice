@@ -87,7 +87,7 @@ fn the_parts_are_written_in_schema_order_with_levels_and_marks() {
             .unwrap_or_else(|| panic!("{needle} in {xml}"))
     };
     assert!(at("<sheetPr><tabColor rgb=\"FF3366CC\"/></sheetPr>") < at("<sheetViews>"));
-    assert!(at("<sheetViews>") < at("<sheetFormatPr defaultRowHeight=\"15\" outlineLevelRow=\"2\" outlineLevelCol=\"1\"/>"));
+    assert!(at("<sheetViews>") < at("<sheetFormatPr defaultRowHeight=\"16.5\" outlineLevelRow=\"2\" outlineLevelCol=\"1\"/>"));
     assert!(at("<sheetFormatPr") < at("<cols>"));
     assert!(at("<cols>") < at("<sheetData>"));
     assert!(xml.contains(

@@ -232,10 +232,10 @@ test("a drag on an edge with every row selected sets the default and replaces th
   h.press("a", { ctrlKey: true });
   await flushAsyncTurns(3);
   await dragEdge(d, 1, 100, 116);
-  assert.deepEqual(saved(h), { defaultRowHeight: [30] }, "24 px and 16 px of move: 40 px, which is 30 pt, and no row of its own");
-  assert.equal(tr(d, 1).style.height, "40px");
-  assert.equal(tr(d, 2).style.height, "40px", "the row that had 15 pt takes the default too");
-  assert.equal(tr(d, 4).style.height, "40px");
+  assert.deepEqual(saved(h), { defaultRowHeight: [28.5] }, "22 px and 16 px of move: 38 px, which is 28.5 pt, and no row of its own");
+  assert.equal(tr(d, 1).style.height, "38px");
+  assert.equal(tr(d, 2).style.height, "38px", "the row that had 15 pt takes the default too");
+  assert.equal(tr(d, 4).style.height, "38px");
   await undo(h);
   assert.deepEqual(saved(h), { rowHeights: [[2, 15], [4, 60]] });
   assert.equal(tr(d, 1).style.height, "");
@@ -261,8 +261,8 @@ test("a row selection from the first row to the last is every row too", async ()
   box.dispatchEvent({ type: "keydown", key: "Enter", target: box });
   await flushAsyncTurns(30);
   await dragEdge(d, 2, 100, 90);
-  assert.deepEqual(saved(h), { defaultRowHeight: [10.5] }, "24 px less 10: 14 px");
-  assert.equal(tr(d, 4).style.height, "14px");
+  assert.deepEqual(saved(h), { defaultRowHeight: [9] }, "22 px less 10: 12 px");
+  assert.equal(tr(d, 4).style.height, "12px");
 });
 
 test("a double click on an edge with every row selected gives every row back to its content and drops the default", async () => {

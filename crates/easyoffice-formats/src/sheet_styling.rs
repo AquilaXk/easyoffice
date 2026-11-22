@@ -12,6 +12,8 @@ use std::sync::Arc;
 pub(crate) mod ods_bounds;
 #[path = "ods_date_system.rs"]
 pub(crate) mod ods_date_system;
+#[path = "ods_default_style.rs"]
+pub(crate) mod ods_default_style;
 #[path = "ods_filter.rs"]
 pub(crate) mod ods_filter;
 #[path = "ods_grid.rs"]
@@ -144,8 +146,9 @@ pub use sheet_page::*;
 pub use sheet_pivot::*;
 pub use sheet_protect::*;
 pub use sheet_row_height::{
-    row_heights_within_bounds, RowHeight, RowHeights, GRID_ROW_PX, MAX_ROW_HEIGHTS,
-    MAX_ROW_HEIGHT_CENTIPT,
+    default_row_centipt_for_font, row_heights_within_bounds, RowHeight, RowHeights,
+    CALIBRI_ROW_HEIGHT_CENTIPT, GRID_ROW_PX, MAX_ROW_HEIGHTS, MAX_ROW_HEIGHT_CENTIPT,
+    STANDARD_ROW_HEIGHT_CENTIPT,
 };
 pub use sheet_row_offsets::{RowOffsets, SheetGrid};
 pub use sheet_rules::*;

@@ -18,6 +18,7 @@ use crate::sheet_links::xls_links::{self, XlsLinkReader};
 use crate::sheet_links::LinkCollector;
 use crate::sheet_styling::{SheetState, SheetStyling, MAX_STYLED_CELLS};
 use crate::xls_boundsheet;
+use crate::xls_layout::{RawXlsSheetLayout, XlsLayoutReader};
 use crate::xls_sst_cursor::SstContinueCursor;
 use crate::xls_styles::{XlsStyleReader, XlsStyles};
 use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec};
@@ -61,6 +62,8 @@ struct XlsParseState {
     links: XlsLinkReader,
     /// The fill and font colours of the cells (PD-227).
     styles: XlsStyleReader,
+    /// Worksheet row heights, default widths, and column widths (PD-308).
+    layout: XlsLayoutReader,
 }
 
 impl XlsParseState {
@@ -120,6 +123,7 @@ impl XlsParseState {
             .push(std::mem::take(&mut self.current_types));
         self.links.end_sheet();
         self.styles.end_sheet();
+        self.layout.end_sheet();
         self.in_worksheet = false;
     }
 
@@ -132,6 +136,7 @@ impl XlsParseState {
         XlsStyles,
         Vec<SheetState>,
         Vec<FastU64Map<CellValueKind>>,
+        Vec<RawXlsSheetLayout>,
     ) {
         if self.sheets.is_empty()
             && (!self.current_cells.is_empty() || !self.boundsheet_names.is_empty())
@@ -148,6 +153,7 @@ impl XlsParseState {
             self.sheet_cell_types.push(self.current_types);
             self.links.end_sheet();
             self.styles.end_sheet();
+            self.layout.end_sheet();
         }
         let mut states = self.boundsheet_states;
         states.resize(self.sheets.len(), SheetState::Visible);
@@ -160,6 +166,7 @@ impl XlsParseState {
             self.styles.finish(),
             states,
             self.sheet_cell_types,
+            self.layout.finish(),
         )
     }
 }
@@ -231,15 +238,21 @@ impl LegacyOle2Codec {
     pub fn unpack_xls_with_styling(
         bytes: &[u8],
     ) -> Result<(crate::OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (payloads, collectors, styles, states, cell_types) = Self::unpack_xls_walk(bytes)?;
+        let (payloads, collectors, styles, states, cell_types, layouts) =
+            Self::unpack_xls_walk(bytes)?;
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
         let (num_fmts, rejected) = (styles.num_fmts, styles.num_fmts_rejected);
         let (fonts, fonts_rejected) = (styles.fonts, styles.fonts_rejected);
+        let default_font = styles.default_font;
+        let digit_px = default_font
+            .as_ref()
+            .map_or(crate::STANDARD_DIGIT_PX, crate::DefaultFont::digit_px);
         let date1904 = styles.date1904;
         let mut colors = styles.sheets.into_iter();
         let mut states = states.into_iter();
         let mut types = cell_types.into_iter();
+        let mut layouts = layouts.into_iter();
         for (index, (payload, links)) in payloads.into_iter().zip(collectors).enumerate() {
             let mut styling = SheetStyling {
                 cells: colors.next().unwrap_or_default(),
@@ -248,11 +261,15 @@ impl LegacyOle2Codec {
                 num_fmts_rejected: if index == 0 { rejected } else { 0 },
                 fonts: std::sync::Arc::clone(&fonts),
                 fonts_rejected: if index == 0 { fonts_rejected } else { 0 },
+                default_font: default_font.clone(),
                 links: links.links,
                 links_rejected: links.rejected,
                 date1904: index == 0 && date1904,
                 ..SheetStyling::default()
             };
+            if let Some(layout) = layouts.next() {
+                layout.resolve(default_font.as_ref(), digit_px, &mut styling);
+            }
             states.next().unwrap_or_default().apply(&mut styling);
             stylings.push((payload.sheet_name.clone(), styling));
             sheets.push((payload.sheet_name, payload.cells));
@@ -270,6 +287,7 @@ impl LegacyOle2Codec {
             XlsStyles,
             Vec<SheetState>,
             Vec<FastU64Map<CellValueKind>>,
+            Vec<RawXlsSheetLayout>,
         ),
         EasyOfficeError,
     > {
@@ -318,6 +336,7 @@ impl LegacyOle2Codec {
     ) -> Result<usize, EasyOfficeError> {
         if state.in_worksheet {
             state.links.before(opcode);
+            state.layout.record(opcode, &data[rec.start..rec.end]);
         }
         state
             .styles

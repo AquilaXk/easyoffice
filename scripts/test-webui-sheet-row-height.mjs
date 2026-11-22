@@ -61,7 +61,7 @@ test("a drag on the edge of a header sets the selected rows when the pressed one
 
 function fit(map, extra = {}) {
   return RF.__EASYOFFICE_CREATE_ROW_FIT__({
-    rowH: () => 24,
+    rowH: () => 22,
     maxRows: MAX_ROWS,
     getSheetName: () => "S",
     getMap: () => map,
@@ -76,19 +76,19 @@ function fit(map, extra = {}) {
 
 test("a larger font makes its row taller, a font that fits the row does not, and an empty cell counts too", () => {
   const f = fit({
-    A1: { value: "가", style: { fontSize: "18px" } },
-    A2: { value: "가", style: { fontSize: "19px" } },
+    A1: { value: "가", style: { fontSize: "17px" } },
+    A2: { value: "가", style: { fontSize: "18px" } },
     A3: { value: "", style: { fontSize: "40px" } },
     A4: { value: "가", style: { fontSize: "13px" } },
     A5: { value: "가" },
   });
   f.sync();
-  assert.equal(f.heightOf(1), 24, "18 px needs 23: the row holds it");
-  assert.equal(f.heightOf(2), 25);
+  assert.equal(f.heightOf(1), 22, "17 px needs 22: the row holds it");
+  assert.equal(f.heightOf(2), 23);
   assert.equal(f.heightOf(3), Math.ceil(40 * 1.275), "as the spreadsheet programs size a row of one line");
-  assert.equal(f.heightOf(4), 24);
-  assert.equal(f.heightOf(5), 24);
-  assert.equal(L.TALL_FONT_PX, 19, "the latch that tells a sheet to look for them agrees with the rule");
+  assert.equal(f.heightOf(4), 22);
+  assert.equal(f.heightOf(5), 22);
+  assert.equal(L.TALL_FONT_PX, 18, "the latch that tells a sheet to look for them agrees with the rule");
 });
 
 test("a wrapped cell with one line takes its font's height, with more lines its lines, and the tallest cell wins", () => {
@@ -111,10 +111,10 @@ test("a height a user set wins over the content, under the grid's row height too
   assert.equal(f.heightOf(5), 60);
   assert.equal(f.heightOf(6), 24);
   assert.equal(f.extraBefore(1), 0);
-  assert.equal(f.extraBefore(2), -4);
-  assert.equal(f.extraBefore(3), -4 + 6, "the next row starts after the extra of the rows above");
-  assert.equal(f.extraBefore(6), -4 + 6 + 36);
-  assert.equal(f.extraTotal(), -4 + 6 + 36);
+  assert.equal(f.extraBefore(2), -2);
+  assert.equal(f.extraBefore(3), -2 + 8, "the next row starts after the extra of the rows above");
+  assert.equal(f.extraBefore(6), -2 + 8 + 38);
+  assert.equal(f.extraTotal(), -2 + 8 + 38 + 2);
   assert.equal(f.minHeight(), 20);
   assert.equal(f.isClipped(1), true, "the text needs more than the row has: it is cut off");
   assert.equal(f.isClipped(2), true);
@@ -135,8 +135,8 @@ test("a hidden row keeps no height and a merged cell asks for none", () => {
 test("the extra height is signed: rows under the grid's height take space off", () => {
   const f = fit({}, { customHeights: () => [[10, 12], [20, 12]] });
   f.sync();
-  assert.equal(f.extraBefore(11), -12);
-  assert.equal(f.extraBefore(21), -24);
+  assert.equal(f.extraBefore(11), -10);
+  assert.equal(f.extraBefore(21), -20);
   assert.equal(f.extraBefore(5), 0);
 });
 
@@ -149,7 +149,7 @@ test("a sync that needs more measurements or more time than its budget leaves th
   assert.equal(f.overBudget(), true);
   assert.ok(calls <= 200000, "the count ends the sync (" + calls + ")");
   assert.equal(f.heightOf(10), 3 * 18 + 7, "the rows it reached are tall");
-  assert.equal(f.heightOf(299999), 24, "and the rest stay plain");
+  assert.equal(f.heightOf(299999), 22, "and the rest stay plain");
   let clock = 0;
   const slow = fit({ A1: { value: "a", style: { wrap: true } }, ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => ["B" + (i + 1), { value: "t" + i, style: { wrap: true } }])) }, { now: () => clock, measure: () => ((clock += 10), 2) });
   slow.sync();
@@ -233,7 +233,7 @@ test("a file's heights come to the grid: rows under, over and at the plain heigh
   assert.deepEqual(h.layout().getAll()["높이"].rowHeights, [[2, 15], [4, 60]], "kept in the layout, saved from it");
   const last = Math.max(...[...d.querySelectorAll("#pane-sheet tbody tr[data-row]")].map((r) => Number(r.dataset.row)));
   const spacer = d.querySelector("#pane-sheet .sheet-spacer-bottom td").style.height;
-  assert.equal(parseInt(spacer, 10), (MAX_ROWS - last) * 24, "the rows below the window are plain: the heights above it do not leak into the spacer");
+  assert.equal(parseInt(spacer, 10), (MAX_ROWS - last) * 22, "the rows below the window are plain: the heights above it do not leak into the spacer");
 });
 
 test("a double click on the edge of a header gives the row back to its content; one undo step brings the height again", async () => {
@@ -280,13 +280,13 @@ test("a drag on the edge sets the height of the row, redraws as it moves, and is
   const d = h.document;
   press(edge(d, 1), { clientY: 100 });
   move(d, 120);
-  assert.equal(tr(d, 1).style.height, "44px", "24 px and the 20 px of the move, before the button is released");
+  assert.equal(tr(d, 1).style.height, "42px", "22 px and the 20 px of the move, before the button is released");
   move(d, 130);
-  assert.equal(tr(d, 1).style.height, "54px");
+  assert.equal(tr(d, 1).style.height, "52px");
   release(d);
   await flushAsyncTurns(8);
-  assert.deepEqual(h.layout().getAll()["높이"].rowHeights, [[1, 40.5], [2, 15], [4, 60]]);
-  assert.equal(tr(d, 1).style.height, "54px");
+  assert.deepEqual(h.layout().getAll()["높이"].rowHeights, [[1, 39], [2, 15], [4, 60]]);
+  assert.equal(tr(d, 1).style.height, "52px");
   await undo(h);
   assert.equal(tr(d, 1).style.height, "");
   assert.deepEqual(h.layout().getAll()["높이"].rowHeights, [[2, 15], [4, 60]]);
@@ -321,16 +321,16 @@ test("rows of other heights are drawn where they are: the window, the top of a r
   const d = h.document;
   const grid = h.host.__EASYOFFICE_SHEET_GRID_UTILS__;
   assert.ok(grid);
-  // Rows 2 (20 px) and 4 (80 px): row 5 starts after 24 + 20 + 24 + 80 px.
+  // Rows 2 (20 px) and 4 (80 px): row 5 starts after 22 + 20 + 22 + 80 px.
   const top = h.viewport.scrollTop;
   assert.equal(top, 0);
   const rows = [...d.querySelectorAll("#pane-sheet tbody tr[data-row]")].map((r) => Number(r.dataset.row));
   assert.deepEqual(rows.slice(0, 5), [1, 2, 3, 4, 5]);
-  h.viewport.scrollTop = 24 * 2000;
+  h.viewport.scrollTop = 22 * 2000;
   h.viewport.dispatchEvent({ type: "scroll" });
   await flushAsyncTurns();
   const far = [...d.querySelectorAll("#pane-sheet tbody tr[data-row]")].map((r) => Number(r.dataset.row));
-  assert.ok(far[0] > 1970 && far[0] < 2000, "the window follows the scroll, 52 px of the two rows above it moved it up: " + far[0]);
+  assert.ok(far[0] > 1970 && far[0] < 2000, "the window follows the scroll, 56 px of the two rows above it moved it up: " + far[0]);
 });
 
 test("short rows fill the viewport: the window holds as many of them as the viewport shows", async () => {
@@ -448,5 +448,5 @@ test("the heights are sent in the save payload, those of a user only, and a shee
   await flushAsyncTurns(12);
   assert.equal("rowHeights" in (await save()), false, "a row that follows its font is not a height of a user");
   await drag(d, 1, 100, 120);
-  assert.deepEqual((await save()).rowHeights, [[1, 33]], "24 px and 20 px of the drag: 44 px is 33 pt");
+  assert.deepEqual((await save()).rowHeights, [[1, 31.5]], "22 px and 20 px of the drag: 42 px is 31.5 pt");
 });

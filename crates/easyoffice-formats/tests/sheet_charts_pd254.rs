@@ -405,7 +405,7 @@ fn external_spreadsheetml_drawing_and_broken_parts_are_parsed_safely() {
     assert_eq!(ch.legend, ChartLegendPos::None);
     // 2*64 + 10: this workbook has no `styles.xml`, so its default font is Calibri 11 pt, a 7 px digit (PD-306)
     assert_eq!(ch.anchor.left_px, 138);
-    assert_eq!(ch.anchor.top_px, 24);
+    assert_eq!(ch.anchor.top_px, 22);
     assert_eq!(ch.anchor.width_px, 400);
     assert_eq!(ch.anchor.height_px, 240);
     assert_eq!(ch.series[0].name, "Alpha");

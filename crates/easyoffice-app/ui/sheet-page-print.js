@@ -206,7 +206,7 @@
         ? Math.max(0, Math.min(48, Number(a.left) - 56 - t.geometry.colLeft(c1)))
         : 0;
       const subY = t.geometry.rowTop && Number(a.top) >= 26
-        ? Math.max(0, Math.min(24, Number(a.top) - 26 - t.geometry.rowTop(r1)))
+        ? Math.max(0, Math.min(22, Number(a.top) - 26 - t.geometry.rowTop(r1)))
         : 0;
       const w = Math.max(180, Number(a.width) || 420);
       const h = Math.max(140, Number(a.height) || 260);

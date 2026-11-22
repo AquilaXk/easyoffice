@@ -69,14 +69,12 @@ pub(crate) fn target_to_href(target: &str) -> String {
 
 /// The text styles a link's `text:a` names, as the spreadsheet program's "Hyperlink" and "Followed Hyperlink"
 /// cell styles look (PD-223): the standard names of the office suite's "Internet link" styles, the colours
-/// and the single underline of those cell styles. They go in `styles.xml` as common styles.
+/// and the single underline of those cell styles. Placed inside `<office:styles>` in `styles.xml`.
 pub(crate) const LINK_STYLES_XML: &str = concat!(
-    "<office:styles>",
     "<style:style style:name=\"Internet_20_link\" style:display-name=\"Internet link\" style:family=\"text\">",
     "<style:text-properties fo:color=\"#0563c1\" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>",
     "<style:style style:name=\"Visited_20_Internet_20_Link\" style:display-name=\"Visited Internet Link\" style:family=\"text\">",
-    "<style:text-properties fo:color=\"#954f72\" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>",
-    "</office:styles>"
+    "<style:text-properties fo:color=\"#954f72\" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>"
 );
 
 /// The `text:a` start tag of `link`.

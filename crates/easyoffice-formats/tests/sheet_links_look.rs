@@ -168,7 +168,8 @@ fn ods_names_the_link_text_styles_in_the_common_styles() {
     let (_, back) = OdfCodec::unpack_ods_with_styling(&bytes).unwrap();
     assert_eq!(back[0].1.links, styling()[0].links);
     let no_links = OdfCodec::pack_ods_multi_styled(&sheets(), &[SheetStyling::default()]).unwrap();
-    assert!(entry(&no_links, "styles.xml").is_none());
+    let no_link_styles = entry(&no_links, "styles.xml").unwrap();
+    assert!(!no_link_styles.contains("Internet_20_link"));
 }
 
 #[test]

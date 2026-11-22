@@ -17,7 +17,7 @@
 //! 8.38 characters and 72 px), which is 8 characters of an 8 px digit and the padding, `(72 - 5) / 8 = 8.375`, so 11 pt gives
 //! 8 px, which `round(advance * 14.667 / 2048)` does for an advance from 1,047 to 1,185. The advance 1116 is the middle of that
 //! range and not a measured advance, so only 11 pt is confirmed; the other sizes are an estimate (12 pt gives 9 px, 10 pt gives
-//! 7 px). Aptos is not in the table: no source gives its digit width.
+//! 7 px). The standard office suite's Aptos font family (v4.40 hmtx table, 2048 upm) gives the exact digit advances below.
 //!
 //! A font that is not in the table is read as Calibri: the workbook is shown in a substitute face on the machine that has
 //! not the font, and the size alone cannot say which. The width is never below 1 px and never above [`MAX_DIGIT_PX`], and a
@@ -58,6 +58,11 @@ const DIGIT_ADVANCES: &[(&str, u16)] = &[
     ("caladea", 1135),
     ("malgun gothic", MALGUN_ADVANCE),
     ("맑은 고딕", MALGUN_ADVANCE),
+    ("aptos", 1094),
+    ("aptos narrow", CALIBRI_ADVANCE),
+    ("aptos display", 1071),
+    ("aptos mono", 1229),
+    ("aptos serif", 1120),
 ];
 
 /// The width of the widest digit of `font` at `size_pt` points, `1..=`[`MAX_DIGIT_PX`] pixels. A missing or unknown
@@ -100,6 +105,21 @@ mod tests {
             ("맑은 고딕", 11.0, 8),
             ("Malgun Gothic", 10.0, 7),
             ("Malgun Gothic", 12.0, 9),
+            ("Aptos", 10.0, 7),
+            ("Aptos", 11.0, 8),
+            ("Aptos", 12.0, 9),
+            ("Aptos Narrow", 10.0, 7),
+            ("Aptos Narrow", 11.0, 7),
+            ("Aptos Narrow", 12.0, 8),
+            ("Aptos Display", 10.0, 7),
+            ("Aptos Display", 11.0, 8),
+            ("Aptos Display", 12.0, 8),
+            ("Aptos Mono", 10.0, 8),
+            ("Aptos Mono", 11.0, 9),
+            ("Aptos Mono", 12.0, 10),
+            ("Aptos Serif", 10.0, 7),
+            ("Aptos Serif", 11.0, 8),
+            ("Aptos Serif", 12.0, 9),
         ];
         for (font, size, px) in table {
             assert_eq!(max_digit_px(Some(font), Some(size)), px, "{font} {size}");

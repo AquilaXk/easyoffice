@@ -64,12 +64,12 @@ test("the rows of the title are repeated on every page after the one they sit on
   const t = await setup(column(100));
   t.layout.setPage("Sheet1", { titleRows: [1, 2] });
   const pages = (await t.print()).querySelectorAll(".eo-print-sheet-page");
-  // A4 with 10 mm margins is 1047 px high: 43 rows of the grid's 24 px on a page.
+  // A4 with 10 mm margins is 1047 px high: 47 rows of the grid's 22 px on a page.
   assert.ok(pages.length >= 3, String(pages.length));
   assert.deepEqual(texts(pages[0]).slice(0, 3), ["행1", "행2", "행3"]);
-  assert.equal(texts(pages[0]).length, 43, "43 rows fill the first page");
-  assert.equal(texts(pages[1]).length, 43, "two title rows and 41 more");
-  assert.deepEqual(texts(pages[1]).slice(0, 3), ["행1", "행2", "행44"]);
+  assert.equal(texts(pages[0]).length, 47, "47 rows fill the first page");
+  assert.equal(texts(pages[1]).length, 47, "two title rows and 45 more");
+  assert.deepEqual(texts(pages[1]).slice(0, 3), ["행1", "행2", "행48"]);
 });
 
 test("the title columns are repeated on the pages across", async () => {

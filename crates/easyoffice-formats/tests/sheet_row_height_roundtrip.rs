@@ -82,7 +82,9 @@ fn xlsx_row_heights_round_trip_with_the_custom_flag() {
 fn a_sheet_without_heights_writes_no_height_attribute() {
     let sheet = part(&xlsx(&SheetStyling::default()), "xl/worksheets/sheet1.xml");
     assert!(
-        !sheet.contains("ht=") && !sheet.contains("customHeight"),
+        !sheet.contains(" ht=")
+            && !sheet.contains("customHeight")
+            && sheet.contains(r#"<sheetFormatPr defaultRowHeight="16.5"/>"#),
         "{sheet}"
     );
 }

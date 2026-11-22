@@ -85,8 +85,8 @@
   const markWrap = () => {
     wrapSeen = true;
   };
-  // A font this large (px) makes a row taller than the grid's row height, which is the least a row is (24 px, `sheet-row-fit.js`).
-  const TALL_FONT_PX = 19;
+  // A font this large (px) makes a row taller than the grid's row height, which is the least a row is (22 px, `sheet-row-fit.js`).
+  const TALL_FONT_PX = 18;
   // Notes a style that can make its row taller than the plain one: a wrapped cell or a large font.
   const noteRowFit = (st) => {
     if (st.wrap || Number.parseFloat(st.fontSize) >= TALL_FONT_PX) wrapSeen = true;

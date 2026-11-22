@@ -1,7 +1,7 @@
 //! OpenDocument spreadsheet cell and column styles (PD-089): automatic styles written into
 //! `content.xml` and read back (`style:text-properties`, `style:column-width`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::cell_type::{pack_cell_pos, CellValueKind};
 use crate::pages_proto::FastU64Map;
@@ -9,31 +9,32 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, extract_tags_or_self_closing_with_attrs,
     extract_tags_with_attrs,
 };
+use crate::sheet_styling::ods_default_style::{
+    append_column_width_styles_xml, length_to_pt, ods_color, parse_column_width_px,
+    parse_table_col_width, parse_text_properties, quote_ods_font_family, settle_col_widths,
+    ColWidthRun,
+};
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
-use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
+use crate::sheet_styling::ods_view::{table_props, TableProps};
 use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
-use crate::sheet_styling::sheet_look::{ods_border_attrs, ods_borders_from, parse_hex_rgb};
+use crate::sheet_styling::sheet_look::{ods_border_attrs, ods_borders_from};
 use crate::sheet_styling::sheet_row_height::{
-    ods_row_style_xml, read_ods_row_properties, RowHeight, RowHeights, MAX_ROW_HEIGHTS,
+    ods_row_style_xml, read_ods_row_properties, settle_heights, HeightRun, RowHeight,
+    MAX_ROW_BLOCK, MAX_ROW_HEIGHTS,
 };
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{
     push_level, LevelRun, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS,
 };
 use crate::sheet_styling::{
-    format_centipt, resolve_code, resolve_font_name, CellStyle, FontTable, HAlign, IdMemo,
-    NumFmtTable, SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
+    format_centipt, resolve_code, resolve_font_name, CellStyle, DefaultColWidth, DefaultFont,
+    FontTable, HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign, MAX_STYLED_CELLS,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{CellBox, EasyOfficeError, OdfCodec, XmlSanitizer};
 use std::sync::Arc;
-
-const PX_PER_INCH: f64 = 96.0;
-const CM_PER_INCH: f64 = 2.54;
-const MM_PER_INCH: f64 = 25.4;
-const PT_PER_INCH: f64 = 72.0;
 
 /// Automatic style names for a workbook: `ce<N>` per distinct cell style and `co<N>` per distinct
 /// column width, in first-use order.
@@ -91,6 +92,13 @@ impl OdsStyleTable {
             for &px in styling.columns.values() {
                 table.width_index.entry(px).or_insert_with(|| {
                     table.widths.push(px);
+                    table.widths.len()
+                });
+            }
+            if styling.default_col_width.is_some() {
+                let def_px = styling.default_col_px();
+                table.width_index.entry(def_px).or_insert_with(|| {
+                    table.widths.push(def_px);
                     table.widths.len()
                 });
             }
@@ -155,13 +163,7 @@ impl OdsStyleTable {
                 xml.push_str(&data_style_xml(&format!("eonf{id}"), code));
             }
         }
-        for (i, &px) in self.widths.iter().enumerate() {
-            xml.push_str(&format!(
-                "<style:style style:name=\"co{}\" style:family=\"table-column\"><style:table-column-properties style:column-width=\"{:.4}in\"/></style:style>",
-                i + 1,
-                f64::from(px) / PX_PER_INCH
-            ));
-        }
+        append_column_width_styles_xml(&self.widths, &mut xml);
         for (i, &height) in self.row_heights.iter().enumerate() {
             xml.push_str(&ods_row_style_xml(i + 1, height));
         }
@@ -186,12 +188,10 @@ impl OdsStyleTable {
                 props.push_str(&format!(" fo:color=\"#{rgb:06x}\""));
             }
             if let Some(name) = resolve_font_name(k.font(), self.font_names.names()) {
-                let esc = XmlSanitizer::escape(name);
-                if name.contains(' ') {
-                    props.push_str(&format!(" fo:font-family=\"'{esc}'\""));
-                } else {
-                    props.push_str(&format!(" fo:font-family=\"{esc}\""));
-                }
+                props.push_str(&format!(
+                    " fo:font-family=\"{}\"",
+                    quote_ods_font_family(name)
+                ));
             }
             let data = match k.num_fmt() {
                 0 => String::new(),
@@ -269,11 +269,6 @@ fn cell_look_xml(k: StyleKey) -> String {
     xml
 }
 
-/// `#rrggbb` of an `fo:color` or `fo:background-color`; `transparent` and anything else is no colour.
-fn ods_color(value: &str) -> Option<u32> {
-    parse_hex_rgb(value.strip_prefix('#')?)
-}
-
 /// Alignment, wrapping, borders and fill out of the cell and paragraph properties of a style body.
 fn parse_cell_look(body: &str, style: &mut CellStyle) {
     if let Some((attrs, _)) =
@@ -299,162 +294,6 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
     style.wrap = get("fo:wrap-option") == Some("wrap");
     style.fill = get("fo:background-color").and_then(ods_color);
     style.borders = ods_borders_from(get);
-}
-
-/// `<table:table-column>` elements for the custom widths and the column groups (empty string when
-/// there are none); columns without a width are filled with unstyled repeated columns.
-pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -> String {
-    let outline = &styling.outline;
-    let mut cuts: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
-    for &col in styling.columns.keys() {
-        cuts.extend([col, col + 1]);
-    }
-    for &(first, last) in &styling.unlocked_cols {
-        cuts.extend([first, last + 1]);
-    }
-    for &(first, last, _) in &outline.cols {
-        cuts.extend([first, last + 1]);
-    }
-    for &(first, last) in &outline.collapsed_cols {
-        cuts.extend([first, last + 1]);
-    }
-    let header_end = crate::sheet_styling::ods_page::title_end(styling.page.title_cols);
-    if let Some(end) = header_end {
-        cuts.extend([0, end]);
-    }
-    let mut groups = GroupWriter::new(
-        "table:table-column-group",
-        &outline.cols,
-        &outline.collapsed_cols,
-        &outline.open_cols,
-    );
-    // Stretches of equal width and level, from the cuts.
-    let mut stretches: Vec<(u32, u32, Option<u32>, u8, bool, bool)> = Vec::new();
-    let cuts: Vec<u32> = cuts.into_iter().collect();
-    for pair in cuts.windows(2) {
-        let (from, to) = (pair[0], pair[1]);
-        let (px, level) = (styling.columns.get(&from).copied(), groups.level(from));
-        let unlocked =
-            crate::sheet_styling::xlsx_layout::run_contains(&styling.unlocked_cols, from)
-                && table.unlocked_name().is_some();
-        if px.is_none() && level == 0 && !unlocked && header_end.is_none_or(|end| from >= end) {
-            continue;
-        }
-        // The columns a folded group hid are written collapsed as well, which is how the other spreadsheet programs
-        // tell a folded group from an open one.
-        let collapsed =
-            crate::sheet_styling::xlsx_layout::run_contains(&outline.collapsed_cols, from);
-        match stretches.last_mut() {
-            Some(last)
-                if last.1 == from
-                    && last.2 == px
-                    && last.3 == level
-                    && last.4 == unlocked
-                    && last.5 == collapsed
-                    && header_end != Some(from) =>
-            {
-                last.1 = to
-            }
-            _ => stretches.push((from, to, px, level, unlocked, collapsed)),
-        }
-    }
-    let mut xml = String::new();
-    let mut next = 0u32;
-    let unlocked_name = table.unlocked_name();
-    for (from, to, px, _, unlocked, collapsed) in stretches {
-        if from > next {
-            groups.close_all(&mut xml);
-            xml.push_str(&repeated_column(None, None, false, from - next));
-        }
-        if from == 0 && header_end.is_some() {
-            xml.push_str("<table:table-header-columns>");
-        }
-        groups.move_to(&mut xml, from);
-        xml.push_str(&repeated_column(
-            px.and_then(|px| table.column_style_name(px)).as_deref(),
-            unlocked_name.as_deref().filter(|_| unlocked),
-            collapsed,
-            to - from,
-        ));
-        next = to;
-        if header_end == Some(to) {
-            groups.close_all(&mut xml);
-            xml.push_str("</table:table-header-columns>");
-        }
-    }
-    groups.close_all(&mut xml);
-    xml
-}
-
-fn repeated_column(
-    style: Option<&str>,
-    default_cell: Option<&str>,
-    collapsed: bool,
-    count: u32,
-) -> String {
-    let mut style = style.map_or(String::new(), |s| {
-        format!(" table:style-name=\"{}\"", XmlSanitizer::escape(s))
-    });
-    if let Some(cell_style) = default_cell {
-        style.push_str(&format!(
-            " table:default-cell-style-name=\"{}\"",
-            XmlSanitizer::escape(cell_style)
-        ));
-    }
-    if collapsed {
-        style.push_str(" table:visibility=\"collapse\"");
-    }
-    let repeat = if count > 1 {
-        format!(" table:number-columns-repeated=\"{count}\"")
-    } else {
-        String::new()
-    };
-    format!("<table:table-column{style}{repeat}/>")
-}
-
-fn length_to_px(value: &str) -> Option<f64> {
-    let value = value.trim();
-    let split = value.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))?;
-    let number: f64 = value[..split].parse().ok()?;
-    let per_inch = match value[split..].trim() {
-        "in" => 1.0,
-        "cm" => CM_PER_INCH,
-        "mm" => MM_PER_INCH,
-        "pt" => PT_PER_INCH,
-        "px" => PX_PER_INCH,
-        _ => return None,
-    };
-    Some(number / per_inch * PX_PER_INCH).filter(|px| px.is_finite())
-}
-
-fn parse_text_properties(attrs: &str, font_table: &mut FontTable) -> CellStyle {
-    let get = |name: &str| extract_attr_from_fragment(attrs, name);
-    let on = |name: &str| get(name).is_some_and(|v| v != "none");
-    let font = get("fo:font-family")
-        .or_else(|| get("style:font-name"))
-        .map(XmlSanitizer::unescape)
-        .and_then(|raw| {
-            let first = raw.split(',').next().unwrap_or(&raw).trim();
-            (!first.is_empty()).then(|| font_table.intern(first))
-        })
-        .unwrap_or(0);
-    CellStyle {
-        bold: get("fo:font-weight")
-            .is_some_and(|w| w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)),
-        italic: get("fo:font-style").is_some_and(|s| s == "italic" || s == "oblique"),
-        underline: on("style:text-underline-style"),
-        strike: on("style:text-line-through-style"),
-        size_pt: get("fo:font-size")
-            .and_then(length_to_px)
-            .map(|px| (px / PX_PER_INCH * PT_PER_INCH * 100.0).round() / 100.0)
-            .filter(|pt| *pt >= 1.0),
-        // `use-window-font-color` is the automatic colour whatever `fo:color` says.
-        font_color: get("fo:color")
-            .and_then(ods_color)
-            .filter(|_| get("style:use-window-font-color") != Some("true")),
-        font,
-        ..CellStyle::default()
-    }
 }
 
 /// Cell styles and column widths declared by the automatic styles of `content.xml`.
@@ -518,27 +357,15 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
             }
             styles.cells.insert(name, style);
         } else if family == "table-column" {
-            let px = extract_tags_or_self_closing_with_attrs(body, "style:table-column-properties")
-                .into_iter()
-                .next()
-                .and_then(|(props, _)| extract_attr_from_fragment(props, "style:column-width"))
-                .and_then(length_to_px);
-            if let Some(px) = px {
-                let px = px
-                    .round()
-                    .clamp(f64::from(MIN_COLUMN_PX), f64::from(MAX_COLUMN_PX));
-                styles.columns.insert(name, px as u32);
+            if let Some(px) = parse_column_width_px(body) {
+                styles.columns.insert(name, px);
             }
         } else if family == "table-row" {
             let height =
                 extract_tags_or_self_closing_with_attrs(body, "style:table-row-properties")
                     .into_iter()
                     .next()
-                    .and_then(|(props, _)| {
-                        read_ods_row_properties(props, |v| {
-                            length_to_px(v).map(|px| px / PX_PER_INCH * PT_PER_INCH)
-                        })
-                    });
+                    .and_then(|(props, _)| read_ods_row_properties(props, length_to_pt));
             if let Some(height) = height {
                 styles.rows.insert(name, height);
             }
@@ -549,38 +376,19 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     styles
 }
 
-/// Rows a repeated band may have and still be read as rows of their own, not as the look of the whole sheet.
-const MAX_ROW_BLOCK: u32 = 1024;
-
-/// The rows `first..first + rows` of one table, all with `height`.
-struct HeightRun {
-    first: u32,
-    rows: u32,
-    height: RowHeight,
-}
-
-/// The heights of the rows the user set, from the stretches a table listed: the rows with the sheet's default height
-/// left out (the writer styles every row with it, it is not a height of anyone's own), and no more than
-/// [`MAX_ROW_HEIGHTS`] rows, the first ones. Settled at the end of the table because the default is the band that ends it.
-fn settle_heights(runs: Vec<HeightRun>, default: Option<RowHeight>) -> RowHeights {
-    runs.into_iter()
-        .filter(|run| Some(run.height) != default)
-        .flat_map(|run| (run.first..run.first + run.rows).map(move |row| (row, run.height)))
-        .take(MAX_ROW_HEIGHTS)
-        .collect()
-}
-
 /// Rows one table may list as hidden by a filter; more are not recorded.
 const MAX_FILTERED_ROWS: u32 = 1_048_576;
 
 /// Collects cell and column styles of each table while the grid is walked.
 pub(crate) struct StyleSink<'s> {
     styles: &'s AutomaticStyles,
+    default_font: Option<DefaultFont>,
     tables: Vec<(String, SheetStyling)>,
-    columns: BTreeMap<u32, u32>,
+    col_runs: Vec<ColWidthRun>,
+    default_col_width: Option<DefaultColWidth>,
     /// Columns whose default cell style is unlocked (PD-216).
     unlocked_cols: Vec<(u32, u32)>,
-    cells: BTreeMap<(u32, u32), CellStyle>,
+    cells: std::collections::BTreeMap<(u32, u32), CellStyle>,
     cell_types: FastU64Map<CellValueKind>,
     name: String,
     row: u32,
@@ -612,13 +420,23 @@ pub(crate) struct StyleSink<'s> {
 }
 
 impl<'s> StyleSink<'s> {
+    #[allow(dead_code)]
     pub(crate) fn new(styles: &'s AutomaticStyles) -> Self {
+        Self::new_with_font(styles, None)
+    }
+
+    pub(crate) fn new_with_font(
+        styles: &'s AutomaticStyles,
+        default_font: Option<&DefaultFont>,
+    ) -> Self {
         Self {
             styles,
+            default_font: default_font.cloned(),
             tables: Vec::new(),
-            columns: BTreeMap::new(),
+            col_runs: Vec::new(),
+            default_col_width: None,
             unlocked_cols: Vec::new(),
-            cells: BTreeMap::new(),
+            cells: std::collections::BTreeMap::new(),
             cell_types: FastU64Map::default(),
             name: String::new(),
             row: 0,
@@ -751,6 +569,21 @@ impl<'s> StyleSink<'s> {
             .add_area(&mut self.link_allowance, block, &target, title);
     }
 
+    fn push_col_width_run(&mut self, first: u32, cols: u32, px: u32) {
+        if cols == 0 {
+            return;
+        }
+        if let Some(last) = self.col_runs.last_mut() {
+            if last.px == px && last.first + last.cols == first {
+                last.cols += cols;
+                return;
+            }
+        }
+        if self.col_runs.len() <= OdfCodec::MAX_COLS as usize {
+            self.col_runs.push(ColWidthRun { first, cols, px });
+        }
+    }
+
     pub(crate) fn into_tables(self) -> Vec<(String, SheetStyling)> {
         self.tables
     }
@@ -762,9 +595,10 @@ impl OdsSink for StyleSink<'_> {
             .get("table:name")
             .map(|n| n.into_owned())
             .unwrap_or_else(|| format!("Sheet{}", self.tables.len() + 1));
-        self.columns = BTreeMap::new();
+        self.col_runs.clear();
+        self.default_col_width = parse_table_col_width(attrs);
         self.unlocked_cols = Vec::new();
-        self.cells = BTreeMap::new();
+        self.cells = std::collections::BTreeMap::new();
         self.cell_types = FastU64Map::default();
         self.row = 0;
         self.column = 0;
@@ -824,16 +658,9 @@ impl OdsSink for StyleSink<'_> {
             .get("table:style-name")
             .and_then(|n| self.styles.columns.get(&*n).copied());
         if let Some(px) = px {
-            for c in self.column
-                ..self
-                    .column
-                    .saturating_add(repeat)
-                    .min(OdfCodec::MAX_COLS + 1)
-            {
-                if self.columns.len() >= MAX_STYLED_CELLS {
-                    break;
-                }
-                self.columns.insert(c, px);
+            let end = u64::from(self.column) + u64::from(repeat);
+            if end <= u64::from(OdfCodec::MAX_COLS) + 1 {
+                self.push_col_width_run(self.column, repeat, px);
             }
         }
         self.column = self.column.saturating_add(repeat);
@@ -899,10 +726,17 @@ impl OdsSink for StyleSink<'_> {
 
     fn table_end(&mut self) {
         let default_row_height = self.default_height.take();
+        let (columns, default_col_width) = settle_col_widths(
+            std::mem::take(&mut self.col_runs),
+            self.default_col_width.take(),
+            self.default_font.as_ref(),
+        );
         let mut styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
             cell_types: std::mem::take(&mut self.cell_types),
-            columns: std::mem::take(&mut self.columns),
+            columns,
+            default_col_width,
+            default_font: self.default_font.clone(),
             unlocked_cols: std::mem::take(&mut self.unlocked_cols),
             num_fmts: Arc::clone(&self.styles.num_fmts),
             // The count belongs to the workbook; the first table carries it.
@@ -956,11 +790,23 @@ pub(crate) fn with_rules(
 }
 
 /// Styling of every table of an ODS `content.xml`, keyed by table name.
+#[allow(dead_code)]
 pub(crate) fn parse_ods_styling(
     content_xml: &str,
 ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
+    parse_ods_styling_with_font(content_xml, None)
+}
+
+/// Styling of every table of an ODS `content.xml`, settling column widths with `default_font`.
+pub(crate) fn parse_ods_styling_with_font(
+    content_xml: &str,
+    default_font: Option<&DefaultFont>,
+) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
-    let mut sinks = (StyleSink::new(&styles), ValidationSink::default());
+    let mut sinks = (
+        StyleSink::new_with_font(&styles, default_font),
+        ValidationSink::default(),
+    );
     let mut budget = crate::decode_budget::DecodeBudget::new();
     let date1904 = crate::sheet_styling::ods_date_system::is_date1904(content_xml);
     walk_ods(content_xml, true, date1904, &mut sinks, &mut budget)?;

@@ -7,7 +7,7 @@
   const { MAX_ROWS, MAX_COLS } = host.__EASYOFFICE_SHEET_REFS__;
   // `DEFAULT_COL_W`: the width of a column a sheet says nothing about (PD-305, PD-306: 8 characters of the 8 px digit of Malgun Gothic 11 pt, up to 8 px); a sheet that does has its own
   // (`defaultColW()`), which the engine works out from the file's `defaultColWidth` and `baseColWidth`.
-  const ROW_H = 24, HEAD_H = 26, ROW_HEAD_W = 56, DEFAULT_COL_W = 72, MIN_COL_W = 36, MAX_COL_W = 720;
+  const ROW_H = 22, HEAD_H = 26, ROW_HEAD_W = 56, DEFAULT_COL_W = 72, MIN_COL_W = 36, MAX_COL_W = 720;
   const OVERSCAN_ROWS = 8, OVERSCAN_COLS = 2, FALLBACK_ROWS = 60, FALLBACK_COLS = 40, DEFAULT_COLS = 8, MIN_ROWS = 12;
 
   const { PACK_STRIDE, colName, colIndex, packCoord, packRef, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;

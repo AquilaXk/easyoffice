@@ -202,8 +202,8 @@ fn a_taller_row_above_moves_the_picture_down_and_keeps_its_cell() {
     let plain = calibri_sheet();
     let mut taller = calibri_sheet();
     taller.row_heights.insert(0, custom(75.0));
-    assert_eq!(top_with(&plain), (3, 72));
-    assert_eq!(top_with(&taller), (3, 72 + 100 - 24));
+    assert_eq!(top_with(&plain), (3, 66));
+    assert_eq!(top_with(&taller), (3, 66 + 100 - 22));
 }
 
 /// 96 px tall and 128 px wide on plain rows and columns, which the taller rows of `tall_rows` do not keep when the cells
@@ -295,7 +295,7 @@ fn cells_of(anchor: &ChartAnchor) -> [u32; 8] {
 }
 
 /// A one-cell picture over rows 5..=9 (zero-based 4..=8) whose rows 7 and 8 are hidden was placed with the rows shown: it is
-/// 96 px tall, and a save that does not touch it says the same cells and the same size, hidden rows or not.
+/// 88 px tall, and a save that does not touch it says the same cells and the same size, hidden rows or not.
 #[test]
 fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
     let mut styling = SheetStyling {
@@ -309,9 +309,9 @@ fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
         to_col: 3,
         to_row: 8,
         left_px: 64,
-        top_px: 96,
+        top_px: 88,
         width_px: 128,
-        height_px: 96,
+        height_px: 88,
         ..ChartAnchor::default()
     };
     styling.images.push(picture(anchor));
@@ -324,21 +324,21 @@ fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
     );
     assert_eq!(
         (back.width_px, back.height_px),
-        (128, 96),
+        (128, 88),
         "and so is the size"
     );
     // The rows are shown again and the file is saved again: still the same.
     let mut shown = read;
     shown.hidden_rows.clear();
     let again = round_trip(shown).images[0].anchor;
-    assert_eq!((again.width_px, again.height_px), (128, 96));
+    assert_eq!((again.width_px, again.height_px), (128, 88));
     assert_eq!(again.edit_as, AnchorEdit::OneCell);
 }
 
 /// A chart smaller than the 180 x 140 px a page lets a chart be dragged to is not made larger by a read and a save.
 #[test]
 fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
-    // 100 x 80 px at (84, 32): column 1 and 20 px in, row 1 and 8 px in, to column 2 / 56 px and row 4 / 16 px.
+    // 100 x 80 px at (84, 30): column 1 and 20 px in, row 1 and 8 px in, to column 2 / 56 px and row 5 / 0 px.
     let cells = |edit_as| ChartAnchor {
         edit_as,
         from_col: 1,
@@ -346,11 +346,11 @@ fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
         col_off_emu: 20 * 9_525,
         row_off_emu: 8 * 9_525,
         to_col: 2,
-        to_row: 4,
+        to_row: 5,
         to_col_off_emu: 56 * 9_525,
-        to_row_off_emu: 16 * 9_525,
+        to_row_off_emu: 0,
         left_px: 84,
-        top_px: 32,
+        top_px: 30,
         width_px: 100,
         height_px: 80,
     };
@@ -379,9 +379,9 @@ fn a_one_cell_picture_nobody_touched_is_written_with_the_cells_it_was_read_with(
         to_col_off_emu: 5_555,
         to_row_off_emu: 6_666,
         left_px: 64,
-        top_px: 24,
+        top_px: 22,
         width_px: 129,
-        height_px: 97,
+        height_px: 89,
     };
     let mut styling = calibri_sheet();
     styling.images.push(picture(anchor));

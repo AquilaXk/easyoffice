@@ -495,7 +495,7 @@ select:focus-visible,
 #pane-sheet .sheet-surface { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; border-width: 0; }
 .sheet-viewport { flex: 1 1 auto; min-height: 220px; overflow: auto; position: relative; background: var(--ui-surface); border-width: 1px; border-style: solid; border-color: var(--ui-border-light); outline: none; }
 .sheet-table.sheet-grid { width: auto; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
-.sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 23px; vertical-align: bottom; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 22px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 21px; vertical-align: bottom; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
 .sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
 .sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }
@@ -507,7 +507,7 @@ select:focus-visible,
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Edit box (PD-280): sheet-edit-box.js sets `--ew`, `--eh` and `--ch` (the cell's own height). The cell being edited becomes a block that lies over the cells to its right and below; its bottom margin gives back the height it takes, so the row keeps its height. */
-.sheet-grid td.edit-grow { --ew: 96px; --eh: auto; --ch: 24px; display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); overflow: hidden; }
+.sheet-grid td.edit-grow { --ew: 72px; --eh: auto; --ch: 22px; display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); overflow: hidden; }
 .sheet-grid td.edit-measure { display: block; width: max-content; }
 .sheet-grid td.edit-grow.edit-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Table style (PD-231): sheet-table-style.js sets `--ts-fill`, `--ts-fg` and `--ts-shadow`. It lies under the cell's own fill and colour (the block below) and under conditional formats; a table cell has no border of its own width: its grid line and the table's lines are shadows, so a line runs unbroken across the cell edges. */
@@ -549,7 +549,7 @@ select:focus-visible,
 .sheet-grid .col-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 6; }
 .sheet-grid .col-resizer:hover { background: var(--accent-strong); opacity: 0.45; }
 /* `--rh` is set on a row that is under the grid's height (`sheet-grid.js`). */
-.sheet-grid { --rh: 24px; }
+.sheet-grid { --rh: 22px; }
 .sheet-grid .row-resizer { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: row-resize; z-index: 6; }
 .sheet-grid .row-resizer:hover { background: var(--accent-strong); opacity: 0.45; }
 /* Row heights (PD-278): a row under the grid's height takes its own (`--rh`), and a row whose height cuts its cells off keeps them on one line. */
@@ -572,7 +572,7 @@ select:focus-visible,
 .sheet-grid td.filter-head.filter-on::after { content: "\25BC"; font-size: 9px; border-color: var(--accent-strong); background: var(--accent-strong); color: var(--ui-surface); }
 /* Row numbers of a filtered range take the accent color, not a fill (a fill reads as a row selection). */
 .sheet-grid th.filter-row { color: var(--accent-strong); font-weight: 700; }
-.sheet-grid td.merge-anchor { --mw: 96px; --mh: 24px; position: relative; z-index: 1; overflow: visible; text-overflow: clip; }
+.sheet-grid td.merge-anchor { --mw: 72px; --mh: 22px; position: relative; z-index: 1; overflow: visible; text-overflow: clip; }
 .sheet-grid td.merge-anchor::after { content: ""; position: absolute; z-index: -1; left: 0; top: 0; width: calc(var(--mw) - 1px); height: calc(var(--mh) - 1px); background: var(--ui-surface); border: 0 solid var(--ui-border-light); border-width: 0 1px 1px 0; }
 .sheet-grid td.merge-anchor.in-range::after { background: var(--ui-surface) linear-gradient(var(--table-selection-fill), var(--table-selection-fill)); }
 .sheet-grid td.merge-anchor.selected-cell { outline: none; }

@@ -127,8 +127,8 @@ test("grouping rows draws a bar and a button, folding hides them, a level button
   assert.equal(toggle().dataset.first, "3");
   assert.equal(toggle().getAttribute("aria-label"), "행 3~5 하위 수준 숨기기");
   assert.equal(toggle().getAttribute("aria-expanded"), "true");
-  // The button sits on the summary row 6: 26px of the header and five rows of 24px, centred.
-  assert.equal(toggle().style.top, 6 * 24 - 24 + 12 - 5.5 + "px");
+  // The button sits on the summary row 6: 26px of the header and five rows of 22px, centred.
+  assert.equal(toggle().style.top, 6 * 22 - 22 + 11 - 5.5 + "px");
   assert.equal(side.querySelectorAll(".outline-bar").length, 1);
 
   userClick(toggle());

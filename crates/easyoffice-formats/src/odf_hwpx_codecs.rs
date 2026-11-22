@@ -3,11 +3,14 @@ use crate::rtf_xml_helpers::{
     extract_attr, extract_odf_blocks_in_order, extract_odf_inline_text, extract_tag_bodies,
     scan_single_a1_coord, strip_tag_blocks, to_open_formula_syntax_impl,
 };
-use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
+use crate::sheet_styling::ods_default_style::{
+    read_default_font, table_col_width_attrs, table_columns_xml,
+};
+use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling_font};
 use crate::sheet_styling::ods_names::LOEXT_NS;
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_page::title_end;
-use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
+use crate::sheet_styling::ods_styles::{parse_ods_styling_with_font, OdsStyleTable};
 use crate::sheet_styling::ods_view::{settings_xml, GroupWriter, TabStyles, TABLEOOO_NS};
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::{hides_every_sheet, IdMemo, SheetStyling};
@@ -400,18 +403,18 @@ impl OdfCodec {
         XmlSanitizer::validate_safe_xml(&content)?;
 
         let settings = settings_xml(&names, stylings);
+        let default_font = stylings.first().and_then(|st| st.default_font.as_ref());
         let page_styles = crate::sheet_styling::ods_page::styles_xml(
             tab_styles.layouts(),
             stylings.iter().any(|st| !st.links.is_empty()),
+            default_font,
         );
-        let mut media = Vec::new();
+        let mut media = vec![("styles.xml".to_string(), "text/xml")];
         if settings.is_some() {
             media.push(("settings.xml".to_string(), "text/xml"));
         }
-        if page_styles.is_some() {
-            media.push(("styles.xml".to_string(), "text/xml"));
-        }
         let manifest = Self::build_manifest_with_media(Self::MIMETYPE_ODS, &media);
+        XmlSanitizer::validate_safe_xml(&page_styles)?;
         let mut parts = vec![
             (
                 "mimetype".to_string(),
@@ -419,13 +422,10 @@ impl OdfCodec {
             ),
             ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
             ("content.xml".to_string(), content.into_bytes()),
+            ("styles.xml".to_string(), page_styles.into_bytes()),
         ];
         if let Some(settings) = settings {
             parts.push(("settings.xml".to_string(), settings.into_bytes()));
-        }
-        if let Some(styles) = page_styles {
-            XmlSanitizer::validate_safe_xml(&styles)?;
-            parts.push(("styles.xml".to_string(), styles.into_bytes()));
         }
         ZipArchiveCodec::pack_compressed(&parts)
     }
@@ -511,8 +511,11 @@ impl OdfCodec {
             String::new(),
             crate::sheet_styling::ods_protect::table_attrs,
         );
+        let col_width_attrs = styling
+            .map(|st| table_col_width_attrs(st.default_col_width))
+            .unwrap_or_default();
         content.push_str(&format!(
-            "<table:table table:name=\"{}\"{tab_style}{print_ranges}{protect_attrs}>",
+            "<table:table table:name=\"{}\"{tab_style}{print_ranges}{protect_attrs}{col_width_attrs}>",
             XmlSanitizer::escape(sheet_name)
         ));
         if let Some(protect) = styling.and_then(|st| st.protect.as_ref()) {
@@ -743,7 +746,8 @@ impl OdfCodec {
         bytes: &[u8],
     ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
-        let mut stylings = parse_ods_styling(&content_xml)?;
+        let default_font = read_default_font(styles.as_deref(), &content_xml);
+        let mut stylings = parse_ods_styling_with_font(&content_xml, default_font.as_ref())?;
         Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
@@ -764,7 +768,9 @@ impl OdfCodec {
         bytes: &[u8],
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
-        let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
+        let default_font = read_default_font(styles.as_deref(), &content_xml);
+        let (sheets, mut stylings) =
+            read_ods_sheets_with_styling_font(&content_xml, default_font.as_ref())?;
         Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);

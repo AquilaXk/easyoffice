@@ -6,6 +6,7 @@ use crate::sheet_links::xls_links;
 use crate::sheet_links::SheetLinks;
 use crate::sheet_styling::{sheet_states, SheetStyling};
 use crate::xls_boundsheet;
+use crate::xls_layout::{write_row_records, write_sheet_layout_globals};
 use crate::xls_styles::{blank_record, default_font_record, set_formula_xf, XlsColorPlan};
 use crate::{EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
@@ -229,6 +230,20 @@ impl LegacyOle2Codec {
         if sheets.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
+        for styling in stylings {
+            if !crate::row_heights_within_bounds(
+                &styling.row_heights,
+                styling.default_row_height,
+                u32::MAX,
+            ) || styling
+                .default_col_width
+                .is_some_and(|w| !w.within_bounds())
+            {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "BIFF8 행 높이·기본 열 너비가 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
+        }
         let mut classified: Vec<Vec<XlsCellRecord>> = Vec::with_capacity(sheets.len());
         let mut sst_strings: Vec<String> = Vec::new();
         let mut sst_index_map: std::collections::HashMap<&str, u32> =
@@ -282,9 +297,10 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&2u16.to_le_bytes());
             stream.extend_from_slice(&1u16.to_le_bytes());
         }
-        stream.extend(default_font_record());
+        let wb_default_font = stylings.first().and_then(|st| st.default_font.as_ref());
+        stream.extend(default_font_record(wb_default_font));
         if let Some(plan) = &colors {
-            plan.font_records(&mut stream);
+            plan.font_records(&mut stream, wb_default_font);
         }
         stream.extend_from_slice(&Self::BIFF8_XF.to_le_bytes());
         stream.extend_from_slice(&20u16.to_le_bytes());
@@ -332,6 +348,9 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&0u32.to_le_bytes());
             stream.extend_from_slice(&0x0006u32.to_le_bytes());
 
+            let styling = stylings.get(sheet_idx);
+            write_sheet_layout_globals(&mut stream, styling, wb_default_font);
+
             let (max_r, max_c) = sheet
                 .cells
                 .iter()
@@ -346,7 +365,7 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&(max_c.min(u16::MAX as u32) as u16).to_le_bytes()); // last_col + 1
             stream.extend_from_slice(&0u16.to_le_bytes()); // reserved
 
-            let styling = stylings.get(sheet_idx);
+            write_row_records(&mut stream, styling, wb_default_font);
             let xf_of =
                 |row: u32, col: u32| colors.as_ref().map_or(0, |plan| plan.xf(styling, row, col));
             let valued: std::collections::HashSet<(u32, u32)> = if colors.is_some() {

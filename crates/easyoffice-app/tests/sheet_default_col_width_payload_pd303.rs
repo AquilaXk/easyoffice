@@ -114,11 +114,11 @@ fn the_page_gets_the_pixels_of_the_default_column() {
     );
 }
 
-/// ODS has no such width: the same payload saves, and the file says nothing of it.
+/// ODS round-trips the sheet-wide `defaultColWidth` payload key (PD-308).
 #[test]
-fn an_ods_save_takes_the_key_and_writes_nothing() {
+fn an_ods_save_round_trips_the_key() {
     let bytes = save("ods", WIDTH).unwrap();
-    assert!(!open("ods", &bytes).contains("defaultColWidth"));
+    assert!(open("ods", &bytes).contains(r#""defaultColWidth":{"width":20.7109375,"base":10}"#));
 }
 
 #[test]

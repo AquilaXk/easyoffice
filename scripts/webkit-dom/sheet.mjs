@@ -319,8 +319,8 @@ export const sheetSteps = [
   ["the default row height sets the height of every row in the real layout, and a drag with every row selected changes it (PD-286)", async (page) => {
     const height = (ref) => page.$eval(td(ref), (el) => el.getBoundingClientRect().height);
     const top = (ref) => page.$eval(td(ref), (el) => el.getBoundingClientRect().top);
-    assert.deepEqual([await height("B3"), await height("B9")], [24, 24]);
-    // Ctrl+A, then the edge of row 3 dragged 16 px down with the real mouse.
+    assert.deepEqual([await height("B3"), await height("B9")], [22, 22]);
+    // Ctrl+A, then the edge of row 3 dragged 18 px down with the real mouse (22 + 18 = 40 px = 30 pt).
     const drag = async (dy) => {
       const edge = await page.locator('#pane-sheet tbody tr[data-row="3"] .row-resizer').boundingBox();
       const [x, y] = [edge.x + edge.width / 2, edge.y + edge.height / 2];
@@ -331,7 +331,7 @@ export const sheetSteps = [
     };
     await page.click(td("B2"));
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
-    await drag(16);
+    await drag(18);
     await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1") === 30);
     assert.equal(await height("B3"), 40);
     assert.equal(await height("B9"), 40, "every row, not the pressed one only");
@@ -389,25 +389,25 @@ export const sheetSteps = [
       await page.mouse.move(x, y + dy, { steps: 4 });
       await page.mouse.up();
     };
-    // Row 2 from 24 to 80 px (60 pt): the picture's row is 56 px lower and the picture is with it.
+    // Row 2 from 22 to 80 px (60 pt): the picture's row is 58 px lower and the picture is with it.
     await page.click(td("B2"));
-    await drag(2, 56);
+    await drag(2, 58);
     await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.rowHeightsOf("Sheet1")?.get(2) === 60);
     const taller = await edges();
-    assert.equal(taller.cellTop - before.cellTop, 56);
+    assert.equal(taller.cellTop - before.cellTop, 58);
     assert.deepEqual([taller.dx, taller.dy], [before.dx, before.dy], "and stays on it");
-    // Every row at 30 pt (40 px): the three rows above the cell are 120 px instead of 72.
+    // Every row at 30 pt (40 px): the three rows above the cell are 120 px instead of 66.
     await page.click(td("B2"));
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
-    await drag(3, 16);
+    await drag(3, 18);
     await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1") === 30);
     const tallest = await edges();
-    assert.equal(tallest.cellTop - before.cellTop, 48);
+    assert.equal(tallest.cellTop - before.cellTop, 54);
     assert.deepEqual([tallest.dx, tallest.dy], [before.dx, before.dy], "the default row height moves it as well");
   }],
 
   ["a picture and a chart on two cells grow with the rows they span, and the chart sits on its cell and scrolls with it (PD-299)", async (page) => {
-    // A picture of 120 x 60 px put on C4 and a chart over C4:G12 (nine rows of 24 px).
+    // A picture of 120 x 60 px put on C4 and a chart over F4:J12 (nine rows of 22 px).
     await page.click(td("C4"));
     await page.evaluate(async () => {
       const canvas = document.createElement("canvas");
@@ -419,7 +419,7 @@ export const sheetSteps = [
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [{
         id: "c1", chartType: "column", title: "합계", dataRange: "A1:B3", switchRowCol: false, legend: "right",
-        anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 320, top: 72, width: 256, height: 216 },
+        anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 320, top: 66, width: 256, height: 198 },
       }]);
     });
     await page.waitForSelector(".sheet-image-card");
@@ -430,7 +430,7 @@ export const sheetSteps = [
     });
     const first = await sizes();
     assert.equal(first.picture.height, 60);
-    assert.equal(first.chart.height, 216, "the chart is as tall as the nine rows it spans");
+    assert.equal(first.chart.height, 198, "the chart is as tall as the nine rows it spans");
     assert.ok(Math.abs(first.chart.top - first.cell) <= 1, `the chart starts on F4 (${first.chart.top} and ${first.cell})`);
     const drag = async (row, dy) => {
       const edge = await page.locator(`#pane-sheet tbody tr[data-row="${row}"] .row-resizer`).boundingBox();
@@ -440,30 +440,30 @@ export const sheetSteps = [
       await page.mouse.move(x, y + dy, { steps: 4 });
       await page.mouse.up();
     };
-    // Row 5 lies inside both (the picture ends in row 6, 12 px down): 16 px taller, so both are 16 px taller.
+    // Row 5 lies inside both (the picture ends in row 6, 16 px down): 16 px taller, so both are 16 px taller.
     await page.click(td("A1"));
     await drag(5, 16);
     await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.rowHeightsOf("Sheet1")?.has(5));
     const taller = await sizes();
     assert.equal(taller.picture.height, 76, "the picture grows with the row");
-    assert.equal(taller.chart.height, 232, "and so does the chart");
+    assert.equal(taller.chart.height, 214, "and so does the chart");
     // The chart scrolls with its cell.
-    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 48; });
-    await page.waitForFunction((cell) => Math.round(document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) === cell - 48, taller.cell);
+    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 44; });
+    await page.waitForFunction((cell) => Math.round(document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) === cell - 44, taller.cell);
     // The scroll event comes after the layout moved, so the card is given a moment.
     await page.waitForFunction(() => Math.abs(document.querySelector(".sheet-chart-card").getBoundingClientRect().top - document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) <= 1);
     const scrolled = await sizes();
-    assert.equal(scrolled.cell, taller.cell - 48);
+    assert.equal(scrolled.cell, taller.cell - 44);
   }],
 
   ["inserting a row or a column moves the charts with their cells in the real layout and one undo brings them back (PD-302)", async (page) => {
-    // A two-cell chart over F4:J13 (288 x 216 px on 72 px columns, PD-305, PD-306) and a one-cell chart of the same width on F16.
+    // A two-cell chart over F4:J13 (288 x 198 px on 72 px columns and 22 px rows, PD-305, PD-306, PD-308) and a one-cell chart of the same width on F16.
     await page.evaluate(() => {
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
       const base = { chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [
-        { ...base, id: "two", anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 360, top: 72, width: 288, height: 216 } },
-        { ...base, id: "one", anchor: { fromCol: 5, fromRow: 15, toCol: 9, toRow: 20, ...emu, left: 360, top: 360, width: 288, height: 144, editAs: "oneCell" } },
+        { ...base, id: "two", anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 360, top: 66, width: 288, height: 198 } },
+        { ...base, id: "one", anchor: { fromCol: 5, fromRow: 15, toCol: 9, toRow: 20, ...emu, left: 360, top: 330, width: 288, height: 132, editAs: "oneCell" } },
       ]);
     });
     await page.waitForSelector('.sheet-chart-card[data-chart-id="one"]');
@@ -497,8 +497,8 @@ export const sheetSteps = [
     assert.deepEqual([start.two.cell, start.one.cell], ["F4", "F16"]);
     // The card starts on the border of its cell, which is 1 px off at most.
     for (const chart of [start.two, start.one]) assert.ok(Math.abs(chart.dx) <= 1 && Math.abs(chart.dy) <= 1, `${chart.cell}: ${chart.dx}, ${chart.dy}`);
-    assert.deepEqual([start.two.width, start.two.height], [288, 216], "the chart sits on F4 and is nine rows tall");
-    assert.deepEqual([start.one.width, start.one.height], [288, 144]);
+    assert.deepEqual([start.two.width, start.two.height], [288, 198], "the chart sits on F4 and is nine rows tall");
+    assert.deepEqual([start.one.width, start.one.height], [288, 132]);
     const moved = (cells) => ({ two: { ...start.two, cell: cells[0] }, one: { ...start.one, cell: cells[1] } });
 
     // A row above both charts: both start one row down, each keeps its size.
@@ -529,7 +529,7 @@ export const sheetSteps = [
     // A chart on the new sheet over the cells of Sheet1, and one more over its own cells.
     await page.evaluate((sheet) => {
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
-      const anchor = { fromCol: 1, fromRow: 1, toCol: 4, toRow: 6, ...emu, left: 72, top: 24, width: 216, height: 120 };
+      const anchor = { fromCol: 1, fromRow: 1, toCol: 4, toRow: 6, ...emu, left: 72, top: 22, width: 216, height: 110 };
       const base = { chartType: "line", title: "", switchRowCol: false, legend: "right", anchor };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts(sheet, [
         { ...base, id: "far", dataRange: "Sheet1!$A$1:$B$5", series: [{ name: "x", nameRef: "Sheet1!$B$1", categoriesRef: "Sheet1!$A$2:$A$5", valuesRef: "Sheet1!$B$2:$B$5" }] },
@@ -575,15 +575,15 @@ export const sheetSteps = [
     await page.click("#btn-add-sheet-tab");
     await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
     await go("Sheet1");
-    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 24 * 30; });
+    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 22 * 30; });
     await page.click('#pane-sheet th[data-col="C"]');
     await page.waitForFunction(() => document.getElementById("active-cell-ref").textContent === "C1");
-    for (const [name, top] of [["Sheet2", 0], ["Sheet1", 24 * 30], ["Sheet2", 0], ["Sheet1", 24 * 30]]) {
+    for (const [name, top] of [["Sheet2", 0], ["Sheet1", 22 * 30], ["Sheet2", 0], ["Sheet1", 22 * 30]]) {
       await go(name);
       await page.waitForFunction((want) => document.getElementById("sheet-viewport").scrollTop === want, top);
       const seen = await view();
       assert.equal(seen.top, top, `${name} is at its own scroll`);
-      assert.ok(seen.last < top / 24 + 100, `${name} shows the rows round its scroll, not the end of the sheet (rows ${seen.first}..${seen.last})`);
+      assert.ok(seen.last < top / 22 + 100, `${name} shows the rows round its scroll, not the end of the sheet (rows ${seen.first}..${seen.last})`);
     }
     assert.equal(await page.textContent("#active-cell-ref"), "C1", "the column is still the pick of the first sheet");
   }],

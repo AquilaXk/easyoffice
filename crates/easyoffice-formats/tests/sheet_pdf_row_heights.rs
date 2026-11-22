@@ -1,5 +1,5 @@
 //! The PDF of a sheet draws each row at its height: the height of the row (`row_heights`), else the default row height a
-//! user set, else the grid's 24 px; a floating image is placed by the rows it spans (PD-287).
+//! user set, else the grid's 22 px; a floating image is placed by the rows it spans (PD-287).
 
 use easyoffice_formats::{
     deflate_zlib, encode_sheet_pdf, CellStyle, ChartAnchor, IeeeCrc32, OdsUnpacked, RichImage,
@@ -71,8 +71,8 @@ fn assert_heights(pdf: &str, px: [f64; ROWS as usize]) {
 }
 
 #[test]
-fn rows_with_no_height_of_their_own_are_24_px() {
-    assert_heights(&pdf_text(SheetStyling::default()), [24.0; 5]);
+fn rows_with_no_height_of_their_own_are_22_px() {
+    assert_heights(&pdf_text(SheetStyling::default()), [22.0; 5]);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn a_row_height_moves_the_rows_below_it() {
         row_heights: [(1, height("60", true)), (3, height("15", false))].into(),
         ..SheetStyling::default()
     };
-    assert_heights(&pdf_text(styling), [24.0, 80.0, 24.0, 20.0, 24.0]);
+    assert_heights(&pdf_text(styling), [22.0, 80.0, 22.0, 20.0, 22.0]);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn a_default_that_follows_the_font_leaves_the_grid_row_height() {
         default_row_height: Some(height("14.4", false)),
         ..SheetStyling::default()
     };
-    assert_heights(&pdf_text(styling), [24.0; 5]);
+    assert_heights(&pdf_text(styling), [22.0; 5]);
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn an_image_is_placed_and_sized_by_the_rows_it_spans() {
     let plain = pdf_text(with_image(SheetStyling::default(), 1, 4));
     let (_, y_plain, _, h_plain) = image_box(&plain);
     assert!(
-        (h_plain - 3.0 * 24.0 * PT_PER_PX).abs() < 0.011,
+        (h_plain - 3.0 * 22.0 * PT_PER_PX).abs() < 0.011,
         "{h_plain}"
     );
 
@@ -199,11 +199,11 @@ fn an_image_is_placed_and_sized_by_the_rows_it_spans() {
     let (_, y_tall, _, h_tall) = image_box(&tall);
     // Rows 1, 2 and 3: 80 px, 20 px and 40 px.
     assert!((h_tall - 140.0 * PT_PER_PX).abs() < 0.011, "{h_tall}");
-    // The top of the image is the bottom of row 0, which is 40 px high instead of 24.
+    // The top of the image is the bottom of row 0, which is 40 px high instead of 22.
     let top_plain = y_plain + h_plain;
     let top_tall = y_tall + h_tall;
     assert!(
-        ((top_plain - top_tall) - 16.0 * PT_PER_PX).abs() < 0.011,
+        ((top_plain - top_tall) - 18.0 * PT_PER_PX).abs() < 0.011,
         "{top_plain} {top_tall}"
     );
 }

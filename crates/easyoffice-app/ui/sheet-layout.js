@@ -359,7 +359,7 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
-  // The 24 px row and 72 px column fallbacks of the anchor readers below only stand in for a value a malformed anchor lacks (PD-299).
+  // The 22 px row and 72 px column fallbacks of the anchor readers below only stand in for a value a malformed anchor lacks (PD-299).
   function normalizeChartAnchor(raw) {
     const a = raw && typeof raw === "object" ? raw : {};
     const fcNum = Number(a.fromCol);
@@ -373,7 +373,7 @@
     const leftNum = Number(a.left);
     const topNum = Number(a.top);
     const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : fromCol * DEFAULT_COL_PX)));
-    const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : fromRow * 24)));
+    const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : fromRow * 22)));
     // A size from the engine is kept as it is: the lower limits of a chart a user drags apply to the drag only.
     const width = Math.max(1, Math.min(8192, Math.round(Number(a.width) || 420)));
     const height = Math.max(1, Math.min(8192, Math.round(Number(a.height) || 260)));
@@ -487,9 +487,9 @@
     const leftRaw = a.leftPx !== undefined ? Number(a.leftPx) : Number(a.left);
     const topRaw = a.topPx !== undefined ? Number(a.topPx) : Number(a.top);
     const leftPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftRaw) ? leftRaw : fromCol * DEFAULT_COL_PX + Math.round(colOffEmu / EMU_PER_PX))));
-    const topPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topRaw) ? topRaw : fromRow * 24 + Math.round(rowOffEmu / EMU_PER_PX))));
+    const topPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topRaw) ? topRaw : fromRow * 22 + Math.round(rowOffEmu / EMU_PER_PX))));
     const toCol = Math.max(fromCol, Math.min(16383, Number.isFinite(Number(a.toCol)) ? Math.trunc(Number(a.toCol)) : Math.min(16383, Math.floor((leftPx + widthPx) / DEFAULT_COL_PX))));
-    const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(Number(a.toRow)) ? Math.trunc(Number(a.toRow)) : Math.min(1048575, Math.floor((topPx + heightPx) / 24))));
+    const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(Number(a.toRow)) ? Math.trunc(Number(a.toRow)) : Math.min(1048575, Math.floor((topPx + heightPx) / 22))));
     const toColOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toColOffEmu) || 0)));
     const toRowOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toRowOffEmu) || 0)));
     return { fromCol, fromRow, colOffEmu, rowOffEmu, toCol, toRow, toColOffEmu, toRowOffEmu, leftPx, topPx, widthPx, heightPx, editAs: editAsOf(a.editAs) };

@@ -257,6 +257,8 @@ pub(crate) fn build_sheet_xml(
         sheet_xml.push_str(&sheet_views_xml(st.freeze, &st.view));
         sheet_xml.push_str(&sheet_format_pr_xml(st));
         sheet_xml.push_str(&layout_cols_xml(st, style_table.unlocked_xf()));
+    } else {
+        sheet_xml.push_str(&sheet_format_pr_xml(&SheetStyling::default()));
     }
     let marks = styling.map(summary_rows).unwrap_or_default();
     sheet_xml.push_str("<sheetData>");

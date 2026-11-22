@@ -29,8 +29,12 @@ pub const MAX_ROW_HEIGHTS: usize = 100_000;
 /// Longest text a default row height may be written as; a longer value is not a height.
 const MAX_HEIGHT_TEXT: usize = 32;
 /// The height the page draws a row at when a sheet has no default row height of a user, in CSS pixels (`sheet-grid.js`
-/// `ROW_H`).
-pub const GRID_ROW_PX: f64 = 24.0;
+/// `ROW_H`). Matches `16.5 pt` (`16.5 * 96 / 72 = 22 px`), the standard Korean edition row height.
+pub const GRID_ROW_PX: f64 = 22.0;
+/// Standard default row height in hundredths of a point (`16.5 pt`, Malgun Gothic 11 pt).
+pub const STANDARD_ROW_HEIGHT_CENTIPT: u32 = 1650;
+/// Non-standard Latin default row height in hundredths of a point (`15 pt`, Calibri 11 pt).
+pub const CALIBRI_ROW_HEIGHT_CENTIPT: u32 = 1500;
 
 const PX_PER_PT: f64 = 4.0 / 3.0;
 
@@ -80,6 +84,34 @@ impl RowHeight {
     /// The height in CSS pixels.
     pub fn px(self) -> f64 {
         f64::from(self.centipt) / 100.0 * PX_PER_PT
+    }
+}
+
+/// Default `defaultRowHeight` in hundredths of a point for a workbook's default font: `1650` (`16.5 pt`) for the
+/// Korean standard (None or Malgun Gothic 11 pt), otherwise `1500` (`15 pt`).
+pub fn default_row_centipt_for_font(font: Option<&crate::DefaultFont>) -> u32 {
+    match font {
+        None => STANDARD_ROW_HEIGHT_CENTIPT,
+        Some(f)
+            if (f.name() == crate::STANDARD_FONT_NAME
+                || f.name().eq_ignore_ascii_case("malgun gothic"))
+                && (f.size_pt() - crate::STANDARD_FONT_SIZE_PT).abs() < 1e-6 =>
+        {
+            STANDARD_ROW_HEIGHT_CENTIPT
+        }
+        Some(_) => CALIBRI_ROW_HEIGHT_CENTIPT,
+    }
+}
+
+/// Normalizes a read default row height: drops an implicit `16.5 pt` default on a standard-font sheet so standard
+/// sheets store `default_row_height == None`, while preserving `15 pt` under Calibri or any explicit `custom` height.
+pub(crate) fn kept_default_row_height(
+    height: Option<RowHeight>,
+    font: Option<&crate::DefaultFont>,
+) -> Option<RowHeight> {
+    match height {
+        Some(h) if !h.custom && font.is_none() && h.centipt == STANDARD_ROW_HEIGHT_CENTIPT => None,
+        other => other,
     }
 }
 
@@ -183,6 +215,26 @@ pub(crate) fn ods_row_style_xml(index: usize, height: RowHeight) -> String {
     )
 }
 
+/// Rows a repeated band may have and still be read as rows of their own, not as the look of the whole sheet.
+pub(crate) const MAX_ROW_BLOCK: u32 = 1024;
+
+/// The rows `first..first + rows` of one table, all with `height`.
+pub(crate) struct HeightRun {
+    pub(crate) first: u32,
+    pub(crate) rows: u32,
+    pub(crate) height: RowHeight,
+}
+
+/// Settles row height stretches at `table_end`, dropping rows whose height matches `default` and
+/// capping at [`MAX_ROW_HEIGHTS`].
+pub(crate) fn settle_heights(runs: Vec<HeightRun>, default: Option<RowHeight>) -> RowHeights {
+    runs.into_iter()
+        .filter(|run| Some(run.height) != default)
+        .flat_map(|run| (run.first..run.first + run.rows).map(move |row| (row, run.height)))
+        .take(MAX_ROW_HEIGHTS)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +279,28 @@ mod tests {
         assert!(!row_heights_within_bounds(&heights, None, 6));
         let many: RowHeights = (0..=MAX_ROW_HEIGHTS as u32).map(|r| (r, one)).collect();
         assert!(!row_heights_within_bounds(&many, None, u32::MAX));
+    }
+
+    #[test]
+    fn default_row_centipt_and_normalization_follow_font() {
+        assert_eq!(default_row_centipt_for_font(None), 1650);
+        let malgun_ascii = crate::DefaultFont::new("Malgun Gothic", 11.0);
+        assert_eq!(default_row_centipt_for_font(malgun_ascii.as_ref()), 1650);
+        let calibri = crate::DefaultFont::new("Calibri", 11.0);
+        assert_eq!(default_row_centipt_for_font(calibri.as_ref()), 1500);
+
+        let implicit_165 = RowHeight::from_points(16.5, false);
+        assert_eq!(kept_default_row_height(implicit_165, None), None);
+        assert_eq!(
+            kept_default_row_height(implicit_165, calibri.as_ref()),
+            implicit_165
+        );
+        let custom_165 = RowHeight::from_points(16.5, true);
+        assert_eq!(kept_default_row_height(custom_165, None), custom_165);
+        let implicit_15 = RowHeight::from_points(15.0, false);
+        assert_eq!(
+            kept_default_row_height(implicit_15, calibri.as_ref()),
+            implicit_15
+        );
     }
 }

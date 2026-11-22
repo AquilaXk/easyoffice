@@ -194,10 +194,10 @@ test("a long text reaching the right edge of the view wraps and the box grows do
   assert.ok(box.right <= view.right, `the box (${box.right}) stays in the view (${view.right})`);
   assert.ok(box.height > 60, `the box wrapped to ${box.height}px`);
   assert.ok(below.top < box.bottom, "it lies over the rows below");
-  assert.equal(await rowHeight("H16"), 24, "the row keeps its height");
+  assert.equal(await rowHeight("H16"), 22, "the row keeps its height");
   await key("Enter");
   await sleep(100);
-  assert.equal((await rectOf(td("H16"))).height, 24);
+  assert.equal((await rectOf(td("H16"))).height, 22);
   assert.equal(await cellText("H16"), "가".repeat(150));
 });
 

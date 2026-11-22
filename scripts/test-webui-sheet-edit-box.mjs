@@ -43,12 +43,12 @@ test("a wrapped cell keeps its width and grows down only when its lines need mor
   assert.deepEqual(fitEditBox({ ...base, wrap: true, naturalW: 900, heightAt: () => 70.2 }), { grow: true, wrap: true, w: 96, h: 71 });
 });
 
-// A page without layout: the cell is measured by a model of it. One glyph is 8px, a cell has 12px of padding and a line is 23px.
+// A page without layout: the cell is measured by a model of it. One glyph is 8px, a cell has 12px of padding and a line is 21px.
 const GLYPH = 8;
 const PAD = 12;
-const LINE = 23;
+const LINE = 21;
 
-function lay(td, { cellW = 96, cellH = 24 } = {}) {
+function lay(td, { cellW = 96, cellH = 22 } = {}) {
   const var_ = (name) => td.style.getPropertyValue(name);
   const textW = () => td.textContent.length * GLYPH + PAD;
   const width = () => {
@@ -96,7 +96,7 @@ test("typing past the cell widens the cell being edited over its neighbours, whe
     assert.equal(td.classList.contains("edit-grow"), false, "a short text stays in the cell");
     type(td, "열두 글자를 넘는 긴 문장을 입력한다");
     assert.equal(td.classList.contains("edit-grow"), true, ref);
-    assert.deepEqual(vars(td), [td.textContent.length * GLYPH + PAD + GAP + "px", "24px", "24px"], "the text, its padding and the gap; the cell's own height is kept");
+    assert.deepEqual(vars(td), [td.textContent.length * GLYPH + PAD + GAP + "px", "22px", "22px"], "the text, its padding and the gap; the cell's own height is kept");
     assert.equal(td.classList.contains("edit-wrap"), false);
   }
 });
@@ -126,7 +126,7 @@ test("a text longer than the room to the right of the cell wraps in a box as wid
   assert.equal(vars(td)[0], 640 - BORDER * 2 + "px");
   const lines = Math.ceil((200 * GLYPH) / (640 - BORDER * 2 - PAD));
   assert.equal(vars(td)[1], lines * LINE + 1 + "px");
-  assert.equal(vars(td)[2], "24px", "the row keeps the height of the cell");
+  assert.equal(vars(td)[2], "22px", "the row keeps the height of the cell");
 });
 
 test("a wrapping cell in a row that follows its content is left to the row, which grows with the text", async () => {

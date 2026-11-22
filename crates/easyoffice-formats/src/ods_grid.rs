@@ -649,13 +649,25 @@ pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, Eas
 }
 
 /// The tables and their styling from one walk of `content_xml`.
+#[allow(dead_code)]
 pub(crate) fn read_ods_sheets_with_styling(
     content_xml: &str,
+) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
+    read_ods_sheets_with_styling_font(content_xml, None)
+}
+
+/// The tables and their styling from one walk of `content_xml`, settling column widths with `default_font`.
+pub(crate) fn read_ods_sheets_with_styling_font(
+    content_xml: &str,
+    default_font: Option<&crate::DefaultFont>,
 ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (
         TextSink::new(true),
-        (StyleSink::new(&styles), ValidationSink::default()),
+        (
+            StyleSink::new_with_font(&styles, default_font),
+            ValidationSink::default(),
+        ),
     );
     let mut budget = DecodeBudget::new();
     let date1904 = crate::sheet_styling::ods_date_system::is_date1904(content_xml);

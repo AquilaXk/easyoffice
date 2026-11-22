@@ -71,14 +71,14 @@ fn a_row_insert_moves_charts_by_their_edit_kind() {
         &format!(r#""charts":{charts}"#),
     ));
     let moved = anchors(&res);
-    // Two cells: both ends move down three rows and the chart is as tall as before (3 rows of 24 px).
+    // Two cells: both ends move down three rows and the chart is as tall as before (3 rows of 22 px).
     assert_eq!((num(&moved[0], "fromRow"), num(&moved[0], "toRow")), (5, 8));
-    assert_eq!((num(&moved[0], "top"), num(&moved[0], "height")), (120, 72));
-    // One cell: the start moves, the size stays (72 px is three rows).
+    assert_eq!((num(&moved[0], "top"), num(&moved[0], "height")), (110, 66));
+    // One cell: the start moves, the size stays (72 px across 22 px rows).
     assert_eq!((num(&moved[1], "fromRow"), num(&moved[1], "toRow")), (5, 8));
-    assert_eq!((num(&moved[1], "top"), num(&moved[1], "height")), (120, 72));
-    // Absolute: the pixels stay (the top is 48 px, row 2) and the cells are worked out again.
-    assert_eq!((num(&moved[2], "fromRow"), num(&moved[2], "top")), (2, 48));
+    assert_eq!((num(&moved[1], "top"), num(&moved[1], "height")), (110, 72));
+    // Absolute: the pixels stay (the top is 44 px, row 2) and the cells are worked out again.
+    assert_eq!((num(&moved[2], "fromRow"), num(&moved[2], "top")), (2, 44));
 }
 
 /// The workbook's default font as the request says it when it is not the standard one: Calibri 11 pt, a 7 px digit and
@@ -251,7 +251,7 @@ fn deleting_the_rows_of_a_chart_shrinks_it_or_leaves_it_in_place() {
     ));
     let moved = anchors(&res);
     assert_eq!((num(&moved[0], "fromRow"), num(&moved[0], "toRow")), (2, 6));
-    assert_eq!(num(&moved[0], "height"), 4 * 24);
+    assert_eq!(num(&moved[0], "height"), 4 * 22);
     assert_eq!((num(&moved[1], "fromRow"), num(&moved[1], "toRow")), (4, 4));
     assert_eq!(num(&moved[1], "height"), 72, "the size it had stays");
     assert_eq!(num(&moved[1], "rowOffEmu"), 0);
@@ -279,7 +279,7 @@ fn the_offsets_inside_a_cell_survive_the_edit() {
         (95_250, 47_625)
     );
     assert_eq!(num(&moved[0], "fromRow"), 3);
-    assert_eq!(num(&moved[0], "top"), 3 * 24 + 95_250 / EMU_PER_PX);
+    assert_eq!(num(&moved[0], "top"), 3 * 22 + 95_250 / EMU_PER_PX);
 }
 
 #[test]

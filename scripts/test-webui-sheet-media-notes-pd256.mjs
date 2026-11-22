@@ -679,10 +679,10 @@ test("PD-299: 그림의 칸 앵커는 행 높이와 기본 행 높이를 따라 
   assert.deepEqual([a.topPx, a.heightPx], [170, 60]);
   const inside = media.anchorFromContentRect(0, 100, 50, 40);
   assert.deepEqual([inside.fromRow, inside.rowOffEmu, inside.toRow, inside.toRowOffEmu], [2, 20 * 9525, 3, 20 * 9525]);
-  // 기본 행 높이가 없던 시트는 24px 행이다.
+  // 기본 행 높이가 없던 시트는 22px 행이다.
   layoutApi.setDefaultRowHeight("Sheet1", null);
   await flushAsyncTurns(4);
-  const plain = media.anchorFromContentRect(0, 50, 50, 24);
+  const plain = media.anchorFromContentRect(0, 46, 50, 22);
   assert.deepEqual([plain.fromRow, plain.rowOffEmu, plain.toRow, plain.toRowOffEmu], [2, 2 * 9525, 3, 2 * 9525]);
 });
 
@@ -707,10 +707,10 @@ test("PD-299: 차트를 옮기기만 하면 180x140~1600x1200 밖의 크기도 �
   await flushAsyncTurns(4);
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
   const base = { id: "", chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
-  const anchor = (width, height) => ({ fromCol: 1, fromRow: 1, toCol: 5, toRow: 6, colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0, left: 72, top: 24, width, height, editAs: "oneCell" });
+  const anchor = (width, height) => ({ fromCol: 1, fromRow: 1, toCol: 5, toRow: 6, colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0, left: 72, top: 22, width, height, editAs: "oneCell" });
   layoutApi.setCharts("Sheet1", [
     { ...base, id: "small", anchor: anchor(100, 80) },
-    { ...base, id: "wide", anchor: { ...anchor(3000, 500), fromRow: 20, toRow: 40, top: 480 } },
+    { ...base, id: "wide", anchor: { ...anchor(3000, 500), fromRow: 20, toRow: 40, top: 440 } },
   ]);
   await flushAsyncTurns(4);
   const sizeOf = (id) => {
@@ -751,10 +751,10 @@ test("PD-299: 두 칸 앵커 그림은 행 높이를 따라 크기가 변하고,
   const rect = () => ({ top: card().style.top, width: card().style.width, height: card().style.height });
   const before = rect();
   assert.equal(before.height, "160px");
-  // 기본 행 높이 30pt(40px): 시작 칸(2행)은 40px 아래, 끝 칸은 8행 안 16px이라 높이는 7 x 40 + 16 - 40 = 256px.
+  // 기본 행 높이 30pt(40px): 시작 칸(2행)은 40px 아래, 22px 기준 끝 칸은 9행 안 6px이라 높이는 7 x 40 + 6 = 286px.
   layoutApi.setDefaultRowHeight("Sheet1", 30);
   await flushAsyncTurns(4);
-  assert.equal(card().style.height, "256px", "크기가 칸을 따른다");
+  assert.equal(card().style.height, "286px", "크기가 칸을 따른다");
   assert.equal(card().style.width, before.width, "열은 그대로다");
   const kinds = async (editAs) => {
     layoutApi.setImages("Sheet1", [{ ...created, anchor: { ...created.anchor, editAs } }]);
@@ -769,6 +769,6 @@ test("PD-299: 두 칸 앵커 그림은 행 높이를 따라 크기가 변하고,
   assert.equal(abs.top, before.top, "절대 앵커는 자리를 지킨다");
   // 알 수 없는 값은 두 칸 앵커다.
   const odd = await kinds("sideways");
-  assert.equal(odd.height, "256px");
+  assert.equal(odd.height, "286px");
   assert.equal(layoutApi.imagesOf("Sheet1")[0].anchor.editAs, "twoCell");
 });

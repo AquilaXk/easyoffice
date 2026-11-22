@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use easyoffice_formats::{
-    resolve_font_name, CellBox, CellStyle, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OoxmlCodec,
-    SheetLinks, SheetStyling, SheetTable, TableSlicer, ZipArchiveCodec, ZipSecurityPolicy,
-    MAX_FONT_FACES, MAX_FONT_NAME_CHARS,
+    resolve_font_name, CellBox, CellStyle, DefaultFont, LegacyOle2Codec, LegacyXlsPayload,
+    OdfCodec, OoxmlCodec, SheetLinks, SheetStyling, SheetTable, TableSlicer, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_FONT_FACES, MAX_FONT_NAME_CHARS,
 };
 
 #[test]
@@ -242,6 +242,7 @@ fn biff8_xls_reads_latin1_and_utf16le_font_names_across_index_four_gap() {
         ]
         .into_iter()
         .collect(),
+        default_font: DefaultFont::new("Arial", 10.0),
         ..Default::default()
     };
     let base_xls = LegacyOle2Codec::pack_xls_multi_values_styled(

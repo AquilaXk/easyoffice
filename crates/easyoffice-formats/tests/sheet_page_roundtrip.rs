@@ -315,14 +315,14 @@ fn an_ods_keeps_the_layout_the_print_ranges_and_gives_each_sheet_its_own() {
 }
 
 #[test]
-fn a_default_ods_setup_writes_no_styles_part_and_equal_layouts_share_a_master_page() {
+fn a_default_ods_setup_writes_default_cell_style_and_equal_layouts_share_a_master_page() {
     let bytes = pack_ods(&["A"], vec![SheetPage::default()]);
+    let default_styles = part(&bytes, "styles.xml");
     assert!(
-        ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default())
-            .unwrap()
-            .iter()
-            .all(|e| e.path != "styles.xml")
+        default_styles.contains(r#"<style:default-style style:family="table-cell">"#),
+        "{default_styles}"
     );
+    assert_eq!(default_styles.matches("<style:master-page ").count(), 0);
     let landscape = SheetPage {
         landscape: true,
         ..SheetPage::default()

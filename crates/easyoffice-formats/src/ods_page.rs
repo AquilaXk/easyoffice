@@ -89,12 +89,13 @@ fn mils(text: &str) -> Option<u32> {
     (m <= f64::from(MAX_MARGIN_MILS)).then_some(m as u32)
 }
 
-/// `styles.xml` with one page layout (`Mpm<N>`) and master page (`Mp<N>`) per layout and, when a cell holds a
-/// hyperlink, the named text styles its `text:a` uses; `None` without either.
-pub(crate) fn styles_xml(layouts: &[SheetPage], links: bool) -> Option<String> {
-    if layouts.is_empty() && !links {
-        return None;
-    }
+/// `styles.xml` carrying the workbook default `table-cell` style inside `<office:styles>`, optional
+/// hyperlink styles, and any page layouts (`Mpm<N>`) / master pages (`Mp<N>`).
+pub(crate) fn styles_xml(
+    layouts: &[SheetPage],
+    links: bool,
+    default_font: Option<&crate::DefaultFont>,
+) -> String {
     let mut automatic = String::new();
     let mut masters = String::new();
     for (i, page) in layouts.iter().enumerate() {
@@ -149,24 +150,27 @@ pub(crate) fn styles_xml(layouts: &[SheetPage], links: bool) -> Option<String> {
             "<style:master-page style:name=\"Mp{n}\" style:page-layout-name=\"Mpm{n}\"></style:master-page>"
         );
     }
-    Some(format!(
+    let default_style = crate::sheet_styling::ods_default_style::default_style_xml(default_font);
+    let link_styles = if links {
+        crate::sheet_styling::ods_links::LINK_STYLES_XML
+    } else {
+        ""
+    };
+    format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles ",
             "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
             "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" ",
-            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:eo=\"{}\" office:version=\"1.2\">",
-            "{}<office:automatic-styles>{}</office:automatic-styles><office:master-styles>{}</office:master-styles>",
+            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
+            "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
+            "xmlns:eo=\"{}\" office:version=\"1.2\">",
+            "<office:styles>{}{}</office:styles>",
+            "<office:automatic-styles>{}</office:automatic-styles>",
+            "<office:master-styles>{}</office:master-styles>",
             "</office:document-styles>"
         ),
-        EO_NS,
-        if links {
-            crate::sheet_styling::ods_links::LINK_STYLES_XML
-        } else {
-            ""
-        },
-        automatic,
-        masters
-    ))
+        EO_NS, default_style, link_styles, automatic, masters
+    )
 }
 
 /// A sheet name as a range prefix in `table:print-ranges`: quoted when it holds anything but letters, digits
@@ -518,7 +522,7 @@ mod tests {
             grid_lines: true,
             ..SheetPage::default()
         };
-        let xml = styles_xml(std::slice::from_ref(&page), false).unwrap();
+        let xml = styles_xml(std::slice::from_ref(&page), false, None);
         let (_, inner) = extract_balanced_elements(&xml, "style:page-layout").remove(0);
         assert_eq!(layout_from(layout_properties(inner).unwrap()), page);
         assert_eq!(mils("297mm"), Some(11_693));

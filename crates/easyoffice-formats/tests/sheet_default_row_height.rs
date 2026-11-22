@@ -113,9 +113,13 @@ fn xlsx_keeps_the_default_beside_the_group_levels() {
 }
 
 #[test]
-fn a_sheet_without_a_default_writes_no_format_element() {
+fn a_sheet_without_a_default_writes_the_standard_format_element() {
     let sheet = part(&xlsx(&SheetStyling::default()), "xl/worksheets/sheet1.xml");
-    assert!(!sheet.contains("sheetFormatPr"), "{sheet}");
+    assert!(
+        sheet.contains(r#"<sheetFormatPr defaultRowHeight="16.5"/>"#)
+            && !sheet.contains("customHeight"),
+        "{sheet}"
+    );
     assert!(read_xlsx(&xlsx(&SheetStyling::default()))
         .default_row_height
         .is_none());

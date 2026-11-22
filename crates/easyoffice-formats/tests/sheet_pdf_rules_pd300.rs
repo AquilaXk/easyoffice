@@ -9,7 +9,7 @@ use easyoffice_formats::{
 
 /// A default column of a Calibri 11 pt workbook (a 7 px digit), 64 px (PD-305), in points.
 const CELL_W: f64 = 48.0;
-const CELL_H: f64 = 18.0;
+const CELL_H: f64 = 16.5;
 
 /// Three rows in column A (`a`, `b`, `c`) and a number at B2: a used range of `A1:B3`.
 fn sheet() -> (Vec<OdsUnpacked>, SheetStyling) {

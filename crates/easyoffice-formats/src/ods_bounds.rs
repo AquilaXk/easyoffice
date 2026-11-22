@@ -46,6 +46,18 @@ impl OdfCodec {
                     "ODS 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.",
                 ));
             }
+            if !crate::row_heights_within_bounds(
+                &styling.row_heights,
+                styling.default_row_height,
+                Self::MAX_ROWS + 1,
+            ) || styling
+                .default_col_width
+                .is_some_and(|w| !w.within_bounds())
+            {
+                return Err(ods_budget_error(
+                    "ODS 행 높이·기본 열 너비가 허용 범위를 초과했습니다.",
+                ));
+            }
             if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
                 return Err(ods_budget_error(
                     "ODS 서식 좌표가 허용 범위를 초과했습니다.",

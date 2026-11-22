@@ -87,6 +87,7 @@ pub(crate) struct XlsStyles {
     pub(crate) num_fmts_rejected: u32,
     pub(crate) fonts: Arc<Vec<String>>,
     pub(crate) fonts_rejected: u32,
+    pub(crate) default_font: Option<crate::DefaultFont>,
     /// `DATEMODE` says the dates count from 1904 (PD-263).
     pub(crate) date1904: bool,
 }
@@ -95,7 +96,8 @@ pub(crate) struct XlsStyles {
 #[derive(Default)]
 pub(crate) struct XlsStyleReader {
     palette: Vec<u32>,
-    fonts: Vec<(u16, Option<String>)>,
+    /// `(icv, name, dy_height)` for each `FONT` record in the globals substream.
+    fonts: Vec<(u16, Option<String>, u16)>,
     /// Per XF: the font index, the fill pattern, the foreground colour index and the number format index.
     xfs: Vec<(u16, u32, u16, u16)>,
     /// The codes of the `FORMAT` records by format index.
@@ -133,6 +135,7 @@ impl XlsStyleReader {
                     self.fonts.push((
                         u16_at(body, 4).unwrap_or(ICV_AUTO_FONT),
                         read_font_name(body),
+                        u16_at(body, 0).unwrap_or(0),
                     ));
                 }
                 // A short record still takes its number: the XFs after it keep theirs.
@@ -201,13 +204,13 @@ impl XlsStyleReader {
             reader
                 .fonts
                 .get(font_record(ifnt)?)
-                .and_then(|&(icv, _)| reader.rgb(icv))
+                .and_then(|&(icv, _, _)| reader.rgb(icv))
         };
         let default_color = font_rgb(self, 0);
         let default_font = self
             .fonts
             .first()
-            .and_then(|(_, n)| n.as_deref())
+            .and_then(|(_, n, _)| n.as_deref())
             .and_then(clean_font_name)
             .map(str::to_string);
         let mut font_ids = vec![u16::MAX; self.fonts.len()];
@@ -330,6 +333,13 @@ impl XlsStyleReader {
 
     /// The styled cells of every worksheet, in file order, and the number format and font tables.
     pub(crate) fn finish(self) -> XlsStyles {
+        let default_font = self.fonts.first().and_then(|(_, name, dy_height)| {
+            if name.is_none() && *dy_height == 0 {
+                return None;
+            }
+            let size_pt = (*dy_height > 0).then(|| f64::from(*dy_height) / 20.0);
+            crate::DefaultFont::kept(name.as_deref(), size_pt)
+        });
         let (num_fmts, num_fmts_rejected) = self.num_fmts.finish();
         let (fonts, fonts_rejected) = self.font_table.finish();
         XlsStyles {
@@ -338,6 +348,7 @@ impl XlsStyleReader {
             num_fmts_rejected,
             fonts,
             fonts_rejected,
+            default_font,
             date1904: self.date1904,
         }
     }
@@ -565,9 +576,13 @@ impl XlsColorPlan {
 
     /// The `FONT` records that follow the default font: one per font colour, the font index of record
     /// `n` being `n` before the missing index 4 and `n + 1` after it.
-    pub(crate) fn font_records(&self, out: &mut Vec<u8>) {
+    pub(crate) fn font_records(
+        &self,
+        out: &mut Vec<u8>,
+        default_font: Option<&crate::DefaultFont>,
+    ) {
         for &icv in &self.fonts {
-            out.extend(font_record(icv));
+            out.extend(font_record(icv, default_font));
         }
     }
 
@@ -613,28 +628,45 @@ impl XlsColorPlan {
     }
 }
 
-/// A `FONT` record of the default font (10 point, regular) in the colour index `icv`
+/// A `FONT` record of the workbook's default font (`"맑은 고딕"` 11 pt when `None`) in `icv`
 /// ([`ICV_AUTO_FONT`] is the automatic colour).
-pub(crate) fn font_record(icv: u16) -> Vec<u8> {
-    const NAME: &[u8] = b"Arial";
-    let mut out = Vec::with_capacity(4 + 16 + NAME.len());
+pub(crate) fn font_record(icv: u16, default_font: Option<&crate::DefaultFont>) -> Vec<u8> {
+    let (name, size_pt) = match default_font {
+        Some(f) => (f.name(), f.size_pt()),
+        None => (crate::STANDARD_FONT_NAME, crate::STANDARD_FONT_SIZE_PT),
+    };
+    let dy_height = ((size_pt * 20.0).round() as u32).clamp(1, u32::from(u16::MAX)) as u16;
+    let wide = !name.is_ascii();
+    let charset: u8 = if wide { 129 } else { 0 }; // 129 = HANGUL_CHARSET
+    let (cch, flags, name_bytes): (u8, u8, Vec<u8>) = if wide {
+        let units: Vec<u16> = name.encode_utf16().take(u8::MAX as usize).collect();
+        let mut bytes = Vec::with_capacity(units.len() * 2);
+        for u in &units {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        (units.len() as u8, 1, bytes)
+    } else {
+        let ascii = &name.as_bytes()[..name.len().min(u8::MAX as usize)];
+        (ascii.len() as u8, 0, ascii.to_vec())
+    };
+    let mut out = Vec::with_capacity(4 + 16 + name_bytes.len());
     out.extend(FONT.to_le_bytes());
-    out.extend(((16 + NAME.len()) as u16).to_le_bytes());
-    out.extend(200u16.to_le_bytes()); // dyHeight = 10pt
+    out.extend(((16 + name_bytes.len()) as u16).to_le_bytes());
+    out.extend(dy_height.to_le_bytes());
     out.extend(0u16.to_le_bytes()); // grbit
     out.extend(icv.to_le_bytes());
     out.extend(400u16.to_le_bytes()); // bls = normal
     out.extend(0u16.to_le_bytes()); // sss
-    out.extend([0, 0, 0, 0]); // uls, bFamily, bCharSet, reserved
-    out.push(NAME.len() as u8);
-    out.push(0); // compressed 8-bit Latin-1
-    out.extend(NAME);
+    out.extend([0, 2, charset, 0]); // uls, bFamily = Swiss (2), bCharSet, reserved
+    out.push(cch);
+    out.push(flags);
+    out.extend(name_bytes);
     out
 }
 
 /// The default font's record.
-pub(crate) fn default_font_record() -> Vec<u8> {
-    font_record(ICV_AUTO_FONT)
+pub(crate) fn default_font_record(default_font: Option<&crate::DefaultFont>) -> Vec<u8> {
+    font_record(ICV_AUTO_FONT, default_font)
 }
 
 /// The record that holds a styled cell without a value (`BLANK`, MS-XLS 2.4.20).

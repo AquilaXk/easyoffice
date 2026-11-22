@@ -74,7 +74,7 @@ fn a_rule_paints_the_cells_it_matches_with_the_values_the_engine_computes() {
     );
     let rows: Vec<f64> = filled.iter().map(|f| f.1).collect();
     assert!(
-        rows.windows(2).all(|w| (w[0] - w[1] - 18.0).abs() < 0.011),
+        rows.windows(2).all(|w| (w[0] - w[1] - 16.5).abs() < 0.011),
         "{rows:?}"
     );
     // The three cells draw their text in the rule's color, bold, under one graphics state.

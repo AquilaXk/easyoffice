@@ -168,7 +168,11 @@ impl ViewScan {
         styling.freeze = self.freeze;
         styling.view = self.state();
         styling.tab_color = self.tab_rgb;
-        styling.default_row_height = self.default_row_height;
+        styling.default_row_height =
+            crate::sheet_styling::sheet_row_height::kept_default_row_height(
+                self.default_row_height,
+                styling.default_font.as_ref(),
+            );
         styling.default_col_width = self.default_col_width;
     }
 
@@ -486,7 +490,7 @@ pub(crate) fn sheet_views_xml(freeze: Option<Freeze>, view: &ViewState) -> Strin
     )
 }
 
-/// `<sheetFormatPr>` with the deepest group level (empty when there are no groups).
+/// `<sheetFormatPr>` with default row height, optional default/base column width, and deepest outline levels.
 pub(crate) fn sheet_format_pr_xml(styling: &SheetStyling) -> String {
     let (rows, cols) = (
         styling.outline.max_level(false),
@@ -494,13 +498,18 @@ pub(crate) fn sheet_format_pr_xml(styling: &SheetStyling) -> String {
     );
     let default = styling.default_row_height;
     let widths = styling.default_col_width;
-    if rows == 0 && cols == 0 && default.is_none() && widths.is_none() {
-        return String::new();
-    }
+    let default_height = default.map_or_else(
+        || {
+            crate::sheet_styling::format_centipt(
+                crate::sheet_styling::default_row_centipt_for_font(styling.default_font.as_ref()),
+            )
+        },
+        RowHeight::points_text,
+    );
     let mut xml = format!(
         "<sheetFormatPr{} defaultRowHeight=\"{}\"",
         widths.map_or_else(String::new, |w| w.xml_attrs()),
-        default.map_or_else(|| "15".to_string(), RowHeight::points_text)
+        default_height,
     );
     if default.is_some_and(|h| h.custom) {
         xml.push_str(" customHeight=\"1\"");

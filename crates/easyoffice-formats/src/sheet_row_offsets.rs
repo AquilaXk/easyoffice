@@ -234,10 +234,10 @@ mod tests {
     }
 
     #[test]
-    fn plain_rows_are_24_px() {
+    fn plain_rows_are_22_px() {
         let rows = RowOffsets::of(&SheetStyling::default());
-        assert_eq!((rows.top(0), rows.top(1), rows.top(10)), (0, 24, 240));
-        assert_eq!(rows.locate(50), (2, 2));
+        assert_eq!((rows.top(0), rows.top(1), rows.top(10)), (0, 22, 220));
+        assert_eq!(rows.locate(46), (2, 2));
         assert_eq!(RowOffsets::default(), rows);
     }
 
@@ -259,10 +259,10 @@ mod tests {
     fn a_million_hidden_rows_are_one_band() {
         let rows = RowOffsets::of(&styling(&[], None, &[(10, 1_000_000)]));
         assert_eq!(rows.bands.len(), 1);
-        assert_eq!(rows.top(10), 240);
-        assert_eq!(rows.top(1_000_001), 240);
-        assert_eq!(rows.top(1_000_002), 264);
-        assert_eq!(rows.locate(240), (1_000_001, 0));
+        assert_eq!(rows.top(10), 220);
+        assert_eq!(rows.top(1_000_001), 220);
+        assert_eq!(rows.top(1_000_002), 242);
+        assert_eq!(rows.locate(220), (1_000_001, 0));
     }
 
     #[test]

@@ -96,8 +96,8 @@ test("the view of the first sheet in a file is shown: its cell, its scroll posit
   assert.equal(h.document.querySelector(".canvas-stage").style.zoom, "150%");
   assert.equal(h.document.getElementById("status-zoom-slider").min, "10", "a sheet zooms from 10 to 400 percent");
   assert.equal(h.document.getElementById("status-zoom-slider").max, "400");
-  // Row 40 is the first row below the top: 39 rows of 24px; column C starts after two default columns.
-  assert.equal(h.viewport.scrollTop, 39 * 24);
+  // Row 40 is the first row below the top: 39 rows of 22px; column C starts after two default columns.
+  assert.equal(h.viewport.scrollTop, 39 * 22);
   assert.ok(h.viewport.scrollLeft > 0);
   assert.equal(h.document.querySelector("#pane-sheet td.selected-cell")?.dataset.cell, "D42");
   assert.equal(h.document.querySelectorAll("#pane-sheet td.in-range").length > 0, true);
@@ -113,7 +113,7 @@ test("each sheet comes back as it was left and a sheet with no view shows A1 uns
   // Leave B at a cell of its own, scrolled and zoomed.
   const td = h.document.querySelector('#pane-sheet td[data-cell="C3"]');
   td.dispatchEvent({ type: "mousedown", target: td, button: 0 });
-  h.viewport.scrollTop = 24 * 10;
+  h.viewport.scrollTop = 22 * 10;
   h.viewport.dispatchEvent({ type: "scroll" });
   h.host.__EASYOFFICE_ZOOM__.apply(80);
   await h.go("C");
@@ -121,11 +121,11 @@ test("each sheet comes back as it was left and a sheet with no view shows A1 uns
   await h.go("A");
   assert.equal(h.zoomLabel(), "150%");
   assert.equal(h.document.querySelector("#pane-sheet td.selected-cell")?.dataset.cell, "D42");
-  assert.equal(h.viewport.scrollTop, 39 * 24);
+  assert.equal(h.viewport.scrollTop, 39 * 22);
   await h.go("B");
   assert.equal(h.zoomLabel(), "80%");
   assert.equal(h.document.querySelector("#pane-sheet td.selected-cell")?.dataset.cell, "C3");
-  assert.equal(h.viewport.scrollTop, 24 * 10);
+  assert.equal(h.viewport.scrollTop, 22 * 10);
 });
 
 const pickHeader = (h, axis, index) => {
@@ -138,7 +138,7 @@ test("a whole column picked by its header leaves the scroll of each sheet as it 
   const h = await open();
   await h.openBook(BOOK);
   await h.go("B");
-  h.viewport.scrollTop = 24 * 10;
+  h.viewport.scrollTop = 22 * 10;
   h.viewport.dispatchEvent({ type: "scroll" });
   pickHeader(h, "col", "C");
   const seen = [];
@@ -146,7 +146,7 @@ test("a whole column picked by its header leaves the scroll of each sheet as it 
     await h.go(name);
     seen.push(h.viewport.scrollTop);
   }
-  assert.deepEqual(seen, [0, 24 * 10, 39 * 24, 24 * 10]);
+  assert.deepEqual(seen, [0, 22 * 10, 39 * 22, 22 * 10]);
   assert.deepEqual(h.host.__EASYOFFICE_SHEET_VIEW_STATE__.get("B").range, [1, 3, 1048576, 3]);
 });
 
@@ -200,7 +200,7 @@ test("a renamed sheet keeps its view and a copy starts from its source's", async
   await flushAsyncTurns(40);
   assert.equal(h.active(), "A (2)");
   assert.equal(h.zoomLabel(), "150%", "the copy is shown as its source was left");
-  assert.equal(h.viewport.scrollTop, 39 * 24);
+  assert.equal(h.viewport.scrollTop, 39 * 22);
   assert.deepEqual(store.get("A (2)"), store.get("A"));
   store.set("A", { zoom: 75 });
   assert.equal(store.get("A (2)").zoom, 150, "a copy is a value, not a link");
