@@ -2,6 +2,7 @@
 // (`EO_APP` or a debug build of the engine, `EO_PW_DIR` with playwright-core, the browser in PLAYWRIGHT_BROWSERS_PATH).
 // Exit code 0 when every step passes. Captures of failed steps go to `captureDir` (default: a temp directory).
 import { baseSteps } from "./base.mjs";
+import { copilotDocSteps, copilotSlideSteps } from "./copilot.mjs";
 import { docSteps } from "./doc.mjs";
 import { sheetSteps } from "./sheet.mjs";
 import { findEngine, loadPlaywright, runSteps, startEngine, tempCaptureDir } from "./support.mjs";
@@ -20,7 +21,7 @@ try {
     browser,
     baseUrl: `http://127.0.0.1:${engine.port}`,
     captureDir,
-    groups: [{ module: "SHEET", steps: sheetSteps }, { module: "DOC", steps: docSteps }, { module: "BASE", steps: baseSteps }],
+    groups: [{ module: "SHEET", steps: sheetSteps }, { module: "DOC", steps: [...docSteps, ...copilotDocSteps] }, { module: "SLIDE", steps: copilotSlideSteps }, { module: "BASE", steps: baseSteps }],
   });
   if (failed) console.log(`${failed} step(s) failed, captures in ${captureDir}`);
 } finally {
