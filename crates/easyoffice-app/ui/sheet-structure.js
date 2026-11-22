@@ -133,18 +133,19 @@
       return out;
     }
 
-    // The answer names the sheets whose charts changed; each of those charts takes the moved references and keeps the rest.
+    // The answer names the sheets whose charts changed, with all the charts of each in the order the request had them (ids can repeat
+    // in a sheet, so the place pairs them); each chart takes the moved references and keeps the rest. A sheet whose charts are not
+    // the ones the request had (another count or another id at a place) is left as it is.
     function applyChartRefs(refs) {
       for (const [sheet, moved] of Object.entries(refs || {})) {
         const charts = structuredClone(layoutApi.chartsOf(sheet));
-        for (const m of Array.isArray(moved) ? moved : []) {
-          const chart = charts.find((c) => c.id === m.id);
-          if (!chart) continue;
-          if (typeof m.dataRange === "string") chart.dataRange = m.dataRange;
+        if (!Array.isArray(moved) || moved.length !== charts.length || moved.some((m, k) => m?.id !== charts[k].id)) continue;
+        moved.forEach((m, k) => {
+          if (typeof m.dataRange === "string") charts[k].dataRange = m.dataRange;
           (m.series || []).forEach((s, i) => {
-            for (const key of ["nameRef", "categoriesRef", "valuesRef"]) if (chart.series?.[i] && typeof s[key] === "string") chart.series[i][key] = s[key];
+            for (const key of ["nameRef", "categoriesRef", "valuesRef"]) if (charts[k].series?.[i] && typeof s[key] === "string") charts[k].series[i][key] = s[key];
           });
-        }
+        });
         layoutApi.setCharts(sheet, charts);
       }
     }

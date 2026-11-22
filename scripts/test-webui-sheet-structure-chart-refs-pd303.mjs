@@ -27,7 +27,9 @@ function selectCell(document, coord) {
   td.focus();
 }
 
-async function open() {
+// `answer(res, far)` may change the engine's answer to a structure request (a test double of a mismatch).
+async function open({ answer = null } = {}) {
+  let farName = null;
   const { sandbox: boot } = await createWebUiDom();
   const cat = boot.__EASYOFFICE_RIBBON_CATALOG__;
   const offline = boot.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -47,7 +49,9 @@ async function open() {
         const body = JSON.parse(payload);
         if (body.sessionAction === "structure") calls.push(body);
       }
-      return offline[command](payload);
+      const res = await offline[command](payload);
+      if (answer && command === "evaluate_sheet" && JSON.parse(payload).sessionAction === "structure") return answer(res, farName);
+      return res;
     },
   });
   await flushAsyncTurns(10);
@@ -58,6 +62,7 @@ async function open() {
   const names = [...harness.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn")].map((b) => b.dataset.sheetTab);
   assert.ok(names.includes("Sheet1") && names.length >= 2, `two sheets: ${names}`);
   const far = names.find((n) => n !== "Sheet1");
+  farName = far;
   harness.userClick(harness.document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]'));
   await flushAsyncTurns(10);
   const layoutApi = harness.host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -92,6 +97,35 @@ test("PD-303: 행 삽입 요청에 다른 시트 차트의 참조만 실리고, 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(14);
   assert.deepEqual(refsOf(layoutApi, far), ["Sheet1!$A$1:$B$5", "Sheet1!$B$1", "Sheet1!$A$2:$A$5", "Sheet1!$B$2:$B$5"], "실행 취소 한 번으로 돌아옴");
+});
+
+test("PD-303: id가 같은 차트 둘도 각자 자기 참조를 받고, 실행 취소가 다른 시트의 차트를 되돌린다", async () => {
+  const { document, sandbox, userClick, layoutApi, calls, far } = await open();
+  const one = { ...sheet2Chart, id: "same", dataRange: "Sheet1!$A$1:$B$5", series: [{ name: "a", valuesRef: "Sheet1!$B$2:$B$5" }] };
+  const two = { ...sheet2Chart, id: "same", dataRange: "Sheet1!$A$1:$C$5", series: [{ name: "b", valuesRef: "Sheet1!$C$2:$C$5" }] };
+  layoutApi.setCharts(far, [one, two]);
+  await flushAsyncTurns(4);
+  const values = () => layoutApi.chartsOf(far).map((c) => [c.dataRange, c.series[0].valuesRef]);
+  selectCell(document, "A2");
+  userClick(document.querySelector('.md-item[data-sheet-act="row-insert-above"]'));
+  await flushAsyncTurns(20);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(values(), [["Sheet1!$A$1:$B$6", "Sheet1!$B$3:$B$6"], ["Sheet1!$A$1:$C$6", "Sheet1!$C$3:$C$6"]], "각 차트가 제 참조를 옮겨 받음");
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(14);
+  assert.deepEqual(values(), [["Sheet1!$A$1:$B$5", "Sheet1!$B$2:$B$5"], ["Sheet1!$A$1:$C$5", "Sheet1!$C$2:$C$5"]], "실행 취소 한 번에 다른 시트의 차트 둘 다 돌아옴");
+});
+
+test("PD-303: 답의 차트 수나 id가 페이지와 다르면 그 시트는 건너뛴다", async () => {
+  const { document, userClick, layoutApi, far } = await open({ answer: (res, far) => ({ ...res, chartRefs: { [far]: res.chartRefs[far].slice(1) } }) });
+  const a = { ...sheet2Chart, id: "a" };
+  const b = { ...sheet2Chart, id: "b" };
+  layoutApi.setCharts(far, [a, b]);
+  await flushAsyncTurns(4);
+  selectCell(document, "A2");
+  userClick(document.querySelector('.md-item[data-sheet-act="row-insert-above"]'));
+  await flushAsyncTurns(20);
+  assert.deepEqual(layoutApi.chartsOf(far).map((c) => c.dataRange), ["Sheet1!$A$1:$B$5", "Sheet1!$A$1:$B$5"], "길이가 다르면 아무것도 덮지 않는다");
 });
 
 test("PD-303: 행 삽입과 실행 취소 뒤에도 시트의 기본 열 너비 값이 레이아웃에 남는다", async () => {
