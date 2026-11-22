@@ -157,13 +157,35 @@ jobs:
             exit 1
           fi
 
+  # One job per macOS architecture (PD-297), so a user downloads one .dmg of about half the size of the
+  # former universal one. Each architecture builds on a runner of its own: the Intel build runs on
+  # `macos-15-intel`, so the smoke test starts the binary that was built. GitHub runs Intel macOS runners
+  # until the macOS 15 image is retired in fall 2027; then the x64 entry moves to `macos-15` (the build
+  # already names its target and its Quick Look architecture, only the smoke test needs Rosetta there).
   release-macos:
-    name: Build macOS Release Artifacts
+    name: Build ${{ matrix.platform }} Release Artifacts
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
-    runs-on: macos-15
-    # The universal build compiles two targets with thin LTO and one codegen unit (PD-276); it took 50 min before LTO.
+    runs-on: ${{ matrix.runner }}
+    # Each job compiles one target with thin LTO and one codegen unit (PD-276), half of the two-target
+    # build that took 50 min before LTO.
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            archs: arm64
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archs: x86_64
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      TARGET: ${{ matrix.target }}
+      ARCHS: ${{ matrix.archs }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -173,25 +195,25 @@ jobs:
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
         with:
-          rust-targets: aarch64-apple-darwin x86_64-apple-darwin
+          rust-targets: ${{ matrix.target }}
 
       # The Quick Look preview and thumbnail extensions (PD-140) are copied into the app's PlugIns
-      # folder by bundle.macOS.files, so they are built first, universal, with the same signing
-      # identity as the app and the release version.
-      - name: Build the Quick Look preview and thumbnail extensions (universal)
+      # folder by bundle.macOS.files, so they are built first, for this architecture only, with the same
+      # signing identity as the app and the release version.
+      - name: Build the Quick Look preview and thumbnail extensions (this architecture)
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           EASYOFFICE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: node scripts/build-quicklook-macos.mjs --universal
+        run: node scripts/build-quicklook-macos.mjs --arch "$ARCHS"
 
-      # Universal .dmg without a Developer ID (PD-094). The identity "-" is an ad-hoc signature (Apple
+      # .dmg without a Developer ID (PD-094). The identity "-" is an ad-hoc signature (Apple
       # silicon refuses to run a binary without any signature; Gatekeeper still prompts on first open).
       # To sign and notarize later, add the APPLE_SIGNING_IDENTITY secret and pass APPLE_ID,
       # APPLE_PASSWORD and APPLE_TEAM_ID to this step; the Tauri CLI reads them from the environment.
       # The release version overrides the bundle version so the Info.plist and the tag agree.
       # createUpdaterArtifacts adds the signed .app.tar.gz the app's updater installs (the signing key
       # comes from the secrets, only here; local and CI builds have no key and do not switch it on).
-      - name: Build EasyOffice desktop shell universal .dmg and the signed updater archive
+      - name: Build EasyOffice desktop shell .dmg and the signed updater archive
         working-directory: crates/easyoffice-desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
@@ -199,17 +221,25 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
-          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js" build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles "$PLATFORM")"
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js" build --ci --target "$TARGET" --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
-      - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, both architectures)
-        run: node scripts/verify-quicklook-bundle.mjs target/universal-apple-darwin/release/bundle/macos/EasyOffice.app --archs arm64,x86_64
+      - name: Verify the app holds only this job's architecture
+        run: |
+          FOUND="$(lipo -archs "target/$TARGET/release/bundle/macos/EasyOffice.app/Contents/MacOS/EasyOffice")"
+          if [ "$FOUND" != "$ARCHS" ]; then
+            echo "::error::EasyOffice is built for [$FOUND], expected [$ARCHS]"
+            exit 1
+          fi
+
+      - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, architecture)
+        run: node scripts/verify-quicklook-bundle.mjs "target/$TARGET/release/bundle/macos/EasyOffice.app" --archs "$ARCHS"
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
         run: |
           set -u
-          target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/MacOS/EasyOffice --smoke &
+          "target/$TARGET/release/bundle/macos/EasyOffice.app/Contents/MacOS/EasyOffice" --smoke &
           PID=$!
           for _ in $(seq 1 90); do
             kill -0 "$PID" 2>/dev/null || break
@@ -228,18 +258,18 @@ jobs:
 
       - name: Verify the third-party notices and the PDF export font are inside the app
         run: |
-          RES=target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/Resources
+          RES="target/$TARGET/release/bundle/macos/EasyOffice.app/Contents/Resources"
           test -f "$RES/THIRD_PARTY_NOTICES.md"
           test -f "$RES/pdf-fonts/NotoSansKR-Regular.ttf"
           test -f "$RES/pdf-fonts/NotoSansKR-OFL.txt"
 
       - name: Stage the macOS .dmg and the signed updater archive under their fixed names
-        run: node scripts/release-assets.mjs stage macos-universal dist
+        run: node scripts/release-assets.mjs stage "$PLATFORM" dist
 
       - name: Upload macOS release artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: release-macos-universal
+          name: release-${{ matrix.platform }}
           path: dist/
           if-no-files-found: error
 

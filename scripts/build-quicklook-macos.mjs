@@ -3,8 +3,9 @@
 // target/quicklook/PlugIns, where `bundle.macOS.files` of the desktop shell picks them up.
 // Run it before `tauri build`. Other platforms: no-op.
 //
-//   node scripts/build-quicklook-macos.mjs               host architecture only (local use)
-//   node scripts/build-quicklook-macos.mjs --universal   arm64 + x86_64 in one binary (CI, release)
+//   node scripts/build-quicklook-macos.mjs                   host architecture only (local use)
+//   node scripts/build-quicklook-macos.mjs --arch <arch>     one architecture, arm64 or x86_64 (release, PD-297)
+//   node scripts/build-quicklook-macos.mjs --universal       arm64 + x86_64 in one binary (CI)
 //
 // Environment: APPLE_SIGNING_IDENTITY (default "-", ad-hoc, PD-094), EASYOFFICE_VERSION (the release
 // version; default the workspace version), EASYOFFICE_QUICKLOOK_TARGETS (comma-separated Rust targets).
@@ -15,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  EXTENSIONS, MIN_MACOS, RUST_TARGETS, appVersion, entitlements, ffiHeader, plugInsDir, repoRoot, rustRoot,
+  EXTENSIONS, MIN_MACOS, appVersion, entitlements, ffiHeader, plugInsDir, quicklookTargets, repoRoot, rustRoot,
   staticLibName, stagingRoot, swiftTarget,
 } from "./quicklook-config.mjs";
 
@@ -24,7 +25,7 @@ if (process.platform !== "darwin") {
   process.exit(0);
 }
 
-const targets = chooseTargets();
+const targets = quicklookTargets(process.argv.slice(2));
 const version = appVersion();
 const identity = process.env.APPLE_SIGNING_IDENTITY || "-";
 const libDir = join(stagingRoot, "lib");
@@ -36,12 +37,6 @@ mkdirSync(libDir, { recursive: true });
 const staticLibs = new Map(targets.map((target) => [target, buildRustStaticLibrary(target)]));
 for (const ext of EXTENSIONS) buildExtension(ext);
 console.log(`[quicklook] staged ${EXTENSIONS.length} extensions (${targets.join(", ")}) in ${plugInsDir}`);
-
-function chooseTargets() {
-  if (process.env.EASYOFFICE_QUICKLOOK_TARGETS) return process.env.EASYOFFICE_QUICKLOOK_TARGETS.split(",");
-  if (process.argv.includes("--universal")) return [RUST_TARGETS.arm64, RUST_TARGETS.x86_64];
-  return [process.arch === "arm64" ? RUST_TARGETS.arm64 : RUST_TARGETS.x86_64];
-}
 
 function buildRustStaticLibrary(target) {
   run("cargo", ["build", "--manifest-path", join(rustRoot, "Cargo.toml"), "--locked", "--release", "--target", target]);

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { REQUIRED_UTIS, bundledContentTypes } from "./desktop-file-associations.mjs";
 import {
-  EXTENSIONS, MIN_MACOS, byCodeUnits, appVersion, bundleFilesEntries, entitlements, ffiHeader, quicklookRoot, repoRoot, rustRoot,
+  EXTENSIONS, MIN_MACOS, RUST_TARGETS, byCodeUnits, appVersion, bundleFilesEntries, entitlements, ffiHeader, quicklookRoot, quicklookTargets, repoRoot,
+  rustRoot,
 } from "./quicklook-config.mjs";
 import { checkExtensionInfo } from "./verify-quicklook-bundle.mjs";
 
@@ -127,11 +128,24 @@ test("the verifier accepts a right extension and names each way it can be wrong"
   }
 });
 
+test("the build covers one architecture by default and by --arch, two only on --universal (PD-297)", () => {
+  const { arm64, x86_64 } = RUST_TARGETS;
+  assert.deepEqual(quicklookTargets([], {}, "arm64"), [arm64]);
+  assert.deepEqual(quicklookTargets([], {}, "x64"), [x86_64]);
+  assert.deepEqual(quicklookTargets(["--arch", "x86_64"], {}, "arm64"), [x86_64], "an arm64 host can build the Intel slice");
+  assert.deepEqual(quicklookTargets(["--arch", "arm64"], {}, "x64"), [arm64]);
+  assert.deepEqual(quicklookTargets(["--universal"], {}, "arm64"), [arm64, x86_64]);
+  assert.deepEqual(quicklookTargets(["--arch", "arm64"], { EASYOFFICE_QUICKLOOK_TARGETS: `${x86_64}` }, "arm64"), [x86_64], "the environment names targets outright");
+  for (const bad of [["--arch"], ["--arch", "ppc64"], ["--arch", "x64"], ["--arch", ""]]) {
+    assert.throws(() => quicklookTargets(bad, {}, "arm64"), /--arch/, JSON.stringify(bad));
+  }
+});
+
 test("CI and the release build the extensions before the app and check the bundle after", () => {
   for (const [file, job] of [[".github/workflows/ci.yml", "verify"], [".github/workflows/release.yml", "release-macos"]]) {
     const text = read(join(repoRoot, file));
     const section = text.slice(text.indexOf(`  ${job}:`));
-    const build = section.indexOf("build-quicklook-macos.mjs --universal");
+    const build = section.search(/build-quicklook-macos\.mjs --(universal|arch)/);
     const tauri = section.indexOf("@tauri-apps/cli");
     const verify = section.indexOf("verify-quicklook-bundle.mjs");
     assert.ok(build > 0 && tauri > build, `${file}: the extensions are built before tauri build`);

@@ -7,7 +7,7 @@ description: >-
 
 inputs:
   rust-targets:
-    description: Space-separated extra Rust compilation targets (the macOS universal build needs two).
+    description: Space-separated extra Rust compilation targets (a macOS build adds the target of its architecture).
     required: false
     default: ""
 

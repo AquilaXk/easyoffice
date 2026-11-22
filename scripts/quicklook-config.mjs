@@ -47,6 +47,21 @@ export const EXTENSIONS = [
 
 export const RUST_TARGETS = { arm64: "aarch64-apple-darwin", x86_64: "x86_64-apple-darwin" };
 
+/**
+ * The Rust targets one Quick Look build covers (PD-297): `EASYOFFICE_QUICKLOOK_TARGETS` names them outright,
+ * `--universal` is both (CI), `--arch arm64|x86_64` is one (the release builds one architecture per job, and
+ * an arm64 host can build the Intel slice), and the host's own architecture is the default.
+ */
+export function quicklookTargets(argv, env = process.env, hostArch = process.arch) {
+  if (env.EASYOFFICE_QUICKLOOK_TARGETS) return env.EASYOFFICE_QUICKLOOK_TARGETS.split(",");
+  if (argv.includes("--universal")) return [RUST_TARGETS.arm64, RUST_TARGETS.x86_64];
+  const at = argv.indexOf("--arch");
+  if (at < 0) return [hostArch === "arm64" ? RUST_TARGETS.arm64 : RUST_TARGETS.x86_64];
+  const target = Object.hasOwn(RUST_TARGETS, argv[at + 1]) ? RUST_TARGETS[argv[at + 1]] : undefined;
+  if (!target) throw new Error(`--arch must be one of ${Object.keys(RUST_TARGETS).join(", ")}, not '${argv[at + 1] ?? ""}'`);
+  return [target];
+}
+
 /** The Swift `-target` triple for a Rust macOS target. */
 export function swiftTarget(rustTarget) {
   const arch = rustTarget === RUST_TARGETS.x86_64 ? "x86_64" : "arm64";

@@ -4,7 +4,7 @@
  * release asset and which updater platform keys it serves. Asset names carry no version, so
  * `releases/latest/download/<name>` links stay valid from release to release (the README links use exactly
  * these names). A release built with signed updater artifacts also holds the `.sig` file of each updatable
- * package, the macOS updater archive and `latest.json`, the manifest the app's updater reads.
+ * package, the macOS updater archive of each architecture (PD-297) and `latest.json`, the manifest the app's updater reads.
  *
  * Usage:
  *   node scripts/release-assets.mjs bundles <platform>            bundle types to pass to `tauri build --bundles`
@@ -39,6 +39,30 @@ const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 const HOST_BUNDLE_ROOT = "target/release/bundle";
 
 /**
+ * One macOS architecture (PD-297): the `.dmg` and the signed updater archive of a build for `triple`. The
+ * updater plugin asks for `darwin-<updaterArch>-app` and then `darwin-<updaterArch>`, with the architecture
+ * of the running slice, so an app installed from the earlier universal dmg finds the archive of its own
+ * architecture under the same keys.
+ */
+function macosPlatform(name, triple, updaterArch) {
+  return {
+    tauriBundles: ["app", "dmg"],
+    bundleRoot: `target/${triple}/release/bundle`,
+    assets: [
+      { dir: "dmg", extension: ".dmg", name: `EasyOffice-macos-${name}.dmg` },
+      {
+        dir: "macos",
+        extension: ".app.tar.gz",
+        name: `EasyOffice-macos-${name}.app.tar.gz`,
+        signed: true,
+        updaterOnly: true,
+        updater: [`darwin-${updaterArch}`, `darwin-${updaterArch}-app`],
+      },
+    ],
+  };
+}
+
+/**
  * Per platform: the Tauri bundle types to build, where the CLI leaves them, and for each release asset
  * the bundle sub-directory, the extension of the file in it and the fixed asset name. `signed` assets have
  * a `.sig` next to them in a release build and serve the updater platform keys in `updater` (the plugin
@@ -46,21 +70,8 @@ const HOST_BUNDLE_ROOT = "target/release/bundle";
  * has a single installer). `updaterOnly` assets are not download links of the README.
  */
 export const PLATFORMS = {
-  "macos-universal": {
-    tauriBundles: ["app", "dmg"],
-    bundleRoot: "target/universal-apple-darwin/release/bundle",
-    assets: [
-      { dir: "dmg", extension: ".dmg", name: "EasyOffice-macos-universal.dmg" },
-      {
-        dir: "macos",
-        extension: ".app.tar.gz",
-        name: "EasyOffice-macos-universal.app.tar.gz",
-        signed: true,
-        updaterOnly: true,
-        updater: ["darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app"],
-      },
-    ],
-  },
+  "macos-arm64": macosPlatform("arm64", "aarch64-apple-darwin", "aarch64"),
+  "macos-x64": macosPlatform("x64", "x86_64-apple-darwin", "x86_64"),
   "windows-x64": {
     tauriBundles: ["nsis"],
     bundleRoot: HOST_BUNDLE_ROOT,

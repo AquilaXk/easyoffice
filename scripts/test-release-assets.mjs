@@ -61,19 +61,20 @@ function stagedRelease(version = "1.2.3") {
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "release-assets-"));
 
-test("the six installers have fixed names with no version in them", () => {
+test("the seven installers have fixed names with no version in them", () => {
   assert.deepEqual(allAssetNames(), [
     "EasyOffice-linux-arm64.deb",
     "EasyOffice-linux-x64.AppImage",
     "EasyOffice-linux-x64.deb",
     "EasyOffice-linux-x64.rpm",
-    "EasyOffice-macos-universal.dmg",
+    "EasyOffice-macos-arm64.dmg",
+    "EasyOffice-macos-x64.dmg",
     "EasyOffice-windows-x64-setup.exe",
   ]);
   for (const name of allAssetNames()) assert.doesNotMatch(name, /\d+\.\d+/, name);
 });
 
-test("a signed release is the installers, the macOS updater archive, a signature per package and latest.json", () => {
+test("a signed release is the installers, the macOS updater archives, a signature per package and latest.json", () => {
   assert.deepEqual(releaseFileNames(), [
     "EasyOffice-linux-arm64.deb",
     "EasyOffice-linux-arm64.deb.sig",
@@ -83,9 +84,12 @@ test("a signed release is the installers, the macOS updater archive, a signature
     "EasyOffice-linux-x64.deb.sig",
     "EasyOffice-linux-x64.rpm",
     "EasyOffice-linux-x64.rpm.sig",
-    "EasyOffice-macos-universal.app.tar.gz",
-    "EasyOffice-macos-universal.app.tar.gz.sig",
-    "EasyOffice-macos-universal.dmg",
+    "EasyOffice-macos-arm64.app.tar.gz",
+    "EasyOffice-macos-arm64.app.tar.gz.sig",
+    "EasyOffice-macos-arm64.dmg",
+    "EasyOffice-macos-x64.app.tar.gz",
+    "EasyOffice-macos-x64.app.tar.gz.sig",
+    "EasyOffice-macos-x64.dmg",
     "EasyOffice-windows-x64-setup.exe",
     "EasyOffice-windows-x64-setup.exe.sig",
     "latest.json",
@@ -93,7 +97,9 @@ test("a signed release is the installers, the macOS updater archive, a signature
 });
 
 test("each platform builds the bundle types its assets come from", () => {
-  assert.equal(bundleArguments("macos-universal"), "app,dmg", "the app bundle is what the updater archive is made from");
+  assert.equal(bundleArguments("macos-arm64"), "app,dmg", "the app bundle is what the updater archive is made from");
+  assert.equal(bundleArguments("macos-x64"), "app,dmg");
+  assert.throws(() => bundleArguments("macos-universal"), /unknown platform/, "PD-297: no universal build any more");
   assert.equal(bundleArguments("windows-x64"), "nsis");
   assert.equal(bundleArguments("linux-x64"), "appimage,deb,rpm");
   assert.equal(bundleArguments("linux-arm64"), "deb");
@@ -116,15 +122,25 @@ test("staging copies each bundle and its signature under the fixed names", () =>
   assert.equal(signedVersion(fs.readFileSync(path.join(out, "EasyOffice-linux-x64.deb.sig"), "utf8")), "0.1.0");
 });
 
-test("macOS stages the dmg and the signed updater archive; the dmg itself is not signed", () => {
+test("each macOS architecture stages its own dmg and signed updater archive; the dmg itself is not signed", () => {
+  for (const arch of ["arm64", "x64"]) {
+    const root = tempDir();
+    const out = path.join(root, "dist");
+    fakeBundles(root, `macos-${arch}`, { macos: ["EasyOffice.app.tar.gz"] }, { signedFor: "0.1.0" });
+    assert.deepEqual(stageAssets(`macos-${arch}`, root, out), [
+      `EasyOffice-macos-${arch}.dmg`,
+      `EasyOffice-macos-${arch}.app.tar.gz`,
+      `EasyOffice-macos-${arch}.app.tar.gz.sig`,
+    ]);
+  }
+});
+
+test("a macOS bundle is read from the directory of its own Rust target", () => {
+  assert.equal(PLATFORMS["macos-arm64"].bundleRoot, "target/aarch64-apple-darwin/release/bundle");
+  assert.equal(PLATFORMS["macos-x64"].bundleRoot, "target/x86_64-apple-darwin/release/bundle");
   const root = tempDir();
-  const out = path.join(root, "dist");
-  fakeBundles(root, "macos-universal", { macos: ["EasyOffice.app.tar.gz"] }, { signedFor: "0.1.0" });
-  assert.deepEqual(stageAssets("macos-universal", root, out), [
-    "EasyOffice-macos-universal.dmg",
-    "EasyOffice-macos-universal.app.tar.gz",
-    "EasyOffice-macos-universal.app.tar.gz.sig",
-  ]);
+  fakeBundles(root, "macos-x64", { macos: ["EasyOffice.app.tar.gz"] }, { signedFor: "0.1.0" });
+  assert.throws(() => stageAssets("macos-arm64", root, path.join(root, "dist")), /expected exactly one \.dmg in .*aarch64-apple-darwin/, "an x64 build is never staged as arm64");
 });
 
 test("staging fails when a signed bundle has no signature or an empty one", () => {
@@ -145,15 +161,15 @@ test("staging fails when a bundle is missing or ambiguous", () => {
   assert.throws(() => stageAssets("linux-x64", missing, path.join(missing, "dist")), /expected exactly one \.rpm .* found 0/);
 
   const twice = tempDir();
-  fakeBundles(twice, "macos-universal", { dmg: ["EasyOffice_0.1.0_universal.dmg", "other.dmg"] });
-  assert.throws(() => stageAssets("macos-universal", twice, path.join(twice, "dist")), /found 2/);
+  fakeBundles(twice, "macos-arm64", { dmg: ["EasyOffice_0.1.0_aarch64.dmg", "other.dmg"] });
+  assert.throws(() => stageAssets("macos-arm64", twice, path.join(twice, "dist")), /found 2/);
 });
 
 test("checksums cover every release file, latest.json included, in one sorted file that sha256sum -c accepts", () => {
   const dir = tempDir();
   for (const name of releaseFileNames()) fs.writeFileSync(path.join(dir, name), `bytes of ${name}`);
   const lines = writeChecksums(dir);
-  assert.equal(lines.length, 14);
+  assert.equal(lines.length, 17);
   const written = fs.readFileSync(path.join(dir, SUMS_FILE), "utf8").trimEnd().split("\n");
   assert.deepEqual(written, lines);
   assert.deepEqual(written.map((l) => l.split("  ")[1]), releaseFileNames());
@@ -165,10 +181,10 @@ test("checksums cover every release file, latest.json included, in one sorted fi
 test("checksums refuse a release with a missing or unexpected file", () => {
   const dir = tempDir();
   for (const name of releaseFileNames().slice(1)) fs.writeFileSync(path.join(dir, name), "x");
-  fs.writeFileSync(path.join(dir, "EasyOffice-0.1.0-macos-universal.dmg"), "x");
+  fs.writeFileSync(path.join(dir, "EasyOffice-macos-universal.dmg"), "x");
   assert.throws(
     () => writeChecksums(dir),
-    (err) => /missing: EasyOffice-linux-arm64\.deb/.test(err.message) && /unexpected: EasyOffice-0\.1\.0-macos-universal\.dmg/.test(err.message)
+    (err) => /missing: EasyOffice-linux-arm64\.deb/.test(err.message) && /unexpected: EasyOffice-macos-universal\.dmg/.test(err.message)
   );
 });
 
@@ -200,8 +216,10 @@ test("latest.json lists every updater platform key with the release's own URL an
     "windows-x86_64-nsis",
   ]);
   const files = {
-    "darwin-aarch64": "EasyOffice-macos-universal.app.tar.gz",
-    "darwin-x86_64-app": "EasyOffice-macos-universal.app.tar.gz",
+    "darwin-aarch64": "EasyOffice-macos-arm64.app.tar.gz",
+    "darwin-aarch64-app": "EasyOffice-macos-arm64.app.tar.gz",
+    "darwin-x86_64": "EasyOffice-macos-x64.app.tar.gz",
+    "darwin-x86_64-app": "EasyOffice-macos-x64.app.tar.gz",
     "windows-x86_64": "EasyOffice-windows-x64-setup.exe",
     "windows-x86_64-nsis": "EasyOffice-windows-x64-setup.exe",
     "linux-x86_64-appimage": "EasyOffice-linux-x64.AppImage",
@@ -220,10 +238,46 @@ test("latest.json lists every updater platform key with the release's own URL an
   assert.doesNotThrow(() => Date.parse(manifest.pub_date), "an RFC 3339 time the updater parses");
 });
 
+test("no updater key is claimed by two assets", () => {
+  const keys = Object.values(PLATFORMS).flatMap((platform) => platform.assets.flatMap((asset) => asset.updater ?? []));
+  assert.equal(new Set(keys).size, keys.length, "a duplicate key would let the last asset silently replace the first in latest.json");
+});
+
+// An app installed from the old universal dmg updates through the same two keys as before (PD-297): the
+// updater plugin names the key from the architecture of the running slice (`updater_arch`, a compile-time
+// cfg), looks for `darwin-<arch>-app` first (the `.app` bundle type) and then `darwin-<arch>`
+// (tauri-plugin-updater 2.14 `get_urls`). The minisign key is the one of the universal release, so the
+// signature check passes for either archive.
+test("an installed universal app finds the archive of its own architecture, with that archive's signature", () => {
+  const dist = stagedRelease("1.2.3");
+  for (const arch of ["arm64", "x64"]) {
+    const bundles = tempDir();
+    fakeBundles(bundles, `macos-${arch}`, { macos: [`built-for-${arch}.app.tar.gz`] }, { signedFor: "1.2.3" });
+    stageAssets(`macos-${arch}`, bundles, dist);
+  }
+  const { platforms } = buildManifest(dist, "1.2.3");
+  const lookup = (arch) => {
+    const key = [`darwin-${arch}-app`, `darwin-${arch}`].find((candidate) => platforms[candidate]);
+    return platforms[key];
+  };
+  for (const [updaterArch, assetArch] of [["aarch64", "arm64"], ["x86_64", "x64"]]) {
+    const entry = lookup(updaterArch);
+    const archive = `EasyOffice-macos-${assetArch}.app.tar.gz`;
+    assert.equal(entry.url, `${RELEASE_DOWNLOAD_BASE_URL}/v1.2.3/${archive}`, updaterArch);
+    assert.equal(entry.signature, fs.readFileSync(path.join(dist, `${archive}.sig`), "utf8"), updaterArch);
+    assert.match(Buffer.from(entry.signature, "base64").toString("utf8"), new RegExp(`file:built-for-${assetArch}\\.app\\.tar\\.gz`), "the signature was made for this architecture's archive");
+  }
+  assert.notEqual(lookup("aarch64").url, lookup("x86_64").url, "the two architectures no longer share one archive");
+  assert.notEqual(lookup("aarch64").signature, lookup("x86_64").signature);
+  for (const key of ["darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app"]) {
+    assert.ok(platforms[key], `${key} stays in latest.json`);
+  }
+});
+
 test("the manifest and the checksums complete the release the publish job uploads", () => {
   const dir = stagedRelease("1.2.3");
   writeManifest(dir, "1.2.3");
-  assert.equal(writeChecksums(dir).length, 14);
+  assert.equal(writeChecksums(dir).length, 17);
   const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   assert.deepEqual(fs.readdirSync(dir).sort(byName), [...releaseFileNames(), SUMS_FILE].sort(byName));
 });
@@ -281,6 +335,30 @@ test("the release builds run the lockfile's Tauri CLI, not a package fetched by 
   for (const [name, entry] of Object.entries(lock.packages)) {
     if (name) assert.match(entry.integrity ?? "", /^sha512-/, `${name} has an integrity hash`);
   }
+});
+
+test("the macOS job builds one architecture per matrix entry on a runner of that architecture (PD-297)", () => {
+  const job = workflow.slice(workflow.indexOf("  release-macos:"), workflow.indexOf("  build-windows-release:"));
+  const entries = [...job.matchAll(/- platform: (\S+)\n\s+runner: (\S+)\n\s+target: (\S+)\n\s+archs: (\S+)/g)].map(
+    ([, platform, runner, target, archs]) => ({ platform, runner, target, archs })
+  );
+  assert.deepEqual(entries, [
+    { platform: "macos-arm64", runner: "macos-15", target: "aarch64-apple-darwin", archs: "arm64" },
+    { platform: "macos-x64", runner: "macos-15-intel", target: "x86_64-apple-darwin", archs: "x86_64" },
+  ]);
+  for (const { platform, target } of entries) {
+    assert.equal(PLATFORMS[platform].bundleRoot, `target/${target}/release/bundle`, `${platform} is read from where its target builds`);
+  }
+  assert.match(job, /runs-on: \$\{\{ matrix\.runner \}\}/);
+  assert.match(job, /fail-fast: false/, "one architecture failing does not cancel the other build");
+  assert.match(job, /timeout-minutes: 120/);
+  assert.match(job, /release-assets\.mjs" bundles "\$PLATFORM"/);
+  assert.match(job, /tauri\.js" build --ci --target "\$TARGET" --bundles/);
+  assert.match(job, /build-quicklook-macos\.mjs --arch "\$ARCHS"/, "the extensions get only this architecture");
+  assert.match(job, /verify-quicklook-bundle\.mjs "target\/\$TARGET\/release\/bundle\/macos\/EasyOffice\.app" --archs "\$ARCHS"/);
+  assert.match(job, /release-assets\.mjs stage "\$PLATFORM" dist/);
+  assert.match(job, /name: release-\$\{\{ matrix\.platform \}\}/, "the publish job's release-* pattern collects both");
+  assert.doesNotMatch(job, /universal-apple-darwin|--universal|macos-universal/, "no universal build is left in the release");
 });
 
 test("publishing is serialized by version across tag pushes and manual runs", () => {
