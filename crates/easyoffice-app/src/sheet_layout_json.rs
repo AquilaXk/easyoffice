@@ -5,9 +5,9 @@
 //! inclusive. Input over a limit is refused, not trimmed.
 
 use easyoffice_formats::{
-    normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, RowHeight, RowHeights,
-    RowOffsets, SheetFilter, SheetGrid, SheetStyling, SheetTable, SpillRef, StrictJsonValue,
-    MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
+    normalize_runs, normalize_spills, run_total, CellBox, DefaultColWidth, EasyOfficeError,
+    RowHeight, RowHeights, RowOffsets, SheetFilter, SheetGrid, SheetStyling, SheetTable, SpillRef,
+    StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -210,6 +210,49 @@ pub(crate) fn default_row_height_json(height: RowHeight) -> String {
     )
 }
 
+/// `defaultColWidth`: `{"width": characters, "base": characters}`, either of them (the XLSX `defaultColWidth` and
+/// `baseColWidth` of the sheet, PD-303). A key that is not one of the two, a value that is not a number in the bounds of a
+/// column width and an object with neither are refused.
+pub(crate) fn parse_default_col_width(
+    v: &StrictJsonValue,
+) -> Result<DefaultColWidth, EasyOfficeError> {
+    let obj = v
+        .as_object()
+        .filter(|o| o.iter().all(|(key, _)| key == "width" || key == "base"))
+        .ok_or_else(|| bad("defaultColWidth"))?;
+    let width = match StrictJsonValue::get_field(obj, "width") {
+        None | Some(StrictJsonValue::Null) => None,
+        Some(StrictJsonValue::Number(text)) => {
+            Some(text.parse::<f64>().map_err(|_| bad("defaultColWidth"))?)
+        }
+        Some(_) => return Err(bad("defaultColWidth")),
+    };
+    let base = match StrictJsonValue::get_field(obj, "base") {
+        None | Some(StrictJsonValue::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| bad("defaultColWidth"))?,
+        ),
+    };
+    let parsed = DefaultColWidth { width, base };
+    parsed
+        .within_bounds()
+        .then_some(parsed)
+        .ok_or_else(|| bad("defaultColWidth"))
+}
+
+fn default_col_width_json(widths: DefaultColWidth) -> String {
+    let mut parts = Vec::with_capacity(2);
+    if let Some(width) = widths.width {
+        parts.push(format!("\"width\":{width}"));
+    }
+    if let Some(base) = widths.base {
+        parts.push(format!("\"base\":{base}"));
+    }
+    format!("{{{}}}", parts.join(","))
+}
+
 pub(crate) fn row_heights_json(heights: &RowHeights) -> String {
     let mut out = String::from("[");
     for (i, (row, height)) in heights.iter().enumerate() {
@@ -242,6 +285,9 @@ pub(crate) fn parse_layout(
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "defaultRowHeight") {
         styling.default_row_height = Some(parse_default_row_height(v)?);
+    }
+    if let Some(v) = StrictJsonValue::get_field(obj, "defaultColWidth") {
+        styling.default_col_width = Some(parse_default_col_width(v)?);
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
@@ -391,6 +437,13 @@ pub(crate) fn write_layout_split(
             out,
             ",\"defaultRowHeight\":{}",
             default_row_height_json(height)
+        );
+    }
+    if let Some(widths) = styling.default_col_width {
+        let _ = write!(
+            out,
+            ",\"defaultColWidth\":{}",
+            default_col_width_json(widths)
         );
     }
     if let Some(filter) = filter {

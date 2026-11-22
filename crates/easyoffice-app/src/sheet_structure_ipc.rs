@@ -6,6 +6,8 @@
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
 //! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights` and `defaultRowHeight` (see `sheet_layout_json`;
 //! with `outline`, `filter` and `tables` they place the `images` and `charts` on the rows the edit leaves, PD-299),
+//! `chartRefs` `{sheet: [{id, dataRange, series}]}` (the references of the charts of the other sheets, which the engine moves
+//! as it moves a formula's, PD-303),
 //! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`), `tables` (see `sheet_table_json`) and `rules`
 //! `{sheet: {cf, dv}}` of every sheet, and the row and column groups `outline` (`sheet_view_json`).
 //!
@@ -295,6 +297,16 @@ fn moved_layout_json(
             out,
             ",\"charts\":{}",
             crate::sheet_chart_json::charts_json(&moved)
+        );
+    }
+    // The charts of the other sheets keep their places; their references to this sheet move (PD-303).
+    if let Some(v) = present("chartRefs") {
+        let parsed = crate::sheet_chart_json::parse_chart_refs(v, sheet)?;
+        let moved = crate::sheet_chart_json::shift_other_charts(parsed, sheet, edit);
+        let _ = write!(
+            out,
+            ",\"chartRefs\":{}",
+            crate::sheet_chart_json::chart_refs_json(&moved)
         );
     }
     if let Some(v) = field("pivots").filter(|v| !matches!(v, StrictJsonValue::Null)) {

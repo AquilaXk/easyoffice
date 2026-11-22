@@ -295,6 +295,158 @@ pub(crate) fn charts_json(charts: &[SheetChart]) -> String {
     out
 }
 
+/// Moves the data range and the series references of `chart`, a chart of the sheet `own`, for an `edit` of `sheet`: the
+/// rule of a formula. A reference without a sheet name points at `own`. True when a reference changed.
+pub(crate) fn shift_chart_refs(
+    chart: &mut SheetChart,
+    own: &str,
+    sheet: &str,
+    edit: &AxisEdit,
+) -> bool {
+    let shift = |text: &mut String| {
+        rewrite_formula_refs(text, own, sheet, edit, false).is_some_and(|moved| {
+            *text = moved;
+            true
+        })
+    };
+    let mut changed = shift(&mut chart.data_range);
+    for s in &mut chart.series {
+        for text in [&mut s.name_ref, &mut s.categories_ref]
+            .into_iter()
+            .flatten()
+        {
+            changed |= shift(text);
+        }
+        changed |= shift(&mut s.values_ref);
+    }
+    changed
+}
+
+/// The sheets a request may name in `chartRefs` (a workbook holds 256) and the charts of all of them together.
+const MAX_REF_SHEETS: usize = 256;
+const MAX_REF_CHARTS: usize = 1_024;
+
+/// One chart of `chartRefs`: its id and the references the edit may move (the chart is not anywhere else of the request).
+fn parse_chart_refs_item(item: &StrictJsonValue) -> Result<SheetChart, EasyOfficeError> {
+    let obj = item.as_object().ok_or_else(|| bad("chartRefs"))?;
+    let id = text_opt(obj, "id")?
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| bad("id"))?;
+    let switch_row_col = match StrictJsonValue::get_field(obj, "switchRowCol") {
+        None | Some(StrictJsonValue::Null) => false,
+        Some(StrictJsonValue::Bool(b)) => *b,
+        Some(_) => return Err(bad("switchRowCol")),
+    };
+    let chart = SheetChart {
+        id,
+        data_range: text_opt(obj, "dataRange")?.unwrap_or_default(),
+        switch_row_col,
+        series: parse_series(StrictJsonValue::get_field(obj, "series"))?,
+        ..SheetChart::default()
+    };
+    if !chart.within_bounds() {
+        return Err(over(
+            "차트 포인트 수 또는 크기 예산이 허용 상한을 초과했습니다.",
+        ));
+    }
+    Ok(chart)
+}
+
+/// `chartRefs` of a row or column edit of the sheet `edited`: `{sheet: [chart, ...]}`, the references of the charts of the
+/// other sheets. The sheets, the charts of a sheet and the charts of all of them are bounded before any is read, and the
+/// edited sheet is not a member (its charts are `charts` and would move twice).
+pub(crate) fn parse_chart_refs(
+    v: &StrictJsonValue,
+    edited: &str,
+) -> Result<Vec<(String, Vec<SheetChart>)>, EasyOfficeError> {
+    let sheets = v.as_object().ok_or_else(|| bad("chartRefs"))?;
+    if sheets.len() > MAX_REF_SHEETS {
+        return Err(over(&format!(
+            "차트가 있는 시트 수({})가 허용 상한({MAX_REF_SHEETS})을 초과했습니다.",
+            sheets.len()
+        )));
+    }
+    let mut total = 0usize;
+    let mut out = Vec::with_capacity(sheets.len());
+    for (name, list) in sheets {
+        let items = list.as_array().ok_or_else(|| bad("chartRefs"))?;
+        total = total.saturating_add(items.len());
+        if name.eq_ignore_ascii_case(edited) {
+            return Err(bad("chartRefs"));
+        }
+        if items.len() > MAX_CHARTS_PER_SHEET || total > MAX_REF_CHARTS {
+            return Err(over(&format!(
+                "다른 시트의 차트 수가 허용 상한(시트당 {MAX_CHARTS_PER_SHEET}개, 전체 {MAX_REF_CHARTS}개)을 초과했습니다."
+            )));
+        }
+        let charts = items
+            .iter()
+            .map(parse_chart_refs_item)
+            .collect::<Result<_, _>>()?;
+        out.push((name.clone(), charts));
+    }
+    Ok(out)
+}
+
+/// The sheets of `charts` with a chart that points at the cells of `edited` the `edit` moves, their charts moved. The sheets
+/// whose references stay are left out.
+pub(crate) fn shift_other_charts(
+    charts: Vec<(String, Vec<SheetChart>)>,
+    edited: &str,
+    edit: &AxisEdit,
+) -> Vec<(String, Vec<SheetChart>)> {
+    charts
+        .into_iter()
+        .filter_map(|(name, mut list)| {
+            let mut changed = false;
+            for chart in &mut list {
+                changed |= shift_chart_refs(chart, &name, edited, edit);
+            }
+            changed.then_some((name, list))
+        })
+        .collect()
+}
+
+/// `{sheet: [{id, dataRange, series: [{nameRef, categoriesRef, valuesRef}]}]}`, all the charts of each sheet in the order
+/// they came, so the page puts each reference back on the chart of the same place.
+pub(crate) fn chart_refs_json(sheets: &[(String, Vec<SheetChart>)]) -> String {
+    let mut out = String::from("{");
+    for (i, (name, charts)) in sheets.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        EasyOfficeIpcRouter::escape_json_into(&mut out, name);
+        out.push_str("\":[");
+        for (j, chart) in charts.iter().enumerate() {
+            if j > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"id\":\"");
+            EasyOfficeIpcRouter::escape_json_into(&mut out, &chart.id);
+            out.push_str("\",\"dataRange\":\"");
+            EasyOfficeIpcRouter::escape_json_into(&mut out, &chart.data_range);
+            out.push_str("\",\"series\":[");
+            for (k, s) in chart.series.iter().enumerate() {
+                if k > 0 {
+                    out.push(',');
+                }
+                out.push_str("{\"nameRef\":");
+                write_opt_str(&mut out, s.name_ref.as_deref());
+                out.push_str(",\"categoriesRef\":");
+                write_opt_str(&mut out, s.categories_ref.as_deref());
+                out.push_str(",\"valuesRef\":\"");
+                EasyOfficeIpcRouter::escape_json_into(&mut out, &s.values_ref);
+                out.push_str("\"}");
+            }
+            out.push_str("]}");
+        }
+        out.push(']');
+    }
+    out.push('}');
+    out
+}
+
 pub(crate) fn shift_charts(
     charts: &[SheetChart],
     sheet: &str,
@@ -305,32 +457,7 @@ pub(crate) fn shift_charts(
         .iter()
         .map(|ch| {
             let mut next = ch.clone();
-            if !next.data_range.is_empty() {
-                if let Some(moved) =
-                    rewrite_formula_refs(&next.data_range, sheet, sheet, edit, false)
-                {
-                    next.data_range = moved;
-                }
-            }
-            for s in &mut next.series {
-                if let Some(nr) = s.name_ref.as_deref() {
-                    if let Some(moved) = rewrite_formula_refs(nr, sheet, sheet, edit, false) {
-                        s.name_ref = Some(moved);
-                    }
-                }
-                if let Some(cr) = s.categories_ref.as_deref() {
-                    if let Some(moved) = rewrite_formula_refs(cr, sheet, sheet, edit, false) {
-                        s.categories_ref = Some(moved);
-                    }
-                }
-                if !s.values_ref.is_empty() {
-                    if let Some(moved) =
-                        rewrite_formula_refs(&s.values_ref, sheet, sheet, edit, false)
-                    {
-                        s.values_ref = moved;
-                    }
-                }
-            }
+            shift_chart_refs(&mut next, sheet, sheet, edit);
             // An absolute anchor stays where it is; the others move with their cells (a one-cell one keeps its size).
             if next.anchor.edit_as != AnchorEdit::Absolute {
                 match edit.axis {

@@ -1122,6 +1122,34 @@ function offlineSourceConversion(parsed) {
       });
     }
 
+    // The references of the charts of the other sheets to the edited sheet, as the engine moves them with a formula's: only the
+    // insert of rows and cell references that carry the sheet name (`S!$B$2:$B$5`) here; the sheets whose references stay are
+    // left out (PD-303).
+    function offlineStructureChartRefs(doc) {
+      if (!doc.chartRefs) return undefined;
+      const at = Number(doc.at), count = Number(doc.count);
+      const name = String(doc.sheet).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const cell = new RegExp(`(${name}!\\$?[A-Z]+\\$?)(\\d+)(?::(\\$?[A-Z]+\\$?)(\\d+))?`, "g");
+      const row = (n) => (Number(n) >= at ? Number(n) + count : Number(n));
+      const shift = (text) => (typeof text === "string" && doc.axis === "row" && doc.op === "insert" ? text.replace(cell, (_, a, r1, b, r2) => a + row(r1) + (b === undefined ? "" : ":" + b + row(r2))) : text);
+      const out = {};
+      for (const [sheet, charts] of Object.entries(doc.chartRefs)) {
+        let changed = false;
+        const move = (text) => {
+          const next = shift(text);
+          changed ||= next !== text;
+          return next ?? null;
+        };
+        const moved = charts.map((c) => ({
+          id: c.id,
+          dataRange: move(c.dataRange),
+          series: (c.series || []).map((s) => ({ nameRef: move(s.nameRef), categoriesRef: move(s.categoriesRef), valuesRef: move(s.valuesRef) })),
+        }));
+        if (changed) out[sheet] = moved;
+      }
+      return out;
+    }
+
     function offlineStructure(doc) {
       const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
       const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
@@ -1217,6 +1245,7 @@ function offlineSourceConversion(parsed) {
         unlockedCols: doc.unlockedCols || [],
         tables: doc.tables || [],
         charts: offlineStructureCharts(doc, edit, at0, limit0),
+        chartRefs: offlineStructureChartRefs(doc),
         images,
         notes,
         widths,

@@ -32,6 +32,8 @@ pub(crate) mod ods_view;
 pub(crate) mod sheet_anchor_edit;
 #[path = "sheet_chart.rs"]
 pub(crate) mod sheet_chart;
+#[path = "sheet_default_col_width.rs"]
+pub(crate) mod sheet_default_col_width;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
 #[path = "sheet_fonts.rs"]
@@ -115,6 +117,7 @@ pub(crate) mod xlsx_view;
 
 pub use sheet_anchor_edit::{AnchorCells, AnchorEdit};
 pub use sheet_chart::*;
+pub use sheet_default_col_width::{DefaultColWidth, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS};
 pub use sheet_filter::*;
 pub use sheet_fonts::*;
 pub use sheet_links::*;
@@ -474,6 +477,9 @@ pub struct SheetStyling {
     /// The height of the rows that have none of their own (XLSX `sheetFormatPr`, the ODS band that ends a table). Only
     /// a default a user set (`custom`) changes how the page draws the sheet (PD-286).
     pub default_row_height: Option<RowHeight>,
+    /// The sheet-wide column width of an XLSX file (`defaultColWidth`, `baseColWidth`), kept so a save writes it back. The page
+    /// draws every column without a width of its own at the window's 96 px (PD-302, PD-303).
+    pub default_col_width: Option<DefaultColWidth>,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
     /// Custom number format codes: the cell id `CUSTOM_BASE + n` names entry `n` (PD-193). A
@@ -594,6 +600,7 @@ impl SheetStyling {
             && self.columns.is_empty()
             && self.row_heights.is_empty()
             && self.default_row_height.is_none()
+            && self.default_col_width.is_none()
             && self.rules.is_empty()
             && self.merges.is_empty()
             && self.hidden_rows.is_empty()

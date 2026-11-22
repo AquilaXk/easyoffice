@@ -16,6 +16,7 @@
 //! the active pane) are read as well, which the reference leaves out (it ignores all of them).
 
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::sheet_default_col_width::DefaultColWidth;
 use crate::sheet_styling::sheet_row_height::RowHeight;
 use crate::sheet_styling::sheet_view::{Freeze, ViewState, MAX_OUTLINE_LEVEL};
 use crate::sheet_styling::SheetStyling;
@@ -67,6 +68,8 @@ pub(crate) struct ViewScan {
     pub(crate) summary_left: bool,
     /// `sheetFormatPr` `defaultRowHeight` and `customHeight` (PD-286).
     pub(crate) default_row_height: Option<RowHeight>,
+    /// `sheetFormatPr` `defaultColWidth` and `baseColWidth` (PD-303).
+    pub(crate) default_col_width: Option<DefaultColWidth>,
 }
 
 /// `value` as a count of frozen rows or columns. Both writers of this value exist: whole numbers
@@ -112,6 +115,10 @@ impl ViewScan {
                     self.default_row_height = RowHeight::parse_default(
                         attrs.get("defaultRowHeight").as_deref(),
                         attrs.get("customHeight").as_deref(),
+                    );
+                    self.default_col_width = DefaultColWidth::parse(
+                        attrs.get("defaultColWidth").as_deref(),
+                        attrs.get("baseColWidth").as_deref(),
                     );
                 }
                 "outlinePr" => {
@@ -161,6 +168,7 @@ impl ViewScan {
         styling.view = self.state();
         styling.tab_color = self.tab_rgb;
         styling.default_row_height = self.default_row_height;
+        styling.default_col_width = self.default_col_width;
     }
 
     /// The selection, zoom and scroll position the scan found.
@@ -484,11 +492,13 @@ pub(crate) fn sheet_format_pr_xml(styling: &SheetStyling) -> String {
         styling.outline.max_level(true),
     );
     let default = styling.default_row_height;
-    if rows == 0 && cols == 0 && default.is_none() {
+    let widths = styling.default_col_width;
+    if rows == 0 && cols == 0 && default.is_none() && widths.is_none() {
         return String::new();
     }
     let mut xml = format!(
-        "<sheetFormatPr defaultRowHeight=\"{}\"",
+        "<sheetFormatPr{} defaultRowHeight=\"{}\"",
+        widths.map_or_else(String::new, |w| w.xml_attrs()),
         default.map_or_else(|| "15".to_string(), RowHeight::points_text)
     );
     if default.is_some_and(|h| h.custom) {

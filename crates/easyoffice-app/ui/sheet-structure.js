@@ -116,6 +116,39 @@
       return Object.keys(widths || {}).map((c) => [Number(c), Number(widths[c])]);
     }
 
+    // The charts of the other sheets point at the edited one with ranges like `S!$B$2:$B$5`. The engine moves those references by
+    // the rule of a formula, so the page sends the references of the charts and not their anchors (PD-303).
+    function otherChartRefs(name) {
+      const out = {};
+      for (const sheet of Object.keys(sheetDataStore)) {
+        const charts = sheet === name ? [] : layoutApi.chartsOf(sheet);
+        if (charts.length === 0) continue;
+        out[sheet] = charts.map((c) => ({
+          id: c.id,
+          dataRange: c.dataRange,
+          switchRowCol: c.switchRowCol,
+          series: (c.series || []).map(({ nameRef, categoriesRef, valuesRef }) => ({ nameRef, categoriesRef, valuesRef })),
+        }));
+      }
+      return out;
+    }
+
+    // The answer names the sheets whose charts changed; each of those charts takes the moved references and keeps the rest.
+    function applyChartRefs(refs) {
+      for (const [sheet, moved] of Object.entries(refs || {})) {
+        const charts = structuredClone(layoutApi.chartsOf(sheet));
+        for (const m of Array.isArray(moved) ? moved : []) {
+          const chart = charts.find((c) => c.id === m.id);
+          if (!chart) continue;
+          if (typeof m.dataRange === "string") chart.dataRange = m.dataRange;
+          (m.series || []).forEach((s, i) => {
+            for (const key of ["nameRef", "categoriesRef", "valuesRef"]) if (chart.series?.[i] && typeof s[key] === "string") chart.series[i][key] = s[key];
+          });
+        }
+        layoutApi.setCharts(sheet, charts);
+      }
+    }
+
     function layoutRequest(name) {
       const json = layoutApi.toJson(layoutApi.get(name) || { merges: [], hiddenRows: [], hiddenCols: [] });
       const rules = {};
@@ -138,6 +171,7 @@
         tables: json.tables || [],
         // The charts move with their cells as the pictures do, and their data ranges follow the edit (PD-302).
         charts: json.charts || [],
+        chartRefs: otherChartRefs(name),
         images: (json.images || []).map(({ data, ...rest }) => rest),
         notes: json.notes || [],
         widths: pairsOf(grid.getAllWidths()[name]),
@@ -218,7 +252,8 @@
       replaceLiveSheetDataStore(nextSheets, rowCounts);
       // The answer moves what sits at a position; the frozen counts and the tab colour stay as they are.
       const kept = layoutApi.get(name);
-      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor, hidden: kept?.hidden });
+      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor, hidden: kept?.hidden, defaultColWidth: kept?.defaultColWidth });
+      applyChartRefs(answer.chartRefs);
       const widths = {};
       for (const [col, px] of Array.isArray(answer.widths) ? answer.widths : []) widths[col] = px;
       grid.replaceAllWidths({ ...grid.getAllWidths(), [name]: widths });
