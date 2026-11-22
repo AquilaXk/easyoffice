@@ -389,6 +389,17 @@
               <div class="md-item" data-sheet-act="name-define" role="menuitem" tabindex="-1"><span class="md-label">이름 정의…</span></div>
               <div class="md-item" data-sheet-act="name-manage" role="menuitem" tabindex="-1"><span class="md-label">이름 관리…</span></div>
               <div class="md-item" data-sheet-act="name-create" role="menuitem" tabindex="-1"><span class="md-label">선택 영역에서 이름 만들기…</span></div>
+              <div class="md-sep"></div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">계산 옵션</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="계산 옵션">
+                  <div class="md-item" data-sheet-act="calc-auto" role="menuitemradio" aria-checked="true" tabindex="-1"><span class="md-label">자동</span></div>
+                  <div class="md-item" data-sheet-act="calc-auto-no-table" role="menuitemradio" aria-checked="false" tabindex="-1"><span class="md-label">데이터 테이블을 제외한 자동</span></div>
+                  <div class="md-item" data-sheet-act="calc-manual" role="menuitemradio" aria-checked="false" tabindex="-1"><span class="md-label">수동</span></div>
+                </div>
+              </div>
+              <div class="md-item" data-sheet-act="calc-now" role="menuitem" tabindex="-1"><span class="md-label">지금 계산</span><span class="md-shortcut">F9</span></div>
+              <div class="md-item" data-sheet-act="calc-sheet" role="menuitem" tabindex="-1"><span class="md-label">시트 계산</span><span class="md-shortcut">Shift+F9</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="data" data-kinds="SHEET">
@@ -2645,6 +2656,7 @@
     <script src="./sheet-pivot-model.js"></script>
     <script src="./sheet-row-height.js"></script>
     <script src="./sheet-default-font.js"></script>
+    <script src="./sheet-calc-options.js"></script>
     <script src="./sheet-layout.js"></script>
     <script src="./sheet-table-presets.js"></script>
     <script src="./sheet-table-style.js"></script>

@@ -225,8 +225,14 @@ impl SheetEngine {
             // For now we just show the count of sheets in the current workbook
             "NUMFILE" => Ok(V::Number(Self::sheet_count(ctx) as f64)),
 
-            // At the moment we always do automatic recalc
-            "RECALC" => Ok(V::Text("Automatic".to_string())),
+            "RECALC" => Ok(V::Text(
+                if crate::in_manual_calc() {
+                    "Manual"
+                } else {
+                    "Automatic"
+                }
+                .to_string(),
+            )),
             "SYSTEM" => Ok(V::Text(
                 if cfg!(target_os = "macos") {
                     "mac"

@@ -231,8 +231,8 @@ fn pane_positions(freeze: Option<Freeze>, view: &ViewState) -> [(&'static str, u
     ]
 }
 
-/// `settings.xml` with the view of each sheet that has a frozen pane, a cursor away from A1, a zoom or a
-/// scroll position, or `None` when none has.
+/// `settings.xml` with sheet view state and/or non-default calculation settings (`ooo:configuration-settings`),
+/// or `None` when every setting is at its default.
 pub(crate) fn settings_xml(sheets: &[&str], stylings: &[SheetStyling]) -> Option<String> {
     let viewed: Vec<(&str, &SheetStyling)> = sheets
         .iter()
@@ -240,38 +240,51 @@ pub(crate) fn settings_xml(sheets: &[&str], stylings: &[SheetStyling]) -> Option
         .filter(|(_, st)| st.freeze.is_some() || !st.view.is_default())
         .map(|(&name, st)| (name, st))
         .collect();
-    if viewed.is_empty() {
+    let config_xml = stylings
+        .first()
+        .map(|st| {
+            crate::sheet_styling::sheet_calc_options::ods_configuration_settings_xml(
+                &st.calc_options,
+            )
+        })
+        .unwrap_or_default();
+    if viewed.is_empty() && config_xml.is_empty() {
         return None;
     }
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-settings xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:config=\"{CONFIG_NS}\" office:version=\"1.2\"><office:settings><config:config-item-set config:name=\"ooo:view-settings\"><config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry><config:config-item config:name=\"ViewId\" config:type=\"string\">view1</config:config-item><config:config-item-map-named config:name=\"Tables\">"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-settings xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:config=\"{CONFIG_NS}\" office:version=\"1.2\"><office:settings>"
     );
-    for (name, styling) in viewed {
-        let Freeze { rows, cols } = styling.freeze.unwrap_or(Freeze { rows: 0, cols: 0 });
-        let view = &styling.view;
-        let item = |key: &str, kind: &str, value: u32| {
-            format!("<config:config-item config:name=\"{key}\" config:type=\"{kind}\">{value}</config:config-item>")
-        };
-        let positions: String = pane_positions(styling.freeze, view)
-            .iter()
-            .map(|&(key, value)| item(key, "int", value))
-            .collect();
-        let _ = write!(
-            xml,
-            "<config:config-item-map-entry config:name=\"{}\">{}{}{}{}{}{}{}{}{}</config:config-item-map-entry>",
-            XmlSanitizer::escape(name),
-            item("CursorPositionX", "int", view.active.1),
-            item("CursorPositionY", "int", view.active.0),
-            item("HorizontalSplitMode", "short", if cols > 0 { 2 } else { 0 }),
-            item("VerticalSplitMode", "short", if rows > 0 { 2 } else { 0 }),
-            item("HorizontalSplitPosition", "int", cols),
-            item("VerticalSplitPosition", "int", rows),
-            positions,
-            item("ZoomType", "short", 0),
-            item("ZoomValue", "int", u32::from(view.zoom.unwrap_or(100))),
-        );
+    if !viewed.is_empty() {
+        xml.push_str("<config:config-item-set config:name=\"ooo:view-settings\"><config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry><config:config-item config:name=\"ViewId\" config:type=\"string\">view1</config:config-item><config:config-item-map-named config:name=\"Tables\">");
+        for (name, styling) in viewed {
+            let Freeze { rows, cols } = styling.freeze.unwrap_or(Freeze { rows: 0, cols: 0 });
+            let view = &styling.view;
+            let item = |key: &str, kind: &str, value: u32| {
+                format!("<config:config-item config:name=\"{key}\" config:type=\"{kind}\">{value}</config:config-item>")
+            };
+            let positions: String = pane_positions(styling.freeze, view)
+                .iter()
+                .map(|&(key, value)| item(key, "int", value))
+                .collect();
+            let _ = write!(
+                xml,
+                "<config:config-item-map-entry config:name=\"{}\">{}{}{}{}{}{}{}{}{}</config:config-item-map-entry>",
+                XmlSanitizer::escape(name),
+                item("CursorPositionX", "int", view.active.1),
+                item("CursorPositionY", "int", view.active.0),
+                item("HorizontalSplitMode", "short", if cols > 0 { 2 } else { 0 }),
+                item("VerticalSplitMode", "short", if rows > 0 { 2 } else { 0 }),
+                item("HorizontalSplitPosition", "int", cols),
+                item("VerticalSplitPosition", "int", rows),
+                positions,
+                item("ZoomType", "short", 0),
+                item("ZoomValue", "int", u32::from(view.zoom.unwrap_or(100))),
+            );
+        }
+        xml.push_str("</config:config-item-map-named></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set>");
     }
-    xml.push_str("</config:config-item-map-named></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set></office:settings></office:document-settings>");
+    xml.push_str(&config_xml);
+    xml.push_str("</office:settings></office:document-settings>");
     Some(xml)
 }
 

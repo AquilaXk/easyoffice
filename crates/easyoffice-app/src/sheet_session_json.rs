@@ -174,6 +174,7 @@ pub(crate) fn try_fast_sheet_session_borrowed(
         StrictJsonBorrow::get_field(&entries, "date1904"),
         Some(StrictJsonBorrow::Bool(true))
     ));
+    let _calc_options = crate::sheet_calc_options_json::enter_from_borrowed(&entries)?;
     match action {
         "open" => {
             let items = StrictJsonBorrow::get_field(&entries, "sheets")

@@ -770,6 +770,11 @@ fn encode_structured_with_thumbnail(
             // The values, displays and date filters of the workbook count from its own date system (PD-263).
             let _date_system =
                 easyoffice_sheet::enter_date_system(stylings.first().is_some_and(|st| st.date1904));
+            let _calc_options = crate::sheet_calc_options_json::enter_from_stylings(stylings);
+            let skip_save_recalc = stylings.first().is_some_and(|st| {
+                st.calc_options.mode == easyoffice_formats::CalcMode::Manual
+                    && !st.calc_options.calc_on_save
+            });
             // The cells an array filled are its formula's results: the engine gives them (and they come
             // back from `with_spilled_cells` and `add_spilled_cells` below), whatever text the page sent.
             let engine_sheets = without_spilled_cells(page_sheets, stylings);
@@ -777,13 +782,23 @@ fn encode_structured_with_thumbnail(
             match format {
                 DocumentFormat::Xlsx => {
                     warn_unsaved_pivot_fields(stylings, warnings);
-                    let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
+                    let (caches, spills) = if skip_save_recalc {
+                        (Vec::new(), Vec::new())
+                    } else {
+                        let (c, _, s) = evaluate_workbook(sheets, stylings, false)?;
+                        (c, s)
+                    };
                     let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
                     OoxmlCodec::pack_xlsx_multi_styled(&out_sheets, &caches, &out_stylings)
                 }
                 DocumentFormat::Ods => {
                     warn_unsaved_sheet_objects(stylings, "ODS", warnings);
-                    let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
+                    let (caches, spills) = if skip_save_recalc {
+                        (Vec::new(), Vec::new())
+                    } else {
+                        let (c, _, s) = evaluate_workbook(sheets, stylings, false)?;
+                        (c, s)
+                    };
                     let (out_sheets, out_stylings) = with_spilled_cells(sheets, stylings, &spills);
                     OdfCodec::pack_ods_multi_styled_with_cache(&out_sheets, &caches, &out_stylings)
                 }

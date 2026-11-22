@@ -8,6 +8,7 @@ mod array_class;
 mod array_eval;
 pub mod axis;
 mod byte_width;
+mod calc_options_runtime;
 mod cell_display;
 mod cell_kind;
 pub mod coercion;
@@ -100,6 +101,9 @@ pub use axis::{
     shift_boxes, shift_filter, shift_levels, shift_link_targets, shift_names, shift_outline,
     shift_row_heights, shift_runs, shift_table, shift_tables, shift_widths, Axis, AxisBudget,
     AxisEdit, AxisEditReport, EditKind, FilterShift, SheetChange,
+};
+pub use calc_options_runtime::{
+    enter_calc_options, in_iteration, in_manual_calc, CalcOptionsGuard,
 };
 pub use cell_display::{
     compile_for_page, format_for_page, format_for_page_typed, general_display, CellText,
@@ -651,6 +655,9 @@ impl SheetEngine {
         };
 
         if !ctx.memo.visit_insert(sid, coord) {
+            if let Some(seed) = crate::calc_options_runtime::iter_fallback(ctx, sid, coord) {
+                return CellEval::Owned(seed);
+            }
             ctx.circular = true;
             return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Cycle));
         }
@@ -679,6 +686,9 @@ impl SheetEngine {
 
         ctx.memo.visit_remove(sid, coord);
         ctx.memo.insert_at(sid, coord, result);
+        if let Some(touched) = ctx.iter_touched.as_mut() {
+            touched.push((sid, coord));
+        }
         CellEval::Memoized
     }
 

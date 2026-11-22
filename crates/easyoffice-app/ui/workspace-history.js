@@ -90,7 +90,8 @@
       await restoreWorkspaceSnapshot(sheetHistory.snapshotOf(record, notes), backendSyncRes, { keepProtections: true });
       // A merge that comes or goes changes where an array may be placed (PD-222): the calculation after the step places it again.
       const cellsChanged = record.sheets.some((entry) => entry.delta.n > 0 || entry.absent);
-      if (cellsChanged || record.parts.sheetLayout !== undefined) await controller.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      const calcRestoredAuto = record.parts.calcOptions !== undefined && !host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.isManual?.();
+      if (cellsChanged || record.parts.sheetLayout !== undefined || calcRestoredAuto) await controller.recalculateActiveSheetFormulas({ ...(calcRestoredAuto ? { force: "all" } : {}), updateFocusedDisplay: true });
       return true;
     }
 

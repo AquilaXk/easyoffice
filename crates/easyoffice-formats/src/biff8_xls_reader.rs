@@ -337,6 +337,10 @@ impl LegacyOle2Codec {
         if state.in_worksheet {
             state.links.before(opcode);
             state.layout.record(opcode, &data[rec.start..rec.end]);
+        } else if state.sheets.is_empty() {
+            state
+                .layout
+                .global_calc_record(opcode, &data[rec.start..rec.end]);
         }
         state
             .styles

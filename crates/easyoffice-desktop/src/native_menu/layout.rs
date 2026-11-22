@@ -64,6 +64,8 @@ pub const ALIGN: &str = "@align";
 pub const BORDER: &str = "@border";
 /// The 조건부 서식 submenu of the spreadsheet's 서식 menu ([`CF_LINES`]; its own submenus are [`CF_SUBMENUS`]).
 pub const CF: &str = "@cf";
+/// The 계산 옵션 submenu of the spreadsheet's 수식 menu ([`CALC_OPTIONS_LINES`]).
+pub const CALC_OPTIONS: &str = "@calc-options";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -73,6 +75,12 @@ pub const SHOW_ALL: &str = "@show-all";
 pub const MINIMIZE: &str = "@minimize";
 pub const CLOSE_WINDOW: &str = "@close-window";
 
+/// The lines of the 계산 옵션 submenu.
+pub const CALC_OPTIONS_LINES: [&str; 3] = [
+    "sheet:calc-auto",
+    "sheet:calc-auto-no-table",
+    "sheet:calc-manual",
+];
 /// The items of the 새 문서 submenu.
 pub const NEW_DOC_IDS: [&str; 8] = [
     "file:new-doc",
@@ -709,13 +717,17 @@ const TABLE_DOC: MenuSpec = menu(
         "table:validation",
     ],
 );
-/// The spreadsheet's 수식 menu: the defined names (수식 > 이름 > 이름 정의, 이름 관리 of the spreadsheet help).
+/// The spreadsheet's 수식 menu: defined names, calculation options, and manual/sheet recalculation.
 const FORMULA_SHEET: MenuSpec = menu(
     "수식",
     &[
         "sheet:name-define",
         "sheet:name-manage",
         "sheet:name-create",
+        S,
+        CALC_OPTIONS,
+        "sheet:calc-now",
+        "sheet:calc-sheet",
     ],
 );
 const DATA_SHEET: MenuSpec = menu(
@@ -944,6 +956,7 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 CF => ids.extend(cf_ids()),
+                CALC_OPTIONS => ids.extend(CALC_OPTIONS_LINES),
                 QUIT_ID => {}
                 line if line == SEPARATOR || line.starts_with('@') => {}
                 id => ids.push(id),

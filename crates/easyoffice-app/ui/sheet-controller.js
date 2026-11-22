@@ -355,8 +355,33 @@
       }
     }
 
+    function snapshotFormulaValues(store) {
+      const out = new Map();
+      for (const [sh, map] of Object.entries(store || {})) {
+        for (const [ref, entry] of Object.entries(map || {})) {
+          if (entry && isFormulaStr(entry.formula || "")) out.set(sh + "!" + ref, entry.value ?? "");
+        }
+      }
+      return out;
+    }
+
+    function restoreUnallowedFormulaValues(store, prevValues, allowTarget) {
+      for (const [key, prevVal] of prevValues) {
+        const bang = key.indexOf("!");
+        if (bang < 0) continue;
+        const sh = key.slice(0, bang), cell = key.slice(bang + 1);
+        if (allowTarget(sh, cell)) continue;
+        const entry = store[sh]?.[cell];
+        if (entry && isFormulaStr(entry.formula || "")) entry.value = prevVal;
+      }
+    }
+
     function recalculateActiveSheetFormulas(options = {}) {
       const forceFocusedDisplay = Boolean(options.updateFocusedDisplay);
+      const force = options.force || null;
+      const calcApi = host.__EASYOFFICE_SHEET_CALC_OPTIONS__;
+      const manualUnforced = calcApi?.isManual?.() === true && !force;
+      const edited = new Set([...(options.editedRefs || []), ...(options.editedRef ? [options.editedRef] : [])]);
       const run = async () => {
         const epoch = sheetSnapshotEpoch;
         const seq = latestSheetRecalcSeq + 1;
@@ -367,12 +392,26 @@
           await new Promise((resolve) => host.setTimeout(resolve, 0));
         }
         sheetDataStore[curSheet] = snapshotDomSheetCells();
+        if (manualUnforced) {
+          if (sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore)) calcApi.markPending(document);
+          if (edited.size === 0) {
+            chartUi?.syncLayer();
+            refreshFocusedSheetCellPendingSnapshot();
+            return;
+          }
+        }
+        const partialScope = force === "sheet" || manualUnforced;
+        const allowTarget = (sh, cell) =>
+          !partialScope || (sh === curSheet && (force === "sheet" || edited.has(cell)));
+        const prevValues = partialScope ? snapshotFormulaValues(sheetDataStore) : null;
         const liveEval = await evaluateLiveFormulaTargets(sheetDataStore, curSheet);
         if (epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) return;
         if (!liveEval) {
+          if (force === "all" || !calcApi?.isManual?.()) calcApi?.clearPending(document);
           chartUi?.syncLayer();
           return;
         }
+        if (prevValues) restoreUnallowedFormulaValues(sheetDataStore, prevValues, allowTarget);
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
         let updatedActiveSheet = false;
         // The cells an array fills changed: the window shows them again (PD-217).
@@ -381,6 +420,7 @@
           updatedActiveSheet = true;
         }
         formulaTargets.forEach((target, idx) => {
+          if (!allowTarget(target.sheet, target.cell)) return;
           const rawVal = extractEvaluatedTargetValue(
             rpcRes,
             targetValues,
@@ -432,7 +472,16 @@
           followCalculation(rpcRes, document.getElementById("status-command-feedback")) &&
           typeof host.setTimeout === "function"
         ) {
-          host.setTimeout(() => void recalculateActiveSheetFormulas(), 0);
+          host.setTimeout(() => void recalculateActiveSheetFormulas(options), 0);
+        } else if (rpcRes?.timedOut !== true) {
+          if (force === "all" || !calcApi?.isManual?.()) {
+            calcApi?.clearPending(document);
+          } else if (force === "sheet") {
+            const otherFormulas = Object.entries(sheetDataStore).some(
+              ([sh, m]) => sh !== curSheet && Object.values(m || {}).some((e) => e && isFormulaStr(e.formula || ""))
+            );
+            if (!otherFormulas) calcApi?.clearPending(document);
+          }
         }
         refreshFocusedSheetCellPendingSnapshot();
       };

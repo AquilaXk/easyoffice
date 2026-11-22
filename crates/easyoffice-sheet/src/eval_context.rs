@@ -164,6 +164,12 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) last_hyperlink_id: u32,
     /// Captured `HYPERLINK` targets (`1`-based index) when evaluating on click (`None` during normal recalc).
     pub(crate) link_targets: Option<Vec<Result<String, crate::FormulaError>>>,
+    /// Previous iteration values (`PD-309`) when circular iterative calculation is active.
+    pub(crate) iter_values: Option<MemoTable>,
+    /// Coordinates memoized during an iterative pass (`PD-309`).
+    pub(crate) iter_touched: Option<Vec<(u16, PackedCellCoordinate)>>,
+    pub(crate) iter_back_edge: bool,
+    pub(crate) iterated: bool,
 }
 
 impl<'a> EvalContext<'a> {
@@ -189,6 +195,10 @@ impl<'a> EvalContext<'a> {
             cell_overlay: None,
             last_hyperlink_id: 0,
             link_targets: None,
+            iter_values: None,
+            iter_touched: None,
+            iter_back_edge: false,
+            iterated: false,
         }
     }
 
@@ -214,6 +224,10 @@ impl<'a> EvalContext<'a> {
             cell_overlay: None,
             last_hyperlink_id: 0,
             link_targets: None,
+            iter_values: None,
+            iter_touched: None,
+            iter_back_edge: false,
+            iterated: false,
         }
     }
 

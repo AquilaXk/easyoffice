@@ -273,6 +273,11 @@ pub struct RecalcSession {
     released: crate::spill::Published,
     /// A dynamic circular reference was met in the pass in progress.
     dynamic_circular_pass: bool,
+    /// Iterative circular-reference calculation resolved at least one cycle (PD-309).
+    iterated: bool,
+    iterated_pass: bool,
+    /// Runtime calculation mode/iteration signature of the last pass (PD-309).
+    last_calc_sig: (bool, Option<(u16, u64)>),
     /// What formulas read through `OFFSET` and `INDIRECT` (see `dynamic`).
     dynamic: dynamic::DynamicReads,
 }
@@ -315,6 +320,9 @@ impl RecalcSession {
             rules: DetMap::default(),
             released: crate::spill::Published::default(),
             dynamic_circular_pass: false,
+            iterated: false,
+            iterated_pass: false,
+            last_calc_sig: crate::calc_options_runtime::runtime_calc_signature(),
             dynamic: dynamic::DynamicReads::default(),
             // The workbook is put in place after the loop, so its names are counted from the argument.
             name_bytes: workbook.name_bytes(),
@@ -437,10 +445,18 @@ impl RecalcSession {
     /// is recalculated by the next pass, until a pass touches nothing. The cells filled are
     /// reported in `changed` like formula cells.
     pub fn recalculate(&mut self) -> RecalcOutcome {
+        let calc_sig = crate::calc_options_runtime::runtime_calc_signature();
+        let calc_changed = calc_sig != self.last_calc_sig;
+        self.last_calc_sig = calc_sig;
+        self.iterated_pass = false;
         let dirty = &mut self.dirty;
         if self.resuming {
             // Only what the last pass left dirty (and what edits since touched).
-        } else if self.cyclic.is_empty() && !self.dynamic_circular {
+        } else if self.cyclic.is_empty()
+            && !self.dynamic_circular
+            && !self.iterated
+            && !calc_changed
+        {
             self.graph.for_each_volatile(|v| {
                 dirty.insert(v);
             });
@@ -628,6 +644,7 @@ impl RecalcSession {
             }
         }
         self.dynamic_circular = self.dynamic_circular_pass || ctx.circular;
+        self.iterated = self.iterated_pass;
         self.rng_state = ctx.rng_state;
         self.memo = ctx.memo;
         self.dirty.clear();
@@ -690,6 +707,21 @@ impl RecalcSession {
             crate::spill::MAX_SPILL_CELLS
                 .saturating_sub(sheets.iter().map(|s| s.spill.filled_count()).sum::<usize>()),
         );
+        if crate::in_iteration().is_some() {
+            let mut seed = MemoTable::new(primary_id);
+            for &((sheet, coord), ref old) in &before {
+                if let Some(val) = old {
+                    if !matches!(val, EvaluatedCellValue::Error(FormulaError::Cycle)) {
+                        seed.insert_at(
+                            sheets[usize::from(sheet)].resolved_sheet_id(),
+                            coord,
+                            val.clone(),
+                        );
+                    }
+                }
+            }
+            ctx.iter_values = Some(seed);
+        }
         let mut roots: Vec<PackedCellCoordinate> = Vec::new();
         let mut start = 0;
         while start < order.len() {
@@ -742,6 +774,7 @@ impl RecalcSession {
             });
         }
         self.dynamic_circular_pass = ctx.circular;
+        self.iterated_pass |= ctx.iterated;
         self.rng_state = ctx.rng_state;
         // What the formulas that finished read through OFFSET and INDIRECT: the next round recalculates them
         // when the cells a round fills are among it.

@@ -43,6 +43,7 @@ mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
 mod sheet_blockers_ipc;
+mod sheet_calc_options_json;
 mod sheet_chart_json;
 mod sheet_default_font_json;
 mod sheet_display;
@@ -420,6 +421,7 @@ impl EasyOfficeIpcRouter {
             StrictJsonValue::get_field(&entries, "date1904"),
             Some(StrictJsonValue::Bool(true))
         ));
+        let _calc_options = sheet_calc_options_json::enter_from_json(&entries)?;
         if let Some(action) = Self::optional_json_str(&entries, "sessionAction")? {
             return Self::handle_sheet_session_action(action, &entries, owner);
         }

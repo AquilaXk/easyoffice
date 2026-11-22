@@ -372,6 +372,9 @@
     { keys: "Alt+F5", action: "sheet-pivot-refresh", module: "SHEET", external: true },
     // Cell note insertion and editing is handled by sheet-note-ui.js on Shift+F2 (PD-256).
     { keys: "Shift+F2", action: "sheet-note-edit", module: "SHEET", external: true },
+    // Manual workbook/sheet recalculation is handled by sheet-structure.js on F9 and Shift+F9 (PD-309).
+    { keys: "F9", action: "sheet-calc-now", module: "SHEET", external: true },
+    { keys: "Shift+F9", action: "sheet-calc-sheet", module: "SHEET", external: true },
     // Slide module only. `module` gates the binding to the active module (every other module keeps
     // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
     // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over

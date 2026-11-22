@@ -112,6 +112,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "ribbon-catalog.js",
     "ribbon-history.js",
     "save-payload.js",
+    "sheet-calc-options.js",
     "sheet-cell-edit.js",
     "sheet-cell-write.js",
     "sheet-cf-presets.js",

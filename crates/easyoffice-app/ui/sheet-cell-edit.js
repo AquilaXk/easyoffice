@@ -129,7 +129,9 @@
     }
 
     async function recalcAfterCellEdit(td, editSheet, keepFocus) {
-      await recalculateActiveSheetFormulas();
+      await recalculateActiveSheetFormulas({
+        editedRef: isFormulaStr(td.dataset.formula || "") ? td.dataset.cell : null,
+      });
       if (keepFocus && document.activeElement === td && !sheetCellFocusState.get(td)?.userEdited) {
         syncSheetCellFocusBaseline(td, true);
         refreshFocusedSheetCellPendingSnapshot();

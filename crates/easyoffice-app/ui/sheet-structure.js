@@ -29,6 +29,7 @@
       sheetStoreHelpers,
       grid,
       getActiveSheetName,
+      getActiveModule,
       getSheetRowCount,
       getRange,
       getSelection,
@@ -455,6 +456,38 @@
       });
     }
 
+    function setCalcModeAction(targetMode, label) {
+      const calcApi = host.__EASYOFFICE_SHEET_CALC_OPTIONS__;
+      if (!calcApi) return Promise.resolve(false);
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        commitIfEditing();
+        if (calcApi.mode() === targetMode) {
+          calcApi.syncMenu(document);
+          say("계산 옵션: " + label);
+          return true;
+        }
+        const change = sheetHistory.begin({ parts: ["calcOptions"] });
+        calcApi.setMode(targetMode, document);
+        sheetHistory.commit(change);
+        if (targetMode !== "manual") {
+          await recalculateActiveSheetFormulas({ force: "all", updateFocusedDisplay: true });
+        }
+        say("계산 옵션: " + label);
+        return true;
+      });
+    }
+
+    function runCalcForce(scope, label) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        commitIfEditing();
+        await recalculateActiveSheetFormulas({ force: scope, updateFocusedDisplay: true });
+        say(label);
+        return true;
+      });
+    }
+
     const ACTIONS = {
       "row-insert-above": () => {
         const [first, last] = span("row");
@@ -514,6 +547,11 @@
       "filter-toggle": () => filter.run("filter-toggle"),
       "filter-reapply": () => filter.run("filter-reapply"),
       "filter-clear": () => filter.run("filter-clear"),
+      "calc-auto": () => setCalcModeAction("auto", "자동"),
+      "calc-auto-no-table": () => setCalcModeAction("autoNoTable", "데이터 테이블을 제외한 자동"),
+      "calc-manual": () => setCalcModeAction("manual", "수동"),
+      "calc-now": () => runCalcForce("all", "지금 계산 완료"),
+      "calc-sheet": () => runCalcForce("sheet", "시트 계산 완료: " + getActiveSheetName()),
     };
 
     function run(action) {
@@ -644,6 +682,17 @@
       void setHidden(axis, first, last, false);
     }
 
+    function onCalcKeydown(ev) {
+      if (ev.defaultPrevented || ev.__eoCalcKeyHandled) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.key !== "F9") return;
+      if ((typeof getActiveModule === "function" && getActiveModule() !== "SHEET") || document.getElementById("pane-sheet")?.hidden) return;
+      if (document.querySelector?.("dialog[open]")) return;
+      ev.__eoCalcKeyHandled = true;
+      ev.preventDefault?.();
+      ev.stopPropagation?.();
+      void run(ev.shiftKey ? "calc-sheet" : "calc-now");
+    }
+
     function bind() {
       filterUi.bind();
       sortUi.bind();
@@ -663,7 +712,10 @@
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
       viewport?.addEventListener("keydown", onKeydown);
+      viewport?.addEventListener("keydown", onCalcKeydown);
       viewport?.addEventListener("scroll", () => closeMenu(false));
+      document.addEventListener("keydown", onCalcKeydown);
+      if (typeof host.addEventListener === "function") host.addEventListener("keydown", onCalcKeydown);
       const el = menu();
       el?.addEventListener("keydown", onMenuKeydown);
       el?.addEventListener("contextmenu", (ev) => ev.preventDefault());
@@ -681,6 +733,7 @@
           void run(item.dataset.sheetAct);
         });
       }
+      host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.syncMenu(document);
     }
 
     function syncLayers() {
@@ -693,6 +746,7 @@
       protectUi.refreshMenu();
       filterUi.refreshMenu();
       noteUi?.refreshMenu();
+      host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.syncMenu(document);
       outlineUi.render();
       tableUi.sync();
       syncLayers();

@@ -53,9 +53,10 @@ impl OdfCodec {
             ) || styling
                 .default_col_width
                 .is_some_and(|w| !w.within_bounds())
+                || !styling.calc_options.within_bounds()
             {
                 return Err(ods_budget_error(
-                    "ODS 행 높이·기본 열 너비가 허용 범위를 초과했습니다.",
+                    "ODS 행 높이·기본 열 너비·계산 옵션이 허용 범위를 초과했습니다.",
                 ));
             }
             if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {

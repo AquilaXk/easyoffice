@@ -55,7 +55,7 @@ impl PackedDfsFrame {
 
 const _: () = assert!(std::mem::size_of::<PackedDfsFrame>() == 8);
 
-type Frame = PackedDfsFrame;
+pub(crate) type Frame = PackedDfsFrame;
 
 #[inline]
 pub(crate) fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
@@ -559,7 +559,9 @@ pub(crate) struct PlanRecorder {
 
 impl RecalcPlan {
     pub(crate) fn matches(&self, sheet: &SheetEngine) -> bool {
-        self.cells_len == sheet.cells.len() && self.name == sheet.name
+        crate::in_iteration().is_none()
+            && self.cells_len == sheet.cells.len()
+            && self.name == sheet.name
     }
 
     /// Runs the pre-pass for every populated cell (recording the order) on a fresh context.
@@ -598,15 +600,15 @@ impl RecalcPlan {
 }
 
 /// Sheets reached by the pass, addressed by a small slot number instead of a cloned name.
-struct SheetTable<'x> {
-    slots: Vec<&'x SheetEngine>,
+pub(crate) struct SheetTable<'x> {
+    pub(crate) slots: Vec<&'x SheetEngine>,
     /// AST sheet token text -> resolved slot, so a name is looked up in the workbook once per
     /// spelling instead of once per reference.
-    names: HashMap<&'x str, Option<u16>>,
+    pub(crate) names: HashMap<&'x str, Option<u16>>,
 }
 
 impl<'x> SheetTable<'x> {
-    fn get(&self, slot: u16) -> &'x SheetEngine {
+    pub(crate) fn get(&self, slot: u16) -> &'x SheetEngine {
         self.slots[usize::from(slot)]
     }
 
@@ -640,11 +642,11 @@ impl<'x> SheetTable<'x> {
     }
 }
 
-struct DepWalk<'a> {
-    memo: &'a MemoTable,
-    state: &'a DfsState,
-    stack: &'a mut Vec<Frame>,
-    cycle: &'a mut bool,
+pub(crate) struct DepWalk<'a> {
+    pub(crate) memo: &'a MemoTable,
+    pub(crate) state: &'a DfsState,
+    pub(crate) stack: &'a mut Vec<Frame>,
+    pub(crate) cycle: &'a mut bool,
 }
 
 impl DepWalk<'_> {
@@ -696,26 +698,31 @@ impl DepWalk<'_> {
 }
 
 /// The sheet whose formula is being scanned.
-struct ScanSite<'x> {
-    sheet: &'x SheetEngine,
-    slot: u16,
-    sid: u16,
+pub(crate) struct ScanSite<'x> {
+    pub(crate) sheet: &'x SheetEngine,
+    pub(crate) slot: u16,
+    pub(crate) sid: u16,
 }
 
 /// Reusable buffers and sheet resolution for the dependency scan.
-struct DepScanner<'x> {
-    root: &'x SheetEngine,
-    wb: Option<&'x WorkbookEngine>,
-    sheets: SheetTable<'x>,
-    expr_stack: Vec<&'x Expr>,
+pub(crate) struct DepScanner<'x> {
+    pub(crate) root: &'x SheetEngine,
+    pub(crate) wb: Option<&'x WorkbookEngine>,
+    pub(crate) sheets: SheetTable<'x>,
+    pub(crate) expr_stack: Vec<&'x Expr>,
     /// Shared trees (see [`Expr::Shared`]) already scanned for the formula at hand.
-    seen_shared: DetSet<*const crate::SharedExpr>,
-    scratch: Vec<PackedCellCoordinate>,
+    pub(crate) seen_shared: DetSet<*const crate::SharedExpr>,
+    pub(crate) scratch: Vec<PackedCellCoordinate>,
 }
 
 impl<'x> DepScanner<'x> {
     /// Visits every cell / range dependency of `ast` (explicit stack, no recursion).
-    fn scan_dependencies(&mut self, walk: &mut DepWalk<'_>, ast: &'x Expr, site: ScanSite<'x>) {
+    pub(crate) fn scan_dependencies(
+        &mut self,
+        walk: &mut DepWalk<'_>,
+        ast: &'x Expr,
+        site: ScanSite<'x>,
+    ) {
         let ScanSite { sheet, slot, sid } = site;
         self.expr_stack.clear();
         self.seen_shared.clear();
@@ -816,6 +823,14 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         mut rec: Option<&mut PlanRecorder>,
     ) {
+        if let Some((max_iters, max_delta)) = crate::in_iteration() {
+            if rec.is_none() {
+                crate::calc_options_runtime::pre_evaluate_iterative(
+                    self, roots, ctx, max_iters, max_delta,
+                );
+                return;
+            }
+        }
         let self_sid = self.resolved_sheet_id();
         let mut scan = DepScanner {
             root: self,

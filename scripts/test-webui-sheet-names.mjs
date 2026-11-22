@@ -71,7 +71,17 @@ const select = (t, ref) => t.cell(ref).focus();
 test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use the shared frame", async () => {
   const t = await open();
   const menu = [...t.document.querySelectorAll('.menu-item[data-menu="formula"] .md-label')].map((el) => el.textContent);
-  assert.deepEqual(menu, ["이름 정의…", "이름 관리…", "선택 영역에서 이름 만들기…"]);
+  assert.deepEqual(menu, [
+    "이름 정의…",
+    "이름 관리…",
+    "선택 영역에서 이름 만들기…",
+    "계산 옵션",
+    "자동",
+    "데이터 테이블을 제외한 자동",
+    "수동",
+    "지금 계산",
+    "시트 계산",
+  ]);
   for (const id of ["sheet-names-dialog", "sheet-name-edit-dialog"]) {
     const dialog = t.document.getElementById(id);
     assert.match(dialog.className, /tool-dialog/);

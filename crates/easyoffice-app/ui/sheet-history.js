@@ -24,6 +24,7 @@
     customTableStyles: () => host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getCustomStyles() ?? {},
     definedNames: () => host.__EASYOFFICE_SHEET_NAMES__.getAll(),
     sheetOrder: (ctx) => host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(ctx.sheetDataStore)),
+    calcOptions: () => host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.get() ?? null,
   };
   const ALL_PARTS = Object.keys(PART_READERS);
   const rawOf = (e) => e?.formula || e?.value || "";

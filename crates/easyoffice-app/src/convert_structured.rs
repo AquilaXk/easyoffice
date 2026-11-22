@@ -238,8 +238,14 @@ pub(crate) fn parse_structured_content(
         {
             first.workbook_theme = crate::sheet_table_json::parse_workbook_theme(theme)?;
         }
+        let calc_options = field(entries, "calcOptions")
+            .map(crate::sheet_calc_options_json::parse_calc_options)
+            .transpose()?;
         if let Some(first) = stylings.first_mut() {
             first.date1904 = opt_bool(entries, "date1904")?;
+            if let Some(co) = calc_options {
+                first.calc_options = co;
+            }
         }
         return Ok(Some((
             StructuredContent::Workbook(sheets, stylings),

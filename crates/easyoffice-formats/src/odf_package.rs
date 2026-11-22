@@ -649,6 +649,12 @@ impl OdfCodec {
     /// Gives each table the frozen pane and the view `settings.xml` names for its sheet.
     pub(crate) fn apply_views(stylings: &mut [(String, SheetStyling)], settings: Option<&str>) {
         let Some(settings) = settings else { return };
+        if let Some((_, first)) = stylings.first_mut() {
+            crate::sheet_styling::sheet_calc_options::read_ods_config_settings(
+                settings,
+                &mut first.calc_options,
+            );
+        }
         let mut views = read_views(settings);
         for (name, styling) in stylings {
             if let Some(table) = views.remove(name.as_str()) {

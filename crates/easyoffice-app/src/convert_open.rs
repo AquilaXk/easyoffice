@@ -726,6 +726,7 @@ fn decode_response_with_deck(
             }
             if let Some((_, first)) = styling.first() {
                 crate::sheet_default_font_json::write_default_font(&mut out, first);
+                crate::sheet_calc_options_json::write_calc_options(&mut out, first);
             }
             out.push('}');
             return Ok(out);

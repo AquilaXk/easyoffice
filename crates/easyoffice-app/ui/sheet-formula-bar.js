@@ -66,9 +66,28 @@
       if (prevCell?.style) nextCell.style = prevCell.style;
       if (prevCell?.link) nextCell.link = prevCell.link;
       candidateSheets[targetSheet][targetCellRef] = nextCell;
+      const prevValues = new Map();
+      const calcApi = host.__EASYOFFICE_SHEET_CALC_OPTIONS__;
+      if (calcApi?.isManual?.() === true) {
+        for (const [sh, map] of Object.entries(sheetDataStore || {})) {
+          for (const [ref, entry] of Object.entries(map || {})) {
+            if (entry && isFormulaStr(entry.formula || "")) prevValues.set(sh + "!" + ref, entry.value ?? "");
+          }
+        }
+      }
       const evaluated = await trackSheetAsyncWork(
         computeEvaluatedSheetStore(candidateSheets, targetSheet, { sheet: targetSheet, cell: targetCellRef })
       );
+      if (calcApi?.isManual?.() === true) {
+        const allowEdited = isFormulaStr(nextCell.formula || "");
+        for (const [key, prevVal] of prevValues) {
+          const bang = key.indexOf("!");
+          const sh = key.slice(0, bang), ref = key.slice(bang + 1);
+          if (allowEdited && sh === targetSheet && ref === targetCellRef) continue;
+          const entry = evaluated.sheets[sh]?.[ref];
+          if (entry && isFormulaStr(entry.formula || "")) entry.value = prevVal;
+        }
+      }
       const textChanged = parsed.editable.trim() !== prevRaw;
       return { epoch, targetSheet, targetCellRef, evaluated, textChanged };
     }
@@ -81,6 +100,15 @@
       restoreDomSheetCells(getActiveSheetName());
       refreshFocusedSheetCellPendingSnapshot();
       announceCircularReference(prep.evaluated.circular);
+      const calcApi = host.__EASYOFFICE_SHEET_CALC_OPTIONS__;
+      if (calcApi?.isManual?.() === true) {
+        const anyFormula = Object.values(prep.evaluated.sheets || {}).some((m) =>
+          Object.values(m || {}).some((e) => e && isFormulaStr(e.formula || ""))
+        );
+        if (anyFormula) calcApi.markPending(document);
+      } else {
+        calcApi?.clearPending(document);
+      }
       if (out && getActiveSheetName() === prep.targetSheet) {
         out.textContent = "결과 (" + prep.targetCellRef + "): " + prep.evaluated.extraValue;
         updateSheetSelectionAndAggregates(getActiveSheetCellRef() || prep.targetCellRef);

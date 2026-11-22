@@ -157,7 +157,7 @@
 
     // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
     // Every request names the workbook's date system when it is 1904, so the engine calculates, formats and filters in it (PD-264).
-    const date1904Field = () => (host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() ? { date1904: true } : {});
+    const date1904Field = () => ({ ...(host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() ? { date1904: true } : {}), ...host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.evalField?.() });
 
     function sessionCall(body) {
       return invokeIpc("evaluate_sheet", JSON.stringify({ ...body, ...date1904Field() }));

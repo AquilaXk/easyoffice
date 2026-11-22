@@ -63,6 +63,7 @@ impl OoxmlCodec {
                 || styling
                     .default_col_width
                     .is_some_and(|w| !w.within_bounds())
+                || !styling.calc_options.within_bounds()
                 || styling.filter.as_ref().is_some_and(|f| {
                     !f.within_bounds()
                         || f.range.row1 >= Self::MAX_XLSX_ROWS

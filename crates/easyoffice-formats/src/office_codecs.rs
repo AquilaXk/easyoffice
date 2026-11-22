@@ -144,7 +144,14 @@ fn build_workbook_parts(
     workbook_xml.push_str(&crate::sheet_styling::xlsx_names::defined_names_xml(
         &names, stylings,
     ));
-    workbook_xml.push_str("<calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
+    let calc_xml = crate::sheet_styling::sheet_calc_options::xlsx_calc_pr_xml(
+        stylings
+            .first()
+            .map(|st| &st.calc_options)
+            .unwrap_or(&crate::CalcOptions::default()),
+    );
+    workbook_xml.push_str(&calc_xml);
+    workbook_xml.push_str("</workbook>");
     let styles_rid = active_sheets.len() + 1;
     let sst_rid = active_sheets.len() + 2;
     wb_rels_xml.push_str(&format!(
@@ -748,6 +755,7 @@ impl OoxmlCodec {
         };
         // The differential formats are listed once for every reader of them (an empty entry takes an id).
         let date1904 = read_date1904(wb_xml);
+        let calc_options = crate::sheet_styling::sheet_calc_options::read_xlsx_calc_options(wb_xml);
         xf_styles.date1904 = date1904;
         let dxf_list = styles_xml.map(dxf_bodies).unwrap_or_default();
         let dxf_styles = parse_dxf_styles(&dxf_list, &colors.clone().unwrap_or_default());
@@ -902,6 +910,7 @@ impl OoxmlCodec {
                     crate::sheet_styling::xlsx_protect::read_workbook_protection(wb_xml)?;
                 first.workbook_theme = theme.filter(|&t| t != DEFAULT_THEME);
                 first.date1904 = date1904;
+                first.calc_options = calc_options;
             }
         }
         Ok((parsed_sheets, stylings))

@@ -4,14 +4,15 @@
 use std::collections::BTreeMap;
 
 use crate::ole2_codec::read_u16_le;
+use crate::sheet_styling::sheet_calc_options::{write_biff8_calc_records, Biff8CalcReader};
 use crate::sheet_styling::sheet_row_height::{
     default_row_centipt_for_font, kept_default_row_height,
 };
 use crate::sheet_styling::xlsx_layout::normalize_runs;
 use crate::sheet_styling::xlsx_styles::{px_to_xlsx_width, xlsx_width_to_px};
 use crate::{
-    DefaultColWidth, DefaultFont, RowHeight, SheetStyling, MAX_BIFF8_COL, MAX_BIFF8_ROW,
-    MAX_COL_WIDTH_CHARS, MIN_COL_WIDTH_CHARS,
+    CalcOptions, DefaultColWidth, DefaultFont, RowHeight, SheetStyling, MAX_BIFF8_COL,
+    MAX_BIFF8_ROW, MAX_COL_WIDTH_CHARS, MIN_COL_WIDTH_CHARS,
 };
 
 pub(crate) const BIFF8_DEFCOLWIDTH: u16 = 0x0055;
@@ -47,12 +48,14 @@ fn default_row_twips(styling: Option<&SheetStyling>, wb_font: Option<&DefaultFon
     }
 }
 
-/// Emits `DEFAULTROWHEIGHT`, `DEFCOLWIDTH`, `COLINFO`, and `STANDARDWIDTH` (if needed) before `DIMENSIONS`.
+/// Emits calculation settings, `DEFAULTROWHEIGHT`, `DEFCOLWIDTH`, `COLINFO`, and `STANDARDWIDTH` before `DIMENSIONS`.
 pub(crate) fn write_sheet_layout_globals(
     out: &mut Vec<u8>,
     styling: Option<&SheetStyling>,
     wb_font: Option<&DefaultFont>,
+    wb_calc: &CalcOptions,
 ) {
+    write_biff8_calc_records(out, wb_calc);
     let (flags, def_twips) = default_row_twips(styling, wb_font);
     out.extend_from_slice(&BIFF8_DEFAULTROWHEIGHT.to_le_bytes());
     out.extend_from_slice(&4u16.to_le_bytes());
@@ -244,6 +247,7 @@ pub(crate) struct RawXlsSheetLayout {
     col_infos: Vec<(u32, u32, u16, bool, bool)>,
     rows: BTreeMap<u32, (u32, bool, bool)>,
     hidden_bits: Box<[u64; BITSET_WORDS]>,
+    calc_options: Option<CalcOptions>,
 }
 
 impl Default for RawXlsSheetLayout {
@@ -255,6 +259,7 @@ impl Default for RawXlsSheetLayout {
             col_infos: Vec::new(),
             rows: BTreeMap::new(),
             hidden_bits: Box::new([0u64; BITSET_WORDS]),
+            calc_options: None,
         }
     }
 }
@@ -336,6 +341,9 @@ impl RawXlsSheetLayout {
                     .insert(row, RowHeight { centipt, custom });
             }
         }
+        if let Some(opts) = self.calc_options {
+            styling.calc_options = opts;
+        }
     }
 }
 
@@ -344,10 +352,18 @@ impl RawXlsSheetLayout {
 pub(crate) struct XlsLayoutReader {
     current: RawXlsSheetLayout,
     sheets: Vec<RawXlsSheetLayout>,
+    calc: Biff8CalcReader,
 }
 
 impl XlsLayoutReader {
+    pub(crate) fn global_calc_record(&mut self, opcode: u16, body: &[u8]) {
+        self.calc.global_record(opcode, body);
+    }
+
     pub(crate) fn record(&mut self, opcode: u16, body: &[u8]) {
+        if self.sheets.is_empty() {
+            self.calc.sheet0_record(opcode, body);
+        }
         match opcode {
             BIFF8_DEFAULTROWHEIGHT => {
                 if let (Ok(flags), Ok(twips)) = (read_u16_le(body, 0), read_u16_le(body, 2)) {
@@ -427,7 +443,11 @@ impl XlsLayoutReader {
         self.sheets.push(std::mem::take(&mut self.current));
     }
 
-    pub(crate) fn finish(self) -> Vec<RawXlsSheetLayout> {
+    pub(crate) fn finish(mut self) -> Vec<RawXlsSheetLayout> {
+        let calc = self.calc.finish();
+        if let Some(first) = self.sheets.first_mut() {
+            first.calc_options = Some(calc);
+        }
         self.sheets
     }
 }

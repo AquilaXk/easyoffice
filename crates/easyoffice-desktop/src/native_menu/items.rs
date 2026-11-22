@@ -663,6 +663,15 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:link-remove", "하이퍼링크 제거", "link-remove"),
     sa!("sheet:name-define", "이름 정의…", "name-define"),
     sa!("sheet:name-manage", "이름 관리…", "name-manage"),
+    sa!("sheet:calc-auto", "자동", "calc-auto"),
+    sa!(
+        "sheet:calc-auto-no-table",
+        "데이터 테이블을 제외한 자동",
+        "calc-auto-no-table"
+    ),
+    sa!("sheet:calc-manual", "수동", "calc-manual"),
+    sa!("sheet:calc-now", "지금 계산", "calc-now"),
+    sa!("sheet:calc-sheet", "시트 계산", "calc-sheet"),
     sa!("sheet:protect", "시트 보호", "sheet-protect"),
     sa!(
         "sheet:protect-workbook",

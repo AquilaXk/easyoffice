@@ -238,9 +238,10 @@ impl LegacyOle2Codec {
             ) || styling
                 .default_col_width
                 .is_some_and(|w| !w.within_bounds())
+                || !styling.calc_options.within_bounds()
             {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "BIFF8 행 높이·기본 열 너비가 허용 범위를 초과했습니다.".to_string(),
+                    "BIFF8 행 높이·기본 열 너비·계산 옵션이 허용 범위를 초과했습니다.".to_string(),
                 ));
             }
         }
@@ -331,6 +332,10 @@ impl LegacyOle2Codec {
         stream.extend_from_slice(&0u16.to_le_bytes());
 
         // 3. Worksheet Substreams
+        let wb_calc = stylings
+            .first()
+            .map(|st| st.calc_options)
+            .unwrap_or_default();
         for (sheet_idx, sheet) in sheets.iter().enumerate() {
             let worksheet_bof_pos = stream.len() as u32;
             write_u32_le(
@@ -349,7 +354,7 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&0x0006u32.to_le_bytes());
 
             let styling = stylings.get(sheet_idx);
-            write_sheet_layout_globals(&mut stream, styling, wb_default_font);
+            write_sheet_layout_globals(&mut stream, styling, wb_default_font, &wb_calc);
 
             let (max_r, max_c) = sheet
                 .cells

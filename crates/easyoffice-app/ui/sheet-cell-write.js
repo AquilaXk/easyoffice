@@ -110,7 +110,10 @@
         host.__EASYOFFICE_SHEET_TABLE_BAR__?.expandAfter(curSheet, edits.filter((e) => e.value !== "" || e.formula !== "").map((e) => e.ref));
         grid.renderWindow(false);
         refreshWindowFromModel();
-        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        await recalculateActiveSheetFormulas({
+          updateFocusedDisplay: true,
+          editedRefs: edits.filter((e) => host.__EASYOFFICE_SHEET_UTILS__.isFormulaStringJs(e.formula || "")).map((e) => e.ref),
+        });
         refreshChrome();
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = (label || "셀 편집") + ": " + (edits.length > 0 ? edits.length + "칸" : widthCols.length + "열");

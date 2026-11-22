@@ -32,6 +32,8 @@ pub(crate) mod ods_styles;
 pub(crate) mod ods_view;
 #[path = "sheet_anchor_edit.rs"]
 pub(crate) mod sheet_anchor_edit;
+#[path = "sheet_calc_options.rs"]
+pub(crate) mod sheet_calc_options;
 #[path = "sheet_chart.rs"]
 pub(crate) mod sheet_chart;
 #[path = "sheet_default_col_width.rs"]
@@ -124,6 +126,10 @@ pub(crate) mod xlsx_styles;
 pub(crate) mod xlsx_view;
 
 pub use sheet_anchor_edit::{AnchorCells, AnchorEdit};
+pub use sheet_calc_options::{
+    CalcMode, CalcOptions, DEFAULT_ITERATE_COUNT, DEFAULT_ITERATE_DELTA, MAX_ITERATE_COUNT,
+    MAX_ITERATE_DELTA,
+};
 pub use sheet_chart::*;
 pub use sheet_default_col_width::{
     default_col_px, DefaultColWidth, DEFAULT_COL_PX, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS,
@@ -551,6 +557,9 @@ pub struct SheetStyling {
     /// The workbook counts its dates from 1904-01-01 (XLSX `workbookPr date1904`, XLS `DATEMODE`, ODS `table:null-date`), not from
     /// 1899-12-30: a serial 1,462 lower for the same day (PD-263). Carried by the first sheet like `workbook_theme`.
     pub date1904: bool,
+    /// Workbook calculation mode, save/load recalculation flags, and iterative circular-reference settings (PD-309).
+    /// Carried by the first sheet like `date1904`.
+    pub calc_options: CalcOptions,
     /// The default font of the workbook (the Normal cell style) when it is not the standard one, Malgun Gothic 11 pt (PD-306).
     /// Its widest digit is the unit of the widths in characters. Every sheet of a workbook has the same value; the writer reads
     /// the first one's.
@@ -641,6 +650,7 @@ impl SheetStyling {
             && self.workbook_protect.is_none()
             && self.workbook_theme.is_none()
             && !self.date1904
+            && self.calc_options.is_default()
             && self.spills.is_empty()
             && self.links.is_empty()
             && self.tables.is_empty()

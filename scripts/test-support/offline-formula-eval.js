@@ -136,6 +136,7 @@
     const formula = workbook.formulaEntries[fullKey];
     if (formula !== undefined) {
       if (workbook.visiting.has(fullKey)) {
+        if (workbook.iterValues) return workbook.iterValues.get(fullKey) ?? valNum(0);
         workbook.circular = true;
         return valErr("#NUM!");
       }
@@ -668,6 +669,24 @@
     return impl(scalarArgs);
   }
 
+  function evalInfoIn(ec, _fn, args) {
+    if (args.length !== 1) return valErr("#VALUE!");
+    const v = ensureScalarIn(ec, evalAstIn(ec, args[0]));
+    if (v.kind === "error") return v;
+    const key = asciiUpperJs(formatFormulaValue(v));
+    if (key === "RECALC") {
+      return valText(ec.workbook?.calcOptions?.mode === "manual" ? "Manual" : "Automatic");
+    }
+    if (key === "NUMFILE") {
+      return valNum(Math.max(1, ec.workbook?.knownSheets?.length || 1));
+    }
+    if (key === "SYSTEM") return valText("mac");
+    if (["DIRECTORY", "ORIGIN", "OSVERSION", "RELEASE", "TIMEZONE", "TIMEZONES"].includes(key)) {
+      return valErr("#N/A");
+    }
+    return valErr("#VALUE!");
+  }
+
   // Functions that need their unevaluated argument nodes (lazy / reference semantics).
   const SPECIAL_FORM_HANDLERS = new Map([
     ["INDIRECT", (ec, _fn, args) => evalIndirectCallIn(ec, args)],
@@ -677,6 +696,7 @@
     ["COLUMN", evalRowColumnIn],
     ["ROWS", evalRowsColumnsIn],
     ["COLUMNS", evalRowsColumnsIn],
+    ["INFO", evalInfoIn],
   ]);
 
   function evalFuncCallIn(ec, node) {
@@ -834,16 +854,62 @@
       }
     }
 
-    return {
+    const workbook = {
       rawValues,
       cellTypes,
       formulaEntries,
       knownSheets,
+      calcOptions: doc.calcOptions && typeof doc.calcOptions === "object" ? doc.calcOptions : null,
+      iterValues: null,
       memo: new Map(),
       visiting: new Set(),
       depthTruncated: false,
       circular: false,
     };
+    if (workbook.calcOptions?.iterate === true) {
+      runIterativePassesJs(workbook);
+    }
+    return workbook;
+  }
+
+  function runIterativePassesJs(workbook) {
+    const opts = workbook.calcOptions;
+    const maxIters =
+      Number.isInteger(opts?.iterateCount) && opts.iterateCount >= 1 && opts.iterateCount <= 32767
+        ? opts.iterateCount
+        : 100;
+    const maxDelta =
+      typeof opts?.iterateDelta === "number" && Number.isFinite(opts.iterateDelta) && opts.iterateDelta >= 0 && opts.iterateDelta <= 1e100
+        ? opts.iterateDelta
+        : 0.001;
+    const keys = Object.keys(workbook.formulaEntries);
+    const iterValues = new Map();
+    for (const k of keys) iterValues.set(k, valNum(0));
+    workbook.iterValues = iterValues;
+    for (let pass = 0; pass < maxIters; pass += 1) {
+      let maxDiff = 0;
+      for (const fullKey of keys) {
+        const bang = fullKey.indexOf("!");
+        const shUpper = fullKey.slice(0, bang);
+        const ref = fullKey.slice(bang + 1);
+        workbook.memo.clear();
+        workbook.visiting.clear();
+        const prev = iterValues.get(fullKey);
+        const computed = evaluateFormulaTyped(workbook.formulaEntries[fullKey], workbook, shUpper, ref, 0);
+        iterValues.set(fullKey, computed);
+        if (prev?.kind === "number" && computed?.kind === "number") {
+          const diff = Math.abs(computed.num - prev.num);
+          if (diff > maxDiff) maxDiff = diff;
+        } else if (JSON.stringify(prev) !== JSON.stringify(computed)) {
+          maxDiff = Infinity;
+        }
+      }
+      if (maxDiff <= maxDelta) break;
+    }
+    workbook.memo.clear();
+    workbook.visiting.clear();
+    for (const [k, v] of iterValues) workbook.memo.set(k, v);
+    workbook.circular = false;
   }
 
   host.__EASYOFFICE_OFFLINE_FORMULA_EVAL__ = {

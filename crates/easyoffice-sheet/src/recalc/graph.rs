@@ -34,7 +34,7 @@ pub(crate) fn cell_key(sheet: u16, coord: PackedCellCoordinate) -> CellKey {
 const NARROW_MAX_WIDTH: u32 = 16;
 /// Functions whose result changes without any referenced cell changing, or whose references are
 /// computed at run time. Their cells are recomputed on every pass.
-const VOLATILE_FUNCTIONS: [&str; 8] = [
+const VOLATILE_FUNCTIONS: [&str; 9] = [
     "RAND",
     "RANDBETWEEN",
     "RANDARRAY",
@@ -44,6 +44,8 @@ const VOLATILE_FUNCTIONS: [&str; 8] = [
     "INDIRECT",
     // reads the source rows of a pivot table it does not name
     "GETPIVOTDATA",
+    // depends on runtime workbook calculation mode
+    "INFO",
 ];
 
 /// One reference a formula reads: a cell, or a rectangle (`r0 <= r1`, `c0 <= c1`).

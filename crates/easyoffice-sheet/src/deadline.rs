@@ -173,22 +173,37 @@ impl SheetEngine {
             ctx = ctx.with_time_limit(limit);
         }
         let mut results = HashMap::with_capacity(self.cells.len());
+        let all_coords;
         let built;
-        let plan = match self.plan.get().filter(|p| p.matches(self)) {
-            Some(plan) => {
-                plan.replay(self, &mut ctx);
-                plan
-            }
-            None => {
-                built = crate::dag::RecalcPlan::build(self, &mut ctx);
-                if !ctx.expired() {
-                    // Another thread may have stored a plan first; either one is valid.
-                    let _ = self.plan.set(built.clone());
-                }
-                &built
-            }
-        };
-        for &coord in &plan.coords {
+        let coords: &[PackedCellCoordinate] =
+            if let Some((max_iters, max_delta)) = crate::in_iteration() {
+                all_coords = self.cell_index().sorted_coords.clone();
+                crate::calc_options_runtime::pre_evaluate_iterative(
+                    self,
+                    &all_coords,
+                    &mut ctx,
+                    max_iters,
+                    max_delta,
+                );
+                &all_coords
+            } else {
+                let plan = match self.plan.get().filter(|p| p.matches(self)) {
+                    Some(plan) => {
+                        plan.replay(self, &mut ctx);
+                        plan
+                    }
+                    None => {
+                        built = crate::dag::RecalcPlan::build(self, &mut ctx);
+                        if !ctx.expired() {
+                            // Another thread may have stored a plan first; either one is valid.
+                            let _ = self.plan.set(built.clone());
+                        }
+                        &built
+                    }
+                };
+                &plan.coords
+            };
+        for &coord in coords {
             ctx.reset_steps();
             let value = if ctx.expired() {
                 None
@@ -246,7 +261,7 @@ impl WorkbookEngine {
             .and_then(|t| self.sheet(t.sheet))
             .map_or(0, SheetEngine::resolved_sheet_id);
         let mut ctx = EvalContext::with_workbook(self, primary_id).with_time_limit(limit);
-        if targets.len() > 1 {
+        if targets.len() > 1 || crate::in_iteration().is_some() {
             let mut roots_by_sheet: Vec<Vec<PackedCellCoordinate>> =
                 vec![Vec::new(); self.sheets().len()];
             for target in targets {

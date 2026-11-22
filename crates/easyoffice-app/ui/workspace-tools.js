@@ -116,6 +116,7 @@
         ...(theme ? { workbookTheme: theme } : {}),
         ...(host.__EASYOFFICE_SHEET_UTILS__.getDate1904() ? { date1904: true } : {}),
         ...host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.field(),
+        ...host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.saveField(),
       };
     }
 

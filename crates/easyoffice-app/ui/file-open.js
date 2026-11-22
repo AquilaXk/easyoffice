@@ -649,6 +649,8 @@
         // The font of the Normal style, the unit of the widths in characters (PD-306); none for the standard font.
         host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.set(res.defaultFont, res.defaultColPx);
         next.defaultFont = host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.get() ?? null;
+        host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.set(res.calcOptions, document);
+        next.calcOptions = host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.get() ?? null;
         // The displays the page cached belong to the previous workbook's date system.
         host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.clear?.();
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setTheme(res.workbookTheme ?? null);
