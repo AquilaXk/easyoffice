@@ -34,13 +34,13 @@
   const BINDING_KEYS = ["gutter", "binding"];
   const BINDING_KINDS = ["single", "duplex", "top"];
   const TOP_BINDING = 2;
-  // The new-document margins of a page without a setup: the editor's own padding (48px 56px).
-  const DEFAULT_SIDE = { top: 720, bottom: 720, left: 840, right: 840, header: 720, footer: 720 };
-  // The margin sets 여백 전환 goes through, in order: the reference editor's new-document margins, then narrow and wide ones
-  // (twips, the engine's form; the first is `RichPageMargins::HWP_DEFAULT`).
+  // The new-document margins of a page without a setup (`RichPageMargins::DOC_DEFAULT`).
+  const DEFAULT_SIDE = { top: 1701, bottom: 1440, left: 1440, right: 1440, header: 851, footer: 992 };
+  // The margin sets 여백 전환 goes through, in order: the new-document margins (`RichPageMargins::DOC_DEFAULT`),
+  // then narrow and wide ones (twips, the engine's form).
   const MARGIN_KEYS = ["top", "bottom", "header", "footer", "left", "right"];
   const MARGIN_PRESETS = [
-    { top: 1984, bottom: 1700, header: 1134, footer: 850, left: 1701, right: 1701 },
+    { top: 1701, bottom: 1440, header: 851, footer: 992, left: 1440, right: 1440 },
     { top: 1134, bottom: 1134, header: 567, footer: 567, left: 851, right: 851 },
     { top: 2551, bottom: 2268, header: 1417, footer: 1134, left: 2268, right: 2268 },
   ];
@@ -200,14 +200,18 @@
       };
       const { paper: name, landscape: turned } = core.paperOf(editor);
       const [short, long] = PAPER_TWIPS[name] ?? PAPER_TWIPS.A4;
+      const topPx = Number.parseFloat(cs?.paddingTop);
+      const isDefaultPad = !Number.isFinite(topPx) || Math.abs(topPx - 113.4) <= 0.1;
       const setup = {
         width: turned ? long : short, height: turned ? short : long,
-        left: pad("paddingLeft", DEFAULT_SIDE.left), right: pad("paddingRight", DEFAULT_SIDE.right),
-        top: pad("paddingTop", DEFAULT_SIDE.top), bottom: pad("paddingBottom", DEFAULT_SIDE.bottom),
-        header: 0, footer: 0,
+        left: isDefaultPad ? DEFAULT_SIDE.left : pad("paddingLeft", DEFAULT_SIDE.left),
+        right: isDefaultPad ? DEFAULT_SIDE.right : pad("paddingRight", DEFAULT_SIDE.right),
+        top: isDefaultPad ? DEFAULT_SIDE.top : pad("paddingTop", DEFAULT_SIDE.top),
+        bottom: isDefaultPad ? DEFAULT_SIDE.bottom : pad("paddingBottom", DEFAULT_SIDE.bottom),
+        header: DEFAULT_SIDE.header, footer: DEFAULT_SIDE.footer,
       };
       const frame = deps.getFrameMargins?.() ?? null;
-      Object.assign(setup, frame ? { top: frame.top, bottom: frame.bottom, header: frame.header, footer: frame.footer } : { header: setup.top, footer: setup.bottom });
+      Object.assign(setup, frame ? { top: frame.top, bottom: frame.bottom, header: frame.header, footer: frame.footer } : isDefaultPad ? {} : { header: setup.top, footer: setup.bottom });
       return setup;
     }
 

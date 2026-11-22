@@ -35,9 +35,14 @@ test("the 편집 용지 item opens the dialog with the paper and margins the pag
   assert.equal(h.field("height").value, "297.0");
   assert.equal(h.field("width").disabled, true, "a listed paper has a fixed size");
   assert.equal(h.field("portrait").checked, true);
-  // The editor's own padding (48px 56px) is the margin of a page without a setup.
-  assert.equal(h.field("left").value, "14.8");
-  assert.equal(h.field("top").value, "12.7");
+  // The editor's default padding (`DOC_DEFAULT`: top 30 mm, left/right 25.4 mm, bottom 25.4 mm,
+  // header 15 mm, footer 17.5 mm) is the margin of a page without an explicit setup.
+  assert.equal(h.field("left").value, "25.4");
+  assert.equal(h.field("right").value, "25.4");
+  assert.equal(h.field("top").value, "15.0");
+  assert.equal(h.field("header").value, "15.0");
+  assert.equal(h.field("bottom").value, "7.9");
+  assert.equal(h.field("footer").value, "17.5");
 });
 
 test("확인 applies the setup as one undo step: the editor's setup, padding and page size follow, undo brings the old ones back", async () => {
@@ -161,7 +166,7 @@ test("용지 방향 전환 turns the page and 여백 전환 goes through the mar
   assert.equal(h.core.parse(h.editor.dataset.eoPage).top, 2551, "then the wide one");
   h.userClick(studioItem(h.document, "layout-margins"));
   await flushAsyncTurns(4);
-  assert.equal(h.core.parse(h.editor.dataset.eoPage).top, 1984, "and round to the reference editor's new-document margins");
+  assert.equal(h.core.parse(h.editor.dataset.eoPage).top, 1701, "and round to the Korean word processor's new-document margins");
   h.userClick(studioItem(h.document, "studio-undo"));
   await flushAsyncTurns(4);
   assert.equal(h.core.parse(h.editor.dataset.eoPage).top, 2551, "undo takes back the last step only");

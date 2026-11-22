@@ -7,13 +7,15 @@ use std::collections::HashMap;
 
 use crate::code_pages::CodePage;
 use crate::decode_budget::DecodeBudget;
-use crate::rich_document::normalize_hex_color;
+use crate::rich_document::{normalize_hex_color, MAX_PAGE_MARGIN_TWIPS};
+use crate::rich_read_page_setup::fitting_setup;
 use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
 use crate::rich_table::RichTable;
 use crate::rich_writers::heading_half_points;
 use crate::rich_xml::{push_run, CharFmt};
 use crate::{
-    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichParagraph, RichRun, RichScript,
+    EasyOfficeError, RichAlignment, RichBinding, RichBindingKind, RichBlock, RichDocument,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
 };
 
 const MAX_GROUP_DEPTH: usize = 256;
@@ -93,6 +95,64 @@ struct ParaProps {
     slmult: bool,
 }
 
+#[derive(Default)]
+struct RtfPageSetup {
+    paper_w: Option<u32>,
+    paper_h: Option<u32>,
+    marg_l: Option<u32>,
+    marg_r: Option<u32>,
+    marg_t: Option<u32>,
+    marg_b: Option<u32>,
+    header_y: Option<u32>,
+    footer_y: Option<u32>,
+    gutter: u32,
+    facing: bool,
+}
+
+impl RtfPageSetup {
+    fn into_frame(self) -> RichPageFrame {
+        let paper = self
+            .paper_w
+            .zip(self.paper_h)
+            .filter(|(w, h)| {
+                *w > 0 && *h > 0 && *w <= MAX_PAGE_MARGIN_TWIPS && *h <= MAX_PAGE_MARGIN_TWIPS
+            })
+            .map(|(width, height)| RichPaper { width, height });
+        let margins = match (self.marg_t, self.marg_b, self.marg_l, self.marg_r) {
+            (Some(top), Some(bottom), Some(left), Some(right)) => Some(RichPageMargins {
+                top,
+                bottom,
+                header: self.header_y.unwrap_or(851),
+                footer: self.footer_y.unwrap_or(992),
+                left,
+                right,
+            })
+            .filter(|m| m.within_bounds()),
+            _ => None,
+        };
+        let binding = RichBinding {
+            kind: if self.facing {
+                RichBindingKind::Duplex
+            } else {
+                RichBindingKind::Single
+            },
+            gutter: self.gutter.min(MAX_PAGE_MARGIN_TWIPS),
+        };
+        let (margins, paper) = fitting_setup(margins, paper, binding);
+        let binding = if margins.is_some() || paper.is_some() {
+            binding
+        } else {
+            RichBinding::default()
+        };
+        RichPageFrame {
+            margins,
+            paper,
+            binding,
+            ..RichPageFrame::default()
+        }
+    }
+}
+
 struct Reader {
     stack: Vec<Group>,
     fonts: HashMap<i32, String>,
@@ -105,6 +165,7 @@ struct Reader {
     runs: Vec<RichRun>,
     para: ParaProps,
     blocks: Vec<RichBlock>,
+    page_setup: RtfPageSetup,
     in_row: bool,
     cell: String,
     row: Vec<String>,
@@ -186,6 +247,7 @@ impl Reader {
             list_first_task: HashMap::new(),
             ls_list: HashMap::new(),
             open_list: OpenList::default(),
+            page_setup: RtfPageSetup::default(),
             text_budget,
         }
     }
@@ -595,6 +657,18 @@ impl Reader {
                     self.para.heading = (n + 1) as u8;
                 }
             }
+            "paperw" => self.page_setup.paper_w = param.and_then(|v| u32::try_from(v).ok()),
+            "paperh" => self.page_setup.paper_h = param.and_then(|v| u32::try_from(v).ok()),
+            "margl" => self.page_setup.marg_l = param.and_then(|v| u32::try_from(v).ok()),
+            "margr" => self.page_setup.marg_r = param.and_then(|v| u32::try_from(v).ok()),
+            "margt" => self.page_setup.marg_t = param.and_then(|v| u32::try_from(v).ok()),
+            "margb" => self.page_setup.marg_b = param.and_then(|v| u32::try_from(v).ok()),
+            "headery" => self.page_setup.header_y = param.and_then(|v| u32::try_from(v).ok()),
+            "footery" => self.page_setup.footer_y = param.and_then(|v| u32::try_from(v).ok()),
+            "gutter" => {
+                self.page_setup.gutter = param.and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
+            }
+            "facingp" => self.page_setup.facing = on,
             _ => self.char_word(word, param, on),
         }
         Ok(())
@@ -897,7 +971,7 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     }
     Ok((
         RichDocument {
-            page_frame: Default::default(),
+            page_frame: reader.page_setup.into_frame(),
             title,
             blocks: reader.blocks,
             official_agency: None,

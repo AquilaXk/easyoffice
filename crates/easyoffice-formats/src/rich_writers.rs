@@ -30,7 +30,8 @@ pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
     docx_cols_xml, docx_frame_parts_and_refs, docx_page_margins, docx_paper, docx_settings,
-    DOCX_SETTINGS_PART,
+    DOCX_SETTINGS_PART, DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_FONT, DOC_DEFAULT_HALF_PT,
+    DOC_DEFAULT_LINE_240THS,
 };
 use crate::rich_run_writers::OdtTextKey;
 use crate::rich_table_writers::{push_docx_table, DocxTableContext};
@@ -57,14 +58,20 @@ pub(crate) fn heading_half_points(level: u8) -> u32 {
 const DOCX_NUMBERING_REL_ID: &str = "rIdNumbering";
 
 fn docx_styles_xml(has_toc: bool) -> String {
-    let mut xml = String::from(concat!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-        "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
-        "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:eastAsia=\"맑은 고딕\" w:cs=\"Calibri\"/>",
-        "<w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/><w:lang w:val=\"ko-KR\" w:eastAsia=\"ko-KR\"/></w:rPr></w:rPrDefault>",
-        "<w:pPrDefault><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>",
-        "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>"
-    ));
+    let mut xml = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+            "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+            "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:eastAsia=\"{f}\" w:cs=\"Times New Roman\"/>",
+            "<w:kern w:val=\"2\"/><w:sz w:val=\"{sz}\"/><w:szCs w:val=\"22\"/><w:lang w:val=\"en-US\" w:eastAsia=\"ko-KR\" w:bidi=\"ar-SA\"/></w:rPr></w:rPrDefault>",
+            "<w:pPrDefault><w:pPr><w:spacing w:after=\"{after}\" w:line=\"{line}\" w:lineRule=\"auto\"/><w:jc w:val=\"both\"/></w:pPr></w:pPrDefault></w:docDefaults>",
+            "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>"
+        ),
+        f = DOC_DEFAULT_FONT,
+        sz = DOC_DEFAULT_HALF_PT,
+        after = DOC_DEFAULT_AFTER_TWIPS,
+        line = DOC_DEFAULT_LINE_240THS,
+    );
     for level in 1..=6u8 {
         let size = heading_half_points(level);
         xml.push_str(&format!(
@@ -335,10 +342,8 @@ pub(crate) fn docx_rich_entries(
         doc.page_frame.even_odd_different,
         doc.track_changes,
     );
-    if let Some((_, rel, content_type)) = &settings {
-        frame.relationships.push_str(rel);
-        frame.content_types.push_str(content_type);
-    }
+    frame.relationships.push_str(&settings.1);
+    frame.content_types.push_str(&settings.2);
     let last_cols_xml = docx_cols_xml(
         last_para_cols,
         doc.page_frame.paper.as_ref(),
@@ -407,7 +412,7 @@ pub(crate) fn docx_rich_entries(
         entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
     }
     // The settings part holds fixed flags only, so it needs no scan.
-    entries.extend(settings.map(|(xml, _, _)| (DOCX_SETTINGS_PART.to_string(), xml.into_bytes())));
+    entries.push((DOCX_SETTINGS_PART.to_string(), settings.0.into_bytes()));
     entries.extend(note_parts.entries);
     entries.extend(frame_entries);
     entries.extend(media.into_entries());

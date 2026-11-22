@@ -107,11 +107,23 @@
   width: 794px;
   max-width: 794px;
   min-height: 1050px;
-  padding: 48px 56px;
+  padding: 113.4px 96px 96px;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  font-size: 10pt;
+  line-height: 1.08;
+  text-align: justify;
   background-color: var(--doc-paper);
   color: #111827;
   border-style: none;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.16));
+}
+#doc-editor > p:not(.manuscript-notice) {
+  margin: 0 0 8pt;
+}
+#doc-editor :is(p:not([data-eo-toc]), li, h1, h2, h3, h4, h5, h6),
+#eo-print-root .eo-print-doc-page :is(p:not([data-eo-toc]), li) {
+  white-space: pre-wrap;
+  tab-size: 53.33px;
 }
 #doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: var(--accent-light); font-size: 0.82em; }
 #doc-editor[data-show-ctrl-marks="true"] h1::after,
@@ -132,10 +144,10 @@
   /* Corner marks 4px outside the body area: the margins are the page's (`--pg-pad-*`, which a header or footer
      that needs more room raises, doc-pages.js); without a page layout they are the editor's padding. */
   background-position:
-    calc(var(--pg-pad-l, 56px) - 18px) calc(var(--pg-pad-t, 48px) - 4px), calc(var(--pg-pad-l, 56px) - 4px) calc(var(--pg-pad-t, 48px) - 18px),
-    calc(100% - var(--pg-pad-r, 56px) + 18px) calc(var(--pg-pad-t, 48px) - 4px), calc(100% - var(--pg-pad-r, 56px) + 4px) calc(var(--pg-pad-t, 48px) - 18px),
-    calc(var(--pg-pad-l, 56px) - 18px) calc(100% - var(--pg-pad-b, 48px) + 4px), calc(var(--pg-pad-l, 56px) - 4px) calc(100% - var(--pg-pad-b, 48px) + 18px),
-    calc(100% - var(--pg-pad-r, 56px) + 18px) calc(100% - var(--pg-pad-b, 48px) + 4px), calc(100% - var(--pg-pad-r, 56px) + 4px) calc(100% - var(--pg-pad-b, 48px) + 18px);
+    calc(var(--pg-pad-l, 96px) - 18px) calc(var(--pg-pad-t, 113.4px) - 4px), calc(var(--pg-pad-l, 96px) - 4px) calc(var(--pg-pad-t, 113.4px) - 18px),
+    calc(100% - var(--pg-pad-r, 96px) + 18px) calc(var(--pg-pad-t, 113.4px) - 4px), calc(100% - var(--pg-pad-r, 96px) + 4px) calc(var(--pg-pad-t, 113.4px) - 18px),
+    calc(var(--pg-pad-l, 96px) - 18px) calc(100% - var(--pg-pad-b, 96px) + 4px), calc(var(--pg-pad-l, 96px) - 4px) calc(100% - var(--pg-pad-b, 96px) + 18px),
+    calc(100% - var(--pg-pad-r, 96px) + 18px) calc(100% - var(--pg-pad-b, 96px) + 4px), calc(100% - var(--pg-pad-r, 96px) + 4px) calc(100% - var(--pg-pad-b, 96px) + 18px);
 }
 .eo-boxed-heading {
   display: flex;
@@ -423,8 +435,8 @@
    with their text, and doc-pages.js moves the body away (`--pg-hf-top`, `--pg-hf-bottom`). */
 .doc-page-hf {
   position: absolute;
-  left: var(--pg-pad-l, 56px);
-  right: var(--pg-pad-r, 56px);
+  left: var(--pg-pad-l, 96px);
+  right: var(--pg-pad-r, 96px);
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -454,8 +466,8 @@
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
-  left: var(--pg-pad-l, 56px);
-  width: calc(var(--pg-w, 794px) - var(--pg-pad-l, 56px) - var(--pg-pad-r, 56px));
+  left: var(--pg-pad-l, 96px);
+  width: calc(var(--pg-w, 794px) - var(--pg-pad-l, 96px) - var(--pg-pad-r, 96px));
   background: var(--doc-paper);
   font-size: 10pt;
   line-height: 1.4;

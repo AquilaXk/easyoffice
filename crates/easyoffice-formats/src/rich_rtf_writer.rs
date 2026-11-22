@@ -8,9 +8,14 @@
 use std::collections::HashMap;
 
 use crate::rich_document::{
-    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun, RichScript,
+    RichAlignment, RichBindingKind, RichBlock, RichDocument, RichListKind, RichPageMargins,
+    RichPaper, RichParagraph, RichRun, RichScript,
 };
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
+use crate::rich_page_frame::{
+    DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_HALF_PT, DOC_DEFAULT_LINE_240THS,
+    DOC_DEFAULT_TAB_STOP_TWIPS,
+};
 use crate::rich_rtf_table::rtf_table_lines;
 use crate::rich_run_writers::{has_extra_run_format, RtfRunTables};
 use crate::rich_writers::heading_half_points;
@@ -289,8 +294,8 @@ fn push_rtf_run(line: &mut String, run: &RichRun, tables: &RtfRunTables, base: &
 
 pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     let (notes, ordinals) = collect_note_ordinals(doc);
-    let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + notes.len() + 6);
-    lines.push("{\\rtf1\\ansi\\deff0".to_string());
+    let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + notes.len() + 10);
+    lines.push("{\\rtf1\\ansi\\ansicpg949\\deff0".to_string());
     lines.push(format!(
         "{{\\info{{\\title {}}}}}",
         RtfCodec::escape_rtf_text(&doc.display_title())
@@ -305,6 +310,12 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
             .filter(|r| !is_deleted_run(r)),
     );
     lines.extend(tables.header_lines());
+    lines.push(format!(
+        "{{\\*\\defchp \\fs{DOC_DEFAULT_HALF_PT}}}{{\\*\\defpap \\qj\\sa{DOC_DEFAULT_AFTER_TWIPS}\\sl{DOC_DEFAULT_LINE_240THS}\\slmult1}}"
+    ));
+    lines.push(format!(
+        "{{\\stylesheet{{\\s0\\qj\\sa{DOC_DEFAULT_AFTER_TWIPS}\\sl{DOC_DEFAULT_LINE_240THS}\\slmult1\\f0\\fs{DOC_DEFAULT_HALF_PT} Normal;}}}}"
+    ));
     let has_list = doc
         .blocks
         .iter()
@@ -312,6 +323,30 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     if has_list {
         lines.extend(list_table_lines());
     }
+    let paper = doc.page_frame.paper.unwrap_or(RichPaper::A4);
+    let m = doc
+        .page_frame
+        .margins
+        .unwrap_or(RichPageMargins::DOC_DEFAULT);
+    let orient = if paper.width > paper.height {
+        "\\lndscpsxn"
+    } else {
+        ""
+    };
+    let facing = if doc.page_frame.binding.kind == RichBindingKind::Duplex {
+        "\\facingp"
+    } else {
+        ""
+    };
+    let gutter = if doc.page_frame.binding.gutter > 0 {
+        format!("\\gutter{}", doc.page_frame.binding.gutter)
+    } else {
+        String::new()
+    };
+    lines.push(format!(
+        "\\paperw{}\\paperh{}{orient}\\margl{}\\margr{}\\margt{}\\margb{}\\headery{}\\footery{}{gutter}{facing}\\deftab{DOC_DEFAULT_TAB_STOP_TWIPS}",
+        paper.width, paper.height, m.left, m.right, m.top, m.bottom, m.header, m.footer
+    ));
     let mut table_idx = 0usize;
     for block in &doc.blocks {
         match block {

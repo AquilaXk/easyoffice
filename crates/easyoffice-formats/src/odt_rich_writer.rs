@@ -201,12 +201,25 @@ pub(crate) fn odt_rich_entries(
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    let has_frame = !page.is_empty() || page.margins.is_some() || page.paper.is_some();
     let mut listing = media.listing();
-    if has_frame {
-        listing.insert(0, ("styles.xml".to_string(), "text/xml"));
-    }
+    listing.insert(0, ("styles.xml".to_string(), "text/xml"));
     let manifest = OdfCodec::build_manifest_with_media(OdfCodec::MIMETYPE_ODT, &listing);
+    let (layout, master) = odt_master_page(OdtMasterInput {
+        header: header_xml.as_deref(),
+        footer: footer_xml.as_deref(),
+        first_header: first_hdr_xml.as_deref(),
+        first_footer: first_ftr_xml.as_deref(),
+        even_header: even_hdr_xml.as_deref(),
+        even_footer: even_ftr_xml.as_deref(),
+        first_page_different: page.first_page_different,
+        even_odd_different: page.even_odd_different,
+        margins: page.margins.as_ref(),
+        paper: page.paper.as_ref(),
+        binding: page.binding,
+        columns: None,
+    });
+    let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
+    XmlSanitizer::validate_safe_xml(&styles_xml)?;
     let mut entries = vec![
         (
             "mimetype".to_string(),
@@ -214,26 +227,8 @@ pub(crate) fn odt_rich_entries(
         ),
         ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
         ("content.xml".to_string(), content.into_bytes()),
+        ("styles.xml".to_string(), styles_xml.into_bytes()),
     ];
-    if has_frame {
-        let (layout, master) = odt_master_page(OdtMasterInput {
-            header: header_xml.as_deref(),
-            footer: footer_xml.as_deref(),
-            first_header: first_hdr_xml.as_deref(),
-            first_footer: first_ftr_xml.as_deref(),
-            even_header: even_hdr_xml.as_deref(),
-            even_footer: even_ftr_xml.as_deref(),
-            first_page_different: page.first_page_different,
-            even_odd_different: page.even_odd_different,
-            margins: page.margins.as_ref(),
-            paper: page.paper.as_ref(),
-            binding: page.binding,
-            columns: None,
-        });
-        let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
-        XmlSanitizer::validate_safe_xml(&styles_xml)?;
-        entries.push(("styles.xml".to_string(), styles_xml.into_bytes()));
-    }
     entries.extend(media.into_entries());
     Ok(entries)
 }

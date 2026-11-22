@@ -3,6 +3,7 @@
 //! the target syntax; none is ever parsed as markup.
 
 use crate::rich_document::hex_to_highlight_name;
+use crate::rich_page_frame::DOC_DEFAULT_FONT;
 use crate::{RichRun, RichScript, RtfCodec, XmlSanitizer};
 
 // ---------------------------------------------------------------- DOCX
@@ -140,17 +141,15 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
     xml
 }
 
-/// `<office:font-face-decls>` declaring every distinct font used by the text styles.
+/// `<office:font-face-decls>` declaring the default document font and every distinct run font.
 pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey]) -> String {
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    let mut fonts: Vec<&str> = Vec::new();
+    let mut seen: std::collections::HashSet<&str> =
+        std::collections::HashSet::from([DOC_DEFAULT_FONT]);
+    let mut fonts: Vec<&str> = vec![DOC_DEFAULT_FONT];
     for font in keys.iter().filter_map(|k| k.2.as_deref()) {
         if seen.insert(font) {
             fonts.push(font);
         }
-    }
-    if fonts.is_empty() {
-        return String::new();
     }
     let mut xml = String::from("<office:font-face-decls>");
     for font in fonts {
@@ -199,21 +198,22 @@ impl RtfRunTables {
         t
     }
 
-    /// `{\fonttbl…}` and `{\colortbl;…}` header lines (none when no run needs them).
+    /// `{\fonttbl…}` (always declaring `\f0` default font) and optional `{\colortbl;…}` header lines.
     pub(crate) fn header_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
-        if !self.fonts.is_empty() {
-            let mut line = String::from("{\\fonttbl{\\f0\\fnil Calibri;}");
-            for (i, font) in self.fonts.iter().enumerate() {
-                line.push_str(&format!(
-                    "{{\\f{}\\fnil {};}}",
-                    i + 1,
-                    RtfCodec::escape_rtf_text(font)
-                ));
-            }
-            line.push('}');
-            lines.push(line);
+        let mut font_line = format!(
+            "{{\\fonttbl{{\\f0\\fnil\\fcharset129 {};}}",
+            RtfCodec::escape_rtf_text(DOC_DEFAULT_FONT)
+        );
+        for (i, font) in self.fonts.iter().enumerate() {
+            font_line.push_str(&format!(
+                "{{\\f{}\\fnil {};}}",
+                i + 1,
+                RtfCodec::escape_rtf_text(font)
+            ));
         }
+        font_line.push('}');
+        lines.push(font_line);
         if !self.colors.is_empty() {
             let mut line = String::from("{\\colortbl;");
             for hex in &self.colors {

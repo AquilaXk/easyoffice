@@ -201,7 +201,7 @@ test("the size box shows a blank mixed state across several sizes and the value 
   h.selection.addRange(rangeOf(para.childNodes[0], 0, para.childNodes[0], 2));
   h.document.dispatchEvent({ type: "selectionchange" });
   await flushAsyncTurns(10);
-  assert.equal(sizeInput.value, "11.0", "text without a run size shows the document default");
+  assert.equal(sizeInput.value, "10.0", "text without a run size shows the document default");
 });
 
 test("bold state is mixed when only part of the selection is bold and toggling bolds everything", async () => {

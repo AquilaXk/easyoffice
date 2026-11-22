@@ -166,13 +166,17 @@ fn hwpx_keeps_header_and_footer_as_controls_of_the_first_paragraph() {
 fn a_document_without_a_frame_writes_no_header_parts() {
     let mut doc = sample();
     doc.page_frame = RichPageFrame::default();
-    for (format, name) in [
-        (DocumentFormat::Docx, "word/header1.xml"),
-        (DocumentFormat::Odt, "styles.xml"),
-    ] {
-        let bytes = UniversalFormatConverter::encode_rich(&doc, format, None).expect("encode");
-        assert!(entries(&bytes).iter().all(|(p, _)| p != name), "{name}");
-    }
+    let docx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None)
+        .expect("encode docx");
+    assert!(entries(&docx)
+        .iter()
+        .all(|(p, _)| p != "word/header1.xml" && p != "word/footer1.xml"));
+    let odt =
+        UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Odt, None).expect("encode odt");
+    let odt_parts = entries(&odt);
+    let styles = part(&odt_parts, "styles.xml");
+    assert!(!styles.contains("<style:header>"));
+    assert!(!styles.contains("<style:footer>"));
 }
 
 // ---- reading files other programs wrote
@@ -501,6 +505,7 @@ fn a_frame_without_margins_writes_the_format_defaults_and_reads_back_a_value_of_
     let mut doc = sample();
     doc.page_frame.margins = None;
     for (format, name) in [
+        (DocumentFormat::Docx, "d.docx"),
         (DocumentFormat::Odt, "d.odt"),
         (DocumentFormat::Hwpx, "d.hwpx"),
     ] {
@@ -511,9 +516,10 @@ fn a_frame_without_margins_writes_the_format_defaults_and_reads_back_a_value_of_
             margins.top >= margins.header && margins.bottom >= margins.footer,
             "{name}: {margins:?}"
         );
+        if format != DocumentFormat::Hwpx {
+            assert_eq!(margins, RichPageMargins::DOC_DEFAULT, "{name}");
+        }
     }
-    let docx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
-    assert_eq!(decode(&docx, "d.docx").0.page_frame.margins, None);
 }
 
 #[test]

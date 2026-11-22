@@ -11,7 +11,7 @@
   const ALL_KINDS = ["header", "footer", "firstHeader", "firstFooter", "evenHeader", "evenFooter"];
   const ZONES = ["left", "center", "right"];
   const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
-  const DEFAULT_MARGINS = { top: 1984, bottom: 1700, header: 1134, footer: 850 };
+  const DEFAULT_MARGINS = { top: 1701, bottom: 1440, header: 851, footer: 992 };
   const PX_PER_TWIP = 1 / 15;
   const GROWN_GAP_PX = 6;
   const PAGE_MARGIN_AT = { top: 4, bottom: 5, header: 6, footer: 7 };

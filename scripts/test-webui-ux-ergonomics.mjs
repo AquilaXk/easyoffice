@@ -394,20 +394,20 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(docEditor.querySelector(".eo-run").dataset.eoFont, "함초롬바탕");
 
   userClick(document.getElementById("btn-size-up"));
-  assert.equal(document.getElementById("doc-font-size-input").value, "12.0");
-  assert.equal(document.getElementById("doc-style-size-badge").textContent, "12.0 pt");
-  assert.equal(docEditor.style.fontSize, "", "size applies to the selection only, not the whole document");
-  assert.equal(docEditor.querySelector(".eo-run").dataset.eoSize, "24");
-  userClick(document.getElementById("btn-size-down"));
   assert.equal(document.getElementById("doc-font-size-input").value, "11.0");
+  assert.equal(document.getElementById("doc-style-size-badge").textContent, "11.0 pt");
+  assert.equal(docEditor.style.fontSize, "", "size applies to the selection only, not the whole document");
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoSize, "22");
+  userClick(document.getElementById("btn-size-down"));
+  assert.equal(document.getElementById("doc-font-size-input").value, "10.0");
 
   userClick(document.getElementById("btn-ls-up"));
-  assert.equal(document.getElementById("doc-linespacing-select").value, "180");
+  assert.equal(document.getElementById("doc-linespacing-select").value, "115");
   const selectedBlock = docEditor.querySelector(".eo-h-title").closest("h1");
-  assert.equal(selectedBlock.style.lineHeight, "1.80", "line spacing is set on the selected paragraph");
+  assert.equal(selectedBlock.style.lineHeight, "1.15", "line spacing is set on the selected paragraph");
   assert.equal(docEditor.style.lineHeight, "");
   userClick(document.getElementById("btn-ls-down"));
-  assert.equal(document.getElementById("doc-linespacing-select").value, "160");
+  assert.equal(document.getElementById("doc-linespacing-select").value, "108");
 
   userClick(document.getElementById("btn-align-distribute"));
   assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);
@@ -459,7 +459,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   switchModule(document, "DOC");
   await flushAsyncTurns();
   assert.equal(styleSelect.value, "바탕글", "without a selection the box shows the document default");
-  assert.equal(document.getElementById("doc-style-font-badge").textContent, "휴먼명조", "the font box shows the document default until a selection carries a run font");
+  assert.equal(document.getElementById("doc-style-font-badge").textContent, "맑은 고딕", "the font box shows the document default until a selection carries a run font");
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), true);

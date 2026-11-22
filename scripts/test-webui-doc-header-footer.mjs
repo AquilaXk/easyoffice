@@ -141,7 +141,7 @@ test("the footer command is a document command: the other windows have neither t
   }
 });
 
-test("the page setup places the areas and sets how far the body keeps away; without one the reference editor's defaults apply", async () => {
+test("the page setup places the areas and sets how far the body keeps away; without one the default margins apply", async () => {
   const { document, editor, host } = await openDoc("w-hf-geometry");
   const frame = host.__EASYOFFICE_DOC_PAGE_FRAME__;
   const layer = document.createElement("footer");
@@ -157,10 +157,10 @@ test("the page setup places the areas and sets how far the body keeps away; with
   header.innerHTML = "<p>머리</p>";
   frame.paint();
   const get = (name) => editor.style.getPropertyValue(name);
-  // Defaults: header 20 mm from the top, body at 35 mm (1134 and 1984 twips, 15 twips to the pixel).
-  assert.equal(get("--hf-hd"), "75.6px");
+  // Defaults (`DOC_DEFAULT`): header 15 mm from the top, body at 30 mm (851 and 1701 twips, 15 twips to the pixel).
+  assert.equal(get("--hf-hd"), "56.73px");
   assert.equal(get("--hf-band-h"), "56.67px");
-  assert.equal(get("--pg-hf-top"), "132.27px");
+  assert.equal(get("--pg-hf-top"), "113.4px");
   assert.equal(get("--pg-hf-bottom"), "", "no footer, no footer room");
   editor.dataset.eoPage = "11906,16838,1701,1701,2000,1800,1000,700";
   const footer = document.createElement("section");

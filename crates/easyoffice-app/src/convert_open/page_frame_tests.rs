@@ -61,8 +61,12 @@ fn a_document_without_a_frame_answers_without_header_and_footer_keys() {
         &request(Some("decode"), "없음.docx", &bytes, ""),
     )
     .unwrap();
-    assert!(!json.contains("\"header\""), "{json}");
-    assert!(!json.contains("\"footer\""), "{json}");
+    assert!(!json.contains("\"header\":["), "{json}");
+    assert!(!json.contains("\"footer\":["), "{json}");
+    assert!(
+        json.contains("\"margins\":{\"top\":1701,\"bottom\":1440,\"header\":851,\"footer\":992,\"left\":1440,\"right\":1440}"),
+        "{json}"
+    );
 }
 
 #[test]

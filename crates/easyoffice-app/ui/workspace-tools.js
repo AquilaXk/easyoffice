@@ -4,8 +4,8 @@
   const { restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
   const savePayload = host.__EASYOFFICE_SAVE_PAYLOAD__;
   const desktopBridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
-  const LS_STEPS = [100, 130, 160, 180, 200, 300];
-  const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
+  const LS_STEPS = [100, 108, 115, 130, 160, 180, 200, 300];
+  const LS_STEPS_REV = [300, 200, 180, 160, 130, 115, 108, 100];
   const STUDIO_QUICK_REDIRECT = {
     palette: "btn-command-palette",
     "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
@@ -803,7 +803,7 @@
         input.type = "text";
         input.className = "sb-select sb-ls-select";
         input.setAttribute("aria-label", "줄 간격 직접 입력");
-        input.value = lsSelect.value || "160";
+        input.value = lsSelect.value || "108";
         hostEl.hidden = true;
         hostEl.parentElement.insertBefore(input, hostEl);
         input.focus?.();
@@ -832,11 +832,11 @@
       lsSelect?.addEventListener("change", () => applyStudioLineSpacing(Number.parseInt(lsSelect.value, 10)));
       bindLineSpacingDoubleClick(editor, lsSelect);
       document.getElementById("btn-ls-up")?.addEventListener("click", () => {
-        const cur = Number.parseInt(lsSelect?.value || "160", 10) || 160;
+        const cur = Number.parseInt(lsSelect?.value || "108", 10) || 108;
         applyStudioLineSpacing(LS_STEPS.find((s) => s > cur) || 300);
       });
       document.getElementById("btn-ls-down")?.addEventListener("click", () => {
-        const cur = Number.parseInt(lsSelect?.value || "160", 10) || 160;
+        const cur = Number.parseInt(lsSelect?.value || "108", 10) || 108;
         applyStudioLineSpacing(LS_STEPS_REV.find((s) => s < cur) || 100);
       });
     }

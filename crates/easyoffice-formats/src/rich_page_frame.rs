@@ -8,6 +8,14 @@ use crate::rich_document::{
 };
 use crate::rich_run_writers::docx_run_properties;
 
+pub(crate) const DOC_DEFAULT_FONT: &str = "맑은 고딕";
+pub(crate) const DOC_DEFAULT_HALF_PT: u16 = 20;
+pub(crate) const DOC_DEFAULT_LINE_240THS: u32 = 259;
+pub(crate) const DOC_DEFAULT_LINE_PERCENT: u16 = 108;
+pub(crate) const DOC_DEFAULT_AFTER_TWIPS: u32 = 160;
+pub(crate) const DOC_DEFAULT_TAB_STOP_TWIPS: u32 = 800;
+pub(crate) const DOC_DEFAULT_COL_SPACE_TWIPS: u32 = 425;
+
 pub(crate) const DOCX_HEADER_PART: &str = "word/header1.xml";
 pub(crate) const DOCX_FOOTER_PART: &str = "word/footer1.xml";
 pub(crate) const DOCX_HEADER_REL_ID: &str = "rIdHeader1";
@@ -63,24 +71,23 @@ pub(crate) fn docx_paper(paper: Option<&RichPaper>) -> String {
     )
 }
 
-/// `w:pgMar` for the section properties; empty without margins (the reader's own default applies).
+/// `w:pgMar` for the section properties (`DOC_DEFAULT` when the document sets none).
 pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>, binding: RichBinding) -> String {
-    margins.map_or_else(String::new, |m| {
-        format!(
-            "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"{}\"/>",
-            m.top, m.right, m.bottom, m.left, m.header, m.footer, binding.gutter
-        )
-    })
+    let m = margins.copied().unwrap_or(RichPageMargins::DOC_DEFAULT);
+    format!(
+        "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"{}\"/>",
+        m.top, m.right, m.bottom, m.left, m.header, m.footer, binding.gutter
+    )
 }
 
-/// `w:cols` for the section properties when `columns` has more than one column; empty otherwise.
+/// `w:cols` for the section properties; single-column uses the default column gap (`425` twips).
 pub(crate) fn docx_cols_xml(
     columns: Option<RichColumns>,
     paper: Option<&RichPaper>,
     margins: Option<&RichPageMargins>,
 ) -> String {
     let Some(cols) = columns.filter(|c| c.count > 1) else {
-        return String::new();
+        return format!("<w:cols w:space=\"{DOC_DEFAULT_COL_SPACE_TWIPS}\"/>");
     };
     let count = cols.count.min(16);
     let gap = cols.gap_twips;
@@ -113,29 +120,28 @@ pub(crate) const DOCX_SETTINGS_REL_ID: &str = "rIdSettings1";
 const DOCX_SETTINGS_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
 
-/// `word/settings.xml` for a binding, even/odd header, or tracked-changes setting
-/// (`w:evenAndOddHeaders`, `w:mirrorMargins`, `w:gutterAtTop`, `w:trackRevisions`), with the
-/// relationship and content-type override; `None` when none apply.
+/// `word/settings.xml` carrying binding/header/revision flags and the default tab stop (`800`
+/// twips), in `CT_Settings` schema order, together with its relationship and content-type override.
 pub(crate) fn docx_settings(
     binding: RichBinding,
     even_odd_different: bool,
     track_changes: bool,
-) -> Option<(String, String, String)> {
+) -> (String, String, String) {
     let mut flags = String::new();
-    if even_odd_different {
-        flags.push_str("<w:evenAndOddHeaders/>");
-    }
-    if track_changes {
-        flags.push_str("<w:trackRevisions/>");
-    }
     match binding.kind {
         RichBindingKind::Single => {}
         RichBindingKind::Duplex => flags.push_str("<w:mirrorMargins/>"),
         RichBindingKind::Top => flags.push_str("<w:gutterAtTop/>"),
     }
-    if flags.is_empty() {
-        return None;
+    if track_changes {
+        flags.push_str("<w:trackRevisions/>");
     }
+    if even_odd_different {
+        flags.push_str("<w:evenAndOddHeaders/>");
+    }
+    flags.push_str(&format!(
+        "<w:defaultTabStop w:val=\"{DOC_DEFAULT_TAB_STOP_TWIPS}\"/>"
+    ));
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flags}</w:settings>"
     );
@@ -145,7 +151,7 @@ pub(crate) fn docx_settings(
     let content_type = format!(
         "<Override PartName=\"/{DOCX_SETTINGS_PART}\" ContentType=\"{DOCX_SETTINGS_CONTENT_TYPE}\"/>"
     );
-    Some((xml, rel, content_type))
+    (xml, rel, content_type)
 }
 
 /// Splits `2..=3` strictly left-to-right ordered paragraphs (`Left`/`None` < `Center` < `Right`)
@@ -405,14 +411,7 @@ pub(crate) struct OdtMasterInput<'a> {
 /// The page layout and master page that give an ODT its page setup, columns, header and footer:
 /// `(page layout, master styles)`.
 pub(crate) fn odt_master_page(inp: OdtMasterInput<'_>) -> (String, String) {
-    let m = inp.margins.copied().unwrap_or(RichPageMargins {
-        top: 1191,
-        bottom: 1191,
-        header: 709,
-        footer: 709,
-        left: 1134,
-        right: 1134,
-    });
+    let m = inp.margins.copied().unwrap_or(RichPageMargins::DOC_DEFAULT);
     let paper = inp.paper.copied().unwrap_or(RichPaper::A4);
     let orientation = if paper.width > paper.height {
         "landscape"
@@ -510,13 +509,16 @@ pub(crate) fn odt_master_page(inp: OdtMasterInput<'_>) -> (String, String) {
     (layout, master)
 }
 
-/// `styles.xml` of an ODT with a page setup, a header or a footer.
+/// `styles.xml` of an ODT carrying default paragraph style, page setup, and master page.
 pub(crate) fn odt_styles_xml(
     font_decls: &str,
     automatic_styles: &str,
     page_layout: &str,
     master_styles: &str,
 ) -> String {
+    let tab_pt = odt_pt(DOC_DEFAULT_TAB_STOP_TWIPS);
+    let after_pt = odt_pt(DOC_DEFAULT_AFTER_TWIPS);
+    let size_pt = odt_pt(u32::from(DOC_DEFAULT_HALF_PT) * 10);
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles ",
@@ -525,9 +527,25 @@ pub(crate) fn odt_styles_xml(
             "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" ",
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
             "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
-            "office:version=\"1.2\">{}<office:automatic-styles>{}{}</office:automatic-styles>{}</office:document-styles>"
+            "office:version=\"1.2\">{}<office:styles><style:default-style style:family=\"paragraph\">",
+            "<style:paragraph-properties fo:text-align=\"justify\" fo:margin-top=\"0pt\" ",
+            "fo:margin-bottom=\"{}\" fo:line-height=\"{}%\" style:tab-stop-distance=\"{}\"/>",
+            "<style:text-properties style:font-name=\"{}\" style:font-name-asian=\"{}\" ",
+            "fo:font-size=\"{}\" style:font-size-asian=\"{}\" fo:language=\"en\" fo:country=\"US\" ",
+            "style:language-asian=\"ko\" style:country-asian=\"KR\"/></style:default-style>",
+            "</office:styles><office:automatic-styles>{}{}</office:automatic-styles>{}</office:document-styles>"
         ),
-        font_decls, automatic_styles, page_layout, master_styles
+        font_decls,
+        after_pt,
+        DOC_DEFAULT_LINE_PERCENT,
+        tab_pt,
+        DOC_DEFAULT_FONT,
+        DOC_DEFAULT_FONT,
+        size_pt,
+        size_pt,
+        automatic_styles,
+        page_layout,
+        master_styles
     )
 }
 

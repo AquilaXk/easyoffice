@@ -32,7 +32,7 @@
   const APPROXIMATED_ALIGN_LABEL = { distribute: "배분", divide: "나눔" };
   const MIN_LINE_PERCENT = 5;
   const MAX_LINE_PERCENT = 500;
-  const DEFAULT_LINE_PERCENT = 160;
+  const DEFAULT_LINE_PERCENT = 108;
   const NON_PARAGRAPH_TAGS = new Set(["TD", "TH", "CAPTION"]);
   const HEADING_TAG_RE = /^H[1-6]$/;
   const STYLE_HEADING_RE = /^개요 ([1-3])$/;
@@ -233,7 +233,7 @@
     }
 
     function setSize(pt, options) {
-      const clamped = Math.max(MIN_PT, Math.min(MAX_PT, Number.isFinite(pt) ? pt : 11));
+      const clamped = Math.max(MIN_PT, Math.min(MAX_PT, Number.isFinite(pt) ? pt : 10));
       return applyPatch({ size: R.ptToHalfPt(clamped) }, options);
     }
 
@@ -286,7 +286,7 @@
     function syncFontControls(state) {
       const select = byId("doc-font-select");
       const badge = byId("doc-style-font-badge");
-      const fallback = editor()?.style?.fontFamily?.replace(/^["']|["']$/g, "") || "휴먼명조";
+      const fallback = editor()?.style?.fontFamily?.replace(/^["']|["']$/g, "") || "맑은 고딕";
       const font = state.font === R.MIXED ? "" : state.font || fallback;
       if (select) select.value = font;
       if (badge) badge.textContent = font || "혼합";
@@ -773,9 +773,46 @@
       }
       if (ev.key !== "Tab" || ev.altKey || ev.ctrlKey || ev.metaKey) return;
       const items = paragraphTargets().filter((b) => isListItem(b));
-      if (items.length === 0) return;
+      if (items.length > 0) {
+        ev.preventDefault?.();
+        shiftListLevel(ev.shiftKey ? -1 : 1);
+        return;
+      }
+      if (ev.shiftKey || getActiveModule() !== "DOC") return;
+      const root = editor();
+      const range = currentRange();
+      if (!root || !range || root.dataset?.eoHfEdit) return;
+      const startEl = range.startContainer?.nodeType === 1 ? range.startContainer : range.startContainer?.parentElement;
+      if (startEl?.closest?.("table")) return;
       ev.preventDefault?.();
-      shiftListLevel(ev.shiftKey ? -1 : 1);
+      const exec = () => {
+        if (!range.collapsed) {
+          const liveSel = typeof host.getSelection === "function" ? host.getSelection() : null;
+          if (liveSel?.rangeCount > 0) liveSel.getRangeAt(0).deleteContents?.();
+        }
+        const cur = currentRange() || range;
+        if (pending && cur.startContainer === pending.node && cur.startOffset === pending.offset) {
+          const res = R.insertFormattedText(root, cur.startContainer, cur.startOffset, "\t", pending.patch);
+          setSelection({ startContainer: res.caret.node, startOffset: res.caret.offset, endContainer: res.caret.node, endOffset: res.caret.offset, collapsed: true });
+          dropPending();
+          return { changed: true };
+        }
+        dropPending();
+        const tabNode = root.ownerDocument.createTextNode("\t");
+        if (cur.startContainer.nodeType === 3) {
+          const text = cur.startContainer;
+          const val = String(text.data ?? text.nodeValue ?? "");
+          const off = Math.max(0, Math.min(val.length, cur.startOffset));
+          text.data = val.slice(0, off) + "\t" + val.slice(off);
+          setSelection({ startContainer: text, startOffset: off + 1, endContainer: text, endOffset: off + 1, collapsed: true });
+        } else {
+          cur.startContainer.insertBefore(tabNode, cur.startContainer.childNodes[cur.startOffset] ?? null);
+          setSelection({ startContainer: tabNode, startOffset: 1, endContainer: tabNode, endOffset: 1, collapsed: true });
+        }
+        return { changed: true };
+      };
+      withUndo(exec);
+      syncToolbar();
     }
 
     function handleEditorClick(ev) {

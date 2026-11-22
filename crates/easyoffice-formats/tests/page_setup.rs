@@ -107,16 +107,24 @@ fn paper_and_margins_round_trip_without_a_header_or_footer() {
 #[test]
 fn a_document_without_a_setup_gets_the_paper_each_format_defaults_to() {
     let source = doc(None, None);
-    let docx = round_trip(&source, DocumentFormat::Docx, "d.docx");
-    assert_eq!(docx.page_frame.margins, None);
-    assert_eq!(docx.page_frame.paper, Some(RichPaper::A4));
-    // An ODT without a setup, header or footer has no page layout part at all.
-    assert_eq!(
-        round_trip(&source, DocumentFormat::Odt, "d.odt")
-            .page_frame
-            .paper,
-        None
-    );
+    for (format, name) in [
+        (DocumentFormat::Docx, "d.docx"),
+        (DocumentFormat::Odt, "d.odt"),
+        (DocumentFormat::Rtf, "d.rtf"),
+    ] {
+        let back = round_trip(&source, format, name);
+        let expect_margins = if format == DocumentFormat::Odt {
+            RichPageMargins {
+                header: RichPageMargins::DOC_DEFAULT.top,
+                footer: RichPageMargins::DOC_DEFAULT.bottom,
+                ..RichPageMargins::DOC_DEFAULT
+            }
+        } else {
+            RichPageMargins::DOC_DEFAULT
+        };
+        assert_eq!(back.page_frame.margins, Some(expect_margins), "{name}");
+        assert_eq!(back.page_frame.paper, Some(RichPaper::A4), "{name}");
+    }
     let hwpx = round_trip(&source, DocumentFormat::Hwpx, "d.hwpx");
     assert_eq!(hwpx.page_frame.paper, Some(RichPaper::A4));
     assert!(hwpx.page_frame.margins.is_some_and(|m| m.top > 0));
@@ -395,12 +403,9 @@ fn the_binding_is_spelled_as_each_format_spells_it() {
         None,
     )
     .unwrap();
-    assert!(
-        ZipArchiveCodec::unpack(&single, &ZipSecurityPolicy::default())
-            .unwrap()
-            .iter()
-            .all(|e| e.path != "word/settings.xml")
-    );
+    let settings = part(&single, "word/settings.xml");
+    assert!(settings.contains("<w:defaultTabStop w:val=\"800\"/>"));
+    assert!(!settings.contains("mirrorMargins") && !settings.contains("gutterAtTop"));
 }
 
 #[test]

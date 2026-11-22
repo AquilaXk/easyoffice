@@ -324,7 +324,7 @@ pub(crate) fn laid_document_pages(doc: &RichDocument, rotation_degrees: u16) -> 
     );
     let (top, bottom, header, footer, left, right) = frame
         .margins
-        .map_or((1417, 1417, 709, 709, 1080, 1080), |m| {
+        .map_or((1701, 1440, 851, 992, 1440, 1440), |m| {
             (m.top, m.bottom, m.header, m.footer, m.left, m.right)
         });
     let gutter = frame.binding.gutter;

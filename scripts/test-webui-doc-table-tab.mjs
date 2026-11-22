@@ -149,8 +149,11 @@ test("the way out skips pictures and the page frame, and Tab with a modifier or 
   assert.equal(t.editor.children[3].textContent, "본문");
 });
 
-test("Tab outside a table is left to the editor", async () => {
+test("Tab outside a table is left to the paragraph editor without touching the table", async () => {
   const t = await openWith([rowOf(text("a"))]);
   t.caretAt(t.editor.children[0], 0);
-  assert.equal(t.tab(), true);
+  assert.equal(t.tab(true), true, "Shift+Tab outside a list or table is untouched");
+  assert.equal(t.tab(), false, "plain Tab in a body paragraph inserts a tab character");
+  assert.equal(t.editor.children[0].textContent, "\t앞");
+  assert.equal(t.rows().length, 1);
 });

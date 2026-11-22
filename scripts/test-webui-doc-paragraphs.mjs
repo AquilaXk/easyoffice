@@ -83,17 +83,17 @@ test("line spacing applies to the selected paragraphs only and is the value that
   const [a, b, c] = h.blocks;
   await selectAcross(h, a, b);
   await click(h, "btn-ls-up");
-  assert.equal(a.style.lineHeight, "1.80");
-  assert.equal(b.style.lineHeight, "1.80");
+  assert.equal(a.style.lineHeight, "1.15");
+  assert.equal(b.style.lineHeight, "1.15");
   assert.equal(c.style.lineHeight, "");
   assert.equal(h.editor.style.lineHeight, "", "the editor root keeps its own line height");
-  assert.equal(h.document.getElementById("doc-linespacing-select").value, "180");
-  assert.deepEqual(saved(h).map((blk) => blk.lineSpacingPercent), [180, 180, undefined]);
+  assert.equal(h.document.getElementById("doc-linespacing-select").value, "115");
+  assert.deepEqual(saved(h).map((blk) => blk.lineSpacingPercent), [115, 115, undefined]);
 
   await selectAcross(h, c, c);
-  assert.equal(h.document.getElementById("doc-linespacing-select").value, "160", "an untouched paragraph shows the default");
+  assert.equal(h.document.getElementById("doc-linespacing-select").value, "108", "an untouched paragraph shows the default");
   await selectAcross(h, a, a);
-  assert.equal(h.document.getElementById("doc-linespacing-select").value, "180", "a paragraph shows its own value");
+  assert.equal(h.document.getElementById("doc-linespacing-select").value, "115", "a paragraph shows its own value");
 
   const lsBox = h.document.getElementById("doc-linespacing-select");
   lsBox.value = "130";
@@ -280,7 +280,7 @@ test("the line spacing list keeps one custom value", async () => {
   const h = await createRunHarness([p("가"), p("나")]);
   const [a, b] = h.blocks;
   const box = h.document.getElementById("doc-linespacing-select");
-  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "130", "150", "160", "180", "200", "300"].includes(o.value)).map((o) => o.value);
+  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "108", "115", "130", "160", "180", "200", "300"].includes(o.value)).map((o) => o.value);
   a.style.lineHeight = "1.25";
   b.style.lineHeight = "1.75";
   await selectAcross(h, a, a);

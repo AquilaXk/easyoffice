@@ -9,6 +9,8 @@ const RTF_OPEN_BRACE: u16 = 0x7B;
 const RTF_CLOSE_BRACE: u16 = 0x7D;
 /// UTF-16 units of the `line` control word.
 const RTF_LINE_WORD: [u16; 4] = [b'l' as u16, b'i' as u16, b'n' as u16, b'e' as u16];
+/// UTF-16 units of the `tab` control word.
+const RTF_TAB_WORD: [u16; 3] = [b't' as u16, b'a' as u16, b'b' as u16];
 /// UTF-16 units of the `uc` control word.
 const RTF_UC_WORD: [u16; 2] = [b'u' as u16, b'c' as u16];
 
@@ -55,12 +57,24 @@ pub(crate) fn decode_rtf_escape(
         }
     }
     let rest = &units[i + 1..];
-    if rest.starts_with(&RTF_LINE_WORD) {
+    let not_alpha = |idx: usize| {
+        units
+            .get(idx)
+            .is_none_or(|&u| !u8::try_from(u).is_ok_and(|b| b.is_ascii_alphabetic()))
+    };
+    if rest.starts_with(&RTF_LINE_WORD) && not_alpha(i + 1 + RTF_LINE_WORD.len()) {
         let mut end = i + 1 + RTF_LINE_WORD.len();
         if units.get(end) == Some(&(b' ' as u16)) {
             end += 1;
         }
         return Some((Some(b'\n' as u16), end));
+    }
+    if rest.starts_with(&RTF_TAB_WORD) && not_alpha(i + 1 + RTF_TAB_WORD.len()) {
+        let mut end = i + 1 + RTF_TAB_WORD.len();
+        if units.get(end) == Some(&(b' ' as u16)) {
+            end += 1;
+        }
+        return Some((Some(b'\t' as u16), end));
     }
     if rest.starts_with(&RTF_UC_WORD) {
         let (count, end) = read_param(units, i + 1 + RTF_UC_WORD.len())?;

@@ -246,6 +246,17 @@ impl RichPageMargins {
         right: 1701,
     };
 
+    /// New-document page setup of the Korean word processor (A4: top 30 mm, other sides 25.4 mm,
+    /// header 15 mm, footer 17.5 mm).
+    pub const DOC_DEFAULT: Self = Self {
+        top: 1701,
+        bottom: 1440,
+        header: 851,
+        footer: 992,
+        left: 1440,
+        right: 1440,
+    };
+
     /// Whether every value is within [`MAX_PAGE_MARGIN_TWIPS`].
     pub fn within_bounds(&self) -> bool {
         [

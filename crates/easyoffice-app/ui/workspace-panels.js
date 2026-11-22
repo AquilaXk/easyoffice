@@ -158,9 +158,9 @@
       if (boldBtn) boldBtn.setAttribute("aria-pressed", isBold ? "true" : "false");
       if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl?.style?.fontStyle === "italic" ? "true" : "false");
       if (underBtn) underBtn.setAttribute("aria-pressed", targetEl?.style?.textDecoration === "underline" ? "true" : "false");
-      const rawSize = targetEl?.style?.fontSize || docEditor?.style?.fontSize || "11.0pt";
+      const rawSize = targetEl?.style?.fontSize || docEditor?.style?.fontSize || "10.0pt";
       const parsedNum = Number.parseFloat(rawSize);
-      const formattedNum = Number.isFinite(parsedNum) ? parsedNum.toFixed(1) : "11.0";
+      const formattedNum = Number.isFinite(parsedNum) ? parsedNum.toFixed(1) : "10.0";
       if (sizeInput) sizeInput.value = formattedNum;
       if (sizeBadge) {
         sizeBadge.textContent = rawSize.endsWith("px") ? rawSize : formattedNum + " pt";
@@ -713,7 +713,7 @@
       const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
       setElField("doc-style-role-badge", "textContent", roleVal);
       setElField("doc-style-select", "value", roleVal);
-      const fontVal = editor?.style?.fontFamily || "휴먼명조";
+      const fontVal = editor?.style?.fontFamily || "맑은 고딕";
       setElField("doc-font-select", "value", fontVal);
       setElField("doc-style-font-badge", "textContent", fontVal);
       // Without a selection the controls show the document-level values; a selection shows its paragraph (doc-runs-ui).
@@ -722,7 +722,7 @@
         syncBtnPressed("btn-align-" + m, m === alignMode)
       );
       const rootLine = Math.round(Number.parseFloat(editor?.style?.lineHeight || "") * 100);
-      deps.getDocRuns?.()?.showLineSpacing(rootLine > 0 ? rootLine : 160);
+      deps.getDocRuns?.()?.showLineSpacing(rootLine > 0 ? rootLine : 108);
       [
         ["btn-toggle-ctrl-marks", "showCtrlMarks"],
         ["btn-toggle-para-marks", "showParaMarks"],

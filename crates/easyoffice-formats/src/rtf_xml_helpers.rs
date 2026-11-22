@@ -107,6 +107,7 @@ impl RtfCodec {
                 0x5C => out.push_str("\\\\"),
                 0x7B => out.push_str("\\{"),
                 0x7D => out.push_str("\\}"),
+                0x09 => out.push_str("\\tab "),
                 0x0A => out.push_str("\\line "),
                 0x20..=0x7E => out.push(unit as u8 as char),
                 _ => {
