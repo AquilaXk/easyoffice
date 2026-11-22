@@ -700,6 +700,40 @@ test("PD-299: 엔진이 준 작은 차트의 크기를 페이지가 180x140으�
   assert.deepEqual([a.colOffEmu, a.rowOffEmu, a.toColOffEmu, a.toRowOffEmu], [190500, 76200, 381000, 152400]);
 });
 
+test("PD-299: 차트를 옮기기만 하면 180x140~1600x1200 밖의 크기도 그대로다", async () => {
+  const { document, host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-chart-move" });
+  await flushAsyncTurns(8);
+  switchModule(document, "SHEET");
+  await flushAsyncTurns(4);
+  const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const base = { id: "", chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
+  const anchor = (width, height) => ({ fromCol: 1, fromRow: 1, toCol: 5, toRow: 6, colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0, left: 96, top: 24, width, height, editAs: "oneCell" });
+  layoutApi.setCharts("Sheet1", [
+    { ...base, id: "small", anchor: anchor(100, 80) },
+    { ...base, id: "wide", anchor: { ...anchor(3000, 500), fromRow: 20, toRow: 40, top: 480 } },
+  ]);
+  await flushAsyncTurns(4);
+  const sizeOf = (id) => {
+    const a = layoutApi.chartsOf("Sheet1").find((c) => c.id === id).anchor;
+    return [a.width, a.height];
+  };
+  const move = async (id) => {
+    const card = document.querySelector(`.sheet-chart-card[data-chart-id="${id}"]`);
+    card.querySelector(".sheet-chart-head").dispatchEvent({ type: "mousedown", button: 0, clientX: 400, clientY: 50 });
+    document.dispatchEvent({ type: "mousemove", clientX: 448, clientY: 74 });
+    document.dispatchEvent({ type: "mouseup", clientX: 448, clientY: 74 });
+    await flushAsyncTurns(6);
+  };
+  for (const [id, size] of [["small", [100, 80]], ["wide", [3000, 500]]]) {
+    const before = layoutApi.chartsOf("Sheet1").find((c) => c.id === id).anchor;
+    await move(id);
+    const after = layoutApi.chartsOf("Sheet1").find((c) => c.id === id).anchor;
+    assert.deepEqual(sizeOf(id), size, `${id} keeps its size when it is moved`);
+    assert.equal(after.left, before.left + 48, `${id} moved right`);
+    assert.equal(after.top, before.top + 24, `${id} moved down`);
+  }
+});
+
 test("PD-299: 두 칸 앵커 그림은 행 높이를 따라 크기가 변하고, 한 칸 앵커는 크기를 지키고, 절대 앵커는 자리를 지킨다", async () => {
   const { document, host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-media-edit-as" });
   await flushAsyncTurns(8);
