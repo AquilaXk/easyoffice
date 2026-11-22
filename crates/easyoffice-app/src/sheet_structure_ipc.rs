@@ -4,7 +4,7 @@
 //! Request: `{session, sheet, axis: "row"|"col", op: "insert"|"delete", at, count}` (`at` is the
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
-//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights` and `defaultRowHeight` (see `sheet_layout_json`;
+//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights`, `defaultRowHeight` and `defaultColWidth` (see `sheet_layout_json`;
 //! with `outline`, `filter` and `tables` they place the `images` and `charts` on the rows the edit leaves, PD-299),
 //! `chartRefs` `{sheet: [{id, dataRange, series}]}` (the references of the charts of the other sheets, which the engine moves
 //! as it moves a formula's, PD-303),
@@ -25,8 +25,8 @@
 
 use crate::sheet_filter_json::{filter_json, parse_filter};
 use crate::sheet_layout_json::{
-    merges_json, parse_default_row_height, parse_hidden_cols, parse_hidden_rows, parse_merges,
-    parse_row_heights, row_heights_json, runs_json,
+    merges_json, parse_default_col_px, parse_default_row_height, parse_hidden_cols,
+    parse_hidden_rows, parse_merges, parse_row_heights, row_heights_json, runs_json,
 };
 use crate::sheet_page_json::moved_page_json;
 use crate::sheet_protect_json::{moved_protect_json, moved_runs_json, parse_protection};
@@ -286,9 +286,11 @@ fn moved_layout_json(
     } else {
         Default::default()
     };
+    // The columns without a width keep the width of the sheet, whatever the edit moves (PD-305).
+    let default_px = parse_default_col_px(field("defaultColWidth"))?;
     let (before, after) = (
-        SheetGrid::new(&widths_before, rows_before),
-        SheetGrid::new(&shifted_cols, rows_after),
+        SheetGrid::new(&widths_before, default_px, rows_before),
+        SheetGrid::new(&shifted_cols, default_px, rows_after),
     );
     if let Some(v) = charts {
         let parsed = crate::sheet_chart_json::parse_charts(v, &before)?;

@@ -835,7 +835,11 @@ impl OoxmlCodec {
                 // The anchors of the drawings are placed on the rows the sheet has (PD-299).
                 // A sheet with no `<drawing>` has nothing to place, so its rows are not worked out.
                 let grid = if sheet_xml.contains("<drawing") {
-                    SheetGrid::new(&styling.columns, RowOffsets::of(&styling))
+                    SheetGrid::new(
+                        &styling.columns,
+                        styling.default_col_px(),
+                        RowOffsets::of(&styling),
+                    )
                 } else {
                     SheetGrid::plain()
                 };

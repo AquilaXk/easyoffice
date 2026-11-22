@@ -2,7 +2,7 @@
 //! anchor, PD-299): moves and sizes with the cells (the default), moves with them and keeps its size, or stays where it is.
 //! `oneCellAnchor` and `absoluteAnchor` files read as the second and the third kind.
 
-use crate::sheet_styling::sheet_chart::{col_left_px, emu_to_px_rounded, ChartAnchor};
+use crate::sheet_styling::sheet_chart::{emu_to_px_rounded, ChartAnchor};
 use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,7 +52,8 @@ impl ChartAnchor {
 
     /// The top left corner of the anchor's start cell and its offset, in px.
     fn cell_origin_px(&self, grid: &SheetGrid<'_>) -> (u32, u32) {
-        let x = col_left_px(self.from_col, grid.columns)
+        let x = grid
+            .col_left(self.from_col)
             .saturating_add(emu_to_px_rounded(self.col_off_emu));
         let y = grid
             .rows()
@@ -64,9 +65,7 @@ impl ChartAnchor {
 
     /// The corners of the anchor in px, `(left, top, right, bottom)`, from its cells on `grid`.
     fn corners_px(&self, grid: &SheetGrid<'_>) -> [u64; 4] {
-        let x = |col: u32, off: u32| {
-            col_left_px(col, grid.columns).saturating_add(emu_to_px_rounded(off))
-        };
+        let x = |col: u32, off: u32| grid.col_left(col).saturating_add(emu_to_px_rounded(off));
         let y = |row: u32, off: u32| grid.rows().top(row).saturating_add(emu_to_px_rounded(off));
         [
             x(self.from_col, self.col_off_emu),

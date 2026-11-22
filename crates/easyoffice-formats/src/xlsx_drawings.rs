@@ -10,9 +10,9 @@ use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
 use crate::rich_image_writers::{docx_content_type_defaults, MediaParts};
 use crate::sheet_styling::sheet_anchor_edit::AnchorEdit;
 use crate::sheet_styling::sheet_chart::{
-    col_left_px, validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart,
-    DEFAULT_CHART_HEIGHT_PX, DEFAULT_CHART_WIDTH_PX, EMU_PER_PX, MAX_CHARTS_PER_SHEET,
-    MAX_CHART_TEXT_BYTES, MAX_WORKBOOK_CHARTS,
+    validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart, DEFAULT_CHART_HEIGHT_PX,
+    DEFAULT_CHART_WIDTH_PX, EMU_PER_PX, MAX_CHARTS_PER_SHEET, MAX_CHART_TEXT_BYTES,
+    MAX_WORKBOOK_CHARTS,
 };
 use crate::sheet_styling::sheet_media_notes::{
     effective_image_two_cell, sync_image_grid_from_px, sync_image_px_from_grid,
@@ -182,7 +182,8 @@ impl<'a> DrawingWriter<'a> {
                 r_num
             };
             let (fc, fr, fce, fre, tc, tr, tce, tre) = effective_image_two_cell(&img.anchor, &grid);
-            let x_emu = col_left_px(fc, grid.columns)
+            let x_emu = grid
+                .col_left(fc)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(fce));
             let y_emu = grid
@@ -190,7 +191,8 @@ impl<'a> DrawingWriter<'a> {
                 .top(fr)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(fre));
-            let x1_emu = col_left_px(tc, grid.columns)
+            let x1_emu = grid
+                .col_left(tc)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(tce));
             let y1_emu = grid
@@ -630,7 +632,8 @@ fn build_anchor_from_raw(
             }
             let w = raw.ext_cx.map_or(def_w, emu_u64_to_px).clamp(min_w, max_w);
             let h = raw.ext_cy.map_or(def_h, emu_u64_to_px).clamp(min_h, max_h);
-            anchor.left_px = col_left_px(fc, grid.columns)
+            anchor.left_px = grid
+                .col_left(fc)
                 .saturating_add(u64::from(emu_u64_to_px(u64::from(raw.from.col_off))))
                 .min(u64::from(u32::MAX)) as u32;
             anchor.top_px = grid

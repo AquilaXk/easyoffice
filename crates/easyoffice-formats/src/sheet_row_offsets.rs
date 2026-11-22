@@ -14,6 +14,8 @@
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
 
+use crate::sheet_styling::sheet_chart::{col_left_px, px_to_col_and_emu};
+use crate::sheet_styling::sheet_default_col_width::DEFAULT_COL_PX;
 use crate::sheet_styling::sheet_row_height::GRID_ROW_PX;
 use crate::sheet_styling::xlsx_layout::{normalize_runs, run_contains};
 use crate::{OoxmlCodec, SheetStyling};
@@ -144,6 +146,8 @@ static NO_COLUMNS: BTreeMap<u32, u32> = BTreeMap::new();
 /// time a position needs them, so a caller that only has anchors with cells of their own (the usual case) pays nothing.
 pub struct SheetGrid<'a> {
     pub columns: &'a BTreeMap<u32, u32>,
+    /// The width of the columns that are not in `columns` (`SheetStyling::default_col_px`, PD-305).
+    pub default_col_px: u32,
     styling: Option<&'a SheetStyling>,
     rows: OnceCell<RowOffsets>,
     natural: OnceCell<Box<SheetGrid<'a>>>,
@@ -154,6 +158,7 @@ impl<'a> SheetGrid<'a> {
     pub fn of(styling: &'a SheetStyling) -> Self {
         Self {
             columns: &styling.columns,
+            default_col_px: styling.default_col_px(),
             styling: Some(styling),
             rows: OnceCell::new(),
             natural: OnceCell::new(),
@@ -162,9 +167,10 @@ impl<'a> SheetGrid<'a> {
 
     /// A grid made of its parts, for a caller that does not have the whole sheet at hand (a reader that is still
     /// filling the sheet, a request that carries the layout of its own).
-    pub fn new(columns: &'a BTreeMap<u32, u32>, rows: RowOffsets) -> Self {
+    pub fn new(columns: &'a BTreeMap<u32, u32>, default_col_px: u32, rows: RowOffsets) -> Self {
         Self {
             columns,
+            default_col_px,
             styling: None,
             rows: OnceCell::from(rows),
             natural: OnceCell::new(),
@@ -177,13 +183,28 @@ impl<'a> SheetGrid<'a> {
         let Some(styling) = self.styling else {
             return self;
         };
-        self.natural
-            .get_or_init(|| Box::new(SheetGrid::new(self.columns, RowOffsets::natural(styling))))
+        self.natural.get_or_init(|| {
+            Box::new(SheetGrid::new(
+                self.columns,
+                self.default_col_px,
+                RowOffsets::natural(styling),
+            ))
+        })
     }
 
     /// A sheet with the default column width and the grid's row height everywhere.
     pub fn plain<'b>() -> SheetGrid<'b> {
-        SheetGrid::new(&NO_COLUMNS, RowOffsets::default())
+        SheetGrid::new(&NO_COLUMNS, DEFAULT_COL_PX, RowOffsets::default())
+    }
+
+    /// The x-coordinate in pixels of the left edge of the zero-based `col`.
+    pub fn col_left(&self, col: u32) -> u64 {
+        col_left_px(col, self.columns, self.default_col_px)
+    }
+
+    /// The column at the horizontal offset `target_px` and the EMU the offset lies right of the column's left edge.
+    pub(crate) fn col_at(&self, target_px: u64) -> (u32, u32) {
+        px_to_col_and_emu(target_px, self.columns, self.default_col_px)
     }
 
     pub fn rows(&self) -> &RowOffsets {

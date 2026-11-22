@@ -74,7 +74,7 @@ fn the_bytes_are_the_same_on_every_operating_system() {
     let laid = encode_sheet_pdf("시트", &sheets, &stylings, &[]).unwrap();
     assert_eq!(
         hex_digest(&laid),
-        "f35d3279b4ca34e7383128a06cf4dfc3a7bff2751d724f4c36ae7a0c108f37d3",
+        "a4bc22b50befd21d6f6ca13532e880f076fb42b6f98df7a7e17f1796feace61c",
         "sheet, {} bytes",
         laid.len()
     );

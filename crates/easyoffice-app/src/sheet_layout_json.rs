@@ -5,9 +5,10 @@
 //! inclusive. Input over a limit is refused, not trimmed.
 
 use easyoffice_formats::{
-    normalize_runs, normalize_spills, run_total, CellBox, DefaultColWidth, EasyOfficeError,
-    RowHeight, RowHeights, RowOffsets, SheetFilter, SheetGrid, SheetStyling, SheetTable, SpillRef,
-    StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
+    default_col_px, normalize_runs, normalize_spills, run_total, CellBox, DefaultColWidth,
+    EasyOfficeError, RowHeight, RowHeights, RowOffsets, SheetFilter, SheetGrid, SheetStyling,
+    SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS,
+    MAX_SPILL_REFS, MODEL_DIGIT_PX,
 };
 use std::fmt::Write;
 
@@ -242,6 +243,16 @@ pub(crate) fn parse_default_col_width(
         .ok_or_else(|| bad("defaultColWidth"))
 }
 
+/// The width in pixels of the columns without a width of their own in a sheet whose request carries `defaultColWidth`
+/// (null or missing: the sheet says nothing), by the rule of `SheetStyling::default_col_px` (PD-305).
+pub(crate) fn parse_default_col_px(v: Option<&StrictJsonValue>) -> Result<u32, EasyOfficeError> {
+    let widths = match v.filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        Some(v) => Some(parse_default_col_width(v)?),
+        None => None,
+    };
+    Ok(default_col_px(widths, MODEL_DIGIT_PX))
+}
+
 fn default_col_width_json(widths: DefaultColWidth) -> String {
     let mut parts = Vec::with_capacity(2);
     if let Some(width) = widths.width {
@@ -327,7 +338,11 @@ fn parse_floating_objects(
     if charts.is_none() && images.is_none() {
         return Ok(());
     }
-    let grid = SheetGrid::new(&styling.columns, RowOffsets::of(styling));
+    let grid = SheetGrid::new(
+        &styling.columns,
+        styling.default_col_px(),
+        RowOffsets::of(styling),
+    );
     if let Some(v) = charts {
         styling.charts = crate::sheet_chart_json::parse_charts(v, &grid)?;
     }
@@ -440,10 +455,12 @@ pub(crate) fn write_layout_split(
         );
     }
     if let Some(widths) = styling.default_col_width {
+        // The page draws the sheet's other columns at `defaultColPx`, which only the engine works out (PD-305).
         let _ = write!(
             out,
-            ",\"defaultColWidth\":{}",
-            default_col_width_json(widths)
+            ",\"defaultColWidth\":{},\"defaultColPx\":{}",
+            default_col_width_json(widths),
+            styling.default_col_px()
         );
     }
     if let Some(filter) = filter {

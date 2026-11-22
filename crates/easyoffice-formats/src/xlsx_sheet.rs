@@ -234,6 +234,7 @@ struct SheetScanner<'s> {
     want_styling: bool,
     /// ISO date cells (`t="d"`) count from 1904 (PD-263).
     date1904: bool,
+    digit_px: u32, // the digit of the workbook's default font, the unit of widths in characters (PD-305)
     cells: Vec<(u32, u32, String)>,
     styling: SheetStyling,
     /// First master formula text of each shared formula index with the cell it sits in.
@@ -376,7 +377,7 @@ impl<'s> SheetScanner<'s> {
             return;
         }
         let styling = &mut self.styling;
-        view.apply_to(styling);
+        view.apply_to(styling, self.digit_px);
         let outline = &mut styling.outline;
         if outline.is_empty() {
             return;
@@ -485,7 +486,7 @@ impl<'s> SheetScanner<'s> {
         if !width.is_finite() || width <= 0.0 || min == 0 || max < min {
             return;
         }
-        let px = xlsx_width_to_px(width);
+        let px = xlsx_width_to_px(width, self.digit_px);
         for col in min..=max.min(OoxmlCodec::MAX_XLSX_COLS) {
             if self.styling.columns.len() >= MAX_STYLED_CELLS {
                 break;
@@ -744,6 +745,7 @@ pub(crate) fn scan_worksheet(
         link_styled: Vec::new(),
         want_styling,
         date1904: xf.date1904,
+        digit_px: xf.digit(),
         cells: Vec::new(),
         styling: SheetStyling::default(),
         masters: HashMap::new(),

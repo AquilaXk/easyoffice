@@ -71,6 +71,27 @@ fn the_width_reaches_the_file_and_comes_back_as_the_same_key() {
     }
 }
 
+/// The page draws the columns without a width at `defaultColPx`, which only the engine works out (PD-305): the width in
+/// characters first, then the base with its padding rounded up to 8 px; a sheet that says nothing has none (64 px).
+#[test]
+fn the_page_gets_the_pixels_of_the_default_column() {
+    for (key, px) in [
+        (WIDTH, 145),
+        (r#","defaultColWidth":{"width":9.140625}"#, 64),
+        (r#","defaultColWidth":{"width":8.7109375}"#, 61),
+        (r#","defaultColWidth":{"base":10}"#, 80),
+        (r#","defaultColWidth":{"base":8}"#, 64),
+        (r#","defaultColWidth":{"base":255}"#, 1_785),
+    ] {
+        let opened = open("xlsx", &save("xlsx", key).unwrap());
+        assert!(
+            opened.contains(&format!(r#","defaultColPx":{px}"#)),
+            "{key}: {opened}"
+        );
+    }
+    assert!(!open("xlsx", &save("xlsx", "").unwrap()).contains("defaultColPx"));
+}
+
 /// ODS has no such width: the same payload saves, and the file says nothing of it.
 #[test]
 fn an_ods_save_takes_the_key_and_writes_nothing() {

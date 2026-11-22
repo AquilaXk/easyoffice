@@ -34,6 +34,8 @@ pub(crate) mod sheet_anchor_edit;
 pub(crate) mod sheet_chart;
 #[path = "sheet_default_col_width.rs"]
 pub(crate) mod sheet_default_col_width;
+#[path = "sheet_digit_width.rs"]
+pub(crate) mod sheet_digit_width;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
 #[path = "sheet_fonts.rs"]
@@ -118,8 +120,10 @@ pub(crate) mod xlsx_view;
 pub use sheet_anchor_edit::{AnchorCells, AnchorEdit};
 pub use sheet_chart::*;
 pub use sheet_default_col_width::{
-    DefaultColWidth, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS, MIN_COL_WIDTH_CHARS,
+    default_col_px, DefaultColWidth, DEFAULT_COL_PX, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS,
+    MAX_DEFAULT_COL_PX, MIN_COL_WIDTH_CHARS,
 };
+pub use sheet_digit_width::{max_digit_px, MAX_DIGIT_PX, MODEL_DIGIT_PX};
 pub use sheet_filter::*;
 pub use sheet_fonts::*;
 pub use sheet_links::*;
@@ -479,8 +483,9 @@ pub struct SheetStyling {
     /// The height of the rows that have none of their own (XLSX `sheetFormatPr`, the ODS band that ends a table). Only
     /// a default a user set (`custom`) changes how the page draws the sheet (PD-286).
     pub default_row_height: Option<RowHeight>,
-    /// The sheet-wide column width of an XLSX file (`defaultColWidth`, `baseColWidth`), kept so a save writes it back. The page
-    /// draws every column without a width of its own at the window's 96 px (PD-302, PD-303).
+    /// The sheet-wide column width of an XLSX file (`defaultColWidth`, `baseColWidth`), kept so a save writes it back. Every
+    /// column without a width of its own is [`SheetStyling::default_col_px`] wide, on the page, in the file and in the PDF
+    /// (PD-305).
     pub default_col_width: Option<DefaultColWidth>,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,

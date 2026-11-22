@@ -1,5 +1,6 @@
 //! PD-302: a row or column edit carries the charts of the sheet. A two-cell chart moves and sizes with its cells, a one-cell
-//! chart moves and keeps its size, an absolute chart stays; the pixels are worked out on the 96 px columns the page draws.
+//! chart moves and keeps its size, an absolute chart stays; the pixels are worked out on the columns the page draws (64 px
+//! for a sheet that says nothing, the width of the request's `defaultColWidth` otherwise, PD-305).
 //! A bad chart in the request is refused before the session changes.
 
 use easyoffice_app::EasyOfficeIpcRouter;
@@ -37,12 +38,12 @@ fn anchors(res: &StrictJsonValue) -> Vec<StrictJsonValue> {
         .collect()
 }
 
-/// A chart over C3:E5 (zero-based columns 2..4, rows 2..4) of the kind `edit_as`, 192 x 72 px on the default grid.
+/// A chart over C3:E5 (zero-based columns 2..4, rows 2..4) of the kind `edit_as`, 128 x 72 px on the default grid.
 fn chart(id: &str, edit_as: &str, from: (u32, u32), to: (u32, u32)) -> String {
     let (from_col, from_row) = from;
     let (to_col, to_row) = to;
     format!(
-        r#"{{"id":"{id}","chartType":"column","title":"t","dataRange":"A1:B3","series":[{{"name":"s","valuesRef":"S!$B$2:$B$3"}}],"anchor":{{"fromCol":{from_col},"fromRow":{from_row},"toCol":{to_col},"toRow":{to_row},"width":192,"height":72,"editAs":"{edit_as}"}}}}"#
+        r#"{{"id":"{id}","chartType":"column","title":"t","dataRange":"A1:B3","series":[{{"name":"s","valuesRef":"S!$B$2:$B$3"}}],"anchor":{{"fromCol":{from_col},"fromRow":{from_row},"toCol":{to_col},"toRow":{to_row},"width":128,"height":72,"editAs":"{edit_as}"}}}}"#
     )
 }
 
@@ -81,9 +82,9 @@ fn a_row_insert_moves_charts_by_their_edit_kind() {
 }
 
 #[test]
-fn the_pixels_of_a_column_edit_are_worked_out_on_96_px_columns() {
+fn the_pixels_of_a_column_edit_are_worked_out_on_64_px_columns() {
     let id = open();
-    // Column 2 (B) is 200 px wide. The chart spans columns 1..3 (B:C): 200 + 96 px.
+    // Column 2 (B) is 200 px wide. The chart spans columns 1..3 (B:C): 200 + 64 px.
     let charts = format!("[{}]", chart("c", "twoCell", (1, 0), (3, 4)));
     let res = call(&structure(
         &id,
@@ -98,8 +99,51 @@ fn the_pixels_of_a_column_edit_are_worked_out_on_96_px_columns() {
     // Three default columns come before it, and the wide column moved along with it.
     assert_eq!(
         (num(&moved[0], "left"), num(&moved[0], "width")),
-        (288, 296)
+        (192, 264)
     );
+}
+
+/// The sheet's own default width (the request's `defaultColWidth`, 20.7109375 characters: 145 px) is the width of the columns
+/// without one of their own, before and after the edit (PD-305).
+#[test]
+fn the_pixels_of_a_column_edit_follow_the_default_width_of_the_sheet() {
+    let id = open();
+    let charts = format!("[{}]", chart("c", "twoCell", (1, 0), (3, 4)));
+    let res = call(&structure(
+        &id,
+        "col",
+        "insert",
+        1,
+        2,
+        &format!(r#""defaultColWidth":{{"width":20.7109375}},"charts":{charts}"#),
+    ));
+    let moved = anchors(&res);
+    assert_eq!((num(&moved[0], "fromCol"), num(&moved[0], "toCol")), (3, 5));
+    assert_eq!(
+        (num(&moved[0], "left"), num(&moved[0], "width")),
+        (3 * 145, 2 * 145)
+    );
+    // `null` and a missing value are a sheet that says nothing; a value that is not a width is refused.
+    for (field, ok) in [
+        (r#""defaultColWidth":null"#, true),
+        (r#""defaultColWidth":{"width":"x"}"#, false),
+        (r#""defaultColWidth":{"width":1e308}"#, false),
+        (r#""defaultColWidth":{"base":256}"#, false),
+        (r#""defaultColWidth":7"#, false),
+    ] {
+        let id = open();
+        let charts = format!("[{}]", chart("c", "twoCell", (1, 0), (3, 4)));
+        let body = structure(
+            &id,
+            "col",
+            "insert",
+            1,
+            2,
+            &format!(r#"{field},"charts":{charts}"#),
+        );
+        let result = EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body);
+        assert_eq!(result.is_ok(), ok, "{field}");
+    }
 }
 
 #[test]
@@ -115,11 +159,11 @@ fn a_one_cell_chart_keeps_its_size_when_columns_are_inserted_before_it() {
         &format!(r#""charts":{charts}"#),
     ));
     let moved = anchors(&res);
-    // 192 px is two columns of 96 px.
+    // 128 px is two columns of 64 px.
     assert_eq!((num(&moved[0], "fromCol"), num(&moved[0], "toCol")), (3, 5));
     assert_eq!(
         (num(&moved[0], "left"), num(&moved[0], "width")),
-        (288, 192)
+        (192, 128)
     );
 }
 

@@ -15,6 +15,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
+use crate::sheet_styling::sheet_default_col_width::chars_to_px;
+use crate::sheet_styling::sheet_digit_width::{max_digit_px, MODEL_DIGIT_PX};
 use crate::sheet_styling::sheet_filter::color_criteria;
 use crate::sheet_styling::sheet_look::{
     xlsx_color_rgb, BorderEdge, BorderLine, CellBorders, BORDER_DEFAULT_RGB,
@@ -29,10 +31,6 @@ use crate::sheet_styling::{
 use crate::XmlSanitizer;
 use std::sync::Arc;
 
-/// Width of the widest digit of the default font (Calibri 11) in CSS pixels. The spreadsheet column width
-/// unit is the number of such digits; the stored width includes the 5 px cell padding:
-/// `width = trunc(256 * px / MDW) / 256`, hence `px = round(width * MDW)`.
-pub(crate) const MAX_DIGIT_WIDTH_PX: f64 = 7.0;
 const DEFAULT_SIZE_PT: f64 = 11.0;
 /// `cellStyles` entries a reader looks at (a spreadsheet program keeps fewer than this many cell styles).
 const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
@@ -43,16 +41,16 @@ const MAX_FILL_DEFS: usize = 65_536;
 const MAX_FONT_DEFS: usize = 65_536;
 pub(crate) const MAX_XF_DEFS: usize = 65_536;
 
-/// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value.
+/// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value, in characters of the 7 px digit of
+/// the font this crate writes as the default font (ECMA-376 18.3.1.13: `Truncate(px / digit * 256) / 256`).
 pub(crate) fn px_to_xlsx_width(px: u32) -> f64 {
-    (f64::from(px) / MAX_DIGIT_WIDTH_PX * 256.0).floor() / 256.0
+    (f64::from(px) / f64::from(MODEL_DIGIT_PX) * 256.0).floor() / 256.0
 }
 
-/// Converts a SpreadsheetML `width` attribute value to CSS pixels.
-pub(crate) fn xlsx_width_to_px(width: f64) -> u32 {
-    (width * MAX_DIGIT_WIDTH_PX)
-        .round()
-        .clamp(f64::from(MIN_COLUMN_PX), f64::from(MAX_COLUMN_PX)) as u32
+/// Converts a SpreadsheetML `width` attribute value to CSS pixels, with the digit width of the workbook's default font
+/// (the runtime formula of ECMA-376 18.3.1.13, [`chars_to_px`]).
+pub(crate) fn xlsx_width_to_px(width: f64, digit_px: u32) -> u32 {
+    chars_to_px(width, digit_px).clamp(MIN_COLUMN_PX, MAX_COLUMN_PX)
 }
 
 /// The format of an unlocked row or column: the default look with the lock off (PD-216).
@@ -628,6 +626,16 @@ pub(crate) struct XfStyles {
     pub(crate) table_styles: HashMap<String, crate::sheet_styling::table_style::TableStyleDef>,
     /// The workbook counts its dates from 1904 (`workbookPr date1904`); set by the caller that has the workbook part.
     pub(crate) date1904: bool,
+    /// The width of the widest digit of the workbook's default font (font 0), which the widths in characters count in
+    /// (PD-305). Missing: the 7 px of the font this crate writes.
+    pub(crate) digit_px: Option<u32>,
+}
+
+impl XfStyles {
+    /// [`XfStyles::digit_px`], or the digit of the font this crate writes as the default.
+    pub(crate) fn digit(&self) -> u32 {
+        self.digit_px.unwrap_or(MODEL_DIGIT_PX)
+    }
 }
 
 /// `numFmtId` -> `formatCode` of the `numFmts` element.
@@ -709,9 +717,13 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         .and_then(clean_font_name)
         .unwrap_or("Calibri")
         .to_string();
+    let digit_px = Some(max_digit_px(Some(&default_font), Some(default_size)));
     let fills = parse_fills(styles_xml, colors);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
-        return XfStyles::default();
+        return XfStyles {
+            digit_px,
+            ..XfStyles::default()
+        };
     };
     let codes = read_num_fmt_codes(styles_xml);
     let borders = parse_borders(styles_xml);
@@ -801,6 +813,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         dxf_colors: Vec::new(),
         table_styles: HashMap::new(),
         date1904: false,
+        digit_px,
     }
 }
 

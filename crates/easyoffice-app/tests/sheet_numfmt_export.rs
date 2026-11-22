@@ -27,9 +27,10 @@ const CELLS: &str = r##""numFmts":["yyyy-mm-dd","#,##0.00;[Red]-#,##0.00","0%","
   {"ref":"A8","raw":"101","style":{"nf":5}},
   {"ref":"A9","raw":"7.5","style":{"nf":4}}"##;
 
+/// Column A is 120 px wide: the formatted texts do not fit the 64 px of a default column (PD-305), and a PDF cuts what does not.
 fn payload(target: &str) -> String {
     format!(
-        r#"{{"sourceFormat":"xlsx","targetFormat":"{target}","title":"t","sheets":[{{"name":"s",{CELLS}]}}]}}"#
+        r#"{{"sourceFormat":"xlsx","targetFormat":"{target}","title":"t","sheets":[{{"name":"s","columns":[{{"index":1,"widthPx":120}}],{CELLS}]}}]}}"#
     )
 }
 
@@ -138,6 +139,8 @@ fn styled_workbook() -> (WorkbookSheets, SheetStyling) {
             "#,##0.00;[Red]-#,##0.00".to_string(),
             "0.0%".to_string(),
         ]),
+        // Wide enough for the formatted texts, which a PDF cuts where a column ends (PD-305).
+        columns: [(0, 120)].into(),
         ..SheetStyling::default()
     };
     for (row, id) in [(0, 0), (1, 1), (2, 2)] {

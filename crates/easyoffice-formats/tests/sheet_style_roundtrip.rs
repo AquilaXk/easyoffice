@@ -315,8 +315,9 @@ fn reads_styles_written_by_other_applications() {
             ..CellStyle::default()
         }
     );
-    // width 20 -> 140 px for B and C; the `<col>` without customWidth is ignored.
-    assert_eq!(back.columns, BTreeMap::from([(1, 140), (2, 140)]));
+    // Width 20 in characters of the default font (Arial 12 pt: a 9 px digit) is 180 px for B and C; the `<col>` without
+    // customWidth is ignored (PD-305).
+    assert_eq!(back.columns, BTreeMap::from([(1, 180), (2, 180)]));
 }
 
 fn base_xlsx_with(styles: &str, sheet: &str) -> Vec<u8> {

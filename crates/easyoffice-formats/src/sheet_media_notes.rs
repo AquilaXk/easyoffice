@@ -6,9 +6,7 @@
 use crate::cell_type::unpack_cell_pos;
 use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
 use crate::sheet_styling::sheet_anchor_edit::AnchorCells;
-use crate::sheet_styling::sheet_chart::{
-    col_left_px, emu_to_px_rounded, px_to_col_and_emu, px_to_row_and_emu, ChartAnchor,
-};
+use crate::sheet_styling::sheet_chart::{emu_to_px_rounded, px_to_row_and_emu, ChartAnchor};
 use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::{EasyOfficeError, OoxmlCodec, SheetStyling};
 
@@ -71,13 +69,15 @@ pub fn image_anchor_within_bounds(anchor: &ChartAnchor) -> bool {
 
 /// Recomputes pixel coordinates from two-cell grid anchors for floating images (`1..=8192 px`).
 pub fn sync_image_px_from_grid(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
-    let (columns, rows) = (grid.columns, grid.rows());
-    let x0 =
-        col_left_px(anchor.from_col, columns).saturating_add(emu_to_px_rounded(anchor.col_off_emu));
+    let rows = grid.rows();
+    let x0 = grid
+        .col_left(anchor.from_col)
+        .saturating_add(emu_to_px_rounded(anchor.col_off_emu));
     let y0 = rows
         .top(anchor.from_row)
         .saturating_add(emu_to_px_rounded(anchor.row_off_emu));
-    let x1 = col_left_px(anchor.to_col, columns)
+    let x1 = grid
+        .col_left(anchor.to_col)
         .saturating_add(emu_to_px_rounded(anchor.to_col_off_emu));
     let y1 = rows
         .top(anchor.to_row)
@@ -94,14 +94,14 @@ pub fn sync_image_px_from_grid(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
 
 /// Recomputes two-cell grid anchors from pixel coordinates for floating images.
 pub fn sync_image_grid_from_px(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
-    let (columns, rows) = (grid.columns, grid.rows());
+    let rows = grid.rows();
     let w = u64::from(anchor.width_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
     let h = u64::from(anchor.height_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
     let left = u64::from(anchor.left_px);
     let top = u64::from(anchor.top_px);
-    let (fc, fce) = px_to_col_and_emu(left, columns);
+    let (fc, fce) = grid.col_at(left);
     let (fr, fre) = px_to_row_and_emu(top, rows);
-    let (tc, tce) = px_to_col_and_emu(left.saturating_add(w), columns);
+    let (tc, tce) = grid.col_at(left.saturating_add(w));
     let (tr, tre) = px_to_row_and_emu(top.saturating_add(h), rows);
     anchor.from_col = fc;
     anchor.col_off_emu = fce;

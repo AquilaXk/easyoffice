@@ -16,6 +16,7 @@ use crate::rich_document::{
 };
 use crate::rich_writers::render_plain_text;
 use crate::sheet_page::{PageScale, SheetPage};
+use crate::sheet_styling::DEFAULT_COL_PX;
 use crate::{EasyOfficeError, RichPaper, SheetStyling};
 
 const TWIPS_PER_PT: f64 = 20.0;
@@ -25,9 +26,8 @@ const PT_PER_MIL: f64 = 0.072;
 const BODY_LINE_PITCH_PT: f64 = 16.0;
 const FRAME_FONT_PT: f64 = 10.0;
 const FRAME_LINE_PT: f64 = 12.0;
-/// The sizes the sheet window draws with (`sheet-grid.js`: `DEFAULT_COL_W`, `ROW_H`), in CSS px. The column is the one
-/// the positions of charts and pictures use (PD-302).
-pub(crate) const DEFAULT_COL_PX: f64 = crate::sheet_styling::GRID_COL_PX as f64;
+/// The row the sheet window draws with (`sheet-grid.js`: `ROW_H`), in CSS px. A column has `SheetStyling::col_px`, so the
+/// PDF, the window and the positions of charts and pictures share one width (PD-305).
 pub(crate) const ROW_PX: f64 = crate::sheet_styling::GRID_ROW_PX;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;
@@ -647,10 +647,7 @@ fn sheet_area_pages(
             if in_runs(hidden_cols, c) {
                 0.0
             } else {
-                styling
-                    .and_then(|s| s.columns.get(&c))
-                    .map_or(DEFAULT_COL_PX, |px| f64::from(*px))
-                    * PT_PER_PX
+                f64::from(styling.map_or(DEFAULT_COL_PX, |s| s.col_px(c))) * PT_PER_PX
             }
         })
         .collect();

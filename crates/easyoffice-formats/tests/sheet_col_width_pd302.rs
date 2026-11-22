@@ -1,12 +1,13 @@
-//! The default column of a sheet is 96 px, the width the sheet window draws a column at, for the window, the chart and
-//! picture anchors and the PDF alike (PD-302). The widths a file gives a column come back as they went, and the sheet-wide
-//! `defaultColWidth` and `baseColWidth` of an XLSX file never change a width that is written down.
+//! The default column of a sheet that says nothing is 64 px (8 characters of the 7 px digit of Calibri 11, rounded up to a
+//! multiple of 8 pixels), for the window, the chart and picture anchors and the PDF alike (PD-305, which replaced the 96 px
+//! of PD-302). The widths a file gives a column come back as they went, and the sheet-wide `defaultColWidth` and
+//! `baseColWidth` of an XLSX file never change a width that is written down.
 
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
     col_left_px, read_sheet_styling, ChartAnchor, DocumentFormat, OdfCodec, OdsUnpacked,
-    OoxmlCodec, SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy, GRID_COL_PX,
+    OoxmlCodec, SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy, DEFAULT_COL_PX,
     MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 
@@ -22,12 +23,13 @@ fn with_columns(columns: &[(u32, u32)]) -> SheetStyling {
 }
 
 #[test]
-fn the_default_column_is_the_96_px_of_the_window() {
-    assert_eq!(GRID_COL_PX, 96);
-    assert_eq!(col_left_px(0, &BTreeMap::new()), 0);
-    assert_eq!(col_left_px(3, &BTreeMap::new()), 288);
+fn the_default_column_is_the_64_px_of_a_sheet_that_says_nothing() {
+    assert_eq!(DEFAULT_COL_PX, 64);
+    assert_eq!(SheetStyling::default().default_col_px(), 64);
+    assert_eq!(col_left_px(0, &BTreeMap::new(), 64), 0);
+    assert_eq!(col_left_px(3, &BTreeMap::new(), 64), 192);
     // A custom column changes the columns after it by the difference to the default.
-    assert_eq!(col_left_px(3, &BTreeMap::from([(1, 200)])), 288 + 104);
+    assert_eq!(col_left_px(3, &BTreeMap::from([(1, 200)]), 64), 192 + 136);
 }
 
 #[test]
@@ -40,12 +42,12 @@ fn an_anchor_is_placed_on_the_default_columns() {
         ..ChartAnchor::default()
     };
     anchor.sync_px_from_grid(&SheetGrid::of(&SheetStyling::default()));
-    assert_eq!((anchor.left_px, anchor.width_px), (192, 192));
-    // The other way: 288 px is the left edge of column 3 and 96 px the width of one column.
+    assert_eq!((anchor.left_px, anchor.width_px), (128, 128));
+    // The other way: 192 px is the left edge of column 3 and 64 px the width of one column.
     let mut by_px = ChartAnchor {
-        left_px: 288,
+        left_px: 192,
         top_px: 24,
-        width_px: 96,
+        width_px: 64,
         height_px: 24,
         ..ChartAnchor::default()
     };
@@ -54,8 +56,8 @@ fn an_anchor_is_placed_on_the_default_columns() {
     assert_eq!(by_px.to_col, 4);
 }
 
-/// The spreadsheet program's own default column (8.43 characters, 64 px), the old engine default (80 px), the window default
-/// (96 px) and the two limits come back from both formats exactly.
+/// The spreadsheet program's own default column (8.43 characters, 64 px, now also the default of this crate), the old engine
+/// default (80 px), the old window default (96 px) and the two limits come back from both formats exactly.
 #[test]
 fn the_widths_written_down_come_back_as_they_were() {
     let columns = [
@@ -100,7 +102,7 @@ fn columns_of(bytes: &[u8]) -> BTreeMap<u32, u32> {
 }
 
 /// A file with a sheet-wide default width and some columns of their own: the columns keep their width through a save and
-/// a second read, and the columns without one stay without (the window draws them at 96 px).
+/// a second read, and the columns without one stay without (they are as wide as the sheet's default says, PD-305).
 #[test]
 fn a_sheet_default_width_does_not_change_the_widths_written_down() {
     let sheet = format!(
