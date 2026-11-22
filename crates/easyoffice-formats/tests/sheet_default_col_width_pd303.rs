@@ -187,7 +187,8 @@ fn a_value_that_is_not_a_width_is_read_as_missing() {
 fn the_limits_are_in_and_just_outside_are_out() {
     assert_eq!(MAX_COL_WIDTH_CHARS, 255.0);
     for (text, want) in [
-        ("0.001", Some(0.001)),
+        ("0.009", None),
+        ("0.01", Some(0.01)),
         ("1", Some(1.0)),
         ("255", Some(255.0)),
         ("254.99609375", Some(254.99609375)),
@@ -220,6 +221,27 @@ fn the_limits_are_in_and_just_outside_are_out() {
     }
 }
 
+/// Whatever width the writer takes, the reader takes back: the attribute is never longer than the reader reads, so a value
+/// at the lower and the upper limit and a long fraction between them come back as they went.
+#[test]
+fn every_width_the_writer_takes_is_read_back() {
+    for w in [
+        0.01,
+        0.010000000000000002,
+        1.0 / 3.0,
+        20.7109375,
+        254.99999999999997,
+        255.0,
+    ] {
+        let styling = SheetStyling {
+            default_col_width: width(Some(w), Some(8)),
+            ..SheetStyling::default()
+        };
+        let back = styling_of(&saved(styling.clone()).unwrap());
+        assert_eq!(back.default_col_width, styling.default_col_width, "{w}");
+    }
+}
+
 /// The writer does not take a width the reader would refuse: a styling built by hand with one is refused whole.
 #[test]
 fn a_styling_with_a_bad_width_is_refused_by_the_writer() {
@@ -229,6 +251,9 @@ fn a_styling_with_a_bad_width_is_refused_by_the_writer() {
         width(Some(f64::NEG_INFINITY), None),
         width(Some(0.0), None),
         width(Some(-1.0), None),
+        width(Some(0.009), None),
+        width(Some(1e-300), None),
+        width(Some(f64::MIN_POSITIVE), None),
         width(Some(255.5), None),
         width(None, Some(256)),
         width(None, Some(u32::MAX)),

@@ -16,6 +16,9 @@ use std::fmt::Write;
 
 /// The widest a column may be, in characters (ECMA-376 18.3.1.13 `col` `width`, the limit of the spreadsheet programs).
 pub const MAX_COL_WIDTH_CHARS: f64 = 255.0;
+/// The narrowest default width kept (a hundredth of a character). The lower bound keeps the attribute short: a value like
+/// `1e-300` would be written as 300 digits, which the reader's text bound refuses, so it would not come back.
+pub const MIN_COL_WIDTH_CHARS: f64 = 0.01;
 /// The largest `baseColWidth`, the characters of the maximum digit width a default column holds.
 pub const MAX_BASE_COL_WIDTH: u32 = 255;
 /// Longest text a width may be written as; a longer one is not a width.
@@ -28,9 +31,10 @@ pub struct DefaultColWidth {
     pub base: Option<u32>,
 }
 
-/// Whether `width` is a width of a column: a finite number above 0 and up to [`MAX_COL_WIDTH_CHARS`].
+/// Whether `width` is a default width: a finite number from [`MIN_COL_WIDTH_CHARS`] up to [`MAX_COL_WIDTH_CHARS`]. The reader
+/// and the writer share this, so every width the writer takes is read back.
 fn in_bounds(width: f64) -> bool {
-    width.is_finite() && width > 0.0 && width <= MAX_COL_WIDTH_CHARS
+    width.is_finite() && (MIN_COL_WIDTH_CHARS..=MAX_COL_WIDTH_CHARS).contains(&width)
 }
 
 fn short(text: &str) -> &str {

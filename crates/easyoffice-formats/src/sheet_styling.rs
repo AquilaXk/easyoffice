@@ -117,7 +117,9 @@ pub(crate) mod xlsx_view;
 
 pub use sheet_anchor_edit::{AnchorCells, AnchorEdit};
 pub use sheet_chart::*;
-pub use sheet_default_col_width::{DefaultColWidth, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS};
+pub use sheet_default_col_width::{
+    DefaultColWidth, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS, MIN_COL_WIDTH_CHARS,
+};
 pub use sheet_filter::*;
 pub use sheet_fonts::*;
 pub use sheet_links::*;

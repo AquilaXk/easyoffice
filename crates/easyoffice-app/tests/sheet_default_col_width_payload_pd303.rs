@@ -83,6 +83,8 @@ fn a_bad_width_refuses_the_whole_save() {
     for width in [
         r#","defaultColWidth":{"width":0}"#,
         r#","defaultColWidth":{"width":-1}"#,
+        r#","defaultColWidth":{"width":0.009}"#,
+        r#","defaultColWidth":{"width":1e-300}"#,
         r#","defaultColWidth":{"width":255.5}"#,
         r#","defaultColWidth":{"width":1e999}"#,
         r#","defaultColWidth":{"width":1e-999}"#,
