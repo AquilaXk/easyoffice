@@ -40,9 +40,13 @@ function pack(entries) {
     let head = e.col | ((e.flags || 0) << 14);
     if (e.bg !== undefined) head |= 1 << 18;
     if (e.fg !== undefined) head |= 1 << 19;
+    if (e.bar) head |= (1 << 20) | (e.bar.gradient ? 1 << 23 : 0);
+    if (e.icon) head |= (1 << 21) | (((e.icon.set << 3) | e.icon.index) << 24);
+    if (e.hide) head |= 1 << 22;
     words.push((e.row | (e.border ? 0x80000000 : 0)) >>> 0, head >>> 0);
     if (e.bg !== undefined || e.fg !== undefined) words.push(((e.bg !== undefined ? id(e.bg) : 0) | ((e.fg !== undefined ? id(e.fg) : 0) << 16)) >>> 0);
     if (e.border) words.push(setId(e.border));
+    if (e.bar) words.push((id(e.bar.color) | ((e.bar.pct + 128) << 16) | (e.bar.start << 24)) >>> 0);
   }
   const bytes = Buffer.alloc(words.length * 4);
   words.forEach((w, i) => bytes.writeUInt32LE(w >>> 0, i * 4));
@@ -157,4 +161,64 @@ test("the look of a cell outside the sheet's grid is none", async () => {
   }
   assert.equal(t.rules.lookAt("Other", 2, 2), undefined);
   assert.equal(t.rules.lookAt("Sheet1", 2, 2).bg, "#ffc7ce");
+});
+
+// ---- data bars and icon sets (PD-300) ----------------------------------------------------------------------------------
+
+const BAR = { color: 0x638ec6, pct: 60, start: 10, gradient: false };
+const gridCell = (t, ref) => t.h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+
+test("a data bar prints as the grid draws it, positive and negative, solid and gradient", async () => {
+  const negative = { color: 0xff0000, pct: -40, start: 50, gradient: true };
+  const t = await open([{ row: 1, col: 1, bar: BAR }, { row: 1, col: 2, bar: negative }]);
+  const root = await t.print();
+  for (const [ref, col] of [["B2", 2], ["C2", 3]]) {
+    const printed = cell(root, 2, col).style.backgroundImage;
+    assert.equal(printed, t.rules.barBackground(t.rules.lookAt("Sheet1", 2, col).bar), ref);
+    assert.equal(printed, gridCell(t, ref).style.getPropertyValue("--cf-bar"), `${ref}: the grid paints the same bar`);
+  }
+  assert.match(cell(root, 2, 2).style.backgroundImage, /linear-gradient\(90deg, transparent 10%, #638ec6 10%, #638ec6 64%, transparent 64%\)/);
+  assert.match(cell(root, 2, 3).style.backgroundImage, /color-mix/, "a gradient bar fades to a quarter of its color");
+  assert.equal(cell(root, 2, 2).textContent, "5", "the value is still in the cell");
+});
+
+test("an icon prints the shape and color the grid draws, before the value", async () => {
+  const t = await open([{ row: 1, col: 1, icon: { set: 0, index: 2 } }, { row: 1, col: 2, icon: { set: 3, index: 0 } }]);
+  const root = await t.print();
+  for (const [ref, col] of [["B2", 2], ["C2", 3]]) {
+    const printed = cell(root, 2, col);
+    const grid = gridCell(t, ref);
+    assert.ok(printed.dataset.cfIcon, ref);
+    assert.equal(printed.dataset.cfIcon, grid.dataset.cfIcon);
+    assert.equal(printed.style.getPropertyValue("--cf-icon-mask"), grid.style.getPropertyValue("--cf-icon-mask"));
+    assert.equal(printed.style.getPropertyValue("--cf-icon-color"), grid.style.getPropertyValue("--cf-icon-color"));
+  }
+  assert.notEqual(cell(root, 2, 2).dataset.cfIcon, cell(root, 2, 3).dataset.cfIcon, "two sets, two shapes");
+  assert.equal(cell(root, 2, 2).textContent, "5");
+});
+
+test("a value a bar or an icon hides stays in the cell and is not drawn", async () => {
+  const t = await open([{ row: 1, col: 1, bar: BAR, hide: true }, { row: 1, col: 2, icon: { set: 0, index: 0 }, hide: true }, { row: 1, col: 3, bar: BAR }]);
+  const root = await t.print();
+  assert.ok(cell(root, 2, 2).classList.contains("eo-print-cf-hide"));
+  assert.ok(cell(root, 2, 3).classList.contains("eo-print-cf-hide"));
+  assert.equal(cell(root, 2, 2).textContent, "5");
+  assert.equal(cell(root, 2, 4).classList.contains("eo-print-cf-hide"), false, "a bar that shows its value does not hide it");
+  assert.equal(gridCell(t, "B2").classList.contains("cf-hide-value"), true, "the grid hides the same cell");
+});
+
+test("a bar or an icon with nothing else is part of the page, and a cell with neither prints as before", async () => {
+  const t = await open([{ row: 2, col: 2, bar: BAR }]);
+  const root = await t.print();
+  const c3 = cell(root, 3, 3);
+  assert.equal(c3.style.backgroundImage, t.rules.barBackground(t.rules.lookAt("Sheet1", 3, 3).bar));
+  assert.equal(cell(root, 2, 2).style.backgroundImage, "");
+  assert.equal(cell(root, 2, 2).dataset.cfIcon, undefined);
+  assert.equal(cell(root, 2, 2).classList.contains("eo-print-cf-hide"), false);
+});
+
+test("an icon index or set the page does not know prints no icon", async () => {
+  const t = await open([{ row: 1, col: 1, icon: { set: 31, index: 7 } }]);
+  const root = await t.print();
+  assert.equal(cell(root, 2, 2).dataset.cfIcon, undefined);
 });

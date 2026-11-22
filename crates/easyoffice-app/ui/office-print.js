@@ -312,14 +312,14 @@
 
     function buildSheet(rules) {
       const { map, geometry, core, boxes, page } = sheetPlan();
-      // What the conditional formats give a cell (PD-289): the answer the grid paints from, and the edges of the cell with the rules'
-      // laid over. Null where the rules give the cell nothing to print.
+      // What the conditional formats give a cell (PD-289, PD-300): the answer the grid paints from, and the edges of the cell with the
+      // rules' laid over. Null where the rules give the cell nothing to print.
       const ruleApi = host.__EASYOFFICE_SHEET_RULES__;
       const ruleOf = (row, col, own) => {
         const fx = ruleApi?.lookAt(geometry.sheetName, row, col);
         const edges = ruleApi?.withEdges(geometry.sheetName, row, col, own?.border);
         const ruledEdges = edges !== own?.border && RULE_EDGE_SIDES.some((side) => edges?.[side]);
-        return fx?.bg || fx?.fg || fx?.flags || ruledEdges ? { fx, edges } : null;
+        return fx?.bg || fx?.fg || fx?.flags || fx?.bar || fx?.icon || ruledEdges ? { fx, edges } : null;
       };
       const cellAt = (row, col) => {
         const entry = map[gridUtils.refOf(row, col)];
@@ -336,7 +336,10 @@
         if (shown?.f) fillCell(td, shown.t, shown.f);
         else td.textContent = shown ? shown.t : isTextEntry(entry) ? text : gridUtils.formatGeneral(text);
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
-        if (rule) host.__EASYOFFICE_SHEET_LOOK__?.printRule(td, rule.fx, rule.edges);
+        if (rule) {
+          host.__EASYOFFICE_SHEET_LOOK__?.printRule(td, rule.fx, rule.edges);
+          ruleApi?.printFx(td, rule.fx);
+        }
         if (shown?.c) td.style.color = shown.c;
       };
       const pages = host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({

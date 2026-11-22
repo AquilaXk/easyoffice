@@ -356,6 +356,11 @@
   #eo-print-root .eo-print-u { text-decoration: underline; }
   #eo-print-root .eo-print-s { text-decoration: line-through; }
   #eo-print-root .eo-print-u.eo-print-s { text-decoration: underline line-through; }
+  /* The icon of a conditional format (PD-300), as the grid draws it (`styles.css`): a masked box before the text; a value the rule hides is not drawn */
+  #eo-print-root .eo-print-sheet td[data-cf-icon]::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; background: var(--cf-icon-color, currentcolor); -webkit-mask: var(--cf-icon-mask, none) center / contain no-repeat; mask: var(--cf-icon-mask, none) center / contain no-repeat; }
+  #eo-print-root .eo-print-sheet td.eo-print-cf-hide { color: transparent !important; }
+  #eo-print-root .eo-print-sheet td.eo-print-cf-hide[data-cf-icon] { text-align: center; }
+  #eo-print-root .eo-print-sheet td.eo-print-cf-hide[data-cf-icon]::before { margin-right: 0; }
   #eo-print-root .slide-stage { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
   #eo-print-root .slide-lower-zone { overflow: hidden; }
   #eo-print-root :is(.slide-title-zone h2, .slide-lower-zone p):empty::before { content: none; }
@@ -670,6 +675,11 @@
 .print-preview-pane .eo-print-i { font-style: italic; }
 .print-preview-pane .eo-print-u { text-decoration: underline; }
 .print-preview-pane .eo-print-s { text-decoration: line-through; }
+.print-preview-pane .eo-print-u.eo-print-s { text-decoration: underline line-through; }
+.print-preview-pane .eo-print-sheet td[data-cf-icon]::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; background: var(--cf-icon-color, currentcolor); -webkit-mask: var(--cf-icon-mask, none) center / contain no-repeat; mask: var(--cf-icon-mask, none) center / contain no-repeat; }
+.print-preview-pane .eo-print-sheet td.eo-print-cf-hide { color: transparent !important; }
+.print-preview-pane .eo-print-sheet td.eo-print-cf-hide[data-cf-icon] { text-align: center; }
+.print-preview-pane .eo-print-sheet td.eo-print-cf-hide[data-cf-icon]::before { margin-right: 0; }
 .print-preview-pane .slide-stage { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 .print-preview-pane .slide-lower-zone { overflow: hidden; }
 .print-preview-pane :is(.slide-title-zone h2, .slide-lower-zone p):empty::before { content: none; }

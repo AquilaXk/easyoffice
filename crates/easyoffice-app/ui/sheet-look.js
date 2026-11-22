@@ -368,8 +368,8 @@
 
   // The look the conditional formats give a printed cell (PD-289), as `td[data-cf]` gives it on the grid (`styles.css`): the fill and
   // the text color of the rule replace the cell's, its font flags add to the cell's, and `edges` (the cell's own with the edges of the
-  // rules laid over, `overlayRuleEdges`) replace the cell's. `fx` is the rule's answer (`sheet-rules.js` `lookAt`). Data bars and icons
-  // are not printed.
+  // rules laid over, `overlayRuleEdges`) replace the cell's. `fx` is the rule's answer (`sheet-rules.js` `lookAt`). The data bar and the
+  // icon are `printFx` of `sheet-rules.js` (PD-300).
   function printRule(td, fx, edges) {
     const s = td.style;
     if (fx?.bg) s.backgroundColor = fx.bg;

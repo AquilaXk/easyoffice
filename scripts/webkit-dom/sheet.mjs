@@ -462,4 +462,43 @@ export const sheetSteps = [
     const one = printed.find((c) => c.text === "1");
     assert.notEqual(one.fill, "rgb(255, 199, 206)", "a cell the rule does not match prints plain");
   }],
+
+  ["a printed sheet draws the data bar and the icon of a conditional format, and does not draw a value they hide (PD-300)", async (page) => {
+    for (const [ref, value] of [["B2", "10"], ["B3", "20"], ["B4", "40"], ["D2", "10"], ["D3", "20"], ["D4", "40"]]) {
+      await page.click(td(ref));
+      await page.keyboard.type(value);
+      await page.keyboard.press("Enter");
+    }
+    await page.evaluate(() => window.__EASYOFFICE_SHEET_RULES__.set("Sheet1", {
+      cf: [
+        { r: "B2:B4", t: "bar", min: { k: "num", v: "0" }, max: { k: "max", v: "" }, pos: "#638ec6", neg: "#ff0000", grad: false, show: true, stop: false },
+        { r: "D2:D4", t: "icons", set: "3Arrows", th: [{ k: "num", v: "0" }, { k: "num", v: "15" }, { k: "num", v: "30" }], rev: false, show: false, stop: false },
+      ],
+      dv: [],
+    }));
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="D4"]').dataset.cfIcon !== undefined, null, { timeout: 5000 });
+    await page.evaluate(() => {
+      window.print = () => {};
+      window.__EASYOFFICE_NATIVE_MENU__("file:print");
+    });
+    await page.waitForSelector("#eo-print-root td", { state: "attached" });
+    // The print rules (the icon box, the hidden value) apply to the print medium.
+    await page.emulateMedia({ media: "print" });
+    const printed = await page.$$eval("#eo-print-root td", (cells) => cells.map((c) => ({
+      text: c.textContent,
+      image: getComputedStyle(c).backgroundImage,
+      color: getComputedStyle(c).color,
+      icon: c.dataset.cfIcon || "",
+      before: c.dataset.cfIcon ? { width: getComputedStyle(c, "::before").width, content: getComputedStyle(c, "::before").content, mask: getComputedStyle(c, "::before").webkitMaskImage } : null,
+    })));
+    const bars = printed.filter((c) => ["10", "20", "40"].includes(c.text) && c.image.includes("linear-gradient"));
+    assert.equal(bars.length, 3, "each value of the bar column prints a bar");
+    assert.ok(bars.every((c) => c.image.includes("rgb(99, 142, 198)")), "the bar is the rule's color");
+    const icons = printed.filter((c) => c.icon);
+    assert.equal(icons.length, 3, "each cell of the icon column prints an icon");
+    assert.equal(new Set(icons.map((c) => c.icon)).size, 3, "three arrows");
+    assert.ok(icons.every((c) => c.before.width === "14px" && c.before.content !== "none" && c.before.mask.includes("svg")), "the icon is a masked box");
+    assert.ok(icons.every((c) => c.color === "rgba(0, 0, 0, 0)"), "the value the icon set hides is not drawn");
+    assert.ok(printed.some((c) => c.text === "40" && c.icon), "the hidden value is still in the cell");
+  }],
 ];

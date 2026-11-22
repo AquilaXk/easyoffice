@@ -281,6 +281,20 @@
     );
   }
 
+  // The data bar and the icon of a rule answer `fx` on a printed cell (PD-300), as `paintFx` gives them to a grid cell: the bar is
+  // the cell's background image, the icon a masked box before the text (`td[data-cf-icon]::before` in `shell.css`), and a value the
+  // rule hides stays in the cell but is not drawn (`eo-print-cf-hide`), so a copy of the page still holds it.
+  function printFx(td, fx) {
+    if (fx?.bar) td.style.backgroundImage = barBackground(fx.bar);
+    const icon = fx?.icon ? ICON_SETS[ICON_SET_NAMES[fx.icon.set]]?.[fx.icon.index] : null;
+    if (icon) {
+      td.dataset.cfIcon = icon[0];
+      td.style.setProperty("--cf-icon-mask", iconMask(icon[0]));
+      td.style.setProperty("--cf-icon-color", icon[1]);
+    }
+    if (fx?.hide) td.classList.add("eo-print-cf-hide");
+  }
+
   function createSheetRules() {
     const rules = new Map(); // sheet -> { cf: [], dv: [] }
     const fx = new Map(); // sheet -> Map(row * MAX_COLS + col -> fx)
@@ -581,6 +595,7 @@
       refOf,
       decodePacked,
       barBackground,
+      printFx,
       get,
       getAll,
       hasAny,
