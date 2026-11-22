@@ -294,6 +294,40 @@
       }));
   }
 
+  // The pivot tables the engine left out for their size (PD-303): the locations (`A3:D6`) of each sheet, as the answer to the
+  // session's `pivots` action named them. A `GETPIVOTDATA` that points into one answers `#REF!`, and the status bar says why.
+  const omittedPivots = new Map();
+  const PIVOT_OMITTED_NOTE = "피벗 정의가 너무 커서 계산에서 제외됨";
+
+  function setOmittedPivots(sheet, locations) {
+    const list = Array.isArray(locations) ? locations.filter((l) => typeof l === "string") : [];
+    if (list.length) omittedPivots.set(sheet, list);
+    else omittedPivots.delete(sheet);
+  }
+
+  const clearOmittedPivots = () => omittedPivots.clear();
+
+  function cellInLocation(location, cell) {
+    const [a, b = a] = location.split(":").map(parseRef);
+    return Boolean(a && b && cell.row >= a.row && cell.row <= b.row && cell.col >= a.col && cell.col <= b.col);
+  }
+
+  // The words for a cell that answers `#REF!` from a `GETPIVOTDATA` whose pivot table reference lies in a table the engine left
+  // out; empty for any other cell. `entry` is the model's `{ value, formula }` of the cell on `sheet`.
+  function pivotOmittedNote(sheet, entry) {
+    if (omittedPivots.size === 0 || !entry || String(entry.value).trim() !== "#REF!") return "";
+    const formula = String(entry.formula || "");
+    const tokens = host.__EASYOFFICE_SHEET_REF_TOKENS__?.TOKEN_RE;
+    if (!tokens || !/GETPIVOTDATA\s*\(/i.test(formula)) return "";
+    for (const m of formula.matchAll(new RegExp(tokens.source, tokens.flags))) {
+      if (!m[2]) continue;
+      const named = m[1] ? m[1].slice(0, -1).replace(/^'(.*)'$/s, "$1").replace(/''/g, "'") : sheet;
+      const cell = parseRef(m[2].split(":")[0].replaceAll("$", ""));
+      if (cell && (omittedPivots.get(named) || []).some((location) => cellInLocation(location, cell))) return PIVOT_OMITTED_NOTE;
+    }
+    return "";
+  }
+
   const PAYLOADS = { merges: mergePayload, tables: tablePayload, pivots: pivotPayload };
 
   // What the engine is told of `kind` (`merges`, `tables` or `pivots`) for a sheet.
@@ -348,6 +382,9 @@
     lockPayload,
     mergePayload,
     pivotPayload,
+    setOmittedPivots,
+    clearOmittedPivots,
+    pivotOmittedNote,
     blockerPayload,
     mergesField,
     hiddenRowsField,

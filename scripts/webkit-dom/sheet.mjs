@@ -520,6 +520,48 @@ export const sheetSteps = [
     assert.deepEqual(await place(), moved(["G4", "G16"]), "the charts moved one column and kept their widths");
   }],
 
+  ["a chart of another sheet follows a row and a column inserted into the sheet its ranges point at, and one undo brings the ranges back (PD-303)", async (page) => {
+    const tabs = () => page.$$eval("#sheet-tab-bar .sheet-tab-btn", (buttons) => buttons.map((b) => b.dataset.sheetTab));
+    const before = await tabs();
+    await page.click("#btn-add-sheet-tab");
+    await page.waitForFunction((count) => document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn").length > count, before.length);
+    const far = (await tabs()).find((name) => !before.includes(name));
+    // A chart on the new sheet over the cells of Sheet1, and one more over its own cells.
+    await page.evaluate((sheet) => {
+      const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
+      const anchor = { fromCol: 1, fromRow: 1, toCol: 4, toRow: 6, ...emu, left: 96, top: 24, width: 288, height: 120 };
+      const base = { chartType: "line", title: "", switchRowCol: false, legend: "right", anchor };
+      window.__EASYOFFICE_SHEET_LAYOUT__.setCharts(sheet, [
+        { ...base, id: "far", dataRange: "Sheet1!$A$1:$B$5", series: [{ name: "x", nameRef: "Sheet1!$B$1", categoriesRef: "Sheet1!$A$2:$A$5", valuesRef: "Sheet1!$B$2:$B$5" }] },
+        { ...base, id: "own", dataRange: "A1:B3", series: [{ name: "y", valuesRef: "B2:B3" }] },
+      ]);
+    }, far);
+    await page.click(`#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]`);
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
+    const refs = () => page.evaluate((sheet) => window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(sheet).map((c) => [c.dataRange, c.series[0].nameRef ?? "", c.series[0].categoriesRef ?? "", c.series[0].valuesRef]), far);
+    const act = (name) => page.evaluate((a) => document.querySelector(`.md-item[data-sheet-act="${a}"]`).click(), name);
+    const start = [["Sheet1!$A$1:$B$5", "Sheet1!$B$1", "Sheet1!$A$2:$A$5", "Sheet1!$B$2:$B$5"], ["A1:B3", "", "", "B2:B3"]];
+    assert.deepEqual(await refs(), start);
+
+    // A row above row 3: the ranges that cross it grow by one, the one that sits above stays, the own ranges are the other sheet's.
+    await page.click(td("A3"));
+    await act("row-insert-above");
+    await page.waitForFunction((want) => JSON.stringify(window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(want.sheet)[0].series[0].valuesRef) === JSON.stringify(want.values), { sheet: far, values: "Sheet1!$B$2:$B$6" });
+    assert.deepEqual(await refs(), [["Sheet1!$A$1:$B$6", "Sheet1!$B$1", "Sheet1!$A$2:$A$6", "Sheet1!$B$2:$B$6"], start[1]]);
+
+    // One undo gives the cells and the ranges of the other sheet back at once.
+    await page.click(td("A1"));
+    await page.keyboard.press("Control+z");
+    await page.waitForFunction((want) => window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(want.sheet)[0].series[0].valuesRef === want.values, { sheet: far, values: "Sheet1!$B$2:$B$5" });
+    assert.deepEqual(await refs(), start);
+
+    // A column before B: the ranges that start at B and after move right, whole.
+    await page.click(td("B1"));
+    await act("col-insert-left");
+    await page.waitForFunction((want) => window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf(want.sheet)[0].dataRange === want.range, { sheet: far, range: "Sheet1!$A$1:$C$5" });
+    assert.deepEqual(await refs(), [["Sheet1!$A$1:$C$5", "Sheet1!$C$1", "Sheet1!$A$2:$A$5", "Sheet1!$C$2:$C$5"], start[1]]);
+  }],
+
   ["a whole column picked by its header leaves each sheet at the scroll it had when the tab changes (PD-299)", async (page) => {
     const view = () => page.evaluate(() => {
       const viewport = document.getElementById("sheet-viewport");
@@ -624,6 +666,16 @@ export const sheetSteps = [
     await enter("H2", '=GETPIVOTDATA("매출",$A$1)', "42");
     await enter("H3", '=GETPIVOTDATA("매출",$A$20)', "#REF!");
     await enter("H4", "=1+2", "3");
+    // PD-303: the status bar says why the table at A20 answers #REF!, and says nothing of the readable one or of a plain formula.
+    const note = () => page.textContent("#status-sheet-agg");
+    const why = "피벗 정의가 너무 커서 계산에서 제외됨";
+    await page.click(td("H3"));
+    await page.waitForFunction((text) => document.getElementById("status-sheet-agg").textContent === text, why, { timeout: 5000 });
+    await enter("H5", '=GETPIVOTDATA("매출",$A$1,"지역","North")', "#REF!");
+    await page.click(td("H5"));
+    assert.notEqual(await note(), why, "a #REF! of a readable table has another cause");
+    await page.click(td("H4"));
+    assert.notEqual(await note(), why);
   }],
 
   ["a printed sheet carries the fill, text color and bold a conditional format gave its cells (PD-289)", async (page) => {

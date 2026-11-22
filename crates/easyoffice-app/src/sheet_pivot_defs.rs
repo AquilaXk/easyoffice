@@ -67,19 +67,37 @@ fn pivot_def(sheet: &str, pivot: &SheetPivotTable) -> Option<PivotTableDef> {
             })
             .collect(),
     };
-    // Each table gets its share of what a workbook may hold, so the tables of one request never outgrow it.
-    (def.heap_bytes() <= MAX_REGISTERED_PIVOT_BYTES / MAX_REGISTERED_PIVOTS).then_some(def)
+    Some(def)
+}
+
+/// Each table gets its share of what a workbook may hold, so the tables of one request never outgrow it.
+fn fits_its_share(def: &PivotTableDef) -> bool {
+    def.heap_bytes() <= MAX_REGISTERED_PIVOT_BYTES / MAX_REGISTERED_PIVOTS
+}
+
+/// The `location` of a pivot item as the page wrote it (`A3:D6`), when it is a range: the name a page matches a table by.
+fn location_of(item: &StrictJsonValue) -> Option<String> {
+    let text = StrictJsonValue::get_field(item.as_object()?, "location")?.as_str()?;
+    CellBox::parse(text).map(|_| text.to_string())
+}
+
+/// The pivot tables of a sheet the engine registers, and the locations of the ones it left out for their size.
+#[derive(Default)]
+pub(crate) struct SheetPivots {
+    pub(crate) defs: Vec<PivotTableDef>,
+    pub(crate) omitted: Vec<String>,
 }
 
 /// The pivot tables of `sheet` from a `pivots` array (null: none). A table whose own content is over a bound (a
 /// text, a list, its bytes) is left out and answers `#REF!`, so it cannot stop the other formulas of the workbook;
-/// the number of tables of a sheet is a bound of the request and refuses all of it.
+/// its location is named in `omitted` (PD-303). The number of tables of a sheet is a bound of the request and
+/// refuses all of it.
 pub(crate) fn pivot_defs(
     sheet: &str,
     value: &StrictJsonValue,
-) -> Result<Vec<PivotTableDef>, EasyOfficeError> {
+) -> Result<SheetPivots, EasyOfficeError> {
     if matches!(value, StrictJsonValue::Null) {
-        return Ok(Vec::new());
+        return Ok(SheetPivots::default());
     }
     let items = value.as_array().ok_or_else(bad)?;
     if items.len() > MAX_PIVOTS_PER_SHEET {
@@ -88,15 +106,24 @@ pub(crate) fn pivot_defs(
             items.len()
         )));
     }
-    let mut defs = Vec::with_capacity(items.len());
+    let mut out = SheetPivots {
+        defs: Vec::with_capacity(items.len()),
+        omitted: Vec::new(),
+    };
     for (idx, item) in items.iter().enumerate() {
         match parse_pivot(idx, item) {
-            Ok(pivot) => defs.extend(pivot_def(sheet, &pivot)),
-            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => {}
+            Ok(pivot) => match pivot_def(sheet, &pivot) {
+                Some(def) if fits_its_share(&def) => out.defs.push(def),
+                Some(_) => out.omitted.extend(location_of(item)),
+                None => {}
+            },
+            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => {
+                out.omitted.extend(location_of(item));
+            }
             Err(err) => return Err(err),
         }
     }
-    Ok(defs)
+    Ok(out)
 }
 
 /// The `pivots` field of a request without a session: `{"Sheet1": [pivot, ...], ...}`; nothing when absent. The
@@ -124,7 +151,7 @@ pub(crate) fn pivots_by_sheet(
             )));
         }
         if count > 0 {
-            out.push((name.clone(), pivot_defs(name, list)?));
+            out.push((name.clone(), pivot_defs(name, list)?.defs));
         }
     }
     Ok(out)

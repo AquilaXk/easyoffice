@@ -169,7 +169,11 @@
       const aggEl = document.getElementById("status-sheet-agg");
       if (aggEl) {
         const editingTd = activeTd && stateOf(activeTd)?.userEdited ? activeTd : null;
-        aggEl.textContent = formatAggregate(collectNumbers(getRange(), editingTd));
+        // A `GETPIVOTDATA` into a pivot table the engine left out for its size answers `#REF!`: the status says why (PD-303).
+        const rg = getRange();
+        const single = rg.r1 === rg.r2 && rg.c1 === rg.c2;
+        const note = single && !editingTd ? host.__EASYOFFICE_SHEET_SPILL__?.pivotOmittedNote(api.getSheetName(), api.getEntry(ref)) : "";
+        aggEl.textContent = note || formatAggregate(collectNumbers(rg, editingTd));
       }
       const out = document.getElementById("sheet-eval-result");
       if (out) out.setAttribute("title", out.textContent || "");

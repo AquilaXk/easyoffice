@@ -2,6 +2,7 @@
 //! the tables structured references are resolved against (PD-222, PD-224, PD-225).
 
 use crate::sheet_layout_json::HiddenRowRuns;
+use crate::sheet_pivot_defs::SheetPivots;
 use crate::sheet_session::{
     recalc_answer, registry, session_id, Applied, Registry, EXPIRED, REFUSED,
 };
@@ -18,6 +19,22 @@ pub(crate) enum Blockers {
     HiddenRows(HiddenRowRuns),
     /// The pivot tables `GETPIVOTDATA` finds (PD-292).
     Pivots(Vec<PivotTableDef>),
+}
+
+/// `,"pivotsOmitted":["A3:D6", ...]`: the tables the engine left out for their size, which the page names when a
+/// `GETPIVOTDATA` that points into one answers `#REF!` (PD-303).
+fn omitted_json(locations: &[String]) -> String {
+    let mut out = String::from(",\"pivotsOmitted\":[");
+    for (i, location) in locations.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        EasyOfficeIpcRouter::escape_json_into(&mut out, location);
+        out.push('"');
+    }
+    out.push(']');
+    out
 }
 
 impl Registry {
@@ -101,11 +118,25 @@ impl EasyOfficeIpcRouter {
         let id = session_id(entries)?;
         let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
         let pivots = match StrictJsonValue::get_field(entries, "pivots") {
-            None => Vec::new(),
+            None => SheetPivots::default(),
             Some(v) => crate::sheet_pivot_defs::pivot_defs(sheet, v)?,
         };
-        match registry().set_blockers(id, owner, sheet, Blockers::Pivots(pivots), Instant::now())? {
-            Applied::Done(json) => Ok(json),
+        let omitted = pivots.omitted;
+        match registry().set_blockers(
+            id,
+            owner,
+            sheet,
+            Blockers::Pivots(pivots.defs),
+            Instant::now(),
+        )? {
+            Applied::Done(mut json) => {
+                if !omitted.is_empty() && !json.contains("\"refused\"") {
+                    json.pop();
+                    json.push_str(&omitted_json(&omitted));
+                    json.push('}');
+                }
+                Ok(json)
+            }
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),
         }

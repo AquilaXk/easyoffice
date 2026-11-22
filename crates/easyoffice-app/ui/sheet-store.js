@@ -175,6 +175,7 @@
       session.merges = new Map();
       session.tables = new Map();
       session.pivots = new Map();
+      spillApi?.clearOmittedPivots();
       session.hiddenRows = new Map();
       session.mergesVersion = -1;
     }
@@ -394,6 +395,8 @@
           if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
           if (res.refused) continue;
           session[kind].set(name, payload);
+          // The pivot tables the engine left out for their size: the status bar says why a `GETPIVOTDATA` into one is `#REF!` (PD-303).
+          if (kind === "pivots") spillApi.setOmittedPivots(name, res.pivotsOmitted);
           for (const c of Array.isArray(res.changed) ? res.changed : []) {
             session.values.set(c.sheet + "!" + c.cell, c.value);
             const held = sheetsMap[c.sheet]?.[c.cell];

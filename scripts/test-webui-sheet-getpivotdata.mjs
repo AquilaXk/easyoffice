@@ -103,7 +103,8 @@ async function type(t, ref, text) {
   await flushAsyncTurns(15);
 }
 
-async function open({ sessions }) {
+// `omitted`: the locations the engine names as left out for their size (PD-303); then it answers `#REF!` for the formulas.
+async function open({ sessions, omitted = null }) {
   const requests = [];
   const harness = await createWorkspaceHarness({
     transformHtml: demoHtml,
@@ -114,7 +115,10 @@ async function open({ sessions }) {
         requests.push(body);
         if (body.sessionAction === "open") return { session: "s1" };
         if (body.sessionAction === "apply") return { session: "s1", changed: [], spills: [], circular: false };
-        if (body.sessionAction === "pivots") return { session: "s1", changed: [{ sheet: body.sheet, cell: "H9", value: String(body.pivots.length ? 43 : "#REF!") }], spills: [], circular: false };
+        if (body.sessionAction === "pivots") {
+          const answer = omitted && body.pivots.length ? "#REF!" : String(body.pivots.length ? 43 : "#REF!");
+          return { session: "s1", changed: [{ sheet: body.sheet, cell: "H9", value: answer }], spills: [], circular: false, ...(omitted && body.pivots.length ? { pivotsOmitted: omitted } : {}) };
+        }
         return {};
       }
       return { status: "ok" };
@@ -178,4 +182,52 @@ test("a request without a session carries the pivot tables to the engine", async
   assert.ok(request, "a stateless request was sent");
   assert.equal(request.pivots.Sheet1[0].location, "F3:I6");
   assert.equal(request.pivots.Sheet1[0].sourceRange, "A1:C7");
+});
+
+// PD-303: a pivot table the engine left out for its size is named in the answer; a `GETPIVOTDATA` into it says why it is `#REF!`.
+const WHY = "피벗 정의가 너무 커서 계산에서 제외됨";
+
+test("the reason shows for a #REF! GETPIVOTDATA whose pivot table reference lies in an omitted table, and for no other cell", async () => {
+  const h = await createWorkspaceHarness();
+  const spill = h.host.__EASYOFFICE_SHEET_SPILL__;
+  const ref = (formula, value = "#REF!") => ({ formula, value });
+  spill.setOmittedPivots("Sheet1", ["F3:I6"]);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",$F$3)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",H5,"지역","East")')), WHY, "any cell of the table");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=IFERROR(GETPIVOTDATA("매출",Sheet1!$I$6),0)+1')), WHY, "named by its sheet");
+  assert.equal(spill.pivotOmittedNote("Sheet2", ref('=GETPIVOTDATA("매출",Sheet1!F3)')), WHY, "from another sheet");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref("=getpivotdata(\"매출\",$F$3)")), WHY, "any case");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",$F$3)', "43")), "", "a value is not an error");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",$A$20)')), "", "a reference outside the table");
+  assert.equal(spill.pivotOmittedNote("Sheet2", ref('=GETPIVOTDATA("매출",$F$3)')), "", "the same cell of another sheet");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref("=F3+1")), "", "no GETPIVOTDATA");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("F3",$A$20)')), "", "a text is not a reference");
+  assert.equal(spill.pivotOmittedNote("Sheet1", null), "");
+  spill.setOmittedPivots("Sheet1", []);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",$F$3)')), "", "the list of a sheet is replaced by the next answer");
+  spill.setOmittedPivots("Sheet1", ["F3:I6", 7, null]);
+  spill.clearOmittedPivots();
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",$F$3)')), "");
+});
+
+test("the status bar names the reason of a #REF! that the omitted pivot table left, and takes it back when the table is readable", async () => {
+  const t = await open({ sessions: true, omitted: ["F3:I6"] });
+  const layout = t.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const status = () => t.document.getElementById("status-sheet-agg").textContent;
+  await type(t, "H9", '=GETPIVOTDATA("매출",$F$3)');
+  layout.setPivots("Sheet1", [PIVOT]);
+  await flushAsyncTurns(30);
+  const cell = t.document.querySelector('#pane-sheet td[data-cell="H9"]');
+  assert.equal(cell.textContent, "#REF!");
+  cell.focus();
+  await flushAsyncTurns(5);
+  assert.equal(status(), WHY);
+  t.document.querySelector('#pane-sheet td[data-cell="H10"]').focus();
+  await flushAsyncTurns(5);
+  assert.notEqual(status(), WHY, "another cell has nothing to say about it");
+  // The table is edited and the engine reads it now: the reason is gone.
+  t.host.__EASYOFFICE_SHEET_SPILL__.setOmittedPivots("Sheet1", []);
+  cell.focus();
+  await flushAsyncTurns(5);
+  assert.notEqual(status(), WHY);
 });
