@@ -694,6 +694,38 @@ fn hyperlink_style_xfs(styles_xml: &str) -> HashSet<u32> {
         .collect()
 }
 
+/// The font id of the Normal cell style (`cellStyle` with `builtinId` 0, ECMA-376 18.8.7): the `fontId` of the `cellStyleXfs`
+/// entry its `xfId` names. Font 0 when the file does not say, or says something that is not there.
+fn normal_font_id(styles_xml: &str) -> usize {
+    let attr = |attrs: &str, name: &str| {
+        extract_attr_from_fragment(attrs, name)?
+            .parse::<usize>()
+            .ok()
+    };
+    let normal_xf = extract_tag_bodies(styles_xml, "cellStyles")
+        .into_iter()
+        .next()
+        .and_then(|body| {
+            extract_tags_or_self_closing_with_attrs(body, "cellStyle")
+                .into_iter()
+                .take(MAX_CELL_STYLE_ENTRIES)
+                .find(|(attrs, _)| extract_attr_from_fragment(attrs, "builtinId") == Some("0"))
+                .and_then(|(attrs, _)| attr(attrs, "xfId"))
+        })
+        .unwrap_or(0);
+    extract_tag_bodies(styles_xml, "cellStyleXfs")
+        .into_iter()
+        .next()
+        .and_then(|body| {
+            extract_tags_or_self_closing_with_attrs(body, "xf")
+                .into_iter()
+                .take(MAX_XF_DEFS)
+                .nth(normal_xf)
+                .and_then(|(attrs, _)| attr(attrs, "fontId"))
+        })
+        .unwrap_or(0)
+}
+
 /// Style of every `cellXfs` entry, resolved against `fonts` and `numFmts`. A font size equal to
 /// the default font's (font 0) reads as "no explicit size".
 pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> XfStyles {
@@ -717,7 +749,12 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         .and_then(clean_font_name)
         .unwrap_or("Calibri")
         .to_string();
-    let digit_px = Some(max_digit_px(Some(&default_font), Some(default_size)));
+    // The unit of the column widths is the digit of the Normal style's font, which is not always font 0 (PD-305).
+    let normal = fonts.get(normal_font_id(styles_xml)).or(fonts.first());
+    let digit_px = normal.map(|(look, name)| {
+        let face = name.as_deref().and_then(clean_font_name);
+        max_digit_px(face, Some(look.size_pt.unwrap_or(DEFAULT_SIZE_PT)))
+    });
     let fills = parse_fills(styles_xml, colors);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
         return XfStyles {

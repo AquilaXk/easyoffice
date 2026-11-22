@@ -147,6 +147,86 @@ fn the_digit_of_the_default_font_is_the_unit_of_every_width_in_characters() {
     );
 }
 
+/// The default font of the Korean edition (Malgun Gothic 11 pt): 8.38 characters of an 8 px digit, 72 px; a width in characters
+/// of the file is in digits of that width.
+#[test]
+fn the_korean_default_font_has_an_8_px_digit() {
+    let bare = format!("{SHEET_HEAD}{SHEET_TAIL}");
+    for name in ["Malgun Gothic", "맑은 고딕"] {
+        let read = styling_of(&xlsx_with(&styles_of("11", name), &bare));
+        assert_eq!(read.default_col_px(), 72, "{name}");
+    }
+    let sheet = format!(
+        r#"{SHEET_HEAD}<cols><col min="1" max="1" width="10" customWidth="1"/></cols>{SHEET_TAIL}"#
+    );
+    let read = styling_of(&xlsx_with(&styles_of("11", "맑은 고딕"), &sheet));
+    assert_eq!(read.columns, BTreeMap::from([(0, 80)]));
+    let again = styling_of(&saved(read.clone()));
+    assert_eq!((again.default_col_px(), again.columns), (72, read.columns));
+    // The face the table has no digit for (Aptos) is read as Calibri: no source gives its width.
+    let aptos = styling_of(&xlsx_with(&styles_of("11", "Aptos Narrow"), &bare));
+    assert_eq!(aptos.default_col_px(), 64);
+}
+
+/// The unit is the digit of the Normal style's font (`cellStyle` `builtinId` 0, its `cellStyleXfs` entry's `fontId`), which
+/// is font 0 only when the file says so or says nothing that can be followed.
+#[test]
+fn the_normal_style_decides_the_font_of_the_unit() {
+    let styles = |cell_styles: &str, style_xfs: &str| {
+        format!(
+            concat!(
+                r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+                r#"<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>"#,
+                r#"<font><sz val="12"/><name val="Arial"/></font></fonts>"#,
+                r#"<cellStyleXfs count="2">{}</cellStyleXfs>"#,
+                r#"<cellXfs count="1"><xf fontId="0"/></cellXfs><cellStyles count="1">{}</cellStyles></styleSheet>"#
+            ),
+            style_xfs, cell_styles
+        )
+    };
+    let two = r#"<xf fontId="0"/><xf fontId="1"/>"#;
+    let bare = format!("{SHEET_HEAD}{SHEET_TAIL}");
+    let px = |cell_styles: &str, xfs: &str| {
+        styling_of(&xlsx_with(&styles(cell_styles, xfs), &bare)).default_col_px()
+    };
+    // Normal is the second entry: Arial 12 pt, a 9 px digit, 80 px.
+    assert_eq!(
+        px(r#"<cellStyle name="Normal" xfId="1" builtinId="0"/>"#, two),
+        80
+    );
+    // Another style that names the second entry is not Normal; font 0 is Calibri 11, 64 px.
+    assert_eq!(
+        px(
+            r#"<cellStyle name="Hyperlink" xfId="1" builtinId="8"/>"#,
+            two
+        ),
+        64
+    );
+    for (cell_styles, xfs) in [
+        (r#"<cellStyle name="Normal" xfId="0" builtinId="0"/>"#, two),
+        (
+            r#"<cellStyle name="Normal" xfId="999" builtinId="0"/>"#,
+            two,
+        ),
+        (r#"<cellStyle name="Normal" xfId="x" builtinId="0"/>"#, two),
+        (
+            r#"<cellStyle name="Normal" xfId="1" builtinId="0"/>"#,
+            r#"<xf fontId="99"/><xf fontId="99"/>"#,
+        ),
+        (
+            r#"<cellStyle name="Normal" xfId="1" builtinId="0"/>"#,
+            r#"<xf fontId="-1"/><xf/>"#,
+        ),
+        (
+            r#"<cellStyle name="Normal" builtinId="0"/>"#,
+            r#"<xf fontId="0"/>"#,
+        ),
+        ("", two),
+    ] {
+        assert_eq!(px(cell_styles, xfs), 64, "{cell_styles} {xfs}");
+    }
+}
+
 #[test]
 fn a_default_font_that_makes_no_sense_is_the_calibri_digit() {
     for (size, name) in [

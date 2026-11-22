@@ -8,7 +8,15 @@
 //! 7 px for Calibri 11. The advances of the faces on a desktop (Arial, Times New Roman, Courier New, Verdana, Tahoma,
 //! Georgia, Trebuchet MS) are read from the `hmtx` and `cmap` tables of the font files; the metric-compatible faces of
 //! the same names (Liberation, Tinos, Cousine, Carlito) have the same advances by design. Calibri's 1038 is the advance of
-//! its digits, which all have one width ("each digit is the same width for this font", the spec).
+//! its digits, which all have one width ("each digit is the same width for this font", the spec); the metric-compatible
+//! Carlito, read from its font file, has 1038 for every digit. Cambria's 1135 is the 0.554 em of its metric-compatible
+//! face Caladea (read from the font file, 554 of 1000 for every digit).
+//!
+//! Malgun Gothic (the default font of the Korean edition of the spreadsheet program) has no font file here. Its 1116 is not
+//! measured: a Korean edition user reports the default column of a new workbook (Malgun Gothic 11 pt, 100 %) as 8.38
+//! characters, which is 8 characters of an 8 px digit and the padding, `(72 - 5) / 8 = 8.375`, so 11 pt must give 8 px, which
+//! `round(advance * 14.667 / 2048)` does for an advance from 1,047 to 1,185. 1116 is the middle of that range, so the other
+//! sizes are an estimate (12 pt gives 9 px, 10 pt gives 7 px). Aptos is not in the table: no source gives its digit width.
 //!
 //! A font that is not in the table is read as Calibri: the workbook is shown in a substitute face on the machine that has
 //! not the font, and the size alone cannot say which. The width is never below 1 px and never above [`MAX_DIGIT_PX`], and a
@@ -28,6 +36,8 @@ const UNITS_PER_EM: f64 = 2048.0;
 
 /// The widest digit of the fallback face, Calibri.
 const CALIBRI_ADVANCE: u16 = 1038;
+/// An estimate inside what 8 px at 11 pt allows (see the header), not a measured advance.
+const MALGUN_ADVANCE: u16 = 1116;
 
 /// Face names (lowercase) and the widest advance of their digits in 1/2048 em.
 const DIGIT_ADVANCES: &[(&str, u16)] = &[
@@ -46,6 +56,10 @@ const DIGIT_ADVANCES: &[(&str, u16)] = &[
     ("tahoma", 1118),
     ("georgia", 1257),
     ("trebuchet ms", 1074),
+    ("cambria", 1135),
+    ("caladea", 1135),
+    ("malgun gothic", MALGUN_ADVANCE),
+    ("맑은 고딕", MALGUN_ADVANCE),
 ];
 
 /// The width of the widest digit of `font` at `size_pt` points, `1..=`[`MAX_DIGIT_PX`] pixels. A missing or unknown
@@ -81,6 +95,13 @@ mod tests {
             ("Courier New", 10.0, 8),
             ("Verdana", 10.0, 8),
             ("Tahoma", 11.0, 8),
+            ("Cambria", 11.0, 8),
+            ("Cambria", 10.0, 7),
+            // The Korean edition's default: 8.38 characters of an 8 px digit (11 pt); the other sizes are estimates.
+            ("Malgun Gothic", 11.0, 8),
+            ("맑은 고딕", 11.0, 8),
+            ("Malgun Gothic", 10.0, 7),
+            ("Malgun Gothic", 12.0, 9),
         ];
         for (font, size, px) in table {
             assert_eq!(max_digit_px(Some(font), Some(size)), px, "{font} {size}");
