@@ -446,6 +446,62 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## rrweb (MIT)
+
+Source: https://github.com/rrweb-io/rrweb (commit `d6926830927706b96d6c018d77d40a945c187342`, Copyright (c) 2018 Contributors). Nothing is vendored or linked at runtime. The replay timer (`packages/rrweb/src/replay/timer.ts:8-123` `Timer`: a list of actions sorted by delay that is checked against the clock on every animation frame, `addAction` with the binary search of `findActionIndex`, `start`, `rafCheck`, `clear`) was ported into `createTimer` in `crates/easyoffice-app/ui/copilot-timeline.js` (`PD-304`) as a closure with an injected clock and frame request, 67 lines. Modifications: the replay `speed`, the live mode, `setSpeed`, `isActive` and `addDelay` (the delay of a recorded event) were left out, and the loop does not ask for another frame after an action called `clear`. The scene player that feeds it (`createScenePlayer`) is EasyOffice code.
+
+```
+MIT License
+
+Copyright (c) 2018 Contributors (https://github.com/rrweb-io/rrweb/graphs/contributors)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Motion (MIT)
+
+Source: https://github.com/motiondivision/motion (commit `1b374802de947700ad7d2bb52a0ccec8339cf2f1`, Copyright (c) 2024 Motion B.V.). Nothing is vendored or linked at runtime. The position of a step in a sequence (`packages/framer-motion/src/animation/sequence/utils/calc-time.ts:21-39` `calcNextTime`: an absolute number, `+N` and `-N` from the end of the step before, `<` and `<N` from its start) and the order in which `resolveSequence` walks a sequence (`sequence/create.ts:58-118, 413-415`: a step without `at` follows the end of the step before, `prevTime` and `currentTime` are carried on) were ported into `calcNextTime` and `resolveSteps` in `crates/easyoffice-app/ui/copilot-timeline.js` (`PD-304`), 26 lines. Modifications: labels and nested sequences were left out, and a step carries a `run` function instead of keyframes. The animation engine of the project (`motion-dom`) was read and not used: its timing is tied to its frame loop and value tracks.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2024 [Motion](https://motion.dev) B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## y-prosemirror (MIT)
 
 Source: https://github.com/yjs/y-prosemirror (commit `47a7385201bcefb55fcd5f1c8df23f48f46fa223`, Copyright (c) 2019 Kevin Jahns). Nothing is vendored or linked at runtime. The remote cursor of `src/cursor-plugin.js:25-62` (`defaultCursorBuilder`: the caret bar with a name label, `defaultSelectionBuilder`: a selection coloured with the user colour, the `maxsize` clamp of positions) and the demo styles `demo/prosemirror.html:36-68` (a caret with a 1px line on each side, the selection at 0.3 opacity) were re-expressed in `crates/easyoffice-app/ui/copilot-cursor.js` (`setSelection`, `setCaret`, `setIdle`) and `copilot.css` as overlay boxes drawn over the editor instead of decorations inside it (`PD-268`).
