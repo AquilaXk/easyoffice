@@ -1,6 +1,7 @@
-// 참조 구현: 같은 폴더의 `copilot-cursor.js`(excalidraw 협업자 포인터와 y-prosemirror 캐럿·선택 강조)와 `copilot-typing.js`(typed.js 타이핑 루프)를 문서·슬라이드·시트에 엮는 연출이다.
-// 이 파일은 직접 썼다: 둘을 엮는 원본(포인터가 선택하고 글을 쳐 넣는 문서 편집)이 따로 없어서 찾아본 저장소는 excalidraw(`packages/excalidraw/clients.ts`),
-// y-prosemirror(`src/cursor-plugin.js`), typed.js(`src/typed.js`)다(보고에 적었다).
+// 참조 구현: 같은 폴더의 `copilot-cursor.js`(excalidraw 협업자 포인터와 y-prosemirror 캐럿·선택 강조), `copilot-typing.js`(typed.js 타이핑 루프),
+// `copilot-timeline.js`(rrweb 재생기 `Timer`와 motion 시퀀스의 시각 읽기)를 문서·슬라이드·시트에 엮는 연출이다.
+// 누르기·끌기·놓기·쉼 같은 몸짓은 `copilot-timeline.js`의 장면(단계 목록 + `at` 위치)으로 짜고 재생기가 시각에 맞춰 돌린다. 이 파일의 나머지(연산에서 목표 뽑기,
+// 쓴 곳까지 연산 자르기, 임시로 쓴 것 되돌리기)는 직접 썼다: 포인터가 선택하고 글을 쳐 넣는 문서 편집이라는 원본이 따로 없다.
 //
 // 슬라이드 쪽(새 슬라이드, 개체 놓기·옮기기, 레이아웃·전환, 노트)은 `copilot-perform-slide.js`가 맡고, 이 파일은 문서·시트와 공통 도구(포인터, 타이핑, 드래그 선택,
 // 임시로 쓴 것의 되돌리기)를 둔다. 문서의 범위 교체(`doc.replace_paragraphs`의 `startIndex`·`endIndex`)는 옛 범위를 끌어 선택하고 가린 뒤 새 블록을 그 자리에 친다(PD-304).
@@ -174,6 +175,7 @@
         return { done: Promise.resolve({ operations: cutOperations(operations, targets, null), completed: true, discarded: false }), stop() {}, discard() {}, active: false };
       }
       const cursor = createCursor();
+      const scenes = host.__EASYOFFICE_COPILOT_TIMELINE__.createScenePlayer(cursor.timing);
       let stopped = false;
       let discarded = false;
       let typing = null;
@@ -190,6 +192,7 @@
         if (stopped) return;
         stopped = true;
         typing?.stop();
+        scenes.clear();
         cursor.interrupt();
       }
 
@@ -204,6 +207,16 @@
         await cursor.moveTo(rect.left, rect.top + Math.min(rect.height || 16, 20) / 2);
       }
 
+      // 멈춘 뒤에는 새 장면을 시작하지 않는다(시작하면 타이머가 끝날 때까지 연출이 남는다). 끝까지 갔으면 `true`.
+      const play = (steps) => (stopped ? Promise.resolve(false) : scenes.play(steps));
+
+      // 누르기 → 끌기 → 놓기: 마우스를 누른 채 `ms` 동안 `step(eased)`를 프레임마다 돌리고 뗀다.
+      const gesture = (ms, step) => play([
+        { run: () => cursor.press(true) },
+        { at: "<", duration: ms, run: () => cursor.animate(ms, step) },
+        { run: () => cursor.press(false) },
+      ]);
+
       // 요소들의 글을 처음부터 끝까지 끌어 선택하는 몸짓. 글이 없는 요소는 건너뛰고, 모두 없으면 하지 않는다.
       async function drag(els) {
         const parts = els.map((el) => {
@@ -217,8 +230,7 @@
           const rects = part.node ? rangeRects(part.node, 0, take) : [];
           return rects.length > 0 ? rects : [elementRect(part.el)];
         };
-        cursor.press(true);
-        await cursor.animate(DRAG_MS, (t) => {
+        await gesture(DRAG_MS, (t) => {
           let left = Math.max(1, Math.round(total * t));
           const rects = [];
           for (const part of parts) {
@@ -230,7 +242,6 @@
           const last = rects.at(-1);
           if (last) cursor.place(last.right, last.top + last.height / 2);
         });
-        cursor.press(false);
       }
 
       async function typeInto(el, text, setText, { speed, totalMs, caret: caretFor } = {}) {
@@ -332,10 +343,10 @@
         revert: revertCosmetics,
         stopped: () => stopped,
         glideTo, caretAt, rectOf: elementRect,
-        // 멈춘 뒤에는 새 이동·애니메이션을 시작하지 않는다(시작하면 타이머가 끝날 때까지 연출이 남는다).
         moveTo: (x, y) => (stopped ? Promise.resolve(false) : cursor.moveTo(x, y)),
-        animate: (ms, step) => (stopped ? Promise.resolve(false) : cursor.animate(ms, step)),
-        hold: (ms) => session.animate(ms, () => {}),
+        play, gesture,
+        click: (ms) => play([{ run: () => cursor.press(true) }, { at: ms, run: () => cursor.press(false) }]),
+        hold: (ms) => play([{ duration: ms }]),
       };
       const drivers = {
         "doc-replace": docTarget,

@@ -16,6 +16,7 @@ function loadText() {
   loadUiModule(UI("copilot-diff.js"), env);
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
   loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
@@ -50,6 +51,7 @@ function makeActions(texts, selectedText = "") {
   loadUiModule(UI("copilot-diff.js"), env);
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
   loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
@@ -142,6 +144,7 @@ test("BASE and BOARD context cut every text at a code point", () => {
   loadUiModule(UI("copilot-diff.js"), env);
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
   loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);

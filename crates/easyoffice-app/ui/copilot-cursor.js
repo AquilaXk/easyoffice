@@ -190,6 +190,8 @@
       get element() { return layer; },
       get position() { return { ...position }; },
       get alpha() { return INACTIVE_ALPHA; },
+      /** 포인터가 쓰는 시계와 프레임 요청. 같은 시간 위에서 도는 장면 재생기(`copilot-timeline.js`)가 받아 간다. */
+      get timing() { return { now: clock, requestAnimationFrame: frames.requestAnimationFrame, cancelAnimationFrame: frames.cancelAnimationFrame }; },
       show() {
         install();
         layer.hidden = false;

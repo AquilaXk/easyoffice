@@ -1,4 +1,5 @@
-// 참조 구현: 같은 폴더의 `copilot-cursor.js`(excalidraw 협업자 포인터)와 `copilot-typing.js`(typed.js 타이핑 루프)를 슬라이드에 엮는다.
+// 참조 구현: 같은 폴더의 `copilot-cursor.js`(excalidraw 협업자 포인터)와 `copilot-typing.js`(typed.js 타이핑 루프), `copilot-timeline.js`(rrweb 재생기와 motion 시퀀스의
+// 시각 읽기, 몸짓 `gesture`·`click`·`hold`가 쓴다)를 슬라이드에 엮는다.
 // `copilot-perform.js`가 문서·시트 연출과 함께 부르는 슬라이드 쪽 부품이다: 어느 연산이 어떤 연출 단계가 되는지(`collect`), 중간에 멈추면 연산을 어디서
 // 자르는지(`cut`), 단계마다 포인터가 하는 일(`createDrivers`)을 둔다. 포인터·타이핑·되돌리기 도구는 `copilot-perform.js`가 `session`으로 건넨다.
 //
@@ -198,9 +199,7 @@
 
       const clickAt = async (rect) => {
         await session.moveTo(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        cursor.press(true);
-        await session.hold(CLICK_MS);
-        cursor.press(false);
+        await session.click(CLICK_MS);
       };
 
       // 단계가 일할 슬라이드를 화면에 둔다. 새 슬라이드는 임시 빈 슬라이드가 열려 있을 때만 할 수 있다(`false`면 건너뛴다).
@@ -358,14 +357,12 @@
       async function drawObject(layer, target) {
         const frame = frameOf(target.element);
         await session.moveTo(frame.left, frame.top);
-        cursor.press(true);
-        await session.animate(DRAW_MS, (k) => {
+        await session.gesture(DRAW_MS, (k) => {
           const width = frame.width * k;
           const height = frame.height * k;
           cursor.setSelection([{ left: frame.left, top: frame.top, width, height }]);
           cursor.place(frame.left + width, frame.top + height);
         });
-        cursor.press(false);
         if (session.stopped()) return { typed: 0 };
         const card = buildCard(layer, hasText(target.element) ? { ...target.element, text: "" } : target.element);
         cursor.setSelection([frame]);
@@ -379,19 +376,17 @@
         const from = frameOf(target.prev);
         await session.moveTo(from.left + from.width / 2, from.top + from.height / 2);
         cursor.setSelection([from]);
-        cursor.press(true);
         session.hide(old);
         const start = { x: target.prev.x, y: target.prev.y, w: target.prev.w, h: target.prev.h };
         const end = { x: target.element.x, y: target.element.y, w: target.element.w, h: target.element.h };
         const card = buildCard(layer, { ...target.element, ...start, ...(hasText(target.element) ? { text: textOf(target.prev) } : {}) });
-        await session.animate(MOVE_MS, (k) => {
+        await session.gesture(MOVE_MS, (k) => {
           const at = { x: start.x + (end.x - start.x) * k, y: start.y + (end.y - start.y) * k, w: start.w + (end.w - start.w) * k, h: start.h + (end.h - start.h) * k };
           api.positionElementDom(card, at, size);
           const frame = frameOf(at);
           cursor.setSelection([frame]);
           cursor.place(frame.left + frame.width / 2, frame.top + frame.height / 2);
         });
-        cursor.press(false);
         if (session.stopped()) return { typed: 0 };
         return typeObjectText(card, target);
       }

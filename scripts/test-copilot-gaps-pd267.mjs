@@ -53,6 +53,7 @@ function createActions({ texts = [], epoch = () => 1, selection = null, slides =
   loadUiModule(UI("copilot-diff.js"), env);
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
+  loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
   loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
