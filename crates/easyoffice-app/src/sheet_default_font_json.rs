@@ -28,10 +28,10 @@ pub(crate) fn parse_default_font(
     let obj = v
         .as_object()
         .filter(|o| o.iter().all(|(key, _)| key == "name" || key == "size"))
-        .ok_or_else(|| bad())?;
+        .ok_or_else(bad)?;
     let name = StrictJsonValue::get_field(obj, "name")
         .and_then(StrictJsonValue::as_str)
-        .ok_or_else(|| bad())?;
+        .ok_or_else(bad)?;
     let size = match StrictJsonValue::get_field(obj, "size") {
         Some(StrictJsonValue::Number(text)) => text.parse::<f64>().map_err(|_| bad())?,
         _ => return Err(bad()),
