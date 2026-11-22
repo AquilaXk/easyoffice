@@ -258,7 +258,9 @@ impl RuleLayer {
             } else {
                 0.0
             };
-            list.push((at + shift, stretch.0, stretch.1));
+            // The line is named in hundredths of a point, as it is written: the edge two cells share is one line though
+            // its two ends were computed along different sums and differ in the last place.
+            list.push((((at + shift) * 100.0).round() / 100.0, stretch.0, stretch.1));
         }
     }
 
@@ -289,8 +291,7 @@ impl RuleLayer {
             let dash = dash.map_or(String::new(), |[on, off]| {
                 format!("[{:.2} {:.2}] 0 d ", unit(on), unit(off))
             });
-            lines.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-            let lines = joined(&lines);
+            let lines = settled(&mut lines);
             for chunk in lines.chunks(PATH_PARTS) {
                 let mut op = format!("q {:.2} w {} RG {dash}", unit(width), rgb_ops(rgb));
                 for &(at, from, to) in chunk {
@@ -312,12 +313,24 @@ impl RuleLayer {
     }
 }
 
-/// `lines` (sorted by line, then start) with the ones that meet or overlap on one line made one.
+/// `lines` sorted by line, then start, with the ones that meet or overlap on one line made one.
+fn settled(lines: &mut [Segment]) -> Vec<Segment> {
+    lines.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    joined(lines)
+}
+
+/// `lines` (sorted by line, then start) with the ones that meet or overlap on one line made one. A line that lies apart
+/// from the last one stays its own, whatever the order the sums put it in.
 fn joined(lines: &[Segment]) -> Vec<Segment> {
     let mut out: Vec<Segment> = Vec::with_capacity(lines.len());
     for &(at, from, to) in lines {
         match out.last_mut() {
-            Some(last) if (last.0 - at).abs() < SAME_PT && from <= last.2 + SAME_PT => {
+            Some(last)
+                if (last.0 - at).abs() < SAME_PT
+                    && from <= last.2 + SAME_PT
+                    && to >= last.1 - SAME_PT =>
+            {
+                last.1 = last.1.min(from);
                 last.2 = last.2.max(to);
             }
             _ => out.push((at, from, to)),
@@ -423,5 +436,125 @@ pub(crate) fn draw_text(
     if bits & FLAG_STRIKE != 0 {
         let at = y + size * STRIKE_RISE_EM;
         canvas.stroke_line(x, at, x + width, at, ink, line_width);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edge_only(top: bool, bottom: bool) -> CellBorders {
+        let thin = BorderEdge::new(BorderLine::Thin, 0xFF0000);
+        CellBorders {
+            top: if top { thin } else { BorderEdge::NONE },
+            bottom: if bottom { thin } else { BorderEdge::NONE },
+            ..CellBorders::NONE
+        }
+    }
+
+    /// The thin red lines along rows the layer holds, sorted and joined as `into_ops` writes them.
+    fn row_lines(layer: RuleLayer) -> Vec<Segment> {
+        let mut lines = layer.edges.into_values().next().unwrap_or_default();
+        settled(&mut lines)
+    }
+
+    fn covers(lines: &[Segment], x: f64) -> bool {
+        lines.iter().any(|&(_, from, to)| from <= x && x <= to)
+    }
+
+    #[test]
+    fn the_shared_edge_of_two_rows_is_one_line_though_the_floats_differ_in_the_last_place() {
+        let (y, h) = (751.059_251_835_584_f64, 19.773_744_998_649_533_f64);
+        let mut layer = RuleLayer::new(1.0);
+        // The cell above ends at `y`; the cell below is laid out from `y - h` and its top is `(y - h) + h`.
+        layer.edges((300.0, y, 100.0, h), edge_only(false, true));
+        layer.edges((0.0, y - h, 100.0, h), edge_only(true, false));
+        assert_ne!(y, (y - h) + h, "the two edges differ in the last place");
+        let lines = row_lines(layer);
+        assert!(
+            covers(&lines, 50.0),
+            "the lower cell's edge is kept: {lines:?}"
+        );
+        assert!(
+            covers(&lines, 350.0),
+            "the upper cell's edge is kept: {lines:?}"
+        );
+        assert!(
+            !covers(&lines, 200.0),
+            "the gap between them stays: {lines:?}"
+        );
+    }
+
+    /// Integer hundredths of a point.
+    fn hundredths(pt: f64) -> i64 {
+        (pt * 100.0).round() as i64
+    }
+
+    /// `(line, from, to)` in hundredths as the union of touching stretches on each line.
+    fn union(segments: impl Iterator<Item = (i64, i64, i64)>) -> Vec<(i64, i64, i64)> {
+        let mut all: Vec<(i64, i64, i64)> = segments.collect();
+        all.sort_unstable();
+        let mut out: Vec<(i64, i64, i64)> = Vec::new();
+        for (at, from, to) in all {
+            match out.last_mut() {
+                Some(last) if last.0 == at && from <= last.2 + 1 => last.2 = last.2.max(to),
+                _ => out.push((at, from, to)),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn joined_edges_cover_what_the_cells_draw_one_by_one_for_any_row_heights() {
+        // A fixed seed: the same rows and cells every run.
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let mut layer = RuleLayer::new(1.0);
+        let mut direct = Vec::new();
+        let mut mismatched = 0;
+        let mut y = 800.0 + next();
+        for _ in 0..120 {
+            let h = 8.0 + next() * 32.0;
+            let (mut x, bottom) = (28.0 + next(), y - h);
+            for _ in 0..16 {
+                let w = 24.0 + next() * 90.0;
+                let (top_on, bottom_on) = (next() < 0.5, next() < 0.5);
+                layer.edges((x, bottom, w, h), edge_only(top_on, bottom_on));
+                for (on, at) in [(top_on, bottom + h), (bottom_on, bottom)] {
+                    if on {
+                        direct.push((hundredths(at), hundredths(x), hundredths(x + w)));
+                    }
+                }
+                x += w;
+            }
+            if (y - h) + h != y {
+                mismatched += 1;
+            }
+            y = bottom;
+        }
+        assert!(
+            mismatched > 0,
+            "the rows include shared edges that differ in the last place"
+        );
+        let mut lines = layer.edges.into_values().next().unwrap_or_default();
+        let joined_lines = settled(&mut lines);
+        let got = union(
+            joined_lines
+                .iter()
+                .map(|&(at, from, to)| (hundredths(at), hundredths(from), hundredths(to))),
+        );
+        let want = union(direct.into_iter());
+        let first_difference = got.iter().zip(&want).position(|(a, b)| a != b);
+        assert!(
+            got == want,
+            "{} stretches, {} wanted; first difference at {first_difference:?}",
+            got.len(),
+            want.len()
+        );
     }
 }
