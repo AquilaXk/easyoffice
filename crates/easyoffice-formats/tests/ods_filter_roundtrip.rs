@@ -223,5 +223,7 @@ fn a_flood_of_filtered_rows_is_read_in_linear_time_and_bounded() {
         .map(|r| u64::from(r.1 - r.0) + 1)
         .sum();
     assert!((300_000..=300_001).contains(&hidden), "{hidden}");
-    assert!(elapsed.as_secs_f64() < 5.0, "{elapsed:?}");
+    // A linear read takes about a second here and about 5 s in a debug build on the slowest release runner
+    // (4-core Intel macOS); a quadratic read of 300,000 rows takes minutes. 15 s matches the other linear-time bounds.
+    assert!(elapsed.as_secs_f64() < 15.0, "{elapsed:?}");
 }
