@@ -31,15 +31,8 @@ pub use validate::{validate_input, Verdict};
 
 pub use easyoffice_formats::DataValidation;
 
-/// A data bar: `pct` is -100..=100 (negative grows left of the axis), `start` the axis position
-/// in percent of the cell width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Bar {
-    pub pct: i8,
-    pub start: u8,
-    pub color: u32,
-    pub gradient: bool,
-}
+// A data bar (`CfBar`): the page and the PDF draw it from the same fields.
+pub use easyoffice_formats::CfBar as Bar;
 
 /// An icon of an icon set (`easyoffice_formats::ICON_SETS` order); `index` 0 is the lowest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +182,12 @@ impl RuleRuntime {
     /// True once the rules matched more cells than the budget allows.
     pub fn is_over_budget(&self) -> bool {
         self.over_budget
+    }
+
+    /// False when the last evaluation of a rule stopped early (deadline, step budget) or the rules matched more cells
+    /// than the budget allows: what it answered is a part of the appearance.
+    pub(crate) fn is_complete(&self) -> bool {
+        !self.over_budget && !self.states.iter().any(|s| s.incomplete)
     }
 
     fn enforce_budget(&mut self) {
@@ -497,8 +496,18 @@ impl WorkbookEngine {
     /// Appearance every conditional formatting rule of `sheet` gives its cells, evaluated on a
     /// fresh pass over the workbook (the stateless path).
     pub fn evaluate_rules(&self, sheet: &str, rules: SheetRules) -> Vec<CellVisual> {
+        self.evaluate_rules_checked(sheet, rules).0
+    }
+
+    /// [`Self::evaluate_rules`] and whether the answer is whole: false when the time limit, the step
+    /// budget or the matched-cell budget cut the evaluation short (the PDF says so, PD-300).
+    pub fn evaluate_rules_checked(
+        &self,
+        sheet: &str,
+        rules: SheetRules,
+    ) -> (Vec<CellVisual>, bool) {
         let Some(engine) = self.sheet(sheet) else {
-            return Vec::new();
+            return (Vec::new(), true);
         };
         let mut runtime = RuleRuntime::new(rules);
         let boxes: Vec<CellBox> = runtime
@@ -514,7 +523,8 @@ impl WorkbookEngine {
             sheet: engine,
             ctx: &mut ctx,
         };
-        runtime.evaluate(&mut cells)
+        let visuals = runtime.evaluate(&mut cells);
+        (visuals, runtime.is_complete())
     }
 }
 

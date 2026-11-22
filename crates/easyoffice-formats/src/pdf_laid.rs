@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use crate::pdf_sheet_rules::{self, CellRule};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::pdf_writer::{mixed_units, text_ops, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
 use crate::rich_document::{
@@ -45,15 +46,17 @@ const MAX_SHEET_CELLS: u64 = 200_000;
 
 /// How a number format changes the way a page draws one cell (PD-235): a number sits at the right, the colour of the
 /// format's section replaces the cell's text colour, and `*x` repeats `x` over the width the text leaves free
-/// (`fill` is the byte offset in the text and the character).
+/// (`fill` is the byte offset in the text and the character). `rule` is what the conditional formats give the cell (PD-300);
+/// a cell that has one and no number format has the `numeric` of [`plain_cell_numeric`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CellShown {
     pub numeric: bool,
     pub color: Option<u32>,
     pub fill: Option<(usize, char)>,
+    pub rule: Option<CellRule>,
 }
 
-/// The cells of one sheet a number format changed, by zero-based row and column.
+/// The cells of one sheet a number format or a conditional format changed, by zero-based row and column.
 pub type SheetShown = HashMap<(u32, u32), CellShown>;
 
 /// Most copies of a fill character one cell draws (a column cannot be wider in points than this many glyphs).
@@ -432,6 +435,14 @@ fn lines_of(group: (usize, usize, bool), title: Option<(usize, usize)>) -> Vec<u
     out
 }
 
+/// Whether a cell with no number format sits at the right: its kind when the sheet says it, else whether the text reads as
+/// a number.
+pub fn plain_cell_numeric(styling: Option<&SheetStyling>, at: (u32, u32), text: &str) -> bool {
+    styling
+        .and_then(|s| s.explicit_cell_kind(at.0, at.1, text))
+        .map_or_else(|| is_number(text), |k| k == crate::CellValueKind::Number)
+}
+
 fn is_number(text: &str) -> bool {
     let t = text.trim().replace(',', "");
     !t.is_empty() && t.parse::<f64>().is_ok()
@@ -753,6 +764,8 @@ fn sheet_area_pages(
                 y -= h;
                 ys.push(y);
             }
+            // The edges the conditional formats draw come after the grid lines, which would paint over them.
+            let mut rule_edges: Vec<String> = Vec::new();
             let mut page_cols: Vec<u32> = Vec::with_capacity(cols.len());
             let mut page_rows: Vec<u32> = Vec::with_capacity(rows.len());
             for &i in &rows {
@@ -784,24 +797,30 @@ fn sheet_area_pages(
                     }
                     let at = (r, c);
                     let look = styling.and_then(|s| s.cells.get(&at));
-                    let fill = look.and_then(|style| style.fill);
+                    let how_opt = shown.and_then(|m| m.get(&at)).copied();
+                    let rule = how_opt.and_then(|cell| cell.rule);
+                    let fill = rule
+                        .and_then(|rule| rule.bg)
+                        .or_else(|| look.and_then(|style| style.fill));
                     if let Some(rgb) = fill {
                         canvas.fill_rect(x, y - h, w, h, rgb);
                     }
-                    if let Some(text) = cells.get(&at) {
-                        let how_opt = shown.and_then(|m| m.get(&at)).copied();
+                    if let Some(rule) = rule {
+                        let cell_box = (x, y - h, w, h);
+                        if let Some(bar) = rule.bar {
+                            pdf_sheet_rules::draw_bar(&mut canvas, cell_box, bar, fill);
+                        }
+                        rule_edges.extend(pdf_sheet_rules::edge_ops(cell_box, rule.border, scale));
+                    }
+                    let hidden = rule.is_some_and(|rule| rule.hide_value);
+                    if let Some(text) = cells.get(&at).filter(|_| !hidden) {
                         let how = how_opt.unwrap_or_default();
                         let room = w - 2.0 * pad;
                         let drawn = fit_text(&filled_text(text, how.fill, font, room), font, room);
                         let tw = width_pt(&drawn, font);
                         let right_aligned = match how_opt {
                             Some(cell) => cell.numeric,
-                            None => styling
-                                .and_then(|s| s.explicit_cell_kind(at.0, at.1, text))
-                                .map_or_else(
-                                    || is_number(text),
-                                    |k| k == crate::CellValueKind::Number,
-                                ),
+                            None => plain_cell_numeric(styling, at, text),
                         };
                         let tx = if right_aligned {
                             x + w - pad - tw
@@ -809,14 +828,20 @@ fn sheet_area_pages(
                             x + pad
                         };
                         let ty = y - h + (h - font) / 2.0 + 1.0;
-                        match how
+                        let color = how
                             .color
+                            .or_else(|| rule.and_then(|rule| rule.fg))
                             .or_else(|| look.and_then(|style| style.font_color))
-                            .or_else(|| auto_text_color(fill))
-                        {
-                            Some(rgb) => canvas.colored_text(tx, ty, font, &drawn, rgb),
-                            None => canvas.text(tx, ty, font, &drawn),
-                        }
+                            .or_else(|| auto_text_color(fill));
+                        let flags = rule.map_or(0, |rule| rule.flags);
+                        pdf_sheet_rules::draw_text(
+                            &mut canvas,
+                            (tx, ty),
+                            font,
+                            &drawn,
+                            tw,
+                            (color, flags),
+                        );
                     }
                     x += w;
                     if !xs_done {
@@ -828,6 +853,9 @@ fn sheet_area_pages(
                 ys.push(y);
             }
             canvas.grid(&xs, &ys, page.grid_lines, page.headings);
+            for op in rule_edges {
+                canvas.push_raw_op(op);
+            }
             let xobjects = if let Some(st) = styling {
                 crate::pdf_sheet_media::render_sheet_overlays(
                     &mut canvas,

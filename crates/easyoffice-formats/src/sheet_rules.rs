@@ -215,6 +215,16 @@ impl CfStyle {
     }
 }
 
+/// A data bar the rules draw over a cell: `pct` is -100..=100 (negative grows left of the axis), `start` the axis position
+/// in percent of the cell width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CfBar {
+    pub pct: i8,
+    pub start: u8,
+    pub color: u32,
+    pub gradient: bool,
+}
+
 /// How a threshold of a scale, bar or icon set is found (OOXML `cfvo`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {

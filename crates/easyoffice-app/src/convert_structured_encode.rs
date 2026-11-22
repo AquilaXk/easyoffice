@@ -22,6 +22,7 @@ use crate::convert_structured_loss::{warn_unsaved_pivot_fields, warn_unsaved_she
 use crate::eval_limit::evaluate_for_file;
 use crate::sheet_display::{show_cells, Show};
 use crate::sheet_links_xls::xls_links;
+use crate::sheet_pdf_rules::add_rule_looks;
 
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
 const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
@@ -434,15 +435,24 @@ fn evaluate_workbook(
     Ok((caches, grids, spills))
 }
 
+/// The value of each formula cell in cell order and the arrays that spill.
+type FormulaValues = (
+    std::vec::IntoIter<Option<EvaluatedCellValue>>,
+    Vec<SpillArea>,
+);
+
 type EvaluatedDisplays = (Vec<DisplayCells>, Vec<SheetStyling>, Vec<SheetShown>);
 
 /// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
-/// sheet has them, so a print area and repeated rows address real rows).
+/// sheet has them, so a print area and repeated rows address real rows), the number formats' colors and the look the
+/// conditional formats give the cells (PD-300). What the rules could not finish is said in `warnings`.
 fn evaluate_displays(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
+    warnings: &mut Vec<String>,
 ) -> Result<EvaluatedDisplays, EasyOfficeError> {
-    let (mut values, spills) = evaluate_formulas(sheets, stylings, true)?;
+    let wb = workbook_engine(sheets, stylings)?;
+    let (mut values, spills) = evaluate_formulas_in(&wb, sheets, stylings, true)?;
     let mut all_displays = Vec::with_capacity(sheets.len());
     let mut all_stylings = Vec::with_capacity(sheets.len());
     let mut all_shown = Vec::with_capacity(sheets.len());
@@ -451,7 +461,8 @@ fn evaluate_displays(
         let mut display_st = orig_st.cloned().unwrap_or_default();
         let mut displays = sheet_values(cells, orig_st, Some(&mut display_st), &mut values, true).1;
         add_spilled_cells(name, &mut displays, Some(&mut display_st), &spills);
-        let shown = show_cells(&mut displays, Some(&display_st), Show::Page);
+        let mut shown = show_cells(&mut displays, Some(&display_st), Show::Page);
+        add_rule_looks(&wb, name, (&display_st, &displays), &mut shown, warnings);
         all_displays.push(displays);
         all_stylings.push(display_st);
         all_shown.push(shown);
@@ -465,14 +476,18 @@ fn evaluate_formulas(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
     complete: bool,
-) -> Result<
-    (
-        std::vec::IntoIter<Option<EvaluatedCellValue>>,
-        Vec<SpillArea>,
-    ),
-    EasyOfficeError,
-> {
+) -> Result<FormulaValues, EasyOfficeError> {
     let wb = workbook_engine(sheets, stylings)?;
+    evaluate_formulas_in(&wb, sheets, stylings, complete)
+}
+
+/// [`evaluate_formulas`] on an engine that holds the sheets already.
+fn evaluate_formulas_in(
+    wb: &WorkbookEngine,
+    sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
+    complete: bool,
+) -> Result<FormulaValues, EasyOfficeError> {
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
         .enumerate()
@@ -496,7 +511,7 @@ fn evaluate_formulas(
             anchor: None,
         })
         .collect();
-    let (values, spills) = evaluate_for_file(&wb, &targets, complete)?;
+    let (values, spills) = evaluate_for_file(wb, &targets, complete)?;
     Ok((values.into_iter(), spills))
 }
 
@@ -773,7 +788,8 @@ fn encode_structured_with_thumbnail(
                     OdfCodec::pack_ods_multi_styled_with_cache(&out_sheets, &caches, &out_stylings)
                 }
                 DocumentFormat::Pdf => {
-                    let (displays, display_stylings, shown) = evaluate_displays(sheets, stylings)?;
+                    let (displays, display_stylings, shown) =
+                        evaluate_displays(sheets, stylings, warnings)?;
                     let named: Vec<OdsUnpacked> = sheets
                         .iter()
                         .map(|(name, _)| name.clone())

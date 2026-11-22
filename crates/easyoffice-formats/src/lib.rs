@@ -49,6 +49,7 @@ mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;
 mod pdf_sheet_media;
+mod pdf_sheet_rules;
 pub mod pdf_slide;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
@@ -126,7 +127,8 @@ pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
 pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
-pub use pdf_laid::{CellShown, SheetShown};
+pub use pdf_laid::{plain_cell_numeric, CellShown, SheetShown};
+pub use pdf_sheet_rules::CellRule;
 pub use pdf_slide::encode_slide_pdf;
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{

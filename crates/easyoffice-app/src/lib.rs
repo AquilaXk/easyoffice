@@ -63,6 +63,7 @@ mod sheet_names_ipc;
 mod sheet_names_ipc_tests;
 mod sheet_names_json;
 mod sheet_page_json;
+mod sheet_pdf_rules;
 mod sheet_pivot_defs;
 mod sheet_pivot_ipc;
 mod sheet_pivot_json;

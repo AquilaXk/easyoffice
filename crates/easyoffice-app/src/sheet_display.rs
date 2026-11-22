@@ -76,6 +76,7 @@ pub(crate) fn show_cells(
                         numeric: cell.numeric,
                         color: cell.color,
                         fill: cell.fill,
+                        rule: None,
                     },
                 );
                 *text = cell.text;
