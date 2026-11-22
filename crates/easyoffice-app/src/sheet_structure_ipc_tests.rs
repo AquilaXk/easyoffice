@@ -141,6 +141,64 @@ fn pictures_are_placed_on_the_rows_the_edit_leaves() {
     assert!(images.contains(r#""heightPx":80"#), "{images}");
 }
 
+/// A one-cell picture moves with its start cell and keeps its size, an absolute one stays where it is (`editAs`, PD-299).
+#[test]
+fn pictures_follow_an_edit_by_their_edit_kind() {
+    let id = open_with(&[("S!A1", "1")]);
+    let picture = |name: &str, edit_as: &str, top: u32| {
+        format!(
+            concat!(
+                r#"{{"id":"{0}","name":"n","alt":"","mime":"image/png","imageId":"x","anchor":{{"#,
+                r#""fromCol":1,"fromRow":4,"colOffEmu":0,"rowOffEmu":0,"toCol":3,"toRow":6,"toColOffEmu":0,"toRowOffEmu":0,"#,
+                r#""leftPx":80,"topPx":{2},"widthPx":160,"heightPx":80,"editAs":"{1}"}}}}"#
+            ),
+            name, edit_as, top
+        )
+    };
+    let images = format!(
+        "[{},{},{},{}]",
+        picture("two", "twoCell", 0),
+        picture("one", "oneCell", 0),
+        picture("abs", "absolute", 200),
+        picture("bad", "move-and-size", 0)
+    );
+    let res = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":2,"count":1,"defaultRowHeight":[30],"rowHeights":[[4,60]],"images":{images}}}"#
+    ));
+    let moved = field(&res, "images").as_array().unwrap();
+    let anchor = |i: usize| field(&moved[i], "anchor");
+    let num = |i: usize, key: &str| {
+        StrictJsonValue::get_field(anchor(i).as_object().unwrap(), key)
+            .and_then(StrictJsonValue::as_u64)
+            .unwrap()
+    };
+    // Rows 0..=3 are 40 px, row 4 (the tall one after the edit) 80 px: row 5 starts at 240 px.
+    assert_eq!(
+        (num(0, "fromRow"), num(0, "toRow"), num(0, "heightPx")),
+        (5, 7, 80)
+    );
+    assert_eq!(
+        (num(1, "fromRow"), num(1, "toRow"), num(1, "heightPx")),
+        (5, 7, 80)
+    );
+    assert_eq!(num(1, "topPx"), 240);
+    // The absolute picture is 200 px down: row 4 (160..240), 40 px in.
+    assert_eq!(
+        (num(2, "fromRow"), num(2, "rowOffEmu"), num(2, "topPx")),
+        (4, 40 * 9_525, 200)
+    );
+    assert!(anchor(1).to_json_string().contains(r#""editAs":"oneCell""#));
+    assert!(anchor(2)
+        .to_json_string()
+        .contains(r#""editAs":"absolute""#));
+    for plain in [0, 3] {
+        assert!(
+            !anchor(plain).to_json_string().contains("editAs"),
+            "the default kind is not written"
+        );
+    }
+}
+
 #[test]
 fn bad_requests_and_missing_sessions_are_refused() {
     let id = open_with(&[("S!A1", "1")]);

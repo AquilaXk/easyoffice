@@ -685,3 +685,42 @@ test("PD-299: 그림의 칸 앵커는 행 높이와 기본 행 높이를 따라 
   const plain = media.anchorFromContentRect(0, 50, 50, 24);
   assert.deepEqual([plain.fromRow, plain.rowOffEmu, plain.toRow, plain.toRowOffEmu], [2, 2 * 9525, 3, 2 * 9525]);
 });
+
+test("PD-299: 두 칸 앵커 그림은 행 높이를 따라 크기가 변하고, 한 칸 앵커는 크기를 지키고, 절대 앵커는 자리를 지킨다", async () => {
+  const { document, host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-media-edit-as" });
+  await flushAsyncTurns(8);
+  switchModule(document, "SHEET");
+  await flushAsyncTurns(4);
+  const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const media = host.__EASYOFFICE_SHEET_MEDIA__;
+  selectCell(document, "B2");
+  await flushAsyncTurns(2);
+  assert.equal((await media.insertPictureFromBytes(makeValidPngBytes(240, 160), "p.png")).ok, true);
+  await flushAsyncTurns(6);
+  const [created] = layoutApi.imagesOf("Sheet1");
+  assert.equal(created.anchor.editAs, "twoCell", "새 그림은 두 칸 앵커다");
+  const card = () => document.querySelector(".sheet-image-card");
+  const rect = () => ({ top: card().style.top, width: card().style.width, height: card().style.height });
+  const before = rect();
+  assert.equal(before.height, "160px");
+  // 기본 행 높이 30pt(40px): 시작 칸(2행)은 40px 아래, 끝 칸은 8행 안 16px이라 높이는 7 x 40 + 16 - 40 = 256px.
+  layoutApi.setDefaultRowHeight("Sheet1", 30);
+  await flushAsyncTurns(4);
+  assert.equal(card().style.height, "256px", "크기가 칸을 따른다");
+  assert.equal(card().style.width, before.width, "열은 그대로다");
+  const kinds = async (editAs) => {
+    layoutApi.setImages("Sheet1", [{ ...created, anchor: { ...created.anchor, editAs } }]);
+    await flushAsyncTurns(4);
+    return rect();
+  };
+  const one = await kinds("oneCell");
+  assert.equal(one.height, "160px", "한 칸 앵커는 크기를 지킨다");
+  assert.notEqual(one.top, before.top, "시작 칸을 따라 내려간다");
+  const abs = await kinds("absolute");
+  assert.equal(abs.height, "160px");
+  assert.equal(abs.top, before.top, "절대 앵커는 자리를 지킨다");
+  // 알 수 없는 값은 두 칸 앵커다.
+  const odd = await kinds("sideways");
+  assert.equal(odd.height, "256px");
+  assert.equal(layoutApi.imagesOf("Sheet1")[0].anchor.editAs, "twoCell");
+});

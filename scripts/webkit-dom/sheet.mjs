@@ -406,6 +406,56 @@ export const sheetSteps = [
     assert.deepEqual([tallest.dx, tallest.dy], [before.dx, before.dy], "the default row height moves it as well");
   }],
 
+  ["a picture and a chart on two cells grow with the rows they span, and the chart sits on its cell and scrolls with it (PD-299)", async (page) => {
+    // A picture of 120 x 60 px put on C4 and a chart over C4:G12 (nine rows of 24 px).
+    await page.click(td("C4"));
+    await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 120;
+      canvas.height = 60;
+      canvas.getContext("2d").fillRect(0, 0, 120, 60);
+      const b64 = canvas.toDataURL("image/png").split(",")[1];
+      await window.__EASYOFFICE_SHEET_MEDIA__.insertPictureFromBytes(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), "면.png");
+      const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
+      window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [{
+        id: "c1", chartType: "column", title: "합계", dataRange: "A1:B3", switchRowCol: false, legend: "right",
+        anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 480, top: 72, width: 384, height: 216 },
+      }]);
+    });
+    await page.waitForSelector(".sheet-image-card");
+    await page.waitForSelector(".sheet-chart-card");
+    const sizes = () => page.evaluate(() => {
+      const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: Math.round(r.top), height: Math.round(r.height), width: Math.round(r.width) }; };
+      return { picture: box(".sheet-image-card"), chart: box(".sheet-chart-card"), cell: Math.round(document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) };
+    });
+    const first = await sizes();
+    assert.equal(first.picture.height, 60);
+    assert.equal(first.chart.height, 216, "the chart is as tall as the nine rows it spans");
+    assert.ok(Math.abs(first.chart.top - first.cell) <= 1, `the chart starts on F4 (${first.chart.top} and ${first.cell})`);
+    const drag = async (row, dy) => {
+      const edge = await page.locator(`#pane-sheet tbody tr[data-row="${row}"] .row-resizer`).boundingBox();
+      const [x, y] = [edge.x + edge.width / 2, edge.y + edge.height / 2];
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 4 });
+      await page.mouse.up();
+    };
+    // Row 5 lies inside both (the picture ends in row 6, 12 px down): 16 px taller, so both are 16 px taller.
+    await page.click(td("A1"));
+    await drag(5, 16);
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.rowHeightsOf("Sheet1")?.has(5));
+    const taller = await sizes();
+    assert.equal(taller.picture.height, 76, "the picture grows with the row");
+    assert.equal(taller.chart.height, 232, "and so does the chart");
+    // The chart scrolls with its cell.
+    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 48; });
+    await page.waitForFunction((cell) => Math.round(document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) === cell - 48, taller.cell);
+    // The scroll event comes after the layout moved, so the card is given a moment.
+    await page.waitForFunction(() => Math.abs(document.querySelector(".sheet-chart-card").getBoundingClientRect().top - document.querySelector('#pane-sheet td[data-cell="F4"]').getBoundingClientRect().top) <= 1);
+    const scrolled = await sizes();
+    assert.equal(scrolled.cell, taller.cell - 48);
+  }],
+
   ["a whole column picked by its header leaves each sheet at the scroll it had when the tab changes (PD-299)", async (page) => {
     const view = () => page.evaluate(() => {
       const viewport = document.getElementById("sheet-viewport");

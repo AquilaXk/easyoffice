@@ -62,6 +62,7 @@ fn make_chart(
             top_px: row_off * 24,
             width_px: 480,
             height_px: 264,
+            ..ChartAnchor::default()
         },
         series: vec![
             ChartSeriesRef {

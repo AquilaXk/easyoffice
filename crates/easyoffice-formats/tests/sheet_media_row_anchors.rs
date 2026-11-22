@@ -3,9 +3,9 @@
 //! height a user set and the hidden rows (PD-299); a saved file read again keeps every picture on its cells.
 
 use easyoffice_formats::{
-    deflate_zlib, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef, IeeeCrc32, OdsUnpacked,
-    OoxmlCodec, RichImage, RowHeight, RowOffsets, SheetChart, SheetFloatingImage, SheetGrid,
-    SheetStyling,
+    deflate_zlib, effective_image_two_cell, AnchorEdit, ChartAnchor, ChartKind, ChartLegendPos,
+    ChartSeriesRef, IeeeCrc32, OdsUnpacked, OoxmlCodec, RichImage, RowHeight, RowOffsets,
+    SheetChart, SheetFloatingImage, SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn png() -> Vec<u8> {
@@ -195,6 +195,144 @@ fn a_taller_row_above_moves_the_picture_down_and_keeps_its_cell() {
     taller.row_heights.insert(0, custom(75.0));
     assert_eq!(top_with(&plain), (3, 72));
     assert_eq!(top_with(&taller), (3, 72 + 100 - 24));
+}
+
+/// 96 px tall and 160 px wide on plain rows, which the taller rows of `tall_rows` do not keep when the cells decide.
+fn sized_anchor(edit_as: AnchorEdit) -> ChartAnchor {
+    ChartAnchor {
+        edit_as,
+        from_col: 1,
+        from_row: 1,
+        to_col: 3,
+        to_row: 5,
+        left_px: 80,
+        top_px: 24,
+        width_px: 160,
+        height_px: 96,
+        ..ChartAnchor::default()
+    }
+}
+
+/// `editAs`: a two-cell anchor says its own cells (its size follows them), a one-cell anchor starts on its cell and keeps
+/// its size, an absolute anchor keeps its place whatever the rows are.
+#[test]
+fn the_cells_an_anchor_writes_follow_its_edit_kind() {
+    let styling = tall_rows();
+    let grid = SheetGrid::of(&styling);
+    let cells = |edit_as| effective_image_two_cell(&sized_anchor(edit_as), &grid);
+    assert_eq!(cells(AnchorEdit::TwoCell), (1, 1, 0, 0, 3, 5, 0, 0));
+    // Row 1 starts at 40 px, 96 px below is 136 px: row 2 (120..160) and 16 px into it; column 3 starts at 240 px.
+    assert_eq!(
+        cells(AnchorEdit::OneCell),
+        (1, 1, 0, 0, 3, 2, 0, 16 * 9_525)
+    );
+    let mut absolute = sized_anchor(AnchorEdit::Absolute);
+    (absolute.left_px, absolute.top_px) = (100, 100);
+    // 100 px down is row 1 (40..120) and 60 px into it; 100 px right is column 1 and 20 px into it. The end, 160 x 96 px
+    // further, is column 3 (starts at 240) 20 px in and row 3 (160..200) 36 px in.
+    assert_eq!(
+        effective_image_two_cell(&absolute, &grid),
+        (1, 1, 20 * 9_525, 60 * 9_525, 3, 3, 20 * 9_525, 36 * 9_525)
+    );
+}
+
+#[test]
+fn the_edit_kind_survives_a_round_trip_and_the_size_follows_its_rule() {
+    let mut styling = tall_rows();
+    styling
+        .images
+        .push(picture(sized_anchor(AnchorEdit::OneCell)));
+    let mut absolute = sized_anchor(AnchorEdit::Absolute);
+    (absolute.left_px, absolute.top_px) = (100, 100);
+    styling.images.push(picture(absolute));
+    styling
+        .images
+        .push(picture(sized_anchor(AnchorEdit::TwoCell)));
+    let read = round_trip(styling);
+    let kinds: Vec<_> = read.images.iter().map(|i| i.anchor.edit_as).collect();
+    assert_eq!(
+        kinds,
+        [
+            AnchorEdit::OneCell,
+            AnchorEdit::Absolute,
+            AnchorEdit::TwoCell
+        ]
+    );
+    let one = read.images[0].anchor;
+    assert_eq!((one.from_row, one.to_row), (1, 2));
+    assert_eq!((one.top_px, one.height_px), (40, 96), "its size is kept");
+    let abs = read.images[1].anchor;
+    assert_eq!((abs.left_px, abs.top_px), (100, 100), "its place is kept");
+    let two = read.images[2].anchor;
+    assert_eq!(
+        (two.top_px, two.height_px),
+        (40, 180),
+        "its size is its cells"
+    );
+}
+
+/// A value of `editAs` that is not one of the three is the default, and so is no attribute at all.
+#[test]
+fn an_edit_kind_that_is_not_one_of_the_three_is_two_cell() {
+    for (text, want) in [
+        ("twoCell", AnchorEdit::TwoCell),
+        ("oneCell", AnchorEdit::OneCell),
+        ("absolute", AnchorEdit::Absolute),
+        (" oneCell ", AnchorEdit::OneCell),
+        ("", AnchorEdit::TwoCell),
+        ("onecell", AnchorEdit::TwoCell),
+        ("ONECELL", AnchorEdit::TwoCell),
+        ("move", AnchorEdit::TwoCell),
+        ("oneCell\u{0}", AnchorEdit::TwoCell),
+    ] {
+        assert_eq!(AnchorEdit::parse(text), want, "{text:?}");
+    }
+    let mut styling = tall_rows();
+    styling
+        .images
+        .push(picture(sized_anchor(AnchorEdit::OneCell)));
+    let xlsx = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[styling]).unwrap();
+    let entries = ZipArchiveCodec::unpack(&xlsx, &ZipSecurityPolicy::default()).unwrap();
+    let drawing = |entries: &[easyoffice_formats::ZipEntry]| {
+        let part = entries
+            .iter()
+            .find(|e| e.path.starts_with("xl/drawings/drawing"))
+            .unwrap();
+        String::from_utf8(part.data.clone()).unwrap()
+    };
+    assert!(drawing(&entries).contains(r#"<xdr:twoCellAnchor editAs="oneCell">"#));
+    for hostile in [
+        "bogus",
+        "",
+        "oneCell oneCell",
+        "&lt;x&gt;",
+        "twoCell\" a=\"b",
+    ] {
+        let edited: Vec<(String, Vec<u8>)> = entries
+            .iter()
+            .map(|e| {
+                let data = if e.path.starts_with("xl/drawings/drawing") {
+                    String::from_utf8(e.data.clone())
+                        .unwrap()
+                        .replace("editAs=\"oneCell\"", &format!("editAs=\"{hostile}\""))
+                        .into_bytes()
+                } else {
+                    e.data.clone()
+                };
+                (e.path.clone(), data)
+            })
+            .collect();
+        let pkg = ZipArchiveCodec::pack_compressed(&edited).unwrap();
+        let styling = OoxmlCodec::unpack_xlsx_with_styling(&pkg).map(|(_, s)| s);
+        // Either the file reads with the default or a value that is not XML is refused; never another kind.
+        if let Ok(stylings) = styling {
+            assert_eq!(
+                stylings[0].1.images[0].anchor.edit_as,
+                AnchorEdit::TwoCell,
+                "{hostile:?}"
+            );
+        }
+    }
 }
 
 /// A user's default row height and hidden rows are the same rule the page and the PDF use (`SheetStyling::shown_row_px`).

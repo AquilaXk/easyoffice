@@ -456,6 +456,38 @@ mod tests {
     }
 
     #[test]
+    fn a_chart_anchor_carries_its_offsets_and_edit_kind_both_ways() {
+        let sheet = json(concat!(
+            r#"{"charts":[{"id":"c","chartType":"column","dataRange":"A1:B3","anchor":{"fromCol":1,"fromRow":1,"#,
+            r#""colOffEmu":9525,"rowOffEmu":19050,"toCol":5,"toRow":6,"toColOffEmu":28575,"toRowOffEmu":38100,"editAs":"oneCell"}},"#,
+            r#"{"id":"d","chartType":"column","dataRange":"A1:B3","anchor":{"fromCol":1,"fromRow":1,"toCol":5,"toRow":6,"editAs":"sideways"}}]}"#
+        ));
+        let mut styling = SheetStyling::default();
+        parse_layout(sheet.as_object().unwrap(), &mut styling).unwrap();
+        let first = styling.charts[0].anchor;
+        assert_eq!(
+            (
+                first.col_off_emu,
+                first.row_off_emu,
+                first.to_col_off_emu,
+                first.to_row_off_emu
+            ),
+            (9525, 19050, 28575, 38100)
+        );
+        assert_eq!(first.edit_as, easyoffice_formats::AnchorEdit::OneCell);
+        assert_eq!(
+            styling.charts[1].anchor.edit_as,
+            easyoffice_formats::AnchorEdit::TwoCell,
+            "a kind that is not one of the three is the default"
+        );
+        let mut out = String::new();
+        write_layout(&mut out, &styling);
+        assert!(out.contains(r#""colOffEmu":9525,"rowOffEmu":19050,"toCol":5,"toRow":6,"toColOffEmu":28575,"toRowOffEmu":38100"#));
+        assert_eq!(out.matches(r#""editAs":"oneCell""#).count(), 1);
+        assert!(!out.contains("sideways"));
+    }
+
+    #[test]
     fn layout_round_trips_through_json() {
         let mut styling = SheetStyling::default();
         let sheet = json(
