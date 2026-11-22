@@ -103,8 +103,8 @@ fn structured_save_decode_and_pdf_preserve_charts_json_schema() {
     assert_eq!(field(anchor, "fromRow").as_u64(), Some(1));
     assert_eq!(field(anchor, "toCol").as_u64(), Some(10));
     assert_eq!(field(anchor, "toRow").as_u64(), Some(13));
-    // Six columns of 64 px (PD-305).
-    assert_eq!(field(anchor, "width").as_u64(), Some(384));
+    // Six columns of 72 px (PD-305, PD-306).
+    assert_eq!(field(anchor, "width").as_u64(), Some(432));
     assert_eq!(field(anchor, "height").as_u64(), Some(288));
 
     let series = field(ch, "series").as_array().unwrap();

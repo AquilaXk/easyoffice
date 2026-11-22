@@ -16,7 +16,10 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
 use crate::sheet_styling::sheet_default_col_width::chars_to_px;
-use crate::sheet_styling::sheet_digit_width::{max_digit_px, MODEL_DIGIT_PX};
+use crate::sheet_styling::sheet_default_font::{
+    DefaultFont, STANDARD_FONT_NAME, STANDARD_FONT_SIZE_PT,
+};
+use crate::sheet_styling::sheet_digit_width::MAX_DIGIT_PX;
 use crate::sheet_styling::sheet_filter::color_criteria;
 use crate::sheet_styling::sheet_look::{
     xlsx_color_rgb, BorderEdge, BorderLine, CellBorders, BORDER_DEFAULT_RGB,
@@ -24,6 +27,7 @@ use crate::sheet_styling::sheet_look::{
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::xlsx_color::ColorScheme;
 use crate::sheet_styling::xlsx_dxf_border::edge_xml;
+use crate::sheet_styling::xlsx_normal_font::{normal_font_id, written_default_font};
 use crate::sheet_styling::{
     clean_font_name, format_centipt, resolve_font_name, CellStyle, FontTable, HAlign, IdMemo,
     NumFmtTable, SheetStyling, StyleKey, VAlign, CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
@@ -31,9 +35,8 @@ use crate::sheet_styling::{
 use crate::XmlSanitizer;
 use std::sync::Arc;
 
-const DEFAULT_SIZE_PT: f64 = 11.0;
 /// `cellStyles` entries a reader looks at (a spreadsheet program keeps fewer than this many cell styles).
-const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
+pub(crate) const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
 /// Border, fill, font and cell format definitions a reader keeps; a stylesheet with more reads the rest as
 /// no border, no fill, the default font and the default format.
 pub(crate) const MAX_BORDER_DEFS: usize = 65_536;
@@ -41,10 +44,10 @@ const MAX_FILL_DEFS: usize = 65_536;
 const MAX_FONT_DEFS: usize = 65_536;
 pub(crate) const MAX_XF_DEFS: usize = 65_536;
 
-/// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value, in characters of the 7 px digit of
-/// the font this crate writes as the default font (ECMA-376 18.3.1.13: `Truncate(px / digit * 256) / 256`).
-pub(crate) fn px_to_xlsx_width(px: u32) -> f64 {
-    (f64::from(px) / f64::from(MODEL_DIGIT_PX) * 256.0).floor() / 256.0
+/// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value, in characters of a `digit_px` wide digit,
+/// the one of the workbook's default font (ECMA-376 18.3.1.13: `Truncate(px / digit * 256) / 256`).
+pub(crate) fn px_to_xlsx_width(px: u32, digit_px: u32) -> f64 {
+    (f64::from(px) / f64::from(digit_px.clamp(1, MAX_DIGIT_PX)) * 256.0).floor() / 256.0
 }
 
 /// Converts a SpreadsheetML `width` attribute value to CSS pixels, with the digit width of the workbook's default font
@@ -93,6 +96,8 @@ pub(crate) struct XlsxStyleTable {
     num_fmts: NumFmtTable,
     /// Non-default font family names of the whole workbook (PD-244).
     font_names: FontTable,
+    /// The Normal style's font, font 0: the first sheet's default font (PD-306), its size as a text in points.
+    default_font: (String, String),
     /// Differential formats of the conditional formatting rules (PD-171).
     pub(crate) dxf: DxfTable,
 }
@@ -110,6 +115,7 @@ impl XlsxStyleTable {
             fill_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
             font_names: FontTable::default(),
+            default_font: written_default_font(stylings.first()),
             dxf: DxfTable::build(
                 stylings
                     .iter()
@@ -257,7 +263,7 @@ impl XlsxStyleTable {
             }
             let sz = k
                 .size_centipt()
-                .map_or_else(|| "11".to_string(), format_centipt);
+                .map_or_else(|| self.default_font.1.clone(), format_centipt);
             out.push_str(&format!("<sz val=\"{sz}\"/>"));
             if let Some(rgb) = k.font_color() {
                 out.push_str(&format!("<color rgb=\"FF{rgb:06X}\"/>"));
@@ -265,11 +271,11 @@ impl XlsxStyleTable {
                 out.push_str(&format!("<color rgb=\"{HYPERLINK_COLOR}\"/>"));
             }
         } else {
-            out.push_str("<sz val=\"11\"/>");
+            out.push_str(&format!("<sz val=\"{}\"/>", self.default_font.1));
         }
         let name = key
             .and_then(|k| resolve_font_name(k.font(), self.font_names.names()))
-            .unwrap_or("Calibri");
+            .unwrap_or(&self.default_font.0);
         out.push_str(&format!(
             "<name val=\"{}\"/></font>",
             XmlSanitizer::escape(name)
@@ -464,7 +470,7 @@ fn cell_styles_xml(linked: bool) -> String {
 
 /// `<cols>` element (empty string when no column has a custom width). Adjacent columns with the
 /// same width share one `<col>`.
-pub(crate) fn cols_xml(columns: &BTreeMap<u32, u32>) -> String {
+pub(crate) fn cols_xml(columns: &BTreeMap<u32, u32>, digit_px: u32) -> String {
     if columns.is_empty() {
         return String::new();
     }
@@ -481,7 +487,7 @@ pub(crate) fn cols_xml(columns: &BTreeMap<u32, u32>) -> String {
             "<col min=\"{}\" max=\"{}\" width=\"{}\" customWidth=\"1\"/>",
             start + 1,
             end + 1,
-            px_to_xlsx_width(px)
+            px_to_xlsx_width(px, digit_px)
         ));
     }
     xml.push_str("</cols>");
@@ -626,15 +632,19 @@ pub(crate) struct XfStyles {
     pub(crate) table_styles: HashMap<String, crate::sheet_styling::table_style::TableStyleDef>,
     /// The workbook counts its dates from 1904 (`workbookPr date1904`); set by the caller that has the workbook part.
     pub(crate) date1904: bool,
-    /// The width of the widest digit of the workbook's default font (font 0), which the widths in characters count in
-    /// (PD-305). Missing: the 7 px of the font this crate writes.
-    pub(crate) digit_px: Option<u32>,
+    /// The font of the Normal style when it is not the standard default font; its widest digit is the unit the widths in
+    /// characters count in (PD-305, PD-306). `None`: the standard font, Malgun Gothic 11 pt.
+    pub(crate) default_font: Option<DefaultFont>,
 }
 
 impl XfStyles {
-    /// [`XfStyles::digit_px`], or the digit of the font this crate writes as the default.
-    pub(crate) fn digit(&self) -> u32 {
-        self.digit_px.unwrap_or(MODEL_DIGIT_PX)
+    /// A workbook that has no fonts to read: its default font is the first spreadsheet program's, Calibri 11 pt (what the
+    /// format says a missing `styles.xml` is), so its widths count in 7 px digits.
+    pub(crate) fn unstyled() -> Self {
+        Self {
+            default_font: DefaultFont::kept(None, None),
+            ..Self::default()
+        }
     }
 }
 
@@ -694,43 +704,11 @@ fn hyperlink_style_xfs(styles_xml: &str) -> HashSet<u32> {
         .collect()
 }
 
-/// The font id of the Normal cell style (`cellStyle` with `builtinId` 0, ECMA-376 18.8.7): the `fontId` of the `cellStyleXfs`
-/// entry its `xfId` names. Font 0 when the file does not say, or says something that is not there.
-fn normal_font_id(styles_xml: &str) -> usize {
-    let attr = |attrs: &str, name: &str| {
-        extract_attr_from_fragment(attrs, name)?
-            .parse::<usize>()
-            .ok()
-    };
-    let normal_xf = extract_tag_bodies(styles_xml, "cellStyles")
-        .into_iter()
-        .next()
-        .and_then(|body| {
-            extract_tags_or_self_closing_with_attrs(body, "cellStyle")
-                .into_iter()
-                .take(MAX_CELL_STYLE_ENTRIES)
-                .find(|(attrs, _)| extract_attr_from_fragment(attrs, "builtinId") == Some("0"))
-                .and_then(|(attrs, _)| attr(attrs, "xfId"))
-        })
-        .unwrap_or(0);
-    extract_tag_bodies(styles_xml, "cellStyleXfs")
-        .into_iter()
-        .next()
-        .and_then(|body| {
-            extract_tags_or_self_closing_with_attrs(body, "xf")
-                .into_iter()
-                .take(MAX_XF_DEFS)
-                .nth(normal_xf)
-                .and_then(|(attrs, _)| attr(attrs, "fontId"))
-        })
-        .unwrap_or(0)
-}
-
 /// Style of every `cellXfs` entry, resolved against `fonts` and `numFmts`. A font size equal to
 /// the default font's (font 0) reads as "no explicit size".
 pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> XfStyles {
     let Some(fonts_xml) = extract_tag_bodies(styles_xml, "fonts").into_iter().next() else {
-        return XfStyles::default();
+        return XfStyles::unstyled();
     };
     let fonts: Vec<(CellStyle, Option<String>)> =
         extract_tags_or_self_closing_with_attrs(fonts_xml, "font")
@@ -738,27 +716,29 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
             .take(MAX_FONT_DEFS)
             .map(|(_, font)| parse_font(font, colors))
             .collect();
-    let default_size = fonts
-        .first()
-        .and_then(|(f, _)| f.size_pt)
-        .unwrap_or(DEFAULT_SIZE_PT);
-    let default_color = fonts.first().and_then(|(f, _)| f.font_color);
-    let default_font = fonts
-        .first()
-        .and_then(|(_, n)| n.as_deref())
-        .and_then(clean_font_name)
-        .unwrap_or("Calibri")
+    // The Normal style's font is the default font (PD-306): its digit is the unit of the widths in characters, and a cell
+    // font of its name and size reads as "not set". It is not always font 0 (PD-305).
+    let normal_id = normal_font_id(styles_xml);
+    let normal = fonts
+        .get(normal_id)
+        .map(|(look, name)| (look, name.as_deref()));
+    let normal = normal.or_else(|| fonts.first().map(|(look, name)| (look, name.as_deref())));
+    let default_color = normal.and_then(|(look, _)| look.font_color);
+    let kept_font = normal.map_or_else(
+        || DefaultFont::kept(None, None),
+        |(look, name)| DefaultFont::kept(name, look.size_pt),
+    );
+    let default_size = kept_font
+        .as_ref()
+        .map_or(STANDARD_FONT_SIZE_PT, DefaultFont::size_pt);
+    let default_font = kept_font
+        .as_ref()
+        .map_or(STANDARD_FONT_NAME, DefaultFont::name)
         .to_string();
-    // The unit of the column widths is the digit of the Normal style's font, which is not always font 0 (PD-305).
-    let normal = fonts.get(normal_font_id(styles_xml)).or(fonts.first());
-    let digit_px = normal.map(|(look, name)| {
-        let face = name.as_deref().and_then(clean_font_name);
-        max_digit_px(face, Some(look.size_pt.unwrap_or(DEFAULT_SIZE_PT)))
-    });
     let fills = parse_fills(styles_xml, colors);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
         return XfStyles {
-            digit_px,
+            default_font: kept_font,
             ..XfStyles::default()
         };
     };
@@ -768,8 +748,8 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
     let mut table = NumFmtTable::default();
     let mut font_table = FontTable::default();
     let mut font_ids = vec![u16::MAX; fonts.len()];
-    if !font_ids.is_empty() {
-        font_ids[0] = 0;
+    if let Some(slot) = font_ids.get_mut(normal_id) {
+        *slot = 0;
     }
     let mut link_xfs = Vec::new();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
@@ -850,7 +830,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         dxf_colors: Vec::new(),
         table_styles: HashMap::new(),
         date1904: false,
-        digit_px,
+        default_font: kept_font,
     }
 }
 

@@ -12,20 +12,18 @@
 //! Carlito, read from its font file, has 1038 for every digit. Cambria's 1135 is the 0.554 em of its metric-compatible
 //! face Caladea (read from the font file, 554 of 1000 for every digit).
 //!
-//! Malgun Gothic (the default font of the Korean edition of the spreadsheet program) has no font file here. Its 1116 is not
-//! measured: a Korean edition user reports the default column of a new workbook (Malgun Gothic 11 pt, 100 %) as 8.38
-//! characters, which is 8 characters of an 8 px digit and the padding, `(72 - 5) / 8 = 8.375`, so 11 pt must give 8 px, which
-//! `round(advance * 14.667 / 2048)` does for an advance from 1,047 to 1,185. 1116 is the middle of that range, so the other
-//! sizes are an estimate (12 pt gives 9 px, 10 pt gives 7 px). Aptos is not in the table: no source gives its digit width.
+//! Malgun Gothic (the default font of the Korean edition of the spreadsheet program) has no font file here. Its 11 pt width is
+//! confirmed on the Korean edition (QA, 2026-11-22: the default column of a new workbook, Malgun Gothic 11 pt at 100 %, is
+//! 8.38 characters and 72 px), which is 8 characters of an 8 px digit and the padding, `(72 - 5) / 8 = 8.375`, so 11 pt gives
+//! 8 px, which `round(advance * 14.667 / 2048)` does for an advance from 1,047 to 1,185. The advance 1116 is the middle of that
+//! range and not a measured advance, so only 11 pt is confirmed; the other sizes are an estimate (12 pt gives 9 px, 10 pt gives
+//! 7 px). Aptos is not in the table: no source gives its digit width.
 //!
 //! A font that is not in the table is read as Calibri: the workbook is shown in a substitute face on the machine that has
 //! not the font, and the size alone cannot say which. The width is never below 1 px and never above [`MAX_DIGIT_PX`], and a
 //! size that is not a number, not positive or above the 409 pt a font size may have is the default size of 11 pt, so a
 //! hostile `styles.xml` cannot make the width of a column cost or overflow anything.
 
-/// The digit width of the font this crate writes as the default font of a workbook (Calibri 11). The sheet model counts
-/// its widths in characters of this width.
-pub const MODEL_DIGIT_PX: u32 = 7;
 /// The widest digit the table gives: a column of 255 characters of it is still a width a sheet can draw.
 pub const MAX_DIGIT_PX: u32 = 64;
 
@@ -36,7 +34,7 @@ const UNITS_PER_EM: f64 = 2048.0;
 
 /// The widest digit of the fallback face, Calibri.
 const CALIBRI_ADVANCE: u16 = 1038;
-/// An estimate inside what 8 px at 11 pt allows (see the header), not a measured advance.
+/// Inside what 8 px at 11 pt allows (see the header; 11 pt is confirmed, the advance itself is not measured).
 const MALGUN_ADVANCE: u16 = 1116;
 
 /// Face names (lowercase) and the widest advance of their digits in 1/2048 em.
@@ -83,7 +81,7 @@ mod tests {
 
     #[test]
     fn the_spec_example_and_the_common_default_fonts() {
-        assert_eq!(max_digit_px(Some("Calibri"), Some(11.0)), MODEL_DIGIT_PX);
+        assert_eq!(max_digit_px(Some("Calibri"), Some(11.0)), 7);
         let table = [
             ("Calibri", 10.0, 7),
             ("Calibri", 12.0, 8),
@@ -97,7 +95,7 @@ mod tests {
             ("Tahoma", 11.0, 8),
             ("Cambria", 11.0, 8),
             ("Cambria", 10.0, 7),
-            // The Korean edition's default: 8.38 characters of an 8 px digit (11 pt); the other sizes are estimates.
+            // The Korean edition's default: 8.38 characters of an 8 px digit (11 pt, confirmed); the other sizes are estimates.
             ("Malgun Gothic", 11.0, 8),
             ("맑은 고딕", 11.0, 8),
             ("Malgun Gothic", 10.0, 7),

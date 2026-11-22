@@ -20,9 +20,6 @@ pub const MAX_MERGES: usize = 100_000;
 /// Hidden rows (summed over all runs) one sheet may carry.
 pub const MAX_HIDDEN_ROWS: u64 = 100_000;
 
-/// Hidden width of a column that has no custom width (`width` is required next to `hidden`).
-const DEFAULT_HIDDEN_WIDTH: &str = "8.43";
-
 /// Rows or columns in `runs`.
 pub fn run_total(runs: &[(u32, u32)]) -> u64 {
     runs.iter().map(|&(s, e)| u64::from(e - s) + 1).sum()
@@ -124,8 +121,12 @@ pub(crate) fn layout_cols_xml(styling: &SheetStyling, unlocked_xf: usize) -> Str
     let outline = &styling.outline;
     if styling.hidden_cols.is_empty() && outline.cols.is_empty() && styling.unlocked_cols.is_empty()
     {
-        return cols_xml(&styling.columns);
+        return cols_xml(&styling.columns, styling.digit_px());
     }
+    // `width` is required next to `hidden`: a column without a width of its own says the sheet's default one, in characters
+    // of the workbook's default font (PD-306).
+    let digit = styling.digit_px();
+    let default_width = px_to_xlsx_width(styling.default_col_px(), digit).to_string();
     // One entry per column that has a width, is hidden or is grouped, merged into runs of equal entries.
     let mut by_col: BTreeMap<u32, ColAttrs> = styling
         .columns
@@ -178,8 +179,8 @@ pub(crate) fn layout_cols_xml(styling: &SheetStyling, unlocked_xf: usize) -> Str
             end + 1
         );
         match attrs.px {
-            Some(px) => xml.push_str(&px_to_xlsx_width(px).to_string()),
-            None => xml.push_str(DEFAULT_HIDDEN_WIDTH),
+            Some(px) => xml.push_str(&px_to_xlsx_width(px, digit).to_string()),
+            None => xml.push_str(&default_width),
         }
         xml.push('"');
         if attrs.hidden {
@@ -278,14 +279,17 @@ mod tests {
         let xml = layout_cols_xml(&styling, 0);
         assert!(xml.contains(r#"<col min="1" max="1""#));
         assert!(
-            xml.contains(r#"min="2" max="2" width="8.43" hidden="1"/>"#),
+            xml.contains(r#"min="2" max="2" width="9" hidden="1"/>"#),
             "{xml}"
         );
         assert!(
             xml.contains(r#"min="3" max="3""#) && xml.contains(r#"hidden="1" customWidth="1""#)
         );
         styling.hidden_cols.clear();
-        assert_eq!(layout_cols_xml(&styling, 0), cols_xml(&styling.columns));
+        assert_eq!(
+            layout_cols_xml(&styling, 0),
+            cols_xml(&styling.columns, styling.digit_px())
+        );
     }
 
     #[test]
@@ -300,12 +304,12 @@ mod tests {
         };
         let xml = layout_cols_xml(&styling, 0);
         assert!(
-            xml.contains(r#"<col min="2" max="3" width="8.43" hidden="1" outlineLevel="1"/>"#),
+            xml.contains(r#"<col min="2" max="3" width="9" hidden="1" outlineLevel="1"/>"#),
             "{xml}"
         );
         assert!(
-            xml.contains(r#"<col min="4" max="4" width="8.43" hidden="1" outlineLevel="2"/>"#)
-                && xml.contains(r#"<col min="5" max="5" width="8.43" collapsed="1"/>"#),
+            xml.contains(r#"<col min="4" max="4" width="9" hidden="1" outlineLevel="2"/>"#)
+                && xml.contains(r#"<col min="5" max="5" width="9" collapsed="1"/>"#),
             "{xml}"
         );
     }

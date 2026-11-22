@@ -163,14 +163,13 @@ impl ViewScan {
     }
 
     /// Gives `styling` what the scan found: the frozen pane, the view, the tab colour and the default row and column size. The
-    /// column size is in characters of the workbook's default font (`digit_px` wide), the sheet's own are of 7 px (PD-305).
-    pub(crate) fn apply_to(&self, styling: &mut SheetStyling, digit_px: u32) {
+    /// column size stays in characters of the workbook's default font, which the styling carries (PD-305, PD-306).
+    pub(crate) fn apply_to(&self, styling: &mut SheetStyling) {
         styling.freeze = self.freeze;
         styling.view = self.state();
         styling.tab_color = self.tab_rgb;
         styling.default_row_height = self.default_row_height;
-        styling.default_col_width =
-            DefaultColWidth::in_model_digits(self.default_col_width, digit_px);
+        styling.default_col_width = self.default_col_width;
     }
 
     /// The selection, zoom and scroll position the scan found.

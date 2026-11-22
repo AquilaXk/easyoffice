@@ -181,7 +181,7 @@ fn legacy_worksheet_styling(sheet_xml: &str, xf_styles: &[CellStyle]) -> SheetSt
         if !width.is_finite() || width <= 0.0 || min == 0 || max < min {
             continue;
         }
-        let px = xlsx_width_to_px(width, 7);
+        let px = xlsx_width_to_px(width, 8); // the standard default font's digit (PD-306)
         for col in min..=max.min(crate::OoxmlCodec::MAX_XLSX_COLS) {
             if styling.columns.len() >= MAX_STYLED_CELLS {
                 break;

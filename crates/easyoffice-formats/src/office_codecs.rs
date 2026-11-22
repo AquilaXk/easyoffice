@@ -744,7 +744,7 @@ impl OoxmlCodec {
         });
         let mut xf_styles = match (styles_xml, &colors) {
             (Some(styles), Some(colors)) => parse_cell_xf_styles(styles, colors),
-            _ => XfStyles::default(),
+            _ => XfStyles::unstyled(),
         };
         // The differential formats are listed once for every reader of them (an empty entry takes an id).
         let date1904 = read_date1904(wb_xml);

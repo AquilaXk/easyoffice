@@ -3,11 +3,11 @@
 
 use easyoffice_formats::{
     encode_sheet_pdf, plain_cell_numeric, BorderEdge, BorderLine, CellBorders, CellRule, CellShown,
-    CellStyle, CfBar, OdsUnpacked, SheetShown, SheetStyling, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE,
-    FLAG_UNDERLINE,
+    CellStyle, CfBar, DefaultFont, OdsUnpacked, SheetShown, SheetStyling, FLAG_BOLD, FLAG_ITALIC,
+    FLAG_STRIKE, FLAG_UNDERLINE,
 };
 
-/// A default column, 64 px (PD-305), in points.
+/// A default column of a Calibri 11 pt workbook (a 7 px digit), 64 px (PD-305), in points.
 const CELL_W: f64 = 48.0;
 const CELL_H: f64 = 18.0;
 
@@ -19,7 +19,11 @@ fn sheet() -> (Vec<OdsUnpacked>, SheetStyling) {
         (2, 0, "c".to_string()),
         (1, 1, "5".to_string()),
     ];
-    (vec![("S".to_string(), cells)], SheetStyling::default())
+    let styling = SheetStyling {
+        default_font: DefaultFont::kept(Some("Calibri"), Some(11.0)),
+        ..SheetStyling::default()
+    };
+    (vec![("S".to_string(), cells)], styling)
 }
 
 fn rule_of(at: (u32, u32), rule: CellRule) -> SheetShown {

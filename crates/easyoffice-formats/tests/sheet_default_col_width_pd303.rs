@@ -135,7 +135,8 @@ fn the_widths_of_the_columns_stay_as_the_file_wrote_them() {
     let columns = styling.columns.clone();
     assert_eq!(
         columns.iter().map(|(&c, &w)| (c, w)).collect::<Vec<_>>(),
-        vec![(0, 64), (2, 210)]
+        // The standard font (8 px digit, PD-306): 9.140625 characters are 73 px and 30 are 240 px.
+        vec![(0, 73), (2, 240)]
     );
     let again = styling_of(&saved(styling).unwrap());
     assert_eq!(again.columns, columns);

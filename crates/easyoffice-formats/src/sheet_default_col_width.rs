@@ -8,7 +8,9 @@
 //! (never clamped), following ECMA-376 18.3.1.81 (`baseColWidth`: characters of the maximum digit width, without padding;
 //! `defaultColWidth`: characters including the padding, as `<col width>`) and the 255 characters a column may have. No line
 //! is copied. The reference's own default of 8.43 characters is the 8 characters of `baseColWidth` below plus the padding
-//! (8 * 7 + 5 = 61 px, 64 px once rounded up to 8 px, which is 8.43 characters of a 7 px digit: (64 - 5) / 7).
+//! (8 * 7 + 5 = 61 px, 64 px once rounded up to 8 px, which is 8.43 characters of a 7 px digit: (64 - 5) / 7). With the 8 px
+//! digit of the standard default font (PD-306) the same 8 characters are 8 * 8 + 5 = 69 px, 72 px once rounded up: 8.38
+//! characters, what the Korean edition shows.
 //!
 //! The width of a column without a width of its own is worked out here (PD-305), the rule of the spreadsheet programs:
 //! - `defaultColWidth` first, in characters including the padding, as pixels by the `<col width>` formula of ECMA-376
@@ -18,16 +20,14 @@
 //!   article "Description of how column widths are determined", KB 214123, retired; kept by web.archive.org), which is
 //!   why 8 characters of a 7 px digit are 64 px and not the 61 px of the formula alone.
 //!
-//! `digit` is the maximum digit width of the workbook's default font (`sheet_digit_width.rs`), 7 px for Calibri 11. The model
-//! of a sheet always counts in 7 px digits, the font this crate writes as the default: a reader of a workbook whose default
-//! font has another digit width turns the sheet's width into 7 px digits with [`DefaultColWidth::in_model_digits`], so the
-//! pixels stay and a save writes a file that says the same.
+//! `digit` is the maximum digit width of the workbook's default font (`sheet_digit_width.rs`, [`SheetStyling::digit_px`]): 7 px
+//! for Calibri 11, 8 px for the standard Malgun Gothic 11. The values stay as the file gave them, in characters of that digit;
+//! the workbook's font is kept with them (PD-306), so a save writes the same font and the same numbers.
 
 use std::fmt::Write;
 
-use crate::sheet_styling::sheet_digit_width::{MAX_DIGIT_PX, MODEL_DIGIT_PX};
-use crate::sheet_styling::xlsx_styles::px_to_xlsx_width;
-use crate::sheet_styling::{SheetStyling, MIN_COLUMN_PX};
+use crate::sheet_styling::sheet_digit_width::MAX_DIGIT_PX;
+use crate::sheet_styling::{SheetStyling, MAX_COLUMN_PX, MIN_COLUMN_PX};
 
 /// Characters a default column holds when a sheet says nothing (`baseColWidth` of ECMA-376 18.3.1.81).
 pub const DEFAULT_BASE_COL_CHARS: u32 = 8;
@@ -35,10 +35,11 @@ pub const DEFAULT_BASE_COL_CHARS: u32 = 8;
 const COL_PADDING_PX: u32 = 5;
 /// The width a sheet is drawn at when `baseColWidth` decides it is a multiple of this many pixels.
 const COL_PX_ALIGN: u32 = 8;
-/// The width of a column without a width of its own in a sheet that says nothing, with a 7 px digit: 8 characters, 64 px.
-pub const DEFAULT_COL_PX: u32 = 64;
-/// The widest default column in pixels: 255 characters of the model's 7 px digit, what the writer can say.
-pub const MAX_DEFAULT_COL_PX: u32 = MAX_BASE_COL_WIDTH * MODEL_DIGIT_PX;
+/// The width of a column without a width of its own in a sheet that says nothing, with the standard 8 px digit: 8 characters,
+/// 72 px.
+pub const DEFAULT_COL_PX: u32 = 72;
+/// The widest default column in pixels, the widest a column may be.
+pub const MAX_DEFAULT_COL_PX: u32 = MAX_COLUMN_PX;
 
 /// The widest a column may be, in characters (ECMA-376 18.3.1.13 `col` `width`, the limit of the spreadsheet programs).
 pub const MAX_COL_WIDTH_CHARS: f64 = 255.0;
@@ -91,20 +92,6 @@ impl DefaultColWidth {
             && self.base.is_none_or(|b| b <= MAX_BASE_COL_WIDTH)
     }
 
-    /// The sheet's width as it reads with 7 px digits when the workbook's default font has a `digit_px` wide digit: the
-    /// same pixels, as a `defaultColWidth` (the values are kept as the file gave them when the digits are the same).
-    pub(crate) fn in_model_digits(widths: Option<Self>, digit_px: u32) -> Option<Self> {
-        let digit = digit_px.clamp(1, MAX_DIGIT_PX);
-        if digit == MODEL_DIGIT_PX {
-            return widths;
-        }
-        let px = default_col_px(widths, digit);
-        Some(Self {
-            width: Some(px_to_xlsx_width(px)),
-            base: None,
-        })
-    }
-
     /// ` baseColWidth="10" defaultColWidth="20"` for the values that are set, in the order of the schema's attributes.
     pub(crate) fn xml_attrs(&self) -> String {
         let mut xml = String::new();
@@ -120,9 +107,9 @@ impl DefaultColWidth {
 
 impl SheetStyling {
     /// The width in pixels of the columns that have none of their own (PD-305): one rule for the page, the positions of
-    /// pictures and charts, and the PDF.
+    /// pictures and charts, and the PDF. The digit is the one of the workbook's default font (PD-306).
     pub fn default_col_px(&self) -> u32 {
-        default_col_px(self.default_col_width, MODEL_DIGIT_PX)
+        default_col_px(self.default_col_width, self.digit_px())
     }
 
     /// The width in pixels of the zero-based `col`: its own width, else the default of the sheet.
@@ -169,6 +156,8 @@ pub fn default_col_px(widths: Option<DefaultColWidth>, digit_px: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sheet_styling::sheet_default_font::STANDARD_DIGIT_PX;
+    use crate::sheet_styling::xlsx_styles::px_to_xlsx_width;
 
     fn widths(width: Option<f64>, base: Option<u32>) -> Option<DefaultColWidth> {
         Some(DefaultColWidth { width, base })
@@ -179,7 +168,7 @@ mod tests {
         // 8 characters: 8 * digit + 5 px up to a multiple of 8 (61 -> 64 for the 7 px digit of Calibri 11).
         let px: Vec<u32> = (5..=10).map(|d| default_col_px(None, d)).collect();
         assert_eq!(px, [48, 56, 64, 72, 80, 88]);
-        assert_eq!(default_col_px(None, MODEL_DIGIT_PX), DEFAULT_COL_PX);
+        assert_eq!(default_col_px(None, STANDARD_DIGIT_PX), DEFAULT_COL_PX);
     }
 
     #[test]
@@ -191,7 +180,16 @@ mod tests {
         // Only the base: the characters and the padding, up to 8 px (10 * 7 + 5 = 75 -> 80).
         assert_eq!(default_col_px(widths(None, Some(10)), 7), 80);
         assert_eq!(default_col_px(widths(None, Some(0)), 7), 8);
-        assert_eq!(default_col_px(widths(None, Some(255)), 7), 1_785);
+        assert_eq!(default_col_px(widths(None, Some(255)), 7), 1_792);
+        // The widest column is 2,000 px whatever the digit.
+        assert_eq!(
+            default_col_px(widths(None, Some(255)), 8),
+            MAX_DEFAULT_COL_PX
+        );
+        assert_eq!(
+            default_col_px(widths(Some(255.0), None), 9),
+            MAX_DEFAULT_COL_PX
+        );
     }
 
     #[test]
@@ -224,28 +222,29 @@ mod tests {
         assert_eq!(chars_to_px(f64::NAN, 7), 0);
         assert_eq!(chars_to_px(f64::INFINITY, 7), 0);
         assert_eq!(chars_to_px(f64::MAX, 7), u32::MAX);
-        // The writer's width of a pixel count reads back as the same pixels, for every width a column may have.
-        for px in 1..=2_000u32 {
-            assert_eq!(chars_to_px(px_to_xlsx_width(px), 7), px, "{px}");
+        // The writer's width of a pixel count reads back as the same pixels, for every width a column may have and
+        // every digit a font may have.
+        for digit in [1, 5, 7, 8, 9, 12, MAX_DIGIT_PX] {
+            for px in 1..=2_000u32 {
+                assert_eq!(
+                    chars_to_px(px_to_xlsx_width(px, digit), digit),
+                    px,
+                    "{px} {digit}"
+                );
+            }
         }
     }
 
     #[test]
-    fn other_digits_are_turned_into_the_models_pixels() {
-        assert_eq!(DefaultColWidth::in_model_digits(None, 7), None);
-        let kept = widths(Some(20.5), Some(9));
-        assert_eq!(DefaultColWidth::in_model_digits(kept, 7), kept);
-        for digit in [5, 6, 8, 9, 12, 64] {
-            for w in [None, widths(None, Some(10)), widths(Some(12.25), Some(3))] {
-                let wanted = default_col_px(w, digit);
-                let model = DefaultColWidth::in_model_digits(w, digit);
-                assert!(model.is_some_and(|m| m.within_bounds()), "{digit} {w:?}");
-                assert_eq!(
-                    default_col_px(model, MODEL_DIGIT_PX),
-                    wanted,
-                    "{digit} {w:?}"
-                );
-            }
-        }
+    fn the_default_font_decides_the_digit_of_the_sheet() {
+        let mut styling = SheetStyling::default();
+        assert_eq!(styling.default_col_px(), DEFAULT_COL_PX);
+        assert_eq!(DEFAULT_COL_PX, 72);
+        styling.default_font = crate::sheet_styling::DefaultFont::kept(Some("Calibri"), Some(11.0));
+        assert_eq!(styling.default_col_px(), 64);
+        styling.default_col_width = widths(Some(20.7109375), None);
+        assert_eq!(styling.default_col_px(), 145);
+        styling.default_font = None;
+        assert_eq!(styling.default_col_px(), 166);
     }
 }

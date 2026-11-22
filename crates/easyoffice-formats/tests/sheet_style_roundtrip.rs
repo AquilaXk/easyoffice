@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    read_sheet_styling, CellStyle, DocumentFormat, OdfCodec, OdsUnpacked, OoxmlCodec, SheetStyling,
-    XlsxCachedValue, XlsxFormulaCache, ZipArchiveCodec, ZipSecurityPolicy,
+    read_sheet_styling, CellStyle, DefaultFont, DocumentFormat, OdfCodec, OdsUnpacked, OoxmlCodec,
+    SheetStyling, XlsxCachedValue, XlsxFormulaCache, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn cell(text: &str) -> OdsUnpacked {
@@ -168,11 +168,22 @@ fn column_widths_round_trip_and_use_excel_character_units() {
         &[styled(vec![], widths)],
     );
     let sheet = part(&xlsx, "xl/worksheets/sheet1.xml");
-    // 96 px / 7 px per digit = 13.7109375 (truncated to 1/256); A and B share one <col>.
+    // 96 px / 8 px per digit (the standard default font, PD-306) = 12; A and B share one <col>.
     assert!(
-        sheet.contains("<col min=\"1\" max=\"2\" width=\"13.7109375\" customWidth=\"1\"/>"),
+        sheet.contains("<col min=\"1\" max=\"2\" width=\"12\" customWidth=\"1\"/>"),
         "{sheet}"
     );
+    assert!(sheet.contains("<col min=\"4\" max=\"4\" width=\"25\" customWidth=\"1\"/>"));
+    // A Calibri 11 workbook counts in 7 px digits: 96 px = 13.7109375 (truncated to 1/256), 200 px = 28.5703125.
+    let calibri = SheetStyling {
+        default_font: DefaultFont::kept(Some("Calibri"), Some(11.0)),
+        ..styled(vec![], vec![(0, 96), (3, 200)])
+    };
+    let sheet = part(
+        &pack(DocumentFormat::Xlsx, &[cell("x")], &[calibri]),
+        "xl/worksheets/sheet1.xml",
+    );
+    assert!(sheet.contains("<col min=\"1\" max=\"1\" width=\"13.7109375\" customWidth=\"1\"/>"));
     assert!(sheet.contains("<col min=\"4\" max=\"4\" width=\"28.5703125\" customWidth=\"1\"/>"));
     assert!(
         sheet.find("<cols>").unwrap() < sheet.find("<sheetData>").unwrap(),
@@ -202,7 +213,7 @@ fn styles_xml_follows_the_ecma376_element_order() {
     );
     // Inside <font>: b, i, strike, u, sz, name.
     let font = &xml[xml.find("<font><b/>").unwrap()..];
-    assert!(font.starts_with("<font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font>"));
+    assert!(font.starts_with("<font><b/><sz val=\"11\"/><name val=\"맑은 고딕\"/></font>"));
     let all = CellStyle {
         bold: true,
         italic: true,
@@ -220,7 +231,9 @@ fn styles_xml_follows_the_ecma376_element_order() {
         "xl/styles.xml",
     );
     assert!(
-        xml.contains("<font><b/><i/><strike/><u/><sz val=\"12.5\"/><name val=\"Calibri\"/></font>"),
+        xml.contains(
+            "<font><b/><i/><strike/><u/><sz val=\"12.5\"/><name val=\"맑은 고딕\"/></font>"
+        ),
         "{xml}"
     );
 }

@@ -104,10 +104,8 @@ fn the_parts_are_written_in_schema_order_with_levels_and_marks() {
     );
     // The folded group of rows 20-24 is summed up by row 25, which has no group level.
     assert!(xml.contains("<row r=\"25\" collapsed=\"1\">"), "{xml}");
-    assert!(
-        xml.contains("<col min=\"3\" max=\"5\" width=\"8.43\" hidden=\"1\" outlineLevel=\"1\"/>")
-    );
-    assert!(xml.contains("<col min=\"6\" max=\"6\" width=\"8.43\" collapsed=\"1\"/>"));
+    assert!(xml.contains("<col min=\"3\" max=\"5\" width=\"9\" hidden=\"1\" outlineLevel=\"1\"/>"));
+    assert!(xml.contains("<col min=\"6\" max=\"6\" width=\"9\" collapsed=\"1\"/>"));
 }
 
 #[test]

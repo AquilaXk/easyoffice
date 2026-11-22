@@ -8,7 +8,7 @@ use easyoffice_formats::{
     default_col_px, normalize_runs, normalize_spills, run_total, CellBox, DefaultColWidth,
     EasyOfficeError, RowHeight, RowHeights, RowOffsets, SheetFilter, SheetGrid, SheetStyling,
     SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS,
-    MAX_SPILL_REFS, MODEL_DIGIT_PX,
+    MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -244,13 +244,17 @@ pub(crate) fn parse_default_col_width(
 }
 
 /// The width in pixels of the columns without a width of their own in a sheet whose request carries `defaultColWidth`
-/// (null or missing: the sheet says nothing), by the rule of `SheetStyling::default_col_px` (PD-305).
-pub(crate) fn parse_default_col_px(v: Option<&StrictJsonValue>) -> Result<u32, EasyOfficeError> {
+/// (null or missing: the sheet says nothing), by the rule of `SheetStyling::default_col_px` (PD-305), in digits of `digit_px`,
+/// the widest digit of the workbook's default font (PD-306).
+pub(crate) fn parse_default_col_px(
+    v: Option<&StrictJsonValue>,
+    digit_px: u32,
+) -> Result<u32, EasyOfficeError> {
     let widths = match v.filter(|v| !matches!(v, StrictJsonValue::Null)) {
         Some(v) => Some(parse_default_col_width(v)?),
         None => None,
     };
-    Ok(default_col_px(widths, MODEL_DIGIT_PX))
+    Ok(default_col_px(widths, digit_px))
 }
 
 fn default_col_width_json(widths: DefaultColWidth) -> String {

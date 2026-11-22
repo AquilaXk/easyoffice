@@ -724,6 +724,9 @@ fn decode_response_with_deck(
             if styling.first().is_some_and(|(_, st)| st.date1904) {
                 out.push_str(",\"date1904\":true");
             }
+            if let Some((_, first)) = styling.first() {
+                crate::sheet_default_font_json::write_default_font(&mut out, first);
+            }
             out.push('}');
             return Ok(out);
         }

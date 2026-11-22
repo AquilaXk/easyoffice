@@ -197,8 +197,8 @@ fn all_five_chart_kinds_and_schema_order_round_trip_through_xlsx() {
     assert_eq!(st.charts[0].series[0].name, "실적");
     assert_eq!(st.charts[0].anchor.from_col, 4);
     assert_eq!(st.charts[0].anchor.to_col, 10);
-    // Col 0 width 100 + cols 1..=3 (3*64=192) = 292 px
-    assert_eq!(st.charts[0].anchor.left_px, 292);
+    // Col 0 width 100 + cols 1..=3 (3*72=216, the standard font's default column) = 316 px
+    assert_eq!(st.charts[0].anchor.left_px, 316);
 
     assert_eq!(st.charts[1].kind, ChartKind::Bar);
     assert_eq!(st.charts[1].legend, ChartLegendPos::Bottom);
@@ -403,7 +403,8 @@ fn external_spreadsheetml_drawing_and_broken_parts_are_parsed_safely() {
     assert_eq!(ch.kind, ChartKind::Bar);
     assert_eq!(ch.title, "External Title");
     assert_eq!(ch.legend, ChartLegendPos::None);
-    assert_eq!(ch.anchor.left_px, 138); // 2*64 + 10
+    // 2*64 + 10: this workbook has no `styles.xml`, so its default font is Calibri 11 pt, a 7 px digit (PD-306)
+    assert_eq!(ch.anchor.left_px, 138);
     assert_eq!(ch.anchor.top_px, 24);
     assert_eq!(ch.anchor.width_px, 400);
     assert_eq!(ch.anchor.height_px, 240);

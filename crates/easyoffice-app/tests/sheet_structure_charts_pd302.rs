@@ -81,6 +81,10 @@ fn a_row_insert_moves_charts_by_their_edit_kind() {
     assert_eq!((num(&moved[2], "fromRow"), num(&moved[2], "top")), (2, 48));
 }
 
+/// The workbook's default font as the request says it when it is not the standard one: Calibri 11 pt, a 7 px digit and
+/// 64 px default columns (PD-306).
+const CALIBRI: &str = r#""defaultFont":{"name":"Calibri","size":11}"#;
+
 #[test]
 fn the_pixels_of_a_column_edit_are_worked_out_on_64_px_columns() {
     let id = open();
@@ -92,7 +96,7 @@ fn the_pixels_of_a_column_edit_are_worked_out_on_64_px_columns() {
         "insert",
         1,
         2,
-        &format!(r#""widths":[[2,200]],"charts":{charts}"#),
+        &format!(r#"{CALIBRI},"widths":[[2,200]],"charts":{charts}"#),
     ));
     let moved = anchors(&res);
     assert_eq!((num(&moved[0], "fromCol"), num(&moved[0], "toCol")), (3, 5));
@@ -101,6 +105,65 @@ fn the_pixels_of_a_column_edit_are_worked_out_on_64_px_columns() {
         (num(&moved[0], "left"), num(&moved[0], "width")),
         (192, 264)
     );
+}
+
+/// The standard default font (Malgun Gothic 11 pt) has an 8 px digit: the default columns are 72 px (PD-306).
+#[test]
+fn the_pixels_of_a_column_edit_are_worked_out_on_72_px_columns_of_the_standard_font() {
+    let id = open();
+    let charts = format!("[{}]", chart("c", "twoCell", (1, 0), (3, 4)));
+    let res = call(&structure(
+        &id,
+        "col",
+        "insert",
+        1,
+        2,
+        &format!(r#""widths":[[2,200]],"charts":{charts}"#),
+    ));
+    let moved = anchors(&res);
+    assert_eq!((num(&moved[0], "fromCol"), num(&moved[0], "toCol")), (3, 5));
+    assert_eq!(
+        (num(&moved[0], "left"), num(&moved[0], "width")),
+        (216, 272)
+    );
+    // The same edit in a Calibri workbook and in a request that says the standard font itself.
+    let explicit = r#""defaultFont":{"name":"맑은 고딕","size":11}"#;
+    let again = call(&structure(
+        &id,
+        "col",
+        "insert",
+        1,
+        2,
+        &format!(r#"{explicit},"widths":[[2,200]],"charts":{charts}"#),
+    ));
+    assert_eq!(
+        (
+            num(&anchors(&again)[0], "left"),
+            num(&anchors(&again)[0], "width")
+        ),
+        (216, 272)
+    );
+}
+
+/// A font the request names must be a bounded font: the whole request is refused otherwise.
+#[test]
+fn a_hostile_default_font_refuses_the_request() {
+    let id = open();
+    let long = "F".repeat(65);
+    for font in [
+        format!(r#""defaultFont":{{"name":"{long}","size":11}}"#),
+        r#""defaultFont":{"name":"Arial","size":410}"#.to_string(),
+        r#""defaultFont":{"name":"Arial","size":0}"#.to_string(),
+        r#""defaultFont":{"name":"Bad;Font","size":11}"#.to_string(),
+        r#""defaultFont":"Arial""#.to_string(),
+        r#""defaultFont":{"name":"Arial"}"#.to_string(),
+    ] {
+        let body = structure(&id, "col", "insert", 1, 1, &font);
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).is_err(),
+            "{font}"
+        );
+    }
 }
 
 /// The sheet's own default width (the request's `defaultColWidth`, 20.7109375 characters: 145 px) is the width of the columns
@@ -115,7 +178,7 @@ fn the_pixels_of_a_column_edit_follow_the_default_width_of_the_sheet() {
         "insert",
         1,
         2,
-        &format!(r#""defaultColWidth":{{"width":20.7109375}},"charts":{charts}"#),
+        &format!(r#"{CALIBRI},"defaultColWidth":{{"width":20.7109375}},"charts":{charts}"#),
     ));
     let moved = anchors(&res);
     assert_eq!((num(&moved[0], "fromCol"), num(&moved[0], "toCol")), (3, 5));
@@ -156,7 +219,7 @@ fn a_one_cell_chart_keeps_its_size_when_columns_are_inserted_before_it() {
         "insert",
         1,
         1,
-        &format!(r#""charts":{charts}"#),
+        &format!(r#"{CALIBRI},"charts":{charts}"#),
     ));
     let moved = anchors(&res);
     // 128 px is two columns of 64 px.

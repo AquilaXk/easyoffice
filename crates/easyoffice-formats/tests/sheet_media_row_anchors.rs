@@ -4,8 +4,9 @@
 
 use easyoffice_formats::{
     deflate_zlib, effective_image_two_cell, AnchorEdit, ChartAnchor, ChartKind, ChartLegendPos,
-    ChartSeriesRef, IeeeCrc32, OdsUnpacked, OoxmlCodec, RichImage, RowHeight, RowOffsets,
-    SheetChart, SheetFloatingImage, SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
+    ChartSeriesRef, DefaultFont, IeeeCrc32, OdsUnpacked, OoxmlCodec, RichImage, RowHeight,
+    RowOffsets, SheetChart, SheetFloatingImage, SheetGrid, SheetStyling, ZipArchiveCodec,
+    ZipSecurityPolicy,
 };
 
 fn png() -> Vec<u8> {
@@ -33,12 +34,20 @@ fn custom(points: f64) -> RowHeight {
     RowHeight::from_points(points, true).unwrap()
 }
 
+/// A sheet of a Calibri 11 pt workbook: its default column is the 64 px the pixel numbers below count in.
+fn calibri_sheet() -> SheetStyling {
+    SheetStyling {
+        default_font: DefaultFont::kept(Some("Calibri"), Some(11.0)),
+        ..SheetStyling::default()
+    }
+}
+
 /// Rows of 40 px (30 pt default), row 1 of 80 px (60 pt), row 4 of 20 px (15 pt):
 /// tops 0, 40, 120, 160, 200, 220, 260 and 40 px each below.
 fn tall_rows() -> SheetStyling {
     let mut styling = SheetStyling {
         default_row_height: Some(custom(30.0)),
-        ..SheetStyling::default()
+        ..calibri_sheet()
     };
     styling.row_heights.insert(1, custom(60.0));
     styling.row_heights.insert(4, custom(15.0));
@@ -190,8 +199,8 @@ fn a_taller_row_above_moves_the_picture_down_and_keeps_its_cell() {
         anchor.sync_px_from_grid(&SheetGrid::of(styling));
         (anchor.from_row, anchor.top_px)
     };
-    let plain = SheetStyling::default();
-    let mut taller = SheetStyling::default();
+    let plain = calibri_sheet();
+    let mut taller = calibri_sheet();
     taller.row_heights.insert(0, custom(75.0));
     assert_eq!(top_with(&plain), (3, 72));
     assert_eq!(top_with(&taller), (3, 72 + 100 - 24));
@@ -291,7 +300,7 @@ fn cells_of(anchor: &ChartAnchor) -> [u32; 8] {
 fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
     let mut styling = SheetStyling {
         hidden_rows: vec![(6, 7)],
-        ..SheetStyling::default()
+        ..calibri_sheet()
     };
     let anchor = ChartAnchor {
         edit_as: AnchorEdit::OneCell,
@@ -346,7 +355,7 @@ fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
         height_px: 80,
     };
     for edit_as in [AnchorEdit::OneCell, AnchorEdit::Absolute] {
-        let mut styling = SheetStyling::default();
+        let mut styling = calibri_sheet();
         styling.charts.push(chart(cells(edit_as)));
         let back = round_trip(styling).charts[0].anchor;
         assert_eq!(back.edit_as, edit_as);
@@ -374,7 +383,7 @@ fn a_one_cell_picture_nobody_touched_is_written_with_the_cells_it_was_read_with(
         width_px: 129,
         height_px: 97,
     };
-    let mut styling = SheetStyling::default();
+    let mut styling = calibri_sheet();
     styling.images.push(picture(anchor));
     let first = round_trip(styling);
     assert_eq!(cells_of(&first.images[0].anchor), cells_of(&anchor));

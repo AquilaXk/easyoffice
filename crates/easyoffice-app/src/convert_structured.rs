@@ -17,12 +17,12 @@ use std::collections::BTreeMap;
 
 use easyoffice_formats::{
     check_document_images, clean_font_name, code_within_bounds, frame_paragraph,
-    normalize_hex_color, safe_link_target, CellStyle, EasyOfficeError, FontTable, ImageBudget,
-    NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichColumns,
-    RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame, RichParagraph, RichRun,
-    RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue, MAX_COLUMN_PX,
-    MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL,
-    MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    normalize_hex_color, safe_link_target, CellStyle, DefaultFont, EasyOfficeError, FontTable,
+    ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
+    RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
+    RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
+    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT,
+    MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -219,7 +219,14 @@ pub(crate) fn parse_structured_content(
         return Ok(Some((content, warnings)));
     }
     if let Some(v) = field(entries, "sheets") {
-        let (sheets, mut stylings) = parse_sheets(as_array(v, "sheets")?, &mut budget)?;
+        // The workbook's default font (PD-306) decides the pixels of the anchors and the characters of the widths of every
+        // sheet, so each sheet takes it before its layout is read.
+        let default_font = match field(entries, "defaultFont") {
+            Some(v) => crate::sheet_default_font_json::parse_default_font(v)?,
+            None => None,
+        };
+        let (sheets, mut stylings) =
+            parse_sheets(as_array(v, "sheets")?, &mut budget, default_font.as_ref())?;
         if let (Some(names), Some(first)) = (field(entries, "names"), stylings.first_mut()) {
             first.defined_names = crate::sheet_names_json::parse_names_for_save(names)?;
         }
@@ -700,6 +707,7 @@ type ParsedSheets = (Vec<OdsUnpacked>, Vec<SheetStyling>);
 fn parse_sheets(
     items: &[StrictJsonValue],
     budget: &mut Budget,
+    default_font: Option<&DefaultFont>,
 ) -> Result<ParsedSheets, EasyOfficeError> {
     if items.len() > MAX_SHEETS {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
@@ -723,7 +731,10 @@ fn parse_sheets(
             )));
         }
         let mut cells: BTreeMap<(u32, u32), String> = BTreeMap::new();
-        let mut styling = SheetStyling::default();
+        let mut styling = SheetStyling {
+            default_font: default_font.cloned(),
+            ..SheetStyling::default()
+        };
         let (num_fmts, num_fmt_ids) = match field(obj, "numFmts") {
             Some(v) => parse_num_fmts(as_array(v, "numFmts")?)?,
             None => (NumFmtTable::default(), Vec::new()),

@@ -4,7 +4,8 @@
 //! Request: `{session, sheet, axis: "row"|"col", op: "insert"|"delete", at, count}` (`at` is the
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
-//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights`, `defaultRowHeight` and `defaultColWidth` (see `sheet_layout_json`;
+//! second copy of the rule (`defaultFont` is the workbook's default font when it is not the standard one, PD-306, the unit
+//! of `defaultColWidth`): `merges`, `hiddenRows`, `hiddenCols`, `rowHeights`, `defaultRowHeight` and `defaultColWidth` (see `sheet_layout_json`;
 //! with `outline`, `filter` and `tables` they place the `images` and `charts` on the rows the edit leaves, PD-299),
 //! `chartRefs` `{sheet: [{id, dataRange, series}]}` (the references of the charts of the other sheets, which the engine moves
 //! as it moves a formula's, PD-303),
@@ -23,6 +24,7 @@
 //! allowed ranges and `unlockedRows`, `unlockedCols` of the request move with the cells; `{"expired":true}` and
 //! `{"refused":"limit"}` are as for `apply`.
 
+use crate::sheet_default_font_json::{digit_of, parse_default_font};
 use crate::sheet_filter_json::{filter_json, parse_filter};
 use crate::sheet_layout_json::{
     merges_json, parse_default_col_px, parse_default_row_height, parse_hidden_cols,
@@ -287,7 +289,12 @@ fn moved_layout_json(
         Default::default()
     };
     // The columns without a width keep the width of the sheet, whatever the edit moves (PD-305).
-    let default_px = parse_default_col_px(field("defaultColWidth"))?;
+    // In digits of the workbook's default font, which the request carries when it is not the standard one (PD-306).
+    let digit = match field("defaultFont") {
+        Some(v) => digit_of(parse_default_font(v)?.as_ref()),
+        None => digit_of(None),
+    };
+    let default_px = parse_default_col_px(field("defaultColWidth"), digit)?;
     let (before, after) = (
         SheetGrid::new(&widths_before, default_px, rows_before),
         SheetGrid::new(&shifted_cols, default_px, rows_after),

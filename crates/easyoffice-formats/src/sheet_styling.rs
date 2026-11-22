@@ -34,6 +34,8 @@ pub(crate) mod sheet_anchor_edit;
 pub(crate) mod sheet_chart;
 #[path = "sheet_default_col_width.rs"]
 pub(crate) mod sheet_default_col_width;
+#[path = "sheet_default_font.rs"]
+pub(crate) mod sheet_default_font;
 #[path = "sheet_digit_width.rs"]
 pub(crate) mod sheet_digit_width;
 #[path = "sheet_filter.rs"]
@@ -98,6 +100,8 @@ pub(crate) mod xlsx_formula_text;
 pub(crate) mod xlsx_layout;
 #[path = "xlsx_names.rs"]
 pub(crate) mod xlsx_names;
+#[path = "xlsx_normal_font.rs"]
+pub(crate) mod xlsx_normal_font;
 #[path = "xlsx_page.rs"]
 pub(crate) mod xlsx_page;
 #[path = "xlsx_parts.rs"]
@@ -123,7 +127,10 @@ pub use sheet_default_col_width::{
     default_col_px, DefaultColWidth, DEFAULT_COL_PX, MAX_BASE_COL_WIDTH, MAX_COL_WIDTH_CHARS,
     MAX_DEFAULT_COL_PX, MIN_COL_WIDTH_CHARS,
 };
-pub use sheet_digit_width::{max_digit_px, MAX_DIGIT_PX, MODEL_DIGIT_PX};
+pub use sheet_default_font::{
+    DefaultFont, MAX_FONT_SIZE_PT, STANDARD_DIGIT_PX, STANDARD_FONT_NAME, STANDARD_FONT_SIZE_PT,
+};
+pub use sheet_digit_width::{max_digit_px, MAX_DIGIT_PX};
 pub use sheet_filter::*;
 pub use sheet_fonts::*;
 pub use sheet_links::*;
@@ -541,6 +548,10 @@ pub struct SheetStyling {
     /// The workbook counts its dates from 1904-01-01 (XLSX `workbookPr date1904`, XLS `DATEMODE`, ODS `table:null-date`), not from
     /// 1899-12-30: a serial 1,462 lower for the same day (PD-263). Carried by the first sheet like `workbook_theme`.
     pub date1904: bool,
+    /// The default font of the workbook (the Normal cell style) when it is not the standard one, Malgun Gothic 11 pt (PD-306).
+    /// Its widest digit is the unit of the widths in characters. Every sheet of a workbook has the same value; the writer reads
+    /// the first one's.
+    pub default_font: Option<DefaultFont>,
     /// The arrays that spill, by anchor (PD-217).
     pub spills: Vec<SpillRef>,
     /// The hyperlinks of the cells (PD-218).

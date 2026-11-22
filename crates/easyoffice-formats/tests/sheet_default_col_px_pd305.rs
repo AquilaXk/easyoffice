@@ -1,15 +1,16 @@
 //! The width of a column that has none of its own is one rule for the page, the positions of pictures and charts and the
 //! PDF (PD-305): `defaultColWidth` first, then `baseColWidth` (8 when missing) with the padding rounded up to 8 pixels, in
-//! digits of the workbook's default font (7 px for Calibri 11, so a sheet that says nothing is 64 px). The widths a file
-//! writes down never change.
+//! digits of the workbook's default font (7 px for Calibri 11, so a sheet that says nothing is 64 px; PD-306 makes the
+//! standard font Malgun Gothic 11 pt, 8 px, 72 px, which `sheet_korean_defaults_pd306` covers). The rules below are read with
+//! the Calibri 11 digit unless a test says otherwise. The widths a file writes down never change.
 
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
     encode_sheet_pdf, read_sheet_styling, CellStyle, ChartAnchor, ChartKind, ChartLegendPos,
-    ChartSeriesRef, DefaultColWidth, DocumentFormat, OdfCodec, OdsUnpacked, OoxmlCodec, SheetChart,
-    SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy, DEFAULT_COL_PX,
-    MAX_DEFAULT_COL_PX,
+    ChartSeriesRef, DefaultColWidth, DefaultFont, DocumentFormat, OdfCodec, OdsUnpacked,
+    OoxmlCodec, SheetChart, SheetGrid, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
+    DEFAULT_COL_PX, MAX_DEFAULT_COL_PX,
 };
 
 fn cell() -> OdsUnpacked {
@@ -57,22 +58,35 @@ fn styling_of(bytes: &[u8]) -> SheetStyling {
         .1
 }
 
+/// The default font of a Calibri 11 pt workbook, a 7 px digit.
+fn calibri() -> Option<DefaultFont> {
+    DefaultFont::kept(Some("Calibri"), Some(11.0))
+}
+
 fn saved(styling: SheetStyling) -> Vec<u8> {
     OoxmlCodec::pack_xlsx_multi_styled(&[cell()], &[], &[styling]).unwrap()
 }
 
+/// The sheet of a workbook whose default font is Calibri 11 pt (a 7 px digit).
+fn calibri_xlsx(sheet: &str) -> Vec<u8> {
+    xlsx_with(&styles_of("11", "Calibri"), sheet)
+}
+
 fn px_of(attrs: &str) -> u32 {
-    styling_of(&xlsx_with("", &format_pr(attrs))).default_col_px()
+    styling_of(&calibri_xlsx(&format_pr(attrs))).default_col_px()
 }
 
 #[test]
 fn a_new_sheet_and_a_sheet_that_says_nothing_are_the_default_of_the_digit() {
-    assert_eq!(DEFAULT_COL_PX, 64);
-    assert_eq!(SheetStyling::default().default_col_px(), 64);
+    assert_eq!(DEFAULT_COL_PX, 72);
+    assert_eq!(SheetStyling::default().default_col_px(), 72);
+    // A new workbook is written with the standard font: 8 px digit, 72 px, and the reader keeps no font for it.
     let new = styling_of(&OoxmlCodec::pack_xlsx_multi(&[cell()]).unwrap());
-    assert_eq!((new.default_col_px(), new.default_col_width), (64, None));
+    assert_eq!((new.default_col_px(), new.default_col_width), (72, None));
+    assert_eq!(new.default_font, None);
     let bare = xlsx_with("", &format!("{SHEET_HEAD}{SHEET_TAIL}"));
-    assert_eq!(styling_of(&bare).default_col_px(), 64);
+    assert_eq!(styling_of(&bare).default_col_px(), 72);
+    // Calibri 11 pt, the first spreadsheet program's default: 7 px digit, 64 px.
     assert_eq!(px_of(r#"defaultRowHeight="15""#), 64);
 }
 
@@ -110,9 +124,15 @@ fn hostile_values_stay_in_range_and_cost_nothing() {
     ] {
         assert_eq!(px_of(attrs), 64, "{attrs}");
     }
-    // The widest width a sheet may say is 255 characters.
-    assert_eq!(px_of(r#"defaultColWidth="255""#), MAX_DEFAULT_COL_PX);
-    assert_eq!(px_of(r#"baseColWidth="255""#), MAX_DEFAULT_COL_PX);
+    // The widest width a sheet may say is 255 characters (of a 7 px digit: 1,785 px, and 1,792 px for the base with padding).
+    assert_eq!(px_of(r#"defaultColWidth="255""#), 1_785);
+    assert_eq!(px_of(r#"baseColWidth="255""#), 1_792);
+    // Wider digits are held at the widest column a sheet may have.
+    let wide = styling_of(&xlsx_with(
+        &styles_of("12", "Arial"),
+        &format_pr(r#"defaultColWidth="255""#),
+    ));
+    assert_eq!(wide.default_col_px(), MAX_DEFAULT_COL_PX);
 }
 
 #[test]
@@ -125,17 +145,21 @@ fn the_digit_of_the_default_font_is_the_unit_of_every_width_in_characters() {
     let read = styling_of(&xlsx_with(&styles, &sheet));
     assert_eq!(read.default_col_px(), 80);
     assert_eq!(read.columns, BTreeMap::from([(1, 90)]));
-    // A save writes this crate's default font (a 7 px digit), and the pixels stay what the file showed.
+    // A save writes the file's own default font again (PD-306), and the pixels stay what the file showed.
     let again = styling_of(&saved(read.clone()));
     assert_eq!(again.default_col_px(), 80);
     assert_eq!(again.columns, read.columns);
+    assert_eq!(again.default_font, read.default_font);
+    assert_eq!(again.default_font.as_ref().map(|f| f.name()), Some("Arial"));
     // A file that gives the width is read in its own digits, too: 20 characters of 9 px are 180 px.
     let given = format!(
         r#"{SHEET_HEAD}<sheetFormatPr defaultColWidth="20" baseColWidth="3"/>{SHEET_TAIL}"#
     );
     let read = styling_of(&xlsx_with(&styles, &given));
     assert_eq!(read.default_col_px(), 180);
-    assert_eq!(styling_of(&saved(read)).default_col_px(), 180);
+    let again = styling_of(&saved(read.clone()));
+    assert_eq!(again.default_col_px(), 180);
+    assert_eq!(again.default_col_width, read.default_col_width);
     // The digit of Calibri 11 keeps the file's values as they are.
     let calibri = styling_of(&xlsx_with(&styles_of("11", "Calibri"), &given));
     assert_eq!(
@@ -163,7 +187,8 @@ fn the_korean_default_font_has_an_8_px_digit() {
     assert_eq!(read.columns, BTreeMap::from([(0, 80)]));
     let again = styling_of(&saved(read.clone()));
     assert_eq!((again.default_col_px(), again.columns), (72, read.columns));
-    // The face the table has no digit for (Aptos) is read as Calibri: no source gives its width.
+    assert_eq!(read.default_font, None); // the standard font is not kept: the writer says it
+                                         // The face the table has no digit for (Aptos) is read as Calibri: no source gives its width.
     let aptos = styling_of(&xlsx_with(&styles_of("11", "Aptos Narrow"), &bare));
     assert_eq!(aptos.default_col_px(), 64);
 }
@@ -261,6 +286,7 @@ fn the_default_width_places_pictures_and_charts() {
             base: None,
         }),
         columns: BTreeMap::from([(1, 300)]),
+        default_font: calibri(),
         ..SheetStyling::default()
     };
     assert_eq!(styling.default_col_px(), 145);
@@ -327,6 +353,7 @@ fn a_chart_keeps_its_cells_on_the_columns_of_the_sheet_through_a_file() {
             default_col_width,
             columns: BTreeMap::from([(1, 300)]),
             charts: vec![chart.clone()],
+            default_font: calibri(),
             ..SheetStyling::default()
         };
         assert_eq!(styling.default_col_px(), default_px);
@@ -362,6 +389,7 @@ fn the_pdf_draws_the_default_column_at_the_width_of_the_sheet() {
         let mut styling = SheetStyling {
             default_col_width,
             columns: BTreeMap::from([(1, 200)]),
+            default_font: calibri(),
             ..SheetStyling::default()
         };
         for (col, fill) in [(0, 0x10_0000), (1, 0x20_0000)] {
@@ -402,11 +430,12 @@ fn an_ods_sheet_has_no_default_of_its_own_so_its_unstyled_columns_follow_the_sam
         .1;
     assert_eq!(back.columns, BTreeMap::from([(1, 150)]));
     assert_eq!(back.default_col_width, None);
+    // The standard font has no ODS counterpart here: a sheet without a default is 72 px (PD-306).
     assert_eq!(
         (back.default_col_px(), back.col_px(0), back.col_px(1)),
-        (64, 64, 150)
+        (72, 72, 150)
     );
-    assert_eq!(back.col_px(2), 64);
+    assert_eq!(back.col_px(2), 72);
 }
 
 #[test]
@@ -414,7 +443,7 @@ fn the_widths_written_down_do_not_change_with_the_default() {
     let sheet = format!(
         r#"{SHEET_HEAD}<sheetFormatPr baseColWidth="10" defaultColWidth="20"/><cols><col min="1" max="1" width="9.140625" customWidth="1"/><col min="3" max="3" width="13.7109375" customWidth="1"/></cols>{SHEET_TAIL}"#
     );
-    let first = styling_of(&xlsx_with("", &sheet));
+    let first = styling_of(&calibri_xlsx(&sheet));
     assert_eq!(first.default_col_px(), 140);
     assert_eq!(first.columns, BTreeMap::from([(0, 64), (2, 96)]));
     let second = styling_of(&saved(first.clone()));
