@@ -713,7 +713,7 @@
       const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
       setElField("doc-style-role-badge", "textContent", roleVal);
       setElField("doc-style-select", "value", roleVal);
-      const fontVal = editor?.style?.fontFamily || "맑은 고딕";
+      const fontVal = editor?.style?.fontFamily || (mod === "HWP" ? "함초롬바탕" : "맑은 고딕");
       setElField("doc-font-select", "value", fontVal);
       setElField("doc-style-font-badge", "textContent", fontVal);
       // Without a selection the controls show the document-level values; a selection shows its paragraph (doc-runs-ui).
@@ -722,7 +722,7 @@
         syncBtnPressed("btn-align-" + m, m === alignMode)
       );
       const rootLine = Math.round(Number.parseFloat(editor?.style?.lineHeight || "") * 100);
-      deps.getDocRuns?.()?.showLineSpacing(rootLine > 0 ? rootLine : 108);
+      deps.getDocRuns?.()?.showLineSpacing(rootLine > 0 ? rootLine : (mod === "HWP" ? 160 : 108));
       [
         ["btn-toggle-ctrl-marks", "showCtrlMarks"],
         ["btn-toggle-para-marks", "showParaMarks"],

@@ -11,7 +11,7 @@ fn styled(text: &str) -> RichRun {
         text: text.to_string(),
         bold: true,
         size_half_pt: Some(28),
-        font: Some("함초롬바탕".to_string()),
+        font: Some("함초롬돋움".to_string()),
         color: Some("FF0000".to_string()),
         highlight: Some("FFFF00".to_string()),
         ..RichRun::default()
@@ -91,7 +91,7 @@ fn docx_roundtrip_keeps_size_font_color_highlight_per_run() {
         xml.contains("<w:sz w:val=\"28\"/><w:szCs w:val=\"28\"/>"),
         "{xml}"
     );
-    assert!(xml.contains("w:rFonts w:ascii=\"함초롬바탕\""), "{xml}");
+    assert!(xml.contains("w:rFonts w:ascii=\"함초롬돋움\""), "{xml}");
     assert!(xml.contains("<w:color w:val=\"FF0000\"/>"), "{xml}");
     assert!(xml.contains("<w:highlight w:val=\"yellow\"/>"), "{xml}");
     assert!(xml.contains("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"A1B2C3\"/>"));
@@ -104,7 +104,7 @@ fn hwpx_roundtrip_keeps_size_font_color_highlight_per_run() {
     let bytes = assert_roundtrip(DocumentFormat::Hwpx, "a.hwpx");
     let header = zip_text(&bytes, "Contents/header.xml");
     assert!(header.contains("height=\"1400\" textColor=\"#FF0000\" shadeColor=\"#FFFF00\""));
-    assert!(header.contains("face=\"함초롬바탕\""));
+    assert!(header.contains("face=\"함초롬돋움\""));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn odt_roundtrip_keeps_size_font_color_highlight_per_run() {
     assert!(xml.contains("fo:font-size=\"9.5pt\""), "{xml}");
     assert!(xml.contains("fo:color=\"#FF0000\""), "{xml}");
     assert!(xml.contains("fo:background-color=\"#FFFF00\""), "{xml}");
-    assert!(xml.contains("style:font-name=\"함초롬바탕\""), "{xml}");
+    assert!(xml.contains("style:font-name=\"함초롬돋움\""), "{xml}");
 }
 
 #[test]

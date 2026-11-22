@@ -34,8 +34,9 @@
   const BINDING_KEYS = ["gutter", "binding"];
   const BINDING_KINDS = ["single", "duplex", "top"];
   const TOP_BINDING = 2;
-  // The new-document margins of a page without a setup (`RichPageMargins::DOC_DEFAULT`).
+  // The new-document margins of a page without a setup (`RichPageMargins::DOC_DEFAULT` / `HWP_DEFAULT`).
   const DEFAULT_SIDE = { top: 1701, bottom: 1440, left: 1440, right: 1440, header: 851, footer: 992 };
+  const HWP_DEFAULT_SIDE = { top: 1984, bottom: 1701, left: 1701, right: 1701, header: 1134, footer: 850 };
   // The margin sets 여백 전환 goes through, in order: the new-document margins (`RichPageMargins::DOC_DEFAULT`),
   // then narrow and wide ones (twips, the engine's form).
   const MARGIN_KEYS = ["top", "bottom", "header", "footer", "left", "right"];
@@ -131,13 +132,14 @@
   }
 
   // The setup of an open answer's `pageSetup` (`{ paper, margins }`, either may be missing), or null without one.
-  function fromDecoded(pageSetup) {
+  function fromDecoded(pageSetup, mod) {
     const paper = pageSetup?.paper;
     const margins = pageSetup?.margins;
     if (!paper && !margins) return null;
     const kind = BINDING_KINDS.indexOf(pageSetup?.binding?.kind);
     const binding = { gutter: Number(pageSetup?.binding?.gutter) || 0, binding: Math.max(0, kind) };
-    const setup = { width: 11906, height: 16838, ...DEFAULT_SIDE, ...(paper ?? {}), ...(margins ?? {}), ...binding };
+    const side = mod === "HWP" ? HWP_DEFAULT_SIDE : DEFAULT_SIDE;
+    const setup = { width: 11906, height: 16838, ...side, ...(paper ?? {}), ...(margins ?? {}), ...binding };
     return violation(setup) === null && setup.header <= setup.top && setup.footer <= setup.bottom ? setup : null;
   }
 
@@ -187,11 +189,15 @@
     const FIELD_IDS = { gutter: "doc-ps-gutter", width: "doc-ps-width", height: "doc-ps-height", left: "doc-ps-left", right: "doc-ps-right", top: "doc-ps-top", bottom: "doc-ps-bottom", header: "doc-ps-header", footer: "doc-ps-footer" };
     let original = null;
 
+    const isHwp = () => (deps.getActiveModule?.() ?? byId("app")?.dataset?.module) === "HWP";
+    const defaultSide = () => (isHwp() ? HWP_DEFAULT_SIDE : DEFAULT_SIDE);
+
     // The setup the document has now: its own, else what the page layout shows (the paper, the padding and the
     // header and footer distances the page frame uses).
     function current(editor) {
       const own = parse(editor.dataset.eoPage);
       if (own) return own;
+      const side = defaultSide();
       const core = host.__EASYOFFICE_DOC_PAGES_CORE__;
       const cs = env.getComputedStyle?.(editor);
       const pad = (name, fallback) => {
@@ -201,14 +207,15 @@
       const { paper: name, landscape: turned } = core.paperOf(editor);
       const [short, long] = PAPER_TWIPS[name] ?? PAPER_TWIPS.A4;
       const topPx = Number.parseFloat(cs?.paddingTop);
-      const isDefaultPad = !Number.isFinite(topPx) || Math.abs(topPx - 113.4) <= 0.1;
+      const defTopPx = isHwp() ? 132.27 : 113.4;
+      const isDefaultPad = !Number.isFinite(topPx) || Math.abs(topPx - defTopPx) <= 0.2;
       const setup = {
         width: turned ? long : short, height: turned ? short : long,
-        left: isDefaultPad ? DEFAULT_SIDE.left : pad("paddingLeft", DEFAULT_SIDE.left),
-        right: isDefaultPad ? DEFAULT_SIDE.right : pad("paddingRight", DEFAULT_SIDE.right),
-        top: isDefaultPad ? DEFAULT_SIDE.top : pad("paddingTop", DEFAULT_SIDE.top),
-        bottom: isDefaultPad ? DEFAULT_SIDE.bottom : pad("paddingBottom", DEFAULT_SIDE.bottom),
-        header: DEFAULT_SIDE.header, footer: DEFAULT_SIDE.footer,
+        left: isDefaultPad ? side.left : pad("paddingLeft", side.left),
+        right: isDefaultPad ? side.right : pad("paddingRight", side.right),
+        top: isDefaultPad ? side.top : pad("paddingTop", side.top),
+        bottom: isDefaultPad ? side.bottom : pad("paddingBottom", side.bottom),
+        header: side.header, footer: side.footer,
       };
       const frame = deps.getFrameMargins?.() ?? null;
       Object.assign(setup, frame ? { top: frame.top, bottom: frame.bottom, header: frame.header, footer: frame.footer } : isDefaultPad ? {} : { header: setup.top, footer: setup.bottom });
@@ -350,8 +357,9 @@
       const editor = byId("doc-editor");
       if (!editor || editor.classList.contains("manuscript-grid")) return false;
       const now = current(editor);
-      const at = MARGIN_PRESETS.findIndex((set) => MARGIN_KEYS.every((key) => set[key] === now[key]));
-      return change({ ...now, ...MARGIN_PRESETS[at >= 0 ? (at + 1) % MARGIN_PRESETS.length : 1] }, "여백 전환");
+      const presets = [defaultSide(), MARGIN_PRESETS[1], MARGIN_PRESETS[2]];
+      const at = presets.findIndex((set) => MARGIN_KEYS.every((key) => set[key] === now[key]));
+      return change({ ...now, ...presets[at >= 0 ? (at + 1) % presets.length : 1] }, "여백 전환");
     }
 
     function bind() {
@@ -374,6 +382,6 @@
     return { open, apply, bind, current, turn, nextMargins };
   }
 
-  host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__ = { PRESETS, KEYS, MAX_TWIPS, MIN_BODY_TWIPS, twipsToMm, mmToTwips, matchPreset, parse, encode, violation, toFields, fromFields, fromDecoded, layoutFields, payloadOf, applyToEditor };
+  host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__ = { PRESETS, KEYS, MAX_TWIPS, MIN_BODY_TWIPS, HWP_DEFAULT_SIDE, twipsToMm, mmToTwips, matchPreset, parse, encode, violation, toFields, fromFields, fromDecoded, layoutFields, payloadOf, applyToEditor };
   host.__EASYOFFICE_CREATE_DOC_PAGE_SETUP__ = createDocPageSetup;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

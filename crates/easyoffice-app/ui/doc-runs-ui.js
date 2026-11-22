@@ -33,6 +33,9 @@
   const MIN_LINE_PERCENT = 5;
   const MAX_LINE_PERCENT = 500;
   const DEFAULT_LINE_PERCENT = 108;
+  const HWP_LINE_PERCENT = 160;
+  const DOC_DEFAULT_FONT = "맑은 고딕";
+  const HWP_DEFAULT_FONT = "함초롬바탕";
   const NON_PARAGRAPH_TAGS = new Set(["TD", "TH", "CAPTION"]);
   const HEADING_TAG_RE = /^H[1-6]$/;
   const STYLE_HEADING_RE = /^개요 ([1-3])$/;
@@ -87,6 +90,8 @@
 
     const editor = () => byId("doc-editor");
     const isDocModule = () => ["DOC", "HWP"].includes(getActiveModule());
+    const defaultLinePercent = () => (getActiveModule() === "HWP" ? HWP_LINE_PERCENT : DEFAULT_LINE_PERCENT);
+    const defaultFontName = () => (getActiveModule() === "HWP" ? HWP_DEFAULT_FONT : DOC_DEFAULT_FONT);
 
     function setFeedback(text) {
       const fb = byId("status-command-feedback");
@@ -286,7 +291,7 @@
     function syncFontControls(state) {
       const select = byId("doc-font-select");
       const badge = byId("doc-style-font-badge");
-      const fallback = editor()?.style?.fontFamily?.replace(/^["']|["']$/g, "") || "맑은 고딕";
+      const fallback = editor()?.style?.fontFamily?.replace(/^["']|["']$/g, "") || defaultFontName();
       const font = state.font === R.MIXED ? "" : state.font || fallback;
       if (select) select.value = font;
       if (badge) badge.textContent = font || "혼합";
@@ -416,7 +421,7 @@
     }
 
     function setLineSpacing(percent) {
-      const clamped = Math.max(MIN_LINE_PERCENT, Math.min(MAX_LINE_PERCENT, Number.isFinite(percent) ? Math.round(percent) : DEFAULT_LINE_PERCENT));
+      const clamped = Math.max(MIN_LINE_PERCENT, Math.min(MAX_LINE_PERCENT, Number.isFinite(percent) ? Math.round(percent) : defaultLinePercent()));
       const value = (clamped / 100).toFixed(2);
       const res = runOnParagraphs((blocks) => {
         const stale = blocks.filter((b) => b.style.lineHeight !== value);
@@ -594,7 +599,7 @@
 
     function lineSpacingOf(block) {
       const raw = Number.parseFloat(block?.style?.lineHeight || editor()?.style?.lineHeight || "");
-      return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : DEFAULT_LINE_PERCENT;
+      return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : defaultLinePercent();
     }
 
     function styleNameOf(block) {

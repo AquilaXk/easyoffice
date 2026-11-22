@@ -17,10 +17,12 @@ pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
 pub(crate) const NS_SECTION: &str = "http://www.owpml.org/owpml/2011/section";
 pub(crate) const NS_PARAGRAPH: &str = "http://www.owpml.org/owpml/2011/paragraph";
 
-/// A4 portrait page in HWPUNIT (1/7200 inch) with 30 mm side margins.
+/// A4 portrait page in HWPUNIT (1/7200 inch) with 30 mm side, 20 mm top, and 15 mm bottom/header/footer margins.
 const PAGE_WIDTH: u32 = 59_528;
 const PAGE_HEIGHT: u32 = 84_188;
 const MARGIN_SIDE: u32 = 8_504;
+const MARGIN_TOP: u32 = 5_668;
+const MARGIN_OTHER: u32 = 4_252;
 /// Left margin (HWPUNIT) the writer gives list paragraphs; the reader treats it as the list marker.
 pub(crate) const LIST_LEFT_MARGIN: u32 = 2_000;
 /// Single-spacing-relative line spacing written when a paragraph sets none (percent).
@@ -32,6 +34,8 @@ pub(crate) const CELL_HEIGHT: u32 = 1_000;
 
 /// `hh:heading` type of a paragraph that is no list item.
 pub(crate) const HEADING_NONE: &str = "NONE";
+/// `hh:heading` type of an outline heading paragraph.
+pub(crate) const HEADING_OUTLINE: &str = "OUTLINE";
 /// Heading types of list items; each names the one definition below by `idRef="1"`.
 pub(crate) const HEADING_BULLET: &str = "BULLET";
 pub(crate) const HEADING_NUMBER: &str = "NUMBER";
@@ -52,9 +56,9 @@ const BULLET_XML: &str = concat!(
 const FONT_LANGS: [&str; 7] = [
     "HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER",
 ];
-pub(crate) const DEFAULT_FONT_FACE: &str = "맑은 고딕";
-/// Body text height (1/100 pt) of the default character shape: 11 pt, the editor default.
-pub(crate) const DEFAULT_CHAR_HEIGHT: u32 = 1100;
+pub(crate) const DEFAULT_FONT_FACE: &str = "함초롬바탕";
+/// Body text height (1/100 pt) of the default character shape: 10 pt, the HWP default.
+pub(crate) const DEFAULT_CHAR_HEIGHT: u32 = 1000;
 
 fn per_lang_attrs(value: &str) -> String {
     format!(
@@ -237,16 +241,19 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
 fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
     let align_xml = match shape.align {
         Some(a) => format!("<hh:align horizontal=\"{a}\" vertical=\"BASELINE\"/>"),
+        None if id == 0 => "<hh:align horizontal=\"JUSTIFY\" vertical=\"BASELINE\"/>".to_string(),
         None => "<hh:align vertical=\"BASELINE\"/>".to_string(),
     };
-    let heading_ref = if shape.heading_type == HEADING_NONE {
+    let tab_pr = u8::from(shape.heading_type == HEADING_OUTLINE);
+    let heading_ref = if shape.heading_type == HEADING_NONE || shape.heading_type == HEADING_OUTLINE
+    {
         0
     } else {
         shape.heading_id_ref.max(1)
     };
     format!(
         concat!(
-            "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"{checked}\">",
+            "<hh:paraPr id=\"{id}\" tabPrIDRef=\"{tab_pr}\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"{checked}\">",
             "{align}",
             "<hh:heading type=\"{heading_type}\" idRef=\"{heading_ref}\" level=\"{heading_level}\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
@@ -258,6 +265,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "</hh:paraPr>"
         ),
         id = id,
+        tab_pr = tab_pr,
         checked = u8::from(shape.checked),
         align = align_xml,
         heading_type = shape.heading_type,
@@ -364,7 +372,7 @@ pub(crate) fn header_xml_with_all(
         xml.push_str(&char_pr_xml(id, shape));
     }
     xml.push_str("</hh:charProperties>");
-    xml.push_str("<hh:tabProperties itemCnt=\"1\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/></hh:tabProperties>");
+    xml.push_str("<hh:tabProperties itemCnt=\"3\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/><hh:tabPr id=\"1\" autoTabLeft=\"1\" autoTabRight=\"0\"/><hh:tabPr id=\"2\" autoTabLeft=\"0\" autoTabRight=\"1\"/></hh:tabProperties>");
     let max_bullet_id = para_shapes
         .iter()
         .filter(|shape| shape.heading_type == HEADING_BULLET)
@@ -433,9 +441,12 @@ fn page_box(
             p.width > p.height,
         )
     });
-    let (left, right) = margins.map_or((MARGIN_SIDE, MARGIN_SIDE), |m| {
-        (m.left * HWPUNIT_PER_TWIP, m.right * HWPUNIT_PER_TWIP)
-    });
+    let (left, right) = match margins {
+        Some(m) if *m != RichPageMargins::HWP_DEFAULT => {
+            (m.left * HWPUNIT_PER_TWIP, m.right * HWPUNIT_PER_TWIP)
+        }
+        _ => (MARGIN_SIDE, MARGIN_SIDE),
+    };
     (width, height, landscape, left, right)
 }
 
@@ -491,10 +502,12 @@ pub(crate) fn section_properties_xml(
     binding: RichBinding,
     columns: Option<RichColumns>,
 ) -> String {
-    let (header, footer, top, bottom) = margins.map_or(
-        (4252, 4252, 5668, 4252),
-        crate::rich_page_frame::hwpx_margin_values,
-    );
+    let (header, footer, top, bottom) = match margins {
+        Some(m) if *m != RichPageMargins::HWP_DEFAULT => {
+            crate::rich_page_frame::hwpx_margin_values(m)
+        }
+        _ => (MARGIN_OTHER, MARGIN_OTHER, MARGIN_TOP, MARGIN_OTHER),
+    };
     let (width, height, landscape, left, right) = page_box(margins, paper);
     let orientation = if landscape { "NARROWLY" } else { "WIDELY" };
     let gutter = binding.gutter * HWPUNIT_PER_TWIP;
@@ -506,9 +519,16 @@ pub(crate) fn section_properties_xml(
             "<hp:grid lineGrid=\"0\" charGrid=\"0\" wonggojiFormat=\"0\"/>",
             "<hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/>",
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",
+            "<hp:lineNumberShape restartType=\"0\" countBy=\"0\" distance=\"0\" startNumber=\"0\"/>",
             "<hp:pagePr landscape=\"{orientation}\" width=\"{width}\" height=\"{height}\" gutterType=\"{gutter_type}\">",
             "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"{gutter}\" left=\"{left}\" right=\"{right}\" top=\"{top}\" bottom=\"{bottom}\"/>",
-            "</hp:pagePr></hp:secPr>{col_ctrl}"
+            "</hp:pagePr>",
+            "<hp:footNotePr><hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\")\" supscript=\"0\"/><hp:noteLine length=\"-1\" type=\"SOLID\" width=\"0.12 mm\" color=\"#000000\"/><hp:noteSpacing betweenNotes=\"283\" belowLine=\"567\" aboveLine=\"850\"/><hp:numbering type=\"CONTINUOUS\" newNum=\"1\"/><hp:placement place=\"EACH_COLUMN\" beneathText=\"0\"/></hp:footNotePr>",
+            "<hp:endNotePr><hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\")\" supscript=\"0\"/><hp:noteLine length=\"14692344\" type=\"SOLID\" width=\"0.12 mm\" color=\"#000000\"/><hp:noteSpacing betweenNotes=\"0\" belowLine=\"567\" aboveLine=\"850\"/><hp:numbering type=\"CONTINUOUS\" newNum=\"1\"/><hp:placement place=\"END_OF_DOCUMENT\" beneathText=\"0\"/></hp:endNotePr>",
+            "<hp:pageBorderFill type=\"BOTH\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill>",
+            "<hp:pageBorderFill type=\"EVEN\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill>",
+            "<hp:pageBorderFill type=\"ODD\" borderFillIDRef=\"1\" textBorder=\"PAPER\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAPER\"><hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/></hp:pageBorderFill>",
+            "</hp:secPr>{col_ctrl}"
         ),
         orientation = orientation,
         width = width,

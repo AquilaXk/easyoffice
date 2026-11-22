@@ -361,10 +361,16 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         .line_percent
         .filter(|p| *p != DEFAULT_LINE_PERCENT && (1..=1_000).contains(p))
         .and_then(|p| u16::try_from(p).ok());
+    let body_default_justify = heading == 0
+        && list.is_none()
+        && style.is_some_and(|s| {
+            (s.name == "바탕글" || s.eng_name == "Normal") && s.para_pr == p.para_pr
+        });
     let alignment = match shape.align.as_deref() {
         Some("LEFT") => Some(RichAlignment::Left),
         Some("CENTER") => Some(RichAlignment::Center),
         Some("RIGHT") => Some(RichAlignment::Right),
+        Some("JUSTIFY") if body_default_justify => None,
         Some("JUSTIFY" | "DISTRIBUTE" | "DISTRIBUTE_SPACE") => Some(RichAlignment::Justify),
         _ => None,
     };

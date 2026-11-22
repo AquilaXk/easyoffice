@@ -10,9 +10,9 @@
 use crate::hwpx_parts::{
     header_xml, header_xml_with_all, hwpx_col_ctrl_xml, manifest_xml, section_properties_xml,
     text_width, HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML,
-    DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER,
-    HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, MAX_HWPX_BORDER_FILLS, NS_PARAGRAPH, NS_SECTION,
-    SETTINGS_XML, VERSION_XML,
+    DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE,
+    HEADING_NUMBER, HEADING_OUTLINE, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, MAX_HWPX_BORDER_FILLS,
+    NS_CORE, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
 pub(crate) use crate::hwpx_unpack::section_xml;
 use crate::office_codecs::checked_part;
@@ -154,6 +154,9 @@ impl ShapeTables {
 
     /// Index (1-based, 0 is the default face) of a font name.
     fn font_index(&mut self, name: &str) -> usize {
+        if name == DEFAULT_FONT_FACE {
+            return 0;
+        }
         if let Some(&idx) = self.font_map.get(name) {
             return idx;
         }
@@ -192,7 +195,13 @@ impl ShapeTables {
             Some(crate::RichListKind::Ordered) => {
                 (HEADING_NUMBER, ordered_run_id.unwrap_or(1).max(1), false)
             }
+            None if level > 0 => (HEADING_OUTLINE, 0, false),
             None => (HEADING_NONE, 0, false),
+        };
+        let heading_level = if list_kind.is_none() && level > 0 {
+            level - 1
+        } else {
+            list_lvl
         };
         let para = HwpxParaShape {
             align: match p.alignment {
@@ -204,7 +213,7 @@ impl ShapeTables {
             },
             heading_type,
             heading_id_ref,
-            heading_level: list_lvl,
+            heading_level,
             checked,
             left_margin: p
                 .left_indent_twips
@@ -314,7 +323,7 @@ impl SectionWriter {
     fn new() -> Self {
         Self {
             xml: format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hs:sec xmlns:hs=\"{NS_SECTION}\" xmlns:hp=\"{NS_PARAGRAPH}\">"
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hs:sec xmlns:hs=\"{NS_SECTION}\" xmlns:hp=\"{NS_PARAGRAPH}\" xmlns:hc=\"{NS_CORE}\">"
             ),
             next_para_id: 0,
             next_table_id: 1,
@@ -408,7 +417,26 @@ impl SectionWriter {
     fn run(&mut self, char_pr: usize, text: &str) {
         self.xml
             .push_str(&format!("<hp:run charPrIDRef=\"{char_pr}\"><hp:t>"));
-        self.xml.push_str(&XmlSanitizer::escape(text));
+        if !text.contains(['\t', '\n']) {
+            self.xml.push_str(&XmlSanitizer::escape(text));
+        } else {
+            let mut start = 0;
+            for (idx, ch) in text.char_indices() {
+                let tag = match ch {
+                    '\t' => "<hp:tab width=\"0\" leader=\"0\" type=\"1\"/>",
+                    '\n' => "<hp:lineBreak/>",
+                    _ => continue,
+                };
+                if idx > start {
+                    self.xml.push_str(&XmlSanitizer::escape(&text[start..idx]));
+                }
+                self.xml.push_str(tag);
+                start = idx + 1;
+            }
+            if start < text.len() {
+                self.xml.push_str(&XmlSanitizer::escape(&text[start..]));
+            }
+        }
         self.xml.push_str("</hp:t></hp:run>");
     }
 

@@ -12,6 +12,59 @@ use crate::rtf_xml_helpers::{
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 const MAX_EQUATION_BYTES: usize = 64 * 1024;
+const INLINE_HP_TAGS: [(&str, &str); 5] = [
+    ("tab", "\t"),
+    ("lineBreak", "\n"),
+    ("nbSpace", " "),
+    ("fwSpace", " "),
+    ("hyphen", "-"),
+];
+
+fn match_inline_hp_tag(after_hp: &str) -> Option<(&'static str, &'static str, &str)> {
+    for &(tag, replacement) in &INLINE_HP_TAGS {
+        if let Some(after) = after_hp.strip_prefix(tag) {
+            if after.starts_with([' ', '\t', '\n', '\r', '/', '>']) {
+                return Some((tag, replacement, after));
+            }
+        }
+    }
+    None
+}
+
+fn unescape_hp_t(raw: &str) -> String {
+    if !raw.contains("<hp:") {
+        return XmlSanitizer::unescape(raw);
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(pos) = rest.find("<hp:") {
+        out.push_str(&XmlSanitizer::unescape(&rest[..pos]));
+        let tail = &rest[pos + 4..];
+        let Some((tag, replacement, after_name)) = match_inline_hp_tag(tail) else {
+            out.push_str("<hp:");
+            rest = tail;
+            continue;
+        };
+        out.push_str(replacement);
+        if let Some(end) = after_name.find('>') {
+            let after_open = &after_name[end + 1..];
+            if !after_name[..end].ends_with('/') {
+                let close = format!("</hp:{tag}>");
+                if let Some(after_close) = after_open.strip_prefix(&close) {
+                    rest = after_close;
+                    continue;
+                }
+            }
+            rest = after_open;
+        } else {
+            rest = "";
+        }
+    }
+    if !rest.is_empty() {
+        out.push_str(&XmlSanitizer::unescape(rest));
+    }
+    out
+}
 
 /// A `Contents/section*.xml` part of a package whose XML entries were checked as a whole.
 pub(crate) fn section_xml<'a>(
@@ -192,7 +245,7 @@ fn extract_hwpx_paragraphs_and_eqs(
     let p_without_eq = strip_tag_blocks(p_body, "hp:equation");
     let text = extract_tag_bodies(&p_without_eq, "hp:t")
         .into_iter()
-        .map(XmlSanitizer::unescape)
+        .map(unescape_hp_t)
         .collect::<Vec<_>>()
         .join("");
     if !text.is_empty() || !p_body.contains("<hp:equation") {
@@ -237,7 +290,7 @@ fn extract_hwpx_cell_text(
         };
         let t = text_nodes
             .into_iter()
-            .map(XmlSanitizer::unescape)
+            .map(unescape_hp_t)
             .collect::<Vec<_>>()
             .join("");
         if !t.is_empty() || !tc_clean.contains("<hp:equation") {

@@ -239,7 +239,7 @@ impl RichPageMargins {
     /// 15 mm from the bottom and the body 30 mm.
     pub const HWP_DEFAULT: Self = Self {
         top: 1984,
-        bottom: 1700,
+        bottom: 1701,
         header: 1134,
         footer: 850,
         left: 1701,

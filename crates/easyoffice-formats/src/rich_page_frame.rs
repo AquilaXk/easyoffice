@@ -610,17 +610,18 @@ pub(crate) fn hwpx_margin_values(m: &RichPageMargins) -> (u32, u32, u32, u32) {
 }
 
 /// The inverse of [`hwpx_margin_values`] for the `(header, footer, top, bottom)` of a `hp:margin` and its side
-/// margins `(left, right)`, all in HWPUNIT.
+/// margins `(left, right)`, all in HWPUNIT, rounded to the nearest twip.
 pub(crate) fn margins_from_hwpx(
     (header, footer, top, bottom): (u32, u32, u32, u32),
     (left, right): (u32, u32),
 ) -> RichPageMargins {
+    let twip = |hwpunit: u32| hwpunit.saturating_add(HWPUNIT_PER_TWIP / 2) / HWPUNIT_PER_TWIP;
     RichPageMargins {
-        top: top.saturating_add(header) / HWPUNIT_PER_TWIP,
-        bottom: bottom.saturating_add(footer) / HWPUNIT_PER_TWIP,
-        header: top / HWPUNIT_PER_TWIP,
-        footer: footer / HWPUNIT_PER_TWIP,
-        left: left / HWPUNIT_PER_TWIP,
-        right: right / HWPUNIT_PER_TWIP,
+        top: twip(top.saturating_add(header)),
+        bottom: twip(bottom.saturating_add(footer)),
+        header: twip(top),
+        footer: twip(footer),
+        left: twip(left),
+        right: twip(right),
     }
 }

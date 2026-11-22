@@ -127,7 +127,14 @@ impl SectionWalker {
                             _ => RichBindingKind::Single,
                         };
                         if let (Some(width), Some(height)) = (value("width"), value("height")) {
-                            paper = Some((to_twips(width), to_twips(height)));
+                            let (short_hw, long_hw) = (width.min(height), width.max(height));
+                            paper = Some(
+                                if short_hw.abs_diff(59_528) <= 3 && long_hw.abs_diff(84_188) <= 3 {
+                                    (RichPaper::A4.width, RichPaper::A4.height)
+                                } else {
+                                    (to_twips(width), to_twips(height))
+                                },
+                            );
                         }
                         continue;
                     }
@@ -169,7 +176,10 @@ impl SectionWalker {
                             kind,
                             gutter: to_twips(value("gutter").unwrap_or(0)),
                         };
-                        if paper.is_none_or(|p| p.holds_bound(&margins, binding)) {
+                        if paper
+                            .unwrap_or(RichPaper::A4)
+                            .holds_bound(&margins, binding)
+                        {
                             self.margins = Some(margins);
                             self.paper = paper;
                             self.binding = binding;

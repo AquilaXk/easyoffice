@@ -111,9 +111,9 @@
   });
   docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot, saveDocState: () => workspacePanels.saveActiveDocTabState(), getActiveModule: () => activeModule });
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
-  docPageFrame = host.__EASYOFFICE_CREATE_DOC_PAGE_FRAME__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFileName: () => windowBridge?.getDocumentName(activeModule) });
+  docPageFrame = host.__EASYOFFICE_CREATE_DOC_PAGE_FRAME__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFileName: () => windowBridge?.getDocumentName(activeModule), getActiveModule: () => activeModule });
 
-  docPageSetup = host.__EASYOFFICE_CREATE_DOC_PAGE_SETUP__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFrameMargins: () => docPageFrame.margins() });
+  docPageSetup = host.__EASYOFFICE_CREATE_DOC_PAGE_SETUP__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFrameMargins: () => docPageFrame.margins(), getActiveModule: () => activeModule });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
     document, sheetDataStore, sheetRowCounts, sheetStoreHelpers,

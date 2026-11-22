@@ -104,6 +104,9 @@
 .pdf-page-card::selection,
 .pdf-page-card ::selection { background: rgba(51, 144, 255, 0.35); }
 #doc-editor {
+  --pg-def-t: 113.4px;
+  --pg-def-x: 96px;
+  --pg-def-b: 96px;
   width: 794px;
   max-width: 794px;
   min-height: 1050px;
@@ -119,6 +122,17 @@
 }
 #doc-editor > p:not(.manuscript-notice) {
   margin: 0 0 8pt;
+}
+.app-shell[data-module="HWP"] #doc-editor {
+  --pg-def-t: 132.27px;
+  --pg-def-x: 113.4px;
+  --pg-def-b: 113.4px;
+  padding: 132.27px 113.4px 113.4px;
+  font-family: '함초롬바탕', 'HCR Batang', 'AppleMyungjo', 'Noto Serif KR', serif;
+  line-height: 1.6;
+}
+.app-shell[data-module="HWP"] #doc-editor > p:not(.manuscript-notice) {
+  margin: 0;
 }
 #doc-editor :is(p:not([data-eo-toc]), li, h1, h2, h3, h4, h5, h6),
 #eo-print-root .eo-print-doc-page :is(p:not([data-eo-toc]), li) {
@@ -144,10 +158,10 @@
   /* Corner marks 4px outside the body area: the margins are the page's (`--pg-pad-*`, which a header or footer
      that needs more room raises, doc-pages.js); without a page layout they are the editor's padding. */
   background-position:
-    calc(var(--pg-pad-l, 96px) - 18px) calc(var(--pg-pad-t, 113.4px) - 4px), calc(var(--pg-pad-l, 96px) - 4px) calc(var(--pg-pad-t, 113.4px) - 18px),
-    calc(100% - var(--pg-pad-r, 96px) + 18px) calc(var(--pg-pad-t, 113.4px) - 4px), calc(100% - var(--pg-pad-r, 96px) + 4px) calc(var(--pg-pad-t, 113.4px) - 18px),
-    calc(var(--pg-pad-l, 96px) - 18px) calc(100% - var(--pg-pad-b, 96px) + 4px), calc(var(--pg-pad-l, 96px) - 4px) calc(100% - var(--pg-pad-b, 96px) + 18px),
-    calc(100% - var(--pg-pad-r, 96px) + 18px) calc(100% - var(--pg-pad-b, 96px) + 4px), calc(100% - var(--pg-pad-r, 96px) + 4px) calc(100% - var(--pg-pad-b, 96px) + 18px);
+    calc(var(--pg-pad-l, var(--pg-def-x, 96px)) - 18px) calc(var(--pg-pad-t, var(--pg-def-t, 113.4px)) - 4px), calc(var(--pg-pad-l, var(--pg-def-x, 96px)) - 4px) calc(var(--pg-pad-t, var(--pg-def-t, 113.4px)) - 18px),
+    calc(100% - var(--pg-pad-r, var(--pg-def-x, 96px)) + 18px) calc(var(--pg-pad-t, var(--pg-def-t, 113.4px)) - 4px), calc(100% - var(--pg-pad-r, var(--pg-def-x, 96px)) + 4px) calc(var(--pg-pad-t, var(--pg-def-t, 113.4px)) - 18px),
+    calc(var(--pg-pad-l, var(--pg-def-x, 96px)) - 18px) calc(100% - var(--pg-pad-b, var(--pg-def-b, 96px)) + 4px), calc(var(--pg-pad-l, var(--pg-def-x, 96px)) - 4px) calc(100% - var(--pg-pad-b, var(--pg-def-b, 96px)) + 18px),
+    calc(100% - var(--pg-pad-r, var(--pg-def-x, 96px)) + 18px) calc(100% - var(--pg-pad-b, var(--pg-def-b, 96px)) + 4px), calc(100% - var(--pg-pad-r, var(--pg-def-x, 96px)) + 4px) calc(100% - var(--pg-pad-b, var(--pg-def-b, 96px)) + 18px);
 }
 .eo-boxed-heading {
   display: flex;

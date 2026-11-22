@@ -3,6 +3,9 @@
 
 use super::*;
 use easyoffice_app::{EasyOfficeIpcRouter, ShellWriters};
+use easyoffice_formats::{
+    DecodedContent, RichBlock, RichPageMargins, RichPaper, UniversalFormatConverter,
+};
 use rhwp::DocumentCore;
 
 const PAYLOAD: &str = r#"{"sourceFormat":"docx","targetFormat":"hwp","title":"보고서","blocks":[{"type":"paragraph","heading":1,"runs":[{"text":"제목 줄"}]},{"type":"paragraph","runs":[{"text":"본문 하나"}]},{"type":"paragraph","runs":[{"text":"본문 둘 둘"}]},{"type":"table","rows":[[{"text":"가"},{"text":"나"}]]}]}"#;
@@ -71,4 +74,70 @@ fn bytes_that_are_no_hwpx_are_an_error_not_a_panic() {
     assert!(hwpx_to_hwp(b"not a document").is_err());
     assert!(hwpx_to_hwp(&[]).is_err());
     assert!(hwpx_to_hwp(&vec![0; crate::doc_pdf::MAX_HWPX_BYTES + 1]).is_err());
+}
+
+#[test]
+fn blank_native_and_converted_hwp_match_korean_wordprocessor_page_and_font_defaults() {
+    let mut blank = DocumentCore::new_empty();
+    blank
+        .create_blank_document_native()
+        .expect("native blank document");
+    let blank_hwpx = blank.export_hwpx_native().expect("export blank hwpx");
+    let DecodedContent::Document(blank_doc) =
+        UniversalFormatConverter::decode_rich(&blank_hwpx, Some("blank.hwpx"))
+            .expect("decode blank hwpx")
+            .content
+    else {
+        panic!("expected rich document");
+    };
+    assert_eq!(blank_doc.page_frame.paper, Some(RichPaper::A4));
+    assert_eq!(
+        blank_doc.page_frame.margins,
+        Some(RichPageMargins::HWP_DEFAULT)
+    );
+    if let Some(RichBlock::Paragraph(first)) = blank_doc.blocks.first() {
+        assert_eq!(first.alignment, None);
+    }
+
+    for (target, header_bytes, check_hwpx) in [
+        ("hwp", &[0xD0_u8, 0xCF, 0x11, 0xE0][..], false),
+        ("hwpx", b"PK\x03\x04".as_slice(), true),
+    ] {
+        let req = format!(
+            r#"{{"sourceFormat":"docx","targetFormat":"{target}","title":"새 한글","blocks":[{{"type":"paragraph","heading":1,"runs":[{{"text":"제목"}}]}},{{"type":"paragraph","runs":[{{"text":"첫칸\t둘째\n셋째"}}]}}]}}"#
+        );
+        let response = convert(&req).expect("convert blank-like payload");
+        let bytes = converted_bytes(&response);
+        assert!(bytes.starts_with(header_bytes), "{target} magic");
+
+        let core = DocumentCore::from_bytes(&bytes).expect("reopen converted document");
+        let texts = paragraph_texts(&core);
+        assert!(
+            texts.iter().any(|t| t == "제목"),
+            "{target} missing heading in {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("첫칸") && t.contains("둘째") && t.contains("셋째")),
+            "{target} missing tab/lineBreak paragraph in {texts:?}"
+        );
+        let svg = core.render_page_svg_native(0).expect("render page 0");
+        assert!(svg.contains("<svg"), "{target} rendered empty svg");
+
+        if check_hwpx {
+            let DecodedContent::Document(decoded) =
+                UniversalFormatConverter::decode_rich(&bytes, Some("converted.hwpx"))
+                    .expect("decode converted hwpx")
+                    .content
+            else {
+                panic!("expected rich document");
+            };
+            assert_eq!(decoded.page_frame.paper, Some(RichPaper::A4));
+            assert_eq!(
+                decoded.page_frame.margins,
+                Some(RichPageMargins::HWP_DEFAULT)
+            );
+        }
+    }
 }

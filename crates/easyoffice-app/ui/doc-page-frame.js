@@ -12,6 +12,7 @@
   const ZONES = ["left", "center", "right"];
   const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
   const DEFAULT_MARGINS = { top: 1701, bottom: 1440, header: 851, footer: 992 };
+  const HWP_DEFAULT_MARGINS = { top: 1984, bottom: 1701, header: 1134, footer: 850 };
   const PX_PER_TWIP = 1 / 15;
   const GROWN_GAP_PX = 6;
   const PAGE_MARGIN_AT = { top: 4, bottom: 5, header: 6, footer: 7 };
@@ -53,6 +54,7 @@
     const document = deps.document;
     const env = deps.env || host;
     const raf = (fn) => (env.requestAnimationFrame ? env.requestAnimationFrame(fn) : env.setTimeout(fn, 16));
+    const defaultMargins = () => ((deps.getActiveModule?.() ?? document?.getElementById?.("app")?.dataset?.module) === "HWP" ? HWP_DEFAULT_MARGINS : DEFAULT_MARGINS);
     let editor = null;
     let pages = null;
     let observer = null;
@@ -246,7 +248,7 @@
     }
 
     function applyGeometry(sections, layer) {
-      const m = marginsOf() ?? DEFAULT_MARGINS;
+      const m = marginsOf() ?? defaultMargins();
       const px = (twips) => Math.round(twips * PX_PER_TWIP * 100) / 100;
       const [header, footer] = sections;
       const band = (kind) => px(kind === "header" ? Math.max(0, m.top - m.header) : Math.max(0, m.bottom - m.footer));
@@ -746,7 +748,7 @@
       navigateSlot, switchBand, toggleFirstPage, toggleEvenOdd, toggleZones, focusZone, activeSlots,
       isEditing: () => editing,
       has: (kind) => hasNodeContent(sectionOf(kind)),
-      margins: () => marginsOf() ?? (ALL_KINDS.some((kind) => hasNodeContent(sectionOf(kind))) ? { ...DEFAULT_MARGINS } : null),
+      margins: () => marginsOf() ?? (ALL_KINDS.some((kind) => hasNodeContent(sectionOf(kind))) ? { ...defaultMargins() } : null),
     };
     host.__EASYOFFICE_DOC_PAGE_FRAME__ = api;
     return api;
