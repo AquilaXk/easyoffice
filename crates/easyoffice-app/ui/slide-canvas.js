@@ -48,7 +48,7 @@
   const readU32BE = (u8, at) => (((u8[at] << 24) >>> 0) + (u8[at + 1] << 16) + (u8[at + 2] << 8) + u8[at + 3]) >>> 0;
   const stageSizeOf = (aspect) => STAGE_SIZES[aspect] || STAGE_SIZES["16:9"];
   const normalizeLayout = (raw) => (Object.hasOwn(LAYOUT_LABELS, raw) ? raw : "titleAndContent");
-  const normalizeTransition = (raw) => (TRANSITIONS.has(raw) ? raw : "fade");
+  const normalizeTransition = (raw) => (TRANSITIONS.has(raw) ? raw : "none");
 
   function normalizeHex6(raw, fallback) {
     if (raw === null || raw === undefined || raw === "") return fallback;

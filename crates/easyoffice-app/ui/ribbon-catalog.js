@@ -174,7 +174,7 @@
   }
 
   function createInitialSlideDeckState() {
-    return [{ title: "", lower: "", notes: "", transition: "fade", ...createEmptySlideStyleFields() }];
+    return [{ title: "", lower: "", notes: "", transition: "none", ...createEmptySlideStyleFields(), layout: "titleSlide" }];
   }
 
   function textSpec(v) {

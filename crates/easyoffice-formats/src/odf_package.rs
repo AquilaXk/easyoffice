@@ -4,10 +4,11 @@ use std::fmt::Write;
 
 use crate::odf_hwpx_codecs::{OdfCodec, OdpUnpacked};
 use crate::office_codecs::validate_zip_xml_entries;
+use crate::pptx_master::odp_layout_boxes_pt;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     parse_length_pt, RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout,
-    SlideTransition, MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
+    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
 };
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
@@ -275,17 +276,66 @@ pub(crate) fn finish_odp_package(
     charts: Vec<(usize, String)>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let (w_cm, h_cm) = deck.aspect.dimensions_cm();
-    let mut styles = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:presentation=\"urn:oasis:names:tc:opendocument:xmlns:presentation:1.0\" office:version=\"1.2\"><office:styles>".to_string();
+    let mut styles = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<office:document-styles ",
+        "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
+        "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" ",
+        "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
+        "xmlns:presentation=\"urn:oasis:names:tc:opendocument:xmlns:presentation:1.0\" ",
+        "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
+        "xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" ",
+        "office:version=\"1.2\">",
+        "<office:font-face-decls>",
+        "<style:font-face style:name=\"맑은 고딕\" svg:font-family=\"&apos;맑은 고딕&apos;\" style:font-family-generic=\"swiss\"/>",
+        "</office:font-face-decls>",
+        "<office:styles>",
+        "<style:default-style style:family=\"graphic\">",
+        "<style:graphic-properties svg:stroke-color=\"#808080\" draw:fill=\"solid\" draw:fill-color=\"#ffffff\"/>",
+        "<style:paragraph-properties fo:text-align=\"start\" style:writing-mode=\"lr-tb\"/>",
+        "<style:text-properties style:font-name=\"맑은 고딕\" style:font-name-asian=\"맑은 고딕\" fo:font-size=\"18pt\" style:font-size-asian=\"18pt\" fo:language=\"ko\" fo:country=\"KR\" style:language-asian=\"ko\" style:country-asian=\"KR\"/>",
+        "</style:default-style>",
+        "<style:default-style style:family=\"paragraph\">",
+        "<style:paragraph-properties fo:text-align=\"start\" style:writing-mode=\"lr-tb\"/>",
+        "<style:text-properties style:font-name=\"맑은 고딕\" style:font-name-asian=\"맑은 고딕\" fo:font-size=\"18pt\" style:font-size-asian=\"18pt\" fo:language=\"ko\" fo:country=\"KR\" style:language-asian=\"ko\" style:country-asian=\"KR\"/>",
+        "</style:default-style>",
+        "<style:style style:name=\"Standard-title\" style:family=\"presentation\"><style:text-properties style:font-name=\"맑은 고딕\" style:font-name-asian=\"맑은 고딕\" fo:font-size=\"44pt\" style:font-size-asian=\"44pt\"/></style:style>",
+        "<style:style style:name=\"Standard-subtitle\" style:family=\"presentation\"><style:text-properties style:font-name=\"맑은 고딕\" style:font-name-asian=\"맑은 고딕\" fo:font-size=\"24pt\" style:font-size-asian=\"24pt\"/></style:style>",
+        "<style:style style:name=\"Standard-outline1\" style:family=\"presentation\"><style:text-properties style:font-name=\"맑은 고딕\" style:font-name-asian=\"맑은 고딕\" fo:font-size=\"28pt\" style:font-size-asian=\"28pt\"/></style:style>"
+    ).to_string();
     for layout in SlideMasterLayout::ALL {
+        let name = layout.as_str();
+        if layout == SlideMasterLayout::Blank {
+            let _ = write!(
+                styles,
+                "<style:presentation-page-layout style:name=\"eo_{name}\"/>"
+            );
+            continue;
+        }
+        let (title_box, body_box, right_box) = odp_layout_boxes_pt(layout, deck.aspect);
+        let body_obj = if layout == SlideMasterLayout::TitleSlide {
+            "subtitle"
+        } else {
+            "outline"
+        };
         let _ = write!(
             styles,
-            "<style:presentation-page-layout style:name=\"eo_{}\"/>",
-            layout.as_str()
+            "<style:presentation-page-layout style:name=\"eo_{name}\"><presentation:placeholder presentation:object=\"title\" svg:x=\"{:.3}pt\" svg:y=\"{:.3}pt\" svg:width=\"{:.3}pt\" svg:height=\"{:.3}pt\"/><presentation:placeholder presentation:object=\"{body_obj}\" svg:x=\"{:.3}pt\" svg:y=\"{:.3}pt\" svg:width=\"{:.3}pt\" svg:height=\"{:.3}pt\"/>",
+            title_box.x, title_box.y, title_box.w, title_box.h,
+            body_box.x, body_box.y, body_box.w, body_box.h
         );
+        if let Some(rb) = right_box {
+            let _ = write!(
+                styles,
+                "<presentation:placeholder presentation:object=\"outline\" svg:x=\"{:.3}pt\" svg:y=\"{:.3}pt\" svg:width=\"{:.3}pt\" svg:height=\"{:.3}pt\"/>",
+                rb.x, rb.y, rb.w, rb.h
+            );
+        }
+        styles.push_str("</style:presentation-page-layout>");
     }
     let _ = write!(
         styles,
-        "</office:styles><office:automatic-styles><style:page-layout style:name=\"PM1\"><style:page-layout-properties fo:page-width=\"{w_cm:.3}cm\" fo:page-height=\"{h_cm:.3}cm\" style:print-orientation=\"landscape\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"PM1\"/></office:master-styles></office:document-styles>"
+        "</office:styles><office:automatic-styles><style:page-layout style:name=\"PM1\"><style:page-layout-properties fo:margin-top=\"0cm\" fo:margin-bottom=\"0cm\" fo:margin-left=\"0cm\" fo:margin-right=\"0cm\" fo:page-width=\"{w_cm:.3}cm\" fo:page-height=\"{h_cm:.3}cm\" style:print-orientation=\"landscape\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"PM1\"/></office:master-styles></office:document-styles>"
     );
     let mut manifest_items: Vec<(String, &str)> = vec![
         ("styles.xml".into(), "text/xml"),
@@ -423,10 +473,7 @@ impl OdfCodec {
         title: &str,
         slides: &[(String, Vec<String>, String)],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut deck = RichSlideDeck::from_legacy_slides(title, false, slides.to_vec());
-        for s in &mut deck.slides {
-            s.transition = SlideTransition::None;
-        }
+        let deck = RichSlideDeck::from_legacy_slides(title, false, slides.to_vec());
         crate::odp_rich::pack_odp_rich(&deck)
     }
 

@@ -127,12 +127,14 @@
       applyDeckChange(() => {
         const base = deck[getActiveSlideIndex()] || deck[0];
         const empty = host.__EASYOFFICE_RIBBON_CATALOG__.createEmptySlideStyleFields();
+        const nextLayout = base?.layout && base.layout !== "titleSlide" ? base.layout : "titleAndContent";
         deck.push({
           title: "",
           lower: "",
           notes: "",
-          transition: base?.transition || "fade",
+          transition: "none",
           ...empty,
+          layout: nextLayout,
           aspect: deckAspect(),
         });
         return deck.length - 1;
@@ -423,7 +425,7 @@
       const frame = document.createElement("div");
       frame.id = "slide-show-frame";
       frame.className = "slide-show-frame";
-      frame.dataset.transition = slide.transition || "fade";
+      frame.dataset.transition = slide.transition || "none";
       frame.dataset.layout = slide.layout || "titleAndContent";
       const title = document.createElement("h2");
       title.id = "slide-show-title";

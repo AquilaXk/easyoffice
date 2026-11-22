@@ -543,14 +543,17 @@
         }
         const empty = host.__EASYOFFICE_RIBBON_CATALOG__.createEmptySlideStyleFields();
         const base = slideDeckState[getActiveSlideIndex()] || slideDeckState[0];
+        const nextLayout = op.layout
+          ? (codec ? codec.normalizeLayout(op.layout) : String(op.layout))
+          : (base?.layout && base.layout !== "titleSlide" ? base.layout : "titleAndContent");
         slideDeckState.push({
           title: String(op.title || "새 슬라이드"),
           lower: bulletBody !== undefined ? bulletBody : String(op.body ?? op.lower ?? ""),
           notes: String(op.notes || ""),
-          transition: codec ? codec.normalizeTransition(op.transition || base?.transition) : String(op.transition || base?.transition || "fade"),
+          transition: op.transition ? (codec ? codec.normalizeTransition(op.transition) : String(op.transition)) : "none",
           ...empty,
           aspect,
-          layout: codec ? codec.normalizeLayout(op.layout) : "titleAndContent",
+          layout: nextLayout,
           elements: normEls(op.elements) || [],
         });
         const idx = slideDeckState.length - 1;

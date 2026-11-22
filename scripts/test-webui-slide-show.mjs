@@ -156,7 +156,7 @@ test("show content is the live slide text with the slide's transition", async ()
   typeTitle(document, "수정한 제목");
   userClick($(document, "btn-slide-show"));
   assert.equal($(document, "slide-show-title").textContent, "수정한 제목");
-  assert.equal($(document, "slide-show-frame").dataset.transition, "fade");
+  assert.equal($(document, "slide-show-frame").dataset.transition, "none");
   sandbox.dispatchWindowKeydown({ key: "ArrowRight" });
   assert.equal($(document, "slide-show-frame").dataset.transition, "push");
   sandbox.dispatchWindowKeydown({ key: "ArrowRight" });

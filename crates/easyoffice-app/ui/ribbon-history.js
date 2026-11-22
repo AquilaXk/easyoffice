@@ -665,7 +665,7 @@
     const SLIDE_TITLE_SIZES = ["20px", "22px", "24px", "18px"];
     const SLIDE_TITLE_COLORS = ["", "var(--accent-strong)", "var(--accent-light)", ""];
     const SLIDE_PADDINGS = ["20px", "12px", "28px"];
-    const SLIDE_TRANSITIONS = ["fade", "push", "zoom", "none"];
+    const SLIDE_TRANSITIONS = ["none", "fade", "push", "zoom"];
 
     function slideTitleEffect(cmdId, ctx) {
       if (host.__EASYOFFICE_SLIDE_CANVAS__?.applyFormatting?.(cmdId)) return true;

@@ -311,7 +311,7 @@ pub(crate) fn parse_slide_deck(
                 .ok_or_else(|| invalid(format!("지원하지 않는 슬라이드 레이아웃: {s}")))?,
         };
         let transition = match opt_str(obj, "transition")? {
-            None => SlideTransition::Fade,
+            None => SlideTransition::None,
             Some(s) => SlideTransition::parse(s)
                 .ok_or_else(|| invalid(format!("지원하지 않는 슬라이드 전환 효과: {s}")))?,
         };

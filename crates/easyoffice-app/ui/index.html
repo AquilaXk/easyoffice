@@ -967,16 +967,16 @@
                 </select>
                 <label for="slide-layout-select" class="sb-size-unit">레이아웃</label>
                 <select id="slide-layout-select" class="sb-combo slide-layout-select">
-                  <option value="titleSlide">제목 슬라이드</option>
-                  <option value="titleAndContent" selected>제목 및 내용</option>
+                  <option value="titleSlide" selected>제목 슬라이드</option>
+                  <option value="titleAndContent">제목 및 내용</option>
                   <option value="sectionHeader">구역 머리글</option>
                   <option value="twoColumn">두 개의 내용</option>
                   <option value="blank">빈 화면</option>
                 </select>
                 <label for="slide-transition-select" class="sb-size-unit">화면 전환</label>
                 <select id="slide-transition-select" class="sb-combo slide-transition-select">
-                  <option value="none">없음</option>
-                  <option value="fade" selected>페이드</option>
+                  <option value="none" selected>없음</option>
+                  <option value="fade">페이드</option>
                   <option value="push">밀어내기</option>
                   <option value="zoom">확대</option>
                 </select>
@@ -987,12 +987,12 @@
                 <button id="btn-slide-show-current" type="button" class="tb-btn" title="현재 슬라이드부터 (Shift+F5)" aria-label="현재 슬라이드부터 슬라이드 쇼"><span class="tb-sprite icon-slide-show-current"></span><span class="tb-label">현재<br/>슬라이드부터</span></button>
                 <button id="btn-slide-laser" type="button" class="tb-btn" aria-pressed="false" title="레이저 포인터: 끔" aria-label="레이저 포인터"><span class="tb-sprite icon-pointer"></span><span class="tb-label">레이저<br/>포인터</span></button>
               </div>
-              <span id="slide-meta-status" class="formula-result">슬라이드 1 / 1 · 전환: 페이드</span>
+              <span id="slide-meta-status" class="formula-result">슬라이드 1 / 1 · 전환: 없음</span>
             </div>
             <div class="slide-workspace">
               <div id="slide-thumb-list" class="slide-thumb-list" role="group" aria-label="슬라이드 목록"></div>
               <div class="slide-main-col">
-                <div class="slide-stage" id="slide-stage-box" data-layout="titleAndContent">
+                <div class="slide-stage" id="slide-stage-box" data-layout="titleSlide">
                   <div class="slide-title-zone" id="slide-title-zone" contenteditable="true">
                     <h2></h2>
                   </div>

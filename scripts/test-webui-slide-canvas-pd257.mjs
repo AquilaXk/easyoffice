@@ -38,7 +38,7 @@ test("PD-257: 글상자·6종 도형·PNG 그림·표·5종 벡터 차트 삽입
   const layer = $(document, "slide-canvas-layer");
   const snapLayer = $(document, "slide-snap-layer");
   assert.ok(stage && layer && snapLayer, "stage, canvas layer and snap layer exist");
-  assert.equal(stage.dataset.layout, "titleAndContent");
+  assert.equal(stage.dataset.layout, "titleSlide");
 
   // 1. Textbox insertion, inline editing, and selection-scoped bold/italic/underline vs title fallback
   userClick(slideMenuAction(document, "insert-textbox"));
@@ -348,6 +348,11 @@ test("PD-257: 마스터 레이아웃·화면비·전환 효과·발표자 도구
   userClick(commandItem(document, "slide-mod-transition"));
   await flushAsyncTurns(4);
   const transSel = $(document, "slide-transition-select");
+  assert.equal(transSel.value, "fade");
+  assert.equal(transSel.parentElement.querySelector(".custom-select-value").textContent, "페이드");
+
+  userClick(commandItem(document, "slide-mod-transition"));
+  await flushAsyncTurns(4);
   assert.equal(transSel.value, "push");
   assert.equal(transSel.parentElement.querySelector(".custom-select-value").textContent, "밀어내기");
 
@@ -552,7 +557,7 @@ test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 �
 
   const req = seenCopilotPayloads.at(-1);
   assert.ok(req, "copilot_run payload captured");
-  assert.equal(req.context.slide.slides[0].layout, "titleAndContent");
+  assert.equal(req.context.slide.slides[0].layout, "titleSlide");
   assert.equal(req.context.slide.slides[0].elements.length, 1);
   assert.equal(req.context.slide.slides[0].elements[0].kind, "textbox");
 
@@ -563,7 +568,7 @@ test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 �
   assert.ok(undoBtn);
   userClick(undoBtn);
   await flushAsyncTurns(12);
-  assert.equal($(document, "slide-stage-box").dataset.layout, "titleAndContent");
+  assert.equal($(document, "slide-stage-box").dataset.layout, "titleSlide");
   assert.equal($(document, "slide-canvas-layer").querySelector('.slide-el[data-kind="shape"]'), null);
 });
 

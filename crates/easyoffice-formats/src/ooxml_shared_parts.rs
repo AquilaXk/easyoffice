@@ -120,9 +120,9 @@ pub(crate) fn drawingml_theme_xml(name: &str) -> String {
         "<a:folHlink><a:srgbClr val=\"7C3AED\"/></a:folHlink>",
         "</a:clrScheme>",
         "<a:fontScheme name=\"EasyOffice\">",
-        "<a:majorFont><a:latin typeface=\"Calibri\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/>",
+        "<a:majorFont><a:latin typeface=\"맑은 고딕\"/><a:ea typeface=\"맑은 고딕\"/><a:cs typeface=\"\"/>",
         "<a:font script=\"Hang\" typeface=\"맑은 고딕\"/></a:majorFont>",
-        "<a:minorFont><a:latin typeface=\"Calibri\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/>",
+        "<a:minorFont><a:latin typeface=\"맑은 고딕\"/><a:ea typeface=\"맑은 고딕\"/><a:cs typeface=\"\"/>",
         "<a:font script=\"Hang\" typeface=\"맑은 고딕\"/></a:minorFont>",
         "</a:fontScheme>",
         "<a:fmtScheme name=\"EasyOffice\"><a:fillStyleLst>"

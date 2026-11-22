@@ -221,6 +221,7 @@ select:focus-visible,
   margin-inline: auto;
   padding: 0;
   overflow: hidden;
+  font-family: "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   background: var(--doc-paper);
   border: 1px solid var(--ui-border);
   border-radius: var(--radius-sm);
@@ -228,6 +229,7 @@ select:focus-visible,
   display: flex;
   flex-direction: column;
 }
+.slide-show-frame { font-family: "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
 .slide-stage[data-aspect="4:3"] { --slide-ratio: 1.3333; aspect-ratio: 4 / 3; }
 .slide-stage[data-aspect="A4"] { --slide-ratio: 1.4142; aspect-ratio: 297 / 210; }
 .slide-title-zone { flex: 0 0 auto; padding: 4cqw 5cqw 1.5cqw; font-size: 4.2cqw; line-height: 1.2; }

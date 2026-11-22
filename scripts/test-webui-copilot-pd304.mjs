@@ -294,13 +294,13 @@ test("an object moved by hand after the preview makes the change stale", async (
   const h = await slides(() => answer([{ op: "slide.update", layout: "blank" }]));
   await h.send("빈 화면으로 바꿔 주세요");
   const select = h.document.getElementById("slide-layout-select");
-  select.value = "titleSlide";
+  select.value = "twoColumn";
   select.dispatchEvent({ type: "change", target: select });
   await flushAsyncTurns(4);
   h.document.getElementById("status-command-feedback").textContent = "";
   await acceptProposal(h.document, h.userClick);
   assert.equal(h.document.getElementById("status-command-feedback").textContent, "문서가 바뀌어 적용할 수 없습니다");
-  assert.equal(h.document.getElementById("slide-stage-box").dataset.layout, "titleSlide");
+  assert.equal(h.document.getElementById("slide-stage-box").dataset.layout, "twoColumn");
 });
 
 // ---- 문서 범위 교체

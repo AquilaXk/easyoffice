@@ -48,7 +48,7 @@ test("the slide window's icon toolbar lists only the commands that work on a sli
 
 test("aspect and transition selects are custom selects over the native state holders", async () => {
   const { document, userClick } = await openSlide();
-  for (const [id, label] of [["slide-aspect-select", "16:9"], ["slide-transition-select", "페이드"]]) {
+  for (const [id, label] of [["slide-aspect-select", "16:9"], ["slide-layout-select", "제목 슬라이드"], ["slide-transition-select", "없음"]]) {
     const select = document.getElementById(id);
     assert.ok(select.classList.contains("native-select-hidden"), `${id} stays as the hidden state holder`);
     const root = select.parentElement;

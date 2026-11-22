@@ -167,11 +167,11 @@ impl SlideMasterLayout {
 
     pub const fn ooxml_name(self) -> &'static str {
         match self {
-            Self::TitleSlide => "Title Slide",
-            Self::TitleAndContent => "Title and Content",
-            Self::SectionHeader => "Section Header",
-            Self::TwoColumn => "Two Content",
-            Self::Blank => "Blank",
+            Self::TitleSlide => "제목 슬라이드",
+            Self::TitleAndContent => "제목 및 내용",
+            Self::SectionHeader => "구역 머리글",
+            Self::TwoColumn => "두 개의 내용",
+            Self::Blank => "빈 화면",
         }
     }
 
@@ -199,8 +199,8 @@ impl SlideMasterLayout {
 /// Slide transition effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SlideTransition {
-    None,
     #[default]
+    None,
     Fade,
     Push,
     Zoom,
@@ -623,7 +623,7 @@ impl Default for RichSlide {
             bullets: Vec::new(),
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
-            transition: SlideTransition::Fade,
+            transition: SlideTransition::None,
             elements: Vec::new(),
         }
     }
@@ -669,7 +669,7 @@ impl RichSlideDeck {
                     bullets,
                     notes,
                     layout: SlideMasterLayout::TitleAndContent,
-                    transition: SlideTransition::Fade,
+                    transition: SlideTransition::None,
                     elements: Vec::new(),
                 })
                 .collect(),

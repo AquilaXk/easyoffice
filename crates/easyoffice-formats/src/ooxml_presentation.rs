@@ -9,10 +9,13 @@ use crate::ooxml_shared_parts::{
     core_properties_xml, drawingml_theme_xml, CORE_PROPERTIES_CONTENT_TYPE,
     CORE_PROPERTIES_REL_TYPE, PML_CLR_MAP, PML_SP_TREE_HEADER,
 };
+use crate::pptx_master::{
+    build_slide_layout_xml, build_slide_master_xml, presentation_default_text_style_xml,
+};
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
-    RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, SlideTransition,
-    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
+    RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, MAX_SLIDE_CHART_POINTS,
+    MAX_SLIDE_CHART_SERIES,
 };
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements, extract_tag_bodies,
@@ -264,7 +267,16 @@ pub(crate) fn finish_pptx_package(
         let _ = write!(pres_xml, "<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 255 + n);
         pres_rels.push((rid, "slide", format!("slides/slide{n}.xml")));
     }
-    let _ = write!(pres_xml, "</p:sldIdLst><p:sldSz cx=\"{emu_w}\" cy=\"{emu_h}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>");
+    let sz_type = if deck.aspect == SlideAspect::Standard4x3 {
+        " type=\"screen4x3\""
+    } else {
+        ""
+    };
+    let default_tx = presentation_default_text_style_xml();
+    let _ = write!(
+        pres_xml,
+        "</p:sldIdLst><p:sldSz cx=\"{emu_w}\" cy=\"{emu_h}\"{sz_type}/><p:notesSz cx=\"6858000\" cy=\"9144000\"/>{default_tx}</p:presentation>"
+    );
     pres_rels.extend([
         (
             "rIdMaster1".into(),
@@ -281,12 +293,12 @@ pub(crate) fn finish_pptx_package(
         ));
     }
 
-    let mut master_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldMaster {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld>{PML_CLR_MAP}<p:sldLayoutIdLst>");
+    let mut layout_id_entries = String::new();
     let mut master_rels: Vec<(String, &'static str, String)> = Vec::new();
     for layout in SlideMasterLayout::ALL {
         let k = layout.layout_index();
         let _ = write!(
-            master_xml,
+            layout_id_entries,
             "<p:sldLayoutId id=\"{}\" r:id=\"rId{k}\"/>",
             2_147_483_648u64 + k as u64
         );
@@ -296,7 +308,7 @@ pub(crate) fn finish_pptx_package(
             format!("../slideLayouts/slideLayout{k}.xml"),
         ));
     }
-    master_xml.push_str("</p:sldLayoutIdLst></p:sldMaster>");
+    let master_xml = build_slide_master_xml(emu_w, emu_h, &layout_id_entries);
     master_rels.push(("rId6".into(), "theme", "../theme/theme1.xml".into()));
 
     let mut entries: Vec<(String, Vec<u8>)> = vec![
@@ -333,7 +345,7 @@ pub(crate) fn finish_pptx_package(
     let layout_rels = rels_xml(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]);
     for layout in SlideMasterLayout::ALL {
         let k = layout.layout_index();
-        let l_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sldLayout {PML_NS} type=\"{}\" preserve=\"1\"><p:cSld name=\"{}\"><p:spTree>{PML_SP_TREE_HEADER}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>", layout.ooxml_type(), layout.ooxml_name());
+        let l_xml = build_slide_layout_xml(layout, emu_w, emu_h);
         entries.push((
             format!("ppt/slideLayouts/slideLayout{k}.xml"),
             l_xml.into_bytes(),
@@ -688,15 +700,11 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
 
 impl OoxmlCodec {
     pub fn pack_pptx(payload: &OoxmlPptxPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut deck = RichSlideDeck::from_legacy_slides(
+        let deck = RichSlideDeck::from_legacy_slides(
             &payload.title,
             payload.is_slideshow,
             payload.slides.clone(),
         );
-        deck.aspect = SlideAspect::Standard4x3;
-        for s in &mut deck.slides {
-            s.transition = SlideTransition::None;
-        }
         crate::pptx_rich::pack_pptx_rich(&deck, payload.is_slideshow)
     }
 
