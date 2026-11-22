@@ -9,6 +9,7 @@
   const MAX_WIDTH = 1600;
   const MIN_HEIGHT = 140;
   const MAX_HEIGHT = 1200;
+  const MAX_SIZE = 8192;
   const MAX_POS = 50000000;
   const DIALOG_LEGENDS = new Set(["right", "bottom", "top", "none"]);
 
@@ -57,8 +58,10 @@
     function anchorFromRect(rawLeft, rawTop, rawWidth, rawHeight, editAs = "twoCell") {
       const left = Math.max(0, Math.min(MAX_POS, Math.round(Number(rawLeft) || 0)));
       const top = Math.max(0, Math.min(MAX_POS, Math.round(Number(rawTop) || 0)));
-      const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(Number(rawWidth) || 420)));
-      const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(Number(rawHeight) || 260)));
+      // The size is the engine's limit only: the 180x140 to 1600x1200 of a chart a user drags to is for the resize drag, so a chart
+      // that is moved keeps the size it has.
+      const width = Math.max(1, Math.min(MAX_SIZE, Math.round(Number(rawWidth) || 420)));
+      const height = Math.max(1, Math.min(MAX_SIZE, Math.round(Number(rawHeight) || 260)));
       return { ...grid.anchorAt(left, top, width, height), left, top, width, height, editAs };
     }
 

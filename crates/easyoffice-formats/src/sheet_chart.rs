@@ -24,11 +24,7 @@ pub const MAX_SERIES_PER_CHART: usize = 32;
 pub const MAX_POINTS_PER_SERIES: usize = 4_096;
 pub const MAX_CHART_TEXT_BYTES: usize = 512;
 
-pub const MIN_CHART_WIDTH_PX: u32 = 180;
-pub const MAX_CHART_WIDTH_PX: u32 = 1_600;
 pub const DEFAULT_CHART_WIDTH_PX: u32 = 420;
-pub const MIN_CHART_HEIGHT_PX: u32 = 140;
-pub const MAX_CHART_HEIGHT_PX: u32 = 1_200;
 pub const DEFAULT_CHART_HEIGHT_PX: u32 = 260;
 
 pub const EMU_PER_PX: u64 = 9_525;
@@ -133,7 +129,7 @@ impl ChartLegendPos {
     }
 }
 
-/// Two-cell DrawingML anchor paired with pixel coordinates (`180..=1600` x `140..=1200`).
+/// Two-cell DrawingML anchor paired with pixel coordinates (each size `1..=MAX_SHEET_IMAGE_DIM_PX`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChartAnchor {
     pub edit_as: AnchorEdit,
