@@ -558,7 +558,7 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 
 | 후보 | 예상 | 위험·이유 |
 |---|---|---|
-| macOS를 universal 하나에서 arm64·x64 dmg 둘로 | 사용자당 dmg가 약 111 MB에서 약 55 MB로 `[추정]`(조각 하나가 반) | `.github/` 릴리스 워크플로, `latest.json`의 `darwin-aarch64`·`darwin-x86_64` 항목, 업데이트 서명 대상이 바뀐다 |
+| macOS를 universal 하나에서 arm64·x64 dmg 둘로 (PD-297로 적용) | 사용자당 dmg가 약 111 MB에서 약 55 MB로 `[추정]`(조각 하나가 반) | `.github/` 릴리스 워크플로, `latest.json`의 `darwin-aarch64`·`darwin-x86_64` 항목, 업데이트 서명 대상이 바뀐다 |
 | Pretendard 9가중치(6.9 MB)를 가변 글꼴 하나로 | 구현함(PD-298, 8.7절). 실행 파일 -4.77 MB | 글꼴 파일과 `fonts.json`·해시 검증, 편집기 글꼴 목록, 가중치별 글리프 폭이 바뀐다 |
 | 글꼴 부분 집합화(문서에서 안 쓰는 글리프 제거) | 큰 폭 | 글자가 빠질 위험. OFL은 개조본 이름 변경 조건(예약 글꼴 이름)이 있을 수 있다 |
 | D2Coding 둘(3.46 MB)·미사용 가중치를 필요할 때 내려받기 | -3.5 MB~ | 오프라인 우선 원칙과 어긋난다 |

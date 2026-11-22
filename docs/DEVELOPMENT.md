@@ -135,7 +135,7 @@ cargo run -p easyoffice-desktop     # 데스크톱 셸 실행
 
 ## 릴리스 패키지와 플랫폼별 빌드
 
-릴리스 노트는 `docs/releases/v<버전>.md`에 한국어(`## 변경 사항`)·영어(`## Changes`)로 직접 쓴다. 파일이 있으면 릴리스 작업이 본문으로 쓰고, 없으면 자동 생성 노트를 쓴다(PD-274).
+릴리스 노트는 `docs/releases/v<버전>.md`에 한국어(`## 변경 사항`)·영어(`## Changes`)로 직접 쓴다. 파일이 있으면 릴리스 작업이 본문으로 쓰고, 없으면 자동 생성 노트를 쓴다(PD-274). macOS 설치 파일이 아키텍처별로 둘이므로(PD-297) 노트 끝에 어떤 파일을 받는지 한 줄을 넣는다. 한국어는 `Mac은 Apple Silicon(M1 이후)이면 EasyOffice-macos-arm64.dmg, Intel이면 EasyOffice-macos-x64.dmg를 받습니다.`, 영어는 `On a Mac, download EasyOffice-macos-arm64.dmg for Apple Silicon (M1 and later) or EasyOffice-macos-x64.dmg for Intel.`이다.
 
 **공개된 릴리스는 다시 빌드하지 않습니다(PD-283).** QA가 드래프트를 공개하면 태그가 생기고 그 태그 push가 릴리스 작업을 다시 시작합니다. 태그의 릴리스가 이미 공개돼 있으면 `prepare` 잡이 빌드와 발행을 모두 건너뛰고, 어떤 경로로도 공개된 자산을 덮어쓰지 않습니다. 공개된 버전을 고쳐 내려면 새 버전(태그)으로 냅니다. 수동 실행(`publish=true`)이 공개된 버전을 가리키면 빌드 전에 실패합니다.
 
@@ -162,7 +162,7 @@ gh release create "v$VER" .scratch/release-assets/* --draft --target "$SHA" \
 
 #### macOS
 
-macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q·Dock의 종료·AppleScript `quit`·시스템 종료로 끝내면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다(PD-189). Windows의 로그오프·시스템 종료와 Linux의 `SIGTERM`·`SIGHUP`도 저장 안 된 창이 있으면 같은 확인을 거칩니다(PD-191).
+macOS 릴리스는 아키텍처별 디스크 이미지 `EasyOffice-macos-arm64.dmg`(Apple Silicon)와 `EasyOffice-macos-x64.dmg`(Intel)로 배포됩니다(macOS 11 이상, PD-297). 이전 유니버설 이미지로 설치한 앱은 업데이터가 자기 아키텍처의 패키지를 받습니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q·Dock의 종료·AppleScript `quit`·시스템 종료로 끝내면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다(PD-189). Windows의 로그오프·시스템 종료와 Linux의 `SIGTERM`·`SIGHUP`도 저장 안 된 창이 있으면 같은 확인을 거칩니다(PD-191).
 
 서명은 준비만 되어 있고 꺼져 있습니다. macOS CI·릴리스 작업에 `APPLE_SIGNING_IDENTITY` 저장소 시크릿(과 공증 변수)을 추가하면 됩니다(PD-094). macOS에서 `.dmg`를 소스로 빌드하려면 다음과 같이 합니다.
 

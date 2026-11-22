@@ -99,7 +99,7 @@
 ---
 
 ## 3. 플랫폼 배포 형태 (Platform Delivery, `PD-074`)
-- **macOS (`PD-094`)**: Windows와 같은 Tauri 데스크톱 셸(WKWebView)을 유니버설 `.dmg`(`EasyOffice-macos-universal.dmg`, macOS 11 이상)로 배포합니다. Apple Developer ID 서명·공증은 하지 않으므로 처음 한 번 우클릭 → 열기(또는 시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기)가 필요합니다. 표준 메뉴 막대와 Command 단축키가 동작하고 Finder에서 문서를 열 수 있습니다.
+- **macOS (`PD-094`)**: Windows와 같은 Tauri 데스크톱 셸(WKWebView)을 아키텍처별 `.dmg`(`EasyOffice-macos-arm64.dmg`는 Apple Silicon, `EasyOffice-macos-x64.dmg`는 Intel, macOS 11 이상, PD-297)로 배포합니다. Apple Developer ID 서명·공증은 하지 않으므로 처음 한 번 우클릭 → 열기(또는 시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기)가 필요합니다. 표준 메뉴 막대와 Command 단축키가 동작하고 Finder에서 문서를 열 수 있습니다.
 - **Windows**: 설치 프로그램 `EasyOffice-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램)로 배포합니다. 설치된 `EasyOffice.exe`는 Windows 내장 WebView2 위의 데스크톱 창(Tauri v2 셸)이며, 실행 파일에 포함된 WebUI가 프로세스 안의 Rust 엔진(15종 IPC 명령)을 직접 호출합니다. 로컬 HTTP 서버·브라우저·네트워크 연결 없이 동작하고, 저장은 Windows 기본 저장 대화상자로 위치를 고릅니다(취소·실패는 저장 상태 표시에 그대로 보고). 문서 파일 연결(더블클릭으로 열기)은 `PD-093`에 따라 설치 프로그램이 등록합니다.
 - **Linux (`PD-086`)**: 같은 Tauri 셸(WebKitGTK 4.1)을 x64는 `EasyOffice-linux-x64.AppImage`·`EasyOffice-linux-x64.deb`·`EasyOffice-linux-x64.rpm`, arm64는 `EasyOffice-linux-arm64.deb`로 배포합니다(Ubuntu 22.04 기준 빌드, glibc 2.35 이상). 네이티브 패키지가 WebKitGTK·GTK 3·libxdo를 의존성으로 선언하고, AppImage는 설치 없이 실행하는 용도입니다. 메뉴 분류는 Office이고 문서 9종을 "다음으로 열기" 대상으로 등록합니다. 한글 입력기와 WebKitGTK는 배포판 패키지와 함께 쓸 때 가장 안정적입니다.
 - **릴리스 자산과 공개 (`PD-086`)**: 자산 이름에 버전이 없어(`releases/latest/download/<이름>`) README 직링크가 릴리스마다 유지되고, 체크섬은 합친 `SHA256SUMS.txt` 하나입니다. 릴리스는 드래프트로 만들어 QA가 확인한 뒤 공개하며, 업데이트 알림(`PD-103`)은 공개된 릴리스만 봅니다. 모든 OS 산출물에 `THIRD_PARTY_NOTICES.md`가 들어갑니다.

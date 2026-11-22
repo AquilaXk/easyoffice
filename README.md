@@ -28,12 +28,15 @@ Pages(`.pages`)는 읽기와 실험적 쓰기를 지원합니다. 포맷별 읽�
 
 최신 릴리스는 아래 링크에서 받을 수 있습니다.
 
-* [macOS 유니버설 (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
+* [macOS Apple Silicon (.dmg, M1 이후)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-arm64.dmg)
+* [macOS Intel (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-x64.dmg)
 * [Windows x64 (설치 프로그램)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
 * [Linux x64 (.deb, Ubuntu/Debian 계열 권장)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
 * [Linux x64 (.rpm, Fedora/openSUSE 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
 * [Linux x64 (AppImage, portable)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
 * [Linux arm64 (.deb, Ubuntu/Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
+
+Mac은 칩에 맞는 파일을 받습니다. 화면 왼쪽 위 Apple 메뉴의 `이 Mac에 관하여`에서 칩이 Apple M으로 시작하면 Apple Silicon, Intel이면 Intel 파일입니다.
 
 받은 파일은 [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)의 체크섬과 비교할 수 있습니다.
 
