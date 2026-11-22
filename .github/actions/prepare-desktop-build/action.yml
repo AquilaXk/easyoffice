@@ -10,6 +10,13 @@ inputs:
     description: Space-separated extra Rust compilation targets (a macOS build adds the target of its architecture).
     required: false
     default: ""
+  rust-tests:
+    description: >-
+      "true" runs the whole Rust workspace test suite; "false" skips it and keeps the engine self-test. Only
+      the Intel macOS job passes "false" (PD-301): the same commit runs the suite on the arm64 macOS, x64
+      Linux and Windows jobs, and the suite has time-bound tests that a 4-core Intel runner fails by speed alone.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -53,8 +60,12 @@ runs:
         node scripts/checkout-rhwp.mjs
         node scripts/build-hwp-studio.mjs
 
-    - name: Run Rust workspace test suite and self-test
+    - name: Run Rust workspace test suite
+      if: inputs.rust-tests != 'false'
       shell: bash
-      run: |
-        cargo test --workspace --locked
-        cargo run --locked -p easyoffice-app -- --self-test
+      run: cargo test --workspace --locked
+
+    # Always runs, so every release architecture starts the engine it ships (PD-301).
+    - name: Run the engine self-test
+      shell: bash
+      run: cargo run --locked -p easyoffice-app -- --self-test

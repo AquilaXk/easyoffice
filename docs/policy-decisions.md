@@ -5280,10 +5280,21 @@
   7. **안내**: README 다운로드에 Apple Silicon·Intel 링크를 따로 두고 칩 확인 방법을 한 줄 적었다. 릴리스 노트에는 어느 파일을 받는지 한 줄을 넣는 규칙을 `docs/DEVELOPMENT.md`에 적었다.
 - **재사용 판단 (구현 원칙 3단계)** (1) 새 의존성이 없다. (2) 이미 쓰는 Tauri CLI의 `--target`, `release-assets.mjs`의 플랫폼 표, 업데이터 플러그인의 키 규칙을 그대로 쓴다. (3) 이식한 외부 코드는 없다.
 - **Measured** 이 변경으로 만든 dmg는 아직 없다. 크기는 PD-293 분석표에서 뽑은 추정이다(`[추정]`). 조각 합(arm64 약 95 MB, x64 약 101 MB, 압축 전 `.app`)에 universal의 압축률(190 MB에서 111 MB)을 곱하면 dmg가 arm64 약 56 MB, x64 약 59 MB다. 첫 릴리스 빌드에서 실제 크기와 잡 시간을 `docs/performance.md` 8.3에 적는다.
-- **Trade-offs** (1) 다운로드가 둘이라 사용자가 칩을 알아야 한다. (2) `releases/latest/download/EasyOffice-macos-universal.dmg` 링크는 이 릴리스부터 404다(이전 릴리스에는 남아 있다). 외부에서 이 이름을 건 링크가 있으면 끊어진다. (3) macOS 잡이 둘이라 `prepare-desktop-build`의 게이트(위생, 시험, Rust 테스트)가 macOS에서 두 번 돈다. Linux 행렬과 같은 모양이다. (4) Intel 러너가 사라지면(2027년 가을) 교차 빌드로 옮겨야 한다.
+- **Trade-offs** (1) 다운로드가 둘이라 사용자가 칩을 알아야 한다. (2) `releases/latest/download/EasyOffice-macos-universal.dmg` 링크는 이 릴리스부터 404다(이전 릴리스에는 남아 있다). 외부에서 이 이름을 건 링크가 있으면 끊어진다. (3) macOS 잡이 둘이라 `prepare-desktop-build`의 게이트(위생, 시험, Rust 테스트)가 macOS에서 두 번 돈다. Linux 행렬과 같은 모양이다(PD-301이 바꿈: Intel 잡은 Rust 테스트를 건너뛴다). (4) Intel 러너가 사라지면(2027년 가을) 교차 빌드로 옮겨야 한다.
 - **Alternatives rejected** `macos-15` 하나에서 x64를 교차 빌드: 러너 하나로 끝나지만 만든 x64 바이너리를 스모크 테스트할 수 없다(Rosetta 설치 여부를 문서로 확인하지 못함). universal 유지하고 dmg만 둘로 자르기: 앱 안의 조각이 그대로라 크기가 줄지 않는다. 업데이트 키를 universal 아카이브 하나에 두기: 사용자가 쓰지 않는 조각까지 내려받는다.
 - **Verified by** `node --test scripts/test-release-assets.mjs`(자산·서명 이름 7개·17개 파일, 아키텍처별 스테이징, 번들 위치가 대상 디렉터리인지, `latest.json` 키별 URL·서명, 설치된 universal 앱의 키 탐색, 행렬의 러너·대상·`--target`·`--arch` 일치와 universal 잔재 없음), `node --test scripts/test-quicklook-config.mjs`(`quicklookTargets`, CI와 릴리스의 빌드·검증 순서), `actionlint .github/workflows/*.yml`, 이 Mac(arm64)에서 `--arch arm64` Quick Look 빌드와 `verify-quicklook-bundle.mjs --archs arm64`.
 - **Revisit when** 첫 분리 릴리스 후 실제 dmg 크기와 잡 시간을 잴 때, 구형 universal 설치본에서 업데이트 실기기 확인을 할 때, `macos-15-intel`이 폐기될 때, Apple Developer ID 서명·공증을 넣을 때(아키텍처별 공증 제출).
+
+## PD-301. Intel macOS 릴리스 잡은 Rust 시험 묶음을 건너뛰고 자체 시험으로 바이너리를 확인함
+
+- **Status** Implemented (QA 요청 2026-11-22). `.github/actions/prepare-desktop-build/action.yml`(`rust-tests` 입력), `.github/workflows/release.yml`(`release-macos` 행렬의 `rust-tests`), `scripts/test-release-assets.mjs`. PD-283·PD-297의 구조는 그대로다.
+- **Context** PD-297로 `macos-x64` 잡이 `macos-15-intel`(4코어)에서 돈다. 공용 게이트가 debug 빌드로 `cargo test --workspace`를 돌리는데, 이 러너가 느려 시간 한도 시험이 연달아 실패했다. 시험 빌드 run 44985260154는 `ods_filter_roundtrip`의 선형 시간 시험이 5.26초로 5초 한도를 넘었다(60d49e7d가 15초로 올림). run 44989326699는 `workbook_scale_tests.rs`의 `sec_01_dynamic_array_huge_string_fails_closed_without_oom`이 1.19초로 500ms 한도를 넘었다. 같은 시험은 macOS arm64, Linux, Windows 잡과 push CI에서 이미 통과한다.
+- **Decision (`PD-301`)** (1) 공용 action에 입력 `rust-tests`(기본 `true`)를 두고, `false`이면 `cargo test --workspace --locked` 단계만 건너뛴다. 위생 가드, node 시험 묶음, rhwp 확인·편집기 번들 빌드, 엔진 자체 시험(`easyoffice-app --self-test`)은 항상 돈다. (2) `release-macos` 행렬에서 `macos-x64`만 `false`, `macos-arm64`는 `true`다. Windows·Linux 잡은 입력을 쓰지 않아 전체 시험을 그대로 돈다. (3) 같은 커밋의 Rust 시험은 macOS arm64 잡, Linux x64 잡, Windows 잡이 돌리고 push CI(`checks`, `verify-windows`)도 돌린다. 건너뛰는 근거가 이 사실이므로 `scripts/test-release-assets.mjs`가 행렬 값, 다른 잡이 입력을 쓰지 않는 것, 자체 시험 단계에 `if`가 없는 것, action의 `if`가 하나뿐인 것을 고정한다. (4) x64 산출물은 같은 잡에서 계속 실행해 본다. 러너가 x86_64라 자체 시험은 x64 바이너리를 시작하고, 이어서 `.app`의 `--smoke`(내장 WebUI, IPC, HWP 편집기)가 돈다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 새 의존성 없음. (2) 기존 composite action에 입력 하나를 더했다. (3) 이식한 외부 코드 없음.
+- **Alternatives rejected** 시간 한도 시험이 `EASYOFFICE_TIME_SCALE`을 읽게 하는 안: 시험 도우미 하나로 묶으려면 저장소 전체의 `Duration`·`elapsed` 단언을 모두 고쳐야 하고, 러너가 느려지면 배율을 계속 올리게 된다. 배율을 곱한 한도는 2차 시간 회귀를 잡는 힘도 줄인다. 시험 한도는 그대로 두어 다른 잡에서 탐지력을 유지한다. Intel 잡에서 시험만 `--release`로 돌리기: 릴리스 빌드를 한 번 더 컴파일해 릴리스 시간이 늘어난다.
+- **Trade-offs** x64에서만 나는 코드 결함은 Linux·Windows x64 잡이 잡는다(macOS 전용 코드의 x64 경로는 Rust 시험으로 보지 않고 `--smoke`와 Quick Look 검증이 본다). macOS 전용 `cfg`가 든 시험은 arm64 잡에서만 돈다. Intel 러너에서 느려지는 시험은 이 잡에서 더 돌지 않으므로 그 러너의 성능 회귀는 릴리스 게이트가 보지 않는다.
+- **Verified by** `node --test scripts/test-release-assets.mjs`(행렬 값을 바꾸면 실패함을 확인), `actionlint`, `node --test scripts/test-*.mjs`, 위생 가드.
+- **Revisit when** x64 전용 결함이 릴리스 뒤에 발견될 때, `macos-15-intel`이 폐기될 때(PD-297), 시간 한도 시험이 다른 러너에서도 실패할 때.
 
 ## PD-300. 인쇄의 데이터 막대·아이콘, 엔진 PDF의 조건부 서식, ODS 기본 행 높이의 읽기·쓰기 경계
 

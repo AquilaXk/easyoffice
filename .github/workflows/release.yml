@@ -178,10 +178,14 @@ jobs:
             runner: macos-15
             target: aarch64-apple-darwin
             archs: arm64
+            rust-tests: "true"
           - platform: macos-x64
             runner: macos-15-intel
             target: x86_64-apple-darwin
             archs: x86_64
+            # The Rust suite runs on the same commit in macos-arm64, linux-x64 and Windows (PD-301); this
+            # job keeps the hygiene, node suites, editor bundle and the engine self-test.
+            rust-tests: "false"
     env:
       PLATFORM: ${{ matrix.platform }}
       TARGET: ${{ matrix.target }}
@@ -196,6 +200,7 @@ jobs:
         uses: ./.github/actions/prepare-desktop-build
         with:
           rust-targets: ${{ matrix.target }}
+          rust-tests: ${{ matrix.rust-tests }}
 
       # The Quick Look preview and thumbnail extensions (PD-140) are copied into the app's PlugIns
       # folder by bundle.macOS.files, so they are built first, for this architecture only, with the same

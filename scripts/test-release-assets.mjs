@@ -361,6 +361,45 @@ test("the macOS job builds one architecture per matrix entry on a runner of that
   assert.doesNotMatch(job, /universal-apple-darwin|--universal|macos-universal/, "no universal build is left in the release");
 });
 
+// PD-301: the Intel macOS runner (4 cores) fails the suite's time-bound tests by speed alone, so that job
+// skips the Rust suite. The skip is only sound while the same commit runs the suite elsewhere; this test
+// pins that, so removing the other runs or widening the skip fails here.
+test("only the Intel macOS job skips the Rust suite, and the suite still runs on the same commit elsewhere (PD-301)", () => {
+  const jobs = Object.fromEntries(
+    workflow
+      .slice(workflow.indexOf("\njobs:\n"))
+      .split(/\n(?=  [a-z][\w-]*:\n)/)
+      .slice(1)
+      .map((text) => [text.match(/^ {2}([\w-]+):/)[1], text])
+  );
+  const entries = [...jobs["release-macos"].matchAll(/- platform: (\S+)\n(?:.*\n)*?\s+rust-tests: "(\w+)"/g)].map(([, platform, flag]) => [platform, flag]);
+  assert.deepEqual(entries, [["macos-arm64", "true"], ["macos-x64", "false"]]);
+  assert.match(jobs["release-macos"], /rust-tests: \$\{\{ matrix\.rust-tests \}\}/);
+  for (const name of ["build-windows-release", "build-linux-release"]) {
+    assert.match(jobs[name], /uses: \.\/\.github\/actions\/prepare-desktop-build\n/, `${name} runs the shared gate`);
+    assert.doesNotMatch(jobs[name], /rust-tests:/, `${name} keeps the full Rust suite`);
+  }
+  assert.match(jobs["build-linux-release"], /- platform: linux-x64\n\s+runner: ubuntu-22\.04\n/, "an x86_64 job runs the suite");
+  assert.match(jobs["build-windows-release"], /runs-on: windows-latest/);
+
+  const action = read(".github/actions/prepare-desktop-build/action.yml");
+  assert.match(action, /rust-tests:\n(?:.*\n)*?\s+default: "true"/, "the suite runs unless a job opts out");
+  assert.match(action, /- name: Run Rust workspace test suite\n\s+if: inputs\.rust-tests != 'false'\n\s+shell: bash\n\s+run: cargo test --workspace --locked\n/);
+  const selfTest = action.match(/- name: Run the engine self-test\n((?:\s{6,}.*\n)+)/);
+  assert.ok(selfTest, "the self-test is its own step");
+  assert.doesNotMatch(selfTest[1], /\bif:/, "the self-test runs on every architecture");
+  assert.match(selfTest[1], /cargo run --locked -p easyoffice-app -- --self-test/);
+  assert.equal(action.match(/^\s+if:/gm).length, 1, "the hygiene guard, node suites and editor bundle are never skipped");
+
+  // The push CI runs the suite on x86_64 Linux and Windows for every commit as well.
+  const ci = read(".github/workflows/ci.yml");
+  assert.match(ci, /cargo test --workspace --exclude easyoffice-desktop/);
+  assert.match(ci, /runs-on: ubuntu-latest/);
+  assert.match(ci, /runs-on: windows-latest/);
+  // The x64 build product is still started: the desktop smoke test and the self-test stay in the job.
+  assert.match(jobs["release-macos"], /--smoke &/);
+});
+
 test("publishing is serialized by version across tag pushes and manual runs", () => {
   const publish = workflow.slice(workflow.indexOf("  publish-release:"));
   assert.match(publish, /concurrency:\s+group: release-publish-\$\{\{ needs\.prepare\.outputs\.version \}\}\s+cancel-in-progress: false/);
