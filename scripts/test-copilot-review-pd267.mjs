@@ -17,6 +17,7 @@ function loadText() {
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
   return env.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints;
 }
@@ -50,6 +51,7 @@ function makeActions(texts, selectedText = "") {
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
@@ -141,6 +143,7 @@ test("BASE and BOARD context cut every text at a code point", () => {
   loadUiModule(UI("copilot-typing.js"), env);
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
+  loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("base-board-host.js"), env);
   env.__EASYOFFICE_BASE_BOARD_HOST__.init({ document: { getElementById: () => null }, env: { addEventListener() {} }, invokeIpc: async () => ({}) });

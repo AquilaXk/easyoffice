@@ -13,6 +13,7 @@ function performer(withSheetUtils) {
     loadUiModule(UI("sheet-refs.js"), env);
     loadUiModule(UI("sheet-utils.js"), env);
   }
+  loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
   return env.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({ document: {}, getActiveSlideIndex: () => 0, getActiveSheetName: () => "Sheet1", blockText: (x) => String(x?.text ?? x) });
 }

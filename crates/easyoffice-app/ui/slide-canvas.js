@@ -938,6 +938,7 @@
     STAGE_SIZES, LAYOUT_LABELS, SHAPE_LABELS, CHART_LABELS,
     stageSizeOf, normalizeLayout, normalizeTransition, normalizeHex6,
     normalizeSlideElement, serializeDeckPayload, hydrateDecodedDeck, renderStaticElementsLayer,
+    buildElementDom, positionElementDom,
   };
   host.__EASYOFFICE_CREATE_SLIDE_CANVAS__ = createSlideCanvas;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

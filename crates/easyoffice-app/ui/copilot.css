@@ -942,6 +942,11 @@
 
 /* 옮김[excalidraw-yprosemirror-css] 끝 */
 
+/* 연출이 임시로 가린 요소(옛 범위의 문단, 움직이는 개체의 원래 모양). 연출이 끝나면 클래스를 돌려 놓는다. */
+.eo-copilot-ghost {
+  display: none !important;
+}
+
 /* ── 적용 전 변경 목록과 문서 위 삭제·삽입 표시 (PD-268) ────────────────────────────────
    표시 색은 문서의 변경 추적 표시(`#doc-editor ins.eo-rev-ins`, `del.eo-rev-del`)와 같은 토큰이다. 참조 앱에 없는 부품이라 모서리는 직각이다. */
 .eo-copilot-review-btn {

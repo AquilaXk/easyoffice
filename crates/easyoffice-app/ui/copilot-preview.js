@@ -12,6 +12,7 @@
   // 변경 목록은 이만큼까지 그리고 나머지는 개수로만 알린다. 한 칸의 글도 이만큼에서 자른다.
   const MAX_ENTRIES = 40;
   const MAX_ENTRY_CHARS = 600;
+  const ELEMENT_LABELS = Object.freeze({ textbox: "글상자", textBox: "글상자", shape: "도형", image: "그림", table: "표", chart: "차트" });
 
   function createCopilotPreview(deps) {
     const { document, win = host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName } = deps;
@@ -90,7 +91,8 @@
         return;
       }
       if (kind === "slide.add_element") {
-        entries.push(change("format", "개체 추가", "", "", { module: "SLIDE", slideIndex: Number.isInteger(op.slideIndex) ? op.slideIndex : 0 }));
+        const element = op.element && typeof op.element === "object" ? op.element : op;
+        entries.push(change("format", "개체 추가" + (element.kind ? ` (${ELEMENT_LABELS[element.kind] || element.kind})` : ""), "", "", { module: "SLIDE", slideIndex: Number.isInteger(op.slideIndex) ? op.slideIndex : 0 }));
         return;
       }
       const index = Number.isInteger(op.index) ? op.index : Number.isInteger(op.slideIndex) ? op.slideIndex : 0;
@@ -99,6 +101,10 @@
       const fields = [["제목", op.title, slide.title], ["본문", bullets ?? op.body ?? op.lower, slide.lower], ["노트", op.notes, slide.notes]];
       for (const [name, next, prev] of fields) {
         if (next !== undefined) entries.push(change(prev ? "replace" : "insert", `슬라이드 ${index + 1} ${name}`, prev || "", next, location));
+      }
+      // 글이 아닌 변경(레이아웃, 화면 전환, 개체 목록 교체)도 목록에 올려 수락 전에 무엇이 바뀌는지 보이게 한다.
+      for (const [name, next] of [["레이아웃", op.layout], ["화면 전환", op.transition], ["개체", Array.isArray(op.elements) ? op.elements : undefined]]) {
+        if (next !== undefined) entries.push(change("format", `슬라이드 ${index + 1} ${name}`, "", "", location));
       }
     }
 
@@ -154,7 +160,7 @@
         return JSON.stringify({ n: blocks.length, t: [...touched].filter(Number.isInteger).sort((a, b) => a - b).map((i) => [i, blocks[i]?.textContent ?? null]) });
       }
       if (mod === "SLIDE") {
-        return JSON.stringify({ n: slideDeckState.length, t: ops.map((op) => { const s = slideDeckState[Number.isInteger(op?.index) ? op.index : op?.slideIndex ?? 0]; return s ? [s.title, s.lower, s.notes] : null; }) });
+        return JSON.stringify({ n: slideDeckState.length, t: ops.map((op) => { const s = slideDeckState[Number.isInteger(op?.index) ? op.index : op?.slideIndex ?? 0]; return s ? [s.title, s.lower, s.notes, s.layout, s.transition, s.elements] : null; }) });
       }
       if (mod === "SHEET") {
         return JSON.stringify(ops.map((op) => {

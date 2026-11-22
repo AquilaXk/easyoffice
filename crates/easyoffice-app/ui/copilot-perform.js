@@ -2,6 +2,9 @@
 // 이 파일은 직접 썼다: 둘을 엮는 원본(포인터가 선택하고 글을 쳐 넣는 문서 편집)이 따로 없어서 찾아본 저장소는 excalidraw(`packages/excalidraw/clients.ts`),
 // y-prosemirror(`src/cursor-plugin.js`), typed.js(`src/typed.js`)다(보고에 적었다).
 //
+// 슬라이드 쪽(새 슬라이드, 개체 놓기·옮기기, 레이아웃·전환, 노트)은 `copilot-perform-slide.js`가 맡고, 이 파일은 문서·시트와 공통 도구(포인터, 타이핑, 드래그 선택,
+// 임시로 쓴 것의 되돌리기)를 둔다. 문서의 범위 교체(`doc.replace_paragraphs`의 `startIndex`·`endIndex`)는 옛 범위를 끌어 선택하고 가린 뒤 새 블록을 그 자리에 친다(PD-304).
+//
 // 연출은 눈에 보이는 임시 입력일 뿐이다. 글자는 편집 DOM에 한 자씩 써 넣지만 되돌리기 기록은 만들지 않고(글자마다 스냅숏을 뜨면 한 턴이 한 단계라는 규칙이 깨진다),
 // 끝나거나 멈추면 임시로 쓴 것을 원래대로 돌린 다음 한 번만 기존 적용 경로(`applyOperations`)로 쓴다. 멈추면 쓰던 부분까지만 연산으로 잘라 적용한다.
 
@@ -20,10 +23,13 @@
   function createCopilotPerformer(deps) {
     const { document, win = host, docBlocksOf, getWorkspacePanels, slideDeckState, getActiveSlideIndex, getActiveSheetName, getSheetController, isReducedMotion, createCursor, createTypist } = deps;
     const { blockText } = deps;
+    const slidePerf = host.__EASYOFFICE_COPILOT_PERFORM_SLIDE__.createSlidePerformance({ document, slideDeckState, getActiveSlideIndex, getWorkspacePanels });
 
     // ---- 목표: 연산에서 한 자씩 칠 글을 순서대로 뽑는다. `cut(clone, typed)`가 쓰던 곳까지로 연산 복사본을 자른다.
     function collectTargets(mod, operations) {
       const targets = [];
+      // 앞 연산이 더한 슬라이드까지 센 슬라이드 수(그 슬라이드는 아직 없다).
+      const deck = mod === "SLIDE" ? { length: slideDeckState.length } : null;
       operations.forEach((op, opIndex) => {
         const kind = opKind(op);
         if (mod === "DOC") {
@@ -32,15 +38,13 @@
               const index = Number(rep?.index);
               if (Number.isInteger(index) && index >= 0) targets.push({ opIndex, kind: "doc-replace", entry, index, text: String(rep.text ?? "") });
             });
-          } else if (kind === "doc.append") {
+          } else if (kind === "doc.append" || kind === "doc.replace_paragraphs") {
             const key = Array.isArray(op.blocks) ? "blocks" : Array.isArray(op.paragraphs) ? "paragraphs" : null;
-            (key ? op[key] : []).forEach((item, entry) => targets.push({ opIndex, kind: "doc-append", key, entry, text: blockText(item), item }));
+            const range = kind === "doc.append" ? {} : { startIndex: op.startIndex, endIndex: op.endIndex };
+            (key ? op[key] : []).forEach((item, entry) => targets.push({ opIndex, kind: kind === "doc.append" ? "doc-append" : "doc-range", key, entry, text: blockText(item), item, ...range }));
           }
-        } else if (mod === "SLIDE" && kind === "slide.update") {
-          const bulletKey = Array.isArray(op.bullets) ? "bullets" : op.body !== undefined ? "body" : op.lower !== undefined ? "lower" : null;
-          const index = Number.isInteger(op.index) ? op.index : Number.isInteger(op.slideIndex) ? op.slideIndex : getActiveSlideIndex();
-          if (op.title !== undefined) targets.push({ opIndex, kind: "slide-title", index, text: String(op.title) });
-          if (bulletKey) targets.push({ opIndex, kind: "slide-body", index, key: bulletKey, text: bulletKey === "bullets" ? op.bullets.map((b) => String(b ?? "")).join("\n") : String(op[bulletKey] ?? "") });
+        } else if (mod === "SLIDE") {
+          targets.push(...slidePerf.collect(op, opIndex, kind, deck));
         } else if (mod === "SHEET" && kind === "sheet.write" && Array.isArray(op.cells)) {
           op.cells.slice(0, MAX_ANIMATED_CELLS).forEach((cell, entry) => {
             const coord = String(cell?.coord || "").trim().toUpperCase();
@@ -74,28 +78,24 @@
       clone.forEach((op, opIndex) => {
         if (opIndex < target.opIndex) return out.push(op);
         if (opIndex > target.opIndex) return;
+        if (target.kind.startsWith("slide")) {
+          const kept = slidePerf.cut(op, opKind(op), target, typed, targets.slice(0, targets.indexOf(target)));
+          if (kept) out.push(kept);
+          return;
+        }
         const keepFirst = (arr, partial) => arr.slice(0, target.entry).concat(partial ? [partial] : []);
         if (target.kind === "doc-replace") {
           op.replacements = keepFirst(op.replacements, prefix ? { ...op.replacements[target.entry], text: prefix } : null);
-        } else if (target.kind === "doc-append") {
+        } else if (target.kind === "doc-append" || target.kind === "doc-range") {
           const item = op[target.key][target.entry];
           const partial = !prefix ? null : typeof item === "string" ? prefix : Array.isArray(item?.items) ? { ...item, items: prefix.split("\n") } : { ...item, text: prefix };
           op[target.key] = keepFirst(op[target.key], partial);
         } else if (target.kind === "sheet-cell") {
           op.cells = keepFirst(op.cells, prefix && !isAtomicText(target.text) ? { ...op.cells[target.entry], raw: prefix, formula: undefined, value: undefined } : null);
-        } else if (target.kind === "slide-title") {
-          if (prefix) op.title = prefix;
-          else delete op.title;
-          for (const key of ["bullets", "body", "lower", "notes", "layout", "transition", "elements"]) delete op[key];
-        } else if (target.kind === "slide-body") {
-          if (!prefix) delete op[target.key];
-          else op[target.key] = target.key === "bullets" ? prefix.split("\n") : prefix;
-          for (const key of ["notes", "layout", "transition", "elements"]) delete op[key];
         }
         // 쓴 것이 하나도 없는 연산은 뺀다(빈 목록이나 빈 슬라이드 변경은 엔진 쪽 검사에서 걸린다).
         const lists = ["replacements", "blocks", "paragraphs", "cells"].filter((key) => Array.isArray(op[key]));
-        const textless = target.kind.startsWith("slide") && ["title", "bullets", "body", "lower"].every((key) => op[key] === undefined);
-        if (!textless && !(lists.length > 0 && lists.every((key) => op[key].length === 0))) out.push(op);
+        if (!(lists.length > 0 && lists.every((key) => op[key].length === 0))) out.push(op);
       });
       return out;
     }
@@ -140,11 +140,32 @@
       if (!touched.some((t) => t.el === el)) touched.push({ el, nodes: Array.from(el.childNodes).map((n) => n.cloneNode(true)) });
     };
     const createdEls = [];
+    // 클래스·속성값처럼 자식이 아닌 것을 바꾼 연출은 되돌리는 함수를 남긴다(나중에 바꾼 것부터 돌린다).
+    const reverts = [];
+    const onRevert = (fn) => reverts.push(fn);
 
     function revertCosmetics() {
+      for (const fn of reverts.splice(0).reverse()) fn();
       for (const el of createdEls.splice(0)) el.remove();
       for (const { el, nodes } of touched.splice(0)) el.replaceChildren(...nodes);
     }
+
+    function toggleClass(el, name, on) {
+      const was = el.classList.contains(name);
+      el.classList.toggle(name, on);
+      onRevert(() => el.classList.toggle(name, was));
+    }
+
+    function setProp(el, prop, value) {
+      const was = el[prop];
+      el[prop] = value;
+      onRevert(() => {
+        el[prop] = was;
+      });
+    }
+
+    // 임시로 가린 요소(`copilot.css`의 `.eo-copilot-ghost`). 문서 블록의 번호는 그대로 둔다.
+    const hide = (el) => toggleClass(el, "eo-copilot-ghost", true);
 
     function perform(mod, operations) {
       const targets = collectTargets(mod, operations);
@@ -183,28 +204,43 @@
         await cursor.moveTo(rect.left, rect.top + Math.min(rect.height || 16, 20) / 2);
       }
 
-      async function drag(el, oldLength) {
-        const node = textNodeOf(el);
-        if (!node || oldLength <= 0 || stopped) return;
+      // 요소들의 글을 처음부터 끝까지 끌어 선택하는 몸짓. 글이 없는 요소는 건너뛰고, 모두 없으면 하지 않는다.
+      async function drag(els) {
+        const parts = els.map((el) => {
+          const node = textNodeOf(el);
+          return { el, node, length: node ? node.data.length : String(el.textContent || "").length };
+        }).filter((part) => part.length > 0);
+        const total = parts.reduce((sum, part) => sum + part.length, 0);
+        if (total <= 0 || stopped) return;
+        // 글 위치를 잴 수 없는 요소(직접 글 노드가 없는 목록, 서식 조각이 섞인 문단)는 통째로 칠한다.
+        const rectsOf = (part, take) => {
+          const rects = part.node ? rangeRects(part.node, 0, take) : [];
+          return rects.length > 0 ? rects : [elementRect(part.el)];
+        };
         cursor.press(true);
         await cursor.animate(DRAG_MS, (t) => {
-          const end = Math.max(1, Math.round(oldLength * t));
-          const rects = rangeRects(node, 0, end);
-          cursor.setSelection(rects.length > 0 ? rects : [elementRect(el)]);
+          let left = Math.max(1, Math.round(total * t));
+          const rects = [];
+          for (const part of parts) {
+            const take = Math.min(part.length, left);
+            if (take > 0) rects.push(...rectsOf(part, take));
+            left -= take;
+          }
+          cursor.setSelection(rects);
           const last = rects.at(-1);
           if (last) cursor.place(last.right, last.top + last.height / 2);
         });
         cursor.press(false);
       }
 
-      async function typeInto(el, text, setText, { speed, totalMs } = {}) {
+      async function typeInto(el, text, setText, { speed, totalMs, caret: caretFor } = {}) {
         typing = createTypist({ onBlink: (idle) => cursor.setIdle(idle), ...(speed ? { typeSpeed: speed, maxTotalMs: totalMs, sentencePauseMs: 40 } : {}) });
         // 타이머 안에서 던진 오류는 약속이 받지 못한다: 붙잡아 입력을 끝내고 다 기다린 뒤 다시 던진다.
         let failure = null;
         const result = await typing.type(text, (prefix) => {
           try {
             setText(prefix);
-            const caret = caretAt(el);
+            const caret = caretFor ? caretFor(prefix) : caretAt(el);
             cursor.setCaret(caret);
             cursor.place(caret.left + 2, caret.top + caret.height / 2);
           } catch (error) {
@@ -217,25 +253,8 @@
         return result;
       }
 
-      async function docTarget(t) {
-        const editor = document.getElementById("doc-editor");
-        let el;
-        let oldLength = 0;
-        if (t.kind === "doc-replace") {
-          el = docBlocksOf(editor)[t.index];
-          if (el) {
-            remember(el);
-            oldLength = textNodeOf(el)?.data?.length || 0;
-          }
-        }
-        if (!el) {
-          el = t.kind === "doc-append" && t.item && typeof t.item === "object" && Number.isInteger(t.item.heading) ? document.createElement("h" + Math.min(4, Math.max(1, t.item.heading))) : document.createElement("p");
-          editor.appendChild(el);
-          createdEls.push(el);
-        }
-        el.scrollIntoView?.({ block: "nearest" });
-        await glideTo(caretAt(el));
-        await drag(el, oldLength);
+      // 선택한 글을 지우고 `el`에 새 글을 한 자씩 쳐 넣는다.
+      async function typeOver(el, t) {
         if (stopped) return { typed: 0 };
         cursor.setSelection([]);
         el.textContent = "";
@@ -244,25 +263,51 @@
         });
       }
 
-      async function slideTarget(t) {
-        const panels = getWorkspacePanels();
-        // 슬라이드를 바꾸기 전에 임시로 쓴 것을 원래대로 돌린다. 영역(제목·본문)은 슬라이드마다 같은 요소를 쓰므로,
-        // 나중에 돌리면 앞 슬라이드의 원래 글이 지금 슬라이드에 덮인다.
-        if (t.index !== getActiveSlideIndex()) {
-          revertCosmetics();
-          panels?.renderSlideDeck?.(t.index);
-        }
-        const el = document.getElementById(t.kind === "slide-title" ? "slide-title-zone" : "slide-lower-zone");
-        if (!el) return { typed: 0 };
+      // 임시로 쓸 새 블록(제목이면 제목 태그). 쓴 글은 연출이 끝나면 지워진다.
+      function tempBlock(t, before) {
+        const heading = t.item && typeof t.item === "object" && Number.isInteger(t.item.heading) ? t.item.heading : 0;
+        const el = document.createElement(heading ? "h" + Math.min(4, Math.max(1, heading)) : "p");
+        document.getElementById("doc-editor").insertBefore(el, before);
+        createdEls.push(el);
+        return el;
+      }
+
+      async function typeInNewBlock(t, before) {
+        const block = tempBlock(t, before);
+        block.scrollIntoView?.({ block: "nearest" });
+        await glideTo(caretAt(block));
+        return typeOver(block, t);
+      }
+
+      async function docTarget(t) {
+        const el = docBlocksOf(document.getElementById("doc-editor"))[t.index];
+        if (!el) return typeInNewBlock(t, null);
         remember(el);
+        el.scrollIntoView?.({ block: "nearest" });
         await glideTo(caretAt(el));
-        await drag(el, textNodeOf(el)?.data?.length || 0);
-        if (stopped) return { typed: 0 };
-        cursor.setSelection([]);
-        el.textContent = "";
-        return typeInto(el, t.text, (prefix) => {
-          el.textContent = prefix;
-        });
+        await drag([el]);
+        return typeOver(el, t);
+      }
+
+      // 범위 교체: 처음에 옛 범위를 끌어 선택해 가리고, 새 블록들을 그 자리에 차례로 쳐 넣는다.
+      const rangeAnchors = new Map();
+
+      async function docRangeTarget(t) {
+        if (t.entry === 0) {
+          const blocks = docBlocksOf(document.getElementById("doc-editor"));
+          const start = Number.isInteger(t.startIndex) ? Math.max(0, t.startIndex) : 0;
+          const end = Number.isInteger(t.endIndex) ? Math.min(blocks.length - 1, t.endIndex) : blocks.length - 1;
+          const old = blocks.slice(start, end + 1);
+          rangeAnchors.set(t.opIndex, blocks[end + 1] || null);
+          if (old.length > 0) {
+            old[0].scrollIntoView?.({ block: "nearest" });
+            await glideTo(caretAt(old[0]));
+            await drag(old);
+            if (stopped) return { typed: 0 };
+            old.forEach(hide);
+          }
+        }
+        return typeInNewBlock(t, rangeAnchors.get(t.opIndex) ?? null);
       }
 
       async function sheetTarget(t) {
@@ -281,7 +326,24 @@
         return result;
       }
 
-      const drivers = { "doc-replace": docTarget, "doc-append": docTarget, "slide-title": slideTarget, "slide-body": slideTarget, "sheet-cell": sheetTarget };
+      const session = {
+        cursor, drag, typeInto, remember, onRevert, toggleClass, setProp, hide,
+        addTemp: (el) => createdEls.push(el),
+        revert: revertCosmetics,
+        stopped: () => stopped,
+        glideTo, caretAt, rectOf: elementRect,
+        // 멈춘 뒤에는 새 이동·애니메이션을 시작하지 않는다(시작하면 타이머가 끝날 때까지 연출이 남는다).
+        moveTo: (x, y) => (stopped ? Promise.resolve(false) : cursor.moveTo(x, y)),
+        animate: (ms, step) => (stopped ? Promise.resolve(false) : cursor.animate(ms, step)),
+        hold: (ms) => session.animate(ms, () => {}),
+      };
+      const drivers = {
+        "doc-replace": docTarget,
+        "doc-append": (t) => typeInNewBlock(t, null),
+        "doc-range": docRangeTarget,
+        "sheet-cell": sheetTarget,
+        ...slidePerf.createDrivers(session),
+      };
 
       const done = (async () => {
         let cutAt = null;
