@@ -27,14 +27,14 @@
   const CHART_TYPE_SET = new Set(CHART_TYPES);
   const CHART_LEGENDS = Object.freeze(["right", "bottom", "top", "none", "left"]);
   const CHART_LEGEND_SET = new Set(CHART_LEGENDS);
-  const BLOCK = 64, TALL_BLOCKS = 4096;
+  const BLOCK = 64, TALL_BLOCKS = 4096, DEFAULT_COL_PX = 64, MIN_COL_PX = 8, MAX_DEFAULT_COL_PX = 1785; // the last three: PD-305, `default_col_px`
 
   const bySheet = Object.create(null);
   let version = 0;
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], rowHeights: new Map(), defaultRowHeight: null, defaultColWidth: null, filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], rowHeights: new Map(), defaultRowHeight: null, defaultColWidth: null, defaultColPx: null, filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], charts: [], pivots: [], images: [], notes: [], noteMap: null, index: null, rows: null };
   }
 
   const entry = (name) => bySheet[name] || (bySheet[name] = blank());
@@ -311,7 +311,7 @@
     if (layout.rowHeights?.size) out.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.toJson(layout.rowHeights);
     const defaultHeight = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.defaultToJson(layout.defaultRowHeight);
     if (defaultHeight) out.defaultRowHeight = defaultHeight;
-    if (layout.defaultColWidth) out.defaultColWidth = { ...layout.defaultColWidth };
+    if (layout.defaultColWidth) Object.assign(out, { defaultColWidth: { ...layout.defaultColWidth } }, layout.defaultColPx ? { defaultColPx: layout.defaultColPx } : null);
     if (layout.filter) out.filter = filterToJson(layout.filter);
     if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
     if (layout.tabColor) out.tabColor = layout.tabColor;
@@ -359,8 +359,7 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
-  // The 24 px row and 96 px column fallbacks of the two anchor readers below only stand in for a value a malformed anchor
-  // lacks: the engine sends the pixels of every anchor, on the rows of the sheet (PD-299).
+  // The 24 px row and 64 px column fallbacks of the anchor readers below only stand in for a value a malformed anchor lacks (PD-299).
   function normalizeChartAnchor(raw) {
     const a = raw && typeof raw === "object" ? raw : {};
     const fcNum = Number(a.fromCol);
@@ -373,7 +372,7 @@
     const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(trNum) ? Math.trunc(trNum) : fromRow + 11));
     const leftNum = Number(a.left);
     const topNum = Number(a.top);
-    const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : fromCol * 96)));
+    const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : fromCol * DEFAULT_COL_PX)));
     const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : fromRow * 24)));
     // A size from the engine is kept as it is: the lower limits of a chart a user drags apply to the drag only.
     const width = Math.max(1, Math.min(8192, Math.round(Number(a.width) || 420)));
@@ -487,9 +486,9 @@
     const heightPx = Math.max(1, Math.min(4096, Math.round(Number(a.heightPx ?? a.height) || fallbackH || 160)));
     const leftRaw = a.leftPx !== undefined ? Number(a.leftPx) : Number(a.left);
     const topRaw = a.topPx !== undefined ? Number(a.topPx) : Number(a.top);
-    const leftPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftRaw) ? leftRaw : fromCol * 96 + Math.round(colOffEmu / EMU_PER_PX))));
+    const leftPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftRaw) ? leftRaw : fromCol * DEFAULT_COL_PX + Math.round(colOffEmu / EMU_PER_PX))));
     const topPx = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topRaw) ? topRaw : fromRow * 24 + Math.round(rowOffEmu / EMU_PER_PX))));
-    const toCol = Math.max(fromCol, Math.min(16383, Number.isFinite(Number(a.toCol)) ? Math.trunc(Number(a.toCol)) : Math.min(16383, Math.floor((leftPx + widthPx) / 96))));
+    const toCol = Math.max(fromCol, Math.min(16383, Number.isFinite(Number(a.toCol)) ? Math.trunc(Number(a.toCol)) : Math.min(16383, Math.floor((leftPx + widthPx) / DEFAULT_COL_PX))));
     const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(Number(a.toRow)) ? Math.trunc(Number(a.toRow)) : Math.min(1048575, Math.floor((topPx + heightPx) / 24))));
     const toColOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toColOffEmu) || 0)));
     const toRowOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toRowOffEmu) || 0)));
@@ -572,6 +571,7 @@
     layout.rowHeights = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.fromJson(json?.rowHeights);
     layout.defaultRowHeight = host.__EASYOFFICE_SHEET_ROW_HEIGHT__.defaultFromJson(json?.defaultRowHeight);
     layout.defaultColWidth = json?.defaultColWidth && typeof json.defaultColWidth === "object" ? { ...json.defaultColWidth } : null; // XLSX `defaultColWidth`, `baseColWidth`: kept so a save writes them back (PD-303)
+    layout.defaultColPx = layout.defaultColWidth && Number.isInteger(json.defaultColPx) && json.defaultColPx >= MIN_COL_PX && json.defaultColPx <= MAX_DEFAULT_COL_PX ? json.defaultColPx : null; // the width the engine worked out for them (PD-305)
     layout.filter = json?.filter ? filterFromJson(json.filter) : null;
     const rows = Number(json?.freeze?.rows) || 0;
     const cols = Number(json?.freeze?.cols) || 0;
@@ -989,7 +989,7 @@
     tablesOf, tablesIn, tableBox, setTables, settleTableHeaders, tableColumnRenames, resetTableHeaders, tableNamed, tableAt, setTableColumn, copiedTables,
     filterOf, setFilter, setTableFilterHidden, setTableFilter, filterOwnerAt, hiddenRunsOf, sameHiddenRuns, NO_RUNS, clearTableFilter, filterToJson,
     colHidden, hiddenColRuns, freezeOf, setFreeze, tabColorOf, setTabColor, hiddenOf, veryHiddenOf, setHiddenSheet,
-    outlineOf, setOutline, rowHeightsOf, setRowHeights, defaultRowHeightOf, setDefaultRowHeight, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
+    outlineOf, setOutline, rowHeightsOf, setRowHeights, defaultRowHeightOf, setDefaultRowHeight, defaultColPxOf: (name) => bySheet[name]?.defaultColPx || DEFAULT_COL_PX, DEFAULT_COL_PX, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
     getAll, replaceAll, setSheet, toJson, chartsOf, setCharts, pivotsOf, setPivots, pivotBox, pivotsIn, pivotAt,
     imagesOf, setImages, notesOf, setNotes, noteAtRef, parseImageHeader, normalizeImageAnchor, trimUtf8,
     MAX_MERGES, MAX_CHARTS_PER_SHEET, MAX_CHART_SERIES, CHART_TYPES, CHART_LEGENDS,

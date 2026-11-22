@@ -206,7 +206,7 @@ test("with columns selected, the double click fits all of them when the pressed 
   await doubleClick(d, "B");
   assert.equal(widthPx(d, "A"), textW("열 하나의 아주 긴 글"));
   assert.equal(widthPx(d, "B"), textW("열 둘에 쓴 글자가 조금 길다"));
-  assert.equal(widthPx(d, "C"), 96, "C is not in the selection");
+  assert.equal(widthPx(d, "C"), 64, "C is not in the selection");
   await doubleClick(d, "C");
   assert.equal(widthPx(d, "C"), textW("셋째 열의 중간 길이 글"));
   assert.equal(widthPx(d, "A"), textW("열 하나의 아주 긴 글"), "and the others stay");

@@ -164,6 +164,8 @@
         rowHeights: json.rowHeights || [],
         // The rows below the default height too: the engine places pictures and charts on the rows after the edit (PD-299).
         defaultRowHeight: json.defaultRowHeight,
+        // The columns without a width keep the sheet's width after the edit (PD-305).
+        defaultColWidth: json.defaultColWidth,
         outline: json.outline,
         page: json.page,
         protect: json.protect || null,
@@ -253,7 +255,7 @@
       replaceLiveSheetDataStore(nextSheets, rowCounts);
       // The answer moves what sits at a position; the frozen counts and the tab colour stay as they are.
       const kept = layoutApi.get(name);
-      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor, hidden: kept?.hidden, defaultColWidth: kept?.defaultColWidth });
+      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor, hidden: kept?.hidden, defaultColWidth: kept?.defaultColWidth, defaultColPx: kept?.defaultColPx });
       applyChartRefs(answer.chartRefs);
       const widths = {};
       for (const [col, px] of Array.isArray(answer.widths) ? answer.widths : []) widths[col] = px;

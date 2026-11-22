@@ -419,7 +419,7 @@ export const sheetSteps = [
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [{
         id: "c1", chartType: "column", title: "합계", dataRange: "A1:B3", switchRowCol: false, legend: "right",
-        anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 480, top: 72, width: 384, height: 216 },
+        anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 320, top: 72, width: 256, height: 216 },
       }]);
     });
     await page.waitForSelector(".sheet-image-card");
@@ -457,13 +457,13 @@ export const sheetSteps = [
   }],
 
   ["inserting a row or a column moves the charts with their cells in the real layout and one undo brings them back (PD-302)", async (page) => {
-    // A two-cell chart over F4:J13 (384 x 216 px) and a one-cell chart of the same size on F16.
+    // A two-cell chart over F4:J13 (256 x 216 px on 64 px columns, PD-305) and a one-cell chart of the same width on F16.
     await page.evaluate(() => {
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
       const base = { chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [
-        { ...base, id: "two", anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 480, top: 72, width: 384, height: 216 } },
-        { ...base, id: "one", anchor: { fromCol: 5, fromRow: 15, toCol: 9, toRow: 20, ...emu, left: 480, top: 360, width: 384, height: 144, editAs: "oneCell" } },
+        { ...base, id: "two", anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 320, top: 72, width: 256, height: 216 } },
+        { ...base, id: "one", anchor: { fromCol: 5, fromRow: 15, toCol: 9, toRow: 20, ...emu, left: 320, top: 360, width: 256, height: 144, editAs: "oneCell" } },
       ]);
     });
     await page.waitForSelector('.sheet-chart-card[data-chart-id="one"]');
@@ -497,8 +497,8 @@ export const sheetSteps = [
     assert.deepEqual([start.two.cell, start.one.cell], ["F4", "F16"]);
     // The card starts on the border of its cell, which is 1 px off at most.
     for (const chart of [start.two, start.one]) assert.ok(Math.abs(chart.dx) <= 1 && Math.abs(chart.dy) <= 1, `${chart.cell}: ${chart.dx}, ${chart.dy}`);
-    assert.deepEqual([start.two.width, start.two.height], [384, 216], "the chart sits on F4 and is nine rows tall");
-    assert.deepEqual([start.one.width, start.one.height], [384, 144]);
+    assert.deepEqual([start.two.width, start.two.height], [256, 216], "the chart sits on F4 and is nine rows tall");
+    assert.deepEqual([start.one.width, start.one.height], [256, 144]);
     const moved = (cells) => ({ two: { ...start.two, cell: cells[0] }, one: { ...start.one, cell: cells[1] } });
 
     // A row above both charts: both start one row down, each keeps its size.
@@ -513,7 +513,7 @@ export const sheetSteps = [
     await settled("F4", "F16");
     assert.deepEqual(await place(), start);
 
-    // A column before both: the 96 px columns of the window and of the engine agree, so the sizes do not change.
+    // A column before both: the 64 px columns of the window and of the engine agree, so the sizes do not change.
     await page.click(td("B1"));
     await act("col-insert-left");
     await settled("G4", "G16");
@@ -529,7 +529,7 @@ export const sheetSteps = [
     // A chart on the new sheet over the cells of Sheet1, and one more over its own cells.
     await page.evaluate((sheet) => {
       const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
-      const anchor = { fromCol: 1, fromRow: 1, toCol: 4, toRow: 6, ...emu, left: 96, top: 24, width: 288, height: 120 };
+      const anchor = { fromCol: 1, fromRow: 1, toCol: 4, toRow: 6, ...emu, left: 64, top: 24, width: 192, height: 120 };
       const base = { chartType: "line", title: "", switchRowCol: false, legend: "right", anchor };
       window.__EASYOFFICE_SHEET_LAYOUT__.setCharts(sheet, [
         { ...base, id: "far", dataRange: "Sheet1!$A$1:$B$5", series: [{ name: "x", nameRef: "Sheet1!$B$1", categoriesRef: "Sheet1!$A$2:$A$5", valuesRef: "Sheet1!$B$2:$B$5" }] },

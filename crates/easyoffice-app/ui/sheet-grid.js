@@ -5,7 +5,9 @@
   // materializes the cells around the viewport (plus a small overscan) as real table rows.
   // Logical addressing covers the full 1,048,576 x 16,384 sheet while the DOM stays small.
   const { MAX_ROWS, MAX_COLS } = host.__EASYOFFICE_SHEET_REFS__;
-  const ROW_H = 24, HEAD_H = 26, ROW_HEAD_W = 56, DEFAULT_COL_W = 96, MIN_COL_W = 36, MAX_COL_W = 720;
+  // `DEFAULT_COL_W`: the width of a column a sheet says nothing about (PD-305, 8 characters of a 7 px digit up to 8 px); a sheet that does has its own
+  // (`defaultColW()`), which the engine works out from the file's `defaultColWidth` and `baseColWidth`.
+  const ROW_H = 24, HEAD_H = 26, ROW_HEAD_W = 56, DEFAULT_COL_W = 64, MIN_COL_W = 36, MAX_COL_W = 720;
   const OVERSCAN_ROWS = 8, OVERSCAN_COLS = 2, FALLBACK_ROWS = 60, FALLBACK_COLS = 40, DEFAULT_COLS = 8, MIN_ROWS = 12;
 
   const { PACK_STRIDE, colName, colIndex, packCoord, packRef, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
@@ -37,6 +39,7 @@
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     let widthCacheVersion = -1;
     const layoutOf = () => layoutApi?.get(getSheetName()) || null;
+    const defaultColW = () => layoutApi?.defaultColPxOf?.(getSheetName()) ?? DEFAULT_COL_W;
     // The height of a row with none of its own: the grid's `ROW_H` (the stylesheet's), or the default row height of the sheet when a user
     // set one (PD-286).
     const rowBase = () => host.__EASYOFFICE_SHEET_ROW_HEIGHT__.baseOf(layoutApi?.defaultRowHeightOf(getSheetName()), ROW_H);
@@ -120,9 +123,10 @@
       }
       const cols = keys.map(Number).sort((a, b) => a - b);
       const prefix = new Array(cols.length);
+      const plain = defaultColW();
       let acc = 0;
       for (let i = 0; i < cols.length; i += 1) {
-        acc += w[cols[i]] - DEFAULT_COL_W;
+        acc += w[cols[i]] - plain;
         prefix[i] = acc;
       }
       widthCacheCols = cols;
@@ -131,7 +135,7 @@
 
     function colWidth(c) {
       if (layoutApi?.colHidden(getSheetName(), c)) return 0;
-      return widths()[c] || DEFAULT_COL_W;
+      return widths()[c] || defaultColW();
     }
 
     // Top edge of `row` and the height of the rows between `first` and `last`, hidden rows counting 0.
@@ -190,7 +194,7 @@
     }
 
     function colLeft(c) {
-      let x = (c - 1) * DEFAULT_COL_W;
+      let x = (c - 1) * defaultColW();
       ensureWidthCache();
       const cols = widthCacheCols;
       const n = cols.length;
@@ -207,7 +211,7 @@
     }
 
     function colAtX(x) {
-      let c = Math.min(MAX_COLS, Math.max(1, Math.floor(x / DEFAULT_COL_W) + 1));
+      let c = Math.min(MAX_COLS, Math.max(1, Math.floor(x / defaultColW()) + 1));
       while (c > 1 && colLeft(c) > x) c -= 1;
       while (c < MAX_COLS && colLeft(c + 1) <= x) c += 1;
       return c;
@@ -215,7 +219,7 @@
 
     function setColWidth(c, px) {
       const w = Math.max(MIN_COL_W, Math.min(MAX_COL_W, Math.round(px)));
-      if (w === DEFAULT_COL_W) delete widths()[c];
+      if (w === defaultColW()) delete widths()[c];
       else widths()[c] = w;
       widthCacheSheet = null;
       return w;
@@ -237,7 +241,8 @@
         const next = {};
         Object.keys(bySheet[name] || {}).forEach((c) => {
           const w = Math.max(MIN_COL_W, Math.min(MAX_COL_W, Math.round(Number(bySheet[name][c]))));
-          if (Number.isFinite(w) && w !== DEFAULT_COL_W) next[Number(c)] = w;
+          // A width equal to the sheet's default stays: the file wrote it down, and the default of the sheet may arrive after it.
+          if (Number.isFinite(w)) next[Number(c)] = w;
         });
         widthsBySheet[name] = next;
       });
@@ -791,7 +796,7 @@
     }
 
     return {
-      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, anchorAt, contentRectOf, DEFAULT_COL_W,
+      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, anchorAt, contentRectOf, get DEFAULT_COL_W() { return defaultColW(); },
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
       applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),

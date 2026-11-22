@@ -6,7 +6,7 @@ import { switchModule } from "./test-support/modules.mjs";
 // PD-302: a row or column edit carries the charts of the sheet, the answer moves their anchors, and one undo gives them back.
 
 const EMU = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
-// 192 x 72 px over C3:E5 on the 96 x 24 px grid.
+// 128 x 72 px over C3:E5 on the 64 x 24 px grid (PD-305).
 const chart = (id, editAs) => ({
   id,
   chartType: "column",
@@ -14,7 +14,7 @@ const chart = (id, editAs) => ({
   dataRange: "A1:B3",
   switchRowCol: false,
   legend: "right",
-  anchor: { fromCol: 2, fromRow: 2, toCol: 4, toRow: 5, ...EMU, left: 192, top: 48, width: 192, height: 72, editAs },
+  anchor: { fromCol: 2, fromRow: 2, toCol: 4, toRow: 5, ...EMU, left: 128, top: 48, width: 128, height: 72, editAs },
 });
 
 function selectCell(document, coord) {
