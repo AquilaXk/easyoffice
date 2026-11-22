@@ -107,7 +107,7 @@
       return SCOPE_BY_FORMAT[token] || "DOC";
     }
 
-    // The `workbookProtect` and `workbookTheme` fields of a sheet save (PD-216, PD-242).
+    // The `workbookProtect`, `workbookTheme`, `date1904` and `defaultFont` fields of a sheet save (PD-216, PD-242, PD-306).
     function workbookProtectField() {
       const protect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
       const theme = host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme();
@@ -115,6 +115,7 @@
         ...(protect ? { workbookProtect: protect } : {}),
         ...(theme ? { workbookTheme: theme } : {}),
         ...(host.__EASYOFFICE_SHEET_UTILS__.getDate1904() ? { date1904: true } : {}),
+        ...host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.field(),
       };
     }
 

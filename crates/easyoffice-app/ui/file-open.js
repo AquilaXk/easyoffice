@@ -646,6 +646,9 @@
         host.__EASYOFFICE_SHEET_PROTECT__.forgetUnlocked();
         next.workbookProtect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
         host.__EASYOFFICE_SHEET_UTILS__.setDate1904(res.date1904);
+        // The font of the Normal style, the unit of the widths in characters (PD-306); none for the standard font.
+        host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.set(res.defaultFont, res.defaultColPx);
+        next.defaultFont = host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.get() ?? null;
         // The displays the page cached belong to the previous workbook's date system.
         host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.clear?.();
         host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setTheme(res.workbookTheme ?? null);

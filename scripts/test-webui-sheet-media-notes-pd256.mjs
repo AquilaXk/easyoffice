@@ -707,7 +707,7 @@ test("PD-299: 차트를 옮기기만 하면 180x140~1600x1200 밖의 크기도 �
   await flushAsyncTurns(4);
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
   const base = { id: "", chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
-  const anchor = (width, height) => ({ fromCol: 1, fromRow: 1, toCol: 5, toRow: 6, colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0, left: 64, top: 24, width, height, editAs: "oneCell" });
+  const anchor = (width, height) => ({ fromCol: 1, fromRow: 1, toCol: 5, toRow: 6, colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0, left: 72, top: 24, width, height, editAs: "oneCell" });
   layoutApi.setCharts("Sheet1", [
     { ...base, id: "small", anchor: anchor(100, 80) },
     { ...base, id: "wide", anchor: { ...anchor(3000, 500), fromRow: 20, toRow: 40, top: 480 } },

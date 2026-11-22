@@ -27,7 +27,7 @@
   const CHART_TYPE_SET = new Set(CHART_TYPES);
   const CHART_LEGENDS = Object.freeze(["right", "bottom", "top", "none", "left"]);
   const CHART_LEGEND_SET = new Set(CHART_LEGENDS);
-  const BLOCK = 64, TALL_BLOCKS = 4096, DEFAULT_COL_PX = 64, MIN_COL_PX = 8, MAX_DEFAULT_COL_PX = 1785; // the last three: PD-305, `default_col_px`
+  const BLOCK = 64, TALL_BLOCKS = 4096, DEFAULT_COL_PX = 72, MIN_COL_PX = 8, MAX_DEFAULT_COL_PX = 2000; // the last three: PD-305, PD-306, `default_col_px`
 
   const bySheet = Object.create(null);
   let version = 0;
@@ -359,7 +359,7 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
-  // The 24 px row and 64 px column fallbacks of the anchor readers below only stand in for a value a malformed anchor lacks (PD-299).
+  // The 24 px row and 72 px column fallbacks of the anchor readers below only stand in for a value a malformed anchor lacks (PD-299).
   function normalizeChartAnchor(raw) {
     const a = raw && typeof raw === "object" ? raw : {};
     const fcNum = Number(a.fromCol);
@@ -989,7 +989,7 @@
     tablesOf, tablesIn, tableBox, setTables, settleTableHeaders, tableColumnRenames, resetTableHeaders, tableNamed, tableAt, setTableColumn, copiedTables,
     filterOf, setFilter, setTableFilterHidden, setTableFilter, filterOwnerAt, hiddenRunsOf, sameHiddenRuns, NO_RUNS, clearTableFilter, filterToJson,
     colHidden, hiddenColRuns, freezeOf, setFreeze, tabColorOf, setTabColor, hiddenOf, veryHiddenOf, setHiddenSheet,
-    outlineOf, setOutline, rowHeightsOf, setRowHeights, defaultRowHeightOf, setDefaultRowHeight, defaultColPxOf: (name) => bySheet[name]?.defaultColPx || DEFAULT_COL_PX, DEFAULT_COL_PX, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
+    outlineOf, setOutline, rowHeightsOf, setRowHeights, defaultRowHeightOf, setDefaultRowHeight, defaultColPxOf: (name) => bySheet[name]?.defaultColPx || host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.colPx() || DEFAULT_COL_PX, DEFAULT_COL_PX, pageOf, setPage, protectOf, setProtect, unlockedOf, setUnlocked,
     getAll, replaceAll, setSheet, toJson, chartsOf, setCharts, pivotsOf, setPivots, pivotBox, pivotsIn, pivotAt,
     imagesOf, setImages, notesOf, setNotes, noteAtRef, parseImageHeader, normalizeImageAnchor, trimUtf8,
     MAX_MERGES, MAX_CHARTS_PER_SHEET, MAX_CHART_SERIES, CHART_TYPES, CHART_LEGENDS,

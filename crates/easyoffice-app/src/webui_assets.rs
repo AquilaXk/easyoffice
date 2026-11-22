@@ -124,6 +124,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-col-fit.js",
     "sheet-color-ui.js",
     "sheet-controller.js",
+    "sheet-default-font.js",
     "sheet-delta.js",
     "sheet-dialog-kit.js",
     "sheet-dv-widgets.js",

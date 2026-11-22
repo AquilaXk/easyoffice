@@ -145,6 +145,7 @@
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
         workbookTheme: host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getTheme() ?? null,
         date1904: host.__EASYOFFICE_SHEET_UTILS__?.getDate1904?.() === true,
+        defaultFont: host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.get() ?? null,
         customTableStyles: host.__EASYOFFICE_SHEET_TABLE_STYLE__?.getCustomStyles() ?? {},
         definedNames: host.__EASYOFFICE_SHEET_NAMES__.getAll(),
         sheetOrder: host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore)),
@@ -261,6 +262,7 @@
       }
       if ("workbookTheme" in snap) host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setTheme(snap.workbookTheme ?? null);
       if ("date1904" in snap) host.__EASYOFFICE_SHEET_UTILS__?.setDate1904?.(snap.date1904);
+      if ("defaultFont" in snap) host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.restore(snap.defaultFont);
       if ("customTableStyles" in snap) host.__EASYOFFICE_SHEET_TABLE_STYLE__?.setCustomStyles(snap.customTableStyles || {});
       // A change of the names re-evaluates the page's formulas; the restore does that itself.
       if (snap.definedNames) host.__EASYOFFICE_SHEET_NAMES__.replaceAll(structuredClone(snap.definedNames), true);

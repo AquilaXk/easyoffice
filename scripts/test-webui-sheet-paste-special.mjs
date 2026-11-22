@@ -191,7 +191,7 @@ test("열 너비 pastes the widths of the copied columns and one undo step takes
   assert.deepEqual(text(document, ["D1", "E1"]), ["", ""], "no content");
   h.userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(15);
-  assert.deepEqual([width("D"), width("E")], ["64px", "64px"]);
+  assert.deepEqual([width("D"), width("E")], ["72px", "72px"]);
   await select(document, "A1");
   copy(document);
   await select(document, "A3");

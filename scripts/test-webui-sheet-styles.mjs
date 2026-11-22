@@ -68,7 +68,7 @@ test("a bolded range and a widened column are sent in the sheets payload", async
     assert.equal(byRef[ref].raw, "", `${ref} is a styled blank cell`);
   }
   assert.equal(byRef.G5, undefined, "unformatted blank cells are not sent");
-  assert.deepEqual(sheet.columns, [{ index: 3, widthPx: 124 }], "64 px of a default column and the 60 px of the drag");
+  assert.deepEqual(sheet.columns, [{ index: 3, widthPx: 132 }], "72 px of a default column and the 60 px of the drag");
 });
 
 test("italic, underline, strikethrough and size are sent as flags and points", async () => {
@@ -129,7 +129,7 @@ test("opening a file applies cell styles, styled blank cells and column widths",
   assert.equal(cell(document, "D4").style.fontWeight, "", "plain cell untouched");
   assert.equal(document.querySelector('#pane-sheet th[data-col="A"]').style.width, "150px");
   assert.equal(document.querySelector('#pane-sheet th[data-col="C"]').style.width, "60px");
-  assert.equal(document.querySelector('#pane-sheet th[data-col="B"]').style.width, "64px", "invalid entries are skipped");
+  assert.equal(document.querySelector('#pane-sheet th[data-col="B"]').style.width, "72px", "invalid entries are skipped");
 });
 
 test("open -> edit -> save sends the file's formatting and widths again", async () => {
@@ -156,7 +156,7 @@ test("opening a different file drops the previous file's column widths", async (
   const { document } = h;
   await pickFile(document, makeFixtureFile("서식.xlsx", STYLED_MODEL));
   await pickFile(document, makeFixtureFile("다른.xlsx", { sheets: [{ name: "서식", cells: [{ ref: "A1", raw: "새" }] }] }));
-  assert.equal(document.querySelector('#pane-sheet th[data-col="A"]').style.width, "64px");
+  assert.equal(document.querySelector('#pane-sheet th[data-col="A"]').style.width, "72px");
   const save = await saveSheet(h);
   assert.equal(save.sheets[0].columns, undefined);
 });

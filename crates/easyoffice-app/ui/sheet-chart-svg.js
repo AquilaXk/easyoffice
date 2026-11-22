@@ -932,7 +932,7 @@
       throw new Error("차트 계열 수 한도(32개)를 초과했습니다.");
     }
     const idx = existingCharts.length;
-    const colPx = layoutApi?.defaultColPxOf?.(sheetName) ?? 64; // the sheet's default column (PD-305)
+    const colPx = layoutApi?.defaultColPxOf?.(sheetName) ?? 72; // the sheet's default column (PD-305)
     const baseLeft = 56 + box.c2 * colPx + 16 + (idx % 4) * 24;
     const baseTop = 26 + (box.r1 - 1) * 24 + 4 + (idx % 4) * 20;
     const width = Math.max(180, Math.min(1600, Math.round(Number(spec.width) || 420)));

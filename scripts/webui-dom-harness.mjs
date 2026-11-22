@@ -101,6 +101,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-numfmt-display.js",
   "../crates/easyoffice-app/ui/sheet-pivot-model.js",
   "../crates/easyoffice-app/ui/sheet-row-height.js",
+  "../crates/easyoffice-app/ui/sheet-default-font.js",
   "../crates/easyoffice-app/ui/sheet-layout.js",
   "../crates/easyoffice-app/ui/sheet-table-presets.js",
   "../crates/easyoffice-app/ui/sheet-table-style.js",

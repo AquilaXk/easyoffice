@@ -164,8 +164,9 @@
         rowHeights: json.rowHeights || [],
         // The rows below the default height too: the engine places pictures and charts on the rows after the edit (PD-299).
         defaultRowHeight: json.defaultRowHeight,
-        // The columns without a width keep the sheet's width after the edit (PD-305).
+        // The columns without a width keep the sheet's width after the edit (PD-305), in digits of the workbook's font (PD-306).
         defaultColWidth: json.defaultColWidth,
+        ...host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.field(),
         outline: json.outline,
         page: json.page,
         protect: json.protect || null,
