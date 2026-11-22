@@ -114,6 +114,33 @@ fn row_heights_follow_a_row_edit_and_a_bad_height_changes_nothing() {
     }
 }
 
+/// A picture moves with its cells and its pixels are worked out on the rows after the edit: the default row height of
+/// the sheet is 30 pt (40 px) and row 4 is 60 pt (80 px) before the edit, row 5 after it (PD-299).
+#[test]
+fn pictures_are_placed_on_the_rows_the_edit_leaves() {
+    let id = open_with(&[("S!A1", "1")]);
+    let picture = concat!(
+        r#"[{"id":"p","name":"n","alt":"","mime":"image/png","imageId":"x","anchor":{"#,
+        r#""fromCol":1,"fromRow":4,"colOffEmu":0,"rowOffEmu":0,"toCol":3,"toRow":6,"toColOffEmu":0,"toRowOffEmu":0,"#,
+        r#""leftPx":80,"topPx":0,"widthPx":160,"heightPx":80}}]"#
+    );
+    let edit = format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":2,"count":1,"defaultRowHeight":[30],"rowHeights":[[4,60]],"images":{picture}}}"#
+    );
+    let res = call(&edit);
+    assert_eq!(
+        field(&res, "rowHeights").to_json_string(),
+        "[[5,60]]",
+        "the tall row moved down with the edit"
+    );
+    let images = field(&res, "images").to_json_string();
+    // Zero-based rows 0..=3 are 40 px and row 4 is 80 px, so row 5 starts at 240 px; rows 5 and 6 are 40 px each.
+    assert!(images.contains(r#""fromRow":5"#), "{images}");
+    assert!(images.contains(r#""toRow":7"#), "{images}");
+    assert!(images.contains(r#""topPx":240"#), "{images}");
+    assert!(images.contains(r#""heightPx":80"#), "{images}");
+}
+
 #[test]
 fn bad_requests_and_missing_sessions_are_refused() {
     let id = open_with(&[("S!A1", "1")]);

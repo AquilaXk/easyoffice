@@ -22,6 +22,9 @@ td { font-weight:400; mso-number-format:General; }
 
 const asText = (rows) => rows.map((row) => row.join("\t")).join("\n");
 
+// A PNG of one pixel, for a picture put on a sheet.
+const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 async function pasteTable(page) {
   await page.click(td("B2"));
   assert.equal(await paste(page, { "text/html": TABLE_HTML, "text/plain": asText([["글자만", "글자만"]]) }), true, "the page takes the paste over");
@@ -360,6 +363,73 @@ export const sheetSteps = [
     await page.keyboard.press("Alt+ArrowLeft");
     if (mac) await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet1");
     else assert.equal(await tab(), "Sheet2", "Alt+Left is not a sheet key outside a Mac");
+  }],
+
+  ["a picture sits on the cell it was put on and follows it when the rows above get taller or the default row height changes (PD-299)", async (page) => {
+    await page.click(td("C4"));
+    const inserted = await page.evaluate(async (base64) => {
+      const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+      return (await window.__EASYOFFICE_SHEET_MEDIA__.insertPictureFromBytes(bytes, "점.png")).ok;
+    }, ONE_PIXEL_PNG);
+    assert.equal(inserted, true);
+    await page.waitForSelector(".sheet-image-card");
+    const edges = () => page.evaluate(() => {
+      const card = document.querySelector(".sheet-image-card").getBoundingClientRect();
+      const cell = document.querySelector('#pane-sheet td[data-cell="C4"]').getBoundingClientRect();
+      return { dx: Math.round(card.left - cell.left), dy: Math.round(card.top - cell.top), cellTop: Math.round(cell.top) };
+    });
+    const before = await edges();
+    assert.ok(Math.abs(before.dx) <= 1 && Math.abs(before.dy) <= 1, `the picture starts on its cell (${before.dx}, ${before.dy}: the border of the cell)`);
+    // The edge of row `row` dragged `dy` px down with the real mouse.
+    const drag = async (row, dy) => {
+      const edge = await page.locator(`#pane-sheet tbody tr[data-row="${row}"] .row-resizer`).boundingBox();
+      const [x, y] = [edge.x + edge.width / 2, edge.y + edge.height / 2];
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 4 });
+      await page.mouse.up();
+    };
+    // Row 2 from 24 to 80 px (60 pt): the picture's row is 56 px lower and the picture is with it.
+    await page.click(td("B2"));
+    await drag(2, 56);
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.rowHeightsOf("Sheet1")?.get(2) === 60);
+    const taller = await edges();
+    assert.equal(taller.cellTop - before.cellTop, 56);
+    assert.deepEqual([taller.dx, taller.dy], [before.dx, before.dy], "and stays on it");
+    // Every row at 30 pt (40 px): the three rows above the cell are 120 px instead of 72.
+    await page.click(td("B2"));
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await drag(3, 16);
+    await page.waitForFunction(() => window.__EASYOFFICE_SHEET_LAYOUT__.defaultRowHeightOf("Sheet1") === 30);
+    const tallest = await edges();
+    assert.equal(tallest.cellTop - before.cellTop, 48);
+    assert.deepEqual([tallest.dx, tallest.dy], [before.dx, before.dy], "the default row height moves it as well");
+  }],
+
+  ["a whole column picked by its header leaves each sheet at the scroll it had when the tab changes (PD-299)", async (page) => {
+    const view = () => page.evaluate(() => {
+      const viewport = document.getElementById("sheet-viewport");
+      const rows = [...document.querySelectorAll("#pane-sheet tbody tr[data-row]")].map((tr) => Number(tr.dataset.row));
+      return { top: viewport.scrollTop, first: Math.min(...rows), last: Math.max(...rows), tab: document.querySelector("#sheet-tab-bar .sheet-tab-btn.active").dataset.sheetTab };
+    });
+    const go = async (name) => {
+      await page.click(`#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${name}"]`);
+      await page.waitForFunction((tab) => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === tab, name);
+    };
+    await page.click("#btn-add-sheet-tab");
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    await go("Sheet1");
+    await page.evaluate(() => { document.getElementById("sheet-viewport").scrollTop = 24 * 30; });
+    await page.click('#pane-sheet th[data-col="C"]');
+    await page.waitForFunction(() => document.getElementById("active-cell-ref").textContent === "C1");
+    for (const [name, top] of [["Sheet2", 0], ["Sheet1", 24 * 30], ["Sheet2", 0], ["Sheet1", 24 * 30]]) {
+      await go(name);
+      await page.waitForFunction((want) => document.getElementById("sheet-viewport").scrollTop === want, top);
+      const seen = await view();
+      assert.equal(seen.top, top, `${name} is at its own scroll`);
+      assert.ok(seen.last < top / 24 + 100, `${name} shows the rows round its scroll, not the end of the sheet (rows ${seen.first}..${seen.last})`);
+    }
+    assert.equal(await page.textContent("#active-cell-ref"), "C1", "the column is still the pick of the first sheet");
   }],
 
   ["GETPIVOTDATA reads the pivot table the page made, and its value follows the source once the pivot table is refreshed (PD-292)", async (page) => {

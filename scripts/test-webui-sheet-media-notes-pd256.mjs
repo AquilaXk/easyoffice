@@ -661,3 +661,27 @@ test("PD-256: office-print(.eo-print-image)·시트 복사·save-payload Base64 
   const built = reopened.host.__EASYOFFICE_FILE_OPEN_UTILS__.buildSheetStore(sheetsPayload);
   assert.ok(built.rowCounts.Sheet1 >= 45, "값 없는 하단 셀(B45) 메모도 maxRow에 반영");
 });
+
+test("PD-299: 그림의 칸 앵커는 행 높이와 기본 행 높이를 따라 계산된다", async () => {
+  const { document, host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-media-rows" });
+  await flushAsyncTurns(8);
+  switchModule(document, "SHEET");
+  await flushAsyncTurns(4);
+  const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const media = host.__EASYOFFICE_SHEET_MEDIA__;
+  // 기본 행 30pt(40px)라 행 위쪽 끝은 0, 40, 80, 120, 160, 200. (행마다 정한 높이는 글자 폭을 재는 격자가 있어야 하므로
+  // 실제 WebKit 단계 `scripts/webkit-dom/sheet.mjs`가 본다.)
+  layoutApi.setDefaultRowHeight("Sheet1", 30);
+  await flushAsyncTurns(4);
+  // 5행(0부터 4)은 160에서 시작하니 170은 그 안 10px 아래이고, 60px 높이의 끝 230은 6행(0부터 5) 안 30px 아래다.
+  const a = media.anchorFromContentRect(0, 170, 100, 60);
+  assert.deepEqual([a.fromRow, a.rowOffEmu, a.toRow, a.toRowOffEmu], [4, 10 * 9525, 5, 30 * 9525]);
+  assert.deepEqual([a.topPx, a.heightPx], [170, 60]);
+  const inside = media.anchorFromContentRect(0, 100, 50, 40);
+  assert.deepEqual([inside.fromRow, inside.rowOffEmu, inside.toRow, inside.toRowOffEmu], [2, 20 * 9525, 3, 20 * 9525]);
+  // 기본 행 높이가 없던 시트는 24px 행이다.
+  layoutApi.setDefaultRowHeight("Sheet1", null);
+  await flushAsyncTurns(4);
+  const plain = media.anchorFromContentRect(0, 50, 50, 24);
+  assert.deepEqual([plain.fromRow, plain.rowOffEmu, plain.toRow, plain.toRowOffEmu], [2, 2 * 9525, 3, 2 * 9525]);
+});

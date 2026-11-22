@@ -128,6 +128,46 @@ test("each sheet comes back as it was left and a sheet with no view shows A1 uns
   assert.equal(h.viewport.scrollTop, 24 * 10);
 });
 
+const pickHeader = (h, axis, index) => {
+  const head = h.document.querySelector(`#pane-sheet th[data-${axis}="${index}"]`);
+  head.dispatchEvent({ type: "mousedown", target: head, button: 0 });
+};
+const rowsShown = (h) => [...h.document.querySelectorAll("#pane-sheet tbody tr[data-row]")].map((tr) => Number(tr.dataset.row));
+
+test("a whole column picked by its header leaves the scroll of each sheet as it was when the tabs change (PD-299)", async () => {
+  const h = await open();
+  await h.openBook(BOOK);
+  await h.go("B");
+  h.viewport.scrollTop = 24 * 10;
+  h.viewport.dispatchEvent({ type: "scroll" });
+  pickHeader(h, "col", "C");
+  const seen = [];
+  for (const name of ["C", "B", "A", "B"]) {
+    await h.go(name);
+    seen.push(h.viewport.scrollTop);
+  }
+  assert.deepEqual(seen, [0, 24 * 10, 39 * 24, 24 * 10]);
+  assert.deepEqual(h.host.__EASYOFFICE_SHEET_VIEW_STATE__.get("B").range, [1, 3, 1048576, 3]);
+});
+
+// A grid with no size (its pane is not on show) draws the rows round the cursor; the end of a whole column is its last row,
+// so the window went to the bottom of the sheet and stayed there with the pick (PD-299).
+test("a window without a layout keeps to the cell a whole column or row was picked from, not to its far end", async () => {
+  const h = await open();
+  await h.openBook(BOOK);
+  h.viewport.clientHeight = 0;
+  h.viewport.clientWidth = 0;
+  pickHeader(h, "col", "C");
+  await h.go("B");
+  await h.go("A");
+  assert.ok(Math.max(...rowsShown(h)) < 200, `the rows shown end at ${Math.max(...rowsShown(h))}`);
+  pickHeader(h, "row", 5);
+  await h.go("B");
+  assert.ok(Math.max(...rowsShown(h)) < 200, `the rows shown end at ${Math.max(...rowsShown(h))}`);
+  const columns = h.document.querySelectorAll("#pane-sheet thead th[data-col]").length;
+  assert.ok(columns > 0 && columns < 100, `${columns} columns are shown`);
+});
+
 test("a save carries the view of every sheet, the one on screen included, and says nothing for a default one", async () => {
   const h = await open();
   await h.openBook(BOOK);
