@@ -5245,3 +5245,24 @@
 - **Verified by** 순수 시험 19개(`test-base-cell-nav-pd294.mjs`: `offsetForIndex` 3개, 키 3개, 이동 6개, `updateCells` 3개, TSV 4개, 악의적 입력 포함), DOM 하니스 시험 35개(`test-webui-base-cell-select-pd294.mjs`: 클릭·Shift·끌기, 방향키·Tab·Home·End·페이지·Ctrl+방향키(1만 행 스크롤), 편집 시작·확정·취소, 입력기 키, 체크박스·선택·수식·날짜, 지우기, 복사, 붙여넣기 형 변환·거부·상한, 그룹 행, 선택 유지·초기화, 접근성 속성). 구현을 일부러 망가뜨려 시험이 실패함을 확인했다: 스크롤 여백을 빼면 `offsetForIndex` 3개와 스크롤 시험, Delete를 칸마다 쓰면 실행 취소 시험, 붙여넣기 글 상한을 풀면 상한 시험, Ctrl+방향키 점프를 끄면 점프 시험 2개, 스크롤 뒤 창 동기화를 빼면 스크롤 시험이 실패한다. 실제 브라우저 단계 17개 중 새 7개(클릭·더블클릭·Shift, 끌기와 아래 밖 스크롤, 1만 행 두 높이에서 키 이동, 글자 편집·Enter·Esc·Delete·Space, 실제 `ControlOrMeta+C`와 붙여넣기, 탭 정지 하나, 키 시간)와 바뀐 3개를 WebKit과 Chrome 헤드리스(`EO_BROWSER=chromium`)에서 모두 통과했다. 밝은·어두운 테마 전후 캡처는 `.scratch/shots/`(WebKit·Chrome, 클릭·범위·편집). `node --test scripts/test-*.mjs` 2,192개 중 2,191개 통과·실패 0·건너뜀 1, `cargo test --workspace --exclude easyoffice-desktop` 3,181개 통과·실패 0·무시 76, clippy `-D warnings`, fmt, `--self-test`, 위생 검사 통과.
 - **Revisit when** 행 높이 설정이나 열 너비 조절을 넣을 때(`scrollToItem`의 여백), 레코드 상한을 올릴 때(Ctrl+방향키 점프의 선형 탐색), 여러 범위·행 선택·채우기가 필요할 때, 입력기 조합의 첫 글자가 사라진다는 신고가 들어올 때.
 
+## PD-298. Pretendard 정적 9가중치를 공식 가변 woff2 하나로 바꿈
+
+- **Status** Implemented (QA 승인 2026-11-22, 경량화 제안 2). `assets/fonts/PretendardVariable.woff2`(새 파일), `fonts.json`, `FONTS.md`, `THIRD_PARTY_NOTICES.md`, `apps/hwp-studio/src/core/pretendard-variable.ts`(새 파일), `font-loader.ts`(포크). 크기 분석은 `docs/performance.md` 8장.
+- **Context** 편집기(한글 창) 번들에 Pretendard가 정적 woff2 9개(6.90 MB)로 들어 있었다. 이 파일을 읽는 곳은 편집기의 글꼴 적재기 하나다. 문서·시트·슬라이드·BASE·BOARD 화면은 시스템 글꼴 목록만 쓰고 글꼴 파일을 요청하지 않는다(5개 화면, Chromium·WebKit, 밝은·어두운 테마에서 글꼴 요청 0건). PDF 내보내기와 검색 가능한 PDF는 `pdf-fonts/`의 TTF와 시스템 글꼴만 읽고 UI 번들의 woff2는 읽지 않는다(`pdf_fonts.rs`, `tauri.conf.json`).
+- **Decision (`PD-298`)**
+  1. 원저작자 공식 릴리스 v1.3.9의 `Pretendard-1.3.9.zip`(SHA-256 `04be351a…428c`)에서 `web/variable/woff2/PretendardVariable.woff2`(2,057,688 B, SHA-256 `9599f12f…900b`)를 수정 없이 번들한다. 같은 해시를 릴리스 zip, `v1.3.9` 태그, `main` 브랜치 세 곳에서 확인했다. `fonts.json`에는 `conversion: none`, 압축 파일 이름(`member`)과 zip 해시(`archiveSha256`)를 적었다.
+  2. 편집기의 글꼴 목록은 가중치마다 이름(`Pretendard Bold` 등 9개)과 정적 파일 이름(`fonts/Pretendard-Bold.woff2`)을 쓴다. 이름과 파일 이름은 그대로 두고 `FontFace`를 만들 때 파일을 가변 파일로 바꾸며 `weight` 설명자를 그 이름의 굵기 하나(100~900, `Pretendard`는 400)로 고정한다. 설명자에 값 하나만 쓰면 요청한 굵기가 그 값으로 고정되므로 이름마다 정적 파일과 같은 한 굵기만 그린다. `@font-face`를 `100 900` 범위 하나로 바꾸지 않은 이유는 문서가 `Pretendard`에 굵게를 켤 때다. 이전에는 400 글꼴에 합성 굵게였고, 범위로 바꾸면 실제 700 글리프로 바뀌어 폭이 달라진다.
+  3. 정적 파일 9개를 지우고 `fonts.json`·`FONTS.md`·`THIRD_PARTY_NOTICES.md`를 고쳤다. 라이선스 전문(`licenses/Pretendard-OFL.txt`)은 그대로 둔다. 공식 릴리스의 `LICENSE.txt`는 첫 저작권 항목만 있고, 저장소 사본은 구성 글꼴 세 곳의 고지를 더 담은 상위 집합이다.
+  4. **라이선스 판단**: OFL-1.1이고 예약 글꼴 이름은 `Pretendard`다. 공식 배포 파일을 바이트 그대로 쓰므로 수정본이 아니어서 이름 변경 조건(OFL 3항)이 걸리지 않는다. `verify-fonts.mjs`는 `conversion: none`이면 번들 해시와 공식 해시가 같아야 통과시킨다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 공식 가변 woff2를 그대로 쓴다. (2) 이미 쓰는 의존성에 같은 기능이 없다. (3) 이식한 코드가 없다. 새로 쓴 것은 매핑 표와 조회 함수(약 40줄)다.
+- **Measured** 크기는 `docs/performance.md` 8.7절(릴리스 `EasyOffice` 59,677,232 → 54,905,264 B, -4.77 MB, UI brotli 합계 -4.74 MB). 폭은 Chromium 1234와 WebKit 2215(Playwright 1.56.1)에서 쟀다.
+  - 글꼴 단위: 9가중치 × 문장 5개 × 글자 크기 6개(11~48px) × 요청 굵기(normal, bold), `getBoundingClientRect`와 캔버스 `measureText`. 정적 파일과 고정 가변 면의 폭 차이는 최대 0.52px(48px 긴 문장)이고 1px를 넘는 값이 없다. BMP 63,423개 코드 포인트의 글자별 진행 폭은 100·400·700·900에서 정적 파일과 0.5px(100px 기준) 안에서 같다(차이 0개).
+  - 편집기 단위: 빈 문서에 이름 9개와 굵게를 쓴 줄을 치고 `measureText`·`fillText`를 기록했다(Chromium·WebKit, 두 테마, 호출 53,072건씩). 호출 순서가 전후 같고 `fillText`의 x 좌표는 전부 같다(쪽 배치는 rhwp 쪽 계산이라 글꼴이 바꾸지 않는다). `measureText` 최대 차이는 Chromium 0.013px, WebKit 0.377px(굵게 요청의 한 글자)다. 화면 캡처의 다른 픽셀은 2.1%이고 대부분 안티앨리어싱이다(밝은 테마 Chromium 21,917 픽셀 중 채널 차 48 초과 310).
+  - 1px를 넘는 곳은 WebKit에서 600 이상 이름(`SemiBold`·`Bold`·`ExtraBold`·`Black`)에 굵게를 켠 경우뿐이다(120행). 아래 Trade-offs 1.
+- **Trade-offs**
+  1. 600 이상 이름에 굵게를 함께 켜면 WebKit은 이전에 이미 굵은 글리프 위에 합성 굵게를 더해 글자당 폭이 늘고 획이 두꺼웠다. 이제 합성 굵게가 없다. 16px 한 문장이 292.7 → 282.0 px(-3.6%), 잉크 양이 22~28% 줄어 `Bold`+굵게가 실제 700 글꼴로 보인다. Chromium은 전후가 같다. 줄 배치는 rhwp가 정하므로 줄 바꿈은 그대로다. 이전 모양(이중 굵게)을 그대로 두는 방법이 없다: `@font-face`의 `font-variation-settings` 설명자를 Chromium만 읽고 WebKit은 무시한다.
+  2. 같은 파일을 이름마다 `FontFace` 하나씩 받아 푼다. 한 가중치는 22 → 44 ms(Chromium), 26 → 55 ms(WebKit)로 2배, 한 문서에서 이름 9개를 모두 쓰면 57 → 133 ms, 190 → 384 ms다. 파일을 한 번만 받아 `ArrayBuffer`로 공유하는 방법이 있으나 이번에는 넣지 않았다(문서가 이름 서너 개를 넘기는 일이 드물다).
+  3. Pretendard가 설치된 PC는 이전처럼 시스템 글꼴을 먼저 쓴다(적재기의 설치 감지). 이 변경은 설치되지 않은 PC에서만 보인다.
+- **Verified by** `scripts/test-pretendard-variable-pd298.mjs` 5개(매핑 9개의 굵기, 상위 글꼴 목록이 요청하는 파일 전부의 매핑, 정적 파일이 없고 가변 파일만 있음, `fonts.json`의 공식 해시와 `conversion: none`, 적재기의 연결), 위 폭 측정, 검증 모음(위생 검사, `node --test`, WebKit DOM 시험, `fmt`, `clippy`, `cargo test --workspace`, `--self-test`).
+- **Revisit when** 한 문서에서 가중치 이름을 많이 쓴다는 신고나 글꼴 로드 지연이 보일 때(파일 한 번 받아 공유), 가변 글꼴 새 릴리스로 올릴 때(`fonts.json`의 URL·해시와 위 폭 측정을 다시), 600 이상 이름의 이중 굵게 모양이 필요하다는 QA 결정이 있을 때.
+

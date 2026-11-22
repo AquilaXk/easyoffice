@@ -559,7 +559,7 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 | 후보 | 예상 | 위험·이유 |
 |---|---|---|
 | macOS를 universal 하나에서 arm64·x64 dmg 둘로 | 사용자당 dmg가 약 111 MB에서 약 55 MB로 `[추정]`(조각 하나가 반) | `.github/` 릴리스 워크플로, `latest.json`의 `darwin-aarch64`·`darwin-x86_64` 항목, 업데이트 서명 대상이 바뀐다 |
-| Pretendard 9가중치(6.9 MB)를 가변 글꼴 하나로 | 실행 파일 약 -4.9 MB `[추정: 가변 woff2 약 2 MB]` | 글꼴 파일과 `fonts.json`·해시 검증, 편집기 글꼴 목록, 가중치별 글리프 폭이 바뀐다. 문서 조판 폭이 달라질 수 있어 QA가 정해야 한다 |
+| Pretendard 9가중치(6.9 MB)를 가변 글꼴 하나로 | 구현함(PD-298, 8.7절). 실행 파일 -4.77 MB | 글꼴 파일과 `fonts.json`·해시 검증, 편집기 글꼴 목록, 가중치별 글리프 폭이 바뀐다 |
 | 글꼴 부분 집합화(문서에서 안 쓰는 글리프 제거) | 큰 폭 | 글자가 빠질 위험. OFL은 개조본 이름 변경 조건(예약 글꼴 이름)이 있을 수 있다 |
 | D2Coding 둘(3.46 MB)·미사용 가중치를 필요할 때 내려받기 | -3.5 MB~ | 오프라인 우선 원칙과 어긋난다 |
 | `rhwp_bg.wasm`에 `wasm-opt -Oz` | 3.13 MB brotli에서 한 자리 % `[추정]` | 고정한 산출물의 해시·출처(`PROVENANCE.json`)가 바뀌고 wasm-opt가 이 기기에 없다 |
@@ -573,4 +573,20 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 - 크기는 macOS arm64만 쟀다. 다른 OS의 실행 파일 구성은 설치본 크기와 deb 안의 파일 크기로만 짐작했다.
 - `cargo bloat`의 크레이트별 값은 심볼 이름으로 나눈 추정이다(제네릭 인스턴스는 호출한 쪽이 아니라 정의한 크레이트로 센다).
 - Quick Look 크레이트 빌드가 이 기기에서 한 번 `can't find crate`(proc-macro dylib을 못 불러옴)로 죽었다. 같은 `strip = "debuginfo"` 프로필로 다시 여덟 번(문자 코덱 크레이트 하나만 일곱 번, 전체 한 번) 빌드했을 때는 모두 성공했고 원인은 확인하지 못했다. 방어로 두 `Cargo.toml`에 `[profile.release.build-override] strip = "none"`을 뒀다(PD-293). 8.4절의 Quick Look 값은 첫 실패 뒤 `CARGO_PROFILE_RELEASE_STRIP=none`으로 빌드한 정적 라이브러리를 `swiftc`로 묶은 결과다.
+
+### 8.7 Pretendard 가변 글꼴 (PD-298)
+
+편집기 번들의 Pretendard 정적 woff2 9개(6.90 MB)를 공식 가변 woff2 하나(1.96 MB)로 바꿨다. 같은 소스에서 번들만 바꿔 릴리스 빌드(`cargo build --release`, macOS arm64, `strip = "symbols"`)를 두 번 했다.
+
+| 항목 | 전 | 후 | 차이 |
+|---|---|---|---|
+| 글꼴 woff2 원본 합계(`assets/fonts`, 28개 → 20개) | 20,387,796 B | 15,544,008 B | -4,843,788 B (-23.8%) |
+| `ui/` 전체 파일별 brotli 합계(품질 11, 창 22) | 24,750,217 B | 20,006,929 B | -4,743,288 B (-19.2%) |
+| 데스크톱 `EasyOffice` 릴리스 | 59,677,232 B | 54,905,264 B | -4,771,968 B (-8.0%) |
+| CLI `easyoffice-app` 릴리스(편집기 번들 없음) | 13,022,192 B | 13,022,192 B | 0 |
+
+- `ui/` 합계의 편집기 번들(`hwp-studio`)은 23,887,238 → 19,143,950 B, 나머지 UI 파일은 862,979 B로 같다. 가변 woff2는 이미 압축돼 있어 brotli로 거의 줄지 않는다(2,057,688 → 약 2.0 MB).
+- universal dmg는 아키텍처 조각마다 UI를 한 번씩 넣으므로 사용자가 받는 크기는 위 차이의 약 두 배(약 -9.5 MB)로 줄 것으로 본다 `[추정, dmg를 만들지 않았다]`.
+- 로드 시간(`FontFace.load`, 중앙값 7회, 로컬 서빙): 한 가중치 22 → 44 ms(Chromium), 26 → 55 ms(WebKit). 한 문서에서 가중치 이름 9개를 모두 쓰면 57 → 133 ms, 190 → 384 ms. 이름마다 `FontFace`를 따로 만들어 같은 파일을 이름 수만큼 받아 푼다.
+- PDF 내보내기·검색 가능한 PDF는 이 파일을 읽지 않는다(`pdf-fonts/`의 TTF와 시스템 글꼴만 쓴다). 그래서 정적 파일을 PDF용으로 남길 필요가 없다.
 
