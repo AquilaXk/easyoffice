@@ -197,7 +197,8 @@ fn a_taller_row_above_moves_the_picture_down_and_keeps_its_cell() {
     assert_eq!(top_with(&taller), (3, 72 + 100 - 24));
 }
 
-/// 96 px tall and 160 px wide on plain rows, which the taller rows of `tall_rows` do not keep when the cells decide.
+/// 96 px tall and 192 px wide on plain rows and columns, which the taller rows of `tall_rows` do not keep when the cells
+/// decide.
 fn sized_anchor(edit_as: AnchorEdit) -> ChartAnchor {
     ChartAnchor {
         edit_as,
@@ -205,9 +206,9 @@ fn sized_anchor(edit_as: AnchorEdit) -> ChartAnchor {
         from_row: 1,
         to_col: 3,
         to_row: 5,
-        left_px: 80,
+        left_px: 96,
         top_px: 24,
-        width_px: 160,
+        width_px: 192,
         height_px: 96,
         ..ChartAnchor::default()
     }
@@ -221,18 +222,18 @@ fn the_cells_an_anchor_writes_follow_its_edit_kind() {
     let grid = SheetGrid::of(&styling);
     let cells = |edit_as| effective_image_two_cell(&sized_anchor(edit_as), &grid);
     assert_eq!(cells(AnchorEdit::TwoCell), (1, 1, 0, 0, 3, 5, 0, 0));
-    // Row 1 starts at 40 px, 96 px below is 136 px: row 2 (120..160) and 16 px into it; column 3 starts at 240 px.
+    // Row 1 starts at 40 px, 96 px below is 136 px: row 2 (120..160) and 16 px into it; column 3 starts at 288 px.
     assert_eq!(
         cells(AnchorEdit::OneCell),
         (1, 1, 0, 0, 3, 2, 0, 16 * 9_525)
     );
     let mut absolute = sized_anchor(AnchorEdit::Absolute);
     (absolute.left_px, absolute.top_px) = (100, 100);
-    // 100 px down is row 1 (40..120) and 60 px into it; 100 px right is column 1 and 20 px into it. The end, 160 x 96 px
-    // further, is column 3 (starts at 240) 20 px in and row 3 (160..200) 36 px in.
+    // 100 px down is row 1 (40..120) and 60 px into it; 100 px right is column 1 (96..192) and 4 px into it. The end, 192 x
+    // 96 px further, is column 3 (starts at 288) 4 px in and row 3 (160..200) 36 px in.
     assert_eq!(
         effective_image_two_cell(&absolute, &grid),
-        (1, 1, 20 * 9_525, 60 * 9_525, 3, 3, 20 * 9_525, 36 * 9_525)
+        (1, 1, 4 * 9_525, 60 * 9_525, 3, 3, 4 * 9_525, 36 * 9_525)
     );
 }
 
@@ -298,9 +299,9 @@ fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
         from_row: 4,
         to_col: 3,
         to_row: 8,
-        left_px: 80,
+        left_px: 96,
         top_px: 96,
-        width_px: 160,
+        width_px: 192,
         height_px: 96,
         ..ChartAnchor::default()
     };
@@ -314,21 +315,21 @@ fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
     );
     assert_eq!(
         (back.width_px, back.height_px),
-        (160, 96),
+        (192, 96),
         "and so is the size"
     );
     // The rows are shown again and the file is saved again: still the same.
     let mut shown = read;
     shown.hidden_rows.clear();
     let again = round_trip(shown).images[0].anchor;
-    assert_eq!((again.width_px, again.height_px), (160, 96));
+    assert_eq!((again.width_px, again.height_px), (192, 96));
     assert_eq!(again.edit_as, AnchorEdit::OneCell);
 }
 
 /// A chart smaller than the 180 x 140 px a page lets a chart be dragged to is not made larger by a read and a save.
 #[test]
 fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
-    // 100 x 80 px at (100, 32): column 1 and 20 px in, row 1 and 8 px in, to column 2 / 40 px and row 4 / 16 px.
+    // 100 x 80 px at (116, 32): column 1 and 20 px in, row 1 and 8 px in, to column 2 / 24 px and row 4 / 16 px.
     let cells = |edit_as| ChartAnchor {
         edit_as,
         from_col: 1,
@@ -337,9 +338,9 @@ fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
         row_off_emu: 8 * 9_525,
         to_col: 2,
         to_row: 4,
-        to_col_off_emu: 40 * 9_525,
+        to_col_off_emu: 24 * 9_525,
         to_row_off_emu: 16 * 9_525,
-        left_px: 100,
+        left_px: 116,
         top_px: 32,
         width_px: 100,
         height_px: 80,
@@ -368,9 +369,9 @@ fn a_one_cell_picture_nobody_touched_is_written_with_the_cells_it_was_read_with(
         to_row: 5,
         to_col_off_emu: 5_555,
         to_row_off_emu: 6_666,
-        left_px: 80,
+        left_px: 96,
         top_px: 24,
-        width_px: 161,
+        width_px: 193,
         height_px: 97,
     };
     let mut styling = SheetStyling::default();

@@ -197,8 +197,8 @@ fn all_five_chart_kinds_and_schema_order_round_trip_through_xlsx() {
     assert_eq!(st.charts[0].series[0].name, "실적");
     assert_eq!(st.charts[0].anchor.from_col, 4);
     assert_eq!(st.charts[0].anchor.to_col, 10);
-    // Col 0 width 100 + cols 1..=3 (3*80=240) = 340 px
-    assert_eq!(st.charts[0].anchor.left_px, 340);
+    // Col 0 width 100 + cols 1..=3 (3*96=288) = 388 px
+    assert_eq!(st.charts[0].anchor.left_px, 388);
 
     assert_eq!(st.charts[1].kind, ChartKind::Bar);
     assert_eq!(st.charts[1].legend, ChartLegendPos::Bottom);
@@ -403,7 +403,7 @@ fn external_spreadsheetml_drawing_and_broken_parts_are_parsed_safely() {
     assert_eq!(ch.kind, ChartKind::Bar);
     assert_eq!(ch.title, "External Title");
     assert_eq!(ch.legend, ChartLegendPos::None);
-    assert_eq!(ch.anchor.left_px, 170); // 2*80 + 10
+    assert_eq!(ch.anchor.left_px, 202); // 2*96 + 10
     assert_eq!(ch.anchor.top_px, 24);
     assert_eq!(ch.anchor.width_px, 400);
     assert_eq!(ch.anchor.height_px, 240);

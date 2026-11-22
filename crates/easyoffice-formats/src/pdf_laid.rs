@@ -25,8 +25,9 @@ const PT_PER_MIL: f64 = 0.072;
 const BODY_LINE_PITCH_PT: f64 = 16.0;
 const FRAME_FONT_PT: f64 = 10.0;
 const FRAME_LINE_PT: f64 = 12.0;
-/// The sizes the sheet window draws with (`sheet-grid.js`: `DEFAULT_COL_W`, `ROW_H`), in CSS px.
-pub(crate) const DEFAULT_COL_PX: f64 = 96.0;
+/// The sizes the sheet window draws with (`sheet-grid.js`: `DEFAULT_COL_W`, `ROW_H`), in CSS px. The column is the one
+/// the positions of charts and pictures use (PD-302).
+pub(crate) const DEFAULT_COL_PX: f64 = crate::sheet_styling::GRID_COL_PX as f64;
 pub(crate) const ROW_PX: f64 = crate::sheet_styling::GRID_ROW_PX;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;

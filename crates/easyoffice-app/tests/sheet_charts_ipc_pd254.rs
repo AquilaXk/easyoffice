@@ -54,9 +54,9 @@ fn structured_save_decode_and_pdf_preserve_charts_json_schema() {
                     "fromRow": 1,
                     "toCol": 10,
                     "toRow": 13,
-                    "left": 320,
+                    "left": 384,
                     "top": 24,
-                    "width": 480,
+                    "width": 576,
                     "height": 288
                 },
                 "series": [
@@ -103,7 +103,7 @@ fn structured_save_decode_and_pdf_preserve_charts_json_schema() {
     assert_eq!(field(anchor, "fromRow").as_u64(), Some(1));
     assert_eq!(field(anchor, "toCol").as_u64(), Some(10));
     assert_eq!(field(anchor, "toRow").as_u64(), Some(13));
-    assert_eq!(field(anchor, "width").as_u64(), Some(480));
+    assert_eq!(field(anchor, "width").as_u64(), Some(576));
     assert_eq!(field(anchor, "height").as_u64(), Some(288));
 
     let series = field(ch, "series").as_array().unwrap();

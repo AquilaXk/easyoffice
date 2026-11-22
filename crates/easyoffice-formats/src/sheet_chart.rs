@@ -28,7 +28,9 @@ pub const DEFAULT_CHART_WIDTH_PX: u32 = 420;
 pub const DEFAULT_CHART_HEIGHT_PX: u32 = 260;
 
 pub const EMU_PER_PX: u64 = 9_525;
-pub const DEFAULT_CHART_COL_PX: u32 = 80;
+/// The width of a column that has no width of its own, in CSS pixels: the one the sheet window draws (`sheet-grid.js`
+/// `DEFAULT_COL_W`). The positions of charts and pictures and the PDF read it from here (PD-302).
+pub const GRID_COL_PX: u32 = 96;
 
 /// Supported chart types (`column`, `bar`, `line`, `pie`, `scatter`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -169,13 +171,13 @@ impl Default for ChartAnchor {
 
 /// Cumulative x-coordinate (CSS px) of `col` in O(|columns|) using sparse custom widths.
 pub fn col_left_px(col: u32, columns: &BTreeMap<u32, u32>) -> u64 {
-    let mut x = u64::from(col) * u64::from(DEFAULT_CHART_COL_PX);
+    let mut x = u64::from(col) * u64::from(GRID_COL_PX);
     for (&c, &w) in columns.range(..col) {
         let _ = c;
         let clamped = w.max(1);
         x = x
             .saturating_add(u64::from(clamped))
-            .saturating_sub(u64::from(DEFAULT_CHART_COL_PX));
+            .saturating_sub(u64::from(GRID_COL_PX));
     }
     x
 }
@@ -194,11 +196,11 @@ pub(crate) fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) ->
             break;
         }
         let gap_cols = u64::from(col - cur_col);
-        let gap_px = gap_cols * u64::from(DEFAULT_CHART_COL_PX);
+        let gap_px = gap_cols * u64::from(GRID_COL_PX);
         if target_px < cur_x + gap_px {
             let rem = target_px - cur_x;
-            let dc = (rem / u64::from(DEFAULT_CHART_COL_PX)) as u32;
-            let off_px = rem % u64::from(DEFAULT_CHART_COL_PX);
+            let dc = (rem / u64::from(GRID_COL_PX)) as u32;
+            let off_px = rem % u64::from(GRID_COL_PX);
             return (
                 cur_col + dc,
                 (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32,
@@ -214,11 +216,11 @@ pub(crate) fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) ->
         cur_col = col + 1;
     }
     let rem = target_px.saturating_sub(cur_x);
-    let dc = rem / u64::from(DEFAULT_CHART_COL_PX);
+    let dc = rem / u64::from(GRID_COL_PX);
     if u64::from(cur_col) + dc > u64::from(max_col) {
         return (max_col, 0);
     }
-    let off_px = rem % u64::from(DEFAULT_CHART_COL_PX);
+    let off_px = rem % u64::from(GRID_COL_PX);
     (
         cur_col + dc as u32,
         (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32,
