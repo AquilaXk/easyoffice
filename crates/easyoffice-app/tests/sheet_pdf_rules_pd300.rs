@@ -3,7 +3,7 @@
 
 use easyoffice_app::EasyOfficeIpcRouter;
 
-fn convert(sheet: &str) -> (String, String) {
+fn convert_bytes(sheet: &str) -> (Vec<u8>, String) {
     let payload = format!(
         r#"{{"sourceFormat":"xlsx","targetFormat":"pdf","title":"t","sheets":[{{"name":"s",{sheet}}}]}}"#
     );
@@ -11,7 +11,14 @@ fn convert(sheet: &str) -> (String, String) {
     let marker = "\"convertedBase64\":\"";
     let start = json.find(marker).unwrap() + marker.len();
     let end = json[start..].find('"').unwrap() + start;
-    let bytes = EasyOfficeIpcRouter::decode_base64(&json[start..end]).unwrap();
+    (
+        EasyOfficeIpcRouter::decode_base64(&json[start..end]).unwrap(),
+        json,
+    )
+}
+
+fn convert(sheet: &str) -> (String, String) {
+    let (bytes, json) = convert_bytes(sheet);
     (String::from_utf8_lossy(&bytes).into_owned(), json)
 }
 
@@ -25,10 +32,16 @@ fn fills(pdf: &str, color: u32) -> Vec<(f64, f64, f64, f64)> {
     let head = format!("q {} rg ", rgb(color));
     let mut found: Vec<(f64, f64, f64, f64)> = pdf
         .lines()
-        .filter_map(|line| {
-            let rest = line.strip_prefix(&head)?.strip_suffix(" re f Q")?;
-            let n: Vec<f64> = rest.split(' ').map(|v| v.parse().unwrap()).collect();
-            Some((n[0], n[1], n[2], n[3]))
+        .filter_map(|line| line.strip_prefix(&head)?.strip_suffix(" f Q"))
+        .flat_map(|path| {
+            let words: Vec<&str> = path.split(' ').collect();
+            words
+                .chunks(5)
+                .map(|c| {
+                    let n = |i: usize| c[i].parse::<f64>().unwrap();
+                    (n(0), n(1), n(2), n(3))
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
     found.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)));
@@ -64,16 +77,14 @@ fn a_rule_paints_the_cells_it_matches_with_the_values_the_engine_computes() {
         rows.windows(2).all(|w| (w[0] - w[1] - 18.0).abs() < 0.011),
         "{rows:?}"
     );
-    let red = format!("q {} rg", rgb(DARK_RED));
-    assert_eq!(
-        pdf.lines()
-            .filter(|l| l.starts_with(&red) && l.contains("2 Tr"))
-            .count(),
-        3
-    );
-    // The first row is above the first filled one: the row of A1 is not painted.
-    let one_up = pdf.lines().any(|l| l.contains("(5) Tj"));
-    assert!(one_up);
+    // The three cells draw their text in the rule's color, bold, under one graphics state.
+    let state = format!("q {} rg {} RG 2 Tr", rgb(DARK_RED), rgb(DARK_RED));
+    assert_eq!(pdf.matches(&state).count(), 1, "{pdf}");
+    let at = pdf.find(&state).unwrap();
+    let run = &pdf[at..at + pdf[at..].find(" Q").unwrap()];
+    assert_eq!(run.matches(" Tj").count(), 3, "{run}");
+    // The cell A1 does not match: its text is plain and comes before the run.
+    assert!(pdf.find("(5) Tj").unwrap() < at);
 }
 
 #[test]
@@ -172,4 +183,63 @@ fn a_sheet_without_rules_is_drawn_as_before() {
     .0;
     assert_eq!(plain, empty_rules);
     assert!(fills(&plain, PINK).is_empty());
+}
+
+fn column_name(col: u32) -> String {
+    let letter = |n: u32| char::from(b'A' + u8::try_from(n).unwrap());
+    if col < 26 {
+        letter(col).to_string()
+    } else {
+        format!("{}{}", letter(col / 26 - 1), letter(col % 26))
+    }
+}
+
+/// The bytes of the PDF of a 200 x 100 sheet (20,000 cells) whose values come from `value(row, col)`, without and with
+/// rules: a fill, bold colored text and an edge on every cell over 50, and a gradient bar in the first ten columns.
+fn big_sheet_sizes(value: impl Fn(u32, u32) -> u32) -> (usize, usize) {
+    let raws: Vec<String> = (0..200u32)
+        .flat_map(|r| {
+            let value = &value;
+            (0..100u32).map(move |c| {
+                format!(
+                    r#"{{"ref":"{}{}","raw":"{}"}}"#,
+                    column_name(c),
+                    r + 1,
+                    value(r, c)
+                )
+            })
+        })
+        .collect();
+    let cells = format!(r#""cells":[{}]"#, raws.join(","));
+    let rules = r##","rules":{"cf":[
+      {"r":"A1:CV200","p":1,"t":"cellIs","op":"greaterThan","a":"50","bg":"#FFC7CE","fg":"#9C0006","fl":1,"bd":{"b":"thin:9c0006"}},
+      {"r":"A1:J200","p":2,"t":"bar","min":{"k":"num","v":"0"},"max":{"k":"num","v":"100"},"pos":"#638EC6","grad":true}]}"##;
+    let (plain, _) = convert_bytes(&cells);
+    let (ruled, _) = convert_bytes(&format!("{cells}{rules}"));
+    assert!(
+        String::from_utf8_lossy(&ruled).contains("/FlateDecode"),
+        "a page this big is deflated"
+    );
+    (plain.len(), ruled.len())
+}
+
+#[test]
+fn rules_on_blocks_of_a_big_sheet_make_the_file_no_more_than_half_as_big_again() {
+    // The cells over 50 are bands of ten columns, as a rule over a region of a sheet makes them.
+    let (plain, ruled) = big_sheet_sizes(|_, c| if (c / 10) % 2 == 0 { 20 } else { 80 });
+    assert!(
+        ruled * 2 <= plain * 3,
+        "{ruled} bytes with the rules, {plain} without"
+    );
+}
+
+#[test]
+fn rules_on_scattered_cells_of_a_big_sheet_make_the_file_less_than_twice_as_big() {
+    // The worst case for the paths and runs the PDF collects: the cells over 50 are scattered, so no two neighbours
+    // share a box, an edge or a text state.
+    let (plain, ruled) = big_sheet_sizes(|r, c| ((r + 1) * 7 + c * 13) % 100);
+    assert!(
+        ruled < plain * 2,
+        "{ruled} bytes with the rules, {plain} without"
+    );
 }

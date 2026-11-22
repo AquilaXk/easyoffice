@@ -885,6 +885,8 @@ pub fn encode_slide_pdf(deck: &RichSlideDeck, title: &str) -> Result<Vec<u8>, Ea
             height_pt: ph,
             content: cv.ops.join("\n"),
             xobjects: cv.xobjects,
+            gradients: Vec::new(),
+            deflate: false,
         }));
     }
     Ok(PdfSerializer::serialize_entries(

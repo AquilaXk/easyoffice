@@ -44,15 +44,39 @@ fn rgb(value: u32) -> String {
     format!("{:.3} {:.3} {:.3}", c(16), c(8), c(0))
 }
 
-/// `(x, y, w, h)` of every rectangle filled in `color`.
-fn fills(pdf: &str, color: u32) -> Vec<(f64, f64, f64, f64)> {
-    let head = format!("q {} rg ", rgb(color));
+type Boxed = (f64, f64, f64, f64);
+
+/// Every box of every fill path (`q <color> rg x y w h re ... f Q`) with the operands of its color.
+fn boxes(pdf: &str) -> Vec<(String, Boxed)> {
     pdf.lines()
         .filter_map(|line| {
-            let rest = line.strip_prefix(&head)?.strip_suffix(" re f Q")?;
-            let n: Vec<f64> = rest.split(' ').map(|v| v.parse().unwrap()).collect();
-            Some((n[0], n[1], n[2], n[3]))
+            let rest = line.strip_prefix("q ")?.strip_suffix(" f Q")?;
+            let (color, path) = rest.split_once(" rg ")?;
+            let words: Vec<&str> = path.split(' ').collect();
+            if !words.len().is_multiple_of(5) || words.chunks(5).any(|c| c[4] != "re") {
+                return None;
+            }
+            Some(
+                words
+                    .chunks(5)
+                    .map(|c| {
+                        let n = |i: usize| c[i].parse::<f64>().unwrap();
+                        (color.to_string(), (n(0), n(1), n(2), n(3)))
+                    })
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
+        .collect()
+}
+
+/// `(x, y, w, h)` of every box filled in `color`.
+fn fills(pdf: &str, color: u32) -> Vec<Boxed> {
+    let color = rgb(color);
+    boxes(pdf)
+        .into_iter()
+        .filter(|(c, _)| *c == color)
+        .map(|(_, b)| b)
         .collect()
 }
 
@@ -300,11 +324,18 @@ fn the_edges_of_a_rule_are_drawn_on_the_sides_of_the_cell_over_the_grid() {
         )),
         "dashed bottom edge"
     );
-    assert_eq!(
-        line_with(&pdf, &format!("{:.2} m", y + h + 0.75)).len()
-            + line_with(&pdf, &format!("{:.2} m", y + h - 0.75)).len(),
-        2,
-        "a double edge is two lines either side of the cell's edge"
+    // The thin lines along a row edge are one path: the two lines of the double top edge, either side of the cell's edge.
+    let row_lines = line_with(&pdf, &format!("q 0.75 w {color} {x:.0}"));
+    assert_eq!(row_lines.len(), 1, "{row_lines:?}");
+    let words: Vec<&str> = row_lines[0].split(' ').collect();
+    let ys: Vec<f64> = (1..words.len())
+        .filter(|&i| words[i] == "m")
+        .map(|i| words[i - 1].parse().unwrap())
+        .collect();
+    assert_eq!(ys.len(), 2, "{row_lines:?}");
+    assert!(
+        close(ys[0], y + h - 0.75) && close(ys[1], y + h + 0.75),
+        "{ys:?}"
     );
     // The edges come after the grid lines, so the grid does not paint over them.
     assert!(pdf.find(&right).unwrap() > pdf.rfind("0.5 w").unwrap());
@@ -389,7 +420,7 @@ fn a_negative_bar_grows_left_of_the_axis() {
 }
 
 #[test]
-fn a_gradient_bar_fades_toward_its_end_in_steps_that_stay_inside_the_bar() {
+fn a_gradient_bar_is_one_form_stretched_over_the_box_of_the_bar() {
     let mut shown = bar(100, 0, true);
     shown.insert(
         (0, 0),
@@ -403,30 +434,74 @@ fn a_gradient_bar_fades_toward_its_end_in_steps_that_stay_inside_the_bar() {
     );
     let pdf = pdf_with(sheet().1, shown);
     let (cx, _, _, _) = fills(&pdf, 0x112233)[0];
-    let steps: Vec<(f64, f64, f64, f64, String)> = pdf
-        .lines()
-        .filter_map(|line| {
-            let rest = line.strip_prefix("q ")?.strip_suffix(" re f Q")?;
-            let (color, rect) = rest.split_once(" rg ")?;
-            let n: Vec<f64> = rect.split(' ').map(|v| v.parse().unwrap()).collect();
-            (n[2] > 0.0 && n[2] < CELL_W && close(n[3], CELL_H) && n[1] < 800.0)
-                .then(|| (n[0], n[1], n[2], n[3], color.to_string()))
-        })
-        .filter(|s| !s.4.starts_with("0.067"))
+    // One draw of the form over the bar's box: from the axis over the whole cell here.
+    let draws = line_with(&pdf, "/Gr1 Do");
+    assert_eq!(draws.len(), 1, "{draws:?}");
+    let n: Vec<f64> = draws[0]
+        .split(' ')
+        .filter_map(|word| word.parse().ok())
         .collect();
-    assert!(steps.len() >= 4, "{steps:?}");
-    assert!(close(steps[0].0, cx), "the first step starts at the axis");
-    let last = steps.last().unwrap();
     assert!(
-        last.0 + last.2 <= cx + CELL_W + 0.011,
-        "no step leaves the cell"
+        close(n[0], CELL_W) && close(n[3], CELL_H) && close(n[4], cx),
+        "{n:?}"
     );
-    let colors: std::collections::HashSet<&String> = steps.iter().map(|s| &s.4).collect();
-    assert_eq!(
-        colors.len(),
-        steps.len(),
-        "every step is a lighter color than the one before"
+    // The form shades from the bar's color (99, 142, 198) at the axis to a quarter of it over white at the end.
+    assert!(pdf.contains("/ShadingType 2") && pdf.contains("/FunctionType 2"));
+    let ends = |pdf: &str| -> (f64, f64) {
+        let first = |key: &str| -> f64 {
+            let at = pdf.find(key).unwrap() + key.len();
+            pdf[at..].split(' ').next().unwrap().parse().unwrap()
+        };
+        (first("/C0 ["), first("/C1 ["))
+    };
+    let (from, to) = ends(&pdf);
+    assert!(
+        close_ratio(from, 99.0 / 255.0) && close_ratio(to, 216.0 / 255.0),
+        "{from} {to}"
     );
+    // A bar that grows left of the axis is faded at its left end.
+    let reversed = pdf_with(sheet().1, bar(-100, 100, true));
+    let (from, to) = ends(&reversed);
+    assert!(
+        close_ratio(from, 216.0 / 255.0) && close_ratio(to, 99.0 / 255.0),
+        "{from} {to}"
+    );
+}
+
+fn close_ratio(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.005
+}
+
+#[test]
+fn bars_of_one_pair_of_colors_share_one_gradient_form() {
+    let mut shown = bar(50, 0, true);
+    shown.insert(
+        (2, 0),
+        CellShown {
+            rule: Some(CellRule {
+                bar: Some(CfBar {
+                    pct: 90,
+                    start: 0,
+                    color: 0x638EC6,
+                    gradient: true,
+                }),
+                ..CellRule::default()
+            }),
+            ..CellShown::default()
+        },
+    );
+    let pdf = pdf_with(sheet().1, shown);
+    assert_eq!(line_with(&pdf, "/Gr1 Do").len(), 2);
+    assert_eq!(pdf.matches("/ShadingType 2").count(), 1);
+}
+
+#[test]
+fn a_solid_bar_is_over_the_fill_of_its_cell_whatever_the_colors_are() {
+    // The bar color sorts before the fill color; the bar is still drawn after the fill.
+    let mut shown = bar(50, 0, false);
+    shown.get_mut(&(1, 0)).unwrap().rule.as_mut().unwrap().bg = Some(0xFFFFFF);
+    let pdf = pdf_with(sheet().1, shown);
+    assert!(pdf.find(&rgb(0xFFFFFF)).unwrap() < pdf.find(&rgb(0x638EC6)).unwrap());
 }
 
 #[test]
@@ -471,15 +546,7 @@ fn a_hostile_rule_stays_inside_its_cell_and_writes_numbers() {
     };
     let pdf = pdf_with(sheet().1, rule_of((1, 0), hostile));
     assert!(!pdf.contains("NaN") && !pdf.contains("inf"));
-    for (x, _, w, _) in pdf.lines().filter_map(|line| {
-        let rest = line.strip_suffix(" re f Q")?;
-        let n: Vec<f64> = rest
-            .rsplit(' ')
-            .take(4)
-            .map(|v| v.parse().ok())
-            .collect::<Option<_>>()?;
-        Some((n[3], n[2], n[1], n[0]))
-    }) {
+    for (_, (x, _, w, _)) in boxes(&pdf) {
         assert!(x >= 0.0 && w >= 0.0 && x + w < 600.0, "{x} {w}");
     }
     let positive = bar(i8::MAX, 100, true);

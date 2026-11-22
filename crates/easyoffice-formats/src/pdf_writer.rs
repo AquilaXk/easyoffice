@@ -18,9 +18,10 @@ use crate::pdf_image::PdfImageObject;
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
-use ::pdf_writer::types::{CidFontType, FontFlags, SystemInfo};
-use ::pdf_writer::writers::Resources;
-use ::pdf_writer::{Finish, Name, Pdf, Rect, Ref, Str, TextStr};
+use ::pdf_writer::types::{CidFontType, FontFlags, FunctionShadingType, SystemInfo};
+use ::pdf_writer::writers::{FunctionShading, Resources};
+use ::pdf_writer::{Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
+
 use std::ops::Range;
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
@@ -303,6 +304,11 @@ pub(crate) struct PdfLaidPage {
     pub height_pt: f64,
     pub content: String,
     pub xobjects: Vec<(String, PdfImageObject)>,
+    /// The gradients the content draws by resource name, as the colors at the two ends of the unit axis (`0xRRGGBB`): each
+    /// is a form of one unit square that content stretches over a box with `cm` and `Do` (PD-300).
+    pub gradients: Vec<(String, u32, u32)>,
+    /// The content stream is stored deflated (`FlateDecode`).
+    pub deflate: bool,
 }
 
 /// One output page: text lines, a picture or a laid-out page.
@@ -321,6 +327,8 @@ struct PagePlan {
     mask: Option<Ref>,
     /// The pictures of a laid page and their soft masks, in resource order.
     xobjects: Vec<(Ref, Option<Ref>)>,
+    /// The forms of the gradients of a laid page and the functions they shade with, in resource order.
+    gradients: Vec<(Ref, Ref)>,
     /// The page's annotations and their appearance streams.
     annotations: Vec<(Ref, Ref)>,
 }
@@ -333,10 +341,13 @@ impl PagePlan {
             resources.x_objects().pair(Name(b"Im1"), image);
         }
         if let PdfPageEntry::Laid(page) = entry {
-            if !page.xobjects.is_empty() {
-                let mut pictures = resources.x_objects();
+            if !page.xobjects.is_empty() || !page.gradients.is_empty() {
+                let mut forms = resources.x_objects();
                 for ((name, _), &(picture, _)) in page.xobjects.iter().zip(&self.xobjects) {
-                    pictures.pair(Name(name.as_bytes()), picture);
+                    forms.pair(Name(name.as_bytes()), picture);
+                }
+                for ((name, ..), &(form, _)) in page.gradients.iter().zip(&self.gradients) {
+                    forms.pair(Name(name.as_bytes()), form);
                 }
             }
         }
@@ -357,6 +368,7 @@ fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
         let content = take()?;
         let (mut image, mut mask) = (None, None);
         let mut xobjects = Vec::new();
+        let mut gradients = Vec::new();
         match entry {
             PdfPageEntry::Image(page) => {
                 image = Some(take()?);
@@ -374,6 +386,9 @@ fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
                     };
                     xobjects.push((picture_ref, mask_ref));
                 }
+                for _ in &page.gradients {
+                    gradients.push((take()?, take()?));
+                }
             }
             PdfPageEntry::Text(..) => {}
         }
@@ -383,6 +398,7 @@ fn plan_objects(entries: &[PdfPageEntry]) -> Option<(Vec<PagePlan>, usize)> {
             image,
             mask,
             xobjects,
+            gradients,
             annotations: Vec::new(),
         });
     }
@@ -543,6 +559,28 @@ impl FontObjects {
     }
 }
 
+/// A gradient form: a unit square shaded along its bottom edge from the color `from` to the color `to`, which content
+/// stretches over a box (`w 0 0 h x y cm /Name Do`). The function is the straight blend between the two colors.
+fn write_gradient(pdf: &mut Pdf, (form, function): (Ref, Ref), (from, to): (u32, u32)) {
+    let rgb = |c: u32| [16, 8, 0].map(|shift| ((c >> shift) & 0xFF) as f32 / 255.0);
+    pdf.exponential_function(function)
+        .domain([0.0, 1.0])
+        .c0(rgb(from))
+        .c1(rgb(to))
+        .n(1.0);
+    let mut xobject = pdf.form_xobject(form, b"/Sh sh");
+    xobject.bbox(Rect::new(0.0, 0.0, 1.0, 1.0));
+    let mut resources = xobject.resources();
+    let mut shadings = resources.shadings();
+    let mut shading = shadings.insert(Name(b"Sh")).start::<FunctionShading>();
+    shading
+        .shading_type(FunctionShadingType::Axial)
+        .coords([0.0, 0.0, 1.0, 0.0])
+        .function(function)
+        .extend([true, true]);
+    shading.color_space().device_rgb();
+}
+
 fn write_page(
     pdf: &mut Pdf,
     entry: &PdfPageEntry,
@@ -604,7 +642,12 @@ fn write_page(
             page.annotations(plan.annotations.iter().map(|&(annot, _)| annot));
         }
     }
-    pdf.stream(plan.content, body.as_bytes());
+    if matches!(entry, PdfPageEntry::Laid(page) if page.deflate) {
+        pdf.stream(plan.content, &crate::deflate_zlib(body.as_bytes()))
+            .filter(Filter::FlateDecode);
+    } else {
+        pdf.stream(plan.content, body.as_bytes());
+    }
     match entry {
         PdfPageEntry::Image(page) => {
             if let Some(image) = plan.image {
@@ -614,6 +657,9 @@ fn write_page(
         PdfPageEntry::Laid(page) => {
             for ((_, image), &(image_ref, mask_ref)) in page.xobjects.iter().zip(&plan.xobjects) {
                 image.write(pdf, image_ref, mask_ref);
+            }
+            for ((_, from, to), &(form, function)) in page.gradients.iter().zip(&plan.gradients) {
+                write_gradient(pdf, (form, function), (*from, *to));
             }
         }
         PdfPageEntry::Text(_, annotations) => {

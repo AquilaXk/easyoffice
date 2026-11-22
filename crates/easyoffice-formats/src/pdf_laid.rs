@@ -6,8 +6,9 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::OnceLock;
 
-use crate::pdf_sheet_rules::{self, CellRule};
+use crate::pdf_sheet_rules::{self, plain_cell_numeric, RuleLayer, RuleOps, SheetShown};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::pdf_writer::{mixed_units, text_ops, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
 use crate::rich_document::{
@@ -40,24 +41,13 @@ const MIN_SCALE: f64 = 0.1;
 pub(crate) const PDF_PT_PER_PX: f64 = PT_PER_PX;
 /// A fill with a luminance (0..=255) up to this is dark: its automatic text is white (PD-227).
 const DARK_FILL_LUMINANCE: u32 = 62;
+/// The pages of a sheet whose drawing operators come to this many bytes together are stored deflated: they are
+/// repetitive numbers (a sheet of 20,000 cells is 900 KB of them, a seventh of that deflated). A smaller sheet stays plain
+/// text, which any editor reads (PD-300).
+const MIN_DEFLATED_SHEET_BYTES: usize = 64 * 1024;
 /// Pages and printed cells a sheet may make (the page's print caps, `sheet-page-print.js`).
 const MAX_SHEET_PAGES: usize = 5_000;
 const MAX_SHEET_CELLS: u64 = 200_000;
-
-/// How a number format changes the way a page draws one cell (PD-235): a number sits at the right, the colour of the
-/// format's section replaces the cell's text colour, and `*x` repeats `x` over the width the text leaves free
-/// (`fill` is the byte offset in the text and the character). `rule` is what the conditional formats give the cell (PD-300);
-/// a cell that has one and no number format has the `numeric` of [`plain_cell_numeric`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CellShown {
-    pub numeric: bool,
-    pub color: Option<u32>,
-    pub fill: Option<(usize, char)>,
-    pub rule: Option<CellRule>,
-}
-
-/// The cells of one sheet a number format or a conditional format changed, by zero-based row and column.
-pub type SheetShown = HashMap<(u32, u32), CellShown>;
 
 /// Most copies of a fill character one cell draws (a column cannot be wider in points than this many glyphs).
 const MAX_FILL_REPEAT: usize = 512;
@@ -98,8 +88,15 @@ pub(crate) fn width_pt(text: &str, size: f64) -> f64 {
 
 /// The three operands of `rg` for `0xRRGGBB`.
 pub(crate) fn rgb_ops(rgb: u32) -> String {
-    let channel = |shift: u32| f64::from((rgb >> shift) & 0xFF) / 255.0;
-    format!("{:.3} {:.3} {:.3}", channel(16), channel(8), channel(0))
+    // The text of each channel value, `{:.3}` of its share of 255, made once: a page writes it for every colored cell.
+    static CHANNELS: OnceLock<Vec<String>> = OnceLock::new();
+    let texts = CHANNELS.get_or_init(|| {
+        (0..=255u32)
+            .map(|v| format!("{:.3}", f64::from(v) / 255.0))
+            .collect()
+    });
+    let channel = |shift: u32| texts[((rgb >> shift) & 0xFF) as usize].as_str();
+    format!("{} {} {}", channel(16), channel(8), channel(0))
 }
 
 /// The colour of text with no colour of its own on `fill`: white on a dark fill, none (black) otherwise.
@@ -114,6 +111,8 @@ pub(crate) struct Canvas {
     width: f64,
     height: f64,
     ops: Vec<String>,
+    /// The gradient forms the operators draw by name (`PdfLaidPage::gradients`).
+    gradients: Vec<(String, u32, u32)>,
 }
 
 impl Canvas {
@@ -122,6 +121,7 @@ impl Canvas {
             width,
             height,
             ops: Vec::new(),
+            gradients: Vec::new(),
         }
     }
 
@@ -195,6 +195,22 @@ impl Canvas {
         self.ops.push(op);
     }
 
+    /// Where the next operator will go, for [`Self::insert_ops`].
+    pub(crate) fn mark(&self) -> usize {
+        self.ops.len()
+    }
+
+    /// Puts `ops` at the place `mark` named, before everything drawn since, and the gradient forms they draw with.
+    pub(crate) fn insert_ops(
+        &mut self,
+        at: usize,
+        ops: Vec<String>,
+        gradients: Vec<(String, u32, u32)>,
+    ) {
+        self.ops.splice(at..at, ops);
+        self.gradients.extend(gradients);
+    }
+
     pub(crate) fn push_raw_op(&mut self, op: String) {
         self.ops.push(op);
     }
@@ -243,8 +259,10 @@ impl Canvas {
             rotation_degrees,
             width_pt: self.width,
             height_pt: self.height,
-            content: self.ops.join("\n"),
+            content: pdf_sheet_rules::merge_styled(self.ops).join("\n"),
             xobjects: Vec::new(),
+            gradients: self.gradients,
+            deflate: false,
         }
     }
 
@@ -435,19 +453,6 @@ fn lines_of(group: (usize, usize, bool), title: Option<(usize, usize)>) -> Vec<u
     out
 }
 
-/// Whether a cell with no number format sits at the right: its kind when the sheet says it, else whether the text reads as
-/// a number.
-pub fn plain_cell_numeric(styling: Option<&SheetStyling>, at: (u32, u32), text: &str) -> bool {
-    styling
-        .and_then(|s| s.explicit_cell_kind(at.0, at.1, text))
-        .map_or_else(|| is_number(text), |k| k == crate::CellValueKind::Number)
-}
-
-fn is_number(text: &str) -> bool {
-    let t = text.trim().replace(',', "");
-    !t.is_empty() && t.parse::<f64>().is_ok()
-}
-
 /// `text` cut at the end so that it is at most `width` pt wide.
 pub(crate) fn fit_text(text: &str, size: f64, width: f64) -> String {
     let mut out = String::new();
@@ -591,8 +596,11 @@ pub(crate) fn encode_sheet_pdf(
     if entries.is_empty() {
         entries.push(Canvas::new(595.0, 842.0).into_laid(0));
     }
+    let deflate =
+        entries.iter().map(|e| e.content.len()).sum::<usize>() >= MIN_DEFLATED_SHEET_BYTES;
     for (i, entry) in entries.iter_mut().enumerate() {
         entry.page_number = i + 1;
+        entry.deflate = deflate;
     }
     let entries: Vec<PdfPageEntry> = entries.into_iter().map(PdfPageEntry::Laid).collect();
     Ok(crate::PdfSerializer::serialize_entries(
@@ -764,8 +772,9 @@ fn sheet_area_pages(
                 y -= h;
                 ys.push(y);
             }
-            // The edges the conditional formats draw come after the grid lines, which would paint over them.
-            let mut rule_edges: Vec<String> = Vec::new();
+            // What the conditional formats paint goes under the text (their boxes) or over the grid lines (their edges).
+            let mut rule_layer = RuleLayer::new(scale);
+            let layer_at = canvas.mark();
             let mut page_cols: Vec<u32> = Vec::with_capacity(cols.len());
             let mut page_rows: Vec<u32> = Vec::with_capacity(rows.len());
             for &i in &rows {
@@ -802,15 +811,17 @@ fn sheet_area_pages(
                     let fill = rule
                         .and_then(|rule| rule.bg)
                         .or_else(|| look.and_then(|style| style.fill));
-                    if let Some(rgb) = fill {
-                        canvas.fill_rect(x, y - h, w, h, rgb);
+                    let cell_box = (x, y - h, w, h);
+                    match (rule, fill) {
+                        (Some(_), Some(rgb)) => rule_layer.fill(cell_box, rgb),
+                        (None, Some(rgb)) => canvas.fill_rect(x, y - h, w, h, rgb),
+                        _ => {}
                     }
                     if let Some(rule) = rule {
-                        let cell_box = (x, y - h, w, h);
                         if let Some(bar) = rule.bar {
-                            pdf_sheet_rules::draw_bar(&mut canvas, cell_box, bar, fill);
+                            rule_layer.bar(cell_box, bar, fill);
                         }
-                        rule_edges.extend(pdf_sheet_rules::edge_ops(cell_box, rule.border, scale));
+                        rule_layer.edges(cell_box, rule.border);
                     }
                     let hidden = rule.is_some_and(|rule| rule.hide_value);
                     if let Some(text) = cells.get(&at).filter(|_| !hidden) {
@@ -853,7 +864,13 @@ fn sheet_area_pages(
                 ys.push(y);
             }
             canvas.grid(&xs, &ys, page.grid_lines, page.headings);
-            for op in rule_edges {
+            let RuleOps {
+                under,
+                over,
+                gradients,
+            } = rule_layer.into_ops();
+            canvas.insert_ops(layer_at, under, gradients);
+            for op in over {
                 canvas.push_raw_op(op);
             }
             let xobjects = if let Some(st) = styling {
