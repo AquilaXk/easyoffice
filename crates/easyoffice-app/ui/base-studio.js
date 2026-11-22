@@ -55,7 +55,8 @@
     let queryPanel = "", draftFilters = [], draftConjunction = "and", draftSorts = [];
     let editingFieldId = null, draggedRecordId = "", invalidCell = null, refs = null;
     // The rows of the datasheet around the visible ones (`base-grid-window.js`); the scroll offset, the measured row heights and the fixed column widths outlive a redraw.
-    let gridWin = null;
+    let gridWin = null, liveQuery = null;
+    const changeListeners = new Set();
     const gridMemo = { key: "", top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, cfgRowPx: 0, margin: 0 }, gridWidths = new Map();
 
     const el = (tag, cls, text) => {
@@ -726,7 +727,7 @@
       buildShellDom();
       relationOptions = new Map();
       const table = activeTable();
-      if (!table) return;
+      if (!table) { liveQuery = null; return; }
       refs.tableTabs.replaceChildren();
       for (const tbl of state.tables) {
         const active = tbl.id === table.id;
@@ -757,12 +758,13 @@
       cellSel.beforeRender();
       gridWin?.dispose();
       gridWin = null;
-      const query = M.queryTableView(state, table.id);
+      const query = (liveQuery = M.queryTableView(state, table.id));
       const viewNode = table.view === "kanban" ? renderKanbanView(table, query)
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
       refs.viewport.replaceChildren(viewNode);
       if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else { cellSel.release(); gridSize?.release?.(); }
+      for (const fn of changeListeners) fn();
     }
 
     // ---- Public Studio API ----
@@ -967,6 +969,9 @@
       bind, render, getState, setState, resetBlank,
       addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, deleteRecord,
       selection: cellSel.selection, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
+      liveQuery: () => liveQuery || (activeTable() ? M.queryTableView(state, activeTable().id) : null),
+      onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),
+      activeCellTarget: cellSel.activeTarget, selectCellById: cellSel.selectRecordField, relationIds,
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;
     return api;

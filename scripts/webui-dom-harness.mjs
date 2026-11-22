@@ -93,6 +93,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/find-core.js",
   "../crates/easyoffice-app/ui/find-doc.js",
   "../crates/easyoffice-app/ui/find-sheet.js",
+  "../crates/easyoffice-app/ui/find-base.js",
   "../crates/easyoffice-app/ui/find-replace.js",
   "../crates/easyoffice-app/ui/slide-canvas.js",
   "../crates/easyoffice-app/ui/slide-dialogs.js",

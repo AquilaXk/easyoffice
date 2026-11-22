@@ -450,4 +450,33 @@ export const baseSteps = [
     await page.mouse.dblclick(resetBox.x + 12, resetBox.y + resetBox.height / 2);
     assert.equal(await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].rowHeight), undefined);
   }],
+
+  ["in-app find and replace jumps to offscreen r8500 in 10,000 records, keeps query focus, and closes on Esc (PD-315)", async (page) => {
+    await load(page, 10000);
+    await page.evaluate(() => {
+      const studio = window.__EASYOFFICE_BASE_STUDIO__;
+      const st = studio.getState();
+      st.tables[0].records[8500].values.f1 = "유일한_오프스크린_찾기_표적";
+      studio.setState(st);
+    });
+    await page.keyboard.press("Control+f");
+    await page.waitForSelector("#find-dialog[open]");
+    await page.fill("#find-query", "오프스크린_찾기_표적");
+    await page.waitForFunction(() => document.getElementById("find-count")?.textContent === "1 / 1");
+    const info = await activeInfo(page);
+    assert.equal(info?.rec, "r8500");
+    assert.equal(info?.field, "f1");
+    assert.equal(info?.inView, true, "r8500 scrolled clear of sticky chrome");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "find-query");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.getElementById("find-dialog")?.open);
+
+    await page.keyboard.press("Control+F2");
+    await page.waitForSelector("#find-replacement", { state: "visible" });
+    await page.fill("#find-replacement", "고친_오프스크린_값");
+    await page.click("#btn-find-replace");
+    await page.waitForFunction(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].records[8500].values.f1 === "유일한_고친_오프스크린_값");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.getElementById("find-dialog")?.open);
+  }],
 ];

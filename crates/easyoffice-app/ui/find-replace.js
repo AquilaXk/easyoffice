@@ -1,14 +1,15 @@
 (function (host) {
   "use strict";
 
-  // The find / replace dialog (#find-dialog) for the document and sheet modules (Ctrl+F finds,
+  // The find / replace dialog (#find-dialog) for the document, sheet and base modules (Ctrl+F finds,
   // Ctrl+F2 replaces, as in the reference editor). It is not modal: the page stays editable, the
   // matches are painted with the CSS Custom Highlight API (no DOM change) when the web view has it,
   // otherwise the current match is selected. The text, the matches and the offset table live in
-  // `find-core.js` and a source (`find-doc.js`, `find-sheet.js`); this file is the UI around them.
+  // `find-core.js` and a source (`find-doc.js`, `find-sheet.js`, `find-base.js`); this file is the UI around them.
 
   const { buildMatcher, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
   const DIALOG_ID = "find-dialog";
+  const KIND_OF = { DOC: "doc", SHEET: "sheet", BASE: "base" };
   // Matches on each side of the current one that get an on-screen highlight range.
   const NEAR_WINDOW = 1000;
   const MAX_SELECTION_QUERY = 100;
@@ -39,6 +40,7 @@
 
     function createSource(moduleCode) {
       if (moduleCode === "DOC") return host.__EASYOFFICE_CREATE_DOC_FIND_SOURCE__({ root: byId("doc-editor"), document, env, withUndo });
+      if (moduleCode === "BASE") return host.__EASYOFFICE_CREATE_BASE_FIND_SOURCE__({ getBaseStudio: deps.getBaseStudio, setFeedback });
       return host.__EASYOFFICE_CREATE_SHEET_FIND_SOURCE__({
         sheetDataStore: deps.sheetDataStore, getActiveSheetName: deps.getActiveSheetName,
         getActiveCellRef: deps.getActiveSheetCellRef, sheetController: deps.sheetController,
@@ -137,9 +139,10 @@
 
     // ---- replacing --------------------------------------------------------------------------
 
-    function reportReplaced({ replaced, skipped }) {
-      const note = skipped > 0 ? " (수식 셀 " + skipped + "개는 건너뜀)" : "";
-      const text = replaced + "개를 바꿨습니다" + note;
+    function reportReplaced({ replaced, skipped, rejected = 0 }) {
+      const skipNote = skipped > 0 ? " (수식 셀 " + skipped + "개는 건너뜀)" : "";
+      const invalidNote = rejected > 0 ? " (유효성 불일치 " + rejected + "개는 건너뜀)" : "";
+      const text = replaced + "개를 바꿨습니다" + skipNote + invalidNote;
       setFeedback?.(text);
       return text;
     }
@@ -194,13 +197,15 @@
     }
 
     function ensureSource(moduleCode) {
-      if (source?.kind === (moduleCode === "DOC" ? "doc" : "sheet")) return;
+      const kind = KIND_OF[moduleCode];
+      if (source?.kind === kind) return false;
       source?.dispose();
       source = createSource(moduleCode);
       source.watch(() => {
         if (countTimer !== null || matcher.empty) return;
         countTimer = env.setTimeout(refreshCount, 0);
       });
+      return true;
     }
 
     // The document changed while the dialog is open: the count follows (only the changed blocks are searched again).
@@ -215,10 +220,10 @@
     // Opens the dialog for the active module; false when the module has no find (the caller falls back).
     function open(mode) {
       const moduleCode = getActiveModule();
-      if (moduleCode !== "DOC" && moduleCode !== "SHEET") return false;
+      if (!KIND_OF[moduleCode]) return false;
       const els = ui();
       if (!els.dialog) return false;
-      ensureSource(moduleCode);
+      const switched = ensureSource(moduleCode);
       applyMode(mode);
       const picked = moduleCode === "DOC" ? selectedQuery() : "";
       if (picked) els.query.value = picked;
@@ -226,6 +231,9 @@
         origin = source.anchor(sheetOptions());
         els.dialog.show();
         document.addEventListener("keydown", onKeyCapture, true);
+      } else if (switched) {
+        current = null;
+        origin = source.anchor(sheetOptions());
       }
       els.query.focus();
       els.query.select();

@@ -42,7 +42,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
     "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
-    find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
+    find: ["DOC", "SHEET", "BASE"], replace: ["DOC", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     "mod-symbol": EDIT_MODULES,
     "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],

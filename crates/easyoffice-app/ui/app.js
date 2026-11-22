@@ -207,6 +207,7 @@
   });
   const findReplace = host.__EASYOFFICE_CREATE_FIND_REPLACE__({
     document, env: host, getActiveModule: () => activeModule, setFeedback: (text) => setStatusFeedback(text),
+    getBaseStudio: () => host.__EASYOFFICE_BASE_BOARD_HOST__?.getBaseStudio(),
     sheetDataStore, sheetController, sheetStoreHelpers, getActiveSheetName: () => activeSheetName, getActiveSheetCellRef: () => activeSheetCellRef,
     sheetHistory: ribbonHistory.sheetHistory, captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     saveDocState: () => workspacePanels.saveActiveDocTabState(), noteActivity: () => workspaceSession.noteActivity(),
@@ -766,7 +767,7 @@
     }
   }
 
-  // Print and find belong to the module in front: the Hangul editor has its own, document and sheet use the find dialog, other modules keep the palette on Ctrl+F.
+  // Print and find belong to the module in front: the Hangul editor has its own, document, sheet and base use the find dialog, other modules keep the palette on Ctrl+F.
   function printActiveModule() {
     if (activeModule === "HWP") return hwpPrint.print();
     return officePrint.isSupported(activeModule) ? officePrint.print() : Promise.reject(new Error("이 모듈은 인쇄를 지원하지 않습니다."));

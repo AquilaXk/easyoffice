@@ -148,16 +148,17 @@
       ctl.addEventListener("blur", onEditBlur, { once: true });
     }
 
-    // Leaves the control (`restore`: with the text it had). The change event of the browser commits what was typed, and the table is drawn again.
-    function leaveEdit(restore) {
+    // Leaves the control (`restore`: with the text it had). When `keepFocus` is true the table keeps focus after commit.
+    function leaveEdit(restore, keepFocus = true) {
       const edit = editing;
       if (!edit) return;
       if (restore && edit.text) edit.ctl.value = edit.orig;
       editing = null;
       if (edit.text) edit.ctl.readOnly = true;
-      refocus = true;
+      refocus = keepFocus;
       edit.ctl.blur();
       if (refocus) { refocus = false; ctx?.tbl.focus({ preventScroll: true }); }
+      refocus = false;
     }
 
     // Starts the edit of the active cell. `seed` is the text a typed key puts in (an empty one clears the cell), none keeps the text.
@@ -384,7 +385,37 @@
       editing = null;
     }
 
-    return { bind, rowBuilt, beforeRender, afterAttach, release, selection: () => sel };
+    function rowIndexMap() {
+      if (!ctx) return new Map();
+      if (!ctx.rowOf) {
+        const map = new Map();
+        for (let i = 0; i < ctx.win.count; i += 1) {
+          const rec = ctx.win.recordAt(i);
+          if (rec) map.set(rec.record.id, i + 1);
+        }
+        ctx.rowOf = map;
+      }
+      return ctx.rowOf;
+    }
+
+    function activeTarget() {
+      if (!ctx) return null;
+      if (editing) leaveEdit(false, false);
+      if (!sel) return null;
+      const rec = ctx.win.recordAt(sel.ar - 1), fld = ctx.fields[sel.ac - 1];
+      return rec && fld ? { recordId: rec.record.id, fieldId: fld.id } : null;
+    }
+
+    function selectRecordField(recordId, fieldId) {
+      if (!ctx) return false;
+      const r = rowIndexMap().get(recordId), c = ctx.colOf.get(fieldId);
+      if (!r || !c || ctx.win.isGroup(r - 1)) return false;
+      if (editing) leaveEdit(false, false);
+      setSel(N.single(r, c), true);
+      return true;
+    }
+
+    return { bind, rowBuilt, beforeRender, afterAttach, release, selection: () => sel, activeTarget, selectRecordField };
   }
 
   host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__ = createCellSelect;
