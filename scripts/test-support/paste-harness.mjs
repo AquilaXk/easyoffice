@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 import { createWorkspaceHarness, flushAsyncTurns } from "../webui-dom-harness.mjs";
 import { switchModule } from "./modules.mjs";
 
@@ -112,8 +113,102 @@ export function clipboard({ html = "", text = "", rtf = "", files = [] } = {}) {
   };
 }
 
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0);
+  out.write(type, 4, 4, "ascii");
+  data.copy(out, 8);
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+  return out;
+}
+
+export function makeTestPng(width = 2, height = 3) {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  const idat = deflateSync(raw);
+  return new Uint8Array(Buffer.concat([sig, pngChunk("IHDR", ihdr), pngChunk("IDAT", idat), pngChunk("IEND", Buffer.alloc(0))]));
+}
+
+export function makeTestGif(width = 4, height = 5) {
+  const head = Buffer.from("GIF89a", "ascii");
+  const lsd = Buffer.alloc(7);
+  lsd.writeUInt16LE(width, 0);
+  lsd.writeUInt16LE(height, 2);
+  lsd[4] = 0x80;
+  const body = Buffer.from([0, 0, 0, 255, 255, 255, 0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x4c, 0x01, 0, 0x3b]);
+  return new Uint8Array(Buffer.concat([head, lsd, body]));
+}
+
+class TestBlob {
+  constructor(parts = [], opts = {}) {
+    const bufs = parts.map((p) => (typeof p === "string" ? Buffer.from(p, "utf8") : Buffer.from(p)));
+    this._bytes = new Uint8Array(Buffer.concat(bufs));
+    this.type = opts.type || "";
+    this.size = this._bytes.byteLength;
+  }
+  async arrayBuffer() {
+    return this._bytes.buffer.slice(this._bytes.byteOffset, this._bytes.byteOffset + this._bytes.byteLength);
+  }
+  async text() {
+    return Buffer.from(this._bytes).toString("utf8");
+  }
+}
+
+function measureBytes(bytes, mime = "") {
+  if (bytes.byteLength >= 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return { width: bytes[6] | (bytes[7] << 8), height: bytes[8] | (bytes[9] << 8) };
+  }
+  if (mime.includes("svg") || Buffer.from(bytes.subarray(0, 32)).toString("utf8").includes("<svg")) {
+    const s = Buffer.from(bytes).toString("utf8");
+    const w = Number(/\bwidth\s*=\s*["']?(\d+(?:\.\d+)?)/i.exec(s)?.[1] ?? 12);
+    const h = Number(/\bheight\s*=\s*["']?(\d+(?:\.\d+)?)/i.exec(s)?.[1] ?? 8);
+    return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+  }
+  return { width: 2, height: 2 };
+}
+
+class TestImage {
+  set src(val) {
+    const comma = String(val || "").indexOf(",");
+    const header = comma >= 0 ? val.slice(0, comma).toLowerCase() : "";
+    const body = comma >= 0 ? val.slice(comma + 1) : "";
+    let ok = false;
+    if (header.startsWith("data:image/gif;base64")) {
+      const u8 = new Uint8Array(Buffer.from(body, "base64"));
+      ok = u8.byteLength >= 26 && u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46;
+      if (ok) Object.assign(this, measureBytes(u8, "image/gif"));
+    } else if (header.startsWith("data:image/svg+xml")) {
+      const svg = header.includes(";base64") ? Buffer.from(body, "base64").toString("utf8") : decodeURIComponent(body);
+      ok = svg.includes("<svg");
+      if (ok) Object.assign(this, measureBytes(Buffer.from(svg, "utf8"), "image/svg+xml"));
+    }
+    queueMicrotask(() => (ok ? this.onload?.() : this.onerror?.()));
+  }
+}
+
 // Opens the document editor with `paragraphs` (strings) and returns helpers. `markup` replaces them with the editor's HTML.
-export async function openPasteEditor({ paragraphs = [], markup = null, module = "DOC", parserOptions = {} } = {}) {
+export async function openPasteEditor({ paragraphs = [], markup = null, module = "DOC", parserOptions = {}, clipboard: systemClipboard = null } = {}) {
   const selection = createPasteSelection();
   const holder = { document: null };
   class TestDOMParser {
@@ -128,8 +223,36 @@ export async function openPasteEditor({ paragraphs = [], markup = null, module =
       return { body, documentElement: body };
     }
   }
-  const harness = await createWorkspaceHarness({ selection, hostEnvExtras: { DOMParser: TestDOMParser, ...parserOptions } });
+  const harness = await createWorkspaceHarness({
+    selection,
+    clipboard: systemClipboard,
+    hostEnvExtras: {
+      DOMParser: TestDOMParser,
+      Blob: TestBlob,
+      Image: TestImage,
+      createImageBitmap: async (blob) => {
+        const bytes = blob?._bytes ?? new Uint8Array(await blob.arrayBuffer());
+        const dims = measureBytes(bytes, blob?.type || "");
+        return { ...dims, close() {} };
+      },
+      ...parserOptions,
+    },
+  });
   holder.document = harness.document;
+  const origCreateElement = harness.document.createElement.bind(harness.document);
+  harness.document.createElement = (tagName) => {
+    const el = origCreateElement(tagName);
+    if (String(tagName).toLowerCase() === "canvas") {
+      el.width = 0;
+      el.height = 0;
+      el.getContext = () => ({ drawImage() {} });
+      el.toBlob = (done) => {
+        const png = makeTestPng(Math.max(1, el.width || 1), Math.max(1, el.height || 1));
+        done(new TestBlob([png], { type: "image/png" }));
+      };
+    }
+    return el;
+  };
   switchModule(harness.document, module);
   await flushAsyncTurns(10);
   const { document } = harness;

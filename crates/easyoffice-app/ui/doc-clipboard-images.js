@@ -37,8 +37,28 @@
   const MIN_PICTURE_HEX_DIGITS = 32;
   // The record header and the DIB fields up to `cbBits` end at byte 64.
   const MIN_DIB_RECORD_BYTES = 64;
+  const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+  const MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024;
+  const MAX_IMAGE_PIXELS = 50_000_000;
+  const MAX_DIMENSION_PX = 65535;
+  const MAX_SVG_BYTES = 2 * 1024 * 1024;
+  const MAX_SVG_TAGS = 10_000;
+  const SAFE_SVG_XMLNS = /\bxmlns(?::[a-z0-9_-]+)?\s*=\s*(["'])http:\/\/(?:www\.w3\.org\/2000\/svg|www\.w3\.org\/1999\/xlink|www\.w3\.org\/XML\/1998\/namespace)\1/gi;
 
-  const LIMITS = { MAX_RTF_CHARS, MAX_RTF_PICTURES, MAX_EMF_PIECES, MAX_PIECE_PIXELS, MAX_EMF_TOTAL_PIXELS, MAX_EMF_BMP_BYTES, MAX_CANVAS_SIDE };
+  const LIMITS = {
+    MAX_RTF_CHARS,
+    MAX_RTF_PICTURES,
+    MAX_EMF_PIECES,
+    MAX_PIECE_PIXELS,
+    MAX_EMF_TOTAL_PIXELS,
+    MAX_EMF_BMP_BYTES,
+    MAX_CANVAS_SIDE,
+    MAX_IMAGE_BYTES,
+    MAX_TOTAL_IMAGE_BYTES,
+    MAX_IMAGE_PIXELS,
+    MAX_SVG_BYTES,
+    MAX_SVG_TAGS,
+  };
 
   // Value of an ASCII hex digit by character code, -1 for anything else.
   const HEX_VALUE = new Int8Array(128).fill(-1);
@@ -245,8 +265,225 @@
     return ranges;
   }
 
-  const SRC_ATTRIBUTE = /src\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i;
+  const SRC_ATTRIBUTE = /src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
   const DATA_SRC = /src\s*=\s*["']?data:/i;
+  const DATA_GIF_OR_SVG_IMG = /src\s*=\s*["']?\s*data:image\/(?:gif\b|svg\+xml\b)/i;
+
+  function utf8BytesOf(text) {
+    if (typeof TextEncoder === "function") return new TextEncoder().encode(text);
+    const out = [];
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+    return new Uint8Array(out);
+  }
+
+  function decodeBase64Bytes(cleaned, env) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__;
+    const dec = env?.atob ?? host.atob ?? globalThis.atob;
+    if (utils?.base64ToBytes) return utils.base64ToBytes(cleaned, typeof dec === "function" ? dec : undefined);
+    if (typeof dec !== "function") throw new Error("no atob");
+    const bin = dec(cleaned);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function encodeBytesToBase64(bytes, env) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__;
+    if (utils?.bytesToBase64) return utils.bytesToBase64(bytes);
+    const enc = env?.btoa ?? host.btoa ?? globalThis.btoa;
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+    return enc(bin);
+  }
+
+  function checkGifBytes(u8) {
+    if (!(u8 instanceof Uint8Array) || u8.byteLength < 26 || u8.byteLength > MAX_IMAGE_BYTES) return { reason: "invalid" };
+    const is87 = u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38 && u8[4] === 0x37 && u8[5] === 0x61;
+    const is89 = u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x38 && u8[4] === 0x39 && u8[5] === 0x61;
+    if (!is87 && !is89) return { reason: "invalid" };
+    const widthPx = u8[6] | (u8[7] << 8);
+    const heightPx = u8[8] | (u8[9] << 8);
+    if (widthPx < 1 || heightPx < 1 || widthPx > MAX_DIMENSION_PX || heightPx > MAX_DIMENSION_PX) return { reason: "invalid" };
+    if (widthPx * heightPx > MAX_IMAGE_PIXELS) return { reason: "area" };
+    return { header: { widthPx, heightPx } };
+  }
+
+  function parseGifHeader(u8) {
+    return checkGifBytes(u8).header ?? null;
+  }
+
+  function decodeNumericEntities(text) {
+    return text
+      .replace(/&#x([0-9a-fA-F]+);?/g, (_, hex) => {
+        const cp = Number.parseInt(hex, 16);
+        return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+      })
+      .replace(/&#(\d+);?/g, (_, dec) => {
+        const cp = Number.parseInt(dec, 10);
+        return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+      });
+  }
+
+  function parseSvgLengthPx(attrText, name) {
+    const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(attrText);
+    const raw = (match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
+    if (!raw || raw.endsWith("%")) return null;
+    const parsed = /^([+]?(?:\d+(?:\.\d+)?|\.\d+))\s*(px|pt|mm|cm|in)?$/i.exec(raw);
+    if (!parsed) return null;
+    const value = Number(parsed[1]);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const unit = (parsed[2] || "px").toLowerCase();
+    const factor = unit === "pt" ? 4 / 3 : unit === "mm" ? 96 / 25.4 : unit === "cm" ? 96 / 2.54 : unit === "in" ? 96 : 1;
+    return value * factor;
+  }
+
+  function parseSvgDimensions(attrText) {
+    let w = parseSvgLengthPx(attrText, "width");
+    let h = parseSvgLengthPx(attrText, "height");
+    if (w === null || h === null) {
+      const vbMatch = /(?:^|\s)viewbox\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrText);
+      const vbParts = (vbMatch?.[1] ?? vbMatch?.[2] ?? "").trim().split(/[\s,]+/).map(Number);
+      if (vbParts.length === 4 && vbParts.every(Number.isFinite) && vbParts[2] > 0 && vbParts[3] > 0) {
+        w ??= vbParts[2];
+        h ??= vbParts[3];
+      }
+    }
+    const widthPx = Math.round(w ?? 300);
+    const heightPx = Math.round(h ?? 150);
+    if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx < 1 || heightPx < 1) return null;
+    if (widthPx > MAX_DIMENSION_PX || heightPx > MAX_DIMENSION_PX || widthPx * heightPx > MAX_IMAGE_PIXELS) return null;
+    return { widthPx, heightPx };
+  }
+
+  function hasUnsafeSvgContent(candidate) {
+    if (/<!(?:DOCTYPE|ENTITY)/i.test(candidate)) return true;
+    if (/<\s*(?:script|foreignobject|iframe|object|embed|applet|audio|video|canvas)\b/i.test(candidate)) return true;
+    if (/(?:^|[\s"'/<>])on[a-z]+\s*=/i.test(candidate)) return true;
+    const stripped = candidate.replace(SAFE_SVG_XMLNS, "");
+    if (/(?:https?|file|ftp|blob):/i.test(stripped) || /@import/i.test(stripped)) return true;
+    if (/style\s*=\s*(?:"[^"]*\\|'[^']*\\)/i.test(stripped)) return true;
+    const compacted = stripped.replace(/[\u0000-\u0020\u007f-\u009f]+/g, "").toLowerCase();
+    return /(?:javascript|vbscript):|data:text\/html|data:image\/svg\+xml/.test(compacted);
+  }
+
+  function validateSvgSource(rawSvg) {
+    if (typeof rawSvg !== "string" || !rawSvg) return null;
+    if (utf8BytesOf(rawSvg).byteLength > MAX_SVG_BYTES) return null;
+    let tagCount = 0;
+    for (let i = 0; i < rawSvg.length; i += 1) {
+      if (rawSvg.charCodeAt(i) === 0x3c && ++tagCount > MAX_SVG_TAGS) return null;
+    }
+    const expanded = decodeNumericEntities(rawSvg);
+    if (hasUnsafeSvgContent(rawSvg) || hasUnsafeSvgContent(expanded)) return null;
+    const openMatch = /<svg\b([^>]*)>/i.exec(rawSvg);
+    if (!openMatch || openMatch[0].endsWith("/>")) return null;
+    const contentStart = openMatch.index + openMatch[0].length;
+    const closeIdx = rawSvg.toLowerCase().lastIndexOf("</svg>");
+    if (closeIdx < contentStart || !rawSvg.slice(contentStart, closeIdx).trim()) return null;
+    const dims = parseSvgDimensions(openMatch[1]);
+    if (!dims) return null;
+    const svg = /\bxmlns\s*=/i.test(openMatch[1])
+      ? rawSvg
+      : rawSvg.slice(0, openMatch.index + 4) + ' xmlns="http://www.w3.org/2000/svg"' + rawSvg.slice(openMatch.index + 4);
+    return { svg, widthPx: dims.widthPx, heightPx: dims.heightPx };
+  }
+
+  function decodeSvgDataUrl(url, env) {
+    const str = String(url ?? "").trim();
+    const comma = str.indexOf(",");
+    if (comma < 0) return null;
+    const header = str.slice(0, comma).replace(/[\u0000-\u0020]+/g, "").toLowerCase();
+    if (!header.startsWith("data:image/svg+xml")) return null;
+    const meta = header.slice("data:image/svg+xml".length);
+    if (meta !== "" && !meta.startsWith(";")) return null;
+    const params = meta ? meta.slice(1).split(";").filter(Boolean) : [];
+    const isBase64 = params.includes("base64");
+    for (const p of params) {
+      if (p !== "base64" && p !== "utf8" && !p.startsWith("charset=")) return null;
+    }
+    const body = str.slice(comma + 1);
+    if (body.length > MAX_SVG_BYTES * 3) return null;
+    try {
+      let raw;
+      if (isBase64) {
+        const cleaned = body.replace(/\s+/g, "");
+        if (!cleaned || cleaned.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleaned)) return null;
+        const bytes = decodeBase64Bytes(cleaned, env);
+        if (bytes.byteLength > MAX_SVG_BYTES) return null;
+        raw = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { fatal: true }).decode(bytes) : String.fromCharCode(...bytes);
+      } else {
+        raw = /%[0-9a-f]{2}/i.test(body) ? decodeURIComponent(body) : body;
+      }
+      return validateSvgSource(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadImageElement(dataUrl, env) {
+    const Img = env?.Image ?? host.Image ?? globalThis.Image;
+    if (typeof Img !== "function") return null;
+    return await new Promise((resolve) => {
+      const img = new Img();
+      let settled = false;
+      const finish = (val) => {
+        if (settled) return;
+        settled = true;
+        resolve(val);
+      };
+      img.onload = () => finish(img);
+      img.onerror = () => finish(null);
+      img.src = dataUrl;
+      if (typeof img.decode === "function") Promise.resolve(img.decode()).then(() => finish(img), () => finish(null));
+    });
+  }
+
+  async function rasterizeToPngBytes(source, widthPx, heightPx, env) {
+    const doc = env?.document ?? host.document;
+    const canvas = doc?.createElement?.("canvas");
+    const ctx = canvas?.getContext?.("2d");
+    if (!ctx) return null;
+    const scale = Math.min(1, MAX_CANVAS_SIDE / Math.max(widthPx, heightPx));
+    canvas.width = Math.max(1, Math.round(widthPx * scale));
+    canvas.height = Math.max(1, Math.round(heightPx * scale));
+    let bitmap = null;
+    try {
+      let drawable = null;
+      const makeBitmap = env?.createImageBitmap ?? host.createImageBitmap;
+      const BlobCtor = env?.Blob ?? host.Blob ?? globalThis.Blob;
+      if (source.kind === "gif") {
+        if (typeof makeBitmap === "function" && typeof BlobCtor === "function") {
+          try {
+            bitmap = await makeBitmap(new BlobCtor([source.bytes], { type: "image/gif" }));
+            drawable = bitmap;
+          } catch {
+            bitmap = null;
+          }
+        }
+        if (!drawable) drawable = await loadImageElement(`data:image/gif;base64,${encodeBytesToBase64(source.bytes, env)}`, env);
+      } else {
+        const svgBytes = utf8BytesOf(source.svg);
+        drawable = await loadImageElement(`data:image/svg+xml;base64,${encodeBytesToBase64(svgBytes, env)}`, env);
+        if (!drawable && typeof makeBitmap === "function" && typeof BlobCtor === "function") {
+          bitmap = await makeBitmap(new BlobCtor([svgBytes], { type: "image/svg+xml" }));
+          drawable = bitmap;
+        }
+      }
+      if (!drawable) return null;
+      ctx.drawImage(drawable, 0, 0, canvas.width, canvas.height);
+      const blob = await toBlob(canvas);
+      return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    } catch {
+      return null;
+    } finally {
+      bitmap?.close?.();
+    }
+  }
 
   // The HTML of a clipboard that carries RTF pictures, and has a picture the page could not open (not a `data:` one).
   function needsRtfImageInlining(html, rtf) {
@@ -255,6 +492,95 @@
       const tag = html.slice(from, to);
       return SRC_ATTRIBUTE.test(tag) && !DATA_SRC.test(tag);
     });
+  }
+
+  function needsAsyncImagePrep(html, rtf) {
+    if (needsRtfImageInlining(html, rtf)) return true;
+    return Boolean(html && imgTagRanges(html).some(([from, to]) => DATA_GIF_OR_SVG_IMG.test(html.slice(from, to))));
+  }
+
+  async function rasterizeDataTag(rawSrc, budget, env) {
+    const trimmed = String(rawSrc ?? "").trim();
+    if (/^data:image\/gif\s*;\s*base64,/i.test(trimmed)) {
+      const cleaned = trimmed.slice(trimmed.indexOf(",") + 1).replace(/\s+/g, "");
+      if (!cleaned || cleaned.length > Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 4) return null;
+      let bytes;
+      try {
+        bytes = decodeBase64Bytes(cleaned, env);
+      } catch {
+        return null;
+      }
+      const hdr = parseGifHeader(bytes);
+      if (!hdr || budget.count >= MAX_RTF_PICTURES || budget.bytes + bytes.byteLength > MAX_TOTAL_IMAGE_BYTES) return null;
+      budget.count += 1;
+      budget.bytes += bytes.byteLength;
+      return rasterizeToPngBytes({ kind: "gif", bytes }, hdr.widthPx, hdr.heightPx, env);
+    }
+    if (/^data:image\/svg\+xml(?:;|,)/i.test(trimmed)) {
+      const decoded = decodeSvgDataUrl(trimmed, env);
+      if (!decoded) return null;
+      const inBytes = utf8BytesOf(decoded.svg).byteLength;
+      if (budget.count >= MAX_RTF_PICTURES || budget.bytes + inBytes > MAX_TOTAL_IMAGE_BYTES) return null;
+      budget.count += 1;
+      budget.bytes += inBytes;
+      return rasterizeToPngBytes({ kind: "svg", svg: decoded.svg }, decoded.widthPx, decoded.heightPx, env);
+    }
+    return null;
+  }
+
+  async function prepareClipboardHtmlImages(html, rtf, env) {
+    let working = needsRtfImageInlining(html, rtf) ? await inlineOfficeClipboardImages(html, rtf, env) : html;
+    if (!working) return working;
+    const ranges = imgTagRanges(working);
+    if (ranges.length === 0) return working;
+    let out = "";
+    let at = 0;
+    const budget = { count: 0, bytes: 0 };
+    for (const [from, to] of ranges) {
+      const tag = working.slice(from, to);
+      out += working.slice(at, from);
+      at = to;
+      if (!DATA_GIF_OR_SVG_IMG.test(tag)) {
+        out += tag;
+        continue;
+      }
+      const srcMatch = SRC_ATTRIBUTE.exec(tag);
+      const rawSrc = srcMatch ? (srcMatch[1] ?? srcMatch[2] ?? srcMatch[3] ?? "") : "";
+      const pngBytes = rawSrc ? await rasterizeDataTag(rawSrc, budget, env) : null;
+      out += pngBytes ? tag.replace(SRC_ATTRIBUTE, () => `src="data:image/png;base64,${encodeBytesToBase64(pngBytes, env)}"`) : tag;
+    }
+    return out + working.slice(at);
+  }
+
+  async function normalizeClipboardImageBytes(bytes, mime, env) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    if (u8.byteLength === 0) return { error: "그림을 넣지 못했습니다: 빈 파일입니다" };
+    if (u8.byteLength > MAX_IMAGE_BYTES) return { error: "그림을 넣지 못했습니다: 최대 32 MiB까지 넣을 수 있습니다" };
+    const isPng = u8.byteLength >= 8 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47;
+    const isJpg = u8.byteLength >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff;
+    if (isPng || isJpg) return { bytes: u8 };
+    const isGifMagic = u8.byteLength >= 6 && u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46;
+    if (isGifMagic || String(mime || "").toLowerCase().includes("gif")) {
+      const checked = checkGifBytes(u8);
+      if (checked.reason === "area") return { error: "그림을 넣지 못했습니다: 그림 화소 수가 한도(5천만)를 넘습니다" };
+      if (!checked.header) return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      const png = await rasterizeToPngBytes({ kind: "gif", bytes: u8 }, checked.header.widthPx, checked.header.heightPx, env);
+      return png ? { bytes: png } : { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+    }
+    const head = String.fromCharCode(...u8.subarray(0, Math.min(32, u8.byteLength))).trimStart().toLowerCase();
+    if (String(mime || "").toLowerCase().includes("svg") || head.startsWith("<svg") || head.startsWith("<?xml")) {
+      if (u8.byteLength > MAX_SVG_BYTES) return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      try {
+        const raw = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { fatal: true }).decode(u8) : String.fromCharCode(...u8);
+        const decoded = validateSvgSource(raw);
+        if (!decoded) return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+        const png = await rasterizeToPngBytes({ kind: "svg", svg: decoded.svg }, decoded.widthPx, decoded.heightPx, env);
+        return png ? { bytes: png } : { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      } catch {
+        return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
+      }
+    }
+    return { error: "그림을 넣지 못했습니다: 지원하지 않거나 손상된 그림 파일입니다" };
   }
 
   // The `<img src>` of the HTML that a page cannot open (`file://` and the like) as the `data:` address of the RTF picture
@@ -288,5 +614,18 @@
     return out + html.slice(at);
   }
 
-  host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__ = { LIMITS, extractEmfDibs, pieceBmp, extractRtfPictures, needsRtfImageInlining, inlineOfficeClipboardImages };
+  host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__ = {
+    LIMITS,
+    extractEmfDibs,
+    pieceBmp,
+    extractRtfPictures,
+    needsRtfImageInlining,
+    inlineOfficeClipboardImages,
+    parseGifHeader,
+    validateSvgSource,
+    decodeSvgDataUrl,
+    needsAsyncImagePrep,
+    prepareClipboardHtmlImages,
+    normalizeClipboardImageBytes,
+  };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

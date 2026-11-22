@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clipboard, openPasteEditor, shape, shapes } from "./test-support/paste-harness.mjs";
+import { clipboard, makeTestGif, makeTestPng, openPasteEditor, shape, shapes } from "./test-support/paste-harness.mjs";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
@@ -147,7 +147,7 @@ test("office HTML: conditional comments, style blocks, o:p and xml parts leave o
   ].join("\n");
   await t.paste(clipboard({ html }));
   assert.equal(t.editor.textContent, "x안녕둘째 줄");
-  assert.deepEqual(shapes(t.editor), ["p[x|span(s22)[안녕]]", "p[둘째 줄]"]);
+  assert.deepEqual(shapes(t.editor), ["p[x|span(s22)[안녕]]", "ul[li[둘째 줄]]"]);
 });
 
 test("whitespace of the markup collapses, a line break stays, a <pre> keeps its lines", async () => {
@@ -308,4 +308,148 @@ test("the pictures of an RTF paste are not put in once the module or the caret h
   moved.selection.removeAllRanges();
   await flushAsyncTurns(30);
   assert.equal(moved.editor.textContent, "앞뒤", "the caret is gone");
+});
+
+test("GIF and SVG data images (base64 and utf8) rasterize to PNG and survive save serialization", async () => {
+  const t = await openPasteEditor({ markup: "<p><br></p>" });
+  t.caretAt(paragraphAt(t), 0);
+  const gif = makeTestGif(14, 9);
+  const svgA = '<svg width="24" height="16"><rect width="24" height="16"/></svg>';
+  const svgB = '<svg viewBox="0 0 30 12"><circle cx="10" cy="6" r="5"/></svg>';
+  const html = [
+    `<p><img src="data:image/gif;base64,${Buffer.from(gif).toString("base64")}" alt="움짤">`,
+    `<img src="data:image/svg+xml;base64,${Buffer.from(svgA, "utf8").toString("base64")}" alt="벡터A">`,
+    `<img src="data:image/svg+xml;utf8,${encodeURIComponent(svgB)}" alt="벡터B"></p>`,
+  ].join("");
+  await t.paste(clipboard({ html, text: "대체" }));
+  const imgs = t.editor.querySelectorAll("img.doc-inline-image");
+  assert.equal(imgs.length, 3);
+  assert.deepEqual(
+    imgs.map((im) => [im.dataset.eoImageFormat, Number(im.dataset.eoImageNaturalWidthPx), Number(im.dataset.eoImageNaturalHeightPx)]),
+    [["png", 14, 9], ["png", 24, 16], ["png", 30, 12]]
+  );
+  const saved = t.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(t.editor, {});
+  const savedImgs = saved.filter((b) => b.type === "image");
+  assert.equal(savedImgs.length, 3);
+  assert.ok(savedImgs.every((b) => b.format === "png"));
+});
+
+test("Word mso-list HTML maps bullets, Hangul/Latin/Roman numbering, and levels without duplicating markers", async () => {
+  const t = await openPasteEditor({ markup: "<p><br></p>" });
+  t.caretAt(paragraphAt(t), 0);
+  const html = [
+    '<p class=MsoListParagraph style="mso-list:l0 level1 lfo1"><![if !supportLists]><span style="font-family:Wingdings">l<span>&nbsp;</span></span><![endif]>날개 불릿<o:p></o:p></p>',
+    '<p class=MsoListParagraph style="mso-list:l1 level1 lfo2"><![if !supportLists]><span>가.<span>&nbsp;</span></span><![endif]>가나다 점<o:p></o:p></p>',
+    '<p class=MsoListParagraph style="mso-list:l1 level1 lfo2"><![if !supportLists]><span>(가)<span>&nbsp;</span></span><![endif]>가나다 괄호<o:p></o:p></p>',
+    '<p class=MsoListParagraph style="mso-list:l2 level1 lfo3"><![if !supportLists]><span>(a)<span>&nbsp;</span></span><![endif]>영소 괄호<o:p></o:p></p>',
+    '<p class=MsoListParagraph style="mso-list:l2 level2 lfo3"><![if !supportLists]><span>a)<span>&nbsp;</span></span><![endif]>중첩 반괄호<o:p></o:p></p>',
+    '<p class=MsoListParagraph style="mso-list:l3 level1 lfo4"><![if !supportLists]><span>I.<span>&nbsp;</span></span><![endif]>로마 대문자<o:p></o:p></p>',
+  ].join("");
+  await t.paste(clipboard({ html, text: "plain" }));
+  assert.equal(t.editor.textContent, "날개 불릿가나다 점가나다 괄호영소 괄호중첩 반괄호로마 대문자");
+  const saved = t.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(t.editor, {});
+  assert.deepEqual(
+    saved.map((b) => [b.list, b.listLevel ?? 0, b.listNumber ?? null, b.runs.map((r) => r.text).join("")]),
+    [
+      ["bullet", 0, null, "날개 불릿"],
+      ["ordered", 0, "hangul:dot", "가나다 점"],
+      ["ordered", 0, "hangul:paren", "가나다 괄호"],
+      ["ordered", 0, "lowerLatin:paren", "영소 괄호"],
+      ["ordered", 1, "lowerLatin:rparen", "중첩 반괄호"],
+      ["ordered", 0, "upperRoman:dot", "로마 대문자"],
+    ]
+  );
+});
+
+test("image file paste deletes selection in one undo step and leaves selection intact on invalid files", async () => {
+  const t = await openPasteEditor({ paragraphs: ["앞줄", "중간", "뒷줄"] });
+  const [p1, , p3] = t.blocks();
+  t.select(p1.firstChild, 1, p3.firstChild, 1);
+  const badBytes = Buffer.from("not-an-image", "utf8");
+  const badFile = {
+    type: "image/gif",
+    name: "bad.gif",
+    size: badBytes.length,
+    arrayBuffer: async () => badBytes.buffer.slice(badBytes.byteOffset, badBytes.byteOffset + badBytes.byteLength),
+  };
+  await t.paste(clipboard({ files: [badFile] }));
+  assert.equal(t.editor.querySelectorAll("img").length, 0);
+  assert.equal(t.editor.textContent, "앞줄중간뒷줄", "failed image file must not erase selection");
+
+  const [b1, , b3] = t.blocks();
+  t.select(b1.firstChild, 1, b3.firstChild, 1);
+  const before = t.steps();
+  const gif = makeTestGif(11, 7);
+  const gifFile = {
+    type: "image/gif",
+    name: "anim.gif",
+    size: gif.byteLength,
+    arrayBuffer: async () => gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength),
+  };
+  await t.paste(clipboard({ files: [gifFile] }));
+  const imgs = t.editor.querySelectorAll("img.doc-inline-image");
+  assert.equal(imgs.length, 1);
+  assert.equal(imgs[0].dataset.eoImageFormat, "png");
+  assert.ok(!t.editor.textContent.includes("중간"), "selection erased when inserting picture");
+  assert.equal(t.steps(), before + 1);
+  await t.undo();
+  assert.deepEqual(shapes(t.editor), ["p[앞줄]", "p[중간]", "p[뒷줄]"]);
+});
+
+test("menu and toolbar clip-paste use HTML, image blobs, header plain text, and readText fallback", async () => {
+  const sys = {
+    items: [],
+    text: "",
+    error: null,
+    async read() {
+      if (this.error) throw this.error;
+      return this.items;
+    },
+    async readText() {
+      return this.text;
+    },
+  };
+  const clipItem = (entries) => ({
+    types: Object.keys(entries),
+    async getType(type) {
+      const val = entries[type];
+      if (val instanceof Uint8Array) {
+        return { size: val.byteLength, type, arrayBuffer: async () => val.buffer.slice(val.byteOffset, val.byteOffset + val.byteLength) };
+      }
+      return { size: Buffer.byteLength(val, "utf8"), type, text: async () => val };
+    },
+  });
+
+  const t = await openPasteEditor({
+    markup: '<section data-eo-hf="header"><p>머리말</p></section><p>선택대상</p>',
+    clipboard: sys,
+  });
+  const bodyPara = t.blocks()[1];
+  t.select(bodyPara.firstChild, 1, bodyPara.firstChild, 3);
+  sys.items = [clipItem({ "text/html": "<p><b>강조</b></p>", "text/plain": "강조" })];
+  t.userClick(t.document.querySelector('.md-item[data-studio-menu-cmd="clip-paste"]'));
+  await flushAsyncTurns(20);
+  assert.equal(shape(bodyPara), "p[선|span(b)[강조]|상]");
+
+  t.select(bodyPara.firstChild, 0, bodyPara.firstChild, 1);
+  const png = makeTestPng(9, 5);
+  sys.items = [clipItem({ "image/png": png })];
+  t.userClick(t.document.querySelector('.tb-btn[data-studio-cmd="clip-paste"]'));
+  await flushAsyncTurns(20);
+  assert.equal(t.editor.querySelectorAll("img.doc-inline-image").length, 1);
+
+  const hfPara = t.editor.querySelector('section[data-eo-hf="header"] p');
+  t.caretAt(hfPara.firstChild, 1);
+  sys.items = [clipItem({ "text/html": "<table><tr><td>표</td></tr></table>", "text/plain": "줄1\n줄2" })];
+  t.userClick(t.document.querySelector('.md-item[data-studio-menu-cmd="clip-paste"]'));
+  await flushAsyncTurns(20);
+  assert.equal(t.editor.querySelectorAll("table").length, 0);
+  assert.equal(hfPara.textContent, "머줄1 줄2리말");
+
+  t.caretAt(hfPara.firstChild, 0);
+  sys.error = new Error("NotAllowedError");
+  sys.text = "대체";
+  t.userClick(t.document.querySelector('.tb-btn[data-studio-cmd="clip-paste"]'));
+  await flushAsyncTurns(20);
+  assert.ok(hfPara.textContent.startsWith("대체"));
 });

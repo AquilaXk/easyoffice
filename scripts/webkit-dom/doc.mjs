@@ -60,4 +60,39 @@ export const docSteps = [
     await page.keyboard.press("Shift+Tab");
     assert.equal(await caretCell(page), "d", "Shift+Tab goes back to the previous cell");
   }],
+
+  ["Word list markers and GIF/SVG data images paste cleanly in WebKit", async (page) => {
+    await page.evaluate(() => {
+      const ed = document.querySelector("#doc-editor");
+      ed.innerHTML = "<p><br></p>";
+      const r = document.createRange();
+      r.setStart(ed.querySelector("p"), 0);
+      r.collapse(true);
+      const s = getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      ed.focus();
+    });
+    const gif1x1 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    const svgB64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="10"><rect width="12" height="10"/></svg>', "utf8").toString("base64");
+    const html = [
+      '<p class="MsoListParagraph" style="mso-list:l0 level1 lfo1"><![if !supportLists]><span>(가)</span><![endif]>가나다 항목<o:p></o:p></p>',
+      '<p class="MsoListParagraph" style="mso-list:l1 level1 lfo2"><![if !supportLists]><span style="font-family:Wingdings">l</span><![endif]>글머리 항목<o:p></o:p></p>',
+      `<p><img src="data:image/gif;base64,${gif1x1}"><img src="data:image/svg+xml;base64,${svgB64}"></p>`,
+    ].join("");
+    await paste(page, { "text/html": html, "text/plain": "가나다 항목\n글머리 항목" });
+    await page.waitForFunction(() => document.querySelectorAll("#doc-editor img.doc-inline-image").length === 2);
+    const result = await page.evaluate(() => ({
+      olNum: document.querySelector("#doc-editor ol > li")?.dataset?.eoListNum || null,
+      olText: document.querySelector("#doc-editor ol > li")?.textContent || "",
+      ulText: document.querySelector("#doc-editor ul > li")?.textContent || "",
+      imgFormats: Array.from(document.querySelectorAll("#doc-editor img.doc-inline-image")).map((im) => im.dataset.eoImageFormat),
+    }));
+    assert.deepEqual(result, {
+      olNum: "hangul:paren",
+      olText: "가나다 항목",
+      ulText: "글머리 항목",
+      imgFormats: ["png", "png"],
+    });
+  }],
 ];

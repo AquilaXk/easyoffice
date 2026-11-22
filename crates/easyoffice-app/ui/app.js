@@ -156,7 +156,7 @@
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     runExclusive: chainWorkspaceQueue,
-    getWorkspacePanels: () => workspacePanels,
+    getWorkspacePanels: () => workspacePanels, getDocPaste: () => docPaste,
     getSheetController: () => sheetController, getSheetStore: () => sheetDataStore,
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),

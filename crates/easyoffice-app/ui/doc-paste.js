@@ -128,6 +128,7 @@
     function listItemElement(item) {
       const li = styleBlock(document.createElement("li"), item);
       if (item.level > 0) li.dataset.eoListLevel = String(item.level);
+      if (item.list === "ol" && item.listNumber) li.dataset.eoListNum = item.listNumber;
       if (item.list === "task") li.dataset.eoChecked = item.checked ? "true" : "false";
       appendInline(li, item.runs);
       if (item.runs.length === 0) li.appendChild(document.createElement("br"));
@@ -269,16 +270,17 @@
     function clampToBody(root, range) {
       const kids = Array.from(root.childNodes);
       if (kids.every(isFrame)) return false;
+      const endContainer = range.endContainer ?? range.startContainer;
       if (range.startContainer === root) {
-        const first = kids.slice(range.startOffset).find((n) => !isFrame(n));
+        const first = kids.slice(range.startOffset ?? 0).find((n) => !isFrame(n));
         if (first) range.setStart(root, kids.indexOf(first));
       }
-      if (range.endContainer === root) {
-        const last = kids.slice(0, range.endOffset).findLast((n) => !isFrame(n));
+      if (endContainer === root) {
+        const last = kids.slice(0, range.endOffset ?? 0).findLast((n) => !isFrame(n));
         if (last) range.setEnd(root, kids.indexOf(last) + 1);
       }
       const from = structureTable(root, range.startContainer);
-      const to = structureTable(root, range.endContainer);
+      const to = structureTable(root, range.endContainer ?? range.startContainer);
       if (from && from === to) return false;
       if (from) range.setStart(from.parentNode, indexIn(from));
       if (to) range.setEnd(to.parentNode, indexIn(to) + 1);
@@ -291,11 +293,12 @@
     // first block when the ends are in two blocks, so the point is taken before the deletion (the node it names is cut, never
     // removed; a boundary on the editor itself names a place between blocks, which stays).
     function deleteSelection(root, range) {
-      if (!clampToBody(root, range)) return { start: { node: range.startContainer, offset: range.startOffset }, deleted: false };
-      const start = { node: range.startContainer, offset: range.startOffset };
-      if (closestCell(root, range.startContainer) !== closestCell(root, range.endContainer) || zoneOf(root, range.startContainer) !== zoneOf(root, range.endContainer)) return { start, deleted: false };
+      if (!clampToBody(root, range)) return { start: { node: range.startContainer, offset: range.startOffset ?? 0 }, deleted: false };
+      const endNode = range.endContainer ?? range.startContainer;
+      const start = { node: range.startContainer, offset: range.startOffset ?? 0 };
+      if (closestCell(root, range.startContainer) !== closestCell(root, endNode) || zoneOf(root, range.startContainer) !== zoneOf(root, endNode)) return { start, deleted: false };
       const startBlock = leafBlockOf(root, range.startContainer);
-      const endBlock = leafBlockOf(root, range.endContainer);
+      const endBlock = leafBlockOf(root, endNode);
       range.deleteContents();
       if (startBlock && endBlock && startBlock !== endBlock && endBlock.parentNode && !startBlock.contains(endBlock) && !endBlock.contains(startBlock)) {
         while (endBlock.firstChild) startBlock.appendChild(endBlock.firstChild);
@@ -448,8 +451,8 @@
       delete block.dataset.eoFrameCopy;
       const tail = cleanTail(splitUpTo(block, located.node, located.offset));
       // The first block of the paste joins the text before the caret, the last one the text after it. An empty paragraph
-      // takes the heading level and the alignment of the first block instead.
-      const lead = items[0]?.type === "text" ? items.shift() : null;
+      // takes the heading level and the alignment of the first block instead (except list items, which keep their list).
+      const lead = items[0]?.type === "text" && (inList || !items[0].list) ? items.shift() : null;
       if (lead && wasEmpty && tagOf(block) === "P") block = adoptBlockLook(block, lead);
       const headChars = block.textContent.length;
       if (lead) appendInline(block, lead.runs);
@@ -467,7 +470,11 @@
         for (const node of inlineNodes(last.runs)) tail.insertBefore(node, first);
       }
       attachTail(block, tail, anchor, rest, spread, needsTail);
-      if (!block.firstChild) block.appendChild(document.createElement("br"));
+      if (wasEmpty && !lead && (tagOf(anchor) === "UL" || tagOf(anchor) === "OL") && tagOf(block) === "P" && block.parentNode) {
+        block.parentNode.removeChild(block);
+      } else if (!block.firstChild) {
+        block.appendChild(document.createElement("br"));
+      }
       R().normalizeContainer(block);
       if (root.contains(tail)) R().normalizeContainer(tail);
       if (!spread) return caretIn(root, block, headChars + runChars(lead?.runs));
@@ -498,13 +505,25 @@
 
     // ------------------------------------------------------------ the events
 
+    function activeEditorRange(root, fallbackRange) {
+      const sel = env.getSelection?.();
+      const liveRange = sel?.rangeCount > 0 ? sel.getRangeAt(0) : null;
+      if (liveRange && root.contains(liveRange.startContainer) && root.contains(liveRange.endContainer ?? liveRange.startContainer)) {
+        return { range: liveRange, fromLive: true };
+      }
+      if (fallbackRange && root.contains(fallbackRange.startContainer) && root.contains(fallbackRange.endContainer ?? fallbackRange.startContainer)) {
+        return { range: fallbackRange, fromLive: false };
+      }
+      return { range: null, fromLive: false };
+    }
+
     // The model into the editor as one undo step; false when there was nowhere to put it.
-    function insertModel(blocks) {
+    function insertModel(blocks, fallbackRange = null) {
       const root = editor();
       if (!root) return false;
       const sel = env.getSelection?.();
-      const range = sel?.rangeCount > 0 ? sel.getRangeAt(0) : null;
-      const inside = range && root.contains(range.startContainer) && root.contains(range.endContainer);
+      const { range, fromLive } = activeEditorRange(root, fallbackRange);
+      const inside = Boolean(range);
       // Nothing to put in (a line break alone in a header) leaves the selection where it is.
       const zone = inside ? zoneOf(root, range.startContainer) : null;
       const insertable = zone ? blocks.some((item) => item.type === "text" && item.runs.some((run) => !run.br)) : blocks.length > 0;
@@ -515,11 +534,11 @@
       let done = false;
       withUndo(() => {
         const cut = inside && !range.collapsed ? deleteSelection(root, range) : null;
-        const live = inside ? sel.getRangeAt(0) : null;
-        const at = cut?.start ?? (live ? { node: live.startContainer, offset: live.startOffset } : appendPoint(root));
+        const liveAfter = inside && fromLive && sel?.rangeCount > 0 ? sel.getRangeAt(0) : range;
+        const at = cut?.start ?? (liveAfter ? { node: liveAfter.startContainer, offset: liveAfter.startOffset ?? 0 } : appendPoint(root));
         const located = leafBlockAt(root, at.node, at.offset);
-        const zone = zoneOf(root, located.block);
-        const caret = zone ? insertInline(root, located.block, located.node, located.offset, blocks) : insertBlocks(root, blocks, located);
+        const locZone = zoneOf(root, located.block);
+        const caret = locZone ? insertInline(root, located.block, located.node, located.offset, blocks) : insertBlocks(root, blocks, located);
         if (caret) {
           placeCaretAt(caret.node, caret.offset);
           done = true;
@@ -536,34 +555,97 @@
       return { node: root, offset: root.childNodes.length };
     }
 
-    async function pasteImageFile(file) {
-      const api = host.__EASYOFFICE_DOC_IMAGE_API__;
-      if (!api) return;
+    async function pasteImageFile(file, fallbackRange = null) {
+      const limits = host.__EASYOFFICE_DOC_PASTE_MODEL__?.LIMITS;
+      if (typeof file?.size === "number" && limits && file.size > limits.MAX_IMAGE_BYTES) {
+        setFeedback?.("그림을 넣지 못했습니다: 최대 32 MiB까지 넣을 수 있습니다");
+        return false;
+      }
       try {
-        api.insertImageBytes(new Uint8Array(await file.arrayBuffer()), file.type || file.name);
+        const raw = new Uint8Array(await file.arrayBuffer());
+        const images = host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__;
+        const norm = await images.normalizeClipboardImageBytes(raw, file.type || file.name || "", env);
+        if (norm.error) {
+          setFeedback?.(norm.error);
+          return false;
+        }
+        if (!isDocModule() || !editor()) return false;
+        const api = host.__EASYOFFICE_DOC_IMAGE_API__;
+        const check = api?.validateImageBytes?.(norm.bytes);
+        if (check?.error) {
+          setFeedback?.(check.error);
+          return false;
+        }
+        const ok = insertModel([{ type: "image", bytes: norm.bytes, hint: file.name || file.type || "" }], fallbackRange);
+        if (ok) setFeedback?.(MSG_DONE);
+        return ok;
       } catch {
         setFeedback?.("그림을 넣지 못했습니다");
+        return false;
       }
     }
 
     // Ref `pastePlainText`. `doneMessage` is what the status line says when the text went in.
-    function pasteText(text, doneMessage = MSG_DONE) {
+    function pasteText(text, doneMessage = MSG_DONE, fallbackRange = null) {
       const parsed = host.__EASYOFFICE_DOC_PASTE_MODEL__.parseText(text);
-      if (parsed.error === "limit") return setFeedback?.(MSG_TEXT_TOO_LARGE);
-      if (parsed.error) return setFeedback?.(MSG_NO_CONTENT);
-      if (insertModel(parsed.blocks)) setFeedback?.(doneMessage);
+      if (parsed.error === "limit") {
+        setFeedback?.(MSG_TEXT_TOO_LARGE);
+        return false;
+      }
+      if (parsed.error) {
+        setFeedback?.(MSG_NO_CONTENT);
+        return false;
+      }
+      if (insertModel(parsed.blocks, fallbackRange)) {
+        setFeedback?.(doneMessage);
+        return true;
+      }
+      return false;
     }
 
     // Ref `pasteExternalHtml`: cleaned HTML, and the plain text when the HTML has nothing to paste or is refused.
-    function pasteExternalHtml(html, text) {
+    function pasteExternalHtml(html, text, fallbackRange = null) {
       const cleaned = host.__EASYOFFICE_DOC_PASTE_SANITIZE__.sanitizeOfficeHtml(html);
       const parsed = host.__EASYOFFICE_DOC_PASTE_MODEL__.parseHtml(cleaned, env);
       if (parsed.blocks) {
-        if (insertModel(parsed.blocks)) setFeedback?.(MSG_DONE);
-        return;
+        if (insertModel(parsed.blocks, fallbackRange)) {
+          setFeedback?.(MSG_DONE);
+          return true;
+        }
+        return false;
       }
-      if (text) pasteText(text, parsed.error === "limit" ? MSG_TOO_LARGE : MSG_DONE);
-      else if (parsed.error === "limit") setFeedback?.(MSG_TEXT_TOO_LARGE);
+      if (text) return pasteText(text, parsed.error === "limit" ? MSG_TOO_LARGE : MSG_DONE, fallbackRange);
+      if (parsed.error === "limit") setFeedback?.(MSG_TEXT_TOO_LARGE);
+      return false;
+    }
+
+    async function pasteHtmlOrText(html, text, rtf, { fallbackRange = null, requireLiveCaret = false } = {}) {
+      const limits = host.__EASYOFFICE_DOC_PASTE_MODEL__.LIMITS;
+      if (html.length > limits.MAX_HTML_CHARS) {
+        if (text) return pasteText(text, MSG_TOO_LARGE, fallbackRange);
+        setFeedback?.(MSG_TEXT_TOO_LARGE);
+        return false;
+      }
+      if (!html) return pasteText(text, MSG_DONE, fallbackRange);
+      const images = host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__;
+      if (!images.needsAsyncImagePrep(html, rtf)) {
+        return pasteExternalHtml(html, text, fallbackRange);
+      }
+      // Prepare RTF/GIF/SVG pictures, then paste only if the document window is still active (and caret remains if event paste).
+      let merged = html;
+      try {
+        merged = await images.prepareClipboardHtmlImages(html, rtf, env);
+      } catch {
+        // without converted pictures the rest of the HTML is still pasted
+      }
+      const root = editor();
+      if (!isDocModule() || !root) return false;
+      if (requireLiveCaret) {
+        const now = env.getSelection?.();
+        const caret = now?.rangeCount > 0 ? now.getRangeAt(0).startContainer : null;
+        if (!caret || !root.contains(caret)) return false;
+      }
+      return pasteExternalHtml(merged, text, fallbackRange);
     }
 
     // Ref `onPaste`.
@@ -574,8 +656,6 @@
       if (!root || !data) return;
       event.preventDefault?.();
       const html = data.getData("text/html") || "";
-      // The size of the HTML is the first thing looked at: over the bound it is neither cleaned nor read.
-      const oversized = html.length > host.__EASYOFFICE_DOC_PASTE_MODEL__.LIMITS.MAX_HTML_CHARS;
       const text = data.getData("text/plain") || "";
       const rtf = data.getData("text/rtf") || "";
       const sel = env.getSelection?.();
@@ -595,41 +675,67 @@
           }
         }
       }
-      if (oversized) {
-        if (text) pasteText(text, MSG_TOO_LARGE);
-        else setFeedback?.(MSG_TEXT_TOO_LARGE);
-        return;
-      }
-      if (!html) {
-        pasteText(text);
-        return;
-      }
+      void pasteHtmlOrText(html, text, rtf, { requireLiveCaret: imagesNeedAsync(html, rtf) });
+    }
+
+    function imagesNeedAsync(html, rtf) {
+      const limits = host.__EASYOFFICE_DOC_PASTE_MODEL__.LIMITS;
+      return Boolean(html && html.length <= limits.MAX_HTML_CHARS && host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__?.needsAsyncImagePrep(html, rtf));
+    }
+
+    async function pasteFromClipboard(fallbackRange, fallbackReadText) {
+      const root = editor();
+      if (!root || !isDocModule()) return false;
+      const { range } = activeEditorRange(root, fallbackRange);
+      const inZone = Boolean(range && zoneOf(root, range.startContainer));
+      const limits = host.__EASYOFFICE_DOC_PASTE_MODEL__.LIMITS;
       const images = host.__EASYOFFICE_DOC_CLIPBOARD_IMAGES__;
-      if (!images.needsRtfImageInlining(html, rtf)) {
-        pasteExternalHtml(html, text);
-        return;
-      }
-      // The pictures come from the RTF. The paste goes in when they are ready, at the caret of that time, and only if the
-      // document window and a caret in it are still there (the user may have gone elsewhere meanwhile).
-      void (async () => {
-        let merged = html;
+      const clip = env.navigator?.clipboard;
+      if (clip && typeof clip.read === "function") {
         try {
-          merged = await images.inlineOfficeClipboardImages(html, rtf, env);
+          for (const item of await clip.read()) {
+            const types = Array.from(item.types || []);
+            const imgType = !inZone ? types.find((t) => String(t).startsWith("image/")) : null;
+            if (imgType && !types.includes("text/html")) {
+              return await pasteImageFile(await item.getType(imgType), range);
+            }
+            const htmlBlob = !inZone && types.includes("text/html") ? await item.getType("text/html") : null;
+            const plainBlob = types.includes("text/plain") ? await item.getType("text/plain") : null;
+            if (plainBlob && plainBlob.size > limits.MAX_TEXT_CHARS * 4) {
+              setFeedback?.(MSG_TEXT_TOO_LARGE);
+              return false;
+            }
+            const plain = plainBlob ? await plainBlob.text() : "";
+            if (htmlBlob) {
+              if (htmlBlob.size > limits.MAX_HTML_CHARS * 3) {
+                if (plain) return pasteText(plain, MSG_TOO_LARGE, range);
+                setFeedback?.(MSG_TEXT_TOO_LARGE);
+                return false;
+              }
+              const html = await htmlBlob.text();
+              const rtfBlob = types.includes("text/rtf") ? await item.getType("text/rtf") : null;
+              const rtf = rtfBlob && rtfBlob.size <= images.LIMITS.MAX_RTF_CHARS ? await rtfBlob.text() : "";
+              if (html || plain) return await pasteHtmlOrText(html, plain, rtf, { fallbackRange: range });
+            }
+            if (plain) return pasteText(plain, MSG_DONE, range);
+          }
         } catch {
-          // without the pictures the rest is still pasted
+          // Permission denied or clipboard.read unavailable: fall back to text-only clipboard read.
         }
-        const now = env.getSelection?.();
-        const caret = now?.rangeCount > 0 ? now.getRangeAt(0).startContainer : null;
-        if (!isDocModule() || !caret || !editor()?.contains(caret)) return;
-        pasteExternalHtml(merged, text);
-      })();
+      }
+      const text = typeof fallbackReadText === "function" ? await fallbackReadText() : "";
+      if (!text) {
+        setFeedback?.(MSG_NO_CONTENT);
+        return false;
+      }
+      return pasteText(text, MSG_DONE, range);
     }
 
     function bind() {
       editor()?.addEventListener("paste", onPaste);
     }
 
-    return { bind, onPaste, insertModel };
+    return { bind, onPaste, insertModel, pasteFromClipboard };
   }
 
   host.__EASYOFFICE_CREATE_DOC_PASTE__ = createDocPaste;

@@ -254,3 +254,33 @@ test("random tag soup never throws and never leaves anything but the editor's ow
     assert.ok(!t.editor.textContent.includes("alert"));
   }
 });
+
+test("hostile SVG data URLs and pixel-bomb GIFs leave zero pictures and a clean editor tree", async () => {
+  const t = await editorWithCaret();
+  const bombGif = Buffer.from([
+    0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0xff, 0xff, 0xff, 0xff, 0x80, 0, 0,
+    ...Array.from({ length: 16 }, () => 0), 0x3b,
+  ]).toString("base64");
+  const svgBomb = [
+    '<svg><script>alert(1)</script><rect/></svg>',
+    '<svg onload="alert(2)"><rect/></svg>',
+    '<svg><foreignObject><body/></foreignObject></svg>',
+    '<!DOCTYPE svg [<!ENTITY e "x">]><svg><text>&e;</text></svg>',
+    '<svg><image href="https://evil.example/x.png"/></svg>',
+    `<svg><image href="data:image/svg+xml;base64,${Buffer.from("<svg><rect/></svg>").toString("base64")}"/></svg>`,
+  ].map((s) => `<img src="data:image/svg+xml;base64,${Buffer.from(s, "utf8").toString("base64")}">`).join("");
+  await t.paste(clipboard({ html: `<p>안전<img src="data:image/gif;base64,${bombGif}">${svgBomb}</p>`, text: "x" }));
+  assert.equal(t.editor.querySelectorAll("img").length, 0);
+  assert.equal(t.editor.textContent, "앞안전뒤");
+  assertCleanTree(t.editor);
+});
+
+test("hostile !supportLists conditionals strip active payloads cleanly", async () => {
+  const t = await editorWithCaret();
+  const html = '<p class="MsoListParagraph" style="mso-list:l0 level1 lfo1"><![if !supportLists]><script>alert(1)</script><img src=x onerror=alert(2)><span>1.</span><![endif]>목록글</p>';
+  await t.paste(clipboard({ html, text: "목록글" }));
+  assertCleanTree(t.editor);
+  assert.equal(t.editor.querySelectorAll("img").length, 0);
+  assert.ok(!t.editor.textContent.includes("alert"));
+  assert.ok(t.editor.textContent.includes("목록글"));
+});

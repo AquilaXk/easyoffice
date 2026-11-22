@@ -425,10 +425,17 @@
       dlg?.querySelectorAll?.("[data-dialog-close]").forEach((btn) => btn.addEventListener("click", () => dlg.close?.()));
     }
 
+    function validateImageBytes(bytes) {
+      const root = editor();
+      if (!root || !utils) return { error: "편집 영역을 찾을 수 없습니다" };
+      const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+      return checkQuotaAndHeader(root, u8);
+    }
+
     const handles = (cmd) => cmd === CMD_INSERT_IMAGE;
     const run = (cmd) => (cmd === CMD_INSERT_IMAGE ? ($("doc-image-input")?.click(), { changed: false, openedPicker: true }) : { changed: false });
 
-    const api = { bind, handles, run, insertImageBytes, createImageElement, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
+    const api = { bind, handles, run, insertImageBytes, createImageElement, validateImageBytes, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
     host.__EASYOFFICE_DOC_IMAGE_API__ = api;
     return api;
   }

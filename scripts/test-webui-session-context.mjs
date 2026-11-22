@@ -68,8 +68,21 @@ function selectTextRange(selection, document, textNode, start, end) {
   const range = {
     commonAncestorContainer: textNode,
     startContainer: textNode,
+    get startOffset() {
+      return state.start;
+    },
+    endContainer: textNode,
+    get endOffset() {
+      return state.end;
+    },
     get collapsed() {
       return state.start === state.end;
+    },
+    setStart(n, o) {
+      if (n === textNode) state.start = o;
+    },
+    setEnd(n, o) {
+      if (n === textNode) state.end = o;
     },
     toString: () => textNode.data.slice(state.start, state.end),
     cloneRange() {

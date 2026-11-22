@@ -352,6 +352,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       restoreWorkspaceSnapshot,
       runExclusive,
       getWorkspacePanels,
+      getDocPaste,
       getSheetController,
     } = deps;
     const isDesktopShell = typeof deps.isDesktopShell === "function" ? deps.isDesktopShell : () => false;
@@ -716,22 +717,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return internalClipboard;
     }
 
-    function insertPlainText(range, text) {
-      if (range) {
-        range.deleteContents();
-        range.insertNode(document.createTextNode(text));
-        return;
-      }
-      const editor = document.getElementById("doc-editor");
-      if (!editor) return;
-      let blk = getWorkspacePanels().getFocusedDocBlock(editor);
-      while (blk?.parentElement && blk.parentElement !== editor) blk = blk.parentElement;
-      const p = document.createElement("p");
-      p.textContent = text;
-      if (blk && blk !== editor && typeof blk.after === "function") blk.after(p);
-      else editor.appendChild(p);
-    }
-
     // Replaces the selection (or inserts at the caret) with a text node and puts the caret after it, so
     // inline runs around it keep their markup. False when the document has no selection to use.
     function insertTextAtSelection(text) {
@@ -755,16 +740,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       else if (cmd === "clip-paste" && where === false) setFeedback("붙일 클립보드 내용이 없습니다");
     }
 
-    async function runDocClipboardPaste(range, withDocStyleUndo) {
-      const text = await readSystemClipboard();
-      if (!text) {
-        setFeedback("붙일 클립보드 내용이 없습니다");
-        return;
+    async function runDocClipboardPaste(range) {
+      const pasted = await getDocPaste?.()?.pasteFromClipboard(range, readSystemClipboard);
+      if (pasted) {
+        getWorkspacePanels().computeSmartStats();
+        noteActivity();
       }
-      withDocStyleUndo(() => insertPlainText(range, text));
-      getWorkspacePanels().computeSmartStats();
-      noteActivity();
-      setFeedback("클립보드 붙이기 완료 (" + Array.from(text).length + "자)");
     }
 
     async function runClipboardCommand(cmd, withDocStyleUndo) {
@@ -776,7 +757,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();
-      if (cmd === "clip-paste") return runDocClipboardPaste(range, withDocStyleUndo);
+      if (cmd === "clip-paste") return runDocClipboardPaste(range);
       const text = range && !range.collapsed ? range.toString() : "";
       if (!text) {
         setFeedback((cmd === "clip-cut" ? "오려 둘" : "복사할") + " 텍스트를 먼저 선택하세요");

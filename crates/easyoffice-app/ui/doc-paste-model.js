@@ -51,6 +51,66 @@
   const IMAGE_DATA_URL = /^data:image\/(png|jpe?g);base64,/i;
   const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
   const COLLAPSIBLE_SPACE = /[ \t\r\n\f]+/g;
+  const OL_TYPES = { a: "lowerLatin:dot", A: "upperLatin:dot", i: "lowerRoman:dot", I: "upperRoman:dot" };
+  const VALID_LIST_NUMBERS = new Set([
+    "decimal:dot", "decimal:paren", "decimal:rparen",
+    "lowerLatin:dot", "lowerLatin:paren", "lowerLatin:rparen",
+    "upperLatin:dot", "upperLatin:paren", "upperLatin:rparen",
+    "lowerRoman:dot", "lowerRoman:paren", "lowerRoman:rparen",
+    "upperRoman:dot", "upperRoman:paren", "upperRoman:rparen",
+    "hangul:dot", "hangul:paren", "hangul:rparen",
+  ]);
+  const normalizeListNumber = (code) => (VALID_LIST_NUMBERS.has(code) && code !== "decimal:dot" ? code : null);
+  const isMsoIgnore = (el) => el?.getAttribute?.("data-eo-mso-list-ignore") === "1" || /\bmso-list\s*:\s*ignore\b/i.test(el?.getAttribute?.("style") || "");
+
+  function hasMsoIgnoreChild(el, depth = 0, budget = { left: 16 }) {
+    if (!el || depth > 4) return false;
+    for (const child of Array.from(el.childNodes || [])) {
+      if (child.nodeType !== 1) continue;
+      if (budget.left <= 0) return false;
+      budget.left -= 1;
+      if (isMsoIgnore(child) || hasMsoIgnoreChild(child, depth + 1, budget)) return true;
+    }
+    return false;
+  }
+
+  function msoListSpec(el, ctx) {
+    if (ctx.listItem) return null;
+    const style = String(el.getAttribute?.("style") || "");
+    const match = /\bmso-list\s*:\s*([^;]+)/i.exec(style);
+    if (match) {
+      const val = match[1].trim();
+      if (/^(?:none|ignore)\b/i.test(val)) return null;
+      const lvlMatch = /\blevel(\d+)\b/i.exec(val);
+      const level = lvlMatch ? Math.min(Math.max(Number.parseInt(lvlMatch[1], 10) - 1, 0), LIMITS.MAX_LIST_LEVEL) : 0;
+      return { level };
+    }
+    return hasMsoIgnoreChild(el) ? { level: 0 } : null;
+  }
+
+  function classifyMsoMarker(text, font, prevFmt) {
+    const raw = String(text ?? "").replace(/(?:&nbsp;|[\s\u00a0])+/gi, "");
+    if (!raw || /\b(?:wingdings|symbol|webdings)\b/i.test(font)) return { list: "ul", listNumber: null, fmt: null };
+    if (/^[①-⑳]$/.test(raw)) return { list: "ol", listNumber: "decimal:paren", fmt: "decimal" };
+    if (/^\d+(?:\.\d+)+\.?$/.test(raw)) return { list: "ol", listNumber: null, fmt: "decimal" };
+    let match;
+    let enc = null;
+    if ((match = /^\(([^()]+)\)\.?$/.exec(raw))) enc = "paren";
+    else if ((match = /^([^().]+)\)$/.exec(raw))) enc = "rparen";
+    else if ((match = /^([^().]+)\.$/.exec(raw))) enc = "dot";
+    else if ((match = /^(\d+)$/.exec(raw))) enc = "dot";
+    if (!enc) return { list: "ul", listNumber: null, fmt: null };
+    const core = match[1];
+    let fmt = null;
+    if (/^\d+$/.test(core)) fmt = "decimal";
+    else if (/^[가-힣]$/.test(core)) fmt = "hangul";
+    else if (/^[ivxlcdm]{1,8}$/.test(core)) fmt = core.length === 1 && prevFmt === "lowerLatin" ? "lowerLatin" : "lowerRoman";
+    else if (/^[IVXLCDM]{1,8}$/.test(core)) fmt = core.length === 1 && prevFmt === "upperLatin" ? "upperLatin" : "upperRoman";
+    else if (/^[a-z]$/.test(core)) fmt = "lowerLatin";
+    else if (/^[A-Z]$/.test(core)) fmt = "upperLatin";
+    if (!fmt) return { list: "ul", listNumber: null, fmt: null };
+    return { list: "ol", listNumber: normalizeListNumber(`${fmt}:${enc}`), fmt };
+  }
 
   const NO_FORMAT = Object.freeze({});
 
@@ -85,7 +145,7 @@
 
     function newBlock(tag, props = {}) {
       over("blocks", LIMITS.MAX_BLOCKS);
-      return { type: "text", tag, list: null, level: 0, checked: false, align: null, runs: [], pre: false, ...props };
+      return { type: "text", tag, list: null, listNumber: null, level: 0, checked: false, align: null, runs: [], pre: false, ...props };
     }
 
     const sameFormat = (a, b) => {
@@ -202,7 +262,12 @@
     // ------------------------------------------------------------ the walk
 
     function newContext(extra = {}) {
-      return { blocks: [], cur: null, fmt: NO_FORMAT, pre: false, href: null, align: null, listItem: null, listProps: null, lists: [], inCell: false, ...extra };
+      return {
+        blocks: [], cur: null, fmt: NO_FORMAT, pre: false, href: null, align: null,
+        listItem: null, listProps: null, lists: [], inCell: false,
+        msoMarker: null, capturingMsoIgnore: false, lastMsoFmtByLevel: [],
+        ...extra,
+      };
     }
 
     function visitChildren(el, ctx, depth) {
@@ -219,10 +284,33 @@
       ctx.align = keepAlign;
     }
 
+    function openMsoListParagraph(el, ctx, depth, spec) {
+      flush(ctx);
+      const keepAlign = ctx.align;
+      const keepMarker = ctx.msoMarker;
+      const marker = { text: "", font: "" };
+      const startIdx = ctx.blocks.length;
+      ctx.msoMarker = marker;
+      ctx.align = alignOf(el) ?? keepAlign;
+      ctx.cur = newBlock("li", { list: "ul", listNumber: null, level: spec.level, checked: false, align: ctx.align, pre: ctx.pre });
+      visitChildren(el, ctx, depth);
+      ctx.msoMarker = keepMarker;
+      const targetBlock = ctx.cur ?? (ctx.blocks.length > startIdx && ctx.blocks[startIdx]?.type === "text" ? ctx.blocks[startIdx] : null);
+      if (targetBlock) {
+        const kind = classifyMsoMarker(marker.text, marker.font, ctx.lastMsoFmtByLevel[spec.level] ?? null);
+        targetBlock.list = kind.list;
+        targetBlock.listNumber = kind.listNumber;
+        if (kind.fmt) ctx.lastMsoFmtByLevel[spec.level] = kind.fmt;
+      }
+      flush(ctx);
+      ctx.align = keepAlign;
+    }
+
     function openList(el, ctx, depth, tag) {
       flush(ctx);
       const task = el.dataset?.eoList === "task";
-      ctx.lists.push({ kind: tag === "ol" ? "ol" : task ? "task" : "ul" });
+      const listNumber = tag === "ol" ? (OL_TYPES[String(el.getAttribute?.("type") || "").trim()] ?? null) : null;
+      ctx.lists.push({ kind: tag === "ol" ? "ol" : task ? "task" : "ul", listNumber });
       visitChildren(el, ctx, depth);
       flush(ctx);
       ctx.lists.pop();
@@ -230,9 +318,10 @@
 
     function openListItem(el, ctx, depth) {
       flush(ctx);
-      const list = ctx.lists.at(-1) ?? { kind: "ul" };
+      const list = ctx.lists.at(-1) ?? { kind: "ul", listNumber: null };
       const props = {
         list: list.kind,
+        listNumber: list.kind === "ol" ? normalizeListNumber(String(el.dataset?.eoListNum || list.listNumber || "")) : null,
         level: Math.min(Math.max(ctx.lists.length - 1, 0), LIMITS.MAX_LIST_LEVEL),
         checked: list.kind === "task" && el.dataset?.eoChecked === "true",
         align: alignOf(el) ?? ctx.align,
@@ -255,7 +344,23 @@
       ctx.fmt = outer;
     }
 
+    function visitMsoIgnoreElement(el, ctx, depth) {
+      if (DROPPED_TAGS.has(tagOf(el)) || el.hasAttribute?.("hidden") || el.style?.display === "none") return;
+      const style = String(el.getAttribute?.("style") || "");
+      const font = String(el.style?.fontFamily || /\bfont-family\s*:\s*([^;]+)/i.exec(style)?.[1] || "").trim();
+      if (font && (!ctx.msoMarker.font || /\b(?:wingdings|symbol|webdings)\b/i.test(font))) ctx.msoMarker.font = font;
+      visitChildren(el, ctx, depth);
+    }
+
     function dispatchElement(el, ctx, depth) {
+      if (isMsoIgnore(el)) {
+        if (ctx.msoMarker && !ctx.capturingMsoIgnore) {
+          ctx.capturingMsoIgnore = true;
+          visitMsoIgnoreElement(el, ctx, depth);
+          ctx.capturingMsoIgnore = false;
+        }
+        return;
+      }
       const tag = tagOf(el);
       if (tag === "br") {
         addRun(ensureBlock(ctx), { br: true });
@@ -281,6 +386,11 @@
       } else if (HEADINGS.has(tag)) {
         openTextBlock(el, ctx, depth, tag);
       } else if (TEXT_BLOCK_TAGS.has(tag)) {
+        const msoSpec = msoListSpec(el, ctx);
+        if (msoSpec) {
+          openMsoListParagraph(el, ctx, depth, msoSpec);
+          return;
+        }
         const keepPre = ctx.pre;
         ctx.pre = ctx.pre || tag === "pre" || tag === "listing" || tag === "xmp";
         openTextBlock(el, ctx, depth, ctx.listItem ?? "p");
@@ -305,6 +415,18 @@
     function visit(node, ctx, depth) {
       over("nodes", LIMITS.MAX_NODES);
       if (depth > LIMITS.MAX_DEPTH) throw new PasteLimitError("depth");
+      if (ctx.capturingMsoIgnore) {
+        if (node.nodeType === 3) {
+          const data = String(node.data ?? "").replace(CONTROL_CHARS, "");
+          if (data) {
+            over("chars", LIMITS.MAX_TEXT_CHARS, data.length);
+            ctx.msoMarker.text += data;
+          }
+        } else if (node.nodeType === 1) {
+          visitMsoIgnoreElement(node, ctx, depth + 1);
+        }
+        return;
+      }
       if (node.nodeType === 3) addText(ctx, node);
       else if (node.nodeType === 1) visitElement(node, ctx, depth + 1);
     }

@@ -46,8 +46,16 @@ test("a similar tag name is kept: <styles> is not <style>", () => {
   assert.equal(sanitizeOfficeHtml("<scripts>x</scripts>"), "<scripts>x</scripts>");
 });
 
-test("downlevel-revealed conditional blocks go", () => {
-  assert.equal(sanitizeOfficeHtml("<p><![if !supportLists]><span>1.</span><![endif]>item</p>"), "<p>item</p>");
+test("downlevel-revealed conditional blocks drop non-list blocks and preserve !supportLists markers cleanly", () => {
+  assert.equal(sanitizeOfficeHtml("<p><![if !supportEmptyParas]>&nbsp;<![endif]>plain</p>"), "<p>plain</p>");
+  assert.equal(
+    sanitizeOfficeHtml("<p><![if !supportLists]><span>1.</span><![endif]>item</p>"),
+    '<p><span data-eo-mso-list-ignore="1"><span>1.</span></span>item</p>'
+  );
+  assert.equal(
+    sanitizeOfficeHtml("<p><![if !supportLists]><script>alert(1)</script><span>·</span><![endif]>item</p>"),
+    '<p><span data-eo-mso-list-ignore="1"><span>·</span></span>item</p>'
+  );
 });
 
 test("a start marker without an end marker takes the rest of the text (fail-closed)", () => {
@@ -334,4 +342,71 @@ test("a letter with a different lower case form does not shift the scan of the c
   const out = sanitizeOfficeHtml("\u0130".repeat(20) + "<script>alert(1)</script>x<style>p{}</style>y");
   assert.ok(!out.toLowerCase().includes("<script") && !out.includes("alert") && !out.toLowerCase().includes("<style"), out);
   assert.ok(out.endsWith("xy"));
+});
+
+function makeMinimalGif(w, h) {
+  const head = Buffer.from("GIF89a", "ascii");
+  const lsd = Buffer.alloc(7);
+  lsd.writeUInt16LE(w, 0);
+  lsd.writeUInt16LE(h, 2);
+  lsd[4] = 0x80;
+  return Uint8Array.from([...head, ...lsd, ...Array.from({ length: 16 }, (_, i) => i), 0x3b]);
+}
+
+test("parseGifHeader validates GIF87a/89a magic, length, bounds, and 50M pixel limit", () => {
+  assert.deepEqual(images.parseGifHeader(makeMinimalGif(12, 34)), { widthPx: 12, heightPx: 34 });
+  assert.equal(images.parseGifHeader(new Uint8Array(10)), null);
+  assert.equal(images.parseGifHeader(makeMinimalGif(0, 10)), null);
+  assert.equal(images.parseGifHeader(makeMinimalGif(10000, 5001)), null);
+});
+
+test("validateSvgSource and decodeSvgDataUrl allow safe SVGs and reject active or external content", () => {
+  const goodSvg = '<svg width="40" height="20"><rect width="40" height="20"/></svg>';
+  const checked = images.validateSvgSource(goodSvg);
+  assert.equal(checked.widthPx, 40);
+  assert.equal(checked.heightPx, 20);
+  assert.ok(checked.svg.includes('xmlns="http://www.w3.org/2000/svg"'));
+
+  const b64Url = `data:image/svg+xml;base64,${Buffer.from(goodSvg, "utf8").toString("base64")}`;
+  assert.equal(images.decodeSvgDataUrl(b64Url)?.widthPx, 40);
+  assert.equal(images.decodeSvgDataUrl(`data:image/svg+xml;utf8,${encodeURIComponent(goodSvg)}`)?.heightPx, 20);
+
+  for (const bad of [
+    "<svg/>",
+    "<svg></svg>",
+    '<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg><text>&x;</text></svg>',
+    "<svg><script>alert(1)</script><rect/></svg>",
+    "<svg><foreignObject><body/></foreignObject></svg>",
+    "<svg><rect &#x6f;nload=\"alert(1)\"/></svg>",
+    '<svg><image href="https://evil.example/a.png"/></svg>',
+    '<svg style="background:url(javascript:alert(1))"><rect/></svg>',
+    `<svg><image href="${b64Url}"/></svg>`,
+  ]) {
+    assert.equal(images.validateSvgSource(bad), null, "expected rejection for " + bad);
+  }
+});
+
+test("prepareClipboardHtmlImages and normalizeClipboardImageBytes rasterize GIF and SVG to PNG", async () => {
+  const gif = makeMinimalGif(8, 6);
+  const svg = '<svg viewBox="0 0 18 9"><circle cx="9" cy="4" r="3"/></svg>';
+  const fake = fakeBrowser();
+  fake.env.Image = class {
+    set src(v) {
+      this.ok = String(v).startsWith("data:image/svg+xml;base64,");
+      queueMicrotask(() => (this.ok ? this.onload?.() : this.onerror?.()));
+    }
+  };
+  const html = `<p><img src="data:image/gif;base64,${Buffer.from(gif).toString("base64")}"><img src="data:image/svg+xml;utf8,${encodeURIComponent(svg)}"><img src="data:image/svg+xml;base64,${Buffer.from("<svg><script>1</script></svg>").toString("base64")}"></p>`;
+  assert.equal(images.needsAsyncImagePrep(html, ""), true);
+  const prepped = await images.prepareClipboardHtmlImages(html, "", fake.env);
+  const pngMatches = prepped.match(/data:image\/png;base64,/g) || [];
+  assert.equal(pngMatches.length, 2, prepped);
+  assert.ok(prepped.includes("data:image/svg+xml;base64,"), "unsafe SVG tag stays unreplaced");
+
+  const normGif = await images.normalizeClipboardImageBytes(gif, "image/gif", fake.env);
+  assert.deepEqual(Array.from(normGif.bytes.subarray(0, 4)), [0x89, 0x50, 0x4e, 0x47]);
+  const normSvg = await images.normalizeClipboardImageBytes(Buffer.from(svg, "utf8"), "image/svg+xml", fake.env);
+  assert.deepEqual(Array.from(normSvg.bytes.subarray(0, 4)), [0x89, 0x50, 0x4e, 0x47]);
+  const tooLargeGif = await images.normalizeClipboardImageBytes(makeMinimalGif(10000, 5001), "image/gif", fake.env);
+  assert.match(tooLargeGif.error, /화소 수/);
 });

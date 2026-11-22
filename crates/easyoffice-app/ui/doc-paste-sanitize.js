@@ -39,7 +39,10 @@
     }
   }
 
-  function sanitizeOfficeHtml(html) {
+  const MAX_SANITIZE_DEPTH = 8;
+
+  function sanitizeOfficeHtml(html, depth = 0) {
+    if (depth > MAX_SANITIZE_DEPTH) return "";
     // ASCII only: `toLowerCase` of a letter like U+0130 gives two code units and every index after it would be off.
     const lower = html.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
     let out = "";
@@ -57,10 +60,19 @@
         index = end < 0 ? html.length : end + 3;
         continue;
       }
-      // downlevel-revealed `<![if !supportEmptyParas]>...<![endif]>`
+      // downlevel-revealed `<![if !supportEmptyParas]>...<![endif]>` and `<![if !supportLists]>...<![endif]>`
       if (lower.startsWith("<![if", lt)) {
-        const end = lower.indexOf(CONDITIONAL_END, lt);
-        index = end < 0 ? html.length : end + CONDITIONAL_END.length;
+        const openEnd = html.indexOf(">", lt);
+        const end = openEnd < 0 ? -1 : lower.indexOf(CONDITIONAL_END, openEnd + 1);
+        if (end < 0) {
+          index = html.length;
+          continue;
+        }
+        if (/^<!\[if\s+!supportlists\s*\]>$/.test(lower.slice(lt, openEnd + 1))) {
+          const inner = sanitizeOfficeHtml(html.slice(openEnd + 1, end), depth + 1);
+          if (inner) out += '<span data-eo-mso-list-ignore="1">' + inner + "</span>";
+        }
+        index = end + CONDITIONAL_END.length;
         continue;
       }
       const dropped = NON_CONTENT_ELEMENTS.find((name) => lower.startsWith(`<${name}`, lt) && isTagNameBoundary(lower.charCodeAt(lt + 1 + name.length)));
