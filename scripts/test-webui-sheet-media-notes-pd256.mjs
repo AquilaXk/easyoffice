@@ -686,6 +686,20 @@ test("PD-299: 그림의 칸 앵커는 행 높이와 기본 행 높이를 따라 
   assert.deepEqual([plain.fromRow, plain.rowOffEmu, plain.toRow, plain.toRowOffEmu], [2, 2 * 9525, 3, 2 * 9525]);
 });
 
+test("PD-299: 엔진이 준 작은 차트의 크기를 페이지가 180x140으로 키우지 않는다", async () => {
+  const { host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-small-chart" });
+  await flushAsyncTurns(8);
+  const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const emu = { colOffEmu: 190500, rowOffEmu: 76200, toColOffEmu: 381000, toRowOffEmu: 152400 };
+  layoutApi.setCharts("Sheet1", [{
+    id: "c", chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right",
+    anchor: { fromCol: 1, fromRow: 1, toCol: 2, toRow: 4, ...emu, left: 100, top: 32, width: 100, height: 80, editAs: "oneCell" },
+  }]);
+  const a = layoutApi.chartsOf("Sheet1")[0].anchor;
+  assert.deepEqual([a.width, a.height, a.editAs], [100, 80, "oneCell"]);
+  assert.deepEqual([a.colOffEmu, a.rowOffEmu, a.toColOffEmu, a.toRowOffEmu], [190500, 76200, 381000, 152400]);
+});
+
 test("PD-299: 두 칸 앵커 그림은 행 높이를 따라 크기가 변하고, 한 칸 앵커는 크기를 지키고, 절대 앵커는 자리를 지킨다", async () => {
   const { document, host } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-media-edit-as" });
   await flushAsyncTurns(8);

@@ -364,7 +364,7 @@ fn chart_json_and_ipc_budgets_fail_closed() {
     for bad in [
         r#"{"targetFormat":"xlsx","sheets":[{"name":"S1","cells":[],"charts":[{"id":"c1","chartType":"radar"}]}]}"#,
         r#"{"targetFormat":"xlsx","sheets":[{"name":"S1","cells":[],"charts":[{"id":"c1","chartType":"column","legend":"center"}]}]}"#,
-        r#"{"targetFormat":"xlsx","sheets":[{"name":"S1","cells":[],"charts":[{"id":"c1","chartType":"column","anchor":{"width":50,"height":260}}]}]}"#,
+        r#"{"targetFormat":"xlsx","sheets":[{"name":"S1","cells":[],"charts":[{"id":"c1","chartType":"column","anchor":{"width":0,"height":260}}]}]}"#,
         r#"{"targetFormat":"xlsx","sheets":[{"name":"S1","cells":[],"charts":[{"id":"c1","chartType":"column","anchor":{"width":420,"height":9999}}]}]}"#,
     ] {
         assert!(

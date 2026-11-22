@@ -271,6 +271,116 @@ fn the_edit_kind_survives_a_round_trip_and_the_size_follows_its_rule() {
     );
 }
 
+fn cells_of(anchor: &ChartAnchor) -> [u32; 8] {
+    [
+        anchor.from_col,
+        anchor.from_row,
+        anchor.col_off_emu,
+        anchor.row_off_emu,
+        anchor.to_col,
+        anchor.to_row,
+        anchor.to_col_off_emu,
+        anchor.to_row_off_emu,
+    ]
+}
+
+/// A one-cell picture over rows 5..=9 (zero-based 4..=8) whose rows 7 and 8 are hidden was placed with the rows shown: it is
+/// 96 px tall, and a save that does not touch it says the same cells and the same size, hidden rows or not.
+#[test]
+fn a_one_cell_picture_over_hidden_rows_keeps_its_cells_and_its_size() {
+    let mut styling = SheetStyling {
+        hidden_rows: vec![(6, 7)],
+        ..SheetStyling::default()
+    };
+    let anchor = ChartAnchor {
+        edit_as: AnchorEdit::OneCell,
+        from_col: 1,
+        from_row: 4,
+        to_col: 3,
+        to_row: 8,
+        left_px: 80,
+        top_px: 96,
+        width_px: 160,
+        height_px: 96,
+        ..ChartAnchor::default()
+    };
+    styling.images.push(picture(anchor));
+    let read = round_trip(styling.clone());
+    let back = read.images[0].anchor;
+    assert_eq!(
+        cells_of(&back),
+        cells_of(&anchor),
+        "the cells are as they were"
+    );
+    assert_eq!(
+        (back.width_px, back.height_px),
+        (160, 96),
+        "and so is the size"
+    );
+    // The rows are shown again and the file is saved again: still the same.
+    let mut shown = read;
+    shown.hidden_rows.clear();
+    let again = round_trip(shown).images[0].anchor;
+    assert_eq!((again.width_px, again.height_px), (160, 96));
+    assert_eq!(again.edit_as, AnchorEdit::OneCell);
+}
+
+/// A chart smaller than the 180 x 140 px a page lets a chart be dragged to is not made larger by a read and a save.
+#[test]
+fn a_small_one_cell_or_absolute_chart_keeps_its_size_and_its_cells() {
+    // 100 x 80 px at (100, 32): column 1 and 20 px in, row 1 and 8 px in, to column 2 / 40 px and row 4 / 16 px.
+    let cells = |edit_as| ChartAnchor {
+        edit_as,
+        from_col: 1,
+        from_row: 1,
+        col_off_emu: 20 * 9_525,
+        row_off_emu: 8 * 9_525,
+        to_col: 2,
+        to_row: 4,
+        to_col_off_emu: 40 * 9_525,
+        to_row_off_emu: 16 * 9_525,
+        left_px: 100,
+        top_px: 32,
+        width_px: 100,
+        height_px: 80,
+    };
+    for edit_as in [AnchorEdit::OneCell, AnchorEdit::Absolute] {
+        let mut styling = SheetStyling::default();
+        styling.charts.push(chart(cells(edit_as)));
+        let back = round_trip(styling).charts[0].anchor;
+        assert_eq!(back.edit_as, edit_as);
+        assert_eq!((back.width_px, back.height_px), (100, 80), "{edit_as:?}");
+        assert_eq!(cells_of(&back), cells_of(&cells(edit_as)), "{edit_as:?}");
+    }
+}
+
+/// An anchor nobody touched is written with the cells and the offsets the file gave, to the EMU, even when they are not
+/// whole pixels.
+#[test]
+fn a_one_cell_picture_nobody_touched_is_written_with_the_cells_it_was_read_with() {
+    let anchor = ChartAnchor {
+        edit_as: AnchorEdit::OneCell,
+        from_col: 1,
+        from_row: 1,
+        col_off_emu: 3_333,
+        row_off_emu: 4_444,
+        to_col: 3,
+        to_row: 5,
+        to_col_off_emu: 5_555,
+        to_row_off_emu: 6_666,
+        left_px: 80,
+        top_px: 24,
+        width_px: 161,
+        height_px: 97,
+    };
+    let mut styling = SheetStyling::default();
+    styling.images.push(picture(anchor));
+    let first = round_trip(styling);
+    assert_eq!(cells_of(&first.images[0].anchor), cells_of(&anchor));
+    let second = round_trip(first);
+    assert_eq!(cells_of(&second.images[0].anchor), cells_of(&anchor));
+}
+
 /// A value of `editAs` that is not one of the three is the default, and so is no attribute at all.
 #[test]
 fn an_edit_kind_that_is_not_one_of_the_three_is_two_cell() {

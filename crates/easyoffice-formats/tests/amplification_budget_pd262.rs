@@ -508,8 +508,9 @@ fn drawing_extents_beyond_u64_pixels_clamp_instead_of_overflowing() {
 
     let (_, stylings) = OoxmlCodec::unpack_xlsx_with_styling(&pkg).expect("decode");
     let chart = &stylings[0].1.charts[0];
-    assert_eq!(chart.anchor.width_px, 1_600);
-    assert_eq!(chart.anchor.height_px, 1_200);
+    // The size a file gives is kept up to the 8,192 px every picture and chart may have (PD-299), never more.
+    assert_eq!(chart.anchor.width_px, 8_192);
+    assert_eq!(chart.anchor.height_px, 8_192);
 }
 
 /// 계산 필드(`formula`)와 날짜 묶음 필드(`fieldGroup`, `databaseField="0"`)는 원본 열이 없어
