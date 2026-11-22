@@ -833,7 +833,12 @@ impl OoxmlCodec {
                     &xf_styles.table_styles,
                 )?;
                 // The anchors of the drawings are placed on the rows the sheet has (PD-299).
-                let grid = SheetGrid::new(&styling.columns, RowOffsets::of(&styling));
+                // A sheet with no `<drawing>` has nothing to place, so its rows are not worked out.
+                let grid = if sheet_xml.contains("<drawing") {
+                    SheetGrid::new(&styling.columns, RowOffsets::of(&styling))
+                } else {
+                    SheetGrid::plain()
+                };
                 (styling.charts_rejected, styling.images_rejected) = read_sheet_drawings(
                     &sheet_name,
                     sheet_xml,

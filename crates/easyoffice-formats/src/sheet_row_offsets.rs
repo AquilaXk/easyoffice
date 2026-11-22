@@ -54,10 +54,24 @@ impl RowOffsets {
     /// The rows of `styling`: their own heights, the default row height and the hidden rows (the rows a user hid, a
     /// folded group hid and the filters hid).
     pub fn of(styling: &SheetStyling) -> Self {
+        Self::build(styling, true)
+    }
+
+    /// The rows of `styling` with the hidden rows at their height: where a picture that was placed on the cells with the rows
+    /// shown lies.
+    pub fn natural(styling: &SheetStyling) -> Self {
+        Self::build(styling, false)
+    }
+
+    fn build(styling: &SheetStyling, with_hidden: bool) -> Self {
         let base = whole_px(styling.base_row_px(GRID_ROW_PX));
-        let (mut hidden, filtered) = styling.hidden_row_runs();
-        hidden.extend(filtered);
-        normalize_runs(&mut hidden);
+        let mut hidden = Vec::new();
+        if with_hidden {
+            let (user, filtered) = styling.hidden_row_runs();
+            hidden = user;
+            hidden.extend(filtered);
+            normalize_runs(&mut hidden);
+        }
         let mut spans: Vec<(u32, u32, u32)> = hidden.iter().map(|&(a, b)| (a, b, 0)).collect();
         for &row in styling.row_heights.keys() {
             let px = whole_px(styling.row_height_px(row, GRID_ROW_PX));
@@ -132,6 +146,7 @@ pub struct SheetGrid<'a> {
     pub columns: &'a BTreeMap<u32, u32>,
     styling: Option<&'a SheetStyling>,
     rows: OnceCell<RowOffsets>,
+    natural: OnceCell<Box<SheetGrid<'a>>>,
 }
 
 impl<'a> SheetGrid<'a> {
@@ -141,6 +156,7 @@ impl<'a> SheetGrid<'a> {
             columns: &styling.columns,
             styling: Some(styling),
             rows: OnceCell::new(),
+            natural: OnceCell::new(),
         }
     }
 
@@ -151,11 +167,22 @@ impl<'a> SheetGrid<'a> {
             columns,
             styling: None,
             rows: OnceCell::from(rows),
+            natural: OnceCell::new(),
         }
     }
 
+    /// The same columns with the hidden rows at their height. A grid that was made of parts has no sheet to tell which
+    /// rows are hidden and is its own natural grid.
+    pub fn natural(&self) -> &SheetGrid<'a> {
+        let Some(styling) = self.styling else {
+            return self;
+        };
+        self.natural
+            .get_or_init(|| Box::new(SheetGrid::new(self.columns, RowOffsets::natural(styling))))
+    }
+
     /// A sheet with the default column width and the grid's row height everywhere.
-    pub fn plain() -> SheetGrid<'static> {
+    pub fn plain<'b>() -> SheetGrid<'b> {
         SheetGrid::new(&NO_COLUMNS, RowOffsets::default())
     }
 

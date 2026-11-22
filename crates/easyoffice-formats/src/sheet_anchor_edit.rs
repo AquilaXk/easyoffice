@@ -62,18 +62,60 @@ impl ChartAnchor {
         (clamp(x), clamp(y))
     }
 
+    /// The corners of the anchor in px, `(left, top, right, bottom)`, from its cells on `grid`.
+    fn corners_px(&self, grid: &SheetGrid<'_>) -> [u64; 4] {
+        let x = |col: u32, off: u32| {
+            col_left_px(col, grid.columns).saturating_add(emu_to_px_rounded(off))
+        };
+        let y = |row: u32, off: u32| grid.rows().top(row).saturating_add(emu_to_px_rounded(off));
+        [
+            x(self.from_col, self.col_off_emu),
+            y(self.from_row, self.row_off_emu),
+            x(self.to_col, self.to_col_off_emu),
+            y(self.to_row, self.to_row_off_emu),
+        ]
+    }
+
+    /// Whether the anchor's cells already put its corners where `placed` does, to a pixel, on `grid`.
+    fn lies_where(&self, placed: &Self, grid: &SheetGrid<'_>) -> bool {
+        let (a, b) = (self.corners_px(grid), placed.corners_px(grid));
+        a.iter().zip(b).all(|(p, q)| p.abs_diff(q) <= 1)
+    }
+
     /// Makes the cells say what the anchor means on the rows and columns of `grid`: a two-cell anchor says its own cells
     /// (its size follows them), a one-cell anchor starts on its start cell and keeps its pixel size, an absolute anchor
     /// keeps its pixel position and size. An anchor with no cells of its own has its pixels read.
     /// `grid_from_px` is the version of `sync_grid_from_px` of the kind of anchor (chart or picture).
+    ///
+    /// The cells of a one-cell or absolute anchor that has some are kept as they are, to the EMU, when they already
+    /// describe that size and place, on the rows as they are or with the hidden rows shown (the cells a file gives for a
+    /// picture over hidden rows, which are the rows' height when they were shown or hidden). Only a change of the rows, the
+    /// columns, the place or the size makes them be worked out again.
     pub(crate) fn settle(
         &mut self,
         grid: &SheetGrid<'_>,
         grid_from_px: impl Fn(&mut Self, &SheetGrid<'_>),
     ) {
+        let kept = *self;
         match (self.edit_as, self.has_explicit_grid()) {
-            (AnchorEdit::TwoCell, true) => {}
-            (AnchorEdit::OneCell, true) => self.start_on_cell(grid, grid_from_px),
+            (AnchorEdit::TwoCell, true) => return,
+            (_, false) => return grid_from_px(self, grid),
+            (_, true) => {}
+        }
+        for rows in [grid, grid.natural()] {
+            *self = kept;
+            match kept.edit_as {
+                AnchorEdit::OneCell => self.start_on_cell(rows, &grid_from_px),
+                _ => grid_from_px(self, rows),
+            }
+            if kept.lies_where(self, rows) {
+                *self = kept;
+                return;
+            }
+        }
+        *self = kept;
+        match kept.edit_as {
+            AnchorEdit::OneCell => self.start_on_cell(grid, grid_from_px),
             _ => grid_from_px(self, grid),
         }
     }

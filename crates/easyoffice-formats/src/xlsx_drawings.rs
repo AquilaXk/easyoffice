@@ -12,8 +12,7 @@ use crate::sheet_styling::sheet_anchor_edit::AnchorEdit;
 use crate::sheet_styling::sheet_chart::{
     col_left_px, validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart,
     DEFAULT_CHART_HEIGHT_PX, DEFAULT_CHART_WIDTH_PX, EMU_PER_PX, MAX_CHARTS_PER_SHEET,
-    MAX_CHART_HEIGHT_PX, MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_WORKBOOK_CHARTS,
-    MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
+    MAX_CHART_TEXT_BYTES, MAX_WORKBOOK_CHARTS,
 };
 use crate::sheet_styling::sheet_media_notes::{
     effective_image_two_cell, sync_image_grid_from_px, sync_image_px_from_grid,
@@ -199,8 +198,18 @@ impl<'a> DrawingWriter<'a> {
                 .top(tr)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(tre));
-            let w_emu = x1_emu.saturating_sub(x_emu).max(EMU_PER_PX);
-            let h_emu = y1_emu.saturating_sub(y_emu).max(EMU_PER_PX);
+            // A picture that does not size with its cells says its own size, which hidden rows between its cells do not shrink.
+            let (w_emu, h_emu) = if img.anchor.edit_as == AnchorEdit::TwoCell {
+                (
+                    x1_emu.saturating_sub(x_emu).max(EMU_PER_PX),
+                    y1_emu.saturating_sub(y_emu).max(EMU_PER_PX),
+                )
+            } else {
+                (
+                    u64::from(img.anchor.width_px).saturating_mul(EMU_PER_PX),
+                    u64::from(img.anchor.height_px).saturating_mul(EMU_PER_PX),
+                )
+            };
             let pic_name = if img.name.trim().is_empty() {
                 img.id.as_str()
             } else {
@@ -444,14 +453,22 @@ fn parse_drawing_anchors(xml: &str) -> Result<Vec<DrawingAnchorRaw>, EasyOfficeE
                         a.pos_y = attrs.get("y").and_then(|s| s.trim().parse().ok());
                     }
                 }
+                // The size of a one-cell, an absolute and a two-cell anchor that does not size with its cells: `xdr:ext`, or the
+                // `a:ext` of the picture. An extent of 0 (a chart's frame) is no size.
                 "ext"
-                    if cur
-                        .as_ref()
-                        .is_some_and(|a| a.kind != AnchorKind::TwoCell && loc_to.is_none()) =>
+                    if cur.as_ref().is_some_and(|a| {
+                        (a.kind != AnchorKind::TwoCell || a.edit_as != AnchorEdit::TwoCell)
+                            && loc_to.is_none()
+                    }) =>
                 {
                     if let Some(a) = cur.as_mut().filter(|a| a.ext_cx.is_none()) {
-                        a.ext_cx = attrs.get("cx").and_then(|s| s.trim().parse().ok());
-                        a.ext_cy = attrs.get("cy").and_then(|s| s.trim().parse().ok());
+                        let size = |key: &str| {
+                            attrs
+                                .get(key)
+                                .and_then(|s| s.trim().parse::<u64>().ok())
+                                .filter(|v| *v > 0)
+                        };
+                        (a.ext_cx, a.ext_cy) = (size("cx"), size("cy"));
                     }
                 }
                 "pic" if cur.is_some() => {
@@ -559,11 +576,11 @@ fn build_anchor_from_raw(
         )
     } else {
         (
-            MIN_CHART_WIDTH_PX,
-            MAX_CHART_WIDTH_PX,
+            1,
+            MAX_SHEET_IMAGE_DIM_PX,
             DEFAULT_CHART_WIDTH_PX,
-            MIN_CHART_HEIGHT_PX,
-            MAX_CHART_HEIGHT_PX,
+            1,
+            MAX_SHEET_IMAGE_DIM_PX,
             DEFAULT_CHART_HEIGHT_PX,
         )
     };
@@ -594,6 +611,16 @@ fn build_anchor_from_raw(
                 sync_image_px_from_grid(&mut anchor, grid);
             } else {
                 anchor.sync_px_from_grid(grid);
+            }
+            // An anchor that does not size with its cells has the size its file says, not the one of cells whose rows may be
+            // hidden now.
+            if raw.edit_as != AnchorEdit::TwoCell {
+                if let Some(cx) = raw.ext_cx {
+                    anchor.width_px = emu_u64_to_px(cx).clamp(min_w, max_w);
+                }
+                if let Some(cy) = raw.ext_cy {
+                    anchor.height_px = emu_u64_to_px(cy).clamp(min_h, max_h);
+                }
             }
         }
         AnchorKind::OneCell => {

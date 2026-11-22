@@ -358,9 +358,8 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
-  // The pixel and row fallbacks of the two anchor readers below (24 px rows, 96 px columns) only stand in for a value a
-  // malformed anchor lacks: the engine sends the pixels of every anchor it places, on the rows of the sheet (PD-299), and
-  // the grid places a picture by its row and column.
+  // The 24 px row and 96 px column fallbacks of the two anchor readers below only stand in for a value a malformed anchor
+  // lacks: the engine sends the pixels of every anchor, on the rows of the sheet (PD-299).
   function normalizeChartAnchor(raw) {
     const a = raw && typeof raw === "object" ? raw : {};
     const fcNum = Number(a.fromCol);
@@ -375,8 +374,9 @@
     const topNum = Number(a.top);
     const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : fromCol * 96)));
     const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : fromRow * 24)));
-    const width = Math.max(180, Math.min(1600, Math.round(Number(a.width) || 420)));
-    const height = Math.max(140, Math.min(1200, Math.round(Number(a.height) || 260)));
+    // A size from the engine is kept as it is: the lower limits of a chart a user drags apply to the drag only.
+    const width = Math.max(1, Math.min(8192, Math.round(Number(a.width) || 420)));
+    const height = Math.max(1, Math.min(8192, Math.round(Number(a.height) || 260)));
     return { fromCol, fromRow, ...emuOffsets(a), toCol, toRow, left, top, width, height, editAs: editAsOf(a.editAs) };
   }
 

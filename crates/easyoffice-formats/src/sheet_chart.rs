@@ -11,6 +11,7 @@ use crate::cell_type::pack_cell_pos;
 use crate::pages_proto::FastU64Map;
 use crate::rtf_xml_helpers::format_col_letters;
 use crate::sheet_styling::sheet_anchor_edit::{AnchorCells, AnchorEdit};
+use crate::sheet_styling::sheet_media_notes::MAX_SHEET_IMAGE_DIM_PX;
 use crate::sheet_styling::sheet_row_offsets::{RowOffsets, SheetGrid};
 use crate::{
     CellBox, EasyOfficeError, OdsUnpacked, OoxmlCodec, SheetStyling, XlsxCachedValue,
@@ -258,23 +259,20 @@ impl ChartAnchor {
         if x1 > x0 {
             self.width_px = u32::try_from(x1 - x0)
                 .unwrap_or(u32::MAX)
-                .clamp(MIN_CHART_WIDTH_PX, MAX_CHART_WIDTH_PX);
+                .clamp(1, MAX_SHEET_IMAGE_DIM_PX);
         }
         if y1 > y0 {
             self.height_px = u32::try_from(y1 - y0)
                 .unwrap_or(u32::MAX)
-                .clamp(MIN_CHART_HEIGHT_PX, MAX_CHART_HEIGHT_PX);
+                .clamp(1, MAX_SHEET_IMAGE_DIM_PX);
         }
     }
 
     /// Recomputes two-cell grid coordinates and EMU offsets from pixel coordinates.
     pub fn sync_grid_from_px(&mut self, grid: &SheetGrid<'_>) {
         let (columns, rows) = (grid.columns, grid.rows());
-        let w = u64::from(self.width_px.clamp(MIN_CHART_WIDTH_PX, MAX_CHART_WIDTH_PX));
-        let h = u64::from(
-            self.height_px
-                .clamp(MIN_CHART_HEIGHT_PX, MAX_CHART_HEIGHT_PX),
-        );
+        let w = u64::from(self.width_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
+        let h = u64::from(self.height_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
         let left = u64::from(self.left_px);
         let top = u64::from(self.top_px);
         let (fc, fce) = px_to_col_and_emu(left, columns);
@@ -300,8 +298,9 @@ impl ChartAnchor {
     }
 
     pub fn within_bounds(&self) -> bool {
-        (MIN_CHART_WIDTH_PX..=MAX_CHART_WIDTH_PX).contains(&self.width_px)
-            && (MIN_CHART_HEIGHT_PX..=MAX_CHART_HEIGHT_PX).contains(&self.height_px)
+        // The size a file gives is kept whatever it is (the page limits the size of a chart a user drags to, not the file).
+        (1..=MAX_SHEET_IMAGE_DIM_PX).contains(&self.width_px)
+            && (1..=MAX_SHEET_IMAGE_DIM_PX).contains(&self.height_px)
             && self.from_col < OoxmlCodec::MAX_XLSX_COLS
             && self.to_col < OoxmlCodec::MAX_XLSX_COLS
             && self.from_row < OoxmlCodec::MAX_XLSX_ROWS

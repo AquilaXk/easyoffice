@@ -6,8 +6,7 @@ use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     ref_point_count, AnchorEdit, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef,
     EasyOfficeError, SheetChart, SheetGrid, StrictJsonValue, MAX_CHARTS_PER_SHEET,
-    MAX_CHART_HEIGHT_PX, MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_POINTS_PER_SERIES,
-    MAX_SERIES_PER_CHART, MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
+    MAX_CHART_TEXT_BYTES, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART, MAX_SHEET_IMAGE_DIM_PX,
 };
 use easyoffice_sheet::axis::rewrite_formula_refs;
 use easyoffice_sheet::{Axis, AxisEdit, EditKind};
@@ -72,16 +71,9 @@ fn parse_anchor(
     let to_row = opt_u32("toRow", 0, u64::from(LAST_ROW))?;
     let left = opt_u32("left", 0, MAX_POS_PX)?;
     let top = opt_u32("top", 0, MAX_POS_PX)?;
-    let width = opt_u32(
-        "width",
-        u64::from(MIN_CHART_WIDTH_PX),
-        u64::from(MAX_CHART_WIDTH_PX),
-    )?;
-    let height = opt_u32(
-        "height",
-        u64::from(MIN_CHART_HEIGHT_PX),
-        u64::from(MAX_CHART_HEIGHT_PX),
-    )?;
+    // A chart read from a file may be smaller or larger than the page lets a user drag one to; its size comes back as it went.
+    let width = opt_u32("width", 1, u64::from(MAX_SHEET_IMAGE_DIM_PX))?;
+    let height = opt_u32("height", 1, u64::from(MAX_SHEET_IMAGE_DIM_PX))?;
 
     let offset = |key: &str| opt_u32(key, 0, MAX_OFFSET_EMU).map(Option::unwrap_or_default);
     let mut anchor = ChartAnchor {
