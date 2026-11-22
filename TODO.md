@@ -17,6 +17,7 @@
 ## 배포
 - [ ] 릴리스 발행 잡의 쓰기 403 원인 확정: 다음 릴리스 실행에서 "Record the token's release access…" 경고와 "Create or update the GitHub Release" 로그의 `x-accepted-github-permissions`·`x-github-request-id`를 보고 원인을 확정함. 워크플로 파일 차이 가설은 태그 push 실행에서 맞지 않았고 403은 수동 실행에서만 났다(PD-283 6항 (d))
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
+- [ ] Developer ID 서명과 함께: Quick Look 두 확장이 rhwp를 공유 dylib(`Contents/Frameworks/libeasyoffice_ql.dylib`) 하나로 쓰게 함(아키텍처당 약 -11 MB). ad-hoc 서명에서는 library validation이 Team ID 불일치로 적재를 막아 QA가 Developer ID 이후로 미룸(2026-11-22). 동작 확인한 시제품 diff는 SSD `Caches/eo-ci/ql-share/`
 
 ## PDF·미리보기
 - [ ] PDF 스튜디오 저장: Square·Circle·Line·Polygon·FileAttachment 주석, 태그 구조 트리, 전자서명은 저장하지 못하고 경고만 한다(PD-266, 증분 저장 또는 종류별 복사)
