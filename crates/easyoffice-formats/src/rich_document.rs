@@ -257,6 +257,16 @@ impl RichPageMargins {
         right: 1440,
     };
 
+    /// ISO A4 blank document margins of the reference Pages app (`20 mm` sides/top/bottom, `12.5 mm` header, `15 mm` footer).
+    pub const PAGES_DEFAULT: Self = Self {
+        top: 1134,
+        bottom: 1134,
+        header: 709,
+        footer: 850,
+        left: 1134,
+        right: 1134,
+    };
+
     /// Whether every value is within [`MAX_PAGE_MARGIN_TWIPS`].
     pub fn within_bounds(&self) -> bool {
         [
@@ -525,9 +535,9 @@ pub struct RichParagraph {
     pub toc_page: Option<u32>,
     /// Whether the tab before the page number is filled with dots (else it is blank).
     pub toc_dots: bool,
-    /// The paragraph shows, after the body, text that the document also holds elsewhere (the header and footer of a Pages file,
-    /// which are in the page frame). A writer that writes the frame leaves it out: [`RichDocument::body_blocks`] skips it.
-    pub frame_copy: bool,
+    /// The paragraph shows, after the body, text that the document also holds elsewhere (the header and footer of a Pages file).
+    /// `Some("")` matches `page_frame`/appendix headings (legacy boolean flag), while non-empty `Some(orig)` matches the exact copy text read by the reader.
+    pub frame_copy: Option<String>,
 }
 
 impl RichParagraph {
@@ -611,7 +621,11 @@ impl RichDocument {
         let mut in_copy = false;
         self.blocks.iter().filter(move |block| {
             if let RichBlock::Paragraph(p) = block {
-                in_copy = p.frame_copy && is_frame_text(&p.plain_text(), &frame_texts);
+                in_copy = match p.frame_copy.as_deref() {
+                    None => false,
+                    Some("") => is_frame_text(&p.plain_text(), &frame_texts),
+                    Some(orig) => p.plain_text() == orig,
+                };
             }
             !in_copy
         })

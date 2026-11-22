@@ -12,9 +12,9 @@ use easyoffice_formats::{
 use std::collections::BTreeSet;
 
 const MAX_BLOCK: usize = 64 * 1024;
-/// Body style of the writer: 12 pt (24 half-points), black. A read-back run that sets neither
+/// Body style of the writer: 11 pt (22 half-points), black. A read-back run that sets neither
 /// carries these, because the reader resolves the paragraph style into the run.
-const BODY_HALF_POINTS: u16 = 24;
+const BODY_HALF_POINTS: u16 = 22;
 const BODY_COLOR: &str = "000000";
 
 fn run(text: &str) -> RichRun {
@@ -611,10 +611,87 @@ fn write_qa_samples() {
             ]))
         })
         .collect());
+    let extended = doc(vec![
+        RichBlock::Paragraph(RichParagraph {
+            heading_level: 1,
+            ..para(vec![run("확장 서식 확인 문서")])
+        }),
+        RichBlock::Paragraph(RichParagraph {
+            list: Some(RichListKind::Ordered),
+            list_level: 1,
+            ..para(vec![
+                run("다단계 번호 목록 "),
+                RichRun {
+                    link: Some("https://example.com".to_string()),
+                    ..run("외부 링크")
+                },
+            ])
+        }),
+        RichBlock::Paragraph(RichParagraph {
+            list: Some(RichListKind::Bullet),
+            list_level: 0,
+            columns: Some(easyoffice_formats::RichColumns {
+                count: 2,
+                equal: true,
+                gap_twips: 360,
+            }),
+            ..para(vec![run("글머리 기호 2단 문단")])
+        }),
+        RichBlock::Table({
+            let mut tbl = RichTable::new(vec![
+                vec!["머리1".to_string(), "".to_string()],
+                vec!["셀 값".to_string(), "셀 링크".to_string()],
+            ]);
+            tbl.merges.push(easyoffice_formats::CellMerge {
+                row: 0,
+                col: 0,
+                row_span: 1,
+                col_span: 2,
+            });
+            tbl.links.push(easyoffice_formats::TableCellLink {
+                row: 1,
+                col: 1,
+                start: 0,
+                end: "셀 링크".len() as u32,
+                url: "https://example.org".to_string(),
+            });
+            tbl
+        }),
+    ]);
+    let mut extended_doc = extended;
+    extended_doc.page_frame = easyoffice_formats::RichPageFrame {
+        binding: easyoffice_formats::RichBinding {
+            kind: easyoffice_formats::RichBindingKind::Duplex,
+            gutter: 0,
+        },
+        header: vec![
+            RichParagraph {
+                alignment: Some(RichAlignment::Left),
+                ..para(vec![run("왼쪽 머리글")])
+            },
+            RichParagraph {
+                alignment: Some(RichAlignment::Center),
+                ..para(vec![run("가운데 머리글")])
+            },
+            RichParagraph {
+                alignment: Some(RichAlignment::Right),
+                ..para(vec![run("오른쪽 머리글")])
+            },
+        ],
+        footer: vec![RichParagraph {
+            alignment: Some(RichAlignment::Right),
+            ..para(vec![RichRun {
+                field: Some(RichField::PageNumber),
+                ..RichRun::default()
+            }])
+        }],
+        ..Default::default()
+    };
     for (name, d) in [
         ("pages-write-1-basic.pages", formatted_document()),
         ("pages-write-2-formats.pages", formats),
         ("pages-write-3-long.pages", long),
+        ("pages-write-4-extended.pages", extended_doc),
     ] {
         std::fs::write(format!("{dir}/{name}"), write(&d)).unwrap();
     }

@@ -15,19 +15,12 @@ use crate::{
     RichPageMargins, RichPaper, RichParagraph, MAX_PAGE_FRAME_PARAGRAPHS,
 };
 
-/// Default A4 in PostScript points (210 x 297 mm), 1-inch margins and 0.5-inch header/footer insets.
+/// Default ISO A4 in PostScript points (210 x 297 mm), 20 mm margins, 12.5 mm header and 15 mm footer insets.
 const DEFAULT_PAGE_WIDTH: f32 = 595.28;
 const DEFAULT_PAGE_HEIGHT: f32 = 841.89;
-const DEFAULT_MARGIN: f32 = 72.0;
-const DEFAULT_INSET: f32 = 36.0;
-const DEFAULT_MARGINS_TWIPS: RichPageMargins = RichPageMargins {
-    top: 1440,
-    bottom: 1440,
-    header: 720,
-    footer: 720,
-    left: 1440,
-    right: 1440,
-};
+const DEFAULT_MARGIN: f32 = 56.692_913;
+const DEFAULT_HEADER_INSET: f32 = 35.433_07;
+const DEFAULT_FOOTER_INSET: f32 = 42.519_684;
 
 pub(super) struct ResolvedPageSetup {
     pub page_width_pt: f32,
@@ -59,21 +52,43 @@ pub(super) fn resolve_page_setup(
 
     if frame.paper.is_some() || frame.margins.is_some() {
         let paper = frame.paper.unwrap_or(RichPaper::A4);
-        let margins = frame.margins.unwrap_or(DEFAULT_MARGINS_TWIPS);
+        let margins = frame.margins.unwrap_or(RichPageMargins::PAGES_DEFAULT);
         if paper.holds_bound(&margins, frame.binding) {
             let to_pt = |tw: u32| tw as f32 / 20.0;
-            let page_width_pt = to_pt(paper.width);
-            let left_pt = to_pt(margins.left);
-            let right_pt = to_pt(margins.right);
+            let (page_width_pt, page_height_pt) = if paper == RichPaper::A4 {
+                (DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
+            } else {
+                (to_pt(paper.width), to_pt(paper.height))
+            };
+            let (left_pt, right_pt, top_pt, bottom_pt, header_pt, footer_pt) =
+                if margins == RichPageMargins::PAGES_DEFAULT {
+                    (
+                        DEFAULT_MARGIN,
+                        DEFAULT_MARGIN,
+                        DEFAULT_MARGIN,
+                        DEFAULT_MARGIN,
+                        DEFAULT_HEADER_INSET,
+                        DEFAULT_FOOTER_INSET,
+                    )
+                } else {
+                    (
+                        to_pt(margins.left),
+                        to_pt(margins.right),
+                        to_pt(margins.top),
+                        to_pt(margins.bottom),
+                        to_pt(margins.header),
+                        to_pt(margins.footer),
+                    )
+                };
             return Ok(ResolvedPageSetup {
                 page_width_pt,
-                page_height_pt: to_pt(paper.height),
+                page_height_pt,
                 left_pt,
                 right_pt,
-                top_pt: to_pt(margins.top),
-                bottom_pt: to_pt(margins.bottom),
-                header_pt: to_pt(margins.header),
-                footer_pt: to_pt(margins.footer),
+                top_pt,
+                bottom_pt,
+                header_pt,
+                footer_pt,
                 body_width_pt: (page_width_pt - left_pt - right_pt).max(36.0),
                 settings_id,
             });
@@ -87,8 +102,8 @@ pub(super) fn resolve_page_setup(
         right_pt: DEFAULT_MARGIN,
         top_pt: DEFAULT_MARGIN,
         bottom_pt: DEFAULT_MARGIN,
-        header_pt: DEFAULT_INSET,
-        footer_pt: DEFAULT_INSET,
+        header_pt: DEFAULT_HEADER_INSET,
+        footer_pt: DEFAULT_FOOTER_INSET,
         body_width_pt: DEFAULT_PAGE_WIDTH - 2.0 * DEFAULT_MARGIN,
         settings_id,
     })

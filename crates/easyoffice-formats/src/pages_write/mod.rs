@@ -111,14 +111,7 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
     }
     if frame.paper.is_some() || frame.margins.is_some() {
         let paper = frame.paper.unwrap_or(RichPaper::A4);
-        let margins = frame.margins.unwrap_or(RichPageMargins {
-            top: 1440,
-            bottom: 1440,
-            header: 720,
-            footer: 720,
-            left: 1440,
-            right: 1440,
-        });
+        let margins = frame.margins.unwrap_or(RichPageMargins::PAGES_DEFAULT);
         if !paper.holds_bound(&margins, frame.binding) {
             loss.formats += 1;
         }

@@ -28,11 +28,12 @@ const TYPE_COLUMN_STYLE: u32 = 2024;
 const TYPE_SHAPE_STYLE: u32 = 2025;
 const TYPE_MEDIA_STYLE: u32 = 3016;
 
-/// Body text: 12 pt, black. Headings 1-6 are bold at the sizes below.
-pub(super) const BODY_POINTS: f32 = 12.0;
-const HEADING_POINTS: [f32; 6] = [24.0, 20.0, 17.0, 15.0, 13.0, 12.0];
-const BODY_FONT: &str = "Helvetica";
-const HEADING_FONT: &str = "Helvetica-Bold";
+/// Body text: 11 pt, black (`AppleSDGothicNeo-Regular`). Headings 1-6 use `AppleSDGothicNeo-Bold`.
+pub(super) const BODY_POINTS: f32 = 11.0;
+const HEADING_POINTS: [f32; 6] = [18.0, 16.0, 14.0, 13.0, 12.0, 11.0];
+const BODY_FONT: &str = "AppleSDGothicNeo-Regular";
+const HEADING_FONT: &str = "AppleSDGothicNeo-Bold";
+const DEFAULT_TAB_STOPS_PT: f32 = 36.0;
 
 /// Paragraph alignment values (`ParagraphStyle` bag field 1): 4 is "natural".
 const ALIGN_NATURAL: u64 = 4;
@@ -235,9 +236,9 @@ fn paragraph_style(
     let ink = || color(0.0, 0.0, 0.0);
     vec![
         header(Some((name, identifier)), stylesheet),
-        // `override_count`: six character properties and two paragraph properties below. A style
+        // `override_count`: six character properties and three paragraph properties below. A style
         // whose bags hold properties while this says nothing is treated as setting none.
-        varint(10, 8),
+        varint(10, 9),
         msg(
             11,
             vec![
@@ -250,7 +251,14 @@ fn paragraph_style(
                 msg(46, vec![msg(1, ink())]),
             ],
         ),
-        msg(12, vec![varint(1, ALIGN_NATURAL), reference(40, list)]),
+        msg(
+            12,
+            vec![
+                varint(1, ALIGN_NATURAL),
+                float(4, DEFAULT_TAB_STOPS_PT),
+                reference(40, list),
+            ],
+        ),
     ]
 }
 

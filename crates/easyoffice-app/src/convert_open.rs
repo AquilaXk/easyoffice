@@ -125,8 +125,13 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if p.page_break_before {
         out.push_str(",\"pageBreakBefore\":true");
     }
-    if p.frame_copy {
-        out.push_str(",\"frameCopy\":true");
+    if let Some(copy) = &p.frame_copy {
+        if copy.is_empty() {
+            out.push_str(",\"frameCopy\":true");
+        } else {
+            out.push_str(",\"frameCopy\":");
+            push_json_str(out, copy);
+        }
     }
     match p.toc {
         Some(RichToc::Title) => out.push_str(",\"toc\":0"),

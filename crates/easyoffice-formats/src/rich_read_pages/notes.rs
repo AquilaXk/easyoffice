@@ -23,11 +23,11 @@ fn non_empty(block: &RichBlock) -> bool {
     }
 }
 
-/// Marks the paragraphs of a header or footer appendix as copies of what the page frame holds.
+/// Marks the paragraphs of a header or footer appendix as copies with their exact source text.
 fn frame_copies(mut blocks: Vec<RichBlock>) -> Vec<RichBlock> {
     for block in &mut blocks {
         if let RichBlock::Paragraph(p) = block {
-            p.frame_copy = true;
+            p.frame_copy = Some(p.plain_text());
         }
     }
     blocks
@@ -206,7 +206,9 @@ impl Reader<'_> {
             if let (RichBlock::Paragraph(h), Some(RichBlock::Paragraph(first))) =
                 (&mut head, blocks.first())
             {
-                h.frame_copy = first.frame_copy;
+                if first.frame_copy.is_some() {
+                    h.frame_copy = Some(h.plain_text());
+                }
             }
             out.push(head);
             out.extend(blocks);

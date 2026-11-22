@@ -560,7 +560,7 @@ fn text_written_after_the_header_appendix_is_saved_as_body_text() {
         ..RichParagraph::default()
     };
     // The browser copies the mark to the paragraph a split creates.
-    written.frame_copy = true;
+    written.frame_copy = Some("머리말: Pages 객체 테스트 문서".to_string());
     doc.blocks.push(RichBlock::Paragraph(written));
     let saved =
         UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Pages, None).expect("save");

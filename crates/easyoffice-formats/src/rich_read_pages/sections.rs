@@ -14,9 +14,9 @@ use crate::{
     MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS,
 };
 
-/// Default A4 text body width and height in PostScript points (`595.3 - 144`, `841.9 - 144`).
-pub(super) const DEFAULT_BODY_WIDTH_PT: f32 = 451.3;
-pub(super) const DEFAULT_BODY_HEIGHT_PT: f32 = 697.9;
+/// Default A4 text body width and height in PostScript points (`595.28 - 113.39`, `841.89 - 113.39`).
+pub(super) const DEFAULT_BODY_WIDTH_PT: f32 = 481.89;
+pub(super) const DEFAULT_BODY_HEIGHT_PT: f32 = 728.50;
 const MAX_COLUMNS: u64 = 16;
 
 #[derive(Debug, Clone)]

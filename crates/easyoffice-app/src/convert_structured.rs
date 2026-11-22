@@ -39,6 +39,8 @@ use crate::sheet_look_json::parse_look;
 const MAX_INDENT_TWIPS: i64 = 288_000;
 /// Largest line spacing, as a percentage of single spacing.
 const MAX_LINE_SPACING_PERCENT: i64 = 1_000;
+/// Maximum UTF-8 byte length of a `frameCopy` header/footer snapshot string.
+const MAX_FRAME_COPY_BYTES: usize = 64 * 1024;
 
 /// Upper bound on runs + table cells + sheet cells + slide items in one payload.
 const MAX_STRUCTURED_ITEMS: usize = 500_000;
@@ -89,6 +91,28 @@ fn opt_bool(obj: &JsonObject, key: &str) -> Result<bool, EasyOfficeError> {
         v.as_bool()
             .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 true/false여야 합니다.")))
     })
+}
+
+fn opt_frame_copy(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
+    match field(obj, "frameCopy") {
+        None => Ok(None),
+        Some(v) => {
+            if let Some(b) = v.as_bool() {
+                return Ok(b.then(String::new));
+            }
+            if let Some(s) = v.as_str() {
+                if s.len() > MAX_FRAME_COPY_BYTES {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "구조화 저장: 'frameCopy' 원문 길이가 한도를 넘었습니다.".to_string(),
+                    ));
+                }
+                return Ok(Some(s.to_string()));
+            }
+            Err(invalid(
+                "구조화 저장: 'frameCopy'는 불리언 또는 문자열이어야 합니다.",
+            ))
+        }
+    }
 }
 
 /// Run size in half-points (`w:sz` unit): an integer from 2 (1 pt) to 1638 (819 pt).
@@ -463,7 +487,7 @@ fn parse_paragraph(
         toc_dots,
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
         columns,
-        frame_copy: opt_bool(obj, "frameCopy")?,
+        frame_copy: opt_frame_copy(obj)?,
     })
 }
 
