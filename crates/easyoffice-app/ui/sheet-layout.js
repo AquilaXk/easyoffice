@@ -358,6 +358,9 @@
     return host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(r, c);
   }
 
+  // The pixel and row fallbacks of the two anchor readers below (24 px rows, 96 px columns) only stand in for a value a
+  // malformed anchor lacks: the engine sends the pixels of every anchor it places, on the rows of the sheet (PD-299), and
+  // the grid places a picture by its row and column.
   function normalizeChartAnchor(raw) {
     const a = raw && typeof raw === "object" ? raw : {};
     const fcNum = Number(a.fromCol);

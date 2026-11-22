@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     effective_image_two_cell, resolve_code, run_total, CellBox, CellValueKind, EasyOfficeError,
-    OdsUnpacked, SheetState, SheetStyling, MAX_WORKBOOK_NOTES, MAX_WORKBOOK_SHEET_IMAGES,
-    MAX_WORKBOOK_SHEET_IMAGE_BYTES,
+    OdsUnpacked, SheetGrid, SheetState, SheetStyling, MAX_WORKBOOK_NOTES,
+    MAX_WORKBOOK_SHEET_IMAGES, MAX_WORKBOOK_SHEET_IMAGE_BYTES,
 };
 use easyoffice_sheet::{
     compile_for_page, general_display, validate_input, Budget, CompiledNumFmt, EvaluatedCellValue,
@@ -638,12 +638,12 @@ fn write_sheet_summary(
     let image_count = st.map_or(0, |s| s.images.len());
     let _ = write!(out, "],\"imageCount\":{image_count},\"images\":[");
     if let Some(styling) = st {
+        let grid = SheetGrid::of(styling);
         for (i_idx, im) in styling.images.iter().enumerate() {
             if i_idx > 0 {
                 out.push(',');
             }
-            let (fc, fr, _, _, tc, tr, _, _) =
-                effective_image_two_cell(&im.anchor, &styling.columns);
+            let (fc, fr, _, _, tc, tr, _, _) = effective_image_two_cell(&im.anchor, &grid);
             out.push_str("{\"id\":");
             push_json_str(out, &im.id);
             out.push_str(",\"name\":");

@@ -128,6 +128,8 @@
         hiddenCols: json.hiddenCols || [],
         filter: json.filter || null,
         rowHeights: json.rowHeights || [],
+        // The rows below the default height too: the engine places pictures on the rows after the edit (PD-299).
+        defaultRowHeight: json.defaultRowHeight,
         outline: json.outline,
         page: json.page,
         protect: json.protect || null,

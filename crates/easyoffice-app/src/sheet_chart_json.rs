@@ -1,14 +1,13 @@
 //! JSON parser, serializer, and row/column shift helpers for sheet charts (`PD-254`).
 
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     ref_point_count, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef, EasyOfficeError,
-    SheetChart, StrictJsonValue, MAX_CHARTS_PER_SHEET, MAX_CHART_HEIGHT_PX, MAX_CHART_TEXT_BYTES,
-    MAX_CHART_WIDTH_PX, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART, MIN_CHART_HEIGHT_PX,
-    MIN_CHART_WIDTH_PX,
+    SheetChart, SheetGrid, StrictJsonValue, MAX_CHARTS_PER_SHEET, MAX_CHART_HEIGHT_PX,
+    MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART,
+    MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
 };
 use easyoffice_sheet::axis::rewrite_formula_refs;
 use easyoffice_sheet::{Axis, AxisEdit, EditKind};
@@ -43,10 +42,13 @@ fn text_opt(
     }
 }
 
-fn parse_anchor(v: Option<&StrictJsonValue>) -> Result<ChartAnchor, EasyOfficeError> {
+fn parse_anchor(
+    v: Option<&StrictJsonValue>,
+    grid: &SheetGrid<'_>,
+) -> Result<ChartAnchor, EasyOfficeError> {
     let Some(val) = v.filter(|x| !matches!(x, StrictJsonValue::Null)) else {
         let mut a = ChartAnchor::default();
-        a.sync_grid_from_px(&BTreeMap::new());
+        a.sync_grid_from_px(grid);
         return Ok(a);
     };
     let obj = val.as_object().ok_or_else(|| bad("anchor"))?;
@@ -94,10 +96,9 @@ fn parse_anchor(v: Option<&StrictJsonValue>) -> Result<ChartAnchor, EasyOfficeEr
         height_px: height.unwrap_or(260),
     };
 
-    let empty_cols = BTreeMap::new();
     if anchor.has_explicit_grid() {
         let mut derived = anchor;
-        derived.sync_px_from_grid(&empty_cols);
+        derived.sync_px_from_grid(grid);
         if left.is_none() {
             anchor.left_px = derived.left_px;
         }
@@ -111,7 +112,7 @@ fn parse_anchor(v: Option<&StrictJsonValue>) -> Result<ChartAnchor, EasyOfficeEr
             anchor.height_px = derived.height_px;
         }
     } else {
-        anchor.sync_grid_from_px(&empty_cols);
+        anchor.sync_grid_from_px(grid);
     }
 
     Ok(anchor)
@@ -157,7 +158,10 @@ fn parse_series(v: Option<&StrictJsonValue>) -> Result<Vec<ChartSeriesRef>, Easy
     Ok(out)
 }
 
-pub(crate) fn parse_charts(v: &StrictJsonValue) -> Result<Vec<SheetChart>, EasyOfficeError> {
+pub(crate) fn parse_charts(
+    v: &StrictJsonValue,
+    grid: &SheetGrid<'_>,
+) -> Result<Vec<SheetChart>, EasyOfficeError> {
     let items = v.as_array().ok_or_else(|| bad("charts"))?;
     if items.len() > MAX_CHARTS_PER_SHEET {
         return Err(over(&format!(
@@ -191,7 +195,7 @@ pub(crate) fn parse_charts(v: &StrictJsonValue) -> Result<Vec<SheetChart>, EasyO
             }
             Some(_) => return Err(bad("legend")),
         };
-        let anchor = parse_anchor(StrictJsonValue::get_field(obj, "anchor"))?;
+        let anchor = parse_anchor(StrictJsonValue::get_field(obj, "anchor"), grid)?;
         let series = parse_series(StrictJsonValue::get_field(obj, "series"))?;
         let chart = SheetChart {
             id,
@@ -321,7 +325,7 @@ pub(crate) fn shift_charts(
     charts: &[SheetChart],
     sheet: &str,
     edit: &AxisEdit,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> Vec<SheetChart> {
     charts
         .iter()
@@ -367,7 +371,7 @@ pub(crate) fn shift_charts(
                     next.anchor.to_col = tc;
                 }
             }
-            next.anchor.sync_px_from_grid(columns);
+            next.anchor.sync_px_from_grid(grid);
             next
         })
         .collect()

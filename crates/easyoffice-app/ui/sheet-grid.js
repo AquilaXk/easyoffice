@@ -581,7 +581,9 @@
     function layoutChanged() {
       widthCacheSheet = null;
       if (wrapRowsPossible()) syncRows();
-      return renderWindow(true);
+      const rendered = renderWindow(true);
+      hooks.afterLayout?.();
+      return rendered;
     }
 
     function seedDomMaps() {
@@ -744,7 +746,7 @@
     }
 
     return {
-      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
+      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
       applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),

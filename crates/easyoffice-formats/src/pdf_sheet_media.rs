@@ -6,6 +6,7 @@ use crate::pdf_image::PdfImageObject;
 use crate::pdf_laid::{fit_text, row_height_pt, width_pt, Canvas, DEFAULT_COL_PX, PDF_PT_PER_PX};
 use crate::sheet_styling::sheet_chart::{SheetCellIndex, EMU_PER_PX};
 use crate::sheet_styling::sheet_media_notes::effective_image_two_cell;
+use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::{pack_cell_pos, OdsUnpacked, SheetStyling};
 
 const NOTE_TRIANGLE_RGB: &str = "0.82 0.14 0.14";
@@ -168,9 +169,9 @@ pub(crate) fn draw_sheet_floating_images(
     let min_row = page_rows.iter().copied().min().unwrap_or(0);
     let max_row = page_rows.iter().copied().max().unwrap_or(0);
 
+    let grid = SheetGrid::of(styling);
     for img in &styling.images {
-        let (fc, fr, fce, fre, tc, tr, tce, tre) =
-            effective_image_two_cell(&img.anchor, &styling.columns);
+        let (fc, fr, fce, fre, tc, tr, tce, tre) = effective_image_two_cell(&img.anchor, &grid);
         if fc > max_col || tc < min_col || fr > max_row || tr < min_row {
             continue;
         }
@@ -242,12 +243,13 @@ pub(crate) fn extend_used_bounds(
     styling: &SheetStyling,
     max_cells: u64,
 ) -> Option<(u32, u32, u32, u32)> {
+    let grid = SheetGrid::of(styling);
     for ch in &styling.charts {
-        let (fc, fr, _, _, tc, tr, _, _) = ch.anchor.effective_two_cell(&styling.columns);
+        let (fc, fr, _, _, tc, tr, _, _) = ch.anchor.effective_two_cell(&grid);
         used = expand_bounds(used, (fr, fc, tr, tc), max_cells);
     }
     for img in &styling.images {
-        let (fc, fr, _, _, tc, tr, _, _) = effective_image_two_cell(&img.anchor, &styling.columns);
+        let (fc, fr, _, _, tc, tr, _, _) = effective_image_two_cell(&img.anchor, &grid);
         used = expand_bounds(used, (fr, fc, tr, tc), max_cells);
     }
     for &packed in styling.notes.keys() {

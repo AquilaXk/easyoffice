@@ -3,6 +3,7 @@ pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::sheet_links::xlsx_links::{links_xml, read_links, sheet_relationships};
 use crate::sheet_styling::sheet_links::LinkAllowance;
+use crate::sheet_styling::sheet_row_offsets::{RowOffsets, SheetGrid};
 use crate::sheet_styling::sheet_rules::xlsx_rules::{parse_dxf_styles, parse_worksheet_rules};
 use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
@@ -831,12 +832,14 @@ impl OoxmlCodec {
                     &xf_styles.dxf_colors,
                     &xf_styles.table_styles,
                 )?;
+                // The anchors of the drawings are placed on the rows the sheet has (PD-299).
+                let grid = SheetGrid::new(&styling.columns, RowOffsets::of(&styling));
                 (styling.charts_rejected, styling.images_rejected) = read_sheet_drawings(
                     &sheet_name,
                     sheet_xml,
                     part_path,
                     &entry_by_path,
-                    &styling.columns,
+                    &grid,
                     &mut drawing_budget,
                     &mut styling.charts,
                     &mut styling.images,

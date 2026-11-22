@@ -4,7 +4,8 @@
 //! Request: `{session, sheet, axis: "row"|"col", op: "insert"|"delete", at, count}` (`at` is the
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
-//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights` (see `sheet_layout_json`),
+//! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols`, `rowHeights` and `defaultRowHeight` (see `sheet_layout_json`;
+//! with `outline`, `filter` and `tables` they place the `images` and `charts` on the rows the edit leaves, PD-299),
 //! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`), `tables` (see `sheet_table_json`) and `rules`
 //! `{sheet: {cf, dv}}` of every sheet, and the row and column groups `outline` (`sheet_view_json`).
 //!
@@ -22,8 +23,8 @@
 
 use crate::sheet_filter_json::{filter_json, parse_filter};
 use crate::sheet_layout_json::{
-    merges_json, parse_hidden_cols, parse_hidden_rows, parse_merges, parse_row_heights,
-    row_heights_json, runs_json,
+    merges_json, parse_default_row_height, parse_hidden_cols, parse_hidden_rows, parse_merges,
+    parse_row_heights, row_heights_json, runs_json,
 };
 use crate::sheet_page_json::moved_page_json;
 use crate::sheet_protect_json::{moved_protect_json, moved_runs_json, parse_protection};
@@ -32,8 +33,8 @@ use crate::sheet_session::{session_id, write_changed, Applied, EXPIRED, REFUSED}
 use crate::sheet_view_json::{outline_json, parse_outline};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    CellBox, EasyOfficeError, SheetRules, StrictJsonValue, DELETE_COLUMNS, DELETE_ROWS,
-    INSERT_COLUMNS, INSERT_ROWS, MAX_COLUMN_PX, MIN_COLUMN_PX,
+    CellBox, EasyOfficeError, RowOffsets, SheetGrid, SheetRules, SheetStyling, StrictJsonValue,
+    DELETE_COLUMNS, DELETE_ROWS, INSERT_COLUMNS, INSERT_ROWS, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
     shift_boxes, shift_filter, shift_outline, shift_row_heights, shift_rules, shift_runs,
@@ -125,6 +126,31 @@ fn parse_widths(v: &StrictJsonValue) -> Result<BTreeMap<u32, u32>, EasyOfficeErr
     Ok(widths)
 }
 
+/// The rows the request carries before the edit: heights, default height, hidden rows, folded groups and filters.
+fn request_rows(entries: &Entries) -> Result<SheetStyling, EasyOfficeError> {
+    let field = |key: &str| StrictJsonValue::get_field(entries, key);
+    let mut rows = SheetStyling::default();
+    if let Some(v) = field("hiddenRows") {
+        rows.hidden_rows = parse_hidden_rows(v)?;
+    }
+    if let Some(v) = field("rowHeights") {
+        rows.row_heights = parse_row_heights(v)?;
+    }
+    if let Some(v) = field("defaultRowHeight") {
+        rows.default_row_height = Some(parse_default_row_height(v)?);
+    }
+    if let Some(v) = field("outline") {
+        rows.outline = parse_outline(v)?;
+    }
+    if let Some(v) = field("filter").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        rows.filter = Some(parse_filter(v)?);
+    }
+    if let Some(v) = field("tables") {
+        rows.tables = crate::sheet_table_json::parse_tables(v)?;
+    }
+    Ok(rows)
+}
+
 /// The layout the request carries, moved for `edit`, as the answer's JSON fields.
 fn moved_layout_json(
     entries: &Entries,
@@ -133,6 +159,11 @@ fn moved_layout_json(
     out: &mut String,
 ) -> Result<(), EasyOfficeError> {
     let field = |key: &str| StrictJsonValue::get_field(entries, key);
+    // The rows after the edit, which place the pictures and charts that move with it (PD-299).
+    let mut after_rows = SheetStyling::default();
+    if let Some(v) = field("defaultRowHeight") {
+        after_rows.default_row_height = Some(parse_default_row_height(v)?);
+    }
     let straddles = |b: &CellBox| b.row1 >= edit.at && edit.straddles_cols(b.col0, b.col1);
     if let Some(v) = field("merges") {
         let parsed = parse_merges(v)?;
@@ -150,10 +181,12 @@ fn moved_layout_json(
             rows
         };
         let _ = write!(out, ",\"hiddenRows\":{}", runs_json(&moved));
+        after_rows.hidden_rows = moved;
     }
     if let Some(v) = field("rowHeights") {
         let moved = shift_row_heights(&parse_row_heights(v)?, edit);
         let _ = write!(out, ",\"rowHeights\":{}", row_heights_json(&moved));
+        after_rows.row_heights = moved;
     }
     if let Some(v) = field("hiddenCols") {
         let cols = parse_hidden_cols(v)?;
@@ -181,6 +214,7 @@ fn moved_layout_json(
     if let Some(v) = field("outline") {
         let moved = shift_outline(&parse_outline(v)?, edit);
         let _ = write!(out, ",\"outline\":{}", outline_json(&moved));
+        after_rows.outline = moved;
     }
     // `null` is the page saying the sheet has no filter.
     if let Some(v) = field("filter").filter(|v| !matches!(v, StrictJsonValue::Null)) {
@@ -198,6 +232,7 @@ fn moved_layout_json(
         if shifted.reapply {
             out.push_str(",\"filterReapply\":true");
         }
+        after_rows.filter = shifted.filter;
     }
     if let Some(v) = field("tables") {
         let parsed = crate::sheet_table_json::parse_tables(v)?;
@@ -219,6 +254,7 @@ fn moved_layout_json(
             ",\"tables\":{}",
             crate::sheet_table_json::tables_json(&moved)
         );
+        after_rows.tables = moved;
     }
     let parsed_widths = field("widths").map(parse_widths).transpose()?;
     let shifted_cols = parsed_widths
@@ -236,9 +272,25 @@ fn moved_layout_json(
         out.push(']');
         let _ = widths_map;
     }
-    if let Some(v) = field("charts").filter(|v| !matches!(v, StrictJsonValue::Null)) {
-        let parsed = crate::sheet_chart_json::parse_charts(v)?;
-        let moved = crate::sheet_chart_json::shift_charts(&parsed, sheet, edit, &shifted_cols);
+    let present = |key: &str| field(key).filter(|v| !matches!(v, StrictJsonValue::Null));
+    // The objects are read on the rows the request has and move onto the rows the edit leaves.
+    let (charts, images) = (present("charts"), present("images"));
+    let widths_before = parsed_widths.clone().unwrap_or_default();
+    let (rows_before, rows_after) = if charts.is_some() || images.is_some() {
+        (
+            RowOffsets::of(&request_rows(entries)?),
+            RowOffsets::of(&after_rows),
+        )
+    } else {
+        Default::default()
+    };
+    let (before, after) = (
+        SheetGrid::new(&widths_before, rows_before),
+        SheetGrid::new(&shifted_cols, rows_after),
+    );
+    if let Some(v) = charts {
+        let parsed = crate::sheet_chart_json::parse_charts(v, &before)?;
+        let moved = crate::sheet_chart_json::shift_charts(&parsed, sheet, edit, &after);
         let _ = write!(
             out,
             ",\"charts\":{}",
@@ -254,12 +306,9 @@ fn moved_layout_json(
             crate::sheet_pivot_json::pivots_json(&moved)
         );
     }
-    if let Some(v) = field("images").filter(|v| !matches!(v, StrictJsonValue::Null)) {
-        let empty_cols = BTreeMap::new();
-        let base_cols = parsed_widths.as_ref().unwrap_or(&empty_cols);
-        let parsed = crate::sheet_media_notes_json::parse_images_for_structure(v, base_cols)?;
-        let moved =
-            crate::sheet_media_notes_json::shift_structure_images(&parsed, edit, &shifted_cols);
+    if let Some(v) = images {
+        let parsed = crate::sheet_media_notes_json::parse_images_for_structure(v, &before)?;
+        let moved = crate::sheet_media_notes_json::shift_structure_images(&parsed, edit, &after);
         let _ = write!(
             out,
             ",\"images\":{}",

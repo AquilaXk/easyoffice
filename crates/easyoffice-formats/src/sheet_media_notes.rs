@@ -3,13 +3,12 @@
 //! Spreadsheet floating image and cell note models with packed `u64` cell indexing and
 //! fail-closed resource budgets (`PD-256`).
 
-use std::collections::BTreeMap;
-
 use crate::cell_type::unpack_cell_pos;
 use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
 use crate::sheet_styling::sheet_chart::{
-    col_left_px, row_top_px, ChartAnchor, DEFAULT_CHART_COL_PX, DEFAULT_CHART_ROW_PX, EMU_PER_PX,
+    col_left_px, emu_to_px_rounded, px_to_col_and_emu, px_to_row_and_emu, ChartAnchor,
 };
+use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::{EasyOfficeError, OoxmlCodec, SheetStyling};
 
 pub const MAX_SHEET_IMAGES_PER_SHEET: usize = 64;
@@ -59,59 +58,6 @@ impl SheetCellNote {
     }
 }
 
-#[inline]
-fn emu_to_px_rounded(emu: u32) -> u64 {
-    (u64::from(emu) + EMU_PER_PX / 2) / EMU_PER_PX
-}
-
-fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) -> (u32, u32) {
-    let max_col = OoxmlCodec::MAX_XLSX_COLS - 1;
-    let mut cur_col = 0u32;
-    let mut cur_x = 0u64;
-    for (&col, &w) in columns {
-        if col > max_col {
-            break;
-        }
-        let gap_cols = u64::from(col - cur_col);
-        let gap_px = gap_cols * u64::from(DEFAULT_CHART_COL_PX);
-        if target_px < cur_x + gap_px {
-            let rem = target_px - cur_x;
-            let dc = (rem / u64::from(DEFAULT_CHART_COL_PX)) as u32;
-            let off_px = rem % u64::from(DEFAULT_CHART_COL_PX);
-            return (
-                cur_col + dc,
-                (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32,
-            );
-        }
-        cur_x += gap_px;
-        let cw = u64::from(w.max(1));
-        if target_px < cur_x + cw {
-            let off_px = target_px - cur_x;
-            return (col, (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32);
-        }
-        cur_x += cw;
-        cur_col = col + 1;
-    }
-    let rem = target_px.saturating_sub(cur_x);
-    let dc = rem / u64::from(DEFAULT_CHART_COL_PX);
-    if u64::from(cur_col) + dc > u64::from(max_col) {
-        return (max_col, 0);
-    }
-    let off_px = rem % u64::from(DEFAULT_CHART_COL_PX);
-    (
-        cur_col + dc as u32,
-        (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32,
-    )
-}
-
-fn px_to_row_and_emu(target_px: u64) -> (u32, u32) {
-    let row_h = u64::from(DEFAULT_CHART_ROW_PX);
-    let max_row = u64::from(OoxmlCodec::MAX_XLSX_ROWS - 1);
-    let r = (target_px / row_h).min(max_row) as u32;
-    let off_px = target_px % row_h;
-    (r, (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32)
-}
-
 /// Checks image anchor bounds without applying chart minimum dimension floors (`180x140`).
 pub fn image_anchor_within_bounds(anchor: &ChartAnchor) -> bool {
     (1..=MAX_SHEET_IMAGE_DIM_PX).contains(&anchor.width_px)
@@ -123,13 +69,18 @@ pub fn image_anchor_within_bounds(anchor: &ChartAnchor) -> bool {
 }
 
 /// Recomputes pixel coordinates from two-cell grid anchors for floating images (`1..=8192 px`).
-pub fn sync_image_px_from_grid(anchor: &mut ChartAnchor, columns: &BTreeMap<u32, u32>) {
+pub fn sync_image_px_from_grid(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
+    let (columns, rows) = (grid.columns, grid.rows());
     let x0 =
         col_left_px(anchor.from_col, columns).saturating_add(emu_to_px_rounded(anchor.col_off_emu));
-    let y0 = row_top_px(anchor.from_row).saturating_add(emu_to_px_rounded(anchor.row_off_emu));
+    let y0 = rows
+        .top(anchor.from_row)
+        .saturating_add(emu_to_px_rounded(anchor.row_off_emu));
     let x1 = col_left_px(anchor.to_col, columns)
         .saturating_add(emu_to_px_rounded(anchor.to_col_off_emu));
-    let y1 = row_top_px(anchor.to_row).saturating_add(emu_to_px_rounded(anchor.to_row_off_emu));
+    let y1 = rows
+        .top(anchor.to_row)
+        .saturating_add(emu_to_px_rounded(anchor.to_row_off_emu));
     anchor.left_px = x0.min(u64::from(u32::MAX)) as u32;
     anchor.top_px = y0.min(u64::from(u32::MAX)) as u32;
     if x1 > x0 {
@@ -141,15 +92,16 @@ pub fn sync_image_px_from_grid(anchor: &mut ChartAnchor, columns: &BTreeMap<u32,
 }
 
 /// Recomputes two-cell grid anchors from pixel coordinates for floating images.
-pub fn sync_image_grid_from_px(anchor: &mut ChartAnchor, columns: &BTreeMap<u32, u32>) {
+pub fn sync_image_grid_from_px(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
+    let (columns, rows) = (grid.columns, grid.rows());
     let w = u64::from(anchor.width_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
     let h = u64::from(anchor.height_px.clamp(1, MAX_SHEET_IMAGE_DIM_PX));
     let left = u64::from(anchor.left_px);
     let top = u64::from(anchor.top_px);
     let (fc, fce) = px_to_col_and_emu(left, columns);
-    let (fr, fre) = px_to_row_and_emu(top);
+    let (fr, fre) = px_to_row_and_emu(top, rows);
     let (tc, tce) = px_to_col_and_emu(left.saturating_add(w), columns);
-    let (tr, tre) = px_to_row_and_emu(top.saturating_add(h));
+    let (tr, tre) = px_to_row_and_emu(top.saturating_add(h), rows);
     anchor.from_col = fc;
     anchor.col_off_emu = fce;
     anchor.from_row = fr;
@@ -163,7 +115,7 @@ pub fn sync_image_grid_from_px(anchor: &mut ChartAnchor, columns: &BTreeMap<u32,
 /// Returns effective two-cell DrawingML coordinates for a floating image anchor.
 pub fn effective_image_two_cell(
     anchor: &ChartAnchor,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
     if anchor.has_explicit_grid() {
         (
@@ -178,7 +130,7 @@ pub fn effective_image_two_cell(
         )
     } else {
         let mut copy = *anchor;
-        sync_image_grid_from_px(&mut copy, columns);
+        sync_image_grid_from_px(&mut copy, grid);
         (
             copy.from_col,
             copy.from_row,

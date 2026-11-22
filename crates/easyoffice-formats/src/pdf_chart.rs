@@ -13,6 +13,7 @@ use crate::sheet_styling::sheet_chart::{
     parse_chart_number, ChartKind, ChartLegendPos, ResolvedSeriesData, SheetCellIndex, SheetChart,
     EMU_PER_PX, MAX_SERIES_PER_CHART,
 };
+use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::{OdsUnpacked, SheetStyling};
 
 const PALETTE: [u32; 8] = [
@@ -130,9 +131,9 @@ pub(crate) fn draw_sheet_charts(
     let min_row = page_rows.iter().copied().min().unwrap_or(0);
     let max_row = page_rows.iter().copied().max().unwrap_or(0);
 
+    let grid = SheetGrid::of(styling);
     for chart in &styling.charts {
-        let (fc, fr, fce, fre, tc, tr, tce, tre) =
-            chart.anchor.effective_two_cell(&styling.columns);
+        let (fc, fr, fce, fre, tc, tr, tce, tre) = chart.anchor.effective_two_cell(&grid);
         if fc > max_col || tc < min_col || fr > max_row || tr < min_row {
             continue;
         }

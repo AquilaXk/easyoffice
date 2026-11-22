@@ -136,7 +136,7 @@
       return Boolean(ae?.tagName === "TD" && ae.dataset?.cell);
     }
 
-    let refocusAfterRender = false, rulesUi = null, lookOps = null, chartUi = null;
+    let refocusAfterRender = false, rulesUi = null, lookOps = null, chartUi = null, syncObjectLayers = null;
     // `input` is created right below; the grid only calls these hooks after both exist.
     const grid = host.__EASYOFFICE_CREATE_SHEET_GRID__({
       document,
@@ -146,9 +146,12 @@
       getExtent: () => getSheetExtent(getActiveSheetName()),
       getCursor: () => {
         const s = input.getSelection();
-        return { row: s.cr, col: s.cc };
+        // A whole column or row ends at the edge of the sheet; a grid without a layout keeps to the cell it was picked from.
+        return s.axis ? { row: s.ar, col: s.ac } : { row: s.cr, col: s.cc };
       },
       hooks: {
+        // The rows changed their height or went away: the pictures and charts stand on the rows as they are now (PD-299).
+        afterLayout: () => syncObjectLayers?.(),
         bindTd: (td) => input.bindTd(td),
         beforeStructuralChange: () => {
           refocusAfterRender = isGridFocused();
@@ -665,6 +668,10 @@
       getSelectionRange: () => input.getRange(), getExtent: () => getSheetExtent(getActiveSheetName()),
       snapshotDomSheetCells, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, sheetHistory, focusAnchor: () => input.focusAnchor(),
     }) ?? null;
+    syncObjectLayers = () => {
+      chartUi?.syncLayer();
+      structure.syncLayers?.();
+    };
 
     // Switching sheets and the view each sheet keeps (`sheet-view-live.js`).
     function performSwitchSheetTabAsync(target) {
@@ -708,7 +715,7 @@
       openHyperlinkDialog: structure.openHyperlink,
       openPivotDialog: () => rulesUi.openPivotDialog(),
       openChartDialog: (id) => chartUi?.openChartDialog(id),
-      syncChartLayer: () => { chartUi?.syncLayer(); structure.syncLayers?.(); },
+      syncChartLayer: () => syncObjectLayers(),
       getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,
       // The sizes the grid shows and the page setup of the active sheet, for printing (`sheet-page-print.js`).

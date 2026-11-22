@@ -52,6 +52,8 @@ pub(crate) mod sheet_pivot;
 pub(crate) mod sheet_protect;
 #[path = "sheet_row_height.rs"]
 pub(crate) mod sheet_row_height;
+#[path = "sheet_row_offsets.rs"]
+pub(crate) mod sheet_row_offsets;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
 #[path = "sheet_spill.rs"]
@@ -126,6 +128,7 @@ pub use sheet_row_height::{
     row_heights_within_bounds, RowHeight, RowHeights, GRID_ROW_PX, MAX_ROW_HEIGHTS,
     MAX_ROW_HEIGHT_CENTIPT,
 };
+pub use sheet_row_offsets::{RowOffsets, SheetGrid};
 pub use sheet_rules::*;
 pub use sheet_spill::*;
 pub use sheet_table::{

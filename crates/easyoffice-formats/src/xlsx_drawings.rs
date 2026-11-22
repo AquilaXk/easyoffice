@@ -3,13 +3,13 @@
 //! Unified OOXML DrawingML (`xl/drawings/drawing*.xml`, `xl/media/*`) reader & writer
 //! combining worksheet charts and floating images under a single `<drawing>` part (`PD-256`).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
 use crate::rich_image_writers::{docx_content_type_defaults, MediaParts};
 use crate::sheet_styling::sheet_chart::{
-    col_left_px, row_top_px, validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart,
+    col_left_px, validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart,
     DEFAULT_CHART_HEIGHT_PX, DEFAULT_CHART_WIDTH_PX, EMU_PER_PX, MAX_CHARTS_PER_SHEET,
     MAX_CHART_HEIGHT_PX, MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_WORKBOOK_CHARTS,
     MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
@@ -20,6 +20,7 @@ use crate::sheet_styling::sheet_media_notes::{
     MAX_SHEET_IMAGE_DIM_PX, MAX_SHEET_IMAGE_NAME_BYTES, MAX_WORKBOOK_SHEET_IMAGES,
     MAX_WORKBOOK_SHEET_IMAGE_BYTES,
 };
+use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::sheet_styling::xlsx_charts::{
     build_chart_xml, local_name, parse_chart_xml, CHART_CONTENT_TYPE, CHART_REL_TYPE,
 };
@@ -96,8 +97,10 @@ impl<'a> DrawingWriter<'a> {
         if charts.is_empty() && images.is_empty() {
             return Ok(SheetDrawingPart::default());
         }
-        let empty_cols = BTreeMap::new();
-        let cols_ref = styling.map_or(&empty_cols, |st| &st.columns);
+        let grid = match styling {
+            Some(st) => SheetGrid::of(st),
+            None => SheetGrid::plain(),
+        };
         let d = self.next_drawing_id;
         self.next_drawing_id += 1;
 
@@ -122,7 +125,7 @@ impl<'a> DrawingWriter<'a> {
             self.next_chart_id += 1;
             r_num += 1;
             shape_id += 1;
-            let (fc, fr, fce, fre, tc, tr, tce, tre) = chart.anchor.effective_two_cell(cols_ref);
+            let (fc, fr, fce, fre, tc, tr, tce, tre) = chart.anchor.effective_two_cell(&grid);
             write_two_cell_bounds(&mut drawing_xml, fc, fr, fce, fre, tc, tr, tce, tre);
             let _ = write!(
                 drawing_xml,
@@ -173,18 +176,21 @@ impl<'a> DrawingWriter<'a> {
                 );
                 r_num
             };
-            let (fc, fr, fce, fre, tc, tr, tce, tre) =
-                effective_image_two_cell(&img.anchor, cols_ref);
-            let x_emu = col_left_px(fc, cols_ref)
+            let (fc, fr, fce, fre, tc, tr, tce, tre) = effective_image_two_cell(&img.anchor, &grid);
+            let x_emu = col_left_px(fc, grid.columns)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(fce));
-            let y_emu = row_top_px(fr)
+            let y_emu = grid
+                .rows()
+                .top(fr)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(fre));
-            let x1_emu = col_left_px(tc, cols_ref)
+            let x1_emu = col_left_px(tc, grid.columns)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(tce));
-            let y1_emu = row_top_px(tr)
+            let y1_emu = grid
+                .rows()
+                .top(tr)
                 .saturating_mul(EMU_PER_PX)
                 .saturating_add(u64::from(tre));
             let w_emu = x1_emu.saturating_sub(x_emu).max(EMU_PER_PX);
@@ -516,7 +522,7 @@ fn emu_u64_to_px(emu: u64) -> u32 {
 
 fn build_anchor_from_raw(
     raw: &DrawingAnchorRaw,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
     is_image: bool,
 ) -> Option<ChartAnchor> {
     let (min_w, max_w, def_w, min_h, max_h, def_h) = if is_image {
@@ -559,9 +565,9 @@ fn build_anchor_from_raw(
             anchor.to_col_off_emu = raw.to.col_off;
             anchor.to_row_off_emu = raw.to.row_off;
             if is_image {
-                sync_image_px_from_grid(&mut anchor, columns);
+                sync_image_px_from_grid(&mut anchor, grid);
             } else {
-                anchor.sync_px_from_grid(columns);
+                anchor.sync_px_from_grid(grid);
             }
         }
         AnchorKind::OneCell => {
@@ -571,18 +577,20 @@ fn build_anchor_from_raw(
             }
             let w = raw.ext_cx.map_or(def_w, emu_u64_to_px).clamp(min_w, max_w);
             let h = raw.ext_cy.map_or(def_h, emu_u64_to_px).clamp(min_h, max_h);
-            anchor.left_px = col_left_px(fc, columns)
+            anchor.left_px = col_left_px(fc, grid.columns)
                 .saturating_add(u64::from(emu_u64_to_px(u64::from(raw.from.col_off))))
                 .min(u64::from(u32::MAX)) as u32;
-            anchor.top_px = row_top_px(fr)
+            anchor.top_px = grid
+                .rows()
+                .top(fr)
                 .saturating_add(u64::from(emu_u64_to_px(u64::from(raw.from.row_off))))
                 .min(u64::from(u32::MAX)) as u32;
             anchor.width_px = w;
             anchor.height_px = h;
             if is_image {
-                sync_image_grid_from_px(&mut anchor, columns);
+                sync_image_grid_from_px(&mut anchor, grid);
             } else {
-                anchor.sync_grid_from_px(columns);
+                anchor.sync_grid_from_px(grid);
             }
             anchor.from_col = fc;
             anchor.from_row = fr;
@@ -595,9 +603,9 @@ fn build_anchor_from_raw(
             anchor.width_px = raw.ext_cx.map_or(def_w, emu_u64_to_px).clamp(min_w, max_w);
             anchor.height_px = raw.ext_cy.map_or(def_h, emu_u64_to_px).clamp(min_h, max_h);
             if is_image {
-                sync_image_grid_from_px(&mut anchor, columns);
+                sync_image_grid_from_px(&mut anchor, grid);
             } else {
-                anchor.sync_grid_from_px(columns);
+                anchor.sync_grid_from_px(grid);
             }
         }
     }
@@ -638,7 +646,7 @@ pub(crate) fn read_sheet_drawings(
     sheet_xml: &str,
     part_path: &str,
     entries: &HashMap<&str, &[u8]>,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
     budget: &mut DrawingReadBudget,
     charts_out: &mut Vec<SheetChart>,
     images_out: &mut Vec<SheetFloatingImage>,
@@ -686,7 +694,7 @@ pub(crate) fn read_sheet_drawings(
                 }
                 budget.charts += 1;
 
-                let parsed_anchor = build_anchor_from_raw(&raw_anchor, columns, false);
+                let parsed_anchor = build_anchor_from_raw(&raw_anchor, grid, false);
                 let chart_xml =
                     resolve_rel_bytes(&drawing_rels, CHART_REL_TYPE, drawing_dir, cid, entries)
                         .and_then(|(_, data)| std::str::from_utf8(data).ok());
@@ -759,14 +767,14 @@ pub(crate) fn read_sheet_drawings(
                     }
                 };
                 budget.image_bytes = next_bytes;
-                let Some(mut anchor) = build_anchor_from_raw(&raw_anchor, columns, true) else {
+                let Some(mut anchor) = build_anchor_from_raw(&raw_anchor, grid, true) else {
                     images_rejected = images_rejected.saturating_add(1);
                     continue;
                 };
                 if !anchor.has_explicit_grid() && raw_anchor.ext_cx.is_none() {
                     anchor.width_px = rich_img.width_px().clamp(1, MAX_SHEET_IMAGE_DIM_PX);
                     anchor.height_px = rich_img.height_px().clamp(1, MAX_SHEET_IMAGE_DIM_PX);
-                    sync_image_grid_from_px(&mut anchor, columns);
+                    sync_image_grid_from_px(&mut anchor, grid);
                 }
                 let name = raw_anchor
                     .name

@@ -109,13 +109,25 @@ impl SheetStyling {
     /// The height in CSS pixels of the visible `row` as the page draws it: the height of the row, else the default row
     /// height a user set, else `grid_px`.
     pub fn row_height_px(&self, row: u32, grid_px: f64) -> f64 {
-        self.row_heights.get(&row).map_or_else(
-            || {
-                self.user_default_row_height()
-                    .map_or(grid_px, RowHeight::px)
-            },
-            |h| h.px(),
-        )
+        self.row_heights
+            .get(&row)
+            .map_or_else(|| self.base_row_px(grid_px), |h| h.px())
+    }
+
+    /// The height in CSS pixels of a row with no height of its own: the default row height a user set, else `grid_px`.
+    pub fn base_row_px(&self, grid_px: f64) -> f64 {
+        self.user_default_row_height()
+            .map_or(grid_px, RowHeight::px)
+    }
+
+    /// The height `row` takes on the page and in the PDF (PD-287, PD-299): none for a hidden row, else
+    /// [`Self::row_height_px`]. The one rule the page, the PDF and the position of pictures and charts share.
+    pub fn shown_row_px(&self, row: u32, grid_px: f64) -> f64 {
+        if self.row_hidden(row) {
+            0.0
+        } else {
+            self.row_height_px(row, grid_px)
+        }
     }
 
     /// Records the height of the `row` element `attrs` belong to (`ht`, `customHeight`). A value that is not a finite

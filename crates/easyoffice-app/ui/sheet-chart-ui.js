@@ -51,13 +51,8 @@
       if (el) el.textContent = msg || "";
     }
 
-    function rowAtContentY(gy) {
-      const target = Math.max(0, gy);
-      let r = grid.rowAtVisible(Math.max(0, Math.floor(target / grid.ROW_H)));
-      while (r > 1 && grid.rowTop(r) > target) r -= 1;
-      while (r < grid.MAX_ROWS && grid.rowTop(r + 1) <= target) r += 1;
-      return r;
-    }
+    // The row that holds the content offset `gy`: a search over the row tops, which take the heights of the rows (PD-299).
+    const rowAtContentY = (gy) => Math.min(grid.MAX_ROWS, grid.rowAtY(Math.max(0, gy)));
 
     function anchorFromRect(rawLeft, rawTop, rawWidth, rawHeight) {
       const left = Math.max(0, Math.min(MAX_POS, Math.round(Number(rawLeft) || 0)));

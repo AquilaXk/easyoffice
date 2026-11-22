@@ -10,6 +10,7 @@ use crate::cell_numbers::numeric_cell_value;
 use crate::cell_type::pack_cell_pos;
 use crate::pages_proto::FastU64Map;
 use crate::rtf_xml_helpers::format_col_letters;
+use crate::sheet_styling::sheet_row_offsets::{RowOffsets, SheetGrid};
 use crate::{
     CellBox, EasyOfficeError, OdsUnpacked, OoxmlCodec, SheetStyling, XlsxCachedValue,
     XlsxFormulaCache,
@@ -30,7 +31,6 @@ pub const DEFAULT_CHART_HEIGHT_PX: u32 = 260;
 
 pub const EMU_PER_PX: u64 = 9_525;
 pub const DEFAULT_CHART_COL_PX: u32 = 80;
-pub const DEFAULT_CHART_ROW_PX: u32 = 24;
 
 /// Supported chart types (`column`, `bar`, `line`, `pie`, `scatter`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -181,16 +181,11 @@ pub fn col_left_px(col: u32, columns: &BTreeMap<u32, u32>) -> u64 {
 }
 
 #[inline]
-pub fn row_top_px(row: u32) -> u64 {
-    u64::from(row) * u64::from(DEFAULT_CHART_ROW_PX)
-}
-
-#[inline]
-fn emu_to_px_rounded(emu: u32) -> u64 {
+pub(crate) fn emu_to_px_rounded(emu: u32) -> u64 {
     (u64::from(emu) + EMU_PER_PX / 2) / EMU_PER_PX
 }
 
-fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) -> (u32, u32) {
+pub(crate) fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) -> (u32, u32) {
     let max_col = OoxmlCodec::MAX_XLSX_COLS - 1;
     let mut cur_col = 0u32;
     let mut cur_x = 0u64;
@@ -230,12 +225,10 @@ fn px_to_col_and_emu(target_px: u64, columns: &BTreeMap<u32, u32>) -> (u32, u32)
     )
 }
 
-fn px_to_row_and_emu(target_px: u64) -> (u32, u32) {
-    let row_h = u64::from(DEFAULT_CHART_ROW_PX);
-    let max_row = u64::from(OoxmlCodec::MAX_XLSX_ROWS - 1);
-    let r = (target_px / row_h).min(max_row) as u32;
-    let off_px = target_px % row_h;
-    (r, (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32)
+/// The row at the vertical offset `target_px` and the EMU the offset lies below the row's top edge.
+pub(crate) fn px_to_row_and_emu(target_px: u64, rows: &RowOffsets) -> (u32, u32) {
+    let (row, off_px) = rows.locate(target_px);
+    (row, (off_px * EMU_PER_PX).min(u64::from(u32::MAX)) as u32)
 }
 
 impl ChartAnchor {
@@ -245,13 +238,18 @@ impl ChartAnchor {
     }
 
     /// Recomputes `left_px`, `top_px`, `width_px`, `height_px` from two-cell grid coordinates.
-    pub fn sync_px_from_grid(&mut self, columns: &BTreeMap<u32, u32>) {
+    pub fn sync_px_from_grid(&mut self, grid: &SheetGrid<'_>) {
+        let (columns, rows) = (grid.columns, grid.rows());
         let x0 =
             col_left_px(self.from_col, columns).saturating_add(emu_to_px_rounded(self.col_off_emu));
-        let y0 = row_top_px(self.from_row).saturating_add(emu_to_px_rounded(self.row_off_emu));
+        let y0 = rows
+            .top(self.from_row)
+            .saturating_add(emu_to_px_rounded(self.row_off_emu));
         let x1 = col_left_px(self.to_col, columns)
             .saturating_add(emu_to_px_rounded(self.to_col_off_emu));
-        let y1 = row_top_px(self.to_row).saturating_add(emu_to_px_rounded(self.to_row_off_emu));
+        let y1 = rows
+            .top(self.to_row)
+            .saturating_add(emu_to_px_rounded(self.to_row_off_emu));
         self.left_px = x0.min(u64::from(u32::MAX)) as u32;
         self.top_px = y0.min(u64::from(u32::MAX)) as u32;
         if x1 > x0 {
@@ -267,7 +265,8 @@ impl ChartAnchor {
     }
 
     /// Recomputes two-cell grid coordinates and EMU offsets from pixel coordinates.
-    pub fn sync_grid_from_px(&mut self, columns: &BTreeMap<u32, u32>) {
+    pub fn sync_grid_from_px(&mut self, grid: &SheetGrid<'_>) {
+        let (columns, rows) = (grid.columns, grid.rows());
         let w = u64::from(self.width_px.clamp(MIN_CHART_WIDTH_PX, MAX_CHART_WIDTH_PX));
         let h = u64::from(
             self.height_px
@@ -276,9 +275,9 @@ impl ChartAnchor {
         let left = u64::from(self.left_px);
         let top = u64::from(self.top_px);
         let (fc, fce) = px_to_col_and_emu(left, columns);
-        let (fr, fre) = px_to_row_and_emu(top);
+        let (fr, fre) = px_to_row_and_emu(top, rows);
         let (tc, tce) = px_to_col_and_emu(left.saturating_add(w), columns);
-        let (tr, tre) = px_to_row_and_emu(top.saturating_add(h));
+        let (tr, tre) = px_to_row_and_emu(top.saturating_add(h), rows);
         self.from_col = fc;
         self.col_off_emu = fce;
         self.from_row = fr;
@@ -293,7 +292,7 @@ impl ChartAnchor {
     /// for DrawingML export and PDF intersection.
     pub fn effective_two_cell(
         &self,
-        columns: &BTreeMap<u32, u32>,
+        grid: &SheetGrid<'_>,
     ) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
         if self.has_explicit_grid() {
             (
@@ -308,7 +307,7 @@ impl ChartAnchor {
             )
         } else {
             let mut copy = *self;
-            copy.sync_grid_from_px(columns);
+            copy.sync_grid_from_px(grid);
             (
                 copy.from_col,
                 copy.from_row,

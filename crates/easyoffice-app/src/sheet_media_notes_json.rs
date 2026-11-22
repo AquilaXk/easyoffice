@@ -6,7 +6,7 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     base64_codec, pack_cell_pos, sync_image_grid_from_px, sync_image_px_from_grid, ChartAnchor,
-    EasyOfficeError, RichImage, RichImageFormat, SheetCellNote, SheetFloatingImage,
+    EasyOfficeError, RichImage, RichImageFormat, SheetCellNote, SheetFloatingImage, SheetGrid,
     StrictJsonValue, MAX_IMAGE_BYTES, MAX_NOTES_PER_SHEET, MAX_NOTE_AUTHOR_BYTES,
     MAX_SHEET_IMAGES_PER_SHEET, MAX_SHEET_IMAGE_ID_BYTES, MAX_SHEET_IMAGE_NAME_BYTES,
     MAX_SHEET_NOTE_TEXT_BYTES,
@@ -58,13 +58,13 @@ fn opt_u32_any(
 
 fn parse_image_anchor(
     val: Option<&StrictJsonValue>,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> Result<ChartAnchor, EasyOfficeError> {
     let mut a = ChartAnchor::default();
     let Some(v) = val.filter(|v| !matches!(v, StrictJsonValue::Null)) else {
         a.width_px = 240;
         a.height_px = 160;
-        sync_image_grid_from_px(&mut a, columns);
+        sync_image_grid_from_px(&mut a, grid);
         return Ok(a);
     };
     let Some(obj) = v.as_object() else {
@@ -137,10 +137,10 @@ fn parse_image_anchor(
         if height_opt.is_none() {
             a.height_px = 160;
         }
-        sync_image_grid_from_px(&mut a, columns);
+        sync_image_grid_from_px(&mut a, grid);
     } else if width_opt.is_none() || height_opt.is_none() {
         let mut derived = a;
-        sync_image_px_from_grid(&mut derived, columns);
+        sync_image_px_from_grid(&mut derived, grid);
         if left_opt.is_none() {
             a.left_px = derived.left_px;
         }
@@ -205,7 +205,7 @@ fn parse_id_and_name(
 /// Parses `sheets[i].images` for full save/convert.
 pub(crate) fn parse_images(
     v: &StrictJsonValue,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> Result<Vec<SheetFloatingImage>, EasyOfficeError> {
     let Some(items) = v.as_array() else {
         return Err(invalid("시트의 그림 목록이 배열이어야 합니다."));
@@ -238,7 +238,7 @@ pub(crate) fn parse_images(
                 return Err(invalid("그림 MIME과 실제 이미지 형식이 일치하지 않습니다."));
             }
         }
-        let anchor = parse_image_anchor(StrictJsonValue::get_field(obj, "anchor"), columns)?;
+        let anchor = parse_image_anchor(StrictJsonValue::get_field(obj, "anchor"), grid)?;
         out.push(SheetFloatingImage {
             id,
             name,
@@ -305,7 +305,7 @@ pub(crate) struct StructureImage {
 
 pub(crate) fn parse_images_for_structure(
     v: &StrictJsonValue,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> Result<Vec<StructureImage>, EasyOfficeError> {
     let Some(items) = v.as_array() else {
         return Err(invalid("시트의 그림 목록이 배열이어야 합니다."));
@@ -325,7 +325,7 @@ pub(crate) fn parse_images_for_structure(
         validate_mime(mime_opt)?;
         let image_id = opt_str(obj, "imageId", "그림 캐시 ID")?.map(str::to_string);
         let data = opt_str(obj, "data", "그림 데이터")?.map(str::to_string);
-        let anchor = parse_image_anchor(StrictJsonValue::get_field(obj, "anchor"), columns)?;
+        let anchor = parse_image_anchor(StrictJsonValue::get_field(obj, "anchor"), grid)?;
         out.push(StructureImage {
             id,
             name,
@@ -379,7 +379,7 @@ fn shift_anchor_span(lo: u32, hi: u32, edit: &AxisEdit) -> (u32, u32) {
 pub(crate) fn shift_structure_images(
     images: &[StructureImage],
     edit: &AxisEdit,
-    columns: &BTreeMap<u32, u32>,
+    grid: &SheetGrid<'_>,
 ) -> Vec<StructureImage> {
     images
         .iter()
@@ -397,7 +397,7 @@ pub(crate) fn shift_structure_images(
                     anchor.to_col = tc;
                 }
             }
-            sync_image_px_from_grid(&mut anchor, columns);
+            sync_image_px_from_grid(&mut anchor, grid);
             StructureImage {
                 id: im.id.clone(),
                 name: im.name.clone(),

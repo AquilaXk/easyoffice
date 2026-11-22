@@ -6,8 +6,8 @@
 
 use easyoffice_formats::{
     normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, RowHeight, RowHeights,
-    SheetFilter, SheetStyling, SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
-    MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
+    RowOffsets, SheetFilter, SheetGrid, SheetStyling, SheetTable, SpillRef, StrictJsonValue,
+    MAX_HIDDEN_ROWS, MAX_MERGES, MAX_ROW_HEIGHTS, MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -253,19 +253,9 @@ pub(crate) fn parse_layout(
         styling.spills = parse_spills(v)?;
     }
     if let Some(v) =
-        StrictJsonValue::get_field(obj, "charts").filter(|v| !matches!(v, StrictJsonValue::Null))
-    {
-        styling.charts = crate::sheet_chart_json::parse_charts(v)?;
-    }
-    if let Some(v) =
         StrictJsonValue::get_field(obj, "pivots").filter(|v| !matches!(v, StrictJsonValue::Null))
     {
         styling.pivots = crate::sheet_pivot_json::parse_pivots(v)?;
-    }
-    if let Some(v) =
-        StrictJsonValue::get_field(obj, "images").filter(|v| !matches!(v, StrictJsonValue::Null))
-    {
-        styling.images = crate::sheet_media_notes_json::parse_images(v, &styling.columns)?;
     }
     if let Some(v) =
         StrictJsonValue::get_field(obj, "notes").filter(|v| !matches!(v, StrictJsonValue::Null))
@@ -275,6 +265,29 @@ pub(crate) fn parse_layout(
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
     crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
+    parse_floating_objects(obj, styling)
+}
+
+/// Reads `charts` and `images`, which sit on the rows of the sheet (heights, default height, hidden rows, folded groups,
+/// filters), so it runs after the fields that give those (PD-299).
+fn parse_floating_objects(
+    obj: &[(String, StrictJsonValue)],
+    styling: &mut SheetStyling,
+) -> Result<(), EasyOfficeError> {
+    let present = |key: &str| {
+        StrictJsonValue::get_field(obj, key).filter(|v| !matches!(v, StrictJsonValue::Null))
+    };
+    let (charts, images) = (present("charts"), present("images"));
+    if charts.is_none() && images.is_none() {
+        return Ok(());
+    }
+    let grid = SheetGrid::new(&styling.columns, RowOffsets::of(styling));
+    if let Some(v) = charts {
+        styling.charts = crate::sheet_chart_json::parse_charts(v, &grid)?;
+    }
+    if let Some(v) = images {
+        styling.images = crate::sheet_media_notes_json::parse_images(v, &grid)?;
+    }
     Ok(())
 }
 
@@ -427,6 +440,19 @@ mod tests {
 
     fn json(text: &str) -> StrictJsonValue {
         StrictJsonValue::parse(text).unwrap()
+    }
+
+    #[test]
+    fn charts_are_placed_on_the_rows_of_the_sheet_whatever_the_key_order() {
+        // 30 pt (40 px) rows with row 2 at 60 pt (80 px): the chart starts at 40 px and spans rows 2..=6 (80 + 4 * 40).
+        let sheet = json(concat!(
+            r#"{"charts":[{"id":"c","chartType":"column","dataRange":"A1:B3","anchor":"#,
+            r#"{"fromCol":1,"fromRow":1,"toCol":5,"toRow":6}}],"rowHeights":[[2,60]],"defaultRowHeight":[30]}"#
+        ));
+        let mut styling = SheetStyling::default();
+        parse_layout(sheet.as_object().unwrap(), &mut styling).unwrap();
+        let anchor = styling.charts[0].anchor;
+        assert_eq!((anchor.top_px, anchor.height_px), (40, 240));
     }
 
     #[test]

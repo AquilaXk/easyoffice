@@ -72,13 +72,10 @@ fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) ->
 }
 
 /// The height of `row` on the page in points: none for a hidden row, else its height, the sheet's default row height or
-/// the grid's row height, times `scale` (PD-287).
+/// the grid's row height, times `scale` (PD-287). The rule is `SheetStyling::shown_row_px`, which the position of
+/// pictures and charts shares (PD-299).
 pub(crate) fn row_height_pt(styling: &SheetStyling, row: u32, scale: f64) -> f64 {
-    if styling.row_hidden(row) {
-        0.0
-    } else {
-        styling.row_height_px(row, ROW_PX) * PDF_PT_PER_PX * scale
-    }
+    styling.shown_row_px(row, ROW_PX) * PDF_PT_PER_PX * scale
 }
 
 /// Text width in points at `size` pt.
