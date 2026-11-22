@@ -107,8 +107,12 @@
       const wrap = ctx.wrap;
       if (!td || !(wrap.clientWidth > 0)) return;
       const view = wrap.getBoundingClientRect(), box = td.getBoundingClientRect(), head = td.parentElement.firstChild.getBoundingClientRect().width;
-      if (box.left < view.left + head) wrap.scrollLeft -= view.left + head - box.left;
-      else if (box.right > view.left + wrap.clientWidth) wrap.scrollLeft += box.right - (view.left + wrap.clientWidth);
+      const startEdge = view.left + head, endEdge = view.left + wrap.clientWidth;
+      if (box.width > Math.max(endEdge - startEdge, 0)) {
+        if (box.left <= startEdge + 0.5 && box.right >= endEdge - 0.5) return;
+        wrap.scrollLeft += box.left - startEdge;
+      } else if (box.left < startEdge) wrap.scrollLeft -= startEdge - box.left;
+      else if (box.right > endEdge) wrap.scrollLeft += box.right - endEdge;
     }
 
     // The far corner is the cell that moved last (the active cell when the range is one cell).
@@ -293,6 +297,7 @@
     };
 
     function onMouseDown(ev) {
+      if (ev.target?.closest?.(".col-resizer, .row-resizer")) return;
       const td = cellOfTarget(ev), at = td && ctx && coordsOf(td);
       if (!at || ev.button !== 0 || (editing && editing.td === td)) return;
       const extend = ev.shiftKey && sel, native = nativeTarget(ev, at);
@@ -324,6 +329,7 @@
     }
 
     function onDblClick(ev) {
+      if (ev.target?.closest?.(".col-resizer, .row-resizer")) return;
       const td = cellOfTarget(ev);
       if (!td || !sel || editing || ev.target?.closest?.(NATIVE_CONTROL)) return;
       startEdit();

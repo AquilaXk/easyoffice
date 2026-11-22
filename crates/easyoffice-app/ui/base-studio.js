@@ -56,7 +56,7 @@
     let editingFieldId = null, draggedRecordId = "", invalidCell = null, refs = null;
     // The rows of the datasheet around the visible ones (`base-grid-window.js`); the scroll offset, the measured row heights and the fixed column widths outlive a redraw.
     let gridWin = null;
-    const gridMemo = { key: "", top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, margin: 0 }, gridWidths = new Map();
+    const gridMemo = { key: "", top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, cfgRowPx: 0, margin: 0 }, gridWidths = new Map();
 
     const el = (tag, cls, text) => {
       const n = doc.createElement(tag);
@@ -98,6 +98,7 @@
     const setFeedback = (msg) => { deps.setFeedback?.(String(msg || "")); };
     // Cell selection, keys, clipboard of the datasheet (`base-cell-select.js`): it outlives a redraw, so an edit keeps the selection.
     const cellSel = host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__(doc, { updateCells: (edits) => updateCells(edits), setFeedback, relationIds: (field, text) => relationIds(field, text) });
+    const gridSize = host.__EASYOFFICE_CREATE_BASE_GRID_SIZE__?.(doc, { setFieldWidth: (id, w) => setFieldWidth(id, w), setRowHeight: (h) => setRowHeight(h), setFeedback });
     const recordUndo = () => { deps.recordUndo?.(); };
     const noteActivity = () => { deps.noteActivity?.(); };
     const byId = (id) => doc.getElementById(id);
@@ -514,12 +515,13 @@
       for (const field of query.fields) {
         const th = setAttr(el("th", "base-grid-th"), "scope", "col");
         th.dataset.fieldId = field.id;
+        if (field.width !== undefined) th.style.width = field.width + "px";
         const inner = appendAll(el("div", "base-th-inner"),
           el("span", "base-th-name", field.name),
           el("span", "base-th-type", M.FIELD_TYPE_LABELS[field.type] || field.type),
           mkBtn("base-field-edit-btn", "▾", () => openFieldDialog(field), "", `필드 설정: ${field.name}`)
         );
-        th.appendChild(inner); headRow.appendChild(th);
+        appendAll(th, inner, setAttr(el("span", "col-resizer"), "aria-hidden", "true")); headRow.appendChild(th);
       }
       thead.appendChild(headRow);
 
@@ -532,6 +534,7 @@
           const set = new Set(t.collapsedGroups || []);
           if (set.has(group.key)) set.delete(group.key); else set.add(group.key);
           t.collapsedGroups = Array.from(set);
+          gridSize?.invalidateTable(t.id, gridWidths);
         }), "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
         gtd.appendChild(toggle); gr.appendChild(gtd);
         return gr;
@@ -541,7 +544,8 @@
         tr.dataset.recordId = rowData.record.id;
         tr.appendChild(appendAll(el("td", "base-row-index"),
           el("span", "base-row-num", String(rowNum + 1)),
-          mkBtn("base-row-delete-btn", "×", () => deleteRecord(rowData.record.id), "", "레코드 삭제")
+          mkBtn("base-row-delete-btn", "×", () => deleteRecord(rowData.record.id), "", "레코드 삭제"),
+          setAttr(el("span", "row-resizer"), "aria-hidden", "true")
         ));
         for (const field of query.fields) {
           const td = el("td", "base-grid-cell");
@@ -551,15 +555,23 @@
         }
         return tr;
       };
-      const widthKey = table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|");
+      if (table.rowHeight !== undefined) { tblEl.style.setProperty("--base-row-height", table.rowHeight + "px"); tblEl.dataset.rowHeight = String(table.rowHeight); }
+      const footCount = query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`;
+      const footSums = query.fields.map((field) => {
+        const sum = query.numericSums[field.id], hasSum = field.type === "number" || (field.type === "formula" && query.rows.some((r) => typeof r.values[field.id] === "number"));
+        return hasSum && Number.isFinite(sum) ? `합계: ${Math.round(sum * 1000) / 1000}` : "";
+      });
+      const { widthKey, growOnly } = gridSize ? gridSize.prepareAutoWidths(table, query, [footCount, ...footSums])
+        : { widthKey: table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|"), growOnly: false };
       gridWin = host.__EASYOFFICE_BASE_GRID_WINDOW__.createGridWindow(doc, {
         groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
-        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, onRowBuilt: cellSel.rowBuilt,
+        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, fields: query.fields, rowHeight: table.rowHeight, growOnly, onRowBuilt: cellSel.rowBuilt,
       });
       const tbody = gridWin.tbody, itemCount = gridWin.count;
       // The selection is kept while the table is drawn again for an edit; another table, filter, sort or group starts without one.
       const viewKey = JSON.stringify([table.id, table.filters, table.filterConjunction, table.sorts, table.groupByFieldId, table.collapsedGroups]);
       cellSel.bind({ tbl: tblEl, wrap, win: gridWin, fields: query.fields }, viewKey);
+      gridSize?.bind({ tbl: tblEl, table, query, win: gridWin, footSums });
       setAttr(tblEl, "aria-rowcount", String(itemCount + 3)); setAttr(headRow, "aria-rowindex", "1");
 
       const newRowTr = setAttr(el("tr", "base-new-record-row"), "aria-rowindex", String(itemCount + 2));
@@ -571,12 +583,8 @@
       tbody.appendChild(newRowTr);
 
       const tfoot = el("tfoot"), footRow = setAttr(el("tr", "base-grid-footer"), "aria-rowindex", String(itemCount + 3));
-      footRow.appendChild(el("td", "base-footer-count", query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`));
-      for (const field of query.fields) {
-        const sum = query.numericSums[field.id];
-        const hasSum = field.type === "number" || (field.type === "formula" && query.rows.some((r) => typeof r.values[field.id] === "number"));
-        footRow.appendChild(el("td", "base-footer-sum", hasSum && Number.isFinite(sum) ? `합계: ${Math.round(sum * 1000) / 1000}` : ""));
-      }
+      footRow.appendChild(el("td", "base-footer-count", footCount));
+      for (const txt of footSums) footRow.appendChild(el("td", "base-footer-sum", txt));
       tfoot.appendChild(footRow);
       appendAll(tblEl, thead, tbody, tfoot);
       wrap.appendChild(tblEl);
@@ -754,7 +762,7 @@
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
       refs.viewport.replaceChildren(viewNode);
-      if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else cellSel.release();
+      if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else { cellSel.release(); gridSize?.release?.(); }
     }
 
     // ---- Public Studio API ----
@@ -765,13 +773,13 @@
     function setState(next) {
       const res = M.hydrateBaseState(next);
       if (!res.ok) { setFeedback(res.error); return res; }
-      state = res.state; invalidCell = null; gridMemo.key = "";
+      state = res.state; invalidCell = null; gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
       if (bound) render();
       return { ok: true, state: getState() };
     }
 
     function resetBlank() {
-      state = M.createInitialBaseState(); invalidCell = null; queryPanel = ""; gridMemo.key = "";
+      state = M.createInitialBaseState(); invalidCell = null; queryPanel = ""; gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
       if (bound) render();
       return getState();
     }
@@ -798,8 +806,11 @@
     const setViewSetting = (apply) => withActive((tbl) => { apply(tbl); return { ok: true }; });
     const addTable = (spec = {}) => runMut(() => M.addTable(state, spec), true);
     const addField = (spec = {}) => withActive((t) => M.addField(state, t.id, spec));
-    const updateField = (fieldId, patch = {}) => withActive((t) => M.updateField(state, t.id, fieldId, patch));
-    const deleteField = (fieldId) => withActive((t) => M.deleteField(state, t.id, fieldId));
+    const updateField = (fieldId, patch = {}) => withActive((t) => { const r = M.updateField(state, t.id, fieldId, patch); if (r.ok) gridSize?.invalidateTable(t.id, gridWidths); return r; });
+    const deleteField = (fieldId) => withActive((t) => { const r = M.deleteField(state, t.id, fieldId); if (r.ok) gridSize?.invalidateTable(t.id, gridWidths); return r; });
+    const setFieldWidth = (fieldId, widthPx) => withActive((t) => M.setFieldWidth(state, t.id, fieldId, widthPx));
+    const setRowHeight = (heightPx) => withActive((t) => M.setRowHeight(state, t.id, heightPx));
+    const fitFieldWidth = (fieldId) => withActive((t) => { const px = gridSize?.fitField(M.queryTableView(state, t.id), fieldId); return px ? M.setFieldWidth(state, t.id, fieldId, px) : { ok: false, error: "대상 필드를 찾을 수 없습니다." }; });
     const addRecord = (values = {}) => withActive((t) => M.addRecord(state, t.id, values), true);
     const deleteRecord = (recordId) => withActive((t) => M.deleteRecord(state, t.id, recordId), true);
 
@@ -832,7 +843,7 @@
     function setView(viewMode) {
       const tbl = activeTable();
       if (!tbl || !M.VIEW_MODES.has(viewMode)) return { ok: false, error: "유효하지 않은 보기 모드입니다." };
-      if (tbl.view !== viewMode) setViewSetting((t) => { t.view = viewMode; });
+      if (tbl.view !== viewMode) setViewSetting((t) => { t.view = viewMode; if (viewMode === "grid") gridSize?.invalidateTable(t.id, gridWidths); });
       return { ok: true, view: viewMode };
     }
 
@@ -841,17 +852,20 @@
         fieldId: String(f?.fieldId || ""), op: M.FILTER_OPS.includes(f?.op) ? f.op : "contains", value: String(f?.value ?? ""),
       })) : [];
       tbl.filterConjunction = conjunction === "or" ? "or" : "and";
+      gridSize?.invalidateTable(tbl.id, gridWidths);
       return { ok: true };
     });
 
     const setSorts = (sorts = []) => withActive((tbl) => {
       tbl.sorts = Array.isArray(sorts) ? sorts.slice(0, 16).map((s) => ({ fieldId: String(s?.fieldId || ""), dir: s?.dir === "desc" ? "desc" : "asc" })) : [];
+      gridSize?.invalidateTable(tbl.id, gridWidths);
       return { ok: true };
     });
 
     const setGroupBy = (fieldId = "") => withActive((tbl) => {
       tbl.groupByFieldId = String(fieldId || "");
       tbl.collapsedGroups = [];
+      gridSize?.invalidateTable(tbl.id, gridWidths);
       return { ok: true };
     });
 
@@ -951,7 +965,7 @@
 
     const api = {
       bind, render, getState, setState, resetBlank,
-      addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,
+      addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, deleteRecord,
       selection: cellSel.selection, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;

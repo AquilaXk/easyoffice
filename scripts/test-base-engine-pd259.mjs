@@ -394,8 +394,10 @@ test("PD-259 CSS 토큰 준수(리터럴 색상 0건) 및 저장소 위생·줄 
   assert.equal(/#[0-9a-fA-F]{3,8}\b|\brgba?\s*\(|\bhsla?\s*\(/i.test(cssWithoutComments), false, "base.css must use tokens.css vars only");
   assert.equal(/font-size\s*:\s*\d/i.test(cssWithoutComments), false, "base.css must use tokens.css --font-size-* hierarchy tokens only");
 
+  const BASE_SIZE_URL = new URL("../crates/easyoffice-app/ui/base-grid-size.js", import.meta.url);
   const files = [
     ["crates/easyoffice-app/ui/base-model.js", BASE_MODEL_URL, 990],
+    ["crates/easyoffice-app/ui/base-grid-size.js", BASE_SIZE_URL, 400],
     ["crates/easyoffice-app/ui/base-studio.js", BASE_STUDIO_URL, 990],
     ["crates/easyoffice-app/ui/base.css", BASE_CSS_URL, 500],
     ["scripts/test-base-engine-pd259.mjs", THIS_TEST_URL, 500],

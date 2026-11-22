@@ -74,9 +74,13 @@
   function offsetForIndex(flat, count, index, align, view) {
     if (count === 0) return null;
     const i = Math.max(0, Math.min(index, count - 1)), start = flat[i * 2 + START], end = start + flat[i * 2 + SIZE];
+    const inner = Math.max(view.size - view.padStart - view.padEnd, 0);
     let side = align;
     if (side === "auto") {
-      if (end >= view.offset + view.size - view.padEnd) side = "end";
+      if (inner > 0 && end - start > inner) {
+        if (start <= view.offset + view.padStart && end >= view.offset + view.size - view.padEnd) return view.offset;
+        side = "start";
+      } else if (end >= view.offset + view.size - view.padEnd) side = "end";
       else if (start <= view.offset + view.padStart) side = "start";
       else return view.offset;
     }

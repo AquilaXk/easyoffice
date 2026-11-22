@@ -9,7 +9,7 @@
   // Rows kept above and below the visible ones, so a scroll of a few rows moves no node.
   const OVERSCAN = 12;
   // Until the real heights are measured (and where there is no layout at all): the height of a row (`base.css`), of the header, of the view.
-  const ROW_PX = 24, HEAD_PX = 26, FOOT_PX = 24, VIEW_PX = 800;
+  const ROW_PX = 24, HEAD_PX = 26, FOOT_PX = 24, VIEW_PX = 800, CORNER_PX = 56, DEFAULT_COL_PX = 144;
   // Browsers lay out in 1/64 px: a height read from a rect is rounded to that step, and a smaller difference is no difference.
   const LAYOUT_UNITS = 64;
   // aria-rowindex: the header row is 1, the items follow, then the new record row and the footer.
@@ -47,11 +47,16 @@
 
     // A new key (another table, a new document) starts at the top with nothing measured; a redraw of the same table keeps what it knew.
     // The measured heights are by item: a list of another length starts them again.
-    if (memo.key !== opts.scrollKey) Object.assign(memo, { key: opts.scrollKey, top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, margin: HEAD_PX, foot: FOOT_PX });
+    const baseRowPx = opts.rowHeight || ROW_PX;
+    const hasExplicitWidths = Boolean(opts.fields?.some((f) => f.width !== undefined));
+    if (memo.key !== opts.scrollKey) Object.assign(memo, { key: opts.scrollKey, top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, cfgRowPx: baseRowPx, margin: HEAD_PX, foot: FOOT_PX });
+    else if (memo.cfgRowPx !== baseRowPx) Object.assign(memo, { sizes: null, rowPx: 0, groupPx: 0, cfgRowPx: baseRowPx });
+    if (!(memo.margin > 0)) memo.margin = HEAD_PX;
+    if (!(memo.foot > 0)) memo.foot = FOOT_PX;
     if (memo.sizes?.length !== count) memo.sizes = new Float64Array(count);
     const sizes = memo.sizes;
     let wrap = null, tblEl = null, flat = null, painted = null, disposed = false, measured = false, observer = null, topPx = 0, trailing = 0;
-    let rowPx = memo.rowPx || ROW_PX, groupPx = memo.groupPx || rowPx;
+    let rowPx = memo.rowPx || baseRowPx, groupPx = memo.groupPx || ROW_PX;
 
     const segmentAt = (i) => plan.segments[V.findNearestBinarySearch(0, plan.segments.length - 1, (k) => plan.starts[k], i)];
     const isGroupRow = (i) => opts.grouped && segmentAt(i).start === i;
@@ -135,14 +140,24 @@
       }
     }
 
-    // Column widths are fixed from the first painted window: the columns keep their widths while the rows that set them scroll away.
-    function fixColumns() {
-      let widths = opts.widths.get(opts.widthKey);
-      if (!widths) {
-        widths = Array.from(tblEl.querySelectorAll("thead th"), (th) => th.getBoundingClientRect().width);
-        if (widths.length === 0 || widths.some((w) => !(w > 0))) return;
-        opts.widths.set(opts.widthKey, widths);
+    // Column widths combine measured auto widths (`opts.widths`) with user-set `field.width`.
+    function fixColumns(forceMeasure = false) {
+      let autoWidths = opts.widths.get(opts.widthKey);
+      if (!autoWidths || forceMeasure) {
+        if (tblEl.firstChild?.tagName === "COLGROUP") tblEl.firstChild.remove();
+        tblEl.classList.remove("is-fixed");
+        tblEl.style.width = "";
+        const domWidths = Array.from(tblEl.querySelectorAll("thead th"), (th) => Math.round(th.getBoundingClientRect().width * LAYOUT_UNITS) / LAYOUT_UNITS);
+        if (domWidths.length === opts.colSpan && domWidths.every((w) => w > 0)) {
+          autoWidths = autoWidths && opts.growOnly ? autoWidths.map((pw, idx) => Math.max(pw, domWidths[idx])) : domWidths;
+          opts.widths.set(opts.widthKey, autoWidths);
+        } else if (!autoWidths) {
+          if (!hasExplicitWidths) return;
+          autoWidths = [CORNER_PX, ...(opts.fields || []).map(() => DEFAULT_COL_PX)];
+        }
       }
+      if (tblEl.firstChild?.tagName === "COLGROUP") tblEl.firstChild.remove();
+      const widths = autoWidths.map((aw, idx) => (idx > 0 && opts.fields?.[idx - 1]?.width !== undefined ? opts.fields[idx - 1].width : aw));
       const colgroup = doc.createElement("colgroup");
       for (const w of widths) {
         const col = doc.createElement("col");
@@ -154,30 +169,37 @@
       tblEl.classList.add("is-fixed");
     }
 
-    // Everything that needs a layout, once, as soon as the pane has one (a pane that is hidden has none): the height of the header above the
-    // list, the estimate for the rows that are not built yet (the mean of the first window), the column widths and what follows the list.
+    // Measure sticky chrome, painted row heights (for both short and windowed tables), and column widths once layout exists.
     function measureLayout() {
-      if (measured || disposed || !windowed || !painted || !hasLayout()) return;
+      if (measured || disposed || !hasLayout()) return;
       measured = true;
       const cached = opts.widths.has(opts.widthKey), fresh = !memo.rowPx;
-      memo.margin = tblEl.querySelector("thead").getBoundingClientRect().height || memo.margin;
+      memo.margin = tblEl.querySelector("thead")?.getBoundingClientRect().height || memo.margin;
       memo.foot = tblEl.querySelector("tfoot")?.getBoundingClientRect().height || memo.foot;
-      const means = { row: [], group: [] };
-      for (let i = painted.from; i <= painted.to; i += 1) {
-        const h = rowsByIndex.has(i) ? heightOf(rowsByIndex.get(i)) : 0;
-        if (h > 0) (isGroupRow(i) ? means.group : means.row).push(h);
+      if (painted) {
+        const means = { row: [], group: [] };
+        for (let i = painted.from; i <= painted.to; i += 1) {
+          const h = rowsByIndex.has(i) ? heightOf(rowsByIndex.get(i)) : 0;
+          if (h > 0) (isGroupRow(i) ? means.group : means.row).push(h);
+        }
+        const mean = (list, fallback) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : fallback);
+        if (fresh) { rowPx = mean(means.row, rowPx); groupPx = mean(means.group, groupPx); Object.assign(memo, { rowPx, groupPx }); }
+        relayout();
+        const shift = measureRows(painted.from, painted.to, painted.from);
+        if (windowed) {
+          topPx = flat[painted.from * 2] - memo.margin;
+          setSpacer(top, topPx);
+          setSpacer(bottom, V.listEnd(flat, count) - (flat[painted.to * 2] + flat[painted.to * 2 + 1]));
+          if (shift) wrap.scrollTop += shift;
+        }
       }
-      const mean = (list, fallback) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : fallback);
-      if (fresh) { rowPx = mean(means.row, rowPx); groupPx = mean(means.group, rowPx); Object.assign(memo, { rowPx, groupPx }); }
-      relayout();
-      const shift = measureRows(painted.from, painted.to, painted.from);
-      topPx = flat[painted.from * 2] - memo.margin;
-      setSpacer(top, topPx);
-      setSpacer(bottom, V.listEnd(flat, count) - (flat[painted.to * 2] + flat[painted.to * 2 + 1]));
-      if (shift) wrap.scrollTop += shift;
-      if (!cached) fixColumns();
-      trailing = Math.max(wrap.scrollHeight - V.listEnd(flat, count), 0);
-      sync();
+      if ((windowed && (!cached || opts.growOnly)) || hasExplicitWidths) {
+        fixColumns(windowed && (!cached || Boolean(opts.growOnly)));
+        memo.margin = tblEl.querySelector("thead")?.getBoundingClientRect().height || memo.margin;
+        memo.foot = tblEl.querySelector("tfoot")?.getBoundingClientRect().height || memo.foot;
+      }
+      trailing = count > 0 ? Math.max((wrap.scrollHeight || 0) - V.listEnd(flat, count), 0) : 0;
+      if (windowed) sync();
     }
 
     function onScroll() {
@@ -185,20 +207,37 @@
       if (windowed) sync();
     }
 
+    function previewRowHeight(px) {
+      if (disposed || !tblEl) return;
+      tblEl.style.setProperty("--base-row-height", px + "px");
+      tblEl.dataset.rowHeight = String(px);
+      rowPx = px; memo.rowPx = px; memo.cfgRowPx = px; sizes.fill(0);
+      relayout();
+      if (windowed && painted) {
+        topPx = flat[painted.from * 2] - memo.margin;
+        setSpacer(top, topPx);
+        setSpacer(bottom, V.listEnd(flat, count) - (flat[painted.to * 2] + flat[painted.to * 2 + 1]));
+        sync();
+      }
+      if (wrap) trailing = count > 0 ? Math.max((wrap.scrollHeight || 0) - V.listEnd(flat, count), 0) : 0;
+    }
+
     function attach(wrapEl, tableEl) {
       wrap = wrapEl; tblEl = tableEl;
       relayout();
       if (windowed) {
-        if (opts.widths.has(opts.widthKey)) fixColumns();
+        if (opts.widths.has(opts.widthKey) || hasExplicitWidths) fixColumns(false);
         setSpacer(bottom, V.listEnd(flat, count) - memo.margin);
-      } else if (count > 0) paint(0, count - 1, 0);
+      } else {
+        if (count > 0) paint(0, count - 1, 0);
+        if (hasExplicitWidths) fixColumns(false);
+      }
       wrap.scrollTop = memo.top; wrap.scrollLeft = memo.left;
       wrap.addEventListener("scroll", onScroll, { passive: true });
-      if (!windowed) return;
-      sync();
+      if (windowed) sync();
       measureLayout();
       const Observer = doc.defaultView?.ResizeObserver || host.ResizeObserver;
-      if (typeof Observer === "function") { observer = new Observer(() => { sync(); measureLayout(); }); observer.observe(wrap); }
+      if (typeof Observer === "function") { observer = new Observer(() => { if (!measured) measureLayout(); if (windowed) sync(); }); observer.observe(wrap); }
     }
 
     function dispose() {
@@ -239,7 +278,7 @@
     // The rows a page holds: as many of the usual row height as fit between the sticky header and the sticky footer, at least one.
     const visibleSpan = () => Math.max(Math.floor(((wrap.clientHeight || VIEW_PX) - memo.margin - memo.foot) / rowPx), 1);
 
-    return { tbody, count, attach, dispose, rowAt, itemOf, recordAt, isGroup: isGroupRow, builtItems, scrollToItem, visibleSpan };
+    return { tbody, count, attach, dispose, rowAt, itemOf, recordAt, isGroup: isGroupRow, builtItems, scrollToItem, visibleSpan, previewRowHeight };
   }
 
   host.__EASYOFFICE_BASE_GRID_WINDOW__ = Object.freeze({ createGridWindow, WINDOW_MIN_ITEMS, OVERSCAN });

@@ -403,4 +403,48 @@ export const baseSteps = [
     assert.ok(times.arrow.sync < 20 && times.page.sync < 60, `${JSON.stringify(times)}`);
     assert.ok((await windowOf(page)).contiguous);
   }],
+
+  ["column and row resizer drags, offscreen best-fit dblclick, row height PageDown/Ctrl+End, and reset work in live layout (PD-314)", async (page) => {
+    await page.evaluate(() => {
+      const fields = [{ id: "f1", name: "이름", type: "text" }, { id: "f2", name: "수량", type: "number" }];
+      const records = Array.from({ length: 10000 }, (_, i) => ({
+        id: "r" + i,
+        values: { f1: i === 8500 ? "오프스크린_긴_제목_" + "가".repeat(32) : "항목 " + i, f2: i + 1 },
+      }));
+      const res = window.__EASYOFFICE_BASE_STUDIO__.setState({ version: 1, activeTableId: "t1", tables: [{ id: "t1", name: "표", fields, records }] });
+      if (!res.ok) throw new Error(res.error);
+    });
+    const colBox = await page.locator('th[data-field-id="f1"] .col-resizer').boundingBox();
+    await page.mouse.move(colBox.x + colBox.width / 2, colBox.y + colBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(colBox.x + colBox.width / 2 + 80, colBox.y + colBox.height / 2, { steps: 4 });
+    await page.mouse.up();
+    const draggedW = (await columnWidths(page))[1];
+    const modelW = await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].fields[0].width);
+    assert.ok(Math.abs(draggedW - modelW) <= 2 && modelW >= 200, `dragged col width ${draggedW} / ${modelW}`);
+
+    await page.locator('th[data-field-id="f1"] .col-resizer').dblclick();
+    const fitW = await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].fields[0].width);
+    assert.ok(fitW > draggedW && fitW > 400, `best-fit widened for offscreen r8500: ${fitW}`);
+
+    const rowBox = await page.locator('tr[data-record-id="r0"] .row-resizer').boundingBox();
+    await page.mouse.move(rowBox.x + 12, rowBox.y + rowBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rowBox.x + 12, rowBox.y + rowBox.height / 2 + 18, { steps: 4 });
+    await page.mouse.up();
+    const rh = await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].rowHeight);
+    assert.ok(rh >= 40 && rh <= 45, `row height dragged to ${rh}`);
+    const w = await windowOf(page);
+    assert.ok(Math.abs(w.pitchMin - rh) < 1 && Math.abs(w.pitchMax - rh) < 1 && w.topGap < 1 && w.bottomGap < 1, `42px window gap check: ${JSON.stringify(w)}`);
+
+    await cellOf(page, 0, "f1").click();
+    await page.keyboard.press("PageDown");
+    assert.ok((await activeInfo(page)).inView, "active cell remains clear of sticky header/footer after PageDown");
+    await page.keyboard.press("Control+End");
+    assert.deepEqual([(await activeInfo(page)).rec, (await activeInfo(page)).inView], ["r9999", true], "Control+End reveals last row cleanly");
+
+    const resetBox = await page.locator('tr.base-grid-row .row-resizer').first().boundingBox();
+    await page.mouse.dblclick(resetBox.x + 12, resetBox.y + resetBox.height / 2);
+    assert.equal(await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].rowHeight), undefined);
+  }],
 ];

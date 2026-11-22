@@ -10,6 +10,8 @@
   const MAX_CELL_CHARS = 8192, MAX_FORMULA_DEPTH = 32, MAX_FORMULA_CHARS = 4096;
   const MAX_JSON_BYTES = 64 * 1024 * 1024, MAX_FILTERS = 64, MAX_SORTS = 16, MAX_OPTIONS = 256;
   const MAX_FORMULA_CACHE = 1024, MS_PER_DAY = 86400000, MAX_RELATION_EVALS = 100000, MAX_RELATION_DEPTH = 32;
+  const MIN_COL_PX = 64, MAX_COL_PX = 1200, MIN_ROW_PX = 20, MAX_ROW_PX = 400, DEFAULT_ROW_PX = 24;
+  const validDimPx = (v, min, max) => (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? Math.round(v) : null);
 
   const VIEW_MODES = new Set(["grid", "kanban", "calendar"]);
   const FIELD_TYPES = Object.freeze(["text", "number", "select", "multiSelect", "date", "checkbox", "url", "relation", "formula"]);
@@ -793,6 +795,26 @@
     return { ok: true };
   }
 
+  function setFieldWidth(state, tableId, fieldId, widthPx) {
+    const field = getTable(state, tableId)?.fields.find((f) => f.id === fieldId);
+    if (!field) return fail("대상 필드를 찾을 수 없습니다.");
+    if (widthPx === null || widthPx === undefined) { delete field.width; return { ok: true, width: null }; }
+    const cw = validDimPx(widthPx, MIN_COL_PX, MAX_COL_PX);
+    if (cw === null) return fail(`열 너비는 ${MIN_COL_PX}~${MAX_COL_PX}px 범위의 숫자여야 합니다.`);
+    field.width = cw;
+    return { ok: true, width: cw };
+  }
+
+  function setRowHeight(state, tableId, heightPx) {
+    const table = getTable(state, tableId);
+    if (!table) return fail("대상 테이블을 찾을 수 없습니다.");
+    if (heightPx === null || heightPx === undefined) { delete table.rowHeight; return { ok: true, rowHeight: null }; }
+    const rh = validDimPx(heightPx, MIN_ROW_PX, MAX_ROW_PX);
+    if (rh === null) return fail(`행 높이는 ${MIN_ROW_PX}~${MAX_ROW_PX}px 범위의 숫자여야 합니다.`);
+    table.rowHeight = rh;
+    return { ok: true, rowHeight: rh };
+  }
+
   // ---- Export Serialization & State Persistence ----
 
   const uniqueSheetName = (rawName, usedUpper) => {
@@ -854,11 +876,12 @@
     if (f.type === "select" || f.type === "multiSelect") out.options = normalizeOpts ? normalizeOptions(f.options || []) : [...(f.options || [])];
     if (f.type === "relation") out.relationTableId = String(f.relationTableId || "");
     if (f.type === "formula") out.formula = String(f.formula ?? "");
+    if (f.width !== undefined) out.width = f.width;
     return out;
   }
 
   function cloneTableProps(t, fallbackName, fields, records) {
-    return {
+    const out = {
       id: String(t.id), name: String(t.name || fallbackName).trim().slice(0, 128) || fallbackName,
       view: VIEW_MODES.has(t.view) ? t.view : "grid",
       kanbanFieldId: String(t.kanbanFieldId || ""), calendarFieldId: String(t.calendarFieldId || ""),
@@ -867,6 +890,8 @@
       sorts: sanitizeSorts(t.sorts), groupByFieldId: String(t.groupByFieldId || ""),
       collapsedGroups: Array.isArray(t.collapsedGroups) ? t.collapsedGroups.map(String) : [], fields, records,
     };
+    if (t.rowHeight !== undefined) out.rowHeight = t.rowHeight;
+    return out;
   }
 
   function serializeBaseState(state) {
@@ -909,15 +934,25 @@
       if (!Array.isArray(rt.fields) || !rt.fields.length || rt.fields.length > MAX_FIELDS_PER_TABLE) return fail(`필드 수는 1~${MAX_FIELDS_PER_TABLE}개 범위여야 합니다.`);
       if (!Array.isArray(rt.records) || rt.records.length > MAX_RECORDS_PER_TABLE) return fail(`레코드 수는 최대 ${MAX_RECORDS_PER_TABLE}건까지 허용됩니다.`);
       if (rt.view !== undefined && !VIEW_MODES.has(rt.view)) return fail(`알 수 없는 보기 모드입니다: ${rt.view}`);
+      let rowHeight;
+      if (rt.rowHeight !== undefined && rt.rowHeight !== null) {
+        rowHeight = validDimPx(rt.rowHeight, MIN_ROW_PX, MAX_ROW_PX);
+        if (rowHeight === null) return fail(`행 높이는 ${MIN_ROW_PX}~${MAX_ROW_PX}px 범위의 숫자여야 합니다.`);
+      }
       const fields = [];
       for (const rf of rt.fields) {
         if (!rf || !rf.id || !FIELD_TYPE_SET.has(rf.type)) return fail("유효하지 않은 필드 정의입니다.");
         const fld = cloneField(rf, true);
         if (!fld.name) return fail("필드 이름이 비어 있습니다.");
+        if (rf.width !== undefined && rf.width !== null) {
+          const cw = validDimPx(rf.width, MIN_COL_PX, MAX_COL_PX);
+          if (cw === null) return fail(`열 너비는 ${MIN_COL_PX}~${MAX_COL_PX}px 범위의 숫자여야 합니다.`);
+          fld.width = cw;
+        } else delete fld.width;
         if (fld.type === "formula") { const c = compileFormula(fld.formula); if (!c.ok && c.depthExceeded) return fail(c.error); }
         fields.push(fld);
       }
-      tables.push(cloneTableProps(rt, `테이블 ${t + 1}`, fields,
+      tables.push(cloneTableProps({ ...rt, rowHeight }, `테이블 ${t + 1}`, fields,
         rt.records.map((rec, rIdx) => ({ id: String(rec?.id || `rec-${rIdx + 1}`), values: rec?.values && typeof rec.values === "object" ? { ...rec.values } : {} }))));
     }
     const nextState = {
@@ -940,10 +975,11 @@
 
   host.__EASYOFFICE_BASE_MODEL__ = {
     MAX_TABLES, MAX_FIELDS_PER_TABLE, MAX_RECORDS_PER_TABLE, MAX_CELL_CHARS, MAX_FORMULA_DEPTH,
+    MIN_COL_PX, MAX_COL_PX, MIN_ROW_PX, MAX_ROW_PX, DEFAULT_ROW_PX,
     VIEW_MODES, FIELD_TYPES, FIELD_TYPE_LABELS, FILTER_OPS, FILTER_OP_LABELS,
     createInitialBaseState, buildStateIndex, getTable, validateCellValue, compileFormula, evaluateFormula,
     resolveRelationDisplay, resolveRelationItems, rollupSum, formatCellDisplay, queryTableView,
     addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,
-    toSheetsPayload, toDelimitedText, serializeBaseState, hydrateBaseState,
+    setFieldWidth, setRowHeight, toSheetsPayload, toDelimitedText, serializeBaseState, hydrateBaseState,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
