@@ -357,7 +357,8 @@ pub(crate) fn parse_images_for_structure(
     Ok(out)
 }
 
-fn shift_anchor_span(lo: u32, hi: u32, edit: &AxisEdit) -> (u32, u32) {
+/// The start and end row or column of an anchor after `edit`: the same rule for pictures and charts.
+pub(crate) fn shift_anchor_span(lo: u32, hi: u32, edit: &AxisEdit) -> (u32, u32) {
     let limit = match edit.axis {
         Axis::Row => LAST_ROW,
         Axis::Col => LAST_COL,

@@ -1091,6 +1091,37 @@ function offlineSourceConversion(parsed) {
       return [at0, end - count];
     }
 
+    // The start and end of a chart anchor after an edit, as the engine moves them: a deleted anchor stays on the edit.
+    function shiftChartSpan0(start, end, op, at0, count, limit0) {
+      if (op === "insert") {
+        if (start >= at0) return [Math.min(limit0, start + count), Math.min(limit0, end + count)];
+        return [start, end >= at0 ? Math.min(limit0, end + count) : end];
+      }
+      const de = at0 + count - 1;
+      if (end < at0) return [start, end];
+      if (start > de) return [start - count, end - count];
+      if (start >= at0 && end <= de) return [at0, at0];
+      if (start >= at0) return [at0, end - count];
+      return [start, end <= de ? Math.max(start, at0 - 1) : end - count];
+    }
+
+    // Charts on the default 24 x 96 px grid: a two-cell chart moves with both ends, a one-cell chart with its start, an
+    // absolute one stays (PD-302).
+    function offlineStructureCharts(doc, edit, at0, limit0) {
+      return (doc.charts || []).map((chart) => {
+        const a = { ...chart.anchor };
+        if (a.editAs !== "absolute") {
+          const [from, to] = edit.axis === "row" ? [a.fromRow, a.toRow] : [a.fromCol, a.toCol];
+          const [nextFrom, nextTo] = shiftChartSpan0(from, to, edit.op, at0, edit.count, limit0);
+          if (edit.axis === "row") [a.fromRow, a.toRow] = [nextFrom, nextTo];
+          else [a.fromCol, a.toCol] = [nextFrom, nextTo];
+          if (edit.axis === "row") a.top = a.fromRow * 24 + Math.round((a.rowOffEmu || 0) / 9525);
+          else a.left = a.fromCol * 96 + Math.round((a.colOffEmu || 0) / 9525);
+        }
+        return { ...chart, anchor: a };
+      });
+    }
+
     function offlineStructure(doc) {
       const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
       const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
@@ -1185,6 +1216,7 @@ function offlineSourceConversion(parsed) {
         unlockedRows: doc.unlockedRows || [],
         unlockedCols: doc.unlockedCols || [],
         tables: doc.tables || [],
+        charts: offlineStructureCharts(doc, edit, at0, limit0),
         images,
         notes,
         widths,

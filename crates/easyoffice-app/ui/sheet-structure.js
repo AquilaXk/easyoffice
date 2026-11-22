@@ -128,7 +128,7 @@
         hiddenCols: json.hiddenCols || [],
         filter: json.filter || null,
         rowHeights: json.rowHeights || [],
-        // The rows below the default height too: the engine places pictures on the rows after the edit (PD-299).
+        // The rows below the default height too: the engine places pictures and charts on the rows after the edit (PD-299).
         defaultRowHeight: json.defaultRowHeight,
         outline: json.outline,
         page: json.page,
@@ -136,6 +136,8 @@
         unlockedRows: json.unlockedRows || [],
         unlockedCols: json.unlockedCols || [],
         tables: json.tables || [],
+        // The charts move with their cells as the pictures do, and their data ranges follow the edit (PD-302).
+        charts: json.charts || [],
         images: (json.images || []).map(({ data, ...rest }) => rest),
         notes: json.notes || [],
         widths: pairsOf(grid.getAllWidths()[name]),

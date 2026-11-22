@@ -456,6 +456,70 @@ export const sheetSteps = [
     assert.equal(scrolled.cell, taller.cell - 48);
   }],
 
+  ["inserting a row or a column moves the charts with their cells in the real layout and one undo brings them back (PD-302)", async (page) => {
+    // A two-cell chart over F4:J13 (384 x 216 px) and a one-cell chart of the same size on F16.
+    await page.evaluate(() => {
+      const emu = { colOffEmu: 0, rowOffEmu: 0, toColOffEmu: 0, toRowOffEmu: 0 };
+      const base = { chartType: "column", title: "", dataRange: "A1:B3", switchRowCol: false, legend: "right" };
+      window.__EASYOFFICE_SHEET_LAYOUT__.setCharts("Sheet1", [
+        { ...base, id: "two", anchor: { fromCol: 5, fromRow: 3, toCol: 9, toRow: 12, ...emu, left: 480, top: 72, width: 384, height: 216 } },
+        { ...base, id: "one", anchor: { fromCol: 5, fromRow: 15, toCol: 9, toRow: 20, ...emu, left: 480, top: 360, width: 384, height: 144, editAs: "oneCell" } },
+      ]);
+    });
+    await page.waitForSelector('.sheet-chart-card[data-chart-id="one"]');
+    // The cell each chart starts on, and how far its card lies from that cell's corner and how big it is.
+    const place = () => page.evaluate(() => {
+      const startCell = (anchor) => `${String.fromCharCode(65 + anchor.fromCol)}${anchor.fromRow + 1}`;
+      const measure = (id) => {
+        const anchor = window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf("Sheet1").find((c) => c.id === id).anchor;
+        const card = document.querySelector(`.sheet-chart-card[data-chart-id="${id}"]`).getBoundingClientRect();
+        const cell = document.querySelector(`#pane-sheet td[data-cell="${startCell(anchor)}"]`).getBoundingClientRect();
+        return { cell: startCell(anchor), dx: Math.round(card.left - cell.left), dy: Math.round(card.top - cell.top), width: Math.round(card.width), height: Math.round(card.height) };
+      };
+      return { two: measure("two"), one: measure("one") };
+    });
+    const act = (name) => page.evaluate((a) => document.querySelector(`.md-item[data-sheet-act="${a}"]`).click(), name);
+    // The engine's answer is in the layout and the page has drawn the cards on it.
+    const settled = (two, one) => page.waitForFunction(([wantTwo, wantOne]) => {
+      const startCell = (id) => {
+        const a = window.__EASYOFFICE_SHEET_LAYOUT__.chartsOf("Sheet1").find((c) => c.id === id).anchor;
+        return `${String.fromCharCode(65 + a.fromCol)}${a.fromRow + 1}`;
+      };
+      const drawn = (id, cell) => {
+        const card = document.querySelector(`.sheet-chart-card[data-chart-id="${id}"]`)?.getBoundingClientRect();
+        const at = document.querySelector(`#pane-sheet td[data-cell="${cell}"]`)?.getBoundingClientRect();
+        return Boolean(card && at) && Math.abs(card.left - at.left) <= 1 && Math.abs(card.top - at.top) <= 1;
+      };
+      return startCell("two") === wantTwo && startCell("one") === wantOne && drawn("two", wantTwo) && drawn("one", wantOne);
+    }, [two, one]);
+
+    const start = await place();
+    assert.deepEqual([start.two.cell, start.one.cell], ["F4", "F16"]);
+    // The card starts on the border of its cell, which is 1 px off at most.
+    for (const chart of [start.two, start.one]) assert.ok(Math.abs(chart.dx) <= 1 && Math.abs(chart.dy) <= 1, `${chart.cell}: ${chart.dx}, ${chart.dy}`);
+    assert.deepEqual([start.two.width, start.two.height], [384, 216], "the chart sits on F4 and is nine rows tall");
+    assert.deepEqual([start.one.width, start.one.height], [384, 144]);
+    const moved = (cells) => ({ two: { ...start.two, cell: cells[0] }, one: { ...start.one, cell: cells[1] } });
+
+    // A row above both charts: both start one row down, each keeps its size.
+    await page.click(td("A2"));
+    await act("row-insert-above");
+    await settled("F5", "F17");
+    assert.deepEqual(await place(), moved(["F5", "F17"]), "both charts sit on the cells they moved to, at the same size");
+
+    // One undo gives the cells and the charts back at once.
+    await page.click(td("A1"));
+    await page.keyboard.press("Control+z");
+    await settled("F4", "F16");
+    assert.deepEqual(await place(), start);
+
+    // A column before both: the 96 px columns of the window and of the engine agree, so the sizes do not change.
+    await page.click(td("B1"));
+    await act("col-insert-left");
+    await settled("G4", "G16");
+    assert.deepEqual(await place(), moved(["G4", "G16"]), "the charts moved one column and kept their widths");
+  }],
+
   ["a whole column picked by its header leaves each sheet at the scroll it had when the tab changes (PD-299)", async (page) => {
     const view = () => page.evaluate(() => {
       const viewport = document.getElementById("sheet-viewport");

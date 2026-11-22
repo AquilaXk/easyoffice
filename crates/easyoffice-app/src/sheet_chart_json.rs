@@ -9,7 +9,9 @@ use easyoffice_formats::{
     MAX_CHART_TEXT_BYTES, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART, MAX_SHEET_IMAGE_DIM_PX,
 };
 use easyoffice_sheet::axis::rewrite_formula_refs;
-use easyoffice_sheet::{Axis, AxisEdit, EditKind};
+use easyoffice_sheet::{Axis, AxisEdit};
+
+use crate::sheet_media_notes_json::shift_anchor_span;
 
 const LAST_ROW: u32 = 1_048_575;
 const LAST_COL: u32 = 16_383;
@@ -291,43 +293,6 @@ pub(crate) fn charts_json(charts: &[SheetChart]) -> String {
     }
     out.push(']');
     out
-}
-
-fn shift_anchor_span(lo: u32, hi: u32, edit: &AxisEdit) -> (u32, u32) {
-    let limit = match edit.axis {
-        Axis::Row => LAST_ROW,
-        Axis::Col => LAST_COL,
-    };
-    match edit.kind {
-        EditKind::Insert => {
-            if lo >= edit.at {
-                (
-                    lo.saturating_add(edit.count).min(limit),
-                    hi.saturating_add(edit.count).min(limit),
-                )
-            } else if hi >= edit.at {
-                (lo, hi.saturating_add(edit.count).min(limit))
-            } else {
-                (lo, hi)
-            }
-        }
-        EditKind::Delete => {
-            let del_end = edit.at.saturating_add(edit.count.saturating_sub(1));
-            if hi < edit.at {
-                (lo, hi)
-            } else if lo > del_end {
-                (lo - edit.count, hi - edit.count)
-            } else if lo >= edit.at && hi <= del_end {
-                (edit.at.min(limit), edit.at.min(limit))
-            } else if lo >= edit.at {
-                (edit.at.min(limit), hi - edit.count)
-            } else if hi <= del_end {
-                (lo, edit.at.saturating_sub(1).max(lo))
-            } else {
-                (lo, hi - edit.count)
-            }
-        }
-    }
 }
 
 pub(crate) fn shift_charts(
