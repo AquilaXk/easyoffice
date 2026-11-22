@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    base64_codec, pack_cell_pos, sync_image_grid_from_px, sync_image_px_from_grid, ChartAnchor,
-    EasyOfficeError, RichImage, RichImageFormat, SheetCellNote, SheetFloatingImage, SheetGrid,
-    StrictJsonValue, MAX_IMAGE_BYTES, MAX_NOTES_PER_SHEET, MAX_NOTE_AUTHOR_BYTES,
+    base64_codec, pack_cell_pos, sync_image_grid_from_px, sync_image_px_from_grid, AnchorEdit,
+    ChartAnchor, EasyOfficeError, RichImage, RichImageFormat, SheetCellNote, SheetFloatingImage,
+    SheetGrid, StrictJsonValue, MAX_IMAGE_BYTES, MAX_NOTES_PER_SHEET, MAX_NOTE_AUTHOR_BYTES,
     MAX_SHEET_IMAGES_PER_SHEET, MAX_SHEET_IMAGE_ID_BYTES, MAX_SHEET_IMAGE_NAME_BYTES,
     MAX_SHEET_NOTE_TEXT_BYTES,
 };
@@ -54,6 +54,21 @@ fn opt_u32_any(
         }
     }
     Ok(None)
+}
+
+/// `editAs` of an anchor (`twoCell`, `oneCell`, `absolute`); missing, not a string or any other text is the default.
+pub(crate) fn parse_edit_as(obj: &[(String, StrictJsonValue)]) -> AnchorEdit {
+    match StrictJsonValue::get_field(obj, "editAs") {
+        Some(StrictJsonValue::Str(s)) => AnchorEdit::parse(s),
+        _ => AnchorEdit::TwoCell,
+    }
+}
+
+/// `,"editAs":".."` for an anchor that is not the default two-cell kind.
+pub(crate) fn write_edit_as(out: &mut String, edit_as: AnchorEdit) {
+    if edit_as != AnchorEdit::TwoCell {
+        let _ = write!(out, ",\"editAs\":\"{}\"", edit_as.as_str());
+    }
 }
 
 fn parse_image_anchor(
@@ -106,6 +121,7 @@ fn parse_image_anchor(
     if let Some(v) = opt_u32_any(obj, &["toRowOffEmu"])? {
         a.to_row_off_emu = v;
     }
+    a.edit_as = parse_edit_as(obj);
     let left_opt = opt_u32_any(obj, &["leftPx", "left"])?;
     let top_opt = opt_u32_any(obj, &["topPx", "top"])?;
     let width_opt = opt_u32_any(obj, &["widthPx", "width"])?;
@@ -253,7 +269,7 @@ pub(crate) fn parse_images(
 fn write_anchor_json(out: &mut String, a: &ChartAnchor) {
     let _ = write!(
         out,
-        "{{\"fromCol\":{},\"fromRow\":{},\"colOffEmu\":{},\"rowOffEmu\":{},\"toCol\":{},\"toRow\":{},\"toColOffEmu\":{},\"toRowOffEmu\":{},\"leftPx\":{},\"topPx\":{},\"widthPx\":{},\"heightPx\":{}}}",
+        "{{\"fromCol\":{},\"fromRow\":{},\"colOffEmu\":{},\"rowOffEmu\":{},\"toCol\":{},\"toRow\":{},\"toColOffEmu\":{},\"toRowOffEmu\":{},\"leftPx\":{},\"topPx\":{},\"widthPx\":{},\"heightPx\":{}",
         a.from_col,
         a.from_row,
         a.col_off_emu,
@@ -267,6 +283,8 @@ fn write_anchor_json(out: &mut String, a: &ChartAnchor) {
         a.width_px,
         a.height_px
     );
+    write_edit_as(out, a.edit_as);
+    out.push('}');
 }
 
 pub(crate) fn write_images_json(out: &mut String, images: &[SheetFloatingImage]) {
@@ -385,19 +403,26 @@ pub(crate) fn shift_structure_images(
         .iter()
         .map(|im| {
             let mut anchor = im.anchor;
-            match edit.axis {
-                Axis::Row => {
-                    let (fr, tr) = shift_anchor_span(anchor.from_row, anchor.to_row, edit);
-                    anchor.from_row = fr;
-                    anchor.to_row = tr;
-                }
-                Axis::Col => {
-                    let (fc, tc) = shift_anchor_span(anchor.from_col, anchor.to_col, edit);
-                    anchor.from_col = fc;
-                    anchor.to_col = tc;
+            // An absolute anchor stays where it is; the others move with their cells (a one-cell one keeps its size).
+            if anchor.edit_as != AnchorEdit::Absolute {
+                match edit.axis {
+                    Axis::Row => {
+                        let (fr, tr) = shift_anchor_span(anchor.from_row, anchor.to_row, edit);
+                        anchor.from_row = fr;
+                        anchor.to_row = tr;
+                    }
+                    Axis::Col => {
+                        let (fc, tc) = shift_anchor_span(anchor.from_col, anchor.to_col, edit);
+                        anchor.from_col = fc;
+                        anchor.to_col = tc;
+                    }
                 }
             }
-            sync_image_px_from_grid(&mut anchor, grid);
+            match anchor.edit_as {
+                AnchorEdit::TwoCell => sync_image_px_from_grid(&mut anchor, grid),
+                AnchorEdit::OneCell => anchor.start_on_cell(grid, sync_image_grid_from_px),
+                AnchorEdit::Absolute => sync_image_grid_from_px(&mut anchor, grid),
+            }
             StructureImage {
                 id: im.id.clone(),
                 name: im.name.clone(),

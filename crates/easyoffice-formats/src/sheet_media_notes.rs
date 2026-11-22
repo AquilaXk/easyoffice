@@ -5,6 +5,7 @@
 
 use crate::cell_type::unpack_cell_pos;
 use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
+use crate::sheet_styling::sheet_anchor_edit::AnchorCells;
 use crate::sheet_styling::sheet_chart::{
     col_left_px, emu_to_px_rounded, px_to_col_and_emu, px_to_row_and_emu, ChartAnchor,
 };
@@ -113,35 +114,10 @@ pub fn sync_image_grid_from_px(anchor: &mut ChartAnchor, grid: &SheetGrid<'_>) {
 }
 
 /// Returns effective two-cell DrawingML coordinates for a floating image anchor.
-pub fn effective_image_two_cell(
-    anchor: &ChartAnchor,
-    grid: &SheetGrid<'_>,
-) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
-    if anchor.has_explicit_grid() {
-        (
-            anchor.from_col,
-            anchor.from_row,
-            anchor.col_off_emu,
-            anchor.row_off_emu,
-            anchor.to_col,
-            anchor.to_row,
-            anchor.to_col_off_emu,
-            anchor.to_row_off_emu,
-        )
-    } else {
-        let mut copy = *anchor;
-        sync_image_grid_from_px(&mut copy, grid);
-        (
-            copy.from_col,
-            copy.from_row,
-            copy.col_off_emu,
-            copy.row_off_emu,
-            copy.to_col,
-            copy.to_row,
-            copy.to_col_off_emu,
-            copy.to_row_off_emu,
-        )
-    }
+pub fn effective_image_two_cell(anchor: &ChartAnchor, grid: &SheetGrid<'_>) -> AnchorCells {
+    let mut copy = *anchor;
+    copy.settle(grid, sync_image_grid_from_px);
+    copy.cells()
 }
 
 /// Validates workbook and per-sheet floating image budgets.

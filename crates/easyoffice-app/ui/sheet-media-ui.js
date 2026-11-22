@@ -70,13 +70,10 @@
       return true;
     }
 
-    // The row that holds the content offset `gy`: a search over the row tops, which take the heights of the rows (PD-299).
-    const rowAtContentY = (gy) => Math.min(grid.MAX_ROWS, grid.rowAtY(Math.max(0, gy)));
-
-    function contentOriginOf(anchor) {
-      const gx = grid.colLeft(anchor.fromCol + 1) + Math.round((anchor.colOffEmu || 0) / layoutApi.EMU_PER_PX);
-      const gy = grid.rowTop(anchor.fromRow + 1) + Math.round((anchor.rowOffEmu || 0) / layoutApi.EMU_PER_PX);
-      return { gx, gy };
+    // Where the picture is in the content of the grid and how large it is: a two-cell anchor is as large as its cells, so it grows
+    // and shrinks with the rows and columns (PD-299); a one-cell one keeps its size and an absolute one its place.
+    function contentRectOf(anchor) {
+      return grid.contentRectOf(anchor, { left: anchor.leftPx, top: anchor.topPx, width: anchor.widthPx, height: anchor.heightPx });
     }
 
     function screenPosOf(gx, gy) {
@@ -87,37 +84,13 @@
       };
     }
 
-    function anchorFromContentRect(gxRaw, gyRaw, wRaw, hRaw) {
+    // The anchor of a rectangle of the content (`editAs`: the kind of the anchor it replaces, two-cell for a new one).
+    function anchorFromContentRect(gxRaw, gyRaw, wRaw, hRaw, editAs = "twoCell") {
       const gx = clamp(Math.round(Number(gxRaw) || 0), 0, MAX_POS_PX);
       const gy = clamp(Math.round(Number(gyRaw) || 0), 0, MAX_POS_PX);
       const widthPx = clamp(Math.round(Number(wRaw) || 240), MIN_DIALOG_PX, MAX_SIZE_PX);
       const heightPx = clamp(Math.round(Number(hRaw) || 160), MIN_DIALOG_PX, MAX_SIZE_PX);
-      const c1 = grid.colAtX(gx);
-      const r1 = rowAtContentY(gy);
-      const fromCol = clamp(c1 - 1, 0, 16383);
-      const fromRow = clamp(r1 - 1, 0, 1048575);
-      const colOffEmu = Math.max(0, Math.round(Math.max(0, gx - grid.colLeft(c1)) * layoutApi.EMU_PER_PX));
-      const rowOffEmu = Math.max(0, Math.round(Math.max(0, gy - grid.rowTop(r1)) * layoutApi.EMU_PER_PX));
-      const gx1 = gx + widthPx;
-      const gy1 = gy + heightPx;
-      const toCol = Math.max(fromCol, clamp(grid.colAtX(gx1) - 1, 0, 16383));
-      const toRow = Math.max(fromRow, clamp(rowAtContentY(gy1) - 1, 0, 1048575));
-      const toColOffEmu = Math.max(0, Math.round(Math.max(0, gx1 - grid.colLeft(toCol + 1)) * layoutApi.EMU_PER_PX));
-      const toRowOffEmu = Math.max(0, Math.round(Math.max(0, gy1 - grid.rowTop(toRow + 1)) * layoutApi.EMU_PER_PX));
-      return {
-        fromCol,
-        fromRow,
-        colOffEmu,
-        rowOffEmu,
-        toCol,
-        toRow,
-        toColOffEmu,
-        toRowOffEmu,
-        leftPx: gx,
-        topPx: gy,
-        widthPx,
-        heightPx,
-      };
+      return { ...grid.anchorAt(gx, gy, widthPx, heightPx), leftPx: gx, topPx: gy, widthPx, heightPx, editAs };
     }
 
     function workbookImageTotals() {
@@ -265,7 +238,8 @@
       if (!img) return false;
       editingImageId = img.id;
       selectedImageId = img.id;
-      syncDialogSizeFields(img.anchor.widthPx, img.anchor.heightPx);
+      const rect = contentRectOf(img.anchor);
+      syncDialogSizeFields(rect.w, rect.h);
       kit.setChecked("sheet-image-lock-ratio", true);
       kit.setVal("sheet-image-alt", img.alt || "");
       setDialogStatus("");
@@ -297,8 +271,8 @@
         return;
       }
       const prev = current[idx];
-      const { gx, gy } = contentOriginOf(prev.anchor);
-      const nextAnchor = anchorFromContentRect(gx, gy, w, h);
+      const { gx, gy } = contentRectOf(prev.anchor);
+      const nextAnchor = anchorFromContentRect(gx, gy, w, h, prev.anchor.editAs);
       const alt = layoutApi.trimUtf8(kit.val("sheet-image-alt").trim(), 1024);
       const nextImages = current.slice();
       nextImages[idx] = { ...prev, alt, anchor: nextAnchor };
@@ -323,14 +297,10 @@
       const current = layoutApi.imagesOf(drag.sheet);
       const idx = current.findIndex((im) => im.id === drag.imageId);
       if (idx < 0) return;
-      const nextAnchor = anchorFromContentRect(drag.gx, drag.gy, drag.width, drag.height);
       const prev = current[idx].anchor;
-      if (
-        prev.leftPx === nextAnchor.leftPx &&
-        prev.topPx === nextAnchor.topPx &&
-        prev.widthPx === nextAnchor.widthPx &&
-        prev.heightPx === nextAnchor.heightPx
-      ) {
+      const nextAnchor = anchorFromContentRect(drag.gx, drag.gy, drag.width, drag.height, prev.editAs);
+      const was = contentRectOf(prev);
+      if (was.gx === nextAnchor.leftPx && was.gy === nextAnchor.topPx && was.w === nextAnchor.widthPx && was.h === nextAnchor.heightPx) {
         return;
       }
       const nextImages = current.slice();
@@ -376,7 +346,7 @@
       if (isProtected(sheet, true)) return;
       ev.preventDefault?.();
       ev.stopPropagation?.();
-      const { gx, gy } = contentOriginOf(img.anchor);
+      const { gx, gy, w, h } = contentRectOf(img.anchor);
       activeDrag = {
         kind,
         sheet,
@@ -386,12 +356,12 @@
         startY: Number(ev.clientY) || 0,
         origGx: gx,
         origGy: gy,
-        origWidth: img.anchor.widthPx,
-        origHeight: img.anchor.heightPx,
+        origWidth: w,
+        origHeight: h,
         gx,
         gy,
-        width: img.anchor.widthPx,
-        height: img.anchor.heightPx,
+        width: w,
+        height: h,
         moved: false,
       };
       document.addEventListener("mousemove", onDragMove);
@@ -414,12 +384,12 @@
       card.tabIndex = 0;
       card.setAttribute("role", "region");
       card.setAttribute("aria-label", img.alt || img.name || "그림");
-      const { gx, gy } = contentOriginOf(img.anchor);
+      const { gx, gy, w, h } = contentRectOf(img.anchor);
       const pos = screenPosOf(gx, gy);
       card.style.left = pos.left + "px";
       card.style.top = pos.top + "px";
-      card.style.width = img.anchor.widthPx + "px";
-      card.style.height = img.anchor.heightPx + "px";
+      card.style.width = w + "px";
+      card.style.height = h + "px";
 
       const imgEl = document.createElement("img");
       imgEl.className = "sheet-image-el";
@@ -499,7 +469,7 @@
       for (const card of layer.querySelectorAll(".sheet-image-card")) {
         const img = byId.get(card.dataset.imageId);
         if (!img) continue;
-        const { gx, gy } = contentOriginOf(img.anchor);
+        const { gx, gy } = contentRectOf(img.anchor);
         const pos = screenPosOf(gx, gy);
         card.style.left = pos.left + "px";
         card.style.top = pos.top + "px";

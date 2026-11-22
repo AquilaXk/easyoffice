@@ -8,6 +8,7 @@ use std::fmt::Write;
 
 use crate::rich_image::{RichImage, MAX_ALT_TEXT_BYTES, MAX_IMAGE_BYTES};
 use crate::rich_image_writers::{docx_content_type_defaults, MediaParts};
+use crate::sheet_styling::sheet_anchor_edit::AnchorEdit;
 use crate::sheet_styling::sheet_chart::{
     col_left_px, validate_workbook_charts, ChartAnchor, SheetCellIndex, SheetChart,
     DEFAULT_CHART_HEIGHT_PX, DEFAULT_CHART_WIDTH_PX, EMU_PER_PX, MAX_CHARTS_PER_SHEET,
@@ -126,7 +127,12 @@ impl<'a> DrawingWriter<'a> {
             r_num += 1;
             shape_id += 1;
             let (fc, fr, fce, fre, tc, tr, tce, tre) = chart.anchor.effective_two_cell(&grid);
-            write_two_cell_bounds(&mut drawing_xml, fc, fr, fce, fre, tc, tr, tce, tre);
+            write_two_cell_bounds(
+                &mut drawing_xml,
+                chart.anchor.edit_as,
+                (fc, fr, fce, fre),
+                (tc, tr, tce, tre),
+            );
             let _ = write!(
                 drawing_xml,
                 "<xdr:graphicFrame macro=\"\">\
@@ -205,7 +211,12 @@ impl<'a> DrawingWriter<'a> {
             } else {
                 format!(" descr=\"{}\"", XmlSanitizer::escape(&img.alt))
             };
-            write_two_cell_bounds(&mut drawing_xml, fc, fr, fce, fre, tc, tr, tce, tre);
+            write_two_cell_bounds(
+                &mut drawing_xml,
+                img.anchor.edit_as,
+                (fc, fr, fce, fre),
+                (tc, tr, tce, tre),
+            );
             let _ = write!(
                 drawing_xml,
                 "<xdr:pic><xdr:nvPicPr>\
@@ -245,21 +256,23 @@ impl<'a> DrawingWriter<'a> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// `(col, row, col offset, row offset)` of a start or end cell, the offsets in EMU.
+type CellPoint = (u32, u32, u32, u32);
+
 fn write_two_cell_bounds(
     out: &mut String,
-    fc: u32,
-    fr: u32,
-    fce: u32,
-    fre: u32,
-    tc: u32,
-    tr: u32,
-    tce: u32,
-    tre: u32,
+    edit_as: AnchorEdit,
+    (fc, fr, fce, fre): CellPoint,
+    (tc, tr, tce, tre): CellPoint,
 ) {
+    // `twoCell` is what a reader assumes without the attribute.
+    let edit_attr = match edit_as {
+        AnchorEdit::TwoCell => String::new(),
+        other => format!(" editAs=\"{}\"", other.as_str()),
+    };
     let _ = write!(
         out,
-        "<xdr:twoCellAnchor>\
+        "<xdr:twoCellAnchor{edit_attr}>\
          <xdr:from><xdr:col>{fc}</xdr:col><xdr:colOff>{fce}</xdr:colOff>\
          <xdr:row>{fr}</xdr:row><xdr:rowOff>{fre}</xdr:rowOff></xdr:from>\
          <xdr:to><xdr:col>{tc}</xdr:col><xdr:colOff>{tce}</xdr:colOff>\
@@ -372,6 +385,7 @@ struct AnchorPoint {
 #[derive(Default)]
 struct DrawingAnchorRaw {
     kind: AnchorKind,
+    edit_as: AnchorEdit,
     from: AnchorPoint,
     to: AnchorPoint,
     pos_x: Option<u64>,
@@ -402,8 +416,17 @@ fn parse_drawing_anchors(xml: &str) -> Result<Vec<DrawingAnchorRaw>, EasyOfficeE
                         "oneCellAnchor" => AnchorKind::OneCell,
                         _ => AnchorKind::Absolute,
                     };
+                    // A one-cell anchor keeps its size and an absolute one its place; a two-cell one says so in `editAs`.
+                    let edit_as = match kind {
+                        AnchorKind::TwoCell => attrs
+                            .get("editAs")
+                            .map_or(AnchorEdit::TwoCell, |v| AnchorEdit::parse(&v)),
+                        AnchorKind::OneCell => AnchorEdit::OneCell,
+                        AnchorKind::Absolute => AnchorEdit::Absolute,
+                    };
                     cur = Some(DrawingAnchorRaw {
                         kind,
+                        edit_as,
                         ..Default::default()
                     });
                     loc_to = None;
@@ -544,7 +567,10 @@ fn build_anchor_from_raw(
             DEFAULT_CHART_HEIGHT_PX,
         )
     };
-    let mut anchor = ChartAnchor::default();
+    let mut anchor = ChartAnchor {
+        edit_as: raw.edit_as,
+        ..ChartAnchor::default()
+    };
     match raw.kind {
         AnchorKind::TwoCell => {
             let (fc, fr) = (raw.from.col?, raw.from.row?);

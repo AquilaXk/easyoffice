@@ -35,6 +35,7 @@
     const $ = (id) => document.getElementById(id);
 
     let bound = false;
+    let scrollBound = false;
     let editingChartId = null;
     let selectedChartId = null;
     let activeDrag = null;
@@ -51,21 +52,25 @@
       if (el) el.textContent = msg || "";
     }
 
-    // The row that holds the content offset `gy`: a search over the row tops, which take the heights of the rows (PD-299).
-    const rowAtContentY = (gy) => Math.min(grid.MAX_ROWS, grid.rowAtY(Math.max(0, gy)));
-
-    function anchorFromRect(rawLeft, rawTop, rawWidth, rawHeight) {
+    // The anchor of a rectangle of the content of the grid, `left` and `top` in px from the top left of the first cell (a chart sits on
+    // its cells like a picture, PD-299). `editAs`: the kind of the anchor it replaces, two-cell for a new chart.
+    function anchorFromRect(rawLeft, rawTop, rawWidth, rawHeight, editAs = "twoCell") {
       const left = Math.max(0, Math.min(MAX_POS, Math.round(Number(rawLeft) || 0)));
       const top = Math.max(0, Math.min(MAX_POS, Math.round(Number(rawTop) || 0)));
       const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(Number(rawWidth) || 420)));
       const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(Number(rawHeight) || 260)));
-      const gx0 = Math.max(0, left - grid.ROW_HEAD_W);
-      const gy0 = Math.max(0, top - grid.HEAD_H);
-      const fromCol = Math.max(0, Math.min(16383, grid.colAtX(gx0) - 1));
-      const fromRow = Math.max(0, Math.min(1048575, rowAtContentY(gy0) - 1));
-      const toCol = Math.max(fromCol, Math.min(16383, grid.colAtX(gx0 + width) - 1));
-      const toRow = Math.max(fromRow, Math.min(1048575, rowAtContentY(gy0 + height) - 1));
-      return { fromCol, fromRow, toCol, toRow, left, top, width, height };
+      return { ...grid.anchorAt(left, top, width, height), left, top, width, height, editAs };
+    }
+
+    // Where the chart is in the content of the grid and how large it is: as large as its cells for a two-cell anchor, so it
+    // grows and shrinks with the rows and columns.
+    function rectOf(anchor) {
+      return grid.contentRectOf(anchor, anchor);
+    }
+
+    function screenPosOf(gx, gy) {
+      const vp = $("sheet-viewport");
+      return { left: grid.ROW_HEAD_W + gx - (vp?.scrollLeft || 0), top: grid.HEAD_H + gy - (vp?.scrollTop || 0) };
     }
 
     function formatRangeBox(box) {
@@ -182,8 +187,8 @@
             setStatus("시트당 차트 수 한도(" + layoutApi.MAX_CHARTS_PER_SHEET + "개)를 초과했습니다.");
             return;
           }
-          const baseLeft = grid.ROW_HEAD_W + grid.colLeft(Math.min(grid.MAX_COLS, parsedBox.c2 + 1)) + 16 + (current.length % 4) * 24;
-          const baseTop = grid.HEAD_H + grid.rowTop(parsedBox.r1) + 4 + (current.length % 4) * 20;
+          const baseLeft = grid.colLeft(Math.min(grid.MAX_COLS, parsedBox.c2 + 1)) + 16 + (current.length % 4) * 24;
+          const baseTop = grid.rowTop(parsedBox.r1) + 4 + (current.length % 4) * 20;
           const created = svgApi.createChartModel({
             sheetName: sheet,
             sheetDataStore,
@@ -229,14 +234,10 @@
       const current = layoutApi.chartsOf(drag.sheet);
       const idx = current.findIndex((c) => c.id === drag.chartId);
       if (idx < 0) return;
-      const nextAnchor = anchorFromRect(drag.left, drag.top, drag.width, drag.height);
       const prev = current[idx].anchor;
-      if (
-        prev.left === nextAnchor.left &&
-        prev.top === nextAnchor.top &&
-        prev.width === nextAnchor.width &&
-        prev.height === nextAnchor.height
-      ) {
+      const nextAnchor = anchorFromRect(drag.left, drag.top, drag.width, drag.height, prev.editAs);
+      const was = rectOf(prev);
+      if (was.gx === nextAnchor.left && was.gy === nextAnchor.top && was.w === nextAnchor.width && was.h === nextAnchor.height) {
         return;
       }
       const nextCharts = current.slice();
@@ -253,8 +254,9 @@
       if (activeDrag.kind === "move") {
         activeDrag.left = Math.max(0, Math.min(MAX_POS, Math.round(activeDrag.origLeft + dx)));
         activeDrag.top = Math.max(0, Math.min(MAX_POS, Math.round(activeDrag.origTop + dy)));
-        activeDrag.card.style.left = activeDrag.left + "px";
-        activeDrag.card.style.top = activeDrag.top + "px";
+        const pos = screenPosOf(activeDrag.left, activeDrag.top);
+        activeDrag.card.style.left = pos.left + "px";
+        activeDrag.card.style.top = pos.top + "px";
       } else {
         activeDrag.width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(activeDrag.origWidth + dx)));
         activeDrag.height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(activeDrag.origHeight + dy)));
@@ -288,6 +290,7 @@
       ev.preventDefault?.();
       ev.stopPropagation?.();
       selectedChartId = chart.id;
+      const rect = rectOf(chart.anchor);
       activeDrag = {
         kind,
         sheet,
@@ -296,14 +299,14 @@
         card,
         startX: Number(ev.clientX) || 0,
         startY: Number(ev.clientY) || 0,
-        origLeft: chart.anchor.left,
-        origTop: chart.anchor.top,
-        origWidth: chart.anchor.width,
-        origHeight: chart.anchor.height,
-        left: chart.anchor.left,
-        top: chart.anchor.top,
-        width: chart.anchor.width,
-        height: chart.anchor.height,
+        origLeft: rect.gx,
+        origTop: rect.gy,
+        origWidth: rect.w,
+        origHeight: rect.h,
+        left: rect.gx,
+        top: rect.gy,
+        width: rect.w,
+        height: rect.h,
         moved: false,
       };
       document.addEventListener("mousemove", onDragMove);
@@ -319,10 +322,12 @@
       card.setAttribute("role", "region");
       const labelTitle = chart.title || svgApi.CHART_TYPE_LABELS[chart.chartType] || "차트";
       card.setAttribute("aria-label", "차트: " + labelTitle);
-      card.style.left = chart.anchor.left + "px";
-      card.style.top = chart.anchor.top + "px";
-      card.style.width = chart.anchor.width + "px";
-      card.style.height = chart.anchor.height + "px";
+      const rect = rectOf(chart.anchor);
+      const pos = screenPosOf(rect.gx, rect.gy);
+      card.style.left = pos.left + "px";
+      card.style.top = pos.top + "px";
+      card.style.width = rect.w + "px";
+      card.style.height = rect.h + "px";
 
       const head = document.createElement("div");
       head.className = "sheet-chart-head";
@@ -370,14 +375,14 @@
 
       const body = document.createElement("div");
       body.className = "sheet-chart-body";
-      const bodyH = Math.max(60, chart.anchor.height - 28);
+      const bodyH = Math.max(60, rect.h - 28);
       body.appendChild(
         svgApi.renderChartSvg({
           document,
           chart,
           sheetName: sheet,
           sheetDataStore,
-          width: Math.max(120, chart.anchor.width - 2),
+          width: Math.max(120, rect.w - 2),
           height: bodyH,
         })
       );
@@ -413,6 +418,21 @@
       return card;
     }
 
+    // The cards stay on their cells when the grid scrolls.
+    function syncScrollPositions() {
+      const layer = $("sheet-chart-layer");
+      if (!layer || layer.hidden) return;
+      const byId = new Map(layoutApi.chartsOf(getActiveSheetName()).map((c) => [c.id, c]));
+      for (const card of layer.querySelectorAll(".sheet-chart-card")) {
+        const chart = byId.get(card.dataset.chartId);
+        if (!chart || activeDrag?.chartId === chart.id) continue;
+        const rect = rectOf(chart.anchor);
+        const pos = screenPosOf(rect.gx, rect.gy);
+        card.style.left = pos.left + "px";
+        card.style.top = pos.top + "px";
+      }
+    }
+
     function syncLayer() {
       const layer = $("sheet-chart-layer");
       if (!layer) return;
@@ -431,6 +451,12 @@
       const cards = charts.map((chart) => renderCard(sheet, chart));
       layer.replaceChildren(...cards);
       layer.hidden = false;
+      // The grid is there once a chart is: the cards follow its scroll.
+      if (!scrollBound) {
+        const viewport = $("sheet-viewport");
+        viewport?.addEventListener("scroll", syncScrollPositions);
+        scrollBound = Boolean(viewport);
+      }
     }
 
     function ensureBound() {

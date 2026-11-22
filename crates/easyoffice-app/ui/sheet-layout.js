@@ -373,11 +373,21 @@
     const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(trNum) ? Math.trunc(trNum) : fromRow + 11));
     const leftNum = Number(a.left);
     const topNum = Number(a.top);
-    const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : 56 + fromCol * 96)));
-    const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : 26 + fromRow * 24)));
+    const left = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(leftNum) ? leftNum : fromCol * 96)));
+    const top = Math.max(0, Math.min(50000000, Math.round(Number.isFinite(topNum) ? topNum : fromRow * 24)));
     const width = Math.max(180, Math.min(1600, Math.round(Number(a.width) || 420)));
     const height = Math.max(140, Math.min(1200, Math.round(Number(a.height) || 260)));
-    return { fromCol, fromRow, toCol, toRow, left, top, width, height };
+    return { fromCol, fromRow, ...emuOffsets(a), toCol, toRow, left, top, width, height, editAs: editAsOf(a.editAs) };
+  }
+
+  // What an anchor does when the rows and columns under it change: `twoCell` (moves and sizes with them, the default),
+  // `oneCell` (moves, keeps its size) or `absolute` (stays). Any other value is `twoCell`.
+  const editAsOf = (v) => (v === "oneCell" || v === "absolute" ? v : "twoCell");
+
+  // The offsets of the two corners inside their cells, in EMU.
+  function emuOffsets(a) {
+    const emu = (v) => Math.max(0, Math.min(0x7fffffff, Math.round(Number(v) || 0)));
+    return { colOffEmu: emu(a.colOffEmu), rowOffEmu: emu(a.rowOffEmu), toColOffEmu: emu(a.toColOffEmu), toRowOffEmu: emu(a.toRowOffEmu) };
   }
 
   function trimUtf8(str, maxBytes) {
@@ -482,7 +492,7 @@
     const toRow = Math.max(fromRow, Math.min(1048575, Number.isFinite(Number(a.toRow)) ? Math.trunc(Number(a.toRow)) : Math.min(1048575, Math.floor((topPx + heightPx) / 24))));
     const toColOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toColOffEmu) || 0)));
     const toRowOffEmu = Math.max(0, Math.min(0x7fffffff, Math.round(Number(a.toRowOffEmu) || 0)));
-    return { fromCol, fromRow, colOffEmu, rowOffEmu, toCol, toRow, toColOffEmu, toRowOffEmu, leftPx, topPx, widthPx, heightPx };
+    return { fromCol, fromRow, colOffEmu, rowOffEmu, toCol, toRow, toColOffEmu, toRowOffEmu, leftPx, topPx, widthPx, heightPx, editAs: editAsOf(a.editAs) };
   }
 
   function imagesFromJson(rawList) {

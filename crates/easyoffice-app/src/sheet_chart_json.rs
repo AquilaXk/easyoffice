@@ -4,10 +4,10 @@ use std::fmt::Write;
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    ref_point_count, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef, EasyOfficeError,
-    SheetChart, SheetGrid, StrictJsonValue, MAX_CHARTS_PER_SHEET, MAX_CHART_HEIGHT_PX,
-    MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART,
-    MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
+    ref_point_count, AnchorEdit, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef,
+    EasyOfficeError, SheetChart, SheetGrid, StrictJsonValue, MAX_CHARTS_PER_SHEET,
+    MAX_CHART_HEIGHT_PX, MAX_CHART_TEXT_BYTES, MAX_CHART_WIDTH_PX, MAX_POINTS_PER_SERIES,
+    MAX_SERIES_PER_CHART, MIN_CHART_HEIGHT_PX, MIN_CHART_WIDTH_PX,
 };
 use easyoffice_sheet::axis::rewrite_formula_refs;
 use easyoffice_sheet::{Axis, AxisEdit, EditKind};
@@ -15,6 +15,8 @@ use easyoffice_sheet::{Axis, AxisEdit, EditKind};
 const LAST_ROW: u32 = 1_048_575;
 const LAST_COL: u32 = 16_383;
 const MAX_POS_PX: u64 = 50_000_000;
+/// The largest offset inside a cell a page may send, in EMU (the image anchors take as much).
+const MAX_OFFSET_EMU: u64 = 0x7fff_ffff;
 
 fn bad(what: &str) -> EasyOfficeError {
     EasyOfficeError::InvalidArgument(format!("차트 JSON이 올바르지 않습니다: {what}"))
@@ -81,15 +83,17 @@ fn parse_anchor(
         u64::from(MAX_CHART_HEIGHT_PX),
     )?;
 
+    let offset = |key: &str| opt_u32(key, 0, MAX_OFFSET_EMU).map(Option::unwrap_or_default);
     let mut anchor = ChartAnchor {
+        edit_as: crate::sheet_media_notes_json::parse_edit_as(obj),
         from_col: from_col.unwrap_or(0),
         from_row: from_row.unwrap_or(0),
         to_col: to_col.unwrap_or(0),
         to_row: to_row.unwrap_or(0),
-        col_off_emu: 0,
-        row_off_emu: 0,
-        to_col_off_emu: 0,
-        to_row_off_emu: 0,
+        col_off_emu: offset("colOffEmu")?,
+        row_off_emu: offset("rowOffEmu")?,
+        to_col_off_emu: offset("toColOffEmu")?,
+        to_row_off_emu: offset("toRowOffEmu")?,
         left_px: left.unwrap_or(0),
         top_px: top.unwrap_or(0),
         width_px: width.unwrap_or(420),
@@ -251,9 +255,22 @@ pub(crate) fn write_chart_json(out: &mut String, chart: &SheetChart, include_ser
     let a = &chart.anchor;
     let _ = write!(
         out,
-        ",\"anchor\":{{\"fromCol\":{},\"fromRow\":{},\"toCol\":{},\"toRow\":{},\"left\":{},\"top\":{},\"width\":{},\"height\":{}}},\"series\":[",
-        a.from_col, a.from_row, a.to_col, a.to_row, a.left_px, a.top_px, a.width_px, a.height_px
+        ",\"anchor\":{{\"fromCol\":{},\"fromRow\":{},\"colOffEmu\":{},\"rowOffEmu\":{},\"toCol\":{},\"toRow\":{},\"toColOffEmu\":{},\"toRowOffEmu\":{},\"left\":{},\"top\":{},\"width\":{},\"height\":{}",
+        a.from_col,
+        a.from_row,
+        a.col_off_emu,
+        a.row_off_emu,
+        a.to_col,
+        a.to_row,
+        a.to_col_off_emu,
+        a.to_row_off_emu,
+        a.left_px,
+        a.top_px,
+        a.width_px,
+        a.height_px
     );
+    crate::sheet_media_notes_json::write_edit_as(out, a.edit_as);
+    out.push_str("},\"series\":[");
     for (i, s) in chart.series.iter().enumerate() {
         if i > 0 {
             out.push(',');
@@ -357,21 +374,30 @@ pub(crate) fn shift_charts(
                     }
                 }
             }
-            match edit.axis {
-                Axis::Row => {
-                    let (fr, tr) =
-                        shift_anchor_span(next.anchor.from_row, next.anchor.to_row, edit);
-                    next.anchor.from_row = fr;
-                    next.anchor.to_row = tr;
-                }
-                Axis::Col => {
-                    let (fc, tc) =
-                        shift_anchor_span(next.anchor.from_col, next.anchor.to_col, edit);
-                    next.anchor.from_col = fc;
-                    next.anchor.to_col = tc;
+            // An absolute anchor stays where it is; the others move with their cells (a one-cell one keeps its size).
+            if next.anchor.edit_as != AnchorEdit::Absolute {
+                match edit.axis {
+                    Axis::Row => {
+                        let (fr, tr) =
+                            shift_anchor_span(next.anchor.from_row, next.anchor.to_row, edit);
+                        next.anchor.from_row = fr;
+                        next.anchor.to_row = tr;
+                    }
+                    Axis::Col => {
+                        let (fc, tc) =
+                            shift_anchor_span(next.anchor.from_col, next.anchor.to_col, edit);
+                        next.anchor.from_col = fc;
+                        next.anchor.to_col = tc;
+                    }
                 }
             }
-            next.anchor.sync_px_from_grid(grid);
+            match next.anchor.edit_as {
+                AnchorEdit::TwoCell => next.anchor.sync_px_from_grid(grid),
+                AnchorEdit::OneCell => next
+                    .anchor
+                    .start_on_cell(grid, ChartAnchor::sync_grid_from_px),
+                AnchorEdit::Absolute => next.anchor.sync_grid_from_px(grid),
+            }
             next
         })
         .collect()

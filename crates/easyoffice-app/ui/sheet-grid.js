@@ -745,8 +745,53 @@
       }
     }
 
+    // Pictures and charts on the content of the grid (PD-299). `anchorAt` gives the cells a rectangle of the content (`gx`, `gy`
+    // from the top left of the first cell, in px) starts and ends on, with the EMU offsets in them, as a two-cell anchor says it.
+    const emuPerPx = () => layoutApi?.EMU_PER_PX || 9525;
+    const emuToPx = (emu) => Math.round((Number(emu) || 0) / emuPerPx());
+    const rowAtContentY = (gy) => Math.min(MAX_ROWS, rowAtY(Math.max(0, gy)));
+
+    function anchorAt(gxRaw, gyRaw, w, h) {
+      const emu = emuPerPx();
+      const gx = Math.max(0, gxRaw);
+      const gy = Math.max(0, gyRaw);
+      const c1 = colAtX(gx);
+      const r1 = rowAtContentY(gy);
+      const fromCol = Math.max(0, Math.min(MAX_COLS - 1, c1 - 1));
+      const fromRow = Math.max(0, Math.min(MAX_ROWS - 1, r1 - 1));
+      const gx1 = gx + w;
+      const gy1 = gy + h;
+      const toCol = Math.max(fromCol, Math.min(MAX_COLS - 1, colAtX(gx1) - 1));
+      const toRow = Math.max(fromRow, Math.min(MAX_ROWS - 1, rowAtContentY(gy1) - 1));
+      const off = (v) => Math.max(0, Math.round(Math.max(0, v) * emu));
+      return {
+        fromCol,
+        fromRow,
+        colOffEmu: off(gx - colLeft(c1)),
+        rowOffEmu: off(gy - rowTop(r1)),
+        toCol,
+        toRow,
+        toColOffEmu: off(gx1 - colLeft(toCol + 1)),
+        toRowOffEmu: off(gy1 - rowTop(toRow + 1)),
+      };
+    }
+
+    // The rectangle of the content an anchor lies on, from `anchor` and the size it keeps (`stored`: `left`, `top`, `width`,
+    // `height` in px). A two-cell anchor (`editAs` missing or `twoCell`) is as large as its cells, and so grows and shrinks
+    // with the rows and columns; a one-cell anchor starts on its cell and keeps its size; an absolute anchor keeps its place.
+    function contentRectOf(anchor, stored) {
+      if (anchor.editAs === "absolute") return { gx: stored.left, gy: stored.top, w: stored.width, h: stored.height };
+      const gx = colLeft(anchor.fromCol + 1) + emuToPx(anchor.colOffEmu);
+      const gy = rowTop(anchor.fromRow + 1) + emuToPx(anchor.rowOffEmu);
+      if (anchor.editAs === "oneCell") return { gx, gy, w: stored.width, h: stored.height };
+      const w = colLeft(anchor.toCol + 1) + emuToPx(anchor.toColOffEmu) - gx;
+      const h = rowTop(anchor.toRow + 1) + emuToPx(anchor.toRowOffEmu) - gy;
+      // An end that is not past the start (an anchor that has no end offsets) has no size of its cells: it keeps its own.
+      return { gx, gy, w: w > 0 ? w : stored.width, h: h > 0 ? h : stored.height };
+    }
+
     return {
-      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, DEFAULT_COL_W,
+      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, anchorAt, contentRectOf, DEFAULT_COL_W,
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
       applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),

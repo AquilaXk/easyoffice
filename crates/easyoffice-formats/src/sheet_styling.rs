@@ -28,6 +28,8 @@ pub(crate) mod ods_protect;
 pub(crate) mod ods_styles;
 #[path = "ods_view.rs"]
 pub(crate) mod ods_view;
+#[path = "sheet_anchor_edit.rs"]
+pub(crate) mod sheet_anchor_edit;
 #[path = "sheet_chart.rs"]
 pub(crate) mod sheet_chart;
 #[path = "sheet_filter.rs"]
@@ -111,6 +113,7 @@ pub(crate) mod xlsx_styles;
 #[path = "xlsx_view.rs"]
 pub(crate) mod xlsx_view;
 
+pub use sheet_anchor_edit::{AnchorCells, AnchorEdit};
 pub use sheet_chart::*;
 pub use sheet_filter::*;
 pub use sheet_fonts::*;

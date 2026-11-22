@@ -10,6 +10,7 @@ use crate::cell_numbers::numeric_cell_value;
 use crate::cell_type::pack_cell_pos;
 use crate::pages_proto::FastU64Map;
 use crate::rtf_xml_helpers::format_col_letters;
+use crate::sheet_styling::sheet_anchor_edit::{AnchorCells, AnchorEdit};
 use crate::sheet_styling::sheet_row_offsets::{RowOffsets, SheetGrid};
 use crate::{
     CellBox, EasyOfficeError, OdsUnpacked, OoxmlCodec, SheetStyling, XlsxCachedValue,
@@ -134,6 +135,7 @@ impl ChartLegendPos {
 /// Two-cell DrawingML anchor paired with pixel coordinates (`180..=1600` x `140..=1200`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChartAnchor {
+    pub edit_as: AnchorEdit,
     pub from_col: u32,
     pub from_row: u32,
     pub to_col: u32,
@@ -151,6 +153,7 @@ pub struct ChartAnchor {
 impl Default for ChartAnchor {
     fn default() -> Self {
         Self {
+            edit_as: AnchorEdit::TwoCell,
             from_col: 0,
             from_row: 0,
             to_col: 0,
@@ -290,35 +293,10 @@ impl ChartAnchor {
 
     /// Returns effective two-cell `(from_col, from_row, col_off, row_off, to_col, to_row, to_col_off, to_row_off)`
     /// for DrawingML export and PDF intersection.
-    pub fn effective_two_cell(
-        &self,
-        grid: &SheetGrid<'_>,
-    ) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
-        if self.has_explicit_grid() {
-            (
-                self.from_col,
-                self.from_row,
-                self.col_off_emu,
-                self.row_off_emu,
-                self.to_col,
-                self.to_row,
-                self.to_col_off_emu,
-                self.to_row_off_emu,
-            )
-        } else {
-            let mut copy = *self;
-            copy.sync_grid_from_px(grid);
-            (
-                copy.from_col,
-                copy.from_row,
-                copy.col_off_emu,
-                copy.row_off_emu,
-                copy.to_col,
-                copy.to_row,
-                copy.to_col_off_emu,
-                copy.to_row_off_emu,
-            )
-        }
+    pub fn effective_two_cell(&self, grid: &SheetGrid<'_>) -> AnchorCells {
+        let mut copy = *self;
+        copy.settle(grid, Self::sync_grid_from_px);
+        copy.cells()
     }
 
     pub fn within_bounds(&self) -> bool {
