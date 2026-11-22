@@ -28,6 +28,13 @@ async function slides(run, motion = true) {
   return h;
 }
 
+// Plays frame by frame until `ready()` holds. The typing's step lengths are random, so a fixed time can land before the
+// first letter or after the last one; a stop is pressed at a moment that is checked, not at a guessed one.
+async function playUntil(h, ready, limitMs = 9000) {
+  for (let t = 0; t < limitMs && !ready(); t += 16) await h.play(16);
+  assert.ok(ready(), "the moment to stop never came");
+}
+
 const textbox = (text, extra = {}) => ({ kind: "textbox", x: 100, y: 140, w: 320, h: 80, text, ...extra });
 const addElement = (element, extra = {}) => ({ op: "slide.add_element", element, ...extra });
 
@@ -67,7 +74,7 @@ test("stopping while a new slide's title is typed leaves a slide with what was t
   await h.send("슬라이드를 추가해 주세요");
   h.userClick(reviewButton(h.document, "accept"));
   await flushAsyncTurns(6);
-  await h.play(1400);
+  await playUntil(h, () => zoneText(h.document, "slide-title-zone").length >= 3);
   const typed = zoneText(h.document, "slide-title-zone");
   assert.ok(typed.length > 0 && typed.length < 20, "typing is under way: " + typed);
   h.userClick(h.document.getElementById("btn-copilot-send"));
@@ -184,8 +191,9 @@ test("stopping in the middle of a text box's text keeps the box with the typed p
   await h.send("글상자를 넣어 주세요");
   h.userClick(reviewButton(h.document, "accept"));
   await flushAsyncTurns(6);
-  await h.play(1500);
-  const typing = cards(h.document)[0]?.querySelector(".slide-el-textbox").textContent;
+  const typed = () => cards(h.document)[0]?.querySelector(".slide-el-textbox").textContent ?? "";
+  await playUntil(h, () => typed().length >= 3);
+  const typing = typed();
   assert.ok(typing && typing.length > 0 && typing.length < text.length, "typing is under way: " + typing);
   h.userClick(h.document.getElementById("btn-copilot-send"));
   await flushAsyncTurns(14);
@@ -337,7 +345,7 @@ test("stopping in the middle of a range keeps the blocks typed so far in place o
   const h = await range(rangeOp({ startIndex: 1, endIndex: 2 }, "첫 블록은 끝까지 씁니다", "둘째 블록은 쓰다가 멈춥니다 길게 이어지는 문장"));
   h.userClick(reviewButton(h.document, "accept"));
   await flushAsyncTurns(6);
-  await h.play(2700);
+  await playUntil(h, () => h.editor.querySelectorAll(".eo-copilot-ghost").length === 2 && paragraphs(h.editor).length >= 3 && paragraphs(h.editor)[1].length >= 3);
   const typing = paragraphs(h.editor);
   assert.ok(typing.length >= 3, "typing has reached a new block: " + typing.join("/"));
   h.userClick(h.document.getElementById("btn-copilot-send"));
