@@ -97,7 +97,7 @@ impl OdsStyleTable {
             for &height in styling
                 .row_heights
                 .values()
-                .chain(&styling.default_row_height)
+                .chain(&styling.user_default_row_height())
             {
                 table.row_height_index.entry(height).or_insert_with(|| {
                     table.row_heights.push(height);
@@ -552,6 +552,24 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
 /// Rows a repeated band may have and still be read as rows of their own, not as the look of the whole sheet.
 const MAX_ROW_BLOCK: u32 = 1024;
 
+/// The rows `first..first + rows` of one table, all with `height`.
+struct HeightRun {
+    first: u32,
+    rows: u32,
+    height: RowHeight,
+}
+
+/// The heights of the rows the user set, from the stretches a table listed: the rows with the sheet's default height
+/// left out (the writer styles every row with it, it is not a height of anyone's own), and no more than
+/// [`MAX_ROW_HEIGHTS`] rows, the first ones. Settled at the end of the table because the default is the band that ends it.
+fn settle_heights(runs: Vec<HeightRun>, default: Option<RowHeight>) -> RowHeights {
+    runs.into_iter()
+        .filter(|run| Some(run.height) != default)
+        .flat_map(|run| (run.first..run.first + run.rows).map(move |row| (row, run.height)))
+        .take(MAX_ROW_HEIGHTS)
+        .collect()
+}
+
 /// Rows one table may list as hidden by a filter; more are not recorded.
 const MAX_FILTERED_ROWS: u32 = 1_048_576;
 
@@ -585,8 +603,9 @@ pub(crate) struct StyleSink<'s> {
     /// The rows in `filtered`, counted as they are added (a sum over the runs per row would be quadratic).
     filtered_total: u64,
     next_filtered: bool,
-    /// The heights of the rows of the table being read, and the one the next row has.
-    row_heights: RowHeights,
+    /// The heights the user set on the rows of the table being read, as stretches of rows, and the one the next row has.
+    /// The rows with the sheet's default height are among them until the end of the table says what that is (PD-300).
+    height_runs: Vec<HeightRun>,
     next_height: Option<RowHeight>,
     /// The height of the band of rows that ends the table being read: its default row height (PD-286).
     default_height: Option<RowHeight>,
@@ -615,7 +634,7 @@ impl<'s> StyleSink<'s> {
             filtered: Vec::new(),
             filtered_total: 0,
             next_filtered: false,
-            row_heights: RowHeights::new(),
+            height_runs: Vec::new(),
             next_height: None,
             default_height: None,
         }
@@ -687,10 +706,28 @@ impl<'s> StyleSink<'s> {
             if end == u64::from(OdfCodec::MAX_ROWS) + 1 {
                 self.default_height = Some(height);
             }
-        } else if height.custom && self.row_heights.len() + repeat as usize <= MAX_ROW_HEIGHTS {
-            for r in self.row..self.row + repeat {
-                self.row_heights.insert(r, height);
+        } else if height.custom {
+            self.push_height_run(repeat, height);
+        }
+    }
+
+    /// Adds the rows `self.row..self.row + rows` to the stretches, joined to the last one when it ends where they begin
+    /// with the same height. A stretch is no more than a row, so a table makes at most [`MAX_ROW_HEIGHTS`] of them and
+    /// the rows of the default height (the one stretch of a sheet that sets it on every row) cost one.
+    fn push_height_run(&mut self, rows: u32, height: RowHeight) {
+        let first = self.row;
+        if let Some(last) = self.height_runs.last_mut() {
+            if last.height == height && last.first + last.rows == first {
+                last.rows += rows;
+                return;
             }
+        }
+        if self.height_runs.len() < MAX_ROW_HEIGHTS {
+            self.height_runs.push(HeightRun {
+                first,
+                rows,
+                height,
+            });
         }
     }
 
@@ -744,7 +781,7 @@ impl OdsSink for StyleSink<'_> {
         self.links = LinkCollector::default();
         self.filtered = Vec::new();
         self.filtered_total = 0;
-        self.row_heights = RowHeights::new();
+        self.height_runs = Vec::new();
         self.default_height = None;
     }
 
@@ -861,6 +898,7 @@ impl OdsSink for StyleSink<'_> {
     }
 
     fn table_end(&mut self) {
+        let default_row_height = self.default_height.take();
         let mut styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
             cell_types: std::mem::take(&mut self.cell_types),
@@ -883,14 +921,11 @@ impl OdsSink for StyleSink<'_> {
             hidden: std::mem::take(&mut self.hidden),
             outline: self.settled_outline(),
             filtered_rows: std::mem::take(&mut self.filtered),
-            row_heights: std::mem::take(&mut self.row_heights),
-            default_row_height: self.default_height.take(),
+            // A row that has the default height is not a height of its own (the writer styles every row with it).
+            row_heights: settle_heights(std::mem::take(&mut self.height_runs), default_row_height),
+            default_row_height,
             ..SheetStyling::default()
         };
-        // A row that has the default height is not a height of its own (the writer styles every row with it).
-        if let Some(default) = styling.default_row_height {
-            styling.row_heights.retain(|_, height| *height != default);
-        }
         let links = std::mem::take(&mut self.links);
         (styling.links, styling.links_rejected) = (links.links, links.rejected);
         styling.normalize_locks();

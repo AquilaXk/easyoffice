@@ -100,14 +100,18 @@ pub fn row_heights_within_bounds(
 }
 
 impl SheetStyling {
+    /// The default row height a user set. One that follows the font (`customHeight` off) is the program's own measure of
+    /// a row: the page keeps its grid row height for it (PD-286) and an ODS file does not carry it (PD-300).
+    pub fn user_default_row_height(&self) -> Option<RowHeight> {
+        self.default_row_height.filter(|h| h.custom)
+    }
+
     /// The height in CSS pixels of the visible `row` as the page draws it: the height of the row, else the default row
-    /// height a user set, else `grid_px`. A default that follows the font (`customHeight` off) is the program's own
-    /// measure and the page keeps its grid row height for it.
+    /// height a user set, else `grid_px`.
     pub fn row_height_px(&self, row: u32, grid_px: f64) -> f64 {
         self.row_heights.get(&row).map_or_else(
             || {
-                self.default_row_height
-                    .filter(|h| h.custom)
+                self.user_default_row_height()
                     .map_or(grid_px, RowHeight::px)
             },
             |h| h.px(),

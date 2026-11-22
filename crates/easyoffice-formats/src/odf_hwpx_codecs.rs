@@ -525,10 +525,10 @@ impl OdfCodec {
             content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
         }
         let mut expected_row: u32 = 0;
-        // The rows with no height of their own take the default row height; the band after the last row says it for the
-        // rest of the sheet (PD-286).
+        // The rows with no height of their own take the default row height a user set; the band after the last row says it
+        // for the rest of the sheet (PD-286). A default that follows the font is not written (PD-300).
         let default_style = styling
-            .and_then(|st| st.default_row_height)
+            .and_then(SheetStyling::user_default_row_height)
             .and_then(|height| style_table.row_style_name(height))
             .map_or(String::new(), |name| {
                 format!(" table:style-name=\"{name}\"")

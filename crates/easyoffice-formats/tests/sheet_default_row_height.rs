@@ -187,7 +187,8 @@ fn a_default_over_the_bounds_is_refused_on_write() {
 
 #[test]
 fn ods_writes_the_default_on_every_row_and_the_band_that_ends_the_table() {
-    for default in [height("30", true), height("14.4", false)] {
+    // A default that follows the font is not written (PD-300, `sheet_ods_row_heights_pd300.rs`).
+    for default in [height("30", true), height("14.4", true)] {
         let styling = with_default(default);
         let bytes = ods(&styling);
         let content = part(&bytes, "content.xml");
