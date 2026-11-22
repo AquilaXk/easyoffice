@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "easyoffice-formats"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "adler2",
  "base64 0.23.1",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "easyoffice-quicklook-ffi"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.23.1",
  "easyoffice-formats",
