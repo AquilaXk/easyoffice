@@ -145,7 +145,7 @@ impl SheetEngine {
     }
 
     /// The reference a bare variable in `expr` holds, for a call the scalar engine runs.
-    fn bound_ref(expr: &Expr, env: &Env) -> Option<Expr> {
+    pub(crate) fn bound_ref(expr: &Expr, env: &Env) -> Option<Expr> {
         match expr.peeled() {
             Expr::Var(name) => match env.get(name) {
                 Some(Val::Ref(reference)) => Some((**reference).clone()),
@@ -292,6 +292,9 @@ impl SheetEngine {
             return self.apply_val(&f, vals, ctx, depth + 1);
         }
         match name {
+            "SINGLE" => Ok(Val::scalar(
+                self.eval_implicit_single_in_env(args, env, ctx, depth)?,
+            )),
             "LET" => self.fn_let(args, env, ctx, depth),
             "LAMBDA" => self.fn_lambda(args, env),
             "FILTER" => self.fn_filter(args, env, ctx, depth),
@@ -644,7 +647,7 @@ impl SheetEngine {
 }
 
 /// Whether `expr` reads a `LET` variable or calls one.
-fn uses_vars(expr: &Expr) -> bool {
+pub(crate) fn uses_vars(expr: &Expr) -> bool {
     let mut found = false;
     crate::names::walk(expr, |node| {
         found |= matches!(node, Expr::Var(_) | Expr::Call(_));

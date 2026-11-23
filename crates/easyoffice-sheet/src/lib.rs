@@ -70,6 +70,7 @@ mod functions_unavailable;
 mod functions_unit_tests;
 mod groupby_axis;
 mod hidden_rows;
+mod implicit_single;
 mod lexer;
 mod lookup_helpers;
 mod lookup_index;

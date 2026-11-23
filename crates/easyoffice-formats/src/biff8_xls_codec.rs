@@ -6,8 +6,11 @@ use crate::sheet_links::xls_links;
 use crate::sheet_links::SheetLinks;
 use crate::sheet_styling::{sheet_states, SheetStyling};
 use crate::xls_boundsheet;
+use crate::xls_builtin_styles::{
+    write_builtin_fonts, write_builtin_styles, write_builtin_xfs, DEFAULT_CELL_XF,
+};
 use crate::xls_layout::{write_row_records, write_sheet_layout_globals};
-use crate::xls_styles::{blank_record, default_font_record, set_formula_xf, XlsColorPlan};
+use crate::xls_styles::{blank_record, set_formula_xf, XlsColorPlan};
 use crate::{EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
 /// Legacy `.xls` BIFF8 spreadsheet payload model.
@@ -299,16 +302,15 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&1u16.to_le_bytes());
         }
         let wb_default_font = stylings.first().and_then(|st| st.default_font.as_ref());
-        stream.extend(default_font_record(wb_default_font));
+        write_builtin_fonts(&mut stream, wb_default_font);
         if let Some(plan) = &colors {
             plan.font_records(&mut stream, wb_default_font);
         }
-        stream.extend_from_slice(&Self::BIFF8_XF.to_le_bytes());
-        stream.extend_from_slice(&20u16.to_le_bytes());
-        stream.extend_from_slice(&[0u8; 20]);
+        write_builtin_xfs(&mut stream);
         if let Some(plan) = &colors {
             plan.xf_and_palette_records(&mut stream);
         }
+        write_builtin_styles(&mut stream);
 
         // 2. BOUNDSHEET records (0x0085)
         let mut lb_ply_pos_offsets = Vec::with_capacity(sheets.len());
@@ -371,8 +373,11 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&0u16.to_le_bytes()); // reserved
 
             write_row_records(&mut stream, styling, wb_default_font);
-            let xf_of =
-                |row: u32, col: u32| colors.as_ref().map_or(0, |plan| plan.xf(styling, row, col));
+            let xf_of = |row: u32, col: u32| {
+                colors
+                    .as_ref()
+                    .map_or(DEFAULT_CELL_XF, |plan| plan.xf(styling, row, col))
+            };
             let valued: std::collections::HashSet<(u32, u32)> = if colors.is_some() {
                 sheet.cells.iter().map(|&(r, c, _)| (r, c)).collect()
             } else {

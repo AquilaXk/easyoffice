@@ -32,6 +32,7 @@ use crate::sheet_styling::xlsx_color::DEFAULT_INDEXED;
 use crate::sheet_styling::{
     clean_font_name, CellStyle, FontTable, SheetStyling, MAX_FONT_NAME_CHARS, MAX_STYLED_CELLS,
 };
+use crate::xls_builtin_styles::DEFAULT_CELL_XF;
 use crate::{MAX_BIFF8_COL, MAX_BIFF8_ROW};
 
 pub(crate) const FONT: u16 = 0x0031;
@@ -521,8 +522,16 @@ impl XlsColorPlan {
             );
             let xf = match xf_of.get(&key) {
                 Some(&xf) => xf,
-                // The default XF is index 0; a table past the limit of the format keeps the default look.
-                None => match u16::try_from(xfs.len() + 1).ok().filter(|&n| n < MAX_XFS) {
+                // Built-in style/default XFs occupy indexes 0..=DEFAULT_CELL_XF (15); custom XFs start at 16.
+                None => match DEFAULT_CELL_XF
+                    .checked_add(1)
+                    .and_then(|base| {
+                        u16::try_from(xfs.len())
+                            .ok()
+                            .and_then(|n| base.checked_add(n))
+                    })
+                    .filter(|&n| n < MAX_XFS)
+                {
                     Some(xf) => {
                         let font_record = key.1.map_or(0, |icv| {
                             *font_of.entry(icv).or_insert_with(|| {
@@ -536,7 +545,7 @@ impl XlsColorPlan {
                     }
                     None => {
                         approximated = approximated.saturating_add(1);
-                        0
+                        DEFAULT_CELL_XF
                     }
                 },
             };
@@ -552,14 +561,14 @@ impl XlsColorPlan {
         })
     }
 
-    /// The XF of the cell `(row, col)` of `styling`: 0 (the default XF) when it has no colour.
+    /// The XF of the cell `(row, col)` of `styling`: `DEFAULT_CELL_XF` (15) when it has no colour.
     pub(crate) fn xf(&self, styling: Option<&SheetStyling>, row: u32, col: u32) -> u16 {
         styling
             .and_then(|st| st.cells.get(&(row, col)))
             .and_then(look)
             .and_then(|pair| self.by_look.get(&pair).copied())
             .filter(|_| in_grid(row, col))
-            .unwrap_or(0)
+            .unwrap_or(DEFAULT_CELL_XF)
     }
 
     /// The cells of `styling` that have a colour and fit the grid of the format, in row order.
@@ -586,14 +595,12 @@ impl XlsColorPlan {
         }
     }
 
-    /// The `XF` records that follow the default one, then the `PALETTE` record when the palette changed.
+    /// The `XF` records that follow the 16 built-in XFs, then the `PALETTE` record when the palette changed.
     pub(crate) fn xf_and_palette_records(&self, out: &mut Vec<u8>) {
         for &(font_record, fill) in &self.xfs {
-            let font_index = if font_record >= 4 {
-                font_record + 1
-            } else {
-                font_record
-            } as u16;
+            // Four built-in FONT records (0..=3) precede custom fonts and BIFF8 skips index 4,
+            // so a 1-based custom `font_record` maps to BIFF8 font index `font_record + 4`.
+            let font_index = if font_record == 0 { 0 } else { font_record + 4 } as u16;
             let mut body = [0u8; 20];
             body[0..2].copy_from_slice(&font_index.to_le_bytes());
             // Locked, a cell XF whose parent is the default XF.

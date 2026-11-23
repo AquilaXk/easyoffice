@@ -106,3 +106,30 @@ fn a_pivot_answer_over_an_error_value_is_sent_as_the_error_literal() {
     assert!(json.contains(r##""rowTotals":["#DIV/0!",5]"##), "{json}");
     assert!(json.contains(r##""grandTotal":"#DIV/0!""##), "{json}");
 }
+
+#[test]
+fn xls_warns_about_dropped_merges_rules_freeze_and_cell_styles() {
+    let payload = r#"{
+        "sourceFormat":"xlsx","targetFormat":"xls","title":"서식손실",
+        "sheets":[{
+            "name":"S",
+            "cells":[{"ref":"A1","raw":"제목","style":{"bold":true,"ha":"center"}}],
+            "merges":["A1:B1"],
+            "freeze":{"rows":1,"cols":0},
+            "rules":{
+                "cf":[{"r":"A1:A2","p":1,"t":"expr","formula":"$A1>0"}],
+                "dv":[{"r":"B1:B2","t":"whole","op":"greaterThan","a":"0"}]
+            }
+        }]
+    }"#;
+    let json = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
+    for want in [
+        "병합 영역 1개는 XLS에 저장하지 않아 병합이 해제됩니다.",
+        "조건부 서식 1개는 XLS에 저장하지 않았습니다.",
+        "데이터 유효성 규칙 1개는 XLS에 저장하지 않았습니다.",
+        "틀 고정 설정 시트 1개의 고정 정보는 XLS에 저장하지 않았습니다.",
+        "글꼴·테두리·맞춤 서식이 있는 칸 1개는 XLS에 해당 서식을 저장하지 않았습니다.",
+    ] {
+        assert!(json.contains(want), "missing warning `{want}` in {json}");
+    }
+}

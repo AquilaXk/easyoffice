@@ -271,21 +271,24 @@ fn biff8_xls_reads_latin1_and_utf16le_font_names_across_index_four_gap() {
             hits.push(i);
         }
     }
+    // With 4 built-in FONT records (0..=3), the 4 custom fonts occupy records 4..=7
+    // (BIFF8 font indexes 5..=8, past the skipped index 4).
     assert!(
-        hits.len() >= 5,
-        "expected default + 4 FONT records, got {}",
+        hits.len() >= 8,
+        "expected 4 built-in + 4 custom FONT records, got {}",
         hits.len()
     );
-    let first_custom = hits[1];
+    let first_custom = hits[4];
     patched[first_custom + 2..first_custom + 7].copy_from_slice(b"Menlo");
-    // Overwrite the 5th FONT record (index 4 in Vec -> BIFF8 ifnt = 5!) with "Serif"
-    let fifth = hits[4];
-    patched[fifth + 2..fifth + 7].copy_from_slice(b"Serif");
+    // Overwrite the 8th FONT record (index 7 in Vec -> BIFF8 ifnt = 8) with "Serif".
+    let eighth = hits[7];
+    patched[eighth + 2..eighth + 7].copy_from_slice(b"Serif");
 
     let (_, stylings) = LegacyOle2Codec::unpack_xls_with_styling(&patched).unwrap();
     let st = &stylings[0].1;
-    // `XlsColorPlan` orders looks by RGB: `0x0000FF` ((0, 2)) is custom FONT #1 (`hits[1]`),
-    // `0x00FF00` ((0, 1)) is #2, `0xFF0000` ((0, 0)) is #3, and `0xFF00FF` ((0, 3)) is #4 (`ifnt = 5`).
+    // `XlsColorPlan` orders looks by RGB: `0x0000FF` ((0, 2)) is custom FONT #1 (`hits[4]`, ifnt = 5),
+    // `0x00FF00` ((0, 1)) is #2 (`hits[5]`, ifnt = 6), `0xFF0000` ((0, 0)) is #3 (`hits[6]`, ifnt = 7),
+    // and `0xFF00FF` ((0, 3)) is #4 (`hits[7]`, ifnt = 8).
     assert_eq!(
         resolve_font_name(st.cells[&(0, 2)].font, &st.fonts),
         Some("Menlo")
@@ -294,7 +297,7 @@ fn biff8_xls_reads_latin1_and_utf16le_font_names_across_index_four_gap() {
     assert_eq!(
         resolve_font_name(st.cells[&(0, 3)].font, &st.fonts),
         Some("Serif"),
-        "BIFF8 ifnt=5 (past missing index 4) resolves to 5th FONT record"
+        "BIFF8 ifnt=8 (past 4 built-in fonts + missing index 4) resolves to 8th FONT record"
     );
 }
 

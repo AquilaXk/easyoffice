@@ -644,7 +644,7 @@ pub fn parse_sheet_and_box(default_sheet: &str, raw_ref: &str) -> Option<(String
 }
 
 /// Whether `name` reads as a cell in the R1C1 style: `R`, `C`, `RC`, `R1`, `C1`, `R1C1`.
-fn is_r1c1_like(name: &str) -> bool {
+pub(crate) fn is_r1c1_like(name: &str) -> bool {
     let bytes = name.as_bytes();
     let digits = |from: usize| {
         bytes[from..]

@@ -526,6 +526,9 @@ impl SheetEngine {
             Expr::FuncCall(f) if f.name == "INDEX" => {
                 self.extract_index_line_ref(&f.args, ctx, depth)
             }
+            Expr::FuncCall(f) if f.name == "SINGLE" && f.args.len() == 1 => {
+                self.resolve_single_ref(&f.args[0], ctx, depth + 1)
+            }
             _ => Ok(None),
         }
     }

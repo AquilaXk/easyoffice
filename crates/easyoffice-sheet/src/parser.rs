@@ -44,6 +44,8 @@ pub(crate) enum Token<'a> {
     Structured(Cow<'a, str>),
     /// The spill range operator after a reference (`A1#`).
     Hash,
+    /// The implicit intersection operator (`@`).
+    At,
 }
 
 pub use crate::expr::*;
@@ -557,6 +559,13 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), Some(Token::Minus)) {
             self.next();
             return Ok(Expr::UnaryMinus(Box::new(self.parse_unary(depth + 1)?)));
+        }
+        if matches!(self.peek(), Some(Token::At)) {
+            self.next();
+            return Ok(Expr::func_call(
+                "SINGLE",
+                vec![self.parse_unary(depth + 1)?],
+            ));
         }
         self.parse_postfix(depth)
     }

@@ -4,9 +4,9 @@
 
 use easyoffice_formats::{
     doc_save_loss, pages_write_loss, CellValueKind, CsvCodec, DocumentFormat, EasyOfficeError,
-    LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions,
+    HAlign, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions,
     RichBlock, RichDocument, RichParagraph, RichRun, SheetShown, SheetStyling, SpillRef,
-    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    UniversalDocumentModel, UniversalFormatConverter, VAlign, XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
@@ -345,6 +345,7 @@ fn encode_xls(
             "색이 있는 칸 {dropped}개는 XLS의 범위(65,536행, 256열) 밖이라 색을 저장하지 않았습니다."
         ));
     }
+    warn_xls_dropped_styling(stylings, warnings);
     let mut payloads: Vec<LegacyXlsPayload> = computed
         .into_iter()
         .map(|(sheet_name, cells)| LegacyXlsPayload { sheet_name, cells })
@@ -356,6 +357,55 @@ fn encode_xls(
         });
     }
     LegacyOle2Codec::pack_xls_multi_values_styled(&payloads, &links, &computed_stylings)
+}
+
+fn warn_xls_dropped_styling(stylings: &[SheetStyling], warnings: &mut Vec<String>) {
+    let merges: usize = stylings.iter().map(|st| st.merges.len()).sum();
+    if merges > 0 {
+        warnings.push(format!(
+            "병합 영역 {merges}개는 XLS에 저장하지 않아 병합이 해제됩니다."
+        ));
+    }
+    let cf_rules: usize = stylings.iter().map(|st| st.rules.cf.len()).sum();
+    if cf_rules > 0 {
+        warnings.push(format!(
+            "조건부 서식 {cf_rules}개는 XLS에 저장하지 않았습니다."
+        ));
+    }
+    let dv_rules: usize = stylings.iter().map(|st| st.rules.dv.len()).sum();
+    if dv_rules > 0 {
+        warnings.push(format!(
+            "데이터 유효성 규칙 {dv_rules}개는 XLS에 저장하지 않았습니다."
+        ));
+    }
+    let freezes = stylings.iter().filter(|st| st.freeze.is_some()).count();
+    if freezes > 0 {
+        warnings.push(format!(
+            "틀 고정 설정 시트 {freezes}개의 고정 정보는 XLS에 저장하지 않았습니다."
+        ));
+    }
+    let unsupported_cells: usize = stylings
+        .iter()
+        .map(|st| {
+            st.cells
+                .values()
+                .filter(|c| {
+                    c.flags() != 0
+                        || c.size_pt.is_some()
+                        || c.font != 0
+                        || !c.borders.is_none()
+                        || c.h_align != HAlign::General
+                        || c.v_align != VAlign::Bottom
+                        || c.wrap
+                })
+                .count()
+        })
+        .sum();
+    if unsupported_cells > 0 {
+        warnings.push(format!(
+            "글꼴·테두리·맞춤 서식이 있는 칸 {unsupported_cells}개는 XLS에 해당 서식을 저장하지 않았습니다."
+        ));
+    }
 }
 
 /// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV

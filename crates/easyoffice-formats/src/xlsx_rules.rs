@@ -218,6 +218,20 @@ fn first_formula_texts(body: &str) -> Vec<String> {
         .collect()
 }
 
+fn formula_to_file(text: &str) -> String {
+    match text.strip_prefix('=') {
+        Some(body) => format!("={}", crate::xlsx_formula_text::to_file_formula(body)),
+        None => crate::xlsx_formula_text::to_file_formula(text),
+    }
+}
+
+fn formula_from_file(text: &str) -> String {
+    match text.strip_prefix('=') {
+        Some(body) => format!("={}", crate::xlsx_formula_text::from_file_formula(body)),
+        None => crate::xlsx_formula_text::from_file_formula(text),
+    }
+}
+
 /// Styles of the `<dxf>` entries `dxfs` (`xlsx_filter_dxf::dxf_bodies` of `styles.xml`), in file order. The colours of the
 /// fill, the font and the borders resolve through `colors` (`rgb`, theme with its tint, `indexed`; PD-288); an automatic or
 /// unreadable colour is no colour.
@@ -325,9 +339,17 @@ fn rule_xml(rule: &CfRule, priority: usize, dxf: &DxfTable) -> String {
     match &rule.kind {
         CfKind::CellIs { cmp, a, b } => {
             let _ = write!(head, "type=\"cellIs\" operator=\"{}\"", cmp.name());
-            let _ = write!(body, "<formula>{}</formula>", XmlSanitizer::escape(a));
+            let _ = write!(
+                body,
+                "<formula>{}</formula>",
+                XmlSanitizer::escape(&formula_to_file(a))
+            );
             if cmp.takes_two() {
-                let _ = write!(body, "<formula>{}</formula>", XmlSanitizer::escape(b));
+                let _ = write!(
+                    body,
+                    "<formula>{}</formula>",
+                    XmlSanitizer::escape(&formula_to_file(b))
+                );
             }
         }
         CfKind::TimePeriod(period) => {
@@ -409,7 +431,11 @@ fn rule_xml(rule: &CfRule, priority: usize, dxf: &DxfTable) -> String {
         }
         CfKind::Expression(f) => {
             head.push_str("type=\"expression\"");
-            let _ = write!(body, "<formula>{}</formula>", XmlSanitizer::escape(f));
+            let _ = write!(
+                body,
+                "<formula>{}</formula>",
+                XmlSanitizer::escape(&formula_to_file(f))
+            );
         }
         CfKind::ColorScale(stops) => {
             uses_dxf = false;
@@ -513,16 +539,22 @@ fn validation_xml(dv: &DataValidation) -> String {
             let (on, off) = dv.checkbox_values();
             format!("\"{}\"", format!("{on},{off}").replace('"', "\"\""))
         }
-        (kind, Some(reference)) if kind.is_list() => reference.to_string(),
+        (kind, Some(reference)) if kind.is_list() => {
+            crate::xlsx_formula_text::to_file_formula(reference)
+        }
         (kind, None) if kind.is_list() => format!("\"{}\"", dv.a.replace('"', "\"\"")),
-        _ => dv.a.clone(),
+        _ => formula_to_file(&dv.a),
     };
     let mut body = format!("<formula1>{}</formula1>", XmlSanitizer::escape(&first));
     if dv.cmp.takes_two()
         && !dv.kind.is_list()
         && !matches!(dv.kind, DvKind::Custom | DvKind::Checkbox)
     {
-        let _ = write!(body, "<formula2>{}</formula2>", XmlSanitizer::escape(&dv.b));
+        let _ = write!(
+            body,
+            "<formula2>{}</formula2>",
+            XmlSanitizer::escape(&formula_to_file(&dv.b))
+        );
     }
     format!("<dataValidation {attrs}>{body}</dataValidation>")
 }
@@ -533,10 +565,15 @@ fn validation_xml(dv: &DataValidation) -> String {
 const KIND_NS: &str = "urn:easyoffice:sheet-rules";
 const KIND_EXT_URI: &str = "{4D0B5E1C-7A52-4C77-9F0A-2E6B1D93A8C4}";
 
-fn kind_ext_xml(dvs: &[&DataValidation]) -> String {
-    let marks: String = dvs
+/// Inner `<ext uri="...">...</ext>` fragment (no outer `<extLst>`) for checkbox / multi-select DV
+/// kinds; merged into the worksheet's single trailing `<extLst>` by [`build_sheet_xml`].
+pub(crate) fn dv_ext_inner_xml(rules: &SheetRules) -> String {
+    let marks: String = rules
+        .dv
         .iter()
-        .filter(|dv| matches!(dv.kind, DvKind::Checkbox | DvKind::ListMultiple))
+        .filter(|dv| {
+            !dv.ranges.is_empty() && matches!(dv.kind, DvKind::Checkbox | DvKind::ListMultiple)
+        })
         .map(|dv| {
             let (on, off) = dv.checkbox_values();
             let values = if dv.kind == DvKind::Checkbox {
@@ -558,7 +595,7 @@ fn kind_ext_xml(dvs: &[&DataValidation]) -> String {
     if marks.is_empty() {
         return String::new();
     }
-    format!("<extLst><ext uri=\"{KIND_EXT_URI}\" xmlns:eo=\"{KIND_NS}\">{marks}</ext></extLst>")
+    format!("<ext uri=\"{KIND_EXT_URI}\" xmlns:eo=\"{KIND_NS}\">{marks}</ext>")
 }
 
 /// `<conditionalFormatting>` blocks and `<dataValidations>` of one sheet (empty when none).
@@ -577,9 +614,12 @@ pub(crate) fn rules_xml(rules: &SheetRules, dxf: &DxfTable) -> String {
             rule_xml(rule, i + 1, dxf)
         );
     }
-    let written: Vec<&DataValidation> =
-        rules.dv.iter().filter(|dv| !dv.ranges.is_empty()).collect();
-    let validations: Vec<String> = written.iter().map(|dv| validation_xml(dv)).collect();
+    let validations: Vec<String> = rules
+        .dv
+        .iter()
+        .filter(|dv| !dv.ranges.is_empty())
+        .map(validation_xml)
+        .collect();
     if !validations.is_empty() {
         let _ = write!(
             out,
@@ -587,7 +627,6 @@ pub(crate) fn rules_xml(rules: &SheetRules, dxf: &DxfTable) -> String {
             validations.len(),
             validations.concat()
         );
-        out.push_str(&kind_ext_xml(&written));
     }
     out
 }
@@ -626,8 +665,10 @@ fn parse_kind(attrs: &str, body: &str) -> Result<CfKind, String> {
             };
             CfKind::CellIs {
                 cmp,
-                a: first,
-                b: formulas.get(1).cloned().unwrap_or_default(),
+                a: bounded(formula_from_file(&first)),
+                b: bounded(formula_from_file(
+                    formulas.get(1).map_or("", String::as_str),
+                )),
             }
         }
         "containsText" | "notContainsText" | "beginsWith" | "endsWith" => {
@@ -666,7 +707,7 @@ fn parse_kind(attrs: &str, body: &str) -> Result<CfKind, String> {
         },
         "duplicateValues" => CfKind::Duplicates { unique: false },
         "uniqueValues" => CfKind::Duplicates { unique: true },
-        "expression" => CfKind::Expression(first),
+        "expression" => CfKind::Expression(bounded(formula_from_file(&first))),
         "colorScale" => {
             let stops = parse_values(body);
             let colors = parse_colors(body);
@@ -840,12 +881,18 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
         dv.a = if kind.is_list() {
             match f1.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
                 Some(items) => bounded(items.replace("\"\"", "\"")),
-                None => bounded(format!("={f1}")),
+                None => {
+                    let expr = f1.strip_prefix('=').unwrap_or(&f1);
+                    bounded(format!(
+                        "={}",
+                        crate::xlsx_formula_text::from_file_formula(expr)
+                    ))
+                }
             }
         } else {
-            f1
+            bounded(formula_from_file(&f1))
         };
-        dv.b = first_formula(body, "formula2");
+        dv.b = bounded(formula_from_file(&first_formula(body, "formula2")));
         dv.allow_blank = flag_attr(attrs, "allowBlank", false);
         dv.show_dropdown = !flag_attr(attrs, "showDropDown", false);
         dv.alert = attr(attrs, "errorStyle")

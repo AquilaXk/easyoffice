@@ -25,6 +25,22 @@ fn is_plain(attrs: &str, name: &str) -> bool {
             .all(|flag| !matches!(extract_attr_from_fragment(attrs, flag), Some("1" | "true")))
 }
 
+fn refers_to_to_file(text: &str) -> String {
+    let expanded = crate::structured_ref::to_file_refs(text, None);
+    let src = expanded.as_deref().unwrap_or(text);
+    match src.strip_prefix('=') {
+        Some(body) => format!("={}", crate::xlsx_formula_text::to_file_formula(body)),
+        None => crate::xlsx_formula_text::to_file_formula(src),
+    }
+}
+
+fn refers_to_from_file(text: &str) -> String {
+    match text.strip_prefix('=') {
+        Some(body) => format!("={}", crate::xlsx_formula_text::from_file_formula(body)),
+        None => crate::xlsx_formula_text::from_file_formula(text),
+    }
+}
+
 /// The defined names of the workbook part and how many names were left out.
 pub(crate) fn read_defined_names(
     workbook_xml: &str,
@@ -50,12 +66,14 @@ pub(crate) fn read_defined_names(
                 continue;
             }
         };
-        let refers_to = XmlSanitizer::unescape(inner);
+        let raw_refers = XmlSanitizer::unescape(inner);
+        let refers_to = refers_to_from_file(raw_refers.trim());
         let comment = extract_attr_from_fragment(attrs, "comment")
             .map(XmlSanitizer::unescape)
             .unwrap_or_default();
         let usable = out.len() < MAX_NAMES
             && defined_name_problem(&name).is_none()
+            && raw_refers.chars().count() <= MAX_REFERS_TO_CHARS
             && refers_to.chars().count() <= MAX_REFERS_TO_CHARS
             && comment.chars().count() <= MAX_NAME_COMMENT_CHARS
             && seen.insert((fold_name(&name), scope));
@@ -66,7 +84,7 @@ pub(crate) fn read_defined_names(
         out.push(DefinedName {
             name,
             scope: scope.map(|i| sheet_names[i].clone()),
-            refers_to: refers_to.trim().to_string(),
+            refers_to,
             comment,
             hidden: matches!(
                 extract_attr_from_fragment(attrs, "hidden"),
@@ -117,17 +135,19 @@ pub(crate) fn defined_names_xml(sheet_names: &[String], stylings: &[SheetStyling
             continue;
         }
         // A structured reference is written the way the file format holds it; a name sits in no table, so a reference
-        // with no table's name is `#REF!` (PD-225).
-        match crate::structured_ref::to_file_refs(&def.refers_to, None) {
-            Some(refers_to) => push_name(
+        // with no table's name is `#REF!` (PD-225). Function/variable prefixes are applied afterwards.
+        let refers_to = refers_to_to_file(&def.refers_to);
+        if refers_to == def.refers_to {
+            push_name(&mut inner, def, local);
+        } else {
+            push_name(
                 &mut inner,
                 &DefinedName {
                     refers_to,
                     ..def.clone()
                 },
                 local,
-            ),
-            None => push_name(&mut inner, def, local),
+            );
         }
     }
     if inner.is_empty() {

@@ -21,6 +21,7 @@ fn single_byte_token(b: u8) -> Option<Token<'static>> {
         b':' => Token::Colon,
         b'!' => Token::Bang,
         b'=' => Token::Eq,
+        b'@' => Token::At,
         _ => return None,
     })
 }

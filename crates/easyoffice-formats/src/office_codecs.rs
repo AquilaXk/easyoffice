@@ -578,6 +578,7 @@ impl OoxmlCodec {
                     &drawing_part.drawing_xml,
                     &comment_part.legacy_drawing_xml,
                     &tables.parts_xml,
+                    &tables.ext_xml,
                 ),
                 &HeaderCells::new(&sheet_tables[i]),
             );

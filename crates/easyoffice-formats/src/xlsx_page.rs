@@ -160,11 +160,27 @@ fn margins(attrs: &Attrs<'_>) -> Option<PageMargins> {
 
 // ---- the defined names of the workbook ------------------------------------------------------
 
+fn is_cell_address_like(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let Some(idx) = bytes.iter().position(|b| b.is_ascii_digit()) else {
+        return false;
+    };
+    let (letters, digits) = bytes.split_at(idx);
+    (1..=3).contains(&letters.len())
+        && letters.iter().all(u8::is_ascii_alphabetic)
+        && (1..=7).contains(&digits.len())
+        && digits.iter().all(u8::is_ascii_digit)
+}
+
 /// A sheet name as a formula writes it before `!`: quoted, with `'` doubled, unless it is plain.
 fn sheet_ref(name: &str) -> String {
     let plain = !name.is_empty()
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-        && !name.chars().next().is_some_and(|c| c.is_ascii_digit());
+        && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
+        && !is_cell_address_like(name)
+        && !crate::sheet_chart::is_r1c1_like(name)
+        && !name.eq_ignore_ascii_case("TRUE")
+        && !name.eq_ignore_ascii_case("FALSE");
     if plain {
         name.to_string()
     } else {

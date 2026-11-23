@@ -303,6 +303,9 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
         Expr::FuncCall(f) => {
             let name = f.name.as_str();
             let args = &f.args;
+            if name == "SINGLE" {
+                return false;
+            }
             if is_spill_fn(name) || (name == "HYPERLINK" && (1..=2).contains(&args.len())) {
                 return true;
             }

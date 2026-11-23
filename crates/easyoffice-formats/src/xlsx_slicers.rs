@@ -646,9 +646,9 @@ impl SlicerPackageWriter {
         }
     }
 
-    pub(crate) fn finish_sheet(&mut self, sheet_parts_xml: &mut String, sheet_rels: &mut String) {
+    pub(crate) fn finish_sheet(&mut self, sheet_rels: &mut String) -> String {
         if self.cur_sheet_views_xml.is_empty() {
-            return;
+            return String::new();
         }
         self.sheet_view_count += 1;
         let m = self.sheet_view_count;
@@ -666,10 +666,9 @@ impl SlicerPackageWriter {
             sheet_rels,
             "<Relationship Id=\"rIdSl{m}\" Type=\"{SLICER_VIEW_REL_TYPE}\" Target=\"../slicers/slicer{m}.xml\"/>"
         );
-        let _ = write!(
-            sheet_parts_xml,
-            "<extLst><ext uri=\"{WS_SLICERS_EXT_URI}\" xmlns:x14=\"{SLICER_MAIN_2010_NS}\" xmlns:r=\"{REL_NS}\"><x14:slicers><x14:slicer r:id=\"rIdSl{m}\"/></x14:slicers></ext></extLst>"
-        );
+        format!(
+            "<ext uri=\"{WS_SLICERS_EXT_URI}\" xmlns:x14=\"{SLICER_MAIN_2010_NS}\" xmlns:r=\"{REL_NS}\"><x14:slicers><x14:slicer r:id=\"rIdSl{m}\"/></x14:slicers></ext>"
+        )
     }
 
     pub(crate) fn workbook_ext_xml(&self) -> String {

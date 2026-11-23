@@ -309,10 +309,13 @@ fn join(tokens: &[Tok]) -> String {
 
 /// The formula text of the page (no leading `=`) as a file spells it.
 pub fn to_file_formula(text: &str) -> String {
-    if !text.chars().any(|c| c.is_ascii_alphabetic() || c == '#') {
+    if !text
+        .chars()
+        .any(|c| c.is_ascii_alphabetic() || matches!(c, '#' | '@'))
+    {
         return text.to_string();
     }
-    let tokens = optional_parameters(anchor_calls(tokenize(text)));
+    let tokens = optional_parameters(single_calls(anchor_calls(tokenize(text))));
     let variables = declared_variables(&tokens);
     let mut out = String::with_capacity(text.len() + 16);
     for (i, token) in tokens.iter().enumerate() {
@@ -345,9 +348,18 @@ pub fn to_file_formula(text: &str) -> String {
     out
 }
 
+fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
+    let nb = needle.as_bytes();
+    haystack
+        .as_bytes()
+        .windows(nb.len())
+        .any(|w| w.eq_ignore_ascii_case(nb))
+}
+
 /// The formula text of a file (no leading `=`) as the page spells it.
 pub fn from_file_formula(text: &str) -> String {
-    if !text.contains("_xl") && !text.contains("ANCHORARRAY") {
+    if !text.contains("_xl") && !text.contains("ANCHORARRAY") && !contains_ascii_ci(text, "SINGLE")
+    {
         return text.to_string();
     }
     let mut tokens: Vec<Tok> = Vec::new();
@@ -371,7 +383,7 @@ pub fn from_file_formula(text: &str) -> String {
             .map_or(word.clone(), str::to_string);
         tokens.push(Tok::Word(plain));
     }
-    join(&spill_operators(tokens))
+    join(&single_operators(spill_operators(tokens)))
 }
 
 /// `[x]` in an argument list as the word `_xlop.x`.
@@ -435,6 +447,166 @@ fn spill_operators(tokens: Vec<Tok>) -> Vec<Tok> {
                     out.extend(inner.iter().cloned());
                     out.push(Tok::Punct('#'));
                     i += close + 3;
+                    continue;
+                }
+            }
+        }
+        out.push(tokens[i].clone());
+        i += 1;
+    }
+    out
+}
+
+fn matching_delim(tokens: &[Tok], start: usize, open: char, close: char) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, tok) in tokens[start..].iter().enumerate() {
+        match tok {
+            Tok::Punct(c) if *c == open => depth += 1,
+            Tok::Punct(c) if *c == close => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(start + offset + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn single_operand_end(tokens: &[Tok], start: usize) -> Option<usize> {
+    let mut i = start;
+    while matches!(tokens.get(i), Some(Tok::Punct(c)) if c.is_whitespace()) {
+        i += 1;
+    }
+    let tok = tokens.get(i)?;
+    let mut end = match tok {
+        Tok::Punct('@' | '+' | '-') => return single_operand_end(tokens, i + 1),
+        Tok::Punct('(') => matching_delim(tokens, i, '(', ')')?,
+        Tok::Punct('{') => matching_delim(tokens, i, '{', '}')?,
+        Tok::Quoted(_) => i + 1,
+        Tok::Word(_) => {
+            let next = if tokens.get(i + 1) == Some(&Tok::Punct('(')) {
+                matching_delim(tokens, i + 1, '(', ')')?
+            } else {
+                i + 1
+            };
+            if matches!(tokens.get(next), Some(Tok::Quoted(q)) if q.starts_with('[')) {
+                next + 1
+            } else {
+                next
+            }
+        }
+        Tok::Punct(_) => return None,
+    };
+    while let Some(Tok::Punct(op)) = tokens.get(end) {
+        match op {
+            '!' | ':' => {
+                end = single_operand_end(tokens, end + 1)?;
+                break;
+            }
+            '%' => end += 1,
+            _ => break,
+        }
+    }
+    Some(end)
+}
+
+/// Unary `@<operand>` as `_xlfn.SINGLE(<operand>)`.
+fn single_calls(tokens: Vec<Tok>) -> Vec<Tok> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        if tokens[i] == Tok::Punct('@') {
+            let mut op_start = i + 1;
+            while matches!(tokens.get(op_start), Some(Tok::Punct(c)) if c.is_whitespace()) {
+                op_start += 1;
+            }
+            if let Some(end) = single_operand_end(&tokens, op_start) {
+                out.push(Tok::Word("_xlfn.SINGLE".to_string()));
+                out.push(Tok::Punct('('));
+                out.extend(single_calls(tokens[op_start..end].to_vec()));
+                out.push(Tok::Punct(')'));
+                i = end;
+                continue;
+            }
+        }
+        out.push(tokens[i].clone());
+        i += 1;
+    }
+    out
+}
+
+fn has_top_level_comma(tokens: &[Tok]) -> bool {
+    let mut depth = 0usize;
+    for tok in tokens {
+        match tok {
+            Tok::Punct('(' | '{') => depth += 1,
+            Tok::Punct(')' | '}') => depth = depth.saturating_sub(1),
+            Tok::Punct(',') if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn is_outer_parenthesized(tokens: &[Tok]) -> bool {
+    let mut start = 0;
+    while matches!(tokens.get(start), Some(Tok::Punct(c)) if c.is_whitespace()) {
+        start += 1;
+    }
+    let mut end = tokens.len();
+    while end > start && matches!(tokens.get(end - 1), Some(Tok::Punct(c)) if c.is_whitespace()) {
+        end -= 1;
+    }
+    tokens.get(start) == Some(&Tok::Punct('('))
+        && matching_delim(tokens, start, '(', ')') == Some(end)
+}
+
+fn has_single_top_level_op(tokens: &[Tok]) -> bool {
+    let mut depth = 0usize;
+    for tok in tokens {
+        match tok {
+            Tok::Punct('(' | '{') => depth += 1,
+            Tok::Punct(')' | '}') => depth = depth.saturating_sub(1),
+            Tok::Punct(c)
+                if depth == 0
+                    && !c.is_whitespace()
+                    && !matches!(c, '!' | ':' | '#' | '%' | '@') =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// `SINGLE(<operand>)` as `@<operand>` (or `@(<operand>)` when top-level operators appear inside).
+fn single_operators(tokens: Vec<Tok>) -> Vec<Tok> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let is_call = matches!(&tokens[i], Tok::Word(w) if w.eq_ignore_ascii_case("SINGLE"))
+            && tokens.get(i + 1) == Some(&Tok::Punct('('));
+        if is_call {
+            if let Some(end) = matching_delim(&tokens, i + 1, '(', ')') {
+                let raw_inner = &tokens[i + 2..end - 1];
+                let has_content = raw_inner
+                    .iter()
+                    .any(|t| !matches!(t, Tok::Punct(c) if c.is_whitespace()));
+                if has_content && !has_top_level_comma(raw_inner) {
+                    let inner = single_operators(raw_inner.to_vec());
+                    out.push(Tok::Punct('@'));
+                    let wrap = !is_outer_parenthesized(&inner) && has_single_top_level_op(&inner);
+                    if wrap {
+                        out.push(Tok::Punct('('));
+                    }
+                    out.extend(inner);
+                    if wrap {
+                        out.push(Tok::Punct(')'));
+                    }
+                    i = end;
                     continue;
                 }
             }
@@ -614,7 +786,7 @@ mod tests {
         );
         for name in FUTURE
             .iter()
-            .filter(|n| !matches!(**n, "ANCHORARRAY" | "LAMBDA" | "LET"))
+            .filter(|n| !matches!(**n, "ANCHORARRAY" | "LAMBDA" | "LET" | "SINGLE"))
             .chain(WORKSHEET_ONLY.iter())
         {
             let page = format!("{name}(A1, 2)");
@@ -671,5 +843,29 @@ mod tests {
             assert_eq!(from_file_formula(&to_file_formula(text)), text, "{text}");
         }
         assert_eq!(from_file_formula("_xlfn.ANCHORARRAY(B2)"), "B2#");
+    }
+
+    #[test]
+    fn implicit_intersection_operator_round_trips_as_single() {
+        for (page, file) in [
+            ("@A1:A5", "_xlfn.SINGLE(A1:A5)"),
+            (
+                "SUM(@A1:A5, @B1:B5)",
+                "SUM(_xlfn.SINGLE(A1:A5), _xlfn.SINGLE(B1:B5))",
+            ),
+            ("@'My Sheet'!A1:A5", "_xlfn.SINGLE('My Sheet'!A1:A5)"),
+            ("@A1#", "_xlfn.SINGLE(_xlfn.ANCHORARRAY(A1))"),
+            ("@SEQUENCE(5)", "_xlfn.SINGLE(_xlfn.SEQUENCE(5))"),
+            ("@Table1[Amount]", "_xlfn.SINGLE(Table1[Amount])"),
+            ("@{10,20}", "_xlfn.SINGLE({10,20})"),
+            ("@(A1+B1)", "_xlfn.SINGLE((A1+B1))"),
+            ("SUM(Table1[@Amount])", "SUM(Table1[@Amount])"),
+            ("\"@literal\"", "\"@literal\""),
+        ] {
+            assert_eq!(to_file_formula(page), file, "to_file {page}");
+            assert_eq!(from_file_formula(file), page, "from_file {file}");
+        }
+        assert_eq!(from_file_formula("_xlfn.SINGLE(A1+B1)"), "@(A1+B1)");
+        assert_eq!(from_file_formula("SINGLE(A1, 2)"), "SINGLE(A1, 2)");
     }
 }

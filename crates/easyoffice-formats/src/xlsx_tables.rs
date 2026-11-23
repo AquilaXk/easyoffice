@@ -514,6 +514,8 @@ pub(crate) struct SheetTables {
     pub(crate) cells: Option<Vec<(u32, u32, String)>>,
     /// The `tableParts` element for the end of the worksheet part.
     pub(crate) parts_xml: String,
+    /// `<ext uri="...">...</ext>` elements emitted inside the worksheet's single trailing `<extLst>`.
+    pub(crate) ext_xml: String,
     /// `Relationship` elements for the sheet's relationships part.
     pub(crate) rels: String,
 }
@@ -663,7 +665,7 @@ impl TableWriter {
             self.slicers.add_table(n, table, &names);
         }
         out.parts_xml.push_str("</tableParts>");
-        self.slicers.finish_sheet(&mut out.parts_xml, &mut out.rels);
+        out.ext_xml = self.slicers.finish_sheet(&mut out.rels);
         if !fixes.is_empty() {
             out.cells = Some(patched_cells(cells, fixes));
         }

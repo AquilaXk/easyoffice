@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::rtf_xml_helpers::write_col_letters;
-use crate::sheet_styling::sheet_rules::xlsx_rules::rules_xml;
+use crate::sheet_styling::sheet_rules::xlsx_rules::{dv_ext_inner_xml, rules_xml};
 use crate::sheet_styling::sheet_table::xlsx_tables::HeaderCells;
 use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
@@ -236,7 +236,13 @@ pub(crate) fn build_sheet_xml(
     styling: Option<&SheetStyling>,
     style_table: &XlsxStyleTable,
     sst_map: &SharedStringMap<'_>,
-    (links_xml, drawing_xml, legacy_drawing_xml, table_parts): (&str, &str, &str, &str),
+    (links_xml, drawing_xml, legacy_drawing_xml, table_parts, slicer_ext_xml): (
+        &str,
+        &str,
+        &str,
+        &str,
+        &str,
+    ),
     headers: &HeaderCells,
 ) -> String {
     let blank = String::new();
@@ -329,6 +335,7 @@ pub(crate) fn build_sheet_xml(
         sheet_xml.push_str("</row>");
     }
     sheet_xml.push_str("</sheetData>");
+    let mut dv_ext = String::new();
     if let Some(st) = styling {
         if let Some(protect) = &st.protect {
             sheet_xml.push_str(&crate::sheet_styling::xlsx_protect::sheet_protection_xml(
@@ -344,10 +351,17 @@ pub(crate) fn build_sheet_xml(
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
         sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
+        dv_ext = dv_ext_inner_xml(&st.rules);
     }
     sheet_xml.push_str(drawing_xml);
     sheet_xml.push_str(legacy_drawing_xml);
     sheet_xml.push_str(table_parts);
+    if !dv_ext.is_empty() || !slicer_ext_xml.is_empty() {
+        sheet_xml.push_str("<extLst>");
+        sheet_xml.push_str(&dv_ext);
+        sheet_xml.push_str(slicer_ext_xml);
+        sheet_xml.push_str("</extLst>");
+    }
     sheet_xml.push_str("</worksheet>");
     sheet_xml
 }

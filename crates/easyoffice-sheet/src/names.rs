@@ -117,14 +117,16 @@ struct Parsed {
 
 pub(crate) fn is_function(name: &str) -> bool {
     static FUNCTIONS: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
-    FUNCTIONS
-        .get_or_init(|| {
-            crate::SheetEngine::supported_function_names()
-                .iter()
-                .copied()
-                .collect()
-        })
-        .contains(name.to_ascii_uppercase().as_str())
+    let upper = name.to_ascii_uppercase();
+    upper == "SINGLE"
+        || FUNCTIONS
+            .get_or_init(|| {
+                crate::SheetEngine::supported_function_names()
+                    .iter()
+                    .copied()
+                    .collect()
+            })
+            .contains(upper.as_str())
 }
 
 /// Visits every node under `root`, parents first, without recursion; `visit` gets the node and whether it is

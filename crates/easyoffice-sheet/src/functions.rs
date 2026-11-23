@@ -631,6 +631,7 @@ impl SheetEngine {
                 self.eval_stat_tests_func(name, args, ctx, depth)
             }
             "COVAR" => self.eval_stat_regression("COVARIANCE.P", args, ctx, depth),
+            "SINGLE" => self.eval_implicit_single(args, ctx, depth),
             _ => Err(FormulaError::Name),
         }
     }
