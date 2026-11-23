@@ -394,13 +394,13 @@ impl SlideBox {
                 "슬라이드 개체 좌표에 유한하지 않은 값이 포함되어 있습니다.".to_string(),
             ));
         }
-        if !(0.0..=MAX_SLIDE_COORD_PT).contains(&self.x)
-            || !(0.0..=MAX_SLIDE_COORD_PT).contains(&self.y)
-            || !(1.0..=MAX_SLIDE_COORD_PT).contains(&self.w)
-            || !(1.0..=MAX_SLIDE_COORD_PT).contains(&self.h)
+        if !(-MAX_SLIDE_COORD_PT..=MAX_SLIDE_COORD_PT).contains(&self.x)
+            || !(-MAX_SLIDE_COORD_PT..=MAX_SLIDE_COORD_PT).contains(&self.y)
+            || !(0.0..=MAX_SLIDE_COORD_PT).contains(&self.w)
+            || !(0.0..=MAX_SLIDE_COORD_PT).contains(&self.h)
         {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "슬라이드 개체 좌표/크기({:.1}, {:.1}, {:.1}x{:.1})가 허용 범위(0..={MAX_SLIDE_COORD_PT}, 1..={MAX_SLIDE_COORD_PT})를 벗어났습니다.",
+                "슬라이드 개체 좌표/크기({:.1}, {:.1}, {:.1}x{:.1})가 허용 범위(-{MAX_SLIDE_COORD_PT}..={MAX_SLIDE_COORD_PT}, 0..={MAX_SLIDE_COORD_PT})를 벗어났습니다.",
                 self.x, self.y, self.w, self.h
             )));
         }
@@ -409,10 +409,10 @@ impl SlideBox {
 
     pub fn scaled(self, sx: f64, sy: f64) -> Self {
         Self {
-            x: (self.x * sx).clamp(0.0, MAX_SLIDE_COORD_PT),
-            y: (self.y * sy).clamp(0.0, MAX_SLIDE_COORD_PT),
-            w: (self.w * sx).clamp(1.0, MAX_SLIDE_COORD_PT),
-            h: (self.h * sy).clamp(1.0, MAX_SLIDE_COORD_PT),
+            x: (self.x * sx).clamp(-MAX_SLIDE_COORD_PT, MAX_SLIDE_COORD_PT),
+            y: (self.y * sy).clamp(-MAX_SLIDE_COORD_PT, MAX_SLIDE_COORD_PT),
+            w: (self.w * sx).clamp(0.0, MAX_SLIDE_COORD_PT),
+            h: (self.h * sy).clamp(0.0, MAX_SLIDE_COORD_PT),
         }
     }
 }
@@ -766,6 +766,10 @@ impl RichSlideDeck {
 
 pub fn pt_to_emu(pt: f64) -> u64 {
     (pt.clamp(0.0, MAX_SLIDE_COORD_PT) * EMU_PER_PT).round() as u64
+}
+
+pub fn pt_to_signed_emu(pt: f64) -> i64 {
+    (pt.clamp(-MAX_SLIDE_COORD_PT, MAX_SLIDE_COORD_PT) * EMU_PER_PT).round() as i64
 }
 
 /// Validates slide/deck/image resource limits before appending a decoded [`SlideElement`].

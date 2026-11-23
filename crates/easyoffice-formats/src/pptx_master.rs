@@ -138,6 +138,25 @@ pub(crate) fn slide_placeholder_specs(
     }
 }
 
+/// Returns `(left_col, right_col)` placeholder specs matching `build_slide_layout_xml` (`twoObj`).
+pub(crate) fn two_column_placeholder_specs(
+    emu_w: u64,
+    emu_h: u64,
+) -> (PlaceholderSpec, PlaceholderSpec) {
+    (
+        PlaceholderSpec {
+            name: "Content Placeholder 2",
+            ph_xml: "<p:ph idx=\"1\"/>",
+            emu: EmuBox::new(838_200, 1_825_625, 5_167_313, 4_381_500).scaled(emu_w, emu_h),
+        },
+        PlaceholderSpec {
+            name: "Content Placeholder 3",
+            ph_xml: "<p:ph idx=\"2\"/>",
+            emu: EmuBox::new(6_186_487, 1_825_625, 5_167_313, 4_381_500).scaled(emu_w, emu_h),
+        },
+    )
+}
+
 /// Returns `(emit_title, emit_body)` visibility flags for slide placeholders.
 #[inline]
 pub(crate) fn slide_placeholder_visibility(slide: &RichSlide) -> (bool, bool) {
@@ -159,13 +178,8 @@ pub(crate) fn odp_layout_boxes_pt(
     let (emu_w, emu_h) = aspect.dimensions_emu();
     let (t_emu, b_emu) = pptx_placeholder_boxes(layout, emu_w, emu_h);
     if layout == SlideMasterLayout::TwoColumn {
-        let left = EmuBox::new(838_200, 1_825_625, 5_167_313, 4_381_500)
-            .scaled(emu_w, emu_h)
-            .to_pt();
-        let right = EmuBox::new(6_186_487, 1_825_625, 5_167_313, 4_381_500)
-            .scaled(emu_w, emu_h)
-            .to_pt();
-        return (t_emu.to_pt(), left, Some(right));
+        let (left, right) = two_column_placeholder_specs(emu_w, emu_h);
+        return (t_emu.to_pt(), left.emu.to_pt(), Some(right.emu.to_pt()));
     }
     (t_emu.to_pt(), b_emu.to_pt(), None)
 }
@@ -329,9 +343,7 @@ pub(crate) fn build_slide_layout_xml(layout: SlideMasterLayout, emu_w: u64, emu_
         }
         SlideMasterLayout::TwoColumn => {
             let (t_emu, _) = pptx_placeholder_boxes(layout, emu_w, emu_h);
-            let left = EmuBox::new(838_200, 1_825_625, 5_167_313, 4_381_500).scaled(emu_w, emu_h);
-            let right =
-                EmuBox::new(6_186_487, 1_825_625, 5_167_313, 4_381_500).scaled(emu_w, emu_h);
+            let (left, right) = two_column_placeholder_specs(emu_w, emu_h);
             shapes.push_str(&layout_placeholder_sp(
                 2,
                 "Title 1",
@@ -343,18 +355,18 @@ pub(crate) fn build_slide_layout_xml(layout: SlideMasterLayout, emu_w: u64, emu_
             ));
             shapes.push_str(&layout_placeholder_sp(
                 3,
-                "Content Placeholder 2",
-                "<p:ph idx=\"1\"/>",
-                left,
+                left.name,
+                left.ph_xml,
+                left.emu,
                 None,
                 None,
                 "t",
             ));
             shapes.push_str(&layout_placeholder_sp(
                 4,
-                "Content Placeholder 3",
-                "<p:ph idx=\"2\"/>",
-                right,
+                right.name,
+                right.ph_xml,
+                right.emu,
                 None,
                 None,
                 "t",

@@ -8,18 +8,22 @@ use crate::ooxml_presentation::{
     build_slide_chart_xml, finish_pptx_package, notes_slide_xml, rels_xml, PML_NS,
 };
 use crate::ooxml_shared_parts::PML_SP_TREE_HEADER;
-use crate::pptx_master::{slide_placeholder_specs, slide_placeholder_visibility, PlaceholderSpec};
+use crate::pptx_master::{
+    slide_placeholder_specs, slide_placeholder_visibility, two_column_placeholder_specs,
+    PlaceholderSpec,
+};
 pub use crate::pptx_rich_read::unpack_pptx_rich;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
-    pt_to_emu, RichSlideDeck, SlideBox, SlideElement, SlideTextAlign, SlideTransition,
+    pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
+    SlideTextAlign, SlideTransition,
 };
 use crate::{EasyOfficeError, XmlSanitizer};
 
 fn push_xfrm(out: &mut String, tag: &str, r: SlideBox) {
     let (x, y, cx, cy) = (
-        pt_to_emu(r.x),
-        pt_to_emu(r.y),
+        pt_to_signed_emu(r.x),
+        pt_to_signed_emu(r.y),
         pt_to_emu(r.w),
         pt_to_emu(r.h),
     );
@@ -309,9 +313,20 @@ pub fn pack_pptx_rich(
             sid += 1;
         }
         if emit_body {
-            let lines: Vec<&str> = slide.bullets.iter().map(String::as_str).collect();
-            push_ph(&mut s_xml, sid, &b_spec, &lines);
-            sid += 1;
+            if slide.layout == SlideMasterLayout::TwoColumn {
+                let (left_spec, right_spec) = two_column_placeholder_specs(emu_w, emu_h);
+                let mid = slide.bullets.len().div_ceil(2);
+                let left: Vec<&str> = slide.bullets[..mid].iter().map(String::as_str).collect();
+                let right: Vec<&str> = slide.bullets[mid..].iter().map(String::as_str).collect();
+                push_ph(&mut s_xml, sid, &left_spec, &left);
+                sid += 1;
+                push_ph(&mut s_xml, sid, &right_spec, &right);
+                sid += 1;
+            } else {
+                let lines: Vec<&str> = slide.bullets.iter().map(String::as_str).collect();
+                push_ph(&mut s_xml, sid, &b_spec, &lines);
+                sid += 1;
+            }
         }
         for el in &slide.elements {
             push_element(

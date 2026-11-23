@@ -264,6 +264,9 @@ fn draw_table(
     header_row: bool,
     fill: Option<&str>,
 ) {
+    if r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
     let n_rows = rows.len().max(1);
     let n_cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let (cw, rh) = (r.w / n_cols as f64, r.h / n_rows as f64);
@@ -351,6 +354,9 @@ fn draw_chart(
     series: &[SlideChartSeries],
     legend: ChartLegendPos,
 ) {
+    if r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
     cv.fill_rect(r.x, r.y, r.w, r.h, 0xFFFFFF);
     cv.stroke_rect(r.x, r.y, r.w, r.h, 0xCBD5E1, 0.75);
     let top_pad = if title.is_empty() {
@@ -755,6 +761,9 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
             fill,
             ..
         } => {
+            if rect.w < 1.0 || rect.h < 1.0 {
+                return;
+            }
             let f = parse_rgb(fill.as_deref());
             if let Some(rgb) = f {
                 cv.fill_rect(rect.x, rect.y, rect.w, rect.h, rgb);
@@ -788,20 +797,33 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
             ..
         } => {
             let (f, s) = (parse_rgb(fill.as_deref()), parse_rgb(stroke.as_deref()));
-            let path = shape_path(*shape_type, rect.x, cv.py(rect.y, rect.h), rect.w, rect.h);
-            cv.paint_path(&path, f, s, *stroke_width_pt);
-            let fg = contrast_rgb(f, parse_rgb(color.as_deref()));
-            cv.draw_text_box(
-                *rect,
-                text,
-                TextRun::aligned(*font_size_pt, fg, *align, *bold),
-                6.0,
-                true,
-            );
+            if rect.w <= 0.0 || rect.h <= 0.0 {
+                let y_bot = cv.py(rect.y, rect.h);
+                let (x2, y2) = (rect.x + rect.w, y_bot + rect.h);
+                let path = format!("{:.2} {y_bot:.2} m {x2:.2} {y2:.2} l", rect.x);
+                let col = s.or(f).unwrap_or(0x475569);
+                cv.paint_path(&path, None, Some(col), stroke_width_pt.max(0.75));
+            } else {
+                let path = shape_path(*shape_type, rect.x, cv.py(rect.y, rect.h), rect.w, rect.h);
+                cv.paint_path(&path, f, s, *stroke_width_pt);
+            }
+            if rect.w >= 1.0 && rect.h >= 1.0 {
+                let fg = contrast_rgb(f, parse_rgb(color.as_deref()));
+                cv.draw_text_box(
+                    *rect,
+                    text,
+                    TextRun::aligned(*font_size_pt, fg, *align, *bold),
+                    6.0,
+                    true,
+                );
+            }
         }
         SlideElement::Image {
             rect, image, alt, ..
         } => {
+            if rect.w <= 0.0 || rect.h <= 0.0 {
+                return;
+            }
             let py = cv.py(rect.y, rect.h);
             if let Some(obj) = pdf_image_object(image) {
                 let xname = format!("Im{}", cv.xobjects.len() + 1);

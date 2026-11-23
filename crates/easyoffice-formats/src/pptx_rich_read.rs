@@ -8,12 +8,12 @@ use crate::ooxml_presentation::{
     extract_notes_xml_text, parse_slide_chart_xml, parse_slide_size_aspect, read_ppt_rels,
     resolve_ppt, utf8_entry, SLIDESHOW_MAIN_CT,
 };
-use crate::rich_document::normalize_hex_color;
+use crate::pptx_shape_read::{parse_cxn_sp, parse_sp, ParsedSp};
+use crate::pptx_theme_cache::PptxThemeCache;
+use crate::pptx_theme_color::{ColorSpecBuilder, PptxClrMap, PptxThemePalette};
 use crate::rich_slide::{
     emu_to_pt, normalize_table_rows, push_checked_slide_element, RichSlide, RichSlideDeck,
-    SlideBox, SlideElement, SlideMasterLayout, SlidePlaceholderRole, SlideShapeType,
-    SlideTextAlign, SlideTransition, DEFAULT_SLIDE_FONT_PT, DEFAULT_SLIDE_STROKE_PT,
-    MAX_SLIDE_FONT_PT, MAX_SLIDE_STROKE_PT, MIN_SLIDE_FONT_PT,
+    SlideBox, SlideElement, SlideTransition,
 };
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -23,9 +23,10 @@ use crate::{
 };
 
 const MAX_SLIDE_XML_EVENTS: usize = 512_000;
+const MAX_GROUP_DEPTH: usize = 16;
 
 #[inline]
-fn loc(name: &str) -> &str {
+pub(crate) fn loc(name: &str) -> &str {
     name.rsplit(':').next().unwrap_or(name)
 }
 
@@ -42,10 +43,15 @@ fn parse_pt_pair(
             "PPTX 개체 좌표/크기({kx}/{ky})가 숫자가 아닙니다."
         )));
     };
+    if !x.is_finite() || !y.is_finite() {
+        return Err(EasyOfficeError::InvalidArgument(format!(
+            "PPTX 개체 좌표/크기({kx}/{ky})에 유한하지 않은 값이 포함되어 있습니다."
+        )));
+    }
     Ok(Some((emu_to_pt(x), emu_to_pt(y))))
 }
 
-fn parse_cnvpr(attrs: &Attrs<'_>, id: &mut String, descr: Option<&mut String>) {
+pub(crate) fn parse_cnvpr(attrs: &Attrs<'_>, id: &mut String, descr: Option<&mut String>) {
     if let Some(n) = attr(attrs, "name").filter(|s| !s.trim().is_empty()) {
         *id = n.into_owned();
     }
@@ -56,13 +62,66 @@ fn parse_cnvpr(attrs: &Attrs<'_>, id: &mut String, descr: Option<&mut String>) {
     }
 }
 
-struct SlideCtx<'a> {
-    sx: f64,
-    sy: f64,
-    rels: &'a HashMap<String, String>,
-    map: &'a HashMap<&'a str, &'a ZipArchiveEntry>,
-    cache: &'a mut HashMap<String, RichImage>,
-    budget: &'a mut DecodeBudget,
+#[derive(Clone, Copy, Default)]
+pub(crate) struct GroupFrame {
+    gx: f64,
+    gy: f64,
+    gw: f64,
+    gh: f64,
+    ch_x: f64,
+    ch_y: f64,
+    ch_w: f64,
+    ch_h: f64,
+}
+
+impl GroupFrame {
+    fn apply(self, c: SlideBox) -> SlideBox {
+        let sx = if self.ch_w > 0.0 {
+            self.gw / self.ch_w
+        } else {
+            1.0
+        };
+        let sy = if self.ch_h > 0.0 {
+            self.gh / self.ch_h
+        } else {
+            1.0
+        };
+        SlideBox {
+            x: if self.ch_w > 0.0 {
+                self.gx + (c.x - self.ch_x) * sx
+            } else {
+                c.x - self.ch_x + self.gx
+            },
+            y: if self.ch_h > 0.0 {
+                self.gy + (c.y - self.ch_y) * sy
+            } else {
+                c.y - self.ch_y + self.gy
+            },
+            w: c.w * sx,
+            h: c.h * sy,
+        }
+    }
+}
+
+pub(crate) struct SlideCtx<'a> {
+    pub(crate) sx: f64,
+    pub(crate) sy: f64,
+    pub(crate) rels: &'a HashMap<String, String>,
+    pub(crate) map: &'a HashMap<&'a str, &'a ZipArchiveEntry>,
+    pub(crate) cache: &'a mut HashMap<String, RichImage>,
+    pub(crate) budget: &'a mut DecodeBudget,
+    pub(crate) palette: &'a PptxThemePalette,
+    pub(crate) clr_map: &'a PptxClrMap,
+}
+
+#[derive(Default)]
+struct SlideAccum {
+    t_parts: Vec<String>,
+    bullets: Vec<String>,
+    loose: Vec<String>,
+    els: Vec<SlideElement>,
+    total_el: usize,
+    total_img_b: usize,
 }
 
 fn resolve_rel_entry<'a>(
@@ -79,11 +138,12 @@ fn resolve_rel_entry<'a>(
     Ok((entry.path.as_str(), entry))
 }
 
-fn parse_xfrm(
+pub(crate) fn parse_xfrm(
     events: &[XmlEvent<'_>],
     ignore_tc: bool,
     sx: f64,
     sy: f64,
+    groups: &[GroupFrame],
 ) -> Result<Option<SlideBox>, EasyOfficeError> {
     let (mut off, mut ext, mut in_xfrm, mut in_tc) = (None, None, false, false);
     for ev in events {
@@ -106,168 +166,65 @@ fn parse_xfrm(
     let Some(((x, y), (w, h))) = off.zip(ext) else {
         return Ok(None);
     };
-    let raw = SlideBox { x, y, w, h };
-    raw.validate()?;
-    let scaled = raw.scaled(sx, sy);
+    if w < 0.0 || h < 0.0 {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "슬라이드 개체 크기({w:.1}x{h:.1})는 음수일 수 없습니다."
+        )));
+    }
+    let mut box_pt = SlideBox { x, y, w, h };
+    for frame in groups.iter().rev() {
+        box_pt = frame.apply(box_pt);
+    }
+    box_pt.validate()?;
+    let scaled = box_pt.scaled(sx, sy);
     scaled.validate()?;
     Ok(Some(scaled))
 }
 
-enum ParsedSp {
-    Placeholder {
-        is_title: bool,
-        paragraphs: Vec<String>,
-    },
-    LooseText(Vec<String>),
-    Element(SlideElement),
-}
-
-fn parse_sp(
-    events: &[XmlEvent<'_>],
-    sx: f64,
-    sy: f64,
-    fallback_id: &str,
-) -> Result<ParsedSp, EasyOfficeError> {
-    let mut id = fallback_id.to_string();
-    let (mut descr, mut ph_type, mut fill, mut stroke, mut t_clr) = (None, None, None, None, None);
-    let (mut tx_box, mut has_ph, mut bold, mut italic, mut underline) =
-        (false, false, false, false, false);
-    let (mut in_sp, mut in_ln, mut in_rpr, mut in_t, mut in_p) =
-        (false, false, false, false, false);
-    let (mut prst, mut stroke_w, mut font_pt, mut align) =
-        (SlideShapeType::Rect, DEFAULT_SLIDE_STROKE_PT, None, None);
-    let (mut paras, mut cur_p) = (Vec::new(), String::new());
-
+fn parse_grp_frame(events: &[XmlEvent<'_>]) -> Result<GroupFrame, EasyOfficeError> {
+    let (mut off, mut ext, mut ch_off, mut ch_ext, mut in_xfrm) = (None, None, None, None, false);
     for ev in events {
         match ev {
             XmlEvent::Start { name, attrs } => match loc(name) {
-                "cNvPr" => {
-                    parse_cnvpr(attrs, &mut id, None);
-                    descr = descr.or_else(|| attr(attrs, "descr").map(|s| s.into_owned()));
-                }
-                "cNvSpPr" if attr(attrs, "txBox").as_deref() == Some("1") => tx_box = true,
-                "ph" => {
-                    has_ph = true;
-                    ph_type = ph_type.or_else(|| attr(attrs, "type").map(|s| s.into_owned()));
-                }
-                "spPr" => in_sp = true,
-                "prstGeom" if in_sp => {
-                    if let Some(p) = attr(attrs, "prst").and_then(|s| SlideShapeType::parse(&s)) {
-                        prst = p;
-                    }
-                }
-                "ln" if in_sp => {
-                    in_ln = true;
-                    if let Some(w) = attr(attrs, "w").and_then(|s| s.trim().parse::<f64>().ok()) {
-                        stroke_w = emu_to_pt(w).clamp(0.0, MAX_SLIDE_STROKE_PT);
-                    }
-                }
-                "noFill" if in_sp => {
-                    if in_ln {
-                        stroke = None
-                    } else {
-                        fill = None
-                    }
-                }
-                "srgbClr" if in_sp && !in_rpr => {
-                    if let Some(h) = attr(attrs, "val").and_then(|v| normalize_hex_color(&v)) {
-                        if in_ln {
-                            stroke = Some(h)
-                        } else {
-                            fill = Some(h)
-                        }
-                    }
-                }
-                "p" => {
-                    in_p = true;
-                    cur_p.clear();
-                }
-                "pPr" if in_p && align.is_none() => {
-                    align = attr(attrs, "algn").and_then(|a| SlideTextAlign::parse(&a))
-                }
-                "rPr" | "defRPr" | "endParaRPr" => {
-                    in_rpr = true;
-                    if font_pt.is_none() {
-                        font_pt = attr(attrs, "sz")
-                            .and_then(|v| v.trim().parse::<f64>().ok())
-                            .map(|sz| (sz / 100.0).clamp(MIN_SLIDE_FONT_PT, MAX_SLIDE_FONT_PT));
-                    }
-                    bold |= attr(attrs, "b").is_some_and(|v| v == "1" || v == "true");
-                    italic |= attr(attrs, "i").is_some_and(|v| v == "1" || v == "true");
-                    underline |= attr(attrs, "u").is_some_and(|v| v != "none");
-                }
-                "srgbClr" if in_rpr && t_clr.is_none() => {
-                    t_clr = attr(attrs, "val").and_then(|v| normalize_hex_color(&v))
-                }
-                "t" if in_p => in_t = true,
-                "br" if in_p => cur_p.push('\n'),
-                _ => {}
-            },
-            XmlEvent::Text(t) if in_t => cur_p.push_str(t),
-            XmlEvent::End(name) => match loc(name) {
-                "spPr" => in_sp = false,
-                "ln" => in_ln = false,
-                "rPr" | "defRPr" | "endParaRPr" => in_rpr = false,
-                "t" => in_t = false,
-                "p" => {
-                    in_p = false;
-                    paras.push(std::mem::take(&mut cur_p));
+                "xfrm" => in_xfrm = true,
+                "off" if in_xfrm && off.is_none() => off = parse_pt_pair(attrs, "x", "y")?,
+                "ext" if in_xfrm && ext.is_none() => ext = parse_pt_pair(attrs, "cx", "cy")?,
+                "chOff" if in_xfrm && ch_off.is_none() => ch_off = parse_pt_pair(attrs, "x", "y")?,
+                "chExt" if in_xfrm && ch_ext.is_none() => {
+                    ch_ext = parse_pt_pair(attrs, "cx", "cy")?
                 }
                 _ => {}
             },
+            XmlEvent::End(name) if loc(name) == "xfrm" => in_xfrm = false,
             _ => {}
         }
     }
-
-    if has_ph && !tx_box {
-        return Ok(ParsedSp::Placeholder {
-            is_title: matches!(ph_type.as_deref(), Some("title" | "ctrTitle")),
-            paragraphs: paras,
-        });
+    let (gx, gy) = off.unwrap_or((0.0, 0.0));
+    let (gw, gh) = ext.unwrap_or((0.0, 0.0));
+    let (ch_x, ch_y) = ch_off.unwrap_or((0.0, 0.0));
+    let (ch_w, ch_h) = ch_ext.unwrap_or((0.0, 0.0));
+    if gw < 0.0 || gh < 0.0 || ch_w < 0.0 || ch_h < 0.0 {
+        return Err(EasyOfficeError::InvalidArgument(
+            "PPTX 그룹 크기(ext/chExt)는 음수일 수 없습니다.".to_string(),
+        ));
     }
-    let Some(rect) = parse_xfrm(events, false, sx, sy)? else {
-        return Ok(ParsedSp::LooseText(paras));
-    };
-    let text = paras.join("\n");
-    if tx_box {
-        let role = descr
-            .as_deref()
-            .and_then(|d| d.strip_prefix("eo-role:"))
-            .and_then(SlidePlaceholderRole::parse);
-        Ok(ParsedSp::Element(SlideElement::TextBox {
-            id,
-            rect,
-            text,
-            font_size_pt: font_pt.unwrap_or(DEFAULT_SLIDE_FONT_PT),
-            bold,
-            italic,
-            underline,
-            align: align.unwrap_or(SlideTextAlign::Left),
-            color: t_clr,
-            fill,
-            role,
-        }))
-    } else {
-        Ok(ParsedSp::Element(SlideElement::Shape {
-            id,
-            rect,
-            shape_type: prst,
-            text,
-            fill,
-            stroke,
-            stroke_width_pt: stroke_w,
-            color: t_clr,
-            font_size_pt: font_pt.unwrap_or(16.0),
-            bold,
-            align: align.unwrap_or(SlideTextAlign::Center),
-        }))
-    }
+    Ok(GroupFrame {
+        gx,
+        gy,
+        gw,
+        gh,
+        ch_x,
+        ch_y,
+        ch_w,
+        ch_h,
+    })
 }
 
 fn parse_pic(
     events: &[XmlEvent<'_>],
     fallback_id: &str,
     ctx: &mut SlideCtx<'_>,
+    groups: &[GroupFrame],
 ) -> Result<Option<SlideElement>, EasyOfficeError> {
     let (mut id, mut alt, mut rid) = (fallback_id.to_string(), String::new(), None);
     for ev in events {
@@ -283,7 +240,7 @@ fn parse_pic(
             }
         }
     }
-    let (Some(rect), Some(rid)) = (parse_xfrm(events, false, ctx.sx, ctx.sy)?, rid) else {
+    let (Some(rect), Some(rid)) = (parse_xfrm(events, false, ctx.sx, ctx.sy, groups)?, rid) else {
         return Ok(None);
     };
     let (path, entry) = resolve_rel_entry(&rid, "그림", ctx)?;
@@ -306,62 +263,104 @@ fn parse_graphic_frame(
     events: &[XmlEvent<'_>],
     fallback_id: &str,
     ctx: &mut SlideCtx<'_>,
+    groups: &[GroupFrame],
     loose: &mut Vec<String>,
 ) -> Result<Option<SlideElement>, EasyOfficeError> {
     let mut id = fallback_id.to_string();
     let (mut chart_rid, mut is_table, mut header_row, mut fill) = (None, false, false, None);
     let (mut rows, mut cur_row, mut cell_paras, mut cur_p) =
         (Vec::new(), Vec::new(), Vec::new(), String::new());
-    let (mut in_tc, mut in_tc_pr, mut in_p, mut in_t) = (false, false, false, false);
+    let (mut d, mut tc_pr_d, mut solid_fill_d, mut color_d) = (0usize, None, None, None);
+    let (mut in_tc, mut in_p, mut in_t) = (false, false, false);
+    let mut pending_color = None::<ColorSpecBuilder>;
 
     for ev in events {
         match ev {
-            XmlEvent::Start { name, attrs } => match loc(name) {
-                "cNvPr" => parse_cnvpr(attrs, &mut id, None),
-                "chart" if chart_rid.is_none() => {
-                    chart_rid = attr(attrs, "r:id")
-                        .or_else(|| attr(attrs, "id"))
-                        .map(|s| s.into_owned())
+            XmlEvent::Start { name, attrs } => {
+                d += 1;
+                let ln = loc(name);
+                if color_d.is_some_and(|cd| d == cd + 1) {
+                    if let Some(b) = pending_color.as_mut() {
+                        b.push_transform(ln, attrs);
+                    }
+                    continue;
                 }
-                "tbl" => is_table = true,
-                "tblPr" if is_table => {
-                    header_row = attr(attrs, "firstRow").is_some_and(|v| v == "1" || v == "true")
+                match ln {
+                    "cNvPr" => parse_cnvpr(attrs, &mut id, None),
+                    "chart" if chart_rid.is_none() => {
+                        chart_rid = attr(attrs, "r:id")
+                            .or_else(|| attr(attrs, "id"))
+                            .map(|s| s.into_owned())
+                    }
+                    "tbl" => is_table = true,
+                    "tblPr" if is_table => {
+                        header_row =
+                            attr(attrs, "firstRow").is_some_and(|v| v == "1" || v == "true")
+                    }
+                    "tr" if is_table => cur_row.clear(),
+                    "tc" if is_table => {
+                        in_tc = true;
+                        cell_paras.clear();
+                    }
+                    "tcPr" if in_tc && tc_pr_d.is_none() => tc_pr_d = Some(d),
+                    "solidFill" if tc_pr_d.is_some_and(|td| d == td + 1) && fill.is_none() => {
+                        solid_fill_d = Some(d);
+                    }
+                    "srgbClr" | "schemeClr" | "sysClr" | "prstClr"
+                        if color_d.is_none()
+                            && fill.is_none()
+                            && solid_fill_d.is_some_and(|fd| d == fd + 1) =>
+                    {
+                        if let Some(b) = ColorSpecBuilder::from_start(ln, attrs) {
+                            color_d = Some(d);
+                            pending_color = Some(b);
+                        }
+                    }
+                    "p" if in_tc => {
+                        in_p = true;
+                        cur_p.clear();
+                    }
+                    "t" if in_p => in_t = true,
+                    _ => {}
                 }
-                "tr" if is_table => cur_row.clear(),
-                "tc" if is_table => {
-                    in_tc = true;
-                    cell_paras.clear();
-                }
-                "tcPr" if in_tc => in_tc_pr = true,
-                "srgbClr" if in_tc_pr && fill.is_none() => {
-                    fill = attr(attrs, "val").and_then(|v| normalize_hex_color(&v))
-                }
-                "p" if in_tc => {
-                    in_p = true;
-                    cur_p.clear();
-                }
-                "t" if in_p => in_t = true,
-                _ => {}
-            },
+            }
             XmlEvent::Text(t) if in_t => cur_p.push_str(t),
-            XmlEvent::End(name) => match loc(name) {
-                "tcPr" => in_tc_pr = false,
-                "t" => in_t = false,
-                "p" if in_tc => {
-                    in_p = false;
-                    cell_paras.push(std::mem::take(&mut cur_p));
+            XmlEvent::End(name) => {
+                let ln = loc(name);
+                if color_d == Some(d) {
+                    color_d = None;
+                    if fill.is_none() {
+                        if let Some(spec) = pending_color.take().and_then(ColorSpecBuilder::finish)
+                        {
+                            fill = spec.resolve_hex(ctx.palette, ctx.clr_map, None);
+                        }
+                    }
                 }
-                "tc" if is_table => {
-                    in_tc = false;
-                    cur_row.push(cell_paras.join("\n"));
+                if solid_fill_d == Some(d) {
+                    solid_fill_d = None;
                 }
-                "tr" if is_table => rows.push(std::mem::take(&mut cur_row)),
-                _ => {}
-            },
+                if tc_pr_d == Some(d) {
+                    tc_pr_d = None;
+                }
+                match ln {
+                    "t" if in_t => in_t = false,
+                    "p" if in_tc && in_p => {
+                        in_p = false;
+                        cell_paras.push(std::mem::take(&mut cur_p));
+                    }
+                    "tc" if is_table => {
+                        in_tc = false;
+                        cur_row.push(cell_paras.join("\n"));
+                    }
+                    "tr" if is_table => rows.push(std::mem::take(&mut cur_row)),
+                    _ => {}
+                }
+                d = d.saturating_sub(1);
+            }
             _ => {}
         }
     }
-    let Some(rect) = parse_xfrm(events, true, ctx.sx, ctx.sy)? else {
+    let Some(rect) = parse_xfrm(events, true, ctx.sx, ctx.sy, groups)? else {
         if is_table {
             for r in rows {
                 let cleaned: Vec<String> = r.into_iter().map(|c| c.replace('\n', " ")).collect();
@@ -399,6 +398,105 @@ fn parse_graphic_frame(
     Ok(None)
 }
 
+fn dispatch_shape_subtree(
+    kind: &str,
+    sub: &[XmlEvent<'_>],
+    ctx: &mut SlideCtx<'_>,
+    groups: &[GroupFrame],
+    acc: &mut SlideAccum,
+) -> Result<(), EasyOfficeError> {
+    let fid = format!("el-{}", acc.els.len() + 1);
+    let maybe = match kind {
+        "sp" => match parse_sp(sub, &fid, ctx, groups)? {
+            ParsedSp::Ignore => None,
+            ParsedSp::Placeholder {
+                is_title,
+                paragraphs,
+            } => {
+                let ne = paragraphs.into_iter().filter(|s| !s.is_empty());
+                if is_title {
+                    acc.t_parts.extend(ne);
+                } else {
+                    acc.bullets.extend(ne);
+                }
+                None
+            }
+            ParsedSp::LooseText(p) => {
+                acc.loose.extend(p.into_iter().filter(|s| !s.is_empty()));
+                None
+            }
+            ParsedSp::Element(el) => Some(el),
+        },
+        "cxnSp" => parse_cxn_sp(sub, &fid, ctx, groups)?,
+        "pic" => parse_pic(sub, &fid, ctx, groups)?,
+        "graphicFrame" => parse_graphic_frame(sub, &fid, ctx, groups, &mut acc.loose)?,
+        _ => None,
+    };
+    if let Some(el) = maybe {
+        push_checked_slide_element(el, &mut acc.els, &mut acc.total_el, &mut acc.total_img_b)?;
+    }
+    Ok(())
+}
+
+fn walk_grp_sp(
+    events: &[XmlEvent<'_>],
+    depth: usize,
+    groups: &mut Vec<GroupFrame>,
+    ctx: &mut SlideCtx<'_>,
+    acc: &mut SlideAccum,
+) -> Result<(), EasyOfficeError> {
+    if depth > MAX_GROUP_DEPTH {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "PPTX 그룹 중첩 깊이({depth})가 상한({MAX_GROUP_DEPTH})을 초과했습니다."
+        )));
+    }
+    if events.len() < 2 {
+        return Ok(());
+    }
+    let inner = &events[1..events.len() - 1];
+    let mut children: Vec<(&str, usize, usize)> = Vec::new();
+    let (mut rel_d, mut c_start, mut c_name) = (0usize, 0usize, "");
+    let mut frame = None;
+
+    for (idx, ev) in inner.iter().enumerate() {
+        match ev {
+            XmlEvent::Start { name, .. } => {
+                if rel_d == 0 {
+                    c_start = idx;
+                    c_name = loc(name);
+                }
+                rel_d += 1;
+            }
+            XmlEvent::End(_) => {
+                rel_d = rel_d.saturating_sub(1);
+                if rel_d == 0 {
+                    if c_name == "grpSpPr" && frame.is_none() {
+                        frame = Some(parse_grp_frame(&inner[c_start..=idx])?);
+                    } else if matches!(c_name, "sp" | "pic" | "graphicFrame" | "cxnSp" | "grpSp") {
+                        children.push((c_name, c_start, idx));
+                    }
+                }
+            }
+            XmlEvent::Text(_) => {}
+        }
+    }
+
+    groups.push(frame.unwrap_or_default());
+    let res = (|| -> Result<(), EasyOfficeError> {
+        for (kind, s, e) in children {
+            let sub = &inner[s..=e];
+            if kind == "grpSp" {
+                walk_grp_sp(sub, depth + 1, groups, ctx, acc)?;
+            } else {
+                dispatch_shape_subtree(kind, sub, ctx, groups, acc)?;
+            }
+        }
+        Ok(())
+    })();
+    groups.pop();
+    res
+}
+
 /// Unpacks a `.pptx` or `.ppsx` OOXML package into a [`RichSlideDeck`].
 pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
@@ -429,6 +527,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
     let ordered_slides =
         OoxmlCodec::ordered_pptx_slides(pres_xml, &entries, &entry_map, &pres_rels)?;
 
+    let mut theme_cache = PptxThemeCache::new(&entry_map, &mut budget)?;
     let mut media_cache = HashMap::new();
     let (mut total_el, mut total_img_b) = (0usize, 0usize);
     let mut slides = Vec::with_capacity(ordered_slides.len());
@@ -438,11 +537,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         budget.charge(s_xml.len(), "PPTX 슬라이드 XML")?;
         let (dir, file) = s_entry.path.rsplit_once('/').unwrap_or(("", &s_entry.path));
         let rels_path = format!("{dir}/_rels/{file}.rels");
-        let (mut slide_rels, mut layout, mut notes) = (
-            HashMap::new(),
-            SlideMasterLayout::TitleAndContent,
-            String::new(),
-        );
+        let (mut slide_rels, mut layout_path, mut notes) = (HashMap::new(), None, String::new());
         if let Some(&re) = entry_map.get(rels_path.as_str()) {
             let r_xml = utf8_entry(re, &rels_path)?;
             for (attrs, _) in extract_balanced_elements(r_xml, "Relationship") {
@@ -457,13 +552,8 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
                 }
                 let rt = extract_attr_from_fragment(attrs, "Type").unwrap_or("");
                 let tp = resolve_ppt(if target.starts_with("ppt/") { "" } else { dir }, target)?;
-                if rt.ends_with("/slideLayout") {
-                    if let Some(&le) = entry_map.get(tp.as_str()) {
-                        if let Some(lt) = extract_attr(utf8_entry(le, &tp)?, "<p:sldLayout", "type")
-                        {
-                            layout = SlideMasterLayout::from_ooxml_type(lt);
-                        }
-                    }
+                if rt.ends_with("/slideLayout") && layout_path.is_none() {
+                    layout_path = Some(tp.clone());
                 } else if rt.ends_with("/notesSlide") && notes.is_empty() {
                     if let Some(&ne) = entry_map.get(tp.as_str()) {
                         let n_xml = utf8_entry(ne, &tp)?;
@@ -482,13 +572,19 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             }
         }
         budget.charge(notes.len(), "PPTX 슬라이드 노트")?;
+        let (layout, palette, clr_map) =
+            theme_cache.resolve_for_slide(layout_path.as_deref(), s_xml, &mut budget)?;
 
         let mut reader = XmlReader::with_budget(s_xml, MAX_SLIDE_XML_EVENTS);
         let (mut transition, mut in_tr, mut sp_d, mut d) =
             (SlideTransition::None, false, None::<usize>, 0usize);
-        let (mut t_parts, mut bullets, mut loose, mut els) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let (mut in_bare_t, mut bare_t) = (false, String::new());
+        let mut acc = SlideAccum {
+            total_el,
+            total_img_b,
+            ..SlideAccum::default()
+        };
+        let mut groups = Vec::new();
         let mut ctx = SlideCtx {
             sx,
             sy,
@@ -496,6 +592,8 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             map: &entry_map,
             cache: &mut media_cache,
             budget: &mut budget,
+            palette: &palette,
+            clr_map: &clr_map,
         };
 
         while let Some(ev) = reader.next_event()? {
@@ -525,45 +623,15 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
                         bare_t.clear();
                     }
                     if sp_d.is_some_and(|sd| d == sd + 1)
-                        && matches!(ln, "sp" | "pic" | "graphicFrame")
+                        && matches!(ln, "sp" | "pic" | "graphicFrame" | "cxnSp" | "grpSp")
                     {
                         let kind = ln;
                         let sub = reader.collect_subtree(ev)?;
                         d -= 1;
-                        let fid = format!("el-{}", els.len() + 1);
-                        let maybe = match kind {
-                            "sp" => match parse_sp(&sub, sx, sy, &fid)? {
-                                ParsedSp::Placeholder {
-                                    is_title,
-                                    paragraphs,
-                                } => {
-                                    let ne = paragraphs.into_iter().filter(|s| !s.is_empty());
-                                    if is_title {
-                                        t_parts.extend(ne)
-                                    } else {
-                                        bullets.extend(ne)
-                                    }
-                                    None
-                                }
-                                ParsedSp::LooseText(p) => {
-                                    loose.extend(p.into_iter().filter(|s| !s.is_empty()));
-                                    None
-                                }
-                                ParsedSp::Element(el) => Some(el),
-                            },
-                            "pic" => parse_pic(&sub, &fid, &mut ctx)?,
-                            "graphicFrame" => {
-                                parse_graphic_frame(&sub, &fid, &mut ctx, &mut loose)?
-                            }
-                            _ => None,
-                        };
-                        if let Some(el) = maybe {
-                            push_checked_slide_element(
-                                el,
-                                &mut els,
-                                &mut total_el,
-                                &mut total_img_b,
-                            )?;
+                        if kind == "grpSp" {
+                            walk_grp_sp(&sub, 1, &mut groups, &mut ctx, &mut acc)?;
+                        } else {
+                            dispatch_shape_subtree(kind, &sub, &mut ctx, &groups, &mut acc)?;
                         }
                     }
                 }
@@ -573,7 +641,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
                     if ln == "t" && in_bare_t {
                         in_bare_t = false;
                         if !bare_t.is_empty() {
-                            loose.push(std::mem::take(&mut bare_t));
+                            acc.loose.push(std::mem::take(&mut bare_t));
                         }
                     }
                     if ln == "transition" {
@@ -587,22 +655,24 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
                 _ => {}
             }
         }
-        let mut s_title = t_parts.join("\n");
+        total_el = acc.total_el;
+        total_img_b = acc.total_img_b;
+        let mut s_title = acc.t_parts.join("\n");
         if s_title.is_empty() {
             if let Some(t) = extract_attr(s_xml, "<p:sld", "title") {
                 s_title = XmlSanitizer::unescape(t);
-            } else if bullets.is_empty() && !loose.is_empty() {
-                s_title = loose.remove(0);
+            } else if acc.bullets.is_empty() && !acc.loose.is_empty() {
+                s_title = acc.loose.remove(0);
             }
         }
-        bullets.extend(loose);
+        acc.bullets.extend(acc.loose);
         slides.push(RichSlide {
             title: s_title,
-            bullets,
+            bullets: acc.bullets,
             notes,
             layout,
             transition,
-            elements: els,
+            elements: acc.els,
         });
     }
     let deck = RichSlideDeck {
