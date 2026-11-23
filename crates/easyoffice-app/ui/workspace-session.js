@@ -463,6 +463,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         return;
       }
       if (deps.getSheetStore && skipAutosaveForLargeWorkbook(deps.getSheetStore())) return;
+      const baseCells = host.__EASYOFFICE_BASE_STUDIO__?.cellCount?.() || 0;
+      if (baseCells > AUTOSAVE_MAX_SHEET_CELLS) {
+        pendingActivity = false;
+        pendingEdit = false;
+        dirty = true;
+        try { resolveStorage()?.removeItem(storageKey()); } catch { /* storage blocked */ }
+        syncUnloadGuard();
+        return;
+      }
       const snap = captureWorkspaceSnapshot(false);
       if (skipAutosaveForLargeWorkbook(snap.sheets)) return;
       const hash = contentFingerprint(snap, workbookProtectOf());

@@ -55,43 +55,19 @@
     let queryPanel = "", draftFilters = [], draftConjunction = "and", draftSorts = [];
     let editingFieldId = null, draggedRecordId = "", invalidCell = null, refs = null;
     // The rows of the datasheet around the visible ones (`base-grid-window.js`); the scroll offset, the measured row heights and the fixed column widths outlive a redraw.
-    let gridWin = null, liveQuery = null;
+    let gridWin = null, gridLive = null, liveQuery = null;
     const changeListeners = new Set();
     const gridMemo = { key: "", top: 0, left: 0, sizes: null, rowPx: 0, groupPx: 0, cfgRowPx: 0, margin: 0 }, gridWidths = new Map();
 
-    const el = (tag, cls, text) => {
-      const n = doc.createElement(tag);
-      if (cls) n.className = cls;
-      if (text !== undefined) n.textContent = text;
-      return n;
-    };
+    const el = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
     const appendAll = (p, ...nodes) => { for (const n of nodes) if (n) p.appendChild(n); return p; };
-    const mkBtn = (cls, label, onClick, id, aria) => {
-      const b = el("button", cls, label);
-      b.type = "button";
-      if (id) b.id = id;
-      b.setAttribute("aria-label", aria || label);
-      if (onClick) b.addEventListener("click", onClick);
-      return b;
-    };
+    const mkBtn = (cls, label, onClick, id, aria) => { const b = el("button", cls, label); b.type = "button"; if (id) b.id = id; b.setAttribute("aria-label", aria || label); if (onClick) b.addEventListener("click", onClick); return b; };
     // A toolbar button in the reference format: the sprite icon above the label (`toolbar.css`).
     const mkTbBtn = (icon, label, onClick, id) =>
       appendAll(mkBtn("tb-btn", "", onClick, id, label), setAttr(el("span", "tb-sprite icon-" + icon), "aria-hidden", "true"), el("span", "tb-label", label));
     const setTbLabel = (btn, text) => { btn.querySelector(".tb-label").textContent = text; };
-    const mkSel = (cls, aria, id) => {
-      const s = el("select", cls);
-      if (id) s.id = id;
-      if (aria) s.setAttribute("aria-label", aria);
-      return s;
-    };
-    const mkInput = (id, type, cls, aria, placeholder) => {
-      const inp = el("input", cls);
-      inp.type = type;
-      if (id) inp.id = id;
-      inp.setAttribute("aria-label", aria);
-      if (placeholder) inp.placeholder = placeholder;
-      return inp;
-    };
+    const mkSel = (cls, aria, id) => { const s = el("select", cls); if (id) s.id = id; if (aria) s.setAttribute("aria-label", aria); return s; };
+    const mkInput = (id, type, cls, aria, ph) => { const inp = el("input", cls); inp.type = type; if (id) inp.id = id; inp.setAttribute("aria-label", aria); if (ph) inp.placeholder = ph; return inp; };
     const addOpt = (sel, value, text) => { const o = el("option", "", text); o.value = value; sel.appendChild(o); return o; };
     const setAttr = (node, k, v) => { node.setAttribute(k, v); return node; };
 
@@ -107,28 +83,17 @@
     const byId = (id) => doc.getElementById(id);
 
     function ensureRoot() {
-      if (rootEl) {
-        rootEl.classList.add("base-pane");
-        if (!rootEl.getAttribute("aria-label")) rootEl.setAttribute("aria-label", "데이터베이스 편집기");
-        return rootEl;
-      }
+      if (rootEl) { rootEl.classList.add("base-pane"); if (!rootEl.getAttribute("aria-label")) rootEl.setAttribute("aria-label", "데이터베이스 편집기"); return rootEl; }
       const existing = byId("pane-base");
       if (existing) { rootEl = existing; rootEl.classList.add("base-pane"); return rootEl; }
       const pane = setAttr(el("section", "editor-pane base-pane"), "aria-label", "데이터베이스 편집기");
       pane.id = "pane-base"; pane.hidden = true;
       (doc.querySelector(".canvas-stage") || doc.body)?.appendChild(pane);
-      rootEl = pane;
-      return rootEl;
+      return (rootEl = pane);
     }
 
-    const openDialog = (dlg) => {
-      if (!dlg) return;
-      if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", "");
-    };
-    const closeDialog = (dlg) => {
-      if (!dlg) return;
-      if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open");
-    };
+    const openDialog = (dlg) => { if (dlg) { if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", ""); } };
+    const closeDialog = (dlg) => { if (dlg) { if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open"); } };
 
     function buildShellDom() {
       const container = ensureRoot();
@@ -410,6 +375,7 @@
 
     function markInvalid(td, control, msg) {
       td.dataset.invalid = "true"; td.setAttribute("aria-invalid", "true"); td.title = msg;
+      if (td.parentElement) td.parentElement._eoInvalid = true;
       if (control) { control.dataset.invalid = "true"; control.setAttribute("aria-invalid", "true"); }
     }
 
@@ -510,6 +476,15 @@
 
     // ---- 3 Synchronized View Renderers ----
 
+    function gridFootTexts(query) {
+      const footCount = query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`;
+      const footSums = query.fields.map((field) => {
+        const sum = query.numericSums[field.id], hasSum = field.type === "number" || (field.type === "formula" && (query.numericCounts ? query.numericCounts[field.id] > 0 : query.rows.some((r) => typeof r.values[field.id] === "number")));
+        return hasSum && Number.isFinite(sum) ? `합계: ${Math.round(sum * 1000) / 1000}` : "";
+      });
+      return { footCount, footSums };
+    }
+
     function renderGridView(table, query) {
       const wrap = el("div", "base-grid-wrap"), tblEl = setAttr(el("table", "base-grid-table"), "aria-label", "데이터시트 보기");
       const thead = el("thead"), headRow = el("tr"), cornerTh = setAttr(el("th", "base-grid-corner", "#"), "scope", "col");
@@ -542,7 +517,7 @@
         gtd.appendChild(toggle); gr.appendChild(gtd);
         return gr;
       };
-      const buildDataRow = (rowData, rowNum) => {
+      const buildDataRow = (rowData, rowNum, q = query) => {
         const tr = el("tr", "base-grid-row");
         tr.dataset.recordId = rowData.record.id;
         tr.appendChild(appendAll(el("td", "base-row-index"),
@@ -550,24 +525,20 @@
           mkBtn("base-row-delete-btn", "×", () => deleteRecord(rowData.record.id), "", "레코드 삭제"),
           setAttr(el("span", "row-resizer"), "aria-hidden", "true")
         ));
-        for (const field of query.fields) {
+        for (const field of q.fields) {
           const td = el("td", "base-grid-cell");
           td.dataset.fieldId = field.id; td.dataset.fieldType = field.type;
-          buildCellControl(td, rowData, field, rowNum, query);
+          buildCellControl(td, rowData, field, rowNum, q);
           tr.appendChild(td);
         }
         return tr;
       };
       if (table.rowHeight !== undefined) { tblEl.style.setProperty("--base-row-height", table.rowHeight + "px"); tblEl.dataset.rowHeight = String(table.rowHeight); }
-      const footCount = query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`;
-      const footSums = query.fields.map((field) => {
-        const sum = query.numericSums[field.id], hasSum = field.type === "number" || (field.type === "formula" && (query.numericCounts ? query.numericCounts[field.id] > 0 : query.rows.some((r) => typeof r.values[field.id] === "number")));
-        return hasSum && Number.isFinite(sum) ? `합계: ${Math.round(sum * 1000) / 1000}` : "";
-      });
+      const { footCount, footSums } = gridFootTexts(query);
       const { widthKey, growOnly } = gridSize ? gridSize.prepareAutoWidths(table, query, [footCount, ...footSums])
         : { widthKey: table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|"), growOnly: false };
       gridWin = host.__EASYOFFICE_BASE_GRID_WINDOW__.createGridWindow(doc, {
-        groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
+        query, groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
         memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, fields: query.fields, rowHeight: table.rowHeight, growOnly, onRowBuilt: cellSel.rowBuilt,
       });
       const tbody = gridWin.tbody, itemCount = gridWin.count;
@@ -586,11 +557,13 @@
       tbody.appendChild(newRowTr);
 
       const tfoot = el("tfoot"), footRow = setAttr(el("tr", "base-grid-footer"), "aria-rowindex", String(itemCount + 3));
-      footRow.appendChild(el("td", "base-footer-count", footCount));
-      for (const txt of footSums) footRow.appendChild(el("td", "base-footer-sum", txt));
+      const footCountTd = el("td", "base-footer-count", footCount);
+      footRow.appendChild(footCountTd);
+      const footSumTds = footSums.map((txt) => { const td = el("td", "base-footer-sum", txt); footRow.appendChild(td); return td; });
       tfoot.appendChild(footRow);
       appendAll(tblEl, thead, tbody, tfoot);
       wrap.appendChild(tblEl);
+      gridLive = { tableId: table.id, viewKey, wrap, tblEl, newRowTr, footRow, footCountTd, footSumTds };
       return wrap;
     }
 
@@ -759,7 +732,7 @@
       renderQueryBar(table);
       cellSel.beforeRender();
       gridWin?.dispose();
-      gridWin = null;
+      gridWin = null; gridLive = null;
       const query = (liveQuery = queryOf(table.id));
       const viewNode = table.view === "kanban" ? renderKanbanView(table, query)
         : table.view === "calendar" ? renderCalendarView(table, query)
@@ -767,6 +740,27 @@
       refs.viewport.replaceChildren(viewNode);
       if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else { cellSel.release(); gridSize?.release?.(); }
       for (const fn of changeListeners) fn();
+    }
+
+    function refreshGridCells() {
+      const table = bound ? activeTable() : null;
+      if (!table || table.view !== "grid" || !gridWin || !gridLive || gridLive.tableId !== table.id || !refs?.viewport?.contains(gridLive.wrap)) return false;
+      relationOptions = new Map();
+      const query = (liveQuery = queryOf(table.id)), { footCount, footSums } = gridFootTexts(query);
+      const { growOnly } = gridSize ? gridSize.prepareAutoWidths(table, query, [footCount, ...footSums]) : { growOnly: false };
+      cellSel.beforeRender();
+      const winBefore = gridWin, liveBefore = gridLive;
+      if (!winBefore.refresh(query, growOnly)) return false;
+      if (gridWin !== winBefore || gridLive !== liveBefore) return true;
+      if (gridLive.footCountTd.textContent !== footCount) gridLive.footCountTd.textContent = footCount;
+      footSums.forEach((txt, i) => { if (gridLive.footSumTds[i] && gridLive.footSumTds[i].textContent !== txt) gridLive.footSumTds[i].textContent = txt; });
+      const rc = winBefore.count;
+      setAttr(gridLive.tblEl, "aria-rowcount", String(rc + 3)); setAttr(gridLive.newRowTr, "aria-rowindex", String(rc + 2)); setAttr(gridLive.footRow, "aria-rowindex", String(rc + 3));
+      cellSel.bind({ tbl: gridLive.tblEl, wrap: gridLive.wrap, win: winBefore, fields: query.fields, tableId: table.id }, gridLive.viewKey);
+      gridSize?.bind({ tbl: gridLive.tblEl, table, query, win: winBefore, footSums });
+      cellSel.afterAttach();
+      for (const fn of changeListeners) fn();
+      return true;
     }
 
     // ---- Public Studio API ----
@@ -791,7 +785,7 @@
     // One undo step per change that was made: the state before it is taken first and kept only when the change succeeded,
     // so a refused change (a validation error) leaves no empty step. A host without that split records before the change.
     const equalCellVal = (a, b) => a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]));
-    const finishEdit = () => { invalidCell = null; noteActivity(); if (bound) render(); };
+    const finishEdit = () => { invalidCell = null; noteActivity(); if (bound && !refreshGridCells()) render(); };
     const recordCellDelta = (tableId, edits) => edits.length > 0 && deps.recordCellUndo?.({ kind: "base-cells", activeModule: "BASE", tableId, edits });
 
     function runMut(fn, clearInvalid = false) {
@@ -976,6 +970,7 @@
       selection: cellSel.selection, selectedRanges: cellSel.selectedRanges, runClipboardCommand: cellSel.runClipboardCommand, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
       liveQuery: () => liveQuery || (activeTable() ? queryOf(activeTable().id) : null),
       onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),
+      cellCount: () => state.tables.reduce((s, t) => s + t.records.length * t.fields.length, 0),
       activeCellTarget: cellSel.activeTarget, selectCellById: cellSel.selectRecordField, relationIds,
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;

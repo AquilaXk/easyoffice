@@ -45,7 +45,8 @@
       if (!ctx) return new Map();
       if (!ctx.rowOf) {
         const map = new Map();
-        for (let i = 0; i < ctx.win.count; i += 1) { const rec = ctx.win.recordAt(i); if (rec) map.set(rec.record.id, i + 1); }
+        if (ctx.win.fillRecordIndexMap) ctx.win.fillRecordIndexMap(map);
+        else for (let i = 0; i < ctx.win.count; i += 1) { const rec = ctx.win.recordAt(i); if (rec) map.set(rec.record.id, i + 1); }
         ctx.rowOf = map;
       }
       return ctx.rowOf;
@@ -500,11 +501,16 @@
     function findRowOf(recId, hintRow) {
       if (!recId || !ctx) return undefined;
       if (hintRow >= 1 && hintRow <= ctx.win.count && ctx.win.recordAt(hintRow - 1)?.record.id === recId) return hintRow;
+      if (ctx.win.indexOfRecord) {
+        const idx = ctx.win.indexOfRecord(recId);
+        return idx >= 0 ? idx + 1 : undefined;
+      }
       return rowIndexMap().get(recId);
     }
 
     function bind(grid, key) {
       endDrag();
+      const prevTbl = ctx?.tbl, hadPaint = Boolean(sel || appendTarget || extraRanges.length > 0);
       const sameTable = (grid.tableId ?? "") === tableKey, sameView = key === viewKey;
       const prevAr = sel?.ar, prevCr = sel?.cr, prevExtra = extraRanges;
       tableKey = grid.tableId ?? ""; viewKey = key;
@@ -529,9 +535,13 @@
       if (sel && !selectionFits()) { sel = null; extraRanges = []; }
       rememberAnchor();
       const { tbl } = ctx;
-      tbl.setAttribute("role", "grid"); tbl.setAttribute("aria-multiselectable", "true"); tbl.setAttribute("tabindex", "0");
-      tbl.addEventListener("keydown", onKeyDown); tbl.addEventListener("mousedown", onMouseDown); tbl.addEventListener("dblclick", onDblClick);
-      tbl.addEventListener("focusin", onFocusIn); tbl.addEventListener("copy", onCopy); tbl.addEventListener("cut", onCut); tbl.addEventListener("paste", onPaste);
+      if (tbl !== prevTbl) {
+        tbl.setAttribute("role", "grid"); tbl.setAttribute("aria-multiselectable", "true"); tbl.setAttribute("tabindex", "0");
+        tbl.addEventListener("keydown", onKeyDown); tbl.addEventListener("mousedown", onMouseDown); tbl.addEventListener("dblclick", onDblClick);
+        tbl.addEventListener("focusin", onFocusIn); tbl.addEventListener("copy", onCopy); tbl.addEventListener("cut", onCut); tbl.addEventListener("paste", onPaste);
+      } else if (hadPaint || sel || appendTarget || extraRanges.length > 0) {
+        paintBuilt();
+      }
     }
 
     function beforeRender() { refocus = refocus || Boolean(ctx && ctx.tbl.contains(doc.activeElement)); }

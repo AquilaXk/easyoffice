@@ -233,3 +233,49 @@ test("PD-317 workspace harness records O(1) base-cells undo delta and round-trip
   assert.equal(studio.liveQuery().rows[9000].values.f2, 109001);
   assert.equal(studio.liveQuery().numericSums.f2, sumBefore + 100000);
 });
+
+test("PD-317 in-place grid refresh keeps table and untouched rows while replacing only edited visible row", async () => {
+  const { root, studio } = await openBase();
+  studio.setState({
+    version: 1,
+    activeTableId: "t1",
+    tables: [{
+      id: "t1",
+      name: "표",
+      fields: [
+        { id: "f1", name: "이름", type: "text" },
+        { id: "f2", name: "수량", type: "number" },
+        { id: "f3", name: "상태", type: "select", options: ["대기", "진행", "완료"] },
+      ],
+      records: Array.from({ length: 10000 }, (_, i) => ({
+        id: "r" + i,
+        values: { f1: "항목 " + i, f2: i, f3: ["대기", "진행", "완료"][i % 3] },
+      })),
+    }],
+  });
+  studio.setSorts([{ fieldId: "f2", dir: "desc" }]);
+  studio.setFilters([{ fieldId: "f2", op: "gte", value: "100" }], "and");
+  studio.setGroupBy("f3");
+
+  const tblBefore = root.querySelector("table.base-grid-table");
+  const rowsBefore = root.querySelectorAll("tr.base-grid-row");
+  const row0Before = rowsBefore[0];
+  const row1Before = rowsBefore[1];
+  const firstId = row0Before.dataset.recordId;
+  const sumBefore = studio.liveQuery().numericSums.f2;
+
+  assert.equal(studio.updateCell("r9000", "f2", 9001).ok, true);
+  assert.equal(root.querySelector("table.base-grid-table"), tblBefore);
+  assert.equal(root.querySelectorAll("tr.base-grid-row")[0], row0Before);
+  assert.equal(root.querySelectorAll("tr.base-grid-row")[1], row1Before);
+  assert.equal(studio.liveQuery().numericSums.f2, sumBefore + 1);
+  assert.ok(root.querySelectorAll(".base-footer-sum")[1]?.textContent.includes(String(sumBefore + 1)));
+
+  assert.equal(studio.updateCell(firstId, "f1", "새 이름").ok, true);
+  assert.equal(root.querySelector("table.base-grid-table"), tblBefore);
+  const rowsAfterVisibleEdit = root.querySelectorAll("tr.base-grid-row");
+  assert.notEqual(rowsAfterVisibleEdit[0], row0Before);
+  assert.equal(rowsAfterVisibleEdit[0].dataset.recordId, firstId);
+  assert.equal(rowsAfterVisibleEdit[0].querySelector('td[data-field-id="f1"] input').value, "새 이름");
+  assert.equal(rowsAfterVisibleEdit[1], row1Before);
+});

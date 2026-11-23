@@ -194,10 +194,12 @@
     }
 
     function bind(nextCtx) {
+      const prevTbl = ctx?.tbl;
+      ctx = { ...nextCtx, colIdxOf: new Map(nextCtx.query.fields.map((f, i) => [f.id, i])) };
+      if (ctx.tbl === prevTbl) return;
       drag = null;
       doc.removeEventListener("mousemove", onDocMouseMove);
       doc.removeEventListener("mouseup", endDrag);
-      ctx = { ...nextCtx, colIdxOf: new Map(nextCtx.query.fields.map((f, i) => [f.id, i])) };
       ctx.tbl.addEventListener("mousedown", onMouseDown);
       ctx.tbl.addEventListener("dblclick", onDblClick);
     }

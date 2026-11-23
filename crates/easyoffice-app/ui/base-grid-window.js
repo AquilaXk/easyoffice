@@ -27,14 +27,17 @@
       const shown = group.collapsed ? 0 : group.records.length;
       count += (grouped ? 1 : 0) + shown; records += shown;
     }
-    return { segments, starts, count };
+    const groupMask = grouped ? new Uint8Array(count) : null;
+    if (groupMask) for (const s of starts) if (s < count) groupMask[s] = 1;
+    return { segments, starts, count, groupMask };
   }
 
-  // opts: groups, grouped, colSpan, buildGroupRow(group), buildDataRow(rowData, recordIndex), scrollKey, widthKey, onRowBuilt(tr, item) (optional),
+  // opts: query, groups, grouped, colSpan, buildGroupRow(group), buildDataRow(rowData, recordIndex, query), scrollKey, widthKey, onRowBuilt(tr, item) (optional),
   // memo: what outlives a redraw of the table ({ key, top, left, sizes, rowPx, groupPx, margin, foot }, and widths: a Map).
   function createGridWindow(doc, opts) {
     const V = host.__EASYOFFICE_BASE_VIRTUAL__, memo = opts.memo;
-    const plan = planSegments(opts.groups, opts.grouped), count = plan.count, windowed = count > WINDOW_MIN_ITEMS;
+    let curQuery = opts.query || null, plan = planSegments(opts.groups, opts.grouped), count = plan.count;
+    const windowed = count > WINDOW_MIN_ITEMS;
     const tbody = doc.createElement("tbody"), rowsByIndex = new Map(), indexByRow = new WeakMap();
     const makeSpacer = () => {
       const tr = doc.createElement("tr"), td = doc.createElement("td");
@@ -54,13 +57,13 @@
     if (!(memo.margin > 0)) memo.margin = HEAD_PX;
     if (!(memo.foot > 0)) memo.foot = FOOT_PX;
     if (memo.sizes?.length !== count) memo.sizes = new Float64Array(count);
-    const sizes = memo.sizes;
+    let sizes = memo.sizes;
     let wrap = null, tblEl = null, flat = null, painted = null, disposed = false, measured = false, observer = null, topPx = 0, trailing = 0;
     let rowPx = memo.rowPx || baseRowPx, groupPx = memo.groupPx || ROW_PX;
 
     const segmentAt = (i) => plan.segments[V.findNearestBinarySearch(0, plan.segments.length - 1, (k) => plan.starts[k], i)];
-    const isGroupRow = (i) => opts.grouped && segmentAt(i).start === i;
-    const sizeAt = (i) => sizes[i] || (opts.grouped && isGroupRow(i) ? groupPx : rowPx);
+    const isGroupRow = (i) => Boolean(plan.groupMask?.[i]);
+    const sizeAt = (i) => sizes[i] || (isGroupRow(i) ? groupPx : rowPx);
     const setSpacer = (tr, px) => { tr.hidden = !(px > 0); tr.firstChild.style.height = px + "px"; };
     const hasLayout = () => wrap.clientHeight > 0;
     const relayout = () => { flat = V.layoutItems(count, sizeAt, memo.margin, flat); };
@@ -68,9 +71,26 @@
 
     function buildItem(i) {
       const seg = segmentAt(i), k = i - seg.start;
-      if (seg.headed && k === 0) return opts.buildGroupRow(seg.group);
+      if (seg.headed && k === 0) {
+        const g = seg.group, tr = opts.buildGroupRow(g);
+        tr._eoKind = "g"; tr._eoKey = g.key; tr._eoLabel = g.label; tr._eoCount = g.count; tr._eoCollapsed = Boolean(g.collapsed);
+        return tr;
+      }
+      const j = k - (seg.headed ? 1 : 0), rowData = seg.group.records[j], rowNum = seg.recordBase + j;
+      const tr = opts.buildDataRow(rowData, rowNum, curQuery);
+      tr._eoKind = "d"; tr._eoRow = rowData; tr._eoRowNum = rowNum;
+      return tr;
+    }
+
+    function itemMatches(tr, i) {
+      if (!tr || tr._eoInvalid) return false;
+      const seg = segmentAt(i), k = i - seg.start;
+      if (seg.headed && k === 0) {
+        const g = seg.group;
+        return tr._eoKind === "g" && tr._eoKey === g.key && tr._eoLabel === g.label && tr._eoCount === g.count && tr._eoCollapsed === Boolean(g.collapsed);
+      }
       const j = k - (seg.headed ? 1 : 0);
-      return opts.buildDataRow(seg.group.records[j], seg.recordBase + j);
+      return tr._eoKind === "d" && tr._eoRow === seg.group.records[j] && tr._eoRowNum === seg.recordBase + j;
     }
 
     function dropRows(from, to) {
@@ -81,13 +101,36 @@
     }
 
     function makeRows(from, to, before) {
-      for (let i = from; i <= to; i += 1) {
-        const tr = buildItem(i);
-        tr.setAttribute("aria-rowindex", String(i + ROWS_BEFORE_ITEMS));
-        rowsByIndex.set(i, tr); indexByRow.set(tr, i);
-        opts.onRowBuilt?.(tr, i);
-        tbody.insertBefore(tr, before);
-      }
+      for (let i = from; i <= to; i += 1) buildRowAt(i, before);
+    }
+
+    function placeRow(i, tr) {
+      tr.setAttribute("aria-rowindex", String(i + ROWS_BEFORE_ITEMS));
+      rowsByIndex.set(i, tr); indexByRow.set(tr, i);
+      opts.onRowBuilt?.(tr, i);
+      return tr;
+    }
+
+    function buildRowAt(i, before) {
+      const tr = placeRow(i, buildItem(i));
+      tbody.insertBefore(tr, before);
+      return tr;
+    }
+
+    function measureHeight(i) {
+      const tr = rowsByIndex.get(i), h = tr ? heightOf(tr) : 0;
+      const changed = h > 0 && Math.abs(h - sizeAt(i)) >= 1 / LAYOUT_UNITS;
+      if (h > 0) sizes[i] = h;
+      return changed;
+    }
+
+    function measureList(indices, anchor) {
+      if (!hasLayout()) return 0;
+      let dirty = false;
+      for (const i of indices) if (measureHeight(i)) dirty = true;
+      if (!dirty) return 0;
+      const before = flat[anchor * 2]; relayout();
+      return flat[anchor * 2] - before;
     }
 
     // The real heights of the rows from..to. When one differs from what the list assumed, the list is laid out again; the rows above the
@@ -95,14 +138,9 @@
     function measureRows(from, to, anchor) {
       if (!hasLayout()) return 0;
       let dirty = false;
-      for (let i = from; i <= to; i += 1) {
-        const tr = rowsByIndex.get(i), h = tr ? heightOf(tr) : 0;
-        if (h > 0 && Math.abs(h - sizeAt(i)) >= 1 / LAYOUT_UNITS) dirty = true;
-        if (h > 0) sizes[i] = h;
-      }
+      for (let i = from; i <= to; i += 1) if (measureHeight(i)) dirty = true;
       if (!dirty) return 0;
-      const before = flat[anchor * 2];
-      relayout();
+      const before = flat[anchor * 2]; relayout();
       return flat[anchor * 2] - before;
     }
 
@@ -112,22 +150,79 @@
       if (index !== undefined && (index < from || index > to)) active.blur?.();
     }
 
-    function paint(from, to, anchor) {
+    function trimPainted(from, to) {
       if (painted) {
         releaseFocus(from, to);
-        if (disposed) return;
+        if (disposed) return null;
         if (from > painted.to || to < painted.from) { dropRows(painted.from, painted.to); painted = null; }
         else { dropRows(painted.from, from - 1); dropRows(to + 1, painted.to); }
       }
-      const keepFrom = painted ? Math.max(painted.from, from) : to + 1, keepTo = painted ? Math.min(painted.to, to) : to;
-      makeRows(from, Math.min(keepFrom - 1, to), rowsByIndex.get(keepFrom) || bottom);
-      makeRows(Math.max(keepTo + 1, from), to, bottom);
-      const shift = measureRows(from, to, anchor);
-      painted = { from, to };
+      return { keepFrom: painted ? Math.max(painted.from, from) : to + 1, keepTo: painted ? Math.min(painted.to, to) : to };
+    }
+
+    function syncWindowSpacers(from, to) {
       topPx = flat[from * 2] - memo.margin;
       setSpacer(top, topPx);
       setSpacer(bottom, V.listEnd(flat, count) - (flat[to * 2] + flat[to * 2 + 1]));
+    }
+
+    function paint(from, to, anchor) {
+      const keep = trimPainted(from, to);
+      if (!keep) return;
+      makeRows(from, Math.min(keep.keepFrom - 1, to), rowsByIndex.get(keep.keepFrom) || bottom);
+      makeRows(Math.max(keep.keepTo + 1, from), to, bottom);
+      const shift = measureRows(from, to, anchor);
+      painted = { from, to };
+      syncWindowSpacers(from, to);
       if (shift) wrap.scrollTop += shift;
+    }
+
+    function refresh(nextQuery, nextGrowOnly) {
+      if (disposed || !wrap || !tblEl) return false;
+      if (Boolean(nextQuery.table?.groupByFieldId) !== opts.grouped) return false;
+      const nextPlan = planSegments(nextQuery.groups, opts.grouped), nextCount = nextPlan.count;
+      if ((nextCount > WINDOW_MIN_ITEMS) !== windowed) return false;
+      curQuery = nextQuery; plan = nextPlan; count = nextCount; opts.growOnly = Boolean(nextGrowOnly);
+      const sizesReset = sizes.length !== count;
+      if (sizesReset) { memo.sizes = new Float64Array(count); sizes = memo.sizes; }
+      relayout();
+      if (count === 0) {
+        if (painted) { releaseFocus(0, -1); if (disposed) return true; dropRows(painted.from, painted.to); }
+        painted = null;
+        if (windowed) { setSpacer(top, 0); setSpacer(bottom, 0); if (opts.growOnly && hasLayout()) fixColumns(true); }
+        return true;
+      }
+      let from = 0, to = count - 1, anchor = 0;
+      if (windowed) {
+        const range = V.calculateRange(flat, count, wrap.clientHeight || VIEW_PX, wrap.scrollTop || 0, trailing);
+        if (!range) return true;
+        ({ from, to } = V.extendRange(range, OVERSCAN, count));
+        anchor = range.startIndex;
+      }
+      const keep = trimPainted(from, to);
+      if (!keep) return true;
+      const beforeKeep = rowsByIndex.get(keep.keepFrom) || bottom, rebuilt = [];
+      for (let i = from; i <= Math.min(keep.keepFrom - 1, to); i += 1) { buildRowAt(i, beforeKeep); rebuilt.push(i); }
+      for (let i = keep.keepFrom; i <= keep.keepTo; i += 1) {
+        const curTr = rowsByIndex.get(i);
+        if (itemMatches(curTr, i)) continue;
+        if (doc.activeElement && curTr?.contains?.(doc.activeElement)) { doc.activeElement.blur?.(); if (disposed) return true; }
+        const nextTr = buildItem(i);
+        tbody.insertBefore(nextTr, curTr);
+        curTr.remove();
+        placeRow(i, nextTr);
+        rebuilt.push(i);
+      }
+      for (let i = Math.max(keep.keepTo + 1, from); i <= to; i += 1) { buildRowAt(i, bottom); rebuilt.push(i); }
+      const shift = sizesReset ? measureRows(from, to, anchor) : measureList(rebuilt, anchor);
+      painted = { from, to };
+      if (windowed) {
+        syncWindowSpacers(from, to);
+        if (shift) wrap.scrollTop += shift;
+        if (opts.growOnly && hasLayout()) fixColumns(true);
+        if (rebuilt.length > 0) sync();
+      }
+      return true;
     }
 
     // Paints until the rows in the DOM cover the view (a row that turned out taller or shorter can leave a gap the first time).
@@ -173,24 +268,27 @@
     function measureLayout() {
       if (measured || disposed || !hasLayout()) return;
       measured = true;
-      const cached = opts.widths.has(opts.widthKey), fresh = !memo.rowPx;
+      const cached = opts.widths.has(opts.widthKey), fresh = !memo.rowPx, prevMargin = memo.margin;
       memo.margin = tblEl.querySelector("thead")?.getBoundingClientRect().height || memo.margin;
       memo.foot = tblEl.querySelector("tfoot")?.getBoundingClientRect().height || memo.foot;
       if (painted) {
         const means = { row: [], group: [] };
+        let missingSizes = false;
         for (let i = painted.from; i <= painted.to; i += 1) {
-          const h = rowsByIndex.has(i) ? heightOf(rowsByIndex.get(i)) : 0;
+          let h = sizes[i];
+          if (!(h > 0)) { missingSizes = true; h = rowsByIndex.has(i) ? heightOf(rowsByIndex.get(i)) : 0; if (h > 0) sizes[i] = h; }
           if (h > 0) (isGroupRow(i) ? means.group : means.row).push(h);
         }
         const mean = (list, fallback) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : fallback);
         if (fresh) { rowPx = mean(means.row, rowPx); groupPx = mean(means.group, groupPx); Object.assign(memo, { rowPx, groupPx }); }
-        relayout();
-        const shift = measureRows(painted.from, painted.to, painted.from);
-        if (windowed) {
-          topPx = flat[painted.from * 2] - memo.margin;
-          setSpacer(top, topPx);
-          setSpacer(bottom, V.listEnd(flat, count) - (flat[painted.to * 2] + flat[painted.to * 2 + 1]));
-          if (shift) wrap.scrollTop += shift;
+        if (fresh || memo.margin !== prevMargin || missingSizes || !windowed) {
+          const before = flat[painted.from * 2];
+          relayout();
+          if (windowed) {
+            syncWindowSpacers(painted.from, painted.to);
+            const shift = flat[painted.from * 2] - before;
+            if (shift) wrap.scrollTop += shift;
+          }
         }
       }
       if ((windowed && (!cached || opts.growOnly)) || hasExplicitWidths) {
@@ -214,9 +312,7 @@
       rowPx = px; memo.rowPx = px; memo.cfgRowPx = px; sizes.fill(0);
       relayout();
       if (windowed && painted) {
-        topPx = flat[painted.from * 2] - memo.margin;
-        setSpacer(top, topPx);
-        setSpacer(bottom, V.listEnd(flat, count) - (flat[painted.to * 2] + flat[painted.to * 2 + 1]));
+        syncWindowSpacers(painted.from, painted.to);
         sync();
       }
       if (wrap) trailing = count > 0 ? Math.max((wrap.scrollHeight || 0) - V.listEnd(flat, count), 0) : 0;
@@ -254,6 +350,21 @@
       const seg = segmentAt(i), k = i - seg.start - (seg.headed ? 1 : 0);
       return k < 0 ? null : seg.group.records[k];
     };
+    function indexOfRecord(recId) {
+      for (const seg of plan.segments) {
+        if (seg.group.collapsed) continue;
+        const recs = seg.group.records, base = seg.start + (seg.headed ? 1 : 0);
+        for (let j = 0; j < recs.length; j += 1) if (recs[j].record.id === recId) return base + j;
+      }
+      return -1;
+    }
+    function fillRecordIndexMap(map) {
+      for (const seg of plan.segments) {
+        if (seg.group.collapsed) continue;
+        const recs = seg.group.records, base = seg.start + (seg.headed ? 1 : 0) + 1;
+        for (let j = 0; j < recs.length; j += 1) map.set(recs[j].record.id, base + j);
+      }
+    }
     const builtItems = () => painted;
     const scrollOffset = () => wrap.scrollTop || 0;
     // What the sticky footer and the new record row below the list add to the scroll height: the measured value, or what the element holds beyond the list.
@@ -278,7 +389,11 @@
     // The rows a page holds: as many of the usual row height as fit between the sticky header and the sticky footer, at least one.
     const visibleSpan = () => Math.max(Math.floor(((wrap.clientHeight || VIEW_PX) - memo.margin - memo.foot) / rowPx), 1);
 
-    return { tbody, count, attach, dispose, rowAt, itemOf, recordAt, isGroup: isGroupRow, builtItems, scrollToItem, visibleSpan, previewRowHeight };
+    return {
+      tbody, get count() { return count; },
+      attach, dispose, refresh, rowAt, itemOf, recordAt, indexOfRecord, fillRecordIndexMap,
+      isGroup: isGroupRow, builtItems, scrollToItem, visibleSpan, previewRowHeight,
+    };
   }
 
   host.__EASYOFFICE_BASE_GRID_WINDOW__ = Object.freeze({ createGridWindow, WINDOW_MIN_ITEMS, OVERSCAN });
