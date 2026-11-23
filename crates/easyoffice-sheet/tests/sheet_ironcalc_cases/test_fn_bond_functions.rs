@@ -134,6 +134,63 @@ fn fn_yield_roundtrip() {
     let yld: f64 = model._get_text("B1").parse().unwrap();
     assert!((yld - 0.065).abs() < 1e-5, "YIELD roundtrip = {yld}");
 }
+// Annual, Actual/360, long first period; redemption varied. Values are linear in
+// redemption and consistent with fn_oddfprice_basis2_various (same bond at R=100).
+#[test]
+fn fn_oddfprice_freq1_basis2() {
+    let mut model = new_empty_model();
+    model._set("A1", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,10,1,2)");
+    model._set("A2", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,30,1,2)");
+    model._set("A3", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,50,1,2)");
+    model._set("A4", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,60,1,2)");
+    model._set("A5", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,300,1,2)");
+    model.evaluate();
+    let v1: f64 = model._get_text("A1").parse().unwrap();
+    let v2: f64 = model._get_text("A2").parse().unwrap();
+    let v3: f64 = model._get_text("A3").parse().unwrap();
+    let v4: f64 = model._get_text("A4").parse().unwrap();
+    let v5: f64 = model._get_text("A5").parse().unwrap();
+    assert!((v1 - 57.642566425).abs() < 1e-4, "redemption=10:  got {v1}");
+    assert!((v2 - 67.800002803).abs() < 1e-4, "redemption=30:  got {v2}");
+    assert!((v3 - 77.957439182).abs() < 1e-4, "redemption=50:  got {v3}");
+    assert!((v4 - 83.036157371).abs() < 1e-4, "redemption=60:  got {v4}");
+    assert!(
+        (v5 - 204.925393914).abs() < 1e-4,
+        "redemption=300: got {v5}"
+    );
+}
+// basis=2 at various settlement positions and freq=2
+#[test]
+fn fn_oddfprice_basis2_various() {
+    let mut model = new_empty_model();
+    // vary settlement, freq=1, basis=2
+    model._set("A1", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,2)");
+    model._set("A2", "=ODDFPRICE(DATE(2020,6,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,2)");
+    model._set("A3", "=ODDFPRICE(DATE(2020,9,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,2)");
+    model._set("A4", "=ODDFPRICE(DATE(2020,12,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,2)");
+    // same settlement, basis=0/3/4 for comparison
+    model._set("A5", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,0)");
+    model._set("A6", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,3)");
+    model._set("A7", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.07,100,1,4)");
+    // freq=2, basis=2, vary settlement
+    model._set("A8", "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,9,1),0.075,0.07,100,2,2)");
+    model._set("A9", "=ODDFPRICE(DATE(2020,6,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,9,1),0.075,0.07,100,2,2)");
+    model._set("A10", "=ODDFPRICE(DATE(2020,9,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,9,1),0.075,0.07,100,2,2)");
+    model.evaluate();
+    let v: Vec<f64> = (1..=10)
+        .map(|i| model._get_text(&format!("A{i}")).parse().unwrap())
+        .collect();
+    assert!((v[0] - 103.351_030_128_363).abs() < 1e-4, "A1 got {}", v[0]);
+    assert!((v[1] - 103.253_611_618_92).abs() < 1e-4, "A2 got {}", v[1]);
+    assert!((v[2] - 103.187_922_416_873).abs() < 1e-4, "A3 got {}", v[2]);
+    assert!((v[3] - 103.154_703_483_357).abs() < 1e-4, "A4 got {}", v[3]);
+    assert!((v[4] - 103.449_096_066_416).abs() < 1e-4, "A5 got {}", v[4]);
+    assert!((v[5] - 103.449_954_897_979).abs() < 1e-4, "A6 got {}", v[5]);
+    assert!((v[6] - 103.449_096_066_416).abs() < 1e-4, "A7 got {}", v[6]);
+    assert!((v[7] - 103.020_326_415_136).abs() < 1e-4, "A8 got {}", v[7]);
+    assert!((v[8] - 102.948_079_122_894).abs() < 1e-4, "A9 got {}", v[8]);
+    assert!((v[9] - 102.887_967_361_15).abs() < 1e-4, "A10 got {}", v[9]);
+}
 // freq=2, basis=1: verifies the long-first-period E_i fix at semi-annual frequency.
 #[test]
 fn fn_oddfprice_freq2_basis1() {
@@ -154,6 +211,74 @@ fn fn_oddfprice_freq2_basis1() {
     assert!((v3 - 88.83800269).abs() < 1e-4, "redemption=50:  got {v3}");
     assert!((v4 - 94.94071212).abs() < 1e-4, "redemption=60:  got {v4}");
     assert!((v5 - 241.40573840).abs() < 1e-4, "redemption=300: got {v5}");
+}
+#[test]
+fn fn_oddfprice_redemption_10() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.05,10,1,1)",
+    );
+    model.evaluate();
+    let expected = 64.0072577;
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!((v - expected).abs() < 1e-4);
+}
+#[test]
+fn fn_oddfprice_redemption_30() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.05,30,1,1)",
+    );
+    model.evaluate();
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (v - 76.28552277).abs() < 1e-4,
+        "ODDFPRICE redemption=30: {v}"
+    );
+}
+#[test]
+fn fn_oddfprice_redemption_50() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.05,50,1,1)",
+    );
+    model.evaluate();
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (v - 88.56378784).abs() < 1e-4,
+        "ODDFPRICE redemption=50: {v}"
+    );
+}
+#[test]
+fn fn_oddfprice_redemption_60() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.05,60,1,1)",
+    );
+    model.evaluate();
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (v - 94.70292037).abs() < 1e-4,
+        "ODDFPRICE redemption=60: {v}"
+    );
+}
+#[test]
+fn fn_oddfprice_redemption_300() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2030,3,1),DATE(2020,1,15),DATE(2021,3,1),0.075,0.05,300,1,1)",
+    );
+    model.evaluate();
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (v - 242.0421012).abs() < 1e-4,
+        "ODDFPRICE redemption=300: {v}"
+    );
 }
 // ============================================================
 // COUPDAYBS

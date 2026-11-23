@@ -1,18 +1,23 @@
 //! Coupon schedule and day counts (`COUPDAYBS`, `COUPDAYS`, `COUPDAYSNC`, `COUPNCD`, `COUPNUM`,
-//! `COUPPCD`, `DURATION`, `MDURATION`) and the helpers the bond functions share (PD-201).
+//! `COUPPCD`, `DURATION`, `MDURATION`) and the helpers the bond functions share (PD-201, PD-323).
 //!
-//! Reference implementation: `packages/engine-formula/src/basics/financial.ts` (coupon schedule,
-//! `calculateCoup*`, `calculateDuration`, `getDateSerialNumberByMonths`, `getCouponsNumber`),
-//! `src/basics/date.ts` (`getTwoDateDaysByBasis` and the 30/360, actual and European counts) and
-//! `src/functions/financial/{coupdaybs,coupdays,coupdaysnc,coupncd,coupnum,couppcd,duration,mduration}`
-//! of the Univer formula engine, commit `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0,
-//! Copyright 2023-present DreamNum Co., Ltd. See `THIRD_PARTY_NOTICES.md`.
+//! Reference implementation: `packages/engine-formula/src/basics/financial.ts` (day counts,
+//! `calculateDuration`) and `src/basics/date.ts` (`getTwoDateDaysByBasis` and the 30/360, actual
+//! and European counts) of the Univer formula engine, commit
+//! `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present DreamNum Co., Ltd.;
+//! calendar month arithmetic (`base/src/functions/financial/calendar.rs` lines 182-221) and
+//! maturity-anchored coupon schedule / actual `COUPDAYS` / US 30/360 `COUPDAYSNC`
+//! (`base/src/functions/financial/financial_bonds.rs` lines 34-58, 111-130, 205-250, 433-457,
+//! 1463-1480) of IronCalc, commit `f93662006b8fb1c401dc870bbda26c5d60ac6037`, MIT OR Apache-2.0,
+//! Copyright 2023 EqualTo GmbH, Copyright 2023-present IronCalc contributors, Copyright 2026-present
+//! IronCalc GmbH, itself derived from `ExcelFinancialFunctions` (`bonds.fs`, `oddbonds.fs`,
+//! `daycountbasis.fs`), MIT License, Copyright (c) 2013 Luca Bolognese. See `THIRD_PARTY_NOTICES.md`.
 //!
-//! Differences from the original: only the 1900 date system exists (no 1904 branches), dates are
-//! whole serial numbers (`i64`, the fraction is dropped on input as the spreadsheet does), the
-//! coupon walks are bounded by [`MAX_COUPON_PERIODS`] (over the limit the result is `#NUM!`), and a
-//! month step keeps the reference's date-object behaviour (a day past the end of the month rolls
-//! into the next month) through [`add_months_js`].
+//! Differences from the original: dates are whole serial numbers (`i64`, the fraction is dropped
+//! on input as the spreadsheet does), all coupon walks are bounded by [`MAX_COUPON_PERIODS`]
+//! (over the limit the result is `#NUM!`), regular coupon schedules clamp month ends with
+//! [`unchecked_add_months_1900`] / [`is_last_day_of_month_1900`], while last-period odd bonds keep
+//! [`shift_months_raw`] / [`set_year_raw`].
 
 use crate::functions_date_fin::{civil_from_serial, serial_from_civil};
 use crate::functions_fin_args::ArgRule;
@@ -53,7 +58,7 @@ pub(crate) fn year_month_day(serial: i64) -> (i64, i64, i64) {
 }
 
 fn ymd(serial: i64) -> Ymd {
-    if serial == 0 {
+    if !crate::date_system::in_date_1904() && serial == 0 {
         return Ymd {
             y: 1900,
             m: 1,
@@ -65,19 +70,69 @@ fn ymd(serial: i64) -> Ymd {
 }
 
 fn serial_of(p: Ymd) -> i64 {
-    if p.y == 1900 && p.m == 1 && p.d == 0 {
+    if !crate::date_system::in_date_1904() && p.y == 1900 && p.m == 1 && p.d == 0 {
         0
     } else {
         serial_from_civil(p.y, p.m, p.d)
     }
 }
 
-fn is_month_end(p: Ymd) -> bool {
-    p.d == days_in_month(p.y, p.m)
+/// Whether `serial` is the last day of its month in the active displayed calendar (so serial 60,
+/// fictional Feb 29 1900, is month-end whereas serial 59, Feb 28 1900, is not).
+pub(crate) fn is_last_day_of_month_1900(serial: i64) -> bool {
+    if !crate::date_system::in_date_1904() {
+        if serial <= 0 {
+            return false;
+        }
+        if serial == 60 {
+            return true;
+        }
+        if serial == 59 {
+            return false;
+        }
+    }
+    let (y, m, d) = civil_from_serial(serial);
+    d == days_in_month(y, m)
 }
 
-pub(crate) fn is_month_end_serial(serial: i64) -> bool {
-    is_month_end(ymd(serial))
+/// Moves `serial` by `months` using Gregorian month lengths (`EDATE` clamping, or snapping to
+/// month-end when `return_last` is set). May yield negative serials before epoch `0`.
+pub(crate) fn unchecked_add_months_1900(
+    serial: i64,
+    months: i64,
+    return_last: bool,
+) -> Fallible<i64> {
+    let (y, m, d) = civil_from_serial(serial);
+    let index = y
+        .checked_mul(12)
+        .and_then(|v| v.checked_add(m - 1))
+        .and_then(|v| v.checked_add(months))
+        .ok_or(FormulaError::Num)?;
+    let (ny, nm) = (index.div_euclid(12), index.rem_euclid(12) + 1);
+    if !(-9999..=9999).contains(&ny) {
+        return Err(FormulaError::Num);
+    }
+    let last = days_in_month(ny, nm);
+    let nd = if return_last { last } else { d.min(last) };
+    let moved = serial_from_civil(ny, nm, nd);
+    if crate::date_system::to_1900(moved) > 2_958_465 {
+        return Err(FormulaError::Num);
+    }
+    Ok(moved)
+}
+
+/// Checked variant of [`unchecked_add_months_1900`] rejecting dates before serial `0`.
+pub(crate) fn checked_add_months_1900(
+    serial: i64,
+    months: i64,
+    return_last: bool,
+) -> Fallible<i64> {
+    let moved = unchecked_add_months_1900(serial, months, return_last)?;
+    if moved < 0 {
+        Err(FormulaError::Num)
+    } else {
+        Ok(moved)
+    }
 }
 
 /// Date-object month step without the month-end rule: a day past the end of the target month
@@ -171,6 +226,25 @@ fn days_30_360(start: i64, end: i64, us: bool) -> (f64, f64) {
     )
 }
 
+/// US (NASD) 30/360 day count using Gregorian Feb-end checks; `modify_both` applies the
+/// `ModifyBothDates` variant (`COUPDAYSNC` period length and `ACCRINT` basis 0 denominator).
+pub(crate) fn days_30_360_us_psa(start: i64, end: i64, modify_both: bool) -> f64 {
+    let (sy, sm, mut sd) = civil_from_serial(start);
+    let (ey, em, mut ed) = civil_from_serial(end);
+    let start_feb_end = sm == 2 && sd == days_in_month(sy, 2);
+    let end_feb_end = em == 2 && ed == days_in_month(ey, 2);
+    if end_feb_end && (start_feb_end || modify_both) {
+        ed = 30;
+    }
+    if ed == 31 && (sd >= 30 || modify_both) {
+        ed = 30;
+    }
+    if sd == 31 || start_feb_end {
+        sd = 30;
+    }
+    ((ey - sy) * 360 + (em - sm) * 30 + (ed - sd)) as f64
+}
+
 fn days_actual(start: i64, end: i64) -> (f64, f64) {
     let (s, e) = (ymd(start), ymd(end));
     let total = (end - start).abs() as f64;
@@ -208,68 +282,6 @@ pub(crate) fn year_days(serial: i64, basis: i64) -> f64 {
     }
 }
 
-/// The reference's date-object month step: from a month end the result is a month end,
-/// otherwise a day past the end of the target month rolls into the following month.
-pub(crate) fn add_months_js(serial: i64, months: i64) -> i64 {
-    let p = ymd(serial);
-    let index = p.y * 12 + p.m - 1 + months;
-    let (y, m) = (index.div_euclid(12), index.rem_euclid(12) + 1);
-    if is_month_end(p) {
-        return serial_of(Ymd {
-            y,
-            m,
-            d: days_in_month(y, m),
-        });
-    }
-    serial_of(Ymd { y, m, d: 1 }) + p.d - 1
-}
-
-/// [`add_months_js`], then optionally the last day of the resulting month.
-pub(crate) fn add_months(serial: i64, months: i64, last_day: bool) -> i64 {
-    let moved = add_months_js(serial, months);
-    if !last_day {
-        return moved;
-    }
-    let p = ymd(moved);
-    serial_of(Ymd {
-        d: days_in_month(p.y, p.m),
-        ..p
-    })
-}
-
-/// A coupon date that remembers whether the maturity sits on a month end.
-#[derive(Clone, Copy)]
-struct Coupon {
-    at: Ymd,
-    month_end: bool,
-}
-
-impl Coupon {
-    fn of(serial: i64) -> Self {
-        let at = ymd(serial);
-        Self {
-            at,
-            month_end: is_month_end(at),
-        }
-    }
-
-    /// `months` later (negative: earlier); the maturity's day and month-end rule is kept.
-    fn shifted(self, months: i64) -> Self {
-        let index = self.at.y * 12 + self.at.m - 1 + months;
-        let (y, m) = (index.div_euclid(12), index.rem_euclid(12) + 1);
-        let max_day = days_in_month(y, m);
-        let d = if self.month_end {
-            max_day
-        } else {
-            self.at.d.min(max_day)
-        };
-        Self {
-            at: Ymd { y, m, d },
-            month_end: self.month_end,
-        }
-    }
-}
-
 /// The coupon dates around the settlement date and the coupons left to pay.
 pub(crate) struct Schedule {
     pub(crate) previous: i64,
@@ -282,39 +294,55 @@ pub(crate) fn coupon_schedule(
     maturity: i64,
     frequency: i64,
 ) -> Fallible<Schedule> {
-    let s = ymd(settlement);
-    let m = ymd(maturity);
+    let (sy, sm, _) = civil_from_serial(settlement);
+    let (my, mm, _) = civil_from_serial(maturity);
     let period = 12 / frequency;
-    if ((m.y - s.y) * 12 + m.m - s.m) / period > MAX_COUPON_PERIODS {
+    if ((my - sy) * 12 + mm - sm) / period > MAX_COUPON_PERIODS {
         return Err(FormulaError::Num);
     }
-    let mut candidate = Coupon {
-        at: Ymd { y: s.y, ..m },
-        month_end: is_month_end(m),
-    };
-    if candidate.at < s {
-        candidate.at.y += 1;
-    }
-    while candidate.at > s {
-        candidate = candidate.shifted(-period);
-    }
-    let previous = serial_of(candidate.at);
-    let next = serial_of(candidate.shifted(period).at);
-    let mut count = 0;
-    let mut walk = Coupon::of(maturity);
-    while walk.at > s {
-        walk = walk.shifted(-period);
-        count += 1;
+    let return_last = is_last_day_of_month_1900(maturity);
+    let mut periods = 0_i64;
+    let mut front = maturity;
+    let mut trailing = maturity;
+    while front > settlement {
+        if periods >= MAX_COUPON_PERIODS {
+            return Err(FormulaError::Num);
+        }
+        trailing = front;
+        periods += 1;
+        front = unchecked_add_months_1900(maturity, -period * periods, return_last)?;
     }
     Ok(Schedule {
-        previous,
-        next,
-        count,
+        previous: front,
+        next: trailing,
+        count: periods,
     })
 }
 
 pub(crate) fn coupon_days_from_start(sched: &Schedule, settlement: i64, basis: i64) -> f64 {
-    days_by_basis(sched.previous, settlement, basis).0
+    days_by_basis(sched.previous.max(0), settlement, basis).0
+}
+
+/// Actual/actual coupon period days for `COUPDAYS` (`basis == 1`): steps back from `maturity`
+/// without EOM snapping while strictly after `settlement`, then returns `NCD - PCD`.
+fn coupdays_actual(settlement: i64, maturity: i64, frequency: i64) -> Fallible<f64> {
+    check_coupon_span(settlement, maturity, frequency)?;
+    let period = 12 / frequency;
+    let mut date = maturity;
+    let mut steps = 0_i64;
+    loop {
+        steps += 1;
+        if steps > MAX_COUPON_PERIODS + 2 {
+            return Err(FormulaError::Num);
+        }
+        let earlier = unchecked_add_months_1900(date, -period, false)?;
+        if earlier <= settlement {
+            break;
+        }
+        date = earlier;
+    }
+    let sched = coupon_schedule(settlement, date, frequency)?;
+    Ok((sched.next - sched.previous) as f64)
 }
 
 /// Days in the coupon period (the "E" of the bond formulas) for a schedule already at hand.
@@ -416,16 +444,23 @@ impl SheetEngine {
             "COUPPCD" => num(sched.previous.max(0) as f64),
             "COUPNUM" if sched.previous < 0 => Err(FormulaError::Num),
             "COUPNUM" => num(sched.count as f64),
-            "COUPDAYBS" => {
-                let days = coupon_days_from_start(&sched, settlement, basis);
-                num(if settlement == 0 && days == 1.0 {
-                    0.0
+            "COUPDAYBS" => num(coupon_days_from_start(&sched, settlement, basis)),
+            "COUPDAYSNC" => {
+                if basis == 0 {
+                    let prev = sched.previous.max(0);
+                    num(days_30_360_us_psa(prev, sched.next, true)
+                        - days_30_360_us_psa(prev, settlement, false))
                 } else {
-                    days
-                })
+                    num(days_by_basis(settlement, sched.next, basis).0)
+                }
             }
-            "COUPDAYSNC" => num(days_by_basis(settlement, sched.next, basis).0),
-            "COUPDAYS" => num(coupon_days(settlement, maturity, frequency, basis)?),
+            "COUPDAYS" => {
+                if basis == 1 && settlement > 0 {
+                    num(coupdays_actual(settlement, maturity, frequency)?)
+                } else {
+                    num(coupon_days(settlement, maturity, frequency, basis)?)
+                }
+            }
             _ => Err(FormulaError::Name),
         }
     }

@@ -1,19 +1,28 @@
 //! Bond and security functions: `PRICE`, `YIELD`, `ACCRINT`, `ACCRINTM`, `DISC`, `PRICEDISC`,
-//! `PRICEMAT`, `RECEIVED`, `YIELDDISC`, `YIELDMAT`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD` (PD-201).
+//! `PRICEMAT`, `RECEIVED`, `YIELDDISC`, `YIELDMAT`, `TBILLEQ`, `TBILLPRICE`, `TBILLYIELD` (PD-201,
+//! PD-323).
 //!
 //! Reference implementation: `packages/engine-formula/src/functions/financial/{price,yield,
-//! accrint,accrintm,disc,pricedisc,pricemat,received,yielddisc,yieldmat,tbilleq,tbillprice,
-//! tbillyield}/index.ts` and `src/basics/financial.ts` (`calculatePrice`, `getResultByGuessIterF`)
-//! of the Univer formula engine, commit `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0,
-//! Copyright 2023-present DreamNum Co., Ltd. See `THIRD_PARTY_NOTICES.md`.
+//! accrintm,disc,pricedisc,pricemat,received,yielddisc,yieldmat,tbilleq,tbillprice,tbillyield}`
+//! and `src/basics/financial.ts` (`calculatePrice`, `getResultByGuessIterF`) of the Univer formula
+//! engine, commit `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present
+//! DreamNum Co., Ltd.; `ACCRINT` day-count algorithm (`base/src/functions/financial/accrint.rs`
+//! lines 20-268) and bisection fallback (`financial_bonds.rs` lines 749-772) of IronCalc, commit
+//! `f93662006b8fb1c401dc870bbda26c5d60ac6037`, MIT OR Apache-2.0, Copyright 2023 EqualTo GmbH,
+//! Copyright 2023-present IronCalc contributors, Copyright 2026-present IronCalc GmbH, itself
+//! derived from `ExcelFinancialFunctions` (`bonds.fs`, `daycountbasis.fs`), MIT License,
+//! Copyright (c) 2013 Luca Bolognese. See `THIRD_PARTY_NOTICES.md`.
 //!
 //! The yield solvers stop after [`YIELD_MAX_STEPS`] secant steps and the guess search after
-//! [`GUESS_BRACKET_STEPS`] widenings; a solver that does not converge gives `#NUM!`.
+//! [`GUESS_BRACKET_STEPS`] widenings plus [`BISECT_MAX_STEPS`] fixed-range bisection steps; a
+//! solver that does not converge gives `#NUM!`.
 
 use crate::functions_coupon::{
-    add_months, check_coupon_span, check_frequency_basis, coupon_days, coupon_days_from_start,
-    coupon_days_in, coupon_schedule, days_by_basis, days_in_year, year_days, Schedule,
+    check_coupon_span, check_frequency_basis, checked_add_months_1900, coupon_days_from_start,
+    coupon_days_in, coupon_schedule, days_30_360_us_psa, days_by_basis, days_in_year,
+    is_last_day_of_month_1900, year_days, Schedule, MAX_COUPON_PERIODS,
 };
+use crate::functions_date_fin::civil_from_serial;
 use crate::functions_fin_args::ArgRule;
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
@@ -25,34 +34,97 @@ const YIELD_MAX_STEPS: usize = 100;
 pub(crate) const NEWTON_MAX_STEPS: usize = 100;
 /// Widenings and bisections of the bracket search.
 pub(crate) const GUESS_BRACKET_STEPS: usize = 60;
+/// Fallback bisection steps over `[-0.9999, 100.0]`.
+const BISECT_MAX_STEPS: usize = 200;
 const SOLVER_EPS: f64 = 1e-7;
 
 fn num(v: f64) -> Fallible<EvaluatedCellValue> {
     Ok(EvaluatedCellValue::Number(v))
 }
 
-/// Newton iteration with a numeric derivative from `guess`; a run that diverges or does not
-/// settle falls back to bracketing and bisection (`getResultByGuessIterF`).
+/// Newton iteration with a numeric derivative from `guess`; a run that diverges or leaves
+/// `(-1, +inf)` falls back to bracketing and bisection (`getResultByGuessIterF` + `solve_yield`).
 pub(crate) fn solve_by_guess(guess: f64, f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<f64> {
-    let (mut x, mut eps, mut steps) = (guess, 1.0, 0);
-    while eps > SOLVER_EPS && steps < NEWTON_MAX_STEPS {
+    if !guess.is_finite() {
+        return Err(FormulaError::Num);
+    }
+    let (mut x, mut steps) = (guess, 0);
+    while steps < NEWTON_MAX_STEPS {
+        if x <= -1.0 + SOLVER_EPS {
+            break;
+        }
         let slope = (f(x + SOLVER_EPS)? - f(x - SOLVER_EPS)?) / (2.0 * SOLVER_EPS);
+        if !slope.is_finite() || slope.abs() < 1e-15 {
+            break;
+        }
         let next = x - f(x)? / slope;
         steps += 1;
-        eps = (next - x).abs();
+        if !next.is_finite() || next <= -1.0 {
+            break;
+        }
+        let eps = (next - x).abs();
         x = next;
+        if eps <= SOLVER_EPS {
+            return Ok(x);
+        }
     }
-    if x.is_nan() || x.is_infinite() || steps == NEWTON_MAX_STEPS {
-        return bracket_and_bisect(guess, f);
+    bracket_and_bisect(guess, f)
+}
+
+fn bisect_range(
+    mut begin: f64,
+    mut end: f64,
+    max_steps: usize,
+    tol: f64,
+    f: &dyn Fn(f64) -> Fallible<f64>,
+) -> Fallible<f64> {
+    let mut f_begin = f(begin)?;
+    if f_begin.abs() <= SOLVER_EPS {
+        return Ok(begin);
     }
-    Ok(x)
+    let f_end = f(end)?;
+    if f_end.abs() <= SOLVER_EPS {
+        return Ok(end);
+    }
+    if !f_begin.is_finite() || !f_end.is_finite() || f_begin * f_end > 0.0 {
+        return Err(FormulaError::Num);
+    }
+    for _ in 0..max_steps {
+        let mid = begin + (end - begin) / 2.0;
+        let f_mid = f(mid)?;
+        if !f_mid.is_finite() {
+            return Err(FormulaError::Num);
+        }
+        if f_mid.abs() <= SOLVER_EPS || (end - begin).abs() < tol {
+            return Ok(mid);
+        }
+        if f_begin * f_mid < 0.0 {
+            end = mid;
+        } else {
+            begin = mid;
+            f_begin = f_mid;
+        }
+    }
+    Ok(begin + (end - begin) / 2.0)
+}
+
+fn bisect_wide(f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<f64> {
+    let hi = 100.0_f64;
+    let f_hi = f(hi)?;
+    for &lo in &[-0.9999_f64, -0.99, -0.95, -0.9, -0.5, 0.0] {
+        let f_lo = f(lo)?;
+        if f_lo.is_finite() && f_hi.is_finite() && f_lo * f_hi <= 0.0 {
+            return bisect_range(lo, hi, BISECT_MAX_STEPS, 1e-12, f);
+        }
+    }
+    Err(FormulaError::Num)
 }
 
 fn bracket_and_bisect(guess: f64, f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<f64> {
     const LOWEST: f64 = -1.0;
     const WIDEN: f64 = 1.6;
     if guess <= LOWEST || guess >= f64::MAX {
-        return Err(FormulaError::Num);
+        return bisect_wide(f);
     }
     let mut low = if guess - 0.01 <= LOWEST {
         LOWEST + SOLVER_EPS
@@ -61,7 +133,8 @@ fn bracket_and_bisect(guess: f64, f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<
     };
     let mut high = guess + 0.01;
     let (mut begin, mut end) = (low, high);
-    for i in 0..GUESS_BRACKET_STEPS {
+    let mut bracketed = false;
+    for _ in 0..GUESS_BRACKET_STEPS {
         begin = if low <= LOWEST {
             LOWEST + SOLVER_EPS
         } else {
@@ -69,34 +142,22 @@ fn bracket_and_bisect(guess: f64, f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<
         };
         end = high;
         let product = f(begin)? * f(end)?;
-        if product <= 0.0 {
+        if product.is_finite() && product <= 0.0 {
+            bracketed = true;
             break;
         }
-        if product.is_nan() || i == GUESS_BRACKET_STEPS - 1 {
-            return Err(FormulaError::Num);
+        if product.is_nan() {
+            break;
         }
         low = begin + WIDEN * (begin - end);
         high = end + WIDEN * (end - begin);
     }
-    let mut f_begin = f(begin)?;
-    if f_begin.abs() < SOLVER_EPS || f(end)?.abs() < SOLVER_EPS {
-        return Err(FormulaError::Num);
-    }
-    let mut steps = 0;
-    loop {
-        let mid = begin + (end - begin) / 2.0;
-        let f_mid = f(mid)?;
-        if f_begin * f_mid < 0.0 {
-            end = mid;
-        } else {
-            begin = mid;
-        }
-        f_begin = f(begin)?;
-        steps += 1;
-        if f_mid.abs() <= SOLVER_EPS || steps >= GUESS_BRACKET_STEPS {
-            return Ok(mid);
+    if bracketed {
+        if let Ok(root) = bisect_range(begin, end, GUESS_BRACKET_STEPS, 0.0, f) {
+            return Ok(root);
         }
     }
+    bisect_wide(f)
 }
 
 /// What a bond price depends on besides the rate and the yield: the coupons left (`n`), the days
@@ -232,11 +293,21 @@ impl SheetEngine {
         let (issue, first, settlement) = (a.date(0)?, a.date(1)?, a.date(2)?);
         let (rate, par) = (a.num(3)?, a.num(4)?);
         let (frequency, basis) = check_frequency_basis(a.int_or(5, 0.0)?, a.int_or(6, 0.0)?)?;
-        if rate <= 0.0 || par <= 0.0 || issue >= settlement || issue == 0 {
+        if rate <= 0.0 || par <= 0.0 || issue >= settlement || issue <= 0 {
             return Err(FormulaError::Num);
         }
-        let accrued = accrued_periods(issue, first, settlement, frequency, basis, calc_method)?;
-        num(par * rate / frequency as f64 * accrued)
+        check_coupon_span(issue, first.max(settlement), frequency)?;
+        compute_accrint(
+            issue,
+            first,
+            settlement,
+            rate,
+            par,
+            frequency,
+            basis,
+            calc_method,
+        )
+        .and_then(num)
     }
 
     fn fin_accrintm(
@@ -378,71 +449,109 @@ impl SheetEngine {
     }
 }
 
-/// Accrued interest in coupon periods from the issue date to `settlement` (`ACCRINT`).
-fn accrued_periods(
+fn acc_date_diff_360_eu(start: i64, end: i64) -> f64 {
+    let (sy, sm, sd0) = civil_from_serial(start);
+    let (ey, em, ed0) = civil_from_serial(end);
+    ((ey - sy) * 360 + (em - sm) * 30 + (ed0.min(30) - sd0.min(30))) as f64
+}
+
+fn acc_find_pcd_ncd(
+    start: i64,
+    end: i64,
+    num_months: i64,
+    return_last: bool,
+) -> Fallible<(i64, i64)> {
+    let mut front = start;
+    let mut trailing = end;
+    for _ in 0..=(MAX_COUPON_PERIODS + 1) {
+        let stop = if num_months > 0 {
+            front >= end
+        } else {
+            front <= end
+        };
+        if stop {
+            return Ok((front, trailing));
+        }
+        trailing = front;
+        front = checked_add_months_1900(front, num_months, return_last)?;
+    }
+    Err(FormulaError::Num)
+}
+
+fn acc_days_numerator(start: i64, end: i64, basis: i64) -> f64 {
+    match basis {
+        0 => days_30_360_us_psa(start, end, false),
+        4 => acc_date_diff_360_eu(start, end),
+        _ => (end - start) as f64,
+    }
+}
+
+fn acc_coup_days(settl: i64, mat: i64, freq: i64, basis: i64) -> Fallible<f64> {
+    match basis {
+        0 | 2 | 4 => Ok(360.0 / freq as f64),
+        3 => Ok(365.0 / freq as f64),
+        _ => {
+            let num_months = -(12 / freq);
+            let (pcd, ncd) =
+                acc_find_pcd_ncd(mat, settl, num_months, is_last_day_of_month_1900(mat))?;
+            Ok((ncd - pcd) as f64)
+        }
+    }
+}
+
+/// Accrued interest (`ACCRINT`) over quasi-coupon periods anchored on `first_interest`.
+#[allow(clippy::too_many_arguments)]
+fn compute_accrint(
     issue: i64,
-    first: i64,
+    first_interest: i64,
     settlement: i64,
+    rate: f64,
+    par: f64,
     frequency: i64,
     basis: i64,
     calc_method: bool,
 ) -> Fallible<f64> {
-    if coupon_schedule(issue, first, frequency)?.previous <= 0 {
-        return Ok(0.0);
-    }
-    let previous = coupon_schedule(settlement, first, frequency)?.previous;
-    let months = 12 / frequency;
-    let first_is_month_end = crate::functions_coupon::is_month_end_serial(first);
-    let walk_back = |from: i64| add_months(from, -months, first_is_month_end);
-    check_coupon_span(issue, first.max(settlement), frequency)?;
-    let mut coupon = walk_back(first);
-    if settlement > first && calc_method {
-        coupon = first;
-        while coupon < settlement {
-            coupon = add_months(coupon, months, first_is_month_end);
+    let num_months = 12 / frequency;
+    let freq = frequency as f64;
+    let end_month_bond = is_last_day_of_month_1900(first_interest);
+    let calc = if calc_method { 1.0 } else { 0.0 };
+
+    let reg_pcd = checked_add_months_1900(first_interest, -num_months, end_month_bond)?;
+    let pcd = if settlement > first_interest && calc_method {
+        acc_find_pcd_ncd(first_interest, settlement, num_months, end_month_bond)?.1
+    } else {
+        reg_pcd
+    };
+
+    let first_date = issue.max(pcd);
+    let days0 = acc_days_numerator(first_date, settlement, basis);
+    let coup_days0 = acc_coup_days(reg_pcd, first_interest, frequency, basis)?;
+    let mut acc = days0 / coup_days0;
+
+    let mut front = pcd;
+    let mut steps = 0_i64;
+    while front > issue {
+        steps += 1;
+        if steps > MAX_COUPON_PERIODS + 2 {
+            return Err(FormulaError::Num);
+        }
+        let period_end = front;
+        front = checked_add_months_1900(front, -num_months, end_month_bond)?;
+        let period_start = front;
+        if issue <= period_start {
+            acc += calc;
+        } else {
+            let numerator = acc_days_numerator(issue, period_end, basis);
+            let denominator = match basis {
+                0 => days_30_360_us_psa(period_start, period_end, true),
+                2 => 360.0 / freq,
+                3 => 365.0 / freq,
+                4 => acc_date_diff_360_eu(period_start, period_end),
+                _ => (period_end - period_start) as f64,
+            };
+            acc += numerator / denominator;
         }
     }
-    let mut from = issue.max(coupon);
-    let mut days = days_by_basis(from, settlement, basis).0;
-    if previous >= issue {
-        days = days_by_basis(from, settlement, if basis == 0 { 0 } else { 4 }).0;
-    }
-    if settlement < from {
-        days = -days;
-    }
-    let mut period_days = coupon_days(coupon, first, frequency, basis)?;
-    let mut accrued = days / period_days;
-    let mut start = coupon;
-    while start > issue {
-        let end = start;
-        start = walk_back(start);
-        from = issue.max(start);
-        let to_end = days_by_basis(from, end, basis).0;
-        if basis == 0 {
-            days = if end >= from || issue <= start {
-                to_end
-            } else {
-                -to_end
-            };
-            period_days = coupon_days(start, end, frequency, basis)?;
-        } else {
-            days = if end < from { -to_end } else { to_end };
-            period_days = if basis == 3 {
-                365.0 / frequency as f64
-            } else {
-                let span = days_by_basis(start, end, basis).0;
-                if end < start {
-                    -span
-                } else {
-                    span
-                }
-            };
-        }
-        accrued += if issue <= start {
-            f64::from(u8::from(calc_method))
-        } else {
-            days / period_days
-        };
-    }
-    Ok(accrued)
+
+    Ok(par * rate / freq * acc)
 }

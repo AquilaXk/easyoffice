@@ -75,7 +75,8 @@ const ACCRINT: &[Case] = &[
         id: "accrint#3",
         cells: &[],
         formula: "=ACCRINT(\"1900/1/29\",\"2008/8/31\",\"2008/5/1\",0.1,1000,2)",
-        expect: Exp::Num(0.0),
+        // DIFFERS: earlier JS port gave 0.0; stepping back crosses before serial 0 (#NUM! in reference app).
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "accrint#4",
@@ -87,13 +88,15 @@ const ACCRINT: &[Case] = &[
         id: "accrint#5",
         cells: &[],
         formula: "=ACCRINT(\"2008/2/29\",\"2008/8/31\",\"2008/11/1\",0.1,1000,2,3)",
-        expect: Exp::Num(67.9452054795),
+        // DIFFERS: earlier JS port gave 67.9452054795; basis 3 regular period length is 365/2 = 182.5.
+        expect: Exp::Num(66.98630136986301),
     },
     Case {
         id: "accrint#6",
         cells: &[],
         formula: "=ACCRINT(\"2008/2/29\",\"2008/8/31\",\"2008/11/1\",0.1,1000,2,1)",
-        expect: Exp::Num(68.2065217391),
+        // DIFFERS: earlier JS port gave 68.2065217391; basis 1 divides by actual period length 184.
+        expect: Exp::Num(66.84782608695652),
     },
     Case {
         id: "accrint#7",
@@ -165,7 +168,8 @@ const ACCRINT: &[Case] = &[
         id: "accrint#18",
         cells: &[],
         formula: "=ACCRINT(31,366,60,0.1,100,2,1)",
-        expect: Exp::Num(0.0),
+        // DIFFERS: earlier JS port gave 0.0; reference algorithm gives 5 * (-122/184 + 151/182).
+        expect: Exp::Num(0.833134257047301),
     },
 ];
 

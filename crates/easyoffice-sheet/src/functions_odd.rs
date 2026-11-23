@@ -1,19 +1,24 @@
-//! Odd-period bond functions: `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD` (PD-201).
+//! Odd-period bond functions: `ODDFPRICE`, `ODDFYIELD`, `ODDLPRICE`, `ODDLYIELD` (PD-201, PD-323).
 //!
 //! Reference implementation: `packages/engine-formula/src/functions/financial/{oddfprice,oddfyield,
-//! oddlprice,oddlyield}/index.ts` and `src/basics/financial.ts` (`calculateOddFPrice`,
-//! `getCouponsNumber`, `validDaysBetweenIsWholeFrequencyByTwoDate`) of the Univer formula engine,
-//! commit `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present DreamNum
-//! Co., Ltd. See `THIRD_PARTY_NOTICES.md`.
+//! oddlprice,oddlyield}/index.ts` and `src/basics/financial.ts` of the Univer formula engine, commit
+//! `5a06a7842c8e13fa0646d0733dc3662cf4b330b9`, Apache-2.0, Copyright 2023-present DreamNum Co., Ltd.;
+//! `coup_number` and `compute_oddfprice` (`base/src/functions/financial/financial_bonds.rs` lines
+//! 476-616) of IronCalc, commit `f93662006b8fb1c401dc870bbda26c5d60ac6037`, MIT OR Apache-2.0,
+//! Copyright 2023 EqualTo GmbH, Copyright 2023-present IronCalc contributors, Copyright 2026-present
+//! IronCalc GmbH, itself derived from `ExcelFinancialFunctions` (`oddbonds.fs`), MIT License,
+//! Copyright (c) 2013 Luca Bolognese. See `THIRD_PARTY_NOTICES.md`.
 //!
-//! The last-period functions keep the reference's date-object walk (`setUTCMonth` steps that roll
-//! a day past the end of the month into the next month), which the reference marks as differing
-//! from the spreadsheet in some cases. Every walk is bounded by `check_coupon_span`.
+//! The last-period functions keep the earlier reference's date-object walk (`shift_months_raw` /
+//! `set_year_raw`), while first-period odd bonds use 1900-clamped month arithmetic via
+//! [`checked_add_months_1900`]. Every walk is bounded by `check_coupon_span` and
+//! [`MAX_COUPON_PERIODS`].
 
 use crate::functions_bond::solve_by_guess;
 use crate::functions_coupon::{
-    add_months, check_coupon_span, check_frequency_basis, coupon_days, coupon_schedule,
-    days_by_basis, is_month_end_serial, set_year_raw, shift_months_raw, year_of,
+    check_coupon_span, check_frequency_basis, checked_add_months_1900, coupon_days,
+    coupon_schedule, days_by_basis, is_last_day_of_month_1900, month_parts, set_year_raw,
+    shift_months_raw, year_of, MAX_COUPON_PERIODS,
 };
 use crate::functions_fin_args::ArgRule;
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
@@ -29,36 +34,30 @@ fn positive_days(start: i64, end: i64, basis: i64) -> f64 {
     }
 }
 
-/// Whole coupon periods from `start` to `end` stepping `months` (`getCouponsNumber`, whole
-/// numbers counted from 1).
-fn coupons_between(start: i64, end: i64, months: i64) -> f64 {
-    let day_of_month_end = |s: i64| is_month_end_serial(s);
-    let start_end = day_of_month_end(start);
-    let (_, month, day, days_in_start_month) = crate::functions_coupon::month_parts(start);
-    let month_end = if !start_end && month != 2 && day > 28 && day < days_in_start_month {
-        day_of_month_end(end)
+/// Whole quasi-coupon periods strictly between `settlement` and `first_coupon` (`coup_number`
+/// with `is_whole_number = true`).
+fn coup_number_whole(first_coupon: i64, settlement: i64, months: i64) -> Fallible<f64> {
+    let end_of_month_temp = is_last_day_of_month_1900(first_coupon);
+    let (_, month, day, days_in_first_month) = month_parts(first_coupon);
+    let end_of_month = if !end_of_month_temp && month != 2 && day > 28 && day < days_in_first_month
+    {
+        is_last_day_of_month_1900(settlement)
     } else {
-        start_end
+        end_of_month_temp
     };
-    let anchor = add_months(end, 0, month_end);
-    let mut coupons = 1.0 + f64::from(u8::from(end < anchor));
-    let mut front = add_months(anchor, months, month_end);
-    while front < end {
-        front = add_months(front, months, month_end);
+    let start_date = checked_add_months_1900(settlement, 0, end_of_month)?;
+    let mut coupons = if settlement < start_date { 1.0 } else { 0.0 };
+    let mut front = checked_add_months_1900(start_date, months, end_of_month)?;
+    let mut steps = 0_i64;
+    while front < first_coupon {
+        steps += 1;
+        if steps > MAX_COUPON_PERIODS + 2 {
+            return Err(FormulaError::Num);
+        }
         coupons += 1.0;
+        front = checked_add_months_1900(front, months, end_of_month)?;
     }
-    coupons
-}
-
-/// The month and day of `a` and `b` agree (or both are month ends) and are a whole number of
-/// coupon periods apart.
-fn whole_periods_apart(a: i64, b: i64, frequency: i64) -> bool {
-    let (ay, am, ad, _) = crate::functions_coupon::month_parts(a);
-    let (by, bm, bd, _) = crate::functions_coupon::month_parts(b);
-    if ad != bd && !(is_month_end_serial(a) && is_month_end_serial(b)) {
-        return false;
-    }
-    ((by - ay) * 12 + (bm - am)).abs() % (12 / frequency) == 0
+    Ok(coupons)
 }
 
 /// A bond with an odd first period, reduced to what the price depends on besides the yield: the
@@ -131,18 +130,29 @@ impl OddFirst {
                 positive_days(issue, settlement, basis) / e,
             ));
         }
-        let n = coupon_schedule(first, maturity, frequency)?.count;
-        let nq = coupons_between(first, settlement, 12 / frequency);
+        let first_to_mat = coupon_schedule(first, maturity, frequency)?;
+        if first_to_mat.previous < 0 {
+            return Err(FormulaError::Num);
+        }
+        let n = first_to_mat.count;
+        let nq = coup_number_whole(first, settlement, 12 / frequency)?;
         let dsc = if basis == 2 || basis == 3 {
             positive_days(settlement, to_first.next, basis)
         } else {
+            if to_first.previous < 0 {
+                return Err(FormulaError::Num);
+            }
             e - days_by_basis(to_first.previous, settlement, basis).0
         };
         let ratio = dsc / e;
         let mut late = first;
         let (mut dc_sum, mut a_sum) = (0.0, 0.0);
-        for index in (1..=coupon_schedule(issue, first, frequency)?.count).rev() {
-            let early = add_months(late, -12 / frequency, false);
+        let nc = coupon_schedule(issue, first, frequency)?;
+        if nc.previous < 0 {
+            return Err(FormulaError::Num);
+        }
+        for index in (1..=nc.count).rev() {
+            let early = checked_add_months_1900(late, -12 / frequency, false)?;
             let nl = if basis == 1 {
                 positive_days(early, late, basis)
             } else {
@@ -296,13 +306,16 @@ impl SheetEngine {
         }
         let result = if first_period {
             let ordered = maturity > first && first > settlement && settlement > issue;
-            if !ordered
-                || !whole_periods_apart(maturity, first, frequency)
+            if !ordered {
+                return Err(FormulaError::Num);
+            }
+            check_coupon_span(issue, maturity, frequency)?;
+            let first_sched = coupon_schedule(first, maturity, frequency)?;
+            if first_sched.previous != first
                 || coupon_schedule(issue, maturity, frequency)?.previous < 0
             {
                 return Err(FormulaError::Num);
             }
-            check_coupon_span(issue, maturity, frequency)?;
             let odd = OddFirst::new(&OddFirstInput {
                 settlement,
                 maturity,

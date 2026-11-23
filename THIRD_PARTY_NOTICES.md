@@ -10529,3 +10529,65 @@ Source: https://github.com/apache/poi (`poi/src/main/java/org/apache/poi/hssf/re
 ### Sheet `FILTERXML` XML parser dependency (`roxmltree`, MIT OR Apache-2.0, PD-320)
 
 `crates/easyoffice-sheet/src/functions_filterxml.rs` uses `roxmltree` 0.21 (`MIT OR Apache-2.0`, already resolved in the workspace lock file and documented above) unmodified with `allow_dtd: false` and `nodes_limit: 16_384` after running `XmlSanitizer::validate_safe_xml`. The XPath 1.0 lexer/parser (`crates/easyoffice-sheet/src/xpath_ast.rs`) and bounded XPath 1.0 evaluator (`crates/easyoffice-sheet/src/functions_filterxml.rs`, `functions_filterxml_core.rs`) are original cleanroom code implementing the W3C XPath 1.0 specification.
+
+### IronCalc financial day-count and bond functions and ExcelFinancialFunctions (MIT OR Apache-2.0; MIT)
+
+Sources: https://github.com/ironcalc/IronCalc (commit `f93662006b8fb1c401dc870bbda26c5d60ac6037`, MIT OR Apache-2.0, used under MIT, Copyright 2023 EqualTo GmbH, Copyright 2023-present IronCalc contributors, Copyright 2026-present IronCalc GmbH) and https://github.com/fsprojects/ExcelFinancialFunctions (`bonds.fs`, `oddbonds.fs`, `daycountbasis.fs`, MIT License, Copyright (c) 2013 Luca Bolognese).
+
+Nothing is vendored or linked at runtime; for `PD-323`, `crates/easyoffice-sheet/src/functions_coupon.rs`, `functions_bond.rs`, and `functions_odd.rs` port the following algorithms into this engine's `i64` serial date representation with `MAX_COUPON_PERIODS` step budgets:
+
+- `base/src/functions/financial/calendar.rs` lines 182-221 (`is_last_day_of_month`, `unchecked_add_months`, `add_months`) into `is_last_day_of_month_1900`, `unchecked_add_months_1900`, and `checked_add_months_1900` in `functions_coupon.rs`.
+- `base/src/functions/financial/financial_bonds.rs` lines 34-58, 111-130, 205-250, 433-457, and 1463-1480 (`find_pcd_ncd`, `coupdays_actual`, `days_30_360_us_both`, `fn_coupdaysnc` US 30/360 difference rule) into `coupon_schedule`, `coupdays_actual`, `days_30_360_us_psa`, and `eval_coupon_func` in `functions_coupon.rs`.
+- `base/src/functions/financial/accrint.rs` lines 20-268 and `financial_bonds.rs` lines 749-772 (`compute_accrint` and fixed-range `[-0.9999, 100.0]` yield bisection fallback) into `compute_accrint` and `bisect_wide` in `functions_bond.rs`.
+- `base/src/functions/financial/financial_bonds.rs` lines 476-616 (`coup_number` and `compute_oddfprice` long odd first period) into `coup_number_whole` and `OddFirst::new` in `functions_odd.rs`.
+- Reference test suites `base/src/test/test_fn_accrint.rs`, `test_fn_bond_functions.rs`, `test_fn_coupon_dates.rs`, and `test_fn_oddfprice.rs` into `crates/easyoffice-sheet/tests/sheet_ironcalc_cases/` and `crates/easyoffice-sheet/tests/sheet_fin_daycount.rs`.
+
+```
+MIT License
+
+Copyright (c) 2023 EqualTo GmbH
+Copyright (c) 2023-present IronCalc contributors
+Copyright (c) 2026-present IronCalc GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2013 Luca Bolognese
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

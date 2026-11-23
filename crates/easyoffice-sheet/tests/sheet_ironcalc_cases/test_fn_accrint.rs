@@ -360,6 +360,26 @@ fn fn_accrint_basis_3_actual_365() {
     );
 }
 #[test]
+fn fn_accrint_leap_year_february() {
+    // Leap-year boundary case: settlement on Feb 29 inside a leap year.
+    // Issue 2020-1-1, first_interest 2020-7-1, settlement 2020-2-29.
+    // Under basis 1 (Actual/Actual):
+    //   actual days from 2020-1-1 to 2020-2-29 = 59
+    //   period 2020-1-1 to 2020-7-1 actual = 182
+    //   AI = 1000 * 0.05 * 59/182 = 16.208791...
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2020,1,1), DATE(2020,7,1), DATE(2020,2,29), 0.1, 1000, 2, 1)",
+    );
+    model.evaluate();
+    let v: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (v - 16.208_791_208_8).abs() < 1e-6,
+        "leap year Feb 29 settlement = {v}, expected ~16.2088 (59/182 * 50)"
+    );
+}
+#[test]
 fn fn_accrint_month_end_first_interest() {
     // First_interest on the last day of a month with 31 days, semi-annual.
     // Issue 2008-2-29, first_interest 2008-8-31 (last day of Aug),
@@ -461,6 +481,51 @@ fn fn_accrint_xlsx_oracle_k7_calc_false_freq2_short_span() {
         "K7 freq=2 basis=0 calc_method=FALSE = {a1}, expected 247.5"
     );
 }
+// J8-J10: ACCRINT(2017-01-01, 2017-12-01, 2017-04-01, 0.33, 3000,
+// 4, basis) for basis in {1, 2, 3}. Each basis yields its own
+// accrued-interest value, matching the reference app.
+#[test]
+fn fn_accrint_xlsx_oracle_j8_freq4_basis1() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2017,1,1), DATE(2017,12,1), DATE(2017,4,1), 0.33, 3000, 4, 1)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 241.123_626_4).abs() < 1e-6,
+        "J8 freq=4 basis=1 = {a1}, expected 241.1236264"
+    );
+}
+#[test]
+fn fn_accrint_xlsx_oracle_j9_freq4_basis2() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2017,1,1), DATE(2017,12,1), DATE(2017,4,1), 0.33, 3000, 4, 2)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 236.5).abs() < 1e-6,
+        "J9 freq=4 basis=2 = {a1}, expected 236.5"
+    );
+}
+#[test]
+fn fn_accrint_xlsx_oracle_j10_freq4_basis3() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2017,1,1), DATE(2017,12,1), DATE(2017,4,1), 0.33, 3000, 4, 3)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 240.041_095_9).abs() < 1e-6,
+        "J10 freq=4 basis=3 = {a1}, expected 240.0410959"
+    );
+}
 #[test]
 fn fn_accrint_xlsx_oracle_j11_freq4_basis4() {
     let mut model = new_empty_model();
@@ -473,5 +538,65 @@ fn fn_accrint_xlsx_oracle_j11_freq4_basis4() {
     assert!(
         (a1 - 247.5).abs() < 1e-6,
         "J11 freq=4 basis=4 = {a1}, expected 247.5"
+    );
+}
+// ---------------------------------------------------------------------
+// Cross-frequency oracle tests for the odd-long-first-coupon settlement
+// numerator matching the reference app.
+// ---------------------------------------------------------------------
+#[test]
+fn fn_accrint_freq2_oddlong_basis2() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2016,6,1), DATE(2017,12,1), DATE(2016,9,1), 0.33, 3000, 2, 2)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 239.25).abs() < 1e-6,
+        "freq=2 odd-long basis=2 = {a1}, expected 239.25"
+    );
+}
+#[test]
+fn fn_accrint_freq2_oddlong_basis3() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2016,6,1), DATE(2017,12,1), DATE(2016,9,1), 0.33, 3000, 2, 3)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 249.534_247).abs() < 1e-4,
+        "freq=2 odd-long basis=3 = {a1}, expected ~249.5342"
+    );
+}
+#[test]
+fn fn_accrint_freq2_oddlong_basis1_last_period_normalization() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2016,6,1), DATE(2017,12,1), DATE(2016,9,1), 0.33, 3000, 2, 1)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 251.557_377).abs() < 1e-4,
+        "freq=2 odd-long basis=1 = {a1}, expected ~251.5574"
+    );
+}
+#[test]
+fn fn_accrint_freq4_nc2_basis1() {
+    let mut model = new_empty_model();
+    model._set(
+        "A1",
+        "=ACCRINT(DATE(2017,6,1), DATE(2017,12,1), DATE(2017,7,1), 0.33, 3000, 4, 1)",
+    );
+    model.evaluate();
+    let a1: f64 = model._get_text("A1").parse().unwrap();
+    assert!(
+        (a1 - 78.873_626).abs() < 1e-4,
+        "freq=4 NC=2 basis=1 = {a1}, expected ~78.87363"
     );
 }

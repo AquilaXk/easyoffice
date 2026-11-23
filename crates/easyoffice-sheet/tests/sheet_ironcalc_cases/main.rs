@@ -60,6 +60,7 @@ mod test_fn_accrint;
 mod test_fn_accrintm;
 mod test_fn_bond_functions;
 mod test_fn_choose;
+mod test_fn_coupon_dates;
 mod test_fn_day;
 mod test_fn_drop_take;
 mod test_fn_exact;
