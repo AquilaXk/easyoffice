@@ -36,7 +36,13 @@
     if (arrow) return { t: "move", dr: arrow[0], dc: arrow[1], jump: mod, extend: shift };
     if (key === "Home") return { t: "home", whole: mod, extend: shift };
     if (key === "End") return { t: "end", whole: mod, extend: shift };
-    if (mod) return key.toLowerCase() === "a" ? { t: "all" } : null;
+    if (key === " " && mod && !shift && !ev.altKey) return { t: "selectCol" };
+    if (key === " " && shift && !mod && !ev.altKey) return { t: "selectRow" };
+    if (mod) {
+      const lo = key.toLowerCase();
+      if (!shift && !ev.altKey && (lo === "d" || lo === "r")) return { t: "fill", dir: lo === "d" ? "down" : "right" };
+      return lo === "a" ? { t: "all" } : null;
+    }
     if (key === "PageDown" || key === "PageUp") return { t: "page", dr: key === "PageDown" ? 1 : -1, extend: shift };
     if (key === "Tab") return { t: "walk", dr: 0, dc: shift ? -1 : 1 };
     if (key === "Enter" || key === "F2" || key === " ") return { t: "edit" };

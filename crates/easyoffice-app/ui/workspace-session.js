@@ -43,7 +43,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
     "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     find: ["DOC", "SHEET", "BASE"], replace: ["DOC", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
-    "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
+    "clip-copy": [...EDIT_MODULES, "BASE"], "clip-cut": [...DOC_SHEET_MODULES, "BASE"], "clip-paste": [...DOC_SHEET_MODULES, "BASE"],
     "mod-symbol": EDIT_MODULES,
     "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
     "table-border-bg": ["DOC"], "table-cell-props": ["DOC"], "table-col-equal": ["DOC"],
@@ -755,6 +755,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         return;
       }
       if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
+      if (mod === "BASE") return host.__EASYOFFICE_BASE_BOARD_HOST__?.getBaseStudio()?.runClipboardCommand?.(cmd, readSystemClipboard, writeSystemClipboard);
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();
       if (cmd === "clip-paste") return runDocClipboardPaste(range);

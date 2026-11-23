@@ -98,7 +98,7 @@
     const activeTable = () => M.getTable(state, state.activeTableId);
     const setFeedback = (msg) => { deps.setFeedback?.(String(msg || "")); };
     // Cell selection, keys, clipboard of the datasheet (`base-cell-select.js`): it outlives a redraw, so an edit keeps the selection.
-    const cellSel = host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__(doc, { updateCells: (edits) => updateCells(edits), setFeedback, relationIds: (field, text) => relationIds(field, text) });
+    const cellSel = host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__(doc, { updateCells: (edits) => updateCells(edits), applyPaste: (edits, newRows) => applyPaste(edits, newRows), setFeedback, relationIds: (field, text) => relationIds(field, text) });
     const gridSize = host.__EASYOFFICE_CREATE_BASE_GRID_SIZE__?.(doc, { setFieldWidth: (id, w) => setFieldWidth(id, w), setRowHeight: (h) => setRowHeight(h), setFeedback });
     const recordUndo = () => { deps.recordUndo?.(); };
     const noteActivity = () => { deps.noteActivity?.(); };
@@ -571,7 +571,7 @@
       const tbody = gridWin.tbody, itemCount = gridWin.count;
       // The selection is kept while the table is drawn again for an edit; another table, filter, sort or group starts without one.
       const viewKey = JSON.stringify([table.id, table.filters, table.filterConjunction, table.sorts, table.groupByFieldId, table.collapsedGroups]);
-      cellSel.bind({ tbl: tblEl, wrap, win: gridWin, fields: query.fields }, viewKey);
+      cellSel.bind({ tbl: tblEl, wrap, win: gridWin, fields: query.fields, tableId: table.id }, viewKey);
       gridSize?.bind({ tbl: tblEl, table, query, win: gridWin, footSums });
       setAttr(tblEl, "aria-rowcount", String(itemCount + 3)); setAttr(headRow, "aria-rowindex", "1");
 
@@ -841,6 +841,11 @@
       if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
       return res;
     }
+    const applyPaste = (edits, newRows) => {
+      const res = withActive((tbl) => host.__EASYOFFICE_BASE_CLIPBOARD__.applyPasteMutation(M, state, tbl, edits, newRows), true);
+      if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
+      return res;
+    };
 
     function setView(viewMode) {
       const tbl = activeTable();
@@ -968,7 +973,7 @@
     const api = {
       bind, render, getState, setState, resetBlank,
       addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, deleteRecord,
-      selection: cellSel.selection, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
+      selection: cellSel.selection, selectedRanges: cellSel.selectedRanges, runClipboardCommand: cellSel.runClipboardCommand, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
       liveQuery: () => liveQuery || (activeTable() ? M.queryTableView(state, activeTable().id) : null),
       onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),
       activeCellTarget: cellSel.activeTarget, selectCellById: cellSel.selectRecordField, relationIds,

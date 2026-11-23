@@ -50,7 +50,7 @@ async function openBase(extra = {}) {
   const { document, host } = await createWorkspaceHarness();
   patchHarness(document);
   rowHeight = () => ROW_PX;
-  for (const name of ["sheet-nav.js", "base-model.js", "base-virtual.js", "base-grid-window.js", "base-cell-nav.js", "base-cell-select.js", "base-studio.js"]) loadUiModule(new URL(UI + name, import.meta.url), host);
+  for (const name of ["sheet-nav.js", "base-model.js", "base-virtual.js", "base-grid-window.js", "base-cell-nav.js", "base-clipboard.js", "base-cell-select.js", "base-studio.js"]) loadUiModule(new URL(UI + name, import.meta.url), host);
   const root = document.createElement("section");
   root.id = "pane-base";
   root.className = "editor-pane base-pane";
@@ -607,7 +607,7 @@ test("a paste with values a field refuses writes the others and counts the refus
   assert.equal(stateValues(studio, "r0").f2, 1);
 });
 
-test("one text pasted over a range fills the range; a block is cut at the end of the table and the fields, and passes group rows", async () => {
+test("one text pasted over a range fills the range; a block appends records past the end, cuts columns, and passes group rows", async () => {
   const { root, studio } = await openBase();
   studio.setState(bigState(8));
   view(root);
@@ -617,11 +617,13 @@ test("one text pasted over a range fills the range; a block is cut at the end of
   assert.deepEqual([1, 2, 3].map((i) => stateValues(studio, "r" + i).f1), ["같은 값", "같은 값", "같은 값"]);
   assert.equal(stateValues(studio, "r2").f2, 2, "a text that a number field refuses leaves it");
   mousedown(cellOf(root, "r6", "f2"));
-  // Two fields are left from "수량" on: the third text of a line is cut; the third line has no record to go to.
+  // Two fields are left from "수량" on: the third text of a line is cut; the third line appends a new record.
   paste(root, "1\t완료\t9\n5\t대기\t9\n7\t진행\t9");
   assert.deepEqual([stateValues(studio, "r6").f2, stateValues(studio, "r6").f3], [1, "완료"]);
   assert.deepEqual([stateValues(studio, "r7").f2, stateValues(studio, "r7").f3], [5, "대기"]);
-  assert.equal(studio.getState().tables[0].records.length, 8, "no record is added beyond the end");
+  const recs = studio.getState().tables[0].records;
+  assert.equal(recs.length, 9, "the third pasted line creates a new record");
+  assert.deepEqual(recs[8].values, { f1: "", f2: 7, f3: "진행" });
   assert.equal(stateValues(studio, "r6").f1, "항목 6", "the field before the active cell is not touched");
 });
 

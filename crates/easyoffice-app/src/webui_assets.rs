@@ -45,6 +45,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "base-board-host.js",
     "base-cell-nav.js",
     "base-cell-select.js",
+    "base-clipboard.js",
     "base-grid-size.js",
     "base-grid-window.js",
     "base-model.js",

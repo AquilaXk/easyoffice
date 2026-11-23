@@ -109,3 +109,7 @@
 .base-grid-table .base-grid-row td[data-sel~="l"]::after { border-left-width: 1px; }
 .base-grid-table .base-grid-row td[data-sel~="r"]::after { border-right-width: 1px; }
 .base-grid-table .base-grid-row td[data-sel~="a"] { background: var(--ui-surface); outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+.base-grid-table thead th[data-sel-hdr="true"], .base-grid-table .base-row-index[data-sel-hdr="true"] { background: var(--ui-selected); color: var(--accent-strong); }
+.base-grid-table .base-new-record-row[data-sel="append"] td { background: var(--ui-selected); }
+.base-grid-table .base-grid-row td[data-fill-preview="true"] { background: var(--ui-selected); outline: 1px dashed var(--accent-primary); outline-offset: -1px; }
+.base-fill-handle { position: absolute; right: -3px; bottom: -3px; z-index: 4; width: 7px; height: 7px; background: var(--accent-primary); border: 1px solid var(--ui-surface); cursor: crosshair; }

@@ -479,4 +479,42 @@ export const baseSteps = [
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.getElementById("find-dialog")?.open);
   }],
+
+  ["multi-range cut, header selection, fill handle series, append paste, and sorted edit selection preservation work in live layout (PD-316)", async (page) => {
+    const mod = process.platform === "darwin" ? "Meta" : "Control";
+    await load(page, 10, "none");
+    await page.locator('thead th[data-field-id="f2"]').click();
+    assert.equal(await page.$eval('thead th[data-field-id="f2"]', (th) => th.getAttribute("data-sel-hdr")), "true");
+    assert.deepEqual(await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.selectedRanges()), [{ r1: 1, r2: 10, c1: 2, c2: 2 }]);
+    await page.locator('tr[data-record-id="r1"] td.base-row-index').click();
+    assert.equal(await page.$eval('tr[data-record-id="r1"] td.base-row-index', (td) => td.getAttribute("data-sel-hdr")), "true");
+
+    await cellOf(page, 0, "f1").click();
+    await cellOf(page, 2, "f1").click({ modifiers: [mod] });
+    assert.equal(await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.selectedRanges().length), 2);
+    await page.keyboard.press("ControlOrMeta+x");
+    assert.deepEqual([(await recordValues(page, 0)).f1, (await recordValues(page, 2)).f1], ["", ""]);
+
+    await cellOf(page, 0, "f2").click();
+    await cellOf(page, 1, "f2").click({ modifiers: ["Shift"] });
+    const hBox = await page.locator(".base-fill-handle").boundingBox();
+    const dstBox = await cellOf(page, 4, "f2").boundingBox();
+    await page.mouse.move(hBox.x + hBox.width / 2, hBox.y + hBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dstBox.x + dstBox.width / 2, dstBox.y + dstBox.height / 2, { steps: 4 });
+    await page.mouse.up();
+    assert.deepEqual([2, 3, 4], await page.evaluate(() => [2, 3, 4].map((i) => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].records[i].values.f2)));
+
+    await page.locator("tr.base-new-record-row td.base-new-row-marker").click();
+    assert.equal(await paste(page, { "text/plain": "추가 A\t50\n추가 B\t60" }), true);
+    assert.equal(await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.getState().tables[0].records.length), 12);
+
+    await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.setSorts([{ fieldId: "f2", dir: "asc" }]));
+    await cellOf(page, 5, "f2").click();
+    await page.keyboard.press("Enter");
+    await page.locator('tr[data-record-id="r5"] td[data-field-id="f2"] input').fill("999");
+    await page.keyboard.press("Tab");
+    const after = await activeInfo(page);
+    assert.deepEqual([after?.rec, after?.field], ["r5", "f3"]);
+  }],
 ];

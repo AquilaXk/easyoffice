@@ -214,6 +214,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/base-virtual.js",
   "../crates/easyoffice-app/ui/base-grid-window.js",
   "../crates/easyoffice-app/ui/base-cell-nav.js",
+  "../crates/easyoffice-app/ui/base-clipboard.js",
   "../crates/easyoffice-app/ui/base-cell-select.js",
   "../crates/easyoffice-app/ui/base-grid-size.js",
   "../crates/easyoffice-app/ui/base-studio.js",
