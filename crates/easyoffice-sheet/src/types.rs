@@ -313,6 +313,10 @@ pub enum FormulaError {
     /// An array result that cannot be calculated: an empty array (`FILTER` without a match), a call
     /// that returns an array where one value is needed.
     Calc,
+    /// Cannot connect to an external data source or online quote service (`STOCKHISTORY`, connected data).
+    Connect,
+    /// Evaluation blocked by workbook security settings (external links, XLM macros/DLL calls).
+    Blocked,
 }
 
 impl FormulaError {
@@ -327,6 +331,8 @@ impl FormulaError {
             Self::Num => "#NUM!",
             Self::Spill => "#SPILL!",
             Self::Calc => "#CALC!",
+            Self::Connect => "#CONNECT!",
+            Self::Blocked => "#BLOCKED!",
         }
     }
 
@@ -341,6 +347,8 @@ impl FormulaError {
             "#CYCLE!" => Some(Self::Cycle),
             "#SPILL!" => Some(Self::Spill),
             "#CALC!" => Some(Self::Calc),
+            "#CONNECT!" => Some(Self::Connect),
+            "#BLOCKED!" => Some(Self::Blocked),
             _ => None,
         }
     }

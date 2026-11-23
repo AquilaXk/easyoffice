@@ -67,7 +67,7 @@ fn pivot_total_key() -> (String, String) {
 const ERROR_NAN: u64 = 0x7FF8_0000_0000_0000;
 const ERROR_NAN_MASK: u64 = !0xF;
 
-const PIVOT_ERRORS: [FormulaError; 9] = [
+const PIVOT_ERRORS: [FormulaError; 11] = [
     FormulaError::DivByZero,
     FormulaError::Value,
     FormulaError::Ref,
@@ -77,6 +77,8 @@ const PIVOT_ERRORS: [FormulaError; 9] = [
     FormulaError::Num,
     FormulaError::Spill,
     FormulaError::Calc,
+    FormulaError::Connect,
+    FormulaError::Blocked,
 ];
 
 /// The `f64` a pivot grid holds for the error `err`.

@@ -878,7 +878,7 @@
   const CELL_TYPE_TAGS = new Set(["n", "s", "b", "e", "f"]);
   const CELL_ERROR_LITERALS = new Set([
     "#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!",
-    "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA", "#ERROR!",
+    "#N/A", "#SPILL!", "#CALC!", "#CONNECT!", "#BLOCKED!", "#GETTING_DATA", "#ERROR!",
   ]);
   const STRICT_CELL_NUM_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 

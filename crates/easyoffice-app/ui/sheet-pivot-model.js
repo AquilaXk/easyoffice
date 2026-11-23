@@ -32,7 +32,7 @@
     max: "최대",
   });
 
-  const ERROR_TEXTS = new Set(["#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#N/A", "#NUM!", "#SPILL!", "#CALC!"]);
+  const ERROR_TEXTS = new Set(["#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#N/A", "#NUM!", "#SPILL!", "#CALC!", "#CONNECT!", "#BLOCKED!"]);
   // An aggregation over an error value is that error, written as its literal (the engine sends it as a string).
   const numberText = (n) => {
     if (typeof n === "number") return Number.isFinite(n) ? String(Math.round(n * 1e10) / 1e10) : "";

@@ -277,3 +277,110 @@ fn explicit_cell_kinds_round_trip_across_xlsx_ods_and_xls_and_stay_sparse() {
     }
     assert_eq!(capped.cell_types.len(), MAX_STYLED_CELLS);
 }
+
+#[test]
+fn modern_blocked_and_connect_errors_roundtrip_across_xlsx_ods_xls_and_xlfn_formulas() {
+    use easyoffice_formats::{CellValueKind, SheetStyling};
+
+    let raw_cells = vec![
+        (0, 0, "#CONNECT!".to_string()),
+        (1, 0, "#BLOCKED!".to_string()),
+        (2, 0, "#BLOCKED!".to_string()),
+        (
+            3,
+            0,
+            "=IMAGE(\"https://example.invalid/a.png\")".to_string(),
+        ),
+        (4, 0, "=STOCKHISTORY(\"MSFT\",DATE(2026,1,1))".to_string()),
+    ];
+    let mut styling = SheetStyling::default();
+    styling.set_cell_kind(0, 0, "#CONNECT!", CellValueKind::Error);
+    styling.set_cell_kind(1, 0, "#BLOCKED!", CellValueKind::Error);
+    styling.set_cell_kind(2, 0, "#BLOCKED!", CellValueKind::Text);
+    assert_eq!(styling.cell_types.len(), 1);
+
+    let xlsx = OoxmlCodec::pack_xlsx_multi_styled(
+        &[("S".to_string(), raw_cells.clone())],
+        &[],
+        std::slice::from_ref(&styling),
+    )
+    .unwrap();
+    let sheet_xml = part(&xlsx, "xl/worksheets/sheet1.xml");
+    assert!(
+        sheet_xml.contains("<c r=\"A1\" t=\"e\"><v>#CONNECT!</v></c>"),
+        "{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<c r=\"A2\" t=\"e\"><v>#BLOCKED!</v></c>"),
+        "{sheet_xml}"
+    );
+    assert!(sheet_xml.contains("<c r=\"A3\" t=\"s\">"), "{sheet_xml}");
+    assert!(sheet_xml.contains("_xlfn.IMAGE("), "{sheet_xml}");
+    assert!(sheet_xml.contains("_xlfn.STOCKHISTORY("), "{sheet_xml}");
+
+    let (xlsx_sheets, xlsx_stylings) = OoxmlCodec::unpack_xlsx_with_styling(&xlsx).unwrap();
+    assert_eq!(xlsx_sheets[0].1, raw_cells);
+    assert_eq!(
+        xlsx_stylings[0].1.cell_kind(0, 0, "#CONNECT!"),
+        CellValueKind::Error
+    );
+    assert_eq!(
+        xlsx_stylings[0].1.cell_kind(1, 0, "#BLOCKED!"),
+        CellValueKind::Error
+    );
+    assert_eq!(
+        xlsx_stylings[0].1.cell_kind(2, 0, "#BLOCKED!"),
+        CellValueKind::Text
+    );
+
+    let ods = OdfCodec::pack_ods_multi_styled(
+        &[("S".to_string(), raw_cells[..3].to_vec())],
+        std::slice::from_ref(&styling),
+    )
+    .unwrap();
+    let ods_xml = part(&ods, "content.xml");
+    assert!(
+        ods_xml.contains("calcext:value-type=\"error\"><text:p>#CONNECT!</text:p>"),
+        "{ods_xml}"
+    );
+    assert!(
+        ods_xml.contains("calcext:value-type=\"error\"><text:p>#BLOCKED!</text:p>"),
+        "{ods_xml}"
+    );
+    let (ods_sheets, ods_stylings) = OdfCodec::unpack_ods_with_styling(&ods).unwrap();
+    assert_eq!(ods_sheets[0].1, raw_cells[..3]);
+    assert_eq!(
+        ods_stylings[0].1.cell_kind(0, 0, "#CONNECT!"),
+        CellValueKind::Error
+    );
+    assert_eq!(
+        ods_stylings[0].1.cell_kind(2, 0, "#BLOCKED!"),
+        CellValueKind::Text
+    );
+
+    let xls = LegacyOle2Codec::pack_xls_multi_values_styled(
+        &[LegacyXlsPayload {
+            sheet_name: "S".to_string(),
+            cells: raw_cells[..3].to_vec(),
+        }],
+        &[],
+        std::slice::from_ref(&styling),
+    )
+    .unwrap();
+    let (xls_sheets, xls_stylings) = LegacyOle2Codec::unpack_xls_with_styling(&xls).unwrap();
+    assert_eq!(xls_sheets[0].1, raw_cells[..3]);
+    assert_eq!(
+        xls_stylings[0].1.cell_kind(0, 0, "#CONNECT!"),
+        CellValueKind::Error
+    );
+    assert_eq!(
+        xls_stylings[0].1.cell_kind(1, 0, "#BLOCKED!"),
+        CellValueKind::Error
+    );
+    // Modern error literals without MS-XLS §2.5.10 BErr codes travel via LABELSST in BIFF8
+    // (`biff8_xls_reader.rs`) and read back as inferred `Error`, matching `#SPILL!` and `#CALC!`.
+    assert_eq!(
+        xls_stylings[0].1.cell_kind(2, 0, "#BLOCKED!"),
+        CellValueKind::Error
+    );
+}

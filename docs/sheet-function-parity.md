@@ -4,7 +4,7 @@
 
 ## 요약
 
-- 기준 목록 521개 중 우리 엔진은 **505개**(PD-270 전 480개, PD-271 전 494개, PD-272 전 501개), 없는 것은 **16개**(전 41개, PD-271 전 27개, PD-272 전 20개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`FILTERXML`은 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
+- 기준 목록 521개 중 우리 엔진은 **505개**(PD-270 전 480개, PD-271 전 494개, PD-272 전 501개), 없는 것은 **16개**(전 41개, PD-271 전 27개, PD-272 전 20개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`FILTERXML`·`IMAGE`·`CALL`·`REGISTER.ID`·`STOCKHISTORY`는 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
 - 참조 엔진: A 496개, B 497개, C 403개가 기준 목록에 든다.
 - 없는 16개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `FILTERXML`은 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 우리는 PD-273 클린룸 구현).
 
@@ -33,9 +33,9 @@
 |---|---|---|---|
 | 텍스트 | `DETECTLANGUAGE` | - | 온라인 번역 서비스. 대상 아님. |
 | 텍스트 | `TRANSLATE` | - | 위와 같다. |
-| 조회·참조 | `IMAGE` | B | 셀 안 그림. 그림 주소를 받아야 해서 신뢰할 수 없는 문서가 네트워크에 닿는다. 대상 아님. 문서의 오류 값은 `#BLOCKED!`·`#CONNECT!`인데 엔진에 없다(PD-271). |
+| 조회·참조 | `IMAGE` | B | 셀 안 그림. 그림 주소를 받아야 해서 신뢰할 수 없는 문서가 네트워크에 닿는다. 대상 아님. 이름은 알고 `#BLOCKED!`(문서, PD-318)를 돌려준다. |
 | 조회·참조 | `RTD` | - | 실시간 데이터 서버. 외부 연결이라 대상 아님. 이름은 알고 `#N/A`(문서)를 돌려준다. |
-| 정보 | `STOCKHISTORY` | - | 온라인 시세. 대상 아님. |
+| 정보 | `STOCKHISTORY` | - | 온라인 시세. 대상 아님. 이름은 알고 `#CONNECT!`(문서, PD-318)를 돌려준다. |
 | 큐브 | `CUBEKPIMEMBER` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 큐브 | `CUBEMEMBER` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 큐브 | `CUBEMEMBERPROPERTY` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
@@ -43,8 +43,8 @@
 | 큐브 | `CUBESET` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 큐브 | `CUBESETCOUNT` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 큐브 | `CUBEVALUE` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
-| 추가 기능·자동화 | `CALL` | - | 외부 라이브러리 호출. 대상 아님. |
-| 추가 기능·자동화 | `REGISTER.ID` | - | 위와 같다. |
+| 추가 기능·자동화 | `CALL` | - | 외부 라이브러리 호출. 대상 아님. 이름은 알고 `#BLOCKED!`(문서, PD-318)를 돌려준다. |
+| 추가 기능·자동화 | `REGISTER.ID` | - | 위와 같다. 이름은 알고 `#BLOCKED!`(문서, PD-318)를 돌려준다. |
 | 웹 | `FILTERXML` | B | 유지되는 XPath 크레이트 없음, 클린룸·대체 크레이트 검토. `sxd-xpath`는 2018년 이후 릴리스가 없고 접두사 이름에서 패닉이 나며 질의 비용 상한을 금지 목록으로 막을 수 없었다(PD-271). 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 | 웹 | `WEBSERVICE` | - | 네트워크 호출. 신뢰할 수 없는 문서에서 열면 안 되므로 대상 아님. 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 
@@ -74,7 +74,7 @@
 | 텍스트 | `PHONETIC` | `functions_text_locale.rs` | 없음 | 약 20 | 후리가나를 읽지 못해 셀 글자를 돌려준다(범위는 왼쪽 위 칸). XLSX `rPh`는 읽기에서 버려진다. |
 | 조회·참조 | `GROUPBY`, `PIVOTBY` | `functions_groupby.rs`, `groupby_axis.rs`, `parser_array.rs` | 없음(참조 B는 이름만 있다) | 907 | 문서의 8·11개 인수. 합계·소계 글과 머리글 이름은 우리 선택. 함수 목록 인수는 `#VALUE!`. 훑는 양 800만, 칸 수는 배열 예산. |
 | 조회·참조 | `GETPIVOTDATA` | `functions_pivot_data.rs` | 없음 | 257 | 피벗 정의를 `set_pivot_tables`로 등록해야 한다(앱은 평가 요청과 세션의 `pivots`로 등록, PD-292). 원본 행을 한 번 읽어 피벗 엔진 규칙으로 계산한다. |
-| 웹·조회 | `WEBSERVICE`, `RTD`, `FILTERXML` | `functions_unavailable.rs` | 없음 | 약 50 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#VALUE!`)을 돌려준다. 없는 쪽으로 센다. `FILTERXML`은 보안 검토로 크레이트 구현을 뺐다. |
+| 웹·조회·정보 | `WEBSERVICE`, `RTD`, `FILTERXML`, `IMAGE`, `CALL`, `REGISTER.ID`, `STOCKHISTORY` | `functions_unavailable.rs` | 없음 | 약 60 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#VALUE!`, `#BLOCKED!`, `#BLOCKED!`, `#BLOCKED!`, `#CONNECT!`)을 돌려준다(PD-271, PD-318). 없는 쪽으로 센다. `FILTERXML`은 보안 검토로 크레이트 구현을 뺐다. |
 
 옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,350줄과 시험 약 900줄이다.
 
@@ -104,7 +104,8 @@
 - `FILTERXML`: 읽을 수 없는 XML이면 `#VALUE!`. 질의 구현을 뺐으므로 이름을 알고 항상 이 값을 돌려준다.
 - `RTD`: 실시간 서버가 없으면 `#N/A`. 이름을 알고 이 값을 돌려준다.
 - 큐브 7개: 연결 이름이 통합 문서에 저장된 연결이 아니면 `#NAME?`이 문서의 값이라 지금 동작이 맞다.
-- `IMAGE`: `#BLOCKED!`(보안 설정), `#CONNECT!`(연결 문제). `CALL`·`REGISTER.ID`: XLM 매크로 차단이면 `#BLOCKED!`. `STOCKHISTORY`는 같은 계열이다. 엔진에 이 오류 값이 없어 `#NAME?`를 유지한다(TODO).
+- `IMAGE`·`CALL`·`REGISTER.ID`: 보안 설정·XLM 매크로 차단으로 `#BLOCKED!`를 돌려준다(PD-318).
+- `STOCKHISTORY`: 온라인 시세 연결 없이 `#CONNECT!`를 돌려준다(PD-318). `WEBSERVICE`·`RTD`·`FILTERXML`과 함께 인자 오류(`#REF!` 등)를 먼저 전파하고 필수 인자 수가 맞지 않으면 `#VALUE!`를 낸다.
 
 ## 정확도 수정 30건
 

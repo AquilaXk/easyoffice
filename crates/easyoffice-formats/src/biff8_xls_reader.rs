@@ -71,8 +71,8 @@ impl XlsParseState {
         if raw.is_empty() {
             return;
         }
-        // Error literals outside MS-XLS §2.5.10 `BErr` (`#SPILL!`, `#CALC!`) have no `BoolErr`
-        // encoding in BIFF8 and are written as `LABELSST`, so reading them back keeps `Error`.
+        // Error literals outside MS-XLS §2.5.10 `BErr` (`#SPILL!`, `#CALC!`, `#CONNECT!`, `#BLOCKED!`)
+        // have no `BoolErr` encoding in BIFF8 and are written as `LABELSST`, so reading them back keeps `Error`.
         if kind == CellValueKind::Text
             && CellValueKind::infer(raw) == CellValueKind::Error
             && crate::cell_type::biff8_error_code(raw).is_none()

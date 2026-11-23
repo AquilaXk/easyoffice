@@ -676,3 +676,18 @@ fn readback_10k_cells_benchmark() {
     let avg_ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(iters);
     println!("readback_10k_cells_benchmark: avg_ms={avg_ms:.2}");
 }
+
+#[test]
+fn evaluate_sheet_reports_blocked_and_connect_error_buckets() {
+    let payload = r#"{"action":"inspect","sheets":["S1"],"range":"A1:D1","cells":[{"sheet":"S1","cell":"A1","value":"=IMAGE(\"https://example.invalid/a.png\")"},{"sheet":"S1","cell":"B1","value":"=CALL(\"Kernel32\",\"GetTickCount\",\"J\")"},{"sheet":"S1","cell":"C1","value":"=REGISTER.ID(\"Kernel32\",\"GetTickCount\")"},{"sheet":"S1","cell":"D1","value":"=STOCKHISTORY(\"MSFT\",DATE(2026,1,1))"}]}"#;
+    let out = EasyOfficeIpcRouter::dispatch("evaluate_sheet", payload).unwrap();
+    let root = parse_obj(&out);
+    let sheets = field(&root, "sheets").as_array().unwrap();
+    let err_counts = field(sheets[0].as_object().unwrap(), "errorCounts")
+        .as_object()
+        .unwrap();
+    assert_eq!(field(err_counts, "total").as_u64(), Some(4));
+    let by_code = field(err_counts, "byCode").as_object().unwrap();
+    assert_eq!(field(by_code, "#BLOCKED!").as_u64(), Some(3));
+    assert_eq!(field(by_code, "#CONNECT!").as_u64(), Some(1));
+}

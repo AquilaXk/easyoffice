@@ -21,7 +21,7 @@ const WORKSHEET_ONLY: [&str; 3] = ["FILTER", "PY", "SORT"];
 /// upper case; a function the engine does not have is listed too, so a formula that names it is
 /// spelled the way the file format wants. Functions of this engine with no entry
 /// (`AVERAGE.WEIGHTED`, `MARGINOFERROR`) are its own and are written as they are.
-const FUTURE: [&str; 167] = [
+const FUTURE: [&str; 168] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -159,6 +159,7 @@ const FUTURE: [&str; 167] = [
     "SORTBY",
     "STDEV.P",
     "STDEV.S",
+    "STOCKHISTORY",
     "SWITCH",
     "T.DIST",
     "T.DIST.2T",
@@ -587,7 +588,7 @@ mod tests {
     fn the_tables_hold_exactly_the_listed_names() {
         let mut future = [listed("spec"), listed("observed")].concat();
         future.sort_unstable();
-        assert_eq!(future.len(), 167, "a name repeats between the sections");
+        assert_eq!(future.len(), 168, "a name repeats between the sections");
         assert_eq!(FUTURE.to_vec(), future);
         let mut worksheet = listed("worksheet");
         worksheet.sort_unstable();

@@ -57,11 +57,10 @@
 ## 시트 함수 (PD-270·PD-271·PD-273, 비교표 `docs/sheet-function-parity.md`)
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열의 비공개 평활 계수 선택 목적함수(0.001 격자), 계절 경로의 순환식·끝점 고정 처리, `STAT`의 MAE·RMSE·MASE 오차 열 정의, 같은 날짜가 있을 때 `aggregation` 생략·`0` 동작, 범위 밖 인수와 시계열 안 대상 날짜의 오류 값(`docs/forecast-ets-cleanroom.md` 9장)
 - [ ] `GROUPBY`·`PIVOTBY`: 함수 목록(여러 열 집계), 만들어 붙이는 머리글·합계 글 문구(`Total`, `<항목> Total`, `Group`, `Value`)를 기준 앱 출력과 대조
-- [ ] `#BLOCKED!`·`#CONNECT!` 오류 값: `IMAGE`(문서에 명시)·`CALL`·`REGISTER.ID`(XLM 매크로 차단)·`STOCKHISTORY`에 필요하다. 지금은 `#NAME?`. 오류 값 종류를 더하려면 포맷·앱·페이지의 오류 목록을 함께 고친다
 - [ ] `PHONETIC`: XLSX `rPh` 후리가나를 읽어 셀에 보관하고 저장에도 쓴다(`xlsx_sheet.rs`, 포맷 크레이트 개편 병합 뒤). 지금은 셀 글자를 돌려준다
 - [ ] `FILTERXML`: 유지되는 XPath 크레이트가 없다. 클린룸 최소 평가기(상한 포함)나 대체 크레이트를 검토한다(PD-271). 지금은 이름만 알고 `#VALUE!`
 - [ ] 재무: `ACCRINT` 기준 1~3과 `ODDFPRICE`·`ODDFYIELD`·`ODDLPRICE` 일부 값이 참조 A 시험(기준 앱 산출값 대조)과 다르다. `base/src/functions/financial/accrint.rs`·`calendar.rs`의 일수 계산을 이식해 대조
-- [ ] 큐브 7개(`CUBE*`), `CALL`·`REGISTER.ID`, `STOCKHISTORY`, `DETECTLANGUAGE`·`TRANSLATE`, `IMAGE`는 외부 연결이나 신뢰할 수 없는 문서의 네트워크 접근이라 대상 아님(PD-271). `WEBSERVICE`·`RTD`는 이름만 알고 문서의 오류 값을 돌려준다
+- [ ] 큐브 7개(`CUBE*`), `CALL`·`REGISTER.ID`, `STOCKHISTORY`, `DETECTLANGUAGE`·`TRANSLATE`, `IMAGE`는 외부 연결이나 신뢰할 수 없는 문서의 네트워크 접근이라 대상 아님(PD-271). `WEBSERVICE`·`RTD`·`IMAGE`·`CALL`·`REGISTER.ID`·`STOCKHISTORY`는 이름만 알고 문서의 오류 값을 돌려준다
 - [ ] `A1:OFFSET(...)`처럼 함수 호출을 끝으로 하는 범위 연산자, `@` 암묵적 교차 연산자 일부(`COLUMNS(@A1:C1)`, `OFFSET(@B1:B4,...)`)
 - [ ] `TRIMRANGE`에 전체 열·행 참조(`A:A`)를 주면 배열 예산을 넘어 `#SPILL!`; 사용 범위로 먼저 줄여야 한다
 - [ ] `CELL`의 `format`·`width`·`color`·`parentheses`·`prefix`·`protect`·`filename`, `INFO`의 `release`·`osversion`·`directory`·`origin`(파일 이름·서식 정보를 평가 맥락에 실어야 함)

@@ -618,9 +618,8 @@ impl SheetEngine {
             "LENB" | "LEFTB" | "MIDB" | "RIGHTB" | "FINDB" | "SEARCHB" | "REPLACEB" | "ASC"
             | "DBCS" | "JIS" => self.eval_text_bytes_func(name, args, ctx, depth),
             "GETPIVOTDATA" => self.fn_getpivotdata(args, ctx, depth),
-            "WEBSERVICE" | "RTD" | "FILTERXML" => {
-                self.eval_unavailable_func(name, args, ctx, depth)
-            }
+            "WEBSERVICE" | "RTD" | "FILTERXML" | "IMAGE" | "CALL" | "REGISTER.ID"
+            | "STOCKHISTORY" => self.eval_unavailable_func(name, args, ctx, depth),
             "BAHTTEXT" => self.fn_bahttext(args, ctx, depth),
             "EUROCONVERT" => self.fn_euroconvert(args, ctx, depth),
             "PHONETIC" => self.fn_phonetic(args, ctx, depth),

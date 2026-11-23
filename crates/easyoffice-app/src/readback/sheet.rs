@@ -22,13 +22,22 @@ use super::{push_json_str, push_opt_json_str, same_sheet_name, ReadbackQuery};
 
 const MAX_VALIDATION_CHECKS: usize = 10_000;
 
-const ERROR_BUCKETS: [&str; 8] = [
-    "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#N/A", "#NUM!", "#SPILL!", "#CALC!",
+const ERROR_BUCKETS: [&str; 10] = [
+    "#DIV/0!",
+    "#VALUE!",
+    "#REF!",
+    "#NAME?",
+    "#N/A",
+    "#NUM!",
+    "#SPILL!",
+    "#CALC!",
+    "#CONNECT!",
+    "#BLOCKED!",
 ];
 
 #[derive(Default, Clone, Copy)]
 struct ErrorHistogram {
-    counts: [usize; 8],
+    counts: [usize; 10],
 }
 
 impl ErrorHistogram {
@@ -42,6 +51,8 @@ impl ErrorHistogram {
             FormulaError::Num | FormulaError::Cycle => 5,
             FormulaError::Spill => 6,
             FormulaError::Calc => 7,
+            FormulaError::Connect => 8,
+            FormulaError::Blocked => 9,
         };
         self.counts[idx] += 1;
     }

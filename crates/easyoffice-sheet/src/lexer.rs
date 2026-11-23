@@ -139,6 +139,8 @@ fn lex_error_literal(src: &str, start: usize) -> Result<(Token<'static>, usize),
         "#NUM!" => FormulaError::Num,
         "#SPILL!" => FormulaError::Spill,
         "#CALC!" => FormulaError::Calc,
+        "#CONNECT!" => FormulaError::Connect,
+        "#BLOCKED!" => FormulaError::Blocked,
         _ => return Err(FormulaError::Value),
     };
     Ok((Token::ErrorLiteral(err), i))

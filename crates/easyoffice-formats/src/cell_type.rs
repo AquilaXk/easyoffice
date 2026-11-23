@@ -108,6 +108,8 @@ pub fn is_error_literal(raw: &str) -> bool {
             | "#N/A"
             | "#SPILL!"
             | "#CALC!"
+            | "#CONNECT!"
+            | "#BLOCKED!"
             | "#GETTING_DATA"
             | "#ERROR!"
     )
@@ -160,6 +162,8 @@ mod tests {
         assert_eq!(CellValueKind::infer("true"), CellValueKind::Text);
         assert_eq!(CellValueKind::infer("#N/A"), CellValueKind::Error);
         assert_eq!(CellValueKind::infer("#DIV/0!"), CellValueKind::Error);
+        assert_eq!(CellValueKind::infer("#BLOCKED!"), CellValueKind::Error);
+        assert_eq!(CellValueKind::infer("#CONNECT!"), CellValueKind::Error);
         assert_eq!(CellValueKind::infer("#TAG"), CellValueKind::Text);
         assert_eq!(CellValueKind::infer("=SUM(A1:A3)"), CellValueKind::Formula);
         assert_eq!(CellValueKind::infer(" 42"), CellValueKind::Text);

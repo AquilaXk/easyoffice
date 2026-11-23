@@ -1,19 +1,22 @@
-//! `WEBSERVICE`, `RTD` and `FILTERXML`: names the engine knows and cannot serve (PD-271).
+//! `WEBSERVICE`, `RTD`, `FILTERXML`, `IMAGE`, `CALL`, `REGISTER.ID` and `STOCKHISTORY`:
+//! names the engine knows and cannot serve offline or under workbook security policy (PD-271, PD-318).
 //!
-//! 참조 구현: none. Both functions need a network or a server that a document must not reach on
-//! its own (an untrusted document would make the program call out), so neither is built. The
-//! function documentation says what a call that cannot be served gives, and that is what these
-//! return, instead of `#NAME?` for a name the reference app knows: `WEBSERVICE` is `#VALUE!` ("if the
-//! arguments are unable to return the data") and `RTD` is `#N/A` (no real-time data server). `FILTERXML` has no
-//! maintained XPath crate to run on (the one tried has no release since 2019, panics on a prefixed
-//! name and has no work budget), so it answers `#VALUE!`, the documented error for an XML text it
-//! cannot read. The
-//! arguments are read first, so an error in one of them is that error. The other functions that
-//! need a service (`STOCKHISTORY`, `DETECTLANGUAGE`, `TRANSLATE`, `IMAGE`, `CALL`, `REGISTER.ID`
-//! and the cube functions) are left as `#NAME?`: their documented errors (`#BLOCKED!`,
-//! `#CONNECT!`) are error values this engine does not have.
+//! 참조 구현: none. These functions reach out over a network, connect to a real-time or market-data
+//! server, or load external libraries (`CALL`/`REGISTER.ID`), which an untrusted document must not
+//! trigger automatically (`FILTERXML` awaits a bounded cleanroom evaluator). Each function checks its
+//! argument count and required positional arguments (`#VALUE!` when invalid), evaluates non-missing
+//! arguments first to propagate any error in them, and then returns its documented error literal:
+//! - `WEBSERVICE` -> `#VALUE!`
+//! - `FILTERXML` -> `#VALUE!`
+//! - `RTD` -> `#N/A`
+//! - `IMAGE`, `CALL`, `REGISTER.ID` -> `#BLOCKED!`
+//! - `STOCKHISTORY` -> `#CONNECT!`
 
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
+
+fn req(args: &[Expr], idx: usize) -> bool {
+    args.get(idx).is_some_and(|a| !matches!(a, Expr::Missing))
+}
 
 impl SheetEngine {
     pub(crate) fn eval_unavailable_func(
@@ -23,10 +26,30 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        let arity_ok = match name {
-            "WEBSERVICE" => args.len() == 1,
-            "FILTERXML" => args.len() == 2,
-            _ => args.len() >= 3,
+        let (arity_ok, err) = match name {
+            "WEBSERVICE" => (args.len() == 1 && req(args, 0), FormulaError::Value),
+            "FILTERXML" => (
+                args.len() == 2 && req(args, 0) && req(args, 1),
+                FormulaError::Value,
+            ),
+            "RTD" => (
+                args.len() >= 3 && req(args, 0) && req(args, 2),
+                FormulaError::Na,
+            ),
+            "IMAGE" => (
+                (1..=5).contains(&args.len()) && req(args, 0),
+                FormulaError::Blocked,
+            ),
+            "CALL" => (!args.is_empty() && req(args, 0), FormulaError::Blocked),
+            "REGISTER.ID" => (
+                (2..=3).contains(&args.len()) && req(args, 0) && req(args, 1),
+                FormulaError::Blocked,
+            ),
+            "STOCKHISTORY" => (
+                (2..=11).contains(&args.len()) && req(args, 0) && req(args, 1),
+                FormulaError::Connect,
+            ),
+            _ => (false, FormulaError::Name),
         };
         if !arity_ok {
             return Err(FormulaError::Value);
@@ -34,10 +57,6 @@ impl SheetEngine {
         for arg in args.iter().filter(|a| !matches!(a, Expr::Missing)) {
             self.eval_arg_val(arg, ctx, depth)?;
         }
-        Err(if name == "RTD" {
-            FormulaError::Na
-        } else {
-            FormulaError::Value
-        })
+        Err(err)
     }
 }

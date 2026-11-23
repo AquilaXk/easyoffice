@@ -333,7 +333,7 @@
 
   // ---- 중복된 항목 제거 (PD-242) ------------------------------------------------------------------------------------------
   const MAX_DEDUPE_ROWS = 200000;
-  const ERROR_LITERALS = new Set(["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#GETTING_DATA", "#SPILL!", "#CALC!"]);
+  const ERROR_LITERALS = new Set(["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#GETTING_DATA", "#SPILL!", "#CALC!", "#CONNECT!", "#BLOCKED!"]);
 
   function fnv1aStep(h, str) {
     let x = h >>> 0;
