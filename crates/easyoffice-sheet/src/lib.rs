@@ -38,6 +38,7 @@ mod functions_depr;
 mod functions_dist;
 mod functions_dist_more;
 mod functions_eng;
+mod functions_filterxml;
 mod functions_fin;
 mod functions_fin_args;
 mod functions_forecast_ets_args;
@@ -95,6 +96,7 @@ pub mod table_index;
 mod text_format;
 pub mod types;
 pub mod workbook;
+mod xpath_ast;
 
 pub use axis::{
     follow_sheet_change_links, follow_sheet_change_names, quote_sheet_name, rewrite_sheet_names,

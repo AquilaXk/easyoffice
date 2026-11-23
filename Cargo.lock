@@ -1311,6 +1311,7 @@ version = "0.2.3"
 dependencies = [
  "easyoffice-formats",
  "regex",
+ "roxmltree 0.21.2",
 ]
 
 [[package]]

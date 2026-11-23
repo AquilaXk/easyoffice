@@ -1,13 +1,12 @@
-//! `WEBSERVICE`, `RTD`, `FILTERXML`, `IMAGE`, `CALL`, `REGISTER.ID` and `STOCKHISTORY`:
+//! `WEBSERVICE`, `RTD`, `IMAGE`, `CALL`, `REGISTER.ID` and `STOCKHISTORY`:
 //! names the engine knows and cannot serve offline or under workbook security policy (PD-271, PD-318).
 //!
 //! 참조 구현: none. These functions reach out over a network, connect to a real-time or market-data
 //! server, or load external libraries (`CALL`/`REGISTER.ID`), which an untrusted document must not
-//! trigger automatically (`FILTERXML` awaits a bounded cleanroom evaluator). Each function checks its
-//! argument count and required positional arguments (`#VALUE!` when invalid), evaluates non-missing
-//! arguments first to propagate any error in them, and then returns its documented error literal:
+//! trigger automatically. Each function checks its argument count and required positional arguments
+//! (`#VALUE!` when invalid), evaluates non-missing arguments first to propagate any error in them,
+//! and then returns its documented error literal:
 //! - `WEBSERVICE` -> `#VALUE!`
-//! - `FILTERXML` -> `#VALUE!`
 //! - `RTD` -> `#N/A`
 //! - `IMAGE`, `CALL`, `REGISTER.ID` -> `#BLOCKED!`
 //! - `STOCKHISTORY` -> `#CONNECT!`
@@ -28,10 +27,6 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         let (arity_ok, err) = match name {
             "WEBSERVICE" => (args.len() == 1 && req(args, 0), FormulaError::Value),
-            "FILTERXML" => (
-                args.len() == 2 && req(args, 0) && req(args, 1),
-                FormulaError::Value,
-            ),
             "RTD" => (
                 args.len() >= 3 && req(args, 0) && req(args, 2),
                 FormulaError::Na,

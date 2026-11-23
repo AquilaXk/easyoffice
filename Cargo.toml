@@ -33,6 +33,7 @@ sha1 = "0.11"
 sha2 = "0.11"
 # XML tokenizer behind `xml_stream.rs` (PD-269, step 3): the version the desktop shell and rhwp resolve.
 quick-xml = { version = "0.42", default-features = false }
+roxmltree = { version = "0.21", default-features = false, features = ["std"] }
 # PDF (PD-269, step 4). `pdf-writer` writes the engine's PDF dictionaries and cross-reference table
 # and the desktop shell's overlays; `hayro-syntax`, `hayro-write` and `hayro` read, copy and draw
 # pages in the shell's PDF worker process only (they decode streams without an output limit, so
@@ -94,4 +95,6 @@ opt-level = 3
 [profile.dev.package.zip]
 opt-level = 3
 [profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.roxmltree]
 opt-level = 3

@@ -11,7 +11,7 @@ EasyOffice는 문서·스프레드시트·프레젠테이션·PDF·한글(HWP/HW
 ## 할 수 있는 일
 
 * 문서 편집 (DOCX, DOC, ODT, RTF, MD, TXT)
-* 시트 편집: 내장 함수 313종, 피벗, 차트, 조건부 서식 (XLSX, XLS, ODS, CSV, TSV)
+* 시트 편집: 내장 함수 314종, 피벗, 차트, 조건부 서식 (XLSX, XLS, ODS, CSV, TSV)
 * 슬라이드 편집과 발표자 보기: 글상자·도형·그림·표·차트 개체 (PPTX, PPT, PPSX, ODP)
 * PDF 보기와 편집: 주석, 쪽 편집, 원본 객체 보존 저장 (PDF)
 * 한글 문서 열기와 편집 (HWP, HWPX, HWT, HWTX)

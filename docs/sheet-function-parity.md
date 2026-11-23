@@ -4,9 +4,9 @@
 
 ## 요약
 
-- 기준 목록 521개 중 우리 엔진은 **505개**(PD-270 전 480개, PD-271 전 494개, PD-272 전 501개), 없는 것은 **16개**(전 41개, PD-271 전 27개, PD-272 전 20개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`FILTERXML`·`IMAGE`·`CALL`·`REGISTER.ID`·`STOCKHISTORY`는 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
+- 기준 목록 521개 중 우리 엔진은 **506개**(PD-270 전 480개, PD-271 전 494개, PD-272 전 501개, PD-320 전 505개), 없는 것은 **15개**(전 41개, PD-271 전 27개, PD-272 전 20개, PD-320 전 16개)다. 이름은 인식하고 문서의 오류 값만 돌려주는 `WEBSERVICE`·`RTD`·`IMAGE`·`CALL`·`REGISTER.ID`·`STOCKHISTORY`는 없는 쪽으로 센다. 기준 목록에 없는 우리 함수는 6개다(`AVERAGE.WEIGHTED`, `IMCOTH`, `IMLOG`, `IMTANH`, `MARGINOFERROR`, `ROUNDBANK`).
 - 참조 엔진: A 496개, B 497개, C 403개가 기준 목록에 든다.
-- 없는 16개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `FILTERXML`은 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 우리는 PD-273 클린룸 구현).
+- 없는 15개 가운데 참조 엔진 어느 쪽에도 없는 것은 14개다. `IMAGE`만 참조 B에 이름이 있다. 참조 A·B의 표에서 `FORECAST.ETS` 계열과 `GROUPBY`·`GETPIVOTDATA`·`IMAGE`의 O는 이름이 있다는 뜻이고 몸체가 없는 것이 많다(`FORECAST.ETS` 계열은 A·B 모두 `#N/IMPL!`나 빈 클래스, 우리는 PD-273 클린룸 구현).
 
 ## 범주별 수
 
@@ -25,9 +25,9 @@
 | 데이터베이스 | 12 | 12 | 0 | 12 | 12 | 12 |
 | 큐브 | 7 | 0 | 7 | 0 | 0 | 0 |
 | 추가 기능·자동화 | 3 | 1 | 2 | 0 | 1 | 0 |
-| 웹 | 3 | 1 | 2 | 1 | 2 | 0 |
+| 웹 | 3 | 2 | 1 | 1 | 2 | 0 |
 
-## 없는 함수 16개
+## 없는 함수 15개
 
 | 범주 | 함수 | 참조 | 사정 |
 |---|---|---|---|
@@ -45,7 +45,6 @@
 | 큐브 | `CUBEVALUE` | - | 큐브(OLAP) 연결이 필요하다. 대상 아님. |
 | 추가 기능·자동화 | `CALL` | - | 외부 라이브러리 호출. 대상 아님. 이름은 알고 `#BLOCKED!`(문서, PD-318)를 돌려준다. |
 | 추가 기능·자동화 | `REGISTER.ID` | - | 위와 같다. 이름은 알고 `#BLOCKED!`(문서, PD-318)를 돌려준다. |
-| 웹 | `FILTERXML` | B | 유지되는 XPath 크레이트 없음, 클린룸·대체 크레이트 검토. `sxd-xpath`는 2018년 이후 릴리스가 없고 접두사 이름에서 패닉이 나며 질의 비용 상한을 금지 목록으로 막을 수 없었다(PD-271). 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 | 웹 | `WEBSERVICE` | - | 네트워크 호출. 신뢰할 수 없는 문서에서 열면 안 되므로 대상 아님. 이름은 알고 `#VALUE!`(문서)를 돌려준다. |
 
 ## 이번에 이식한 함수 14개
@@ -74,7 +73,8 @@
 | 텍스트 | `PHONETIC` | `functions_text_locale.rs`, `xlsx_phonetic.rs` | 없음 | 약 770 | XLSX `<rPh>`·`<phoneticPr>` 후리가나를 `SharedStrings`·`inlineStr`에서 UTF-16 경계 검증과 가나 종류 변환(`FullwidthKatakana`·`HalfwidthKatakana`·`Hiragana`·`NoConversion`)으로 읽어 보관·저장 왕복하며 `PHONETIC`은 첫 셀의 후리가나를 돌려준다(없으면 셀 글자). |
 | 조회·참조 | `GROUPBY`, `PIVOTBY` | `functions_groupby.rs`, `groupby_axis.rs`, `parser_array.rs` | 없음(참조 B는 이름만 있다) | 907 | 문서의 8·11개 인수. 합계·소계 글과 머리글 이름은 우리 선택. 함수 목록 인수는 `#VALUE!`. 훑는 양 800만, 칸 수는 배열 예산. |
 | 조회·참조 | `GETPIVOTDATA` | `functions_pivot_data.rs` | 없음 | 257 | 피벗 정의를 `set_pivot_tables`로 등록해야 한다(앱은 평가 요청과 세션의 `pivots`로 등록, PD-292). 원본 행을 한 번 읽어 피벗 엔진 규칙으로 계산한다. |
-| 웹·조회·정보 | `WEBSERVICE`, `RTD`, `FILTERXML`, `IMAGE`, `CALL`, `REGISTER.ID`, `STOCKHISTORY` | `functions_unavailable.rs` | 없음 | 약 60 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#VALUE!`, `#BLOCKED!`, `#BLOCKED!`, `#BLOCKED!`, `#CONNECT!`)을 돌려준다(PD-271, PD-318). 없는 쪽으로 센다. `FILTERXML`은 보안 검토로 크레이트 구현을 뺐다. |
+| 웹 | `FILTERXML` | `functions_filterxml.rs`, `functions_filterxml_core.rs`, `xpath_arena.rs`, `xpath_ast.rs` | 없음(W3C XPath 1.0 클린룸 + 기존 XML 트리 파서) | 약 2,500 | `XmlSanitizer`로 DTD·ENTITY를 막은 뒤 XML 깊이(128)·노드(16,384)·XPath 크기(4 KiB/64단계/깊이 32/256노드)·실행 연산(200,000 op) 상한 안에서 12개 축과 핵심 함수 27종을 평가하고 세로 동적 배열이나 단일 스칼라로 돌려준다(PD-320). |
+| 웹·조회·정보 | `WEBSERVICE`, `RTD`, `IMAGE`, `CALL`, `REGISTER.ID`, `STOCKHISTORY` | `functions_unavailable.rs` | 없음 | 약 50 | 이름만 알고 문서의 오류 값(`#VALUE!`, `#N/A`, `#BLOCKED!`, `#BLOCKED!`, `#BLOCKED!`, `#CONNECT!`)을 돌려준다(PD-271, PD-318). 없는 쪽으로 센다. |
 
 옮긴 줄은 참조 B에서 원본 약 260줄이고 나머지는 직접 썼다. 직접 쓴 줄은 소스 약 1,350줄과 시험 약 900줄이다.
 
@@ -101,11 +101,11 @@
 ### 문서의 오류 값을 확인한 함수
 
 - `WEBSERVICE`: 자료를 돌려줄 수 없으면 `#VALUE!`. 이름을 알고 이 값을 돌려준다.
-- `FILTERXML`: 읽을 수 없는 XML이면 `#VALUE!`. 질의 구현을 뺐으므로 이름을 알고 항상 이 값을 돌려준다.
+- `FILTERXML`: 클린룸 XPath 1.0 평가기를 연결했고(PD-320) 유효하지 않은 XML·XPath·상한 초과·결과 없음이면 `#VALUE!`를 돌려준다.
 - `RTD`: 실시간 서버가 없으면 `#N/A`. 이름을 알고 이 값을 돌려준다.
 - 큐브 7개: 연결 이름이 통합 문서에 저장된 연결이 아니면 `#NAME?`이 문서의 값이라 지금 동작이 맞다.
 - `IMAGE`·`CALL`·`REGISTER.ID`: 보안 설정·XLM 매크로 차단으로 `#BLOCKED!`를 돌려준다(PD-318).
-- `STOCKHISTORY`: 온라인 시세 연결 없이 `#CONNECT!`를 돌려준다(PD-318). `WEBSERVICE`·`RTD`·`FILTERXML`과 함께 인자 오류(`#REF!` 등)를 먼저 전파하고 필수 인자 수가 맞지 않으면 `#VALUE!`를 낸다.
+- `STOCKHISTORY`: 온라인 시세 연결 없이 `#CONNECT!`를 돌려준다(PD-318). `WEBSERVICE`·`RTD`와 함께 인자 오류(`#REF!` 등)를 먼저 전파하고 필수 인자 수가 맞지 않으면 `#VALUE!`를 낸다.
 
 ## 정확도 수정 30건
 
@@ -696,5 +696,5 @@
 | `EUROCONVERT` | O | - | O | - | 추가 기능·자동화 |
 | `REGISTER.ID` | - | - | - | - | 추가 기능·자동화 |
 | `ENCODEURL` | O | O | O | - | 웹 |
-| `FILTERXML` | - | - | O | - | 웹 |
+| `FILTERXML` | O | - | O | - | 웹 |
 | `WEBSERVICE` | - | - | - | - | 웹 |

@@ -36,6 +36,7 @@ fn calling_sources() -> String {
         include_str!("../tests/sheet_dynamic_isomitted.rs"),
         include_str!("../tests/sheet_function_parity_new.rs"),
         include_str!("../tests/sheet_text_locale_functions.rs"),
+        include_str!("../tests/sheet_filterxml.rs"),
         include_str!("../tests/sheet_groupby_pivotby.rs"),
         include_str!("../tests/sheet_getpivotdata.rs"),
         include_str!("../tests/sheet_forecast_ets.rs"),

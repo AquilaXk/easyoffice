@@ -5640,3 +5640,18 @@
 - **Alternatives rejected** (1) `<rPh>`를 무시하고 셀 본문만 유지하는 기존 방식: `PHONETIC` 규격 위반과 저장 시 루비 데이터 손실이 발생한다. (2) `SheetStyling::cells`에 `ph`를 직접 넣는 방식: 50만 셀 한도와 서식 키 패킹 복잡도를 불필요하게 키운다.
 - **Verified by** `crates/easyoffice-formats/tests/xlsx_phonetic_roundtrip.rs` 3개(단일·복수·4종 가나 모드·정렬·`_xHHHH_`·서로게이트·`inlineStr` 왕복, 동일 문자 SST 분리, 본문 변경/기형 `sb`/`eb` 해제, 악의적 `<rPh>` 수/바이트/SST 증폭 Fail-Closed 거부), `crates/easyoffice-sheet/tests/sheet_text_locale_functions.rs` 14개(`PHONETIC` 저장 후리가나·범위·타 시트·`INDIRECT`·`OFFSET`·행 삽입·행 정렬·`RecalcSession` 증분 재계산), `crates/easyoffice-app/tests/sheet_phonetic_ipc_pd319.rs` 2개(`convert_document_format` 디코드·저장·`readback`·무/유세션 `evaluate_sheet` 왕복 및 악의적 페이로드 거부), `scripts/test-sheet-phonetic-pd319.mjs` 2개(`buildSheetStore`·`save-payload`·`sheet-store`·`planPaste`·서식/텍스트 변경·`Ctrl+Z` 실행 취소 왕복).
 - **Revisit when** 시트 리본에 후리가나 직접 표시·편집 다이얼로그를 추가하거나 ODS `<text:ruby>` 루비 요약을 연동할 때.
+
+
+## PD-320 — 시트 `FILTERXML` 클린룸 XPath 1.0 평가기 및 내장 함수 314종 확장 (2026-11-23)
+
+- **Context** 기존에는 유지되는 허용 라이선스 XPath 크레이트가 없고 구버전 외부 크레이트의 접두사 패닉과 중첩 술어 시간 폭발 때문에 `FILTERXML`을 이름만 아는 함수(`#VALUE!`)로 비워 두었다(`PD-271`, `TODO.md`).
+- **Decision (`PD-320`)**
+  1. **문맥 감지 XPath 1.0 렉서·파서(`xpath_ast.rs`)**: W3C XPath 1.0 명세 3.7절 어휘 규칙을 클린룸으로 구현해 `*`와 `and`·`or`·`div`·`mod`를 직전 토큰의 값 종결 여부에 따라 연산자 또는 요소·속성 이름으로 구분하며 `::` 축, `prefix:local`·`prefix:*`, `node()`·`text()`·`comment()`·`processing-instruction()`, 필터 식·합집합(`|`)을 파싱한다. 입력 `MAX_XPATH_BYTES = 4_096`, 단계 `MAX_XPATH_STEPS = 64`, 깊이 `MAX_XPATH_DEPTH = 32`, AST 노드 `MAX_XPATH_AST_NODES = 256` 상한을 넘기면 즉시 `#VALUE!`로 실패한다.
+  2. **평면 전위 순회 `XmlArena`·비트셋 `NodeSet`·작업 예산 평가기(`xpath_arena.rs`, `functions_filterxml.rs`, `functions_filterxml_core.rs`)**: 먼저 `XmlSanitizer::validate_safe_xml`로 `DOCTYPE`·`ENTITY`를 차단하고 기존 XML 트리 파서 크레이트(MIT/Apache-2.0, `THIRD_PARTY_NOTICES.md`)를 `allow_dtd: false`·`nodes_limit: 16_384`로 호출해 XML(`<= 2 MiB`, 깊이 `<= 128`, 노드 `<= 16_384`)을 전위 순회 평면 배열로 적재한다. `u64` 워드 패킹 `NodeSet` 비트셋과 요소 텍스트 캐시(`elem_text_cache`), 선형 집합 비교로 12개 축·역축 근접 순서(`[1]`)·핵심 함수 27종을 평가하고 매 방문·연산마다 `MAX_XPATH_OPS = 200_000` 작업 예산과 `EvalContext::charge_steps`에 과금해 $O(N^3)$ 적대적 질의를 수 ms 내에 `#VALUE!`로 차단한다.
+  3. **내장 함수 카탈로그 314종 확장 및 문서·위생 동기화**: `CANONICAL_FUNCTIONS`를 313종에서 314종으로 올리고 `array_class.rs`·`array_eval.rs`·`functions.rs`·`self_test.rs`·`check-repo-hygiene.mjs`·`docs/sheet-function-parity.md`(506/521)를 함께 맞췄다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 유지되는 허용 라이선스 XPath 1.0 + 작업 예산 크레이트가 없다. (2) 워크스페이스 락파일과 공지 목록에 이미 포함된 기존 XML 트리 파서 크레이트(MIT/Apache-2.0)와 엔진의 `XmlSanitizer`·`parse_strict_number`·`Grid::from_rows_checked`를 그대로 재사용했다. (3) W3C XPath 1.0 렉서·파서·축/핵심 함수 평가기는 명세 기반으로 자체 작성했고 외부 이식 코드는 `0`줄이다.
+- **Why** 네트워크 없이 로컬 XML 문자열을 추출하는 `FILTERXML`을 완전 지원하면서 구버전 XPath 크레이트의 패닉과 서비스 거부 취약점 없이 Fail-Closed 동작을 보장해야 한다.
+- **Trade-offs** (1) DTD 없는 인메모리 XML이므로 `namespace::` 축과 외부 DTD 엔티티는 의도적으로 거부하며 `id()`는 `xml:id`만 매칭한다. (2) 셀 텍스트 상한(`32_767`자)과 배열 예산·200,000 op 상한을 넘는 질의는 `#VALUE!` 또는 `#SPILL!`을 반환한다.
+- **Alternatives rejected** (1) 유지 중단된 XPath 크레이트에 정규식/구문 금지 목록을 덧대는 방식: 동등한 중첩/형제 축 폭발 질의를 계속 놓친다. (2) `#VALUE!` 스텁 유지: 웹 범주의 실제 XML 추출 수식이 모두 오류로 남는다.
+- **Verified by** `crates/easyoffice-sheet/tests/sheet_filterxml.rs`(공식 예제·세로 스필·`SUM`/`INDEX` 합성, 12개 축·역축 근접 순서·문맥 키워드·핵심 함수 27종, XML 이름공간 접두사/기본 이름공간/미선언 접두사, `DOCTYPE`/`ENTITY`/깊이 129/노드 상한·200k op 적대적 질의 차단), `--self-test`(함수 314종), `cargo test --workspace --exclude easyoffice-desktop`, `cargo test -p easyoffice-desktop`, `node --test scripts/test-*.mjs`, `node scripts/check-repo-hygiene.mjs`.
+- **Revisit when** XPath 2.0/3.1 요구가 생기거나 DTD 외부 없이 커스텀 함수 바인딩이 필요할 때.

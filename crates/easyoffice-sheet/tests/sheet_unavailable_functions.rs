@@ -1,4 +1,4 @@
-//! `WEBSERVICE`, `RTD`, `FILTERXML`, `IMAGE`, `CALL`, `REGISTER.ID` and `STOCKHISTORY` (PD-271, PD-318):
+//! `WEBSERVICE`, `RTD`, `IMAGE`, `CALL`, `REGISTER.ID` and `STOCKHISTORY` (PD-271, PD-318):
 //! names that are known and not served offline or under workbook security policy.
 #![allow(clippy::unwrap_used)]
 
@@ -27,14 +27,6 @@ fn webservice_and_rtd_give_their_documented_errors() {
     assert_eq!(eval("=WEBSERVICE()"), "#VALUE!");
     assert_eq!(eval("=WEBSERVICE(\"a\",\"b\")"), "#VALUE!");
     assert_eq!(eval("=RTD(\"p\",\"\")"), "#VALUE!");
-}
-
-#[test]
-fn filterxml_is_known_and_gives_the_documented_value_error() {
-    assert_eq!(eval("=FILTERXML(\"<a><b>1</b></a>\",\"//b\")"), "#VALUE!");
-    assert_eq!(eval("=FILTERXML(\"<a>\",\"//b\")"), "#VALUE!");
-    assert_eq!(eval("=FILTERXML(#N/A,\"//b\")"), "#N/A");
-    assert_eq!(eval("=FILTERXML(\"<a/>\")"), "#VALUE!");
 }
 
 #[test]
