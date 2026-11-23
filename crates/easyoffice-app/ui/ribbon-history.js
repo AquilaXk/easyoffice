@@ -336,6 +336,7 @@
       getActiveSheetName,
       captureWorkspaceSnapshot,
       restoreWorkspaceSnapshot,
+      activatePane: (mod) => activatePaneInternal(mod, true),
       enqueueWorkspaceHistoryOp,
     });
 

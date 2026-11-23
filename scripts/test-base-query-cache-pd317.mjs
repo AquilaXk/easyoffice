@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
-import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
+import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
 const UI = "../crates/easyoffice-app/ui/";
 const MODULES = ["sheet-nav.js", "base-model.js", "base-query-cache.js", "base-virtual.js", "base-grid-window.js", "base-cell-nav.js", "base-clipboard.js", "base-cell-select.js", "base-studio.js"];
@@ -193,4 +193,43 @@ test("PD-317 benchmark compares stateless queryTableView vs incremental cache on
   console.log(`PD-317 bench 100k: stateless query=${mFull100k.toFixed(2)}ms -> incremental plain=${mInc100k.toFixed(3)}ms, filter+sort+group=${mInc100kGrp.toFixed(3)}ms`);
   assert.ok(mStudio10k < 10, `10k incremental studio edit took ${mStudio10k.toFixed(2)}ms`);
   assert.ok(mInc100k < 5 && mInc100kGrp < 5, `100k incremental query took plain=${mInc100k.toFixed(2)}ms, grouped=${mInc100kGrp.toFixed(2)}ms`);
+});
+
+test("PD-317 workspace harness records O(1) base-cells undo delta and round-trips undo/redo on 10,000 rows", async () => {
+  const h = await createWorkspaceHarness({ search: "?module=BASE&win=w-base-undo-pd317" });
+  const { host, document } = h;
+  const studio = host.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+  const H = host.__EASYOFFICE_WORKSPACE_HISTORY__;
+  studio.setState({
+    version: 1,
+    activeTableId: "t1",
+    tables: [{
+      id: "t1",
+      name: "표",
+      fields: [{ id: "f1", name: "이름", type: "text" }, { id: "f2", name: "수량", type: "number" }],
+      records: Array.from({ length: 10000 }, (_, i) => ({ id: "r" + i, values: { f1: "항목 " + i, f2: i + 1 } })),
+    }],
+  });
+  const sumBefore = studio.liveQuery().numericSums.f2;
+  const bytesBefore = H.sizes().bytes;
+  assert.equal(studio.updateCell("r9000", "f2", 109001).ok, true);
+  assert.equal(studio.updateCells([{ recordId: "r1", fieldId: "f1", value: "일괄" }, { recordId: "r2", fieldId: "f2", value: 1002 }]).ok, true);
+  const deltaBytes = H.sizes().bytes - bytesBefore;
+  assert.ok(deltaBytes > 0 && deltaBytes <= 1024, `expected compact base-cells undo steps, got ${deltaBytes}`);
+  assert.equal(studio.liveQuery().numericSums.f2, sumBefore + 100000 + (1002 - 3));
+
+  const undoBtn = document.querySelector('.md-item[data-studio-menu-cmd="studio-undo"]');
+  const redoBtn = document.querySelector('.md-item[data-studio-menu-cmd="studio-redo"]');
+  h.userClick(undoBtn);
+  await flushAsyncTurns(6);
+  assert.equal(studio.liveQuery().rows[1].values.f1, "항목 1");
+  assert.equal(studio.liveQuery().numericSums.f2, sumBefore + 100000);
+  h.userClick(undoBtn);
+  await flushAsyncTurns(6);
+  assert.equal(studio.liveQuery().rows[9000].values.f2, 9001);
+  assert.equal(studio.liveQuery().numericSums.f2, sumBefore);
+  h.userClick(redoBtn);
+  await flushAsyncTurns(6);
+  assert.equal(studio.liveQuery().rows[9000].values.f2, 109001);
+  assert.equal(studio.liveQuery().numericSums.f2, sumBefore + 100000);
 });

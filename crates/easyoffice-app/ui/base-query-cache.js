@@ -296,15 +296,24 @@
       for (let i = delIdx; i < entry.allRows.length; i += 1) { entry.allRows[i].origIdx = i; entry.idxById.set(entry.allRows[i].record.id, i); }
     }
 
+    function snapshotEdits(state, tableId, edits) {
+      const idx = ensureIndex(state), recs = idx.recordMapsByTableId.get(tableId), flds = idx.fieldsByTableId.get(tableId)?.byId;
+      if (!recs || !flds || !Array.isArray(edits)) return [];
+      const out = [], seen = new Set();
+      for (const e of edits) {
+        const key = `${e?.recordId}\0${e?.fieldId}`, rec = recs.get(e?.recordId), fld = flds.get(e?.fieldId);
+        if (!rec || !fld || fld.type === "formula" || seen.has(key)) continue;
+        seen.add(key); const v = rec.values[e.fieldId];
+        out.push({ recordId: e.recordId, fieldId: e.fieldId, value: Array.isArray(v) ? [...v] : v });
+      }
+      return out;
+    }
+    const resetState = (s) => { boundState = s || null; entries.clear(); stateIndex = s ? M.buildStateIndex(s) : null; };
     return {
-      index: ensureIndex,
-      reset: (s) => { boundState = s || null; entries.clear(); stateIndex = s ? M.buildStateIndex(s) : null; },
-      invalidateSchema: (s) => { entries.clear(); boundState = s || null; stateIndex = s ? M.buildStateIndex(s) : null; if (s?.tables) for (const t of s.tables) bumpRev(t.id); },
-      noteUpdate: (s, id, ids) => notePaste(s, id, ids, []),
-      noteAdd: (s, id, rec) => notePaste(s, id, [], [rec]),
-      notePaste, noteDelete, query,
+      index: ensureIndex, query, snapshotEdits, notePaste, noteDelete, reset: resetState,
+      invalidateSchema: (s) => { resetState(s); if (s?.tables) for (const t of s.tables) bumpRev(t.id); },
+      noteUpdate: (s, id, ids) => notePaste(s, id, ids, []), noteAdd: (s, id, rec) => notePaste(s, id, [], [rec]),
     };
   }
-
   host.__EASYOFFICE_CREATE_BASE_QUERY_CACHE__ = createBaseQueryCache;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

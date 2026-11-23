@@ -24,6 +24,7 @@
       getActiveSheetName,
       captureWorkspaceSnapshot,
       restoreWorkspaceSnapshot,
+      activatePane,
       enqueueWorkspaceHistoryOp,
     } = deps;
     const { sheetMapHasAnyFormula, sheetCellDataChanged, computeEvaluatedSheetStore } = sheetStoreHelpers;
@@ -41,6 +42,13 @@
     };
 
     function snapshotBytes(snap) {
+      if (snap?.kind === "base-cells") {
+        let bytes = 256;
+        for (const e of snap.edits || []) {
+          bytes += 64 + (typeof e?.value === "string" ? e.value.length * 2 : Array.isArray(e?.value) ? e.value.length * 16 : 0);
+        }
+        return bytes;
+      }
       let entries = 0;
       for (const map of Object.values(snap.sheets || {})) entries += Object.keys(map || {}).length;
       return SNAPSHOT_BASE_BYTES + D.bytesOfEntries(entries);
@@ -123,6 +131,15 @@
       return true;
     }
 
+    async function stepBaseCells(record, commit) {
+      const inverse = host.__EASYOFFICE_BASE_BOARD_HOST__?.applyCellUndo?.(record);
+      if (!inverse) return false;
+      bumpEpoch();
+      commit(inverse);
+      if (typeof activatePane === "function") await activatePane("BASE");
+      return true;
+    }
+
     function performStep(isUndo) {
       return enqueueWorkspaceHistoryOp(async () => {
         await getSheetController().drainInFlightSheetWork();
@@ -131,7 +148,7 @@
           return;
         }
         sheetDataStore[getActiveSheetName()] = getSheetController().snapshotDomSheetCells();
-        const apply = (target, commit) => (target.kind === "delta" ? stepSheetRecord(target, isUndo, commit) : stepSnapshot(target, isUndo, commit));
+        const apply = (target, commit) => (target.kind === "delta" ? stepSheetRecord(target, isUndo, commit) : target.kind === "base-cells" ? stepBaseCells(target, commit) : stepSnapshot(target, isUndo, commit));
         const done = await (isUndo ? stacks.undo(apply) : stacks.redo(apply));
         if (done) say(isUndo ? "실행 취소" : "다시 실행");
       });

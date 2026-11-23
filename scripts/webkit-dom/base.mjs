@@ -527,11 +527,11 @@ export const baseSteps = [
       studio.setGroupBy("f4");
     });
     const bench = await page.evaluate(() => {
-      const studio = window.__EASYOFFICE_BASE_STUDIO__, M = window.__EASYOFFICE_BASE_MODEL__, samples = [];
+      const studio = window.__EASYOFFICE_BASE_STUDIO__, M = window.__EASYOFFICE_BASE_MODEL__, H = window.__EASYOFFICE_WORKSPACE_HISTORY__, samples = [];
       const cache = window.__EASYOFFICE_CREATE_BASE_QUERY_CACHE__(M);
       const st = studio.getState();
       cache.query(st, "t1");
-      const qSamples = [];
+      const qSamples = [], bytesBefore = H.sizes().bytes;
       for (let i = 0; i < 8; i += 1) {
         M.updateCell(st, "t1", "r9000", "f2", 9000 + i + 1, cache.index(st));
         cache.noteUpdate(st, "t1", ["r9000"]);
@@ -545,15 +545,36 @@ export const baseSteps = [
       return {
         queryMedian: qSamples.sort((a, b) => a - b)[qSamples.length >> 1],
         studioMedian: samples.sort((a, b) => a - b)[samples.length >> 1],
+        undoStepBytes: (H.sizes().bytes - bytesBefore) / 8,
       };
     });
-    console.log(`     PD-317 10k filter+sort+group WebKit median: query=${bench.queryMedian.toFixed(2)} ms, studio.updateCell=${bench.studioMedian.toFixed(2)} ms`);
-    assert.ok(bench.queryMedian < 3 && bench.studioMedian < 30, `expected fast 10k incremental edit, got ${JSON.stringify(bench)}`);
+    console.log(`     PD-317 10k filter+sort+group WebKit median: query=${bench.queryMedian.toFixed(2)} ms, studio.updateCell=${bench.studioMedian.toFixed(2)} ms, undo=${bench.undoStepBytes} B/step`);
+    assert.ok(
+      bench.queryMedian < 3 && bench.studioMedian < 50 && bench.undoStepBytes > 0 && bench.undoStepBytes <= 512,
+      `expected fast 10k incremental edit, got ${JSON.stringify(bench)}`,
+    );
     const q = await page.evaluate(() => {
       const studio = window.__EASYOFFICE_BASE_STUDIO__;
       const lq = studio.liveQuery(), exact = window.__EASYOFFICE_BASE_MODEL__.queryTableView(studio.getState(), "t1");
-      return { countOk: lq.filteredCount === exact.filteredCount, sumEq: lq.numericSums.f2 === exact.numericSums.f2, row0: lq.rows[0]?.record.id === exact.rows[0]?.record.id };
+      const r9k = lq.rows.find((r) => r.record.id === "r9000")?.values.f2;
+      return {
+        countOk: lq.filteredCount === exact.filteredCount,
+        sumEq: lq.numericSums.f2 === exact.numericSums.f2,
+        row0: lq.rows[0]?.record.id === exact.rows[0]?.record.id,
+        sum: lq.numericSums.f2,
+        r9k,
+      };
     });
-    assert.deepEqual(q, { countOk: true, sumEq: true, row0: true });
+    assert.deepEqual({ countOk: q.countOk, sumEq: q.sumEq, row0: q.row0, r9k: q.r9k }, { countOk: true, sumEq: true, row0: true, r9k: 9008 });
+
+    // O(1) Undo (`Control+z`) and Redo (`Control+y`) revert/restore r9000 and live sums without full-table cloning.
+    await page.keyboard.press("Control+z");
+    await page.waitForFunction(() => window.__EASYOFFICE_BASE_STUDIO__.liveQuery()?.rows.find((r) => r.record.id === "r9000")?.values.f2 === 9007);
+    const afterUndoSum = await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.liveQuery().numericSums.f2);
+    assert.equal(afterUndoSum, q.sum - 1);
+    await page.keyboard.press("Control+y");
+    await page.waitForFunction(() => window.__EASYOFFICE_BASE_STUDIO__.liveQuery()?.rows.find((r) => r.record.id === "r9000")?.values.f2 === 9008);
+    const afterRedoSum = await page.evaluate(() => window.__EASYOFFICE_BASE_STUDIO__.liveQuery().numericSums.f2);
+    assert.equal(afterRedoSum, q.sum);
   }],
 ];

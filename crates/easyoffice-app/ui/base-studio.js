@@ -790,6 +790,10 @@
 
     // One undo step per change that was made: the state before it is taken first and kept only when the change succeeded,
     // so a refused change (a validation error) leaves no empty step. A host without that split records before the change.
+    const equalCellVal = (a, b) => a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]));
+    const finishEdit = () => { invalidCell = null; noteActivity(); if (bound) render(); };
+    const recordCellDelta = (tableId, edits) => edits.length > 0 && deps.recordCellUndo?.({ kind: "base-cells", activeModule: "BASE", tableId, edits });
+
     function runMut(fn, clearInvalid = false) {
       const before = deps.captureUndo?.();
       if (!before) recordUndo();
@@ -797,8 +801,7 @@
       if (!res.ok) { setFeedback(res.error); return res; }
       if (before) deps.commitUndo(before);
       if (clearInvalid) invalidCell = null;
-      noteActivity();
-      if (bound) render();
+      noteActivity(); if (bound) render();
       return res;
     }
     function withActive(fn, clearInvalid = false) {
@@ -822,24 +825,44 @@
       const tbl = activeTable(), idx = tbl ? qCache?.index(state) : null;
       if (!tbl) return { ok: false, error: "활성 테이블이 없습니다." };
       const prevRec = idx?.recordMapsByTableId.get(tbl.id)?.get(recordId) || tbl.records.find((r) => r.id === recordId);
-      const prevCopy = prevRec ? (Array.isArray(prevRec.values[fieldId]) ? [...prevRec.values[fieldId]] : prevRec.values[fieldId]) : undefined;
+      const had = Boolean(prevRec && Object.hasOwn(prevRec.values, fieldId));
+      const prevCopy = had ? (Array.isArray(prevRec.values[fieldId]) ? [...prevRec.values[fieldId]] : prevRec.values[fieldId]) : undefined;
       const res = M.updateCell(state, tbl.id, recordId, fieldId, value, idx);
       if (!res.ok) { invalidCell = { recordId, fieldId, error: res.error }; setFeedback(res.error); return res; }
-      if (prevRec && prevCopy !== res.value) {
-        const committed = res.value;
-        prevRec.values[fieldId] = prevCopy; recordUndo(); prevRec.values[fieldId] = committed;
+      if (prevRec && !equalCellVal(prevCopy, res.value)) {
+        if (deps.recordCellUndo) recordCellDelta(tbl.id, [{ recordId, fieldId, value: prevCopy }]);
+        else { const committed = res.value; if (had) prevRec.values[fieldId] = prevCopy; else delete prevRec.values[fieldId]; recordUndo(); prevRec.values[fieldId] = committed; }
       }
-      qCache?.noteUpdate(state, tbl.id, [recordId]); invalidCell = null; noteActivity();
-      if (bound) render();
+      qCache?.noteUpdate(state, tbl.id, [recordId]); finishEdit();
       return res;
     }
 
     // Many cells in one undo step and one redraw (a paste, Delete over a range): `edits` are `{ recordId, fieldId, value }`; the cells whose value the
     // field refuses are left as they are and counted in the feedback.
     function updateCells(edits) {
-      const res = withActive((tbl) => { const r = M.updateCells(state, tbl.id, edits, qCache?.index(state)); if (r.ok) qCache?.noteUpdate(state, tbl.id, r.dirtyIds); return r; }, true);
+      const tbl = activeTable(), canDelta = Boolean(tbl && deps.recordCellUndo && qCache);
+      const before = canDelta ? qCache.snapshotEdits(state, tbl.id, edits) : null;
+      const run = (t) => { const r = M.updateCells(state, t.id, edits, qCache?.index(state)); if (r.ok) qCache?.noteUpdate(state, t.id, r.dirtyIds); return r; };
+      let res;
+      if (!canDelta) res = withActive(run, true);
+      else { res = run(tbl); if (!res.ok) setFeedback(res.error); else { if (res.dirtyIds.length > 0) recordCellDelta(tbl.id, before); finishEdit(); } }
       if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
       return res;
+    }
+
+    function applyUndoEdits(tableId, edits) {
+      const tbl = M.getTable(state, tableId), idx = tbl && Array.isArray(edits) && qCache ? qCache.index(state) : null;
+      if (!tbl || !idx) return null;
+      const inverse = qCache.snapshotEdits(state, tbl.id, edits), recs = idx.recordMapsByTableId.get(tbl.id), dirty = new Set();
+      if (!recs || inverse.length === 0) return null;
+      for (const e of edits) {
+        const rec = recs.get(e?.recordId);
+        if (!rec) continue;
+        if (e.value === undefined) delete rec.values[e.fieldId]; else rec.values[e.fieldId] = Array.isArray(e.value) ? [...e.value] : e.value;
+        dirty.add(e.recordId);
+      }
+      state.activeTableId = tbl.id; qCache.noteUpdate(state, tbl.id, Array.from(dirty)); finishEdit();
+      return { kind: "base-cells", activeModule: "BASE", tableId: tbl.id, edits: inverse };
     }
     const applyPaste = (edits, newRows) => {
       const res = withActive((tbl) => { const r = host.__EASYOFFICE_BASE_CLIPBOARD__.applyPasteMutation(M, state, tbl, edits, newRows, qCache?.index(state)); if (r.ok) qCache?.notePaste(state, tbl.id, r.dirtyIds, r.createdRecords); return r; }, true);
@@ -906,11 +929,7 @@
       if (typeof deps.deliverExport === "function") {
         delivery = await deps.deliverExport(base64, fileBase, fmt);
         if (delivery?.cancelled) { setFeedback("내보내기 취소: 저장 위치를 선택하지 않았습니다"); return { ok: false, cancelled: true }; }
-        if (delivery && delivery.ok === false) {
-          const error = delivery.error || "파일 저장에 실패했습니다.";
-          setFeedback("내보내기 실패: " + error);
-          return { ok: false, error };
-        }
+        if (delivery && delivery.ok === false) { const error = delivery.error || "파일 저장에 실패했습니다."; setFeedback("내보내기 실패: " + error); return { ok: false, error }; }
       }
       setFeedback(`내보내기 완료 (${fileBase}.${fmt})`);
       return { ok: true, format: fmt, fileBase, base64, sheets, res: ipcRes, delivery };
@@ -930,49 +949,30 @@
       const rowsOnOther = Math.max(1, Math.floor(room / PRINT_ROW_MM) - 1);
       const pages = [];
       for (let from = 0; from < rows.length; ) {
-        const first = pages.length === 0, take = first ? rowsOnFirst : rowsOnOther;
-        const page = d.createElement("div");
+        const first = pages.length === 0, take = first ? rowsOnFirst : rowsOnOther, page = d.createElement("div");
         page.className = ("eo-print-page base-print-page " + paperClass).trim();
-        if (first) {
-          const titleEl = d.createElement("h3");
-          titleEl.textContent = tbl.name || "데이터베이스";
-          titleEl.style.height = PRINT_TITLE_MM + "mm";
-          page.appendChild(titleEl);
-        }
-        const tableEl = d.createElement("table");
-        tableEl.className = "eo-print-sheet";
-        const thead = d.createElement("thead"), htr = d.createElement("tr");
-        htr.style.height = PRINT_ROW_MM + "mm";
-        for (const fld of fields) {
-          const th = d.createElement("th");
-          th.textContent = fld.name || "";
-          htr.appendChild(th);
-        }
+        if (first) { const titleEl = d.createElement("h3"); titleEl.textContent = tbl.name || "데이터베이스"; titleEl.style.height = PRINT_TITLE_MM + "mm"; page.appendChild(titleEl); }
+        const tableEl = d.createElement("table"), thead = d.createElement("thead"), htr = d.createElement("tr"), tbody = d.createElement("tbody");
+        tableEl.className = "eo-print-sheet"; htr.style.height = PRINT_ROW_MM + "mm";
+        for (const fld of fields) { const th = d.createElement("th"); th.textContent = fld.name || ""; htr.appendChild(th); }
         thead.appendChild(htr);
-        const tbody = d.createElement("tbody");
         for (const row of rows.slice(from, from + take)) {
-          const tr = d.createElement("tr");
-          tr.style.height = PRINT_ROW_MM + "mm";
+          const tr = d.createElement("tr"); tr.style.height = PRINT_ROW_MM + "mm";
           for (const fld of fields) {
-            const td = d.createElement("td");
-            if (fld.type === "number") td.className = "eo-print-num";
-            td.textContent = row.displays[fld.id] ?? "";
-            tr.appendChild(td);
+            const td = d.createElement("td"); if (fld.type === "number") td.className = "eo-print-num";
+            td.textContent = row.displays[fld.id] ?? ""; tr.appendChild(td);
           }
           tbody.appendChild(tr);
         }
-        tableEl.appendChild(thead);
-        tableEl.appendChild(tbody);
-        page.appendChild(tableEl);
-        pages.push(page);
-        from += take;
+        tableEl.appendChild(thead); tableEl.appendChild(tbody); page.appendChild(tableEl);
+        pages.push(page); from += take;
       }
       return pages;
     }
 
     const api = {
       bind, render, getState, setState, resetBlank,
-      addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, deleteRecord,
+      addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, applyUndoEdits, deleteRecord,
       selection: cellSel.selection, selectedRanges: cellSel.selectedRanges, runClipboardCommand: cellSel.runClipboardCommand, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
       liveQuery: () => liveQuery || (activeTable() ? queryOf(activeTable().id) : null),
       onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),

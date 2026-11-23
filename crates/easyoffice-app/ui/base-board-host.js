@@ -68,6 +68,7 @@
         recordUndo,
         captureUndo: deps.captureUndo,
         commitUndo: deps.commitUndo,
+        recordCellUndo: deps.commitUndo ? (delta) => deps.commitUndo(delta) : null,
         noteActivity,
       });
       baseStudio.bind();
@@ -110,6 +111,10 @@
   function restoreSnapshotFields(snap) {
     if (snap?.baseState && baseStudio) baseStudio.setState(snap.baseState);
     if (snap?.boardState && boardStudio) boardStudio.replaceState(snap.boardState);
+  }
+
+  function applyCellUndo(record) {
+    return (baseStudio || host.__EASYOFFICE_BASE_STUDIO__)?.applyUndoEdits?.(record?.tableId, record?.edits) || null;
   }
 
   function buildConversionContent(mod, title) {
@@ -303,6 +308,7 @@
     getBoardStudio: () => boardStudio || host.__EASYOFFICE_BOARD_STUDIO__,
     captureSnapshotFields,
     restoreSnapshotFields,
+    applyCellUndo,
     buildConversionContent,
     savePackage,
     decodePackage,
