@@ -596,16 +596,16 @@ pub(crate) fn hwpx_number_control(num_type: &str) -> String {
 /// HWPUNIT per twip (1/7200 inch against 1/1440 inch).
 const HWPUNIT_PER_TWIP: u32 = 5;
 
-/// The page margins as `hp:margin` values `(header, footer, top, bottom)` in HWPUNIT: the reference
-/// editor's top margin is the distance to the header and its header margin the header area's height, its
-/// footer margin the distance to the footer and its bottom margin the footer area's height
-/// (`rhwp` `src/model/page.rs:238-269`).
+/// The page margins as `hp:margin` values `(header, footer, top, bottom)` in HWPUNIT (KS X 6101):
+/// `top` is the distance from the top edge to the header band and `header` is that band's height;
+/// `bottom` is the distance from the bottom edge to the footer band and `footer` is that band's
+/// height (`rhwp` `ruler.ts:798-803`, `layout.rs:5666-5667`).
 pub(crate) fn hwpx_margin_values(m: &RichPageMargins) -> (u32, u32, u32, u32) {
     (
         m.top.saturating_sub(m.header) * HWPUNIT_PER_TWIP,
-        m.footer * HWPUNIT_PER_TWIP,
-        m.header * HWPUNIT_PER_TWIP,
         m.bottom.saturating_sub(m.footer) * HWPUNIT_PER_TWIP,
+        m.header * HWPUNIT_PER_TWIP,
+        m.footer * HWPUNIT_PER_TWIP,
     )
 }
 
@@ -620,7 +620,7 @@ pub(crate) fn margins_from_hwpx(
         top: twip(top.saturating_add(header)),
         bottom: twip(bottom.saturating_add(footer)),
         header: twip(top),
-        footer: twip(footer),
+        footer: twip(bottom),
         left: twip(left),
         right: twip(right),
     }

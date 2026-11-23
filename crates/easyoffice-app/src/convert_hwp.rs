@@ -73,10 +73,14 @@ pub(crate) fn write_hwp(
 }
 
 /// Compatibility and specification label of the bytes a conversion to `format` produced. `.hwp`
-/// only gets here through [`write_hwp`], so it is the host's real HWP 5.0, not the engine's
-/// container that [`DocumentFormat::output_compatibility`] describes.
-pub(crate) fn written_compatibility(format: DocumentFormat) -> (OutputCompatibility, &'static str) {
-    if format == DocumentFormat::Hwp {
+/// (and `.hwt` when the host supplies an HWP writer) is written by [`write_hwp`] as real HWP 5.0
+/// rather than the engine's private container that [`DocumentFormat::output_compatibility`]
+/// describes; headless `.hwt` falls back to the engine container and keeps the limited label.
+pub(crate) fn written_compatibility(
+    format: DocumentFormat,
+    has_shell_hwp: bool,
+) -> (OutputCompatibility, &'static str) {
+    if format == DocumentFormat::Hwp || (format == DocumentFormat::Hwt && has_shell_hwp) {
         (
             OutputCompatibility::Standard,
             format.standard_specification(),

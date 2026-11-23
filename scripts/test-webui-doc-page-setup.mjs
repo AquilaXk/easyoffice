@@ -39,9 +39,9 @@ test("the 편집 용지 item opens the dialog with the paper and margins the pag
   // header 15 mm, footer 17.5 mm) is the margin of a page without an explicit setup.
   assert.equal(h.field("left").value, "25.4");
   assert.equal(h.field("right").value, "25.4");
-  assert.equal(h.field("top").value, "15.0");
+  assert.equal(h.field("top").value, "30.0");
   assert.equal(h.field("header").value, "15.0");
-  assert.equal(h.field("bottom").value, "7.9");
+  assert.equal(h.field("bottom").value, "25.4");
   assert.equal(h.field("footer").value, "17.5");
 });
 
@@ -57,9 +57,9 @@ test("확인 applies the setup as one undo step: the editor's setup, padding and
   assert.equal(h.field("width").value, "257.0", "turning the page swaps the width and length");
   h.type("left", 30);
   h.type("right", 20);
-  h.type("top", 20);
-  h.type("header", 15);
-  h.type("bottom", 10);
+  h.type("top", 35);
+  h.type("header", 20);
+  h.type("bottom", 22);
   h.type("footer", 12);
   h.document.getElementById("btn-doc-ps-apply").click();
   await flushAsyncTurns(4);
@@ -67,10 +67,10 @@ test("확인 applies the setup as one undo step: the editor's setup, padding and
   const setup = h.core.parse(h.editor.dataset.eoPage);
   assert.ok(setup.width > setup.height, "landscape");
   assert.equal(h.core.twipsToMm(setup.left), 30);
-  assert.equal(h.core.twipsToMm(setup.header), 20, "the engine's header distance is the dialog's top margin");
-  assert.equal(h.core.twipsToMm(setup.top), 35, "the body starts below the header area");
-  assert.equal(h.core.twipsToMm(setup.footer), 12);
+  assert.equal(h.core.twipsToMm(setup.top), 35, "DOC top margin is distance from top edge to body");
+  assert.equal(h.core.twipsToMm(setup.header), 20, "DOC header distance is independent from top margin");
   assert.equal(h.core.twipsToMm(setup.bottom), 22);
+  assert.equal(h.core.twipsToMm(setup.footer), 12);
   assert.equal(h.editor.style.padding.split(" ").length, 4);
   const pages = h.host.__EASYOFFICE_DOC_PAGES_CORE__;
   const geo = pages.pageGeometry({ ...pages.paperOf(h.editor), padding: {} });
@@ -92,8 +92,14 @@ test("a setup that leaves less than 10 mm of body is refused with the reference 
   assert.equal(h.editor.dataset.eoPage ?? "", "");
   h.type("left", 15);
   h.type("right", 15);
-  h.type("top", 140);
-  h.type("bottom", 140);
+  h.type("top", 10);
+  h.type("header", 20);
+  h.document.getElementById("btn-doc-ps-apply").click();
+  assert.equal(h.dialog.open, true);
+  assert.equal(h.document.getElementById("doc-ps-status").textContent, "머리말·꼬리말 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.");
+  assert.equal(h.editor.dataset.eoPage ?? "", "");
+  h.type("top", 145);
+  h.type("bottom", 145);
   h.document.getElementById("btn-doc-ps-apply").click();
   assert.match(h.document.getElementById("doc-ps-status").textContent, /^위아래 여백이 너무 커서/);
 });
@@ -138,14 +144,21 @@ test("the page layout draws the paper of the setup and the header follows its ma
   assert.equal(h.host.__EASYOFFICE_DOC_PAGE_FRAME__.margins().top, 1984);
 });
 
-test("fields left as shown keep their exact twips, an edited field changes alone, and the engine's distances come back from the dialog's", async () => {
+test("fields left as shown keep their exact twips, an edited field changes alone, and DOC vs HWP margin models round-trip cleanly", async () => {
   const { core } = await openDoc("w-ps-exact");
   const original = { width: 11906, height: 16838, left: 1001, right: 999, top: 1984, bottom: 1700, header: 1134, footer: 850 };
-  assert.deepEqual(core.fromFields(core.toFields(original), original), { ...original, gutter: 0, binding: 0 }, "pressing 확인 on an untouched dialog changes nothing");
-  const edited = core.fromFields({ ...core.toFields(original), left: 20 }, original);
-  assert.equal(edited.left, core.mmToTwips(20));
-  assert.deepEqual({ ...edited, left: original.left }, { ...original, gutter: 0, binding: 0 });
-  assert.deepEqual(core.toFields(original), { width: 210, height: 297, left: 17.7, right: 17.6, top: 20, header: 15, bottom: 15, footer: 15, gutter: 0 });
+  assert.deepEqual(core.toFields(original, "DOC"), { width: 210, height: 297, left: 17.7, right: 17.6, top: 35, header: 20, bottom: 30, footer: 15, gutter: 0 });
+  assert.deepEqual(core.fromFields(core.toFields(original, "DOC"), original, "DOC"), { ...original, gutter: 0, binding: 0 }, "pressing 확인 on an untouched DOC dialog changes nothing");
+  const editedDoc = core.fromFields({ ...core.toFields(original, "DOC"), left: 20 }, original, "DOC");
+  assert.equal(editedDoc.left, core.mmToTwips(20));
+  assert.deepEqual({ ...editedDoc, left: original.left }, { ...original, gutter: 0, binding: 0 });
+
+  const asymHwp = { width: 11906, height: 16838, left: 1001, right: 999, top: 1984, bottom: 1984, header: 1134, footer: 1417 };
+  assert.deepEqual(core.toFields(asymHwp, "HWP"), { width: 210, height: 297, left: 17.7, right: 17.6, top: 20, header: 15, bottom: 25, footer: 10, gutter: 0 });
+  assert.deepEqual(core.fromFields(core.toFields(asymHwp, "HWP"), asymHwp, "HWP"), { ...asymHwp, gutter: 0, binding: 0 }, "pressing 확인 on an untouched HWP dialog keeps exact asymmetric bottom/footer twips");
+  const editedHwp = core.fromFields({ ...core.toFields(asymHwp, "HWP"), left: 20 }, asymHwp, "HWP");
+  assert.equal(editedHwp.left, core.mmToTwips(20));
+  assert.deepEqual({ ...editedHwp, left: asymHwp.left }, { ...asymHwp, gutter: 0, binding: 0 });
 });
 
 test("용지 방향 전환 turns the page and 여백 전환 goes through the margin sets, each as one undo step", async () => {

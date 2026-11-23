@@ -274,3 +274,40 @@ fn reference_a4_height_84186_snaps_to_a4_and_oversized_margins_fail_closed() {
     let no_page_doc = decode_hwpx(&no_page_pr_wide, "no_page_pr.hwpx");
     assert_eq!(no_page_doc.page_frame.margins, None);
 }
+
+#[test]
+fn asymmetric_bottom_and_footer_margins_roundtrip_symmetrically_with_hwpx_margin_attrs() {
+    let margins = RichPageMargins {
+        top: 1984,
+        bottom: 1984,
+        header: 1134,
+        footer: 1417,
+        left: 1701,
+        right: 1701,
+    };
+    let mut doc = RichDocument {
+        title: "비대칭 꼬리말 여백".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("본문")],
+            ..RichParagraph::default()
+        })],
+        official_agency: None,
+        ..RichDocument::default()
+    };
+    doc.page_frame.paper = Some(RichPaper::A4);
+    doc.page_frame.margins = Some(margins);
+
+    let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None)
+        .expect("encode hwpx");
+    let parts = unpack_parts(&bytes);
+    let section = part_text(&parts, "Contents/section0.xml");
+    assert!(
+        section.contains(
+            "<hp:margin header=\"4250\" footer=\"2835\" gutter=\"0\" left=\"8505\" right=\"8505\" top=\"5670\" bottom=\"7085\"/>"
+        ),
+        "{section}"
+    );
+
+    let back = decode_hwpx(&bytes, "asymmetric_footer.hwpx");
+    assert_eq!(back.page_frame.margins, Some(margins));
+}

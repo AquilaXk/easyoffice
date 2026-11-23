@@ -495,9 +495,17 @@ fn the_margins_that_place_the_frame_come_back_from_all_three_formats() {
         .contains("w:top=\"1985\" w:right=\"1500\" w:bottom=\"1590\" w:left=\"1700\" w:header=\"1134\" w:footer=\"680\""));
     let hwpx =
         UniversalFormatConverter::encode_rich(&sample(), DocumentFormat::Hwpx, None).unwrap();
-    // The reference editor's top margin is the distance to the header, its header margin the header's height.
-    assert!(part(&entries(&hwpx), "Contents/section0.xml")
-        .contains("<hp:margin header=\"4255\" footer=\"3400\""));
+    // KS X 6101 `<hp:margin>`: `top`/`bottom` are outer edge distances to header/footer bands and `header`/`footer` are the band heights.
+    let hwpx_parts = entries(&hwpx);
+    let section_xml = part(&hwpx_parts, "Contents/section0.xml");
+    assert!(
+        section_xml.contains("<hp:margin header=\"4255\" footer=\"4550\""),
+        "{section_xml}"
+    );
+    assert!(
+        section_xml.contains("top=\"5670\" bottom=\"3400\""),
+        "{section_xml}"
+    );
 }
 
 #[test]

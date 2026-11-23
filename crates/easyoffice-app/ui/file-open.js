@@ -623,7 +623,7 @@
             eoFirstPage: res.firstPageDifferent ? "true" : "",
             eoEvenOdd: res.evenOddDifferent ? "true" : "",
             eoTrackChanges: res.trackChanges === true ? "true" : "",
-            ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup)),
+            ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup, mod)),
           },
         };
       } else if (mod === "SHEET") {

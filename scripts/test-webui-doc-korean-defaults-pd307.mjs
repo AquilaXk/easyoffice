@@ -69,9 +69,9 @@ test("initial DOC toolbar and 편집 용지 dialog open with Korean word process
       height: "297.0",
       left: "25.4",
       right: "25.4",
-      top: "15.0",
+      top: "30.0",
       header: "15.0",
-      bottom: "7.9",
+      bottom: "25.4",
       footer: "17.5",
     }
   );

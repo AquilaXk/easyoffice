@@ -102,9 +102,9 @@ test("switching between DOC and HWP updates fallback font, line spacing, and 편
     {
       left: "25.4",
       right: "25.4",
-      top: "15.0",
+      top: "30.0",
       header: "15.0",
-      bottom: "7.9",
+      bottom: "25.4",
       footer: "17.5",
     }
   );
@@ -125,7 +125,7 @@ test("HWP_DEFAULT_SIDE, fromDecoded, and HWPX engine constants match Korean HWP 
     footer: 850,
   });
 
-  const fields = core.toFields({ width: 11906, height: 16838, ...core.HWP_DEFAULT_SIDE });
+  const fields = core.toFields({ width: 11906, height: 16838, ...core.HWP_DEFAULT_SIDE }, "HWP");
   assert.deepEqual(fields, {
     width: 210,
     height: 297,
@@ -137,6 +137,17 @@ test("HWP_DEFAULT_SIDE, fromDecoded, and HWPX engine constants match Korean HWP 
     footer: 15,
     gutter: 0,
   });
+
+  const asym = { width: 11906, height: 16838, ...core.HWP_DEFAULT_SIDE, bottom: 1984, footer: 1417 };
+  const asymFields = core.toFields(asym, "HWP");
+  assert.deepEqual(
+    { bottom: asymFields.bottom, footer: asymFields.footer },
+    { bottom: 25, footer: 10 }
+  );
+  assert.deepEqual(
+    core.fromFields(asymFields, asym, "HWP"),
+    { ...asym, gutter: 0, binding: 0 }
+  );
 
   const fromHwp = core.fromDecoded({ paper: { width: 11906, height: 16838 } }, "HWP");
   const fromDoc = core.fromDecoded({ paper: { width: 11906, height: 16838 } }, "DOC");

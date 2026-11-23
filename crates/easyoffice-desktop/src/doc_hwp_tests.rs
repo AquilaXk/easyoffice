@@ -141,3 +141,39 @@ fn blank_native_and_converted_hwp_match_korean_wordprocessor_page_and_font_defau
         }
     }
 }
+
+#[test]
+fn hwt_conversion_and_save_route_through_rhwp_and_verify_cleanly() {
+    for (source_format, for_save) in [("docx", false), ("hwt", true)] {
+        let req = format!(
+            r#"{{"sourceFormat":"{source_format}","targetFormat":"hwt","title":"서식 문서","forSave":{for_save},"blocks":[{{"type":"paragraph","heading":1,"runs":[{{"text":"서식 제목"}}]}},{{"type":"paragraph","runs":[{{"text":"서식 본문"}}]}},{{"type":"table","rows":[[{{"text":"갑"}},{{"text":"을"}}]]}}]}}"#
+        );
+        let response = convert(&req).expect("hwt converted or saved");
+        assert!(
+            response.contains("\"compatibility\":\"standard\""),
+            "source={source_format}, forSave={for_save}: {response}"
+        );
+        assert!(
+            response.contains("\"compatibilityWarning\":null"),
+            "source={source_format}, forSave={for_save}: {response}"
+        );
+        let bytes = converted_bytes(&response);
+        assert!(
+            bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]),
+            "OLE2 signature"
+        );
+        assert!(
+            crate::save_verify::verify_document_bytes("hwt", &bytes).is_ok(),
+            "save_verify must accept shell-written .hwt"
+        );
+        let core = DocumentCore::from_bytes(&bytes).expect("rhwp opens saved hwt");
+        let texts = paragraph_texts(&core);
+        for wanted in ["서식 제목", "서식 본문"] {
+            assert!(texts.iter().any(|t| t == wanted), "{wanted:?} in {texts:?}");
+        }
+        let svg = core.render_page_svg_native(0).unwrap();
+        for cell in ["갑", "을"] {
+            assert!(svg.contains(cell), "table cell {cell} is drawn");
+        }
+    }
+}

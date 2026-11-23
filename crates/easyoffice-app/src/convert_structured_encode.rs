@@ -670,7 +670,7 @@ pub(crate) fn encode_target(
     writers: ShellWriters<'_>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    if format == DocumentFormat::Hwp {
+    if format == DocumentFormat::Hwp || (format == DocumentFormat::Hwt && writers.hwp.is_some()) {
         let hwpx = encode_structured(content, DocumentFormat::Hwpx, title, warnings)?;
         return write_hwp(&hwpx, writers.hwp, writers.thumbnail);
     }
@@ -698,7 +698,12 @@ pub(crate) fn encode_source_target(
     writers: ShellWriters<'_>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let native = matches!(source, DocumentFormat::Hwp | DocumentFormat::Hwpx);
+    let native = matches!(
+        source,
+        DocumentFormat::Hwp | DocumentFormat::Hwpx | DocumentFormat::Hwtx
+    ) || (source == DocumentFormat::Hwt && writers.hwp.is_some());
+    let shell_hwp =
+        format == DocumentFormat::Hwp || (format == DocumentFormat::Hwt && writers.hwp.is_some());
     if let (Some(render), StructuredContent::Document(_, options)) = (writers.pdf, content) {
         if native && host_draws_pdf(format, source, options) {
             match render(source_bytes, options) {
@@ -710,7 +715,7 @@ pub(crate) fn encode_source_target(
             }
         }
     }
-    if native && format != DocumentFormat::Hwp && format != DocumentFormat::Pdf {
+    if native && !shell_hwp && format != DocumentFormat::Pdf {
         return encode_structured_with_thumbnail(
             content,
             format,

@@ -77,6 +77,9 @@
   // margins, and a body of at least 10 mm in both directions. Returns the reason or null.
   function violation(setup) {
     if (![...KEYS, "gutter"].every((key) => Number.isInteger(setup[key] ?? 0) && (setup[key] ?? 0) >= 0 && (setup[key] ?? 0) <= MAX_TWIPS)) return MSG_TOO_BIG;
+    if ((setup.header ?? 0) > (setup.top ?? 0) || (setup.footer ?? 0) > (setup.bottom ?? 0)) {
+      return "머리말·꼬리말 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.";
+    }
     const mm = (twips) => (twips / TWIPS_PER_MM).toFixed(1);
     const atTop = setup.binding === TOP_BINDING;
     const gutter = setup.gutter ?? 0;
@@ -91,39 +94,54 @@
     return null;
   }
 
-  // The dialog's fields (mm) as the reference editor shows them: its top margin is the distance to the header area,
-  // its header margin the height of that area; the same for the footer. The engine's `top` is the distance to the body.
-  function toFields(setup) {
+  // The dialog's fields (mm). HWP displays top/bottom as distances to the header/footer bands and header/footer as
+  // band heights; DOC displays independent distances from each paper edge. The engine stores body, header, and footer
+  // distances from paper edges.
+  function toFields(setup, mod = "DOC") {
+    const hwp = mod === "HWP";
     return {
       width: twipsToMm(setup.width),
       height: twipsToMm(setup.height),
       left: twipsToMm(setup.left),
       right: twipsToMm(setup.right),
-      top: twipsToMm(setup.header),
-      header: twipsToMm(Math.max(0, setup.top - setup.header)),
-      bottom: twipsToMm(Math.max(0, setup.bottom - setup.footer)),
-      footer: twipsToMm(setup.footer),
+      top: twipsToMm(hwp ? setup.header : setup.top),
+      header: twipsToMm(hwp ? Math.max(0, setup.top - setup.header) : setup.header),
+      bottom: twipsToMm(hwp ? setup.footer : setup.bottom),
+      footer: twipsToMm(hwp ? Math.max(0, setup.bottom - setup.footer) : setup.footer),
       gutter: twipsToMm(setup.gutter ?? 0),
     };
   }
 
   // The setup of the dialog's fields (numbers in mm). A field the user left as it was shown keeps its exact twips, so
   // pressing 확인 does not round a file's values to a tenth of a millimetre.
-  function fromFields(fields, original) {
-    const shown = original ? toFields(original) : null;
+  function fromFields(fields, original, mod = "DOC") {
+    const shown = original ? toFields(original, mod) : null;
     const kept = (key) => shown !== null && fields[key] === shown[key];
     const twips = (key, exact) => (kept(key) ? exact : mmToTwips(Number(fields[key]) || 0));
-    const header = twips("top", original?.header);
-    const footer = twips("footer", original?.footer);
-    const headerArea = kept("header") ? Math.max(0, original.top - original.header) : mmToTwips(Number(fields.header) || 0);
-    const footerArea = kept("bottom") ? Math.max(0, original.bottom - original.footer) : mmToTwips(Number(fields.bottom) || 0);
+    let top;
+    let bottom;
+    let header;
+    let footer;
+    if (mod === "HWP") {
+      header = twips("top", original?.header);
+      footer = twips("bottom", original?.footer);
+      const headerArea = kept("header") ? Math.max(0, original.top - original.header) : mmToTwips(Number(fields.header) || 0);
+      const footerArea = kept("footer") ? Math.max(0, original.bottom - original.footer) : mmToTwips(Number(fields.footer) || 0);
+      top = header + headerArea;
+      bottom = footer + footerArea;
+    } else {
+      top = twips("top", original?.top);
+      bottom = twips("bottom", original?.bottom);
+      header = twips("header", original?.header);
+      footer = twips("footer", original?.footer);
+    }
     return {
       width: twips("width", original?.width),
       height: twips("height", original?.height),
       left: twips("left", original?.left),
       right: twips("right", original?.right),
-      top: header + headerArea,
-      bottom: footer + footerArea,
+      top,
+      bottom,
       header,
       footer,
       gutter: twips("gutter", original?.gutter ?? 0),
@@ -190,6 +208,7 @@
     let original = null;
 
     const isHwp = () => (deps.getActiveModule?.() ?? byId("app")?.dataset?.module) === "HWP";
+    const activeMod = () => (isHwp() ? "HWP" : "DOC");
     const defaultSide = () => (isHwp() ? HWP_DEFAULT_SIDE : DEFAULT_SIDE);
 
     // The setup the document has now: its own, else what the page layout shows (the paper, the padding and the
@@ -276,7 +295,7 @@
     }
 
     function populate(setup) {
-      writeFields(toFields(setup));
+      writeFields(toFields(setup, activeMod()));
       kit.setChecked(setup.width > setup.height ? "doc-ps-landscape" : "doc-ps-portrait", true);
       markOrientation();
       kit.setChecked(BINDING_IDS[setup.binding ?? 0], true);
@@ -306,7 +325,7 @@
     function apply() {
       const editor = byId("doc-editor");
       if (!editor) return false;
-      const setup = fromFields(readFields(), original);
+      const setup = fromFields(readFields(), original, activeMod());
       // A listed paper keeps its exact size, not the one its rounded millimetres give.
       const preset = PRESETS.find(([name]) => name === kit.val("doc-ps-paper"));
       if (preset) {
