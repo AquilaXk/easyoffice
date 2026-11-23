@@ -56,6 +56,7 @@ impl SheetEngine {
     fn move_axis(&mut self, edit: &AxisEdit) -> usize {
         let cells = std::mem::take(&mut self.cells);
         let mut kinds = std::mem::take(&mut self.explicit_kinds);
+        let mut phonetics = std::mem::take(&mut self.phonetics);
         let mut asts = std::mem::take(&mut self.compiled_asts);
         let mut subtotals = std::mem::take(&mut self.subtotal_coords);
         let mut arrays = std::mem::take(&mut self.array_formulas);
@@ -87,6 +88,9 @@ impl SheetEngine {
             }
             if let Some(kind) = kinds.remove(&coord) {
                 self.explicit_kinds.insert(moved, kind);
+            }
+            if let Some(ph) = phonetics.remove(&coord) {
+                self.phonetics.insert(moved, ph);
             }
             self.cells.insert(moved, raw);
         }

@@ -19,6 +19,10 @@ use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, parse_merge, MAX_MERGES};
 use crate::sheet_styling::xlsx_page::PageScan;
+use crate::sheet_styling::xlsx_phonetic::PhoneticScan;
+pub(crate) use crate::sheet_styling::xlsx_phonetic::{
+    decode_xlsx_escapes, read_shared_strings, SharedStrings,
+};
 use crate::sheet_styling::xlsx_protect::ProtectScan;
 use crate::sheet_styling::xlsx_styles::{xlsx_width_to_px, XfStyles};
 use crate::sheet_styling::xlsx_view::{level_attr, ThemeTab, ViewScan, LAST_COL};
@@ -29,98 +33,6 @@ use crate::{EasyOfficeError, OoxmlCodec};
 /// Attribute `name`, also written with the `eo:` prefix.
 fn plain_name(name: &str) -> &str {
     name.strip_prefix("eo:").unwrap_or(name)
-}
-
-/// The shared string table of `xl/sharedStrings.xml`: all strings in one arena.
-#[derive(Default)]
-pub(crate) struct SharedStrings {
-    text: String,
-    ends: Vec<usize>,
-}
-
-impl SharedStrings {
-    pub(crate) fn get(&self, index: usize) -> Option<&str> {
-        let end = *self.ends.get(index)?;
-        let start = index.checked_sub(1).map_or(0, |prev| self.ends[prev]);
-        Some(&self.text[start..end])
-    }
-
-    fn close_item(&mut self, start: usize) {
-        if self.text[start..].contains("_x") {
-            let escaped = self.text.split_off(start);
-            decode_xlsx_escapes_into(&escaped, &mut self.text);
-        }
-        self.ends.push(self.text.len());
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_strings(strings: &[String]) -> Self {
-        let mut table = Self::default();
-        for s in strings {
-            table.text.push_str(s);
-            table.ends.push(table.text.len());
-        }
-        table
-    }
-}
-
-const MAX_SST_ITEMS: usize = 1 << 20;
-const MAX_SST_TOTAL_BYTES: usize = 128 * 1024 * 1024;
-
-/// Reads every `si` item: the text of its `t` elements outside `rPh` phonetic runs.
-pub(crate) fn read_shared_strings(xml: &str) -> Result<SharedStrings, EasyOfficeError> {
-    let mut table = SharedStrings::default();
-    let mut reader = XmlReader::unbounded(xml);
-    let mut item_start: Option<usize> = None;
-    let mut phonetic_depth = 0usize;
-    let mut in_text = false;
-    while let Some(event) = reader.next_event()? {
-        match event {
-            XmlEvent::Start { name: "si", .. } if reader.last_start_was_empty() => {
-                if table.ends.len() >= MAX_SST_ITEMS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "XLSX 공유 문자열(SST) 항목 수가 상한을 초과했습니다.".to_string(),
-                    ));
-                }
-                table.ends.push(table.text.len());
-            }
-            XmlEvent::Start { name: "si", .. } => {
-                if table.ends.len() >= MAX_SST_ITEMS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "XLSX 공유 문자열(SST) 항목 수가 상한을 초과했습니다.".to_string(),
-                    ));
-                }
-                item_start = Some(table.text.len());
-                phonetic_depth = 0;
-            }
-            XmlEvent::Start { name: "rPh", .. } if item_start.is_some() => phonetic_depth += 1,
-            XmlEvent::End("rPh") => phonetic_depth = phonetic_depth.saturating_sub(1),
-            XmlEvent::Start { name: "t", .. }
-                if item_start.is_some()
-                    && phonetic_depth == 0
-                    && !reader.last_start_was_empty() =>
-            {
-                in_text = true;
-            }
-            XmlEvent::End("t") => in_text = false,
-            XmlEvent::Text(text) if in_text => {
-                if table.text.len().saturating_add(text.len()) > MAX_SST_TOTAL_BYTES {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "XLSX 공유 문자열(SST) 누적 바이트가 상한(128 MiB)을 초과했습니다."
-                            .to_string(),
-                    ));
-                }
-                table.text.push_str(&text);
-            }
-            XmlEvent::End("si") => {
-                if let Some(start) = item_start.take() {
-                    table.close_item(start);
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(table)
 }
 
 /// What one worksheet yields: its cells and, when asked for, their styling.
@@ -160,6 +72,7 @@ struct CellState<'a> {
     formula: Option<Formula<'a>>,
     value: Option<Cow<'a, str>>,
     inline: Cow<'a, str>,
+    phonetic: Option<Box<PhoneticScan>>,
     has_inline: bool,
     phonetic_depth: usize,
     capture: Capture,
@@ -363,6 +276,7 @@ impl<'s> SheetScanner<'s> {
             formula: None,
             value: None,
             inline: Cow::Borrowed(""),
+            phonetic: None,
             has_inline: false,
             phonetic_depth: 0,
             capture: Capture::None,
@@ -495,7 +409,12 @@ impl<'s> SheetScanner<'s> {
     }
 
     /// Feeds an event inside a `c` element.
-    fn feed<'a>(&self, cell: &mut CellState<'a>, event: XmlEvent<'a>, empty_start: bool) {
+    fn feed<'a>(
+        &self,
+        cell: &mut CellState<'a>,
+        event: XmlEvent<'a>,
+        empty_start: bool,
+    ) -> Result<(), EasyOfficeError> {
         match event {
             XmlEvent::Start { name: "f", attrs } if cell.formula.is_none() => {
                 let (mut kind, mut index, mut array_ref) = (None, None, None);
@@ -527,10 +446,44 @@ impl<'s> SheetScanner<'s> {
                 cell.capture = Capture::Value;
             }
             XmlEvent::Start { name: "is", .. } => cell.has_inline = true,
-            XmlEvent::Start { name: "rPh", .. } => cell.phonetic_depth += 1,
-            XmlEvent::End("rPh") => cell.phonetic_depth = cell.phonetic_depth.saturating_sub(1),
+            XmlEvent::Start { name: "rPh", attrs } => {
+                cell.phonetic_depth += 1;
+                if self.want_styling && cell.phonetic_depth == 1 {
+                    cell.phonetic
+                        .get_or_insert_with(Box::default)
+                        .start_rph(&attrs)?;
+                }
+            }
+            XmlEvent::End("rPh") => {
+                if cell.phonetic_depth == 1 {
+                    if let Some(scan) = cell.phonetic.as_mut() {
+                        scan.end_rph();
+                    }
+                }
+                cell.phonetic_depth = cell.phonetic_depth.saturating_sub(1);
+            }
+            XmlEvent::Start {
+                name: "phoneticPr",
+                attrs,
+            } if cell.phonetic_depth == 0 => {
+                if self.want_styling {
+                    cell.phonetic
+                        .get_or_insert_with(Box::default)
+                        .on_phonetic_pr(&attrs);
+                }
+            }
             XmlEvent::Start { name: "t", .. } if cell.phonetic_depth == 0 && !empty_start => {
                 cell.capture = Capture::InlineText;
+            }
+            XmlEvent::Start { name: "t", .. } if cell.phonetic_depth == 1 && !empty_start => {
+                if let Some(scan) = cell.phonetic.as_mut() {
+                    scan.start_t();
+                }
+            }
+            XmlEvent::End("t") if cell.phonetic_depth == 1 => {
+                if let Some(scan) = cell.phonetic.as_mut() {
+                    scan.end_t();
+                }
             }
             XmlEvent::End("f" | "v" | "t") => cell.capture = Capture::None,
             XmlEvent::Text(text) => match cell.capture {
@@ -545,10 +498,16 @@ impl<'s> SheetScanner<'s> {
                     }
                 }
                 Capture::InlineText => append(&mut cell.inline, text),
+                Capture::None if cell.phonetic_depth == 1 => {
+                    if let Some(scan) = cell.phonetic.as_mut() {
+                        scan.push_text(&text)?;
+                    }
+                }
                 Capture::None => {}
             },
             _ => {}
         }
+        Ok(())
     }
 
     /// The cell's formula as cell text (`=` first), or `None` when it has no usable one. The
@@ -593,23 +552,39 @@ impl<'s> SheetScanner<'s> {
     fn cell_text(
         &mut self,
         cell: CellState<'_>,
-    ) -> Result<Option<(String, crate::CellValueKind)>, EasyOfficeError> {
+    ) -> Result<Option<(String, crate::CellValueKind, Option<crate::CellPhonetic>)>, EasyOfficeError>
+    {
         if let Some(formula) = self.formula_text(&cell)? {
-            return Ok(Some((formula, crate::CellValueKind::Formula)));
+            return Ok(Some((formula, crate::CellValueKind::Formula, None)));
         }
         if cell.cell_type == "inlineStr" || (cell.cell_type.is_empty() && cell.has_inline) {
             let text = decode_xlsx_escapes(cell.inline);
             self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
-            return Ok(Some((text, crate::CellValueKind::Text)));
+            let phonetic = self
+                .want_styling
+                .then(|| cell.phonetic.and_then(|p| p.finish(&text)))
+                .flatten();
+            if let Some(ref ph) = phonetic {
+                self.budget.charge_cell(ph.byte_len(), CELL_BUDGET_WHAT)?;
+            }
+            return Ok(Some((text, crate::CellValueKind::Text, phonetic)));
         }
         let Some(raw) = cell.value else {
             return Ok(None);
         };
         let (text, kind) = match &*cell.cell_type {
             "s" => {
-                let shared = self.shared_string(&raw)?;
+                let (shared, ph) = self.shared_entry(&raw)?;
                 self.budget.charge_cell(shared.len(), CELL_BUDGET_WHAT)?;
-                return Ok(Some((shared.to_string(), crate::CellValueKind::Text)));
+                let phonetic = self.want_styling.then_some(ph).flatten().cloned();
+                if let Some(ref ph) = phonetic {
+                    self.budget.charge_cell(ph.byte_len(), CELL_BUDGET_WHAT)?;
+                }
+                return Ok(Some((
+                    shared.to_string(),
+                    crate::CellValueKind::Text,
+                    phonetic,
+                )));
             }
             "str" => (decode_xlsx_escapes(raw), crate::CellValueKind::Text),
             "b" => match raw.trim() {
@@ -635,7 +610,7 @@ impl<'s> SheetScanner<'s> {
             }
         };
         self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
-        Ok(Some((text, kind)))
+        Ok(Some((text, kind, None)))
     }
 
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
@@ -643,9 +618,12 @@ impl<'s> SheetScanner<'s> {
         if let Some(reference) = cell.formula.as_ref().and_then(|f| f.array_ref.as_deref()) {
             self.record_spill(row, col, reference)?;
         }
-        if let Some((text, kind)) = self.cell_text(cell)? {
+        if let Some((text, kind, phonetic)) = self.cell_text(cell)? {
             if self.want_styling {
                 self.styling.set_cell_kind(row, col, &text, kind);
+                if let Some(ph) = phonetic {
+                    self.styling.set_cell_phonetic(row, col, &text, ph);
+                }
             }
             self.cells.push((row, col, text));
         }
@@ -667,9 +645,9 @@ impl<'s> SheetScanner<'s> {
             let before = spills.partition_point(|r| r.row <= *row);
             let keep = !crate::is_covered_by_spills(&spills[..before], *row, *col);
             if !keep {
-                self.styling
-                    .cell_types
-                    .remove(&crate::pack_cell_pos(*row, *col));
+                let packed = crate::pack_cell_pos(*row, *col);
+                self.styling.cell_types.remove(&packed);
+                self.styling.phonetics.remove(&packed);
             }
             keep
         });
@@ -713,11 +691,14 @@ impl<'s> SheetScanner<'s> {
         Ok(())
     }
 
-    fn shared_string(&self, raw: &str) -> Result<&'s str, EasyOfficeError> {
+    fn shared_entry(
+        &self,
+        raw: &str,
+    ) -> Result<(&'s str, Option<&'s crate::CellPhonetic>), EasyOfficeError> {
         raw.trim()
             .parse::<usize>()
             .ok()
-            .and_then(|index| self.shared.get(index))
+            .and_then(|index| Some((self.shared.get(index)?, self.shared.phonetic(index))))
             .ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer(format!(
                     "XLSX 공유 문자열 인덱스 '{raw}'를 읽을 수 없습니다."
@@ -798,7 +779,7 @@ pub(crate) fn scan_worksheet(
             }
             event => {
                 if let Some(open) = cell.as_mut() {
-                    scanner.feed(open, event, reader.last_start_was_empty());
+                    scanner.feed(open, event, reader.last_start_was_empty())?;
                 }
             }
         }
@@ -816,65 +797,6 @@ pub(crate) fn scan_worksheet(
         tab_indexed: view.tab_indexed,
         link_styled: scanner.link_styled,
     })
-}
-
-/// Decodes ECMA-376 `_xHHHH_` UTF-16 escape sequences (including surrogate pairs) in XLSX strings.
-pub(crate) fn decode_xlsx_escapes(s: Cow<'_, str>) -> String {
-    if !s.as_bytes().contains(&b'_') || !s.contains("_x") {
-        return s.into_owned();
-    }
-    let mut out = String::with_capacity(s.len());
-    decode_xlsx_escapes_into(&s, &mut out);
-    out
-}
-
-/// Appends `s` to `out` with its `_xHHHH_` escapes decoded.
-fn decode_xlsx_escapes_into(s: &str, out: &mut String) {
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    let mut high_surrogate: Option<u16> = None;
-    while i < bytes.len() {
-        if i + 7 <= bytes.len() && bytes[i] == b'_' && bytes[i + 1] == b'x' && bytes[i + 6] == b'_'
-        {
-            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6]) {
-                if let Ok(unit) = u16::from_str_radix(hex_str, 16) {
-                    if (0xD800..=0xDBFF).contains(&unit) {
-                        if high_surrogate.replace(unit).is_some() {
-                            out.push(char::REPLACEMENT_CHARACTER);
-                        }
-                        i += 7;
-                        continue;
-                    } else if (0xDC00..=0xDFFF).contains(&unit) {
-                        if let Some(hi) = high_surrogate.take() {
-                            let cp = 0x10000
-                                + (((u32::from(hi) - 0xD800) << 10) | (u32::from(unit) - 0xDC00));
-                            out.push(char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER));
-                            i += 7;
-                            continue;
-                        }
-                    } else {
-                        if high_surrogate.take().is_some() {
-                            out.push(char::REPLACEMENT_CHARACTER);
-                        }
-                        out.push(
-                            char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER),
-                        );
-                        i += 7;
-                        continue;
-                    }
-                }
-            }
-        }
-        if high_surrogate.take().is_some() {
-            out.push(char::REPLACEMENT_CHARACTER);
-        }
-        let ch = s[i..].chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    if high_surrogate.is_some() {
-        out.push(char::REPLACEMENT_CHARACTER);
-    }
 }
 
 /// The index after the quoted run (`"text"` or `'Sheet'`) that starts at `start`, where a doubled

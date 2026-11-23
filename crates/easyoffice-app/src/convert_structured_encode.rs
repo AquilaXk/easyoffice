@@ -118,22 +118,27 @@ fn workbook_engine(
         if let Some(styling) = sheet_styling {
             sheet.set_spill_merges(styling.merges.clone());
         }
+        let set_one = |sheet: &mut easyoffice_sheet::SheetEngine,
+                       row: u32,
+                       col: u32,
+                       raw: &String| {
+            if let Ok(coord) = PackedCellCoordinate::new(row, col) {
+                let kind = sheet_styling.and_then(|st| st.explicit_cell_kind(row, col, raw));
+                let ph = sheet_styling
+                    .and_then(|st| st.cell_phonetic(row, col, raw))
+                    .map(|p| p.reading());
+                sheet.set_cell_typed_with_phonetic_coord(coord, raw.clone(), kind, ph.as_deref());
+            }
+        };
         if let Some(filter) = SpillRefCoverFilter::new(spills) {
             for (row, col, raw) in cells {
-                if filter.covers_after_anchor(*row, *col) {
-                    continue;
-                }
-                if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                    let kind = sheet_styling.and_then(|st| st.explicit_cell_kind(*row, *col, raw));
-                    sheet.set_cell_typed_coord(coord, raw.clone(), kind);
+                if !filter.covers_after_anchor(*row, *col) {
+                    set_one(sheet, *row, *col, raw);
                 }
             }
         } else {
             for (row, col, raw) in cells {
-                if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                    let kind = sheet_styling.and_then(|st| st.explicit_cell_kind(*row, *col, raw));
-                    sheet.set_cell_typed_coord(coord, raw.clone(), kind);
-                }
+                set_one(sheet, *row, *col, raw);
             }
         }
     }

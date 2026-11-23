@@ -110,6 +110,8 @@ pub(crate) mod xlsx_normal_font;
 pub(crate) mod xlsx_page;
 #[path = "xlsx_parts.rs"]
 pub(crate) mod xlsx_parts;
+#[path = "xlsx_phonetic.rs"]
+pub(crate) mod xlsx_phonetic;
 #[path = "xlsx_pivots.rs"]
 pub(crate) mod xlsx_pivots;
 #[path = "xlsx_protect.rs"]
@@ -173,6 +175,10 @@ pub use table_style::{
 };
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
+pub use xlsx_phonetic::{
+    CellPhonetic, PhoneticAlign, PhoneticKind, PhoneticRun, MAX_PHONETIC_RUNS_PER_CELL,
+    MAX_PHONETIC_TEXT_BYTES,
+};
 pub use xlsx_slicers::{
     TableSlicer, MAX_SLICERS_PER_TABLE, MAX_SLICERS_TOTAL, MAX_SLICER_DIM_PX, MAX_SLICER_POS_PX,
     MIN_SLICER_DIM_PX,
@@ -592,6 +598,8 @@ pub struct SheetStyling {
     pub notes: BTreeMap<u64, SheetCellNote>,
     /// Cell notes a reader turned away because a ref or entry was invalid (PD-256).
     pub notes_rejected: u32,
+    /// Per-cell XLSX `<rPh>` phonetic guides keyed by packed `(row, col)` (PD-319).
+    pub phonetics: FastU64Map<CellPhonetic>,
 }
 
 /// Sorted, disjoint, zero-based inclusive runs of rows.
@@ -658,6 +666,7 @@ impl SheetStyling {
             && self.pivots.is_empty()
             && self.images.is_empty()
             && self.notes.is_empty()
+            && self.phonetics.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that
@@ -766,6 +775,29 @@ impl SheetStyling {
     pub fn explicit_cell_kind(&self, row: u32, col: u32, raw: &str) -> Option<CellValueKind> {
         let kind = *self.cell_types.get(&pack_cell_pos(row, col))?;
         (!raw.is_empty() && kind != CellValueKind::infer(raw)).then_some(kind)
+    }
+
+    /// Stores validated phonetic runs for text cell `(row, col)`, or clears them when empty/mismatching (PD-319).
+    pub fn set_cell_phonetic(&mut self, row: u32, col: u32, raw: &str, ph: CellPhonetic) {
+        let packed = pack_cell_pos(row, col);
+        if raw.is_empty()
+            || self.cell_kind(row, col, raw) != CellValueKind::Text
+            || !ph.matches_base(raw)
+        {
+            self.phonetics.remove(&packed);
+        } else if self.phonetics.len() < MAX_STYLED_CELLS || self.phonetics.contains_key(&packed) {
+            self.phonetics.insert(packed, ph);
+        }
+    }
+
+    /// Phonetic guide for `(row, col)` iff it is a text cell whose current text matches `ph.base` (PD-319).
+    #[inline]
+    pub fn cell_phonetic(&self, row: u32, col: u32, raw: &str) -> Option<&CellPhonetic> {
+        if raw.is_empty() || self.cell_kind(row, col, raw) != CellValueKind::Text {
+            return None;
+        }
+        let ph = self.phonetics.get(&pack_cell_pos(row, col))?;
+        ph.matches_base(raw).then_some(ph)
     }
 
     /// Whether the user, a folded group, the filter or a table's filter hides `row`.

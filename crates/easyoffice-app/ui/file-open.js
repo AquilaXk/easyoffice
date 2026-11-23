@@ -503,6 +503,7 @@
         const entry = isFormula ? { value: "", formula: raw } : { value: raw, formula: "" };
         const t = isFormula ? undefined : cellTypeApi?.explicitTag(raw, cell.t);
         if (t) entry.t = t;
+        if (!isFormula && raw && cell.ph && typeof cell.ph.r === "string") entry.ph = Object.freeze({ ...cell.ph, b: raw });
         if (style) entry.style = style;
         map[cell.ref] = entry;
         const packed = gridUtils ? gridUtils.packRef(cell.ref) : 0;

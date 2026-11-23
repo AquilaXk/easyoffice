@@ -66,6 +66,7 @@ mod sheet_names_ipc_tests;
 mod sheet_names_json;
 mod sheet_page_json;
 mod sheet_pdf_rules;
+mod sheet_phonetic_json;
 mod sheet_pivot_defs;
 mod sheet_pivot_ipc;
 mod sheet_pivot_json;
@@ -317,12 +318,14 @@ impl EasyOfficeIpcRouter {
         } else if !default_sheet.trim().is_empty() {
             wb.try_add_sheet(default_sheet)?;
         }
-        let mut cell_triples: Vec<(
-            String,
-            String,
-            String,
-            Option<easyoffice_formats::CellValueKind>,
-        )> = Vec::new();
+        struct EvalInputCell {
+            sheet: String,
+            addr: String,
+            val: String,
+            kind: Option<easyoffice_formats::CellValueKind>,
+            ph: Option<String>,
+        }
+        let mut input_cells: Vec<EvalInputCell> = Vec::new();
         if let Some(cells_val) = StrictJsonValue::get_field(entries, "cells") {
             let cells = cells_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
@@ -347,6 +350,9 @@ impl EasyOfficeIpcRouter {
                 }
                 let kind =
                     sheet_session::parse_cell_kind_tag(Self::optional_json_str(c_entries, "t")?)?;
+                let ph = sheet_phonetic_json::checked_eval_phonetic(Self::optional_json_str(
+                    c_entries, "ph",
+                )?)?;
                 let val = match StrictJsonValue::get_field(c_entries, "value") {
                     None => String::new(),
                     Some(v) => v.to_scalar_string().ok_or_else(|| {
@@ -356,14 +362,20 @@ impl EasyOfficeIpcRouter {
                         )
                     })?,
                 };
-                cell_triples.push((sh.to_string(), addr.to_string(), val, kind));
+                input_cells.push(EvalInputCell {
+                    sheet: sh.to_string(),
+                    addr: addr.to_string(),
+                    val,
+                    kind,
+                    ph,
+                });
             }
         }
         let has_explicit_sheets = explicit_sheets_val.is_some();
         if !has_explicit_sheets {
-            for (sh, _, _, _) in &cell_triples {
-                if !sh.trim().is_empty() {
-                    wb.try_add_sheet(sh)?;
+            for cell in &input_cells {
+                if !cell.sheet.trim().is_empty() {
+                    wb.try_add_sheet(&cell.sheet)?;
                 }
             }
         }
@@ -388,9 +400,15 @@ impl EasyOfficeIpcRouter {
                 wb.set_pivot_tables(&name, pivots)?;
             }
         }
-        for (sh, addr, val, kind) in cell_triples {
-            if wb.sheet(&sh).is_some() {
-                wb.set_cell_typed(&sh, &addr, val, kind)?;
+        for cell in input_cells {
+            if let Some(sheet) = wb.sheet_mut(&cell.sheet) {
+                let coord = PackedCellCoordinate::parse_a1(&cell.addr)?;
+                sheet.set_cell_typed_with_phonetic_coord(
+                    coord,
+                    cell.val,
+                    cell.kind,
+                    cell.ph.as_deref(),
+                );
             }
         }
         let names = sheet_names_json::names_field(entries)?;

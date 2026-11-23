@@ -336,6 +336,7 @@ impl Registry {
                 coord: c.coord,
                 raw: c.raw.clone(),
                 kind: None,
+                phonetic: None,
             })
             .collect();
         self.apply_typed(id, owner, &typed, recalc, now)
@@ -355,7 +356,10 @@ impl Registry {
                 self.limits.max_changes
             )));
         }
-        let incoming: usize = changes.iter().map(|c| c.raw.len()).sum();
+        let incoming: usize = changes
+            .iter()
+            .map(|c| c.raw.len() + c.phonetic.as_ref().map_or(0, String::len))
+            .sum();
         let Some(handle) = self.checkout(id, owner, now) else {
             return Ok(Applied::Expired);
         };
@@ -796,6 +800,9 @@ fn parse_changes(
             let sheet = EasyOfficeIpcRouter::optional_json_str(fields, "sheet")?.unwrap_or("");
             let cell = EasyOfficeIpcRouter::optional_json_str(fields, "cell")?.unwrap_or("");
             let kind = parse_cell_kind_tag(EasyOfficeIpcRouter::optional_json_str(fields, "t")?)?;
+            let phonetic = crate::sheet_phonetic_json::checked_eval_phonetic(
+                EasyOfficeIpcRouter::optional_json_str(fields, "ph")?,
+            )?;
             let raw = match StrictJsonValue::get_field(fields, "value") {
                 None => String::new(),
                 Some(v) => v.to_scalar_string().ok_or_else(|| {
@@ -809,6 +816,7 @@ fn parse_changes(
                 coord: PackedCellCoordinate::parse_a1(cell.trim())?,
                 raw,
                 kind,
+                phonetic,
             })
         })
         .collect()

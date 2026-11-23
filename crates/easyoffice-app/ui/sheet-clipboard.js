@@ -167,6 +167,7 @@
           const cell = e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: hidden ? "" : e.formula || "", style: e.style } : null;
           if (cell && !e.formula && e.t) cell.t = e.t;
           if (cell && e.link) cell.link = e.link;
+          if (cell && !e.formula && e.ph && e.ph.b === cell.value) cell.ph = e.ph;
           // A cell an array filled whose formula is copied too comes back with the formula (PD-217): pasting the formula
           // recreates it, pasting values still writes it.
           const source = e?.spillOf ? host.__EASYOFFICE_SHEET_SPILL__?.parseRef(e.spillOf) : null;

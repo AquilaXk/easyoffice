@@ -330,7 +330,8 @@ impl RecalcSession {
         };
         for idx in 0..workbook.sheet_count() {
             let sheet = &workbook.sheets()[idx];
-            session.raw_bytes += sheet.cells.values().map(String::len).sum::<usize>();
+            session.raw_bytes += sheet.cells.values().map(String::len).sum::<usize>()
+                + sheet.phonetics.values().map(|p| p.len()).sum::<usize>();
             for (&coord, entry) in &sheet.compiled_asts {
                 if let (true, Ok(ast)) = (is_formula(Some(entry)), entry) {
                     let sheet_idx = idx as u16;

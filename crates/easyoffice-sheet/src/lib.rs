@@ -162,6 +162,7 @@ pub struct SheetEngine {
     pub(crate) has_workbook_assigned_id: bool,
     pub(crate) cells: CellMap<String>,
     pub(crate) explicit_kinds: CellMap<easyoffice_formats::CellValueKind>,
+    pub(crate) phonetics: CellMap<Box<str>>,
     pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
     pub(crate) subtotal_coords: HashSet<PackedCellCoordinate>,
     /// Formulas the array evaluator calculates (see `array_class::needs_array`).
@@ -218,6 +219,7 @@ impl SheetEngine {
             has_workbook_assigned_id: false,
             cells: CellMap::default(),
             explicit_kinds: CellMap::default(),
+            phonetics: CellMap::default(),
             compiled_asts: CellMap::default(),
             subtotal_coords: HashSet::new(),
             array_formulas: HashSet::new(),
@@ -381,6 +383,7 @@ impl SheetEngine {
         if val.is_empty() {
             self.cells.remove(&coord);
             self.explicit_kinds.remove(&coord);
+            self.phonetics.remove(&coord);
             self.compiled_asts.remove(&coord);
             self.subtotal_coords.remove(&coord);
             self.array_formulas.remove(&coord);
@@ -393,6 +396,9 @@ impl SheetEngine {
             self.update_dense_number(coord, entry.as_ref());
             self.mark_array_formula(coord, entry.as_ref());
             if let Some(comp) = entry {
+                if dag::is_formula(Some(&comp)) {
+                    self.phonetics.remove(&coord);
+                }
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
                 } else {
@@ -414,6 +420,7 @@ impl SheetEngine {
         let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
         let comp = Ok(Expr::Number(num));
         self.explicit_kinds.remove(&coord);
+        self.phonetics.remove(&coord);
         self.set_name_uses(coord, None);
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
@@ -448,6 +455,9 @@ impl SheetEngine {
             self.update_dense_number(coord, entry.as_ref());
             self.mark_array_formula(coord, entry.as_ref());
             if let Some(comp) = entry {
+                if dag::is_formula(Some(&comp)) {
+                    self.phonetics.remove(&coord);
+                }
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
                 }

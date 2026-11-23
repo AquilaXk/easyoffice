@@ -10,13 +10,14 @@ use crate::recalc::{RecalcError, RecalcSession};
 use crate::{EasyOfficeError, PackedCellCoordinate, SheetEngine, WorkbookEngine};
 pub use easyoffice_formats::CellValueKind;
 
-/// One cell edit carrying an optional explicit value kind (`None` infers from `raw`).
+/// One cell edit carrying optional explicit value kind and phonetic guide (PD-241, PD-319).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedCellChange {
     pub sheet: String,
     pub coord: PackedCellCoordinate,
     pub raw: String,
     pub kind: Option<CellValueKind>,
+    pub phonetic: Option<String>,
 }
 
 /// Normalizes `kind` to sparse delta form (`Some(k)` iff `!raw.is_empty() && k != infer(raw)`).
@@ -27,6 +28,18 @@ pub(crate) fn normalize_explicit_kind(
 ) -> Option<CellValueKind> {
     let k = kind?;
     (!raw.is_empty() && k != CellValueKind::infer(raw)).then_some(k)
+}
+
+/// Normalizes `phonetic` to sparse form (`Some(p)` iff non-empty text cell with non-empty reading).
+#[inline]
+pub(crate) fn normalize_phonetic<'a>(
+    raw: &str,
+    kind: Option<CellValueKind>,
+    phonetic: Option<&'a str>,
+) -> Option<&'a str> {
+    let p = phonetic.filter(|s| !s.is_empty())?;
+    let effective = normalize_explicit_kind(raw, kind).unwrap_or_else(|| CellValueKind::infer(raw));
+    (!raw.is_empty() && effective == CellValueKind::Text).then_some(p)
 }
 
 impl SheetEngine {
@@ -83,18 +96,31 @@ impl SheetEngine {
         Ok(())
     }
 
-    /// Sets `coord` with an optional explicit [`CellValueKind`] (`None` infers from `raw_value`).
+    /// Sets `coord` with an optional explicit [`CellValueKind`] (`None` infers from `raw_value`),
+    /// clearing any previous phonetic guide.
     pub fn set_cell_typed_coord(
         &mut self,
         coord: PackedCellCoordinate,
         raw_value: impl Into<String>,
         kind: Option<CellValueKind>,
     ) {
+        self.set_cell_typed_with_phonetic_coord(coord, raw_value, kind, None);
+    }
+
+    /// Sets `coord` with explicit [`CellValueKind`] and optional phonetic guide string (PD-319).
+    pub fn set_cell_typed_with_phonetic_coord(
+        &mut self,
+        coord: PackedCellCoordinate,
+        raw_value: impl Into<String>,
+        kind: Option<CellValueKind>,
+        phonetic: Option<&str>,
+    ) {
         self.invalidate_plan();
         let was_populated = self.cells.contains_key(&coord);
         let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
         let val = raw_value.into();
-        match normalize_explicit_kind(&val, kind) {
+        let norm_kind = normalize_explicit_kind(&val, kind);
+        match norm_kind {
             Some(explicit) => {
                 self.explicit_kinds.insert(coord, explicit);
             }
@@ -102,8 +128,39 @@ impl SheetEngine {
                 self.explicit_kinds.remove(&coord);
             }
         }
+        match normalize_phonetic(&val, norm_kind, phonetic) {
+            Some(ph) => {
+                self.phonetics.insert(coord, Box::from(ph));
+            }
+            None => {
+                self.phonetics.remove(&coord);
+            }
+        }
         self.store_cell_preserving_kind(coord, val);
         self.patch_indexes(coord, was_populated, was_formula);
+    }
+
+    /// Updates only the phonetic guide of an existing text cell at `coord` (PD-319).
+    pub fn set_cell_phonetic_coord(&mut self, coord: PackedCellCoordinate, phonetic: Option<&str>) {
+        let Some(raw) = self.cells.get(&coord) else {
+            self.phonetics.remove(&coord);
+            return;
+        };
+        let kind = self.explicit_kinds.get(&coord).copied();
+        match normalize_phonetic(raw, kind, phonetic) {
+            Some(ph) => {
+                self.phonetics.insert(coord, Box::from(ph));
+            }
+            None => {
+                self.phonetics.remove(&coord);
+            }
+        }
+    }
+
+    /// Stored phonetic guide string of `coord`, if any (PD-319).
+    #[inline]
+    pub fn cell_phonetic_coord(&self, coord: PackedCellCoordinate) -> Option<&str> {
+        self.phonetics.get(&coord).map(Box::as_ref)
     }
 }
 
@@ -247,18 +304,21 @@ mod tests {
                 coord: a1,
                 raw: "123".into(),
                 kind: None,
+                phonetic: None,
             },
             TypedCellChange {
                 sheet: "S".into(),
                 coord: b1,
                 raw: "=SUM(A1)".into(),
                 kind: None,
+                phonetic: None,
             },
             TypedCellChange {
                 sheet: "S".into(),
                 coord: c1,
                 raw: "=ISTEXT(A1)".into(),
                 kind: None,
+                phonetic: None,
             },
         ])
         .unwrap();

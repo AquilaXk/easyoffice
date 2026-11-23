@@ -97,6 +97,7 @@ fn parse_borrowed_changes<'a>(
         let mut cell: Option<Cow<'a, str>> = None;
         let mut raw = String::new();
         let mut kind: Option<CellValueKind> = None;
+        let mut ph_raw: Option<Cow<'a, str>> = None;
         for (fk, fv) in fields {
             match fk.as_ref() {
                 "sheet" => match fv {
@@ -134,6 +135,15 @@ fn parse_borrowed_changes<'a>(
                         ))
                     }
                 },
+                "ph" => match fv {
+                    StrictJsonBorrow::Null => {}
+                    StrictJsonBorrow::Str(s) => ph_raw = Some(s),
+                    _ => {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "JSON 필드 'ph'는 문자열이어야 합니다.".to_string(),
+                        ))
+                    }
+                },
                 _ => {}
             }
         }
@@ -142,11 +152,13 @@ fn parse_borrowed_changes<'a>(
             Some(s) if !s.is_empty() => s.into_owned(),
             _ => String::new(),
         };
+        let phonetic = crate::sheet_phonetic_json::checked_eval_phonetic(ph_raw.as_deref())?;
         out.push(TypedCellChange {
             sheet: sheet_owned,
             coord,
             raw,
             kind,
+            phonetic,
         });
     }
     Ok((id, recalc, out))

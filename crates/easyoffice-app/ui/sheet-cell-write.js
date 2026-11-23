@@ -62,6 +62,7 @@
       // The cell keeps its hyperlink through a write of text, as the spreadsheet programs do; an edit with `link` replaces
       // it (`null` removes it): a paste or fill of cells, a cut, the link dialog (PD-218).
       const link = "link" in edit ? edit.link : map[edit.ref]?.link;
+      const ph = "ph" in edit ? edit.ph : map[edit.ref]?.ph;
       const t = edit.formula ? undefined : host.__EASYOFFICE_SHEET_CELL_TYPE__?.explicitTag(edit.value, edit.t);
       if (edit.value === "" && edit.formula === "" && !style && !link) {
         delete map[edit.ref];
@@ -72,6 +73,7 @@
         : { value: edit.value, formula: edit.formula };
       if (t) entry.t = t;
       if (link) entry.link = link;
+      if (!edit.formula && edit.value && ph && ph.b === edit.value) entry.ph = ph;
       map[edit.ref] = entry;
       const packed = gridUtils.packRef(edit.ref);
       if (packed > 0) {

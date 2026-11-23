@@ -127,7 +127,13 @@ test("a source cell brings its format; the frozen-panes flag does not travel; an
   const result = fillColumn([cellOf("1", { style: bold }), cellOf("", { style: frozen }), undefined], "down", 3, "copy");
   assert.equal(result.edits[0].style, bold);
   assert.deepEqual(result.edits[1].style, { fontWeight: "600", fontStyle: "", textDecoration: "", fontSize: "" });
-  assert.deepEqual(result.edits[2], { ref: "C15", value: "", formula: "", style: null, link: null }, "a filled cell brings its source's link, or none");
+  assert.deepEqual(result.edits[2], { ref: "C15", value: "", formula: "", style: null, link: null, ph: null }, "a filled cell brings its source's link, or none");
+  const ph = Object.freeze({ r: "トウキョウト", b: "東京都" });
+  assert.equal(fillColumn([cellOf("東京都", { ph })], "down", 1, "copy").edits[0].ph, ph);
+  const seriesPh = Object.freeze({ r: "ダイ1カイ", b: "第1回" });
+  const seriesRes = fillColumn([cellOf("第1回", { ph: seriesPh })], "down", 1);
+  assert.equal(seriesRes.edits[0].value, "第2回");
+  assert.equal(seriesRes.edits[0].ph, null);
 });
 
 test("a fill past the limits is refused and writes nothing; odd numbers never turn into Infinity or NaN", () => {

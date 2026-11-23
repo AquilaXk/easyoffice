@@ -65,6 +65,7 @@
       if (parsed.t) nextCell.t = parsed.t;
       if (prevCell?.style) nextCell.style = prevCell.style;
       if (prevCell?.link) nextCell.link = prevCell.link;
+      if (!nextCell.formula && prevCell?.ph && prevCell.ph.b === nextCell.value) nextCell.ph = prevCell.ph;
       candidateSheets[targetSheet][targetCellRef] = nextCell;
       const prevValues = new Map();
       const calcApi = host.__EASYOFFICE_SHEET_CALC_OPTIONS__;

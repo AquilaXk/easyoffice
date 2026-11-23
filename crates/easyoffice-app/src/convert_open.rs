@@ -459,6 +459,10 @@ fn write_sheet_cells(
         if let Some(kind) = styling.and_then(|s| s.explicit_cell_kind(*r, *c, raw)) {
             let _ = write!(out, ",\"t\":\"{}\"", kind.tag());
         }
+        if let Some(ph) = styling.and_then(|s| s.cell_phonetic(*r, *c, raw)) {
+            out.push_str(",\"ph\":");
+            crate::sheet_phonetic_json::write_cell_phonetic_json(out, ph);
+        }
         if let Some(style) = style {
             out.push_str(",\"style\":");
             write_style(out, style, num_fmts, fonts);

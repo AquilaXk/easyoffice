@@ -252,3 +252,147 @@ fn phonetic_gives_the_text_of_the_first_cell() {
     assert_eq!(model._get_text("A7"), "#VALUE!");
     assert_eq!(model._get_text("A8"), "#N/A");
 }
+
+#[test]
+fn phonetic_uses_stored_reading_across_sheets_sort_axis_and_recalc_session() {
+    use easyoffice_sheet::{
+        Axis, AxisBudget, AxisEdit, CellValueKind, EditKind, EvaluatedCellValue,
+        PackedCellCoordinate, RecalcSession, SortKey, TypedCellChange, WorkbookEngine,
+    };
+
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S1");
+    wb.add_sheet("S2");
+    let b1 = PackedCellCoordinate::parse_a1("B1").unwrap();
+    let b2 = PackedCellCoordinate::parse_a1("B2").unwrap();
+    let c2 = PackedCellCoordinate::parse_a1("C2").unwrap();
+
+    wb.sheet_mut("S1")
+        .unwrap()
+        .set_cell_typed_with_phonetic_coord(b1, "東京都", None, Some("トウキョウト"));
+    wb.sheet_mut("S1")
+        .unwrap()
+        .set_cell_typed_with_phonetic_coord(b2, "大阪府", None, Some("おおさかふ"));
+    wb.sheet_mut("S1")
+        .unwrap()
+        .set_cell_typed_with_phonetic_coord(c2, "001", Some(CellValueKind::Text), Some("ゼロ"));
+    wb.sheet_mut("S2")
+        .unwrap()
+        .set_cell_typed_with_phonetic_coord(b1, "北海道", None, Some("ホッカイドウ"));
+
+    // Direct reference, multi-cell upper-left, cross-sheet, INDIRECT, OFFSET, formula cell fallback
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(B1)"),
+        EvaluatedCellValue::Text("トウキョウト".into())
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(B1:C2)"),
+        EvaluatedCellValue::Text("トウキョウト".into())
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(S2!B1)"),
+        EvaluatedCellValue::Text("ホッカイドウ".into())
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(INDIRECT(\"C2\"))"),
+        EvaluatedCellValue::Text("ゼロ".into())
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(OFFSET(A1,1,1))"),
+        EvaluatedCellValue::Text("おおさかふ".into())
+    );
+    wb.set_cell("S1", "D1", "=\"東京都\"").unwrap();
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("S1", "=PHONETIC(D1)"),
+        EvaluatedCellValue::Text("東京都".into())
+    );
+
+    // Axis row insertion shifts phonetic coordinates and triggers dependency recalculation.
+    let mut sess = RecalcSession::new(wb).unwrap();
+    let a1 = PackedCellCoordinate::parse_a1("A1").unwrap();
+    let a2 = PackedCellCoordinate::parse_a1("A2").unwrap();
+    let base_bytes = sess.footprint().raw_bytes;
+    assert!(base_bytes >= "トウキョウト".len());
+    sess.set_cell("S1", a1, "=PHONETIC(B1)").unwrap();
+    let r1 = sess.recalculate();
+    assert!(r1
+        .changed
+        .iter()
+        .any(|c| c.coord == a1 && c.value == EvaluatedCellValue::Text("トウキョウト".into())));
+
+    // Updating only the phonetic string (same base text!) invalidates A1 and updates raw_bytes.
+    sess.apply_typed(&[TypedCellChange {
+        sheet: "S1".into(),
+        coord: b1,
+        raw: "東京都".into(),
+        kind: None,
+        phonetic: Some("とうきょうと".into()),
+    }])
+    .unwrap();
+    let r2 = sess.recalculate();
+    assert!(r2
+        .changed
+        .iter()
+        .any(|c| c.coord == a1 && c.value == EvaluatedCellValue::Text("とうきょうと".into())));
+
+    // Clearing phonetic falls back to cell text cleanly.
+    sess.apply_typed(&[TypedCellChange {
+        sheet: "S1".into(),
+        coord: b1,
+        raw: "東京都".into(),
+        kind: None,
+        phonetic: None,
+    }])
+    .unwrap();
+    let r3 = sess.recalculate();
+    assert!(r3
+        .changed
+        .iter()
+        .any(|c| c.coord == a1 && c.value == EvaluatedCellValue::Text("東京都".into())));
+
+    // Restoring furigana then inserting row 1 shifts B1 -> B2 while A1 (=PHONETIC(B1) -> =PHONETIC(B2)).
+    sess.apply_typed(&[TypedCellChange {
+        sheet: "S1".into(),
+        coord: b1,
+        raw: "東京都".into(),
+        kind: None,
+        phonetic: Some("トウキョウト".into()),
+    }])
+    .unwrap();
+    sess.recalculate();
+    let (_, after_insert) = sess
+        .apply_axis_edit(
+            "S1",
+            AxisEdit {
+                axis: Axis::Row,
+                kind: EditKind::Insert,
+                at: 0,
+                count: 1,
+                cols: None,
+            },
+            AxisBudget::default(),
+        )
+        .unwrap();
+    assert!(after_insert.changed.iter().all(|c| c.coord != a2));
+    assert_eq!(
+        sess.workbook()
+            .evaluate_formula_on_sheet("S1", "=PHONETIC(B2)"),
+        EvaluatedCellValue::Text("トウキョウト".into())
+    );
+
+    // Sorting rows moves each cell's furigana alongside its row!
+    let mut sort_sheet = easyoffice_sheet::SheetEngine::new("Sort");
+    let r0 = PackedCellCoordinate::new(0, 0).unwrap();
+    let r1 = PackedCellCoordinate::new(1, 0).unwrap();
+    sort_sheet.set_cell_typed_with_phonetic_coord(r0, "山", None, Some("ヤマ"));
+    sort_sheet.set_cell_typed_with_phonetic_coord(r1, "川", None, Some("カワ"));
+    sort_sheet
+        .set_cell("B1", "20")
+        .and_then(|_| sort_sheet.set_cell("B2", "10"))
+        .unwrap();
+    sort_sheet
+        .sort_rows(0, 1, &[SortKey::asc(1)], false)
+        .unwrap();
+    assert_eq!(sort_sheet.cell_phonetic_coord(r0), Some("カワ"));
+    assert_eq!(sort_sheet.cell_phonetic_coord(r1), Some("ヤマ"));
+}

@@ -417,14 +417,16 @@
         const col = vertical ? fromCol : reverse ? s.c1 - away : s.c2 + away;
         const from = sources[line][step.src];
         const edit = { ref: refOf(row, col), value: "", formula: "", style: plainStyle(from?.style) };
-        // The copy and series fills bring the hyperlink along, or none (PD-218).
+        // The copy and series fills bring the hyperlink and matching phonetic along, or none (PD-218, PD-319).
         edit.link = from?.link ?? null;
+        edit.ph = null;
         if (from?.formula) {
           edit.formula = shiftFormula(from.formula, row - fromRow, col - fromCol);
           if (adjustColumns) edit.formula = shiftStructured(edit.formula, vertical ? row - fromRow : col - fromCol, (name) => tableFor(name, fromRow, fromCol));
         } else {
           edit.value = step.value ?? String(from?.value ?? "");
           if (from?.t) edit.t = from.t;
+          if (edit.value && edit.value === from?.value && from?.ph && from.ph.b === edit.value) edit.ph = from.ph;
         }
         edits.push(edit);
       });

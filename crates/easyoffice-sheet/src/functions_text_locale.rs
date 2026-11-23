@@ -284,7 +284,7 @@ impl SheetEngine {
         Ok(decimals.min(MAX_EURO_DECIMALS))
     }
 
-    /// `PHONETIC(reference)`: the text of the first cell of the reference.
+    /// `PHONETIC(reference)`: phonetic guide of the upper-left cell when present, else cell text (PD-319).
     pub(crate) fn fn_phonetic(
         &self,
         args: &[Expr],
@@ -294,12 +294,22 @@ impl SheetEngine {
         if args.len() != 1 {
             return Err(FormulaError::Value);
         }
-        let first_cell = match self.extract_range_and_sheet_ctx(&args[0], ctx, depth)? {
+        let resolved = self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?;
+        let first_cell = match &resolved {
             Some((Some(sheet), range, _)) => Expr::sheet_cell(sheet.as_ref(), range.start),
             Some((None, range, _)) => Expr::Cell(range.start),
             None => args[0].clone(),
         };
         let text = self.text_arg(&first_cell, ctx, depth)?;
+        if let Some((sheet_opt, range, _)) = resolved {
+            if let Some(target) = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx) {
+                if !crate::dag::is_formula(target.compiled_asts.get(&range.start)) {
+                    if let Some(ph) = target.cell_phonetic_coord(range.start) {
+                        return bounded_text(ph.to_string());
+                    }
+                }
+            }
+        }
         bounded_text(text)
     }
 }

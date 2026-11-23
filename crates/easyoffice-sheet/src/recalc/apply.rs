@@ -27,7 +27,7 @@ impl RecalcSession {
             return Err(RecalcError::OverBudget);
         }
         let idx = self.sheet_index(sheet)?;
-        self.stage(idx, coord, raw, kind)
+        self.stage(idx, coord, raw, kind, None)
     }
 
     /// Stages a batch of edits. A large batch rebuilds the cell indexes once instead of patching
@@ -37,7 +37,7 @@ impl RecalcSession {
             changes.len(),
             changes
                 .iter()
-                .map(|c| (c.sheet.as_str(), c.coord, c.raw.as_str(), None)),
+                .map(|c| (c.sheet.as_str(), c.coord, c.raw.as_str(), None, None)),
         )
     }
 
@@ -47,9 +47,15 @@ impl RecalcSession {
     ) -> Result<(), RecalcError> {
         self.apply_items(
             changes.len(),
-            changes
-                .iter()
-                .map(|c| (c.sheet.as_str(), c.coord, c.raw.as_str(), c.kind)),
+            changes.iter().map(|c| {
+                (
+                    c.sheet.as_str(),
+                    c.coord,
+                    c.raw.as_str(),
+                    c.kind,
+                    c.phonetic.as_deref(),
+                )
+            }),
         )
     }
 
@@ -62,6 +68,7 @@ impl RecalcSession {
                 PackedCellCoordinate,
                 &'a str,
                 Option<CellValueKind>,
+                Option<&'a str>,
             ),
         >,
     ) -> Result<(), RecalcError> {
@@ -69,11 +76,11 @@ impl RecalcSession {
             return Err(RecalcError::OverBudget);
         }
         let mut resolved = Vec::with_capacity(len);
-        for (sheet_name, coord, raw, kind) in items {
-            resolved.push((self.sheet_index(sheet_name)?, coord, raw, kind));
+        for (sheet_name, coord, raw, kind, ph) in items {
+            resolved.push((self.sheet_index(sheet_name)?, coord, raw, kind, ph));
         }
         if resolved.len() > BULK_CHANGE_THRESHOLD {
-            for &(idx, _, _, _) in &resolved {
+            for &(idx, _, _, _, _) in &resolved {
                 self.wb.sheets_mut()[usize::from(idx)].drop_indexes();
             }
         }
@@ -81,11 +88,15 @@ impl RecalcSession {
             let mut batch_pairs: Vec<(Ref, u32)> = Vec::new();
             let mut leaving: Vec<(u32, u16, PackedCellCoordinate, usize)> = Vec::new();
             let mut seen_vertices = DetSet::default();
-            for &(sheet, coord, raw, kind) in &resolved {
+            for &(sheet, coord, raw, kind, ph) in &resolved {
                 let engine = &self.wb.sheets()[usize::from(sheet)];
                 let old_raw = engine.cells.get(&coord).map_or("", String::as_str);
                 let norm_kind = crate::cell_kind::normalize_explicit_kind(raw, kind);
-                if old_raw == raw && engine.explicit_cell_kind(coord) == norm_kind {
+                let norm_ph = crate::cell_kind::normalize_phonetic(raw, norm_kind, ph);
+                if old_raw == raw
+                    && engine.explicit_cell_kind(coord) == norm_kind
+                    && engine.cell_phonetic_coord(coord) == norm_ph
+                {
                     continue;
                 }
                 if let Some(vertex) = self.graph.vertex_at(sheet, coord) {
@@ -112,8 +123,8 @@ impl RecalcSession {
                 }
             }
         }
-        for (idx, coord, raw, kind) in resolved {
-            self.stage(idx, coord, raw, kind)?;
+        for (idx, coord, raw, kind, ph) in resolved {
+            self.stage(idx, coord, raw, kind, ph)?;
         }
         Ok(())
     }
@@ -124,14 +135,21 @@ impl RecalcSession {
         coord: PackedCellCoordinate,
         raw: &str,
         kind: Option<CellValueKind>,
+        phonetic: Option<&str>,
     ) -> Result<(), RecalcError> {
         let engine = &self.wb.sheets()[usize::from(sheet)];
         let old_raw = engine.cells.get(&coord).map_or("", String::as_str);
+        let old_ph_len = engine.cell_phonetic_coord(coord).map_or(0, str::len);
         let norm_kind = crate::cell_kind::normalize_explicit_kind(raw, kind);
-        if old_raw == raw && engine.explicit_cell_kind(coord) == norm_kind {
+        let norm_ph = crate::cell_kind::normalize_phonetic(raw, norm_kind, phonetic);
+        if old_raw == raw
+            && engine.explicit_cell_kind(coord) == norm_kind
+            && engine.cell_phonetic_coord(coord) == norm_ph
+        {
             return Ok(());
         }
-        self.raw_bytes = self.raw_bytes - old_raw.len() + raw.len();
+        let new_ph_len = norm_ph.map_or(0, str::len);
+        self.raw_bytes = self.raw_bytes - old_raw.len() - old_ph_len + raw.len() + new_ph_len;
         if let Some(vertex) = self.graph.vertex_at(sheet, coord) {
             if let Some(Ok(ast)) = engine.compiled_asts.get(&coord) {
                 collect_refs(&self.wb, sheet, ast, &mut self.refs);
@@ -156,7 +174,8 @@ impl RecalcSession {
                 &mut self.released,
             );
         }
-        self.wb.sheets_mut()[usize::from(sheet)].set_cell_typed_coord(coord, raw, norm_kind);
+        self.wb.sheets_mut()[usize::from(sheet)]
+            .set_cell_typed_with_phonetic_coord(coord, raw, norm_kind, norm_ph);
         self.name_bytes = self.wb.name_bytes();
         let engine = &self.wb.sheets()[usize::from(sheet)];
         if let Some(entry) = engine.compiled_asts.get(&coord) {

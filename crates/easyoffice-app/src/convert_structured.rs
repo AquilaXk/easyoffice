@@ -806,6 +806,13 @@ fn parse_sheets(
                     if let Some(kind) = explicit_kind {
                         styling.set_cell_kind(key.0, key.1, raw, kind);
                     }
+                    if let Some(ph_val) = field(cell, "ph") {
+                        if let Some(ph) =
+                            crate::sheet_phonetic_json::parse_cell_phonetic_json(ph_val, raw)?
+                        {
+                            styling.set_cell_phonetic(key.0, key.1, raw, ph);
+                        }
+                    }
                     cells.insert(key, raw.to_string());
                 }
             }

@@ -54,7 +54,7 @@
       if (refsA.length !== refsB.length) return true;
       for (const ref of refsA) {
         const ea = mapA[ref], eb = mapB[ref];
-        if (!eb || (ea?.value || "") !== (eb?.value || "") || (ea?.formula || "") !== (eb?.formula || "") || (ea?.t || "") !== (eb?.t || "") || (includeStyle && cellStyleChanged(ea?.style, eb?.style))) {
+        if (!eb || (ea?.value || "") !== (eb?.value || "") || (ea?.formula || "") !== (eb?.formula || "") || (ea?.t || "") !== (eb?.t || "") || (ea?.ph?.b === ea?.value ? ea?.ph?.r || "" : "") !== (eb?.ph?.b === eb?.value ? eb?.ph?.r || "" : "") || (includeStyle && cellStyleChanged(ea?.style, eb?.style))) {
           return true;
         }
       }
@@ -99,13 +99,10 @@
             formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
           }
           if (entry.formula || entry.value) {
-            const val = entry.formula
-              ? entry.formula
-              : entry.t === "s"
-                ? String(entry.value)
-                : normalizeFormattedNumericCell(entry.value);
+            const val = entry.formula ? entry.formula : entry.t === "s" ? String(entry.value) : normalizeFormattedNumericCell(entry.value);
             const t = entry.formula ? undefined : host.__EASYOFFICE_SHEET_CELL_TYPE__?.wireTag(val, entry.t);
-            cells.push(t ? { sheet: shName, cell: ref, value: val, t } : { sheet: shName, cell: ref, value: val });
+            const ph = !entry.formula && entry.ph?.b === entry.value ? (entry.ph.r || "") : "";
+            cells.push({ sheet: shName, cell: ref, value: val, ...(t ? { t } : {}), ...(ph ? { ph } : {}) });
           }
         }
       }
@@ -237,16 +234,16 @@
           if (!entry.formula && !entry.value) continue;
           const raw = entry.formula ? entry.formula : entry.t === "s" ? String(entry.value) : normalizeFormattedNumericCell(entry.value);
           const t = entry.formula ? "" : (host.__EASYOFFICE_SHEET_CELL_TYPE__?.wireTag(raw, entry.t) || "");
+          const ph = !entry.formula && entry.ph?.b === entry.value ? (entry.ph.r || "") : "";
           const known = mirror.get(ref);
-          const mkChange = () => (t ? { sheet: shName, cell: ref, value: raw, t } : { sheet: shName, cell: ref, value: raw });
+          const mkChange = () => ({ sheet: shName, cell: ref, value: raw, ...(t ? { t } : {}), ...(ph ? { ph } : {}) });
           if (known === undefined) {
-            mirror.set(ref, { raw, t, gen });
+            mirror.set(ref, { raw, t, ph, gen });
             changes.push(mkChange());
           } else {
             known.gen = gen;
-            if (known.raw !== raw || known.t !== t) {
-              known.raw = raw;
-              known.t = t;
+            if (known.raw !== raw || known.t !== t || (known.ph || "") !== ph) {
+              known.raw = raw; known.t = t; known.ph = ph;
               changes.push(mkChange());
             }
           }

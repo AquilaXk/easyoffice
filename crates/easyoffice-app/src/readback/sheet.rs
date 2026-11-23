@@ -234,7 +234,10 @@ pub(super) fn write_workbook_readback(
                 continue;
             };
             let explicit = st.and_then(|s| s.explicit_cell_kind(row, col, raw));
-            engine.set_cell_typed_coord(coord, raw.clone(), explicit);
+            let ph = st
+                .and_then(|s| s.cell_phonetic(row, col, raw))
+                .map(|p| p.reading());
+            engine.set_cell_typed_with_phonetic_coord(coord, raw.clone(), explicit, ph.as_deref());
         }
         if let Some(st) = st {
             if !st.merges.is_empty() {

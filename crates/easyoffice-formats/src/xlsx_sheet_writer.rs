@@ -13,12 +13,13 @@ use crate::sheet_styling::sheet_table::xlsx_tables::HeaderCells;
 use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
+use crate::sheet_styling::xlsx_phonetic::push_inline_is_xml;
 use crate::sheet_styling::xlsx_styles::XlsxStyleTable;
 use crate::sheet_styling::xlsx_view::{sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml};
 use crate::sheet_styling::{merges_clear_of_tables, IdMemo, SheetStyling};
-use crate::{OoxmlCodec, SpillRef, XlsxCachedValue, XmlSanitizer};
+use crate::{CellPhonetic, OoxmlCodec, SpillRef, XlsxCachedValue, XmlSanitizer};
 
-pub(crate) type SharedStringMap<'a> = HashMap<&'a str, usize>;
+pub(crate) type SharedStringMap<'a> = HashMap<(&'a str, Option<&'a CellPhonetic>), usize>;
 
 pub(crate) fn push_cell_xml(
     sheet_xml: &mut String,
@@ -32,6 +33,7 @@ pub(crate) fn push_cell_xml(
         spill,
         filled,
         text_only,
+        phonetic,
     }: crate::sheet_styling::xlsx_parts::CellContent<'_>,
     sst_map: &SharedStringMap<'_>,
 ) {
@@ -42,16 +44,12 @@ pub(crate) fn push_cell_xml(
     if raw.is_empty() {
         sheet_xml.push_str("/>");
     } else if text_only || filled {
-        let _ = write!(
-            sheet_xml,
-            " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
-            XmlSanitizer::escape(raw)
-        );
+        push_inline_is_xml(sheet_xml, raw, if filled { None } else { phonetic });
     } else {
         match kind {
             crate::CellValueKind::Formula => {
                 let Some(formula) = raw.strip_prefix('=') else {
-                    push_shared_or_inline_str(sheet_xml, raw, sst_map);
+                    push_shared_or_inline_str(sheet_xml, raw, None, sst_map);
                     return;
                 };
                 let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
@@ -103,21 +101,22 @@ pub(crate) fn push_cell_xml(
                 );
             }
             crate::CellValueKind::Text | crate::CellValueKind::Number => {
-                push_shared_or_inline_str(sheet_xml, raw, sst_map);
+                push_shared_or_inline_str(sheet_xml, raw, phonetic, sst_map);
             }
         }
     }
 }
 
-fn push_shared_or_inline_str(sheet_xml: &mut String, raw: &str, sst_map: &SharedStringMap<'_>) {
-    if let Some(&idx) = sst_map.get(raw) {
+fn push_shared_or_inline_str(
+    sheet_xml: &mut String,
+    raw: &str,
+    phonetic: Option<&CellPhonetic>,
+    sst_map: &SharedStringMap<'_>,
+) {
+    if let Some(&idx) = sst_map.get(&(raw, phonetic)) {
         let _ = write!(sheet_xml, " t=\"s\"><v>{idx}</v></c>");
     } else {
-        let _ = write!(
-            sheet_xml,
-            " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
-            XmlSanitizer::escape(raw)
-        );
+        push_inline_is_xml(sheet_xml, raw, phonetic);
     }
 }
 
@@ -322,6 +321,7 @@ pub(crate) fn build_sheet_xml(
                             .iter()
                             .any(|area| area.covers_after_anchor(row, col)),
                     text_only: headers.contains(row, col),
+                    phonetic: styling.and_then(|st| st.cell_phonetic(row, col, raw)),
                 },
                 sst_map,
             );

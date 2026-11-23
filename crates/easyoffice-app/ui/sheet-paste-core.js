@@ -185,6 +185,7 @@
             edit.value = now?.value ?? "";
             edit.formula = now?.formula ?? "";
             if (now?.t) edit.t = now.t;
+            if (now?.ph) edit.ph = now.ph;
           }
           edit.ref = ref;
           result.edits.push(edit);
@@ -206,19 +207,20 @@
     const formula = from?.formula || (!copied && mode !== "values" && !pinned && isFormulaStr(value) ? value : "");
     const text = formula ? "" : value;
     const t = rich && !formula && from?.t ? from.t : undefined;
-    if (mode === "values") return t ? { value, formula: "", t } : { value, formula: "" };
+    const ph = !formula && from?.ph && from.ph.b === text ? from.ph : null;
+    if (mode === "values") return t ? { value, formula: "", t, ph: null } : { value, formula: "", ph: null };
     if (mode === "formats") return { value: "", formula: "", style: plainStyle(from?.style) };
-    if (mode === "formulas") return t ? { value: text, formula, t } : { value: text, formula };
+    if (mode === "formulas") return t ? { value: text, formula, t, ph: null } : { value: text, formula, ph: null };
     // A block from outside with formats (a table of HTML) brings its styles and leaves the cell's hyperlink.
     if (!copied) {
-      if (!rich) return { value: text, formula };
-      return t ? { value: text, formula, t, style: plainStyle(from?.style) } : { value: text, formula, style: plainStyle(from?.style) };
+      if (!rich) return { value: text, formula, ph: null };
+      return t ? { value: text, formula, t, style: plainStyle(from?.style), ph: null } : { value: text, formula, style: plainStyle(from?.style), ph: null };
     }
     // A plain paste brings the source's hyperlink or none; the special pastes of values, formulas and formats leave the
     // hyperlink of the cell they land on (PD-218).
     return t
-      ? { value: text, formula, t, style: plainStyle(from?.style), link: from?.link ?? null }
-      : { value: text, formula, style: plainStyle(from?.style), link: from?.link ?? null };
+      ? { value: text, formula, t, style: plainStyle(from?.style), link: from?.link ?? null, ph }
+      : { value: text, formula, style: plainStyle(from?.style), link: from?.link ?? null, ph };
   }
 
   // Column widths of the pasted columns by column; a source column at the default width resets the

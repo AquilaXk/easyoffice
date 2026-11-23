@@ -107,4 +107,6 @@ pub(crate) struct CellContent<'a> {
     pub(crate) filled: bool,
     /// A table's header cell: written as an inline string whatever its text (PD-224).
     pub(crate) text_only: bool,
+    /// Optional `<rPh>` phonetic runs for text cells matching `raw` (PD-319).
+    pub(crate) phonetic: Option<&'a crate::CellPhonetic>,
 }

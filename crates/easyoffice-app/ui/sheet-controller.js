@@ -202,6 +202,9 @@
         for (const key of lookApi?.hasLook(look) ? lookApi.LOOK_KEYS : []) if (look[key]) cellEntry.style[key] = look[key];
       }
       spill?.copyComputedMeta(prevEntry, cellEntry, formula);
+      if (!formula && value !== "" && prevEntry?.formula === "" && prevEntry?.ph && prevEntry.ph.b === value) {
+        cellEntry.ph = prevEntry.ph;
+      }
       // A hyperlink (PD-218) stays through any text the cell is given, even none.
       if (prevEntry?.link) cellEntry.link = prevEntry.link;
       map[ref] = cellEntry;

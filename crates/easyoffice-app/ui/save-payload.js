@@ -877,6 +877,10 @@
         const t = entry?.formula ? undefined : cellTypeApi?.wireTag(raw, entry?.t);
         const cell = { ref, raw };
         if (t) cell.t = t;
+        if (!entry?.formula && entry?.value && entry?.ph && entry.ph.b === entry.value) {
+          const { b: _b, ...ph } = entry.ph;
+          cell.ph = ph;
+        }
         if (style) cell.style = style;
         cells.push(cell);
       }

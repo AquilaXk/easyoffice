@@ -69,7 +69,7 @@ const XLSX_ROOT_RELS: &str = concat!(
     "</Relationships>"
 );
 
-type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
+type SharedStringMap<'a> = crate::sheet_styling::xlsx_sheet_writer::SharedStringMap<'a>;
 
 /// Whether `workbookPr` of the workbook part says the dates count from 1904.
 fn read_date1904(wb_xml: &str) -> bool {
@@ -163,12 +163,16 @@ fn build_workbook_parts(
     (workbook_xml, wb_rels_xml)
 }
 
-/// Unique text-cell strings with their indices and the total occurrence count.
+/// Unique `(text, phonetic)` entries with their SST indices and the total occurrence count.
 fn collect_shared_strings<'a>(
     active_sheets: &'a [OdsUnpacked],
-    stylings: &[SheetStyling],
-) -> (Vec<&'a str>, SharedStringMap<'a>, usize) {
-    let mut shared_strings: Vec<&'a str> = Vec::new();
+    stylings: &'a [SheetStyling],
+) -> (
+    Vec<(&'a str, Option<&'a crate::CellPhonetic>)>,
+    SharedStringMap<'a>,
+    usize,
+) {
+    let mut shared_strings: Vec<(&'a str, Option<&'a crate::CellPhonetic>)> = Vec::new();
     let mut sst_map = SharedStringMap::new();
     let mut total_str_count = 0usize;
     for (sheet_idx, (_, cells)) in active_sheets.iter().enumerate() {
@@ -188,32 +192,30 @@ fn collect_shared_strings<'a>(
             if !needs_sst {
                 continue;
             }
+            let key = (
+                val.as_str(),
+                styling.and_then(|st| st.cell_phonetic(row, col, val)),
+            );
             total_str_count += 1;
-            if !sst_map.contains_key(val.as_str()) {
-                sst_map.insert(val.as_str(), shared_strings.len());
-                shared_strings.push(val.as_str());
+            if let std::collections::hash_map::Entry::Vacant(e) = sst_map.entry(key) {
+                e.insert(shared_strings.len());
+                shared_strings.push(key);
             }
         }
     }
     (shared_strings, sst_map, total_str_count)
 }
 
-fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> String {
+fn build_shared_strings_xml(
+    shared_strings: &[(&str, Option<&crate::CellPhonetic>)],
+    total_str_count: usize,
+) -> String {
     let mut sst_xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{total_str_count}\" uniqueCount=\"{}\">",
         shared_strings.len()
     );
-    for s in shared_strings {
-        if s.starts_with(char::is_whitespace)
-            || s.ends_with(char::is_whitespace)
-            || s.contains(['\n', '\r'])
-        {
-            sst_xml.push_str("<si><t xml:space=\"preserve\">");
-        } else {
-            sst_xml.push_str("<si><t>");
-        }
-        sst_xml.push_str(&XmlSanitizer::escape(s));
-        sst_xml.push_str("</t></si>");
+    for &(s, ph) in shared_strings {
+        crate::sheet_styling::xlsx_phonetic::push_si_xml(&mut sst_xml, s, ph);
     }
     sst_xml.push_str("</sst>");
     sst_xml
