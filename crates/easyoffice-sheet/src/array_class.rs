@@ -239,11 +239,11 @@ pub(crate) fn arrayish(expr: &Expr) -> bool {
             let name = f.name.as_str();
             let args = &f.args;
             is_spill_fn(name)
-                || name == "TRANSPOSE"
+                || matches!(name, "TRANSPOSE" | ":")
                 || is_array_fn(name)
                 || (name == "XLOOKUP" && xlookup_returns_array(args))
                 || (name == "INDEX" && index_returns_line(args))
-                || (is_lifted_fn(name) && args.iter().any(arrayish))
+                || ((is_lifted_fn(name) || name == "CHOOSE") && args.iter().any(arrayish))
         }
         _ => false,
     }
@@ -257,7 +257,7 @@ pub(crate) fn index_returns_line(args: &[Expr]) -> bool {
     };
     match args {
         [array, row] => arrayish(array) && !matches!(row.peeled(), Expr::Missing),
-        [_, row, col] => zero(row) || zero(col),
+        [_, row, col] | [_, row, col, _] => zero(row) || zero(col),
         _ => false,
     }
 }
@@ -324,7 +324,8 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
                     ) || scan_spill_only(a)
                 });
             }
-            (is_lifted_fn(name) && args.iter().any(arrayish)) || args.iter().any(|a| scan(a, seen))
+            ((is_lifted_fn(name) || name == "CHOOSE") && args.iter().any(arrayish))
+                || args.iter().any(|a| scan(a, seen))
         }
         _ => false,
     }

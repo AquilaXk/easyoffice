@@ -119,6 +119,7 @@ pub(crate) fn is_function(name: &str) -> bool {
     static FUNCTIONS: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
     let upper = name.to_ascii_uppercase();
     upper == "SINGLE"
+        || name == ":"
         || FUNCTIONS
             .get_or_init(|| {
                 crate::SheetEngine::supported_function_names()

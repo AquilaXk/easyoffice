@@ -17,6 +17,23 @@ fn test_fn_choose_incorrect_index() {
     assert_eq!(model._get_text("A4"), *"#VALUE!");
     assert_eq!(model._get_text("A5"), *"#VALUE!");
 }
+#[test]
+fn test_fn_choose_basic_tests() {
+    let mut model = new_empty_model();
+    model._set("B1", "1");
+    model._set("B2", "2");
+    model._set("B3", "3");
+    model._set("A1", "=CHOOSE(3.1, B1, B2, B3)");
+    model._set("A2", "=SUM(B1:CHOOSE(1, B1, B2, B3))");
+    model._set("A3", "=SUM(CHOOSE(3, B1:B1, B1:B2, B1:B3))");
+    model._set("A4", "=CHOOSE(3,\"Wide\",115,\"world\",8)");
+    model.evaluate();
+
+    assert_eq!(model._get_text("A1"), *"3");
+    assert_eq!(model._get_text("A2"), *"1");
+    assert_eq!(model._get_text("A3"), *"6");
+    assert_eq!(model._get_text("A4"), *"world");
+}
 // CHOOSE broadcasts when the index argument is an array/range: each index element
 // selects the matching value argument, and the result spills with the index shape.
 #[test]
@@ -46,4 +63,39 @@ fn test_fn_choose_array_index() {
 
     assert_eq!(model._get_text("G1"), "7");
     assert_eq!(model._get_text("G2"), "#VALUE!");
+}
+#[test]
+fn test_fn_choose_scalar_index_unaffected() {
+    let mut model = new_empty_model();
+    model._set("A1", "10");
+    model._set("A2", "20");
+    model._set("A3", "30");
+    model._set("C1", "=CHOOSE(1, A1:A3, 999)");
+    model.evaluate();
+    assert_eq!(model._get_text("C1"), "10");
+    assert_eq!(model._get_text("C2"), "20");
+    assert_eq!(model._get_text("C3"), "30");
+}
+#[test]
+fn test_fn_choose_range_arm_flows_to_range_consumer() {
+    let mut model = new_empty_model();
+    model._set("A1", "10");
+    model._set("A2", "20");
+    model._set("A3", "30");
+    model._set("C1", "=SUM(CHOOSE(2, A1:A2, A1:A3))");
+    model._set("C2", "=SUM(A1:CHOOSE(2, A2, A3))");
+    model.evaluate();
+    assert_eq!(model._get_text("C1"), "60");
+    assert_eq!(model._get_text("C2"), "60");
+}
+#[test]
+fn test_fn_choose_at_call_intersects_result() {
+    let mut model = new_empty_model();
+    model._set("A1", "10");
+    model._set("A2", "20");
+    model._set("A3", "30");
+    model._set("C2", "=@CHOOSE(1, A1:A3, 999)");
+    model.evaluate();
+    assert_eq!(model._get_text("C2"), "20");
+    assert_eq!(model._get_text("C3"), "");
 }

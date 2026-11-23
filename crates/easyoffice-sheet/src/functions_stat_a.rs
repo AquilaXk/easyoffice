@@ -14,18 +14,6 @@ use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError as E, Sheet
 
 type Fallible<T> = Result<T, E>;
 
-fn is_reference(arg: &Expr) -> bool {
-    match arg.peeled() {
-        Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_) => true,
-        Expr::FuncCall(f) => {
-            let name = &f.name;
-            crate::functions_matrix::is_array_fn(name)
-                || matches!(name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE")
-        }
-        _ => false,
-    }
-}
-
 impl SheetEngine {
     /// Calls `f` with every value of the arguments as the "A" functions read them.
     fn visit_a_values(
@@ -39,7 +27,9 @@ impl SheetEngine {
             return Err(E::Value);
         }
         for arg in args {
-            if is_reference(arg) {
+            let is_ref_or_matrix = self.extract_streaming_range_ctx(arg, ctx, depth)?.is_some()
+                || self.matrix_expr(arg, ctx, depth)?.is_some();
+            if is_ref_or_matrix {
                 self.visit_args_streaming(std::slice::from_ref(arg), ctx, depth, |v| {
                     match v {
                         V::Number(n) => f(n),

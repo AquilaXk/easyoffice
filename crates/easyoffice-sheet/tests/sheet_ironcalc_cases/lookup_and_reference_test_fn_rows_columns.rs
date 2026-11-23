@@ -105,3 +105,13 @@ fn test_rows_and_columns_propagate_errors() {
     assert_eq!(model._get_text("C1"), "#DIV/0!");
     assert_eq!(model._get_text("C2"), "#DIV/0!");
 }
+#[test]
+fn test_rows_and_columns_intersection_operator_still_narrows() {
+    let mut model = new_empty_model();
+    model._set("A1", "1");
+    model._set("B1", "2");
+    model._set("C1", "3");
+    model._set("B3", "=COLUMNS(@A1:C1)");
+    model.evaluate();
+    assert_eq!(model._get_text("B3"), "1");
+}

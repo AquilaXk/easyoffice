@@ -172,6 +172,38 @@ impl SheetEngine {
         ctx.charge_array_cells(rows, cols)?;
         let total = rows * cols;
         let mut data = vec![V::Empty; total];
+        if let Some(vidx) = sheet_opt
+            .as_deref()
+            .and_then(crate::array::virtual_sheet_index)
+        {
+            if let Some(src) = ctx.temp.get(vidx).cloned() {
+                let mut links: Option<Vec<u32>> = None;
+                for dr in 0..rows {
+                    for dc in 0..cols {
+                        let (r, c) = if transposed {
+                            ((min_r + dc as u32) as usize, (min_c + dr as u32) as usize)
+                        } else {
+                            ((min_r + dr as u32) as usize, (min_c + dc as u32) as usize)
+                        };
+                        let idx = dr * cols + dc;
+                        let (v, lid) = if r < src.rows && c < src.cols {
+                            (src.get(r, c).clone(), src.link_id(r, c))
+                        } else {
+                            (V::Error(FormulaError::Ref), 0)
+                        };
+                        let hb = v.heap_bytes();
+                        if hb > 0 {
+                            ctx.charge_array_extra_bytes(hb)?;
+                        }
+                        data[idx] = v;
+                        if lid != 0 {
+                            links.get_or_insert_with(|| vec![0; total])[idx] = lid;
+                        }
+                    }
+                }
+                return Ok(Some(Grid::from_rows_with_links(rows, cols, data, links)));
+            }
+        }
         // A sparse range over few populated cells (per range, not whole sheet) avoids dense walks.
         let sparse_pop = (!transposed && total > 64)
             .then(|| self.resolve_sheet_ref(sheet_opt.as_deref(), ctx))
@@ -351,13 +383,6 @@ impl SheetEngine {
             "IFS" => self.fn_ifs_array(args, env, ctx, depth),
             "SWITCH" => self.fn_switch_array(args, env, ctx, depth),
             "CHOOSE" => self.fn_choose_branch_array(args, env, ctx, depth),
-            "OFFSET" | "ROW" | "COLUMN"
-                if args
-                    .first()
-                    .is_some_and(|a| Self::bound_ref(a, env).is_none() && needs_array(a)) =>
-            {
-                Ok(Val::error(FormulaError::Value))
-            }
             "INDEX" if index_returns_line(args) => {
                 let mark = ctx.temp.len();
                 let call = Expr::func_call(
@@ -371,7 +396,7 @@ impl SheetEngine {
                     None => self.fn_index_grid(args, env, ctx, depth),
                 }
             }
-            "INDIRECT" | "OFFSET" => {
+            "INDIRECT" | "OFFSET" | ":" => {
                 let mark = ctx.temp.len();
                 let call = Expr::func_call(
                     name.to_string(),
@@ -467,7 +492,8 @@ impl SheetEngine {
     }
 
     /// `args` of a call the scalar engine runs, with the ones that are arrays or use variables
-    /// replaced: by a literal (one value) or by a range of a temporary sheet (more).
+    /// replaced: by a reference (when variable substitution yields a real range), a literal (one value),
+    /// or a range of a temporary sheet (more).
     fn substitute_args(
         &self,
         args: &[Expr],
@@ -481,12 +507,37 @@ impl SheetEngine {
                 out.push(reference);
                 continue;
             }
+            let substituted = (!env.is_empty() && uses_vars(arg))
+                .then(|| subst_env_bindings(arg, env))
+                .map(std::borrow::Cow::Owned)
+                .unwrap_or(std::borrow::Cow::Borrowed(arg));
+            if let Expr::FuncCall(f) = substituted.peeled() {
+                if matches!(
+                    f.name.as_str(),
+                    ":" | "INDEX" | "OFFSET" | "INDIRECT" | "CHOOSE" | "IF" | "SINGLE"
+                ) && !uses_vars(&substituted)
+                {
+                    match self.extract_range_and_sheet_ctx(&substituted, ctx, depth + 1) {
+                        Ok(Some((sheet_opt, range, false)))
+                            if !Self::is_virtual_sheet(sheet_opt.as_deref()) =>
+                        {
+                            out.push(range_to_expr(sheet_opt.as_deref(), range));
+                            continue;
+                        }
+                        Err(e) => {
+                            out.push(Expr::ErrorLiteral(e));
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             let plain_ref = matches!(
                 arg.peeled(),
                 Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_)
             );
             if plain_ref || !(needs_array(arg) || (!env.is_empty() && uses_vars(arg))) {
-                out.push(arg.clone());
+                out.push(substituted.into_owned());
                 continue;
             }
             let grid = self.eval_val(arg, env, ctx, depth + 1)?.into_grid()?;
@@ -643,6 +694,89 @@ impl SheetEngine {
         Ok(Val::grid(Grid::from_rows_with_links(
             rows, cols, data, links,
         )))
+    }
+}
+
+/// Replaces free `LET`/`LAMBDA` variable references with bound [`Val::Ref`] or scalar [`Val::Grid`] literals.
+fn subst_env_bindings(expr: &Expr, env: &Env) -> Expr {
+    fn walk_subst(expr: &Expr, env: &Env, shadowed: &mut Vec<String>) -> Expr {
+        match expr {
+            Expr::Shared(shared) => walk_subst(&shared.expr, env, shadowed),
+            Expr::Var(name) if !shadowed.iter().any(|s| s.eq_ignore_ascii_case(name)) => {
+                match env.get(name) {
+                    Some(Val::Ref(r)) => (**r).clone(),
+                    Some(Val::Grid(g)) if g.is_scalar() => literal(g.get(0, 0)),
+                    _ => expr.clone(),
+                }
+            }
+            Expr::UnaryPlus(inner) => Expr::UnaryPlus(Box::new(walk_subst(inner, env, shadowed))),
+            Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(walk_subst(inner, env, shadowed))),
+            Expr::PostfixPercent(inner) => {
+                Expr::PostfixPercent(Box::new(walk_subst(inner, env, shadowed)))
+            }
+            Expr::Binary { op, lhs, rhs } => Expr::Binary {
+                op: *op,
+                lhs: Box::new(walk_subst(lhs, env, shadowed)),
+                rhs: Box::new(walk_subst(rhs, env, shadowed)),
+            },
+            Expr::FuncCall(f) if f.name == "LET" && f.args.len() >= 3 && f.args.len() % 2 == 1 => {
+                let mark = shadowed.len();
+                let last = f.args.len() - 1;
+                let mut args = Vec::with_capacity(f.args.len());
+                for i in (0..last).step_by(2) {
+                    args.push(f.args[i].clone());
+                    args.push(walk_subst(&f.args[i + 1], env, shadowed));
+                    if let Expr::Var(v) = &f.args[i] {
+                        shadowed.push(v.clone());
+                    }
+                }
+                args.push(walk_subst(&f.args[last], env, shadowed));
+                shadowed.truncate(mark);
+                Expr::func_call(f.name.clone(), args)
+            }
+            Expr::FuncCall(f) if f.name == "LAMBDA" && !f.args.is_empty() => {
+                let mark = shadowed.len();
+                let last = f.args.len() - 1;
+                let mut args = Vec::with_capacity(f.args.len());
+                for arg in &f.args[..last] {
+                    if let Expr::Var(v) = arg {
+                        shadowed.push(v.trim_start_matches('?').to_string());
+                    }
+                    args.push(arg.clone());
+                }
+                args.push(walk_subst(&f.args[last], env, shadowed));
+                shadowed.truncate(mark);
+                Expr::func_call(f.name.clone(), args)
+            }
+            Expr::FuncCall(f) => Expr::func_call(
+                f.name.clone(),
+                f.args
+                    .iter()
+                    .map(|a| walk_subst(a, env, shadowed))
+                    .collect(),
+            ),
+            Expr::Call(c) => Expr::call(
+                Box::new(walk_subst(&c.callee, env, shadowed)),
+                c.args
+                    .iter()
+                    .map(|a| walk_subst(a, env, shadowed))
+                    .collect(),
+            ),
+            _ => expr.clone(),
+        }
+    }
+    let mut shadowed = Vec::new();
+    walk_subst(expr, env, &mut shadowed)
+}
+
+#[inline]
+fn range_to_expr(sheet_opt: Option<&str>, range: CellRange) -> Expr {
+    let single = range.start == range.end;
+    match (sheet_opt, single) {
+        (None, true) => Expr::Cell(range.start),
+        (None, false) => Expr::Range(range),
+        (Some(sh), true) => Expr::sheet_cell(sh.to_string(), range.start),
+        (Some(sh), false) => Expr::sheet_range(sh.to_string(), range),
     }
 }
 

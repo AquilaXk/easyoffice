@@ -525,7 +525,7 @@ impl SheetEngine {
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
             | "TRUE" | "FALSE" => self.eval_logical_func(name, args, ctx, depth),
             "VLOOKUP" | "HLOOKUP" | "XLOOKUP" | "XMATCH" | "INDEX" | "MATCH" | "CHOOSE"
-            | "OFFSET" | "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" | "INDIRECT" => {
+            | "OFFSET" | "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" | "INDIRECT" | ":" => {
                 self.eval_lookup_func(name, args, ctx, depth)
             }
             "LEN" | "TRIM" | "UPPER" | "LOWER" | "PROPER" | "VALUE" | "CHAR" | "CODE"

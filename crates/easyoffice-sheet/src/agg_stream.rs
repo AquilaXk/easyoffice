@@ -211,7 +211,14 @@ impl SheetEngine {
                 Expr::FuncCall(f)
                     if matches!(
                         f.name.as_str(),
-                        "INDIRECT" | "OFFSET" | "TRANSPOSE" | "SINGLE"
+                        "INDIRECT"
+                            | "OFFSET"
+                            | "TRANSPOSE"
+                            | "SINGLE"
+                            | "INDEX"
+                            | "CHOOSE"
+                            | "IF"
+                            | ":"
                     ) =>
                 {
                     fold = self.agg_reference_func(fold, arg, ctx, depth)?;

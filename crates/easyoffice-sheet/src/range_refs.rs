@@ -343,67 +343,6 @@ impl SheetEngine {
         self.qualify_indirect_range(lhs_sh, range, ctx)
     }
 
-    /// `INDEX(range, 0, c)`, `INDEX(range, r, 0)`, `INDEX(range, 0, 0)` and `INDEX(range, r)` of a 2-D
-    /// range give the column, the row or the whole range as a reference; a single cell is left to the
-    /// scalar `INDEX`.
-    fn extract_index_line_ref<'b>(
-        &self,
-        args: &'b [Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
-        if !(2..=3).contains(&args.len()) {
-            return Ok(None);
-        }
-        let Some((sheet_opt, base, false)) =
-            self.extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
-        else {
-            return Ok(None);
-        };
-        let (rows, cols) = base.dimensions();
-        let mut number = |i: usize| -> Result<Option<i64>, FormulaError> {
-            match args.get(i) {
-                None | Some(Expr::Missing) => Ok(None),
-                Some(arg) => Ok(Some(self.eval_arg_num(arg, ctx, depth + 1)?.trunc() as i64)),
-            }
-        };
-        let (row, col) = (number(1)?, number(2)?);
-        let (row_all, col_all) = if args.len() == 3 {
-            (row.unwrap_or(0) == 0, col.unwrap_or(0) == 0)
-        } else if rows > 1 && cols > 1 {
-            (false, true)
-        } else {
-            return Ok(None);
-        };
-        let pick = |all: bool, n: Option<i64>, len: usize| -> Option<(u32, u32)> {
-            if all {
-                return Some((0, len as u32 - 1));
-            }
-            let n = n?;
-            (1..=len as i64)
-                .contains(&n)
-                .then(|| (n as u32 - 1, n as u32 - 1))
-        };
-        let (Some((r0, r1)), Some((c0, c1))) = (pick(row_all, row, rows), pick(col_all, col, cols))
-        else {
-            return Ok(None);
-        };
-        if r0 == r1 && c0 == c1 {
-            return Ok(None);
-        }
-        let (min_r, min_c) = (
-            base.start.row().min(base.end.row()),
-            base.start.col().min(base.end.col()),
-        );
-        let corner = |r: u32, c: u32| PackedCellCoordinate::new(min_r + r, min_c + c);
-        let range = CellRange::new(
-            corner(r0, c0).map_err(|_| FormulaError::Ref)?,
-            corner(r1, c1).map_err(|_| FormulaError::Ref)?,
-        )
-        .map_err(|_| FormulaError::Ref)?;
-        Ok(Some((sheet_opt, range, false)))
-    }
-
     fn extract_offset_ref<'b>(
         &self,
         args: &'b [Expr],
@@ -418,6 +357,9 @@ impl SheetEngine {
         else {
             return Err(FormulaError::Value);
         };
+        if Self::is_virtual_sheet(sheet_opt.as_deref()) {
+            return Err(FormulaError::Value);
+        }
         let dr = self.eval_arg_num(&args[1], ctx, depth + 1)?.trunc() as i64;
         let dc = self.eval_arg_num(&args[2], ctx, depth + 1)?.trunc() as i64;
         let (base_rows, base_cols) = base_range.dimensions();
@@ -452,7 +394,7 @@ impl SheetEngine {
 
     /// Writes down the range an `OFFSET` or `INDIRECT` of the formula in `ctx.current_coord` resolved to,
     /// when the pass collects them (see `dyn_reads`).
-    fn note_dynamic_read(
+    pub(crate) fn note_dynamic_read(
         &self,
         resolved: Option<&ResolvedRangeRef<'_>>,
         ctx: &mut EvalContext<'_>,
@@ -523,9 +465,10 @@ impl SheetEngine {
                 self.note_dynamic_read(resolved.as_ref(), ctx);
                 Ok(resolved)
             }
-            Expr::FuncCall(f) if f.name == "INDEX" => {
-                self.extract_index_line_ref(&f.args, ctx, depth)
-            }
+            Expr::FuncCall(f) if f.name == "INDEX" => self.extract_index_ref(&f.args, ctx, depth),
+            Expr::FuncCall(f) if f.name == "CHOOSE" => self.extract_choose_ref(&f.args, ctx, depth),
+            Expr::FuncCall(f) if f.name == "IF" => self.extract_if_ref(&f.args, ctx, depth),
+            Expr::FuncCall(f) if f.name == ":" => self.extract_colon_range_ref(&f.args, ctx, depth),
             Expr::FuncCall(f) if f.name == "SINGLE" && f.args.len() == 1 => {
                 self.resolve_single_ref(&f.args[0], ctx, depth + 1)
             }

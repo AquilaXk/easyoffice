@@ -83,6 +83,7 @@ mod parser;
 mod parser_array;
 mod pivot;
 mod pivot_dynamic;
+mod range_dyn;
 mod recalc;
 mod rules;
 mod sheet_sort;

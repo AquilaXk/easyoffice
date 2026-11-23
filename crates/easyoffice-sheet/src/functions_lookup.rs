@@ -37,7 +37,7 @@ impl SheetEngine {
             "INDEX" => self.lookup_index(args, ctx, depth),
             "MATCH" => self.lookup_match(args, ctx, depth),
             "CHOOSE" => self.lookup_choose(args, ctx, depth),
-            "OFFSET" | "INDIRECT" => self.lookup_reference(name, args, ctx, depth),
+            "OFFSET" | "INDIRECT" | ":" => self.lookup_reference(name, args, ctx, depth),
             "ROW" | "COLUMN" => self.lookup_row_column(name == "ROW", args, ctx, depth),
             "ROWS" | "COLUMNS" => self.lookup_rows_columns(name == "ROWS", args, ctx, depth),
             "TRANSPOSE" => self.lookup_transpose(args, ctx, depth),
@@ -594,9 +594,13 @@ impl SheetEngine {
             return number_value(v as f64);
         }
         check_lookup_arity(args, 1, 1)?;
-        let Some((_, range, _)) = self.extract_range_and_sheet_ctx(&args[0], ctx, depth)? else {
+        let Some((sheet_opt, range, _)) = self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
+        else {
             return Err(FormulaError::Value);
         };
+        if Self::is_virtual_sheet(sheet_opt.as_deref()) {
+            return Err(FormulaError::Value);
+        }
         let v = if is_row {
             range.start.row().min(range.end.row()) + 1
         } else {

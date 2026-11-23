@@ -597,13 +597,21 @@ fn single_operators(tokens: Vec<Tok>) -> Vec<Tok> {
                     .any(|t| !matches!(t, Tok::Punct(c) if c.is_whitespace()));
                 if has_content && !has_top_level_comma(raw_inner) {
                     let inner = single_operators(raw_inner.to_vec());
+                    let lhs_of_colon = tokens.get(end) == Some(&Tok::Punct(':'));
+                    let inner_wrap =
+                        !is_outer_parenthesized(&inner) && has_single_top_level_op(&inner);
+                    if lhs_of_colon {
+                        out.push(Tok::Punct('('));
+                    }
                     out.push(Tok::Punct('@'));
-                    let wrap = !is_outer_parenthesized(&inner) && has_single_top_level_op(&inner);
-                    if wrap {
+                    if inner_wrap {
                         out.push(Tok::Punct('('));
                     }
                     out.extend(inner);
-                    if wrap {
+                    if inner_wrap {
+                        out.push(Tok::Punct(')'));
+                    }
+                    if lhs_of_colon {
                         out.push(Tok::Punct(')'));
                     }
                     i = end;
@@ -859,6 +867,12 @@ mod tests {
             ("@Table1[Amount]", "_xlfn.SINGLE(Table1[Amount])"),
             ("@{10,20}", "_xlfn.SINGLE({10,20})"),
             ("@(A1+B1)", "_xlfn.SINGLE((A1+B1))"),
+            ("(@B1:B4):D2", "(_xlfn.SINGLE(B1:B4)):D2"),
+            (
+                "SUM(@OFFSET(B1,0,0):B4)",
+                "SUM(_xlfn.SINGLE(OFFSET(B1,0,0):B4))",
+            ),
+            ("@(B1:B2*3)", "_xlfn.SINGLE((B1:B2*3))"),
             ("SUM(Table1[@Amount])", "SUM(Table1[@Amount])"),
             ("\"@literal\"", "\"@literal\""),
         ] {

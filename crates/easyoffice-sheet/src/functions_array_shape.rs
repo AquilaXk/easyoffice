@@ -517,6 +517,18 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> ValResult {
+        if args
+            .get(3)
+            .is_some_and(|a| !matches!(a.peeled(), Expr::Missing))
+        {
+            let area = self.arg_number(args, 3, 1.0, env, ctx, depth)?.trunc();
+            if area < 1.0 {
+                return Err(FormulaError::Value);
+            }
+            if area > 1.0 {
+                return Err(FormulaError::Ref);
+            }
+        }
         let grid = self.shape_grid(&args[0], env, ctx, depth)?;
         let mut number = |i: usize| -> Result<Option<i64>, FormulaError> {
             match args.get(i) {

@@ -99,6 +99,15 @@ fn test_index_zero_row_returns_whole_column() {
     assert_eq!(model._get_text("A2"), "4");
 }
 #[test]
+fn test_index_zero_column_returns_whole_row() {
+    let mut model = new_empty_model();
+    model._set("A1", "=INDEX({1,2,3},1,0,1)");
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "1");
+    assert_eq!(model._get_text("B1"), "2");
+    assert_eq!(model._get_text("C1"), "3");
+}
+#[test]
 fn test_index_negative_row_is_value_error() {
     let mut model = new_empty_model();
     model._set("A1", "=INDEX({1,2,3;4,5,6},-1,1)");

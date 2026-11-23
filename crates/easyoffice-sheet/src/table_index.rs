@@ -66,22 +66,37 @@ fn ref_box_endpoint(e: &Expr) -> Result<Option<(Option<&str>, CellRange)>, Formu
     }
 }
 
+fn can_yield_ref(e: &Expr) -> bool {
+    !matches!(
+        e.peeled(),
+        Expr::Number(_)
+            | Expr::Text(_)
+            | Expr::Boolean(_)
+            | Expr::Array(_)
+            | Expr::Missing
+            | Expr::Blank
+    )
+}
+
 /// Joins two reference expressions across the binary `:` range operator (`Table1[a]:Table1[b]`,
-/// `[@a]:[@b]`, `A2:Table1[b]`), returning their bounding rectangle on the same sheet or `#REF!`.
+/// `[@a]:[@b]`, `A2:Table1[b]`, `A1:OFFSET(...)`), returning their static bounding rectangle when
+/// both sides are static references, or a deferred `:` operator node for dynamic endpoints.
 pub(crate) fn join_colon_range(
     lhs: Expr,
     rhs: Expr,
     cur_sheet: Option<&str>,
 ) -> Result<Expr, FormulaError> {
-    let a = match ref_box_endpoint(&lhs) {
-        Ok(Some(v)) => v,
-        Ok(None) => return Err(FormulaError::Value),
-        Err(err) => return Ok(Expr::ErrorLiteral(err)),
-    };
-    let b = match ref_box_endpoint(&rhs) {
-        Ok(Some(v)) => v,
-        Ok(None) => return Err(FormulaError::Value),
-        Err(err) => return Ok(Expr::ErrorLiteral(err)),
+    if !can_yield_ref(&lhs) || !can_yield_ref(&rhs) {
+        return Err(FormulaError::Value);
+    }
+    let a = ref_box_endpoint(&lhs);
+    let b = ref_box_endpoint(&rhs);
+    let (a, b) = match (a, b) {
+        (Ok(Some(va)), Ok(Some(vb))) => (va, vb),
+        (Err(err), Ok(Some(_))) | (Ok(Some(_)), Err(err)) | (Err(err), Err(_)) => {
+            return Ok(Expr::ErrorLiteral(err));
+        }
+        _ => return Ok(Expr::func_call(":", vec![lhs, rhs])),
     };
     let out_sheet = match (a.0, b.0) {
         (None, None) => None,

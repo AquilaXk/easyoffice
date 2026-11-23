@@ -360,6 +360,9 @@ impl SheetEngine {
         let Some((sheet_opt, range, _)) = located else {
             return Err(FormulaError::Na);
         };
+        if Self::is_virtual_sheet(sheet_opt.as_deref()) {
+            return Err(FormulaError::Na);
+        }
         let sheet = self
             .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
             .ok_or(FormulaError::Ref)?;

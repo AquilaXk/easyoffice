@@ -156,6 +156,9 @@ impl SheetEngine {
             let (sheet, range, _) = self
                 .extract_range_and_sheet_ctx(&args[1], ctx, depth)?
                 .ok_or(FormulaError::Value)?;
+            if Self::is_virtual_sheet(sheet.as_deref()) {
+                return Err(FormulaError::Value);
+            }
             let corner = PackedCellCoordinate::new(
                 range.start.row().min(range.end.row()),
                 range.start.col().min(range.end.col()),

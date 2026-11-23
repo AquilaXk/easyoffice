@@ -52,7 +52,7 @@ impl SheetEngine {
         Ok(Some((sheet, cell_range, false)))
     }
 
-    fn spill_ref_range<'b>(
+    pub(crate) fn spill_ref_range<'b>(
         &self,
         sheet: Option<&'b str>,
         coord: PackedCellCoordinate,
@@ -126,7 +126,10 @@ impl SheetEngine {
                 self.intersect_range_ref(sheet, range, ctx)
             }
             Expr::FuncCall(f)
-                if matches!(f.name.as_str(), "INDIRECT" | "OFFSET" | "INDEX" | "SINGLE") =>
+                if matches!(
+                    f.name.as_str(),
+                    "INDIRECT" | "OFFSET" | "INDEX" | "CHOOSE" | "IF" | "SINGLE" | ":"
+                ) =>
             {
                 let Some((sheet, range, _)) =
                     self.extract_range_and_sheet_ctx(expr, ctx, depth + 1)?

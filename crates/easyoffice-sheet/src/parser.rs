@@ -120,7 +120,7 @@ pub(crate) fn needs_sheet_quoting(raw_sheet: &str) -> bool {
         || looks_like_ascii_cell_token(raw_sheet)
 }
 
-fn classify_failed_a1_token(raw: &str) -> FormulaError {
+pub(crate) fn classify_failed_a1_token(raw: &str) -> FormulaError {
     let bytes = raw.trim().as_bytes();
     let mut i = usize::from(bytes.first() == Some(&b'$'));
     let mut letters = 0usize;
@@ -570,27 +570,31 @@ impl<'a> Parser<'a> {
         self.parse_postfix(depth)
     }
 
-    fn colon_starts_structured(&self) -> bool {
-        matches!(self.tokens.get(self.pos), Some(Token::Colon))
-            && (matches!(self.tokens.get(self.pos + 1), Some(Token::Structured(_)))
-                || (matches!(self.tokens.get(self.pos + 1), Some(Token::Ident(_)))
-                    && matches!(self.tokens.get(self.pos + 2), Some(Token::Structured(_)))))
-    }
-
     fn parse_postfix(&mut self, depth: usize) -> Result<Expr, FormulaError> {
         let specs_mark = self.ref_specs.as_ref().map_or(0, Vec::len);
         let mut expr = self.parse_primary(depth)?;
+        let mut colon_depth = depth;
         while matches!(self.peek(), Some(Token::Colon)) {
+            colon_depth += 1;
+            if colon_depth > MAX_PARSE_DEPTH {
+                return Err(FormulaError::Value);
+            }
             self.next();
-            let rhs = self.parse_primary(depth + 1)?;
+            let rhs = if matches!(self.peek(), Some(Token::At)) {
+                self.parse_unary(depth + 1)?
+            } else {
+                self.parse_primary(depth + 1)?
+            };
             expr = join_colon_range(expr, rhs, self.tables.map(|ctx| ctx.sheet))?;
             if let Some(specs) = self.ref_specs.as_mut() {
-                specs.truncate(specs_mark);
-                if matches!(
-                    expr,
-                    Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_)
-                ) {
-                    specs.push(RefSpec::Fixed);
+                if !matches!(&expr, Expr::FuncCall(f) if f.name == ":") {
+                    specs.truncate(specs_mark);
+                    if matches!(
+                        expr,
+                        Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_)
+                    ) {
+                        specs.push(RefSpec::Fixed);
+                    }
                 }
             }
         }
@@ -648,6 +652,17 @@ impl<'a> Parser<'a> {
     /// A number, or a whole-row range such as `1:3`.
     fn parse_number_primary(&mut self, n: f64) -> Result<Expr, FormulaError> {
         if !matches!(self.peek(), Some(Token::Colon)) {
+            return Ok(Expr::Number(n));
+        }
+        let is_dynamic_rhs = match self.tokens.get(self.pos + 1) {
+            Some(Token::Ident(_)) => matches!(
+                self.tokens.get(self.pos + 2),
+                Some(Token::LParen | Token::Structured(_) | Token::Hash | Token::Bang)
+            ),
+            Some(Token::At | Token::LParen) => true,
+            _ => false,
+        };
+        if is_dynamic_rhs {
             return Ok(Expr::Number(n));
         }
         self.next();
@@ -720,7 +735,7 @@ impl<'a> Parser<'a> {
         if name.eq_ignore_ascii_case("FALSE") {
             return Ok(Expr::Boolean(false));
         }
-        if matches!(self.peek(), Some(Token::Colon)) && !self.colon_starts_structured() {
+        if self.colon_has_static_endpoint(&name, None) {
             self.next();
             return self.finish_range(&name);
         }
@@ -763,7 +778,7 @@ impl<'a> Parser<'a> {
         let Some(cell_ident) = self.next_range_endpoint_string() else {
             return Err(FormulaError::Ref);
         };
-        if matches!(self.peek(), Some(Token::Colon)) && !self.colon_starts_structured() {
+        if self.colon_has_static_endpoint(&cell_ident, Some(&name)) {
             self.next();
             let Some(s) = self.next_range_endpoint_string() else {
                 return Err(FormulaError::Ref);

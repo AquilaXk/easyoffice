@@ -1,8 +1,8 @@
 //! Parsing the array-specific syntax (PD-217): array constants, the spill range operator and the
 //! variables of `LET` and `LAMBDA`.
 
-use crate::parser::{ArrayLit, Parser, Token};
-use crate::{EvaluatedCellValue, Expr, FormulaError};
+use crate::parser::{classify_failed_a1_token, ArrayLit, Parser, Token};
+use crate::{CellRange, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate};
 use std::sync::Arc;
 
 /// Elements of one array constant: the evaluation budget reads the grid whole, so the constant is
@@ -10,6 +10,70 @@ use std::sync::Arc;
 const MAX_LITERAL_CELLS: usize = 4_096;
 
 impl Parser<'_> {
+    pub(crate) fn colon_starts_structured(&self) -> bool {
+        matches!(self.tokens.get(self.pos), Some(Token::Colon))
+            && (matches!(self.tokens.get(self.pos + 1), Some(Token::Structured(_)))
+                || (matches!(self.tokens.get(self.pos + 1), Some(Token::Ident(_)))
+                    && matches!(self.tokens.get(self.pos + 2), Some(Token::Structured(_)))))
+    }
+
+    fn is_static_range_pair(lhs_raw: &str, rhs_raw: &str) -> bool {
+        if CellRange::parse_endpoints(lhs_raw, rhs_raw).is_ok() {
+            return true;
+        }
+        let is_ref_shape = |raw: &str| {
+            PackedCellCoordinate::parse_a1(raw).is_ok()
+                || PackedCellCoordinate::parse_col_only(raw).is_ok()
+                || PackedCellCoordinate::parse_row_only(raw).is_ok()
+        };
+        let is_bad_cell =
+            |raw: &str| !is_ref_shape(raw) && classify_failed_a1_token(raw) == FormulaError::Ref;
+        (is_bad_cell(lhs_raw) && (is_ref_shape(rhs_raw) || is_bad_cell(rhs_raw)))
+            || ((is_ref_shape(lhs_raw) || is_bad_cell(lhs_raw)) && is_bad_cell(rhs_raw))
+    }
+
+    pub(crate) fn colon_has_static_endpoint(&self, lhs_raw: &str, lhs_sheet: Option<&str>) -> bool {
+        if !matches!(self.tokens.get(self.pos), Some(Token::Colon))
+            || self.colon_starts_structured()
+        {
+            return false;
+        }
+        let Some(tok1) = self.tokens.get(self.pos + 1) else {
+            return false;
+        };
+        let tok2 = self.tokens.get(self.pos + 2);
+        match tok1 {
+            Token::Number(n) if n.fract() == 0.0 && *n >= 1.0 => {
+                PackedCellCoordinate::parse_row_only(lhs_raw).is_ok()
+                    && !matches!(tok2, Some(Token::Bang | Token::Hash | Token::LParen))
+            }
+            Token::Ident(rhs_raw) => match tok2 {
+                Some(Token::LParen | Token::Structured(_) | Token::Hash) => false,
+                Some(Token::Bang) => {
+                    let Some(lhs_sh) = lhs_sheet else {
+                        return false;
+                    };
+                    if matches!(
+                        self.tokens.get(self.pos + 4),
+                        Some(Token::LParen | Token::Structured(_) | Token::Hash)
+                    ) {
+                        return false;
+                    }
+                    let same = crate::WorkbookEngine::is_same_sheet_identity(rhs_raw, lhs_sh);
+                    match self.tokens.get(self.pos + 3) {
+                        Some(Token::Ident(end_raw)) => {
+                            !same || Self::is_static_range_pair(lhs_raw, end_raw)
+                        }
+                        Some(Token::Number(_)) => true,
+                        _ => !same,
+                    }
+                }
+                _ => Self::is_static_range_pair(lhs_raw, rhs_raw),
+            },
+            _ => false,
+        }
+    }
+
     /// Consumes the `#` of `A1#` when it is next.
     pub(crate) fn take_hash(&mut self) -> bool {
         let hash = matches!(self.peek(), Some(Token::Hash));
