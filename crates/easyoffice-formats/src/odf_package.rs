@@ -3,7 +3,7 @@
 use std::fmt::Write;
 
 use crate::odf_hwpx_codecs::{OdfCodec, OdpUnpacked};
-use crate::office_codecs::validate_zip_xml_entries;
+use crate::office_codecs::validate_zip_xml_entries_for;
 use crate::pptx_master::odp_layout_boxes_pt;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
@@ -18,7 +18,10 @@ use crate::sheet_chart::{ChartKind, ChartLegendPos};
 use crate::sheet_styling::ods_view::read_views;
 use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
-use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
+use crate::{
+    ContainerFamily, DocumentFormat, EasyOfficeError, XmlSanitizer, ZipArchiveCodec,
+    ZipSecurityPolicy,
+};
 
 const MAX_ODP_CHART_EVENTS: usize = 65_536;
 const ODF_NS_DECLS: &str = concat!(
@@ -387,7 +390,7 @@ pub(crate) type ExtractedOdp = (
 
 pub(crate) fn extract_odp_rich_parts(bytes: &[u8]) -> Result<ExtractedOdp, EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    validate_zip_xml_entries(&entries)?;
+    validate_zip_xml_entries_for(&entries, Some(DocumentFormat::Odp))?;
     if let Some(mime_e) = entries.iter().find(|e| e.path == "mimetype") {
         let actual = std::str::from_utf8(&mime_e.data).unwrap_or_default().trim();
         if actual != OdfCodec::MIMETYPE_ODP {
@@ -628,7 +631,13 @@ impl OdfCodec {
         expected_mime: &str,
     ) -> Result<(String, Option<String>, Option<String>, Option<String>), EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        validate_zip_xml_entries(&entries)?;
+        let fallback_fmt = match expected_mime {
+            Self::MIMETYPE_ODT => Some(DocumentFormat::Odt),
+            Self::MIMETYPE_ODS => Some(DocumentFormat::Ods),
+            Self::MIMETYPE_ODP => Some(DocumentFormat::Odp),
+            _ => None,
+        };
+        validate_zip_xml_entries_for(&entries, fallback_fmt)?;
         if let Some(mime_entry) = entries.iter().find(|e| e.path == "mimetype") {
             let actual_mime = std::str::from_utf8(&mime_entry.data).unwrap_or_default();
             if actual_mime.trim() != expected_mime {

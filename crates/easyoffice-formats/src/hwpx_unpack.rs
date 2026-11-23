@@ -4,12 +4,12 @@
 
 use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::{HwpxCodec, HwpxPayload};
-use crate::office_codecs::{checked_part, checked_zip_xml_entries};
+use crate::office_codecs::{checked_part, checked_zip_xml_entries_for};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
     replace_tag_blocks, strip_tag_blocks,
 };
-use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
+use crate::{DocumentFormat, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 const MAX_EQUATION_BYTES: usize = 64 * 1024;
 const INLINE_HP_TAGS: [(&str, &str); 5] = [
@@ -80,7 +80,7 @@ pub(crate) fn section_xml<'a>(
 
 pub(crate) fn unpack_hwpx_bytes(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    let parts = checked_zip_xml_entries(&entries)?;
+    let parts = checked_zip_xml_entries_for(&entries, Some(DocumentFormat::Hwpx))?;
     let (_header_xml, title, is_template, official_agency, approval_lines) =
         HwpxCodec::extract_header_and_metadata(&parts)?;
 

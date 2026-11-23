@@ -130,20 +130,48 @@ fn verify_ole2(format: DocumentFormat, bytes: &[u8]) -> Result<(), EasyOfficeErr
     if streams.is_empty() {
         return Err(corrupted("문서 스트림이 없습니다."));
     }
-    if !matches!(format, DocumentFormat::Hwp | DocumentFormat::Hwt) {
-        return Ok(());
-    }
-    let header_ok = streams
-        .iter()
-        .find(|stream| stream.name == HWP_FILE_HEADER_STREAM)
-        .is_some_and(|stream| {
-            stream.data.len() >= Ole2SecurityGuard::HWP5_FILE_HEADER_LEN
-                && stream.data.starts_with(Ole2SecurityGuard::HWP5_SIGNATURE)
-        });
-    if header_ok {
-        Ok(())
-    } else {
-        Err(corrupted("한글 문서 머리 정보가 없습니다."))
+    let has_stream = |target: &str| {
+        streams
+            .iter()
+            .any(|stream| stream.name.eq_ignore_ascii_case(target))
+    };
+    match format {
+        DocumentFormat::Hwp | DocumentFormat::Hwt => {
+            let header_ok = streams
+                .iter()
+                .find(|stream| stream.name.eq_ignore_ascii_case(HWP_FILE_HEADER_STREAM))
+                .is_some_and(|stream| {
+                    stream.data.len() >= Ole2SecurityGuard::HWP5_FILE_HEADER_LEN
+                        && stream.data.starts_with(Ole2SecurityGuard::HWP5_SIGNATURE)
+                });
+            if header_ok {
+                Ok(())
+            } else {
+                Err(corrupted("한글 문서 머리 정보가 없습니다."))
+            }
+        }
+        DocumentFormat::Doc => {
+            if has_stream("WordDocument") {
+                Ok(())
+            } else {
+                Err(corrupted("문서 본문 스트림이 없습니다."))
+            }
+        }
+        DocumentFormat::Xls => {
+            if has_stream("Workbook") || has_stream("Book") {
+                Ok(())
+            } else {
+                Err(corrupted("통합 문서 스트림이 없습니다."))
+            }
+        }
+        DocumentFormat::Ppt => {
+            if has_stream("PowerPoint Document") {
+                Ok(())
+            } else {
+                Err(corrupted("프레젠테이션 본문 스트림이 없습니다."))
+            }
+        }
+        _ => Ok(()),
     }
 }
 
@@ -630,8 +658,39 @@ mod tests {
         let streams = [("BodyText/Section0".to_string(), vec![0_u8; 16])];
         let bytes = Ole2ContainerCodec::pack(&streams).unwrap();
         assert!(verify_document_bytes("hwp", &bytes).is_err());
-        // The same container is a fine legacy document of another kind.
-        assert!(verify_document_bytes("doc", &bytes).is_ok());
+        assert!(matches!(
+            verify_document_bytes("doc", &bytes),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+        let doc_bytes =
+            Ole2ContainerCodec::pack(&[("WordDocument".to_string(), vec![0_u8; 16])]).unwrap();
+        assert!(verify_document_bytes("doc", &doc_bytes).is_ok());
+    }
+
+    #[test]
+    fn legacy_xls_and_ppt_containers_require_their_main_streams() {
+        let foreign =
+            Ole2ContainerCodec::pack(&[("WordDocument".to_string(), vec![0_u8; 16])]).unwrap();
+        assert!(matches!(
+            verify_document_bytes("xls", &foreign),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+        assert!(matches!(
+            verify_document_bytes("ppt", &foreign),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+
+        let xls_workbook =
+            Ole2ContainerCodec::pack(&[("workbook".to_string(), vec![0_u8; 16])]).unwrap();
+        assert!(verify_document_bytes("xls", &xls_workbook).is_ok());
+
+        let xls_book = Ole2ContainerCodec::pack(&[("Book".to_string(), vec![0_u8; 16])]).unwrap();
+        assert!(verify_document_bytes("xls", &xls_book).is_ok());
+
+        let ppt_bytes =
+            Ole2ContainerCodec::pack(&[("PowerPoint Document".to_string(), vec![0_u8; 16])])
+                .unwrap();
+        assert!(verify_document_bytes("ppt", &ppt_bytes).is_ok());
     }
 
     #[test]

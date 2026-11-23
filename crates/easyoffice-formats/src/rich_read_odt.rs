@@ -12,16 +12,16 @@ use self::frame::{parse_odt_list_level_bullet, parse_odt_list_level_number, OdtL
 use self::notes::OdtNotesState;
 use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
-use crate::office_codecs::{checked_part, checked_zip_xml_entries};
+use crate::office_codecs::{checked_part, checked_zip_xml_entries_for};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns, RichDocument, RichField,
-    RichImage, RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy,
+    DocumentFormat, EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns, RichDocument,
+    RichField, RichImage, RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
+    ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 const EMU_PER_INCH: f64 = 914_400.0;
@@ -828,7 +828,7 @@ impl<'a> OdtWalker<'a> {
 pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
     // Every XML entry (styles.xml and content.xml included) is checked once, here.
-    let parts = checked_zip_xml_entries(&entries)?;
+    let parts = checked_zip_xml_entries_for(&entries, Some(DocumentFormat::Odt))?;
     let entry_by_path: HashMap<&str, &ZipArchiveEntry> =
         entries.iter().map(|e| (e.path.as_str(), e)).collect();
     if let Some(&m) = entry_by_path.get("mimetype") {

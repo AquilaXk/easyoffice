@@ -17,6 +17,7 @@ pub mod deflate;
 mod doc_save_loss;
 mod docx_notes_writer;
 pub mod embedded_thumbnail;
+pub mod encrypted_container;
 pub mod hwp5_codec;
 pub mod hwp_eqedit;
 pub mod hwpx_codec;
@@ -498,6 +499,10 @@ impl FormatDetector {
             return Self::detect_hwpx_family(bytes, cd_opt);
         }
         if has(b"Index/Document.iwa")
+            || has(b"Index/Metadata.iwa")
+            || has(b"Index.zip")
+            || has(b".iwph")
+            || has(b".iwpv2")
             || (has(b"index.xml") && !has(b"[Content_Types].xml") && !has(b"mimetype"))
         {
             return DocumentFormat::Pages;
@@ -583,6 +588,11 @@ impl FormatDetector {
             return Ok(Self::detect_zip_family(bytes));
         }
         if bytes.starts_with(&Self::OLE2_MAGIC) {
+            if encrypted_container::is_ole2_offcrypto_encrypted(bytes) {
+                return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                    DocumentFormat::Docx,
+                ));
+            }
             return Ok(Self::detect_ole2_family(bytes));
         }
 
@@ -622,6 +632,12 @@ impl FormatDetector {
             | ContainerFamily::ZipHwpx
             | ContainerFamily::ZipIwork => {
                 if !bytes.starts_with(&Self::ZIP_MAGIC) {
+                    if family == ContainerFamily::ZipOoxml
+                        && bytes.starts_with(&Self::OLE2_MAGIC)
+                        && encrypted_container::is_ole2_offcrypto_encrypted(bytes)
+                    {
+                        return Err(EasyOfficeError::EncryptedDocumentUnsupported(format));
+                    }
                     return Err(EasyOfficeError::SignatureMismatch {
                         expected: family,
                         detail: format!(
@@ -694,7 +710,7 @@ impl FormatDetector {
         Self::validate_without_nul(text.as_bytes(), label)
     }
 
-    fn slice_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    pub(crate) fn slice_contains(haystack: &[u8], needle: &[u8]) -> bool {
         let Some(&first) = needle.first() else {
             return false;
         };

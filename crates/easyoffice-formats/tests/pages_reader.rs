@@ -431,3 +431,148 @@ fn full_style_properties_and_title_extraction() {
     assert_eq!(p1.first_line_indent_twips, Some(240));
     assert_eq!(p1.line_spacing_percent, Some(200));
 }
+
+fn bplist_single_dict(entries: &[(&str, Option<bool>)]) -> Vec<u8> {
+    let count = 1 + entries.len() * 2;
+    let mut body = Vec::new();
+    let mut offsets = vec![8usize];
+    body.push(0xD0 | (entries.len() as u8));
+    for i in 0..entries.len() {
+        body.push((1 + i) as u8);
+    }
+    for i in 0..entries.len() {
+        body.push((1 + entries.len() + i) as u8);
+    }
+    for (k, _) in entries {
+        offsets.push(8 + body.len());
+        assert!(k.len() < 15 || k.len() < 256);
+        if k.len() < 15 {
+            body.push(0x50 | (k.len() as u8));
+        } else {
+            body.push(0x5F);
+            body.push(0x10);
+            body.push(k.len() as u8);
+        }
+        body.extend_from_slice(k.as_bytes());
+    }
+    for (_, val) in entries {
+        offsets.push(8 + body.len());
+        match val {
+            Some(true) => body.push(0x09),
+            Some(false) => body.push(0x08),
+            None => body.push(0x50),
+        }
+    }
+    let table_at = 8 + body.len();
+    let mut out = Vec::from(&b"bplist00"[..]);
+    out.extend_from_slice(&body);
+    let off_size = if table_at <= 0xFF { 1usize } else { 2usize };
+    for off in offsets {
+        if off_size == 1 {
+            out.push(off as u8);
+        } else {
+            out.extend_from_slice(&(off as u16).to_be_bytes());
+        }
+    }
+    out.extend_from_slice(&[0; 6]);
+    out.push(off_size as u8);
+    out.push(1);
+    out.extend_from_slice(&(count as u64).to_be_bytes());
+    out.extend_from_slice(&0u64.to_be_bytes());
+    out.extend_from_slice(&(table_at as u64).to_be_bytes());
+    out
+}
+
+fn replace_plist_in_sample(plist_bytes: Vec<u8>) -> Vec<u8> {
+    let base = sample_document();
+    let entries =
+        ZipArchiveCodec::unpack(&base, &easyoffice_formats::ZipSecurityPolicy::default()).unwrap();
+    let mut replaced: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .filter(|e| e.path != "Metadata/Properties.plist")
+        .map(|e| (e.path, e.data))
+        .collect();
+    replaced.push(("Metadata/Properties.plist".to_string(), plist_bytes));
+    ZipArchiveCodec::pack(&replaced).unwrap()
+}
+
+#[test]
+fn package_prefix_legacy_index_xml_and_iwpv2_encryption() {
+    let wrapped_legacy = ZipArchiveCodec::pack(&[
+        (
+            "Doc.pages/index.xml".to_string(),
+            b"<sl:document/>".to_vec(),
+        ),
+        (
+            "Doc.pages/QuickLook/Thumbnail.jpg".to_string(),
+            vec![1, 2, 3],
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        FormatDetector::detect(&wrapped_legacy, None).unwrap(),
+        DocumentFormat::Pages
+    );
+    let err =
+        UniversalFormatConverter::decode_rich(&wrapped_legacy, Some("Doc.pages")).unwrap_err();
+    assert!(err.to_string().contains("2009"), "{err}");
+
+    let enc_iwpv2 = ZipArchiveCodec::pack(&[
+        ("Secret.pages/Index.zip".to_string(), vec![0x50, 0x4B]),
+        (
+            "Secret.pages/Index/PasswordHint.iwpv2".to_string(),
+            vec![1, 2],
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        FormatDetector::detect(&enc_iwpv2, None).unwrap(),
+        DocumentFormat::Pages
+    );
+    assert_eq!(
+        easyoffice_formats::pages_package::load_package(&enc_iwpv2).unwrap_err(),
+        EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pages)
+    );
+}
+
+#[test]
+fn properties_plist_xml_and_bplist_encryption_distinguishes_true_from_false() {
+    let xml_false = br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>isEncrypted</key>
+  <!-- explicit false flag -->
+  <false/>
+  <key>documentEncrypted</key>
+  <false></false>
+</dict></plist>"#;
+    let doc_xml_false = replace_plist_in_sample(xml_false.to_vec());
+    assert!(UniversalFormatConverter::decode_rich(&doc_xml_false, Some("ok.pages")).is_ok());
+
+    let bplist_false = bplist_single_dict(&[
+        ("isEncrypted", Some(false)),
+        ("documentEncrypted", Some(false)),
+    ]);
+    let doc_bplist_false = replace_plist_in_sample(bplist_false);
+    assert!(UniversalFormatConverter::decode_rich(&doc_bplist_false, Some("ok.pages")).is_ok());
+
+    let xml_true = br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>isEncrypted</key>
+  <!-- encrypted -->
+  <true/>
+</dict></plist>"#;
+    let doc_xml_true = replace_plist_in_sample(xml_true.to_vec());
+    assert_eq!(
+        UniversalFormatConverter::decode_rich(&doc_xml_true, Some("enc.pages")).unwrap_err(),
+        EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pages)
+    );
+
+    let bplist_true = bplist_single_dict(&[("documentEncrypted", Some(true))]);
+    let doc_bplist_true = replace_plist_in_sample(bplist_true);
+    assert_eq!(
+        UniversalFormatConverter::decode_rich(&doc_bplist_true, Some("enc.pages")).unwrap_err(),
+        EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pages)
+    );
+}

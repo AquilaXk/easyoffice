@@ -18,7 +18,7 @@ use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
     LIST_LEFT_MARGIN,
 };
-use crate::office_codecs::checked_zip_xml_entries;
+use crate::office_codecs::checked_zip_xml_entries_for;
 use crate::rich_document::{normalize_hex_color, RichColumns};
 use crate::rich_image::ImageBudget;
 use crate::rich_list_writers::HwpxNumberingReader;
@@ -27,9 +27,9 @@ use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::{check_paragraph_depth, heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock, RichDocument, RichImage,
-    RichListKind, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
-    ZipArchiveCodec, ZipSecurityPolicy,
+    DocumentFormat, EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock,
+    RichDocument, RichImage, RichListKind, RichPageFrame, RichPageMargins, RichPaper,
+    RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
@@ -811,7 +811,7 @@ fn push_text(
 /// Decodes every `Contents/section*.xml` of a HWPX/HWTX package in order.
 pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    let parts = checked_zip_xml_entries(&entries)?;
+    let parts = checked_zip_xml_entries_for(&entries, Some(DocumentFormat::Hwpx))?;
     let (header_xml, title, _is_template, official_agency, _approval_lines) =
         HwpxCodec::extract_header_and_metadata(&parts)?;
     let header = read_header(header_xml)?;

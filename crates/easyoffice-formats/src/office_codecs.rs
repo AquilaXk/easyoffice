@@ -919,32 +919,22 @@ impl OoxmlCodec {
     }
 }
 
+pub(crate) use crate::encrypted_container::{
+    checked_zip_xml_entries_for, validate_zip_xml_entries_for,
+};
+
 /// The XML entries of a package as `(path, text)`, each UTF-8 checked and scanned for DOCTYPE and
 /// entity declarations once. A reader that takes its parts from here does not check them again.
 pub(crate) fn checked_zip_xml_entries(
     entries: &[crate::ZipArchiveEntry],
 ) -> Result<Vec<(&str, &str)>, EasyOfficeError> {
-    let mut parts = Vec::new();
-    for entry in entries {
-        if entry.path.ends_with('/') {
-            continue;
-        }
-        let lower = entry.path.to_ascii_lowercase();
-        if lower.ends_with(".xml") || lower.ends_with(".rels") || lower.ends_with(".hpf") {
-            let xml = std::str::from_utf8(&entry.data).map_err(|_| {
-                EasyOfficeError::InvalidUtf8(format!("ZIP XML 엔트리 UTF-8 오류: {}", entry.path))
-            })?;
-            XmlSanitizer::validate_safe_xml(xml)?;
-            parts.push((entry.path.as_str(), xml));
-        }
-    }
-    Ok(parts)
+    checked_zip_xml_entries_for(entries, None)
 }
 
 pub(crate) fn validate_zip_xml_entries(
     entries: &[crate::ZipArchiveEntry],
 ) -> Result<(), EasyOfficeError> {
-    checked_zip_xml_entries(entries).map(drop)
+    validate_zip_xml_entries_for(entries, None)
 }
 
 /// The text of `path` among `parts` from [`checked_zip_xml_entries`].
