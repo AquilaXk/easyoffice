@@ -21,6 +21,11 @@ use crate::{
 };
 
 const ODT_MEDIA_DIR: &str = "Pictures";
+const ODT_TABLE_CELL_P_STYLE: &str = concat!(
+    "<style:style style:name=\"TableCellP\" style:family=\"paragraph\">",
+    "<style:paragraph-properties fo:text-align=\"start\" fo:margin-bottom=\"0pt\" fo:line-height=\"100%\"/>",
+    "</style:style>",
+);
 
 pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
     let entries = odt_rich_entries(doc)?;
@@ -163,6 +168,7 @@ pub(crate) fn odt_rich_entries(
     let mut table_auto_styles = String::new();
     table_styles.write_automatic_styles(&mut table_auto_styles);
     let mut styles = String::from("<office:automatic-styles>");
+    styles.push_str(ODT_TABLE_CELL_P_STYLE);
     if doc.blocks.iter().any(is_toc_block) {
         styles.push_str(&odt_toc_styles_xml());
     }

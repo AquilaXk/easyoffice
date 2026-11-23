@@ -153,7 +153,7 @@ fn docx_settings_emits_ct_settings_elements_in_schema_sequence_order() {
         .find("<w:defaultTabStop w:val=\"800\"/>")
         .expect("defaultTabStop");
     assert!(
-        mirror < revisions && revisions < even_odd && even_odd < tab_stop,
+        mirror < revisions && revisions < tab_stop && tab_stop < even_odd,
         "CT_Settings sequence order invalid: {settings}"
     );
 }

@@ -78,7 +78,7 @@ pub(crate) fn rtf_table_lines(table: &RichTable, table_idx: usize) -> Vec<String
                 }
                 line.push_str(&format!("\\cellx{}", TABLE_WIDTH_TWIPS * (c + 1) / cols));
             }
-            line.push(' ');
+            line.push_str(" \\pard\\intbl\\ql\\sa0\\sl240\\slmult1 ");
             for cell in row {
                 line.push_str(&RtfCodec::escape_rtf_text(cell));
                 line.push_str("\\cell ");
@@ -91,7 +91,8 @@ pub(crate) fn rtf_table_lines(table: &RichTable, table_idx: usize) -> Vec<String
 
 /// Escaped cell texts of one `{\trowd ... \row}` line, for both layouts: standard (every `\cellx`
 /// before the first cell) and the older one (`\cellx` right before each cell's text). Cell
-/// definitions (`\cellx`, `\cl*` merge marks) are dropped; escapes stay for the unescaper.
+/// definitions (`\cellx`, `\cl*` merge marks) and cell paragraph-reset words are dropped; escapes
+/// stay for the unescaper.
 pub(crate) fn flat_row_cells(line: &str) -> Vec<String> {
     let body = line.strip_prefix("{\\trowd").unwrap_or(line);
     let body = match body.strip_prefix("{\\*\\tblidx") {
@@ -112,7 +113,20 @@ pub(crate) fn flat_row_cells(line: &str) -> Vec<String> {
             .position(|b| !b.is_ascii_lowercase())
             .map_or(bytes.len(), |n| i + 1 + n);
         let word = &body[i + 1..word_end];
-        let is_def = matches!(word, "cellx" | "clmgf" | "clmrg" | "clvmgf" | "clvmrg");
+        let is_def = matches!(
+            word,
+            "cellx"
+                | "clmgf"
+                | "clmrg"
+                | "clvmgf"
+                | "clvmrg"
+                | "pard"
+                | "intbl"
+                | "ql"
+                | "sa"
+                | "sl"
+                | "slmult"
+        );
         if word.is_empty() || !(is_def || word == "cell") {
             // Control symbol or other control word: keep it in the text.
             i = word_end.max(i + 2);
@@ -120,7 +134,10 @@ pub(crate) fn flat_row_cells(line: &str) -> Vec<String> {
         }
         cur.push_str(&body[copied..i]);
         let mut end = word_end;
-        if word == "cellx" {
+        if is_def {
+            if bytes.get(end) == Some(&b'-') && bytes.get(end + 1).is_some_and(u8::is_ascii_digit) {
+                end += 1;
+            }
             while bytes.get(end).is_some_and(u8::is_ascii_digit) {
                 end += 1;
             }
@@ -194,7 +211,7 @@ mod tests {
 
     #[test]
     fn flat_reader_reads_standard_and_old_layouts() {
-        let standard = "{\\trowd{\\*\\tblidx 0} \\clmgf\\cellx3000\\clmrg\\cellx6000 a \\\\cell\\cell b\\line c\\cell \\row}";
+        let standard = "{\\trowd{\\*\\tblidx 0} \\clmgf\\cellx3000\\clmrg\\cellx6000 \\pard\\intbl\\ql\\sa-20\\sl240\\slmult1 a \\\\cell\\cell b\\line c\\cell \\row}";
         assert_eq!(flat_row_cells(standard), vec!["a \\\\cell", "b\\line c"]);
         let old = "{\\trowd{\\*\\tblidx 0} \\cellx a\\cell \\cellx b\\cell \\row}";
         assert_eq!(flat_row_cells(old), vec!["a", "b"]);
@@ -205,7 +222,7 @@ mod tests {
         let table = RichTable::new(grid(&[&["a", "b", "c"]]));
         assert_eq!(
             rtf_table_lines(&table, 0),
-            vec!["{\\trowd{\\*\\tblidx 0} \\cellx3120\\cellx6240\\cellx9360 a\\cell b\\cell c\\cell \\row}"]
+            vec!["{\\trowd{\\*\\tblidx 0} \\cellx3120\\cellx6240\\cellx9360 \\pard\\intbl\\ql\\sa0\\sl240\\slmult1 a\\cell b\\cell c\\cell \\row}"]
         );
     }
 

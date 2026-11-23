@@ -1,6 +1,6 @@
-//! What a document save leaves out for the formats that hold no review marks (PD-263): comments and tracked changes in HWPX,
-//! RTF, Markdown, text and PDF, and the first-page header and footer in HWPX (its header control has no first-page variant).
-//! The lines follow `pages_write_loss`: "<format> 저장에서 빠진 <what> <count>".
+//! What a document save leaves out for the formats that hold no review marks (PD-263, PD-328):
+//! comments and tracked changes in HWPX, DOC, RTF, Markdown, text and PDF, and the first-page
+//! header and footer in HWPX and DOC. The lines follow `pages_write_loss`: "<format> 저장에서 빠진 <what> <count>".
 
 use crate::{DocumentFormat, RichBlock, RichDocument};
 
@@ -41,6 +41,7 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
         format,
         DocumentFormat::Hwpx
             | DocumentFormat::Hwtx
+            | DocumentFormat::Doc
             | DocumentFormat::Rtf
             | DocumentFormat::Markdown
             | DocumentFormat::Txt
@@ -58,7 +59,10 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
         })
         .sum();
     let frame = &doc.page_frame;
-    let first_page_frames = if matches!(format, DocumentFormat::Hwpx | DocumentFormat::Hwtx) {
+    let first_page_frames = if matches!(
+        format,
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx | DocumentFormat::Doc
+    ) {
         frame.first_header.len() + frame.first_footer.len()
     } else {
         0

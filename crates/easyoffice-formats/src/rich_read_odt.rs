@@ -33,7 +33,6 @@ const EMU_PER_PIXEL: f64 = 9_525.0;
 const EMU_PER_TWIP: f64 = 635.0;
 const MAX_LENGTH_EMU: f64 = 182_880_000.0;
 const MAX_LINE_PERCENT: f64 = 1_000.0;
-const SINGLE_LINE_PERCENT: u16 = 100;
 
 /// Left margin the ODT writer gives list paragraphs; the reader treats it as the list marker.
 const LIST_MARGIN: &str = "0.5in";
@@ -77,14 +76,18 @@ fn length_twips(value: &str) -> Option<i32> {
     length_emu(value).map(|e| (e / EMU_PER_TWIP).round() as i32)
 }
 
-/// `fo:line-height` as a percentage of single spacing (`200%`); other units and 100% are unset.
+/// `fo:line-height` as a percentage of single spacing (`100%`, `200%`), or an absolute length
+/// scaled against a `12pt` (`240` twip) single line.
 fn line_height_percent(value: &str) -> Option<u16> {
-    let n: f64 = value.trim().strip_suffix('%')?.trim().parse().ok()?;
-    let percent = n.round();
-    (n.is_finite()
-        && (1.0..=MAX_LINE_PERCENT).contains(&percent)
-        && percent as u16 != SINGLE_LINE_PERCENT)
-        .then_some(percent as u16)
+    let trimmed = value.trim();
+    if let Some(raw) = trimmed.strip_suffix('%') {
+        let n: f64 = raw.trim().parse().ok()?;
+        let percent = n.round();
+        return (n.is_finite() && (1.0..=MAX_LINE_PERCENT).contains(&percent))
+            .then_some(percent as u16);
+    }
+    let twips = length_twips(trimmed).filter(|t| *t > 0)?;
+    Some(((i64::from(twips) * 100 + 120) / 240).clamp(50, 1000) as u16)
 }
 
 fn off(value: Option<&str>) -> bool {
@@ -124,13 +127,21 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
         italic: attr(attrs, "fo:font-style").is_some_and(|s| s == "italic" || s == "oblique"),
         underline: !off(attr(attrs, "style:text-underline-style").as_deref()),
         strike: !off(attr(attrs, "style:text-line-through-style").as_deref()),
-        size_half_pt: attr(attrs, "fo:font-size")
-            .as_deref()
-            .and_then(parse_points),
-        font: attr(attrs, "style:font-name")
-            .or_else(|| attr(attrs, "fo:font-family"))
-            .map(|f| f.trim().trim_matches('\'').to_string())
-            .filter(|f| !f.is_empty()),
+        size_half_pt: ["style:font-size-asian", "fo:font-size"]
+            .into_iter()
+            .find_map(|k| attr(attrs, k).as_deref().and_then(parse_points)),
+        font: [
+            "style:font-name-asian",
+            "style:font-family-asian",
+            "style:font-name",
+            "fo:font-family",
+        ]
+        .into_iter()
+        .find_map(|k| {
+            attr(attrs, k)
+                .map(|f| f.trim().trim_matches('\'').to_string())
+                .filter(|f| !f.is_empty())
+        }),
         color: attr(attrs, "fo:color")
             .as_deref()
             .and_then(normalize_hex_color),

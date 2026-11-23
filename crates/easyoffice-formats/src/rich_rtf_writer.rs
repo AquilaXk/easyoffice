@@ -190,7 +190,7 @@ fn list_table_lines() -> [String; 2] {
 }
 
 /// `\slN` for a percentage of single line spacing (inverse of the reader's rounding).
-fn line_spacing_240ths(percent: u16) -> u32 {
+pub(crate) fn line_spacing_240ths(percent: u16) -> u32 {
     (u32::from(percent) * SINGLE_LINE_240THS + 50) / 100
 }
 

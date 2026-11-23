@@ -15,12 +15,16 @@ use crate::rich_table_style::{
 use crate::rich_writers::{push_docx_text, push_odt_text, StyleTable};
 use crate::XmlSanitizer;
 
+const DOCX_TABLE_CELL_PPR: &str =
+    "<w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/><w:jc w:val=\"left\"/></w:pPr>";
+
 pub(crate) struct DocxTableContext<'a> {
     pub(crate) links: &'a mut DocxLinks,
     pub(crate) media: &'a mut MediaParts,
     pub(crate) image_rels: &'a mut String,
     pub(crate) first_image_rel: usize,
     pub(crate) media_dir: &'a str,
+    pub(crate) text_width_twips: usize,
 }
 
 pub(crate) struct OdtTableStyles {
@@ -184,12 +188,13 @@ fn push_docx_cell(
         out.push_str("</w:tcPr>");
     }
     if !text.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
+        out.push_str("<w:p>");
+        out.push_str(DOCX_TABLE_CELL_PPR);
         if cell_links.is_empty() {
-            out.push_str("<w:p><w:r>");
+            out.push_str("<w:r>");
             push_docx_text(out, text);
-            out.push_str("</w:r></w:p>");
+            out.push_str("</w:r>");
         } else {
-            out.push_str("<w:p>");
             let mut pos = 0usize;
             for link in cell_links {
                 let (s, e) = (link.start as usize, link.end as usize);
@@ -224,8 +229,8 @@ fn push_docx_cell(
                 push_docx_text(out, &text[pos..]);
                 out.push_str("</w:r>");
             }
-            out.push_str("</w:p>");
         }
+        out.push_str("</w:p>");
     }
     for ci in cell_images {
         let picture = ctx.media.add(ctx.media_dir, &ci.image);
@@ -258,10 +263,11 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
     let mut style_cursor = 0usize;
     let mut image_cursor = 0usize;
     out.push_str("<w:tbl>");
-    crate::ooxml_shared_parts::push_docx_table_properties_with_widths(
+    crate::ooxml_shared_parts::push_docx_table_properties_with_widths_for_page(
         out,
         &table.rows,
         col_widths.as_deref(),
+        ctx.text_width_twips,
     );
     for (r, row) in table.rows.iter().enumerate() {
         out.push_str("<w:tr>");
@@ -436,7 +442,7 @@ fn push_odt_cell_body(
     media: &mut MediaParts,
 ) {
     if !cell.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
-        body.push_str("<text:p>");
+        body.push_str("<text:p text:style-name=\"TableCellP\">");
         push_odt_cell_content(body, cell, cell_links);
         body.push_str("</text:p>");
     }

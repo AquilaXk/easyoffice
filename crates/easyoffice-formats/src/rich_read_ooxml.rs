@@ -64,7 +64,8 @@ const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 2] = ["w:pict", "w:object"];
 const DRAWING_ELEMENT: &str = "w:drawing";
 /// `w:spacing/@w:line` of single line spacing (240ths of a line).
 const DOCX_SINGLE_LINE_240THS: i64 = 240;
-const SINGLE_LINE_PERCENT: u16 = 100;
+const MAX_LINE_PERCENT: u16 = 1000;
+const MIN_FIXED_LINE_PERCENT: i128 = 50;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// The in-document link (`#_Toc12`) to a table-of-contents bookmark name.
@@ -72,15 +73,24 @@ fn toc_bookmark_link(name: &str) -> Option<String> {
     toc_bookmark_number(name).map(|_| format!("#{name}"))
 }
 
-/// `w:spacing` (auto line rule, 240ths of a line) and `w:ind` of a paragraph.
+/// `w:spacing` (auto, exact, or atLeast line spacing, 240ths of a line) and `w:ind` of a paragraph.
 fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
     match name {
-        "w:spacing" if attr(attrs, "w:lineRule").is_none_or(|r| r == "auto") => {
-            top.line_percent = number("w:line")
-                .filter(|l| *l > 0)
-                .and_then(|l| u16::try_from(l * 100 / DOCX_SINGLE_LINE_240THS).ok())
-                .filter(|p| *p != SINGLE_LINE_PERCENT);
+        "w:spacing" => {
+            let line = number("w:line").filter(|l| *l > 0);
+            top.line_percent = match (attr(attrs, "w:lineRule").as_deref(), line) {
+                (None | Some("auto"), Some(l)) => l
+                    .checked_mul(100)
+                    .and_then(|v| v.checked_add(DOCX_SINGLE_LINE_240THS / 2))
+                    .and_then(|v| u16::try_from(v / DOCX_SINGLE_LINE_240THS).ok())
+                    .filter(|p| (1..=MAX_LINE_PERCENT).contains(p)),
+                (Some("exact" | "atLeast"), Some(l)) => {
+                    let pct = (i128::from(l) * 100 + 120) / 240;
+                    Some(pct.clamp(MIN_FIXED_LINE_PERCENT, i128::from(MAX_LINE_PERCENT)) as u16)
+                }
+                _ => None,
+            };
         }
         "w:ind" => {
             top.left_indent = number("w:left").and_then(|v| u32::try_from(v).ok());

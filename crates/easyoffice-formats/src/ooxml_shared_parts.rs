@@ -29,15 +29,16 @@ pub(crate) fn core_properties_xml(title: &str) -> String {
 
 /// Writes `w:tblPr` and `w:tblGrid`, which must precede the first `w:tr` (ECMA-376 §17.4.38).
 pub(crate) fn push_docx_table_properties(out: &mut String, rows: &[Vec<String>]) {
-    push_docx_table_properties_with_widths(out, rows, None);
+    push_docx_table_properties_with_widths_for_page(out, rows, None, DOCX_TEXT_WIDTH_TWIPS);
 }
 
 /// Writes `w:tblPr` (with fixed table layout when explicit column widths are provided) and
-/// `w:tblGrid`.
-pub(crate) fn push_docx_table_properties_with_widths(
+/// `w:tblGrid` distributed over `page_text_width_twips`.
+pub(crate) fn push_docx_table_properties_with_widths_for_page(
     out: &mut String,
     rows: &[Vec<String>],
     col_widths_twips: Option<&[u32]>,
+    page_text_width_twips: usize,
 ) {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
     let custom = col_widths_twips.filter(|w| w.len() == cols);
@@ -71,7 +72,7 @@ pub(crate) fn push_docx_table_properties_with_widths(
             out.push_str(&format!("<w:gridCol w:w=\"{w}\"/>"));
         }
     } else {
-        let width = DOCX_TEXT_WIDTH_TWIPS / cols;
+        let width = (page_text_width_twips.max(1) / cols).max(1);
         for _ in 0..cols {
             out.push_str(&format!("<w:gridCol w:w=\"{width}\"/>"));
         }

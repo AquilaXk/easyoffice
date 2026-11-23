@@ -209,10 +209,9 @@ pub(super) fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_
         "w:strike" | "w:dstrike" => fmt.strike = toggle_on(val),
         "w:u" => fmt.underline = toggle_on(val),
         "w:rFonts" => {
-            fmt.font = ["w:ascii", "w:hAnsi", "w:eastAsia"]
+            fmt.font = ["w:eastAsia", "w:ascii", "w:hAnsi", "w:cs"]
                 .iter()
-                .find_map(|k| attr(attrs, k))
-                .filter(|f| !f.trim().is_empty())
+                .find_map(|k| attr(attrs, k).filter(|f| !f.trim().is_empty()))
                 .map(Cow::into_owned);
         }
         "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),

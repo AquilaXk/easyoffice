@@ -30,9 +30,10 @@ pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
     docx_cols_xml, docx_frame_parts_and_refs, docx_page_margins, docx_paper, docx_settings,
-    DOCX_SETTINGS_PART, DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_FONT, DOC_DEFAULT_HALF_PT,
-    DOC_DEFAULT_LINE_240THS,
+    page_text_width_twips, DOCX_SETTINGS_PART, DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_FONT,
+    DOC_DEFAULT_HALF_PT, DOC_DEFAULT_LINE_240THS,
 };
+use crate::rich_rtf_writer::line_spacing_240ths;
 use crate::rich_run_writers::OdtTextKey;
 use crate::rich_table_writers::{push_docx_table, DocxTableContext};
 use crate::rich_toc_writers::{
@@ -42,9 +43,6 @@ use crate::rich_toc_writers::{
 use crate::{
     EasyOfficeError, PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer, ZipArchiveCodec,
 };
-
-/// `w:spacing/@w:line` value of single line spacing (240ths of a line).
-const DOCX_SINGLE_LINE_240THS: u32 = 240;
 
 /// Heading font sizes in half-points for levels 1–6.
 const HEADING_HALF_POINTS: [u32; 6] = [32, 28, 26, 24, 22, 22];
@@ -95,7 +93,7 @@ fn docx_styles_xml(has_toc: bool) -> String {
     if has_toc {
         xml.push_str(&docx_toc_styles_xml());
     }
-    xml.push_str("<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>");
+    xml.push_str("<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/><w:jc w:val=\"left\"/></w:pPr><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>");
     xml.push_str("</w:styles>");
     xml
 }
@@ -109,7 +107,7 @@ pub(crate) fn push_docx_text(out: &mut String, text: &str) {
 pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
     let mut xml = String::new();
     if let Some(percent) = p.line_spacing_percent {
-        let line = u32::from(percent) * DOCX_SINGLE_LINE_240THS / 100;
+        let line = line_spacing_240ths(percent);
         xml.push_str(&format!(
             "<w:spacing w:line=\"{line}\" w:lineRule=\"auto\"/>"
         ));
@@ -279,6 +277,7 @@ pub(crate) fn docx_rich_entries(
             seen_later_para = Some(p.columns);
         }
     }
+    let text_width_twips = page_text_width_twips(&doc.page_frame);
     let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
     // The frame belongs to the first section: its references and `titlePg` go on the `sectPr` that ends it, the later sections
     // inherit them (a section with none of its own would show no header at all).
@@ -326,6 +325,7 @@ pub(crate) fn docx_rich_entries(
                     image_rels: &mut image_rels,
                     first_image_rel: DOCX_FIRST_IMAGE_REL,
                     media_dir: DOCX_MEDIA_DIR,
+                    text_width_twips,
                 };
                 push_docx_table(&mut body, table, &mut ctx);
                 // A table cannot end the body or touch another table without a paragraph.

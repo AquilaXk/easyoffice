@@ -262,3 +262,29 @@ fn a_highlight_on_a_native_hangul_source_stays_with_the_engine_writer() {
     assert!(host.seen.borrow().is_empty());
     assert!(String::from_utf8_lossy(&pdf_of(&response)).contains("/Subtype /Highlight"));
 }
+
+#[test]
+fn host_pdf_renderer_reports_doc_save_loss_warnings() {
+    let host = Recorder::new();
+    let payload = concat!(
+        r#"{"sourceFormat":"docx","targetFormat":"pdf","title":"손실 점검","#,
+        r#""comments":[{"id":1,"author":"검토자","date":"2026-11-23T09:00:00Z","text":"메모 내용"}],"#,
+        r#""firstHeader":[{"type":"paragraph","runs":[{"text":"첫 머리글"}]}],"#,
+        r#""firstFooter":[{"type":"paragraph","runs":[{"text":"첫 바닥글"}]}],"#,
+        r#""blocks":[{"type":"paragraph","runs":[{"text":"본문","commentId":1,"revision":{"id":1,"kind":"insert","author":"작성자","date":"2026-11-23T08:00:00Z"}}]}]}"#
+    );
+    let response = dispatch(payload, &|h, o| host.render(h, o));
+    assert_eq!(text_of(&pdf_of(&response)), "rendered by the host");
+    assert!(
+        response.contains("PDF 저장에서 빠진 메모 1개"),
+        "{response}"
+    );
+    assert!(
+        response.contains("PDF 저장에서 빠진 변경 추적 1곳"),
+        "{response}"
+    );
+    assert!(
+        response.contains("PDF 저장에서 빠진 첫 쪽 머리글·바닥글 2개"),
+        "{response}"
+    );
+}

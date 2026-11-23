@@ -120,6 +120,22 @@ pub(crate) const DOCX_SETTINGS_REL_ID: &str = "rIdSettings1";
 const DOCX_SETTINGS_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
 
+/// Usable text area width in twips for a document's page setup (A4 with default side margins = `9026`).
+pub(crate) fn page_text_width_twips(frame: &crate::RichPageFrame) -> usize {
+    let paper = frame.paper.unwrap_or(RichPaper::A4);
+    let margins = frame.margins.unwrap_or(RichPageMargins::DOC_DEFAULT);
+    let side_gutter = match frame.binding.kind {
+        RichBindingKind::Top => 0,
+        RichBindingKind::Single | RichBindingKind::Duplex => frame.binding.gutter,
+    };
+    paper
+        .width
+        .saturating_sub(margins.left)
+        .saturating_sub(margins.right)
+        .saturating_sub(side_gutter)
+        .max(1) as usize
+}
+
 /// `word/settings.xml` carrying binding/header/revision flags and the default tab stop (`800`
 /// twips), in `CT_Settings` schema order, together with its relationship and content-type override.
 pub(crate) fn docx_settings(
@@ -136,12 +152,12 @@ pub(crate) fn docx_settings(
     if track_changes {
         flags.push_str("<w:trackRevisions/>");
     }
-    if even_odd_different {
-        flags.push_str("<w:evenAndOddHeaders/>");
-    }
     flags.push_str(&format!(
         "<w:defaultTabStop w:val=\"{DOC_DEFAULT_TAB_STOP_TWIPS}\"/>"
     ));
+    if even_odd_different {
+        flags.push_str("<w:evenAndOddHeaders/>");
+    }
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flags}</w:settings>"
     );

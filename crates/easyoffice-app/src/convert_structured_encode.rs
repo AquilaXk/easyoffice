@@ -677,7 +677,10 @@ pub(crate) fn encode_target(
     if let (Some(render), StructuredContent::Document(doc, options)) = (writers.pdf, content) {
         if host_draws_pdf(format, source, options) {
             match render_document(doc, title, options, render) {
-                Ok(pdf) => return Ok(pdf),
+                Ok(pdf) => {
+                    warnings.extend(doc_save_loss(doc, DocumentFormat::Hwpx).warnings("PDF"));
+                    return Ok(pdf);
+                }
                 Err(reason) => warnings.push(render_fallback_warning(&reason)),
             }
         }
