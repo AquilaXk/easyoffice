@@ -53,7 +53,6 @@
 
 ## BASE
 - [ ] 입력기 조합의 첫 글자가 새 입력 칸에 들어가는지 실기기(한글 입력기)로 확인(PD-294)
-- [ ] 편집 뒤 다시 그리기 시간의 대부분이 `queryTableView`다. 증분 갱신을 검토한다(PD-290)
 
 ## 시트 함수 (PD-270·PD-271·PD-273, 비교표 `docs/sheet-function-parity.md`)
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열의 비공개 평활 계수 선택 목적함수(0.001 격자), 계절 경로의 순환식·끝점 고정 처리, `STAT`의 MAE·RMSE·MASE 오차 열 정의, 같은 날짜가 있을 때 `aggregation` 생략·`0` 동작, 범위 밖 인수와 시계열 안 대상 날짜의 오류 값(`docs/forecast-ets-cleanroom.md` 9장)

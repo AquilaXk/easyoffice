@@ -133,17 +133,19 @@
   }
 
   // Writes existing-cell updates and appends pasted new records atomically under MAX_RECORDS_PER_TABLE, refusing whole when exceeded.
-  function applyPasteMutation(M, state, tbl, edits, newRows) {
+  function applyPasteMutation(M, state, tbl, edits, newRows, indexOpt) {
     if (newRows.length > 0 && tbl.records.length + newRows.length > M.MAX_RECORDS_PER_TABLE) {
       return { ok: false, error: `테이블당 최대 레코드 수(${M.MAX_RECORDS_PER_TABLE}건)를 초과했습니다.` };
     }
-    const fieldsById = new Map(tbl.fields.map((f) => [f.id, f])), recordsById = new Map(tbl.records.map((r) => [r.id, r]));
-    const index = M.buildStateIndex(state), createdIds = [];
+    const index = indexOpt || M.buildStateIndex(state);
+    const fieldsById = index.fieldsByTableId.get(tbl.id)?.byId || new Map(tbl.fields.map((f) => [f.id, f]));
+    const recordsById = index.recordMapsByTableId.get(tbl.id) || new Map(tbl.records.map((r) => [r.id, r]));
+    const createdIds = [], createdRecords = [], dirtySet = new Set();
     let applied = 0, failed = 0, error = "";
     for (const { recordId, fieldId, value } of edits) {
       const fld = fieldsById.get(fieldId), rec = recordsById.get(recordId);
       const res = fld && rec ? M.validateCellValue(fld, value, state, index) : { ok: false, error: "대상 셀을 찾을 수 없습니다." };
-      if (res.ok) { rec.values[fieldId] = res.value; applied += 1; } else { failed += 1; error ||= res.error; }
+      if (res.ok) { rec.values[fieldId] = res.value; dirtySet.add(recordId); applied += 1; } else { failed += 1; error ||= res.error; }
     }
     for (const rawValues of newRows) {
       const clean = {}; let rowOk = true;
@@ -163,11 +165,11 @@
         const rSeq = state.nextRecordSeq || tbl.records.length + 1;
         state.nextRecordSeq = rSeq + 1;
         const record = { id: `rec-${rSeq}`, values: clean };
-        tbl.records.push(record);
-        createdIds.push(record.id);
+        tbl.records.push(record); recordsById.set(record.id, record);
+        createdIds.push(record.id); createdRecords.push(record);
       }
     }
-    return applied > 0 || createdIds.length > 0 ? { ok: true, applied, createdIds, failed, error } : { ok: false, error: error || "붙여 넣을 칸이 없습니다." };
+    return applied > 0 || createdIds.length > 0 ? { ok: true, applied, createdIds, createdRecords, dirtyIds: Array.from(dirtySet), failed, error } : { ok: false, error: error || "붙여 넣을 칸이 없습니다." };
   }
 
   function dataItemsBetween(win, r1, r2) {

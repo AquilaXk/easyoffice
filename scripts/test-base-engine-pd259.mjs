@@ -396,9 +396,11 @@ test("PD-259 CSS 토큰 준수(리터럴 색상 0건) 및 저장소 위생·줄 
 
   const BASE_SIZE_URL = new URL("../crates/easyoffice-app/ui/base-grid-size.js", import.meta.url);
   const BASE_CLIP_URL = new URL("../crates/easyoffice-app/ui/base-clipboard.js", import.meta.url);
+  const BASE_QCACHE_URL = new URL("../crates/easyoffice-app/ui/base-query-cache.js", import.meta.url);
   const FIND_BASE_URL = new URL("../crates/easyoffice-app/ui/find-base.js", import.meta.url);
   const files = [
     ["crates/easyoffice-app/ui/base-model.js", BASE_MODEL_URL, 990],
+    ["crates/easyoffice-app/ui/base-query-cache.js", BASE_QCACHE_URL, 320],
     ["crates/easyoffice-app/ui/base-grid-size.js", BASE_SIZE_URL, 400],
     ["crates/easyoffice-app/ui/base-clipboard.js", BASE_CLIP_URL, 280],
     ["crates/easyoffice-app/ui/base-studio.js", BASE_STUDIO_URL, 990],

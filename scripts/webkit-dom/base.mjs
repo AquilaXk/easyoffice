@@ -517,4 +517,43 @@ export const baseSteps = [
     const after = await activeInfo(page);
     assert.deepEqual([after?.rec, after?.field], ["r5", "f3"]);
   }],
+
+  ["incremental query cache keeps 10,000-row cell edits fast and exact across sort, group, and relation updates (PD-317)", async (page) => {
+    await load(page, 10000);
+    await page.evaluate(() => {
+      const studio = window.__EASYOFFICE_BASE_STUDIO__;
+      studio.setSorts([{ fieldId: "f2", dir: "desc" }]);
+      studio.setFilters([{ fieldId: "f2", op: "gte", value: "100" }], "and");
+      studio.setGroupBy("f4");
+    });
+    const bench = await page.evaluate(() => {
+      const studio = window.__EASYOFFICE_BASE_STUDIO__, M = window.__EASYOFFICE_BASE_MODEL__, samples = [];
+      const cache = window.__EASYOFFICE_CREATE_BASE_QUERY_CACHE__(M);
+      const st = studio.getState();
+      cache.query(st, "t1");
+      const qSamples = [];
+      for (let i = 0; i < 8; i += 1) {
+        M.updateCell(st, "t1", "r9000", "f2", 9000 + i + 1, cache.index(st));
+        cache.noteUpdate(st, "t1", ["r9000"]);
+        const q0 = performance.now();
+        cache.query(st, "t1");
+        qSamples.push(performance.now() - q0);
+        const t0 = performance.now();
+        studio.updateCell("r9000", "f2", 9000 + i + 1);
+        samples.push(performance.now() - t0);
+      }
+      return {
+        queryMedian: qSamples.sort((a, b) => a - b)[qSamples.length >> 1],
+        studioMedian: samples.sort((a, b) => a - b)[samples.length >> 1],
+      };
+    });
+    console.log(`     PD-317 10k filter+sort+group WebKit median: query=${bench.queryMedian.toFixed(2)} ms, studio.updateCell=${bench.studioMedian.toFixed(2)} ms`);
+    assert.ok(bench.queryMedian < 3 && bench.studioMedian < 30, `expected fast 10k incremental edit, got ${JSON.stringify(bench)}`);
+    const q = await page.evaluate(() => {
+      const studio = window.__EASYOFFICE_BASE_STUDIO__;
+      const lq = studio.liveQuery(), exact = window.__EASYOFFICE_BASE_MODEL__.queryTableView(studio.getState(), "t1");
+      return { countOk: lq.filteredCount === exact.filteredCount, sumEq: lq.numericSums.f2 === exact.numericSums.f2, row0: lq.rows[0]?.record.id === exact.rows[0]?.record.id };
+    });
+    assert.deepEqual(q, { countOk: true, sumEq: true, row0: true });
+  }],
 ];

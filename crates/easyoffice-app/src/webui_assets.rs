@@ -49,6 +49,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "base-grid-size.js",
     "base-grid-window.js",
     "base-model.js",
+    "base-query-cache.js",
     "base-studio.js",
     "base-virtual.js",
     "board-router.js",

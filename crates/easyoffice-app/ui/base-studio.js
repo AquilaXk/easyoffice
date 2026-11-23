@@ -96,6 +96,8 @@
     const setAttr = (node, k, v) => { node.setAttribute(k, v); return node; };
 
     const activeTable = () => M.getTable(state, state.activeTableId);
+    const qCache = host.__EASYOFFICE_CREATE_BASE_QUERY_CACHE__?.(M) || null;
+    const queryOf = (id) => (qCache ? qCache.query(state, id) : M.queryTableView(state, id));
     const setFeedback = (msg) => { deps.setFeedback?.(String(msg || "")); };
     // Cell selection, keys, clipboard of the datasheet (`base-cell-select.js`): it outlives a redraw, so an edit keeps the selection.
     const cellSel = host.__EASYOFFICE_CREATE_BASE_CELL_SELECT__(doc, { updateCells: (edits) => updateCells(edits), applyPaste: (edits, newRows) => applyPaste(edits, newRows), setFeedback, relationIds: (field, text) => relationIds(field, text) });
@@ -394,7 +396,7 @@
     // The record ids that a pasted text of labels ("Kim, Lee") stands for. A text that is no label stays as it is, for the model to check.
     const relationLabels = new WeakMap();
     function relationIds(field, text) {
-      const list = relationOptions.get(field.id) || relationOptionsOf(field, { index: M.buildStateIndex(state) });
+      const list = relationOptions.get(field.id) || relationOptionsOf(field, { index: qCache ? qCache.index(state) : M.buildStateIndex(state) });
       let byLabel = relationLabels.get(list);
       if (!byLabel) {
         byLabel = new Map();
@@ -559,7 +561,7 @@
       if (table.rowHeight !== undefined) { tblEl.style.setProperty("--base-row-height", table.rowHeight + "px"); tblEl.dataset.rowHeight = String(table.rowHeight); }
       const footCount = query.filteredCount === query.totalCount ? `개수: ${query.totalCount}건` : `개수: ${query.filteredCount} / ${query.totalCount}건`;
       const footSums = query.fields.map((field) => {
-        const sum = query.numericSums[field.id], hasSum = field.type === "number" || (field.type === "formula" && query.rows.some((r) => typeof r.values[field.id] === "number"));
+        const sum = query.numericSums[field.id], hasSum = field.type === "number" || (field.type === "formula" && (query.numericCounts ? query.numericCounts[field.id] > 0 : query.rows.some((r) => typeof r.values[field.id] === "number")));
         return hasSum && Number.isFinite(sum) ? `합계: ${Math.round(sum * 1000) / 1000}` : "";
       });
       const { widthKey, growOnly } = gridSize ? gridSize.prepareAutoWidths(table, query, [footCount, ...footSums])
@@ -758,7 +760,7 @@
       cellSel.beforeRender();
       gridWin?.dispose();
       gridWin = null;
-      const query = (liveQuery = M.queryTableView(state, table.id));
+      const query = (liveQuery = queryOf(table.id));
       const viewNode = table.view === "kanban" ? renderKanbanView(table, query)
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
@@ -775,13 +777,13 @@
     function setState(next) {
       const res = M.hydrateBaseState(next);
       if (!res.ok) { setFeedback(res.error); return res; }
-      state = res.state; invalidCell = null; gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
+      state = res.state; invalidCell = null; qCache?.reset(state); gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
       if (bound) render();
       return { ok: true, state: getState() };
     }
 
     function resetBlank() {
-      state = M.createInitialBaseState(); invalidCell = null; queryPanel = ""; gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
+      state = M.createInitialBaseState(); invalidCell = null; qCache?.reset(state); queryPanel = ""; gridMemo.key = ""; if (gridSize) gridSize.clearAll(gridWidths); else gridWidths.clear();
       if (bound) render();
       return getState();
     }
@@ -806,30 +808,28 @@
 
     // A view setting (the view, the board or calendar field, the month, a collapsed group) is saved with the model: one undo step each.
     const setViewSetting = (apply) => withActive((tbl) => { apply(tbl); return { ok: true }; });
-    const addTable = (spec = {}) => runMut(() => M.addTable(state, spec), true);
-    const addField = (spec = {}) => withActive((t) => M.addField(state, t.id, spec));
-    const updateField = (fieldId, patch = {}) => withActive((t) => { const r = M.updateField(state, t.id, fieldId, patch); if (r.ok) gridSize?.invalidateTable(t.id, gridWidths); return r; });
-    const deleteField = (fieldId) => withActive((t) => { const r = M.deleteField(state, t.id, fieldId); if (r.ok) gridSize?.invalidateTable(t.id, gridWidths); return r; });
+    const addTable = (spec = {}) => runMut(() => { const r = M.addTable(state, spec); if (r.ok) qCache?.invalidateSchema(state); return r; }, true);
+    const addField = (spec = {}) => withActive((t) => { const r = M.addField(state, t.id, spec); if (r.ok) qCache?.invalidateSchema(state); return r; });
+    const updateField = (fieldId, patch = {}) => withActive((t) => { const r = M.updateField(state, t.id, fieldId, patch); if (r.ok) { gridSize?.invalidateTable(t.id, gridWidths); qCache?.invalidateSchema(state); } return r; });
+    const deleteField = (fieldId) => withActive((t) => { const r = M.deleteField(state, t.id, fieldId); if (r.ok) { gridSize?.invalidateTable(t.id, gridWidths); qCache?.invalidateSchema(state); } return r; });
     const setFieldWidth = (fieldId, widthPx) => withActive((t) => M.setFieldWidth(state, t.id, fieldId, widthPx));
     const setRowHeight = (heightPx) => withActive((t) => M.setRowHeight(state, t.id, heightPx));
-    const fitFieldWidth = (fieldId) => withActive((t) => { const px = gridSize?.fitField(M.queryTableView(state, t.id), fieldId); return px ? M.setFieldWidth(state, t.id, fieldId, px) : { ok: false, error: "대상 필드를 찾을 수 없습니다." }; });
-    const addRecord = (values = {}) => withActive((t) => M.addRecord(state, t.id, values), true);
-    const deleteRecord = (recordId) => withActive((t) => M.deleteRecord(state, t.id, recordId), true);
+    const fitFieldWidth = (fieldId) => withActive((t) => { const px = gridSize?.fitField(queryOf(t.id), fieldId); return px ? M.setFieldWidth(state, t.id, fieldId, px) : { ok: false, error: "대상 필드를 찾을 수 없습니다." }; });
+    const addRecord = (values = {}) => withActive((t) => { const r = M.addRecord(state, t.id, values, qCache?.index(state)); if (r.ok) qCache?.noteAdd(state, t.id, r.record); return r; }, true);
+    const deleteRecord = (recordId) => withActive((t) => { const r = M.deleteRecord(state, t.id, recordId); if (r.ok) qCache?.noteDelete(state, t.id, recordId); return r; }, true);
 
     function updateCell(recordId, fieldId, value) {
-      const tbl = activeTable();
+      const tbl = activeTable(), idx = tbl ? qCache?.index(state) : null;
       if (!tbl) return { ok: false, error: "활성 테이블이 없습니다." };
-      const prevRec = tbl.records.find((r) => r.id === recordId);
+      const prevRec = idx?.recordMapsByTableId.get(tbl.id)?.get(recordId) || tbl.records.find((r) => r.id === recordId);
       const prevCopy = prevRec ? (Array.isArray(prevRec.values[fieldId]) ? [...prevRec.values[fieldId]] : prevRec.values[fieldId]) : undefined;
-      const res = M.updateCell(state, tbl.id, recordId, fieldId, value);
+      const res = M.updateCell(state, tbl.id, recordId, fieldId, value, idx);
       if (!res.ok) { invalidCell = { recordId, fieldId, error: res.error }; setFeedback(res.error); return res; }
       if (prevRec && prevCopy !== res.value) {
         const committed = res.value;
-        prevRec.values[fieldId] = prevCopy;
-        recordUndo();
-        prevRec.values[fieldId] = committed;
+        prevRec.values[fieldId] = prevCopy; recordUndo(); prevRec.values[fieldId] = committed;
       }
-      invalidCell = null; noteActivity();
+      qCache?.noteUpdate(state, tbl.id, [recordId]); invalidCell = null; noteActivity();
       if (bound) render();
       return res;
     }
@@ -837,12 +837,12 @@
     // Many cells in one undo step and one redraw (a paste, Delete over a range): `edits` are `{ recordId, fieldId, value }`; the cells whose value the
     // field refuses are left as they are and counted in the feedback.
     function updateCells(edits) {
-      const res = withActive((tbl) => M.updateCells(state, tbl.id, edits), true);
+      const res = withActive((tbl) => { const r = M.updateCells(state, tbl.id, edits, qCache?.index(state)); if (r.ok) qCache?.noteUpdate(state, tbl.id, r.dirtyIds); return r; }, true);
       if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
       return res;
     }
     const applyPaste = (edits, newRows) => {
-      const res = withActive((tbl) => host.__EASYOFFICE_BASE_CLIPBOARD__.applyPasteMutation(M, state, tbl, edits, newRows), true);
+      const res = withActive((tbl) => { const r = host.__EASYOFFICE_BASE_CLIPBOARD__.applyPasteMutation(M, state, tbl, edits, newRows, qCache?.index(state)); if (r.ok) qCache?.notePaste(state, tbl.id, r.dirtyIds, r.createdRecords); return r; }, true);
       if (res.ok && res.failed > 0) setFeedback(`${res.failed}칸은 값이 맞지 않아 바꾸지 못했습니다: ${res.error}`);
       return res;
     };
@@ -921,7 +921,7 @@
     function buildPrintPages(docArg, rules) {
       const d = docArg || doc, tbl = activeTable();
       if (!tbl) throw new Error("인쇄할 내용이 없습니다.");
-      const { fields, rows } = M.queryTableView(state, tbl.id);
+      const { fields, rows } = queryOf(tbl.id);
       if (rows.length === 0) throw new Error("인쇄할 내용이 없습니다.");
       const wide = fields.length > 6, paperHeight = wide ? 210 : 297;
       const paperClass = rules?.classFor ? rules.classFor(wide ? 297 : 210, paperHeight) : "";
@@ -974,7 +974,7 @@
       bind, render, getState, setState, resetBlank,
       addTable, addField, updateField, deleteField, setFieldWidth, setRowHeight, fitFieldWidth, addRecord, updateCell, updateCells, deleteRecord,
       selection: cellSel.selection, selectedRanges: cellSel.selectedRanges, runClipboardCommand: cellSel.runClipboardCommand, setView, setFilters, setSorts, setGroupBy, exportAs, buildPrintPages,
-      liveQuery: () => liveQuery || (activeTable() ? M.queryTableView(state, activeTable().id) : null),
+      liveQuery: () => liveQuery || (activeTable() ? queryOf(activeTable().id) : null),
       onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),
       activeCellTarget: cellSel.activeTarget, selectCellById: cellSel.selectRecordField, relationIds,
     };

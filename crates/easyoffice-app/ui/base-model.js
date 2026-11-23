@@ -751,11 +751,11 @@
     return { ok: true, values: clean };
   }
 
-  function addRecord(state, tableId, rawValues = {}) {
+  function addRecord(state, tableId, rawValues = {}, indexOpt) {
     const table = getTable(state, tableId);
     if (!table) return fail("대상 테이블을 찾을 수 없습니다.");
     if (table.records.length >= MAX_RECORDS_PER_TABLE) return fail(`테이블당 최대 레코드 수(${MAX_RECORDS_PER_TABLE}건)를 초과했습니다.`);
-    const vRes = validateRecordValues(table.fields, rawValues, state, buildStateIndex(state));
+    const vRes = validateRecordValues(table.fields, rawValues, state, indexOpt || buildStateIndex(state));
     if (!vRes.ok) return vRes;
     const rSeq = state.nextRecordSeq || table.records.length + 1; state.nextRecordSeq = rSeq + 1;
     const record = { id: `rec-${rSeq}`, values: vRes.values };
@@ -763,29 +763,32 @@
     return { ok: true, record };
   }
 
-  function updateCell(state, tableId, recordId, fieldId, rawValue) {
-    const table = getTable(state, tableId), field = table?.fields.find((f) => f.id === fieldId), record = table?.records.find((r) => r.id === recordId);
+  function updateCell(state, tableId, recordId, fieldId, rawValue, indexOpt) {
+    const table = getTable(state, tableId);
+    const field = indexOpt?.fieldsByTableId.get(table?.id)?.byId.get(fieldId) || table?.fields.find((f) => f.id === fieldId);
+    const record = indexOpt?.recordMapsByTableId.get(table?.id)?.get(recordId) || table?.records.find((r) => r.id === recordId);
     if (!field || !record) return fail("대상 셀을 찾을 수 없습니다.");
-    const res = validateCellValue(field, rawValue, state);
+    const res = validateCellValue(field, rawValue, state, indexOpt);
     if (!res.ok) return res;
     record.values[fieldId] = res.value;
     return { ok: true, value: res.value };
   }
 
-  // Many cells at once (a paste, a clear: PD-294): the checks of `updateCell` for each edit `{ recordId, fieldId, value }`, with the table's
-  // records and the relation index built once, not for each cell. An edit that fails is left out and counted; the others are written.
-  function updateCells(state, tableId, edits) {
+  // Many cells at once (a paste, a clear: PD-294): uses indexed field/record maps when provided and tracks touched record IDs.
+  function updateCells(state, tableId, edits, indexOpt) {
     const table = getTable(state, tableId);
     if (!table) return fail("대상 테이블을 찾을 수 없습니다.");
-    const fieldsById = new Map(table.fields.map((f) => [f.id, f])), recordsById = new Map(table.records.map((r) => [r.id, r]));
-    const index = buildStateIndex(state);
+    const index = indexOpt || buildStateIndex(state);
+    const fieldsById = index.fieldsByTableId.get(table.id)?.byId || new Map(table.fields.map((f) => [f.id, f]));
+    const recordsById = index.recordMapsByTableId.get(table.id) || new Map(table.records.map((r) => [r.id, r]));
+    const dirtySet = new Set();
     let applied = 0, failed = 0, error = "";
     for (const { recordId, fieldId, value } of edits) {
       const field = fieldsById.get(fieldId), record = recordsById.get(recordId);
       const res = field && record ? validateCellValue(field, value, state, index) : fail("대상 셀을 찾을 수 없습니다.");
-      if (res.ok) { record.values[fieldId] = res.value; applied += 1; } else { failed += 1; error ||= res.error; }
+      if (res.ok) { record.values[fieldId] = res.value; dirtySet.add(recordId); applied += 1; } else { failed += 1; error ||= res.error; }
     }
-    return applied > 0 ? { ok: true, applied, failed, error } : fail(error || "바꿀 칸이 없습니다.");
+    return applied > 0 ? { ok: true, applied, failed, error, dirtyIds: Array.from(dirtySet) } : fail(error || "바꿀 칸이 없습니다.");
   }
 
   function deleteRecord(state, tableId, recordId) {
@@ -979,6 +982,7 @@
     VIEW_MODES, FIELD_TYPES, FIELD_TYPE_LABELS, FILTER_OPS, FILTER_OP_LABELS,
     createInitialBaseState, buildStateIndex, getTable, validateCellValue, compileFormula, evaluateFormula,
     resolveRelationDisplay, resolveRelationItems, rollupSum, formatCellDisplay, queryTableView,
+    matchesFilterRule, compareFieldValues,
     addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,
     setFieldWidth, setRowHeight, toSheetsPayload, toDelimitedText, serializeBaseState, hydrateBaseState,
   };

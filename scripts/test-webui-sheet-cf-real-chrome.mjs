@@ -31,13 +31,21 @@ let ctx = null;
 before(async () => {
   if (skip) return;
   const port = 20000 + Math.floor(Math.random() * 20000);
-  const engine = startEngine(APP, port);
-  await sleep(800);
-  // `EO_UI_DIR` serves another copy of the page (the before-and-after shots of a change run the same steps on both).
-  const server = await startUiServer({ enginePort: port, port: port + 1, ui: process.env.EO_UI_DIR || undefined });
-  const browser = await startBrowser({ chrome: CHROME, debugPort: port + 2, url: `http://127.0.0.1:${port + 1}/?module=SHEET&win=cf-real-chrome`, width: 1280, height: 860 });
-  ctx = { engine, server, browser, cdp: browser.cdp };
-  await sleep(1000);
+  let engine = null, server = null, browser = null;
+  try {
+    engine = startEngine(APP, port);
+    await sleep(800);
+    // `EO_UI_DIR` serves another copy of the page (the before-and-after shots of a change run the same steps on both).
+    server = await startUiServer({ enginePort: port, port: port + 1, ui: process.env.EO_UI_DIR || undefined });
+    browser = await startBrowser({ chrome: CHROME, debugPort: port + 2, url: `http://127.0.0.1:${port + 1}/?module=SHEET&win=cf-real-chrome`, width: 1280, height: 860 });
+    ctx = { engine, server, browser, cdp: browser.cdp };
+    await sleep(1000);
+  } catch (err) {
+    try { await browser?.stop?.(); } catch {}
+    try { server?.close?.(); } catch {}
+    try { engine?.kill?.(); } catch {}
+    throw err;
+  }
 });
 
 after(async () => {

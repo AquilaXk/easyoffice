@@ -497,24 +497,31 @@
 
     // ---- lifecycle ----
 
+    function findRowOf(recId, hintRow) {
+      if (!recId || !ctx) return undefined;
+      if (hintRow >= 1 && hintRow <= ctx.win.count && ctx.win.recordAt(hintRow - 1)?.record.id === recId) return hintRow;
+      return rowIndexMap().get(recId);
+    }
+
     function bind(grid, key) {
       endDrag();
       const sameTable = (grid.tableId ?? "") === tableKey, sameView = key === viewKey;
+      const prevAr = sel?.ar, prevCr = sel?.cr, prevExtra = extraRanges;
       tableKey = grid.tableId ?? ""; viewKey = key;
       ctx = { ...grid, colOf: new Map(grid.fields.map((f, i) => [f.id, i + 1])), view: viewOf(grid) };
       editing = null;
       if (!sameTable || !sameView) { sel = null; extraRanges = []; savedAnchor = null; appendTarget = false; }
       else if (savedAnchor?.arId) {
-        const rm = rowIndexMap(), ar = savedAnchor.wholeCol ? ctx.view.firstData : rm.get(savedAnchor.arId), ac = ctx.colOf.get(savedAnchor.acId);
+        const ar = savedAnchor.wholeCol ? ctx.view.firstData : findRowOf(savedAnchor.arId, prevAr), ac = ctx.colOf.get(savedAnchor.acId);
         if (!ar || !ac || ar > ctx.view.dataRows || ctx.win.isGroup(ar - 1)) { sel = null; extraRanges = []; savedAnchor = null; }
         else {
-          const cr = rm.get(savedAnchor.crId) || ar, cc = ctx.colOf.get(savedAnchor.ccId) || ac;
+          const cr = findRowOf(savedAnchor.crId, prevCr) || ar, cc = ctx.colOf.get(savedAnchor.ccId) || ac;
           sel = savedAnchor.wholeCol ? { ...N.single(ctx.view.firstData, ac), cr: ctx.view.dataRows, cc } : { ar, ac, cr, cc, span: sel?.span ? N.rangeOf({ ar, ac, cr, cc }) : null, tabFrom: sel?.tabFrom ?? null };
-          extraRanges = savedAnchor.extra.map((ex) => {
+          extraRanges = savedAnchor.extra.map((ex, idx) => {
             const c1 = ctx.colOf.get(ex.c1Id), c2 = ctx.colOf.get(ex.c2Id);
             if (!c1 || !c2) return null;
             if (ex.wholeCol) return { r1: ctx.view.firstData, r2: ctx.view.dataRows, c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
-            const r1 = rm.get(ex.r1Id), r2 = rm.get(ex.r2Id);
+            const r1 = findRowOf(ex.r1Id, prevExtra[idx]?.r1), r2 = findRowOf(ex.r2Id, prevExtra[idx]?.r2);
             return r1 && r2 ? { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) } : null;
           }).filter(Boolean);
         }
