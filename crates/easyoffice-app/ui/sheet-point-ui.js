@@ -20,6 +20,18 @@
   // Keys that keep a pointed reference alive: the movers, the modifiers and F4.
   const KEEP_POINT_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "F4", ...Object.keys(ARROW_STEP)]);
 
+  function latinKeyOf(ev) {
+    const fn = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.latinKeyOf;
+    if (typeof fn === "function") return fn(ev);
+    if (!ev || ev.isComposing) return "";
+    const k = String(ev.key || "");
+    const code = String(ev.code || "");
+    if ((ev.ctrlKey || ev.metaKey || ev.altKey) && !(ev.getModifierState?.("AltGraph") && !ev.metaKey) && /^Key[A-Z]$/.test(code) && (ev.altKey || k === "Process" || k === "Unidentified" || (k.length === 1 && k.charCodeAt(0) > 0x7f))) {
+      return code.slice(3);
+    }
+    return k.length === 1 ? k.toUpperCase() : "";
+  }
+
   function createSheetPointUi(deps) {
     const { document, grid, feedback } = deps;
     const P = host.__EASYOFFICE_SHEET_FORMULA_POINT__;
@@ -418,7 +430,8 @@
       if (!s) return false;
       if (ARROW_STEP[ev.key] && !ev.altKey && arrow(ev, s)) return true;
       if (ev.key === "F2") return turn(ev, s);
-      if ((ev.key === "F4" || (ev.metaKey && !ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === "t")) && cycle(ev, s)) return true;
+      const cmdT = ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.isComposing && (ev.key?.toLowerCase?.() === "t" || latinKeyOf(ev) === "T");
+      if ((ev.key === "F4" || cmdT) && cycle(ev, s)) return true;
       if (point && !KEEP_POINT_KEYS.has(ev.key)) {
         point = null;
         refresh();

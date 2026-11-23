@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  comboFromKeyEvent, createShellShortcutRelay, matchShellShortcut, parseShellKeys, SHELL_SHORTCUT_REASON,
+  comboFromKeyEvent, createShellShortcutRelay, matchShellShortcut, parseShellKeys, physicalLatinKey, SHELL_SHORTCUT_REASON,
 } from "../apps/hwp-studio/src/embed/shell-shortcuts.ts";
 
 // Shortcut forwarding of the embedded HWP editor (PD-088): only Ctrl/Cmd combos the shell asked for
@@ -53,4 +53,35 @@ test("the relay delivers the combo string to the embed port listeners only", () 
   relay.forward("Ctrl+O");
   assert.equal(seen.length, 1);
   assert.equal(relay.hasListener(), false);
+});
+
+test("physicalLatinKey and shell shortcuts normalize Korean 2-beolsik and Process while keeping AltGr, Dvorak and active composing intact", () => {
+  for (const [jamo, code, expected] of [
+    ["ㄴ", "KeyS", "Ctrl+S"],
+    ["ㅐ", "KeyO", "Ctrl+O"],
+    ["ㅜ", "KeyN", "Ctrl+N"],
+    ["ㅏ", "KeyK", "Ctrl+K"],
+    ["ㅈ", "KeyW", "Ctrl+W"],
+  ]) {
+    const ev = key({ key: jamo, code, ctrlKey: true });
+    assert.equal(physicalLatinKey(ev), expected.slice(-1));
+    assert.equal(comboFromKeyEvent(ev), expected);
+    assert.equal(matchShellShortcut(ev, WANTED), expected);
+  }
+  assert.equal(physicalLatinKey(key({ key: "ㅐ", code: "KeyO", metaKey: true })), "O");
+  assert.equal(comboFromKeyEvent(key({ key: "ㅐ", code: "KeyO", metaKey: true })), "Ctrl+O");
+  assert.equal(matchShellShortcut(key({ key: "Process", code: "KeyS", ctrlKey: true, isComposing: false }), WANTED), "Ctrl+S");
+  assert.equal(matchShellShortcut(key({ key: "Unidentified", code: "KeyO", ctrlKey: true, isComposing: false }), WANTED), "Ctrl+O");
+  assert.equal(physicalLatinKey(key({ key: "Process", code: "KeyS", ctrlKey: true, isComposing: true })), null);
+  assert.equal(comboFromKeyEvent(key({ key: "ㄴ", code: "KeyS", ctrlKey: true, isComposing: true })), null);
+  assert.equal(matchShellShortcut(key({ key: "Process", code: "KeyS", ctrlKey: true, isComposing: true }), WANTED), null);
+  assert.equal(physicalLatinKey(key({ key: "k", code: "KeyV", ctrlKey: true })), "K", "Dvorak ASCII keeps key");
+  assert.equal(comboFromKeyEvent(key({ key: "k", code: "KeyV", ctrlKey: true })), "Ctrl+K");
+  assert.equal(physicalLatinKey(key({ key: "ㄴ", code: "KeyS" })), "ㄴ", "unmodified Jamo is not normalized");
+  assert.equal(physicalLatinKey(key({ key: "Dead", code: "KeyN", altKey: true })), "N");
+  const altGr = key({ key: "@", code: "KeyQ", ctrlKey: true, altKey: true, getModifierState: (m) => m === "AltGraph" });
+  assert.equal(physicalLatinKey(altGr), "@");
+  assert.equal(matchShellShortcut(altGr, ["Ctrl+Alt+Q", ...WANTED]), null);
+  const altGrO = key({ key: "ó", code: "KeyO", ctrlKey: true, altKey: true, getModifierState: (m) => m === "AltGraph" });
+  assert.equal(matchShellShortcut(altGrO, ["Ctrl+Alt+O", ...WANTED]), null);
 });

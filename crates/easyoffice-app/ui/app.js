@@ -733,7 +733,8 @@
       e.preventDefault();
       return void modal.close?.();
     }
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+    const focusKey = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.latinKeyOf?.(e) ?? (e.code === "KeyF" && (e.key === "Process" || e.key === "Unidentified" || (e.key?.length === 1 && e.key.charCodeAt(0) > 0x7f)) ? "F" : e.key?.toUpperCase?.());
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && !e.isComposing && focusKey === "F") {
       e.preventDefault();
       return void cmdSearchInput?.focus();
     }

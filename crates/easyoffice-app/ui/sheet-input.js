@@ -5,6 +5,18 @@
     return Boolean(st && (st.mode || st.userEdited));
   }
 
+  function latinKeyOf(ev) {
+    const fn = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.latinKeyOf;
+    if (typeof fn === "function") return fn(ev);
+    if (!ev || ev.isComposing) return "";
+    const key = String(ev.key || "");
+    const code = String(ev.code || "");
+    if ((ev.ctrlKey || ev.metaKey || ev.altKey) && !(ev.getModifierState?.("AltGraph") && !ev.metaKey) && /^Key[A-Z]$/.test(code) && (ev.altKey || key === "Process" || key === "Unidentified" || (key.length === 1 && key.charCodeAt(0) > 0x7f))) {
+      return code.slice(3);
+    }
+    return key.length === 1 ? key.toUpperCase() : "";
+  }
+
   function isPrintable(ev) {
     return ev.key?.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey;
   }
@@ -598,12 +610,13 @@
 
     // Keys that act on the selection (select all, clear, type-to-edit) while no cell is being edited.
     function handleIdleKey(ev, mod, td) {
-      if (mod && ev.altKey && (ev.code === "KeyV" || ev.key.toLowerCase() === "v")) {
+      const latin = latinKeyOf(ev);
+      if (mod && ev.altKey && latin === "V") {
         ev.preventDefault();
         pasteUi.open();
         return;
       }
-      if (mod && ev.key.toLowerCase() === "a") {
+      if (mod && !ev.altKey && latin === "A") {
         ev.preventDefault();
         selectAll();
         return;
@@ -627,6 +640,7 @@
 
     // IME composition: a bare "Process" key starts an edit; every composition key is consumed.
     function handleCompositionKey(ev, td) {
+      if ((ev.ctrlKey || ev.metaKey || ev.altKey) && !ev.isComposing) return false;
       if (!(ev.isComposing || ev.key === "Process" || ev.keyCode === 229)) return false;
       const cst = td ? stateOf(td) : null;
       if (td && !isEditing(cst) && ev.key === "Process") startEdit(td, "enter", true);

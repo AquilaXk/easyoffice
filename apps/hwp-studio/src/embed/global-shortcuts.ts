@@ -2,6 +2,7 @@
 // focus (navigation keys, zoom keys, undo/redo fallback, Alt+N and Ctrl/Cmd+O without a document).
 import { defaultShortcuts, matchShortcut } from '@/command/shortcut-map';
 import { handleDocumentSelectAllShortcut, isTextEditingTarget } from '@/command/document-shortcut-guard';
+import { physicalLatinKey } from './shell-shortcuts.ts';
 import type { CommandDispatcher } from '@/command/dispatcher';
 import type { InputHandler } from '@/engine/input-handler';
 import type { CanvasView } from '@/view/canvas-view';
@@ -65,13 +66,15 @@ export function setupGlobalShortcuts({ dispatcher, getInputHandler, getCanvasVie
 
   /** 문서 미로드 상태에서도 동작하는 Alt+N(새 문서)·Ctrl/Cmd+O(열기). */
   function handleDocumentlessShortcut(e: KeyboardEvent): void {
+    const latin = physicalLatinKey(e);
+    if (!latin) return;
     const ctrlOrMeta = e.ctrlKey || e.metaKey;
-    if (e.altKey && !ctrlOrMeta && !e.shiftKey && (e.key === 'n' || e.key === 'N' || e.key === 'ㅜ')) {
+    if (e.altKey && !ctrlOrMeta && !e.shiftKey && (latin === 'N' || e.key === 'ㅜ')) {
       e.preventDefault();
       dispatcher.dispatch('file:new-doc');
       return;
     }
-    if (ctrlOrMeta && !e.altKey && !e.shiftKey && (e.key === 'o' || e.key === 'O' || e.key === 'ㅐ')) {
+    if (ctrlOrMeta && !e.altKey && !e.shiftKey && (latin === 'O' || e.key === 'ㅐ')) {
       e.preventDefault();
       dispatcher.dispatch('file:open');
     }

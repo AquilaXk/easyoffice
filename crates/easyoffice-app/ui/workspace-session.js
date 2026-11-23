@@ -283,10 +283,35 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return snap.slides.every((s) => s && typeof s === "object" && isSafeNodeSpecList(s.insertedNodes, 0));
   }
 
+  function latinKeyOf(e) {
+    if (!e || e.isComposing) return "";
+    const key = String(e.key || "");
+    const code = String(e.code || "");
+    const mod = Boolean(e.ctrlKey || e.metaKey || e.altKey);
+    if (
+      mod &&
+      !(e.getModifierState?.("AltGraph") && !e.metaKey) &&
+      /^Key[A-Z]$/.test(code) &&
+      (e.altKey || key === "Process" || key === "Unidentified" || (key.length === 1 && key.charCodeAt(0) > 0x7f))
+    ) {
+      return code.slice(3);
+    }
+    return key.length === 1 ? key.toUpperCase() : "";
+  }
+
   function shortcutComboFromEvent(e) {
-    let key = String(e.key || "");
-    if (e.altKey && /^Key[A-Z]$/.test(String(e.code || ""))) key = e.code.slice(3);
-    if (key.length === 1) key = key.toUpperCase();
+    if (!e || e.isComposing) return "";
+    const rawKey = String(e.key || "");
+    const mod = Boolean(e.metaKey || e.ctrlKey || e.altKey);
+    let key;
+    if (mod) {
+      key = latinKeyOf(e);
+      if (!key && rawKey !== "Process" && rawKey !== "Unidentified") key = rawKey;
+    } else {
+      if (rawKey === "Process" || rawKey === "Unidentified") return "";
+      key = rawKey.length === 1 ? rawKey.toUpperCase() : rawKey;
+    }
+    if (!key) return "";
     const parts = [];
     if (e.metaKey || e.ctrlKey) parts.push("Ctrl");
     if (e.altKey) parts.push("Alt");
@@ -825,7 +850,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function handleShortcutKeydown(e, actions) {
+      if (e.isComposing) return false;
       const combo = shortcutComboFromEvent(e);
+      if (!combo) return false;
       const binding = bindingFor(combo);
       if (!binding) return false;
       if (isStartWindow() && !START_SHORTCUT_ACTIONS.has(binding.action)) return false;
@@ -922,6 +949,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__ = {
     AUTOSAVE_STORAGE_KEY,
     studioCommandApplies,
+    latinKeyOf,
     shortcutComboFromEvent,
     guessClientPlatform,
     isRestorableSnapshot,

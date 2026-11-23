@@ -8,6 +8,7 @@
 export const SHELL_SHORTCUT_REASON = 'shell_shortcut' as const;
 const MAX_KEYS = 16;
 const COMBO_PATTERN = /^Ctrl\+(?:Alt\+)?(?:Shift\+)?[A-Z0-9]$/;
+const KEY_CODE_RE = /^Key([A-Z])$/;
 
 export interface ShellKeyEvent {
   key: string;
@@ -17,6 +18,27 @@ export interface ShellKeyEvent {
   altKey: boolean;
   shiftKey: boolean;
   isComposing?: boolean;
+  getModifierState?: (keyArg: string) => boolean;
+}
+
+/** Resolves a key event to an uppercase Latin letter ('A'..'Z') or 1-char uppercase key; null when composing. */
+export function physicalLatinKey(event: ShellKeyEvent): string | null {
+  if (event.isComposing) return null;
+  const key = String(event.key || '');
+  const code = String(event.code || '');
+  const modified = event.ctrlKey || event.metaKey || event.altKey;
+  if (modified && !(event.getModifierState?.('AltGraph') && !event.metaKey)) {
+    if (
+      event.altKey ||
+      key === 'Process' ||
+      key === 'Unidentified' ||
+      (key.length === 1 && key.charCodeAt(0) > 0x7f)
+    ) {
+      const m = KEY_CODE_RE.exec(code);
+      if (m) return m[1];
+    }
+  }
+  return key.length === 1 ? key.toUpperCase() : null;
 }
 
 /** Combos the shell asked for, from the frame URL query. Anything malformed is ignored. */
@@ -31,14 +53,13 @@ export function parseShellKeys(search: string): string[] {
 
 /** Same normalisation as the shell (`Ctrl` stands for Ctrl or Cmd; a single character is upper-cased). */
 export function comboFromKeyEvent(event: ShellKeyEvent): string | null {
-  if (!(event.ctrlKey || event.metaKey)) return null;
-  let key = String(event.key || '');
-  if (event.altKey && /^Key[A-Z]$/.test(String(event.code || ''))) key = String(event.code).slice(3);
-  if (key.length !== 1) return null;
+  if (event.isComposing || !(event.ctrlKey || event.metaKey)) return null;
+  const key = physicalLatinKey(event);
+  if (!key || key.length !== 1) return null;
   const parts = ['Ctrl'];
   if (event.altKey) parts.push('Alt');
   if (event.shiftKey) parts.push('Shift');
-  parts.push(key.toUpperCase());
+  parts.push(key);
   return parts.join('+');
 }
 
