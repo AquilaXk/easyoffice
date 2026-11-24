@@ -58,7 +58,7 @@
 - [ ] 기준 앱 실측 대조 필요: `FORECAST.ETS` 계열의 비공개 평활 계수 선택 목적함수(0.001 격자), 계절 경로의 순환식·끝점 고정 처리, `STAT`의 MAE·RMSE·MASE 오차 열 정의, 같은 날짜가 있을 때 `aggregation` 생략·`0` 동작, 범위 밖 인수와 시계열 안 대상 날짜의 오류 값(`docs/forecast-ets-cleanroom.md` 9장)
 - [ ] `GROUPBY`·`PIVOTBY`: 함수 목록(여러 열 집계), 만들어 붙이는 머리글·합계 글 문구(`Total`, `<항목> Total`, `Group`, `Value`)를 기준 앱 출력과 대조
 - [ ] 큐브 7개(`CUBE*`), `CALL`·`REGISTER.ID`, `STOCKHISTORY`, `DETECTLANGUAGE`·`TRANSLATE`, `IMAGE`는 외부 연결이나 신뢰할 수 없는 문서의 네트워크 접근이라 대상 아님(PD-271). `WEBSERVICE`·`RTD`·`IMAGE`·`CALL`·`REGISTER.ID`·`STOCKHISTORY`는 이름만 알고 문서의 오류 값을 돌려준다
-- [ ] 날짜 글 해석: `DATEVALUE("2026 - 01 - 01")`(구분자 둘레 공백), `"... 24:00:00"` 올림, `DATEDIF`의 지역 날짜 글, 순환 참조 오류 값(`#NUM!` 대신 `#CIRC!`인지 기준 앱 대조)
+
 
 
 ## 시트 UI 이식 1차 이후 (PD-275)

@@ -13,7 +13,7 @@
 //! defaults are `TRUE` and `FALSE`.
 
 use super::data::{Cells, SheetCells};
-use crate::coercion::parse_iso_date_serial;
+use crate::date_locale_parse::parse_date_serial_locale;
 use crate::{
     EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate, WorkbookEngine,
     MAX_EVAL_TIME,
@@ -73,7 +73,7 @@ fn operand_number(text: &str, kind: DvKind, cells: &mut dyn Cells) -> Option<f64
         return Some(n);
     }
     if kind == DvKind::Date {
-        if let Some(n) = parse_iso_date_serial(expr.trim_matches('"')) {
+        if let Some(n) = parse_date_serial_locale(expr.trim_matches('"')) {
             return Some(n);
         }
     }
@@ -164,7 +164,7 @@ fn judge(dv: &DataValidation, cells: &mut dyn Cells, input: &str) -> bool {
             let n = match &value {
                 EvaluatedCellValue::Number(n) => Some(*n),
                 EvaluatedCellValue::Text(t) if dv.kind == DvKind::Date => {
-                    parse_iso_date_serial(t.trim())
+                    parse_date_serial_locale(t.trim())
                 }
                 EvaluatedCellValue::Text(t) => parse_time_fraction(t),
                 _ => None,

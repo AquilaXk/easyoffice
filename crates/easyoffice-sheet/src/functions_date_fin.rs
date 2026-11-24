@@ -15,7 +15,7 @@ const DAY_BOUNDS: (f64, f64) = (-100_000_000.0, 100_000_000.0);
 const TIME_BOUNDS: (f64, f64) = (-1_000_000_000.0, 1_000_000_000.0);
 
 /// The last serial of the current date system (9999-12-31).
-fn max_serial() -> i64 {
+pub(crate) fn max_serial() -> i64 {
     from_1900(MAX_SERIAL_1900)
 }
 
@@ -748,25 +748,7 @@ fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
 }
 
 pub(crate) fn parse_iso_date_serial(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    let sep = if trimmed.contains('-') {
-        '-'
-    } else if trimmed.contains('/') {
-        '/'
-    } else {
-        return None;
-    };
-    let mut parts = trimmed.split(sep);
-    let y: i64 = parts.next()?.parse().ok()?;
-    let m: i64 = parts.next()?.parse().ok()?;
-    let d: i64 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() || !(1900..=9999).contains(&y) || !(1..=12).contains(&m) {
-        return None;
-    }
-    if !(1..=days_in_month(y, m)).contains(&d) {
-        return None;
-    }
-    Some(serial_from_civil(y, m, d) as f64)
+    crate::coercion::parse_iso_date_serial(s)
 }
 
 pub(crate) fn ymd_to_excel_serial(y: i64, m: i64, d: i64) -> Result<i64, FormulaError> {

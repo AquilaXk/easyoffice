@@ -123,7 +123,7 @@ pub fn parse_value_text(s: &str) -> Option<f64> {
     if let Some(n) = parse_strict_number(trimmed) {
         return Some(n);
     }
-    if let Some(serial) = parse_iso_date_serial(trimmed) {
+    if let Some(serial) = crate::date_locale_parse::parse_datetime_or_time_locale(trimmed) {
         return Some(serial);
     }
     let mut work = trimmed;

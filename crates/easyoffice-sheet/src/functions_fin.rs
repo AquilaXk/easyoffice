@@ -672,7 +672,7 @@ impl SheetEngine {
             let dv = match d {
                 EvaluatedCellValue::Number(n) => Some(n.trunc()),
                 EvaluatedCellValue::Text(s) => {
-                    crate::functions_date_fin::parse_iso_date_serial(s).map(f64::trunc)
+                    crate::date_locale_parse::parse_date_serial_locale(s).map(f64::trunc)
                 }
                 _ => None,
             };

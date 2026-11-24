@@ -51,6 +51,7 @@ mod statistical_test_fn_skew_p;
 mod test_arrays;
 mod test_base_decimal;
 mod test_ceiling_floor;
+mod test_datevalue_rollover;
 mod test_datevalue_timevalue_spaces;
 mod test_days360_month_end;
 mod test_escape_quotes;
