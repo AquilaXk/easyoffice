@@ -19,8 +19,16 @@ use std::fmt::Write;
 use crate::pdf_laid::{rgb_ops, Canvas};
 use crate::pdf_writer::text_ops;
 use crate::{
-    BorderEdge, BorderLine, CellBorders, CfBar, SheetStyling, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE,
-    FLAG_UNDERLINE,
+    BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, SheetStyling, FLAG_BOLD, FLAG_ITALIC,
+    FLAG_STRIKE, FLAG_UNDERLINE, MAX_SIZE_PT, MIN_SIZE_PT, STYLE_BOLD, STYLE_ITALIC, STYLE_STRIKE,
+    STYLE_UNDERLINE,
+};
+
+const _: () = {
+    assert!(STYLE_BOLD == FLAG_BOLD);
+    assert!(STYLE_ITALIC == FLAG_ITALIC);
+    assert!(STYLE_UNDERLINE == FLAG_UNDERLINE);
+    assert!(STYLE_STRIKE == FLAG_STRIKE);
 };
 
 /// The look the conditional formats give one cell of a PDF page. A part the rules do not set is none, 0 or the
@@ -79,6 +87,8 @@ const BOLD_OUTLINE_EM: f64 = 0.03;
 const TEXT_LINE_EM: f64 = 0.06;
 const UNDERLINE_DROP_EM: f64 = 0.12;
 const STRIKE_RISE_EM: f64 = 0.3;
+const ASCENT_EM: f64 = 0.90;
+const DESCENT_EM: f64 = 0.25;
 /// Widths of the lines of an edge in points; a dash is the same in points. Everything is drawn at the page's scale.
 const THIN_PT: f64 = 0.75;
 const THICK_PT: f64 = 1.5;
@@ -381,9 +391,82 @@ pub(crate) fn merge_styled(ops: Vec<String>) -> Vec<String> {
     out
 }
 
+/// Effective PDF font size in points for a sheet cell: the cell's own `size_pt` (clamped to
+/// `MIN_SIZE_PT..=MAX_SIZE_PT` and multiplied by `scale`) when finite and positive, else `default_pt`.
+pub(crate) fn cell_font_pt(look: Option<&CellStyle>, default_pt: f64, scale: f64) -> f64 {
+    look.and_then(|style| style.size_pt)
+        .filter(|size| size.is_finite() && *size > 0.0)
+        .map_or(default_pt, |size| {
+            size.clamp(MIN_SIZE_PT, MAX_SIZE_PT) * scale
+        })
+}
+
+/// Whether a cell's glyphs, underline, strikethrough, bold outline, or italic shear extend outside
+/// `cell_box` `(x, bottom, w, h)`.
+fn cell_text_needs_clip(
+    (bx, by, bw, bh): Rect,
+    (tx, ty): (f64, f64),
+    size: f64,
+    width: f64,
+    flags: u8,
+) -> bool {
+    if size > bh {
+        return true;
+    }
+    let bits = flags & (FLAG_BOLD | FLAG_ITALIC | FLAG_UNDERLINE | FLAG_STRIKE);
+    let line_half = (size * TEXT_LINE_EM).max(MIN_LINE_PT) * 0.5;
+    let bold_half = if bits & FLAG_BOLD != 0 {
+        size * BOLD_OUTLINE_EM * 0.5
+    } else {
+        0.0
+    };
+    if ty + size * ASCENT_EM + bold_half > by + bh || ty - size * DESCENT_EM - bold_half < by {
+        return true;
+    }
+    if bits & FLAG_UNDERLINE != 0 && ty - size * UNDERLINE_DROP_EM - line_half < by {
+        return true;
+    }
+    if bits & FLAG_STRIKE != 0 && ty + size * STRIKE_RISE_EM + line_half > by + bh {
+        return true;
+    }
+    let (italic_left, italic_right) = if bits & FLAG_ITALIC != 0 {
+        (
+            ITALIC_SHEAR * size * DESCENT_EM,
+            ITALIC_SHEAR * size * ASCENT_EM,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    tx - bold_half - italic_left < bx || tx + width + bold_half + italic_right > bx + bw
+}
+
+/// Draws cell text, clipping to `cell_box` `(x, bottom, w, h)` whenever the text or its font
+/// decorations extend past any edge of the cell.
+pub(crate) fn draw_cell_text(
+    canvas: &mut Canvas,
+    cell_box: Rect,
+    pos: (f64, f64),
+    size: f64,
+    text: &str,
+    width: f64,
+    look: (Option<u32>, u8),
+) {
+    if text.is_empty() {
+        return;
+    }
+    let clipped = cell_text_needs_clip(cell_box, pos, size, width, look.1);
+    if clipped {
+        canvas.push_clip_rect(cell_box.0, cell_box.1, cell_box.2, cell_box.3);
+    }
+    draw_text(canvas, pos, size, text, width, look);
+    if clipped {
+        canvas.pop_clip();
+    }
+}
+
 /// The text of a cell at `(x, y)` (the baseline), `width` wide, in `color` (black when none) with the font bits `flags`.
 /// Without bits it is the plain text of the page.
-pub(crate) fn draw_text(
+fn draw_text(
     canvas: &mut Canvas,
     (x, y): (f64, f64),
     size: f64,
@@ -397,9 +480,6 @@ pub(crate) fn draw_text(
             Some(rgb) => canvas.colored_text(x, y, size, text, rgb),
             None => canvas.text(x, y, size, text),
         }
-        return;
-    }
-    if text.is_empty() {
         return;
     }
     let ink = color.unwrap_or(0) & RGB_MASK;
@@ -556,5 +636,108 @@ mod tests {
             got.len(),
             want.len()
         );
+    }
+
+    #[test]
+    fn cell_font_pt_scales_valid_sizes_and_rejects_or_clamps_extremes() {
+        assert_eq!(cell_font_pt(None, 10.0, 1.0), 10.0);
+        let plain = CellStyle::default();
+        assert_eq!(cell_font_pt(Some(&plain), 15.0, 1.5), 15.0);
+
+        let sized = CellStyle {
+            size_pt: Some(11.25),
+            ..CellStyle::default()
+        };
+        assert!((cell_font_pt(Some(&sized), 10.0, 0.5) - 5.625).abs() < 1e-12);
+
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -4.0] {
+            let bad = CellStyle {
+                size_pt: Some(invalid),
+                ..CellStyle::default()
+            };
+            assert_eq!(cell_font_pt(Some(&bad), 10.0, 1.0), 10.0);
+        }
+
+        let tiny = CellStyle {
+            size_pt: Some(0.2),
+            ..CellStyle::default()
+        };
+        assert_eq!(cell_font_pt(Some(&tiny), 10.0, 2.0), MIN_SIZE_PT * 2.0);
+
+        let huge = CellStyle {
+            size_pt: Some(9_999.0),
+            ..CellStyle::default()
+        };
+        assert_eq!(cell_font_pt(Some(&huge), 10.0, 0.5), MAX_SIZE_PT * 0.5);
+    }
+
+    #[test]
+    fn cell_text_needs_clip_catches_underline_descender_and_italic_overflow_without_false_positives(
+    ) {
+        let box_std = (28.35, 800.0, 48.0, 16.5);
+        let all = FLAG_BOLD | FLAG_ITALIC | FLAG_UNDERLINE | FLAG_STRIKE;
+        assert!(!cell_text_needs_clip(
+            box_std,
+            (32.35, 804.25),
+            10.0,
+            40.0,
+            all
+        ));
+        assert!(!cell_text_needs_clip(
+            box_std,
+            (32.35, 803.25),
+            12.0,
+            40.0,
+            all
+        ));
+        assert!(cell_text_needs_clip(
+            box_std,
+            (32.35, 801.25),
+            16.0,
+            20.0,
+            FLAG_UNDERLINE
+        ));
+        assert!(cell_text_needs_clip(
+            box_std,
+            (32.35, 802.25),
+            14.0,
+            20.0,
+            0
+        ));
+
+        // 10% scale default cell fits cleanly; 16% of 10% scale clips descender.
+        let box_tiny = (28.35, 800.0, 4.8, 1.65);
+        assert!(!cell_text_needs_clip(
+            box_tiny,
+            (28.75, 800.425),
+            1.0,
+            3.0,
+            all
+        ));
+        assert!(cell_text_needs_clip(
+            box_tiny,
+            (28.75, 800.125),
+            1.6,
+            2.0,
+            0
+        ));
+
+        // Tall 60pt row with 36pt text: upright fits inside vertically and horizontally, while
+        // 12-deg italic filling width shears past right padding and must clip.
+        let box_tall = (28.35, 760.0, 90.0, 60.0);
+        assert!(cell_text_needs_clip(
+            box_tall,
+            (32.35, 773.0),
+            36.0,
+            82.0,
+            FLAG_ITALIC
+        ));
+        assert!(!cell_text_needs_clip(
+            box_tall,
+            (32.35, 773.0),
+            36.0,
+            60.0,
+            0
+        ));
     }
 }

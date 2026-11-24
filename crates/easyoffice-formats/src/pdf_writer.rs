@@ -49,16 +49,20 @@ fn in_latin_font(c: char) -> bool {
     matches!(c, ' '..='~' | '\u{A0}'..='\u{FF}')
 }
 
+/// Width of `c` in thousandths of the font size as [`text_ops`] shows it.
+#[inline]
+pub(crate) fn char_units(c: char) -> u32 {
+    match c {
+        ' '..='~' => crate::pdf_text_wrap::ascii_units(c),
+        '\u{A0}'..='\u{FF}' => 556,
+        _ => 1000,
+    }
+}
+
 /// Width of `text` in thousandths of the font size as [`text_ops`] shows it: the Latin font's widths for what it shows,
 /// a full em for the rest. Latin-1 signs outside the ASCII table count 556, the width of most of them.
 pub(crate) fn mixed_units(text: &str) -> u32 {
-    text.chars()
-        .map(|c| match c {
-            ' '..='~' => crate::pdf_text_wrap::ascii_units(c),
-            '\u{A0}'..='\u{FF}' => 556,
-            _ => 1000,
-        })
-        .sum()
+    text.chars().map(char_units).sum()
 }
 
 /// The operators that show `text` at (`x`, `y`) in `size` pt. A line the Korean font shows whole is one text object in one

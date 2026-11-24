@@ -4,28 +4,25 @@
 //! (PD-213). The text is the same two fonts as the plain text pages (`pdf_writer.rs`); a line's width is estimated from
 //! the same glyph units as the line breaker, so a line is cut where its column ends and a number sits at the right.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::OnceLock;
 
+#[path = "pdf_laid_doc.rs"]
+mod doc;
+pub(crate) use doc::laid_document_pdf;
+
 use crate::pdf_sheet_rules::{self, plain_cell_numeric, RuleLayer, RuleOps, SheetShown};
-use crate::pdf_text_wrap::wrap_spans;
-use crate::pdf_writer::{mixed_units, text_ops, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
-use crate::rich_document::{
-    RichAlignment, RichBindingKind, RichDocument, RichField, RichParagraph,
-};
-use crate::rich_writers::render_plain_text;
+use crate::pdf_writer::{char_units, mixed_units, text_ops, PdfLaidPage, PdfPageEntry};
 use crate::sheet_page::{PageScale, SheetPage};
 use crate::sheet_styling::DEFAULT_COL_PX;
-use crate::{EasyOfficeError, RichPaper, SheetStyling};
+use crate::{EasyOfficeError, SheetStyling};
 
 const TWIPS_PER_PT: f64 = 20.0;
 const PT_PER_MM: f64 = 72.0 / 25.4;
 const PT_PER_PX: f64 = 0.75;
 const PT_PER_MIL: f64 = 0.072;
-const BODY_LINE_PITCH_PT: f64 = 16.0;
-const FRAME_FONT_PT: f64 = 10.0;
-const FRAME_LINE_PT: f64 = 12.0;
 /// The row the sheet window draws with (`sheet-grid.js`: `ROW_H`), in CSS px. A column has `SheetStyling::col_px`, so the
 /// PDF, the window and the positions of charts and pictures share one width (PD-305).
 pub(crate) const ROW_PX: f64 = crate::sheet_styling::GRID_ROW_PX;
@@ -54,9 +51,14 @@ const MAX_SHEET_CELLS: u64 = 200_000;
 const MAX_FILL_REPEAT: usize = 512;
 
 /// `text` with its fill character repeated over the `room` pt the text leaves free.
-fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) -> String {
+fn filled_text<'a>(
+    text: &'a str,
+    fill: Option<(usize, char)>,
+    size: f64,
+    room: f64,
+) -> Cow<'a, str> {
     let Some((at, ch)) = fill.filter(|(at, _)| text.is_char_boundary(*at)) else {
-        return text.to_string();
+        return Cow::Borrowed(text);
     };
     let glyph = width_pt(ch.encode_utf8(&mut [0u8; 4]), size);
     let free = room - width_pt(text, size);
@@ -69,7 +71,7 @@ fn filled_text(text: &str, fill: Option<(usize, char)>, size: f64, room: f64) ->
     out.push_str(&text[..at]);
     out.extend(std::iter::repeat_n(ch, copies));
     out.push_str(&text[at..]);
-    out
+    Cow::Owned(out)
 }
 
 /// The height of `row` on the page in points: none for a hidden row, else its height, the sheet's default row height or
@@ -269,144 +271,6 @@ impl Canvas {
     }
 }
 
-// ---- document ---------------------------------------------------------------------------------------
-
-/// The text of a header or footer paragraph for page `number` of `total`.
-fn frame_text(p: &RichParagraph, number: usize, total: usize, title: &str) -> String {
-    let mut out = String::new();
-    for run in &p.runs {
-        if crate::rich_notes::is_deleted_run(run) {
-            continue;
-        }
-        match run.field {
-            Some(RichField::PageNumber) => {
-                let _ = write!(out, "{number}");
-            }
-            Some(RichField::TotalPages) => {
-                let _ = write!(out, "{total}");
-            }
-            Some(RichField::FileName) => out.push_str(title),
-            None => out.push_str(&run.text),
-        }
-    }
-    out
-}
-
-/// Whether the engine's document PDF has to lay the pages out itself: the document has a header, a footer or a page setup.
-pub(crate) fn needs_laid_pages(doc: &RichDocument) -> bool {
-    let f = &doc.page_frame;
-    !f.is_empty() || f.margins.is_some() || f.paper.is_some()
-}
-
-/// The document's PDF laid out on its own paper when it has a header, a footer or a page setup (the caller has ruled out a
-/// highlight and a stamp, which the plain text pages carry).
-pub(crate) fn laid_document_pdf(
-    doc: &RichDocument,
-    options: &crate::PdfWriteOptions,
-) -> Option<Vec<u8>> {
-    needs_laid_pages(doc).then(|| {
-        let entries = laid_document_pages(doc, options.rotation_degrees);
-        crate::PdfSerializer::serialize_entries(
-            &doc.display_title(),
-            options.watermark.as_deref(),
-            &entries,
-        )
-    })
-}
-
-/// The pages of a document on its own paper and margins with its header, footer and page numbers.
-pub(crate) fn laid_document_pages(doc: &RichDocument, rotation_degrees: u16) -> Vec<PdfPageEntry> {
-    let frame = &doc.page_frame;
-    let paper = frame.paper.unwrap_or(RichPaper::A4);
-    let (w, h) = (
-        f64::from(paper.width) / TWIPS_PER_PT,
-        f64::from(paper.height) / TWIPS_PER_PT,
-    );
-    let (top, bottom, header, footer, left, right) = frame
-        .margins
-        .map_or((1701, 1440, 851, 992, 1440, 1440), |m| {
-            (m.top, m.bottom, m.header, m.footer, m.left, m.right)
-        });
-    let gutter = frame.binding.gutter;
-    let (side_gutter, top_gutter) = match frame.binding.kind {
-        RichBindingKind::Top => (0, gutter),
-        _ => (gutter, 0),
-    };
-    let to_pt = |twips: u32| f64::from(twips) / TWIPS_PER_PT;
-    let (body_left, body_right) = (to_pt(left.saturating_add(side_gutter)), w - to_pt(right));
-    let (body_top, body_bottom) = (h - to_pt(top.saturating_add(top_gutter)), to_pt(bottom));
-    let text_width = (body_right - body_left).max(1.0);
-    let units =
-        ((text_width / PDF_TEXT_FONT_PT as f64) * 1000.0).clamp(1.0, u32::MAX as f64) as u32;
-    let text = render_plain_text(doc, " | ", false);
-    let mut lines: Vec<&str> = Vec::new();
-    for line in text.split('\n') {
-        let spans = wrap_spans(line, units.max(1));
-        lines.extend(spans.into_iter().map(|r| &line[r]));
-    }
-    let per_page = ((body_top - body_bottom) / BODY_LINE_PITCH_PT)
-        .floor()
-        .clamp(1.0, usize::MAX as f64) as usize;
-    let chunks: Vec<&[&str]> = if lines.is_empty() {
-        vec![&[][..]]
-    } else {
-        lines.chunks(per_page).collect()
-    };
-    let total = chunks.len();
-    let title = doc.display_title();
-    let mut pages = Vec::with_capacity(total);
-    for (i, chunk) in chunks.iter().enumerate() {
-        let mut canvas = Canvas::new(w, h);
-        for (n, line) in chunk.iter().enumerate() {
-            canvas.text(
-                body_left,
-                body_top - PDF_TEXT_FONT_PT as f64 - n as f64 * BODY_LINE_PITCH_PT,
-                PDF_TEXT_FONT_PT as f64,
-                line,
-            );
-        }
-        let place = |canvas: &mut Canvas, p: &RichParagraph, y: f64| {
-            let t = frame_text(p, i + 1, total, &title);
-            let tw = width_pt(&t, FRAME_FONT_PT);
-            let x = match p.alignment {
-                Some(RichAlignment::Center) => body_left + (text_width - tw) / 2.0,
-                Some(RichAlignment::Right) => body_right - tw,
-                _ => body_left,
-            };
-            canvas.text(x, y, FRAME_FONT_PT, &t);
-        };
-        let (hdr, ftr) = if i == 0 && frame.first_page_different {
-            (&frame.first_header, &frame.first_footer)
-        } else if (i + 1) % 2 == 0 && frame.even_odd_different {
-            (&frame.even_header, &frame.even_footer)
-        } else {
-            (&frame.header, &frame.footer)
-        };
-        for (n, p) in hdr.iter().enumerate() {
-            place(
-                &mut canvas,
-                p,
-                h - to_pt(header) - FRAME_FONT_PT - n as f64 * FRAME_LINE_PT,
-            );
-        }
-        let last = ftr.len().saturating_sub(1);
-        for (n, p) in ftr.iter().enumerate() {
-            place(
-                &mut canvas,
-                p,
-                to_pt(footer) + (last - n) as f64 * FRAME_LINE_PT,
-            );
-        }
-        pages.push(canvas.finish(rotation_degrees));
-    }
-    for (i, page) in pages.iter_mut().enumerate() {
-        if let PdfPageEntry::Laid(p) = page {
-            p.page_number = i + 1;
-        }
-    }
-    pages
-}
-
 // ---- sheet ------------------------------------------------------------------------------------------
 
 /// A zero-based inclusive range of a sheet to print.
@@ -451,17 +315,27 @@ fn lines_of(group: (usize, usize, bool), title: Option<(usize, usize)>) -> Vec<u
     out
 }
 
-/// `text` cut at the end so that it is at most `width` pt wide.
-pub(crate) fn fit_text(text: &str, size: f64, width: f64) -> String {
-    let mut out = String::new();
-    for c in text.chars() {
-        out.push(c);
-        if width_pt(&out, size) > width {
-            out.pop();
+/// Single-pass prefix of `text` fitting within `width` pt at `size` pt, and its exact width.
+fn fit_text_with_width(text: &str, size: f64, width: f64) -> (&str, f64) {
+    if !width.is_finite() || width <= 0.0 || !size.is_finite() || size <= 0.0 {
+        return ("", 0.0);
+    }
+    let mut units = 0u32;
+    let mut end = 0usize;
+    for (idx, c) in text.char_indices() {
+        let next = units.saturating_add(char_units(c));
+        if f64::from(next) * size / 1000.0 > width {
             break;
         }
+        units = next;
+        end = idx + c.len_utf8();
     }
-    out
+    (&text[..end], f64::from(units) * size / 1000.0)
+}
+
+/// `text` cut at the end so that it is at most `width` pt wide.
+pub(crate) fn fit_text(text: &str, size: f64, width: f64) -> String {
+    fit_text_with_width(text, size, width).0.to_string()
 }
 
 fn col_name(col: u32) -> String {
@@ -758,7 +632,7 @@ fn sheet_area_pages(
                     let name = col_name(area.c1 + i as u32);
                     canvas.text(
                         x + (w - width_pt(&name, font)) / 2.0,
-                        y - h + (h - font) / 2.0 + 1.0,
+                        y - h + (h - font) / 2.0 + scale,
                         font,
                         &name,
                     );
@@ -784,7 +658,7 @@ fn sheet_area_pages(
                     let label = (r + 1).to_string();
                     canvas.text(
                         x + (head_w * scale - width_pt(&label, font)) / 2.0,
-                        y - h + (h - font) / 2.0 + 1.0,
+                        y - h + (h - font) / 2.0 + scale,
                         font,
                         &label,
                     );
@@ -821,9 +695,10 @@ fn sheet_area_pages(
                     let hidden = rule.is_some_and(|rule| rule.hide_value);
                     if let Some(text) = cells.get(&at).filter(|_| !hidden) {
                         let how = how_opt.unwrap_or_default();
+                        let cell_font = pdf_sheet_rules::cell_font_pt(look, font, scale);
                         let room = w - 2.0 * pad;
-                        let drawn = fit_text(&filled_text(text, how.fill, font, room), font, room);
-                        let tw = width_pt(&drawn, font);
+                        let filled = filled_text(text, how.fill, cell_font, room);
+                        let (drawn, tw) = fit_text_with_width(&filled, cell_font, room);
                         let right_aligned = match how_opt {
                             Some(cell) => cell.numeric,
                             None => plain_cell_numeric(styling, at, text),
@@ -833,18 +708,20 @@ fn sheet_area_pages(
                         } else {
                             x + pad
                         };
-                        let ty = y - h + (h - font) / 2.0 + 1.0;
+                        let ty = y - h + (h - cell_font) / 2.0 + scale;
                         let color = how
                             .color
                             .or_else(|| rule.and_then(|rule| rule.fg))
                             .or_else(|| look.and_then(|style| style.font_color))
                             .or_else(|| auto_text_color(fill));
-                        let flags = rule.map_or(0, |rule| rule.flags);
-                        pdf_sheet_rules::draw_text(
+                        let flags = look.map_or(0, crate::CellStyle::flags)
+                            | rule.map_or(0, |rule| rule.flags);
+                        pdf_sheet_rules::draw_cell_text(
                             &mut canvas,
+                            cell_box,
                             (tx, ty),
-                            font,
-                            &drawn,
+                            cell_font,
+                            drawn,
                             tw,
                             (color, flags),
                         );
@@ -898,7 +775,9 @@ fn sheet_area_pages(
 mod tests {
     use super::*;
     use crate::sheet_page::PageMargins;
-    use crate::{CellBox, RichBinding, RichPageFrame, RichPageMargins};
+    use crate::{
+        CellBox, RichBinding, RichBindingKind, RichDocument, RichPageFrame, RichPageMargins,
+    };
 
     fn one_cell_sheet() -> Vec<crate::OdsUnpacked> {
         vec![("S1".to_string(), vec![(0, 0, "a".to_string())])]
@@ -971,7 +850,21 @@ mod tests {
             },
             ..Default::default()
         };
-        let pages = laid_document_pages(&doc, 0);
+        let pages = doc::laid_document_pages(&doc, 0);
         assert_eq!(pages.len(), 1);
+    }
+
+    #[test]
+    fn fit_text_with_width_matches_mixed_units_and_filled_text_borrows_plain() {
+        let sample = "가·나 ABCDEF";
+        for width in [0.0, 5.0, 20.0, 45.0, 200.0] {
+            let (slice, w) = fit_text_with_width(sample, 14.0, width);
+            assert_eq!(w, width_pt(slice, 14.0));
+            assert!(w <= width || slice.is_empty());
+        }
+        assert!(matches!(
+            filled_text(sample, None, 14.0, 100.0),
+            Cow::Borrowed(_)
+        ));
     }
 }
