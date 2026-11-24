@@ -5941,3 +5941,17 @@
 - **Alternatives rejected** (1) `size_pt`를 `default_font.size_pt()` 비율로 환산해 쓰는 방식: 사용자가 지정한 `20pt`가 `18.18pt`로 왜곡된다. (2) `size > cell_box.3`만 검사해 자르는 방식: `16pt` 밑줄·디센더(`16.5pt` 행)와 축소 배율의 상단 보정(`+1.0`), 큰 행의 `36pt` 기울임 수평 돌출이 클리핑을 피해 이웃 칸·행을 침범한다.
 - **Verified by** `crates/easyoffice-formats/src/{pdf_sheet_rules,pdf_laid}.rs` 단위 시험, `crates/easyoffice-formats/tests/sheet_pdf_cell_font_pd340.rs`, `crates/easyoffice-app/tests/sheet_pdf_cell_font_pd340.rs`, 외부 PDF 무결성 검사·래스터 렌더링 확인, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`, `node scripts/verify-licenses.mjs`, `node --test scripts/test-*.mjs`, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 시트 PDF에서 줄바꿈·큰 글꼴에 맞춘 자동 행 높이 계산과 조건부 서식 아이콘 집합 그리기를 추가할 때.
+
+## PD-341 — 세션 없는 평가 및 정의된 이름 경유 `GETPIVOTDATA`의 피벗 크기 한도 제외 이유 표시 (2026-11-24)
+
+- **Context** `PD-303` 이후에도 크기 한도를 넘어 계산에서 빠진 피벗 테이블의 제외 위치(`pivotsOmitted`)는 세션의 `pivots` 동작에서만 내려갔고 세션 없는 `evaluate_sheet` 경로와 정의된 이름(`GETPIVOTDATA("매출", 이름)`)을 거친 호출에서는 상태줄 설명이 비어 있었다.
+- **Decision (`PD-341`)**
+  1. **세션 없는 엔진 평가 응답(`sheet_pivot_defs.rs` · `lib.rs`)**: `pivots_by_sheet`가 시트별 `SheetPivots`(`defs`와 `omitted`)를 함께 돌려주도록 바꾸고 `build_workbook_and_omitted_pivots`에서 정규 시트 이름 기준으로 제외 목록을 모아 두었다. 크기 상한을 넘긴 피벗이 하나라도 있으면 `with_omitted_pivots`가 `targets` 및 단일 `expr` `evaluate_sheet` JSON 응답에 `"pivotsOmitted":{"Sheet1":["A3:D6",...]}`를 붙인다.
+  2. **웹 UI 세션 없는 상태 동기화(`sheet-spill.js` · `sheet-store.js`)**: `omittedPivots` 맵 키를 소문자로 통일해 `replaceOmittedPivots`를 추가하고 `replaceAll`이 선택적 `pivotsOmitted` 인자를 받아 `computeEvaluatedSheetStore`와 `evaluateLiveFormulaTargets`의 세션 없는 응답을 그대로 반영한다. 수식이 하나도 없거나 새 응답에 제외 목록이 없으면 이전 제외 목록을 비워 상태줄이 낡은 경고를 남기지 않는다(`sheet-store.js`는 불필요한 줄바꿈을 정리해 `985`줄을 지켰다).
+  3. **정의된 이름 경유 `GETPIVOTDATA` 해석(`sheet-spill.js` `pivotOmittedNote`)**: `TOKEN_RE` 직접 셀 참조에 이어 `stripFormulaForNames`로 큰따옴표 문자열·작은따옴표 시트 이름·`[...]` 구조적 참조 묶음을 가린 뒤 일반 식별자를 추려낸다. `resolveDefinedPivotCell`이 `host.__EASYOFFICE_SHEET_NAMES__`의 시트 범위·통합 문서 범위 정의와 최대 64단계 연쇄 별칭(`seen`으로 순환 차단)을 따라 첫 셀 좌표를 얻고 제외 피벗 영역과 겹치면 `"피벗 정의가 너무 커서 계산에서 제외됨"`을 반환한다.
+- **재사용 판단 (구현 원칙 3단계)** (1) `PD-269` 정책상 새 외부 크레이트나 패키지를 들이지 않았다. (2) 기존 `sheet_pivot_defs::pivot_defs`·`WorkbookEngine::is_same_sheet_identity`·`sheet-names.js` `find`/`parseRange`/`parseAddress`·`pivotOmittedNote`를 그대로 재사용했다. (3) 외부 구현을 이식하지 않고(`0`줄) 기존 세션 경로 계약을 세션 없는 경로와 이름 정의 경로로 넓혔다.
+- **Why** 세션 유무나 수식 작성 방식(직접 셀 참조·정의된 이름)에 관계없이 크기 한도로 제외된 피벗 테이블 때문에 난 `#REF!` 원인을 사용자가 바로 확인할 수 있게 한다.
+- **Trade-offs** `GETPIVOTDATA` 두 번째 인수가 `OFFSET`·`INDIRECT` 같은 동적 수식 결과일 때는 정적 이름 추적 대상에 들지 않는다.
+- **Alternatives rejected** `GETPIVOTDATA` 인수를 정적으로 추정하지 않고 엔진이 모든 실패 원인을 오류 문자열로 반환하게 하는 방식: 표준 스프레드시트 오류 계약(`#REF!`)이 깨진다.
+- **Verified by** `crates/easyoffice-app/tests/sheet_pivot_omitted_pd303.rs`, `scripts/test-webui-sheet-getpivotdata.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `node scripts/verify-licenses.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`.
+- **Revisit when** 시트 전체의 셀 오류 사유를 담는 별도 진단 메타데이터 채널을 엔진에 둘 때.

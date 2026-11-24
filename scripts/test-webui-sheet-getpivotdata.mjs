@@ -119,6 +119,15 @@ async function open({ sessions, omitted = null }) {
           const answer = omitted && body.pivots.length ? "#REF!" : String(body.pivots.length ? 43 : "#REF!");
           return { session: "s1", changed: [{ sheet: body.sheet, cell: "H9", value: answer }], spills: [], circular: false, ...(omitted && body.pivots.length ? { pivotsOmitted: omitted } : {}) };
         }
+        if (!body.sessionAction && Array.isArray(body.targets)) {
+          const hasPivots = Boolean(body.pivots?.Sheet1?.length);
+          const answer = hasPivots && omitted?.length ? "#REF!" : String(hasPivots ? 43 : "#REF!");
+          return {
+            targetValues: body.targets.map((target) => (target.cell === "H9" ? answer : "")),
+            circular: false,
+            ...(hasPivots && omitted?.length ? { pivotsOmitted: { Sheet1: [...omitted] } } : {}),
+          };
+        }
         return {};
       }
       return { status: "ok" };
@@ -227,6 +236,69 @@ test("the status bar names the reason of a #REF! that the omitted pivot table le
   assert.notEqual(status(), WHY, "another cell has nothing to say about it");
   // The table is edited and the engine reads it now: the reason is gone.
   t.host.__EASYOFFICE_SHEET_SPILL__.setOmittedPivots("Sheet1", []);
+  cell.focus();
+  await flushAsyncTurns(5);
+  assert.notEqual(status(), WHY);
+});
+
+test("pivotOmittedNote follows defined names (workbook, sheet-scoped, chained) and skips cycles or text literals", async () => {
+  const h = await createWorkspaceHarness();
+  const spill = h.host.__EASYOFFICE_SHEET_SPILL__;
+  const names = h.host.__EASYOFFICE_SHEET_NAMES__;
+  names.replaceAll(
+    [
+      { name: "피벗시작", refersTo: "Sheet1!$F$3" },
+      { name: "피벗영역", refersTo: "Sheet1!$F$3:$I$6" },
+      { name: "별칭", refersTo: "=피벗영역" },
+      { name: "시트1전용", scope: "Sheet1", refersTo: "$F$3" },
+      { name: "시트2다른참조", scope: "Sheet2", refersTo: "Sheet1!$F$3" },
+      { name: "밖", refersTo: "Sheet1!$A$20" },
+      { name: "순환A", refersTo: "=순환B" },
+      { name: "순환B", refersTo: "=순환A" },
+    ],
+    true
+  );
+  spill.replaceOmittedPivots({ sheet1: ["F3:I6"] });
+  const ref = (formula, value = "#REF!") => ({ formula, value });
+
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",피벗시작)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",피벗영역)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",별칭)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",시트1전용)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet2", ref('=GETPIVOTDATA("매출",피벗영역)')), WHY);
+  assert.equal(spill.pivotOmittedNote("Sheet2", ref('=GETPIVOTDATA("매출",시트2다른참조)')), WHY);
+
+  assert.equal(spill.pivotOmittedNote("Sheet2", ref('=GETPIVOTDATA("매출",시트1전용)')), "");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",밖)')), "");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",순환A)')), "");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("피벗영역",$A$20)')), "");
+  assert.equal(spill.pivotOmittedNote("Sheet1", ref('=GETPIVOTDATA("매출",피벗영역)', "43")), "");
+});
+
+test("stateless evaluation carries omitted pivots for defined-name GETPIVOTDATA and clears when resolved", async () => {
+  const omittedList = ["F3:I6"];
+  const t = await open({ sessions: false, omitted: omittedList });
+  const layout = t.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const names = t.host.__EASYOFFICE_SHEET_NAMES__;
+  names.replaceAll([{ name: "피벗영역", refersTo: "Sheet1!$F$3:$I$6" }], true);
+  layout.setPivots("Sheet1", [PIVOT]);
+  const status = () => t.document.getElementById("status-sheet-agg").textContent;
+
+  await type(t, "H9", '=GETPIVOTDATA("매출",피벗영역)');
+  await flushAsyncTurns(30);
+  const cell = t.document.querySelector('#pane-sheet td[data-cell="H9"]');
+  assert.equal(cell.textContent, "#REF!");
+  cell.focus();
+  await flushAsyncTurns(5);
+  assert.equal(status(), WHY);
+
+  // Pivot returns within budget: next stateless evaluation clears omitted state and status reverts.
+  omittedList.length = 0;
+  layout.setPivots("Sheet1", [{ ...PIVOT, filters: [] }]);
+  cell.focus();
+  t.document.getElementById("btn-eval-formula").click();
+  await flushAsyncTurns(30);
+  assert.equal(cell.textContent, "43");
   cell.focus();
   await flushAsyncTurns(5);
   assert.notEqual(status(), WHY);

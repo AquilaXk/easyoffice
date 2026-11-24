@@ -133,3 +133,77 @@ fn every_omitted_pivot_is_named_in_order() {
     );
     assert_eq!(omitted(&answer), Some("\"A3:D6\",\"H3:I4\""), "{answer}");
 }
+
+fn stateless_base_cells() -> &'static str {
+    concat!(
+        r#"[{"sheet":"Data","cell":"A1","value":"a"},{"sheet":"Data","cell":"B1","value":"b"},{"sheet":"Data","cell":"C1","value":"c"},"#,
+        r#"{"sheet":"Data","cell":"A2","value":"East"},{"sheet":"Data","cell":"B2","value":"Q1"},{"sheet":"Data","cell":"C2","value":10},"#,
+        r#"{"sheet":"Data","cell":"A3","value":"East"},{"sheet":"Data","cell":"B3","value":"Q1"},{"sheet":"Data","cell":"C3","value":20},"#,
+        r#"{"sheet":"Report","cell":"H9","value":"=GETPIVOTDATA(\"sum\",$F$3)"},"#,
+        r#"{"sheet":"Report","cell":"H10","value":"=GETPIVOTDATA(\"sum\",피벗이름)"},"#,
+        r#"{"sheet":"Report","cell":"H11","value":"=GETPIVOTDATA(\"sum\",$A$3)"}]"#,
+    )
+}
+
+#[test]
+fn stateless_requests_report_omitted_pivots_and_evaluate_direct_and_named_refs() {
+    let long_name = "가".repeat(171);
+    let ok = pivot("A3:D6", "ok", "A1:C3", r#""East""#);
+    let big = pivot("F3:I6", &long_name, "A1:C3", r#""East""#);
+    let cells = stateless_base_cells();
+    let targets_payload = format!(
+        r#"{{"sheet":"Report","sheets":["Data","Report"],"targets":[{{"sheet":"Report","cell":"H9"}},{{"sheet":"Report","cell":"H10"}},{{"sheet":"Report","cell":"H11"}}],"cells":{cells},"names":[{{"name":"피벗이름","refersTo":"Report!$F$3:$I$6"}}],"pivots":{{"Report":[{ok},{big}]}}}}"#
+    );
+    let answer = call(&targets_payload);
+    assert!(
+        answer.contains(r#""targetValues":["#)
+            && answer.contains(r#""pivotsOmitted":{"Report":["F3:I6"]}"#),
+        "{answer}"
+    );
+    assert!(
+        answer.contains(r##""targetValues":["#REF!","#REF!","30"]"##),
+        "{answer}"
+    );
+
+    let expr_payload = format!(
+        r#"{{"sheet":"Report","sheets":["Data","Report"],"expr":"H10","cells":{cells},"names":[{{"name":"피벗이름","refersTo":"Report!$F$3:$I$6"}}],"pivots":{{"Report":[{ok},{big}]}}}}"#
+    );
+    let single = call(&expr_payload);
+    assert!(single.contains(r##""value":"#REF!""##), "{single}");
+    assert!(
+        single.contains(r#""pivotsOmitted":{"Report":["F3:I6"]}"#),
+        "{single}"
+    );
+}
+
+#[test]
+fn stateless_request_without_size_omissions_omits_pivots_omitted_field() {
+    let ok = pivot("A3:D6", "ok", "A1:C3", r#""East""#);
+    let no_source = pivot("F3:I6", "table", "A1:C3", r#""East""#).replacen(
+        r#""sourceRange":"A1:C3","sourceTable":null"#,
+        r#""sourceRange":"","sourceTable":"표1""#,
+        1,
+    );
+    let cells = stateless_base_cells();
+    let payload = format!(
+        r#"{{"sheet":"Report","sheets":["Data","Report"],"targets":[{{"sheet":"Report","cell":"H11"}}],"cells":{cells},"pivots":{{"Report":[{ok},{no_source}]}}}}"#
+    );
+    let answer = call(&payload);
+    assert!(!answer.contains("pivotsOmitted"), "{answer}");
+    assert!(answer.contains(r#""targetValues":["30"]"#), "{answer}");
+}
+
+#[test]
+fn stateless_requests_canonicalize_pivot_sheet_name_case() {
+    let long_name = "가".repeat(171);
+    let big = pivot("H3:I4", &long_name, "A1:C3", r#""East""#);
+    let cells = stateless_base_cells();
+    let payload = format!(
+        r#"{{"sheet":"Report","sheets":["Data","Report"],"targets":[{{"sheet":"Report","cell":"H9"}}],"cells":{cells},"pivots":{{"report":[{big}]}}}}"#
+    );
+    let answer = call(&payload);
+    assert!(
+        answer.contains(r#""pivotsOmitted":{"Report":["H3:I4"]}"#),
+        "{answer}"
+    );
+}

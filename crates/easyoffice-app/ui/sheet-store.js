@@ -693,14 +693,7 @@
         ...extraTarget,
         key: extraTarget.sheet + "!" + extraTarget.cell,
       };
-      const rawExtra = extractEvaluatedTargetValue(
-        rpcRes,
-        targetValues,
-        batchValues,
-        target,
-        0,
-        totalTargets
-      );
+      const rawExtra = extractEvaluatedTargetValue(rpcRes, targetValues, batchValues, target, 0, totalTargets);
       if (rawExtra !== undefined && rawExtra !== null) return String(rawExtra);
       if (rpcRes?.value !== undefined && rpcRes.value !== null) return String(rpcRes.value);
       return sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
@@ -760,6 +753,7 @@
       }
 
       if (rpcTargets.length === 0) {
+        spillApi?.clearOmittedPivots();
         return { sheets, extraValue: "", circular: false };
       }
 
@@ -778,14 +772,7 @@
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
 
       rpcTargets.forEach((target, idx) => {
-        const rawVal = extractEvaluatedTargetValue(
-          rpcRes,
-          targetValues,
-          batchValues,
-          target,
-          idx,
-          rpcTargets.length
-        );
+        const rawVal = extractEvaluatedTargetValue(rpcRes, targetValues, batchValues, target, idx, rpcTargets.length);
         if (rawVal === undefined || rawVal === null) return;
         const storedEntry = sheets[target.sheet]?.[target.cell];
         if (storedEntry && isFormulaStr(storedEntry.formula || "")) {
@@ -793,7 +780,7 @@
         }
       });
 
-      if (spillApi) spillApi.replaceAll(sheets, rpcRes?.spills, rpcRes?.formulaLinks);
+      if (spillApi) spillApi.replaceAll(sheets, rpcRes?.spills, rpcRes?.formulaLinks, rpcRes?.pivotsOmitted ?? null);
       const extraValue = extraTarget
         ? readExtraValue(rpcRes, sheets, extraTarget, rpcTargets.length)
         : "";
@@ -816,6 +803,7 @@
       }
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheetsMap);
       if (formulaTargets.length === 0) {
+        spillApi?.clearOmittedPivots();
         return null;
       }
       const rpcPayload = JSON.stringify({
@@ -831,7 +819,7 @@
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
-      if (spillApi) spillApi.replaceAll(sheetsMap, rpcRes?.spills, rpcRes?.formulaLinks);
+      if (spillApi) spillApi.replaceAll(sheetsMap, rpcRes?.spills, rpcRes?.formulaLinks, rpcRes?.pivotsOmitted ?? null);
       return { rpcRes, formulaTargets, targetValues, batchValues, spillsChanged: Boolean(spillApi) };
     }
 

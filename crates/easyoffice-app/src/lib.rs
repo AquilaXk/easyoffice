@@ -295,6 +295,13 @@ impl EasyOfficeIpcRouter {
         entries: &[(String, StrictJsonValue)],
         default_sheet: &str,
     ) -> Result<WorkbookEngine, EasyOfficeError> {
+        Self::build_workbook_and_omitted_pivots(entries, default_sheet).map(|(wb, _)| wb)
+    }
+
+    fn build_workbook_and_omitted_pivots(
+        entries: &[(String, StrictJsonValue)],
+        default_sheet: &str,
+    ) -> Result<(WorkbookEngine, sheet_pivot_defs::OmittedPivotsBySheet), EasyOfficeError> {
         let mut wb = WorkbookEngine::new();
         let explicit_sheets_val = StrictJsonValue::get_field(entries, "sheets");
         if let Some(sheets_val) = explicit_sheets_val {
@@ -396,9 +403,18 @@ impl EasyOfficeIpcRouter {
             }
         }
         // The pivot tables `GETPIVOTDATA` finds (PD-292). The sheets that are not in the request are left out, as for tables.
+        let mut omitted_pivots = Vec::new();
         for (name, pivots) in sheet_pivot_defs::pivots_by_sheet(entries)? {
-            if wb.sheet(&name).is_some() {
-                wb.set_pivot_tables(&name, pivots)?;
+            let canonical = wb
+                .sheet_names()
+                .into_iter()
+                .find(|s| WorkbookEngine::is_same_sheet_identity(s, &name))
+                .map(str::to_string);
+            if let Some(canonical) = canonical {
+                if !pivots.omitted.is_empty() {
+                    omitted_pivots.push((canonical, pivots.omitted));
+                }
+                wb.set_pivot_tables(&name, pivots.defs)?;
             }
         }
         for cell in input_cells {
@@ -428,7 +444,7 @@ impl EasyOfficeIpcRouter {
             }
         }
         sheet_cell_meta_ipc::apply_stateless_meta(&mut wb, entries)?;
-        Ok(wb)
+        Ok((wb, omitted_pivots))
     }
 
     fn handle_evaluate_sheet(payload: &str, owner: &str) -> Result<String, EasyOfficeError> {
@@ -451,7 +467,7 @@ impl EasyOfficeIpcRouter {
         let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let default_sh = default_sh_owned.as_str();
         let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
-        let wb = Self::build_workbook_from_json_entries(&entries, default_sh)?;
+        let (wb, omitted_pivots) = Self::build_workbook_and_omitted_pivots(&entries, default_sh)?;
         if let Some(targets_val) = StrictJsonValue::get_field(&entries, "targets") {
             let targets = targets_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
@@ -482,7 +498,10 @@ impl EasyOfficeIpcRouter {
                     requests.push((sh, expr));
                 }
                 let batch = eval_limit::evaluate(&wb, &requests, anchor_coord);
-                return Ok(eval_limit::answer(&requests, &batch));
+                return Ok(sheet_pivot_defs::with_omitted_pivots(
+                    eval_limit::answer(&requests, &batch),
+                    &omitted_pivots,
+                ));
             }
         }
         let default_cell_label = anchor_coord
@@ -498,7 +517,10 @@ impl EasyOfficeIpcRouter {
         };
         let requests = [(default_sh, expr)];
         let batch = eval_limit::evaluate(&wb, &requests, anchor_coord);
-        Ok(eval_limit::answer(&requests, &batch))
+        Ok(sheet_pivot_defs::with_omitted_pivots(
+            eval_limit::answer(&requests, &batch),
+            &omitted_pivots,
+        ))
     }
 
     fn handle_compute_layout(payload: &str) -> Result<String, EasyOfficeError> {

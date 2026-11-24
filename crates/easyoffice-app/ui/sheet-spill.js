@@ -169,8 +169,9 @@
   }
 
   // The whole picture from a stateless answer (`{ sheet, cell, rows, cols, blocked, values, links? }` per array, row by
-  // row, plus optional `formulaLinks`): every area is forgotten and the listed ones are filled again.
-  function replaceAll(sheets, spills, formulaLinks) {
+  // row, plus optional `formulaLinks` and `pivotsOmitted`): every area is forgotten and the listed ones are filled again.
+  function replaceAll(sheets, spills, formulaLinks, pivotsOmitted) {
+    if (pivotsOmitted !== undefined) replaceOmittedPivots(pivotsOmitted);
     const linkSet = Array.isArray(formulaLinks) ? new Set(formulaLinks) : null;
     for (const [sheetName, map] of Object.entries(sheets || {})) {
       for (const ref of Object.keys(map || {})) {
@@ -294,15 +295,26 @@
       }));
   }
 
-  // The pivot tables the engine left out for their size (PD-303): the locations (`A3:D6`) of each sheet, as the answer to the
-  // session's `pivots` action named them. A `GETPIVOTDATA` that points into one answers `#REF!`, and the status bar says why.
+  // The pivot tables the engine left out for their size (PD-303, PD-341): the locations (`A3:D6`) of each sheet, from
+  // either the session's `pivots` action or the stateless `evaluate_sheet` response. A `GETPIVOTDATA` that points into
+  // one directly or via defined names answers `#REF!`, and the status bar says why.
   const omittedPivots = new Map();
   const PIVOT_OMITTED_NOTE = "피벗 정의가 너무 커서 계산에서 제외됨";
+  const MAX_NAME_STEPS = 64;
+  const BARE_NAME_RE = /^[\p{L}_\\][\p{L}\p{N}_.\\]*$/u;
+  const NAME_TOKEN_RE = /(?<![\p{L}\p{N}_.$!'])[\p{L}_\\][\p{L}\p{N}_.\\]*(?![\p{L}\p{N}_.\\(!'])/gu;
 
   function setOmittedPivots(sheet, locations) {
+    const key = String(sheet ?? "").toLowerCase();
     const list = Array.isArray(locations) ? locations.filter((l) => typeof l === "string") : [];
-    if (list.length) omittedPivots.set(sheet, list);
-    else omittedPivots.delete(sheet);
+    if (key && list.length) omittedPivots.set(key, list);
+    else if (key) omittedPivots.delete(key);
+  }
+
+  function replaceOmittedPivots(bySheet) {
+    omittedPivots.clear();
+    if (!bySheet || typeof bySheet !== "object" || Array.isArray(bySheet)) return;
+    for (const [sheet, locations] of Object.entries(bySheet)) setOmittedPivots(sheet, locations);
   }
 
   const clearOmittedPivots = () => omittedPivots.clear();
@@ -310,6 +322,74 @@
   function cellInLocation(location, cell) {
     const [a, b = a] = location.split(":").map(parseRef);
     return Boolean(a && b && cell.row >= a.row && cell.row <= b.row && cell.col >= a.col && cell.col <= b.col);
+  }
+
+  function hitsOmitted(targetSheet, cell) {
+    if (!cell) return false;
+    const locs = omittedPivots.get(String(targetSheet ?? "").toLowerCase());
+    return Boolean(locs?.some((location) => cellInLocation(location, cell)));
+  }
+
+  // Blanks out double-quoted literals, single-quoted sheet names, and `[...]` structured-reference groups so only plain
+  // identifier tokens remain for defined-name scanning.
+  function stripFormulaForNames(formula) {
+    let out = "";
+    for (let i = 0; i < formula.length; i += 1) {
+      const ch = formula[i];
+      if (ch === '"' || ch === "'") {
+        out += " ";
+        while (i + 1 < formula.length) {
+          i += 1;
+          out += " ";
+          if (formula[i] === ch) {
+            if (formula[i + 1] === ch) {
+              i += 1;
+              out += " ";
+            } else break;
+          }
+        }
+      } else if (ch === "[") {
+        let depth = 1;
+        out += " ";
+        while (i + 1 < formula.length && depth > 0) {
+          i += 1;
+          const c = formula[i];
+          out += " ";
+          if (c === "'" && i + 1 < formula.length && "[]#'@".includes(formula[i + 1])) {
+            i += 1;
+            out += " ";
+          } else if (c === "[") depth += 1;
+          else if (c === "]") depth -= 1;
+        }
+      } else {
+        out += ch;
+      }
+    }
+    return out;
+  }
+
+  function resolveDefinedPivotCell(namesApi, startSheet, startName) {
+    let curSheet = startSheet;
+    let curName = startName;
+    const seen = new Set();
+    for (let step = 0; step < MAX_NAME_STEPS; step += 1) {
+      const def = namesApi.find(curName, curSheet);
+      if (!def) return null;
+      const scoped = def.scope ? namesApi.fold(def.scope) : "";
+      const key = scoped + "|" + namesApi.fold(def.name);
+      if (seen.has(key)) return null;
+      seen.add(key);
+      const rg = namesApi.parseRange(def.refersTo);
+      if (rg) return { sheet: rg.sheet, cell: { row: rg.r1, col: rg.c1 } };
+      const body = String(def.refersTo ?? "").trim().replace(/^=/, "");
+      const owner = def.scope || curSheet;
+      const addr = namesApi.parseAddress(body);
+      if (addr) return { sheet: owner, cell: { row: addr.r1, col: addr.c1 } };
+      if (!BARE_NAME_RE.test(body)) return null;
+      curName = body;
+      curSheet = owner;
+    }
+    return null;
   }
 
   // The words for a cell that answers `#REF!` from a `GETPIVOTDATA` whose pivot table reference lies in a table the engine left
@@ -323,7 +403,15 @@
       if (!m[2]) continue;
       const named = m[1] ? m[1].slice(0, -1).replace(/^'(.*)'$/s, "$1").replace(/''/g, "'") : sheet;
       const cell = parseRef(m[2].split(":")[0].replaceAll("$", ""));
-      if (cell && (omittedPivots.get(named) || []).some((location) => cellInLocation(location, cell))) return PIVOT_OMITTED_NOTE;
+      if (hitsOmitted(named, cell)) return PIVOT_OMITTED_NOTE;
+    }
+    const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+    if (namesApi?.hasAny?.()) {
+      const stripped = stripFormulaForNames(formula);
+      for (const m of stripped.matchAll(NAME_TOKEN_RE)) {
+        const hit = resolveDefinedPivotCell(namesApi, sheet, m[0]);
+        if (hit && hitsOmitted(hit.sheet, hit.cell)) return PIVOT_OMITTED_NOTE;
+      }
     }
     return "";
   }
@@ -383,6 +471,7 @@
     mergePayload,
     pivotPayload,
     setOmittedPivots,
+    replaceOmittedPivots,
     clearOmittedPivots,
     pivotOmittedNote,
     blockerPayload,

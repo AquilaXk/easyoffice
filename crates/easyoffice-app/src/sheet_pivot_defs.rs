@@ -130,7 +130,7 @@ pub(crate) fn pivot_defs(
 /// pivot tables of all the sheets together stay within what a workbook may register, checked before any is read.
 pub(crate) fn pivots_by_sheet(
     entries: &[(String, StrictJsonValue)],
-) -> Result<Vec<(String, Vec<PivotTableDef>)>, EasyOfficeError> {
+) -> Result<Vec<(String, SheetPivots)>, EasyOfficeError> {
     let Some(field) = StrictJsonValue::get_field(entries, "pivots")
         .filter(|v| !matches!(v, StrictJsonValue::Null))
     else {
@@ -151,8 +151,45 @@ pub(crate) fn pivots_by_sheet(
             )));
         }
         if count > 0 {
-            out.push((name.clone(), pivot_defs(name, list)?.defs));
+            out.push((name.clone(), pivot_defs(name, list)?));
         }
     }
     Ok(out)
+}
+
+/// Per-sheet pivot locations omitted due to budget bounds (`[(sheet, [location, ...])]`).
+pub(crate) type OmittedPivotsBySheet = Vec<(String, Vec<String>)>;
+
+/// Appends `,"pivotsOmitted":{"Sheet1":["A3:D6",...]}` to a stateless `evaluate_sheet` JSON object
+/// when at least one sheet had pivot definitions omitted for size; leaves `json` untouched when empty.
+pub(crate) fn with_omitted_pivots(mut json: String, omitted: &[(String, Vec<String>)]) -> String {
+    if !omitted.iter().any(|(_, locs)| !locs.is_empty()) || !json.ends_with('}') {
+        return json;
+    }
+    json.pop();
+    json.push_str(",\"pivotsOmitted\":{");
+    let mut first_sheet = true;
+    for (sheet, locs) in omitted {
+        if locs.is_empty() {
+            continue;
+        }
+        if !first_sheet {
+            json.push(',');
+        }
+        first_sheet = false;
+        json.push('"');
+        crate::EasyOfficeIpcRouter::escape_json_into(&mut json, sheet);
+        json.push_str("\":[");
+        for (i, loc) in locs.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push('"');
+            crate::EasyOfficeIpcRouter::escape_json_into(&mut json, loc);
+            json.push('"');
+        }
+        json.push(']');
+    }
+    json.push_str("}}");
+    json
 }
