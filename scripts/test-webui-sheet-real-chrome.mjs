@@ -21,7 +21,7 @@ try {
 const skip = !APP || !CHROME ? "needs a built easyoffice-app and a Chrome (EO_APP, CHROME_PATH)" : false;
 
 const KEYS = {
-  Enter: [13, "Enter"], Tab: [9, "Tab"], Backspace: [8, "Backspace"], Escape: [27, "Escape"], Home: [36, "Home"], End: [35, "End"], PageUp: [33, "PageUp"], PageDown: [34, "PageDown"],
+  Enter: [13, "Enter"], Tab: [9, "Tab"], Backspace: [8, "Backspace"], Escape: [27, "Escape"], Home: [36, "Home"], End: [35, "End"], PageUp: [33, "PageUp"], PageDown: [34, "PageDown"], F3: [114, "F3"],
   ArrowLeft: [37, "ArrowLeft"], ArrowUp: [38, "ArrowUp"], ArrowRight: [39, "ArrowRight"], ArrowDown: [40, "ArrowDown"],
 };
 const CTRL = 2;
@@ -59,7 +59,7 @@ const js = (expression) => ctx.cdp.evalJs(expression);
 const rectOf = (selector) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; })()`);
 const td = (ref) => `#pane-sheet td[data-cell="${ref}"]`;
 const rowHeight = (ref) => js(`document.querySelector(${JSON.stringify(td(ref))}).closest("tr").getBoundingClientRect().height`);
-const mouse = (type, x, y) => ctx.cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+const mouse = (type, x, y, clickCount = 1) => ctx.cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount });
 // Scrolls the grid so the row of `ref` is near the top (rows are 24px until a test sets one), then waits for the window.
 async function show(ref) {
   const row = Number(ref.replace(/^[A-Z]+/, ""));
@@ -244,4 +244,126 @@ test("the cell format dialog lists the categories in order and shows what the en
   assert.equal(await sampleOf("special", "[DBNum4]General"), "일");
   assert.equal((await sampleOf("fraction", "# ?/?")).trim(), "1", "a whole number keeps the blanks of its fraction part");
   await js(`document.getElementById("sheet-numfmt-dialog").close?.()`);
+});
+
+test("F3 (이름 붙여넣기) handles empty focus, arrow keys, double-click, menu aria-expanded, and outside click in real Chrome", { skip }, async () => {
+  await click("E2");
+  await key("F3");
+  await sleep(100);
+  assert.equal(await js(`document.getElementById("sheet-name-paste-dialog").open`), true);
+  assert.equal(await js(`document.activeElement?.classList?.contains("dialog-close")`), false, "empty F3 never focuses the close button");
+  await key("Escape");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("sheet-name-paste-dialog").open`), false);
+
+  const defineViaNameBox = async (ref, name) => {
+    await click(ref);
+    const nb = await rectOf("#active-cell-ref");
+    assert.ok(nb);
+    await mouse("mouseMoved", nb.left + nb.width / 2, nb.top + nb.height / 2);
+    await mouse("mousePressed", nb.left + nb.width / 2, nb.top + nb.height / 2);
+    await mouse("mouseReleased", nb.left + nb.width / 2, nb.top + nb.height / 2);
+    await js(`(() => { const el = document.getElementById("active-cell-ref"); el.focus(); const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); })()`);
+    await text(name);
+    await key("Enter");
+    await sleep(120);
+  };
+  await defineViaNameBox("B2", "가_첫째");
+  await defineViaNameBox("B4", "나_둘째");
+
+  await click("E2");
+  await text("=10+");
+  await sleep(80);
+  await key("F3");
+  await sleep(120);
+  assert.equal(await js(`document.getElementById("sheet-name-paste-dialog").open`), true);
+  assert.equal(await js(`document.querySelector('#sheet-name-paste-list li[aria-selected="true"]')?.dataset?.index`), "0");
+  await key("ArrowDown");
+  await sleep(60);
+  assert.equal(await js(`document.querySelector('#sheet-name-paste-list li[aria-selected="true"]')?.dataset?.index`), "1");
+  await key("ArrowUp");
+  await sleep(60);
+  assert.equal(await js(`document.querySelector('#sheet-name-paste-list li[aria-selected="true"]')?.dataset?.index`), "0");
+
+  const row1 = await rectOf('#sheet-name-paste-list li[data-index="1"]');
+  assert.ok(row1, "second defined name row is rendered");
+  const rx = row1.left + row1.width / 2;
+  const ry = row1.top + row1.height / 2;
+  await mouse("mouseMoved", rx, ry, 1);
+  await mouse("mousePressed", rx, ry, 1);
+  await mouse("mouseReleased", rx, ry, 1);
+  await mouse("mousePressed", rx, ry, 2);
+  await mouse("mouseReleased", rx, ry, 2);
+  await sleep(120);
+
+  assert.equal(await js(`document.getElementById("sheet-name-paste-dialog").open`), false, "double-click confirms and closes dialog");
+  assert.equal(await cellText("E2"), "=10+나_둘째", "double-clicked name inserts without premature commit");
+  await key("Enter");
+  await sleep(150);
+  assert.equal(await cellText("E2"), "13", "real engine evaluates 10 + B4 (3)");
+
+  // Opening 수식 -> 수식에서 사용 -> 이름 붙여넣기 resets aria-expanded cleanly and outside click closes Name Box dropdown.
+  const openUseMenu = async () => {
+    const formulaMenu = await rectOf('.menu-item[data-menu="formula"] .menu-title');
+    assert.ok(formulaMenu);
+    await mouse("mouseMoved", formulaMenu.left + formulaMenu.width / 2, formulaMenu.top + formulaMenu.height / 2, 1);
+    await mouse("mousePressed", formulaMenu.left + formulaMenu.width / 2, formulaMenu.top + formulaMenu.height / 2, 1);
+    await mouse("mouseReleased", formulaMenu.left + formulaMenu.width / 2, formulaMenu.top + formulaMenu.height / 2, 1);
+    await sleep(80);
+    assert.equal(await js(`document.querySelector('.menu-item[data-menu="formula"] .menu-title')?.getAttribute("aria-expanded")`), "true");
+    const subRect = await js(`(() => { const el = document.getElementById("sheet-name-use-menu")?.closest(".md-sub"); if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; })()`);
+    assert.ok(subRect && subRect.width > 0, "수식에서 사용 submenu trigger is visible");
+    await mouse("mouseMoved", subRect.left + subRect.width / 2, subRect.top + subRect.height / 2, 1);
+    await sleep(80);
+  };
+
+  await click("F2");
+  await text("=20+");
+  await sleep(60);
+  await openUseMenu();
+  const useItem = await rectOf('#sheet-name-use-menu .md-item[data-name-use="가_첫째"]');
+  assert.ok(useItem && useItem.width > 0, "가_첫째 item visible in 수식에서 사용");
+  await mouse("mouseMoved", useItem.left + useItem.width / 2, useItem.top + useItem.height / 2, 1);
+  await mouse("mousePressed", useItem.left + useItem.width / 2, useItem.top + useItem.height / 2, 1);
+  await mouse("mouseReleased", useItem.left + useItem.width / 2, useItem.top + useItem.height / 2, 1);
+  await sleep(100);
+  assert.equal(await cellText("F2"), "=20+가_첫째");
+  await key("Enter");
+  await sleep(140);
+  assert.equal(await cellText("F2"), "21", "real engine evaluates 20 + B2 (1)");
+
+  await openUseMenu();
+  const pasteItem = await rectOf('.md-item[data-sheet-act="name-paste"]');
+  assert.ok(pasteItem && pasteItem.width > 0, "이름 붙여넣기 item visible in 수식에서 사용");
+  await mouse("mouseMoved", pasteItem.left + pasteItem.width / 2, pasteItem.top + pasteItem.height / 2, 1);
+  await mouse("mousePressed", pasteItem.left + pasteItem.width / 2, pasteItem.top + pasteItem.height / 2, 1);
+  await mouse("mouseReleased", pasteItem.left + pasteItem.width / 2, pasteItem.top + pasteItem.height / 2, 1);
+  await sleep(100);
+  assert.equal(await js(`document.querySelector('.menu-item[data-menu="formula"] .menu-title')?.getAttribute("aria-expanded")`), "false");
+  assert.equal(await js(`document.getElementById("sheet-name-paste-dialog").open`), true);
+  await key("Escape");
+  await sleep(80);
+
+  const dropBtn = await rectOf("#btn-name-box-list");
+  assert.ok(dropBtn);
+  await click("G2");
+  await text("=1+");
+  await sleep(50);
+  await mouse("mouseMoved", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await mouse("mousePressed", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await mouse("mouseReleased", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await sleep(60);
+  assert.equal(await js(`document.getElementById("sheet-name-box-list").hidden`), false);
+  await key("Escape");
+  await sleep(60);
+  assert.equal(await js(`document.getElementById("sheet-name-box-list").hidden`), true, "Escape closes Name Box dropdown");
+  assert.equal(await cellText("G2"), "=1+", "Escape closing Name Box dropdown preserves active formula edit");
+  await mouse("mouseMoved", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await mouse("mousePressed", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await mouse("mouseReleased", dropBtn.left + dropBtn.width / 2, dropBtn.top + dropBtn.height / 2, 1);
+  await sleep(60);
+  assert.equal(await js(`document.getElementById("sheet-name-box-list").hidden`), false);
+  await click("C5");
+  await sleep(60);
+  assert.equal(await js(`document.getElementById("sheet-name-box-list").hidden`), true, "outside click closes Name Box dropdown");
 });

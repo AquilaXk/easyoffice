@@ -684,9 +684,18 @@
 
     function onCalcKeydown(ev) {
       if (ev.defaultPrevented || ev.__eoCalcKeyHandled) return;
-      if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.key !== "F9") return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       if ((typeof getActiveModule === "function" && getActiveModule() !== "SHEET") || document.getElementById("pane-sheet")?.hidden) return;
       if (document.querySelector?.("dialog[open]")) return;
+      if (ev.key === "F3" && !ev.shiftKey) {
+        if (ev.target?.closest?.(".sheet-tab-edit, .sheet-table-bar input, #active-cell-ref")) return;
+        ev.__eoCalcKeyHandled = true;
+        ev.preventDefault?.();
+        ev.stopPropagation?.();
+        void run("name-paste");
+        return;
+      }
+      if (ev.key !== "F9") return;
       ev.__eoCalcKeyHandled = true;
       ev.preventDefault?.();
       ev.stopPropagation?.();
@@ -714,6 +723,7 @@
       viewport?.addEventListener("keydown", onKeydown);
       viewport?.addEventListener("keydown", onCalcKeydown);
       viewport?.addEventListener("scroll", () => closeMenu(false));
+      document.getElementById("pane-sheet")?.addEventListener("keydown", onCalcKeydown);
       document.addEventListener("keydown", onCalcKeydown);
       if (typeof host.addEventListener === "function") host.addEventListener("keydown", onCalcKeydown);
       const el = menu();
@@ -728,7 +738,14 @@
         item.addEventListener("click", (ev) => {
           ev.stopPropagation?.();
           closeMenu(true);
-          document.querySelectorAll(".menu-item.open").forEach((open) => open.classList.remove("open"));
+          if (typeof globalThis.__EASYOFFICE_CLOSE_MENUS__ === "function") {
+            globalThis.__EASYOFFICE_CLOSE_MENUS__(document);
+          } else {
+            document.querySelectorAll(".menu-item.open").forEach((open) => {
+              open.classList.remove("open");
+              open.querySelector?.(".menu-title")?.setAttribute?.("aria-expanded", "false");
+            });
+          }
           if (item.getAttribute("aria-disabled") === "true") return;
           void run(item.dataset.sheetAct);
         });
@@ -741,11 +758,12 @@
       noteUi?.syncLayer();
     }
 
-    // What follows the active sheet: the filter menu's check, and the outline bars.
+    // What follows the active sheet: the filter menu's check, the defined names submenu, and the outline bars.
     function refreshSheetChrome() {
       protectUi.refreshMenu();
       filterUi.refreshMenu();
       noteUi?.refreshMenu();
+      namesUi.refreshUseMenu();
       host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.syncMenu(document);
       outlineUi.render();
       tableUi.sync();

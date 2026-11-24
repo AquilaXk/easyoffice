@@ -372,6 +372,8 @@
     { keys: "Alt+F5", action: "sheet-pivot-refresh", module: "SHEET", external: true },
     // Cell note insertion and editing is handled by sheet-note-ui.js on Shift+F2 (PD-256).
     { keys: "Shift+F2", action: "sheet-note-edit", module: "SHEET", external: true },
+    // Defined-name paste dialog is opened by sheet-structure.js on F3 (PD-344).
+    { keys: "F3", action: "sheet-name-paste", module: "SHEET", external: true },
     // Manual workbook/sheet recalculation is handled by sheet-structure.js on F9 and Shift+F9 (PD-309).
     { keys: "F9", action: "sheet-calc-now", module: "SHEET", external: true },
     { keys: "Shift+F9", action: "sheet-calc-sheet", module: "SHEET", external: true },

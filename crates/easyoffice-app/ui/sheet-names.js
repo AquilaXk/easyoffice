@@ -141,12 +141,12 @@
   }
 
   // The names the name box and the formulas of `sheet` see: the workbook's and that sheet's, not the hidden ones, a
-  // sheet's own name hiding the workbook's of the same name. At most `NAME_BOX_LIMIT`.
-  function visibleFor(sheet) {
+  // sheet's own name hiding the workbook's of the same name. At most `limit` (`NAME_BOX_LIMIT` by default).
+  function visibleFor(sheet, limit = NAME_BOX_LIMIT) {
     const own = new Set(list.filter((def) => def.scope && sameScope(def.scope, sheet)).map((def) => fold(def.name)));
     return list
       .filter((def) => !def.hidden && (def.scope ? sameScope(def.scope, sheet) : !own.has(fold(def.name))))
-      .slice(0, NAME_BOX_LIMIT);
+      .slice(0, limit);
   }
 
   // The ranges the visible names refer to, by sheet and corners: one pass per change of the list, so the name box

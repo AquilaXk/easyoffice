@@ -393,6 +393,13 @@
               <div class="md-item" data-sheet-act="name-define" role="menuitem" tabindex="-1"><span class="md-label">이름 정의…</span></div>
               <div class="md-item" data-sheet-act="name-manage" role="menuitem" tabindex="-1"><span class="md-label">이름 관리…</span></div>
               <div class="md-item" data-sheet-act="name-create" role="menuitem" tabindex="-1"><span class="md-label">선택 영역에서 이름 만들기…</span></div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">수식에서 사용</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div id="sheet-name-use-menu" class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="수식에서 사용">
+                  <div id="sheet-name-use-sep" class="md-sep" hidden></div>
+                  <div class="md-item" data-sheet-act="name-paste" role="menuitem" tabindex="-1"><span class="md-label">이름 붙여넣기…</span><span class="md-shortcut">F3</span></div>
+                </div>
+              </div>
               <div class="md-sep"></div>
               <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">계산 옵션</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
@@ -2012,6 +2019,21 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-name-edit-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-name-paste-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-name-paste-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-name-paste-title">이름 붙여넣기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="sheet-names-head" aria-hidden="true"><span>이름</span><span>참조 영역</span><span>범위</span></div>
+          <ul id="sheet-name-paste-list" class="dialog-list sheet-names-list" role="listbox" aria-label="이름 붙여넣기 목록"></ul>
+          <p id="sheet-name-paste-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-name-paste-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>

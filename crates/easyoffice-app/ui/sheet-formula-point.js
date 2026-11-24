@@ -56,6 +56,13 @@
   // It may stand before an operator, a closing bracket, a separator or a space, not before a name, a number or `(`.
   const POINT_BEFORE = "=<>+-*/&^),:%{}[]#@ ";
   const NONE = Object.freeze({ mode: "none", start: 0, end: 0, span: null });
+  const MAX_FORMULA_CHARS = 65536;
+  const MAX_SCAN_BRACKET_DEPTH = 4;
+  const NAME_START_RE = /^[\p{L}_\\]$/u;
+  const NAME_CHAR_RE = /^[\p{L}\p{N}_.\\?]$/u;
+  const UNQUOTED_SHEET_RE = /^[\p{L}\p{N}_.]$/u;
+  const UNQUOTED_SHEET_START_RE = /^[\p{L}_]$/u;
+  const NAME_PREV_FORBID_RE = /^[\p{L}\p{N}_.$!\\?:\]]$/u;
 
   // The `"` that opens a text literal the text never closes, else -1.
   function openQuoteAt(text) {
@@ -94,8 +101,143 @@
     return spans;
   }
 
-  // Every reference that gets a colour and a box, in text order: the cells and the structured references.
-  const colorSpans = (text) => [...refSpans(text), ...structuredSpans(text)].sort((a, b) => a.start - b.start);
+  function skipBracketGroup(text, start, limit) {
+    let depth = 0;
+    for (let i = start; i < limit; i += 1) {
+      const ch = text[i];
+      if (ch === "'" && i + 1 < limit) {
+        i += 1;
+        continue;
+      }
+      if (ch === "[") {
+        depth += 1;
+        if (depth > MAX_SCAN_BRACKET_DEPTH) return start + 1;
+      } else if (ch === "]") {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+      }
+    }
+    return limit;
+  }
+
+  function scanIdentifierEnd(text, start, limit) {
+    let end = start;
+    while (end < limit && NAME_CHAR_RE.test(text[end])) end += 1;
+    return end;
+  }
+
+  function overlapsSorted(spans, fromIdx, start, end) {
+    for (let i = fromIdx; i < spans.length; i += 1) {
+      if (spans[i].start >= end) return false;
+      if (spans[i].end > start) return true;
+    }
+    return false;
+  }
+
+  // Defined names referenced in a formula (bare `Name` or single-sheet `Sheet1!Name` / `'My Sheet'!Name`), outside strings,
+  // brackets, cell/structured refs and function calls (`Name(`). Returns `[]` when `namesList` is omitted or empty.
+  function nameSpans(text, namesList, originSheet) {
+    if (typeof text !== "string" || !text.startsWith("=") || text.length > MAX_FORMULA_CHARS) return [];
+    if (!Array.isArray(namesList) || namesList.length === 0) return [];
+    const byName = new Map();
+    for (const def of namesList) {
+      if (!def || typeof def.name !== "string" || !def.name || def.hidden === true) continue;
+      const key = def.name.toLowerCase();
+      const bucket = byName.get(key);
+      if (bucket) bucket.push(def);
+      else byName.set(key, [def]);
+    }
+    if (byName.size === 0) return [];
+    const resolveDef = (candidate, sheetPrefix) => {
+      const entries = byName.get(candidate.toLowerCase());
+      if (!entries) return null;
+      const sheet = sheetPrefix ? sheetOf(sheetPrefix).toLowerCase() : (originSheet != null ? String(originSheet).toLowerCase() : null);
+      if (sheet !== null) {
+        return entries.find((d) => d.scope && d.scope.toLowerCase() === sheet) ?? entries.find((d) => !d.scope) ?? null;
+      }
+      return entries.find((d) => !d.scope) ?? entries[0];
+    };
+    const taken = [...refSpans(text), ...structuredSpans(text)].sort((a, b) => a.start - b.start);
+    const open = openQuoteAt(text);
+    const limit = open >= 0 ? open : text.length;
+    const spans = [];
+    let takenIdx = 0;
+    const tryPushName = (spanStart, sheet, idStart, scanFrom) => {
+      const end = scanIdentifierEnd(text, scanFrom, limit);
+      const next = end < limit ? text[end] : "";
+      if (
+        !(sheet && /[[\]]/.test(sheet))
+        && next !== "(" && next !== "[" && next !== "!" && next !== ":"
+        && !overlapsSorted(taken, takenIdx, spanStart, end)
+      ) {
+        const candidate = text.slice(idStart, end);
+        const def = resolveDef(candidate, sheet);
+        if (def) spans.push({ start: spanStart, end, token: text.slice(spanStart, end), sheet, name: candidate, ref: undefined, kind: "name", def });
+      }
+      return end;
+    };
+    for (let i = 1; i < limit; ) {
+      while (takenIdx < taken.length && taken[takenIdx].end <= i) takenIdx += 1;
+      if (takenIdx < taken.length && i >= taken[takenIdx].start) {
+        i = taken[takenIdx].end;
+        continue;
+      }
+      const ch = text[i];
+      if (ch === '"') {
+        i += 1;
+        while (i < limit && text[i] !== '"') i += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === "[") {
+        i = skipBracketGroup(text, i, limit);
+        continue;
+      }
+      if (ch === "'") {
+        const forbidden = i > 0 && NAME_PREV_FORBID_RE.test(text[i - 1]);
+        let q = i + 1;
+        while (q < limit && text[q] !== "'") q += 1;
+        while (q < limit && text[q] === "'" && text[q + 1] === "'") {
+          q += 2;
+          while (q < limit && text[q] !== "'") q += 1;
+        }
+        if (q >= limit) break;
+        if (!forbidden && text[q + 1] === "!" && q + 2 < limit && NAME_START_RE.test(text[q + 2])) {
+          const idStart = q + 2;
+          i = tryPushName(i, text.slice(i, idStart), idStart, idStart + 1);
+          continue;
+        }
+        i = q + 1;
+        continue;
+      }
+      if (UNQUOTED_SHEET_RE.test(ch) || ch === "\\") {
+        if (i > 0 && NAME_PREV_FORBID_RE.test(text[i - 1])) {
+          i = scanIdentifierEnd(text, i + 1, limit);
+          continue;
+        }
+        let p = i;
+        while (p < limit && UNQUOTED_SHEET_RE.test(text[p])) p += 1;
+        if (p > i && p < limit && text[p] === "!" && UNQUOTED_SHEET_START_RE.test(ch)) {
+          const idStart = p + 1;
+          i = idStart < limit && NAME_START_RE.test(text[idStart])
+            ? tryPushName(i, text.slice(i, idStart), idStart, idStart + 1)
+            : idStart;
+          continue;
+        }
+        const end = NAME_START_RE.test(ch)
+          ? tryPushName(i, "", i, p)
+          : scanIdentifierEnd(text, p, limit);
+        i = Math.max(i + 1, end);
+        continue;
+      }
+      i += 1;
+    }
+    return spans;
+  }
+
+  // Every reference that gets a colour and a box, in text order: cells, structured references, and defined names.
+  const colorSpans = (text, namesList, originSheet) =>
+    [...refSpans(text), ...structuredSpans(text), ...nameSpans(text, namesList, originSheet)].sort((a, b) => a.start - b.start);
 
   // Whether `caret` stands inside a text literal or a quoted sheet name.
   function insideQuotes(text, caret) {
@@ -120,9 +262,9 @@
   // Ref `resolveFormulaReferenceEditingContext`: what a pointed reference does at `from`..`to` (a caret, or a selection):
   // `replace` the reference the caret is in or at the end of (or the selection touches), `add` at the caret, or `none`.
   // `start`..`end` is the text the reference takes the place of.
-  function pointContext(text, from, to = from) {
+  function pointContext(text, from, to = from, namesList, originSheet) {
     if (!text.startsWith("=")) return NONE;
-    const spans = colorSpans(text);
+    const spans = colorSpans(text, namesList, originSheet);
     const hit = to > from ? spans.find((s) => s.start < to && s.end > from) : spans.find((s) => from > s.start && from <= s.end);
     if (hit) return { mode: "replace", start: hit.start, end: hit.end, span: hit };
     return canPointAt(text, from, to) ? { mode: "add", start: from, end: to, span: null } : NONE;
@@ -148,12 +290,18 @@
     const { parseRef, colIndex, MAX_ROWS, MAX_COLS } = refsApi();
     const parts = ref.replaceAll("$", "").toUpperCase().split(":");
     const order = (a, b) => [Math.min(a, b), Math.max(a, b)];
-    if (parts.length === 2 && /^[A-Z]+$/.test(parts[0]) && /^[A-Z]+$/.test(parts[1])) {
-      const [c1, c2] = order(colIndex(parts[0]), colIndex(parts[1]));
+    if (parts.length === 2 && /^[A-Z]{1,3}$/.test(parts[0]) && /^[A-Z]{1,3}$/.test(parts[1])) {
+      const cA = colIndex(parts[0]);
+      const cB = colIndex(parts[1]);
+      if (!cA || !cB || cA > MAX_COLS || cB > MAX_COLS) return null;
+      const [c1, c2] = order(cA, cB);
       return { r1: 1, c1, r2: MAX_ROWS, c2, axis: "col" };
     }
-    if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
-      const [r1, r2] = order(Number(parts[0]), Number(parts[1]));
+    if (parts.length === 2 && /^[1-9]\d{0,6}$/.test(parts[0]) && /^[1-9]\d{0,6}$/.test(parts[1])) {
+      const rA = Number(parts[0]);
+      const rB = Number(parts[1]);
+      if (rA < 1 || rB < 1 || rA > MAX_ROWS || rB > MAX_ROWS) return null;
+      const [r1, r2] = order(rA, rB);
       return { r1, c1: 1, r2, c2: MAX_COLS, axis: "row" };
     }
     const a = parseRef(parts[0]);
@@ -517,13 +665,40 @@
     };
   }
 
+  // Resolves a defined-name's `refersTo` (`Sheet1!$C$3:$C$5`, `Sheet1!$B:$D`, `Sheet1:Sheet3!$A$1`) to `{ endpoints, range }`,
+  // or null when the definition holds a constant, multi-area, or formula expression.
+  function resolveNameTarget(refersTo) {
+    const body = String(refersTo ?? "").trim().replace(/^=\s*/, "");
+    if (!body || body.length > MAX_FORMULA_CHARS) return null;
+    let inSingle = false;
+    let bang = -1;
+    for (let i = 0; i < body.length; i += 1) {
+      if (body[i] === "'") {
+        if (inSingle && body[i + 1] === "'") i += 1;
+        else inSingle = !inSingle;
+      } else if (body[i] === "!" && !inSingle) {
+        bang = i;
+        break;
+      }
+    }
+    if (bang <= 0) return null;
+    const prefix = body.slice(0, bang + 1);
+    const rest = body.slice(bang + 1).trim();
+    if (!rest || rest.split(":").length > 2) return null;
+    const range = rangeOf(rest);
+    if (!range) return null;
+    return { endpoints: sheetEndpoints(prefix), range };
+  }
+
   host.__EASYOFFICE_SHEET_FORMULA_POINT__ = {
     refSpans,
+    nameSpans,
     colorSpans,
     pointContext,
     applyRef,
     rangeText,
     rangeOf,
+    resolveNameTarget,
     sheetOf,
     sheetEndpoints,
     quoteSheetSpan,

@@ -75,6 +75,8 @@ test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use 
     "이름 정의…",
     "이름 관리…",
     "선택 영역에서 이름 만들기…",
+    "수식에서 사용",
+    "이름 붙여넣기…",
     "계산 옵션",
     "자동",
     "데이터 테이블을 제외한 자동",
@@ -82,7 +84,7 @@ test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use 
     "지금 계산",
     "시트 계산",
   ]);
-  for (const id of ["sheet-names-dialog", "sheet-name-edit-dialog"]) {
+  for (const id of ["sheet-names-dialog", "sheet-name-edit-dialog", "sheet-name-paste-dialog"]) {
     const dialog = t.document.getElementById(id);
     assert.match(dialog.className, /tool-dialog/);
     assert.ok(dialog.querySelector(".dialog-wrap .dialog-title .dialog-close"), id);
@@ -418,4 +420,31 @@ test("the buttons and titles are the spreadsheet help's: 이름 추가, 이름 �
   await t.act("name-define");
   assert.equal(title(), "이름 정의");
   assert.equal(t.document.getElementById("btn-sheet-name-edit-apply").textContent, "확인");
+});
+
+test("수식에서 사용 submenu lists active-sheet visible names only and hides its separator when empty", async () => {
+  const t = await open();
+  const useMenu = t.document.getElementById("sheet-name-use-menu");
+  const sep = t.document.getElementById("sheet-name-use-sep");
+  assert.equal(useMenu.querySelectorAll(".md-item[data-name-use]").length, 0);
+  assert.equal(sep.hidden, true);
+
+  t.names.replaceAll([
+    { name: "목표", refersTo: "Sheet1!$C$3:$C$5" },
+    { name: "LocalOnly", scope: "OtherSheet", refersTo: "OtherSheet!$A$1" },
+    { name: "Hidden_", refersTo: "Sheet1!$A$1", hidden: true },
+  ], true);
+  t.document.querySelector('.menu-item[data-menu="formula"]').dispatchEvent({ type: "mousedown", target: t.document.querySelector('.menu-item[data-menu="formula"]') });
+  assert.equal(sep.hidden, false);
+  assert.deepEqual([...useMenu.querySelectorAll(".md-item[data-name-use] .md-label")].map((el) => el.textContent), ["목표"]);
+
+  // Empty 이름 붙여넣기 dialog disables 확인 and leaves selection intact on Esc/취소
+  t.names.replaceAll([], true);
+  await t.act("name-paste");
+  const pasteDlg = t.document.getElementById("sheet-name-paste-dialog");
+  assert.equal(pasteDlg.open, true);
+  assert.equal(t.document.getElementById("btn-sheet-name-paste-ok").disabled, true);
+  pasteDlg.close();
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, false);
 });

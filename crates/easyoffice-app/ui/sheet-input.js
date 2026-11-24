@@ -120,6 +120,11 @@
       tablesIn: (sheet, r1, c1, r2, c2) => host.__EASYOFFICE_SHEET_LAYOUT__.tablesIn(sheet, r1, c1, r2, c2),
       tablesOf: (sheet) => host.__EASYOFFICE_SHEET_LAYOUT__.tablesOf(sheet),
       tableBox: (table) => host.__EASYOFFICE_SHEET_LAYOUT__.tableBox(table),
+      getNames: () => host.__EASYOFFICE_SHEET_NAMES__?.getAll?.() ?? [],
+      findName: (name, sheet) => host.__EASYOFFICE_SHEET_NAMES__?.find?.(name, sheet) ?? null,
+      focusAnchor: () => focusAnchor(),
+      focusCell: (row, col, text, from, to, mode) => focusHeldCell(row, col, text, from, to, mode),
+      startFormulaWithName: (nameText) => startFormulaWithName(nameText),
     });
 
     // The entry of a cell as a fill may read it: a formula a protected sheet hides is a value (PD-216).
@@ -362,15 +367,17 @@
     }
 
     // ---- edit modes ------------------------------------------------------------------------
-    function setCaretAtOffset(td, offset) {
+    function setCaretRange(td, from, to = from) {
       const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
       if (!selObj || typeof document.createRange !== "function") return;
       const range = document.createRange();
       const node = td.firstChild;
       if (node && node.nodeType === 3) {
-        const pos = Math.max(0, Math.min(offset, (node.textContent || "").length));
-        range.setStart(node, pos);
-        range.setEnd(node, pos);
+        const len = (node.textContent || "").length;
+        const a = Math.max(0, Math.min(from, len));
+        const b = Math.max(a, Math.min(to, len));
+        range.setStart(node, a);
+        range.setEnd(node, b);
       } else if (typeof range.selectNodeContents === "function") {
         range.selectNodeContents(td);
         range.collapse?.(false);
@@ -382,6 +389,8 @@
       selObj.removeAllRanges?.();
       selObj.addRange?.(range);
     }
+
+    const setCaretAtOffset = (td, offset) => setCaretRange(td, offset, offset);
 
     function placeCaret(td) {
       const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
@@ -535,6 +544,11 @@
     }
 
     function onFocus(td) {
+      const existing = stateOf(td);
+      if (point.holdsBlur() && existing && isEditing(existing)) {
+        updateSelection(td.dataset.cell);
+        return;
+      }
       updateSelection(td.dataset.cell);
       const text = grid.readTdValue(td);
       const entry = {
@@ -579,6 +593,42 @@
       td.focus({ preventScroll: true });
       startEdit(td, mode, false);
       return isEditing(stateOf(td)) ? td : null;
+    }
+
+    function focusHeldCell(row, col, text, from, to, mode) {
+      grid.ensureVisible(row, col);
+      const td = tdAt(row, col);
+      if (!td) return null;
+      td.focus({ preventScroll: true });
+      let st = stateOf(td);
+      if (!st || !isEditing(st)) {
+        startEdit(td, mode || "edit", false);
+        st = stateOf(td);
+      } else {
+        markEditing(td, st, mode || st.mode);
+      }
+      if (td.textContent !== text) td.textContent = text;
+      const trimmed = text.trim();
+      if (!trimmed.startsWith("'") && td._nf !== "@" && isFormulaStr(trimmed)) td.dataset.formula = trimmed;
+      else delete td.dataset.formula;
+      setCaretRange(td, from, to);
+      editBox.fit(td);
+      refreshChrome();
+      return td;
+    }
+
+    function startFormulaWithName(nameText) {
+      grid.ensureVisible(sel.ar, sel.ac);
+      const td = tdAt(sel.ar, sel.ac);
+      if (!td || !nameText || editBlocked(td)) return false;
+      if (gridTdOf(document.activeElement) !== td) td.focus({ preventScroll: true });
+      startEdit(td, "edit", true);
+      if (!isEditing(stateOf(td))) return false;
+      const text = "=" + nameText;
+      td.textContent = text;
+      setCaretRange(td, text.length, text.length);
+      onInput(td);
+      return true;
     }
 
     // Enter (`commit`) or Esc on the cell being edited; false when no cell is.
@@ -806,6 +856,7 @@
       bound.add(td);
       td.addEventListener("focus", () => onFocus(td));
       td.addEventListener("blur", () => {
+        if (point.holdsBlur()) return;
         void api.commitSheetCellEdit(td, false).catch(() => {});
       });
     }
@@ -853,6 +904,13 @@
       handleBarKey: point.barKey,
       detachForSwitch: point.detach,
       afterSheetSwitch: point.afterSwitch,
+      insertFormulaName: point.insertName,
+      hasFormulaEditSurface: point.hasInsertSurface,
+      holdsFormulaMenu: point.holdsFormulaMenu,
+      isEditingFormula: point.isEditingFormula,
+      originSheet: point.originSheet,
+      beginFormulaInsertHold: point.beginInsertHold,
+      endFormulaInsertHold: point.endInsertHold,
     };
   }
 

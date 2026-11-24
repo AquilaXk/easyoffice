@@ -75,6 +75,8 @@ pub const ALIGN: &str = "@align";
 pub const BORDER: &str = "@border";
 /// The 조건부 서식 submenu of the spreadsheet's 서식 menu ([`CF_LINES`]; its own submenus are [`CF_SUBMENUS`]).
 pub const CF: &str = "@cf";
+/// The 수식에서 사용 submenu of the spreadsheet's 수식 menu ([`USE_IN_FORMULA_LINES`]).
+pub const USE_IN_FORMULA: &str = "@name-use";
 /// The 계산 옵션 submenu of the spreadsheet's 수식 menu ([`CALC_OPTIONS_LINES`]).
 pub const CALC_OPTIONS: &str = "@calc-options";
 pub const PASTE: &str = "@paste";
@@ -86,6 +88,8 @@ pub const SHOW_ALL: &str = "@show-all";
 pub const MINIMIZE: &str = "@minimize";
 pub const CLOSE_WINDOW: &str = "@close-window";
 
+/// The static lines of the 수식에서 사용 submenu (dynamic defined names live in the WebUI menu).
+pub const USE_IN_FORMULA_LINES: [&str; 1] = ["sheet:name-paste"];
 /// The lines of the 계산 옵션 submenu.
 pub const CALC_OPTIONS_LINES: [&str; 3] = [
     "sheet:calc-auto",

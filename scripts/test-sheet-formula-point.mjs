@@ -305,3 +305,78 @@ test("3D sheet spans tokenize, color, quote, extract endpoints, and cycle F4 cle
   assert.equal(toggled.caret, "=SUM(Sheet1:Sheet3!$A$1".length);
   assert.equal(f4("='1월:3월'!B2").text, "='1월:3월'!$B$2");
 });
+
+test("nameSpans, colorSpans and pointContext recognize defined names, respect sheet scope, and reject literals/functions/hostiles", () => {
+  const defs = [
+    { name: "목표", refersTo: "Sheet1!$C$3:$C$5" },
+    { name: "Rate", scope: "Sheet2", refersTo: "Sheet2!$B$2" },
+    { name: "Rate", refersTo: "0.1" },
+    { name: "HiddenName", refersTo: "Sheet1!$A$1", hidden: true },
+    { name: "A.1", refersTo: "Sheet1!$D$2" },
+  ];
+
+  const spans = P.colorSpans("=SUM(목표)+Rate+Sheet2!Rate+'Sheet 3'!Rate+A.1", defs, "Sheet1");
+  assert.deepEqual(
+    spans.map((s) => ({ token: s.token, sheet: s.sheet, name: s.name ?? null })),
+    [
+      { token: "목표", sheet: "", name: "목표" },
+      { token: "Rate", sheet: "", name: "Rate" },
+      { token: "Sheet2!Rate", sheet: "Sheet2!", name: "Rate" },
+      { token: "'Sheet 3'!Rate", sheet: "'Sheet 3'!", name: "Rate" },
+      { token: "A.1", sheet: "", name: "A.1" },
+    ]
+  );
+  assert.equal(spans[1].def.refersTo, "0.1", "Sheet1 uses workbook Rate");
+  assert.equal(spans[2].def.refersTo, "Sheet2!$B$2", "Sheet2!Rate resolves Sheet2's scoped definition");
+
+  // Sheet-only name on Sheet2 does not resolve bare on Sheet1, while Sheet2!Local works
+  const scopedOnly = [{ name: "LocalOnly", scope: "Sheet2", refersTo: "Sheet2!$A$1" }];
+  assert.deepEqual(P.nameSpans("=LocalOnly+Sheet2!LocalOnly", scopedOnly, "Sheet1").map((s) => s.token), ["Sheet2!LocalOnly"]);
+  assert.deepEqual(P.nameSpans("=LocalOnly", scopedOnly, "Sheet2").map((s) => s.token), ["LocalOnly"]);
+
+  // Skips string literals, open quotes, structured refs, functions, partial identifiers, 3D invalid prefixes, hidden names
+  assert.deepEqual(
+    P.nameSpans('="목표"&목표(1)+Table1[목표]+my목표+1목표+HiddenName+Sheet1:Sheet2!목표+"unclosed', defs, "Sheet1"),
+    []
+  );
+  assert.deepEqual(P.refSpans("=SUM(목표)+B2", defs).map((s) => s.token), ["B2"]);
+  assert.equal(P.cycleRef("=목표", "=목표".length), null);
+
+  // pointContext treats caret at/inside a defined name as replace, while after `+` is add
+  const ctx = P.pointContext("=SUM(목표)+1", "=SUM(목표".length, "=SUM(목표".length, defs, "Sheet1");
+  assert.deepEqual({ mode: ctx.mode, start: ctx.start, end: ctx.end }, { mode: "replace", start: 5, end: 7 });
+  assert.equal(P.applyRef("=SUM(목표)+1", ctx, "Rate").text, "=SUM(Rate)+1");
+
+  // resolveNameTarget parses range, whole column/row, 3D sheet spans, and rejects constants/multi-area/malformed refs
+  assert.deepEqual(P.resolveNameTarget("='2026년'!$B$2:$D$4"), {
+    endpoints: { start: "2026년", end: "2026년", whole: "2026년" },
+    range: { r1: 2, c1: 2, r2: 4, c2: 4, axis: null },
+  });
+  assert.deepEqual(P.resolveNameTarget("= Sheet1!$A$1")?.range, { r1: 1, c1: 1, r2: 1, c2: 1, axis: null });
+  assert.equal(P.resolveNameTarget("= Sheet1!$A$1")?.endpoints?.start, "Sheet1");
+  assert.deepEqual(P.resolveNameTarget("Sheet1!$B:$D")?.range, { r1: 1, c1: 2, r2: 1048576, c2: 4, axis: "col" });
+  assert.equal(P.resolveNameTarget("0.1"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!A1,Sheet1!B2"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!A1:B2:C3"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!$ZZZZ:$ZZZZ"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!$XFE:$XFE"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!$0:$0"), null);
+  assert.equal(P.resolveNameTarget("Sheet1!$1:$1048577"), null);
+
+  // External workbook refs and digit/dot-starting unquoted sheet prefixes do not resolve local defined names
+  for (const externalOrBad of [
+    "=[Book]Sheet1!목표",
+    "=[Book]'My Sheet'!목표",
+    "='[Book]My Sheet'!목표",
+    "=[Book]목표",
+    "=1!목표",
+    "=.!목표",
+  ]) {
+    assert.deepEqual(P.nameSpans(externalOrBad, defs, "Sheet1"), [], externalOrBad);
+  }
+
+  // Hostile deep nested/unmatched brackets or oversized formulas terminate linearly within safety limits
+  const brackets = "=" + "[".repeat(500) + "]".repeat(500) + "+목표";
+  assert.deepEqual(P.nameSpans(brackets, defs, "Sheet1").map((s) => s.token), ["목표"]);
+  assert.deepEqual(P.nameSpans("=" + "목표+".repeat(25000), defs, "Sheet1"), []);
+});

@@ -25,10 +25,10 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 46 row, column, hide, merge, sort, filter, freeze, sheet tab, group, page setup, print area, name, calculation, link and protection items and 골라 붙이기", () => {
+test("the table holds the 11 number-format items, the 47 row, column, hide, merge, sort, filter, freeze, sheet tab, group, page setup, print area, name, calculation, link and protection items and 골라 붙이기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 46);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 47);
   assert.equal(items.filter((i) => i.name === "sheet-cf").length, 66, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, clear and manage rules");
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });

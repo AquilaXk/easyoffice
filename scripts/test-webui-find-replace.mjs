@@ -348,6 +348,9 @@ test("a tool dialog takes Esc and Enter like the reference, keeps other keys ins
   const fieldEnter = keyEvent(field, "Enter");
   h.document.dispatchEvent(fieldEnter);
   assert.equal(pressed, 1, "Enter in a text field does not press the primary button");
+  const arrow = keyEvent(dialog.querySelector(".dialog-body"), "ArrowDown");
+  h.document.dispatchEvent(arrow);
+  assert.deepEqual(arrow.calls, ["stop", "prevent"], "dialog without a listbox keeps ArrowDown inside");
   dialog.dispatchEvent({ type: "click", target: dialog });
   assert.equal(dialog.open, true, "a click on the backdrop does not close it");
   const esc = keyEvent(dialog, "Escape");
@@ -357,6 +360,20 @@ test("a tool dialog takes Esc and Enter like the reference, keeps other keys ins
   const after = keyEvent(h.document.body, "x");
   h.document.dispatchEvent(after);
   assert.deepEqual(after.calls, [], "keys are not captured once the dialog is closed");
+
+  const paste = $(h.document, "sheet-name-paste-dialog");
+  paste.showModal();
+  const pasteArrow = keyEvent(paste.querySelector(".dialog-body"), "ArrowDown");
+  h.document.dispatchEvent(pasteArrow);
+  assert.deepEqual(pasteArrow.calls, [], "document capture lets ArrowDown reach a listbox dialog");
+  let bubbledToDoc = 0;
+  const onDocBubble = (ev) => { if (ev.key === "ArrowDown") bubbledToDoc += 1; };
+  h.document.addEventListener("keydown", onDocBubble);
+  paste.querySelector('[role="listbox"]').dispatchEvent({ type: "keydown", key: "ArrowDown" });
+  h.document.removeEventListener("keydown", onDocBubble);
+  assert.equal(bubbledToDoc, 0, "listbox dialog keeps ArrowDown from bubbling past the dialog");
+  paste.close();
+  paste.dispatchEvent({ type: "close", target: paste });
 });
 
 test("the dragged position of a dialog stays after it is closed; the find dialog is dragged by its title like the reference", async () => {

@@ -3,11 +3,11 @@
 #[cfg(test)]
 use super::{
     cf_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES, NEW_DOC_IDS, NUMFMT_LINES,
-    QUIT_ID, SEPARATOR, THEME_IDS,
+    QUIT_ID, SEPARATOR, THEME_IDS, USE_IN_FORMULA_LINES,
 };
 use super::{
     menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, HELP, NEW_DOCS, NUMFMT, PASTE,
-    S, SELECT_ALL, THEME, WINDOW,
+    S, SELECT_ALL, THEME, USE_IN_FORMULA, WINDOW,
 };
 
 const FILE_HWP: MenuSpec = menu(
@@ -459,6 +459,7 @@ const FORMULA_SHEET: MenuSpec = menu(
         "sheet:name-define",
         "sheet:name-manage",
         "sheet:name-create",
+        USE_IN_FORMULA,
         S,
         CALC_OPTIONS,
         "sheet:calc-now",
@@ -706,6 +707,7 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 CF => ids.extend(cf_ids()),
+                USE_IN_FORMULA => ids.extend(USE_IN_FORMULA_LINES),
                 CALC_OPTIONS => ids.extend(CALC_OPTIONS_LINES),
                 QUIT_ID => {}
                 line if line == SEPARATOR || line.starts_with('@') => {}

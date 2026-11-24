@@ -18,8 +18,8 @@
   const MODE_LABEL = { enter: "입력", edit: "편집", point: "참조" };
   const ARROW_STEP = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
   const HIGHLIGHT_PREFIX = "eo-ref-";
-  // Keys that keep a pointed reference alive: the movers, the modifiers and F4.
-  const KEEP_POINT_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "F4", ...Object.keys(ARROW_STEP)]);
+  // Keys that keep a pointed reference alive: the movers, the modifiers, F4, and F3 (Paste Name).
+  const KEEP_POINT_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "F3", "F4", ...Object.keys(ARROW_STEP)]);
 
   function latinKeyOf(ev) {
     const fn = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.latinKeyOf;
@@ -52,6 +52,7 @@
     let dragging = null;
     let writing = false;
     let detaching = false;
+    let holdingBlur = false;
     // A press that ends the entry out on another sheet is under way (see `leave`).
     let leaving = false;
     let painted = false;
@@ -130,9 +131,20 @@
       return td && deps.stateOf(td)?.mode && deps.editable(td) ? cellSurface(td) : null;
     }
 
+    const originSheet = () => (session ? session.sheet : deps.getSheetName());
+    const namesList = () => (typeof deps.getNames === "function" ? deps.getNames() : []);
+
+    function activeSlotSurface() {
+      const s = surface();
+      if (s) return s;
+      const bar = barEl();
+      if (bar && document.activeElement === bar) return barSurface(bar);
+      return null;
+    }
+
     function contextOf(s) {
       const { text, from, to } = s.read();
-      return P.pointContext(text, from, to);
+      return P.pointContext(text, from, to, namesList(), originSheet());
     }
 
     // ---- status, colours, boxes --------------------------------------------------------------------------------------
@@ -181,6 +193,15 @@
     // The sheet and the cells a reference of the formula points at, when it is on the sheet on show (else null).
     function targetOf(span) {
       const here = deps.getSheetName().toLowerCase();
+      if (span.kind === "name") {
+        const lookupSheet = span.sheet ? P.sheetOf(span.sheet) : originSheet();
+        const def = (typeof deps.findName === "function" ? deps.findName(span.name, lookupSheet) : null) ?? span.def ?? null;
+        if (!def) return null;
+        const resolved = P.resolveNameTarget(def.refersTo);
+        if (!resolved) return null;
+        const { endpoints, range } = resolved;
+        return sheetSpanSet(endpoints.start, endpoints.end, endpoints.whole).has(here) ? range : null;
+      }
       if (span.ref === null) {
         const sheet = deps.getSheetName();
         const tables = deps.tablesOf ? deps.tablesOf(sheet) : deps.tablesIn(sheet, 1, 1, grid.MAX_ROWS, grid.MAX_COLS);
@@ -189,7 +210,7 @@
       const rg = P.rangeOf(span.ref);
       if (!rg) return null;
       if (!span.sheet) {
-        const origin = (session ? session.sheet : deps.getSheetName()).toLowerCase();
+        const origin = originSheet().toLowerCase();
         return origin === here ? rg : null;
       }
       const ep = P.sheetEndpoints(span.sheet);
@@ -266,7 +287,7 @@
       const bar = barEl();
       const copy = byId("sheet-formula-colors");
       if (!bar || !copy) return;
-      const spans = editing ? P.colorSpans(bar.value) : [];
+      const spans = editing ? P.colorSpans(bar.value, namesList(), originSheet()) : [];
       const colors = P.colorIndexes(spans, colorCount());
       copy.hidden = spans.length === 0;
       bar.classList.toggle("colored", spans.length > 0);
@@ -308,7 +329,7 @@
       if (!s && !painted) return;
       painted = Boolean(s);
       applyPalette();
-      shown.spans = s ? P.colorSpans(s.text()) : [];
+      shown.spans = s ? P.colorSpans(s.text(), namesList(), originSheet()) : [];
       shown.colors = P.colorIndexes(shown.spans, colorCount());
       paintBoxes();
       paintCellText(s, shown.spans, shown.colors);
@@ -473,7 +494,7 @@
       if (ev.key === "F2") return turn(ev, s);
       const cmdT = ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.isComposing && (ev.key?.toLowerCase?.() === "t" || latinKeyOf(ev) === "T");
       if ((ev.key === "F4" || cmdT) && cycle(ev, s)) return true;
-      if (point && !KEEP_POINT_KEYS.has(ev.key)) {
+      if (point && (!KEEP_POINT_KEYS.has(ev.key) || (ev.key === "F3" && (ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey)))) {
         point = null;
         tabSpan = null;
         refresh();
@@ -631,18 +652,117 @@
       return Boolean(s && (point || session || contextOf(s).mode !== "none"));
     }
 
+    const hasInsertSurface = () => Boolean(activeSlotSurface());
+
+    function isEditingFormula() {
+      const s = activeSlotSurface();
+      return Boolean(s && s.text().startsWith("="));
+    }
+
+    function insertName(nameText) {
+      const s = activeSlotSurface();
+      if (!s || !nameText) return false;
+      const { text, from, to } = s.read();
+      const ctx = point ? pointedCtx() : P.pointContext(text, from, to, namesList(), originSheet());
+      let slot = ctx;
+      let payload = nameText;
+      if (slot.mode === "none") {
+        if (!text) {
+          slot = { mode: "caret", start: 0, end: 0, span: null };
+          payload = "=" + nameText;
+        } else if (text.startsWith("=")) {
+          const a = Math.max(1, from);
+          const b = Math.max(a, to);
+          slot = { mode: "caret", start: a, end: b, span: null };
+        } else {
+          slot = { mode: "caret", start: from, end: to, span: null };
+        }
+      }
+      const out = P.applyRef(text, slot, payload);
+      point = null;
+      tabSpan = null;
+      if (s.kind === "bar") barDirty = true;
+      s.setMode("edit");
+      writing = true;
+      s.write(out.text, out.caret);
+      writing = false;
+      refresh();
+      return true;
+    }
+
+    function captureSlot() {
+      const s = activeSlotSurface();
+      if (!s) return null;
+      const { text, from, to } = s.read();
+      const active = deps.getActiveCell();
+      return {
+        kind: s.kind,
+        row: s.kind === "cell" ? s.el._row : active.r,
+        col: s.kind === "cell" ? s.el._col : active.c,
+        text,
+        from,
+        to,
+        mode: s.mode(),
+        point: point ? { ...point } : null,
+        session: session ? { ...session } : null,
+        tabSpan: tabSpan ? { ...tabSpan } : null,
+        barDirty,
+        barMode,
+      };
+    }
+
+    function beginInsertHold() {
+      const slot = captureSlot();
+      holdingBlur = true;
+      return slot;
+    }
+
+    function endInsertHold(slot, nameText) {
+      let ok = false;
+      try {
+        if (!slot) {
+          if (nameText) ok = Boolean(deps.startFormulaWithName?.(nameText));
+          else deps.focusAnchor?.();
+          return ok;
+        }
+        session = slot.session ? { ...slot.session } : null;
+        point = slot.point ? { ...slot.point } : null;
+        tabSpan = slot.tabSpan ? { ...slot.tabSpan } : null;
+        barDirty = slot.kind === "bar" ? (slot.barDirty || Boolean(nameText)) : slot.barDirty;
+        barMode = slot.kind === "bar" ? slot.barMode : barMode;
+        if (slot.kind === "bar") {
+          const bar = barEl();
+          if (bar) {
+            bar.focus?.();
+            bar.value = slot.text;
+            bar.setSelectionRange?.(slot.from, slot.to);
+          }
+        } else {
+          deps.focusCell?.(slot.row, slot.col, slot.text, slot.from, slot.to, slot.mode);
+        }
+      } finally {
+        holdingBlur = false;
+      }
+      if (nameText) {
+        ok = insertName(nameText);
+      } else {
+        refresh();
+      }
+      return ok;
+    }
+
     function bind() {
       const bar = barEl();
       if (bar) {
         bar.addEventListener("focus", () => {
-          if (session) return;
+          if (session || holdingBlur) return;
           barMode = "edit";
           point = null;
           tabSpan = null;
           refresh();
         });
         bar.addEventListener("blur", () => {
-          if (!session) endBarEdit();
+          if (!session && !holdingBlur) endBarEdit();
         });
         bar.addEventListener("input", () => {
           barDirty = true;
@@ -698,6 +818,14 @@
       editedEnded: editEnded,
       clearPoint,
       holdsBar: () => Boolean(session),
+      holdsBlur: () => holdingBlur,
+      originSheet,
+      hasInsertSurface,
+      holdsFormulaMenu: hasInsertSurface,
+      isEditingFormula,
+      insertName,
+      beginInsertHold,
+      endInsertHold,
     };
   }
 

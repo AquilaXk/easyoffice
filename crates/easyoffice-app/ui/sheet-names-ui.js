@@ -77,6 +77,7 @@
         sheetHistory.commit(record);
         refreshNameBox();
         renderManager();
+        refreshUseMenu();
         say(text);
         return true;
       });
@@ -236,9 +237,31 @@
           return;
         }
         const def = names.find(li.dataset.name, li.dataset.scope || getActiveSheetName());
-        if (def) void goTo(def).then(() => focusAnchor());
+        if (!def) return;
+        if (deps.isEditingFormula?.()) {
+          insertDefinedName(def);
+          return;
+        }
+        void goTo(def).then(() => focusAnchor());
       });
-      names.on("changed", () => deps.onNamesChanged?.());
+      document.addEventListener("mousedown", (ev) => {
+        const box = popup();
+        if (!box || box.hidden) return;
+        if (ev.target?.closest?.("#active-cell-ref, #btn-name-box-list, #sheet-name-box-list")) return;
+        closeList();
+      });
+      document.addEventListener("keydown", (ev) => {
+        const box = popup();
+        if (!box || box.hidden || ev.key !== "Escape") return;
+        if (ev.target === el || document.querySelector?.("dialog[open]")) return;
+        closeList();
+        ev.preventDefault?.();
+        ev.stopPropagation?.();
+      }, true);
+      names.on("changed", () => {
+        refreshUseMenu();
+        deps.onNamesChanged?.();
+      });
     }
 
     // ---- 이름 관리 ---------------------------------------------------------------------------------------
@@ -471,19 +494,213 @@
       });
     }
 
+    // ---- 수식에서 사용 / 이름 붙여넣기 ----------------------------------------------------------------
+
+    let useMenuStamp = "";
+    let pasteOpen = false;
+
+    function formatDefinedNameRef(def) {
+      if (!def) return "";
+      const origin = deps.getFormulaOriginSheet?.() || getActiveSheetName();
+      const active = getActiveSheetName();
+      if (names.fold(origin) !== names.fold(active)) {
+        if (def.scope && names.fold(def.scope) !== names.fold(origin)) {
+          return host.__EASYOFFICE_SHEET_UTILS__.quoteFormulaSheetName(def.scope) + "!" + def.name;
+        }
+        const onOrigin = names.find(def.name, origin);
+        if (onOrigin && onOrigin.scope && names.fold(onOrigin.scope) === names.fold(origin)) {
+          return host.__EASYOFFICE_SHEET_UTILS__.quoteFormulaSheetName(active) + "!" + def.name;
+        }
+      }
+      return def.name;
+    }
+
+    function insertDefinedName(def) {
+      const text = formatDefinedNameRef(def);
+      if (!text) return false;
+      if (deps.hasFormulaEditSurface?.()) return Boolean(deps.insertFormulaName?.(text));
+      return Boolean(deps.endFormulaInsertHold?.(null, text));
+    }
+
+    function refreshUseMenu() {
+      const menu = byId("sheet-name-use-menu");
+      const sep = byId("sheet-name-use-sep");
+      if (!menu || !sep) return;
+      const sheet = getActiveSheetName();
+      const stamp = names.getVersion() + "|" + sheet;
+      if (useMenuStamp === stamp) return;
+      useMenuStamp = stamp;
+      for (const old of Array.from(menu.querySelectorAll(".md-item[data-name-use]"))) old.remove();
+      const shown = names.visibleFor(sheet);
+      sep.hidden = shown.length === 0;
+      for (const def of shown) {
+        const item = document.createElement("div");
+        item.className = "md-item";
+        item.setAttribute("role", "menuitem");
+        item.setAttribute("tabindex", "-1");
+        item.dataset.nameUse = def.name;
+        if (def.scope) item.dataset.scope = def.scope;
+        const label = document.createElement("span");
+        label.className = "md-label";
+        label.textContent = def.name;
+        item.appendChild(label);
+        menu.insertBefore(item, sep);
+      }
+    }
+
+    async function openPasteName() {
+      if (pasteOpen) return false;
+      const listEl = byId("sheet-name-paste-list");
+      const okBtn = byId("btn-sheet-name-paste-ok");
+      const dialog = byId("sheet-name-paste-dialog");
+      if (!listEl || !okBtn || !dialog) return false;
+      const shown = names.visibleFor(getActiveSheetName(), names.MAX_NAMES);
+      let pickedIndex = shown.length > 0 ? 0 : -1;
+      const rows = [];
+      listEl.replaceChildren();
+      shown.forEach((def, i) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.dataset.index = String(i);
+        for (const text of [def.name, def.refersTo, scopeLabel(def)]) {
+          const span = document.createElement("span");
+          span.textContent = text;
+          li.appendChild(span);
+        }
+        rows.push(li);
+        listEl.appendChild(li);
+      });
+      const updatePasteSelection = () => {
+        rows.forEach((li, i) => {
+          li.setAttribute("aria-selected", i === pickedIndex ? "true" : "false");
+        });
+        if (pickedIndex >= 0 && pickedIndex < rows.length) {
+          rows[pickedIndex].scrollIntoView?.({ block: "nearest" });
+        }
+        okBtn.disabled = pickedIndex < 0 || pickedIndex >= shown.length;
+      };
+      updatePasteSelection();
+      kit.note("sheet-name-paste-status", "");
+      pasteOpen = true;
+      const held = deps.beginFormulaInsertHold?.() ?? null;
+      let chosen = null;
+      try {
+        chosen = await kit.modal(
+          "sheet-name-paste-dialog",
+          "btn-sheet-name-paste-ok",
+          () => (pickedIndex >= 0 && pickedIndex < shown.length ? shown[pickedIndex] : null),
+          (finish) => {
+            const onClick = (ev) => {
+              const li = ev.target?.closest?.("li");
+              if (!li) return;
+              const next = Number(li.dataset.index);
+              if (!Number.isInteger(next) || next < 0 || next >= shown.length) return;
+              pickedIndex = next;
+              updatePasteSelection();
+            };
+            const onDblClick = (ev) => {
+              const li = ev.target?.closest?.("li");
+              if (!li) return;
+              const next = Number(li.dataset.index);
+              if (!Number.isInteger(next) || next < 0 || next >= shown.length) return;
+              pickedIndex = next;
+              finish(shown[pickedIndex]);
+            };
+            const onKeydown = (ev) => {
+              if (ev.key === "ArrowDown" && shown.length > 0) {
+                ev.preventDefault();
+                pickedIndex = Math.min(shown.length - 1, pickedIndex + 1);
+                updatePasteSelection();
+              } else if (ev.key === "ArrowUp" && shown.length > 0) {
+                ev.preventDefault();
+                pickedIndex = Math.max(0, pickedIndex - 1);
+                updatePasteSelection();
+              } else if (ev.key === "Home" && shown.length > 0) {
+                ev.preventDefault();
+                pickedIndex = 0;
+                updatePasteSelection();
+              } else if (ev.key === "End" && shown.length > 0) {
+                ev.preventDefault();
+                pickedIndex = shown.length - 1;
+                updatePasteSelection();
+              } else if (ev.key === "Enter" && pickedIndex >= 0 && pickedIndex < shown.length) {
+                ev.preventDefault();
+                finish(shown[pickedIndex]);
+              }
+            };
+            listEl.addEventListener("click", onClick);
+            listEl.addEventListener("dblclick", onDblClick);
+            dialog.addEventListener("keydown", onKeydown);
+            return () => {
+              listEl.removeEventListener("click", onClick);
+              listEl.removeEventListener("dblclick", onDblClick);
+              dialog.removeEventListener("keydown", onKeydown);
+            };
+          },
+          () => {
+            if (shown.length > 0) okBtn.focus?.();
+            else {
+              dialog.tabIndex = -1;
+              dialog.focus?.();
+            }
+          }
+        );
+      } finally {
+        pasteOpen = false;
+      }
+      const payload = chosen ? formatDefinedNameRef(chosen) : "";
+      return Boolean(deps.endFormulaInsertHold?.(held, payload || null));
+    }
+
+    function bindUseMenu() {
+      const formulaMenu = document.querySelector('.menu-item[data-menu="formula"]');
+      formulaMenu?.addEventListener("mousedown", (ev) => {
+        refreshUseMenu();
+        if (deps.holdsFormulaMenu?.()) ev.preventDefault();
+      });
+      formulaMenu?.addEventListener("click", () => refreshUseMenu());
+      formulaMenu?.addEventListener("keydown", () => refreshUseMenu());
+      byId("sheet-name-use-menu")?.addEventListener("click", (ev) => {
+        const item = ev.target?.closest?.(".md-item[data-name-use]");
+        if (!item) return;
+        ev.stopPropagation?.();
+        host.__EASYOFFICE_CLOSE_MENUS__?.(document);
+        const def = names.find(item.dataset.nameUse, item.dataset.scope || getActiveSheetName());
+        if (def) insertDefinedName(def);
+      });
+    }
+
     function bind() {
       if (state.bound) return;
       state.bound = true;
       bindNameBox();
       bindDialogs();
+      bindUseMenu();
+      refreshUseMenu();
     }
 
     const actions = {
       "name-define": () => Promise.resolve(openEdit(null)),
       "name-manage": () => Promise.resolve(openManager()),
       "name-create": () => Promise.resolve(openCreate()),
+      "name-paste": () => openPasteName(),
     };
-    return { actions, bind, refreshNameBox, openManager, openEdit, openCreate, confirmCreate, deleteName, checkCandidate, commitNameBox, goTo, state: () => state };
+    return {
+      actions,
+      bind,
+      refreshNameBox,
+      refreshUseMenu,
+      openManager,
+      openEdit,
+      openCreate,
+      openPasteName,
+      confirmCreate,
+      deleteName,
+      checkCandidate,
+      commitNameBox,
+      goTo,
+      state: () => state,
+    };
   }
 
   host.__EASYOFFICE_SHEET_NAMES_MESSAGES__ = MESSAGES;

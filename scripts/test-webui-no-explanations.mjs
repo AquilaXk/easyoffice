@@ -16,7 +16,7 @@ const INDEX_HTML = UI("index.html");
 const STATUS_PARAGRAPHS = new Set([
   "smart-stats", "smart-summary-output", "pii-result-text", "security-status-text", "bench-result-box", "pdf-splitmerge-error",
   "sheet-cf-status", "sheet-dv-status", "sheet-pivot-status", "sheet-dv-alert-message", "sheet-numfmt-status",
-  "sheet-filter-status", "sheet-sort-status", "sheet-tab-delete-message", "sheet-names-status", "sheet-name-edit-status", "sheet-name-delete-message", "sheet-name-create-status",
+  "sheet-filter-status", "sheet-sort-status", "sheet-tab-delete-message", "sheet-names-status", "sheet-name-edit-status", "sheet-name-paste-status", "sheet-name-delete-message", "sheet-name-create-status",
   "sheet-link-status", "sheet-table-status", "sheet-ts-status", "sheet-dedupe-status", "sheet-slicer-status", "sheet-chart-status",
   "sheet-image-status", "sheet-note-status",
   "slide-layout-status", "slide-shape-status", "slide-table-status", "slide-chart-status", "slide-image-status",

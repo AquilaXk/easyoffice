@@ -246,6 +246,7 @@
     "sheet:protect-workbook": "sheet-act:workbook-protect",
     "sheet:protect-ranges": "sheet-act:range-allow",
     "sheet:name-create": "sheet-act:name-create",
+    "sheet:name-paste": "sheet-act:name-paste",
     "sheet:page-setup": "sheet-act:page-setup",
     "sheet:print-area-set": "sheet-act:print-area-set",
     "sheet:print-area-clear": "sheet-act:print-area-clear",
@@ -622,6 +623,18 @@
     // dialog is the reference's own non-modal dialog and keeps its own keys and focus (`find-dialog.ts`).
     function enableDialogKeys(dialog) {
       if (dialog.classList.contains("find-dialog")) return;
+      const listboxArrows = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+      const insideDialog = (target) => (
+        target === dialog
+        || (typeof dialog.contains === "function" ? dialog.contains(target) : target?.closest?.("dialog") === dialog)
+      );
+      const allowsListboxArrow = (ev, editable) => (
+        !editable
+        && listboxArrows.has(ev.key)
+        && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey
+        && insideDialog(ev.target)
+        && Boolean(dialog.querySelector?.('[role="listbox"]'))
+      );
       const capture = (ev) => {
         // The app's combo boxes (custom-select.js) work by keyboard on their own keydown handlers.
         if (ev.target?.closest?.(".custom-select") && ev.key !== "Escape" && !ev.ctrlKey && !ev.metaKey) return;
@@ -635,13 +648,19 @@
           ev.stopPropagation();
           ev.preventDefault();
           dialog.querySelector(".dialog-btn-primary")?.click();
+        } else if (allowsListboxArrow(ev, editable)) {
+          return;
         } else {
           ev.stopPropagation();
           if (!editable) ev.preventDefault();
         }
       };
+      const keepArrowInside = (ev) => {
+        if (allowsListboxArrow(ev, false)) ev.stopPropagation();
+      };
       const release = () => document.removeEventListener("keydown", capture, true);
       dialog.addEventListener("close", release);
+      dialog.addEventListener("keydown", keepArrowInside);
       for (const method of ["showModal", "show"]) {
         const open = dialog[method];
         if (typeof open !== "function") continue;
@@ -649,7 +668,7 @@
           const out = open.apply(this, args);
           document.addEventListener("keydown", capture, true);
           const primary = this.querySelector(".dialog-btn-primary");
-          if (primary) primary.focus();
+          if (primary && !primary.disabled) primary.focus();
           else {
             this.tabIndex = -1;
             this.focus();

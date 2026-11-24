@@ -149,7 +149,7 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", CF: "@cf", CALC_OPTIONS: "@calc-options", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function readRustLayoutSources() {
   let src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
@@ -280,7 +280,7 @@ function nativeRows(menu) {
       return sub ? `${sub.title} > ${rowsOf(sub.lines).join(" | ")}` : labels.get(line) ?? line;
     });
   return menu.lines.map((line) => {
-    const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"], "@cf": ["조건부 서식", "CF"], "@calc-options": ["계산 옵션", "CALC_OPTIONS"] }[line];
+    const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"], "@cf": ["조건부 서식", "CF"], "@name-use": ["수식에서 사용", "USE_IN_FORMULA"], "@calc-options": ["계산 옵션", "CALC_OPTIONS"] }[line];
     if (submenu) return `${submenu[0]} > ${rowsOf(submenuLines(submenu[1])).join(" | ")}`;
     return labels.get(line) ?? line;
   });

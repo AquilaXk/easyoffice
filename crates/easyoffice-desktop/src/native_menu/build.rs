@@ -9,7 +9,7 @@ use super::layout::{
     self, MenuKind, MenuSpec, ALIGN, ALIGN_LINES, BORDER, BORDER_LINES, CALC_OPTIONS,
     CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
     NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME,
-    THEME_IDS,
+    THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
 use super::{check, custom, is_check_item, quit_item, spec, QUIT_ID};
 
@@ -44,6 +44,7 @@ fn submenu<R: Runtime>(app: &AppHandle<R>, menu: &MenuSpec) -> tauri::Result<Sub
             ALIGN => builder.item(&nested(app, "맞춤", &ALIGN_LINES)?),
             BORDER => builder.item(&nested(app, "테두리", &BORDER_LINES)?),
             CF => builder.item(&nested(app, "조건부 서식", &CF_LINES)?),
+            USE_IN_FORMULA => builder.item(&nested(app, "수식에서 사용", &USE_IN_FORMULA_LINES)?),
             CALC_OPTIONS => builder.item(&nested(app, "계산 옵션", &CALC_OPTIONS_LINES)?),
             // Paste and select all are system items: paste reaches the page's paste handler and
             // the text fields. Every system item carries its Korean text (the system language

@@ -683,6 +683,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     sa!("sheet:protect-ranges", "범위 편집 허용", "range-allow"),
     sa! { "sheet:name-create", "선택 영역에서 이름 만들기…", "name-create" },
+    sa!("sheet:name-paste", "이름 붙여넣기…", "name-paste"),
     sa!("sheet:page-setup", "쪽 설정…", "page-setup"),
     sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),
     sa! { "sheet:print-area-clear", "인쇄 영역 해제", "print-area-clear" },

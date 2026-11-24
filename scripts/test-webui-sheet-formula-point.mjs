@@ -737,3 +737,259 @@ test("manually typed structured references draw grid boxes in cell, formula bar 
   key(h10, "ArrowRight", { shiftKey: true });
   assert.equal(h10.textContent, "=표1[[#Headers],[2분기]:[3분기]]");
 });
+
+test("F3 (이름 붙여넣기) inserts defined names without committing incomplete formulas, restores on cancel, and starts =name from idle", async () => {
+  const { document, host } = await openSheet();
+  host.__EASYOFFICE_SHEET_NAMES__.replaceAll([
+    { name: "목표", refersTo: "Sheet1!$C$3:$C$5" },
+    { name: "비율", refersTo: "2" },
+  ], true);
+
+  const b9 = cell(document, "B9");
+  b9.focus();
+  typeText(document, "=SUM(");
+  assert.equal(key(b9, "F3"), false, "F3 opens 이름 붙여넣기 while editing cell formula");
+  await flushAsyncTurns(10);
+  const pasteDlg = document.getElementById("sheet-name-paste-dialog");
+  assert.equal(pasteDlg.open, true);
+  assert.equal(b9.dataset.editMode, "enter", "opening modal does not commit partial formula");
+  assert.deepEqual(
+    [...document.querySelectorAll("#sheet-name-paste-list li")].map((li) => li.querySelector("span").textContent),
+    ["목표", "비율"]
+  );
+
+  // Cancel preserves partial formula and cursor
+  pasteDlg.querySelector(".dialog-close").click();
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, false);
+  assert.equal(b9.textContent, "=SUM(");
+  assert.equal(b9.dataset.editMode, "enter");
+
+  // Re-open with F3, pick second entry with ArrowDown + 확인, color + ref box + evaluate
+  key(b9, "F3");
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, true);
+  key(pasteDlg, "ArrowDown");
+  assert.equal(document.querySelector('#sheet-name-paste-list li[aria-selected="true"]').dataset.index, "1");
+  key(pasteDlg, "ArrowUp");
+  document.getElementById("btn-sheet-name-paste-ok").click();
+  await flushAsyncTurns(10);
+  assert.equal(b9.textContent, "=SUM(목표");
+  assert.equal(boxes(document).length, 1, "inserted defined name draws its range box");
+  assert.deepEqual([...document.querySelectorAll("#sheet-formula-colors span[data-color]")].map((s) => s.textContent), ["목표"]);
+  typeText(document, ")");
+  key(b9, "Enter");
+  await flushAsyncTurns(30);
+  assert.equal(cell(document, "B9").dataset.formula, "=SUM(목표)");
+
+  // Starting from idle cell via F3 begins `=비율` edit mode (and Esc reverts cell cleanly)
+  const c9 = cell(document, "C9");
+  c9.focus();
+  key(c9, "F3");
+  await flushAsyncTurns(10);
+  key(pasteDlg, "ArrowDown");
+  key(pasteDlg, "Enter");
+  await flushAsyncTurns(10);
+  assert.equal(c9.textContent, "=비율");
+  assert.equal(c9.dataset.editMode, "edit");
+  assert.equal(boxes(document).length, 0, "constant defined name has no grid range box");
+  assert.deepEqual([...document.querySelectorAll("#sheet-formula-colors span[data-color]")].map((s) => s.textContent), ["비율"]);
+  key(c9, "Escape");
+  await flushAsyncTurns(10);
+  assert.equal(cell(document, "C9").textContent, "");
+});
+
+test("수식에서 사용 menu, Name Box dropdown, cross-sheet insertion, and cell replacement work on defined names", async () => {
+  const { document, host } = await openSheet();
+  host.__EASYOFFICE_SHEET_NAMES__.replaceAll([
+    { name: "목표", refersTo: "Sheet1!$C$3:$C$5" },
+    { name: "타시트", scope: "Sheet2", refersTo: "Sheet2!$B$2" },
+  ], true);
+
+  // Clicking 수식 > 수식에서 사용 > 목표 preserves cell edit focus and inserts into formula
+  const b9 = cell(document, "B9");
+  b9.focus();
+  typeText(document, "=SUM(");
+  const formulaMenu = document.querySelector('.menu-item[data-menu="formula"]');
+  assert.equal(formulaMenu.dispatchEvent({ type: "mousedown", target: formulaMenu.querySelector(".menu-title") }), false, "menu press preserves edit focus");
+  const useItem = document.querySelector('#sheet-name-use-menu .md-item[data-name-use="목표"]');
+  assert.ok(useItem);
+  useItem.dispatchEvent({ type: "mousedown", target: useItem, bubbles: true });
+  useItem.click();
+  assert.equal(b9.textContent, "=SUM(목표");
+  assert.equal(boxes(document).length, 1);
+
+  // Clicking a cell while caret sits on a defined name replaces it with the pointed cell
+  click(document, "D3");
+  assert.equal(b9.textContent, "=SUM(D3");
+
+  // Selecting from Name Box dropdown during active formula edit inserts instead of navigating
+  document.getElementById("btn-name-box-list").dispatchEvent({ type: "mousedown", target: document.getElementById("btn-name-box-list") });
+  const listItem = document.querySelector('#sheet-name-box-list li[data-name="목표"]');
+  assert.ok(listItem);
+  listItem.dispatchEvent({ type: "mousedown", target: listItem, bubbles: true });
+  assert.equal(b9.textContent, "=SUM(목표");
+
+  // Cross-sheet formula bar edit inserts Sheet2!타시트 when picking a Sheet2-scoped name on Sheet2
+  typeText(document, "+");
+  clickTab(document, "Sheet2");
+  await flushAsyncTurns(20);
+  formulaMenu.dispatchEvent({ type: "mousedown", target: formulaMenu.querySelector(".menu-title") });
+  const localItem = document.querySelector('#sheet-name-use-menu .md-item[data-name-use="타시트"]');
+  assert.ok(localItem);
+  localItem.click();
+  assert.equal(bar(document).value, "=SUM(목표+Sheet2!타시트");
+  assert.equal(boxes(document).length, 1, "only Sheet2 box draws on Sheet2");
+  typeBar(document, ")");
+  key(bar(document), "Enter");
+  await flushAsyncTurns(40);
+  assert.equal(cell(document, "B9").dataset.formula, "=SUM(목표+Sheet2!타시트)");
+  assert.equal(document.querySelector("#sheet-tab-bar .sheet-tab-btn.active").dataset.sheetTab, "Sheet1");
+});
+
+test("F3 while pointing a cell preserves or replaces the pointed ref, formula bar F3 works, and F2/protection guards hold", async () => {
+  const { document, host } = await openSheet();
+  host.__EASYOFFICE_SHEET_NAMES__.replaceAll([{ name: "목표", refersTo: "Sheet1!$C$3:$C$5" }], true);
+  const pasteDlg = document.getElementById("sheet-name-paste-dialog");
+
+  // 1) Pointing C3 then cancelling F3 keeps point mode ("참조") and pointed C3 intact; confirming replaces C3
+  const b9 = cell(document, "B9");
+  b9.focus();
+  typeText(document, "=SUM(");
+  click(document, "C3");
+  assert.equal(b9.textContent, "=SUM(C3");
+  assert.equal(mode(document).textContent, "참조");
+  key(b9, "F3");
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, true);
+  pasteDlg.querySelector(".dialog-close").click();
+  await flushAsyncTurns(10);
+  assert.equal(b9.textContent, "=SUM(C3");
+  assert.equal(mode(document).textContent, "참조");
+  assert.equal(boxes(document).length, 1);
+
+  key(b9, "F3");
+  await flushAsyncTurns(10);
+  document.getElementById("btn-sheet-name-paste-ok").click();
+  await flushAsyncTurns(10);
+  assert.equal(b9.textContent, "=SUM(목표");
+  assert.equal(mode(document).textContent, "편집");
+  assert.equal(key(b9, "F4"), false, "F4 does nothing on a defined name");
+  assert.equal(b9.textContent, "=SUM(목표");
+  key(b9, "Escape");
+  await flushAsyncTurns(10);
+
+  // 2) Same-sheet formula bar editing with F3 cancel & confirm
+  cell(document, "B9").focus();
+  typeBar(document, "=1+");
+  key(bar(document), "F3");
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, true);
+  pasteDlg.querySelector(".dialog-close").click();
+  await flushAsyncTurns(10);
+  assert.equal(bar(document).value, "=1+");
+  key(bar(document), "F3");
+  await flushAsyncTurns(10);
+  key(pasteDlg, "Enter");
+  await flushAsyncTurns(10);
+  assert.equal(bar(document).value, "=1+목표");
+  assert.equal(boxes(document).length, 1);
+  key(bar(document), "Enter");
+  await flushAsyncTurns(30);
+  assert.equal(cell(document, "B9").dataset.formula, "=1+목표");
+
+  // 3) Re-entering saved formula via F2 shows defined-name box and colors immediately
+  cell(document, "B9").focus();
+  key(cell(document, "B9"), "F2");
+  await flushAsyncTurns(10);
+  assert.equal(boxes(document).length, 1);
+  key(cell(document, "B9"), "Escape");
+  await flushAsyncTurns(10);
+
+  // 4) Idle F3 insert on a locked cell of a protected sheet is refused without altering the cell
+  const c9 = cell(document, "C9");
+  host.__EASYOFFICE_SHEET_LAYOUT__.setProtect("Sheet1", { on: true, deny: [] });
+  c9.focus();
+  key(c9, "F3");
+  await flushAsyncTurns(10);
+  document.getElementById("btn-sheet-name-paste-ok").click();
+  await flushAsyncTurns(10);
+  assert.equal(document.getElementById("sheet-protect-alert-dialog").open, true);
+  assert.equal(cell(document, "C9").textContent, "");
+});
+
+test("F3 empty focus, stable row DOM across selection, 3D tabSpan on cancel, outside-click name box, and F3 input guards", async () => {
+  const { document, host } = await openSheet();
+  const pasteDlg = document.getElementById("sheet-name-paste-dialog");
+  const closePaste = async () => { pasteDlg.close(); pasteDlg.dispatchEvent({ type: "close", target: pasteDlg }); await flushAsyncTurns(10); };
+
+  // 1) Empty F3 disables OK and never focuses .dialog-close; clicking rows keeps <li> node identity for dblclick
+  cell(document, "B9").focus();
+  key(cell(document, "B9"), "F3");
+  await flushAsyncTurns(10);
+  assert.equal(pasteDlg.open, true);
+  assert.equal(document.getElementById("btn-sheet-name-paste-ok").disabled, true);
+  assert.equal(document.activeElement?.classList?.contains("dialog-close"), false);
+  await closePaste();
+
+  host.__EASYOFFICE_SHEET_NAMES__.replaceAll([{ name: "목표", refersTo: "Sheet1!$C$3:$C$5" }, { name: "예산", refersTo: "Sheet1!$D$3:$D$5" }], true);
+  cell(document, "B9").focus();
+  key(cell(document, "B9"), "F3");
+  await flushAsyncTurns(10);
+  const firstLi = document.querySelector('#sheet-name-paste-list li[data-index="0"]');
+  const secondLi = document.querySelector('#sheet-name-paste-list li[data-index="1"]');
+  secondLi.dispatchEvent({ type: "click", target: secondLi, bubbles: true });
+  assert.equal(document.querySelector('#sheet-name-paste-list li[data-index="1"]'), secondLi);
+  assert.equal(secondLi.getAttribute("aria-selected"), "true");
+  assert.equal(firstLi.getAttribute("aria-selected"), "false");
+  await closePaste();
+
+  // 2) Clicking 이름 붙여넣기 from 수식 menu resets aria-expanded="false"
+  const formulaMenu = document.querySelector('.menu-item[data-menu="formula"]');
+  const title = formulaMenu.querySelector(".menu-title");
+  formulaMenu.classList.add("open");
+  title.setAttribute("aria-expanded", "true");
+  document.querySelector('.md-item[data-sheet-act="name-paste"]').click();
+  await flushAsyncTurns(10);
+  assert.equal(title.getAttribute("aria-expanded"), "false");
+  assert.equal(pasteDlg.open, true);
+  await closePaste();
+
+  // 3) Name Box dropdown closes on Escape (without cancelling formula) and on outside mousedown
+  const b9 = cell(document, "B9");
+  b9.focus();
+  typeText(document, "=1+");
+  document.getElementById("btn-name-box-list").dispatchEvent({ type: "mousedown", target: document.getElementById("btn-name-box-list") });
+  assert.equal(document.getElementById("sheet-name-box-list").hidden, false);
+  key(document, "Escape");
+  assert.equal(document.getElementById("sheet-name-box-list").hidden, true);
+  assert.equal(b9.textContent, "=1+");
+  document.getElementById("btn-name-box-list").dispatchEvent({ type: "mousedown", target: document.getElementById("btn-name-box-list") });
+  document.dispatchEvent({ type: "mousedown", target: document.body });
+  assert.equal(document.getElementById("sheet-name-box-list").hidden, true);
+
+  // 4) Cancelling F3 preserves 3D tabSpan, and F3 stays ignored inside sub-inputs
+  clickTab(document, "Sheet2");
+  await flushAsyncTurns(15);
+  click(document, "C4");
+  clickTab(document, "Sheet1", { shiftKey: true });
+  await flushAsyncTurns(15);
+  assert.equal(bar(document).value, "=1+Sheet2:Sheet1!C4");
+  key(bar(document), "F3");
+  await flushAsyncTurns(10);
+  pasteDlg.querySelector(".dialog-close").click();
+  await flushAsyncTurns(10);
+  clickTab(document, "Sheet2", { shiftKey: true });
+  await flushAsyncTurns(15);
+  assert.equal(bar(document).value, "=1+Sheet2!C4", "preserved 3D tabSpan collapses cleanly on Shift+Sheet2");
+  key(bar(document), "Escape");
+  await flushAsyncTurns(10);
+  for (const selector of ["#active-cell-ref", ".sheet-table-name"]) {
+    const inp = document.querySelector(selector);
+    if (!inp) continue;
+    inp.focus();
+    key(inp, "F3");
+    await flushAsyncTurns(5);
+    assert.equal(pasteDlg.open, false, selector);
+  }
+});
