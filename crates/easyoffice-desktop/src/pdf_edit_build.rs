@@ -17,13 +17,15 @@
 //! page contents, the fonts and the pictures are copied byte for byte (the content stream is
 //! decoded and compressed again by the library, pictures and fonts are not touched).
 //!
-//! Carried over (PD-245): safe `/Link` annotations (`http`, `https`, `mailto` and internal page or
-//! named destinations), existing text markup and note annotations (`/Highlight`, `/Underline`,
-//! `/StrikeOut`, `/Squiggly`, `/Text`), `/Catalog /Outlines` bookmarks, and interactive `/AcroForm`
-//! `/Widget` fields (`applicant` and `department` updated or added when requested), plus new
-//! phrase `/Highlight` and `/Underline` annotations positioned from glyph advances. Only the
-//! structure tree and document-level scripts/signatures are omitted; title, author, subject and
-//! keywords of the first PDF are kept.
+//! Carried over (PD-245, PD-266, PD-337): safe `/Link` annotations (`http`, `https`, `mailto`
+//! and internal page or named destinations), existing text markup and note annotations
+//! (`/Highlight`, `/Underline`, `/StrikeOut`, `/Squiggly`, `/Text`), carried page annotations
+//! (`/FreeText`, `/Ink`, `/Stamp`, `/Square`, `/Circle`, `/Line`, `/Polygon`, `/FileAttachment`),
+//! `/OCProperties` layers, `/PageLabels`, `/Names /EmbeddedFiles`, `/Metadata`, `/Catalog /Outlines`
+//! bookmarks, and interactive `/AcroForm` `/Widget` fields (`applicant` and `department` updated or
+//! added when requested), plus new phrase `/Highlight` and `/Underline` annotations positioned from
+//! glyph advances. Only the structure tree and document-level scripts/signatures are omitted; title,
+//! author, subject and keywords of the first PDF are kept.
 
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,

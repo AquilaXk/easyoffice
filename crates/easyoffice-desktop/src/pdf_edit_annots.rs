@@ -9,85 +9,44 @@
 // 결과다. 원본은 `/InkList`·`/CL`을 바꾸지 않지만 여기서는 같은 행렬로 옮긴다. 출처는
 // THIRD_PARTY_NOTICES.md에 있다.
 //
-//! Free text, ink and stamp annotations of the sources in the result (PD-266).
+//! Carried-over page annotations in the result (PD-266, PD-337).
 //!
 //! The annotations that `pdf_edit_preserve.rs` writes again field by field (links, text markup,
-//! notes) are the ones whose look the shell can draw itself. These three are drawn by their own
-//! appearance streams, and they hold more than a short list of fields can: so the dictionary is
-//! carried over as it is, key by key, with three changes. The rectangle and the points of the
-//! strokes and of a callout line move by the origin of the page's crop box, which is where the
-//! new page starts (as for every annotation of the page); the entries that point back at the page
-//! or at other annotations (`/P`, `/Parent`, `/Popup`, `/IRT`) or run something (`/A`, `/AA`) are
-//! left out; everything else, the appearance streams and the layer an annotation belongs to
-//! (`/OC`) included, is copied by reference with the page's own objects (`pdf_edit_carry.rs`).
+//! notes) are the ones whose look the shell can draw itself. The eight annotation kinds carried
+//! here (`FreeText`, `Ink`, `Stamp`, `Square`, `Circle`, `Line`, `Polygon`, `FileAttachment`) carry
+//! geometry, styles, optional appearance streams, optional content layer memberships, and (for
+//! `FileAttachment`) embedded file specifications. Each dictionary is copied by allowlisted keys,
+//! with `/Rect` and kind-specific coordinates (`/InkList`, `/CL`, `/L`, `/Vertices`, `/Path`)
+//! translated by the page crop-box origin; entries that point back at the page or other
+//! annotations (`/P`, `/Parent`, `/Popup`, `/IRT`) or run actions (`/A`, `/AA`) are left out.
+//! Non-`/AP`/`/OC`/`/FS` keys safely inline non-cyclic non-structural indirect values; `/AP` and
+//! `/OC` only retain validated appearance streams and layer dictionaries (`pdf_edit_annots_safe.rs`);
+//! `FileAttachment` requires an embedded `/EF` stream whose stream dictionary passes safety and
+//! budget checks (external path/URL file specifications are dropped and reported in `lost`).
 //!
 //! Library choice (the three steps of the implementation rule): (1) `hayro-write` copies a
-//! dictionary only as part of a page and its writer is private, so it cannot move a rectangle;
-//! (2) the JavaScript PDF viewers read these annotations for display and write them with their own
-//! appearance generators, which the shell does not need because the original streams are kept;
-//! (3) the key table below follows ISO 32000-1 §12.5.2 (annotation dictionaries), §12.5.6.6 (free
-//! text), §12.5.6.13 (ink) and §12.5.6.12 (rubber stamp); nothing was copied.
+//! dictionary only as part of a page and its writer is private, so it cannot move coordinates or
+//! sanitize `/FS`; (2) the JavaScript PDF viewers read these annotations for display only;
+//! (3) the key tables below follow ISO 32000-1 §12.5.2 (annotation dictionaries), §12.5.6.6 (free
+//! text), §12.5.6.7 (line), §12.5.6.8 (square and circle), §12.5.6.9 (polygon), §12.5.6.12 (rubber
+//! stamp), §12.5.6.13 (ink) and §12.5.6.15 (file attachment); nothing was copied.
 //!
 //! Every other kind of annotation that is not written elsewhere is counted and reported, never
 //! dropped silently (`lost_sentence`).
 
-use crate::pdf_edit_budget::MAX_PAGE_ANNOTS;
+use crate::pdf_edit_annots_safe::{
+    is_structural_dict, sanitize_ap, sanitize_filespec, sanitize_oc,
+};
+use crate::pdf_edit_budget::{
+    MAX_ATTACHMENTS, MAX_PAGE_ANNOTS, MAX_VALUE_INLINED_BYTES, MAX_VALUE_NODES,
+};
 use crate::pdf_edit_preserve::too_many_page_annots;
-use crate::pdf_edit_value::{Budget, Value};
+use crate::pdf_edit_value::{spend_bytes, spend_node, Budget, Value};
 use hayro_syntax::object::{Array, Dict, Name};
 use hayro_syntax::page::Page;
+use hayro_syntax::Pdf as ReadPdf;
 use std::collections::BTreeMap;
 
-/// The kinds carried over as dictionaries.
-const CARRIED: [&str; 3] = ["FreeText", "Ink", "Stamp"];
-/// The kinds that are written elsewhere (`pdf_edit_preserve.rs`, `pdf_edit_forms.rs`), and the
-/// pop-up, whose text is the `/Contents` of the annotation it belongs to.
-const WRITTEN_ELSEWHERE: [&str; 8] = [
-    "Link",
-    "Highlight",
-    "Underline",
-    "StrikeOut",
-    "Squiggly",
-    "Text",
-    "Widget",
-    "Popup",
-];
-/// The keys of a carried annotation. Everything not listed is left out, whatever it is.
-const KEYS: [&[u8]; 33] = [
-    b"Type",
-    b"Subtype",
-    b"Rect",
-    b"Contents",
-    b"NM",
-    b"M",
-    b"F",
-    b"AP",
-    b"AS",
-    b"Border",
-    b"BS",
-    b"BE",
-    b"C",
-    b"CA",
-    b"ca",
-    b"T",
-    b"Subj",
-    b"CreationDate",
-    b"RC",
-    b"DS",
-    b"DA",
-    b"Q",
-    b"IT",
-    b"RD",
-    b"IC",
-    b"LE",
-    b"CL",
-    b"InkList",
-    b"Name",
-    b"Intent",
-    b"Lang",
-    b"OC",
-    b"Rotate",
-];
 /// Longest annotation subtype name quoted in a warning (characters); the name comes from the file.
 const MAX_SUBTYPE_CHARS: usize = 24;
 /// Most subtype names listed in one warning.
@@ -96,11 +55,72 @@ const MAX_LISTED_SUBTYPES: usize = 6;
 /// How many annotations of each kind the result does not keep.
 pub type Lost = BTreeMap<String, usize>;
 
+fn is_carried_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "FreeText" | "Ink" | "Stamp" | "Square" | "Circle" | "Line" | "Polygon" | "FileAttachment"
+    )
+}
+
+fn is_written_elsewhere(kind: &str) -> bool {
+    matches!(
+        kind,
+        "Link" | "Highlight" | "Underline" | "StrikeOut" | "Squiggly" | "Text" | "Widget" | "Popup"
+    )
+}
+
+fn is_allowed_key(kind: &str, key: &[u8]) -> bool {
+    if matches!(
+        key,
+        b"Type"
+            | b"Subtype"
+            | b"Rect"
+            | b"Contents"
+            | b"NM"
+            | b"M"
+            | b"F"
+            | b"AP"
+            | b"AS"
+            | b"Border"
+            | b"BS"
+            | b"BE"
+            | b"C"
+            | b"CA"
+            | b"ca"
+            | b"T"
+            | b"Subj"
+            | b"CreationDate"
+            | b"RC"
+            | b"IT"
+            | b"RD"
+            | b"IC"
+            | b"LE"
+            | b"Name"
+            | b"Intent"
+            | b"Lang"
+            | b"OC"
+            | b"Rotate"
+    ) {
+        return true;
+    }
+    match kind {
+        "FreeText" | "Ink" | "Stamp" => {
+            matches!(key, b"DS" | b"DA" | b"Q" | b"CL" | b"InkList")
+        }
+        "Line" => matches!(key, b"L" | b"LL" | b"LLE" | b"LLO" | b"Cap" | b"CP" | b"CO"),
+        "Polygon" => matches!(key, b"Vertices" | b"Path"),
+        _ => false,
+    }
+}
+
 /// The carried annotations of one page, moved into the page space of the result, and the count
-/// of those that could not be (a rectangle that is not four numbers, strokes that are not points).
+/// of those that could not be (a rectangle that is not four numbers, strokes/lines/vertices that
+/// are not points, or an unsafe/external file attachment).
 pub fn scan_page(
+    pdf: &ReadPdf,
     page: &Page<'_>,
     budget: &mut Budget,
+    file_attachments: &mut usize,
     lost: &mut Lost,
 ) -> Result<Vec<Value>, String> {
     let Some(annots) = page.raw().get::<Array<'_>>(b"Annots") else {
@@ -118,12 +138,22 @@ pub fn scan_page(
             continue;
         };
         let kind = subtype.as_str();
-        if CARRIED.contains(&kind) {
-            match carry_annot(&annot, kind, (dx, dy), budget)? {
-                Some(value) => carried.push(value),
+        if is_carried_kind(kind) {
+            match carry_annot(pdf, &annot, kind, (dx, dy), budget)? {
+                Some(value) => {
+                    if kind == "FileAttachment" {
+                        *file_attachments += 1;
+                        if *file_attachments > MAX_ATTACHMENTS {
+                            return Err(format!(
+                                "첨부 파일 주석 수가 한도({MAX_ATTACHMENTS})를 초과합니다."
+                            ));
+                        }
+                    }
+                    carried.push(value);
+                }
                 None => *lost.entry(kind.to_string()).or_default() += 1,
             }
-        } else if !WRITTEN_ELSEWHERE.contains(&kind) {
+        } else if !is_written_elsewhere(kind) {
             *lost.entry(printable(kind)).or_default() += 1;
         }
     }
@@ -207,41 +237,121 @@ impl Matrix {
     }
 }
 
+/// Reads only allowlisted keys from `annot` into a `Value::Dict` using a shared per-annotation
+/// `own` node budget and build-wide `budget`. Only validated `/AP` streams, validated `/OC`
+/// layer references, and sanitized `/FS` embedded-file references retain indirect `ObjRef`s; all
+/// other keys are safely inlined without cycles or structural dictionaries.
+fn read_annot_entries(
+    pdf: &ReadPdf,
+    annot: &Dict<'_>,
+    kind: &str,
+    own: &mut usize,
+    own_bytes: &mut usize,
+    budget: &mut Budget,
+) -> Result<Value, String> {
+    spend_node(own, budget).map_err(|refused| refused.sentence("주석"))?;
+    let allow_dict = |dict: &Dict<'_>| !is_structural_dict(dict);
+    let mut entries = Vec::new();
+    for (key, raw) in annot.entries() {
+        let kb = key.as_ref();
+        if kb == b"FS" || !is_allowed_key(kind, kb) {
+            continue;
+        }
+        spend_node(own, budget).map_err(|refused| refused.sentence("주석"))?;
+        spend_bytes(kb.len(), own_bytes, budget).map_err(|refused| refused.sentence("주석"))?;
+        let val = match kb {
+            b"AP" => sanitize_ap(pdf, &raw, own, own_bytes, budget)?,
+            b"OC" => sanitize_oc(pdf, &raw, own, own_bytes, budget)?,
+            _ => {
+                let inlined =
+                    Value::read_inlined(&raw, 2, own, own_bytes, budget, pdf, &allow_dict)
+                        .map_err(|refused| refused.sentence("주석"))?;
+                (inlined != Value::Null).then_some(inlined)
+            }
+        };
+        if let Some(val) = val {
+            entries.push((kb.to_vec(), val));
+        }
+    }
+    Ok(Value::Dict(entries))
+}
+
 /// The annotation with only the listed keys, its rectangle and points moved by (`dx`, `dy`); `None`
-/// when what has to move cannot be read as numbers.
+/// when what has to move cannot be read as numbers or an attachment specification is unsafe.
 fn carry_annot(
+    pdf: &ReadPdf,
     annot: &Dict<'_>,
     kind: &str,
     (dx, dy): (f32, f32),
     budget: &mut Budget,
 ) -> Result<Option<Value>, String> {
-    let mut value = Value::read_dict(annot, |key| KEYS.contains(&key), budget)
-        .map_err(|refused| refused.sentence("주석"))?;
+    let mut own = MAX_VALUE_NODES;
+    let mut own_bytes = MAX_VALUE_INLINED_BYTES;
+    let mut value = read_annot_entries(pdf, annot, kind, &mut own, &mut own_bytes, budget)?;
     let mut cm = Matrix::new();
     cm.translate(f64::from(dx), f64::from(dy));
     let Some(rect) = value.get(b"Rect").and_then(rectangle) else {
         return Ok(None);
     };
     let moved = cm.transform_rectangle(rect);
-    if !moved.iter().all(|n| n.is_finite()) {
+    #[allow(clippy::cast_possible_truncation)]
+    let moved_f32 = moved.map(|n| n as f32);
+    if !moved_f32.iter().all(|n| n.is_finite()) {
         return Ok(None);
     }
-    #[allow(clippy::cast_possible_truncation)]
     value.set(
         b"Rect",
-        Value::Array(moved.iter().map(|&n| Value::Real(n as f32)).collect()),
+        Value::Array(moved_f32.into_iter().map(Value::Real).collect()),
     );
-    if let Some(strokes) = value.get_mut(b"InkList") {
-        if !transform_points(strokes, &cm) {
-            return Ok(None);
+    match kind {
+        "Ink" => {
+            let Some(strokes) = value.get_mut(b"InkList") else {
+                return Ok(None);
+            };
+            if !transform_points(strokes, &cm) {
+                return Ok(None);
+            }
         }
-    } else if kind == "Ink" {
-        return Ok(None);
-    }
-    if let Some(line) = value.get_mut(b"CL") {
-        if !transform_points(line, &cm) {
-            value.remove(b"CL");
+        "FreeText" => {
+            if let Some(line) = value.get_mut(b"CL") {
+                if !transform_points(line, &cm) {
+                    value.remove(b"CL");
+                }
+            }
         }
+        "Line" => {
+            let Some(line) = value.get_mut(b"L") else {
+                return Ok(None);
+            };
+            if !transform_flat_points(line, &cm, Some(4)) {
+                return Ok(None);
+            }
+        }
+        "Polygon" => {
+            let mut has_geometry = false;
+            if let Some(vertices) = value.get_mut(b"Vertices") {
+                if !transform_flat_points(vertices, &cm, None) {
+                    return Ok(None);
+                }
+                has_geometry = true;
+            }
+            if let Some(path) = value.get_mut(b"Path") {
+                if !transform_path(path, &cm) {
+                    return Ok(None);
+                }
+                has_geometry = true;
+            }
+            if !has_geometry {
+                return Ok(None);
+            }
+        }
+        "FileAttachment" => {
+            let Some(fs) = sanitize_filespec(pdf, annot, &mut own, &mut own_bytes, budget)? else {
+                return Ok(None);
+            };
+            value.set(b"FS", fs);
+        }
+        _ => {}
     }
     Ok(Some(value))
 }
@@ -255,6 +365,65 @@ fn rectangle(value: &Value) -> Option<[f64; 4]> {
         .filter(|rect| rect.iter().all(|n| n.is_finite()))
 }
 
+fn transform_point_pairs(items: &mut [Value], cm: &Matrix) -> bool {
+    if !items.len().is_multiple_of(2) || !items.iter().all(|item| item.as_f32().is_some()) {
+        return false;
+    }
+    for pair in items.chunks_mut(2) {
+        let [x, y] = pair else { return false };
+        let (px, py) = cm.transform(
+            f64::from(x.as_f32().unwrap_or_default()),
+            f64::from(y.as_f32().unwrap_or_default()),
+        );
+        #[allow(clippy::cast_possible_truncation)]
+        let (px, py) = (px as f32, py as f32);
+        if !px.is_finite() || !py.is_finite() {
+            return false;
+        }
+        *x = Value::Real(px);
+        *y = Value::Real(py);
+    }
+    true
+}
+
+fn transform_flat_points(value: &mut Value, cm: &Matrix, exact_len: Option<usize>) -> bool {
+    let Value::Array(items) = value else {
+        return false;
+    };
+    if items.is_empty() {
+        return false;
+    }
+    if let Some(expected) = exact_len {
+        if items.len() != expected {
+            return false;
+        }
+    }
+    transform_point_pairs(items, cm)
+}
+
+fn transform_path(value: &mut Value, cm: &Matrix) -> bool {
+    let Value::Array(subpaths) = value else {
+        return false;
+    };
+    !subpaths.is_empty()
+        && subpaths
+            .iter_mut()
+            .all(|sub| transform_path_nested(sub, cm))
+}
+
+fn transform_path_nested(value: &mut Value, cm: &Matrix) -> bool {
+    let Value::Array(items) = value else {
+        return false;
+    };
+    if items.is_empty() {
+        return false;
+    }
+    if items.iter().all(|item| item.as_f32().is_some()) {
+        return transform_point_pairs(items, cm);
+    }
+    items.iter_mut().all(|item| transform_path_nested(item, cm))
+}
+
 /// Moves the points in `value` (an array of numbers `x y x y ...`, or arrays of them) with `cm`.
 /// `false` when it is not made of such pairs; `value` is then left half moved and must be dropped.
 fn transform_points(value: &mut Value, cm: &Matrix) -> bool {
@@ -262,24 +431,7 @@ fn transform_points(value: &mut Value, cm: &Matrix) -> bool {
         return false;
     };
     if items.iter().all(|item| item.as_f32().is_some()) {
-        if items.len() % 2 != 0 {
-            return false;
-        }
-        for pair in items.chunks_mut(2) {
-            let [x, y] = pair else { return false };
-            let (px, py) = cm.transform(
-                f64::from(x.as_f32().unwrap_or_default()),
-                f64::from(y.as_f32().unwrap_or_default()),
-            );
-            #[allow(clippy::cast_possible_truncation)]
-            let (px, py) = (px as f32, py as f32);
-            if !px.is_finite() || !py.is_finite() {
-                return false;
-            }
-            *x = Value::Real(px);
-            *y = Value::Real(py);
-        }
-        return true;
+        return transform_point_pairs(items, cm);
     }
     items.iter_mut().all(|item| transform_points(item, cm))
 }
@@ -392,6 +544,72 @@ mod tests {
         assert_eq!(
             cm.transform_rectangle([140.0, 260.0, 40.0, 200.0]),
             [20.0, 170.0, 120.0, 230.0]
+        );
+    }
+
+    #[test]
+    fn carried_subtypes_keys_and_flat_geometry_rules_are_enforced() {
+        for kind in [
+            "FreeText",
+            "Ink",
+            "Stamp",
+            "Square",
+            "Circle",
+            "Line",
+            "Polygon",
+            "FileAttachment",
+        ] {
+            assert!(is_carried_kind(kind), "{kind}");
+            assert!(!is_allowed_key(kind, b"P"));
+            assert!(!is_allowed_key(kind, b"Parent"));
+            assert!(!is_allowed_key(kind, b"Popup"));
+            assert!(!is_allowed_key(kind, b"IRT"));
+            assert!(!is_allowed_key(kind, b"A"));
+            assert!(!is_allowed_key(kind, b"AA"));
+            assert!(!is_allowed_key(kind, b"StructParent"));
+        }
+        assert!(!is_carried_kind("Caret"));
+        assert!(!is_carried_kind("PolyLine"));
+        assert!(is_allowed_key("Line", b"L"));
+        assert!(is_allowed_key("Line", b"LL"));
+        assert!(is_allowed_key("Line", b"Cap"));
+        assert!(!is_allowed_key("Square", b"L"));
+        assert!(is_allowed_key("Polygon", b"Vertices"));
+        assert!(is_allowed_key("Polygon", b"Path"));
+        assert!(!is_allowed_key("Circle", b"Vertices"));
+        assert!(!is_allowed_key("FileAttachment", b"FS"));
+
+        let mut cm = Matrix::new();
+        cm.translate(-20.0, -30.0);
+        let nums = |list: &[f32]| Value::Array(list.iter().map(|&n| Value::Real(n)).collect());
+        let mut line = nums(&[40.0, 100.0, 140.0, 180.0]);
+        assert!(transform_flat_points(&mut line, &cm, Some(4)));
+        assert_eq!(line, nums(&[20.0, 70.0, 120.0, 150.0]));
+        assert!(!transform_flat_points(&mut nums(&[1.0, 2.0]), &cm, Some(4)));
+        assert!(!transform_flat_points(&mut nums(&[]), &cm, None));
+        assert!(!transform_flat_points(
+            &mut nums(&[1.0, 2.0, 3.0]),
+            &cm,
+            None
+        ));
+
+        let mut path = Value::Array(vec![nums(&[40.0, 100.0, 140.0, 100.0, 90.0, 200.0])]);
+        assert!(transform_path(&mut path, &cm));
+        assert_eq!(
+            path,
+            Value::Array(vec![nums(&[20.0, 70.0, 120.0, 70.0, 70.0, 170.0])])
+        );
+        assert!(!transform_path(&mut Value::Array(Vec::new()), &cm));
+        assert!(!transform_path(&mut nums(&[40.0, 100.0]), &cm));
+        assert!(!transform_path(
+            &mut Value::Array(vec![Value::Array(Vec::new())]),
+            &cm
+        ));
+        let mut nested = Value::Array(vec![Value::Array(vec![nums(&[40.0, 100.0])])]);
+        assert!(transform_path(&mut nested, &cm));
+        assert_eq!(
+            nested,
+            Value::Array(vec![Value::Array(vec![nums(&[20.0, 70.0])])])
         );
     }
 }

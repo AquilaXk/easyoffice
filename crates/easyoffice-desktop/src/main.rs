@@ -24,6 +24,8 @@ mod os_recent;
 mod page_screenshot;
 mod pages_bundle_dir;
 mod pdf_edit_annots;
+mod pdf_edit_annots_ap;
+mod pdf_edit_annots_safe;
 mod pdf_edit_attach;
 mod pdf_edit_budget;
 mod pdf_edit_build;

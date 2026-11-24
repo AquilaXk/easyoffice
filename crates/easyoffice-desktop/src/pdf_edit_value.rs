@@ -16,8 +16,12 @@
 //! Reading never follows a reference, so a cycle of references cannot loop here; nesting depth and
 //! the number of nodes are limited (fail closed, [`Refused`]).
 
-use crate::pdf_edit_budget::{MAX_CARRIED_NODES, MAX_VALUE_DEPTH, MAX_VALUE_NODES};
+use crate::pdf_edit_budget::{
+    MAX_CARRIED_INLINED_BYTES, MAX_CARRIED_NODES, MAX_VALUE_DEPTH, MAX_VALUE_INLINED_BYTES,
+    MAX_VALUE_NODES,
+};
 use hayro_syntax::object::{Dict, MaybeRef, ObjRef, Object};
+use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::{Name, Null, Obj, Ref, Str};
 
 /// An object as it is written, minus streams (a stream is always an indirect object, carried as a
@@ -44,6 +48,9 @@ pub enum Refused {
     Nodes,
     /// The objects carried over in one build together hold more than [`MAX_CARRIED_NODES`] nodes.
     Total,
+    /// Inlined strings, names, or dictionary keys exceed [`MAX_VALUE_INLINED_BYTES`] or
+    /// [`MAX_CARRIED_INLINED_BYTES`].
+    Large,
     /// A number that is not finite once it is a single-precision real (the writer cannot write it).
     Number,
 }
@@ -56,6 +63,9 @@ impl Refused {
             Self::Nodes => {
                 format!("{what}의 크기가 허용 한도(항목 {MAX_VALUE_NODES}개)를 초과합니다.")
             }
+            Self::Large => format!(
+                "{what}의 문자열·이름 크기가 허용 한도({MAX_VALUE_INLINED_BYTES}B)를 초과합니다."
+            ),
             Self::Number => {
                 format!("{what}에 쓸 수 없는 숫자(너무 크거나 유한하지 않음)가 있습니다.")
             }
@@ -66,45 +76,64 @@ impl Refused {
     }
 }
 
-/// The nodes that all the values of one build may still hold.
+/// The nodes and inlined bytes that all the values of one build may still hold.
 #[derive(Debug)]
-pub struct Budget(usize);
+pub struct Budget {
+    nodes: usize,
+    inlined_bytes: usize,
+}
 
 impl Default for Budget {
     fn default() -> Self {
-        Self(MAX_CARRIED_NODES)
+        Self {
+            nodes: MAX_CARRIED_NODES,
+            inlined_bytes: MAX_CARRIED_INLINED_BYTES,
+        }
     }
+}
+
+/// Spends one node from both the per-object budget `own` and the build-wide `total` budget.
+pub fn spend_node(own: &mut usize, total: &mut Budget) -> Result<(), Refused> {
+    spend(own, &mut total.nodes)
+}
+
+/// Spends `len` bytes from both the per-object `own_bytes` and build-wide `total` inlined-byte
+/// budgets before cloning strings, names, or dictionary keys.
+pub fn spend_bytes(len: usize, own_bytes: &mut usize, total: &mut Budget) -> Result<(), Refused> {
+    spend_bytes_inner(len, own_bytes, &mut total.inlined_bytes)
 }
 
 impl Value {
     /// Reads `raw` and everything direct inside it; references stay references.
     pub fn read(raw: &MaybeRef<Object<'_>>, total: &mut Budget) -> Result<Self, Refused> {
         let mut own = MAX_VALUE_NODES;
-        read_raw(raw, 1, &mut own, &mut total.0)
+        read_raw(raw, 1, &mut own, &mut total.nodes)
     }
 
-    /// The entries of `dict` whose key `keep` accepts, as a dictionary value; the other entries
-    /// are not read (they use none of the limits).
-    pub fn read_dict(
-        dict: &Dict<'_>,
-        keep: impl Fn(&[u8]) -> bool,
+    /// Reads `raw` against caller-supplied per-object budgets `own` (nodes) and `own_bytes`
+    /// (inlined string/name/key bytes) and build-wide `total` starting at `depth`, safely resolving
+    /// non-cyclic indirect references whose dictionaries satisfy `allow_dict` into inline values
+    /// (streams and disallowed/cyclic dicts become `null`).
+    pub fn read_inlined(
+        raw: &MaybeRef<Object<'_>>,
+        depth: usize,
+        own: &mut usize,
+        own_bytes: &mut usize,
         total: &mut Budget,
+        pdf: &ReadPdf,
+        allow_dict: &dyn Fn(&Dict<'_>) -> bool,
     ) -> Result<Self, Refused> {
-        let mut own = MAX_VALUE_NODES;
-        spend(&mut own, &mut total.0)?;
-        let mut entries = Vec::new();
-        // Only the keys that are kept are parsed: the others (a pop-up, the page) may be large.
-        for key in dict.keys().filter(|key| keep(key.as_ref())) {
-            let Some(item) = dict.get_raw::<Object<'_>>(key.as_ref()) else {
-                continue;
-            };
-            spend(&mut own, &mut total.0)?;
-            entries.push((
-                key.as_ref().to_vec(),
-                read_raw(&item, 2, &mut own, &mut total.0)?,
-            ));
-        }
-        Ok(Self::Dict(entries))
+        let mut active = Vec::new();
+        read_raw_inlined(
+            raw,
+            depth,
+            own,
+            own_bytes,
+            total,
+            pdf,
+            allow_dict,
+            &mut active,
+        )
     }
 
     /// The entry `key` of a dictionary.
@@ -175,6 +204,19 @@ impl Value {
         }
     }
 
+    /// The cumulative byte length of strings, names, and dictionary keys held by this value.
+    pub fn byte_len(&self) -> usize {
+        match self {
+            Self::Str(bytes) | Self::Name(bytes) => bytes.len(),
+            Self::Array(items) => items.iter().map(Self::byte_len).sum(),
+            Self::Dict(entries) => entries
+                .iter()
+                .map(|(key, value)| key.len().saturating_add(value.byte_len()))
+                .sum(),
+            _ => 0,
+        }
+    }
+
     /// Every reference inside, in order of appearance.
     pub fn refs(&self, out: &mut Vec<ObjRef>) {
         match self {
@@ -237,17 +279,19 @@ fn spend(own: &mut usize, total: &mut usize) -> Result<(), Refused> {
     Ok(())
 }
 
-fn read_raw(
-    raw: &MaybeRef<Object<'_>>,
-    depth: usize,
-    own: &mut usize,
-    total: &mut usize,
-) -> Result<Value, Refused> {
-    spend(own, total)?;
-    let object = match raw {
-        MaybeRef::Ref(r) => return Ok(Value::Ref(*r)),
-        MaybeRef::NotRef(object) => object,
-    };
+fn spend_bytes_inner(
+    len: usize,
+    own_bytes: &mut usize,
+    total_bytes: &mut usize,
+) -> Result<(), Refused> {
+    let next_own = own_bytes.checked_sub(len).ok_or(Refused::Large)?;
+    let next_total = total_bytes.checked_sub(len).ok_or(Refused::Large)?;
+    *own_bytes = next_own;
+    *total_bytes = next_total;
+    Ok(())
+}
+
+fn read_scalar(object: &Object<'_>) -> Result<Value, Refused> {
     Ok(match object {
         Object::Null(_) | Object::Stream(_) => Value::Null,
         Object::Boolean(b) => Value::Bool(*b),
@@ -263,6 +307,42 @@ fn read_raw(
         }
         Object::String(s) => Value::Str(s.as_bytes().to_vec()),
         Object::Name(n) => Value::Name(n.as_ref().to_vec()),
+        Object::Array(_) | Object::Dict(_) => Value::Null,
+    })
+}
+
+fn read_scalar_inlined(
+    object: &Object<'_>,
+    own_bytes: &mut usize,
+    total_bytes: &mut usize,
+) -> Result<Value, Refused> {
+    match object {
+        Object::String(s) => {
+            let bytes = s.as_bytes();
+            spend_bytes_inner(bytes.len(), own_bytes, total_bytes)?;
+            Ok(Value::Str(bytes.to_vec()))
+        }
+        Object::Name(n) => {
+            let bytes = n.as_ref();
+            spend_bytes_inner(bytes.len(), own_bytes, total_bytes)?;
+            Ok(Value::Name(bytes.to_vec()))
+        }
+        other => read_scalar(other),
+    }
+}
+
+fn read_raw(
+    raw: &MaybeRef<Object<'_>>,
+    depth: usize,
+    own: &mut usize,
+    total: &mut usize,
+) -> Result<Value, Refused> {
+    spend(own, total)?;
+    let object = match raw {
+        MaybeRef::Ref(r) => return Ok(Value::Ref(*r)),
+        MaybeRef::NotRef(object) => object,
+    };
+    Ok(match object {
         Object::Array(array) => {
             if depth >= MAX_VALUE_DEPTH {
                 return Err(Refused::Deep);
@@ -287,6 +367,103 @@ fn read_raw(
             }
             Value::Dict(entries)
         }
+        other => read_scalar(other)?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_raw_inlined(
+    raw: &MaybeRef<Object<'_>>,
+    depth: usize,
+    own: &mut usize,
+    own_bytes: &mut usize,
+    total: &mut Budget,
+    pdf: &ReadPdf,
+    allow_dict: &dyn Fn(&Dict<'_>) -> bool,
+    active: &mut Vec<ObjRef>,
+) -> Result<Value, Refused> {
+    spend(own, &mut total.nodes)?;
+    match raw {
+        MaybeRef::Ref(r) => {
+            if active.contains(r) {
+                return Ok(Value::Null);
+            }
+            let Some(resolved) = pdf.xref().get::<Object<'_>>((*r).into()) else {
+                return Ok(Value::Null);
+            };
+            active.push(*r);
+            let result = read_object_inlined(
+                &resolved, depth, own, own_bytes, total, pdf, allow_dict, active,
+            );
+            active.pop();
+            result
+        }
+        MaybeRef::NotRef(object) => read_object_inlined(
+            object, depth, own, own_bytes, total, pdf, allow_dict, active,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_object_inlined(
+    object: &Object<'_>,
+    depth: usize,
+    own: &mut usize,
+    own_bytes: &mut usize,
+    total: &mut Budget,
+    pdf: &ReadPdf,
+    allow_dict: &dyn Fn(&Dict<'_>) -> bool,
+    active: &mut Vec<ObjRef>,
+) -> Result<Value, Refused> {
+    Ok(match object {
+        Object::Array(array) => {
+            if depth >= MAX_VALUE_DEPTH {
+                return Err(Refused::Deep);
+            }
+            let mut items = Vec::new();
+            for item in array.raw_iter() {
+                items.push(read_raw_inlined(
+                    &item,
+                    depth + 1,
+                    own,
+                    own_bytes,
+                    total,
+                    pdf,
+                    allow_dict,
+                    active,
+                )?);
+            }
+            Value::Array(items)
+        }
+        Object::Dict(dict) => {
+            if depth >= MAX_VALUE_DEPTH {
+                return Err(Refused::Deep);
+            }
+            if !allow_dict(dict) {
+                return Ok(Value::Null);
+            }
+            let mut entries = Vec::new();
+            for (key, item) in dict.entries() {
+                spend(own, &mut total.nodes)?;
+                let kb = key.as_ref();
+                spend_bytes_inner(kb.len(), own_bytes, &mut total.inlined_bytes)?;
+                entries.push((
+                    kb.to_vec(),
+                    read_raw_inlined(
+                        &item,
+                        depth + 1,
+                        own,
+                        own_bytes,
+                        total,
+                        pdf,
+                        allow_dict,
+                        active,
+                    )?,
+                ));
+            }
+            Value::Dict(entries)
+        }
+        other => read_scalar_inlined(other, own_bytes, &mut total.inlined_bytes)?,
     })
 }
 
@@ -382,7 +559,10 @@ mod tests {
 
     #[test]
     fn the_total_budget_is_shared_by_all_values() {
-        let mut budget = Budget(10);
+        let mut budget = Budget {
+            nodes: 10,
+            inlined_bytes: MAX_CARRIED_INLINED_BYTES,
+        };
         let raw = MaybeRef::NotRef(Object::Boolean(true));
         for _ in 0..10 {
             assert!(Value::read(&raw, &mut budget).is_ok());
@@ -402,5 +582,97 @@ mod tests {
         assert_eq!(value.get(b"Keep"), Some(&Value::Int(3)));
         assert_eq!(value.get(b"Drop"), None);
         assert_eq!(value.get(b"New"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn read_inlined_resolves_safe_refs_and_stops_cycles_and_disallowed_dicts() {
+        let file = crate::pdf_edit_fixtures::hand_written_with_xref(
+            &[
+                (1, "<< /Type /Catalog /Pages 2 0 R /X 5 0 R >>".to_string()),
+                (2, "<< /Type /Pages /Kids [] /Count 0 >>".to_string()),
+                (3, "<< /Type /Page /Parent 2 0 R >>".to_string()),
+                (4, "[4 2]".to_string()),
+                (5, "<< /D 4 0 R /Bad 3 0 R /Loop 6 0 R >>".to_string()),
+                (6, "[6 0 R]".to_string()),
+            ],
+            "",
+        );
+        let pdf = Pdf::new(Arc::new(file)).unwrap();
+        let cat = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        let raw = cat.get_raw::<Object<'_>>(b"X").unwrap();
+        let mut own = MAX_VALUE_NODES;
+        let mut own_bytes = MAX_VALUE_INLINED_BYTES;
+        let mut budget = Budget::default();
+        let val = Value::read_inlined(&raw, 1, &mut own, &mut own_bytes, &mut budget, &pdf, &|d| {
+            d.get::<hayro_syntax::object::Name<'_>>(b"Type")
+                .is_none_or(|t| t.as_str() != "Page")
+        })
+        .unwrap();
+        assert_eq!(
+            val.get(b"D"),
+            Some(&Value::Array(vec![Value::Int(4), Value::Int(2)]))
+        );
+        assert_eq!(val.get(b"Bad"), Some(&Value::Null));
+        assert_eq!(val.get(b"Loop"), Some(&Value::Array(vec![Value::Null])));
+    }
+
+    #[test]
+    fn read_inlined_refuses_shallow_string_name_and_key_dag_amplification() {
+        let mib_str = format!("({})", "a".repeat(MAX_VALUE_INLINED_BYTES));
+        let half_name = format!("/{}", "b".repeat(MAX_VALUE_INLINED_BYTES / 2 + 16));
+        let half_dict = format!("<< /{} 1 >>", "k".repeat(MAX_VALUE_INLINED_BYTES / 2 + 16));
+        let file = crate::pdf_edit_fixtures::hand_written_with_xref(
+            &[
+                (
+                    1,
+                    "<< /Type /Catalog /Pages 2 0 R /StrDag 4 0 R /NameDag 6 0 R /KeyDag 8 0 R >>"
+                        .to_string(),
+                ),
+                (2, "<< /Type /Pages /Kids [] /Count 0 >>".to_string()),
+                (3, mib_str),
+                (4, "[3 0 R 3 0 R]".to_string()),
+                (5, half_name),
+                (6, "[5 0 R 5 0 R]".to_string()),
+                (7, half_dict),
+                (8, "[7 0 R 7 0 R]".to_string()),
+            ],
+            "",
+        );
+        let pdf = Pdf::new(Arc::new(file)).unwrap();
+        let cat = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        for key in [b"StrDag".as_slice(), b"NameDag", b"KeyDag"] {
+            let raw = cat.get_raw::<Object<'_>>(key).unwrap();
+            let mut own = MAX_VALUE_NODES;
+            let mut own_bytes = MAX_VALUE_INLINED_BYTES;
+            let mut budget = Budget::default();
+            let err = Value::read_inlined(
+                &raw,
+                1,
+                &mut own,
+                &mut own_bytes,
+                &mut budget,
+                &pdf,
+                &|_| true,
+            )
+            .unwrap_err();
+            assert_eq!(err, Refused::Large, "{}", String::from_utf8_lossy(key));
+        }
+
+        // Build-wide inlined byte budget also fails closed across separate annotations.
+        let mut own = MAX_VALUE_NODES;
+        let mut own_bytes = MAX_VALUE_INLINED_BYTES;
+        let mut tight = Budget {
+            nodes: MAX_CARRIED_NODES,
+            inlined_bytes: 100,
+        };
+        let raw = cat.get_raw::<Object<'_>>(b"StrDag").unwrap();
+        assert_eq!(
+            Value::read_inlined(&raw, 1, &mut own, &mut own_bytes, &mut tight, &pdf, &|_| {
+                true
+            })
+            .unwrap_err(),
+            Refused::Large
+        );
+        assert!(Refused::Large.sentence("주석").contains("크기"));
     }
 }

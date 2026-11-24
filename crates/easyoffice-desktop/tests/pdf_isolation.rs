@@ -115,7 +115,7 @@ fn what_the_result_does_not_keep_comes_back_as_warnings_before_the_answer() {
             (3, page.to_string()),
             (
                 4,
-                "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] >>".to_string(),
+                "<< /Type /Annot /Subtype /Caret /Rect [10 10 50 50] >>".to_string(),
             ),
         ],
         "",
@@ -126,7 +126,7 @@ fn what_the_result_does_not_keep_comes_back_as_warnings_before_the_answer() {
     assert_eq!(pages_of(&built.bytes), 1);
     assert_eq!(
         built.warnings,
-        ["지원하지 않는 주석 1개는 저장하지 못했습니다 (Square 1)."]
+        ["지원하지 않는 주석 1개는 저장하지 못했습니다 (Caret 1)."]
     );
     let clean = supervisor
         .build(

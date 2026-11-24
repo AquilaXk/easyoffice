@@ -77,9 +77,14 @@ pub const PAGES_PER_CHECK_MASK: usize = 63;
 /// over as it is, and the deepest nesting followed (PD-266).
 pub const MAX_VALUE_NODES: usize = 65_536;
 pub const MAX_VALUE_DEPTH: usize = 32;
+/// Most cumulative bytes cloned into inlined strings, names and dictionary keys per carried
+/// object (`Value::read_inlined`) and across all carried annotations in one build (PD-337).
+pub const MAX_VALUE_INLINED_BYTES: usize = MIB;
+pub const MAX_CARRIED_INLINED_BYTES: usize = 32 * MIB;
 /// Most nodes held at once from all the objects carried over in one build (PD-266).
 pub const MAX_CARRIED_NODES: usize = 1_000_000;
-/// Most attachments (`/Names /EmbeddedFiles`) one source may list (PD-266).
+/// Most attachments (`/Names /EmbeddedFiles` and `FileAttachment` annotations combined) one build
+/// may carry (PD-266, PD-337).
 pub const MAX_ATTACHMENTS: usize = 1_024;
 /// Most page label ranges (`/PageLabels`) one source may list, and the longest label prefix (bytes).
 pub const MAX_LABEL_RANGES: usize = 8_192;

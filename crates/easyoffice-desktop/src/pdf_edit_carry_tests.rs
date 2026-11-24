@@ -57,23 +57,24 @@ pub(crate) fn one_page_with(
     hand_written_with_xref(&objects, "")
 }
 
-fn square(rect: &str) -> String {
-    format!("<< /Type /Annot /Subtype /Square /Rect [{rect}] /C [1 0 0] >>")
+fn caret(rect: &str) -> String {
+    format!("<< /Type /Annot /Subtype /Caret /Rect [{rect}] /C [1 0 0] >>")
 }
 
 #[test]
 fn annotations_the_result_cannot_write_are_reported_by_kind() {
     let more = vec![
-        square("10 10 50 50"),
-        "<< /Type /Annot /Subtype /Line /Rect [10 60 80 90] /L [10 60 80 90] >>".to_string(),
-        square("100 100 150 150"),
+        caret("10 10 50 50"),
+        "<< /Type /Annot /Subtype /PolyLine /Rect [10 60 80 90] /Vertices [10 60 80 90] >>"
+            .to_string(),
+        caret("100 100 150 150"),
         "<< /Type /Annot /Subtype /Link /Rect [0 0 20 20] /A << /S /URI /URI (https://example.org/) >> >>"
             .to_string(),
     ];
     let built = rebuilt(one_page("", "5 0 R 6 0 R 7 0 R 8 0 R", &more));
     assert_eq!(
         built.warnings,
-        ["지원하지 않는 주석 3개는 저장하지 못했습니다 (Square 2, Line 1)."]
+        ["지원하지 않는 주석 3개는 저장하지 못했습니다 (Caret 2, PolyLine 1)."]
     );
 }
 

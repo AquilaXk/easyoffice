@@ -17,8 +17,8 @@
 use crate::pdf_edit_annots::{lost_sentence, scan_page, Lost};
 use crate::pdf_edit_attach::{self, Attachment};
 use crate::pdf_edit_budget::{
-    Deadline, MAX_ATTACHMENTS, MAX_CARRIED_NODES, MAX_TOTAL_ANNOTS, MAX_XMP_BYTES,
-    PAGES_PER_CHECK_MASK,
+    Deadline, MAX_ATTACHMENTS, MAX_CARRIED_INLINED_BYTES, MAX_CARRIED_NODES, MAX_TOTAL_ANNOTS,
+    MAX_XMP_BYTES, PAGES_PER_CHECK_MASK,
 };
 use crate::pdf_edit_labels;
 use crate::pdf_edit_oc;
@@ -66,7 +66,7 @@ pub struct Carry {
     budget: Budget,
     /// The `/OCProperties` of each source that has them.
     layers: Vec<(usize, Value)>,
-    /// The free text, ink and stamp annotations of each (source, page) that is used.
+    /// The carried annotations of each (source, page) that is used.
     annots: HashMap<(usize, usize), Vec<Value>>,
     /// The attachments of each source.
     attachments: Vec<(usize, Vec<Attachment>)>,
@@ -74,8 +74,13 @@ pub struct Carry {
     page_labels: Option<Value>,
     /// The metadata stream of the file of the first page.
     metadata: Option<(usize, ObjRef)>,
-    /// The nodes of the annotations written so far: a page placed again writes them again.
+    /// The nodes and inlined bytes of the annotations written so far: a page placed again writes
+    /// them again.
     written_nodes: usize,
+    written_bytes: usize,
+    /// Total `FileAttachment` page annotations carried so far, counted against `MAX_ATTACHMENTS`
+    /// together with catalog `/Names /EmbeddedFiles`.
+    file_attachments: usize,
     /// The objects of each source that are copied together with its pages.
     roots: BTreeMap<usize, Vec<ObjRef>>,
 }
@@ -117,7 +122,13 @@ impl Carry {
                 .get(&plan.source)
                 .ok_or("쪽의 원본 PDF가 없습니다.")?;
             let page = pdf.pages().get(plan.index).ok_or("없는 쪽을 가리킵니다.")?;
-            let found = scan_page(page, &mut self.budget, &mut lost)?;
+            let found = scan_page(
+                pdf,
+                page,
+                &mut self.budget,
+                &mut self.file_attachments,
+                &mut lost,
+            )?;
             for value in &found {
                 self.add_roots(plan.source, value);
             }
@@ -136,7 +147,7 @@ impl Carry {
         pages: &[PagePlan],
     ) -> Result<(), String> {
         let mut labels = BTreeMap::new();
-        let mut attached = 0usize;
+        let mut attached = self.file_attachments;
         for (&source, pdf) in parsed {
             note_catalog(pdf, &mut self.warnings);
             if let Some(list) = pdf_edit_oc::read(pdf, &mut self.budget, &mut self.warnings)? {
@@ -202,6 +213,10 @@ impl Carry {
             self.written_nodes = self.written_nodes.saturating_add(annot.node_count());
             if self.written_nodes > MAX_CARRIED_NODES {
                 return Err(Refused::Total.sentence("주석"));
+            }
+            self.written_bytes = self.written_bytes.saturating_add(annot.byte_len());
+            if self.written_bytes > MAX_CARRIED_INLINED_BYTES {
+                return Err(Refused::Large.sentence("주석"));
             }
             *total_annots += 1;
             if *total_annots > MAX_TOTAL_ANNOTS {

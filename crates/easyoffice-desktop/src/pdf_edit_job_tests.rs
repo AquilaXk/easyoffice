@@ -327,7 +327,7 @@ fn merging_through_the_helper_returns_the_grown_session() {
 fn a_split_gathers_the_warnings_of_its_files_without_repeats() {
     use crate::pdf_edit_carry_tests::one_page;
     let dir = scratch_dir("split-warnings");
-    let annot = "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] >>".to_string();
+    let annot = "<< /Type /Annot /Subtype /Caret /Rect [10 10 50 50] >>".to_string();
     let file = one_page("", "5 0 R", &[annot]);
     let mut s = EditSession::open(file.clone(), &engine()).unwrap();
     s.merge(vec![file], &engine()).unwrap();
@@ -336,7 +336,7 @@ fn a_split_gathers_the_warnings_of_its_files_without_repeats() {
     assert_eq!(written.files, 2);
     assert_eq!(
         written.warnings,
-        ["지원하지 않는 주석 1개는 저장하지 못했습니다 (Square 1)."],
+        ["지원하지 않는 주석 1개는 저장하지 못했습니다 (Caret 1)."],
         "both files have the same loss; it is told once"
     );
     let _ = std::fs::remove_dir_all(&dir);
