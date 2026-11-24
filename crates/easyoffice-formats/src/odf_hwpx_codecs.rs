@@ -4,13 +4,14 @@ use crate::rtf_xml_helpers::{
     scan_single_a1_coord, strip_tag_blocks, to_open_formula_syntax_impl,
 };
 use crate::sheet_styling::ods_default_style::{
-    read_default_font, table_col_width_attrs, table_columns_xml,
+    read_default_styles, table_col_width_attrs, table_columns_xml, table_row_height_attr,
+    workbook_default_row_height,
 };
-use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling_font};
+use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_defaults};
 use crate::sheet_styling::ods_names::LOEXT_NS;
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_page::title_end;
-use crate::sheet_styling::ods_styles::{parse_ods_styling_with_font, OdsStyleTable};
+use crate::sheet_styling::ods_styles::{parse_ods_styling_with_defaults, OdsStyleTable};
 use crate::sheet_styling::ods_view::{settings_xml, GroupWriter, TabStyles, TABLEOOO_NS};
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::{hides_every_sheet, IdMemo, SheetStyling};
@@ -371,6 +372,8 @@ impl OdfCodec {
             sheets
         };
         let names: Vec<&str> = active_sheets.iter().map(|(n, _)| n.as_str()).collect();
+        let default_font = stylings.first().and_then(|st| st.default_font.as_ref());
+        let wb_default_row_height = workbook_default_row_height(stylings, active_sheets.len());
         content.push_str(&rule_table.validations_xml(stylings, &names));
         for (sheet_idx, (sheet_name, cells)) in active_sheets.iter().enumerate() {
             let rules = RuleContext {
@@ -389,6 +392,7 @@ impl OdfCodec {
                 &cells,
                 caches.get(sheet_idx),
                 stylings.get(sheet_idx),
+                wb_default_row_height,
                 (&style_table, &rules, &tab_styles),
             );
         }
@@ -403,11 +407,11 @@ impl OdfCodec {
         XmlSanitizer::validate_safe_xml(&content)?;
 
         let settings = settings_xml(&names, stylings);
-        let default_font = stylings.first().and_then(|st| st.default_font.as_ref());
         let page_styles = crate::sheet_styling::ods_page::styles_xml(
             tab_styles.layouts(),
             stylings.iter().any(|st| !st.links.is_empty()),
             default_font,
+            wb_default_row_height,
         );
         let mut media = vec![("styles.xml".to_string(), "text/xml")];
         if settings.is_some() {
@@ -457,6 +461,7 @@ impl OdfCodec {
         cells: &[(u32, u32, String)],
         cache: Option<&crate::XlsxFormulaCache>,
         styling: Option<&SheetStyling>,
+        wb_default_row_height: Option<crate::RowHeight>,
         (style_table, rules, tab_styles): (&OdsStyleTable, &RuleContext<'_>, &TabStyles),
     ) {
         let blank = String::new();
@@ -514,8 +519,12 @@ impl OdfCodec {
         let col_width_attrs = styling
             .map(|st| table_col_width_attrs(st.default_col_width))
             .unwrap_or_default();
+        let row_height_attr = table_row_height_attr(
+            styling.and_then(|st| st.default_row_height),
+            wb_default_row_height,
+        );
         content.push_str(&format!(
-            "<table:table table:name=\"{}\"{tab_style}{print_ranges}{protect_attrs}{col_width_attrs}>",
+            "<table:table table:name=\"{}\"{tab_style}{print_ranges}{protect_attrs}{col_width_attrs}{row_height_attr}>",
             XmlSanitizer::escape(sheet_name)
         ));
         if let Some(protect) = styling.and_then(|st| st.protect.as_ref()) {
@@ -529,7 +538,7 @@ impl OdfCodec {
         }
         let mut expected_row: u32 = 0;
         // The rows with no height of their own take the default row height a user set; the band after the last row says it
-        // for the rest of the sheet (PD-286). A default that follows the font is not written (PD-300).
+        // for the rest of the sheet (PD-286). A default that follows the font stays in `styles.xml` / `eo:default-row-height` (PD-300, PD-345).
         let default_style = styling
             .and_then(SheetStyling::user_default_row_height)
             .and_then(|height| style_table.row_style_name(height))
@@ -746,8 +755,8 @@ impl OdfCodec {
         bytes: &[u8],
     ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
-        let default_font = read_default_font(styles.as_deref(), &content_xml);
-        let mut stylings = parse_ods_styling_with_font(&content_xml, default_font.as_ref())?;
+        let defaults = read_default_styles(styles.as_deref(), &content_xml)?;
+        let mut stylings = parse_ods_styling_with_defaults(&content_xml, &defaults)?;
         Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
@@ -768,9 +777,8 @@ impl OdfCodec {
         bytes: &[u8],
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
-        let default_font = read_default_font(styles.as_deref(), &content_xml);
-        let (sheets, mut stylings) =
-            read_ods_sheets_with_styling_font(&content_xml, default_font.as_ref())?;
+        let defaults = read_default_styles(styles.as_deref(), &content_xml)?;
+        let (sheets, mut stylings) = read_ods_sheets_with_defaults(&content_xml, &defaults)?;
         Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);

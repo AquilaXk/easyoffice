@@ -27,7 +27,7 @@ pub const MAX_ROW_HEIGHT_CENTIPT: u32 = 40_900;
 /// Rows with a height one sheet may carry.
 pub const MAX_ROW_HEIGHTS: usize = 100_000;
 /// Longest text a default row height may be written as; a longer value is not a height.
-const MAX_HEIGHT_TEXT: usize = 32;
+pub(crate) const MAX_HEIGHT_TEXT: usize = 32;
 /// The height the page draws a row at when a sheet has no default row height of a user, in CSS pixels (`sheet-grid.js`
 /// `ROW_H`). Matches `16.5 pt` (`16.5 * 96 / 72 = 22 px`), the standard Korean edition row height.
 pub const GRID_ROW_PX: f64 = 22.0;
@@ -193,17 +193,70 @@ pub(crate) fn xlsx_row_attrs(heights: &RowHeights, row: u32, xml: &mut String) {
     }
 }
 
+/// Maximum raw XML attribute bytes decoded before rejecting a length/boolean token (6x worst-case `&#x...;` per char).
+const MAX_RAW_HEIGHT_ATTR_BYTES: usize = MAX_HEIGHT_TEXT * 6;
+
+fn parse_ods_use_optimal(raw: Option<&str>) -> Option<bool> {
+    let Some(raw) = raw else {
+        return Some(false);
+    };
+    if raw.len() > MAX_RAW_HEIGHT_ATTR_BYTES {
+        return None;
+    }
+    let decoded = crate::xml_stream::unescape_cow(raw);
+    match decoded.as_ref() {
+        "true" => Some(false),
+        "false" => Some(true),
+        _ => None,
+    }
+}
+
+/// Parses one raw XML row-height length attribute (`style:row-height` or `eo:default-row-height`)
+/// within the raw/decoded length budgets and `[0.01pt, 409pt]` bounds.
+pub(crate) fn parse_ods_row_height_attr(
+    raw: &str,
+    custom: bool,
+    length_to_pt: impl Fn(&str) -> Option<f64>,
+) -> Option<RowHeight> {
+    if raw.len() > MAX_RAW_HEIGHT_ATTR_BYTES {
+        return None;
+    }
+    let decoded = crate::xml_stream::unescape_cow(raw);
+    if decoded.len() > MAX_HEIGHT_TEXT {
+        return None;
+    }
+    RowHeight::from_points(length_to_pt(&decoded)?, custom)
+}
+
 /// The height a `style:table-row-properties` element sets. It is `custom` when a user set it
-/// (`style:use-optimal-row-height="false"`); a row that follows its content has no height of its own, the program that
-/// reads the file measures it, so only the band that ends a table keeps such a height (as the sheet's default).
+/// (`style:use-optimal-row-height="false"`); absent or `"true"` marks an automatic height, and any
+/// other value fails closed (`None`).
 pub(crate) fn read_ods_row_properties(
     props: &str,
     length_to_pt: impl Fn(&str) -> Option<f64>,
 ) -> Option<RowHeight> {
     use crate::rtf_xml_helpers::extract_attr_from_fragment as attr;
-    let custom = attr(props, "style:use-optimal-row-height") == Some("false");
-    let text = attr(props, "style:row-height").filter(|t| t.len() <= MAX_HEIGHT_TEXT)?;
-    RowHeight::from_points(length_to_pt(text)?, custom)
+    let custom = parse_ods_use_optimal(attr(props, "style:use-optimal-row-height"))?;
+    let text = attr(props, "style:row-height")?;
+    parse_ods_row_height_attr(text, custom, length_to_pt)
+}
+
+/// Single-pass `Attrs` variant of [`read_ods_row_properties`] for streaming `<style:table-row-properties>`.
+pub(crate) fn read_ods_row_properties_attrs(
+    attrs: &crate::xml_stream::Attrs<'_>,
+    length_to_pt: impl Fn(&str) -> Option<f64>,
+) -> Option<RowHeight> {
+    let mut height_raw = None;
+    let mut optimal_raw = None;
+    for (name, value) in attrs.iter_raw() {
+        if name == "style:row-height" && height_raw.is_none() {
+            height_raw = Some(value);
+        } else if name == "style:use-optimal-row-height" && optimal_raw.is_none() {
+            optimal_raw = Some(value);
+        }
+    }
+    let custom = parse_ods_use_optimal(optimal_raw)?;
+    parse_ods_row_height_attr(height_raw?, custom, length_to_pt)
 }
 
 /// The automatic style `ro<index>` of one distinct row height: `style:row-height` in points and whether the row follows its content.

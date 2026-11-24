@@ -7,12 +7,12 @@ use crate::cell_type::{pack_cell_pos, CellValueKind};
 use crate::pages_proto::FastU64Map;
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, extract_tags_or_self_closing_with_attrs,
-    extract_tags_with_attrs,
+    extract_tags_or_self_closing_with_attrs_limit, extract_tags_with_attrs,
 };
 use crate::sheet_styling::ods_default_style::{
     append_column_width_styles_xml, length_to_pt, ods_color, parse_column_width_px,
-    parse_table_col_width, parse_text_properties, quote_ods_font_family, settle_col_widths,
-    ColWidthRun,
+    parse_table_col_width, parse_table_row_height, parse_text_properties, quote_ods_font_family,
+    read_default_styles, settle_col_widths, ColWidthRun, OdsDefaultStyles,
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
@@ -21,8 +21,8 @@ use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
 use crate::sheet_styling::sheet_look::{ods_border_attrs, ods_borders_from};
 use crate::sheet_styling::sheet_row_height::{
-    ods_row_style_xml, read_ods_row_properties, settle_heights, HeightRun, RowHeight,
-    MAX_ROW_BLOCK, MAX_ROW_HEIGHTS,
+    kept_default_row_height, ods_row_style_xml, read_ods_row_properties, settle_heights, HeightRun,
+    RowHeight, MAX_ROW_BLOCK, MAX_ROW_HEIGHTS,
 };
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{
@@ -361,11 +361,14 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
                 styles.columns.insert(name, px);
             }
         } else if family == "table-row" {
-            let height =
-                extract_tags_or_self_closing_with_attrs(body, "style:table-row-properties")
-                    .into_iter()
-                    .next()
-                    .and_then(|(props, _)| read_ods_row_properties(props, length_to_pt));
+            let height = extract_tags_or_self_closing_with_attrs_limit(
+                body,
+                "style:table-row-properties",
+                1,
+            )
+            .into_iter()
+            .next()
+            .and_then(|(props, _)| read_ods_row_properties(props, length_to_pt));
             if let Some(height) = height {
                 styles.rows.insert(name, height);
             }
@@ -417,17 +420,22 @@ pub(crate) struct StyleSink<'s> {
     next_height: Option<RowHeight>,
     /// The height of the band of rows that ends the table being read: its default row height (PD-286).
     default_height: Option<RowHeight>,
+    /// Per-table `eo:default-row-height` attribute when different from the workbook default (PD-345).
+    eo_default_height: Option<RowHeight>,
+    /// Workbook `<style:default-style style:family="table-row">` height from `styles.xml` / header (PD-345).
+    wb_default_row_height: Option<RowHeight>,
 }
 
 impl<'s> StyleSink<'s> {
     #[allow(dead_code)]
     pub(crate) fn new(styles: &'s AutomaticStyles) -> Self {
-        Self::new_with_font(styles, None)
+        Self::new_with_defaults(styles, None, None)
     }
 
-    pub(crate) fn new_with_font(
+    pub(crate) fn new_with_defaults(
         styles: &'s AutomaticStyles,
         default_font: Option<&DefaultFont>,
+        wb_default_row_height: Option<RowHeight>,
     ) -> Self {
         Self {
             styles,
@@ -455,6 +463,8 @@ impl<'s> StyleSink<'s> {
             height_runs: Vec::new(),
             next_height: None,
             default_height: None,
+            eo_default_height: None,
+            wb_default_row_height,
         }
     }
 
@@ -617,6 +627,7 @@ impl OdsSink for StyleSink<'_> {
         self.filtered_total = 0;
         self.height_runs = Vec::new();
         self.default_height = None;
+        self.eo_default_height = parse_table_row_height(attrs);
     }
 
     fn row_filtered(&mut self, filtered: bool) {
@@ -725,7 +736,12 @@ impl OdsSink for StyleSink<'_> {
     }
 
     fn table_end(&mut self) {
-        let default_row_height = self.default_height.take();
+        let raw_default = self
+            .default_height
+            .take()
+            .or_else(|| self.eo_default_height.take())
+            .or(self.wb_default_row_height);
+        let default_row_height = kept_default_row_height(raw_default, self.default_font.as_ref());
         let (columns, default_col_width) = settle_col_widths(
             std::mem::take(&mut self.col_runs),
             self.default_col_width.take(),
@@ -794,17 +810,18 @@ pub(crate) fn with_rules(
 pub(crate) fn parse_ods_styling(
     content_xml: &str,
 ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
-    parse_ods_styling_with_font(content_xml, None)
+    let defaults = read_default_styles(None, content_xml)?;
+    parse_ods_styling_with_defaults(content_xml, &defaults)
 }
 
-/// Styling of every table of an ODS `content.xml`, settling column widths with `default_font`.
-pub(crate) fn parse_ods_styling_with_font(
+/// Styling of every table of an ODS `content.xml`, settling column widths and row heights with workbook `defaults`.
+pub(crate) fn parse_ods_styling_with_defaults(
     content_xml: &str,
-    default_font: Option<&DefaultFont>,
+    defaults: &OdsDefaultStyles,
 ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (
-        StyleSink::new_with_font(&styles, default_font),
+        StyleSink::new_with_defaults(&styles, defaults.font.as_ref(), defaults.row_height),
         ValidationSink::default(),
     );
     let mut budget = crate::decode_budget::DecodeBudget::new();

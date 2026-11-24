@@ -78,3 +78,46 @@ fn xls_and_ods_round_trip_sheet_defaults_and_layout_via_ipc() {
         "{dec_ods}"
     );
 }
+
+#[test]
+fn ods_ipc_round_trips_automatic_font_default_row_height_with_zero_flag() {
+    let payload = r#"{
+        "sourceFormat":"xlsx",
+        "targetFormat":"ods",
+        "title":"auto_row_height",
+        "defaultFont":{"name":"Calibri","size":11},
+        "sheets":[{
+            "name":"S1",
+            "cells":[{"ref":"A1","raw":"x"}],
+            "defaultRowHeight":[14.4,0]
+        },{
+            "name":"S2",
+            "cells":[{"ref":"A1","raw":"y"}],
+            "defaultRowHeight":[24,1]
+        }]
+    }"#;
+    let ods_res = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
+    let ods_b64 = str_field(&ods_res, "convertedBase64");
+    let dec_ods = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(r#"{{"action":"decode","fileName":"out.ods","sourceBase64":"{ods_b64}"}}"#),
+    )
+    .unwrap();
+    assert!(
+        dec_ods.contains(r#""defaultRowHeight":[14.4,0]"#),
+        "{dec_ods}"
+    );
+    assert!(dec_ods.contains(r#""defaultRowHeight":[24]"#), "{dec_ods}");
+    assert!(
+        dec_ods.contains(r#""defaultFont":{"name":"Calibri","size":11}"#),
+        "{dec_ods}"
+    );
+
+    for bad in ["[-1,0]", "[410,0]", "[0,0]"] {
+        let bad_payload = payload.replace("[14.4,0]", bad);
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &bad_payload).is_err(),
+            "{bad} must fail closed"
+        );
+    }
+}

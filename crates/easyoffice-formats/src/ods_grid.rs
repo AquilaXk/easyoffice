@@ -15,6 +15,7 @@ use std::borrow::Cow;
 use crate::cell_type::CellValueKind;
 use crate::decode_budget::DecodeBudget;
 use crate::odf_hwpx_codecs::{ods_budget_error, OdsMultiUnpacked};
+use crate::sheet_styling::ods_default_style::{read_default_styles, OdsDefaultStyles};
 use crate::sheet_styling::ods_styles::{parse_automatic_styles, with_rules, StyleSink};
 use crate::sheet_styling::sheet_rules::ods_rules_read::ValidationSink;
 use crate::sheet_styling::SheetStyling;
@@ -653,19 +654,20 @@ pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, Eas
 pub(crate) fn read_ods_sheets_with_styling(
     content_xml: &str,
 ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-    read_ods_sheets_with_styling_font(content_xml, None)
+    let defaults = read_default_styles(None, content_xml)?;
+    read_ods_sheets_with_defaults(content_xml, &defaults)
 }
 
-/// The tables and their styling from one walk of `content_xml`, settling column widths with `default_font`.
-pub(crate) fn read_ods_sheets_with_styling_font(
+/// The tables and their styling from one walk of `content_xml`, settling column widths and row heights with workbook `defaults`.
+pub(crate) fn read_ods_sheets_with_defaults(
     content_xml: &str,
-    default_font: Option<&crate::DefaultFont>,
+    defaults: &OdsDefaultStyles,
 ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (
         TextSink::new(true),
         (
-            StyleSink::new_with_font(&styles, default_font),
+            StyleSink::new_with_defaults(&styles, defaults.font.as_ref(), defaults.row_height),
             ValidationSink::default(),
         ),
     );

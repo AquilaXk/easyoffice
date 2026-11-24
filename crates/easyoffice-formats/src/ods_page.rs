@@ -89,12 +89,13 @@ fn mils(text: &str) -> Option<u32> {
     (m <= f64::from(MAX_MARGIN_MILS)).then_some(m as u32)
 }
 
-/// `styles.xml` carrying the workbook default `table-cell` style inside `<office:styles>`, optional
-/// hyperlink styles, and any page layouts (`Mpm<N>`) / master pages (`Mp<N>`).
+/// `styles.xml` carrying workbook default styles (`table-cell` font and optional `table-row` height)
+/// inside `<office:styles>`, optional hyperlink styles, and any page layouts (`Mpm<N>`) / master pages (`Mp<N>`).
 pub(crate) fn styles_xml(
     layouts: &[SheetPage],
     links: bool,
     default_font: Option<&crate::DefaultFont>,
+    default_row_height: Option<crate::RowHeight>,
 ) -> String {
     let mut automatic = String::new();
     let mut masters = String::new();
@@ -151,6 +152,9 @@ pub(crate) fn styles_xml(
         );
     }
     let default_style = crate::sheet_styling::ods_default_style::default_style_xml(default_font);
+    let default_row_style = default_row_height
+        .map(crate::sheet_styling::ods_default_style::default_row_style_xml)
+        .unwrap_or_default();
     let link_styles = if links {
         crate::sheet_styling::ods_links::LINK_STYLES_XML
     } else {
@@ -164,12 +168,12 @@ pub(crate) fn styles_xml(
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
             "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
             "xmlns:eo=\"{}\" office:version=\"1.2\">",
-            "<office:styles>{}{}</office:styles>",
+            "<office:styles>{}{}{}</office:styles>",
             "<office:automatic-styles>{}</office:automatic-styles>",
             "<office:master-styles>{}</office:master-styles>",
             "</office:document-styles>"
         ),
-        EO_NS, default_style, link_styles, automatic, masters
+        EO_NS, default_style, default_row_style, link_styles, automatic, masters
     )
 }
 
@@ -522,7 +526,7 @@ mod tests {
             grid_lines: true,
             ..SheetPage::default()
         };
-        let xml = styles_xml(std::slice::from_ref(&page), false, None);
+        let xml = styles_xml(std::slice::from_ref(&page), false, None, None);
         let (_, inner) = extract_balanced_elements(&xml, "style:page-layout").remove(0);
         assert_eq!(layout_from(layout_properties(inner).unwrap()), page);
         assert_eq!(mils("297mm"), Some(11_693));

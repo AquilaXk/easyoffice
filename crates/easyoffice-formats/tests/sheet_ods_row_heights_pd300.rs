@@ -1,6 +1,6 @@
 //! Row heights in ODS (PD-300): rows that carry the sheet's default height do not use up the row-height budget before a
-//! row of its own height, and a default height that follows the font (`customHeight` off, what every XLSX read gives) is
-//! not written to ODS.
+//! row of its own height, and a default height that follows the font (`customHeight` off, what every XLSX read gives)
+//! stays out of content.xml bands (preserved via `styles.xml` default-style in PD-345).
 
 use easyoffice_formats::{
     OdfCodec, OoxmlCodec, RowHeight, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
@@ -179,14 +179,21 @@ fn a_default_that_follows_the_font_is_not_written_to_ods() {
     assert_eq!(styling.default_row_height, Some(height("15", false)));
     let bytes = ods(&styling);
     let content = part(&bytes, "content.xml");
+    let styles = part(&bytes, "styles.xml");
     let band = format!(r#"table:number-rows-repeated="{}""#, ODS_ROWS - 3);
     assert!(!content.contains(&band), "no band that ends the table");
     assert!(
         !content.contains(r#"style:row-height="15pt""#),
-        "no row style for the default"
+        "no row style for the default in content.xml"
+    );
+    assert!(
+        styles.contains(
+            r#"<style:default-style style:family="table-row"><style:table-row-properties style:row-height="15pt" style:use-optimal-row-height="true"/></style:default-style>"#
+        ),
+        "automatic default row height lives in styles.xml"
     );
     let back = read_ods(&bytes);
-    assert!(back.default_row_height.is_none());
+    assert_eq!(back.default_row_height, styling.default_row_height);
     assert_eq!(
         back.row_heights, styling.row_heights,
         "the row of 40 pt stays"
