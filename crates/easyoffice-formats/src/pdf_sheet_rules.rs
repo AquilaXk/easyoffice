@@ -1,13 +1,13 @@
-//! What conditional formatting adds to a sheet page of the engine's own PDF (PD-300): the fill and text color of the
-//! rules, the font bits, the edges and the data bar. The rules are evaluated by the engine (`easyoffice-sheet`, the code
-//! the grid and the print read) and arrive per cell in [`CellRule`], as the number format's answer arrives in
-//! `CellShown`. Icon sets are not drawn: a cell that has one shows its value.
+//! What conditional formatting adds to a sheet page of the engine's own PDF (PD-300, PD-342): the fill and text color
+//! of the rules, the font bits, the edges, the data bar, and the icon sets. The rules are evaluated by the engine
+//! (`easyoffice-sheet`, the code the grid and the print read) and arrive per cell in [`CellRule`], as the number format's
+//! answer arrives in `CellShown`.
 //!
 //! The data bar geometry is the grid's (`barBackground` in `sheet-rules.js`): the axis is `start` percent of the cell
 //! width, a positive bar grows right from it to `start + (100 - start) * pct / 100`, a negative bar left to
 //! `start - start * |pct| / 100`, and a gradient bar fades from its color to a quarter of it at its far end, mixed with
 //! the cell's own fill. A gradient is a form of one unit square shaded once per pair of end colors (`write_gradient` in
-//! `pdf_writer.rs`) that each bar stretches over its box.
+//! `pdf_writer.rs`) that each bar stretches over its box. Icon sets use shared 24×24 vector Form XObjects (`pdf_sheet_icons.rs`).
 //!
 //! A sheet can have tens of thousands of cells that a rule paints, so the fills, bars and edges are not written cell by
 //! cell. [`RuleLayer`] collects them for the page: the boxes of one color are one path (a run of neighbours in a row is
@@ -17,11 +17,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
 use crate::pdf_laid::{rgb_ops, Canvas};
+use crate::pdf_sheet_icons::{IconKey, IconSlot, ICON_BOX_UNITS};
 use crate::pdf_writer::text_ops;
 use crate::{
-    BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, SheetStyling, FLAG_BOLD, FLAG_ITALIC,
-    FLAG_STRIKE, FLAG_UNDERLINE, MAX_SIZE_PT, MIN_SIZE_PT, STYLE_BOLD, STYLE_ITALIC, STYLE_STRIKE,
-    STYLE_UNDERLINE,
+    BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, CfIcon, SheetStyling, FLAG_BOLD,
+    FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, MAX_SIZE_PT, MIN_SIZE_PT, STYLE_BOLD, STYLE_ITALIC,
+    STYLE_STRIKE, STYLE_UNDERLINE,
 };
 
 const _: () = {
@@ -44,7 +45,8 @@ pub struct CellRule {
     /// The sides the rules draw (a side with no edge is not drawn).
     pub border: CellBorders,
     pub bar: Option<CfBar>,
-    /// The bar shows no value: the cell's text is not drawn.
+    pub icon: Option<CfIcon>,
+    /// The bar or icon shows no value: the cell's text is not drawn.
     pub hide_value: bool,
 }
 
@@ -142,12 +144,13 @@ impl Stroke {
 /// A line along a row edge or a column edge: its fixed coordinate and the stretch it covers.
 type Segment = (f64, f64, f64);
 
-/// The operators a [`RuleLayer`] makes: the boxes and gradients, which go under the text of the page; the edges, which go
-/// over the grid lines; and the gradient forms the first ones draw by name (`Gr1`, ...), as the colors at their two ends.
+/// The operators a [`RuleLayer`] makes: the boxes, gradients and icons, which go under the text of the page; the edges,
+/// which go over the grid lines; the gradient forms (`Gr1`, ...); and the icon forms (`Ic1`, ...).
 pub(crate) struct RuleOps {
     pub under: Vec<String>,
     pub over: Vec<String>,
     pub gradients: Vec<(String, u32, u32)>,
+    pub icons: Vec<(String, IconKey)>,
 }
 
 /// Boxes by color.
@@ -168,7 +171,7 @@ fn push_box(boxes: &mut Boxes, (x, y, w, h): Rect, rgb: u32) {
     list.push((x, y, w, h));
 }
 
-/// The fills, bars and edges of the cells with a rule on one page.
+/// The fills, bars, icons and edges of the cells with a rule on one page.
 pub(crate) struct RuleLayer {
     scale: f64,
     fills: Boxes,
@@ -176,6 +179,11 @@ pub(crate) struct RuleLayer {
     bars: Boxes,
     /// The gradient bars by the colors at their two ends, which go over the solid bars.
     gradients: BTreeMap<(u32, u32), Vec<Rect>>,
+    /// Distinct `(shape, color)` keys used by icon cells on this page.
+    icon_keys: Vec<IconKey>,
+    icon_map: HashMap<IconKey, usize>,
+    /// `(icon_key_index, x, y, size)` placements drawn over fills and bars.
+    icons: Vec<(usize, f64, f64, f64)>,
     /// By stroke, color and whether the lines are vertical.
     edges: BTreeMap<(Stroke, u32, bool), Vec<Segment>>,
 }
@@ -187,8 +195,21 @@ impl RuleLayer {
             fills: BTreeMap::new(),
             bars: BTreeMap::new(),
             gradients: BTreeMap::new(),
+            icon_keys: Vec::new(),
+            icon_map: HashMap::new(),
+            icons: Vec::new(),
             edges: BTreeMap::new(),
         }
+    }
+
+    /// Places `key` at `slot` over the cell fill and data bar.
+    pub(crate) fn icon(&mut self, slot: IconSlot, key: IconKey) {
+        let idx = *self.icon_map.entry(key).or_insert_with(|| {
+            let i = self.icon_keys.len();
+            self.icon_keys.push(key);
+            i
+        });
+        self.icons.push((idx, slot.x, slot.y, slot.size));
     }
 
     /// The fill of a cell.
@@ -294,6 +315,25 @@ impl RuleLayer {
             }
             gradients.push((name, *from, *to));
         }
+        let mut icons = Vec::with_capacity(self.icon_keys.len());
+        for (i, key) in self.icon_keys.into_iter().enumerate() {
+            icons.push((format!("Ic{}", i + 1), key));
+        }
+        for chunk in self.icons.chunks(PATH_PARTS) {
+            let mut op = String::with_capacity(chunk.len() * 48);
+            for (pos, &(idx, ix, iy, size)) in chunk.iter().enumerate() {
+                if pos > 0 {
+                    op.push('\n');
+                }
+                let k = size / ICON_BOX_UNITS;
+                let _ = write!(
+                    op,
+                    "q {k:.5} 0 0 {k:.5} {ix:.2} {iy:.2} cm /Ic{} Do Q",
+                    idx + 1
+                );
+            }
+            under.push(op);
+        }
         let unit = |pt: f64| (pt * self.scale).max(MIN_LINE_PT);
         let mut over = Vec::new();
         for ((stroke, rgb, vertical), mut lines) in self.edges {
@@ -319,6 +359,7 @@ impl RuleLayer {
             under,
             over,
             gradients,
+            icons,
         }
     }
 }

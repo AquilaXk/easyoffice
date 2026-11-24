@@ -5955,3 +5955,18 @@
 - **Alternatives rejected** `GETPIVOTDATA` 인수를 정적으로 추정하지 않고 엔진이 모든 실패 원인을 오류 문자열로 반환하게 하는 방식: 표준 스프레드시트 오류 계약(`#REF!`)이 깨진다.
 - **Verified by** `crates/easyoffice-app/tests/sheet_pivot_omitted_pd303.rs`, `scripts/test-webui-sheet-getpivotdata.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `node scripts/verify-licenses.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`.
 - **Revisit when** 시트 전체의 셀 오류 사유를 담는 별도 진단 메타데이터 채널을 엔진에 둘 때.
+
+## PD-342 — 엔진 시트 PDF 조건부 서식 아이콘 집합 20종 벡터 렌더링 지원 (2026-11-25)
+
+- **Context** `PD-300`에서 조건부 서식의 채우기·글자색·글꼴 비트·테두리·데이터 막대는 엔진 시트 PDF에 그렸으나 아이콘 집합 20종(`sheet-rules.js` `SHAPES`)은 그리지 않아 값이 그대로 노출되었다(`TODO.md`).
+- **Decision (`PD-342`)**
+  1. **아이콘 20종 벡터 경로와 공유 Form XObject(`pdf_sheet_icons.rs` · `pdf_writer.rs`)**: `sheet-rules.js`의 `24×24` SVG `SHAPES`(화살표·회전 화살표·깃발·신호등 원/고리·표지·기호·별 0~2·4/5등급 막대·4분면 파이 0~4·상자 0~4)와 `ICON_SETS` 20종 색상·순서를 PDF `24×24` Form XObject(`/BBox [0 0 24 24]`)로 옮겼다. 부분 등급 막대(`4Rating` 1~3, `5Rating` 1~4)의 희미한 막대(`opacity=".3"`)만 인라인 `/ExtGState << /A3 << /ca 0.3 >> >>`를 쓰고, `Serialize` 시 문서 전체에서 유일한 `(모양, 색)` 조합마다 Form XObject를 한 번만 쓴다(아이콘 없는 문서는 추가 객체 0개).
+  2. **칸 배치·겹침 방지·값 숨김·층 순서(`pdf_laid.rs` · `pdf_sheet_rules.rs` · `sheet_pdf_rules.rs`)**: 화면·인쇄 CSS(`14px`, 간격 `4px`)에 맞춘 `10.5pt × scale` 크기와 `3.0pt × scale` 간격으로 칸 안에 배치하며, 좁은 열·낮은 행에서는 `pad_x = (w * 0.25).min(pad)` 연속 축소로 칸 밖 넘침과 너비 경계 도약을 막는다. 값이 보일 때는 왼쪽 여백에 아이콘을 두고 오른쪽 정렬 숫자와 왼쪽 정렬 문자열 모두 아이콘 영역(`text_inset`) 뒤 공간만 써서 글자와 겹치지 않는다. `show_value == false`인 유효 아이콘은 칸 가운데에 아이콘을 두고 값을 숨긴다(기존 `PD-300`의 임시 값 유지 분기와 `sheet_pdf_rules_pd300` 테스트를 갱신).
+  3. **Fail-Closed 경계(`sheet_rules.rs` · `pdf_sheet_icons.rs`)**: `CfIcon::is_valid`와 `resolve_icon`이 `ICON_SETS` 범위(`0..20`)와 집합별 아이콘 수를 검사한다. 범위 밖 `CfIcon`이나 비정상 좌표(`NaN`·음수·0)는 아이콘을 그리지 않고, 잘못된 아이콘만 있는 칸에서는 `hide_value`로 값을 지우지 않는다.
+  4. **`TODO.md` 정리**: 완료한 `엔진 시트 PDF가 조건부 서식의 아이콘 집합을 그리지 않는다` 항목을 지웠다.
+- **재사용 판단 (구현 원칙 3단계)** (1) `PD-269` 원칙상 `easyoffice-formats`에 외부 SVG→PDF 변환 크레이트를 추가하지 않았다. (2) 기존 `ICON_SETS`·`pdf_writer` Form XObject 패턴(`write_gradient`·`pdf_highlight` `ext_g_states`)·`RuleLayer`·`WorkbookEngine::evaluate_rules_checked`를 그대로 재사용했다. (3) 외부 코드 이식 없이 `sheet-rules.js` `SHAPES`의 `24×24` 기하를 `pdf_sheet_icons.rs`에 직접 작성했다.
+- **Why** 조건부 서식 아이콘 집합이 있는 시트를 엔진 PDF로 내보낼 때도 화면·인쇄와 같은 아이콘 모양·색·값 숨김을 유지하고, 2만 칸 시트에서도 Form XObject 공유·O(1) 색인·배치 묶음으로 파일 크기와 생성 시간을 억제한다.
+- **Trade-offs** (1) 아이콘 20종 모양은 `sheet-rules.js`의 `24×24` 정적 기하에 맞춰 `pdf_sheet_icons.rs`에 병렬 유지된다. (2) 아이콘 크기는 `14px(10.5pt) × scale` 기준이라 큰 글꼴(`PD-340`)과 함께 쓸 때도 행 높이를 넘기지 않는다.
+- **Alternatives rejected** (1) 칸마다 아이콘 경로 연산자를 인라인으로 전개하는 방식: 2만 칸 시트에서 내용 스트림이 수 MB로 불어난다. (2) 부분 등급 막대를 흰색과 수동 혼합해 쓰는 방식: 데이터 막대나 칸 채우기 위에서 투명 합성이 깨진다.
+- **Verified by** `crates/easyoffice-formats/src/pdf_sheet_icons.rs` 단위 시험, `crates/easyoffice-formats/tests/sheet_pdf_icon_sets_pd342.rs`, `crates/easyoffice-app/tests/sheet_pdf_icon_sets_pd342.rs`, 갱신된 `crates/easyoffice-app/tests/sheet_pdf_rules_pd300.rs`, 외부 PDF 무결성·래스터 렌더링 확인, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`, `node scripts/verify-licenses.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`.
+- **Revisit when** 화면 `sheet-rules.js` `SHAPES`에 새 아이콘 집합이나 모양 변경이 생길 때.

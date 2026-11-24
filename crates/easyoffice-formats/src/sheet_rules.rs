@@ -225,6 +225,23 @@ pub struct CfBar {
     pub gradient: bool,
 }
 
+/// One icon of an icon set (`ICON_SETS` index and zero-based icon index, lowest first).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CfIcon {
+    pub set: u8,
+    pub index: u8,
+}
+
+impl CfIcon {
+    /// True when `set` names a known set in [`ICON_SETS`] and `index` is inside that set.
+    #[inline]
+    pub fn is_valid(self) -> bool {
+        ICON_SETS
+            .get(usize::from(self.set))
+            .is_some_and(|&(_, count)| self.index < count)
+    }
+}
+
 /// How a threshold of a scale, bar or icon set is found (OOXML `cfvo`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {

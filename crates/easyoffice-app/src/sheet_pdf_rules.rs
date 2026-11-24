@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use easyoffice_formats::{
-    plain_cell_numeric, CellRule, CellShown, SheetRules, SheetShown, SheetStyling,
+    plain_cell_numeric, CellRule, CellShown, CfIcon, SheetRules, SheetShown, SheetStyling,
 };
 use easyoffice_sheet::{CellVisual, WorkbookEngine};
 
@@ -28,16 +28,24 @@ fn printed_box(
     }
 }
 
-/// What the rules give the cell, as the PDF draws it. A bar that hides the value hides it only when it is drawn and no
-/// icon is: the PDF draws no icon sets, so a cell with one shows its value.
+/// What the rules give the cell, as the PDF draws it. A bar or icon that hides the value hides it only when at least one
+/// valid bar or icon is drawn (`PD-342`).
 fn rule_of(visual: &CellVisual) -> CellRule {
+    let icon = visual
+        .icon
+        .map(|i| CfIcon {
+            set: i.set,
+            index: i.index,
+        })
+        .filter(|i| i.is_valid());
     CellRule {
         bg: visual.bg,
         fg: visual.fg,
         flags: visual.flags,
         border: visual.border,
         bar: visual.bar,
-        hide_value: visual.hide_value && visual.bar.is_some() && visual.icon.is_none(),
+        icon,
+        hide_value: visual.hide_value && (visual.bar.is_some() || icon.is_some()),
     }
 }
 

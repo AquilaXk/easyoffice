@@ -15,13 +15,15 @@
 
 use crate::pdf_highlight::{write_annotation, HighlightPass, PageAnnotation, PdfHighlight};
 use crate::pdf_image::PdfImageObject;
+use crate::pdf_sheet_icons::{icon_form_content, IconKey, ICON_BOX_UNITS};
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
 use crate::pdf_text_wrap::wrap_spans;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
 use ::pdf_writer::types::{CidFontType, FontFlags, FunctionShadingType, SystemInfo};
-use ::pdf_writer::writers::{FunctionShading, Resources};
+use ::pdf_writer::writers::{ExtGraphicsState, FunctionShading, Resources};
 use ::pdf_writer::{Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
+use std::collections::{hash_map::Entry, HashMap};
 use std::ops::Range;
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
@@ -311,6 +313,8 @@ pub(crate) struct PdfLaidPage {
     /// The gradients the content draws by resource name, as the colors at the two ends of the unit axis (`0xRRGGBB`): each
     /// is a form of one unit square that content stretches over a box with `cm` and `Do` (PD-300).
     pub gradients: Vec<(String, u32, u32)>,
+    /// The icon set glyphs drawn by page-local resource name (`Ic1`, ...), deduplicated at document level (PD-342).
+    pub icons: Vec<(String, IconKey)>,
     /// The content stream is stored deflated (`FlateDecode`).
     pub deflate: bool,
 }
@@ -338,20 +342,30 @@ struct PagePlan {
 }
 
 impl PagePlan {
-    /// The `/XObject` resource of the page: `/Im1` of a picture page, the named pictures of a
-    /// laid page. Nothing is written for a page without pictures.
-    fn xobject_resources(&self, entry: &PdfPageEntry, resources: &mut Resources<'_>) {
+    /// The `/XObject` resource of the page: `/Im1` of a picture page, the named pictures and forms of a
+    /// laid page. Nothing is written for a page without XObjects.
+    fn xobject_resources(
+        &self,
+        entry: &PdfPageEntry,
+        icon_form_refs: &HashMap<IconKey, Ref>,
+        resources: &mut Resources<'_>,
+    ) {
         if let Some(image) = self.image {
             resources.x_objects().pair(Name(b"Im1"), image);
         }
         if let PdfPageEntry::Laid(page) = entry {
-            if !page.xobjects.is_empty() || !page.gradients.is_empty() {
+            if !page.xobjects.is_empty() || !page.gradients.is_empty() || !page.icons.is_empty() {
                 let mut forms = resources.x_objects();
                 for ((name, _), &(picture, _)) in page.xobjects.iter().zip(&self.xobjects) {
                     forms.pair(Name(name.as_bytes()), picture);
                 }
                 for ((name, ..), &(form, _)) in page.gradients.iter().zip(&self.gradients) {
                     forms.pair(Name(name.as_bytes()), form);
+                }
+                for (name, key) in &page.icons {
+                    if let Some(&form_ref) = icon_form_refs.get(key) {
+                        forms.pair(Name(name.as_bytes()), form_ref);
+                    }
                 }
             }
         }
@@ -449,6 +463,21 @@ impl PdfSerializer {
                 }
             }
         }
+        let mut icon_forms: Vec<(IconKey, Ref)> = Vec::new();
+        let mut icon_form_refs: HashMap<IconKey, Ref> = HashMap::new();
+        for entry in entries {
+            if let PdfPageEntry::Laid(page) = entry {
+                for &(_, key) in &page.icons {
+                    if let Entry::Vacant(slot) = icon_form_refs.entry(key) {
+                        let id = next_free;
+                        next_free = next_free.checked_add(1).expect("PDF object count overflow");
+                        let form_ref = object_ref(id);
+                        slot.insert(form_ref);
+                        icon_forms.push((key, form_ref));
+                    }
+                }
+            }
+        }
 
         let mut pdf = Pdf::with_capacity(4096);
         pdf.set_version(1, 4);
@@ -457,7 +486,10 @@ impl PdfSerializer {
             .count(i32::try_from(entries.len()).expect("PDF object count overflow"))
             .kids(plans.iter().map(|plan| plan.page));
         for (entry, plan) in entries.iter().zip(&plans) {
-            write_page(&mut pdf, entry, plan, &fonts, watermark);
+            write_page(&mut pdf, entry, plan, &fonts, &icon_form_refs, watermark);
+        }
+        for &(key, form_ref) in &icon_forms {
+            write_icon_form(&mut pdf, form_ref, key);
         }
         fonts.write(&mut pdf);
         pdf.document_info(fonts.info)
@@ -585,11 +617,30 @@ fn write_gradient(pdf: &mut Pdf, (form, function): (Ref, Ref), (from, to): (u32,
     shading.color_space().device_rgb();
 }
 
+fn write_icon_form(pdf: &mut Pdf, form_ref: Ref, key: IconKey) {
+    let (content, uses_alpha) = icon_form_content(key);
+    let mut form = pdf.form_xobject(form_ref, content.as_bytes());
+    form.bbox(Rect::new(
+        0.0,
+        0.0,
+        ICON_BOX_UNITS as f32,
+        ICON_BOX_UNITS as f32,
+    ));
+    if uses_alpha {
+        form.resources()
+            .ext_g_states()
+            .insert(Name(b"A3"))
+            .start::<ExtGraphicsState>()
+            .non_stroking_alpha(0.3);
+    }
+}
+
 fn write_page(
     pdf: &mut Pdf,
     entry: &PdfPageEntry,
     plan: &PagePlan,
     fonts: &FontObjects,
+    icon_form_refs: &HashMap<IconKey, Ref>,
     watermark: Option<&str>,
 ) {
     let a4 = Rect::new(
@@ -639,7 +690,7 @@ fn write_page(
         page.rotate(rotation).media_box(media_box);
         let mut resources = page.resources();
         fonts.resources(&mut resources);
-        plan.xobject_resources(entry, &mut resources);
+        plan.xobject_resources(entry, icon_form_refs, &mut resources);
         resources.finish();
         page.contents(plan.content);
         if !plan.annotations.is_empty() {

@@ -124,19 +124,43 @@ fn a_data_bar_is_as_wide_as_the_value_says() {
 }
 
 #[test]
-fn a_bar_that_shows_no_value_hides_it_and_an_icon_set_keeps_the_value() {
+fn a_bar_or_icon_set_that_shows_no_value_hides_it_and_icon_set_shows_it_by_default() {
     let bar = format!(
         r##"{},"rules":{{"cf":[{{"r":"A1:A3","p":1,"t":"bar","min":{{"k":"num","v":"0"}},"max":{{"k":"max","v":""}},"show":false}}]}}"##,
         cells(&[("A1", "10"), ("A2", "20"), ("A3", "40")])
     );
     let pdf = convert(&bar).0;
     assert!(!pdf.contains("(10) Tj") && !pdf.contains("(20) Tj") && !pdf.contains("(40) Tj"));
-    let icons = format!(
+    let icons_shown = format!(
+        r##"{},"rules":{{"cf":[{{"r":"A1:A3","p":1,"t":"icons","set":"3Arrows","th":[{{"k":"num","v":"0"}},{{"k":"num","v":"15"}},{{"k":"num","v":"30"}}],"show":true}}]}}"##,
+        cells(&[("A1", "10"), ("A2", "20"), ("A3", "40")])
+    );
+    let pdf_shown = convert(&icons_shown).0;
+    assert!(
+        pdf_shown.contains("(10) Tj")
+            && pdf_shown.contains("(20) Tj")
+            && pdf_shown.contains("(40) Tj")
+    );
+    assert!(
+        pdf_shown.contains("/Ic1 Do")
+            && pdf_shown.contains("/Ic2 Do")
+            && pdf_shown.contains("/Ic3 Do")
+    );
+    let icons_hidden = format!(
         r##"{},"rules":{{"cf":[{{"r":"A1:A3","p":1,"t":"icons","set":"3Arrows","th":[{{"k":"num","v":"0"}},{{"k":"num","v":"15"}},{{"k":"num","v":"30"}}],"show":false}}]}}"##,
         cells(&[("A1", "10"), ("A2", "20"), ("A3", "40")])
     );
-    let pdf = convert(&icons).0;
-    assert!(pdf.contains("(10) Tj") && pdf.contains("(20) Tj") && pdf.contains("(40) Tj"));
+    let pdf_hidden = convert(&icons_hidden).0;
+    assert!(
+        !pdf_hidden.contains("(10) Tj")
+            && !pdf_hidden.contains("(20) Tj")
+            && !pdf_hidden.contains("(40) Tj")
+    );
+    assert!(
+        pdf_hidden.contains("/Ic1 Do")
+            && pdf_hidden.contains("/Ic2 Do")
+            && pdf_hidden.contains("/Ic3 Do")
+    );
 }
 
 #[test]

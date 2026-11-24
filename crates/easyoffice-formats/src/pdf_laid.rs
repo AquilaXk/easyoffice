@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 mod doc;
 pub(crate) use doc::laid_document_pdf;
 
+use crate::pdf_sheet_icons::{self, IconKey};
 use crate::pdf_sheet_rules::{self, plain_cell_numeric, RuleLayer, RuleOps, SheetShown};
 use crate::pdf_writer::{char_units, mixed_units, text_ops, PdfLaidPage, PdfPageEntry};
 use crate::sheet_page::{PageScale, SheetPage};
@@ -31,7 +32,7 @@ const HEADING_ROW_PX: f64 = 22.0;
 const SHEET_FONT_PT: f64 = 10.0;
 /// The width of every grid line, in points.
 const GRID_WIDTH_PT: f64 = 0.5;
-const CELL_PAD_PT: f64 = 4.0;
+pub(crate) const CELL_PAD_PT: f64 = 4.0;
 const DEFAULT_SHEET_MARGIN_MM: f64 = 10.0;
 const WIDE_SHEET_COLUMNS: u32 = 8;
 const MIN_SCALE: f64 = 0.1;
@@ -113,6 +114,8 @@ pub(crate) struct Canvas {
     ops: Vec<String>,
     /// The gradient forms the operators draw by name (`PdfLaidPage::gradients`).
     gradients: Vec<(String, u32, u32)>,
+    /// The icon forms the operators draw by name (`PdfLaidPage::icons`).
+    icons: Vec<(String, IconKey)>,
 }
 
 impl Canvas {
@@ -122,6 +125,7 @@ impl Canvas {
             height,
             ops: Vec::new(),
             gradients: Vec::new(),
+            icons: Vec::new(),
         }
     }
 
@@ -200,15 +204,17 @@ impl Canvas {
         self.ops.len()
     }
 
-    /// Puts `ops` at the place `mark` named, before everything drawn since, and the gradient forms they draw with.
+    /// Puts `ops` at the place `mark` named, before everything drawn since, and the gradient and icon forms they draw with.
     pub(crate) fn insert_ops(
         &mut self,
         at: usize,
         ops: Vec<String>,
         gradients: Vec<(String, u32, u32)>,
+        icons: Vec<(String, IconKey)>,
     ) {
         self.ops.splice(at..at, ops);
         self.gradients.extend(gradients);
+        self.icons.extend(icons);
     }
 
     pub(crate) fn push_raw_op(&mut self, op: String) {
@@ -262,6 +268,7 @@ impl Canvas {
             content: pdf_sheet_rules::merge_styled(self.ops).join("\n"),
             xobjects: Vec::new(),
             gradients: self.gradients,
+            icons: self.icons,
             deflate: false,
         }
     }
@@ -686,17 +693,33 @@ fn sheet_area_pages(
                         (None, Some(rgb)) => canvas.fill_rect(x, y - h, w, h, rgb),
                         _ => {}
                     }
+                    let icon_key = rule
+                        .and_then(|rule| rule.icon)
+                        .and_then(pdf_sheet_icons::resolve_icon);
+                    let invalid_icon_only = rule.is_some_and(|rule| {
+                        rule.icon.is_some() && icon_key.is_none() && rule.bar.is_none()
+                    });
+                    let hidden = rule.is_some_and(|rule| rule.hide_value) && !invalid_icon_only;
                     if let Some(rule) = rule {
                         if let Some(bar) = rule.bar {
                             rule_layer.bar(cell_box, bar, fill);
                         }
                         rule_layer.edges(cell_box, rule.border);
                     }
-                    let hidden = rule.is_some_and(|rule| rule.hide_value);
+                    let icon_inset = if let Some(key) = icon_key {
+                        if let Some(slot) = pdf_sheet_icons::icon_slot(cell_box, scale, hidden) {
+                            rule_layer.icon(slot, key);
+                            slot.text_inset
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    };
                     if let Some(text) = cells.get(&at).filter(|_| !hidden) {
                         let how = how_opt.unwrap_or_default();
                         let cell_font = pdf_sheet_rules::cell_font_pt(look, font, scale);
-                        let room = w - 2.0 * pad;
+                        let room = (w - 2.0 * pad - icon_inset).max(0.0);
                         let filled = filled_text(text, how.fill, cell_font, room);
                         let (drawn, tw) = fit_text_with_width(&filled, cell_font, room);
                         let right_aligned = match how_opt {
@@ -706,7 +729,7 @@ fn sheet_area_pages(
                         let tx = if right_aligned {
                             x + w - pad - tw
                         } else {
-                            x + pad
+                            x + pad + icon_inset
                         };
                         let ty = y - h + (h - cell_font) / 2.0 + scale;
                         let color = how
@@ -740,8 +763,9 @@ fn sheet_area_pages(
                 under,
                 over,
                 gradients,
+                icons,
             } = rule_layer.into_ops();
-            canvas.insert_ops(layer_at, under, gradients);
+            canvas.insert_ops(layer_at, under, gradients, icons);
             for op in over {
                 canvas.push_raw_op(op);
             }

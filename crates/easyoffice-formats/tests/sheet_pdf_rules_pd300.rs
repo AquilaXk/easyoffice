@@ -3,8 +3,8 @@
 
 use easyoffice_formats::{
     encode_sheet_pdf, plain_cell_numeric, BorderEdge, BorderLine, CellBorders, CellRule, CellShown,
-    CellStyle, CfBar, DefaultFont, OdsUnpacked, SheetShown, SheetStyling, FLAG_BOLD, FLAG_ITALIC,
-    FLAG_STRIKE, FLAG_UNDERLINE,
+    CellStyle, CfBar, CfIcon, DefaultFont, OdsUnpacked, SheetShown, SheetStyling, FLAG_BOLD,
+    FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE,
 };
 
 /// A default column of a Calibri 11 pt workbook (a 7 px digit), 64 px (PD-305), in points.
@@ -547,10 +547,15 @@ fn a_hostile_rule_stays_inside_its_cell_and_writes_numbers() {
             color: u32::MAX,
             gradient: true,
         }),
+        icon: Some(CfIcon {
+            set: u8::MAX,
+            index: u8::MAX,
+        }),
         hide_value: false,
     };
     let pdf = pdf_with(sheet().1, rule_of((1, 0), hostile));
     assert!(!pdf.contains("NaN") && !pdf.contains("inf"));
+    assert!(!pdf.contains("/Ic"));
     for (_, (x, _, w, _)) in boxes(&pdf) {
         assert!(x >= 0.0 && w >= 0.0 && x + w < 600.0, "{x} {w}");
     }

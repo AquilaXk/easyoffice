@@ -51,6 +51,7 @@ mod pdf_chart;
 mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;
+mod pdf_sheet_icons;
 mod pdf_sheet_media;
 mod pdf_sheet_rules;
 pub mod pdf_slide;

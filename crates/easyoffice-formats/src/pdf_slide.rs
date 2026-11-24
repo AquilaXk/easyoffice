@@ -908,6 +908,7 @@ pub fn encode_slide_pdf(deck: &RichSlideDeck, title: &str) -> Result<Vec<u8>, Ea
             content: cv.ops.join("\n"),
             xobjects: cv.xobjects,
             gradients: Vec::new(),
+            icons: Vec::new(),
             deflate: false,
         }));
     }
