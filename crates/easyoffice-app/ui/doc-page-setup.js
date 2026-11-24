@@ -75,10 +75,11 @@
 
   // The setup is usable: every value within the engine's bounds, the header and footer distances inside their
   // margins, and a body of at least 10 mm in both directions. Returns the reason or null.
-  function violation(setup) {
+  function violation(setup, mod = "DOC") {
     if (![...KEYS, "gutter"].every((key) => Number.isInteger(setup[key] ?? 0) && (setup[key] ?? 0) >= 0 && (setup[key] ?? 0) <= MAX_TWIPS)) return MSG_TOO_BIG;
+    const hfPair = mod === "HWP" ? "머리말·꼬리말" : "머리글·바닥글";
     if ((setup.header ?? 0) > (setup.top ?? 0) || (setup.footer ?? 0) > (setup.bottom ?? 0)) {
-      return "머리말·꼬리말 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.";
+      return hfPair + " 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.";
     }
     const mm = (twips) => (twips / TWIPS_PER_MM).toFixed(1);
     const atTop = setup.binding === TOP_BINDING;
@@ -89,7 +90,7 @@
       return "좌우 여백이 너무 커서 본문이 남지 않습니다 (본문 너비 " + mm(width) + "mm, 최소 " + MIN_BODY_MM + "mm). 왼쪽·오른쪽 여백을 줄여주세요.";
     }
     if (height < MIN_BODY_TWIPS) {
-      return "위아래 여백이 너무 커서 본문이 남지 않습니다 (본문 높이 " + mm(height) + "mm, 최소 " + MIN_BODY_MM + "mm). 위쪽·아래쪽·머리말·꼬리말 여백을 줄여주세요.";
+      return "위아래 여백이 너무 커서 본문이 남지 않습니다 (본문 높이 " + mm(height) + "mm, 최소 " + MIN_BODY_MM + "mm). 위쪽·아래쪽·" + hfPair + " 여백을 줄여주세요.";
     }
     return null;
   }
@@ -303,6 +304,14 @@
       syncPaper();
     }
 
+    function syncDialogLabels() {
+      const hwp = isHwp();
+      const setTxt = (id, text) => { const el = byId(id); if (el) el.textContent = text; };
+      setTxt("doc-page-setup-title", hwp ? "편집 용지" : "용지 설정");
+      setTxt("doc-ps-header-label", hwp ? "머리말" : "머리글");
+      setTxt("doc-ps-footer-label", hwp ? "꼬리말" : "바닥글");
+    }
+
     function open() {
       const editor = byId("doc-editor");
       if (!editor) {
@@ -313,6 +322,7 @@
         setFeedback?.(MSG_PAGED_ONLY);
         return false;
       }
+      syncDialogLabels();
       original = current(editor);
       populate(original);
       kit.note("doc-ps-status", "");
@@ -325,7 +335,8 @@
     function apply() {
       const editor = byId("doc-editor");
       if (!editor) return false;
-      const setup = fromFields(readFields(), original, activeMod());
+      const mod = activeMod();
+      const setup = fromFields(readFields(), original, mod);
       // A listed paper keeps its exact size, not the one its rounded millimetres give.
       const preset = PRESETS.find(([name]) => name === kit.val("doc-ps-paper"));
       if (preset) {
@@ -333,7 +344,7 @@
         const [width, height] = setup.width > setup.height ? [h, w] : [w, h];
         if (twipsToMm(width) === twipsToMm(setup.width) && twipsToMm(height) === twipsToMm(setup.height)) Object.assign(setup, { width, height });
       }
-      const refused = violation(setup);
+      const refused = violation(setup, mod);
       if (refused) {
         kit.note("doc-ps-status", refused);
         return false;
@@ -346,14 +357,14 @@
       };
       if (withUndo) withUndo(run);
       else run();
-      setFeedback?.("편집 용지 적용");
+      setFeedback?.(mod === "HWP" ? "편집 용지 적용" : "용지 설정 적용");
       editor.focus?.();
       return true;
     }
 
     // Applies `next` (a setup) as the page's, unless it leaves no body, in which case the reason is on the status line.
     function change(next, label) {
-      const refused = violation(next);
+      const refused = violation(next, activeMod());
       if (refused) {
         setFeedback?.(refused);
         return false;
@@ -363,22 +374,22 @@
       return true;
     }
 
-    // 용지 방향 전환: the page's width and length swap (the margins stay).
+    // 용지 방향: the page's width and length swap (the margins stay).
     function turn() {
       const editor = byId("doc-editor");
       if (!editor || editor.classList.contains("manuscript-grid")) return false;
       const now = current(editor);
-      return change({ ...now, width: now.height, height: now.width }, "용지 방향 전환");
+      return change({ ...now, width: now.height, height: now.width }, "용지 방향");
     }
 
-    // 여백 전환: the next margin set after the one the page has (the second when it has none of them).
+    // 여백: the next margin set after the one the page has (the second when it has none of them).
     function nextMargins() {
       const editor = byId("doc-editor");
       if (!editor || editor.classList.contains("manuscript-grid")) return false;
       const now = current(editor);
       const presets = [defaultSide(), MARGIN_PRESETS[1], MARGIN_PRESETS[2]];
       const at = presets.findIndex((set) => MARGIN_KEYS.every((key) => set[key] === now[key]));
-      return change({ ...now, ...presets[at >= 0 ? (at + 1) % presets.length : 1] }, "여백 전환");
+      return change({ ...now, ...presets[at >= 0 ? (at + 1) % presets.length : 1] }, "여백");
     }
 
     function bind() {

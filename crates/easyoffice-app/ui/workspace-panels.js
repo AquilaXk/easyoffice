@@ -860,7 +860,7 @@
       box.className = "eo-doc-mailmerge";
       box.dataset.docMailmerge = "true";
       box.textContent =
-        "[메일 머지 필드 병합 (" + summary + ") · 성명: 이수현 · 기관명: 행정안전부 · 일자: 2026-10-25]";
+        "[편지 병합 필드 병합 (" + summary + ") · 성명: 이수현 · 기관명: 행정안전부 · 일자: 2026-10-25]";
       if (!box.parentElement) insertBeforePageLayer(docEditor, box);
     }
 
@@ -931,7 +931,7 @@
         const chartDiv = document.createElement("div");
         chartDiv.className = "slide-chart-obj";
         chartDiv.dataset.slideObject = "chart";
-        chartDiv.textContent = "[슬라이드 차트 개체 · 분기 실적 추이 (" + summary + ")]";
+        chartDiv.textContent = "[슬라이드 차트 · 분기 실적 추이 (" + summary + ")]";
         return chartDiv;
       },
       "slide-insert-shape": (summary) => {

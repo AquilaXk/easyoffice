@@ -16,7 +16,6 @@
   const PX_PER_TWIP = 1 / 15;
   const GROWN_GAP_PX = 6;
   const PAGE_MARGIN_AT = { top: 4, bottom: 5, header: 6, footer: 7 };
-  const LABELS = { header: "머리말", footer: "꼬리말" };
   const SECTION_CLASS = "eo-page-frame";
   const FIELD_CLASS = "eo-page-field";
   const COPY_CLASS = "doc-page-hf";
@@ -54,7 +53,9 @@
     const document = deps.document;
     const env = deps.env || host;
     const raf = (fn) => (env.requestAnimationFrame ? env.requestAnimationFrame(fn) : env.setTimeout(fn, 16));
-    const defaultMargins = () => ((deps.getActiveModule?.() ?? document?.getElementById?.("app")?.dataset?.module) === "HWP" ? HWP_DEFAULT_MARGINS : DEFAULT_MARGINS);
+    const isHwp = () => (deps.getActiveModule?.() ?? document?.getElementById?.("app")?.dataset?.module) === "HWP";
+    const bandLabel = (band) => (isHwp() ? (band === "header" ? "머리말" : "꼬리말") : band === "header" ? "머리글" : "바닥글");
+    const defaultMargins = () => (isHwp() ? HWP_DEFAULT_MARGINS : DEFAULT_MARGINS);
     let editor = null;
     let pages = null;
     let observer = null;
@@ -82,7 +83,7 @@
     }
 
     function statusTitle(kind) {
-      const base = LABELS[bandOf(kind)];
+      const base = bandLabel(bandOf(kind));
       const scope = scopeLabel(kind);
       return scope === "양쪽" ? base : scope + " " + base;
     }
@@ -292,14 +293,14 @@
       const label = group.querySelector(".tb-hf-label");
       if (label) {
         label.textContent = editing
-          ? LABELS[bandOf(editing)] + " · " + scopeLabel(editing) + " 편집 중"
+          ? bandLabel(bandOf(editing)) + " · " + scopeLabel(editing) + " 편집 중"
           : "";
       }
       const switchBtn = group.querySelector('[data-hf-action="switch-band"]');
       if (switchBtn) {
         const isHdr = !editing || bandOf(editing) === "header";
-        const moveText = isHdr ? "바닥글로 이동" : "머리글로 이동";
-        const moveLead = isHdr ? "바닥글로" : "머리글로";
+        const moveLead = bandLabel(isHdr ? "footer" : "header") + "로";
+        const moveText = moveLead + " 이동";
         switchBtn.setAttribute("title", moveText);
         switchBtn.setAttribute("aria-label", moveText);
         const switchLbl = switchBtn.querySelector(".tb-label");

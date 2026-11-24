@@ -34,15 +34,20 @@ const COMMAND_PREFIX_MODULE = { document: "DOC", doc: "DOC", hwp: "HWP", sheet: 
 
 /** Menu item that runs the named studio command (`studio-save`, `studio-undo`, ...). */
 export function studioItem(document, cmd) {
-  return document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`);
+  const items = Array.from(document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`));
+  return items.find((el) => !el.closest("[hidden]")) ?? items[0] ?? null;
 }
 
 /** Menu item that runs one catalog ribbon command id (the ribbon strip no longer exists). */
 export function commandItem(document, commandId) {
   const catalog = document.defaultView.__EASYOFFICE_RIBBON_CATALOG__;
   const mod = COMMAND_PREFIX_MODULE[commandId.split("-")[0]];
-  const items = document.querySelectorAll(".md-item[data-studio-menu-cmd]");
-  return items.find((el) => catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod) === commandId) || null;
+  const items = Array.from(document.querySelectorAll(".md-item[data-studio-menu-cmd]"));
+  return (
+    items.find((el) => !el.closest("[hidden]") && catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod) === commandId) ??
+    items.find((el) => catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod) === commandId) ??
+    null
+  );
 }
 
 /** Puts the caret in the first cell of the first table of the document editor (the table menu's items need one), making a table when there is none. */

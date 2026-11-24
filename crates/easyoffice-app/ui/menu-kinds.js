@@ -7,7 +7,7 @@
   // marked: after the items are filtered, a separator is shown only between two visible items.
   // Whether a shown item applies right now stays with `studioCommandApplies` (`aria-disabled`).
 
-  const KINDS = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "PDF"]);
+  const KINDS = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"]);
   const KIND_SET = new Set(KINDS);
 
   // The menu kind of a command module: the Hangul editor's embedded editor is `HWP_EMBED`; the start
@@ -36,8 +36,10 @@
     const kind = menuKindOf(commandModule);
     const bar = document.querySelector(".studio-menubar");
     if (!bar) return kind;
+    const hwpEmbed = document.getElementById("app")?.dataset.hwpEmbed === "true";
     for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds]")]) {
-      el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled);
+      const embedHwpOnly = el.dataset.hwpSaveAs !== undefined && !hwpEmbed;
+      el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled) || embedHwpOnly;
     }
     for (const menu of bar.querySelectorAll(":scope > .menu-item")) {
       if (menu.hidden) menu.classList.remove("open");

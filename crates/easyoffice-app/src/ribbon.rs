@@ -413,15 +413,23 @@ impl RibbonCommandRouter {
                     ],
                     "insert" => [
                         ("insert-table", "표 삽입", "Ctrl+Cmd+T"),
-                        ("insert-chart", "차트 개체", "Ctrl+Cmd+C"),
+                        ("insert-chart", "차트", "Ctrl+Cmd+C"),
                         ("insert-shape", "도형·다이어그램", "Ctrl+Cmd+S"),
                         ("insert-link", "책갈피·링크", "Cmd+K"),
                     ],
                     "layout" => [
-                        ("layout-paper", "편집 용지", "Shift+Cmd+P"),
-                        ("layout-orientation", "용지 방향 전환", "Alt+Cmd+O"),
+                        (
+                            "layout-paper",
+                            if module == OfficeModuleKind::Hwp {
+                                "편집 용지"
+                            } else {
+                                "용지 설정"
+                            },
+                            "Shift+Cmd+P",
+                        ),
+                        ("layout-orientation", "용지 방향", "Alt+Cmd+O"),
                         ("layout-columns", "다단 설정", "Alt+Cmd+M"),
-                        ("layout-margins", "여백 프리셋", "Alt+Cmd+G"),
+                        ("layout-margins", "여백", "Alt+Cmd+G"),
                     ],
                     "formulasAndData" => [
                         ("data-autosum", "자동 합계 (SUM)", "Shift+Cmd+T"),
@@ -433,7 +441,7 @@ impl RibbonCommandRouter {
                         OfficeModuleKind::Document => [
                             ("mod-toc", "자동 목차 생성", "Ctrl+Alt+T"),
                             ("mod-footnote", "각주·미주 삽입", "Alt+Cmd+F"),
-                            ("mod-mailmerge", "메일 머지 치환", "Ctrl+Cmd+M"),
+                            ("mod-mailmerge", "편지 병합", "Ctrl+Cmd+M"),
                             ("mod-tableformula", "표 셀 수식 계산", "Ctrl+Cmd+="),
                         ],
                         OfficeModuleKind::Hwp => [

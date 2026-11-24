@@ -313,7 +313,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   userClick(document.getElementById("btn-smart-diagnose"));
   await flushAsyncTurns();
-  assert.match(document.getElementById("smart-summary-output").textContent, /슬라이드 차트 개체|발표 자료/);
+  assert.match(document.getElementById("smart-summary-output").textContent, /슬라이드 차트|발표 자료/);
 
   switchModule(document, "PDF");
   await flushAsyncTurns();

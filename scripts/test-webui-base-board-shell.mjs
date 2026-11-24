@@ -208,3 +208,36 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
   assert.ok(board.nodes.every((n) => n.id && n.kind), "each element carries an id and a kind");
   assert.equal(copilotCtx.context.doc, undefined);
 });
+
+test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown command enabled", async () => {
+  const shown = (el) => !el.closest("[hidden]");
+  const checkWindow = async (mod, expectFind, expectClip) => {
+    const { document, host } = await createWorkspaceHarness({ search: `?module=${mod}&win=w-menu-${mod}` });
+    await flushAsyncTurns(10);
+    assert.equal(host.__EASYOFFICE_MENU_KINDS__.menuKindOf(mod), mod);
+    const topMenus = document.querySelectorAll(".studio-menubar > .menu-item").filter(shown).map((el) => el.querySelector(".menu-title").textContent);
+    assert.deepEqual(topMenus, ["파일", "편집", "보기", "도구", "도움말"]);
+    const grayed = document.querySelectorAll(".md-item[data-studio-menu-cmd]").filter((el) => shown(el) && el.getAttribute("aria-disabled") === "true").map((el) => el.dataset.studioMenuCmd);
+    assert.deepEqual(grayed, [], `${mod} must have zero disabled visible items`);
+    for (const hwpItem of document.querySelectorAll("[data-hwp-save-as]")) {
+      assert.equal(shown(hwpItem), false, `${mod} hides HWP save-as items`);
+    }
+    const cmds = new Set(document.querySelectorAll(".md-item[data-studio-menu-cmd]").filter(shown).map((el) => el.dataset.studioMenuCmd));
+    for (const required of ["studio-save", "studio-save-as", "studio-undo", "studio-redo", "palette", "zoom-in", "zoom-out", "view-zoom", "view-theme", "copilot-toggle", "print"]) {
+      assert.ok(cmds.has(required), `${mod} shows ${required}`);
+    }
+    for (const excluded of ["ctrl-marks", "para-marks", "doc-grid", "view-outline", "view-split", "zoom-fit-page", "smart-diagnose", "scrub-pii", "security-audit", "bench-run", "review-verify", "review-stats"]) {
+      assert.ok(!cmds.has(excluded), `${mod} hides ${excluded}`);
+    }
+    assert.equal(cmds.has("find"), expectFind);
+    assert.equal(cmds.has("replace"), expectFind);
+    assert.equal(cmds.has("clip-copy"), expectClip);
+    document.querySelector('.md-item[data-studio-menu-cmd="zoom-in"]').click();
+    assert.notEqual(document.getElementById("status-zoom-label").textContent, "100%");
+    document.querySelector('.md-item[data-studio-menu-cmd="view-zoom"]').click();
+    await flushAsyncTurns(6);
+    assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
+  };
+  await checkWindow("BASE", true, true);
+  await checkWindow("BOARD", false, false);
+});

@@ -1,5 +1,7 @@
 use super::*;
 
+mod contracts;
+
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Alt", "Shift"];
 const GROUPS: &[&str] = &[
     "app", "file", "edit", "view", "insert", "format", "page", "sheet", "table", "tool", "help",
@@ -239,6 +241,14 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
             &tail
         )
     );
+    assert_eq!(
+        titles_of(MenuKind::Base),
+        bar(&["파일", "편집", "보기", "도구"], &tail)
+    );
+    assert_eq!(
+        titles_of(MenuKind::Board),
+        bar(&["파일", "편집", "보기", "도구"], &tail)
+    );
 }
 
 #[test]
@@ -263,6 +273,8 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         "page:columns",
         "page:header",
         "page:footer",
+        "page:doc-header",
+        "page:doc-footer",
         "view:ctrl-marks",
         "view:para-marks",
         "view:doc-grid",
@@ -272,6 +284,9 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         "table:sheet-chart",
         "table:sheet-condfmt",
         "table:sheet-freeze",
+        "sheet:protect-ranges",
+        "sheet:merge",
+        "sheet:unmerge",
     ];
     let slide_only = [
         "page:slide-master",
@@ -291,43 +306,121 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         "page:manuscript",
         "table:hwp-border",
         "file:export-pdf",
+        "page:paper",
+        "page:header",
+        "page:footer",
+    ];
+    let doc_only = [
+        "insert:toc",
+        "insert:toc-update",
+        "insert:mailmerge",
+        "insert:image",
+        "insert:endnote",
+        "page:break",
+        "table:split",
+        "table:col-equal",
+        "table:border-bg",
+        "table:cell-props",
+        "table:doc-formula",
+        "tool:review-accept-all",
+        "tool:review-reject-all",
+        "page:doc-header",
+        "page:doc-footer",
     ];
     for kind in [
         MenuKind::Doc,
         MenuKind::Sheet,
         MenuKind::Slide,
         MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
     ] {
         not_in(kind, &editor_only);
         not_in(kind, &hwp_only);
+    }
+    for kind in [
+        MenuKind::Hwp,
+        MenuKind::Sheet,
+        MenuKind::Slide,
+        MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
+    ] {
+        not_in(kind, &doc_only);
     }
     not_in(MenuKind::Doc, &sheet_only);
     not_in(MenuKind::Doc, &slide_only);
     not_in(MenuKind::Doc, &pdf_only);
     not_in(MenuKind::Doc, &["table:cell-select", "table:cell-split"]);
-    not_in(MenuKind::Hwp, &["table:split"]);
-    for kind in [MenuKind::Sheet, MenuKind::Slide, MenuKind::Pdf] {
+    not_in(MenuKind::Hwp, &sheet_only);
+    not_in(MenuKind::Hwp, &slide_only);
+    not_in(MenuKind::Hwp, &pdf_only);
+    not_in(MenuKind::Hwp, &["table:split", "page:doc-paper"]);
+    for kind in [
+        MenuKind::Sheet,
+        MenuKind::Slide,
+        MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
+    ] {
         not_in(kind, &paragraph);
         not_in(
             kind,
             &[
-                "insert:toc",
-                "insert:toc-update",
-                "page:break",
-                "insert:mailmerge",
                 "insert:footnote",
-                "table:doc-formula",
                 "table:row-above",
                 "table:add-row",
                 "table:col-left",
                 "table:col-right",
                 "table:row-delete",
                 "table:col-delete",
-                "table:split",
                 "table:merge",
                 "table:sum",
             ],
         );
+    }
+    for kind in [MenuKind::Base, MenuKind::Board] {
+        not_in(kind, &sheet_only);
+        not_in(kind, &slide_only);
+        not_in(kind, &pdf_only);
+        not_in(
+            kind,
+            &[
+                "view:zoom-fit-page",
+                "view:zoom-fit-width",
+                "view:split",
+                "view:outline",
+                "tool:diagnose",
+                "tool:scrub-pii",
+                "tool:security-audit",
+                "tool:bench-run",
+                "tool:review-verify",
+                "tool:review-stats",
+                "tool:doc-inspect",
+                "tool:review-track",
+                "tool:review-comment",
+                "page:paper",
+                "page:doc-paper",
+            ],
+        );
+        for absent_top in [
+            "입력",
+            "삽입",
+            "서식",
+            "쪽",
+            "표",
+            "시트",
+            "수식",
+            "데이터",
+            "주석",
+            "슬라이드",
+            "슬라이드 쇼",
+        ] {
+            assert!(
+                !titles_of(kind).contains(&absent_top),
+                "{kind:?} {absent_top}"
+            );
+        }
     }
     not_in(MenuKind::Sheet, &slide_only);
     not_in(MenuKind::Sheet, &pdf_only);
@@ -341,6 +434,7 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         &[
             "file:print",
             "page:paper",
+            "page:doc-paper",
             "page:orientation",
             "page:margins",
         ],
@@ -367,7 +461,14 @@ fn only_the_spreadsheet_tool_menu_has_the_protection_items_and_they_run_the_page
     ] {
         assert!(tools.contains(&id), "{id}");
         assert_eq!(action_for(id), Some(act), "{id}");
-        for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+        for kind in [
+            MenuKind::Doc,
+            MenuKind::Hwp,
+            MenuKind::Slide,
+            MenuKind::Pdf,
+            MenuKind::Base,
+            MenuKind::Board,
+        ] {
             assert!(!layout::table_ids(kind).contains(&id), "{kind:?} {id}");
         }
     }
@@ -405,7 +506,14 @@ fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_s
             action_for(id).unwrap().starts_with("sheet-act:filter-"),
             "{id}"
         );
-        for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+        for kind in [
+            MenuKind::Doc,
+            MenuKind::Hwp,
+            MenuKind::Slide,
+            MenuKind::Pdf,
+            MenuKind::Base,
+            MenuKind::Board,
+        ] {
             assert!(!layout::table_ids(kind).contains(&id), "{kind:?} {id}");
         }
     }
@@ -458,11 +566,13 @@ fn the_page_kind_names_are_the_rust_kinds() {
         ("SHEET", MenuKind::Sheet),
         ("SLIDE", MenuKind::Slide),
         ("PDF", MenuKind::Pdf),
+        ("BASE", MenuKind::Base),
+        ("BOARD", MenuKind::Board),
     ] {
         assert_eq!(MenuKind::parse(name), Some(kind));
         assert!(MenuKind::ALL.contains(&kind));
     }
-    assert_eq!(MenuKind::ALL.len(), 5);
+    assert_eq!(MenuKind::ALL.len(), 7);
     for bad in ["", "doc", "START", "CONV", "HWP_EMBED"] {
         assert_eq!(MenuKind::parse(bad), None, "{bad}");
     }
@@ -618,18 +728,34 @@ fn the_file_and_view_menus_keep_the_reference_order_and_separators() {
             ],
             "{kind:?}"
         );
-        assert_eq!(
-            lines_of(kind, "보기")[..6],
-            [
-                "view:zoom-in",
-                "view:zoom-out",
-                "view:zoom-100",
-                "-",
-                "view:zoom-fit-page",
-                "view:zoom-fit-width"
-            ],
-            "{kind:?}"
-        );
+        let view = lines_of(kind, "보기");
+        if matches!(kind, MenuKind::Base | MenuKind::Board) {
+            assert_eq!(
+                view,
+                [
+                    "view:zoom-in",
+                    "view:zoom-out",
+                    "view:zoom-100",
+                    "-",
+                    layout::THEME,
+                    "view:theme-toggle",
+                ],
+                "{kind:?}"
+            );
+        } else {
+            assert_eq!(
+                view[..6],
+                [
+                    "view:zoom-in",
+                    "view:zoom-out",
+                    "view:zoom-100",
+                    "-",
+                    "view:zoom-fit-page",
+                    "view:zoom-fit-width"
+                ],
+                "{kind:?}"
+            );
+        }
     }
 }
 
@@ -739,230 +865,4 @@ fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() 
         "an app that does not check offers no switch"
     );
     assert_eq!(check_state("file:save", &view("dark", None)), None);
-}
-
-#[test]
-fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_order() {
-    let s = layout::SEPARATOR;
-    assert_eq!(
-        lines_of(MenuKind::Sheet, "서식"),
-        [
-            "format:bold",
-            "format:italic",
-            "format:underline",
-            s,
-            "format:style",
-            s,
-            layout::NUMFMT,
-            layout::ALIGN,
-            "format:wrap",
-            layout::BORDER,
-            layout::CF,
-            "format:cell-format",
-        ]
-    );
-    let labels: Vec<&str> = layout::NUMFMT_LINES
-        .iter()
-        .map(|id| if *id == s { s } else { spec(id).label })
-        .collect();
-    assert_eq!(
-        labels,
-        [
-            "일반",
-            "숫자",
-            "통화",
-            "회계",
-            "백분율",
-            "날짜",
-            "시간",
-            "텍스트",
-            s,
-            "자릿수 늘림",
-            "자릿수 줄임",
-        ]
-    );
-    let align: Vec<&str> = layout::ALIGN_LINES
-        .iter()
-        .map(|id| if *id == s { s } else { spec(id).label })
-        .collect();
-    assert_eq!(
-        align,
-        [
-            "왼쪽 정렬",
-            "가운데 정렬",
-            "오른쪽 정렬",
-            s,
-            "위쪽 맞춤",
-            "가운데 맞춤",
-            "아래쪽 맞춤",
-        ]
-    );
-    let border: Vec<&str> = layout::BORDER_LINES
-        .iter()
-        .map(|id| if *id == s { s } else { spec(id).label })
-        .collect();
-    assert_eq!(
-        border,
-        [
-            "모두",
-            "바깥쪽",
-            "안쪽",
-            "위쪽",
-            "아래쪽",
-            "왼쪽",
-            "오른쪽",
-            "없음",
-            s,
-            "가는 실선",
-            "굵은 실선",
-            "파선",
-            "점선",
-            "이중 실선",
-            s,
-            "테두리 색…",
-        ]
-    );
-    let sheet: Vec<&str> = lines_of(MenuKind::Sheet, "시트")
-        .iter()
-        .map(|id| if *id == s { s } else { spec(id).label })
-        .collect();
-    assert_eq!(
-        sheet,
-        [
-            "첫 행 고정",
-            "첫 열 고정",
-            "선택 행/열 고정",
-            "틀 고정 해제",
-            s,
-            "행 위에 삽입",
-            "행 아래에 삽입",
-            "열 왼쪽에 삽입",
-            "열 오른쪽에 삽입",
-            "행 삭제",
-            "열 삭제",
-            s,
-            "숨기기",
-            "숨기기 취소",
-            s,
-            "셀 병합",
-            "병합 해제",
-            s,
-            "시트 삽입",
-            "시트 삭제",
-            "시트 이름 바꾸기",
-            "시트 복사",
-            "시트 이동/복사…",
-            "시트 왼쪽으로 이동",
-            "시트 오른쪽으로 이동",
-            "시트 숨기기",
-            "시트 숨기기 취소…",
-        ]
-    );
-    for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
-        let ids = layout::table_ids(kind);
-        assert!(
-            ids.iter().all(|id| !id.starts_with("sheet:")
-                && !id.starts_with("format:numfmt-")
-                && !id.starts_with("format:align-")
-                && !id.starts_with("format:valign-")
-                && !id.starts_with("format:border-")
-                && !id.starts_with("format:cf-")
-                && *id != "format:wrap"),
-            "{kind:?}"
-        );
-    }
-}
-
-#[test]
-fn the_conditional_formatting_menu_has_the_submenus_and_items_of_the_page() {
-    let s = layout::SEPARATOR;
-    let top: Vec<&str> = layout::CF_LINES
-        .iter()
-        .map(|line| match layout::cf_submenu(line) {
-            Some(sub) => sub.title,
-            None if *line == s => s,
-            None => spec(line).label,
-        })
-        .collect();
-    assert_eq!(
-        top,
-        [
-            "셀 강조 규칙",
-            "상위/하위 규칙",
-            "데이터 막대",
-            "색조",
-            "아이콘 집합",
-            s,
-            "새 규칙…",
-            "규칙 지우기",
-            "규칙 관리…",
-        ]
-    );
-    let counts: Vec<usize> = layout::CF_SUBMENUS
-        .iter()
-        .map(|sub| sub.lines.iter().filter(|line| **line != s).count())
-        .collect();
-    assert_eq!(counts, [8, 7, 13, 13, 21, 2]);
-    // The id of an item is `format:cf-` and the argument of its page action, so the two cannot drift apart.
-    let ids = layout::table_ids(MenuKind::Sheet);
-    let cf: Vec<&str> = ids
-        .iter()
-        .copied()
-        .filter(|id| id.starts_with("format:cf-"))
-        .collect();
-    assert_eq!(cf.len(), 8 + 7 + 13 + 13 + 21 + 2 + 2);
-    for id in cf {
-        let argument = &id["format:cf-".len()..];
-        assert_eq!(
-            action_for(id),
-            Some(format!("sheet-cf:{argument}").as_str())
-        );
-    }
-}
-
-#[test]
-fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
-    for id in [
-        "format:numfmt-decimal-down",
-        "format:cell-format",
-        "format:align-left",
-        "format:border-line-double",
-        "sheet:row-insert-above",
-        "sheet:unmerge",
-    ] {
-        let action = action_for(id).unwrap();
-        assert!(
-            action.starts_with("sheet-numfmt:")
-                || action.starts_with("sheet-act:")
-                || action.starts_with("sheet-look:")
-                || action.starts_with("sheet-cf:"),
-            "{id}"
-        );
-        let script = dispatch_script(id).unwrap();
-        assert_eq!(script, format!("{SCRIPT_PREFIX}\"{id}\");"));
-    }
-    assert!(ITEMS.len() <= ItemMask::CAPACITY);
-}
-
-#[test]
-fn paste_special_follows_the_system_paste_in_the_spreadsheet_edit_menu_only() {
-    let lines = lines_of(MenuKind::Sheet, "편집");
-    let paste = lines.iter().position(|id| *id == layout::PASTE).unwrap();
-    assert_eq!(lines[paste + 1], "edit:paste-special");
-    let item = spec("edit:paste-special");
-    assert_eq!(item.label, "골라 붙이기…");
-    assert_eq!(
-        action_for("edit:paste-special"),
-        Some("sheet-paste:special")
-    );
-    assert_eq!(
-        dispatch_script("edit:paste-special").unwrap(),
-        format!("{SCRIPT_PREFIX}\"edit:paste-special\");")
-    );
-    for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
-        assert!(
-            !lines_of(kind, "편집").contains(&"edit:paste-special"),
-            "{kind:?}"
-        );
-    }
 }

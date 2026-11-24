@@ -96,7 +96,7 @@ test("a setup that leaves less than 10 mm of body is refused with the reference 
   h.type("header", 20);
   h.document.getElementById("btn-doc-ps-apply").click();
   assert.equal(h.dialog.open, true);
-  assert.equal(h.document.getElementById("doc-ps-status").textContent, "머리말·꼬리말 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.");
+  assert.equal(h.document.getElementById("doc-ps-status").textContent, "머리글·바닥글 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.");
   assert.equal(h.editor.dataset.eoPage ?? "", "");
   h.type("top", 145);
   h.type("bottom", 145);

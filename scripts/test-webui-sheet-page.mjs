@@ -190,7 +190,7 @@ test("the paper's size for printing follows the list and the orientation, A4 for
 test("the sheet's paper, orientation and margin commands are the page setup: no menu items of their own, one command search entry", async () => {
   const t = await open();
   const labels = [...t.document.querySelectorAll(".md-item[data-studio-menu-cmd]")].filter((el) => !el.closest("[hidden]")).map((el) => el.querySelector(".md-label").textContent);
-  assert.equal(labels.includes("용지 방향 전환") || labels.includes("여백 전환"), false);
+  assert.equal(labels.includes("용지 방향") || labels.includes("여백") || labels.includes("용지 방향 전환") || labels.includes("여백 전환"), false);
   const items = t.host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(t.document).map((i) => i.title);
   assert.ok(items.includes("쪽 설정…") && items.includes("인쇄 영역 설정") && items.includes("인쇄 영역 해제"));
 });

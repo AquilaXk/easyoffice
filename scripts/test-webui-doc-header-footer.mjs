@@ -28,9 +28,9 @@ test("the header button makes the header section once and edits it in place; the
   assert.equal(editor.getAttribute("contenteditable"), "false", "the body is not editable meanwhile");
   assert.equal(section(editor, "header").getAttribute("contenteditable"), "true");
   assert.equal(document.querySelector("#icon-toolbar .tb-headerfooter-group").hidden, false);
-  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /머리말/);
+  assert.match(document.querySelector("#icon-toolbar .tb-hf-label").textContent, /머리글/);
   assert.equal(editor.querySelectorAll("p").length, 3, "the header's paragraph is not a body paragraph of the flow");
-  assert.equal(document.getElementById("status-command-feedback").textContent, "머리말 편집 중");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "머리글 편집 중");
 });
 
 test("closing keeps a header with text and drops an empty one; the page layer draws the kept one on every sheet", async () => {
@@ -65,7 +65,7 @@ test("closing keeps a header with text and drops an empty one; the page layer dr
 
 test("the menu item runs the same command and one undo takes the header section back out", async () => {
   const { document, editor, host, sandbox, userClick } = await openDoc("w-hf-menu");
-  assert.equal(studioItem(document, "mod-footer").querySelector(".md-label").textContent, "꼬리말");
+  assert.equal(studioItem(document, "mod-footer").querySelector(".md-label").textContent, "바닥글");
   userClick(studioItem(document, "mod-footer"));
   await flushAsyncTurns();
   assert.ok(section(editor, "footer"));
@@ -106,14 +106,14 @@ test("deleting removes the section as one undo step", async () => {
   assert.equal(document.querySelector("#icon-toolbar .tb-headerfooter-group").hidden, true);
 });
 
-test("the command palette lists 머리말 and 꼬리말 in the document window and runs them", async () => {
+test("the command palette lists 머리글 and 바닥글 in the document window and runs them", async () => {
   const { document, editor, host, userClick } = await openDoc("w-hf-palette");
   userClick(document.getElementById("btn-command-palette"));
   const search = document.getElementById("cmd-search-input");
-  search.value = "꼬리말";
+  search.value = "바닥글";
   search.dispatchEvent({ type: "input", target: search });
   await flushAsyncTurns();
-  const rows = [...document.querySelectorAll("#cmd-palette-list li")].filter((li) => li.textContent.includes("꼬리말"));
+  const rows = [...document.querySelectorAll("#cmd-palette-list li")].filter((li) => li.textContent.includes("바닥글"));
   assert.equal(rows.length, 1);
   userClick(rows[0]);
   await flushAsyncTurns();
@@ -231,7 +231,7 @@ test("PD-249: 3-zone toggle splits header into left/center/right compartments, n
   assert.equal(hdr.dataset.eoHfZones, "true");
   assert.equal(toggleZonesBtn.getAttribute("aria-pressed"), "true");
   assert.equal(toggleZonesBtn.getAttribute("title"), "빈 문서(3열)");
-  assert.equal(document.querySelector("#icon-toolbar .tb-hf-label").textContent, "머리말 · 양쪽 편집 중");
+  assert.equal(document.querySelector("#icon-toolbar .tb-hf-label").textContent, "머리글 · 양쪽 편집 중");
 
   const zones = [...hdr.querySelectorAll(":scope > p[data-eo-zone]")];
   assert.deepEqual(zones.map((p) => p.dataset.eoZone), ["left", "center", "right"]);

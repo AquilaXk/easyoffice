@@ -330,7 +330,10 @@
     if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
     if (activeModule === "DOC" || activeModule === "HWP") {
       // The native menu's items: the Hangul editor's own commands while it owns the window, the page frame otherwise.
-      for (const [cmd, title, english, menuId] of [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"], ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "셀 테두리/배경", "cell border background", "table:border-bg"], ["table-cell-props", "표/셀 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "셀 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
+      const hfItems = activeModule === "HWP"
+        ? [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"]]
+        : [["mod-header", "머리글", "header", "page:doc-header"], ["mod-footer", "바닥글", "footer", "page:doc-footer"]];
+      for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "셀 테두리/배경", "cell border background", "table:border-bg"], ["table-cell-props", "표/셀 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "셀 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
         items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
@@ -436,6 +439,10 @@
     workspacePanels.setupStudioChromeControls(
       applyZoomPercent,
       (cmd) => {
+        if (cmd === "view-zoom" && !RIBBON_CATEGORY_TOOLS[activeModule]) {
+          applyZoomPercent(100);
+          return;
+        }
         const modPrefix = getRibbonModulePrefix(activeModule);
         const fullCmd =
           host.__EASYOFFICE_RIBBON_CATALOG__.resolveMenuCommand(cmd, activeModule) ||
@@ -809,6 +816,10 @@
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
       ribbon: (suffix) => {
+        if (suffix === "view-zoom" && !RIBBON_CATEGORY_TOOLS[activeModule]) {
+          applyZoomPercent(100);
+          return;
+        }
         const fullCmd = getRibbonModulePrefix(activeModule) + "-" + suffix;
         void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
       },

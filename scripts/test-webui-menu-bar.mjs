@@ -135,7 +135,7 @@ test("module-specific items are disabled outside their module and common items s
 });
 
 test("no shown menu item is grayed out in the window it belongs to", async () => {
-  for (const mod of MODULES) {
+  for (const mod of [...MODULES, "BASE", "BOARD"]) {
     const { document } = await openModule(mod);
     const grayed = document
       .querySelectorAll(".md-item[data-studio-menu-cmd]")
@@ -255,36 +255,52 @@ test("menu-bar.css and toolbar.css name rhwp-studio as their source and are in t
 });
 
 // A label must name what its command does. The app has no format painter and no object properties dialog, so no menu item or toolbar button may be called that; `home-style` is the
-// ribbon's "스타일 적용" and `layout-paper` the paper size toggle ("편집 용지").
+// ribbon's "스타일 적용", `layout-paper` uses "용지 설정" in DOC and "편집 용지" in HWP, and header/footer follow each module's official UI term.
 test("menu and toolbar labels name what their command does", async () => {
   const { document } = await openModule("DOC");
-  const labelsOf = (cmd) =>
-    document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`).filter(shown).map((el) => el.querySelector(".md-label").textContent.trim());
-  const buttonsOf = (cmd) => document.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
-  assert.deepEqual(labelsOf("home-style"), ["스타일 적용"]);
-  assert.deepEqual(buttonsOf("home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
-  assert.deepEqual(labelsOf("layout-paper"), ["편집 용지", "편집 용지"]);
-  assert.equal(buttonsOf("layout-paper").length, 0, "no toolbar button called object properties");
+  const labelsOf = (doc, cmd) =>
+    doc.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`).filter(shown).map((el) => el.querySelector(".md-label").textContent.trim());
+  const buttonsOf = (doc, cmd) => doc.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
+  assert.deepEqual(labelsOf(document, "home-style"), ["스타일 적용"]);
+  assert.deepEqual(buttonsOf(document, "home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
+  assert.deepEqual(labelsOf(document, "layout-paper"), ["용지 설정", "용지 설정"]);
+  assert.deepEqual(labelsOf(document, "layout-orientation"), ["용지 방향"]);
+  assert.deepEqual(labelsOf(document, "layout-margins"), ["여백"]);
+  assert.equal(buttonsOf(document, "layout-paper").length, 0, "no toolbar button called object properties");
   // `para-shape` clicks the editor bar's justify button; `mod-header`, `mod-footer` and `mod-footnote` each do one thing, so one
   // button each; `insert-chart` has no picture or chart icon and stays a menu item.
-  assert.deepEqual(labelsOf("para-shape"), ["양쪽 정렬"]);
-  assert.deepEqual(buttonsOf("para-shape").map((el) => el.getAttribute("title")), ["양쪽 정렬"]);
-  assert.deepEqual(labelsOf("mod-header"), ["머리말"]);
-  assert.deepEqual(labelsOf("mod-footer"), ["꼬리말"]);
-  assert.deepEqual(buttonsOf("mod-header").map((el) => el.getAttribute("title")), ["머리말"]);
-  assert.deepEqual(buttonsOf("mod-footer").map((el) => el.getAttribute("title")), ["꼬리말"]);
-  assert.deepEqual(buttonsOf("mod-footnote").map((el) => el.getAttribute("title")), ["각주"]);
-  assert.equal(buttonsOf("insert-chart").length, 0, "no picture button for the chart command");
-  assert.deepEqual(labelsOf("insert-chart"), ["차트 개체"]);
-  assert.deepEqual(labelsOf("palette"), ["명령 검색", "환경 설정 및 명령 검색"]);
-  assert.deepEqual(labelsOf("find"), ["찾기"]);
-  assert.deepEqual(labelsOf("replace"), ["찾아 바꾸기"]);
-  assert.deepEqual(labelsOf("print"), ["인쇄…"]);
+  assert.deepEqual(labelsOf(document, "para-shape"), ["양쪽 정렬"]);
+  assert.deepEqual(buttonsOf(document, "para-shape").map((el) => el.getAttribute("title")), ["양쪽 정렬"]);
+  assert.deepEqual(labelsOf(document, "mod-header"), ["머리글"]);
+  assert.deepEqual(labelsOf(document, "mod-footer"), ["바닥글"]);
+  assert.deepEqual(buttonsOf(document, "mod-header").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["머리글", "머리글"]]);
+  assert.deepEqual(buttonsOf(document, "mod-footer").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["바닥글", "바닥글"]]);
+  assert.deepEqual(buttonsOf(document, "mod-footnote").map((el) => el.getAttribute("title")), ["각주"]);
+  assert.equal(buttonsOf(document, "insert-chart").length, 0, "no picture button for the chart command");
+  assert.deepEqual(labelsOf(document, "insert-chart"), ["차트"]);
+  assert.deepEqual(labelsOf(document, "doc-mod-mailmerge"), ["편지 병합"]);
+  assert.deepEqual(labelsOf(document, "palette"), ["명령 검색", "환경 설정 및 명령 검색"]);
+  assert.deepEqual(labelsOf(document, "find"), ["찾기"]);
+  assert.deepEqual(labelsOf(document, "replace"), ["찾아 바꾸기"]);
+  assert.deepEqual(labelsOf(document, "print"), ["인쇄…"]);
+  const docVisibleNames = [
+    ...document.querySelectorAll(".md-item").filter(shown).map((el) => el.querySelector(".md-label")?.textContent || ""),
+    ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
+  ];
+  for (const hwpOnlyTerm of ["편집 용지", "머리말", "꼬리말", "메일 머지 치환", "차트 개체"]) {
+    assert.ok(!docVisibleNames.some((text) => text.includes(hwpOnlyTerm)), `DOC must not display ${hwpOnlyTerm}`);
+  }
+  const hwp = await openModule("HWP");
+  assert.deepEqual(labelsOf(hwp.document, "layout-paper"), ["편집 용지", "편집 용지"]);
+  assert.deepEqual(labelsOf(hwp.document, "mod-header"), ["머리말"]);
+  assert.deepEqual(labelsOf(hwp.document, "mod-footer"), ["꼬리말"]);
+  assert.deepEqual(buttonsOf(hwp.document, "mod-header").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["머리말", "머리말"]]);
+  assert.deepEqual(buttonsOf(hwp.document, "mod-footer").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["꼬리말", "꼬리말"]]);
   const named = [
     ...document.querySelectorAll(".md-label").map((el) => el.textContent),
     ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
   ];
-  for (const promised of ["모양 복사", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "(F)"]) {
+  for (const promised of ["모양 복사", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "(F)", "메일 머지 치환", "차트 개체"]) {
     assert.ok(!named.some((text) => text.includes(promised)), `${promised} is not a feature of the app`);
   }
 });

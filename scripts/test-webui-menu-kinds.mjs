@@ -14,13 +14,15 @@ const byName = (a, b) => a.localeCompare(b);
 const REPO = new URL("../", import.meta.url);
 const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 
-const KINDS = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
+const KINDS = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"];
 const TITLES = {
   DOC: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
   HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
   SHEET: ["파일", "편집", "보기", "삽입", "서식", "시트", "수식", "데이터", "도구", "도움말"],
   SLIDE: ["파일", "편집", "보기", "삽입", "서식", "슬라이드", "슬라이드 쇼", "도구", "도움말"],
   PDF: ["파일", "편집", "보기", "주석", "쪽", "도구", "도움말"],
+  BASE: ["파일", "편집", "보기", "도구", "도움말"],
+  BOARD: ["파일", "편집", "보기", "도구", "도움말"],
 };
 
 const shown = (el) => !el.closest("[hidden]");
@@ -61,12 +63,17 @@ test("a window shows only the items that mean something in it", async () => {
     SHEET: ["para-shape", "para-numbering", "para-bullet", "indent-in", "indent-out", "layout-columns", "mod-header", "mod-footnote", "doc-mod-toc", "doc-mod-mailmerge", "doc-mod-tableformula", "table-add-row", "table-merge", "table-sum", "ctrl-marks", "para-marks", "doc-grid", "slide-mod-master", "pdf-mod-rotate", "hwp-mod-field"],
     SLIDE: ["para-shape", "para-numbering", "indent-in", "layout-columns", "mod-header", "doc-mod-toc", "table-add-row", "data-sort", "data-validation", "data-autosum", "data-fn-browser", "sheet-mod-pivot", "pdf-mod-rotate", "find", "replace", "clip-cut", "clip-paste", "ctrl-marks"],
     PDF: ["home-bold", "home-italic", "home-underline", "home-style", "para-shape", "insert-table", "insert-shape", "insert-chart", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "data-sort", "data-autosum", "mod-header", "doc-mod-toc", "sheet-mod-pivot", "slide-mod-master", "find", "replace", "clip-cut", "clip-copy", "clip-paste", "print", "review-track", "ctrl-marks", "para-marks", "doc-grid"],
+    BASE: ["home-bold", "home-italic", "home-underline", "home-style", "para-shape", "para-numbering", "insert-table", "insert-shape", "insert-chart", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-header", "mod-footer", "mod-footnote", "doc-mod-toc", "doc-mod-mailmerge", "sheet-mod-pivot", "slide-mod-master", "pdf-mod-rotate", "hwp-mod-field", "ctrl-marks", "para-marks", "doc-grid", "view-outline", "view-split", "zoom-fit-page", "zoom-fit-width", "smart-diagnose", "scrub-pii", "security-audit", "bench-run", "review-verify", "review-stats", "review-track", "review-comment"],
+    BOARD: ["home-bold", "home-italic", "home-underline", "home-style", "para-shape", "para-numbering", "insert-table", "insert-shape", "insert-chart", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-header", "mod-footer", "mod-footnote", "doc-mod-toc", "doc-mod-mailmerge", "sheet-mod-pivot", "slide-mod-master", "pdf-mod-rotate", "hwp-mod-field", "ctrl-marks", "para-marks", "doc-grid", "view-outline", "view-split", "zoom-fit-page", "zoom-fit-width", "smart-diagnose", "scrub-pii", "security-audit", "bench-run", "review-verify", "review-stats", "review-track", "review-comment", "find", "replace", "clip-cut", "clip-copy", "clip-paste"],
   };
   for (const [mod, cmds] of Object.entries(absent)) {
     const { document } = await open(mod);
     await flushAsyncTurns(10);
     const have = shownCommands(document);
     assert.deepEqual(cmds.filter((cmd) => have.has(cmd)), [], `${mod} shows items of other kinds`);
+    for (const hwpSaveAs of document.querySelectorAll("[data-hwp-save-as]")) {
+      assert.equal(shown(hwpSaveAs), false, `${mod} must hide data-hwp-save-as`);
+    }
   }
 });
 
@@ -101,9 +108,9 @@ test("the document window keeps its menus and the Hangul window's fallback edito
   assert.ok(!commandsOf(hwp.document, "입력").includes("doc-mod-toc"));
 });
 
-test("the start screen and the converter use the document menus", async () => {
+test("the start screen and the converter use the document menus, and BASE and BOARD keep their own kind", async () => {
   const { menuKindOf } = (await open("DOC")).document.defaultView.__EASYOFFICE_MENU_KINDS__;
-  for (const [moduleCode, kind] of [["START", "DOC"], ["CONV", "DOC"], ["HWP_EMBED", "HWP"], ["SHEET", "SHEET"], ["SLIDE", "SLIDE"], ["PDF", "PDF"], [undefined, "DOC"]]) {
+  for (const [moduleCode, kind] of [["START", "DOC"], ["CONV", "DOC"], ["HWP_EMBED", "HWP"], ["SHEET", "SHEET"], ["SLIDE", "SLIDE"], ["PDF", "PDF"], ["BASE", "BASE"], ["BOARD", "BOARD"], [undefined, "DOC"]]) {
     assert.equal(menuKindOf(moduleCode), kind, String(moduleCode));
   }
 });
@@ -144,15 +151,23 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", CF: "@cf", CALC_OPTIONS: "@calc-options", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
+function readRustLayoutSources() {
+  let src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  try {
+    src += "\n" + read("crates/easyoffice-desktop/src/native_menu/layout/bars.rs");
+  } catch {}
+  return src;
+}
+
 function rustLayout() {
-  const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  const src = readRustLayoutSources();
   const menus = {};
   for (const m of src.matchAll(/const (\w+): MenuSpec = menu\(\s*"([^"]+)",\s*&\[([\s\S]*?)\],?\s*\);/g)) {
     const lines = m[3].split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t.startsWith('"') ? t.slice(1, -1) : TOKENS[t] ?? assert.fail(`unknown token ${t}`)));
     menus[m[1]] = { title: m[2], lines };
   }
   const kinds = {};
-  for (const m of src.matchAll(/const (DOC|HWP|SHEET|SLIDE|PDF): \[&MenuSpec; (\d+)\] = \[([\s\S]*?)\];/g)) {
+  for (const m of src.matchAll(/const (DOC|HWP|SHEET|SLIDE|PDF|BASE|BOARD): \[&MenuSpec; (\d+)\] = \[([\s\S]*?)\];/g)) {
     const names = [...m[3].matchAll(/&(\w+)/g)].map((x) => x[1]);
     assert.equal(names.length, Number(m[2]), `${m[1]} array length`);
     kinds[m[1]] = names.map((name) => menus[name] ?? assert.fail(`unknown menu ${name}`));
@@ -175,7 +190,7 @@ function rustLabels() {
 }
 
 function submenuLines(name = "NUMFMT") {
-  const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  const src = readRustLayoutSources();
   const body = src.match(new RegExp(`pub const ${name}_LINES: \\[&str; (\\d+)\\] = \\[([\\s\\S]*?)\\];`));
   const lines = body[2].split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
   assert.equal(lines.length, Number(body[1]));
@@ -200,9 +215,9 @@ test("the native bars list the same menus as the page for every kind", () => {
   }
 });
 
-test("the native bar of a document, sheet, slide or PDF window has the page's commands and nothing else", async () => {
+test("the native bar of a document, sheet, slide, PDF, BASE or BOARD window has the page's commands and nothing else", async () => {
   const items = rustItems();
-  for (const kind of ["DOC", "SHEET", "SLIDE", "PDF"]) {
+  for (const kind of ["DOC", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"]) {
     const { document } = await open(kind);
     await flushAsyncTurns(10);
     const page = new Set([...shownCommands(document)].map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a)));
@@ -222,8 +237,8 @@ test("the page reports the menu kind to the shell with its menu state", () => {
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
   assert.match(chrome, /kind: host\.__EASYOFFICE_MENU_KINDS__\.menuKindOf\(active\)/);
   const kinds = read("crates/easyoffice-app/ui/menu-kinds.js");
-  assert.match(kinds, /const KINDS = Object\.freeze\(\["DOC", "HWP", "SHEET", "SLIDE", "PDF"\]\)/);
-  const rust = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  assert.match(kinds, /const KINDS = Object\.freeze\(\["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"\]\)/);
+  const rust = readRustLayoutSources();
   for (const kind of KINDS) assert.ok(rust.includes(`"${kind}" => Some(`), kind);
 });
 

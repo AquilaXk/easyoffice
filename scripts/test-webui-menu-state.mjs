@@ -53,7 +53,7 @@ test("a window reports its menu kind, theme and module state to the shell", asyn
 
 test("the reported menu kind follows the module of the window", async () => {
   const { document, reports } = await shellPage();
-  for (const mod of ["SHEET", "SLIDE", "PDF", "HWP", "DOC"]) {
+  for (const mod of ["SHEET", "SLIDE", "PDF", "HWP", "BASE", "BOARD", "DOC"]) {
     await switchModule(document, mod);
     await flushAsyncTurns(10);
     assert.equal(reports.at(-1).kind, mod, mod);
@@ -75,7 +75,7 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
   const rule = page.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.studioCommandApplies;
   const commands = tableCommands(page);
   assert.ok(commands.length >= 60);
-  for (const mod of ["DOC", "SHEET", "SLIDE", "PDF", "HWP"]) {
+  for (const mod of ["DOC", "SHEET", "SLIDE", "PDF", "HWP", "BASE", "BOARD"]) {
     await switchModule(document, mod);
     await flushAsyncTurns(10);
     const editorOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)

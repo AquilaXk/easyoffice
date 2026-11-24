@@ -65,15 +65,15 @@
     ],
     insert: [
       { suffix: "insert-table", title: "표 삽입", shortcut: "⌃⌘T" },
-      { suffix: "insert-chart", title: "차트 개체", shortcut: "⌃⌘C" },
+      { suffix: "insert-chart", title: "차트", shortcut: "⌃⌘C" },
       { suffix: "insert-shape", title: "도형·다이어그램", shortcut: "⌃⌘S" },
       { suffix: "insert-link", title: "책갈피·링크", shortcut: "⌘K" },
     ],
     layout: [
-      { suffix: "layout-paper", title: "편집 용지", shortcut: "⇧⌘P" },
-      { suffix: "layout-orientation", title: "용지 방향 전환", shortcut: "⌥⌘O" },
+      { suffix: "layout-paper", title: "용지 설정", shortcut: "⇧⌘P" },
+      { suffix: "layout-orientation", title: "용지 방향", shortcut: "⌥⌘O" },
       { suffix: "layout-columns", title: "다단 설정", shortcut: "⌥⌘M" },
-      { suffix: "layout-margins", title: "여백 프리셋", shortcut: "⌥⌘G" },
+      { suffix: "layout-margins", title: "여백", shortcut: "⌥⌘G" },
     ],
     formulasAndData: [
       { suffix: "data-autosum", title: "자동 합계 (SUM)", shortcut: "⇧⌘T" },
@@ -99,7 +99,7 @@
     DOC: [
       { id: "doc-mod-toc", title: "자동 목차 생성", shortcut: "⌃⌥T" },
       { id: "doc-mod-footnote", title: "각주", shortcut: "⌥⌘F" },
-      { id: "doc-mod-mailmerge", title: "메일 머지 치환", shortcut: "⌃⌘M" },
+      { id: "doc-mod-mailmerge", title: "편지 병합", shortcut: "⌃⌘M" },
       { id: "doc-mod-tableformula", title: "표 셀 수식 계산", shortcut: "⌃⌘=" },
     ],
     HWP: [
@@ -143,7 +143,7 @@
       Object.keys(COMMON_CATEGORY_SPECS).forEach((catKey) => {
         catalog[modKey][catKey] = COMMON_CATEGORY_SPECS[catKey].map((item) => ({
           id: prefix + "-" + item.suffix,
-          title: item.title,
+          title: modKey === "HWP" && item.suffix === "layout-paper" ? "편집 용지" : item.title,
           shortcut: item.shortcut,
         }));
       });

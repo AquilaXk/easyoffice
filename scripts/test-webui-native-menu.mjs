@@ -325,7 +325,7 @@ test("the native labels of the shared style, paper and justify commands are the 
   const html = read("crates/easyoffice-app/ui/index.html");
   const pageLabels = (cmd) =>
     [...html.matchAll(new RegExp(`data-studio-menu-cmd="${cmd}"[^>]*><span class="md-label">([^<]+)</span>`, "g"))].map((m) => m[1]);
-  for (const cmd of ["home-style", "layout-paper", "para-shape"]) {
+  for (const cmd of ["home-style", "layout-paper", "para-shape", "mod-header", "mod-footer"]) {
     const native = rustItems().filter((item) => item.action === `studio-cmd:${cmd}`).map((item) => item.label);
     assert.ok(native.length > 0, cmd);
     assert.deepEqual([...new Set(pageLabels(cmd))], [...new Set(native)], cmd);

@@ -38,9 +38,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Studio menu/toolbar command -> modules where it has a real effect (default: DOC/HWP only).
   const STUDIO_COMMAND_MODULES = {
     "studio-save": ALL_MODULES, "studio-save-as": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
-    palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
-    "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
-    "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
+    palette: ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
+    "zoom-fit-page": [...RIBBON_MODULES, "CONV"], "zoom-fit-width": [...RIBBON_MODULES, "CONV"],
+    "smart-diagnose": [...RIBBON_MODULES, "CONV"], "scrub-pii": [...RIBBON_MODULES, "CONV"],
+    "security-audit": [...RIBBON_MODULES, "CONV"], "bench-run": [...RIBBON_MODULES, "CONV"],
+    "view-outline": [...RIBBON_MODULES, "CONV"],
     "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     find: ["DOC", "SHEET", "BASE"], replace: ["DOC", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
     "clip-copy": [...EDIT_MODULES, "BASE"], "clip-cut": [...DOC_SHEET_MODULES, "BASE"], "clip-paste": [...DOC_SHEET_MODULES, "BASE"],
@@ -50,6 +52,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
     ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),
+    // Theme toggle and 100% actual size also work in BASE/BOARD/CONV outside the 5 ribbon modules.
+    "view-theme": ALL_MODULES, "view-zoom": ALL_MODULES,
     // A PDF page has no style, table, shape or link to apply: there these four only answer with a status line.
     ...Object.fromEntries(["home-style", "insert-table", "insert-shape", "insert-link"].map((cmd) => [cmd, EDIT_MODULES])),
     ...MODULE_SPECIFIC_COMMANDS,
@@ -668,6 +672,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function syncToolbarButtons(mod, commandModule) {
+      const hfLabels = mod === "HWP" ? { "mod-header": "머리말", "mod-footer": "꼬리말" } : { "mod-header": "머리글", "mod-footer": "바닥글" };
       // A window's toolbar lists the commands that work in it: the others are hidden.
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
@@ -676,6 +681,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         btn.disabled = !on;
         btn.hidden = !on;
         btn.setAttribute("aria-disabled", on ? "false" : "true");
+        const hfLabel = hfLabels[cmd];
+        if (hfLabel) {
+          btn.setAttribute("title", hfLabel);
+          btn.setAttribute("aria-label", hfLabel);
+          const lbl = btn.querySelector(".tb-label");
+          if (lbl) lbl.textContent = hfLabel;
+        }
       }
     }
 
@@ -686,14 +698,14 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const start = appShell?.dataset.windowKind === "start";
       const isDoc = DOC_MODULES.includes(mod) && !embed && !start;
       if (appShell) appShell.dataset.hwpEmbed = embed ? "true" : "false";
-      for (const item of document.querySelectorAll("[data-hwp-save-as]")) item.hidden = !embed;
-      for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
       const commandModule = start ? "START" : embed ? "HWP_EMBED" : mod;
       syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
       host.__EASYOFFICE_MENU_KINDS__.applyMenuKind(document, commandModule);
+      for (const item of document.querySelectorAll("[data-hwp-save-as]")) item.hidden = !embed;
+      for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       syncToolbarRowVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);

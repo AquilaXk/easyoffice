@@ -343,7 +343,7 @@ test("PD-258 창 내 실시간 인쇄 미리보기: 참조 앱 한국어 명칭,
 
   const ppMenu = verifyMenuAction(document, "print-preview");
   assert.equal(ppMenu.querySelector(".md-label")?.textContent, "인쇄 미리보기");
-  assert.equal(ppMenu.dataset.kinds, "DOC SHEET SLIDE");
+  assert.equal(ppMenu.dataset.kinds, "DOC SHEET SLIDE BASE BOARD");
 
   // 1. Open in DOC via native menu action and verify non-destructive preview + live refresh.
   const editor = $(document, "doc-editor");
