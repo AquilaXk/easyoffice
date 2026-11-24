@@ -531,6 +531,8 @@ impl WorkbookEngine {
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_databar;
+#[cfg(test)]
 mod tests_expr_shift;
 #[cfg(test)]
 mod tests_validate;

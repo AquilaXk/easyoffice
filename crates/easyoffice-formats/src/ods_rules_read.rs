@@ -11,9 +11,11 @@ use crate::sheet_styling::ods_grid::{OdsCell, OdsSink};
 use crate::sheet_styling::sheet_look::ods_borders_from;
 use crate::sheet_styling::sheet_rules::ods_rules::range_from_ods;
 use crate::sheet_styling::sheet_rules::{
-    icon_set_index, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert,
-    DvKind, SheetRules, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE,
-    ICON_SETS, MAX_RANGES_PER_RULE, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
+    icon_set_index, CellBox, CfBarAxis, CfBarDirection, CfKind, CfRule, CfStyle, CfValue, Cmp,
+    DataValidation, DvAlert, DvKind, SheetRules, TextOp, ValueKind, DEFAULT_BAR_AXIS_COLOR,
+    DEFAULT_BAR_NEGATIVE, DEFAULT_BAR_POSITIVE, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE,
+    FLAG_UNDERLINE, ICON_SETS, MAX_RANGES_PER_RULE, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,
+    MAX_RULE_TEXT_CHARS,
 };
 use crate::xml_stream::Attrs;
 use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
@@ -27,7 +29,47 @@ fn attr(attrs: &str, name: &str) -> Option<String> {
 
 fn color_of(attrs: &str, name: &str) -> Option<u32> {
     let c = attr(attrs, name)?;
-    u32::from_str_radix(c.strip_prefix('#')?, 16).ok()
+    let hex = c.strip_prefix('#')?;
+    (hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+}
+
+fn opt_color_of(attrs: &str, name: &str) -> Result<Option<u32>, ()> {
+    match attr(attrs, name) {
+        None => Ok(None),
+        Some(c) => {
+            let Some(hex) = c.strip_prefix('#') else {
+                return Err(());
+            };
+            if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(());
+            }
+            u32::from_str_radix(hex, 16).map(Some).map_err(|_| ())
+        }
+    }
+}
+
+fn opt_flag_of(attrs: &str, name: &str, default: bool) -> Result<bool, ()> {
+    match attr(attrs, name).as_deref() {
+        None => Ok(default),
+        Some("1" | "true") => Ok(true),
+        Some("0" | "false") => Ok(false),
+        Some(_) => Err(()),
+    }
+}
+
+fn bar_direction_of(attrs: &str) -> Option<CfBarDirection> {
+    match attr(attrs, "eo:bar-direction")
+        .or_else(|| attr(attrs, "calcext:direction"))
+        .as_deref()
+    {
+        None => Some(CfBarDirection::Context),
+        Some("context") => Some(CfBarDirection::Context),
+        Some("leftToRight" | "left-to-right") => Some(CfBarDirection::LeftToRight),
+        Some("rightToLeft" | "right-to-left") => Some(CfBarDirection::RightToLeft),
+        Some(_) => None,
+    }
 }
 
 /// Colours and flags of the cell styles declared in `content.xml` (automatic and common styles).
@@ -283,21 +325,59 @@ fn parse_conditional_formats(
                     .into_iter()
                     .filter_map(|(e, _)| parse_entry(e))
                     .collect();
-            if let [min, max] = entries.as_slice() {
-                found.push((
-                    CfKind::DataBar {
-                        min: min.clone(),
-                        max: max.clone(),
-                        positive: color_of(a, "calcext:positive-color").unwrap_or(0x63_8E_C6),
-                        negative: color_of(a, "calcext:negative-color").unwrap_or(0xFF_00_00),
-                        gradient: attr(a, "calcext:gradient").as_deref() != Some("false"),
-                        show_value: attr(a, "calcext:show-value").as_deref() != Some("false"),
-                    },
-                    CfStyle::default(),
-                    String::new(),
-                ));
-            } else {
-                push_unsupported(&mut rules.unsupported, "조건부 서식 dataBar".to_string());
+            let axis_pos = match attr(a, "calcext:axis-position").as_deref() {
+                None => Some(CfBarAxis::Automatic),
+                Some(raw) => CfBarAxis::from_ods_name(raw),
+            };
+            let dir = bar_direction_of(a);
+            match (
+                entries.as_slice(),
+                axis_pos,
+                dir,
+                opt_color_of(a, "calcext:positive-color"),
+                opt_color_of(a, "calcext:negative-color"),
+                opt_flag_of(a, "eo:bar-border", false),
+                opt_flag_of(a, "calcext:gradient", true),
+                opt_flag_of(a, "calcext:show-value", true),
+                opt_color_of(a, "eo:bar-border-positive"),
+                opt_color_of(a, "eo:bar-border-negative"),
+                opt_color_of(a, "calcext:axis-color"),
+            ) {
+                (
+                    [min, max],
+                    Some(axis_position),
+                    Some(direction),
+                    Ok(pos_opt),
+                    Ok(neg_opt),
+                    Ok(border),
+                    Ok(gradient),
+                    Ok(show_value),
+                    Ok(bpos_opt),
+                    Ok(bneg_opt),
+                    Ok(axis_opt),
+                ) => {
+                    let positive = pos_opt.unwrap_or(DEFAULT_BAR_POSITIVE);
+                    let negative = neg_opt.unwrap_or(DEFAULT_BAR_NEGATIVE);
+                    found.push((
+                        CfKind::DataBar {
+                            min: min.clone(),
+                            max: max.clone(),
+                            positive,
+                            negative,
+                            gradient,
+                            show_value,
+                            direction,
+                            border,
+                            border_positive: bpos_opt.unwrap_or(positive),
+                            border_negative: bneg_opt.unwrap_or(negative),
+                            axis_position,
+                            axis_color: axis_opt.unwrap_or(DEFAULT_BAR_AXIS_COLOR),
+                        },
+                        CfStyle::default(),
+                        String::new(),
+                    ));
+                }
+                _ => push_unsupported(&mut rules.unsupported, "조건부 서식 dataBar".to_string()),
             }
         }
         for (a, body) in extract_tags_with_attrs(block, "calcext:icon-set") {

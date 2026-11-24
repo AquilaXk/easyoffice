@@ -16,6 +16,7 @@
       document, sheetDataStore, sheetRowCounts, sheetStoreHelpers, getActiveModule,
       getActiveSheetName, setActiveSheetName, getActiveSheetCellRef, setActiveSheetCellRef,
       enqueueWorkspaceHistoryOp, restoreWorkspaceSnapshot, sheetHistory, onSheetSwitchedOutline,
+      onClearMenuStateChanged,
     } = deps;
     const { isFormulaStr, extractEvaluatedTargetValue, computeEvaluatedSheetStore, evaluateLiveFormulaTargets, followCalculation } = sheetStoreHelpers;
 
@@ -544,6 +545,7 @@
         format.scheduleToolbarSync();
         lookOps?.sync();
         rulesUi?.syncArrow();
+        rulesUi?.syncClearMenu();
         host.__EASYOFFICE_SHEET_TABLE_BAR__?.sync();
         host.__EASYOFFICE_SHEET_NOTE__?.syncLayer();
       },
@@ -630,6 +632,7 @@
         if (fb) fb.textContent = "시트 탭 전환: " + target;
         structure.refreshSheetChrome();
         input.afterSheetSwitch(target);
+        rulesUi?.syncClearMenu();
       },
     });
 
@@ -722,6 +725,10 @@
       sheetRowCounts,
       getActiveSheetName,
       getRange: () => input.getRange(),
+      getSelection: () => input.getSelection(),
+      onClearMenuStateChanged: () => {
+        if (getActiveModule() === "SHEET") onClearMenuStateChanged?.();
+      },
       isFormulaStr,
       sheetStoreHelpers,
       enqueueWorkspaceHistoryOp,
@@ -740,6 +747,7 @@
     // The same for the pivot tables `GETPIVOTDATA` reads: a create, an edit, a delete and an undo of one (PD-292).
     const layoutStale = () => sheetStoreHelpers.hiddenRowsStale(getActiveSheetName()) || sheetStoreHelpers.pivotsStale() || Boolean(sheetStoreHelpers.cellMetaStale?.(sheetDataStore));
     host.__EASYOFFICE_SHEET_LAYOUT__.onChange(() => {
+      if (getActiveModule() === "SHEET") rulesUi?.syncClearMenu();
       if (getActiveModule() !== "SHEET" || !layoutStale()) return;
       void enqueueWorkspaceHistoryOp(async () => {
         if (layoutStale()) await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
@@ -833,6 +841,7 @@
       applySheetChartSummary: ops.applySheetChartSummary,
       applySheetFormatCommand: format.applyCommand,
       openConditionalFormatDialog: () => rulesUi.openConditionalFormatDialog(),
+      syncCfClearMenu: () => rulesUi?.syncClearMenu(),
       openDataValidationDialog: () => rulesUi.openDataValidationDialog(),
       openHyperlinkDialog: structure.openHyperlink,
       openPivotDialog: () => rulesUi.openPivotDialog(),

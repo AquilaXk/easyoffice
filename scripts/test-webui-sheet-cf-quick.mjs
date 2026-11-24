@@ -180,7 +180,7 @@ test("the submenu has the items of the spreadsheet program's conditional formatt
   assert.deepEqual(direct(panel("조건부 서식")), ["셀 강조 규칙", "상위/하위 규칙", "데이터 막대", "색조", "아이콘 집합", "새 규칙…", "규칙 지우기", "규칙 관리…"]);
   assert.deepEqual(direct(panel("셀 강조 규칙")), ["보다 큼…", "보다 작음…", "다음 값의 사이에 있음…", "같음…", "텍스트 포함…", "발생 날짜…", "중복 값…", "기타 규칙…"]);
   assert.deepEqual(direct(panel("상위/하위 규칙")), ["상위 10개 항목…", "상위 10%…", "하위 10개 항목…", "하위 10%…", "평균 초과…", "평균 미만…", "기타 규칙…"]);
-  assert.deepEqual(direct(panel("규칙 지우기")), ["선택한 셀에서 규칙 지우기", "전체 시트에서 규칙 지우기"]);
+  assert.deepEqual(direct(panel("규칙 지우기")), ["선택한 셀에서 규칙 지우기", "전체 시트에서 규칙 지우기", "이 표에서 규칙 지우기", "이 피벗 테이블에서 규칙 지우기"]);
   assert.equal(doc.querySelectorAll(".cfg-tile").length, 44);
   assert.deepEqual(Array.from(doc.querySelectorAll("#sheet-cf-gallery-bar .cfg-title"), (t) => t.textContent), ["그라데이션 채우기", "단색 채우기"]);
   assert.deepEqual(Array.from(doc.querySelectorAll("#sheet-cf-gallery-icons .cfg-title"), (t) => t.textContent), ["방향", "도형", "표시기", "등급"]);
@@ -527,9 +527,76 @@ test("the manager's border row shows a rule's edges, keeps edges it cannot show 
 });
 
 test("no array method is called on a list the page returns (a NodeList or an HTMLCollection has none)", () => {
-  for (const name of ["sheet-cf-presets.js", "sheet-cf-preview.js", "sheet-cf-quick-ui.js", "sheet-rules-ui.js"]) {
+  for (const name of ["sheet-cf-presets.js", "sheet-cf-preview.js", "sheet-cf-quick-ui.js", "sheet-cf-bar-ui.js", "sheet-rules-ui.js"]) {
     const text = source(name);
     assert.doesNotMatch(text, /querySelectorAll\([^)]*\)\.(map|filter|find|some|every|reduce|flatMap|slice|indexOf|includes)\b/, `${name}: querySelectorAll`);
     assert.doesNotMatch(text, /\.(childNodes|children)\.(map|filter|find|some|every|reduce|flatMap|slice|indexOf|includes|at)\b/, `${name}: childNodes or children`);
   }
+});
+
+test("clear-table and clear-pivot enable only inside their ranges and cut only that table or pivot in one undo step", async () => {
+  const { win, rulesUi, rules, doc, pushed, state } = await pageHarness({
+    selection: { r1: 1, c1: 1, r2: 1, c2: 1 },
+    sheetRules: {
+      Sheet1: {
+        cf: [{ r: "A1:E6", t: "dup", bg: "#ffc7ce" }],
+        dv: [{ r: "B2", t: "whole", op: "between", a: "1", b: "2" }],
+      },
+    },
+  });
+  const layout = win.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.setTables("Sheet1", [{ name: "Table1", range: "B2:C4", columns: ["A", "B"] }]);
+  layout.setPivots("Sheet1", [{ name: "PivotTable1", sourceSheet: "Sheet1", sourceRange: "A1:B2", location: "E1:F3", fieldNames: ["A", "B"], rowFields: [0] }]);
+  const disabledOf = (act) => doc.querySelector(`.md-item[data-sheet-cf="${act}"]`).getAttribute("aria-disabled");
+
+  // Selection on A1 is outside both Table1 and PivotTable1.
+  rulesUi.syncClearMenu();
+  assert.equal(disabledOf("clear-table"), "true");
+  assert.equal(disabledOf("clear-pivot"), "true");
+  await rulesUi.runCfAction("clear-table");
+  await rulesUi.runCfAction("clear-pivot");
+  assert.equal(pushed.length, 0);
+
+  // Inside Table1 (C3 -> row 3, col 3).
+  state.selection = { r1: 3, c1: 3, r2: 3, c2: 3 };
+  rulesUi.syncClearMenu();
+  assert.equal(disabledOf("clear-table"), "false");
+  assert.equal(disabledOf("clear-pivot"), "true");
+  await rulesUi.runCfAction("clear-table");
+  await flushAsyncTurns();
+  assert.equal(pushed.length, 1);
+  const afterTable = rules.parseRanges(rules.get("Sheet1").cf[0].r);
+  assert.ok(!afterTable.some((b) => b.row0 <= 2 && b.row1 >= 2 && b.col0 <= 2 && b.col1 >= 2), "C3 is cut out");
+  assert.ok(afterTable.some((b) => b.row0 <= 0 && b.col0 <= 0), "A1 outside Table1 stays");
+  assert.ok(afterTable.some((b) => b.col1 >= 4), "E1:E6 in pivot stays");
+  assert.equal(rules.get("Sheet1").dv.length, 1);
+
+  // Inside PivotTable1 (E2 -> row 2, col 5).
+  state.selection = { r1: 2, c1: 5, r2: 2, c2: 5 };
+  rulesUi.syncClearMenu();
+  assert.equal(disabledOf("clear-table"), "true");
+  assert.equal(disabledOf("clear-pivot"), "false");
+  await rulesUi.runCfAction("clear-pivot");
+  await flushAsyncTurns();
+  assert.equal(pushed.length, 2);
+  const afterPivot = rules.parseRanges(rules.get("Sheet1").cf[0].r);
+  assert.ok(!afterPivot.some((b) => b.col1 >= 4 && b.row0 <= 2), "E1:E3 in PivotTable1 is cut out");
+  assert.ok(afterPivot.some((b) => b.row0 === 0 && b.col0 === 0), "A1 outside both stays");
+  // Repeating clear-pivot when nothing intersects makes no undo step.
+  await rulesUi.runCfAction("clear-pivot");
+  assert.equal(pushed.length, 2);
+
+  // Reused preview nodes must not retain stale data-rtl when repainted with non-RTL / non-bar rules.
+  const swatch = doc.createElement("span");
+  win.__EASYOFFICE_SHEET_CF_PREVIEW__.paint(
+    swatch,
+    { r: "A1", t: "bar", pos: "#638ec6", neg: "#ff555a", dir: "rightToLeft", min: { k: "min" }, max: { k: "max" } },
+    [],
+  );
+  assert.equal(swatch.dataset.rtl, "true");
+  win.__EASYOFFICE_SHEET_CF_PREVIEW__.paint(swatch, { r: "A1", t: "dup", bg: "#ffc7ce" }, []);
+  assert.equal(swatch.dataset.rtl, undefined);
+
+  layout.replaceAll({});
+  rules.replaceAll({});
 });

@@ -181,6 +181,8 @@
     "format:cf-new": "sheet-cf:new",
     "format:cf-clear-selection": "sheet-cf:clear-selection",
     "format:cf-clear-sheet": "sheet-cf:clear-sheet",
+    "format:cf-clear-table": "sheet-cf:clear-table",
+    "format:cf-clear-pivot": "sheet-cf:clear-pivot",
     "format:cf-manage": "sheet-cf:manage",
     "page:doc-paper": "studio-cmd:layout-paper",
     "page:paper": "studio-cmd:layout-paper",
@@ -437,6 +439,8 @@
           isDisabled = false;
         } else if (EMBED_ONLY_SET.has(name)) {
           isDisabled = commandModule !== "HWP_EMBED";
+        } else if (commandModule === "SHEET" && (id === "format:cf-clear-table" || id === "format:cf-clear-pivot")) {
+          isDisabled = document.querySelector(`.md-item[data-sheet-cf="${argument}"]`)?.getAttribute("aria-disabled") === "true";
         } else {
           isDisabled = name === "hwp-editor" || (name === "studio-cmd" && !applies(argument, commandModule)) || (name === "print" && !applies("print", commandModule));
         }

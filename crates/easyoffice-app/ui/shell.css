@@ -256,6 +256,10 @@
 .cfp { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 72px; height: 20px; font-size: var(--font-size-sm); pointer-events: none; }
 .cfp:empty { display: none; }
 .cfp-seg { flex: 1 1 0; align-self: stretch; background: var(--cfp-color, transparent); }
+.cfp[data-rtl="true"] { flex-direction: row-reverse; }
+.cfp-seg[data-bar-border="true"] { box-shadow: inset 0 0 0 1px var(--cfp-border, transparent); }
+.cf-sub-label { font-size: var(--font-size-sm); color: var(--color-text); white-space: nowrap; }
+.sheet-grid td[data-cf] { background-position: var(--cf-bar-pos, 0 0); background-size: var(--cf-bar-size, 100% 100%); background-repeat: no-repeat; }
 .cfp-seg[data-gradient="end"] { background: linear-gradient(to right, var(--cfp-color, transparent), transparent); }
 .cfp-seg[data-gradient="start"] { background: linear-gradient(to right, transparent, var(--cfp-color, transparent)); }
 .cfp-icon { flex: none; width: 18px; height: 18px; background: var(--cfp-color, transparent); -webkit-mask: var(--cfp-icon-mask, none) center / contain no-repeat; mask: var(--cfp-icon-mask, none) center / contain no-repeat; }

@@ -22,7 +22,7 @@ try {
 const skip = !APP || !CHROME ? "needs a built easyoffice-app and a Chrome (EO_APP, CHROME_PATH)" : false;
 const SHOTS = process.env.EO_SHOTS || "";
 
-const KEYS = { Enter: [13, "Enter"], Escape: [27, "Escape"], ArrowDown: [40, "ArrowDown"], z: [90, "KeyZ"], y: [89, "KeyY"] };
+const KEYS = { Enter: [13, "Enter"], Escape: [27, "Escape"], ArrowRight: [39, "ArrowRight"], ArrowDown: [40, "ArrowDown"], z: [90, "KeyZ"], y: [89, "KeyY"] };
 const CTRL = 2;
 const SHIFT = 8;
 
@@ -148,7 +148,7 @@ async function typeInto(id, value) {
   await sleep(250);
 }
 const ok = async () => {
-  const at = await centerOf(`document.getElementById("btn-sheet-cfq-ok")`);
+  const at = await until(() => centerOf(`document.getElementById("btn-sheet-cfq-ok")`), "quick dialog OK button");
   await mouse("mouseMoved", at.x, at.y);
   await mouse("mousePressed", at.x, at.y);
   await mouse("mouseReleased", at.x, at.y);
@@ -372,4 +372,74 @@ test("the custom format of a quick dialog opens the manager with the rule", { sk
   await shoot("manager-new-rule");
   await js(`document.getElementById("sheet-cf-dialog").close()`);
   assert.deepEqual(await rulesOf(), []);
+});
+
+test("extended data bar options draw RTL border and midpoint axis in real engine and clear-table/clear-pivot cut only their own ranges", { skip }, async () => {
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({}); window.__EASYOFFICE_SHEET_LAYOUT__.replaceAll({});`);
+  for (const [ref, value] of [["B2", "-10"], ["B3", "0"], ["B4", "10"]]) await put(ref, value);
+  await click("B2");
+  for (let i = 0; i < 2; i += 1) await key("ArrowDown", SHIFT);
+  await chooseFromMenu(["조건부 서식"], "새 규칙…");
+  await js(`(() => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("sheet-cf-type-select", "bar");
+    set("sheet-cf-bar-dir", "rightToLeft");
+    set("sheet-cf-bar-border", "solid");
+    set("sheet-cf-bar-bpos", "#112233");
+    set("sheet-cf-bar-bneg", "#990000");
+    set("sheet-cf-bar-axis", "midpoint");
+    set("sheet-cf-bar-axis-color", "#445566");
+  })()`);
+  await js(`document.getElementById("btn-sheet-cf-apply").click()`);
+  const barCss = await painted("B4", "bar");
+  assert.match(barCss, /repeating-linear-gradient\(180deg, #445566/);
+  assert.match(barCss, /#112233/);
+  assert.match(barCss, /transparent 0%, .*50%, transparent 50%/);
+  await until(async () => (await js(`document.querySelector(${JSON.stringify(td("B3"))}).style.getPropertyValue("--cf-bar")`)).includes("#445566"), "zero value still draws midpoint axis");
+  await shoot("databar-rtl-border-axis");
+  await js(`document.getElementById("sheet-cf-dialog").close()`);
+
+  // Add a table on B2:C3 and a pivot on E2:F4, and verify 규칙 지우기 sub-items enable/clear per active range.
+  await js(`(() => {
+    const L = window.__EASYOFFICE_SHEET_LAYOUT__;
+    L.setTables("Sheet1", [{ name: "T1", range: "B2:C3", columns: ["B", "C"] }]);
+    L.setPivots("Sheet1", [{ name: "P1", sourceSheet: "Sheet1", sourceRange: "B2:C3", location: "E2:F4", fieldNames: ["B", "C"], rowFields: [0] }]);
+  })()`);
+  await click("D5");
+  await until(async () => (await js(`document.querySelector('[data-sheet-cf="clear-table"]').getAttribute("aria-disabled")`)) === "true", "clear-table disabled on D5");
+  assert.equal(await js(`document.querySelector('[data-sheet-cf="clear-pivot"]').getAttribute("aria-disabled")`), "true");
+
+  await click("B2");
+  await until(async () => (await js(`document.querySelector('[data-sheet-cf="clear-table"]').getAttribute("aria-disabled")`)) === "false", "clear-table enabled on B2");
+  await chooseFromMenu(["조건부 서식", "규칙 지우기"], "이 표에서 규칙 지우기");
+  await until(async () => (await rulesOf())[0].r === "B4", "table rows B2:B3 cut out, B4 stays");
+
+  await key("z", CTRL);
+  await until(async () => (await rulesOf())[0].r === "B2:B4", "clearing a table is one undo step");
+
+  // Also test clear-pivot and manage-rules table/pivot scope in real Chrome.
+  await click("D2");
+  await key("ArrowRight", SHIFT);
+  await key("ArrowRight", SHIFT);
+  await key("ArrowDown", SHIFT);
+  await chooseFromMenu(["조건부 서식", "상위/하위 규칙"], "평균 초과…");
+  await ok();
+  await click("E2");
+  await until(async () => (await js(`document.querySelector('[data-sheet-cf="clear-pivot"]').getAttribute("aria-disabled")`)) === "false", "clear-pivot enabled inside pivot E2");
+  await chooseFromMenu(["조건부 서식", "규칙 지우기"], "이 피벗 테이블에서 규칙 지우기");
+  await until(async () => (await rulesOf())[0].r === "D2:D3", "pivot area E2:F3 cut out, D2:D3 stays");
+  await chooseFromMenu(["조건부 서식"], "규칙 관리…");
+  assert.equal(await js(`document.querySelector('#sheet-cf-scope-select option[value="pivot"]').disabled`), false, "pivot scope enabled on E2");
+  assert.equal(await js(`document.querySelector('#sheet-cf-scope-select option[value="table"]').disabled`), true, "table scope disabled on E2");
+  await js(`document.getElementById("sheet-cf-dialog").close()`);
+  await click("B2");
+  await chooseFromMenu(["조건부 서식"], "규칙 관리…");
+  assert.equal(await js(`document.querySelector('#sheet-cf-scope-select option[value="table"]').disabled`), false, "table scope enabled on B2");
+  assert.equal(await js(`document.querySelector('#sheet-cf-scope-select option[value="pivot"]').disabled`), true, "pivot scope disabled on B2");
+  await js(`(() => { const s = document.getElementById("sheet-cf-scope-select"); s.value = "table"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  const tableList = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll("#sheet-cf-list li")].map((li) => li.textContent))`));
+  assert.equal(tableList.length, 1);
+  assert.match(tableList[0], /B2:B4 · 데이터 막대/);
+  await js(`document.getElementById("sheet-cf-dialog").close()`);
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({}); window.__EASYOFFICE_SHEET_LAYOUT__.replaceAll({});`);
 });

@@ -3,8 +3,8 @@
 
 use easyoffice_formats::{
     encode_sheet_pdf, plain_cell_numeric, BorderEdge, BorderLine, CellBorders, CellRule, CellShown,
-    CellStyle, CfBar, CfIcon, DefaultFont, OdsUnpacked, SheetShown, SheetStyling, FLAG_BOLD,
-    FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE,
+    CellStyle, CfBar, CfBarAxis, CfBarDirection, CfIcon, DefaultFont, OdsUnpacked, SheetShown,
+    SheetStyling, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE,
 };
 
 /// A default column of a Calibri 11 pt workbook (a 7 px digit), 64 px (PD-305), in points.
@@ -367,12 +367,7 @@ fn bar(pct: i8, start: u8, gradient: bool) -> SheetShown {
     rule_of(
         (1, 0),
         CellRule {
-            bar: Some(CfBar {
-                pct,
-                start,
-                color: 0x638EC6,
-                gradient,
-            }),
+            bar: Some(CfBar::new(pct, start, 0x638EC6, gradient)),
             ..CellRule::default()
         },
     )
@@ -484,12 +479,7 @@ fn bars_of_one_pair_of_colors_share_one_gradient_form() {
         (2, 0),
         CellShown {
             rule: Some(CellRule {
-                bar: Some(CfBar {
-                    pct: 90,
-                    start: 0,
-                    color: 0x638EC6,
-                    gradient: true,
-                }),
+                bar: Some(CfBar::new(90, 0, 0x638EC6, true)),
                 ..CellRule::default()
             }),
             ..CellShown::default()
@@ -515,12 +505,7 @@ fn a_bar_that_hides_the_value_hides_the_text_of_the_cell() {
         (1, 0),
         CellRule {
             hide_value: true,
-            bar: Some(CfBar {
-                pct: 80,
-                start: 0,
-                color: 0x638EC6,
-                gradient: false,
-            }),
+            bar: Some(CfBar::new(80, 0, 0x638EC6, false)),
             ..CellRule::default()
         },
     );
@@ -546,6 +531,7 @@ fn a_hostile_rule_stays_inside_its_cell_and_writes_numbers() {
             start: u8::MAX,
             color: u32::MAX,
             gradient: true,
+            ..CfBar::default()
         }),
         icon: Some(CfIcon {
             set: u8::MAX,
@@ -606,4 +592,140 @@ fn a_number_with_nothing_but_a_rule_sits_at_the_right_like_one_without() {
     assert!(plain_cell_numeric(Some(&styling), (1, 1), text((1, 1))));
     assert!(!plain_cell_numeric(Some(&styling), (1, 0), text((1, 0))));
     assert!(plain_cell_numeric(None, (1, 1), text((1, 1))));
+}
+
+#[test]
+fn rtl_solid_border_and_midpoint_axis_mirror_geometry_and_draw_strokes() {
+    let mut shown = rule_of(
+        (0, 0),
+        CellRule {
+            bg: Some(0xEEEEEE),
+            ..CellRule::default()
+        },
+    );
+    shown.insert(
+        (1, 0),
+        CellShown {
+            rule: Some(CellRule {
+                bar: Some(CfBar {
+                    pct: 60,
+                    start: 50,
+                    color: 0x638EC6,
+                    gradient: false,
+                    direction: CfBarDirection::RightToLeft,
+                    border: true,
+                    border_color: 0x112233,
+                    axis_position: CfBarAxis::Midpoint,
+                    axis_color: 0x445566,
+                }),
+                ..CellRule::default()
+            }),
+            ..CellShown::default()
+        },
+    );
+    let pdf = pdf_with(sheet().1, shown);
+    let (cx, _, _, _) = fills(&pdf, 0xEEEEEE)[0];
+    let bars = fills(&pdf, 0x638EC6);
+    assert_eq!(bars.len(), 1);
+    let (bx, _, bw, _) = bars[0];
+    // RightToLeft + Midpoint: axis is at 50% (cx + CELL_W / 2), 60% positive bar fills [20%..50%] of cell width.
+    assert!(close(bx, cx + CELL_W * 0.20), "bx={bx} cx={cx}");
+    assert!(close(bw, CELL_W * 0.30), "bw={bw}");
+    // Solid border around the bar box and dotted axis line at 50% both appear BEFORE cell text.
+    let border_at = pdf
+        .find(&format!("{} RG", rgb(0x112233)))
+        .expect("bar border stroke");
+    let axis_at = pdf
+        .find(&format!("{} RG", rgb(0x445566)))
+        .expect("axis stroke");
+    let text_at = pdf.find("(b) Tj").unwrap();
+    assert!(border_at < axis_at && axis_at < text_at);
+    let axis_line = line_with(&pdf, &format!("{} RG", rgb(0x445566)))[0];
+    let expected_axis_x = format!("{:.2}", cx + CELL_W * 0.50);
+    assert!(axis_line.contains(&expected_axis_x), "{axis_line}");
+}
+
+#[test]
+fn none_axis_grows_negative_bar_same_direction_without_axis_and_zero_keeps_interior_axis() {
+    let mut shown = rule_of(
+        (0, 0),
+        CellRule {
+            bg: Some(0xEEEEEE),
+            ..CellRule::default()
+        },
+    );
+    shown.insert(
+        (1, 0),
+        CellShown {
+            rule: Some(CellRule {
+                bar: Some(CfBar {
+                    pct: -50,
+                    start: 0,
+                    color: 0xFF0000,
+                    gradient: false,
+                    direction: CfBarDirection::LeftToRight,
+                    border: true,
+                    border_color: 0x990000,
+                    axis_position: CfBarAxis::None,
+                    axis_color: 0x123456,
+                }),
+                ..CellRule::default()
+            }),
+            ..CellShown::default()
+        },
+    );
+    shown.insert(
+        (2, 0),
+        CellShown {
+            rule: Some(CellRule {
+                bar: Some(CfBar {
+                    pct: 0,
+                    start: 40,
+                    color: 0x638EC6,
+                    gradient: true,
+                    direction: CfBarDirection::Context,
+                    border: false,
+                    border_color: 0x638EC6,
+                    axis_position: CfBarAxis::Automatic,
+                    axis_color: 0xABCDEF,
+                }),
+                ..CellRule::default()
+            }),
+            ..CellShown::default()
+        },
+    );
+    let pdf = pdf_with(sheet().1, shown);
+    let (cx, _, _, _) = fills(&pdf, 0xEEEEEE)[0];
+    let neg_bars = fills(&pdf, 0xFF0000);
+    assert_eq!(neg_bars.len(), 1);
+    assert!(close(neg_bars[0].0, cx) && close(neg_bars[0].2, CELL_W * 0.50));
+    assert!(pdf.contains(&format!("{} RG", rgb(0x990000))));
+    assert!(!pdf.contains(&rgb(0x123456)), "axis=none omits axis line");
+    assert!(
+        pdf.contains(&format!("{} RG", rgb(0xABCDEF))),
+        "pct=0 with interior start draws axis"
+    );
+}
+
+#[test]
+fn zero_width_bar_border_emits_no_empty_stroke_op() {
+    let shown = rule_of(
+        (0, 0),
+        CellRule {
+            bar: Some(CfBar {
+                pct: 0,
+                start: 0,
+                color: 0x638EC6,
+                gradient: false,
+                direction: CfBarDirection::LeftToRight,
+                border: true,
+                border_color: 0x112233,
+                axis_position: CfBarAxis::None,
+                axis_color: 0x000000,
+            }),
+            ..CellRule::default()
+        },
+    );
+    let pdf = pdf_with(sheet().1, shown);
+    assert!(!pdf.contains(&format!("{} RG S Q", rgb(0x112233))));
 }

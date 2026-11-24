@@ -168,7 +168,7 @@ fn the_conditional_formatting_menu_has_the_submenus_and_items_of_the_page() {
         .iter()
         .map(|sub| sub.lines.iter().filter(|line| **line != s).count())
         .collect();
-    assert_eq!(counts, [8, 7, 13, 13, 21, 2]);
+    assert_eq!(counts, [8, 7, 13, 13, 21, 4]);
     // The id of an item is `format:cf-` and the argument of its page action, so the two cannot drift apart.
     let ids = layout::table_ids(MenuKind::Sheet);
     let cf: Vec<&str> = ids
@@ -176,7 +176,7 @@ fn the_conditional_formatting_menu_has_the_submenus_and_items_of_the_page() {
         .copied()
         .filter(|id| id.starts_with("format:cf-"))
         .collect();
-    assert_eq!(cf.len(), 8 + 7 + 13 + 13 + 21 + 2 + 2);
+    assert_eq!(cf.len(), 8 + 7 + 13 + 13 + 21 + 4 + 2);
     for id in cf {
         let argument = &id["format:cf-".len()..];
         assert_eq!(

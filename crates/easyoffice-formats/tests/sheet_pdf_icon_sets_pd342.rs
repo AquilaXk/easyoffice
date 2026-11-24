@@ -313,12 +313,7 @@ fn fill_bar_icon_text_grid_and_border_follow_layer_order() {
             numeric: true,
             rule: Some(CellRule {
                 bg: Some(0x112233),
-                bar: Some(CfBar {
-                    pct: 60,
-                    start: 0,
-                    color: 0x445566,
-                    gradient: false,
-                }),
+                bar: Some(CfBar::new(60, 0, 0x445566, false)),
                 icon: Some(CfIcon { set: 18, index: 3 }), // 5Quarters 3/4 pie
                 border: CellBorders {
                     bottom: BorderEdge::new(BorderLine::Thin, 0xFF0000),

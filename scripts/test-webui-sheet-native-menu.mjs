@@ -29,7 +29,7 @@ test("the table holds the 11 number-format items, the 47 row, column, hide, merg
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
   assert.equal(items.filter((i) => i.name === "sheet-act").length, 47);
-  assert.equal(items.filter((i) => i.name === "sheet-cf").length, 66, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, clear and manage rules");
+  assert.equal(items.filter((i) => i.name === "sheet-cf").length, 68, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, 4 clear rules and manage rules");
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });
 
@@ -47,7 +47,7 @@ test("each native item clicks the page's menu item that carries its label", asyn
   assert.deepEqual(clicked, items.map((i) => i.id));
 });
 
-test("the spreadsheet window reports none of the sheet items as disabled, as the page grays none of them", async () => {
+test("the spreadsheet window disables only table and pivot clear items outside a table or pivot and enables them dynamically inside one", async () => {
   const reports = [];
   const { document } = await createWorkspaceHarness({
     search: "?module=SHEET&win=w-sheet-state",
@@ -58,8 +58,28 @@ test("the spreadsheet window reports none of the sheet items as disabled, as the
   const last = reports.at(-1);
   assert.equal(last.kind, "SHEET");
   const ids = sheetItems().map((i) => i.id);
-  assert.deepEqual(last.disabled.filter((id) => ids.includes(id)), []);
-  for (const item of sheetItems()) assert.notEqual(document.querySelector(selectorOf(item)).getAttribute("aria-disabled"), "true", item.id);
+  const CONDITIONAL_CLEAR_IDS = ["format:cf-clear-table", "format:cf-clear-pivot"];
+  assert.deepEqual(last.disabled.filter((id) => ids.includes(id)), CONDITIONAL_CLEAR_IDS);
+  for (const item of sheetItems()) {
+    const expectedDisabled = CONDITIONAL_CLEAR_IDS.includes(item.id) ? "true" : undefined;
+    const actual = document.querySelector(selectorOf(item)).getAttribute("aria-disabled");
+    if (expectedDisabled) assert.equal(actual, expectedDisabled, item.id);
+    else assert.notEqual(actual, "true", item.id);
+  }
+
+  // Placing Table1 over A1:B2 enables clear-table while active cell is A1; Pivot1 over D1:E2 updates native state too.
+  const win = document.defaultView;
+  win.__EASYOFFICE_SHEET_LAYOUT__.setTables("Sheet1", [{ name: "Table1", range: "A1:B2", columns: ["A", "B"] }]);
+  await flushAsyncTurns(6);
+  const withTable = reports.at(-1);
+  assert.deepEqual(withTable.disabled.filter((id) => ids.includes(id)), ["format:cf-clear-pivot"]);
+  assert.equal(document.querySelector('.md-item[data-sheet-cf="clear-table"]').getAttribute("aria-disabled"), "false");
+
+  win.__EASYOFFICE_SHEET_LAYOUT__.setPivots("Sheet1", [{ name: "PivotTable1", sourceSheet: "Sheet1", sourceRange: "A1:B2", location: "A1:B2", fieldNames: ["A", "B"], rowFields: [0] }]);
+  await flushAsyncTurns(6);
+  const withBoth = reports.at(-1);
+  assert.deepEqual(withBoth.disabled.filter((id) => ids.includes(id)), []);
+  assert.equal(document.querySelector('.md-item[data-sheet-cf="clear-pivot"]').getAttribute("aria-disabled"), "false");
 });
 
 const search = (document, text) => {

@@ -59,6 +59,9 @@
     "sheet-cf-stop2-color",
     "sheet-cf-bar-pos",
     "sheet-cf-bar-neg",
+    "sheet-cf-bar-bpos",
+    "sheet-cf-bar-bneg",
+    "sheet-cf-bar-axis-color",
     "sheet-cf-bg",
     "sheet-cf-fg",
     "sheet-cf-bd",
@@ -75,6 +78,8 @@
       sheetRowCounts,
       getActiveSheetName,
       getRange,
+      getSelection,
+      onClearMenuStateChanged,
       isFormulaStr,
       sheetStoreHelpers,
       enqueueWorkspaceHistoryOp,
@@ -147,10 +152,34 @@
     const cf = { selected: -1, ready: false, scope: "selection" };
     const presets = host.__EASYOFFICE_SHEET_CF_PRESETS__;
     const previews = host.__EASYOFFICE_SHEET_CF_PREVIEW__;
+    const barUi = host.__EASYOFFICE_SHEET_CF_BAR_UI__;
+
+    const tableBox = () => barUi?.activeTableBox(getActiveSheetName(), getRange, getSelection) || null;
+    const pivotBox = () => barUi?.activePivotBox(getActiveSheetName(), getRange, getSelection) || null;
+
+    function syncClearMenu() {
+      const hasTable = Boolean(tableBox());
+      const hasPivot = Boolean(pivotBox());
+      const changed = barUi ? barUi.syncClearMenu(document, hasTable, hasPivot) : false;
+      if (changed) onClearMenuStateChanged?.();
+      return { hasTable, hasPivot };
+    }
+
+    function scopeBoxes() {
+      if (cf.scope === "table") {
+        const box = tableBox();
+        return box ? [box] : [];
+      }
+      if (cf.scope === "pivot") {
+        const box = pivotBox();
+        return box ? [box] : [];
+      }
+      return selectionBoxes();
+    }
 
     // The indexes of the rules the list shows (indexes into the sheet's whole list, whose order is the priority).
     function shownIndexes() {
-      return presets.rulesInScope(rules.get(getActiveSheetName()).cf, cf.scope, selectionBoxes(), rules.parseRanges);
+      return presets.rulesInScope(rules.get(getActiveSheetName()).cf, cf.scope, scopeBoxes(), rules.parseRanges);
     }
 
     function describe(rule) {
@@ -262,7 +291,8 @@
         if (li) selectCf(Number(li.dataset.index));
       });
       $("sheet-cf-scope-select")?.addEventListener("change", () => {
-        cf.scope = val("sheet-cf-scope-select") === "sheet" ? "sheet" : "selection";
+        const next = val("sheet-cf-scope-select");
+        cf.scope = ["sheet", "table", "pivot"].includes(next) ? next : "selection";
         if (!shownIndexes().includes(cf.selected)) selectCf(-1);
         else renderCfList();
       });
@@ -319,13 +349,7 @@
         setVal("sheet-cf-stop" + i + "-color", c);
       });
       setChecked("sheet-cf-mid", true);
-      setSelect("sheet-cf-bar-min-kind", "min");
-      setVal("sheet-cf-bar-min-val", "");
-      setSelect("sheet-cf-bar-max-kind", "max");
-      setVal("sheet-cf-bar-max-val", "");
-      setVal("sheet-cf-bar-pos", "#638ec6");
-      setVal("sheet-cf-bar-neg", "#ff0000");
-      setChecked("sheet-cf-bar-grad", true);
+      barUi?.defaultBarForm(kit);
       setSelect("sheet-cf-icon-set-select", "3TrafficLights1");
       setChecked("sheet-cf-icon-rev", false);
       setChecked("sheet-cf-show", true);
@@ -424,14 +448,7 @@
           break;
         }
         case "bar":
-          setSelect("sheet-cf-bar-min-kind", rule.min.k);
-          setVal("sheet-cf-bar-min-val", rule.min.v);
-          setSelect("sheet-cf-bar-max-kind", rule.max.k);
-          setVal("sheet-cf-bar-max-val", rule.max.v);
-          setVal("sheet-cf-bar-pos", rule.pos || "#638ec6");
-          setVal("sheet-cf-bar-neg", rule.neg || "#ff0000");
-          setChecked("sheet-cf-bar-grad", rule.grad !== false);
-          setChecked("sheet-cf-show", rule.show !== false);
+          barUi?.fillBarForm(kit, rule);
           break;
         case "icons":
           setSelect("sheet-cf-icon-set-select", rule.set);
@@ -521,12 +538,7 @@
           break;
         }
         case "bar":
-          rule.min = { k: val("sheet-cf-bar-min-kind"), v: val("sheet-cf-bar-min-val") };
-          rule.max = { k: val("sheet-cf-bar-max-kind"), v: val("sheet-cf-bar-max-val") };
-          rule.pos = colorOf("sheet-cf-bar-pos", "#638ec6");
-          rule.neg = colorOf("sheet-cf-bar-neg", "#ff0000");
-          rule.grad = checked("sheet-cf-bar-grad");
-          rule.show = checked("sheet-cf-show");
+          Object.assign(rule, barUi ? barUi.readBarForm(kit, colorOf) : {});
           break;
         case "icons":
           rule.set = val("sheet-cf-icon-set-select");
@@ -569,7 +581,7 @@
         }
       });
       // A rule outside what the list shows would vanish from it, so the list then shows the whole sheet.
-      if (cf.scope === "selection" && !shownIndexes().includes(cf.selected)) setSelect("sheet-cf-scope-select", "sheet");
+      if (cf.scope !== "sheet" && !shownIndexes().includes(cf.selected)) setSelect("sheet-cf-scope-select", "sheet");
       else renderCfList();
       note("sheet-cf-status", "규칙을 적용했습니다.");
     }
@@ -604,6 +616,9 @@
       if (rulesBlocked()) return;
       ensureCfControls();
       cf.selected = -1;
+      const hasTable = Boolean(tableBox());
+      const hasPivot = Boolean(pivotBox());
+      barUi?.syncScopeOptions(document, hasTable, hasPivot);
       cf.scope = "selection";
       setSelect("sheet-cf-scope-select", "selection");
       if (draft?.t) fillCfForm(draft);
@@ -819,6 +834,9 @@
       getRange,
       selectionBoxes,
       selectionText,
+      tableBox,
+      pivotBox,
+      syncClearMenu,
       commitRules,
       beginStep,
       finishStep,
@@ -832,6 +850,8 @@
     defaultCfForm();
     bindDvLayout();
     fillDvForm();
+    syncClearMenu();
+    host.__EASYOFFICE_SHEET_CF_SYNC_CLEAR__ = () => syncClearMenu();
 
     return {
       openConditionalFormatDialog,
@@ -842,6 +862,7 @@
       syncArrow: widgets.sync,
       hideArrow: widgets.hide,
       pivotCells: pivotUi.pivotCells,
+      syncClearMenu,
     };
   }
 

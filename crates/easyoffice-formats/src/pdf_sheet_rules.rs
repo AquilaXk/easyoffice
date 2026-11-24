@@ -20,9 +20,9 @@ use crate::pdf_laid::{rgb_ops, Canvas};
 use crate::pdf_sheet_icons::{resolve_icon, IconKey, IconSlot, ICON_BOX_UNITS};
 use crate::pdf_writer::text_ops;
 use crate::{
-    BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, CfIcon, SheetStyling, FLAG_BOLD,
-    FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, MAX_SIZE_PT, MIN_SIZE_PT, STYLE_BOLD, STYLE_ITALIC,
-    STYLE_STRIKE, STYLE_UNDERLINE,
+    BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, CfBarAxis, CfBarDirection, CfIcon,
+    SheetStyling, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, MAX_SIZE_PT, MIN_SIZE_PT,
+    STYLE_BOLD, STYLE_ITALIC, STYLE_STRIKE, STYLE_UNDERLINE,
 };
 
 const _: () = {
@@ -179,6 +179,10 @@ pub(crate) struct RuleLayer {
     bars: Boxes,
     /// The gradient bars by the colors at their two ends, which go over the solid bars.
     gradients: BTreeMap<(u32, u32), Vec<Rect>>,
+    /// Solid 1-stroke borders around individual data bars, keyed by RGB color.
+    bar_borders: Boxes,
+    /// Vertical axis dotted segments inside data bar cells, keyed by RGB color.
+    bar_axes: BTreeMap<u32, Vec<Segment>>,
     /// Distinct `(shape, color)` keys used by icon cells on this page.
     icon_keys: Vec<IconKey>,
     icon_map: HashMap<IconKey, usize>,
@@ -195,6 +199,8 @@ impl RuleLayer {
             fills: BTreeMap::new(),
             bars: BTreeMap::new(),
             gradients: BTreeMap::new(),
+            bar_borders: BTreeMap::new(),
+            bar_axes: BTreeMap::new(),
             icon_keys: Vec::new(),
             icon_map: HashMap::new(),
             icons: Vec::new(),
@@ -220,32 +226,66 @@ impl RuleLayer {
     /// The bar over the cell `cell`, drawn after the cell's fill. `under` is the cell's fill.
     pub(crate) fn bar(&mut self, cell: Rect, bar: CfBar, under: Option<u32>) {
         let (x, y, w, h) = cell;
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
         let start = f64::from(bar.start.min(100));
         let mag = f64::from(bar.pct.unsigned_abs().min(100)) / 100.0;
-        let positive = bar.pct >= 0;
-        let (left, right) = if positive {
-            (start, start + (100.0 - start) * mag)
+        let rtl = bar.direction == CfBarDirection::RightToLeft;
+        let natural = if bar.pct > 0 {
+            Some((start, start + (100.0 - start) * mag, true))
+        } else if bar.pct < 0 {
+            if bar.axis_position == CfBarAxis::None {
+                Some((0.0, 100.0 * mag, true))
+            } else {
+                Some((start - start * mag, start, false))
+            }
         } else {
-            (start - start * mag, start)
+            None
         };
-        let (from, span) = (x + w * left / 100.0, w * (right - left) / 100.0);
-        if span <= 0.0 {
-            return;
+        if let Some((ltr_left, ltr_right, solid_left_ltr)) = natural {
+            let (left, right, solid_at_left) = if rtl {
+                (100.0 - ltr_right, 100.0 - ltr_left, !solid_left_ltr)
+            } else {
+                (ltr_left, ltr_right, solid_left_ltr)
+            };
+            let (from, span) = (x + w * left / 100.0, w * (right - left) / 100.0);
+            if span > 0.0 {
+                let color = bar.color & RGB_MASK;
+                let bar_box = (from, y, span, h);
+                if !bar.gradient {
+                    push_box(&mut self.bars, bar_box, color);
+                } else {
+                    // The color fades to a quarter of itself at the far end, mixed with what is under the bar: the cell's fill.
+                    let faded = mixed(color, under.unwrap_or(PAPER), GRADIENT_END_ALPHA);
+                    let ends = if solid_at_left {
+                        (color, faded)
+                    } else {
+                        (faded, color)
+                    };
+                    self.gradients.entry(ends).or_default().push(bar_box);
+                }
+                if bar.border {
+                    self.bar_borders
+                        .entry(bar.border_color & RGB_MASK)
+                        .or_default()
+                        .push(bar_box);
+                }
+            }
         }
-        let color = bar.color & RGB_MASK;
-        let bar_box = (from, y, span, h);
-        if !bar.gradient {
-            push_box(&mut self.bars, bar_box, color);
-            return;
-        }
-        // The color fades to a quarter of itself at the far end, mixed with what is under the bar: the cell's fill.
-        let faded = mixed(color, under.unwrap_or(PAPER), GRADIENT_END_ALPHA);
-        let ends = if positive {
-            (color, faded)
-        } else {
-            (faded, color)
+        let draw_axis = match bar.axis_position {
+            CfBarAxis::Midpoint => true,
+            CfBarAxis::Automatic => bar.start > 0 && bar.start < 100,
+            CfBarAxis::None => false,
         };
-        self.gradients.entry(ends).or_default().push(bar_box);
+        if draw_axis {
+            let axis_pct = if rtl { 100.0 - start } else { start };
+            let axis_x = ((x + w * axis_pct / 100.0) * 100.0).round() / 100.0;
+            self.bar_axes
+                .entry(bar.axis_color & RGB_MASK)
+                .or_default()
+                .push((axis_x, y, y + h));
+        }
     }
 
     /// The edges of the cell `(x, y, w, h)`: top, right, bottom, left.
@@ -315,6 +355,47 @@ impl RuleLayer {
             }
             gradients.push((name, *from, *to));
         }
+        let unit = |pt: f64| (pt * self.scale).max(MIN_LINE_PT);
+        let bar_lw = unit(THIN_PT);
+        for (rgb, boxes) in self.bar_borders {
+            for chunk in boxes.chunks(PATH_PARTS) {
+                let mut op = format!("q {bar_lw:.2} w {} RG", rgb_ops(rgb));
+                let hw = bar_lw * 0.5;
+                let mut drew = false;
+                for &(x, y, w, h) in chunk {
+                    let inset_x = hw.min(w * 0.5);
+                    let inset_y = hw.min(h * 0.5);
+                    let bw = (w - inset_x * 2.0).max(0.0);
+                    let bh = (h - inset_y * 2.0).max(0.0);
+                    if bw > 0.0 && bh > 0.0 {
+                        drew = true;
+                        let _ = write!(
+                            op,
+                            " {:.2} {:.2} {bw:.2} {bh:.2} re",
+                            x + inset_x,
+                            y + inset_y
+                        );
+                    }
+                }
+                if drew {
+                    op.push_str(" S Q");
+                    under.push(op);
+                }
+            }
+        }
+        for (rgb, mut lines) in self.bar_axes {
+            let [dot_on, dot_off] = DOT_PT;
+            let dash = format!("[{:.2} {:.2}] 0 d ", unit(dot_on), unit(dot_off));
+            let lines = settled(&mut lines);
+            for chunk in lines.chunks(PATH_PARTS) {
+                let mut op = format!("q {bar_lw:.2} w {} RG {dash}", rgb_ops(rgb));
+                for &(at, from, to) in chunk {
+                    let _ = write!(op, "{at:.2} {from:.2} m {at:.2} {to:.2} l ");
+                }
+                op.push_str("S Q");
+                under.push(op);
+            }
+        }
         let mut icons = Vec::with_capacity(self.icon_keys.len());
         for (i, key) in self.icon_keys.into_iter().enumerate() {
             icons.push((format!("Ic{}", i + 1), key));
@@ -334,7 +415,6 @@ impl RuleLayer {
             }
             under.push(op);
         }
-        let unit = |pt: f64| (pt * self.scale).max(MIN_LINE_PT);
         let mut over = Vec::new();
         for ((stroke, rgb, vertical), mut lines) in self.edges {
             let (width, dash) = stroke.width_and_dash();

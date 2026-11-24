@@ -152,6 +152,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-cf-presets.js",
   "../crates/easyoffice-app/ui/sheet-cf-preview.js",
   "../crates/easyoffice-app/ui/sheet-cf-quick-ui.js",
+  "../crates/easyoffice-app/ui/sheet-cf-bar-ui.js",
   "../crates/easyoffice-app/ui/sheet-rules-ui.js",
   "../crates/easyoffice-app/ui/sheet-format.js",
   "../crates/easyoffice-app/ui/sheet-numfmt-ui.js",

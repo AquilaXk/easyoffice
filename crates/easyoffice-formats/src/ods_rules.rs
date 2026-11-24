@@ -11,8 +11,8 @@ use std::fmt::Write;
 
 use crate::sheet_styling::sheet_look::ods_border_attrs;
 use crate::sheet_styling::sheet_rules::{
-    CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvKind, SheetRules, TextOp,
-    ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS,
+    CellBox, CfBarDirection, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvKind,
+    SheetRules, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS,
 };
 use crate::sheet_styling::SheetStyling;
 use crate::xlsx_rules::period_formula;
@@ -148,7 +148,10 @@ fn rule_body(rule: &CfRule, styles: &OdsRuleTable, sheet_name: &str) -> String {
     .to_a1();
     match &rule.kind {
         CfKind::ColorScale(stops) => {
-            let entries: String = stops.iter().map(|(v, c)| entry_xml("color-scale-entry", v, Some(*c))).collect();
+            let entries: String = stops
+                .iter()
+                .map(|(v, c)| entry_xml("color-scale-entry", v, Some(*c)))
+                .collect();
             format!("<calcext:color-scale>{entries}</calcext:color-scale>")
         }
         CfKind::DataBar {
@@ -158,18 +161,43 @@ fn rule_body(rule: &CfRule, styles: &OdsRuleTable, sheet_name: &str) -> String {
             negative,
             gradient,
             show_value,
-        } => format!(
-            "<calcext:data-bar calcext:positive-color=\"#{positive:06x}\" calcext:negative-color=\"#{negative:06x}\" calcext:gradient=\"{gradient}\" calcext:show-value=\"{show_value}\" calcext:axis-position=\"automatic\">{}{}</calcext:data-bar>",
-            entry_xml("formatting-entry", min, None),
-            entry_xml("formatting-entry", max, None)
-        ),
+            direction,
+            border,
+            border_positive,
+            border_negative,
+            axis_position,
+            axis_color,
+        } => {
+            let mut ext = String::new();
+            if *direction != CfBarDirection::Context {
+                let _ = write!(ext, " eo:bar-direction=\"{}\"", direction.name());
+            }
+            if *border {
+                ext.push_str(" eo:bar-border=\"true\"");
+            }
+            if *border || *border_positive != *positive || *border_negative != *negative {
+                let _ = write!(
+                    ext,
+                    " eo:bar-border-positive=\"#{border_positive:06x}\" eo:bar-border-negative=\"#{border_negative:06x}\""
+                );
+            }
+            format!(
+                "<calcext:data-bar calcext:positive-color=\"#{positive:06x}\" calcext:negative-color=\"#{negative:06x}\" calcext:gradient=\"{gradient}\" calcext:show-value=\"{show_value}\" calcext:axis-position=\"{}\" calcext:axis-color=\"#{axis_color:06x}\"{ext}>{}{}</calcext:data-bar>",
+                axis_position.ods_name(),
+                entry_xml("formatting-entry", min, None),
+                entry_xml("formatting-entry", max, None)
+            )
+        }
         CfKind::IconSet {
             set,
             thresholds,
             show_value,
             ..
         } => {
-            let entries: String = thresholds.iter().map(|v| entry_xml("formatting-entry", v, None)).collect();
+            let entries: String = thresholds
+                .iter()
+                .map(|v| entry_xml("formatting-entry", v, None))
+                .collect();
             format!(
                 "<calcext:icon-set calcext:icon-set-type=\"{}\" calcext:show-value=\"{show_value}\">{entries}</calcext:icon-set>",
                 ICON_SETS[usize::from(*set)].0
@@ -182,7 +210,9 @@ fn rule_body(rule: &CfRule, styles: &OdsRuleTable, sheet_name: &str) -> String {
             let style = styles
                 .style_index
                 .get(&rule.style)
-                .map_or(String::new(), |i| format!(" calcext:apply-style-name=\"eocf{i}\""));
+                .map_or(String::new(), |i| {
+                    format!(" calcext:apply-style-name=\"eocf{i}\"")
+                });
             format!(
                 "<calcext:condition{style} calcext:value=\"{}\" calcext:base-cell-address=\"{}\"/>",
                 XmlSanitizer::escape(&value),

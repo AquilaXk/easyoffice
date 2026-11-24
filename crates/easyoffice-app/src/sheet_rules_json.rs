@@ -9,9 +9,10 @@ use crate::sheet_look_json::{parse_borders, write_borders};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::base64_codec;
 use easyoffice_formats::{
-    format_sqref, icon_set_index, parse_sqref, CellBorders, CfKind, CfRule, CfStyle, CfValue, Cmp,
-    DataValidation, DvAlert, DvKind, EasyOfficeError, SheetRules, StrictJsonValue, TextOp,
-    TimePeriod, ValueKind, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
+    format_sqref, icon_set_index, parse_sqref, CellBorders, CfBarAxis, CfBarDirection, CfKind,
+    CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, EasyOfficeError, SheetRules,
+    StrictJsonValue, TextOp, TimePeriod, ValueKind, DEFAULT_BAR_AXIS_COLOR, DEFAULT_BAR_NEGATIVE,
+    DEFAULT_BAR_POSITIVE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
 };
 use easyoffice_sheet::{encode_visuals, CellVisual};
 use std::fmt::Write;
@@ -36,6 +37,30 @@ fn flag(f: &Fields, key: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+fn flag_strict(f: &Fields, key: &str, default: bool) -> Result<bool, EasyOfficeError> {
+    match StrictJsonValue::get_field(f, key) {
+        None | Some(StrictJsonValue::Null) => Ok(default),
+        Some(StrictJsonValue::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(key)),
+    }
+}
+
+fn bar_direction(f: &Fields) -> Result<CfBarDirection, EasyOfficeError> {
+    match StrictJsonValue::get_field(f, "dir") {
+        None | Some(StrictJsonValue::Null) => Ok(CfBarDirection::Context),
+        Some(StrictJsonValue::Str(s)) => CfBarDirection::from_name(s).ok_or_else(|| bad("dir")),
+        Some(_) => Err(bad("dir")),
+    }
+}
+
+fn bar_axis(f: &Fields) -> Result<CfBarAxis, EasyOfficeError> {
+    match StrictJsonValue::get_field(f, "axis") {
+        None | Some(StrictJsonValue::Null) => Ok(CfBarAxis::Automatic),
+        Some(StrictJsonValue::Str(s)) => CfBarAxis::from_name(s).ok_or_else(|| bad("axis")),
+        Some(_) => Err(bad("axis")),
+    }
+}
+
 fn count(f: &Fields, key: &str, default: u32) -> Result<u32, EasyOfficeError> {
     match StrictJsonValue::get_field(f, key) {
         None | Some(StrictJsonValue::Null) => Ok(default),
@@ -52,7 +77,7 @@ fn color(f: &Fields, key: &str) -> Result<Option<u32>, EasyOfficeError> {
         return Ok(None);
     }
     let hex = t.strip_prefix('#').unwrap_or(t);
-    if hex.len() != 6 {
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(bad(key));
     }
     u32::from_str_radix(hex, 16).map(Some).map_err(|_| bad(key))
@@ -143,14 +168,24 @@ fn kind(f: &Fields) -> Result<CfKind, EasyOfficeError> {
             }
             CfKind::ColorScale(stops)
         }
-        "bar" => CfKind::DataBar {
-            min: value(StrictJsonValue::get_field(f, "min").ok_or_else(|| bad("min"))?)?,
-            max: value(StrictJsonValue::get_field(f, "max").ok_or_else(|| bad("max"))?)?,
-            positive: color(f, "pos")?.unwrap_or(0x63_8E_C6),
-            negative: color(f, "neg")?.unwrap_or(0xFF_00_00),
-            gradient: flag(f, "grad", true),
-            show_value: flag(f, "show", true),
-        },
+        "bar" => {
+            let positive = color(f, "pos")?.unwrap_or(DEFAULT_BAR_POSITIVE);
+            let negative = color(f, "neg")?.unwrap_or(DEFAULT_BAR_NEGATIVE);
+            CfKind::DataBar {
+                min: value(StrictJsonValue::get_field(f, "min").ok_or_else(|| bad("min"))?)?,
+                max: value(StrictJsonValue::get_field(f, "max").ok_or_else(|| bad("max"))?)?,
+                positive,
+                negative,
+                gradient: flag(f, "grad", true),
+                show_value: flag(f, "show", true),
+                direction: bar_direction(f)?,
+                border: flag_strict(f, "bdOn", false)?,
+                border_positive: color(f, "bpos")?.unwrap_or(positive),
+                border_negative: color(f, "bneg")?.unwrap_or(negative),
+                axis_position: bar_axis(f)?,
+                axis_color: color(f, "axisColor")?.unwrap_or(DEFAULT_BAR_AXIS_COLOR),
+            }
+        }
         "icons" => {
             let set = icon_set_index(text(f, "set")?).ok_or_else(|| bad("set"))?;
             let thresholds = values(f, "th")?
@@ -350,6 +385,12 @@ fn kind_json(out: &mut String, kind: &CfKind) {
             negative,
             gradient,
             show_value,
+            direction,
+            border,
+            border_positive,
+            border_negative,
+            axis_position,
+            axis_color,
         } => {
             let _ = write!(
                 out,
@@ -361,6 +402,12 @@ fn kind_json(out: &mut String, kind: &CfKind) {
             rgb(out, "neg", *negative);
             boolean(out, "grad", *gradient);
             boolean(out, "show", *show_value);
+            field(out, "dir", direction.name());
+            boolean(out, "bdOn", *border);
+            rgb(out, "bpos", *border_positive);
+            rgb(out, "bneg", *border_negative);
+            field(out, "axis", axis_position.name());
+            rgb(out, "axisColor", *axis_color);
         }
         CfKind::IconSet {
             set,
@@ -594,5 +641,43 @@ mod tests {
         let long = "x".repeat(MAX_RULE_TEXT_CHARS + 1);
         let json = format!(r#"{{"cf":[{{"r":"A1","t":"text","op":"contains","text":"{long}"}}]}}"#);
         assert!(parse_rules(&StrictJsonValue::parse(&json).unwrap()).is_err());
+    }
+
+    #[test]
+    fn databar_extended_fields_round_trip_and_invalid_tokens_fail_closed() {
+        let rules = round_trip(
+            r##"{"cf":[{"r":"D1:D9","p":1,"t":"bar","min":{"k":"num","v":"-5"},"max":{"k":"max","v":""},"pos":"#112233","neg":"#445566","grad":false,"show":true,"dir":"rightToLeft","bdOn":true,"bpos":"#778899","bneg":"#AABBCC","axis":"midpoint","axisColor":"#102030"}]}"##,
+        );
+        assert_eq!(
+            rules.cf[0].kind,
+            CfKind::DataBar {
+                min: CfValue::new(ValueKind::Num, "-5"),
+                max: CfValue::new(ValueKind::Max, ""),
+                positive: 0x11_22_33,
+                negative: 0x44_55_66,
+                gradient: false,
+                show_value: true,
+                direction: CfBarDirection::RightToLeft,
+                border: true,
+                border_positive: 0x77_88_99,
+                border_negative: 0xAA_BB_CC,
+                axis_position: CfBarAxis::Midpoint,
+                axis_color: 0x10_20_30,
+            }
+        );
+        for bad in [
+            r#"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"dir":"diagonal"}]}"#,
+            r#"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"axis":"top"}]}"#,
+            r#"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"bdOn":"yes"}]}"#,
+            r##"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"bpos":"#123"}]}"##,
+            r##"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"bpos":"+12345"}]}"##,
+            r##"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"axisColor":"#+12345"}]}"##,
+            r##"{"cf":[{"r":"A1","t":"bar","min":{"k":"min"},"max":{"k":"max"},"axisColor":"red"}]}"##,
+        ] {
+            assert!(
+                parse_rules(&StrictJsonValue::parse(bad).unwrap()).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

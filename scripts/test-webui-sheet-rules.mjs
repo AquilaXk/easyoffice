@@ -608,7 +608,7 @@ const CF_VISIBLE = {
   expr: ["수식", ...STYLE_ROWS],
   period: ["기간", ...STYLE_ROWS],
   scale: ["최소", "중간", "최대"],
-  bar: ["막대 시작", "막대 끝", "막대 색", "표시"],
+  bar: ["막대 시작", "막대 끝", "막대 색", "막대 방향", "막대 모양", "음수 값 및 축 설정", "표시"],
   icons: ["아이콘", "아이콘 2", "표시"],
 };
 const DV_VISIBLE = {
@@ -742,4 +742,84 @@ test("the selection lies translucent over a rule's fill instead of hiding it", (
   // shell.css loads after styles.css, so these win over the plain selection rules at equal specificity.
   const html = fs.readFileSync(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url), "utf8");
   assert.ok(html.indexOf("shell.css") > html.indexOf("styles.css"));
+});
+
+test("packed bar extras decode direction, border and axis settings and build screen CSS layers", async () => {
+  const { win, rules } = await load();
+  const BAR_DIRS = { context: 0, leftToRight: 1, rightToLeft: 2 };
+  const BAR_AXES = { automatic: 0, midpoint: 1, none: 2 };
+  const palette = [0xff0000, 0x990000, 0x123456];
+  const word0 = 1 | (BAR_DIRS.rightToLeft << 20) | (1 << 22) | (BAR_AXES.midpoint << 23) | (1 << 25);
+  const head = 2 | (1 << 20);
+  const barWord = 0 | ((-40 + 128) << 16) | (50 << 24);
+  const extraWord = 1 | (2 << 16);
+  const bytes = Buffer.alloc(16);
+  [word0, head, barWord, extraWord].forEach((w, i) => bytes.writeUInt32LE(w >>> 0, i * 4));
+  const [decoded] = rules.decodePacked({ pal: palette, w: bytes.toString("base64") });
+  assert.deepEqual(decoded.bar, {
+    color: "#ff0000",
+    pct: -40,
+    start: 50,
+    gradient: false,
+    direction: "rightToLeft",
+    border: true,
+    borderColor: "#990000",
+    axisPosition: "midpoint",
+    axisColor: "#123456",
+  });
+  const bg = rules.barBackground(decoded.bar);
+  assert.match(bg, /repeating-linear-gradient\(180deg, #123456 0 2px, transparent 2px 4px\)/);
+  assert.match(bg, /#990000/);
+  assert.match(bg, /linear-gradient\(90deg, transparent 50%, #ff0000 50%, #ff0000 70%, transparent 70%\)/);
+
+  const td = win.document.createElement("td");
+  td.dataset.cell = "C2";
+  rules.applyPacked("Sheet1", { pal: palette, w: bytes.toString("base64") }, true);
+  rules.paintTd(td, "Sheet1");
+  assert.ok(td.style.getPropertyValue("--cf-bar-pos").includes("50% 0"));
+  assert.ok(td.style.getPropertyValue("--cf-bar-size").includes("1px 100%"));
+  rules.replaceAll({});
+});
+
+test("data bar extended dialog fields and table/pivot manager scopes work end-to-end", async () => {
+  const { win, rulesUi, rules, document, userClick } = await dialogHarness();
+  const layout = win.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.setTables("Sheet1", [{ name: "Table1", range: "B2:C5", columns: ["B", "C"] }]);
+  layout.setPivots("Sheet1", [{ name: "Pivot1", sourceSheet: "Sheet1", sourceRange: "A1:B2", location: "E1:F4", fieldNames: ["A", "B"], rowFields: [0] }]);
+
+  rulesUi.openConditionalFormatDialog();
+  const scopeSelect = document.getElementById("sheet-cf-scope-select");
+  assert.equal(scopeSelect.querySelector('option[value="table"]').disabled, false, "B2 is inside Table1");
+  assert.equal(scopeSelect.querySelector('option[value="pivot"]').disabled, true, "B2 is outside Pivot1");
+
+  field(document, "sheet-cf-type-select", "bar");
+  field(document, "sheet-cf-bar-dir", "rightToLeft");
+  field(document, "sheet-cf-bar-border", "solid");
+  field(document, "sheet-cf-bar-bpos", "#112233");
+  field(document, "sheet-cf-bar-bneg", "#445566");
+  field(document, "sheet-cf-bar-axis", "midpoint");
+  field(document, "sheet-cf-bar-axis-color", "#778899");
+  userClick(document.getElementById("btn-sheet-cf-apply"));
+  await flushAsyncTurns();
+
+  const bar = rules.get("Sheet1").cf[0];
+  assert.deepEqual([bar.dir, bar.bdOn, bar.bpos, bar.bneg, bar.axis, bar.axisColor], ["rightToLeft", true, "#112233", "#445566", "midpoint", "#778899"]);
+  assert.match(rules.payloadFor("Sheet1"), /"dir":"rightToLeft".*"bdOn":true.*"bpos":"#112233".*"bneg":"#445566".*"axis":"midpoint".*"axisColor":"#778899"/);
+
+  // Add a rule only on Pivot1 and verify Table scope shows only Table1 rule.
+  userClick(document.getElementById("btn-sheet-cf-new"));
+  field(document, "sheet-cf-range", "E2:F3");
+  field(document, "sheet-cf-type-select", "dup");
+  userClick(document.getElementById("btn-sheet-cf-apply"));
+  await flushAsyncTurns();
+
+  rulesUi.openConditionalFormatDialog();
+  field(document, "sheet-cf-scope-select", "table");
+  scopeSelect.dispatchEvent({ type: "change", target: scopeSelect, bubbles: true });
+  const rows = Array.from(document.querySelectorAll("#sheet-cf-list li"));
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].textContent, /B2:C5/);
+
+  layout.replaceAll({});
+  rules.replaceAll({});
 });

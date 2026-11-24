@@ -58,10 +58,14 @@
   }
 
   // The gradient of one half of a bar: from the bar color to nothing, toward the middle for the negative half.
-  function half(document, color, gradient, towardEnd) {
+  function half(document, color, gradient, towardEnd, borderColor) {
     const el = span(document, "cfp-seg");
     el.style.setProperty("--cfp-color", color);
     if (gradient) el.dataset.gradient = towardEnd ? "end" : "start";
+    if (borderColor) {
+      el.dataset.barBorder = "true";
+      el.style.setProperty("--cfp-border", borderColor);
+    }
     return el;
   }
 
@@ -81,12 +85,18 @@
   function paint(el, rule, iconSets, maskOf) {
     const document = el.ownerDocument;
     el.replaceChildren();
+    delete el.dataset.rtl;
     const look = previewOf(rule, iconSets);
     el.dataset.kind = look?.kind || "";
     if (!look) return;
     if (look.kind === "bar") {
-      if (look.neg !== "") el.appendChild(half(document, look.neg, look.gradient, false));
-      el.appendChild(half(document, look.pos, look.gradient, true));
+      const rtl = rule?.dir === "rightToLeft";
+      const hasBorder = Boolean(rule?.bdOn);
+      const bpos = hasBorder ? rule.bpos || look.pos : "";
+      const bneg = hasBorder ? rule.bneg || look.neg : "";
+      if (rtl) el.dataset.rtl = "true";
+      if (look.neg !== "") el.appendChild(half(document, look.neg, look.gradient, rtl, bneg));
+      el.appendChild(half(document, look.pos, look.gradient, !rtl, bpos));
     } else if (look.kind === "scale") {
       for (const color of look.colors) {
         const seg = span(document, "cfp-seg");

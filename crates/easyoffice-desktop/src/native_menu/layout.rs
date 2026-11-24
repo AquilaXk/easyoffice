@@ -275,7 +275,12 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
     CfSubmenu {
         token: "@cf-clear",
         title: "규칙 지우기",
-        lines: &["format:cf-clear-selection", "format:cf-clear-sheet"],
+        lines: &[
+            "format:cf-clear-selection",
+            "format:cf-clear-sheet",
+            "format:cf-clear-table",
+            "format:cf-clear-pivot",
+        ],
     },
 ];
 

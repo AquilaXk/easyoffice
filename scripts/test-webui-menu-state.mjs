@@ -96,7 +96,8 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
       .map(([id]) => id);
     assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf"]);
     const printOff = rule("print", mod) ? [] : ["file:print"];
-    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly, ...printOff];
+    const cfClearOff = mod === "SHEET" ? ["format:cf-clear-pivot", "format:cf-clear-table"] : [];
+    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly, ...printOff, ...cfClearOff];
     assert.ok(reports.length > 0, `${mod} reported`);
     assert.deepEqual([...reports.at(-1).disabled].sort(byName), expected.sort(byName), mod);
   }

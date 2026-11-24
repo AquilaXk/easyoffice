@@ -222,3 +222,39 @@ test("an icon index or set the page does not know prints no icon", async () => {
   const root = await t.print();
   assert.equal(cell(root, 2, 2).dataset.cfIcon, undefined);
 });
+
+test("extended data bar direction, solid border, midpoint/none axis match grid and print cells", async () => {
+  const palette = [0x638ec6, 0x112233, 0x445566, 0xff0000, 0x990000];
+  // B2 (row=1,col=1): RightToLeft, border=#112233, Midpoint axis=#445566, pct=+60, start=50
+  const w0a = 1 | (2 << 20) | (1 << 22) | (1 << 23) | (1 << 25);
+  const ha = 1 | (1 << 20);
+  const ba = 0 | ((60 + 128) << 16) | (50 << 24);
+  const ea = 1 | (2 << 16);
+  // C2 (row=1,col=2): LeftToRight, border=#990000, None axis, pct=-50, start=0
+  const w0b = 1 | (1 << 20) | (1 << 22) | (2 << 23) | (1 << 25);
+  const hb = 2 | (1 << 20);
+  const bb = 3 | ((-50 + 128) << 16) | (0 << 24);
+  const eb = 4 | (2 << 16);
+  const words = [w0a, ha, ba, ea, w0b, hb, bb, eb];
+  const bytes = Buffer.alloc(words.length * 4);
+  words.forEach((w, i) => bytes.writeUInt32LE(w >>> 0, i * 4));
+
+  const t = await open([]);
+  t.rules.applyPacked("Sheet1", { pal: palette, w: bytes.toString("base64") }, true);
+  const root = await t.print();
+
+  const b2Print = cell(root, 2, 2);
+  const b2Grid = gridCell(t, "B2");
+  assert.equal(b2Print.style.backgroundImage, b2Grid.style.getPropertyValue("--cf-bar"));
+  assert.equal(b2Print.style.backgroundPosition, b2Grid.style.getPropertyValue("--cf-bar-pos"));
+  assert.equal(b2Print.style.backgroundSize, b2Grid.style.getPropertyValue("--cf-bar-size"));
+  assert.equal(b2Print.style.backgroundRepeat, "no-repeat");
+  assert.match(b2Print.style.backgroundImage, /#445566/);
+  assert.match(b2Print.style.backgroundImage, /#112233/);
+  assert.match(b2Print.style.backgroundImage, /transparent 20%, #638ec6 20%, #638ec6 50%, transparent 50%/);
+
+  const c2Print = cell(root, 2, 3);
+  assert.equal(c2Print.style.backgroundImage, gridCell(t, "C2").style.getPropertyValue("--cf-bar"));
+  assert.doesNotMatch(c2Print.style.backgroundImage, /repeating-linear-gradient/, "axis=none omits axis line");
+  assert.match(c2Print.style.backgroundImage, /transparent 0%, #ff0000 0%, #ff0000 50%, transparent 50%/);
+});

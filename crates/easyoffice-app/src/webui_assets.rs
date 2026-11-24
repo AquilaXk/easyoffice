@@ -119,6 +119,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-calc-options.js",
     "sheet-cell-edit.js",
     "sheet-cell-write.js",
+    "sheet-cf-bar-ui.js",
     "sheet-cf-presets.js",
     "sheet-cf-preview.js",
     "sheet-cf-quick-ui.js",

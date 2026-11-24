@@ -13,9 +13,13 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
     extract_tags_or_self_closing_with_attrs_limit,
 };
+use crate::sheet_styling::sheet_rules::xlsx_rules_x14::{
+    cf_ext_inner_xml, cf_rule_id_ext_xml, count_unsupported_x14_rules, parse_x14_data_bars,
+};
 use crate::sheet_styling::sheet_rules::{
-    format_sqref, icon_set_index, parse_sqref, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp,
-    DataValidation, DvAlert, DvKind, SheetRules, TextOp, TimePeriod, ValueKind, FLAG_BOLD,
+    format_sqref, icon_set_index, parse_sqref, CellBox, CfBarAxis, CfBarDirection, CfKind, CfRule,
+    CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, SheetRules, TextOp, TimePeriod,
+    ValueKind, DEFAULT_BAR_AXIS_COLOR, DEFAULT_BAR_NEGATIVE, DEFAULT_BAR_POSITIVE, FLAG_BOLD,
     FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,
     MAX_RULE_TEXT_CHARS,
 };
@@ -200,7 +204,11 @@ fn flag_attr(attrs: &str, name: &str, default: bool) -> bool {
 
 fn rgb_of(attrs: &str) -> Option<u32> {
     let rgb = extract_attr_from_fragment(attrs, "rgb")?;
-    u32::from_str_radix(rgb.get(rgb.len().checked_sub(6)?..)?, 16).ok()
+    if !(rgb.len() == 6 || rgb.len() == 8) || !rgb.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let hex = &rgb[rgb.len() - 6..];
+    u32::from_str_radix(hex, 16).ok()
 }
 
 fn bounded(text: String) -> String {
@@ -461,9 +469,10 @@ fn rule_xml(rule: &CfRule, priority: usize, dxf: &DxfTable) -> String {
             let show = if *show_value { "" } else { " showValue=\"0\"" };
             let _ = write!(
                 body,
-                "<dataBar{show}>{}{}<color rgb=\"FF{positive:06X}\"/></dataBar>",
+                "<dataBar{show}>{}{}<color rgb=\"FF{positive:06X}\"/></dataBar>{}",
                 value_xml(min, false),
-                value_xml(max, false)
+                value_xml(max, false),
+                cf_rule_id_ext_xml(priority),
             );
         }
         CfKind::IconSet {
@@ -567,7 +576,13 @@ const KIND_EXT_URI: &str = "{4D0B5E1C-7A52-4C77-9F0A-2E6B1D93A8C4}";
 
 /// Inner `<ext uri="...">...</ext>` fragment (no outer `<extLst>`) for checkbox / multi-select DV
 /// kinds; merged into the worksheet's single trailing `<extLst>` by [`build_sheet_xml`].
-pub(crate) fn dv_ext_inner_xml(rules: &SheetRules) -> String {
+pub(crate) fn rules_ext_inner_xml(rules: &SheetRules) -> String {
+    let mut out = dv_ext_inner_xml(rules);
+    out.push_str(&cf_ext_inner_xml(rules));
+    out
+}
+
+fn dv_ext_inner_xml(rules: &SheetRules) -> String {
     let marks: String = rules
         .dv
         .iter()
@@ -725,13 +740,23 @@ fn parse_kind(attrs: &str, body: &str) -> Result<CfKind, String> {
                 .first()
                 .map(|(a, _)| *a)
                 .unwrap_or_default();
+            let positive = parse_colors(body)
+                .first()
+                .copied()
+                .unwrap_or(DEFAULT_BAR_POSITIVE);
             CfKind::DataBar {
                 min,
                 max,
-                positive: parse_colors(body).first().copied().unwrap_or(0x63_8E_C6),
-                negative: 0xFF_00_00,
+                positive,
+                negative: DEFAULT_BAR_NEGATIVE,
                 gradient: true,
                 show_value: flag_attr(bar_attrs, "showValue", true),
+                direction: CfBarDirection::Context,
+                border: false,
+                border_positive: positive,
+                border_negative: DEFAULT_BAR_NEGATIVE,
+                axis_position: CfBarAxis::Automatic,
+                axis_color: DEFAULT_BAR_AXIS_COLOR,
             }
         }
         "iconSet" => {
@@ -765,6 +790,7 @@ fn push_unsupported(rules: &mut SheetRules, message: String) {
 }
 
 fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut SheetRules) {
+    let mut x14 = parse_x14_data_bars(sheet_xml);
     for (block_attrs, block) in extract_tags_or_self_closing_with_attrs_limit(
         sheet_xml,
         "conditionalFormatting",
@@ -780,7 +806,11 @@ fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut Sh
                 break;
             }
             match parse_kind(attrs, body) {
-                Ok(kind) if !ranges.is_empty() => {
+                Ok(mut kind) if !ranges.is_empty() => {
+                    if let Err(name) = x14.apply_to_bar(body, &mut kind) {
+                        push_unsupported(rules, format!("조건부 서식 {}", bounded(name)));
+                        continue;
+                    }
                     let style = attr(attrs, "dxfId")
                         .and_then(|i| i.parse::<usize>().ok())
                         .and_then(|i| dxf.get(i))
@@ -801,9 +831,15 @@ fn parse_conditional_formatting(sheet_xml: &str, dxf: &[CfStyle], rules: &mut Sh
             }
         }
     }
+    for extra in x14.take_standalone() {
+        match extra {
+            Ok(rule) if rules.cf.len() < MAX_RULES_PER_SHEET => rules.cf.push(rule),
+            Ok(_) => break,
+            Err(msg) => push_unsupported(rules, msg),
+        }
+    }
     // Icon sets outside the 2007 schema (stars, triangles, boxes, custom icons) live only here.
-    let extended = sheet_xml.matches("<x14:cfRule").count();
-    let count = extended.saturating_sub(sheet_xml.matches("<x14:cfRule type=\"dataBar\"").count());
+    let count = count_unsupported_x14_rules(sheet_xml);
     let room = MAX_RULES_PER_SHEET.saturating_sub(rules.unsupported.len());
     for _ in 0..count.min(room) {
         push_unsupported(rules, "조건부 서식 확장 아이콘".to_string());
@@ -925,32 +961,4 @@ pub(crate) fn parse_worksheet_rules(sheet_xml: &str, dxf: &[CfStyle]) -> SheetRu
     }
     rules.cf.sort_by_key(|r| r.priority);
     rules
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hostile_excess_unsupported_rules_are_bounded() {
-        let mut xml = String::from("<worksheet><conditionalFormatting sqref=\"A1\">");
-        for _ in 0..400 {
-            xml.push_str(r#"<cfRule type="unknownVendorRule" priority="1"/>"#);
-        }
-        xml.push_str("</conditionalFormatting>");
-        for _ in 0..400 {
-            xml.push_str("<x14:cfRule type=\"iconSet\"/>");
-        }
-        xml.push_str("<dataValidations>");
-        for _ in 0..400 {
-            xml.push_str(r#"<dataValidation type="customBad" sqref="A1"/>"#);
-        }
-        xml.push_str("</dataValidations>");
-        for _ in 0..400 {
-            xml.push_str("<x14:dataValidation sqref=\"A1\"/>");
-        }
-        xml.push_str("</worksheet>");
-        let rules = parse_worksheet_rules(&xml, &[]);
-        assert!(rules.unsupported.len() <= MAX_RULES_PER_SHEET);
-    }
 }

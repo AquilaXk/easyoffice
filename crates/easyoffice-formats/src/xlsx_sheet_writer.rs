@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::rtf_xml_helpers::write_col_letters;
-use crate::sheet_styling::sheet_rules::xlsx_rules::{dv_ext_inner_xml, rules_xml};
+use crate::sheet_styling::sheet_rules::xlsx_rules::{rules_ext_inner_xml, rules_xml};
 use crate::sheet_styling::sheet_table::xlsx_tables::HeaderCells;
 use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
@@ -351,7 +351,7 @@ pub(crate) fn build_sheet_xml(
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
         sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
-        dv_ext = dv_ext_inner_xml(&st.rules);
+        dv_ext = rules_ext_inner_xml(&st.rules);
     }
     sheet_xml.push_str(drawing_xml);
     sheet_xml.push_str(legacy_drawing_xml);

@@ -20,7 +20,9 @@ use super::data::{Cells, RangeData};
 use super::period::period_days;
 use super::{Bar, Icon};
 use crate::{EvaluatedCellValue, FormulaError};
-use easyoffice_formats::{CfKind, CfRule, CfValue, Cmp, TextOp, ValueKind, ICON_SETS};
+use easyoffice_formats::{
+    CfBarAxis, CfBarDirection, CfKind, CfRule, CfValue, Cmp, TextOp, ValueKind, ICON_SETS,
+};
 use std::collections::HashMap;
 
 /// What a matching cell shows beyond the rule's style.
@@ -223,6 +225,12 @@ pub(crate) struct BarPlan {
     positive: u32,
     negative: u32,
     gradient: bool,
+    direction: CfBarDirection,
+    border: bool,
+    border_positive: u32,
+    border_negative: u32,
+    axis_position: CfBarAxis,
+    axis_color: u32,
 }
 
 fn parse_percent(v: &CfValue) -> f64 {
@@ -280,34 +288,54 @@ fn rank_cut(n: u32, percent: bool, bottom: bool, data: &RangeData) -> Option<f64
 }
 
 /// Port of the data bar pre-computation: the range and where the zero axis sits (percent).
+#[allow(clippy::too_many_arguments)]
 fn bar_plan(
     min: &CfValue,
     max: &CfValue,
     positive: u32,
     negative: u32,
     gradient: bool,
+    direction: CfBarDirection,
+    border: bool,
+    border_positive: u32,
+    border_negative: u32,
+    axis_position: CfBarAxis,
+    axis_color: u32,
     data: &RangeData,
     cells: &mut dyn Cells,
 ) -> Option<BarPlan> {
     let lo = resolve(min, data, cells)?;
     let hi = resolve(max, data, cells)?;
     let (max, min) = (hi.max(lo), hi.min(lo));
-    let start = if min < 0.0 && max <= 0.0 {
-        100.0
-    } else if min < 0.0 && max > 0.0 {
-        min.abs() / (max.abs() + min.abs()) * 100.0
-    } else if min >= 0.0 && max > 0.0 {
-        0.0
-    } else {
-        50.0
+    let start = match axis_position {
+        CfBarAxis::Midpoint => 50,
+        CfBarAxis::None => 0,
+        CfBarAxis::Automatic => {
+            let pct = if min < 0.0 && max <= 0.0 {
+                100.0
+            } else if min < 0.0 && max > 0.0 {
+                (min.abs() / (max.abs() + min.abs()) * 100.0).clamp(1.0, 99.0)
+            } else if min >= 0.0 && max > 0.0 {
+                0.0
+            } else {
+                50.0
+            };
+            pct.round().clamp(0.0, 100.0) as u8
+        }
     };
     Some(BarPlan {
         min,
         max,
-        start: start.round().clamp(0.0, 100.0) as u8,
+        start,
         positive,
         negative,
         gradient,
+        direction,
+        border,
+        border_positive,
+        border_negative,
+        axis_position,
+        axis_color,
     })
 }
 
@@ -416,9 +444,27 @@ pub(crate) fn make_plan(
             positive,
             negative,
             gradient,
+            direction,
+            border,
+            border_positive,
+            border_negative,
+            axis_position,
+            axis_color,
             ..
         } => Plan::Bar(bar_plan(
-            min, max, *positive, *negative, *gradient, data, cells,
+            min,
+            max,
+            *positive,
+            *negative,
+            *gradient,
+            *direction,
+            *border,
+            *border_positive,
+            *border_negative,
+            *axis_position,
+            *axis_color,
+            data,
+            cells,
         )?),
         CfKind::IconSet {
             set,
@@ -644,33 +690,81 @@ fn bar_hit(plan: &BarPlan, v: f64) -> Option<Hit> {
         positive,
         negative,
         gradient,
+        direction,
+        border,
+        border_positive,
+        border_negative,
+        axis_position,
+        axis_color,
     } = *plan;
     if v < min || min == max || max < min {
         return None;
     }
+    let has_axis = axis_position == CfBarAxis::Midpoint
+        || (axis_position == CfBarAxis::Automatic && start > 0 && start < 100);
     let safe = |p: f64| p.clamp(0.0, 100.0);
-    let bar = |pct: f64, color: u32| {
+    let make_bar = |pct: f64, pos_side: bool| {
         let pct = pct.round() as i8;
-        (pct != 0).then_some(Hit::Bar(Bar {
+        if pct == 0 && !has_axis {
+            return None;
+        }
+        let (color, border_color) = if pos_side {
+            (positive, border_positive)
+        } else {
+            (negative, border_negative)
+        };
+        Some(Hit::Bar(Bar {
             pct,
             start,
             color,
             gradient,
+            direction,
+            border,
+            border_color,
+            axis_position,
+            axis_color,
         }))
     };
     if v == 0.0 {
-        return None;
+        return has_axis.then_some(Hit::Bar(Bar {
+            pct: 0,
+            start,
+            color: positive,
+            gradient,
+            direction,
+            border,
+            border_color: border_positive,
+            axis_position,
+            axis_color,
+        }));
+    }
+    if axis_position == CfBarAxis::None {
+        if min < 0.0 && max > 0.0 {
+            let scale = max.abs().max(min.abs());
+            return if v > 0.0 {
+                make_bar(safe((v / scale).min(1.0) * 100.0), true)
+            } else {
+                make_bar(-safe((v.abs() / scale).min(1.0) * 100.0), false)
+            };
+        }
+        return if min < 0.0 && max <= 0.0 {
+            make_bar(-safe((max - v) / (max - min) * 100.0), false)
+        } else if min >= 0.0 && max > 0.0 {
+            make_bar(safe((1.0 - (max - v) / (max - min)) * 100.0), true)
+        } else {
+            None
+        };
     }
     if min < 0.0 && max <= 0.0 {
-        bar(-safe((max - v) / (max - min) * 100.0), negative)
+        make_bar(-safe((max - v) / (max - min) * 100.0), false)
     } else if min < 0.0 && max > 0.0 {
         if v > 0.0 {
-            bar(safe((v / max).min(1.0) * 100.0), positive)
+            make_bar(safe((v / max).min(1.0) * 100.0), true)
         } else {
-            bar(-safe((v.abs() / min.abs()).min(1.0) * 100.0), negative)
+            make_bar(-safe((v.abs() / min.abs()).min(1.0) * 100.0), false)
         }
     } else if min >= 0.0 && max > 0.0 {
-        bar(safe((1.0 - (max - v) / (max - min)) * 100.0), positive)
+        make_bar(safe((1.0 - (max - v) / (max - min)) * 100.0), true)
     } else {
         None
     }

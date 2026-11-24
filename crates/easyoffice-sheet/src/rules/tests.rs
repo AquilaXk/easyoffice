@@ -11,7 +11,7 @@ fn coord(a1: &str) -> PackedCellCoordinate {
     PackedCellCoordinate::parse_a1(a1).unwrap()
 }
 
-fn workbook(cells: &[(&str, &str)]) -> WorkbookEngine {
+pub(super) fn workbook(cells: &[(&str, &str)]) -> WorkbookEngine {
     let mut wb = WorkbookEngine::new();
     wb.add_sheet("Sheet1");
     for (a1, raw) in cells {
@@ -27,7 +27,7 @@ const MARK: CfStyle = CfStyle {
     border: CellBorders::NONE,
 };
 
-fn rule(ranges: &str, priority: u32, kind: CfKind) -> CfRule {
+pub(super) fn rule(ranges: &str, priority: u32, kind: CfKind) -> CfRule {
     CfRule {
         ranges: parse_sqref(ranges),
         priority,
@@ -44,7 +44,7 @@ fn rules(cf: Vec<CfRule>) -> SheetRules {
     }
 }
 
-fn eval(wb: &WorkbookEngine, cf: Vec<CfRule>) -> HashMap<String, CellVisual> {
+pub(super) fn eval(wb: &WorkbookEngine, cf: Vec<CfRule>) -> HashMap<String, CellVisual> {
     wb.evaluate_rules("Sheet1", rules(cf))
         .into_iter()
         .map(|v| (v.coord.to_a1(), v))
@@ -291,6 +291,12 @@ fn bar(min: ValueKind, min_t: &str, max: ValueKind) -> CfKind {
         negative: 0xFF0000,
         gradient: true,
         show_value: false,
+        direction: easyoffice_formats::CfBarDirection::Context,
+        border: false,
+        border_positive: 0x638EC6,
+        border_negative: 0xFF0000,
+        axis_position: easyoffice_formats::CfBarAxis::Automatic,
+        axis_color: 0x000000,
     }
 }
 
@@ -441,12 +447,7 @@ fn visuals_pack_and_unpack() {
             bg: None,
             fg: None,
             flags: 0,
-            bar: Some(Bar {
-                pct: -73,
-                start: 41,
-                color: 0x638EC6,
-                gradient: true,
-            }),
+            bar: Some(Bar::new(-73, 41, 0x638EC6, true)),
             icon: Some(Icon { set: 19, index: 4 }),
             hide_value: true,
             border: CellBorders::NONE,

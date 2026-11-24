@@ -1,9 +1,9 @@
 //! Conditional formatting and data validation survive XLSX writing and reading (PD-171).
 
 use easyoffice_formats::{
-    CellBorders, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind,
-    OdfCodec, OoxmlCodec, SheetRules, SheetStyling, TextOp, TimePeriod, ValueKind, FLAG_BOLD,
-    FLAG_ITALIC,
+    CellBorders, CellBox, CfBarAxis, CfBarDirection, CfKind, CfRule, CfStyle, CfValue, Cmp,
+    DataValidation, DvAlert, DvKind, OdfCodec, OoxmlCodec, SheetRules, SheetStyling, TextOp,
+    TimePeriod, ValueKind, FLAG_BOLD, FLAG_ITALIC,
 };
 
 fn boxes(text: &str) -> Vec<CellBox> {
@@ -131,9 +131,15 @@ fn sample_rules() -> SheetRules {
                     min: CfValue::new(ValueKind::Num, "0"),
                     max: CfValue::new(ValueKind::Max, ""),
                     positive: 0x638EC6,
-                    negative: 0xFF0000,
-                    gradient: true,
+                    negative: 0xAB1234,
+                    gradient: false,
                     show_value: false,
+                    direction: CfBarDirection::RightToLeft,
+                    border: true,
+                    border_positive: 0x112233,
+                    border_negative: 0x445566,
+                    axis_position: CfBarAxis::Midpoint,
+                    axis_color: 0x778899,
                 },
             ),
             rule(
@@ -174,17 +180,7 @@ fn xlsx_rules_round_trip_with_styles_and_priorities() {
     let bytes =
         OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &[styling(rules.clone())]).unwrap();
     let (_, back) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
-    let mut got = back[0].1.rules.clone();
-    // The data bar's negative colour and gradient flag live in a schema extension the writer omits.
-    for r in &mut got.cf {
-        if let CfKind::DataBar {
-            negative, gradient, ..
-        } = &mut r.kind
-        {
-            *negative = 0xFF0000;
-            *gradient = true;
-        }
-    }
+    let got = back[0].1.rules.clone();
     assert_eq!(got.cf, rules.cf);
     assert_eq!(got.dv, rules.dv);
     assert!(got.unsupported.is_empty(), "{:?}", got.unsupported);
@@ -315,11 +311,24 @@ fn ods_rules_round_trip_through_calc_extension_elements() {
     let mut got = back[0].1.rules.clone();
     for r in &mut got.cf {
         if let CfKind::DataBar {
-            negative, gradient, ..
+            negative,
+            gradient,
+            direction,
+            border,
+            axis_position,
+            ..
         } = &mut r.kind
         {
-            // Preserved by ODS, unlike XLSX.
-            assert_eq!((*negative, *gradient), (0xFF0000, true));
+            assert_eq!(
+                (*negative, *gradient, *direction, *border, *axis_position),
+                (
+                    0xAB1234,
+                    false,
+                    CfBarDirection::RightToLeft,
+                    true,
+                    CfBarAxis::Midpoint
+                )
+            );
         }
     }
     let norm = |mut v: Vec<DataValidation>| {
@@ -586,4 +595,216 @@ fn ods_writes_period_rules_as_formula_rules_and_check_boxes_as_lists() {
     );
     assert_eq!(got.dv[0].kind, DvKind::List);
     assert_eq!(got.dv[0].a, "예,아니오");
+}
+
+#[test]
+fn xlsx_x14_databars_round_trip_directions_borders_axes_and_standalone_x14() {
+    let mut rules = SheetRules::default();
+    rules.cf.push(rule(
+        "A1:A10",
+        1,
+        CfKind::DataBar {
+            min: CfValue::new(ValueKind::Num, "-10"),
+            max: CfValue::new(ValueKind::Percent, "90"),
+            positive: 0x638EC6,
+            negative: 0xD93025,
+            gradient: false,
+            show_value: true,
+            direction: CfBarDirection::LeftToRight,
+            border: true,
+            border_positive: 0x1A73E8,
+            border_negative: 0xA50E0E,
+            axis_position: CfBarAxis::None,
+            axis_color: 0x334455,
+        },
+    ));
+    rules.cf.push(rule(
+        "B1:B10",
+        2,
+        CfKind::DataBar {
+            min: CfValue::new(ValueKind::Min, ""),
+            max: CfValue::new(ValueKind::Max, ""),
+            positive: 0x63C384,
+            negative: 0xFF0000,
+            gradient: true,
+            show_value: false,
+            direction: CfBarDirection::RightToLeft,
+            border: false,
+            border_positive: 0x63C384,
+            border_negative: 0xFF0000,
+            axis_position: CfBarAxis::Midpoint,
+            axis_color: 0x123456,
+        },
+    ));
+    let (xml, bytes) = written_sheet_xml(rules.clone());
+    assert!(xml.contains("{78C0D932-649D-46B8-A469-E5A362C6BD93}"));
+    assert!(xml.contains("axisPosition=\"none\""));
+    assert!(xml.contains("axisPosition=\"midpoint\""));
+    assert!(xml.contains("direction=\"rightToLeft\""));
+    let (_, back) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+    assert_eq!(back[0].1.rules.cf, rules.cf);
+
+    // Standalone <x14:cfRule type="dataBar"> (no base <cfRule> link) also decodes and rejects hostile IDs/tokens fail-closed.
+    let mut entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    for e in &mut entries {
+        if e.path == "xl/worksheets/sheet1.xml" {
+            let standalone = concat!(
+                r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14="http://schemas.micro"#,
+                r#"soft.com/office/spreadsheetml/2009/9/ac" xmlns:xm="http://schemas.micro"#,
+                r#"soft.com/office/ex"#,
+                r#"cel/2006/main">"#,
+                r#"<sheetData><row r="1"><c r="C1"><v>5</v></c></row></sheetData>"#,
+                r#"<extLst><ext uri="{78C0D932-649D-46B8-A469-E5A362C6BD93}"><x14:conditionalFormattings>"#,
+                r#"<x14:conditionalFormatting><x14:cfRule type="dataBar" id="{11111111-1111-1111-1111-111111111111}"><x14:dataBar border="1" gradient="0" direction="rightToLeft" negativeBarBorderColorSameAsPositive="0" axisPosition="midpoint"><x14:cfvo type="min"/><x14:cfvo type="num"><xm:f>100</xm:f></x14:cfvo><x14:fillColor rgb="FF112233"/><x14:borderColor rgb="FF445566"/><x14:negativeFillColor rgb="FF778899"/><x14:negativeBorderColor rgb="FFAABBCC"/><x14:axisColor rgb="FF102030"/></x14:dataBar></x14:cfRule><xm:sqref>C1:C5</xm:sqref></x14:conditionalFormatting>"#,
+                r#"<x14:conditionalFormatting><x14:cfRule type="dataBar" id="{22222222-2222-2222-2222-222222222222}"><x14:dataBar direction="diagonal" axisPosition="midpoint"><x14:cfvo type="min"/><x14:cfvo type="max"/></x14:dataBar></x14:cfRule><xm:sqref>D1:D5</xm:sqref></x14:conditionalFormatting>"#,
+                r#"</x14:conditionalFormattings></ext></extLst></worksheet>"#,
+            );
+            e.data = standalone.as_bytes().to_vec();
+        }
+    }
+    let repacked = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+        &entries
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let (_, back2) = OoxmlCodec::unpack_xlsx_with_styling(&repacked).unwrap();
+    assert_eq!(back2[0].1.rules.cf.len(), 1);
+    assert_eq!(
+        back2[0].1.rules.cf[0].kind,
+        CfKind::DataBar {
+            min: CfValue::new(ValueKind::Min, ""),
+            max: CfValue::new(ValueKind::Num, "100"),
+            positive: 0x112233,
+            negative: 0x778899,
+            gradient: false,
+            show_value: true,
+            direction: CfBarDirection::RightToLeft,
+            border: true,
+            border_positive: 0x445566,
+            border_negative: 0xAABBCC,
+            axis_position: CfBarAxis::Midpoint,
+            axis_color: 0x102030,
+        }
+    );
+    assert!(back2[0]
+        .1
+        .rules
+        .unsupported
+        .iter()
+        .any(|s| s.contains("dataBar")));
+}
+
+#[test]
+fn ods_databar_round_trips_axis_none_left_to_right_and_rejects_bad_tokens() {
+    let rules = SheetRules {
+        cf: vec![rule(
+            "A1:A5",
+            1,
+            CfKind::DataBar {
+                min: CfValue::new(ValueKind::Min, ""),
+                max: CfValue::new(ValueKind::Max, ""),
+                positive: 0x112233,
+                negative: 0x445566,
+                gradient: true,
+                show_value: false,
+                direction: CfBarDirection::LeftToRight,
+                border: true,
+                border_positive: 0x778899,
+                border_negative: 0xAABBCC,
+                axis_position: CfBarAxis::None,
+                axis_color: 0x123456,
+            },
+        )],
+        ..SheetRules::default()
+    };
+    let sheets = vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])];
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &[styling(rules.clone())]).unwrap();
+    let back =
+        easyoffice_formats::read_sheet_styling(&bytes, easyoffice_formats::DocumentFormat::Ods)
+            .unwrap();
+    assert_eq!(back[0].1.rules.cf, rules.cf);
+
+    let mut entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    for e in &mut entries {
+        if e.path == "content.xml" {
+            let xml = String::from_utf8(e.data.clone()).unwrap().replace(
+                "calcext:axis-position=\"none\"",
+                "calcext:axis-position=\"bogus\"",
+            );
+            e.data = xml.into_bytes();
+        }
+    }
+    let repacked = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+        &entries
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let back2 =
+        easyoffice_formats::read_sheet_styling(&repacked, easyoffice_formats::DocumentFormat::Ods)
+            .unwrap();
+    assert!(back2[0].1.rules.cf.is_empty());
+    assert!(back2[0]
+        .1
+        .rules
+        .unsupported
+        .iter()
+        .any(|s| s.contains("dataBar")));
+
+    for (from, to) in [
+        (
+            "calcext:axis-color=\"#123456\"",
+            "calcext:axis-color=\"#+12345\"",
+        ),
+        ("eo:bar-border=\"true\"", "eo:bar-border=\"bogus\""),
+        (
+            "eo:bar-direction=\"leftToRight\"",
+            "eo:bar-direction=\"diagonal\"",
+        ),
+    ] {
+        let mut bad_entries = easyoffice_formats::ZipArchiveCodec::unpack(
+            &bytes,
+            &easyoffice_formats::ZipSecurityPolicy::default(),
+        )
+        .unwrap();
+        for e in &mut bad_entries {
+            if e.path == "content.xml" {
+                let xml = String::from_utf8(e.data.clone()).unwrap().replace(from, to);
+                e.data = xml.into_bytes();
+            }
+        }
+        let bad_bytes = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+            &bad_entries
+                .into_iter()
+                .map(|e| (e.path, e.data))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let bad_back = easyoffice_formats::read_sheet_styling(
+            &bad_bytes,
+            easyoffice_formats::DocumentFormat::Ods,
+        )
+        .unwrap();
+        assert!(bad_back[0].1.rules.cf.is_empty(), "{to}");
+        assert!(
+            bad_back[0]
+                .1
+                .rules
+                .unsupported
+                .iter()
+                .any(|s| s.contains("dataBar")),
+            "{to}"
+        );
+    }
 }

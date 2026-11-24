@@ -52,7 +52,7 @@
   const pdfEdit = host.__EASYOFFICE_CREATE_PDF_EDIT__({ document, desktopBridge, getPdfRotationDeg: () => pdfRotationDeg });
   host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
 
-  let sheetController = null, workspacePanels = null, slideStudio = null;
+  let sheetController = null, workspacePanels = null, slideStudio = null, shellChrome = null;
   const snapshotDomSheetCells = () => sheetController.snapshotDomSheetCells();
 
   const sheetStoreHelpers = host.__EASYOFFICE_CREATE_SHEET_STORE__({
@@ -128,6 +128,7 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     sheetHistory: ribbonHistory.sheetHistory,
     onSheetSwitchedOutline: () => workspacePanels.renderModuleOutline("SHEET"),
+    onClearMenuStateChanged: () => shellChrome?.pushMenuState?.(),
   });
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
@@ -164,7 +165,7 @@
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
     isCapturePaused: () => copilotUi?.isPerforming() === true, whenCaptureAllowed: () => copilotUi?.whenIdle() ?? Promise.resolve(),
     isDesktopShell: () => desktopBridge.isAvailable(),
-    onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule), onMenuItemsApplied: () => docTable.syncMenu(),
+    onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule), onMenuItemsApplied: () => { docTable.syncMenu(); sheetController?.syncCfClearMenu?.(); },
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
@@ -231,7 +232,7 @@
   host.__EASYOFFICE_WINDOW_BRIDGE__.instance = windowBridge;
 
   // The editor's 파일 menu forwards shell commands (whitelisted in hwp-host.js); these run them.
-  const shellChrome = host.__EASYOFFICE_CREATE_SHELL_CHROME__({
+  shellChrome = host.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document, hwpHost, icons, ribbonState: localRibbonState,
     // Only macOS has a native menu bar that needs the window's state (PD-121).
     hasNativeMenu: () => activeShortcutModifier === "⌘",

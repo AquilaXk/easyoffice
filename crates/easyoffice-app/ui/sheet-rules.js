@@ -250,12 +250,34 @@
         if (at >= words) break;
         const w = view.getUint32(at * 4, true);
         at += 1;
-        fx.bar = {
-          color: color(w & 0xffff),
+        const barColor = color(w & 0xffff);
+        const dirCode = (first >>> 20) & 3;
+        const axisCode = (first >>> 23) & 3;
+        const border = ((first >>> 22) & 1) !== 0;
+        const hasExtras = ((first >>> 25) & 1) !== 0;
+        let borderColor = barColor;
+        let axisColor = "#000000";
+        if (hasExtras) {
+          if (at >= words) break;
+          const ew = view.getUint32(at * 4, true);
+          at += 1;
+          borderColor = color(ew & 0xffff) || barColor;
+          axisColor = color(ew >>> 16) || "#000000";
+        }
+        const bar = {
+          color: barColor,
           pct: ((w >>> 16) & 0xff) - 128,
           start: (w >>> 24) & 0xff,
           gradient: (head & (1 << 23)) !== 0,
         };
+        if (dirCode > 0 && dirCode < BAR_DIRS.length) bar.direction = BAR_DIRS[dirCode];
+        if (border) {
+          bar.border = true;
+          bar.borderColor = borderColor;
+        }
+        if (axisCode > 0 && axisCode < BAR_AXES.length) bar.axisPosition = BAR_AXES[axisCode];
+        if (hasExtras && axisColor !== "#000000") bar.axisColor = axisColor;
+        fx.bar = bar;
       }
       if (head & (1 << 21)) {
         const id = head >>> 24;
@@ -266,26 +288,83 @@
     return out;
   }
 
-  // Bar geometry (reference conditional-format engine data bar): positive bars grow right of the axis, negative ones left.
+  const BAR_DIRS = ["context", "leftToRight", "rightToLeft"];
+  const BAR_AXES = ["automatic", "midpoint", "none"];
+
+  // Bar geometry: computes layered CSS background image, position, and size matching PDF/print.
+  function barLayers(bar) {
+    const start = Math.max(0, Math.min(100, Number(bar.start) || 0));
+    const mag = Math.min(100, Math.abs(Number(bar.pct) || 0)) / 100;
+    const rtl = bar.direction === "rightToLeft";
+    const axisPos = BAR_AXES.includes(bar.axisPosition) ? bar.axisPosition : "automatic";
+    const axisColor = bar.axisColor || "#000000";
+    const borderColor = bar.borderColor || bar.color;
+    let natural = null;
+    if (bar.pct > 0) {
+      natural = [start, start + (100 - start) * mag, true];
+    } else if (bar.pct < 0) {
+      natural = axisPos === "none" ? [0, 100 * mag, true] : [start - start * mag, start, false];
+    }
+    const images = [];
+    const positions = [];
+    const sizes = [];
+    const drawAxis = axisPos === "midpoint" || (axisPos === "automatic" && start > 0 && start < 100);
+    if (drawAxis) {
+      const axisX = rtl ? 100 - start : start;
+      images.push(`repeating-linear-gradient(180deg, ${axisColor} 0 2px, transparent 2px 4px)`);
+      positions.push(`${axisX}% 0`);
+      sizes.push("1px 100%");
+    }
+    if (natural) {
+      const [ltrL, ltrR, solidLeftLtr] = natural;
+      const left = rtl ? 100 - ltrR : ltrL;
+      const right = rtl ? 100 - ltrL : ltrR;
+      const solidAtLeft = rtl ? !solidLeftLtr : solidLeftLtr;
+      if (right > left) {
+        if (bar.border) {
+          images.push(
+            `linear-gradient(90deg, transparent ${left}%, ${borderColor} ${left}%, ${borderColor} ${right}%, transparent ${right}%)`,
+            `linear-gradient(90deg, transparent ${left}%, ${borderColor} ${left}%, ${borderColor} ${right}%, transparent ${right}%)`,
+            `linear-gradient(${borderColor}, ${borderColor})`,
+            `linear-gradient(${borderColor}, ${borderColor})`
+          );
+          positions.push("0 0", "0 100%", `${left}% 0`, `${right}% 0`);
+          sizes.push("100% 1px", "100% 1px", "1px 100%", "1px 100%");
+        }
+        const edge = bar.gradient ? `color-mix(in srgb, ${bar.color} 25%, transparent)` : bar.color;
+        const from = solidAtLeft ? bar.color : edge;
+        const to = solidAtLeft ? edge : bar.color;
+        images.push(
+          `linear-gradient(90deg, transparent ${left}%, ${from} ${left}%, ${to} ${right}%, transparent ${right}%)`
+        );
+        positions.push("0 0");
+        sizes.push("100% 100%");
+      }
+    }
+    return {
+      image: images.join(", "),
+      position: positions.join(", "),
+      size: sizes.join(", "),
+    };
+  }
+
   function barBackground(bar) {
-    const start = bar.start;
-    const mag = Math.abs(bar.pct) / 100;
-    const left = bar.pct >= 0 ? start : start - start * mag;
-    const right = bar.pct >= 0 ? start + (100 - start) * mag : start;
-    const edge = bar.gradient ? `color-mix(in srgb, ${bar.color} 25%, transparent)` : bar.color;
-    const from = bar.pct >= 0 ? bar.color : edge;
-    const to = bar.pct >= 0 ? edge : bar.color;
-    return (
-      `linear-gradient(90deg, transparent ${left}%, ${from} ${left}%, ${to} ${right}%, ` +
-      `transparent ${right}%)`
-    );
+    return barLayers(bar).image;
   }
 
   // The data bar and the icon of a rule answer `fx` on a printed cell (PD-300), as `paintFx` gives them to a grid cell: the bar is
   // the cell's background image, the icon a masked box before the text (`td[data-cf-icon]::before` in `shell.css`), and a value the
   // rule hides stays in the cell but is not drawn (`eo-print-cf-hide`), so a copy of the page still holds it.
   function printFx(td, fx) {
-    if (fx?.bar) td.style.backgroundImage = barBackground(fx.bar);
+    if (fx?.bar) {
+      const look = barLayers(fx.bar);
+      if (look.image) {
+        td.style.backgroundImage = look.image;
+        td.style.backgroundPosition = look.position;
+        td.style.backgroundSize = look.size;
+        td.style.backgroundRepeat = "no-repeat";
+      }
+    }
     const icon = fx?.icon ? ICON_SETS[ICON_SET_NAMES[fx.icon.set]]?.[fx.icon.index] : null;
     if (icon) {
       td.dataset.cfIcon = icon[0];
@@ -498,7 +577,7 @@
     function clearTd(td) {
       delete td.dataset.cf;
       delete td.dataset.cfIcon;
-      for (const name of ["--cf-bg", "--cf-fg", "--cf-bar", "--cf-icon-mask", "--cf-icon-color"]) setVar(td, name, "");
+      for (const name of ["--cf-bg", "--cf-fg", "--cf-bar", "--cf-bar-pos", "--cf-bar-size", "--cf-icon-mask", "--cf-icon-color"]) setVar(td, name, "");
       td.classList.remove("cf-hide-value", ...CF_CLASSES.map(([name]) => name));
     }
 
@@ -539,7 +618,10 @@
       td.dataset.cf = "1";
       setVar(td, "--cf-bg", f.bg);
       setVar(td, "--cf-fg", f.fg);
-      setVar(td, "--cf-bar", f.bar ? barBackground(f.bar) : "");
+      const barLook = f.bar ? barLayers(f.bar) : null;
+      setVar(td, "--cf-bar", barLook?.image);
+      setVar(td, "--cf-bar-pos", barLook?.position);
+      setVar(td, "--cf-bar-size", barLook?.size);
       for (const [name, bit] of CF_CLASSES) td.classList.toggle(name, (f.flags & bit) !== 0);
       td.classList.toggle("cf-hide-value", Boolean(f.hide));
       const icon = f.icon ? ICON_SETS[ICON_SET_NAMES[f.icon.set]]?.[f.icon.index] : null;

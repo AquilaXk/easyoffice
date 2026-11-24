@@ -453,6 +453,8 @@ pub const ITEMS: &[MenuItemSpec] = &[
     cf!("새 규칙…", "new"),
     cf!("선택한 셀에서 규칙 지우기", "clear-selection"),
     cf!("전체 시트에서 규칙 지우기", "clear-sheet"),
+    cf!("이 표에서 규칙 지우기", "clear-table"),
+    cf!("이 피벗 테이블에서 규칙 지우기", "clear-pivot"),
     cf!("규칙 관리…", "manage"),
     item(
         "format:cell-format",

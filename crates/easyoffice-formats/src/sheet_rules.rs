@@ -16,6 +16,8 @@ pub(crate) mod ods_rules;
 pub(crate) mod ods_rules_read;
 #[path = "xlsx_rules.rs"]
 pub(crate) mod xlsx_rules;
+#[path = "xlsx_rules_x14.rs"]
+pub(crate) mod xlsx_rules_x14;
 
 /// Rules (formatting plus validation) one sheet may carry.
 pub const MAX_RULES_PER_SHEET: usize = 256;
@@ -215,14 +217,165 @@ impl CfStyle {
     }
 }
 
-/// A data bar the rules draw over a cell: `pct` is -100..=100 (negative grows left of the axis), `start` the axis position
-/// in percent of the cell width.
+pub const DEFAULT_BAR_POSITIVE: u32 = 0x63_8E_C6;
+pub const DEFAULT_BAR_NEGATIVE: u32 = 0xFF_00_00;
+pub const DEFAULT_BAR_AXIS_COLOR: u32 = 0x00_00_00;
+
+/// Growth direction of a conditional-formatting data bar (MS-XLSX `ST_DataBarDirection`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CfBarDirection {
+    #[default]
+    Context,
+    LeftToRight,
+    RightToLeft,
+}
+
+impl CfBarDirection {
+    pub const NAMES: [(Self, &'static str); 3] = [
+        (Self::Context, "context"),
+        (Self::LeftToRight, "leftToRight"),
+        (Self::RightToLeft, "rightToLeft"),
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Context => "context",
+            Self::LeftToRight => "leftToRight",
+            Self::RightToLeft => "rightToLeft",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find_map(|&(kind, token)| (token == name).then_some(kind))
+    }
+
+    pub fn as_code(self) -> u8 {
+        match self {
+            Self::Context => 0,
+            Self::LeftToRight => 1,
+            Self::RightToLeft => 2,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Context),
+            1 => Some(Self::LeftToRight),
+            2 => Some(Self::RightToLeft),
+            _ => None,
+        }
+    }
+}
+
+/// Axis placement of a conditional-formatting data bar (MS-XLSX `ST_DataBarAxisPosition`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CfBarAxis {
+    #[default]
+    Automatic,
+    Midpoint,
+    None,
+}
+
+impl CfBarAxis {
+    pub const NAMES: [(Self, &'static str); 3] = [
+        (Self::Automatic, "automatic"),
+        (Self::Midpoint, "midpoint"),
+        (Self::None, "none"),
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Midpoint => "midpoint",
+            Self::None => "none",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find_map(|&(kind, token)| (token == name).then_some(kind))
+    }
+
+    pub fn ods_name(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Midpoint => "middle",
+            Self::None => "none",
+        }
+    }
+
+    pub fn from_ods_name(name: &str) -> Option<Self> {
+        match name {
+            "automatic" => Some(Self::Automatic),
+            "middle" | "midpoint" => Some(Self::Midpoint),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+
+    pub fn as_code(self) -> u8 {
+        match self {
+            Self::Automatic => 0,
+            Self::Midpoint => 1,
+            Self::None => 2,
+        }
+    }
+
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Automatic),
+            1 => Some(Self::Midpoint),
+            2 => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+/// A data bar the rules draw over a cell: `pct` is -100..=100 (negative grows opposite positive unless `axis_position == None`),
+/// `start` is the axis position in percent of the cell width in natural orientation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CfBar {
     pub pct: i8,
     pub start: u8,
     pub color: u32,
     pub gradient: bool,
+    pub direction: CfBarDirection,
+    pub border: bool,
+    pub border_color: u32,
+    pub axis_position: CfBarAxis,
+    pub axis_color: u32,
+}
+
+impl Default for CfBar {
+    fn default() -> Self {
+        Self {
+            pct: 0,
+            start: 0,
+            color: DEFAULT_BAR_POSITIVE,
+            gradient: true,
+            direction: CfBarDirection::Context,
+            border: false,
+            border_color: DEFAULT_BAR_POSITIVE,
+            axis_position: CfBarAxis::Automatic,
+            axis_color: DEFAULT_BAR_AXIS_COLOR,
+        }
+    }
+}
+
+impl CfBar {
+    pub fn new(pct: i8, start: u8, color: u32, gradient: bool) -> Self {
+        Self {
+            pct,
+            start,
+            color,
+            gradient,
+            border_color: color,
+            ..Self::default()
+        }
+    }
 }
 
 /// One icon of an icon set (`ICON_SETS` index and zero-based icon index, lowest first).
@@ -428,6 +581,12 @@ pub enum CfKind {
         negative: u32,
         gradient: bool,
         show_value: bool,
+        direction: CfBarDirection,
+        border: bool,
+        border_positive: u32,
+        border_negative: u32,
+        axis_position: CfBarAxis,
+        axis_color: u32,
     },
     IconSet {
         set: u8,

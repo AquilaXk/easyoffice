@@ -31,7 +31,7 @@
       const head = ev.target?.closest?.(HEAD_SELECTOR);
       if (head) {
         if (point.press(ev, headTarget(head))) {
-          drag = { active: true, point: true };
+          drag = { active: true, point: true, moved: false, startX: ev.clientX, startY: ev.clientY };
           return;
         }
         ev.preventDefault();
@@ -49,12 +49,12 @@
       const p = grid.parseRef(td.dataset.cell);
       if (!p) return;
       if (point.press(ev, { r: p.row, c: p.col })) {
-        drag = { active: true, point: true };
+        drag = { active: true, point: true, moved: false, startX: ev.clientX, startY: ev.clientY };
         return;
       }
       ev.preventDefault();
       commitIfEditing();
-      drag = { active: true };
+      drag = { active: true, moved: false, startX: ev.clientX, startY: ev.clientY };
       select(p.row, p.col, Boolean(ev.shiftKey));
     }
 
@@ -75,11 +75,19 @@
         grid.applyColWidth(resize.col, resize.startW + (ev.clientX - resize.startX));
         return;
       }
+      if (drag && !drag.moved && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY) && (ev.clientX !== drag.startX || ev.clientY !== drag.startY)) {
+        drag.moved = true;
+      }
       if (drag || fill.isDragging()) autoScroll(ev);
     }
 
     function onMouseOver(ev) {
       if ((!drag && !fill.isDragging()) || resize) return;
+      if (!fill.isDragging() && drag && !drag.moved && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY) && Number.isFinite(drag.startX) && Number.isFinite(drag.startY)) {
+        // Ignore a browser layout-shift `mouseover` fired under an unmoved positioned pointer (synthetic DOM tests use default 0,0).
+        if ((ev.clientX !== 0 || ev.clientY !== 0) && ev.clientX === drag.startX && ev.clientY === drag.startY) return;
+        drag.moved = true;
+      }
       const td = gridTdOf(ev.target);
       const p = td ? grid.parseRef(td.dataset.cell) : null;
       if (fill.isDragging()) {

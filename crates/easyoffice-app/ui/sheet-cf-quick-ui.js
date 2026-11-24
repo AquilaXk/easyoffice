@@ -35,7 +35,7 @@
   };
 
   function createSheetCfQuickUi(deps) {
-    const { document, kit, rules, sheetDataStore, getActiveSheetName, getRange, selectionBoxes, selectionText, commitRules, beginStep, finishStep, isBlocked, openManager } = deps;
+    const { document, kit, rules, sheetDataStore, getActiveSheetName, getRange, selectionBoxes, selectionText, tableBox, pivotBox, syncClearMenu, commitRules, beginStep, finishStep, isBlocked, openManager } = deps;
     const P = host.__EASYOFFICE_SHEET_CF_PRESETS__;
     const PV = host.__EASYOFFICE_SHEET_CF_PREVIEW__;
     const { $, val, setVal, setSelect, openDialog, closeDialog, fillOptions } = kit;
@@ -241,14 +241,28 @@
 
     const add = (rule) => commitRules((next) => void next.cf.unshift(rule));
 
-    function clearSelection() {
-      const cuts = selectionBoxes();
+    function clearBoxes(cuts) {
+      if (!cuts || cuts.length === 0) return false;
       return commitRules((next) => {
         const kept = P.clearRange(next.cf, cuts, rules.parseRanges, rules.formatRanges);
         if (kept.length === next.cf.length && JSON.stringify(kept) === JSON.stringify(next.cf)) return false;
         next.cf = kept;
         return true;
       });
+    }
+
+    function clearSelection() {
+      return clearBoxes(selectionBoxes());
+    }
+
+    function clearTable() {
+      const box = tableBox?.();
+      return box ? clearBoxes([box]) : false;
+    }
+
+    function clearPivot() {
+      const box = pivotBox?.();
+      return box ? clearBoxes([box]) : false;
     }
 
     function clearSheet() {
@@ -273,11 +287,17 @@
       if (action === "new" || action === "manage") return openManager();
       if (action === "clear-selection") return void (await clearSelection());
       if (action === "clear-sheet") return void (await clearSheet());
+      if (action === "clear-table") return void (await clearTable());
+      if (action === "clear-pivot") return void (await clearPivot());
     }
 
     // Menu items carry `data-sheet-cf="<action>"`.
     function bind() {
       buildGalleries();
+      const formatMenu = document.querySelector?.('.menu-item[data-menu="format"]');
+      if (formatMenu && syncClearMenu) {
+        for (const evName of ["mouseenter", "focusin", "click"]) formatMenu.addEventListener(evName, () => syncClearMenu());
+      }
       for (const panel of Array.from(document.querySelectorAll(".cfg-panel"))) {
         for (const event of ["mouseenter", "focusin"]) panel.parentElement.addEventListener(event, () => fitPanel(panel));
       }
