@@ -139,14 +139,34 @@ impl SheetEngine {
         Ok(V::Number(Self::sheet_count(ctx) as f64))
     }
 
-    /// CELL(info_type, [reference])
-    /// NB: In the reference app "info_type" is localized. Here it is always in English.
-    pub(crate) fn fn_cell(
+    fn resolve_cell_meta_target<'a>(
+        &'a self,
+        sheet: Option<&str>,
+        ctx: &'a EvalContext<'_>,
+    ) -> Result<(&'a SheetEngine, &'a crate::WorkbookMeta), FormulaError> {
+        let wb_meta = ctx.workbook.map_or(&*self.workbook_meta, |wb| &*wb.meta);
+        match sheet {
+            Some(name) => {
+                if let Some(wb) = ctx.workbook {
+                    Ok((wb.sheet(name).ok_or(FormulaError::Ref)?, wb_meta))
+                } else if name.eq_ignore_ascii_case(&self.name)
+                    || name.to_lowercase() == self.name.to_lowercase()
+                {
+                    Ok((self, wb_meta))
+                } else {
+                    Err(FormulaError::Ref)
+                }
+            }
+            None => Ok((self, wb_meta)),
+        }
+    }
+
+    fn resolve_cell_target_and_type(
         &self,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
-    ) -> CellResult {
+    ) -> Result<(Option<String>, PackedCellCoordinate, String), FormulaError> {
         let arg_count = args.len();
         if arg_count == 0 || arg_count > 2 {
             return Err(FormulaError::Value);
@@ -172,27 +192,127 @@ impl SheetEngine {
             V::Text(s) => s.to_uppercase(),
             other => other.to_display_string().to_uppercase(),
         };
-        match info_type.as_str() {
+        Ok((sheet, reference, info_type))
+    }
+
+    /// Array evaluator entry point for `CELL`: `"width"` spills a 1x2 `{width, is_default}` row;
+    /// every other `info_type` evaluates to a 1x1 scalar.
+    pub(crate) fn fn_cell_grid(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<crate::array::Grid, FormulaError> {
+        let (sheet, reference, info_type) = self.resolve_cell_target_and_type(args, ctx, depth)?;
+        if info_type == "WIDTH" {
+            let (target, _) = self.resolve_cell_meta_target(sheet.as_deref(), ctx)?;
+            let (width, is_default) = target.cell_meta().map_or_else(
+                || crate::SheetCellMeta::default().col_width_info(reference.col()),
+                |meta| meta.col_width_info(reference.col()),
+            );
+            return crate::array::Grid::from_rows_checked(
+                ctx,
+                1,
+                2,
+                vec![V::Number(f64::from(width)), V::Boolean(is_default)],
+            );
+        }
+        Ok(crate::array::Grid::scalar(self.eval_cell_info(
+            sheet.as_deref(),
+            reference,
+            &info_type,
+            ctx,
+            depth,
+        )?))
+    }
+
+    /// CELL(info_type, [reference])
+    /// NB: In the reference app "info_type" is localized. Here it is always in English.
+    pub(crate) fn fn_cell(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        let (sheet, reference, info_type) = self.resolve_cell_target_and_type(args, ctx, depth)?;
+        self.eval_cell_info(sheet.as_deref(), reference, &info_type, ctx, depth)
+    }
+
+    fn eval_cell_info(
+        &self,
+        sheet: Option<&str>,
+        reference: PackedCellCoordinate,
+        info_type: &str,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        match info_type {
             "ADDRESS" => {
-                if sheet.is_some() {
-                    // References to other sheets not implemented
-                    return Err(FormulaError::Na);
+                let (target, wb_meta) = self.resolve_cell_meta_target(sheet, ctx)?;
+                let same_sheet = sheet.is_none() || std::ptr::eq(target, self);
+                if same_sheet {
+                    let column = PackedCellCoordinate::format_col_label(reference.col());
+                    Ok(V::Text(format!("${}${}", column, reference.row() + 1)))
+                } else {
+                    Ok(V::Text(wb_meta.qualified_address(&target.name, reference)))
                 }
-                let column = PackedCellCoordinate::format_col_label(reference.col());
-                Ok(V::Text(format!("${}${}", column, reference.row() + 1)))
             }
             "COL" => Ok(V::Number(f64::from(reference.col()) + 1.0)),
-            "COLOR" | "FORMAT" | "PARENTHESES" | "PREFIX" | "PROTECT" | "WIDTH" => {
-                // info_type not implemented
-                Err(FormulaError::Na)
+            "COLOR" | "FORMAT" | "PARENTHESES" => {
+                let (target, _) = self.resolve_cell_meta_target(sheet, ctx)?;
+                let code = target
+                    .cell_meta()
+                    .and_then(|meta| meta.resolve_format_code(reference));
+                let (fmt, neg_color, pos_parens) =
+                    crate::text_format::cell_format_descriptors(code);
+                match info_type {
+                    "FORMAT" => Ok(V::Text(fmt)),
+                    "COLOR" => Ok(V::Number(if neg_color { 1.0 } else { 0.0 })),
+                    _ => Ok(V::Number(if pos_parens { 1.0 } else { 0.0 })),
+                }
             }
-            "CONTENTS" => Ok(self.eval_sheet_coord(sheet.as_deref(), reference, ctx, depth)),
-            // The file name of the workbook is not known to a formula
-            "FILENAME" => Err(FormulaError::Na),
+            "PREFIX" => {
+                let evaluated = self.eval_sheet_coord(sheet, reference, ctx, depth);
+                let (target, _) = self.resolve_cell_meta_target(sheet, ctx)?;
+                let prefix = match evaluated {
+                    V::Text(_) => match target
+                        .cell_meta()
+                        .map_or(easyoffice_formats::HAlign::General, |m| {
+                            m.h_align(reference)
+                        }) {
+                        easyoffice_formats::HAlign::General | easyoffice_formats::HAlign::Left => {
+                            "'"
+                        }
+                        easyoffice_formats::HAlign::Center => "^",
+                        easyoffice_formats::HAlign::Right => "\"",
+                    },
+                    _ => "",
+                };
+                Ok(V::Text(prefix.to_string()))
+            }
+            "PROTECT" => {
+                let (target, _) = self.resolve_cell_meta_target(sheet, ctx)?;
+                let locked = target
+                    .cell_meta()
+                    .is_none_or(|meta| meta.is_locked(reference));
+                Ok(V::Number(if locked { 1.0 } else { 0.0 }))
+            }
+            "WIDTH" => {
+                let (target, _) = self.resolve_cell_meta_target(sheet, ctx)?;
+                let (width, _) = target.cell_meta().map_or_else(
+                    || crate::SheetCellMeta::default().col_width_info(reference.col()),
+                    |meta| meta.col_width_info(reference.col()),
+                );
+                Ok(V::Number(f64::from(width)))
+            }
+            "CONTENTS" => Ok(self.eval_sheet_coord(sheet, reference, ctx, depth)),
+            "FILENAME" => {
+                let (target, wb_meta) = self.resolve_cell_meta_target(sheet, ctx)?;
+                Ok(V::Text(wb_meta.filename_for_sheet(&target.name)))
+            }
             "ROW" => Ok(V::Number(f64::from(reference.row()) + 1.0)),
             "TYPE" => {
-                let cell_type = match self.eval_sheet_coord(sheet.as_deref(), reference, ctx, depth)
-                {
+                let cell_type = match self.eval_sheet_coord(sheet, reference, ctx, depth) {
                     V::Empty => "b",
                     V::Text(_) => "l",
                     V::Number(_) | V::Boolean(_) | V::Error(_) => "v",
@@ -219,11 +339,16 @@ impl SheetEngine {
             V::Text(s) => s.to_uppercase(),
             other => other.to_display_string().to_uppercase(),
         };
+        let wb_meta = ctx.workbook.map_or(&*self.workbook_meta, |wb| &*wb.meta);
         match type_text.as_str() {
-            // type_text not implemented
-            "DIRECTORY" | "ORIGIN" | "OSVERSION" | "RELEASE" | "TIMEZONE" | "TIMEZONES" => {
-                Err(FormulaError::Na)
-            }
+            "TIMEZONE" | "TIMEZONES" => Err(FormulaError::Na),
+            "DIRECTORY" => Ok(V::Text(wb_meta.directory_with_sep())),
+            "ORIGIN" => Ok(V::Text(
+                self.cell_meta()
+                    .map_or_else(|| "$A:$A$1".to_string(), |meta| meta.origin_text()),
+            )),
+            "OSVERSION" => Ok(V::Text(wb_meta.effective_osversion().to_string())),
+            "RELEASE" => Ok(V::Text(wb_meta.effective_release().to_string())),
 
             // For now we just show the count of sheets in the current workbook
             "NUMFILE" => Ok(V::Number(Self::sheet_count(ctx) as f64)),
@@ -248,4 +373,23 @@ impl SheetEngine {
             _ => Err(FormulaError::Value),
         }
     }
+}
+
+/// Whether `f` is a 2-argument `CELL` call whose literal `info_type` reads only cell metadata/address
+/// and never reads the target cell's evaluated value.
+#[inline]
+pub(crate) fn cell_arg_is_metadata_only(f: &crate::expr::FuncCallExpr) -> bool {
+    if f.name != "CELL" || f.args.len() != 2 {
+        return false;
+    }
+    let Expr::Text(kind) = f.args[0].peeled() else {
+        return false;
+    };
+    !kind.eq_ignore_ascii_case("CONTENTS")
+        && !kind.eq_ignore_ascii_case("TYPE")
+        && !kind.eq_ignore_ascii_case("PREFIX")
+        && matches!(
+            f.args[1].peeled(),
+            Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_)
+        )
 }

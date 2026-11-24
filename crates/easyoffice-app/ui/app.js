@@ -57,6 +57,8 @@
 
   const sheetStoreHelpers = host.__EASYOFFICE_CREATE_SHEET_STORE__({
     invokeIpc, normalizeFormattedNumericCell, tokenizeFormulaStringLiterals,
+    getColumnWidths: () => sheetController?.getColumnWidths?.(),
+    getFileName: () => windowBridge?.getDocumentName("SHEET"),
   });
 
   windowBridge = host.__EASYOFFICE_WINDOW_BRIDGE__.createWindowBridge({

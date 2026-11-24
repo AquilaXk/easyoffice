@@ -442,6 +442,13 @@ impl SheetEngine {
                     None => Ok(Val::error(FormulaError::Ref)),
                 }
             }
+            "CELL" => {
+                let mark = ctx.temp.len();
+                let sub = self.substitute_args(args, env, ctx, depth)?;
+                let res = self.fn_cell_grid(&sub, ctx, depth);
+                ctx.temp.truncate(mark);
+                Ok(Val::grid(res?))
+            }
             _ if crate::functions_matrix::is_array_fn(name) => {
                 let mark = ctx.temp.len();
                 let call = Expr::func_call(

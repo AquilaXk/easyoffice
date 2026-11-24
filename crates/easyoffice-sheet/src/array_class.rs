@@ -241,12 +241,23 @@ pub(crate) fn arrayish(expr: &Expr) -> bool {
             is_spill_fn(name)
                 || matches!(name, "TRANSPOSE" | ":")
                 || is_array_fn(name)
+                || (name == "CELL" && cell_may_spill(args))
                 || (name == "XLOOKUP" && xlookup_returns_array(args))
                 || (name == "INDEX" && index_returns_line(args))
                 || ((is_lifted_fn(name) || name == "CHOOSE") && args.iter().any(arrayish))
         }
         _ => false,
     }
+}
+
+/// Whether `CELL(...)` can return a 1x2 `{width, is_default}` spill array.
+pub(crate) fn cell_may_spill(args: &[Expr]) -> bool {
+    (1..=2).contains(&args.len())
+        && match args[0].peeled() {
+            Expr::Text(s) => s.eq_ignore_ascii_case("width"),
+            Expr::Number(_) | Expr::Boolean(_) | Expr::ErrorLiteral(_) | Expr::Missing => false,
+            _ => true,
+        }
 }
 
 /// `INDEX` that gives a row, a column or the whole range: a zero or left out row or column number, or
@@ -306,7 +317,10 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
             if name == "SINGLE" {
                 return false;
             }
-            if is_spill_fn(name) || (name == "HYPERLINK" && (1..=2).contains(&args.len())) {
+            if is_spill_fn(name)
+                || (name == "HYPERLINK" && (1..=2).contains(&args.len()))
+                || (name == "CELL" && cell_may_spill(args))
+            {
                 return true;
             }
             if name == "INDEX" && index_returns_line(args) {
@@ -340,6 +354,7 @@ fn scan_spill_only(expr: &Expr) -> bool {
             Expr::FuncCall(f)
                 if is_spill_fn(&f.name)
                     || (f.name == "HYPERLINK" && (1..=2).contains(&f.args.len()))
+                    || (f.name == "CELL" && cell_may_spill(&f.args))
         );
     });
     found

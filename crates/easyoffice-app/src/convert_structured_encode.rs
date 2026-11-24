@@ -117,6 +117,7 @@ fn workbook_engine(
         let sheet_styling = stylings.get(index);
         if let Some(styling) = sheet_styling {
             sheet.set_spill_merges(styling.merges.clone());
+            sheet.set_cell_meta(Some(easyoffice_sheet::SheetCellMeta::from_styling(styling)));
         }
         let set_one = |sheet: &mut easyoffice_sheet::SheetEngine,
                        row: u32,
@@ -142,6 +143,7 @@ fn workbook_engine(
             }
         }
     }
+    crate::sheet_cell_meta_ipc::apply_current_save_meta(&mut wb);
     Ok(wb)
 }
 
@@ -834,6 +836,7 @@ fn encode_structured_with_thumbnail(
             let _date_system =
                 easyoffice_sheet::enter_date_system(stylings.first().is_some_and(|st| st.date1904));
             let _calc_options = crate::sheet_calc_options_json::enter_from_stylings(stylings);
+            let _save_meta = crate::sheet_cell_meta_ipc::enter_save_file_name(title, format);
             let skip_save_recalc = stylings.first().is_some_and(|st| {
                 st.calc_options.mode == easyoffice_formats::CalcMode::Manual
                     && !st.calc_options.calc_on_save

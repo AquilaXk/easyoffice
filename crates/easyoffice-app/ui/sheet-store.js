@@ -18,7 +18,7 @@
   const mergesField = (sheets) => {
     const names = Object.keys(sheets || {});
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
-    return { ...(spillApi?.mergesField(names, layoutApi) || {}), ...(spillApi?.hiddenRowsField(names, layoutApi) || {}) };
+    return { ...(spillApi?.mergesField(names, layoutApi) || {}), ...(spillApi?.hiddenRowsField(names, layoutApi) || {}), ...(host.__EASYOFFICE_SHEET_CELL_META__?.metaField?.(names, sheets) || {}) };
   };
 
   function cloneStore(sheets) {
@@ -146,11 +146,12 @@
       pivots: new Map(),
       // The hidden rows each sheet was told (see `syncMerges`, PD-232).
       hiddenRows: new Map(),
+      cellMeta: null,
       mergesVersion: -1,
       gen: 0,
     };
     let sessionChain = Promise.resolve();
-    const hiddenRows = host.__EASYOFFICE_CREATE_SHEET_HIDDEN_ROWS_SYNC__({ session, sessionCall: (body) => sessionCall(body), isFormulaStr });
+    const hiddenRows = host.__EASYOFFICE_CREATE_SHEET_HIDDEN_ROWS_SYNC__({ session, sessionCall: (body) => sessionCall(body), isFormulaStr, takeSpills: (m, r) => takeSpills(m, r), getColumnWidths: deps.getColumnWidths, getFileName: deps.getFileName });
 
     // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
     // Every request names the workbook's date system when it is 1904, so the engine calculates, formats and filters in it (PD-264).
@@ -174,6 +175,7 @@
       session.pivots = new Map();
       spillApi?.clearOmittedPivots();
       session.hiddenRows = new Map();
+      session.cellMeta = null;
       session.mergesVersion = -1;
     }
 
@@ -266,6 +268,7 @@
       }
       await syncNames(sheetsMap);
       const mergeChanged = await syncMerges(names, sheetsMap);
+      const metaChanged = await hiddenRows.syncMeta(names, sheetsMap);
       const { changes, formulaTargets } = diffAgainstMirror(sheetsMap, names);
       let at = 0;
       let last = null;
@@ -303,7 +306,7 @@
         circular: last.circular === true,
         timedOut: last.timedOut === true,
         pending: last.pending,
-        spillsChanged: spillsChanged || lockChanged || mergeChanged,
+        spillsChanged: spillsChanged || lockChanged || mergeChanged || metaChanged,
       };
     }
 
@@ -980,6 +983,7 @@
       renameTableColumns,
       followTableHeaders,
       hiddenRowsStale: (name) => hiddenRows.stale(name),
+      cellMetaStale: (sheetsMap) => hiddenRows.metaStale(sheetsMap),
       // Whether a sheet of the session has other pivot tables than the layout has now (a create, an edit, a delete or an undo).
       pivotsStale: () =>
         session.id !== null &&

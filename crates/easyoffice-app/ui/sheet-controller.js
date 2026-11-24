@@ -706,7 +706,7 @@
     // again, and only those in the engine (PD-232).
     // It runs after the step that changed them (an undo restores the cells after the layout).
     // The same for the pivot tables `GETPIVOTDATA` reads: a create, an edit, a delete and an undo of one (PD-292).
-    const layoutStale = () => sheetStoreHelpers.hiddenRowsStale(getActiveSheetName()) || sheetStoreHelpers.pivotsStale();
+    const layoutStale = () => sheetStoreHelpers.hiddenRowsStale(getActiveSheetName()) || sheetStoreHelpers.pivotsStale() || Boolean(sheetStoreHelpers.cellMetaStale?.(sheetDataStore));
     host.__EASYOFFICE_SHEET_LAYOUT__.onChange(() => {
       if (getActiveModule() !== "SHEET" || !layoutStale()) return;
       void enqueueWorkspaceHistoryOp(async () => {

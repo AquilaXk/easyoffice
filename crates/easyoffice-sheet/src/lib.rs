@@ -10,6 +10,7 @@ pub mod axis;
 mod byte_width;
 mod calc_options_runtime;
 mod cell_display;
+mod cell_info_meta;
 mod cell_kind;
 pub mod coercion;
 mod compile;
@@ -115,6 +116,7 @@ pub use cell_display::{
     compile_for_page, format_for_page, format_for_page_typed, general_display, CellText,
     CompiledNumFmt,
 };
+pub use cell_info_meta::{SheetCellMeta, WorkbookMeta};
 pub use cell_kind::{CellValueKind, TypedCellChange};
 pub use coercion::*;
 pub(crate) use dag::expr_contains_subtotal;
@@ -183,6 +185,10 @@ pub struct SheetEngine {
     pub(crate) spill_tables: Option<Arc<spill_merges::SpillMerges>>,
     /// The rows the user and a filter hid, which `SUBTOTAL` and `AGGREGATE` leave out (PD-232).
     pub(crate) hidden_rows: Option<Arc<hidden_rows::HiddenRows>>,
+    /// Per-sheet formats, widths, alignments, locks, and scroll origin for `CELL` and `INFO` (PD-331).
+    pub(crate) cell_meta: Option<Arc<cell_info_meta::SheetCellMeta>>,
+    /// Workbook file and environment metadata for `CELL` and `INFO` (PD-331).
+    pub(crate) workbook_meta: Arc<cell_info_meta::WorkbookMeta>,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -234,6 +240,8 @@ impl SheetEngine {
             spill_merges: None,
             spill_tables: None,
             hidden_rows: None,
+            cell_meta: None,
+            workbook_meta: Arc::default(),
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),

@@ -88,6 +88,34 @@ impl RecalcSession {
         Ok(())
     }
 
+    /// Updates workbook-level metadata exposed to `CELL` and `INFO` (PD-331). Returns `true` when changed.
+    pub fn set_workbook_meta(&mut self, meta: crate::WorkbookMeta) -> bool {
+        if *self.wb.meta == meta {
+            return false;
+        }
+        self.wb.set_meta(meta);
+        self.graph.for_each_volatile(|v| {
+            self.dirty.insert(v);
+        });
+        true
+    }
+
+    /// Updates per-sheet `CELL`/`INFO` metadata on `sheet` (PD-331). Returns `true` when changed.
+    pub fn set_sheet_cell_meta(
+        &mut self,
+        sheet: &str,
+        meta: Option<crate::SheetCellMeta>,
+    ) -> Result<bool, super::RecalcError> {
+        let idx = self.sheet_index(sheet)?;
+        let changed = self.wb.sheets_mut()[usize::from(idx)].set_cell_meta(meta);
+        if changed {
+            self.graph.for_each_volatile(|v| {
+                self.dirty.insert(v);
+            });
+        }
+        Ok(changed)
+    }
+
     /// Tells the session the pivot tables `GETPIVOTDATA` finds on `sheet` (an empty list: none). The formulas that call
     /// it are volatile, so the next [`recalculate`](Self::recalculate) works them out again against the new tables (PD-292).
     pub fn set_sheet_pivot_tables(

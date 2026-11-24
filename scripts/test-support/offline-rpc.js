@@ -1263,7 +1263,7 @@ function offlineSourceConversion(parsed) {
       if (doc.sessionAction === "close") return { closed: true };
       if (doc.sessionAction === "structure") return offlineStructure(doc);
       if (doc.sessionAction === "rules") return { session: doc.session || "offline-s1", cf: { cells: [], bars: [], icons: [], scales: [] } };
-      if (doc.sessionAction === "apply" || doc.sessionAction === "merges" || doc.sessionAction === "tables" || doc.sessionAction === "locks" || doc.sessionAction === "hiddenRows" || doc.sessionAction === "names") {
+      if (doc.sessionAction === "apply" || doc.sessionAction === "merges" || doc.sessionAction === "tables" || doc.sessionAction === "locks" || doc.sessionAction === "hiddenRows" || doc.sessionAction === "names" || doc.sessionAction === "cellMeta") {
         return { session: doc.session || "offline-s1", changed: [], spills: [], circular: false };
       }
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);

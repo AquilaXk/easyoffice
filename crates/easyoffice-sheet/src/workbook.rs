@@ -20,6 +20,8 @@ pub struct WorkbookEngine {
     sheet_by_id: crate::FastMap<u16, usize>,
     /// The pivot tables `GETPIVOTDATA` reads, with the name of the sheet each one is on (PD-271).
     pub(crate) pivot_tables: Arc<Vec<(String, crate::PivotTableDef)>>,
+    /// File and platform metadata for `CELL` and `INFO` (PD-331).
+    pub(crate) meta: Arc<crate::WorkbookMeta>,
 }
 
 impl Clone for WorkbookEngine {
@@ -38,6 +40,7 @@ impl Clone for WorkbookEngine {
             sheet_by_name: self.sheet_by_name.clone(),
             sheet_by_id: self.sheet_by_id.clone(),
             pivot_tables: Arc::clone(&self.pivot_tables),
+            meta: Arc::clone(&self.meta),
         }
     }
 }
@@ -473,6 +476,7 @@ impl WorkbookEngine {
         engine.names = Arc::clone(&self.names);
         engine.tables = Arc::clone(&self.tables);
         engine.name_budget = Arc::clone(&self.name_budget);
+        engine.workbook_meta = Arc::clone(&self.meta);
         let new_idx = self.sheets.len();
         self.sheet_by_name
             .insert(Self::canonical_sheet_key(&engine.name), new_idx);

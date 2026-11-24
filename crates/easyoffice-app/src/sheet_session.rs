@@ -841,6 +841,7 @@ impl EasyOfficeIpcRouter {
             "tables" => Self::sheet_session_blockers(entries, owner, true),
             "pivots" => Self::sheet_session_pivots(entries, owner),
             "hiddenRows" => Self::sheet_session_hidden_rows(entries, owner),
+            "cellMeta" => crate::sheet_cell_meta_ipc::sheet_session_cell_meta(entries, owner),
             "tableColumn" => Self::table_column_rewrites(entries),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),

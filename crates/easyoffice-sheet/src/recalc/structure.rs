@@ -35,6 +35,13 @@ impl RecalcSession {
         {
             target_engine.set_spill_lock(Some(lock));
         }
+        if let Some(moved) = target_engine
+            .cell_meta
+            .as_deref()
+            .map(|meta| meta.shifted(&edit))
+        {
+            target_engine.set_cell_meta(Some(moved));
+        }
         for (slot, drop_single) in [
             (&mut target_engine.spill_merges, true),
             (&mut target_engine.spill_tables, false),

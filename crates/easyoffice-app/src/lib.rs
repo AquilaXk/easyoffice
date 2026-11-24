@@ -44,6 +44,7 @@ mod security_ipc;
 pub mod self_test;
 mod sheet_blockers_ipc;
 mod sheet_calc_options_json;
+mod sheet_cell_meta_ipc;
 mod sheet_chart_json;
 mod sheet_default_font_json;
 mod sheet_display;
@@ -426,6 +427,7 @@ impl EasyOfficeIpcRouter {
                 sheet.set_hidden_rows(hidden, filtered);
             }
         }
+        sheet_cell_meta_ipc::apply_stateless_meta(&mut wb, entries)?;
         Ok(wb)
     }
 

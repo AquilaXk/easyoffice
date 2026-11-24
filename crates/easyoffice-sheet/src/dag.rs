@@ -790,8 +790,12 @@ impl<'x> DepScanner<'x> {
                     self.expr_stack.push(lhs);
                 }
                 Expr::FuncCall(f) => {
-                    for a in f.args.iter().rev() {
-                        self.expr_stack.push(a);
+                    if crate::functions_info_ref::cell_arg_is_metadata_only(f) {
+                        self.expr_stack.push(&f.args[0]);
+                    } else {
+                        for a in f.args.iter().rev() {
+                            self.expr_stack.push(a);
+                        }
                     }
                 }
                 Expr::Number(_)

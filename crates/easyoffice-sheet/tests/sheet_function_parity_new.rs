@@ -145,7 +145,7 @@ fn cell_and_info_report_a_cell_and_the_workbook() {
     let texts: Vec<String> = (1..=7).map(|r| model._get_text(&format!("C{r}"))).collect();
     assert_eq!(texts, ["$B$3", "3", "2", "l", "b", "hello", "#VALUE!"]);
     let texts: Vec<String> = (1..=4).map(|r| model._get_text(&format!("D{r}"))).collect();
-    assert_eq!(texts, ["Automatic", "2", "#VALUE!", "#N/A"]);
+    assert_eq!(texts, ["Automatic", "2", "#VALUE!", "16.0"]);
 }
 
 #[test]

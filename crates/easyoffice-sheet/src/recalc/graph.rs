@@ -34,7 +34,7 @@ pub(crate) fn cell_key(sheet: u16, coord: PackedCellCoordinate) -> CellKey {
 const NARROW_MAX_WIDTH: u32 = 16;
 /// Functions whose result changes without any referenced cell changing, or whose references are
 /// computed at run time. Their cells are recomputed on every pass.
-const VOLATILE_FUNCTIONS: [&str; 9] = [
+const VOLATILE_FUNCTIONS: [&str; 10] = [
     "RAND",
     "RANDBETWEEN",
     "RANDARRAY",
@@ -46,6 +46,8 @@ const VOLATILE_FUNCTIONS: [&str; 9] = [
     "GETPIVOTDATA",
     // depends on runtime workbook calculation mode
     "INFO",
+    // reads cell formats, column widths, locks, and workbook file metadata
+    "CELL",
 ];
 
 /// One reference a formula reads: a cell, or a rectangle (`r0 <= r1`, `c0 <= c1`).
@@ -155,7 +157,11 @@ pub(crate) fn collect_refs(
             }
             Expr::FuncCall(f) => {
                 volatile |= VOLATILE_FUNCTIONS.contains(&f.name.as_str());
-                stack.extend(f.args.iter());
+                if crate::functions_info_ref::cell_arg_is_metadata_only(f) {
+                    stack.push(&f.args[0]);
+                } else {
+                    stack.extend(f.args.iter());
+                }
             }
             Expr::Number(_)
             | Expr::Text(_)

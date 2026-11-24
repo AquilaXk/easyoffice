@@ -675,3 +675,175 @@ pub(crate) fn format_cell_with(
             .then(|| (compiled.render_text(raw), false)),
     }
 }
+
+/// Derives `(format_code, has_negative_color, has_positive_parens)` for `CELL("format"|"color"|"parentheses")`.
+pub(crate) fn cell_format_descriptors(code: Option<&str>) -> (String, bool, bool) {
+    let Some(trimmed) = code.map(str::trim).filter(|s| !s.is_empty()) else {
+        return ("G".to_string(), false, false);
+    };
+    if trimmed.eq_ignore_ascii_case("General") {
+        return ("G".to_string(), false, false);
+    }
+    let compiled = compiled_format(trimmed);
+    if compiled.is_text_only() {
+        return ("G".to_string(), false, false);
+    }
+    let Some(sec0) = compiled.sections.first() else {
+        return ("G".to_string(), false, false);
+    };
+    let neg_color = compiled
+        .sections
+        .iter()
+        .enumerate()
+        .filter(|&(idx, sec)| Some(idx) != compiled.text_idx && sec.color.is_some())
+        .any(|(idx, sec)| match sec.cond {
+            Some(c) => c.matches(-1.0) && !c.matches(1.0),
+            None => idx == 1 && compiled.numeric_count >= 2,
+        });
+    let pos_parens = compiled.text_idx != Some(0) && section_has_parens(&sec0.toks);
+    let mut base = if compiled.text_idx == Some(0) {
+        "G".to_string()
+    } else {
+        classify_section_code(sec0)
+    };
+    if neg_color {
+        base.push('-');
+    }
+    if pos_parens {
+        base.push_str("()");
+    }
+    (base, neg_color, pos_parens)
+}
+
+fn section_has_parens(toks: &[Tok]) -> bool {
+    let mut saw_open = false;
+    for tok in toks {
+        if let Tok::Lit(lit) = tok {
+            for ch in lit.chars() {
+                if ch == '(' {
+                    saw_open = true;
+                } else if ch == ')' && saw_open {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn classify_section_code(sec: &Section) -> String {
+    match sec.kind {
+        SectionKind::Date => classify_date_section(&sec.toks),
+        SectionKind::Number(_) => classify_number_section(&sec.toks),
+    }
+}
+
+fn classify_date_section(toks: &[Tok]) -> String {
+    let mut has_year = false;
+    let mut month_max = 0usize;
+    let mut has_day = false;
+    let mut has_time = false;
+    let mut has_sec = false;
+    let mut has_ampm = false;
+    for tok in toks {
+        match *tok {
+            Tok::Year(_) => has_year = true,
+            Tok::Month(n) => month_max = month_max.max(n),
+            Tok::Day(_) | Tok::KoDay(_) => has_day = true,
+            Tok::Hour(_) | Tok::Elapsed(..) => has_time = true,
+            Tok::Second(_) => {
+                has_time = true;
+                has_sec = true;
+            }
+            Tok::AmPm(..) => {
+                has_time = true;
+                has_ampm = true;
+            }
+            _ => {}
+        }
+    }
+    if has_time && !has_year && !has_day && month_max < 3 {
+        return match (has_ampm, has_sec) {
+            (true, true) => "D6",
+            (true, false) => "D7",
+            (false, true) => "D8",
+            (false, false) => "D9",
+        }
+        .to_string();
+    }
+    if !has_time {
+        if has_day && month_max >= 3 && has_year {
+            return "D1".to_string();
+        }
+        if has_day && month_max >= 3 && !has_year {
+            return "D2".to_string();
+        }
+        if !has_day && month_max >= 3 && has_year {
+            return "D3".to_string();
+        }
+        if has_day && (1..=2).contains(&month_max) && !has_year {
+            return "D5".to_string();
+        }
+    }
+    "D4".to_string()
+}
+
+fn classify_number_section(toks: &[Tok]) -> String {
+    let mut has_digit = false;
+    let mut has_general = false;
+    let mut has_slash = false;
+    let mut has_exp = false;
+    let mut has_percent = false;
+    let mut has_currency = false;
+    let mut in_fraction = false;
+    let mut decimals = 0usize;
+    let mut int_commas = Vec::new();
+    let mut last_int_digit = None;
+
+    for (idx, tok) in toks.iter().enumerate() {
+        match tok {
+            Tok::General => has_general = true,
+            Tok::Slash => has_slash = true,
+            Tok::Percent => has_percent = true,
+            Tok::Exp(_) => has_exp = true,
+            Tok::Dot if !in_fraction && !has_exp => in_fraction = true,
+            Tok::Digit(_) => {
+                has_digit = true;
+                if in_fraction && !has_exp {
+                    decimals += 1;
+                } else if !has_exp {
+                    last_int_digit = Some(idx);
+                }
+            }
+            Tok::Comma if !in_fraction && !has_exp => {
+                if has_digit {
+                    int_commas.push(idx);
+                }
+            }
+            Tok::Lit(lit)
+                if lit
+                    .chars()
+                    .any(|c| matches!(c, '$' | '₩' | '￦' | '¥' | '￥' | '€' | '£')) =>
+            {
+                has_currency = true;
+            }
+            _ => {}
+        }
+    }
+    if has_general || has_slash || (!has_digit && !has_percent && !has_exp) {
+        return "G".to_string();
+    }
+    let has_grouping = last_int_digit.is_some_and(|last| int_commas.iter().any(|&c| c < last));
+    let prefix = if has_exp {
+        "S"
+    } else if has_percent {
+        "P"
+    } else if has_currency {
+        "C"
+    } else if has_grouping {
+        ","
+    } else {
+        "F"
+    };
+    format!("{prefix}{decimals}")
+}
