@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_laid::{fit_text, row_height_pt, width_pt, Canvas, PDF_PT_PER_PX};
-use crate::sheet_styling::sheet_chart::{SheetCellIndex, EMU_PER_PX};
+use crate::sheet_styling::sheet_chart::{col_left_px, SheetCellIndex, EMU_PER_PX};
 use crate::sheet_styling::sheet_media_notes::effective_image_two_cell;
-use crate::sheet_styling::sheet_row_offsets::SheetGrid;
-use crate::{pack_cell_pos, OdsUnpacked, SheetStyling};
+use crate::sheet_styling::sheet_row_offsets::{RowOffsets, SheetGrid};
+use crate::{pack_cell_pos, AnchorCells, AnchorEdit, ChartAnchor, OdsUnpacked, SheetStyling};
 
 const NOTE_TRIANGLE_RGB: &str = "0.82 0.14 0.14";
 const FALLBACK_BG_RGB: u32 = 0xF8FAFC;
@@ -29,28 +29,28 @@ fn col_width_pt(styling: &SheetStyling, col: u32, scale: f64) -> f64 {
     f64::from(styling.col_px(col)) * PDF_PT_PER_PX * scale
 }
 
-fn x_at_col(
+pub(crate) fn x_at_col(
     col: u32,
     page_cols: &[u32],
     col_xs: &[f64],
     styling: &SheetStyling,
     scale: f64,
 ) -> f64 {
-    if let Some(pos) = page_cols.iter().position(|&c| c == col) {
-        return col_xs[pos];
-    }
-    let first = page_cols[0];
-    if col < first {
-        let mut x = col_xs[0];
+    let pos = page_cols.partition_point(|&c| c < col);
+    if let Some(&page_col) = page_cols.get(pos) {
+        if page_col == col {
+            return col_xs[pos];
+        }
+        let mut x = col_xs[pos];
         let mut c = col;
-        while c < first {
+        while c < page_col {
             x -= col_width_pt(styling, c, scale);
             c += 1;
         }
         return x;
     }
-    let last = *page_cols.last().unwrap_or(&first);
-    let mut x = *col_xs.last().unwrap_or(&col_xs[0]);
+    let last = *page_cols.last().unwrap();
+    let mut x = *col_xs.last().unwrap();
     let mut c = last + 1;
     while c < col {
         x += col_width_pt(styling, c, scale);
@@ -59,34 +59,143 @@ fn x_at_col(
     x
 }
 
-fn y_at_row(
+#[inline]
+fn area_row_height_pt(
+    styling: &SheetStyling,
+    row: u32,
+    area_rows: (u32, &[f64]),
+    scale: f64,
+) -> f64 {
+    if let Some(offset) = row.checked_sub(area_rows.0) {
+        if let Some(&h) = area_rows.1.get(offset as usize) {
+            return h * scale;
+        }
+    }
+    row_height_pt(styling, row, scale)
+}
+
+pub(crate) fn y_at_row(
     row: u32,
     page_rows: &[u32],
     row_ys: &[f64],
     styling: &SheetStyling,
+    area_rows: (u32, &[f64]),
     scale: f64,
 ) -> f64 {
-    if let Some(pos) = page_rows.iter().position(|&r| r == row) {
-        return row_ys[pos];
-    }
-    let first = page_rows[0];
-    if row < first {
-        let mut y = row_ys[0];
+    let pos = page_rows.partition_point(|&r| r < row);
+    if let Some(&page_row) = page_rows.get(pos) {
+        if page_row == row {
+            return row_ys[pos];
+        }
+        let mut y = row_ys[pos];
         let mut r = row;
-        while r < first {
-            y += row_height_pt(styling, r, scale);
+        while r < page_row {
+            y += area_row_height_pt(styling, r, area_rows, scale);
             r += 1;
         }
         return y;
     }
-    let last = *page_rows.last().unwrap_or(&first);
-    let mut y = *row_ys.last().unwrap_or(&row_ys[0]);
+    let last = *page_rows.last().unwrap();
+    let mut y = *row_ys.last().unwrap();
     let mut r = last + 1;
     while r < row {
-        y -= row_height_pt(styling, r, scale);
+        y -= area_row_height_pt(styling, r, area_rows, scale);
         r += 1;
     }
     y
+}
+
+fn visible_col_left_pt(styling: &SheetStyling, col: u32, scale: f64) -> f64 {
+    let mut px = col_left_px(col, &styling.columns, styling.default_col_px());
+    for &(a, b) in &styling.hidden_cols {
+        if a < col {
+            let end = b.min(col - 1);
+            for hc in a..=end {
+                px = px.saturating_sub(u64::from(styling.col_px(hc)));
+            }
+        }
+    }
+    px as f64 * PDF_PT_PER_PX * scale
+}
+
+fn sheet_origin(
+    page_cols: &[u32],
+    page_rows: &[u32],
+    col_xs: &[f64],
+    row_ys: &[f64],
+    styling: &SheetStyling,
+    area_rows: (u32, &[f64]),
+    scale: f64,
+) -> (f64, f64) {
+    let last_c_idx = page_cols.len() - 1;
+    let ox = col_xs[last_c_idx] - visible_col_left_pt(styling, page_cols[last_c_idx], scale);
+
+    let last_r_idx = page_rows.len() - 1;
+    let ref_row = page_rows[last_r_idx];
+    let mut oy = row_ys[last_r_idx];
+    if ref_row >= area_rows.0 && ref_row - area_rows.0 <= 16_384 {
+        for r in area_rows.0..ref_row {
+            oy += area_row_height_pt(styling, r, area_rows, scale);
+        }
+        if area_rows.0 <= 8_192 {
+            for r in 0..area_rows.0 {
+                oy += row_height_pt(styling, r, scale);
+            }
+        } else {
+            oy += SheetGrid::of(styling).rows().top(area_rows.0) as f64 * PDF_PT_PER_PX * scale;
+        }
+    } else {
+        oy += SheetGrid::of(styling).rows().top(ref_row) as f64 * PDF_PT_PER_PX * scale;
+    }
+    (ox, oy)
+}
+
+/// Resolves the PDF rectangle `(x_left, y_bottom, w, h)` for a floating image or chart on the
+/// current page (`TwoCell`, `OneCell`, `Absolute`, or pixel-only anchor).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_overlay_rect(
+    anchor: &ChartAnchor,
+    (fc, fr, fce, fre, tc, tr, tce, tre): AnchorCells,
+    (min_col, max_col, min_row, max_row): (u32, u32, u32, u32),
+    page_cols: &[u32],
+    page_rows: &[u32],
+    col_xs: &[f64],
+    row_ys: &[f64],
+    styling: &SheetStyling,
+    area_rows: (u32, &[f64]),
+    scale: f64,
+    (min_span_pt, min_w_pt, min_h_pt): (f64, f64, f64),
+) -> Option<(f64, f64, f64, f64)> {
+    if fc > max_col || tc < min_col || fr > max_row || tr < min_row {
+        return None;
+    }
+    let fallback_w = (f64::from(anchor.width_px) * PDF_PT_PER_PX * scale).max(min_w_pt);
+    let fallback_h = (f64::from(anchor.height_px) * PDF_PT_PER_PX * scale).max(min_h_pt);
+    if anchor.edit_as == AnchorEdit::Absolute {
+        let (ox, oy) = sheet_origin(
+            page_cols, page_rows, col_xs, row_ys, styling, area_rows, scale,
+        );
+        let x_left = ox + f64::from(anchor.left_px) * PDF_PT_PER_PX * scale;
+        let y_top = oy - f64::from(anchor.top_px) * PDF_PT_PER_PX * scale;
+        return Some((x_left, y_top - fallback_h, fallback_w, fallback_h));
+    }
+    let x_left = x_at_col(fc, page_cols, col_xs, styling, scale) + emu_to_pt(fce, scale);
+    let y_top = y_at_row(fr, page_rows, row_ys, styling, area_rows, scale) - emu_to_pt(fre, scale);
+    let x_right = x_at_col(tc, page_cols, col_xs, styling, scale) + emu_to_pt(tce, scale);
+    let y_bot_grid =
+        y_at_row(tr, page_rows, row_ys, styling, area_rows, scale) - emu_to_pt(tre, scale);
+    let two_cell = anchor.edit_as == AnchorEdit::TwoCell && anchor.has_explicit_grid();
+    let w = if two_cell && x_right > x_left + min_span_pt {
+        x_right - x_left
+    } else {
+        fallback_w
+    };
+    let h = if two_cell && y_top > y_bot_grid + min_span_pt {
+        y_top - y_bot_grid
+    } else {
+        fallback_h
+    };
+    Some((x_left, y_top - h, w, h))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -144,10 +253,12 @@ pub(crate) fn draw_sheet_notes_indicators(
 pub(crate) fn draw_sheet_floating_images(
     canvas: &mut Canvas,
     styling: &SheetStyling,
+    grid: &SheetGrid<'_>,
     page_cols: &[u32],
     page_rows: &[u32],
     col_xs: &[f64],
     row_ys: &[f64],
+    area_rows: (u32, &[f64]),
     scale: f64,
 ) -> Vec<(String, PdfImageObject)> {
     let mut xobjects = Vec::new();
@@ -159,35 +270,30 @@ pub(crate) fn draw_sheet_floating_images(
     {
         return xobjects;
     }
-    let min_col = page_cols.iter().copied().min().unwrap_or(0);
-    let max_col = page_cols.iter().copied().max().unwrap_or(0);
-    let min_row = page_rows.iter().copied().min().unwrap_or(0);
-    let max_row = page_rows.iter().copied().max().unwrap_or(0);
+    let page_bounds = (
+        page_cols.iter().copied().min().unwrap_or(0),
+        page_cols.iter().copied().max().unwrap_or(0),
+        page_rows.iter().copied().min().unwrap_or(0),
+        page_rows.iter().copied().max().unwrap_or(0),
+    );
 
-    let grid = SheetGrid::of(styling);
     for img in &styling.images {
-        let (fc, fr, fce, fre, tc, tr, tce, tre) = effective_image_two_cell(&img.anchor, &grid);
-        if fc > max_col || tc < min_col || fr > max_row || tr < min_row {
+        let cells = effective_image_two_cell(&img.anchor, grid);
+        let Some((x_left, y_bottom, w, h)) = resolve_overlay_rect(
+            &img.anchor,
+            cells,
+            page_bounds,
+            page_cols,
+            page_rows,
+            col_xs,
+            row_ys,
+            styling,
+            area_rows,
+            scale,
+            (scale, 4.0 * scale, 4.0 * scale),
+        ) else {
             continue;
-        }
-        let x_left = x_at_col(fc, page_cols, col_xs, styling, scale) + emu_to_pt(fce, scale);
-        let y_top = y_at_row(fr, page_rows, row_ys, styling, scale) - emu_to_pt(fre, scale);
-        let x_right = x_at_col(tc, page_cols, col_xs, styling, scale) + emu_to_pt(tce, scale);
-        let y_bot_grid = y_at_row(tr, page_rows, row_ys, styling, scale) - emu_to_pt(tre, scale);
-
-        let fallback_w = f64::from(img.anchor.width_px) * PDF_PT_PER_PX * scale;
-        let fallback_h = f64::from(img.anchor.height_px) * PDF_PT_PER_PX * scale;
-        let w = if img.anchor.has_explicit_grid() && x_right > x_left + scale {
-            x_right - x_left
-        } else {
-            fallback_w.max(4.0 * scale)
         };
-        let h = if img.anchor.has_explicit_grid() && y_top > y_bot_grid + scale {
-            y_top - y_bot_grid
-        } else {
-            fallback_h.max(4.0 * scale)
-        };
-        let y_bottom = y_top - h;
 
         if let Some(pdf_obj) = crate::pdf_image::pdf_image_object(&img.image) {
             let res_name = format!("Im{}", xobjects.len() + 1);
@@ -266,6 +372,7 @@ pub(crate) fn render_sheet_overlays(
     page_rows: &[u32],
     xs: &[f64],
     ys: &[f64],
+    area_rows: (u32, &[f64]),
     head_w: f64,
     head_h: f64,
     scale: f64,
@@ -281,11 +388,20 @@ pub(crate) fn render_sheet_overlays(
         ys
     };
     draw_sheet_notes_indicators(canvas, styling, page_cols, page_rows, col_xs, row_ys, scale);
+    if styling.charts.is_empty() && styling.images.is_empty() {
+        return Vec::new();
+    }
+    let grid = match RowOffsets::of_with_area_pt(styling, area_rows.0, area_rows.1) {
+        Some(offsets) => SheetGrid::new(&styling.columns, styling.default_col_px(), offsets),
+        None => SheetGrid::of(styling),
+    };
     if !styling.charts.is_empty() {
         crate::pdf_chart::draw_sheet_charts(
-            canvas, sheet_name, sheets, cell_index, styling, page_cols, page_rows, col_xs, row_ys,
-            scale,
+            canvas, sheet_name, sheets, cell_index, styling, &grid, page_cols, page_rows, col_xs,
+            row_ys, area_rows, scale,
         );
     }
-    draw_sheet_floating_images(canvas, styling, page_cols, page_rows, col_xs, row_ys, scale)
+    draw_sheet_floating_images(
+        canvas, styling, &grid, page_cols, page_rows, col_xs, row_ys, area_rows, scale,
+    )
 }

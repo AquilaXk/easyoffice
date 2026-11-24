@@ -12,13 +12,15 @@ use std::sync::OnceLock;
 #[path = "pdf_laid_doc.rs"]
 mod doc;
 pub(crate) use doc::laid_document_pdf;
+#[path = "pdf_sheet_wrap.rs"]
+mod wrap;
 
 use crate::pdf_sheet_icons::{self, IconKey};
 use crate::pdf_sheet_rules::{self, plain_cell_numeric, RuleLayer, RuleOps, SheetShown};
 use crate::pdf_writer::{char_units, mixed_units, text_ops, PdfLaidPage, PdfPageEntry};
 use crate::sheet_page::{PageScale, SheetPage};
 use crate::sheet_styling::DEFAULT_COL_PX;
-use crate::{EasyOfficeError, SheetStyling};
+use crate::{EasyOfficeError, HAlign, SheetStyling, VAlign};
 
 const TWIPS_PER_PT: f64 = 20.0;
 const PT_PER_MM: f64 = 72.0 / 25.4;
@@ -29,7 +31,7 @@ const PT_PER_MIL: f64 = 0.072;
 pub(crate) const ROW_PX: f64 = crate::sheet_styling::GRID_ROW_PX;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;
-const SHEET_FONT_PT: f64 = 10.0;
+pub(crate) const SHEET_FONT_PT: f64 = 10.0;
 /// The width of every grid line, in points.
 const GRID_WIDTH_PT: f64 = 0.5;
 pub(crate) const CELL_PAD_PT: f64 = 4.0;
@@ -282,7 +284,7 @@ impl Canvas {
 
 /// A zero-based inclusive range of a sheet to print.
 #[derive(Clone, Copy)]
-struct Area {
+pub(crate) struct Area {
     r1: u32,
     c1: u32,
     r2: u32,
@@ -532,7 +534,7 @@ fn sheet_area_pages(
             }
         })
         .collect();
-    let row_sizes: Vec<f64> = (area.r1..=area.r2)
+    let mut row_sizes: Vec<f64> = (area.r1..=area.r2)
         .map(|r| {
             if styling.is_some_and(|s| s.row_hidden(r)) || in_runs(hidden_rows, r) {
                 0.0
@@ -541,6 +543,7 @@ fn sheet_area_pages(
             }
         })
         .collect();
+    wrap::expand_wrapped_row_heights(area, &mut row_sizes, &col_sizes, styling, cells, shown);
     let (head_w, head_h) = if page.headings {
         (HEADING_COL_PX * PT_PER_PX, HEADING_ROW_PX * PT_PER_PX)
     } else {
@@ -693,13 +696,7 @@ fn sheet_area_pages(
                         (None, Some(rgb)) => canvas.fill_rect(x, y - h, w, h, rgb),
                         _ => {}
                     }
-                    let icon_key = rule
-                        .and_then(|rule| rule.icon)
-                        .and_then(pdf_sheet_icons::resolve_icon);
-                    let invalid_icon_only = rule.is_some_and(|rule| {
-                        rule.icon.is_some() && icon_key.is_none() && rule.bar.is_none()
-                    });
-                    let hidden = rule.is_some_and(|rule| rule.hide_value) && !invalid_icon_only;
+                    let (icon_key, hidden) = pdf_sheet_rules::effective_rule_icon(rule);
                     if let Some(rule) = rule {
                         if let Some(bar) = rule.bar {
                             rule_layer.bar(cell_box, bar, fill);
@@ -719,19 +716,11 @@ fn sheet_area_pages(
                     if let Some(text) = cells.get(&at).filter(|_| !hidden) {
                         let how = how_opt.unwrap_or_default();
                         let cell_font = pdf_sheet_rules::cell_font_pt(look, font, scale);
-                        let room = (w - 2.0 * pad - icon_inset).max(0.0);
-                        let filled = filled_text(text, how.fill, cell_font, room);
-                        let (drawn, tw) = fit_text_with_width(&filled, cell_font, room);
                         let right_aligned = match how_opt {
                             Some(cell) => cell.numeric,
                             None => plain_cell_numeric(styling, at, text),
                         };
-                        let tx = if right_aligned {
-                            x + w - pad - tw
-                        } else {
-                            x + pad + icon_inset
-                        };
-                        let ty = y - h + (h - cell_font) / 2.0 + scale;
+                        let h_align = look.map_or(HAlign::General, |style| style.h_align);
                         let color = how
                             .color
                             .or_else(|| rule.and_then(|rule| rule.fg))
@@ -739,15 +728,56 @@ fn sheet_area_pages(
                             .or_else(|| auto_text_color(fill));
                         let flags = look.map_or(0, crate::CellStyle::flags)
                             | rule.map_or(0, |rule| rule.flags);
-                        pdf_sheet_rules::draw_cell_text(
-                            &mut canvas,
-                            cell_box,
-                            (tx, ty),
-                            cell_font,
-                            drawn,
-                            tw,
-                            (color, flags),
-                        );
+                        if look.is_some_and(|style| style.wrap) {
+                            let v_align = look.map_or(VAlign::Bottom, |style| style.v_align);
+                            let icon_inset_unscaled = if icon_inset > 0.0 {
+                                icon_key
+                                    .and_then(|_| {
+                                        pdf_sheet_icons::icon_slot(
+                                            (
+                                                0.0,
+                                                0.0,
+                                                col_sizes[k],
+                                                row_sizes[i].max(22.0 * PDF_PT_PER_PX),
+                                            ),
+                                            1.0,
+                                            false,
+                                        )
+                                    })
+                                    .map_or(0.0, |slot| slot.text_inset)
+                            } else {
+                                0.0
+                            };
+                            let wrap_room =
+                                (col_sizes[k] - 2.0 * CELL_PAD_PT - icon_inset_unscaled).max(0.0);
+                            let wrap_font = pdf_sheet_rules::cell_font_pt(look, SHEET_FONT_PT, 1.0);
+                            wrap::draw_wrapped_cell(
+                                &mut canvas,
+                                cell_box,
+                                (pad, icon_inset, scale),
+                                cell_font,
+                                (wrap_room, wrap_font),
+                                text,
+                                (h_align, v_align, right_aligned),
+                                (color, flags),
+                            );
+                        } else {
+                            let room = (w - 2.0 * pad - icon_inset).max(0.0);
+                            let filled = filled_text(text, how.fill, cell_font, room);
+                            let (drawn, tw) = fit_text_with_width(&filled, cell_font, room);
+                            let tx =
+                                wrap::cell_tx(x, w, pad, icon_inset, tw, h_align, right_aligned);
+                            let ty = y - h + (h - cell_font) / 2.0 + scale;
+                            pdf_sheet_rules::draw_cell_text(
+                                &mut canvas,
+                                cell_box,
+                                (tx, ty),
+                                cell_font,
+                                drawn,
+                                tw,
+                                (color, flags),
+                            );
+                        }
                     }
                     x += w;
                     if !xs_done {
@@ -780,6 +810,7 @@ fn sheet_area_pages(
                     &page_rows,
                     &xs,
                     &ys,
+                    (area.r1, &row_sizes),
                     head_w,
                     head_h,
                     scale,

@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
 use crate::pdf_laid::{rgb_ops, Canvas};
-use crate::pdf_sheet_icons::{IconKey, IconSlot, ICON_BOX_UNITS};
+use crate::pdf_sheet_icons::{resolve_icon, IconKey, IconSlot, ICON_BOX_UNITS};
 use crate::pdf_writer::text_ops;
 use crate::{
     BorderEdge, BorderLine, CellBorders, CellStyle, CfBar, CfIcon, SheetStyling, FLAG_BOLD,
@@ -432,6 +432,16 @@ pub(crate) fn merge_styled(ops: Vec<String>) -> Vec<String> {
     out
 }
 
+/// Resolves a conditional-format cell's icon key and whether `hide_value` suppresses its text
+/// (`PD-342`: an invalid icon alone without a data bar never hides the cell value).
+pub(crate) fn effective_rule_icon(rule: Option<CellRule>) -> (Option<IconKey>, bool) {
+    let icon_key = rule.and_then(|r| r.icon).and_then(resolve_icon);
+    let invalid_icon_only =
+        rule.is_some_and(|r| r.icon.is_some() && icon_key.is_none() && r.bar.is_none());
+    let hidden = rule.is_some_and(|r| r.hide_value) && !invalid_icon_only;
+    (icon_key, hidden)
+}
+
 /// Effective PDF font size in points for a sheet cell: the cell's own `size_pt` (clamped to
 /// `MIN_SIZE_PT..=MAX_SIZE_PT` and multiplied by `scale`) when finite and positive, else `default_pt`.
 pub(crate) fn cell_font_pt(look: Option<&CellStyle>, default_pt: f64, scale: f64) -> f64 {
@@ -444,7 +454,7 @@ pub(crate) fn cell_font_pt(look: Option<&CellStyle>, default_pt: f64, scale: f64
 
 /// Whether a cell's glyphs, underline, strikethrough, bold outline, or italic shear extend outside
 /// `cell_box` `(x, bottom, w, h)`.
-fn cell_text_needs_clip(
+pub(crate) fn cell_text_needs_clip(
     (bx, by, bw, bh): Rect,
     (tx, ty): (f64, f64),
     size: f64,
@@ -507,7 +517,7 @@ pub(crate) fn draw_cell_text(
 
 /// The text of a cell at `(x, y)` (the baseline), `width` wide, in `color` (black when none) with the font bits `flags`.
 /// Without bits it is the plain text of the page.
-fn draw_text(
+pub(crate) fn draw_text(
     canvas: &mut Canvas,
     (x, y): (f64, f64),
     size: f64,

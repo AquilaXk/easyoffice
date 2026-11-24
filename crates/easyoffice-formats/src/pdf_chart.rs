@@ -6,10 +6,11 @@
 
 use std::fmt::Write;
 
-use crate::pdf_laid::{fit_text, rgb_ops, row_height_pt, width_pt, Canvas, PDF_PT_PER_PX};
+use crate::pdf_laid::{fit_text, rgb_ops, width_pt, Canvas};
+use crate::pdf_sheet_media::resolve_overlay_rect;
 use crate::sheet_styling::sheet_chart::{
     parse_chart_number, ChartKind, ChartLegendPos, ResolvedSeriesData, SheetCellIndex, SheetChart,
-    EMU_PER_PX, MAX_SERIES_PER_CHART,
+    MAX_SERIES_PER_CHART,
 };
 use crate::sheet_styling::sheet_row_offsets::SheetGrid;
 use crate::{OdsUnpacked, SheetStyling};
@@ -24,81 +25,6 @@ const AXIS_RGB: u32 = 0x6B7280;
 const GRID_RGB: u32 = 0xE5E7EB;
 const LABEL_RGB: u32 = 0x4B5563;
 
-fn emu_to_pt(emu: u32, scale: f64) -> f64 {
-    (f64::from(emu) / EMU_PER_PX as f64) * PDF_PT_PER_PX * scale
-}
-
-fn col_width_pt(styling: &SheetStyling, col: u32, scale: f64) -> f64 {
-    if styling
-        .hidden_cols
-        .iter()
-        .any(|&(a, b)| a <= col && col <= b)
-    {
-        return 0.0;
-    }
-    f64::from(styling.col_px(col)) * PDF_PT_PER_PX * scale
-}
-
-fn x_at_col(
-    col: u32,
-    page_cols: &[u32],
-    col_xs: &[f64],
-    styling: &SheetStyling,
-    scale: f64,
-) -> f64 {
-    if let Some(pos) = page_cols.iter().position(|&c| c == col) {
-        return col_xs[pos];
-    }
-    let first = page_cols[0];
-    if col < first {
-        let mut x = col_xs[0];
-        let mut c = col;
-        while c < first {
-            x -= col_width_pt(styling, c, scale);
-            c += 1;
-        }
-        return x;
-    }
-    let last = *page_cols.last().unwrap_or(&first);
-    let mut x = *col_xs.last().unwrap_or(&col_xs[0]);
-    let mut c = last + 1;
-    while c < col {
-        x += col_width_pt(styling, c, scale);
-        c += 1;
-    }
-    x
-}
-
-fn y_at_row(
-    row: u32,
-    page_rows: &[u32],
-    row_ys: &[f64],
-    styling: &SheetStyling,
-    scale: f64,
-) -> f64 {
-    if let Some(pos) = page_rows.iter().position(|&r| r == row) {
-        return row_ys[pos];
-    }
-    let first = page_rows[0];
-    if row < first {
-        let mut y = row_ys[0];
-        let mut r = row;
-        while r < first {
-            y += row_height_pt(styling, r, scale);
-            r += 1;
-        }
-        return y;
-    }
-    let last = *page_rows.last().unwrap_or(&first);
-    let mut y = *row_ys.last().unwrap_or(&row_ys[0]);
-    let mut r = last + 1;
-    while r < row {
-        y -= row_height_pt(styling, r, scale);
-        r += 1;
-    }
-    y
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_sheet_charts(
     canvas: &mut Canvas,
@@ -106,10 +32,12 @@ pub(crate) fn draw_sheet_charts(
     sheets: &[OdsUnpacked],
     cell_index: &SheetCellIndex<'_>,
     styling: &SheetStyling,
+    grid: &SheetGrid<'_>,
     page_cols: &[u32],
     page_rows: &[u32],
     col_xs: &[f64],
     row_ys: &[f64],
+    area_rows: (u32, &[f64]),
     scale: f64,
 ) {
     if page_cols.is_empty()
@@ -119,35 +47,30 @@ pub(crate) fn draw_sheet_charts(
     {
         return;
     }
-    let min_col = page_cols.iter().copied().min().unwrap_or(0);
-    let max_col = page_cols.iter().copied().max().unwrap_or(0);
-    let min_row = page_rows.iter().copied().min().unwrap_or(0);
-    let max_row = page_rows.iter().copied().max().unwrap_or(0);
+    let page_bounds = (
+        page_cols.iter().copied().min().unwrap_or(0),
+        page_cols.iter().copied().max().unwrap_or(0),
+        page_rows.iter().copied().min().unwrap_or(0),
+        page_rows.iter().copied().max().unwrap_or(0),
+    );
 
-    let grid = SheetGrid::of(styling);
     for chart in &styling.charts {
-        let (fc, fr, fce, fre, tc, tr, tce, tre) = chart.anchor.effective_two_cell(&grid);
-        if fc > max_col || tc < min_col || fr > max_row || tr < min_row {
+        let cells = chart.anchor.effective_two_cell(grid);
+        let Some((x_left, y_bottom, w, h)) = resolve_overlay_rect(
+            &chart.anchor,
+            cells,
+            page_bounds,
+            page_cols,
+            page_rows,
+            col_xs,
+            row_ys,
+            styling,
+            area_rows,
+            scale,
+            (40.0 * scale, 80.0 * scale, 60.0 * scale),
+        ) else {
             continue;
-        }
-        let x_left = x_at_col(fc, page_cols, col_xs, styling, scale) + emu_to_pt(fce, scale);
-        let y_top = y_at_row(fr, page_rows, row_ys, styling, scale) - emu_to_pt(fre, scale);
-        let x_right = x_at_col(tc, page_cols, col_xs, styling, scale) + emu_to_pt(tce, scale);
-        let y_bot_grid = y_at_row(tr, page_rows, row_ys, styling, scale) - emu_to_pt(tre, scale);
-
-        let fallback_w = f64::from(chart.anchor.width_px) * PDF_PT_PER_PX * scale;
-        let fallback_h = f64::from(chart.anchor.height_px) * PDF_PT_PER_PX * scale;
-        let w = if chart.anchor.has_explicit_grid() && x_right > x_left + 40.0 * scale {
-            x_right - x_left
-        } else {
-            fallback_w.max(80.0 * scale)
         };
-        let h = if chart.anchor.has_explicit_grid() && y_top > y_bot_grid + 40.0 * scale {
-            y_top - y_bot_grid
-        } else {
-            fallback_h.max(60.0 * scale)
-        };
-        let y_bottom = y_top - h;
         draw_single_chart(
             canvas,
             chart,

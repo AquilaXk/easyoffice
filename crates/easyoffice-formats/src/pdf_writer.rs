@@ -64,7 +64,8 @@ pub(crate) fn char_units(c: char) -> u32 {
 /// Width of `text` in thousandths of the font size as [`text_ops`] shows it: the Latin font's widths for what it shows,
 /// a full em for the rest. Latin-1 signs outside the ASCII table count 556, the width of most of them.
 pub(crate) fn mixed_units(text: &str) -> u32 {
-    text.chars().map(char_units).sum()
+    text.chars()
+        .fold(0u32, |acc, c| acc.saturating_add(char_units(c)))
 }
 
 /// The operators that show `text` at (`x`, `y`) in `size` pt. A line the Korean font shows whole is one text object in one
@@ -767,5 +768,11 @@ mod tests {
         };
         let s = super::image_content_stream(&page);
         assert!(s.contains(" 0 cm /Im1 Do Q"), "{s}");
+    }
+
+    #[test]
+    fn mixed_units_saturates_without_overflow() {
+        let huge_w = "W".repeat(4_600_000);
+        assert_eq!(mixed_units(&huge_w), u32::MAX);
     }
 }

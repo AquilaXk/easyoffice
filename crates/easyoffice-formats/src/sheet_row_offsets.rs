@@ -67,13 +67,7 @@ impl RowOffsets {
 
     fn build(styling: &SheetStyling, with_hidden: bool) -> Self {
         let base = whole_px(styling.base_row_px(GRID_ROW_PX));
-        let mut hidden = Vec::new();
-        if with_hidden {
-            let (user, filtered) = styling.hidden_row_runs();
-            hidden = user;
-            hidden.extend(filtered);
-            normalize_runs(&mut hidden);
-        }
+        let hidden = Self::hidden_runs(styling, with_hidden);
         let mut spans: Vec<(u32, u32, u32)> = hidden.iter().map(|&(a, b)| (a, b, 0)).collect();
         for &row in styling.row_heights.keys() {
             let px = whole_px(styling.row_height_px(row, GRID_ROW_PX));
@@ -81,6 +75,65 @@ impl RowOffsets {
                 spans.push((row, row, px));
             }
         }
+        Self::from_spans(base, spans)
+    }
+
+    /// Builds `RowOffsets` using unscaled PDF row heights (`area_pt`) over `area_start..` when any
+    /// row inside the print area grew beyond `styling.shown_row_px` (e.g. wrapped text, `PD-343`).
+    /// Returns `None` when no row in `area_pt` differs from `styling`.
+    pub(crate) fn of_with_area_pt(
+        styling: &SheetStyling,
+        area_start: u32,
+        area_pt: &[f64],
+    ) -> Option<Self> {
+        const PX_PER_PT: f64 = 4.0 / 3.0;
+        const PT_PER_PX: f64 = 0.75;
+        let changed = area_pt.iter().enumerate().any(|(i, &pt)| {
+            let row = area_start + i as u32;
+            let base_pt = styling.shown_row_px(row, GRID_ROW_PX) * PT_PER_PX;
+            pt > 0.0 && (pt - base_pt).abs() > 1e-6
+        });
+        if !changed {
+            return None;
+        }
+        let area_end = area_start.saturating_add(area_pt.len() as u32);
+        let base = whole_px(styling.base_row_px(GRID_ROW_PX));
+        let hidden = Self::hidden_runs(styling, true);
+        let mut spans: Vec<(u32, u32, u32)> = hidden.iter().map(|&(a, b)| (a, b, 0)).collect();
+        for &row in styling.row_heights.keys() {
+            if (area_start..area_end).contains(&row) || run_contains(&hidden, row) {
+                continue;
+            }
+            let px = whole_px(styling.row_height_px(row, GRID_ROW_PX));
+            if px != base {
+                spans.push((row, row, px));
+            }
+        }
+        for (i, &pt) in area_pt.iter().enumerate() {
+            let row = area_start + i as u32;
+            if pt <= 0.0 || run_contains(&hidden, row) {
+                continue;
+            }
+            let px = whole_px(pt * PX_PER_PT);
+            if px != base {
+                spans.push((row, row, px));
+            }
+        }
+        Some(Self::from_spans(base, spans))
+    }
+
+    fn hidden_runs(styling: &SheetStyling, with_hidden: bool) -> Vec<(u32, u32)> {
+        let mut hidden = Vec::new();
+        if with_hidden {
+            let (user, filtered) = styling.hidden_row_runs();
+            hidden = user;
+            hidden.extend(filtered);
+            normalize_runs(&mut hidden);
+        }
+        hidden
+    }
+
+    fn from_spans(base: u32, mut spans: Vec<(u32, u32, u32)>) -> Self {
         spans.sort_unstable();
         let mut bands = Vec::with_capacity(spans.len());
         let mut before = 0i64;
@@ -286,6 +339,20 @@ mod tests {
             let pt = row_height_pt(&st, row, 1.0);
             assert_eq!(pt, rows.height(row) as f64 * PDF_PT_PER_PX, "row {row}");
         }
+    }
+
+    #[test]
+    fn of_with_area_pt_updates_expanded_rows_and_skips_unchanged_areas() {
+        let st = styling(&[(1, 30.0)], None, &[(2, 2)]);
+        let unchanged = [16.5, 30.0, 0.0, 16.5];
+        assert!(RowOffsets::of_with_area_pt(&st, 0, &unchanged).is_none());
+
+        let expanded = [45.0, 30.0, 0.0, 16.5];
+        let rows = RowOffsets::of_with_area_pt(&st, 0, &expanded).expect("row 0 grew to 60px");
+        assert_eq!(rows.height(0), 60);
+        assert_eq!(rows.height(1), 40);
+        assert_eq!(rows.height(2), 0);
+        assert_eq!(rows.top(3), 100);
     }
 
     #[test]
