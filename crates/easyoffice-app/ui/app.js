@@ -68,7 +68,7 @@
     settleDirty: () => workspaceSession.settle(),
     isDirty: () => workspaceSession.isDirty(),
     save: () => saveWorkspaceDocument({ closing: true }),
-    discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); },
+    discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); host.__EASYOFFICE_SHEET_TAB_STRIP__?.clearGroup?.(); },
   });
 
   const ribbonHistory = host.__EASYOFFICE_CREATE_RIBBON_HISTORY__({
@@ -563,7 +563,7 @@
         const rawAttr = btn.dataset.sheetTab;
         const targetSheet =
           rawAttr !== undefined && rawAttr.trim().length > 0 ? rawAttr : "Sheet1";
-        void sheetController.switchSheetTab(targetSheet).catch(() => {});
+        void sheetController.clickSheetTab(targetSheet, { shiftKey: Boolean(e.shiftKey), ctrlKey: Boolean(e.ctrlKey || e.metaKey) }).catch(() => {});
       });
     }
     // The add button puts a new sheet after the last one (the tab menu's insert puts it before a tab).

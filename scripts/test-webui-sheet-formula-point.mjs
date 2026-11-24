@@ -595,6 +595,7 @@ test("Shift+click on a sheet tab writes a 3D sheet span before or after clicking
   assert.equal(bar(document).value, "=SUM(Sheet1:Sheet2!B2");
   assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]').dataset.pointSpan, "true");
   assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]').dataset.pointSpan, "true");
+  assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]').dataset.tabGrouped, undefined, "formula point span does not mark tabs as grouped");
   assert.equal(boxes(document).length, 1, "3D reference shows a ref box on Sheet2 as well");
 
   typeBar(document, ")");

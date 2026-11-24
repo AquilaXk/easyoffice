@@ -723,12 +723,20 @@
       const st = td ? stateOf(td) : null;
       const editing = isEditing(st);
       const mod = ev.ctrlKey || ev.metaKey;
+      const mac = isMacClient();
       // Ctrl+PageDown and Ctrl+PageUp (on a Mac also Option+Right and Option+Left) go to the next and previous sheet (PD-291); a cell
       // being edited keeps the keys for its text.
-      const sheetStep = !editing && api.stepSheet ? nav.sheetStep(ev, isMacClient()) : 0;
+      const sheetStep = !editing && api.stepSheet ? nav.sheetStep(ev, mac) : 0;
       if (sheetStep !== 0) {
         ev.preventDefault();
         api.stepSheet(sheetStep);
+        return;
+      }
+      // Ctrl+Shift+PageDown and Ctrl+Shift+PageUp (on a Mac also Option+Shift+Right and Option+Left) extend or shrink sheet group (PD-346).
+      const sheetGroupStep = !editing && api.stepSheetGroup ? nav.sheetGroupStep(ev, mac) : 0;
+      if (sheetGroupStep !== 0) {
+        ev.preventDefault();
+        api.stepSheetGroup(sheetGroupStep);
         return;
       }
       if (ARROWS[ev.key]) return handleArrow(ev, st, editing);
@@ -883,6 +891,22 @@
       document.addEventListener("mousemove", mouse.onMouseMove);
       document.addEventListener("mouseup", mouse.onMouseUp);
       host.addEventListener?.("mouseup", mouse.onMouseUp);
+      const tabBar = document.getElementById("sheet-tab-bar");
+      tabBar?.addEventListener("keydown", (ev) => {
+        if (ev.target?.closest?.("input, textarea")) return;
+        const mac = isMacClient();
+        const sStep = api.stepSheet ? nav.sheetStep(ev, mac) : 0;
+        if (sStep !== 0) {
+          ev.preventDefault();
+          api.stepSheet(sStep);
+          return;
+        }
+        const gStep = api.stepSheetGroup ? nav.sheetGroupStep(ev, mac) : 0;
+        if (gStep !== 0) {
+          ev.preventDefault();
+          api.stepSheetGroup(gStep);
+        }
+      });
     }
 
     return {
@@ -902,6 +926,7 @@
       shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),
       handleBarKey: point.barKey,
+      holdsTabPress: point.holdsTabPress,
       detachForSwitch: point.detach,
       afterSheetSwitch: point.afterSwitch,
       insertFormulaName: point.insertName,

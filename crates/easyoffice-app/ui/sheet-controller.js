@@ -552,13 +552,38 @@
       pushCellUndoSnapshotIfNeeded,
       retractCellUndoSnapshot,
       switchSheet: (name) => performSwitchSheetTabAsync(name),
-      // The next (1) or previous (-1) shown sheet in tab order, as the keys of `sheet-nav.js` ask for (PD-291).
+      // The next (1) or previous (-1) shown sheet in tab order, as the keys of `sheet-nav.js` ask for (PD-291),
+      // clearing any active sheet group (PD-346).
       stepSheet: (step) => {
-        const keys = [...new Set([...Object.keys(sheetDataStore), getActiveSheetName()])];
-        const shown = host.__EASYOFFICE_SHEET_TAB_STRIP__.visibleOf(keys);
-        const target = host.__EASYOFFICE_SHEET_NAV__.sheetTarget(shown, getActiveSheetName(), step);
-        // The key goes on working in the new sheet: the focus comes back to its selected cell.
-        if (target !== null) void switchSheetTab(target).then(() => input.focusAnchor()).catch(() => {});
+        void enqueueWorkspaceHistoryOp(async () => {
+          const strip = host.__EASYOFFICE_SHEET_TAB_STRIP__;
+          const active = getActiveSheetName();
+          const hadGroup = strip.isGrouped();
+          const keys = [...new Set([...Object.keys(sheetDataStore), active])];
+          const shown = strip.visibleOf(keys);
+          const target = host.__EASYOFFICE_SHEET_NAV__.sheetTarget(shown, active, step);
+          if (target !== null) {
+            strip.clearGroup(target);
+            await performSwitchSheetTabAsync(target);
+            input.focusAnchor();
+          } else if (hadGroup) {
+            strip.clearGroup(active);
+            strip.syncSelection(document, keys, active);
+            input.focusAnchor();
+          }
+        }).catch(() => {});
+      },
+      // Extends or shrinks grouped sheet selection `[anchor..target]` along tab order (PD-346).
+      stepSheetGroup: (step) => {
+        void enqueueWorkspaceHistoryOp(async () => {
+          const strip = host.__EASYOFFICE_SHEET_TAB_STRIP__;
+          const active = getActiveSheetName();
+          const keys = [...new Set([...Object.keys(sheetDataStore), active])];
+          const next = strip.stepGroup(keys, active, step);
+          if (!next) return;
+          await performSwitchSheetTabAsync(next.active);
+          input.focusAnchor();
+        }).catch(() => {});
       },
       ensureSheetCellFocusEntry,
       syncSheetCellFocusBaseline,
@@ -741,6 +766,44 @@
       return enqueueWorkspaceHistoryOp(() => performSwitchSheetTabAsync(targetSheetName));
     }
 
+    // Handles sheet tab pointer selection (Shift range, Ctrl/Cmd toggle, plain click inside/outside group) while
+    // yielding cleanly to formula point mode when active.
+    function clickSheetTab(targetSheetName, mods = {}) {
+      const shiftKey = Boolean(mods.shiftKey);
+      const ctrlKey = Boolean(mods.ctrlKey);
+      const pointing = Boolean(input.holdsTabPress?.());
+      return enqueueWorkspaceHistoryOp(async () => {
+        const strip = host.__EASYOFFICE_SHEET_TAB_STRIP__;
+        const active = getActiveSheetName();
+        const keys = [...new Set([...Object.keys(sheetDataStore), active])];
+        if (pointing) {
+          strip.clearGroup();
+          return performSwitchSheetTabAsync(targetSheetName);
+        }
+        if (shiftKey) {
+          const next = strip.rangeGroup(keys, active, targetSheetName);
+          if (!next) return;
+          if (next.active !== active) return performSwitchSheetTabAsync(next.active);
+          strip.syncSelection(document, keys, active);
+          return;
+        }
+        if (ctrlKey) {
+          const next = strip.toggleGroup(keys, active, targetSheetName);
+          if (!next || !next.changed) return;
+          if (next.switched) return performSwitchSheetTabAsync(next.active);
+          strip.syncSelection(document, keys, next.active);
+          return;
+        }
+        if (strip.isGrouped() && strip.hasInGroup(targetSheetName)) {
+          if (targetSheetName !== active) return performSwitchSheetTabAsync(targetSheetName);
+          strip.syncSelection(document, keys, active);
+          return;
+        }
+        strip.clearGroup(targetSheetName);
+        return performSwitchSheetTabAsync(targetSheetName);
+      });
+    }
+
     return {
       DEFAULT_SHEET_ROW_COUNT,
       bumpSnapshotEpoch,
@@ -788,6 +851,7 @@
       syncSheetFormatToolbar: format.syncToolbar,
       performSwitchSheetTabAsync,
       switchSheetTab,
+      clickSheetTab,
       captureView: viewLive.capture,
       restoreView: viewLive.restore,
     };

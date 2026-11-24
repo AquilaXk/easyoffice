@@ -162,13 +162,47 @@
     return 0;
   }
 
+  // The keys that extend or shrink grouped sheet tabs (PD-346): Ctrl+Shift+PageDown/PageUp on all platforms, and
+  // Option+Shift+Right/Left on a Mac while not editing a cell. Returns 1, -1 or 0.
+  function sheetGroupStep(ev, mac) {
+    if (!ev || !ev.shiftKey) return 0;
+    const { key } = ev;
+    if ((key === "PageDown" || key === "PageUp") && ev.ctrlKey && !ev.metaKey && !ev.altKey) return key === "PageDown" ? 1 : -1;
+    if (mac && (key === "ArrowRight" || key === "ArrowLeft") && ev.altKey && !ev.ctrlKey && !ev.metaKey) return key === "ArrowRight" ? 1 : -1;
+    return 0;
+  }
+
   // The sheet `step` places from `active` among the shown sheets in tab order, null at the first or last sheet (the spreadsheet
   // program does not wrap) and when `active` is not a shown sheet.
   function sheetTarget(shown, active, step) {
+    if (!Array.isArray(shown) || !Number.isInteger(step) || step === 0) return null;
     const at = shown.indexOf(active);
     const to = at + step;
-    return at >= 0 && step !== 0 && to >= 0 && to < shown.length ? shown[to] : null;
+    return at >= 0 && to >= 0 && to < shown.length ? shown[to] : null;
   }
 
-  host.__EASYOFFICE_SHEET_NAV__ = { step, jump, cycle, afterTabs, page, home, end, sheetStep, sheetTarget };
+  // Contiguous sheet selection `[anchor..target]` in `shown` tab order. If `anchor` is missing or hidden it falls back
+  // to `active` (or `target` if `active` is absent); returns null when `target` is not in `shown`.
+  function sheetSpanBetween(shown, anchor, active, target) {
+    if (!Array.isArray(shown)) return null;
+    const targetAt = shown.indexOf(target);
+    if (targetAt < 0) return null;
+    const anchorAt = shown.indexOf(anchor);
+    const activeAt = shown.indexOf(active);
+    const from = anchorAt >= 0 ? anchorAt : activeAt >= 0 ? activeAt : targetAt;
+    const lo = Math.min(from, targetAt);
+    const hi = Math.max(from, targetAt);
+    return { anchor: shown[from], active: target, selected: shown.slice(lo, hi + 1) };
+  }
+
+  // Next contiguous sheet selection after stepping `step` from `active` toward/away from `anchor` among `shown` sheets.
+  // Shrinking back toward `anchor` narrows the group to `[anchor..target]`; stepping out of bounds does not wrap and returns null.
+  function sheetGroupRange(shown, anchor, active, step) {
+    const target = sheetTarget(shown, active, step);
+    if (target === null) return null;
+    const effectiveAnchor = shown.includes(anchor) ? anchor : active;
+    return sheetSpanBetween(shown, effectiveAnchor, active, target);
+  }
+
+  host.__EASYOFFICE_SHEET_NAV__ = { step, jump, cycle, afterTabs, page, home, end, sheetStep, sheetGroupStep, sheetTarget, sheetSpanBetween, sheetGroupRange };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -29,6 +29,8 @@
       "move-right": (tabs, sheet) => tabs.move(sheet, 1),
       hide: (tabs, sheet) => tabs.hide(sheet),
       unhide: (tabs) => tabs.unhide(),
+      "select-all": (tabs, sheet) => tabs.selectAll(sheet),
+      ungroup: (tabs) => tabs.ungroup(),
     };
 
     // The states of `tabs.can` that grey an item out.
@@ -42,6 +44,8 @@
       "move-right": "moveRight",
       hide: "hide",
       unhide: "unhide",
+      "select-all": "selectAll",
+      ungroup: "ungroup",
     };
 
     // The `탭 색` palette: the colours of the style bar, 색 없음 and 다른 색..., for the tab that was pressed.

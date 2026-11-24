@@ -92,12 +92,7 @@
       if (!sheetDataStore[target]) sheetDataStore[target] = {};
       restoreDomSheetCells(target);
       refreshFocusedSheetCellPendingSnapshot();
-      document.getElementById("sheet-tab-bar")?.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((b) => {
-        const isAct = b.dataset.sheetTab === target;
-        b.classList.toggle("active", isAct);
-        b.setAttribute("role", "tab");
-        b.setAttribute("aria-selected", isAct ? "true" : "false");
-      });
+      host.__EASYOFFICE_SHEET_TAB_STRIP__?.syncSelection(document, [...new Set([...Object.keys(sheetDataStore), target])], target);
       restore(target);
       afterSwitch(target);
     }

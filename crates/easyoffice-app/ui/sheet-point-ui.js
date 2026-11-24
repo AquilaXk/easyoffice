@@ -221,8 +221,12 @@
       const activeSpan = editing && tabSpan ? sheetSpanSet(tabSpan.start, tabSpan.end) : null;
       for (const btn of sheetTabs()) {
         const name = btn.dataset.sheetTab?.toLowerCase();
-        if (activeSpan && name && activeSpan.has(name)) btn.dataset.pointSpan = "true";
-        else delete btn.dataset.pointSpan;
+        if (activeSpan && name && activeSpan.has(name)) {
+          btn.dataset.pointSpan = "true";
+          delete btn.dataset.tabGrouped;
+        } else {
+          delete btn.dataset.pointSpan;
+        }
       }
     }
 
@@ -818,6 +822,7 @@
       editedEnded: editEnded,
       clearPoint,
       holdsBar: () => Boolean(session),
+      holdsTabPress,
       holdsBlur: () => holdingBlur,
       originSheet,
       hasInsertSurface,

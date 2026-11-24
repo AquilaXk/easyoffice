@@ -367,3 +367,198 @@ test("F3 (이름 붙여넣기) handles empty focus, arrow keys, double-click, me
   await sleep(60);
   assert.equal(await js(`document.getElementById("sheet-name-box-list").hidden`), true, "outside click closes Name Box dropdown");
 });
+
+test("Ctrl+Shift+PageDown/PageUp, Shift/Ctrl+click, and tab menu group selection work in real Chrome against the engine (PD-346)", { skip }, async () => {
+  await click("A1");
+  await js(`document.getElementById("btn-add-sheet-tab").click()`);
+  await sleep(160);
+  await js(`document.getElementById("btn-add-sheet-tab").click()`);
+  await sleep(160);
+  await js(`document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]').click()`);
+  await sleep(140);
+  await click("A1");
+
+  const snapTabs = async () =>
+    JSON.parse(
+      await js(`JSON.stringify([...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => ({
+        name: b.dataset.sheetTab,
+        active: b.classList.contains("active"),
+        grouped: b.dataset.tabGrouped || null,
+        selected: b.getAttribute("aria-selected"),
+      })))`)
+    );
+
+  // Ctrl+Shift+PageDown twice: Sheet1 -> Sheet2 -> Sheet3; active moves and anchor keeps Sheet1..Sheet3 grouped.
+  await key("PageDown", CTRL | SHIFT);
+  await sleep(140);
+  let tabs = await snapTabs();
+  assert.deepEqual(tabs, [
+    { name: "Sheet1", active: false, grouped: "true", selected: "true" },
+    { name: "Sheet2", active: true, grouped: null, selected: "true" },
+    { name: "Sheet3", active: false, grouped: null, selected: "false" },
+  ]);
+
+  // Visual style on grouped inactive tab uses design tokens and differs from unselected tabs.
+  const visuals = JSON.parse(
+    await js(`JSON.stringify((() => {
+      const s1 = getComputedStyle(document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]'));
+      const s3 = getComputedStyle(document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet3"]'));
+      return { s1Bg: s1.backgroundColor, s1Shadow: s1.boxShadow, s3Bg: s3.backgroundColor, s3Shadow: s3.boxShadow };
+    })())`)
+  );
+  assert.notEqual(visuals.s1Bg, visuals.s3Bg, "grouped inactive tab background distinguishes it from unselected tabs");
+  assert.notEqual(visuals.s1Shadow, visuals.s3Shadow, "grouped inactive tab shows bottom group indicator shadow");
+
+  await key("PageDown", CTRL | SHIFT);
+  await sleep(140);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.selected]), [
+    ["Sheet1", false, "true"],
+    ["Sheet2", false, "true"],
+    ["Sheet3", true, "true"],
+  ]);
+
+  // Ctrl+Shift+PageUp shrinks back toward anchor Sheet1 -> [Sheet1, Sheet2].
+  await key("PageUp", CTRL | SHIFT);
+  await sleep(140);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", false, "true", "true"],
+    ["Sheet2", true, null, "true"],
+    ["Sheet3", false, null, "false"],
+  ]);
+
+  // Plain Ctrl+PageUp clears group and moves to Sheet1.
+  await key("PageUp", CTRL);
+  await sleep(140);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", true, null, "true"],
+    ["Sheet2", false, null, "false"],
+    ["Sheet3", false, null, "false"],
+  ]);
+
+  // Right-click tab -> 모든 시트 선택 -> verify focus returns to grid and Ctrl+Shift+PageDown/PageUp still works immediately!
+  const tabRect = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
+  assert.ok(tabRect);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 2, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 0, clickCount: 1 });
+  await sleep(80);
+  await js(`document.querySelector('#sheet-tab-menu [data-tab-act="select-all"]').click()`);
+  await sleep(100);
+  tabs = await snapTabs();
+  assert.equal(tabs.every((t) => t.selected === "true"), true, "모든 시트 선택 selects every visible tab");
+  assert.equal(await js(`document.activeElement?.tagName`), "TD", "focus restores to grid after 모든 시트 선택");
+  await key("PageDown", CTRL | SHIFT);
+  await sleep(120);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", false, "true", "true"],
+    ["Sheet2", true, null, "true"],
+    ["Sheet3", false, null, "false"],
+  ]);
+  await key("PageUp", CTRL);
+  await sleep(120);
+
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 2, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 0, clickCount: 1 });
+  await sleep(80);
+  await js(`document.querySelector('#sheet-tab-menu [data-tab-act="select-all"]').click()`);
+  await sleep(100);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 2, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 0, clickCount: 1 });
+  await sleep(80);
+  assert.equal(await js(`document.querySelector('#sheet-tab-menu [data-tab-act="delete"]').getAttribute("aria-disabled")`), "true");
+  assert.equal(await js(`document.querySelector('#sheet-tab-menu [data-tab-act="hide"]').getAttribute("aria-disabled")`), "true");
+  await js(`document.querySelector('#sheet-tab-menu [data-tab-act="ungroup"]').click()`);
+  await sleep(100);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", true, null, "true"],
+    ["Sheet2", false, null, "false"],
+    ["Sheet3", false, null, "false"],
+  ]);
+
+  // Shift+click Sheet3 groups all 3 via mouse; Cmd/Ctrl+click Sheet2 toggles it out cleanly.
+  const r3 = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet3"]');
+  assert.ok(r3);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: r3.left + r3.width / 2, y: r3.top + r3.height / 2, button: "left", buttons: 1, clickCount: 1, modifiers: SHIFT });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r3.left + r3.width / 2, y: r3.top + r3.height / 2, button: "left", buttons: 0, clickCount: 1, modifiers: SHIFT });
+  await sleep(120);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", false, "true", "true"],
+    ["Sheet2", false, "true", "true"],
+    ["Sheet3", true, null, "true"],
+  ]);
+
+  // Tab color + grouped + .drop-before must still show drop indicator shadow (CSS specificity check).
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 2, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "right", buttons: 0, clickCount: 1 });
+  await sleep(80);
+  await js(`document.querySelector('#sheet-tab-color-panel .sb-hl-swatch[title="#ff0000"]').click()`);
+  await sleep(140);
+  const dropCssCheck = JSON.parse(
+    await js(`JSON.stringify((() => {
+      const btn = document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]');
+      const before = getComputedStyle(btn).boxShadow;
+      btn.classList.add("drop-before");
+      const withDrop = getComputedStyle(btn).boxShadow;
+      btn.classList.remove("drop-before");
+      return { grouped: btn.dataset.tabGrouped, color: btn.dataset.tabColor, before, withDrop };
+    })())`)
+  );
+  assert.equal(dropCssCheck.grouped, "true");
+  assert.equal(dropCssCheck.color, "ff0000");
+  assert.notEqual(dropCssCheck.withDrop, dropCssCheck.before, "drop-before remains visible on grouped colored tab");
+
+  const modToggle = process.platform === "darwin" ? 4 : CTRL;
+  const r2 = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]');
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, button: "left", buttons: 1, clickCount: 1, modifiers: modToggle });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, button: "left", buttons: 0, clickCount: 1, modifiers: modToggle });
+  await sleep(100);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", false, "true", "true"],
+    ["Sheet2", false, null, "false"],
+    ["Sheet3", true, null, "true"],
+  ]);
+
+  // Clicking outside group (Sheet2) clears group cleanly.
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, button: "left", buttons: 1, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(100);
+  tabs = await snapTabs();
+  assert.deepEqual(tabs.map((t) => [t.name, t.active, t.grouped, t.selected]), [
+    ["Sheet1", false, null, "false"],
+    ["Sheet2", true, null, "true"],
+    ["Sheet3", false, null, "false"],
+  ]);
+
+  // Formula 3D point mode clears any active group without mixing data-tab-grouped and data-point-span; editing cell blocks Ctrl+Shift+PageDown.
+  await click("A1");
+  await key("PageDown", CTRL | SHIFT);
+  await sleep(100);
+  assert.deepEqual((await snapTabs()).filter((t) => t.selected === "true").map((t) => t.name), ["Sheet2", "Sheet3"]);
+  await text("=SUM(");
+  await sleep(60);
+  await key("PageDown", CTRL | SHIFT);
+  await sleep(80);
+  assert.equal((await snapTabs()).find((t) => t.active).name, "Sheet3", "editing cell does not switch sheets on Ctrl+Shift+PageDown");
+  await click("B2");
+  await sleep(60);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "left", buttons: 1, clickCount: 1, modifiers: SHIFT });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tabRect.left + tabRect.width / 2, y: tabRect.top + tabRect.height / 2, button: "left", buttons: 0, clickCount: 1, modifiers: SHIFT });
+  await sleep(120);
+  const pointCheck = JSON.parse(
+    await js(`JSON.stringify([...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => ({
+      name: b.dataset.sheetTab,
+      pointSpan: b.dataset.pointSpan || null,
+      grouped: b.dataset.tabGrouped || null,
+    })))`)
+  );
+  assert.equal(pointCheck.some((t) => t.pointSpan === "true"), true, "formula 3D span marks tabs");
+  assert.equal(pointCheck.every((t) => t.grouped === null), true, "formula 3D span leaves no data-tab-grouped");
+  await key("Escape");
+  await sleep(80);
+});

@@ -648,11 +648,13 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   const t = h.tab("Sheet1");
   t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
   const off = [...h.menu().querySelectorAll(".md-item")].filter((el) => el.getAttribute("aria-disabled") === "true").map((el) => el.dataset.tabAct);
-  assert.deepEqual(off, ["move-left", "unhide"]);
+  assert.deepEqual(off, ["move-left", "unhide", "ungroup"]);
   const focused = () => h.document.activeElement.dataset.tabAct;
   assert.equal(focused(), "insert");
   const press = (key) => h.menu().dispatchEvent({ type: "keydown", key, target: h.document.activeElement });
   press("End");
+  assert.equal(focused(), "select-all", "ungroup is greyed and skipped");
+  press("ArrowUp");
   assert.equal(focused(), "hide", "unhide is greyed and skipped");
   press("ArrowUp");
   assert.equal(focused(), "move-right");
@@ -1114,4 +1116,356 @@ test("copying a sheet rewrites structured references on the copy to the copied t
   assert.equal(defs.find((d) => !d.scope && d.name === "GlobalTotal")?.refersTo, "=SUM(표1[단가])");
   await h.history("studio-undo");
   assert.deepEqual(h.names(), ["Sheet1", "Sheet2"]);
+});
+
+// ---- grouped sheet tabs: Shift/Ctrl click, menu actions, safe mutations, file/close reset (PD-346) ----------------
+
+test("Shift+click and Ctrl/Cmd+click manage sheet groups, never allow 0 selected, and plain click outside ungroups (PD-346)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "Sheet1", cells: { A1: "1" } },
+    { name: "Sheet2", cells: { A1: "2" } },
+    { name: "Sheet3", cells: { A1: "3" } },
+    { name: "Sheet4", cells: { A1: "4" } },
+  ]);
+  const clickTab = async (name, mods = {}) => {
+    const t = h.tab(name);
+    t.focus?.();
+    if (mods.shiftKey || mods.ctrlKey || mods.metaKey || mods.altKey) {
+      const base = { button: 0, bubbles: true, cancelable: true, ...mods };
+      t.dispatchEvent({ type: "mousedown", target: t, ...base });
+      t.dispatchEvent({ type: "mouseup", target: t, ...base });
+      t.dispatchEvent({ type: "click", target: t, ...base });
+    } else {
+      h.userClick(t);
+    }
+    await flushAsyncTurns(30);
+  };
+  const selected = () => h.tabs().filter((b) => b.getAttribute("aria-selected") === "true").map((b) => b.dataset.sheetTab);
+  const groupedAttr = () => h.tabs().filter((b) => b.dataset.tabGrouped === "true").map((b) => b.dataset.sheetTab);
+
+  // Shift+click from Sheet1 to Sheet3 selects [Sheet1, Sheet2, Sheet3] with Sheet3 active.
+  await clickTab("Sheet3", { shiftKey: true });
+  assert.equal(h.active(), "Sheet3");
+  assert.deepEqual(selected(), ["Sheet1", "Sheet2", "Sheet3"]);
+  assert.deepEqual(groupedAttr(), ["Sheet1", "Sheet2"]);
+
+  // Shift+click back onto Sheet2 shrinks toward anchor Sheet1 -> [Sheet1, Sheet2].
+  await clickTab("Sheet2", { shiftKey: true });
+  assert.equal(h.active(), "Sheet2");
+  assert.deepEqual(selected(), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(groupedAttr(), ["Sheet1"]);
+
+  // Plain click on Sheet1 (inside the group) switches active to Sheet1 without clearing group.
+  await clickTab("Sheet1");
+  assert.equal(h.active(), "Sheet1");
+  assert.deepEqual(selected(), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(groupedAttr(), ["Sheet2"]);
+
+  // Plain click on Sheet4 (outside the group) clears group cleanly.
+  await clickTab("Sheet4");
+  assert.equal(h.active(), "Sheet4");
+  assert.deepEqual(selected(), ["Sheet4"]);
+  assert.deepEqual(groupedAttr(), []);
+
+  // Ctrl+click on sole selected Sheet4 cannot reduce selection to 0.
+  await clickTab("Sheet4", { ctrlKey: true });
+  assert.equal(h.active(), "Sheet4");
+  assert.deepEqual(selected(), ["Sheet4"]);
+
+  // Cmd+click adds non-adjacent Sheet2 while keeping Sheet4 active, then Ctrl+click toggles Sheet4 off and moves active to nearest grouped Sheet2.
+  await clickTab("Sheet2", { metaKey: true });
+  assert.equal(h.active(), "Sheet4");
+  assert.deepEqual(selected(), ["Sheet2", "Sheet4"]);
+  assert.deepEqual(groupedAttr(), ["Sheet2"]);
+  await clickTab("Sheet4", { ctrlKey: true });
+  assert.equal(h.active(), "Sheet2");
+  assert.deepEqual(selected(), ["Sheet2"]);
+  assert.deepEqual(groupedAttr(), []);
+
+  // Non-contiguous [Sheet1, Sheet3, Sheet4] with active Sheet4: Ctrl+click Sheet4 moves active to nearest left (Sheet3), not Sheet1.
+  await clickTab("Sheet1");
+  await clickTab("Sheet3", { ctrlKey: true });
+  await clickTab("Sheet4", { ctrlKey: true });
+  await clickTab("Sheet4"); // make Sheet4 active inside group [Sheet1, Sheet3, Sheet4]
+  assert.equal(h.active(), "Sheet4");
+  await clickTab("Sheet4", { ctrlKey: true });
+  assert.equal(h.active(), "Sheet3", "deselecting rightmost active tab activates nearest left grouped tab");
+  assert.deepEqual(selected(), ["Sheet1", "Sheet3"]);
+});
+
+test("tab menu 모든 시트 선택 and 시트 그룹 해제, grouped 색/이동/복사/숨기기/삭제 and all-visible refusal, undo and reset (PD-346)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "HiddenS", cells: { A1: "h" }, hidden: true },
+    { name: "S1", cells: { A1: "10" } },
+    { name: "S2", cells: { A1: "20" } },
+    { name: "S3", cells: { A1: "=S1!A1+S2!A1" } },
+  ]);
+  const selected = () => h.tabs().filter((b) => b.getAttribute("aria-selected") === "true").map((b) => b.dataset.sheetTab);
+  const groupedAttr = () => h.tabs().filter((b) => b.dataset.tabGrouped === "true").map((b) => b.dataset.sheetTab);
+  const openMenu = (name) => {
+    const t = h.tab(name);
+    t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  };
+  const menuState = (act) => h.menu().querySelector(`[data-tab-act="${act}"]`).getAttribute("aria-disabled") === "true";
+
+  // Select all visible sheets via tab menu: S1, S2, S3 (skips HiddenS).
+  await h.tabMenu("S1", "select-all");
+  assert.deepEqual(selected(), ["S1", "S2", "S3"]);
+  assert.deepEqual(groupedAttr(), ["S2", "S3"]);
+  assert.match(h.status(), /모든 시트 선택/);
+
+  // With all visible sheets selected, 삭제/숨기기/이름 바꾸기/모든 시트 선택 are disabled; 시트 그룹 해제 is enabled.
+  openMenu("S2");
+  assert.equal(menuState("delete"), true, "cannot delete all visible sheets");
+  assert.equal(menuState("hide"), true, "cannot hide all visible sheets");
+  assert.equal(menuState("rename"), true, "cannot rename a multi-sheet group");
+  assert.equal(menuState("select-all"), true, "all shown sheets already selected");
+  assert.equal(menuState("ungroup"), false, "ungroup is available");
+  // Attempt via sheet menu action refuses hiding/deleting all visible sheets even with hidden sheet present.
+  h.userClick(h.menu().querySelector('[data-tab-act="hide"]'));
+  await flushAsyncTurns(20);
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+  await h.tabMenu("S2", "ungroup");
+  assert.deepEqual(selected(), ["S1"]);
+  assert.deepEqual(groupedAttr(), []);
+  assert.match(h.status(), /시트 그룹 해제/);
+
+  // Refusing delete & hide when invoked directly while all visible sheets are selected.
+  await h.tabMenu("S1", "select-all");
+  await h.document.getElementById("btn-add-sheet-tab").blur?.();
+  const deleteItem = h.document.querySelector('[data-sheet-act="tab-delete"]');
+  if (deleteItem) {
+    h.userClick(deleteItem);
+    await flushAsyncTurns(30);
+    assert.deepEqual(h.names(), ["S1", "S2", "S3"], "all visible sheets stay after refused delete");
+  }
+
+  // Group subset [S1, S2] via Shift+click S2.
+  const shiftS2 = h.tab("S2");
+  h.userClick(h.tab("S1"));
+  await flushAsyncTurns(20);
+  shiftS2.dispatchEvent({ type: "mousedown", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "mouseup", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "click", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  await flushAsyncTurns(20);
+  assert.deepEqual(selected(), ["S1", "S2"]);
+
+  // Apply tab color red to [S1, S2] in one undo step.
+  openMenu("S1");
+  const red = [...h.document.querySelectorAll("#sheet-tab-color-panel .sb-hl-swatch")].find((s) => s.title === "#ff0000");
+  h.userClick(red);
+  await flushAsyncTurns(30);
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  assert.equal(layout.tabColorOf("S1"), "ff0000");
+  assert.equal(layout.tabColorOf("S2"), "ff0000");
+  assert.equal(layout.tabColorOf("S3"), null);
+  await h.history("studio-undo");
+  assert.equal(layout.tabColorOf("S1"), null);
+  assert.equal(layout.tabColorOf("S2"), null);
+
+  // Move group [S1, S2] right past S3, then undo.
+  await h.tabMenu("S2", "move-right");
+  assert.deepEqual(h.names(), ["S3", "S1", "S2"]);
+  assert.deepEqual(selected(), ["S1", "S2"], "group survives moving");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // Hide group [S1, S2] together -> S3 becomes active, HiddenS stays hidden; undo restores both visible.
+  await h.tabMenu("S1", "hide");
+  assert.deepEqual(h.names(), ["S3"]);
+  assert.equal(h.active(), "S3");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // Group [S1, S2] again and delete together -> confirms multi-sheet message, S3 survives with #REF! rewrites; undo restores both.
+  const shiftS2Del = h.tab("S2");
+  h.userClick(h.tab("S1"));
+  await flushAsyncTurns(20);
+  shiftS2Del.dispatchEvent({ type: "mousedown", target: shiftS2Del, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2Del.dispatchEvent({ type: "mouseup", target: shiftS2Del, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2Del.dispatchEvent({ type: "click", target: shiftS2Del, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  await flushAsyncTurns(20);
+  await h.tabMenu("S2", "delete");
+  assert.equal(h.document.getElementById("sheet-tab-delete-dialog").open, true);
+  assert.equal(h.document.getElementById("sheet-tab-delete-message").textContent, "'S1, S2' 시트를 삭제하시겠습니까?");
+  userClickOk(h, "sheet-tab-delete-dialog");
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["S3"]);
+  assert.equal(h.active(), "S3");
+  assert.deepEqual(groupedAttr(), []);
+  const afterDel = await h.book();
+  assert.equal(afterDel.S3.cells.A1, "=#REF!+#REF!");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // Group [S1, S2] and duplicate together in one undo step, then undo.
+  h.userClick(h.tab("S1"));
+  await flushAsyncTurns(20);
+  const shiftS2Copy = h.tab("S2");
+  shiftS2Copy.dispatchEvent({ type: "mousedown", target: shiftS2Copy, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2Copy.dispatchEvent({ type: "mouseup", target: shiftS2Copy, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2Copy.dispatchEvent({ type: "click", target: shiftS2Copy, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  await flushAsyncTurns(20);
+  await h.tabMenu("S2", "copy");
+  assert.deepEqual(h.names(), ["S1", "S2", "S1 (2)", "S2 (2)", "S3"]);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // Opening a different workbook or closing/discarding resets previous group selection cleanly.
+  assert.equal(h.active(), "S2");
+  await h.tabMenu("S1", "select-all");
+  assert.deepEqual(selected(), ["S1", "S2", "S3"]);
+  assert.deepEqual(groupedAttr(), ["S1", "S3"]);
+  await h.openBook([{ name: "N1", cells: { A1: "x" } }, { name: "N2", cells: { A1: "y" } }]);
+  assert.deepEqual(h.names(), ["N1", "N2"]);
+  assert.deepEqual(groupedAttr(), [], "opening another file resets sheet group state");
+  assert.deepEqual(selected(), ["N1"]);
+  await h.tabMenu("N1", "select-all");
+  assert.equal(h.host.__EASYOFFICE_SHEET_TAB_STRIP__.isGrouped(), true);
+  h.host.confirm = () => true;
+  h.userClick(h.document.querySelector("[data-window-close]"));
+  await flushAsyncTurns(30);
+  assert.equal(h.host.__EASYOFFICE_SHEET_TAB_STRIP__.isGrouped(), false, "closing window clears sheet group state");
+});
+
+test("grouped Ctrl+drag copy, tab menu focus restore, rename guard/preserve, and delete rollback/redo (PD-346)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "HiddenS", cells: { A1: "h" }, hidden: true },
+    { name: "S1", cells: { A1: "1" }, tabColor: "3366cc" },
+    { name: "S2", cells: { A1: "2" }, tabColor: "cc3333" },
+    {
+      name: "S3",
+      cells: { A1: "=S1!A1+S2!A1" },
+      rules: { cf: [{ t: "expr", r: "A1", formula: "=S1!A1+S2!A1>0", style: { bold: true } }], dv: [] },
+    },
+  ]);
+  const { document } = h;
+  const selected = () => h.tabs().filter((b) => b.getAttribute("aria-selected") === "true").map((b) => b.dataset.sheetTab);
+
+  // 1. Tab menu "모든 시트 선택" restores focus to grid cell so Ctrl+Shift+PageUp works immediately.
+  await h.tabMenu("S1", "select-all");
+  assert.deepEqual(selected(), ["S1", "S2", "S3"]);
+  assert.equal(document.activeElement?.tagName, "TD", "focus returns to active cell after select-all");
+  // Also calling select-all again when already all selected is a no-op (disabled in menu).
+  const saItem = await h.tabMenu("S1", "select-all");
+  assert.equal(saItem.getAttribute("aria-disabled"), "true");
+
+  // Press Ctrl+Shift+PageUp on the focused grid cell: active is S1, wait -> switch to S3 inside group first, then shrink!
+  h.userClick(h.tab("S3"));
+  await flushAsyncTurns(20);
+  h.userClick(document.querySelector('#pane-sheet td[data-cell="A1"]'));
+  document.activeElement.dispatchEvent({ type: "keydown", key: "PageUp", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  await flushAsyncTurns(30);
+  assert.equal(h.active(), "S2");
+  // Now active is S2 (anchor was S1); right-click S2 -> "시트 그룹 해제" -> focus returns to grid cell.
+  await h.tabMenu("S2", "ungroup");
+  assert.deepEqual(selected(), ["S2"]);
+  assert.equal(document.activeElement?.tagName, "TD", "focus returns to active cell after ungroup");
+
+  // 2. Group [S1, S2] and verify UI tab-rename refuses with feedback, while tab menu "탭 색" restores focus.
+  h.userClick(h.tab("S1"));
+  await flushAsyncTurns(20);
+  const shiftS2 = h.tab("S2");
+  shiftS2.dispatchEvent({ type: "mousedown", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "mouseup", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "click", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  await flushAsyncTurns(20);
+  assert.deepEqual(selected(), ["S1", "S2"]);
+  userClickMenuAct(h, "tab-rename");
+  await flushAsyncTurns(20);
+  assert.equal(document.querySelector("#sheet-tab-bar .sheet-tab-edit"), null);
+  assert.match(h.status(), /여러 시트를 선택한 상태/);
+
+  // 3. Ctrl+drag on a grouped tab copies all grouped sheets together in one undo step.
+  const place = () => {
+    h.tabs().forEach((b, i) => {
+      b.getBoundingClientRect = () => ({ left: 10 + i * 80, right: 90 + i * 80, top: 700, bottom: 726, width: 80, height: 26 });
+    });
+  };
+  place();
+  const t1 = h.tab("S1");
+  t1.dispatchEvent({ type: "mousedown", target: t1, clientX: 40, button: 0 });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 500, ctrlKey: true });
+  assert.equal(h.tabs().at(-1).classList.contains("drop-end"), true);
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 500, ctrlKey: true });
+  await flushAsyncTurns(40);
+  assert.deepEqual(h.names(), ["S1", "S2", "S3", "S1 (2)", "S2 (2)"]);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // 4. Multi-sheet delete with CF rules + Undo -> Redo -> Undo, and failure rollback preserves definedNames.
+  h.host.__EASYOFFICE_SHEET_NAMES__.replaceAll([{ name: "N_S1", refersTo: "S1!$A$1" }], true);
+  h.userClick(h.tab("S1"));
+  await flushAsyncTurns(20);
+  shiftS2.dispatchEvent({ type: "mousedown", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "mouseup", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  shiftS2.dispatchEvent({ type: "click", target: shiftS2, button: 0, bubbles: true, cancelable: true, shiftKey: true });
+  await flushAsyncTurns(20);
+  // Simulate engine failure on rewriteRefs -> refuses deletion and preserves sheets & definedNames.
+  h.engine.state.refuse = "수식 오류";
+  await h.tabMenu("S1", "delete");
+  userClickOk(h, "sheet-tab-delete-dialog");
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"], "refused multi-sheet delete keeps all sheets");
+  assert.equal(h.host.__EASYOFFICE_SHEET_NAMES__.getAll()[0]?.refersTo, "S1!$A$1", "definedNames restored on refusal");
+  h.engine.state.refuse = "";
+
+  // Now allow deletion -> S3 survives with CF rule rewritten -> Undo -> Redo -> Undo.
+  await h.tabMenu("S1", "delete");
+  userClickOk(h, "sheet-tab-delete-dialog");
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["S3"]);
+  assert.equal(h.host.__EASYOFFICE_SHEET_RULES__.get("S3").cf[0].formula, "=#REF!+#REF!>0");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+  assert.equal(h.host.__EASYOFFICE_SHEET_RULES__.get("S3").cf[0].formula, "=S1!A1+S2!A1>0");
+  await h.history("studio-redo");
+  assert.deepEqual(h.names(), ["S3"]);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
+
+  // 5. Direct createSheetTabs check: can(hidden).copy === false, and rename preserves active group via renameInGroup.
+  let restored = null;
+  const localStrip = h.host.__EASYOFFICE_SHEET_TAB_STRIP__;
+  const store = { S1: {}, S2: {}, S3: {} };
+  let curActive = "S1";
+  const fakeHistory = {
+    begin: () => ({}),
+    current: () => ({ scope: "sheet", activeSheetName: curActive, activeSheetCellRef: "A1", sheetColumnWidths: {}, sheetRules: {}, sheetLayout: {}, sheetOrder: ["S1", "S2", "S3"], sheetRowCounts: {}, definedNames: [] }),
+    commit: () => {},
+  };
+  const tabsApi = h.host.__EASYOFFICE_CREATE_SHEET_TABS__({
+    document,
+    sheetDataStore: store,
+    sheetStoreHelpers: {
+      sheetMapHasAnyFormula: () => false,
+      rewriteSheetRefs: async () => ({ ok: true, answer: { formulas: [], rules: {} } }),
+    },
+    getActiveSheetName: () => curActive,
+    commitIfEditing: () => {},
+    focusAnchor: () => {},
+    snapshotDomSheetCells: () => store[curActive],
+    recalculateActiveSheetFormulas: async () => {},
+    refreshChrome: () => {},
+    enqueueWorkspaceHistoryOp: (fn) => Promise.resolve().then(fn),
+    drainInFlightSheetWork: async () => {},
+    sheetHistory: fakeHistory,
+    restoreWorkspaceSnapshot: async (next) => {
+      restored = next;
+      curActive = next.activeSheetName;
+      localStrip.render({ document, keys: Object.keys(next.sheets), active: curActive });
+    },
+    viewLive: { capture: () => {}, restore: () => {} },
+    ui: { focusTab: () => {} },
+  });
+  localStrip.clearGroup("S1");
+  localStrip.rangeGroup(["S1", "S2", "S3"], "S1", "S2");
+  assert.equal(tabsApi.can("HiddenS").copy, false, "hidden sheet cannot be copied");
+  const renamedOk = await tabsApi.rename("S2", "Two");
+  assert.equal(renamedOk, true);
+  assert.ok(restored);
+  assert.deepEqual(localStrip.getGroup(["S1", "Two", "S3"], "S1"), ["S1", "Two"], "renameInGroup preserves group before render reconciles");
 });

@@ -86,10 +86,8 @@ test("Option+Right and Option+Left do nothing to the sheets elsewhere", async ()
   assert.equal(t.active(), "가");
 });
 
-test("Ctrl+Shift+PageDown, the page keys and Ctrl+Arrow keep their own meaning", async () => {
+test("the page keys and Ctrl+Arrow keep their own meaning", async () => {
   const t = await open();
-  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
-  assert.equal(t.active(), "가");
   await t.press("PageDown");
   assert.equal(t.active(), "가");
   assert.notEqual(t.at(), "A1", "PageDown moves the cell");
@@ -97,6 +95,100 @@ test("Ctrl+Shift+PageDown, the page keys and Ctrl+Arrow keep their own meaning",
   assert.equal(t.active(), "가");
   await t.press("ArrowRight", { ctrlKey: true });
   assert.equal(t.active(), "가");
+});
+
+test("Ctrl+Shift+PageDown and PageUp group contiguous tabs, shrink toward anchor, stay bounded, and return focus to the cell (PD-346)", async () => {
+  const t = await open();
+  const d = t.document;
+  const tab = (name) => d.querySelector(`#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${name}"]`);
+  const grouped = () =>
+    [...d.querySelectorAll('#sheet-tab-bar .sheet-tab-btn[aria-selected="true"]')].map((b) => b.dataset.sheetTab);
+  const inactiveGrouped = () =>
+    [...d.querySelectorAll('#sheet-tab-bar .sheet-tab-btn[data-tab-grouped="true"]')].map((b) => b.dataset.sheetTab);
+
+  // Start at 가: Ctrl+Shift+PageDown moves to 나 and groups [가, 나].
+  const ev1 = await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(ev1.defaultPrevented, true);
+  assert.equal(t.active(), "나");
+  assert.deepEqual(grouped(), ["가", "나"]);
+  assert.deepEqual(inactiveGrouped(), ["가"]);
+  assert.equal(tab("나").dataset.tabGrouped, undefined, "active tab is not tagged data-tab-grouped");
+  assert.equal(d.activeElement?.tagName, "TD", "focus stays on the cell so consecutive presses keep working");
+
+  // Second Ctrl+Shift+PageDown extends to [가, 나, 다].
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "다");
+  assert.deepEqual(grouped(), ["가", "나", "다"]);
+  assert.deepEqual(inactiveGrouped(), ["가", "나"]);
+
+  // Extend to 라, then hit last sheet again -> no wrap.
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "라");
+  assert.deepEqual(grouped(), ["가", "나", "다", "라"]);
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "라");
+  assert.deepEqual(grouped(), ["가", "나", "다", "라"]);
+
+  // Ctrl+Shift+PageUp shrinks back toward anchor 가 -> [가, 나, 다] -> [가, 나] -> [가] (ungrouped).
+  await t.press("PageUp", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "다");
+  assert.deepEqual(grouped(), ["가", "나", "다"]);
+  await t.press("PageUp", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "나");
+  assert.deepEqual(grouped(), ["가", "나"]);
+  await t.press("PageUp", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "가");
+  assert.deepEqual(grouped(), ["가"]);
+  assert.deepEqual(inactiveGrouped(), []);
+
+  // At first sheet, Ctrl+Shift+PageUp stays on 가 without wrapping.
+  await t.press("PageUp", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "가");
+  assert.deepEqual(grouped(), ["가"]);
+
+  // Plain Ctrl+PageDown clears an existing group and moves to the adjacent tab.
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.deepEqual(grouped(), ["가", "나", "다"]);
+  await t.press("PageUp", { ctrlKey: true });
+  assert.equal(t.active(), "나");
+  assert.deepEqual(grouped(), ["나"]);
+  assert.deepEqual(inactiveGrouped(), []);
+
+  // Even from a focused sheet tab button, Ctrl+Shift+PageDown works and returns focus to the grid.
+  tab("나").focus();
+  await t.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(t.active(), "다");
+  assert.deepEqual(grouped(), ["나", "다"]);
+  assert.equal(d.activeElement?.tagName, "TD");
+});
+
+test("Ctrl+Shift+PageDown skips hidden sheets while grouping, and Mac Option+Shift+Arrow works when idle only", async () => {
+  const hidden = await open({ hidden: ["나", "다"] });
+  await hidden.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(hidden.active(), "라");
+  assert.deepEqual(
+    [...hidden.document.querySelectorAll('#sheet-tab-bar .sheet-tab-btn[aria-selected="true"]')].map((b) => b.dataset.sheetTab),
+    ["가", "라"]
+  );
+
+  const mac = await open({ mac: true });
+  await mac.press("ArrowRight", { altKey: true, shiftKey: true });
+  assert.equal(mac.active(), "나");
+  assert.deepEqual(
+    [...mac.document.querySelectorAll('#sheet-tab-bar .sheet-tab-btn[aria-selected="true"]')].map((b) => b.dataset.sheetTab),
+    ["가", "나"]
+  );
+  // While editing a cell, Option+Shift+ArrowLeft and Ctrl+Shift+PageDown stay with text editing.
+  mac.cell("B2").focus();
+  await mac.press("F2");
+  await mac.press("ArrowLeft", { altKey: true, shiftKey: true });
+  await mac.press("PageDown", { ctrlKey: true, shiftKey: true });
+  assert.equal(mac.active(), "나", "editing cell keeps Option+Shift+Arrow and Ctrl+Shift+PageDown");
+  assert.deepEqual(
+    [...mac.document.querySelectorAll('#sheet-tab-bar .sheet-tab-btn[aria-selected="true"]')].map((b) => b.dataset.sheetTab),
+    ["가", "나"]
+  );
 });
 
 test("a cell being edited keeps the keys for its text", async () => {

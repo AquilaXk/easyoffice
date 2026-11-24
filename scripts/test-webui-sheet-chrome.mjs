@@ -45,6 +45,12 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
   for (const { selector, body } of rules) assert.equal(hasColorLiteral(body), false, `${selector} has a literal colour`);
   const tabRules = rulesFor(read("shell.css"), [".sheet-tab-bar", ".sheet-tab-btn"]).map((r) => r.body).join(" ");
   assert.ok(tabRules.includes("var(--color-bg)") && tabRules.includes("var(--ui-border-strong)") && tabRules.includes("var(--color-surface-raised)"), "tabs take the reference dialog tab values");
+  const groupedRules = rulesFor(read("shell.css"), ['[data-tab-grouped="true"]']);
+  assert.ok(groupedRules.length >= 2, "grouped inactive tab styling rules exist");
+  for (const { selector, body } of groupedRules) assert.equal(hasColorLiteral(body), false, `${selector} has no literal colour`);
+  const dropCss = rulesFor(read("shell.css"), [".drop-before", ".drop-end"]).map((r) => r.selector).join(" ");
+  assert.ok(dropCss.includes('[data-tab-grouped="true"][data-tab-color]:not(.active).drop-before'), "drop-before overrides grouped+colored specificity");
+  assert.ok(dropCss.includes('[data-tab-grouped="true"][data-tab-color]:not(.active).drop-end'), "drop-end overrides grouped+colored specificity");
   assert.equal(/border-radius/.test(tabRules), false, "tabs are square");
   const header = rulesFor(read("styles.css"), [".sheet-table th, .doc-inline-table th"]).map((r) => r.body).join(" ");
   assert.ok(header.includes("var(--ui-bg-light)"), "grid headers use the toolbar background token");

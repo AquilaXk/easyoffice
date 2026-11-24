@@ -39,6 +39,7 @@
       sheetStoreHelpers,
       getActiveSheetName,
       commitIfEditing,
+      focusAnchor,
       snapshotDomSheetCells,
       recalculateActiveSheetFormulas,
       refreshChrome,
@@ -63,24 +64,40 @@
     // The sheets 숨기기 취소 offers: a very hidden sheet (a file's) is not among them (PD-209).
     const hiddenSheets = () => allSheets().filter((name) => layoutApi.hiddenOf(name) && !layoutApi.veryHiddenOf(name));
 
+    // Sheets targeted by a tab command: the active multi-sheet group when `sheet` belongs to it, otherwise just `[sheet]`.
+    function targetsFor(sheet) {
+      const shown = shownSheets();
+      if (!shown.includes(sheet)) return [];
+      if (strip.isGrouped() && strip.hasInGroup(sheet)) {
+        const group = strip.getGroup(sheetKeys(), getActiveSheetName()).filter((name) => shown.includes(name));
+        if (group.length > 0) return group;
+      }
+      return [sheet];
+    }
+
     // What each command may do now; the menus grey the rest out.
     // A workbook whose structure is protected (PD-216) allows none of them.
     function can(sheet) {
       const shown = shownSheets();
       const at = shown.indexOf(sheet);
+      const targets = at >= 0 ? targetsFor(sheet) : [];
       const open = !host.__EASYOFFICE_SHEET_PROTECT__?.structureLocked();
+      const protect = host.__EASYOFFICE_SHEET_PROTECT__;
+      const group = strip.getGroup(sheetKeys(), getActiveSheetName());
       return {
         insert: open && allSheets().length < names.MAX_SHEETS,
-        copy: open && allSheets().length < names.MAX_SHEETS,
-        delete: open && shown.length > 1 && at >= 0,
-        rename: open && at >= 0,
+        copy: open && at >= 0 && allSheets().length + targets.length <= names.MAX_SHEETS,
+        delete: open && at >= 0 && shown.length > targets.length,
+        rename: open && at >= 0 && targets.length === 1,
         moveCopy: open && at >= 0,
-        // The colour of a tab is off under a protected structure and on a protected sheet (PD-229).
-        tabColor: open && at >= 0 && !host.__EASYOFFICE_SHEET_PROTECT__?.isOn(sheet),
-        moveLeft: open && at > 0,
-        moveRight: open && at >= 0 && at < shown.length - 1,
-        hide: open && shown.length > 1 && at >= 0,
+        // The colour of a tab is off under a protected structure and if any target sheet is protected (PD-229, PD-346).
+        tabColor: open && at >= 0 && targets.every((name) => !protect?.isOn(name)),
+        moveLeft: open && at >= 0 && shown.indexOf(targets[0]) > 0,
+        moveRight: open && at >= 0 && shown.indexOf(targets[targets.length - 1]) < shown.length - 1,
+        hide: open && at >= 0 && shown.length > targets.length,
         unhide: open && hiddenSheets().length > 0,
+        selectAll: open && shown.length > 1 && group.length < shown.length,
+        ungroup: open && strip.isGrouped(),
       };
     }
 
@@ -116,6 +133,9 @@
         sheetHistory.commit(record, { renames });
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
+        if (Object.keys(renames).length === 0 && (!document.activeElement || document.activeElement === document.body)) {
+          focusAnchor?.();
+        }
         say(text);
         return true;
       });
@@ -142,8 +162,21 @@
     }
 
     // ---- the engine rewrites the references to a renamed or deleted sheet -------------------------
-    function rulesRequest() {
+    function rulesRequest(rulesMap = null) {
       const out = {};
+      if (rulesMap) {
+        for (const [sheet, r] of Object.entries(rulesMap)) {
+          const hasCf = Array.isArray(r?.cf) && r.cf.length > 0;
+          const hasDv = Array.isArray(r?.dv) && r.dv.length > 0;
+          if (!hasCf && !hasDv) continue;
+          out[sheet] = {
+            cf: (r.cf || []).map((rule, i) => (rule.p !== undefined ? rule : { ...rule, p: i + 1 })),
+            dv: r.dv || [],
+            ...(r.today !== undefined ? { today: r.today } : {}),
+          };
+        }
+        return out;
+      }
       for (const sheet of Object.keys(sheetDataStore)) {
         if (rulesApi && !rulesApi.isEmpty(rulesApi.get(sheet))) out[sheet] = JSON.parse(rulesApi.payloadFor(sheet));
       }
@@ -152,13 +185,16 @@
 
     // `{ ok, answer }`; a workbook with no formula and no rule has nothing to rewrite, so it needs no
     // engine. A failure says why in the status text.
-    async function rewriteRefs(request) {
+    async function rewriteRefs(request, model = null) {
+      const sheetsMap = model ? model.sheets : sheetDataStore;
       const linkApi = host.__EASYOFFICE_SHEET_LINK__;
-      const linkField = linkApi?.requestField(sheetDataStore) ?? {};
-      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore) && !rulesApi?.hasAny() && !host.__EASYOFFICE_SHEET_NAMES__?.hasAny() && !linkField.linkTargets) {
+      const linkField = linkApi?.requestField(sheetsMap) ?? {};
+      const hasRules = model ? Object.keys(rulesRequest(model.sheetRules)).length > 0 : Boolean(rulesApi?.hasAny());
+      const hasNames = model ? Array.isArray(model.definedNames) && model.definedNames.length > 0 : Boolean(host.__EASYOFFICE_SHEET_NAMES__?.hasAny());
+      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetsMap) && !hasRules && !hasNames && !linkField.linkTargets) {
         return { ok: true, answer: { formulas: [], rules: {} } };
       }
-      const result = await sheetStoreHelpers.rewriteSheetRefs(sheetDataStore, { ...request, rules: rulesRequest(), ...linkField });
+      const result = await sheetStoreHelpers.rewriteSheetRefs(sheetsMap, { ...request, rules: rulesRequest(model?.sheetRules), ...linkField });
       if (!result.ok) say(result.message || FAILURES[result.reason] || FAILURES.error);
       return result;
     }
@@ -202,24 +238,50 @@
 
     async function remove(sheet) {
       if (structureBlocked()) return false;
-      if (!can(sheet).delete) {
-        say("마지막 시트는 삭제할 수 없음");
+      const shown = shownSheets();
+      const targets = targetsFor(sheet);
+      if (targets.length === 0 || !can(sheet).delete) {
+        say(shown.length <= 1 ? "마지막 시트는 삭제할 수 없음" : "모든 보이는 시트는 삭제할 수 없음");
         return false;
       }
-      if (!(await ui.confirmDelete(names.labelOf(sheet)))) return false;
+      if (!(await ui.confirmDelete(targets.map(names.labelOf).join(", ")))) return false;
       return change(async (next) => {
-        const result = await rewriteRefs({ op: "delete", sheet });
-        if (!result.ok) return false;
-        if (next.activeSheetName === sheet) activate(next, neighbourOf(next, sheet));
-        applyRewrites(next, result.answer);
-        next.sheets = withoutKey(next.sheets, sheet);
-        next.sheetRowCounts = withoutKey(next.sheetRowCounts, sheet);
-        next.sheetColumnWidths = withoutKey(next.sheetColumnWidths, sheet);
-        next.sheetRules = withoutKey(next.sheetRules, sheet);
-        next.sheetLayout = withoutKey(next.sheetLayout, sheet);
-        next.sheetOrder = next.sheetOrder.filter((n) => n !== sheet);
+        const deleteSet = new Set(targets);
+        const curShown = shownIn(next);
+        const surviving = curShown.filter((n) => !deleteSet.has(n));
+        if (surviving.length === 0) {
+          say(curShown.length <= 1 ? "마지막 시트는 삭제할 수 없음" : "모든 보이는 시트는 삭제할 수 없음");
+          return false;
+        }
+        const curAt = curShown.indexOf(next.activeSheetName);
+        const fallbackActive = curShown.slice(curAt + 1).find((n) => !deleteSet.has(n))
+          ?? curShown.slice(0, curAt).reverse().find((n) => !deleteSet.has(n))
+          ?? surviving[0];
+        const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+        const savedNames = namesApi?.getAll?.() ?? null;
+        try {
+          for (const s of targets) {
+            const result = await rewriteRefs({ op: "delete", sheet: s }, next);
+            if (!result.ok) {
+              if (savedNames) namesApi.replaceAll(savedNames, true);
+              return false;
+            }
+            applyRewrites(next, result.answer);
+            if (namesApi && Array.isArray(result.answer?.names)) namesApi.replaceAll(result.answer.names, true);
+            next.sheets = withoutKey(next.sheets, s);
+            next.sheetRowCounts = withoutKey(next.sheetRowCounts, s);
+            next.sheetColumnWidths = withoutKey(next.sheetColumnWidths, s);
+            next.sheetRules = withoutKey(next.sheetRules, s);
+            next.sheetLayout = withoutKey(next.sheetLayout, s);
+            next.sheetOrder = next.sheetOrder.filter((n) => n !== s);
+          }
+        } catch (err) {
+          if (savedNames) namesApi.replaceAll(savedNames, true);
+          throw err;
+        }
+        if (deleteSet.has(next.activeSheetName)) activate(next, fallbackActive);
         // The view of a deleted sheet stays: an undo brings the sheet back and it opens as it was left.
-        return "시트 삭제: " + names.labelOf(sheet);
+        return "시트 삭제: " + targets.map(names.labelOf).join(", ");
       });
     }
 
@@ -247,6 +309,7 @@
         next.sheetLayout = renamedKey(next.sheetLayout, sheet, to);
         next.sheetOrder = next.sheetOrder.map((n) => (n === sheet ? to : n));
         if (next.activeSheetName === sheet) next.activeSheetName = to;
+        strip.renameInGroup(sheet, to);
         // The old name keeps its view for the undo that gives the name back.
         viewState.copy(sheet, to);
         return "시트 이름 바꿈: " + to;
@@ -345,38 +408,64 @@
     // The copy goes right after its source and becomes the active sheet.
     function copy(sheet) {
       if (structureBlocked()) return Promise.resolve(false);
-      if (!can(sheet).copy) {
+      const targets = targetsFor(sheet);
+      if (targets.length === 0 || !can(sheet).copy) {
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
       }
       return change(async (next) => {
-        const name = await cloneInto(next, sheet);
-        if (name === null) return false;
-        place(next, name, next.sheetOrder.indexOf(sheet) + 1);
-        activate(next, name);
-        return "시트 복사: " + names.labelOf(name);
+        const copies = [];
+        let insertAt = next.sheetOrder.indexOf(targets[targets.length - 1]) + 1;
+        for (const s of targets) {
+          const name = await cloneInto(next, s);
+          if (name === null) return false;
+          place(next, name, insertAt);
+          insertAt += 1;
+          copies.push(name);
+        }
+        activate(next, copies[0]);
+        return "시트 복사: " + copies.map(names.labelOf).join(", ");
       });
     }
 
-    // 이동/복사: `sheet`, or a copy of it, goes before the sheet `before` (null for the end) and is the active sheet.
+    // 이동/복사: `sheet` (or its active group), or a copy of it, goes before `before` (null for the end).
     function moveOrCopy(sheet, before, makeCopy) {
       if (structureBlocked()) return Promise.resolve(false);
+      const targets = targetsFor(sheet);
+      if (targets.length === 0) return Promise.resolve(false);
       if (makeCopy && !can(sheet).copy) {
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
       }
       return change(async (next) => {
         if (before !== null && !next.sheetOrder.includes(before)) return false;
-        if (!makeCopy && before === sheet) return false;
-        const name = makeCopy ? await cloneInto(next, sheet) : sheet;
-        if (name === null) return false;
-        const order = next.sheetOrder.filter((n) => n !== name);
-        order.splice(before === null ? order.length : order.indexOf(before), 0, name);
-        // A move to where the sheet is makes no step.
-        if (!makeCopy && order.every((n, i) => n === next.sheetOrder[i])) return false;
+        if (targets.length === 1 && !makeCopy && before === sheet) return false;
+        if (makeCopy) {
+          const copies = [];
+          let at = before === null ? next.sheetOrder.length : next.sheetOrder.indexOf(before);
+          for (const s of targets) {
+            const name = await cloneInto(next, s);
+            if (name === null) return false;
+            place(next, name, at);
+            at += 1;
+            copies.push(name);
+          }
+          activate(next, copies[0]);
+          return "시트 복사: " + copies.map(names.labelOf).join(", ");
+        }
+        const targetSet = new Set(targets);
+        let anchor = before;
+        if (anchor !== null && targetSet.has(anchor)) {
+          const start = next.sheetOrder.indexOf(anchor);
+          anchor = next.sheetOrder.slice(start + 1).find((n) => !targetSet.has(n)) ?? null;
+        }
+        const order = next.sheetOrder.filter((n) => !targetSet.has(n));
+        order.splice(anchor === null ? order.length : order.indexOf(anchor), 0, ...targets);
+        // A move to where the sheets already are makes no step.
+        if (order.every((n, i) => n === next.sheetOrder[i])) return false;
         next.sheetOrder = order;
-        if (makeCopy || next.activeSheetName !== name) activate(next, name);
-        return (makeCopy ? "시트 복사: " : "시트 이동: ") + names.labelOf(name);
+        if (!targetSet.has(next.activeSheetName)) activate(next, targets[0]);
+        return "시트 이동: " + targets.map(names.labelOf).join(", ");
       });
     }
 
@@ -385,7 +474,9 @@
       if (structureBlocked()) return false;
       if (!can(sheet).moveCopy) return false;
       const shown = shownSheets();
-      const after = shown[shown.indexOf(sheet) + 1] ?? null;
+      const targets = targetsFor(sheet);
+      const tail = targets[targets.length - 1] ?? sheet;
+      const after = shown[shown.indexOf(tail) + 1] ?? null;
       const answer = await ui.pickPlace(shown, after);
       return answer ? moveOrCopy(sheet, answer.before, answer.copy) : false;
     }
@@ -405,38 +496,89 @@
       });
     }
 
-    const move = (sheet, delta) => {
-      const at = shownSheets().indexOf(sheet);
-      return at < 0 ? Promise.resolve(false) : moveTo(sheet, at + delta);
-    };
+    function move(sheet, delta) {
+      const targets = targetsFor(sheet);
+      if (targets.length <= 1) {
+        const at = shownSheets().indexOf(sheet);
+        return at < 0 ? Promise.resolve(false) : moveTo(sheet, at + delta);
+      }
+      if (structureBlocked()) return Promise.resolve(false);
+      if (delta !== -1 && delta !== 1) return Promise.resolve(false);
+      const shown = shownSheets();
+      const canMove = delta < 0 ? shown.indexOf(targets[0]) > 0 : shown.indexOf(targets[targets.length - 1]) < shown.length - 1;
+      if (!canMove) return Promise.resolve(false);
+      return change((next) => {
+        const curShown = shownIn(next);
+        const targetSet = new Set(targets);
+        const moved = curShown.slice();
+        if (delta < 0) {
+          for (let i = 1; i < moved.length; i += 1) {
+            if (targetSet.has(moved[i]) && !targetSet.has(moved[i - 1])) {
+              [moved[i - 1], moved[i]] = [moved[i], moved[i - 1]];
+            }
+          }
+        } else {
+          for (let i = moved.length - 2; i >= 0; i -= 1) {
+            if (targetSet.has(moved[i]) && !targetSet.has(moved[i + 1])) {
+              [moved[i], moved[i + 1]] = [moved[i + 1], moved[i]];
+            }
+          }
+        }
+        if (moved.every((n, i) => n === curShown[i])) return false;
+        let idx = 0;
+        next.sheetOrder = next.sheetOrder.map((n) => (hiddenIn(next, n) ? n : moved[idx++]));
+        return "시트 이동: " + targets.map(names.labelOf).join(", ");
+      });
+    }
 
-    // The colour of the tab of `sheet` ("rrggbb", null for none), one undo step.
+    // The colour of the tab of `sheet` (or its active group) ("rrggbb", null for none), one undo step.
     function setTabColor(sheet, rgb) {
       if (structureBlocked()) return Promise.resolve(false);
-      if (!can(sheet).tabColor) {
+      const targets = targetsFor(sheet);
+      if (targets.length === 0 || !can(sheet).tabColor) {
         say("보호된 시트의 탭 색은 바꿀 수 없음");
         return Promise.resolve(false);
       }
       return change((next) => {
-        const { tabColor, ...kept } = next.sheetLayout[sheet] || {};
-        if ((tabColor || null) === (rgb || null)) return false;
-        if (rgb) kept.tabColor = rgb;
-        if (Object.keys(kept).length > 0) next.sheetLayout[sheet] = kept;
-        else delete next.sheetLayout[sheet];
-        return rgb ? "탭 색: " + names.labelOf(sheet) : "탭 색 없음: " + names.labelOf(sheet);
+        let changed = false;
+        for (const s of targets) {
+          const { tabColor, ...kept } = next.sheetLayout[s] || {};
+          if ((tabColor || null) === (rgb || null)) continue;
+          changed = true;
+          if (rgb) kept.tabColor = rgb;
+          if (Object.keys(kept).length > 0) next.sheetLayout[s] = kept;
+          else delete next.sheetLayout[s];
+        }
+        if (!changed) return false;
+        const label = targets.map(names.labelOf).join(", ");
+        return rgb ? "탭 색: " + label : "탭 색 없음: " + label;
       });
     }
 
     function hide(sheet) {
       if (structureBlocked()) return Promise.resolve(false);
-      if (!can(sheet).hide) {
+      const targets = targetsFor(sheet);
+      if (targets.length === 0 || !can(sheet).hide) {
         say("모든 시트를 숨길 수 없음");
         return Promise.resolve(false);
       }
       return change((next) => {
-        if (next.activeSheetName === sheet) activate(next, neighbourOf(next, sheet));
-        next.sheetLayout[sheet] = { ...next.sheetLayout[sheet], hidden: true };
-        return "시트 숨김: " + names.labelOf(sheet);
+        const hideSet = new Set(targets);
+        const curShown = shownIn(next);
+        const surviving = curShown.filter((n) => !hideSet.has(n));
+        if (surviving.length === 0) {
+          say("모든 시트를 숨길 수 없음");
+          return false;
+        }
+        if (hideSet.has(next.activeSheetName)) {
+          const at = curShown.indexOf(next.activeSheetName);
+          const nextShown = curShown.slice(at + 1).find((n) => !hideSet.has(n))
+            ?? curShown.slice(0, at).reverse().find((n) => !hideSet.has(n))
+            ?? surviving[0];
+          activate(next, nextShown);
+        }
+        for (const s of targets) next.sheetLayout[s] = { ...next.sheetLayout[s], hidden: true };
+        return "시트 숨김: " + targets.map(names.labelOf).join(", ");
       });
     }
 
@@ -454,11 +596,49 @@
       });
     }
 
+    function selectAll() {
+      if (structureBlocked()) return Promise.resolve(false);
+      return enqueueWorkspaceHistoryOp(() => {
+        commitIfEditing();
+        const keys = sheetKeys();
+        const shown = shownSheets();
+        const active = getActiveSheetName();
+        if (shown.length <= 1 || strip.getGroup(keys, active).length >= shown.length) return false;
+        strip.selectAllGroup(keys, active);
+        strip.render({ document, keys, active });
+        focusAnchor?.();
+        say("모든 시트 선택");
+        return true;
+      });
+    }
+
+    function ungroup() {
+      if (structureBlocked()) return Promise.resolve(false);
+      return enqueueWorkspaceHistoryOp(() => {
+        commitIfEditing();
+        if (!strip.isGrouped()) return false;
+        const keys = sheetKeys();
+        const active = getActiveSheetName();
+        strip.clearGroup(active);
+        strip.render({ document, keys, active });
+        focusAnchor?.();
+        say("시트 그룹 해제");
+        return true;
+      });
+    }
+
     // The same commands for the sheet menu and the command search: they act on the active sheet.
     const actions = {
       "tab-insert": () => insert(getActiveSheetName()),
       "tab-delete": () => remove(getActiveSheetName()),
-      "tab-rename": () => Promise.resolve(ui.startRename(getActiveSheetName())),
+      "tab-rename": () => {
+        const active = getActiveSheetName();
+        if (!structureBlocked() && targetsFor(active).length > 1) {
+          say("여러 시트를 선택한 상태에서는 이름을 바꿀 수 없음");
+          return Promise.resolve(false);
+        }
+        return Promise.resolve(ui.startRename(active));
+      },
       "tab-copy": () => copy(getActiveSheetName()),
       "tab-move-copy": () => movePlace(getActiveSheetName()),
       "tab-left": () => move(getActiveSheetName(), -1),
@@ -467,7 +647,7 @@
       "tab-unhide": () => unhide(),
     };
 
-    return { can, insert, remove, rename, checkRename, setTabColor, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, actions, shownSheets, hiddenSheets };
+    return { can, insert, remove, rename, checkRename, setTabColor, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, selectAll, ungroup, actions, shownSheets, hiddenSheets };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TABS__ = createSheetTabs;

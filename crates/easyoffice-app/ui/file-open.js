@@ -638,6 +638,7 @@
         host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(order);
         next.sheetOrder = order;
         const first = order.find((name) => layoutBySheet[name]?.hidden !== true) ?? order[0];
+        host.__EASYOFFICE_SHEET_TAB_STRIP__.clearGroup?.(first);
         // The rules and the defined names go in first, so the evaluation below learns them with the cells.
         if (typeof replaceSheetRules === "function") replaceSheetRules(rulesBySheet);
         next.sheetRules = rulesBySheet;
@@ -759,6 +760,8 @@
         if (res.module === "SHEET") {
           clearSheetEvalResult();
           deps.restoreSheetView?.();
+        } else {
+          host.__EASYOFFICE_SHEET_TAB_STRIP__?.clearGroup?.();
         }
         baselines[res.module] = fingerprint(captureWorkspaceSnapshot(false), res.module);
         return { ok: true };

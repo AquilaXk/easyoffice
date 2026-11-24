@@ -231,3 +231,63 @@ test("a sheet that is not shown, and a step that is no step, have no target", ()
   assert.equal(nav.sheetTarget(shown, "A", Number.NaN), null);
   assert.equal(nav.sheetTarget(shown, "A", 1), "C", "a hidden sheet between them is passed over");
 });
+
+// ---- grouped sheet selection keys & ranges (PD-346) --------------------------------------------------------------
+
+test("sheetGroupStep matches Ctrl+Shift+PageDown/PageUp everywhere and Option+Shift+Arrow on macOS only", () => {
+  for (const mac of [false, true]) {
+    assert.equal(nav.sheetGroupStep(key("PageDown", { ctrlKey: true, shiftKey: true }), mac), 1);
+    assert.equal(nav.sheetGroupStep(key("PageUp", { ctrlKey: true, shiftKey: true }), mac), -1);
+  }
+  assert.equal(nav.sheetGroupStep(key("ArrowRight", { altKey: true, shiftKey: true }), true), 1);
+  assert.equal(nav.sheetGroupStep(key("ArrowLeft", { altKey: true, shiftKey: true }), true), -1);
+  assert.equal(nav.sheetGroupStep(key("ArrowRight", { altKey: true, shiftKey: true }), false), 0);
+  assert.equal(nav.sheetGroupStep(key("ArrowLeft", { altKey: true, shiftKey: true }), false), 0);
+  for (const mac of [false, true]) {
+    for (const ev of [
+      key("PageDown", { ctrlKey: true }),
+      key("PageDown", { shiftKey: true }),
+      key("PageDown", { ctrlKey: true, shiftKey: true, altKey: true }),
+      key("PageDown", { ctrlKey: true, shiftKey: true, metaKey: true }),
+      key("ArrowRight", { ctrlKey: true, shiftKey: true }),
+      key("ArrowRight", { altKey: true }),
+      key("ArrowRight", { altKey: true, shiftKey: true, ctrlKey: true }),
+      key("ArrowRight", { altKey: true, shiftKey: true, metaKey: true }),
+      {},
+    ]) {
+      assert.equal(nav.sheetGroupStep(ev, mac), 0, JSON.stringify(ev) + " " + mac);
+    }
+  }
+});
+
+test("sheetGroupRange expands away from anchor, shrinks back toward anchor, crosses anchor, and never wraps", () => {
+  const shown = ["S1", "S2", "S3", "S4"];
+  // Starting ungrouped at S2: +1 moves active to S3 and selects [S2, S3] anchored at S2.
+  const r1 = nav.sheetGroupRange(shown, null, "S2", 1);
+  assert.deepEqual(r1, { anchor: "S2", active: "S3", selected: ["S2", "S3"] });
+  // +1 again expands to [S2, S3, S4].
+  const r2 = nav.sheetGroupRange(shown, r1.anchor, r1.active, 1);
+  assert.deepEqual(r2, { anchor: "S2", active: "S4", selected: ["S2", "S3", "S4"] });
+  // At last sheet S4, +1 does not wrap.
+  assert.equal(nav.sheetGroupRange(shown, r2.anchor, r2.active, 1), null);
+  // Stepping back (-1) shrinks toward anchor S2: [S2, S3] then [S2].
+  const r3 = nav.sheetGroupRange(shown, r2.anchor, r2.active, -1);
+  assert.deepEqual(r3, { anchor: "S2", active: "S3", selected: ["S2", "S3"] });
+  const r4 = nav.sheetGroupRange(shown, r3.anchor, r3.active, -1);
+  assert.deepEqual(r4, { anchor: "S2", active: "S2", selected: ["S2"] });
+  // Stepping past anchor in reverse expands the other way to [S1, S2].
+  const r5 = nav.sheetGroupRange(shown, r4.anchor, r4.active, -1);
+  assert.deepEqual(r5, { anchor: "S2", active: "S1", selected: ["S1", "S2"] });
+  // At first sheet S1, -1 does not wrap.
+  assert.equal(nav.sheetGroupRange(shown, r5.anchor, r5.active, -1), null);
+});
+
+test("sheetGroupRange skips hidden sheets via shown order and rejects invalid active or anchorless missing targets", () => {
+  assert.deepEqual(nav.sheetGroupRange(["A", "C", "D"], "C", "A", 1), { anchor: "C", active: "C", selected: ["C"] });
+  assert.deepEqual(nav.sheetGroupRange(["A", "C"], "HiddenAnchor", "A", 1), { anchor: "A", active: "C", selected: ["A", "C"] });
+  assert.equal(nav.sheetGroupRange(["A", "C"], "A", "Missing", 1), null);
+  assert.equal(nav.sheetGroupRange(["One"], "One", "One", 1), null);
+  assert.equal(nav.sheetGroupRange(["A", "B"], "A", "A", 0), null);
+  assert.deepEqual(nav.sheetSpanBetween(["A", "B", "C", "D"], "C", "A", "A"), { anchor: "C", active: "A", selected: ["A", "B", "C"] });
+  assert.equal(nav.sheetSpanBetween(["A", "B"], "A", "A", "Hidden"), null);
+});
