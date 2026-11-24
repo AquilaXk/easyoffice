@@ -100,6 +100,7 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
                     if !t.cell_styles.is_empty() {
                         loss.formats += t.validated_cell_styles().len().max(1);
                     }
+                    loss.formats += t.validated_cell_images().len();
                 }
             }
             RichBlock::Image(_) => {}

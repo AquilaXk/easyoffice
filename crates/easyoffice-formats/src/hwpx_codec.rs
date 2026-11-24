@@ -256,20 +256,24 @@ impl ShapeTables {
         };
         sec.open_paragraph_with_cols(para_pr, style, p.columns);
         let groups = external_link_groups(&p.runs);
+        let mut wrote_run = false;
         if groups.is_empty() {
             let char_pr = intern(&mut self.char_shapes, &mut self.char_map, base);
             sec.run(char_pr, "");
+            wrote_run = true;
         }
         for (link, group) in groups {
+            let visible: Vec<&crate::RichRun> =
+                group.into_iter().filter(|r| !is_deleted_run(r)).collect();
+            if visible.is_empty() {
+                continue;
+            }
             let field_id = link.map(|url| {
                 self.next_field_id += 1;
                 sec.xml.push_str(&hwpx_link_begin(self.next_field_id, url));
                 self.next_field_id
             });
-            for run in group {
-                if is_deleted_run(run) {
-                    continue;
-                }
+            for run in visible {
                 let font = run.font.as_ref().map_or(0, |f| self.font_index(f));
                 let shape = HwpxCharShape {
                     bold: base.bold || run.bold,
@@ -292,10 +296,15 @@ impl ShapeTables {
                 } else {
                     sec.run(char_pr, &run.text);
                 }
+                wrote_run = true;
             }
             if let Some(id) = field_id {
                 sec.xml.push_str(&hwpx_link_end(id));
             }
+        }
+        if !wrote_run {
+            sec.xml
+                .push_str("<hp:run charPrIDRef=\"0\"><hp:t/></hp:run>");
         }
         sec.xml.push_str("</hp:p>");
     }
@@ -454,18 +463,24 @@ impl SectionWriter {
     }
 
     fn note_run(&mut self, char_pr: usize, kind: RichNoteKind, text: &str) {
-        let tag = match kind {
-            RichNoteKind::Footnote => "hp:footNote",
-            RichNoteKind::Endnote => "hp:endNote",
+        let (tag, num_type) = match kind {
+            RichNoteKind::Footnote => ("hp:footNote", "FOOTNOTE"),
+            RichNoteKind::Endnote => ("hp:endNote", "ENDNOTE"),
         };
         let mut paras = String::new();
-        for line in text.split('\n') {
-            paras.push_str("<hp:p paraPrIDRef=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>");
+        for (idx, line) in text.split('\n').enumerate() {
+            paras.push_str("<hp:p paraPrIDRef=\"0\"><hp:run charPrIDRef=\"0\">");
+            if idx == 0 {
+                paras.push_str(&format!(
+                    "<hp:ctrl><hp:autoNum numType=\"{num_type}\"/></hp:ctrl>"
+                ));
+            }
+            paras.push_str("<hp:t>");
             paras.push_str(&XmlSanitizer::escape(line));
             paras.push_str("</hp:t></hp:run></hp:p>");
         }
         self.xml.push_str(&format!(
-            "<hp:run charPrIDRef=\"{char_pr}\"><hp:ctrl><{tag}><hp:subList>{paras}</hp:subList></{tag}></hp:ctrl></hp:run>"
+            "<hp:run charPrIDRef=\"{char_pr}\"><hp:ctrl><{tag}><hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\">{paras}</hp:subList></{tag}></hp:ctrl></hp:run>"
         ));
     }
 
@@ -528,6 +543,7 @@ impl SectionWriter {
             |hu| hu.iter().copied().fold(0u32, u32::saturating_add),
         );
         let no_adjust = if col_widths_hu.is_some() { "1" } else { "0" };
+        let repeat_header = if row_cnt > 1 { "1" } else { "0" };
         let tbl_id = self.next_table_id;
         self.next_table_id += 1;
         let mut link_cursor = 0usize;
@@ -537,13 +553,14 @@ impl SectionWriter {
         self.xml.push_str("<hp:run charPrIDRef=\"0\">");
         self.xml.push_str(&format!(
             concat!(
-                "<hp:tbl id=\"{id}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"2\" noAdjust=\"{no_adjust}\">",
+                "<hp:tbl id=\"{id}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"{repeat_header}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"2\" noAdjust=\"{no_adjust}\">",
                 "<hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>",
                 "<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>",
                 "<hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/>",
                 "<hp:inMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/>"
             ),
             id = tbl_id,
+            repeat_header = repeat_header,
             rows = row_cnt,
             cols = col_cnt,
             no_adjust = no_adjust,
@@ -568,8 +585,9 @@ impl SectionWriter {
                     None => 2,
                 };
                 let cell_imgs = slice_cell_images(&images, &mut img_cursor, r_idx, c_idx);
+                let is_header = if row_cnt > 1 && r_idx == 0 { "1" } else { "0" };
                 self.xml.push_str(&format!(
-                    "<hp:tc name=\"\" header=\"0\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{bf_id}\">"
+                    "<hp:tc name=\"\" header=\"{is_header}\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{bf_id}\">"
                 ));
                 self.xml.push_str("<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">");
                 if !cell.is_empty() || !cl.is_empty() || cell_imgs.is_empty() {
@@ -744,11 +762,19 @@ impl HwpxCodec {
             title: doc.display_title(),
             is_template,
             official_agency: doc.official_agency.clone(),
-            approval_lines: vec!["기안".to_string(), "검토".to_string(), "결재".to_string()],
+            approval_lines: Self::default_approval_lines(doc.official_agency.as_deref()),
             paragraphs: Vec::new(),
             tables: Vec::new(),
         };
         Self::package_entries(&meta, header, sec.finish(), media)
+    }
+
+    pub(crate) fn default_approval_lines(agency: Option<&str>) -> Vec<String> {
+        if agency.is_some_and(|a| !a.trim().is_empty()) {
+            vec!["기안".to_string(), "검토".to_string(), "결재".to_string()]
+        } else {
+            Vec::new()
+        }
     }
 
     fn pack_package(

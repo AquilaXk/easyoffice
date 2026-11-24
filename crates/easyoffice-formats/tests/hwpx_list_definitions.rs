@@ -41,7 +41,8 @@ fn a_bullet_item_refers_to_a_bullet_definition() {
         "no bullet definition"
     );
     assert!(header.contains("<hh:heading type=\"BULLET\" idRef=\"1\" level=\"0\"/>"));
-    assert!(!header.contains("<hh:numberings"), "no numbering is used");
+    assert!(header.contains("<hh:numberings itemCnt=\"1\"><hh:numbering id=\"1\""));
+    assert!(!header.contains("<hh:heading type=\"NUMBER\""));
 }
 
 #[test]
@@ -62,7 +63,8 @@ fn a_document_without_lists_defines_neither() {
         runs: vec![RichRun::plain("본문")],
         ..RichParagraph::default()
     })]);
-    assert!(!header.contains("<hh:bullets") && !header.contains("<hh:numberings"));
+    assert!(!header.contains("<hh:bullets"));
+    assert!(header.contains("<hh:numberings itemCnt=\"1\"><hh:numbering id=\"1\""));
     assert!(header.contains("<hh:heading type=\"NONE\" idRef=\"0\" level=\"0\"/>"));
 }
 

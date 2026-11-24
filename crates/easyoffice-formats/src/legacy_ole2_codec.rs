@@ -9,6 +9,7 @@ use crate::ole2_codec::{
     Ole2StreamEntry,
 };
 use crate::{DocumentFormat, EasyOfficeError};
+pub use ppt_writer::{ppt_legacy_slides_loss, ppt_save_loss, PptSaveLoss};
 
 /// Legacy `.doc` payload model.
 #[derive(Debug, Clone, PartialEq, Eq)]

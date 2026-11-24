@@ -513,3 +513,68 @@ fn current_user(offset_to_current_edit: u32) -> Result<Vec<u8>, EasyOfficeError>
     out.extend_from_slice(&utf16le(USER));
     Ok(out)
 }
+
+/// Elements and presenter notes flattened or omitted from standard MS-PPT containers on `.ppt` save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PptSaveLoss {
+    pub tables: usize,
+    pub charts: usize,
+    pub images: usize,
+    pub notes: usize,
+}
+
+impl PptSaveLoss {
+    pub fn is_empty(&self) -> bool {
+        self.tables == 0 && self.charts == 0 && self.images == 0 && self.notes == 0
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.tables > 0 {
+            out.push(format!("PPT 저장에서 빠진 표 {}개", self.tables));
+        }
+        if self.charts > 0 {
+            out.push(format!("PPT 저장에서 빠진 차트 {}개", self.charts));
+        }
+        if self.images > 0 {
+            out.push(format!("PPT 저장에서 빠진 그림 {}개", self.images));
+        }
+        if self.notes > 0 {
+            out.push(format!(
+                "PPT 저장에서 표준 슬라이드 기록이 생략된 발표자 노트 {}개",
+                self.notes
+            ));
+        }
+        out
+    }
+}
+
+/// Counts rich slide elements and speaker notes lost from standard MS-PPT structures on `.ppt` save.
+pub fn ppt_save_loss(deck: &crate::RichSlideDeck) -> PptSaveLoss {
+    let mut loss = PptSaveLoss::default();
+    for slide in &deck.slides {
+        if !slide.notes.trim().is_empty() {
+            loss.notes += 1;
+        }
+        for el in &slide.elements {
+            match el {
+                crate::SlideElement::Table { .. } => loss.tables += 1,
+                crate::SlideElement::Chart { .. } => loss.charts += 1,
+                crate::SlideElement::Image { .. } => loss.images += 1,
+                crate::SlideElement::TextBox { .. } | crate::SlideElement::Shape { .. } => {}
+            }
+        }
+    }
+    loss
+}
+
+/// Counts speaker notes omitted from standard MS-PPT slide records when saving legacy slide triples.
+pub fn ppt_legacy_slides_loss(slides: &[crate::DecodedSlide]) -> PptSaveLoss {
+    PptSaveLoss {
+        notes: slides
+            .iter()
+            .filter(|(_, _, n)| !n.trim().is_empty())
+            .count(),
+        ..PptSaveLoss::default()
+    }
+}

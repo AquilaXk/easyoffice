@@ -20,6 +20,7 @@ pub mod embedded_thumbnail;
 pub mod encrypted_container;
 pub mod hwp5_codec;
 pub mod hwp_eqedit;
+mod hwp_eqedit_tokens;
 pub mod hwpx_codec;
 mod hwpx_parts;
 mod hwpx_unpack;
@@ -131,6 +132,7 @@ pub use layout_lint::{
     lint_document, lint_legacy_slides, lint_slide_deck, LayoutIssue, LayoutIssueKind,
     LayoutLintReport, MAX_LINT_ISSUES,
 };
+pub use legacy_ole2_codec::{ppt_legacy_slides_loss, ppt_save_loss, PptSaveLoss};
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;

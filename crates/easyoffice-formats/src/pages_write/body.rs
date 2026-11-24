@@ -23,7 +23,8 @@ use crate::rich_notes::{collect_note_ordinals, is_deleted_run};
 use crate::rich_table::safe_cell_link_url;
 use crate::{
     normalize_hex_color, EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField,
-    RichImage, RichImageFormat, RichListKind, RichParagraph, RichRun,
+    RichImage, RichImageFormat, RichListKind, RichNumberEnclosure, RichNumberFormat, RichParagraph,
+    RichRun,
 };
 
 const TYPE_STORAGE: u32 = ty::STORAGE;
@@ -98,12 +99,31 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
     p.page_break_before
         || p.bookmark.is_some()
         || (p.list == Some(RichListKind::Task) && !(1..=6).contains(&p.heading_level))
+        || (p.list == Some(RichListKind::Ordered)
+            && p.list_number.is_some_and(|n| {
+                n.format == RichNumberFormat::HangulSyllable
+                    && n.enclosure != RichNumberEnclosure::Dot
+            }))
         || p.left_indent_twips
             .is_some_and(|t| t > MAX_INDENT_TWIPS as u32)
         || p.first_line_indent_twips
             .is_some_and(|t| t.saturating_abs() > MAX_INDENT_TWIPS)
         || p.line_spacing_percent
             .is_some_and(|pct| pct == 0 || pct > MAX_SPACING_PERCENT)
+}
+
+pub(super) fn drawable_archive_fields(w_pt: f32, h_pt: f32, description: Option<&str>) -> Vec<Fld> {
+    let mut fields = vec![msg(
+        drawable::GEOMETRY,
+        vec![
+            msg(geometry::POSITION, vec![float(1, 0.0), float(2, 0.0)]),
+            msg(geometry::SIZE, vec![float(1, w_pt), float(2, h_pt)]),
+        ],
+    )];
+    if let Some(desc) = description.map(str::trim).filter(|s| !s.is_empty()) {
+        fields.push(string(drawable::DESCRIPTION, desc));
+    }
+    fields
 }
 
 pub(super) fn look_of(run: &RichRun) -> CharLook {
@@ -207,17 +227,7 @@ fn write_image_attachment<'a>(
     let (w_emu, h_emu) = img.display_emu();
     let w_pt = (w_emu as f32 / EMU_PER_POINT).max(0.75);
     let h_pt = (h_emu as f32 / EMU_PER_POINT).max(0.75);
-    let mut drawable_fields = vec![msg(
-        drawable::GEOMETRY,
-        vec![
-            msg(geometry::POSITION, vec![float(1, 0.0), float(2, 0.0)]),
-            msg(geometry::SIZE, vec![float(1, w_pt), float(2, h_pt)]),
-        ],
-    )];
-    let alt = img.alt().trim();
-    if !alt.is_empty() {
-        drawable_fields.push(string(drawable::DESCRIPTION, alt));
-    }
+    let drawable_fields = drawable_archive_fields(w_pt, h_pt, Some(img.alt()));
 
     let doc_comp = bp.document();
     let img_obj = bp.add(
@@ -379,7 +389,8 @@ pub(super) fn write_body<'a>(
                 close_link(&mut active_link, &mut smartfield_entries, offset);
             }
             RichBlock::Table(tbl) => {
-                let Some(att_id) = write_table_attachment(bp, styles, tbl, &mut table_budget)?
+                let Some(att_id) =
+                    write_table_attachment(bp, styles, tbl, body_width_pt, &mut table_budget)?
                 else {
                     continue;
                 };

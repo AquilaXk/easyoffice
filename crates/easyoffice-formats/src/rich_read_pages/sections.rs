@@ -76,20 +76,21 @@ pub(super) fn read_page_setup(root_msg: &Message<'_>, facing_pages: bool) -> Pag
     if let (Some(width), Some(height)) = (width_tw, height_tw) {
         if width > 0 && height > 0 {
             let paper = RichPaper { width, height };
+            let opt_margin = |field: u32, fallback: u32| -> Option<u32> {
+                match root_msg.float_any(field) {
+                    Some(v) => pt_to_u32_twips(v),
+                    None => Some(fallback),
+                }
+            };
+            let def = RichPageMargins::PAGES_DEFAULT;
             let m_opt = (|| {
                 Some(RichPageMargins {
-                    left: pt_to_u32_twips(root_msg.float_any(root::LEFT_MARGIN).unwrap_or(0.0))?,
-                    right: pt_to_u32_twips(root_msg.float_any(root::RIGHT_MARGIN).unwrap_or(0.0))?,
-                    top: pt_to_u32_twips(root_msg.float_any(root::TOP_MARGIN).unwrap_or(0.0))?,
-                    bottom: pt_to_u32_twips(
-                        root_msg.float_any(root::BOTTOM_MARGIN).unwrap_or(0.0),
-                    )?,
-                    header: pt_to_u32_twips(
-                        root_msg.float_any(root::HEADER_MARGIN).unwrap_or(0.0),
-                    )?,
-                    footer: pt_to_u32_twips(
-                        root_msg.float_any(root::FOOTER_MARGIN).unwrap_or(0.0),
-                    )?,
+                    left: opt_margin(root::LEFT_MARGIN, def.left)?,
+                    right: opt_margin(root::RIGHT_MARGIN, def.right)?,
+                    top: opt_margin(root::TOP_MARGIN, def.top)?,
+                    bottom: opt_margin(root::BOTTOM_MARGIN, def.bottom)?,
+                    header: opt_margin(root::HEADER_MARGIN, def.header)?,
+                    footer: opt_margin(root::FOOTER_MARGIN, def.footer)?,
                 })
             })();
             if let Some(margins) = m_opt {

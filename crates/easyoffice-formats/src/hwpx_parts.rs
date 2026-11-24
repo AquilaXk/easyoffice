@@ -379,13 +379,9 @@ pub(crate) fn header_xml_with_all(
         .map(|shape| shape.heading_id_ref.max(1))
         .max()
         .unwrap_or(0);
-    let uses_number = para_shapes
-        .iter()
-        .any(|shape| shape.heading_type == HEADING_NUMBER);
     match numberings_xml {
-        Some(custom) => xml.push_str(custom),
-        None if uses_number => xml.push_str(NUMBERING_XML),
-        None => {}
+        Some(custom) if !custom.is_empty() => xml.push_str(custom),
+        _ => xml.push_str(NUMBERING_XML),
     }
     if max_bullet_id > 0 {
         if max_bullet_id == 1 {
@@ -515,7 +511,7 @@ pub(crate) fn section_properties_xml(
     let col_ctrl = hwpx_col_ctrl_xml(columns);
     format!(
         concat!(
-            "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"0\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
+            "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"1\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
             "<hp:grid lineGrid=\"0\" charGrid=\"0\" wonggojiFormat=\"0\"/>",
             "<hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/>",
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",

@@ -72,6 +72,21 @@ impl UniversalDocumentModel {
     }
 }
 
+fn legacy_ppt_slides(
+    slides: impl IntoIterator<Item = (crate::DecodedSlide, String)>,
+) -> Vec<LegacyPptSlide> {
+    slides
+        .into_iter()
+        .map(|((s_title, bullets, notes), transition)| LegacyPptSlide {
+            title: s_title,
+            bullets,
+            notes,
+            theme: "SignatureLavender".to_string(),
+            transition,
+        })
+        .collect()
+}
+
 /// Lossless cross-format encoder, decoder, and converter for all 20 `DocumentFormat::ALL` formats.
 pub struct UniversalFormatConverter;
 
@@ -193,7 +208,7 @@ impl UniversalFormatConverter {
                 title,
                 is_template: format == DocumentFormat::Hwtx,
                 official_agency: model.official_agency.clone(),
-                approval_lines: vec!["기안".to_string(), "검토".to_string(), "결재".to_string()],
+                approval_lines: HwpxCodec::default_approval_lines(model.official_agency.as_deref()),
                 paragraphs: model.effective_paragraphs(),
                 tables: model.tables.clone(),
             }),
@@ -240,17 +255,12 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Ppt => LegacyOle2Codec::pack_ppt(&LegacyPptPayload {
                 title,
-                slides: model
-                    .effective_slides()
-                    .into_iter()
-                    .map(|(s_title, bullets, notes)| LegacyPptSlide {
-                        title: s_title,
-                        bullets,
-                        notes,
-                        theme: "SignatureLavender".to_string(),
-                        transition: "Fade".to_string(),
-                    })
-                    .collect(),
+                slides: legacy_ppt_slides(
+                    model
+                        .effective_slides()
+                        .into_iter()
+                        .map(|s| (s, "Fade".to_string())),
+                ),
             }),
             DocumentFormat::Odp => OdfCodec::pack_odp(&title, &model.effective_slides()),
             DocumentFormat::Pdf => {
@@ -286,23 +296,15 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Odp => crate::odp_rich::pack_odp_rich(deck),
             DocumentFormat::Pdf => crate::pdf_slide::encode_slide_pdf(deck, &deck.title),
-            DocumentFormat::Ppt => {
-                let legacy = deck.to_legacy_slides();
-                LegacyOle2Codec::pack_ppt(&LegacyPptPayload {
-                    title: deck.title.clone(),
-                    slides: legacy
+            DocumentFormat::Ppt => LegacyOle2Codec::pack_ppt(&LegacyPptPayload {
+                title: deck.title.clone(),
+                slides: legacy_ppt_slides(
+                    deck.to_legacy_slides()
                         .into_iter()
                         .zip(deck.slides.iter())
-                        .map(|((s_title, bullets, notes), s)| LegacyPptSlide {
-                            title: s_title,
-                            bullets,
-                            notes,
-                            theme: "SignatureLavender".to_string(),
-                            transition: format!("{:?}", s.transition),
-                        })
-                        .collect(),
-                })
-            }
+                        .map(|(legacy, s)| (legacy, format!("{:?}", s.transition))),
+                ),
+            }),
             _ => Self::encode(
                 &UniversalDocumentModel {
                     title: deck.title.clone(),
@@ -312,6 +314,19 @@ impl UniversalFormatConverter {
                 format,
             ),
         }
+    }
+
+    pub fn encode_rich_slides_with_warnings(
+        deck: &crate::RichSlideDeck,
+        format: DocumentFormat,
+    ) -> Result<(Vec<u8>, Vec<String>), EasyOfficeError> {
+        let bytes = Self::encode_rich_slides(deck, format)?;
+        let warnings = if format == DocumentFormat::Ppt {
+            crate::ppt_save_loss(deck).warnings()
+        } else {
+            Vec::new()
+        };
+        Ok((bytes, warnings))
     }
 
     pub fn decode(

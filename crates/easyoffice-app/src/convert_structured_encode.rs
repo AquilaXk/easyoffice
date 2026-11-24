@@ -3,10 +3,11 @@
 //! formats get the displayed grids, and PDF goes through the shell's writer when it offers one.
 
 use easyoffice_formats::{
-    doc_save_loss, pages_write_loss, CellValueKind, CsvCodec, DocumentFormat, EasyOfficeError,
-    HAlign, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions,
-    RichBlock, RichDocument, RichParagraph, RichRun, SheetShown, SheetStyling, SpillRef,
-    UniversalDocumentModel, UniversalFormatConverter, VAlign, XlsxCachedValue, XlsxFormulaCache,
+    doc_save_loss, pages_write_loss, ppt_legacy_slides_loss, CellValueKind, CsvCodec,
+    DocumentFormat, EasyOfficeError, HAlign, LegacyOle2Codec, LegacyXlsPayload, OdfCodec,
+    OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument, RichParagraph, RichRun,
+    SheetShown, SheetStyling, SpillRef, UniversalDocumentModel, UniversalFormatConverter, VAlign,
+    XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
@@ -918,13 +919,19 @@ fn encode_structured_with_thumbnail(
             if !title.trim().is_empty() {
                 titled.title = title.to_string();
             }
-            UniversalFormatConverter::encode_rich_slides(&titled, format)
+            let (bytes, ppt_warnings) =
+                UniversalFormatConverter::encode_rich_slides_with_warnings(&titled, format)?;
+            warnings.extend(ppt_warnings);
+            Ok(bytes)
         }
         StructuredContent::Slides(slides) if is_document_format(format) => {
             let doc = slides_to_document(slides, title);
             encode_rich_for_host(&doc, format, None, thumbnail, None)
         }
         StructuredContent::Slides(slides) => {
+            if format == DocumentFormat::Ppt {
+                warnings.extend(ppt_legacy_slides_loss(slides).warnings());
+            }
             let model = UniversalDocumentModel {
                 title: title.to_string(),
                 slides: slides.clone(),

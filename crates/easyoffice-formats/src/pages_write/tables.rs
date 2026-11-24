@@ -7,10 +7,10 @@
 
 use std::collections::HashMap;
 
-use super::body::valid_pages_link;
+use super::body::{drawable_archive_fields, valid_pages_link};
 use super::package::Blueprint;
 use super::styles::Styles;
-use super::wire::{bytes, msg, reference, string, varint, Fld};
+use super::wire::{bytes, float, msg, reference, string, varint, Fld};
 use crate::pages_schema::{cell, hyperlink, storage, table, ty};
 use crate::pages_table::{MAX_TABLE_CELLS, MAX_TABLE_COLS, MAX_TABLE_ROWS};
 use crate::{EasyOfficeError, RichTable, TableCellLink};
@@ -183,12 +183,16 @@ fn write_rich_cell_payload(
     )
 }
 
+const DEFAULT_ROW_HEIGHT_PT: f32 = 22.0;
+const MIN_COL_WIDTH_PT: f32 = 36.0;
+
 /// Writes `tbl` into the `Document` component and returns the `TSWP.DrawableAttachment` (2003)
 /// identifier, or `None` when `tbl` has zero rows or zero columns.
 pub(super) fn write_table_attachment(
     bp: &mut Blueprint,
     styles: &Styles,
     tbl: &RichTable,
+    body_width_pt: f32,
     budget: &mut TableWriteBudget,
 ) -> Result<Option<u64>, EasyOfficeError> {
     let rows = tbl.rows.len();
@@ -347,19 +351,35 @@ pub(super) fn write_table_attachment(
         store_fields.push(reference(table::STORE_RICH_TEXT_LIST, rt_list_id));
     }
 
-    let model_id = bp.add(
+    let model_id = bp.allocate();
+    let table_uuid = format!("00000000-0000-4000-8000-{model_id:012x}");
+    let col_width_pt = (body_width_pt / cols as f32).max(MIN_COL_WIDTH_PT);
+    let table_w_pt = (col_width_pt * cols as f32).max(MIN_COL_WIDTH_PT);
+    let table_h_pt = (DEFAULT_ROW_HEIGHT_PT * rows as f32).max(DEFAULT_ROW_HEIGHT_PT);
+
+    bp.put(
         doc_comp,
+        model_id,
         ty::TABLE_MODEL,
         &[
+            string(table::MODEL_ID, &table_uuid),
             msg(table::MODEL_DATA_STORE, store_fields),
             varint(table::MODEL_ROWS, rows as u64),
             varint(table::MODEL_COLS, cols as u64),
+            float(table::MODEL_DEFAULT_ROW_HEIGHT, DEFAULT_ROW_HEIGHT_PT),
+            float(table::MODEL_DEFAULT_COL_WIDTH, col_width_pt),
         ],
     )?;
     let info_id = bp.add(
         doc_comp,
         ty::TABLE_INFO,
-        &[reference(table::INFO_MODEL, model_id)],
+        &[
+            msg(
+                table::INFO_DRAWABLE,
+                drawable_archive_fields(table_w_pt, table_h_pt, None),
+            ),
+            reference(table::INFO_MODEL, model_id),
+        ],
     )?;
     let att_id = bp.add(doc_comp, ty::ATTACHMENT, &[reference(1, info_id)])?;
     Ok(Some(att_id))

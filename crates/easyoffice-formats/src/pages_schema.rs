@@ -541,14 +541,22 @@ pub(crate) mod header_footer {
 
 /// Table field numbers.
 pub(crate) mod table {
+    /// Table info: drawable geometry/archive wrapper.
+    pub const INFO_DRAWABLE: u32 = 1;
     /// Table info: reference to the model. 확인
     pub const INFO_MODEL: u32 = 2;
+    /// Model: UUID string (`MODEL_ID`).
+    pub const MODEL_ID: u32 = 1;
     /// Model: number of rows. 확인
     pub const MODEL_ROWS: u32 = 6;
     /// Model: number of columns. 확인
     pub const MODEL_COLS: u32 = 7;
     /// Model: data store message. 확인
     pub const MODEL_DATA_STORE: u32 = 4;
+    /// Model: default row height in points.
+    pub const MODEL_DEFAULT_ROW_HEIGHT: u32 = 8;
+    /// Model: default column width in points.
+    pub const MODEL_DEFAULT_COL_WIDTH: u32 = 9;
     /// Data store: tile storage. 확인
     pub const STORE_TILES: u32 = 3;
     /// Data store: rich text payload list reference. 확인 (the list's own type number differs

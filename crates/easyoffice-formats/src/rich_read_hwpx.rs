@@ -3,25 +3,23 @@
 //! levels, and `hp:tbl` tables keep their position in the section.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 mod frame;
+mod header;
 mod objects;
 mod table_style;
 
+use self::header::{read_header, Header};
 use self::objects::{is_drawing_shape, HwpxMedia, NoteFormatSpec, OLE_SKIP_WARNING};
-use self::table_style::BorderFillReader;
 
 use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::section_xml;
 use crate::hwpx_parts::{
-    DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
-    LIST_LEFT_MARGIN,
+    DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN,
 };
 use crate::office_codecs::checked_zip_xml_entries_for;
-use crate::rich_document::{normalize_hex_color, RichColumns};
+use crate::rich_document::RichColumns;
 use crate::rich_image::ImageBudget;
-use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table::{join_cell_paragraphs, table_from_placed_with_layout, PlacedCell};
 use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::{check_paragraph_depth, heading_level_from_name, push_linked_run, CharFmt};
@@ -29,267 +27,11 @@ use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     DocumentFormat, EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock,
     RichDocument, RichImage, RichListKind, RichPageFrame, RichPageMargins, RichPaper,
-    RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipSecurityPolicy,
+    RichParagraph, RichRun, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
 pub(super) const EMU_PER_HWPUNIT: u64 = 127;
-
-#[derive(Default, Clone)]
-struct ParaShape {
-    align: Option<String>,
-    heading_type: String,
-    heading_id_ref: u32,
-    heading_level: u8,
-    checked: bool,
-    left: u32,
-    /// First-line indent (`hc:intent`), HWPUNIT.
-    intent: i32,
-    /// `hh:lineSpacing` percentage when its type is PERCENT.
-    line_percent: Option<u32>,
-}
-
-#[derive(Default, Clone)]
-struct StyleInfo {
-    name: String,
-    eng_name: String,
-    para_pr: String,
-    char_pr: String,
-}
-
-#[derive(Default)]
-struct Header {
-    /// Hangul-slot font faces by id (the writer repeats the same face in every language slot).
-    fonts: HashMap<String, String>,
-    chars: HashMap<String, CharFmt>,
-    paras: HashMap<String, ParaShape>,
-    styles: HashMap<String, StyleInfo>,
-    border_fills: HashMap<String, (CellFill, TableCellBorders)>,
-    numberings: HwpxNumberingReader,
-}
-
-/// Parsing state while reading `Contents/header.xml`.
-#[derive(Default)]
-struct HeaderBuilder {
-    header: Header,
-    border_fills: BorderFillReader,
-    cur_char: Option<(String, CharFmt)>,
-    cur_para: Option<(String, ParaShape, bool)>,
-    intent_seen: bool,
-    hangul_slot: bool,
-}
-
-impl HeaderBuilder {
-    fn char_fmt_mut(&mut self) -> Option<&mut CharFmt> {
-        self.cur_char.as_mut().map(|(_, f)| f)
-    }
-
-    fn para_mut(&mut self) -> Option<&mut ParaShape> {
-        self.cur_para.as_mut().map(|(_, p, _)| p)
-    }
-
-    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
-        self.header.numberings.on_start(name, attrs);
-        self.border_fills.on_start(name, attrs)?;
-        if !self.on_char_start(name, attrs) {
-            self.on_para_start(name, attrs);
-        }
-        Ok(())
-    }
-
-    /// Fonts and character shapes; `false` when `name` is not one of them.
-    fn on_char_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
-        match name {
-            "hh:fontface" => self.hangul_slot = attr(attrs, "lang").as_deref() == Some("HANGUL"),
-            "hh:font" if self.hangul_slot => {
-                if let (Some(id), Some(face)) = (attr(attrs, "id"), attr(attrs, "face")) {
-                    self.header.fonts.insert(id.to_string(), face.to_string());
-                }
-            }
-            "hh:charPr" => {
-                self.cur_char =
-                    attr(attrs, "id").map(|id| (id.to_string(), char_fmt_from_attrs(attrs)))
-            }
-            "hh:fontRef" => {
-                let font = attr(attrs, "hangul")
-                    .as_deref()
-                    .and_then(|id| self.header.fonts.get(id))
-                    .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
-                    .cloned();
-                if let Some(f) = self.char_fmt_mut() {
-                    f.font = font;
-                }
-            }
-            "hh:bold" => {
-                if let Some(f) = self.char_fmt_mut() {
-                    f.bold = true;
-                }
-            }
-            "hh:italic" => {
-                if let Some(f) = self.char_fmt_mut() {
-                    f.italic = true;
-                }
-            }
-            "hh:underline" => {
-                if let Some(f) = self.char_fmt_mut() {
-                    f.underline = attr(attrs, "type").is_some_and(|t| t != "NONE");
-                }
-            }
-            "hh:strikeout" => {
-                if let Some(f) = self.char_fmt_mut() {
-                    f.strike = attr(attrs, "shape").is_some_and(|t| t != "NONE");
-                }
-            }
-            "hh:supscript" | "hh:subscript" => {
-                let script = if name == "hh:supscript" {
-                    RichScript::Superscript
-                } else {
-                    RichScript::Subscript
-                };
-                if let Some(f) = self.char_fmt_mut() {
-                    f.script = script;
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    /// Paragraph shapes and styles.
-    fn on_para_start(&mut self, name: &str, attrs: &Attrs<'_>) {
-        match name {
-            "hh:paraPr" => {
-                self.intent_seen = false;
-                let checked = attr(attrs, "checked").as_deref() == Some("1");
-                self.cur_para = attr(attrs, "id").map(|id| {
-                    (
-                        id.to_string(),
-                        ParaShape {
-                            checked,
-                            ..ParaShape::default()
-                        },
-                        false,
-                    )
-                });
-            }
-            "hh:align" => {
-                if let Some(p) = self.para_mut() {
-                    p.align = attr(attrs, "horizontal").map(Cow::into_owned);
-                }
-            }
-            "hh:heading" => {
-                if let Some(p) = self.para_mut() {
-                    p.heading_type =
-                        attr(attrs, "type").map_or_else(|| "NONE".to_string(), Cow::into_owned);
-                    p.heading_id_ref = attr(attrs, "idRef")
-                        .as_deref()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    p.heading_level = attr(attrs, "level")
-                        .as_deref()
-                        .and_then(|l| l.parse().ok())
-                        .unwrap_or(0);
-                }
-            }
-            "hc:left" => {
-                if let Some((_, p, seen)) = self.cur_para.as_mut() {
-                    if !*seen {
-                        *seen = true;
-                        p.left = attr(attrs, "value")
-                            .as_deref()
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
-                    }
-                }
-            }
-            "hc:intent" if !self.intent_seen => {
-                self.intent_seen = true;
-                if let Some(p) = self.para_mut() {
-                    p.intent = attr(attrs, "value")
-                        .as_deref()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                }
-            }
-            "hh:lineSpacing" => {
-                if let Some(p) = self.para_mut() {
-                    p.line_percent = (attr(attrs, "type").as_deref() == Some("PERCENT"))
-                        .then(|| attr(attrs, "value").as_deref().and_then(|v| v.parse().ok()))
-                        .flatten();
-                }
-            }
-            "hh:style" => self.register_style(attrs),
-            _ => {}
-        }
-    }
-
-    fn register_style(&mut self, attrs: &Attrs<'_>) {
-        let Some(id) = attr(attrs, "id") else {
-            return;
-        };
-        self.header.styles.insert(
-            id.to_string(),
-            StyleInfo {
-                name: attr(attrs, "name").unwrap_or_default().into_owned(),
-                eng_name: attr(attrs, "engName").unwrap_or_default().into_owned(),
-                para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
-                char_pr: attr(attrs, "charPrIDRef").unwrap_or_default().into_owned(),
-            },
-        );
-    }
-
-    fn on_end(&mut self, name: &str) {
-        self.header.numberings.on_end(name);
-        self.border_fills.on_end(name);
-        match name {
-            "hh:charPr" => {
-                if let Some((id, f)) = self.cur_char.take() {
-                    self.header.chars.insert(id, f);
-                }
-            }
-            "hh:paraPr" => {
-                if let Some((id, p, _)) = self.cur_para.take() {
-                    self.header.paras.insert(id, p);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Base character format of a `hh:charPr` element (size, text and shade colours).
-fn char_fmt_from_attrs(attrs: &Attrs<'_>) -> CharFmt {
-    CharFmt {
-        size_half_pt: attr(attrs, "height")
-            .as_deref()
-            .and_then(|v| v.parse::<u32>().ok())
-            .map(|v| v / 50)
-            .and_then(|v| u16::try_from(v).ok())
-            .filter(|v| *v > 0),
-        color: attr(attrs, "textColor")
-            .as_deref()
-            .and_then(normalize_hex_color)
-            .filter(|c| c != "000000"),
-        highlight: attr(attrs, "shadeColor")
-            .as_deref()
-            .and_then(normalize_hex_color),
-        ..CharFmt::default()
-    }
-}
-
-fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
-    let mut builder = HeaderBuilder::default();
-    for ev in XmlReader::new(xml) {
-        match ev? {
-            XmlEvent::Start { name, attrs } => builder.on_start(name, &attrs)?,
-            XmlEvent::End(name) => builder.on_end(name),
-            XmlEvent::Text(text) => builder.header.numberings.on_text(&text),
-        }
-    }
-    builder.header.numberings.check_budget()?;
-    builder.header.border_fills = builder.border_fills.entries;
-    Ok(builder.header)
-}
 
 #[derive(Default)]
 struct ParaState {
