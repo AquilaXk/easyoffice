@@ -168,6 +168,17 @@ impl SheetEngine {
         }) else {
             return Ok(None);
         };
+        self.read_streaming_spec_grid(spec, ctx, depth).map(Some)
+    }
+
+    /// Materializes an already-resolved [`crate::range_refs::StreamingRangeSpec`] into a [`Grid`]
+    /// while charging array cell and extra heap byte budgets.
+    pub(crate) fn read_streaming_spec_grid(
+        &self,
+        spec: crate::range_refs::StreamingRangeSpec<'_>,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Grid, FormulaError> {
         let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
         ctx.charge_array_cells(rows, cols)?;
         let total = rows * cols;
@@ -201,26 +212,29 @@ impl SheetEngine {
                         }
                     }
                 }
-                return Ok(Some(Grid::from_rows_with_links(rows, cols, data, links)));
+                return Ok(Grid::from_rows_with_links(rows, cols, data, links));
             }
         }
+        let max_r = min_r + rows as u32 - 1;
+        let max_c = min_c + cols as u32 - 1;
         // A sparse range over few populated cells (per range, not whole sheet) avoids dense walks.
         let sparse_pop = (!transposed && total > 64)
             .then(|| self.resolve_sheet_ref(sheet_opt.as_deref(), ctx))
             .flatten()
             .and_then(|ts| {
-                let max_r = min_r + rows as u32 - 1;
-                let max_c = min_c + cols as u32 - 1;
                 let pop_count = ts.cell_index().count_in_range(min_r, max_r, min_c, max_c);
                 if pop_count == 0 {
-                    Some(Vec::new())
+                    Some((ts.resolved_sheet_id(), Vec::new()))
                 } else if total > pop_count.saturating_mul(2) {
-                    Some(ts.cell_index().range_coords(min_r, max_r, min_c, max_c))
+                    Some((
+                        ts.resolved_sheet_id(),
+                        ts.cell_index().range_coords(min_r, max_r, min_c, max_c),
+                    ))
                 } else {
                     None
                 }
             });
-        if let Some(coords) = sparse_pop {
+        if let Some((target_sid, coords)) = sparse_pop {
             ctx.steps = ctx.steps.saturating_add(1);
             if ctx.steps > Self::MAX_EVAL_STEPS {
                 return Err(FormulaError::Value);
@@ -236,6 +250,25 @@ impl SheetEngine {
                     ctx.charge_array_extra_bytes(hb)?;
                 }
                 data[dr * cols + dc] = v;
+            }
+            if let Some((o_sid, o_coord, o_val)) =
+                ctx.cell_overlay.as_ref().and_then(|(s, c, v)| {
+                    (*s == target_sid
+                        && (min_r..=max_r).contains(&c.row())
+                        && (min_c..=max_c).contains(&c.col()))
+                    .then(|| (*s, *c, v.clone()))
+                })
+            {
+                let _ = o_sid;
+                let (dr, dc) = (
+                    (o_coord.row() - min_r) as usize,
+                    (o_coord.col() - min_c) as usize,
+                );
+                let hb = o_val.heap_bytes();
+                if hb > 0 {
+                    ctx.charge_array_extra_bytes(hb)?;
+                }
+                data[dr * cols + dc] = o_val;
             }
         } else {
             ctx.steps = ctx.steps.saturating_add(total);
@@ -253,7 +286,7 @@ impl SheetEngine {
                 }
             }
         }
-        Ok(Some(Grid::from_rows(rows, cols, data)))
+        Ok(Grid::from_rows(rows, cols, data))
     }
 
     /// `A1#`: the cells of the spill range of the formula at `coord` (one value for a formula that
@@ -514,7 +547,13 @@ impl SheetEngine {
             if let Expr::FuncCall(f) = substituted.peeled() {
                 if matches!(
                     f.name.as_str(),
-                    ":" | "INDEX" | "OFFSET" | "INDIRECT" | "CHOOSE" | "IF" | "SINGLE"
+                    ":" | "INDEX"
+                        | "OFFSET"
+                        | "INDIRECT"
+                        | "CHOOSE"
+                        | "IF"
+                        | "SINGLE"
+                        | "TRIMRANGE"
                 ) && !uses_vars(&substituted)
                 {
                     match self.extract_range_and_sheet_ctx(&substituted, ctx, depth + 1) {
@@ -698,7 +737,7 @@ impl SheetEngine {
 }
 
 /// Replaces free `LET`/`LAMBDA` variable references with bound [`Val::Ref`] or scalar [`Val::Grid`] literals.
-fn subst_env_bindings(expr: &Expr, env: &Env) -> Expr {
+pub(crate) fn subst_env_bindings(expr: &Expr, env: &Env) -> Expr {
     fn walk_subst(expr: &Expr, env: &Env, shadowed: &mut Vec<String>) -> Expr {
         match expr {
             Expr::Shared(shared) => walk_subst(&shared.expr, env, shadowed),

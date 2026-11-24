@@ -96,6 +96,7 @@ mod spill_merges;
 mod table_api;
 pub mod table_index;
 mod text_format;
+mod trim_bounds;
 pub mod types;
 pub mod workbook;
 mod xpath_ast;

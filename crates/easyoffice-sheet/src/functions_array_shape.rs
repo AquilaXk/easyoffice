@@ -411,6 +411,27 @@ impl SheetEngine {
         Ok(Val::grid(out))
     }
 
+    fn trim_mode_arg(
+        &self,
+        args: &[Expr],
+        i: usize,
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<u8, FormulaError> {
+        match args.get(i) {
+            None | Some(Expr::Missing) => Ok(3),
+            Some(_) => {
+                let n = self.arg_number(args, i, 0.0, env, ctx, depth)?.trunc();
+                if !(0.0..=3.0).contains(&n) {
+                    Err(FormulaError::Value)
+                } else {
+                    Ok(n as u8)
+                }
+            }
+        }
+    }
+
     /// `=TRIMRANGE(range, [trim_rows], [trim_cols])`
     ///
     /// Trims blank rows and/or columns from the outer edges of a range or array.
@@ -433,28 +454,46 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
 
+        let substituted_arg0 = (!env.is_empty() && crate::array_eval::uses_vars(&args[0]))
+            .then(|| crate::array_eval::subst_env_bindings(&args[0], env));
+        let arg0 = substituted_arg0.as_ref().unwrap_or(&args[0]);
+        if let Some((sheet_opt, range, transposed)) =
+            self.extract_range_and_sheet_ctx(arg0, ctx, depth + 1)?
+        {
+            if !Self::is_virtual_sheet(sheet_opt.as_deref()) {
+                let trim_rows = self.trim_mode_arg(args, 1, env, ctx, depth)?;
+                let trim_cols = self.trim_mode_arg(args, 2, env, ctx, depth)?;
+                let trimmed = self.trim_sheet_range(
+                    sheet_opt.as_deref(),
+                    range,
+                    transposed,
+                    (trim_rows, trim_cols),
+                    ctx,
+                    depth + 1,
+                )?;
+                let min_r = trimmed.start.row().min(trimmed.end.row());
+                let max_r = trimmed.start.row().max(trimmed.end.row());
+                let min_c = trimmed.start.col().min(trimmed.end.col());
+                let max_c = trimmed.start.col().max(trimmed.end.col());
+                let phys_rows = (max_r - min_r + 1) as usize;
+                let phys_cols = (max_c - min_c + 1) as usize;
+                let (rows, cols) = if transposed {
+                    (phys_cols, phys_rows)
+                } else {
+                    (phys_rows, phys_cols)
+                };
+                let spec = (sheet_opt, min_r, min_c, rows, cols, transposed);
+                return Ok(Val::grid(self.read_streaming_spec_grid(
+                    spec,
+                    ctx,
+                    depth + 1,
+                )?));
+            }
+        }
+
         let data = self.shape_grid(&args[0], env, ctx, depth)?;
-
-        let trim_rows = if args.len() >= 2 {
-            self.arg_number(args, 1, 3.0, env, ctx, depth)? as i32
-        } else {
-            3
-        };
-
-        let trim_cols = if args.len() == 3 {
-            self.arg_number(args, 2, 3.0, env, ctx, depth)? as i32
-        } else {
-            3
-        };
-
-        if !matches!(trim_rows, 0..=3) {
-            // trim_rows must be 0, 1, 2, or 3
-            return Err(FormulaError::Value);
-        }
-        if !matches!(trim_cols, 0..=3) {
-            // trim_cols must be 0, 1, 2, or 3
-            return Err(FormulaError::Value);
-        }
+        let trim_rows = self.trim_mode_arg(args, 1, env, ctx, depth)?;
+        let trim_cols = self.trim_mode_arg(args, 2, env, ctx, depth)?;
 
         let num_rows = data.rows;
         let num_cols = data.cols;

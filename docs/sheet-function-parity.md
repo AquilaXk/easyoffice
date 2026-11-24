@@ -55,7 +55,7 @@
 |---|---|---|---|
 | 텍스트 | `TEXTSPLIT`, `ARRAYTOTEXT` | `functions_text_split.rs` | 대소문자 접기를 `char` 단위로 해 바이트 위치 어긋남을 없앴다. 구분자 수 × 글자 수 400만 회, 결과 글자 32,767자 상한(Fail-Closed). |
 | 텍스트 | `REGEXTEST`, `REGEXEXTRACT`, `REGEXREPLACE` | `functions_regex.rs` | 패턴 길이 4,096바이트, 프로그램 크기·DFA 캐시 1 MiB, 중첩 64 상한(넘으면 `#VALUE!`). 반환 형식 0은 첫 일치 전체(참조 A는 첫 그룹), 형식 2·대소문자 인수·`REGEXREPLACE` 횟수 인수는 문서에 맞춰 더했다. |
-| 조회·참조 | `TRIMRANGE` | `functions_array_shape.rs` | 결과 크기를 배열 예산에 건다. 전체 열 참조는 아직 `#SPILL!`. |
+| 조회·참조 | `TRIMRANGE` | `functions_array_shape.rs`, `trim_bounds.rs` | 실제 시트 참조는 색인으로 사용 범위 끝을 먼저 잘라낸 뒤 결과 크기만 배열 예산에 건다. |
 | 정보 | `ISREF`, `SHEET`, `SHEETS`, `CELL`, `INFO` | `functions_info_ref.rs` | 참조 판정은 이 엔진이 참조로 푸는 식(`OFFSET`·`INDIRECT`·`INDEX`·`CHOOSE`·이름)이다. 파일 이름·디렉터리·릴리스가 필요한 종류는 `#N/A`. |
 | 수학 | `PERCENTOF`, `ISO.CEILING` | `functions_math.rs`, `functions_math_trig.rs` | `ISO.CEILING`은 `CEILING.PRECISE`와 같은 길이다. |
 | 재무 | `AMORDEGRC` | `functions_depr.rs` | 일수 계산은 이 엔진의 기준별 일수 함수를 쓴다. 문서 예제 776과 일치. |

@@ -472,6 +472,9 @@ impl SheetEngine {
             Expr::FuncCall(f) if f.name == "SINGLE" && f.args.len() == 1 => {
                 self.resolve_single_ref(&f.args[0], ctx, depth + 1)
             }
+            Expr::FuncCall(f) if f.name == "TRIMRANGE" => {
+                self.extract_trimrange_ref(&f.args, ctx, depth)
+            }
             _ => Ok(None),
         }
     }

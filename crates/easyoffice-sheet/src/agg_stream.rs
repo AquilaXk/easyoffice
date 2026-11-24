@@ -215,6 +215,7 @@ impl SheetEngine {
                             | "OFFSET"
                             | "TRANSPOSE"
                             | "SINGLE"
+                            | "TRIMRANGE"
                             | "INDEX"
                             | "CHOOSE"
                             | "IF"

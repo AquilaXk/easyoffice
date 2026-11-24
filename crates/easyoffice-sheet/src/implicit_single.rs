@@ -128,7 +128,14 @@ impl SheetEngine {
             Expr::FuncCall(f)
                 if matches!(
                     f.name.as_str(),
-                    "INDIRECT" | "OFFSET" | "INDEX" | "CHOOSE" | "IF" | "SINGLE" | ":"
+                    "INDIRECT"
+                        | "OFFSET"
+                        | "INDEX"
+                        | "CHOOSE"
+                        | "IF"
+                        | "SINGLE"
+                        | "TRIMRANGE"
+                        | ":"
                 ) =>
             {
                 let Some((sheet, range, _)) =
