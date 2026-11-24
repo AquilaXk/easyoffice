@@ -118,6 +118,7 @@
         focusAnchor();
       },
       tablesIn: (sheet, r1, c1, r2, c2) => host.__EASYOFFICE_SHEET_LAYOUT__.tablesIn(sheet, r1, c1, r2, c2),
+      tablesOf: (sheet) => host.__EASYOFFICE_SHEET_LAYOUT__.tablesOf(sheet),
       tableBox: (table) => host.__EASYOFFICE_SHEET_LAYOUT__.tableBox(table),
     });
 

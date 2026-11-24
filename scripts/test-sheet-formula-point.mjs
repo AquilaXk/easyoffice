@@ -182,14 +182,75 @@ test("a cell of the formula's own row is `[@Column]` inside the table and `Table
   assert.equal(refOf(rect(4, 3, 4, 4), { r: 4, c: 9 }), "매출[[#This Row],[1분기]:[분기 합계]]");
 });
 
-test("what is no whole column and no cell of the formula's row stays an A1 reference", () => {
+test("what is partial or outside the table stays an A1 reference", () => {
   assert.equal(refOf(rect(4, 3, 4, 3), { r: 5, c: 9 }), null, "another row");
   assert.equal(refOf(rect(4, 3, 4, 3)), null, "no formula cell on this sheet");
   assert.equal(refOf(rect(3, 3, 5, 3)), null, "part of a column");
-  assert.equal(refOf(rect(2, 3, 6, 3)), null, "with the header");
-  assert.equal(refOf(rect(3, 3, 7, 3)), null, "with the totals row");
+  assert.equal(refOf(rect(2, 3, 5, 3)), null, "header plus partial data stays A1");
+  assert.equal(refOf(rect(4, 3, 7, 3)), null, "partial data plus totals stays A1");
   assert.equal(refOf(rect(3, 1, 6, 3)), null, "a cell outside the table");
   assert.equal(refOf({ r1: 1, c1: 3, r2: 1048576, c2: 3, axis: "col" }), null, "a whole sheet column");
+});
+
+test("headers, totals, all and combined row items produce standard structured references", () => {
+  assert.equal(refOf(rect(2, 3, 2, 3)), "매출[[#Headers],[1분기]]");
+  assert.equal(refOf(rect(2, 3, 2, 4)), "매출[[#Headers],[1분기]:[분기 합계]]");
+  assert.equal(refOf(rect(2, 2, 2, 5)), "매출[#Headers]");
+  assert.equal(refOf(rect(7, 3, 7, 3)), "매출[[#Totals],[1분기]]");
+  assert.equal(refOf(rect(7, 3, 7, 3), { r: 7, c: 2 }), "매출[[#Totals],[1분기]]", "totals cell pointed from totals row keeps #Totals");
+  assert.equal(refOf(rect(7, 2, 7, 5)), "매출[#Totals]");
+  assert.equal(refOf(rect(2, 3, 7, 3)), "매출[[#All],[1분기]]");
+  assert.equal(refOf(rect(2, 2, 7, 5)), "매출[#All]");
+  assert.equal(refOf(rect(2, 3, 6, 3)), "매출[[#Headers],[#Data],[1분기]]");
+  assert.equal(refOf(rect(3, 3, 7, 3)), "매출[[#Data],[#Totals],[1분기]]");
+  assert.equal(refOf(rect(3, 2, 6, 5)), "매출[#Data]");
+  assert.equal(refOf(rect(4, 2, 4, 5), { r: 4, c: 3 }), "[@]");
+  assert.equal(refOf(rect(4, 2, 4, 5), { r: 4, c: 9 }), "매출[#This Row]");
+});
+
+test("resolveStructured parses valid manual structured references and rejects invalid ones", () => {
+  const esc = {
+    name: "t_esc",
+    columns: ["a.b", "@x", "a[1]", "it's", "p#q"],
+    header: true,
+    totals: true,
+  };
+  const tables = [
+    { ...TABLE, range: "B2:E7" },
+    { ...esc, range: "G2:K6" },
+  ];
+  const boxOf = (t) => {
+    const [a, b] = t.range.split(":");
+    const pa = /^([A-Z]+)(\d+)$/.exec(a);
+    const pb = /^([A-Z]+)(\d+)$/.exec(b);
+    const colNum = (s) => [...s].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+    return { r1: Number(pa[2]), c1: colNum(pa[1]), r2: Number(pb[2]), c2: colNum(pb[1]) };
+  };
+  const r = (tok, at = null) => P.resolveStructured(tok, tables, boxOf, at);
+
+  assert.deepEqual(r("매출[[#Headers],[1분기]]"), { r1: 2, c1: 3, r2: 2, c2: 3, axis: null });
+  assert.deepEqual(r("매출[#Headers]"), { r1: 2, c1: 2, r2: 2, c2: 5, axis: null });
+  assert.deepEqual(r("매출[#Totals]"), { r1: 7, c1: 2, r2: 7, c2: 5, axis: null });
+  assert.deepEqual(r("매출[#All]"), { r1: 2, c1: 2, r2: 7, c2: 5, axis: null });
+  assert.deepEqual(r("매출[#Data]"), { r1: 3, c1: 2, r2: 6, c2: 5, axis: null });
+  assert.deepEqual(r("매출[[#Headers],[#Data],[1분기]]"), { r1: 2, c1: 3, r2: 6, c2: 3, axis: null });
+  assert.deepEqual(r("매출[[#Data],[#Totals],[a.b]:[1분기]]"), { r1: 3, c1: 3, r2: 7, c2: 5, axis: null });
+  assert.deepEqual(r("[@[분기 합계]]", { r: 4, c: 2 }), { r1: 4, c1: 4, r2: 4, c2: 4, axis: null });
+  assert.deepEqual(r("[@1분기]", { r: 4, c: 2 }), { r1: 4, c1: 3, r2: 4, c2: 3, axis: null });
+  assert.deepEqual(r("[@]", { r: 4, c: 5 }), { r1: 4, c1: 2, r2: 4, c2: 5, axis: null });
+  assert.deepEqual(r("매출[[#This Row],[1분기]]", { r: 4, c: 9 }), { r1: 4, c1: 3, r2: 4, c2: 3, axis: null });
+  assert.deepEqual(r("t_esc[[@x]]"), { r1: 3, c1: 8, r2: 5, c2: 8, axis: null });
+  assert.deepEqual(r("t_esc[[a'[1']]]"), { r1: 3, c1: 9, r2: 5, c2: 9, axis: null });
+  assert.deepEqual(r("t_esc[it''s]"), { r1: 3, c1: 10, r2: 5, c2: 10, axis: null });
+  assert.deepEqual(r("t_esc[p'#q]"), { r1: 3, c1: 11, r2: 5, c2: 11, axis: null });
+
+  assert.equal(r("매출[[#Headers],[#Totals]]"), null);
+  assert.equal(r("매출[#Nope]"), null);
+  assert.equal(r("매출[없는열]"), null);
+  assert.equal(r("[@1분기]", { r: 2, c: 3 }), null, "header row cannot resolve @");
+  assert.equal(r("[@1분기]", { r: 4, c: 9 }), null, "unqualified @ requires caret inside table");
+  assert.equal(r("[Book]"), null, "unqualified non-structured bracket ignored");
+  assert.equal(P.resolveStructured("t[#Totals]", [{ ...TABLE, name: "t", range: "B2:E7", totals: false }], boxOf, null), null);
 });
 
 test("a table without a header or a totals row has its data from the first to the last row", () => {

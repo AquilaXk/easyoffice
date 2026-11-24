@@ -1,10 +1,11 @@
 (function (host) {
   "use strict";
 
-  // Point mode of the formula editor (PD-279, PD-296): while a formula is typed in a cell or in the formula bar, a click, a drag
+  // Point mode of the formula editor (PD-279, PD-296, PD-339): while a formula is typed in a cell or in the formula bar, a click, a drag
   // (over cells, or over the column or row headers), a Shift+click or an arrow key on the grid writes the reference of the cells
   // at the caret (after `=`, an operator, `(` or `,`). A merged range is written whole, and the cells of a table as its structured
-  // reference where `sheet-formula-point.js` has one. A press where no reference is awaited, with the entry out on another
+  // reference where `sheet-formula-point.js` has one (including `#Headers`, `#Totals` and `#All`), with grid boxes drawn for both
+  // pointed and manually typed structured references via `resolveStructured`. A press where no reference is awaited, with the entry out on another
   // sheet, enters the formula on its own sheet and selects what it hit. A tab of another sheet puts the sheet in front of it,
   // F2 turns between the entry and the edit of the text, F4 cycles the `$` of the reference at the caret, and every reference
   // of the formula gets a colour that is drawn on the text and as a box on the grid. Which places take a reference, the colours and the F4 cycle are `sheet-formula-point.js`; this file ties them
@@ -58,9 +59,6 @@
     let boxes = [];
     let shown = { spans: [], colors: [] };
     let paletteSet = false;
-    // The cells a structured reference of the entry stands for, by its text: `{ sheet, rg }`. The page wrote it from those
-    // cells; one that was typed is not known and has no box.
-    const known = new Map();
 
     const palette = () => host.__EASYOFFICE_SHEET_CHART_SVG__?.CHART_PALETTE ?? [];
     const colorCount = () => Math.max(1, palette().length);
@@ -184,8 +182,9 @@
     function targetOf(span) {
       const here = deps.getSheetName().toLowerCase();
       if (span.ref === null) {
-        const found = known.get(span.token);
-        return found?.rg && found.sheet.toLowerCase() === here ? found.rg : null;
+        const sheet = deps.getSheetName();
+        const tables = deps.tablesOf ? deps.tablesOf(sheet) : deps.tablesIn(sheet, 1, 1, grid.MAX_ROWS, grid.MAX_COLS);
+        return P.resolveStructured(span.token, tables, deps.tableBox, entryCell());
       }
       const rg = P.rangeOf(span.ref);
       if (!rg) return null;
@@ -368,7 +367,6 @@
     function writeRef(s, ctx, anchor, focus, axis, sheetOverride = deps.getSheetName()) {
       const rg = axis ? rangeBetween(anchor, focus, axis) : withMerges(rangeBetween(anchor, focus, null));
       const structured = axis || sheetOverride !== deps.getSheetName() ? null : structuredOf(rg);
-      if (structured) known.set(structured, { sheet: deps.getSheetName(), rg });
       const out = P.applyRef(s.read().text, ctx, structured ?? prefixOf(sheetOverride) + P.rangeText(rg, axis));
       point = { start: out.start, end: out.end, anchor, focus, axis };
       writing = true;
@@ -594,7 +592,6 @@
       barDirty = false;
       point = null;
       tabSpan = null;
-      known.clear();
       refresh();
     }
 
@@ -610,7 +607,6 @@
       if (detaching) return;
       point = null;
       tabSpan = null;
-      known.clear();
       refresh();
     }
 

@@ -18,24 +18,38 @@
 // text literal or a quoted sheet name. A selected text is replaced by the reference. The cycle covers the cell, range, column
 // and row forms of the pattern and writes letters in upper case.
 //
-// Structured references (PD-296): neither the reference above nor IronCalc has a point that writes a table's column (IronCalc
-// turns a structured reference into a range while it parses and never writes one; the reference only rewrites the
-// `[@Column]` of a calculated column, Univer `sheets-table/src/commands/utils/calculated-column.ts` lines 89-140, Apache-2.0,
-// Copyright 2023-present DreamNum Co., Ltd., commit ac29fd8aaa3ce43cd1f672e75a596da22c132616; IronCalc `base/src/expressions/
-// parser/stringify.rs`, MIT OR Apache-2.0, commit f93662006b8fb1c401dc870bbda26c5d60ac6037; both read, no code taken), so the text a
-// pointed range of a table becomes follows the spreadsheet program's help page for tables ("Use table names in formulas",
-// on by default): the whole data of a column is `Table[Column]`, several columns `Table[[A]:[B]]`, a cell in the formula's
-// own row `[@Column]` in the table and `Table[[#This Row],[Column]]` outside it, and anything else (part of a column, the
-// header, the totals row) stays an A1 range. The spelling of a column name is that of `sheet-table-totals.js` (`columnRef`),
-// which the formula bar and the totals row use; the engine reads the text back through `structured_ref.rs`.
+// Structured references (PD-296, PD-339): neither the reference above nor IronCalc has a point that writes a table's
+// column (IronCalc turns a structured reference into a range while it parses and never writes one; the reference only
+// rewrites the `[@Column]` of a calculated column, Univer `sheets-table/src/commands/utils/calculated-column.ts` lines
+// 89-140, Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit ac29fd8aaa3ce43cd1f672e75a596da22c132616; IronCalc
+// `base/src/expressions/parser/stringify.rs`, MIT OR Apache-2.0, commit f93662006b8fb1c401dc870bbda26c5d60ac6037; both
+// read, no code taken), so the text a pointed range of a table becomes follows the spreadsheet program's help page for
+// tables ("Use table names in formulas", on by default): `#Headers`, `#Totals`, `#All`, `#Data`, `[#Headers],[#Data]`,
+// `[#Data],[#Totals]` and `#This Row` (`@`), while partial slices stay A1 ranges. The spelling of a column name uses
+// `sheet-table-totals.js` (`columnRef`); `resolveStructured` parses manual and pointed tokens with `structured_ref.rs`
+// rules so every valid structured reference gets its grid box.
 (function (host) {
   "use strict";
 
   const { TOKEN_RE } = host.__EASYOFFICE_SHEET_REF_TOKENS__;
   const refsApi = () => host.__EASYOFFICE_SHEET_REFS__;
   const totalsApi = () => host.__EASYOFFICE_SHEET_TABLE_TOTALS__;
-  // The characters of a table's name in front of its bracket group.
-  const TABLE_NAME_CHAR = /[\p{L}\p{N}_.]/u;
+  // The characters of a table's name in front of its bracket group (`structured_ref.rs`).
+  const TABLE_NAME_CHAR = /[\p{L}\p{N}_.\\]/u;
+  const MAX_STRUCTURED_DEPTH = 4;
+  const ESCAPABLE = "[]#'@";
+  const ITEM_DATA = 1;
+  const ITEM_HEADERS = 2;
+  const ITEM_TOTALS = 4;
+  const ITEM_ALL = 8;
+  const ITEM_THIS_ROW = 16;
+  const ITEM_NAMES = new Map([
+    ["#all", ITEM_ALL],
+    ["#data", ITEM_DATA],
+    ["#headers", ITEM_HEADERS],
+    ["#totals", ITEM_TOTALS],
+    ["#this row", ITEM_THIS_ROW],
+  ]);
 
   // A reference is pointed after `=`, an operator, `(` or `,`.
   const POINT_AFTER = "=+-*/^&<>(,";
@@ -73,6 +87,7 @@
       if (m[2] !== undefined || m[0][0] !== "[" || (open >= 0 && m.index > open)) continue;
       let start = m.index;
       while (start > 0 && TABLE_NAME_CHAR.test(text[start - 1])) start -= 1;
+      if (start === m.index && !/^\s*[@#\[]/.test(m[0].slice(1, -1))) continue;
       const end = m.index + m[0].length;
       spans.push({ start, end, token: text.slice(start, end), sheet: "", ref: null });
     }
@@ -190,25 +205,232 @@
 
   // The structured reference a pointed range `rg` (`{ r1, c1, r2, c2, axis }`) of the table `table` (`{ name, columns, header,
   // totals }`, its cells `box`) is written as, or null for an A1 range. `at` is the cell of the formula `{ r, c }` when it is on
-  // the table's sheet, else null; a cell in its row is the table's `#This Row`.
+  // the table's sheet, else null; a cell in its data row is `#This Row` (`@` inside the table).
   function structuredRef(rg, table, box, at) {
-    const first = box.r1 + (table.header === false ? 0 : 1);
-    const last = box.r2 - (table.totals === true ? 1 : 0);
-    if (rg.axis || rg.r1 < first || rg.r2 > last || rg.c1 < box.c1 || rg.c2 > box.c2) return null;
+    if (rg.axis || rg.r1 < box.r1 || rg.r2 > box.r2 || rg.c1 < box.c1 || rg.c2 > box.c2) return null;
+    const hasHeader = table.header !== false;
+    const hasTotals = table.totals === true;
+    const first = box.r1 + (hasHeader ? 1 : 0);
+    const last = box.r2 - (hasTotals ? 1 : 0);
     const from = table.columns[rg.c1 - box.c1];
     const to = table.columns[rg.c2 - box.c1];
     if (!from || !to) return null;
+    const width = box.c2 - box.c1 + 1;
+    const allCols = width > 1 && rg.c1 === box.c1 && rg.c2 === box.c2;
+    if (allCols && (table.columns.length < width || table.columns.slice(0, width).some((c) => !c))) return null;
     const { escapeColumn, columnRef } = totalsApi();
+    const escapeCol = (s) => escapeColumn(s).replace(/^@/, "'@");
     const one = rg.c1 === rg.c2;
-    const columns = "[" + escapeColumn(from) + "]" + (one ? "" : ":[" + escapeColumn(to) + "]");
-    if (rg.r1 === rg.r2 && at && at.r === rg.r1) {
-      if (at.c < box.c1 || at.c > box.c2) return table.name + "[[#This Row]," + columns + "]";
+    const columns = "[" + escapeCol(from) + "]" + (one ? "" : ":[" + escapeCol(to) + "]");
+    const withItems = (items) => {
+      if (items.length === 1) {
+        return allCols ? table.name + "[" + items[0] + "]" : table.name + "[[" + items[0] + "]," + columns + "]";
+      }
+      const head = items.map((s) => "[" + s + "]").join(",");
+      return allCols ? table.name + "[" + head + "]" : table.name + "[" + head + "," + columns + "]";
+    };
+    if (hasHeader && rg.r1 === box.r1 && rg.r2 === box.r1) return withItems(["#Headers"]);
+    if (hasTotals && rg.r1 === box.r2 && rg.r2 === box.r2) return withItems(["#Totals"]);
+    if ((hasHeader || hasTotals) && rg.r1 === box.r1 && rg.r2 === box.r2) return withItems(["#All"]);
+    if (hasHeader && first <= last && rg.r1 === box.r1 && rg.r2 === last) return withItems(["#Headers", "#Data"]);
+    if (hasTotals && first <= last && rg.r1 === first && rg.r2 === box.r2) return withItems(["#Data", "#Totals"]);
+    if (first <= last && rg.r1 === rg.r2 && rg.r1 >= first && rg.r2 <= last && at && at.r === rg.r1) {
+      if (at.c < box.c1 || at.c > box.c2) return withItems(["#This Row"]);
+      if (allCols) return "[@]";
       // The spreadsheet program writes a name with a blank in double brackets here (`[@[Sales Amount]]`).
-      const plain = one && !/\s/.test(from) && !columnRef("", from).startsWith("[[");
-      return "[@" + (plain ? escapeColumn(from) : columns) + "]";
+      const plain = one && !/\s/.test(from) && !from.startsWith("@") && !columnRef("", from).startsWith("[[");
+      return "[@" + (plain ? escapeCol(from) : columns) + "]";
     }
-    if (rg.r1 !== first || rg.r2 !== last) return null;
-    return one ? columnRef(table.name, from) : table.name + "[" + columns + "]";
+    if (first <= last && rg.r1 === first && rg.r2 === last) {
+      if (allCols) return table.name + "[#Data]";
+      if (one && from.startsWith("@")) return table.name + "[" + columns + "]";
+      return one ? columnRef(table.name, from) : table.name + "[" + columns + "]";
+    }
+    return null;
+  }
+
+  // ---- structured reference parsing & grid box resolution (PD-339, mirrors `structured_ref.rs`) ----
+  function groupEnd(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i += 1) {
+      const c = text[i];
+      if (c === "'" && i + 1 < text.length && ESCAPABLE.includes(text[i + 1])) i += 1;
+      else if (c === "[") {
+        depth += 1;
+        if (depth > MAX_STRUCTURED_DEPTH) return -1;
+      } else if (c === "]") {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+        if (depth < 0) return -1;
+      }
+    }
+    return -1;
+  }
+
+  const unescapeCol = (raw) => raw.replace(/'([[\]#'@])/g, "$1");
+
+  function hasBareBracket(raw) {
+    for (let i = 0; i < raw.length; i += 1) {
+      const c = raw[i];
+      if (c === "'" && i + 1 < raw.length && ESCAPABLE.includes(raw[i + 1])) i += 1;
+      else if (c === "[" || c === "]") return true;
+    }
+    return false;
+  }
+
+  function itemsAllowed(items) {
+    if (items === 0) return true;
+    if (items & ITEM_ALL) return items === ITEM_ALL;
+    if (items & ITEM_THIS_ROW) return items === ITEM_THIS_ROW;
+    const rows = ITEM_HEADERS | ITEM_DATA | ITEM_TOTALS;
+    return (items & ~rows) === 0 && items !== (ITEM_HEADERS | ITEM_TOTALS);
+  }
+
+  function skipSpaces(cur) {
+    while (cur.at < cur.text.length && cur.text[cur.at] === " ") cur.at += 1;
+  }
+
+  function doneCur(cur) {
+    skipSpaces(cur);
+    return cur.at >= cur.text.length;
+  }
+
+  function readCurGroup(cur) {
+    skipSpaces(cur);
+    if (cur.text[cur.at] !== "[") return null;
+    const end = groupEnd(cur.text, cur.at);
+    if (end < 0) return null;
+    const inner = cur.text.slice(cur.at + 1, end - 1);
+    cur.at = end;
+    return inner;
+  }
+
+  function columnElement(cur) {
+    const first = readCurGroup(cur);
+    if (first === null || hasBareBracket(first)) return null;
+    skipSpaces(cur);
+    if (cur.text[cur.at] !== ":") return { kind: "one", a: unescapeCol(first) };
+    cur.at += 1;
+    const second = readCurGroup(cur);
+    if (second === null || hasBareBracket(second)) return null;
+    return { kind: "span", a: unescapeCol(first), b: unescapeCol(second) };
+  }
+
+  function elementList(inner) {
+    const cur = { text: inner, at: 0 };
+    let items = 0;
+    let columns = null;
+    for (;;) {
+      skipSpaces(cur);
+      const mark = cur.at;
+      const content = readCurGroup(cur);
+      if (content === null) return null;
+      if (content.trimStart().startsWith("#")) {
+        const bit = ITEM_NAMES.get(content.trim().toLowerCase());
+        if (!bit) return null;
+        items |= bit;
+      } else {
+        cur.at = mark;
+        if (columns !== null) return null;
+        columns = columnElement(cur);
+        if (!columns) return null;
+      }
+      if (doneCur(cur)) break;
+      if (cur.text[cur.at] !== ",") return null;
+      cur.at += 1;
+    }
+    return itemsAllowed(items) ? { items, columns: columns || { kind: "all" } } : null;
+  }
+
+  function atForm(rest) {
+    let columns;
+    if (rest.trim() === "") {
+      columns = { kind: "all" };
+    } else if (rest.trimStart().startsWith("[")) {
+      const cur = { text: rest, at: 0 };
+      columns = columnElement(cur);
+      if (!columns || !doneCur(cur)) return null;
+    } else if (hasBareBracket(rest)) {
+      return null;
+    } else {
+      columns = { kind: "one", a: unescapeCol(rest) };
+    }
+    return { items: ITEM_THIS_ROW, columns };
+  }
+
+  function parseStructuredGroup(group) {
+    if (group.length < 2 || groupEnd(group, 0) !== group.length) return null;
+    const inner = group.slice(1, -1);
+    const s = inner.trimStart();
+    if (s === "") return { items: 0, columns: { kind: "all" } };
+    if (s[0] === "@") return atForm(s.slice(1));
+    if (s[0] === "#") {
+      const bit = ITEM_NAMES.get(s.trim().toLowerCase());
+      return bit ? { items: bit, columns: { kind: "all" } } : null;
+    }
+    if (s[0] === "[") return elementList(inner);
+    if (hasBareBracket(inner)) return null;
+    return { items: 0, columns: { kind: "one", a: unescapeCol(inner) } };
+  }
+
+  function rowsOfStructured(items, table, box, at) {
+    const hasHeader = table.header !== false;
+    const hasTotals = table.totals === true;
+    const first = box.r1 + (hasHeader ? 1 : 0);
+    const last = box.r2 - (hasTotals ? 1 : 0);
+    if (items === 0 || items === ITEM_DATA) return first <= last ? [first, last] : null;
+    if (items === ITEM_HEADERS) return hasHeader ? [box.r1, box.r1] : null;
+    if (items === ITEM_TOTALS) return hasTotals ? [box.r2, box.r2] : null;
+    if (items === ITEM_ALL) return [box.r1, box.r2];
+    if (items === ITEM_THIS_ROW) return at && at.r >= first && at.r <= last ? [at.r, at.r] : null;
+    if (items === (ITEM_HEADERS | ITEM_DATA)) return hasHeader && first <= last ? [box.r1, last] : null;
+    if (items === (ITEM_DATA | ITEM_TOTALS)) return hasTotals && first <= last ? [first, box.r2] : null;
+    return hasHeader && hasTotals ? [box.r1, box.r2] : null;
+  }
+
+  function resolveStructured(token, tables, tableBox, at) {
+    const open = String(token || "").indexOf("[");
+    if (open < 0 || !Array.isArray(tables) || tables.length === 0) return null;
+    const tableName = token.slice(0, open);
+    const group = token.slice(open);
+    if (tableName === "" && !/^\s*[@#\[]/.test(group.slice(1, -1))) return null;
+    const sref = parseStructuredGroup(group);
+    if (!sref) return null;
+    const folded = tableName.toLowerCase();
+    const table = tableName
+      ? tables.find((t) => String(t.name || "").toLowerCase() === folded)
+      : at
+        ? tables.find((t) => {
+            const b = tableBox(t);
+            return b && b.r2 >= b.r1 && at.r >= b.r1 && at.r <= b.r2 && at.c >= b.c1 && at.c <= b.c2;
+          })
+        : null;
+    if (!table) return null;
+    const box = tableBox(table);
+    if (!box || box.r2 < box.r1 || box.c2 < box.c1) return null;
+    const rows = rowsOfStructured(sref.items, table, box, at);
+    if (!rows) return null;
+    const colPos = (name) => {
+      const key = name.toLowerCase();
+      return table.columns.findIndex((c) => String(c).toLowerCase() === key);
+    };
+    let c1;
+    let c2;
+    if (sref.columns.kind === "all") {
+      c1 = box.c1;
+      c2 = box.c2;
+    } else if (sref.columns.kind === "one") {
+      const idx = colPos(sref.columns.a);
+      if (idx < 0 || box.c1 + idx > box.c2) return null;
+      c1 = c2 = box.c1 + idx;
+    } else {
+      const a = colPos(sref.columns.a);
+      const b = colPos(sref.columns.b);
+      if (a < 0 || b < 0 || box.c1 + Math.max(a, b) > box.c2) return null;
+      c1 = box.c1 + Math.min(a, b);
+      c2 = box.c1 + Math.max(a, b);
+    }
+    return { r1: rows[0], c1, r2: rows[1], c2, axis: null };
   }
 
   // Ref `buildFormulaTextRuns`: references get the colours of a palette of `count` in the order they first appear, and the
@@ -306,6 +528,7 @@
     sheetEndpoints,
     quoteSheetSpan,
     structuredRef,
+    resolveStructured,
     colorIndexes,
     cycleRef,
   };

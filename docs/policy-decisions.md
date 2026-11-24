@@ -5913,3 +5913,17 @@
 - **Alternatives rejected** `visit_args_streaming` 안에서 모든 함수에 대해 `SheetSpan`을 암묵 확장하는 방식: `XLOOKUP`·`MATCH`·`TEXTJOIN` 등 3차원 미지원 함수까지 조용히 통과해 표준 오피스 오류 계약(`#VALUE!`)과 어긋난다.
 - **Verified by** `crates/easyoffice-sheet/tests/sheet_3d_refs_pd338.rs`, `scripts/test-sheet-formula-point.mjs`, `scripts/test-webui-sheet-formula-point.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/verify-licenses.mjs`, `node --test scripts/test-*.mjs`, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 여러 시트를 묶어 편집하는 그룹 시트 모드가 행·열 삽입 삭제까지 함께 옮겨야 할 때.
+
+## PD-339 — 수식 포인트 모드 표 머리글·요약 행 구조적 참조 및 수동 입력 격자 박스 지원 (2026-11-24)
+
+- **Context** `PD-296`에서는 수식 포인트 모드가 표의 머리글·요약 행·전체 영역을 고를 때 A1 범위를 넣었고 직접 타이핑하거나 기존 수식에서 다시 연 구조적 참조는 좌표를 기억한 `known` 맵에만 의존해 격자 박스를 그리지 못했다.
+- **Decision (`PD-339`)**
+  1. **머리글·요약 행·조합 영역 생성(`sheet-formula-point.js` `structuredRef`)**: 선택 범위가 표 열 경계 안에 있고 행 구간이 머리글(`#Headers`), 요약 행(`#Totals`), 표 전체(`#All`), 머리글+데이터(`#Headers`·`#Data`), 데이터+요약 행(`#Data`·`#Totals`), 수식과 같은 데이터 행(`[@...]` 또는 `표[[#This Row],[...]]`), 데이터 전체(`#Data` 또는 `표[열]`) 가운데 하나에 해당하면 표준 구조적 참조를 만든다. 전체 열이 선택된 다열 표는 열 목록을 생략해 `표[#Headers]`·`표[#Totals]`·`표[#All]`·`표[#Data]`·`[@]`로 줄이고 요약 행에서 같은 행을 가리킬 때는 `[@열]` 대신 `#Totals`를 유지한다. 부분 행 선택과 표 밖을 걸친 선택만 A1 범위로 남긴다.
+  2. **수동 입력·재편집 구조적 참조 격자 박스(`sheet-formula-point.js` `resolveStructured` · `sheet-point-ui.js` · `sheet-input.js`)**: 임시 `known` 맵을 없애고 `crates/easyoffice-formats/src/structured_ref.rs`의 4겹 대괄호·`'` 이스케이프·5종 `#` 항목 규칙을 그대로 따르는 `resolveStructured`를 추가했다. `targetOf`가 `span.ref === null` 토큰을 현재 활성 시트의 표 목록과 활성 수식 칸 위치로 해석해 셀 편집, 수식 입력줄, 기존 수식 `F2` 재진입 모두에서 색상과 `.sheet-ref-box`를 그리며 `Shift+방향키` 확장 기준점(`seedOf`)까지 제공한다.
+  3. **비구조적 대괄호 필터 및 이름 문자 정합(`sheet-formula-point.js`)**: `TABLE_NAME_CHAR`에 `\`를 더하고 표 이름 없이 `[`로 시작하는 토큰 가운데 `@`·`#`·`[`로 시작하지 않는 대괄호(`ODF`·외부 책 참조 등)는 구조적 참조 강조 대상에서 제외한다.
+- **재사용 판단 (구현 원칙 3단계)** (1) `PD-269` 정책상 외부 패키지를 추가하지 않았다. (2) 기존 `TOKEN_RE`·`columnRef`·`escapeColumn`·`sheet-layout.js` `tablesOf`/`tableBox` 및 `seedOf`/`paintBoxes` 경로를 그대로 재사용했다. (3) 참조 시트 구현 둘 모두 포인트 모드 구조적 참조·해석기를 두지 않아 `crates/easyoffice-formats/src/structured_ref.rs`의 문법과 해결 규칙을 `sheet-formula-point.js`에 맞췄다(`sheet-layout.js`는 999줄 상한을 넘지 않도록 수정하지 않고 `sheet-input.js`에서 `tablesOf`만 연결했다).
+- **Why** 표의 머리글·요약 행 수식 입력과 수동 편집 시 참조 범위 시각화를 표 계산 프로그램의 기본 동작과 일치시킨다.
+- **Trade-offs** 표의 일부 행(머리글+일부 데이터, 일부 데이터+요약 행)처럼 구조적 참조 문법으로 표현할 수 없는 구간은 A1 범위를 유지한다.
+- **Alternatives rejected** (1) `point.writeRef`가 쓴 문자열만 `known` 맵에 적재해 두는 방식: 수동 타이핑과 기존 수식 재편집에서 격자 박스와 `Shift+방향키` 시드가 빠진다. (2) `sheet-layout.js`에 새 도우미를 덧붙이는 방식: `1,000`줄 위생 상한을 넘긴다.
+- **Verified by** `scripts/test-sheet-formula-point.mjs`, `scripts/test-webui-sheet-formula-point.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `node scripts/verify-licenses.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`.
+- **Revisit when** 실제 한국어 표 계산 프로그램의 표 안 단일 셀 클릭 구조적 참조 형태(PD-296 잔여 항목)를 실측으로 대조할 때.

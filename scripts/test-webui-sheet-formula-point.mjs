@@ -494,8 +494,12 @@ test("the data of a table column is pointed as the structured reference of the c
   release(cell(document, "B5"));
   press(cell(document, "B1"));
   over(cell(document, "B6"));
-  assert.equal(h10.textContent, "=SUM(B1:B6", "with the header it is an A1 range");
+  assert.equal(h10.textContent, "=SUM(표1[[#All],[1분기]]", "header plus all data in a table without totals becomes #All");
   release(cell(document, "B6"));
+  press(cell(document, "B1"));
+  over(cell(document, "B5"));
+  assert.equal(h10.textContent, "=SUM(B1:B5", "header plus partial data stays an A1 range");
+  release(cell(document, "B5"));
   press(cell(document, "B2"));
   over(cell(document, "B6"));
   typeText(document, ")");
@@ -560,7 +564,10 @@ test("a table of another sheet is pointed by its name without the sheet's", asyn
   assert.equal(bar(document).value, "=SUM(표2[나 다]");
   assert.equal(boxes(document).length, 1, "boxed on its own sheet");
   click(document, "A1");
-  assert.equal(bar(document).value, "=SUM(Sheet2!A1", "the header is an A1 reference of the sheet");
+  assert.equal(bar(document).value, "=SUM(표2[[#Headers],[가]]", "pointing a header cell writes [#Headers] with its box");
+  assert.equal(boxes(document).length, 1);
+  click(document, "C1");
+  assert.equal(bar(document).value, "=SUM(Sheet2!C1", "a cell outside the table is a sheet-prefixed A1 reference");
 });
 
 test("a name defined for exactly the cells pointed is not written in their place", async () => {
@@ -630,4 +637,103 @@ test("Shift+click on another sheet tab before pointing a cell uses quoted 3D she
   await flushAsyncTurns(40);
   assert.equal(cell(document, "B4").dataset.formula, "=SUM('1월:3월'!A1:B1)");
   assert.equal(cell(document, "B4").textContent, "210");
+});
+
+test("pointing table headers, totals row, combined sections and whole table inserts structured references with boxes", async () => {
+  const { document, host } = await openSheet();
+  host.__EASYOFFICE_SHEET_LAYOUT__.setTables("Sheet1", [
+    { ...TABLE, range: "A1:G7", totals: true },
+  ]);
+  const h10 = cell(document, "H10");
+  h10.focus();
+  typeText(document, "=");
+
+  click(document, "C1");
+  assert.equal(h10.textContent, "=표1[[#Headers],[2분기]]");
+  assert.equal(boxes(document).length, 1);
+
+  press(cell(document, "A1"));
+  over(cell(document, "G1"));
+  release(cell(document, "G1"));
+  assert.equal(h10.textContent, "=표1[#Headers]");
+  assert.equal(boxes(document).length, 1);
+
+  click(document, "C7");
+  assert.equal(h10.textContent, "=표1[[#Totals],[2분기]]");
+  assert.equal(boxes(document).length, 1);
+
+  press(cell(document, "A7"));
+  over(cell(document, "G7"));
+  release(cell(document, "G7"));
+  assert.equal(h10.textContent, "=표1[#Totals]");
+
+  press(cell(document, "A1"));
+  over(cell(document, "G7"));
+  release(cell(document, "G7"));
+  assert.equal(h10.textContent, "=표1[#All]");
+  assert.equal(boxes(document).length, 1);
+
+  press(cell(document, "C1"));
+  over(cell(document, "C6"));
+  release(cell(document, "C6"));
+  assert.equal(h10.textContent, "=표1[[#Headers],[#Data],[2분기]]");
+
+  press(cell(document, "C2"));
+  over(cell(document, "C7"));
+  release(cell(document, "C7"));
+  assert.equal(h10.textContent, "=표1[[#Data],[#Totals],[2분기]]");
+});
+
+test("manually typed structured references draw grid boxes in cell, formula bar and F2 edit mode, and follow sheet switches and Shift+arrow", async () => {
+  const { document, host } = await openSheet();
+  host.__EASYOFFICE_SHEET_LAYOUT__.setTables("Sheet1", [TABLE]);
+  host.__EASYOFFICE_SHEET_LAYOUT__.setTables("Sheet2", [
+    { ...TABLE, name: "표2", range: "A1:B2", columns: ["가", "나 다"] },
+  ]);
+  const g3 = cell(document, "G3");
+  g3.focus();
+  typeText(document, "=SUM(표1[1분기])+표1[[#Headers],[2분기]]+[@3분기]");
+  assert.deepEqual(boxes(document).map((b) => b.dataset.color), ["0", "1", "2"]);
+  const [colBox, hdrBox, rowBox] = boxes(document);
+  assert.equal(hdrBox.style.top, "26px");
+  assert.equal(colBox.style.left, "128px");
+  assert.ok(parseFloat(colBox.style.height) > parseFloat(hdrBox.style.height) * 4);
+  assert.ok(parseFloat(rowBox.style.top) > parseFloat(hdrBox.style.top));
+  assert.ok(parseFloat(rowBox.style.left) > parseFloat(hdrBox.style.left));
+  assert.ok(parseFloat(hdrBox.style.left) > parseFloat(colBox.style.left));
+
+  // Re-entering an existing typed structured-ref formula via F2 draws boxes immediately.
+  key(g3, "Enter");
+  await flushAsyncTurns(12);
+  assert.equal(boxes(document).length, 0);
+  g3.focus();
+  key(g3, "F2");
+  await flushAsyncTurns(12);
+  assert.deepEqual(boxes(document).map((b) => b.dataset.color), ["0", "1", "2"]);
+  key(g3, "Escape");
+
+  // Formula bar typing + cross-sheet box isolation (`[@3분기]` belongs to Sheet1 and never paints on Sheet2).
+  cell(document, "B9").focus();
+  typeBar(document, "=SUM(표2[나 다])+");
+  assert.equal(boxes(document).length, 0, "Sheet2 table does not draw a box while Sheet1 is active");
+  typeBar(document, "표1[[#Headers],[2분기]]+[@3분기]");
+  assert.equal(boxes(document).length, 1, "Sheet1 header structured ref typed in formula bar draws a box");
+  typeBar(document, "+");
+  clickTab(document, "Sheet2");
+  await flushAsyncTurns(20);
+  assert.deepEqual(
+    boxes(document).map((b) => b.dataset.color),
+    ["0"],
+    "switching to Sheet2 shows Sheet2 table box only and hides Sheet1 boxes"
+  );
+  key(bar(document), "Escape");
+  await flushAsyncTurns(40);
+
+  // Typed structured reference in enter mode widens with Shift+ArrowRight.
+  const h10 = cell(document, "H10");
+  h10.focus();
+  typeText(document, "=표1[[#Headers],[2분기]]");
+  assert.equal(boxes(document).length, 1);
+  key(h10, "ArrowRight", { shiftKey: true });
+  assert.equal(h10.textContent, "=표1[[#Headers],[2분기]:[3분기]]");
 });
