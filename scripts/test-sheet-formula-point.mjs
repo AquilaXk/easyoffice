@@ -217,3 +217,30 @@ test("a structured reference is a span of the formula: the point replaces it, th
   assert.deepEqual(unqualified.map((s) => s.token), ["[@Q1]"]);
   assert.equal(P.colorSpans('="매출[x]"').length, 0, "not inside a text literal");
 });
+
+test("3D sheet spans tokenize, color, quote, extract endpoints, and cycle F4 cleanly", () => {
+  const quote = (n) => (/^\w+$/.test(n) && !/^\d/.test(n) ? n : "'" + n.replaceAll("'", "''") + "'");
+  assert.deepEqual(P.sheetEndpoints("Sheet1:Sheet3!"), { start: "Sheet1", end: "Sheet3", whole: null });
+  assert.deepEqual(P.sheetEndpoints("'Sheet 1:Sheet 3'!"), { start: "Sheet 1", end: "Sheet 3", whole: "Sheet 1:Sheet 3" });
+  assert.deepEqual(P.sheetEndpoints("'Sheet 1':'Sheet 3'!"), { start: "Sheet 1", end: "Sheet 3", whole: null });
+  assert.equal(P.quoteSheetSpan("Sheet1", "Sheet3", quote), "Sheet1:Sheet3!");
+  assert.equal(P.quoteSheetSpan("1월", "3월", quote), "'1월:3월'!");
+  assert.equal(P.quoteSheetSpan("Sheet2", "Sheet2", quote), "Sheet2!");
+
+  const spans = P.refSpans("=SUM(Sheet1:Sheet3!A1:B2)+'1월:3월'!$C$4+'A 1':'B 2'!D5");
+  assert.deepEqual(
+    spans.map((s) => ({ token: s.token, sheet: s.sheet, ref: s.ref })),
+    [
+      { token: "Sheet1:Sheet3!A1:B2", sheet: "Sheet1:Sheet3!", ref: "A1:B2" },
+      { token: "'1월:3월'!$C$4", sheet: "'1월:3월'!", ref: "$C$4" },
+      { token: "'A 1':'B 2'!D5", sheet: "'A 1':'B 2'!", ref: "D5" },
+    ]
+  );
+
+  // F4 at the range colon of a 3D reference toggles both range corners without misreading the sheet span colon
+  const f = "=SUM(Sheet1:Sheet3!A1:B2)";
+  const toggled = f4(f, "=SUM(Sheet1:Sheet3!A1".length);
+  assert.equal(toggled.text, "=SUM(Sheet1:Sheet3!$A$1:$B$2)");
+  assert.equal(toggled.caret, "=SUM(Sheet1:Sheet3!$A$1".length);
+  assert.equal(f4("='1월:3월'!B2").text, "='1월:3월'!$B$2");
+});

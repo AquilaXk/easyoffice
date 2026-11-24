@@ -1,7 +1,9 @@
 //! Parsing the array-specific syntax (PD-217): array constants, the spill range operator and the
 //! variables of `LET` and `LAMBDA`.
 
-use crate::parser::{classify_failed_a1_token, ArrayLit, Parser, Token};
+use crate::parser::{
+    cell_endpoint_spec, classify_failed_a1_token, range_ref_spec, ArrayLit, Parser, RefSpec, Token,
+};
 use crate::{CellRange, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate};
 use std::sync::Arc;
 
@@ -81,6 +83,130 @@ impl Parser<'_> {
             self.pos += 1;
         }
         hash
+    }
+
+    /// Parses the cell or range after a 3D sheet span prefix (`Start:End!`).
+    pub(crate) fn parse_sheet_span_reference(
+        &mut self,
+        start_sheet: String,
+        end_sheet: String,
+        quoted_whole: Option<String>,
+    ) -> Result<Expr, FormulaError> {
+        let Some(cell_ident) = self.next_range_endpoint_string() else {
+            return Err(FormulaError::Ref);
+        };
+        let make_span = |range| match quoted_whole {
+            Some(whole) => Expr::sheet_span_quoted(whole, start_sheet, end_sheet, range),
+            None => Expr::sheet_span(start_sheet, end_sheet, range),
+        };
+        if self.colon_has_static_endpoint(&cell_ident, None) {
+            self.next();
+            let Some(end_ident) = self.next_range_endpoint_string() else {
+                return Err(FormulaError::Ref);
+            };
+            if matches!(self.peek(), Some(Token::Bang)) {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            }
+            return match CellRange::parse_endpoints(&cell_ident, &end_ident) {
+                Ok(range) => {
+                    if self.ref_specs.is_some() {
+                        let spec = range_ref_spec(&cell_ident, &end_ident);
+                        self.record_ref(spec);
+                    }
+                    Ok(make_span(range))
+                }
+                Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            };
+        }
+        match PackedCellCoordinate::parse_a1(&cell_ident) {
+            Ok(_) if self.take_hash() => Err(FormulaError::Ref),
+            Ok(coord) => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
+                }
+                Ok(make_span(CellRange {
+                    start: coord,
+                    end: coord,
+                }))
+            }
+            Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+        }
+    }
+
+    /// `Sheet!A1` or `Sheet!A1:B2` (also `Sheet!A1:Sheet!B2`) after the `!`.
+    pub(crate) fn parse_sheet_reference(&mut self, name: String) -> Result<Expr, FormulaError> {
+        let Some(cell_ident) = self.next_range_endpoint_string() else {
+            return Err(FormulaError::Ref);
+        };
+        let quoted_span = crate::sheet_span::split_quoted_sheet_span(&name)
+            .map(|(s, e)| (s.to_string(), e.to_string()));
+        if self.colon_has_static_endpoint(&cell_ident, Some(&name)) {
+            self.next();
+            let Some(s) = self.next_range_endpoint_string() else {
+                return Err(FormulaError::Ref);
+            };
+            let (end_ident, same_sheet, repeated_bang) = if matches!(self.peek(), Some(Token::Bang))
+            {
+                self.next();
+                let Some(s2) = self.next_range_endpoint_string() else {
+                    return Err(FormulaError::Ref);
+                };
+                (
+                    s2,
+                    crate::WorkbookEngine::is_same_sheet_identity(&s, &name),
+                    true,
+                )
+            } else {
+                (s, true, false)
+            };
+            if !same_sheet {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            }
+            return match CellRange::parse_endpoints(&cell_ident, &end_ident) {
+                Ok(range) => {
+                    if self.ref_specs.is_some() {
+                        let spec = range_ref_spec(&cell_ident, &end_ident);
+                        self.record_ref(spec);
+                    }
+                    if !repeated_bang {
+                        if let Some((s_sh, e_sh)) = quoted_span {
+                            return Ok(Expr::sheet_span_quoted(name, s_sh, e_sh, range));
+                        }
+                    }
+                    Ok(Expr::sheet_range(name, range))
+                }
+                Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            };
+        }
+        match PackedCellCoordinate::parse_a1(&cell_ident) {
+            Ok(coord) if self.take_hash() => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
+                }
+                Ok(Expr::spill_ref(Some(name), coord))
+            }
+            Ok(coord) => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
+                }
+                if let Some((s_sh, e_sh)) = quoted_span {
+                    return Ok(Expr::sheet_span_quoted(
+                        name,
+                        s_sh,
+                        e_sh,
+                        CellRange {
+                            start: coord,
+                            end: coord,
+                        },
+                    ));
+                }
+                Ok(Expr::sheet_cell(name, coord))
+            }
+            Err(_) => match self.name_or_error(Some(name), cell_ident) {
+                named @ Expr::Name(_) => Ok(named),
+                _ => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            },
+        }
     }
 
     /// An array constant after its `{`: rows split by `;`, elements by `,`, each a number (signed),

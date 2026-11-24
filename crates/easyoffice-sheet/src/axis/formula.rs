@@ -166,8 +166,14 @@ fn follows_ident(bytes: &[u8], end: usize) -> bool {
         .is_some_and(|&b| is_ident_byte(b) || b == b'(' || b == b'!' || b == b'.' || !b.is_ascii())
 }
 
-/// Length of a sheet prefix at `i` (`Q1!`, `'My ''Sheet'!`) and the sheet's name.
-fn prefix_at(text: &str, i: usize) -> Option<(usize, String)> {
+pub(super) struct SheetPrefix {
+    pub(super) len: usize,
+    pub(super) start: String,
+    pub(super) end: Option<String>,
+    pub(super) quoted_whole: Option<String>,
+}
+
+fn prefix_atom_at(text: &str, i: usize) -> Option<(usize, String, bool)> {
     let bytes = text.as_bytes();
     if bytes.get(i) == Some(&b'\'') {
         let mut name = String::new();
@@ -183,13 +189,47 @@ fn prefix_at(text: &str, i: usize) -> Option<(usize, String)> {
                 break;
             }
         }
-        return (bytes.get(cur) == Some(&b'!')).then(|| (cur + 1 - i, name));
+        return (!name.is_empty()).then_some((cur - i, name, true));
     }
     let run = bytes[i..]
         .iter()
         .take_while(|&&b| is_ident_byte(b) || b == b'.' || !b.is_ascii())
         .count();
-    (run > 0 && bytes.get(i + run) == Some(&b'!')).then(|| (run + 1, text[i..i + run].to_string()))
+    (run > 0).then(|| (run, text[i..i + run].to_string(), false))
+}
+
+/// Length of a sheet prefix at `i` (`Q1!`, `'My ''Sheet'!`, `Q1:Q3!`, `'Q1:Q3'!`, `'Q1':'Q3'!`).
+fn prefix_at(text: &str, i: usize) -> Option<SheetPrefix> {
+    let bytes = text.as_bytes();
+    let (len1, name1, quoted1) = prefix_atom_at(text, i)?;
+    if bytes.get(i + len1) == Some(&b'!') {
+        let (start, end, quoted_whole) = if quoted1 {
+            match crate::sheet_span::split_quoted_sheet_span(&name1) {
+                Some((s, e)) => (s.to_string(), Some(e.to_string()), Some(name1)),
+                None => (name1, None, None),
+            }
+        } else {
+            (name1, None, None)
+        };
+        return Some(SheetPrefix {
+            len: len1 + 1,
+            start,
+            end,
+            quoted_whole,
+        });
+    }
+    if bytes.get(i + len1) == Some(&b':') {
+        let (len2, name2, _) = prefix_atom_at(text, i + len1 + 1)?;
+        if bytes.get(i + len1 + 1 + len2) == Some(&b'!') {
+            return Some(SheetPrefix {
+                len: len1 + 1 + len2 + 1,
+                start: name1,
+                end: Some(name2),
+                quoted_whole: None,
+            });
+        }
+    }
+    None
 }
 
 fn parse_unit(text: &str, i: usize, head_sheet: Option<&str>) -> Option<Unit> {
@@ -198,10 +238,15 @@ fn parse_unit(text: &str, i: usize, head_sheet: Option<&str>) -> Option<Unit> {
     if bytes.get(first.end) == Some(&b':') {
         let mut at = first.end + 1;
         let mut tail_prefix = at..at;
-        if let (Some(head), Some((len, name))) = (head_sheet, prefix_at(text, at)) {
-            if name.eq_ignore_ascii_case(head) {
-                tail_prefix = at..at + len;
-                at += len;
+        if let (Some(head), Some(pfx)) = (head_sheet, prefix_at(text, at)) {
+            let matches_head = (pfx.end.is_none() && pfx.start.eq_ignore_ascii_case(head))
+                || pfx
+                    .quoted_whole
+                    .as_deref()
+                    .is_some_and(|w| w.eq_ignore_ascii_case(head));
+            if matches_head {
+                tail_prefix = at..at + pfx.len;
+                at += pfx.len;
             }
         }
         if let Some(second) = parse_endpoint(bytes, at) {
@@ -278,6 +323,8 @@ pub(super) struct Site {
     pub(super) start: usize,
     pub(super) prefix_len: usize,
     pub(super) sheet: Option<String>,
+    pub(super) end_sheet: Option<String>,
+    pub(super) quoted_whole: Option<String>,
     pub(super) unit: Option<Unit>,
 }
 
@@ -335,11 +382,16 @@ pub(super) fn scan_refs(
             i += text[i..].chars().next().map_or(1, char::len_utf8);
             continue;
         }
-        let (prefix_len, sheet) = match prefix_at(text, i) {
-            Some((len, name)) => (len, Some(name)),
-            None => (0, None),
+        let (prefix_len, sheet, end_sheet, quoted_whole) = match prefix_at(text, i) {
+            Some(pfx) => (pfx.len, Some(pfx.start), pfx.end, pfx.quoted_whole),
+            None => (0, None, None, None),
         };
-        let unit = parse_unit(text, i + prefix_len, sheet.as_deref());
+        let unit_head = if end_sheet.is_some() {
+            quoted_whole.as_deref()
+        } else {
+            sheet.as_deref()
+        };
+        let unit = parse_unit(text, i + prefix_len, unit_head);
         if unit.is_none() && prefix_len == 0 {
             // Not a reference: skip one character.
             i += text[i..].chars().next().map_or(1, char::len_utf8);
@@ -349,6 +401,8 @@ pub(super) fn scan_refs(
             start: i,
             prefix_len,
             sheet,
+            end_sheet,
+            quoted_whole,
             unit,
         };
         let end = site.end();
@@ -378,7 +432,11 @@ pub fn rewrite_formula_refs(
 ) -> Option<String> {
     scan_refs(text, |site| {
         let mut unit = site.unit.clone()?;
-        let sheet = site.sheet.as_deref().unwrap_or(own_sheet);
+        let sheet = if site.end_sheet.is_some() {
+            site.quoted_whole.as_deref()?
+        } else {
+            site.sheet.as_deref().unwrap_or(own_sheet)
+        };
         if !sheet.eq_ignore_ascii_case(target_sheet) {
             return None;
         }

@@ -612,7 +612,7 @@ impl<'x> SheetTable<'x> {
         self.slots[usize::from(slot)]
     }
 
-    fn resolve(
+    pub(crate) fn resolve(
         &mut self,
         root: &'x SheetEngine,
         wb: Option<&'x WorkbookEngine>,
@@ -661,7 +661,7 @@ impl DepWalk<'_> {
         }
     }
 
-    fn range(
+    pub(crate) fn range(
         &mut self,
         sheet: &SheetEngine,
         slot: u16,
@@ -776,6 +776,9 @@ impl<'x> DepScanner<'x> {
                         let dep_sid = dep_sheet.resolved_sheet_id();
                         walk.range(dep_sheet, ds, dep_sid, *range, &mut self.scratch);
                     }
+                }
+                Expr::SheetSpan(sp) => {
+                    self.scan_sheet_span(walk, sp, ScanSite { sheet, slot, sid });
                 }
                 Expr::Shared(shared) => {
                     if self.seen_shared.insert(std::sync::Arc::as_ptr(shared)) {

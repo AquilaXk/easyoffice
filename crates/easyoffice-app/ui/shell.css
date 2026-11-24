@@ -440,6 +440,7 @@
 .sheet-tab-bar.copying { cursor: copy; }
 .sheet-tab-btn.drop-before, .sheet-tab-btn[data-tab-color].active.drop-before { box-shadow: inset 2px 0 0 var(--accent-strong); }
 .sheet-tab-btn.drop-end, .sheet-tab-btn[data-tab-color].active.drop-end { box-shadow: inset -2px 0 0 var(--accent-strong); }
+.sheet-tab-btn[data-point-span="true"]:not(.active) { background: var(--color-accent-bg); color: var(--color-text); border-color: var(--ui-border-strong); }
 /* The `탭 색` submenu of the tab menu: palette rows as the filter panel's colour list has them. */
 #sheet-tab-menu { overflow: visible; }
 .sb-hl-swatch.selected { box-shadow: 0 0 0 1px var(--color-text); }

@@ -155,6 +155,39 @@
     return name.startsWith("'") ? name.slice(1, -1).replaceAll("''", "'") : name;
   }
 
+  function unquoteToken(tok) {
+    return tok.startsWith("'") ? tok.slice(1, -1).replaceAll("''", "'") : tok;
+  }
+
+  // The start and end sheets of a single-sheet or 3D prefix (`Sheet2!`, `Sheet1:Sheet3!`, `'A:B'!`, `'A':'B'!`).
+  function sheetEndpoints(prefix) {
+    const body = String(prefix || "").slice(0, -1);
+    let inSingle = false;
+    for (let i = 0; i < body.length; i += 1) {
+      if (body[i] === "'") {
+        if (inSingle && body[i + 1] === "'") i += 1;
+        else inSingle = !inSingle;
+      } else if (body[i] === ":" && !inSingle) {
+        return { start: unquoteToken(body.slice(0, i)), end: unquoteToken(body.slice(i + 1)), whole: null };
+      }
+    }
+    const whole = unquoteToken(body);
+    const colon = whole.indexOf(":");
+    if (colon > 0 && colon < whole.length - 1 && whole.indexOf(":", colon + 1) < 0) {
+      return { start: whole.slice(0, colon), end: whole.slice(colon + 1), whole };
+    }
+    return { start: whole, end: whole, whole };
+  }
+
+  // Formats `start:end!` (quoting as `'Start:End'!` when either endpoint needs quotes).
+  function quoteSheetSpan(start, end, quoteSheet) {
+    if (start.toLowerCase() === end.toLowerCase()) return quoteSheet(start) + "!";
+    const qs = quoteSheet(start);
+    const qe = quoteSheet(end);
+    if (!qs.startsWith("'") && !qe.startsWith("'")) return start + ":" + end + "!";
+    return "'" + start.replaceAll("'", "''") + ":" + end.replaceAll("'", "''") + "'!";
+  }
+
   // The structured reference a pointed range `rg` (`{ r1, c1, r2, c2, axis }`) of the table `table` (`{ name, columns, header,
   // totals }`, its cells `box`) is written as, or null for an A1 range. `at` is the cell of the formula `{ r, c }` when it is on
   // the table's sheet, else null; a cell in its row is the table's `#This Row`.
@@ -224,9 +257,15 @@
       const turn = target === "both" || (target === "start" && i === 0) || (target === "end" && i === 1);
       return turn ? cycleEnd(p) : upperEnd(p);
     });
-    const token = span.sheet + ends.join(":");
+    const body = ends.join(":");
+    const token = span.sheet + body;
     const colon = parts.length === 2;
-    return { token, target, before: colon ? span.token.indexOf(":") : null, after: colon ? token.indexOf(":") : null };
+    return {
+      token,
+      target,
+      before: colon ? span.sheet.length + span.ref.indexOf(":") : null,
+      after: colon ? span.sheet.length + body.indexOf(":") : null,
+    };
   }
 
   // Ref `_translateCursorOffset`: the caret follows the text it was in.
@@ -256,5 +295,18 @@
     };
   }
 
-  host.__EASYOFFICE_SHEET_FORMULA_POINT__ = { refSpans, colorSpans, pointContext, applyRef, rangeText, rangeOf, sheetOf, structuredRef, colorIndexes, cycleRef };
+  host.__EASYOFFICE_SHEET_FORMULA_POINT__ = {
+    refSpans,
+    colorSpans,
+    pointContext,
+    applyRef,
+    rangeText,
+    rangeOf,
+    sheetOf,
+    sheetEndpoints,
+    quoteSheetSpan,
+    structuredRef,
+    colorIndexes,
+    cycleRef,
+  };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

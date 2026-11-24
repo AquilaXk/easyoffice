@@ -116,6 +116,7 @@ impl SheetEngine {
                     None => Ok(Val::error(FormulaError::Ref)),
                 }
             }
+            Expr::SheetSpan(sp) => Ok(Val::scalar(self.eval_sheet_span_scalar(sp, ctx, depth))),
             Expr::Number(_)
             | Expr::Text(_)
             | Expr::Boolean(_)
@@ -133,9 +134,11 @@ impl SheetEngine {
         depth: usize,
     ) -> ValResult {
         match expr.peeled() {
-            Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_) => {
-                Ok(Val::Ref(Arc::new(expr.peeled().clone())))
-            }
+            Expr::Cell(_)
+            | Expr::SheetCell(_)
+            | Expr::Range(_)
+            | Expr::SheetRange(_)
+            | Expr::SheetSpan(_) => Ok(Val::Ref(Arc::new(expr.peeled().clone()))),
             Expr::Var(name) => match env.get(name) {
                 Some(val @ Val::Ref(_)) => Ok(val.clone()),
                 _ => self.eval_val(expr, env, ctx, depth),
@@ -580,7 +583,11 @@ impl SheetEngine {
             }
             let plain_ref = matches!(
                 arg.peeled(),
-                Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_)
+                Expr::Cell(_)
+                    | Expr::SheetCell(_)
+                    | Expr::Range(_)
+                    | Expr::SheetRange(_)
+                    | Expr::SheetSpan(_)
             );
             if plain_ref || !(needs_array(arg) || (!env.is_empty() && uses_vars(arg))) {
                 out.push(substituted.into_owned());

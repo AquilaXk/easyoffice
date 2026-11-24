@@ -120,6 +120,16 @@ impl SheetEngine {
             Expr::SheetRange(sr) => {
                 self.intersect_range_ref(Some(Cow::Borrowed(sr.sheet.as_str())), sr.range, ctx)
             }
+            Expr::SheetSpan(sp) => {
+                let Some(w) = self.exact_quoted_sheet(sp, ctx) else {
+                    return Err(if self.resolve_sheet_span(sp, ctx).is_err() {
+                        FormulaError::Ref
+                    } else {
+                        FormulaError::Value
+                    });
+                };
+                self.intersect_range_ref(Some(Cow::Borrowed(w)), sp.range, ctx)
+            }
             Expr::SpillRef(sp) => {
                 let (sheet, range) =
                     self.spill_ref_range(sp.sheet.as_deref(), sp.coord, ctx, depth + 1)?;

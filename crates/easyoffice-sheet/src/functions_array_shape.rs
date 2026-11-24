@@ -110,6 +110,29 @@ impl SheetEngine {
         }
     }
 
+    fn shape_grids(
+        &self,
+        arg: &Expr,
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Vec<Arc<Grid>>, FormulaError> {
+        let bound = Self::bound_ref(arg, env);
+        let target = bound.as_ref().unwrap_or_else(|| arg.peeled());
+        if let Expr::SheetSpan(sp) = target {
+            let sheets = self.resolve_sheet_span(sp, ctx)?;
+            let mut grids = Vec::with_capacity(sheets.len());
+            for sh in sheets {
+                let grid = self
+                    .read_ref_grid(&Expr::sheet_range(sh, sp.range), ctx, depth + 1)?
+                    .ok_or(FormulaError::Ref)?;
+                grids.push(Arc::new(grid));
+            }
+            return Ok(grids);
+        }
+        Ok(vec![self.shape_grid(arg, env, ctx, depth)?])
+    }
+
     /// `TAKE(array, rows, [columns])` and `DROP(array, rows, [columns])`.
     pub(crate) fn fn_take_drop(
         &self,
@@ -152,7 +175,7 @@ impl SheetEngine {
         if args.is_empty() || args.len() > 3 {
             return Err(FormulaError::Value);
         }
-        let grid = self.shape_grid(&args[0], env, ctx, depth)?;
+        let grids = self.shape_grids(&args[0], env, ctx, depth)?;
         let ignore = self.arg_number(args, 1, 0.0, env, ctx, depth)?.trunc() as i64;
         if !(0..=3).contains(&ignore) {
             return Err(FormulaError::Value);
@@ -171,7 +194,7 @@ impl SheetEngine {
         // Emit directly into flat vector in a single pass without allocating intermediate coordinate vectors.
         let mut flat = Vec::new();
         let mut links: Option<Vec<u32>> = None;
-        let mut push_cell = |r: usize, c: usize| {
+        let mut push_cell = |grid: &Grid, r: usize, c: usize| {
             let v = grid.get(r, c).clone();
             if keep(&v) {
                 let lid = grid.link_id(r, c);
@@ -186,16 +209,18 @@ impl SheetEngine {
                 flat.push(v);
             }
         };
-        if by_col {
-            for c in 0..grid.cols {
-                for r in 0..grid.rows {
-                    push_cell(r, c);
-                }
-            }
-        } else {
-            for r in 0..grid.rows {
+        for grid in &grids {
+            if by_col {
                 for c in 0..grid.cols {
-                    push_cell(r, c);
+                    for r in 0..grid.rows {
+                        push_cell(grid, r, c);
+                    }
+                }
+            } else {
+                for r in 0..grid.rows {
+                    for c in 0..grid.cols {
+                        push_cell(grid, r, c);
+                    }
                 }
             }
         }
@@ -224,7 +249,7 @@ impl SheetEngine {
         }
         let mut grids = Vec::with_capacity(args.len());
         for arg in args {
-            grids.push(self.shape_grid(arg, env, ctx, depth)?);
+            grids.extend(self.shape_grids(arg, env, ctx, depth)?);
         }
         let na = V::Error(FormulaError::Na);
         if vertical {

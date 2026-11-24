@@ -15,9 +15,10 @@
   const ROW_RANGE = String.raw`\$?[1-9]\d{0,6}:\$?[1-9]\d{0,6}`;
   // A bracket group (`Table1[[#This Row],[Q1]]`, `[@Q1]`) is a structured reference: it names columns, so a fill or a
   // paste leaves it as written (PD-225). The group nests up to the depth the engine reads (`'` escapes the next character).
+  const SHEET_NAME = String.raw`(?:'(?:[^']|'')+'|[\p{L}\p{N}_.]+)`;
   const GROUP_RE = String.raw`\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.)*\])*\])*\])*\]`;
   const TOKEN_RE = new RegExp(
-    String.raw`"(?:[^"]|"")*"|` + GROUP_RE + String.raw`|(?<![\p{L}\p{N}_.$!])((?:'(?:[^']|'')+'|[\p{L}\p{N}_.]+)!)?` +
+    String.raw`"(?:[^"]|"")*"|` + GROUP_RE + String.raw`|(?<![\p{L}\p{N}_.$!])((?:${SHEET_NAME}(?::${SHEET_NAME})?)!)?` +
       `(${CELL}(?::${CELL})?|${COL_RANGE}|${ROW_RANGE})` +
       String.raw`(?![\p{L}\p{N}_(!])`,
     "gu"

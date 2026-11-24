@@ -841,7 +841,7 @@ impl SheetEngine {
         Err(FormulaError::Na)
     }
 
-    /// AND / OR / XOR over all non-empty arguments.
+    /// AND / OR / XOR over logical/numeric arguments (text and blanks inside references are skipped).
     fn logical_fold(
         &self,
         name: &str,
@@ -849,16 +849,35 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> CellResult {
-        let vals = self.expand_args_ctx(args, ctx, depth)?;
         let mut trues = 0usize;
         let mut seen = 0usize;
-        for v in vals
-            .iter()
-            .filter(|v| !matches!(v, EvaluatedCellValue::Empty))
-        {
-            seen += 1;
-            if v.as_bool().ok_or(FormulaError::Value)? {
-                trues += 1;
+        for arg in args {
+            let is_ref_or_matrix = self.extract_streaming_range_ctx(arg, ctx, depth)?.is_some()
+                || self.matrix_expr(arg, ctx, depth)?.is_some();
+            if is_ref_or_matrix {
+                self.visit_args_streaming(std::slice::from_ref(arg), ctx, depth, |v| {
+                    match v {
+                        EvaluatedCellValue::Boolean(b) => {
+                            seen += 1;
+                            trues += usize::from(b);
+                        }
+                        EvaluatedCellValue::Number(n) => {
+                            seen += 1;
+                            trues += usize::from(n != 0.0);
+                        }
+                        EvaluatedCellValue::Empty | EvaluatedCellValue::Text(_) => {}
+                        EvaluatedCellValue::Error(e) => return Err(e),
+                    }
+                    Ok(())
+                })?;
+                continue;
+            }
+            let v = self.eval_arg_val(arg, ctx, depth)?;
+            if !matches!(v, EvaluatedCellValue::Empty) {
+                seen += 1;
+                if v.as_bool().ok_or(FormulaError::Value)? {
+                    trues += 1;
+                }
             }
         }
         if seen == 0 {

@@ -32,6 +32,14 @@ pub struct SheetRangeExpr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SheetSpanExpr {
+    pub start_sheet: String,
+    pub end_sheet: String,
+    pub range: CellRange,
+    pub quoted_whole: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct NameExpr {
     pub scope: Option<String>,
     pub name: String,
@@ -83,6 +91,7 @@ pub enum Expr {
     Range(CellRange),
     SheetCell(Box<SheetCellExpr>),
     SheetRange(Box<SheetRangeExpr>),
+    SheetSpan(Box<SheetSpanExpr>),
     Name(Box<NameExpr>),
     Shared(Arc<SharedExpr>),
     UnaryPlus(Box<Expr>),
@@ -136,6 +145,35 @@ impl Expr {
         Self::SheetRange(Box::new(SheetRangeExpr {
             sheet: sheet.into(),
             range,
+        }))
+    }
+
+    #[inline]
+    pub fn sheet_span(
+        start_sheet: impl Into<String>,
+        end_sheet: impl Into<String>,
+        range: CellRange,
+    ) -> Self {
+        Self::SheetSpan(Box::new(SheetSpanExpr {
+            start_sheet: start_sheet.into(),
+            end_sheet: end_sheet.into(),
+            range,
+            quoted_whole: None,
+        }))
+    }
+
+    #[inline]
+    pub fn sheet_span_quoted(
+        whole: impl Into<String>,
+        start_sheet: impl Into<String>,
+        end_sheet: impl Into<String>,
+        range: CellRange,
+    ) -> Self {
+        Self::SheetSpan(Box::new(SheetSpanExpr {
+            start_sheet: start_sheet.into(),
+            end_sheet: end_sheet.into(),
+            range,
+            quoted_whole: Some(whole.into()),
         }))
     }
 

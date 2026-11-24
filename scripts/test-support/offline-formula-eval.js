@@ -293,9 +293,31 @@
     return valNum(fnName === "STDEV" ? Math.sqrt(variance) : variance);
   }
 
+  function resolveSheetSpanUppers(workbook, sheetName, sheetSpan) {
+    if (sheetName !== null) {
+      const exact = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
+      if (exact) return { isSpan: false, sheets: [exact] };
+    }
+    if (!sheetSpan) return null;
+    const i = workbook.knownSheets.findIndex((s) => isSameSheetIdentityJs(s, sheetSpan[0]));
+    const j = workbook.knownSheets.findIndex((s) => isSameSheetIdentityJs(s, sheetSpan[1]));
+    if (i < 0 || j < 0) return null;
+    const lo = Math.min(i, j);
+    const hi = Math.max(i, j);
+    return { isSpan: true, sheets: workbook.knownSheets.slice(lo, hi + 1).map(canonicalSheetKeyJs) };
+  }
+
   function evalAggregateFunction(fnName, argItems, workbook, depth) {
     const state = { nums: [], countAll: 0, countBlank: 0 };
     for (const item of argItems) {
+      if (item.kind === "span") {
+        if (fnName === "COUNTBLANK") return valErr("#VALUE!");
+        for (const shUpper of item.sheetUppers) {
+          const failure = foldRangeAggregateArg({ ...item, sheetUpper: shUpper }, workbook, depth, state);
+          if (failure) return failure;
+        }
+        continue;
+      }
       const failure =
         item.kind === "range"
           ? foldRangeAggregateArg(item, workbook, depth, state)
@@ -322,7 +344,7 @@
     if (!item.sheetUpper) return valErr("#REF!");
     let rangeErr = null;
     visitRangeCells(item, workbook, depth, (cellVal) => {
-      if (cellVal.kind === "empty") return true;
+      if (cellVal.kind === "empty" || cellVal.kind === "text") return true;
       rangeErr = tallyLogicalValue(cellVal, tally);
       return rangeErr === null;
     });
@@ -332,6 +354,13 @@
   function evalLogicalFunction(fnName, argItems, workbook, depth) {
     const tally = { trues: 0, seen: 0 };
     for (const item of argItems) {
+      if (item.kind === "span") {
+        for (const shUpper of item.sheetUppers) {
+          const failure = tallyLogicalRange({ ...item, sheetUpper: shUpper }, workbook, depth, tally);
+          if (failure) return failure;
+        }
+        continue;
+      }
       const failure =
         item.kind === "range"
           ? tallyLogicalRange(item, workbook, depth, tally)
@@ -493,6 +522,7 @@
   }
 
   function ensureScalarIn(ec, v) {
+    if (v?.kind === "span") return valErr("#VALUE!");
     if (v?.kind !== "range") return v;
     if (v.minCol !== v.maxCol || v.minRow !== v.maxRow) return valErr("#VALUE!");
     if (!v.sheetUpper) return valErr("#REF!");
@@ -536,17 +566,16 @@
   }
 
   function evalRangeNodeIn(ec, node) {
+    if (node.sheetSpan) {
+      const spanRes = resolveSheetSpanUppers(ec.workbook, node.sheet, node.sheetSpan);
+      if (!spanRes) return valErr("#REF!");
+      if (spanRes.isSpan) {
+        return { kind: "span", sheetUppers: spanRes.sheets, minCol: node.minCol, maxCol: node.maxCol, minRow: node.minRow, maxRow: node.maxRow, cellCount: node.cellCount };
+      }
+    }
     const sheetUpper = validateRefTargetSheet(node, ec.workbook, ec.currentSheetUpper);
     if (!sheetUpper) return valErr("#REF!");
-    return {
-      kind: "range",
-      sheetUpper,
-      minCol: node.minCol,
-      maxCol: node.maxCol,
-      minRow: node.minRow,
-      maxRow: node.maxRow,
-      cellCount: node.cellCount,
-    };
+    return { kind: "range", sheetUpper, minCol: node.minCol, maxCol: node.maxCol, minRow: node.minRow, maxRow: node.maxRow, cellCount: node.cellCount };
   }
 
   function evalUnaryIn(ec, node) {
@@ -582,6 +611,11 @@
   function evalReferenceInfoIn(ec, target, pick, cellShape) {
     if (target.kind === "Error") return valErr(target.code);
     if (target.kind === "Cell" || target.kind === "Range") {
+      if (target.sheetSpan) {
+        const spanRes = resolveSheetSpanUppers(ec.workbook, target.sheet, target.sheetSpan);
+        if (!spanRes) return valErr("#REF!");
+        if (spanRes.isSpan) return valErr("#VALUE!");
+      }
       if (!validateRefTargetSheet(target, ec.workbook, ec.currentSheetUpper)) {
         return valErr("#REF!");
       }
@@ -729,6 +763,13 @@
     if (node.kind === "Bool") return valBool(node.value);
     if (node.kind === "Error") return valErr(node.code);
     if (node.kind === "Cell") {
+      if (node.sheetSpan) {
+        const spanRes = resolveSheetSpanUppers(ec.workbook, node.sheet, node.sheetSpan);
+        if (!spanRes) return valErr("#REF!");
+        if (spanRes.isSpan) {
+          return { kind: "span", sheetUppers: spanRes.sheets, minCol: node.col, maxCol: node.col, minRow: node.row, maxRow: node.row, cellCount: 1 };
+        }
+      }
       const sheetUpper = validateRefTargetSheet(node, ec.workbook, ec.currentSheetUpper);
       if (!sheetUpper) return valErr("#REF!");
       return readWorkbookTypedCell(ec.workbook, sheetUpper, node.ref, ec.depth);

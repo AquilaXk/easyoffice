@@ -197,6 +197,16 @@ impl SheetEngine {
                 Expr::SheetRange(sr) => {
                     fold = self.agg_sheet_range(fold, &sr.sheet, &sr.range, ctx, depth)?;
                 }
+                Expr::SheetSpan(sp) => {
+                    let Some(w) = self.exact_quoted_sheet(sp, ctx) else {
+                        return Err(if self.resolve_sheet_span(sp, ctx).is_err() {
+                            FormulaError::Ref
+                        } else {
+                            FormulaError::Value
+                        });
+                    };
+                    fold = self.agg_sheet_range(fold, w, &sp.range, ctx, depth)?;
+                }
                 Expr::Cell(_) | Expr::SheetCell(_) => {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold.fold(&v, 0, true)?;

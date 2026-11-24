@@ -62,6 +62,7 @@ fn ref_box_endpoint(e: &Expr) -> Result<Option<(Option<&str>, CellRange)>, Formu
             .ok()
             .map(|r| (Some(sc.sheet.as_str()), r))),
         Expr::SheetRange(sr) => Ok(Some((Some(sr.sheet.as_str()), sr.range))),
+        Expr::SheetSpan(_) => Err(FormulaError::Ref),
         _ => Ok(None),
     }
 }

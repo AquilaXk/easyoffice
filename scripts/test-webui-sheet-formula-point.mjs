@@ -60,9 +60,9 @@ function headerClick(d, selector, extra = {}) {
 }
 
 // A tab press the way the browser takes it: a press that is not cancelled moves the focus to the tab.
-function clickTab(d, name) {
+function clickTab(d, name, extra = {}) {
   const tab = d.querySelector(`#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${name}"]`);
-  if (tab.dispatchEvent({ type: "mousedown", target: tab, button: 0 })) d.activeElement?.blur?.();
+  if (tab.dispatchEvent({ type: "mousedown", target: tab, button: 0, ...extra })) d.activeElement?.blur?.();
   tab.click();
 }
 
@@ -572,4 +572,62 @@ test("a name defined for exactly the cells pointed is not written in their place
   press(cell(document, "C3"));
   over(cell(document, "C5"));
   assert.equal(b9.textContent, "=SUM(C3:C5");
+});
+
+test("Shift+click on a sheet tab writes a 3D sheet span before or after clicking a cell, marks spanned tabs, and evaluates across sheets", async () => {
+  const { document } = await openSheet();
+  const b9 = cell(document, "B9");
+  b9.focus();
+  typeText(document, "=SUM(");
+  click(document, "B2");
+  assert.equal(b9.textContent, "=SUM(B2");
+
+  // Upgrading a pointed cell on Sheet1 to Sheet1:Sheet2 via Shift+click on Sheet2
+  clickTab(document, "Sheet2", { shiftKey: true });
+  await flushAsyncTurns(20);
+  assert.equal(bar(document).value, "=SUM(Sheet1:Sheet2!B2");
+  assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]').dataset.pointSpan, "true");
+  assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]').dataset.pointSpan, "true");
+  assert.equal(boxes(document).length, 1, "3D reference shows a ref box on Sheet2 as well");
+
+  typeBar(document, ")");
+  key(bar(document), "Enter");
+  await flushAsyncTurns(40);
+  assert.equal(document.querySelector("#sheet-tab-bar .sheet-tab-btn.active").dataset.sheetTab, "Sheet1");
+  assert.equal(cell(document, "B9").dataset.formula, "=SUM(Sheet1:Sheet2!B2)");
+  assert.equal(cell(document, "B9").textContent, String(1150 + 1200));
+  assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]').dataset.pointSpan, undefined);
+});
+
+test("Shift+click on another sheet tab before pointing a cell uses quoted 3D sheet span on Korean tab names", async () => {
+  const { document } = await openSheet();
+  const { makeFixtureFile, pickFile } = await import("./test-support/fixture-files.mjs");
+  await pickFile(
+    document,
+    makeFixtureFile("삼차원.xlsx", {
+      sheets: [
+        { name: "1월", cells: [{ ref: "A1", raw: "10" }, { ref: "B1", raw: "20" }] },
+        { name: "2월", cells: [{ ref: "A1", raw: "30" }, { ref: "B1", raw: "40" }] },
+        { name: "3월", cells: [{ ref: "A1", raw: "50" }, { ref: "B1", raw: "60" }] },
+      ],
+    })
+  );
+  switchModule(document, "SHEET");
+  await flushAsyncTurns(20);
+
+  const b4 = cell(document, "B4");
+  b4.focus();
+  typeText(document, "=SUM(");
+  clickTab(document, "3월", { shiftKey: true });
+  await flushAsyncTurns(20);
+  click(document, "A1");
+  click(document, "B1", { shiftKey: true });
+  assert.equal(bar(document).value, "=SUM('1월:3월'!A1:B1");
+  assert.equal(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="2월"]').dataset.pointSpan, "true");
+
+  typeBar(document, ")");
+  key(bar(document), "Enter");
+  await flushAsyncTurns(40);
+  assert.equal(cell(document, "B4").dataset.formula, "=SUM('1월:3월'!A1:B1)");
+  assert.equal(cell(document, "B4").textContent, "210");
 });

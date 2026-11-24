@@ -331,7 +331,7 @@ pub(crate) enum RefSpec {
     },
 }
 
-fn cell_endpoint_spec(raw: &str, coord: PackedCellCoordinate) -> RefEndpointSpec {
+pub(crate) fn cell_endpoint_spec(raw: &str, coord: PackedCellCoordinate) -> RefEndpointSpec {
     let (col_abs, after_col_dollar) = match raw.strip_prefix('$') {
         Some(rest) => (true, rest),
         None => (false, raw),
@@ -356,7 +356,7 @@ fn cell_endpoint_spec(raw: &str, coord: PackedCellCoordinate) -> RefEndpointSpec
     }
 }
 
-fn range_ref_spec(start_raw: &str, end_raw: &str) -> RefSpec {
+pub(crate) fn range_ref_spec(start_raw: &str, end_raw: &str) -> RefSpec {
     match (
         PackedCellCoordinate::parse_a1(start_raw),
         PackedCellCoordinate::parse_a1(end_raw),
@@ -388,7 +388,7 @@ pub(crate) struct Parser<'a> {
     /// The hash of each table a structured reference named (see [`crate::table_index`]).
     table_keys: Vec<NameKey>,
     /// Optional per-leaf shiftability descriptors recorded alongside parsed references.
-    ref_specs: Option<Vec<RefSpec>>,
+    pub(crate) ref_specs: Option<Vec<RefSpec>>,
 }
 
 impl<'a> Parser<'a> {
@@ -404,7 +404,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn record_ref(&mut self, spec: RefSpec) {
+    pub(crate) fn record_ref(&mut self, spec: RefSpec) {
         if let Some(specs) = &mut self.ref_specs {
             specs.push(spec);
         }
@@ -431,6 +431,7 @@ impl<'a> Parser<'a> {
                 | Expr::Range(_)
                 | Expr::SheetCell(_)
                 | Expr::SheetRange(_)
+                | Expr::SheetSpan(_)
                 | Expr::SpillRef(_)
         ) {
             self.record_ref(RefSpec::Fixed);
@@ -442,7 +443,7 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.pos)
     }
 
-    fn next(&mut self) -> Option<Token<'a>> {
+    pub(crate) fn next(&mut self) -> Option<Token<'a>> {
         if self.pos < self.tokens.len() {
             let tok = std::mem::replace(&mut self.tokens[self.pos], Token::Comma);
             self.pos += 1;
@@ -591,7 +592,11 @@ impl<'a> Parser<'a> {
                     specs.truncate(specs_mark);
                     if matches!(
                         expr,
-                        Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_)
+                        Expr::Cell(_)
+                            | Expr::Range(_)
+                            | Expr::SheetCell(_)
+                            | Expr::SheetRange(_)
+                            | Expr::SheetSpan(_)
                     ) {
                         specs.push(RefSpec::Fixed);
                     }
@@ -619,7 +624,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn next_range_endpoint_string(&mut self) -> Option<String> {
+    pub(crate) fn next_range_endpoint_string(&mut self) -> Option<String> {
         match self.next() {
             Some(Token::Ident(s)) => Some(s.into_owned()),
             Some(Token::Number(n)) if n.fract() == 0.0 && n >= 1.0 => Some(format!("{}", n as u64)),
@@ -701,6 +706,21 @@ impl<'a> Parser<'a> {
             self.next();
             return self.parse_sheet_reference(name.into_owned());
         }
+        if matches!(self.peek(), Some(Token::Colon))
+            && matches!(self.tokens.get(self.pos + 1), Some(Token::Ident(_)))
+            && matches!(self.tokens.get(self.pos + 2), Some(Token::Bang))
+        {
+            self.next();
+            let Some(Token::Ident(end_sheet)) = self.next() else {
+                return Err(FormulaError::Ref);
+            };
+            self.next();
+            return self.parse_sheet_span_reference(
+                name.into_owned(),
+                end_sheet.into_owned(),
+                None,
+            );
+        }
         if let Some(Token::Structured(group)) = self.peek() {
             let group = group.clone();
             self.next();
@@ -757,7 +777,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A word that is not a cell address: a defined name, or the error its shape says.
-    fn name_or_error(&mut self, scope: Option<String>, name: String) -> Expr {
+    pub(crate) fn name_or_error(&mut self, scope: Option<String>, name: String) -> Expr {
         // `r` and `c` alone are valid names of `LET` variables and `LAMBDA` parameters.
         let loose = matches!(name.as_str(), "r" | "R" | "c" | "C");
         match classify_failed_a1_token(&name) {
@@ -770,59 +790,6 @@ impl<'a> Parser<'a> {
                 Expr::name(scope, name)
             }
             error => Expr::ErrorLiteral(error),
-        }
-    }
-
-    /// `Sheet!A1` or `Sheet!A1:B2` (also `Sheet!A1:Sheet!B2`) after the `!`.
-    fn parse_sheet_reference(&mut self, name: String) -> Result<Expr, FormulaError> {
-        let Some(cell_ident) = self.next_range_endpoint_string() else {
-            return Err(FormulaError::Ref);
-        };
-        if self.colon_has_static_endpoint(&cell_ident, Some(&name)) {
-            self.next();
-            let Some(s) = self.next_range_endpoint_string() else {
-                return Err(FormulaError::Ref);
-            };
-            let (end_ident, same_sheet) = if matches!(self.peek(), Some(Token::Bang)) {
-                self.next();
-                let Some(s2) = self.next_range_endpoint_string() else {
-                    return Err(FormulaError::Ref);
-                };
-                (s2, crate::WorkbookEngine::is_same_sheet_identity(&s, &name))
-            } else {
-                (s, true)
-            };
-            if !same_sheet {
-                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-            }
-            return match CellRange::parse_endpoints(&cell_ident, &end_ident) {
-                Ok(range) => {
-                    if self.ref_specs.is_some() {
-                        let spec = range_ref_spec(&cell_ident, &end_ident);
-                        self.record_ref(spec);
-                    }
-                    Ok(Expr::sheet_range(name, range))
-                }
-                Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
-            };
-        }
-        match PackedCellCoordinate::parse_a1(&cell_ident) {
-            Ok(coord) if self.take_hash() => {
-                if self.ref_specs.is_some() {
-                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
-                }
-                Ok(Expr::spill_ref(Some(name), coord))
-            }
-            Ok(coord) => {
-                if self.ref_specs.is_some() {
-                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
-                }
-                Ok(Expr::sheet_cell(name, coord))
-            }
-            Err(_) => match self.name_or_error(Some(name), cell_ident) {
-                named @ Expr::Name(_) => Ok(named),
-                _ => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
-            },
         }
     }
 

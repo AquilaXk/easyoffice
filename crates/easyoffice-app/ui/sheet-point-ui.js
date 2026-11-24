@@ -46,6 +46,8 @@
     let barDirty = false;
     // The entry that went on in the formula bar while another sheet is shown: { sheet, ref, mode, fromBar }.
     let session = null;
+    let tabSpan = null;
+    let lastTabShift = false;
     let dragging = null;
     let writing = false;
     let detaching = false;
@@ -159,13 +161,49 @@
       return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
     }
 
+    function sheetTabs() {
+      return [...(byId("sheet-tab-bar")?.querySelectorAll(".sheet-tab-btn[data-sheet-tab]") ?? [])];
+    }
+
+    function sheetSpanSet(start, end, whole = null) {
+      const names = sheetTabs().map((b) => b.dataset.sheetTab);
+      if (whole && names.some((n) => n.toLowerCase() === whole.toLowerCase())) {
+        return new Set([whole.toLowerCase()]);
+      }
+      const i = names.findIndex((n) => n.toLowerCase() === start.toLowerCase());
+      const j = names.findIndex((n) => n.toLowerCase() === end.toLowerCase());
+      if (i < 0 || j < 0) {
+        return !whole && start.toLowerCase() === end.toLowerCase()
+          ? new Set([start.toLowerCase()])
+          : new Set();
+      }
+      return new Set(names.slice(Math.min(i, j), Math.max(i, j) + 1).map((n) => n.toLowerCase()));
+    }
+
     // The sheet and the cells a reference of the formula points at, when it is on the sheet on show (else null).
     function targetOf(span) {
-      const here = deps.getSheetName();
-      const found = span.ref === null
-        ? known.get(span.token)
-        : { sheet: span.sheet ? P.sheetOf(span.sheet) : session ? session.sheet : here, rg: P.rangeOf(span.ref) };
-      return found?.rg && found.sheet.toLowerCase() === here.toLowerCase() ? found.rg : null;
+      const here = deps.getSheetName().toLowerCase();
+      if (span.ref === null) {
+        const found = known.get(span.token);
+        return found?.rg && found.sheet.toLowerCase() === here ? found.rg : null;
+      }
+      const rg = P.rangeOf(span.ref);
+      if (!rg) return null;
+      if (!span.sheet) {
+        const origin = (session ? session.sheet : deps.getSheetName()).toLowerCase();
+        return origin === here ? rg : null;
+      }
+      const ep = P.sheetEndpoints(span.sheet);
+      return sheetSpanSet(ep.start, ep.end, ep.whole).has(here) ? rg : null;
+    }
+
+    function paintTabSpan(editing) {
+      const activeSpan = editing && tabSpan ? sheetSpanSet(tabSpan.start, tabSpan.end) : null;
+      for (const btn of sheetTabs()) {
+        const name = btn.dataset.sheetTab?.toLowerCase();
+        if (activeSpan && name && activeSpan.has(name)) btn.dataset.pointSpan = "true";
+        else delete btn.dataset.pointSpan;
+      }
     }
 
     // The boxes of the references that point at the sheet on show.
@@ -276,13 +314,16 @@
       paintBoxes();
       paintCellText(s, shown.spans, shown.colors);
       paintBarText(Boolean(s));
+      paintTabSpan(Boolean(s));
     }
 
     // ---- pointing ----------------------------------------------------------------------------------------------------
     // The sheet in front of a reference: none on the sheet the entry started on.
-    function prefixOf() {
-      const here = deps.getSheetName();
-      return session && session.sheet !== here ? deps.quoteSheet(here) + "!" : "";
+    function prefixOf(sheetOverride = deps.getSheetName()) {
+      if (tabSpan && tabSpan.start.toLowerCase() !== tabSpan.end.toLowerCase()) {
+        return P.quoteSheetSpan(tabSpan.start, tabSpan.end, deps.quoteSheet);
+      }
+      return session && session.sheet !== sheetOverride ? deps.quoteSheet(sheetOverride) + "!" : "";
     }
 
     function rangeBetween(a, b, axis) {
@@ -318,16 +359,17 @@
 
     // `Table1[Column]` and its kin for cells of the one table of the sheet on show that hold them, else null.
     function structuredOf(rg) {
+      if (tabSpan && tabSpan.start.toLowerCase() !== tabSpan.end.toLowerCase()) return null;
       const sheet = deps.getSheetName();
       const tables = deps.tablesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
       return tables.length === 1 ? P.structuredRef(rg, tables[0], deps.tableBox(tables[0]), entryCell()) : null;
     }
 
-    function writeRef(s, ctx, anchor, focus, axis) {
+    function writeRef(s, ctx, anchor, focus, axis, sheetOverride = deps.getSheetName()) {
       const rg = axis ? rangeBetween(anchor, focus, axis) : withMerges(rangeBetween(anchor, focus, null));
-      const structured = axis ? null : structuredOf(rg);
+      const structured = axis || sheetOverride !== deps.getSheetName() ? null : structuredOf(rg);
       if (structured) known.set(structured, { sheet: deps.getSheetName(), rg });
-      const out = P.applyRef(s.read().text, ctx, structured ?? prefixOf() + P.rangeText(rg, axis));
+      const out = P.applyRef(s.read().text, ctx, structured ?? prefixOf(sheetOverride) + P.rangeText(rg, axis));
       point = { start: out.start, end: out.end, anchor, focus, axis };
       writing = true;
       s.write(out.text, out.caret);
@@ -420,6 +462,7 @@
       ev.preventDefault();
       s.setMode(point || s.mode() === "enter" ? "edit" : "enter");
       point = null;
+      tabSpan = null;
       refresh();
       return true;
     }
@@ -434,6 +477,7 @@
       if ((ev.key === "F4" || cmdT) && cycle(ev, s)) return true;
       if (point && !KEEP_POINT_KEYS.has(ev.key)) {
         point = null;
+        tabSpan = null;
         refresh();
       }
       return false;
@@ -467,7 +511,7 @@
 
     // Back on the sheet the entry started on, it goes on where it started.
     function afterSwitch(name) {
-      if (!session || name.toLowerCase() !== session.sheet.toLowerCase()) {
+      if (!session || tabSpan || name.toLowerCase() !== session.sheet.toLowerCase()) {
         refresh();
         return;
       }
@@ -491,6 +535,7 @@
     // Enter or Esc in the bar while the entry is out: back to its sheet, where the cell takes it or drops it.
     async function finish(commit) {
       const origin = session.sheet;
+      tabSpan = null;
       try {
         await deps.switchSheet(origin);
       } catch {
@@ -548,26 +593,40 @@
     function endBarEdit() {
       barDirty = false;
       point = null;
+      tabSpan = null;
       known.clear();
       refresh();
     }
 
     function afterInput() {
-      if (!writing) point = null;
+      if (!writing) {
+        point = null;
+        tabSpan = null;
+      }
       refresh();
     }
 
     function editEnded() {
       if (detaching) return;
       point = null;
+      tabSpan = null;
       known.clear();
       refresh();
     }
 
     function clearPoint() {
-      if (!point) return;
+      if (!point && !tabSpan) return;
       point = null;
+      tabSpan = null;
       refresh();
+    }
+
+    function pointAnchorSheet(s) {
+      if (!point || !s) return null;
+      const hit = P.refSpans(s.read().text).find((sp) => sp.start === point.start && sp.end === point.end);
+      if (!hit || !hit.sheet) return deps.getSheetName();
+      const ep = P.sheetEndpoints(hit.sheet);
+      return ep.whole || ep.start;
     }
 
     // The tab of a sheet is pressed while a reference is awaited: the button must not take the focus (and with it the entry).
@@ -583,6 +642,7 @@
           if (session) return;
           barMode = "edit";
           point = null;
+          tabSpan = null;
           refresh();
         });
         bar.addEventListener("blur", () => {
@@ -595,9 +655,37 @@
         bar.addEventListener("mousedown", clearPoint);
         ["keyup", "mouseup", "scroll"].forEach((type) => bar.addEventListener(type, () => paintBarText(Boolean(surface()))));
       }
-      byId("sheet-tab-bar")?.addEventListener("mousedown", (ev) => {
+      const tabBar = byId("sheet-tab-bar");
+      tabBar?.addEventListener("mousedown", (ev) => {
+        const tab = ev.target?.closest?.(".sheet-tab-btn[data-sheet-tab]");
+        lastTabShift = Boolean(tab && ev.shiftKey);
         if (ev.target?.closest?.(".sheet-tab-btn") && holdsTabPress()) ev.preventDefault();
       });
+      tabBar?.addEventListener(
+        "click",
+        (ev) => {
+          const tab = ev.target?.closest?.(".sheet-tab-btn[data-sheet-tab]");
+          const shift = Boolean(ev.shiftKey || lastTabShift);
+          lastTabShift = false;
+          if (!tab) return;
+          if (!holdsTabPress()) {
+            tabSpan = null;
+            return;
+          }
+          const target = tab.dataset.sheetTab;
+          if (!shift || !target) {
+            tabSpan = null;
+            return;
+          }
+          const s = surface();
+          const anchor = tabSpan ? tabSpan.start : pointAnchorSheet(s) || deps.getSheetName();
+          tabSpan = anchor.toLowerCase() === target.toLowerCase() ? null : { start: anchor, end: target };
+          if (point && s) {
+            writeRef(s, pointedCtx(), point.anchor, point.focus, point.axis, target);
+          }
+        },
+        true
+      );
     }
 
     return {

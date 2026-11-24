@@ -390,6 +390,10 @@ pub(crate) fn cell_arg_is_metadata_only(f: &crate::expr::FuncCallExpr) -> bool {
         && !kind.eq_ignore_ascii_case("PREFIX")
         && matches!(
             f.args[1].peeled(),
-            Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_)
+            Expr::Cell(_)
+                | Expr::SheetCell(_)
+                | Expr::Range(_)
+                | Expr::SheetRange(_)
+                | Expr::SheetSpan(_)
         )
 }

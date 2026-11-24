@@ -145,6 +145,7 @@ fn expr_to_sheet_range(expr: Expr) -> Result<(Option<String>, CellRange), Formul
             CellRange::new(sc.coord, sc.coord).map_err(|_| FormulaError::Ref)?,
         )),
         Expr::SheetRange(sr) => Ok((Some(sr.sheet), sr.range)),
+        Expr::SheetSpan(_) => Err(FormulaError::Ref),
         _ => Err(FormulaError::Ref),
     }
 }
@@ -451,6 +452,16 @@ impl SheetEngine {
                     sr.range,
                     false,
                 )))
+            }
+            Expr::SheetSpan(sp) => {
+                let Some(w) = self.exact_quoted_sheet(sp, ctx) else {
+                    return Err(if self.resolve_sheet_span(sp, ctx).is_err() {
+                        FormulaError::Ref
+                    } else {
+                        FormulaError::Value
+                    });
+                };
+                Ok(Some((Some(Cow::Borrowed(w)), sp.range, false)))
             }
             Expr::FuncCall(f) if f.name == "TRANSPOSE" && f.args.len() == 1 => Ok(self
                 .extract_range_and_sheet_ctx(&f.args[0], ctx, depth + 1)?

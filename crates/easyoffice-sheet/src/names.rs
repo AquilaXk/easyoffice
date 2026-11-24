@@ -208,6 +208,7 @@ fn is_leaf(expr: &Expr) -> bool {
             | Expr::Range(_)
             | Expr::SheetCell(_)
             | Expr::SheetRange(_)
+            | Expr::SheetSpan(_)
             | Expr::Number(_)
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)

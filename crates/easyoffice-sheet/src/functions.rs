@@ -343,12 +343,12 @@ fn numeric_values(vals: &[EvaluatedCellValue]) -> Vec<f64> {
 }
 
 #[inline]
-fn cmp_f64(a: &f64, b: &f64) -> std::cmp::Ordering {
+pub(crate) fn cmp_f64(a: &f64, b: &f64) -> std::cmp::Ordering {
     a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// Selects the `lo`-th and `hi`-th ($lo \le hi \le lo + 1$) smallest numbers in $O(N)$ time.
-fn select_pair(nums: &mut [f64], lo: usize, hi: usize) -> (f64, f64) {
+pub(crate) fn select_pair(nums: &mut [f64], lo: usize, hi: usize) -> (f64, f64) {
     let (_, &mut lo_val, upper) = nums.select_nth_unstable_by(lo, cmp_f64);
     let hi_val = if hi == lo {
         lo_val
@@ -478,13 +478,21 @@ impl SheetEngine {
         Ok(val)
     }
 
-    fn eval_func_inner(
+    pub(crate) fn eval_func_inner(
         &self,
         name: &str,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
+        if !matches!(
+            name,
+            "IF" | "IFS" | "SWITCH" | "IFERROR" | "IFNA" | "CHOOSE" | "SINGLE"
+        ) && Self::args_have_sheet_span_candidate(args)
+            && self.args_have_true_sheet_span(args, ctx)
+        {
+            return self.eval_func_with_sheet_span(name, args, ctx, depth);
+        }
         match name {
             "SUM" | "PRODUCT" => self.eval_streaming_range_agg_ctx(name, args, ctx, depth),
             "SUBTOTAL" => self.eval_subtotal(args, ctx, depth),
@@ -765,19 +773,7 @@ impl SheetEngine {
         }
         let vals = self.eval_range_vec(&args[0], ctx, depth)?;
         let pct = self.eval_arg_num(&args[1], ctx, depth)?;
-        let mut nums = numeric_values(&vals);
-        if nums.is_empty() || !(0.0..1.0).contains(&pct) {
-            return Err(FormulaError::Num);
-        }
-        let g = ((nums.len() as f64 * pct).floor() as usize) / 2;
-        if g * 2 >= nums.len() {
-            return Err(FormulaError::Num);
-        }
-        nums.sort_unstable_by(cmp_f64);
-        let slice = &nums[g..nums.len() - g];
-        Ok(EvaluatedCellValue::Number(
-            slice.iter().sum::<f64>() / (slice.len() as f64),
-        ))
+        Self::trimmean_from_nums(numeric_values(&vals), pct)
     }
 
     fn stat_small_large(
@@ -792,17 +788,7 @@ impl SheetEngine {
         }
         let vals = self.eval_range_vec(&args[0], ctx, depth)?;
         let k = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-        let mut nums = numeric_values(&vals);
-        if k < 1 || (k as usize) > nums.len() {
-            return Err(FormulaError::Num);
-        }
-        let idx = if is_small {
-            (k as usize) - 1
-        } else {
-            nums.len() - (k as usize)
-        };
-        let (_, &mut val, _) = nums.select_nth_unstable_by(idx, cmp_f64);
-        Ok(EvaluatedCellValue::Number(val))
+        Self::small_large_from_nums(is_small, numeric_values(&vals), k)
     }
 
     fn stat_rank(
@@ -815,32 +801,14 @@ impl SheetEngine {
         if !(2..=3).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
-        let target = self.eval_arg_num(&args[0], ctx, depth)?;
-        let order = match args.get(2) {
-            Some(arg) => self.eval_arg_num(arg, ctx, depth)?.trunc() as i32,
-            None => 0,
-        };
-        let mut equal_count = 0usize;
-        let mut better_count = 0usize;
-        self.visit_args_streaming(std::slice::from_ref(&args[1]), ctx, depth, |v| {
-            if let EvaluatedCellValue::Number(x) = v {
-                if x == target {
-                    equal_count += 1;
-                } else if (order == 0 && x > target) || (order != 0 && x < target) {
-                    better_count += 1;
-                }
-            }
-            Ok(())
-        })?;
-        if equal_count == 0 {
-            return Err(FormulaError::Na);
-        }
-        let rank = if is_avg {
-            (better_count as f64) + ((equal_count + 1) as f64) * 0.5
-        } else {
-            (better_count + 1) as f64
-        };
-        Ok(EvaluatedCellValue::Number(rank))
+        self.stat_rank_over(
+            is_avg,
+            &args[0],
+            std::slice::from_ref(&args[1]),
+            args.get(2),
+            ctx,
+            depth,
+        )
     }
 
     fn stat_percentrank(
@@ -915,39 +883,6 @@ impl SheetEngine {
         }
         let vals = self.eval_range_vec(&args[0], ctx, depth)?;
         let param = self.eval_arg_num(&args[1], ctx, depth)?;
-        let mut nums = numeric_values(&vals);
-        if nums.is_empty() {
-            return Err(FormulaError::Num);
-        }
-        let is_exc = name.ends_with(".EXC");
-        let p = if name.starts_with("QUARTILE") {
-            let q = param.trunc() as i32;
-            let valid = if is_exc { 1..=3 } else { 0..=4 };
-            if !valid.contains(&q) {
-                return Err(FormulaError::Num);
-            }
-            (q as f64) * 0.25
-        } else if is_exc && (param <= 0.0 || param >= 1.0)
-            || !is_exc && !(0.0..=1.0).contains(&param)
-        {
-            return Err(FormulaError::Num);
-        } else {
-            param
-        };
-        let pos = if is_exc {
-            let raw = p * ((nums.len() + 1) as f64);
-            if raw < 1.0 || raw > nums.len() as f64 {
-                return Err(FormulaError::Num);
-            }
-            raw - 1.0
-        } else {
-            p * ((nums.len() - 1) as f64)
-        };
-        let lo = pos.floor() as usize;
-        let hi = pos.ceil() as usize;
-        let (v_lo, v_hi) = select_pair(&mut nums, lo, hi);
-        Ok(EvaluatedCellValue::Number(
-            v_lo + (pos - lo as f64) * (v_hi - v_lo),
-        ))
+        Self::percentile_from_nums(name, numeric_values(&vals), param)
     }
 }

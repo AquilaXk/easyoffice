@@ -96,6 +96,7 @@ fn collect_patches(
         | Expr::Range(_)
         | Expr::SheetCell(_)
         | Expr::SheetRange(_)
+        | Expr::SheetSpan(_)
         | Expr::SpillRef(_) => {
             let Some(spec) = specs.get(*spec_idx).copied() else {
                 return false;
@@ -218,6 +219,17 @@ fn apply_shift_ref(node: &mut Expr, shifted: ShiftedRef) -> bool {
         }
         (Expr::SheetRange(sr), ShiftedRef::Range(new_r)) => {
             sr.range = new_r;
+            true
+        }
+        (Expr::SheetSpan(sp), ShiftedRef::Cell(new_c)) => {
+            sp.range = CellRange {
+                start: new_c,
+                end: new_c,
+            };
+            true
+        }
+        (Expr::SheetSpan(sp), ShiftedRef::Range(new_r)) => {
+            sp.range = new_r;
             true
         }
         _ => false,

@@ -141,6 +141,15 @@ pub(crate) fn collect_refs(
                     out.push(Ref::rect(idx, sr.range));
                 }
             }
+            Expr::SheetSpan(sp) => {
+                if let Some(indices) = wb.sheet_span_indices(sp) {
+                    for idx in indices {
+                        if let Ok(sheet) = u16::try_from(idx) {
+                            out.push(Ref::rect(sheet, sp.range));
+                        }
+                    }
+                }
+            }
             Expr::Shared(shared) => {
                 // A shared tree is read once per formula however often it appears inside itself.
                 let at = std::sync::Arc::as_ptr(shared);

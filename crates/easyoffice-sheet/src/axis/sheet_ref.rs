@@ -37,12 +37,70 @@ pub fn quote_sheet_name(name: &str) -> String {
     }
 }
 
+/// Formats a 3D sheet span prefix body without `!`, quoting as `'Start:End'` when needed.
+fn quote_sheet_span(start: &str, end: &str) -> String {
+    if !easyoffice_formats::sheet_name_needs_quotes(start)
+        && !easyoffice_formats::sheet_name_needs_quotes(end)
+    {
+        format!("{start}:{end}")
+    } else {
+        format!(
+            "'{}:{}'",
+            start.replace('\'', "''"),
+            end.replace('\'', "''")
+        )
+    }
+}
+
 /// `text` with the references to the changed sheet rewritten, or `None` when nothing changes.
 pub fn rewrite_sheet_names(text: &str, change: SheetChange<'_>) -> Option<String> {
     scan_refs(text, |site| {
-        let sheet = site.sheet.as_deref()?;
+        if let Some(whole) = site.quoted_whole.as_deref() {
+            match change {
+                SheetChange::Rename { from, to }
+                    if from.contains(':') && same_sheet(whole, from) =>
+                {
+                    let mut out = quote_sheet_name(to);
+                    out.push('!');
+                    if let Some(unit) = &site.unit {
+                        out.push_str(&text[site.unit_start()..unit.end()]);
+                    }
+                    return Some(out);
+                }
+                SheetChange::Delete { name }
+                    if name.contains(':') && same_sheet(whole, name) && site.unit.is_some() =>
+                {
+                    return Some("#REF!".to_string());
+                }
+                _ => {}
+            }
+        }
+        let start = site.sheet.as_deref()?;
+        if let Some(end) = site.end_sheet.as_deref() {
+            return match change {
+                SheetChange::Rename { from, to }
+                    if same_sheet(start, from) || same_sheet(end, from) =>
+                {
+                    let new_start = if same_sheet(start, from) { to } else { start };
+                    let new_end = if same_sheet(end, from) { to } else { end };
+                    let mut out = quote_sheet_span(new_start, new_end);
+                    out.push('!');
+                    if let Some(unit) = &site.unit {
+                        out.push_str(&text[site.unit_start()..unit.end()]);
+                    }
+                    Some(out)
+                }
+                SheetChange::Delete { name }
+                    if (same_sheet(start, name) || same_sheet(end, name))
+                        && site.unit.is_some() =>
+                {
+                    Some("#REF!".to_string())
+                }
+                _ => None,
+            };
+        }
         match change {
-            SheetChange::Rename { from, to } if same_sheet(sheet, from) => {
+            SheetChange::Rename { from, to } if same_sheet(start, from) => {
                 let mut prefix = quote_sheet_name(to);
                 prefix.push('!');
                 let mut out = prefix.clone();
@@ -59,7 +117,7 @@ pub fn rewrite_sheet_names(text: &str, change: SheetChange<'_>) -> Option<String
                 }
                 Some(out)
             }
-            SheetChange::Delete { name } if same_sheet(sheet, name) && site.unit.is_some() => {
+            SheetChange::Delete { name } if same_sheet(start, name) && site.unit.is_some() => {
                 Some("#REF!".to_string())
             }
             _ => None,

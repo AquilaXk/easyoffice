@@ -277,22 +277,51 @@
     return LEX_ERROR;
   }
 
-  /** Reads a quoted sheet name ('Name'!) starting at src[i]. */
-  function lexQuotedSheetJs(src, i) {
-    let pos = i + 1;
-    let closed = false;
-    while (pos < src.length && !closed) {
-      if (src[pos] !== "'") pos += 1;
-      else if (src[pos + 1] === "'") pos += 2;
-      else {
-        pos += 1;
-        closed = true;
+  function splitSingleSpanColonJs(name) {
+    const idx = name.indexOf(":");
+    if (idx <= 0 || idx >= name.length - 1 || name.indexOf(":", idx + 1) >= 0) return null;
+    return [name.slice(0, idx), name.slice(idx + 1)];
+  }
+
+  /** Reads either a quoted sheet token or a bare identifier/word for sheet-prefix lookahead. */
+  function readSheetAtomJs(src, i) {
+    if (src[i] === "'") {
+      let pos = i + 1;
+      let closed = false;
+      while (pos < src.length && !closed) {
+        if (src[pos] !== "'") pos += 1;
+        else if (src[pos + 1] === "'") pos += 2;
+        else {
+          pos += 1;
+          closed = true;
+        }
+      }
+      if (!closed) return null;
+      const unquoted = unquoteFormulaSheetTokenOnce(src.slice(i, pos));
+      return unquoted === null ? null : { name: unquoted, quoted: true, end: pos };
+    }
+    let end = i;
+    while (end < src.length && !WORD_BREAK_RE.test(src[end])) end += 1;
+    if (end === i) return null;
+    return { name: src.slice(i, end), quoted: false, end };
+  }
+
+  function lexSheetOrWordJs(src, i, allowSpan) {
+    const a = readSheetAtomJs(src, i);
+    if (!a) return LEX_ERROR;
+    if (src[a.end] === "!") {
+      if (!a.quoted && !SHEET_WORD_RE.test(a.name)) return LEX_ERROR;
+      const spanSheets = a.quoted ? splitSingleSpanColonJs(a.name) : null;
+      return { tok: { type: "sheet", name: a.name, spanSheets }, end: a.end + 1 };
+    }
+    if (allowSpan && src[a.end] === ":" && a.end + 1 < src.length) {
+      const b = readSheetAtomJs(src, a.end + 1);
+      if (b && src[b.end] === "!" && (b.quoted || SHEET_WORD_RE.test(b.name))) {
+        return { tok: { type: "sheet", name: null, spanSheets: [a.name, b.name] }, end: b.end + 1 };
       }
     }
-    if (!closed || src[pos] !== "!") return LEX_ERROR;
-    const unquoted = unquoteFormulaSheetTokenOnce(src.slice(i, pos));
-    if (unquoted === null) return LEX_ERROR;
-    return { tok: { type: "sheet", name: unquoted }, end: pos + 1 };
+    if (a.quoted) return LEX_ERROR;
+    return { tok: { type: "ident", value: a.name }, end: a.end };
   }
 
   function lexErrorLiteralJs(src, i) {
@@ -312,32 +341,22 @@
     return { tok: { type: "num", value: parsedNum }, end };
   }
 
-  function lexWordJs(src, i) {
-    let end = i;
-    while (end < src.length && !WORD_BREAK_RE.test(src[end])) end += 1;
-    if (end === i) return LEX_ERROR;
-    const word = src.slice(i, end);
-    if (src[end] !== "!") return { tok: { type: "ident", value: word }, end };
-    if (!SHEET_WORD_RE.test(word)) return LEX_ERROR;
-    return { tok: { type: "sheet", name: word }, end: end + 1 };
-  }
-
-  function lexOperatorOrWordJs(src, i) {
+  function lexOperatorOrWordJs(src, i, allowSpan) {
     const ch = src[i];
     const twoChar = src.slice(i, i + 2);
     if (TWO_CHAR_OPS.has(twoChar)) return { tok: { type: "op", value: twoChar }, end: i + 2 };
     if (ch === ";") return { tok: { type: "punct", value: "," }, end: i + 1 };
     if (PUNCT_CHARS.includes(ch)) return { tok: { type: "punct", value: ch }, end: i + 1 };
-    return lexWordJs(src, i);
+    return lexSheetOrWordJs(src, i, allowSpan);
   }
 
-  function lexTokenAtJs(src, i) {
+  function lexTokenAtJs(src, i, allowSpan) {
     const ch = src[i];
     if (ch === '"') return lexStringJs(src, i);
-    if (ch === "'") return lexQuotedSheetJs(src, i);
+    if (ch === "'") return lexSheetOrWordJs(src, i, allowSpan);
     if (ch === "#") return lexErrorLiteralJs(src, i);
     if ((ch >= "0" && ch <= "9") || ch === ".") return lexNumberJs(src, i);
-    return lexOperatorOrWordJs(src, i);
+    return lexOperatorOrWordJs(src, i, allowSpan);
   }
 
   function tokenizeFormulaJs(rawBody) {
@@ -351,7 +370,8 @@
         i += 1;
         continue;
       }
-      const lexed = lexTokenAtJs(src, i);
+      const allowSpan = tokens.length === 0 || tokens[tokens.length - 1]?.type !== "sheet";
+      const lexed = lexTokenAtJs(src, i, allowSpan);
       if (lexed.error) return { error: lexed.error };
       if (tokens.length >= MAX_TOKENS) return LEX_ERROR;
       tokens.push(lexed.tok);
@@ -386,14 +406,15 @@
     return t?.type === "punct" && values.includes(t.value);
   }
 
-  function buildRangeNode(explicitSheet, endSheet, startCoord, endCoord) {
+  function buildRangeNode(sheetTok, endSheet, startCoord, endCoord) {
     const minCol = Math.min(startCoord.col, endCoord.col);
     const maxCol = Math.max(startCoord.col, endCoord.col);
     const minRow = Math.min(startCoord.row, endCoord.row);
     const maxRow = Math.max(startCoord.row, endCoord.row);
     return {
       kind: "Range",
-      sheet: explicitSheet,
+      sheet: sheetTok?.name ?? null,
+      sheetSpan: endSheet === null ? (sheetTok?.spanSheets ?? null) : null,
       endSheet,
       startRef: startCoord.normRef,
       endRef: endCoord.normRef,
@@ -405,29 +426,30 @@
     };
   }
 
-  function parseRangeTail(ps, explicitSheet, startCoord) {
+  function parseRangeTail(ps, sheetTok, startCoord) {
     psNext(ps);
     let endSheet = null;
     if (psPeek(ps)?.type === "sheet") {
-      if (explicitSheet === null) return psFail(ps, "#REF!");
+      if (sheetTok === null || sheetTok.name === null) return psFail(ps, "#REF!");
       endSheet = psNext(ps).name;
     }
     const endTok = psNext(ps);
     if (endTok?.type !== "ident") return psFail(ps, "#REF!");
     const endCoord = parseStrictA1Coord(endTok.value);
     if (!startCoord.ok || !endCoord.ok) return { kind: "Error", code: "#REF!" };
-    return buildRangeNode(explicitSheet, endSheet, startCoord, endCoord);
+    return buildRangeNode(sheetTok, endSheet, startCoord, endCoord);
   }
 
-  function parseRefOrRangeAst(ps, explicitSheet, firstWord) {
+  function parseRefOrRangeAst(ps, sheetTok, firstWord) {
     const startCoord = parseStrictA1Coord(firstWord);
-    if (peekIsPunct(ps, ":")) return parseRangeTail(ps, explicitSheet, startCoord);
+    if (peekIsPunct(ps, ":")) return parseRangeTail(ps, sheetTok, startCoord);
     if (!startCoord.ok) {
-      return { kind: "Error", code: explicitSheet === null ? startCoord.errorCode : "#REF!" };
+      return { kind: "Error", code: sheetTok === null ? startCoord.errorCode : "#REF!" };
     }
     return {
       kind: "Cell",
-      sheet: explicitSheet,
+      sheet: sheetTok?.name ?? null,
+      sheetSpan: sheetTok?.spanSheets ?? null,
       ref: startCoord.normRef,
       col: startCoord.col,
       row: startCoord.row,
@@ -538,7 +560,7 @@
   function parseSheetPrefixed(ps, sheetTok) {
     const refTok = psNext(ps);
     if (refTok?.type !== "ident") return psFail(ps, "#REF!");
-    return parseRefOrRangeAst(ps, sheetTok.name, refTok.value);
+    return parseRefOrRangeAst(ps, sheetTok, refTok.value);
   }
 
   const LITERAL_NODE_BUILDERS = {

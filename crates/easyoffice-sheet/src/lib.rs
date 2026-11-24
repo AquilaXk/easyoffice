@@ -89,6 +89,7 @@ mod range_dyn;
 mod recalc;
 mod rules;
 mod sheet_sort;
+mod sheet_span;
 mod sig_digits;
 mod sort_keys;
 mod sort_refs;
@@ -825,6 +826,7 @@ impl SheetEngine {
                     EvaluatedCellValue::Error(FormulaError::Value)
                 }
             }
+            Expr::SheetSpan(sp) => self.eval_sheet_span_scalar(sp, ctx, depth),
             Expr::UnaryPlus(inner) => self.eval_unary(inner, ctx, depth, |n| n),
             Expr::UnaryMinus(inner) => self.eval_unary(inner, ctx, depth, |n| -n),
             Expr::PostfixPercent(inner) => self.eval_unary(inner, ctx, depth, |n| n / 100.0),
@@ -930,10 +932,19 @@ impl SheetEngine {
                 }
             }
             "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
-            | "PRODUCT" => match self.eval_streaming_range_agg_ctx(name, args, ctx, depth) {
-                Ok(v) => v,
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
+            | "PRODUCT" => {
+                let res = if Self::args_have_sheet_span_candidate(args)
+                    && self.args_have_true_sheet_span(args, ctx)
+                {
+                    self.eval_func_with_sheet_span(name, args, ctx, depth)
+                } else {
+                    self.eval_streaming_range_agg_ctx(name, args, ctx, depth)
+                };
+                match res {
+                    Ok(v) => v,
+                    Err(e) => EvaluatedCellValue::Error(e),
+                }
+            }
             _ => self.eval_func_ctx(name, args, ctx, depth),
         }
     }
