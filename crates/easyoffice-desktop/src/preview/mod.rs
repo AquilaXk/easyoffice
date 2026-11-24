@@ -30,7 +30,6 @@ use bounded::{Gate, RenderError};
 use cache::{FileStamp, PreviewCache};
 use serde::Serialize;
 use source::Source;
-use std::fs::Metadata;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -237,6 +236,30 @@ fn first_page_step(
     }
 }
 
+enum PreviewOutcome {
+    Cache(Option<Arc<Thumbnail>>),
+    SkipCache,
+}
+
+fn preview_from_source<R: Read + Seek + Send + 'static>(
+    state: &PreviewState,
+    mut source: R,
+    path: &Path,
+    source_len: u64,
+    ready: impl FnOnce(),
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> PreviewOutcome {
+    if let Some(embedded) = extract_thumbnail(&mut source) {
+        return PreviewOutcome::Cache(Some(Arc::new(embedded)));
+    }
+    ready();
+    match draw_first_page_len(state, source, path, source_len, render) {
+        Ok(drawn) => PreviewOutcome::Cache(Some(Arc::new(drawn))),
+        Err(RenderError::Busy | RenderError::TimedOut) => PreviewOutcome::SkipCache,
+        Err(_) => PreviewOutcome::Cache(None),
+    }
+}
+
 /// [`load_preview_with`] that runs `ready` on the calling thread when a page has to be drawn, before
 /// the permit wait and the deadline start: what the render needs and may take long to get (the
 /// font database) is waited for outside the time the render is allowed.
@@ -247,6 +270,34 @@ fn load_preview_after(
     ready: impl FnOnce(),
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Option<Arc<Thumbnail>> {
+    if crate::pages_bundle_dir::is_pages_bundle_dir(path) {
+        let meta = std::fs::symlink_metadata(path).ok()?;
+        let stamp = FileStamp::of(&meta);
+        if let Some(hit) = state.cached(id, &stamp) {
+            return hit;
+        }
+        let max_bytes = Source::of(path)?.max_file_bytes() as usize;
+        let found = match crate::pages_bundle_dir::read_pages_bundle_as_zip(path, max_bytes) {
+            Err(_) => None,
+            Ok((bytes, _)) => {
+                let len = bytes.len() as u64;
+                match preview_from_source(
+                    state,
+                    std::io::Cursor::new(bytes),
+                    path,
+                    len,
+                    ready,
+                    render,
+                ) {
+                    PreviewOutcome::Cache(found) => found,
+                    PreviewOutcome::SkipCache => return None,
+                }
+            }
+        };
+        state.remember(id, stamp, found.clone());
+        return found;
+    }
+
     let meta = std::fs::metadata(path).ok()?;
     // A named pipe has no picture and opening one blocks: refused before the cache and the open.
     if !meta.is_file() {
@@ -258,16 +309,9 @@ fn load_preview_after(
     }
     let found = match open_regular(path) {
         Err(_) => None,
-        Ok((mut file, _)) => match extract_thumbnail(&mut file) {
-            Some(embedded) => Some(Arc::new(embedded)),
-            None => {
-                ready();
-                match draw_first_page(state, file, path, &meta, render) {
-                    Ok(drawn) => Some(Arc::new(drawn)),
-                    Err(RenderError::Busy | RenderError::TimedOut) => return None,
-                    Err(_) => None,
-                }
-            }
+        Ok((file, _)) => match preview_from_source(state, file, path, meta.len(), ready, render) {
+            PreviewOutcome::Cache(found) => found,
+            PreviewOutcome::SkipCache => return None,
         },
     };
     state.remember(id, stamp, found.clone());
@@ -301,17 +345,16 @@ fn read_document<R: Read + Seek>(
 /// The first page of a document within the size limit of its kind, drawn by the bounded worker. The
 /// file is read on the worker, after it holds a render permit: a request that finds none free reads
 /// nothing, so a stream of them cannot each hold up to 50 MiB of file bytes.
-fn draw_first_page<R: Read + Seek + Send + 'static>(
+fn draw_first_page_len<R: Read + Seek + Send + 'static>(
     state: &PreviewState,
     mut source: R,
     path: &Path,
-    meta: &Metadata,
+    size: u64,
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Result<Thumbnail, RenderError> {
     let kind = Source::of(path)
-        .filter(|kind| meta.len() <= kind.max_file_bytes())
+        .filter(|kind| size <= kind.max_file_bytes())
         .ok_or(RenderError::Unreadable)?;
-    let size = meta.len();
     let limits = state.limits;
     let png = bounded::run(
         &state.gate,
@@ -369,6 +412,17 @@ fn load_preview_with(
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Option<Arc<Thumbnail>> {
     load_preview_after(state, id, path, || {}, render)
+}
+
+#[cfg(test)]
+fn draw_first_page<R: Read + Seek + Send + 'static>(
+    state: &PreviewState,
+    source: R,
+    path: &Path,
+    meta: &std::fs::Metadata,
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> Result<Thumbnail, RenderError> {
+    draw_first_page_len(state, source, path, meta.len(), render)
 }
 
 #[cfg(test)]

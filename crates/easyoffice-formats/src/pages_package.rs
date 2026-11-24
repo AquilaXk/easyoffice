@@ -5,15 +5,19 @@
 //! [`ZipSecurityPolicy`] (entry count, size and ratio ceilings, path traversal). Package-directory
 //! zips (all entries below a single `Name.pages/` folder) are handled by stripping that prefix.
 
+use crate::encrypted_container::is_ole2_offcrypto_encrypted;
 use crate::pages_iwa::{decode_stream_into_table, decompress_iwa_into, MAX_DOCUMENT_BYTES};
 use crate::pages_proto::ObjectTable;
+use crate::zip_path_tracker::ZipPathTracker;
 use crate::{
-    DocumentFormat, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
+    open_guarded, DocumentFormat, EasyOfficeError, FormatDetector, OpenLimits, XmlSanitizer,
+    ZipArchiveCodec, ZipArchiveEntry, ZipBinaryBudget, ZipEntryDescriptor, ZipSecurityGuard,
     ZipSecurityPolicy,
 };
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::collections::HashMap;
+use std::io::Cursor;
 
 /// Package directory that holds picture and media files.
 const DATA_DIR: &str = "Data/";
@@ -51,11 +55,26 @@ fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
 }
 
 fn strip_package_prefix(entries: &[ZipArchiveEntry]) -> &str {
+    let has_top_marker = entries.iter().any(|e| {
+        e.path.starts_with("Index/")
+            || e.path.starts_with("Metadata/")
+            || matches!(e.path.as_str(), "index.xml" | "index.xml.gz" | "Index.zip")
+            || (!e.path.contains('/')
+                && ENCRYPTED_ENTRY_SUFFIXES
+                    .iter()
+                    .any(|suffix| ends_with_ignore_ascii_case(&e.path, suffix)))
+    });
+    if has_top_marker {
+        return "";
+    }
     for marker in ["Index/", "Metadata/"] {
         for e in entries {
             if let Some(idx) = e.path.find(marker) {
                 let prefix = &e.path[..idx];
-                if is_single_folder_prefix(prefix) {
+                if is_single_folder_prefix(prefix)
+                    && !prefix.eq_ignore_ascii_case("Data/")
+                    && !prefix.eq_ignore_ascii_case("QuickLook/")
+                {
                     return prefix;
                 }
             }
@@ -377,19 +396,296 @@ fn is_properties_plist_encrypted(data: &[u8]) -> bool {
     }
 }
 
-/// Loads every IWA record of a Pages package. Legacy XML and encrypted packages are refused.
+fn check_nested_index_zip_encryption(bytes: &[u8]) -> Result<(), EasyOfficeError> {
+    if is_ole2_offcrypto_encrypted(bytes) {
+        return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pages,
+        ));
+    }
+    if bytes.starts_with(&FormatDetector::ZIP_MAGIC) {
+        if let Ok(mut opened) = open_guarded(
+            Cursor::new(bytes),
+            OpenLimits {
+                max_entries: usize::from(u16::MAX),
+                max_directory_bytes: 16 * 1024 * 1024,
+            },
+        ) {
+            for index in 0..opened.archive.len() {
+                if let Ok(file) = opened.archive.by_index_raw(index) {
+                    if file.encrypted() {
+                        return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                            DocumentFormat::Pages,
+                        ));
+                    }
+                    if std::str::from_utf8(file.name_raw()).is_ok_and(|name| {
+                        ENCRYPTED_ENTRY_SUFFIXES
+                            .iter()
+                            .any(|suffix| ends_with_ignore_ascii_case(name, suffix))
+                    }) {
+                        return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                            DocumentFormat::Pages,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remaining_zip_policy(
+    policy: &ZipSecurityPolicy,
+    outer_entries: &[ZipArchiveEntry],
+) -> Result<(ZipSecurityPolicy, u64), EasyOfficeError> {
+    let outer_bytes = outer_entries
+        .iter()
+        .try_fold(0u64, |acc, e| acc.checked_add(e.data.len() as u64))
+        .ok_or_else(|| {
+            EasyOfficeError::ResourceBudgetExceeded(
+                "Pages 패키지 압축 해제 크기가 한도를 초과했습니다.".to_string(),
+            )
+        })?;
+    let remaining_entries = policy.max_entries.saturating_sub(outer_entries.len());
+    let remaining_bytes = policy
+        .max_total_uncompressed_bytes
+        .saturating_sub(outer_bytes);
+    let inner_policy = ZipSecurityPolicy {
+        max_entries: remaining_entries,
+        max_single_entry_uncompressed_bytes: policy
+            .max_single_entry_uncompressed_bytes
+            .min(remaining_bytes),
+        max_total_uncompressed_bytes: remaining_bytes,
+        max_compression_ratio: policy.max_compression_ratio,
+        binary_budget: policy.binary_budget.map(|b| ZipBinaryBudget {
+            max_single_entry_uncompressed_bytes: b
+                .max_single_entry_uncompressed_bytes
+                .min(remaining_bytes),
+            max_total_uncompressed_bytes: b.max_total_uncompressed_bytes.min(remaining_bytes),
+        }),
+    };
+    Ok((inner_policy, remaining_bytes))
+}
+
+fn normalize_index_zip_path(raw: &str) -> Result<String, EasyOfficeError> {
+    if raw.ends_with('/') {
+        let trimmed = raw.trim_end_matches('/');
+        if raw.len() - trimmed.len() != 1 {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "Index.zip 내부의 비정상 경로: {raw}"
+            )));
+        }
+        if raw == "Index/" {
+            return Ok(raw.to_string());
+        }
+        if let Some(rest) = raw.strip_prefix("Index/") {
+            if rest
+                .split('/')
+                .next()
+                .is_some_and(|seg| seg.eq_ignore_ascii_case("index"))
+            {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "Index.zip 내부의 중복 Index/ 경로: {raw}"
+                )));
+            }
+            ZipSecurityGuard::validate_entry_path(raw)?;
+            return Ok(raw.to_string());
+        }
+        if raw == "Tables/" || raw.starts_with("Tables/") {
+            let normalized = format!("Index/{raw}");
+            ZipSecurityGuard::validate_entry_path(&normalized)?;
+            return Ok(normalized);
+        }
+        return Err(EasyOfficeError::SecurityViolation(format!(
+            "Index.zip 내부의 비정상 경로: {raw}"
+        )));
+    }
+
+    if let Some(rest) = raw.strip_prefix("Index/") {
+        if rest.is_empty()
+            || rest
+                .split('/')
+                .next()
+                .is_some_and(|seg| seg.eq_ignore_ascii_case("index"))
+        {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "Index.zip 내부의 중복 Index/ 경로: {raw}"
+            )));
+        }
+        ZipSecurityGuard::validate_entry_path(raw)?;
+        return Ok(raw.to_string());
+    }
+    if raw
+        .split('/')
+        .next()
+        .is_some_and(|seg| seg.eq_ignore_ascii_case("index"))
+    {
+        return Err(EasyOfficeError::SecurityViolation(format!(
+            "Index.zip 내부의 비정상 경로: {raw}"
+        )));
+    }
+    if let Some(rest) = raw.strip_prefix("Tables/") {
+        if rest.is_empty() {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "Index.zip 내부의 비정상 경로: {raw}"
+            )));
+        }
+        let normalized = format!("Index/{raw}");
+        ZipSecurityGuard::validate_entry_path(&normalized)?;
+        return Ok(normalized);
+    }
+    if !raw.contains('/')
+        && (ends_with_ignore_ascii_case(raw, ".iwa")
+            || ENCRYPTED_ENTRY_SUFFIXES
+                .iter()
+                .any(|suffix| ends_with_ignore_ascii_case(raw, suffix)))
+    {
+        let normalized = format!("Index/{raw}");
+        ZipSecurityGuard::validate_entry_path(&normalized)?;
+        return Ok(normalized);
+    }
+    Err(EasyOfficeError::SecurityViolation(format!(
+        "Index.zip 내부의 비정상 경로: {raw}"
+    )))
+}
+
+fn unpack_and_merge_index_zip(
+    entries: Vec<ZipArchiveEntry>,
+    prefix: &str,
+    policy: &ZipSecurityPolicy,
+) -> Result<Vec<ZipArchiveEntry>, EasyOfficeError> {
+    check_nested_index_zip_encryption(
+        &entries
+            .iter()
+            .find(|e| e.path.strip_prefix(prefix).unwrap_or(&e.path) == "Index.zip")
+            .ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer("Pages 패키지에 Index.zip이 없습니다.".into())
+            })?
+            .data,
+    )?;
+
+    let (inner_policy, remaining_bytes) = remaining_zip_policy(policy, &entries)?;
+    let mut index_zip_bytes = None;
+    let mut outer_normalized = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let relative = entry.path.strip_prefix(prefix).unwrap_or(&entry.path);
+        if relative == "Index.zip" {
+            index_zip_bytes = Some(entry.data);
+        } else {
+            let owned_rel = relative.to_string();
+            outer_normalized.push(ZipArchiveEntry {
+                path: owned_rel,
+                data: entry.data,
+                crc32: entry.crc32,
+            });
+        }
+    }
+    let index_zip_bytes = index_zip_bytes.ok_or_else(|| {
+        EasyOfficeError::CorruptedContainer("Pages 패키지에 Index.zip이 없습니다.".into())
+    })?;
+
+    let raw_inner = ZipArchiveCodec::unpack(&index_zip_bytes, &inner_policy).map_err(|err| {
+        match err {
+            EasyOfficeError::EncryptedDocumentUnsupported(_) => {
+                EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pages)
+            }
+            EasyOfficeError::SecurityViolation(ref msg) if msg.contains("엔트리 개수") => {
+                EasyOfficeError::ResourceBudgetExceeded(msg.clone())
+            }
+            EasyOfficeError::DecompressionBombDetected { ratio, max_ratio }
+                if ratio <= max_ratio =>
+            {
+                EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "중첩 Index.zip 압축 해제 크기가 잔여 예산({remaining_bytes} bytes)을 초과했습니다."
+                ))
+            }
+            other => other,
+        }
+    })?;
+
+    let mut inner_tracker = ZipPathTracker::with_capacity(raw_inner.len());
+    let mut normalized_inner = Vec::with_capacity(raw_inner.len());
+    for entry in raw_inner {
+        let norm_path = normalize_index_zip_path(&entry.path)?;
+        let desc = ZipEntryDescriptor::new(
+            norm_path.clone(),
+            entry.data.len() as u64,
+            entry.data.len() as u64,
+            false,
+        );
+        inner_tracker.check(&desc)?;
+        if ENCRYPTED_ENTRY_SUFFIXES
+            .iter()
+            .any(|suffix| ends_with_ignore_ascii_case(&norm_path, suffix))
+        {
+            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                DocumentFormat::Pages,
+            ));
+        }
+        normalized_inner.push(ZipArchiveEntry {
+            path: norm_path,
+            data: entry.data,
+            crc32: entry.crc32,
+        });
+    }
+
+    let mut merged_tracker =
+        ZipPathTracker::with_capacity(outer_normalized.len() + normalized_inner.len());
+    for entry in &outer_normalized {
+        if entry.path.ends_with('/') {
+            continue;
+        }
+        let desc = ZipEntryDescriptor::new(
+            entry.path.clone(),
+            entry.data.len() as u64,
+            entry.data.len() as u64,
+            false,
+        );
+        merged_tracker.check(&desc)?;
+    }
+    for entry in &normalized_inner {
+        if entry.path.ends_with('/') {
+            continue;
+        }
+        let desc = ZipEntryDescriptor::new(
+            entry.path.clone(),
+            entry.data.len() as u64,
+            entry.data.len() as u64,
+            false,
+        );
+        merged_tracker.check(&desc)?;
+    }
+
+    outer_normalized.extend(normalized_inner);
+    Ok(outer_normalized)
+}
+
+/// Loads every IWA record of a Pages package under `ZipSecurityPolicy::default()`.
 pub fn load_package(bytes: &[u8]) -> Result<PagesPackage, EasyOfficeError> {
-    let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    let prefix = strip_package_prefix(&entries);
+    load_package_with_policy(bytes, &ZipSecurityPolicy::default())
+}
+
+/// Loads every IWA record of a Pages package under `policy`. Legacy XML and encrypted packages
+/// are refused, and nested `Index.zip` archives share the remaining `policy` budget.
+pub fn load_package_with_policy(
+    bytes: &[u8],
+    policy: &ZipSecurityPolicy,
+) -> Result<PagesPackage, EasyOfficeError> {
+    let entries = ZipArchiveCodec::unpack(bytes, policy).map_err(|err| match err {
+        EasyOfficeError::EncryptedDocumentUnsupported(_) => {
+            EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pages)
+        }
+        other => other,
+    })?;
+    let prefix_owned = strip_package_prefix(&entries).to_string();
 
     let encrypted_entry = entries.iter().any(|e| {
-        let relative = e.path.strip_prefix(prefix).unwrap_or(&e.path);
+        let relative = e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path);
         ENCRYPTED_ENTRY_SUFFIXES
             .iter()
             .any(|suffix| ends_with_ignore_ascii_case(relative, suffix))
     });
     let encrypted_plist = entries.iter().any(|e| {
-        e.path.strip_prefix(prefix).unwrap_or(&e.path) == "Metadata/Properties.plist"
+        e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path) == "Metadata/Properties.plist"
             && is_properties_plist_encrypted(&e.data)
     });
     if encrypted_entry || encrypted_plist {
@@ -398,14 +694,30 @@ pub fn load_package(bytes: &[u8]) -> Result<PagesPackage, EasyOfficeError> {
         ));
     }
 
+    let has_document_iwa = entries
+        .iter()
+        .any(|e| e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path) == "Index/Document.iwa");
+    let has_index_zip = entries
+        .iter()
+        .any(|e| e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path) == "Index.zip");
+
+    let (entries, prefix_owned) = if !has_document_iwa && has_index_zip {
+        (
+            unpack_and_merge_index_zip(entries, &prefix_owned, policy)?,
+            String::new(),
+        )
+    } else {
+        (entries, prefix_owned)
+    };
+
     let has_iwa = entries.iter().any(|e| {
-        let r = e.path.strip_prefix(prefix).unwrap_or(&e.path);
+        let r = e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path);
         r.starts_with("Index/") && r.ends_with(".iwa")
     });
     if !has_iwa {
         if entries.iter().any(|e| {
             matches!(
-                e.path.strip_prefix(prefix).unwrap_or(&e.path),
+                e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path),
                 "index.xml" | "index.xml.gz"
             )
         }) {
@@ -419,7 +731,7 @@ pub fn load_package(bytes: &[u8]) -> Result<PagesPackage, EasyOfficeError> {
     let mut iwa: Vec<(&str, &[u8])> = entries
         .iter()
         .filter_map(|e| {
-            let r = e.path.strip_prefix(prefix).unwrap_or(&e.path);
+            let r = e.path.strip_prefix(&prefix_owned).unwrap_or(&e.path);
             (r.starts_with("Index/") && r.ends_with(".iwa")).then_some((r, e.data.as_slice()))
         })
         .collect();
@@ -432,7 +744,6 @@ pub fn load_package(bytes: &[u8]) -> Result<PagesPackage, EasyOfficeError> {
         decode_stream_into_table(&stream, &mut pkg.objects)?;
         pkg.iwa_files += 1;
     }
-    let prefix_owned = prefix.to_string();
     drop(iwa);
     for entry in entries {
         let relative = entry

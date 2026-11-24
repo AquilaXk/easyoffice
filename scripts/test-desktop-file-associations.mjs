@@ -148,3 +148,32 @@ test("the license and NOTICE files must be shipped as bundle resources", () => {
     assert.match(checkDesktopBundleConfig(conf).join("\n"), new RegExp(`bundle\\.resources must ship '${file}'`));
   }
 });
+
+test("hwt, hwtx, ppsx and pages are registered as Editor with Alternate rank and standard MIME types (PD-336)", () => {
+  const expected = [
+    ["hwt", "Editor", "application/x-hwt"],
+    ["hwtx", "Editor", "application/x-hwtx"],
+    ["ppsx", "Editor", "application/vnd.openxmlformats-officedocument.presentationml.slideshow"],
+    ["pages", "Editor", "application/x-iwork-pages-sffpages"],
+  ];
+  const conf = load();
+  assert.equal(conf.bundle.macOS.minimumSystemVersion, "11.0");
+  for (const [ext, role, mimeType] of expected) {
+    assert.equal(REQUIRED_ASSOCIATIONS.get(ext), role, `REQUIRED_ASSOCIATIONS.${ext}`);
+    assert.equal(REQUIRED_MIME_TYPES.get(ext), mimeType, `REQUIRED_MIME_TYPES.${ext}`);
+    const assoc = conf.bundle.fileAssociations.find((a) => Array.isArray(a.ext) && a.ext.includes(ext));
+    assert.ok(assoc, `tauri.conf.json fileAssociations must include .${ext}`);
+    assert.equal(assoc.role, role, ext);
+    assert.equal(assoc.rank, "Alternate", ext);
+    assert.equal(assoc.mimeType, mimeType, ext);
+    assert.equal(checkDesktopBundleConfig(conf).length, 0);
+
+    const missing = load();
+    missing.bundle.fileAssociations = missing.bundle.fileAssociations.filter((a) => !a.ext.includes(ext));
+    assert.match(checkDesktopBundleConfig(missing).join("\n"), new RegExp(`'\\.${ext}' is missing`));
+
+    const badMime = load();
+    badMime.bundle.fileAssociations.find((a) => a.ext.includes(ext)).mimeType = "application/octet-stream";
+    assert.match(checkDesktopBundleConfig(badMime).join("\n"), new RegExp(`'\\.${ext}' must declare mimeType`));
+  }
+});

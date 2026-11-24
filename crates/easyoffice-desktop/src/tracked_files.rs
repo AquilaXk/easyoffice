@@ -44,7 +44,13 @@ impl Fingerprint {
 
     /// Reads the file once: metadata from the opened handle, then the content through a fixed
     /// buffer. Files above the save limit hash only their first bytes; the length already differs.
+    /// A `.pages` folder bundle is packed deterministically up to the document open limit.
     pub fn of(path: &Path) -> std::io::Result<Self> {
+        if crate::pages_bundle_dir::is_pages_bundle_dir(path) {
+            let max_bytes = crate::windows::WindowKind::Doc.max_open_bytes() as usize;
+            let (bytes, meta) = crate::pages_bundle_dir::read_pages_bundle_as_zip(path, max_bytes)?;
+            return Ok(Self::from_metadata_and_bytes(&meta, &bytes));
+        }
         let (file, meta) = open_regular(path)?;
         let content_hash = hash_reader(file.take(MAX_SAVE_BYTES as u64 + 1))?;
         Ok(Self::from_parts(&meta, content_hash))
@@ -508,5 +514,32 @@ mod tests {
         let res = open_regular(&fifo_path);
         assert!(res.is_err());
         let _ = fs::remove_file(&fifo_path);
+    }
+
+    #[test]
+    fn pages_bundle_dir_fingerprint_and_disk_view_track_inner_edits() {
+        let dir = scratch("pages-bundle-track");
+        let bundle = dir.join("note.pages");
+        let index_dir = bundle.join("Index");
+        fs::create_dir_all(&index_dir).unwrap();
+        let iwa_path = index_dir.join("Document.iwa");
+        fs::write(&iwa_path, b"initial-iwa-bytes").unwrap();
+
+        let (bytes, meta) = crate::pages_bundle_dir::read_pages_bundle_as_zip(
+            &bundle,
+            crate::windows::WindowKind::Doc.max_open_bytes() as usize,
+        )
+        .unwrap();
+        let opened = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
+        assert_eq!(Fingerprint::of(&bundle).unwrap(), opened);
+        assert_eq!(disk_view(&bundle, &opened).state, DiskState::Unchanged);
+
+        fs::write(&iwa_path, b"modified-iwa-bytes").unwrap();
+        assert_eq!(disk_view(&bundle, &opened).state, DiskState::Changed);
+
+        fs::remove_dir_all(&bundle).unwrap();
+        assert_eq!(disk_view(&bundle, &opened).state, DiskState::Missing);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

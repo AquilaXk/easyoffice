@@ -680,3 +680,71 @@ fn windows_symlink_and_ntfs_junction_writes_update_target_and_refuse_sensitive_p
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn writing_or_in_place_saving_over_a_pages_directory_fails_without_modifying_files() {
+    let dir = scratch_dir("pages-dir-protect");
+    let bundle = dir.join("문서.pages");
+    let index_dir = bundle.join("Index");
+    fs::create_dir_all(&index_dir).unwrap();
+    let doc_iwa = index_dir.join("Document.iwa");
+    let preview_jpg = bundle.join("preview.jpg");
+    fs::write(&doc_iwa, b"original-iwa").unwrap();
+    fs::write(&preview_jpg, b"original-preview").unwrap();
+
+    let write_err = write_document_bytes(&bundle, b"replacement-bytes").unwrap_err();
+    assert!(
+        write_err
+            .to_string()
+            .contains("다른 이름으로 저장을 사용하세요"),
+        "unexpected write error: {write_err}"
+    );
+    assert_eq!(fs::read(&doc_iwa).unwrap(), b"original-iwa");
+    assert_eq!(fs::read(&preview_jpg).unwrap(), b"original-preview");
+    assert_no_leftovers(&dir);
+
+    let fake_fp =
+        Fingerprint::from_metadata_and_bytes(&fs::symlink_metadata(&bundle).unwrap(), b"x");
+    let inplace_err = save_in_place(&bundle, &fake_fp, b"replacement-bytes", |_| {
+        panic!("directory overwrite must be refused before confirmation prompt")
+    })
+    .unwrap_err();
+    assert!(
+        inplace_err
+            .to_string()
+            .contains("다른 이름으로 저장을 사용하세요"),
+        "unexpected in-place error: {inplace_err}"
+    );
+    assert_eq!(fs::read(&doc_iwa).unwrap(), b"original-iwa");
+    assert_eq!(fs::read(&preview_jpg).unwrap(), b"original-preview");
+    assert_no_leftovers(&dir);
+
+    let empty_dir = dir.join("빈문서.pages");
+    fs::create_dir_all(&empty_dir).unwrap();
+    let empty_err = write_document_bytes(&empty_dir, b"replacement-bytes").unwrap_err();
+    assert!(
+        empty_err
+            .to_string()
+            .contains("다른 이름으로 저장을 사용하세요"),
+        "empty dir error: {empty_err}"
+    );
+    assert!(empty_dir.is_dir(), "empty directory must not be replaced");
+    assert_no_leftovers(&dir);
+
+    #[cfg(unix)]
+    {
+        let link = dir.join("바로가기.pages");
+        std::os::unix::fs::symlink(&bundle, &link).unwrap();
+        let link_err = write_document_bytes(&link, b"replacement-bytes").unwrap_err();
+        assert!(
+            link_err
+                .to_string()
+                .contains("다른 이름으로 저장을 사용하세요"),
+            "symlink to dir error: {link_err}"
+        );
+        assert_eq!(fs::read(&doc_iwa).unwrap(), b"original-iwa");
+        assert_no_leftovers(&dir);
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}

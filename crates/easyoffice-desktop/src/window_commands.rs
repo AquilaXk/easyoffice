@@ -535,17 +535,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         return Ok(OpenOutcome::FOCUSED);
     }
     check_window_limit(&locked(&state.registry))?;
-    let (file, meta) = open_regular(&canonical)
-        .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
-    check_open_size(kind, meta.len(), &name)?;
-    let bytes = match read_within(file, kind.max_open_bytes(), meta.len()) {
-        Ok(bytes) => bytes,
-        // The file grew past the checked size while it was read.
-        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
-            return Err(open_size_refusal(kind, &name));
-        }
-        Err(err) => return Err(open_failure("파일을 읽지 못했습니다", &canonical, &err)),
-    };
+    let (bytes, meta) = read_open_target(&canonical, kind, &name)?;
     // Metadata from before the read, hash of the bytes the editor receives: a change in between
     // makes the next save ask instead of silently overwriting.
     let fingerprint = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
@@ -587,6 +577,38 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     crate::os_recent::note_recent_document(app, &shown);
     close_empty_start_windows(app);
     Ok(OpenOutcome::OPENED)
+}
+
+fn read_open_target(
+    canonical: &Path,
+    kind: WindowKind,
+    name: &str,
+) -> Result<(Vec<u8>, fs::Metadata), String> {
+    if crate::pages_bundle_dir::is_pages_bundle_dir(canonical) {
+        let max_bytes = usize::try_from(kind.max_open_bytes()).unwrap_or(usize::MAX);
+        return match crate::pages_bundle_dir::read_pages_bundle_as_zip(canonical, max_bytes) {
+            Ok((bytes, meta)) => {
+                check_open_size(kind, bytes.len() as u64, name)?;
+                Ok((bytes, meta))
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                Err(open_size_refusal(kind, name))
+            }
+            Err(err) => Err(open_failure("파일을 읽지 못했습니다", canonical, &err)),
+        };
+    }
+    let (file, meta) = open_regular(canonical)
+        .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", canonical, &err))?;
+    check_open_size(kind, meta.len(), name)?;
+    let bytes = match read_within(file, kind.max_open_bytes(), meta.len()) {
+        Ok(bytes) => bytes,
+        // The file grew past the checked size while it was read.
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+            return Err(open_size_refusal(kind, name));
+        }
+        Err(err) => return Err(open_failure("파일을 읽지 못했습니다", canonical, &err)),
+    };
+    Ok((bytes, meta))
 }
 
 /// Reads at most `limit` bytes of `source` (`expected` is the size that was checked, for the
@@ -678,7 +700,7 @@ pub fn note_written(app: &AppHandle, label: &str, fingerprint: Option<Fingerprin
 /// unsupported kind. Everything else (flags such as `--smoke`, missing paths, directories) is ignored.
 pub fn launch_files(args: impl Iterator<Item = String>) -> Vec<PathBuf> {
     args.map(PathBuf::from)
-        .filter(|path| path.is_file())
+        .filter(|path| crate::pages_bundle_dir::is_openable_target(path))
         .collect()
 }
 
@@ -730,7 +752,7 @@ pub fn open_startup_files(app: &AppHandle, args: impl Iterator<Item = String>) -
 pub fn file_url_paths(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter_map(|url| url.to_file_path().ok())
-        .filter(|path| path.is_file())
+        .filter(|path| crate::pages_bundle_dir::is_openable_target(path))
         .collect()
 }
 

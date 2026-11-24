@@ -620,7 +620,7 @@ const DESKTOP_SHELL_PERMISSIONS = new Set(
 // app commands (no core/shell/fs/http/dialog permissions reach the WebView).
 // Extensions `WindowKind::for_extension` opens (crates/easyoffice-desktop/src/windows.rs).
 const DESKTOP_OPENABLE_EXTENSIONS = [
-  "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "hwp", "hwpx", "hwt", "hwtx",
+  "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "pages", "hwp", "hwpx", "hwt", "hwtx",
   "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp", "eobase", "eoboard", "pdf",
 ];
 const desktopConfigFull = path.join(ROOT, DESKTOP_SHELL_CONFIG);

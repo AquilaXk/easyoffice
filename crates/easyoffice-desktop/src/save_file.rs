@@ -230,14 +230,45 @@ pub struct Written {
     pub fingerprint: Option<Fingerprint>,
 }
 
+/// Rejects overwriting a directory (or a symlink pointing to a directory) before any temporary
+/// sibling file is created or renamed, so directory bundles like `.pages/` never risk data loss.
+fn reject_if_directory(path: &Path) -> Result<(), SaveError> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(_) => return Ok(()),
+    };
+    let is_dir = if meta.file_type().is_dir() {
+        true
+    } else if meta.file_type().is_symlink() {
+        if let Ok(canonical) = fs::canonicalize(path) {
+            ensure_safe_symlink_target(&canonical).map_err(|err| SaveError::from_io(path, &err))?;
+            fs::symlink_metadata(&canonical).is_ok_and(|target| target.file_type().is_dir())
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if is_dir {
+        let err = std::io::Error::new(
+            std::io::ErrorKind::IsADirectory,
+            "target path is a directory",
+        );
+        return Err(SaveError::from_io(path, &err));
+    }
+    Ok(())
+}
+
 /// Writes through a uniquely named sibling temporary file and renames it into place, so a failed
 /// write never leaves a truncated document where an existing one used to be, and two saves into the
 /// same folder never share a temporary file. `fs::rename` replaces an existing file on Windows too
 /// (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`). A symbolic link as `path` is saved through to
 /// its target.
 pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveError> {
+    reject_if_directory(path)?;
     let failed = |err: std::io::Error| SaveError::from_io(path, &err);
     let path = &resolve_link(path).map_err(failed)?;
+    reject_if_directory(path)?;
     let (tmp_path, tmp_file) = create_unique_sibling(path).map_err(failed)?;
     if let Err(err) = write_then_rename(&tmp_path, tmp_file, path, bytes) {
         let _ = fs::remove_file(&tmp_path);
@@ -379,6 +410,7 @@ pub fn save_in_place(
     bytes: &[u8],
     mut confirm_overwrite: impl FnMut(DiskState) -> bool,
 ) -> Result<InPlaceResult, SaveError> {
+    reject_if_directory(path)?;
     let mut asked_about = disk_view(path, expected);
     let mut questions = 0;
     while asked_about.state != DiskState::Unchanged {

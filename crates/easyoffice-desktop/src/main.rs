@@ -22,6 +22,7 @@ mod open_feedback;
 mod open_link;
 mod os_recent;
 mod page_screenshot;
+mod pages_bundle_dir;
 mod pdf_edit_annots;
 mod pdf_edit_attach;
 mod pdf_edit_budget;

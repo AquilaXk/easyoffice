@@ -79,11 +79,11 @@ impl RecentList {
             .map(|e| e.path.clone())
     }
 
-    /// Entries whose file still exists and has a supported kind, newest first.
+    /// Entries whose document still exists and has a supported kind, newest first.
     pub fn views(&self) -> Vec<RecentView> {
         self.entries
             .iter()
-            .filter(|e| e.path.is_file())
+            .filter(|e| crate::pages_bundle_dir::is_openable_target(&e.path))
             .filter_map(|e| {
                 let kind = WindowKind::for_path(&e.path)?;
                 Some(RecentView {

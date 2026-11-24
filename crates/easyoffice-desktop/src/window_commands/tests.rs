@@ -604,3 +604,58 @@ fn windows_symlinks_and_ntfs_junctions_open_save_and_refuse_sensitive_targets() 
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn launch_files_and_urls_accept_pages_bundle_directories_and_read_open_target_succeeds() {
+    let dir =
+        std::env::temp_dir().join(format!("easyoffice-open-pages-dir-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let plain_dir = dir.join("plain_folder");
+    let bundle_dir = dir.join("Report.PAGES");
+    fs::create_dir_all(&plain_dir).unwrap();
+    fs::create_dir_all(bundle_dir.join("Index")).unwrap();
+    fs::write(
+        bundle_dir.join("Index").join("Document.iwa"),
+        b"iwa-payload",
+    )
+    .unwrap();
+
+    let picked = launch_files(
+        [
+            plain_dir.to_string_lossy().into_owned(),
+            bundle_dir.to_string_lossy().into_owned(),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(picked, vec![bundle_dir.clone()]);
+
+    let urls = vec![
+        tauri::Url::from_file_path(&plain_dir).unwrap(),
+        tauri::Url::from_file_path(&bundle_dir).unwrap(),
+    ];
+    assert_eq!(file_url_paths(&urls), vec![bundle_dir.clone()]);
+
+    let target = OpenTarget::of(&bundle_dir).expect("safe pages dir");
+    let kind = WindowKind::for_path(&target.shown).unwrap();
+    assert_eq!(kind, WindowKind::Doc);
+    let (bytes, meta) = read_open_target(&target.canonical, kind, "Report.PAGES").expect("opens");
+    assert!(!bytes.is_empty());
+    let fp = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
+    assert_eq!(fp, Fingerprint::of(&target.canonical).unwrap());
+
+    // Recent list keeps `.pages/` directory entries and drops ordinary folders.
+    let mut recents = crate::recent::RecentList::default();
+    recents.add(plain_dir);
+    recents.add(bundle_dir.clone());
+    let views = recents.views();
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].name, "Report.PAGES");
+
+    // Empty bundle is rejected on open without leaking full directory path.
+    let empty_bundle = dir.join("empty.pages");
+    fs::create_dir_all(&empty_bundle).unwrap();
+    let err = read_open_target(&empty_bundle, WindowKind::Doc, "empty.pages").unwrap_err();
+    assert!(!err.contains(&dir.to_string_lossy().into_owned()), "{err}");
+
+    let _ = fs::remove_dir_all(&dir);
+}

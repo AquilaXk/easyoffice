@@ -158,3 +158,19 @@ test("a release package needs a non-empty signature file next to it", () => {
   fs.writeFileSync(`${deb}.sig`, "c2ln");
   assert.deepEqual(signatureProblems(deb), []);
 });
+
+test("the desktop template MimeType line matches REQUIRED_MIME_TYPES and includes hwt, hwtx, ppsx and pages (PD-336)", () => {
+  const rendered = render(template);
+  const line = rendered.split("\n").find((l) => l.startsWith("MimeType="));
+  assert.equal(line, `MimeType=${[...REQUIRED_MIME_TYPES.values()].join(";")};`);
+  for (const mime of [
+    "application/x-hwt",
+    "application/x-hwtx",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+    "application/x-iwork-pages-sffpages",
+  ]) {
+    assert.ok(line.includes(`${mime};`), mime);
+    const removed = rendered.replace(`${mime};`, "");
+    assert.match(checkDesktopEntry(removed).join("\n"), new RegExp(`MimeType must list ${mime.replaceAll(".", "\\.")}`));
+  }
+});

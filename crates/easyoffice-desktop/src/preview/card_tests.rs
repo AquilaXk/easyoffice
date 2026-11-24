@@ -696,3 +696,106 @@ fn a_named_pipe_has_no_preview_and_is_not_waited_for() {
     assert_eq!(found, Some(true));
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn pages_directory_bundle_extracts_thumbnail_and_renders_nested_index_zip() {
+    let dir = std::env::temp_dir().join(format!(
+        "easyoffice-preview-pages-dir-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+
+    // 1. Folder bundle with an embedded preview.jpg returns the thumbnail without drawing.
+    let thumb_bundle = dir.join("thumb.pages");
+    fs::create_dir_all(thumb_bundle.join("Index")).unwrap();
+    let jpg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0];
+    fs::write(thumb_bundle.join("preview.jpg"), &jpg).unwrap();
+    fs::write(thumb_bundle.join("Index").join("Document.iwa"), b"stub").unwrap();
+    let state = PreviewState::new();
+    let found = load_preview_with(&state, "00000000000000e1", &thumb_bundle, |_| {
+        panic!("embedded thumbnail should be returned without drawing")
+    })
+    .expect("thumbnail from folder bundle");
+    assert_eq!((found.mime, &found.bytes), ("image/jpeg", &jpg));
+
+    // 2. Folder bundle without thumbnail, using nested Index.zip, draws the first-page card.
+    let pages_zip = encode(DocumentFormat::Pages);
+    let entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &pages_zip,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    let doc_iwa = entries
+        .into_iter()
+        .find(|entry| entry.path == "Index/Document.iwa")
+        .expect("Index/Document.iwa")
+        .data;
+    let nested_index_zip =
+        easyoffice_formats::ZipArchiveCodec::pack(&[("Document.iwa".to_string(), doc_iwa)])
+            .unwrap();
+    let render_bundle = dir.join("nested.pages");
+    fs::create_dir_all(&render_bundle).unwrap();
+    fs::write(render_bundle.join("Index.zip"), nested_index_zip).unwrap();
+    let card_state = patient_state();
+    let rendered = drawn(&card_state, "00000000000000e2", &render_bundle);
+    assert_eq!(
+        (rendered.mime, png_size(&rendered.bytes)),
+        ("image/png", (480, 360))
+    );
+    assert!(
+        non_white(&rendered.bytes) > 0,
+        "rendered card must have ink"
+    );
+
+    // Cache hit on repeated request returns the cached thumbnail.
+    let again = load_preview_with(&card_state, "00000000000000e2", &render_bundle, |_| {
+        panic!("cached preview must not re-render")
+    })
+    .expect("cached preview");
+    assert_eq!(again.bytes, rendered.bytes);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn pages_directory_bundle_with_fifo_or_symlink_fails_without_blocking() {
+    use std::os::unix::fs::symlink;
+
+    let dir = std::env::temp_dir().join(format!(
+        "easyoffice-preview-pages-unsafe-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+
+    let fifo_bundle = dir.join("fifo.pages");
+    fs::create_dir_all(fifo_bundle.join("Data")).unwrap();
+    let pipe = fifo_bundle.join("Data").join("stream.pipe");
+    crate::named_pipe_support::make_pipe(&pipe);
+    let path_for_pipe = fifo_bundle.clone();
+    let non_blocking_none = crate::named_pipe_support::within_time(&pipe, move || {
+        load_preview_with(
+            &PreviewState::new(),
+            "00000000000000e3",
+            &path_for_pipe,
+            |_| Ok(PNG_1X1.to_vec()),
+        )
+        .is_none()
+    });
+    assert_eq!(non_blocking_none, Some(true));
+
+    let link_bundle = dir.join("link.pages");
+    fs::create_dir_all(&link_bundle).unwrap();
+    let outside = dir.join("secret.txt");
+    fs::write(&outside, b"secret").unwrap();
+    symlink(&outside, link_bundle.join("preview.jpg")).unwrap();
+    assert!(load_preview_with(
+        &PreviewState::new(),
+        "00000000000000e4",
+        &link_bundle,
+        |_| Ok(PNG_1X1.to_vec()),
+    )
+    .is_none());
+
+    let _ = fs::remove_dir_all(&dir);
+}

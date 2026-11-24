@@ -56,11 +56,20 @@ impl std::fmt::Display for SaveError {
 impl std::error::Error for SaveError {}
 
 /// The sentence for a kind of failure: full disk, missing permission (a read-only volume counts as
-/// one), else the generic sentence with the file name.
+/// one), directory target, else the generic sentence with the file name.
 fn reason_for(kind: ErrorKind, file_name: &str) -> String {
     match kind {
         ErrorKind::StorageFull | ErrorKind::QuotaExceeded => DISK_FULL.to_string(),
         ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => NO_PERMISSION.to_string(),
+        ErrorKind::IsADirectory => {
+            if file_name.is_empty() {
+                "폴더에는 덮어쓸 수 없습니다. 다른 이름으로 저장을 사용하세요.".to_string()
+            } else {
+                format!(
+                    "폴더({file_name})에는 덮어쓸 수 없습니다. 다른 이름으로 저장을 사용하세요."
+                )
+            }
+        }
         _ if file_name.is_empty() => "파일을 저장하지 못했습니다.".to_string(),
         _ => format!("파일을 저장하지 못했습니다 ({file_name})"),
     }
