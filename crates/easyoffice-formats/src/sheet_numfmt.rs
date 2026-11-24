@@ -8,7 +8,7 @@
 //!
 //! Reference implementation: the built-in table follows ECMA-376 18.8.30, the same list the
 //! reference format-code library carries (Apache-2.0, see `THIRD_PARTY_NOTICES.md`). Ids that
-//! name a locale-dependent code (14, 27..36, 50..58) are read with the Korean default of the
+//! name a locale-dependent code (5..8, 14, 27..36, 50..58) are read with the Korean default of the
 //! editor and never written, so a file opened elsewhere keeps its meaning.
 //!
 //! Untrusted input is bounded: a code is at most [`MAX_NUM_FMT_CODE_BYTES`] bytes with at most
@@ -35,6 +35,10 @@ const BUILTIN: &[(u16, &str)] = &[
     (2, "0.00"),
     (3, "#,##0"),
     (4, "#,##0.00"),
+    (5, "₩#,##0;-₩#,##0"),
+    (6, "₩#,##0;[Red]-₩#,##0"),
+    (7, "₩#,##0.00;-₩#,##0.00"),
+    (8, "₩#,##0.00;[Red]-₩#,##0.00"),
     (9, "0%"),
     (10, "0.00%"),
     (11, "0.00E+00"),
@@ -49,6 +53,16 @@ const BUILTIN: &[(u16, &str)] = &[
     (20, "h:mm"),
     (21, "h:mm:ss"),
     (22, "yyyy-mm-dd h:mm"),
+    (27, "yyyy\"년\" m\"월\""),
+    (28, "m\"월\" d\"일\""),
+    (29, "m\"월\" d\"일\""),
+    (30, "m-d-yy"),
+    (31, "yyyy\"년\" m\"월\" d\"일\""),
+    (32, "h\"시\" mm\"분\""),
+    (33, "h\"시\" mm\"분\" ss\"초\""),
+    (34, "[$-412]AM/PM h\"시\" mm\"분\""),
+    (35, "[$-412]AM/PM h\"시\" mm\"분\" ss\"초\""),
+    (36, "yyyy\"년\" m\"월\""),
     (37, "#,##0_);(#,##0)"),
     (38, "#,##0_);[Red](#,##0)"),
     (39, "#,##0.00_);(#,##0.00)"),
@@ -68,11 +82,20 @@ const BUILTIN: &[(u16, &str)] = &[
     (47, "mmss.0"),
     (48, "##0.0E+0"),
     (49, "@"),
+    (50, "yyyy\"년\" m\"월\""),
+    (51, "m\"월\" d\"일\""),
+    (52, "yyyy\"년\" m\"월\""),
+    (53, "m\"월\" d\"일\""),
+    (54, "m\"월\" d\"일\""),
+    (55, "[$-412]AM/PM h\"시\" mm\"분\""),
+    (56, "[$-412]AM/PM h\"시\" mm\"분\" ss\"초\""),
+    (57, "yyyy\"년\" m\"월\""),
+    (58, "m\"월\" d\"일\""),
 ];
 
 /// Ids whose code depends on the program's locale; they are read, never written.
 const fn is_locale_dependent(id: u16) -> bool {
-    id == 14 || (27 <= id && id <= 36) || (50 <= id && id <= 58)
+    (5 <= id && id <= 8) || id == 14 || (27 <= id && id <= 36) || (50 <= id && id <= 58)
 }
 
 /// Code of a built-in id; `None` for General (`0`), for an id the table does not define and for
@@ -260,9 +283,10 @@ mod tests {
         assert_eq!(ids, sorted, "binary search needs ascending ids");
         assert_eq!(builtin_code(2), Some("0.00"));
         assert_eq!(builtin_code(49), Some("@"));
-        assert_eq!(builtin_code(5), None);
+        assert_eq!(builtin_code(5), Some("₩#,##0;-₩#,##0"));
         assert_eq!(builtin_code(0), None);
-        assert!(is_known_builtin(0) && is_known_builtin(14) && !is_known_builtin(27));
+        assert!(is_known_builtin(0) && is_known_builtin(14) && is_known_builtin(27));
+        assert!(!is_known_builtin(23) && !is_known_builtin(59));
     }
 
     #[test]

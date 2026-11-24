@@ -141,7 +141,15 @@ fn bracket_and_bisect(guess: f64, f: &dyn Fn(f64) -> Fallible<f64>) -> Fallible<
             low
         };
         end = high;
-        let product = f(begin)? * f(end)?;
+        let fb = f(begin)?;
+        if fb.abs() <= SOLVER_EPS {
+            return Ok(begin);
+        }
+        let fe = f(end)?;
+        if fe.abs() <= SOLVER_EPS {
+            return Ok(end);
+        }
+        let product = fb * fe;
         if product.is_finite() && product <= 0.0 {
             bracketed = true;
             break;
@@ -554,4 +562,32 @@ fn compute_accrint(
     }
 
     Ok(par * rate / freq * acc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bracket_and_bisect_accepts_boundary_roots_before_product() {
+        let end_tangent = |x: f64| -> Fallible<f64> { Ok((x - 0.06).powi(2) + 1e-10) };
+        let root_end = bracket_and_bisect(0.05, &end_tangent).unwrap();
+        assert!((root_end - 0.06).abs() < 1e-9);
+
+        let begin_tangent = |x: f64| -> Fallible<f64> { Ok((x - 0.04).powi(2) + 1e-10) };
+        let root_begin = bracket_and_bisect(0.05, &begin_tangent).unwrap();
+        assert!((root_begin - 0.04).abs() < 1e-9);
+
+        let zero_times_inf = |x: f64| -> Fallible<f64> {
+            if (x - 0.06).abs() < 1e-12 {
+                Ok(0.0)
+            } else if x < 0.06 {
+                Ok(f64::INFINITY)
+            } else {
+                Ok(1.0)
+            }
+        };
+        let root_inf = bracket_and_bisect(0.05, &zero_times_inf).unwrap();
+        assert!((root_inf - 0.06).abs() < 1e-9);
+    }
 }

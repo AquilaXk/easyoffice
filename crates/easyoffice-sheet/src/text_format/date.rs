@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 
-use super::{FormattedText, Section, Tok};
+use super::{dbnum, FormattedText, Section, Tok};
 
 const MONTH_NAMES: [&str; 12] = [
     "January",
@@ -110,18 +110,35 @@ impl DateParts {
     }
 }
 
-fn push_year(out: &mut String, n: usize, y: i64) {
-    let _ = if n <= 2 {
-        write!(out, "{:02}", y % 100)
-    } else {
-        write!(out, "{y:04}")
-    };
+fn push_date_num(out: &mut String, n: i64, width: usize, dbnum: Option<u8>, korean: bool) {
+    match dbnum {
+        Some(dbnum::FULL_WIDTH) => {
+            let buf = format!("{n:0width$}");
+            out.push_str(&dbnum::map_digits(&buf, dbnum::FULL_WIDTH));
+        }
+        Some(kind) => {
+            let digits = n.to_string();
+            let omit_zero = kind == dbnum::HANGUL_KIND || korean;
+            out.push_str(&dbnum::integer(&digits, kind, omit_zero));
+        }
+        None => {
+            let _ = write!(out, "{n:0width$}");
+        }
+    }
 }
 
-fn push_month_name(out: &mut String, n: usize, mo: i64, korean: bool) {
+fn push_year(out: &mut String, n: usize, y: i64, dbnum: Option<u8>, korean: bool) {
+    if n <= 2 {
+        push_date_num(out, y % 100, 2, dbnum, korean);
+    } else {
+        push_date_num(out, y, 4, dbnum, korean);
+    }
+}
+
+fn push_month_name(out: &mut String, n: usize, mo: i64, dbnum: Option<u8>, korean: bool) {
     let idx = ((mo - 1).clamp(0, 11)) as usize;
     match n {
-        1 | 2 => push_padded(out, mo, n == 2),
+        1 | 2 => push_date_num(out, mo, if n == 2 { 2 } else { 1 }, dbnum, korean),
         _ if korean => {
             let _ = write!(out, "{}", idx + 1);
             if n != 5 {
@@ -134,13 +151,20 @@ fn push_month_name(out: &mut String, n: usize, mo: i64, korean: bool) {
     }
 }
 
-fn push_elapsed(out: &mut String, kind: char, width: usize, total_secs: i64) {
+fn push_elapsed(
+    out: &mut String,
+    kind: char,
+    width: usize,
+    total_secs: i64,
+    dbnum: Option<u8>,
+    korean: bool,
+) {
     let amount = match kind {
         'h' => total_secs / 3600,
         'm' => total_secs / 60,
         _ => total_secs,
     };
-    let _ = write!(out, "{amount:0width$}");
+    push_date_num(out, amount, width, dbnum, korean);
 }
 
 fn push_ampm(out: &mut String, tok: (bool, bool), hour: i64, korean: bool) {
@@ -163,17 +187,10 @@ fn push_ampm(out: &mut String, tok: (bool, bool), hour: i64, korean: bool) {
     }
 }
 
-fn push_padded(out: &mut String, n: i64, pad: bool) {
-    let _ = if pad {
-        write!(out, "{n:02}")
-    } else {
-        write!(out, "{n}")
-    };
-}
-
 pub(super) fn render(section: &Section, value: f64, out: &mut FormattedText) {
     let toks = &section.toks;
     let korean = section.korean;
+    let dbnum = section.dbnum;
     let parts = DateParts::new(toks, value);
     let prev_sig = |idx: usize| toks[..idx].iter().rev().find(|t| !matches!(t, Tok::Lit(_)));
     let next_sig = |idx: usize| {
@@ -187,28 +204,46 @@ pub(super) fn render(section: &Section, value: f64, out: &mut FormattedText) {
     let mut skip_frac = false;
     for (idx, t) in toks.iter().enumerate() {
         match t {
-            Tok::Year(n) => push_year(text, *n, parts.y),
+            Tok::Year(n) => push_year(text, *n, parts.y, dbnum, korean),
             Tok::Month(n) => {
                 let is_minute = matches!(prev_sig(idx), Some(Tok::Hour(_) | Tok::Elapsed('h', _)))
                     || matches!(next_sig(idx), Some(Tok::Second(_) | Tok::Elapsed('s', _)));
                 if is_minute {
-                    push_padded(text, parts.minute, *n >= 2);
+                    push_date_num(
+                        text,
+                        parts.minute,
+                        if *n >= 2 { 2 } else { 1 },
+                        dbnum,
+                        korean,
+                    );
                 } else {
-                    push_month_name(text, *n, parts.mo, korean);
+                    push_month_name(text, *n, parts.mo, dbnum, korean);
                 }
             }
             Tok::Day(n) => match n {
-                1 | 2 => push_padded(text, parts.d, *n == 2),
+                1 | 2 => push_date_num(text, parts.d, if *n == 2 { 2 } else { 1 }, dbnum, korean),
                 _ => push_day_name(text, *n, parts.weekday, korean),
             },
             Tok::KoDay(n) => push_day_name(text, *n, parts.weekday, true),
-            Tok::Hour(n) => push_padded(text, parts.display_hour(), *n >= 2),
+            Tok::Hour(n) => push_date_num(
+                text,
+                parts.display_hour(),
+                if *n >= 2 { 2 } else { 1 },
+                dbnum,
+                korean,
+            ),
             Tok::Second(n) => {
-                push_padded(text, parts.second, *n >= 2);
+                push_date_num(
+                    text,
+                    parts.second,
+                    if *n >= 2 { 2 } else { 1 },
+                    dbnum,
+                    korean,
+                );
                 skip_frac = parts.frac_digits > 0;
             }
             Tok::Elapsed(kind, n) => {
-                push_elapsed(text, *kind, *n, parts.total_secs);
+                push_elapsed(text, *kind, *n, parts.total_secs, dbnum, korean);
                 skip_frac = *kind == 's' && parts.frac_digits > 0;
             }
             Tok::AmPm(full, lower) => push_ampm(text, (*full, *lower), parts.hour, korean),

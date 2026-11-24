@@ -15,6 +15,7 @@ pub mod coercion;
 mod compile;
 mod criteria;
 mod dag;
+mod date_locale_parse;
 mod date_system;
 mod deadline;
 mod dyn_reads;

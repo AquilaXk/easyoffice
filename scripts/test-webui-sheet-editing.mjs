@@ -499,3 +499,83 @@ test("sheet-grid packRef, COL_NAMES cache, getTdAt, and paintSelectionRange upda
   }
 });
 
+test("Alt+Enter inserts a newline at the caret during cell edit without committing or moving", async () => {
+  const selection = {
+    ranges: [],
+    get rangeCount() {
+      return this.ranges.length;
+    },
+    getRangeAt(i) {
+      return this.ranges[i];
+    },
+    removeAllRanges() {
+      this.ranges = [];
+    },
+    addRange(r) {
+      this.ranges = [r];
+    },
+  };
+  const { document } = await openSheet({ selection });
+  const a9 = cell(document, "A9");
+  a9.focus();
+  typeText(document, "abcdef");
+  // Place caret between "abc" and "def".
+  const r1 = document.createRange();
+  r1.setStart(a9.firstChild, 3);
+  r1.setEnd(a9.firstChild, 3);
+  selection.addRange(r1);
+
+  const notPrevented = key(a9, "Enter", { altKey: true });
+  assert.equal(notPrevented, false, "Alt+Enter must prevent default submit");
+  assert.equal(activeRef(document), "A9", "Alt+Enter keeps active cell");
+  assert.equal(a9.classList.contains("editing"), true, "Alt+Enter stays in editing mode");
+  assert.equal(a9.textContent, "abc\ndef", "Alt+Enter inserts newline at caret");
+  assert.equal(selection.rangeCount, 1);
+  assert.equal(selection.getRangeAt(0).startOffset, 4, "caret moves immediately past inserted newline");
+  assert.equal(document.getElementById("formula-input").value, "abc\ndef");
+
+  // Selection outside the edited cell falls back to appending at the end.
+  const other = cell(document, "B9");
+  other.textContent = "other";
+  const outsideRange = document.createRange();
+  outsideRange.setStart(other.firstChild, 1);
+  outsideRange.setEnd(other.firstChild, 1);
+  selection.addRange(outsideRange);
+
+  key(a9, "Enter", { altKey: true });
+  assert.equal(a9.textContent, "abc\ndef\n", "outside selection appends newline at end");
+
+  key(a9, "Enter");
+  await flushAsyncTurns();
+  assert.equal(activeRef(document), "A10");
+  assert.equal(cell(document, "A9").textContent, "abc\ndef");
+});
+
+test("Ctrl+Enter and Cmd+Enter commit in place without moving to the next cell", async () => {
+  const { document } = await openSheet();
+  const b3 = cell(document, "B3");
+  b3.focus();
+  typeText(document, "420");
+
+  const notPreventedCtrl = key(b3, "Enter", { ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(notPreventedCtrl, false);
+  assert.equal(activeRef(document), "B3", "Ctrl+Enter does not move away from B3");
+  assert.equal(document.activeElement, cell(document, "B3"), "focus remains on B3");
+  assert.equal(cell(document, "B3").textContent, "420");
+  assert.equal(cell(document, "B3").classList.contains("editing"), false, "editing finishes");
+
+  key(cell(document, "B3"), "ArrowDown");
+  assert.equal(activeRef(document), "B4", "arrow navigation resumes from B3");
+
+  const b4 = cell(document, "B4");
+  typeText(document, "=B3+1");
+  const notPreventedMeta = key(b4, "Enter", { metaKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(notPreventedMeta, false);
+  assert.equal(activeRef(document), "B4", "Cmd+Enter does not move away from B4");
+  assert.equal(document.activeElement, cell(document, "B4"), "focus remains on B4");
+  assert.equal(cell(document, "B4").dataset.formula, "=B3+1");
+  assert.equal(cell(document, "B4").textContent, "421");
+});
+

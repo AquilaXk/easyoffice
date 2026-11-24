@@ -63,6 +63,8 @@ struct Formula<'a> {
     body: Cow<'a, str>,
     /// The `ref` of an array formula (`t="array"`): the cells its results fill.
     array_ref: Option<Cow<'a, str>>,
+    /// Whether `<c>` carries a `cm` metadata index attribute (dynamic array spill marker).
+    has_cm: bool,
 }
 
 /// Fields of the `c` element being read.
@@ -74,6 +76,7 @@ struct CellState<'a> {
     inline: Cow<'a, str>,
     phonetic: Option<Box<PhoneticScan>>,
     has_inline: bool,
+    has_cm: bool,
     phonetic_depth: usize,
     capture: Capture,
 }
@@ -240,7 +243,8 @@ impl<'s> SheetScanner<'s> {
         attrs: &Attrs<'a>,
         empty: bool,
     ) -> Result<Option<CellState<'a>>, EasyOfficeError> {
-        let (mut a1, mut row, mut col, mut cell_type, mut style) = (None, None, None, None, None);
+        let (mut a1, mut row, mut col, mut cell_type, mut style, mut has_cm) =
+            (None, None, None, None, None, false);
         for (name, value) in attrs.iter_raw() {
             let slot = match plain_name(name) {
                 "r" => &mut a1,
@@ -248,6 +252,10 @@ impl<'s> SheetScanner<'s> {
                 "col" => &mut col,
                 "t" => &mut cell_type,
                 "s" => &mut style,
+                "cm" => {
+                    has_cm = true;
+                    continue;
+                }
                 _ => continue,
             };
             slot.get_or_insert_with(|| unescape_cow(value));
@@ -278,6 +286,7 @@ impl<'s> SheetScanner<'s> {
             inline: Cow::Borrowed(""),
             phonetic: None,
             has_inline: false,
+            has_cm,
             phonetic_depth: 0,
             capture: Capture::None,
         }))
@@ -438,6 +447,7 @@ impl<'s> SheetScanner<'s> {
                     index: index.and_then(|s| s.trim().parse::<u32>().ok()),
                     body: Cow::Borrowed(""),
                     array_ref: array_ref.filter(|_| is_array),
+                    has_cm: cell.has_cm,
                 });
                 cell.capture = Capture::Formula;
             }
@@ -615,8 +625,16 @@ impl<'s> SheetScanner<'s> {
 
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
         let (row, col) = cell.pos;
-        if let Some(reference) = cell.formula.as_ref().and_then(|f| f.array_ref.as_deref()) {
-            self.record_spill(row, col, reference)?;
+        if let Some(formula) = cell.formula.as_ref() {
+            if let Some(reference) = formula.array_ref.as_deref() {
+                if formula.has_cm
+                    || crate::sheet_styling::xlsx_array_kind::is_dynamic_array_formula(
+                        &formula.body,
+                    )
+                {
+                    self.record_spill(row, col, reference)?;
+                }
+            }
         }
         if let Some((text, kind, phonetic)) = self.cell_text(cell)? {
             if self.want_styling {

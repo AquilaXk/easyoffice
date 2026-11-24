@@ -4,6 +4,8 @@
 
 /// `DBNum3`: positional full-width digits, no place units.
 pub(super) const FULL_WIDTH: u8 = 3;
+/// `DBNum4`: Hangul numerals (always omits interior zeros).
+pub(super) const HANGUL_KIND: u8 = 4;
 
 /// Integer parts longer than this fall back to digit-by-digit glyphs (four-digit groups with a
 /// named unit end at `京`).
@@ -64,7 +66,9 @@ pub(super) fn map_digits(s: &str, kind: u8) -> String {
 }
 
 /// Spells an integer (ASCII digits, may be empty) for kinds 1, 2 and 4.
-pub(super) fn integer(digits: &str, kind: u8) -> String {
+/// When `omit_middle_zero` is true (`DBNum4` or Korean `[$-412]`), interior `0` digits are
+/// skipped rather than inserting `'零'`/`'영'` (`2026` -> `이천이십육` / `二千二十六`).
+pub(super) fn integer(digits: &str, kind: u8, omit_middle_zero: bool) -> String {
     if digits.len() > MAX_UNIT_DIGITS {
         return map_digits(digits, kind);
     }
@@ -77,7 +81,9 @@ pub(super) fn integer(digits: &str, kind: u8) -> String {
         let d = (b - b'0') as usize;
         let in_group = pos % GROUP_DIGITS;
         if d == 0 {
-            pending_zero = !out.is_empty();
+            if !omit_middle_zero {
+                pending_zero = !out.is_empty();
+            }
         } else {
             if pending_zero {
                 out.push_str(g.digits[0]);
@@ -105,12 +111,12 @@ fn group_is_nonzero(bytes: &[u8], pos: usize) -> bool {
 
 /// A rendered plain number (`123`, `4.56`, `1E+20`): unit-spelled integer part for kinds 1, 2
 /// and 4, digit-by-digit glyphs for the fraction, exponent and kind 3.
-pub(super) fn number_text(text: &str, kind: u8) -> String {
+pub(super) fn number_text(text: &str, kind: u8, omit_middle_zero: bool) -> String {
     let (int_part, frac_part) = text.split_once('.').unwrap_or((text, ""));
     if kind == FULL_WIDTH || !int_part.bytes().all(|b| b.is_ascii_digit()) {
         return map_digits(text, kind);
     }
-    let mut out = integer(int_part, kind);
+    let mut out = integer(int_part, kind, omit_middle_zero);
     if !frac_part.is_empty() {
         out.push('.');
         out.push_str(&map_digits(frac_part, kind));

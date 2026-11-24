@@ -110,7 +110,7 @@
   }
 
   // Port of getCurrencyFormat.
-  function currencyFormat(symbol = DEFAULT_CURRENCY, digits = 2) {
+  function currencyFormat(symbol = DEFAULT_CURRENCY, digits = symbol === DEFAULT_CURRENCY ? 0 : 2) {
     const n = Math.min(Math.max(0, digits), MAX_DECIMALS);
     const decimal = n > 0 ? "." + "0".repeat(n) : "";
     return `"${symbol}"#,##0${decimal}_);[Red]("${symbol}"#,##0${decimal})`;
@@ -123,9 +123,9 @@
     { id: "number", label: "숫자", code: "0" },
     { id: "percent", label: "백분율", code: "0.00%" },
     { id: "scientific", label: "지수", code: "0.00E+00" },
-    { id: "accounting", label: "회계", code: `"${DEFAULT_CURRENCY}" #,##0.00_);[Red]("${DEFAULT_CURRENCY}"#,##0.00)` },
+    { id: "accounting", label: "회계", code: `"${DEFAULT_CURRENCY}" #,##0_);[Red]("${DEFAULT_CURRENCY}"#,##0)` },
     { id: "financial", label: "재무", code: "#,##0.00;[Red]#,##0.00" },
-    { id: "currency", label: "통화", code: currencyFormat(DEFAULT_CURRENCY, 2) },
+    { id: "currency", label: "통화", code: currencyFormat(DEFAULT_CURRENCY) },
     { id: "rounding-currency", label: "통화(정수)", code: `"${DEFAULT_CURRENCY}"#,##0;[Red]"${DEFAULT_CURRENCY}"#,##0` },
     { id: "date", label: "날짜", code: "yyyy-mm-dd;@" },
     { id: "time", label: "시간", code: 'am/pm h":"mm":"ss' },

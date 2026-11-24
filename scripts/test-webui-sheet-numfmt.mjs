@@ -18,8 +18,11 @@ test("the presets keep the reference menu order and codes", () => {
     ["general", "text", "number", "percent", "scientific", "accounting", "financial", "currency", "rounding-currency", "date", "time", "datetime", "duration"]
   );
   assert.equal(N.presetById("percent").code, "0.00%");
-  assert.equal(N.presetById("currency").code, '"₩"#,##0.00_);[Red]("₩"#,##0.00)');
-  assert.equal(N.presetById("accounting").code, '"₩" #,##0.00_);[Red]("₩"#,##0.00)');
+  assert.equal(N.presetById("currency").code, '"₩"#,##0_);[Red]("₩"#,##0)');
+  assert.equal(N.presetById("accounting").code, '"₩" #,##0_);[Red]("₩"#,##0)');
+  assert.equal(N.currencyFormat(), '"₩"#,##0_);[Red]("₩"#,##0)');
+  assert.equal(N.currencyFormat("₩", 2), '"₩"#,##0.00_);[Red]("₩"#,##0.00)');
+  assert.equal(N.currencyFormat("$"), '"$"#,##0.00_);[Red]("$"#,##0.00)');
   assert.equal(N.currencyFormat("$", 0), '"$"#,##0_);[Red]("$"#,##0)');
 });
 

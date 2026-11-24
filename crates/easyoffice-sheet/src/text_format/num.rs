@@ -167,6 +167,11 @@ fn digit_placeholders(tokens: &[Tok]) -> Vec<char> {
         .collect()
 }
 
+#[inline]
+fn omit_middle_zero(kind: u8, korean: bool) -> bool {
+    kind == dbnum::HANGUL_KIND || korean
+}
+
 /// Appends `s` with ASCII digits replaced by the section's `DBNum` glyphs (no-op without one).
 fn push_digits(out: &mut FormattedText, s: &str, dbnum: Option<u8>) {
     match dbnum {
@@ -176,10 +181,14 @@ fn push_digits(out: &mut FormattedText, s: &str, dbnum: Option<u8>) {
 }
 
 /// `General` text; `DBNum` kinds spell the integer part and map the fraction digits.
-fn push_general(out: &mut FormattedText, value: f64, dbnum: Option<u8>) {
+fn push_general(out: &mut FormattedText, value: f64, dbnum: Option<u8>, korean: bool) {
     let text = format_general_number(value);
     match dbnum {
-        Some(kind) => out.push_str(&dbnum::number_text(&text, kind)),
+        Some(kind) => out.push_str(&dbnum::number_text(
+            &text,
+            kind,
+            omit_middle_zero(kind, korean),
+        )),
         None => out.push_str(&text),
     }
 }
@@ -187,7 +196,7 @@ fn push_general(out: &mut FormattedText, value: f64, dbnum: Option<u8>) {
 fn render_general(section: &Section, value: f64, out: &mut FormattedText) {
     for t in &section.toks {
         match t {
-            Tok::General | Tok::At => push_general(out, value, section.dbnum),
+            Tok::General | Tok::At => push_general(out, value, section.dbnum, section.korean),
             Tok::Lit(s) => out.push_str(s),
             Tok::Percent => out.push('%'),
             Tok::Dot => out.push('.'),
@@ -353,7 +362,11 @@ fn int_block(section: &Section, plan: &NumPlan, int_digits: &str) -> Option<Stri
         } else {
             int_digits
         };
-        return Some(dbnum::integer(digits, kind));
+        return Some(dbnum::integer(
+            digits,
+            kind,
+            omit_middle_zero(kind, section.korean),
+        ));
     }
     if !plan.grouping {
         return None;
@@ -407,7 +420,7 @@ fn emit_digits(
                 in_exponent = true;
                 push_exponent(out, *plus, lay.exponent, plan.exp_min_len.unwrap_or(0));
             }
-            Tok::General | Tok::At => push_general(out, value, dbnum),
+            Tok::General | Tok::At => push_general(out, value, dbnum, section.korean),
             _ => {}
         }
     }

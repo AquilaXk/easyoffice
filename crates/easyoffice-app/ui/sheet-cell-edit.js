@@ -128,9 +128,10 @@
       if (keepFocus) refreshFocusedSheetCellPendingSnapshot();
     }
 
-    async function recalcAfterCellEdit(td, editSheet, keepFocus) {
+    async function recalcAfterCellEdit(td, editSheet, keepFocus, updateFocusedDisplay) {
       await recalculateActiveSheetFormulas({
         editedRef: isFormulaStr(td.dataset.formula || "") ? td.dataset.cell : null,
+        updateFocusedDisplay,
       });
       if (keepFocus && document.activeElement === td && !sheetCellFocusState.get(td)?.userEdited) {
         syncSheetCellFocusBaseline(td, true);
@@ -144,10 +145,10 @@
 
     // An entry under a data validation waits for the engine's verdict; a refused entry takes the
     // old value back before the ordinary commit runs.
-    function commitSheetCellEdit(td, keepFocus) {
+    function commitSheetCellEdit(td, keepFocus, updateFocusedDisplay = false) {
       const st = sheetCellFocusState.get(td);
       const gate = getRulesUi()?.gateEntry(td, st) ?? null;
-      if (!gate) return commitSheetCellEditNow(td, keepFocus);
+      if (!gate) return commitSheetCellEditNow(td, keepFocus, updateFocusedDisplay);
       return trackSheetAsyncWork(
         gate.then((accepted) => {
           if (!accepted) {
@@ -155,12 +156,12 @@
             td._ct = st.initialCt || "";
             grid.setDisplayValue(td, st.initialText);
           }
-          return commitSheetCellEditNow(td, keepFocus);
+          return commitSheetCellEditNow(td, keepFocus, updateFocusedDisplay);
         })
       );
     }
 
-    function commitSheetCellEditNow(td, keepFocus) {
+    function commitSheetCellEditNow(td, keepFocus, updateFocusedDisplay = false) {
       const st = sheetCellFocusState.get(td);
       if (!st || st.sheetName !== getActiveSheetName()) {
         if (!keepFocus) sheetCellFocusState.delete(td);
@@ -188,7 +189,7 @@
       if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, nextValue);
       sheetDataStore[editSheet] = snapshotDomSheetCells();
       if (edited) autoLink(editSheet, td.dataset.cell, true);
-      return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus));
+      return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus, updateFocusedDisplay));
     }
 
     // `target` is the sheet the window switches to: a formula that waits for a reference goes on there instead of being entered.

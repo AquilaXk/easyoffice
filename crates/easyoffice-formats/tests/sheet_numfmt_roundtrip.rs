@@ -204,7 +204,7 @@ fn hostile_codes_read_as_general_and_are_counted() {
     );
     let xfs = concat!(
         "<xf numFmtId=\"164\" fontId=\"0\"/><xf numFmtId=\"165\" fontId=\"0\"/><xf numFmtId=\"166\" fontId=\"0\"/>",
-        "<xf numFmtId=\"27\" fontId=\"0\"/><xf numFmtId=\"999\" fontId=\"0\"/>"
+        "<xf numFmtId=\"23\" fontId=\"0\"/><xf numFmtId=\"999\" fontId=\"0\"/>"
     );
     let bytes = xlsx_with_styles(&style_sheet(&numfmts, xfs));
     let styling = &read_sheet_styling(&bytes, DocumentFormat::Xlsx).unwrap()[0].1;

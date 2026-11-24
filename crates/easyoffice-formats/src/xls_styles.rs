@@ -265,11 +265,14 @@ impl XlsStyleReader {
         if format == 0 {
             return 0;
         }
-        let code = if format < CUSTOM_BASE {
-            builtin_code(format).or_else(|| self.formats.get(&format).map(String::as_str))
-        } else {
-            self.formats.get(&format).map(String::as_str)
-        };
+        // A workbook FORMAT record overrides any built-in fallback (MS-XLS 2.4.126, e.g. 5..=8).
+        let code = self.formats.get(&format).map(String::as_str).or_else(|| {
+            if format < CUSTOM_BASE {
+                builtin_code(format)
+            } else {
+                None
+            }
+        });
         match code {
             Some(code) => self.num_fmts.intern(code),
             None => {
@@ -873,8 +876,8 @@ mod tests {
 
     #[test]
     fn a_format_index_that_names_no_code_is_counted_and_reads_as_general() {
-        // 27 is a locale built-in this reader does not define; 200 has no FORMAT record.
-        let mut r = reader(&[8], &[xf_with_format(27), xf_with_format(200)]);
+        // 23 is an undefined id below CUSTOM_BASE; 200 has no FORMAT record.
+        let mut r = reader(&[8], &[xf_with_format(23), xf_with_format(200)]);
         r.record(NUMBER, &cell(0, 0, 0), true);
         r.record(NUMBER, &cell(0, 1, 1), true);
         r.end_sheet();

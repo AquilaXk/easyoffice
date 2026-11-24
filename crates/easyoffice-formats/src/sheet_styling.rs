@@ -82,6 +82,8 @@ pub(crate) mod structured_edit;
 pub(crate) mod structured_ref;
 #[path = "table_style.rs"]
 pub(crate) mod table_style;
+#[path = "xlsx_array_kind.rs"]
+pub(crate) mod xlsx_array_kind;
 #[path = "xlsx_bounds.rs"]
 pub(crate) mod xlsx_bounds;
 #[path = "xlsx_charts.rs"]

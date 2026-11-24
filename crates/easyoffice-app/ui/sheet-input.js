@@ -186,10 +186,10 @@
       if (vp && typeof vp.focus === "function") vp.focus({ preventScroll: true });
     }
 
-    function commitIfEditing() {
+    function commitIfEditing(keepFocus = false) {
       const ae = document.activeElement;
       const td = gridTdOf(ae);
-      if (td && isEditing(stateOf(td))) api.commitSheetCellEdit(td, false).catch(() => {});
+      if (td && isEditing(stateOf(td))) api.commitSheetCellEdit(td, keepFocus, keepFocus).catch(() => {});
     }
 
     // Whether a click or a move may land on the cell: a protected sheet can keep locked or unlocked cells from
@@ -361,14 +361,91 @@
     }
 
     // ---- edit modes ------------------------------------------------------------------------
+    function setCaretAtOffset(td, offset) {
+      const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
+      if (!selObj || typeof document.createRange !== "function") return;
+      const range = document.createRange();
+      const node = td.firstChild;
+      if (node && node.nodeType === 3) {
+        const pos = Math.max(0, Math.min(offset, (node.textContent || "").length));
+        range.setStart(node, pos);
+        range.setEnd(node, pos);
+      } else if (typeof range.selectNodeContents === "function") {
+        range.selectNodeContents(td);
+        range.collapse?.(false);
+      } else {
+        const end = (td.childNodes || []).length;
+        range.setStart(td, end);
+        range.setEnd(td, end);
+      }
+      selObj.removeAllRanges?.();
+      selObj.addRange?.(range);
+    }
+
     function placeCaret(td) {
       const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
       if (!selObj || typeof document.createRange !== "function") return;
       const range = document.createRange();
-      range.selectNodeContents(td);
-      range.collapse(false);
-      selObj.removeAllRanges();
-      selObj.addRange(range);
+      if (typeof range.selectNodeContents === "function") {
+        range.selectNodeContents(td);
+        range.collapse?.(false);
+        selObj.removeAllRanges?.();
+        selObj.addRange?.(range);
+      } else {
+        setCaretAtOffset(td, (td.textContent || "").length);
+      }
+    }
+
+    function textOffsetIn(root, target, offset) {
+      if (target === root) {
+        let acc = 0;
+        const limit = Math.min(offset, (root.childNodes || []).length);
+        for (let i = 0; i < limit; i += 1) acc += (root.childNodes[i].textContent || "").length;
+        return acc;
+      }
+      let acc = 0;
+      let found = false;
+      const walkNodes = (el) => {
+        for (const child of el.childNodes || []) {
+          if (found) return;
+          if (child === target) {
+            found = true;
+            if (child.nodeType === 3) {
+              acc += Math.max(0, Math.min(offset, (child.textContent || "").length));
+            } else {
+              const limit = Math.min(offset, (child.childNodes || []).length);
+              for (let i = 0; i < limit; i += 1) acc += (child.childNodes[i].textContent || "").length;
+            }
+            return;
+          }
+          if (child.nodeType === 3) acc += (child.textContent || "").length;
+          else walkNodes(child);
+        }
+      };
+      walkNodes(root);
+      return found ? acc : null;
+    }
+
+    function insertNewlineAtCaret(td) {
+      const raw = td.textContent || "";
+      let startPos = raw.length;
+      let endPos = raw.length;
+      const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
+      if (selObj && selObj.rangeCount > 0) {
+        const range = selObj.getRangeAt(0);
+        if (range?.startContainer && range?.endContainer && td.contains(range.startContainer) && td.contains(range.endContainer)) {
+          const s = textOffsetIn(td, range.startContainer, range.startOffset);
+          const e = textOffsetIn(td, range.endContainer, range.endOffset);
+          if (s !== null && e !== null) {
+            startPos = Math.min(s, e);
+            endPos = Math.max(s, e);
+          }
+        }
+      }
+      td.textContent = raw.slice(0, startPos) + "\n" + raw.slice(endPos);
+      setCaretAtOffset(td, startPos + 1);
+      onInput(td);
+      editBox.fit(td);
     }
 
     // A locked cell of a protected sheet is not typed into: the status line says why.
@@ -535,7 +612,20 @@
       moveBy(dr, dc, { extend: !editing && ev.shiftKey, jump: !editing && mod });
     }
 
-    function handleEnterTab(ev, editing) {
+    function handleEnterTab(ev, editing, targetTd) {
+      if (editing && ev.key === "Enter") {
+        if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+          ev.preventDefault();
+          const td = targetTd || gridTdOf(document.activeElement) || tdAt(sel.ar, sel.ac);
+          if (td) insertNewlineAtCaret(td);
+          return;
+        }
+        if ((ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+          ev.preventDefault();
+          commitIfEditing(true);
+          return;
+        }
+      }
       ev.preventDefault();
       if (editing) commitIfEditing();
       const dr = ev.key === "Enter" ? (ev.shiftKey ? -1 : 1) : 0;
@@ -591,7 +681,7 @@
         return;
       }
       if (ARROWS[ev.key]) return handleArrow(ev, st, editing);
-      if (ev.key === "Enter" || ev.key === "Tab") return handleEnterTab(ev, editing);
+      if (ev.key === "Enter" || ev.key === "Tab") return handleEnterTab(ev, editing, td);
       if (ev.key === "Escape") return handleEscapeKey(ev, editing, td);
       if (ev.key === "F2" && td) {
         ev.preventDefault();

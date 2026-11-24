@@ -1,15 +1,14 @@
 //! Date, time, and cell-inspection functions, including `WORKDAY.INTL` and `NETWORKDAYS.INTL`
 //! backed by a 7-bit `u8` weekend bitmask (reference implementation: MIT License, Copyright (c) Sutoiku, Inc.; see `THIRD_PARTY_NOTICES.md`).
 
-use crate::date_system::{from_1900, in_date_1904, to_1900, SERIAL_1904_OFFSET};
+use crate::date_locale_parse::{local_ymd_hms, parse_date_serial_locale, parse_time_serial_locale};
+use crate::date_system::{from_1900, in_date_1904, to_1900};
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 /// 9999-12-31 in the 1900 system (the 1904 system ends 1,462 days earlier: `max_serial`).
 const MAX_SERIAL_1900: i64 = 2_958_465;
 const SECONDS_PER_DAY: i64 = 86_400;
 const MONTHS_PER_YEAR: i64 = 12;
-const EXCEL_EPOCH_DAYS: f64 = 25_569.0;
-const FALLBACK_UNIX_SECS: u64 = 1_704_067_200;
 const MAX_NETWORKDAYS_SPAN: i64 = 1_000_000;
 const MONTH_BOUNDS: (f64, f64) = (-1_000_000.0, 1_000_000.0);
 const DAY_BOUNDS: (f64, f64) = (-100_000_000.0, 100_000_000.0);
@@ -150,21 +149,12 @@ fn datedif_diff(unit: &str, s1: i64, s2: i64) -> Option<i64> {
 
 fn date_today_now(is_today: bool, args: &[Expr]) -> Result<EvaluatedCellValue, FormulaError> {
     check_date_arity(args, 0, 0)?;
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(FALLBACK_UNIX_SECS);
-    let epoch = EXCEL_EPOCH_DAYS
-        - if in_date_1904() {
-            SERIAL_1904_OFFSET as f64
-        } else {
-            0.0
-        };
-    let days = epoch + ((secs / SECONDS_PER_DAY as u64) as f64);
+    let (y, m, d, h, min, s) = local_ymd_hms();
+    let days = serial_from_civil(y, m, d) as f64;
     number(if is_today {
         days
     } else {
-        days + ((secs % SECONDS_PER_DAY as u64) as f64) / SECONDS_PER_DAY as f64
+        days + ((h * 3600 + min * 60 + s) as f64) / SECONDS_PER_DAY as f64
     })
 }
 
@@ -246,7 +236,7 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_date_arity(args, 1, 1)?;
         let serial = self.arg_i64(&args[0], serial_bounds_from_zero(), true, ctx, depth)?;
-        let (y, m, d) = if serial == 0 {
+        let (y, m, d) = if serial == 0 && !in_date_1904() {
             (1900, 1, 0)
         } else {
             civil_from_serial(serial)
@@ -361,7 +351,11 @@ impl SheetEngine {
         let months = self.arg_i64(&args[1], MONTH_BOUNDS, false, ctx, depth)?;
         let (y, m, d) = civil_from_serial(start_s);
         let (ny, nm) = shift_year_month(y, m, months)?;
-        let max_d = days_in_month(ny, nm);
+        let max_d = if ny == 1900 && nm == 2 {
+            28
+        } else {
+            days_in_month(ny, nm)
+        };
         let nd = if end_of_month { max_d } else { d.min(max_d) };
         let serial = serial_from_civil(ny, nm, nd);
         if !(1..=max_serial()).contains(&serial) {
@@ -380,7 +374,7 @@ impl SheetEngine {
         let EvaluatedCellValue::Text(s) = self.eval_arg_val(&args[0], ctx, depth)? else {
             return Err(FormulaError::Value);
         };
-        parse_iso_date_serial(&s)
+        parse_date_serial_locale(&s)
             .map(EvaluatedCellValue::Number)
             .ok_or(FormulaError::Value)
     }
@@ -395,7 +389,7 @@ impl SheetEngine {
         let EvaluatedCellValue::Text(s) = self.eval_arg_val(&args[0], ctx, depth)? else {
             return Err(FormulaError::Value);
         };
-        parse_time_serial(&s)
+        parse_time_serial_locale(&s)
             .map(EvaluatedCellValue::Number)
             .ok_or(FormulaError::Value)
     }
@@ -687,42 +681,6 @@ impl SheetEngine {
             _ => Err(FormulaError::Name),
         }
     }
-}
-
-fn parse_time_serial(s: &str) -> Option<f64> {
-    let mut t = s.trim();
-    if let Some((date_part, rest)) = t.split_once(' ') {
-        if parse_iso_date_serial(date_part).is_some() {
-            t = rest.trim();
-        }
-    }
-    let up = t.to_ascii_uppercase();
-    let (body, ampm) = if let Some(b) = up.strip_suffix("AM") {
-        (b.trim(), Some(false))
-    } else if let Some(b) = up.strip_suffix("PM") {
-        (b.trim(), Some(true))
-    } else {
-        (up.as_str(), None)
-    };
-    let mut parts = body.split(':');
-    let mut h: u32 = parts.next()?.trim().parse().ok()?;
-    let m: u32 = parts.next()?.trim().parse().ok()?;
-    let sec: f64 = match parts.next() {
-        Some(sp) => sp.trim().parse().ok()?,
-        None => 0.0,
-    };
-    if parts.next().is_some() || m >= 60 || !sec.is_finite() || !(0.0..60.0).contains(&sec) {
-        return None;
-    }
-    if let Some(is_pm) = ampm {
-        if !(1..=12).contains(&h) {
-            return None;
-        }
-        h = (h % 12) + if is_pm { 12 } else { 0 };
-    } else if h >= 24 {
-        return None;
-    }
-    Some((h as f64 * 3600.0 + m as f64 * 60.0 + sec) / SECONDS_PER_DAY as f64)
 }
 
 pub(crate) fn day_count_and_year_basis(d1: i64, d2: i64, basis: i64) -> (f64, f64) {
