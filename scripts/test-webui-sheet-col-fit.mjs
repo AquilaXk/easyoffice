@@ -164,7 +164,7 @@ async function open() {
     if (tag === "canvas") el.getContext = () => ({ font: "", measureText(t) { return { width: [...t].length * (this.font.includes("600") ? 9 : 8) }; } });
     return el;
   };
-  win.getComputedStyle = () => ({ fontFamily: "sans-serif", fontSize: "13px" });
+  win.getComputedStyle = () => ({ fontFamily: "'맑은 고딕', 'Malgun Gothic', sans-serif", fontSize: "11pt" });
   switchModule(d, "SHEET");
   await flushAsyncTurns();
   await pickFile(d, makeFixtureFile("맞춤.xlsx", MODEL));

@@ -345,6 +345,8 @@
   #eo-print-root .eo-print-chart { position: absolute; pointer-events: none; z-index: 2; }
   #eo-print-root .eo-print-image { position: absolute; pointer-events: none; z-index: 2; object-fit: fill; }
   #eo-print-root .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
+  #eo-print-root .eo-print-sheet-page .eo-print-sheet { font-family: var(--sheet-cell-font-family); font-size: var(--sheet-cell-font-size); }
+  #eo-print-root .eo-print-sheet-page .eo-print-sheet td.eo-print-head { font-family: var(--font-family-ui); font-size: 12px; }
   #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
   #eo-print-root .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
   #eo-print-root .base-print-page { box-sizing: border-box; padding: 10mm; }
@@ -670,6 +672,8 @@
 .print-preview-pane .eo-print-chart { position: absolute; pointer-events: none; z-index: 2; }
 .print-preview-pane .eo-print-image { position: absolute; pointer-events: none; z-index: 2; object-fit: fill; }
 .print-preview-pane .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
+.print-preview-pane .eo-print-sheet-page .eo-print-sheet { font-family: var(--sheet-cell-font-family); font-size: var(--sheet-cell-font-size); }
+.print-preview-pane .eo-print-sheet-page .eo-print-sheet td.eo-print-head { font-family: var(--font-family-ui); font-size: 12px; }
 .print-preview-pane .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
 .print-preview-pane .base-print-page { box-sizing: border-box; padding: 10mm; }
 .print-preview-pane .base-print-page h3 { margin: 0; font-size: 12pt; line-height: 10mm; overflow: hidden; }

@@ -24,15 +24,19 @@
   const PADDING_PX = 13; // 6px each side and the border, as the grid's cell
   const BUTTON_PX = 18; // the drop-down button of a filter header cell
   const GLYPH_EM = 1.5; // no glyph is wider than this many em: a text this short cannot beat the widest so far
-  const BASE_FONT_PX = 13;
+  const FALLBACK_FONT_PX = 14.67; // Normal font (Malgun Gothic 11 pt) when `sheet-default-font.js` is absent
+  const FALLBACK_FONT_FAMILY = "'맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
   const MEMO_LIMIT = 50000;
   const MAX_MEASURES = 200000; // canvas measurements one fit may make
   const BUDGET_MS = 1500; // and the time it may take
   const CLOCK_EVERY = 256; // measurements between two looks at the clock
-  const DEFAULT_FONT = `normal 400 ${BASE_FONT_PX}px\u0000`;
 
   function createColFit(deps) {
     const { getMap, packRef, measure: measureText, isColHidden, isRowHidden, mergeAt, headerCells, formatGeneral, defaultWidth, minWidth, maxWidth } = deps;
+    const dfApi = deps.defaultFont || host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
+    const baseFontPx = () => (typeof deps.baseFontPx === "function" ? deps.baseFontPx() : dfApi?.baseFontPx?.() ?? FALLBACK_FONT_PX);
+    const baseFontFamily = () => (typeof deps.baseFontFamily === "function" ? deps.baseFontFamily() : dfApi?.baseFontFamily?.() ?? FALLBACK_FONT_FAMILY);
+    const fontVersion = () => (typeof deps.fontVersion === "function" ? deps.fontVersion() : dfApi?.version?.() ?? 0);
     let measures = 0;
     let started = 0;
     let overBudget = false;
@@ -51,12 +55,24 @@
     const memo = new Map();
     let memoSize = 0;
     // A style is shared by every cell that wears it (the grid interns them): its font is worked out once.
-    const fonts = new WeakMap();
+    let fonts = new WeakMap();
+    let cachedFontSig = fontVersion() + "\u0000" + baseFontPx() + "\u0000" + baseFontFamily();
+    function syncFontCache() {
+      const sig = fontVersion() + "\u0000" + baseFontPx() + "\u0000" + baseFontFamily();
+      if (sig === cachedFontSig) return;
+      cachedFontSig = sig;
+      memo.clear();
+      memoSize = 0;
+      fonts = new WeakMap();
+    }
     const fontOf = (st) => {
-      if (!st) return DEFAULT_FONT;
+      syncFontCache();
+      const dpx = baseFontPx();
+      const dfam = baseFontFamily();
+      if (!st) return `normal 400 ${dpx}px\u0000${dfam}`;
       let key = fonts.get(st);
       if (key === undefined) {
-        key = `${st.fontStyle || "normal"} ${st.fontWeight || "400"} ${st.fontSize || BASE_FONT_PX + "px"}\u0000${st.fontFamily || ""}`;
+        key = `${st.fontStyle || "normal"} ${st.fontWeight || "400"} ${st.fontSize || dpx + "px"}\u0000${st.fontFamily || dfam}`;
         fonts.set(st, key);
       }
       return key;
@@ -118,6 +134,7 @@
      * measurements or 1.5 s: no width is changed from a half-done fit.
      */
     async function widthsFor(cols, resolveFormats) {
+      syncFontCache();
       const colSet = new Set(cols.filter((c) => !isColHidden(c)));
       if (colSet.size === 0) return { widths: [] };
       measures = 0;
@@ -128,6 +145,7 @@
       const formatted = wanted.size > 0 ? await resolveFormats(wanted) : new Map();
       const best = new Map();
       const full = maxWidth - PADDING_PX;
+      const defaultPx = baseFontPx();
       for (const ref in map) {
         const entry = map[ref];
         const text = shownOf(entry, formatted);
@@ -142,7 +160,7 @@
         const widest = best.get(col) || 0;
         if (widest >= full) continue;
         const extra = headerCells(row, col) ? BUTTON_PX : 0;
-        const px = Number.parseFloat(entry.style?.fontSize) || BASE_FONT_PX;
+        const px = Number.parseFloat(entry.style?.fontSize) || defaultPx;
         if (text.length * px * GLYPH_EM + extra <= widest) continue;
         const w = lineWidth(fontOf(entry.style), text);
         if (w === null) return { refused: overBudget ? "budget" : "measure" };

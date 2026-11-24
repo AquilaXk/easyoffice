@@ -99,7 +99,7 @@ test("a wrapped cell with one line takes its font's height, with more lines its 
   });
   f.sync();
   assert.equal(f.heightOf(1), Math.ceil(30 * 1.275));
-  assert.equal(f.heightOf(2), Math.max(3 * 18 + 7, Math.ceil(40 * 1.275)));
+  assert.equal(f.heightOf(2), Math.max(3 * 20 + 7, Math.ceil(40 * 1.275)));
 });
 
 test("a height a user set wins over the content, under the grid's row height too, and the rows below follow", () => {
@@ -148,7 +148,7 @@ test("a sync that needs more measurements or more time than its budget leaves th
   f.sync();
   assert.equal(f.overBudget(), true);
   assert.ok(calls <= 200000, "the count ends the sync (" + calls + ")");
-  assert.equal(f.heightOf(10), 3 * 18 + 7, "the rows it reached are tall");
+  assert.equal(f.heightOf(10), 3 * 20 + 7, "the rows it reached are tall");
   assert.equal(f.heightOf(299999), 22, "and the rest stay plain");
   let clock = 0;
   const slow = fit({ A1: { value: "a", style: { wrap: true } }, ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => ["B" + (i + 1), { value: "t" + i, style: { wrap: true } }])) }, { now: () => clock, measure: () => ((clock += 10), 2) });
@@ -186,7 +186,7 @@ async function open(model = MODEL) {
     if (tag === "canvas") el.getContext = () => ({ font: "", measureText(t) { return { width: [...t].length * 8 }; } });
     return el;
   };
-  d.defaultView.getComputedStyle = () => ({ fontFamily: "sans-serif", fontSize: "13px" });
+  d.defaultView.getComputedStyle = () => ({ fontFamily: "'맑은 고딕', 'Malgun Gothic', sans-serif", fontSize: "11pt" });
   switchModule(d, "SHEET");
   await flushAsyncTurns();
   const viewport = d.getElementById("sheet-viewport");

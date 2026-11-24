@@ -126,6 +126,8 @@
 
   /* 타이포그래피 */
   --font-family-ui: -apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif;
+  --sheet-cell-font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --sheet-cell-font-size: 11pt;
   --font-family-mono: 'Consolas', 'Courier New', monospace;
   --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --font-size-xs: 10px;

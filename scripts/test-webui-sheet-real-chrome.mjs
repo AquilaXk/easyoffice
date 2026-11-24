@@ -21,7 +21,7 @@ try {
 const skip = !APP || !CHROME ? "needs a built easyoffice-app and a Chrome (EO_APP, CHROME_PATH)" : false;
 
 const KEYS = {
-  Enter: [13, "Enter"], Tab: [9, "Tab"], Backspace: [8, "Backspace"], Escape: [27, "Escape"], Home: [36, "Home"], End: [35, "End"], PageUp: [33, "PageUp"], PageDown: [34, "PageDown"], F3: [114, "F3"],
+  Enter: [13, "Enter"], Tab: [9, "Tab"], Backspace: [8, "Backspace"], Escape: [27, "Escape"], Home: [36, "Home"], End: [35, "End"], PageUp: [33, "PageUp"], PageDown: [34, "PageDown"], F2: [113, "F2"], F3: [114, "F3"],
   ArrowLeft: [37, "ArrowLeft"], ArrowUp: [38, "ArrowUp"], ArrowRight: [39, "ArrowRight"], ArrowDown: [40, "ArrowDown"],
 };
 const CTRL = 2;
@@ -561,4 +561,290 @@ test("Ctrl+Shift+PageDown/PageUp, Shift/Ctrl+click, and tab menu group selection
   assert.equal(pointCheck.every((t) => t.grouped === null), true, "formula 3D span leaves no data-tab-grouped");
   await key("Escape");
   await sleep(80);
+});
+
+test("screen default font applies Malgun Gothic 11pt stack, separates headers and doc tables, syncs large defaultFont row heights and print CSS", { skip }, async () => {
+  await click("A1");
+  const baseCheck = JSON.parse(
+    await js(`JSON.stringify((() => {
+      const tdEl = document.querySelector('#pane-sheet td[data-cell="A1"]');
+      const thEl = document.querySelector('#pane-sheet th[data-col="A"]');
+      const tbl = document.createElement("table");
+      tbl.className = "sheet-table doc-inline-table";
+      const tr = document.createElement("tr");
+      const dth = document.createElement("th");
+      const dtd = document.createElement("td");
+      tr.append(dth, dtd);
+      tbl.appendChild(tr);
+      document.body.appendChild(tbl);
+      const docTdCs = getComputedStyle(dtd);
+      const docTdFontSize = parseFloat(docTdCs.fontSize);
+      const docTdFontFamily = docTdCs.fontFamily;
+      tbl.remove();
+      const tdCs = getComputedStyle(tdEl);
+      const thCs = getComputedStyle(thEl);
+      return {
+        tdFontSize: parseFloat(tdCs.fontSize),
+        tdFontFamily: tdCs.fontFamily,
+        thFontSize: parseFloat(thCs.fontSize),
+        docTdFontSize,
+        docTdFontFamily,
+        rowH: tdEl.closest("tr").getBoundingClientRect().height,
+      };
+    })())`)
+  );
+  assert.ok(Math.abs(baseCheck.tdFontSize - (11 * 96) / 72) < 0.1, `sheet td defaults to 11pt (~14.67px), got ${baseCheck.tdFontSize}`);
+  assert.ok(baseCheck.tdFontFamily.includes("맑은 고딕") || baseCheck.tdFontFamily.includes("Malgun Gothic"), baseCheck.tdFontFamily);
+  assert.equal(baseCheck.thFontSize, 12, "sheet headers keep 12px UI font");
+  assert.equal(baseCheck.docTdFontSize, 12, "doc-inline-table cells keep 12px UI font");
+  assert.equal(baseCheck.rowH, 22, "11pt keeps 22px default row height");
+
+  const openedLarge = await js(`(async () => {
+    const api = window.__EASYOFFICE_WORKSPACE_API__;
+    const resp = await fetch("/api/ipc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-EasyOffice-Ipc": "1" },
+      body: JSON.stringify({
+        command: "convert_document_format",
+        payload: JSON.stringify({
+          sourceFormat: "xlsx",
+          targetFormat: "xlsx",
+          title: "normal-font-20pt",
+          forSave: true,
+          sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "큰 기본 글꼴" }, { ref: "A2", raw: "줄바꿈 글자입니다 길게 씁니다", style: { wrap: true } }] }],
+          defaultFont: { name: "Arial", size: 20 },
+        }),
+      }),
+    });
+    const res = await resp.json();
+    if (!res.convertedBase64) throw new Error("convert failed: " + JSON.stringify(res));
+    const bin = Uint8Array.from(atob(res.convertedBase64), (c) => c.charCodeAt(0));
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      await api.openDocumentFromBytes("normal-font-20pt.xlsx", bin);
+    } finally {
+      window.confirm = origConfirm;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    const td1 = document.querySelector('#pane-sheet td[data-cell="A1"]');
+    const td2 = document.querySelector('#pane-sheet td[data-cell="A2"]');
+    const td1EditMeasure = (() => {
+      td1.classList.add("edit-measure");
+      const sz = parseFloat(getComputedStyle(td1).fontSize);
+      td1.classList.remove("edit-measure");
+      return sz;
+    })();
+    const preview = await window.__EASYOFFICE_OFFICE_PRINT__.buildPreview();
+    const { root } = window.__EASYOFFICE_OFFICE_PRINT__.prepare();
+    const preparedTd = root.querySelector(".eo-print-sheet td");
+    const preparedCs = getComputedStyle(preparedTd);
+    const previewFontSize = parseFloat(preparedCs.fontSize);
+    const previewFontFamily = preparedCs.fontFamily;
+    window.__EASYOFFICE_OFFICE_PRINT__.remove();
+    return JSON.stringify({
+      td1FontSize: parseFloat(getComputedStyle(td1).fontSize),
+      td1EditMeasure,
+      td1FontFamily: getComputedStyle(td1).fontFamily,
+      row1H: td1.closest("tr").getBoundingClientRect().height,
+      td2LineH: parseFloat(getComputedStyle(td2).lineHeight),
+      printRuleMatch: preview.rulesCss.some((r) => r.includes("eo-print-sheet") && r.includes("20pt") && r.includes("Arial")),
+      previewFontSize,
+      previewFontFamily,
+    });
+  })()`).then(JSON.parse);
+
+  assert.ok(Math.abs(openedLarge.td1FontSize - (20 * 96) / 72) < 0.1, `20pt defaultFont renders at ~26.67px, got ${openedLarge.td1FontSize}`);
+  assert.ok(Math.abs(openedLarge.td1EditMeasure - (20 * 96) / 72) < 0.1, "edit measurement box uses active defaultFont size");
+  assert.match(openedLarge.td1FontFamily, /Arial/);
+  assert.equal(openedLarge.row1H, 35, "large 20pt defaultFont auto-expands row height from 22px to 35px");
+  assert.equal(openedLarge.td2LineH, 36, "wrapped cell uses 36px line-height at 20pt");
+  assert.equal(openedLarge.printRuleMatch, true);
+  assert.ok(Math.abs(openedLarge.previewFontSize - (20 * 96) / 72) < 0.1, `print table inherits 20pt (~26.67px), got ${openedLarge.previewFontSize}`);
+  assert.match(openedLarge.previewFontFamily, /Arial/);
+
+  // Undo restores the prior standard 11pt workbook, 22px row height, and CSS custom properties.
+  await js(`document.querySelector('[data-studio-menu-cmd="studio-undo"]').click()`);
+  await sleep(200);
+  const afterUndo = await js(`JSON.stringify((() => {
+    const td1 = document.querySelector('#pane-sheet td[data-cell="A1"]');
+    return {
+      td1FontSize: parseFloat(getComputedStyle(td1).fontSize),
+      row1H: td1.closest("tr").getBoundingClientRect().height,
+      cssVarSize: document.documentElement.style.getPropertyValue("--sheet-cell-font-size"),
+    };
+  })())`).then(JSON.parse);
+  assert.ok(Math.abs(afterUndo.td1FontSize - (11 * 96) / 72) < 0.1);
+  assert.equal(afterUndo.row1H, 22);
+  assert.equal(afterUndo.cssVarSize, "");
+});
+
+test("defaultFont editing syncs rows, keeps empty/single-wrap/manual rows aligned, floats tall edit box, wraps preview, resets multi-sheet cache, and fits columns in real Chrome (PD-348)", { skip }, async () => {
+  async function openXlsxFixture(title, sheets, defaultFont) {
+    await js(`(async () => {
+      const resp = await fetch("/api/ipc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-EasyOffice-Ipc": "1" },
+        body: JSON.stringify({
+          command: "convert_document_format",
+          payload: JSON.stringify({
+            sourceFormat: "xlsx",
+            targetFormat: "xlsx",
+            title: ${JSON.stringify(title)},
+            forSave: true,
+            sheets: ${JSON.stringify(sheets)},
+            ...( ${JSON.stringify(defaultFont || null)} ? { defaultFont: ${JSON.stringify(defaultFont || null)} } : {}),
+          }),
+        }),
+      });
+      const res = await resp.json();
+      if (!res.convertedBase64) throw new Error("convert failed: " + JSON.stringify(res));
+      const bin = Uint8Array.from(atob(res.convertedBase64), (c) => c.charCodeAt(0));
+      const origConfirm = window.confirm;
+      window.confirm = () => true;
+      try {
+        await window.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes(${JSON.stringify(title + ".xlsx")}, bin);
+      } finally {
+        window.confirm = origConfirm;
+      }
+    })()`);
+    await sleep(200);
+  }
+
+  // 1) Multi-sheet 20pt workbook: row 1 populated (35px), row 2 long unbroken wrap, row 3 1-line wrap (35px), row 4 empty (22px), C1 wide string.
+  await openXlsxFixture("multi-20pt", [
+    {
+      name: "Sheet1",
+      cells: [
+        { ref: "A1", raw: "큰글꼴" },
+        { ref: "A2", raw: "WordWithoutSpacesForOverflowWrapAnywhereInPrintPreview", style: { wrap: true } },
+        { ref: "A3", raw: "Hi", style: { wrap: true } },
+        { ref: "C5", raw: "MMMMMMMMMM" },
+      ],
+    },
+    { name: "Sheet2", cells: [{ ref: "B1", raw: "둘째시트" }] },
+  ], { name: "Arial", size: 20 });
+
+  const initLayout = await js(`JSON.stringify({
+    r1: document.querySelector('#pane-sheet td[data-cell="A1"]').closest("tr").getBoundingClientRect().height,
+    r3: document.querySelector('#pane-sheet td[data-cell="A3"]').closest("tr").getBoundingClientRect().height,
+    r3Style: document.querySelector('#pane-sheet td[data-cell="A3"]').closest("tr").style.height,
+    r4: document.querySelector('#pane-sheet td[data-cell="A4"]').closest("tr").getBoundingClientRect().height,
+    r4Style: document.querySelector('#pane-sheet td[data-cell="A4"]').closest("tr").style.height,
+  })`).then(JSON.parse);
+  assert.equal(initLayout.r1, 35);
+  assert.equal(initLayout.r3, 35, "1-line wrapped cell at 20pt stays capped at 35px without 43px overflow");
+  assert.equal(initLayout.r3Style, "35px");
+  assert.equal(initLayout.r4, 22, "empty rows stay aligned at 22px without 34px CSS drift");
+  assert.equal(initLayout.r4Style, "");
+
+  // 2) Column auto-fit via dblclick on .col-resizer expands column C for 20pt text.
+  await js(`document.querySelector('#pane-sheet thead th[data-col="C"] .col-resizer').dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+  await sleep(250);
+  const colCFit = await js(`JSON.stringify((() => {
+    const th = document.querySelector('#pane-sheet thead th[data-col="C"]');
+    const c5 = document.querySelector('#pane-sheet td[data-cell="C5"]');
+    return { width: th.getBoundingClientRect().width, scrollW: c5.scrollWidth, clientW: c5.clientWidth };
+  })())`).then(JSON.parse);
+  assert.ok(colCFit.width > 180, `20pt MMMMMMMMMM col auto-fit expected > 180px, got ${colCFit.width}`);
+  assert.ok(colCFit.scrollW <= colCFit.clientW + 1, "col auto-fit leaves no horizontal clip");
+
+  // 3) Docked Print Preview (#print-preview-pane) wraps unbroken words with overflow-wrap: anywhere.
+  await js(`window.__EASYOFFICE_PRINT_PREVIEW__.open()`);
+  await sleep(400);
+  const previewWrap = await js(`JSON.stringify((() => {
+    const cells = Array.from(document.querySelectorAll('#print-preview-pane .eo-print-sheet td:not(.eo-print-head)'));
+    const target = cells.find((c) => c.textContent.includes("WordWithoutSpaces"));
+    if (!target) return null;
+    const cs = getComputedStyle(target);
+    return { ws: cs.whiteSpace, ovWrap: cs.overflowWrap, scrollW: target.scrollWidth, clientW: target.clientWidth };
+  })())`).then(JSON.parse);
+  assert.ok(previewWrap, "wrapped target cell found in print preview");
+  assert.equal(previewWrap.ws, "pre-wrap");
+  assert.equal(previewWrap.ovWrap, "anywhere");
+  assert.ok(previewWrap.scrollW <= previewWrap.clientW + 1, `print preview unbroken word must wrap inside column (${previewWrap.scrollW} <= ${previewWrap.clientW})`);
+  await js(`window.__EASYOFFICE_PRINT_PREVIEW__.close()`);
+  await sleep(100);
+
+  // 4) Typing into empty 22px row A4 under 20pt floats .edit-grow vertically without shifting row 5, then Enter syncs row 4 to 35px.
+  const a4Rect = await rectOf(td("A4"));
+  const a5TopBefore = (await rectOf(td("A5"))).top;
+  await mouse("mouseMoved", a4Rect.left + a4Rect.width / 2, a4Rect.top + a4Rect.height / 2);
+  await mouse("mousePressed", a4Rect.left + a4Rect.width / 2, a4Rect.top + a4Rect.height / 2);
+  await mouse("mouseReleased", a4Rect.left + a4Rect.width / 2, a4Rect.top + a4Rect.height / 2);
+  await text("Hi");
+  await sleep(100);
+  const whileTypingA4 = await js(`JSON.stringify((() => {
+    const el = document.querySelector('#pane-sheet td[data-cell="A4"]');
+    return {
+      grow: el.classList.contains("edit-grow"),
+      eh: el.style.getPropertyValue("--eh"),
+      ch: el.style.getPropertyValue("--ch"),
+      offsetH: el.offsetHeight,
+      scrollH: el.scrollHeight,
+      clientH: el.clientHeight,
+      trH: el.closest("tr").getBoundingClientRect().height,
+      a5Top: document.querySelector('#pane-sheet td[data-cell="A5"]').getBoundingClientRect().top,
+    };
+  })())`).then(JSON.parse);
+  assert.equal(whileTypingA4.grow, true);
+  assert.equal(whileTypingA4.eh, "34px");
+  assert.equal(whileTypingA4.ch, "22px");
+  assert.equal(whileTypingA4.offsetH, 34);
+  assert.equal(whileTypingA4.scrollH, whileTypingA4.clientH);
+  assert.equal(whileTypingA4.trH, 22);
+  assert.equal(whileTypingA4.a5Top, a5TopBefore);
+
+  await key("Enter");
+  await sleep(200);
+  assert.equal(await rowHeight("A4"), 35);
+  assert.equal(await js(`document.querySelector('#pane-sheet td[data-cell="A4"]').closest("tr").style.height`), "35px");
+
+  // 5) Clearing populated A1 via F2 + Backspace + Enter shrinks row 1 back to 22px.
+  await click("A1");
+  await key("F2");
+  for (let i = 0; i < 4; i += 1) await key("Backspace");
+  await key("Enter");
+  await sleep(200);
+  assert.equal(await rowHeight("A1"), 22);
+  assert.equal(await js(`document.querySelector('#pane-sheet td[data-cell="A1"]').closest("tr").style.height`), "");
+
+  // 6) Dragging row 3 (35px) down to 23px renders at 23px (not stretched back to 34px).
+  const rz3 = await rectOf('#pane-sheet tbody tr[data-row="3"] th .row-resizer');
+  await mouse("mouseMoved", rz3.left + rz3.width / 2, rz3.top + rz3.height / 2);
+  await mouse("mousePressed", rz3.left + rz3.width / 2, rz3.top + rz3.height / 2);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rz3.left + rz3.width / 2, y: rz3.top + rz3.height / 2 - 12, button: "left", buttons: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: rz3.left + rz3.width / 2, y: rz3.top + rz3.height / 2 - 12, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(200);
+  const manualR3 = await js(`JSON.stringify((() => {
+    const tr = document.querySelector('#pane-sheet tbody tr[data-row="3"]');
+    return { styleH: tr.style.height, rectH: tr.getBoundingClientRect().height, cap: tr.classList.contains("row-cap") };
+  })())`).then(JSON.parse);
+  assert.equal(manualR3.styleH, "23px");
+  assert.equal(manualR3.rectH, 23);
+  assert.equal(manualR3.cap, true);
+
+  // 7) Visit Sheet2 (35px), switch back to Sheet1, then open an 11pt workbook with empty Sheet1 and Sheet2 B1: Sheet2 must reset to 22px.
+  const tab2 = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]');
+  await mouse("mousePressed", tab2.left + tab2.width / 2, tab2.top + tab2.height / 2);
+  await mouse("mouseReleased", tab2.left + tab2.width / 2, tab2.top + tab2.height / 2);
+  await sleep(200);
+  assert.equal(await rowHeight("B1"), 35);
+
+  const tab1 = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
+  await mouse("mousePressed", tab1.left + tab1.width / 2, tab1.top + tab1.height / 2);
+  await mouse("mouseReleased", tab1.left + tab1.width / 2, tab1.top + tab1.height / 2);
+  await sleep(150);
+
+  await openXlsxFixture("multi-11pt", [
+    { name: "Sheet1", cells: [] },
+    { name: "Sheet2", cells: [{ ref: "B1", raw: "표준" }] },
+  ], null);
+
+  const tab2Std = await rectOf('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]');
+  await mouse("mousePressed", tab2Std.left + tab2Std.width / 2, tab2Std.top + tab2Std.height / 2);
+  await mouse("mouseReleased", tab2Std.left + tab2Std.width / 2, tab2Std.top + tab2Std.height / 2);
+  await sleep(200);
+  assert.equal(await rowHeight("B1"), 22);
+  assert.equal(await js(`document.querySelector('#pane-sheet td[data-cell="B1"]').closest("tr").style.height`), "");
 });

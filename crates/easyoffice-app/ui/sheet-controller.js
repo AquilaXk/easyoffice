@@ -467,6 +467,7 @@
           void recalculateActiveSheetFormulas();
         });
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
+          grid.syncRowFit?.();
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }
         chartUi?.syncLayer();

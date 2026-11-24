@@ -463,13 +463,13 @@ test("a row is as tall as its tallest wrapped cell, other rows and unwrapped cel
   };
   const f = fit(map);
   assert.equal(f.sync(), true);
-  // width 100: A2 takes 3 lines (3 * 18 + 6 + 1), A4 one line (not taller than a plain row).
-  assert.equal(f.heightOf(2), 3 * 18 + 7);
+  // width 100: A2 takes 3 lines at the Normal font (11pt = 14.67px -> 3 * 20 + 6 + 1), A4 one line (not taller than a plain row).
+  assert.equal(f.heightOf(2), 3 * 20 + 7);
   assert.equal(f.heightOf(4), 24);
   assert.equal(f.heightOf(6), 24, "no wrap, no growth");
   assert.equal(f.extraBefore(2), 0);
-  assert.equal(f.extraBefore(3), 3 * 18 + 7 - 24);
-  assert.equal(f.extraTotal(), 3 * 18 + 7 - 24);
+  assert.equal(f.extraBefore(3), 3 * 20 + 7 - 24);
+  assert.equal(f.extraTotal(), 3 * 20 + 7 - 24);
   assert.equal(f.sync(), false, "unchanged cells give the same heights");
 });
 
@@ -507,7 +507,7 @@ test("measuring is remembered per font, width and text", () => {
 
 test("the wrapped rows of a sheet move the rows below them in the grid", async () => {
   const h = await createHarness();
-  h.host.getComputedStyle = () => ({ fontFamily: "sans-serif", fontSize: "13px" });
+  h.host.getComputedStyle = () => ({ fontFamily: "'맑은 고딕', 'Malgun Gothic', sans-serif", fontSize: "11pt" });
   const canvas = { getContext: () => ({ measureText: (t) => ({ width: t.length * 7 }), font: "" }) };
   const make = h.document.createElement.bind(h.document);
   h.document.createElement = (tag, ...rest) => (tag === "canvas" ? canvas : make(tag, ...rest));

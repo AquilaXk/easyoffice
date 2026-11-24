@@ -306,7 +306,8 @@
   // with another look is reset first. `fontPx` is the line height basis of wrapped text.
   function paintTd(td, st, row, col, borderAt, span) {
     const edges = resolveEdges(row, col, borderAt, span);
-    const sig = lookKey(st) + "/" + (edges.t || "") + (edges.r || "") + (edges.b || "") + (edges.l || "") + (st?.wrap ? "/" + (st.fontSize || "") : "");
+    const basePx = host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.baseFontPx?.() ?? 14.67;
+    const sig = lookKey(st) + "/" + (edges.t || "") + (edges.r || "") + (edges.b || "") + (edges.l || "") + (st?.wrap ? "/" + (st.fontSize || basePx) : "");
     if (td._lk === sig) return;
     td._lk = sig;
     const s = td.style;
@@ -321,7 +322,7 @@
       s.whiteSpace = "pre-wrap";
       s.overflowWrap = "anywhere";
       s.textOverflow = "clip";
-      const px = Number.parseFloat(st.fontSize) || 13;
+      const px = Number.parseFloat(st.fontSize) || basePx;
       s.lineHeight = Math.round(px * LINE_HEIGHT_RATIO) + "px";
       s.paddingTop = WRAP_PAD_V + "px";
       s.paddingBottom = WRAP_PAD_V + "px";
@@ -344,7 +345,10 @@
     if (st.fontFamily) s.fontFamily = st.fontFamily;
     if (st.textAlign) s.textAlign = st.textAlign;
     s.verticalAlign = st.verticalAlign || "bottom";
-    if (st.wrap) s.whiteSpace = "pre-wrap";
+    if (st.wrap) {
+      s.whiteSpace = "pre-wrap";
+      s.overflowWrap = "anywhere";
+    }
     if (st.fill) s.backgroundColor = "#" + st.fill;
     const fg = textColorOf(st);
     if (fg) s.color = "#" + fg;

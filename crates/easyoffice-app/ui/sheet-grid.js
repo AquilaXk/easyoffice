@@ -46,13 +46,14 @@
     // Rows follow the height of their wrapped cells (PD-207); `null` where the page cannot measure text.
     const rowFit = host.__EASYOFFICE_CREATE_ROW_FIT__?.({
       rowH: rowBase,
+      gridRowH: () => ROW_H,
       maxRows: MAX_ROWS,
       getSheetName,
       getMap: getMap || (() => null),
       columnWidth: (c) => colWidth(c),
       isRowHidden: (r) => rowIsHidden(r),
       isMerged: (r, c) => Boolean(layoutApi?.mergeAt(getSheetName(), r, c)),
-      measure: (text, width, font) => measureWrapped(sampleTd(), text, width, font),
+      measure: (text, width, font, family) => measureWrapped(sampleTd(), text, width, font, family),
       packRef,
       // The heights a user set, as `[[row, px], ...]` (PD-278).
       customHeights: () => (rowHeightsOf() ? host.__EASYOFFICE_SHEET_ROW_HEIGHT__.pxEntries(rowHeightsOf()) : []),
@@ -78,13 +79,18 @@
     };
     // Row heights are looked up only once a wrapped or large cell exists, a row has a height of a user, or one has been fitted before (it may be gone now).
     // A default row height other than the grid's moves every row, and a large font needs more than a short default row has.
-    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any() || Boolean(rowHeightsOf()) || rowBase() !== ROW_H);
+    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any() || Boolean(rowHeightsOf()) || rowBase() !== ROW_H || Boolean(rowFit.baseTall?.()));
     // Works the row heights out again; a sync that ran out of its budget leaves the rest of the rows plain and says so.
     function syncRows() {
       const changed = rowFit.sync();
       const say = rowFit.overBudget() && document.getElementById("status-command-feedback");
       if (say) say.textContent = "행 높이를 맞추기에 시트가 너무 커서 일부 행은 기본 높이로 둠";
       return changed;
+    }
+    function syncRowFit() {
+      if (!wrapRowsPossible() || !syncRows()) return false;
+      renderWindow(true);
+      return true;
     }
     // The look of a cell as the page paints it: neighbours decide the shared edges, and the edges the rules draw come over the cell's
     // own (PD-284). A rule edge changes the look of the cells beside it too: the rules ask for a "relook" when their edges moved.
@@ -186,6 +192,10 @@
         }
         tr.classList.toggle("row-short", h < ROW_H);
         tr.classList.toggle("row-clip", rowFit.isClipped(r));
+        const cap = h >= ROW_H && Boolean(want) && Boolean(rowFit.isCapped?.(r));
+        tr.classList.toggle("row-cap", cap);
+        if (cap) tr.style.setProperty("--rh-cap", want);
+        else tr.style.removeProperty("--rh-cap");
       }
     }
 
@@ -804,7 +814,7 @@
       mergesIn: (r1, c1, r2, c2) => layoutApi?.mergesIn(getSheetName(), r1, c1, r2, c2) ?? [],
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
-      getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells,
+      getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells, syncRowFit,
       ensureVisible, visibleRowSpan, getTdAt, getTdByRef, forEachMaterializedTd,
       paintSelectionRange, paintTd, setDisplayValue, readTdValue, install, getView: () => view,
     };

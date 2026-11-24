@@ -81,7 +81,7 @@ async function openFile(sheet) {
     if (tag === "canvas") el.getContext = () => ({ font: "", measureText: (t) => ({ width: [...t].length * 8 }) });
     return el;
   };
-  d.defaultView.getComputedStyle = () => ({ fontFamily: "sans-serif", fontSize: "13px" });
+  d.defaultView.getComputedStyle = () => ({ fontFamily: "'맑은 고딕', 'Malgun Gothic', sans-serif", fontSize: "11pt" });
   switchModule(d, "SHEET");
   await flushAsyncTurns();
   const viewport = d.getElementById("sheet-viewport");

@@ -130,6 +130,13 @@ select:focus-visible,
 .sheet-table th, .sheet-table td, .doc-inline-table th, .doc-inline-table td {
   border: 1px solid var(--ui-border-light);
   padding: 7px 9px;
+}
+.sheet-table td {
+  font-family: var(--sheet-cell-font-family);
+  font-size: var(--sheet-cell-font-size);
+}
+.sheet-table th, .doc-inline-table th, .doc-inline-table td, .slide-table-obj td {
+  font-family: var(--font-family-ui);
   font-size: 12px;
 }
 .sheet-table th, .doc-inline-table th { background: var(--ui-bg-light); color: var(--ui-text-muted); text-align: center; }
@@ -501,7 +508,7 @@ select:focus-visible,
 .sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
 .sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
 .sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }
-.sheet-grid td { caret-color: transparent; cursor: cell; user-select: none; }
+.sheet-grid td { line-height: max(21px, calc(1.275em - 1px)); caret-color: transparent; cursor: cell; user-select: none; }
 .sheet-grid td:focus { outline: none; }
 .sheet-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sheet-grid td.in-range { background: var(--table-selection-fill); }
@@ -509,9 +516,9 @@ select:focus-visible,
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Edit box (PD-280): sheet-edit-box.js sets `--ew`, `--eh` and `--ch` (the cell's own height). The cell being edited becomes a block that lies over the cells to its right and below; its bottom margin gives back the height it takes, so the row keeps its height. */
-.sheet-grid td.edit-grow { --ew: 72px; --eh: auto; --ch: 22px; display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); overflow: hidden; }
+.sheet-grid td.edit-grow { --ew: 72px; --eh: auto; --ch: 22px; display: block; position: relative; z-index: 1; width: var(--ew); height: var(--eh, auto); margin-bottom: calc(var(--ch) - var(--eh)); line-height: max(21px, calc(1.275em - 1px)); overflow: hidden; }
 .sheet-grid td.edit-measure { display: block; width: max-content; }
-.sheet-grid td.edit-grow.edit-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sheet-grid td.edit-grow.edit-wrap { white-space: pre-wrap; overflow-wrap: anywhere; line-height: max(21px, 1.35em); }
 /* Table style (PD-231): sheet-table-style.js sets `--ts-fill`, `--ts-fg` and `--ts-shadow`. It lies under the cell's own fill and colour (the block below) and under conditional formats; a table cell has no border of its own width: its grid line and the table's lines are shadows, so a line runs unbroken across the cell edges. */
 .sheet-grid td[data-ts] { border-width: 0; padding: 0 7px 1px 6px; }
 .sheet-grid td[data-ts-f] { background-color: var(--ts-fill, transparent); }
@@ -551,11 +558,13 @@ select:focus-visible,
 .sheet-grid .col-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 6; }
 .sheet-grid .col-resizer:hover { background: var(--accent-strong); opacity: 0.45; }
 /* `--rh` is set on a row that is under the grid's height (`sheet-grid.js`). */
-.sheet-grid { --rh: 22px; }
+.sheet-grid { --rh: 22px; --rh-cap: 22px; }
 .sheet-grid .row-resizer { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: row-resize; z-index: 6; }
 .sheet-grid .row-resizer:hover { background: var(--accent-strong); opacity: 0.45; }
 /* Row heights (PD-278): a row under the grid's height takes its own (`--rh`), and a row whose height cuts its cells off keeps them on one line. */
-.sheet-grid tr.row-short > th, .sheet-grid tr.row-short > td { height: var(--rh); line-height: calc(var(--rh) - 1px) !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+.sheet-grid tr.row-short > th, .sheet-grid tr.row-short > td:not(.edit-grow) { height: var(--rh); line-height: calc(var(--rh) - 1px) !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+.sheet-grid tr:not(.sheet-spacer):not([style*="height"]) > td:not(.editing) { padding-top: 0 !important; padding-bottom: 0 !important; line-height: 21px !important; }
+.sheet-grid tr.row-cap > td:not(.editing) { height: var(--rh-cap); padding-top: 0 !important; padding-bottom: 0 !important; line-height: min(calc(var(--rh-cap) - 1px), max(21px, calc(1.275em - 1px))) !important; }
 .sheet-grid tr.row-clip > td { white-space: nowrap !important; }
 .sheet-grid tr.sheet-spacer td, .sheet-grid td.sheet-spacer-y { padding: 0; border-width: 0; line-height: 0; }
 .sheet-grid td.sheet-spacer-x, .sheet-grid th.sheet-spacer-head { padding: 0; }

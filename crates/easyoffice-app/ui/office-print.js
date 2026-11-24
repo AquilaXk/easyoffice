@@ -312,6 +312,13 @@
 
     function buildSheet(rules) {
       const { map, geometry, core, boxes, page } = sheetPlan();
+      const defaultFont = host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
+      const sheetFamily = defaultFont?.baseFontFamily?.() || "'맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+      const sheetSize = defaultFont?.cssFontSize?.() || "11pt";
+      rules.sheet.insertRule(
+        "#eo-print-root .eo-print-sheet-page .eo-print-sheet, .print-preview-pane .eo-print-sheet-page .eo-print-sheet { font-family: " + sheetFamily + "; font-size: " + sheetSize + "; }",
+        rules.sheet.cssRules.length
+      );
       // What the conditional formats give a cell (PD-289, PD-300): the answer the grid paints from, and the edges of the cell with the
       // rules' laid over. Null where the rules give the cell nothing to print.
       const ruleApi = host.__EASYOFFICE_SHEET_RULES__;

@@ -69,13 +69,22 @@
       return vp.getBoundingClientRect().right - bar - td.getBoundingClientRect().left;
     }
 
+    function naturalHeight(td, w) {
+      td.classList.add("edit-grow");
+      td.classList.remove("edit-wrap");
+      td.style.setProperty("--ew", w + "px");
+      td.style.removeProperty("--eh");
+      return td.offsetHeight;
+    }
+
     function fit(td) {
       if (td.classList.contains("merge-anchor")) return;
       release(td);
       const wrap = Boolean(td._st?.wrap);
       if (wrap && !isFixedRow(td)) return;
       const cellW = td.offsetWidth;
-      const cellH = wrap ? rowHeightOf(td) : td.offsetHeight;
+      const modelH = typeof rowHeightOf === "function" ? rowHeightOf(td) : NaN;
+      const cellH = finite(modelH) && modelH > 0 ? modelH : td.offsetHeight;
       if (!finite(cellW) || !finite(cellH) || cellW <= 0) return;
       const naturalW = wrap ? 0 : naturalWidth(td);
       if (!finite(naturalW)) return;
@@ -88,6 +97,13 @@
         return td.offsetHeight;
       };
       const box = fitEditBox({ cellW, cellH, naturalW, availW: finite(availW) ? availW : cellW, wrap, heightAt });
+      if (!box.wrap) {
+        const minH = Math.ceil(naturalHeight(td, box.w));
+        if (finite(minH) && minH > cellH) {
+          box.grow = true;
+          box.h = Math.max(box.h, minH);
+        }
+      }
       release(td);
       if (!box.grow) return;
       td.classList.add("edit-grow");

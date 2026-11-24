@@ -48,40 +48,67 @@
 
   // Width of `text` in the cell's font, from one shared canvas; -1 when the page cannot measure.
   let measurer;
-  function textWidth(td, text) {
+  const quoteFamilyPrefix = (family) => {
+    if (!family) return "";
+    const trimmed = String(family).trim();
+    if (!trimmed) return "";
+    if (trimmed.includes(",") || /^['"]/.test(trimmed)) return trimmed + ", ";
+    return '"' + trimmed.replaceAll('"', "") + '", ';
+  };
+  function ensureMeasurer(td) {
     if (measurer === undefined) {
       try {
-        measurer = td.ownerDocument.createElement("canvas").getContext("2d") || null;
+        const doc = td?.ownerDocument || host.document;
+        measurer = doc?.createElement?.("canvas")?.getContext?.("2d") || null;
       } catch {
         measurer = null;
       }
     }
-    if (!measurer) return -1;
-    if (!measurer.eoFamily) {
-      const cs = host.getComputedStyle?.(td);
-      if (!cs?.fontFamily) return -1;
-      measurer.eoFamily = cs.fontFamily;
-      measurer.eoSize = cs.fontSize;
+    if (!measurer) return null;
+    const df = host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
+    const ver = df?.version?.() ?? -1;
+    if (!measurer.eoFamily || measurer.eoFontVer !== ver) {
+      if (df) {
+        measurer.eoFamily = df.baseFontFamily();
+        measurer.eoSize = df.cssFontSize();
+        measurer.eoFontVer = ver;
+      } else {
+        const cs = td ? host.getComputedStyle?.(td) : null;
+        if (!cs?.fontFamily) return null;
+        measurer.eoFamily = cs.fontFamily;
+        measurer.eoSize = cs.fontSize || "11pt";
+        measurer.eoFontVer = ver;
+      }
     }
-    measurer.font = `${td.style.fontStyle || "normal"} ${td.style.fontWeight || "400"} ${td.style.fontSize || measurer.eoSize} ${td.style.fontFamily || measurer.eoFamily}`;
-    return measurer.measureText(text).width;
+    return measurer;
+  }
+
+  function textWidth(td, text) {
+    const m = ensureMeasurer(td);
+    if (!m) return -1;
+    const cellFam = td?.style?.fontFamily;
+    const fam = cellFam ? quoteFamilyPrefix(cellFam) + m.eoFamily : m.eoFamily;
+    m.font = `${td?.style?.fontStyle || "normal"} ${td?.style?.fontWeight || "400"} ${td?.style?.fontSize || m.eoSize} ${fam}`;
+    return m.measureText(text).width;
   }
 
   // Lines `text` takes in `width` px of `font`; null when the page cannot measure (yet).
-  function measureWrapped(td, text, width, font) {
-    if (td && !measurer?.eoFamily) textWidth(td, "");
-    if (!measurer?.eoFamily) return null;
-    measurer.font = font + " " + measurer.eoFamily;
-    return host.__EASYOFFICE_SHEET_LINE_COUNT__(text, width, (t) => measurer.measureText(t).width);
+  function measureWrapped(td, text, width, font, family) {
+    const m = ensureMeasurer(td);
+    if (!m?.eoFamily) return null;
+    const prefix = family && family !== m.eoFamily ? quoteFamilyPrefix(family) : "";
+    m.font = font + " " + prefix + m.eoFamily;
+    return host.__EASYOFFICE_SHEET_LINE_COUNT__(text, width, (t) => m.measureText(t).width);
   }
 
   // Width of one line of `text` in `font` (a CSS font without the family) and the cell's own `family`, else the sheet's;
   // null when the page cannot measure (yet).
   function measureLine(td, font, family, text) {
-    if (td && !measurer?.eoFamily) textWidth(td, "");
-    if (!measurer?.eoFamily) return null;
-    measurer.font = font + " " + (family ? '"' + family.replaceAll('"', "") + '", ' : "") + measurer.eoFamily;
-    return measurer.measureText(text).width;
+    const m = ensureMeasurer(td);
+    if (!m?.eoFamily) return null;
+    const prefix = family && family !== m.eoFamily ? quoteFamilyPrefix(family) : "";
+    m.font = font + " " + prefix + m.eoFamily;
+    return m.measureText(text).width;
   }
 
   // Width of a column in px (set by the grid that owns the page's sheet).

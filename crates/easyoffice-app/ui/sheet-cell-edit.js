@@ -189,6 +189,7 @@
       if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, nextValue);
       sheetDataStore[editSheet] = snapshotDomSheetCells();
       if (edited) autoLink(editSheet, td.dataset.cell, true);
+      grid.syncRowFit?.();
       return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus, updateFocusedDisplay));
     }
 
