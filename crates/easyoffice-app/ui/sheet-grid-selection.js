@@ -25,6 +25,19 @@
       activeRowHeads.length = 0;
     }
 
+    // Materialized row or column intervals for a selection: frozen prefix `[1..frozen]` plus visible window `[w0..w1]`.
+    function axisBands(lo, hi, frozen, w0, w1) {
+      const bands = [];
+      if (frozen > 0) {
+        const fHi = Math.min(hi, frozen, w0 - 1);
+        if (lo <= fHi) bands.push([lo, fHi]);
+      }
+      const mLo = Math.max(lo, w0);
+      const mHi = Math.min(hi, w1);
+      if (mLo <= mHi) bands.push([mLo, mHi]);
+      return bands;
+    }
+
     function paintSelectionRange(rg) {
       seedDomMaps();
       clear();
@@ -37,34 +50,44 @@
         selectedTd = anchor;
       }
       const v = getView();
-      const mr1 = v ? Math.max(rg.r1, v.r0) : rg.r1;
-      const mr2 = v ? Math.min(rg.r2, v.r1) : rg.r2;
-      const mc1 = v ? Math.max(rg.c1, v.c0) : rg.c1;
-      const mc2 = v ? Math.min(rg.c2, v.c1) : rg.c2;
+      const rowBands = v ? axisBands(rg.r1, rg.r2, v.layout ? v.fr || 0 : 0, v.r0, v.r1) : [[rg.r1, rg.r2]];
+      const colBands = v ? axisBands(rg.c1, rg.c2, v.layout ? v.fc || 0 : 0, v.c0, v.c1) : [[rg.c1, rg.c2]];
       if (rg.r1 !== rg.r2 || rg.c1 !== rg.c2) {
-        for (let r = mr1; r <= mr2; r += 1) {
-          const rowBase = r * PACK_STRIDE;
-          for (let c = mc1; c <= mc2; c += 1) {
-            const td = tdByPacked.get(rowBase + c);
-            if (td) {
-              td.classList.add("in-range");
-              rangeTds.push(td);
+        for (let rb = 0; rb < rowBands.length; rb += 1) {
+          const [rLo, rHi] = rowBands[rb];
+          for (let r = rLo; r <= rHi; r += 1) {
+            const rowBase = r * PACK_STRIDE;
+            for (let cb = 0; cb < colBands.length; cb += 1) {
+              const [cLo, cHi] = colBands[cb];
+              for (let c = cLo; c <= cHi; c += 1) {
+                const td = tdByPacked.get(rowBase + c);
+                if (td) {
+                  td.classList.add("in-range");
+                  rangeTds.push(td);
+                }
+              }
             }
           }
         }
       }
-      for (let c = mc1; c <= mc2; c += 1) {
-        const th = colHeadByCol.get(c);
-        if (th) {
-          th.classList.add("active-axis");
-          activeColHeads.push(th);
+      for (let cb = 0; cb < colBands.length; cb += 1) {
+        const [cLo, cHi] = colBands[cb];
+        for (let c = cLo; c <= cHi; c += 1) {
+          const th = colHeadByCol.get(c);
+          if (th) {
+            th.classList.add("active-axis");
+            activeColHeads.push(th);
+          }
         }
       }
-      for (let r = mr1; r <= mr2; r += 1) {
-        const th = rowHeadByRow.get(r);
-        if (th) {
-          th.classList.add("active-axis");
-          activeRowHeads.push(th);
+      for (let rb = 0; rb < rowBands.length; rb += 1) {
+        const [rLo, rHi] = rowBands[rb];
+        for (let r = rLo; r <= rHi; r += 1) {
+          const th = rowHeadByRow.get(r);
+          if (th) {
+            th.classList.add("active-axis");
+            activeRowHeads.push(th);
+          }
         }
       }
     }

@@ -205,16 +205,14 @@
     }
 
     function select(row, col, extend) {
-      let r = clamp(row, 1, grid.MAX_ROWS);
-      let c = clamp(col, 1, grid.MAX_COLS);
+      const targetRow = clamp(row, 1, grid.MAX_ROWS);
+      const targetCol = clamp(col, 1, grid.MAX_COLS);
+      // A click or a move that lands inside a merged range selects its anchor cell.
+      const merged = extend ? null : grid.mergeAt?.(targetRow, targetCol);
+      const r = merged ? merged.r1 : targetRow;
+      const c = merged ? merged.c1 : targetCol;
       if (!extend && !selectable(r, c)) return;
       commitIfEditing();
-      // A click or a move that lands inside a merged range selects its anchor cell.
-      const merged = extend ? null : grid.mergeAt?.(r, c);
-      if (merged) {
-        r = merged.r1;
-        c = merged.c1;
-      }
       resetNav(null);
       if (extend) {
         sel.cr = r;
@@ -223,7 +221,11 @@
         sel.ar = sel.cr = r;
         sel.ac = sel.cc = c;
       }
-      grid.ensureVisible(r, c);
+      // If a merged range crosses a freeze line, keep the target's unfrozen axis so scrolling resets to the freeze edge.
+      const frozen = merged && grid.frozenCounts ? grid.frozenCounts() : null;
+      const vr = frozen && r <= frozen.rows && targetRow > frozen.rows ? targetRow : r;
+      const vc = frozen && c <= frozen.cols && targetCol > frozen.cols ? targetCol : c;
+      grid.ensureVisible(vr, vc);
       focusAnchor();
       refreshChrome();
     }
@@ -299,11 +301,14 @@
     // The sheet as the movement rules of sheet-nav.js read it.
     function navView() {
       const ext = api.getExtent();
+      const frozen = grid.frozenCounts ? grid.frozenCounts() : { rows: 0, cols: 0 };
       return {
         maxRows: grid.MAX_ROWS,
         maxCols: grid.MAX_COLS,
         dataRows: ext.dataRows,
         dataCols: ext.dataCols,
+        freezeRows: frozen.rows,
+        freezeCols: frozen.cols,
         hasValue: (r, c) => api.hasValue(r, c),
         mergeAt: (r, c) => grid.mergeAt?.(r, c) || null,
         rowHidden: (r) => Boolean(grid.rowHidden?.(r)),
@@ -700,8 +705,8 @@
       const view = navView();
       const from = { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac };
       let to = null;
-      if (ev.key === "Home") to = nav.home(view, { r: sel.ar, c: sel.ac }, mod);
-      else if (ev.key === "End" && mod) to = nav.end(view);
+      if (ev.key === "Home" && !ev.altKey) to = nav.home(view, { r: sel.ar, c: sel.ac }, mod);
+      else if (ev.key === "End" && mod && !ev.altKey) to = nav.end(view);
       else if ((ev.key === "PageDown" || ev.key === "PageUp") && !mod) {
         const sign = ev.key === "PageDown" ? 1 : -1;
         to = ev.altKey ? nav.page(view, from, 0, sign, visibleColSpan()) : nav.page(view, from, sign, 0, grid.visibleRowSpan());

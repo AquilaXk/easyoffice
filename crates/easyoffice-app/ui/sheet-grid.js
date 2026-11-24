@@ -815,7 +815,7 @@
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
       getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells, syncRowFit,
-      ensureVisible, visibleRowSpan, getTdAt, getTdByRef, forEachMaterializedTd,
+      ensureVisible, visibleRowSpan, frozenCounts, getTdAt, getTdByRef, forEachMaterializedTd,
       paintSelectionRange, paintTd, setDisplayValue, readTdValue, install, getView: () => view,
     };
   }

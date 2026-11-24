@@ -12,9 +12,9 @@
 // functions of a small sheet view (`hasValue`, `mergeAt`, `rowHidden`, `colHidden`, sheet and data extent) that move
 // one cell, a merged range counts as one cell of its top-left value and is left past its far edge. A walk that starts
 // past the last used row or column does not scan the empty cells (the reference visits each one). The reference wraps
-// the arrow keys at the sheet edge; here they stop there. Home, Ctrl+Home, Ctrl+End, the page moves and the keys to the next
-// and previous sheet (PD-291) are not in the reference and are written for the spreadsheet application's rules. Univer's command, selection service and shortcut
-// tables are not used.
+// the arrow keys at the sheet edge; here they stop there. Home, Ctrl+Home (first shown cell of the unfrozen pane),
+// Ctrl+End, the page moves and the keys to the next and previous sheet (PD-291) are not in the reference and are
+// written for the spreadsheet application's rules. Univer's command, selection service and shortcut tables are not used.
 (function (host) {
   "use strict";
 
@@ -134,15 +134,36 @@
     return anchorOf(view, at);
   }
 
-  // The first shown row or column (Home, Ctrl+Home).
-  function firstShown(count, hidden) {
-    for (let i = 1; i <= count; i += 1) if (!hidden(i)) return i;
-    return 1;
+  // The first shown row or column at or past `start`, falling back to an earlier shown one.
+  function firstShownFrom(start, count, hidden) {
+    const limit = Math.max(1, Number(count) || 1);
+    const isHidden = typeof hidden === "function" ? hidden : () => false;
+    const from = clamp(start, 1, limit);
+    for (let i = from; i <= limit; i += 1) if (!isHidden(i)) return i;
+    for (let i = 1; i < from; i += 1) if (!isHidden(i)) return i;
+    return from;
   }
 
-  // Home: the first shown column of the row; Ctrl+Home: the first shown cell of the sheet.
+  // The first shown row or column (Home).
+  function firstShown(count, hidden) {
+    return firstShownFrom(1, count, hidden);
+  }
+
+  function freezeOffset(raw, max) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isFinite(max) || max <= 1) return 0;
+    return clamp(Math.trunc(n), 0, max - 1);
+  }
+
+  // Home: the first shown column of the row; Ctrl+Home: the top-leftmost shown cell of the unfrozen pane.
   function home(view, from, whole) {
-    return { r: whole ? firstShown(view.maxRows, view.rowHidden) : from.r, c: firstShown(view.maxCols, view.colHidden) };
+    if (!whole) return { r: from.r, c: firstShown(view.maxCols, view.colHidden) };
+    const fr = freezeOffset(view.freezeRows, view.maxRows);
+    const fc = freezeOffset(view.freezeCols, view.maxCols);
+    return {
+      r: firstShownFrom(fr + 1, view.maxRows, view.rowHidden),
+      c: firstShownFrom(fc + 1, view.maxCols, view.colHidden),
+    };
   }
 
   // Ctrl+End: the cell where the last used row meets the last used column.

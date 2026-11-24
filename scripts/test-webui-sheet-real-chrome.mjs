@@ -166,6 +166,73 @@ test("Home, Ctrl+Home, Ctrl+End and the page keys", { skip }, async () => {
   assert.equal(await active(), "A1");
 });
 
+test("Ctrl+Home on frozen panes goes to the top-left shown cell of the unfrozen pane and resets scroll (PD-350)", { skip }, async () => {
+  await click("B3");
+  await js(`document.querySelector('.md-item[data-studio-menu-cmd="sheet-mod-freeze"]').click()`);
+  await sleep(150);
+  try {
+    await click("G30");
+    await js(`(() => {
+      const vp = document.getElementById("sheet-viewport");
+      vp.scrollTop = 600;
+      vp.scrollLeft = 240;
+    })()`);
+    await sleep(80);
+    await key("Home", CTRL);
+    await sleep(80);
+    assert.equal(await active(), "B3", "Ctrl+Home moves to B3 when rows 1-2 and col A are frozen");
+    const scrolled = await js(`JSON.stringify((() => {
+      const vp = document.getElementById("sheet-viewport");
+      return { top: vp.scrollTop, left: vp.scrollLeft };
+    })())`).then(JSON.parse);
+    assert.deepEqual(scrolled, { top: 0, left: 0 }, "Ctrl+Home resets scrollable pane offsets back to the freeze lines");
+
+    await click("A1");
+    await key("Home", CTRL);
+    assert.equal(await active(), "B3", "Ctrl+Home from inside the frozen pane moves to B3");
+
+    await click("D4");
+    await key("Home");
+    assert.equal(await active(), "A4", "Home without Ctrl returns to column A");
+
+    await click("D4");
+    await key("Home", SHIFT);
+    assert.deepEqual(await inRange(), ["A4", "B4", "C4", "D4"], "Shift+Home highlights frozen column A in range");
+
+    await click("A1");
+    await key("Home", CTRL | SHIFT);
+    assert.deepEqual(await inRange(), ["A1", "A2", "A3", "B1", "B2", "B3"], "Ctrl+Shift+Home from A1 highlights frozen and unfrozen cells");
+
+    await click("D4");
+    await key("Home", CTRL | SHIFT);
+    assert.deepEqual(await inRange(), ["B3", "B4", "C3", "C4", "D3", "D4"], "Ctrl+Shift+Home extends from D4 to B3");
+
+    await js(`window.__EASYOFFICE_SHEET_LAYOUT__.addMerge("Sheet1", 2, 1, 4, 3)`);
+    await click("G30");
+    await js(`(() => {
+      const vp = document.getElementById("sheet-viewport");
+      vp.scrollTop = 600;
+      vp.scrollLeft = 240;
+    })()`);
+    await sleep(80);
+    await key("Home", CTRL);
+    await sleep(80);
+    assert.equal(await active(), "A2", "cross-freeze merge lands on A2");
+    const mergeScroll = await js(`JSON.stringify((() => {
+      const vp = document.getElementById("sheet-viewport");
+      return { top: vp.scrollTop, left: vp.scrollLeft };
+    })())`).then(JSON.parse);
+    assert.deepEqual(mergeScroll, { top: 0, left: 0 }, "cross-freeze merge resets scrollable offsets on Ctrl+Home");
+  } finally {
+    await js(`window.__EASYOFFICE_SHEET_LAYOUT__.removeMerges("Sheet1", 1, 1, 10, 10)`);
+    await js(`document.querySelector('.md-item[data-sheet-act="freeze-clear"]').click()`);
+    await sleep(120);
+    await click("A1");
+    await key("Home", CTRL);
+    assert.equal(await active(), "A1");
+  }
+});
+
 test("the cell being edited grows to the right over its neighbours, keeps the rows where they are, and goes back with Esc", { skip }, async () => {
   await show("B14");
   const before = await rectOf(td("B14"));

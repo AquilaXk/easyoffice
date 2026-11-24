@@ -15,7 +15,7 @@ const A = (ref) => ({ r: Number(ref.slice(1)), c: ref.charCodeAt(0) - 64 });
 const ref = ({ r, c }) => String.fromCharCode(64 + c) + r;
 
 // A sheet of 100 rows and 20 columns whose cells with a value, merges ("B3:B4"), hidden rows and columns are given.
-function sheet({ cells = [], merges = [], hiddenRows = [], hiddenCols = [] } = {}) {
+function sheet({ cells = [], merges = [], hiddenRows = [], hiddenCols = [], freezeRows = 0, freezeCols = 0 } = {}) {
   const valued = new Set(cells);
   const ranges = merges.map((m) => {
     const [a, b] = m.split(":").map(A);
@@ -27,6 +27,8 @@ function sheet({ cells = [], merges = [], hiddenRows = [], hiddenCols = [] } = {
     maxCols: 20,
     dataRows: Math.max(0, ...all.map((p) => p.r)),
     dataCols: Math.max(0, ...all.map((p) => p.c)),
+    freezeRows,
+    freezeCols,
     hasValue: (r, c) => valued.has(ref({ r, c })),
     mergeAt: (r, c) => ranges.find((m) => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2) || null,
     rowHidden: (r) => hiddenRows.includes(r),
@@ -159,6 +161,32 @@ test("Home goes to the first shown column, Ctrl+Home to the first shown cell, Ct
   assert.equal(ref(nav.home(view, A("E5"), true)), "B2");
   assert.equal(ref(nav.end(view)), "F9");
   assert.equal(ref(nav.end(sheet())), "A1", "an empty sheet ends at A1");
+});
+
+test("Ctrl+Home on frozen panes lands on the first shown cell of the unfrozen pane while Home stays at column A (PD-350)", () => {
+  const rowOnly = sheet({ freezeRows: 2 });
+  assert.equal(ref(nav.home(rowOnly, A("E9"), true)), "A3");
+  assert.equal(ref(nav.home(rowOnly, A("A1"), true)), "A3");
+
+  const colOnly = sheet({ freezeCols: 2 });
+  assert.equal(ref(nav.home(colOnly, A("E9"), true)), "C1");
+  assert.equal(ref(nav.home(colOnly, A("E9"), false)), "A9", "Home without Ctrl does not stop at the freeze boundary");
+
+  const both = sheet({ freezeRows: 2, freezeCols: 3 });
+  assert.equal(ref(nav.home(both, A("G9"), true)), "D3");
+  assert.equal(ref(nav.home(both, A("A1"), true)), "D3", "from inside the frozen region");
+
+  const hiddenEdge = sheet({ freezeRows: 2, freezeCols: 2, hiddenRows: [3, 4], hiddenCols: [1, 3] });
+  assert.equal(ref(nav.home(hiddenEdge, A("F8"), true)), "D5", "skips hidden rows and columns past the freeze lines");
+  assert.equal(ref(nav.home(hiddenEdge, A("F8"), false)), "B8", "Home still goes to the first shown column of the row");
+
+  const clamped = sheet({ freezeRows: 999, freezeCols: 999 });
+  assert.equal(ref(nav.home(clamped, A("A1"), true)), "T100", "clamps freeze counts below the sheet limit");
+  assert.equal(ref(nav.home(sheet({ freezeRows: -3, freezeCols: Number.NaN }), A("E5"), true)), "A1", "invalid freeze inputs fall back to zero");
+  assert.deepEqual(nav.home({ maxRows: Number.NaN, maxCols: undefined, freezeRows: 2, freezeCols: 1 }, A("E5"), true), { r: 1, c: 1 }, "non-finite sheet limits never yield NaN");
+
+  const allTailHidden = sheet({ freezeRows: 98, hiddenRows: [99, 100], hiddenCols: [] });
+  assert.equal(ref(nav.home(allTailHidden, A("E5"), true)), "A1", "falls back to the earliest shown row if all unfrozen rows are hidden");
 });
 
 test("a sheet with nothing in it: Ctrl+Down goes to the last row, Ctrl+Up to the first, without visiting the empty cells", () => {

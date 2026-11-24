@@ -85,6 +85,52 @@ test("frozen rows and columns stay in the window and pin with sticky offsets", a
   assert.equal(far.children[1].dataset.cell.startsWith("A"), true, "column A is kept in every row");
   assert.equal(far.children[1].classList.contains("frozen-col"), true);
 
+  viewport.scrollLeft = 240;
+  const farTd = far.children[2];
+  farTd.focus();
+  farTd.dispatchEvent({ type: "keydown", key: "Home", ctrlKey: true, target: farTd });
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("active-cell-ref").textContent, "B3");
+  assert.deepEqual([viewport.scrollTop, viewport.scrollLeft], [0, 0], "Ctrl+Home resets scrollable offsets at the freeze boundary");
+
+  // Selection paint covers frozen rows/cols when extending across freeze lines (`Shift+Home`, `Ctrl+Shift+Home`).
+  const d4 = document.querySelector('#pane-sheet td[data-cell="D4"]');
+  d4.focus();
+  d4.dispatchEvent({ type: "keydown", key: "Home", shiftKey: true, target: d4 });
+  await flushAsyncTurns();
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="A4"]').classList.contains("in-range"), true, "Shift+Home highlights frozen column A");
+  assert.equal(document.querySelector('#pane-sheet th[data-col="A"]').classList.contains("active-axis"), true);
+
+  const a1 = document.querySelector('#pane-sheet td[data-cell="A1"]');
+  a1.focus();
+  a1.dispatchEvent({ type: "keydown", key: "Home", ctrlKey: true, shiftKey: true, target: a1 });
+  await flushAsyncTurns();
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="A2"]').classList.contains("in-range"), true);
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="B1"]').classList.contains("in-range"), true);
+  assert.equal(document.querySelector('#pane-sheet th[data-row="1"]').classList.contains("active-axis"), true);
+
+  // A cross-freeze merged cell (A2:C4) still resets scrollable offsets to (0, 0) on Ctrl+Home.
+  layout().addMerge("Sheet1", 2, 1, 4, 3);
+  viewport.scrollTop = 24 * 3000;
+  viewport.scrollLeft = 240;
+  viewport.dispatchEvent({ type: "scroll" });
+  await flushAsyncTurns();
+  const farMergeRow = rowsInDom(document).at(-1);
+  const farMergeTd = [...document.querySelectorAll(`#pane-sheet tr[data-row="${farMergeRow}"] td[data-cell]`)].at(-1);
+  farMergeTd.focus();
+  farMergeTd.dispatchEvent({ type: "keydown", key: "Home", ctrlKey: true, target: farMergeTd });
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("active-cell-ref").textContent, "A2");
+  assert.deepEqual([viewport.scrollTop, viewport.scrollLeft], [0, 0], "cross-freeze merge still resets scroll on Ctrl+Home");
+  layout().removeMerges("Sheet1", 1, 1, 10, 10);
+
+  // Negative/fractional freeze inputs normalize cleanly and never synthesize a column 0 header.
+  userCall(layout(), "freeze", { rows: 2.8, cols: -3 });
+  viewport.dispatchEvent({ type: "scroll" });
+  await flushAsyncTurns();
+  assert.deepEqual(layout().freezeOf("Sheet1"), { rows: 2, cols: 0 });
+  assert.equal(document.querySelector('#pane-sheet th[data-col=""]'), null);
+
   await act("freeze-clear");
   assert.equal(layout().freezeOf("Sheet1"), null);
   assert.equal(document.querySelector('#pane-sheet th[data-col="A"]').classList.contains("frozen-col"), false);

@@ -573,9 +573,7 @@
     layout.defaultColWidth = json?.defaultColWidth && typeof json.defaultColWidth === "object" ? { ...json.defaultColWidth } : null; // XLSX `defaultColWidth`, `baseColWidth`: kept so a save writes them back (PD-303)
     layout.defaultColPx = layout.defaultColWidth && Number.isInteger(json.defaultColPx) && json.defaultColPx >= MIN_COL_PX && json.defaultColPx <= MAX_DEFAULT_COL_PX ? json.defaultColPx : null; // the width the engine worked out for them (PD-305)
     layout.filter = json?.filter ? filterFromJson(json.filter) : null;
-    const rows = Number(json?.freeze?.rows) || 0;
-    const cols = Number(json?.freeze?.cols) || 0;
-    layout.freeze = rows > 0 || cols > 0 ? { rows, cols } : null;
+    layout.freeze = normalizeFreeze(json?.freeze);
     layout.tabColor = /^[0-9a-f]{6}$/i.test(json?.tabColor || "") ? json.tabColor.toLowerCase() : null;
     layout.veryHidden = json?.veryHidden === true;
     layout.hidden = json?.hidden === true || layout.veryHidden;
@@ -943,7 +941,9 @@
     touch();
   }
 
-  const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
+  const freezeAxis = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.trunc(Number(v)) : 0);
+  const normalizeFreeze = (f) => { const rows = freezeAxis(f?.rows), cols = freezeAxis(f?.cols); return rows > 0 || cols > 0 ? { rows, cols } : null; };
+  const setFreeze = (name, freeze) => setView(name, "freeze", normalizeFreeze(freeze));
   // The colour of the sheet's tab as "rrggbb", null for none (PD-229).
   const setTabColor = (name, rgb) => setView(name, "tabColor", /^[0-9a-f]{6}$/i.test(rgb || "") ? rgb.toLowerCase() : null);
   const setHiddenSheet = (name, hidden) => setView(name, "hidden", hidden === true);

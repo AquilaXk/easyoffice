@@ -9,9 +9,14 @@
   function createFreeze({ layoutApi, getSheetName, rowTop, colLeft, headH, rowHeadW, maxRows, maxCols }) {
     let painted = false;
 
+    const clampCount = (raw, max) => {
+      const n = Number(raw);
+      return !Number.isFinite(n) || !Number.isFinite(max) || max <= 1 ? 0 : Math.max(0, Math.min(max - 1, Math.trunc(n)));
+    };
+
     function counts() {
       const f = layoutApi ? layoutApi.freezeOf(getSheetName()) : null;
-      return f ? { rows: Math.min(f.rows, maxRows - 1), cols: Math.min(f.cols, maxCols - 1) } : { rows: 0, cols: 0 };
+      return f ? { rows: clampCount(f.rows, maxRows), cols: clampCount(f.cols, maxCols) } : { rows: 0, cols: 0 };
     }
 
     // Height of the first `n` rows (hidden ones count 0) and width of the first `n` columns.

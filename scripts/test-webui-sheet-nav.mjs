@@ -178,6 +178,71 @@ test("Home, Ctrl+Home and Ctrl+End, alone and with Shift", async () => {
   assert.deepEqual(h.range(), ["A5", "B5", "C5", "D5", "E5"]);
 });
 
+test("Ctrl+Home on frozen panes goes to the top-left shown cell of the unfrozen pane, extends with Shift, and returns to A1 on unfreeze (PD-350)", async () => {
+  const h = await open();
+  h.layout.setFreeze(SHEET, { rows: 2, cols: 1 });
+  h.go("E5");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "B3", "lands on the first unfrozen cell below rows 1-2 and right of column A");
+
+  h.go("A1");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "B3", "works even when starting inside the frozen pane");
+
+  h.go("E5");
+  h.press("Home");
+  assert.equal(h.active(), "A5", "Home without Ctrl stays at the first shown column of the row");
+
+  h.go("E5");
+  h.press("Home", { altKey: true });
+  assert.equal(h.active(), "E5", "Alt+Home does not hijack sheet cell navigation");
+
+  h.go("D4");
+  h.press("Home", { ...CTRL, shiftKey: true });
+  assert.equal(h.active(), "D4", "Ctrl+Shift+Home keeps anchor at D4");
+  assert.deepEqual(h.range(), ["B3", "B4", "C3", "C4", "D3", "D4"], "Ctrl+Shift+Home extends from D4 to B3");
+
+  h.go("A1");
+  h.press("Home", { ...CTRL, shiftKey: true });
+  assert.deepEqual(h.range(), ["A1", "A2", "A3", "B1", "B2", "B3"], "Ctrl+Shift+Home from A1 includes frozen cells in range");
+
+  h.layout.setHidden(SHEET, "row", 3, 3, true);
+  h.layout.setHidden(SHEET, "col", 2, 2, true);
+  h.go("E5");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "C4", "skips hidden unfrozen row 3 and hidden unfrozen column B");
+
+  h.layout.addMerge(SHEET, 4, 3, 5, 4);
+  h.go("F7");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "C4", "keeps anchor when unfrozen origin starts a merged range");
+
+  h.layout.setHidden(SHEET, "row", 3, 3, false);
+  h.layout.setHidden(SHEET, "col", 2, 2, false);
+  h.layout.removeMerges(SHEET, 1, 1, 10, 10);
+  h.layout.addMerge(SHEET, 2, 1, 4, 3);
+  h.go("F7");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "A2", "cross-freeze merge lands on its top-left anchor A2");
+  h.layout.removeMerges(SHEET, 1, 1, 10, 10);
+
+  h.layout.setFreeze(SHEET, { rows: 2.9, cols: -3 });
+  assert.deepEqual(h.layout.freezeOf(SHEET), { rows: 2, cols: 0 }, "negative/fractional freeze counts normalize");
+  h.go("D6");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "A3", "row-only freeze lands at A3");
+
+  h.layout.setFreeze(SHEET, { rows: 0, cols: 2 });
+  h.go("D6");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "C1", "col-only freeze lands at C1");
+
+  h.layout.setFreeze(SHEET, { rows: 0, cols: 0 });
+  h.go("D6");
+  h.press("Home", CTRL);
+  assert.equal(h.active(), "A1", "clearing freeze restores Ctrl+Home to A1");
+});
+
 test("PageDown and PageUp move a screen of rows, Alt+PageDown and Alt+PageUp a screen of columns, Shift extends", async () => {
   const h = await open();
   h.go("B2");
