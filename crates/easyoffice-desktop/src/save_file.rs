@@ -31,6 +31,75 @@ const MAX_TEMP_NAME_ATTEMPTS: u32 = 16;
 /// How many times the user is asked about a file that keeps changing under the question.
 const MAX_CONFIRMATIONS: usize = 3;
 
+/// Result of classifying a `save_document_file` request before touching disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveMode {
+    /// Overwrite the window's tracked bidirectional file in place (falling back to the dialog if untracked).
+    InPlace,
+    /// Open the save dialog and track the resulting path on the window + recent documents.
+    DialogTracked,
+    /// Open the save dialog for an export copy without changing the window's tracked path or recents.
+    DialogExportOnly,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SaveOptions {
+    pub in_place: Option<bool>,
+    pub export_only: Option<bool>,
+    pub track_saved: Option<bool>,
+}
+
+/// Extensions that support lossless/bidirectional in-place saving (matches `BIDIRECTIONAL_SAVE_EXTS`
+/// in `workspace-tools.js` plus `.hwp` written by the embedded Hangul editor in `hwp-session.js`).
+/// Experimental `.pages` packages and lossy/read-only formats (`.doc`, `.ppt`, `.pdf`, `.hwt`,
+/// `.hwtx`) are never overwritten in place.
+pub fn allows_in_place_extension(extension: &str) -> bool {
+    matches!(
+        extension.trim().to_ascii_lowercase().as_str(),
+        "docx"
+            | "odt"
+            | "rtf"
+            | "md"
+            | "markdown"
+            | "txt"
+            | "hwpx"
+            | "hwp"
+            | "xlsx"
+            | "xls"
+            | "ods"
+            | "csv"
+            | "tsv"
+            | "pptx"
+            | "ppsx"
+            | "odp"
+            | "eobase"
+            | "eoboard"
+    )
+}
+
+/// Validates save vs. export-copy options and enforces the non-bidirectional in-place guard.
+pub fn resolve_save_mode(extension: &str, options: SaveOptions) -> Result<SaveMode, String> {
+    if options.export_only == Some(true) && options.track_saved == Some(true) {
+        return Err("내보내기 옵션이 서로 모순되어 저장할 수 없습니다.".to_string());
+    }
+    let export_only = options.export_only == Some(true) || options.track_saved == Some(false);
+    if export_only {
+        if options.in_place == Some(true) {
+            return Err("내보내기 사본 저장에서는 원본 파일을 덮어쓸 수 없습니다.".to_string());
+        }
+        return Ok(SaveMode::DialogExportOnly);
+    }
+    if options.in_place == Some(true) {
+        if !allows_in_place_extension(extension) {
+            return Err(format!(
+                ".{extension} 형식은 원본 파일을 덮어써 저장할 수 없습니다. 다른 이름으로 저장 또는 내보내기를 사용하세요."
+            ));
+        }
+        return Ok(SaveMode::InPlace);
+    }
+    Ok(SaveMode::DialogTracked)
+}
+
 /// A save request from the WebView: a proposed file name (never a path) plus the document bytes.
 #[derive(Debug)]
 pub struct SaveRequest {

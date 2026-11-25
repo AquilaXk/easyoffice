@@ -30,6 +30,10 @@ pub(crate) const MAX_TABLE_CELLS: usize = 2_000_000;
 const MAX_TOTAL_CELLS: usize = 4_000_000;
 const MAX_LIST_ENTRIES: usize = 2_000_000;
 const MAX_TOTAL_LIST_ENTRIES: usize = 2_000_000;
+const MAX_TOTAL_STROKE_LAYERS: usize = 200_000;
+const MAX_TOTAL_STROKE_RUNS: usize = 2_000_000;
+const MAX_TOTAL_STROKE_CELLS: usize = 4_000_000;
+const MAX_TOTAL_STYLED_CELLS: usize = 2_000_000;
 const MAX_PAYLOAD_CACHE: usize = 65_536;
 const CELL_TEXT_OVERHEAD: usize = 16;
 const MAX_TILE_ROWS: u64 = 65_536;
@@ -40,6 +44,10 @@ pub(crate) struct TableBudget {
     tables: usize,
     total_cells: usize,
     total_list_entries: usize,
+    total_stroke_layers: usize,
+    total_stroke_runs: usize,
+    total_stroke_cells: usize,
+    total_styled_cells: usize,
 }
 
 impl TableBudget {
@@ -72,6 +80,58 @@ impl TableBudget {
             .ok_or_else(|| {
                 EasyOfficeError::ResourceBudgetExceeded(
                     "Pages 표 목록 항목 수 한도 초과".to_string(),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub(super) fn charge_stroke_layer(&mut self) -> Result<(), EasyOfficeError> {
+        self.total_stroke_layers = self
+            .total_stroke_layers
+            .checked_add(1)
+            .filter(|total| *total <= MAX_TOTAL_STROKE_LAYERS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 테두리 레이어 총수 한도 초과".to_string(),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub(super) fn charge_stroke_run(&mut self) -> Result<(), EasyOfficeError> {
+        self.total_stroke_runs = self
+            .total_stroke_runs
+            .checked_add(1)
+            .filter(|total| *total <= MAX_TOTAL_STROKE_RUNS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 테두리 런 총수 한도 초과".to_string(),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub(super) fn charge_stroke_cells(&mut self, cells: usize) -> Result<(), EasyOfficeError> {
+        self.total_stroke_cells = self
+            .total_stroke_cells
+            .checked_add(cells)
+            .filter(|total| *total <= MAX_TOTAL_STROKE_CELLS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 테두리 확장 셀 총수 한도 초과".to_string(),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub(super) fn charge_styled_cells(&mut self, cells: usize) -> Result<(), EasyOfficeError> {
+        self.total_styled_cells = self
+            .total_styled_cells
+            .checked_add(cells)
+            .filter(|total| *total <= MAX_TOTAL_STYLED_CELLS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 셀 스타일 총수 한도 초과".to_string(),
                 )
             })?;
         Ok(())
@@ -527,7 +587,15 @@ pub(crate) fn read_table(
     };
     let merges = merge::read_merges(objects, &model_msg, &store);
     let col_widths_twips = read_col_widths_twips(objects, &model_msg, &store, cols)?;
-    let cell_styles = assemble_cell_styles(objects, &model_msg, rows, cols, &ctx.cell_fills_out)?;
+    let cell_styles = assemble_cell_styles(
+        objects,
+        &model_msg,
+        rows,
+        cols,
+        &ctx.cell_fills_out,
+        budget,
+        text_budget,
+    )?;
     Ok(TableOutcome::Read(TableRead {
         grid,
         merges,

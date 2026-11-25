@@ -715,8 +715,8 @@ pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
     if !out.ends_with('}') {
         return;
     }
-    let nodes = easyoffice_formats::PdfSerializer::parse_outline_nodes(bytes).unwrap_or_default();
-    let form = easyoffice_formats::PdfSerializer::parse_form_fields(bytes).unwrap_or_default();
+    let (nodes, form) = easyoffice_formats::PdfSerializer::parse_outlines_and_form_fields(bytes)
+        .unwrap_or_default();
     out.pop();
     out.push_str(",\"pdfOutlines\":[");
     for (idx, node) in nodes.iter().enumerate() {

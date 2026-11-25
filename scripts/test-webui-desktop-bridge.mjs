@@ -499,3 +499,27 @@ test("the bridge opens a sheet link through the shell's open_link command with t
   assert.ok(caps.permissions.includes("allow-open-link"));
   assert.ok(readText(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url)).includes('"open_link"'));
 });
+
+test("saveFile forwards exportOnly for copy exports and rejects contradictory inPlace + exportOnly", async () => {
+  const saves = [];
+  const { sandbox } = await createShellHarness({
+    saveFile: (args) => {
+      saves.push(args);
+      return { status: "saved", name: args.fileName, bytes: 10 };
+    },
+  });
+  const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  await bridge.saveFile("QQ==", "사본.docx", { inPlace: false, exportOnly: true });
+  await bridge.saveFile("QQ==", "사본2.pdf", { trackSaved: false });
+  assert.equal(saves.length, 2);
+  assert.deepEqual(Object.keys(saves[0]).sort((a, b) => a.localeCompare(b)), ["base64", "exportOnly", "fileName", "inPlace"]);
+  assert.equal(saves[0].inPlace, false);
+  assert.equal(saves[0].exportOnly, true);
+  assert.equal(saves[1].inPlace, false);
+  assert.equal(saves[1].exportOnly, true);
+
+  await assert.rejects(bridge.saveFile("QQ==", "a.docx", { inPlace: true, exportOnly: true }), /덮어쓸 수 없습니다/);
+  await assert.rejects(bridge.saveFile("QQ==", "a.docx", { inPlace: true, trackSaved: false }), /덮어쓸 수 없습니다/);
+  await assert.rejects(bridge.saveFile("QQ==", "a.docx", { exportOnly: true, trackSaved: true }), /모순됩니다/);
+  assert.equal(saves.length, 2);
+});

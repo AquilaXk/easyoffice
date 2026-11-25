@@ -659,3 +659,94 @@ fn launch_files_and_urls_accept_pages_bundle_directories_and_read_open_target_su
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn export_only_dialog_save_preserves_original_tracked_file_and_duplicate_open_lock() {
+    let dir = scratch_dir("export-only-track");
+    let orig = dir.join("원본.docx");
+    let other_win = dir.join("다른창.docx");
+    let export_same = dir.join("배포본.docx");
+    let export_pdf = dir.join("배포본.pdf");
+    let export_pages = dir.join("배포본.pages");
+    let save_as_target = dir.join("새이름.docx");
+    for p in [
+        &orig,
+        &other_win,
+        &export_same,
+        &export_pdf,
+        &export_pages,
+        &save_as_target,
+    ] {
+        fs::write(p, p.to_string_lossy().as_bytes()).unwrap();
+    }
+
+    let orig_canon = fs::canonicalize(&orig).unwrap();
+    let other_canon = fs::canonicalize(&other_win).unwrap();
+    let orig_fp = Fingerprint::of(&orig_canon).unwrap();
+    let other_fp = Fingerprint::of(&other_canon).unwrap();
+
+    let state = AppWindows::new(None);
+    locked(&state.registry).register("doc-1-a", WindowKind::Doc);
+    locked(&state.registry)
+        .claim_path("doc-1-a", path_key(&orig_canon))
+        .unwrap();
+    locked(&state.files).track_opened("doc-1-a", orig_canon.clone(), orig_canon.clone(), orig_fp);
+
+    locked(&state.registry).register("doc-2-b", WindowKind::Doc);
+    locked(&state.registry)
+        .claim_path("doc-2-b", path_key(&other_canon))
+        .unwrap();
+    locked(&state.files).track_opened(
+        "doc-2-b",
+        other_canon.clone(),
+        other_canon.clone(),
+        other_fp,
+    );
+
+    // 1. Exporting same-extension copy (`배포본.docx`), `.pdf`, `.pages`, or even overwriting another
+    // window's path (`다른창.docx`) with `track_saved = false` keeps `원본.docx` tracked & locked.
+    for target in [&export_same, &export_pdf, &export_pages, &other_win] {
+        let fp = Fingerprint::of(target).unwrap();
+        assert_eq!(
+            state.finish_dialog_save("doc-1-a", target, Some(fp), false),
+            None
+        );
+        let tracked = locked(&state.files).get("doc-1-a").unwrap();
+        assert_eq!(tracked.path, orig_canon);
+        assert_eq!(tracked.fingerprint, orig_fp);
+        assert_eq!(
+            locked(&state.registry).find_by_path(&path_key(&orig_canon)),
+            Some("doc-1-a")
+        );
+        assert_eq!(
+            locked(&state.registry).find_by_path(&path_key(&other_canon)),
+            Some("doc-2-b")
+        );
+    }
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&fs::canonicalize(&export_same).unwrap())),
+        None
+    );
+
+    // 2. Normal Save As (`track_saved = true`) updates tracking & transfers duplicate-open claim.
+    let save_as_fp = Fingerprint::of(&save_as_target).unwrap();
+    let shown = state
+        .finish_dialog_save("doc-1-a", &save_as_target, Some(save_as_fp), true)
+        .unwrap();
+    let save_as_canon = fs::canonicalize(&save_as_target).unwrap();
+    assert_eq!(shown, save_as_canon);
+    assert_eq!(
+        locked(&state.files).get("doc-1-a").unwrap().path,
+        save_as_canon
+    );
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&orig_canon)),
+        None
+    );
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&save_as_canon)),
+        Some("doc-1-a")
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

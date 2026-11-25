@@ -156,6 +156,28 @@ impl AppWindows {
             Err(err) => eprintln!("recent: {err}"),
         }
     }
+
+    pub(crate) fn finish_dialog_save(
+        &self,
+        label: &str,
+        path: &Path,
+        fingerprint: Option<Fingerprint>,
+        track_saved: bool,
+    ) -> Option<PathBuf> {
+        if !track_saved {
+            return None;
+        }
+        let OpenTarget { canonical, shown } = OpenTarget::of(path).ok()?;
+        // A path another window shows keeps its owner; the saving window simply stays untracked.
+        let claimed = locked(&self.registry)
+            .claim_path(label, path_key(&canonical))
+            .is_ok();
+        match fingerprint {
+            Some(fp) if claimed => locked(&self.files).track(label, canonical, shown.clone(), fp),
+            _ => locked(&self.files).untrack(label),
+        }
+        Some(shown)
+    }
 }
 
 /// Margin kept free around a new window and the height the window frame takes beyond the inner
@@ -665,22 +687,11 @@ pub fn note_saved_path(
     path: &Path,
     fingerprint: Option<Fingerprint>,
 ) {
-    let Ok(OpenTarget { canonical, shown }) = OpenTarget::of(path) else {
-        return;
-    };
     let state = app.state::<AppWindows>();
-    // A path another window shows keeps its owner; the saving window simply stays untracked.
-    let claimed = locked(&state.registry)
-        .claim_path(label, path_key(&canonical))
-        .is_ok();
-    match fingerprint {
-        Some(fingerprint) if claimed => {
-            locked(&state.files).track(label, canonical.clone(), shown.clone(), fingerprint)
-        }
-        _ => locked(&state.files).untrack(label),
+    if let Some(shown) = state.finish_dialog_save(label, path, fingerprint, true) {
+        state.remember(app, &shown);
+        crate::os_recent::note_recent_document(app, &shown);
     }
-    state.remember(app, &shown);
-    crate::os_recent::note_recent_document(app, &shown);
 }
 
 /// The file this window's document came from (or was last saved to), if any. Rust-internal.

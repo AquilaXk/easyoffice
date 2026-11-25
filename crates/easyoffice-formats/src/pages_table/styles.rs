@@ -3,7 +3,10 @@
 //! All repeated structures enforce strict per-table limits so hostile sidecars or header buckets
 //! fail closed with [`EasyOfficeError::ResourceBudgetExceeded`].
 
-use super::{reference, KeyedList, TableBudget, MAX_LIST_ENTRIES, MAX_TABLE_COLS};
+use std::collections::hash_map::Entry;
+
+use super::{reference, KeyedList, TableBudget, MAX_LIST_ENTRIES, MAX_TABLE_COLS, MAX_TABLE_ROWS};
+use crate::decode_budget::DecodeBudget;
 use crate::pages_proto::{FastU64Map, Message, ObjectTable};
 use crate::pages_schema::{table, ty, COLOR_RGBA};
 use crate::rich_table_style::{
@@ -13,8 +16,13 @@ use crate::rich_table_style::{
 use crate::EasyOfficeError;
 
 const MAX_HEADER_ENTRIES: usize = MAX_TABLE_COLS * 16;
-const MAX_STROKE_LAYERS: usize = 20_480;
+/// Matches the maximum valid table (`MAX_TABLE_ROWS` x `MAX_TABLE_COLS`) across all 4 axes,
+/// including the outer right (`index == cols`) and outer bottom (`index == rows`) border layers.
+const MAX_STROKE_LAYERS: usize =
+    (MAX_TABLE_ROWS + 1) + MAX_TABLE_ROWS + (MAX_TABLE_COLS + 1) + MAX_TABLE_COLS;
 const MAX_STROKE_RUNS: usize = 250_000;
+/// Maximum RLE border-cell expansions permitted on a single table before failing closed.
+const MAX_STROKE_CELLS_PER_TABLE: usize = MAX_STYLED_TABLE_CELLS * 8;
 const DEFAULT_COL_WIDTH_TWIPS: u32 = 1_440;
 const MAX_COL_WIDTH_PT: f64 = 2_000.0;
 const DOTTED_MAX_DASH_PT: f32 = 2.5;
@@ -240,12 +248,18 @@ fn set_edge(
         return Ok(());
     }
     let key = ((row as u64) << 32) | (col as u64);
-    if !map.contains_key(&key) && map.len() >= MAX_STYLED_TABLE_CELLS {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(
-            "Pages 표 셀 스타일 수 한도 초과".to_string(),
-        ));
-    }
-    let slot = map.entry(key).or_default();
+    let len = map.len();
+    let slot = match map.entry(key) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => {
+            if len >= MAX_STYLED_TABLE_CELLS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 셀 스타일 수 한도 초과".to_string(),
+                ));
+            }
+            entry.insert(BorderPriority::default())
+        }
+    };
     if order >= slot.orders[edge_slot] {
         slot.orders[edge_slot] = order;
         match edge_slot {
@@ -263,6 +277,7 @@ struct StrokeLayerAcc {
     cols: usize,
     layers_seen: usize,
     runs_seen: usize,
+    cells_expanded: usize,
     borders: FastU64Map<BorderPriority>,
 }
 
@@ -273,8 +288,26 @@ impl StrokeLayerAcc {
             cols,
             layers_seen: 0,
             runs_seen: 0,
+            cells_expanded: 0,
             borders: FastU64Map::default(),
         }
+    }
+
+    fn charge_cells(
+        &mut self,
+        span: usize,
+        budget: &mut TableBudget,
+    ) -> Result<(), EasyOfficeError> {
+        self.cells_expanded = self
+            .cells_expanded
+            .checked_add(span)
+            .filter(|total| *total <= MAX_STROKE_CELLS_PER_TABLE)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 테두리 확장 셀 수 한도 초과".to_string(),
+                )
+            })?;
+        budget.charge_stroke_cells(span)
     }
 
     fn apply_layers(
@@ -283,6 +316,7 @@ impl StrokeLayerAcc {
         sidecar: &Message,
         field: u32,
         axis: BorderAxis,
+        budget: &mut TableBudget,
     ) -> Result<(), EasyOfficeError> {
         let mut layer_ids = Vec::new();
         let collect_res = sidecar.for_each_sub(field, |sub| {
@@ -292,6 +326,7 @@ impl StrokeLayerAcc {
                 ));
             }
             self.layers_seen += 1;
+            budget.charge_stroke_layer()?;
             if let Some(id) = sub.varint(1) {
                 layer_ids.push(id);
             }
@@ -322,6 +357,7 @@ impl StrokeLayerAcc {
                     ));
                 }
                 self.runs_seen += 1;
+                budget.charge_stroke_run()?;
                 let origin = run
                     .varint(table::STROKE_RUN_ORIGIN)
                     .and_then(|v| usize::try_from(v).ok())
@@ -337,48 +373,49 @@ impl StrokeLayerAcc {
                     return Ok(());
                 };
                 let edge = parse_stroke_edge(&stroke);
+                if edge.is_unspecified() {
+                    return Ok(());
+                }
                 let order = run.varint(table::STROKE_RUN_ORDER).unwrap_or(0);
-                let borders = &mut self.borders;
-                match axis {
+                let target = match axis {
                     BorderAxis::LeftCol => {
                         if index < cols && origin < rows {
-                            let end = origin.saturating_add(length).min(rows);
-                            for r in origin..end {
-                                set_edge(borders, r, index, 3, edge, order)?;
-                            }
+                            Some((index, 3usize, rows, true))
                         } else if index == cols && cols > 0 && origin < rows {
-                            let end = origin.saturating_add(length).min(rows);
-                            for r in origin..end {
-                                set_edge(borders, r, cols - 1, 1, edge, order)?;
-                            }
+                            Some((cols - 1, 1usize, rows, true))
+                        } else {
+                            None
                         }
                     }
                     BorderAxis::RightCol => {
-                        if index < cols && origin < rows {
-                            let end = origin.saturating_add(length).min(rows);
-                            for r in origin..end {
-                                set_edge(borders, r, index, 1, edge, order)?;
-                            }
-                        }
+                        (index < cols && origin < rows).then_some((index, 1usize, rows, true))
                     }
                     BorderAxis::TopRow => {
                         if index < rows && origin < cols {
-                            let end = origin.saturating_add(length).min(cols);
-                            for c in origin..end {
-                                set_edge(borders, index, c, 0, edge, order)?;
-                            }
+                            Some((index, 0usize, cols, false))
                         } else if index == rows && rows > 0 && origin < cols {
-                            let end = origin.saturating_add(length).min(cols);
-                            for c in origin..end {
-                                set_edge(borders, rows - 1, c, 2, edge, order)?;
-                            }
+                            Some((rows - 1, 2usize, cols, false))
+                        } else {
+                            None
                         }
                     }
                     BorderAxis::BottomRow => {
-                        if index < rows && origin < cols {
-                            let end = origin.saturating_add(length).min(cols);
+                        (index < rows && origin < cols).then_some((index, 2usize, cols, false))
+                    }
+                };
+                if let Some((fixed, edge_slot, limit, along_rows)) = target {
+                    let end = origin.saturating_add(length).min(limit);
+                    let span = end.saturating_sub(origin);
+                    if span > 0 {
+                        self.charge_cells(span, budget)?;
+                        let borders = &mut self.borders;
+                        if along_rows {
+                            for r in origin..end {
+                                set_edge(borders, r, fixed, edge_slot, edge, order)?;
+                            }
+                        } else {
                             for c in origin..end {
-                                set_edge(borders, index, c, 2, edge, order)?;
+                                set_edge(borders, fixed, c, edge_slot, edge, order)?;
                             }
                         }
                     }
@@ -399,6 +436,8 @@ pub(super) fn assemble_cell_styles(
     rows: usize,
     cols: usize,
     cell_fills: &[(u32, u32, CellFill)],
+    budget: &mut TableBudget,
+    text_budget: &mut DecodeBudget,
 ) -> Result<Vec<TableCellStyleEntry>, EasyOfficeError> {
     let mut acc = StrokeLayerAcc::new(rows, cols);
     if let Some(sidecar_obj) = reference(model, table::MODEL_STROKE_SIDECAR)
@@ -412,7 +451,7 @@ pub(super) fn assemble_cell_styles(
                 (table::STROKE_SIDECAR_TOP_ROWS, BorderAxis::TopRow),
                 (table::STROKE_SIDECAR_BOTTOM_ROWS, BorderAxis::BottomRow),
             ] {
-                acc.apply_layers(objects, &sidecar, field, axis)?;
+                acc.apply_layers(objects, &sidecar, field, axis, budget)?;
             }
         }
     }
@@ -423,25 +462,31 @@ pub(super) fn assemble_cell_styles(
     }
 
     let mut combined: FastU64Map<TableCellStyleEntry> = FastU64Map::default();
+    let entry_bytes = std::mem::size_of::<TableCellStyleEntry>();
     for &(row, col, fill) in cell_fills {
         if fill.is_none() || row as usize >= rows || col as usize >= cols {
             continue;
         }
         let key = (u64::from(row) << 32) | u64::from(col);
-        if !combined.contains_key(&key) && combined.len() >= MAX_STYLED_TABLE_CELLS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "Pages 표 셀 스타일 수 한도 초과".to_string(),
-            ));
+        let len = combined.len();
+        match combined.entry(key) {
+            Entry::Occupied(mut e) => e.get_mut().fill = fill,
+            Entry::Vacant(e) => {
+                if len >= MAX_STYLED_TABLE_CELLS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 표 셀 스타일 수 한도 초과".to_string(),
+                    ));
+                }
+                budget.charge_styled_cells(1)?;
+                text_budget.charge(entry_bytes, "Pages 표 셀 스타일")?;
+                e.insert(TableCellStyleEntry {
+                    row,
+                    col,
+                    fill,
+                    borders: TableCellBorders::default(),
+                });
+            }
         }
-        combined
-            .entry(key)
-            .and_modify(|e| e.fill = fill)
-            .or_insert(TableCellStyleEntry {
-                row,
-                col,
-                fill,
-                borders: TableCellBorders::default(),
-            });
     }
     for (key, prio) in border_map {
         if prio.edges.is_unspecified() {
@@ -449,23 +494,116 @@ pub(super) fn assemble_cell_styles(
         }
         let row = (key >> 32) as u32;
         let col = key as u32;
-        if !combined.contains_key(&key) && combined.len() >= MAX_STYLED_TABLE_CELLS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "Pages 표 셀 스타일 수 한도 초과".to_string(),
-            ));
+        let len = combined.len();
+        match combined.entry(key) {
+            Entry::Occupied(mut e) => e.get_mut().borders = prio.edges,
+            Entry::Vacant(e) => {
+                if len >= MAX_STYLED_TABLE_CELLS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 표 셀 스타일 수 한도 초과".to_string(),
+                    ));
+                }
+                budget.charge_styled_cells(1)?;
+                text_budget.charge(entry_bytes, "Pages 표 셀 스타일")?;
+                e.insert(TableCellStyleEntry {
+                    row,
+                    col,
+                    fill: CellFill::NONE,
+                    borders: prio.edges,
+                });
+            }
         }
-        combined
-            .entry(key)
-            .and_modify(|e| e.borders = prio.edges)
-            .or_insert(TableCellStyleEntry {
-                row,
-                col,
-                fill: CellFill::NONE,
-                borders: prio.edges,
-            });
     }
 
     let mut out: Vec<TableCellStyleEntry> = combined.into_values().collect();
     out.sort_by_key(|e| (u64::from(e.row) << 32) | u64::from(e.col));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pages_proto::ArchiveObject;
+
+    fn varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn f_varint(num: u32, v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        varint(u64::from(num) << 3, &mut out);
+        varint(v, &mut out);
+        out
+    }
+
+    fn f_bytes(num: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        varint((u64::from(num) << 3) | 2, &mut out);
+        varint(bytes.len() as u64, &mut out);
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    fn f_ref(num: u32, id: u64) -> Vec<u8> {
+        f_bytes(num, &f_varint(1, id))
+    }
+
+    #[test]
+    fn max_stroke_layers_matches_max_table_four_edge_axes_and_rejects_excess() {
+        assert_eq!(
+            MAX_STROKE_LAYERS,
+            (MAX_TABLE_ROWS + 1) + MAX_TABLE_ROWS + (MAX_TABLE_COLS + 1) + MAX_TABLE_COLS
+        );
+        let mut objects = ObjectTable::default();
+        objects.objects.insert(
+            1,
+            ArchiveObject {
+                type_id: ty::STROKE_LAYER,
+                payload: f_varint(table::STROKE_LAYER_INDEX, 0).into(),
+                extra: Vec::new(),
+            },
+        );
+        let entry = f_ref(table::STROKE_SIDECAR_TOP_ROWS, 1);
+        let mut ok_payload = Vec::with_capacity(entry.len() * 20_512);
+        for _ in 0..20_512 {
+            ok_payload.extend_from_slice(&entry);
+        }
+        let ok_sidecar = Message::parse(&ok_payload).unwrap();
+        let mut acc = StrokeLayerAcc::new(MAX_TABLE_ROWS, MAX_TABLE_COLS);
+        let mut budget = TableBudget::default();
+        acc.apply_layers(
+            &objects,
+            &ok_sidecar,
+            table::STROKE_SIDECAR_TOP_ROWS,
+            BorderAxis::TopRow,
+            &mut budget,
+        )
+        .expect("max 10_000 x 256 table 4-edge layer count must succeed");
+
+        let mut over_payload = ok_payload;
+        for _ in 0..3 {
+            over_payload.extend_from_slice(&entry);
+        }
+        let over_sidecar = Message::parse(&over_payload).unwrap();
+        let mut acc2 = StrokeLayerAcc::new(MAX_TABLE_ROWS, MAX_TABLE_COLS);
+        let mut budget2 = TableBudget::default();
+        let err = acc2
+            .apply_layers(
+                &objects,
+                &over_sidecar,
+                table::STROKE_SIDECAR_TOP_ROWS,
+                BorderAxis::TopRow,
+                &mut budget2,
+            )
+            .unwrap_err();
+        assert!(matches!(err, EasyOfficeError::ResourceBudgetExceeded(_)));
+    }
 }

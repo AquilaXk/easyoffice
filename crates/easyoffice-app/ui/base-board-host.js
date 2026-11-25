@@ -37,7 +37,7 @@
     const bridge = runtime?.desktopBridge || host.__EASYOFFICE_DESKTOP_BRIDGE__;
     if (bridge?.isAvailable?.()) {
       try {
-        const res = await bridge.saveFile(base64Data, fileName, { inPlace: false });
+        const res = await bridge.saveFile(base64Data, fileName, { inPlace: false, exportOnly: true });
         if (res?.status === "cancelled") return { ok: false, cancelled: true, name: "", error: "" };
         return { ok: true, cancelled: false, name: String(res?.name || fileName), error: "" };
       } catch (err) {

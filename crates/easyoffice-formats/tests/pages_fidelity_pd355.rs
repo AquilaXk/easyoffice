@@ -612,3 +612,323 @@ fn right_indent_float_and_web_edition_line_spacing_field_19_do_not_interfere() {
     assert_eq!(second.right_indent_twips, None);
     assert_eq!(second.line_spacing_percent, Some(140));
 }
+
+#[test]
+fn hostile_rle_stroke_expansion_and_shared_sidecar_amplification_fail_closed() {
+    use easyoffice_formats::pages_iwa::IwaRecord;
+    use easyoffice_formats::pages_proto::{ArchiveInfo, MessageInfo};
+
+    let mut tbl = RichTable::from(vec![vec!["셀".to_string()]]);
+    tbl.cell_styles.push(TableCellStyleEntry {
+        row: 0,
+        col: 0,
+        fill: CellFill::NONE,
+        borders: TableCellBorders {
+            left: TableBorderEdge::new(TableBorderKind::Thin, 0x112233),
+            ..TableCellBorders::default()
+        },
+    });
+    let base_bytes = write_pages(&doc(vec![RichBlock::Table(tbl)]));
+    let entries = ZipArchiveCodec::unpack(&base_bytes, &ZipSecurityPolicy::default()).unwrap();
+    let doc_entry = entries
+        .iter()
+        .find(|e| e.path == "Index/Document.iwa")
+        .unwrap();
+    let mut budget = usize::MAX;
+    let stream = decompress_iwa(&doc_entry.data, &mut budget).unwrap();
+    let base_records = split_records(&stream).unwrap();
+
+    let stroke_msg = [
+        f_bytes(
+            1,
+            &[
+                f_float(1, 0.0),
+                f_float(2, 0.0),
+                f_float(3, 0.0),
+                f_float(4, 1.0),
+            ]
+            .concat(),
+        ),
+        f_float(2, 1.0),
+        f_bytes(3, &f_varint(1, 0)),
+    ]
+    .concat();
+    let solid_long_run = f_bytes(
+        2,
+        &[
+            f_varint(1, 0),
+            f_varint(2, 10_000),
+            f_bytes(3, &stroke_msg),
+            f_varint(4, 1),
+        ]
+        .concat(),
+    );
+
+    let pack_doc_iwa = |recs: &[IwaRecord]| {
+        let repacked: Vec<(String, Vec<u8>)> = entries
+            .iter()
+            .map(|e| {
+                (
+                    e.path.clone(),
+                    if e.path == "Index/Document.iwa" {
+                        encode_records_stream(recs)
+                    } else {
+                        e.data.clone()
+                    },
+                )
+            })
+            .collect();
+        ZipArchiveCodec::pack(&repacked).unwrap()
+    };
+
+    // Case 1: Single 10_000 x 1 table with 250 overlapping runs of length 10_000 (2_500_000
+    // expanded cells, far below MAX_STROKE_RUNS = 250_000) must fail closed before looping.
+    let mut single_table_dos = base_records.clone();
+    for rec in &mut single_table_dos {
+        match rec.info.messages.first().map(|m| m.type_id) {
+            Some(6001) => {
+                let msg = Message::parse(&rec.payloads[0]).unwrap();
+                let mut rebuilt = [f_varint(6, 10_000), f_varint(7, 1)].concat();
+                for f in &msg.fields {
+                    if !matches!(f.number, 6 | 7) {
+                        if let WireValue::Varint(v) = f.value {
+                            rebuilt.extend(f_varint(f.number, v));
+                        } else if let WireValue::Bytes(raw) = f.value {
+                            rebuilt.extend(f_bytes(f.number, raw));
+                        }
+                    }
+                }
+                rec.payloads[0] = rebuilt;
+            }
+            Some(6306) => {
+                let mut payload = f_varint(1, 0);
+                for _ in 0..250 {
+                    payload.extend_from_slice(&solid_long_run);
+                }
+                rec.payloads[0] = payload;
+            }
+            _ => {}
+        }
+    }
+    let err1 =
+        UniversalFormatConverter::decode_rich(&pack_doc_iwa(&single_table_dos), Some("a.pages"));
+    assert!(
+        matches!(&err1, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 확장 셀")),
+        "expected ResourceBudgetExceeded for overlapping long RLE runs, got {err1:?}"
+    );
+
+    // Case 2: 400 tables (10_000 x 1 = 4_000_000 total cells <= MAX_TOTAL_CELLS) sharing one
+    // STROKE_SIDECAR with 50 runs of length 10_000 (500_000 per table <= per-table limit,
+    // 200_000_000 across doc) must trip TableBudget cumulative stroke-cell cap immediately.
+    let mut multi_table_dos = base_records;
+    let max_id = multi_table_dos
+        .iter()
+        .map(|r| r.info.identifier)
+        .max()
+        .unwrap_or(1_000);
+    let mut next_id = max_id + 100;
+    let mut store_id_opt = None;
+    let mut sidecar_id_opt = None;
+    let mut info_drawable_opt = None;
+    for rec in &mut multi_table_dos {
+        match rec.info.messages.first().map(|m| m.type_id) {
+            Some(6000) => {
+                let msg = Message::parse(&rec.payloads[0]).unwrap();
+                info_drawable_opt = msg
+                    .fields
+                    .iter()
+                    .find(|f| f.number == 1)
+                    .and_then(|f| match f.value {
+                        WireValue::Bytes(b) => Some(b.to_vec()),
+                        _ => None,
+                    });
+            }
+            Some(6001) => {
+                let msg = Message::parse(&rec.payloads[0]).unwrap();
+                store_id_opt =
+                    msg.fields
+                        .iter()
+                        .find(|f| f.number == 4)
+                        .and_then(|f| match f.value {
+                            WireValue::Bytes(b) => Some(b.to_vec()),
+                            _ => None,
+                        });
+                sidecar_id_opt =
+                    msg.fields
+                        .iter()
+                        .find(|f| f.number == 49)
+                        .and_then(|f| match f.value {
+                            WireValue::Bytes(b) => Some(b.to_vec()),
+                            _ => None,
+                        });
+                let mut rebuilt = [f_varint(6, 10_000), f_varint(7, 1)].concat();
+                for f in &msg.fields {
+                    if !matches!(f.number, 6 | 7) {
+                        if let WireValue::Varint(v) = f.value {
+                            rebuilt.extend(f_varint(f.number, v));
+                        } else if let WireValue::Bytes(raw) = f.value {
+                            rebuilt.extend(f_bytes(f.number, raw));
+                        }
+                    }
+                }
+                rec.payloads[0] = rebuilt;
+            }
+            Some(6306) => {
+                let mut payload = f_varint(1, 0);
+                for _ in 0..50 {
+                    payload.extend_from_slice(&solid_long_run);
+                }
+                rec.payloads[0] = payload;
+            }
+            _ => {}
+        }
+    }
+    let store_bytes = store_id_opt.expect("table data store field");
+    let sidecar_bytes = sidecar_id_opt.expect("table sidecar ref");
+    let info_drawable_bytes = info_drawable_opt.expect("table info drawable field");
+    let body_storage_id = multi_table_dos
+        .iter()
+        .find(|r| r.info.messages.first().map(|m| m.type_id) == Some(10000))
+        .and_then(|r| Message::parse(&r.payloads[0]).ok())
+        .and_then(|m| m.sub(4).ok().flatten())
+        .and_then(|s| s.varint(1))
+        .unwrap();
+
+    let mut extra_attachments = Vec::new();
+    for _ in 0..399 {
+        let model_id = next_id;
+        let info_id = next_id + 1;
+        let att_id = next_id + 2;
+        next_id += 3;
+        let mut model_payload = [f_varint(6, 10_000), f_varint(7, 1)].concat();
+        model_payload.extend(f_bytes(4, &store_bytes));
+        model_payload.extend(f_bytes(49, &sidecar_bytes));
+        multi_table_dos.push(IwaRecord {
+            info: ArchiveInfo {
+                identifier: model_id,
+                messages: vec![MessageInfo {
+                    type_id: 6001,
+                    length: model_payload.len() as u32,
+                    object_references: Vec::new(),
+                    data_references: Vec::new(),
+                }],
+            },
+            payloads: vec![model_payload],
+        });
+        let info_payload = [f_bytes(1, &info_drawable_bytes), f_ref(2, model_id)].concat();
+        multi_table_dos.push(IwaRecord {
+            info: ArchiveInfo {
+                identifier: info_id,
+                messages: vec![MessageInfo {
+                    type_id: 6000,
+                    length: info_payload.len() as u32,
+                    object_references: Vec::new(),
+                    data_references: Vec::new(),
+                }],
+            },
+            payloads: vec![info_payload],
+        });
+        let att_payload = f_ref(1, info_id);
+        multi_table_dos.push(IwaRecord {
+            info: ArchiveInfo {
+                identifier: att_id,
+                messages: vec![MessageInfo {
+                    type_id: 2003,
+                    length: att_payload.len() as u32,
+                    object_references: Vec::new(),
+                    data_references: Vec::new(),
+                }],
+            },
+            payloads: vec![att_payload],
+        });
+        extra_attachments.push(att_id);
+    }
+    let body_rec = multi_table_dos
+        .iter_mut()
+        .find(|r| r.info.identifier == body_storage_id)
+        .unwrap();
+    let body_msg = Message::parse(&body_rec.payloads[0]).unwrap();
+    let old_text = body_msg.string(3).ok().flatten().unwrap_or_default();
+    let mut new_text = old_text;
+    let mut att_entries = Vec::new();
+    if let Ok(Some(att_tbl)) = body_msg.sub(9) {
+        let _ = att_tbl.for_each_sub(1, |e| {
+            let idx = e.varint(1).unwrap_or(0);
+            let obj = e
+                .sub(2)
+                .ok()
+                .flatten()
+                .and_then(|s| s.varint(1))
+                .unwrap_or(0);
+            att_entries.push([f_varint(1, idx), f_ref(2, obj)].concat());
+            Ok(())
+        });
+    }
+    for att_id in extra_attachments {
+        let char_idx = new_text.encode_utf16().count() as u64;
+        new_text.push('\u{FFFC}');
+        att_entries.push([f_varint(1, char_idx), f_ref(2, att_id)].concat());
+    }
+    let mut rebuilt_body = Vec::new();
+    for f in &body_msg.fields {
+        match f.number {
+            3 => rebuilt_body.extend(f_bytes(3, new_text.as_bytes())),
+            9 => {
+                let packed: Vec<u8> = att_entries.iter().flat_map(|e| f_bytes(1, e)).collect();
+                rebuilt_body.extend(f_bytes(9, &packed));
+            }
+            n => match f.value {
+                WireValue::Varint(v) => rebuilt_body.extend(f_varint(n, v)),
+                WireValue::Bytes(raw) => rebuilt_body.extend(f_bytes(n, raw)),
+                _ => {}
+            },
+        }
+    }
+    body_rec.payloads[0] = rebuilt_body;
+
+    let err2 =
+        UniversalFormatConverter::decode_rich(&pack_doc_iwa(&multi_table_dos), Some("multi.pages"));
+    assert!(
+        matches!(&err2, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 확장 셀 총수")),
+        "expected ResourceBudgetExceeded for shared sidecar multi-table DoS, got {err2:?}"
+    );
+
+    // Case 3: Multi-table shared sidecar with 5_500 zero-length runs across 400 small tables
+    // (1 x 1 each) must trip TableBudget cumulative stroke-run cap instead of scanning 2M+ runs.
+    let mut noop_multi_dos = multi_table_dos;
+    let noop_run = f_bytes(2, &[f_varint(1, 0), f_varint(2, 0)].concat());
+    for rec in &mut noop_multi_dos {
+        match rec.info.messages.first().map(|m| m.type_id) {
+            Some(6001) => {
+                let msg = Message::parse(&rec.payloads[0]).unwrap();
+                let mut rebuilt = [f_varint(6, 1), f_varint(7, 1)].concat();
+                for f in &msg.fields {
+                    if !matches!(f.number, 6 | 7) {
+                        if let WireValue::Varint(v) = f.value {
+                            rebuilt.extend(f_varint(f.number, v));
+                        } else if let WireValue::Bytes(raw) = f.value {
+                            rebuilt.extend(f_bytes(f.number, raw));
+                        }
+                    }
+                }
+                rec.payloads[0] = rebuilt;
+            }
+            Some(6306) => {
+                let mut payload = f_varint(1, 0);
+                for _ in 0..5_500 {
+                    payload.extend_from_slice(&noop_run);
+                }
+                rec.payloads[0] = payload;
+            }
+            _ => {}
+        }
+    }
+    let err3 = UniversalFormatConverter::decode_rich(
+        &pack_doc_iwa(&noop_multi_dos),
+        Some("noop-multi.pages"),
+    );
+    assert!(
+        matches!(&err3, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 런 총수")),
+        "expected ResourceBudgetExceeded for shared sidecar noop-run amplification, got {err3:?}"
+    );
+}

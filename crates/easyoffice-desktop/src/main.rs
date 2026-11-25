@@ -202,6 +202,7 @@ async fn ipc_dispatch(
 /// Saves converted document bytes to a location the user picks in the native save dialog.
 /// The WebView never supplies a file-system path: it only proposes a file name, and the path
 /// comes from the dialog shown by this process.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn save_document_file(
     _caller: ShellCaller,
@@ -210,8 +211,20 @@ async fn save_document_file(
     file_name: String,
     base64: String,
     in_place: Option<bool>,
+    export_only: Option<bool>,
+    track_saved: Option<bool>,
     thumbnail_svg: Option<String>,
 ) -> Result<SaveOutcome, IpcError> {
+    let (_, ext) = save_file::split_file_name(&file_name).map_err(IpcError::new)?;
+    let mode = save_file::resolve_save_mode(
+        &ext,
+        save_file::SaveOptions {
+            in_place,
+            export_only,
+            track_saved,
+        },
+    )
+    .map_err(IpcError::new)?;
     let font_dirs = pdf_job::pdf_font_dirs(&app);
     // Decoding and checking a document of up to 256MiB takes a while: off the async workers. The
     // preview picture (first page as SVG, PD-132) is made here too and never fails the save.
@@ -225,7 +238,7 @@ async fn save_document_file(
     .await
     .map_err(|err| IpcError::new(format!("문서를 확인하지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
-    if in_place == Some(true) {
+    if mode == save_file::SaveMode::InPlace {
         // A document that came from (or was saved to) a file with the same format is written back to
         // that file; everything else falls through to the save dialog.
         let tracked = window_commands::tracked_file(&app, window.label())
@@ -234,7 +247,8 @@ async fn save_document_file(
             return save_tracked(&app, &window, tracked, request).await;
         }
     }
-    save_via_dialog(&app, &window, request).await
+    let track_saved = mode != save_file::SaveMode::DialogExportOnly;
+    save_via_dialog(&app, &window, request, track_saved).await
 }
 
 /// Asks where to save with the native save dialog; `None` when the user cancels (or declines to save
@@ -317,6 +331,7 @@ async fn save_via_dialog(
     app: &AppHandle,
     window: &WebviewWindow,
     request: SaveRequest,
+    track_saved: bool,
 ) -> Result<SaveOutcome, IpcError> {
     let Some(path) = pick_save_path(
         app,
@@ -337,7 +352,9 @@ async fn save_via_dialog(
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
     .map_err(|err| report_save_failure(app, window, &err))?;
     let (path, written) = written;
-    window_commands::note_saved_path(app, window.label(), &path, written.fingerprint);
+    if track_saved {
+        window_commands::note_saved_path(app, window.label(), &path, written.fingerprint);
+    }
     Ok(SaveOutcome::saved(&path, written.bytes))
 }
 

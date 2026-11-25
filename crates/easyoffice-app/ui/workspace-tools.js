@@ -370,7 +370,7 @@
       if (curMod === "PDF" && deps.getPdfEdit?.()?.isActive()) return savePdfEdit(deps.getPdfEdit());
       const isConv = curMod === "CONV";
       const spec = isConv
-        ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
+        ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false, exportOnly: true }
         : defaultSaveSpecForModule(curMod, saveAs);
       const dstExt = spec.ext || "docx";
       if (curMod === "BASE" || curMod === "BOARD") return saveEditPackage(curMod, spec);
@@ -400,7 +400,9 @@
         return false;
       }
       let failure = converted.failure;
-      const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;
+      const deliver = spec.inPlace
+        ? deliverInPlace
+        : (b64, base, ext, extra) => deliverSavedFile(b64, base, ext, spec.exportOnly ? { ...extra, inPlace: false, exportOnly: true } : extra);
       const delivery = failure ? null : await deliver(converted.b64, title, dstExt);
       if (delivery?.cancelled) {
         setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");

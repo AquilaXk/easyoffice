@@ -142,14 +142,24 @@
   // Error whose message explains why the file was not written. `options.inPlace` asks Rust to write
   // back to the file this window's document came from (same format; Rust keeps the path and checks
   // the file did not change on disk); without it, or when Rust has no matching file, the dialog opens.
+  // `options.exportOnly` (or `options.trackSaved === false`) saves a copy without altering the
+  // window's tracked file path and forbids `inPlace`.
   // `options.thumbnailSvg` is the first page of a Hangul document: Rust draws it small and stores it as
   // the file's preview picture (PD-132), and saves the document without one if that fails.
   async function saveFile(base64Data, fileName, options) {
+    if (options?.exportOnly === true && options?.trackSaved === true) {
+      throw new Error("내보내기 옵션이 서로 모순됩니다.");
+    }
+    const exportOnly = options?.exportOnly === true || options?.trackSaved === false;
+    if (exportOnly && options?.inPlace === true) {
+      throw new Error("내보내기 사본 저장에서는 원본 파일을 덮어쓸 수 없습니다.");
+    }
     const args = {
       fileName: String(fileName),
       base64: String(base64Data),
       inPlace: Boolean(options?.inPlace),
     };
+    if (exportOnly) args.exportOnly = true;
     if (typeof options?.thumbnailSvg === "string" && options.thumbnailSvg) args.thumbnailSvg = options.thumbnailSvg;
     const res = await callShell(SAVE_COMMAND, args);
     if (res && (res.status === "saved" || res.status === "cancelled")) return res;

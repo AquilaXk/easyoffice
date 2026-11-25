@@ -782,7 +782,7 @@
         if (delivery?.cancelled) { notify("PDF 저장 취소: 저장 위치를 선택하지 않았습니다."); return null; }
       } else {
         const bridge = deps.desktopBridge || host.__EASYOFFICE_DESKTOP_BRIDGE__;
-        if (bridge?.isAvailable?.()) await bridge.saveFile(b64, fileName, { inPlace: false });
+        if (bridge?.isAvailable?.()) await bridge.saveFile(b64, fileName, { inPlace: false, exportOnly: true });
       }
       notify("PDF 내보내기 완료 (" + fileName + ")");
       return res;

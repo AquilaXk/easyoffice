@@ -659,6 +659,17 @@ fn collect_pdf_form_fields(
 }
 
 impl PdfSerializer {
+    pub fn parse_outlines_and_form_fields(
+        bytes: &[u8],
+    ) -> Result<(Vec<PdfOutlineNode>, PdfFormReadback), EasyOfficeError> {
+        let (objects, trailers) = decode_pdf_objects(bytes)?;
+        let ordered_objs = ordered_by_sequence(&objects);
+        let catalog = resolve_catalog_dict(&objects, &ordered_objs, &trailers);
+        let (_, _, _, nodes) = collect_pdf_outlines(catalog, &objects);
+        let form = collect_pdf_form_fields(catalog, &objects);
+        Ok((nodes, form))
+    }
+
     pub fn parse_outline_nodes(bytes: &[u8]) -> Result<Vec<PdfOutlineNode>, EasyOfficeError> {
         let (objects, trailers) = decode_pdf_objects(bytes)?;
         let ordered_objs = ordered_by_sequence(&objects);
@@ -885,5 +896,30 @@ mod tests {
                 value: Some("Yes".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn single_pass_outlines_and_form_fields_matches_individual_parsers() {
+        let pdf = minimal_pdf(
+            &[
+                (
+                    1,
+                    "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R /AcroForm 6 0 R >>",
+                ),
+                (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+                (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"),
+                (4, "<< /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >>"),
+                (5, "<< /Title (1. 개요) /Parent 4 0 R >>"),
+                (6, "<< /Fields [7 0 R] >>"),
+                (7, "<< /FT /Tx /T (applicant) /V (홍길동) >>"),
+            ],
+            1,
+        );
+        let (nodes, form) = PdfSerializer::parse_outlines_and_form_fields(&pdf).unwrap();
+        assert_eq!(nodes, PdfSerializer::parse_outline_nodes(&pdf).unwrap());
+        assert_eq!(form, PdfSerializer::parse_form_fields(&pdf).unwrap());
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].title, "1. 개요");
+        assert_eq!(form.applicant.as_deref(), Some("홍길동"));
     }
 }

@@ -615,7 +615,7 @@
               if (box) box.textContent = "변환 취소: 암호 없이 저장하지 않았습니다";
               return;
             }
-            const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst);
+            const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst, { inPlace: false, exportOnly: true });
             if (box && res) {
               const srcTxt = `${res.sourceFormat.toUpperCase()} (${res.sourceBytes}B)`;
               const dstTxt = `${res.targetFormat.toUpperCase()} (${res.outputBytes}B)`;

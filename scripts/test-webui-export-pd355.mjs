@@ -115,7 +115,7 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
   const bridge = document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance;
   bridge.applyTitles({ ...bridge.getTitles(), DOC: "원본보고서.pages" });
 
-  // Export via menu item -> .pages always keeps inPlace: false and leaves document title unchanged.
+  // Export via menu item -> .pages always keeps inPlace: false, exportOnly: true and leaves document title unchanged.
   const pagesItem = document.querySelector('.md-item[data-export-format="pages"]');
   assert.ok(pagesItem && !pagesItem.hidden, "DOC shows Pages export menu item");
   userClick(pagesItem);
@@ -123,9 +123,10 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
   assert.equal(converts.at(-1)?.targetFormat, "pages");
   assert.equal(saves.at(-1)?.fileName, "원본보고서.pages");
   assert.equal(saves.at(-1)?.inPlace, false, "explicit .pages export must never overwrite in place");
+  assert.equal(saves.at(-1)?.exportOnly, true, "explicit export must carry exportOnly: true");
   assert.equal(bridge.getDocumentName("DOC"), "원본보고서.pages");
 
-  // Format selector dialog sanitizes malicious stems and runs conversion with inPlace: false.
+  // Format selector dialog sanitizes malicious stems (C0/C1 control chars) and runs conversion with inPlace: false, exportOnly: true.
   userClick(document.querySelector(".md-item[data-export-dialog]"));
   await flushAsyncTurns(4);
   const dialog = document.getElementById("export-dialog");
@@ -135,12 +136,31 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
   assert.deepEqual(opts, ["docx", "odt", "rtf", "pages", "md", "txt", "pdf"]);
   sel.value = "odt";
   sel.dispatchEvent({ type: "change" });
-  document.getElementById("export-file-name").value = "../../탈출시도\0.docx";
+  document.getElementById("export-file-name").value = "../../탈출\u0085시도\0.docx";
   userClick(document.getElementById("btn-export-run"));
   await flushAsyncTurns(12);
   assert.equal(saves.at(-1)?.fileName, "탈출시도.odt");
   assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
   assert.equal(dialog.open, false);
+
+  // Exporting a same-extension copy from an opened .docx keeps title and subsequent Save inPlace: true.
+  bridge.applyTitles({ ...bridge.getTitles(), DOC: "원본.docx" });
+  userClick(document.querySelector(".md-item[data-export-dialog]"));
+  await flushAsyncTurns(4);
+  document.getElementById("export-format-select").value = "docx";
+  document.getElementById("export-file-name").value = "배포본.docx";
+  userClick(document.getElementById("btn-export-run"));
+  await flushAsyncTurns(12);
+  assert.equal(saves.at(-1)?.fileName, "배포본.docx");
+  assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
+  assert.equal(bridge.getDocumentName("DOC"), "원본.docx");
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(12);
+  assert.equal(saves.at(-1)?.fileName, "원본.docx");
+  assert.equal(saves.at(-1)?.inPlace, true);
+  assert.equal(saves.at(-1)?.exportOnly, undefined);
 
   // Module kind filtering isolates HWP and swaps SHEET/SLIDE/PDF options.
   switchModule(document, "SHEET");
@@ -328,6 +348,14 @@ test("BASE/BOARD export send valid backend sourceFormats, reject empty BOARD PDF
   assert.equal(converts.at(-1)?.sourceFormat, "xlsx");
   assert.equal(converts.at(-1)?.targetFormat, "csv");
   assert.equal(saves.at(-1)?.fileName, "NUL_보고서_.csv");
+  assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
+
+  // Direct BASE studio export (deliverExport) and BOARD PDF export also carry exportOnly: true.
+  const baseStudio = document.defaultView.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+  await baseStudio.exportAs("xlsx");
+  assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
 
   switchModule(document, "BOARD");
   await flushAsyncTurns(8);
@@ -347,6 +375,8 @@ test("BASE/BOARD export send valid backend sourceFormats, reject empty BOARD PDF
   await flushAsyncTurns(12);
   assert.equal(converts.at(-1)?.sourceFormat, "pptx");
   assert.equal(converts.at(-1)?.targetFormat, "pdf");
+  assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
 
   switchModule(document, "CONV");
   await flushAsyncTurns(6);

@@ -796,3 +796,101 @@ fn export_formats_reject_spoofed_extensions_control_chars_and_dot_stems() {
     assert!(SaveRequest::parse("위조.docx", &base64_codec::encode(&pdf)).is_err());
     assert!(SaveRequest::parse("위조.pdf", &base64_codec::encode(&pages)).is_err());
 }
+
+#[test]
+fn save_mode_rejects_in_place_for_export_only_and_non_bidirectional_formats() {
+    for ext in [
+        "docx", "DOCX", "odt", "rtf", "md", "markdown", "txt", "hwpx", "hwp", "xlsx", "xls", "ods",
+        "csv", "tsv", "pptx", "ppsx", "odp", "eobase", "eoboard",
+    ] {
+        assert_eq!(
+            resolve_save_mode(
+                ext,
+                SaveOptions {
+                    in_place: Some(true),
+                    export_only: None,
+                    track_saved: None,
+                },
+            ),
+            Ok(SaveMode::InPlace),
+            "expected {ext} to allow in-place save"
+        );
+    }
+
+    for lossy_ext in ["pages", "PAGES", "doc", "ppt", "pdf", "hwt", "hwtx", "xyz"] {
+        assert!(
+            resolve_save_mode(
+                lossy_ext,
+                SaveOptions {
+                    in_place: Some(true),
+                    export_only: None,
+                    track_saved: None,
+                },
+            )
+            .is_err(),
+            "expected {lossy_ext} to refuse in-place save"
+        );
+        assert_eq!(
+            resolve_save_mode(
+                lossy_ext,
+                SaveOptions {
+                    in_place: Some(false),
+                    export_only: None,
+                    track_saved: None,
+                },
+            ),
+            Ok(SaveMode::DialogTracked),
+            "expected {lossy_ext} Save As dialog to succeed"
+        );
+    }
+
+    assert_eq!(
+        resolve_save_mode(
+            "docx",
+            SaveOptions {
+                in_place: Some(false),
+                export_only: Some(true),
+                track_saved: None,
+            },
+        ),
+        Ok(SaveMode::DialogExportOnly)
+    );
+    assert_eq!(
+        resolve_save_mode(
+            "pages",
+            SaveOptions {
+                in_place: None,
+                export_only: None,
+                track_saved: Some(false),
+            },
+        ),
+        Ok(SaveMode::DialogExportOnly)
+    );
+    assert!(resolve_save_mode(
+        "docx",
+        SaveOptions {
+            in_place: Some(true),
+            export_only: Some(true),
+            track_saved: None,
+        },
+    )
+    .is_err());
+    assert!(resolve_save_mode(
+        "docx",
+        SaveOptions {
+            in_place: Some(true),
+            export_only: None,
+            track_saved: Some(false),
+        },
+    )
+    .is_err());
+    assert!(resolve_save_mode(
+        "docx",
+        SaveOptions {
+            in_place: Some(false),
+            export_only: Some(true),
+            track_saved: Some(true),
+        },
+    )
+    .is_err());
+}

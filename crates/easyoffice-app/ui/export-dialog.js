@@ -3,7 +3,7 @@
 
   // Safe explicit export & format selector dialog (PD-355).
   // Preserves PD-162 / PD-336 overwrite protection: exports always request a new target
-  // (`inPlace: false`) and never replace the opened `.pages` package or editable source.
+  // (`inPlace: false, exportOnly: true`) and never replace the opened `.pages` package or editable source.
 
   const EXPORT_SPECS = Object.freeze({
     DOC: [
@@ -59,7 +59,7 @@
   function sanitizeBaseName(raw, fallback) {
     const safeFallback = String(fallback || "EasyOffice_문서").trim() || "EasyOffice_문서";
     let base = String(raw || "")
-      .replaceAll(/[\u0000-\u001f\u007f]/g, "")
+      .replaceAll(/[\u0000-\u001f\u007f-\u009f]/g, "")
       .split(/[/\\]/)
       .pop()
       .trim();
@@ -181,7 +181,7 @@
       }
 
       if ((curMod === "BASE" && ext === "eobase") || (curMod === "BOARD" && ext === "eoboard")) {
-        const deliverAsCopy = (b64, base, outExt) => deliverSavedFile(b64, base, outExt, { inPlace: false });
+        const deliverAsCopy = (b64, base, outExt) => deliverSavedFile(b64, base, outExt, { inPlace: false, exportOnly: true });
         const saved = await host.__EASYOFFICE_BASE_BOARD_HOST__.savePackage(curMod, deliverAsCopy, safeBase);
         if (saved.cancelled) {
           setStatusFeedback("내보내기 취소 (" + ext.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");
@@ -213,7 +213,7 @@
         return { ok: false, error: converted.failure };
       }
 
-      const delivery = await deliverSavedFile(converted.b64, safeBase, ext, { inPlace: false });
+      const delivery = await deliverSavedFile(converted.b64, safeBase, ext, { inPlace: false, exportOnly: true });
       if (delivery?.cancelled) {
         setStatusFeedback("내보내기 취소 (" + ext.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");
         return { ok: false, cancelled: true };
