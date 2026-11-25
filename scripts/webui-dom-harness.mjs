@@ -441,7 +441,7 @@ function closestFrom(start, sel, scope) {
   return null;
 }
 
-/** Calls the listeners of `eventObj.type` from `start` up through its ancestors (focus/blur do not bubble). */
+/** Calls the listeners of `eventObj.type` from `start` up through its ancestors (focus/blur/mouseenter/mouseleave do not bubble). */
 function dispatchFrom(start, eventObj) {
   for (let cur = start; cur; cur = cur.parentElement) {
     const fns = cur._listeners.get(eventObj.type) || [];
@@ -449,7 +449,13 @@ function dispatchFrom(start, eventObj) {
       fn.call(cur, eventObj);
       if (eventObj.immediateStopped) break;
     }
-    if (eventObj.type === "focus" || eventObj.type === "blur" || eventObj.propagationStopped) break;
+    if (
+      eventObj.type === "focus" ||
+      eventObj.type === "blur" ||
+      eventObj.type === "mouseenter" ||
+      eventObj.type === "mouseleave" ||
+      eventObj.propagationStopped
+    ) break;
   }
 }
 
@@ -766,6 +772,7 @@ class MiniElement extends MiniNode {
     const eventObj = {
       type: ev.type,
       target: ev.target || this,
+      relatedTarget: ev.relatedTarget ?? null,
       key: ev.key || "",
       code: ev.code || "",
       metaKey: Boolean(ev.metaKey),

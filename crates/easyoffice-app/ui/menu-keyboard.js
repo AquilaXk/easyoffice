@@ -17,14 +17,29 @@
   const HOVER_GUARD_MS = 80;
   const ACTIVATION_KEYS = ["Enter", " "];
 
+  const closeListeners = new WeakMap();
+
+  function onMenusClosed(document, fn) {
+    if (!document || typeof fn !== "function") return;
+    let listeners = closeListeners.get(document);
+    if (!listeners) {
+      listeners = new Set();
+      closeListeners.set(document, listeners);
+    }
+    listeners.add(fn);
+  }
+
   // Closes every open menu and keeps the titles' `aria-expanded` in step (also used by the actions
   // that open a dialog or window from a menu item).
   function closeAllMenus(document) {
+    if (!document) return;
     for (const menu of document.querySelectorAll(".menu-item.open")) {
       menu.classList.remove("open");
       delete menu.dataset.openedByHover;
       menu.querySelector(TITLE_SELECTOR)?.setAttribute("aria-expanded", "false");
     }
+    const listeners = closeListeners.get(document);
+    if (listeners) for (const fn of listeners) fn();
   }
 
   function createMenuKeyboard({ document }) {
@@ -50,13 +65,7 @@
     }
 
     function closeAll() {
-      if (activeOpenMenu) {
-        activeOpenMenu.classList.remove("open");
-        delete activeOpenMenu.dataset.openedByHover;
-        titleOf(activeOpenMenu)?.setAttribute("aria-expanded", "false");
-        activeOpenMenu = null;
-        return;
-      }
+      activeOpenMenu = null;
       closeAllMenus(document);
     }
 
@@ -105,16 +114,27 @@
 
     function openSubmenu(sub) {
       const items = itemsOf(sub.querySelector('[role="menu"]'));
-      focusAt(items, 0);
+      if (!items.length) return;
+      sub.dataset.opening = "1";
+      try {
+        focusAt(items, 0);
+      } finally {
+        delete sub.dataset.opening;
+      }
     }
 
     function activate(item) {
       if (isDisabled(item)) return;
       if (item.classList.contains("md-sub")) return openSubmenu(item);
       const title = titleOf(item.closest(".menu-item"));
-      closeAll();
-      title?.focus();
-      item.click();
+      item.dataset.eoActivating = "1";
+      try {
+        closeAll();
+        title?.focus();
+        item.click();
+      } finally {
+        delete item.dataset.eoActivating;
+      }
     }
 
     function onItemKey(ev, item) {
@@ -190,7 +210,7 @@
       for (const title of document.querySelectorAll(TITLE_SELECTOR)) bindTitle(title, host);
       document.querySelector(".studio-menubar")?.addEventListener("keydown", onMenubarKeydown);
       document.addEventListener("click", (ev) => {
-        if (!activeOpenMenu) return;
+        if (!openMenu()) return;
         if (!ev?.target?.closest?.(".studio-menubar")) closeAll();
       });
       host.addEventListener("keydown", onEscape);
@@ -201,4 +221,5 @@
 
   host.__EASYOFFICE_CREATE_MENU_KEYBOARD__ = createMenuKeyboard;
   host.__EASYOFFICE_CLOSE_MENUS__ = closeAllMenus;
+  host.__EASYOFFICE_ON_MENUS_CLOSED__ = onMenusClosed;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

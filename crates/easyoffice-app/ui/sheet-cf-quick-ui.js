@@ -8,6 +8,7 @@
   // edit them is in sheet-rules-ui.js. A menu action is one undo step; a dialog that is cancelled leaves nothing behind.
 
   const PREVIEW_DELAY_MS = 120;
+  const LEAVE_DELAY_MS = 48;
   // A gallery panel starts 4px above its row (`.md-sub-panel` `top`) and keeps 8px from the window's edges.
   const PANEL_TOP = -4;
   const PANEL_MARGIN = 8;
@@ -35,7 +36,7 @@
   };
 
   function createSheetCfQuickUi(deps) {
-    const { document, kit, rules, sheetDataStore, getActiveSheetName, getRange, selectionBoxes, selectionText, tableBox, pivotBox, syncClearMenu, commitRules, beginStep, finishStep, isBlocked, openManager } = deps;
+    const { document, kit, rules, sheetDataStore, getActiveSheetName, getRange, selectionBoxes, selectionText, tableBox, pivotBox, syncClearMenu, commitRules, beginStep, finishStep, beginPreview, isBlocked, openManager } = deps;
     const P = host.__EASYOFFICE_SHEET_CF_PRESETS__;
     const PV = host.__EASYOFFICE_SHEET_CF_PREVIEW__;
     const { $, val, setVal, setSelect, openDialog, closeDialog, fillOptions } = kit;
@@ -241,6 +242,77 @@
 
     const add = (rule) => commitRules((next) => void next.cf.unshift(rule));
 
+    function galleryRule(action, range) {
+      const at = String(action || "").indexOf("-");
+      if (at < 0) return null;
+      const head = action.slice(0, at);
+      const rest = action.slice(at + 1);
+      if (head === "bar") {
+        const preset = P.BARS.find((b) => b.id === rest);
+        return preset ? P.barRule(range, preset) : null;
+      }
+      if (head === "scale") {
+        const preset = P.SCALES.find((s) => s.id === rest);
+        return preset ? P.scaleRule(range, preset) : null;
+      }
+      if (head === "icons") {
+        const name = rules.ICON_SET_NAMES.find((n) => n.toLowerCase() === rest);
+        return name ? P.iconRule(range, name) : null;
+      }
+      return null;
+    }
+
+    // Live preview for gallery tiles while hovered or keyboard-focused (PD-351): creates 0 undo steps until clicked.
+    let hover = null;
+
+    function clearLeaveTimer() {
+      if (hover?.leaveTimer != null) {
+        host.clearTimeout?.(hover.leaveTimer);
+        hover.leaveTimer = null;
+      }
+    }
+
+    function revertHover() {
+      clearLeaveTimer();
+      if (!hover) return;
+      const { step, version } = hover;
+      hover = null;
+      if (version === undefined || rules.version() === version) rules.set(step.sheet, step.before);
+    }
+
+    function previewTile(tile) {
+      clearLeaveTimer();
+      if (dialog.session || tile.getAttribute("aria-disabled") === "true") return;
+      const action = tile.dataset.sheetCf || "";
+      const sheet = getActiveSheetName();
+      if (hover && (hover.step.sheet !== sheet || (hover.version !== undefined && hover.version !== rules.version()))) revertHover();
+      const range = hover ? hover.range : selectionText();
+      const rule = galleryRule(action, range);
+      if (!rule) return revertHover();
+      if (!hover) {
+        const step = beginPreview?.();
+        if (!step) return;
+        hover = { step, range, action: "", tile: null, next: null, leaveTimer: null, version: undefined };
+      }
+      hover.tile = tile;
+      if (hover.action === action) return;
+      hover.action = action;
+      hover.next = { cf: [rule, ...hover.step.before.cf], dv: hover.step.before.dv };
+      rules.set(hover.step.sheet, hover.next);
+      hover.version = rules.version();
+    }
+
+    function takeHover(action) {
+      clearLeaveTimer();
+      if (hover && hover.action === action && hover.step.sheet === getActiveSheetName() && hover.next && hover.version === rules.version()) {
+        const { step, next } = hover;
+        hover = null;
+        return { step, next };
+      }
+      revertHover();
+      return null;
+    }
+
     function clearBoxes(cuts) {
       if (!cuts || cuts.length === 0) return false;
       return commitRules((next) => {
@@ -275,14 +347,14 @@
 
     // Runs the menu item `action` (`data-sheet-cf`).
     async function run(action) {
+      revertHover();
+      const range = selectionText();
+      const rule = galleryRule(action, range);
+      if (rule) return void (await add(rule));
       const at = action.indexOf("-");
       const head = at < 0 ? action : action.slice(0, at);
       const rest = at < 0 ? "" : action.slice(at + 1);
-      const range = selectionText();
       if (head === "quick") return openQuick(rest);
-      if (head === "bar") return void (await add(P.barRule(range, P.BARS.find((b) => b.id === rest))));
-      if (head === "scale") return void (await add(P.scaleRule(range, P.SCALES.find((s) => s.id === rest))));
-      if (head === "icons") return void (await add(P.iconRule(range, rules.ICON_SET_NAMES.find((name) => name.toLowerCase() === rest))));
       if (head === "more") return openManager(MORE_KINDS[rest](range, P));
       if (action === "new" || action === "manage") return openManager();
       if (action === "clear-selection") return void (await clearSelection());
@@ -300,13 +372,48 @@
       }
       for (const panel of Array.from(document.querySelectorAll(".cfg-panel"))) {
         for (const event of ["mouseenter", "focusin"]) panel.parentElement.addEventListener(event, () => fitPanel(panel));
+        panel.addEventListener("mouseleave", () => revertHover());
       }
+      for (const tile of Array.from(document.querySelectorAll(".cfg-tile"))) {
+        tile.addEventListener("mouseenter", () => previewTile(tile));
+        tile.addEventListener("focusin", () => previewTile(tile));
+        tile.addEventListener("mouseleave", (ev) => {
+          if (tile.dataset.eoActivating === "1") return;
+          const to = ev?.relatedTarget;
+          if (to?.closest?.(".cfg-tile")) return;
+          const panel = tile.closest?.(".cfg-panel");
+          if (panel?.contains?.(to) && typeof host.setTimeout === "function") {
+            clearLeaveTimer();
+            if (hover) hover.leaveTimer = host.setTimeout(() => revertHover(), LEAVE_DELAY_MS);
+          } else {
+            revertHover();
+          }
+        });
+        tile.addEventListener("focusout", (ev) => {
+          if (tile.dataset.eoActivating === "1" || ev?.relatedTarget?.closest?.(".cfg-tile")) return;
+          revertHover();
+        });
+      }
+      if (formatMenu) {
+        for (const item of Array.from(formatMenu.querySelectorAll("[data-sheet-cf]:not(.cfg-tile), .md-item:not(.cfg-tile), .md-sub"))) {
+          item.addEventListener("mouseenter", () => revertHover());
+          item.addEventListener("focusin", (ev) => {
+            if (!ev?.target?.closest?.(".cfg-tile")) revertHover();
+          });
+        }
+      }
+      host.__EASYOFFICE_ON_MENUS_CLOSED__?.(document, () => {
+        if (hover?.tile?.dataset.eoActivating !== "1") revertHover();
+      });
       for (const el of Array.from(document.querySelectorAll("[data-sheet-cf]"))) {
         el.addEventListener("click", (ev) => {
           ev.stopPropagation?.();
+          const disabled = el.getAttribute("aria-disabled") === "true";
+          const accepted = !disabled && el.classList.contains("cfg-tile") ? takeHover(el.dataset.sheetCf) : null;
           host.__EASYOFFICE_CLOSE_MENUS__?.(document);
-          if (el.getAttribute("aria-disabled") === "true") return;
-          void run(el.dataset.sheetCf).catch(() => {});
+          if (disabled) return;
+          if (accepted) void finishStep(accepted.step, accepted.next).catch(() => {});
+          else void run(el.dataset.sheetCf).catch(() => {});
         });
       }
     }

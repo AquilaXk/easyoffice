@@ -22,7 +22,19 @@ try {
 const skip = !APP || !CHROME ? "needs a built easyoffice-app and a Chrome (EO_APP, CHROME_PATH)" : false;
 const SHOTS = process.env.EO_SHOTS || "";
 
-const KEYS = { Enter: [13, "Enter"], Escape: [27, "Escape"], ArrowRight: [39, "ArrowRight"], ArrowDown: [40, "ArrowDown"], z: [90, "KeyZ"], y: [89, "KeyY"] };
+const KEYS = {
+  Enter: [13, "Enter"],
+  Escape: [27, "Escape"],
+  " ": [32, "Space"],
+  Tab: [9, "Tab"],
+  End: [35, "End"],
+  Home: [36, "Home"],
+  ArrowUp: [38, "ArrowUp"],
+  ArrowRight: [39, "ArrowRight"],
+  ArrowDown: [40, "ArrowDown"],
+  z: [90, "KeyZ"],
+  y: [89, "KeyY"],
+};
 const CTRL = 2;
 const SHIFT = 8;
 
@@ -442,4 +454,134 @@ test("extended data bar options draw RTL border and midpoint axis in real engine
   assert.match(tableList[0], /B2:B4 · 데이터 막대/);
   await js(`document.getElementById("sheet-cf-dialog").close()`);
   await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({}); window.__EASYOFFICE_SHEET_LAYOUT__.replaceAll({});`);
+});
+
+test("gallery tiles preview live on pointer hover and keyboard focus, revert on leave/기타 규칙/Escape, and apply in one undo step", { skip }, async () => {
+  await js(`window.__EASYOFFICE_SHEET_RULES__.replaceAll({}); window.__EASYOFFICE_SHEET_LAYOUT__.replaceAll({});`);
+  for (const [ref, value] of Object.entries(VALUES)) await put(ref, value);
+  await click("B2");
+  for (let i = 0; i < 4; i += 1) await key("ArrowDown", SHIFT);
+
+  // Pointer hover across Data Bar tiles -> switch tile -> move onto 기타 규칙… -> leave panel.
+  const title = await rectOf('.menu-item[data-menu="format"] > .menu-title');
+  await mouse("mouseMoved", title.left + 4, title.top + 4);
+  await mouse("mousePressed", title.left + 4, title.top + 4);
+  await mouse("mouseReleased", title.left + 4, title.top + 4);
+  for (const path of [["조건부 서식"], ["조건부 서식", "데이터 막대"]]) {
+    const at = await until(() => centerOf(menuEl(path)), `row ${path.at(-1)}`);
+    await mouse("mouseMoved", at.x, at.y);
+  }
+  const blueAt = await until(() => centerOf(menuEl(["조건부 서식", "데이터 막대"], '[data-sheet-cf="bar-grad-blue"]')), "blue bar tile");
+  await mouse("mouseMoved", blueAt.x, blueAt.y);
+  assert.match(await painted("B5", "bar"), /linear-gradient/);
+  assert.equal((await rulesOf()).length, 1);
+
+  const greenAt = await until(() => centerOf(menuEl(["조건부 서식", "데이터 막대"], '[data-sheet-cf="bar-solid-green"]')), "green bar tile");
+  await mouse("mouseMoved", greenAt.x, greenAt.y);
+  await until(async () => (await look("B5")).bar.includes("#63c384"), "preview switches to green bar");
+  assert.equal((await rulesOf()).length, 1);
+
+  const moreAt = await until(() => centerOf(menuEl(["조건부 서식", "데이터 막대"], '[data-sheet-cf="more-bar"]')), "기타 규칙 row");
+  await mouse("mouseMoved", moreAt.x, moreAt.y);
+  await unpainted("B5");
+  await until(async () => (await rulesOf()).length === 0, "moving onto 기타 규칙 reverts preview");
+
+  // Hover back onto parent .md-sub row (`데이터 막대`) reverts preview; clicking outside while hovering reverts & closes menu.
+  const barRowAt = await until(() => centerOf(menuEl(["조건부 서식", "데이터 막대"])), "bar submenu row");
+  await mouse("mouseMoved", blueAt.x, blueAt.y);
+  await painted("B5", "bar");
+  await mouse("mouseMoved", barRowAt.x, barRowAt.y);
+  await unpainted("B5");
+  await until(async () => (await rulesOf()).length === 0, "moving pointer back onto parent .md-sub reverts preview");
+
+  await mouse("mouseMoved", blueAt.x, blueAt.y);
+  await painted("B5", "bar");
+  await mouse("mousePressed", 5, 700);
+  await mouse("mouseReleased", 5, 700);
+  await until(async () => (await js(`document.querySelector(".menu-item.open") === null`)), "outside click closes menu");
+  await unpainted("B5");
+  await until(async () => (await rulesOf()).length === 0, "outside click reverts preview");
+
+  // Keyboard focus into 색조 gallery -> live preview -> Escape reverts -> Enter applies -> Ctrl+Z undoes in 1 step.
+  await js(`document.querySelector('.menu-item[data-menu="format"] > .menu-title').focus()`);
+  await key("ArrowDown");
+  const walkToLabel = async (label) => {
+    for (let i = 0; i < 30; i += 1) {
+      const cur = await js(`document.activeElement?.querySelector?.(":scope > .md-label")?.textContent || ""`);
+      if (cur === label) return;
+      await key("ArrowDown");
+    }
+    assert.fail(`menu item ${label} not reached`);
+  };
+  await walkToLabel("조건부 서식");
+  await key("ArrowRight");
+  await walkToLabel("색조");
+  await key("ArrowRight");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "scale-gyr");
+  await painted("B3", "bg");
+  await shoot("gallery-live-preview");
+
+  await key("Escape");
+  await unpainted("B3");
+  assert.deepEqual(await rulesOf(), []);
+
+  await key("ArrowRight");
+  await painted("B3", "bg");
+  await key("Enter");
+  await until(async () => (await js(`document.querySelector(".menu-item.open") === null`)), "menu closes on Enter");
+  await painted("B3", "bg");
+  assert.equal((await rulesOf()).length, 1);
+  await key("z", CTRL);
+  await unpainted("B3");
+  assert.deepEqual(await rulesOf(), []);
+
+  // Pointer hover then click on Icon Set tile -> applies in 1 undo step without duplicating.
+  await mouse("mouseMoved", title.left + 4, title.top + 4);
+  await mouse("mousePressed", title.left + 4, title.top + 4);
+  await mouse("mouseReleased", title.left + 4, title.top + 4);
+  const cfRow = await until(() => centerOf(menuEl(["조건부 서식"])), "cf submenu");
+  await mouse("mouseMoved", cfRow.x, cfRow.y);
+  const iconsRow = await until(() => centerOf(menuEl(["조건부 서식", "아이콘 집합"])), "icons submenu");
+  await mouse("mouseMoved", iconsRow.x, iconsRow.y);
+  const arrowsAt = await until(() => centerOf(menuEl(["조건부 서식", "아이콘 집합"], '[data-sheet-cf="icons-3arrows"]')), "3arrows tile");
+  await mouse("mouseMoved", arrowsAt.x, arrowsAt.y);
+  await painted("B2", "icon");
+  await mouse("mousePressed", arrowsAt.x, arrowsAt.y);
+  await mouse("mouseReleased", arrowsAt.x, arrowsAt.y);
+  await until(async () => (await js(`document.querySelector(".menu-item.open") === null`)), "menu closes on tile click");
+  await painted("B2", "icon");
+  assert.equal((await rulesOf()).length, 1);
+  await key("z", CTRL);
+  await unpainted("B2");
+  assert.deepEqual(await rulesOf(), []);
+
+  // Keyboard navigation across 아이콘 집합 gallery (ArrowDown/ArrowUp/End/Home) + Space activation + Ctrl+Z undo.
+  await js(`document.querySelector('.menu-item[data-menu="format"] > .menu-title').focus()`);
+  await key("ArrowDown");
+  await walkToLabel("조건부 서식");
+  await key("ArrowRight");
+  await walkToLabel("아이콘 집합");
+  await key("ArrowRight");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "icons-3arrows");
+  const kbFrame = JSON.parse(await js(`JSON.stringify((() => { const p = document.getElementById("sheet-cf-gallery-icons"); const r = p.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: window.innerHeight }; })())`));
+  assert.ok(kbFrame.top >= 0 && kbFrame.bottom <= kbFrame.height, `keyboard-opened icons gallery fits viewport ${JSON.stringify(kbFrame)}`);
+  await painted("B2", "icon");
+  await key("ArrowDown");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "icons-3arrowsgray");
+  await key("ArrowUp");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "icons-3arrows");
+  await key("End");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "more-icons");
+  await unpainted("B2");
+  assert.deepEqual(await rulesOf(), []);
+  await key("Home");
+  assert.equal(await js(`document.activeElement?.dataset?.sheetCf || ""`), "icons-3arrows");
+  await painted("B2", "icon");
+  await key(" ");
+  await until(async () => (await js(`document.querySelector(".menu-item.open") === null`)), "menu closes on Space");
+  await painted("B2", "icon");
+  assert.equal((await rulesOf()).length, 1, "Space applies once without duplicate keyup click");
+  await key("z", CTRL);
+  await unpainted("B2");
+  assert.deepEqual(await rulesOf(), []);
 });

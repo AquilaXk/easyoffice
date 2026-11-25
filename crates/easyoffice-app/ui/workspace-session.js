@@ -876,6 +876,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const run = binding.ribbon ? () => actions.ribbon(binding.action) : actions[binding.action];
       if (typeof run !== "function") return false;
       e.preventDefault();
+      host.__EASYOFFICE_CLOSE_MENUS__?.(document);
       run();
       return true;
     }

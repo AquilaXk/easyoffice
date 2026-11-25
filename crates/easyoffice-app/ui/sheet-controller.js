@@ -394,11 +394,12 @@
         // Large workbooks: let the keystroke finish and paint before the payload is built.
         if (isHeavySheet() && typeof host.setTimeout === "function") {
           await new Promise((resolve) => host.setTimeout(resolve, 0));
+          if (epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) return;
         }
         sheetDataStore[curSheet] = snapshotDomSheetCells();
         if (manualUnforced) {
-          if (sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore)) calcApi.markPending(document);
-          if (edited.size === 0) {
+          if (!(options.rulesChanged && edited.size === 0) && sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore)) calcApi.markPending(document);
+          if (edited.size === 0 && !options.rulesChanged) {
             chartUi?.syncLayer();
             refreshFocusedSheetCellPendingSnapshot();
             return;
@@ -416,6 +417,11 @@
           return;
         }
         if (prevValues) restoreUnallowedFormulaValues(sheetDataStore, prevValues, allowTarget);
+        if (manualUnforced && edited.size === 0 && options.rulesChanged) {
+          chartUi?.syncLayer();
+          refreshFocusedSheetCellPendingSnapshot();
+          return;
+        }
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
         let updatedActiveSheet = false;
         // The cells an array fills changed: the window shows them again (PD-217).
@@ -740,8 +746,8 @@
       applyCellEdits,
       readTdValue: (td) => grid.readTdValue(td),
     });
-    // Rule changes (dialogs, undo, open) re-evaluate; new appearances repaint the cells.
-    sheetRules.on("changed", () => void recalculateActiveSheetFormulas().catch(() => {}));
+    // Rule changes (dialogs, gallery preview, undo, open) re-evaluate; new appearances repaint the cells.
+    sheetRules.on("changed", () => void recalculateActiveSheetFormulas({ rulesChanged: true }).catch(() => {}));
     // The rows a user or a filter hid changed (a hide, a filter, an undo): the formulas that leave hidden rows out are calculated
     // again, and only those in the engine (PD-232).
     // It runs after the step that changed them (an undo restores the cells after the layout).
@@ -768,6 +774,7 @@
 
     // Switching sheets and the view each sheet keeps (`sheet-view-live.js`).
     function performSwitchSheetTabAsync(target) {
+      host.__EASYOFFICE_CLOSE_MENUS__?.(document);
       return viewLive.switchTo(target);
     }
 

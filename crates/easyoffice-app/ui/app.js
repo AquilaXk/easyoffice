@@ -834,6 +834,7 @@
 
   // The native menu bar (PD-102) runs the same actions as the keyboard, the page's own menu items and two menu-only ones.
   function runNativeMenu(id) {
+    host.__EASYOFFICE_CLOSE_MENUS__?.(document);
     const modal = document.getElementById("cmd-palette-modal");
     const input = document.getElementById("cmd-search-input");
     const { EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS } = host.__EASYOFFICE_NATIVE_MENU_TABLE__;

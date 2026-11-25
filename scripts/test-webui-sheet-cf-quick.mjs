@@ -4,6 +4,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 // The conditional formatting submenu (PD-282): the quick dialogs of the cell highlight and top/bottom rules with their live
 // preview, the galleries, clearing rules, and the preview and scope of the rule manager.
@@ -598,5 +600,681 @@ test("clear-table and clear-pivot enable only inside their ranges and cut only t
   assert.equal(swatch.dataset.rtl, undefined);
 
   layout.replaceAll({});
+  rules.replaceAll({});
+});
+
+// ---- PD-351: gallery pointer & keyboard live preview --------------------------------------------------------
+
+function packTestCf(entries) {
+  const palette = [];
+  const colorId = (rgb) => {
+    let i = palette.indexOf(rgb);
+    if (i < 0) i = palette.push(rgb) - 1;
+    return i;
+  };
+  const words = [];
+  for (const e of entries) {
+    let head = e.col | ((e.flags || 0) << 14);
+    if (e.bg !== undefined) head |= 1 << 18;
+    if (e.fg !== undefined) head |= 1 << 19;
+    if (e.bar) head |= 1 << 20;
+    if (e.icon) head |= (1 << 21) | (((e.icon.set << 3) | e.icon.index) << 24);
+    words.push(e.row >>> 0, head >>> 0);
+    if (e.bg !== undefined || e.fg !== undefined) {
+      words.push(((e.bg !== undefined ? colorId(e.bg) : 0) | ((e.fg !== undefined ? colorId(e.fg) : 0) << 16)) >>> 0);
+    }
+    if (e.bar) words.push((colorId(e.bar.color) | ((e.bar.pct + 128) << 16) | (e.bar.start << 24)) >>> 0);
+  }
+  const bytes = Buffer.alloc(words.length * 4);
+  words.forEach((w, i) => bytes.writeUInt32LE(w >>> 0, i * 4));
+  return { pal: palette, w: bytes.toString("base64") };
+}
+
+function firstCellOfRule(rule) {
+  const first = String(rule?.r || "A1").split(/[\s:]+/)[0];
+  const m = /^([A-Za-z]+)(\d+)$/.exec(first);
+  if (!m) return { row: 0, col: 0 };
+  let col = 0;
+  for (const ch of m[1].toUpperCase()) col = col * 26 + ch.charCodeAt(0) - 64;
+  return { row: Math.max(0, Number(m[2]) - 1), col: Math.max(0, col - 1) };
+}
+
+function defaultCfHandler(body) {
+  const cf = body.rules?.cf || [];
+  if (cf.length === 0) return { pal: [], w: "" };
+  const rule = cf[0];
+  const { row, col } = firstCellOfRule(rule);
+  if (rule.t === "bar") {
+    const rgb = parseInt((rule.pos || "#638ec6").slice(1), 16);
+    return packTestCf([{ row, col, bar: { color: rgb, pct: 80, start: 0 } }]);
+  }
+  if (rule.t === "scale") {
+    const rgb = parseInt((rule.stops?.[0]?.c || "#f8696b").slice(1), 16);
+    return packTestCf([{ row, col, bg: rgb }]);
+  }
+  if (rule.t === "icons") {
+    return packTestCf([{ row, col, icon: { set: 0, index: 2 } }]);
+  }
+  return packTestCf([{ row, col, bg: 0xffc7ce }]);
+}
+
+// MiniElement.focus() dispatches "focus" only; mirror real-browser focusout/focusin on the format menu for menu-keyboard tests.
+function bridgeFormatMenuFocus(doc) {
+  const wrap = (el) => {
+    if (!el || el._eoFocusBridged) return;
+    el._eoFocusBridged = true;
+    const orig = el.focus.bind(el);
+    el.focus = () => {
+      const prev = doc.activeElement;
+      if (prev === el) return;
+      orig();
+      if (prev && prev !== doc.body) prev.dispatchEvent({ type: "focusout", target: prev, relatedTarget: el });
+      el.dispatchEvent({ type: "focusin", target: el, relatedTarget: prev || null });
+    };
+  };
+  const fmt = doc.querySelector('.menu-item[data-menu="format"]');
+  wrap(fmt.querySelector(".menu-title"));
+  for (const node of Array.from(fmt.querySelectorAll(".md-item, .md-sub"))) wrap(node);
+}
+
+async function liveSheetHarness({ onRules, onApply, onConvert, model } = {}) {
+  const { sandbox: proto } = await createWorkspaceHarness();
+  const cat = proto.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = proto.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "SHEET",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const rulesCalls = [];
+  const harness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
+    testIpc: async (command, payload) => {
+      const body = typeof payload === "string" && payload.trimStart().startsWith("{") ? JSON.parse(payload) : null;
+      if (command === "get_workspace_bootstrap") {
+        return { ...offline.get_workspace_bootstrap(), sheetSessions: true };
+      }
+      if (command === "convert_document_format" && body && !body.action && onConvert) {
+        onConvert(body);
+      }
+      if (command === "evaluate_sheet" && body?.sessionAction) {
+        if (body.sessionAction === "open") return { session: "s1" };
+        if (body.sessionAction === "close") return { closed: true };
+        if (body.sessionAction === "apply") {
+          const extra = onApply ? await onApply(body) : null;
+          return { session: "s1", changed: [], spills: [], circular: false, ...(extra || {}) };
+        }
+        if (body.sessionAction === "rules") {
+          rulesCalls.push(body);
+          const cf = onRules ? await onRules(body) : defaultCfHandler(body);
+          return { session: "s1", sheet: body.sheet, cf };
+        }
+        return { session: "s1", changed: [], spills: [], circular: false };
+      }
+      return offline[command](payload);
+    },
+  });
+  switchModule(harness.document, "SHEET");
+  await flushAsyncTurns(8);
+  if (model) {
+    const bytes = new TextEncoder().encode("EOFIXTURE:" + JSON.stringify(model));
+    const res = await harness.host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("live.xlsx", bytes);
+    assert.equal(res.ok, true);
+    await flushAsyncTurns(10);
+  }
+  const win = harness.document.defaultView;
+  const rules = win.__EASYOFFICE_SHEET_RULES__;
+  const historySizes = () => win.__EASYOFFICE_WORKSPACE_HISTORY__.sizes();
+  const tdAt = (ref) => harness.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+  const selectRange = (r1, c1, r2, c2) => {
+    const start = tdAt(rules.refOf(r1 - 1, c1 - 1));
+    const end = tdAt(rules.refOf(r2 - 1, c2 - 1));
+    start.dispatchEvent({ type: "mousedown", target: start, button: 0, bubbles: true });
+    if (r1 !== r2 || c1 !== c2) {
+      end.dispatchEvent({ type: "mousedown", target: end, button: 0, shiftKey: true, bubbles: true });
+    }
+  };
+  return { ...harness, doc: harness.document, win, rules, rulesCalls, historySizes, tdAt, selectRange };
+}
+
+test("gallery pointer hover previews bar, scale and icon rules, survives 4px grid gaps, preserves existing rules, and clicks as one undo step", async () => {
+  const before = {
+    cf: [{ r: "A1", t: "dup", bg: "#ffc7ce" }],
+    dv: [{ r: "D1", t: "whole", op: "between", a: "1", b: "2" }],
+  };
+  const h = await liveSheetHarness();
+  const { doc, win, rules, historySizes, tdAt, selectRange, advanceTimers, userClick } = h;
+  rules.replaceAll({ Sheet1: before });
+  await flushAsyncTurns(8);
+  selectRange(2, 2, 5, 3); // B2:C5
+  const baseUndo = historySizes().undo;
+
+  const tileBarBlue = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-blue"]');
+  const tileBarGreen = doc.querySelector('.cfg-tile[data-sheet-cf="bar-solid-green"]');
+  const tileScaleGyr = doc.querySelector('.cfg-tile[data-sheet-cf="scale-gyr"]');
+  const tileIcons3 = doc.querySelector('.cfg-tile[data-sheet-cf="icons-3arrows"]');
+  const barPanel = doc.getElementById("sheet-cf-gallery-bar");
+  const moreIcons = doc.querySelector('[data-sheet-cf="more-icons"]');
+
+  // Hover Data Bar tile: previews as highest-priority rule, keeps existing rules & dv, 0 undo steps, paints fx on B2.
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  await flushAsyncTurns(8);
+  assert.deepEqual(rules.get("Sheet1").cf.map((r) => [r.t, r.r]), [["bar", "B2:C5"], ["dup", "A1"]]);
+  assert.deepEqual(rules.get("Sheet1").dv, before.dv);
+  assert.equal(historySizes().undo, baseUndo);
+  assert.match(tdAt("B2").style.getPropertyValue("--cf-bar"), /#638ec6/);
+
+  // Leave across 4px gap inside .cfg-panel -> 48ms timer holds preview, switching to another tile cancels timer.
+  tileBarBlue.dispatchEvent({ type: "mouseleave", target: tileBarBlue, relatedTarget: barPanel });
+  advanceTimers(20);
+  assert.equal(rules.get("Sheet1").cf.length, 2, "preview stays across gap before 48ms");
+  tileBarGreen.dispatchEvent({ type: "mouseenter", target: tileBarGreen });
+  advanceTimers(60);
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf[0].pos, "#63c384", "new tile cancelled the leave timer");
+  assert.match(tdAt("B2").style.getPropertyValue("--cf-bar"), /#63c384/);
+  assert.equal(historySizes().undo, baseUndo);
+
+  // Leave into panel gap and stay >= 48ms -> reverts cleanly to before.
+  tileBarGreen.dispatchEvent({ type: "mouseleave", target: tileBarGreen, relatedTarget: barPanel });
+  advanceTimers(48);
+  await flushAsyncTurns(8);
+  assert.deepEqual(rules.get("Sheet1"), before);
+  assert.equal(tdAt("B2").dataset.cf, undefined);
+  assert.equal(historySizes().undo, baseUndo);
+
+  // Color Scale hover -> direct mouseleave outside panel reverts synchronously.
+  tileScaleGyr.dispatchEvent({ type: "mouseenter", target: tileScaleGyr });
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf[0].t, "scale");
+  assert.equal(tdAt("B2").style.getPropertyValue("--cf-bg"), "#f8696b");
+  tileScaleGyr.dispatchEvent({ type: "mouseleave", target: tileScaleGyr, relatedTarget: null });
+  assert.deepEqual(rules.get("Sheet1").cf, before.cf);
+  await flushAsyncTurns(8);
+  assert.equal(tdAt("B2").dataset.cf, undefined);
+
+  // Icon Set hover -> moving onto `기타 규칙…` reverts preview immediately.
+  tileIcons3.dispatchEvent({ type: "mouseenter", target: tileIcons3 });
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf[0].t, "icons");
+  assert.equal(tdAt("B2").dataset.cfIcon, "up");
+  moreIcons.dispatchEvent({ type: "mouseenter", target: moreIcons });
+  assert.deepEqual(rules.get("Sheet1").cf, before.cf);
+  await flushAsyncTurns(8);
+  assert.equal(tdAt("B2").dataset.cfIcon, undefined);
+
+  // Hover then click -> commits as 1 undo step without duplicating the rule; Ctrl+Z undoes back to before.
+  const tileBarOrange = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-orange"]');
+  tileBarOrange.dispatchEvent({ type: "mouseenter", target: tileBarOrange });
+  await flushAsyncTurns(8);
+  userClick(tileBarOrange);
+  await flushAsyncTurns(10);
+  assert.equal(rules.get("Sheet1").cf.length, 2, "rule was not duplicated on click");
+  assert.equal(rules.get("Sheet1").cf[0].pos, "#ffb628");
+  assert.equal(historySizes().undo, baseUndo + 1);
+
+  userClick(studioItem(doc, "studio-undo"));
+  await flushAsyncTurns(10);
+  assert.deepEqual(rules.get("Sheet1"), before);
+  h.sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  assert.equal(rules.get("Sheet1").cf[0].pos, "#ffb628");
+
+  // Switching top-level menu while hovering a tile closes the menu and reverts the preview via onMenusClosed.
+  const formatMenu = doc.querySelector('.menu-item[data-menu="format"]');
+  const toolMenu = doc.querySelector('.menu-item[data-menu="tool"]');
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf.length, 3);
+  toolMenu.dispatchEvent({ type: "mouseenter", target: toolMenu });
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf.length, 2, "switching menu reverts preview");
+
+  // Leaving .cfg-panel and clicking outside menubar both revert preview.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 3);
+  barPanel.dispatchEvent({ type: "mouseleave", target: barPanel });
+  assert.equal(rules.get("Sheet1").cf.length, 2, "mouseleave on .cfg-panel reverts immediately");
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 3);
+  doc.dispatchEvent({ type: "click", target: tdAt("B2") });
+  assert.equal(rules.get("Sheet1").cf.length, 2, "outside click closes menu and reverts preview");
+  win.__EASYOFFICE_CLOSE_MENUS__?.(doc);
+});
+
+test("gallery keyboard focus previews, submenu Escape and Tab revert, and Enter/Space activate without duplicating", async () => {
+  const h = await liveSheetHarness();
+  const { doc, win, rules, historySizes, selectRange, sandbox, userClick } = h;
+  bridgeFormatMenuFocus(doc);
+  rules.replaceAll({});
+  await flushAsyncTurns(6);
+  selectRange(2, 2, 3, 3);
+  const press = (el, key) => el.dispatchEvent({ type: "keydown", key, target: el, bubbles: true });
+  const fmtTitle = doc.querySelector('.menu-item[data-menu="format"] > .menu-title');
+  const cfSub = Array.from(doc.querySelectorAll('.menu-item[data-menu="format"] .md-sub')).find((s) => s.querySelector(".md-label")?.textContent === "조건부 서식");
+  const barSub = Array.from(cfSub.querySelectorAll(".md-sub")).find((s) => s.querySelector(".md-label")?.textContent === "데이터 막대");
+  const scaleSub = Array.from(cfSub.querySelectorAll(".md-sub")).find((s) => s.querySelector(".md-label")?.textContent === "색조");
+  const iconSub = Array.from(cfSub.querySelectorAll(".md-sub")).find((s) => s.querySelector(".md-label")?.textContent === "아이콘 집합");
+
+  // Open format menu and walk keyboard focus into Data Bar gallery.
+  fmtTitle.focus();
+  press(fmtTitle, "ArrowDown");
+  cfSub.focus();
+  press(cfSub, "ArrowRight");
+  barSub.focus();
+  press(barSub, "ArrowRight");
+  const firstBar = doc.activeElement;
+  assert.equal(firstBar.dataset.sheetCf, "bar-grad-blue");
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  assert.equal(rules.get("Sheet1").cf[0].pos, "#638ec6");
+  assert.equal(historySizes().undo, 0);
+
+  // ArrowDown moves to second tile (relatedTarget is still .cfg-tile -> keeps preview and switches).
+  press(firstBar, "ArrowDown");
+  const secondBar = doc.activeElement;
+  assert.equal(secondBar.dataset.sheetCf, "bar-grad-green");
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  assert.equal(rules.get("Sheet1").cf[0].pos, "#63c384");
+
+  // Escape inside submenu returns focus to parent .md-sub and reverts preview synchronously.
+  sandbox.dispatchWindowKeydown({ key: "Escape", target: secondBar });
+  assert.equal(doc.activeElement, barSub);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  assert.equal(historySizes().undo, 0);
+
+  // Re-enter tile then Tab out -> closes menu and reverts preview via onMenusClosed.
+  press(barSub, "ArrowRight");
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  press(doc.activeElement, "Tab");
+  assert.equal(Boolean(doc.querySelector(".menu-item.open")), false);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+
+  // Re-open and activate Color Scale tile with Enter -> preserves preview into click, 1 undo step, no duplication.
+  fmtTitle.focus();
+  press(fmtTitle, "ArrowDown");
+  scaleSub.focus();
+  press(scaleSub, "ArrowRight");
+  assert.equal(doc.activeElement.dataset.sheetCf, "scale-gyr");
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  press(doc.activeElement, "Enter");
+  await flushAsyncTurns(10);
+  assert.equal(Boolean(doc.querySelector(".menu-item.open")), false);
+  assert.equal(doc.activeElement, fmtTitle);
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  assert.equal(rules.get("Sheet1").cf[0].t, "scale");
+  assert.equal(historySizes().undo, 1);
+
+  // Activate Icon Set tile with Space -> adds 1 more rule in 1 undo step.
+  fmtTitle.focus();
+  press(fmtTitle, "ArrowDown");
+  iconSub.focus();
+  press(iconSub, "ArrowRight");
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  press(doc.activeElement, " ");
+  await flushAsyncTurns(10);
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  assert.equal(rules.get("Sheet1").cf[0].t, "icons");
+  assert.equal(historySizes().undo, 2);
+
+  // Mixed case: hover a gallery tile with mouse, then press Enter on another menu item -> reverts hovered tile.
+  userClick(fmtTitle);
+  firstBar.dispatchEvent({ type: "mouseenter", target: firstBar });
+  assert.equal(rules.get("Sheet1").cf.length, 3);
+  const boldItem = doc.querySelector('.menu-item[data-menu="format"] .md-item[data-studio-menu-cmd="home-bold"]');
+  boldItem.focus();
+  press(boldItem, "Enter");
+  await flushAsyncTurns(8);
+  assert.equal(rules.get("Sheet1").cf.length, 2, "activating another menu item reverts unrelated hovered tile");
+
+  // Duplicate onMenusClosed registration fires callback only once per close.
+  let closeHits = 0;
+  const countClose = () => { closeHits += 1; };
+  win.__EASYOFFICE_ON_MENUS_CLOSED__(doc, countClose);
+  win.__EASYOFFICE_ON_MENUS_CLOSED__(doc, countClose);
+  win.__EASYOFFICE_CLOSE_MENUS__(doc);
+  assert.equal(closeHits, 1);
+});
+
+test("protected sheet denying formatCells blocks hover preview silently and blocks click with alert and 0 undo steps", async () => {
+  const h = await liveSheetHarness();
+  const { doc, win, rules, historySizes, userClick } = h;
+  rules.replaceAll({});
+  await flushAsyncTurns(6);
+  win.__EASYOFFICE_SHEET_LAYOUT__.setProtect("Sheet1", { on: true, deny: ["formatCells"], ranges: [] });
+
+  const tile = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-blue"]');
+  const alertDlg = doc.getElementById("sheet-protect-alert-dialog");
+  tile.dispatchEvent({ type: "mouseenter", target: tile });
+  tile.dispatchEvent({ type: "focusin", target: tile });
+  await flushAsyncTurns(6);
+  assert.deepEqual(rules.get("Sheet1").cf, [], "no preview rule added on protected sheet");
+  assert.equal(alertDlg.open, false, "hovering never opens protection alert");
+  assert.equal(historySizes().undo, 0);
+
+  userClick(tile);
+  await flushAsyncTurns(10);
+  assert.equal(alertDlg.open, true, "clicking protected gallery tile shows protection alert");
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  assert.equal(historySizes().undo, 0);
+  alertDlg.close();
+  win.__EASYOFFICE_SHEET_LAYOUT__.setProtect("Sheet1", null);
+});
+
+test("rapid hover-then-revert async syncRules race never paints stale fx or drops session rule sync", async () => {
+  const h = await createWorkspaceHarness();
+  const doc = h.document;
+  const rules = doc.defaultView.__EASYOFFICE_SHEET_RULES__;
+  const pending = [];
+  const sentPayloads = [];
+  const store = doc.defaultView.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc: async (_cmd, payload) => {
+      const body = JSON.parse(payload);
+      if (body.sessionAction === "open") return { session: "s1" };
+      if (body.sessionAction === "apply") return { session: "s1", changed: [], circular: false };
+      if (body.sessionAction === "rules") {
+        sentPayloads.push(body.rules);
+        return new Promise((resolve) => pending.push({ body, resolve }));
+      }
+      return {};
+    },
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  store.enableSheetSessions(true);
+  const sheets = { Sheet1: { A1: { value: "5", formula: "" } } };
+  const barRule = { r: "A1", t: "bar", min: { k: "min", v: "" }, max: { k: "max", v: "" }, pos: "#638ec6", neg: "#ff0000", grad: true, show: true, stop: false };
+  const scaleRule = { r: "A1", t: "scale", stops: [{ k: "min", v: "", c: "#f8696b" }, { k: "max", v: "", c: "#63be7b" }], stop: false };
+
+  // Hover bar rule -> in-flight IPC 1; revert to empty BEFORE IPC 1 resolves.
+  rules.set("Sheet1", { cf: [barRule], dv: [] });
+  const eval1 = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  await flushAsyncTurns(4);
+  assert.equal(pending.length, 1);
+  rules.set("Sheet1", { cf: [], dv: [] });
+  const eval2 = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+
+  // Resolve IPC 1 with bar fx: stale fx must NOT paint onto Sheet1.
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bar: { color: 0x638ec6, pct: 100, start: 0 } }]) });
+  await eval1;
+  assert.equal(rules.fxAt("Sheet1", "A1"), undefined, "superseded response must not paint stale fx after revert");
+  assert.equal(rules.hasFx("Sheet1"), false);
+
+  // Queued eval2 must send empty rules because session.rules preserved that barRule was sent.
+  await flushAsyncTurns(4);
+  assert.equal(pending.length, 1, "engine session must be told the rules reverted to empty");
+  assert.deepEqual(sentPayloads[1].cf, []);
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: { pal: [], w: "" } });
+  await eval2;
+  assert.equal(rules.fxAt("Sheet1", "A1"), undefined);
+
+  // Switch tile 1 -> tile 2 while tile 1 is in flight: stale tile 1 does not flash, tile 2 paints cleanly.
+  rules.set("Sheet1", { cf: [barRule], dv: [] });
+  const sw1 = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  await flushAsyncTurns(4);
+  rules.set("Sheet1", { cf: [scaleRule], dv: [] });
+  const sw2 = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bar: { color: 0x638ec6, pct: 100, start: 0 } }]) });
+  await sw1;
+  assert.equal(rules.fxAt("Sheet1", "A1"), undefined, "superseded tile 1 response must not paint");
+  await flushAsyncTurns(4);
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bg: 0xf8696b }]) });
+  await sw2;
+  assert.equal(rules.fxAt("Sheet1", "A1")?.bg, "#f8696b");
+  rules.replaceAll({});
+});
+
+test("manual calculation mode still paints gallery CF preview without overwriting unedited formula values", async () => {
+  let a1Val = "10";
+  const h = await liveSheetHarness({
+    model: {
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            { ref: "A1", raw: "10" },
+            { ref: "B1", raw: "=A1*2" },
+            { ref: "B2", raw: "5" },
+            { ref: "B3", raw: "15" },
+          ],
+        },
+      ],
+    },
+    onApply: (body) => {
+      const a1 = body.changes?.find((c) => c.cell === "A1")?.value;
+      if (a1 !== undefined) a1Val = a1;
+      return { changed: [{ sheet: "Sheet1", cell: "B1", value: String(Number(a1Val) * 2) }] };
+    },
+  });
+  const { doc, win, tdAt, selectRange, userClick } = h;
+  const calcApi = win.__EASYOFFICE_SHEET_CALC_OPTIONS__;
+  assert.equal(tdAt("B1").textContent, "20");
+
+  // Switch to manual calculation mode via menu.
+  userClick(doc.querySelector('.md-item[data-sheet-act="calc-manual"]'));
+  await flushAsyncTurns(10);
+  assert.equal(calcApi.isManual(), true);
+  assert.equal(tdAt("B1").textContent, "20");
+
+  // Hover preview before any cell edit paints CF and does not falsely mark formulas pending.
+  selectRange(2, 2, 3, 2); // B2:B3
+  const tile = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-blue"]');
+  tile.dispatchEvent({ type: "mouseenter", target: tile });
+  await flushAsyncTurns(10);
+  assert.equal(tdAt("B2").dataset.cf, "1");
+  assert.match(tdAt("B2").style.getPropertyValue("--cf-bar"), /#638ec6/);
+  assert.equal(calcApi.isPending(), false);
+  tile.dispatchEvent({ type: "mouseleave", target: tile, relatedTarget: null });
+  await flushAsyncTurns(10);
+  assert.equal(tdAt("B2").dataset.cf, undefined);
+
+  // Edit A1 to 30 in manual mode -> B1 stays stale at 20, status shows "계산".
+  const a1 = tdAt("A1");
+  a1.focus();
+  a1.textContent = "30";
+  a1.dispatchEvent({ type: "input", target: a1 });
+  a1.dispatchEvent({ type: "keydown", key: "Enter", target: a1 });
+  await flushAsyncTurns(10);
+  assert.equal(tdAt("B1").textContent, "20");
+  assert.equal(calcApi.isPending(), true);
+  assert.equal(doc.getElementById("status-command-feedback").textContent, "계산");
+
+  // Now hover scale-gyr in manual mode: CF preview paints, B1 stays "20" (not overwritten with 60), pending stays intact.
+  selectRange(2, 2, 3, 2);
+  const scaleTile = doc.querySelector('.cfg-tile[data-sheet-cf="scale-gyr"]');
+  scaleTile.dispatchEvent({ type: "mouseenter", target: scaleTile });
+  await flushAsyncTurns(10);
+  assert.equal(tdAt("B2").dataset.cf, "1");
+  assert.equal(tdAt("B2").style.getPropertyValue("--cf-bg"), "#f8696b");
+  assert.equal(tdAt("B1").textContent, "20", "unedited formula cell must stay stale in manual mode");
+  assert.equal(calcApi.isPending(), true);
+  assert.equal(doc.getElementById("status-command-feedback").textContent, "계산");
+
+  scaleTile.dispatchEvent({ type: "mouseleave", target: scaleTile, relatedTarget: null });
+  await flushAsyncTurns(10);
+  assert.equal(tdAt("B2").dataset.cf, undefined);
+  assert.equal(tdAt("B1").textContent, "20");
+});
+
+test("hover preview reverts before Ctrl+Z/Ctrl+S/native menu and never resurrects stale rules after external replaceAll", async () => {
+  const savedBodies = [];
+  const h = await liveSheetHarness({ onConvert: (body) => savedBodies.push(body) });
+  const { doc, win, rules, historySizes, selectRange, sandbox, userClick } = h;
+  selectRange(2, 2, 3, 3);
+  const tileBarBlue = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-blue"]');
+  const tileScaleGyr = doc.querySelector('.cfg-tile[data-sheet-cf="scale-gyr"]');
+  const formatMenu = doc.querySelector('.menu-item[data-menu="format"]');
+
+  // Apply 1 real rule so undo stack has 1 step.
+  userClick(tileScaleGyr);
+  await flushAsyncTurns(10);
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  assert.equal(historySizes().undo, 1);
+
+  // Open menu and hover bar-grad-blue, then press Ctrl+S -> menu closes & preview reverts BEFORE saving.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  sandbox.dispatchWindowKeydown({ key: "s", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(Boolean(doc.querySelector(".menu-item.open")), false, "Ctrl+S closes open menu");
+  assert.equal(rules.get("Sheet1").cf.length, 1, "preview reverted before Ctrl+S saved");
+  assert.equal(savedBodies.at(-1)?.sheets?.[0]?.rules?.cf?.length ?? 0, 1, "saved file excludes uncommitted preview rule");
+
+  // Hover bar-grad-blue, then press Ctrl+Z -> closes menu & reverts preview, then undoes the 1 real step cleanly.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.deepEqual(rules.get("Sheet1").cf, [], "Ctrl+Z undid real rule after reverting preview");
+  assert.equal(historySizes().undo, 0);
+
+  // Even if rules.replaceAll happens externally while hover is active, leaving tile must NOT resurrect stale before.cf.
+  userClick(tileScaleGyr);
+  await flushAsyncTurns(10);
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 2);
+  rules.replaceAll({});
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  tileBarBlue.dispatchEvent({ type: "mouseleave", target: tileBarBlue, relatedTarget: null });
+  assert.deepEqual(rules.get("Sheet1").cf, [], "mouseleave after external replaceAll must not resurrect stale rule");
+  win.__EASYOFFICE_CLOSE_MENUS__?.(doc);
+
+  // Native menu command while hovering closes menu and reverts preview before saving/undoing.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  win.__EASYOFFICE_NATIVE_MENU__("file:save");
+  await flushAsyncTurns(10);
+  assert.equal(Boolean(doc.querySelector(".menu-item.open")), false);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  assert.equal(savedBodies.at(-1)?.sheets?.[0]?.rules, undefined, "native save excludes reverted hover preview");
+});
+
+test("48ms gap timer, non-CF format items, menu-keyboard outside click, and syncRules synchronous throws behave cleanly", async () => {
+  const h = await liveSheetHarness({
+    model: { sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "10" }] }, { name: "Sheet2", cells: [{ ref: "A1", raw: "20" }] }] },
+  });
+  const { doc, win, rules, advanceTimers, userClick } = h;
+  bridgeFormatMenuFocus(doc);
+  const tileBarBlue = doc.querySelector('.cfg-tile[data-sheet-cf="bar-grad-blue"]');
+  const barPanel = doc.getElementById("sheet-cf-gallery-bar");
+  const formatMenu = doc.querySelector('.menu-item[data-menu="format"]');
+  const editMenu = doc.querySelector('.menu-item[data-menu="edit"]');
+
+  // Pending 48ms timer + __EASYOFFICE_CLOSE_MENUS__ (window-bridge path): reverts immediately & timer becomes no-op.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  tileBarBlue.dispatchEvent({ type: "mouseleave", target: tileBarBlue, relatedTarget: barPanel });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  win.__EASYOFFICE_CLOSE_MENUS__?.(doc);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  advanceTimers(60);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+
+  // Pending 48ms timer + top menu mouseenter switch: reverts immediately.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  tileBarBlue.dispatchEvent({ type: "mouseleave", target: tileBarBlue, relatedTarget: barPanel });
+  editMenu.dispatchEvent({ type: "mouseenter", target: editMenu });
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  advanceTimers(60);
+
+  // Pending 48ms timer + clicking sheet tab outside menubar: closes menu & reverts immediately.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  tileBarBlue.dispatchEvent({ type: "mouseleave", target: tileBarBlue, relatedTarget: barPanel });
+  userClick(doc.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet2"]'));
+  await flushAsyncTurns(10);
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+  advanceTimers(60);
+  userClick(doc.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]'));
+  await flushAsyncTurns(10);
+
+  // Non-CF items in formatMenu (e.g. 진하게, 셀 서식…) revert hover preview on hover/focus.
+  userClick(formatMenu.querySelector(".menu-title"));
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  const numfmtDialogItem = formatMenu.querySelector('.md-item[data-sheet-numfmt="dialog"]');
+  numfmtDialogItem.dispatchEvent({ type: "mouseenter", target: numfmtDialogItem });
+  assert.deepEqual(rules.get("Sheet1").cf, [], "non-CF format item mouseenter reverts hover");
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  const boldItem = formatMenu.querySelector('.md-item[data-studio-menu-cmd="home-bold"]');
+  boldItem.focus();
+  assert.deepEqual(rules.get("Sheet1").cf, [], "non-CF format item focusin reverts hover");
+
+  // Outside click closes menu even when .open was added without createMenuKeyboard.open().
+  win.__EASYOFFICE_CLOSE_MENUS__?.(doc);
+  formatMenu.classList.add("open");
+  tileBarBlue.dispatchEvent({ type: "mouseenter", target: tileBarBlue });
+  assert.equal(rules.get("Sheet1").cf.length, 1);
+  doc.dispatchEvent({ type: "click", target: doc.getElementById("pane-sheet") });
+  assert.equal(formatMenu.classList.contains("open"), false, "outside click closes .menu-item.open");
+  assert.deepEqual(rules.get("Sheet1").cf, []);
+});
+
+test("syncRules synchronous throw clears rulesPending and non-empty before.cf recovers cleanly from race", async () => {
+  const h = await createWorkspaceHarness();
+  const doc = h.document;
+  const rules = doc.defaultView.__EASYOFFICE_SHEET_RULES__;
+  let throwSync = true;
+  const pending = [];
+  const store = doc.defaultView.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc: (_cmd, payload) => {
+      const body = JSON.parse(payload);
+      if (body.sessionAction === "open") return Promise.resolve({ session: "s1" });
+      if (body.sessionAction === "apply") return Promise.resolve({ session: "s1", changed: [], circular: false });
+      if (body.sessionAction === "rules") {
+        if (throwSync) throw new Error("sync failure");
+        return new Promise((resolve) => pending.push({ body, resolve }));
+      }
+      return Promise.resolve({});
+    },
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  store.enableSheetSessions(true);
+  const sheets = { Sheet1: { A1: { value: "5", formula: "" } } };
+  const barRule = { r: "A1", t: "bar", min: { k: "min", v: "" }, max: { k: "max", v: "" }, pos: "#638ec6", neg: "#ff0000", grad: true, show: true, stop: false };
+  const beforeRule = { r: "A1", t: "dup", bg: "#ffc7ce" };
+
+  // Synchronous throw during rules sync must NOT leave rulesPending > 0.
+  rules.set("Sheet1", { cf: [barRule], dv: [] });
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  rules.set("Sheet1", { cf: [], dv: [] });
+  const afterClear = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(afterClear, null, "rulesInPlay must be false once rules are cleared after synchronous throw");
+
+  // Non-empty beforeRule -> hover barRule -> revert before IPC 1 resolves -> restores beforeRule fx cleanly.
+  throwSync = false;
+  rules.set("Sheet1", { cf: [beforeRule], dv: [] });
+  const initEval = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  await flushAsyncTurns(4);
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bg: 0xffc7ce }]) });
+  await initEval;
+  assert.equal(rules.fxAt("Sheet1", "A1")?.bg, "#ffc7ce");
+
+  rules.set("Sheet1", { cf: [barRule, beforeRule], dv: [] });
+  const hoverEval = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  await flushAsyncTurns(4);
+  rules.set("Sheet1", { cf: [beforeRule], dv: [] });
+  const revertEval = store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bar: { color: 0x638ec6, pct: 100, start: 0 } }]) });
+  await hoverEval;
+  assert.equal(rules.fxAt("Sheet1", "A1"), undefined, "stale bar fx must not paint after revert to beforeRule");
+  await flushAsyncTurns(4);
+  pending.shift().resolve({ session: "s1", sheet: "Sheet1", cf: packTestCf([{ row: 0, col: 0, bg: 0xffc7ce }]) });
+  await revertEval;
+  assert.equal(rules.fxAt("Sheet1", "A1")?.bg, "#ffc7ce", "beforeRule fx is restored after revert");
   rules.replaceAll({});
 });

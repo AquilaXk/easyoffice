@@ -462,9 +462,9 @@
       if (renames.length > 0) void renameTableColumns(renames, sheetsMap).then((moved) => moved && onChange());
     }
 
-    // Rules exist on the page, or the session still holds rules the page has since cleared.
+    // Rules exist on the page, or the session still holds (or is syncing) rules the page has since cleared.
     function rulesInPlay() {
-      return Boolean(rulesApi) && (rulesApi.hasAny() || session.rules.size > 0);
+      return Boolean(rulesApi) && (rulesApi.hasAny() || session.rules.size > 0 || (session.rulesPending || 0) > 0);
     }
 
     // Appearance changes the engine reports with an `apply` answer.
@@ -488,17 +488,24 @@
         const payload = rulesApi.payloadFor(name);
         const sent = session.rules.get(name);
         if ((sent === payload && rulesApi.hasFx(name)) || (sent === undefined && rulesApi.isEmpty(rulesApi.get(name)))) continue;
-        const res = await sessionCall({
-          sessionAction: "rules",
-          session: session.id,
-          sheet: name,
-          rules: JSON.parse(payload),
-        });
+        const sentEmpty = rulesApi.isEmpty(rulesApi.get(name));
+        session.rulesPending = (session.rulesPending || 0) + 1;
+        let res;
+        try {
+          res = await sessionCall({
+            sessionAction: "rules",
+            session: session.id,
+            sheet: name,
+            rules: JSON.parse(payload),
+          });
+        } finally {
+          session.rulesPending -= 1;
+        }
         if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
-        if (rulesApi.isEmpty(rulesApi.get(name))) session.rules.delete(name);
+        if (sentEmpty) session.rules.delete(name);
         else session.rules.set(name, payload);
         // Refused rules show nothing; the empty answer is still the session's answer, so they are not sent again.
-        rulesApi.applyPacked(name, res.refused ? null : res.cf, true);
+        if (rulesApi.payloadFor(name) === payload) rulesApi.applyPacked(name, res.refused ? null : res.cf, true);
       }
     }
 

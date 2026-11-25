@@ -134,12 +134,23 @@
 
     function finishStep(step, next) {
       return enqueueWorkspaceHistoryOp(async () => {
+        if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(step.sheet, "formatCells") === false) {
+          rules.set(step.sheet, step.before);
+          return false;
+        }
         // Rules the preview already put in are left as they are: setting them again drops the engine's answer for them, which the
         // session does not send twice for the same rules.
         if (JSON.stringify(rules.get(step.sheet)) !== JSON.stringify(next)) rules.set(step.sheet, next);
         sheetHistory.commit(step.record);
         return true;
       });
+    }
+
+    // Synchronous non-modal preview step for gallery hover/focus (never opens a protection alert on hover).
+    function beginPreview() {
+      const sheet = getActiveSheetName();
+      if (host.__EASYOFFICE_SHEET_PROTECT__?.allows(sheet, "formatCells") === false) return null;
+      return { sheet, before: structuredClone(rules.get(sheet)), record: sheetHistory.begin({ parts: ["sheetRules"], sync: false }) };
     }
 
     function colorOf(id, fallback) {
@@ -840,6 +851,7 @@
       commitRules,
       beginStep,
       finishStep,
+      beginPreview,
       isBlocked: rulesBlocked,
       openManager: openConditionalFormatDialog,
     });

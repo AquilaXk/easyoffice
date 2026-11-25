@@ -239,6 +239,7 @@
 }
 
 .md-sub:not(.disabled):not([aria-disabled="true"]):hover > .md-sub-panel,
+.md-sub:not(.disabled):not([aria-disabled="true"])[data-opening="1"] > .md-sub-panel,
 .md-sub:has(> .md-sub-panel:focus-within) > .md-sub-panel {
   display: block;
 }
