@@ -12,7 +12,7 @@
   const DEFAULT_STAGE_H = 560;
   const STAGE_PAD_PX = 28;
   const SPREAD_GAP_PX = 14;
-  const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD"]);
+  const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
 
   const doc = host.document;
   if (!doc) return;

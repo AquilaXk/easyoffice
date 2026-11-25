@@ -693,6 +693,7 @@
           .catch(() => {});
       });
     }
+    document.getElementById("btn-pdf-form-toggle")?.addEventListener("click", () => workspacePanels.togglePdfFormPanel());
     const btnPdfApply = document.getElementById("btn-pdf-apply");
     if (btnPdfApply) {
       btnPdfApply.addEventListener("click", () => {

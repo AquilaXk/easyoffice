@@ -294,3 +294,81 @@ fn official_korean_labels_separate_doc_and_hwp_and_match_menu_terms() {
     assert!(!hwp_page.contains(&"page:doc-header"));
     assert!(!hwp_page.contains(&"page:doc-footer"));
 }
+
+#[test]
+fn per_kind_export_submenus_keep_hwp_isolated_and_cover_supported_formats() {
+    assert!(!lines_of(MenuKind::Hwp, "파일")
+        .iter()
+        .any(|line| line.starts_with("@export")));
+    for (kind, token, required) in [
+        (
+            MenuKind::Doc,
+            layout::EXPORT_DOC,
+            &[
+                "file:exp-docx",
+                "file:exp-odt",
+                "file:exp-rtf",
+                "file:exp-pages",
+                "file:exp-md",
+                "file:exp-txt",
+                "file:exp-pdf",
+                "file:exp-dlg",
+            ][..],
+        ),
+        (
+            MenuKind::Sheet,
+            layout::EXPORT_SHEET,
+            &[
+                "file:exp-xlsx",
+                "file:exp-ods",
+                "file:exp-csv",
+                "file:exp-tsv",
+                "file:exp-pdf",
+                "file:exp-dlg",
+            ][..],
+        ),
+        (
+            MenuKind::Slide,
+            layout::EXPORT_SLIDE,
+            &[
+                "file:exp-pptx",
+                "file:exp-odp",
+                "file:exp-pdf",
+                "file:exp-dlg",
+            ][..],
+        ),
+        (
+            MenuKind::Base,
+            layout::EXPORT_BASE,
+            &[
+                "file:exp-base",
+                "file:exp-xlsx",
+                "file:exp-csv",
+                "file:exp-tsv",
+                "file:exp-dlg",
+            ][..],
+        ),
+        (
+            MenuKind::Board,
+            layout::EXPORT_BOARD,
+            &["file:exp-board", "file:exp-pdf", "file:exp-dlg"][..],
+        ),
+        (
+            MenuKind::Pdf,
+            layout::EXPORT_PDF,
+            &[
+                "file:exp-pdf",
+                "file:exp-docx",
+                "file:exp-txt",
+                "file:exp-dlg",
+            ][..],
+        ),
+    ] {
+        let file = lines_of(kind, "파일");
+        assert!(file.contains(&token), "{kind:?} missing {token}");
+        let ids = layout::table_ids(kind);
+        for item in required {
+            assert!(ids.contains(item), "{kind:?} missing {item}");
+        }
+    }
+}

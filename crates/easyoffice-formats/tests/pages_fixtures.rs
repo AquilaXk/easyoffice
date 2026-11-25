@@ -60,7 +60,7 @@ fn flags(r: &RichRun) -> Flags {
 /// `(bold, italic, underline, strike)`
 type Flags = (bool, bool, bool, bool);
 
-const GENERIC_WARNING: &str = "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 표의 테두리·셀 배경·열 너비·동영상·오디오 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장할 때 표 테두리·셀 배경·도형·각주·댓글 등은 쓰지 않습니다.";
+const GENERIC_WARNING: &str = "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 동영상·오디오 등 일부 요소는 가져오지 않고 서식이 단순화될 수 있습니다. Pages로 저장할 때 도형·각주·댓글 등은 쓰지 않습니다.";
 
 #[test]
 fn text_fixture_paragraphs_and_headings() {

@@ -5,14 +5,15 @@
 //! 참조 구현: iwork-rs (MIT, Copyright (c) 2026 Zebra Pig; see THIRD_PARTY_NOTICES.md),
 //! `src/table.rs`, `src/create.rs`, `FORMAT.md` §5.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::body::{drawable_archive_fields, valid_pages_link};
-use super::package::Blueprint;
-use super::styles::Styles;
+use super::package::{Blueprint, ComponentId};
+use super::styles::{self, Styles};
 use super::wire::{bytes, float, msg, reference, string, varint, Fld};
 use crate::pages_schema::{cell, hyperlink, storage, table, ty};
 use crate::pages_table::{MAX_TABLE_CELLS, MAX_TABLE_COLS, MAX_TABLE_ROWS};
+use crate::rich_table_style::{TableBorderEdge, TableBorderKind, TableCellStyleEntry};
 use crate::{EasyOfficeError, RichTable, TableCellLink};
 
 const MAX_TABLES: usize = 2_000;
@@ -76,16 +77,209 @@ impl TableWriteBudget {
     }
 }
 
-fn pack_string_cell(buf: &mut Vec<u8>, key: u32) {
+fn pack_string_cell(buf: &mut Vec<u8>, key: u32, cell_style_key: Option<u32>) {
+    let flags = (1u32 << cell::LEGACY_BIT_STRING_KEY)
+        | cell_style_key.map_or(0, |_| 1u32 << cell::LEGACY_BIT_CELL_STYLE);
     buf.extend_from_slice(&[cell::LEGACY_VERSION, cell::TYPE_STRING, 0, 0, 0, 0, 0, 0]);
-    buf.extend_from_slice(&(1u32 << cell::LEGACY_BIT_STRING_KEY).to_le_bytes());
+    buf.extend_from_slice(&flags.to_le_bytes());
     buf.extend_from_slice(&key.to_le_bytes());
+    if let Some(sk) = cell_style_key {
+        buf.extend_from_slice(&sk.to_le_bytes());
+    }
 }
 
-fn pack_rich_text_cell(buf: &mut Vec<u8>, key: u32) {
+fn pack_rich_text_cell(buf: &mut Vec<u8>, key: u32, cell_style_key: Option<u32>) {
+    let flags = cell::LEGACY_FLAG_RICH_TEXT_KEY
+        | cell_style_key.map_or(0, |_| 1u32 << cell::LEGACY_BIT_CELL_STYLE);
     buf.extend_from_slice(&[cell::LEGACY_VERSION, cell::TYPE_RICH_TEXT, 0, 0, 0, 0, 0, 0]);
-    buf.extend_from_slice(&cell::LEGACY_FLAG_RICH_TEXT_KEY.to_le_bytes());
+    buf.extend_from_slice(&flags.to_le_bytes());
     buf.extend_from_slice(&key.to_le_bytes());
+    if let Some(sk) = cell_style_key {
+        buf.extend_from_slice(&sk.to_le_bytes());
+    }
+}
+
+fn pack_empty_styled_cell(buf: &mut Vec<u8>, cell_style_key: u32) {
+    buf.extend_from_slice(&[cell::LEGACY_VERSION, cell::TYPE_EMPTY, 0, 0, 0, 0, 0, 0]);
+    buf.extend_from_slice(&(1u32 << cell::LEGACY_BIT_CELL_STYLE).to_le_bytes());
+    buf.extend_from_slice(&cell_style_key.to_le_bytes());
+}
+
+fn encode_stroke(edge: TableBorderEdge) -> Vec<Fld> {
+    let [_, r, g, b] = edge.rgb().to_be_bytes();
+    let kind = edge.kind();
+    let (color_rgb, width, pattern_fields) = match kind {
+        TableBorderKind::None => (
+            [0u8, 0, 0],
+            0.0f32,
+            vec![
+                varint(table::STROKE_PATTERN_TYPE, table::PATTERN_NONE),
+                float(2, 0.0),
+                varint(3, 0),
+            ],
+        ),
+        TableBorderKind::Thin => (
+            [r, g, b],
+            1.0f32,
+            vec![
+                varint(table::STROKE_PATTERN_TYPE, table::PATTERN_SOLID),
+                float(2, 0.0),
+                varint(3, 0),
+            ],
+        ),
+        TableBorderKind::Thick | TableBorderKind::Double => (
+            [r, g, b],
+            2.0f32,
+            vec![
+                varint(table::STROKE_PATTERN_TYPE, table::PATTERN_SOLID),
+                float(2, 0.0),
+                varint(3, 0),
+            ],
+        ),
+        TableBorderKind::Dashed => (
+            [r, g, b],
+            1.0f32,
+            vec![
+                varint(table::STROKE_PATTERN_TYPE, table::PATTERN_DASHED),
+                float(table::STROKE_PATTERN_DASH, 4.0),
+            ],
+        ),
+        TableBorderKind::Dotted => (
+            [r, g, b],
+            1.0f32,
+            vec![
+                varint(table::STROKE_PATTERN_TYPE, table::PATTERN_DASHED),
+                float(table::STROKE_PATTERN_DASH, 1.5),
+            ],
+        ),
+        TableBorderKind::Unspecified => unreachable!(),
+    };
+    vec![
+        msg(table::STROKE_COLOR, styles::rgb(color_rgb)),
+        float(table::STROKE_WIDTH, width),
+        msg(table::STROKE_PATTERN, pattern_fields),
+    ]
+}
+
+fn emit_axis_layers(
+    bp: &mut Blueprint,
+    doc_comp: ComponentId,
+    grouped: BTreeMap<usize, Vec<(usize, TableBorderEdge)>>,
+    next_order: &mut u64,
+) -> Result<Vec<u64>, EasyOfficeError> {
+    let mut layer_ids = Vec::with_capacity(grouped.len());
+    for (axis_idx, items) in grouped {
+        let mut layer_fields = vec![varint(table::STROKE_LAYER_INDEX, axis_idx as u64)];
+        let mut cur_run: Option<(usize, usize, TableBorderEdge)> = None;
+        let flush_run =
+            |run: (usize, usize, TableBorderEdge), order: &mut u64, out: &mut Vec<Fld>| {
+                *order += 1;
+                out.push(msg(
+                    table::STROKE_LAYER_RUNS,
+                    vec![
+                        varint(table::STROKE_RUN_ORIGIN, run.0 as u64),
+                        varint(table::STROKE_RUN_LENGTH, run.1 as u64),
+                        msg(table::STROKE_RUN_STROKE, encode_stroke(run.2)),
+                        varint(table::STROKE_RUN_ORDER, *order),
+                    ],
+                ));
+            };
+        for (pos, edge) in items {
+            match &mut cur_run {
+                Some((orig, len, prev_edge)) if *orig + *len == pos && *prev_edge == edge => {
+                    *len += 1;
+                }
+                Some(run) => {
+                    flush_run(*run, next_order, &mut layer_fields);
+                    cur_run = Some((pos, 1, edge));
+                }
+                None => cur_run = Some((pos, 1, edge)),
+            }
+        }
+        if let Some(run) = cur_run {
+            flush_run(run, next_order, &mut layer_fields);
+        }
+        layer_ids.push(bp.add(doc_comp, ty::STROKE_LAYER, &layer_fields)?);
+    }
+    Ok(layer_ids)
+}
+
+fn write_stroke_sidecar(
+    bp: &mut Blueprint,
+    doc_comp: ComponentId,
+    rows: usize,
+    cols: usize,
+    styled: &[TableCellStyleEntry],
+) -> Result<Option<u64>, EasyOfficeError> {
+    let mut left_cols: BTreeMap<usize, Vec<(usize, TableBorderEdge)>> = BTreeMap::new();
+    let mut right_cols: BTreeMap<usize, Vec<(usize, TableBorderEdge)>> = BTreeMap::new();
+    let mut top_rows: BTreeMap<usize, Vec<(usize, TableBorderEdge)>> = BTreeMap::new();
+    let mut bottom_rows: BTreeMap<usize, Vec<(usize, TableBorderEdge)>> = BTreeMap::new();
+    for e in styled {
+        let (r, c) = (e.row as usize, e.col as usize);
+        if !e.borders.left.is_unspecified() {
+            left_cols.entry(c).or_default().push((r, e.borders.left));
+        }
+        if !e.borders.right.is_unspecified() {
+            right_cols.entry(c).or_default().push((r, e.borders.right));
+        }
+        if !e.borders.top.is_unspecified() {
+            top_rows.entry(r).or_default().push((c, e.borders.top));
+        }
+        if !e.borders.bottom.is_unspecified() {
+            bottom_rows
+                .entry(r)
+                .or_default()
+                .push((c, e.borders.bottom));
+        }
+    }
+    for list in left_cols
+        .values_mut()
+        .chain(right_cols.values_mut())
+        .chain(top_rows.values_mut())
+        .chain(bottom_rows.values_mut())
+    {
+        list.sort_by_key(|(pos, _)| *pos);
+    }
+    if left_cols.is_empty()
+        && right_cols.is_empty()
+        && top_rows.is_empty()
+        && bottom_rows.is_empty()
+    {
+        return Ok(None);
+    }
+    let mut next_order = 0u64;
+    let left_ids = emit_axis_layers(bp, doc_comp, left_cols, &mut next_order)?;
+    let right_ids = emit_axis_layers(bp, doc_comp, right_cols, &mut next_order)?;
+    let top_ids = emit_axis_layers(bp, doc_comp, top_rows, &mut next_order)?;
+    let bottom_ids = emit_axis_layers(bp, doc_comp, bottom_rows, &mut next_order)?;
+
+    let mut sidecar = vec![
+        varint(table::STROKE_SIDECAR_MAX_ORDER, next_order),
+        varint(table::STROKE_SIDECAR_COLS, cols as u64),
+        varint(table::STROKE_SIDECAR_ROWS, rows as u64),
+    ];
+    sidecar.extend(
+        left_ids
+            .into_iter()
+            .map(|id| reference(table::STROKE_SIDECAR_LEFT_COLS, id)),
+    );
+    sidecar.extend(
+        right_ids
+            .into_iter()
+            .map(|id| reference(table::STROKE_SIDECAR_RIGHT_COLS, id)),
+    );
+    sidecar.extend(
+        top_ids
+            .into_iter()
+            .map(|id| reference(table::STROKE_SIDECAR_TOP_ROWS, id)),
+    );
+    sidecar.extend(
+        bottom_ids
+            .into_iter()
+            .map(|id| reference(table::STROKE_SIDECAR_BOTTOM_ROWS, id)),
+    );
+    Ok(Some(bp.add(doc_comp, ty::STROKE_SIDECAR, &sidecar)?))
 }
 
 fn storage_entry(index: u64, object_id: Option<u64>) -> Fld {
@@ -190,7 +384,7 @@ const MIN_COL_WIDTH_PT: f32 = 36.0;
 /// identifier, or `None` when `tbl` has zero rows or zero columns.
 pub(super) fn write_table_attachment(
     bp: &mut Blueprint,
-    styles: &Styles,
+    styles: &mut Styles,
     tbl: &RichTable,
     body_width_pt: f32,
     budget: &mut TableWriteBudget,
@@ -213,11 +407,23 @@ pub(super) fn write_table_attachment(
         }
     }
 
+    let validated_styles = tbl.validated_cell_styles();
+    let mut fill_by_cell: HashMap<(usize, usize), [u8; 3]> = HashMap::new();
+    for entry in &validated_styles {
+        if let Some(rgb) = entry.fill.rgb() {
+            let [_, r, g, b] = rgb.to_be_bytes();
+            fill_by_cell.insert((entry.row as usize, entry.col as usize), [r, g, b]);
+        }
+    }
+
     let doc_comp = bp.document();
     let mut string_keys: HashMap<&str, u32> = HashMap::new();
+    let mut style_keys: HashMap<[u8; 3], u32> = HashMap::new();
     let mut string_entries: Vec<Fld> = Vec::new();
+    let mut style_entries: Vec<Fld> = Vec::new();
     let mut rich_entries: Vec<Fld> = Vec::new();
     let mut next_string_key = 0u32;
+    let mut next_style_key = 0u32;
     let mut next_rich_key = 0u32;
     let mut tile_entries: Vec<Fld> = Vec::new();
 
@@ -231,6 +437,27 @@ pub(super) fn write_table_attachment(
 
             for col_idx in 0..cols {
                 let text = row_cells.get(col_idx).map_or("", String::as_str);
+                let style_key = if let Some(&rgb) = fill_by_cell.get(&(abs_row, col_idx)) {
+                    Some(if let Some(&existing) = style_keys.get(&rgb) {
+                        existing
+                    } else {
+                        budget.charge_list_entry()?;
+                        next_style_key += 1;
+                        let style_id = styles.table_cell_fill(bp, rgb)?;
+                        style_keys.insert(rgb, next_style_key);
+                        style_entries.push(msg(
+                            table::LIST_ENTRIES,
+                            vec![
+                                varint(table::ENTRY_KEY, u64::from(next_style_key)),
+                                reference(table::ENTRY_CELL_STYLE, style_id),
+                            ],
+                        ));
+                        next_style_key
+                    })
+                } else {
+                    None
+                };
+
                 if let Some(links) = cell_links.get(&(abs_row, col_idx)) {
                     let offset = u16::try_from(row_buf.len())
                         .ok()
@@ -250,7 +477,7 @@ pub(super) fn write_table_attachment(
                             reference(table::ENTRY_RICH_TEXT, payload_id),
                         ],
                     ));
-                    pack_rich_text_cell(&mut row_buf, next_rich_key);
+                    pack_rich_text_cell(&mut row_buf, next_rich_key, style_key);
                     row_offsets.extend_from_slice(&offset.to_le_bytes());
                     has_any_cell = true;
                 } else if !text.is_empty() {
@@ -277,7 +504,19 @@ pub(super) fn write_table_attachment(
                         ));
                         next_string_key
                     };
-                    pack_string_cell(&mut row_buf, key);
+                    pack_string_cell(&mut row_buf, key, style_key);
+                    row_offsets.extend_from_slice(&offset.to_le_bytes());
+                    has_any_cell = true;
+                } else if let Some(sk) = style_key {
+                    let offset = u16::try_from(row_buf.len())
+                        .ok()
+                        .filter(|o| *o < table::NO_CELL_OFFSET)
+                        .ok_or_else(|| {
+                            EasyOfficeError::ResourceBudgetExceeded(
+                                "Pages 쓰기: 표 행 셀 버퍼 크기 한도를 넘었습니다".to_string(),
+                            )
+                        })?;
+                    pack_empty_styled_cell(&mut row_buf, sk);
                     row_offsets.extend_from_slice(&offset.to_le_bytes());
                     has_any_cell = true;
                 } else {
@@ -307,7 +546,26 @@ pub(super) fn write_table_attachment(
     }
 
     tile_entries.push(varint(table::TILES_SIZE, table::DEFAULT_TILE_ROWS));
-    let mut store_fields = vec![msg(table::STORE_TILES, tile_entries)];
+    let validated_widths = tbl.validated_col_widths();
+    let mut store_fields = Vec::new();
+    if let Some(widths) = &validated_widths {
+        let entries: Vec<Fld> = widths
+            .iter()
+            .enumerate()
+            .map(|(col_idx, &w_tw)| {
+                msg(
+                    table::HEADER_BUCKET_ENTRIES,
+                    vec![
+                        varint(table::HEADER_ENTRY_INDEX, col_idx as u64),
+                        float(table::HEADER_ENTRY_SIZE, w_tw as f32 / 20.0),
+                    ],
+                )
+            })
+            .collect();
+        let bucket_id = bp.add(doc_comp, ty::TABLE_HEADER_BUCKET, &entries)?;
+        store_fields.push(reference(table::STORE_COL_HEADERS, bucket_id));
+    }
+    store_fields.push(msg(table::STORE_TILES, tile_entries));
 
     if !string_entries.is_empty() {
         let mut list_fields = vec![
@@ -317,6 +575,16 @@ pub(super) fn write_table_attachment(
         list_fields.extend(string_entries);
         let str_list_id = bp.add(doc_comp, ty::TABLE_DATA_LIST, &list_fields)?;
         store_fields.push(reference(table::STORE_STRING_LIST, str_list_id));
+    }
+
+    if !style_entries.is_empty() {
+        let mut list_fields = vec![
+            varint(1, table::LIST_KIND_STYLE),
+            varint(2, u64::from(next_style_key).saturating_add(1)),
+        ];
+        list_fields.extend(style_entries);
+        let style_list_id = bp.add(doc_comp, ty::TABLE_DATA_LIST, &list_fields)?;
+        store_fields.push(reference(table::STORE_STYLE_LIST, style_list_id));
     }
 
     let merges = tbl.validated_merges();
@@ -351,25 +619,35 @@ pub(super) fn write_table_attachment(
         store_fields.push(reference(table::STORE_RICH_TEXT_LIST, rt_list_id));
     }
 
+    let stroke_sidecar_id = write_stroke_sidecar(bp, doc_comp, rows, cols, &validated_styles)?;
+
     let model_id = bp.allocate();
     let table_uuid = format!("00000000-0000-4000-8000-{model_id:012x}");
-    let col_width_pt = (body_width_pt / cols as f32).max(MIN_COL_WIDTH_PT);
-    let table_w_pt = (col_width_pt * cols as f32).max(MIN_COL_WIDTH_PT);
+    let default_col_width_pt = (body_width_pt / cols as f32).max(MIN_COL_WIDTH_PT);
+    let table_w_pt = validated_widths.as_ref().map_or(
+        (default_col_width_pt * cols as f32).max(MIN_COL_WIDTH_PT),
+        |ws| {
+            ws.iter()
+                .map(|&tw| tw as f32 / 20.0)
+                .sum::<f32>()
+                .max(MIN_COL_WIDTH_PT)
+        },
+    );
     let table_h_pt = (DEFAULT_ROW_HEIGHT_PT * rows as f32).max(DEFAULT_ROW_HEIGHT_PT);
 
-    bp.put(
-        doc_comp,
-        model_id,
-        ty::TABLE_MODEL,
-        &[
-            string(table::MODEL_ID, &table_uuid),
-            msg(table::MODEL_DATA_STORE, store_fields),
-            varint(table::MODEL_ROWS, rows as u64),
-            varint(table::MODEL_COLS, cols as u64),
-            float(table::MODEL_DEFAULT_ROW_HEIGHT, DEFAULT_ROW_HEIGHT_PT),
-            float(table::MODEL_DEFAULT_COL_WIDTH, col_width_pt),
-        ],
-    )?;
+    let mut model_fields = vec![
+        string(table::MODEL_ID, &table_uuid),
+        msg(table::MODEL_DATA_STORE, store_fields),
+        varint(table::MODEL_ROWS, rows as u64),
+        varint(table::MODEL_COLS, cols as u64),
+        float(table::MODEL_DEFAULT_ROW_HEIGHT, DEFAULT_ROW_HEIGHT_PT),
+        float(table::MODEL_DEFAULT_COL_WIDTH, default_col_width_pt),
+    ];
+    if let Some(sidecar_id) = stroke_sidecar_id {
+        model_fields.push(reference(table::MODEL_STROKE_SIDECAR, sidecar_id));
+    }
+
+    bp.put(doc_comp, model_id, ty::TABLE_MODEL, &model_fields)?;
     let info_id = bp.add(
         doc_comp,
         ty::TABLE_INFO,

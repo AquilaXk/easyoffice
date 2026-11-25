@@ -147,6 +147,8 @@ const PAGE_ITEM_SELECTORS = {
   "studio-cmd": (cmd) => `.md-item[data-studio-menu-cmd="${cmd}"]`,
   "verify-act": (act) => `.md-item[data-verify-act="${act}"]`,
   "window-new": (kind) => `[data-window-new="${kind.toUpperCase()}"]`,
+  export: (fmt) => `.md-item[data-export-format="${fmt}"]`,
+  "export-dialog": () => ".md-item[data-export-dialog]",
   theme: (mode) => `[data-theme-mode-choice="${mode}"]`,
   "update-check": () => "[data-update-check-toggle]",
 };
@@ -178,6 +180,7 @@ const OWN_ACTIONS = {
   "data-about-open": "about",
   "data-recent-dialog-open": "recent-dialog",
   "data-save-as-generic": "file-save-as",
+  "data-export-dialog": "export-dialog:open",
 };
 const OWN_STUDIO_COMMANDS = { "studio-save": "studio-save", find: "find", replace: "replace", print: "print" };
 // Visible only in the Hangul editor window, where the whole menu row is hidden.
@@ -193,6 +196,7 @@ function pageMenuItemActions() {
     if (attr("data-studio-menu-cmd")) found.push(attr("data-save-as-generic") ? OWN_ACTIONS["data-save-as-generic"] : OWN_STUDIO_COMMANDS[attr("data-studio-menu-cmd")] ?? `studio-cmd:${attr("data-studio-menu-cmd")}`);
     else if (attr("data-verify-act")) found.push(`verify-act:${attr("data-verify-act")}`);
     else if (attr("data-window-new")) found.push(`window-new:${attr("data-window-new").toLowerCase()}`);
+    else if (attr("data-export-format")) found.push(`export:${attr("data-export-format")}`);
     else if (attr("data-theme-mode-choice")) found.push(`theme:${attr("data-theme-mode-choice")}`);
     else if (tag.includes("data-update-check-toggle")) found.push("update-check");
     else {

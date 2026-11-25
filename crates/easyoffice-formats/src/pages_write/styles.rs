@@ -20,6 +20,8 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+use crate::pages_schema::{para_props, table, ty};
+
 const TYPE_STYLESHEET: u32 = 401;
 const TYPE_CHARACTER_STYLE: u32 = 2021;
 const TYPE_PARAGRAPH_STYLE: u32 = 2022;
@@ -27,6 +29,7 @@ const TYPE_LIST_STYLE: u32 = 2023;
 const TYPE_COLUMN_STYLE: u32 = 2024;
 const TYPE_SHAPE_STYLE: u32 = 2025;
 const TYPE_MEDIA_STYLE: u32 = 3016;
+const TYPE_CELL_STYLE: u32 = ty::CELL_STYLE;
 
 /// Body text: 11 pt, black (`AppleSDGothicNeo-Regular`). Headings 1-6 use `AppleSDGothicNeo-Bold`.
 pub(super) const BODY_POINTS: f32 = 11.0;
@@ -55,6 +58,7 @@ const LIST_IDENTIFIER: &str = "text-0-liststyle-None";
 const NULL_CHARACTER_IDENTIFIER: &str = "character-style-null";
 const TEXT_BOX_IDENTIFIER: &str = "textbox-style-preset-0";
 const IMAGE_IDENTIFIER: &str = "image-style-preset-0";
+const TABLE_CELL_IDENTIFIER: &str = "tableCell-0-bodyStyle";
 
 /// `TSP.Color` in sRGB: model 1, three channels, alpha, the colour space (field 12) and the
 /// field that follows it. A colour is complete or it is nothing.
@@ -120,6 +124,7 @@ pub(super) struct ParaLook {
     pub alignment: Option<u64>,
     pub first_line_indent_twips: Option<i32>,
     pub left_indent_twips: Option<u32>,
+    pub right_indent_twips: Option<u32>,
     pub line_spacing_percent: Option<u16>,
 }
 
@@ -128,6 +133,7 @@ impl ParaLook {
         self.alignment.is_none()
             && self.first_line_indent_twips.is_none()
             && self.left_indent_twips.is_none()
+            && self.right_indent_twips.is_none()
             && self.line_spacing_percent.is_none()
     }
 }
@@ -164,6 +170,7 @@ pub(super) struct Styles {
     pub list: u64,
     pub body_column: u64,
     pub image: u64,
+    pub table_cell: u64,
     component: ComponentId,
     null_character: u64,
     column: u64,
@@ -175,6 +182,7 @@ pub(super) struct Styles {
     character_variations: BTreeMap<CharLook, u64>,
     list_variations: BTreeMap<ListLook, u64>,
     column_variations: BTreeMap<(u8, bool, u32), u64>,
+    cell_variations: BTreeMap<[u8; 3], u64>,
     /// `(theme field, style)` of every drawing preset.
     presets: Vec<(u32, u64)>,
 }
@@ -402,6 +410,15 @@ impl Styles {
         named.push((TEXT_BOX_IDENTIFIER.to_string(), text_box));
         named.push((IMAGE_IDENTIFIER.to_string(), image));
         named.push((DEFAULT_PARAGRAPH_IDENTIFIER.to_string(), body));
+        let table_cell = bp.add(
+            component,
+            TYPE_CELL_STYLE,
+            &[
+                header(Some(("Table Cell", TABLE_CELL_IDENTIFIER)), stylesheet),
+                varint(10, 0),
+            ],
+        )?;
+        named.push((TABLE_CELL_IDENTIFIER.to_string(), table_cell));
 
         Ok(Self {
             stylesheet,
@@ -410,6 +427,7 @@ impl Styles {
             list,
             body_column,
             image,
+            table_cell,
             component,
             null_character,
             column,
@@ -419,6 +437,7 @@ impl Styles {
             character_variations: BTreeMap::new(),
             list_variations: BTreeMap::new(),
             column_variations: BTreeMap::new(),
+            cell_variations: BTreeMap::new(),
             presets,
         })
     }
@@ -462,6 +481,10 @@ impl Styles {
                 13,
                 vec![varint(1, 0), float(2, f32::from(pct) / 100.0)],
             ));
+            count += 1;
+        }
+        if let Some(right_tw) = look.right_indent_twips {
+            bag.push(float(para_props::RIGHT_INDENT, right_tw as f32 / 20.0));
             count += 1;
         }
         let fields = [
@@ -652,5 +675,30 @@ impl Styles {
         );
         fields.push(msg(8, listed));
         bp.put(self.component, self.stylesheet, TYPE_STYLESHEET, &fields)
+    }
+
+    pub(super) fn table_cell_fill(
+        &mut self,
+        bp: &mut Blueprint,
+        fill_rgb: [u8; 3],
+    ) -> Result<u64, EasyOfficeError> {
+        if let Some(id) = self.cell_variations.get(&fill_rgb) {
+            return Ok(*id);
+        }
+        let fields = [
+            variation_header(self.table_cell, self.stylesheet),
+            varint(table::CELL_STYLE_OVERRIDES, 1),
+            msg(
+                table::CELL_STYLE_PROPS,
+                vec![msg(
+                    table::CELL_PROPS_FILL,
+                    vec![msg(table::FILL_COLOR, rgb(fill_rgb))],
+                )],
+            ),
+        ];
+        let id = bp.add(self.component, TYPE_CELL_STYLE, &fields)?;
+        self.cell_variations.insert(fill_rgb, id);
+        self.register(self.table_cell, id);
+        Ok(id)
     }
 }

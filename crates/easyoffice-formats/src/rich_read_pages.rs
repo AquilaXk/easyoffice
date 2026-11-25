@@ -294,6 +294,7 @@ impl<'a> Reader<'a> {
             para.alignment = f.align.and_then(alignment_of);
             para.heading_level = f.identifier.as_deref().map_or(0, heading_level);
             para.left_indent_twips = f.left_indent_twips;
+            para.right_indent_twips = f.right_indent_twips;
             para.first_line_indent_twips = f.first_line_indent_twips;
             para.line_spacing_percent = f.line_spacing_percent;
         }
@@ -577,8 +578,10 @@ impl<'a> Reader<'a> {
                 self.skip_many("표 셀의 읽을 수 없는 값(문자열·기간 등)", t.unsupported);
                 self.skip_many("표 셀 안의 개체(그림·필드 등)", t.cell_objects);
                 self.skip_many(marks::UNSAFE_LINK, t.unsafe_links);
-                let (table, dropped_merges, dropped_links) =
+                let (mut table, dropped_merges, dropped_links) =
                     RichTable::with_merges_and_links(t.grid, t.merges, t.links);
+                table.col_widths_twips = t.col_widths_twips;
+                table.cell_styles = t.cell_styles;
                 self.skip_many("범위를 벗어나거나 겹치는 표 병합 영역", dropped_merges);
                 self.skip_many(marks::UNSAFE_LINK, dropped_links);
                 let mut out = Vec::with_capacity(1 + t.cell_images.len());
@@ -687,7 +690,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         warnings.push(PAGE_LAYOUT_NOTE.to_string());
     }
     warnings.push(
-        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 표의 테두리·셀 배경·열 너비·동영상·오디오 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장할 때 표 테두리·셀 배경·도형·각주·댓글 등은 쓰지 않습니다."
+        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 동영상·오디오 등 일부 요소는 가져오지 않고 서식이 단순화될 수 있습니다. Pages로 저장할 때 도형·각주·댓글 등은 쓰지 않습니다."
             .to_string(),
     );
     let title = blocks

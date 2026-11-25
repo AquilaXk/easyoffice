@@ -59,6 +59,7 @@ pub(crate) struct PackedCell {
     pub rich_text_key: Option<u32>,
     pub string_key: Option<u32>,
     pub format_key: Option<u32>,
+    pub cell_style_key: Option<u32>,
     pub value: CellScalar,
 }
 
@@ -82,18 +83,20 @@ fn parse_legacy(head: &[u8]) -> Option<PackedCell> {
     let flags = read_u32(head, cell::LEGACY_FLAGS_OFFSET)?;
     if matches!(
         kind,
-        cell::TYPE_NUMBER
+        cell::TYPE_EMPTY
+            | cell::TYPE_NUMBER
             | cell::TYPE_CURRENCY
             | cell::TYPE_DATE
             | cell::TYPE_STRING
             | cell::TYPE_DURATION
             | cell::TYPE_ERROR
             | cell::TYPE_BOOL
+            | cell::TYPE_RICH_TEXT
     ) {
         return parse_legacy_scalar(head, kind, flags);
     }
     let mut rich_text_key = None;
-    if kind == cell::TYPE_RICH_TEXT && flags & cell::LEGACY_FLAG_RICH_TEXT_KEY != 0 {
+    if flags & cell::LEGACY_FLAG_RICH_TEXT_KEY != 0 {
         let below = (flags & (cell::LEGACY_FLAG_RICH_TEXT_KEY - 1)).count_ones() as usize;
         let at = cell::LEGACY_FIELDS_OFFSET.checked_add(below.checked_mul(4)?)?;
         rich_text_key = Some(read_u32(head, at)?);
@@ -103,6 +106,7 @@ fn parse_legacy(head: &[u8]) -> Option<PackedCell> {
         rich_text_key,
         string_key: None,
         format_key: None,
+        cell_style_key: None,
         value: CellScalar::None,
     })
 }
@@ -125,6 +129,7 @@ fn parse_legacy_scalar(head: &[u8], kind: u8, flags: u32) -> Option<PackedCell> 
         rich_text_key: None,
         string_key: None,
         format_key: None,
+        cell_style_key: None,
         value: CellScalar::None,
     };
     let mut cursor = cell::LEGACY_FIELDS_OFFSET;
@@ -146,6 +151,7 @@ fn parse_legacy_scalar(head: &[u8], kind: u8, flags: u32) -> Option<PackedCell> 
             }
             cell::LEGACY_BIT_STRING_KEY => out.string_key = Some(read_u32(field, 0)?),
             cell::LEGACY_BIT_RICH_TEXT_KEY => out.rich_text_key = Some(read_u32(field, 0)?),
+            cell::LEGACY_BIT_CELL_STYLE => out.cell_style_key = Some(read_u32(field, 0)?),
             b if out.format_key.is_none() && (cell::LEGACY_FORMAT_MASK & (1 << b) != 0) => {
                 out.format_key = Some(read_u32(field, 0)?);
             }
@@ -184,6 +190,7 @@ fn parse_current(head: &[u8]) -> Option<PackedCell> {
         rich_text_key: None,
         string_key: None,
         format_key: None,
+        cell_style_key: None,
         value: CellScalar::None,
     };
     let mut cursor = cell::FIELDS_OFFSET;
@@ -328,5 +335,28 @@ mod tests {
         assert_eq!(parsed.kind, cell::TYPE_DURATION);
         assert_eq!(parsed.value, CellScalar::Double(5400.0));
         assert_eq!(parsed.format_key, Some(7));
+    }
+
+    #[test]
+    fn version_5_empty_and_rich_cells_read_cell_style_key_and_fail_closed_when_truncated() {
+        let mut empty = vec![cell::LEGACY_VERSION, cell::TYPE_EMPTY, 0, 0, 0, 0, 0, 0];
+        empty.extend_from_slice(&(1u32 << cell::LEGACY_BIT_CELL_STYLE).to_le_bytes());
+        empty.extend_from_slice(&11u32.to_le_bytes());
+        let parsed_empty = parse_cell(&empty, 0).unwrap();
+        assert_eq!(parsed_empty.kind, cell::TYPE_EMPTY);
+        assert_eq!(parsed_empty.cell_style_key, Some(11));
+
+        let mut rich = vec![cell::LEGACY_VERSION, cell::TYPE_RICH_TEXT, 0, 0, 0, 0, 0, 0];
+        let flags =
+            (1u32 << cell::LEGACY_BIT_RICH_TEXT_KEY) | (1u32 << cell::LEGACY_BIT_CELL_STYLE);
+        rich.extend_from_slice(&flags.to_le_bytes());
+        rich.extend_from_slice(&5u32.to_le_bytes());
+        rich.extend_from_slice(&14u32.to_le_bytes());
+        let parsed_rich = parse_cell(&rich, 0).unwrap();
+        assert_eq!(parsed_rich.rich_text_key, Some(5));
+        assert_eq!(parsed_rich.cell_style_key, Some(14));
+
+        rich.truncate(rich.len() - 1);
+        assert!(parse_cell(&rich, 0).is_none());
     }
 }

@@ -45,6 +45,7 @@
       if (menu.hidden) menu.classList.remove("open");
       const dropdown = menu.querySelector(":scope > .menu-dropdown");
       if (dropdown) collapseSeparators(dropdown);
+      for (const panel of menu.querySelectorAll(".md-sub-panel")) collapseSeparators(panel);
     }
     return kind;
   }

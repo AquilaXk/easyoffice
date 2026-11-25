@@ -7,7 +7,9 @@ use tauri::{AppHandle, Runtime};
 
 use super::layout::{
     self, MenuKind, MenuSpec, ALIGN, ALIGN_LINES, BORDER, BORDER_LINES, CALC_OPTIONS,
-    CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
+    CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, EXPORT_BASE, EXPORT_BASE_LINES, EXPORT_BOARD,
+    EXPORT_BOARD_LINES, EXPORT_DOC, EXPORT_DOC_LINES, EXPORT_PDF, EXPORT_PDF_LINES, EXPORT_SHEET,
+    EXPORT_SHEET_LINES, EXPORT_SLIDE, EXPORT_SLIDE_LINES, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
     NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME,
     THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
@@ -44,6 +46,12 @@ fn submenu<R: Runtime>(
         builder = match *line {
             SEPARATOR => builder.separator(),
             NEW_DOCS => builder.item(&nested(app, kind, "새 문서", &NEW_DOC_IDS)?),
+            EXPORT_DOC => builder.item(&nested(app, kind, "내보내기", &EXPORT_DOC_LINES)?),
+            EXPORT_SHEET => builder.item(&nested(app, kind, "내보내기", &EXPORT_SHEET_LINES)?),
+            EXPORT_SLIDE => builder.item(&nested(app, kind, "내보내기", &EXPORT_SLIDE_LINES)?),
+            EXPORT_BASE => builder.item(&nested(app, kind, "내보내기", &EXPORT_BASE_LINES)?),
+            EXPORT_BOARD => builder.item(&nested(app, kind, "내보내기", &EXPORT_BOARD_LINES)?),
+            EXPORT_PDF => builder.item(&nested(app, kind, "내보내기", &EXPORT_PDF_LINES)?),
             THEME => builder.item(&nested(app, kind, "테마", &THEME_IDS)?),
             NUMFMT => builder.item(&nested(app, kind, "표시 형식", &NUMFMT_LINES)?),
             ALIGN => builder.item(&nested(app, kind, "맞춤", &ALIGN_LINES)?),

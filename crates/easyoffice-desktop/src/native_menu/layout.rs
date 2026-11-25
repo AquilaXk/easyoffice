@@ -65,6 +65,13 @@ const fn menu(title: &'static str, lines: &'static [&'static str]) -> MenuSpec {
 pub const SEPARATOR: &str = "-";
 /// The 새 문서 submenu (the six `file:new-*` items).
 pub const NEW_DOCS: &str = "@new-docs";
+/// Per-window-kind 내보내기 submenus.
+pub const EXPORT_DOC: &str = "@export-doc";
+pub const EXPORT_SHEET: &str = "@export-sheet";
+pub const EXPORT_SLIDE: &str = "@export-slide";
+pub const EXPORT_BASE: &str = "@export-base";
+pub const EXPORT_BOARD: &str = "@export-board";
+pub const EXPORT_PDF: &str = "@export-pdf";
 /// The 테마 submenu (the three theme check items).
 pub const THEME: &str = "@theme";
 /// The 표시 형식 submenu of the spreadsheet's 서식 menu ([`NUMFMT_LINES`]).
@@ -106,6 +113,50 @@ pub const NEW_DOC_IDS: [&str; 8] = [
     "file:new-board",
     "file:new-pdf",
     "file:new-conv",
+];
+pub const EXPORT_DOC_LINES: [&str; 9] = [
+    "file:exp-docx",
+    "file:exp-odt",
+    "file:exp-rtf",
+    "file:exp-pages",
+    "file:exp-md",
+    "file:exp-txt",
+    "file:exp-pdf",
+    SEPARATOR,
+    "file:exp-dlg",
+];
+pub const EXPORT_SHEET_LINES: [&str; 7] = [
+    "file:exp-xlsx",
+    "file:exp-ods",
+    "file:exp-csv",
+    "file:exp-tsv",
+    "file:exp-pdf",
+    SEPARATOR,
+    "file:exp-dlg",
+];
+pub const EXPORT_SLIDE_LINES: [&str; 5] = [
+    "file:exp-pptx",
+    "file:exp-odp",
+    "file:exp-pdf",
+    SEPARATOR,
+    "file:exp-dlg",
+];
+pub const EXPORT_BASE_LINES: [&str; 6] = [
+    "file:exp-base",
+    "file:exp-xlsx",
+    "file:exp-csv",
+    "file:exp-tsv",
+    SEPARATOR,
+    "file:exp-dlg",
+];
+pub const EXPORT_BOARD_LINES: [&str; 4] =
+    ["file:exp-board", "file:exp-pdf", SEPARATOR, "file:exp-dlg"];
+pub const EXPORT_PDF_LINES: [&str; 5] = [
+    "file:exp-pdf",
+    "file:exp-docx",
+    "file:exp-txt",
+    SEPARATOR,
+    "file:exp-dlg",
 ];
 /// The lines of the 표시 형식 submenu.
 pub const NUMFMT_LINES: [&str; 11] = [

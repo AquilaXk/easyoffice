@@ -35,6 +35,22 @@
     "file:save-as-hwpx": "hwp-save-as:hwpx",
     "file:doc-paper": "studio-cmd:layout-paper",
     "file:export-pdf": "hwp-export-pdf",
+    "file:exp-docx": "export:docx",
+    "file:exp-odt": "export:odt",
+    "file:exp-rtf": "export:rtf",
+    "file:exp-pages": "export:pages",
+    "file:exp-md": "export:md",
+    "file:exp-txt": "export:txt",
+    "file:exp-xlsx": "export:xlsx",
+    "file:exp-ods": "export:ods",
+    "file:exp-csv": "export:csv",
+    "file:exp-tsv": "export:tsv",
+    "file:exp-pptx": "export:pptx",
+    "file:exp-odp": "export:odp",
+    "file:exp-base": "export:eobase",
+    "file:exp-board": "export:eoboard",
+    "file:exp-pdf": "export:pdf",
+    "file:exp-dlg": "export-dialog:open",
     "file:print-preview": "verify-act:print-preview",
     "file:print": "print",
     "file:close": "window-close",
@@ -304,7 +320,7 @@
   // page's menu row too, for the modules that print (`studioCommandApplies("print", ...)`).
   const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-save-as"]);
   const EMBED_ONLY_SET = new Set(EMBED_ONLY_ACTIONS);
-  const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "find", "replace"]);
+  const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "export", "export-dialog", "find", "replace"]);
   const START_DISABLED_SET = new Set(START_DISABLED_ACTIONS);
   const PARSED_NATIVE_MENU_ACTIONS = Object.freeze(
     Object.fromEntries(
@@ -381,6 +397,8 @@
       "sheet-look": (action) => click(`.md-item[data-sheet-look="${action}"]`),
       "sheet-cf": (action) => click(`.md-item[data-sheet-cf="${action}"]`),
       "hwp-save-as": (fmt) => click(`.md-item[data-hwp-save-as="${fmt}"]`),
+      export: (fmt) => clickVisible(`.md-item[data-export-format="${fmt}"]`),
+      "export-dialog": () => clickVisible(".md-item[data-export-dialog]"),
       "view-toolbar-labels": () => click("[data-view-toolbar-labels]"),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),

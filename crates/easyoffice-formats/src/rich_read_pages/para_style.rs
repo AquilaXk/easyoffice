@@ -41,6 +41,7 @@ pub(super) struct Fmt {
     pub font: Option<String>,
     pub script: Option<RichScript>,
     pub left_indent_twips: Option<u32>,
+    pub right_indent_twips: Option<u32>,
     pub first_line_indent_twips: Option<i32>,
     pub line_spacing_percent: Option<u16>,
 }
@@ -204,6 +205,13 @@ impl Fmt {
             if let Ok(Some(p)) = m.sub(style::PARA_PROPS) {
                 self.merge_para_layout(&p, &FULL_PARA_FIELDS);
                 self.merge_para_layout(&p, &FULL_PARA_FIELDS_ALT);
+                if self.right_indent_twips.is_none() {
+                    self.right_indent_twips = p
+                        .float(para_props::RIGHT_INDENT)
+                        .and_then(points_to_twips)
+                        .and_then(|t| u32::try_from(t).ok())
+                        .filter(|t| *t > 0);
+                }
             }
         }
     }
@@ -225,13 +233,28 @@ fn para_props_of<'a>(m: &Message<'a>) -> Option<Message<'a>> {
 }
 
 pub(super) fn heading_level(identifier: &str) -> u8 {
-    if let Some(pos) = identifier.find(heading::HEADING_PREFIX) {
-        let rest = &identifier[pos + heading::HEADING_PREFIX.len()..];
+    let lower = identifier.to_ascii_lowercase();
+    if let Some(pos) = lower.find("paragraphstyle-heading") {
+        let rest =
+            lower[pos + "paragraphstyle-heading".len()..].trim_start_matches([' ', '-', '_']);
         if let Some(d) = rest.chars().next().and_then(|c| c.to_digit(10)) {
-            return (d as u8).clamp(1, MAX_HEADING_LEVEL);
+            if (1..=u32::from(MAX_HEADING_LEVEL)).contains(&d) {
+                return d as u8;
+            }
         }
     }
-    u8::from(identifier.contains(heading::TITLE_MARKER))
+    if lower.contains("paragraphstyle-subtitle") {
+        return 2;
+    }
+    if identifier.contains(heading::HEADING_PREFIX) {
+        if let Some(pos) = identifier.find(heading::HEADING_PREFIX) {
+            let rest = &identifier[pos + heading::HEADING_PREFIX.len()..];
+            if let Some(d) = rest.chars().next().and_then(|c| c.to_digit(10)) {
+                return (d as u8).clamp(1, MAX_HEADING_LEVEL);
+            }
+        }
+    }
+    u8::from(identifier.contains(heading::TITLE_MARKER) || lower.contains("paragraphstyle-title"))
 }
 
 pub(super) fn push_clean(cur: &mut String, ch: char) {

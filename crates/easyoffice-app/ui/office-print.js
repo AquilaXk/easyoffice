@@ -401,10 +401,78 @@
       return slideDeckState.map((slide) => slidePage(slide, aspect, deckOrientation, paperClass));
     }
 
+    function buildPdf(rules) {
+      const card = document.getElementById("pdf-page-card");
+      if (!card) throw new Error(MSG_UNSUPPORTED);
+      const heading = card.querySelector("h3");
+      const paragraphs = Array.from(card.querySelectorAll("p:not(#pdf-form-status)"));
+      const hasText = Boolean(heading?.textContent?.trim()) || paragraphs.some((p) => p.textContent?.trim());
+      if (card.hidden || !hasText) throw new Error(MSG_EMPTY);
+
+      const rotText = document.getElementById("pdf-rotation-badge")?.textContent || "";
+      const rotMatch = /(\d+)/.exec(rotText);
+      const deg = rotMatch ? Number(rotMatch[1]) % 360 : (card.dataset.rotatedQuarter === "true" ? 90 : 0);
+      const size = (deg % 180) !== 0 ? { width: PORTRAIT_MM.height, height: PORTRAIT_MM.width } : PORTRAIT_MM;
+      const paperClass = rules.classFor(size.width, size.height);
+      addPageRule(rules, size, DOC_MARGIN_MM + "mm");
+
+      const page = document.createElement("div");
+      page.className = PAGE_CLASS + " eo-print-pdf-page " + paperClass;
+      if (deg !== 0) page.dataset.rotation = String(deg);
+
+      const stamp = (document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
+      if (stamp) {
+        const el = document.createElement("div");
+        el.className = "eo-print-pdf-stamp";
+        el.textContent = stamp;
+        page.appendChild(el);
+      }
+      const wm = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
+      if (wm) {
+        const el = document.createElement("div");
+        el.className = "eo-print-pdf-wm";
+        el.textContent = wm;
+        page.appendChild(el);
+      }
+      if (heading && heading.textContent?.trim()) {
+        const h = heading.cloneNode(true);
+        h.removeAttribute("id");
+        page.appendChild(h);
+      }
+      for (const p of paragraphs) {
+        if (!p.textContent?.trim()) continue;
+        const clone = p.cloneNode(true);
+        clone.removeAttribute("id");
+        page.appendChild(clone);
+      }
+      for (const cls of [".pdf-highlight-badge", ".pdf-splitmerge-badge"]) {
+        const badge = card.querySelector(cls);
+        if (badge && badge.textContent?.trim()) {
+          const clone = badge.cloneNode(true);
+          clone.removeAttribute("id");
+          page.appendChild(clone);
+        }
+      }
+      const appVal = String(document.getElementById("pdf-form-applicant")?.value || "").trim();
+      const deptVal = String(document.getElementById("pdf-form-dept")?.value || "").trim();
+      const gridVisible = !document.getElementById("pdf-acroform-grid")?.hidden;
+      if ((gridVisible || appVal || deptVal) && (appVal || deptVal)) {
+        const formBox = document.createElement("div");
+        formBox.className = "eo-print-pdf-form";
+        const parts = [];
+        if (appVal) parts.push("신청인: " + appVal);
+        if (deptVal) parts.push("부서: " + deptVal);
+        formBox.textContent = parts.join(" · ");
+        page.appendChild(formBox);
+      }
+      return [page];
+    }
+
     const BUILDERS = {
       DOC: buildDocument,
       SHEET: buildSheet,
       SLIDE: buildSlides,
+      PDF: buildPdf,
       BASE: (rules) => host.__EASYOFFICE_BASE_BOARD_HOST__.buildPrintPages("BASE", document, rules),
       BOARD: (rules) => host.__EASYOFFICE_BASE_BOARD_HOST__.buildPrintPages("BOARD", document, rules),
     };

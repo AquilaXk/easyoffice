@@ -314,6 +314,7 @@ impl Reader<'_> {
                 alignment: zone
                     .or_else(|| pfmt.as_ref().and_then(|f| f.align).and_then(alignment_of)),
                 left_indent_twips: pfmt.as_ref().and_then(|f| f.left_indent_twips),
+                right_indent_twips: pfmt.as_ref().and_then(|f| f.right_indent_twips),
                 first_line_indent_twips: pfmt.as_ref().and_then(|f| f.first_line_indent_twips),
                 line_spacing_percent: pfmt.as_ref().and_then(|f| f.line_spacing_percent),
                 ..RichParagraph::default()

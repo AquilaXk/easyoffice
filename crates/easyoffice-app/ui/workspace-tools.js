@@ -895,6 +895,23 @@
     function setupStudioChromeControls(applyZoomPercent, onStudioCmd, actions) {
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
+      host.__EASYOFFICE_EXPORT_UI__?.createController?.({
+        document,
+        getActiveModule,
+        getPdfEdit: deps.getPdfEdit,
+        getHwpHost,
+        getHwpSession,
+        enqueueWorkspaceHistoryOp,
+        resolveSaveFileBase,
+        buildConversionContent,
+        convertForSave,
+        deliverSavedFile,
+        describeConversionSpec,
+        describeApproximatedAlign,
+        setStatusFeedback,
+        commitPendingSheetCell: () => sheetController.commitPendingFocusedSheetCell(true),
+        closeMenus: () => menuKeyboard.closeAll(),
+      })?.bind?.();
       document.addEventListener?.("selectionchange", () => {
         if (getActiveModule() === "DOC" || getActiveModule() === "HWP") renderPageStatus();
       });

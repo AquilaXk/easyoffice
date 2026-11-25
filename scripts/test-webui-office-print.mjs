@@ -215,15 +215,43 @@ test("slides: one page per slide in the deck's paper, the title and body text of
   assert.ok(rules.some((r) => r.startsWith("@page eo-paper-0")), "a named page rule per paper size");
 });
 
-test("a module without print says so and builds nothing", async () => {
+test("pdf: prints opened card text, stamp, watermark, rotation, and active form fields, and refuses empty PDF", async () => {
   const t = await setup("PDF");
   await t.print();
   assert.equal(t.root(), null);
-  assert.equal(t.printed.length, 0);
+  assert.equal(t.feedback(), "인쇄할 내용이 없습니다.");
+
+  const doc = t.h.document;
+  doc.getElementById("pane-pdf").dataset.empty = "false";
+  const card = doc.getElementById("pdf-page-card");
+  card.hidden = false;
+  card.querySelector("h3").textContent = "PDF 보고서";
+  const p = doc.createElement("p");
+  p.textContent = "본문 1쪽 내용";
+  doc.getElementById("pdf-form-status").before(p);
+  doc.getElementById("pdf-stamp-badge").textContent = "대외비";
+  doc.getElementById("pdf-watermark-layer").textContent = "사내한";
+  doc.getElementById("pdf-rotation-badge").textContent = "회전: 90°";
+  doc.getElementById("pdf-acroform-grid").hidden = false;
+  doc.getElementById("pdf-form-applicant").value = "이서연";
+  doc.getElementById("pdf-form-dept").value = "기획팀";
+
+  await t.print();
+  assert.equal(t.printed.length, 1, t.feedback());
+  const page = t.printed[0].querySelector(".eo-print-pdf-page");
+  assert.ok(page);
+  assert.equal(page.dataset.rotation, "90");
+  assert.equal(page.querySelector(".eo-print-pdf-stamp").textContent, "대외비");
+  assert.equal(page.querySelector(".eo-print-pdf-wm").textContent, "사내한");
+  assert.match(page.querySelector(".eo-print-pdf-form").textContent, /신청인:\s*이서연/);
+  assert.match(page.textContent, /PDF 보고서/);
+  assert.match(page.textContent, /본문 1쪽 내용/);
+  assert.ok(t.pageRules().some((r) => /^@page\s*\{\s*size:\s*297mm 210mm;/.test(r)));
+  t.h.sandbox.dispatchWindowEvent("afterprint");
 });
 
-test("the print menu item follows the module: on in document, sheet and slide, off in PDF", async () => {
-  for (const [moduleCode, grayed] of [["DOC", false], ["SHEET", false], ["SLIDE", false], ["PDF", true]]) {
+test("the print menu item follows the module: on in document, sheet, slide, and PDF", async () => {
+  for (const [moduleCode, grayed] of [["DOC", false], ["SHEET", false], ["SLIDE", false], ["PDF", false]]) {
     const reports = [];
     const h = await createWorkspaceHarness({ platform: "MacIntel", shellCommands: { report_menu_state: (a) => { reports.push(a); return null; } } });
     await flushAsyncTurns(10);

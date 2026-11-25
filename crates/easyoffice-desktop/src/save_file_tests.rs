@@ -748,3 +748,46 @@ fn writing_or_in_place_saving_over_a_pages_directory_fails_without_modifying_fil
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn export_formats_reject_spoofed_extensions_control_chars_and_dot_stems() {
+    for bad_name in [
+        "문서\0.docx",
+        "보고서\n.pdf",
+        "..docx",
+        "...pages",
+        "../..",
+        "a.",
+        "a.veryLongExtension",
+    ] {
+        assert!(
+            split_file_name(bad_name).is_err(),
+            "expected split_file_name to reject {bad_name:?}"
+        );
+    }
+
+    let docx = document(DocumentFormat::Docx);
+    let pdf = document(DocumentFormat::Pdf);
+    let pages_doc = easyoffice_formats::RichDocument {
+        title: "저장 시험".to_string(),
+        blocks: vec![easyoffice_formats::RichBlock::Paragraph(
+            easyoffice_formats::RichParagraph {
+                runs: vec![easyoffice_formats::RichRun::plain("본문")],
+                ..Default::default()
+            },
+        )],
+        ..Default::default()
+    };
+    let pages =
+        UniversalFormatConverter::encode_rich(&pages_doc, DocumentFormat::Pages, None).unwrap();
+
+    assert_eq!(
+        SaveRequest::parse("내보내기.pages", &base64_codec::encode(&pages))
+            .unwrap()
+            .filter_label(),
+        "Pages 문서 (.pages)"
+    );
+    assert!(SaveRequest::parse("위조.pages", &base64_codec::encode(&docx)).is_err());
+    assert!(SaveRequest::parse("위조.docx", &base64_codec::encode(&pdf)).is_err());
+    assert!(SaveRequest::parse("위조.pdf", &base64_codec::encode(&pages)).is_err());
+}

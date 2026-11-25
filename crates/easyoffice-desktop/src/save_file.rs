@@ -41,6 +41,9 @@ pub struct SaveRequest {
 
 /// Validates a proposed file name and returns `(file name, lower-case extension)`.
 pub(crate) fn split_file_name(file_name: &str) -> Result<(String, String), String> {
+    if file_name.chars().any(|c| c.is_control()) {
+        return Err("저장할 파일 이름에 허용되지 않는 제어 문자가 있습니다.".to_string());
+    }
     // Keep only the final component so a proposed name can never point at another directory.
     let base = file_name
         .rsplit(['/', '\\'])
@@ -51,9 +54,10 @@ pub(crate) fn split_file_name(file_name: &str) -> Result<(String, String), Strin
     let Some((stem, ext)) = base.rsplit_once('.') else {
         return Err("저장할 파일 이름에 확장자가 없습니다.".to_string());
     };
+    let stem_trimmed = stem.trim();
     let ext_ok =
         !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric());
-    if stem.trim().is_empty() || !ext_ok {
+    if stem_trimmed.is_empty() || stem_trimmed == "." || stem_trimmed == ".." || !ext_ok {
         return Err(format!("저장할 수 없는 파일 이름입니다: {base}"));
     }
     let ext = ext.to_ascii_lowercase();
@@ -185,6 +189,7 @@ impl SaveRequest {
         match self.extension.as_str() {
             "eobase" => "데이터베이스 (BASE)".to_string(),
             "eoboard" => "보드 (BOARD)".to_string(),
+            "pages" => "Pages 문서 (.pages)".to_string(),
             _ => format!("{} 문서", self.extension.to_ascii_uppercase()),
         }
     }

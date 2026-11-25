@@ -124,6 +124,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/sheet-controller.js",
   "crates/easyoffice-app/ui/ribbon-history.js",
   "crates/easyoffice-app/ui/workspace-session.js",
+  "crates/easyoffice-app/ui/export-dialog.js",
   "crates/easyoffice-app/ui/file-open.js",
   "crates/easyoffice-app/ui/pdf-edit.js",
   "crates/easyoffice-app/ui/icons.js",

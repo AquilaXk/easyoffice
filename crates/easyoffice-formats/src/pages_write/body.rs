@@ -106,6 +106,8 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
             }))
         || p.left_indent_twips
             .is_some_and(|t| t > MAX_INDENT_TWIPS as u32)
+        || p.right_indent_twips
+            .is_some_and(|t| t > MAX_INDENT_TWIPS as u32)
         || p.first_line_indent_twips
             .is_some_and(|t| t.saturating_abs() > MAX_INDENT_TWIPS)
         || p.line_spacing_percent
@@ -162,6 +164,9 @@ pub(super) fn para_look_of(p: &RichParagraph) -> ParaLook {
             .filter(|t| *t != 0 && t.saturating_abs() <= MAX_INDENT_TWIPS),
         left_indent_twips: p
             .left_indent_twips
+            .filter(|t| *t > 0 && *t <= MAX_INDENT_TWIPS as u32),
+        right_indent_twips: p
+            .right_indent_twips
             .filter(|t| *t > 0 && *t <= MAX_INDENT_TWIPS as u32),
         line_spacing_percent: p
             .line_spacing_percent

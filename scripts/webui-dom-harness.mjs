@@ -225,6 +225,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/board-router.js",
   "../crates/easyoffice-app/ui/board-studio.js",
   "../crates/easyoffice-app/ui/base-board-host.js",
+  "../crates/easyoffice-app/ui/export-dialog.js",
   "../crates/easyoffice-app/ui/app.js",
   "../crates/easyoffice-app/ui/print-preview.js",
   "../crates/easyoffice-app/ui/layout-lint-ui.js",

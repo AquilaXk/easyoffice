@@ -94,12 +94,23 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
                         .iter()
                         .filter(|l| body::valid_pages_link(&l.url).is_none())
                         .count();
-                    if !t.col_widths_twips.is_empty() {
+                    if !t.col_widths_twips.is_empty() && t.validated_col_widths().is_none() {
                         loss.formats += 1;
                     }
-                    if !t.cell_styles.is_empty() {
-                        loss.formats += t.validated_cell_styles().len().max(1);
-                    }
+                    loss.formats += t
+                        .validated_cell_styles()
+                        .iter()
+                        .filter(|e| {
+                            [
+                                e.borders.top,
+                                e.borders.right,
+                                e.borders.bottom,
+                                e.borders.left,
+                            ]
+                            .into_iter()
+                            .any(|edge| edge.kind() == crate::TableBorderKind::Double)
+                        })
+                        .count();
                     loss.formats += t.validated_cell_images().len();
                 }
             }
@@ -305,7 +316,7 @@ pub fn pack_pages(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
         float(root::HEADER_MARGIN, setup.header_pt),
         float(root::FOOTER_MARGIN, setup.footer_pt),
         float(38, 1.0),
-        varint(39, 0),
+        varint(39, u64::from(setup.page_width_pt > setup.page_height_pt)),
         varint(40, 0),
         varint(42, 0),
         string(43, " "),

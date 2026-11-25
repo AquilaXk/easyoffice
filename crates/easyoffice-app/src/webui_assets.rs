@@ -94,6 +94,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "doc-table-tab.js",
     "doc-table.js",
     "doc-toc.js",
+    "export-dialog.js",
     "file-open.js",
     "find-base.js",
     "find-core.js",

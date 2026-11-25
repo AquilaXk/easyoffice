@@ -51,6 +51,28 @@
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="studio-save" role="menuitem" tabindex="-1"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
               <div class="md-item" data-studio-menu-cmd="studio-save-as" data-save-as-generic="true" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
+              <div class="md-sub" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">내보내기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="내보내기">
+                  <button type="button" class="md-item" data-kinds="DOC PDF" data-export-format="docx" role="menuitem" tabindex="-1"><span class="md-label">DOCX 문서 (.docx)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC" data-export-format="odt" role="menuitem" tabindex="-1"><span class="md-label">ODF 텍스트 (.odt)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC" data-export-format="rtf" role="menuitem" tabindex="-1"><span class="md-label">RTF 문서 (.rtf)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC" data-export-format="pages" role="menuitem" tabindex="-1"><span class="md-label">Pages 문서 (.pages)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC" data-export-format="md" role="menuitem" tabindex="-1"><span class="md-label">Markdown (.md)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC PDF" data-export-format="txt" role="menuitem" tabindex="-1"><span class="md-label">TXT 텍스트 (.txt)</span></button>
+                  <button type="button" class="md-item" data-kinds="SHEET BASE" data-export-format="xlsx" role="menuitem" tabindex="-1"><span class="md-label">XLSX 통합 문서 (.xlsx)</span></button>
+                  <button type="button" class="md-item" data-kinds="SHEET" data-export-format="ods" role="menuitem" tabindex="-1"><span class="md-label">ODF 스프레드시트 (.ods)</span></button>
+                  <button type="button" class="md-item" data-kinds="SHEET BASE" data-export-format="csv" role="menuitem" tabindex="-1"><span class="md-label">CSV (쉼표로 구분) (.csv)</span></button>
+                  <button type="button" class="md-item" data-kinds="SHEET BASE" data-export-format="tsv" role="menuitem" tabindex="-1"><span class="md-label">TSV (탭으로 구분) (.tsv)</span></button>
+                  <button type="button" class="md-item" data-kinds="SLIDE" data-export-format="pptx" role="menuitem" tabindex="-1"><span class="md-label">PPTX 프레젠테이션 (.pptx)</span></button>
+                  <button type="button" class="md-item" data-kinds="SLIDE" data-export-format="odp" role="menuitem" tabindex="-1"><span class="md-label">ODF 프레젠테이션 (.odp)</span></button>
+                  <button type="button" class="md-item" data-kinds="BASE" data-export-format="eobase" role="menuitem" tabindex="-1"><span class="md-label">데이터베이스 패키지 (.eobase)</span></button>
+                  <button type="button" class="md-item" data-kinds="BOARD" data-export-format="eoboard" role="menuitem" tabindex="-1"><span class="md-label">보드 패키지 (.eoboard)</span></button>
+                  <button type="button" class="md-item" data-kinds="DOC SHEET SLIDE BOARD PDF" data-export-format="pdf" role="menuitem" tabindex="-1"><span class="md-label">PDF 문서 (.pdf)</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-export-dialog="true" role="menuitem" tabindex="-1"><span class="md-label">다른 형식으로 내보내기…</span></button>
+                </div>
+              </div>
               <div class="md-item" data-kinds="HWP" data-hwp-save-as="hwp" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWP</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
               <div class="md-item" data-kinds="HWP" data-hwp-save-as="hwpx" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWPX</span></div>
               <div class="md-item" data-kinds="DOC SLIDE" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">용지 설정</span></div>
@@ -58,8 +80,8 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="page-setup" role="menuitem" tabindex="-1"><span class="md-label">페이지 설정…</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-set" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 설정</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-clear" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 해제</span></div>
-              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리보기</span></div>
-              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리보기</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-window-close="true" role="menuitem" tabindex="-1"><span class="md-label">닫기</span><span class="md-shortcut">Ctrl+W</span></div>
             </div>
@@ -1067,6 +1089,7 @@
                 />
               </div>
               <div class="tb-group">
+                <button id="btn-pdf-form-toggle" type="button" class="tb-btn" disabled title="양식 필드 편집" aria-label="양식 필드 편집" aria-pressed="false"><span class="tb-icon-svg" data-icon="text-box" aria-hidden="true"></span><span class="tb-label">양식<br/>편집</span></button>
                 <button id="btn-pdf-apply" type="button" class="tb-btn" disabled title="양식·스탬프 적용" aria-label="양식·스탬프 적용"><span class="tb-sprite icon-stamp"></span><span class="tb-label">양식·스탬프<br/>적용</span></button>
               </div>
               <span id="pdf-rotation-badge" class="sb-size-unit">회전: 0°</span>
@@ -1075,7 +1098,7 @@
               <div class="pdf-stamp" id="pdf-stamp-badge"></div>
               <div class="pdf-watermark" id="pdf-watermark-layer"></div>
               <h3></h3>
-                            <div class="pdf-acroform-grid">
+              <div class="pdf-acroform-grid" id="pdf-acroform-grid" hidden>
                 <label>
                   신청인 성명
                   <input id="pdf-form-applicant" type="text" class="sb-select" />
@@ -1088,7 +1111,7 @@
               <input id="pdf-highlight-input" type="hidden" />
               <input id="pdf-highlight-kind" type="hidden" value="highlight" />
               <input id="pdf-highlight-color" type="hidden" value="#FFFF00" />
-              <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>
+              <p id="pdf-form-status" class="formula-result"></p>
             </div>
           </div>
 
@@ -2656,6 +2679,21 @@
       </div>
     </dialog>
 
+    <dialog id="export-dialog" class="tool-dialog" aria-labelledby="export-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="export-dialog-title">다른 형식으로 내보내기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="export-file-name">파일 이름</label><input id="export-file-name" type="text" class="dialog-text-input" maxlength="128" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="export-format-select">파일 형식</label><select id="export-format-select" class="sb-combo dialog-select"></select></div>
+          <p id="export-dialog-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-export-run" type="button" class="dialog-btn dialog-btn-primary">내보내기</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="about-dialog" class="tool-dialog" aria-labelledby="about-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -2959,6 +2997,7 @@
     <script src="./board-router.js"></script>
     <script src="./board-studio.js"></script>
     <script src="./base-board-host.js"></script>
+    <script src="./export-dialog.js"></script>
     <script src="./app.js"></script>
     <script src="./print-preview.js"></script>
     <script src="./layout-lint-ui.js"></script>

@@ -21,6 +21,7 @@ const STATUS_PARAGRAPHS = new Set([
   "sheet-image-status", "sheet-note-status",
   "slide-layout-status", "slide-shape-status", "slide-table-status", "slide-chart-status", "slide-image-status",
   "doc-stats-status", "doc-mailmerge-status", "doc-shape-status", "doc-chart-status", "doc-fn-status",
+  "export-dialog-status",
   "sheet-protect-status", "sheet-protect-alert-message", "sheet-wb-protect-status", "sheet-password-status", "sheet-range-edit-status",
 ]);
 

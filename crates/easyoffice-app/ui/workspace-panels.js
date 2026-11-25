@@ -390,6 +390,7 @@
         watermarkLayer: document.getElementById("pdf-watermark-layer")?.textContent ?? "",
         applicant: document.getElementById("pdf-form-applicant")?.value ?? "",
         dept: document.getElementById("pdf-form-dept")?.value ?? "",
+        formVisible: !document.getElementById("pdf-acroform-grid")?.hidden,
         highlightInput: document.getElementById("pdf-highlight-input")?.value ?? "",
         highlightKind: document.getElementById("pdf-highlight-kind")?.value,
         highlightColor: document.getElementById("pdf-highlight-color")?.value,
@@ -463,6 +464,21 @@
       if (!existing) card.appendChild(badge);
     }
 
+    function setPdfFormVisibility(visible) {
+      const grid = document.getElementById("pdf-acroform-grid");
+      if (grid) grid.hidden = !visible;
+      const btn = document.getElementById("btn-pdf-form-toggle");
+      if (btn) btn.setAttribute("aria-pressed", visible ? "true" : "false");
+    }
+
+    function togglePdfFormPanel() {
+      const grid = document.getElementById("pdf-acroform-grid");
+      if (!grid) return;
+      const nextVisible = Boolean(grid.hidden);
+      setPdfFormVisibility(nextVisible);
+      if (nextVisible) document.getElementById("pdf-form-applicant")?.focus?.();
+    }
+
     function restorePdfStudioState(pdfStudio) {
       if (!pdfStudio) return;
       pdfOutlines = Array.isArray(pdfStudio.outlines) ? pdfStudio.outlines.slice() : [];
@@ -470,6 +486,8 @@
         const el = document.getElementById(id);
         if (el && pdfStudio[key] !== undefined) el[prop] = pdfStudio[key];
       }
+      const hasFormValues = String(pdfStudio.applicant || "").trim() !== "" || String(pdfStudio.dept || "").trim() !== "";
+      setPdfFormVisibility(pdfStudio.formVisible !== undefined ? Boolean(pdfStudio.formVisible) : hasFormValues);
       restorePdfCardHeading(pdfStudio);
       const card = document.getElementById("pdf-page-card");
       restorePdfCardBody(pdfStudio, card);
@@ -483,7 +501,7 @@
     }
 
     // The toolbar controls that act on an opened file (rhwp-studio disables its tools without a document).
-    const PDF_FILE_CONTROL_IDS = ["btn-pdf-rotate", "pdf-stamp-select", "pdf-watermark-input", "btn-pdf-apply"];
+    const PDF_FILE_CONTROL_IDS = ["btn-pdf-rotate", "pdf-stamp-select", "pdf-watermark-input", "btn-pdf-form-toggle", "btn-pdf-apply"];
 
     // Without an opened file the pane shows only the home screen's empty hint, no paper card.
     function syncPdfEmptyState() {
@@ -544,15 +562,18 @@
 
       if (stampBadge && stampSel) stampBadge.textContent = stampSel.value;
       if (wmLayer && wmInput) wmLayer.textContent = wmInput.value;
+      const appVal = (appInput?.value || "").trim();
+      const deptVal = (deptInput?.value || "").trim();
+      const hasFormValues = appVal !== "" || deptVal !== "";
+      const gridVisible = !document.getElementById("pdf-acroform-grid")?.hidden;
+      if (hasFormValues && !gridVisible) setPdfFormVisibility(true);
       if (formStatus && appInput && deptInput) {
-        formStatus.textContent =
-          "양식 반영 완료 · 신청인: " +
-          appInput.value +
-          " / 부서: " +
-          deptInput.value +
-          " / 회전: " +
-          getPdfRotationDeg() +
-          "°";
+        if (hasFormValues || gridVisible) {
+          formStatus.textContent =
+            "양식 반영 완료 · 신청인: " + appInput.value + " / 부서: " + deptInput.value + " / 회전: " + getPdfRotationDeg() + "°";
+        } else {
+          formStatus.textContent = "적용 완료 · 회전: " + getPdfRotationDeg() + "°";
+        }
       }
     }
 
@@ -907,6 +928,7 @@
       capturePdfStudioState,
       restorePdfStudioState,
       applyPdfStudioFormState,
+      togglePdfFormPanel,
       openPdfHighlightDialog,
       applyPdfHighlight,
       syncSplitComparePane,

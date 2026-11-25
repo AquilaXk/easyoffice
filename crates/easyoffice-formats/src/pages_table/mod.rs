@@ -9,15 +9,18 @@ use self::cell_rich::{decode_rich_cell_storage, RichCellDecoded, MAX_CELL_MARK_E
 pub(crate) use self::format::format_iso_date;
 use self::format::{render_value, FormatSpec};
 use self::packed::{parse_cell, CellScalar, PackedCell};
+use self::styles::{assemble_cell_styles, read_cell_fills, read_col_widths_twips};
 mod cell_rich;
 mod format;
 mod merge;
 mod packed;
+mod styles;
 
 use crate::decode_budget::DecodeBudget;
 use crate::pages_proto::{read_reference, ArchiveObject, FastU64Map, Message, ObjectTable};
 use crate::pages_schema::{cell, table, ty};
 use crate::rich_read_pages_image::PageImages;
+use crate::rich_table_style::{CellFill, TableCellStyleEntry, MAX_STYLED_TABLE_CELLS};
 use crate::{CellMerge, EasyOfficeError, TableCellLink};
 
 const MAX_TABLES: usize = 2_000;
@@ -83,6 +86,10 @@ pub(crate) struct TableRead {
     pub merges: Vec<CellMerge>,
     /// Cell-level hyperlinks indexed by UTF-8 byte offsets inside `grid[row][col]`.
     pub links: Vec<TableCellLink>,
+    /// Table column widths in twips, when present in model/header bucket.
+    pub col_widths_twips: Vec<u32>,
+    /// Per-cell background fill and border overrides sorted by `(row, col)`.
+    pub cell_styles: Vec<TableCellStyleEntry>,
     /// Picture drawables (`(object_id, fallback_equation_alt)`) anchored inside cells, in cell order.
     pub cell_images: Vec<(u64, Option<String>)>,
     pub unsupported: usize,
@@ -200,8 +207,10 @@ struct CellContext<'a> {
     rich_text: KeyedList<u64>,
     strings: KeyedList<&'a str>,
     formats: KeyedList<FormatSpec<'a>>,
+    cell_fills: KeyedList<CellFill>,
     payload_cache: FastU64Map<Rc<RichCellDecoded>>,
     links: Vec<TableCellLink>,
+    cell_fills_out: Vec<(u32, u32, CellFill)>,
     cell_images: Vec<(u64, Option<String>)>,
     cell_objects: usize,
     unsafe_links: usize,
@@ -233,13 +242,16 @@ impl<'a> CellContext<'a> {
             Some(id) => string_list(objects, id, budget)?,
             None => Vec::new(),
         };
+        let cell_fills = read_cell_fills(objects, store, budget)?;
         Ok(Self {
             objects,
             rich_text,
             strings,
             formats,
+            cell_fills,
             payload_cache: FastU64Map::default(),
             links: Vec::new(),
+            cell_fills_out: Vec::new(),
             cell_images: Vec::new(),
             cell_objects: 0,
             unsafe_links: 0,
@@ -352,8 +364,13 @@ impl<'a> CellContext<'a> {
     }
 }
 
+enum TableDimErr {
+    Absent,
+    Skipped(&'static str),
+}
+
 /// Row and column counts of a table model, or the reason it is not read.
-fn dimensions(model: &Message) -> Result<(usize, usize), TableOutcome> {
+fn dimensions(model: &Message) -> Result<(usize, usize), TableDimErr> {
     let count = |field: u32| {
         model
             .varint(field)
@@ -367,7 +384,7 @@ fn dimensions(model: &Message) -> Result<(usize, usize), TableOutcome> {
         .varint(table::MODEL_COLS)
         .map_or(0, |_| count(table::MODEL_COLS));
     if rows == 0 || cols == 0 {
-        return Err(TableOutcome::Absent);
+        return Err(TableDimErr::Absent);
     }
     let fits = rows <= MAX_TABLE_ROWS
         && cols <= MAX_TABLE_COLS
@@ -375,7 +392,7 @@ fn dimensions(model: &Message) -> Result<(usize, usize), TableOutcome> {
     if fits {
         Ok((rows, cols))
     } else {
-        Err(TableOutcome::Skipped("너무 큰 표"))
+        Err(TableDimErr::Skipped("너무 큰 표"))
     }
 }
 
@@ -402,7 +419,17 @@ fn fill_row(
             continue;
         }
         let rendered = match parse_cell(buf, usize::from(offset)) {
-            Some(p) => Some(ctx.render(row_idx, col_idx, &p, images, text_budget)?),
+            Some(p) => {
+                if let Some(style_key) = p.cell_style_key {
+                    if let Some(fill) = lookup(&ctx.cell_fills, u64::from(style_key)) {
+                        if !fill.is_none() && ctx.cell_fills_out.len() < MAX_STYLED_TABLE_CELLS {
+                            ctx.cell_fills_out
+                                .push((row_idx as u32, col_idx as u32, fill));
+                        }
+                    }
+                }
+                Some(ctx.render(row_idx, col_idx, &p, images, text_budget)?)
+            }
             None => None,
         };
         match rendered {
@@ -475,7 +502,8 @@ pub(crate) fn read_table(
     let model_msg = Message::parse(&model.payload)?;
     let (rows, cols) = match dimensions(&model_msg) {
         Ok(dim) => dim,
-        Err(outcome) => return Ok(outcome),
+        Err(TableDimErr::Absent) => return Ok(TableOutcome::Absent),
+        Err(TableDimErr::Skipped(reason)) => return Ok(TableOutcome::Skipped(reason)),
     };
     budget.charge_cells(rows.checked_mul(cols).ok_or_else(|| {
         EasyOfficeError::ResourceBudgetExceeded("Pages 표 셀 수 계산 오버플로".to_string())
@@ -498,10 +526,14 @@ pub(crate) fn read_table(
         None => 0,
     };
     let merges = merge::read_merges(objects, &model_msg, &store);
+    let col_widths_twips = read_col_widths_twips(objects, &model_msg, &store, cols)?;
+    let cell_styles = assemble_cell_styles(objects, &model_msg, rows, cols, &ctx.cell_fills_out)?;
     Ok(TableOutcome::Read(TableRead {
         grid,
         merges,
         links: ctx.links,
+        col_widths_twips,
+        cell_styles,
         cell_images: ctx.cell_images,
         unsupported,
         cell_objects: ctx.cell_objects,

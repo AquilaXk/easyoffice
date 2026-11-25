@@ -429,11 +429,13 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
     not_in(MenuKind::Slide, &pdf_only);
     not_in(MenuKind::Pdf, &sheet_only);
     not_in(MenuKind::Pdf, &slide_only);
-    // Nothing prints or changes the paper in a PDF window, and a PDF has no formatting menu.
+    // PDF windows print and preview, do not change page setup, and have no formatting menu.
+    let pdf_file = lines_of(MenuKind::Pdf, "파일");
+    assert!(pdf_file.contains(&"file:print"), "{pdf_file:?}");
+    assert!(pdf_file.contains(&"file:print-preview"), "{pdf_file:?}");
     not_in(
         MenuKind::Pdf,
         &[
-            "file:print",
             "page:paper",
             "page:doc-paper",
             "page:orientation",

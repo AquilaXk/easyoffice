@@ -716,6 +716,7 @@ pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
         return;
     }
     let nodes = easyoffice_formats::PdfSerializer::parse_outline_nodes(bytes).unwrap_or_default();
+    let form = easyoffice_formats::PdfSerializer::parse_form_fields(bytes).unwrap_or_default();
     out.pop();
     out.push_str(",\"pdfOutlines\":[");
     for (idx, node) in nodes.iter().enumerate() {
@@ -726,5 +727,13 @@ pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
         push_json_str(out, &node.title);
         let _ = write!(out, ",\"level\":{}}}", node.level);
     }
-    out.push_str("]}");
+    let _ = write!(
+        out,
+        "],\"pdfForm\":{{\"hasAcroForm\":{},\"fieldCount\":{},\"applicant\":",
+        form.has_acro_form, form.field_count
+    );
+    push_opt_json_str(out, form.applicant.as_deref());
+    out.push_str(",\"department\":");
+    push_opt_json_str(out, form.department.as_deref());
+    out.push_str("}}");
 }

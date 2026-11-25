@@ -2,12 +2,14 @@
 
 #[cfg(test)]
 use super::{
-    cf_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES, NEW_DOC_IDS, NUMFMT_LINES,
-    QUIT_ID, SEPARATOR, THEME_IDS, USE_IN_FORMULA_LINES,
+    cf_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES, EXPORT_BASE_LINES,
+    EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES, EXPORT_SHEET_LINES, EXPORT_SLIDE_LINES,
+    NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, THEME_IDS, USE_IN_FORMULA_LINES,
 };
 use super::{
-    menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, HELP, NEW_DOCS, NUMFMT, PASTE,
-    S, SELECT_ALL, THEME, USE_IN_FORMULA, WINDOW,
+    menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, EXPORT_BASE, EXPORT_BOARD,
+    EXPORT_DOC, EXPORT_PDF, EXPORT_SHEET, EXPORT_SLIDE, HELP, NEW_DOCS, NUMFMT, PASTE, S,
+    SELECT_ALL, THEME, USE_IN_FORMULA, WINDOW,
 };
 
 const FILE_HWP: MenuSpec = menu(
@@ -36,13 +38,14 @@ const FILE_DOC: MenuSpec = menu(
         "file:open-recent",
         "file:save",
         "file:save-as",
+        EXPORT_DOC,
         S,
         "file:doc-paper",
         "file:print-preview",
         "file:print",
     ],
 );
-const FILE_WORKSPACE: MenuSpec = menu(
+const FILE_BASE: MenuSpec = menu(
     "파일",
     &[
         "file:new",
@@ -52,6 +55,23 @@ const FILE_WORKSPACE: MenuSpec = menu(
         "file:open-recent",
         "file:save",
         "file:save-as",
+        EXPORT_BASE,
+        S,
+        "file:print-preview",
+        "file:print",
+    ],
+);
+const FILE_BOARD: MenuSpec = menu(
+    "파일",
+    &[
+        "file:new",
+        NEW_DOCS,
+        S,
+        "file:open",
+        "file:open-recent",
+        "file:save",
+        "file:save-as",
+        EXPORT_BOARD,
         S,
         "file:print-preview",
         "file:print",
@@ -68,6 +88,7 @@ const FILE_PAGE_SETUP: MenuSpec = menu(
         "file:open-recent",
         "file:save",
         "file:save-as",
+        EXPORT_SLIDE,
         S,
         "page:doc-paper",
         "file:print-preview",
@@ -85,6 +106,7 @@ const FILE_SHEET: MenuSpec = menu(
         "file:open-recent",
         "file:save",
         "file:save-as",
+        EXPORT_SHEET,
         S,
         "sheet:page-setup",
         "sheet:print-area-set",
@@ -103,6 +125,10 @@ const FILE_PDF: MenuSpec = menu(
         "file:open-recent",
         "file:save",
         "file:save-as",
+        EXPORT_PDF,
+        S,
+        "file:print-preview",
+        "file:print",
     ],
 );
 
@@ -657,7 +683,7 @@ const PDF: [&MenuSpec; 9] = [
 ];
 const BASE: [&MenuSpec; 7] = [
     &APP,
-    &FILE_WORKSPACE,
+    &FILE_BASE,
     &EDIT_FULL,
     &VIEW_WORKSPACE,
     &TOOL_WORKSPACE,
@@ -666,7 +692,7 @@ const BASE: [&MenuSpec; 7] = [
 ];
 const BOARD: [&MenuSpec; 7] = [
     &APP,
-    &FILE_WORKSPACE,
+    &FILE_BOARD,
     &EDIT_PLAIN,
     &VIEW_WORKSPACE,
     &TOOL_WORKSPACE,
@@ -710,6 +736,24 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
         for line in spec.lines {
             match *line {
                 NEW_DOCS => ids.extend(NEW_DOC_IDS),
+                EXPORT_DOC => {
+                    ids.extend(EXPORT_DOC_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
+                EXPORT_SHEET => {
+                    ids.extend(EXPORT_SHEET_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
+                EXPORT_SLIDE => {
+                    ids.extend(EXPORT_SLIDE_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
+                EXPORT_BASE => {
+                    ids.extend(EXPORT_BASE_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
+                EXPORT_BOARD => {
+                    ids.extend(EXPORT_BOARD_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
+                EXPORT_PDF => {
+                    ids.extend(EXPORT_PDF_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
                 THEME => ids.extend(THEME_IDS),
                 NUMFMT => ids.extend(NUMFMT_LINES.iter().filter(|line| **line != SEPARATOR)),
                 ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),

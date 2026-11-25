@@ -557,10 +557,17 @@
       else lines.push((b.runs || []).map((r) => r.text).join(""));
     });
     const title = res.title || name;
+    const formInfo = res.pdfForm || {};
+    const applicant = String(formInfo.applicant || "");
+    const dept = String(formInfo.department || "");
+    const fieldCount = Number(formInfo.fieldCount) || 0;
+    const hasForm = Boolean(formInfo.hasAcroForm && (fieldCount > 0 || applicant || dept));
     next.pdfStudio = {
       ...next.pdfStudio,
       stampValue: "", stampBadge: "", watermarkInput: "", watermarkLayer: "",
-      applicant: "", dept: "", formStatus: "양식 준비 완료",
+      applicant, dept,
+      formVisible: hasForm,
+      formStatus: hasForm ? (fieldCount > 0 ? "양식 필드 " + fieldCount + "개 감지됨" : "양식 필드 감지됨") : "",
       cardHeadingNodes: [textSpec(title)],
       cardBodyParagraphsNodes: lines.filter((l) => l.trim()).map((l) => [textSpec(l)]),
       outlines: Array.isArray(res.pdfOutlines) ? res.pdfOutlines : [],

@@ -266,6 +266,7 @@ select:focus-visible,
   letter-spacing: 2px;
 }
 .pdf-acroform-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; }
+.pdf-acroform-grid[hidden] { display: none; }
 .token-row { display: flex; align-items: center; gap: 8px; }
 .statusbar {
   display: flex;

@@ -435,6 +435,7 @@ mod tests {
             rich_text_key: None,
             string_key: None,
             format_key: None,
+            cell_style_key: None,
             value: CellScalar::Decimal(Decimal {
                 negative,
                 coefficient,
@@ -540,6 +541,7 @@ mod tests {
                 rich_text_key: None,
                 string_key: None,
                 format_key: None,
+                cell_style_key: None,
                 value: CellScalar::Double(secs),
             };
             let spec = FormatSpec {
@@ -579,6 +581,7 @@ mod tests {
             rich_text_key: None,
             string_key: None,
             format_key: None,
+            cell_style_key: None,
             value: CellScalar::Double(v),
         };
         let checkbox = FormatSpec {

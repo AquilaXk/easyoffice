@@ -43,8 +43,15 @@ pub(crate) mod ty {
     pub const TABLE_TILE_V2: u32 = 6003;
     /// Table data list (strings, rich text payloads, styles, ...). 확인
     pub const TABLE_DATA_LIST: u32 = 6005;
+    /// Table cell style archive (`TST.CellStyleArchive`). 확인
+    pub const CELL_STYLE: u32 = 6004;
+    /// Column or row header size bucket (`TST.HeaderStorageBucket`). 확인
+    pub const TABLE_HEADER_BUCKET: u32 = 6006;
     /// Rich text payload of a table cell (points at a text storage). 확인
     pub const RICH_TEXT_PAYLOAD: u32 = 6218;
+    /// Table border sidecar and stroke layer (`TST.StrokeSidecarArchive`, `TST.StrokeLayerArchive`). 확인
+    pub const STROKE_SIDECAR: u32 = 6305;
+    pub const STROKE_LAYER: u32 = 6306;
     /// Picture (image drawable). 확인 (fixture objects file)
     pub const IMAGE: u32 = 3005;
     /// Shape or text box that carries its own text storage. 확인 (fixture objects file)
@@ -462,6 +469,8 @@ pub(crate) mod para_props {
     pub const LEFT_INDENT: u32 = 16;
     /// Line spacing message (`style::PARA_PROPS`).
     pub const LINE_SPACING: u32 = 19;
+    /// Right indent in points (`style::PARA_PROPS`, Fixed32 float in `12.19`). 확인
+    pub const RIGHT_INDENT: u32 = 19;
 }
 
 /// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), matches the fixture text (검증 필요:
@@ -557,8 +566,20 @@ pub(crate) mod table {
     pub const MODEL_DEFAULT_ROW_HEIGHT: u32 = 8;
     /// Model: default column width in points.
     pub const MODEL_DEFAULT_COL_WIDTH: u32 = 9;
+    /// Model: default column width in points (64-bit float in Pages 14.4). 확인
+    pub const MODEL_DEFAULT_COL_WIDTH_F64: u32 = 17;
+    /// Model: stroke sidecar (`TST.StrokeSidecarArchive`, type 6305). 확인
+    pub const MODEL_STROKE_SIDECAR: u32 = 49;
+    /// Data store: column header storage bucket (`TST.HeaderStorageBucket`, type 6006). 확인
+    pub const STORE_COL_HEADERS: u32 = 2;
     /// Data store: tile storage. 확인
     pub const STORE_TILES: u32 = 3;
+    /// Data store: cell/text style list reference (`TST.TableDataList`, kind 4). 확인
+    pub const STORE_STYLE_LIST: u32 = 5;
+    /// Header storage bucket: repeated column/row width entries. 확인
+    pub const HEADER_BUCKET_ENTRIES: u32 = 2;
+    pub const HEADER_ENTRY_INDEX: u32 = 1;
+    pub const HEADER_ENTRY_SIZE: u32 = 2;
     /// Data store: rich text payload list reference. 확인 (the list's own type number differs
     /// between documents, so it is not checked)
     pub const STORE_RICH_TEXT_LIST: u32 = 17;
@@ -580,14 +601,44 @@ pub(crate) mod table {
     /// Row info: u16 LE cell offsets per column; 0xFFFF means no cell. 확인
     pub const ROW_CELL_OFFSETS: u32 = 7;
     pub const NO_CELL_OFFSET: u16 = 0xFFFF;
-    /// Data list: entries. 확인
+    /// Data list: kind (`1 = string`, `4 = style`, `9 = rich text`), next key, entries. 확인
+    pub const LIST_KIND_STYLE: u64 = 4;
     pub const LIST_ENTRIES: u32 = 3;
     /// Data list entry: key. 확인
     pub const ENTRY_KEY: u32 = 1;
+    /// Style data list entry: reference to `TST.CellStyleArchive` (6004) or text style (2022). 확인
+    pub const ENTRY_CELL_STYLE: u32 = 4;
     /// Rich text list entry: payload reference. 확인
     pub const ENTRY_RICH_TEXT: u32 = 9;
     /// Format list entry: format message. 확인 (fixture lists file)
     pub const ENTRY_FORMAT: u32 = 6;
+    /// Cell style archive (`TST.CellStyleArchive`, type 6004). 확인
+    pub const CELL_STYLE_OVERRIDES: u32 = 10;
+    pub const CELL_STYLE_PROPS: u32 = 11;
+    pub const CELL_PROPS_FILL: u32 = 1;
+    pub const FILL_COLOR: u32 = 1;
+    /// Stroke sidecar (`TST.StrokeSidecarArchive`, type 6305) & layer (`6306`). 확인
+    pub const STROKE_SIDECAR_MAX_ORDER: u32 = 1;
+    pub const STROKE_SIDECAR_COLS: u32 = 2;
+    pub const STROKE_SIDECAR_ROWS: u32 = 3;
+    pub const STROKE_SIDECAR_LEFT_COLS: u32 = 4;
+    pub const STROKE_SIDECAR_RIGHT_COLS: u32 = 5;
+    pub const STROKE_SIDECAR_TOP_ROWS: u32 = 6;
+    pub const STROKE_SIDECAR_BOTTOM_ROWS: u32 = 7;
+    pub const STROKE_LAYER_INDEX: u32 = 1;
+    pub const STROKE_LAYER_RUNS: u32 = 2;
+    pub const STROKE_RUN_ORIGIN: u32 = 1;
+    pub const STROKE_RUN_LENGTH: u32 = 2;
+    pub const STROKE_RUN_STROKE: u32 = 3;
+    pub const STROKE_RUN_ORDER: u32 = 4;
+    pub const STROKE_COLOR: u32 = 1;
+    pub const STROKE_WIDTH: u32 = 2;
+    pub const STROKE_PATTERN: u32 = 6;
+    pub const STROKE_PATTERN_TYPE: u32 = 1;
+    pub const STROKE_PATTERN_DASH: u32 = 4;
+    pub const PATTERN_DASHED: u64 = 0;
+    pub const PATTERN_SOLID: u64 = 1;
+    pub const PATTERN_NONE: u64 = 2;
     /// Data store: string list reference, entry text = field 3. 확인 (Pages 14.4 / file format
     /// 26.4.0 documents with string and error cells)
     pub const STORE_STRING_LIST: u32 = 4;
@@ -688,6 +739,7 @@ pub(crate) mod cell {
     pub const LEGACY_BIT_DOUBLE: u32 = 1;
     pub const LEGACY_BIT_STRING_KEY: u32 = 3;
     pub const LEGACY_BIT_RICH_TEXT_KEY: u32 = 4;
+    pub const LEGACY_BIT_CELL_STYLE: u32 = 5;
     /// Date value (a double of seconds since 2001-01-01) of a version-5 cell. 검증 필요: public
     /// notes only (8 bytes); the fixtures hold no version-5 date cell.
     pub const LEGACY_BIT_DATE: u32 = 2;

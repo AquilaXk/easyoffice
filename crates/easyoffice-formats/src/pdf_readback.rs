@@ -23,6 +23,15 @@ const MAX_OUTLINE_NODES: usize = 4_096;
 const MAX_OUTLINE_TITLES: usize = 256;
 const MAX_FORM_NODES: usize = 4_096;
 const MAX_ANNOTS_PER_PAGE: usize = 4_096;
+const MAX_FORM_VALUE_CHARS: usize = 512;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PdfFormReadback {
+    pub has_acro_form: bool,
+    pub field_count: usize,
+    pub applicant: Option<String>,
+    pub department: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PdfPageReadback {
@@ -358,24 +367,156 @@ fn decode_pdf_objects(bytes: &[u8]) -> Result<DecodedPdfObjects, EasyOfficeError
     Ok((objects, trailers))
 }
 
-fn walk_form_fields(
-    items: &[PdfObjValue],
+fn decode_pdf_literal_bytes(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0usize;
+    while i < raw.len() {
+        if raw[i] != b'\\' {
+            out.push(raw[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= raw.len() {
+            break;
+        }
+        match raw[i] {
+            b'n' => {
+                out.push(b'\n');
+                i += 1;
+            }
+            b'r' => {
+                out.push(b'\r');
+                i += 1;
+            }
+            b't' => {
+                out.push(b'\t');
+                i += 1;
+            }
+            b'b' => {
+                out.push(0x08);
+                i += 1;
+            }
+            b'f' => {
+                out.push(0x0C);
+                i += 1;
+            }
+            b'\\' | b'(' | b')' => {
+                out.push(raw[i]);
+                i += 1;
+            }
+            b'\n' => i += 1,
+            b'\r' => {
+                i += 1;
+                if i < raw.len() && raw[i] == b'\n' {
+                    i += 1;
+                }
+            }
+            b'0'..=b'7' => {
+                let mut val = 0u16;
+                for _ in 0..3 {
+                    if i < raw.len() && (b'0'..=b'7').contains(&raw[i]) {
+                        val = (val << 3) | u16::from(raw[i] - b'0');
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                out.push(val as u8);
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn decode_form_text(
+    val: &PdfObjValue,
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
-    visited: &mut HashSet<(u32, u16)>,
-    nodes: &mut usize,
-    leaf_fields: &mut usize,
+) -> Option<String> {
+    let text = match resolve_value(val, objects)? {
+        PdfObjValue::ParenStr(raw) => {
+            let bytes = decode_pdf_literal_bytes(raw);
+            if bytes.starts_with(&[0xFE, 0xFF]) {
+                let u16s: Vec<u16> = bytes[2..]
+                    .chunks_exact(2)
+                    .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                    .collect();
+                String::from_utf16_lossy(&u16s)
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+        PdfObjValue::HexStr(_) => decode_text_value(val, objects)?,
+        _ => return None,
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(MAX_FORM_VALUE_CHARS).collect())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormRole {
+    Applicant,
+    Department,
+}
+
+fn match_form_role(name: &str) -> Option<FormRole> {
+    let lower = name.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    let tail = lower
+        .rsplit_once(['.', '_'])
+        .map_or(lower.as_str(), |(_, t)| t);
+    if matches!(
+        tail,
+        "applicant" | "신청인" | "성명" | "이름" | "신청자" | "작성자"
+    ) {
+        return Some(FormRole::Applicant);
+    }
+    if matches!(tail, "dept" | "department" | "부서" | "부서명" | "소속") {
+        return Some(FormRole::Department);
+    }
+    None
+}
+
+struct FormWalkState<'a> {
+    objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
+    visited: HashSet<(u32, u16)>,
+    nodes: usize,
+    out: PdfFormReadback,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FormWalkParent<'a> {
+    name: Option<&'a str>,
+    alt: Option<&'a str>,
+    value: Option<&'a str>,
+}
+
+fn walk_form_fields_detailed(
+    items: &[PdfObjValue],
+    state: &mut FormWalkState<'_>,
+    parent: FormWalkParent<'_>,
     depth: usize,
 ) {
     if depth > MAX_PDF_PAGE_TREE_DEPTH {
         return;
     }
+    let objects = state.objects;
     for item in items {
-        if *nodes >= MAX_FORM_NODES {
+        if state.nodes >= MAX_FORM_NODES {
             return;
         }
         let entries = match item {
             PdfObjValue::Ref(on, gn) => {
-                if !visited.insert((*on, *gn)) {
+                if !state.visited.insert((*on, *gn)) {
                     continue;
                 }
                 let Some(PdfObjValue::Dict(ref d)) = objects.get(&(*on, *gn)).map(|o| &o.val)
@@ -387,7 +528,21 @@ fn walk_form_fields(
             PdfObjValue::Dict(d) => d.as_slice(),
             _ => continue,
         };
-        *nodes += 1;
+        state.nodes += 1;
+        let own_name = dict_get(entries, "/T").and_then(|v| decode_form_text(v, objects));
+        let full_name = match (parent.name, own_name.as_deref()) {
+            (Some(p), Some(n)) => Some(format!("{p}.{n}")),
+            (Some(p), None) => Some(p.to_string()),
+            (None, Some(n)) => Some(n.to_string()),
+            (None, None) => None,
+        };
+        let own_alt = dict_get(entries, "/TU")
+            .and_then(|v| decode_form_text(v, objects))
+            .or_else(|| parent.alt.map(str::to_string));
+        let own_val = dict_get(entries, "/V")
+            .and_then(|v| decode_form_text(v, objects))
+            .or_else(|| parent.value.map(str::to_string));
+
         let kids = dict_get(entries, "/Kids").and_then(|k| match resolve_value(k, objects) {
             Some(PdfObjValue::Array(arr)) if !arr.is_empty() => Some(arr.as_slice()),
             _ => None,
@@ -402,14 +557,67 @@ fn walk_form_fields(
                 )
             });
             if kids_are_named_fields {
-                walk_form_fields(kid_arr, objects, visited, nodes, leaf_fields, depth + 1);
-            } else {
-                *leaf_fields += 1;
+                walk_form_fields_detailed(
+                    kid_arr,
+                    state,
+                    FormWalkParent {
+                        name: full_name.as_deref(),
+                        alt: own_alt.as_deref(),
+                        value: own_val.as_deref(),
+                    },
+                    depth + 1,
+                );
+                continue;
             }
-        } else if dict_has_non_null_key(entries, "/FT") || dict_has_non_null_key(entries, "/T") {
-            *leaf_fields += 1;
+        }
+        if kids.is_some()
+            || dict_has_non_null_key(entries, "/FT")
+            || dict_has_non_null_key(entries, "/T")
+        {
+            state.out.field_count += 1;
+            let role = own_name
+                .as_deref()
+                .and_then(match_form_role)
+                .or_else(|| full_name.as_deref().and_then(match_form_role))
+                .or_else(|| own_alt.as_deref().and_then(match_form_role));
+            match (role, own_val) {
+                (Some(FormRole::Applicant), Some(val)) if state.out.applicant.is_none() => {
+                    state.out.applicant = Some(val);
+                }
+                (Some(FormRole::Department), Some(val)) if state.out.department.is_none() => {
+                    state.out.department = Some(val);
+                }
+                _ => {}
+            }
         }
     }
+}
+
+fn collect_pdf_form_fields(
+    catalog: Option<&[(String, PdfObjValue)]>,
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> PdfFormReadback {
+    let mut state = FormWalkState {
+        objects,
+        visited: HashSet::new(),
+        nodes: 0,
+        out: PdfFormReadback::default(),
+    };
+    if let Some(acro_dict) = catalog
+        .and_then(|c| dict_get(c, "/AcroForm"))
+        .and_then(|v| match resolve_value(v, objects) {
+            Some(PdfObjValue::Dict(d)) => Some(d.as_slice()),
+            _ => None,
+        })
+    {
+        state.out.has_acro_form = true;
+        if let Some(PdfObjValue::Array(fields)) =
+            dict_get(acro_dict, "/Fields").and_then(|f| resolve_value(f, objects))
+        {
+            walk_form_fields_detailed(fields, &mut state, FormWalkParent::default(), 0);
+        }
+    }
+    state.out
 }
 
 impl PdfSerializer {
@@ -419,6 +627,13 @@ impl PdfSerializer {
         let catalog = resolve_catalog_dict(&objects, &ordered_objs, &trailers);
         let (_, _, _, nodes) = collect_pdf_outlines(catalog, &objects);
         Ok(nodes)
+    }
+
+    pub fn parse_form_fields(bytes: &[u8]) -> Result<PdfFormReadback, EasyOfficeError> {
+        let (objects, trailers) = decode_pdf_objects(bytes)?;
+        let ordered_objs = ordered_by_sequence(&objects);
+        let catalog = resolve_catalog_dict(&objects, &ordered_objs, &trailers);
+        Ok(collect_pdf_form_fields(catalog, &objects))
     }
 
     pub fn inspect_readback(bytes: &[u8]) -> Result<PdfReadbackReport, EasyOfficeError> {
@@ -465,31 +680,9 @@ impl PdfSerializer {
         let (has_outlines, outline_count, outline_titles, outline_nodes) =
             collect_pdf_outlines(catalog, &objects);
 
-        let mut form_field_count = 0usize;
-        let mut has_acro_form = false;
-        if let Some(acro_dict) = catalog
-            .and_then(|c| dict_get(c, "/AcroForm"))
-            .and_then(|v| match resolve_value(v, &objects) {
-                Some(PdfObjValue::Dict(d)) => Some(d.as_slice()),
-                _ => None,
-            })
-        {
-            has_acro_form = true;
-            if let Some(PdfObjValue::Array(fields)) =
-                dict_get(acro_dict, "/Fields").and_then(|f| resolve_value(f, &objects))
-            {
-                let mut visited = HashSet::new();
-                let mut nodes = 0usize;
-                walk_form_fields(
-                    fields,
-                    &objects,
-                    &mut visited,
-                    &mut nodes,
-                    &mut form_field_count,
-                    0,
-                );
-            }
-        }
+        let form_info = collect_pdf_form_fields(catalog, &objects);
+        let form_field_count = form_info.field_count;
+        let has_acro_form = form_info.has_acro_form;
 
         let mut link_annotation_count = 0usize;
         let mut markup_annotation_count = 0usize;
@@ -524,5 +717,73 @@ impl PdfSerializer {
             has_acro_form,
             has_outlines,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_pdf(body_objects: &[(u32, &str)], trailer_root: u32) -> Vec<u8> {
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for &(id, body) in body_objects {
+            offsets.push((id, out.len()));
+            out.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let xref_pos = out.len();
+        let max_id = body_objects.iter().map(|(id, _)| *id).max().unwrap_or(1);
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", max_id + 1).as_bytes());
+        for obj_id in 1..=max_id {
+            if let Some(&(_, off)) = offsets.iter().find(|&&(id, _)| id == obj_id) {
+                out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+            } else {
+                out.extend_from_slice(b"0000000000 65535 f \n");
+            }
+        }
+        out.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root {trailer_root} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n",
+                max_id + 1
+            )
+            .as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn non_form_pdf_reports_no_acro_form() {
+        let pdf = minimal_pdf(
+            &[
+                (1, "<< /Type /Catalog /Pages 2 0 R >>"),
+                (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+                (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"),
+            ],
+            1,
+        );
+        let form = PdfSerializer::parse_form_fields(&pdf).unwrap();
+        assert_eq!(form, PdfFormReadback::default());
+    }
+
+    #[test]
+    fn acro_form_extracts_utf16_values_and_ignores_cycles() {
+        let pdf = minimal_pdf(
+            &[
+                (1, "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>"),
+                (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+                (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"),
+                (4, "<< /Fields [5 0 R 6 0 R 7 0 R] >>"),
+                (5, "<< /FT /Tx /T (applicant) /V <FEFFCD5CC131> >>"),
+                (6, "<< /FT /Tx /T (department) /V <FEFFBD80C11C> >>"),
+                // Cyclic kid reference back to 6 0 R must not loop or double-count.
+                (7, "<< /T (group) /Kids [6 0 R] >>"),
+            ],
+            1,
+        );
+        let form = PdfSerializer::parse_form_fields(&pdf).unwrap();
+        assert!(form.has_acro_form);
+        assert_eq!(form.field_count, 2);
+        assert_eq!(form.applicant.as_deref(), Some("최성"));
+        assert_eq!(form.department.as_deref(), Some("부서"));
     }
 }
