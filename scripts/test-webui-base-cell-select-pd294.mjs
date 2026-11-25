@@ -50,7 +50,7 @@ async function openBase(extra = {}) {
   const { document, host } = await createWorkspaceHarness();
   patchHarness(document);
   rowHeight = () => ROW_PX;
-  for (const name of ["sheet-nav.js", "base-model.js", "base-virtual.js", "base-grid-window.js", "base-cell-nav.js", "base-clipboard.js", "base-cell-select.js", "base-studio.js"]) loadUiModule(new URL(UI + name, import.meta.url), host);
+  for (const name of ["custom-select.js", "sheet-nav.js", "base-model.js", "base-virtual.js", "base-grid-window.js", "base-cell-nav.js", "base-clipboard.js", "base-cell-select.js", "base-studio.js"]) loadUiModule(new URL(UI + name, import.meta.url), host);
   const root = document.createElement("section");
   root.id = "pane-base";
   root.className = "editor-pane base-pane";
@@ -211,7 +211,7 @@ test("a drag selects a range, follows the pointer, and ends at mouseup", async (
 });
 
 test("a click on a link, a button or a checkbox goes to it; the cell is selected all the same", async () => {
-  const { root, studio } = await openBase();
+  const { document, root, studio } = await openBase();
   studio.setState(mixedState());
   view(root);
   const box = cellOf(root, "r1", "f5");
@@ -221,8 +221,22 @@ test("a click on a link, a button or a checkbox goes to it; the cell is selected
   assert.equal(mousedown(pill), false);
   assert.deepEqual(activeOf(root), ["r2", "f8"]);
   const sel = cellOf(root, "r3", "f3").querySelector("select");
-  assert.equal(mousedown(sel), true, "the first click on a select selects the cell");
-  assert.equal(mousedown(sel), false, "the click on a selected cell opens the select");
+  const trigger = cellOf(root, "r3", "f3").querySelector(".custom-select-trigger");
+  const comboRoot = cellOf(root, "r3", "f3").querySelector(".custom-select");
+  assert.ok(trigger && comboRoot, "base select cells render custom-select trigger");
+  assert.equal(mousedown(trigger), true, "the first click on a custom-select trigger selects the cell");
+  assert.deepEqual(activeOf(root), ["r3", "f3"]);
+  assert.equal(comboRoot.classList.contains("open"), false, "first click does not open custom-select");
+  assert.equal(mousedown(trigger), true, "the click on an active select cell opens custom-select");
+  assert.equal(comboRoot.classList.contains("open"), true, "second click opens custom-select menu");
+  assert.equal(document.activeElement, trigger, "trigger takes focus when menu opens");
+  press(document, "Escape");
+  assert.equal(comboRoot.classList.contains("open"), false, "Escape closes open custom-select");
+  mousedown(cellOf(root, "r0", "f2"));
+  assert.equal(mousedown(trigger, { shiftKey: true }), true, "Shift+click on a custom-select trigger extends the cell range");
+  assert.equal(comboRoot.classList.contains("open"), false, "Shift+click never opens custom-select");
+  assert.equal(selected(root).length, 4 * 2, "Shift+click selects r0..r3 x f2..f3");
+  assert.equal(sel.tagName, "SELECT");
 });
 
 // ---- moving ----

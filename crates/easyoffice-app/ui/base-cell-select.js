@@ -217,6 +217,18 @@
       syncFillHandle();
     }
 
+    function activateComboTrigger(td, trigger, select, openMenu) {
+      if (select) {
+        const focusEv = typeof host.Event === "function" ? new host.Event("focus") : { type: "focus", target: select };
+        select.dispatchEvent(focusEv);
+      }
+      beginEdit(td, trigger);
+      trigger.focus({ preventScroll: true });
+      if (openMenu && select && !trigger.closest?.(".custom-select")?.classList?.contains("open")) {
+        host.__EASYOFFICE_CUSTOM_SELECT__?.openCustomSelect?.(select);
+      }
+    }
+
     function startEdit(seed) {
       const field = ctx.fields[sel.ac - 1];
       let td = cellAt(sel.ar, sel.ac);
@@ -229,13 +241,7 @@
         if (!select) return false;
         const trigger = td.querySelector(".custom-select-trigger");
         if (trigger && select.classList?.contains("native-select-hidden")) {
-          beginEdit(td, trigger); trigger.focus({ preventScroll: true });
-          if (seed === undefined && !trigger.closest?.(".custom-select")?.classList?.contains("open")) {
-            const ev = typeof host.MouseEvent === "function"
-              ? new host.MouseEvent("mousedown", { bubbles: true, cancelable: true })
-              : { type: "mousedown", bubbles: true, cancelable: true, target: trigger, preventDefault() {}, stopPropagation() {} };
-            trigger.dispatchEvent(ev);
-          }
+          activateComboTrigger(td, trigger, select, seed === undefined);
           return false;
         }
         beginEdit(td, select); select.focus({ preventScroll: true });
@@ -387,7 +393,7 @@
       const hit = ev.target?.closest?.(NATIVE_CONTROL);
       if (!hit) return false;
       const isCombo = hit.tagName === "SELECT" || hit.classList?.contains("custom-select-trigger");
-      return !isCombo || (sel?.ar === at.r && sel?.ac === at.c && N.isSingle(N.rangeOf(sel)) && extraRanges.length === 0);
+      return !isCombo || (!ev.shiftKey && sel?.ar === at.r && sel?.ac === at.c && N.isSingle(N.rangeOf(sel)) && extraRanges.length === 0);
     };
 
     function pickMulti(ev, nextSel, kind) {
@@ -450,10 +456,25 @@
         return pickMulti(ev, next, "row");
       }
       const td = ev.target?.closest?.(CELL) || null, at = td && coordsOf(td);
-      if (!at || (editing && editing.td === td)) return;
+      if (!at) return;
+      if (editing && editing.td === td) {
+        if (ev.target?.closest?.(".custom-select-trigger")) {
+          ev.preventDefault?.();
+          host.__EASYOFFICE_CUSTOM_SELECT__?.toggleCustomSelect?.(td.querySelector("select"));
+        }
+        return;
+      }
       const extend = ev.shiftKey && sel, native = !((ev.ctrlKey || ev.metaKey) && !extend) && nativeTarget(ev, at);
       const next = extend ? { ...sel, span: null, cr: at.r, cc: at.c } : N.single(at.r, at.c);
-      if (native) { setSel(next, false, []); return; }
+      if (native) {
+        setSel(next, false, []);
+        const comboTrigger = ev.target?.closest?.(".custom-select-trigger");
+        if (comboTrigger) {
+          ev.preventDefault?.();
+          activateComboTrigger(td, comboTrigger, td.querySelector("select"), true);
+        }
+        return;
+      }
       pickMulti(ev, next, "cell");
     }
 

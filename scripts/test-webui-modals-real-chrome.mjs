@@ -598,6 +598,13 @@ test("Slice 2 real Chrome: BASE custom-select hydration + unclipped menu, BOARD 
   assert.ok(baseInitial.total > 0);
   assert.equal(baseInitial.unenhanced, 0, "all BASE selects enhanced initially");
 
+  // PD-294: 1st click selects cell (keeps popup closed for Shift+click/navigation); 2nd click opens custom-select unclipped
+  await clickCenter("#pane-base .base-relation-cell .custom-select-trigger");
+  await sleep(80);
+  const afterFirstClick = await js(`({ sel: document.querySelector("#pane-base .base-relation-cell")?.closest("td")?.getAttribute("data-sel") || "", open: Boolean(document.querySelector("#pane-base .base-relation-cell .custom-select")?.classList?.contains("open")) })`);
+  assert.ok(afterFirstClick.sel.includes("a"), "1st click on BASE combo selects the cell");
+  assert.equal(afterFirstClick.open, false, "1st click does not open BASE combo menu");
+
   await clickCenter("#pane-base .base-relation-cell .custom-select-trigger");
   await sleep(100);
   const relPopup = await js(`(() => {

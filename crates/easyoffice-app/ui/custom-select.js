@@ -281,11 +281,13 @@
     };
 
     trigger.addEventListener("mousedown", (event) => {
+      if (select.classList?.contains("base-cell-select")) return;
       event.preventDefault?.();
       event.stopPropagation?.();
       toggle();
     });
     trigger.addEventListener("dblclick", (event) => {
+      if (select.classList?.contains("base-cell-select")) return;
       close();
       const MouseEventCtor = host.MouseEvent;
       const dbl = typeof MouseEventCtor === "function"
@@ -302,7 +304,7 @@
     }
     observeValue(select, sync);
     rebuild();
-    ENHANCED.set(select, { root, sync, rebuild });
+    ENHANCED.set(select, { root, sync, rebuild, open, toggle });
   }
 
   function stepEdgeSelection(select, options, toEnd) {
@@ -344,5 +346,13 @@
     if (entry) (entry.rebuild || entry.sync)();
   }
 
-  host.__EASYOFFICE_CUSTOM_SELECT__ = { enhanceCustomSelects, syncCustomSelect, closeOpenIn };
+  function openCustomSelect(select) {
+    ENHANCED.get(select)?.open?.();
+  }
+
+  function toggleCustomSelect(select) {
+    ENHANCED.get(select)?.toggle?.();
+  }
+
+  host.__EASYOFFICE_CUSTOM_SELECT__ = { enhanceCustomSelects, syncCustomSelect, openCustomSelect, toggleCustomSelect, closeOpenIn };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
