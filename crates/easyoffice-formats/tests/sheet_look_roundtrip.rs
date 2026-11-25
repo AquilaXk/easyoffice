@@ -304,3 +304,43 @@ fn look_does_not_change_the_font_or_number_format_parts() {
     assert!(styles.contains("<fonts count=\"2\">"), "{styles}");
     assert!(styles.contains("<cellXfs count=\"3\">"), "{styles}");
 }
+
+#[test]
+fn text_rotation_round_trips_across_xlsx_and_ods_and_clamps_out_of_bounds() {
+    for format in BOTH {
+        let st = with(vec![
+            (
+                (0, 0),
+                CellStyle {
+                    text_rotation: 45,
+                    ..Default::default()
+                },
+            ),
+            (
+                (1, 1),
+                CellStyle {
+                    text_rotation: -90,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let back = round_trip(format, &st);
+        assert_eq!(back.cells[&(0, 0)].text_rotation, 45, "{format:?}");
+        assert_eq!(back.cells[&(1, 1)].text_rotation, -90, "{format:?}");
+    }
+    let bytes = pack(
+        DocumentFormat::Xlsx,
+        &with(vec![(
+            (0, 0),
+            CellStyle {
+                text_rotation: 120,
+                ..Default::default()
+            },
+        )]),
+    );
+    let back = read_sheet_styling(&bytes, DocumentFormat::Xlsx)
+        .unwrap()
+        .remove(0)
+        .1;
+    assert_eq!(back.cells[&(0, 0)].text_rotation, 90);
+}

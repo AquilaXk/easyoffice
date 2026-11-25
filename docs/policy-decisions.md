@@ -6175,4 +6175,30 @@
 - **Verified by** `crates/easyoffice-formats/tests/pages_fidelity_pd355.rs`, `crates/easyoffice-formats/tests/pages_fixtures.rs`, `crates/easyoffice-formats/tests/pages_write.rs`, `crates/easyoffice-formats/tests/pages_write_pd246.rs`, `crates/easyoffice-app/tests/export_roundtrip_pd355.rs`, `scripts/test-webui-export-pd355.mjs`, `scripts/test-webui-office-print.mjs`, `scripts/test-webui-native-menu.mjs`, `scripts/test-webui-menu-state.mjs`, `scripts/test-webui-desktop-bridge.mjs`, `scripts/test-webui-modals-real-chrome.mjs`, `node scripts/verify-licenses.mjs`, `node scripts/verify-rhwp-upstream.mjs`, `node scripts/verify-rhwp-core.mjs`, `node scripts/verify-fonts.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
 - **Revisit when** 슬라이스 4~5에서 시트 키보드/서식 확장, `DOC`·`SLIDE`·`BASE`·`BOARD` 편집 UX 완결 및 `.pages` 부동 객체·각주 쓰기 확장을 진행할 때.
 
+## PD-356 — 슬라이스 4: 스프레드시트 표준 단축키·비연속 다중 선택·우클릭 메뉴·행/열 수치 설정·데이터 도구 및 `셀 서식` 확장 (2026-11-26)
+
+- **Context** `SHEET` 창에서 오피스 스프레드시트 표준 단축키(`Ctrl/⌘+1`, `Ctrl/⌘+D`, `Ctrl/⌘+R`, `Ctrl/⌘+;`, `Ctrl/⌘+Shift+;`, `Alt+=`, `Ctrl+Space`, `Shift+Space`, `Ctrl/⌘+Shift+L`, 다중 범위 일괄 `Ctrl/⌘+Enter`), 비연속 다중 범위 선택(`Ctrl/⌘+클릭/드래그`), 일반 셀 우클릭 메뉴, 행 높이/열 너비 수치 입력 대화상자, 일반 범위 `중복된 항목 제거…`, `텍스트 나누기…`, `셀 서식` 내 글꼴·크기·`셀 병합`·텍스트 방향(`-90°..90°`) 왕복 보존과 macOS 네이티브 메뉴 패리티가 빠져 있었다.
+- **Decision (`PD-356`)**
+  1. **IME 안전 단축키 및 도구줄 `Σ` (`sheet-shortcuts.js` · `icons.js` · `sheet-input.js`)**:
+     - 물리 키 코드(`ev.code`: `Digit1`, `KeyD`, `KeyR`, `Semicolon`, `Equal`, `Space`, `KeyL`, `Enter`) 기준으로 한글 IME 상태에서도 단축키를 일관 처리하되 조합 중 입력(`isComposing`/`Process`/`keyCode === 229`)에서는 가로채지 않는다.
+     - 도구줄에 `Σ`(`자동 합계`) 버튼(`#btn-sheet-autosum`, `data-studio-cmd="data-autosum"`)을 추가하고 `Alt+=`와 동일 경로로 연결했다.
+     - 다중 셀·비연속 다중 범위에서 `Ctrl/⌘+Enter` 확정 시 상대 참조 이동을 포함한 전체 범위 일괄 채우기를 단일 실행 취소 단계로 적용하고, 단일 셀 `Ctrl/⌘+Enter` 제자리 확정 계약은 유지한다.
+  2. **비연속 다중 범위 선택 (`sheet-multi-range.js` · `sheet-mouse.js` · `sheet-grid-selection.js` · `sheet-selection-chrome.js` · `sheet-format.js` · `sheet-look-ops.js`)**:
+     - 추가 선택 사각형 `extraRanges`를 최대 64개(`MAX_MULTI_RANGES = 64`), 일괄 셀 연산을 최대 200,000셀(`MAX_MULTI_OPS_CELLS = 200000`)로 제한해 적대적 입력을 차단한다.
+     - 격자 강조, 서식 적용, `Delete`/`내용 지우기`, 상태 표시줄 집계(`합계`/`평균`/`개수`)는 좌표 집합으로 중복을 제거해 겹친 셀을 이중 집계·이중 변경하지 않으며, 다중 범위 `Ctrl+C`/`Ctrl+X`는 비파괴 안내 문구를 표시한다.
+  3. **일반 셀·머리글 우클릭 메뉴 및 행/열 수치 대화상자 (`sheet-context-menu.js` · `sheet-size-dialogs.js`)**:
+     - 링크/메모 전용 셀의 기존 `#sheet-header-menu` 격리 계약(`PD-223`·`PD-256`)을 유지한 채 일반 셀에 `#sheet-cell-menu`(공식 한국어 메뉴명)와 삽입·삭제 밀기 대화상자(`#sheet-cell-shift-dialog`)를 추가했다.
+     - `행 높이…`(`0..409pt`)·`열 너비…`(`0..255` 표준 문자 단위)·자동 맞춤을 `서식` 메뉴, 머리글 우클릭 메뉴, macOS 네이티브 메뉴(`FORMAT_SHEET`·`DATA_SHEET`)에 1:1 연결했다.
+  4. **데이터 도구 및 `셀 서식` 텍스트 회전 왕복 (`sheet-table-dedupe.js` · `sheet-text-columns.js` · `sheet-look-ui.js` · `sheet-look.js` · `sheet_styling.rs` · `xlsx_styles.rs` · `ods_styles.rs` · `sheet_look_json.rs`)**:
+     - `데이터 ▸ 중복된 항목 제거…`를 표뿐 아니라 일반 범위(`내 데이터에 머리글 표시` 토글 포함)에서도 단일 실행 취소 단계로 지원한다.
+     - `데이터 ▸ 텍스트 나누기…`는 구분 기호(`탭`/`세미콜론`/`쉼표`/`공백`/`기타` 1글자)·연속 구분 기호 병합·실시간 미리 보기·덮어쓰기 충돌 보호·행/열/길이 상한(`10,000행`·`64열`·`8,192자`)을 두고 단일 실행 취소 단계로 기록한다.
+     - `셀 서식`에서 `글꼴`·`크기`·`텍스트 줄 바꿈`·`셀 병합`·`텍스트 방향`(`-90°..90°`)을 편집하고 `StyleKey` 비트 패킹·XLSX `textRotation`·ODS `style:rotation-angle`·구조화 JSON `"rot"`(`-90..90` 정수 검증)에서 왕복 보존한다.
+- **재사용 판단 (구현 원칙 3단계)** (1) `PD-269` 정책상 신규 외부 패키지를 들이지 않았다. (2) 기존 `sheet-fill-core.js`, `sheet-table-ops.js`(`cellDedupeKey`/`fnv1aStep`), `sheet-row-height.js`, `sheet-row-fit.js`, `sheet-col-fit.js`, `sheet-numfmt-ui.js`, `sheet-dialog-kit.js`와 `sheet_digit_width.rs`·`sheet_styling.rs` 계약을 그대로 확장했다. (3) 비연속 범위 중복 제거 순회기(`sheet-multi-range.js`), 구분 기호 선형 분할기(`sheet-text-columns.js`, ReDoS 없는 문자 순회), `셀 서식`/크기/셀 메뉴 컨트롤러만 최소 범위로 신설했다.
+- **Why** 스프레드시트 핵심 키보드·마우스·메뉴·서식·데이터 정리 동선을 오피스 표준 동작에 맞추면서 기존 한글·PDF·표·링크·메모 계약을 보존한다.
+- **Trade-offs** (1) `셀 서식` 내 텍스트 방향은 `-90°..90°` 범위 각도와 가로 배치를 CSS 회전(`.cell-rot`)으로 표시하며 세로 누적(`255`) 레이아웃은 별도 확장으로 남겼다. (2) `텍스트 나누기…`는 단일 열 범위만 허용해 다중 열 동시 덮어쓰기를 막는다.
+- **Alternatives rejected** (1) 일반 셀 우클릭을 기존 `#sheet-header-menu`에 섞는 방식: 링크/메모 전용 셀 메뉴 격리 검증(`PD-223`·`PD-256`)과 충돌하므로 별도 `#sheet-cell-menu`를 두었다. (2) 정규표현식으로 구분 기호를 나누는 방식: 사용자 1글자 입력·장문에서의 역추적 위험을 없애기 위해 상한을 둔 선형 문자 순회로 구현했다.
+- **Verified by** `crates/easyoffice-formats/tests/sheet_look_roundtrip.rs`, `crates/easyoffice-app/src/sheet_look_json.rs`, `crates/easyoffice-desktop/src/native_menu/tests/contracts.rs`, `scripts/test-webui-sheet-slice4-pd356.mjs`, `scripts/test-webui-sheet-slice4-real-chrome.mjs`, `scripts/test-webui-native-menu.mjs`, `scripts/test-webui-no-explanations.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
+- **Revisit when** 슬라이스 5에서 `DOC`·`SLIDE`·`BASE`·`BOARD` 편집 UX 완결 및 시트 고급 인쇄·차트 레이아웃 확장을 진행할 때.
+
+
 
