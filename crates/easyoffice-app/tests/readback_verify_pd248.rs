@@ -10,10 +10,10 @@ use easyoffice_app::inspect_cli::{run_inspect_cli, run_inspect_cli_with_limit};
 use easyoffice_app::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     base64_codec, deflate_zlib, CellBox, CellLink, CellStyle, CellValueKind, Cmp, DataValidation,
-    DocumentFormat, DvAlert, DvKind, IeeeCrc32, RichAlignment, RichBlock, RichDocument, RichImage,
-    RichListKind, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichTable,
-    SheetRules, SheetStyling, SheetTable, StrictJsonValue, TableSlicer, UniversalDocumentModel,
-    UniversalFormatConverter, CUSTOM_BASE,
+    DocumentFormat, DvAlert, DvKind, IeeeCrc32, PdfSerializer, RichAlignment, RichBlock,
+    RichDocument, RichImage, RichListKind, RichPageFrame, RichPageMargins, RichPaper,
+    RichParagraph, RichRun, RichTable, SheetRules, SheetStyling, SheetTable, StrictJsonValue,
+    TableSlicer, UniversalDocumentModel, UniversalFormatConverter, CUSTOM_BASE,
 };
 
 fn make_png(width: u32, height: u32) -> Vec<u8> {
@@ -690,4 +690,138 @@ fn evaluate_sheet_reports_blocked_and_connect_error_buckets() {
     let by_code = field(err_counts, "byCode").as_object().unwrap();
     assert_eq!(field(by_code, "#BLOCKED!").as_u64(), Some(3));
     assert_eq!(field(by_code, "#CONNECT!").as_u64(), Some(1));
+}
+
+fn build_pdf_with_nested_outlines() -> Vec<u8> {
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+    let mut offsets = vec![0usize];
+    let push_obj = |buf: &mut Vec<u8>, offs: &mut Vec<usize>, id: usize, body: &str| {
+        offs.push(buf.len());
+        buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
+    };
+    let s1 = "BT /F1 12 Tf 72 720 Td (Outline Body) Tj ET";
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        1,
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        2,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        3,
+        "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        4,
+        &format!("<< /Length {} >>\nstream\n{s1}\nendstream", s1.len()),
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        6,
+        "<< /Type /Outlines /First 7 0 R /Last 9 0 R /Count 3 >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        7,
+        "<< /Title (1. Overview) /Parent 6 0 R /First 8 0 R /Last 8 0 R /Next 9 0 R /Dest [3 0 R /Fit] >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        8,
+        "<< /Title (1.1 Scope) /Parent 7 0 R /Dest [3 0 R /Fit] >>",
+    );
+    push_obj(
+        &mut pdf,
+        &mut offsets,
+        9,
+        "<< /Title (2. Conclusion) /Parent 6 0 R /Prev 7 0 R /Dest [3 0 R /Fit] >>",
+    );
+    let xref_pos = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
+    for off in offsets.iter().skip(1) {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n",
+            offsets.len()
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
+#[test]
+fn pdf_decode_returns_structured_outline_nodes_and_empty_when_absent() {
+    let nested_pdf = build_pdf_with_nested_outlines();
+    let parsed_nodes = PdfSerializer::parse_outline_nodes(&nested_pdf).unwrap();
+    let pairs: Vec<(&str, u8)> = parsed_nodes
+        .iter()
+        .map(|n| (n.title.as_str(), n.level))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![("1. Overview", 1), ("1.1 Scope", 2), ("2. Conclusion", 1)]
+    );
+
+    let dec_req = format!(
+        r#"{{"action":"decode","fileName":"nested.pdf","sourceBase64":"{}"}}"#,
+        base64_codec::encode(&nested_pdf)
+    );
+    let dec_resp = EasyOfficeIpcRouter::dispatch("convert_document_format", &dec_req).unwrap();
+    let root = parse_obj(&dec_resp);
+    let outlines = field(&root, "pdfOutlines").as_array().unwrap();
+    assert_eq!(outlines.len(), 3);
+    assert_eq!(
+        field(outlines[1].as_object().unwrap(), "title").as_str(),
+        Some("1.1 Scope")
+    );
+    assert_eq!(
+        field(outlines[1].as_object().unwrap(), "level").as_u64(),
+        Some(2)
+    );
+
+    // PDF without /Outlines returns empty pdfOutlines array
+    let plain_doc = RichDocument {
+        title: "북마크 없음".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("본문만 있음")],
+            ..RichParagraph::default()
+        })],
+        ..RichDocument::default()
+    };
+    let plain_pdf =
+        UniversalFormatConverter::encode_rich(&plain_doc, DocumentFormat::Pdf, None).unwrap();
+    assert!(PdfSerializer::parse_outline_nodes(&plain_pdf)
+        .unwrap()
+        .is_empty());
+    let plain_req = format!(
+        r#"{{"action":"decode","fileName":"plain.pdf","sourceBase64":"{}"}}"#,
+        base64_codec::encode(&plain_pdf)
+    );
+    let plain_resp = EasyOfficeIpcRouter::dispatch("convert_document_format", &plain_req).unwrap();
+    let plain_root = parse_obj(&plain_resp);
+    assert!(field(&plain_root, "pdfOutlines")
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

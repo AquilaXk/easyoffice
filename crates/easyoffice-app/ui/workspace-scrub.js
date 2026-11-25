@@ -172,6 +172,25 @@
         for (const key of SLIDE_TEXT_KEYS) {
           if ((slide[key] || "").trim()) fields.push({ slide, key, text: slide[key] });
         }
+        if (Array.isArray(slide.elements)) {
+          slide.elements.forEach((el) => {
+            if (!el) return;
+            if ((el.kind === "textbox" || el.kind === "shape") && (el.text || "").trim()) {
+              fields.push({ slide, apply: (v) => { el.text = v; }, text: el.text });
+            } else if (el.kind === "chart" && (el.title || "").trim()) {
+              fields.push({ slide, apply: (v) => { el.title = v; }, text: el.title });
+            } else if (el.kind === "table" && Array.isArray(el.rows)) {
+              el.rows.forEach((row, rIdx) => {
+                if (!Array.isArray(row)) return;
+                row.forEach((cell, cIdx) => {
+                  if (String(cell || "").trim()) {
+                    fields.push({ slide, apply: (v) => { el.rows[rIdx][cIdx] = v; }, text: String(cell) });
+                  }
+                });
+              });
+            }
+          });
+        }
         if (!Array.isArray(slide.insertedNodes) || slide.insertedNodes.length === 0) return;
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, slide.insertedNodes, document);
@@ -183,7 +202,11 @@
 
     function applySlideScrubResults(fields, results, slideNodeJobs, nodeJobResults) {
       results.forEach((res, idx) => {
-        if (Number(res.totalMasked || 0) > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
+        if (Number(res.totalMasked || 0) > 0) {
+          const entry = fields[idx];
+          if (typeof entry.apply === "function") entry.apply(res.scrubbedText);
+          else entry.slide[entry.key] = res.scrubbedText;
+        }
       });
       nodeJobResults.forEach((groupRes, jIdx) => {
         const job = slideNodeJobs[jIdx];

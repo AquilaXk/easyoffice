@@ -164,6 +164,7 @@ pub(crate) struct HwpxParaShape {
     pub heading_level: u8,
     pub checked: bool,
     pub left_margin: u32,
+    pub right_margin: u32,
     /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
     pub intent: i32,
     /// Line spacing in percent of single spacing.
@@ -179,6 +180,7 @@ impl Default for HwpxParaShape {
             heading_level: 0,
             checked: false,
             left_margin: 0,
+            right_margin: 0,
             intent: 0,
             line_percent: DEFAULT_LINE_PERCENT,
         }
@@ -259,7 +261,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
             "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
-            "<hc:right value=\"0\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
+            "<hc:right value=\"{right}\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
             "<hh:lineSpacing type=\"PERCENT\" value=\"{line}\" unit=\"HWPUNIT\"/>",
             "<hh:border borderFillIDRef=\"1\" offsetLeft=\"0\" offsetRight=\"0\" offsetTop=\"0\" offsetBottom=\"0\" connect=\"0\" ignoreMargin=\"0\"/>",
             "</hh:paraPr>"
@@ -272,6 +274,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         heading_ref = heading_ref,
         heading_level = shape.heading_level,
         left = shape.left_margin,
+        right = shape.right_margin,
         intent = shape.intent,
         line = shape.line_percent
     )

@@ -212,6 +212,8 @@ fn cli_inspect_reports_layout_lint_for_docx_and_pptx_and_enforces_cap() {
                     color: None,
                     font_size_pt: 16.0,
                     bold: false,
+                    italic: false,
+                    underline: false,
                     align: SlideTextAlign::Center,
                 },
                 SlideElement::Shape {
@@ -230,6 +232,8 @@ fn cli_inspect_reports_layout_lint_for_docx_and_pptx_and_enforces_cap() {
                     color: None,
                     font_size_pt: 16.0,
                     bold: false,
+                    italic: false,
+                    underline: false,
                     align: SlideTextAlign::Center,
                 },
             ],

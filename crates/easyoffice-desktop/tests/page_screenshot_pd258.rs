@@ -149,6 +149,8 @@ fn build_test_pptx() -> Vec<u8> {
                         color: Some("FFFFFF".into()),
                         font_size_pt: 16.0,
                         bold: true,
+                        italic: false,
+                        underline: false,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Image {
@@ -218,6 +220,8 @@ fn build_test_pptx() -> Vec<u8> {
                     color: Some("FFFFFF".into()),
                     font_size_pt: 20.0,
                     bold: true,
+                    italic: false,
+                    underline: false,
                     align: SlideTextAlign::Center,
                 }],
             },

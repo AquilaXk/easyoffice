@@ -224,6 +224,9 @@ fn rtf_paragraph_line(
     if let Some(left) = left {
         line.push_str(&format!("\\li{left}"));
     }
+    if let Some(right) = p.right_indent_twips.filter(|v| *v > 0) {
+        line.push_str(&format!("\\ri{right}"));
+    }
     if let Some(first) = p.first_line_indent_twips.filter(|v| *v != 0) {
         line.push_str(&format!("\\fi{first}"));
     }

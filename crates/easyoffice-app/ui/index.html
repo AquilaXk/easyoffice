@@ -386,7 +386,6 @@
               <div class="md-item" data-studio-menu-cmd="data-autosum" role="menuitem" tabindex="-1"><span class="md-label">자동 합계 (SUM)</span></div>
               <div class="md-item" data-studio-menu-cmd="data-fn-browser" role="menuitem" tabindex="-1"><span class="md-label">함수 마법사</span></div>
               <div class="md-item" data-studio-menu-cmd="data-sort" role="menuitem" tabindex="-1"><span class="md-label">오름차순·내림차순 정렬</span></div>
-              <div class="md-item" data-studio-menu-cmd="data-validation" role="menuitem" tabindex="-1"><span class="md-label">데이터 유효성 검사</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="formula" data-kinds="SHEET">
@@ -446,7 +445,7 @@
               <div class="md-item" data-kinds="DOC SLIDE" data-verify-act="doc-inspect" role="menuitem" tabindex="-1"><span class="md-label">문서 검사…</span></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF" data-studio-menu-cmd="bench-run" role="menuitem" tabindex="-1"><span class="md-label">문서 엔진 성능 진단</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-track" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">변경 내용 추적</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET" data-studio-menu-cmd="review-track" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">변경 내용 추적</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-accept-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 수락</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-reject-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 거부</span></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
@@ -2382,6 +2381,146 @@
       </div>
     </dialog>
 
+    <dialog id="symbol-picker-dialog" class="tool-dialog" aria-labelledby="symbol-picker-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="symbol-picker-title">문자표</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div id="symbol-picker-tabs" class="dialog-tabs" role="tablist" aria-label="문자표 분류"></div>
+          <div id="symbol-picker-grid" class="symbol-picker-grid" role="listbox" aria-label="문자 목록"></div>
+          <div class="dialog-row symbol-preview-row">
+            <span class="dialog-label">선택 문자</span>
+            <output id="symbol-picker-preview-char" class="symbol-preview-char">※</output>
+            <span id="symbol-picker-preview-code" class="symbol-preview-code">U+203B</span>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-symbol-insert" type="button" class="dialog-btn dialog-btn-primary">넣기</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-stats-dialog" class="tool-dialog" aria-labelledby="doc-stats-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-stats-title">문서 통계</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <dl id="doc-stats-grid" class="board-analysis-grid"></dl>
+          <p id="doc-stats-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-stats-close" type="button" class="dialog-btn dialog-btn-primary" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-mailmerge-dialog" class="tool-dialog" aria-labelledby="doc-mailmerge-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-mailmerge-title">편지 병합</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div id="doc-mailmerge-rows" class="dialog-stack"></div>
+          <div class="dialog-row">
+            <button id="btn-doc-mailmerge-add" type="button" class="dialog-btn">필드 추가</button>
+            <button id="btn-doc-mailmerge-token" type="button" class="dialog-btn">필드 토큰 넣기</button>
+          </div>
+          <p id="doc-mailmerge-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-mailmerge-apply" type="button" class="dialog-btn dialog-btn-primary">병합</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-shape-dialog" class="tool-dialog" aria-labelledby="doc-shape-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-shape-title">도형</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-shape-type">종류</label>
+            <select id="doc-shape-type" class="sb-combo dialog-select">
+              <option value="roundRect" selected>모서리가 둥근 직사각형</option>
+              <option value="rect">직사각형</option>
+              <option value="callout">설명선</option>
+              <option value="ellipse">타원</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-shape-text">텍스트</label><input id="doc-shape-text" type="text" class="dialog-text-input" maxlength="512" autocomplete="off" value="도형" /></div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-shape-fill">채우기 색</label><input id="doc-shape-fill" type="color" value="#dbeafe" />
+            <label class="dialog-label" for="doc-shape-stroke">선 색</label><input id="doc-shape-stroke" type="color" value="#2563eb" />
+          </div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-shape-w">너비</label><input id="doc-shape-w" type="number" min="24" max="180" step="1" value="64" class="dialog-input" /><span class="dialog-unit">mm</span>
+            <label class="dialog-label" for="doc-shape-h">높이</label><input id="doc-shape-h" type="number" min="12" max="120" step="1" value="28" class="dialog-input" /><span class="dialog-unit">mm</span>
+          </div>
+          <p id="doc-shape-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-shape-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-chart-dialog" class="tool-dialog" aria-labelledby="doc-chart-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-chart-title">차트</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-chart-type">종류</label>
+            <select id="doc-chart-type" class="sb-combo dialog-select">
+              <option value="column" selected>세로 막대형</option>
+              <option value="bar">가로 막대형</option>
+              <option value="line">꺾은선형</option>
+              <option value="pie">원형</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-chart-title-input">제목</label><input id="doc-chart-title-input" type="text" class="dialog-text-input" maxlength="160" autocomplete="off" value="분기별 실적" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-chart-categories">항목</label><input id="doc-chart-categories" type="text" class="dialog-text-input" autocomplete="off" value="1분기, 2분기, 3분기" /></div>
+          <div class="dialog-row slide-chart-series-row"><label class="dialog-label" for="doc-chart-series">계열</label><textarea id="doc-chart-series" class="dialog-text-input slide-chart-series-input" rows="3">실적: 40, 65, 90</textarea></div>
+          <p id="doc-chart-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-chart-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-fn-dialog" class="tool-dialog" aria-labelledby="doc-fn-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-fn-title">함수 마법사</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-fn-name">함수</label>
+            <select id="doc-fn-name" class="sb-combo dialog-select">
+              <option value="SUM" selected>SUM (합계)</option>
+              <option value="AVERAGE">AVERAGE (평균)</option>
+              <option value="COUNT">COUNT (개수)</option>
+              <option value="MAX">MAX (최댓값)</option>
+              <option value="MIN">MIN (최솟값)</option>
+            </select>
+          </div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-fn-dir">방향</label>
+            <select id="doc-fn-dir" class="sb-combo dialog-select">
+              <option value="ABOVE" selected>ABOVE (위쪽)</option>
+              <option value="LEFT">LEFT (왼쪽)</option>
+              <option value="BELOW">BELOW (아래쪽)</option>
+              <option value="RIGHT">RIGHT (오른쪽)</option>
+            </select>
+          </div>
+          <div class="dialog-row"><span class="dialog-label">수식</span><output id="doc-fn-preview" class="dialog-preview-code">=SUM(ABOVE)</output></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-fn-eval" type="checkbox" checked /> 삽입 후 바로 계산</label></div>
+          <p id="doc-fn-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-fn-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="slide-layout-dialog" class="tool-dialog" aria-labelledby="slide-layout-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="slide-layout-dialog-title">마스터 레이아웃</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -2421,6 +2560,7 @@
             </select>
           </div>
           <div class="dialog-row"><label class="dialog-label" for="slide-shape-text">텍스트</label><input id="slide-shape-text" type="text" class="dialog-text-input" maxlength="1024" autocomplete="off" /></div>
+          <div class="dialog-row"><span class="dialog-label">텍스트 서식</span><label class="dialog-checkbox"><input id="slide-shape-bold" type="checkbox" checked /> 굵게</label><label class="dialog-checkbox"><input id="slide-shape-italic" type="checkbox" /> 기울임</label><label class="dialog-checkbox"><input id="slide-shape-underline" type="checkbox" /> 밑줄</label></div>
           <div class="dialog-row"><span class="dialog-label">채우기 색</span><div id="slide-shape-fill-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="채우기 색" aria-label="채우기 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="slide-shape-fill" type="color" value="#2563eb" aria-label="채우기 색" /><div id="slide-shape-fill-palette" class="sb-hl-palette" hidden></div></div><span class="dialog-label">선 색</span><div id="slide-shape-stroke-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="선 색" aria-label="선 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="slide-shape-stroke" type="color" value="#1d4ed8" aria-label="선 색" /><div id="slide-shape-stroke-palette" class="sb-hl-palette" hidden></div></div></div>
           <div class="dialog-row"><label class="dialog-label" for="slide-shape-stroke-width">선 굵기</label><input id="slide-shape-stroke-width" type="number" min="0" max="24" step="1" value="2" class="dialog-input" /><span class="dialog-unit">pt</span></div>
           <div class="dialog-row"><label class="dialog-label" for="slide-shape-x">가로 위치</label><input id="slide-shape-x" type="number" min="0" max="960" step="1" value="370" class="dialog-input" /><label class="dialog-label" for="slide-shape-y">세로 위치</label><input id="slide-shape-y" type="number" min="0" max="596" step="1" value="150" class="dialog-input" /></div>
@@ -2686,6 +2826,8 @@
     <script src="./zoom-range.js"></script>
     <script src="./slide-canvas.js"></script>
     <script src="./slide-dialogs.js"></script>
+    <script src="./doc-symbol-dialog.js"></script>
+    <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-pivot-model.js"></script>

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule, commandItem, putCaretInFirstTable } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem, putCaretInFirstTable } from "./test-support/modules.mjs";
 import { addDemoHeading, demoHtml, openDemoDeck, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
+import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
+import { createSelection } from "./test-support/doc-run-harness.mjs";
 
 test("design tokens, ARIA tab roles, zoom controls, split compare pane, and format filters stay synchronized", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
@@ -71,13 +73,59 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   await flushAsyncTurns();
   assert.ok(docEditor.querySelector(".eo-doc-footnote"));
 
+  const pressEsc = (dlg) => document.dispatchEvent({ type: "keydown", key: "Escape", target: dlg, preventDefault() {}, stopPropagation() {} });
   userClick(commandItem(document, "doc-mod-mailmerge"));
   await flushAsyncTurns();
-  assert.equal(
-    document.getElementById("mailmerge-target-line").textContent,
-    "수신: 행정안전부 이수현 (2026-10-25)"
-  );
-  assert.ok(docEditor.querySelector(".eo-doc-mailmerge"));
+  const mmDlg = document.getElementById("doc-mailmerge-dialog");
+  assert.equal(mmDlg.open, true, "mail merge opens field input dialog instead of hardcoding values");
+  pressEsc(mmDlg);
+  assert.equal(mmDlg.open, false);
+  assert.equal(document.getElementById("mailmerge-target-line").textContent, "수신: {{기관명}} {{성명}} ({{일자}})");
+  assert.equal(docEditor.querySelector(".eo-doc-mailmerge"), null);
+
+  userClick(commandItem(document, "doc-mod-mailmerge"));
+  await flushAsyncTurns();
+  const mmRows = Array.from(mmDlg.querySelectorAll(".doc-mailmerge-row"));
+  const mmInputs = Object.fromEntries(mmRows.map((r) => [r.querySelector(".doc-mm-key").value, r.querySelector(".doc-mm-val")]));
+  mmInputs["기관명"].value = "기획예산처";
+  mmInputs["성명"].value = "홍길동";
+  mmInputs["일자"].value = "2026-11-25";
+  userClick(document.getElementById("btn-doc-mailmerge-apply"));
+  await flushAsyncTurns(6);
+  assert.equal(mmDlg.open, false);
+  assert.equal(document.getElementById("mailmerge-target-line").textContent, "수신: 기획예산처 홍길동 (2026-11-25)");
+  assert.equal(docEditor.querySelector(".eo-doc-mailmerge"), null, "no dummy mail merge banner inserted");
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(6);
+  assert.equal(document.getElementById("mailmerge-target-line").textContent, "수신: {{기관명}} {{성명}} ({{일자}})");
+
+  userClick(commandItem(document, "document-insert-shape"));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("doc-shape-dialog").open, true);
+  document.getElementById("doc-shape-text").value = "검토 도형";
+  userClick(document.getElementById("btn-doc-shape-ok"));
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector(".eo-doc-shape svg") !== null, true);
+
+  userClick(commandItem(document, "document-insert-chart"));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("doc-chart-dialog").open, true);
+  document.getElementById("doc-chart-title-input").value = "분기별 추이";
+  userClick(document.getElementById("btn-doc-chart-ok"));
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector(".eo-doc-chart") !== null, true);
+
+  userClick(commandItem(document, "document-review-stats"));
+  await flushAsyncTurns(6);
+  const statsDlg = document.getElementById("doc-stats-dialog");
+  assert.equal(statsDlg.open, true, "review-stats opens document statistics dialog");
+  assert.match(document.getElementById("doc-stats-status").textContent, /공백 포함 \d+자/);
+  pressEsc(statsDlg);
+  assert.equal(statsDlg.open, false);
+
+  userClick(commandItem(document, "document-home-style"));
+  await flushAsyncTurns();
+  assert.notEqual(document.getElementById("doc-style-select").value, "");
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
@@ -260,23 +308,40 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(document.querySelectorAll("#slide-thumb-list .slide-thumb").length, 3);
 
+  const pressEsc = (dlg) => document.dispatchEvent({ type: "keydown", key: "Escape", target: dlg, preventDefault() {}, stopPropagation() {} });
+  const canvasLayer = document.getElementById("slide-canvas-layer");
+  const lowerZone = document.getElementById("slide-lower-zone");
+
   await flushAsyncTurns();
   userClick(commandItem(document, "slide-insert-table"));
   await flushAsyncTurns();
+  const tblDlg = document.getElementById("slide-table-dialog");
+  assert.equal(tblDlg.open, true);
+  pressEsc(tblDlg);
+  await flushAsyncTurns();
+  assert.equal(tblDlg.open, false);
+  assert.equal(canvasLayer.querySelectorAll(".slide-el").length, 0, "Esc cancels without dummy node");
+  assert.equal(lowerZone.querySelector("[data-slide-object]"), null);
+
+  userClick(commandItem(document, "slide-insert-table"));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-slide-table-ok"));
+  await flushAsyncTurns();
   userClick(commandItem(document, "slide-insert-chart"));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-slide-chart-ok"));
   await flushAsyncTurns();
   userClick(commandItem(document, "slide-insert-shape"));
   await flushAsyncTurns();
+  document.getElementById("slide-shape-text").value = "담당자 연락처 010-5555-7777";
+  userClick(document.getElementById("btn-slide-shape-ok"));
+  await flushAsyncTurns();
 
-  assert.equal(
-    document.querySelectorAll("#slide-thumb-list .slide-thumb").length,
-    3,
-    "inserting table/chart/shape on a slide must not add new slides to the deck"
-  );
-  const lowerZone = document.getElementById("slide-lower-zone");
-  assert.ok(lowerZone.querySelector('[data-slide-object="table"]'));
-  assert.ok(lowerZone.querySelector('[data-slide-object="chart"]'));
-  assert.ok(lowerZone.querySelector('[data-slide-object="shape"]'));
+  assert.equal(document.querySelectorAll("#slide-thumb-list .slide-thumb").length, 3);
+  assert.equal(lowerZone.querySelector("[data-slide-object]"), null, "no legacy lower-zone dummy stubs created");
+  assert.ok(canvasLayer.querySelector('.slide-el[data-kind="table"]'));
+  assert.ok(canvasLayer.querySelector('.slide-el[data-kind="chart"]'));
+  assert.ok(canvasLayer.querySelector('.slide-el[data-kind="shape"]'));
 
   lowerZone.focus();
   const lowerP = lowerZone.querySelector("p");
@@ -288,22 +353,36 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   userClick(document.querySelector('.slide-thumb[data-slide-idx="0"]'));
   await flushAsyncTurns();
-  assert.equal(
-    lowerZone.querySelector("p").textContent,
-    "수정된 슬라이드 본문 요약",
-    "typing in #slide-lower-zone must not duplicate inserted object text into slide.lower"
-  );
-  assert.ok(lowerZone.querySelector('[data-slide-object="table"]'));
+  assert.equal(lowerZone.querySelector("p").textContent, "수정된 슬라이드 본문 요약");
+  assert.ok(canvasLayer.querySelector('.slide-el[data-kind="table"]'));
 
-  const shapeObj = lowerZone.querySelector('[data-slide-object="shape"]');
-  shapeObj.textContent = "담당자 연락처 010-5555-7777";
-  lowerZone.dispatchEvent({ type: "input", target: shapeObj });
   userClick(document.getElementById("btn-scrub-pii"));
   await flushAsyncTurns();
   assert.doesNotMatch(
-    lowerZone.querySelector('[data-slide-object="shape"]').textContent,
+    canvasLayer.querySelector('.slide-el[data-kind="shape"] .slide-el-shape-text').textContent,
     /010-5555-7777/
   );
+
+  userClick(commandItem(document, "slide-insert-link"));
+  await flushAsyncTurns();
+  const linkDlg = document.getElementById("doc-link-dialog");
+  assert.equal(linkDlg.open, true);
+  pressEsc(linkDlg);
+  assert.equal(linkDlg.open, false);
+  userClick(commandItem(document, "slide-review-comment"));
+  await flushAsyncTurns();
+  const commentDlg = document.getElementById("doc-comment-dialog");
+  assert.equal(commentDlg.open, true);
+  document.getElementById("doc-comment-input").value = "발표 순서 확인";
+  userClick(document.getElementById("btn-doc-comment-ok"));
+  await flushAsyncTurns();
+  assert.doesNotMatch(lowerZone.textContent, /\[.*\]/, "slide link and comment never append command bracket stubs");
+  assert.match(document.getElementById("slide-presenter-notes").value, /발표 순서 확인/);
+
+  userClick(commandItem(document, "slide-layout-orientation"));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("slide-stage-box").dataset.orientation, "portrait");
+  assert.equal(document.getElementById("slide-stage-box").style.outline, "");
 
   await flushAsyncTurns();
   userClick(commandItem(document, "slide-mod-presenter"));
@@ -313,7 +392,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   userClick(document.getElementById("btn-smart-diagnose"));
   await flushAsyncTurns();
-  assert.match(document.getElementById("smart-summary-output").textContent, /슬라이드 차트|발표 자료/);
+  assert.match(document.getElementById("smart-summary-output").textContent, /분기 실적|발표/);
 
   switchModule(document, "PDF");
   await flushAsyncTurns();
@@ -576,5 +655,165 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   cmdInput.dispatchEvent({ type: "input" });
   sandbox.dispatchWindowKeydown({ key: "/", ctrlKey: true });
   assert.equal(paletteModal.open, false);
+});
+
+test("Slice 1: table sort/fn wizard, validation non-audit, rightIndentTwips roundtrip, line/col & overwrite, slide shape italic/underline, PDF/SHEET outlines, and active fit zoom", async () => {
+  const audited = [];
+  const selection = createSelection();
+  const h1 = await createWorkspaceHarness({ selection, transformHtml: demoHtml });
+  const origIpc = h1.host.__EASYOFFICE_TEST_IPC__;
+  h1.host.__EASYOFFICE_TEST_IPC__ = async (cmd, payload) => {
+    if (cmd === "audit_security") audited.push(payload);
+    return origIpc(cmd, payload);
+  };
+  await flushAsyncTurns(8);
+
+  // 1. DOC data-validation never triggers audit_security
+  h1.userClick(commandItem(h1.document, "document-data-validation"));
+  await flushAsyncTurns(6);
+  assert.equal(audited.length, 0, "DOC data-validation must not miswire to securityAudit");
+
+  // 2. DOC caret table sort + Undo + function wizard
+  const docEditor1 = h1.document.getElementById("doc-editor");
+  const getDocTableRows = () =>
+    Array.from(h1.document.getElementById("doc-table-body").querySelectorAll("tr:not(#doc-table-sum-row)")).map(
+      (r) => r.cells[0].textContent
+    );
+  const rowsBefore = getDocTableRows();
+  assert.ok(rowsBefore.length >= 2);
+  putCaretInFirstTable(h1.document, selection);
+  h1.userClick(commandItem(h1.document, "document-data-sort"));
+  await flushAsyncTurns(6);
+  const rowsAfter = getDocTableRows();
+  assert.notDeepEqual(rowsAfter, rowsBefore, "caret table rows actually reordered");
+  h1.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(6);
+  const rowsUndo = getDocTableRows();
+  assert.deepEqual(rowsUndo, rowsBefore, "Ctrl+Z restores table sort order");
+
+  // Function wizard inserts and computes =SUM(ABOVE) at caret cell
+  const sumCell = h1.document.getElementById("doc-table-sum-cell");
+  const rFn = h1.document.createRange();
+  rFn.setStart(sumCell, 0);
+  rFn.setEnd(sumCell, 0);
+  selection.removeAllRanges();
+  selection.addRange(rFn);
+  h1.userClick(commandItem(h1.document, "document-data-fn-browser"));
+  await flushAsyncTurns(4);
+  assert.equal(h1.document.getElementById("doc-fn-dialog").open, true);
+  h1.userClick(h1.document.getElementById("btn-doc-fn-ok"));
+  await flushAsyncTurns(4);
+  assert.match(sumCell.textContent, /^1000/);
+
+  // 3. rightIndentTwips save payload preservation
+  const pInd = h1.document.createElement("p");
+  pInd.textContent = "오른쪽 여백 테스트";
+  pInd.style.paddingRight = "32px";
+  pInd.dataset.eoRightTwips = "480";
+  docEditor1.appendChild(pInd);
+  const blocksOut = h1.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(docEditor1);
+  assert.ok(blocksOut.some((b) => b.rightIndentTwips === 480), "save payload preserves rightIndentTwips");
+
+  // Clean harness for file-open roundtrips, line/col, overwrite, SLIDE, PDF, SHEET outlines & active fit zoom
+  const sel2 = createSelection();
+  const { document, host, userClick } = await createWorkspaceHarness({ selection: sel2 });
+  await flushAsyncTurns(8);
+  const docEditor = document.getElementById("doc-editor");
+  await pickFile(document, makeFixtureFile("우여백.docx", { blocks: [{ type: "paragraph", rightIndentTwips: 480, runs: [{ text: "복원 여백" }] }] }));
+  await flushAsyncTurns(8);
+  const restoredP = docEditor.querySelector("p");
+  assert.equal(restoredP.dataset.eoRightTwips, "480");
+  assert.equal(restoredP.style.paddingRight, "32px");
+
+  // 4. Real caret line/col and Overwrite mode ('수정')
+  restoredP.replaceChildren(document.createTextNode("첫째줄\n둘째가나다"));
+  const textNode = restoredP.firstChild;
+  const rPos = document.createRange();
+  rPos.setStart(textNode, 6);
+  rPos.setEnd(textNode, 6);
+  sel2.removeAllRanges();
+  sel2.addRange(rPos);
+  document.dispatchEvent({ type: "selectionchange" });
+  assert.match(document.getElementById("status-studio-pos").textContent, /2줄\s+3칸/);
+
+  userClick(document.getElementById("status-insert-mode"));
+  assert.equal(document.getElementById("status-insert-mode").textContent, "수정");
+  rPos.setStart(textNode, 4);
+  rPos.setEnd(textNode, 4);
+  sel2.removeAllRanges();
+  sel2.addRange(rPos);
+  docEditor.dispatchEvent({ type: "beforeinput", inputType: "insertText", data: "★", preventDefault() {} });
+  assert.equal(textNode.data, "첫째줄\n★째가나다", "overwrite mode replaces character at caret");
+
+  // Split compare pane renders live document content, never dummy static text
+  userClick(commandItem(document, "document-view-split"));
+  await flushAsyncTurns(4);
+  const splitPane = document.querySelector(".canvas-stage .split-compare-pane");
+  assert.ok(splitPane);
+  assert.doesNotMatch(splitPane.textContent, /화면 분할 참조 보기/);
+  assert.match(splitPane.textContent, /복원 여백|첫째줄/);
+
+  // 5. SLIDE shape italic/underline wire persistence & slide-layout-paper cycling
+  switchModule(document, "SLIDE");
+  await flushAsyncTurns(4);
+  userClick(commandItem(document, "slide-insert-shape"));
+  await flushAsyncTurns(4);
+  document.getElementById("slide-shape-text").value = "서식 도형";
+  document.getElementById("slide-shape-italic").checked = true;
+  document.getElementById("slide-shape-underline").checked = true;
+  userClick(document.getElementById("btn-slide-shape-ok"));
+  await flushAsyncTurns(4);
+  const shapeTextEl = document.querySelector('#slide-canvas-layer .slide-el[data-kind="shape"] .slide-el-shape-text');
+  assert.equal(shapeTextEl.style.fontStyle, "italic");
+  assert.equal(shapeTextEl.style.textDecoration, "underline");
+  const shapeEl = host.__EASYOFFICE_SLIDE_CANVAS__.getElements().at(-1);
+  assert.equal(shapeEl.italic, true);
+  assert.equal(shapeEl.underline, true);
+  userClick(commandItem(document, "slide-layout-paper"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("slide-stage-box").dataset.aspect, "4:3");
+
+  // 6. PDF decoded pdfOutlines + empty outline when absent + SHEET hidden sheet excluded
+  await pickFile(document, makeFixtureFile("북마크.pdf", {
+    title: "규정집", pages: 2, paragraphs: ["제1조 목적"],
+    pdfOutlines: [{ title: "제1장 총칙", level: 1 }, { title: "제1조 목적", level: 2 }],
+  }));
+  await flushAsyncTurns(8);
+  userClick(studioItem(document, "view-outline"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("outline-dialog").open, true);
+  const pdfOutItems = Array.from(document.querySelectorAll("#outline-list .outline-item")).map((li) => li.textContent);
+  assert.deepEqual(pdfOutItems, ["제1장 총칙", "  제1조 목적"]);
+  document.getElementById("outline-dialog").close();
+
+  await pickFile(document, makeFixtureFile("무북마크.pdf", { title: "단순문서", pages: 1, paragraphs: ["본문"] }));
+  await flushAsyncTurns(8);
+  userClick(studioItem(document, "view-outline"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("outline-dialog").open, true);
+  assert.equal(document.querySelectorAll("#outline-list .outline-item").length, 0);
+  document.getElementById("outline-dialog").close();
+
+  await openDemoWorkbook(document);
+  switchModule(document, "SHEET");
+  await flushAsyncTurns(6);
+  host.__EASYOFFICE_SHEET_LAYOUT__.setHiddenSheet("Sheet2", true);
+  userClick(studioItem(document, "view-outline"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("outline-dialog").open, true);
+  const sheetOutItems = Array.from(document.querySelectorAll("#outline-list .outline-item")).map((li) => li.textContent);
+  assert.ok(sheetOutItems.length >= 1, "visible sheets stay in outline");
+  assert.ok(!sheetOutItems.some((txt) => txt.includes("시트 2") || txt.includes("Sheet2")), "hidden sheet excluded from outline");
+  document.getElementById("outline-dialog").close();
+
+  // 7. computeFitZoom uses active module container width instead of hidden #doc-editor
+  switchModule(document, "PDF");
+  await flushAsyncTurns(4);
+  const panePdf = document.getElementById("pane-pdf");
+  const pdfCard = document.getElementById("pdf-page-card");
+  Object.defineProperty(panePdf, "clientWidth", { configurable: true, value: 900 });
+  Object.defineProperty(pdfCard, "offsetWidth", { configurable: true, value: 595 });
+  userClick(document.getElementById("btn-zoom-fit-width"));
+  assert.equal(document.getElementById("status-zoom-label").textContent, "145%");
 });
 

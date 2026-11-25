@@ -149,6 +149,8 @@ fn parse_element(
                 color: opt_hex(obj, "color")?,
                 font_size_pt: opt_f64(obj, "fontSizePt")?.unwrap_or(16.0),
                 bold: opt_bool_def(obj, "bold", false)?,
+                italic: opt_bool_def(obj, "italic", false)?,
+                underline: opt_bool_def(obj, "underline", false)?,
                 align,
             })
         }
@@ -418,6 +420,8 @@ fn write_element_json(out: &mut String, el: &SlideElement, push_str: fn(&mut Str
             color,
             font_size_pt,
             bold,
+            italic,
+            underline,
             align,
             ..
         } => {
@@ -440,7 +444,11 @@ fn write_element_json(out: &mut String, el: &SlideElement, push_str: fn(&mut Str
             push_opt_hex(out, "color", color, push_str);
             out.push_str(",\"fontSizePt\":");
             push_f64(out, *font_size_pt);
-            let _ = write!(out, ",\"bold\":{bold},\"align\":\"{}\"", align.as_str());
+            let _ = write!(
+                out,
+                ",\"bold\":{bold},\"italic\":{italic},\"underline\":{underline},\"align\":\"{}\"",
+                align.as_str()
+            );
         }
         SlideElement::Image { id, image, alt, .. } => {
             out.push_str("\"kind\":\"image\",\"id\":");

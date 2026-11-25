@@ -147,6 +147,59 @@
       return result;
     }
 
+    function sortTableAt(asc = true, options = {}) {
+      const root = editor();
+      const sel = selectionAt();
+      const fallbackTable = root?.querySelector("table") || document.getElementById("doc-table-body")?.closest("table");
+      const table = sel?.table || fallbackTable;
+      if (!table) {
+        setFeedback?.(MSG_OUTSIDE);
+        return { changed: false };
+      }
+      const colIdx = sel ? (grid.layoutOf(table).at.get(sel.from)?.col ?? 0) : 0;
+      const tbody = table.tBodies?.[0] || table.querySelector("tbody") || table;
+      const allRows = Array.from(tbody.children || []).filter((r) => r.tagName === "TR");
+      let start = 0;
+      if (!table.tHead && tbody.tagName !== "THEAD") {
+        while (start < allRows.length) {
+          const cells = Array.from(allRows[start].children || []);
+          if (cells.length > 0 && cells.every((c) => c.tagName === "TH")) start += 1;
+          else break;
+        }
+      }
+      const sumRow = allRows.find((r) => r.id === "doc-table-sum-row") || null;
+      const dataRows = allRows.slice(start).filter((r) => r !== sumRow);
+      if (dataRows.length < 2) {
+        setFeedback?.("정렬할 표 행이 부족합니다");
+        return { changed: false };
+      }
+      if (dataRows.some((r) => Array.from(r.children || []).some((c) => (c.rowSpan || 1) > 1 || (c.colSpan || 1) > 1))) {
+        setFeedback?.("병합된 셀이 있는 표는 정렬할 수 없습니다");
+        return { changed: false };
+      }
+      const parseNum = (s) => (/^[-+]?\d[\d,]*(?:\.\d+)?$/.test(s) ? Number(s.replaceAll(",", "")) : NaN);
+      const exec = () => {
+        const sorted = [...dataRows].sort((a, b) => {
+          const sa = cellText(a.children[colIdx] || a.children[0] || a);
+          const sb = cellText(b.children[colIdx] || b.children[0] || b);
+          const na = parseNum(sa);
+          const nb = parseNum(sb);
+          if (Number.isFinite(na) && Number.isFinite(nb)) return asc ? na - nb : nb - na;
+          return asc ? sa.localeCompare(sb, "ko") : sb.localeCompare(sa, "ko");
+        });
+        for (const row of sorted) {
+          if (sumRow) sumRow.before(row);
+          else tbody.appendChild(row);
+        }
+        const firstTarget = sorted[0]?.children[colIdx] || sorted[0]?.children[0];
+        if (firstTarget && sel) placeCaret(firstTarget);
+        return { changed: true };
+      };
+      const res = options.undo === false ? exec() : withUndo(exec);
+      setFeedback?.(asc ? "표 오름차순 정렬 완료" : "표 내림차순 정렬 완료");
+      return res;
+    }
+
     const recalculate = () => applyAtCaret(calculate);
     const autoSum = () => applyAtCaret(OPERATIONS["table-sum"]);
     const docImage = host.__EASYOFFICE_CREATE_DOC_IMAGE__?.(deps) ?? null;
@@ -206,7 +259,7 @@
       syncMenu();
     }
 
-    return { bind, run, recalculate, autoSum, handles, syncMenu, selectionAt };
+    return { bind, run, recalculate, autoSum, sortTableAt, handles, syncMenu, selectionAt };
   }
 
   host.__EASYOFFICE_DOC_TABLE__ = { DEFAULT_ROWS, DEFAULT_COLUMNS, insertTable };

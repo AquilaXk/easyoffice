@@ -112,10 +112,16 @@ pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
             "<w:spacing w:line=\"{line}\" w:lineRule=\"auto\"/>"
         ));
     }
-    if p.left_indent_twips.is_some() || p.first_line_indent_twips.is_some() {
+    if p.left_indent_twips.is_some()
+        || p.right_indent_twips.is_some()
+        || p.first_line_indent_twips.is_some()
+    {
         xml.push_str("<w:ind");
         if let Some(left) = p.left_indent_twips {
             xml.push_str(&format!(" w:left=\"{left}\""));
+        }
+        if let Some(right) = p.right_indent_twips {
+            xml.push_str(&format!(" w:right=\"{right}\""));
         }
         match p.first_line_indent_twips {
             Some(first) if first >= 0 => xml.push_str(&format!(" w:firstLine=\"{first}\"")),
@@ -452,6 +458,7 @@ pub(crate) struct OdtParaKey {
     align: Option<RichAlignment>,
     level: u8,
     left_twips: Option<u32>,
+    right_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
     page_break: bool,
@@ -487,6 +494,7 @@ pub(crate) fn push_odt_paragraph(
         align: p.alignment,
         level,
         left_twips: p.left_indent_twips,
+        right_twips: p.right_indent_twips,
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
         page_break: p.page_break_before,
@@ -538,6 +546,7 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
         align,
         level,
         left_twips,
+        right_twips,
         first_line_twips,
         line_percent,
         page_break,
@@ -558,6 +567,12 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
         styles.push_str(&format!(
             " fo:margin-left=\"{}\"",
             odt_twips_to_pt(i64::from(*left))
+        ));
+    }
+    if let Some(right) = right_twips {
+        styles.push_str(&format!(
+            " fo:margin-right=\"{}\"",
+            odt_twips_to_pt(i64::from(*right))
         ));
     }
     if let Some(first) = first_line_twips {

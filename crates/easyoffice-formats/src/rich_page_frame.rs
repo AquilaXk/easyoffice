@@ -184,6 +184,7 @@ pub(crate) fn split_horizontal_zones(
         if p.heading_level > 0
             || p.list.is_some()
             || p.left_indent_twips.is_some()
+            || p.right_indent_twips.is_some()
             || p.first_line_indent_twips.is_some()
             || p.line_spacing_percent.is_some()
             || p.toc.is_some()

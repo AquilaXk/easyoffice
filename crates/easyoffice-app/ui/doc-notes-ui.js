@@ -23,6 +23,7 @@
 
     const editor = () => document.getElementById("doc-editor");
     const isDocOnly = () => getActiveModule?.() === "DOC";
+    const isCommentDocSurface = () => isDocOnly() || (getActiveModule?.() === "HWP" && !deps.isHwpEmbedActive?.());
 
     function setSelectionPoint(node, offset, focusBody = false) {
       if (!node) return;
@@ -224,8 +225,8 @@
     }
 
     function openNewCommentDialog() {
-      if (!isDocOnly()) return false;
-      savedCommentRange = activeRange();
+      if (!isCommentDocSurface() && getActiveModule?.() !== "SLIDE") return false;
+      savedCommentRange = isCommentDocSurface() ? activeRange() : null;
       const dlg = document.getElementById("doc-comment-dialog");
       const input = document.getElementById("doc-comment-input");
       if (!dlg) return false;
@@ -373,6 +374,11 @@
       }
       if (typeof dlg?.close === "function") dlg.close();
       else if (dlg) dlg.open = false;
+      if (getActiveModule?.() === "SLIDE" && typeof deps.onSlideComment === "function") {
+        deps.onSlideComment(text);
+        savedCommentRange = null;
+        return;
+      }
       addComment(text, undefined, undefined, { range: savedCommentRange });
       savedCommentRange = null;
     }

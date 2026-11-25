@@ -59,6 +59,7 @@
     };
     const bound = new WeakSet();
     let delegatesBound = false;
+    let uiHoldBlur = false;
     const feedback = (text) => {
       const el = document.getElementById("status-command-feedback");
       if (el) el.textContent = text;
@@ -550,7 +551,7 @@
 
     function onFocus(td) {
       const existing = stateOf(td);
-      if (point.holdsBlur() && existing && isEditing(existing)) {
+      if ((point.holdsBlur() || uiHoldBlur) && existing && isEditing(existing)) {
         updateSelection(td.dataset.cell);
         return;
       }
@@ -869,9 +870,52 @@
       bound.add(td);
       td.addEventListener("focus", () => onFocus(td));
       td.addEventListener("blur", () => {
-        if (point.holdsBlur()) return;
+        if (point.holdsBlur() || uiHoldBlur) return;
         void api.commitSheetCellEdit(td, false).catch(() => {});
       });
+    }
+
+    function spliceTextAt(raw, start, end, ch) {
+      const s = String(raw || ""), a = Math.max(0, Math.min(start ?? s.length, s.length)), b = Math.max(a, Math.min(end ?? a, s.length));
+      return { text: s.slice(0, a) + ch + s.slice(b), caret: a + ch.length };
+    }
+    function captureSymbolTarget() {
+      const ae = document.activeElement, bar = document.getElementById("formula-input");
+      if (bar && ae === bar) return { kind: "formulaBar", start: bar.selectionStart ?? bar.value.length, end: bar.selectionEnd ?? bar.value.length };
+      const td = gridTdOf(ae) || tdAt(sel.ar, sel.ac), st = td ? stateOf(td) : null;
+      if (!td || !isEditing(st)) return { kind: "cell", ref: grid.refOf(sel.ar, sel.ac), row: sel.ar, col: sel.ac };
+      let startOffset = (td.textContent || "").length, endOffset = startOffset;
+      const selObj = host.getSelection?.(), r = selObj?.rangeCount > 0 ? selObj.getRangeAt(0) : null;
+      if (r && td.contains(r.startContainer) && td.contains(r.endContainer)) {
+        const s = textOffsetIn(td, r.startContainer, r.startOffset), e = textOffsetIn(td, r.endContainer, r.endOffset);
+        if (s !== null && e !== null) { startOffset = Math.min(s, e); endOffset = Math.max(s, e); }
+      }
+      return { kind: "editing", ref: td.dataset.cell, row: td._row, col: td._col, startOffset, endOffset };
+    }
+    function insertSymbolAtEditingTarget(ch, target) {
+      uiHoldBlur = false;
+      if (target?.kind === "formulaBar") {
+        const bar = document.getElementById("formula-input");
+        if (!bar) return { handled: false };
+        const next = spliceTextAt(bar.value, target.start, target.end, ch);
+        bar.value = next.text;
+        bar.focus?.();
+        bar.setSelectionRange?.(next.caret, next.caret);
+        bar.dispatchEvent?.(new (host.Event || Event)("input", { bubbles: true }));
+        return { handled: true, inserted: true };
+      }
+      const td = target?.kind === "editing" ? tdAt(target.row, target.col) : null;
+      if (!td || !isEditing(stateOf(td))) return { handled: false };
+      const next = spliceTextAt(td.textContent, target.startOffset, target.endOffset, ch);
+      td.textContent = next.text;
+      td.focus?.({ preventScroll: true });
+      setCaretAtOffset(td, next.caret);
+      onInput(td);
+      return { handled: true, inserted: true };
+    }
+    function restoreSymbolFocus(target) {
+      const td = target?.kind === "editing" ? tdAt(target.row, target.col) : null;
+      if (td && isEditing(stateOf(td))) { td.focus?.({ preventScroll: true }); setCaretRange(td, target.startOffset, target.endOffset); }
     }
 
     function bindSheetCellEvents(rootEl) {
@@ -941,6 +985,10 @@
       originSheet: point.originSheet,
       beginFormulaInsertHold: point.beginInsertHold,
       endFormulaInsertHold: point.endInsertHold,
+      setUiHold: (on) => { uiHoldBlur = Boolean(on); },
+      captureSymbolTarget,
+      insertSymbolAtEditingTarget,
+      restoreSymbolFocus,
     };
   }
 

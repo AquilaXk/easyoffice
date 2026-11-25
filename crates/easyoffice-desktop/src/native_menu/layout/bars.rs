@@ -422,7 +422,6 @@ const TABLE_HWP: MenuSpec = menu(
         "table:autosum",
         "table:fn-browser",
         "table:sort",
-        "table:validation",
     ],
 );
 const TABLE_DOC: MenuSpec = menu(
@@ -449,7 +448,6 @@ const TABLE_DOC: MenuSpec = menu(
         "table:autosum",
         "table:fn-browser",
         "table:sort",
-        "table:validation",
     ],
 );
 /// The spreadsheet's 수식 menu: defined names, calculation options, and manual/sheet recalculation.
@@ -534,7 +532,6 @@ const TOOL_OFFICE: MenuSpec = menu(
         "tool:doc-inspect",
         "tool:bench-run",
         S,
-        "tool:review-track",
         "tool:review-comment",
         "tool:review-verify",
         "tool:review-stats",

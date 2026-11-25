@@ -7,6 +7,7 @@
   // and autosave activity hook; the slide model itself stays in `slideDeckState` so save,
   // open and autosave keep reading one source of truth.
   const ASPECTS = new Set(["16:9", "4:3", "A4"]);
+  const ASPECT_CYCLE = ["16:9", "4:3", "A4"];
   const THUMB_REFRESH_MS = 150;
   const EMPTY_TITLE_LABEL = "(제목 없음)";
   const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", " ", "PageDown", "Enter", "n", "N"]);
@@ -108,6 +109,10 @@
       return ASPECTS.has(raw) ? raw : "16:9";
     }
 
+    function deckOrientation() {
+      return deck[0]?.orientation === "portrait" ? "portrait" : "landscape";
+    }
+
     // ---- deck operations -------------------------------------------------------------------
 
     function applyDeckChange(change) {
@@ -175,14 +180,67 @@
     const moveDown = (idx = getActiveSlideIndex()) => moveSlide(idx, idx + 1);
     const operations = { add: addSlide, duplicate: duplicateSlide, remove: removeSlide, moveUp, moveDown };
 
-    function setDeckAspect(value) {
+    function setDeckAspect(value, options = {}) {
       if (!ASPECTS.has(value) || value === deckAspect()) return;
-      pushUndoSnapshot(false);
+      if (options.recordUndo !== false) pushUndoSnapshot(false);
       deck.forEach((s) => {
         s.aspect = value;
       });
       getPanels().renderSlideDeck(getActiveSlideIndex());
       noteActivity();
+    }
+
+    function cycleDeckAspect(options = {}) {
+      const cur = deckAspect();
+      const idx = ASPECT_CYCLE.indexOf(cur);
+      const next = ASPECT_CYCLE[(idx + 1) % ASPECT_CYCLE.length];
+      setDeckAspect(next, options);
+      setFeedback("슬라이드 비율: " + next);
+      return next;
+    }
+
+    function toggleDeckOrientation(options = {}) {
+      const next = deckOrientation() === "portrait" ? "landscape" : "portrait";
+      if (options.recordUndo !== false) pushUndoSnapshot(false);
+      deck.forEach((s) => {
+        s.orientation = next;
+      });
+      getPanels().renderSlideDeck(getActiveSlideIndex());
+      noteActivity();
+      setFeedback("슬라이드 용지 방향: " + (next === "portrait" ? "세로" : "가로"));
+      return next;
+    }
+
+    function appendLink(url, label, elementId) {
+      const linkText = label ? label + " (" + url + ")" : url;
+      if (elementId && slideCanvas) {
+        const cur = slideCanvas.getElements().find((e) => e.id === elementId);
+        if (cur) {
+          const prev = String(cur.text || "").trim();
+          slideCanvas.updateElement(elementId, { text: prev ? prev + " " + linkText : linkText });
+          setFeedback("하이퍼링크 적용: " + url);
+          return;
+        }
+      }
+      const curSlide = deck[getActiveSlideIndex()];
+      if (!curSlide) return;
+      pushUndoSnapshot(false);
+      curSlide.lower = curSlide.lower ? curSlide.lower + "\n" + linkText : linkText;
+      getPanels().renderSlideDeck(getActiveSlideIndex());
+      noteActivity();
+      setFeedback("하이퍼링크 적용: " + url);
+    }
+
+    function appendNote(text) {
+      const clean = String(text || "").trim();
+      const curSlide = deck[getActiveSlideIndex()];
+      if (!clean || !curSlide) return;
+      pushUndoSnapshot(false);
+      curSlide.notes = curSlide.notes ? curSlide.notes + "\n" + clean : clean;
+      getPanels().renderSlideDeck(getActiveSlideIndex());
+      noteActivity();
+      byId("slide-presenter-notes")?.focus?.();
+      setFeedback("슬라이드 메모 추가 완료");
     }
 
     // ---- thumbnails ------------------------------------------------------------------------
@@ -244,10 +302,12 @@
       renderThumbs(activeIdx);
       updateToolbarState(activeIdx);
       const aspect = deckAspect();
+      const orientation = deckOrientation();
       const layout = deck[activeIdx]?.layout || "titleAndContent";
       const stage = byId("slide-stage-box");
       if (stage) {
         stage.dataset.aspect = aspect;
+        stage.dataset.orientation = orientation;
         stage.dataset.layout = layout;
       }
       const select = byId("slide-aspect-select");
@@ -422,6 +482,7 @@
       const viewport = byId("slide-show-viewport");
       if (!slide || !viewport) return;
       viewport.dataset.aspect = deckAspect();
+      viewport.dataset.orientation = deckOrientation();
       const frame = document.createElement("div");
       frame.id = "slide-show-frame";
       frame.className = "slide-show-frame";
@@ -622,6 +683,11 @@
       removeSlide,
       moveUp,
       moveDown,
+      setDeckAspect,
+      cycleDeckAspect,
+      toggleDeckOrientation,
+      appendLink,
+      appendNote,
       isShowing: () => showing,
     };
   }

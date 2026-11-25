@@ -64,10 +64,18 @@
     return Number.parseInt(blk.style[prop] || "0", 10) || 0;
   }
 
+  const TWIPS_DATA_KEYS = {
+    paddingLeft: "eoLeftTwips",
+    paddingRight: "eoRightTwips",
+    textIndent: "eoFirstLineTwips",
+  };
+
   function writePx(blk, prop, px) {
     const [lo, hi] = INDENT_LIMITS[prop];
     const next = Math.max(lo, Math.min(hi, Math.round(px)));
     blk.style[prop] = next ? next + "px" : "";
+    const key = TWIPS_DATA_KEYS[prop];
+    if (key && blk.dataset) delete blk.dataset[key];
     return next;
   }
 
@@ -369,7 +377,7 @@
     // Runs `exec(blocks, range)` on the paragraphs the selection touches as one undo step; `hint` is
     // shown when nothing is selected. `exec` returns false when it found nothing to change, which
     // leaves no undo step.
-    function runOnParagraphs(exec, hint, pick = paragraphTargets) {
+    function runOnParagraphs(exec, hint, pick = paragraphTargets, options = {}) {
       if (!isDocModule()) return { changed: false, blocks: 0 };
       const blocks = pick();
       if (blocks.length === 0) {
@@ -377,7 +385,8 @@
         return { changed: false, blocks: 0 };
       }
       const range = currentRange();
-      const res = withUndo(() => ({ changed: exec(blocks, range) !== false }));
+      const run = () => ({ changed: exec(blocks, range) !== false });
+      const res = options.undo === false ? run() : withUndo(run);
       refocusEditor(editor());
       syncToolbar();
       return { changed: res.changed, blocks: blocks.length };
@@ -574,7 +583,7 @@
     }
 
     // The style box: outline levels are headings, the plain styles are paragraphs.
-    function setStyle(name) {
+    function setStyle(name, options = {}) {
       const level = STYLE_HEADING_RE.exec(name)?.[1];
       if (!level && !PLAIN_STYLES.has(name)) return { changed: false, blocks: 0 };
       const tag = level ? "h" + level : "p";
@@ -589,7 +598,7 @@
         blocks.forEach((b) => { if (b.tagName.toLowerCase() !== tag) replaced.set(b, retag(b, tag)); });
         restoreSelection(range, replaced);
         return replaced.size > 0 || roleChanged;
-      }, "스타일을 적용할 문단을 먼저 선택하세요", pick);
+      }, "스타일을 적용할 문단을 먼저 선택하세요", pick, options);
       if (res.blocks === 0) {
         const select = byId("doc-style-select");
         if (select) select.value = styleNameOf(null);

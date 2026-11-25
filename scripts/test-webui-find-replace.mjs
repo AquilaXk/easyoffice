@@ -325,7 +325,7 @@ test("every tool dialog opens with the focus on its primary button or itself, ne
   }
 });
 
-test("a tool dialog takes Esc and Enter like the reference, keeps other keys inside, and only while it is open", async () => {
+test("a tool dialog takes Esc and Enter like the reference, lets child listeners handle keys, keeps keys from escaping, and only while open", async () => {
   const h = await createWorkspaceHarness();
   await flushAsyncTurns(10);
   const dialog = $(h.document, "pii-dialog");
@@ -333,29 +333,40 @@ test("a tool dialog takes Esc and Enter like the reference, keeps other keys ins
   let pressed = 0;
   primary.addEventListener("click", () => { pressed += 1; });
   dialog.showModal();
-  const enter = keyEvent(dialog.querySelector(".dialog-body"), "Enter");
-  h.document.dispatchEvent(enter);
+  const body = dialog.querySelector(".dialog-body");
+  let leakedToDoc = 0;
+  const onDocLeak = () => { leakedToDoc += 1; };
+  h.document.addEventListener("keydown", onDocLeak);
+
+  assert.equal(body.dispatchEvent({ type: "keydown", key: "Enter", target: body }), false, "Enter outside a text field prevents default");
   assert.equal(pressed, 1, "Enter outside a text field presses the primary button");
-  assert.deepEqual(enter.calls, ["stop", "prevent"]);
-  const undo = keyEvent(dialog.querySelector(".dialog-body"), "z", { ctrlKey: true });
-  h.document.dispatchEvent(undo);
-  assert.deepEqual(undo.calls, ["stop", "prevent"], "Ctrl+Z is stopped before the editor's shortcuts");
+  assert.equal(body.dispatchEvent({ type: "keydown", key: "z", ctrlKey: true, target: body }), false, "Ctrl+Z inside dialog body prevents default");
+
   const field = h.document.createElement("input");
-  dialog.querySelector(".dialog-body").appendChild(field);
-  const typing = keyEvent(field, "a");
-  h.document.dispatchEvent(typing);
-  assert.deepEqual(typing.calls, ["stop"], "typing in a field is not prevented");
-  const fieldEnter = keyEvent(field, "Enter");
-  h.document.dispatchEvent(fieldEnter);
+  let fieldKeySeen = "";
+  let fieldEnterSeen = 0;
+  field.addEventListener("keydown", (ev) => {
+    fieldKeySeen += ev.key;
+    if (ev.key === "Enter") fieldEnterSeen += 1;
+  });
+  body.appendChild(field);
+  assert.equal(field.dispatchEvent({ type: "keydown", key: "a", target: field }), true, "typing in a field is not prevented");
+  assert.equal(fieldKeySeen, "a", "child keydown listener receives key in dialog");
+  assert.equal(field.dispatchEvent({ type: "keydown", key: "Enter", target: field }), true, "Enter in a text field lets field handle it");
+  assert.equal(fieldEnterSeen, 1, "child input Enter listener receives Enter");
   assert.equal(pressed, 1, "Enter in a text field does not press the primary button");
-  const arrow = keyEvent(dialog.querySelector(".dialog-body"), "ArrowDown");
-  h.document.dispatchEvent(arrow);
-  assert.deepEqual(arrow.calls, ["stop", "prevent"], "dialog without a listbox keeps ArrowDown inside");
+
+  const arrow = keyEvent(body, "ArrowDown");
+  body.dispatchEvent(arrow);
+  assert.equal(leakedToDoc, 0, "dialog bubble stops keys before escaping to document");
+  h.document.removeEventListener("keydown", onDocLeak);
+
   dialog.dispatchEvent({ type: "click", target: dialog });
   assert.equal(dialog.open, true, "a click on the backdrop does not close it");
   const esc = keyEvent(dialog, "Escape");
   h.document.dispatchEvent(esc);
   assert.equal(dialog.open, false, "Esc closes");
+  assert.deepEqual(esc.calls, ["stop", "prevent"]);
   dialog.dispatchEvent({ type: "close", target: dialog });
   const after = keyEvent(h.document.body, "x");
   h.document.dispatchEvent(after);

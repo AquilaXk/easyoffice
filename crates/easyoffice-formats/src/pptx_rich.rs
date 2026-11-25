@@ -151,6 +151,8 @@ fn push_element(
             color,
             font_size_pt,
             bold,
+            italic,
+            underline,
             align,
         } => {
             push_sp_open(out, sid, id, "", "", *rect);
@@ -167,7 +169,7 @@ fn push_element(
                 out,
                 text,
                 *font_size_pt,
-                (*bold, false, false),
+                (*bold, *italic, *underline),
                 *align,
                 color.as_deref(),
             );

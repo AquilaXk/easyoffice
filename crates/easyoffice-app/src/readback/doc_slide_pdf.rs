@@ -710,3 +710,21 @@ pub(super) fn write_pdf_readback(out: &mut String, report: &PdfReadbackReport, m
         report.has_acro_form, report.has_outlines
     );
 }
+
+pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
+    if !out.ends_with('}') {
+        return;
+    }
+    let nodes = easyoffice_formats::PdfSerializer::parse_outline_nodes(bytes).unwrap_or_default();
+    out.pop();
+    out.push_str(",\"pdfOutlines\":[");
+    for (idx, node) in nodes.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"title\":");
+        push_json_str(out, &node.title);
+        let _ = write!(out, ",\"level\":{}}}", node.level);
+    }
+    out.push_str("]}");
+}

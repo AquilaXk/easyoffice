@@ -48,6 +48,7 @@ struct StyleProps {
     list_margin: bool,
     list_kind: Option<RichListKind>,
     left_twips: Option<u32>,
+    right_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
     page_break_before: bool,
@@ -165,6 +166,11 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
             .and_then(|t| u32::try_from(t).ok())
             .filter(|t| *t > 0);
     }
+    p.right_twips = attr(attrs, "fo:margin-right")
+        .as_deref()
+        .and_then(length_twips)
+        .and_then(|t| u32::try_from(t).ok())
+        .filter(|t| *t > 0);
     p.first_line_twips = attr(attrs, "fo:text-indent")
         .as_deref()
         .and_then(length_twips)
@@ -300,6 +306,9 @@ fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
             }
             if props.left_twips.is_none() {
                 props.left_twips = p.left_twips;
+            }
+            if props.right_twips.is_none() {
+                props.right_twips = p.right_twips;
             }
             if props.first_line_twips.is_none() {
                 props.first_line_twips = p.first_line_twips;
@@ -810,6 +819,7 @@ impl<'a> OdtWalker<'a> {
                 heading_level: p.outline,
                 list,
                 left_indent_twips: p.style.left_twips,
+                right_indent_twips: p.style.right_twips,
                 first_line_indent_twips: p.style.first_line_twips,
                 line_spacing_percent: p.style.line_percent,
                 toc: p.toc,

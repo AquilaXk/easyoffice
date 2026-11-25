@@ -63,10 +63,10 @@ const enabledMenuItems = (document) =>
 
 // The ribbon commands (suffix after the module prefix) a window kind has no menu item for.
 const PALETTE_ONLY = {
-  DOC: [],
-  HWP: ["layout-orientation", "layout-margins"],
+  DOC: ["data-validation"],
+  HWP: ["layout-orientation", "layout-margins", "data-validation"],
   SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins"],
-  SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation"],
+  SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
   PDF: [
     "home-bold", "home-italic", "home-underline", "home-style",
     "insert-table", "insert-chart", "insert-shape", "insert-link",
@@ -74,6 +74,23 @@ const PALETTE_ONLY = {
     "data-autosum", "data-fn-browser", "data-sort", "data-validation",
     "review-track",
   ],
+};
+const CLIENT_DIALOG_BY_COMMAND = {
+  "document-insert-chart": "doc-chart-dialog",
+  "document-insert-shape": "doc-shape-dialog",
+  "document-insert-link": "doc-link-dialog",
+  "document-data-fn-browser": "doc-fn-dialog",
+  "document-review-comment": "doc-comment-dialog",
+  "hwp-insert-chart": "doc-chart-dialog",
+  "hwp-insert-shape": "doc-shape-dialog",
+  "hwp-insert-link": "doc-link-dialog",
+  "hwp-data-fn-browser": "doc-fn-dialog",
+  "hwp-review-comment": "doc-comment-dialog",
+  "slide-insert-table": "slide-table-dialog",
+  "slide-insert-chart": "slide-chart-dialog",
+  "slide-insert-shape": "slide-shape-dialog",
+  "slide-insert-link": "doc-link-dialog",
+  "slide-review-comment": "doc-comment-dialog",
 };
 const suffixOf = (id) => id.replace(/^[a-z]+-/, "");
 const menuIdsOf = (catalog, mod) => idsOf(catalog, mod).filter((id) => !PALETTE_ONLY[mod].includes(suffixOf(id)));
@@ -104,7 +121,22 @@ for (const mod of MODULES) {
       const id = catalog.resolveMenuCommand(item.dataset.studioMenuCmd, mod);
       if (id && !clicked.has(id)) clicked.set(id, item);
     }
-    for (const item of clicked.values()) item.click();
+    const openedDialogs = new Map();
+    for (const [id, item] of clicked.entries()) {
+      item.click();
+      if (id === "doc-mod-mailmerge") {
+        const firstVal = document.querySelector("#doc-mailmerge-rows .doc-mm-val");
+        if (firstVal) firstVal.value = "확인";
+        document.getElementById("btn-doc-mailmerge-apply").click();
+        continue;
+      }
+      const expectedDlgId = CLIENT_DIALOG_BY_COMMAND[id];
+      if (expectedDlgId) {
+        const dlg = document.getElementById(expectedDlgId);
+        openedDialogs.set(id, Boolean(dlg?.open));
+        dlg?.close?.();
+      }
+    }
     // The highlight command asks for its phrase first; the dialog's 확인 runs it.
     if (mod === "PDF") {
       document.getElementById("pdf-highlight-text").value = "문구";
@@ -117,8 +149,11 @@ for (const mod of MODULES) {
       document.getElementById("btn-doc-toc-apply").click();
     }
     await flushAsyncTurns(4 * clicked.size);
-    // `view-theme` runs the theme toggle itself (the menu item behaves like the ribbon button).
-    const expected = menuIdsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));
+    for (const [id, isOpen] of openedDialogs.entries()) {
+      assert.equal(isOpen, true, `${id} opens its real modal dialog`);
+    }
+    // `view-theme` runs the theme toggle itself; interactive dialog commands apply via user confirmation.
+    const expected = menuIdsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme") && !Object.hasOwn(CLIENT_DIALOG_BY_COMMAND, id));
     const missing = expected.filter((id) => !executed.includes(id));
     assert.deepEqual(missing, [], `${mod}: menu items that did not run their ribbon command`);
   });

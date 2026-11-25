@@ -472,6 +472,8 @@ fn parse_paragraph(
         list,
         left_indent_twips: opt_bounded(obj, "leftIndentTwips", 0, MAX_INDENT_TWIPS)?
             .map(|v| v as u32),
+        right_indent_twips: opt_bounded(obj, "rightIndentTwips", 0, MAX_INDENT_TWIPS)?
+            .map(|v| v as u32),
         first_line_indent_twips: opt_bounded(
             obj,
             "firstLineIndentTwips",

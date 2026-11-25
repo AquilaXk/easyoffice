@@ -380,6 +380,7 @@ pub fn frame_paragraph(p: &RichParagraph) -> RichParagraph {
             .collect(),
         alignment: p.alignment,
         left_indent_twips: p.left_indent_twips,
+        right_indent_twips: p.right_indent_twips,
         first_line_indent_twips: p.first_line_indent_twips,
         line_spacing_percent: p.line_spacing_percent,
         ..RichParagraph::default()
@@ -515,6 +516,8 @@ pub struct RichParagraph {
     pub list_number: Option<RichListNumber>,
     /// Left indent in twips (1/20 point); `None` inherits.
     pub left_indent_twips: Option<u32>,
+    /// Right indent in twips (1/20 point); `None` inherits.
+    pub right_indent_twips: Option<u32>,
     /// First-line indent in twips; `None` inherits.
     pub first_line_indent_twips: Option<i32>,
     /// Line height as a percentage of single spacing (200 = double); `None` inherits.

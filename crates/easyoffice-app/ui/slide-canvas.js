@@ -46,7 +46,10 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const round2 = (v) => Math.round(v * 100) / 100;
   const readU32BE = (u8, at) => (((u8[at] << 24) >>> 0) + (u8[at + 1] << 16) + (u8[at + 2] << 8) + u8[at + 3]) >>> 0;
-  const stageSizeOf = (aspect) => STAGE_SIZES[aspect] || STAGE_SIZES["16:9"];
+  const stageSizeOf = (aspect, orientation = "landscape") => {
+    const base = STAGE_SIZES[aspect] || STAGE_SIZES["16:9"];
+    return orientation === "portrait" ? { w: base.h, h: base.w } : base;
+  };
   const normalizeLayout = (raw) => (Object.hasOwn(LAYOUT_LABELS, raw) ? raw : "titleAndContent");
   const normalizeTransition = (raw) => (TRANSITIONS.has(raw) ? raw : "none");
 
@@ -132,12 +135,12 @@
     return { categories, series };
   }
 
-  function normalizeSlideElement(raw, aspect = "16:9", fallbackId = "el-1") {
+  function normalizeSlideElement(raw, aspect = "16:9", fallbackId = "el-1", orientation = "landscape") {
     if (!raw || typeof raw !== "object") return null;
     const rawKind = String(raw.kind || "").trim();
     const kind = rawKind === "textBox" ? "textbox" : rawKind;
     if (!ELEMENT_KINDS.has(kind)) return null;
-    const stage = stageSizeOf(aspect);
+    const stage = stageSizeOf(aspect, orientation);
     const id = String(raw.id || fallbackId).trim().slice(0, 64) || fallbackId;
     const defW = kind === "chart" ? 380 : kind === "table" ? 360 : kind === "image" ? 240 : kind === "shape" ? 200 : 320;
     const defH = kind === "chart" ? 200 : kind === "table" ? 150 : kind === "image" ? 160 : kind === "shape" ? 100 : 80;
@@ -231,7 +234,7 @@
         text: String(el.text ?? ""), fill: normalizeHex6(el.fill, "2563EB"),
         stroke: normalizeHex6(el.stroke, "1D4ED8"), strokeWidthPt: Number(el.strokeWidthPt ?? 2),
         color: normalizeHex6(el.color, "FFFFFF"), fontSizePt: el.fontSizePt || 16,
-        bold: Boolean(el.bold), align: el.align || "center",
+        bold: Boolean(el.bold), italic: Boolean(el.italic), underline: Boolean(el.underline), align: el.align || "center",
       };
     }
     if (el.kind === "image") {
@@ -279,16 +282,17 @@
       ? res.slides.slice(0, MAX_SLIDES)
       : [{ title: "", bullets: [], notes: "" }];
     return srcSlides.map((s) => {
+      const orientation = s?.orientation === "portrait" ? "portrait" : "landscape";
       const rawEls = Array.isArray(s?.elements) ? s.elements.slice(0, MAX_ELEMENTS_PER_SLIDE) : [];
       const elements = [];
       for (let i = 0; i < rawEls.length; i += 1) {
-        const norm = normalizeSlideElement(rawEls[i], aspect, "el-" + (i + 1));
+        const norm = normalizeSlideElement(rawEls[i], aspect, "el-" + (i + 1), orientation);
         if (norm) elements.push(norm);
       }
       return {
         title: String(s?.title || ""), lower: Array.isArray(s?.bullets) ? s.bullets.join("\n") : String(s?.lower || ""),
         notes: String(s?.notes || ""), transition: normalizeTransition(s?.transition),
-        ...createEmptySlideStyleFields(), aspect, layout: normalizeLayout(s?.layout), elements,
+        ...createEmptySlideStyleFields(), aspect, orientation, layout: normalizeLayout(s?.layout), elements,
       };
     });
   }
@@ -481,9 +485,10 @@
     const els = Array.isArray(slide?.elements) ? slide.elements : [];
     const layer = document.createElement("div");
     layer.className = "slide-canvas-layer slide-canvas-layer--static";
-    const stage = stageSizeOf(aspect);
+    const orientation = slide?.orientation === "portrait" ? "portrait" : (options.orientation || "landscape");
+    const stage = stageSizeOf(aspect, orientation);
     for (let i = 0; i < els.length; i += 1) {
-      const norm = normalizeSlideElement(els[i], aspect, "el-" + (i + 1));
+      const norm = normalizeSlideElement(els[i], aspect, "el-" + (i + 1), orientation);
       if (norm) layer.appendChild(buildElementDom(document, norm, stage, { interactive: false, forPrint: Boolean(options.forPrint) }));
     }
     return layer;
@@ -559,6 +564,7 @@
 
     const say = (msg) => { const fb = $("status-command-feedback"); if (fb) fb.textContent = msg; };
     const currentAspect = () => (Object.hasOwn(STAGE_SIZES, deck[0]?.aspect) ? deck[0].aspect : "16:9");
+    const currentOrientation = () => (deck[0]?.orientation === "portrait" ? "portrait" : "landscape");
     const currentSlide = () => deck[getActiveSlideIndex()] || deck[0] || null;
     function ensureElements(slide = currentSlide()) {
       if (!slide) return [];
@@ -665,7 +671,7 @@
       if (!layer) return;
       const els = ensureElements(currentSlide());
       if (selectedId && !els.some((e) => e.id === selectedId)) selectedId = null;
-      const stage = stageSizeOf(currentAspect());
+      const stage = stageSizeOf(currentAspect(), currentOrientation());
       layer.replaceChildren(...els.map((el) => {
         const card = buildElementDom(document, el, stage, { interactive: true, selected: el.id === selectedId });
         attachInteractiveHandlers(card, el);
@@ -688,7 +694,7 @@
     function startPointerDrag(mode, dir, ev, el, card) {
       const stageBox = $("slide-stage-box");
       if (!stageBox) return;
-      const rect = stageBox.getBoundingClientRect(), stage = stageSizeOf(currentAspect());
+      const rect = stageBox.getBoundingClientRect(), stage = stageSizeOf(currentAspect(), currentOrientation());
       const preSnap = captureWorkspaceSnapshot(false);
       preSnap.slides = structuredClone(deck);
       activeDrag = {
@@ -741,7 +747,7 @@
       if (!slide) return null;
       const els = ensureElements(slide);
       if (els.length >= MAX_ELEMENTS_PER_SLIDE) { say("슬라이드당 개체 수 한도(256개)를 초과했습니다."); return null; }
-      const norm = normalizeSlideElement(spec, currentAspect(), nextElementId(els));
+      const norm = normalizeSlideElement(spec, currentAspect(), nextElementId(els), currentOrientation());
       if (!norm) return null;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
       if (options.clearStubKind) {
@@ -759,7 +765,7 @@
       const els = ensureElements();
       const idx = els.findIndex((e) => e.id === id);
       if (idx < 0) return null;
-      const merged = normalizeSlideElement({ ...els[idx], ...patch, id: els[idx].id, kind: els[idx].kind }, currentAspect(), els[idx].id);
+      const merged = normalizeSlideElement({ ...els[idx], ...patch, id: els[idx].id, kind: els[idx].kind }, currentAspect(), els[idx].id, currentOrientation());
       if (!merged) return null;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
       Object.assign(els[idx], merged);
@@ -816,7 +822,7 @@
       if (totalDeckImageBytes() + u8.length > MAX_TOTAL_IMAGE_BYTES) return fail("전체 그림 용량 한도(128 MiB)를 초과했습니다.");
       if (ensureElements().length >= MAX_ELEMENTS_PER_SLIDE) return fail("슬라이드당 개체 수 한도(256개)를 초과했습니다.");
 
-      const stage = stageSizeOf(currentAspect());
+      const stage = stageSizeOf(currentAspect(), currentOrientation());
       let w = Math.max(MIN_EL_W, header.widthPx), h = Math.max(MIN_EL_H, header.heightPx);
       if (header.widthPx < MIN_EL_W || header.heightPx < MIN_EL_H) {
         const up = Math.max(120 / header.widthPx, 90 / header.heightPx);
@@ -898,7 +904,7 @@
       const el = getSelectedElement();
       if (!el) return false;
       e.preventDefault();
-      const stage = stageSizeOf(currentAspect());
+      const stage = stageSizeOf(currentAspect(), currentOrientation());
       updateElement(el.id, { x: clamp(el.x + dx, 0, Math.max(0, stage.w - el.w)), y: clamp(el.y + dy, 0, Math.max(0, stage.h - el.h)) });
       $("slide-canvas-layer")?.querySelector?.(`.slide-el[data-element-id="${el.id}"]`)?.focus?.();
       return true;
@@ -927,7 +933,7 @@
       bringToFront: (id = selectedId) => reorderElement(id, true),
       sendToBack: (id = selectedId) => reorderElement(id, false),
       insertPictureFromBytes, applyFormatting, toggleSnap, isSnapEnabled: () => snapEnabled,
-      setSlideLayout, currentAspect, stageSize: () => stageSizeOf(currentAspect()), handleKeydown,
+      setSlideLayout, currentAspect, currentOrientation, stageSize: () => stageSizeOf(currentAspect(), currentOrientation()), handleKeydown,
       setDoubleClickHandler: (fn) => { onElementDblClick = fn; },
       startPresenterShow: () => hooks.startShow?.(true, { presenter: true }),
       onLeaveModule: () => { activeDrag = null; hideSnapGuides(); clearSelection(); hooks.onLeave?.(); },

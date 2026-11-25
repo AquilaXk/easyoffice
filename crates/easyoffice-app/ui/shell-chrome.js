@@ -625,51 +625,182 @@
     // Ctrl+Z never reach the document behind it. The focus starts on the primary button, so the
     // browser does not put it on the title bar's close button and draw a focus ring there. The find
     // dialog is the reference's own non-modal dialog and keeps its own keys and focus (`find-dialog.ts`).
+    const NON_TEXT_INPUT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "color", "range", "file", "image"]);
+    const BUTTON_INPUT_TYPES = new Set(["button", "submit", "reset"]);
+    const KEY_BOUND_DIALOGS = new WeakSet();
+    const openDialogStack = [];
+    const FOCUSABLE_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]';
+
+    function pruneOpenDialogStack() {
+      for (let i = openDialogStack.length - 1; i >= 0; i -= 1) {
+        const dlg = openDialogStack[i];
+        if (!dlg || !dlg.open || dlg.isConnected === false) openDialogStack.splice(i, 1);
+      }
+    }
+
+    function pushOpenDialogStack(dialog) {
+      const idx = openDialogStack.indexOf(dialog);
+      if (idx >= 0) openDialogStack.splice(idx, 1);
+      pruneOpenDialogStack();
+      openDialogStack.push(dialog);
+    }
+
+    function removeOpenDialogStack(dialog) {
+      const idx = openDialogStack.indexOf(dialog);
+      if (idx >= 0) openDialogStack.splice(idx, 1);
+      pruneOpenDialogStack();
+    }
+
+    function topOpenDialog() {
+      pruneOpenDialogStack();
+      return openDialogStack.length > 0 ? openDialogStack[openDialogStack.length - 1] : null;
+    }
+
+    function inputTypeOf(el) {
+      return String(el.type || el.getAttribute?.("type") || "text").toLowerCase();
+    }
+
+    function isTextInputTarget(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.isContentEditable === true || el.getAttribute?.("contenteditable") === "plaintext-only") return true;
+      const tag = String(el.tagName || "").toUpperCase();
+      if (tag === "TEXTAREA") return true;
+      if (tag === "INPUT") return !NON_TEXT_INPUT_TYPES.has(inputTypeOf(el));
+      return false;
+    }
+
+    function isButtonLikeTarget(el) {
+      if (!el || el.nodeType !== 1) return false;
+      const tag = String(el.tagName || "").toUpperCase();
+      if (tag === "BUTTON" || tag === "SUMMARY") return true;
+      if (tag === "A" && el.hasAttribute?.("href")) return true;
+      if (tag === "INPUT") return BUTTON_INPUT_TYPES.has(inputTypeOf(el));
+      const role = el.getAttribute?.("role");
+      return role === "button" || role === "menuitem" || role === "option" || role === "tab";
+    }
+
+    function dialogFocusables(dialog) {
+      return Array.from(dialog.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => {
+        if (!el || el.disabled || el.hidden) return false;
+        if (el.getAttribute?.("aria-disabled") === "true" || el.getAttribute?.("aria-hidden") === "true") return false;
+        if (String(el.tagName || "").toUpperCase() === "INPUT" && inputTypeOf(el) === "hidden") return false;
+        if (el.classList?.contains?.("native-select-hidden")) return false;
+        const hiddenAncestor = el.closest?.("[hidden]");
+        if (hiddenAncestor && hiddenAncestor !== dialog && dialog.contains(hiddenAncestor)) return false;
+        const tabAttr = el.getAttribute?.("tabindex");
+        if (tabAttr !== null && tabAttr !== undefined && Number(tabAttr) < 0) return false;
+        return typeof el.focus === "function";
+      });
+    }
+
     function enableDialogKeys(dialog) {
-      if (dialog.classList.contains("find-dialog")) return;
-      const listboxArrows = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+      if (!dialog || dialog.classList.contains("find-dialog") || KEY_BOUND_DIALOGS.has(dialog)) return;
+      KEY_BOUND_DIALOGS.add(dialog);
       const insideDialog = (target) => (
         target === dialog
         || (typeof dialog.contains === "function" ? dialog.contains(target) : target?.closest?.("dialog") === dialog)
       );
-      const allowsListboxArrow = (ev, editable) => (
-        !editable
-        && listboxArrows.has(ev.key)
-        && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey
-        && insideDialog(ev.target)
-        && Boolean(dialog.querySelector?.('[role="listbox"]'))
+      const hasOpenNestedPopup = () => Boolean(
+        dialog.querySelector?.(".custom-select.open") || document.querySelector?.(".sb-hl-palette:not([hidden])")
       );
+      const isTopActive = () => {
+        if (!dialog.open) return false;
+        const top = topOpenDialog();
+        return !top || top === dialog;
+      };
+      const cycleTabFocus = (ev) => {
+        const list = dialogFocusables(dialog);
+        if (list.length === 0) {
+          ev.preventDefault();
+          dialog.tabIndex = -1;
+          dialog.focus();
+          return;
+        }
+        const active = document.activeElement;
+        if (!insideDialog(active) || !list.includes(active)) {
+          ev.preventDefault();
+          (ev.shiftKey ? list[list.length - 1] : list[0]).focus();
+          return;
+        }
+        if (ev.shiftKey && active === list[0]) {
+          ev.preventDefault();
+          list[list.length - 1].focus();
+        } else if (!ev.shiftKey && active === list[list.length - 1]) {
+          ev.preventDefault();
+          list[0].focus();
+        }
+      };
       const capture = (ev) => {
-        // The app's combo boxes (custom-select.js) work by keyboard on their own keydown handlers.
-        if (ev.target?.closest?.(".custom-select") && ev.key !== "Escape" && !ev.ctrlKey && !ev.metaKey) return;
-        const tag = String(ev.target?.tagName || "").toUpperCase();
-        const editable = tag === "INPUT" || tag === "TEXTAREA";
+        if (!isTopActive() || ev.isComposing) return;
         if (ev.key === "Escape") {
+          if (hasOpenNestedPopup()) return;
           ev.stopPropagation();
           ev.preventDefault();
           dialog.close();
-        } else if (ev.key === "Enter" && !editable) {
+          return;
+        }
+        if (ev.key === "Tab" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          cycleTabFocus(ev);
+          return;
+        }
+        if (insideDialog(ev.target)) return;
+        if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !hasOpenNestedPopup()) {
           ev.stopPropagation();
           ev.preventDefault();
           dialog.querySelector(".dialog-btn-primary")?.click();
-        } else if (allowsListboxArrow(ev, editable)) {
           return;
-        } else {
-          ev.stopPropagation();
-          if (!editable) ev.preventDefault();
+        }
+        ev.stopPropagation();
+        if (!isTextInputTarget(ev.target)) ev.preventDefault();
+      };
+      const onDialogBubble = (ev) => {
+        if (!isTopActive() || ev.isComposing) return;
+        ev.stopPropagation();
+        if (ev.defaultPrevented) return;
+        if (ev.key === "Escape") {
+          if (hasOpenNestedPopup()) return;
+          ev.preventDefault();
+          dialog.close();
+          return;
+        }
+        if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !hasOpenNestedPopup()) {
+          if (
+            isTextInputTarget(ev.target)
+            || isButtonLikeTarget(ev.target)
+            || ev.target?.closest?.(".custom-select, select, [role='listbox'], [role='option'], [role='button'], button, a[href]")
+          ) {
+            return;
+          }
+          ev.preventDefault();
+          dialog.querySelector(".dialog-btn-primary")?.click();
+          return;
+        }
+        if ((ev.ctrlKey || ev.metaKey || ev.altKey) && !isTextInputTarget(ev.target) && !ev.target?.closest?.("input, textarea")) {
+          const lower = String(ev.key || "").toLowerCase();
+          if (lower !== "c" && lower !== "a") ev.preventDefault();
         }
       };
-      const keepArrowInside = (ev) => {
-        if (allowsListboxArrow(ev, false)) ev.stopPropagation();
+      const release = () => {
+        removeOpenDialogStack(dialog);
+        document.removeEventListener("keydown", capture, true);
       };
-      const release = () => document.removeEventListener("keydown", capture, true);
       dialog.addEventListener("close", release);
-      dialog.addEventListener("keydown", keepArrowInside);
+      dialog.addEventListener("keydown", onDialogBubble);
+      const origClose = typeof dialog.close === "function" ? dialog.close : null;
+      if (origClose) {
+        dialog.close = function (...args) {
+          removeOpenDialogStack(this);
+          document.removeEventListener("keydown", capture, true);
+          return origClose.apply(this, args);
+        };
+      }
       for (const method of ["showModal", "show"]) {
         const open = dialog[method];
         if (typeof open !== "function") continue;
         dialog[method] = function (...args) {
           const out = open.apply(this, args);
+          pushOpenDialogStack(this);
+          document.removeEventListener("keydown", capture, true);
           document.addEventListener("keydown", capture, true);
           const primary = this.querySelector(".dialog-btn-primary");
           if (primary && !primary.disabled) primary.focus();

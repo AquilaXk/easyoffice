@@ -25,6 +25,7 @@ pub(super) struct ParaShape {
     pub(super) heading_level: u8,
     pub(super) checked: bool,
     pub(super) left: u32,
+    pub(super) right: u32,
     /// First-line indent (`hc:intent`), HWPUNIT.
     pub(super) intent: i32,
     /// `hh:lineSpacing` mapped to percentage of single spacing.
@@ -226,6 +227,16 @@ impl HeaderBuilder {
                     if !*seen {
                         *seen = true;
                         p.left = attr(attrs, "value")
+                            .as_deref()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+                    }
+                }
+            }
+            "hc:right" => {
+                if let Some(p) = self.para_mut() {
+                    if p.right == 0 {
+                        p.right = attr(attrs, "value")
                             .as_deref()
                             .and_then(|v| v.parse().ok())
                             .unwrap_or(0);

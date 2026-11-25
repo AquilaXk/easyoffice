@@ -41,6 +41,7 @@ struct TextRun {
     rgb: u32,
     align: SlideTextAlign,
     bold: bool,
+    italic: bool,
     underline: bool,
 }
 
@@ -51,6 +52,7 @@ impl TextRun {
             rgb,
             align: SlideTextAlign::Left,
             bold,
+            italic: false,
             underline: false,
         }
     }
@@ -60,6 +62,7 @@ impl TextRun {
             rgb,
             align,
             bold,
+            italic: false,
             underline: false,
         }
     }
@@ -130,7 +133,14 @@ impl PdfCanvas {
         if text.is_empty() {
             return;
         }
-        let t = text_ops(x, base_y, st.pt, text);
+        let t = if st.italic {
+            format!(
+                "1 0 0 1 {x:.2} {base_y:.2} cm 1 0 0.21 1 0 0 cm {}",
+                text_ops(0.0, 0.0, st.pt, text)
+            )
+        } else {
+            text_ops(x, base_y, st.pt, text)
+        };
         if st.bold {
             let sw = (st.pt * 0.025).clamp(0.2, 0.8);
             self.ops.push(format!(
@@ -755,6 +765,7 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
             text,
             font_size_pt,
             bold,
+            italic,
             underline,
             align,
             color,
@@ -777,6 +788,7 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
                     rgb: fg,
                     align: *align,
                     bold: *bold,
+                    italic: *italic,
                     underline: *underline,
                 },
                 4.0,
@@ -793,6 +805,8 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
             color,
             font_size_pt,
             bold,
+            italic,
+            underline,
             align,
             ..
         } => {
@@ -812,7 +826,14 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
                 cv.draw_text_box(
                     *rect,
                     text,
-                    TextRun::aligned(*font_size_pt, fg, *align, *bold),
+                    TextRun {
+                        pt: *font_size_pt,
+                        rgb: fg,
+                        align: *align,
+                        bold: *bold,
+                        italic: *italic,
+                        underline: *underline,
+                    },
                     6.0,
                     true,
                 );

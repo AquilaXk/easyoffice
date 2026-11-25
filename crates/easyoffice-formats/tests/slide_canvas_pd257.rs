@@ -113,6 +113,8 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                         color: Some("0F172A".into()),
                         font_size_pt: 15.0,
                         bold: true,
+                        italic: true,
+                        underline: true,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Image {
@@ -238,6 +240,8 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                         color: Some("FFFFFF".into()),
                         font_size_pt: 14.0,
                         bold: false,
+                        italic: false,
+                        underline: false,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Shape {
@@ -256,6 +260,8 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                         color: None,
                         font_size_pt: 13.0,
                         bold: true,
+                        italic: false,
+                        underline: false,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Shape {
@@ -274,6 +280,8 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                         color: Some("FFFFFF".into()),
                         font_size_pt: 14.0,
                         bold: true,
+                        italic: false,
+                        underline: false,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Shape {
@@ -292,6 +300,8 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                         color: Some("FFFFFF".into()),
                         font_size_pt: 14.0,
                         bold: false,
+                        italic: false,
+                        underline: false,
                         align: SlideTextAlign::Center,
                     },
                     SlideElement::Chart {
@@ -419,6 +429,8 @@ fn assert_deck_close(orig: &RichSlideDeck, got: &RichSlideDeck, label: &str) {
                         stroke_width_pt: sw1,
                         color: c1,
                         bold: b1,
+                        italic: i1,
+                        underline: u1,
                         align: al1,
                         ..
                     },
@@ -430,13 +442,15 @@ fn assert_deck_close(orig: &RichSlideDeck, got: &RichSlideDeck, label: &str) {
                         stroke_width_pt: sw2,
                         color: c2,
                         bold: b2,
+                        italic: i2,
+                        underline: u2,
                         align: al2,
                         ..
                     },
                 ) => {
                     assert_eq!(
-                        (*st2, t2, f2, s2, c2, *b2, *al2),
-                        (*st1, t1, f1, s1, c1, *b1, *al1),
+                        (*st2, t2, f2, s2, c2, *b2, *i2, *u2, *al2),
+                        (*st1, t1, f1, s1, c1, *b1, *i1, *u1, *al1),
                         "{label} s{si} e{ei}"
                     );
                     assert!((sw1 - sw2).abs() < 0.05);
@@ -630,6 +644,14 @@ fn multipage_vector_pdf_export_has_per_page_mediabox_korean_text_and_vector_grap
             "Bezier curves for Ellipse/RoundRect/Pie missing"
         );
         assert!(
+            raw.contains("1 0 0.21 1 0 0 cm"),
+            "italic oblique shear transform missing in vector PDF"
+        );
+        assert!(
+            raw.contains(" l S Q"),
+            "underline stroke missing in vector PDF"
+        );
+        assert!(
             !raw.contains("[이미지:"),
             "valid PNG/JPEG should render as XObject, not placeholder"
         );
@@ -681,6 +703,8 @@ fn hostile_slide_inputs_fail_closed() {
             color: None,
             font_size_pt: 12.0,
             bold: false,
+            italic: false,
+            underline: false,
             align: SlideTextAlign::Center,
         })
         .collect();
@@ -762,6 +786,8 @@ fn bench_pd257_slide_deck_roundtrip() {
                     color: Some("FFFFFF".into()),
                     font_size_pt: 14.0,
                     bold: true,
+                    italic: false,
+                    underline: false,
                     align: SlideTextAlign::Center,
                 },
                 SlideElement::Image {

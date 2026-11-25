@@ -48,7 +48,7 @@ fn rich_slides_json(target: &str) -> String {
                     "transition": "fade",
                     "elements": [
                         {{"kind":"textBox","id":"tb1","x":40,"y":90,"w":260,"h":48,"text":"자유 상자","fontSizePt":18,"bold":true,"italic":false,"underline":true,"align":"center","color":"1E3A8A","fill":"EFF6FF","role":"subtitle"}},
-                        {{"kind":"shape","id":"sh1","x":320,"y":90,"w":180,"h":60,"shapeType":"roundRect","text":"도형 알림","fill":"DBEAFE","stroke":"2563EB","strokeWidthPt":1.5,"color":"0F172A","fontSizePt":14,"bold":true,"align":"center"}},
+                        {{"kind":"shape","id":"sh1","x":320,"y":90,"w":180,"h":60,"shapeType":"roundRect","text":"도형 알림","fill":"DBEAFE","stroke":"2563EB","strokeWidthPt":1.5,"color":"0F172A","fontSizePt":14,"bold":true,"italic":true,"underline":true,"align":"center"}},
                         {{"kind":"image","id":"im1","x":40,"y":170,"w":120,"h":80,"dataBase64":"{img}","alt":"브랜드 마크"}},
                         {{"kind":"table","id":"tbl1","x":180,"y":170,"w":240,"h":100,"headerRow":true,"fill":"1E40AF","rows":[["부서","매출"],["개발","500"]]}},
                         {{"kind":"chart","id":"ch1","x":440,"y":170,"w":240,"h":160,"chartType":"column","title":"성장 그래프","categories":["Q1","Q2"],"series":[{{"name":"실적","values":[80,115]}}],"legend":"bottom"}}
@@ -100,6 +100,10 @@ fn ipc_structured_slides_save_and_decode_roundtrip_pptx_ppsx_odp() {
             ["textBox", "shape", "image", "table", "chart"],
             "{ext}"
         );
+        let sh = els[1].as_object().unwrap();
+        assert_eq!(field(sh, "bold").as_bool(), Some(true), "{ext}");
+        assert_eq!(field(sh, "italic").as_bool(), Some(true), "{ext}");
+        assert_eq!(field(sh, "underline").as_bool(), Some(true), "{ext}");
 
         let s1 = slides[1].as_object().unwrap();
         assert_eq!(field(s1, "layout").as_str(), Some("twoColumn"), "{ext}");

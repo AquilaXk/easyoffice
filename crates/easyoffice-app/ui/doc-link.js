@@ -163,9 +163,9 @@
   // ---- dialog ---------------------------------------------------------------------------------
 
   function createDocLink(deps) {
-    const { document, env, getRange, withUndo, setFeedback } = deps;
+    const { document, env, getRange, withUndo, setFeedback, getActiveModule, onSlideLink } = deps;
     const byId = (id) => document.getElementById(id);
-    let target = null; // { range, link } of the open dialog
+    let target = null; // { mode, root, range, link, elementId } of the open dialog
     const ui = () => ({
       dialog: byId("doc-link-dialog"), address: byId("doc-link-address"), label: byId("doc-link-label"),
       status: byId("doc-link-status"), remove: byId("btn-doc-link-remove"), apply: byId("btn-doc-link-apply"),
@@ -179,6 +179,20 @@
     }
 
     function open() {
+      const els = ui();
+      if (!els.dialog) return false;
+      if (getActiveModule?.() === "SLIDE") {
+        const selEl = host.__EASYOFFICE_SLIDE_CANVAS__?.getSelectedElement?.();
+        const isTextEl = Boolean(selEl && (selEl.kind === "textbox" || selEl.kind === "shape"));
+        target = { mode: "slide", elementId: isTextEl ? selEl.id : null };
+        els.address.value = "";
+        els.label.value = isTextEl ? String(selEl.text || "") : "";
+        els.status.textContent = "";
+        els.remove.hidden = true;
+        els.dialog.showModal();
+        els.address.focus();
+        return true;
+      }
       const root = byId("doc-editor");
       const range = getRange();
       if (!root || !range) {
@@ -186,8 +200,7 @@
         return false;
       }
       const link = linkAt(root, range.startContainer) || (range.collapsed ? null : linkAt(root, range.endContainer));
-      const els = ui();
-      target = { root, range, link };
+      target = { mode: "doc", root, range, link };
       els.address.value = link ? link.getAttribute("href") : "";
       els.label.value = link ? link.textContent : selectedText(range);
       els.status.textContent = "";
@@ -204,13 +217,26 @@
         return;
       }
       ui().dialog.close();
-      target.root.focus?.();
+      target.root?.focus?.();
     }
 
     function apply() {
-      const { root, range, link } = target;
+      if (!target) return;
       const { address, label } = ui();
       const text = label.value.trim();
+      if (target.mode === "slide") {
+        const url = normalizeUrl(address.value);
+        if (!url) {
+          ui().status.textContent = MSG_BAD_URL;
+          return;
+        }
+        const elementId = target.elementId;
+        target = null;
+        ui().dialog.close();
+        onSlideLink?.(url, text, elementId);
+        return;
+      }
+      const { root, range, link } = target;
       run(() => (link ? updateLink(root, link, address.value, text) : addLink(root, range, address.value, text)));
     }
 

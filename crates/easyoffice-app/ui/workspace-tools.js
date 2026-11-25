@@ -18,11 +18,10 @@
   // Menu command -> app-provided action.
   const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark", find: "find", replace: "replace", print: "print" };
   const EMBED_BLIND_TOOLS = new Set(["scrub-pii", "security-audit"]);
-  const SYMBOL_TABLE_CHAR = "※";
   const PAGE_FRAME_COMMANDS = { "mod-header": "header", "mod-footer": "footer" };
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
-    "mod-symbol": { label: "문자표 기호 삽입 완료" },
+    "mod-symbol": { label: "문자표 기호 삽입" },
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주" },
   };
 
@@ -444,17 +443,13 @@
     function countTextMetrics(text) {
       const s = String(text || "");
       if (s.length === 0) return { chars: 0, words: 0, lineCount: 1 };
-      let chars = 0;
-      let words = 1;
-      let lineCount = 1;
-      let inSpace = false;
-      let inNewline = false;
+      let chars = 0, words = 0, lineCount = 1, inSpace = true, inNewline = false;
       for (let i = 0; i < s.length; ) {
         const cp = s.codePointAt(i);
         chars += 1;
         i += cp > 0xffff ? 2 : 1;
         const space = isWhitespaceCode(cp);
-        if (space && !inSpace) words += 1;
+        if (!space && inSpace) words += 1;
         inSpace = space;
         const nl = cp === 10;
         if (nl && !inNewline) lineCount += 1;
@@ -462,9 +457,6 @@
       }
       return { chars, words, lineCount };
     }
-
-    // Page numbers come from the page layout (`doc-pages.js`); the text figures are the last ones counted.
-    let lastMetrics = { chars: 0, lineCount: 1 };
 
     function renderPageStatus() {
       const pages = deps.getDocPages?.();
@@ -474,9 +466,8 @@
       const posEl = document.getElementById("status-studio-pos");
       if (posEl) {
         const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
-        const { chars, lineCount } = lastMetrics;
-        const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
-        posEl.textContent = current + "/" + total + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
+        const { line, col } = symbolDialog?.caretLineCol?.(editor) || { line: 1, col: 1 };
+        posEl.textContent = current + "/" + total + " 쪽   " + cols + "단   " + line + "줄   " + col + "칸 | 구역: 1 / 1 |";
       }
       const zoneEl = document.getElementById("doc-page-zone-indicator");
       if (zoneEl) zoneEl.textContent = current + " / " + total + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
@@ -491,10 +482,9 @@
       const statsEl = document.getElementById("smart-stats");
       if (!statsEl) return;
       const text = extractEditableDocumentText();
-      const { chars, words, lineCount } = countTextMetrics(text);
+      const { chars, words } = countTextMetrics(text);
       const secs = Math.max(1, Math.ceil((words / 220) * 60));
       statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
-      lastMetrics = { chars, lineCount };
       renderPageStatus();
     }
 
@@ -672,50 +662,16 @@
       return true;
     }
 
-    function applyFallbackInsertMod(cmd, _editor, textTarget) {
-      if (cmd === "mod-symbol") {
-        // A text node at the caret: the paragraph's inline runs keep their markup.
-        if (!insertTextAtSelection(SYMBOL_TABLE_CHAR) && textTarget) {
-          const kids = textTarget.childNodes || [];
-          const last = kids[kids.length - 1];
-          const container = last?.classList?.contains?.("eo-run") ? last : textTarget;
-          container.appendChild(document.createTextNode(SYMBOL_TABLE_CHAR));
-        }
-        getDocRuns?.()?.refreshToolbarFromSelection?.();
-        computeSmartStats();
-      } else if (cmd === "mod-footnote") {
+    function applyFallbackInsertMod(cmd) {
+      if (cmd === "mod-footnote") {
         host.__EASYOFFICE_DOC_NOTES_API__?.insertNote?.("footnote", undefined, { undo: false, feedback: false });
         computeSmartStats();
       }
     }
 
-    function insertSymbolInNonDocModule(curMod) {
-      if (insertTextAtSelection(SYMBOL_TABLE_CHAR)) {
-        if (curMod === "SHEET") sheetController.saveActiveSheetCellsToWorkbook();
-        if (curMod === "SLIDE") syncActiveSlideDomStylesToDeck();
-        return true;
-      }
-      if (curMod === "SHEET") {
-        const td = document.querySelector("#pane-sheet td.selected-cell") || document.querySelector('#pane-sheet td[data-cell="A1"]');
-        if (!td) return false;
-        td.textContent = (td.textContent || "") + SYMBOL_TABLE_CHAR;
-        sheetController.saveActiveSheetCellsToWorkbook();
-        return true;
-      }
-      if (curMod === "SLIDE") {
-        const zone = document.getElementById("slide-lower-zone") || document.getElementById("slide-title-zone");
-        if (!zone) return false;
-        const target = zone.querySelector("p") || zone;
-        target.appendChild(document.createTextNode(SYMBOL_TABLE_CHAR));
-        syncActiveSlideDomStylesToDeck();
-        return true;
-      }
-      return false;
-    }
-
     // The header and footer commands edit the page frame in place (`doc-page-frame.js`); the Hangul window's
     // editor has its own commands for them, which the native menu and the command search send to it.
-    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod) {
+    function execStudioInsertModCmd(cmd, editor, _textTarget, fb, onStudioCmd, curMod, isDocMod) {
       const frameKind = PAGE_FRAME_COMMANDS[cmd];
       if (frameKind) {
         if (isDocMod) deps.getDocPageFrame?.().open(frameKind);
@@ -723,15 +679,16 @@
       }
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
-      if (!isDocMod) {
-        if (cmd === "mod-symbol" && insertSymbolInNonDocModule(curMod) && fb) fb.textContent = spec.label;
+      if (cmd === "mod-symbol") {
+        symbolDialog?.openSymbolDialog?.();
         return true;
       }
+      if (!isDocMod) return true;
       if (spec.target && (curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
         onStudioCmd(spec.target);
         return true;
       }
-      withDocStyleUndo(() => applyFallbackInsertMod(cmd, editor, textTarget));
+      withDocStyleUndo(() => applyFallbackInsertMod(cmd));
       if (fb) fb.textContent = spec.label;
       return true;
     }
@@ -739,9 +696,48 @@
     let studioActions = {};
 
     function openToolDialog(dialogId) {
+      if (dialogId === "outline-dialog") panelHooks.renderModuleOutline?.(getActiveModule());
       const dialog = document.getElementById(dialogId);
       if (typeof dialog?.showModal === "function" && !dialog.open) dialog.showModal();
     }
+
+    const symbolDialog = host.__EASYOFFICE_CREATE_DOC_SYMBOL_DIALOG__?.({
+      document,
+      getActiveModule,
+      getSheetController: () => sheetController,
+      getDocRuns,
+      getDocPages: deps.getDocPages,
+      getSlideDeckCount: () => slideDeckState.length,
+      extractEditableDocumentText,
+      resolveActiveDocBlock,
+      insertTextAtSelection,
+      withDocStyleUndo,
+      computeSmartStats,
+      syncActiveSlideDomStylesToDeck,
+      openToolDialog,
+      closeDialog: (id) => document.getElementById(id)?.close?.(),
+      setFeedback: (text) => {
+        const fbEl = document.getElementById("status-command-feedback");
+        if (fbEl) fbEl.textContent = text;
+      },
+    });
+
+    const docDialogsExt = host.__EASYOFFICE_CREATE_DOC_DIALOGS_EXT__?.({
+      document,
+      getDocRuns,
+      getDocTable,
+      insertTextAtSelection,
+      withDocStyleUndo,
+      computeSmartStats,
+      renderModuleOutline: (mod) => panelHooks.renderModuleOutline?.(mod),
+      getActiveModule,
+      openToolDialog,
+      closeDialog: (id) => document.getElementById(id)?.close?.(),
+      setFeedback: (text) => {
+        const fbEl = document.getElementById("status-command-feedback");
+        if (fbEl) fbEl.textContent = text;
+      },
+    });
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
@@ -885,27 +881,23 @@
 
     function toggleStudioInsertMode(insertBtn) {
       insertModeLabel = insertModeLabel === "삽입" ? "수정" : "삽입";
-      if (insertBtn) insertBtn.textContent = insertModeLabel;
-      computeSmartStats();
+      if (insertBtn) {
+        insertBtn.textContent = insertModeLabel;
+        insertBtn.setAttribute("aria-pressed", insertModeLabel === "수정" ? "true" : "false");
+      }
+      renderPageStatus();
     }
 
-    function computeFitZoom(editor, mode, fallback) {
-      const vp = [".doc-canvas-scroll", ".doc-scroll-container", "#sheet-grid", ".slide-canvas-stage", "#slide-stage-box", "#pane-pdf", ".canvas-stage"]
-        .map((sel) => document.querySelector(sel))
-        .find((el) => el && !el.hidden && !el.closest?.("[hidden]") && Number(el.clientWidth) > 0);
-      const cw = Number(vp?.clientWidth) || 0;
-      const ch = Number(vp?.clientHeight) || 0;
-      if (cw <= 0 || (mode === "page" && ch <= 0)) return fallback;
-      const pw = Number(editor?.offsetWidth) || 794;
-      const ph = Number(editor?.offsetHeight) || 1123;
-      const wPct = ((cw - 40) / pw) * 100;
-      const raw = mode === "page" ? Math.min(wPct, ((ch - 20) / ph) * 100) : wPct;
-      return Math.max(50, Math.min(200, Math.round(raw)));
+    function bindDocOverwriteListener(editor) {
+      editor?.addEventListener("beforeinput", (ev) => symbolDialog?.handleOverwriteBeforeInput?.(ev, editor, insertModeLabel));
     }
 
     function setupStudioChromeControls(applyZoomPercent, onStudioCmd, actions) {
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
+      document.addEventListener?.("selectionchange", () => {
+        if (getActiveModule() === "DOC" || getActiveModule() === "HWP") renderPageStatus();
+      });
       for (const closer of document.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => closer.closest("dialog")?.close?.());
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) btn.addEventListener("click", () => { if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd); });
@@ -921,7 +913,9 @@
       if (docGridBtn && editor) docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
       const insertBtn = document.getElementById("status-insert-mode");
       insertBtn?.addEventListener("click", () => toggleStudioInsertMode(insertBtn));
-      host.addEventListener("keydown", (ev) => { if (ev.key === "Insert") toggleStudioInsertMode(insertBtn); });
+      host.addEventListener("keydown", (ev) => {
+        if (ev.key === "Insert" && !document.querySelector("dialog[open]")) toggleStudioInsertMode(insertBtn);
+      });
       document.getElementById("status-studio-pos")?.addEventListener("click", () => {
         document.getElementById("btn-doc-outline")?.click?.();
         openToolDialog("outline-dialog");
@@ -941,7 +935,10 @@
         });
       }
       for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) {
-        document.getElementById(id)?.addEventListener("click", () => applyZoom(computeFitZoom(editor, mode, pct), mode));
+        document.getElementById(id)?.addEventListener("click", () => {
+          if (getActiveModule() === "BOARD") { host.__EASYOFFICE_BOARD_STUDIO__?.fitAll?.(); return; }
+          applyZoom(symbolDialog?.computeFitZoom?.(editor, mode, pct) ?? pct, mode);
+        });
       }
     }
 
@@ -952,7 +949,13 @@
       describeDeliveryFailure, describeConversionSpec, describePdfHighlight, openToolDialog, saveActiveModuleDocument,
       computeSmartStats, renderPageStatus, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
-      setupStudioChromeControls, runStudioCommand: (cmd) => dispatchStudioIconCmd(cmd, document.getElementById("doc-editor"), null),
+      setupStudioChromeControls, bindDocOverwriteListener, runStudioCommand: (cmd) => dispatchStudioIconCmd(cmd, document.getElementById("doc-editor"), null),
+      openStatsDialog: (smartRes) => symbolDialog?.openStatsDialog?.(smartRes),
+      openDocMailMergeDialog: (onSubmit) => docDialogsExt?.openMailMergeDialog?.(onSubmit),
+      mergeTokensInDom: (docEditor, values) => docDialogsExt?.mergeTokensInDom?.(docEditor, values) ?? 0,
+      openDocShapeDialog: () => docDialogsExt?.openShapeDialog?.(),
+      openDocChartDialog: () => docDialogsExt?.openChartDialog?.(),
+      openDocFnDialog: () => docDialogsExt?.openFnWizardDialog?.(),
     };
   }
 

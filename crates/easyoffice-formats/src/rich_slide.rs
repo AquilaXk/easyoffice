@@ -451,6 +451,8 @@ pub enum SlideElement {
         color: Option<String>,
         font_size_pt: f64,
         bold: bool,
+        italic: bool,
+        underline: bool,
         align: SlideTextAlign,
     },
     Image {

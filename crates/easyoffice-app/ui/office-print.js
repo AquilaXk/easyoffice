@@ -364,6 +364,7 @@
       const stage = document.createElement("div");
       stage.className = "slide-stage";
       stage.dataset.aspect = aspect;
+      stage.dataset.orientation = slide.orientation === "portrait" ? "portrait" : "landscape";
       stage.dataset.layout = slide.layout || "titleAndContent";
       const titleZone = document.createElement("div");
       titleZone.className = "slide-title-zone";

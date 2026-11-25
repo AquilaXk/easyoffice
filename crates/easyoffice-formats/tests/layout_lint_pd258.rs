@@ -66,6 +66,8 @@ fn rect_shape(id: &str, x: f64, y: f64, w: f64, h: f64, text: &str) -> SlideElem
         color: None,
         font_size_pt: 16.0,
         bold: false,
+        italic: false,
+        underline: false,
         align: SlideTextAlign::Center,
     }
 }

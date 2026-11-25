@@ -90,6 +90,7 @@ struct ParaProps {
     list: Option<crate::RichListKind>,
     task_checked: bool,
     left_indent: Option<u32>,
+    right_indent: Option<u32>,
     first_line: Option<i32>,
     sl: Option<i32>,
     slmult: bool,
@@ -411,6 +412,7 @@ impl Reader {
                 list,
                 task_checked,
                 left_indent_twips,
+                right_indent_twips: para.right_indent,
                 first_line_indent_twips: para.first_line,
                 line_spacing_percent,
                 ..RichParagraph::default()
@@ -640,8 +642,11 @@ impl Reader {
                 self.para.task_checked = checked;
             }
             "li" => {
-                self.para.left_indent =
-                    param.filter(|v| *v > 0).and_then(|v| u32::try_from(v).ok());
+                self.para.left_indent = param.filter(|v| *v > 0).and_then(|v| u32::try_from(v).ok())
+            }
+            "ri" => {
+                self.para.right_indent =
+                    param.filter(|v| *v > 0).and_then(|v| u32::try_from(v).ok())
             }
             "fi" => {
                 self.para.first_line = param.filter(|v| *v != 0);

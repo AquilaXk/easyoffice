@@ -436,7 +436,7 @@ test("Edit menu cut/copy/paste act on the real selection and the system clipboar
   assert.equal(docEditor.querySelector("p").textContent, original);
 });
 
-test("the symbol table inserts at the caret and keeps the paragraph's inline runs, in DOC and in the Hangul fallback", async () => {
+test("the symbol table opens a picker dialog, inserts at the caret and keeps the paragraph's inline runs, in DOC and in the Hangul fallback", async () => {
   for (const moduleName of ["DOC", "HWP"]) {
     const selection = createSelectionHolder();
     const { document, userClick } = await createWorkspaceHarness({ selection });
@@ -450,6 +450,12 @@ test("the symbol table inserts at the caret and keeps the paragraph's inline run
 
     userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
     await flushAsyncTurns();
+    const symDlg = document.getElementById("symbol-picker-dialog");
+    assert.equal(symDlg.open, true, moduleName + ": opens symbol picker dialog");
+    assert.ok(document.querySelectorAll("#symbol-picker-tabs [data-sym-cat]").length >= 5, "has symbol categories");
+    userClick(document.getElementById("btn-symbol-insert"));
+    await flushAsyncTurns();
+    assert.equal(symDlg.open, false);
 
     assert.equal(editor.querySelector("span.eo-run"), run, moduleName + ": the run element survives");
     assert.equal(run.getAttribute("style"), "font-weight: 700", moduleName + ": its formatting survives");
@@ -498,29 +504,91 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+/");
 });
 
-test("mod-symbol without selection appends inside a trailing .eo-run in DOC, and also inserts in SHEET and SLIDE", async () => {
-  const { document, userClick } = await createWorkspaceHarness();
+test("mod-symbol dialog cancels safely, inserts chosen glyphs in DOC, SHEET (formula/protection-safe + undo), and SLIDE", async () => {
+  const { document, sandbox, userClick, host } = await createWorkspaceHarness();
+  const pressEsc = (dlg) => document.dispatchEvent({ type: "keydown", key: "Escape", target: dlg, preventDefault() {}, stopPropagation() {} });
   const editor = document.getElementById("doc-editor");
   editor.innerHTML = '<p>앞 <span class="eo-run" style="font-weight: 700">끝런</span></p>';
   const run = editor.querySelector("span.eo-run");
+
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  const symDlg = document.getElementById("symbol-picker-dialog");
+  assert.equal(symDlg.open, true);
+  pressEsc(symDlg);
+  assert.equal(symDlg.open, false);
+  assert.equal(run.textContent, "끝런", "canceling symbol dialog inserts nothing");
+
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-symbol-insert"));
   await flushAsyncTurns();
   assert.equal(run.textContent, "끝런※", "appended inside the trailing .eo-run when there is no selection");
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
+  const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
+  const beforeB2 = b2.textContent;
+  f2.focus();
+  f2.textContent = "=SUM(B2:E2)";
+  f2.dispatchEvent({ type: "input", target: f2 });
+  f2.dispatchEvent({ type: "keydown", key: "Enter", target: f2 });
+  await flushAsyncTurns(8);
+  f2.focus();
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-symbol-insert"));
+  await flushAsyncTurns(6);
+  assert.equal(f2.dataset.formula, "=SUM(B2:E2)", "non-editing symbol insertion must not destroy formula cell");
+
+  const b3 = document.querySelector('#pane-sheet td[data-cell="B3"]');
+  b3.focus();
+  b3.textContent = "항목";
+  b3.dispatchEvent({ type: "input", target: b3 });
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-symbol-insert"));
+  await flushAsyncTurns(6);
+  assert.equal(b3.textContent, "항목※", "editing cell splices symbol cleanly");
+  b3.dispatchEvent({ type: "keydown", key: "Enter", target: b3 });
+  await flushAsyncTurns(6);
+
   b2.focus();
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  const arrowTab = document.querySelector('#symbol-picker-tabs [data-sym-cat="arrow"]');
+  assert.ok(arrowTab);
+  userClick(arrowTab);
+  const arrowBtn = document.querySelector('#symbol-picker-grid [data-symbol-char="→"]');
+  assert.ok(arrowBtn);
+  userClick(arrowBtn);
+  userClick(document.getElementById("btn-symbol-insert"));
   await flushAsyncTurns(6);
-  assert.ok(b2.textContent.endsWith("※"), "mod-symbol appends ※ into the active sheet cell");
+  assert.ok(b2.textContent.endsWith("→"), "chosen arrow glyph inserted cleanly into active sheet cell");
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(6);
+  assert.equal(b2.textContent, beforeB2, "Ctrl+Z undoes sheet symbol insertion cleanly");
+
+  host.__EASYOFFICE_SHEET_LAYOUT__.setProtect("Sheet1", { on: true, deny: host.__EASYOFFICE_SHEET_PROTECT__.FLAG_NAMES });
+  b2.focus();
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-symbol-insert"));
+  await flushAsyncTurns(6);
+  assert.equal(b2.textContent, beforeB2, "protected sheet blocks symbol overwrite");
 
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  const generalTab = document.querySelector('#symbol-picker-tabs [data-sym-cat="general"]');
+  userClick(generalTab);
+  userClick(document.querySelector('#symbol-picker-grid [data-symbol-char="※"]'));
+  userClick(document.getElementById("btn-symbol-insert"));
   await flushAsyncTurns(6);
   const lower = document.getElementById("slide-lower-zone");
-  assert.ok(lower.textContent.includes("※"), "mod-symbol appends ※ into the slide content");
+  assert.ok(lower.textContent.includes("※"), "mod-symbol appends chosen symbol into slide content");
 });
 
 test("start window (?module=START) blocks document editing and saving shortcuts while allowing palette and theme shortcuts", async () => {

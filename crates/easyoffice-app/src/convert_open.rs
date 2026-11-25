@@ -172,6 +172,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if let Some(v) = p.left_indent_twips {
         let _ = write!(out, ",\"leftIndentTwips\":{v}");
     }
+    if let Some(v) = p.right_indent_twips {
+        let _ = write!(out, ",\"rightIndentTwips\":{v}");
+    }
     if let Some(v) = p.first_line_indent_twips {
         let _ = write!(out, ",\"firstLineIndentTwips\":{v}");
     }
@@ -886,7 +889,7 @@ impl EasyOfficeIpcRouter {
             let max_cols = limit(entries, "maxCols")?;
             let (decoded, styling, slide_deck) =
                 UniversalFormatConverter::decode_rich_full(&bytes, source_hint)?;
-            return decode_response_with_deck(
+            let mut out = decode_response_with_deck(
                 &decoded,
                 &styling,
                 slide_deck.as_ref(),
@@ -894,7 +897,11 @@ impl EasyOfficeIpcRouter {
                 bytes.len(),
                 max_rows,
                 max_cols,
-            );
+            )?;
+            if decoded.format == DocumentFormat::Pdf {
+                crate::readback::doc_slide_pdf::append_pdf_outlines_json(&mut out, &bytes);
+            }
+            return Ok(out);
         }
         if action != "convert" {
             return Err(EasyOfficeError::InvalidArgument(format!(

@@ -401,3 +401,35 @@ fn bench_pd243_doc_roundtrip_release() {
     );
     assert!(avg_us < 50_000.0);
 }
+
+#[test]
+fn docx_odt_and_hwpx_ipc_roundtrip_right_indent_twips() {
+    for (fmt, file_name) in [
+        ("docx", "indent.docx"),
+        ("odt", "indent.odt"),
+        ("hwpx", "indent.hwpx"),
+        ("rtf", "indent.rtf"),
+    ] {
+        let payload = format!(
+            r#"{{
+              "sourceFormat":"docx",
+              "targetFormat":"{fmt}",
+              "blocks":[{{"type":"paragraph","leftIndentTwips":240,"rightIndentTwips":540,"runs":[{{"text":"오른쪽 들여쓰기 테스트"}}]}}]
+            }}"#
+        );
+        let bytes = save_to_bytes(&payload);
+        let decoded = decode_bytes(file_name, &bytes);
+        let blocks = field(&decoded, "blocks").unwrap().as_array().unwrap();
+        let para = &blocks[0];
+        assert_eq!(
+            field(para, "rightIndentTwips").and_then(StrictJsonValue::as_u64),
+            Some(540),
+            "{file_name}"
+        );
+        assert_eq!(
+            field(para, "leftIndentTwips").and_then(StrictJsonValue::as_u64),
+            Some(240),
+            "{file_name}"
+        );
+    }
+}

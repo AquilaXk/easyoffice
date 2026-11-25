@@ -408,6 +408,8 @@ pub(crate) fn parse_sp(
             color: t_clr,
             font_size_pt: font_pt.unwrap_or(16.0),
             bold,
+            italic,
+            underline,
             align: align.unwrap_or(SlideTextAlign::Center),
         }))
     }
@@ -468,6 +470,8 @@ pub(crate) fn parse_cxn_sp(
         color: None,
         font_size_pt: DEFAULT_SLIDE_FONT_PT,
         bold: false,
+        italic: false,
+        underline: false,
         align: SlideTextAlign::Center,
     }))
 }

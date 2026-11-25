@@ -147,6 +147,9 @@
       kit.note("slide-shape-status", "");
       kit.setSelect("slide-shape-type", existing?.shapeType || "roundRect");
       kit.setVal("slide-shape-text", existing?.text ?? "도형");
+      kit.setChecked("slide-shape-bold", existing ? Boolean(existing.bold) : true);
+      kit.setChecked("slide-shape-italic", Boolean(existing?.italic));
+      kit.setChecked("slide-shape-underline", Boolean(existing?.underline));
       kit.setVal("slide-shape-fill", "#" + codec.normalizeHex6(existing?.fill, "2563EB").toLowerCase());
       kit.setVal("slide-shape-stroke", "#" + codec.normalizeHex6(existing?.stroke, "1D4ED8").toLowerCase());
       kit.setVal("slide-shape-stroke-width", String(existing?.strokeWidthPt ?? 2));
@@ -167,6 +170,9 @@
         ...box,
         shapeType: kit.val("slide-shape-type") || "rect",
         text: kit.val("slide-shape-text"),
+        bold: kit.checked("slide-shape-bold"),
+        italic: kit.checked("slide-shape-italic"),
+        underline: kit.checked("slide-shape-underline"),
         fill: codec.normalizeHex6(kit.val("slide-shape-fill"), "2563EB"),
         stroke: codec.normalizeHex6(kit.val("slide-shape-stroke"), "1D4ED8"),
         strokeWidthPt: Number(kit.val("slide-shape-stroke-width") ?? 2),
@@ -328,9 +334,9 @@
 
     function openForRibbonCommand(cmdId) {
       if (cmdId === "slide-mod-master") openLayoutDialog();
-      else if (cmdId === "slide-insert-shape") openShapeDialog(null, "shape");
-      else if (cmdId === "slide-insert-table") openTableDialog(null, "table");
-      else if (cmdId === "slide-insert-chart") openChartDialog(null, "chart");
+      else if (cmdId === "slide-insert-shape") openShapeDialog(null);
+      else if (cmdId === "slide-insert-table") openTableDialog(null);
+      else if (cmdId === "slide-insert-chart") openChartDialog(null);
     }
 
     function runSlideMenuAction(act) {

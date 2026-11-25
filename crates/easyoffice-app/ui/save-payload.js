@@ -8,7 +8,7 @@
     "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "UL", "OL",
     "BLOCKQUOTE", "SECTION", "ARTICLE", "PRE", "HEADER", "ASIDE", "FIGURE", "FIGCAPTION", "DL", "DT", "DD",
   ]);
-  const SKIP_TAGS = new Set(["FOOTER", "SCRIPT", "STYLE", "BUTTON", "TEMPLATE", "NOSCRIPT"]);
+  const SKIP_TAGS = new Set(["FOOTER", "SCRIPT", "STYLE", "BUTTON", "TEMPLATE", "NOSCRIPT", "SVG"]);
   const CSS_ALIGN = { left: "left", start: "left", center: "center", right: "right", end: "right", justify: "justify" };
   const TABLE_FUNCS = new Set(["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"]);
   const TABLE_DIRS = new Set(["ABOVE", "BELOW", "LEFT", "RIGHT"]);
@@ -142,6 +142,8 @@
     const out = {};
     const left = twipsFor(st.paddingLeft, data.eoLeftTwips);
     if (left !== null && left > 0) out.leftIndentTwips = left;
+    const right = twipsFor(st.paddingRight, data.eoRightTwips);
+    if (right !== null && right > 0) out.rightIndentTwips = right;
     const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
     if (first !== null && first !== 0) out.firstLineIndentTwips = first;
     const rawLineHeight = String(st.lineHeight || baseLineHeight || "").trim();

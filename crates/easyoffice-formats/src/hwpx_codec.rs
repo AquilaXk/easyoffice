@@ -223,6 +223,9 @@ impl ShapeTables {
                 } else {
                     0
                 }),
+            right_margin: p
+                .right_indent_twips
+                .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP)),
             intent: p
                 .first_line_indent_twips
                 .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP as i32)),

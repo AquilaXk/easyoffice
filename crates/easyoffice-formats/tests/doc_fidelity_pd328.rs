@@ -519,3 +519,33 @@ fn doc_save_loss_reports_comments_revisions_and_first_page_frames_for_doc() {
         ]
     );
 }
+
+#[test]
+fn right_indent_twips_roundtrips_across_docx_odt_hwpx_and_rtf() {
+    let doc = RichDocument {
+        title: "오른쪽 여백".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            left_indent_twips: Some(360),
+            right_indent_twips: Some(720),
+            first_line_indent_twips: Some(180),
+            runs: vec![RichRun::plain("문단 오른쪽 들여쓰기 확인")],
+            ..RichParagraph::default()
+        })],
+        ..RichDocument::default()
+    };
+    for (fmt, name) in [
+        (DocumentFormat::Docx, "right.docx"),
+        (DocumentFormat::Odt, "right.odt"),
+        (DocumentFormat::Hwpx, "right.hwpx"),
+        (DocumentFormat::Rtf, "right.rtf"),
+    ] {
+        let bytes = UniversalFormatConverter::encode_rich(&doc, fmt, None).expect(name);
+        let decoded = decode_doc(&bytes, name);
+        let RichBlock::Paragraph(p) = &decoded.blocks[0] else {
+            panic!("expected paragraph for {name}");
+        };
+        assert_eq!(p.left_indent_twips, Some(360), "{name}");
+        assert_eq!(p.right_indent_twips, Some(720), "{name}");
+        assert_eq!(p.first_line_indent_twips, Some(180), "{name}");
+    }
+}

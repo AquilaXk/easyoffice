@@ -37,6 +37,12 @@ pub struct PdfPageReadback {
     pub widget_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfOutlineNode {
+    pub title: String,
+    pub level: u8,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PdfReadbackReport {
     pub title: String,
@@ -44,6 +50,7 @@ pub struct PdfReadbackReport {
     pub pages: Vec<PdfPageReadback>,
     pub outline_count: usize,
     pub outline_titles: Vec<String>,
+    pub outline_nodes: Vec<PdfOutlineNode>,
     pub link_annotation_count: usize,
     pub markup_annotation_count: usize,
     pub form_field_count: usize,
@@ -230,6 +237,7 @@ fn walk_outline_chain<'a>(
     visited: &mut HashSet<(u32, u16)>,
     count: &mut usize,
     titles: &mut Vec<String>,
+    nodes: &mut Vec<PdfOutlineNode>,
     depth: usize,
 ) {
     if depth > MAX_PDF_PAGE_TREE_DEPTH {
@@ -259,7 +267,12 @@ fn walk_outline_chain<'a>(
             {
                 let trimmed = t.trim();
                 if !trimmed.is_empty() {
+                    let level = u8::try_from(depth.saturating_add(1)).unwrap_or(u8::MAX);
                     titles.push(trimmed.to_string());
+                    nodes.push(PdfOutlineNode {
+                        title: trimmed.to_string(),
+                        level,
+                    });
                 }
             }
         }
@@ -270,11 +283,79 @@ fn walk_outline_chain<'a>(
                 visited,
                 count,
                 titles,
+                nodes,
                 depth + 1,
             );
         }
         cur = dict_get(entries, "/Next");
     }
+}
+
+fn collect_pdf_outlines(
+    catalog: Option<&[(String, PdfObjValue)]>,
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> (bool, usize, Vec<String>, Vec<PdfOutlineNode>) {
+    let mut outline_count = 0usize;
+    let mut outline_titles = Vec::new();
+    let mut outline_nodes = Vec::new();
+    let mut has_outlines = false;
+    if let Some(outlines_dict) = catalog
+        .and_then(|c| dict_get(c, "/Outlines"))
+        .and_then(|v| match resolve_value(v, objects) {
+            Some(PdfObjValue::Dict(d)) => Some(d.as_slice()),
+            _ => None,
+        })
+    {
+        has_outlines = true;
+        let mut visited = HashSet::new();
+        walk_outline_chain(
+            dict_get(outlines_dict, "/First"),
+            objects,
+            &mut visited,
+            &mut outline_count,
+            &mut outline_titles,
+            &mut outline_nodes,
+            0,
+        );
+    }
+    (has_outlines, outline_count, outline_titles, outline_nodes)
+}
+
+type PdfObjDict = Vec<(String, PdfObjValue)>;
+type DecodedPdfObjects = (HashMap<(u32, u16), PdfIndirectObject>, Vec<PdfObjDict>);
+
+fn decode_pdf_objects(bytes: &[u8]) -> Result<DecodedPdfObjects, EasyOfficeError> {
+    let mut scan = PdfTopLevelScan::new(bytes);
+    scan.run()?;
+    let PdfTopLevelScan {
+        mut objects,
+        trailers,
+        mut order_seq,
+        ..
+    } = scan;
+    let mut remaining_budget = MAX_PDF_TOTAL_DECODED_BYTES;
+    let mut dummy_b64 = None;
+    let mut dummy_cnt = 0usize;
+    let flate_cache = {
+        let ordered_objs = ordered_by_sequence(&objects);
+        decode_and_validate_pdf_streams(
+            bytes,
+            &objects,
+            &ordered_objs,
+            &mut remaining_budget,
+            &mut dummy_b64,
+            &mut dummy_cnt,
+        )?
+    };
+    let mut decoded = DecodeBudget::new();
+    expand_pdf_object_streams(
+        bytes,
+        &mut objects,
+        &flate_cache,
+        &mut order_seq,
+        &mut decoded,
+    )?;
+    Ok((objects, trailers))
 }
 
 fn walk_form_fields(
@@ -332,38 +413,17 @@ fn walk_form_fields(
 }
 
 impl PdfSerializer {
+    pub fn parse_outline_nodes(bytes: &[u8]) -> Result<Vec<PdfOutlineNode>, EasyOfficeError> {
+        let (objects, trailers) = decode_pdf_objects(bytes)?;
+        let ordered_objs = ordered_by_sequence(&objects);
+        let catalog = resolve_catalog_dict(&objects, &ordered_objs, &trailers);
+        let (_, _, _, nodes) = collect_pdf_outlines(catalog, &objects);
+        Ok(nodes)
+    }
+
     pub fn inspect_readback(bytes: &[u8]) -> Result<PdfReadbackReport, EasyOfficeError> {
         let model = Self::parse(bytes)?;
-        let mut scan = PdfTopLevelScan::new(bytes);
-        scan.run()?;
-        let PdfTopLevelScan {
-            mut objects,
-            trailers,
-            mut order_seq,
-            ..
-        } = scan;
-        let mut remaining_budget = MAX_PDF_TOTAL_DECODED_BYTES;
-        let mut dummy_b64 = None;
-        let mut dummy_cnt = 0usize;
-        let flate_cache = {
-            let ordered_objs = ordered_by_sequence(&objects);
-            decode_and_validate_pdf_streams(
-                bytes,
-                &objects,
-                &ordered_objs,
-                &mut remaining_budget,
-                &mut dummy_b64,
-                &mut dummy_cnt,
-            )?
-        };
-        let mut decoded = DecodeBudget::new();
-        expand_pdf_object_streams(
-            bytes,
-            &mut objects,
-            &flate_cache,
-            &mut order_seq,
-            &mut decoded,
-        )?;
+        let (objects, trailers) = decode_pdf_objects(bytes)?;
         let ordered_objs = ordered_by_sequence(&objects);
         let (_, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
@@ -402,27 +462,8 @@ impl PdfSerializer {
             }
         }
 
-        let mut outline_count = 0usize;
-        let mut outline_titles = Vec::new();
-        let mut has_outlines = false;
-        if let Some(outlines_dict) = catalog
-            .and_then(|c| dict_get(c, "/Outlines"))
-            .and_then(|v| match resolve_value(v, &objects) {
-                Some(PdfObjValue::Dict(d)) => Some(d.as_slice()),
-                _ => None,
-            })
-        {
-            has_outlines = true;
-            let mut visited = HashSet::new();
-            walk_outline_chain(
-                dict_get(outlines_dict, "/First"),
-                &objects,
-                &mut visited,
-                &mut outline_count,
-                &mut outline_titles,
-                0,
-            );
-        }
+        let (has_outlines, outline_count, outline_titles, outline_nodes) =
+            collect_pdf_outlines(catalog, &objects);
 
         let mut form_field_count = 0usize;
         let mut has_acro_form = false;
@@ -476,6 +517,7 @@ impl PdfSerializer {
             pages,
             outline_count,
             outline_titles,
+            outline_nodes,
             link_annotation_count,
             markup_annotation_count,
             form_field_count,

@@ -291,9 +291,12 @@
     const nodeMap = () => new Map(state.nodes.map((n) => [n.id, n]));
     const totalBoardImageBytes = () => state.nodes.reduce((sum, n) => sum + (n.kind === "image" && n.imageId ? utils?.getDocImage?.(n.imageId)?.bytesLen || 0 : 0), 0);
 
-    function applyViewportTransform() {
+    function applyViewportTransform(options = {}) {
       if (worldEl) worldEl.style.transform = `translate(${round2(state.viewport.panX)}px, ${round2(state.viewport.panY)}px) scale(${state.viewport.zoom / 100})`;
       if (zoomLabelEl) zoomLabelEl.textContent = state.viewport.zoom + "%";
+      if (options.syncHost !== false && (!deps.getActiveModule || deps.getActiveModule() === "BOARD")) {
+        host.__EASYOFFICE_ZOOM__?.syncExternal?.(state.viewport.zoom);
+      }
     }
 
     function setMode(nextMode) {
@@ -607,7 +610,7 @@
       return { ok: true, node };
     }
 
-    const setZoom = (z) => { state.viewport.zoom = clamp(Math.round(Number(z) || 100), MIN_ZOOM, MAX_ZOOM); applyViewportTransform(); };
+    const setZoom = (z, options) => { state.viewport.zoom = clamp(Math.round(Number(z) || 100), MIN_ZOOM, MAX_ZOOM); applyViewportTransform(options); };
     const stepZoom = (delta) => setZoom(delta > 0 ? (ZOOM_STEPS.find((z) => z > state.viewport.zoom) ?? MAX_ZOOM) : ([...ZOOM_STEPS].sort((a, b) => b - a).find((z) => z < state.viewport.zoom) ?? MIN_ZOOM));
 
     function fitAll() {
@@ -891,7 +894,7 @@
       viewportEl.addEventListener("wheel", (ev) => {
         ev.preventDefault?.();
         if (ev.ctrlKey || ev.metaKey) stepZoom(ev.deltaY < 0 ? 1 : -1);
-        else { state.viewport.panX = round2(clamp(state.viewport.panX - (ev.deltaX || 0), MIN_COORD, MAX_COORD)); state.viewport.panY = round2(clamp(state.viewport.panY - (ev.deltaY || 0), MIN_COORD, MAX_COORD)); applyViewportTransform(); }
+        else { state.viewport.panX = round2(clamp(state.viewport.panX - (ev.deltaX || 0), MIN_COORD, MAX_COORD)); state.viewport.panY = round2(clamp(state.viewport.panY - (ev.deltaY || 0), MIN_COORD, MAX_COORD)); applyViewportTransform({ syncHost: false }); }
       });
 
       doc.addEventListener("mousemove", onDocMouseMove);

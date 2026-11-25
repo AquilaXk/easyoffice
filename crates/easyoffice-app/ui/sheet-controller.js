@@ -820,6 +820,29 @@
       });
     }
 
+    function insertSymbol(ch, target) {
+      input.setUiHold(false);
+      const ref = target?.ref || getActiveSheetCellRef() || "A1";
+      const parsedRef = gridUtils.parseRef(ref);
+      const sheetName = getActiveSheetName();
+      const entry = entryAt(ref);
+      const protect = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (protect?.isOn(sheetName) && parsedRef && !protect.cellEditable(sheetName, parsedRef.row, parsedRef.col, entry?.style)) {
+        protect.alertBlocked();
+        return Promise.resolve({ inserted: false, reason: "protected" });
+      }
+      const inlineRes = input.insertSymbolAtEditingTarget(ch, target);
+      if (inlineRes.handled) return Promise.resolve({ inserted: inlineRes.inserted });
+      if (entry && isFormulaStr(entry.formula || "")) {
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "수식 셀에는 문자표를 덮어쓸 수 없습니다";
+        return Promise.resolve({ inserted: false, reason: "formula" });
+      }
+      const prevVal = String(entry?.value ?? "");
+      return applyCellEdits([{ ref, value: prevVal + ch, formula: "" }], "문자표 기호 삽입")
+        .then((ok) => ({ inserted: Boolean(ok) }));
+    }
+
     return {
       DEFAULT_SHEET_ROW_COUNT,
       bumpSnapshotEpoch,
@@ -871,6 +894,10 @@
       clickSheetTab,
       captureView: viewLive.capture,
       restoreView: viewLive.restore,
+      captureSymbolTarget: () => input.captureSymbolTarget(),
+      setSymbolDialogHold: (on) => input.setUiHold(on),
+      restoreSymbolHoldFocus: (target) => input.restoreSymbolFocus(target),
+      insertSymbol,
     };
   }
 

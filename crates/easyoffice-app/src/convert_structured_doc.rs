@@ -199,11 +199,18 @@ pub(crate) fn slide_deck_to_document(deck: &RichSlideDeck, title: &str) -> RichD
                     }));
                 }
                 SlideElement::Shape {
-                    text, bold, color, ..
+                    text,
+                    bold,
+                    italic,
+                    underline,
+                    color,
+                    ..
                 } if !text.trim().is_empty() => {
                     blocks.push(RichBlock::Paragraph(RichParagraph {
                         runs: vec![RichRun {
                             bold: *bold,
+                            italic: *italic,
+                            underline: *underline,
                             color: color.clone(),
                             ..RichRun::plain(text)
                         }],

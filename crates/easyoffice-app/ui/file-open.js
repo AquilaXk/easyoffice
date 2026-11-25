@@ -89,11 +89,16 @@
   // and ruler write) plus the exact twip values, so saving gives back the same numbers.
   function applyParagraphLayout(spec, block) {
     const left = Number(block.leftIndentTwips);
+    const right = Number(block.rightIndentTwips);
     const first = Number(block.firstLineIndentTwips);
     const spacing = Number(block.lineSpacingPercent);
     if (Number.isFinite(left) && left > 0) {
       spec.style.paddingLeft = twipsToPx(left);
       spec.data.eoLeftTwips = String(left);
+    }
+    if (Number.isFinite(right) && right > 0) {
+      spec.style.paddingRight = twipsToPx(right);
+      spec.data.eoRightTwips = String(right);
     }
     if (Number.isFinite(first) && first !== 0) {
       spec.style.textIndent = twipsToPx(first);
@@ -434,7 +439,7 @@
     const zones = [null, null, null];
     let prev = -1;
     for (const b of blocks) {
-      if (b?.type !== "paragraph" || b.heading || b.list || b.leftIndentTwips || b.firstLineIndentTwips || b.lineSpacingPercent || b.toc !== undefined || b.pageBreakBefore) {
+      if (b?.type !== "paragraph" || b.heading || b.list || b.leftIndentTwips || b.rightIndentTwips || b.firstLineIndentTwips || b.lineSpacingPercent || b.toc !== undefined || b.pageBreakBefore) {
         return null;
       }
       const slot = b.align === "center" ? 1 : b.align === "right" ? 2 : (!b.align || b.align === "left") ? 0 : -1;
@@ -558,6 +563,7 @@
       applicant: "", dept: "", formStatus: "양식 준비 완료",
       cardHeadingNodes: [textSpec(title)],
       cardBodyParagraphsNodes: lines.filter((l) => l.trim()).map((l) => [textSpec(l)]),
+      outlines: Array.isArray(res.pdfOutlines) ? res.pdfOutlines : [],
     };
     next.pdfRotationDeg = 0;
   }

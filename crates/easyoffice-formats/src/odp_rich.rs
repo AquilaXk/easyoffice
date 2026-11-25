@@ -172,11 +172,19 @@ fn push_odp_element(
             color,
             font_size_pt,
             bold,
+            italic,
+            underline,
             align,
         } => {
             let gid = sg.add_graphic(fill.as_deref(), stroke.as_deref(), Some(*stroke_width_pt));
-            let (pid, tid) =
-                sg.add_para_text(*align, *font_size_pt, *bold, false, false, color.as_deref());
+            let (pid, tid) = sg.add_para_text(
+                *align,
+                *font_size_pt,
+                *bold,
+                *italic,
+                *underline,
+                color.as_deref(),
+            );
             let _ = write!(
                 body,
                 "<draw:custom-shape draw:name=\"{}\" draw:style-name=\"{gid}\" svg:x=\"{:.3}pt\" svg:y=\"{:.3}pt\" svg:width=\"{:.3}pt\" svg:height=\"{:.3}pt\"><draw:enhanced-geometry draw:type=\"{}\"/>",

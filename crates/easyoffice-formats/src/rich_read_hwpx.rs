@@ -96,6 +96,10 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         .then(|| to_twips(i64::from(shape.left)))
         .flatten()
         .and_then(|t| u32::try_from(t).ok());
+    let right_indent_twips = (shape.right > 0)
+        .then(|| to_twips(i64::from(shape.right)))
+        .flatten()
+        .and_then(|t| u32::try_from(t).ok());
     let first_line_indent_twips = (shape.intent != 0)
         .then(|| to_twips(i64::from(shape.intent)))
         .flatten();
@@ -165,6 +169,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         heading_level: heading,
         list,
         left_indent_twips,
+        right_indent_twips,
         first_line_indent_twips,
         line_spacing_percent,
         columns: p.columns,

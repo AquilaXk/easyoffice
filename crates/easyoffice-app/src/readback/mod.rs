@@ -8,7 +8,7 @@
 //!   `"sessionAction": "inspect"` (live [`easyoffice_sheet::RecalcSession`]);
 //! - `easyoffice-app --inspect <FILE>` (`--readback <FILE>`) CLI.
 
-mod doc_slide_pdf;
+pub(crate) mod doc_slide_pdf;
 mod sheet;
 
 use std::fmt::Write;

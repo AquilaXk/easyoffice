@@ -138,10 +138,22 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
   const boardStudio = boardHost.getBoardStudio();
   assert.ok(boardStudio, "boardStudio mounted");
 
-  // Zooming/fitting empty or clean board must NOT mark window dirty
-  boardStudio.setZoom(150);
+  // Zooming/fitting empty or clean board must NOT mark window dirty and shares unified status zoom state
+  boardStudio.setZoom(125);
   await flushAsyncTurns(5);
   assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "viewport zoom alone does not mark BOARD dirty");
+  assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "125%");
+  assert.equal(document.getElementById("status-zoom-label").textContent, "125%");
+  assert.equal(document.querySelector(".canvas-stage").style.zoom, "", "BOARD uses transform scale only, never double stage CSS zoom");
+  userClick(document.getElementById("btn-zoom-in"));
+  await flushAsyncTurns(4);
+  assert.equal(boardStudio.getState().viewport.zoom, 150);
+  assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "150%");
+  assert.equal(document.getElementById("status-zoom-label").textContent, "150%");
+  assert.equal(document.querySelector(".canvas-stage").style.zoom, "");
+  userClick(document.getElementById("btn-board-zoom-reset"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
 
   // Adding shapes, chart, and obstacle-avoiding orthogonal connector marks dirty and supports Undo/Redo
   const a = boardStudio.addNode({ kind: "shape", shapeType: "roundRect", x: 80, y: 120, w: 150, h: 80, text: "요청 수집" });

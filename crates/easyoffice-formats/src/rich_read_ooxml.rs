@@ -93,7 +93,12 @@ fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
             };
         }
         "w:ind" => {
-            top.left_indent = number("w:left").and_then(|v| u32::try_from(v).ok());
+            top.left_indent = number("w:left")
+                .or_else(|| number("w:start"))
+                .and_then(|v| u32::try_from(v).ok());
+            top.right_indent = number("w:right")
+                .or_else(|| number("w:end"))
+                .and_then(|v| u32::try_from(v).ok());
             top.first_line = number("w:firstLine")
                 .or_else(|| number("w:hanging").map(|h| -h))
                 .and_then(|v| i32::try_from(v).ok());

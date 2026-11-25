@@ -75,7 +75,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocTable: () => docTable, getDocPages: () => docPages, getDocPageSetup: () => docPageSetup,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocTable: () => docTable, getDocPages: () => docPages, getDocPageSetup: () => docPageSetup, getSlideStudio: () => slideStudio,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -105,13 +105,14 @@
   docPaste = host.__EASYOFFICE_CREATE_DOC_PASTE__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getActiveModule: () => activeModule });
   docLink = host.__EASYOFFICE_CREATE_DOC_LINK__({
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
+    getActiveModule: () => activeModule, onSlideLink: (url, text, elId) => slideStudio?.appendLink?.(url, text, elId),
   });
 
   docToc = host.__EASYOFFICE_CREATE_DOC_TOC__({
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
     runCommand: (toc) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc }),
   });
-  docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot, saveDocState: () => workspacePanels.saveActiveDocTabState(), getActiveModule: () => activeModule });
+  docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot, saveDocState: () => workspacePanels.saveActiveDocTabState(), getActiveModule: () => activeModule, isHwpEmbedActive: () => hwpHost?.isEmbedActive?.() === true, onSlideComment: (text) => slideStudio?.appendNote?.(text) });
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
   docPageFrame = host.__EASYOFFICE_CREATE_DOC_PAGE_FRAME__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFileName: () => windowBridge?.getDocumentName(activeModule), getActiveModule: () => activeModule });
 
@@ -404,29 +405,36 @@
     }
   }
 
-  function applyZoomPercent(pct, fitMode) {
+  function syncExternalZoom(pct) {
     const zoomRange = host.__EASYOFFICE_ZOOM_RANGE__;
     const { min, max } = zoomRange.rangeOf(activeModule);
     const nextZoom = Math.max(min, Math.min(max, Math.round(Number(pct) || 100)));
     localRibbonState.zoomPercent = nextZoom;
-    const stage = document.querySelector(".canvas-stage");
-    if (stage) {
-      stage.style.zoom = nextZoom + "%";
-      if (fitMode) stage.dataset.zoomFit = fitMode;
-    }
     const zoomLabel = document.getElementById("status-zoom-label");
     if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
     const zoomSlider = document.getElementById("status-zoom-slider");
     zoomRange.syncSlider(zoomSlider, activeModule);
     if (zoomSlider) zoomSlider.value = String(nextZoom);
+    return nextZoom;
+  }
+
+  function applyZoomPercent(pct, fitMode) {
+    const nextZoom = syncExternalZoom(pct);
+    const stage = document.querySelector(".canvas-stage");
+    if (activeModule === "BOARD") {
+      if (stage) { stage.style.zoom = ""; delete stage.dataset.zoomFit; }
+      host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.()?.setZoom?.(nextZoom, { syncHost: false });
+      return;
+    }
+    if (stage) { stage.style.zoom = nextZoom + "%"; if (fitMode) stage.dataset.zoomFit = fitMode; }
     docRunsUi?.syncRuler?.(nextZoom / 100);
   }
 
   function applyZoomStepDelta(delta) {
     applyZoomPercent(host.__EASYOFFICE_ZOOM_RANGE__.step(activeModule, Number(localRibbonState.zoomPercent || 100), delta));
   }
-  // The sheet's view restores a sheet's own zoom through this (`sheet-view-live.js`).
-  host.__EASYOFFICE_ZOOM__ = { apply: applyZoomPercent, current: () => Number(localRibbonState.zoomPercent || 100) };
+  // The sheet's view restores a sheet's own zoom through this (`sheet-view-live.js`) and BOARD shares it too.
+  host.__EASYOFFICE_ZOOM__ = { apply: applyZoomPercent, syncExternal: syncExternalZoom, current: () => Number(localRibbonState.zoomPercent || 100) };
 
   function setupStaticNavigationHandlers() {
     const zoomOutBtn = document.getElementById("btn-zoom-out");
@@ -603,20 +611,9 @@
             }
             const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst);
             if (box && res) {
-              box.textContent =
-                "[" +
-                res.status +
-                "] " +
-                res.sourceFormat.toUpperCase() +
-                " (" +
-                res.sourceBytes +
-                "B) → " +
-                res.targetFormat.toUpperCase() +
-                " (" +
-                res.outputBytes +
-                "B) · " +
-                workspacePanels.describeConversionSpec(res) +
-                workspacePanels.describeDeliveryFailure(delivery, " · ");
+              const srcTxt = `${res.sourceFormat.toUpperCase()} (${res.sourceBytes}B)`;
+              const dstTxt = `${res.targetFormat.toUpperCase()} (${res.outputBytes}B)`;
+              box.textContent = `[${res.status}] ${srcTxt} → ${dstTxt} · ${workspacePanels.describeConversionSpec(res)}${workspacePanels.describeDeliveryFailure(delivery, " · ")}`;
             }
           });
         void runConvert().catch(reportConvertFailure);
@@ -711,6 +708,7 @@
     const editor = document.getElementById("doc-editor");
     if (editor) {
       docIme.bind(editor);
+      workspacePanels.bindDocOverwriteListener(editor);
       editor.addEventListener("focus", () => workspacePanels.saveActiveDocTabState());
       editor.addEventListener("blur", () => workspacePanels.saveActiveDocTabState());
       editor.addEventListener("click", (ev) => {
@@ -904,6 +902,7 @@
         handleOpenPaletteKeydown(e, modal, cmdSearchInput);
         return;
       }
+      if (document.querySelector("dialog.tool-dialog[open]:not(.find-dialog)")) return;
       handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput);
     });
   }

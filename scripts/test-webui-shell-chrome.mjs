@@ -623,3 +623,134 @@ test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, z
   assert.ok(hasDecl(cpSelectedLabel, "color", "var(--color-primary-dark)"));
 });
 
+test("modal dialogs preserve child keydown listeners, cycle Tab focus, handle checkbox Enter and Space, and isolate nested modals", async () => {
+  const { document, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-modal-keys" });
+  await flushAsyncTurns(10);
+
+  // 1. Child keydown handlers (e.g. #doc-comment-input Cmd/Ctrl+Enter) are NOT blocked by document capture
+  const commentDlg = document.getElementById("doc-comment-dialog");
+  const commentInput = document.getElementById("doc-comment-input");
+  const editor = document.getElementById("doc-editor");
+  const docP = editor.querySelector("p");
+  docP.textContent = "검토 대상 문단";
+  commentDlg.showModal();
+  commentInput.value = "수정 의견";
+  let captureStopped = false;
+  const probeEv = {
+    type: "keydown",
+    key: "Enter",
+    ctrlKey: true,
+    target: commentInput,
+    defaultPrevented: false,
+    stopPropagation() { captureStopped = true; },
+    preventDefault() { this.defaultPrevented = true; },
+  };
+  document.dispatchEvent(probeEv);
+  assert.equal(captureStopped, false, "document capture does not stopPropagation on child key events inside dialog");
+  const handled = commentInput.dispatchEvent({ type: "keydown", key: "Enter", ctrlKey: true, target: commentInput });
+  assert.equal(handled, false, "doc-comment-input Ctrl+Enter runs and calls preventDefault");
+
+  // Background Ctrl+Z shortcut on window does not run while a modal dialog is open
+  const beforeText = docP.textContent;
+  commentDlg.showModal();
+  sandbox.dispatchWindowKeydown({ key: "b", ctrlKey: true });
+  await flushAsyncTurns(4);
+  assert.equal(docP.textContent, beforeText);
+  commentDlg.close();
+  commentDlg.dispatchEvent({ type: "close", target: commentDlg });
+
+  // 2. Tab focus cycling, Space on <button>, and Enter on <input type="checkbox">
+  const pivotDlg = document.getElementById("sheet-pivot-dialog");
+  const headerCheck = document.getElementById("sheet-pivot-header");
+  const pivotPrimary = document.getElementById("btn-sheet-pivot-apply");
+  const pivotCancel = pivotDlg.querySelector(".dialog-footer [data-dialog-close]");
+  const pivotCloseX = pivotDlg.querySelector(".dialog-close");
+  pivotDlg.showModal();
+
+  // Space on a focused button must not be prevented in document capture
+  pivotCancel.focus();
+  let spacePrevented = false;
+  let spaceStopped = false;
+  document.dispatchEvent({
+    type: "keydown",
+    key: " ",
+    target: pivotCancel,
+    preventDefault() { spacePrevented = true; },
+    stopPropagation() { spaceStopped = true; },
+  });
+  assert.equal(spacePrevented, false, "Space on button is not prevented");
+  assert.equal(spaceStopped, false, "Space on button is not stopped");
+
+  // Pressing Enter on cancel button does NOT hijack to primary button
+  let primaryClicks = 0;
+  const countPrimary = () => { primaryClicks += 1; };
+  pivotPrimary.addEventListener("click", countPrimary);
+  pivotCancel.dispatchEvent({ type: "keydown", key: "Enter", target: pivotCancel });
+  assert.equal(primaryClicks, 0, "Enter on non-primary button does not click primary");
+
+  // Pressing Enter on <input type="checkbox"> triggers primary button consistently
+  headerCheck.dispatchEvent({ type: "keydown", key: "Enter", target: headerCheck });
+  assert.equal(primaryClicks, 1, "Enter on checkbox triggers primary button");
+  pivotPrimary.removeEventListener("click", countPrimary);
+
+  // Tab wraps from last focusable back to first; Shift+Tab wraps from first back to last
+  pivotCancel.focus();
+  let tabWrapped = false;
+  document.dispatchEvent({
+    type: "keydown",
+    key: "Tab",
+    target: pivotCancel,
+    preventDefault() { tabWrapped = true; },
+    stopPropagation() {},
+  });
+  assert.equal(tabWrapped, true);
+  assert.equal(document.activeElement, pivotCloseX, "Tab on last focusable wraps to first");
+
+  pivotCloseX.focus();
+  let shiftWrapped = false;
+  document.dispatchEvent({
+    type: "keydown",
+    key: "Tab",
+    shiftKey: true,
+    target: pivotCloseX,
+    preventDefault() { shiftWrapped = true; },
+    stopPropagation() {},
+  });
+  assert.equal(shiftWrapped, true);
+  assert.equal(document.activeElement, pivotCancel, "Shift+Tab on first focusable wraps to last");
+  pivotDlg.close();
+  pivotDlg.dispatchEvent({ type: "close", target: pivotDlg });
+
+  // 3. Nested modals: only topmost dialog responds to Escape and Enter
+  const namesDlg = document.getElementById("sheet-names-dialog");
+  const editDlg = document.getElementById("sheet-name-edit-dialog");
+  const namesPrimary = namesDlg.querySelector(".dialog-btn-primary");
+  const editPrimary = editDlg.querySelector(".dialog-btn-primary");
+  let namesPrimaryClicks = 0;
+  let editPrimaryClicks = 0;
+  const onNamesPrimary = () => { namesPrimaryClicks += 1; };
+  const onEditPrimary = () => { editPrimaryClicks += 1; };
+  namesPrimary.addEventListener("click", onNamesPrimary);
+  editPrimary.addEventListener("click", onEditPrimary);
+
+  namesDlg.showModal();
+  editDlg.showModal();
+  editDlg.querySelector(".dialog-body").dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    target: editDlg.querySelector(".dialog-body"),
+  });
+  assert.equal(editPrimaryClicks, 1, "topmost nested modal handles Enter");
+  assert.equal(namesPrimaryClicks, 0, "parent modal stays untouched on Enter");
+
+  document.dispatchEvent({ type: "keydown", key: "Escape", target: editDlg, preventDefault() {}, stopPropagation() {} });
+  assert.equal(editDlg.open, false, "Escape closes topmost nested modal");
+  assert.equal(namesDlg.open, true, "parent modal remains open after child closes on Escape");
+
+  // Once child closes, parent becomes topmost again and closes on next Escape
+  document.dispatchEvent({ type: "keydown", key: "Escape", target: namesDlg, preventDefault() {}, stopPropagation() {} });
+  assert.equal(namesDlg.open, false, "second Escape closes parent modal");
+  namesPrimary.removeEventListener("click", onNamesPrimary);
+  editPrimary.removeEventListener("click", onEditPrimary);
+});
+

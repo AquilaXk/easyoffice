@@ -493,6 +493,8 @@ fn parse_odp_shape(
         color: ts.color,
         font_size_pt: ts.font_size_pt.unwrap_or(16.0),
         bold: ts.bold,
+        italic: ts.italic,
+        underline: ts.underline,
         align: align.unwrap_or(SlideTextAlign::Center),
     }))
 }
