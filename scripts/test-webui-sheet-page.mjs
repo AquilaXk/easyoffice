@@ -84,7 +84,7 @@ test("확인 stores the setup in the layout as one undo step, and undo brings th
     scale: { fitWidth: 1, fitHeight: 0 }, centerH: true, grid: true, headings: true, printArea: ["A1:D10", "F15"], titleRows: [1, 2], titleCols: [1, 1],
   });
   assert.deepEqual(t.layout.getAll().Sheet1.page, t.layout.pageOf("Sheet1"), "the layout JSON of the save payload carries it");
-  assert.equal(t.document.getElementById("status-command-feedback").textContent, "쪽 설정 적용");
+  assert.equal(t.document.getElementById("status-command-feedback").textContent, "페이지 설정 적용");
   t.userClick(studioItem(t.document, "studio-undo"));
   await flushAsyncTurns(20);
   assert.equal(t.layout.pageOf("Sheet1"), null);
@@ -192,5 +192,5 @@ test("the sheet's paper, orientation and margin commands are the page setup: no 
   const labels = [...t.document.querySelectorAll(".md-item[data-studio-menu-cmd]")].filter((el) => !el.closest("[hidden]")).map((el) => el.querySelector(".md-label").textContent);
   assert.equal(labels.includes("용지 방향") || labels.includes("여백") || labels.includes("용지 방향 전환") || labels.includes("여백 전환"), false);
   const items = t.host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(t.document).map((i) => i.title);
-  assert.ok(items.includes("쪽 설정…") && items.includes("인쇄 영역 설정") && items.includes("인쇄 영역 해제"));
+  assert.ok(items.includes("페이지 설정…") && items.includes("인쇄 영역 설정") && items.includes("인쇄 영역 해제"));
 });

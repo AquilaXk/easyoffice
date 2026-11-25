@@ -15,7 +15,7 @@ const OLD_PLACEHOLDER = "커맨드 검색";
 
 test("applyKoOverrides replaces only the named value", () => {
   const code = 'const c = {\n  "a.b": "커맨드 검색...",\n  "a.c": "그대로",\n};\n';
-  assert.equal(applyKoOverrides(code, { "a.b": "명령 검색..." }), 'const c = {\n  "a.b": "명령 검색...",\n  "a.c": "그대로",\n};\n');
+  assert.equal(applyKoOverrides(code, { "a.b": "명령 검색…" }), 'const c = {\n  "a.b": "명령 검색…",\n  "a.c": "그대로",\n};\n');
 });
 
 test("applyKoOverrides rejects missing and duplicate keys", () => {
@@ -27,15 +27,15 @@ test("overrides leave no 커맨드 in the upstream ko catalog", { skip: !fs.exis
   const out = applyKoOverrides(fs.readFileSync(UPSTREAM_KO, "utf8"), readKoOverrides(REPO));
   assert.equal(out.includes(OLD_TERM), false);
   assert.equal(out.includes("토글"), false);
-  assert.ok(out.includes("명령 검색..."));
+  assert.ok(out.includes("명령 검색…"));
   assert.ok(out.includes("글머리표 켜기/끄기"));
 });
 
-test("built bundle shows 명령 검색... and no 커맨드", { skip: !fs.existsSync(path.join(BUNDLE, "index.html")) }, () => {
+test("built bundle shows 명령 검색… and no 커맨드", { skip: !fs.existsSync(path.join(BUNDLE, "index.html")) }, () => {
   const text = listFiles(BUNDLE)
     .filter((rel) => /\.(js|html)$/.test(rel))
     .map((rel) => fs.readFileSync(path.join(BUNDLE, rel), "utf8"))
     .join("\n");
   assert.equal(text.includes(OLD_PLACEHOLDER), false);
-  assert.ok(text.includes("명령 검색..."));
+  assert.ok(text.includes("명령 검색…"));
 });

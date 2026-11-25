@@ -32,6 +32,8 @@
     "file:open-recent": "recent-dialog",
     "file:save": "studio-save",
     "file:save-as": "file-save-as",
+    "file:save-as-hwpx": "hwp-save-as:hwpx",
+    "file:doc-paper": "studio-cmd:layout-paper",
     "file:export-pdf": "hwp-export-pdf",
     "file:print-preview": "verify-act:print-preview",
     "file:print": "print",
@@ -56,7 +58,7 @@
     "view:theme-light": "theme:light",
     "view:theme-dark": "theme:dark",
     "view:theme-toggle": "studio-cmd:view-theme",
-    "view:toolbar-labels": "hwp-editor",
+    "view:toolbar-labels": "view-toolbar-labels",
     "view:form-mode": "hwp-editor",
     "view:ctrl-marks": "studio-cmd:ctrl-marks",
     "view:para-marks": "studio-cmd:para-marks",
@@ -199,6 +201,14 @@
     "page:slide-snap": "studio-cmd:slide-mod-snap",
     "page:slide-transition": "studio-cmd:slide-mod-transition",
     "page:slide-presenter": "studio-cmd:slide-mod-presenter",
+    "slide:insert-textbox": "slide-act:insert-textbox",
+    "slide:insert-picture": "slide-act:insert-picture",
+    "slide:bring-front": "slide-act:bring-front",
+    "slide:send-back": "slide-act:send-back",
+    "slide:delete-element": "slide-act:delete-element",
+    "sheet:insert-picture": "sheet-act:insert-picture",
+    "sheet:note-insert": "sheet-act:note-insert",
+    "sheet:note-toggle-all": "sheet-act:note-toggle-all",
     "table:insert": "studio-cmd:insert-table",
     "table:row-above": "studio-cmd:table-row-above",
     "table:add-row": "studio-cmd:table-add-row",
@@ -221,7 +231,6 @@
     "table:sort": "studio-cmd:data-sort",
     "table:validation": "studio-cmd:data-validation",
     "table:sheet-pivot": "studio-cmd:sheet-mod-pivot",
-    "table:sheet-chart": "studio-cmd:sheet-mod-chart",
     "table:sheet-condfmt": "studio-cmd:sheet-mod-condfmt",
     "table:sheet-freeze": "studio-cmd:sheet-mod-freeze",
     "sheet:row-insert-above": "sheet-act:row-insert-above",
@@ -273,14 +282,13 @@
     "tool:copilot": "studio-cmd:copilot-toggle",
     "tool:diagnose": "studio-cmd:smart-diagnose",
     "tool:scrub-pii": "studio-cmd:scrub-pii",
-    "tool:security-audit": "studio-cmd:security-audit",
+    "tool:review-verify": "studio-cmd:review-verify",
     "tool:doc-inspect": "verify-act:doc-inspect",
     "tool:bench-run": "studio-cmd:bench-run",
     "tool:review-track": "studio-cmd:review-track",
     "tool:review-accept-all": "studio-cmd:review-accept-all",
     "tool:review-reject-all": "studio-cmd:review-reject-all",
     "tool:review-comment": "studio-cmd:review-comment",
-    "tool:review-verify": "studio-cmd:review-verify",
     "tool:review-stats": "studio-cmd:review-stats",
     "tool:pdf-highlight": "studio-cmd:pdf-mod-highlight",
     "tool:pdf-rotate": "studio-cmd:pdf-mod-rotate",
@@ -294,7 +302,7 @@
   // page's own menu row: the editor's 파일 menu carries it in the Hangul window, and no other window
   // has it, so the native item is grayed out everywhere but in the editor window. Print is in the
   // page's menu row too, for the modules that print (`studioCommandApplies("print", ...)`).
-  const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf"]);
+  const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-save-as"]);
   const EMBED_ONLY_SET = new Set(EMBED_ONLY_ACTIONS);
   const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "find", "replace"]);
   const START_DISABLED_SET = new Set(START_DISABLED_ACTIONS);
@@ -335,6 +343,12 @@
     "edit:redo": "edit:redo",
     "edit:cut": "edit:cut",
     "edit:copy": "edit:copy",
+    "edit:find": "edit:find",
+    "edit:replace": "edit:find-replace",
+    "format:bold": "format:bold",
+    "format:italic": "format:italic",
+    "format:underline": "format:underline",
+    "insert:link": "insert:hyperlink",
   });
 
   // The same four items while a plain text field of the page has the focus (a bound ⌘ key never reaches the
@@ -351,14 +365,23 @@
   // arguments come from the static table above only.
   function pageMenuActions(document) {
     const click = (selector) => document.querySelector(selector)?.click();
+    const clickVisible = (selector) => {
+      for (const el of document.querySelectorAll(selector)) {
+        if (!el.hidden && !el.closest("[hidden]")) { el.click(); return; }
+      }
+      click(selector);
+    };
     return {
-      "studio-cmd": (cmd) => click(`.md-item[data-studio-menu-cmd="${cmd}"]`),
+      "studio-cmd": (cmd) => clickVisible(`.md-item[data-studio-menu-cmd="${cmd}"]`),
       "verify-act": (act) => click(`.md-item[data-verify-act="${act}"]`),
+      "slide-act": (act) => click(`.md-item[data-slide-act="${act}"]`),
       "sheet-act": (act) => click(`.md-item[data-sheet-act="${act}"]`),
       "sheet-numfmt": (action) => click(`.md-item[data-sheet-numfmt="${action}"]`),
       "sheet-paste": (action) => click(`.md-item[data-sheet-paste="${action}"]`),
       "sheet-look": (action) => click(`.md-item[data-sheet-look="${action}"]`),
       "sheet-cf": (action) => click(`.md-item[data-sheet-cf="${action}"]`),
+      "hwp-save-as": (fmt) => click(`.md-item[data-hwp-save-as="${fmt}"]`),
+      "view-toolbar-labels": () => click("[data-view-toolbar-labels]"),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),
       "update-check": () => click("[data-update-check-toggle]"),
@@ -449,6 +472,34 @@
       return out;
     }
 
+    const TOOLBAR_LABELS_KEY = "toolbar-labels";
+    function readToolbarLabels() {
+      try {
+        return env.localStorage?.getItem(TOOLBAR_LABELS_KEY) !== "hidden";
+      } catch {
+        return true;
+      }
+    }
+    function applyToolbarLabels(visible) {
+      const shown = Boolean(visible);
+      if (document.documentElement?.dataset) document.documentElement.dataset.toolbarLabels = shown ? "shown" : "hidden";
+      for (const el of document.querySelectorAll("[data-view-toolbar-labels]")) {
+        el.classList?.toggle?.("active", shown);
+        el.setAttribute("aria-checked", String(shown));
+      }
+    }
+    function toggleToolbarLabels() {
+      const next = document.documentElement?.dataset?.toolbarLabels === "hidden";
+      applyToolbarLabels(next);
+      try {
+        env.localStorage?.setItem(TOOLBAR_LABELS_KEY, next ? "shown" : "hidden");
+      } catch {
+        // Ignore unavailable storage.
+      }
+      pushMenuState();
+      return next;
+    }
+
     // Without a new module context the last one is reused (a theme change); nothing is sent before the
     // first one, and an unchanged state is not sent twice.
     function pushMenuState(commandModule) {
@@ -456,7 +507,8 @@
       if (commandModule !== undefined) menuContext = { commandModule };
       if (!menuContext || !bridge?.isAvailable() || !deps.hasNativeMenu()) return;
       const active = menuContext.commandModule;
-      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(active), kind: host.__EASYOFFICE_MENU_KINDS__.menuKindOf(active) };
+      const toolbarLabels = document.documentElement?.dataset?.toolbarLabels !== "hidden";
+      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(active), kind: host.__EASYOFFICE_MENU_KINDS__.menuKindOf(active), toolbarLabels };
       const key = JSON.stringify(state);
       if (key === lastMenuState) return;
       lastMenuState = key;
@@ -855,6 +907,20 @@
     function bind() {
       bindAbout();
       bindIconToolbarScroller();
+      applyToolbarLabels(readToolbarLabels());
+      for (const el of document.querySelectorAll("[data-view-toolbar-labels]")) {
+        el.addEventListener("click", (ev) => {
+          ev.stopPropagation?.();
+          host.__EASYOFFICE_CLOSE_MENUS__?.(document);
+          toggleToolbarLabels();
+        });
+      }
+      env.addEventListener?.("storage", (ev) => {
+        if (ev.key === TOOLBAR_LABELS_KEY || ev.key === null) {
+          applyToolbarLabels(readToolbarLabels());
+          pushMenuState();
+        }
+      });
       for (const dlg of document.querySelectorAll("dialog.tool-dialog")) {
         enableDialogDrag(dlg);
         enableDialogKeys(dlg);
@@ -863,7 +929,7 @@
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, enableDialogKeys, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, enableDialogKeys, toggleToolbarLabels, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

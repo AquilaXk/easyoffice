@@ -65,7 +65,7 @@ const enabledMenuItems = (document) =>
 const PALETTE_ONLY = {
   DOC: ["data-validation"],
   HWP: ["layout-orientation", "layout-margins", "data-validation"],
-  SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins"],
+  SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"],
   SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
   PDF: [
     "home-bold", "home-italic", "home-underline", "home-style",
@@ -316,7 +316,7 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(labelsOf(document, "doc-mod-mailmerge"), ["편지 병합"]);
   assert.deepEqual(labelsOf(document, "palette"), ["명령 검색", "환경 설정 및 명령 검색"]);
   assert.deepEqual(labelsOf(document, "find"), ["찾기"]);
-  assert.deepEqual(labelsOf(document, "replace"), ["찾아 바꾸기"]);
+  assert.deepEqual(labelsOf(document, "replace"), ["찾기 및 바꾸기"]);
   assert.deepEqual(labelsOf(document, "print"), ["인쇄…"]);
   const docVisibleNames = [
     ...document.querySelectorAll(".md-item").filter(shown).map((el) => el.querySelector(".md-label")?.textContent || ""),

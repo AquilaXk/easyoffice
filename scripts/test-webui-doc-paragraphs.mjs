@@ -168,7 +168,7 @@ test("the style box turns paragraphs into outline headings and back", async () =
   const [a, b] = h.blocks;
   const style = h.document.getElementById("doc-style-select");
   await selectAcross(h, a, b);
-  style.value = "개요 2";
+  style.value = "제목 2";
   style.dispatchEvent({ type: "change", target: style });
   await flushAsyncTurns(10);
   assert.deepEqual(tags(h), ["H2", "H2", "P"]);
@@ -176,8 +176,14 @@ test("the style box turns paragraphs into outline headings and back", async () =
   assert.equal(h.editor.childNodes[0].textContent, "가");
 
   await caretIn(h, h.editor.childNodes[0]);
-  assert.equal(style.value, "개요 2", "the box shows the paragraph's style");
-  style.value = "바탕글";
+  assert.equal(style.value, "제목 2", "the box shows the paragraph's style");
+  style.value = "제목 5";
+  style.dispatchEvent({ type: "change", target: style });
+  await flushAsyncTurns(10);
+  assert.deepEqual(tags(h), ["H5", "H2", "P"]);
+  assert.deepEqual(saved(h).map((blk) => blk.heading), [5, 2, undefined]);
+
+  style.value = "표준";
   style.dispatchEvent({ type: "change", target: style });
   await flushAsyncTurns(10);
   assert.deepEqual(tags(h), ["P", "H2", "P"]);
@@ -186,11 +192,11 @@ test("the style box turns paragraphs into outline headings and back", async () =
 test("the style box without a selection keeps the shown style and says what to do", async () => {
   const h = await createRunHarness([p("본문")]);
   const style = h.document.getElementById("doc-style-select");
-  style.value = "개요 1";
+  style.value = "제목 1";
   style.dispatchEvent({ type: "change", target: style });
   await flushAsyncTurns(10);
   assert.equal(h.editor.childNodes[0].tagName, "P");
-  assert.equal(style.value, "바탕글");
+  assert.equal(style.value, "표준");
   assert.match(feedback(h), /스타일을 적용할 문단을 먼저 선택/);
 });
 
@@ -199,7 +205,8 @@ test("controls without a model counterpart are gone and no dead style rules rema
   assert.equal(h.document.getElementById("doc-font-lang"), null, "no per-language font slot in the run model");
   assert.equal(h.document.getElementById("btn-stylebar-charfx"), null, "no character effects in the run model");
   const values = Array.from(h.document.getElementById("doc-style-select").querySelectorAll("option")).map((o) => o.value);
-  assert.deepEqual(values, ["바탕글", "공문서 바탕글", "개요 1", "개요 2", "개요 3"]);
+  assert.deepEqual(values, ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"]);
+  assert.equal(values.includes("공문서 바탕글"), false);
   const css = ["styles.css", "toolbar.css", "content.css"].map((f) => readText(new URL(f, UI_DIR))).join("\n");
   assert.doesNotMatch(css, /data-(strike|textcolor|highlight|charfx)|doc-font-lang|sb-lang-select/);
 });

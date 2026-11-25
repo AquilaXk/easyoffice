@@ -341,7 +341,7 @@
         return Promise.resolve(null);
       }
       const extra = (plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "") + (options?.note || "");
-      const label = mode === "all" && !transpose ? "붙여넣기" : "골라 붙이기";
+      const label = mode === "all" && !transpose ? "붙여넣기" : "선택하여 붙여넣기";
       const merges = core.planMerges({ snap, mode, transpose, target, grid });
       if (merges?.refused) {
         say("붙여넣을 병합이 너무 많음");

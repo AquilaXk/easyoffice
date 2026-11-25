@@ -83,12 +83,14 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
 }
 
 /// Settings the user switches on and off or picks one of: check items whose mark [`sync`] sets.
-pub const CHECK_IDS: [&str; 4] = [
+pub const CHECK_IDS: [&str; 5] = [
     "view:theme-system",
     "view:theme-light",
     "view:theme-dark",
+    TOOLBAR_LABELS_ID,
     UPDATE_CHECK_ID,
 ];
+const TOOLBAR_LABELS_ID: &str = "view:toolbar-labels";
 const UPDATE_CHECK_ID: &str = "help:update-check";
 const THEME_ITEMS: [(&str, &str); 3] = [
     ("system", "view:theme-system"),
@@ -149,19 +151,43 @@ pub fn dispatch_script(id: &str) -> Option<String> {
     (id.len() <= MAX_ID_LEN).then(|| format!("{SCRIPT_PREFIX}{quoted});"))
 }
 
+/// Per-window Korean label for a menu item (`HWP` preserves the Hangul editor's terms while
+/// Office windows use official Office Korean terminology, `PD-354`).
+pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
+    if kind == MenuKind::Hwp {
+        match spec.id {
+            "edit:undo" => return "되돌리기",
+            "edit:cut" => return "오려 두기",
+            "edit:copy" => return "복사하기",
+            "edit:paste" => return "붙이기",
+            "edit:replace" => return "찾아 바꾸기",
+            "format:bold" => return "진하게",
+            "format:italic" => return "기울임",
+            "view:zoom-100" => return "실제 크기",
+            _ => {}
+        }
+    }
+    spec.label
+}
+
 fn custom<R: Runtime>(
     app: &AppHandle<R>,
+    kind: MenuKind,
     spec: &MenuItemSpec,
 ) -> tauri::Result<tauri::menu::MenuItem<R>> {
-    let builder = MenuItemBuilder::with_id(spec.id, spec.label);
+    let builder = MenuItemBuilder::with_id(spec.id, label_for(kind, spec));
     match accelerator_of(spec) {
         Some(accelerator) => builder.accelerator(accelerator).build(app),
         None => builder.build(app),
     }
 }
 
-fn check<R: Runtime>(app: &AppHandle<R>, spec: &MenuItemSpec) -> tauri::Result<CheckMenuItem<R>> {
-    CheckMenuItemBuilder::with_id(spec.id, spec.label)
+fn check<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: MenuKind,
+    spec: &MenuItemSpec,
+) -> tauri::Result<CheckMenuItem<R>> {
+    CheckMenuItemBuilder::with_id(spec.id, label_for(kind, spec))
         .checked(false)
         .build(app)
 }
@@ -200,12 +226,18 @@ pub struct MenuView<'a> {
     pub disabled_mask: ItemMask,
     /// The update-check switch: `None` when the app does not check at all (it is then disabled).
     pub update_check: Option<bool>,
+    /// Whether `#icon-toolbar` / DOM toolbars show `.tb-label` text under buttons (`PD-105`, `PD-354`).
+    pub toolbar_labels: bool,
 }
 
 /// `(checked, enabled)` of a check item, `None` for an id that is not one.
 fn check_state(id: &str, view: &MenuView) -> Option<(bool, bool)> {
     if id == UPDATE_CHECK_ID {
         return Some((view.update_check == Some(true), view.update_check.is_some()));
+    }
+    if id == TOOLBAR_LABELS_ID {
+        let enabled = item_index(id).is_none_or(|index| !view.disabled_mask.contains(index));
+        return Some((view.toolbar_labels, enabled));
     }
     let theme = theme_item_id(view.theme);
     is_check_item(id).then(|| {

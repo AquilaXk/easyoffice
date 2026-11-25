@@ -23,6 +23,7 @@
         eoFirstPage: "",
         eoEvenOdd: "",
         eoTrackChanges: "",
+        eoDocFlavor: "",
         styleRole: "",
         showCtrlMarks: "",
         showParaMarks: "true",
@@ -43,6 +44,7 @@
       eoFirstPage: editor.dataset.eoFirstPage || "",
       eoEvenOdd: editor.dataset.eoEvenOdd || "",
       eoTrackChanges: editor.dataset.eoTrackChanges || "",
+      eoDocFlavor: editor.dataset.eoDocFlavor || "",
       styleRole: editor.dataset.styleRole || "",
       showCtrlMarks: editor.dataset.showCtrlMarks || "",
       showParaMarks: editor.dataset.showParaMarks || "",
@@ -67,6 +69,7 @@
       "eoFirstPage",
       "eoEvenOdd",
       "eoTrackChanges",
+      "eoDocFlavor",
       "styleRole",
       "showCtrlMarks",
       "showParaMarks",
@@ -727,9 +730,13 @@
         releaseDocImageUrls(editor);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
-      const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
+      const flavor = mod === "DOC" && editor?.dataset?.eoDocFlavor === "pages" ? "pages" : "";
+      deps.getDocRuns?.()?.syncStyleOptions?.(mod, flavor);
+      const defaultRole = mod === "HWP" ? "바탕글" : flavor === "pages" ? "본문" : "표준";
+      const roleVal = editor?.dataset?.styleRole && (mod === "HWP" ? editor.dataset.styleRole === "바탕글" : flavor === "pages" ? editor.dataset.styleRole === "본문" : editor.dataset.styleRole === "표준") ? editor.dataset.styleRole : defaultRole;
       setElField("doc-style-role-badge", "textContent", roleVal);
       setElField("doc-style-select", "value", roleVal);
+      host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(document.getElementById("doc-style-select"));
       const fontVal = editor?.style?.fontFamily || (mod === "HWP" ? "함초롬바탕" : "맑은 고딕");
       setElField("doc-font-select", "value", fontVal);
       setElField("doc-style-font-badge", "textContent", fontVal);

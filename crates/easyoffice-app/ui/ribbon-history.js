@@ -380,9 +380,7 @@
         const anchor = targetEl.firstChild || targetEl;
         runs.setLastRange({ startContainer: anchor, startOffset: 0, endContainer: anchor, endOffset: 0, collapsed: true });
       }
-      const curTag = String(targetEl?.tagName || "").toUpperCase();
-      const match = /^H([1-3])$/.exec(curTag);
-      const curStyle = match ? "개요 " + match[1] : (select.value || styles[0]);
+      const curStyle = runs.styleNameOf?.(targetEl) || select.value || styles[0];
       const nextStyle = cyclePreset(styles, curStyle);
       runs.setStyle(nextStyle, { undo: false });
       syncDocStyleBarFromTarget(getWorkspacePanels().getFocusedDocBlock(docEditor));
@@ -574,8 +572,10 @@
       getWorkspacePanels().saveActiveDocTabState();
     }
 
-    const applyAuditFromPrepared = (_id, _res, prepared) =>
+    const applyAuditFromPrepared = (_id, _res, prepared, options) => {
       getWorkspacePanels().applySecurityAuditDom(prepared?.auditOutcome);
+      if (options) options.skipFeedback = true;
+    };
     const applyStatsFromPrepared = (_id, _res, prepared) => {
       const workspacePanels = getWorkspacePanels();
       workspacePanels.applySmartDiagnoseDom(prepared?.smartRes, false);
@@ -812,7 +812,7 @@
     async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options = {}) {
       const viewEffect = viewRibbonEffectFor(cmdId);
       if (viewEffect) {
-        viewEffect(cmdId, execRes, preparedEffect);
+        viewEffect(cmdId, execRes, preparedEffect, options);
         return;
       }
       if (applyDocumentPaneEffect(cmdId, execRes, options)) return;
@@ -902,6 +902,9 @@
       if (cmdId === "slide-insert-table" || cmdId === "slide-insert-chart" || cmdId === "slide-insert-shape") {
         host.__EASYOFFICE_SLIDE_CANVAS__?.dialogs?.openForRibbonCommand?.(cmdId);
         return Promise.resolve(null);
+      }
+      if (cmdId.endsWith("-review-verify") && !options.skipSecurityDialog && !isHwpEmbedCommandBlocked(cmdId, options.targetModule || getActiveModule())) {
+        getWorkspacePanels().openToolDialog("security-dialog");
       }
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();

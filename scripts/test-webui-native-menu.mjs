@@ -79,6 +79,12 @@ const EXPECTED_EDITOR_COMMANDS = {
   "edit:redo": "edit:redo",
   "edit:cut": "edit:cut",
   "edit:copy": "edit:copy",
+  "edit:find": "edit:find",
+  "edit:replace": "edit:find-replace",
+  "format:bold": "format:bold",
+  "format:italic": "format:italic",
+  "format:underline": "format:underline",
+  "insert:link": "insert:hyperlink",
 };
 
 test("the native menu ids that reach the Hangul editor map to the reference app's editor command ids", () => {
@@ -92,7 +98,6 @@ test("the native menu ids that reach the Hangul editor map to the reference app'
     "table:cell-select",
     "table:cell-split",
     "view:form-mode",
-    "view:toolbar-labels",
     "view:zoom-dialog",
   ]);
   assert.equal(rust.get("table:cell-select").accelerator, "CmdOrCtrl+Alt+T");
@@ -120,7 +125,7 @@ test("the native file menu has PDF export and print with the reference keys, run
   const { NATIVE_MENU_ACTIONS, EMBED_ONLY_ACTIONS } = chromeTable();
   assert.equal(NATIVE_MENU_ACTIONS["file:export-pdf"], "hwp-export-pdf");
   assert.equal(NATIVE_MENU_ACTIONS["file:print"], "print");
-  assert.deepEqual([...EMBED_ONLY_ACTIONS], ["hwp-export-pdf"]);
+  assert.deepEqual([...EMBED_ONLY_ACTIONS], ["hwp-export-pdf", "hwp-save-as"]);
   const html = read("crates/easyoffice-app/ui/index.html");
   const menu = html.slice(html.indexOf('<div class="studio-menubar"'), html.indexOf('class="topbar-actions"'));
   assert.ok(!/export-pdf|PDF로 내보내기/.test(menu), "no page menu item for PDF export: the editor's own 파일 menu has it");

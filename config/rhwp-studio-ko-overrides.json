@@ -1,5 +1,12 @@
 {
+  "command.format.levelDecrease.toolbarLabel": "한 수준\n감소",
+  "command.format.levelIncrease.toolbarLabel": "한 수준\n증가",
   "command.format.toggleBullet.registryLabel": "글머리표 켜기/끄기",
   "command.format.toggleNumbering.registryLabel": "문단 번호 켜기/끄기",
-  "dialog.commandPalette.input.placeholder": "명령 검색..."
+  "command.page.footerCreate.label": "꼬리말 편집…",
+  "command.page.headerCreate.label": "머리말 편집…",
+  "command.table.deleteRowCol.label": "줄/칸 지우기(E)…",
+  "command.table.insertRowCol.label": "줄/칸 추가하기(I)…",
+  "command.view.zoomDialog.label": "화면 확대/축소…",
+  "dialog.commandPalette.input.placeholder": "명령 검색…"
 }

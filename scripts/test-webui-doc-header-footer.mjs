@@ -230,7 +230,7 @@ test("PD-249: 3-zone toggle splits header into left/center/right compartments, n
   const hdr = section(editor, "header");
   assert.equal(hdr.dataset.eoHfZones, "true");
   assert.equal(toggleZonesBtn.getAttribute("aria-pressed"), "true");
-  assert.equal(toggleZonesBtn.getAttribute("title"), "빈 문서(3열)");
+  assert.equal(toggleZonesBtn.getAttribute("title"), "3열 분할");
   assert.equal(document.querySelector("#icon-toolbar .tb-hf-label").textContent, "머리글 · 양쪽 편집 중");
 
   const zones = [...hdr.querySelectorAll(":scope > p[data-eo-zone]")];

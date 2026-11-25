@@ -100,10 +100,10 @@ test("recent colours work without storage: the choice still applies and shows in
   assert.equal(panel.querySelectorAll(".eo-recent-colors .sb-hl-swatch").length, 1);
 });
 
-test("the native chooser commit ('다른 색...') applies like a swatch", async () => {
+test("the native chooser commit ('다른 색…') applies like a swatch", async () => {
   const { document } = await openDoc();
   const { panel, input } = parts(document, "textcolor");
-  const other = [...panel.querySelectorAll(".sb-hl-palette-actions button")].find((b) => b.textContent === "다른 색...");
+  const other = [...panel.querySelectorAll(".sb-hl-palette-actions button")].find((b) => b.textContent === "다른 색…");
   assert.ok(other, "the palette offers the native chooser");
   input.value = "#123456";
   input.dispatchEvent({ type: "change", target: input });

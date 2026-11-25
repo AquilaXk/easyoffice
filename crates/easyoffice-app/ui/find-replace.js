@@ -9,7 +9,7 @@
 
   const { buildMatcher, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
   const DIALOG_ID = "find-dialog";
-  const KIND_OF = { DOC: "doc", SHEET: "sheet", BASE: "base" };
+  const KIND_OF = { DOC: "doc", HWP: "doc", SHEET: "sheet", BASE: "base" };
   // Matches on each side of the current one that get an on-screen highlight range.
   const NEAR_WINDOW = 1000;
   const MAX_SELECTION_QUERY = 100;
@@ -39,7 +39,7 @@
     });
 
     function createSource(moduleCode) {
-      if (moduleCode === "DOC") return host.__EASYOFFICE_CREATE_DOC_FIND_SOURCE__({ root: byId("doc-editor"), document, env, withUndo });
+      if (moduleCode === "DOC" || moduleCode === "HWP") return host.__EASYOFFICE_CREATE_DOC_FIND_SOURCE__({ root: byId("doc-editor"), document, env, withUndo });
       if (moduleCode === "BASE") return host.__EASYOFFICE_CREATE_BASE_FIND_SOURCE__({ getBaseStudio: deps.getBaseStudio, setFeedback });
       return host.__EASYOFFICE_CREATE_SHEET_FIND_SOURCE__({
         sheetDataStore: deps.sheetDataStore, getActiveSheetName: deps.getActiveSheetName,
@@ -190,7 +190,8 @@
     function applyMode(mode) {
       const { title, replaceRow, replaceButtons, sheetOptions: optionsRow } = ui();
       const replacing = mode === "replace";
-      title.textContent = replacing ? "찾아 바꾸기" : "찾기";
+      const replaceTitle = getActiveModule() === "HWP" ? "찾아 바꾸기" : "찾기 및 바꾸기";
+      title.textContent = replacing ? replaceTitle : "찾기";
       replaceRow.hidden = !replacing;
       replaceButtons.hidden = !replacing;
       optionsRow.hidden = source?.kind !== "sheet";

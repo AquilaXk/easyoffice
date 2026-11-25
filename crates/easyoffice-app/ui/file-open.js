@@ -625,6 +625,7 @@
           // The page setup is the file's own (`doc-page-setup.js`): a file without one does not take the last document's.
           layoutStyle: {
             ...(next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" }),
+            eoDocFlavor: mod === "DOC" && String(res.format || "").toLowerCase() === "pages" ? "pages" : "",
             columnCount: uniformCols,
             eoFirstPage: res.firstPageDifferent ? "true" : "",
             eoEvenOdd: res.evenOddDifferent ? "true" : "",

@@ -11,10 +11,11 @@ use super::layout::{
     NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME,
     THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
-use super::{check, custom, is_check_item, quit_item, spec, QUIT_ID};
+use super::{check, custom, is_check_item, label_for, quit_item, spec, QUIT_ID};
 
 fn nested<R: Runtime>(
     app: &AppHandle<R>,
+    kind: MenuKind,
     title: &str,
     lines: &[&'static str],
 ) -> tauri::Result<Submenu<R>> {
@@ -23,35 +24,41 @@ fn nested<R: Runtime>(
         builder = if *id == SEPARATOR {
             builder.separator()
         } else if let Some(sub) = layout::cf_submenu(id) {
-            builder.item(&nested(app, sub.title, sub.lines)?)
+            builder.item(&nested(app, kind, sub.title, sub.lines)?)
         } else if is_check_item(id) {
-            builder.item(&check(app, spec(id))?)
+            builder.item(&check(app, kind, spec(id))?)
         } else {
-            builder.item(&custom(app, spec(id))?)
+            builder.item(&custom(app, kind, spec(id))?)
         };
     }
     builder.build()
 }
 
-fn submenu<R: Runtime>(app: &AppHandle<R>, menu: &MenuSpec) -> tauri::Result<Submenu<R>> {
+fn submenu<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: MenuKind,
+    menu: &MenuSpec,
+) -> tauri::Result<Submenu<R>> {
     let mut builder = SubmenuBuilder::new(app, menu.title);
     for line in menu.lines {
         builder = match *line {
             SEPARATOR => builder.separator(),
-            NEW_DOCS => builder.item(&nested(app, "새 문서", &NEW_DOC_IDS)?),
-            THEME => builder.item(&nested(app, "테마", &THEME_IDS)?),
-            NUMFMT => builder.item(&nested(app, "표시 형식", &NUMFMT_LINES)?),
-            ALIGN => builder.item(&nested(app, "맞춤", &ALIGN_LINES)?),
-            BORDER => builder.item(&nested(app, "테두리", &BORDER_LINES)?),
-            CF => builder.item(&nested(app, "조건부 서식", &CF_LINES)?),
-            USE_IN_FORMULA => builder.item(&nested(app, "수식에서 사용", &USE_IN_FORMULA_LINES)?),
-            CALC_OPTIONS => builder.item(&nested(app, "계산 옵션", &CALC_OPTIONS_LINES)?),
+            NEW_DOCS => builder.item(&nested(app, kind, "새 문서", &NEW_DOC_IDS)?),
+            THEME => builder.item(&nested(app, kind, "테마", &THEME_IDS)?),
+            NUMFMT => builder.item(&nested(app, kind, "표시 형식", &NUMFMT_LINES)?),
+            ALIGN => builder.item(&nested(app, kind, "맞춤", &ALIGN_LINES)?),
+            BORDER => builder.item(&nested(app, kind, "테두리", &BORDER_LINES)?),
+            CF => builder.item(&nested(app, kind, "조건부 서식", &CF_LINES)?),
+            USE_IN_FORMULA => {
+                builder.item(&nested(app, kind, "수식에서 사용", &USE_IN_FORMULA_LINES)?)
+            }
+            CALC_OPTIONS => builder.item(&nested(app, kind, "계산 옵션", &CALC_OPTIONS_LINES)?),
             // Paste and select all are system items: paste reaches the page's paste handler and
             // the text fields. Every system item carries its Korean text (the system language
             // would show otherwise).
             PASTE => builder.item(&PredefinedMenuItem::paste(
                 app,
-                Some(spec("edit:paste").label),
+                Some(label_for(kind, spec("edit:paste"))),
             )?),
             SELECT_ALL => builder.item(&PredefinedMenuItem::select_all(app, Some("모두 선택"))?),
             SERVICES => builder.item(&PredefinedMenuItem::services(app, Some("서비스"))?),
@@ -65,8 +72,8 @@ fn submenu<R: Runtime>(app: &AppHandle<R>, menu: &MenuSpec) -> tauri::Result<Sub
             // 끝내기 is the custom item that runs in Rust, not the system one that would end the
             // process at once.
             QUIT_ID => builder.item(&quit_item(app)?),
-            id if is_check_item(id) => builder.item(&check(app, spec(id))?),
-            id => builder.item(&custom(app, spec(id))?),
+            id if is_check_item(id) => builder.item(&check(app, kind, spec(id))?),
+            id => builder.item(&custom(app, kind, spec(id))?),
         };
     }
     builder.build()
@@ -76,7 +83,7 @@ fn submenu<R: Runtime>(app: &AppHandle<R>, menu: &MenuSpec) -> tauri::Result<Sub
 pub fn build<R: Runtime>(app: &AppHandle<R>, kind: MenuKind) -> tauri::Result<Menu<R>> {
     let menu = Menu::new(app)?;
     for spec in layout::layout(kind) {
-        menu.append(&submenu(app, spec)?)?;
+        menu.append(&submenu(app, kind, spec)?)?;
     }
     Ok(menu)
 }

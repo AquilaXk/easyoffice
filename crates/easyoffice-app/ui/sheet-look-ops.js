@@ -15,7 +15,7 @@
   const H_ACTIONS = { "align-left": "left", "align-center": "center", "align-right": "right" };
   const V_ACTIONS = { "valign-top": "top", "valign-middle": "middle", "valign-bottom": "" };
   const BORDER_KINDS = { "border-all": "all", "border-outer": "outer", "border-inner": "inner", "border-top": "top", "border-bottom": "bottom", "border-left": "left", "border-right": "right", "border-none": "none" };
-  const LABELS = { align: "맞춤", wrap: "줄 바꿈", border: "테두리", protect: "셀 보호", fill: "채우기 색", fontColor: "글꼴 색" };
+  const LABELS = { align: "맞춤", wrap: "텍스트 줄 바꿈", border: "테두리", protect: "셀 보호", fill: "채우기 색", fontColor: "글꼴 색" };
   // The style key and label of each color action.
   const COLOR_ACTIONS = { fill: ["fill", LABELS.fill], "font-color": ["fontColor", LABELS.fontColor] };
 

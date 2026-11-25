@@ -132,16 +132,16 @@
       });
     }
 
-    const group = () => editOutline((o, t) => outlineApi.group(o, t.axis, t.first, t.last), "그룹 묶기", "그룹");
-    const ungroup = () => editOutline((o, t) => outlineApi.ungroup(o, t.axis, t.first, t.last), "그룹 풀기", "그룹 해제");
-    const hideDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, true), "하위 수준 숨기기");
-    const showDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, false), "하위 수준 표시");
+    const group = () => editOutline((o, t) => outlineApi.group(o, t.axis, t.first, t.last), "그룹", "그룹");
+    const ungroup = () => editOutline((o, t) => outlineApi.ungroup(o, t.axis, t.first, t.last), "그룹 해제", "그룹 해제");
+    const hideDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, true), "세부 정보 숨기기");
+    const showDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, false), "세부 정보 표시");
     const clearOutline = () =>
       groupBlocked(null) ? Promise.resolve(false) : step((name) => {
         const outline = layoutApi.outlineOf(name);
         if (!outline || !outlineApi.hasGroups(outline)) return null;
         layoutApi.setOutline(name, outlineApi.clear(outline));
-        return "윤곽 지우기";
+        return "윤곽선 지우기";
       });
 
     // The outline bar's buttons: one group, or a level button for a whole axis.
@@ -149,7 +149,7 @@
       if (groupBlocked(axis)) return Promise.resolve(false);
       return step((name) => {
         layoutApi.setOutline(name, outlineApi.setFolded(layoutApi.outlineOf(name) || {}, axis, g, fold));
-        return fold ? "하위 수준 숨기기" : "하위 수준 표시";
+        return fold ? "세부 정보 숨기기" : "세부 정보 표시";
       });
     }
 

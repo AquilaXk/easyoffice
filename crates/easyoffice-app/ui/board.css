@@ -20,6 +20,32 @@
   display: none;
 }
 
+#pane-board .custom-select {
+  height: 22px;
+}
+
+#pane-board .custom-select-value {
+  padding-right: 6px;
+}
+
+#pane-board .custom-select-value,
+#pane-board .custom-select-sizer {
+  grid-area: 1 / 1;
+}
+
+#pane-board .custom-select-arrow {
+  grid-area: 1 / 2;
+}
+
+#pane-board .custom-select-sizer {
+  display: grid;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  padding-right: 6px;
+  white-space: nowrap;
+}
+
 .board-tools-group {
   margin-left: auto;
 }

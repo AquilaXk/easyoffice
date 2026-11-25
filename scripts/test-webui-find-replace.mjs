@@ -40,10 +40,15 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   ctrl(h, "F2");
   assert.equal($(h.document, "find-replace-buttons").hidden, false, "the replace button row follows the replace mode");
   assert.equal($(h.document, "find-replace-row").hidden, false);
-  assert.equal($(h.document, "find-dialog-title").textContent, "찾아 바꾸기");
+  assert.equal($(h.document, "find-dialog-title").textContent, "찾기 및 바꾸기");
   assert.equal(ctrl(h, "h").defaultPrevented, false, "Ctrl+H is not taken (macOS hide, browser history)");
   ctrl(h, "/");
   assert.equal($(h.document, "cmd-palette-modal").open, true);
+  $(h.document, "cmd-palette-modal").close();
+  switchModule(h.document, "HWP");
+  await flushAsyncTurns(4);
+  ctrl(h, "F2");
+  assert.equal($(h.document, "find-dialog-title").textContent, "찾아 바꾸기");
 });
 
 test("the shortcut table has no repeated combination and keeps print, find and replace to one action each", async () => {

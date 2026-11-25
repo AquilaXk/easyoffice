@@ -26,7 +26,7 @@
   const AFTERPRINT_FALLBACK_MS = 5 * 60 * 1000;
   const MAX_PRINT_CELLS = 200000;
   const FILL_REPEATS = 300;
-  const MSG_UNSUPPORTED = "이 모듈은 인쇄를 지원하지 않습니다.";
+  const MSG_UNSUPPORTED = "현재 창에서는 인쇄를 지원하지 않습니다.";
   const MSG_EMPTY = "인쇄할 내용이 없습니다.";
   const MSG_OPENING = "인쇄 대화상자를 여는 중…";
   const RULE_EDGE_SIDES = ["t", "r", "b", "l"];

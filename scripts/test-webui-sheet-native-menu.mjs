@@ -14,7 +14,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 function sheetItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu/items.rs");
   const table = itemTable(source);
-  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste|cf)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
+  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*(?:None|Some\("[^"]+"\)),\s*"(sheet-(?:act|numfmt|paste|cf)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
 }
 
 const selectorOf = ({ name, argument }) => `.md-item[data-${name}="${argument}"]`;
@@ -25,12 +25,12 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 47 row, column, hide, merge, sort, filter, freeze, sheet tab, group, page setup, print area, name, calculation, link and protection items and 골라 붙이기", () => {
+test("the table holds the 11 number-format items, the 50 sheet action items and 선택하여 붙여넣기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 47);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 50);
   assert.equal(items.filter((i) => i.name === "sheet-cf").length, 68, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, 4 clear rules and manage rules");
-  assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
+  assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "선택하여 붙여넣기…", "special"]]);
 });
 
 test("each native item clicks the page's menu item that carries its label", async () => {

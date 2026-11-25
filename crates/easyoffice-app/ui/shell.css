@@ -6,6 +6,7 @@
 [data-icon] { display: inline-flex; align-items: center; justify-content: center; }
 .eo-icon { width: 16px; height: 16px; display: block; flex-shrink: 0; pointer-events: none; }
 .icon-slot { display: inline-flex; align-items: center; }
+.ruler-pin .eo-icon { width: 10px; height: 10px; }
 /* ---- top bar ---------------------------------------------------------------------------------- */
 .topbar { height: 28px; padding: 0 8px 0 4px; gap: 8px; flex-wrap: nowrap; min-width: 0; background: var(--ui-bg-light); color: var(--ui-text); border-bottom: 1px solid var(--ui-border-light); }
 .topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }

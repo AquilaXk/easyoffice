@@ -11,7 +11,7 @@
   // caller to clear the list (no confirmation, as in the reference app) and closes on success.
 
   const KIND_LABELS = Object.freeze({
-    DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF",
+    DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", BASE: "데이터베이스", BOARD: "보드", PDF: "PDF",
   });
 
   // appendChild-based so the page also works in hosts without ParentNode.append.

@@ -44,7 +44,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "security-audit": [...RIBBON_MODULES, "CONV"], "bench-run": [...RIBBON_MODULES, "CONV"],
     "view-outline": [...RIBBON_MODULES, "CONV"],
     "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
-    find: ["DOC", "SHEET", "BASE"], replace: ["DOC", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
+    find: ["DOC", "HWP", "SHEET", "BASE"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD"],
     "clip-copy": [...EDIT_MODULES, "BASE"], "clip-cut": [...DOC_SHEET_MODULES, "BASE"], "clip-paste": [...DOC_SHEET_MODULES, "BASE"],
     "mod-symbol": EDIT_MODULES,
     "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
@@ -672,8 +672,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function syncToolbarButtons(mod, commandModule) {
-      const hfLabels = mod === "HWP" ? { "mod-header": "머리말", "mod-footer": "꼬리말" } : { "mod-header": "머리글", "mod-footer": "바닥글" };
-      // A window's toolbar lists the commands that work in it: the others are hidden.
+      const isPages = mod === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages";
+      const hwpOrPages = mod === "HWP" || isPages;
+      const hfLabels = hwpOrPages ? { "mod-header": "머리말", "mod-footer": "꼬리말" } : { "mod-header": "머리글", "mod-footer": "바닥글" };
+      const clipLabels = mod === "HWP"
+        ? { "clip-cut": ["오려 두기", "오려\n두기"], "clip-copy": ["복사하기", "복사\n하기"], "clip-paste": ["붙이기", "붙이기"] }
+        : { "clip-cut": ["잘라내기", "잘라\n내기"], "clip-copy": ["복사", "복사"], "clip-paste": ["붙여넣기", "붙여\n넣기"] };
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
         if (!cmd) continue;
@@ -681,12 +685,26 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         btn.disabled = !on;
         btn.hidden = !on;
         btn.setAttribute("aria-disabled", on ? "false" : "true");
-        const hfLabel = hfLabels[cmd];
-        if (hfLabel) {
-          btn.setAttribute("title", hfLabel);
-          btn.setAttribute("aria-label", hfLabel);
+        const hfLabel = hfLabels[cmd], clipPair = clipLabels[cmd];
+        if (hfLabel || clipPair) {
+          const text = hfLabel || clipPair[0], old = btn.getAttribute("title") || "";
+          const suffix = clipPair ? (old.match(/ \([^)]+\)$/)?.[0] || "") : "";
+          btn.setAttribute("title", text + suffix);
+          btn.setAttribute("aria-label", text);
           const lbl = btn.querySelector(".tb-label");
-          if (lbl) lbl.textContent = hfLabel;
+          if (lbl) lbl.textContent = hfLabel || clipPair[1];
+        }
+      }
+      for (const [id, hwpTxt, offTxt] of [["btn-stylebar-bold", "진하게", "굵게"], ["btn-stylebar-italic", "기울임", "기울임꼴"]]) {
+        const btn = document.getElementById(id);
+        if (!btn) continue;
+        const base = mod === "HWP" ? hwpTxt : offTxt, suffix = (btn.getAttribute("title") || "").match(/ \([^)]+\)$/)?.[0] || "";
+        btn.setAttribute("title", base + suffix);
+        btn.setAttribute("aria-label", base);
+      }
+      for (const [cmd, pTxt, dTxt] of [["layout-paper", "페이지 설정", "용지 설정"], ["mod-header", "머리말", "머리글"], ["mod-footer", "꼬리말", "바닥글"]]) {
+        for (const el of document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`)) {
+          if (el.dataset.kinds?.split(" ").includes("DOC")) el.querySelector(".md-label").textContent = isPages ? pTxt : dTxt;
         }
       }
     }

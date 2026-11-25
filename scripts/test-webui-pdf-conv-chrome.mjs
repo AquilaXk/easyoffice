@@ -19,7 +19,7 @@ test("the PDF toolbar is an rhwp toolbar: icon-above-label buttons, sb-* fields,
   const rotate = document.getElementById("btn-pdf-rotate");
   assert.ok(rotate.classList.contains("tb-btn"));
   assert.ok(rotate.getAttribute("aria-label"));
-  assert.ok(rotate.querySelector(".tb-icon-text") && rotate.querySelector(".tb-label")?.textContent.trim(), "the rotate button is the reference's text icon over its label");
+  assert.ok(rotate.querySelector(".tb-icon-svg svg.eo-icon") && rotate.querySelector(".tb-label")?.textContent.trim(), "the rotate button shows a 24x24 icons.js SVG over its label");
   const apply = document.getElementById("btn-pdf-apply");
   assert.ok(apply.classList.contains("tb-btn"));
   assert.ok(apply.querySelector(".tb-sprite") && apply.querySelector(".tb-label")?.textContent.trim(), "the apply button is a sprite cell over its label");

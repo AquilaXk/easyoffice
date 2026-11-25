@@ -489,7 +489,8 @@ test("모델 설정 대화상자와 하단 모델 선택 메뉴는 회사별 모
     effortButtons.map((b) => b.textContent.trim()),
     ["낮음", "보통", "높음"]
   );
-  assert.match(COPILOT_CSS, /\.eo-copilot-welcome-title\s*\{[^}]*font-size:\s*var\(--font-size-xl\)/);
+  assert.equal(document.querySelector(".eo-copilot-welcome-title"), null, "welcome title copy removed per design-system.md 4-1");
+  assert.equal(COPILOT_CSS.includes(".eo-copilot-welcome-title"), false, "unused welcome title CSS rule removed");
   assert.match(COPILOT_CSS, /\.eo-copilot-textarea\s*\{[^}]*font-size:\s*var\(--font-size-lg\)/);
   assert.match(COPILOT_CSS, /\.eo-copilot-reply\s*\{[^}]*font-size:\s*var\(--font-size-lg\)/);
   assert.match(COPILOT_CSS, /\.eo-copilot-menu-heading\s*\{[^}]*font-size:\s*var\(--font-size-sm\)[^}]*font-weight:\s*500/s);

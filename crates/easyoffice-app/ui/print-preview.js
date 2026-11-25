@@ -188,7 +188,7 @@
     const pane = $("print-preview-pane");
     if (!pane) return false;
     if (!isCurrentModuleSupported()) {
-      host.__EASYOFFICE_OFFICE_PRINT__?.notify?.("이 모듈은 인쇄를 지원하지 않습니다.");
+      host.__EASYOFFICE_OFFICE_PRINT__?.notify?.("현재 창에서는 인쇄를 지원하지 않습니다.");
       return false;
     }
     openState = true;

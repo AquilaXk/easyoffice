@@ -36,7 +36,7 @@
       b.dataset.first = String(group.first);
       b.dataset.last = String(group.last);
       b.dataset.folded = String(folded);
-      const text = folded ? "하위 수준 표시" : "하위 수준 숨기기";
+      const text = folded ? "세부 정보 표시" : "세부 정보 숨기기";
       b.title = text;
       b.setAttribute("aria-label", LABELS[axis] + " " + group.first + "~" + group.last + " " + text);
       b.setAttribute("aria-expanded", String(!folded));

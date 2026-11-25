@@ -26,6 +26,7 @@ pub struct WindowMenu {
     kind: MenuKind,
     theme: &'static str,
     disabled_mask: ItemMask,
+    toolbar_labels: bool,
 }
 
 impl Default for WindowMenu {
@@ -34,13 +35,19 @@ impl Default for WindowMenu {
             kind: MenuKind::Doc,
             theme: "system",
             disabled_mask: ItemMask::default(),
+            toolbar_labels: true,
         }
     }
 }
 
 impl WindowMenu {
     /// Checks a report: the kind and the theme must be known and every id an item of the table.
-    pub fn parse(kind: &str, theme: &str, disabled: Vec<String>) -> Result<Self, String> {
+    pub fn parse(
+        kind: &str,
+        theme: &str,
+        disabled: Vec<String>,
+        toolbar_labels: Option<bool>,
+    ) -> Result<Self, String> {
         let kind =
             MenuKind::parse(kind).ok_or_else(|| "알 수 없는 메뉴 종류입니다.".to_string())?;
         if disabled.len() > ITEMS.len() {
@@ -61,6 +68,7 @@ impl WindowMenu {
             kind,
             theme,
             disabled_mask,
+            toolbar_labels: toolbar_labels.unwrap_or(true),
         })
     }
 }
@@ -117,6 +125,7 @@ pub fn refresh(app: &AppHandle) -> Result<(), String> {
             theme: state.theme,
             disabled_mask: state.disabled_mask,
             update_check,
+            toolbar_labels: state.toolbar_labels,
         },
     )
     .map_err(|err| format!("메뉴를 갱신하지 못했습니다: {err}"))
@@ -139,11 +148,13 @@ pub fn report_menu_state(
     kind: String,
     theme: String,
     disabled: Vec<String>,
+    toolbar_labels: Option<bool>,
 ) -> Result<(), crate::IpcError> {
     if !is_window_label(window.label()) {
         return Ok(());
     }
-    let state = WindowMenu::parse(&kind, &theme, disabled).map_err(crate::IpcError::new)?;
+    let state =
+        WindowMenu::parse(&kind, &theme, disabled, toolbar_labels).map_err(crate::IpcError::new)?;
     app.state::<MenuStates>()
         .states()
         .insert(window.label().to_string(), state);
@@ -170,19 +181,26 @@ mod tests {
 
     #[test]
     fn a_report_is_accepted_only_with_a_known_theme_and_known_items() {
-        let ok = WindowMenu::parse("SHEET", "dark", ids(&["table:sort", "edit:undo"])).unwrap();
+        let ok = WindowMenu::parse(
+            "SHEET",
+            "dark",
+            ids(&["table:sort", "edit:undo"]),
+            Some(false),
+        )
+        .unwrap();
         assert_eq!(ok.theme, "dark");
         assert_eq!(ok.kind, MenuKind::Sheet);
+        assert!(!ok.toolbar_labels);
         assert!(ok.is_disabled("table:sort"));
         assert!(!ok.is_disabled("file:save"));
-        assert!(WindowMenu::parse("DOC", "purple", Vec::new()).is_err());
-        assert!(WindowMenu::parse("DOC", "light", ids(&["app:quit"])).is_err());
-        assert!(WindowMenu::parse("DOC", "light", ids(&["nope"])).is_err());
+        assert!(WindowMenu::parse("DOC", "purple", Vec::new(), None).is_err());
+        assert!(WindowMenu::parse("DOC", "light", ids(&["app:quit"]), None).is_err());
+        assert!(WindowMenu::parse("DOC", "light", ids(&["nope"]), None).is_err());
         let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
-        assert!(WindowMenu::parse("DOC", "light", too_many).is_err());
+        assert!(WindowMenu::parse("DOC", "light", too_many, None).is_err());
         for bad in ["", "doc", "START", "HWP_EMBED"] {
             assert!(
-                WindowMenu::parse(bad, "light", Vec::new()).is_err(),
+                WindowMenu::parse(bad, "light", Vec::new(), None).is_err(),
                 "{bad}"
             );
         }
@@ -193,12 +211,14 @@ mod tests {
         let states = MenuStates::default();
         assert_eq!(states.get("doc-1"), WindowMenu::default());
         assert_eq!(WindowMenu::default().kind, MenuKind::Doc);
+        assert!(WindowMenu::default().toolbar_labels);
         states.states().insert(
             "doc-1".to_string(),
-            WindowMenu::parse("PDF", "dark", Vec::new()).unwrap(),
+            WindowMenu::parse("PDF", "dark", Vec::new(), None).unwrap(),
         );
         assert_eq!(states.get("doc-1").kind, MenuKind::Pdf);
         assert_eq!(states.get("doc-1").theme, "dark");
+        assert!(states.get("doc-1").toolbar_labels);
         states.forget("doc-1");
         assert_eq!(states.get("doc-1").theme, "system");
     }

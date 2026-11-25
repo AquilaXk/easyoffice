@@ -851,6 +851,7 @@
     lintWorkspaceSync,
     jumpToIssue,
     containsTemplateToken,
+    appendLintFeedbackAfterVerify,
   };
   host.__EASYOFFICE_LAYOUT_LINT__ = api;
 

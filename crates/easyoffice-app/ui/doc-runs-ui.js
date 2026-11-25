@@ -38,8 +38,14 @@
   const HWP_DEFAULT_FONT = "함초롬바탕";
   const NON_PARAGRAPH_TAGS = new Set(["TD", "TH", "CAPTION"]);
   const HEADING_TAG_RE = /^H[1-6]$/;
-  const STYLE_HEADING_RE = /^개요 ([1-3])$/;
-  const PLAIN_STYLES = new Set(["바탕글", "공문서 바탕글"]);
+  const STYLE_HEADING_RE = /^(?:개요|제목|머리말)\s+([1-6])$/;
+  const PLAIN_STYLES = new Set(["바탕글", "표준", "본문"]);
+  const PAGES_EXPLICIT_STYLES = { 제목: 1, 부제목: 2 };
+  const DOC_STYLE_OPTIONS = {
+    doc: ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"],
+    hwp: ["바탕글", "개요 1", "개요 2", "개요 3", "개요 4", "개요 5", "개요 6"],
+    pages: ["본문", "제목", "부제목", "머리말 1", "머리말 2", "머리말 3", "제목 4", "제목 5", "제목 6"],
+  };
   const LIST_TAGS = { ordered: "OL", bullet: "UL", task: "UL" };
   const LIST_TAG_NAMES = new Set(Object.values(LIST_TAGS));
   const LIST_BUTTON_CMDS = { ordered: "para-numbering", bullet: "para-bullet", task: "para-checklist" };
@@ -582,26 +588,59 @@
       }, "체크 상태를 바꿀 체크리스트 항목을 먼저 선택하세요", pick);
     }
 
-    // The style box: outline levels are headings, the plain styles are paragraphs.
+    function docFlavorOf(modOverride, flavorOverride) {
+      const mod = modOverride ?? document.getElementById("app")?.dataset?.module;
+      if (mod === "HWP") return "hwp";
+      const fl = flavorOverride ?? editor()?.dataset?.eoDocFlavor;
+      return fl === "pages" ? "pages" : "doc";
+    }
+
+    function syncStyleOptions(modOverride, flavorOverride) {
+      const select = byId("doc-style-select");
+      if (!select) return;
+      const list = DOC_STYLE_OPTIONS[docFlavorOf(modOverride, flavorOverride)] || DOC_STYLE_OPTIONS.doc;
+      const curList = Array.from(select.querySelectorAll("option")).map((o) => o.value);
+      if (curList.length !== list.length || curList.some((v, i) => v !== list[i])) {
+        select.replaceChildren();
+        for (const name of list) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          select.appendChild(opt);
+        }
+      }
+      select.value = styleNameOf(null);
+      host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(select);
+    }
+
+    // The style box: headings 1..6 and plain paragraph style per window/flavor.
     function setStyle(name, options = {}) {
-      const level = STYLE_HEADING_RE.exec(name)?.[1];
+      const explicitLevel = PAGES_EXPLICIT_STYLES[name];
+      const level = explicitLevel || Number(STYLE_HEADING_RE.exec(name)?.[1] || 0);
       if (!level && !PLAIN_STYLES.has(name)) return { changed: false, blocks: 0 };
       const tag = level ? "h" + level : "p";
       const pick = () => paragraphTargets().filter((b) => b.tagName === "P" || HEADING_TAG_RE.test(b.tagName));
       const res = runOnParagraphs((blocks, range) => {
         const replaced = new Map();
-        // The plain styles are also the document's default paragraph style (the box shows it for
-        // every plain paragraph, and the Hangul module starts on 공문서 바탕글), so choosing one
-        // sets that document-level name on purpose.
         const roleChanged = !level && editor().dataset.styleRole !== name;
         if (!level) editor().dataset.styleRole = name;
-        blocks.forEach((b) => { if (b.tagName.toLowerCase() !== tag) replaced.set(b, retag(b, tag)); });
+        let metaChanged = false;
+        blocks.forEach((b) => {
+          const target = b.tagName.toLowerCase() !== tag ? retag(b, tag) : b;
+          if (target !== b) replaced.set(b, target);
+          if (explicitLevel) {
+            if (target.dataset.eoPagesStyle !== name) { target.dataset.eoPagesStyle = name; metaChanged = true; }
+          } else if (target.dataset?.eoPagesStyle) {
+            delete target.dataset.eoPagesStyle;
+            metaChanged = true;
+          }
+        });
         restoreSelection(range, replaced);
-        return replaced.size > 0 || roleChanged;
+        return replaced.size > 0 || roleChanged || metaChanged;
       }, "스타일을 적용할 문단을 먼저 선택하세요", pick, options);
       if (res.blocks === 0) {
         const select = byId("doc-style-select");
-        if (select) select.value = styleNameOf(null);
+        if (select) { select.value = styleNameOf(null); host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(select); }
       }
       return res;
     }
@@ -612,10 +651,22 @@
     }
 
     function styleNameOf(block) {
+      const flavor = docFlavorOf();
       const level = HEADING_TAG_RE.test(block?.tagName || "") ? Number(block.tagName[1]) : 0;
-      if (level >= 1 && level <= 3) return "개요 " + level;
+      if (level >= 1 && level <= 6) {
+        if (flavor === "hwp") return "개요 " + level;
+        if (flavor === "pages") {
+          if (level === 1 && block?.dataset?.eoPagesStyle === "제목") return "제목";
+          if (level === 2 && block?.dataset?.eoPagesStyle === "부제목") return "부제목";
+          return level <= 3 ? "머리말 " + level : "제목 " + level;
+        }
+        return "제목 " + level;
+      }
+      const fallback = flavor === "hwp" ? "바탕글" : flavor === "pages" ? "본문" : "표준";
       const role = editor()?.dataset?.styleRole;
-      return PLAIN_STYLES.has(role) ? role : "바탕글";
+      if (flavor === "hwp") return role === "바탕글" ? role : fallback;
+      if (flavor === "pages") return role === "본문" ? role : fallback;
+      return role === "표준" ? role : fallback;
     }
 
     function alignModeOf(block) {
@@ -867,7 +918,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, styleNameOf, syncStyleOptions, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,

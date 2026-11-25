@@ -171,7 +171,7 @@ test("grouping rows draws a bar and a button, folding hides them, a level button
   assert.equal(document.getElementById("sheet-frame").style.getPropertyValue("--outline-w"), "28px");
   const toggle = () => side.querySelector(".outline-toggle");
   assert.equal(toggle().dataset.first, "3");
-  assert.equal(toggle().getAttribute("aria-label"), "행 3~5 하위 수준 숨기기");
+  assert.equal(toggle().getAttribute("aria-label"), "행 3~5 세부 정보 숨기기");
   assert.equal(toggle().getAttribute("aria-expanded"), "true");
   // The button sits on the summary row 6: 26px of the header and five rows of 22px, centred.
   assert.equal(toggle().style.top, 6 * 22 - 22 + 11 - 5.5 + "px");
@@ -182,7 +182,7 @@ test("grouping rows draws a bar and a button, folding hides them, a level button
   assert.deepEqual(layout().outlineOf("Sheet1").foldedRows, [[3, 5]]);
   assert.equal(layout().get("Sheet1").hiddenRows.length, 0, "folded rows are not the user's hidden rows");
   assert.deepEqual(rowsInDom(document).filter((r) => r >= 2 && r <= 7), [2, 6, 7]);
-  assert.equal(toggle().getAttribute("aria-label"), "행 3~5 하위 수준 표시");
+  assert.equal(toggle().getAttribute("aria-label"), "행 3~5 세부 정보 표시");
   assert.equal(side.querySelectorAll(".outline-bar").length, 0);
 
   // Level button 2 shows every group again, button 1 hides them all.
@@ -299,7 +299,7 @@ test("the tab menu has 탭 색 with a palette, and a tab that has a colour shows
   assert.deepEqual(labels, ["시트 삽입", "삭제", "이름 바꾸기", "복사", "이동/복사…", "탭 색", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…", "-", "모든 시트 선택", "시트 그룹 해제"]);
   const panel = document.getElementById("sheet-tab-color-panel");
   assert.equal(panel.querySelectorAll(".sb-hl-palette-row").length, 7, "the gray row and the six colour rows of the style bar");
-  assert.deepEqual([...panel.querySelectorAll(".sb-hl-palette-actions button")].map((b) => b.textContent), ["색 없음", "다른 색..."]);
+  assert.deepEqual([...panel.querySelectorAll(".sb-hl-palette-actions button")].map((b) => b.textContent), ["색 없음", "다른 색…"]);
   layout().replaceAll({ Sheet1: { tabColor: "3366cc" } });
   assert.equal(layout().tabColorOf("Sheet1"), "3366cc");
   assert.equal(layout().getAll().Sheet1.tabColor, "3366cc", "the file gets the colour back");

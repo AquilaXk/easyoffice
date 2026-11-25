@@ -267,7 +267,7 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   await flushAsyncTurns();
   assert.equal(document.getElementById("sheet-pivot-dialog").open, true);
 
-  userClick(commandItem(document, "sheet-mod-chart"));
+  userClick(commandItem(document, "sheet-insert-chart"));
   await flushAsyncTurns();
   assert.match(document.getElementById("sheet-eval-result").textContent, /차트 데이터 요약 · 합계/);
 
@@ -472,9 +472,9 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   const docEditor = document.getElementById("doc-editor");
   const styleSelect = document.getElementById("doc-style-select");
-  styleSelect.value = "개요 1";
+  styleSelect.value = "제목 1";
   styleSelect.dispatchEvent({ type: "change" });
-  assert.equal(document.getElementById("doc-style-role-badge").textContent, "개요 1");
+  assert.equal(document.getElementById("doc-style-role-badge").textContent, "제목 1");
   assert.equal(docEditor.querySelector(".eo-h-title").closest("h1").tagName, "H1", "the selected paragraph is an outline-1 heading");
 
   const fontSelect = document.getElementById("doc-font-select");
@@ -538,9 +538,13 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
-  assert.equal(styleSelect.value, "공문서 바탕글");
+  assert.equal(styleSelect.value, "바탕글");
   assert.ok(
-    Array.from(styleSelect.querySelectorAll("option")).some((o) => o.value === "공문서 바탕글")
+    Array.from(styleSelect.querySelectorAll("option")).some((o) => o.value === "개요 6")
+  );
+  assert.equal(
+    Array.from(styleSelect.querySelectorAll("option")).some((o) => o.value === "공문서 바탕글"),
+    false
   );
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), true);
@@ -549,7 +553,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   switchModule(document, "DOC");
   await flushAsyncTurns();
-  assert.equal(styleSelect.value, "바탕글", "without a selection the box shows the document default");
+  assert.equal(styleSelect.value, "표준", "without a selection the box shows the document default");
   assert.equal(document.getElementById("doc-style-font-badge").textContent, "맑은 고딕", "the font box shows the document default until a selection carries a run font");
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), false);
@@ -635,7 +639,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   switchModule(document, "DOC");
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-studio-menu-cmd="security-audit"]'));
+  userClick(document.querySelector('[data-studio-menu-cmd="review-verify"]'));
   await flushAsyncTurns();
   assert.match(document.getElementById("status-command-feedback").textContent, /보안|감사/);
 

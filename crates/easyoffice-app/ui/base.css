@@ -4,6 +4,11 @@
    see `THIRD_PARTY_NOTICES.md`) 데이터시트 셀 표면 스타일 — `tokens.css` 디자인·글자 토큰 전용 */
 .base-pane:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; min-height: 0; background: var(--doc-workspace); color: var(--ui-text); font-family: var(--font-family-ui); font-size: var(--font-size-base); }
 .base-group-select { min-width: 124px; }
+#pane-base .custom-select { height: 22px; }
+#pane-base .custom-select-value { padding-right: 6px; }
+#pane-base .custom-select-value, #pane-base .custom-select-sizer { grid-area: 1 / 1; }
+#pane-base .custom-select-arrow { grid-area: 1 / 2; }
+#pane-base .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; padding-right: 6px; white-space: nowrap; }
 .base-view-tabs { display: inline-flex; align-items: stretch; gap: 0; margin-left: auto; border: 1px solid var(--ui-border-light); }
 .base-view-tab { height: var(--control-height-md); padding: 0 var(--space-5); border: 0; border-right: 1px solid var(--ui-border-light); border-radius: 0; background: var(--ui-surface); color: var(--ui-text); font-family: var(--font-family-ui); font-size: var(--font-size-base); font-weight: 400; cursor: pointer; white-space: nowrap; }
 .base-view-tab:last-child { border-right: 0; }

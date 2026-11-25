@@ -239,8 +239,8 @@
       showTab(internal ? "doc" : "web");
       kit.note("sheet-link-status", "");
       refreshButtons();
-      byId("sheet-link-dialog-title").textContent = link ? "하이퍼링크 고치기" : "하이퍼링크";
-      byId("btn-sheet-link-apply").textContent = link ? "고치기" : "넣기";
+      byId("sheet-link-dialog-title").textContent = link ? "하이퍼링크 편집" : "하이퍼링크";
+      byId("btn-sheet-link-apply").textContent = link ? "편집" : "넣기";
       const remove = byId("btn-sheet-link-remove");
       if (remove) remove.hidden = !link;
       kit.openDialog("sheet-link-dialog");

@@ -81,7 +81,7 @@ impl ConfirmKind {
             },
             Self::ReplaceUnsavedModule => ConfirmSpec {
                 title: "저장하지 않은 편집 내용",
-                message: "이 모듈에 저장하지 않은 편집 내용이 있습니다.\n파일을 열면 현재 내용이 바뀝니다 (실행 취소로 되돌릴 수 있습니다). 계속할까요?",
+                message: "현재 문서에 저장하지 않은 편집 내용이 있습니다.\n파일을 열면 현재 내용이 바뀝니다 (실행 취소로 되돌릴 수 있습니다). 계속할까요?",
                 accept: "계속",
                 cancel: CANCEL,
             },

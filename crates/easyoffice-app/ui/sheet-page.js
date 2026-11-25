@@ -279,7 +279,7 @@
       kit.closeDialog("sheet-page-dialog");
       return step((name) => {
         layoutApi.setPage(name, result.page);
-        return "쪽 설정 적용";
+        return "페이지 설정 적용";
       });
     }
 

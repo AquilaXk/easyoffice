@@ -151,6 +151,44 @@
   flex-shrink: 0;
 }
 
+.tb-icon-svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--accent-light);
+  flex-shrink: 0;
+}
+
+.tb-icon-svg .eo-icon {
+  width: 18px;
+  height: 18px;
+}
+
+:root[data-toolbar-labels="hidden"] .tb-label {
+  display: none;
+}
+
+:root[data-toolbar-labels="hidden"] #icon-toolbar,
+:root[data-toolbar-labels="hidden"] #slide-toolbar,
+:root[data-toolbar-labels="hidden"] #pdf-toolbar,
+:root[data-toolbar-labels="hidden"] #base-toolbar,
+:root[data-toolbar-labels="hidden"] #board-toolbar {
+  height: 34px;
+  min-height: 34px;
+}
+
+:root[data-toolbar-labels="hidden"] #icon-toolbar .tb-btn,
+:root[data-toolbar-labels="hidden"] #slide-toolbar .tb-btn,
+:root[data-toolbar-labels="hidden"] #pdf-toolbar .tb-btn,
+:root[data-toolbar-labels="hidden"] #base-toolbar .tb-btn,
+:root[data-toolbar-labels="hidden"] #board-toolbar .tb-btn {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px 5px;
+}
+
 /* The sprite has no marks icons: the reference draws them from characters (`.icon-ctrl-mark`, `.icon-para-mark`). */
 .icon-ctrl-mark,
 .icon-para-mark {

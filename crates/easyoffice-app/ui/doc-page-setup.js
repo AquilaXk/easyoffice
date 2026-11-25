@@ -306,10 +306,11 @@
 
     function syncDialogLabels() {
       const hwp = isHwp();
+      const pages = !hwp && byId("doc-editor")?.dataset?.eoDocFlavor === "pages";
       const setTxt = (id, text) => { const el = byId(id); if (el) el.textContent = text; };
-      setTxt("doc-page-setup-title", hwp ? "편집 용지" : "용지 설정");
-      setTxt("doc-ps-header-label", hwp ? "머리말" : "머리글");
-      setTxt("doc-ps-footer-label", hwp ? "꼬리말" : "바닥글");
+      setTxt("doc-page-setup-title", hwp ? "편집 용지" : pages ? "페이지 설정" : "용지 설정");
+      setTxt("doc-ps-header-label", hwp || pages ? "머리말" : "머리글");
+      setTxt("doc-ps-footer-label", hwp || pages ? "꼬리말" : "바닥글");
     }
 
     function open() {

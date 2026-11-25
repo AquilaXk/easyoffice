@@ -1058,7 +1058,7 @@ test("the keyboard reaches the 탭 색 palette: Right opens it, the arrows move 
   press("ArrowRight");
   assert.notEqual(document.activeElement, first);
   press("End");
-  assert.equal(document.activeElement.textContent, "다른 색...");
+  assert.equal(document.activeElement.textContent, "다른 색…");
   press("ArrowLeft");
   assert.equal(document.activeElement, sub);
   assert.equal(sub.classList.contains("open"), false);

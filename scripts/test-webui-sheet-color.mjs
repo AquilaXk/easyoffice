@@ -118,8 +118,8 @@ test("the toolbar has a 채우기 색 and a 글꼴 색 button with the reference
     assert.ok($(h, button).getAttribute("aria-label"));
   }
   const clearLabel = (palette) => [...$(h, palette).querySelectorAll(".sb-hl-palette-actions button")].map((b) => b.textContent);
-  assert.deepEqual(clearLabel("sheet-fill-palette"), ["채우기 없음", "다른 색..."]);
-  assert.deepEqual(clearLabel("sheet-font-color-palette"), ["자동", "다른 색..."]);
+  assert.deepEqual(clearLabel("sheet-fill-palette"), ["채우기 없음", "다른 색…"]);
+  assert.deepEqual(clearLabel("sheet-font-color-palette"), ["자동", "다른 색…"]);
   assert.ok($(h, "sheet-fill-palette").querySelector(".sb-hl-palette-row"), "the rows of the reference palette");
   assert.match($(h, "sheet-fill-palette").textContent, /최근에 사용한 색/);
 });

@@ -25,7 +25,7 @@
     ["stdDev", "표본 표준 편차", 107],
     ["var", "표본 분산", 110],
   ];
-  const MORE_LABEL = "함수 더 보기...";
+  const MORE_LABEL = "함수 더 보기…";
   const CODE_OF = new Map(FUNCTIONS.filter((f) => f[2]).map((f) => [f[0], f[2]]));
   const ID_OF = new Map(FUNCTIONS.filter((f) => f[2]).map((f) => [f[2], f[0]]));
   const HIT_PX = 18; // the arrow at the right edge of the selected cell

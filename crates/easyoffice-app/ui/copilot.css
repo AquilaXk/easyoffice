@@ -202,15 +202,6 @@
   display: none;
 }
 
-.eo-copilot-welcome-title {
-  font-size: var(--font-size-xl);
-  font-weight: 600;
-  line-height: 1.45;
-  letter-spacing: -0.02em;
-  color: var(--ui-text);
-}
-
-
 .eo-copilot-examples {
   display: flex;
   flex-direction: column;

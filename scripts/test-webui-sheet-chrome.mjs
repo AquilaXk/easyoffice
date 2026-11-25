@@ -71,9 +71,13 @@ test("the toolbars are the reference toolbar format: the icon above a label, on 
     const name = button.getAttribute("title");
     assert.ok(button.querySelector(".tb-label")?.textContent.trim(), `${name} has its label`);
     assert.ok(button.getAttribute("aria-label"), `${name} keeps its name on the button`);
-    assert.equal(button.querySelector("svg"), null, `${name} draws no icon of its own`);
     assert.equal(button.hasAttribute("data-icon"), false);
     if (button.querySelector(".tb-icon-text")) continue;
+    const svgIcon = button.querySelector(".tb-icon-svg");
+    if (svgIcon) {
+      assert.ok(Boolean(svgIcon.querySelector("svg.eo-icon")), `${name} renders an icons.js SVG`);
+      continue;
+    }
     const icon = button.querySelector(".tb-sprite")?.className.split(" ").find((cls) => cls.startsWith("icon-"));
     assert.ok(icon, `${name} shows an icon`);
     assert.ok(CHARACTER_ICONS.includes(icon) || css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);

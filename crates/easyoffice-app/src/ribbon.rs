@@ -406,8 +406,24 @@ impl RibbonCommandRouter {
                 let prefix = Self::module_prefix(module);
                 let specs: [(&str, &'static str, &'static str); 4] = match cat_key {
                     "home" => [
-                        ("home-bold", "굵게", "Cmd+B"),
-                        ("home-italic", "기울임", "Cmd+I"),
+                        (
+                            "home-bold",
+                            if module == OfficeModuleKind::Hwp {
+                                "진하게"
+                            } else {
+                                "굵게"
+                            },
+                            "Cmd+B",
+                        ),
+                        (
+                            "home-italic",
+                            if module == OfficeModuleKind::Hwp {
+                                "기울임"
+                            } else {
+                                "기울임꼴"
+                            },
+                            "Cmd+I",
+                        ),
                         ("home-underline", "밑줄", "Cmd+U"),
                         ("home-style", "스타일 적용", "Alt+Cmd+S"),
                     ],
@@ -415,7 +431,7 @@ impl RibbonCommandRouter {
                         ("insert-table", "표 삽입", "Ctrl+Cmd+T"),
                         ("insert-chart", "차트", "Ctrl+Cmd+C"),
                         ("insert-shape", "도형·다이어그램", "Ctrl+Cmd+S"),
-                        ("insert-link", "책갈피·링크", "Cmd+K"),
+                        ("insert-link", "하이퍼링크", "Cmd+K"),
                     ],
                     "layout" => [
                         (
@@ -440,7 +456,7 @@ impl RibbonCommandRouter {
                     "moduleSpecific" => match module {
                         OfficeModuleKind::Document => [
                             ("mod-toc", "자동 목차 생성", "Ctrl+Alt+T"),
-                            ("mod-footnote", "각주·미주 삽입", "Alt+Cmd+F"),
+                            ("mod-footnote", "각주", "Alt+Cmd+F"),
                             ("mod-mailmerge", "편지 병합", "Ctrl+Cmd+M"),
                             ("mod-tableformula", "표 셀 수식 계산", "Ctrl+Cmd+="),
                         ],
@@ -451,10 +467,10 @@ impl RibbonCommandRouter {
                             ("mod-manuscript", "200자 원고지 매수 검산", "Ctrl+Cmd+W"),
                         ],
                         OfficeModuleKind::Sheet => [
-                            ("mod-pivot", "피벗 테이블 요약", "Alt+Cmd+P"),
-                            ("mod-chart", "차트 시각화", "Alt+F1"),
-                            ("mod-condfmt", "조건부 서식 규칙", "Ctrl+Cmd+F"),
-                            ("mod-freeze", "선택 행/열 고정", "Ctrl+Cmd+L"),
+                            ("mod-pivot", "피벗 테이블…", "Alt+Cmd+P"),
+                            ("mod-chart", "차트", "Alt+F1"),
+                            ("mod-condfmt", "조건부 서식…", "Ctrl+Cmd+F"),
+                            ("mod-freeze", "틀 고정", "Ctrl+Cmd+L"),
                         ],
                         OfficeModuleKind::Slide => [
                             ("mod-master", "마스터 레이아웃", "Shift+Cmd+M"),
@@ -472,14 +488,22 @@ impl RibbonCommandRouter {
                     "review" => [
                         ("review-track", "변경 내용 추적", "Shift+Cmd+E"),
                         ("review-comment", "새 메모", "Alt+Cmd+C"),
-                        ("review-verify", "문서 구조 보안 검사", "Ctrl+Cmd+V"),
+                        ("review-verify", "문서 보안 검사", "Ctrl+Cmd+V"),
                         ("review-stats", "문서 통계·글자 수", "Shift+Cmd+I"),
                     ],
                     "view" => [
-                        ("view-split", "좌우 스플릿 뷰", "Ctrl+Cmd+2"),
+                        ("view-split", "창 나누기", "Ctrl+Cmd+2"),
                         ("view-ribbon", "리본 접기·펼치기", "Alt+Cmd+R"),
                         ("view-theme", "라이트·다크 테마 전환", "Ctrl+Alt+D"),
-                        ("view-zoom", "100% 실제 배율", "Cmd+0"),
+                        (
+                            "view-zoom",
+                            if module == OfficeModuleKind::Hwp {
+                                "실제 크기"
+                            } else {
+                                "100%"
+                            },
+                            "Cmd+0",
+                        ),
                     ],
                     _ => unreachable!(),
                 };

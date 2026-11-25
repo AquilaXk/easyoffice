@@ -120,7 +120,7 @@ export function renderShellRecents(panel: HTMLElement, recents: readonly ShellRe
     return item;
   };
   if (recents.length === 0) {
-    panel.append(make('(최근 문서 없음)', true));
+    panel.append(make('최근 문서가 없습니다', true));
   } else {
     for (const entry of recents) {
       const item = make(entry.name, false);

@@ -47,9 +47,9 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
     assert_eq!(
         align,
         [
-            "왼쪽 정렬",
-            "가운데 정렬",
-            "오른쪽 정렬",
+            "왼쪽 맞춤",
+            "가운데 맞춤",
+            "오른쪽 맞춤",
             s,
             "위쪽 맞춤",
             "가운데 맞춤",
@@ -90,7 +90,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
         [
             "첫 행 고정",
             "첫 열 고정",
-            "선택 행/열 고정",
+            "틀 고정",
             "틀 고정 해제",
             s,
             "행 위에 삽입",
@@ -216,7 +216,7 @@ fn paste_special_follows_the_system_paste_in_the_spreadsheet_edit_menu_only() {
     let paste = lines.iter().position(|id| *id == layout::PASTE).unwrap();
     assert_eq!(lines[paste + 1], "edit:paste-special");
     let item = spec("edit:paste-special");
-    assert_eq!(item.label, "골라 붙이기…");
+    assert_eq!(item.label, "선택하여 붙여넣기…");
     assert_eq!(
         action_for("edit:paste-special"),
         Some("sheet-paste:special")
@@ -253,6 +253,8 @@ fn base_and_board_isolate_workspace_menus_without_doc_leaks() {
                 layout::SEPARATOR,
                 layout::THEME,
                 "view:theme-toggle",
+                layout::SEPARATOR,
+                "view:toolbar-labels",
             ],
             "{kind:?} view"
         );

@@ -217,7 +217,7 @@
       if (!boardStudio) throw new Error("인쇄할 내용이 없습니다.");
       return [boardStudio.buildPrintPage(doc, rules)];
     }
-    throw new Error("이 모듈은 인쇄를 지원하지 않습니다.");
+    throw new Error("현재 창에서는 인쇄를 지원하지 않습니다.");
   }
 
   function outlineItems(mod) {

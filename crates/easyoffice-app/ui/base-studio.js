@@ -66,7 +66,9 @@
     const mkTbBtn = (icon, label, onClick, id) =>
       appendAll(mkBtn("tb-btn", "", onClick, id, label), setAttr(el("span", "tb-sprite icon-" + icon), "aria-hidden", "true"), el("span", "tb-label", label));
     const setTbLabel = (btn, text) => { btn.querySelector(".tb-label").textContent = text; };
-    const mkSel = (cls, aria, id) => { const s = el("select", cls); if (id) s.id = id; if (aria) s.setAttribute("aria-label", aria); return s; };
+    const mkSel = (cls, aria, id) => { const s = el("select", cls.includes("sb-combo") ? cls : "sb-combo " + cls); if (id) s.id = id; if (aria) s.setAttribute("aria-label", aria); return s; };
+    const enhanceSelects = (scope) => host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, scope);
+    const syncSelect = (sel) => host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(sel);
     const mkInput = (id, type, cls, aria, ph) => { const inp = el("input", cls); inp.type = type; if (id) inp.id = id; inp.setAttribute("aria-label", aria); if (ph) inp.placeholder = ph; return inp; };
     const addOpt = (sel, value, text) => { const o = el("option", "", text); o.value = value; sel.appendChild(o); return o; };
     const setAttr = (node, k, v) => { node.setAttribute(k, v); return node; };
@@ -144,6 +146,8 @@
       doc.body.appendChild(fieldDlg);
 
       container.replaceChildren(toolbar, queryBar, viewport, bottomBar);
+      enhanceSelects(container);
+      enhanceSelects(fieldDlg);
       refs = { container, tableTabs, viewTabs, viewButtons, btnFilter, btnSort, groupSelect, queryBar, viewport, fieldDlg };
       return refs;
     }
@@ -243,6 +247,8 @@
       for (const tbl of state.tables) addOpt(relSel, tbl.id, tbl.name);
       relSel.value = field?.relationTableId || state.tables[0]?.id || "";
       byId("btn-base-field-delete").hidden = !field || (activeTable()?.fields?.length || 0) <= 1;
+      syncSelect(byId("base-field-type"));
+      syncSelect(relSel);
       dlg._syncTypeRows?.();
       openDialog(dlg);
       byId("base-field-name")?.focus?.();
@@ -344,6 +350,7 @@
       }
       appendAll(panel, list, actions);
       bar.replaceChildren(panel);
+      enhanceSelects(bar);
     }
 
     // Per render: relation field id -> [[record id, label]] of its target table, built the first time a cell of the field is used.
@@ -728,6 +735,7 @@
       addOpt(refs.groupSelect, "", "그룹화 기준: 없음");
       for (const f of table.fields) addOpt(refs.groupSelect, f.id, `그룹화 기준: ${f.name}`);
       refs.groupSelect.value = table.groupByFieldId || "";
+      syncSelect(refs.groupSelect);
 
       renderQueryBar(table);
       cellSel.beforeRender();
@@ -738,6 +746,7 @@
         : table.view === "calendar" ? renderCalendarView(table, query)
         : renderGridView(table, query);
       refs.viewport.replaceChildren(viewNode);
+      enhanceSelects(refs.viewport);
       if (gridWin) { gridWin.attach(viewNode, viewNode.querySelector("table")); cellSel.afterAttach(); } else { cellSel.release(); gridSize?.release?.(); }
       for (const fn of changeListeners) fn();
     }

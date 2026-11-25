@@ -23,7 +23,7 @@ const REMOVED_IDS = [
 const TOOL_DIALOG_MENU = [
   ["smart-diagnose", "smart-dialog", "btn-smart-diagnose"],
   ["scrub-pii", "pii-dialog", "btn-scrub-pii"],
-  ["security-audit", "security-dialog", "btn-run-security-audit"],
+  ["review-verify", "security-dialog", "btn-run-security-audit"],
   ["bench-run", "bench-dialog", "btn-run-benchmark"],
   ["view-outline", "outline-dialog", null],
 ];
@@ -60,7 +60,7 @@ test("every tool dialog opens from its menu item, reuses the dialog chrome and c
 
 test("menu items run the same actions the side panels ran", async () => {
   const { document, userClick } = await createWorkspaceHarness();
-  userClick(studioItem(document, "security-audit"));
+  userClick(studioItem(document, "review-verify"));
   await flushAsyncTurns(12);
   assert.notEqual(document.getElementById("security-status-text").textContent, "압축 컨테이너 및 문서 구조 보호 활성");
   userClick(studioItem(document, "bench-run"));

@@ -59,7 +59,7 @@
   const COMMON_CATEGORY_SPECS = {
     home: [
       { suffix: "home-bold", title: "굵게", shortcut: "⌘B" },
-      { suffix: "home-italic", title: "기울임", shortcut: "⌘I" },
+      { suffix: "home-italic", title: "기울임꼴", shortcut: "⌘I" },
       { suffix: "home-underline", title: "밑줄", shortcut: "⌘U" },
       { suffix: "home-style", title: "스타일 적용", shortcut: "⌥⌘S" },
     ],
@@ -67,7 +67,7 @@
       { suffix: "insert-table", title: "표 삽입", shortcut: "⌃⌘T" },
       { suffix: "insert-chart", title: "차트", shortcut: "⌃⌘C" },
       { suffix: "insert-shape", title: "도형·다이어그램", shortcut: "⌃⌘S" },
-      { suffix: "insert-link", title: "책갈피·링크", shortcut: "⌘K" },
+      { suffix: "insert-link", title: "하이퍼링크", shortcut: "⌘K" },
     ],
     layout: [
       { suffix: "layout-paper", title: "용지 설정", shortcut: "⇧⌘P" },
@@ -84,14 +84,14 @@
     review: [
       { suffix: "review-track", title: "변경 내용 추적", shortcut: "⇧⌘E" },
       { suffix: "review-comment", title: "새 메모", shortcut: "⌥⌘C" },
-      { suffix: "review-verify", title: "문서 구조 보안 검사", shortcut: "⌃⌘V" },
+      { suffix: "review-verify", title: "문서 보안 검사", shortcut: "⌃⌘V" },
       { suffix: "review-stats", title: "문서 통계·글자 수", shortcut: "⇧⌘I" },
     ],
     view: [
-      { suffix: "view-split", title: "좌우 스플릿 뷰", shortcut: "⌃⌘2" },
+      { suffix: "view-split", title: "창 나누기", shortcut: "⌃⌘2" },
       { suffix: "view-ribbon", title: "리본 접기·펼치기", shortcut: "⌥⌘R" },
       { suffix: "view-theme", title: "라이트·다크 테마 전환", shortcut: "⌃⌥D" },
-      { suffix: "view-zoom", title: "100% 실제 배율", shortcut: "⌘0" },
+      { suffix: "view-zoom", title: "100%", shortcut: "⌘0" },
     ],
   };
 
@@ -109,10 +109,10 @@
       { id: "hwp-mod-manuscript", title: "200자 원고지 매수 검산", shortcut: "⌃⌘W" },
     ],
     SHEET: [
-      { id: "sheet-mod-pivot", title: "피벗 테이블 요약", shortcut: "⌥⌘P" },
-      { id: "sheet-mod-chart", title: "차트 시각화", shortcut: "⌥F1" },
-      { id: "sheet-mod-condfmt", title: "조건부 서식 규칙", shortcut: "⌃⌘F" },
-      { id: "sheet-mod-freeze", title: "선택 행/열 고정", shortcut: "⌃⌘L" },
+      { id: "sheet-mod-pivot", title: "피벗 테이블…", shortcut: "⌥⌘P" },
+      { id: "sheet-mod-chart", title: "차트", shortcut: "⌥F1" },
+      { id: "sheet-mod-condfmt", title: "조건부 서식…", shortcut: "⌃⌘F" },
+      { id: "sheet-mod-freeze", title: "틀 고정", shortcut: "⌃⌘L" },
     ],
     SLIDE: [
       { id: "slide-mod-master", title: "마스터 레이아웃", shortcut: "⇧⌘M" },
@@ -126,6 +126,13 @@
       { id: "pdf-mod-splitmerge", title: "페이지 분할·병합", shortcut: "⇧⌘S" },
       { id: "pdf-mod-tooffice", title: "편집 문서 변환", shortcut: "⇧⌘E" },
     ],
+  };
+
+  const HWP_CATALOG_TITLES = {
+    "home-bold": "진하게",
+    "home-italic": "기울임",
+    "layout-paper": "편집 용지",
+    "view-zoom": "실제 크기",
   };
 
   function buildRibbonCatalog() {
@@ -143,7 +150,7 @@
       Object.keys(COMMON_CATEGORY_SPECS).forEach((catKey) => {
         catalog[modKey][catKey] = COMMON_CATEGORY_SPECS[catKey].map((item) => ({
           id: prefix + "-" + item.suffix,
-          title: modKey === "HWP" && item.suffix === "layout-paper" ? "편집 용지" : item.title,
+          title: (modKey === "HWP" && HWP_CATALOG_TITLES[item.suffix]) || item.title,
           shortcut: item.shortcut,
         }));
       });

@@ -46,7 +46,7 @@ test("PD-254: 차트 삽입 대화상자에서 5종 벡터 SVG 차트(막대·�
   await flushAsyncTurns(4);
   await seedQuarterlySheet(document);
 
-  userClick(menuCommand(document, "sheet-mod-chart"));
+  userClick(menuCommand(document, "insert-chart"));
   await flushAsyncTurns(6);
 
   assert.match(
@@ -236,7 +236,7 @@ test("PD-254: 부동 차트 카드 드래그 이동·리사이즈(anchor 동기�
   await flushAsyncTurns(4);
   await seedQuarterlySheet(document);
 
-  userClick(menuCommand(document, "sheet-mod-chart"));
+  userClick(menuCommand(document, "insert-chart"));
   await flushAsyncTurns(6);
   document.getElementById("sheet-chart-range").value = "A1:B4";
   document.getElementById("sheet-chart-heading").value = "초기 제목";
@@ -336,7 +336,7 @@ test("PD-254: save-payload 직렬화·file-open 재적재 복원 및 office-prin
   await flushAsyncTurns(4);
   await seedQuarterlySheet(document);
 
-  userClick(menuCommand(document, "sheet-mod-chart"));
+  userClick(menuCommand(document, "insert-chart"));
   await flushAsyncTurns(6);
   document.getElementById("sheet-chart-range").value = "A1:B5";
   document.getElementById("sheet-chart-heading").value = "인쇄·저장 차트";
@@ -421,7 +421,7 @@ test("PD-254: 코파일럿 sheet.chart 연동, 시트 보호 편집 거부, 차�
   await copilotActions.undoLastTurn("turn-chart-1");
   assert.equal(layoutApi.chartsOf("Sheet1").length, 0, "코파일럿 차트 Undo 복원");
 
-  userClick(menuCommand(document, "sheet-mod-chart"));
+  userClick(menuCommand(document, "insert-chart"));
   await flushAsyncTurns(6);
   document.getElementById("sheet-chart-range").value = "A1:B4";
   document.getElementById("sheet-chart-heading").value = "보호 대상 차트";
@@ -508,7 +508,7 @@ test("PD-254: 코파일럿 sheet.chart 연동, 시트 보호 편집 거부, 차�
     "미지원 chartType Fail-Closed"
   );
 
-  userClick(menuCommand(document, "sheet-mod-chart"));
+  userClick(menuCommand(document, "insert-chart"));
   await flushAsyncTurns(6);
   if (document.getElementById("sheet-chart-dialog").open) {
     document.getElementById("sheet-chart-range").value = "A1:B3";

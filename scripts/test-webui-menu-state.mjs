@@ -45,7 +45,8 @@ test("a window reports its menu kind, theme and module state to the shell", asyn
   const { reports } = await shellPage();
   const last = reports.at(-1);
   assert.ok(last, "the window reported its state at start");
-  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "kind", "theme"]);
+  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "kind", "theme", "toolbarLabels"]);
+  assert.equal(last.toolbarLabels, true);
   assert.equal(last.theme, "system");
   assert.equal(last.kind, "DOC");
   assert.ok(Array.isArray(last.disabled));
@@ -85,16 +86,15 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
       "table:cell-select",
       "table:cell-split",
       "view:form-mode",
-      "view:toolbar-labels",
       "view:zoom-dialog",
     ]);
     // PDF export works on the editor's pages: gray in every window but the editor window. Print also runs in the
     // document, sheet and slide modules.
     const { EMBED_ONLY_ACTIONS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;
     const embedOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
-      .filter(([, action]) => EMBED_ONLY_ACTIONS.includes(action))
+      .filter(([, action]) => EMBED_ONLY_ACTIONS.includes(action.split(":")[0]))
       .map(([id]) => id);
-    assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf"]);
+    assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf", "file:save-as-hwpx"]);
     const printOff = rule("print", mod) ? [] : ["file:print"];
     const cfClearOff = mod === "SHEET" ? ["format:cf-clear-pivot", "format:cf-clear-table"] : [];
     const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly, ...printOff, ...cfClearOff];
@@ -210,10 +210,10 @@ test("the native quit item is Rust-only (it closes the macOS application menu an
   assert.ok(commands.includes('"quit_app"') && capability.permissions.includes("allow-quit-app"));
 });
 
-test("the check items are the three themes and the update switch", () => {
+test("the check items are the three themes, toolbar labels and the update switch", () => {
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");
-  assert.match(menu, /CheckMenuItemBuilder::with_id\(spec\.id, spec\.label\)/);
-  for (const id of ["view:theme-system", "view:theme-light", "view:theme-dark", "UPDATE_CHECK_ID"]) {
+  assert.match(menu, /CheckMenuItemBuilder::with_id\(spec\.id, label_for\(kind, spec\)\)/);
+  for (const id of ["view:theme-system", "view:theme-light", "view:theme-dark", "TOOLBAR_LABELS_ID", "UPDATE_CHECK_ID"]) {
     assert.ok(menu.slice(menu.indexOf("pub const CHECK_IDS"), menu.indexOf("fn is_check_item")).includes(id), id);
   }
 });

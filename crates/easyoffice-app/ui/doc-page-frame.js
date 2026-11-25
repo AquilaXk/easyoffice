@@ -54,7 +54,8 @@
     const env = deps.env || host;
     const raf = (fn) => (env.requestAnimationFrame ? env.requestAnimationFrame(fn) : env.setTimeout(fn, 16));
     const isHwp = () => (deps.getActiveModule?.() ?? document?.getElementById?.("app")?.dataset?.module) === "HWP";
-    const bandLabel = (band) => (isHwp() ? (band === "header" ? "머리말" : "꼬리말") : band === "header" ? "머리글" : "바닥글");
+    const isPages = () => !isHwp() && editor?.dataset?.eoDocFlavor === "pages";
+    const bandLabel = (band) => (isHwp() || isPages() ? (band === "header" ? "머리말" : "꼬리말") : band === "header" ? "머리글" : "바닥글");
     const defaultMargins = () => (isHwp() ? HWP_DEFAULT_MARGINS : DEFAULT_MARGINS);
     let editor = null;
     let pages = null;
@@ -551,7 +552,7 @@
       else run();
       sync();
       focusZone(section, 0);
-      deps.setFeedback?.(enable ? "빈 문서(3열)" : statusTitle(editing) + " 편집 중");
+      deps.setFeedback?.(enable ? "3열 분할" : statusTitle(editing) + " 편집 중");
       return true;
     }
 

@@ -123,8 +123,8 @@ test("a link cell opens the dialog filled in, 고치기 changes it and 링크 �
   await t.apply();
   await t.select("B2");
   await t.openDialog();
-  assert.equal(t.byId("sheet-link-dialog-title").textContent, "하이퍼링크 고치기");
-  assert.equal(t.byId("btn-sheet-link-apply").textContent, "고치기");
+  assert.equal(t.byId("sheet-link-dialog-title").textContent, "하이퍼링크 편집");
+  assert.equal(t.byId("btn-sheet-link-apply").textContent, "편집");
   assert.equal(t.byId("sheet-link-address").value, URL_A);
   assert.equal(t.byId("btn-sheet-link-remove").hidden, false);
   t.fill("sheet-link-address", "mailto:me@example.com");
@@ -715,7 +715,7 @@ test("clicking a spilled HYPERLINK child cell asks the engine for that cell with
   assert.deepEqual(opened, ["https://example.com/spilled-2"]);
 });
 
-test("a right click on a link cell opens a menu with 하이퍼링크 고치기... and 하이퍼링크 지우기 on that cell; other cells and headers keep their own", async () => {
+test("a right click on a link cell opens a menu with 하이퍼링크 편집… and 하이퍼링크 제거 on that cell; other cells and headers keep their own", async () => {
   const t = await open();
   await t.select("B3");
   await t.openDialog();
@@ -729,10 +729,10 @@ test("a right click on a link cell opens a menu with 하이퍼링크 고치기..
   const td = t.cell("B3");
   td.dispatchEvent({ type: "contextmenu", target: td, button: 2, clientX: 40, clientY: 40, bubbles: true });
   assert.equal(menu.hidden, false);
-  assert.deepEqual(shown(), ["하이퍼링크 고치기...", "하이퍼링크 지우기"]);
+  assert.deepEqual(shown(), ["하이퍼링크 편집…", "하이퍼링크 제거"]);
   t.userClick(menu.querySelector('[data-sheet-act="link-edit"]'));
   await flushAsyncTurns(12);
-  assert.equal(t.byId("sheet-link-dialog").open, true, "고치기 opens the dialog filled with the cell's link");
+  assert.equal(t.byId("sheet-link-dialog").open, true, "편집 opens the dialog filled with the cell's link");
   assert.equal(t.byId("sheet-link-address").value, URL_A);
   t.byId("sheet-link-dialog").close();
   const textBefore = td.textContent;
@@ -740,12 +740,12 @@ test("a right click on a link cell opens a menu with 하이퍼링크 고치기..
   td.dispatchEvent({ type: "contextmenu", target: td, button: 2, clientX: 40, clientY: 40, bubbles: true });
   t.userClick(menu.querySelector('[data-sheet-act="link-clear"]'));
   await flushAsyncTurns(20);
-  assert.equal(td.dataset.link, undefined, "지우기 takes the link of the clicked cell, though another one was active");
+  assert.equal(td.dataset.link, undefined, "제거 takes the link of the clicked cell, though another one was active");
   assert.equal(td.textContent, textBefore, "and keeps its text");
   const header = t.document.querySelector("#pane-sheet th[data-col]");
   header.dispatchEvent({ type: "contextmenu", target: header, button: 2, clientX: 40, clientY: 10, bubbles: true });
   assert.equal(shown().includes("행 삭제") || shown().includes("열 삭제"), true);
-  assert.equal(shown().includes("하이퍼링크 지우기"), false, "a header menu shows no link items");
+  assert.equal(shown().includes("하이퍼링크 제거"), false, "a header menu shows no link items");
 });
 
 test("an address entered in the formula bar becomes a link when the cell has none, in a step after the entry's", async () => {

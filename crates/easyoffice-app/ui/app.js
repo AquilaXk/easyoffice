@@ -276,71 +276,74 @@
     SLIDE: "프레젠테이션 (PPTX)", BASE: "데이터베이스 (BASE)", BOARD: "보드 (BOARD)", PDF: "PDF 스튜디오", CONV: "포맷 변환기",
   };
 
+  const EXCLUDED_PALETTE_SUFFIX = {
+    DOC: new Set(["data-validation"]),
+    HWP: new Set(["layout-orientation", "layout-margins", "data-validation"]),
+    SHEET: new Set(["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"]),
+    SLIDE: new Set(["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
+    PDF: new Set(["home-bold", "home-italic", "home-underline", "home-style", "insert-table", "insert-chart", "insert-shape", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
+  };
+  const WORKSPACE_BUTTON_PALETTE = {
+    BASE: [["btn-base-add-record", "새 레코드"], ["btn-base-add-field", "필드 추가"], ["btn-base-filter", "필터"], ["btn-base-sort", "정렬"], ["btn-base-add-table", "새 테이블"], ["btn-base-export-xlsx", "XLSX로 내보내기"], ["btn-base-export-csv", "CSV로 내보내기"], ["btn-base-export-tsv", "TSV로 내보내기"]],
+    BOARD: [["btn-board-select", "선택 도구"], ["btn-board-add-shape", "도형 추가"], ["btn-board-add-text", "텍스트 추가"], ["btn-board-add-image", "그림 추가"], ["btn-board-add-chart", "차트 추가"], ["btn-board-connect-ortho", "직각 연결선"], ["btn-board-connect-curved", "곡선 연결선"], ["btn-board-front", "맨 앞으로 가져오기"], ["btn-board-back", "맨 뒤로 보내기"], ["btn-board-delete", "개체 지우기"], ["btn-board-analyze", "요소 분석"], ["btn-board-export-pdf", "PDF로 내보내기"], ["btn-board-fit-all", "전체 맞춤"]],
+  };
+
   function executePaletteItem(item) {
     if (!item) return;
     const modal = document.getElementById("cmd-palette-modal");
     if (modal && typeof modal.close === "function") modal.close();
-    if (item.run) {
-      item.run();
-    } else if (item.id === "bench-run") {
-      workspacePanels.runStudioCommand("bench-run");
-    } else if (item.id === "studio-save") {
-      void saveWorkspaceDocument().catch(() => {});
-    } else if (item.id === "studio-save-as") {
-      void saveWorkspaceDocument({ saveAs: true }).catch(() => {});
-    } else if (item.id === "studio-undo") {
-      void ribbonHistory.performWorkspaceUndo().catch(() => {});
-    } else if (item.id === "studio-redo") {
-      void ribbonHistory.performWorkspaceRedo().catch(() => {});
-    } else if (item.id === "file-open") {
-      fileOpen.openFilePicker();
-    } else if (item.id.startsWith("window-new-")) {
-      void windowBridge.newDocument(item.id.slice("window-new-".length)).catch((err) => setStatusFeedback(err?.message || String(err)));
-    } else {
-      void ribbonHistory.executeTrackedRibbonCommand(item.id, { targetModule: item.module }).catch(() => {});
-    }
+    if (item.run) { item.run(); return; }
+    const done = item.id === "studio-save" ? saveWorkspaceDocument()
+      : item.id === "studio-save-as" ? saveWorkspaceDocument({ saveAs: true })
+      : item.id === "studio-undo" ? ribbonHistory.performWorkspaceUndo()
+      : item.id === "studio-redo" ? ribbonHistory.performWorkspaceRedo()
+      : item.id === "file-open" ? (fileOpen.openFilePicker(), Promise.resolve())
+      : item.id.startsWith("window-new-") ? windowBridge.newDocument(item.id.slice("window-new-".length)).catch((err) => setStatusFeedback(err?.message || String(err)))
+      : ribbonHistory.executeTrackedRibbonCommand(item.id, { targetModule: item.module });
+    if (item.id.endsWith("-review-verify")) void Promise.resolve(done).then(() => host.__EASYOFFICE_LAYOUT_LINT__?.appendLintFeedbackAfterVerify?.()).catch(() => {});
+    else void Promise.resolve(done).catch(() => {});
   }
 
   function collectCommandPaletteItems() {
     const fmt = (sc) => (typeof formatPlatformShortcut === "function" ? formatPlatformShortcut(sc, activeShortcutModifier) : sc);
+    const isHwp = activeModule === "HWP", isPages = activeModule === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages";
+    const undoLabel = isHwp ? "되돌리기" : "실행 취소";
     const items = [
       { id: "studio-save", module: activeModule, title: "저장", shortcut: fmt("⌘S"), searchKey: "파일 저장 save " + fmt("⌘S") },
       { id: "studio-save-as", module: activeModule, title: "다른 이름으로 저장…", shortcut: fmt("⇧⌘S"), searchKey: "파일 다른 이름으로 저장 save as " + fmt("⇧⌘S") },
-      { id: "studio-undo", module: activeModule, title: "실행 취소", shortcut: fmt("⌘Z"), searchKey: "편집 실행 취소 undo " + fmt("⌘Z") },
-      { id: "studio-redo", module: activeModule, title: "다시 실행", shortcut: fmt("⌘Y"), searchKey: "편집 다시 실행 redo " + fmt("⌘Y") },
+      { id: "studio-undo", module: activeModule, title: undoLabel, shortcut: fmt("⌘Z"), searchKey: "편집 " + undoLabel + " 실행 취소 되돌리기 undo " + fmt("⌘Z") },
+      { id: "studio-redo", module: activeModule, title: "다시 실행", shortcut: fmt("⇧⌘Z"), searchKey: "편집 다시 실행 redo " + fmt("⇧⌘Z") },
     ];
-    for (const [kind, label] of Object.entries(NEW_DOCUMENT_LABELS)) {
-      items.push({ id: "window-new-" + kind, module: activeModule, title: "새 문서 · " + label, shortcut: "", searchKey: "새 문서 창 열기 new " + label.toLowerCase() });
-    }
+    for (const [kind, label] of Object.entries(NEW_DOCUMENT_LABELS)) items.push({ id: "window-new-" + kind, module: activeModule, title: "새 문서 · " + label, shortcut: "", searchKey: "새 문서 창 열기 new " + label.toLowerCase() });
     items.push({ id: "file-open", module: activeModule, title: "열기…", shortcut: fmt("⌘O"), searchKey: "파일 열기 open " + fmt("⌘O") });
-    for (const mod of [activeModule]) {
-      const cats = RIBBON_CATEGORY_TOOLS[mod];
-      if (!cats) continue;
-      const koBadge = MODULE_SHORT_BADGES[mod] || mod;
+    const cats = RIBBON_CATEGORY_TOOLS[activeModule];
+    if (cats) {
+      const excluded = EXCLUDED_PALETTE_SUFFIX[activeModule], koBadge = MODULE_SHORT_BADGES[activeModule] || activeModule;
       for (const cat of Object.keys(cats)) {
         for (const c of cats[cat]) {
-          // The sheet's page setup is one menu item and one command search entry (`sheetMenuPaletteItems`).
-          if (mod === "SHEET" && /^sheet-layout-(paper|orientation|margins)$/.test(c.id)) continue;
-          // In the sheet the link command is the hyperlink dialog (PD-218), not the document editor's link and bookmark.
+          if (c.id.endsWith("-view-ribbon") || excluded?.has(c.id.replace(/^[a-z]+-/, ""))) continue;
           const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
-          const label = c.id === "sheet-insert-link" ? "하이퍼링크" : c.title;
-          const title = mod === activeModule ? label : koBadge + " · " + label;
-          items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + label + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });
+          const label = isPages && c.id === "document-layout-paper" ? "페이지 설정" : c.title;
+          const extraKeys = c.id.endsWith("-insert-link") ? " 책갈피 링크 hyperlink" : "";
+          items.push({ id: c.id, module: activeModule, title: label, shortcut: dispShortcut, searchKey: (koBadge + " " + label + extraKeys + " " + dispShortcut + " " + c.id + " " + activeModule).toLowerCase() });
         }
       }
     }
     if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
-    if (activeModule === "DOC" || activeModule === "HWP") {
-      // The native menu's items: the Hangul editor's own commands while it owns the window, the page frame otherwise.
-      const hfItems = activeModule === "HWP"
-        ? [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"]]
-        : [["mod-header", "머리글", "header", "page:doc-header"], ["mod-footer", "바닥글", "footer", "page:doc-footer"]];
+    if (activeModule === "DOC" || isHwp || activeModule === "SHEET") items.push({ id: "studio-cmd:find", module: activeModule, title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") }, { id: "studio-cmd:replace", module: activeModule, title: isHwp ? "찾아 바꾸기" : "찾기 및 바꾸기", shortcut: fmt("⌘F2"), searchKey: "편집 찾기 및 바꾸기 찾아 바꾸기 replace " + fmt("⌘F2"), run: () => runNativeMenu("edit:replace") });
+    if (activeModule === "DOC" || isHwp) {
+      const hfItems = isHwp || isPages ? [["mod-header", "머리말", "header", isHwp ? "page:header" : "page:doc-header"], ["mod-footer", "꼬리말", "footer", isHwp ? "page:footer" : "page:doc-footer"]] : [["mod-header", "머리글", "header", "page:doc-header"], ["mod-footer", "바닥글", "footer", "page:doc-footer"]];
       for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "셀 테두리/배경", "cell border background", "table:border-bg"], ["table-cell-props", "표/셀 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "셀 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
         items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
-    items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run" });
+    if (activeModule === "BASE" || activeModule === "BOARD") {
+      const ws = [["zoom-in", "확대", "⌘=", "view:zoom-in"], ["zoom-out", "축소", "⌘-", "view:zoom-out"], ["view-zoom", "100%", "⌘0", "view:zoom-100"], ["view-theme", "밝게/어둡게 전환", "⌃⌥D", "view:theme-toggle"], ["copilot-toggle", "코파일럿", "⇧⌘K", "tool:copilot"], ["print", "인쇄…", "⌘P", "file:print"], ...(activeModule === "BASE" ? [["find", "찾기", "⌘F", "edit:find"], ["replace", "찾기 및 바꾸기", "⌘F2", "edit:replace"]] : [])];
+      for (const [id, title, sc, menuId] of ws) items.push({ id: "ws-" + id, module: activeModule, title, shortcut: fmt(sc), searchKey: title + " " + id + " " + fmt(sc), run: () => runNativeMenu(menuId) });
+      for (const [btnId, title] of WORKSPACE_BUTTON_PALETTE[activeModule]) items.push({ id: "btn:" + btnId, module: activeModule, title, shortcut: "", searchKey: activeModule.toLowerCase() + " " + title, run: () => document.getElementById(btnId)?.click?.() });
+    }
+    items.push({ id: "view:toolbar-labels", module: activeModule, title: "도구 상자 라벨 표시", shortcut: "", searchKey: "보기 도구 상자 라벨 표시 toolbar labels", run: () => runNativeMenu("view:toolbar-labels") });
     return items;
   }
 
@@ -348,9 +351,10 @@
     const listEl = document.getElementById("cmd-palette-list");
     if (!listEl) return;
     const q = String(filterText || "").trim().toLowerCase();
-    paletteFilteredItems = collectCommandPaletteItems()
-      .filter((item) => !q || item.searchKey.toLowerCase().includes(q) || item.title.toLowerCase().includes(q))
-      .slice(0, 18);
+    const all = collectCommandPaletteItems();
+    paletteFilteredItems = !q ? all.slice(0, 80) : all
+      .map((item, idx) => ({ item, idx, score: item.title.toLowerCase() === q ? 0 : item.title.toLowerCase().startsWith(q) ? 1 : item.title.toLowerCase().includes(q) ? 2 : item.searchKey.toLowerCase().includes(q) ? 3 : 9 }))
+      .filter((x) => x.score < 9).sort((a, b) => a.score - b.score || a.idx - b.idx).slice(0, 80).map((x) => x.item);
     if (paletteSelectedIdx >= paletteFilteredItems.length) paletteSelectedIdx = 0;
     listEl.innerHTML = "";
     const searchInput = document.getElementById("cmd-search-input");
@@ -779,7 +783,7 @@
   // Print and find belong to the module in front: the Hangul editor has its own, document, sheet and base use the find dialog, other modules keep the palette on Ctrl+F.
   function printActiveModule() {
     if (activeModule === "HWP") return hwpPrint.print();
-    return officePrint.isSupported(activeModule) ? officePrint.print() : Promise.reject(new Error("이 모듈은 인쇄를 지원하지 않습니다."));
+    return officePrint.isSupported(activeModule) ? officePrint.print() : Promise.reject(new Error("현재 창에서는 인쇄를 지원하지 않습니다."));
   }
 
   function findActiveModule(mode) {
@@ -848,7 +852,10 @@
       void hwpHost.call("automation.execute", { id: EMBED_EDITOR_COMMANDS[menuId], allowDialog: true }).catch(() => {});
       return true;
     };
-    if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && editorCommand(id)) return true;
+    if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && editorCommand(id)) {
+      if (id === "view:toolbar-labels") shellChrome.toggleToolbarLabels?.();
+      return true;
+    }
     const actions = {
       ...shortcutActions(modal, input),
       ...host.__EASYOFFICE_NATIVE_MENU_TABLE__.pageMenuActions(document),

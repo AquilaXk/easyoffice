@@ -124,7 +124,7 @@ export function setupColorPicker(
   const actions = document.createElement('div');
   actions.className = 'sb-hl-palette-actions';
   if (options.clear) actions.appendChild(createButton('색 없음', () => applyColor('#ffffff')));
-  actions.appendChild(createButton('다른 색...', () => {
+  actions.appendChild(createButton('다른 색…', () => {
     nativeChoice = { documentVersion: options.documentVersion?.(), color: picker.value };
     picker.click();
   }));

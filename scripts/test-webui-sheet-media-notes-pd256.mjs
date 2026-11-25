@@ -404,7 +404,7 @@ test("PD-256: 셀 메모(Shift+F2·새 메모·메모 삽입·호버/상시 카�
   const e5 = document.querySelector('#pane-sheet td[data-cell="E5"]');
   e5.dispatchEvent({ type: "contextmenu", target: e5, button: 2, clientX: 60, clientY: 60, bubbles: true });
   assert.equal(menu.hidden, false);
-  assert.deepEqual(shown(), ["하이퍼링크 고치기...", "하이퍼링크 지우기"], "링크 전용 셀 불변식 보존");
+  assert.deepEqual(shown(), ["하이퍼링크 편집…", "하이퍼링크 제거"], "링크 전용 셀 불변식 보존");
   document.dispatchEvent({ type: "mousedown", target: document.body });
 
   // 메모 전용 셀(B2) 우클릭: B2 선택 + 메모 3항목 표시
@@ -432,7 +432,7 @@ test("PD-256: 셀 메모(Shift+F2·새 메모·메모 삽입·호버/상시 카�
   userClick(document.getElementById("btn-sheet-note-apply"));
   await flushAsyncTurns(6);
   e5.dispatchEvent({ type: "contextmenu", target: e5, button: 2, clientX: 60, clientY: 60, bubbles: true });
-  assert.deepEqual(shown(), ["하이퍼링크 고치기...", "하이퍼링크 지우기", "메모 편집", "메모 삭제", "메모 표시/숨기기"]);
+  assert.deepEqual(shown(), ["하이퍼링크 편집…", "하이퍼링크 제거", "메모 편집", "메모 삭제", "메모 표시/숨기기"]);
   document.dispatchEvent({ type: "mousedown", target: document.body });
 
   // 삽입 > 메모 표시/숨기기 (워크시트 전체 일괄 토글)

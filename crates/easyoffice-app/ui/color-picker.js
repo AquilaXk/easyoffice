@@ -210,7 +210,7 @@
     const actions = document.createElement("div");
     actions.className = "sb-hl-palette-actions";
     actions.appendChild(makeButton(document, clearLabel, () => onSelect("")));
-    actions.appendChild(makeButton(document, "다른 색...", () => input.click()));
+    actions.appendChild(makeButton(document, "다른 색…", () => input.click()));
     panel.appendChild(actions);
   }
 
@@ -248,7 +248,7 @@
         onSelect("");
       }));
     }
-    actions.appendChild(makeButton(document, "다른 색...", () => input.click()));
+    actions.appendChild(makeButton(document, "다른 색…", () => input.click()));
     panel.appendChild(actions);
     // Keeps the editor selection: pressing the picker must not move focus out of the document.
     hostEl.addEventListener("mousedown", (event) => event.preventDefault?.());

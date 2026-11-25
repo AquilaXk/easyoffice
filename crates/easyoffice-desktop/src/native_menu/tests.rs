@@ -4,7 +4,8 @@ mod contracts;
 
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Alt", "Shift"];
 const GROUPS: &[&str] = &[
-    "app", "file", "edit", "view", "insert", "format", "page", "sheet", "table", "tool", "help",
+    "app", "file", "edit", "view", "insert", "format", "page", "slide", "sheet", "table", "tool",
+    "help",
 ];
 
 #[test]
@@ -36,7 +37,7 @@ fn accelerators_are_command_based_and_do_not_collide() {
         assert!(parts.contains(&"CmdOrCtrl"), "{accelerator} uses Cmd");
         assert!(parts.iter().all(|p| MODIFIERS.contains(p)), "{accelerator}");
         assert!(
-            key.len() == 1 || key == "Enter",
+            key.len() == 1 || matches!(key, "Enter" | "F2"),
             "{accelerator} ends in one key"
         );
         assert!(
@@ -595,12 +596,12 @@ fn the_hangul_window_keeps_the_full_bar_with_the_reference_cell_items_in_order()
         editor_only,
         [
             "view:zoom-dialog",
-            "view:toolbar-labels",
             "view:form-mode",
             "table:cell-select",
             "table:cell-split",
         ]
     );
+    assert_eq!(spec("view:toolbar-labels").action, "view-toolbar-labels");
     let hwp_ids = layout::table_ids(MenuKind::Hwp);
     for id in &editor_only {
         assert!(hwp_ids.contains(id), "{id}");
@@ -634,12 +635,24 @@ fn paste_and_close_are_system_items_that_stay_in_the_table_for_the_page_menu() {
 }
 
 #[test]
-fn editing_keys_stay_with_the_focused_editor_except_the_edit_menu_keys() {
+fn synced_edit_and_format_accelerators_match_webui_while_other_format_items_stay_unbound() {
+    let explicit = [
+        ("edit:find", Some("CmdOrCtrl+F")),
+        ("edit:replace", Some("CmdOrCtrl+F2")),
+        ("edit:paste-special", Some("CmdOrCtrl+Alt+V")),
+        ("format:bold", Some("CmdOrCtrl+B")),
+        ("format:italic", Some("CmdOrCtrl+I")),
+        ("format:underline", Some("CmdOrCtrl+U")),
+    ];
     for spec in ITEMS
         .iter()
         .filter(|spec| spec.id.starts_with("format:") || spec.id.starts_with("edit:"))
-        .filter(|spec| spec.id != "edit:find")
     {
+        if let Some((_, key)) = explicit.iter().find(|(id, _)| *id == spec.id) {
+            assert_eq!(spec.accelerator, *key, "{}", spec.id);
+            assert_eq!(accelerator_of(spec), *key, "{}", spec.id);
+            continue;
+        }
         assert_eq!(spec.accelerator, None, "{}", spec.id);
         let bound = accelerator_of(spec);
         let macos_key = MACOS_EDIT_KEYS.iter().find(|(id, _)| *id == spec.id);
@@ -701,9 +714,15 @@ fn the_hangul_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys()
     );
     let file = lines_of(MenuKind::Hwp, "파일");
     assert_eq!(
-        file[file.len() - 4..],
-        ["file:save-as", "-", "file:export-pdf", "file:print"],
-        "save as, a separator, export, print"
+        file[file.len() - 5..],
+        [
+            "file:save-as",
+            "file:save-as-hwpx",
+            "-",
+            "file:export-pdf",
+            "file:print",
+        ],
+        "save as, save as hwpx, a separator, export, print"
     );
 }
 
@@ -739,6 +758,8 @@ fn the_file_and_view_menus_keep_the_reference_order_and_separators() {
                     "-",
                     layout::THEME,
                     "view:theme-toggle",
+                    "-",
+                    "view:toolbar-labels",
                 ],
                 "{kind:?}"
             );
@@ -823,7 +844,7 @@ fn the_macos_menus_have_the_custom_quit_korean_system_labels_and_one_cmd_w() {
 }
 
 #[test]
-fn the_check_items_are_the_three_themes_and_the_update_switch_of_the_table() {
+fn the_check_items_are_the_three_themes_toolbar_labels_and_the_update_switch_of_the_table() {
     for id in CHECK_IDS {
         assert!(ITEMS.iter().any(|spec| spec.id == id), "{id}");
     }
@@ -833,36 +854,107 @@ fn the_check_items_are_the_three_themes_and_the_update_switch_of_the_table() {
         assert_eq!(action_for(id).unwrap(), format!("theme:{mode}"));
     }
     assert_eq!(theme_item_id("purple"), None);
-    assert_eq!(CHECK_IDS.len(), THEME_ITEMS.len() + 1);
+    assert_eq!(CHECK_IDS.len(), THEME_ITEMS.len() + 2);
+    assert_eq!(
+        action_for("view:toolbar-labels"),
+        Some("view-toolbar-labels")
+    );
     assert_eq!(action_for("help:update-check"), Some("update-check"));
 }
 
 #[test]
-fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() {
-    let view = |theme, update_check| MenuView {
+fn exactly_the_current_theme_is_checked_and_switches_follow_view_state() {
+    let view = |theme, toolbar_labels, update_check| MenuView {
         theme,
         disabled_mask: ItemMask::default(),
         update_check,
+        toolbar_labels,
     };
     for mode in ["system", "light", "dark"] {
         let checked: Vec<&str> = CHECK_IDS
             .into_iter()
-            .filter(|id| check_state(id, &view(mode, None)).is_some_and(|(on, _)| on))
+            .filter(|id| *id != "view:toolbar-labels")
+            .filter(|id| check_state(id, &view(mode, true, None)).is_some_and(|(on, _)| on))
             .collect();
         assert_eq!(checked, vec![theme_item_id(mode).unwrap()], "{mode}");
     }
     assert_eq!(
-        check_state("help:update-check", &view("dark", Some(true))),
+        check_state("view:toolbar-labels", &view("dark", true, None)),
         Some((true, true))
     );
     assert_eq!(
-        check_state("help:update-check", &view("dark", Some(false))),
+        check_state("view:toolbar-labels", &view("dark", false, None)),
         Some((false, true))
     );
     assert_eq!(
-        check_state("help:update-check", &view("dark", None)),
+        check_state("help:update-check", &view("dark", true, Some(true))),
+        Some((true, true))
+    );
+    assert_eq!(
+        check_state("help:update-check", &view("dark", true, Some(false))),
+        Some((false, true))
+    );
+    assert_eq!(
+        check_state("help:update-check", &view("dark", true, None)),
         Some((false, false)),
         "an app that does not check offers no switch"
     );
-    assert_eq!(check_state("file:save", &view("dark", None)), None);
+    assert_eq!(check_state("file:save", &view("dark", true, None)), None);
+}
+
+#[test]
+fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
+    for (id, office_label, hwp_label) in [
+        ("edit:undo", "실행 취소", "되돌리기"),
+        ("edit:cut", "잘라내기", "오려 두기"),
+        ("edit:copy", "복사", "복사하기"),
+        ("edit:paste", "붙여넣기", "붙이기"),
+        ("edit:replace", "찾기 및 바꾸기", "찾아 바꾸기"),
+        ("format:bold", "굵게", "진하게"),
+        ("format:italic", "기울임꼴", "기울임"),
+        ("view:zoom-100", "100%", "실제 크기"),
+    ] {
+        let s = spec(id);
+        assert_eq!(s.label, office_label, "{id}");
+        assert_eq!(label_for(MenuKind::Doc, s), office_label, "{id} doc");
+        assert_eq!(label_for(MenuKind::Sheet, s), office_label, "{id} sheet");
+        assert_eq!(label_for(MenuKind::Hwp, s), hwp_label, "{id} hwp");
+    }
+    assert_eq!(spec("view:toolbar-labels").label, "도구 상자 라벨 표시");
+    assert_eq!(spec("help:update-check").label, "업데이트 확인 알림");
+    assert!(lines_of(MenuKind::Doc, "파일").contains(&"file:doc-paper"));
+    assert!(lines_of(MenuKind::Hwp, "파일").contains(&"file:save-as-hwpx"));
+    for slide_id in [
+        "slide:insert-textbox",
+        "slide:insert-picture",
+        "slide:bring-front",
+        "slide:send-back",
+        "slide:delete-element",
+    ] {
+        assert!(
+            lines_of(MenuKind::Slide, "삽입").contains(&slide_id),
+            "{slide_id}"
+        );
+    }
+    for sheet_id in [
+        "sheet:insert-picture",
+        "sheet:note-insert",
+        "sheet:note-toggle-all",
+    ] {
+        assert!(
+            lines_of(MenuKind::Sheet, "삽입").contains(&sheet_id),
+            "{sheet_id}"
+        );
+    }
+    assert!(!lines_of(MenuKind::Sheet, "삽입").contains(&"table:sheet-chart"));
+    for kind in MenuKind::ALL {
+        assert!(
+            lines_of(kind, "보기").contains(&"view:toolbar-labels"),
+            "{kind:?}"
+        );
+        assert!(
+            !layout::table_ids(kind).contains(&"tool:security-audit"),
+            "{kind:?}"
+        );
+    }
 }

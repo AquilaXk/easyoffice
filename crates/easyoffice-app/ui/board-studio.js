@@ -645,7 +645,10 @@
     function openChartDialog(node) {
       if (!node || node.kind !== "chart") return;
       editingChartId = node.id;
-      if ($("board-chart-type")) $("board-chart-type").value = node.chartType || "column";
+      if ($("board-chart-type")) {
+        $("board-chart-type").value = node.chartType || "column";
+        host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.($("board-chart-type"));
+      }
       if ($("board-chart-title")) $("board-chart-title").value = node.title || "";
       if ($("board-chart-categories")) $("board-chart-categories").value = (node.categories || []).join(", ");
       if ($("board-chart-series")) $("board-chart-series").value = (node.series || []).map((s) => `${s.name}: ${(s.values || []).join(", ")}`).join("\n");
@@ -706,7 +709,7 @@
       const stage = domEl(d, "div", { className: "board-print-stage" });
       const svg = svgEl(d, "svg", { class: "board-print-connectors", viewBox: `0 0 ${pageW} ${pageH}`, "aria-hidden": "true" });
       const defs = svgEl(d, "defs"), marker = svgEl(d, "marker", { id: "board-print-arrow", markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto" });
-      marker.appendChild(svgEl(d, "path", { d: "M 0 0 L 8 4 L 0 8 z", fill: "#335095" }));
+      marker.appendChild(svgEl(d, "path", { d: "M 0 0 L 8 4 L 0 8 z", fill: "var(--accent-strong)" }));
       defs.appendChild(marker);
       svg.appendChild(defs);
       const mapPt = (p) => `${round2(offX + p.x * scale)} ${round2(offY + p.y * scale)}`;
@@ -714,7 +717,7 @@
         const dStr = route.routing === "curved" && route.controlPoints?.length === 2
           ? `M ${mapPt(route.points[0])} C ${mapPt(route.controlPoints[0])}, ${mapPt(route.controlPoints[1])}, ${mapPt(route.points[1])}`
           : route.points.map((p, idx) => (idx === 0 ? "M " : "L ") + mapPt(p)).join(" ");
-        svg.appendChild(svgEl(d, "path", { d: dStr, fill: "none", stroke: "#335095", "stroke-width": 2, "marker-end": "url(#board-print-arrow)" }));
+        svg.appendChild(svgEl(d, "path", { d: dStr, fill: "none", stroke: "var(--accent-strong)", "stroke-width": 2, "marker-end": "url(#board-print-arrow)" }));
       }
       stage.appendChild(svg);
       for (const n of state.nodes) {
@@ -817,6 +820,7 @@
         }
         body.appendChild(domEl(doc, "p", { id: "board-chart-status", className: "dialog-pdf-note", role: "status" }));
         const { dlg, xBtn } = createDialogShell("board-chart-dialog", "board-chart-dialog-title", "차트 데이터 편집", "btn-board-chart-x", body, [["btn-board-chart-ok", "확인", true], ["btn-board-chart-cancel", "취소", false]]);
+        host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, dlg);
         $("btn-board-chart-ok").addEventListener("click", applyChartDialog);
         const closeFn = () => { editingChartId = null; kit ? kit.closeDialog("board-chart-dialog") : dlg.close?.(); };
         $("btn-board-chart-cancel").addEventListener("click", closeFn);
@@ -831,23 +835,26 @@
       const tbBtn = (id, icon, text, pressed) => domEl(doc, "button", { id, type: "button", className: "tb-btn" + (pressed === "true" ? " active" : ""), "aria-label": text, "aria-pressed": pressed }, [
         domEl(doc, "span", { className: "tb-sprite icon-" + icon, "aria-hidden": "true" }), domEl(doc, "span", { className: "tb-label", text }),
       ]);
+      const tbSvg = (id, iconName, text, pressed) => domEl(doc, "button", { id, type: "button", className: "tb-btn" + (pressed === "true" ? " active" : ""), "aria-label": text, "aria-pressed": pressed }, [
+        domEl(doc, "span", { className: "tb-icon-svg", "data-icon": iconName, "aria-hidden": "true" }), domEl(doc, "span", { className: "tb-label", text }),
+      ]);
       const ctrlBtn = (id, text, aria, extraCls = "") => domEl(doc, "button", { id, type: "button", className: ("board-ctrl-btn " + extraCls).trim(), text, "aria-label": aria });
       const sep = () => domEl(doc, "span", { className: "tb-sep", "aria-hidden": "true" });
       const grp = (cls, items) => domEl(doc, "div", { className: ("tb-group " + cls).trim() }, items);
 
-      shapeSelectEl = domEl(doc, "select", { id: "board-shape-kind", className: "sb-select", "aria-label": "도형 종류" }, Object.entries(SHAPE_LABELS).map(([value, text]) => domEl(doc, "option", { value, text })));
+      shapeSelectEl = domEl(doc, "select", { id: "board-shape-kind", className: "sb-combo sb-select", "aria-label": "도형 종류" }, Object.entries(SHAPE_LABELS).map(([value, text]) => domEl(doc, "option", { value, text })));
       imageInputEl = domEl(doc, "input", { id: "board-image-file-input", type: "file", accept: ".png,.jpg,.jpeg,image/png,image/jpeg", hidden: true, "aria-label": "그림 파일 선택" });
 
       const bar = domEl(doc, "div", { id: "board-toolbar", className: "eo-doc-style-bar board-toolbar", role: "toolbar", "aria-label": "보드 도구 모음" }, [
-        grp("", [tbBtn("btn-board-select", "pointer", "선택", "true")]),
+        grp("", [tbSvg("btn-board-select", "cursor", "선택", "true")]),
         sep(),
-        grp("", [tbBtn("btn-board-add-shape", "shape", "도형"), shapeSelectEl, tbBtn("btn-board-add-text", "char-shape", "텍스트"), tbBtn("btn-board-add-image", "image", "그림"), imageInputEl, tbBtn("btn-board-add-chart", "grid", "차트")]),
+        grp("", [tbBtn("btn-board-add-shape", "shape", "도형"), shapeSelectEl, tbSvg("btn-board-add-text", "text-box", "텍스트"), tbBtn("btn-board-add-image", "image", "그림"), imageInputEl, tbSvg("btn-board-add-chart", "chart-bar", "차트")]),
         sep(),
-        grp("", [tbBtn("btn-board-connect-ortho", "hyperlink", "직각 연결선", "false"), tbBtn("btn-board-connect-curved", "hyperlink", "곡선 연결선", "false")]),
+        grp("", [tbSvg("btn-board-connect-ortho", "connect-ortho", "직각 연결선", "false"), tbSvg("btn-board-connect-curved", "connect-curved", "곡선 연결선", "false")]),
         sep(),
-        grp("", [tbBtn("btn-board-front", "arrow-up", "맨 앞으로 가져오기"), tbBtn("btn-board-back", "arrow-down", "맨 뒤로 보내기"), tbBtn("btn-board-delete", "remove", "개체 지우기")]),
+        grp("", [tbSvg("btn-board-front", "layers-front", "맨 앞으로 가져오기"), tbSvg("btn-board-back", "layers-back", "맨 뒤로 보내기"), tbSvg("btn-board-delete", "trash", "개체 지우기")]),
         sep(),
-        grp("board-tools-group", [tbBtn("btn-board-analyze", "find", "요소 분석"), tbBtn("btn-board-print", "paste", "인쇄"), tbBtn("btn-board-export-pdf", "stamp", "PDF로 내보내기")]),
+        grp("board-tools-group", [tbSvg("btn-board-analyze", "activity", "요소 분석"), tbSvg("btn-board-print", "printer", "인쇄"), tbSvg("btn-board-export-pdf", "file-export-pdf", "PDF로 내보내기")]),
       ]);
 
       zoomLabelEl = ctrlBtn("btn-board-zoom-reset", "100%", "배율 100%로 초기화", "board-zoom-pct");
@@ -863,6 +870,8 @@
       worldEl = domEl(doc, "div", { id: "board-world", className: "board-world" }, [connectorLayerEl, nodeLayerEl]);
       viewportEl = domEl(doc, "div", { id: "board-viewport", className: "board-viewport", role: "region", "aria-label": "보드 캔버스" }, [worldEl, zoomIsland]);
       root.replaceChildren(bar, viewportEl);
+      host.__EASYOFFICE_ICONS__?.applyIcons?.(doc, bar);
+      host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, bar);
       ensureDialogs();
 
       const on = (id, fn) => $(id).addEventListener("click", fn);
