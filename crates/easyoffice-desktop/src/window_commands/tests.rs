@@ -734,7 +734,10 @@ fn export_only_dialog_save_preserves_original_tracked_file_and_duplicate_open_lo
         .finish_dialog_save("doc-1-a", &save_as_target, Some(save_as_fp), true)
         .unwrap();
     let save_as_canon = fs::canonicalize(&save_as_target).unwrap();
-    assert_eq!(shown, save_as_canon);
+    assert_eq!(
+        shown,
+        crate::windows::strip_windows_verbatim(save_as_canon.clone())
+    );
     assert_eq!(
         locked(&state.files).get("doc-1-a").unwrap().path,
         save_as_canon
