@@ -942,6 +942,53 @@ test("regression guards: single-pass mailmerge before footer, h4 stats, multi-ta
   assert.deepEqual(Array.from(t1.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "single table untouched when caret is outside");
   assert.equal(document.getElementById("status-command-feedback").textContent, "표 안에서 사용");
 
+  // Moving caret from t1 into non-paragraph .eo-doc-notes refuses sort instead of using stale activeDocBlockEl
+  const rT1 = document.createRange();
+  rT1.setStart(t1.querySelector("td").firstChild, 0);
+  rT1.setEnd(t1.querySelector("td").firstChild, 0);
+  selection.removeAllRanges();
+  selection.addRange(rT1);
+  document.dispatchEvent({ type: "selectionchange" });
+  const notesBox = document.createElement("aside");
+  notesBox.className = "eo-doc-notes";
+  notesBox.dataset.eoNotes = "";
+  const noteP = document.createElement("p");
+  noteP.textContent = "각주 문단";
+  notesBox.appendChild(noteP);
+  docEditor.appendChild(notesBox);
+  const rNote = document.createRange();
+  rNote.setStart(noteP.firstChild, 0);
+  rNote.setEnd(noteP.firstChild, 0);
+  selection.removeAllRanges();
+  selection.addRange(rNote);
+  document.dispatchEvent({ type: "selectionchange" });
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(t1.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "t1 untouched when caret moves to .eo-doc-notes");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "표 안에서 사용");
+
+  // Empty selection when first block in docEditor is a table refuses sort (no firstBlock fallback)
+  const freshSel = createSelection();
+  const hNoSel = await createWorkspaceHarness({ selection: freshSel });
+  await flushAsyncTurns(6);
+  const edNoSel = hNoSel.document.getElementById("doc-editor");
+  const tFirst = hNoSel.document.createElement("table");
+  const tbFirst = hNoSel.document.createElement("tbody");
+  for (const val of ["다", "가"]) {
+    const tr = hNoSel.document.createElement("tr");
+    const td = hNoSel.document.createElement("td");
+    td.textContent = val;
+    tr.appendChild(td);
+    tbFirst.appendChild(tr);
+  }
+  tFirst.appendChild(tbFirst);
+  edNoSel.replaceChildren(tFirst);
+  freshSel.removeAllRanges();
+  hNoSel.userClick(commandItem(hNoSel.document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(tFirst.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "first-child table untouched without caret");
+  assert.equal(hNoSel.document.getElementById("status-command-feedback").textContent, "표 안에서 사용");
+
   // Single-row table preserves error message in status feedback
   const tSingle = mkTable(["단일행"]);
   docEditor.appendChild(tSingle);

@@ -118,6 +118,7 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
   const colorState = JSON.parse(await js(`JSON.stringify((() => {
     const fill = document.getElementById("doc-shape-fill");
     const stroke = document.getElementById("doc-shape-stroke");
+    const dlg = document.getElementById("doc-shape-dialog");
     const swatch = document.querySelector("#doc-shape-fill-host [data-color-toggle]").getBoundingClientRect();
     return {
       fillOpacity: getComputedStyle(fill).opacity,
@@ -126,6 +127,7 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
       fillTab: fill.tabIndex,
       swatchW: swatch.width,
       swatchH: swatch.height,
+      noHOverflow: dlg.scrollWidth <= dlg.clientWidth,
     };
   })())`));
   assert.equal(colorState.fillOpacity, "0");
@@ -133,6 +135,7 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
   assert.equal(colorState.fillHidden, "true");
   assert.equal(colorState.fillTab, -1);
   assert.ok(colorState.swatchW > 12 && colorState.swatchH > 12, "swatch button is visible");
+  assert.equal(colorState.noHOverflow, true, "#doc-shape-dialog does not overflow horizontally");
 
   // Open .sb-hl-palette inside #doc-shape-dialog -> real Chrome Escape closes ONLY palette, not modal!
   await clickCenter("#doc-shape-fill-host [data-color-toggle]");
@@ -146,6 +149,20 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
     true,
     "focus returns to swatch toggle button"
   );
+
+  // ArrowDown on swatch toggle opens palette and focuses first swatch; Escape closes it cleanly
+  await key("ArrowDown");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("doc-shape-fill-palette").hidden`), false);
+  assert.equal(
+    await js(`document.activeElement?.closest?.("#doc-shape-fill-palette") !== null`),
+    true,
+    "ArrowDown moves focus into palette"
+  );
+  await key("Escape");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("doc-shape-fill-palette").hidden`), true);
+  assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), true);
 
   // Pick a swatch from the popover palette
   await clickCenter("#doc-shape-fill-host [data-color-toggle]");
@@ -183,7 +200,7 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
   );
   assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), true, "dialog stays open after custom-select Escape");
 
-  // Mouse-opened .custom-select keeps focus on text input -> Escape hits native cancel guard and keeps dialog open
+  // Mouse-opened .custom-select keeps focus on text input -> Escape STILL closes .custom-select and keeps dialog open!
   await js(`document.getElementById("doc-shape-text").focus()`);
   await clickCenter('#doc-shape-dialog [data-select-id="doc-shape-type"] .custom-select-trigger');
   assert.equal(
@@ -192,10 +209,27 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
   );
   await key("Escape");
   await sleep(80);
-  assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), true, "onCancel preserves dialog while popup is open");
-  await mouse("mousePressed", 10, 10);
-  await mouse("mouseReleased", 10, 10);
-  await js(`document.querySelector('#doc-shape-dialog [data-select-id="doc-shape-type"]').classList.remove("open")`);
+  assert.equal(
+    await js(`document.querySelector('#doc-shape-dialog [data-select-id="doc-shape-type"]').classList.contains("open")`),
+    false,
+    "Escape closes mouse-opened .custom-select even while focus was on text input"
+  );
+  assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), true, "dialog stays open after mouse-opened custom-select Escape");
+
+  // Tabbing away from an open .custom-select closes it via focusin
+  await key(" ");
+  await sleep(80);
+  assert.equal(
+    await js(`document.querySelector('#doc-shape-dialog [data-select-id="doc-shape-type"]').classList.contains("open")`),
+    true
+  );
+  await key("Tab");
+  await sleep(80);
+  assert.equal(
+    await js(`document.querySelector('#doc-shape-dialog [data-select-id="doc-shape-type"]').classList.contains("open")`),
+    false,
+    "Tab moving focus away closes open .custom-select"
+  );
 
   await js(`(() => { const el = document.getElementById("doc-shape-text"); el.focus(); el.select(); })()`);
   await text("실브라우저 도형");
@@ -203,10 +237,28 @@ test("DOC #doc-shape-dialog hides color inputs, keeps modal open on color-picker
   assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), false);
   assert.equal(await js(`document.querySelector("#doc-editor .eo-doc-shape svg")?.firstChild?.getAttribute("fill")`), "#ff0000");
 
-  // Reopen and press Escape directly without nested popup -> closes dialog
+  // Submitting modal via Enter while nested .sb-hl-palette is open closes palette and does not block next modal's Escape
+  await js(`document.querySelector('.md-item[data-studio-menu-cmd="insert-shape"]').click()`);
+  await sleep(80);
+  await clickCenter("#doc-shape-fill-host [data-color-toggle]");
+  assert.equal(await js(`document.getElementById("doc-shape-fill-palette").hidden`), false);
+  await js(`document.getElementById("doc-shape-text").focus()`);
+  await key("Enter");
+  await sleep(100);
+  assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), false);
+  assert.equal(await js(`document.getElementById("doc-shape-fill-palette").hidden`), true, "closing dialog closes open color palette");
+  await js(`document.querySelector('.md-item[data-studio-menu-cmd="review-comment"]').click()`);
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("doc-comment-dialog").open`), true);
+  await key("Escape");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("doc-comment-dialog").open`), false, "next modal closes on first Escape");
+
+  // Reopen #doc-shape-dialog -> palette starts hidden and Escape directly closes dialog
   await js(`document.querySelector('.md-item[data-studio-menu-cmd="insert-shape"]').click()`);
   await sleep(80);
   assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), true);
+  assert.equal(await js(`document.getElementById("doc-shape-fill-palette").hidden`), true);
   await key("Escape");
   await sleep(80);
   assert.equal(await js(`document.getElementById("doc-shape-dialog").open`), false);
@@ -289,6 +341,54 @@ test("DOC capture->bubble Ctrl+Enter in #doc-comment-dialog, background shortcut
   assert.deepEqual(
     JSON.parse(await js(`JSON.stringify([...document.querySelectorAll("#doc-editor table td")].map((td) => td.textContent))`)),
     ["다", "가", "나", "가"]
+  );
+  assert.equal(await js(`document.getElementById("status-command-feedback").textContent`), "표 안에서 사용");
+
+  // Caret moves from t1 into .eo-doc-notes (non-paragraph studio container) -> refuses sort instead of using stale activeDocBlockEl
+  await js(`(() => {
+    const ed = document.getElementById("doc-editor");
+    const t1 = ed.querySelector("table");
+    const notes = document.createElement("aside");
+    notes.className = "eo-doc-notes";
+    notes.dataset.eoNotes = "";
+    const np = document.createElement("p");
+    np.textContent = "각주";
+    notes.appendChild(np);
+    ed.appendChild(notes);
+    const s = getSelection();
+    const r1 = document.createRange();
+    r1.setStart(t1.querySelector("td").firstChild, 0);
+    r1.setEnd(t1.querySelector("td").firstChild, 0);
+    s.removeAllRanges();
+    s.addRange(r1);
+    document.dispatchEvent(new Event("selectionchange"));
+    const r2 = document.createRange();
+    r2.setStart(np.firstChild, 0);
+    r2.setEnd(np.firstChild, 0);
+    s.removeAllRanges();
+    s.addRange(r2);
+    document.dispatchEvent(new Event("selectionchange"));
+  })()`);
+  await js(`document.querySelector('.md-item[data-studio-menu-cmd="data-sort"]').click()`);
+  await sleep(120);
+  assert.deepEqual(
+    JSON.parse(await js(`JSON.stringify([...document.querySelectorAll("#doc-editor table td")].map((td) => td.textContent))`)),
+    ["다", "가", "나", "가"]
+  );
+  assert.equal(await js(`document.getElementById("status-command-feedback").textContent`), "표 안에서 사용");
+
+  // Empty selection when first block is a table -> refuses sort instead of falling back to firstBlock
+  await js(`(() => {
+    const ed = document.getElementById("doc-editor");
+    const t1 = ed.querySelector("table");
+    ed.replaceChildren(t1);
+    getSelection().removeAllRanges();
+  })()`);
+  await js(`document.querySelector('.md-item[data-studio-menu-cmd="data-sort"]').click()`);
+  await sleep(120);
+  assert.deepEqual(
+    JSON.parse(await js(`JSON.stringify([...document.querySelectorAll("#doc-editor table td")].map((td) => td.textContent))`)),
+    ["다", "가"]
   );
   assert.equal(await js(`document.getElementById("status-command-feedback").textContent`), "표 안에서 사용");
 });
@@ -397,6 +497,25 @@ test("SHEET modal Tab exclusion via getComputedStyle, Space on button, Enter on 
     document.getElementById("probe-css-display-none")?.remove();
     document.getElementById("probe-css-visibility-hidden")?.remove();
   })()`);
+  // Native cancel event while nested .custom-select.open is open on top dialog is prevented
+  await clickCenter('#sheet-cf-dialog [data-select-id="sheet-cf-type-select"] .custom-select-trigger');
+  assert.equal(
+    await js(`document.querySelector('#sheet-cf-dialog [data-select-id="sheet-cf-type-select"]').classList.contains("open")`),
+    true
+  );
+  const popupCancelPrevented = await js(`(() => {
+    const ev = new Event("cancel", { cancelable: true });
+    document.getElementById("sheet-cf-dialog").dispatchEvent(ev);
+    return ev.defaultPrevented;
+  })()`);
+  assert.equal(popupCancelPrevented, true, "native cancel prevented while nested popup is open");
+  await key("Escape");
+  await sleep(80);
+  assert.equal(
+    await js(`document.querySelector('#sheet-cf-dialog [data-select-id="sheet-cf-type-select"]').classList.contains("open")`),
+    false
+  );
+  assert.equal(await js(`document.getElementById("sheet-cf-dialog").open`), true);
   await key("Escape");
   await sleep(80);
   assert.equal(await js(`document.getElementById("sheet-cf-dialog").open`), false);

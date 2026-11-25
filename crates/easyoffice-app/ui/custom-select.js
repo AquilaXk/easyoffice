@@ -38,6 +38,7 @@
   function createOptionRow(document, option, commit) {
     const row = el(document, "button", "custom-select-option");
     row.type = "button";
+    row.tabIndex = -1;
     row.dataset.value = option.value;
     row.textContent = option.textContent || "";
     row.disabled = Boolean(option.disabled);
@@ -116,20 +117,61 @@
     openSelectEl.close();
   }
 
-  function ensureDocMousedownListener(document) {
+  function isInactivePopupHost(document, root) {
+    if (!root || root.isConnected === false) return true;
+    const ownDialog = root.closest?.("dialog");
+    if (ownDialog && !ownDialog.open) return true;
+    const openModals = Array.from(document.querySelectorAll?.("dialog") || []).filter(
+      (dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog")
+    );
+    return openModals.length > 0 && !openModals.some((dlg) => dlg.contains?.(root));
+  }
+
+  function closeOpenIn(container) {
+    const doc = container?.ownerDocument || container;
+    if (!doc) return;
+    const openSelectEl = OPEN_SELECT_BY_DOC.get(doc);
+    if (!openSelectEl) return;
+    if (!container?.ownerDocument || container.contains?.(openSelectEl.root) || openSelectEl.root.isConnected === false) {
+      openSelectEl.close();
+    }
+  }
+
+  function ensureDocListeners(document) {
     if (BOUND_DOCS.has(document)) return;
     BOUND_DOCS.add(document);
-    document.addEventListener("mousedown", (event) => {
+    const closeOutside = (event) => {
       const openSelectEl = OPEN_SELECT_BY_DOC.get(document);
       if (openSelectEl && !openSelectEl.root.contains(event.target)) {
         openSelectEl.close();
       }
-    });
+    };
+    document.addEventListener("mousedown", closeOutside, true);
+    document.addEventListener("focusin", closeOutside);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const openSelectEl = OPEN_SELECT_BY_DOC.get(document);
+      if (!openSelectEl) return;
+      if (isInactivePopupHost(document, openSelectEl.root)) {
+        openSelectEl.close();
+        return;
+      }
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      openSelectEl.close();
+      openSelectEl.trigger?.focus?.();
+    }, true);
+    document.addEventListener("close", (event) => {
+      const openSelectEl = OPEN_SELECT_BY_DOC.get(document);
+      if (openSelectEl && event.target?.contains?.(openSelectEl.root)) {
+        openSelectEl.close();
+      }
+    }, true);
   }
 
   function enhanceCustomSelect(document, select) {
     if (ENHANCED.has(select) || select.dataset.nativeSelect === "true") return;
-    ensureDocMousedownListener(document);
+    ensureDocListeners(document);
     const root = el(document, "div", ("custom-select " + select.className).trim());
     root.dataset.selectId = select.id || "";
     root.tabIndex = -1;
@@ -198,9 +240,17 @@
       sync();
       root.classList.add("open");
       trigger.setAttribute("aria-expanded", "true");
-      OPEN_SELECT_BY_DOC.set(document, { root, close });
+      OPEN_SELECT_BY_DOC.set(document, { root, trigger, close });
     };
-    const toggle = () => (root.classList.contains("open") ? close() : open());
+    const toggle = () => {
+      if (root.classList.contains("open")) {
+        const fromMenu = menu.contains?.(document.activeElement);
+        close();
+        if (fromMenu) trigger.focus?.();
+      } else {
+        open();
+      }
+    };
     const commit = (option) => {
       if (option.disabled) return;
       select.value = option.value;
@@ -245,7 +295,7 @@
       event.preventDefault?.();
       event.stopPropagation?.();
     });
-    root.addEventListener("keydown", (event) => onKeydown(event, { root, menu, select, options, rowByValue, close, toggle, sync }));
+    root.addEventListener("keydown", (event) => onKeydown(event, { root, trigger, menu, select, options, rowByValue, close, toggle, sync }));
     select.addEventListener("change", sync);
     if (typeof host.MutationObserver === "function") {
       new host.MutationObserver(rebuild).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "label", "aria-label"] });
@@ -262,11 +312,13 @@
   }
 
   function onKeydown(event, ctl) {
-    const { root, menu, select, options, rowByValue, close, toggle, sync } = ctl;
+    const { root, trigger, menu, select, options, rowByValue, close, toggle, sync } = ctl;
     if (select.disabled) return;
     if (event.key === "Escape") {
       close();
+      trigger?.focus?.();
       event.preventDefault?.();
+      event.stopPropagation?.();
     } else if (event.key === "Enter" || event.key === " ") {
       toggle();
       event.preventDefault?.();
@@ -291,5 +343,5 @@
     if (entry) (entry.rebuild || entry.sync)();
   }
 
-  host.__EASYOFFICE_CUSTOM_SELECT__ = { enhanceCustomSelects, syncCustomSelect };
+  host.__EASYOFFICE_CUSTOM_SELECT__ = { enhanceCustomSelects, syncCustomSelect, closeOpenIn };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

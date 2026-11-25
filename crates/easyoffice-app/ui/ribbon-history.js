@@ -446,8 +446,8 @@
       getWorkspacePanels().computeSmartStats();
     }
 
-    function docEffectSort({ execRes, targetEl }) {
-      return getDocTable().sortTableAt(Boolean(execRes?.sortAscending), { undo: false, targetEl });
+    function docEffectSort({ execRes }) {
+      return getDocTable().sortTableAt(Boolean(execRes?.sortAscending), { undo: false });
     }
 
     const DOC_EXACT_EFFECTS = {

@@ -99,6 +99,26 @@
     };
   }
 
+  function isInactivePopupHost(document, hostEl) {
+    if (!hostEl || hostEl.isConnected === false) return true;
+    const ownDialog = hostEl.closest?.("dialog");
+    if (ownDialog && !ownDialog.open) return true;
+    const openModals = Array.from(document.querySelectorAll?.("dialog") || []).filter(
+      (dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog")
+    );
+    return openModals.length > 0 && !openModals.some((dlg) => dlg.contains?.(hostEl));
+  }
+
+  function closePopupIn(container) {
+    const document = container?.ownerDocument || container;
+    if (!document) return;
+    const active = ACTIVE_POPUP.get(document);
+    if (!active) return;
+    if (!container?.ownerDocument || container.contains?.(active.host) || active.host.isConnected === false) {
+      active.close();
+    }
+  }
+
   // One set of document listeners tracks the single open popup.
   function observePopups(document) {
     if (OBSERVED_DOCS.has(document)) return;
@@ -112,10 +132,18 @@
     document.addEventListener("keydown", (event) => {
       const active = ACTIVE_POPUP.get(document);
       if (event.key !== "Escape" || !active) return;
+      if (isInactivePopupHost(document, active.host)) {
+        active.close();
+        return;
+      }
       event.stopPropagation?.();
       event.preventDefault?.();
       active.close();
       active.button.focus();
+    }, true);
+    document.addEventListener("close", (event) => {
+      const active = ACTIVE_POPUP.get(document);
+      if (active && event.target?.contains?.(active.host)) active.close();
     }, true);
   }
 
@@ -237,5 +265,5 @@
     return { open: popup.open, close: popup.close };
   }
 
-  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, fillMenuPalette, RECENT_KEY, RECENT_LIMIT, placePanel };
+  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, fillMenuPalette, closePopupIn, RECENT_KEY, RECENT_LIMIT, placePanel };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

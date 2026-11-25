@@ -811,9 +811,14 @@
           ev.preventDefault();
         }
       };
+      const closePopups = (scope = dialog) => {
+        host.__EASYOFFICE_COLOR_PICKER__?.closePopupIn?.(scope);
+        host.__EASYOFFICE_CUSTOM_SELECT__?.closeOpenIn?.(scope);
+      };
       const release = () => {
         removeOpenDialogStack(dialog);
         document.removeEventListener("keydown", capture, true);
+        closePopups(dialog);
       };
       dialog.addEventListener("cancel", onCancel);
       dialog.addEventListener("close", release);
@@ -823,6 +828,7 @@
         dialog.close = function (...args) {
           removeOpenDialogStack(this);
           document.removeEventListener("keydown", capture, true);
+          closePopups(this);
           return origClose.apply(this, args);
         };
       }
@@ -830,6 +836,7 @@
         const open = dialog[method];
         if (typeof open !== "function") continue;
         dialog[method] = function (...args) {
+          if (method === "showModal") closePopups(document);
           const out = open.apply(this, args);
           pushOpenDialogStack(this);
           document.removeEventListener("keydown", capture, true);

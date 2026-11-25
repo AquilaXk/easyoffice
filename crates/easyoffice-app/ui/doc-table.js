@@ -148,15 +148,13 @@
     }
 
     function sortTableAt(asc = true, options = {}) {
-      const root = editor();
       const sel = selectionAt();
-      const focusedTable = options.targetEl && root ? grid.tableAt(root, options.targetEl) : null;
-      const table = sel?.table || focusedTable || null;
+      const table = sel?.table || null;
       if (!table) {
         setFeedback?.(MSG_OUTSIDE);
         return { changed: false, error: MSG_OUTSIDE };
       }
-      const colIdx = sel ? (grid.layoutOf(table).at.get(sel.from)?.col ?? 0) : 0;
+      const colIdx = grid.layoutOf(table).at.get(sel.from)?.col ?? 0;
       const tbody = table.tBodies?.[0] || table.querySelector("tbody") || table;
       const allRows = Array.from(tbody.children || []).filter((r) => r.tagName === "TR");
       const rowCells = (r) => Array.from(r.children || []).filter((c) => c.tagName === "TD" || c.tagName === "TH");
@@ -198,7 +196,7 @@
         }
         const firstCells = sorted[0] ? rowCells(sorted[0]) : [];
         const firstTarget = firstCells[colIdx] || firstCells[0];
-        if (firstTarget && sel) placeCaret(firstTarget);
+        if (firstTarget) placeCaret(firstTarget);
         return { changed: true };
       };
       const res = options.undo === false ? exec() : withUndo(exec);

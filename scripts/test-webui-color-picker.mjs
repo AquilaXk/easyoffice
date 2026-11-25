@@ -168,7 +168,26 @@ test("keyboard: ArrowDown opens and focuses the first swatch, Escape closes and 
   assert.equal(escInDialog.defaultPrevented, true);
   assert.equal(fillPanel.hidden, true);
   assert.equal(shapeDlg.open, true, "Escape closing palette inside modal keeps dialog open");
+
+  // Closing the modal while its palette is open clears ACTIVE_POPUP so the next modal closes on first Escape
+  userClick(fillToggle);
+  assert.equal(fillPanel.hidden, false);
   shapeDlg.close();
+  assert.equal(fillPanel.hidden, true, "closing dialog closes open nested color palette");
+  const commentDlg = document.getElementById("doc-comment-dialog");
+  commentDlg.showModal();
+  document.dispatchEvent({ type: "keydown", key: "Escape", target: commentDlg, preventDefault() {}, stopPropagation() {} });
+  assert.equal(commentDlg.open, false, "next modal closes on first Escape without leaking stale palette");
+
+  // Background toolbar color picker behind an open modal does not swallow Escape meant for the modal
+  userClick(toggle);
+  assert.equal(panel.hidden, false);
+  shapeDlg.showModal();
+  assert.equal(panel.hidden, true, "opening modal dismisses toolbar popup");
+  userClick(toggle);
+  document.dispatchEvent({ type: "keydown", key: "Escape", target: shapeDlg, preventDefault() {}, stopPropagation() {} });
+  assert.equal(shapeDlg.open, false, "modal still closes on Escape even if a background picker was opened");
+  assert.equal(panel.hidden, true);
 
   userClick(toggle);
   document.dispatchEvent({ type: "keydown", key: "a", target: toggle });
