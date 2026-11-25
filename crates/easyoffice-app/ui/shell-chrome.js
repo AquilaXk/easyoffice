@@ -416,12 +416,10 @@
 
   const MODAL_GATED_NATIVE_IDS = new Set([
     "edit:undo", "edit:redo", "edit:cut", "edit:copy", "edit:paste-special", "edit:find", "edit:replace",
-    "insert:link", "format:bold", "format:italic", "format:underline", "format:cell-format",
-    "format:row-height", "format:col-width", "sheet:filter", "sheet:remove-duplicates", "sheet:text-to-columns", "view:palette",
+    "insert:link", "format:bold", "format:italic", "format:underline", "view:palette",
   ]);
   const FIELD_GATED_NATIVE_IDS = new Set([
     "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline",
-    "format:cell-format", "format:row-height", "format:col-width", "sheet:filter", "sheet:remove-duplicates", "sheet:text-to-columns",
   ]);
 
   function allowsNativeMenuContext(id, document, modal) {

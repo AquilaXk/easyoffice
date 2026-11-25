@@ -27,7 +27,7 @@
   }
 
   // `sel` is the selection of the input module (`ar`, `ac` the anchor, `cr`, `cc` the other corner), read as it changes.
-  function createSelectionChrome({ document, api, grid, sel, protectApi, point, fill, getRange, getRanges, stateOf, tdAt }) {
+  function createSelectionChrome({ document, api, grid, sel, protectApi, point, fill, getRange, getRanges, getExtraRanges, stateOf, tdAt }) {
     const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     // ---- aggregate -------------------------------------------------------------------------
 
@@ -103,7 +103,8 @@
     function paintSelection() {
       paintSpillArea();
       const rg = getRange();
-      const extras = Array.isArray(sel.extraRanges) && sel.extraRanges.length > 0 ? sel.extraRanges : undefined;
+      const extraList = typeof getExtraRanges === "function" ? getExtraRanges() : sel.extraRanges;
+      const extras = Array.isArray(extraList) && extraList.length > 0 ? extraList : undefined;
       if (typeof grid.paintSelectionRange === "function") {
         grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac, extraRanges: extras });
         fill.sync();

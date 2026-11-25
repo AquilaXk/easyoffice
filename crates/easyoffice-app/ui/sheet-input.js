@@ -33,13 +33,14 @@
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const nav = host.__EASYOFFICE_SHEET_NAV__;
     const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
-    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, whole: false, span: null, tabFrom: null, extraRanges: [] };
+    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, whole: false, span: null, tabFrom: null };
+    let extraRanges = [];
     const resetNav = (axis, keepExtras = false) => {
       sel.axis = axis;
       sel.whole = false;
       sel.span = null;
       sel.tabFrom = null;
-      if (!keepExtras) sel.extraRanges = [];
+      if (!keepExtras) extraRanges = [];
     };
     const bound = new WeakSet();
     let delegatesBound = false;
@@ -139,20 +140,20 @@
       if (sel.span) return { ...sel.span };
       return { r1: Math.min(sel.ar, sel.cr), r2: Math.max(sel.ar, sel.cr), c1: Math.min(sel.ac, sel.cc), c2: Math.max(sel.ac, sel.cc) };
     }
-    const getRanges = () => (multiApi ? multiApi.rangesOf(getRange(), sel.extraRanges) : [getRange()]);
+    const getRanges = () => (multiApi ? multiApi.rangesOf(getRange(), extraRanges) : [getRange()]);
     function pushRange() {
       if (!multiApi) return;
       const cur = getRange();
-      if (sel.extraRanges.some((r) => multiApi.sameRect(r, cur))) return;
-      if (sel.extraRanges.length >= multiApi.MAX_MULTI_RANGES) {
+      if (extraRanges.some((r) => multiApi.sameRect(r, cur))) return;
+      if (extraRanges.length >= multiApi.MAX_MULTI_RANGES) {
         feedback("다중 선택 범위는 최대 " + multiApi.MAX_MULTI_RANGES + "개까지");
         return;
       }
-      sel.extraRanges.push(cur);
+      extraRanges.push(cur);
     }
     function clearExtras() {
-      if (sel.extraRanges.length > 0) {
-        sel.extraRanges = [];
+      if (extraRanges.length > 0) {
+        extraRanges = [];
         refreshChrome();
       }
     }
@@ -163,7 +164,7 @@
     }
 
     const { paintSelection, refreshChrome } = host.__EASYOFFICE_CREATE_SHEET_SELECTION_CHROME__({
-      document, api, grid, sel, protectApi, point, fill, getRange, getRanges, stateOf, tdAt,
+      document, api, grid, sel, protectApi, point, fill, getRange, getRanges, getExtraRanges: () => extraRanges, stateOf, tdAt,
     });
 
     // Public selection refresh (focus, outline links, restore, recalculation).
@@ -757,7 +758,7 @@
       if (editing) {
         ev.preventDefault();
         cancelEdit(td);
-      } else if (sel.ar !== sel.cr || sel.ac !== sel.cc || sel.extraRanges.length > 0) {
+      } else if (sel.ar !== sel.cr || sel.ac !== sel.cc || extraRanges.length > 0) {
         select(sel.ar, sel.ac, false);
       }
     }

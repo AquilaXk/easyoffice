@@ -384,6 +384,10 @@
     // Manual workbook/sheet recalculation is handled by sheet-structure.js on F9 and Shift+F9 (PD-309).
     { keys: "F9", action: "sheet-calc-now", module: "SHEET", external: true },
     { keys: "Shift+F9", action: "sheet-calc-sheet", module: "SHEET", external: true },
+    // Sheet formatting, filter toggle, and AutoSum handled by sheet-shortcuts.js / toolbar (PD-356).
+    { keys: "Ctrl+1", action: "sheet-cell-format", module: "SHEET", external: true },
+    { keys: "Ctrl+Shift+L", action: "sheet-filter-toggle", module: "SHEET", external: true },
+    { keys: "Alt+=", action: "data-autosum", module: "SHEET", external: true },
     // Slide module only. `module` gates the binding to the active module (every other module keeps
     // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
     // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over
