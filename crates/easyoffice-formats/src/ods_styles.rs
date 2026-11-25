@@ -240,8 +240,8 @@ fn parse_cell_protect(value: &str, style: &mut CellStyle) {
     style.force_locked = locked;
 }
 
-/// The cell and paragraph properties of a style's vertical alignment, wrapping, borders and
-/// horizontal alignment (PD-207); empty when it has none.
+/// The cell and paragraph properties of a style's vertical alignment, wrapping, rotation, borders and
+/// horizontal alignment (PD-207, PD-356); empty when it has none.
 fn cell_look_xml(k: StyleKey) -> String {
     let mut cell = String::new();
     if let Some(protect) = cell_protect(k) {
@@ -252,6 +252,10 @@ fn cell_look_xml(k: StyleKey) -> String {
     }
     if k.wrap() {
         cell.push_str(" fo:wrap-option=\"wrap\"");
+    }
+    let rot = k.text_rotation();
+    if rot != 0 {
+        cell.push_str(&format!(" style:rotation-angle=\"{rot}\""));
     }
     if let Some(rgb) = k.fill() {
         cell.push_str(&format!(" fo:background-color=\"#{rgb:06x}\""));
@@ -269,7 +273,21 @@ fn cell_look_xml(k: StyleKey) -> String {
     xml
 }
 
-/// Alignment, wrapping, borders and fill out of the cell and paragraph properties of a style body.
+fn parse_ods_rotation(raw: &str) -> i16 {
+    let Ok(mut deg) = raw.trim().parse::<i32>() else {
+        return 0;
+    };
+    if (270..=359).contains(&deg) {
+        deg -= 360;
+    }
+    if (-90..=90).contains(&deg) {
+        deg as i16
+    } else {
+        0
+    }
+}
+
+/// Alignment, wrapping, rotation, borders and fill out of the cell and paragraph properties of a style body.
 fn parse_cell_look(body: &str, style: &mut CellStyle) {
     if let Some((attrs, _)) =
         extract_tags_or_self_closing_with_attrs(body, "style:paragraph-properties")
@@ -292,6 +310,7 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
     }
     style.v_align = get("style:vertical-align").map_or(VAlign::Bottom, VAlign::from_ods);
     style.wrap = get("fo:wrap-option") == Some("wrap");
+    style.text_rotation = get("style:rotation-angle").map_or(0, parse_ods_rotation);
     style.fill = get("fo:background-color").and_then(ods_color);
     style.borders = ods_borders_from(get);
 }

@@ -549,10 +549,14 @@ pub const ITEMS: &[MenuItemSpec] = &[
     cf!("이 표에서 규칙 지우기", "clear-table"),
     cf!("이 피벗 테이블에서 규칙 지우기", "clear-pivot"),
     cf!("규칙 관리…", "manage"),
+    sa!("format:row-height", "행 높이…", "row-height"),
+    sa!("format:row-autofit", "행 높이 자동 맞춤", "row-autofit"),
+    sa!("format:col-width", "열 너비…", "col-width"),
+    sa!("format:col-autofit", "열 너비 자동 맞춤", "col-autofit"),
     item(
         "format:cell-format",
         "셀 서식…",
-        None,
+        Some("CmdOrCtrl+1"),
         "sheet-numfmt:dialog",
     ),
     item(
@@ -829,9 +833,20 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:merge", "셀 병합", "merge"),
     sa!("sheet:unmerge", "병합 해제", "unmerge"),
     sa!("sheet:sort", "정렬…", "sort-dialog"),
-    sa!("sheet:filter", "필터", "filter-toggle"),
+    item(
+        "sheet:filter",
+        "필터",
+        Some("CmdOrCtrl+Shift+L"),
+        "sheet-act:filter-toggle",
+    ),
     sa!("sheet:filter-reapply", "다시 적용", "filter-reapply"),
     sa!("sheet:filter-clear", "필터 지우기", "filter-clear"),
+    sa!(
+        "sheet:remove-duplicates",
+        "중복된 항목 제거…",
+        "dedupe-dialog"
+    ),
+    sa!("sheet:text-to-columns", "텍스트 나누기…", "text-to-columns"),
     item(
         "tool:copilot",
         "코파일럿",

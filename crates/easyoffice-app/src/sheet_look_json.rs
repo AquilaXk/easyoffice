@@ -14,7 +14,7 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, CellStyle, EasyOfficeError, HAlign,
-    StrictJsonValue, VAlign,
+    StrictJsonValue, VAlign, MAX_TEXT_ROTATION, MIN_TEXT_ROTATION,
 };
 
 use crate::convert_structured::{field, invalid, JsonObject};
@@ -88,6 +88,15 @@ pub(crate) fn parse_look(obj: &JsonObject, style: &mut CellStyle) -> Result<(), 
             .as_bool()
             .ok_or_else(|| invalid("구조화 저장: 'wrap'은 true/false여야 합니다."))?;
     }
+    if let Some(v) = field(obj, "rot") {
+        let deg = match v {
+            StrictJsonValue::Number(raw) => raw.parse::<i16>().ok(),
+            _ => None,
+        }
+        .filter(|&d| (MIN_TEXT_ROTATION..=MAX_TEXT_ROTATION).contains(&d));
+        style.text_rotation =
+            deg.ok_or_else(|| invalid("구조화 저장: 'rot'는 -90~90 사이의 정수여야 합니다."))?;
+    }
     if let Some(v) = field(obj, "bd") {
         style.borders = parse_borders(v)?;
     }
@@ -131,6 +140,16 @@ pub(crate) fn write_look(out: &mut String, style: &CellStyle, wrote: &mut bool) 
         key(out, "wrap");
         out.push_str("true");
     }
+    if style.text_rotation != 0 {
+        key(out, "rot");
+        let _ = write!(
+            out,
+            "{}",
+            style
+                .text_rotation
+                .clamp(MIN_TEXT_ROTATION, MAX_TEXT_ROTATION)
+        );
+    }
     for (rgb, name) in [(style.fill, "fill"), (style.font_color, "fc")] {
         if let Some(rgb) = rgb {
             key(out, name);
@@ -169,4 +188,45 @@ pub(crate) fn write_borders(out: &mut String, borders: &CellBorders) {
         let _ = write!(out, "\"{side}\":\"{line}:{:06x}\"", edge.rgb());
     }
     out.push('}');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_obj(raw: &str) -> Vec<(String, StrictJsonValue)> {
+        match StrictJsonValue::parse(raw).unwrap() {
+            StrictJsonValue::Object(entries) => entries,
+            other => panic!("expected object, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn text_rotation_json_round_trips_and_rejects_out_of_bounds() {
+        for deg in [-90_i16, -45, 0, 45, 90] {
+            let obj = parse_obj(&format!("{{\"rot\":{deg}}}"));
+            let mut style = CellStyle::default();
+            parse_look(&obj, &mut style).unwrap();
+            assert_eq!(style.text_rotation, deg);
+            let mut out = String::from("{");
+            let mut wrote = false;
+            write_look(&mut out, &style, &mut wrote);
+            out.push('}');
+            if deg == 0 {
+                assert_eq!(out, "{}");
+            } else {
+                assert_eq!(out, format!("{{\"rot\":{deg}}}"));
+            }
+        }
+        for bad in [
+            "{\"rot\":91}",
+            "{\"rot\":-91}",
+            "{\"rot\":12.5}",
+            "{\"rot\":\"45\"}",
+        ] {
+            let obj = parse_obj(bad);
+            let mut style = CellStyle::default();
+            assert!(parse_look(&obj, &mut style).is_err(), "{bad}");
+        }
+    }
 }

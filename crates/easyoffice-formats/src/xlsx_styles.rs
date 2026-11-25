@@ -341,6 +341,12 @@ impl XlsxStyleTable {
         if key.wrap() {
             out.push_str(" wrapText=\"1\"");
         }
+        let rot = key.text_rotation();
+        if rot > 0 {
+            out.push_str(&format!(" textRotation=\"{rot}\""));
+        } else if rot < 0 {
+            out.push_str(&format!(" textRotation=\"{}\"", 90 - i32::from(rot)));
+        }
         if out.is_empty() {
             out
         } else {
@@ -751,6 +757,18 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
     if let Some(slot) = font_ids.get_mut(normal_id) {
         *slot = 0;
     }
+    fn parse_xlsx_rotation(raw: &str) -> i16 {
+        let Ok(v) = raw.trim().parse::<u16>() else {
+            return 0;
+        };
+        if v <= 90 {
+            v as i16
+        } else if v <= 180 {
+            -((v - 90) as i16)
+        } else {
+            0
+        }
+    }
     let mut link_xfs = Vec::new();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
@@ -805,6 +823,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
                 style.h_align = HAlign::from_xlsx(word("horizontal"));
                 style.v_align = VAlign::from_xlsx(word("vertical"));
                 style.wrap = truthy(look, "wrapText", false);
+                style.text_rotation = parse_xlsx_rotation(word("textRotation"));
             }
             if let Some((lock, _)) = extract_tags_or_self_closing_with_attrs(body, "protection")
                 .into_iter()

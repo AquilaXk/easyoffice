@@ -201,6 +201,9 @@ pub const MAX_COLUMN_PX: u32 = 2_000;
 /// Spreadsheet programs limit a font size to 1..=409 pt.
 pub const MIN_SIZE_PT: f64 = 1.0;
 pub const MAX_SIZE_PT: f64 = 409.0;
+/// Bounds of per-cell text rotation angle in degrees (`PD-356`).
+pub const MIN_TEXT_ROTATION: i16 = -90;
+pub const MAX_TEXT_ROTATION: i16 = 90;
 
 pub const STYLE_BOLD: u8 = 1 << 0;
 pub const STYLE_ITALIC: u8 = 1 << 1;
@@ -219,6 +222,9 @@ const LINK_BIT: u64 = 1 << 28;
 const FONT_SHIFT: u32 = 29;
 const FONT_MASK: u64 = 0x7FF;
 const SIZE_SHIFT: u32 = 40;
+const SIZE_MASK: u64 = 0xFFFF;
+const ROT_SHIFT: u32 = 56;
+const ROT_MASK: u64 = 0xFF;
 /// A colour word of [`StyleKey::colors`]: the colour is set (bit 24) and its RGB (bits 0..=23). The
 /// fill takes the low word and the font colour the high one, so each compares as one masked word.
 const COLOR_SET: u64 = 1 << 24;
@@ -281,6 +287,8 @@ pub struct CellStyle {
     /// Font family id: `0` keeps the workbook default font, `1..=MAX_FONT_FACES` names the 1-based
     /// entry in [`SheetStyling::fonts`] (PD-244).
     pub font: u16,
+    /// Text rotation angle in degrees (`-90..=90`, `0` horizontal; PD-356).
+    pub text_rotation: i16,
 }
 
 /// Style identity for $O(1)$ word comparison and hashing: one packed 64-bit word
@@ -429,7 +437,7 @@ impl StyleKey {
     pub(crate) const fn font_part(self) -> Self {
         Self {
             bits: self.bits
-                & (FLAGS_MASK | LINK_BIT | (FONT_MASK << FONT_SHIFT) | (!0u64 << SIZE_SHIFT)),
+                & (FLAGS_MASK | LINK_BIT | (FONT_MASK << FONT_SHIFT) | (SIZE_MASK << SIZE_SHIFT)),
             colors: self.colors & (COLOR_WORD_MASK << FONT_COLOR_SHIFT),
             borders: NO_BORDERS,
         }
@@ -437,12 +445,17 @@ impl StyleKey {
 
     #[inline]
     pub(crate) const fn size_centipt(self) -> Option<u32> {
-        let centi = (self.bits >> SIZE_SHIFT) as u32;
+        let centi = ((self.bits >> SIZE_SHIFT) & SIZE_MASK) as u32;
         if centi == 0 {
             None
         } else {
             Some(centi)
         }
+    }
+
+    #[inline]
+    pub(crate) const fn text_rotation(self) -> i16 {
+        (((self.bits >> ROT_SHIFT) & ROT_MASK) as u8 as i8) as i16
     }
 }
 
@@ -471,6 +484,7 @@ impl CellStyle {
             && self.fill.is_none()
             && self.font_color.is_none()
             && self.font == 0
+            && self.text_rotation == 0
     }
 
     #[inline]
@@ -478,8 +492,12 @@ impl CellStyle {
         let centi = self
             .size_pt
             .map_or(0u64, |s| ((s * 100.0).round() as u32) as u64);
+        let rot = (self
+            .text_rotation
+            .clamp(MIN_TEXT_ROTATION, MAX_TEXT_ROTATION) as i8 as u8) as u64;
         StyleKey {
-            bits: (centi << SIZE_SHIFT)
+            bits: ((rot & ROT_MASK) << ROT_SHIFT)
+                | ((centi & SIZE_MASK) << SIZE_SHIFT)
                 | ((u64::from(self.font) & FONT_MASK) << FONT_SHIFT)
                 | (u64::from(self.force_locked) * FORCE_LOCKED_BIT)
                 | (u64::from(self.formula_hidden) * FORMULA_HIDDEN_BIT)

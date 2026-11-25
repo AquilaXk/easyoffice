@@ -645,6 +645,7 @@ fn synced_edit_and_format_accelerators_match_webui_while_other_format_items_stay
         ("format:bold", Some("CmdOrCtrl+B")),
         ("format:italic", Some("CmdOrCtrl+I")),
         ("format:underline", Some("CmdOrCtrl+U")),
+        ("format:cell-format", Some("CmdOrCtrl+1")),
     ];
     for spec in ITEMS
         .iter()

@@ -17,6 +17,12 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "format:wrap",
             layout::BORDER,
             layout::CF,
+            s,
+            "format:row-height",
+            "format:row-autofit",
+            "format:col-width",
+            "format:col-autofit",
+            s,
             "format:cell-format",
         ]
     );
@@ -190,11 +196,17 @@ fn the_conditional_formatting_menu_has_the_submenus_and_items_of_the_page() {
 fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
     for id in [
         "format:numfmt-decimal-down",
+        "format:row-height",
+        "format:row-autofit",
+        "format:col-width",
+        "format:col-autofit",
         "format:cell-format",
         "format:align-left",
         "format:border-line-double",
         "sheet:row-insert-above",
         "sheet:unmerge",
+        "sheet:remove-duplicates",
+        "sheet:text-to-columns",
     ] {
         let action = action_for(id).unwrap();
         assert!(
