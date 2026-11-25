@@ -5,10 +5,10 @@ use std::fmt::Write;
 use easyoffice_formats::{
     base64_codec, normalize_hex_color, normalize_table_rows, ChartKind, ChartLegendPos,
     EasyOfficeError, RichImage, RichSlide, RichSlideDeck, SlideAspect, SlideBox, SlideChartSeries,
-    SlideElement, SlideMasterLayout, SlidePlaceholderRole, SlideShapeType, SlideTextAlign,
-    SlideTransition, StrictJsonValue, DEFAULT_SLIDE_FONT_PT, DEFAULT_SLIDE_STROKE_PT,
-    MAX_ELEMENTS_PER_DECK, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDES_PER_DECK, MAX_SLIDE_CHART_POINTS,
-    MAX_SLIDE_CHART_SERIES, MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    SlideElement, SlideMasterLayout, SlideOrientation, SlidePlaceholderRole, SlideShapeType,
+    SlideTextAlign, SlideTransition, StrictJsonValue, DEFAULT_SLIDE_FONT_PT,
+    DEFAULT_SLIDE_STROKE_PT, MAX_ELEMENTS_PER_DECK, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDES_PER_DECK,
+    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES, MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -288,6 +288,11 @@ pub(crate) fn parse_slide_deck(
         Some(s) => SlideAspect::parse(s)
             .ok_or_else(|| invalid(format!("지원하지 않는 슬라이드 화면비입니다: {s}")))?,
     };
+    let orientation = match opt_str(entries, "orientation")? {
+        None => SlideOrientation::Landscape,
+        Some(s) => SlideOrientation::parse(s)
+            .ok_or_else(|| invalid(format!("지원하지 않는 슬라이드 방향입니다: {s}")))?,
+    };
     let title = opt_str(entries, "title")?.unwrap_or("").to_string();
     let mut slides = Vec::with_capacity(items.len());
     let (mut total_elements, mut total_img_bytes) = (0usize, 0usize);
@@ -349,6 +354,7 @@ pub(crate) fn parse_slide_deck(
         title,
         is_slideshow: false,
         aspect,
+        orientation,
         slides,
         elements_rejected: 0,
     };
@@ -560,7 +566,12 @@ pub(crate) fn write_slide_deck_decode_fields(
     deck: &RichSlideDeck,
     push_str: fn(&mut String, &str),
 ) {
-    let _ = write!(out, "\"aspect\":\"{}\",\"slides\":[", deck.aspect.as_str());
+    let _ = write!(
+        out,
+        "\"aspect\":\"{}\",\"orientation\":\"{}\",\"slides\":[",
+        deck.aspect.as_str(),
+        deck.orientation.as_str()
+    );
     for (idx, s) in deck.slides.iter().enumerate() {
         if idx > 0 {
             out.push(',');
@@ -636,8 +647,9 @@ pub(crate) fn write_slide_deck_readback(
     let kept = deck.slides.len().min(max_items);
     let _ = write!(
         out,
-        "\"aspect\":\"{}\",\"slideCount\":{},\"slidesTruncated\":{truncated},\"slides\":[",
+        "\"aspect\":\"{}\",\"orientation\":\"{}\",\"slideCount\":{},\"slidesTruncated\":{truncated},\"slides\":[",
         deck.aspect.as_str(),
+        deck.orientation.as_str(),
         deck.slides.len()
     );
     for (idx, s) in deck.slides.iter().take(kept).enumerate() {

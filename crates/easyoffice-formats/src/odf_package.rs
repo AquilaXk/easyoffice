@@ -8,7 +8,7 @@ use crate::pptx_master::odp_layout_boxes_pt;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     parse_length_pt, RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout,
-    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
+    SlideOrientation, MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
 };
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
@@ -278,7 +278,7 @@ pub(crate) fn finish_odp_package(
     media: MediaParts,
     charts: Vec<(usize, String)>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let (w_cm, h_cm) = deck.aspect.dimensions_cm();
+    let (w_cm, h_cm) = deck.stage_dimensions_cm();
     let mut styles = concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
         "<office:document-styles ",
@@ -315,7 +315,8 @@ pub(crate) fn finish_odp_package(
             );
             continue;
         }
-        let (title_box, body_box, right_box) = odp_layout_boxes_pt(layout, deck.aspect);
+        let (title_box, body_box, right_box) =
+            odp_layout_boxes_pt(layout, deck.aspect, deck.orientation);
         let body_obj = if layout == SlideMasterLayout::TitleSlide {
             "subtitle"
         } else {
@@ -338,7 +339,8 @@ pub(crate) fn finish_odp_package(
     }
     let _ = write!(
         styles,
-        "</office:styles><office:automatic-styles><style:page-layout style:name=\"PM1\"><style:page-layout-properties fo:margin-top=\"0cm\" fo:margin-bottom=\"0cm\" fo:margin-left=\"0cm\" fo:margin-right=\"0cm\" fo:page-width=\"{w_cm:.3}cm\" fo:page-height=\"{h_cm:.3}cm\" style:print-orientation=\"landscape\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"PM1\"/></office:master-styles></office:document-styles>"
+        "</office:styles><office:automatic-styles><style:page-layout style:name=\"PM1\"><style:page-layout-properties fo:margin-top=\"0cm\" fo:margin-bottom=\"0cm\" fo:margin-left=\"0cm\" fo:margin-right=\"0cm\" fo:page-width=\"{w_cm:.3}cm\" fo:page-height=\"{h_cm:.3}cm\" style:print-orientation=\"{}\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"PM1\"/></office:master-styles></office:document-styles>",
+        deck.orientation.as_str()
     );
     let mut manifest_items: Vec<(String, &str)> = vec![
         ("styles.xml".into(), "text/xml"),
@@ -422,9 +424,16 @@ pub(crate) fn extract_odp_rich_parts(bytes: &[u8]) -> Result<ExtractedOdp, EasyO
     Ok((entries, content_xml, meta_xml, styles_xml))
 }
 
-pub(crate) fn parse_odp_aspect(styles_xml: Option<&str>) -> (SlideAspect, f64, f64) {
+pub(crate) fn parse_odp_aspect(
+    styles_xml: Option<&str>,
+) -> (SlideAspect, SlideOrientation, f64, f64) {
     let Some(xml) = styles_xml else {
-        return (SlideAspect::Widescreen16x9, 1.0, 1.0);
+        return (
+            SlideAspect::Widescreen16x9,
+            SlideOrientation::Landscape,
+            1.0,
+            1.0,
+        );
     };
     let mut r = XmlReader::with_budget(xml, 32_768);
     while let Ok(Some(ev)) = r.next_event() {
@@ -437,12 +446,17 @@ pub(crate) fn parse_odp_aspect(styles_xml: Option<&str>) -> (SlideAspect, f64, f
                     .or_else(|| attr(&attrs, "page-height"))
                     .and_then(|s| parse_length_pt(&s));
                 if let (Some(wp), Some(hp)) = (w, h) {
-                    return SlideAspect::from_dimensions_pt(wp, hp);
+                    return SlideAspect::from_dimensions_oriented_pt(wp, hp);
                 }
             }
         }
     }
-    (SlideAspect::Widescreen16x9, 1.0, 1.0)
+    (
+        SlideAspect::Widescreen16x9,
+        SlideOrientation::Landscape,
+        1.0,
+        1.0,
+    )
 }
 
 pub(crate) fn parse_odp_layout(raw: Option<&str>) -> SlideMasterLayout {

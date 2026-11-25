@@ -271,3 +271,71 @@ fn ipc_webui_wire_schema_data_and_lowercase_textbox_roundtrips_cleanly() {
         .unwrap();
     assert_eq!(els.len(), 2);
 }
+
+#[test]
+fn ipc_portrait_slide_orientation_roundtrips_pptx_odp_and_pdf() {
+    let req_for = |target: &str| {
+        format!(
+            r#"{{"sourceFormat":"pptx","targetFormat":"{target}","title":"세로발표","aspect":"16:9","orientation":"portrait","slides":[{{"title":"세로 1장","bullets":["항목"],"notes":"","layout":"titleAndContent","transition":"none","elements":[{{"id":"p1","kind":"shape","x":80,"y":650,"w":240,"h":120,"shapeType":"roundRect","text":"하단 배치","fill":"DBEAFE","stroke":"2563EB","strokeWidthPt":1.5,"color":"0F172A","fontSizePt":14,"bold":true,"italic":true,"underline":true,"align":"center"}}]}}]}}"#
+        )
+    };
+    for ext in ["pptx", "odp"] {
+        let save = EasyOfficeIpcRouter::dispatch("convert_document_format", &req_for(ext)).unwrap();
+        let b64 = field(
+            StrictJsonValue::parse(&save).unwrap().as_object().unwrap(),
+            "convertedBase64",
+        )
+        .as_str()
+        .unwrap()
+        .to_string();
+        let dec = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &format!(r#"{{"action":"decode","fileName":"p.{ext}","sourceBase64":"{b64}"}}"#),
+        )
+        .unwrap();
+        let dec_obj = StrictJsonValue::parse(&dec).unwrap();
+        let dec_fields = dec_obj.as_object().unwrap();
+        assert_eq!(field(dec_fields, "aspect").as_str(), Some("16:9"), "{ext}");
+        assert_eq!(
+            field(dec_fields, "orientation").as_str(),
+            Some("portrait"),
+            "{ext}"
+        );
+        let slides = field(dec_fields, "slides").as_array().unwrap();
+        let els = field(slides[0].as_object().unwrap(), "elements")
+            .as_array()
+            .unwrap();
+        let el = els[0].as_object().unwrap();
+        let y = match field(el, "y") {
+            StrictJsonValue::Number(raw) => raw.parse::<f64>().unwrap(),
+            other => panic!("expected numeric y, got {other:?}"),
+        };
+        assert!(
+            (y - 650.0).abs() < 1.0,
+            "{ext} portrait y preserved without squashing: {y}"
+        );
+    }
+
+    let pdf_save =
+        EasyOfficeIpcRouter::dispatch("convert_document_format", &req_for("pdf")).unwrap();
+    let pdf_b64 = field(
+        StrictJsonValue::parse(&pdf_save)
+            .unwrap()
+            .as_object()
+            .unwrap(),
+        "convertedBase64",
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    let pdf_bytes = EasyOfficeIpcRouter::decode_base64(&pdf_b64).unwrap();
+    let report = PdfSerializer::inspect_readback(&pdf_bytes).unwrap();
+    assert_eq!(report.pages.len(), 1);
+    assert!(
+        (report.pages[0].width_pt - 540.0).abs() < 0.5
+            && (report.pages[0].height_pt - 960.0).abs() < 0.5,
+        "portrait PDF page size must be 540x960pt, got {}x{}",
+        report.pages[0].width_pt,
+        report.pages[0].height_pt
+    );
+}

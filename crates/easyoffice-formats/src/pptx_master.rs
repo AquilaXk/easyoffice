@@ -5,7 +5,9 @@ use std::fmt::Write;
 
 use crate::ooxml_presentation::PML_NS;
 use crate::ooxml_shared_parts::{PML_CLR_MAP, PML_SP_TREE_HEADER};
-use crate::rich_slide::{RichSlide, SlideAspect, SlideBox, SlideMasterLayout, EMU_PER_PT};
+use crate::rich_slide::{
+    RichSlide, SlideAspect, SlideBox, SlideMasterLayout, SlideOrientation, EMU_PER_PT,
+};
 
 const REF_16_9_W: f64 = 12_192_000.0;
 const REF_16_9_H: f64 = 6_858_000.0;
@@ -174,8 +176,14 @@ pub(crate) fn slide_placeholder_visibility(slide: &RichSlide) -> (bool, bool) {
 pub(crate) fn odp_layout_boxes_pt(
     layout: SlideMasterLayout,
     aspect: SlideAspect,
+    orientation: SlideOrientation,
 ) -> (SlideBox, SlideBox, Option<SlideBox>) {
-    let (emu_w, emu_h) = aspect.dimensions_emu();
+    let (base_w, base_h) = aspect.dimensions_emu();
+    let (emu_w, emu_h) = if orientation == SlideOrientation::Portrait {
+        (base_h, base_w)
+    } else {
+        (base_w, base_h)
+    };
     let (t_emu, b_emu) = pptx_placeholder_boxes(layout, emu_w, emu_h);
     if layout == SlideMasterLayout::TwoColumn {
         let (left, right) = two_column_placeholder_specs(emu_w, emu_h);

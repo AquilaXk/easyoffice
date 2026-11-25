@@ -752,5 +752,78 @@ test("modal dialogs preserve child keydown listeners, cycle Tab focus, handle ch
   assert.equal(namesDlg.open, false, "second Escape closes parent modal");
   namesPrimary.removeEventListener("click", onNamesPrimary);
   editPrimary.removeEventListener("click", onEditPrimary);
+
+  // 4. Closed custom-select options are excluded from Tab focusables; child-close keydown never leaks to document;
+  // nested popup Escape without stopPropagation keeps dialog open
+  const tocDlg = document.getElementById("doc-toc-dialog");
+  const selectWrap = document.createElement("div");
+  selectWrap.className = "custom-select";
+  const selectTrigger = document.createElement("button");
+  selectTrigger.type = "button";
+  selectTrigger.className = "custom-select-trigger";
+  const selectMenu = document.createElement("div");
+  selectMenu.className = "custom-select-menu";
+  const closedOpt = document.createElement("button");
+  closedOpt.type = "button";
+  closedOpt.className = "custom-select-option";
+  selectMenu.appendChild(closedOpt);
+  selectWrap.appendChild(selectTrigger);
+  selectWrap.appendChild(selectMenu);
+  tocDlg.querySelector(".dialog-body").appendChild(selectWrap);
+  tocDlg.showModal();
+
+  // Tab backwards from first focusable wraps to visible footer/body control, never hidden closedOpt
+  const tocCloseX = tocDlg.querySelector(".dialog-close");
+  tocCloseX.focus();
+  document.dispatchEvent({
+    type: "keydown",
+    key: "Tab",
+    shiftKey: true,
+    target: tocCloseX,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.notEqual(document.activeElement, closedOpt, "closed .custom-select-option must not receive Tab focus");
+
+  // Open nested .custom-select.open: Escape closing popup via custom-select keeps dialog open, while an unrelated
+  // background .sb-hl-palette outside the dialog does NOT block modal Escape
+  const bgPalette = document.createElement("div");
+  bgPalette.className = "sb-hl-palette";
+  document.body.appendChild(bgPalette);
+  selectWrap.classList.add("open");
+  let removedByChild = false;
+  const closeOnChild = (ev) => { selectWrap.classList.remove("open"); removedByChild = true; ev.preventDefault(); };
+  selectWrap.addEventListener("keydown", closeOnChild);
+  closedOpt.dispatchEvent({ type: "keydown", key: "Escape" });
+  assert.equal(removedByChild, true);
+  assert.equal(tocDlg.open, true, "dialog stays open when Escape closes nested popup inside dialog");
+  selectWrap.removeEventListener("keydown", closeOnChild);
+
+  // Even with background .sb-hl-palette open outside dialog, Escape still closes top modal
+  document.dispatchEvent({ type: "keydown", key: "Escape", target: tocDlg, preventDefault() {}, stopPropagation() {} });
+  assert.equal(tocDlg.open, false, "background palette outside dialog does not block Escape");
+  tocDlg.dispatchEvent({ type: "close", target: tocDlg });
+  selectWrap.remove();
+  bgPalette.remove();
+
+  // Child keydown that calls dialog.close() still must not leak past dialog: in document capture, insideDialog sets
+  // activeKeyEvents without stopping propagation, and on child close Ctrl+Enter stops cleanly
+  commentDlg.showModal();
+  const commentBox = document.getElementById("doc-comment-input");
+  commentBox.value = "닫힘 후 버블링 방지 확인";
+  commentBox.focus();
+  let capStopped = false;
+  document.dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    ctrlKey: true,
+    target: commentBox,
+    preventDefault() {},
+    stopPropagation() { capStopped = true; },
+  });
+  assert.equal(capStopped, false, "capture lets child Ctrl+Enter run");
+  const childRes = commentBox.dispatchEvent({ type: "keydown", key: "Enter", ctrlKey: true });
+  assert.equal(childRes, false, "doc-comment-input handles Ctrl+Enter");
+  assert.equal(commentDlg.open, false, "doc-comment-input closes dialog on Ctrl+Enter");
 });
 

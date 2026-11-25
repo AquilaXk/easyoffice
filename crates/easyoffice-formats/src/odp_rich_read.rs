@@ -516,7 +516,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "발표자료".to_string());
-    let (aspect, sx, sy) = parse_odp_aspect(styles_xml.as_deref());
+    let (aspect, orientation, sx, sy) = parse_odp_aspect(styles_xml.as_deref());
 
     let mut budget = DecodeBudget::new();
     budget.charge(content_xml.len(), "ODP content.xml")?;
@@ -659,6 +659,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
         title,
         is_slideshow: false,
         aspect,
+        orientation,
         slides,
         elements_rejected: 0,
     };

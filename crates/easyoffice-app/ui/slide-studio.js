@@ -141,6 +141,7 @@
           ...empty,
           layout: nextLayout,
           aspect: deckAspect(),
+          orientation: deckOrientation(),
         });
         return deck.length - 1;
       });
@@ -510,7 +511,7 @@
       frame.appendChild(title);
       frame.appendChild(body);
       if (Array.isArray(slide.elements) && slide.elements.length > 0) {
-        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, deckAspect());
+        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, deckAspect(), { orientation: deckOrientation() });
         if (layer) frame.appendChild(layer);
       }
       viewport.replaceChildren(frame);

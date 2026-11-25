@@ -312,7 +312,9 @@
       let pageValue = Math.max(1, getDocPages?.()?.pageCount?.() ?? 1);
       if (mod === "DOC" || mod === "HWP") {
         unitLabel = "문단 수";
-        unitValue = document.querySelectorAll("#doc-editor p, #doc-editor h1, #doc-editor h2, #doc-editor h3, #doc-editor li").length;
+        unitValue = Array.from(
+          document.querySelectorAll("#doc-editor p, #doc-editor h1, #doc-editor h2, #doc-editor h3, #doc-editor h4, #doc-editor h5, #doc-editor h6, #doc-editor li, #doc-editor blockquote, #doc-editor pre")
+        ).filter((el) => !el.closest?.("#hwp-manuscript-preview, footer, .eo-doc-notes, [data-eo-comments], [data-eo-hf]")).length;
       } else if (mod === "SHEET") {
         pageLabel = "시트 수";
         pageValue = Math.max(1, document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").length);

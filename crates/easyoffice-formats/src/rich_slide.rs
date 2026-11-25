@@ -56,7 +56,37 @@ impl SlideAspect {
             None
         }
     }
+}
 
+/// Slide orientation (`landscape` default, or `portrait`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SlideOrientation {
+    #[default]
+    Landscape,
+    Portrait,
+}
+
+impl SlideOrientation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Landscape => "landscape",
+            Self::Portrait => "portrait",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("landscape") {
+            Some(Self::Landscape)
+        } else if t.eq_ignore_ascii_case("portrait") {
+            Some(Self::Portrait)
+        } else {
+            None
+        }
+    }
+}
+
+impl SlideAspect {
     pub const fn dimensions_pt(self) -> (f64, f64) {
         match self {
             Self::Widescreen16x9 => (960.0, 540.0),
@@ -79,6 +109,46 @@ impl SlideAspect {
             Self::Standard4x3 => (25.40, 19.05),
             Self::HandoutA4 => (29.70, 21.00),
         }
+    }
+
+    pub fn from_dimensions_oriented_pt(w_pt: f64, h_pt: f64) -> (Self, SlideOrientation, f64, f64) {
+        if !w_pt.is_finite() || !h_pt.is_finite() || w_pt <= 1.0 || h_pt <= 1.0 {
+            return (Self::Widescreen16x9, SlideOrientation::Landscape, 1.0, 1.0);
+        }
+        let orientation = if h_pt > w_pt + 1.0 {
+            SlideOrientation::Portrait
+        } else {
+            SlideOrientation::Landscape
+        };
+        let (maj, min) = if orientation == SlideOrientation::Portrait {
+            (h_pt, w_pt)
+        } else {
+            (w_pt, h_pt)
+        };
+        let ratio = maj / min;
+        let aspect = if ratio < (4.0 / 3.0 + 841.89 / 595.28) * 0.5 {
+            Self::Standard4x3
+        } else if ratio < (841.89 / 595.28 + 16.0 / 9.0) * 0.5 {
+            Self::HandoutA4
+        } else {
+            Self::Widescreen16x9
+        };
+        let (base_w, base_h) = aspect.dimensions_pt();
+        let (target_w, target_h) = if orientation == SlideOrientation::Portrait {
+            (base_h, base_w)
+        } else {
+            (base_w, base_h)
+        };
+        let (sx, sy) = if (w_pt - target_w).abs() < 0.6 && (h_pt - target_h).abs() < 0.6 {
+            (1.0, 1.0)
+        } else {
+            (target_w / w_pt, target_h / h_pt)
+        };
+        (aspect, orientation, sx, sy)
+    }
+
+    pub fn from_emu_oriented(cx: u64, cy: u64) -> (Self, SlideOrientation, f64, f64) {
+        Self::from_dimensions_oriented_pt(cx as f64 / EMU_PER_PT, cy as f64 / EMU_PER_PT)
     }
 
     /// Maps arbitrary slide dimensions `(w_pt, h_pt)` to the nearest [`SlideAspect`] and returns
@@ -637,6 +707,7 @@ pub struct RichSlideDeck {
     pub title: String,
     pub is_slideshow: bool,
     pub aspect: SlideAspect,
+    pub orientation: SlideOrientation,
     pub slides: Vec<RichSlide>,
     pub elements_rejected: u32,
 }
@@ -647,6 +718,7 @@ impl Default for RichSlideDeck {
             title: String::new(),
             is_slideshow: false,
             aspect: SlideAspect::Widescreen16x9,
+            orientation: SlideOrientation::Landscape,
             slides: Vec::new(),
             elements_rejected: 0,
         }
@@ -654,6 +726,30 @@ impl Default for RichSlideDeck {
 }
 
 impl RichSlideDeck {
+    pub const fn stage_dimensions_pt(&self) -> (f64, f64) {
+        let (w, h) = self.aspect.dimensions_pt();
+        match self.orientation {
+            SlideOrientation::Landscape => (w, h),
+            SlideOrientation::Portrait => (h, w),
+        }
+    }
+
+    pub const fn stage_dimensions_emu(&self) -> (u64, u64) {
+        let (w, h) = self.aspect.dimensions_emu();
+        match self.orientation {
+            SlideOrientation::Landscape => (w, h),
+            SlideOrientation::Portrait => (h, w),
+        }
+    }
+
+    pub const fn stage_dimensions_cm(&self) -> (f64, f64) {
+        let (w, h) = self.aspect.dimensions_cm();
+        match self.orientation {
+            SlideOrientation::Landscape => (w, h),
+            SlideOrientation::Portrait => (h, w),
+        }
+    }
+
     /// Builds a [`RichSlideDeck`] from legacy `(title, bullets, notes)` triples.
     pub fn from_legacy_slides(
         title: impl Into<String>,
@@ -664,6 +760,7 @@ impl RichSlideDeck {
             title: title.into(),
             is_slideshow,
             aspect: SlideAspect::Widescreen16x9,
+            orientation: SlideOrientation::Landscape,
             slides: slides
                 .into_iter()
                 .map(|(s_title, bullets, notes)| RichSlide {

@@ -516,7 +516,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         .is_some_and(|ct| ct.contains(SLIDESHOW_MAIN_CT));
     let is_slideshow =
         slideshow_ct || extract_attr(pres_xml, "<p:presentation", "slideshow") == Some("1");
-    let (aspect, sx, sy) = parse_slide_size_aspect(pres_xml)?;
+    let (aspect, orientation, sx, sy) = parse_slide_size_aspect(pres_xml)?;
     let mut budget = DecodeBudget::new();
     budget.charge(pres_xml.len(), "PPTX 프레젠테이션")?;
 
@@ -679,6 +679,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         title,
         is_slideshow,
         aspect,
+        orientation,
         slides,
         elements_rejected: 0,
     };

@@ -5,8 +5,8 @@
 use easyoffice_formats::{
     deflate_zlib, encode_slide_pdf, pt_to_signed_emu, EasyOfficeError, IeeeCrc32, OoxmlCodec,
     PdfSerializer, RichImage, RichSlide, RichSlideDeck, SlideAspect, SlideBox, SlideChartSeries,
-    SlideElement, SlideMasterLayout, SlideShapeType, SlideTransition, ZipArchiveCodec,
-    ZipSecurityPolicy,
+    SlideElement, SlideMasterLayout, SlideOrientation, SlideShapeType, SlideTransition,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 const PML_NS: &str = concat!(
@@ -534,6 +534,7 @@ fn excludes_non_body_placeholders_roundtrips_two_column_and_ignores_end_para_rpr
         title: "2단 테스트".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
         slides: vec![
             RichSlide {

@@ -258,6 +258,7 @@
     const utils = host.__EASYOFFICE_SHEET_UTILS__;
     const rawAspect = slideDeckState[0]?.aspect;
     const aspect = Object.hasOwn(STAGE_SIZES, rawAspect) ? rawAspect : "16:9";
+    const orientation = slideDeckState[0]?.orientation === "portrait" ? "portrait" : "landscape";
     const slides = slideDeckState.map((s) => {
       let extraText = "";
       if (Array.isArray(s.insertedNodes) && s.insertedNodes.length > 0 && utils?.restoreDomChildren) {
@@ -273,16 +274,17 @@
         layout: normalizeLayout(s.layout), transition: normalizeTransition(s.transition), elements,
       };
     });
-    return { aspect, slides };
+    return { aspect, orientation, slides };
   }
 
   function hydrateDecodedDeck(res, createEmptySlideStyleFields) {
     const aspect = Object.hasOwn(STAGE_SIZES, res?.aspect) ? res.aspect : "16:9";
+    const deckOrientation = res?.orientation === "portrait" ? "portrait" : "landscape";
     const srcSlides = Array.isArray(res?.slides) && res.slides.length > 0
       ? res.slides.slice(0, MAX_SLIDES)
       : [{ title: "", bullets: [], notes: "" }];
     return srcSlides.map((s) => {
-      const orientation = s?.orientation === "portrait" ? "portrait" : "landscape";
+      const orientation = s?.orientation === "portrait" ? "portrait" : deckOrientation;
       const rawEls = Array.isArray(s?.elements) ? s.elements.slice(0, MAX_ELEMENTS_PER_SLIDE) : [];
       const elements = [];
       for (let i = 0; i < rawEls.length; i += 1) {

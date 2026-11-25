@@ -406,7 +406,7 @@ fn lint_slide_element(
 /// Runs layout lint on a coordinate-based [`RichSlideDeck`].
 pub fn lint_slide_deck(deck: &RichSlideDeck) -> LayoutLintReport {
     let mut report = LayoutLintReport::default();
-    let (stage_w, stage_h) = deck.aspect.dimensions_pt();
+    let (stage_w, stage_h) = deck.stage_dimensions_pt();
     let stage_area = stage_w * stage_h;
 
     for (idx, s) in deck.slides.iter().enumerate() {

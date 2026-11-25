@@ -936,7 +936,7 @@
       }
       for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) {
         document.getElementById(id)?.addEventListener("click", () => {
-          if (getActiveModule() === "BOARD") { host.__EASYOFFICE_BOARD_STUDIO__?.fitAll?.(); return; }
+          if (getActiveModule() === "BOARD") { host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.()?.fitAll?.(); return; }
           applyZoom(symbolDialog?.computeFitZoom?.(editor, mode, pct) ?? pct, mode);
         });
       }

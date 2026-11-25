@@ -7,9 +7,9 @@ use std::time::Instant;
 use easyoffice_formats::{
     deflate_zlib, encode_slide_pdf, ChartKind, ChartLegendPos, EasyOfficeError, IeeeCrc32,
     OdfCodec, OoxmlCodec, PdfSerializer, RichImage, RichSlide, RichSlideDeck, SlideAspect,
-    SlideBox, SlideChartSeries, SlideElement, SlideMasterLayout, SlidePlaceholderRole,
-    SlideShapeType, SlideTextAlign, SlideTransition, ZipArchiveCodec, ZipSecurityPolicy,
-    MAX_ELEMENTS_PER_SLIDE,
+    SlideBox, SlideChartSeries, SlideElement, SlideMasterLayout, SlideOrientation,
+    SlidePlaceholderRole, SlideShapeType, SlideTextAlign, SlideTransition, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_ELEMENTS_PER_SLIDE,
 };
 
 fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
@@ -67,6 +67,7 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
         title: "분기 전략 보고서".into(),
         is_slideshow: false,
         aspect,
+        orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
         slides: vec![
             RichSlide {
@@ -840,6 +841,7 @@ fn bench_pd257_slide_deck_roundtrip() {
         title: "벤치마크".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides,
         elements_rejected: 0,
     };

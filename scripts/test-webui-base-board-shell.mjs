@@ -224,7 +224,7 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
 test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown command enabled", async () => {
   const shown = (el) => !el.closest("[hidden]");
   const checkWindow = async (mod, expectFind, expectClip) => {
-    const { document, host } = await createWorkspaceHarness({ search: `?module=${mod}&win=w-menu-${mod}` });
+    const { document, host, sandbox } = await createWorkspaceHarness({ search: `?module=${mod}&win=w-menu-${mod}` });
     await flushAsyncTurns(10);
     assert.equal(host.__EASYOFFICE_MENU_KINDS__.menuKindOf(mod), mod);
     const topMenus = document.querySelectorAll(".studio-menubar > .menu-item").filter(shown).map((el) => el.querySelector(".menu-title").textContent);
@@ -249,7 +249,36 @@ test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown 
     document.querySelector('.md-item[data-studio-menu-cmd="view-zoom"]').click();
     await flushAsyncTurns(6);
     assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
+    if (mod === "BOARD") {
+      const boardStudio = host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+      const slider = document.getElementById("status-zoom-slider");
+      assert.equal(slider.min, "25");
+      assert.equal(slider.max, "400");
+      boardStudio.setZoom(200);
+      sandbox.dispatchWindowKeydown({ key: "=", metaKey: true });
+      assert.equal(boardStudio.getState().viewport.zoom, 300, "Cmd+= from 200% in BOARD steps up to 300%");
+      assert.equal(document.getElementById("status-zoom-label").textContent, "300%");
+      assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "300%");
+      boardStudio.setZoom(25);
+      assert.equal(document.getElementById("status-zoom-label").textContent, "25%");
+      document.getElementById("btn-zoom-fit-width").click();
+      assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
+    }
   };
   await checkWindow("BASE", true, true);
   await checkWindow("BOARD", false, false);
+
+  // Switching out of BOARD restores non-BOARD zoom percentage and 50..200 slider bounds
+  const { document, host } = await createWorkspaceHarness({ search: "?module=BASE&win=w-board-switch" });
+  await flushAsyncTurns(10);
+  host.__EASYOFFICE_ZOOM__.apply(125);
+  document.defaultView.__EASYOFFICE_ACTIVATE_MODULE__("BOARD");
+  await flushAsyncTurns(5);
+  host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().setZoom(300);
+  assert.equal(document.getElementById("status-zoom-label").textContent, "300%");
+  document.defaultView.__EASYOFFICE_ACTIVATE_MODULE__("BASE");
+  await flushAsyncTurns(5);
+  assert.equal(document.getElementById("status-zoom-label").textContent, "125%");
+  assert.equal(document.getElementById("status-zoom-slider").min, "50");
+  assert.equal(document.getElementById("status-zoom-slider").max, "200");
 });

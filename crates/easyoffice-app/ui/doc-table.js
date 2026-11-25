@@ -150,19 +150,20 @@
     function sortTableAt(asc = true, options = {}) {
       const root = editor();
       const sel = selectionAt();
-      const fallbackTable = root?.querySelector("table") || document.getElementById("doc-table-body")?.closest("table");
-      const table = sel?.table || fallbackTable;
+      const focusedTable = options.targetEl && root ? grid.tableAt(root, options.targetEl) : null;
+      const table = sel?.table || focusedTable || root?.querySelector("table") || null;
       if (!table) {
         setFeedback?.(MSG_OUTSIDE);
-        return { changed: false };
+        return { changed: false, error: MSG_OUTSIDE };
       }
       const colIdx = sel ? (grid.layoutOf(table).at.get(sel.from)?.col ?? 0) : 0;
       const tbody = table.tBodies?.[0] || table.querySelector("tbody") || table;
       const allRows = Array.from(tbody.children || []).filter((r) => r.tagName === "TR");
+      const rowCells = (r) => Array.from(r.children || []).filter((c) => c.tagName === "TD" || c.tagName === "TH");
       let start = 0;
       if (!table.tHead && tbody.tagName !== "THEAD") {
         while (start < allRows.length) {
-          const cells = Array.from(allRows[start].children || []);
+          const cells = rowCells(allRows[start]);
           if (cells.length > 0 && cells.every((c) => c.tagName === "TH")) start += 1;
           else break;
         }
@@ -170,18 +171,22 @@
       const sumRow = allRows.find((r) => r.id === "doc-table-sum-row") || null;
       const dataRows = allRows.slice(start).filter((r) => r !== sumRow);
       if (dataRows.length < 2) {
-        setFeedback?.("정렬할 표 행이 부족합니다");
-        return { changed: false };
+        const error = "정렬할 표 행이 부족합니다";
+        setFeedback?.(error);
+        return { changed: false, error };
       }
-      if (dataRows.some((r) => Array.from(r.children || []).some((c) => (c.rowSpan || 1) > 1 || (c.colSpan || 1) > 1))) {
-        setFeedback?.("병합된 셀이 있는 표는 정렬할 수 없습니다");
-        return { changed: false };
+      if (dataRows.some((r) => rowCells(r).some((c) => (c.rowSpan || 1) > 1 || (c.colSpan || 1) > 1))) {
+        const error = "병합된 셀이 있는 표는 정렬할 수 없습니다";
+        setFeedback?.(error);
+        return { changed: false, error };
       }
       const parseNum = (s) => (/^[-+]?\d[\d,]*(?:\.\d+)?$/.test(s) ? Number(s.replaceAll(",", "")) : NaN);
       const exec = () => {
         const sorted = [...dataRows].sort((a, b) => {
-          const sa = cellText(a.children[colIdx] || a.children[0] || a);
-          const sb = cellText(b.children[colIdx] || b.children[0] || b);
+          const ca = rowCells(a);
+          const cb = rowCells(b);
+          const sa = cellText(ca[colIdx] || ca[0] || a);
+          const sb = cellText(cb[colIdx] || cb[0] || b);
           const na = parseNum(sa);
           const nb = parseNum(sb);
           if (Number.isFinite(na) && Number.isFinite(nb)) return asc ? na - nb : nb - na;
@@ -191,12 +196,13 @@
           if (sumRow) sumRow.before(row);
           else tbody.appendChild(row);
         }
-        const firstTarget = sorted[0]?.children[colIdx] || sorted[0]?.children[0];
+        const firstCells = sorted[0] ? rowCells(sorted[0]) : [];
+        const firstTarget = firstCells[colIdx] || firstCells[0];
         if (firstTarget && sel) placeCaret(firstTarget);
         return { changed: true };
       };
       const res = options.undo === false ? exec() : withUndo(exec);
-      setFeedback?.(asc ? "표 오름차순 정렬 완료" : "표 내림차순 정렬 완료");
+      if (res?.changed) setFeedback?.(asc ? "표 오름차순 정렬 완료" : "표 내림차순 정렬 완료");
       return res;
     }
 

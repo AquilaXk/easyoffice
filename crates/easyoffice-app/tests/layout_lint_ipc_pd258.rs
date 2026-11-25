@@ -7,8 +7,8 @@ use easyoffice_app::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     base64_codec, deflate_zlib, DocumentFormat, IeeeCrc32, RichBlock, RichDocument, RichImage,
     RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichSlide, RichSlideDeck,
-    RichTable, SlideAspect, SlideBox, SlideElement, SlideMasterLayout, SlideShapeType,
-    SlideTextAlign, SlideTransition, StrictJsonValue, UniversalDocumentModel,
+    RichTable, SlideAspect, SlideBox, SlideElement, SlideMasterLayout, SlideOrientation,
+    SlideShapeType, SlideTextAlign, SlideTransition, StrictJsonValue, UniversalDocumentModel,
     UniversalFormatConverter, MAX_LINT_ISSUES,
 };
 
@@ -189,6 +189,7 @@ fn cli_inspect_reports_layout_lint_for_docx_and_pptx_and_enforces_cap() {
         title: "CLI 슬라이드 린트".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides: vec![RichSlide {
             title: "제목".into(),
             bullets: Vec::new(),

@@ -7,15 +7,27 @@
   // spreadsheet program's zoom buttons.
 
   const SHEET = { min: 10, max: 400 };
+  const BOARD = { min: 25, max: 400, steps: [25, 33, 50, 67, 75, 90, 100, 125, 150, 200, 300, 400] };
   const OTHER = { min: 50, max: 200, steps: [75, 90, 100, 125, 150] };
 
-  const rangeOf = (module) => (module === "SHEET" ? SHEET : OTHER);
+  const rangeOf = (module) => (module === "SHEET" ? SHEET : module === "BOARD" ? BOARD : OTHER);
 
   // The zoom `delta` button presses from `current`.
   function step(module, current, delta) {
     const range = rangeOf(module);
-    if (module === "SHEET") return Math.max(range.min, Math.min(range.max, Math.round(current / 10) * 10 + delta * 10));
-    const at = range.steps.indexOf(current);
+    const cur = Math.round(Number(current) || 100);
+    if (module === "SHEET") return Math.max(range.min, Math.min(range.max, Math.round(cur / 10) * 10 + delta * 10));
+    if (module === "BOARD") {
+      if (delta > 0) return range.steps.find((z) => z > cur) ?? range.max;
+      if (delta < 0) {
+        for (let i = range.steps.length - 1; i >= 0; i -= 1) {
+          if (range.steps[i] < cur) return range.steps[i];
+        }
+        return range.min;
+      }
+      return Math.max(range.min, Math.min(range.max, cur));
+    }
+    const at = range.steps.indexOf(cur);
     return range.steps[Math.max(0, Math.min(range.steps.length - 1, (at < 0 ? 2 : at) + delta))];
   }
 

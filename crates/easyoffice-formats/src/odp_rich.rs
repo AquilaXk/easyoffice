@@ -284,7 +284,8 @@ pub fn pack_odp_rich(deck: &RichSlideDeck) -> Result<Vec<u8>, EasyOfficeError> {
             "<draw:page draw:name=\"{}\" draw:style-name=\"{dp}\" draw:master-page-name=\"Standard\" presentation:presentation-page-layout-name=\"eo_{}\">",
             XmlSanitizer::escape(&slide.title), slide.layout.as_str()
         );
-        let (title_box, body_box, _) = odp_layout_boxes_pt(slide.layout, deck.aspect);
+        let (title_box, body_box, _) =
+            odp_layout_boxes_pt(slide.layout, deck.aspect, deck.orientation);
         let (emit_title, emit_body) = slide_placeholder_visibility(slide);
         if emit_title {
             let _ = write!(

@@ -285,7 +285,7 @@ pub fn pack_pptx_rich(
 ) -> Result<Vec<u8>, EasyOfficeError> {
     deck.validate()?;
     let slideshow = is_slideshow || deck.is_slideshow;
-    let (emu_w, emu_h) = deck.aspect.dimensions_emu();
+    let (emu_w, emu_h) = deck.stage_dimensions_emu();
     let mut media = MediaParts::new();
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut slide_entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(deck.slides.len() * 4);

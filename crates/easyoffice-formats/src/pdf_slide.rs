@@ -896,7 +896,7 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
 /// Exports a [`RichSlideDeck`] as a multi-page pure vector PDF (one page per slide).
 pub fn encode_slide_pdf(deck: &RichSlideDeck, title: &str) -> Result<Vec<u8>, EasyOfficeError> {
     deck.validate()?;
-    let (pw, ph) = deck.aspect.dimensions_pt();
+    let (pw, ph) = deck.stage_dimensions_pt();
     let effective_title = if title.trim().is_empty() {
         if deck.title.trim().is_empty() {
             "발표자료"

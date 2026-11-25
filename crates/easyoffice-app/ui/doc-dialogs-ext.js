@@ -29,10 +29,21 @@
     });
   }
 
+  const EXCLUDED_MERGE_CONTAINERS = "#hwp-manuscript-preview, footer, .eo-doc-notes, [data-eo-comments], [data-eo-hf]";
+
+  function isExcludedMergeNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = String(node.tagName || "").toUpperCase();
+    if (tag === "FOOTER" || node.id === "hwp-manuscript-preview") return true;
+    if (node.classList?.contains?.("eo-doc-notes")) return true;
+    const ds = node.dataset;
+    return Boolean(ds && (ds.eoComments !== undefined || ds.eoHf !== undefined));
+  }
+
   function mergeTokensInDom(docEditor, valueMap) {
     let replaced = 0;
     const walk = (node) => {
-      if (!node) return;
+      if (!node || isExcludedMergeNode(node)) return;
       if (node.nodeType === 3) {
         const val = node.nodeValue || "";
         if (!val.includes("{{")) return;
@@ -43,21 +54,20 @@
         }
         return;
       }
+      if (node.nodeType === 1 && (!node.childNodes || node.childNodes.length === 0)) {
+        const raw = node.textContent || "";
+        if (MAIL_MERGE_TOKEN_TEST_RE.test(raw) && !node.closest?.(EXCLUDED_MERGE_CONTAINERS)) {
+          const next = replaceTokensInText(raw, valueMap);
+          if (next !== raw) {
+            node.textContent = next;
+            replaced += 1;
+          }
+        }
+        return;
+      }
       Array.from(node.childNodes || []).forEach(walk);
     };
     walk(docEditor);
-    docEditor
-      ?.querySelectorAll?.("#doc-editor p, #doc-editor li, #doc-editor td, #doc-editor th, #doc-editor div")
-      .forEach((el) => {
-        if (el.childElementCount > 0 || el.children?.length > 0) return;
-        const raw = el.textContent || "";
-        if (!MAIL_MERGE_TOKEN_TEST_RE.test(raw)) return;
-        const next = replaceTokensInText(raw, valueMap);
-        if (next !== raw) {
-          el.textContent = next;
-          replaced += 1;
-        }
-      });
     return replaced;
   }
 
@@ -151,7 +161,7 @@
           const editor = $("doc-editor");
           const p = document.createElement("p");
           p.textContent = token;
-          editor?.appendChild(p);
+          if (editor) insertBlockAfterCaret(editor, p);
         }
         computeSmartStats();
       });
@@ -406,6 +416,21 @@
       $("doc-fn-name")?.addEventListener("change", syncFnPreview);
       $("doc-fn-dir")?.addEventListener("change", syncFnPreview);
       $("btn-doc-fn-ok")?.addEventListener("click", applyFnWizardDialog);
+      const submitOnEnter = (ev, handler) => {
+        if (ev.key === "Enter" && !ev.isComposing && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey) {
+          ev.preventDefault();
+          handler();
+        }
+      };
+      $("doc-mailmerge-rows")?.addEventListener("keydown", (ev) => {
+        if (ev.target?.tagName === "INPUT") submitOnEnter(ev, applyMailMergeDialog);
+      });
+      ["doc-shape-text", "doc-shape-w", "doc-shape-h"].forEach((id) =>
+        $(id)?.addEventListener("keydown", (ev) => submitOnEnter(ev, applyShapeDialog))
+      );
+      ["doc-chart-title-input", "doc-chart-categories"].forEach((id) =>
+        $(id)?.addEventListener("keydown", (ev) => submitOnEnter(ev, applyChartDialog))
+      );
       const cancelMm = () => {
         pendingMailMergeRun = null;
         closeDialog?.("doc-mailmerge-dialog");

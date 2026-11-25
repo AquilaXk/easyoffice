@@ -14,8 +14,8 @@ use crate::pptx_master::{
 };
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
-    RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, MAX_SLIDE_CHART_POINTS,
-    MAX_SLIDE_CHART_SERIES,
+    RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, SlideOrientation,
+    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
 };
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements, extract_tag_bodies,
@@ -119,7 +119,7 @@ pub(crate) fn read_ppt_rels(
 
 pub(crate) fn parse_slide_size_aspect(
     pres_xml: &str,
-) -> Result<(SlideAspect, f64, f64), EasyOfficeError> {
+) -> Result<(SlideAspect, SlideOrientation, f64, f64), EasyOfficeError> {
     for (attrs, _) in extract_balanced_elements(pres_xml, "p:sldSz") {
         let (Some(cxs), Some(cys)) = (
             extract_attr_from_fragment(attrs, "cx"),
@@ -133,10 +133,15 @@ pub(crate) fn parse_slide_size_aspect(
             ));
         };
         if cx > 0 && cy > 0 {
-            return Ok(SlideAspect::from_emu(cx, cy));
+            return Ok(SlideAspect::from_emu_oriented(cx, cy));
         }
     }
-    Ok((SlideAspect::Standard4x3, 1.0, 1.0))
+    Ok((
+        SlideAspect::Standard4x3,
+        SlideOrientation::Landscape,
+        1.0,
+        1.0,
+    ))
 }
 
 pub(crate) fn utf8_entry<'a>(
@@ -209,7 +214,7 @@ pub(crate) fn finish_pptx_package(
     media: MediaParts,
     charts: Vec<(usize, String)>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let (emu_w, emu_h) = deck.aspect.dimensions_emu();
+    let (emu_w, emu_h) = deck.stage_dimensions_emu();
     let has_notes = deck.slides.iter().any(|s| !s.notes.is_empty());
     let main_ct = if slideshow {
         SLIDESHOW_MAIN_CT
@@ -267,7 +272,9 @@ pub(crate) fn finish_pptx_package(
         let _ = write!(pres_xml, "<p:sldId id=\"{}\" r:id=\"{rid}\"/>", 255 + n);
         pres_rels.push((rid, "slide", format!("slides/slide{n}.xml")));
     }
-    let sz_type = if deck.aspect == SlideAspect::Standard4x3 {
+    let sz_type = if deck.aspect == SlideAspect::Standard4x3
+        && deck.orientation == SlideOrientation::Landscape
+    {
         " type=\"screen4x3\""
     } else {
         ""

@@ -817,3 +817,139 @@ test("Slice 1: table sort/fn wizard, validation non-audit, rightIndentTwips roun
   assert.equal(document.getElementById("status-zoom-label").textContent, "145%");
 });
 
+test("regression guards: single-pass mailmerge before footer, h4 stats, multi-table sort feedback, portrait slide serialization/print", async () => {
+  const selection = createSelection();
+  const { document, host, sandbox, userClick } = await createWorkspaceHarness({ selection });
+  await flushAsyncTurns(6);
+  const docEditor = document.getElementById("doc-editor");
+
+  // 1. Insert merge token before footer & verify single-pass replacement when replacement has {{...}}
+  const footer = document.createElement("footer");
+  footer.className = "doc-page-layer";
+  footer.textContent = "바닥글 {{성명}}";
+  docEditor.replaceChildren();
+  const h4 = document.createElement("h4");
+  h4.textContent = "소제목 H4";
+  const bodyP = document.createElement("p");
+  bodyP.textContent = "{{성명}}";
+  docEditor.appendChild(h4);
+  docEditor.appendChild(bodyP);
+  docEditor.appendChild(footer);
+  selection.removeAllRanges();
+
+  userClick(commandItem(document, "doc-mod-mailmerge"));
+  await flushAsyncTurns(4);
+  userClick(document.getElementById("btn-doc-mailmerge-token"));
+  await flushAsyncTurns(4);
+  assert.ok(Array.from(docEditor.children).indexOf(footer) === docEditor.children.length - 1, "token inserted before footer");
+
+  // Reopen mailmerge and submit via Enter key inside input; ensure {{기관명}} in replacement is not double-replaced
+  bodyP.textContent = "{{성명}} / {{기관명}}";
+  userClick(commandItem(document, "doc-mod-mailmerge"));
+  await flushAsyncTurns(4);
+  const valInputs = Array.from(document.querySelectorAll("#doc-mailmerge-rows .doc-mm-val"));
+  const keyInputs = Array.from(document.querySelectorAll("#doc-mailmerge-rows .doc-mm-key"));
+  keyInputs[0].value = "성명";
+  valInputs[0].value = "{{기관명}}";
+  keyInputs[1].value = "기관명";
+  valInputs[1].value = "안전부";
+  valInputs[0].dispatchEvent({ type: "keydown", key: "Enter", target: valInputs[0], preventDefault() {} });
+  await flushAsyncTurns(6);
+  assert.equal(bodyP.textContent, "{{기관명}} / 안전부", "single-pass mailmerge must not re-expand inserted tokens");
+  assert.equal(footer.textContent, "바닥글 {{성명}}", "footer chrome must not be overwritten by mailmerge");
+
+  // 2. Document statistics includes h4 and excludes footer & hwp-manuscript-preview
+  const preview = document.createElement("div");
+  preview.id = "hwp-manuscript-preview";
+  const hiddenP = document.createElement("p");
+  hiddenP.textContent = "원고지 안내";
+  preview.appendChild(hiddenP);
+  docEditor.appendChild(preview);
+  userClick(studioItem(document, "review-stats"));
+  await flushAsyncTurns(6);
+  const statsPairs = {};
+  const dts = Array.from(document.querySelectorAll("#doc-stats-grid dt"));
+  const dds = Array.from(document.querySelectorAll("#doc-stats-grid dd"));
+  dts.forEach((dt, i) => { statsPairs[dt.textContent] = dds[i]?.textContent; });
+  assert.equal(Number(statsPairs["문단 수"]), 3, "h4 + bodyP + tokenP = 3 (excludes footer and hwp-manuscript-preview)");
+  document.getElementById("doc-stats-dialog")?.close?.();
+
+  // 3. Multi-table sort acts on focused table (not #doc-table-body) & keeps error feedback outside tables
+  docEditor.replaceChildren();
+  const mkTable = (rows) => {
+    const t = document.createElement("table");
+    const tb = document.createElement("tbody");
+    for (const val of rows) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    }
+    t.appendChild(tb);
+    return t;
+  };
+  const t1 = mkTable(["다", "가"]);
+  const t2 = mkTable(["가", "나"]);
+  const outP = document.createElement("p");
+  outP.textContent = "표 밖 문단";
+  docEditor.appendChild(t1);
+  docEditor.appendChild(t2);
+  docEditor.appendChild(outP);
+  const r2 = document.createRange();
+  r2.setStart(t2.querySelector("td").firstChild, 0);
+  r2.setEnd(t2.querySelector("td").firstChild, 0);
+  selection.removeAllRanges();
+  selection.addRange(r2);
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(t2.querySelectorAll("td")).map((td) => td.textContent), ["나", "가"], "second table sorted descending on first click");
+  assert.deepEqual(Array.from(t1.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "first table untouched");
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(t2.querySelectorAll("td")).map((td) => td.textContent), ["가", "나"], "second table sorted ascending on second click");
+
+  // Single-row table preserves error message in status feedback
+  const tSingle = mkTable(["단일행"]);
+  docEditor.appendChild(tSingle);
+  const rSingle = document.createRange();
+  rSingle.setStart(tSingle.querySelector("td").firstChild, 0);
+  rSingle.setEnd(tSingle.querySelector("td").firstChild, 0);
+  selection.removeAllRanges();
+  selection.addRange(rSingle);
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.match(document.getElementById("status-command-feedback").textContent, /부족/);
+
+  // 4. SLIDE portrait orientation propagates to addSlide, print pages, and serializeDeckPayload; review-track has no fake state
+  switchModule(document, "SLIDE");
+  await flushAsyncTurns(4);
+  userClick(commandItem(document, "slide-layout-orientation"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("slide-stage-box").dataset.orientation, "portrait");
+  userClick(document.getElementById("btn-slide-add"));
+  await flushAsyncTurns(4);
+  userClick(document.getElementById("btn-slide-move-up"));
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("slide-stage-box").dataset.orientation, "portrait", "added slide preserves portrait orientation");
+  const serialized = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.serializeDeckPayload(
+    [{ aspect: "16:9", orientation: "portrait", title: "", lower: "", notes: "", elements: [] }],
+    document,
+  );
+  assert.equal(serialized.orientation, "portrait");
+
+  const ppApi = host.__EASYOFFICE_PRINT_PREVIEW__;
+  await ppApi.open();
+  await flushAsyncTurns(6);
+  const printSlidePage = document.querySelector("#print-preview-pane .eo-print-page[data-orientation='portrait']");
+  assert.ok(printSlidePage, "print preview builds portrait slide page");
+  ppApi.close();
+
+  delete document.getElementById("slide-stage-box").dataset.layoutState;
+  const trackCmdEl = commandItem(document, "slide-review-track");
+  if (trackCmdEl) userClick(trackCmdEl);
+  await flushAsyncTurns(4);
+  assert.equal(document.getElementById("slide-stage-box").dataset.layoutState, undefined, "unsupported slide-review-track must not write fake layoutState");
+});
+
+

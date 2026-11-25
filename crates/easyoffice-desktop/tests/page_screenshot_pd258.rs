@@ -9,7 +9,7 @@ use easyoffice_formats::{
     deflate_zlib, ChartKind, ChartLegendPos, DocumentFormat, IeeeCrc32, OoxmlCodec, RichBlock,
     RichDocument, RichImage, RichParagraph, RichRun, RichSlide, RichSlideDeck, RichTable,
     SheetStyling, SlideAspect, SlideBox, SlideChartSeries, SlideElement, SlideMasterLayout,
-    SlideShapeType, SlideTextAlign, SlideTransition, UniversalFormatConverter,
+    SlideOrientation, SlideShapeType, SlideTextAlign, SlideTransition, UniversalFormatConverter,
 };
 
 fn hand_written_with_xref(objects: &[(u32, String)], trailer_extra: &str) -> Vec<u8> {
@@ -125,6 +125,7 @@ fn build_test_pptx() -> Vec<u8> {
         title: "스크린샷 테스트 덱".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides: vec![
             RichSlide {
                 title: "1페이지 분기 성과 보고".into(),

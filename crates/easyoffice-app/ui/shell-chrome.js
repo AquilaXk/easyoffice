@@ -680,13 +680,26 @@
     }
 
     function dialogFocusables(dialog) {
+      const getCs = typeof host.getComputedStyle === "function"
+        ? (node) => host.getComputedStyle(node)
+        : null;
       return Array.from(dialog.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => {
         if (!el || el.disabled || el.hidden) return false;
         if (el.getAttribute?.("aria-disabled") === "true" || el.getAttribute?.("aria-hidden") === "true") return false;
         if (String(el.tagName || "").toUpperCase() === "INPUT" && inputTypeOf(el) === "hidden") return false;
         if (el.classList?.contains?.("native-select-hidden")) return false;
+        const selectMenu = el.closest?.(".custom-select-menu");
+        if (selectMenu && !selectMenu.closest?.(".custom-select.open")) return false;
         const hiddenAncestor = el.closest?.("[hidden]");
         if (hiddenAncestor && hiddenAncestor !== dialog && dialog.contains(hiddenAncestor)) return false;
+        if (getCs) {
+          const selfCs = getCs(el);
+          if (selfCs && selfCs.visibility === "hidden") return false;
+          for (let cur = el; cur && cur !== dialog; cur = cur.parentElement) {
+            const curCs = getCs(cur);
+            if (curCs && curCs.display === "none") return false;
+          }
+        }
         const tabAttr = el.getAttribute?.("tabindex");
         if (tabAttr !== null && tabAttr !== undefined && Number(tabAttr) < 0) return false;
         return typeof el.focus === "function";
@@ -696,12 +709,14 @@
     function enableDialogKeys(dialog) {
       if (!dialog || dialog.classList.contains("find-dialog") || KEY_BOUND_DIALOGS.has(dialog)) return;
       KEY_BOUND_DIALOGS.add(dialog);
+      const activeKeyEvents = typeof WeakSet === "function" ? new WeakSet() : null;
+      const popupEscapeEvents = typeof WeakSet === "function" ? new WeakSet() : null;
       const insideDialog = (target) => (
         target === dialog
         || (typeof dialog.contains === "function" ? dialog.contains(target) : target?.closest?.("dialog") === dialog)
       );
       const hasOpenNestedPopup = () => Boolean(
-        dialog.querySelector?.(".custom-select.open") || document.querySelector?.(".sb-hl-palette:not([hidden])")
+        dialog.querySelector?.(".custom-select.open, .sb-hl-palette:not([hidden])")
       );
       const isTopActive = () => {
         if (!dialog.open) return false;
@@ -733,17 +748,24 @@
       const capture = (ev) => {
         if (!isTopActive() || ev.isComposing) return;
         if (ev.key === "Escape") {
-          if (hasOpenNestedPopup()) return;
+          if (hasOpenNestedPopup()) {
+            popupEscapeEvents?.add(ev);
+            return;
+          }
           ev.stopPropagation();
           ev.preventDefault();
           dialog.close();
           return;
         }
         if (ev.key === "Tab" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          activeKeyEvents?.add(ev);
           cycleTabFocus(ev);
           return;
         }
-        if (insideDialog(ev.target)) return;
+        if (insideDialog(ev.target)) {
+          activeKeyEvents?.add(ev);
+          return;
+        }
         if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !hasOpenNestedPopup()) {
           ev.stopPropagation();
           ev.preventDefault();
@@ -754,11 +776,15 @@
         if (!isTextInputTarget(ev.target)) ev.preventDefault();
       };
       const onDialogBubble = (ev) => {
-        if (!isTopActive() || ev.isComposing) return;
+        const fromActive = Boolean(activeKeyEvents?.has(ev));
+        if (fromActive) activeKeyEvents.delete(ev);
+        const escapeOnPopup = Boolean(popupEscapeEvents?.has(ev));
+        if (escapeOnPopup) popupEscapeEvents.delete(ev);
+        if (ev.isComposing || (!isTopActive() && !fromActive)) return;
         ev.stopPropagation();
-        if (ev.defaultPrevented) return;
+        if (!isTopActive() || ev.defaultPrevented) return;
         if (ev.key === "Escape") {
-          if (hasOpenNestedPopup()) return;
+          if (escapeOnPopup || hasOpenNestedPopup()) return;
           ev.preventDefault();
           dialog.close();
           return;
@@ -780,10 +806,16 @@
           if (lower !== "c" && lower !== "a") ev.preventDefault();
         }
       };
+      const onCancel = (ev) => {
+        if (!isTopActive() || hasOpenNestedPopup()) {
+          ev.preventDefault();
+        }
+      };
       const release = () => {
         removeOpenDialogStack(dialog);
         document.removeEventListener("keydown", capture, true);
       };
+      dialog.addEventListener("cancel", onCancel);
       dialog.addEventListener("close", release);
       dialog.addEventListener("keydown", onDialogBubble);
       const origClose = typeof dialog.close === "function" ? dialog.close : null;

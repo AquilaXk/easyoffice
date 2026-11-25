@@ -6,8 +6,8 @@ use easyoffice_formats::{
     deflate_zlib, lint_document, lint_legacy_slides, lint_slide_deck, CellMerge, IeeeCrc32,
     LayoutIssueKind, RichBlock, RichDocument, RichImage, RichPageFrame, RichPageMargins, RichPaper,
     RichParagraph, RichRun, RichSlide, RichSlideDeck, RichTable, SlideAspect, SlideBox,
-    SlideElement, SlideMasterLayout, SlidePlaceholderRole, SlideShapeType, SlideTextAlign,
-    SlideTransition, TableCellImage, MAX_LINT_ISSUES,
+    SlideElement, SlideMasterLayout, SlideOrientation, SlidePlaceholderRole, SlideShapeType,
+    SlideTextAlign, SlideTransition, TableCellImage, MAX_LINT_ISSUES,
 };
 
 fn make_png(width: u32, height: u32) -> Vec<u8> {
@@ -78,6 +78,7 @@ fn slide_lint_detects_stage_text_table_and_bullet_overflows() {
         title: "넘침 검증".to_string(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides: vec![RichSlide {
             title: "슬라이드1".to_string(),
             bullets: (1..=11).map(|i| format!("항목 {i}")).collect(),
@@ -149,6 +150,7 @@ fn slide_lint_detects_element_overlap_and_skips_full_background_shape() {
         title: "겹침 검증".to_string(),
         is_slideshow: false,
         aspect: SlideAspect::Standard4x3, // 720 x 540 = 388,800 pt^2
+        orientation: SlideOrientation::Landscape,
         slides: vec![RichSlide {
             title: "제목".to_string(),
             bullets: Vec::new(),
@@ -184,6 +186,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
         title: "빈 영역 검증".to_string(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides: vec![
             // Slide 1: TitleSlide without title, plus empty/prompt/template textboxes
             RichSlide {
@@ -446,6 +449,7 @@ fn lint_caps_hostile_report_at_max_lint_issues_and_marks_truncated() {
         title: "적대적 슬라이드".to_string(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides: vec![RichSlide {
             title: "제목".to_string(),
             bullets: Vec::new(),
@@ -496,6 +500,7 @@ fn benchmark_layout_lint_release() {
         title: "벤치마크 덱".to_string(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         slides,
         elements_rejected: 0,
     };

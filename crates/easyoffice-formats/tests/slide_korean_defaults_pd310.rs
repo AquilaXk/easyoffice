@@ -6,8 +6,8 @@
 
 use easyoffice_formats::{
     EasyOfficeError, OdfCodec, OoxmlCodec, OoxmlPptxPayload, RichSlide, RichSlideDeck, SlideAspect,
-    SlideBox, SlideElement, SlideMasterLayout, SlideTextAlign, SlideTransition, ZipArchiveCodec,
-    ZipSecurityPolicy,
+    SlideBox, SlideElement, SlideMasterLayout, SlideOrientation, SlideTextAlign, SlideTransition,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn unpack(bytes: &[u8]) -> Vec<(String, String)> {
@@ -120,6 +120,7 @@ fn pptx_legacy_and_rich_emit_16_9_malgun_gothic_theme_master_and_layouts() {
         title: "레이아웃 검증".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
         slides: vec![
             RichSlide {
@@ -204,6 +205,7 @@ fn odp_writes_malgun_gothic_default_styles_standard_xlink_and_layout_frames() {
         title: "ODP 한국어 기본값".into(),
         is_slideshow: false,
         aspect: SlideAspect::Widescreen16x9,
+        orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
         slides: vec![
             RichSlide {

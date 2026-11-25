@@ -88,6 +88,7 @@
     const ribbonSessionId = createRibbonSessionId();
     const ribbonIpcPayload = (fields) => JSON.stringify({ ...fields, sessionId: ribbonSessionId });
     let workspaceHistory = null;
+    let nonBoardZoom = null;
     const sheetHistory = host.__EASYOFFICE_CREATE_SHEET_HISTORY__({
       sheetDataStore,
       sheetRowCounts,
@@ -212,6 +213,7 @@
 
       getWindowBridge?.()?.refresh();
       if (mod === "BOARD") {
+        if (curMod !== "BOARD") nonBoardZoom = Number(localRibbonState.zoomPercent || 100);
         const stage = document.querySelector(".canvas-stage");
         if (stage) {
           stage.style.zoom = "";
@@ -220,12 +222,20 @@
         const bZoom = host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.()?.getState?.().viewport?.zoom ?? 100;
         host.__EASYOFFICE_ZOOM__?.syncExternal?.(bZoom);
       } else if (curMod === "BOARD") {
-        const stage = document.querySelector(".canvas-stage");
-        if (stage && localRibbonState.zoomPercent) stage.style.zoom = localRibbonState.zoomPercent + "%";
+        const restoreZoom = skipTabBufferSync ? Number(localRibbonState.zoomPercent || 100) : (nonBoardZoom ?? 100);
+        nonBoardZoom = null;
+        if (host.__EASYOFFICE_ZOOM__?.apply) {
+          host.__EASYOFFICE_ZOOM__.apply(restoreZoom);
+        } else {
+          const stage = document.querySelector(".canvas-stage");
+          if (stage) stage.style.zoom = restoreZoom + "%";
+        }
       }
       if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
         workspacePanels.restoreDocTabState(mod);
       }
+      const splitStage = document.querySelector(".canvas-stage");
+      if (splitStage?.dataset?.splitView === "true") workspacePanels.syncSplitComparePane(splitStage);
       workspacePanels.renderModuleOutline(mod);
       getSheetController()?.syncSheetFormatToolbar?.();
       getSheetController()?.syncChartLayer?.();
@@ -436,8 +446,8 @@
       getWorkspacePanels().computeSmartStats();
     }
 
-    function docEffectSort({ execRes }) {
-      return getDocTable().sortTableAt(Boolean(execRes?.sortAscending), { undo: false });
+    function docEffectSort({ execRes, targetEl }) {
+      return getDocTable().sortTableAt(Boolean(execRes?.sortAscending), { undo: false, targetEl });
     }
 
     const DOC_EXACT_EFFECTS = {
@@ -484,7 +494,8 @@
       }
       const runEffect = docEditorEffectFor(cmdId);
       if (!runEffect) return false;
-      runEffect({ docEditor, targetEl, cmdId, execRes, options });
+      const effectRes = runEffect({ docEditor, targetEl, cmdId, execRes, options });
+      if (effectRes && effectRes.changed === false && options) options.skipFeedback = true;
       return true;
     }
 
@@ -755,7 +766,10 @@
       "slide-mod-snap": () => host.__EASYOFFICE_SLIDE_CANVAS__?.toggleSnap?.(),
     };
 
+    const UNSUPPORTED_SLIDE_STAGE_CMDS = new Set(["slide-data-validation", "slide-review-track"]);
+
     function slideStageEffect(cmdId, execRes, ctx) {
+      if (UNSUPPORTED_SLIDE_STAGE_CMDS.has(cmdId)) return;
       const handler = SLIDE_STAGE_HANDLERS[cmdId];
       if (typeof handler === "function") handler(ctx, cmdId, execRes);
       else ctx.stageBox.dataset.layoutState = execRes?.summary || cmdId;

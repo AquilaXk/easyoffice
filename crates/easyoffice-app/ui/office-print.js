@@ -358,13 +358,15 @@
 
     // ---- slides -----------------------------------------------------------------------------
 
-    function slidePage(slide, aspect, paperClass) {
+    function slidePage(slide, aspect, deckOrientation, paperClass) {
       const page = document.createElement("div");
+      const orientation = slide.orientation === "portrait" ? "portrait" : deckOrientation;
       page.className = PAGE_CLASS + " " + paperClass;
+      page.dataset.orientation = orientation;
       const stage = document.createElement("div");
       stage.className = "slide-stage";
       stage.dataset.aspect = aspect;
-      stage.dataset.orientation = slide.orientation === "portrait" ? "portrait" : "landscape";
+      stage.dataset.orientation = orientation;
       stage.dataset.layout = slide.layout || "titleAndContent";
       const titleZone = document.createElement("div");
       titleZone.className = "slide-title-zone";
@@ -382,7 +384,7 @@
       stage.appendChild(titleZone);
       stage.appendChild(lowerZone);
       if (Array.isArray(slide.elements) && slide.elements.length > 0) {
-        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, aspect, { forPrint: true });
+        const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, aspect, { forPrint: true, orientation });
         if (layer) stage.appendChild(layer);
       }
       page.appendChild(stage);
@@ -392,9 +394,11 @@
     function buildSlides(rules) {
       if (slideDeckState.length === 0) throw new Error(MSG_EMPTY);
       const aspect = Object.hasOwn(SLIDE_PAPER_MM, slideDeckState[0].aspect) ? slideDeckState[0].aspect : DEFAULT_ASPECT;
-      const [widthMm, heightMm] = SLIDE_PAPER_MM[aspect];
+      const deckOrientation = slideDeckState[0].orientation === "portrait" ? "portrait" : "landscape";
+      const [baseW, baseH] = SLIDE_PAPER_MM[aspect];
+      const [widthMm, heightMm] = deckOrientation === "portrait" ? [baseH, baseW] : [baseW, baseH];
       const paperClass = rules.classFor(widthMm, heightMm);
-      return slideDeckState.map((slide) => slidePage(slide, aspect, paperClass));
+      return slideDeckState.map((slide) => slidePage(slide, aspect, deckOrientation, paperClass));
     }
 
     const BUILDERS = {
