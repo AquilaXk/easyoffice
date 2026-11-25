@@ -116,5 +116,79 @@
     return { fit, release };
   }
 
-  host.__EASYOFFICE_SHEET_EDIT_BOX__ = { GAP, BORDER, fitEditBox, createEditBox };
+  function setCaretRange(document, hostEnv, td, from, to = from) {
+    const selObj = typeof hostEnv.getSelection === "function" ? hostEnv.getSelection() : null;
+    if (!selObj || typeof document.createRange !== "function") return;
+    const range = document.createRange();
+    const node = td.firstChild;
+    if (node && node.nodeType === 3) {
+      const len = (node.textContent || "").length;
+      const a = Math.max(0, Math.min(from, len));
+      const b = Math.max(a, Math.min(to, len));
+      range.setStart(node, a);
+      range.setEnd(node, b);
+    } else if (typeof range.selectNodeContents === "function") {
+      range.selectNodeContents(td);
+      range.collapse?.(false);
+    } else {
+      const end = (td.childNodes || []).length;
+      range.setStart(td, end);
+      range.setEnd(td, end);
+    }
+    selObj.removeAllRanges?.();
+    selObj.addRange?.(range);
+  }
+
+  function placeCaret(document, hostEnv, td) {
+    const selObj = typeof hostEnv.getSelection === "function" ? hostEnv.getSelection() : null;
+    if (!selObj || typeof document.createRange !== "function") return;
+    const range = document.createRange();
+    if (typeof range.selectNodeContents === "function") {
+      range.selectNodeContents(td);
+      range.collapse?.(false);
+      selObj.removeAllRanges?.();
+      selObj.addRange?.(range);
+    } else {
+      setCaretRange(document, hostEnv, td, (td.textContent || "").length);
+    }
+  }
+
+  function textOffsetIn(root, target, offset) {
+    if (target === root) {
+      let acc = 0;
+      const limit = Math.min(offset, (root.childNodes || []).length);
+      for (let i = 0; i < limit; i += 1) acc += (root.childNodes[i].textContent || "").length;
+      return acc;
+    }
+    let acc = 0;
+    let found = false;
+    const walkNodes = (el) => {
+      for (const child of el.childNodes || []) {
+        if (found) return;
+        if (child === target) {
+          found = true;
+          if (child.nodeType === 3) {
+            acc += Math.max(0, Math.min(offset, (child.textContent || "").length));
+          } else {
+            const limit = Math.min(offset, (child.childNodes || []).length);
+            for (let i = 0; i < limit; i += 1) acc += (child.childNodes[i].textContent || "").length;
+          }
+          return;
+        }
+        if (child.nodeType === 3) acc += (child.textContent || "").length;
+        else walkNodes(child);
+      }
+    };
+    walkNodes(root);
+    return found ? acc : null;
+  }
+
+  function spliceTextAt(raw, start, end, ch) {
+    const s = String(raw || "");
+    const a = Math.max(0, Math.min(start ?? s.length, s.length));
+    const b = Math.max(a, Math.min(end ?? a, s.length));
+    return { text: s.slice(0, a) + ch + s.slice(b), caret: a + ch.length };
+  }
+
+  host.__EASYOFFICE_SHEET_EDIT_BOX__ = { GAP, BORDER, fitEditBox, createEditBox, setCaretRange, placeCaret, textOffsetIn, spliceTextAt };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

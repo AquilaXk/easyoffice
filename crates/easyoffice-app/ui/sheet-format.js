@@ -101,6 +101,8 @@
     if (look.H_ALIGNS.includes(style.textAlign)) out.ha = style.textAlign;
     if (look.V_ALIGNS.includes(style.verticalAlign)) out.va = style.verticalAlign;
     if (style.wrap) out.wrap = true;
+    const rot = look.normRot?.(style.textRotation) || 0;
+    if (rot) out.rot = rot;
     const border = look.freezeBorder(style.border);
     if (border) out.bd = { ...border };
     if (style.unlocked) out.unlocked = true;
@@ -138,6 +140,7 @@
     if (look.H_ALIGNS.includes(payload.ha)) style.textAlign = payload.ha;
     if (payload.va === "top" || payload.va === "middle") style.verticalAlign = payload.va;
     if (payload.wrap === true) style.wrap = true;
+    if (Number.isInteger(payload.rot) && payload.rot >= -90 && payload.rot <= 90 && payload.rot !== 0) style.textRotation = payload.rot;
     const border = look.freezeBorder(payload.bd);
     if (border) style.border = border;
     if (payload.unlocked === true) style.unlocked = true;
@@ -176,6 +179,7 @@
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
     mutate(style);
     if (!style.fontFamily) delete style.fontFamily;
+    if (!style.textRotation) delete style.textRotation;
     if (STYLE_KEYS.some((k) => style[k])) {
       entry.style = internStyle(style);
       map[ref] = entry;
@@ -198,6 +202,7 @@
       getActiveSheetName,
       getActiveModule,
       getRange,
+      getRanges,
       getSelection,
       getExtent,
       snapshotDomSheetCells,
@@ -209,6 +214,7 @@
       sheetHistory,
     } = api;
     const numfmt = host.__EASYOFFICE_SHEET_NUMFMT__;
+    const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     let stateTimer = null;
 
     // A protected sheet refuses a change of format unless it allows 셀 서식; the lock state of a cell changes only on
@@ -219,24 +225,50 @@
       return !(lock ? guard.guardUnprotected(getActiveSheetName()) : guard.guardAction(getActiveSheetName(), "formatCells"));
     }
 
-    // The selected range, clamped to the used extent when it is too large to materialize.
-    function effectiveRange() {
-      const rg = getRange();
+    function clampOneRange(rg, ext) {
       const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
       if (area <= MAX_FORMAT_CELLS) return { ...rg, clamped: false };
-      const ext = getExtent();
       const r2 = Math.max(rg.r1, Math.min(rg.r2, ext.rows || 1));
       const c2 = Math.max(rg.c1, Math.min(rg.c2, ext.cols || 1));
       return { r1: rg.r1, r2, c1: rg.c1, c2, clamped: true };
     }
 
-    function forEachRef(rg, cb) {
-      for (let r = rg.r1; r <= rg.r2; r += 1) {
-        for (let c = rg.c1; c <= rg.c2; c += 1) cb(gridUtils.refOf(r, c));
-      }
+    // The selected range, clamped to the used extent when it is too large to materialize.
+    function effectiveRange() {
+      return clampOneRange(getRange(), getExtent());
     }
 
-    function computeRangeMasks(map, rg) {
+    function effectiveRanges() {
+      const list = typeof getRanges === "function" ? getRanges() : [getRange()];
+      const ext = getExtent();
+      return list.map((rg) => clampOneRange(rg, ext));
+    }
+
+    function forEachRef(rangesOrRg, cb) {
+      const list = Array.isArray(rangesOrRg) ? rangesOrRg : [rangesOrRg];
+      if (list.length <= 1) {
+        const rg = list[0];
+        for (let r = rg.r1; r <= rg.r2; r += 1) {
+          for (let c = rg.c1; c <= rg.c2; c += 1) cb(gridUtils.refOf(r, c));
+        }
+        return;
+      }
+      multiApi.forEachUniqueCoord(list, gridUtils.packCoord, (r, c) => cb(gridUtils.refOf(r, c)), MAX_FORMAT_CELLS);
+    }
+
+    function computeRangeMasks(map, rangesOrRg) {
+      const list = Array.isArray(rangesOrRg) ? rangesOrRg : [rangesOrRg];
+      if (list.length > 1) {
+        let orMask = 0;
+        let andMask = 15;
+        multiApi.forEachUniqueCoord(list, gridUtils.packCoord, (r, c) => {
+          const mask = entryMask(map[gridUtils.refOf(r, c)]);
+          orMask |= mask;
+          andMask &= mask;
+        }, MAX_FORMAT_CELLS);
+        return { orMask, andMask };
+      }
+      const rg = list[0];
       const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
       let orMask = 0;
       let andMask = 15;
@@ -294,7 +326,7 @@
       const curSheet = getActiveSheetName();
       const map = snapshotDomSheetCells();
       sheetDataStore[curSheet] = map;
-      const rg = effectiveRange();
+      const ranges = effectiveRanges();
       let mutate;
       if (kind === "fontSize") {
         const size = value || nextSize(map);
@@ -302,14 +334,18 @@
           st.fontSize = size;
         };
       } else {
-        const on = rangeFlagState(map, rg, kind) !== "true";
+        const on = rangeFlagState(map, ranges, kind) !== "true";
         mutate = (st) => writeFlag(st, kind, on);
       }
-      forEachRef(rg, (ref) => patchCell(map, ref, mutate));
+      let touched = 0;
+      forEachRef(ranges, (ref) => {
+        patchCell(map, ref, mutate);
+        touched += 1;
+      });
       refreshWindowFromModel();
       saveActiveSheetCellsToWorkbook();
       syncToolbar();
-      return (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+      return touched;
     }
 
     // Number format of every cell of the selection (PD-193): `resolve(cells)` gets
@@ -319,9 +355,9 @@
       const curSheet = getActiveSheetName();
       const map = snapshotDomSheetCells();
       sheetDataStore[curSheet] = map;
-      const rg = effectiveRange();
+      const ranges = effectiveRanges();
       const cells = [];
-      forEachRef(rg, (ref) => {
+      forEachRef(ranges, (ref) => {
         const e = map[ref];
         cells.push({ ref, code: e?.style?.numFmt || "", raw: e ? String(e.value ?? "") : "" });
       });
@@ -372,15 +408,16 @@
         await drainInFlightSheetWork();
         if (formatBlocked(lock)) return 0;
         // A border also sets the edge the cell next to the range shares, and the locks of a row or column are layout.
-        const rg = effectiveRange();
+        const ranges = effectiveRanges();
+        const box = multiApi ? multiApi.boundingBox(ranges) : ranges[0];
         const change = sheetHistory.begin({
-          range: { r1: Math.max(1, rg.r1 - 1), c1: Math.max(1, rg.c1 - 1), r2: rg.r2 + 1, c2: rg.c2 + 1 },
+          range: { r1: Math.max(1, box.r1 - 1), c1: Math.max(1, box.c1 - 1), r2: box.r2 + 1, c2: box.c2 + 1 },
           parts: ["sheetLayout"],
         });
         const curSheet = getActiveSheetName();
         const map = snapshotDomSheetCells();
         sheetDataStore[curSheet] = map;
-        const result = edit({ map, rg, patch: (ref, mutate) => patchCell(map, ref, mutate) });
+        const result = edit({ map, rg: ranges[0], ranges, patch: (ref, mutate) => patchCell(map, ref, mutate) });
         sheetHistory.commit(change);
         refreshWindowFromModel();
         saveActiveSheetCellsToWorkbook();
@@ -427,8 +464,8 @@
     function syncToolbar() {
       if (getActiveModule() !== "SHEET") return;
       const map = sheetDataStore[getActiveSheetName()] || {};
-      const rg = getRange();
-      const { orMask, andMask } = computeRangeMasks(map, rg);
+      const ranges = typeof getRanges === "function" ? getRanges() : [getRange()];
+      const { orMask, andMask } = computeRangeMasks(map, ranges);
       for (let i = 0; i < FLAG_KINDS.length; i += 1) {
         const kind = FLAG_KINDS[i];
         setPressed(document.getElementById(BUTTON_IDS[kind]), flagStateFromMasks(orMask, andMask, kind));
@@ -468,10 +505,11 @@
           });
           if (!faces.has(clean.toLowerCase()) && faces.size >= MAX_FONTS) return { refused: true };
         }
-        const rg = effectiveRange();
-        const change = sheetHistory.begin({ range: rg });
+        const ranges = effectiveRanges();
+        const box = multiApi ? multiApi.boundingBox(ranges) : ranges[0];
+        const change = sheetHistory.begin({ range: box });
         let count = 0;
-        forEachRef(rg, (ref) => {
+        forEachRef(ranges, (ref) => {
           const cur = map[ref]?.style?.fontFamily || "";
           if (cur === clean) return;
           patchCell(map, ref, (st) => {
@@ -489,7 +527,7 @@
       });
     }
 
-    return { applyCommand, formatRange, formatNumbers, setFontFamily, editStyles, effectiveRange, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
+    return { applyCommand, formatRange, formatNumbers, setFontFamily, editStyles, effectiveRange, effectiveRanges, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, typeof getRanges === "function" ? getRanges() : [getRange()], kind) };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;

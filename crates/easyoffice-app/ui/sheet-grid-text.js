@@ -139,6 +139,7 @@
     let shown = formatted ? formatted.t : textTyped ? raw : formatGeneral(raw);
     if (formatted && !textTyped && isNumericText(raw)) shown = fitToCell(td, shown);
     if (td.textContent !== shown) td.textContent = shown;
+    if (td.dataset?.rot) host.__EASYOFFICE_SHEET_LOOK__?.syncRotSpan?.(td);
     if (shown === raw) {
       if (td.dataset.raw !== undefined) {
         delete td.dataset.raw;

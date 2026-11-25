@@ -27,35 +27,19 @@
     td.classList.add("editing");
   }
 
-  // Sheet editing interaction: selection model, ready/edit modes, keyboard, mouse, IME,
-  // clipboard events and the selection aggregate.
-  //
-  // Modes of the focused cell:
-  //   ready  - the cell is selected; printable keys start an "enter" edit that REPLACES the
-  //            content, F2 / double-click start an "edit" edit that keeps the content.
-  //   enter  - started by typing. Arrow keys commit and move (spreadsheet "Enter mode").
-  //   edit   - started by F2 / double-click. Left/Right move the caret; Up/Down commit and move.
-  // Enter commits and moves down (Shift+Enter up), Tab commits and moves right (Shift+Tab left),
-  // Esc cancels and restores. Keys pressed while an IME composes are never interpreted.
-  // Ctrl+Arrow, Enter and Tab inside a range, Home, End and the page keys are the rules of sheet-nav.js (PD-280).
-
+  // Sheet editing interaction: selection model, ready/enter/edit modes, keyboard, mouse, IME, clipboard.
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
-    // Sheet protection (PD-216); absent in pages that do not load it.
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const nav = host.__EASYOFFICE_SHEET_NAV__;
-    // `axis`: "row" or "col" while a whole row or column header is selected, else null.
-    // `span`: the range Enter and Tab walk the active cell through (it is not the corners ar..cr then), else null.
-    // `tabFrom`: the cell the current row of Tabs started from, which the Enter after it returns to the column of.
-    // `whole`: the selection is the whole sheet (Ctrl+A), which is as far as the sheet's data goes here; the row height of it is the
-    // sheet's default (PD-286).
-    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, whole: false, span: null, tabFrom: null };
-    // A selection that is set (not walked) drops the walk and the Tab row.
-    const resetNav = (axis) => {
+    const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
+    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null, whole: false, span: null, tabFrom: null, extraRanges: [] };
+    const resetNav = (axis, keepExtras = false) => {
       sel.axis = axis;
       sel.whole = false;
       sel.span = null;
       sel.tabFrom = null;
+      if (!keepExtras) sel.extraRanges = [];
     };
     const bound = new WeakSet();
     let delegatesBound = false;
@@ -153,12 +137,24 @@
 
     function getRange() {
       if (sel.span) return { ...sel.span };
-      return {
-        r1: Math.min(sel.ar, sel.cr),
-        r2: Math.max(sel.ar, sel.cr),
-        c1: Math.min(sel.ac, sel.cc),
-        c2: Math.max(sel.ac, sel.cc),
-      };
+      return { r1: Math.min(sel.ar, sel.cr), r2: Math.max(sel.ar, sel.cr), c1: Math.min(sel.ac, sel.cc), c2: Math.max(sel.ac, sel.cc) };
+    }
+    const getRanges = () => (multiApi ? multiApi.rangesOf(getRange(), sel.extraRanges) : [getRange()]);
+    function pushRange() {
+      if (!multiApi) return;
+      const cur = getRange();
+      if (sel.extraRanges.some((r) => multiApi.sameRect(r, cur))) return;
+      if (sel.extraRanges.length >= multiApi.MAX_MULTI_RANGES) {
+        feedback("다중 선택 범위는 최대 " + multiApi.MAX_MULTI_RANGES + "개까지");
+        return;
+      }
+      sel.extraRanges.push(cur);
+    }
+    function clearExtras() {
+      if (sel.extraRanges.length > 0) {
+        sel.extraRanges = [];
+        refreshChrome();
+      }
     }
 
     function gridTdOf(el) {
@@ -166,9 +162,8 @@
       return td && document.getElementById("pane-sheet")?.contains(td) ? td : null;
     }
 
-    // The cell classes, name box, formula bar text and status aggregate that follow the selection (`sheet-selection-chrome.js`).
     const { paintSelection, refreshChrome } = host.__EASYOFFICE_CREATE_SHEET_SELECTION_CHROME__({
-      document, api, grid, sel, protectApi, point, fill, getRange, stateOf, tdAt,
+      document, api, grid, sel, protectApi, point, fill, getRange, getRanges, stateOf, tdAt,
     });
 
     // Public selection refresh (focus, outline links, restore, recalculation).
@@ -205,16 +200,15 @@
       return !protectApi || protectApi.canSelect(api.getSheetName(), r, c, api.getEntry(grid.refOf(r, c))?.style);
     }
 
-    function select(row, col, extend) {
+    function select(row, col, extend, keepExtras = false) {
       const targetRow = clamp(row, 1, grid.MAX_ROWS);
       const targetCol = clamp(col, 1, grid.MAX_COLS);
-      // A click or a move that lands inside a merged range selects its anchor cell.
       const merged = extend ? null : grid.mergeAt?.(targetRow, targetCol);
       const r = merged ? merged.r1 : targetRow;
       const c = merged ? merged.c1 : targetCol;
       if (!extend && !selectable(r, c)) return;
       commitIfEditing();
-      resetNav(null);
+      resetNav(null, keepExtras || extend);
       if (extend) {
         sel.cr = r;
         sel.cc = c;
@@ -222,7 +216,6 @@
         sel.ar = sel.cr = r;
         sel.ac = sel.cc = c;
       }
-      // If a merged range crosses a freeze line, keep the target's unfrozen axis so scrolling resets to the freeze edge.
       const frozen = merged && grid.frozenCounts ? grid.frozenCounts() : null;
       const vr = frozen && r <= frozen.rows && targetRow > frozen.rows ? targetRow : r;
       const vc = frozen && c <= frozen.cols && targetCol > frozen.cols ? targetCol : c;
@@ -265,7 +258,7 @@
     }
 
     // Selects whole rows or columns (a click on a header; `extend` grows the selection to `index`).
-    function selectAxis(axis, index, extend) {
+    function selectAxis(axis, index, extend, keepExtras = false) {
       commitIfEditing();
       const last = axis === "col" ? grid.MAX_COLS : grid.MAX_ROWS;
       const at = clamp(index, 1, last);
@@ -280,7 +273,25 @@
         sel.ac = 1;
         sel.cc = grid.MAX_COLS;
       }
-      resetNav(axis);
+      resetNav(axis, keepExtras || extend);
+      refreshChrome();
+    }
+
+    function selectAxisSpan(axis, first, last) {
+      commitIfEditing();
+      if (axis === "col") {
+        sel.ac = clamp(first, 1, grid.MAX_COLS);
+        sel.cc = clamp(last, 1, grid.MAX_COLS);
+        sel.ar = 1;
+        sel.cr = grid.MAX_ROWS;
+      } else {
+        sel.ar = clamp(first, 1, grid.MAX_ROWS);
+        sel.cr = clamp(last, 1, grid.MAX_ROWS);
+        sel.ac = 1;
+        sel.cc = grid.MAX_COLS;
+      }
+      resetNav(axis, false);
+      focusAnchor();
       refreshChrome();
     }
 
@@ -373,74 +384,12 @@
     }
 
     // ---- edit modes ------------------------------------------------------------------------
-    function setCaretRange(td, from, to = from) {
-      const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
-      if (!selObj || typeof document.createRange !== "function") return;
-      const range = document.createRange();
-      const node = td.firstChild;
-      if (node && node.nodeType === 3) {
-        const len = (node.textContent || "").length;
-        const a = Math.max(0, Math.min(from, len));
-        const b = Math.max(a, Math.min(to, len));
-        range.setStart(node, a);
-        range.setEnd(node, b);
-      } else if (typeof range.selectNodeContents === "function") {
-        range.selectNodeContents(td);
-        range.collapse?.(false);
-      } else {
-        const end = (td.childNodes || []).length;
-        range.setStart(td, end);
-        range.setEnd(td, end);
-      }
-      selObj.removeAllRanges?.();
-      selObj.addRange?.(range);
-    }
-
-    const setCaretAtOffset = (td, offset) => setCaretRange(td, offset, offset);
-
-    function placeCaret(td) {
-      const selObj = typeof host.getSelection === "function" ? host.getSelection() : null;
-      if (!selObj || typeof document.createRange !== "function") return;
-      const range = document.createRange();
-      if (typeof range.selectNodeContents === "function") {
-        range.selectNodeContents(td);
-        range.collapse?.(false);
-        selObj.removeAllRanges?.();
-        selObj.addRange?.(range);
-      } else {
-        setCaretAtOffset(td, (td.textContent || "").length);
-      }
-    }
-
-    function textOffsetIn(root, target, offset) {
-      if (target === root) {
-        let acc = 0;
-        const limit = Math.min(offset, (root.childNodes || []).length);
-        for (let i = 0; i < limit; i += 1) acc += (root.childNodes[i].textContent || "").length;
-        return acc;
-      }
-      let acc = 0;
-      let found = false;
-      const walkNodes = (el) => {
-        for (const child of el.childNodes || []) {
-          if (found) return;
-          if (child === target) {
-            found = true;
-            if (child.nodeType === 3) {
-              acc += Math.max(0, Math.min(offset, (child.textContent || "").length));
-            } else {
-              const limit = Math.min(offset, (child.childNodes || []).length);
-              for (let i = 0; i < limit; i += 1) acc += (child.childNodes[i].textContent || "").length;
-            }
-            return;
-          }
-          if (child.nodeType === 3) acc += (child.textContent || "").length;
-          else walkNodes(child);
-        }
-      };
-      walkNodes(root);
-      return found ? acc : null;
-    }
+    const boxApi = host.__EASYOFFICE_SHEET_EDIT_BOX__;
+    const setCaretRange = (td, from, to = from) => boxApi.setCaretRange(document, host, td, from, to);
+    const setCaretAtOffset = (td, offset) => boxApi.setCaretRange(document, host, td, offset, offset);
+    const placeCaret = (td) => boxApi.placeCaret(document, host, td);
+    const textOffsetIn = (root, target, offset) => boxApi.textOffsetIn(root, target, offset);
+    const spliceTextAt = (raw, start, end, ch) => boxApi.spliceTextAt(raw, start, end, ch);
 
     function insertNewlineAtCaret(td) {
       const raw = td.textContent || "";
@@ -669,6 +618,24 @@
       moveBy(dr, dc, { extend: !editing && ev.shiftKey, jump: !editing && mod });
     }
 
+    const shortcuts = host.__EASYOFFICE_CREATE_SHEET_SHORTCUTS__?.({
+      document,
+      api,
+      grid,
+      sel,
+      getRange,
+      getRanges,
+      selectAxisSpan,
+      focusAnchor,
+      discardInlineEdit: (td) => cancelEdit(td),
+      clip,
+      visibleEntryOf,
+      openFormatDialog: () => document.querySelector('#menu-bar .md-item[data-sheet-numfmt="dialog"]')?.click(),
+      runStructureAct: (act) => api.runStructure?.(act) ?? document.querySelector('#menu-bar .md-item[data-sheet-act="' + act + '"]')?.click(),
+      triggerAutoSum: () => document.querySelector('#icon-toolbar [data-studio-cmd="data-autosum"], #menu-bar .md-item[data-studio-menu-cmd="data-autosum"]')?.click(),
+      feedback,
+    });
+
     function handleEnterTab(ev, editing, targetTd) {
       if (editing && ev.key === "Enter") {
         if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
@@ -678,6 +645,7 @@
           return;
         }
         if ((ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+          if (shortcuts?.handleKey(ev, true, targetTd)) return;
           ev.preventDefault();
           commitIfEditing(true);
           return;
@@ -754,6 +722,7 @@
         return;
       }
       if (handleNavKey(ev, editing)) return;
+      if (shortcuts?.handleKey(ev, editing, td)) return;
       if (mod && !ev.shiftKey && !ev.altKey && ev.key === "5") {
         ev.preventDefault();
         api.onFormatKey?.("strike");
@@ -778,7 +747,7 @@
       }
       if (ev.key === "Delete" || ev.key === "Backspace") {
         ev.preventDefault();
-        void clip.clearRange(getRange()).catch(() => {});
+        void (clip.clearRanges ? clip.clearRanges(getRanges()) : clip.clearRange(getRange())).catch(() => {});
         return;
       }
       if (isPrintable(ev)) startTyping(ev, td);
@@ -788,7 +757,7 @@
       if (editing) {
         ev.preventDefault();
         cancelEdit(td);
-      } else if (sel.ar !== sel.cr || sel.ac !== sel.cc) {
+      } else if (sel.ar !== sel.cr || sel.ac !== sel.cc || sel.extraRanges.length > 0) {
         select(sel.ar, sel.ac, false);
       }
     }
@@ -834,21 +803,26 @@
       if (td && !isEditing(stateOf(td))) startEdit(td, "enter", true);
     }
 
-    // ---- mouse -----------------------------------------------------------------------------
-    // Presses, drags, column resizing and the double click (`sheet-mouse.js`).
     const mouse = host.__EASYOFFICE_CREATE_SHEET_MOUSE__({
-      document, api, grid, sel, protectApi, point, fill, viewport, gridTdOf, stateOf, select, selectAxis, commitIfEditing, startEdit, refreshChrome,
+      document, api, grid, sel, protectApi, point, fill, viewport, gridTdOf, stateOf, select, selectAxis, commitIfEditing, startEdit, refreshChrome, pushRange,
     });
 
-    // ---- clipboard events ------------------------------------------------------------------
     function onClipboardEvent(ev) {
       const td = gridTdOf(ev.target);
       if (td && isEditing(stateOf(td))) {
         if (ev.type === "paste") insertPlainText(ev);
         return;
       }
-      if (ev.type === "paste") void clip.onPaste(ev, getRange()).catch(() => {});
-      else clip.onCopy(ev, getRange(), ev.type === "cut");
+      if (ev.type === "paste") {
+        void clip.onPaste(ev, getRange()).catch(() => {});
+        return;
+      }
+      if (getRanges().length > 1) {
+        ev.preventDefault();
+        feedback("이 명령은 여러 개의 선택 영역에서 실행할 수 없습니다.");
+        return;
+      }
+      clip.onCopy(ev, getRange(), ev.type === "cut");
     }
 
     function insertPlainText(ev) {
@@ -861,6 +835,10 @@
     }
 
     function runClipboardCommand(cmd) {
+      if ((cmd === "clip-copy" || cmd === "clip-cut") && getRanges().length > 1) {
+        feedback("이 명령은 여러 개의 선택 영역에서 실행할 수 없습니다.");
+        return Promise.resolve(false);
+      }
       return clip.runCommand(cmd, getRange());
     }
 
@@ -875,10 +853,6 @@
       });
     }
 
-    function spliceTextAt(raw, start, end, ch) {
-      const s = String(raw || ""), a = Math.max(0, Math.min(start ?? s.length, s.length)), b = Math.max(a, Math.min(end ?? a, s.length));
-      return { text: s.slice(0, a) + ch + s.slice(b), caret: a + ch.length };
-    }
     function captureSymbolTarget() {
       const ae = document.activeElement, bar = document.getElementById("formula-input");
       if (bar && ae === bar) return { kind: "formulaBar", start: bar.selectionStart ?? bar.value.length, end: bar.selectionEnd ?? bar.value.length };
@@ -959,36 +933,15 @@
     }
 
     return {
-      bindTd,
-      bindSheetCellEvents,
-      updateSelection,
-      refreshChrome,
-      paintSelection,
-      focusAnchor,
-      commitIfEditing,
-      endEdit,
-      getRange,
-      selectAxis,
-      selectRange,
-      restoreSelection,
-      runClipboardCommand,
-      shiftFormula: clip.shiftFormula,
-      getSelection: () => ({ ...sel }),
-      handleBarKey: point.barKey,
-      holdsTabPress: point.holdsTabPress,
-      detachForSwitch: point.detach,
-      afterSheetSwitch: point.afterSwitch,
-      insertFormulaName: point.insertName,
-      hasFormulaEditSurface: point.hasInsertSurface,
-      holdsFormulaMenu: point.holdsFormulaMenu,
-      isEditingFormula: point.isEditingFormula,
-      originSheet: point.originSheet,
-      beginFormulaInsertHold: point.beginInsertHold,
-      endFormulaInsertHold: point.endInsertHold,
-      setUiHold: (on) => { uiHoldBlur = Boolean(on); },
-      captureSymbolTarget,
-      insertSymbolAtEditingTarget,
-      restoreSymbolFocus,
+      bindTd, bindSheetCellEvents, updateSelection, refreshChrome, paintSelection, focusAnchor, commitIfEditing, endEdit,
+      getRange, getRanges, clearExtras, clearSelectionContents: () => (clip.clearRanges ? clip.clearRanges(getRanges()) : clip.clearRange(getRange())),
+      openPasteSpecial: () => pasteUi.open(),
+      selectAxis, selectRange, restoreSelection, runClipboardCommand, shiftFormula: clip.shiftFormula, getSelection: () => ({ ...sel }),
+      handleBarKey: (ev) => { if (!shortcuts?.handleBarKey(ev)) point.barKey(ev); },
+      holdsTabPress: point.holdsTabPress, detachForSwitch: point.detach, afterSheetSwitch: point.afterSwitch, insertFormulaName: point.insertName,
+      hasFormulaEditSurface: point.hasInsertSurface, holdsFormulaMenu: point.holdsFormulaMenu, isEditingFormula: point.isEditingFormula,
+      originSheet: point.originSheet, beginFormulaInsertHold: point.beginInsertHold, endFormulaInsertHold: point.endInsertHold,
+      setUiHold: (on) => { uiHoldBlur = Boolean(on); }, captureSymbolTarget, insertSymbolAtEditingTarget, restoreSymbolFocus,
     };
   }
 

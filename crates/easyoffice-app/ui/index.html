@@ -318,7 +318,13 @@
                   <button type="button" class="md-item" role="menuitem" data-sheet-cf="manage" tabindex="-1"><span class="md-label">규칙 관리…</span></button>
                 </div>
               </div>
-              <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
+              <div class="md-sep" data-kinds="SHEET"></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="row-height" role="menuitem" tabindex="-1"><span class="md-label">행 높이…</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="row-autofit" role="menuitem" tabindex="-1"><span class="md-label">행 높이 자동 맞춤</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="col-width" role="menuitem" tabindex="-1"><span class="md-label">열 너비…</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="col-autofit" role="menuitem" tabindex="-1"><span class="md-label">열 너비 자동 맞춤</span></div>
+              <div class="md-sep" data-kinds="SHEET"></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span><span class="md-shortcut">Ctrl+1</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="page" data-kinds="DOC HWP PDF">
@@ -452,7 +458,7 @@
               <div class="md-item" data-sheet-act="sort-dialog" role="menuitem" tabindex="-1"><span class="md-label">정렬…</span></div>
               <div class="md-item" data-studio-menu-cmd="data-validation" role="menuitem" tabindex="-1"><span class="md-label">데이터 유효성 검사</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span></div>
+              <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span><span class="md-shortcut">Ctrl+Shift+L</span></div>
               <div class="md-item" data-sheet-act="filter-reapply" role="menuitem" tabindex="-1"><span class="md-label">다시 적용</span></div>
               <div class="md-item" data-sheet-act="filter-clear" role="menuitem" tabindex="-1"><span class="md-label">필터 지우기</span></div>
               <div class="md-sep"></div>
@@ -461,6 +467,9 @@
               <div class="md-item" data-sheet-act="hide-detail" role="menuitem" tabindex="-1"><span class="md-label">세부 정보 숨기기</span></div>
               <div class="md-item" data-sheet-act="show-detail" role="menuitem" tabindex="-1"><span class="md-label">세부 정보 표시</span></div>
               <div class="md-item" data-sheet-act="outline-clear" role="menuitem" tabindex="-1"><span class="md-label">윤곽선 지우기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="dedupe-dialog" role="menuitem" tabindex="-1"><span class="md-label">중복된 항목 제거…</span></div>
+              <div class="md-item" data-sheet-act="text-to-columns" role="menuitem" tabindex="-1"><span class="md-label">텍스트 나누기…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-pivot" role="menuitem" tabindex="-1"><span class="md-label">피벗 테이블…</span></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-condfmt" role="menuitem" tabindex="-1"><span class="md-label">조건부 서식…</span></div>
@@ -621,6 +630,10 @@
             <input id="sheet-font-color-input" type="color" value="#ff0000" aria-label="글꼴 색 선택" />
             <div id="sheet-font-color-palette" class="sb-hl-palette" hidden></div>
           </div>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button id="btn-sheet-autosum" type="button" class="tb-btn" data-studio-cmd="data-autosum" title="자동 합계 (Alt+=)" aria-label="자동 합계"><span class="tb-icon-svg" data-icon="autosum" aria-hidden="true"></span><span class="tb-label">자동<br/>합계</span></button>
         </div>
       </div>
 
@@ -1902,14 +1915,17 @@
           <div class="dialog-row" data-numfmt-field="list" hidden><label class="dialog-label" for="sheet-numfmt-list-select">형식</label><select id="sheet-numfmt-list-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-code">서식 코드</label><input id="sheet-numfmt-code" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
           <div class="dialog-row"><span class="dialog-label">표본</span><output id="sheet-numfmt-sample" class="sheet-numfmt-sample"></output></div>
-          <p id="sheet-numfmt-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-align" role="tabpanel" aria-labelledby="sheet-fmt-tab-align" data-fmt-pane="align" hidden>
           <div class="dialog-row"><label class="dialog-label" for="sheet-align-h-select">가로</label><select id="sheet-align-h-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-align-v-select">세로</label><select id="sheet-align-v-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-wrap" type="checkbox" /> 텍스트 줄 바꿈</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-merge" type="checkbox" /> 셀 병합</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-align-rotation">텍스트 방향</label><input id="sheet-align-rotation" type="number" min="-90" max="90" step="1" class="dialog-input" /><span class="dialog-unit">°</span><div class="dialog-btn-group sheet-rot-presets" role="group" aria-label="방향 각도"><button type="button" data-rot-preset="0" aria-pressed="false">0°</button><button type="button" data-rot-preset="45" aria-pressed="false">45°</button><button type="button" data-rot-preset="90" aria-pressed="false">90°</button><button type="button" data-rot-preset="-45" aria-pressed="false">-45°</button><button type="button" data-rot-preset="-90" aria-pressed="false">-90°</button></div><output id="sheet-align-rotation-preview" class="sheet-rot-preview">가나다</output></div>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-font" role="tabpanel" aria-labelledby="sheet-fmt-tab-font" data-fmt-pane="font" hidden>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-font-family-select">글꼴</label><select id="sheet-font-family-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-font-size-select">크기</label><select id="sheet-font-size-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><span class="dialog-label">색</span><div id="sheet-fcolor-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-fcolor" type="color" value="#000000" aria-label="글꼴 색" /><div id="sheet-fcolor-palette" class="sb-hl-palette" hidden></div></div></div>
           <div class="dialog-row"><span class="dialog-label">미리 보기</span><output id="sheet-font-sample" class="sheet-color-sample">가나다 AaBb</output></div>
         </div>
@@ -1927,6 +1943,7 @@
           <div class="dialog-row"><span class="dialog-label">셀 보호</span><label class="dialog-checkbox"><input id="sheet-protect-cell-locked" type="checkbox" /> 잠금</label></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-cell-hidden" type="checkbox" /> 숨기기</label></div>
         </div>
+        <p id="sheet-numfmt-status" class="dialog-pdf-note" role="status"></p>
         <div class="dialog-footer">
           <button id="btn-sheet-numfmt-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
@@ -2240,12 +2257,61 @@
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-dedupe-dialog-title">중복된 항목 제거</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
+          <div id="sheet-dedupe-header-row" class="dialog-row" hidden><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-dedupe-header" type="checkbox" checked /> 내 데이터에 머리글 표시</label></div>
           <div class="dialog-row"><span class="dialog-label">열 선택</span><div class="dialog-btn-group"><button id="btn-sheet-dedupe-all" type="button" class="dialog-btn">모두 선택</button><button id="btn-sheet-dedupe-none" type="button" class="dialog-btn">선택 취소</button></div></div>
           <ul id="sheet-dedupe-columns" class="dialog-list sheet-check-list" aria-label="중복 항목 검사 열"></ul>
           <p id="sheet-dedupe-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-dedupe-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-size-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-size-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-size-dialog-title">행 높이</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label id="sheet-size-label" class="dialog-label" for="sheet-size-input">행 높이(pt)</label><input id="sheet-size-input" type="number" min="0" max="409" step="0.25" class="dialog-input" /></div>
+          <p id="sheet-size-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-size-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-cell-shift-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-cell-shift-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-cell-shift-dialog-title">삽입</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-shift-horiz" type="radio" name="sheet-cell-shift-kind" value="horiz" /> <span id="sheet-shift-horiz-label">오른쪽으로 셀 밀기</span></label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-shift-vert" type="radio" name="sheet-cell-shift-kind" value="vert" checked /> <span id="sheet-shift-vert-label">아래로 셀 밀기</span></label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-shift-row" type="radio" name="sheet-cell-shift-kind" value="row" /> <span>행 전체</span></label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-shift-col" type="radio" name="sheet-cell-shift-kind" value="col" /> <span>열 전체</span></label></div>
+          <p id="sheet-cell-shift-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-cell-shift-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-text-columns-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-tc-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-tc-dialog-title">텍스트 나누기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label">구분 기호</span><div class="sheet-tc-checks"><label class="dialog-checkbox"><input id="sheet-tc-tab" type="checkbox" checked /> 탭</label><label class="dialog-checkbox"><input id="sheet-tc-semicolon" type="checkbox" /> 세미콜론</label><label class="dialog-checkbox"><input id="sheet-tc-comma" type="checkbox" /> 쉼표</label><label class="dialog-checkbox"><input id="sheet-tc-space" type="checkbox" /> 공백</label><label class="dialog-checkbox"><input id="sheet-tc-other" type="checkbox" /> 기타</label><input id="sheet-tc-other-char" type="text" maxlength="1" class="dialog-input sheet-tc-other-input" aria-label="기타 구분 기호" disabled /></div></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-tc-collapse" type="checkbox" /> 연속된 구분 기호를 하나로 처리</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-tc-overwrite" type="checkbox" /> 대상 셀 덮어쓰기</label></div>
+          <div class="dialog-row sheet-tc-preview-row"><span class="dialog-label">데이터 미리 보기</span><div class="sheet-tc-preview"><table id="sheet-tc-preview-table" class="sheet-tc-preview-table"><thead></thead><tbody></tbody></table></div></div>
+          <p id="sheet-tc-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-tc-apply" type="button" class="dialog-btn dialog-btn-primary">마침</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -2767,6 +2833,11 @@
       <div class="md-item" data-sheet-act="hide" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">숨기기</span></div>
       <div class="md-item" data-sheet-act="unhide" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">숨기기 취소</span></div>
       <div class="md-sep" data-axis="row col"></div>
+      <div class="md-item" data-sheet-act="row-height" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 높이…</span></div>
+      <div class="md-item" data-sheet-act="row-autofit" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 높이 자동 맞춤</span></div>
+      <div class="md-item" data-sheet-act="col-width" data-axis="col" role="menuitem" tabindex="-1"><span class="md-label">열 너비…</span></div>
+      <div class="md-item" data-sheet-act="col-autofit" data-axis="col" role="menuitem" tabindex="-1"><span class="md-label">열 너비 자동 맞춤</span></div>
+      <div class="md-sep" data-axis="row col"></div>
       <div class="md-item" data-sheet-act="group" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">그룹</span></div>
       <div class="md-item" data-sheet-act="ungroup" data-axis="row col" role="menuitem" tabindex="-1"><span class="md-label">그룹 해제</span></div>
       <div class="md-item" data-sheet-act="link-edit" data-axis="link link-note" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 편집…</span></div>
@@ -2775,6 +2846,20 @@
       <div class="md-item" data-sheet-act="note-edit" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 편집</span></div>
       <div class="md-item" data-sheet-act="note-delete" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 삭제</span></div>
       <div class="md-item" data-sheet-act="note-toggle" data-axis="note link-note" role="menuitem" tabindex="-1"><span class="md-label">메모 표시/숨기기</span></div>
+    </div>
+    <div id="sheet-cell-menu" class="context-menu" role="menu" aria-label="셀 메뉴" hidden>
+      <div class="md-item" data-sheet-ctx="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span></div>
+      <div class="md-item" data-sheet-ctx="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span></div>
+      <div class="md-item" data-sheet-ctx="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙여넣기</span></div>
+      <div class="md-item" data-sheet-ctx="paste-special" role="menuitem" tabindex="-1"><span class="md-label">선택하여 붙여넣기…</span></div>
+      <div class="md-sep"></div>
+      <div class="md-item" data-sheet-ctx="cell-insert" role="menuitem" tabindex="-1"><span class="md-label">삽입…</span></div>
+      <div class="md-item" data-sheet-ctx="cell-delete" role="menuitem" tabindex="-1"><span class="md-label">삭제…</span></div>
+      <div class="md-item" data-sheet-ctx="clear-contents" role="menuitem" tabindex="-1"><span class="md-label">내용 지우기</span></div>
+      <div class="md-sep"></div>
+      <div class="md-item" data-sheet-ctx="cell-format" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
+      <div class="md-item" data-sheet-ctx="note-insert" role="menuitem" tabindex="-1"><span class="md-label">메모 삽입</span></div>
+      <div class="md-item" data-sheet-ctx="link-edit" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크…</span></div>
     </div>
     <div id="sheet-totals-menu" class="context-menu" role="menu" aria-label="요약 행 함수" hidden></div>
     <div id="sheet-tab-menu" class="context-menu" role="menu" aria-label="시트 탭 메뉴" hidden>
@@ -2915,6 +3000,8 @@
     <script src="./sheet-formula-point.js"></script>
     <script src="./sheet-point-ui.js"></script>
     <script src="./sheet-nav.js"></script>
+    <script src="./sheet-multi-range.js"></script>
+    <script src="./sheet-shortcuts.js"></script>
     <script src="./sheet-edit-box.js"></script>
     <script src="./sheet-selection-chrome.js"></script>
     <script src="./sheet-mouse.js"></script>
@@ -2953,6 +3040,9 @@
     <script src="./sheet-media-ui.js"></script>
     <script src="./sheet-note-ui.js"></script>
     <script src="./sheet-row-resize.js"></script>
+    <script src="./sheet-size-dialogs.js"></script>
+    <script src="./sheet-context-menu.js"></script>
+    <script src="./sheet-text-columns.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>

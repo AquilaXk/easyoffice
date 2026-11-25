@@ -9,7 +9,20 @@
 
   const H_OPTIONS = [["", "기본"], ["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]];
   const V_OPTIONS = [["top", "위쪽"], ["middle", "가운데"], ["bottom", "아래쪽"]];
+  const FONT_FAMILIES = [
+    ["", "기본 (맑은 고딕)"], ["맑은 고딕", "맑은 고딕"], ["함초롬돋움", "함초롬돋움"],
+    ["함초롬바탕", "함초롬바탕"], ["나눔고딕", "나눔고딕"], ["돋움", "돋움"], ["바탕", "바탕"],
+    ["Arial", "Arial"], ["Calibri", "Calibri"], ["Times New Roman", "Times New Roman"], ["Courier New", "Courier New"],
+  ];
+  const FONT_SIZES = ["", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48", "72"];
   const MIXED = [["mixed", "혼합"]];
+  function cssPxToPtStr(pxStr) {
+    const m = /^(\d+(?:\.\d+)?)px$/.exec(String(pxStr || "").trim());
+    if (!m) return "";
+    const pt = Number(m[1]) * 0.75;
+    const half = Math.round(pt * 2) / 2;
+    return String(Math.abs(pt - half) < 0.08 ? half : Math.round(pt * 10) / 10);
+  }
   // Position -> [plan kind, preview line [x1, y1, x2, y2] in a 120 x 72 box].
   const POSITIONS = {
     t: ["top", [8, 8, 112, 8]],
@@ -25,11 +38,15 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   function createSheetLookUi(deps) {
-    const { document, kit, ops, getRange } = deps;
+    const { document, kit, ops, getRange, getRanges } = deps;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
-    const { $, val, checked, setVal, setChecked, fillOptions, fireChange } = kit;
+    const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+    const { $, val, checked, setVal, setChecked, fillOptions, fireChange, note } = kit;
     let ready = false;
-    let loaded = { h: "", v: "bottom", wrap: "" };
+    let loaded = { h: "", v: "bottom", wrap: "", rot: "" };
+    let rotTouched = false;
+    let loadedMerge = "";
+    let loadedFont = { family: "", size: "" };
     let initial = {};
     let want = {};
     let line = "thin";
@@ -143,14 +160,89 @@
       drawPreview();
     }
 
-    function loadAlign(rg) {
-      const { textAlign: h, verticalAlign: v, wrap } = ops.states(rg);
-      loaded = { h, v: v === "" ? "bottom" : v, wrap };
+    function updateRotationPreview(degText) {
+      const n = Number(degText);
+      const valid = degText === "" || (/^-?\d+$/.test(degText) && n >= -90 && n <= 90);
+      const deg = valid && degText !== "" ? n : 0;
+      $("sheet-align-rotation-preview")?.style?.setProperty("--rot-preview", -deg + "deg");
+      for (const btn of document.querySelectorAll("#sheet-numfmt-dialog [data-rot-preset]")) {
+        const on = valid && degText !== "" && Number(btn.dataset.rotPreset) === deg;
+        btn.setAttribute("aria-pressed", String(on));
+      }
+    }
+
+    function updateFontSample() {
+      const sample = $("sheet-font-sample");
+      if (!sample) return;
+      const ff = val("sheet-font-family-select");
+      const fs = val("sheet-font-size-select");
+      const dfApi = host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
+      const cssFam = ff && ff !== "mixed" ? (dfApi?.quoteCssFont?.(ff) || ("'" + ff + "'")) : "";
+      const cssSize = fs && fs !== "mixed" ? fs + "pt" : "";
+      if (cssFam) sample.style.setProperty("--sample-font", cssFam);
+      else sample.style.removeProperty("--sample-font");
+      if (cssSize) sample.style.setProperty("--sample-size", cssSize);
+      else sample.style.removeProperty("--sample-size");
+    }
+
+    function mergeStateOf(ranges) {
+      const sheet = deps.getActiveSheetName?.() ?? "";
+      if (!layoutApi) return { state: "", canMerge: false };
+      let anyMulti = false;
+      let mergedCount = 0;
+      let partial = false;
+      for (const rg of ranges) {
+        if (rg.r2 > rg.r1 || rg.c2 > rg.c1) anyMulti = true;
+        const hits = layoutApi.mergesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
+        if (hits.length === 1 && hits[0].r1 === rg.r1 && hits[0].c1 === rg.c1 && hits[0].r2 === rg.r2 && hits[0].c2 === rg.c2) {
+          mergedCount += 1;
+        } else if (hits.length > 0) {
+          partial = true;
+        }
+      }
+      const canMerge = anyMulti || mergedCount > 0 || partial;
+      const state = partial ? "mixed" : mergedCount === ranges.length ? "1" : mergedCount > 0 ? "mixed" : "";
+      return { state, canMerge };
+    }
+
+    function loadAlign(ranges) {
+      const { textAlign: h, verticalAlign: v, wrap, textRotation } = ops.states(ranges);
+      loaded = { h, v: v === "" ? "bottom" : v, wrap, rot: textRotation || "" };
+      rotTouched = false;
       setOptions("sheet-align-h-select", h === "mixed" ? [...MIXED, ...H_OPTIONS] : H_OPTIONS, h);
       setOptions("sheet-align-v-select", v === "mixed" ? [...MIXED, ...V_OPTIONS] : V_OPTIONS, loaded.v);
       const box = $("sheet-align-wrap");
       if (box) box.indeterminate = wrap === "mixed";
       setChecked("sheet-align-wrap", wrap === "1");
+      const mInfo = mergeStateOf(ranges);
+      loadedMerge = mInfo.state;
+      const mBox = $("sheet-align-merge");
+      if (mBox) {
+        mBox.disabled = !mInfo.canMerge;
+        mBox.indeterminate = mInfo.state === "mixed";
+        mBox.checked = mInfo.state === "1";
+      }
+      const rotInput = $("sheet-align-rotation");
+      if (rotInput) {
+        rotInput.value = loaded.rot === "mixed" ? "" : loaded.rot;
+        rotInput.placeholder = loaded.rot === "mixed" ? "혼합" : "0";
+        updateRotationPreview(rotInput.value.trim());
+      }
+    }
+
+    function loadFont(ranges) {
+      const { fontFamily, fontSize } = ops.states(ranges);
+      const sizePt = fontSize === "mixed" ? "mixed" : cssPxToPtStr(fontSize);
+      loadedFont = { family: fontFamily || "", size: sizePt };
+      const famPairs = [...FONT_FAMILIES];
+      if (loadedFont.family && loadedFont.family !== "mixed" && !famPairs.some(([v]) => v === loadedFont.family)) {
+        famPairs.push([loadedFont.family, loadedFont.family]);
+      }
+      setOptions("sheet-font-family-select", loadedFont.family === "mixed" ? [...MIXED, ...famPairs] : famPairs, loadedFont.family);
+      const sizePairs = FONT_SIZES.map((s) => [s, s === "" ? "기본" : s]);
+      if (sizePt && sizePt !== "mixed" && !FONT_SIZES.includes(sizePt)) sizePairs.push([sizePt, sizePt]);
+      setOptions("sheet-font-size-select", sizePt === "mixed" ? [...MIXED, ...sizePairs] : sizePairs, sizePt);
+      updateFontSample();
     }
 
     // The 보호 pane: 잠금 and 숨기기 of the selection. A protected sheet shows them but does not change them.
@@ -200,11 +292,12 @@
     // `open(pane)`: loads the panes from the selection and shows `pane`.
     function open(pane) {
       ensureControls();
-      const rg = getRange();
-      loadColors(rg);
-      loadAlign(rg);
-      loadBorder(rg);
-      loadProtect(rg);
+      const ranges = typeof getRanges === "function" ? getRanges() : [getRange()];
+      loadColors(ranges);
+      loadAlign(ranges);
+      loadFont(ranges);
+      loadBorder(ranges);
+      loadProtect(ranges);
       showPane(pane);
     }
 
@@ -229,7 +322,56 @@
       const box = $("sheet-align-wrap");
       const wrap = checked("sheet-align-wrap");
       if (box && (wrap !== (loaded.wrap === "1") || (loaded.wrap === "mixed" && !box.indeterminate))) values.wrap = wrap ? true : "";
+      const rotInput = $("sheet-align-rotation");
+      if (rotInput) {
+        const raw = rotInput.value.trim();
+        if (loaded.rot === "mixed" && raw === "" && !rotTouched) {
+          // Mixed rotation kept unchanged when left blank.
+        } else if (raw === "") {
+          if (loaded.rot !== "" && loaded.rot !== "0") values.textRotation = 0;
+        } else if (/^-?\d+$/.test(raw)) {
+          const deg = Number(raw);
+          if (deg >= -90 && deg <= 90 && String(deg === 0 ? "" : deg) !== loaded.rot) {
+            values.textRotation = deg;
+          }
+        }
+      }
       return values;
+    }
+
+    function fontValues() {
+      const values = {};
+      const ff = val("sheet-font-family-select");
+      const fs = val("sheet-font-size-select");
+      if (ff !== loadedFont.family && ff !== "mixed") values.fontFamily = ff;
+      if (fs !== loadedFont.size && fs !== "mixed") {
+        values.fontSize = fs === "" ? "" : Math.round((Number(fs) / 0.75) * 100) / 100 + "px";
+      }
+      return values;
+    }
+
+    function mergeValue() {
+      const box = $("sheet-align-merge");
+      if (!box || box.disabled) return null;
+      if (box.checked && loadedMerge !== "1") return "merge";
+      if (!box.checked && !box.indeterminate && loadedMerge !== "") return "unmerge";
+      return null;
+    }
+
+    function validate() {
+      const rotInput = $("sheet-align-rotation");
+      if (rotInput) {
+        const raw = rotInput.value.trim();
+        if (raw !== "") {
+          if (!/^-?\d+$/.test(raw) || Number(raw) < -90 || Number(raw) > 90) {
+            note("sheet-numfmt-status", "텍스트 방향은 -90~90 사이의 정수");
+            showPane("align");
+            rotInput.focus?.();
+            return false;
+          }
+        }
+      }
+      return true;
     }
 
     function borderSteps() {
@@ -243,13 +385,13 @@
 
     // True when the panes have something to write; `apply()` writes it in one step.
     function dirty() {
-      return Object.keys(alignValues()).length > 0 || Object.keys(colorValues()).length > 0 || borderTouched || Object.keys(lockValues()).length > 0;
+      return Object.keys(alignValues()).length > 0 || Object.keys(fontValues()).length > 0 || Object.keys(colorValues()).length > 0 || borderTouched || Object.keys(lockValues()).length > 0 || mergeValue() !== null;
     }
 
     function apply() {
       ops.pen.line = line;
       ops.pen.color = color;
-      return ops.setLook({ ...alignValues(), ...colorValues() }, borderTouched ? borderSteps() : null, lockValues());
+      return ops.setLook({ ...alignValues(), ...fontValues(), ...colorValues() }, borderTouched ? borderSteps() : null, lockValues(), mergeValue());
     }
 
     function lineSvg(name) {
@@ -287,6 +429,24 @@
       }
       fillOptions("sheet-align-h-select", H_OPTIONS);
       fillOptions("sheet-align-v-select", V_OPTIONS);
+      fillOptions("sheet-font-family-select", FONT_FAMILIES);
+      fillOptions("sheet-font-size-select", FONT_SIZES.map((s) => [s, s === "" ? "기본" : s]));
+      $("sheet-font-family-select")?.addEventListener("change", updateFontSample);
+      $("sheet-font-size-select")?.addEventListener("change", updateFontSample);
+      $("sheet-align-rotation")?.addEventListener("input", () => {
+        rotTouched = true;
+        updateRotationPreview($("sheet-align-rotation")?.value?.trim() || "");
+        note("sheet-numfmt-status", "");
+      });
+      for (const btn of document.querySelectorAll("#sheet-numfmt-dialog [data-rot-preset]")) {
+        btn.addEventListener("click", () => {
+          rotTouched = true;
+          const deg = btn.dataset.rotPreset || "0";
+          setVal("sheet-align-rotation", deg);
+          updateRotationPreview(deg);
+          note("sheet-numfmt-status", "");
+        });
+      }
       const picker = host.__EASYOFFICE_COLOR_PICKER__;
       picker?.setupColorPicker($("sheet-fcolor-host"), (picked) => chooseColor("fontColor", picked), { clear: true, clearLabel: "자동" });
       picker?.setupColorPicker($("sheet-bgcolor-host"), (picked) => chooseColor("fill", picked), { clear: true, clearLabel: "채우기 없음" });
@@ -299,7 +459,7 @@
       });
     }
 
-    return { open, apply, dirty, showPane };
+    return { open, apply, dirty, validate, showPane };
   }
 
   // The cell format commands of the sheet window: the number format dialog with the two panes, the
@@ -308,7 +468,7 @@
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(deps.document);
     let numfmtUi = null;
     const ops = host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__({ ...deps, openDialog: (pane) => numfmtUi?.openNumfmtDialog(pane) });
-    const ui = createSheetLookUi({ document: deps.document, kit, ops, getRange: deps.getRange, getActiveSheetName: deps.getActiveSheetName });
+    const ui = createSheetLookUi({ document: deps.document, kit, ops, getRange: deps.getRange, getRanges: deps.getRanges, getActiveSheetName: deps.getActiveSheetName });
     numfmtUi = host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__?.({ document: deps.document, format: deps.format, kit, look: ui });
     host.__EASYOFFICE_CREATE_SHEET_COLOR_UI__?.({ document: deps.document, ops });
     return ops;

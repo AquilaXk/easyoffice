@@ -99,11 +99,28 @@
     const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, ui: tabUi });
     const mediaUi = host.__EASYOFFICE_CREATE_SHEET_MEDIA_UI__?.(deps) ?? null;
     const noteUi = host.__EASYOFFICE_CREATE_SHEET_NOTE_UI__?.(deps) ?? null;
+    const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
     }
+
+    const sizeDialogs = host.__EASYOFFICE_CREATE_SHEET_SIZE_DIALOGS__?.({
+      ...deps,
+      kit,
+      fitColumns,
+      fitRows: rowResize.fitRows,
+      say,
+    }) ?? null;
+    const textColumnsUi = host.__EASYOFFICE_CREATE_SHEET_TEXT_COLUMNS__?.({ ...deps, kit, say }) ?? null;
+    const contextMenu = host.__EASYOFFICE_CREATE_SHEET_CONTEXT_MENU__?.({
+      ...deps,
+      kit,
+      runStructureAct: (act) => run(act),
+      editAxis,
+      say,
+    }) ?? null;
 
     // The rows or columns an action covers: the selection's own axis, else one row or column.
     function span(axis) {
@@ -547,6 +564,11 @@
       "filter-toggle": () => filter.run("filter-toggle"),
       "filter-reapply": () => filter.run("filter-reapply"),
       "filter-clear": () => filter.run("filter-clear"),
+      "row-height": () => Promise.resolve(sizeDialogs?.openRowHeight() ?? false),
+      "row-autofit": () => (sizeDialogs ? sizeDialogs.autofitRows() : Promise.resolve(false)),
+      "col-width": () => Promise.resolve(sizeDialogs?.openColWidth() ?? false),
+      "col-autofit": () => (sizeDialogs ? sizeDialogs.autofitCols() : Promise.resolve(false)),
+      "text-to-columns": () => Promise.resolve(textColumnsUi?.open() ?? false),
       "calc-auto": () => setCalcModeAction("auto", "자동"),
       "calc-auto-no-table": () => setCalcModeAction("autoNoTable", "데이터 테이블을 제외한 자동"),
       "calc-manual": () => setCalcModeAction("manual", "수동"),
@@ -586,6 +608,7 @@
     function openMenu(axis, x, y) {
       const el = menu();
       if (!el) return;
+      contextMenu?.close(false);
       for (const item of el.querySelectorAll("[data-axis]")) item.hidden = !item.dataset.axis.split(" ").includes(axis);
       el.hidden = false;
       placeMenu(el, x, y);
@@ -596,19 +619,23 @@
     // (`메모 편집`, `메모 삭제`, `메모 표시/숨기기`), or both when the cell carries both (PD-223, PD-256).
     function openCellMenu(ev) {
       const td = ev.target?.closest?.("#pane-sheet td[data-cell]");
-      if (!td) return;
+      if (!td) return false;
       const hasLink = Boolean(td.dataset?.link && td._link);
       const hasNote = td.dataset?.note === "true";
-      if (!hasLink && !hasNote) return;
+      if (!hasLink && !hasNote) return false;
       ev.preventDefault();
       commitIfEditing();
       deps.selectRange({ r1: td._row, c1: td._col, r2: td._row, c2: td._col });
       openMenu(hasLink && hasNote ? "link-note" : hasLink ? "link" : "note", ev.clientX, ev.clientY);
+      return true;
     }
 
     function onContextMenu(ev) {
       const th = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
-      if (!th) return openCellMenu(ev);
+      if (!th) {
+        if (!openCellMenu(ev)) contextMenu?.onCellContextMenu(ev);
+        return;
+      }
       ev.preventDefault();
       commitIfEditing();
       const axis = th.dataset.col ? "col" : "row";
@@ -717,6 +744,10 @@
       mediaUi?.bind();
       noteUi?.bind();
       rowResize.bind();
+      sizeDialogs?.ensureBound();
+      textColumnsUi?.ensureBound();
+      contextMenu?.bind();
+      host.__EASYOFFICE_ON_MENUS_CLOSED__?.(document, () => closeMenu(false));
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -731,6 +762,13 @@
       el?.addEventListener("contextmenu", (ev) => ev.preventDefault());
       document.addEventListener("mousedown", (ev) => {
         if (el && !el.hidden && !el.contains(ev.target)) closeMenu(false);
+      });
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && el && !el.hidden) {
+          ev.preventDefault();
+          ev.stopPropagation?.();
+          closeMenu(true);
+        }
       });
       host.addEventListener?.("resize", () => closeMenu(false));
       host.addEventListener?.("blur", () => closeMenu(false));

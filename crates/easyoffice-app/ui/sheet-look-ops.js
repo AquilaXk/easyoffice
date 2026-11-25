@@ -20,8 +20,9 @@
   const COLOR_ACTIONS = { fill: ["fill", LABELS.fill], "font-color": ["fontColor", LABELS.fontColor] };
 
   function createSheetLookOps(deps) {
-    const { document, format, gridUtils, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getSelection, openDialog } = deps;
+    const { document, format, gridUtils, grid, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getRanges, getSelection, openDialog } = deps;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
+    const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     const pen = { line: "thin", color: look.DEFAULT_COLOR };
 
     // For each key of `readers`: the value `read(entry)` has in every cell of the selection, "" when none has
@@ -30,14 +31,23 @@
       textAlign: (e) => e?.style?.textAlign || "",
       verticalAlign: (e) => e?.style?.verticalAlign || "",
       wrap: (e) => (e?.style?.wrap ? "1" : ""),
+      textRotation: (e) => (e?.style?.textRotation ? String(e.style.textRotation) : ""),
+      fontFamily: (e) => e?.style?.fontFamily || "",
+      fontSize: (e) => e?.style?.fontSize || "",
       fill: (e) => e?.style?.fill || "",
       fontColor: (e) => e?.style?.fontColor || "",
     };
     const KEYS = Object.keys(readers);
+    const activeRanges = (rgOrList) => {
+      if (Array.isArray(rgOrList)) return rgOrList;
+      if (rgOrList) return [rgOrList];
+      return typeof getRanges === "function" ? getRanges() : [getRange()];
+    };
 
-    function states(rg) {
+    function states(rgOrList) {
+      const ranges = activeRanges(rgOrList);
       const map = sheetDataStore[getActiveSheetName()] || {};
-      const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+      const area = multiApi ? multiApi.totalArea(ranges) : (ranges[0].r2 - ranges[0].r1 + 1) * (ranges[0].c2 - ranges[0].c1 + 1);
       const seen = {};
       const take = (entry) => {
         for (const key of KEYS) {
@@ -47,28 +57,46 @@
       };
       // A range past the limit is not scanned (the whole sheet is 17 billion cells): it counts as mixed.
       if (area > STATE_SCAN_CELLS) return Object.fromEntries(KEYS.map((key) => [key, "mixed"]));
-      for (let r = rg.r1; r <= rg.r2; r += 1) {
-        for (let c = rg.c1; c <= rg.c2; c += 1) take(map[gridUtils.refOf(r, c)]);
+      if (ranges.length === 1 || !multiApi) {
+        const rg = ranges[0];
+        for (let r = rg.r1; r <= rg.r2; r += 1) {
+          for (let c = rg.c1; c <= rg.c2; c += 1) take(map[gridUtils.refOf(r, c)]);
+        }
+      } else {
+        multiApi.forEachUniqueCoord(ranges, gridUtils.packCoord, (r, c) => take(map[gridUtils.refOf(r, c)]), STATE_SCAN_CELLS);
       }
       return Object.fromEntries(KEYS.map((key) => [key, seen[key] ?? ""]));
     }
 
-    // Sets `key` of every cell of the selection to `value`; the same value again clears it.
-    function setKey(label, key, value) {
-      const rg = format.effectiveRange();
-      const toggled = states(rg)[key] === (value === true ? "1" : value) ? "" : value;
-      return format.editStyles(label, ({ rg: range, patch }) => {
-        let n = 0;
-        for (let r = range.r1; r <= range.r2; r += 1) {
-          for (let c = range.c1; c <= range.c2; c += 1) {
-            patch(gridUtils.refOf(r, c), (st) => {
-              st[key] = toggled;
-            });
+    function walkRanges(ctx, fn) {
+      const ranges = ctx.ranges || [ctx.rg];
+      let n = 0;
+      if (ranges.length <= 1 || !multiApi) {
+        const rg = ranges[0];
+        for (let r = rg.r1; r <= rg.r2; r += 1) {
+          for (let c = rg.c1; c <= rg.c2; c += 1) {
+            fn(r, c);
             n += 1;
           }
         }
         return n;
+      }
+      multiApi.forEachUniqueCoord(ranges, gridUtils.packCoord, (r, c) => {
+        fn(r, c);
+        n += 1;
       });
+      return n;
+    }
+
+    // Sets `key` of every cell of the selection to `value`; the same value again clears it.
+    function setKey(label, key, value) {
+      const ranges = format.effectiveRanges();
+      const toggled = states(ranges)[key] === (value === true ? "1" : value) ? "" : value;
+      return format.editStyles(label, (ctx) => walkRanges(ctx, (r, c) => {
+        ctx.patch(gridUtils.refOf(r, c), (st) => {
+          st[key] = toggled;
+        });
+      }));
     }
 
     // Sets the color `key` (`fill` or `fontColor`) of every cell of the selection; "" removes it. The same color
@@ -76,34 +104,90 @@
     function paint(key, label, rgb) {
       const value = rgb ? look.normalizeColor(rgb) : "";
       if (rgb && !value) return Promise.resolve(null);
-      return format.editStyles(label, ({ rg: range, patch }) => {
-        let n = 0;
-        for (let r = range.r1; r <= range.r2; r += 1) {
-          for (let c = range.c1; c <= range.c2; c += 1) {
-            patch(gridUtils.refOf(r, c), (st) => {
-              st[key] = value;
-            });
-            n += 1;
-          }
-        }
-        return n;
-      });
+      return format.editStyles(label, (ctx) => walkRanges(ctx, (r, c) => {
+        ctx.patch(gridUtils.refOf(r, c), (st) => {
+          st[key] = value;
+        });
+      }));
     }
 
-    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap, fill, fontColor }` in one step (the dialog), and
-    // `locks` `{ locked, hideFormula }` (the 보호 pane, PD-216), which a protected sheet does not let change.
-    function setLook(values, border, locks) {
-      const lock = Object.keys(locks || {}).length > 0;
-      return format.editStyles(LABELS.align, (ctx) => {
-        let n = 0;
-        for (let r = ctx.rg.r1; r <= ctx.rg.r2; r += 1) {
-          for (let c = ctx.rg.c1; c <= ctx.rg.c2; c += 1) {
-            ctx.patch(gridUtils.refOf(r, c), (st) => Object.assign(st, values));
-            n += 1;
+    function applyMergeChange(ctx, mergeOp) {
+      const sheet = getActiveSheetName();
+      const ranges = ctx.ranges || [ctx.rg];
+      if (mergeOp === "unmerge") {
+        let count = 0;
+        for (let i = 0; i < ranges.length; i += 1) {
+          const rg = ranges[i];
+          if (layoutApi.mergesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2).length > 0) {
+            layoutApi.removeMerges(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
+            count += 1;
           }
         }
-        const refused = border ? applyBorders(ctx, border) : null;
-        if (lock) n = Math.max(n, applyLocks(ctx, locks));
+        if (count > 0) grid?.layoutChanged?.();
+        return null;
+      }
+      if (mergeOp === "merge") {
+        for (let i = 0; i < ranges.length; i += 1) {
+          const rg = ranges[i];
+          if (rg.r1 === rg.r2 && rg.c1 === rg.c2) continue;
+          if (layoutApi.tablesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2).length > 0) {
+            return "표 안의 칸은 병합할 수 없음";
+          }
+        }
+        let changed = false;
+        for (let i = 0; i < ranges.length; i += 1) {
+          const rg = ranges[i];
+          if (rg.r1 === rg.r2 && rg.c1 === rg.c2) continue;
+          for (const ref of Object.keys(ctx.map)) {
+            const p = gridUtils.parseRef(ref);
+            if (!p || (p.row === rg.r1 && p.col === rg.c1)) continue;
+            if (p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2) {
+              ctx.map[ref] = { value: "", formula: "", style: ctx.map[ref].style };
+            }
+          }
+          layoutApi.addMerge(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
+          changed = true;
+        }
+        if (changed) grid?.layoutChanged?.();
+      }
+      return null;
+    }
+
+    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap, textRotation, fontFamily, fontSize, fill, fontColor }`
+    // in one step (the dialog), and `locks` `{ locked, hideFormula }` (PD-216), plus optional `mergeOp` ("merge"|"unmerge").
+    function setLook(values, border, locks, mergeOp = null) {
+      const lock = Object.keys(locks || {}).length > 0;
+      const hasValues = Object.keys(values || {}).length > 0;
+      return format.editStyles(LABELS.align, (ctx) => {
+        if (mergeOp) {
+          const mergeErr = applyMergeChange(ctx, mergeOp);
+          if (mergeErr) return mergeErr;
+        }
+        let n = 0;
+        if (hasValues) {
+          n = walkRanges(ctx, (r, c) => {
+            ctx.patch(gridUtils.refOf(r, c), (st) => Object.assign(st, values));
+          });
+        }
+        let refused = null;
+        if (border) {
+          const ranges = ctx.ranges || [ctx.rg];
+          for (let i = 0; i < ranges.length; i += 1) {
+            const stepRes = applyBorders({ map: ctx.map, rg: ranges[i], patch: ctx.patch }, border);
+            if (typeof stepRes === "string") {
+              refused = stepRes;
+              break;
+            }
+            n += stepRes;
+          }
+        }
+        if (lock) {
+          const ranges = ctx.ranges || [ctx.rg];
+          for (let i = 0; i < ranges.length; i += 1) {
+            n = Math.max(n, applyLocks({ map: ctx.map, rg: ranges[i], patch: ctx.patch }, locks));
+          }
+        }
+        if (mergeOp) n = Math.max(n, 1);
         return refused || n;
       }, lock);
     }
@@ -113,7 +197,8 @@
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
 
     // `"1"` when every cell of the selection is locked, `""` when none is, `"mixed"`; the same for hidden formulas.
-    function protectStates(rg) {
+    function protectStates(rgOrList) {
+      const rg = Array.isArray(rgOrList) ? rgOrList[0] : rgOrList;
       const sheet = getActiveSheetName();
       const map = sheetDataStore[sheet] || {};
       const axis = getSelection?.().axis;
@@ -208,7 +293,8 @@
 
     // The border positions a selection has an edge on, for the dialog: `{ t, b, l, r, h, v }` with the
     // edge text each has in every cell concerned ("" for none, "mixed" for cells that differ).
-    function borderState(rg) {
+    function borderState(rgOrList) {
+      const rg = Array.isArray(rgOrList) ? rgOrList[0] : rgOrList;
       const map = sheetDataStore[getActiveSheetName()] || {};
       const at = (r, c) => map[gridUtils.refOf(r, c)]?.style?.border;
       const out = {};
@@ -262,7 +348,7 @@
     // Pressed and checked states of the buttons and menu items that carry `data-sheet-look`.
     function sync() {
       if (getActiveModule() !== "SHEET") return;
-      const state = states(getRange());
+      const state = states(typeof getRanges === "function" ? getRanges() : getRange());
       for (const el of document.querySelectorAll("[data-sheet-look]")) {
         const action = el.dataset.sheetLook;
         let on = null;

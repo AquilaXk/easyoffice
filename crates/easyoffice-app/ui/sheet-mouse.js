@@ -7,7 +7,7 @@
 
   // `sel` is the selection of the input module (`cr`, `cc` the corner a drag moves). `select`, `selectAxis`, `commitIfEditing`
   // and `startEdit` are the input module's. Returns the handlers the input module binds to the viewport and the document.
-  function createMouse({ document, api, grid, sel, protectApi, point, fill, viewport, gridTdOf, stateOf, select, selectAxis, commitIfEditing, startEdit, refreshChrome }) {
+  function createMouse({ document, api, grid, sel, protectApi, point, fill, viewport, gridTdOf, stateOf, select, selectAxis, commitIfEditing, startEdit, refreshChrome, pushRange }) {
     let drag = null;
     let resize = null;
 
@@ -29,14 +29,16 @@
         return;
       }
       const head = ev.target?.closest?.(HEAD_SELECTOR);
+      const multiMod = Boolean((ev.ctrlKey || ev.metaKey) && !ev.shiftKey);
       if (head) {
         if (point.press(ev, headTarget(head))) {
           drag = { active: true, point: true, moved: false, startX: ev.clientX, startY: ev.clientY };
           return;
         }
         ev.preventDefault();
-        if (head.dataset.col) selectAxis("col", grid.colIndex(head.dataset.col), Boolean(ev.shiftKey));
-        else selectAxis("row", Number(head.dataset.row), Boolean(ev.shiftKey));
+        if (multiMod) pushRange?.();
+        if (head.dataset.col) selectAxis("col", grid.colIndex(head.dataset.col), Boolean(ev.shiftKey), multiMod || Boolean(ev.shiftKey));
+        else selectAxis("row", Number(head.dataset.row), Boolean(ev.shiftKey), multiMod || Boolean(ev.shiftKey));
         return;
       }
       const td = gridTdOf(ev.target);
@@ -55,7 +57,8 @@
       ev.preventDefault();
       commitIfEditing();
       drag = { active: true, moved: false, startX: ev.clientX, startY: ev.clientY };
-      select(p.row, p.col, Boolean(ev.shiftKey));
+      if (multiMod) pushRange?.();
+      select(p.row, p.col, Boolean(ev.shiftKey), multiMod || Boolean(ev.shiftKey));
     }
 
     function autoScroll(ev) {
@@ -116,6 +119,7 @@
     }
 
     function onDblClick(ev) {
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
       const td = gridTdOf(ev.target);
       if (td) startEdit(td, "edit", false);
     }

@@ -27,10 +27,14 @@
   }
 
   // `sel` is the selection of the input module (`ar`, `ac` the anchor, `cr`, `cc` the other corner), read as it changes.
-  function createSelectionChrome({ document, api, grid, sel, protectApi, point, fill, getRange, stateOf, tdAt }) {
+  function createSelectionChrome({ document, api, grid, sel, protectApi, point, fill, getRange, getRanges, stateOf, tdAt }) {
+    const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     // ---- aggregate -------------------------------------------------------------------------
 
-    function collectNumbers(range, liveTd) {
+    function collectNumbers(rangeOrList, liveTd) {
+      const ranges = Array.isArray(rangeOrList) ? rangeOrList : [rangeOrList];
+      if (multiApi) return multiApi.collectNumbersMulti(ranges, liveTd, api, grid, numericOf);
+      const range = ranges[0];
       const nums = [];
       const liveRef = liveTd ? liveTd.dataset.cell : "";
       const push = (ref) => {
@@ -99,12 +103,15 @@
     function paintSelection() {
       paintSpillArea();
       const rg = getRange();
+      const extras = Array.isArray(sel.extraRanges) && sel.extraRanges.length > 0 ? sel.extraRanges : undefined;
       if (typeof grid.paintSelectionRange === "function") {
-        grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac });
+        grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac, extraRanges: extras });
         fill.sync();
         return;
       }
-      const multi = rg.r1 !== rg.r2 || rg.c1 !== rg.c2;
+      const ranges = typeof getRanges === "function" ? getRanges() : [rg];
+      const multi = ranges.length > 1 || rg.r1 !== rg.r2 || rg.c1 !== rg.c2;
+      const inAny = (r, c) => (multiApi ? multiApi.anyContainsCoord(ranges, r, c) : r >= rg.r1 && r <= rg.r2 && c >= rg.c1 && c <= rg.c2);
       const tbody = document.querySelector("#pane-sheet tbody");
       if (!tbody) return;
       tbody.querySelectorAll("td[data-cell]").forEach((td) => {
@@ -119,17 +126,17 @@
           td._col = c;
         }
         const active = r === sel.ar && c === sel.ac;
-        const inside = multi && r >= rg.r1 && r <= rg.r2 && c >= rg.c1 && c <= rg.c2;
+        const inside = multi && inAny(r, c);
         td.classList.toggle("selected-cell", active);
         td.classList.toggle("in-range", inside);
       });
       document.querySelectorAll("#pane-sheet th[data-col]").forEach((th) => {
         const idx = grid.colIndex(th.dataset.col);
-        th.classList.toggle("active-axis", idx >= rg.c1 && idx <= rg.c2);
+        th.classList.toggle("active-axis", ranges.some((rect) => idx >= rect.c1 && idx <= rect.c2));
       });
       document.querySelectorAll("#pane-sheet th[data-row]").forEach((th) => {
         const row = Number(th.dataset.row);
-        th.classList.toggle("active-axis", row >= rg.r1 && row <= rg.r2);
+        th.classList.toggle("active-axis", ranges.some((rect) => row >= rect.r1 && row <= rect.r2));
       });
     }
 
@@ -170,10 +177,11 @@
       if (aggEl) {
         const editingTd = activeTd && stateOf(activeTd)?.userEdited ? activeTd : null;
         // A `GETPIVOTDATA` into a pivot table the engine left out for its size answers `#REF!`: the status says why (PD-303).
-        const rg = getRange();
-        const single = rg.r1 === rg.r2 && rg.c1 === rg.c2;
+        const ranges = typeof getRanges === "function" ? getRanges() : [getRange()];
+        const rg = ranges[0];
+        const single = ranges.length === 1 && rg.r1 === rg.r2 && rg.c1 === rg.c2;
         const note = single && !editingTd ? host.__EASYOFFICE_SHEET_SPILL__?.pivotOmittedNote(api.getSheetName(), api.getEntry(ref)) : "";
-        aggEl.textContent = note || formatAggregate(collectNumbers(rg, editingTd));
+        aggEl.textContent = note || formatAggregate(collectNumbers(ranges, editingTd));
       }
       const out = document.getElementById("sheet-eval-result");
       if (out) out.setAttribute("title", out.textContent || "");

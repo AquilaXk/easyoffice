@@ -58,6 +58,7 @@
     }
 
     function openDialog(id) {
+      host.__EASYOFFICE_CLOSE_MENUS__?.(document);
       const dlg = $(id);
       if (!dlg) return null;
       if (typeof dlg.showModal === "function") {

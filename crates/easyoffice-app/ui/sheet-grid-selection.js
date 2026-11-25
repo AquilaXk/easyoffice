@@ -49,44 +49,52 @@
         anchor.classList.add("selected-cell");
         selectedTd = anchor;
       }
+      const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
+      const rects = multiApi ? multiApi.rangesOf(rg, rg.extraRanges) : [rg];
+      const paintCells = rects.length > 1 || rg.r1 !== rg.r2 || rg.c1 !== rg.c2;
       const v = getView();
-      const rowBands = v ? axisBands(rg.r1, rg.r2, v.layout ? v.fr || 0 : 0, v.r0, v.r1) : [[rg.r1, rg.r2]];
-      const colBands = v ? axisBands(rg.c1, rg.c2, v.layout ? v.fc || 0 : 0, v.c0, v.c1) : [[rg.c1, rg.c2]];
-      if (rg.r1 !== rg.r2 || rg.c1 !== rg.c2) {
-        for (let rb = 0; rb < rowBands.length; rb += 1) {
-          const [rLo, rHi] = rowBands[rb];
-          for (let r = rLo; r <= rHi; r += 1) {
-            const rowBase = r * PACK_STRIDE;
-            for (let cb = 0; cb < colBands.length; cb += 1) {
-              const [cLo, cHi] = colBands[cb];
-              for (let c = cLo; c <= cHi; c += 1) {
-                const td = tdByPacked.get(rowBase + c);
-                if (td) {
-                  td.classList.add("in-range");
-                  rangeTds.push(td);
+      const fr = v && v.layout ? v.fr || 0 : 0;
+      const fc = v && v.layout ? v.fc || 0 : 0;
+      for (let i = 0; i < rects.length; i += 1) {
+        const rect = rects[i];
+        const rowBands = v ? axisBands(rect.r1, rect.r2, fr, v.r0, v.r1) : [[rect.r1, rect.r2]];
+        const colBands = v ? axisBands(rect.c1, rect.c2, fc, v.c0, v.c1) : [[rect.c1, rect.c2]];
+        if (paintCells) {
+          for (let rb = 0; rb < rowBands.length; rb += 1) {
+            const [rLo, rHi] = rowBands[rb];
+            for (let r = rLo; r <= rHi; r += 1) {
+              const rowBase = r * PACK_STRIDE;
+              for (let cb = 0; cb < colBands.length; cb += 1) {
+                const [cLo, cHi] = colBands[cb];
+                for (let c = cLo; c <= cHi; c += 1) {
+                  const td = tdByPacked.get(rowBase + c);
+                  if (td && !td.classList.contains("in-range")) {
+                    td.classList.add("in-range");
+                    rangeTds.push(td);
+                  }
                 }
               }
             }
           }
         }
-      }
-      for (let cb = 0; cb < colBands.length; cb += 1) {
-        const [cLo, cHi] = colBands[cb];
-        for (let c = cLo; c <= cHi; c += 1) {
-          const th = colHeadByCol.get(c);
-          if (th) {
-            th.classList.add("active-axis");
-            activeColHeads.push(th);
+        for (let cb = 0; cb < colBands.length; cb += 1) {
+          const [cLo, cHi] = colBands[cb];
+          for (let c = cLo; c <= cHi; c += 1) {
+            const th = colHeadByCol.get(c);
+            if (th && !th.classList.contains("active-axis")) {
+              th.classList.add("active-axis");
+              activeColHeads.push(th);
+            }
           }
         }
-      }
-      for (let rb = 0; rb < rowBands.length; rb += 1) {
-        const [rLo, rHi] = rowBands[rb];
-        for (let r = rLo; r <= rHi; r += 1) {
-          const th = rowHeadByRow.get(r);
-          if (th) {
-            th.classList.add("active-axis");
-            activeRowHeads.push(th);
+        for (let rb = 0; rb < rowBands.length; rb += 1) {
+          const [rLo, rHi] = rowBands[rb];
+          for (let r = rLo; r <= rHi; r += 1) {
+            const th = rowHeadByRow.get(r);
+            if (th && !th.classList.contains("active-axis")) {
+              th.classList.add("active-axis");
+              activeRowHeads.push(th);
+            }
           }
         }
       }

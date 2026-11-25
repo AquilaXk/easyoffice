@@ -235,6 +235,7 @@
     }
 
     async function applyDialog() {
+      if (look?.validate && !look.validate()) return;
       const code = N.isDefaultFormat(val("sheet-numfmt-code")) ? "" : val("sheet-numfmt-code");
       // Another pane changed and the code did not: only that pane is written.
       const lookOnly = Boolean(look?.dirty()) && code === (N.isDefaultFormat(anchor.code) ? "" : anchor.code);
@@ -251,7 +252,13 @@
           return;
         }
       }
-      if (look?.dirty()) await look.apply();
+      if (look?.dirty()) {
+        const lookRes = await look.apply();
+        if (typeof lookRes === "string") {
+          note("sheet-numfmt-status", lookRes);
+          return;
+        }
+      }
       closeDialog("sheet-numfmt-dialog");
     }
 

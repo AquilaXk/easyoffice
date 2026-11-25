@@ -9,16 +9,21 @@
     const m = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "A1").toUpperCase());
     const col = m ? m[1] : "B";
     const row = m ? Number(m[2]) : 7;
+    const isNum = (e) => Boolean(e && !isFormulaStr(e.formula || "") && String(e.value ?? "").trim() !== "" && Number.isFinite(Number(e.value)));
     if (row >= 3) {
+      const startRow = isNum(sheetMap?.[col + "1"]) ? 1 : 2;
       let lastPlainRow = row - 1;
-      for (let r = row - 1; r >= 2; r -= 1) {
+      for (let r = row - 1; r >= startRow; r -= 1) {
         const entry = sheetMap?.[col + r];
         if (entry && !isFormulaStr(entry.formula || "") && entry.value !== "") {
           lastPlainRow = r;
           break;
         }
       }
-      return "=SUM(" + col + "2:" + col + Math.max(2, lastPlainRow) + ")";
+      return "=SUM(" + col + startRow + ":" + col + Math.max(startRow, lastPlainRow) + ")";
+    }
+    if (row === 2 && isNum(sheetMap?.[col + "1"]) && !isNum(sheetMap?.["B2"])) {
+      return "=SUM(" + col + "1:" + col + "1)";
     }
     return "=SUM(B" + row + ":E" + row + ")";
   }

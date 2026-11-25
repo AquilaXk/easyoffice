@@ -90,6 +90,7 @@
     "layers-back": ["M4 8h11v11H4z", "M9 8V4h11v11h-5"],
     printer: ["M7 8V4h10v4", "M5 17H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1", "M7 14h10v6H7z"],
     "file-export-pdf": ["M6 3h8l5 5v13H6z", "M14 3v5h5", "M12 11v6", "M9.5 14.5L12 17l2.5-2.5"],
+    autosum: ["M18 6H7l5.5 6L7 18h11"],
   });
 
   function createIcon(document, name) {

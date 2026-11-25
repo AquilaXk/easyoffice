@@ -31,7 +31,7 @@
   const SIDE_CSS = { t: "Top", r: "Right", b: "Bottom", l: "Left" };
   // The protection flags of a cell (PD-216) travel as style keys too: `unlocked`, `locked` (kept locked inside an
   // unlocked row or column) and `hideFormula`, all `true` or absent.
-  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "border", "unlocked", "locked", "hideFormula", "fill", "fontColor"];
+  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "textRotation", "border", "unlocked", "locked", "hideFormula", "fill", "fontColor"];
   // Text with no color of its own is white on a dark fill (a luminance of 62 of 255 or less), black on
   // any other fill, and the theme's text color on a cell without a fill.
   const DARK_FILL_LUMINANCE = 62;
@@ -77,7 +77,8 @@
 
   // The same text for every style with this look: the part of `internStyle`'s key that is new.
   const protectKey = (st) => (st.unlocked ? "u" : "") + (st.locked ? "l" : "") + (st.hideFormula ? "h" : "");
-  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) + "|" + protectKey(st) + "|" + (st.fill || "") + "|" + (st.fontColor || "") : "|||0||||");
+  const normRot = (v) => (Number.isInteger(v) && v >= -90 && v <= 90 ? v : 0);
+  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + normRot(st.textRotation) + "|" + borderKey(st.border) + "|" + protectKey(st) + "|" + (st.fill || "") + "|" + (st.fontColor || "") : "|||0|0||||");
 
   // Whether a wrapped cell was ever made in this page: a sheet is scanned for wrapped rows only then (every
   // wrapped style comes from `internStyle`, a clone of the model, or a file open, and each of them notes it).
@@ -92,7 +93,7 @@
     if (st.wrap || Number.parseFloat(st.fontSize) >= TALL_FONT_PX) wrapSeen = true;
   };
 
-  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border || st.unlocked || st.locked || st.hideFormula || st.fill || st.fontColor);
+  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || normRot(st.textRotation) || st.border || st.unlocked || st.locked || st.hideFormula || st.fill || st.fontColor);
 
   // The text color a cell shows as `rrggbb`, "" for the theme's own.
   function autoTextColor(fill) {
@@ -302,13 +303,46 @@
     }
   }
 
-  // Draws the look of `st` on `td` (alignment, wrapping and the resolved edges); a cell painted before
+  function syncRotSpan(td) {
+    const doc = td?.ownerDocument || host.document;
+    if (!td || !doc) return;
+    const rot = normRot(Number(td.dataset?.rot));
+    const existing = td.firstElementChild?.classList?.contains?.("cell-rot") ? td.firstElementChild : null;
+    if (!rot || td.classList.contains("editing")) {
+      if (existing) td.textContent = existing.textContent || "";
+      return;
+    }
+    if (existing) return;
+    if (!td.firstChild) return;
+    const span = doc.createElement("span");
+    span.className = "cell-rot";
+    while (td.firstChild) span.appendChild(td.firstChild);
+    td.appendChild(span);
+  }
+
+  function paintRotation(td, st) {
+    const rot = normRot(st?.textRotation);
+    const s = td.style;
+    if (rot) {
+      td.dataset.rot = String(rot);
+      s.setProperty("--cell-rot", -rot + "deg");
+    } else if (td.dataset.rot !== undefined) {
+      delete td.dataset.rot;
+      s.removeProperty("--cell-rot");
+    }
+    syncRotSpan(td);
+  }
+
+  // Draws the look of `st` on `td` (alignment, wrapping, rotation and the resolved edges); a cell painted before
   // with another look is reset first. `fontPx` is the line height basis of wrapped text.
   function paintTd(td, st, row, col, borderAt, span) {
     const edges = resolveEdges(row, col, borderAt, span);
     const basePx = host.__EASYOFFICE_SHEET_DEFAULT_FONT__?.baseFontPx?.() ?? 14.67;
     const sig = lookKey(st) + "/" + (edges.t || "") + (edges.r || "") + (edges.b || "") + (edges.l || "") + (st?.wrap ? "/" + (st.fontSize || basePx) : "");
-    if (td._lk === sig) return;
+    if (td._lk === sig) {
+      if (normRot(st?.textRotation)) syncRotSpan(td);
+      return;
+    }
     td._lk = sig;
     const s = td.style;
     s.textAlign = st?.textAlign || "";
@@ -318,6 +352,7 @@
     else s.removeProperty("--lk-shadow");
     td.classList.toggle("lk-shadow", shadows.length > 0);
     paintColors(td, st);
+    paintRotation(td, st);
     if (st?.wrap) {
       s.whiteSpace = "pre-wrap";
       s.overflowWrap = "anywhere";
@@ -352,6 +387,12 @@
     if (st.fill) s.backgroundColor = "#" + st.fill;
     const fg = textColorOf(st);
     if (fg) s.color = "#" + fg;
+    const rot = normRot(st.textRotation);
+    if (rot) {
+      td.dataset.rot = String(rot);
+      s.setProperty("--cell-rot", -rot + "deg");
+      syncRotSpan(td);
+    }
     printEdges(s, st.border);
   }
 
@@ -412,5 +453,7 @@
     planBorders,
     resolveEdges,
     paintTd,
+    syncRotSpan,
+    normRot,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

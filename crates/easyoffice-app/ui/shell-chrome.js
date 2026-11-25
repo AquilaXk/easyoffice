@@ -113,6 +113,10 @@
     "format:numfmt-decimal-up": "sheet-numfmt:decimal-up",
     "format:numfmt-decimal-down": "sheet-numfmt:decimal-down",
     "format:cell-format": "sheet-numfmt:dialog",
+    "format:row-height": "sheet-act:row-height",
+    "format:row-autofit": "sheet-act:row-autofit",
+    "format:col-width": "sheet-act:col-width",
+    "format:col-autofit": "sheet-act:col-autofit",
     "format:align-left": "sheet-look:align-left",
     "format:align-center": "sheet-look:align-center",
     "format:align-right": "sheet-look:align-right",
@@ -295,6 +299,8 @@
     "sheet:filter": "sheet-act:filter-toggle",
     "sheet:filter-reapply": "sheet-act:filter-reapply",
     "sheet:filter-clear": "sheet-act:filter-clear",
+    "sheet:remove-duplicates": "sheet-act:dedupe-dialog",
+    "sheet:text-to-columns": "sheet-act:text-to-columns",
     "tool:copilot": "studio-cmd:copilot-toggle",
     "tool:diagnose": "studio-cmd:smart-diagnose",
     "tool:scrub-pii": "studio-cmd:scrub-pii",
@@ -314,10 +320,7 @@
     "help:update-check": "update-check",
   });
 
-  // Actions that work on the Hangul editor's pages (the shell's PDF export). It has no item in the
-  // page's own menu row: the editor's 파일 menu carries it in the Hangul window, and no other window
-  // has it, so the native item is grayed out everywhere but in the editor window. Print is in the
-  // page's menu row too, for the modules that print (`studioCommandApplies("print", ...)`).
+  // Embed-only Hangul window items (disabled outside the Hangul embed).
   const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-save-as"]);
   const EMBED_ONLY_SET = new Set(EMBED_ONLY_ACTIONS);
   const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "export", "export-dialog", "find", "replace"]);
@@ -332,10 +335,7 @@
   );
   const PARSED_NATIVE_MENU_LIST = Object.freeze(Object.values(PARSED_NATIVE_MENU_ACTIONS));
 
-  // Menu id -> command id of the Hangul editor (the rhwp-studio command registry, over the embed port's
-  // `automation.execute`). While the editor owns the window these items go to it, the zoom and cell
-  // items using the same command ids as the reference app's menu events; the table's `hwp-editor` items
-  // exist only for it and are grayed out everywhere else.
+  // Menu id -> Hangul editor command id (`automation.execute`).
   const EMBED_EDITOR_COMMANDS = Object.freeze({
     "view:zoom-in": "view:zoom-in",
     "view:zoom-out": "view:zoom-out",
@@ -367,18 +367,10 @@
     "insert:link": "insert:hyperlink",
   });
 
-  // The same four items while a plain text field of the page has the focus (a bound ⌘ key never reaches the
-  // field): the browser's own editing command for that field.
-  const TEXT_FIELD_EDIT_COMMANDS = Object.freeze({
-    "edit:undo": "undo",
-    "edit:redo": "redo",
-    "edit:cut": "cut",
-    "edit:copy": "copy",
-  });
+  // Same items when a plain text field has focus.
+  const TEXT_FIELD_EDIT_COMMANDS = Object.freeze({ "edit:undo": "undo", "edit:redo": "redo", "edit:cut": "cut", "edit:copy": "copy" });
 
-  // Actions that click the page's own (hidden) menu item, so a native item does exactly what the page
-  // menu did, including doing nothing where the item does not apply to the window's module. The
-  // arguments come from the static table above only.
+  // Actions that click the page's menu item from `NATIVE_MENU_ACTIONS`.
   function pageMenuActions(document) {
     const click = (selector) => document.querySelector(selector)?.click();
     const clickVisible = (selector) => {
@@ -406,25 +398,30 @@
     };
   }
 
-  // The spreadsheet's own menu items (number formats, rows and columns, merging) have no ribbon command, so the
-  // command search lists them from the page's menu items: the label is the menu's, running one clicks it.
+  // Command palette entries built from the sheet page menu bar items.
   function sheetMenuPaletteItems(document) {
-    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt], .md-item[data-sheet-paste], .md-item[data-sheet-look], .md-item[data-sheet-cf]"), (el) => {
+    const seen = new Set();
+    const out = [];
+    for (const el of document.querySelectorAll("#menu-bar .md-item[data-sheet-act], #menu-bar .md-item[data-sheet-numfmt], #menu-bar .md-item[data-sheet-paste], #menu-bar .md-item[data-sheet-look], #menu-bar .md-item[data-sheet-cf]")) {
+      const id = `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt || el.dataset.sheetPaste || el.dataset.sheetLook || "cf-" + el.dataset.sheetCf}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
       const title = el.dataset.paletteTitle || el.querySelector(".md-label").textContent;
       const shortcut = el.querySelector(".md-shortcut")?.textContent || "";
-      // A conditional formatting item is found by the name of its submenu too (five of them are 기타 규칙…).
       const kind = el.dataset.sheetCf === undefined ? "서식 시트" : `서식 시트 조건부 서식 ${el.parentElement?.closest?.(".md-sub-panel")?.getAttribute("aria-label") ?? ""}`;
-      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt || el.dataset.sheetPaste || el.dataset.sheetLook || "cf-" + el.dataset.sheetCf}`, module: "SHEET", title, shortcut, searchKey: `${kind} ${title}`, run: () => el.click() };
-    });
+      out.push({ id, module: "SHEET", title, shortcut, searchKey: `${kind} ${title}`, run: () => el.click() });
+    }
+    return out;
   }
 
   const MODAL_GATED_NATIVE_IDS = new Set([
-    "edit:undo", "edit:redo", "edit:cut", "edit:copy",
-    "edit:paste-special", "edit:find", "edit:replace",
-    "insert:link", "format:bold", "format:italic", "format:underline", "view:palette",
+    "edit:undo", "edit:redo", "edit:cut", "edit:copy", "edit:paste-special", "edit:find", "edit:replace",
+    "insert:link", "format:bold", "format:italic", "format:underline", "format:cell-format",
+    "format:row-height", "format:col-width", "sheet:filter", "sheet:remove-duplicates", "sheet:text-to-columns", "view:palette",
   ]);
   const FIELD_GATED_NATIVE_IDS = new Set([
     "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline",
+    "format:cell-format", "format:row-height", "format:col-width", "sheet:filter", "sheet:remove-duplicates", "sheet:text-to-columns",
   ]);
 
   function allowsNativeMenuContext(id, document, modal) {
@@ -914,6 +911,7 @@
       const closePopups = (scope = dialog) => {
         host.__EASYOFFICE_COLOR_PICKER__?.closePopupIn?.(scope);
         host.__EASYOFFICE_CUSTOM_SELECT__?.closeOpenIn?.(scope);
+        if (scope === document) host.__EASYOFFICE_CLOSE_MENUS__?.(document);
       };
       const release = () => {
         removeOpenDialogStack(dialog);

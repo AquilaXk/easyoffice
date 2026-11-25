@@ -734,3 +734,20 @@
 .split-compare-meta { font-size: var(--font-size-xs); color: var(--ui-text-secondary); }
 .split-compare-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
 .split-compare-table td, .split-compare-table th { border: 1px solid var(--ui-border-light); padding: 3px 6px; text-align: left; }
+
+/* Sheet Format Cells, Text Rotation, Size Dialogs & Text-to-Columns (PD-356). */
+.tool-dialog #sheet-font-sample { font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
+.sheet-rot-presets button { padding: 3px 7px; font-size: var(--font-size-xs); }
+.sheet-rot-presets button[aria-pressed="true"] { background: var(--color-accent-bg); border-color: var(--color-primary); color: var(--color-primary-dark); font-weight: 700; }
+.sheet-rot-preview { display: inline-flex; align-items: center; justify-content: center; min-width: 58px; height: 34px; margin-left: auto; border: 1px solid var(--color-border-dark); background: var(--color-surface); font-size: var(--font-size-xs); transform: rotate(var(--rot-preview, 0deg)); }
+.sheet-grid td[data-rot], .print-preview-pane .eo-print-sheet td[data-rot] { overflow: hidden; }
+.sheet-grid td[data-rot] .cell-rot, .print-preview-pane .eo-print-sheet td[data-rot] .cell-rot { display: inline-block; transform: rotate(var(--cell-rot, 0deg)); transform-origin: center center; white-space: nowrap; }
+#sheet-size-dialog, #sheet-cell-shift-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-text-columns-dialog { width: min(500px, calc(100vw - 32px)); }
+.sheet-tc-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sheet-tc-other-input { width: 38px; text-align: center; }
+.sheet-tc-preview-row { align-items: flex-start; }
+.sheet-tc-preview { flex: 1 1 auto; min-width: 0; max-height: 160px; overflow: auto; border: 1px solid var(--color-border-light); background: var(--color-surface); }
+.sheet-tc-preview-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
+.sheet-tc-preview-table th, .sheet-tc-preview-table td { border: 1px solid var(--color-border-light); padding: 3px 6px; text-align: left; white-space: nowrap; }
+.sheet-tc-preview-table th { background: var(--ui-bg-light); font-weight: 600; }

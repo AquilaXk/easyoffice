@@ -264,6 +264,30 @@
       return api.applyCellEdits(clearEdits(range, dropLinks), "범위 지우기");
     }
 
+    function clearRanges(ranges, dropLinks = false) {
+      const list = Array.isArray(ranges) ? ranges : [ranges];
+      if (list.length <= 1) return clearRange(list[0], dropLinks);
+      const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
+      const edits = [];
+      const seen = new Set();
+      let handledLarge = false;
+      for (let i = 0; i < list.length; i += 1) {
+        const rg = list[i];
+        const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+        const part = area > 200000 ? (handledLarge = true, api.clearExisting(rg, dropLinks)) : clearEdits(rg, dropLinks);
+        for (let j = 0; j < part.length; j += 1) {
+          if (seen.has(part[j].ref)) continue;
+          seen.add(part[j].ref);
+          edits.push(part[j]);
+        }
+        if (multiApi && edits.length > multiApi.MAX_MULTI_OPS_CELLS && !handledLarge) {
+          say("선택 범위가 너무 큼");
+          return Promise.resolve(false);
+        }
+      }
+      return api.applyCellEdits(edits, "범위 지우기");
+    }
+
     // Clipboard text as a block without a source: a quoted field keeps tabs and line breaks.
     function textBlock(text) {
       const rows = parseTsv(text);
@@ -429,6 +453,7 @@
       onCopy,
       onPaste,
       clearRange,
+      clearRanges,
       runCommand,
       pasteText: (text, range) => pasteBlock(blockOf(text), range),
       pasteSpecial,

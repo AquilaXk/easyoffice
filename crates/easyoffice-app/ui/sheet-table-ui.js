@@ -839,6 +839,7 @@
         settle,
         filter,
         selectTable,
+        selectRange,
         say,
       });
       dedupeUi?.ensureBound();
@@ -948,13 +949,44 @@
       host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter, fillCalculated, afterCellInput, growth };
     }
 
+    function openDedupe() {
+      commitIfEditing();
+      const name = getActiveSheetName();
+      if (!allowed(name)) return false;
+      const table = tableAtActive();
+      if (table) return Boolean(dedupeUi?.open(table));
+      sheetDataStore[name] = snapshotDomSheetCells();
+      const box = initialBox(name);
+      const map = sheetDataStore[name] || {};
+      const ctx = contextOf(name);
+      if (ops.straddleConflict(ctx, box, ctx.tables)) {
+        say("표와 겹쳐 실행할 수 없음");
+        return false;
+      }
+      if (layoutApi.mergesIn(name, box.r1, box.c1, box.r2, box.c2).length > 0) {
+        say("병합된 칸이 있어 실행할 수 없음");
+        return false;
+      }
+      if (box.r2 <= box.r1) {
+        say("중복된 값이 없습니다.");
+        return false;
+      }
+      const sort = host.__EASYOFFICE_SHEET_SORT_CORE__;
+      const hasHeader = sort.detectHeader(map, box, refOf, sort.numberOf);
+      return Boolean(dedupeUi?.openRange(box, hasHeader));
+    }
+
     return {
       bind,
       sync,
       expandAfter,
       fillCalculated,
       afterCellInput,
-      actions: { "table-create": () => Promise.resolve(openCreate()), "table-resize": () => Promise.resolve(openResize()) },
+      actions: {
+        "table-create": () => Promise.resolve(openCreate()),
+        "table-resize": () => Promise.resolve(openResize()),
+        "dedupe-dialog": () => Promise.resolve(openDedupe()),
+      },
     };
   }
 

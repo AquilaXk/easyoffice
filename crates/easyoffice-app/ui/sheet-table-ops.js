@@ -363,19 +363,9 @@
     return true;
   }
 
-  // Single-pass O(R * K) duplicate scan over `cols` (0-based table column offsets). Keeps first occurrence.
-  function planDedupe({ table, cols, ctx }) {
-    const uniqueCols = [...new Set((cols || []).filter((c) => Number.isInteger(c) && c >= 0 && c < table.columns.length))].sort((a, b) => a - b);
-    if (uniqueCols.length === 0) return { error: "열을 하나 이상 선택" };
-    const b = ctx.boxOf(table);
-    const header = table.header !== false;
-    const totals = table.totals === true;
-    const d1 = b.r1 + (header ? 1 : 0);
-    const d2 = b.r2 - (totals ? 1 : 0);
+  function dedupeScanRows(d1, d2, c1, uniqueCols, ctx) {
     const totalRows = Math.max(0, d2 - d1 + 1);
-    if (totalRows > MAX_DEDUPE_ROWS) return { error: "중복 제거 범위는 200,000행까지" };
-    if (totalRows <= 1) return { removed: 0, remaining: totalRows, table: null, rowMoves: [], clearFrom: 0, box: b };
-
+    if (totalRows <= 1) return { removed: 0, remaining: totalRows, rowMoves: [], clearFrom: 0 };
     const kLen = uniqueCols.length * 2;
     const buckets = new Map();
     const keptRows = [];
@@ -384,7 +374,7 @@
     for (let r = d1; r <= d2; r += 1) {
       let h = 0x811c9dc5;
       for (let j = 0; j < uniqueCols.length; j += 1) {
-        const [tag, val] = cellDedupeKey(ctx.cellAt(r, b.c1 + uniqueCols[j]));
+        const [tag, val] = cellDedupeKey(ctx.cellAt(r, c1 + uniqueCols[j]));
         tuple[j * 2] = tag;
         tuple[j * 2 + 1] = val;
         h = fnv1aStep(Math.imul(h ^ (tag + 17), 0x01000193) >>> 0, val);
@@ -408,27 +398,54 @@
 
     const remaining = keptRows.length;
     const removed = totalRows - remaining;
-    if (removed === 0) return { removed: 0, remaining, table: null, rowMoves: [], clearFrom: 0, box: b };
-
+    if (removed === 0) return { removed: 0, remaining, rowMoves: [], clearFrom: 0 };
     const rowMoves = [];
     for (let i = 0; i < remaining; i += 1) {
       const dst = d1 + i;
       if (keptRows[i] !== dst) rowMoves.push([keptRows[i], dst]);
     }
-    const newR2 = d1 + remaining - 1 + (totals ? 1 : 0);
-    if (totals) rowMoves.push([b.r2, newR2]);
+    return { removed, remaining, rowMoves, clearFrom: d1 + remaining };
+  }
 
+  // Single-pass O(R * K) duplicate scan over `cols` (0-based table column offsets). Keeps first occurrence.
+  function planDedupe({ table, cols, ctx }) {
+    const uniqueCols = [...new Set((cols || []).filter((c) => Number.isInteger(c) && c >= 0 && c < table.columns.length))].sort((a, b) => a - b);
+    if (uniqueCols.length === 0) return { error: "열을 하나 이상 선택" };
+    const b = ctx.boxOf(table);
+    const header = table.header !== false;
+    const totals = table.totals === true;
+    const d1 = b.r1 + (header ? 1 : 0);
+    const d2 = b.r2 - (totals ? 1 : 0);
+    if (Math.max(0, d2 - d1 + 1) > MAX_DEDUPE_ROWS) return { error: "중복 제거 범위는 200,000행까지" };
+    const scan = dedupeScanRows(d1, d2, b.c1, uniqueCols, ctx);
+    if (scan.removed === 0) return { removed: 0, remaining: scan.remaining, table: null, rowMoves: [], clearFrom: 0, box: b };
+    const newR2 = d1 + scan.remaining - 1 + (totals ? 1 : 0);
+    if (totals) scan.rowMoves.push([b.r2, newR2]);
     const next = { ...structuredClone(table), range: rangeText(b.r1, b.c1, newR2, b.c2) };
     delete next.filterHidden;
     return {
-      removed,
-      remaining,
+      removed: scan.removed,
+      remaining: scan.remaining,
       table: next,
-      rowMoves,
+      rowMoves: scan.rowMoves,
       clearFrom: newR2 + 1,
       box: b,
       reapply: Array.isArray(next.filter) && next.filter.length > 0,
     };
+  }
+
+  function planRangeDedupe({ box, header, cols, ctx }) {
+    const numCols = Math.max(0, box.c2 - box.c1 + 1);
+    if (numCols === 0 || numCols > 1000) return { error: "중복 제거 범위는 1,000열까지" };
+    if (straddleConflict(ctx, box, ctx.tables)) return { error: "표와 겹쳐 실행할 수 없음" };
+    if (ctx.merges?.some((m) => touches(box, m))) return { error: "병합된 칸이 있어 실행할 수 없음" };
+    const uniqueCols = [...new Set((cols || []).filter((c) => Number.isInteger(c) && c >= 0 && c < numCols))].sort((a, b) => a - b);
+    if (uniqueCols.length === 0) return { error: "열을 하나 이상 선택" };
+    const d1 = box.r1 + (header ? 1 : 0);
+    const d2 = box.r2;
+    if (Math.max(0, d2 - d1 + 1) > MAX_DEDUPE_ROWS) return { error: "중복 제거 범위는 200,000행까지" };
+    const scan = dedupeScanRows(d1, d2, box.c1, uniqueCols, ctx);
+    return { ...scan, box };
   }
 
   host.__EASYOFFICE_SHEET_TABLE_OPS__ = {
@@ -443,6 +460,7 @@
     planResize,
     planExpand,
     planDedupe,
+    planRangeDedupe,
     cellDedupeKey,
     rangeText,
     straddleConflict,
