@@ -748,7 +748,7 @@
       const capture = (ev) => {
         if (!isTopActive() || ev.isComposing) return;
         if (ev.key === "Escape") {
-          if (hasOpenNestedPopup()) {
+          if (ev.defaultPrevented || hasOpenNestedPopup()) {
             popupEscapeEvents?.add(ev);
             return;
           }

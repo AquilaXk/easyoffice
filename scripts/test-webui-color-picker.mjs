@@ -42,6 +42,16 @@ test("the visible native colour inputs are gone: a toggle arrow, a palette and a
     assert.equal(input.tabIndex, -1);
     assert.equal(panel.querySelectorAll(".sb-hl-swatch").length, 7 * 7, "gray row plus six palette rows");
   }
+  for (const id of ["doc-shape-fill", "doc-shape-stroke"]) {
+    const hostEl = document.getElementById(`${id}-host`);
+    const toggle = hostEl.querySelector("[data-color-toggle]");
+    const panel = hostEl.querySelector(".sb-hl-palette");
+    const input = hostEl.querySelector("input");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.ok(panel.hidden);
+    assert.ok(input.classList.contains("eo-color-input") && input.getAttribute("aria-hidden") === "true");
+    assert.equal(input.tabIndex, -1);
+  }
   assert.ok(!read("index.html").includes("sb-color-input"));
 });
 
@@ -122,10 +132,44 @@ test("keyboard: ArrowDown opens and focuses the first swatch, Escape closes and 
   toggle.dispatchEvent({ type: "keydown", key: "ArrowDown" });
   assert.ok(!panel.hidden);
   assert.equal(document.activeElement, panel.querySelector("button"));
-  document.dispatchEvent({ type: "keydown", key: "Escape", target: document.activeElement, stopPropagation() {} });
+  let escapeStopped = false;
+  let escapePrevented = false;
+  document.dispatchEvent({
+    type: "keydown",
+    key: "Escape",
+    target: document.activeElement,
+    defaultPrevented: false,
+    stopPropagation() { escapeStopped = true; },
+    preventDefault() { escapePrevented = true; this.defaultPrevented = true; },
+  });
+  assert.equal(escapeStopped, true);
+  assert.equal(escapePrevented, true, "Escape on color-picker calls preventDefault so <dialog> cancel does not fire");
   assert.ok(panel.hidden);
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(document.activeElement, toggle);
+
+  // Inside an open modal dialog, Escape closes only the palette and leaves the dialog open
+  const shapeDlg = document.getElementById("doc-shape-dialog");
+  shapeDlg.showModal();
+  const fillHost = document.getElementById("doc-shape-fill-host");
+  const fillToggle = fillHost.querySelector("[data-color-toggle]");
+  const fillPanel = fillHost.querySelector(".sb-hl-palette");
+  userClick(fillToggle);
+  assert.equal(fillPanel.hidden, false);
+  const escInDialog = {
+    type: "keydown",
+    key: "Escape",
+    target: fillToggle,
+    defaultPrevented: false,
+    stopPropagation() {},
+    preventDefault() { this.defaultPrevented = true; },
+  };
+  document.dispatchEvent(escInDialog);
+  assert.equal(escInDialog.defaultPrevented, true);
+  assert.equal(fillPanel.hidden, true);
+  assert.equal(shapeDlg.open, true, "Escape closing palette inside modal keeps dialog open");
+  shapeDlg.close();
+
   userClick(toggle);
   document.dispatchEvent({ type: "keydown", key: "a", target: toggle });
   assert.ok(!panel.hidden, "other keys leave the popup open");

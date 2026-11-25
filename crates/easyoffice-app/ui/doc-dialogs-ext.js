@@ -6,7 +6,6 @@
   const DEFAULT_MERGE_FIELDS = ["성명", "기관명", "일자"];
   const SHAPE_KINDS = new Set(["roundRect", "rect", "callout", "ellipse"]);
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const DEFAULT_CHART_COLORS = ["2563EB", "DC2626", "16A34A", "D97706"];
 
   function collectMergeTokens(docEditor) {
     const seen = new Set();
@@ -217,8 +216,16 @@
       else editor.appendChild(node);
     }
 
+    function syncShapeSwatch(id) {
+      const input = $(id);
+      const chip = input?.parentElement?.querySelector?.(".dialog-swatch-chip");
+      chip?.style?.setProperty?.("--dialog-swatch", input?.value || "");
+    }
+
     function openShapeDialog() {
       bind();
+      syncShapeSwatch("doc-shape-fill");
+      syncShapeSwatch("doc-shape-stroke");
       const st = $("doc-shape-status");
       if (st) st.textContent = "";
       openToolDialog("doc-shape-dialog");
@@ -357,7 +364,7 @@
         computeSmartStats();
         renderModuleOutline(getActiveModule());
       });
-      setFeedback?.("차트 삽입 완료 (" + DEFAULT_CHART_COLORS.length + "색 팔레트)");
+      setFeedback?.("차트 삽입 완료");
     }
 
     function syncFnPreview() {
@@ -435,9 +442,25 @@
         pendingMailMergeRun = null;
         closeDialog?.("doc-mailmerge-dialog");
       };
+      const picker = host.__EASYOFFICE_COLOR_PICKER__;
+      for (const id of ["doc-shape-fill", "doc-shape-stroke"]) {
+        const hostEl = $(id + "-host");
+        const input = $(id);
+        if (!hostEl || !input) continue;
+        if (picker?.setupColorPicker && hostEl.querySelector?.("[data-color-toggle]") && hostEl.querySelector?.(".sb-hl-palette")) {
+          picker.setupColorPicker(hostEl, (color) => {
+            if (color) syncShapeSwatch(id);
+          });
+        } else {
+          input.addEventListener?.("change", () => syncShapeSwatch(id));
+        }
+        syncShapeSwatch(id);
+      }
       $("doc-mailmerge-dialog")?.querySelectorAll?.("[data-dialog-close]").forEach((b) => b.addEventListener("click", cancelMm));
       $("doc-mailmerge-dialog")?.addEventListener("close", () => { pendingMailMergeRun = null; });
     }
+
+    bind();
 
     return {
       openMailMergeDialog,

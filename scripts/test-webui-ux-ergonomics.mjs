@@ -101,11 +101,22 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
   userClick(commandItem(document, "document-insert-shape"));
   await flushAsyncTurns();
-  assert.equal(document.getElementById("doc-shape-dialog").open, true);
+  const shapeDlg = document.getElementById("doc-shape-dialog");
+  assert.equal(shapeDlg.open, true);
+  const fillToggle = document.querySelector("#doc-shape-fill-host [data-color-toggle]");
+  const fillPalette = document.getElementById("doc-shape-fill-palette");
+  userClick(fillToggle);
+  assert.equal(fillPalette.hidden, false);
+  const redSwatch = Array.from(fillPalette.querySelectorAll(".sb-hl-swatch")).find((s) => s.getAttribute("aria-label") === "#ff0000");
+  userClick(redSwatch);
+  assert.equal(fillPalette.hidden, true);
+  assert.equal(document.getElementById("doc-shape-fill").value, "#ff0000");
+  assert.equal(document.querySelector("#doc-shape-fill-host .dialog-swatch-chip").style.getPropertyValue("--dialog-swatch"), "#ff0000");
   document.getElementById("doc-shape-text").value = "검토 도형";
   userClick(document.getElementById("btn-doc-shape-ok"));
   await flushAsyncTurns();
   assert.equal(docEditor.querySelector(".eo-doc-shape svg") !== null, true);
+  assert.equal(docEditor.querySelector(".eo-doc-shape svg")?.firstChild?.getAttribute?.("fill"), "#ff0000");
 
   userClick(commandItem(document, "document-insert-chart"));
   await flushAsyncTurns();
@@ -114,6 +125,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   userClick(document.getElementById("btn-doc-chart-ok"));
   await flushAsyncTurns();
   assert.equal(docEditor.querySelector(".eo-doc-chart") !== null, true);
+  assert.equal(document.getElementById("status-command-feedback").textContent, "차트 삽입 완료");
 
   userClick(commandItem(document, "document-review-stats"));
   await flushAsyncTurns(6);
@@ -908,6 +920,27 @@ test("regression guards: single-pass mailmerge before footer, h4 stats, multi-ta
   userClick(commandItem(document, "document-data-sort"));
   await flushAsyncTurns(4);
   assert.deepEqual(Array.from(t2.querySelectorAll("td")).map((td) => td.textContent), ["가", "나"], "second table sorted ascending on second click");
+
+  // Caret outside tables (in outP) refuses to sort either table and shows MSG_OUTSIDE
+  const rOut = document.createRange();
+  rOut.setStart(outP.firstChild, 0);
+  rOut.setEnd(outP.firstChild, 0);
+  selection.removeAllRanges();
+  selection.addRange(rOut);
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(t1.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "first table untouched when caret is outside tables");
+  assert.deepEqual(Array.from(t2.querySelectorAll("td")).map((td) => td.textContent), ["가", "나"], "second table untouched when caret is outside tables");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "표 안에서 사용");
+
+  // Single-table document also refuses sort when caret is outside the table
+  t2.remove();
+  selection.removeAllRanges();
+  selection.addRange(rOut);
+  userClick(commandItem(document, "document-data-sort"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(t1.querySelectorAll("td")).map((td) => td.textContent), ["다", "가"], "single table untouched when caret is outside");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "표 안에서 사용");
 
   // Single-row table preserves error message in status feedback
   const tSingle = mkTable(["단일행"]);

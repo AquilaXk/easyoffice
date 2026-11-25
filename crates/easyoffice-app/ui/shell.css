@@ -710,6 +710,9 @@
 .doc-inspect-desc { flex: 1 1 auto; min-width: 0; font-size: var(--font-size-sm); color: var(--ui-text); line-height: 1.4; overflow-wrap: anywhere; }
 .doc-inspect-jump-btn { flex-shrink: 0; height: 22px; padding: 0 8px; font-size: var(--font-size-xs); }
 #symbol-picker-dialog, #doc-stats-dialog, #doc-mailmerge-dialog, #doc-shape-dialog, #doc-chart-dialog, #doc-fn-dialog { width: min(440px, calc(100vw - 32px)); }
+#doc-shape-dialog, #doc-chart-dialog, #doc-fn-dialog { overflow: visible; }
+#doc-shape-dialog .dialog-label, #doc-chart-dialog .dialog-label, #doc-fn-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
+#doc-shape-dialog .dialog-text-input, #doc-chart-dialog .dialog-text-input { flex: 1; min-width: 0; }
 .symbol-cat-tab { padding: 4px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ui-text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
 .symbol-cat-tab.active { color: var(--color-primary-dark); border-bottom-color: var(--color-primary); font-weight: 700; }
 .symbol-picker-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; max-height: 190px; overflow-y: auto; padding: 4px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); }

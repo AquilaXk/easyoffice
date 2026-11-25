@@ -151,7 +151,7 @@
       const root = editor();
       const sel = selectionAt();
       const focusedTable = options.targetEl && root ? grid.tableAt(root, options.targetEl) : null;
-      const table = sel?.table || focusedTable || root?.querySelector("table") || null;
+      const table = sel?.table || focusedTable || null;
       if (!table) {
         setFeedback?.(MSG_OUTSIDE);
         return { changed: false, error: MSG_OUTSIDE };

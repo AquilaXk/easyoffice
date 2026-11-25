@@ -216,6 +216,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-hwp-session.mjs",
   "scripts/test-webui-windows.mjs",
   "scripts/test-webui-shell-chrome.mjs",
+  "scripts/test-webui-modals-real-chrome.mjs",
   "scripts/test-webui-hwp-shortcuts.mjs",
   "scripts/test-support/modules.mjs",
   "apps/hwp-studio/src/embed/shell-shortcuts.ts",

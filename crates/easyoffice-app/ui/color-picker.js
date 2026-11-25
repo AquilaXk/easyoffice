@@ -113,6 +113,7 @@
       const active = ACTIVE_POPUP.get(document);
       if (event.key !== "Escape" || !active) return;
       event.stopPropagation?.();
+      event.preventDefault?.();
       active.close();
       active.button.focus();
     }, true);

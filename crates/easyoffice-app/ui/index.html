@@ -2445,10 +2445,7 @@
             </select>
           </div>
           <div class="dialog-row"><label class="dialog-label" for="doc-shape-text">텍스트</label><input id="doc-shape-text" type="text" class="dialog-text-input" maxlength="512" autocomplete="off" value="도형" /></div>
-          <div class="dialog-row">
-            <label class="dialog-label" for="doc-shape-fill">채우기 색</label><input id="doc-shape-fill" type="color" value="#dbeafe" />
-            <label class="dialog-label" for="doc-shape-stroke">선 색</label><input id="doc-shape-stroke" type="color" value="#2563eb" />
-          </div>
+          <div class="dialog-row"><span class="dialog-label">채우기 색</span><div id="doc-shape-fill-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="채우기 색" aria-label="채우기 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="doc-shape-fill" type="color" value="#dbeafe" aria-label="채우기 색" /><div id="doc-shape-fill-palette" class="sb-hl-palette" hidden></div></div><span class="dialog-label">선 색</span><div id="doc-shape-stroke-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="선 색" aria-label="선 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="doc-shape-stroke" type="color" value="#2563eb" aria-label="선 색" /><div id="doc-shape-stroke-palette" class="sb-hl-palette" hidden></div></div></div>
           <div class="dialog-row">
             <label class="dialog-label" for="doc-shape-w">너비</label><input id="doc-shape-w" type="number" min="24" max="180" step="1" value="64" class="dialog-input" /><span class="dialog-unit">mm</span>
             <label class="dialog-label" for="doc-shape-h">높이</label><input id="doc-shape-h" type="number" min="12" max="120" step="1" value="28" class="dialog-input" /><span class="dialog-unit">mm</span>
