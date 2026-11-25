@@ -388,3 +388,55 @@ test("the desktop bridge's PDF edit sends the opened bytes once, small ops after
   delete env.__EASYOFFICE_SHELL_TOKEN__;
   await assert.rejects(pdfEdit.open("a.pdf", ""), /연결할 수 없습니다/);
 });
+
+test("toolbarLabels syncs bidirectionally between shellContext and HWP iframe embed port", async () => {
+  const { api, frames, requests, sendEvent } = loadHost(undefined, { initialToolbarLabels: false });
+  await api.onModuleActivated("HWP");
+  await settle();
+  assert.match(frames[0].getAttribute("src"), /[?&]toolbarLabels=hidden(&|$)/);
+  const pushed = requests.filter((r) => r.method === "setShellContext");
+  assert.equal(pushed[0].params.toolbarLabels, false);
+
+  const labelEvents = [];
+  const changes = [];
+  api.onToolbarLabels((visible) => labelEvents.push(visible));
+  api.onChange((e) => changes.push(e));
+
+  await api.setShellContext({ toolbarLabels: true });
+  await settle();
+  assert.equal(requests.filter((r) => r.method === "setShellContext").at(-1).params.toolbarLabels, true);
+
+  sendEvent({ schemaVersion: 1, reason: "shell_toolbar_labels", visible: false });
+  sendEvent({ schemaVersion: 1, reason: "shell_toolbar_labels", visible: "bad" });
+  await settle();
+  assert.deepEqual(labelEvents, [false]);
+  assert.equal(changes.length, 0, "toolbar-label toggle event never dirties the document");
+
+  const { sanitizeShellContext, parseShellToolbarLabels } = await import("../apps/hwp-studio/src/embed/shell-menu.ts");
+  assert.equal(parseShellToolbarLabels("?theme=dark&toolbarLabels=hidden"), false);
+  assert.equal(parseShellToolbarLabels("?toolbarLabels=shown"), true);
+  assert.equal(parseShellToolbarLabels("?toolbarLabels=other"), null);
+  assert.equal(sanitizeShellContext({ toolbarLabels: false }).toolbarLabels, false);
+  assert.equal(sanitizeShellContext({ toolbarLabels: "hidden" }).toolbarLabels, null);
+
+  const { onToolbarLabelsToggle, setToolbarLabels, toolbarLabelsCommand } = await import("../apps/hwp-studio/src/ui/toolbar-labels.ts");
+  const reported = [];
+  const off = onToolbarLabelsToggle((v) => reported.push(v));
+  const origDoc = globalThis.document;
+  const fakeItem = { classList: { toggle() {} }, setAttribute() {} };
+  const store = new Map();
+  globalThis.document = { documentElement: { dataset: { toolbarLabels: "shown" } }, querySelectorAll: () => [fakeItem] };
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  try {
+    setToolbarLabels(false);
+    assert.deepEqual(reported, [], "shell push via setToolbarLabels must not echo back");
+    assert.equal(globalThis.document.documentElement.dataset.toolbarLabels, "hidden");
+    toolbarLabelsCommand.execute();
+    assert.deepEqual(reported, [true], "iframe command toggle notifies host once");
+    assert.equal(globalThis.document.documentElement.dataset.toolbarLabels, "shown");
+  } finally {
+    off();
+    if (origDoc === undefined) delete globalThis.document;
+    else globalThis.document = origDoc;
+  }
+});

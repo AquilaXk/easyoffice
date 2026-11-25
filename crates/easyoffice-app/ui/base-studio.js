@@ -442,18 +442,17 @@
           wrap.appendChild(chips);
         }
         const sel = mkSel("base-cell-select", label), curSingle = Array.isArray(val) ? (val[0] || "") : String(val || "");
-        addOpt(sel, "", "(연결 없음)");
-        // The select starts with the one record it holds; the whole list of the target table is put in when it is first used
-        // and is shared by every cell of the field (a cell per row with the whole list in each was rows x records nodes).
-        if (items[0]) addOpt(sel, items[0].id, items[0].label);
+        addOpt(sel, "", "(연결 없음)"); if (items[0]) addOpt(sel, items[0].id, items[0].label);
         sel.value = curSingle;
-        const fillOptions = () => {
-          sel.replaceChildren();
-          addOpt(sel, "", "(연결 없음)");
-          for (const [recId, optLabel] of relationOptionsOf(field, query)) addOpt(sel, recId, optLabel);
-          sel.value = curSingle;
+        let optionsLoaded = false;
+        const ensureOptions = () => {
+          if (optionsLoaded) return; optionsLoaded = true;
+          sel.replaceChildren(); addOpt(sel, "", "(연결 없음)");
+          for (const [id, txt] of relationOptionsOf(field, query)) addOpt(sel, id, txt);
+          sel.value = curSingle; syncSelect(sel);
         };
-        for (const type of ["focus", "mousedown"]) sel.addEventListener(type, fillOptions, { once: true });
+        for (const t of ["focus", "mousedown"]) sel.addEventListener(t, ensureOptions, { once: true });
+        for (const t of ["mousedown", "focusin", "keydown"]) wrap.addEventListener(t, ensureOptions, { once: true, capture: true });
         sel.addEventListener("change", () => commitGridEdit(td, sel, recId, field.id, sel.value ? [sel.value] : [], () => { sel.value = curSingle; }));
         showPrevInvalid(sel); wrap.appendChild(sel); td.appendChild(wrap);
         return;
@@ -546,7 +545,7 @@
         : { widthKey: table.id + "|" + query.fields.map((f) => `${f.id}:${f.name}:${f.type}`).join("|"), growOnly: false };
       gridWin = host.__EASYOFFICE_BASE_GRID_WINDOW__.createGridWindow(doc, {
         query, groups: query.groups, grouped: Boolean(table.groupByFieldId), colSpan: query.fields.length + 1, buildGroupRow, buildDataRow,
-        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, fields: query.fields, rowHeight: table.rowHeight, growOnly, onRowBuilt: cellSel.rowBuilt,
+        memo: gridMemo, widths: gridWidths, scrollKey: table.id, widthKey, fields: query.fields, rowHeight: table.rowHeight, growOnly, onRowBuilt: (tr, item) => { enhanceSelects(tr); cellSel.rowBuilt(tr, item); },
       });
       const tbody = gridWin.tbody, itemCount = gridWin.count;
       // The selection is kept while the table is drawn again for an edit; another table, filter, sort or group starts without one.

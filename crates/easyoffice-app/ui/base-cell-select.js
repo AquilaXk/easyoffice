@@ -184,14 +184,21 @@
 
     // ---- editing ----
 
-    function onEditBlur() {
+    function onEditBlur(ev) {
       if (!editing) return;
+      if (editing.selectRoot && ev?.relatedTarget && editing.selectRoot.contains(ev.relatedTarget)) {
+        editing.ctl = ev.relatedTarget;
+        ev.relatedTarget.addEventListener("blur", onEditBlur, { once: true });
+        return;
+      }
       if (editing.text) editing.ctl.readOnly = true;
       editing = null; syncFillHandle();
     }
 
     function beginEdit(td, ctl) {
-      editing = { td, ctl, text: isTextInput(ctl), orig: ctl.value };
+      const selectRoot = ctl.closest?.(".custom-select") || null;
+      const valueCtl = selectRoot ? selectRoot.querySelector("select") || ctl : ctl;
+      editing = { td, ctl, selectRoot, text: isTextInput(ctl), orig: valueCtl.value };
       ctl.addEventListener("blur", onEditBlur, { once: true });
       syncFillHandle();
     }
@@ -202,6 +209,7 @@
       if (restore && edit.text) edit.ctl.value = edit.orig;
       editing = null;
       if (edit.text) edit.ctl.readOnly = true;
+      host.__EASYOFFICE_CUSTOM_SELECT__?.closeOpenIn?.(edit.td);
       refocus = keepFocus;
       edit.ctl.blur();
       if (refocus) { refocus = false; ctx?.tbl.focus({ preventScroll: true }); }
@@ -219,6 +227,17 @@
       if (field.type === "select" || field.type === "relation") {
         const select = td.querySelector("select");
         if (!select) return false;
+        const trigger = td.querySelector(".custom-select-trigger");
+        if (trigger && select.classList?.contains("native-select-hidden")) {
+          beginEdit(td, trigger); trigger.focus({ preventScroll: true });
+          if (seed === undefined && !trigger.closest?.(".custom-select")?.classList?.contains("open")) {
+            const ev = typeof host.MouseEvent === "function"
+              ? new host.MouseEvent("mousedown", { bubbles: true, cancelable: true })
+              : { type: "mousedown", bubbles: true, cancelable: true, target: trigger, preventDefault() {}, stopPropagation() {} };
+            trigger.dispatchEvent(ev);
+          }
+          return false;
+        }
         beginEdit(td, select); select.focus({ preventScroll: true });
         if (seed === undefined) { try { select.showPicker?.(); } catch { /* a picker needs a user gesture */ } }
         return false;
@@ -296,13 +315,13 @@
     async function runClipboardCommand(cmd, readSys, writeSys) {
       if (!ctx || editing) { deps.setFeedback("현재 보기나 편집 상태에서는 클립보드 명령을 실행할 수 없습니다."); return false; }
       if (cmd === "clip-copy" || cmd === "clip-cut") {
-        if (!sel) { deps.setFeedback((cmd === "clip-cut" ? "오려 둘" : "복사할") + " 칸을 먼저 선택하세요"); return false; }
+        if (!sel) { deps.setFeedback((cmd === "clip-cut" ? "잘라낼" : "복사할") + " 칸을 먼저 선택하세요"); return false; }
         const res = copyText();
         if (!res.ok) { deps.setFeedback(res.error); return false; }
         internalClip = res.text;
         const toSys = writeSys ? await writeSys(res.text) : false;
         if (cmd === "clip-cut") clearRange();
-        deps.setFeedback("선택 범위 " + (cmd === "clip-cut" ? "오려 두기" : "복사") + " 완료" + (toSys ? "" : " (앱 내부 클립보드)"));
+        deps.setFeedback("선택 범위 " + (cmd === "clip-cut" ? "잘라내기" : "복사") + " 완료" + (toSys ? "" : " (앱 내부 클립보드)"));
         return true;
       }
       if (cmd === "clip-paste") {
@@ -367,7 +386,8 @@
     const nativeTarget = (ev, at) => {
       const hit = ev.target?.closest?.(NATIVE_CONTROL);
       if (!hit) return false;
-      return hit.tagName !== "SELECT" || (sel?.ar === at.r && sel?.ac === at.c && N.isSingle(N.rangeOf(sel)) && extraRanges.length === 0);
+      const isCombo = hit.tagName === "SELECT" || hit.classList?.contains("custom-select-trigger");
+      return !isCombo || (sel?.ar === at.r && sel?.ac === at.c && N.isSingle(N.rangeOf(sel)) && extraRanges.length === 0);
     };
 
     function pickMulti(ev, nextSel, kind) {
@@ -493,7 +513,7 @@
       const td = ev.target?.closest?.(CELL), at = td && coordsOf(td);
       if (!at) return;
       if (!sel || sel.ar !== at.r || sel.ac !== at.c) setSel(N.single(at.r, at.c), false, []);
-      if (isTextInput(ev.target)) { ev.target.readOnly = false; beginEdit(td, ev.target); } else if (ev.target.tagName === "SELECT") beginEdit(td, ev.target);
+      if (isTextInput(ev.target)) { ev.target.readOnly = false; beginEdit(td, ev.target); } else if (ev.target.tagName === "SELECT" || ev.target.classList?.contains("custom-select-trigger")) beginEdit(td, ev.target);
     }
 
     // ---- lifecycle ----

@@ -474,8 +474,8 @@ test("a checkbox toggles with Space, Enter and F2; a select takes the focus; a f
   assert.equal(stateValues(studio, "r0").f5, true);
   mousedown(cellOf(root, "r0", "f3"));
   press(document, "Enter");
-  const select = cellOf(root, "r0", "f3").querySelector("select");
-  assert.equal(document.activeElement, select);
+  const selectControl = cellOf(root, "r0", "f3").querySelector(".custom-select-trigger") || cellOf(root, "r0", "f3").querySelector("select");
+  assert.ok(document.activeElement === selectControl, "custom-select trigger (or native select fallback) takes focus");
   assert.equal(press(document, "Tab"), true, "Tab leaves the select and goes right");
   assert.deepEqual(activeOf(root), ["r0", "f4"]);
   assert.equal(document.activeElement, tableOf(root));

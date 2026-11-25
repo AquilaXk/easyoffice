@@ -799,7 +799,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     async function runSheetClipboard(cmd) {
       const where = await getSheetController().runSheetClipboardCommand(cmd);
-      const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
+      const verb = { "clip-cut": "잘라내기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
       if (where) setFeedback("선택 범위 " + verb + " 완료" + (where === "internal" ? " (앱 내부 클립보드)" : ""));
       else if (cmd === "clip-paste" && where === false) setFeedback("붙일 클립보드 내용이 없습니다");
     }
@@ -823,9 +823,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();
       if (cmd === "clip-paste") return runDocClipboardPaste(range);
+      const cutVerb = mod === "HWP" ? "오려 두기" : "잘라내기";
+      const cutObject = mod === "HWP" ? "오려 둘" : "잘라낼";
       const text = range && !range.collapsed ? range.toString() : "";
       if (!text) {
-        setFeedback((cmd === "clip-cut" ? "오려 둘" : "복사할") + " 텍스트를 먼저 선택하세요");
+        setFeedback((cmd === "clip-cut" ? cutObject : "복사할") + " 텍스트를 먼저 선택하세요");
         return;
       }
       const toSystem = await writeSystemClipboard(text);
@@ -834,7 +836,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         panels.computeSmartStats();
         noteActivity();
       }
-      const verb = cmd === "clip-cut" ? "오려 두기" : "복사";
+      const verb = cmd === "clip-cut" ? cutVerb : "복사";
       setFeedback("선택 영역 " + verb + " 완료 (" + Array.from(text).length + "자" + (toSystem ? ")" : " · 앱 내부 클립보드)"));
     }
 

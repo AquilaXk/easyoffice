@@ -400,6 +400,29 @@
     });
   }
 
+  const MODAL_GATED_NATIVE_IDS = new Set([
+    "edit:undo", "edit:redo", "edit:cut", "edit:copy",
+    "edit:paste-special", "edit:find", "edit:replace",
+    "insert:link", "format:bold", "format:italic", "format:underline", "view:palette",
+  ]);
+  const FIELD_GATED_NATIVE_IDS = new Set([
+    "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline",
+  ]);
+
+  function allowsNativeMenuContext(id, document, modal) {
+    if (MODAL_GATED_NATIVE_IDS.has(id)) {
+      const hasModal = Boolean(modal?.open) || Array.from(document.querySelectorAll?.("dialog") || []).some(
+        (dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog"),
+      );
+      if (hasModal) return false;
+    }
+    const tag = document.activeElement?.tagName;
+    if ((tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") && FIELD_GATED_NATIVE_IDS.has(id)) {
+      return false;
+    }
+    return true;
+  }
+
   // Runs the page action of a menu id; false for an unknown id or an action the page does not have.
   function runNativeMenuAction(id, actions) {
     const parsed = Object.hasOwn(PARSED_NATIVE_MENU_ACTIONS, id) ? PARSED_NATIVE_MENU_ACTIONS[id] : null;
@@ -488,15 +511,20 @@
         el.setAttribute("aria-checked", String(shown));
       }
     }
-    function toggleToolbarLabels() {
-      const next = document.documentElement?.dataset?.toolbarLabels === "hidden";
-      applyToolbarLabels(next);
+    function saveToolbarLabels(visible) {
+      const shown = Boolean(visible);
+      applyToolbarLabels(shown);
       try {
-        env.localStorage?.setItem(TOOLBAR_LABELS_KEY, next ? "shown" : "hidden");
+        env.localStorage?.setItem(TOOLBAR_LABELS_KEY, shown ? "shown" : "hidden");
       } catch {
         // Ignore unavailable storage.
       }
       pushMenuState();
+      return shown;
+    }
+    function toggleToolbarLabels() {
+      const next = saveToolbarLabels(document.documentElement?.dataset?.toolbarLabels === "hidden");
+      report(hwpHost?.setShellContext?.({ toolbarLabels: next }));
       return next;
     }
 
@@ -907,7 +935,10 @@
     function bind() {
       bindAbout();
       bindIconToolbarScroller();
-      applyToolbarLabels(readToolbarLabels());
+      const initialLabels = readToolbarLabels();
+      applyToolbarLabels(initialLabels);
+      report(hwpHost?.setShellContext?.({ toolbarLabels: initialLabels }));
+      hwpHost?.onToolbarLabels?.((visible) => saveToolbarLabels(visible));
       for (const el of document.querySelectorAll("[data-view-toolbar-labels]")) {
         el.addEventListener("click", (ev) => {
           ev.stopPropagation?.();
@@ -917,7 +948,9 @@
       }
       env.addEventListener?.("storage", (ev) => {
         if (ev.key === TOOLBAR_LABELS_KEY || ev.key === null) {
-          applyToolbarLabels(readToolbarLabels());
+          const nextLabels = readToolbarLabels();
+          applyToolbarLabels(nextLabels);
+          report(hwpHost?.setShellContext?.({ toolbarLabels: nextLabels }));
           pushMenuState();
         }
       });
@@ -933,5 +966,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, PARSED_NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, EMBED_ONLY_SET, START_DISABLED_SET, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions, sheetMenuPaletteItems };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, PARSED_NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, EMBED_ONLY_SET, START_DISABLED_SET, TEXT_FIELD_EDIT_COMMANDS, allowsNativeMenuContext, runNativeMenuAction, pageMenuActions, sheetMenuPaletteItems };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -253,3 +253,164 @@ test("Slice 2: Command palette filters cross-module/retired commands, sorts resu
   assert.ok(openAndQuery("직각 연결선").some((i) => i.title === "직각 연결선"));
   assert.ok(openAndQuery("도구 상자 라벨").some((i) => i.title === "도구 상자 라벨 표시"));
 });
+
+test("Slice 2 regression: BASE relation lazy custom-select, refresh/virtual scroll rows, and keyboard edit", async () => {
+  const { document, host } = await createWorkspaceHarness({ search: "?module=BASE&win=w-slice2-base-rel" });
+  await flushAsyncTurns(16);
+  const baseStudio = host.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+  const M = host.__EASYOFFICE_BASE_MODEL__;
+  const state = M.createInitialBaseState();
+  const deptTable = state.tables[0];
+  deptTable.name = "부서";
+  deptTable.records = [
+    { id: "d1", values: { [deptTable.fields[0].id]: "개발팀" } },
+    { id: "d2", values: { [deptTable.fields[0].id]: "기획팀" } },
+  ];
+  const staffRes = M.addTable(state, {
+    name: "직원",
+    fields: [
+      { id: "f_name", name: "이름", type: "text" },
+      { id: "f_role", name: "직무", type: "select", options: ["엔지니어", "디자이너"] },
+      { id: "f_dept", name: "소속", type: "relation", relationTableId: deptTable.id },
+    ],
+  });
+  const staffTable = staffRes.table;
+  staffTable.records = Array.from({ length: 130 }, (_, idx) => ({
+    id: `r_${idx + 1}`,
+    values: {
+      f_name: `사원 ${idx + 1}`,
+      f_role: idx % 2 === 0 ? "엔지니어" : "디자이너",
+      f_dept: idx === 0 ? ["d1"] : [],
+    },
+  }));
+  state.activeTableId = staffTable.id;
+  baseStudio.setState(state);
+  await flushAsyncTurns(8);
+
+  // Every built cell <select> uses custom-select (even with >120 records & after refreshGridCells + scroll)
+  const checkAllSelectsEnhanced = (label) => {
+    const selects = [...document.querySelectorAll("#pane-base select")];
+    assert.ok(selects.length > 0, `${label}: selects exist`);
+    for (const sel of selects) {
+      assert.ok(sel.classList.contains("native-select-hidden"), `${label}: ${sel.id || sel.getAttribute("aria-label")} hidden`);
+      assert.ok(sel.parentElement?.classList?.contains("custom-select"), `${label}: custom-select wrapper present`);
+      assert.ok(sel.parentElement.querySelector(".custom-select-trigger"), `${label}: trigger present`);
+    }
+  };
+  checkAllSelectsEnhanced("initial 130-row render");
+  baseStudio.updateCell("r_1", "f_role", "디자이너");
+  checkAllSelectsEnhanced("after updateCell / refreshGridCells()");
+  const wrap = document.querySelector("#pane-base .base-grid-wrap");
+  if (wrap) {
+    wrap.scrollTop = 1800;
+    wrap.dispatchEvent({ type: "scroll", target: wrap });
+    await flushAsyncTurns(4);
+    checkAllSelectsEnhanced("after virtual scroll");
+    wrap.scrollTop = 0;
+    wrap.dispatchEvent({ type: "scroll", target: wrap });
+    await flushAsyncTurns(4);
+  }
+
+  // Clicking relation .custom-select-trigger populates target table options synchronously into .custom-select-menu
+  const relWrap = document.querySelector("#pane-base .base-relation-cell");
+  const relCustom = relWrap.querySelector(".custom-select");
+  const relTrigger = relCustom.querySelector(".custom-select-trigger");
+  const relSel = relCustom.querySelector("select");
+  relWrap.dispatchEvent({ type: "mousedown", target: relTrigger });
+  relTrigger.dispatchEvent({ type: "mousedown", target: relTrigger });
+  const optTexts = [...relCustom.querySelectorAll(".custom-select-option")].map((b) => b.textContent);
+  assert.ok(optTexts.includes("개발팀") && optTexts.includes("기획팀"), `relation options hydrated: ${optTexts.join(",")}`);
+  relSel.value = "d2";
+  relSel.dispatchEvent({ type: "change", target: relSel });
+  assert.equal(relTrigger.querySelector(".custom-select-value").textContent, "기획팀");
+
+  // Keyboard Enter on select cell opens custom-select instead of failing or invoking native picker
+  const gridTbl = document.querySelector("#pane-base table.base-grid-table");
+  const roleCell = document.querySelector('#pane-base td.base-grid-cell[data-field-id="f_role"]');
+  assert.ok(roleCell && gridTbl);
+  roleCell.dispatchEvent({ type: "mousedown", button: 0, target: roleCell });
+  gridTbl.dispatchEvent({ type: "keydown", key: "Enter", target: gridTbl });
+  assert.ok(roleCell.querySelector(".custom-select").classList.contains("open"), "Enter opens custom-select on select cell");
+  gridTbl.dispatchEvent({ type: "keydown", key: "Tab", target: gridTbl });
+  assert.equal(roleCell.querySelector(".custom-select").classList.contains("open"), false, "Tab closes open custom-select");
+});
+
+test("Slice 2 regression: HWP -> DOC(.pages) tab switch restores Pages labels, Office cut says 잘라내기, and native menu guards modals/fields", async () => {
+  const { document, host } = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-slice2-reg2",
+    testIpc: async (command, rawPayload) => {
+      if (command === "convert_document_format") {
+        const req = JSON.parse(rawPayload || "{}");
+        if (req.action === "decode" && String(req.fileName || "").endsWith(".pages")) {
+          return {
+            status: "OK",
+            module: "DOC",
+            format: "pages",
+            kind: "blocks",
+            itemCount: 1,
+            title: "pages-switch.pages",
+            blocks: [{ type: "paragraph", heading: 1, runs: [{ text: "페이지스 제목" }] }],
+          };
+        }
+      }
+      return null;
+    },
+  });
+  await flushAsyncTurns(14);
+  await pickFile(document, makeFixtureFile("pages-switch.pages", "pages-bytes"));
+  await flushAsyncTurns(16);
+  const paperMenuLabel = () => document.querySelector('#menu-bar .md-item[data-kinds="DOC SLIDE"][data-studio-menu-cmd="layout-paper"] .md-label')?.textContent;
+  assert.equal(paperMenuLabel(), "페이지 설정");
+
+  // Switch to HWP and back to DOC(.pages): Pages menu/style labels must stay active
+  switchModule(document, "HWP");
+  await flushAsyncTurns(6);
+  assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-label"), "진하게");
+  switchModule(document, "DOC");
+  await flushAsyncTurns(8);
+  assert.equal(paperMenuLabel(), "페이지 설정", "DOC(.pages) retains 페이지 설정 after switching back from HWP");
+  assert.equal(document.querySelector('#menu-bar .md-item[data-kinds="DOC"][data-studio-menu-cmd="mod-header"] .md-label').textContent, "머리말");
+  assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-label"), "굵게");
+
+  // DOC / SHEET / BASE cut feedback says 잘라내기 (not 오려 두기)
+  document.querySelector('.md-item[data-studio-menu-cmd="clip-cut"]').click();
+  await flushAsyncTurns(4);
+  assert.match(document.getElementById("status-command-feedback").textContent, /잘라낼 텍스트를 먼저 선택/);
+  assert.doesNotMatch(document.getElementById("status-command-feedback").textContent, /오려/);
+
+  switchModule(document, "BASE");
+  await flushAsyncTurns(6);
+  await host.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio().runClipboardCommand("clip-cut");
+  assert.match(document.getElementById("status-command-feedback").textContent, /잘라낼 칸을 먼저 선택/);
+
+  // BOARD chart dialog syncCustomSelect updates trigger value on open
+  switchModule(document, "BOARD");
+  await flushAsyncTurns(6);
+  const board = host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+  board.addNode({ kind: "chart", chartType: "line", x: 60, y: 60, w: 300, h: 180, title: "추이" });
+  await flushAsyncTurns(4);
+  const chartNodeEl = document.querySelector("#pane-board .board-node");
+  chartNodeEl.dispatchEvent({ type: "dblclick", target: chartNodeEl });
+  const chartDlg = document.getElementById("board-chart-dialog");
+  assert.equal(chartDlg.open, true);
+  assert.equal(document.querySelector('#board-chart-dialog [data-select-id="board-chart-type"] .custom-select-value').textContent, "꺾은선형");
+  chartDlg.close();
+
+  // Native menu blocks modal/field shortcuts when dialog is open or input focused
+  switchModule(document, "DOC");
+  await flushAsyncTurns(6);
+  const pageDlg = document.getElementById("doc-page-setup-dialog");
+  pageDlg.showModal();
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("insert:link"), false);
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("format:bold"), false);
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("view:palette"), false);
+  assert.equal(document.getElementById("doc-link-dialog").open, false);
+  pageDlg.close();
+
+  const copilotInput = document.getElementById("copilot-input");
+  copilotInput.focus();
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("insert:link"), false);
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("edit:paste-special"), false);
+  assert.equal(document.getElementById("doc-link-dialog").open, false);
+  copilotInput.blur();
+});

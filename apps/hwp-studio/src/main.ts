@@ -61,12 +61,14 @@ import {
   createShellCommandRelay,
   installShellMenu,
   parseShellTheme,
+  parseShellToolbarLabels,
   renderShellRecents,
+  SHELL_TOOLBAR_LABELS_REASON,
   sanitizeShellContext,
 } from './embed/shell-menu.ts';
 import { renderPrintBatch } from './embed/print-batch.ts';
 import { createShellFontBridge } from './embed/host-fonts.ts';
-import { initToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
+import { initToolbarLabels, onToolbarLabelsToggle, setToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import { cellSelectionEnterCommand } from './command/cell-selection.ts';
 import { safeCopyCommand, safeCutCommand } from './command/safe-cut.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
@@ -264,6 +266,8 @@ if (upstreamCopy) registry.register(safeCopyCommand(upstreamCopy));
 registry.registerAll(viewCommands);
 registry.register(toolbarLabelsCommand);
 initToolbarLabels();
+const initialToolbarLabels = parseShellToolbarLabels(window.location.search);
+if (initialToolbarLabels !== null) setToolbarLabels(initialToolbarLabels);
 registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
@@ -347,10 +351,10 @@ async function initialize(): Promise<void> {
   const msg = sbMessage();
   try {
     msg.textContent = extensionViewerSettings.disableExternalWebFonts
-      ? '로컬 폰트 준비 중...'
-      : '웹폰트 로딩 중...';
+      ? '로컬 폰트 준비 중…'
+      : '웹폰트 로딩 중…';
     await loadWebFonts([], undefined, extensionViewerSettings);  // CSS @font-face 등록 + CRITICAL 폰트만 로드
-    msg.textContent = 'WASM 로딩 중...';
+    msg.textContent = 'WASM 로딩 중…';
     await wasm.initialize();
     // EasyOffice: Canvas2D only (CanvasKit is not bundled).
     const renderBackendRequest = { backend: 'canvas2d' as const, source: 'default' as const };
@@ -661,6 +665,7 @@ installEmbedRuntime({
     const offs = [
       shellShortcutRelay.add(listener),
       shellCommandRelay.add(listener),
+      onToolbarLabelsToggle((visible) => listener({ schemaVersion: 1, reason: SHELL_TOOLBAR_LABELS_REASON, visible })),
       shellFontBridge.relay.add((request) => listener({ ...request })),
       eventBus.on('document-agent-changed', listener),
       eventBus.on('document-dirty-changed', (change) => {
@@ -853,6 +858,7 @@ installEmbedRuntime({
         // "PDF로 내보내기" is shown only when the shell says it can do it (desktop app).
         const pdfItem = document.querySelector<HTMLElement>('[data-shell-cmd="export-pdf"]');
         if (pdfItem && context.pdfExport !== null) pdfItem.hidden = !context.pdfExport;
+        if (context.toolbarLabels !== null) setToolbarLabels(context.toolbarLabels);
         return { applied: true as const };
       });
     },

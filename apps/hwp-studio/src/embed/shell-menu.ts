@@ -5,6 +5,7 @@
 // editor (`setShellContext`), so the window has one menu row and one theme.
 
 export const SHELL_COMMAND_REASON = 'shell_command' as const;
+export const SHELL_TOOLBAR_LABELS_REASON = 'shell_toolbar_labels' as const;
 export const SHELL_COMMANDS = ['new', 'open', 'recent', 'recent-dialog', 'save', 'save-as', 'export-pdf', 'print', 'close', 'about'] as const;
 export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
@@ -27,6 +28,8 @@ export interface ShellContext {
   recents: ShellRecent[] | null;
   /** Whether the shell can export a searchable PDF (desktop app only); null = not stated. */
   pdfExport: boolean | null;
+  /** Whether toolbar button text labels are shown in the outer shell; null = not stated. */
+  toolbarLabels: boolean | null;
 }
 
 export interface ShellCommandPayload {
@@ -47,6 +50,14 @@ export function parseShellTheme(search: string): ShellTheme | null {
   return isShellTheme(value) ? value : null;
 }
 
+/** Toolbar-label preference named in the frame URL (first paint), if stated. */
+export function parseShellToolbarLabels(search: string): boolean | null {
+  const value = new URLSearchParams(search).get('toolbarLabels');
+  if (value === 'hidden') return false;
+  if (value === 'shown') return true;
+  return null;
+}
+
 /** Validates what the shell pushed; anything malformed is dropped rather than applied. */
 export function sanitizeShellContext(raw: unknown): ShellContext {
   const params = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -61,7 +72,8 @@ export function sanitizeShellContext(raw: unknown): ShellContext {
     }
   }
   const pdfExport = typeof params.pdfExport === 'boolean' ? params.pdfExport : null;
-  return { theme: isShellTheme(params.theme) ? params.theme : null, recents, pdfExport };
+  const toolbarLabels = typeof params.toolbarLabels === 'boolean' ? params.toolbarLabels : null;
+  return { theme: isShellTheme(params.theme) ? params.theme : null, recents, pdfExport, toolbarLabels };
 }
 
 export type ShellCommandSink = (payload: ShellCommandPayload) => void;

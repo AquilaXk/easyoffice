@@ -43,7 +43,7 @@ impl OdfCodec {
             }
             if !styling.view_within_bounds(Self::MAX_ROWS + 1, Self::MAX_COLS + 1) {
                 return Err(ods_budget_error(
-                    "ODS 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.",
+                    "ODS 틀 고정·탭 색·그룹·페이지 설정 값이 허용 범위를 초과했습니다.",
                 ));
             }
             if !crate::row_heights_within_bounds(

@@ -233,6 +233,7 @@
       }
       if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
         workspacePanels.restoreDocTabState(mod);
+        if (typeof onModuleApplied === "function") onModuleApplied(mod);
       }
       const splitStage = document.querySelector(".canvas-stage");
       if (splitStage?.dataset?.splitView === "true") workspacePanels.syncSplitComparePane(splitStage);

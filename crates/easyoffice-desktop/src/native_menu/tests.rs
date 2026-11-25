@@ -957,4 +957,12 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
             "{kind:?}"
         );
     }
+    assert_eq!(accelerator_for(MenuKind::Hwp, spec("insert:link")), None);
+    for kind in [MenuKind::Doc, MenuKind::Sheet, MenuKind::Slide] {
+        assert_eq!(
+            accelerator_for(kind, spec("insert:link")),
+            Some("CmdOrCtrl+K"),
+            "{kind:?}"
+        );
+    }
 }

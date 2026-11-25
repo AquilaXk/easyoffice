@@ -50,6 +50,7 @@
   // The editor's 파일 menu forwards shell commands by name only; the shell re-checks each one
   // here before anything runs, so a compromised frame can only ask for these actions.
   const SHELL_COMMAND_REASON = "shell_command";
+  const SHELL_TOOLBAR_LABELS_REASON = "shell_toolbar_labels";
   const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
@@ -142,11 +143,13 @@
     const changeListeners = new Set();
     const shortcutListeners = new Set();
     const commandListeners = new Set();
-    // Pushed into the editor (`setShellContext`): the shell theme and the recent-documents list.
+    const toolbarLabelsListeners = new Set();
+    // Pushed into the editor (`setShellContext`): the shell theme, recent-documents list, pdf capability and toolbar labels.
     const shellContext = {
       theme: SHELL_THEMES.includes(deps.initialTheme) ? deps.initialTheme : "system",
       recents: [],
       pdfExport: deps.canExportPdf === true,
+      toolbarLabels: typeof deps.initialToolbarLabels === "boolean" ? deps.initialToolbarLabels : true,
     };
     // Combos the editor forwards to the shell (from the shell's single shortcut table). They travel
     // in the frame URL so the editor knows which keys to hand over; the editor sends combo strings only.
@@ -433,6 +436,13 @@
         if (command) for (const listener of commandListeners) listener(command);
         return;
       }
+      if (payload?.reason === SHELL_TOOLBAR_LABELS_REASON) {
+        if (typeof payload.visible === "boolean") {
+          shellContext.toolbarLabels = payload.visible;
+          for (const listener of toolbarLabelsListeners) listener(payload.visible);
+        }
+        return;
+      }
       if (payload?.reason === SHORTCUT_REASON) {
         if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
         return;
@@ -536,6 +546,7 @@
       const query = [];
       if (shellShortcuts.length > 0) query.push("shellKeys=" + encodeURIComponent(shellShortcuts.join(",")));
       if (shellContext.theme !== "system") query.push("theme=" + shellContext.theme);
+      if (shellContext.toolbarLabels === false) query.push("toolbarLabels=hidden");
       el.setAttribute("src", query.length > 0 ? studioSrc + "?" + query.join("&") : studioSrc);
       pane().appendChild(el);
       return el;
@@ -645,12 +656,18 @@
     // Theme and recent documents travel to the editor as plain values (recents: opaque id + name).
     function pushShellContext() {
       if (!port || !capabilities.includes("shell-context-v1")) return Promise.resolve(false);
-      return call(SHELL_CONTEXT_METHOD, { theme: shellContext.theme, recents: shellContext.recents, pdfExport: shellContext.pdfExport })
+      return call(SHELL_CONTEXT_METHOD, {
+        theme: shellContext.theme,
+        recents: shellContext.recents,
+        pdfExport: shellContext.pdfExport,
+        toolbarLabels: shellContext.toolbarLabels,
+      })
         .then(() => true, () => false);
     }
 
     function setShellContext(next) {
       if (next && SHELL_THEMES.includes(next.theme)) shellContext.theme = next.theme;
+      if (next && typeof next.toolbarLabels === "boolean") shellContext.toolbarLabels = next.toolbarLabels;
       if (next && Array.isArray(next.recents)) {
         shellContext.recents = next.recents
           .filter((r) => r && RECENT_ID_PATTERN.test(String(r.id)) && typeof r.name === "string" && r.name)
@@ -669,6 +686,11 @@
     function onCommand(listener) {
       commandListeners.add(listener);
       return () => commandListeners.delete(listener);
+    }
+
+    function onToolbarLabels(listener) {
+      toolbarLabelsListeners.add(listener);
+      return () => toolbarLabelsListeners.delete(listener);
     }
 
     function onShortcut(listener) {
@@ -748,7 +770,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, setDragOver, onStatus, whenSettled, runSmoke, runFrameProbe,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, onToolbarLabels, setShellContext, setDragOver, onStatus, whenSettled, runSmoke, runFrameProbe,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

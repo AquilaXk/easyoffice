@@ -609,7 +609,7 @@
           select.appendChild(opt);
         }
       }
-      select.value = styleNameOf(null);
+      select.value = styleNameOf(null, modOverride, flavorOverride);
       host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(select);
     }
 
@@ -650,8 +650,8 @@
       return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : defaultLinePercent();
     }
 
-    function styleNameOf(block) {
-      const flavor = docFlavorOf();
+    function styleNameOf(block, modOverride, flavorOverride) {
+      const flavor = docFlavorOf(modOverride, flavorOverride);
       const level = HEADING_TAG_RE.test(block?.tagName || "") ? Number(block.tagName[1]) : 0;
       if (level >= 1 && level <= 6) {
         if (flavor === "hwp") return "개요 " + level;

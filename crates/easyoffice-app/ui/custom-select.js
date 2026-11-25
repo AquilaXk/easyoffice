@@ -315,6 +315,7 @@
     const { root, trigger, menu, select, options, rowByValue, close, toggle, sync } = ctl;
     if (select.disabled) return;
     if (event.key === "Escape") {
+      if (!root.classList.contains("open")) return;
       close();
       trigger?.focus?.();
       event.preventDefault?.();

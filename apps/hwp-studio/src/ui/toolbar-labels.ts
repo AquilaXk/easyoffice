@@ -40,8 +40,16 @@ export function readToolbarLabels(host: ToolbarLabelsHost = browserHost()): bool
   }
 }
 
-export function toggleToolbarLabels(host: ToolbarLabelsHost = browserHost()): boolean {
-  const visible = host.root.dataset.toolbarLabels === HIDDEN;
+const toggleListeners = new Set<(visible: boolean) => void>();
+
+export function onToolbarLabelsToggle(listener: (visible: boolean) => void): () => void {
+  toggleListeners.add(listener);
+  return () => {
+    toggleListeners.delete(listener);
+  };
+}
+
+export function setToolbarLabels(visible: boolean, host: ToolbarLabelsHost = browserHost()): boolean {
   applyToolbarLabels(visible, host);
   try {
     host.storage().setItem(TOOLBAR_LABELS_STORAGE_KEY, visible ? SHOWN : HIDDEN);
@@ -49,6 +57,10 @@ export function toggleToolbarLabels(host: ToolbarLabelsHost = browserHost()): bo
     // Keep the current window usable when storage is unavailable.
   }
   return visible;
+}
+
+export function toggleToolbarLabels(host: ToolbarLabelsHost = browserHost()): boolean {
+  return setToolbarLabels(host.root.dataset.toolbarLabels === HIDDEN, host);
 }
 
 export function initToolbarLabels(): void {
@@ -62,6 +74,7 @@ export const toolbarLabelsCommand: CommandDef = {
   id: TOOLBAR_LABELS_COMMAND_ID,
   label: '도구 상자 라벨 표시',
   execute() {
-    toggleToolbarLabels();
+    const visible = toggleToolbarLabels();
+    for (const listener of toggleListeners) listener(visible);
   },
 };

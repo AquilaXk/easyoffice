@@ -18,7 +18,7 @@ const ROWS: u32 = 1_048_576;
 const COLS: u32 = 16_384;
 
 fn bad(what: &str) -> EasyOfficeError {
-    EasyOfficeError::InvalidArgument(format!("쪽 설정 JSON이 올바르지 않습니다: {what}"))
+    EasyOfficeError::InvalidArgument(format!("페이지 설정 JSON이 올바르지 않습니다: {what}"))
 }
 
 type Obj<'a> = &'a [(String, StrictJsonValue)];
@@ -135,7 +135,7 @@ pub(crate) fn parse_page(obj: Obj<'_>, styling: &mut SheetStyling) -> Result<(),
     }
     if !page.within_bounds(ROWS, COLS) {
         return Err(EasyOfficeError::ResourceBudgetExceeded(
-            "쪽 설정 값(배율·여백·인쇄 영역·반복 행열)이 한도를 초과했습니다.".into(),
+            "페이지 설정 값(배율·여백·인쇄 영역·반복 행열)이 한도를 초과했습니다.".into(),
         ));
     }
     styling.page = page;
@@ -345,5 +345,7 @@ mod tests {
             moved(Axis::Col, EditKind::Insert, 0, 1),
             r#"{"landscape":true,"printArea":["C2:E10"],"titleRows":[1,2],"titleCols":[3,4]}"#
         );
+        let err = read(r#"{"page":{"scale":{"percent":9}}}"#).unwrap_err();
+        assert!(err.to_string().contains("페이지 설정"));
     }
 }

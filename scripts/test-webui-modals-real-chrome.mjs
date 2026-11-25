@@ -557,3 +557,118 @@ test("SHEET modal Tab exclusion via getComputedStyle, Space on button, Enter on 
   await sleep(80);
   assert.equal(await js(`document.getElementById("sheet-names-dialog").open`), false);
 });
+
+test("Slice 2 real Chrome: BASE custom-select hydration + unclipped menu, BOARD SVG icons + chart combo, toolbar-labels 34px layout", { skip }, async () => {
+  await navigateModule("BASE");
+  await js(`(() => {
+    const host = window.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+    const M = window.__EASYOFFICE_BASE_MODEL__;
+    const st = M.createInitialBaseState();
+    const dept = st.tables[0];
+    dept.name = "부서";
+    dept.records = [
+      { id: "d1", values: { [dept.fields[0].id]: "개발팀" } },
+      { id: "d2", values: { [dept.fields[0].id]: "디자인팀" } },
+    ];
+    const staff = M.addTable(st, {
+      name: "직원",
+      fields: [
+        { id: "f_name", name: "이름", type: "text" },
+        { id: "f_role", name: "직무", type: "select", options: ["엔지니어", "PM"] },
+        { id: "f_dept", name: "소속", type: "relation", relationTableId: dept.id },
+      ],
+    }).table;
+    staff.records = Array.from({ length: 130 }, (_, i) => ({
+      id: "r_" + (i + 1),
+      values: { f_name: "사원 " + (i + 1), f_role: i % 2 === 0 ? "엔지니어" : "PM", f_dept: [] },
+    }));
+    st.activeTableId = staff.id;
+    host.setState(st);
+  })()`);
+  await sleep(160);
+
+  // Check every select in BASE viewport uses custom-select and relation popup renders unclipped
+  const baseInitial = await js(`(() => {
+    const selects = [...document.querySelectorAll("#pane-base select")];
+    return {
+      total: selects.length,
+      unenhanced: selects.filter((s) => !s.classList.contains("native-select-hidden") || !s.parentElement?.classList?.contains("custom-select")).length,
+    };
+  })()`);
+  assert.ok(baseInitial.total > 0);
+  assert.equal(baseInitial.unenhanced, 0, "all BASE selects enhanced initially");
+
+  await clickCenter("#pane-base .base-relation-cell .custom-select-trigger");
+  await sleep(100);
+  const relPopup = await js(`(() => {
+    const custom = document.querySelector("#pane-base .base-relation-cell .custom-select");
+    const menu = custom?.querySelector(".custom-select-menu");
+    const menuRect = menu?.getBoundingClientRect();
+    const cellRect = custom?.closest(".base-relation-cell")?.getBoundingClientRect();
+    const cs = custom ? getComputedStyle(custom.closest(".base-relation-cell")) : null;
+    return {
+      open: Boolean(custom?.classList?.contains("open")),
+      options: [...(custom?.querySelectorAll(".custom-select-option") || [])].map((b) => b.textContent),
+      menuH: menuRect?.height || 0,
+      cellH: cellRect?.height || 0,
+      overflow: cs?.overflow || "",
+    };
+  })()`);
+  assert.equal(relPopup.open, true);
+  assert.ok(relPopup.options.includes("개발팀") && relPopup.options.includes("디자인팀"), "real Chrome relation options populated");
+  assert.ok(relPopup.menuH > 40, "relation custom-select menu renders unclipped in real Chrome");
+  assert.equal(relPopup.overflow, "visible", "relation cell lifts overflow clip while menu is open");
+
+  // Scroll 130-row virtual table and confirm all newly created selects are enhanced
+  await js(`(() => {
+    const w = document.querySelector("#pane-base .base-grid-wrap");
+    w.scrollTop = 2000;
+    w.dispatchEvent(new Event("scroll"));
+  })()`);
+  await sleep(160);
+  const baseScrolled = await js(`(() => {
+    const selects = [...document.querySelectorAll("#pane-base select")];
+    return {
+      total: selects.length,
+      unenhanced: selects.filter((s) => !s.classList.contains("native-select-hidden") || !s.parentElement?.classList?.contains("custom-select")).length,
+    };
+  })()`);
+  assert.ok(baseScrolled.total > 0);
+  assert.equal(baseScrolled.unenhanced, 0, "all BASE selects enhanced after virtual scroll");
+
+  // Navigate to BOARD: check icons + chart dialog custom-select sync + toolbar-labels 34px toggle
+  await navigateModule("BOARD");
+  const boardCheck = await js(`(() => {
+    const board = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    board.addNode({ kind: "chart", chartType: "bar", x: 40, y: 40, w: 280, h: 160, title: "차트" });
+    const nodeEl = document.querySelector("#pane-board .board-node");
+    nodeEl.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const dlg = document.getElementById("board-chart-dialog");
+    const val = dlg.querySelector('[data-select-id="board-chart-type"] .custom-select-value')?.textContent;
+    dlg.close();
+    const icons = ["#btn-board-export-pdf", "#btn-board-add-chart", "#btn-board-delete"].map((id) => {
+      const r = document.querySelector(id + " svg.eo-icon")?.getBoundingClientRect();
+      return { id, w: r?.width || 0, h: r?.height || 0 };
+    });
+    return { val, icons };
+  })()`);
+  assert.equal(boardCheck.val, "묶은 가로 막대형");
+  for (const ic of boardCheck.icons) {
+    assert.ok(ic.w >= 16 && ic.h >= 16, `${ic.id} renders visible SVG icon`);
+  }
+
+  // Toggle toolbar-labels off and verify #icon-toolbar compact height (34px) in real Chrome
+  await navigateModule("DOC");
+  const tbToggle = await js(`(() => {
+    const beforeH = document.getElementById("icon-toolbar").getBoundingClientRect().height;
+    document.querySelector("[data-view-toolbar-labels]").click();
+    const hiddenH = document.getElementById("icon-toolbar").getBoundingClientRect().height;
+    const lblDisplay = getComputedStyle(document.querySelector("#icon-toolbar .tb-label")).display;
+    document.querySelector("[data-view-toolbar-labels]").click();
+    const restoredH = document.getElementById("icon-toolbar").getBoundingClientRect().height;
+    return { beforeH, hiddenH, lblDisplay, restoredH };
+  })()`);
+  assert.equal(tbToggle.lblDisplay, "none");
+  assert.ok(tbToggle.hiddenH <= 36 && tbToggle.hiddenH < tbToggle.beforeH, `compact toolbar ${tbToggle.hiddenH} < ${tbToggle.beforeH}`);
+  assert.equal(tbToggle.restoredH, tbToggle.beforeH);
+});

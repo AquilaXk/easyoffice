@@ -82,6 +82,14 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
     })
 }
 
+/// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords).
+fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> {
+    if kind == MenuKind::Hwp && spec.id == "insert:link" {
+        return None;
+    }
+    accelerator_of(spec)
+}
+
 /// Settings the user switches on and off or picks one of: check items whose mark [`sync`] sets.
 pub const CHECK_IDS: [&str; 5] = [
     "view:theme-system",
@@ -176,7 +184,7 @@ fn custom<R: Runtime>(
     spec: &MenuItemSpec,
 ) -> tauri::Result<tauri::menu::MenuItem<R>> {
     let builder = MenuItemBuilder::with_id(spec.id, label_for(kind, spec));
-    match accelerator_of(spec) {
+    match accelerator_for(kind, spec) {
         Some(accelerator) => builder.accelerator(accelerator).build(app),
         None => builder.build(app),
     }

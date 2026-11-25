@@ -142,31 +142,31 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
     try {
       setDocumentFontSubstitutions(docInfo.fontSubstitutions);
       viewState.lastAppliedLocalFontGeneration = null;
-      await updateLoadProgress(55, '폰트 준비 중...');
+      await updateLoadProgress(55, '폰트 준비 중…');
       if (docInfo.fontsUsed?.length) {
         await loadWebFonts(docInfo.fontsUsed, (loaded, total) => {
           const fontPercent = total > 0 ? 55 + Math.round((loaded / total) * 20) : 65;
-          msg.textContent = `파일 로딩 ${fontPercent}% - 폰트 로딩 중... (${loaded}/${total})`;
+          msg.textContent = `파일 로딩 ${fontPercent}% - 폰트 로딩 중… (${loaded}/${total})`;
         }, extensionViewerSettings);
       }
       // 저장 snapshot은 권한 prompt 없이 읽을 수 있다. Canvas2D 첫 paint의 family 해소가
       // 이미 승인된 exact local face를 놓치지 않도록 문서 view보다 먼저 준비한다.
       await loadStoredLocalFonts();
-      await updateLoadProgress(75, '문서 상태 적용 중...');
+      await updateLoadProgress(75, '문서 상태 적용 중…');
       viewState.totalSections = docInfo.sectionCount ?? 1;
       sbSection().textContent = t('ui.sbSection.text', { p1: 1, p2: viewState.totalSections });
       applySavedTextMarkSettings();
       getInputHandler()?.deactivate();
-      await updateLoadProgress(82, '페이지 렌더 준비 중...');
+      await updateLoadProgress(82, '페이지 렌더 준비 중…');
       const savedZoomFitMode = userSettings.getViewSettings().zoomFitMode;
       await getCanvasView()?.loadDocument();
       // 쪽 크기를 알 수 있는 첫 시점이다 — 저장된 맞춤은 이 문서의 쪽으로 다시 계산한다.
       applySavedZoomFitMode(savedZoomFitMode);
-      await updateLoadProgress(90, '도구 모음 준비 중...');
+      await updateLoadProgress(90, '도구 모음 준비 중…');
       getToolbar()?.setEnabled(true);
       getToolbar()?.initFontDropdown(docInfo.fontsUsed);
       getToolbar()?.initStyleDropdown();
-      await updateLoadProgress(94, '문서 검증 및 글꼴 확인 중...');
+      await updateLoadProgress(94, '문서 검증 및 글꼴 확인 중…');
 
       // #177: HWPX 비표준 lineseg 감지 (진단 로그).
       // #2527: 자동 보정(reflowLinesegs)이 빈-lineseg 문서에서 글리프 좌표를 붕괴시켜
@@ -182,7 +182,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       }
 
       // 로컬 글꼴 감지 결과가 뷰를 갱신한 뒤에 캐럿을 연결해야 입력 포커스가 재설정과 경합하지 않는다.
-      await updateLoadProgress(96, '편집 상태 초기화 중...');
+      await updateLoadProgress(96, '편집 상태 초기화 중…');
       getInputHandler()?.activateWithCaretPosition();
       // 최종 단계 뒤에는 비동기 작업이 없으므로 100% progress paint를 기다리지 않는다.
       msg.textContent = displayName;
@@ -225,7 +225,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       // 대기 커서는 저장 여부 확인(모달) 다음부터 — 사용자가 답해야 하는 동안은 평소 커서다.
       return await withBusyCursor(document.documentElement, async () => {
         const startTime = performance.now();
-        await updateLoadProgress(0, '파일 읽는 중...');
+        await updateLoadProgress(0, '파일 읽는 중…');
         const data = new Uint8Array(await file.arrayBuffer());
         await updateLoadProgress(15, '파일 읽기 완료');
         await loadBytes(data, file.name, options.fileHandle ?? null, startTime, { dataReadProgressShown: true });
@@ -255,9 +255,9 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       // 화면이 튀어 보인다. 파싱이 실패하면 아래 catch가 이전 문서 뷰를 되살린다.
       getCanvasView()?.showBlankPage();
       if (!options.dataReadProgressShown) {
-        await updateLoadProgress(0, '문서 데이터 준비 중...');
+        await updateLoadProgress(0, '문서 데이터 준비 중…');
       }
-      await updateLoadProgress(25, '문서 파싱 및 쪽 계산 중...');
+      await updateLoadProgress(25, '문서 파싱 및 쪽 계산 중…');
       const docInfo = await loadDocumentForOpen(wasm, data, fileName);
       prepareCanvasRendererDocument();
       // [#7194] 같은 사실을 앱 안쪽에도 알린다. 종전에는 문서 교체 신호가
@@ -267,11 +267,11 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       // 칸 좌표를 그대로 들고 살아남았다(`cachedTableRef` 는 `{sec, ppi, ci}` 라 문서가
       // 바뀌어도 신선도 검사를 통과한다 — 3184241).
       eventBus.emit('document-swapped');
-      await updateLoadProgress(45, '자동 저장 준비 중...');
+      await updateLoadProgress(45, '자동 저장 준비 중…');
       forgetConvertedHmlSaveHandle(fileHandle);
       wasm.currentFileHandle = fileHandle;
 
-      await updateLoadProgress(50, '문서 초기화 중...');
+      await updateLoadProgress(50, '문서 초기화 중…');
       const elapsed = performance.now() - startTime;
       await initializeDocument(docInfo, t('ui.sbMessage.filePagesTimed', { p1: fileName, p2: docInfo.pageCount, p3: elapsed.toFixed(1) }), {
         suppressDialogs: options.suppressDialogs,
@@ -283,7 +283,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
     const msg = sbMessage();
     try {
       await withBusyCursor(document.documentElement, async () => {
-        msg.textContent = '새 문서 생성 중...';
+        msg.textContent = '새 문서 생성 중…';
         const docInfo = wasm.createNewDocument();
         prepareCanvasRendererDocument();
         await initializeDocument(docInfo, t('ui.sbMessage.newDocPages', { p1: docInfo.pageCount }));
