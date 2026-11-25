@@ -717,6 +717,7 @@ fn hostile_rle_stroke_expansion_and_shared_sidecar_amplification_fail_closed() {
         "expected ResourceBudgetExceeded for overlapping long RLE runs, got {err1:?}"
     );
 
+    let mut tile_dos = base_records.clone();
     // Case 2: 400 tables (10_000 x 1 = 4_000_000 total cells <= MAX_TOTAL_CELLS) sharing one
     // STROKE_SIDECAR with 50 runs of length 10_000 (500_000 per table <= per-table limit,
     // 200_000_000 across doc) must trip TableBudget cumulative stroke-cell cap immediately.
@@ -930,5 +931,70 @@ fn hostile_rle_stroke_expansion_and_shared_sidecar_amplification_fail_closed() {
     assert!(
         matches!(&err3, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 런 총수")),
         "expected ResourceBudgetExceeded for shared sidecar noop-run amplification, got {err3:?}"
+    );
+
+    // Case 4: Shared TABLE_TILE referenced by 1_000 TILES_ENTRIES x 20 TILE_ROWS x 256 cols
+    // (5_120_000 tile cells > MAX_TILE_CELLS_PER_TABLE) must fail closed before looping.
+    let mut tile_id = None;
+    for rec in &mut tile_dos {
+        if rec.info.messages.first().map(|m| m.type_id) == Some(6002) {
+            tile_id = Some(rec.info.identifier);
+            let row_payload = [
+                f_varint(1, 0),
+                f_bytes(6, &[]),
+                f_bytes(7, &[0xFF, 0xFF].repeat(256)),
+            ]
+            .concat();
+            let mut tile_payload = Vec::new();
+            for _ in 0..20 {
+                tile_payload.extend_from_slice(&f_bytes(5, &row_payload));
+            }
+            rec.payloads[0] = tile_payload;
+            break;
+        }
+    }
+    let tid = tile_id.expect("table tile object");
+    let tile_entry = f_bytes(1, &[f_varint(1, 0), f_ref(2, tid)].concat());
+    let mut tiles_msg = f_varint(2, 1);
+    for _ in 0..1_000 {
+        tiles_msg.extend_from_slice(&tile_entry);
+    }
+    for rec in &mut tile_dos {
+        if rec.info.messages.first().map(|m| m.type_id) == Some(6001) {
+            let msg = Message::parse(&rec.payloads[0]).unwrap();
+            let mut rebuilt = [f_varint(6, 1), f_varint(7, 256)].concat();
+            for f in &msg.fields {
+                if f.number == 4 {
+                    if let WireValue::Bytes(raw) = f.value {
+                        let store = Message::parse(raw).unwrap();
+                        let mut store_rebuilt = Vec::new();
+                        for sf in &store.fields {
+                            if sf.number == 3 {
+                                store_rebuilt.extend(f_bytes(3, &tiles_msg));
+                            } else if let WireValue::Varint(v) = sf.value {
+                                store_rebuilt.extend(f_varint(sf.number, v));
+                            } else if let WireValue::Bytes(sraw) = sf.value {
+                                store_rebuilt.extend(f_bytes(sf.number, sraw));
+                            }
+                        }
+                        rebuilt.extend(f_bytes(4, &store_rebuilt));
+                    }
+                } else if !matches!(f.number, 6 | 7) {
+                    if let WireValue::Varint(v) = f.value {
+                        rebuilt.extend(f_varint(f.number, v));
+                    } else if let WireValue::Bytes(raw) = f.value {
+                        rebuilt.extend(f_bytes(f.number, raw));
+                    }
+                }
+            }
+            rec.payloads[0] = rebuilt;
+            break;
+        }
+    }
+    let err4 =
+        UniversalFormatConverter::decode_rich(&pack_doc_iwa(&tile_dos), Some("tile-dos.pages"));
+    assert!(
+        matches!(&err4, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("타일")),
+        "expected ResourceBudgetExceeded for shared tile amplification, got {err4:?}"
     );
 }

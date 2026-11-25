@@ -238,17 +238,23 @@ async fn save_document_file(
     .await
     .map_err(|err| IpcError::new(format!("문서를 확인하지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
-    if mode == save_file::SaveMode::InPlace {
-        // A document that came from (or was saved to) a file with the same format is written back to
-        // that file; everything else falls through to the save dialog.
-        let tracked = window_commands::tracked_file(&app, window.label())
-            .filter(|tracked| tracked.extension_matches(request.extension()));
-        if let Some(tracked) = tracked {
-            return save_tracked(&app, &window, tracked, request).await;
+    let tracked = if mode == save_file::SaveMode::InPlace {
+        window_commands::tracked_file(&app, window.label())
+            .filter(|tracked| tracked.extension_matches(request.extension()))
+    } else {
+        None
+    };
+    match save_file::route_save_request(mode, tracked.is_some()) {
+        save_file::SaveRoute::InPlaceTracked => {
+            if let Some(tracked) = tracked {
+                return save_tracked(&app, &window, tracked, request).await;
+            }
+            save_via_dialog(&app, &window, request, true).await
+        }
+        save_file::SaveRoute::Dialog { track_saved } => {
+            save_via_dialog(&app, &window, request, track_saved).await
         }
     }
-    let track_saved = mode != save_file::SaveMode::DialogExportOnly;
-    save_via_dialog(&app, &window, request, track_saved).await
 }
 
 /// Asks where to save with the native save dialog; `None` when the user cancels (or declines to save

@@ -34,6 +34,10 @@ const MAX_TOTAL_STROKE_LAYERS: usize = 200_000;
 const MAX_TOTAL_STROKE_RUNS: usize = 2_000_000;
 const MAX_TOTAL_STROKE_CELLS: usize = 4_000_000;
 const MAX_TOTAL_STYLED_CELLS: usize = 2_000_000;
+const MAX_TILE_ROWS_PER_TABLE: usize = MAX_TABLE_ROWS * 2;
+const MAX_TILE_CELLS_PER_TABLE: usize = MAX_TABLE_CELLS * 2;
+const MAX_TOTAL_TILE_ROWS: usize = MAX_TOTAL_CELLS;
+const MAX_TOTAL_TILE_CELLS: usize = MAX_TOTAL_CELLS * 2;
 const MAX_PAYLOAD_CACHE: usize = 65_536;
 const CELL_TEXT_OVERHEAD: usize = 16;
 const MAX_TILE_ROWS: u64 = 65_536;
@@ -48,6 +52,8 @@ pub(crate) struct TableBudget {
     total_stroke_runs: usize,
     total_stroke_cells: usize,
     total_styled_cells: usize,
+    total_tile_rows: usize,
+    total_tile_cells: usize,
 }
 
 impl TableBudget {
@@ -132,6 +138,28 @@ impl TableBudget {
             .ok_or_else(|| {
                 EasyOfficeError::ResourceBudgetExceeded(
                     "Pages 표 셀 스타일 총수 한도 초과".to_string(),
+                )
+            })?;
+        Ok(())
+    }
+
+    fn charge_tile_row(&mut self, cells: usize) -> Result<(), EasyOfficeError> {
+        self.total_tile_rows = self
+            .total_tile_rows
+            .checked_add(1)
+            .filter(|total| *total <= MAX_TOTAL_TILE_ROWS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 타일 행 총수 한도 초과".to_string(),
+                )
+            })?;
+        self.total_tile_cells = self
+            .total_tile_cells
+            .checked_add(cells)
+            .filter(|total| *total <= MAX_TOTAL_TILE_CELLS)
+            .ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 타일 셀 총수 한도 초과".to_string(),
                 )
             })?;
         Ok(())
@@ -511,6 +539,7 @@ fn fill_tiles(
     tiles: &Message,
     grid: &mut [Vec<String>],
     cols: usize,
+    budget: &mut TableBudget,
     images: &mut PageImages<'_>,
     text_budget: &mut DecodeBudget,
 ) -> Result<usize, EasyOfficeError> {
@@ -519,7 +548,17 @@ fn fill_tiles(
         .filter(|v| *v > 0 && *v <= MAX_TILE_ROWS)
         .unwrap_or(table::DEFAULT_TILE_ROWS);
     let mut unsupported = 0usize;
+    let mut tile_entries_seen = 0usize;
+    let mut tile_rows_seen = 0usize;
+    let mut tile_cells_seen = 0usize;
     tiles.for_each_sub(table::TILES_ENTRIES, |entry| {
+        if tile_entries_seen >= MAX_TILE_ROWS_PER_TABLE {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages 표 타일 항목 수 한도 초과".to_string(),
+            ));
+        }
+        tile_entries_seen += 1;
+        budget.charge_tile_row(0)?;
         let tile_id = entry.varint(table::TILE_ID).unwrap_or(0);
         let tile_obj = reference(&entry, table::TILE_REF)
             .and_then(|id| ctx.objects.get(id))
@@ -529,9 +568,26 @@ fn fill_tiles(
         };
         let tile = Message::parse(&tile_obj.payload)?;
         tile.for_each_sub(table::TILE_ROWS, |row| {
+            if tile_rows_seen >= MAX_TILE_ROWS_PER_TABLE {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "Pages 표 타일 행 수 한도 초과".to_string(),
+                ));
+            }
+            tile_rows_seen += 1;
             let abs_row = row
                 .varint(table::ROW_INDEX)
                 .and_then(|i| absolute_row(tile_id, tile_rows, i));
+            let in_grid = abs_row.is_some_and(|r| r < grid.len());
+            let row_cells = if in_grid { cols } else { 0 };
+            tile_cells_seen = tile_cells_seen
+                .checked_add(row_cells)
+                .filter(|total| *total <= MAX_TILE_CELLS_PER_TABLE)
+                .ok_or_else(|| {
+                    EasyOfficeError::ResourceBudgetExceeded(
+                        "Pages 표 타일 셀 수 한도 초과".to_string(),
+                    )
+                })?;
+            budget.charge_tile_row(row_cells)?;
             if let Some(r_idx) = abs_row {
                 if let Some(cells) = grid.get_mut(r_idx) {
                     unsupported += fill_row(ctx, r_idx, &row, cols, cells, images, text_budget)?;
@@ -582,7 +638,15 @@ pub(crate) fn read_table(
     )?;
     let mut grid = vec![vec![String::new(); cols]; rows];
     let unsupported = match store.sub(table::STORE_TILES)? {
-        Some(tiles) => fill_tiles(&mut ctx, &tiles, &mut grid, cols, images, text_budget)?,
+        Some(tiles) => fill_tiles(
+            &mut ctx,
+            &tiles,
+            &mut grid,
+            cols,
+            budget,
+            images,
+            text_budget,
+        )?,
         None => 0,
     };
     let merges = merge::read_merges(objects, &model_msg, &store);

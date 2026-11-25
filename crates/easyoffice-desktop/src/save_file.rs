@@ -77,6 +77,24 @@ pub fn allows_in_place_extension(extension: &str) -> bool {
     )
 }
 
+/// Concrete execution route selected by `save_document_file` after mode & tracking lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveRoute {
+    /// Overwrite the window's tracked bidirectional file in place.
+    InPlaceTracked,
+    /// Open the native save dialog and optionally update window tracking & recent documents.
+    Dialog { track_saved: bool },
+}
+
+/// Resolves whether a save overwrites the tracked file or goes through the save dialog.
+pub fn route_save_request(mode: SaveMode, tracked_matches_request: bool) -> SaveRoute {
+    match mode {
+        SaveMode::InPlace if tracked_matches_request => SaveRoute::InPlaceTracked,
+        SaveMode::InPlace | SaveMode::DialogTracked => SaveRoute::Dialog { track_saved: true },
+        SaveMode::DialogExportOnly => SaveRoute::Dialog { track_saved: false },
+    }
+}
+
 /// Validates save vs. export-copy options and enforces the non-bidirectional in-place guard.
 pub fn resolve_save_mode(extension: &str, options: SaveOptions) -> Result<SaveMode, String> {
     if options.export_only == Some(true) && options.track_saved == Some(true) {

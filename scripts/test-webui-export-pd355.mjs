@@ -162,6 +162,14 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
   assert.equal(saves.at(-1)?.inPlace, true);
   assert.equal(saves.at(-1)?.exportOnly, undefined);
 
+  // Direct menu export strips C0/C1 control chars from fallback document title (`sanitizeFileBaseName`).
+  bridge.applyTitles({ ...bridge.getTitles(), DOC: "보고서\u0085초안\u0007.docx" });
+  userClick(document.querySelector('.md-item[data-export-format="docx"]'));
+  await flushAsyncTurns(12);
+  assert.equal(saves.at(-1)?.fileName, "보고서_초안_.docx");
+  assert.equal(saves.at(-1)?.inPlace, false);
+  assert.equal(saves.at(-1)?.exportOnly, true);
+
   // Module kind filtering isolates HWP and swaps SHEET/SLIDE/PDF options.
   switchModule(document, "SHEET");
   await flushAsyncTurns(8);

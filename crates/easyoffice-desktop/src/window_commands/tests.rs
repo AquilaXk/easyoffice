@@ -750,3 +750,189 @@ fn export_only_dialog_save_preserves_original_tracked_file_and_duplicate_open_lo
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn save_route_pipeline_keeps_original_in_place_after_export_and_blocks_lossy_in_place() {
+    use crate::save_file::{
+        resolve_save_mode, route_save_request, save_in_place, split_file_name,
+        write_document_bytes, InPlaceResult, SaveMode, SaveOptions, SaveRequest, SaveRoute,
+    };
+    use easyoffice_formats::{
+        base64_codec, DocumentFormat, RichBlock, RichDocument, RichParagraph, RichRun,
+        UniversalDocumentModel, UniversalFormatConverter,
+    };
+
+    let make_doc = |text: &str, fmt: DocumentFormat| -> Vec<u8> {
+        let model = UniversalDocumentModel {
+            title: "시험".to_string(),
+            paragraphs: vec![text.to_string()],
+            ..Default::default()
+        };
+        UniversalFormatConverter::encode(&model, fmt).unwrap()
+    };
+    let pages_bytes = UniversalFormatConverter::encode_rich(
+        &RichDocument {
+            title: "단일".to_string(),
+            blocks: vec![RichBlock::Paragraph(RichParagraph {
+                runs: vec![RichRun::plain("원본")],
+                ..Default::default()
+            })],
+            ..Default::default()
+        },
+        DocumentFormat::Pages,
+        None,
+    )
+    .unwrap();
+
+    let dir = scratch_dir("save-route-pipeline");
+    let orig_docx = dir.join("원본.docx");
+    let other_docx = dir.join("다른창.docx");
+    let single_pages = dir.join("단일.pages");
+    let export_docx = dir.join("배포본.docx");
+    let export_pdf = dir.join("배포본.pdf");
+
+    let orig_initial = make_doc("초기 원본", DocumentFormat::Docx);
+    let other_initial = make_doc("다른 창", DocumentFormat::Docx);
+    fs::write(&orig_docx, &orig_initial).unwrap();
+    fs::write(&other_docx, &other_initial).unwrap();
+    fs::write(&single_pages, &pages_bytes).unwrap();
+
+    let orig_canon = fs::canonicalize(&orig_docx).unwrap();
+    let other_canon = fs::canonicalize(&other_docx).unwrap();
+    let pages_canon = fs::canonicalize(&single_pages).unwrap();
+    let orig_fp = Fingerprint::of(&orig_canon).unwrap();
+    let other_fp = Fingerprint::of(&other_canon).unwrap();
+    let pages_fp = Fingerprint::of(&pages_canon).unwrap();
+
+    let state = AppWindows::new(None);
+    for (label, canon, fp) in [
+        ("doc-1", &orig_canon, orig_fp),
+        ("doc-2", &other_canon, other_fp),
+        ("doc-3", &pages_canon, pages_fp),
+    ] {
+        locked(&state.registry).register(label, WindowKind::Doc);
+        locked(&state.registry)
+            .claim_path(label, path_key(canon))
+            .unwrap();
+        locked(&state.files).track_opened(label, canon.clone(), canon.clone(), fp);
+    }
+
+    let run_save = |label: &str,
+                    file_name: &str,
+                    bytes: &[u8],
+                    opts: SaveOptions,
+                    dialog_target: Option<&Path>|
+     -> Result<bool, String> {
+        let (_, ext) = split_file_name(file_name)?;
+        let mode = resolve_save_mode(&ext, opts)?;
+        let req = SaveRequest::parse_owned(file_name, base64_codec::encode(bytes))?;
+        let tracked = (mode == SaveMode::InPlace)
+            .then(|| locked(&state.files).get(label))
+            .flatten()
+            .filter(|t| t.extension_matches(req.extension()));
+        match route_save_request(mode, tracked.is_some()) {
+            SaveRoute::InPlaceTracked => {
+                let t = tracked.unwrap();
+                let InPlaceResult::Saved(written) =
+                    save_in_place(&t.path, &t.fingerprint, req.bytes(), |_| false)
+                        .map_err(|e| e.to_string())?
+                else {
+                    return Ok(false);
+                };
+                if let Some(fp) = written.fingerprint {
+                    locked(&state.files).set_fingerprint(label, fp);
+                }
+                Ok(true)
+            }
+            SaveRoute::Dialog { track_saved } => {
+                let target = dialog_target.expect("dialog path");
+                let written =
+                    write_document_bytes(target, req.bytes()).map_err(|e| e.to_string())?;
+                state.finish_dialog_save(label, target, written.fingerprint, track_saved);
+                Ok(true)
+            }
+        }
+    };
+
+    let copy_docx = make_doc("배포본 내용", DocumentFormat::Docx);
+    let copy_pdf = make_doc("PDF 배포본", DocumentFormat::Pdf);
+    let export_opts = SaveOptions {
+        in_place: Some(false),
+        export_only: Some(true),
+        track_saved: None,
+    };
+    assert_eq!(
+        run_save(
+            "doc-1",
+            "배포본.docx",
+            &copy_docx,
+            export_opts,
+            Some(&export_docx)
+        ),
+        Ok(true)
+    );
+    assert_eq!(
+        run_save(
+            "doc-1",
+            "배포본.pdf",
+            &copy_pdf,
+            export_opts,
+            Some(&export_pdf)
+        ),
+        Ok(true)
+    );
+    assert_eq!(
+        run_save(
+            "doc-1",
+            "다른창.docx",
+            &copy_docx,
+            export_opts,
+            Some(&other_docx)
+        ),
+        Ok(true)
+    );
+    assert_eq!(locked(&state.files).get("doc-1").unwrap().path, orig_canon);
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&orig_canon)),
+        Some("doc-1")
+    );
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&other_canon)),
+        Some("doc-2")
+    );
+
+    let edited_orig = make_doc("수정된 원본", DocumentFormat::Docx);
+    let in_place_opts = SaveOptions {
+        in_place: Some(true),
+        export_only: None,
+        track_saved: None,
+    };
+    assert_eq!(
+        run_save("doc-1", "원본.docx", &edited_orig, in_place_opts, None),
+        Ok(true)
+    );
+    assert_eq!(fs::read(&orig_docx).unwrap(), edited_orig);
+    assert_eq!(fs::read(&export_docx).unwrap(), copy_docx);
+
+    for (file_name, bytes) in [
+        ("단일.pages", pages_bytes.as_slice()),
+        (
+            "구문서.doc",
+            make_doc("doc", DocumentFormat::Doc).as_slice(),
+        ),
+        ("발표.ppt", make_doc("ppt", DocumentFormat::Ppt).as_slice()),
+        ("문서.pdf", copy_pdf.as_slice()),
+        ("서식.hwt", make_doc("hwt", DocumentFormat::Hwt).as_slice()),
+        (
+            "서식.hwtx",
+            make_doc("hwtx", DocumentFormat::Hwtx).as_slice(),
+        ),
+    ] {
+        assert!(
+            run_save("doc-3", file_name, bytes, in_place_opts, None).is_err(),
+            "expected in_place: true refusal for {file_name}"
+        );
+    }
+    assert_eq!(fs::read(&single_pages).unwrap(), pages_bytes);
+    let _ = fs::remove_dir_all(&dir);
+}

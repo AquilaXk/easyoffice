@@ -57,7 +57,10 @@
   }
 
   function sanitizeBaseName(raw, fallback) {
-    const safeFallback = String(fallback || "EasyOffice_문서").trim() || "EasyOffice_문서";
+    const safeFallback =
+      String(fallback || "EasyOffice_문서")
+        .replaceAll(/[\u0000-\u001f\u007f-\u009f]/g, "")
+        .trim() || "EasyOffice_문서";
     let base = String(raw || "")
       .replaceAll(/[\u0000-\u001f\u007f-\u009f]/g, "")
       .split(/[/\\]/)
@@ -151,11 +154,15 @@
 
       if (curMod === "HWP" && getHwpHost?.()?.isEmbedActive() && getHwpSession?.()) {
         if (ext === "pdf") {
-          const ok = await getHwpSession().exportPdf();
-          return { ok: Boolean(ok), cancelled: !ok };
+          const res = await getHwpSession().exportPdf();
+          if (res?.status === "saved") return { ok: true, name: res.name };
+          if (res?.status === "cancelled") return { ok: false, cancelled: true };
+          return { ok: false, error: "PDF 내보내기에 실패했습니다." };
         }
-        const ok = await getHwpSession().saveAs(ext);
-        return { ok: Boolean(ok), cancelled: !ok };
+        const res = await getHwpSession().saveAs(ext);
+        if (res?.ok) return { ok: true, name: res.name };
+        if (res?.cancelled) return { ok: false, cancelled: true };
+        return { ok: false, error: res?.message || "한글 문서 내보내기에 실패했습니다." };
       }
 
       const safeBase = sanitizeBaseName(customBaseName, resolveSaveFileBase(curMod));

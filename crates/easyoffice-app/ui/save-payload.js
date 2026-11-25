@@ -936,7 +936,7 @@
       .trim()
       .replace(KNOWN_DOC_EXT_RE, "");
     name = name
-      .replaceAll(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, "_")
+      .replaceAll(/[\u0000-\u001f\u007f-\u009f<>:"/\\|?*]/g, "_")
       .replaceAll(/\s+/g, " ")
       .replace(/^[\s.]+/, "")
       .replace(/(?<![\s.])[\s.]+$/, "");
