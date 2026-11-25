@@ -192,10 +192,13 @@ const FUTURE: [&str; 168] = [
     "Z.TEST",
 ];
 
-const FILE_PREFIXES: [&str; 3] = ["_xlfn._xlws.", "_xlfn.", "_xlpm."];
+use super::xlsx_eta_funcs::{
+    eta_token_mask, has_ascii_prefix_ci, is_builtin_eta_function, next_significant,
+    prev_significant, strip_file_prefixes,
+};
 
 #[derive(Clone, PartialEq, Debug)]
-enum Tok {
+pub(crate) enum Tok {
     /// A word: a function, a name, a cell address, a number.
     Word(String),
     /// Quoted text or a quoted sheet name, with its quotes.
@@ -317,6 +320,7 @@ pub fn to_file_formula(text: &str) -> String {
     }
     let tokens = optional_parameters(single_calls(anchor_calls(tokenize(text))));
     let variables = declared_variables(&tokens);
+    let eta_mask = eta_token_mask(&tokens);
     let mut out = String::with_capacity(text.len() + 16);
     for (i, token) in tokens.iter().enumerate() {
         let Tok::Word(word) = token else {
@@ -324,10 +328,13 @@ pub fn to_file_formula(text: &str) -> String {
             continue;
         };
         let upper = word.to_ascii_uppercase();
-        let called = matches!(tokens.get(i + 1), Some(Tok::Punct('(')));
-        let qualified = matches!(tokens.get(i + 1), Some(Tok::Punct('!')))
-            || (i > 0 && tokens[i - 1] == Tok::Punct('!'));
-        if word.starts_with("_xlfn.") {
+        let next_sig = next_significant(&tokens, i);
+        let prev_sig = prev_significant(&tokens, i);
+        let called = matches!(next_sig, Some(Tok::Punct('(')));
+        let qualified = matches!(next_sig, Some(Tok::Punct('!' | ':')))
+            || matches!(prev_sig, Some(Tok::Punct('!' | ':')))
+            || matches!(next_sig, Some(Tok::Quoted(q)) if q.starts_with('['));
+        if has_ascii_prefix_ci(word, "_xlfn.") || has_ascii_prefix_ci(word, "_xleta.") {
             out.push_str(word);
         } else if called && WORKSHEET_ONLY.contains(&upper.as_str()) {
             out.push_str("_xlfn._xlws.");
@@ -341,6 +348,14 @@ pub fn to_file_formula(text: &str) -> String {
         } else if !qualified && variables.contains(&upper) {
             out.push_str("_xlpm.");
             out.push_str(word);
+        } else if eta_mask[i]
+            && !called
+            && !qualified
+            && !variables.contains(&upper)
+            && is_builtin_eta_function(&upper)
+        {
+            out.push_str("_xleta.");
+            out.push_str(&upper);
         } else {
             out.push_str(word);
         }
@@ -358,7 +373,9 @@ fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
 
 /// The formula text of a file (no leading `=`) as the page spells it.
 pub fn from_file_formula(text: &str) -> String {
-    if !text.contains("_xl") && !text.contains("ANCHORARRAY") && !contains_ascii_ci(text, "SINGLE")
+    if !contains_ascii_ci(text, "_xl")
+        && !text.contains("ANCHORARRAY")
+        && !contains_ascii_ci(text, "SINGLE")
     {
         return text.to_string();
     }
@@ -377,11 +394,7 @@ pub fn from_file_formula(text: &str) -> String {
             ]);
             continue;
         }
-        let plain = FILE_PREFIXES
-            .iter()
-            .find_map(|prefix| word.strip_prefix(prefix))
-            .map_or(word.clone(), str::to_string);
-        tokens.push(Tok::Word(plain));
+        tokens.push(Tok::Word(strip_file_prefixes(&word).to_string()));
     }
     join(&single_operators(spill_operators(tokens)))
 }
@@ -645,9 +658,9 @@ fn declared_variables(tokens: &[Tok]) -> std::collections::HashSet<String> {
         match token {
             Tok::Punct(c) if c.is_whitespace() => {}
             Tok::Punct('(') => {
-                if let Some(Tok::Word(name)) = i.checked_sub(1).map(|j| &tokens[j]) {
+                if let Some(Tok::Word(name)) = prev_significant(tokens, i) {
                     calls.push(Call {
-                        name: name.to_ascii_uppercase().replace("_XLFN.", ""),
+                        name: strip_file_prefixes(name).to_ascii_uppercase(),
                         depth: depth + 1,
                         arg: 0,
                     });

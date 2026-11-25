@@ -71,6 +71,7 @@ mod functions_unavailable;
 #[cfg(test)]
 mod functions_unit_tests;
 mod groupby_axis;
+mod groupby_funcs;
 mod hidden_rows;
 mod implicit_single;
 mod lexer;

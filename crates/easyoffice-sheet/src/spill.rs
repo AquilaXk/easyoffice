@@ -733,6 +733,7 @@ impl SheetEngine {
             Ok(crate::array::Val::Grid(grid)) => grid,
             Ok(
                 crate::array::Val::Lambda(_)
+                | crate::array::Val::FuncGrid(_)
                 | crate::array::Val::Ref(_)
                 | crate::array::Val::Omitted,
             ) => return V::Error(FormulaError::Calc),

@@ -14,7 +14,7 @@
 //! (`TAKE(a,,2)`) means the whole side, every result is checked against the array budget, and an
 //! omitted `LAMBDA` parameter is a variable bound to nothing instead of an empty argument.
 
-use crate::array::{Env, Grid, Val};
+use crate::array::{Closure, Env, FuncElem, FuncGrid, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
 use std::sync::Arc;
@@ -77,6 +77,110 @@ fn pad_of(value: Option<V>) -> V {
         Some(V::Empty) => V::Number(0.0),
         Some(v) => v,
     }
+}
+
+enum StackItem {
+    Grid(Arc<Grid>),
+    Lambda(Arc<Closure>),
+    FuncGrid(Arc<FuncGrid>),
+}
+
+impl StackItem {
+    fn rows(&self) -> usize {
+        match self {
+            Self::Grid(g) => g.rows,
+            Self::Lambda(_) => 1,
+            Self::FuncGrid(fg) => fg.rows,
+        }
+    }
+
+    fn cols(&self) -> usize {
+        match self {
+            Self::Grid(g) => g.cols,
+            Self::Lambda(_) => 1,
+            Self::FuncGrid(fg) => fg.cols,
+        }
+    }
+
+    fn elem(&self, r: usize, c: usize) -> FuncElem {
+        match self {
+            Self::Grid(g) => FuncElem::Scalar(g.get(r, c).clone()),
+            Self::Lambda(l) => FuncElem::Lambda(Arc::clone(l)),
+            Self::FuncGrid(fg) => fg.get(r, c).clone(),
+        }
+    }
+}
+
+fn stack_func_grid(vertical: bool, items: &[StackItem], ctx: &mut EvalContext<'_>) -> ValResult {
+    let na = V::Error(FormulaError::Na);
+    let (rows, cols) = if vertical {
+        let cols = items.iter().map(StackItem::cols).max().unwrap_or(0);
+        let rows = items
+            .iter()
+            .try_fold(0usize, |acc, it| acc.checked_add(it.rows()))
+            .ok_or(FormulaError::Spill)?;
+        (rows, cols)
+    } else {
+        let rows = items.iter().map(StackItem::rows).max().unwrap_or(0);
+        let cols = items
+            .iter()
+            .try_fold(0usize, |acc, it| acc.checked_add(it.cols()))
+            .ok_or(FormulaError::Spill)?;
+        (rows, cols)
+    };
+    ctx.charge_array_cells(rows, cols)?;
+    let total = rows * cols;
+    let mut data = Vec::with_capacity(total);
+    let mut push_elem = |elem: FuncElem, idx: usize| -> Result<(), FormulaError> {
+        if let FuncElem::Scalar(cell) = &elem {
+            let hb = cell.heap_bytes();
+            if hb > 0 {
+                ctx.charge_array_extra_bytes(hb)?;
+            }
+        }
+        data.push(elem);
+        if (idx & 4095) == 4095 {
+            ctx.charge_steps(1)?;
+            ctx.poll_deadline();
+            if ctx.expired() {
+                return Err(FormulaError::Value);
+            }
+        }
+        Ok(())
+    };
+    let mut idx = 0usize;
+    if vertical {
+        for item in items {
+            let (ir, ic) = (item.rows(), item.cols());
+            for r in 0..ir {
+                for c in 0..cols {
+                    let elem = if c < ic {
+                        item.elem(r, c)
+                    } else {
+                        FuncElem::Scalar(na.clone())
+                    };
+                    push_elem(elem, idx)?;
+                    idx += 1;
+                }
+            }
+        }
+    } else {
+        for r in 0..rows {
+            for item in items {
+                let (ir, ic) = (item.rows(), item.cols());
+                for c in 0..ic {
+                    let elem = if r < ir {
+                        item.elem(r, c)
+                    } else {
+                        FuncElem::Scalar(na.clone())
+                    };
+                    push_elem(elem, idx)?;
+                    idx += 1;
+                }
+            }
+        }
+    }
+    Ok(Val::func_grid(FuncGrid { rows, cols, data }))
 }
 
 impl SheetEngine {
@@ -247,14 +351,54 @@ impl SheetEngine {
         if args.is_empty() {
             return Err(FormulaError::Value);
         }
-        let mut grids = Vec::with_capacity(args.len());
+        let mut items = Vec::with_capacity(args.len());
+        let mut has_func = false;
         for arg in args {
-            grids.extend(self.shape_grids(arg, env, ctx, depth)?);
+            let bound = Self::bound_ref(arg, env);
+            let target = bound.as_ref().unwrap_or_else(|| arg.peeled());
+            if let Expr::SheetSpan(sp) = target {
+                let sheets = self.resolve_sheet_span(sp, ctx)?;
+                for sh in sheets {
+                    let grid = self
+                        .read_ref_grid(&Expr::sheet_range(sh, sp.range), ctx, depth + 1)?
+                        .ok_or(FormulaError::Ref)?;
+                    items.push(StackItem::Grid(Arc::new(grid)));
+                }
+                continue;
+            }
+            match self.eval_val(arg, env, ctx, depth + 1)? {
+                Val::Grid(g) => match g.data.as_slice() {
+                    [V::Error(e)] => return Err(*e),
+                    _ => items.push(StackItem::Grid(g)),
+                },
+                Val::Lambda(closure) => {
+                    has_func = true;
+                    items.push(StackItem::Lambda(closure));
+                }
+                Val::FuncGrid(fg) => {
+                    has_func = true;
+                    items.push(StackItem::FuncGrid(fg));
+                }
+                Val::Ref(_) | Val::Omitted => return Err(FormulaError::Value),
+            }
         }
+        if has_func {
+            return stack_func_grid(vertical, &items, ctx);
+        }
+        let grids: Vec<Arc<Grid>> = items
+            .into_iter()
+            .map(|it| match it {
+                StackItem::Grid(g) => g,
+                StackItem::Lambda(_) | StackItem::FuncGrid(_) => unreachable!(),
+            })
+            .collect();
         let na = V::Error(FormulaError::Na);
         if vertical {
             let cols = grids.iter().map(|g| g.cols).max().unwrap_or(0);
-            let rows: usize = grids.iter().map(|g| g.rows).sum();
+            let rows = grids
+                .iter()
+                .try_fold(0usize, |acc, g| acc.checked_add(g.rows))
+                .ok_or(FormulaError::Spill)?;
             let total = rows * cols;
             ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(total);
@@ -292,7 +436,10 @@ impl SheetEngine {
             )))
         } else {
             let rows = grids.iter().map(|g| g.rows).max().unwrap_or(0);
-            let cols: usize = grids.iter().map(|g| g.cols).sum();
+            let cols = grids
+                .iter()
+                .try_fold(0usize, |acc, g| acc.checked_add(g.cols))
+                .ok_or(FormulaError::Spill)?;
             let total = rows * cols;
             ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(total);

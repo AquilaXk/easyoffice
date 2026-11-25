@@ -304,7 +304,7 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
         Expr::Shared(shared) => {
             seen.insert(std::sync::Arc::as_ptr(shared)) && scan(&shared.expr, seen)
         }
-        Expr::Array(_) | Expr::SpillRef(_) | Expr::Call(_) | Expr::Var(_) => true,
+        Expr::Array(_) | Expr::SpillRef(_) | Expr::Call(_) | Expr::Var(_) | Expr::Name(_) => true,
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             arrayish(inner) || scan(inner, seen)
         }

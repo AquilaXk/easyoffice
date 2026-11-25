@@ -11,7 +11,7 @@
 //! A function that returns an array where one value is wanted is `#CALC!` (the reference says
 //! `#VALUE!`; the spreadsheet program says `#CALC!`).
 
-use crate::array::{Env, Grid, Val};
+use crate::array::{Env, Grid, Val, MAX_LAMBDA_DEPTH};
 use crate::array_eval::ValResult;
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
 use std::sync::Arc;
@@ -24,13 +24,39 @@ fn element(val: Val) -> V {
 fn element_with_link(val: Val) -> (V, u32) {
     match val {
         Val::Grid(g) if g.is_scalar() => (g.top_left(), g.link_id_flat(0)),
-        Val::Grid(_) | Val::Lambda(_) | Val::Ref(_) | Val::Omitted => {
+        Val::Grid(_) | Val::Lambda(_) | Val::FuncGrid(_) | Val::Ref(_) | Val::Omitted => {
             (V::Error(FormulaError::Calc), 0)
         }
     }
 }
 
 impl SheetEngine {
+    /// Adapts an eta-reduced built-in closure (`SUM`, `MAX`, ...) when passed through `LET`/`IF`
+    /// to a combinator or direct call expecting a different arity (`args.len()`).
+    pub(crate) fn apply_eta_builtin(
+        &self,
+        upper: &str,
+        args: Vec<Val>,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        if ctx.lambda_depth >= MAX_LAMBDA_DEPTH {
+            return Err(FormulaError::Num);
+        }
+        let mut params = Vec::with_capacity(args.len());
+        let mut env = Env::default();
+        for (i, val) in args.into_iter().enumerate() {
+            let pname = format!("ETA{}", i + 1);
+            env = env.bind(&pname, val);
+            params.push(Expr::Var(pname));
+        }
+        let body = Expr::func_call(upper.to_string(), params);
+        ctx.lambda_depth += 1;
+        let result = self.eval_val(&body, &env, ctx, depth + 1);
+        ctx.lambda_depth -= 1;
+        result
+    }
+
     /// `LET(name1, value1, [name2, value2, ...], body)`.
     pub(crate) fn fn_let(
         &self,
@@ -76,20 +102,27 @@ impl SheetEngine {
         Ok(self.make_closure(names, required, body, env))
     }
 
-    fn lambda_arg(
+    fn lambda_arg_arity(
         &self,
         arg: &Expr,
+        arity: usize,
         env: &Env,
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<Val, FormulaError> {
-        match self.eval_val(arg, env, ctx, depth + 1)? {
+        let val = match arg.peeled() {
+            Expr::Name(n) => self
+                .eval_name_for_eta(n, Some(arity), ctx, depth)
+                .unwrap_or_else(|| Val::error(FormulaError::Name)),
+            _ => self.eval_val(arg, env, ctx, depth + 1)?,
+        };
+        match val {
             f @ Val::Lambda(_) => Ok(f),
             Val::Grid(g) => match g.data.as_slice() {
                 [V::Error(e)] => Err(*e),
                 _ => Err(FormulaError::Value),
             },
-            Val::Ref(_) | Val::Omitted => Err(FormulaError::Value),
+            Val::FuncGrid(_) | Val::Ref(_) | Val::Omitted => Err(FormulaError::Value),
         }
     }
 
@@ -105,7 +138,7 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let (arrays, f) = args.split_at(args.len() - 1);
-        let f = self.lambda_arg(&f[0], env, ctx, depth)?;
+        let f = self.lambda_arg_arity(&f[0], arrays.len(), env, ctx, depth)?;
         let mut grids: Vec<Arc<Grid>> = Vec::with_capacity(arrays.len());
         for arg in arrays {
             grids.push(self.eval_val(arg, env, ctx, depth + 1)?.into_grid()?);
@@ -158,7 +191,7 @@ impl SheetEngine {
             3 => (1, 2),
             _ => return Err(FormulaError::Value),
         };
-        let f = self.lambda_arg(&args[lambda_at], env, ctx, depth)?;
+        let f = self.lambda_arg_arity(&args[lambda_at], 2, env, ctx, depth)?;
         let grid = self
             .eval_val(&args[array_at], env, ctx, depth + 1)?
             .into_grid()?;
@@ -258,7 +291,7 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
-        let f = self.lambda_arg(&args[1], env, ctx, depth)?;
+        let f = self.lambda_arg_arity(&args[1], 1, env, ctx, depth)?;
         let lines = if by_row { grid.rows } else { grid.cols };
         if by_row {
             ctx.charge_array_cells(lines, 1)?;
@@ -320,7 +353,7 @@ impl SheetEngine {
         let (rows, cols) = (rows as usize, cols as usize);
         let total = rows * cols;
         ctx.charge_array_cells(rows, cols)?;
-        let f = self.lambda_arg(&args[2], env, ctx, depth)?;
+        let f = self.lambda_arg_arity(&args[2], 2, env, ctx, depth)?;
         let mut data = Vec::with_capacity(total);
         let mut links: Option<Vec<u32>> = None;
         let mut idx = 0usize;

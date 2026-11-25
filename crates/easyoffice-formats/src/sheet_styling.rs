@@ -96,6 +96,8 @@ pub(crate) mod xlsx_comments;
 pub(crate) mod xlsx_drawings;
 #[path = "xlsx_dxf_border.rs"]
 pub(crate) mod xlsx_dxf_border;
+#[path = "xlsx_eta_funcs.rs"]
+pub(crate) mod xlsx_eta_funcs;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_filter_dxf.rs"]

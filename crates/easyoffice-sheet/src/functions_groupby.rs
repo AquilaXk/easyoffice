@@ -10,19 +10,24 @@
 //! (a column of `TRUE` and `FALSE` as long as the group columns), `field_relationship` (0
 //! hierarchy, 1 table with no subtotals) and `relative_to` (0 column total, 1 row total, 2 grand
 //! total, 3 parent column total, 4 parent row total, for a function with two arguments such as
-//! `PERCENTOF`). A function is an eta-reduced name (`SUM`, `AVERAGE`, ...) or a `LAMBDA`. Not
-//! implemented: a list of functions that makes one result column per function (`#VALUE!`).
+//! `PERCENTOF`). A function is an eta-reduced name (`SUM`, `AVERAGE`, ...), a `LAMBDA`, or a
+//! `HSTACK`/`VSTACK` vector of functions (optionally paired with custom header labels, see
+//! `groupby_funcs.rs`).
 //!
 //! The pass over the rows is single: each row is put in the cell of every shown row group and
 //! column group it belongs to, so the cost is the rows times the levels of the two axes and the
 //! number of cells is checked against the array budget before anything is allocated. The
 //! documentation shows the output only as pictures, so the generated header names (`Group`,
-//! `Column`, `Value`), the layout of the field header row and the labels of the total rows are this
-//! engine's choice (`groupby_axis.rs`). The group function runs once per cell and value column.
+//! `Column`, `Value`, `Function`), the layout of the field header row and the labels of the total
+//! rows are this engine's choice (`groupby_axis.rs`). Each function runs once per cell and value
+//! column, sharing grouped inputs and cached totals across multi-function vectors.
 
-use crate::array::{Closure, Env, Grid, Val};
+use crate::array::{Env, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::groupby_axis::{intersect, Entry, Kind, Node, SortKey, Totals, Tree};
+use crate::groupby_funcs::{
+    parse_func_plan, AggFunc, FuncOrientation, FuncPlan, OutputShape, OutputSpec, MAX_VALUE_COLUMNS,
+};
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
 use std::collections::hash_map::Entry as MapEntry;
 use std::collections::HashMap;
@@ -30,8 +35,6 @@ use std::sync::Arc;
 
 /// Group columns on one axis.
 const MAX_GROUP_FIELDS: usize = 16;
-/// Value columns.
-const MAX_VALUE_COLUMNS: usize = 64;
 /// Rows put into cells, over all rows: the rows times the levels of both axes.
 const MAX_BUCKET_PUSHES: usize = 8_000_000;
 const NO_ENTRY: usize = usize::MAX;
@@ -39,10 +42,6 @@ const NO_ENTRY: usize = usize::MAX;
 const GROUP_NODE_BYTES: usize = 160;
 /// Values a function reads for one evaluation step.
 const STEP_VALUES: usize = 16;
-
-/// What turns the values of a group into one value: a `LAMBDA` (a function named without its
-/// arguments, `SUM`, was made one when the formula was read, see `parser_array.rs`).
-type Aggregator = Arc<Closure>;
 
 /// The positions of the arguments of `GROUPBY` and of `PIVOTBY`.
 struct Layout {
@@ -198,39 +197,34 @@ impl SheetEngine {
             .collect()
     }
 
-    fn aggregator(
+    fn func_plan_arg(
         &self,
         arg: &Expr,
         env: &Env,
         ctx: &mut EvalContext<'_>,
         depth: usize,
-    ) -> Result<Aggregator, FormulaError> {
-        match self.eval_val(arg, env, ctx, depth + 1)? {
-            Val::Lambda(closure) => Ok(closure),
-            Val::Grid(g) => match g.data.as_slice() {
-                [V::Error(e)] => Err(*e),
-                _ => Err(FormulaError::Value),
-            },
-            _ => Err(FormulaError::Value),
-        }
+    ) -> Result<FuncPlan, FormulaError> {
+        parse_func_plan(self.eval_val(arg, env, ctx, depth + 1)?)
     }
 
     /// `group` (and `total`, for a function of two arguments) through the aggregator.
     fn aggregate(
         &self,
-        aggregator: &Aggregator,
-        group: Vec<V>,
+        aggregator: &AggFunc,
+        group: &Arc<Grid>,
         total: Option<Arc<Grid>>,
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<V, FormulaError> {
         // the function reads every value it is given: that work is paid for in steps
-        let work = group.len() + total.as_ref().map_or(0, |t| t.data.len());
+        let work = group.data.len() + total.as_ref().map_or(0, |t| t.data.len());
         ctx.charge_steps(1 + work / STEP_VALUES)?;
-        let mut grids = vec![Arc::new(Grid::from_rows(group.len(), 1, group))];
-        grids.extend(total);
-        let f = Val::Lambda(Arc::clone(aggregator));
-        let call_args = grids.into_iter().map(Val::Grid).collect();
+        let f = Val::Lambda(Arc::clone(&aggregator.closure));
+        let mut call_args = Vec::with_capacity(1 + usize::from(total.is_some()));
+        call_args.push(Val::Grid(Arc::clone(group)));
+        if let Some(t) = total {
+            call_args.push(Val::Grid(t));
+        }
         Ok(single(self.apply_val(&f, call_args, ctx, depth + 1)?))
     }
 
@@ -247,13 +241,20 @@ impl SheetEngine {
         if args.len() < min_args || args.len() > layout.max_args {
             return Err(FormulaError::Value);
         }
-        let row_fields = self.grid_arg(&args[layout.rows], env, ctx, depth)?;
-        let col_fields = match layout.cols {
-            Some(i) => Some(self.grid_arg(&args[i], env, ctx, depth)?),
+        let row_fields = match present(args, layout.rows) {
+            Some(arg) => Some(self.grid_arg(arg, env, ctx, depth)?),
             None => None,
         };
-        let values = self.grid_arg(&args[layout.values], env, ctx, depth)?;
-        let aggregator = self.aggregator(&args[layout.function], env, ctx, depth)?;
+        let col_fields = match layout.cols.and_then(|i| present(args, i)) {
+            Some(arg) => Some(self.grid_arg(arg, env, ctx, depth)?),
+            None => None,
+        };
+        if row_fields.is_none() && col_fields.is_none() {
+            return Err(FormulaError::Value);
+        }
+        let values_arg = present(args, layout.values).ok_or(FormulaError::Value)?;
+        let values = self.grid_arg(values_arg, env, ctx, depth)?;
+        let plan = self.func_plan_arg(&args[layout.function], env, ctx, depth)?;
         let headers = self.whole_number_arg(args, layout.headers, env, ctx, depth)?;
         let row_totals = self.whole_number_arg(args, layout.row_totals, env, ctx, depth)?;
         let col_totals = match layout.col_totals {
@@ -266,16 +267,28 @@ impl SheetEngine {
             (Some(_), n @ 0..=4) => (false, n),
             _ => return Err(FormulaError::Value),
         };
-        let (n, kr, m) = (row_fields.rows, row_fields.cols, values.cols);
+        let n = values.rows;
+        let kr = row_fields.as_ref().map_or(0, |g| g.cols);
         let kc = col_fields.as_ref().map_or(0, |g| g.cols);
+        let m = values.cols;
         if kr > MAX_GROUP_FIELDS || kc > MAX_GROUP_FIELDS || m > MAX_VALUE_COLUMNS {
             return Err(FormulaError::Value);
         }
-        if values.rows != n || col_fields.as_ref().is_some_and(|g| g.rows != n) {
+        if row_fields.as_ref().is_some_and(|g| g.rows != n)
+            || col_fields.as_ref().is_some_and(|g| g.rows != n)
+        {
             return Err(FormulaError::Value);
         }
-        let row_sort = self.sort_arg(args, Some(layout.row_sort), kr + m, env, ctx, depth)?;
-        let col_sort = self.sort_arg(args, layout.col_sort, kc + m, env, ctx, depth)?;
+        let fn_cols = plan.fn_cols();
+        let row_sort = self.sort_arg(
+            args,
+            Some(layout.row_sort),
+            kr + m * fn_cols,
+            env,
+            ctx,
+            depth,
+        )?;
+        let col_sort = self.sort_arg(args, layout.col_sort, kc + m * fn_cols, env, ctx, depth)?;
         let filter = match present(args, layout.filter) {
             Some(arg) => Some(self.grid_arg(arg, env, ctx, depth)?),
             None => None,
@@ -319,7 +332,7 @@ impl SheetEngine {
             row_fields,
             col_fields,
             values,
-            aggregator,
+            plan,
             table,
             relative_to,
             row_totals,
@@ -344,27 +357,31 @@ impl SheetEngine {
         let req = self.read_request(layout, min_args, args, env, ctx, depth)?;
         let groups = self.build_groups(&req, ctx, depth)?;
         let (row_count, col_count) = (groups.row_entries.len(), groups.col_entries.len());
-        let (kr, kc, m) = (req.row_fields.cols, groups.col_tree.fields, req.values.cols);
-        // the answer: the header rows, then one row per shown row group
-        let show_field_row = req.show_headers || (req.col_fields.is_some() && m > 1);
-        let top = if req.col_fields.is_some() {
-            kc + usize::from(show_field_row)
-        } else {
-            usize::from(req.show_headers)
-        };
-        let (out_rows, out_cols) = (top + row_count, kr + col_count * m);
-        ctx.charge_array_cells(out_rows, out_cols)?;
+        let kr = req.row_fields.as_ref().map_or(0, |g| g.cols);
+        let (kc, m) = (groups.col_tree.fields, req.values.cols);
+        let shape = OutputShape::compute(
+            &req.plan,
+            OutputSpec {
+                kr,
+                kc,
+                m,
+                has_col_fields: req.col_fields.is_some(),
+                show_headers: req.show_headers,
+                row_count,
+                col_count,
+            },
+        )?;
+        ctx.charge_array_cells(shape.out_rows, shape.out_cols)?;
         // a cell with nothing in it is empty text: an empty value would read 0 where it spills
-        let mut out = vec![V::Text(String::new()); out_rows * out_cols];
-        let shape = Shape {
-            top,
-            width: out_cols,
-            show_field_row,
-        };
+        let mut out = vec![V::Text(String::new()); shape.out_rows * shape.out_cols];
         req.write_headers(&groups, &shape, &mut out);
         self.write_values(&req, &groups, &shape, &mut out, ctx, depth)?;
-        Ok(Val::grid(Grid::from_rows_checked(
-            ctx, out_rows, out_cols, out,
+        Ok(Val::grid(Grid::from_rows_with_links_precharged(
+            ctx,
+            shape.out_rows,
+            shape.out_cols,
+            out,
+            None,
         )?))
     }
 
@@ -376,10 +393,8 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<Groups<'r>, FormulaError> {
         let rows = req.kept.len();
-        let (kr, kc) = (
-            req.row_fields.cols,
-            req.col_fields.as_ref().map_or(0, |g| g.cols),
-        );
+        let kr = req.row_fields.as_ref().map_or(0, |g| g.cols);
+        let kc = req.col_fields.as_ref().map_or(0, |g| g.cols);
         // the groups, and the lower-cased copy of each key text the index holds, are paid for before
         // they are made: every row may start a group on every level
         ctx.charge_array_extra_bytes(
@@ -388,7 +403,9 @@ impl SheetEngine {
         )?;
         ctx.charge_array_extra_bytes(req.key_text_bytes())?;
         let mut row_tree = Tree::build(kr, rows, req.table, |l, i| {
-            req.row_fields.get(req.kept[i], l).clone()
+            req.row_fields
+                .as_ref()
+                .map_or(V::Empty, |g| g.get(req.kept[i], l).clone())
         });
         let mut col_tree = Tree::build(kc, rows, false, |l, i| {
             req.col_fields
@@ -402,8 +419,10 @@ impl SheetEngine {
             (&mut row_tree, &req.row_sort, req.table),
             (&mut col_tree, &req.col_sort, false),
         ] {
-            let mut aggregate = |node: &Node, j: usize| {
-                let total = if req.wants_total() {
+            let mut aggregate = |node: &Node, idx: usize| {
+                let (f, j) = req.plan.sort_func_col(idx, req.values.cols);
+                let func = &req.plan.funcs[f];
+                let total = if func.wants_total {
                     if all_columns[j].is_none() {
                         all_columns[j] = Some(req.column_grid(&all_rows, j, ctx)?);
                     }
@@ -411,20 +430,28 @@ impl SheetEngine {
                 } else {
                     None
                 };
-                self.aggregate(
-                    &req.aggregator,
+                let group = Arc::new(Grid::from_rows(
+                    node.rows.len(),
+                    1,
                     req.column(&node.rows, j),
-                    total,
-                    ctx,
-                    depth,
-                )
+                ));
+                self.aggregate(func, &group, total, ctx, depth)
             };
             tree.sort(sort, table, &mut aggregate)?;
         }
-        let row_entries = row_tree.entries(Totals::new(req.row_totals, kr, req.table)?, req.table);
+        let row_entries = if req.row_fields.is_some() {
+            row_tree.entries(Totals::new(req.row_totals, kr, req.table)?, req.table)
+        } else {
+            let _ = Totals::new(req.row_totals, 0, req.table)?;
+            vec![Entry {
+                node: 0,
+                kind: Kind::Grand,
+            }]
+        };
         let col_entries = if req.col_fields.is_some() {
             col_tree.entries(Totals::new(req.col_totals, kc, false)?, false)
         } else {
+            let _ = Totals::new(req.col_totals, 0, false)?;
             vec![Entry {
                 node: 0,
                 kind: Kind::Grand,
@@ -471,22 +498,83 @@ impl SheetEngine {
         &self,
         req: &Request,
         groups: &Groups<'_>,
-        shape: &Shape,
+        shape: &OutputShape,
         out: &mut [V],
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<(), FormulaError> {
-        let (kr, m) = (req.row_fields.cols, req.values.cols);
+        let kr = req.row_fields.as_ref().map_or(0, |g| g.cols);
+        let m = req.values.cols;
+        let f_len = req.plan.funcs.len();
         let col_count = groups.col_entries.len();
-        let wants_total = req.wants_total();
-        let (rt, ct) = (&groups.row_tree.nodes, &groups.col_tree.nodes);
         let mut ticks = 0usize;
         // the columns of the totals, each made once: (relative_to, row group, column group, value column)
         let mut totals: HashMap<(i64, usize, usize, usize), Arc<Grid>> = HashMap::new();
+        if req.plan.orientation == FuncOrientation::Vertical {
+            for (ri, re) in groups.row_entries.iter().enumerate() {
+                let row_labels = (kr > 0).then(|| groups.row_tree.labels(re));
+                let repeat_labels = req.table && re.kind == Kind::Leaf;
+                for f in 0..f_len {
+                    let line = (shape.top + ri * f_len + f) * shape.out_cols;
+                    if let Some(labels) = &row_labels {
+                        if f == 0 || repeat_labels {
+                            for (l, label) in labels.iter().take(kr).enumerate() {
+                                out[line + l] = label.clone();
+                            }
+                        }
+                    }
+                    out[line + kr] = req.plan.funcs[f].header_value();
+                }
+                for (ci, ce) in groups.col_entries.iter().enumerate() {
+                    let members = &groups.cells[ri * col_count + ci];
+                    if members.is_empty() {
+                        continue;
+                    }
+                    for j in 0..m {
+                        let group =
+                            Arc::new(Grid::from_rows(members.len(), 1, req.column(members, j)));
+                        let mut total_cache: Option<Arc<Grid>> = None;
+                        for f in 0..f_len {
+                            let func = &req.plan.funcs[f];
+                            let total = if func.wants_total {
+                                if total_cache.is_none() {
+                                    total_cache = Some(req.cached_total(
+                                        groups,
+                                        re.node,
+                                        ce.node,
+                                        j,
+                                        &mut totals,
+                                        ctx,
+                                    )?);
+                                }
+                                total_cache.clone()
+                            } else {
+                                None
+                            };
+                            let line = (shape.top + ri * f_len + f) * shape.out_cols;
+                            out[line + shape.prefix_cols + ci * m + j] =
+                                self.aggregate(func, &group, total, ctx, depth)?;
+                            ticks += 1;
+                            if ticks & 255 == 0 {
+                                ctx.charge_steps(1)?;
+                                ctx.poll_deadline();
+                                if ctx.expired() {
+                                    return Err(FormulaError::Value);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         for (ri, re) in groups.row_entries.iter().enumerate() {
-            let line = (shape.top + ri) * shape.width;
-            for (l, label) in groups.row_tree.labels(re).into_iter().enumerate() {
-                out[line + l] = label;
+            let line = (shape.top + ri) * shape.out_cols;
+            if kr > 0 {
+                for (l, label) in groups.row_tree.labels(re).into_iter().take(kr).enumerate() {
+                    out[line + l] = label;
+                }
             }
             for (ci, ce) in groups.col_entries.iter().enumerate() {
                 let members = &groups.cells[ri * col_count + ci];
@@ -494,40 +582,34 @@ impl SheetEngine {
                     continue;
                 }
                 for j in 0..m {
-                    let total = if wants_total {
-                        let key = match req.relative_to {
-                            0 => (0, ce.node, 0, j),
-                            1 => (1, re.node, 0, j),
-                            2 => (2, 0, 0, j),
-                            // the parent row group with this column group, or this row group
-                            // with the parent column group
-                            3 => (3, rt[re.node].parent, ce.node, j),
-                            _ => (4, re.node, ct[ce.node].parent, j),
-                        };
-                        Some(match totals.entry(key) {
-                            MapEntry::Occupied(done) => Arc::clone(done.get()),
-                            MapEntry::Vacant(slot) => {
-                                let set = match key.0 {
-                                    0 => ct[key.1].rows.clone(),
-                                    1 => rt[key.1].rows.clone(),
-                                    2 => groups.all_rows.clone(),
-                                    _ => intersect(&rt[key.1].rows, &ct[key.2].rows),
-                                };
-                                Arc::clone(slot.insert(req.column_grid(&set, j, ctx)?))
+                    let group = Arc::new(Grid::from_rows(members.len(), 1, req.column(members, j)));
+                    let mut total_cache: Option<Arc<Grid>> = None;
+                    for f in 0..f_len {
+                        let func = &req.plan.funcs[f];
+                        let total = if func.wants_total {
+                            if total_cache.is_none() {
+                                total_cache = Some(req.cached_total(
+                                    groups,
+                                    re.node,
+                                    ce.node,
+                                    j,
+                                    &mut totals,
+                                    ctx,
+                                )?);
                             }
-                        })
-                    } else {
-                        None
-                    };
-                    let group = req.column(members, j);
-                    out[line + kr + ci * m + j] =
-                        self.aggregate(&req.aggregator, group, total, ctx, depth)?;
-                    ticks += 1;
-                    if ticks & 255 == 0 {
-                        ctx.charge_steps(1)?;
-                        ctx.poll_deadline();
-                        if ctx.expired() {
-                            return Err(FormulaError::Value);
+                            total_cache.clone()
+                        } else {
+                            None
+                        };
+                        out[line + kr + ci * (m * f_len) + f * m + j] =
+                            self.aggregate(func, &group, total, ctx, depth)?;
+                        ticks += 1;
+                        if ticks & 255 == 0 {
+                            ctx.charge_steps(1)?;
+                            ctx.poll_deadline();
+                            if ctx.expired() {
+                                return Err(FormulaError::Value);
+                            }
                         }
                     }
                 }
@@ -563,10 +645,10 @@ fn shown_chain(tree: &Tree<'_>, entry_of: &[usize], leaf: usize, out: &mut Vec<u
 
 /// The arguments of a call, read and checked.
 struct Request {
-    row_fields: Arc<Grid>,
+    row_fields: Option<Arc<Grid>>,
     col_fields: Option<Arc<Grid>>,
     values: Arc<Grid>,
-    aggregator: Aggregator,
+    plan: FuncPlan,
     table: bool,
     relative_to: i64,
     row_totals: Option<i64>,
@@ -581,9 +663,35 @@ struct Request {
 }
 
 impl Request {
-    /// A function of two arguments gets the group and a total to compare it with.
-    fn wants_total(&self) -> bool {
-        self.aggregator.params.len() == 2
+    fn cached_total(
+        &self,
+        groups: &Groups<'_>,
+        row_node: usize,
+        col_node: usize,
+        j: usize,
+        totals: &mut HashMap<(i64, usize, usize, usize), Arc<Grid>>,
+        ctx: &mut EvalContext<'_>,
+    ) -> Result<Arc<Grid>, FormulaError> {
+        let (rt, ct) = (&groups.row_tree.nodes, &groups.col_tree.nodes);
+        let key = match self.relative_to {
+            0 => (0, col_node, 0, j),
+            1 => (1, row_node, 0, j),
+            2 => (2, 0, 0, j),
+            3 => (3, rt[row_node].parent, col_node, j),
+            _ => (4, row_node, ct[col_node].parent, j),
+        };
+        Ok(match totals.entry(key) {
+            MapEntry::Occupied(done) => Arc::clone(done.get()),
+            MapEntry::Vacant(slot) => {
+                let set = match key.0 {
+                    0 => ct[key.1].rows.clone(),
+                    1 => rt[key.1].rows.clone(),
+                    2 => groups.all_rows.clone(),
+                    _ => intersect(&rt[key.1].rows, &ct[key.2].rows),
+                };
+                Arc::clone(slot.insert(self.column_grid(&set, j, ctx)?))
+            }
+        })
     }
 
     /// The values of value column `j` in the kept rows `rows` (positions in `kept`).
@@ -614,7 +722,8 @@ impl Request {
             .iter()
             .map(|&r| {
                 let line = |g: &Grid| (0..g.cols).map(|c| g.get(r, c).heap_bytes()).sum::<usize>();
-                line(&self.row_fields) + self.col_fields.as_ref().map_or(0, |g| line(g))
+                self.row_fields.as_ref().map_or(0, |g| line(g))
+                    + self.col_fields.as_ref().map_or(0, |g| line(g))
             })
             .sum()
     }
@@ -631,33 +740,76 @@ impl Request {
     }
 
     /// The column labels above the values and the field names.
-    fn write_headers(&self, groups: &Groups<'_>, shape: &Shape, out: &mut [V]) {
-        let (kr, m) = (self.row_fields.cols, self.values.cols);
-        let width = shape.width;
+    fn write_headers(&self, groups: &Groups<'_>, shape: &OutputShape, out: &mut [V]) {
+        let kr = self.row_fields.as_ref().map_or(0, |g| g.cols);
+        let kc = groups.col_tree.fields;
+        let m = self.values.cols;
+        let width = shape.out_cols;
+        let fn_cols = self.plan.fn_cols();
+        let col_count = groups.col_entries.len();
+        let prefix = shape.prefix_cols;
         if let Some(cols) = &self.col_fields {
+            let block = m * fn_cols;
             for (ci, entry) in groups.col_entries.iter().enumerate() {
-                for (l, label) in groups.col_tree.labels(entry).into_iter().enumerate() {
-                    for j in 0..m {
-                        out[l * width + kr + ci * m + j] = label.clone();
+                for (l, label) in groups
+                    .col_tree
+                    .labels(entry)
+                    .into_iter()
+                    .take(kc)
+                    .enumerate()
+                {
+                    for k in 0..block {
+                        out[l * width + prefix + ci * block + k] = label.clone();
                     }
                 }
             }
-            if self.show_headers {
+            if self.show_headers && prefix > 0 {
                 for l in 0..cols.cols {
-                    out[l * width + kr.saturating_sub(1)] = self.field_name(cols, l, "Column");
+                    out[l * width + prefix - 1] = self.field_name(cols, l, "Column");
+                }
+            }
+        }
+        if shape.show_fn_row {
+            let fn_row = if shape.show_field_row {
+                kc
+            } else {
+                shape.top - 1
+            };
+            let line = fn_row * width;
+            if !shape.show_field_row && self.show_headers {
+                if let Some(rows) = &self.row_fields {
+                    for l in 0..kr {
+                        out[line + l] = self.field_name(rows, l, "Group");
+                    }
+                }
+            }
+            for ci in 0..col_count {
+                for (f, func) in self.plan.funcs.iter().enumerate() {
+                    let lbl = func.header_value();
+                    for j in 0..m {
+                        out[line + prefix + ci * (m * fn_cols) + f * m + j] = lbl.clone();
+                    }
                 }
             }
         }
         if shape.show_field_row && shape.top > 0 {
             let line = (shape.top - 1) * width;
             if self.show_headers {
-                for l in 0..kr {
-                    out[line + l] = self.field_name(&self.row_fields, l, "Group");
+                if let Some(rows) = &self.row_fields {
+                    for l in 0..kr {
+                        out[line + l] = self.field_name(rows, l, "Group");
+                    }
+                }
+                if self.plan.orientation == FuncOrientation::Vertical {
+                    out[line + kr] = V::Text("Function".to_string());
                 }
             }
-            for ci in 0..groups.col_entries.len() {
-                for j in 0..m {
-                    out[line + kr + ci * m + j] = self.field_name(&self.values, j, "Value");
+            for ci in 0..col_count {
+                for f in 0..fn_cols {
+                    for j in 0..m {
+                        out[line + prefix + ci * (m * fn_cols) + f * m + j] =
+                            self.field_name(&self.values, j, "Value");
+                    }
                 }
             }
         }
@@ -673,13 +825,4 @@ struct Groups<'r> {
     /// The kept rows (positions) of every pair of shown row and column, row major.
     cells: Vec<Vec<u32>>,
     all_rows: Vec<u32>,
-}
-
-/// Where things go in the answer.
-struct Shape {
-    /// Header rows above the first row group.
-    top: usize,
-    width: usize,
-    /// The last header row names the fields and the values.
-    show_field_row: bool,
 }

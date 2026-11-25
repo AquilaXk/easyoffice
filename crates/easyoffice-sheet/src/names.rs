@@ -222,7 +222,14 @@ enum Repl<'a> {
     Tree(&'a Arc<SharedExpr>, usize),
     /// A reference that is no name's definition: the data of a table that has the name.
     Leaf(Expr),
+    /// Keep the `Expr::Name` node intact (unqualified canonical function name evaluated at runtime as eta-reduced `LAMBDA`).
+    Keep,
     Error(FormulaError),
+}
+
+fn is_eta_candidate(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    crate::functions::CANONICAL_FUNCTIONS.contains(&upper.as_str())
 }
 
 /// Replaces the names in `expr` by the trees they stand for and returns the nodes the result stands for and holds.
@@ -247,6 +254,7 @@ fn replace_names<'a>(
         let scope = &n.scope;
         let name = &n.name;
         let replacement = match resolve(scope.as_deref(), name) {
+            Repl::Keep => return false,
             Repl::Error(e) => Expr::ErrorLiteral(e),
             Repl::Leaf(expr) => expr,
             Repl::Tree(tree, phys) => {
@@ -501,6 +509,7 @@ impl NameTable {
                 // No name: a table of the name is its data (`SUM(Table1)`).
                 None => match tables.data_of(&folded, &ctx) {
                     Some(data) => Repl::Leaf(data),
+                    None if scope.is_none() && is_eta_candidate(name) => Repl::Keep,
                     None => Repl::Error(FormulaError::Name),
                 },
             }
@@ -619,6 +628,7 @@ fn expand_all(
                     match pick(&fold_name(name), q.or(scope)).and_then(|j| out[j].as_ref()) {
                         Some(Ok(done)) => Repl::Tree(&done.tree, done.phys),
                         Some(Err(e)) => Repl::Error(*e),
+                        None if q.is_none() && is_eta_candidate(name) => Repl::Keep,
                         None => Repl::Error(FormulaError::Name),
                     }
                 });

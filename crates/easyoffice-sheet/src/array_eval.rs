@@ -117,11 +117,12 @@ impl SheetEngine {
                 }
             }
             Expr::SheetSpan(sp) => Ok(Val::scalar(self.eval_sheet_span_scalar(sp, ctx, depth))),
-            Expr::Number(_)
-            | Expr::Text(_)
-            | Expr::Boolean(_)
-            | Expr::ErrorLiteral(_)
-            | Expr::Name(_) => Ok(Val::scalar(self.eval_expr_ctx(expr, ctx, depth))),
+            Expr::Name(n) => Ok(self
+                .eval_name_for_eta(n, None, ctx, depth)
+                .unwrap_or_else(|| Val::error(FormulaError::Name))),
+            Expr::Number(_) | Expr::Text(_) | Expr::Boolean(_) | Expr::ErrorLiteral(_) => {
+                Ok(Val::scalar(self.eval_expr_ctx(expr, ctx, depth)))
+            }
         }
     }
 
@@ -502,6 +503,11 @@ impl SheetEngine {
         let Val::Lambda(closure) = f else {
             return Ok(Val::error(FormulaError::Value));
         };
+        if let Some(upper) = closure.name.as_deref().filter(|n| *n != "PERCENTOF") {
+            if args.len() >= closure.required && args.len() != closure.params.len() {
+                return self.apply_eta_builtin(upper, args, ctx, depth);
+            }
+        }
         if args.len() < closure.required || args.len() > closure.params.len() {
             return Ok(Val::error(FormulaError::Value));
         }
@@ -527,11 +533,72 @@ impl SheetEngine {
         env: &Env,
     ) -> Val {
         Val::Lambda(Arc::new(Closure {
+            name: None,
             params,
             required,
             body: body.clone(),
             env: env.clone(),
         }))
+    }
+
+    pub(crate) fn make_eta_closure(&self, upper: &str, arity: usize) -> Val {
+        let params: Vec<String> = (1..=arity).map(|i| format!("ETA{i}")).collect();
+        let body = Expr::func_call(
+            upper.to_string(),
+            params.iter().cloned().map(Expr::Var).collect(),
+        );
+        Val::Lambda(Arc::new(Closure {
+            name: Some(upper.to_string()),
+            params,
+            required: arity,
+            body,
+            env: Env::default(),
+        }))
+    }
+
+    pub(crate) fn eval_name_for_eta(
+        &self,
+        n: &crate::NameExpr,
+        arity_override: Option<usize>,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Option<Val> {
+        let folded = easyoffice_formats::fold_name(&n.name);
+        let scope = n.scope.as_deref().unwrap_or(&self.name);
+        if let Some(entry) = self.names.resolved_expr(&folded, scope) {
+            return Some(match entry {
+                Ok(tree) => match self.eval_val(&tree.expr, &Env::default(), ctx, depth + 1) {
+                    Ok(v) => v,
+                    Err(e) => Val::error(e),
+                },
+                Err(e) => Val::error(*e),
+            });
+        }
+        if n.scope.is_none() {
+            let tctx = crate::table_index::TableCtx {
+                index: &self.tables,
+                sheet: &self.name,
+                coord: None,
+            };
+            if let Some(data) = self.tables.data_of(&folded, &tctx) {
+                return Some(
+                    match self.eval_val(&data, &Env::default(), ctx, depth + 1) {
+                        Ok(v) => v,
+                        Err(e) => Val::error(e),
+                    },
+                );
+            }
+            let upper = n.name.to_ascii_uppercase();
+            if crate::functions::CANONICAL_FUNCTIONS.contains(&upper.as_str()) {
+                let arity = if upper == "PERCENTOF" {
+                    2
+                } else {
+                    arity_override.unwrap_or(1)
+                };
+                return Some(self.make_eta_closure(&upper, arity));
+            }
+        }
+        None
     }
 
     /// `args` of a call the scalar engine runs, with the ones that are arrays or use variables

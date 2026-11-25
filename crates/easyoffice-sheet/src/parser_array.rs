@@ -307,29 +307,6 @@ fn declare(arg: &mut Expr) -> Option<String> {
     }
 }
 
-/// A built-in function named where a function is wanted, without its arguments (`SUM` in
-/// `GROUPBY(A:A, B:B, SUM)`), becomes the `LAMBDA` that calls it: `LAMBDA(x, SUM(x))`, with a
-/// second parameter for `PERCENTOF`, the one built-in that compares a group with a total.
-fn eta_reduced(arg: &mut Expr, scope: &[String]) {
-    let Expr::Name(n) = arg else {
-        return;
-    };
-    let upper = n.name.to_ascii_uppercase();
-    if n.scope.is_some()
-        || bound(scope, &n.name)
-        || !crate::functions::CANONICAL_FUNCTIONS.contains(&upper.as_str())
-    {
-        return;
-    }
-    let params: Vec<String> = (1..=if upper == "PERCENTOF" { 2 } else { 1 })
-        .map(|i| format!("ETA{i}"))
-        .collect();
-    let call = Expr::func_call(upper, params.iter().cloned().map(Expr::Var).collect());
-    let mut lambda_args: Vec<Expr> = params.into_iter().map(Expr::Var).collect();
-    lambda_args.push(call);
-    *arg = Expr::func_call("LAMBDA", lambda_args);
-}
-
 fn resolve(expr: &mut Expr, scope: &mut Vec<String>) {
     match expr {
         Expr::Name(n) if n.scope.is_none() && bound(scope, &n.name) => {
@@ -373,13 +350,6 @@ fn resolve(expr: &mut Expr, scope: &mut Vec<String>) {
             let mut inner = std::mem::take(&mut f.args);
             inner.iter_mut().for_each(|a| resolve(a, scope));
             *expr = Expr::call(Box::new(Expr::Var(f.name.to_ascii_uppercase())), inner);
-        }
-        Expr::FuncCall(f) if matches!(f.name.as_str(), "GROUPBY" | "PIVOTBY") => {
-            let function_at = if f.name == "GROUPBY" { 2 } else { 3 };
-            if let Some(arg) = f.args.get_mut(function_at) {
-                eta_reduced(arg, scope);
-            }
-            f.args.iter_mut().for_each(|a| resolve(a, scope));
         }
         Expr::FuncCall(f) => f.args.iter_mut().for_each(|a| resolve(a, scope)),
         _ => {}

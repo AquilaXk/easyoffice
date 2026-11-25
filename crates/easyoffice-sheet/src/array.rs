@@ -90,6 +90,16 @@ impl Grid {
         links: Option<Vec<u32>>,
     ) -> Result<Self, FormulaError> {
         ctx.charge_array_cells(rows, cols)?;
+        Self::from_rows_with_links_precharged(ctx, rows, cols, data, links)
+    }
+
+    pub(crate) fn from_rows_with_links_precharged(
+        ctx: &mut crate::EvalContext<'_>,
+        rows: usize,
+        cols: usize,
+        data: Vec<EvaluatedCellValue>,
+        links: Option<Vec<u32>>,
+    ) -> Result<Self, FormulaError> {
         for (i, cell) in data.iter().enumerate() {
             let hb = cell.heap_bytes();
             if hb > 0 {
@@ -238,9 +248,12 @@ pub(crate) fn array_bytes_for(rows: usize, cols: usize) -> Result<usize, Formula
         .ok_or(FormulaError::Spill)
 }
 
-/// A `LAMBDA` and the scope it was made in.
+/// A `LAMBDA` (or eta-reduced built-in function) and the scope it was made in.
 #[derive(Debug)]
 pub(crate) struct Closure {
+    /// Built-in function name in uppercase when created from an eta-reduced symbol (`SUM`, `PERCENTOF`);
+    /// `None` for an explicit `LAMBDA(...)`.
+    pub(crate) name: Option<String>,
     pub(crate) params: Vec<String>,
     /// Parameters from this one on are optional.
     pub(crate) required: usize,
@@ -248,11 +261,34 @@ pub(crate) struct Closure {
     pub(crate) env: Env,
 }
 
+/// An element inside a stacked array that mixes function closures and scalar labels.
+#[derive(Debug, Clone)]
+pub(crate) enum FuncElem {
+    Lambda(Arc<Closure>),
+    Scalar(EvaluatedCellValue),
+}
+
+/// A 2-D grid holding [`FuncElem`] entries (e.g. `HSTACK(COUNT, SUM)` or `VSTACK(HSTACK(COUNT, SUM), {"Count", "Cost"})`).
+#[derive(Debug, Clone)]
+pub(crate) struct FuncGrid {
+    pub(crate) rows: usize,
+    pub(crate) cols: usize,
+    pub(crate) data: Vec<FuncElem>,
+}
+
+impl FuncGrid {
+    #[inline]
+    pub(crate) fn get(&self, r: usize, c: usize) -> &FuncElem {
+        &self.data[r * self.cols + c]
+    }
+}
+
 /// What an expression stands for while an array formula is calculated.
 #[derive(Debug, Clone)]
 pub(crate) enum Val {
     Grid(Arc<Grid>),
     Lambda(Arc<Closure>),
+    FuncGrid(Arc<FuncGrid>),
     /// A reference a variable holds (`LET(x, A1, ROW(x))`): it stays a reference where the scalar
     /// engine wants one. It lives only in a scope; reading the variable gives the cells' values.
     Ref(Arc<Expr>),
@@ -273,11 +309,17 @@ impl Val {
         Self::Grid(Arc::new(grid))
     }
 
-    /// The grid; a `LAMBDA` where values are wanted is `#VALUE!`.
+    pub(crate) fn func_grid(grid: FuncGrid) -> Self {
+        Self::FuncGrid(Arc::new(grid))
+    }
+
+    /// The grid; a `LAMBDA` or function grid where cell values are wanted is `#VALUE!`.
     pub(crate) fn into_grid(self) -> Result<Arc<Grid>, FormulaError> {
         match self {
             Self::Grid(grid) => Ok(grid),
-            Self::Lambda(_) | Self::Ref(_) | Self::Omitted => Err(FormulaError::Value),
+            Self::Lambda(_) | Self::FuncGrid(_) | Self::Ref(_) | Self::Omitted => {
+                Err(FormulaError::Value)
+            }
         }
     }
 }
