@@ -21,7 +21,7 @@ use hayro::hayro_interpret::{
 use hayro::kurbo::{Affine, BezPath, Rect as KRect};
 use hayro_syntax::page::Page;
 use hayro_write::pdf_writer::types::{AnnotationFlags, AnnotationType};
-use hayro_write::pdf_writer::{Pdf, Ref};
+use hayro_write::pdf_writer::{Chunk, Pdf, Ref};
 use std::collections::HashSet;
 
 const DESCENT_RATIO: f64 = 0.22;
@@ -304,13 +304,53 @@ pub fn add_page_phrase_markups<'a>(
     total_annots: &mut usize,
     seen_markups: &mut HashSet<MarkupKey>,
 ) -> Result<Vec<Ref>, String> {
+    add_page_phrase_markups_in_space(
+        out,
+        next,
+        cache,
+        xref,
+        src_page,
+        page_size,
+        out_page_ref,
+        markup,
+        added_markups,
+        total_annots,
+        seen_markups,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_page_phrase_markups_in_space<'a>(
+    out: &mut Chunk,
+    next: &mut Ref,
+    cache: &InterpreterCache<'a>,
+    xref: &'a hayro_syntax::xref::XRef,
+    src_page: &Page<'a>,
+    page_size: (f32, f32),
+    out_page_ref: Ref,
+    markup: &WireMarkup,
+    added_markups: &mut usize,
+    total_annots: &mut usize,
+    seen_markups: &mut HashSet<MarkupKey>,
+    shift_to_crop_origin: bool,
+) -> Result<Vec<Ref>, String> {
     let needle = normalize_phrase(&markup.text);
     if needle.is_empty() {
         return Ok(Vec::new());
     }
     let crop = src_page.intersected_crop_box();
-    let initial = Affine::translate((-crop.x0, -crop.y0));
-    let bbox = KRect::new(0.0, 0.0, f64::from(page_size.0), f64::from(page_size.1));
+    let (initial, bbox) = if shift_to_crop_origin {
+        (
+            Affine::translate((-crop.x0, -crop.y0)),
+            KRect::new(0.0, 0.0, f64::from(page_size.0), f64::from(page_size.1)),
+        )
+    } else {
+        (
+            Affine::IDENTITY,
+            KRect::new(crop.x0, crop.y0, crop.x1, crop.y1),
+        )
+    };
     let settings = InterpreterSettings {
         render_content: RenderContent::PAGE,
         ..Default::default()

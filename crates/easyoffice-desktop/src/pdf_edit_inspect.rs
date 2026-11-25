@@ -123,6 +123,16 @@ pub fn open_within(
     deadline: &Deadline,
     limits: &Limits,
 ) -> Result<Pdf, String> {
+    let pdf = open_scanned_within(bytes, deadline, limits)?;
+    check_page_limits(&pdf, deadline, limits)?;
+    Ok(pdf)
+}
+
+pub(crate) fn open_scanned_within(
+    bytes: &Arc<Vec<u8>>,
+    deadline: &Deadline,
+    limits: &Limits,
+) -> Result<Pdf, String> {
     if bytes.is_empty() || !has_header(bytes) {
         return Err(MSG_UNREADABLE.to_string());
     }
@@ -157,7 +167,16 @@ pub fn open_within(
             limits.pages
         ));
     }
-    check_page_tree(&pdf, deadline, limits)?;
+    Ok(pdf)
+}
+
+pub(crate) fn check_page_limits(
+    pdf: &Pdf,
+    deadline: &Deadline,
+    limits: &Limits,
+) -> Result<(), String> {
+    let pages = pdf.pages();
+    check_page_tree(pdf, deadline, limits)?;
     let (mut total, mut entries) = (0usize, 0usize);
     for (n, page) in pages.iter().enumerate() {
         if n & PAGES_PER_CHECK_MASK == 0 {
@@ -172,7 +191,7 @@ pub fn open_within(
             return Err(too_much_content());
         }
     }
-    Ok(pdf)
+    Ok(())
 }
 
 /// How many entries the resource dictionaries of a page hold (fonts, pictures, colour spaces, ...).

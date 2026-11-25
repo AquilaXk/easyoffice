@@ -430,3 +430,84 @@ fn a_contents_array_of_two_hundred_thousand_items_is_refused_by_its_length() {
     let err = normal().inspect(&Arc::new(file)).unwrap_err();
     assert!(err.contains("내용 스트림"), "{err}");
 }
+
+#[test]
+fn tagged_and_signed_pdf_incremental_save_survives_worker_isolation() {
+    let supervisor = normal();
+    let orig = Arc::new(hand_written_with_xref(
+        &[
+            (
+                1,
+                "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /AcroForm << /Fields [6 0 R] /SigFlags 3 >> >>"
+                    .to_string(),
+            ),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+            (
+                3,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [6 0 R] >>"
+                    .to_string(),
+            ),
+            (4, "<< /Length 0 >>\nstream\n\nendstream".to_string()),
+            (5, "<< /Type /StructTreeRoot >>".to_string()),
+            (
+                6,
+                "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /Rect [10 10 90 40] /V << /Type /Sig /ByteRange [0 1 2 3] >> >>"
+                    .to_string(),
+            ),
+        ],
+        "",
+    ));
+    assert_eq!(supervisor.inspect(&orig), Ok(1));
+    let built = supervisor
+        .build(&[Arc::clone(&orig)], &head(plan(1, 90), 1), &mut no_overlay)
+        .expect("worker incremental build succeeds");
+    assert_eq!(&built.bytes[..orig.len()], orig.as_slice());
+    let pdf = hayro_syntax::Pdf::new(Arc::new(built.bytes)).expect("result opens");
+    let catalog = pdf
+        .xref()
+        .get::<hayro_syntax::object::Dict<'_>>(pdf.xref().root_id())
+        .unwrap();
+    assert!(catalog
+        .get::<hayro_syntax::object::Dict<'_>>(b"StructTreeRoot")
+        .is_some());
+    assert!(catalog
+        .get::<hayro_syntax::object::Dict<'_>>(b"AcroForm")
+        .is_some());
+    assert!(built.warnings.iter().any(|w| w.contains("전자서명")));
+}
+
+#[test]
+fn hostile_circular_prev_falls_back_cleanly_in_worker() {
+    let supervisor = normal();
+    let base = hand_written_with_xref(
+        &[
+            (
+                1,
+                "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>".to_string(),
+            ),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+            (
+                3,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>".to_string(),
+            ),
+            (4, "<< /Type /StructTreeRoot >>".to_string()),
+        ],
+        "",
+    );
+    let xref_off = base.windows(4).rposition(|w| w == b"xref").unwrap();
+    let sxref_off = base.windows(9).rposition(|w| w == b"startxref").unwrap();
+    let end_dict = base[..sxref_off]
+        .windows(2)
+        .rposition(|w| w == b">>")
+        .unwrap();
+    let mut circ = base[..end_dict].to_vec();
+    circ.extend_from_slice(
+        format!(" /Prev {xref_off} >>\nstartxref\n{xref_off}\n%%EOF\n").as_bytes(),
+    );
+    let file = Arc::new(circ);
+    let built = supervisor
+        .build(&[file], &head(plan(1, 0), 1), &mut no_overlay)
+        .expect("fallback rewrite succeeds in worker");
+    assert_eq!(pages_of(&built.bytes), 1);
+    assert!(!built.warnings.is_empty());
+}

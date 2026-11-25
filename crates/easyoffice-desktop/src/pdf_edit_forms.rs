@@ -15,7 +15,9 @@ use crate::pdf_edit_wire::{OverlayKind, OverlayMaker, PagePlan, WireForm};
 use hayro_syntax::object::{Array, Dict, Name, ObjectIdentifier};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::types::{AnnotationFlags, AnnotationType, FieldFlags, FieldType};
-use hayro_write::pdf_writer::{Content, Finish, Name as WName, Pdf, Rect, Ref, Str, TextStr};
+use hayro_write::pdf_writer::{
+    Chunk, Content, Finish, Name as WName, Pdf, Rect, Ref, Str, TextStr,
+};
 use hayro_write::{extract, ChunkSettings, ExtractionQuery};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -23,35 +25,35 @@ use std::sync::Arc;
 const MAX_FIELD_DEPTH: usize = 16;
 const MAX_FIELD_VALUE_CHARS: usize = 2_048;
 const MAX_NAME_CHARS: usize = 256;
-const DEFAULT_DA: &[u8] = b"/Helv 10 Tf 0 g";
-const EO_LABELED_TAG: &str = "eo_labeled";
+pub(crate) const DEFAULT_DA: &[u8] = b"/Helv 10 Tf 0 g";
+pub(crate) const EO_LABELED_TAG: &str = "eo_labeled";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum FormRole {
+pub(crate) enum FormRole {
     Applicant,
     Department,
 }
 
 #[derive(Clone)]
-enum SavedValue {
+pub(crate) enum SavedValue {
     None,
     Text(String),
     Name(Vec<u8>),
 }
 
-struct InheritedField {
-    field_type: FieldType,
-    leaf_name: String,
-    full_name: String,
-    alt_name: String,
-    mapping_name: String,
-    flags: u32,
-    value: SavedValue,
-    default_value: SavedValue,
-    da: Option<Vec<u8>>,
-    quadding: Option<i32>,
-    max_len: Option<i32>,
-    options: Vec<String>,
+pub(crate) struct InheritedField {
+    pub(crate) field_type: FieldType,
+    pub(crate) leaf_name: String,
+    pub(crate) full_name: String,
+    pub(crate) alt_name: String,
+    pub(crate) mapping_name: String,
+    pub(crate) flags: u32,
+    pub(crate) value: SavedValue,
+    pub(crate) default_value: SavedValue,
+    pub(crate) da: Option<Vec<u8>>,
+    pub(crate) quadding: Option<i32>,
+    pub(crate) max_len: Option<i32>,
+    pub(crate) options: Vec<String>,
 }
 
 /// Geometry of an output page needed to place or rotate widget appearances.
@@ -82,9 +84,9 @@ pub struct FormBuildOutput {
     pub skipped_fields: usize,
 }
 
-type WidgetCacheKey = (u32, u32, OverlayKind);
+pub(crate) type WidgetCacheKey = (u32, u32, OverlayKind);
 
-fn widget_cache_key(w: f32, h: f32, kind: OverlayKind) -> WidgetCacheKey {
+pub(crate) fn widget_cache_key(w: f32, h: f32, kind: OverlayKind) -> WidgetCacheKey {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let q = |v: f32| (v * 100.0).round() as u32;
     (q(w), q(h), kind)
@@ -341,7 +343,7 @@ pub fn write_catalog_acroform(
     acro.finish();
 }
 
-fn read_inherited_field(widget: &Dict<'_>) -> Result<Option<InheritedField>, String> {
+pub(crate) fn read_inherited_field(widget: &Dict<'_>) -> Result<Option<InheritedField>, String> {
     let mut chain: Vec<Dict<'_>> = Vec::with_capacity(4);
     let mut seen = HashSet::new();
     let mut cur = Some(widget.clone());
@@ -457,7 +459,7 @@ fn read_saved_value(dict: &Dict<'_>, key: &[u8]) -> Option<SavedValue> {
         .map(|n| SavedValue::Name(n.as_ref().to_vec()))
 }
 
-fn match_field_role(field: &InheritedField) -> Option<FormRole> {
+pub(crate) fn match_field_role(field: &InheritedField) -> Option<FormRole> {
     for raw in [&field.leaf_name, &field.full_name, &field.alt_name] {
         let lower = raw.trim().to_ascii_lowercase();
         if lower.is_empty() {
@@ -479,7 +481,7 @@ fn match_field_role(field: &InheritedField) -> Option<FormRole> {
     None
 }
 
-fn allocate_field_name(field: &InheritedField, used: &mut HashSet<String>) -> String {
+pub(crate) fn allocate_field_name(field: &InheritedField, used: &mut HashSet<String>) -> String {
     let base: String = field
         .full_name
         .chars()
@@ -502,7 +504,7 @@ fn allocate_field_name(field: &InheritedField, used: &mut HashSet<String>) -> St
     base
 }
 
-fn new_widget_rect(geom: PageGeom, slot: usize) -> [f32; 4] {
+pub(crate) fn new_widget_rect(geom: PageGeom, slot: usize) -> [f32; 4] {
     let (shown_w, shown_h) = geom.shown_size();
     let box_w = (shown_w - 72.0).clamp(64.0, 180.0);
     let box_h = 20.0_f32.min((shown_h * 0.12).max(12.0));
@@ -519,8 +521,8 @@ fn new_widget_rect(geom: PageGeom, slot: usize) -> [f32; 4] {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_widget_ap(
-    out: &mut Pdf,
+pub(crate) fn build_widget_ap(
+    out: &mut Chunk,
     next: &mut Ref,
     rect: [f32; 4],
     rotate: u16,
@@ -587,8 +589,8 @@ fn build_widget_ap(
     Ok(wrap_ref)
 }
 
-fn fallback_ascii_ap(
-    out: &mut Pdf,
+pub(crate) fn fallback_ascii_ap(
+    out: &mut Chunk,
     next: &mut Ref,
     helv_ref: &mut Option<Ref>,
     field: &InheritedField,
@@ -625,8 +627,8 @@ fn fallback_ascii_ap(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_merged_widget(
-    out: &mut Pdf,
+pub(crate) fn write_merged_widget(
+    out: &mut Chunk,
     next: &mut Ref,
     field: &InheritedField,
     unique_name: &str,

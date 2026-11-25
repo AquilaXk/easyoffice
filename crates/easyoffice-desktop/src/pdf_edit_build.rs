@@ -31,7 +31,7 @@ use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
     PAGES_PER_CHECK_MASK,
 };
-use crate::pdf_edit_carry::{skipped_fields_sentence, Carry, Copies};
+use crate::pdf_edit_carry::{skipped_fields_sentence, Carry, Copies, Warnings};
 use crate::pdf_edit_forms::{process_forms, write_catalog_acroform, PageGeom};
 use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, resource_entries, Limits};
 use crate::pdf_edit_outlines::preserve_outlines;
@@ -158,6 +158,17 @@ pub fn build(
     if pages.len() > MAX_PAGES {
         return Err(format!("결과의 쪽 수가 한도({MAX_PAGES})를 초과합니다."));
     }
+    let fallback_warning = match crate::pdf_edit_incremental::try_incremental_build(
+        sources,
+        pages,
+        overlay,
+        make_overlay,
+        deadline,
+    )? {
+        crate::pdf_edit_incremental::IncrementalOutcome::Built(built) => return Ok(built),
+        crate::pdf_edit_incremental::IncrementalOutcome::Fallback(reason) => Some(reason),
+        crate::pdf_edit_incremental::IncrementalOutcome::NotApplicable => None,
+    };
     let parsed = parse_used(sources, pages, deadline)?;
     let placements = place_all(&parsed, pages, deadline)?;
     let mut carry = Carry::plan(&parsed, pages, deadline)?;
@@ -333,9 +344,16 @@ pub fn build(
     if bytes.len() > MAX_OUTPUT_BYTES {
         return Err(MSG_TOO_BIG.to_string());
     }
+    let mut warnings = Warnings::default();
+    if let Some(reason) = fallback_warning {
+        warnings.push(reason);
+    }
+    for w in carry.warnings.into_vec() {
+        warnings.push(w);
+    }
     Ok(Built {
         bytes,
-        warnings: carry.warnings.into_vec(),
+        warnings: warnings.into_vec(),
     })
 }
 

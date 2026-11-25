@@ -20,7 +20,7 @@ use hayro_write::pdf_writer::types::{
     ActionType, AnnotationFlags, AnnotationIcon, AnnotationType, BlendMode,
 };
 use hayro_write::pdf_writer::{
-    Array as WArray, Content, Finish, Name as WName, Null, Pdf, Rect, Ref, Str, TextStr,
+    Array as WArray, Chunk, Content, Finish, Name as WName, Null, Pdf, Rect, Ref, Str, TextStr,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -210,6 +210,33 @@ impl PageDestMap {
             deadline.check()?;
             map.load_source_dests(source, pdf)?;
         }
+        Ok(map)
+    }
+
+    /// Builds a destination map for one source PDF when preserving original pages incrementally.
+    pub fn build_single(pdf: &ReadPdf, deadline: &Deadline) -> Result<Self, String> {
+        let pages = pdf.pages();
+        let mut by_obj = HashMap::with_capacity(pages.len());
+        let mut by_index = HashMap::with_capacity(pages.len());
+        let placeholder_ref = Ref::new(1);
+        for (idx, page) in pages.iter().enumerate() {
+            let target = PageTarget {
+                page_ref: placeholder_ref,
+                dx: 0.0,
+                dy: 0.0,
+            };
+            by_index.insert((0, idx), target);
+            if let Some(id) = page.raw().obj_id() {
+                by_obj.insert((0, id), target);
+            }
+        }
+        let mut map = Self {
+            by_obj,
+            by_index,
+            named: HashMap::new(),
+        };
+        deadline.check()?;
+        map.load_source_dests(0, pdf)?;
         Ok(map)
     }
 
@@ -709,7 +736,7 @@ fn write_existing_markup_annot(
 /// self-contained `/AP /N` form XObject stream.
 #[allow(clippy::too_many_arguments)]
 pub fn write_markup_annotation(
-    out: &mut Pdf,
+    out: &mut Chunk,
     next: &mut Ref,
     annot_type: AnnotationType,
     rect: [f32; 4],

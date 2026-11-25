@@ -99,6 +99,45 @@ fn catalog_entries_that_are_not_written_are_reported() {
     assert_eq!(
         built.warnings,
         [
+            "문서 스크립트는 보안을 위해 저장하지 않았습니다.",
+            "PDF 포트폴리오 구성은 저장하지 않았습니다."
+        ]
+    );
+
+    let two_pages = hand_written_with_xref(
+        &[
+            (1, format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>")),
+            (
+                2,
+                "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            ),
+            (
+                3,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>".to_string(),
+            ),
+            (
+                4,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>".to_string(),
+            ),
+            (5, "<< /Type /StructTreeRoot >>".to_string()),
+        ],
+        "",
+    );
+    let partial = crate::pdf_edit_build::build(
+        &[Arc::new(two_pages)],
+        &[crate::pdf_edit_wire::PagePlan {
+            source: 0,
+            index: 0,
+            turn: 0,
+        }],
+        &crate::pdf_edit_overlay::Overlay::default(),
+        &mut |_, _, _| Ok(Vec::new()),
+        &crate::pdf_edit_fixtures::deadline(),
+    )
+    .expect("partial rewrite succeeds");
+    assert_eq!(
+        partial.warnings,
+        [
             "태그 구조 트리(접근성 정보)는 저장하지 않았습니다.",
             "문서 스크립트는 보안을 위해 저장하지 않았습니다.",
             "PDF 포트폴리오 구성은 저장하지 않았습니다."
@@ -116,8 +155,50 @@ fn a_signature_field_is_reported_and_not_written() {
         "5 0 R",
         &more,
     ));
+    assert_eq!(built.warnings, Vec::<String>::new());
+
+    let two_pages = hand_written_with_xref(
+        &[
+            (
+                1,
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>"
+                    .to_string(),
+            ),
+            (
+                2,
+                "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            ),
+            (
+                3,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Annots [5 0 R] >>"
+                    .to_string(),
+            ),
+            (
+                4,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>".to_string(),
+            ),
+            (
+                5,
+                "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Sign) /Rect [10 10 90 40] >>"
+                    .to_string(),
+            ),
+        ],
+        "",
+    );
+    let partial = crate::pdf_edit_build::build(
+        &[Arc::new(two_pages)],
+        &[crate::pdf_edit_wire::PagePlan {
+            source: 0,
+            index: 0,
+            turn: 0,
+        }],
+        &crate::pdf_edit_overlay::Overlay::default(),
+        &mut |_, _, _| Ok(Vec::new()),
+        &crate::pdf_edit_fixtures::deadline(),
+    )
+    .expect("partial rewrite succeeds");
     assert_eq!(
-        built.warnings,
+        partial.warnings,
         ["전자서명 등 지원하지 않는 양식 필드 1개는 저장하지 못했습니다."]
     );
 }
