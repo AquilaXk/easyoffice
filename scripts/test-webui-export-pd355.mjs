@@ -98,6 +98,7 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
     tauriInvoke: async (cmd, { payload }) => {
       if (cmd !== "convert_document_format") return JSON.stringify(await offline[cmd](payload));
       const req = JSON.parse(payload);
+      if (req.action === "decode") return JSON.stringify(await offline[cmd](payload));
       converts.push(req);
       return JSON.stringify({
         status: "OK",
@@ -152,4 +153,202 @@ test("파일 ▸ 내보내기 submenu, format dialog, filename sanitization, and
   for (const el of document.querySelectorAll(".md-item[data-export-format]")) {
     assert.equal(el.hidden, true, "HWP must hide generic export items");
   }
+});
+
+test("PDF form toggle does not dirty clean document, extracted AcroForm fields render safely, and unapplied stamp does not leak", async () => {
+  const offline = await createOffline();
+  const converts = [];
+  const pdfEditSaves = [];
+  const windowStates = [];
+  const confirmCalls = [];
+  const { document, userClick } = await createWorkspaceHarness({
+    search: "?module=PDF&win=w-pdf-clean-export",
+    platform: "MacIntel",
+    confirm: (msg) => {
+      confirmCalls.push(String(msg || ""));
+      return true;
+    },
+    shellCommands: {
+      report_menu_state: () => null,
+      report_window_state: (args) => {
+        windowStates.push(args);
+        return null;
+      },
+      confirm_dialog: (args) => {
+        confirmCalls.push(JSON.stringify(args));
+        return true;
+      },
+      pdf_edit_open: () => ({ pages: 1, sources: 1, turn: 0, stamp: "", watermark: "" }),
+      pdf_edit_apply: () => ({ pages: 1, turn: 0, stamp: "", watermark: "" }),
+      pdf_edit_save: (args) => {
+        pdfEditSaves.push(args);
+        return { status: "saved", name: args?.fileName || "edited.pdf", bytes: 120, pages: 1 };
+      },
+      save_document_file: (args) => ({ status: "saved", name: args.fileName, bytes: 12 }),
+    },
+    tauriInvoke: async (cmd, { payload }) => {
+      if (cmd !== "convert_document_format") return JSON.stringify(await offline[cmd](payload));
+      const req = JSON.parse(payload);
+      if (req.action === "decode") return JSON.stringify(await offline[cmd](payload));
+      converts.push(req);
+      return JSON.stringify({
+        status: "OK",
+        convertedBase64: Buffer.from("PK\x03\x04dummy").toString("base64"),
+        outputBytes: 12,
+        specification: String(req.targetFormat || "").toUpperCase(),
+        compatibility: "full",
+        warnings: [],
+      });
+    },
+  });
+  await flushAsyncTurns(10);
+
+  // Empty PDF must refuse export cleanly without calling backend.
+  userClick(document.querySelector('.md-item[data-export-format="docx"]'));
+  await flushAsyncTurns(8);
+  assert.equal(converts.length, 0, "empty PDF must not convert");
+  assert.match(document.getElementById("status-command-feedback").textContent, /내보낼 PDF 문서가 없습니다/);
+
+  // Open plain PDF -> toggle form panel -> flush autosave -> opening another PDF must NOT trigger unsaved prompt.
+  await pickFile(
+    document,
+    makeFixtureFile("단순문서.pdf", {
+      format: "pdf",
+      title: "단순문서",
+      blocks: [{ type: "paragraph", runs: [{ text: "본문 1줄" }] }],
+      pdfOutlines: [],
+      pdfForm: { hasAcroForm: false, fieldCount: 0, applicant: null, department: null, fields: [] },
+    })
+  );
+  await flushAsyncTurns(12);
+  const promptsBeforeToggle = confirmCalls.length;
+  userClick(document.getElementById("btn-pdf-form-toggle"));
+  await flushAsyncTurns(8);
+  assert.equal(document.getElementById("pdf-acroform-grid").hidden, false);
+
+  // Export DOCX before clicking Apply -> unapplied default #pdf-stamp-select ("승인필") must NOT leak.
+  userClick(document.querySelector('.md-item[data-export-format="docx"]'));
+  await flushAsyncTurns(10);
+  assert.equal(converts.at(-1)?.sourceFormat, "pdf");
+  assert.equal(converts.at(-1)?.targetFormat, "docx");
+  assert.equal(converts.at(-1)?.pdf?.stamp, undefined, "unapplied stamp select must not leak");
+
+  // Open PDF with arbitrary AcroForm fields while grid is merely toggled (no edits) -> must NOT ask unsaved confirm.
+  await pickFile(
+    document,
+    makeFixtureFile("계약.pdf", {
+      format: "pdf",
+      title: "계약",
+      blocks: [{ type: "paragraph", runs: [{ text: "계약 조항" }] }],
+      pdfOutlines: [],
+      pdfForm: {
+        hasAcroForm: true,
+        fieldCount: 2,
+        applicant: null,
+        department: null,
+        fields: [
+          { name: "계약 번호", value: "2026-042" },
+          { name: "동의", value: "Yes" },
+        ],
+      },
+    })
+  );
+  await flushAsyncTurns(12);
+  assert.equal(confirmCalls.length, promptsBeforeToggle, "form toggle alone must not trigger unsaved prompt");
+  assert.notEqual(windowStates.at(-1)?.dirty, true);
+  const extractedBox = document.getElementById("pdf-form-extracted");
+  assert.equal(extractedBox.hidden, false);
+  assert.match(extractedBox.textContent, /계약 번호:\s*2026-042/);
+  assert.match(extractedBox.textContent, /동의:\s*Yes/);
+
+  // Typing a form field value marks dirty and opening another file asks confirm.
+  const applicantInput = document.getElementById("pdf-form-applicant");
+  applicantInput.value = "김철수";
+  applicantInput.dispatchEvent({ type: "input", bubbles: true });
+  await flushAsyncTurns(8);
+  await pickFile(
+    document,
+    makeFixtureFile("계약2.pdf", {
+      format: "pdf",
+      title: "계약2",
+      blocks: [{ type: "paragraph", runs: [{ text: "본문" }] }],
+      pdfOutlines: [],
+      pdfForm: { hasAcroForm: true, fieldCount: 1, applicant: null, department: null, fields: [{ name: "계약 번호", value: "2026-043" }] },
+    })
+  );
+  await flushAsyncTurns(12);
+  assert.ok(confirmCalls.length > promptsBeforeToggle, "editing form field must prompt before replacing");
+
+  userClick(document.querySelector(".md-item[data-export-dialog]"));
+  await flushAsyncTurns(4);
+  document.getElementById("export-format-select").value = "pdf";
+  document.getElementById("export-file-name").value = "CON.pdf";
+  userClick(document.getElementById("btn-export-run"));
+  await flushAsyncTurns(12);
+  assert.equal(pdfEditSaves.at(-1)?.fileName, "_CON.pdf", "reserved Windows stem is sanitized and forwarded to pdf_edit_save");
+});
+
+test("BASE/BOARD export send valid backend sourceFormats, reject empty BOARD PDF, sanitize reserved names, and START/CONV disable export", async () => {
+  const offline = await createOffline();
+  const converts = [];
+  const saves = [];
+  const { document } = await createWorkspaceHarness({
+    search: "?module=BASE&win=w-base-board-export",
+    platform: "MacIntel",
+    shellCommands: {
+      report_menu_state: () => null,
+      save_document_file: (args) => {
+        saves.push(args);
+        return { status: "saved", name: args.fileName, bytes: 12 };
+      },
+    },
+    tauriInvoke: async (cmd, { payload }) => {
+      if (cmd !== "convert_document_format") return JSON.stringify(await offline[cmd](payload));
+      const req = JSON.parse(payload);
+      if (req.action === "decode") return JSON.stringify(await offline[cmd](payload));
+      converts.push(req);
+      return JSON.stringify({
+        status: "OK",
+        convertedBase64: Buffer.from("a,b\n1,2\n").toString("base64"),
+        outputBytes: 8,
+        specification: String(req.targetFormat || "").toUpperCase(),
+        compatibility: "full",
+        warnings: [],
+      });
+    },
+  });
+  await flushAsyncTurns(10);
+
+  document.querySelector(".md-item[data-export-dialog]").click();
+  await flushAsyncTurns(4);
+  document.getElementById("export-format-select").value = "csv";
+  document.getElementById("export-file-name").value = "NUL:보고서?.xlsx";
+  document.getElementById("btn-export-run").click();
+  await flushAsyncTurns(12);
+  assert.equal(converts.at(-1)?.sourceFormat, "xlsx");
+  assert.equal(converts.at(-1)?.targetFormat, "csv");
+  assert.equal(saves.at(-1)?.fileName, "NUL_보고서_.csv");
+
+  switchModule(document, "BOARD");
+  await flushAsyncTurns(8);
+  const boardStudio = document.defaultView.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+  boardStudio.replaceState({ version: 1, nodes: [], connectors: [], viewport: { x: 0, y: 0, zoom: 1 } });
+  document.querySelector('.md-item[data-export-format="pdf"]').click();
+  await flushAsyncTurns(8);
+  assert.match(document.getElementById("status-command-feedback").textContent, /PDF로 내보낼 보드 요소가 없습니다/);
+
+  boardStudio.replaceState({
+    version: 1,
+    nodes: [{ id: "n1", kind: "text", x: 20, y: 20, w: 180, h: 60, text: "보드 텍스트" }],
+    connectors: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  document.querySelector('.md-item[data-export-format="pdf"]').click();
+  await flushAsyncTurns(12);
+  assert.equal(converts.at(-1)?.sourceFormat, "pptx");
+  assert.equal(converts.at(-1)?.targetFormat, "pdf");
+
+  switchModule(document, "CONV");
+  await flushAsyncTurns(6);
+  assert.equal(document.querySelector(".md-item[data-export-dialog]").getAttribute("aria-disabled"), "true");
 });

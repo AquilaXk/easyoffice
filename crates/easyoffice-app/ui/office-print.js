@@ -412,60 +412,110 @@
       const rotText = document.getElementById("pdf-rotation-badge")?.textContent || "";
       const rotMatch = /(\d+)/.exec(rotText);
       const deg = rotMatch ? Number(rotMatch[1]) % 360 : (card.dataset.rotatedQuarter === "true" ? 90 : 0);
-      const size = (deg % 180) !== 0 ? { width: PORTRAIT_MM.height, height: PORTRAIT_MM.width } : PORTRAIT_MM;
+      const isLandscape = (deg % 180) !== 0;
+      const size = isLandscape ? { width: PORTRAIT_MM.height, height: PORTRAIT_MM.width } : PORTRAIT_MM;
       const paperClass = rules.classFor(size.width, size.height);
       addPageRule(rules, size, DOC_MARGIN_MM + "mm");
 
-      const page = document.createElement("div");
-      page.className = PAGE_CLASS + " eo-print-pdf-page " + paperClass;
-      if (deg !== 0) page.dataset.rotation = String(deg);
-
       const stamp = (document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
-      if (stamp) {
-        const el = document.createElement("div");
-        el.className = "eo-print-pdf-stamp";
-        el.textContent = stamp;
-        page.appendChild(el);
-      }
       const wm = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
-      if (wm) {
-        const el = document.createElement("div");
-        el.className = "eo-print-pdf-wm";
-        el.textContent = wm;
-        page.appendChild(el);
-      }
-      if (heading && heading.textContent?.trim()) {
-        const h = heading.cloneNode(true);
-        h.removeAttribute("id");
-        page.appendChild(h);
-      }
+      const headingText = (heading?.textContent || "").trim();
+      const charsPerLine = isLandscape ? 72 : 48;
+      const maxUnitsPerPage = isLandscape ? 18 : 28;
+      const estimateUnits = (text) => Math.max(1, Math.ceil(Array.from(String(text || "")).length / charsPerLine));
+
+      const bodyItems = [];
       for (const p of paragraphs) {
         if (!p.textContent?.trim()) continue;
         const clone = p.cloneNode(true);
         clone.removeAttribute("id");
-        page.appendChild(clone);
+        bodyItems.push({ node: clone, units: estimateUnits(p.textContent) });
       }
       for (const cls of [".pdf-highlight-badge", ".pdf-splitmerge-badge"]) {
         const badge = card.querySelector(cls);
         if (badge && badge.textContent?.trim()) {
           const clone = badge.cloneNode(true);
           clone.removeAttribute("id");
-          page.appendChild(clone);
+          bodyItems.push({ node: clone, units: 2 });
         }
       }
+
       const appVal = String(document.getElementById("pdf-form-applicant")?.value || "").trim();
       const deptVal = String(document.getElementById("pdf-form-dept")?.value || "").trim();
       const gridVisible = !document.getElementById("pdf-acroform-grid")?.hidden;
-      if ((gridVisible || appVal || deptVal) && (appVal || deptVal)) {
-        const formBox = document.createElement("div");
-        formBox.className = "eo-print-pdf-form";
-        const parts = [];
-        if (appVal) parts.push("신청인: " + appVal);
-        if (deptVal) parts.push("부서: " + deptVal);
-        formBox.textContent = parts.join(" · ");
-        page.appendChild(formBox);
+      const extracted = Array.from(document.querySelectorAll("#pdf-form-extracted .pdf-form-extracted-chip"))
+        .map((el) => (el.textContent || "").trim())
+        .filter(Boolean);
+      const formParts = [];
+      if (gridVisible || appVal || deptVal) {
+        if (appVal) formParts.push("신청인: " + appVal);
+        if (deptVal) formParts.push("부서: " + deptVal);
       }
-      return [page];
+      for (const chip of extracted) formParts.push(chip);
+
+      const wmUnits = wm ? 2 : 0;
+      const firstHeaderUnits = (stamp ? 2 : 0) + wmUnits + (headingText ? estimateUnits(headingText) + 1 : 0);
+      const chunks = [];
+      let current = [];
+      let used = firstHeaderUnits;
+      for (const item of bodyItems) {
+        if (current.length > 0 && used + item.units > maxUnitsPerPage) {
+          chunks.push(current);
+          current = [item];
+          used = wmUnits + item.units;
+        } else {
+          current.push(item);
+          used += item.units;
+        }
+      }
+      chunks.push(current);
+
+      const formUnits = formParts.length > 0 ? 3 : 0;
+      if (formUnits > 0 && used + formUnits > maxUnitsPerPage && current.length > 0) {
+        chunks.push([]);
+      }
+
+      const totalPages = chunks.length;
+      return chunks.map((items, idx) => {
+        const page = document.createElement("div");
+        page.className = PAGE_CLASS + " eo-print-pdf-page " + paperClass;
+        if (deg !== 0) page.dataset.rotation = String(deg);
+
+        if (idx === 0 && stamp) {
+          const el = document.createElement("div");
+          el.className = "eo-print-pdf-stamp";
+          el.textContent = stamp;
+          page.appendChild(el);
+        }
+        if (wm) {
+          const el = document.createElement("div");
+          el.className = "eo-print-pdf-wm";
+          el.textContent = wm;
+          page.appendChild(el);
+        }
+        if (idx === 0 && heading && headingText) {
+          const h = heading.cloneNode(true);
+          h.removeAttribute("id");
+          page.appendChild(h);
+        }
+        for (const item of items) page.appendChild(item.node);
+        if (idx === totalPages - 1 && formParts.length > 0) {
+          const formBox = document.createElement("div");
+          formBox.className = "eo-print-pdf-form";
+          formBox.textContent = formParts.join(" · ");
+          page.appendChild(formBox);
+        }
+        if (totalPages > 1 || deg === 180) {
+          const meta = document.createElement("div");
+          meta.className = "eo-print-pdf-meta";
+          const metaParts = [];
+          if (deg === 180) metaParts.push("회전: 180°");
+          if (totalPages > 1) metaParts.push("쪽 " + (idx + 1) + " / " + totalPages);
+          meta.textContent = metaParts.join(" · ");
+          page.appendChild(meta);
+        }
+        return page;
+      });
     }
 
     const BUILDERS = {

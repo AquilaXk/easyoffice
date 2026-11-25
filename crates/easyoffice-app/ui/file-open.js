@@ -561,11 +561,18 @@
     const applicant = String(formInfo.applicant || "");
     const dept = String(formInfo.department || "");
     const fieldCount = Number(formInfo.fieldCount) || 0;
-    const hasForm = Boolean(formInfo.hasAcroForm && (fieldCount > 0 || applicant || dept));
+    const rawFields = Array.isArray(formInfo.fields) ? formInfo.fields : [];
+    const formFields = rawFields
+      .filter((f) => f && typeof f.name === "string" && f.name.trim())
+      .map((f) => ({ name: f.name.trim(), value: f.value == null ? "" : String(f.value) }));
+    const hasForm = Boolean(
+      formInfo.hasAcroForm && (fieldCount > 0 || applicant || dept || formFields.length > 0)
+    );
     next.pdfStudio = {
       ...next.pdfStudio,
       stampValue: "", stampBadge: "", watermarkInput: "", watermarkLayer: "",
       applicant, dept,
+      formFields,
       formVisible: hasForm,
       formStatus: hasForm ? (fieldCount > 0 ? "양식 필드 " + fieldCount + "개 감지됨" : "양식 필드 감지됨") : "",
       cardHeadingNodes: [textSpec(title)],
@@ -785,6 +792,7 @@
         return { ok: false, cancelled: true };
       }
       if (outcome.error) return fail(name + " — " + outcome.error);
+      await deps.onOpenedClean?.();
       // A PDF is also handed to the shell, so that the studio edits its objects (PD-170).
       const pdfNote = res.module === "PDF" && deps.pdfEdit ? await deps.pdfEdit.open(name, data, options) : "";
       setFeedback(describe(res, name) + pdfNote);

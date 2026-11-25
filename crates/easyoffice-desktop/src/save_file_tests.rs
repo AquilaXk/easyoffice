@@ -759,6 +759,11 @@ fn export_formats_reject_spoofed_extensions_control_chars_and_dot_stems() {
         "../..",
         "a.",
         "a.veryLongExtension",
+        "CON.docx",
+        "nul.1.pdf",
+        "COM3.pages",
+        "보고서:최종?.pdf",
+        "trailing..pdf",
     ] {
         assert!(
             split_file_name(bad_name).is_err(),

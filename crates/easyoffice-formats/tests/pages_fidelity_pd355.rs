@@ -521,3 +521,94 @@ fn hostile_header_bucket_and_stroke_sidecar_budgets_fail_closed() {
         "corrupt style payload must decode gracefully or return typed error without panicking"
     );
 }
+
+fn f_float(num: u32, value: f32) -> Vec<u8> {
+    let mut out = Vec::new();
+    varint((u64::from(num) << 3) | 5, &mut out);
+    out.extend_from_slice(&value.to_le_bytes());
+    out
+}
+
+#[test]
+fn right_indent_float_and_web_edition_line_spacing_field_19_do_not_interfere() {
+    let source = doc(vec![
+        RichBlock::Paragraph(RichParagraph {
+            right_indent_twips: Some(720),
+            line_spacing_percent: Some(180),
+            ..para(vec![run("오른쪽 들여쓰기 + 줄간격")])
+        }),
+        RichBlock::Paragraph(RichParagraph {
+            right_indent_twips: Some(400),
+            ..para(vec![run("오른쪽 들여쓰기 단독")])
+        }),
+    ]);
+    let bytes = write_pages(&source);
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let stylesheet_entry = entries
+        .iter()
+        .find(|e| e.path == "Index/DocumentStylesheet.iwa")
+        .unwrap();
+    let mut budget = usize::MAX;
+    let stream = decompress_iwa(&stylesheet_entry.data, &mut budget).unwrap();
+    let mut records = split_records(&stream).unwrap();
+
+    // Mutate one paragraph style so field 12 holds web-edition line spacing (submessage 19)
+    // instead of Fixed32 right indent (float 19), verifying clean wire-type separation.
+    let mut mutated_web_style = false;
+    'outer: for rec in &mut records {
+        for (msg_info, payload) in rec.info.messages.iter().zip(rec.payloads.iter_mut()) {
+            if msg_info.type_id == 2022 {
+                if let Ok(msg) = Message::parse(payload) {
+                    if let Ok(Some(props)) = msg.sub(12) {
+                        if props.float(19).is_some() && props.sub(13).ok().flatten().is_none() {
+                            let spacing_msg = [f_varint(1, 0), f_float(2, 1.4)].concat();
+                            let new_para_props = [f_bytes(19, &spacing_msg)].concat();
+                            let mut rebuilt = Vec::new();
+                            for f in &msg.fields {
+                                if f.number == 12 {
+                                    rebuilt.extend(f_bytes(12, &new_para_props));
+                                } else if let WireValue::Varint(v) = f.value {
+                                    rebuilt.extend(f_varint(f.number, v));
+                                } else if let WireValue::Bytes(raw) = f.value {
+                                    rebuilt.extend(f_bytes(f.number, raw));
+                                }
+                            }
+                            *payload = rebuilt;
+                            mutated_web_style = true;
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        mutated_web_style,
+        "expected standalone right_indent variation"
+    );
+
+    let repacked: Vec<(String, Vec<u8>)> = entries
+        .iter()
+        .map(|e| {
+            (
+                e.path.clone(),
+                if e.path == "Index/DocumentStylesheet.iwa" {
+                    encode_records_stream(&records)
+                } else {
+                    e.data.clone()
+                },
+            )
+        })
+        .collect();
+    let (back, _) = read_pages(&ZipArchiveCodec::pack(&repacked).unwrap());
+    let RichBlock::Paragraph(first) = &back.blocks[0] else {
+        panic!("expected first paragraph");
+    };
+    assert_eq!(first.right_indent_twips, Some(720));
+    assert_eq!(first.line_spacing_percent, Some(180));
+    let RichBlock::Paragraph(second) = &back.blocks[1] else {
+        panic!("expected second paragraph");
+    };
+    assert_eq!(second.right_indent_twips, None);
+    assert_eq!(second.line_spacing_percent, Some(140));
+}

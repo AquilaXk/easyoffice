@@ -24,6 +24,13 @@ const MAX_OUTLINE_TITLES: usize = 256;
 const MAX_FORM_NODES: usize = 4_096;
 const MAX_ANNOTS_PER_PAGE: usize = 4_096;
 const MAX_FORM_VALUE_CHARS: usize = 512;
+const MAX_EXTRACTED_FORM_FIELDS: usize = 32;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfFormField {
+    pub name: String,
+    pub value: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PdfFormReadback {
@@ -31,6 +38,7 @@ pub struct PdfFormReadback {
     pub field_count: usize,
     pub applicant: Option<String>,
     pub department: Option<String>,
+    pub fields: Vec<PdfFormField>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -460,6 +468,22 @@ fn decode_form_text(
     Some(trimmed.chars().take(MAX_FORM_VALUE_CHARS).collect())
 }
 
+fn decode_form_value(
+    val: &PdfObjValue,
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> Option<String> {
+    if let Some(text) = decode_form_text(val, objects) {
+        return Some(text);
+    }
+    if let Some(PdfObjValue::Name(raw)) = resolve_value(val, objects) {
+        let trimmed = raw.strip_prefix('/').unwrap_or(raw).trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.chars().take(MAX_FORM_VALUE_CHARS).collect());
+        }
+    }
+    None
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FormRole {
     Applicant,
@@ -540,7 +564,7 @@ fn walk_form_fields_detailed(
             .and_then(|v| decode_form_text(v, objects))
             .or_else(|| parent.alt.map(str::to_string));
         let own_val = dict_get(entries, "/V")
-            .and_then(|v| decode_form_text(v, objects))
+            .and_then(|v| decode_form_value(v, objects))
             .or_else(|| parent.value.map(str::to_string));
 
         let kids = dict_get(entries, "/Kids").and_then(|k| match resolve_value(k, objects) {
@@ -580,6 +604,20 @@ fn walk_form_fields_detailed(
                 .and_then(match_form_role)
                 .or_else(|| full_name.as_deref().and_then(match_form_role))
                 .or_else(|| own_alt.as_deref().and_then(match_form_role));
+            let display_name = own_alt
+                .as_deref()
+                .or(full_name.as_deref())
+                .or(own_name.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            if let Some(field_name) = display_name {
+                if state.out.fields.len() < MAX_EXTRACTED_FORM_FIELDS {
+                    state.out.fields.push(PdfFormField {
+                        name: field_name.to_string(),
+                        value: own_val.clone(),
+                    });
+                }
+            }
             match (role, own_val) {
                 (Some(FormRole::Applicant), Some(val)) if state.out.applicant.is_none() => {
                     state.out.applicant = Some(val);
@@ -785,5 +823,67 @@ mod tests {
         assert_eq!(form.field_count, 2);
         assert_eq!(form.applicant.as_deref(), Some("최성"));
         assert_eq!(form.department.as_deref(), Some("부서"));
+        assert_eq!(
+            form.fields,
+            vec![
+                PdfFormField {
+                    name: "applicant".to_string(),
+                    value: Some("최성".to_string()),
+                },
+                PdfFormField {
+                    name: "department".to_string(),
+                    value: Some("부서".to_string()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn acro_form_extracts_arbitrary_tx_and_btn_fields_within_cap() {
+        let mut objs = vec![
+            (
+                1,
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".to_string(),
+            ),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+            (
+                3,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>".to_string(),
+            ),
+        ];
+        let mut field_refs = Vec::new();
+        objs.push((
+            5,
+            "<< /FT /Tx /T (contractNo) /TU (계약 번호) /V (2026-042) >>".to_string(),
+        ));
+        field_refs.push("5 0 R".to_string());
+        objs.push((6, "<< /FT /Btn /T (agreed) /V /Yes >>".to_string()));
+        field_refs.push("6 0 R".to_string());
+        for i in 0..40u32 {
+            let id = 10 + i;
+            objs.push((id, format!("<< /FT /Tx /T (extra_{i}) /V (val_{i}) >>")));
+            field_refs.push(format!("{id} 0 R"));
+        }
+        objs.push((4, format!("<< /Fields [{}] >>", field_refs.join(" "))));
+        let body: Vec<(u32, &str)> = objs.iter().map(|(id, s)| (*id, s.as_str())).collect();
+        let pdf = minimal_pdf(&body, 1);
+        let form = PdfSerializer::parse_form_fields(&pdf).unwrap();
+        assert!(form.has_acro_form);
+        assert_eq!(form.field_count, 42);
+        assert_eq!(form.fields.len(), MAX_EXTRACTED_FORM_FIELDS);
+        assert_eq!(
+            form.fields[0],
+            PdfFormField {
+                name: "계약 번호".to_string(),
+                value: Some("2026-042".to_string()),
+            }
+        );
+        assert_eq!(
+            form.fields[1],
+            PdfFormField {
+                name: "agreed".to_string(),
+                value: Some("Yes".to_string()),
+            }
+        );
     }
 }

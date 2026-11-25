@@ -467,9 +467,10 @@ pub(crate) mod para_props {
     pub const FIRST_LINE_INDENT: u32 = 13;
     /// Left indent in points (`style::PARA_PROPS`).
     pub const LEFT_INDENT: u32 = 16;
-    /// Line spacing message (`style::PARA_PROPS`).
+    /// Line spacing message (`style::PARA_PROPS`, length-delimited wire type 2 in web edition;
+    /// standard bundles put line spacing at field 13 and use field 19 as Fixed32 `RIGHT_INDENT`).
     pub const LINE_SPACING: u32 = 19;
-    /// Right indent in points (`style::PARA_PROPS`, Fixed32 float in `12.19`). 확인
+    /// Right indent in points (`style::PARA_PROPS`, Fixed32 float in `12.19`, wire type 5). 확인
     pub const RIGHT_INDENT: u32 = 19;
 }
 

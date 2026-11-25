@@ -163,11 +163,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return value === "" || value === null || value === false ? undefined : value;
   }
 
+  const fingerprintPdfStudio = (s) => (s && typeof s === "object" ? (({ formVisible: _fv, ...rest }) => rest)(s) : s);
+
   // `workbookProtect`: the protection of the workbook (no part of a snapshot); a workbook without one adds nothing.
   function contentFingerprint(snap, workbookProtect) {
     const parts = [
       snap.docTabs, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.workbookTheme, snap.customTableStyles, snap.definedNames,
-      snap.sheetFrozen, snap.sheetOrder, snap.calcOptions, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
+      snap.sheetFrozen, snap.sheetOrder, snap.calcOptions, snap.slides, fingerprintPdfStudio(snap.pdfStudio), snap.pdfRotationDeg,
       snap.baseState, snap.boardState?.nodes, snap.boardState?.connectors,
     ];
     if (workbookProtect) parts.push(workbookProtect);
@@ -252,7 +254,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       SLIDE: [snap.slides],
       BASE: [snap.baseState],
       BOARD: [snap.boardState?.nodes, snap.boardState?.connectors],
-      PDF: [snap.pdfStudio, snap.pdfRotationDeg],
+      PDF: [fingerprintPdfStudio(snap.pdfStudio), snap.pdfRotationDeg],
     }[mod] || [];
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
@@ -619,18 +621,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function installActivityTracking() {
       const root = document.documentElement;
-      const isCopilotUiTarget = (t) => Boolean(t?.closest?.("#eo-copilot-shell, #copilot-model-dialog, #btn-copilot-toggle"));
-      for (const type of ["input", "change", "eo-doc-mutated"]) {
-        root?.addEventListener?.(type, (ev) => {
-          if (!isCopilotUiTarget(ev?.target)) noteActivity(true);
-        });
-      }
+      const nonDoc = "#eo-copilot-shell, #copilot-model-dialog, #btn-copilot-toggle, #export-dialog, #cmd-palette-modal, #find-dialog, #file-open-input, #conv-source-file";
+      const isNonDocInputTarget = (t) => Boolean(t?.closest?.(nonDoc));
+      for (const type of ["input", "change", "eo-doc-mutated"]) root?.addEventListener?.(type, (ev) => { if (!isNonDocInputTarget(ev?.target)) noteActivity(true); });
       root?.addEventListener?.("click", (ev) => {
         const target = ev?.target;
-        if (isCopilotUiTarget(target)) return;
-        if (target && typeof target.closest === "function" && target.closest(CLICK_MUTATING_CONTROL_SELECTOR)) {
-          noteActivity(false);
-        }
+        if (!isNonDocInputTarget(target) && target?.closest?.(CLICK_MUTATING_CONTROL_SELECTOR)) noteActivity(false);
       });
       host.addEventListener?.("pagehide", () => flushAutosaveNow());
       document.addEventListener?.("selectionchange", () => {
@@ -728,6 +724,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");
+      }
+      const exportDisabled = commandModule === "START" || commandModule === "CONV";
+      for (const item of document.querySelectorAll(".md-sub, .md-item[data-export-format], .md-item[data-export-dialog]")) {
+        if (item.classList.contains("md-sub") && !item.querySelector("[data-export-format]")) continue;
+        item.setAttribute("aria-disabled", exportDisabled ? "true" : "false");
       }
       deps.onMenuItemsApplied?.();
       if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule);
@@ -956,37 +957,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     });
 
     return {
-      noteActivity,
-      flushAutosaveNow,
-      establishBaseline,
-      markSaved,
-      setExternalDirty,
-      restoreFromStorage,
-      installActivityTracking,
-      applyModuleContext,
-      runClipboardCommand, insertTextAtSelection,
-      handleShortcutKeydown,
-      runForwardedShortcut,
-      isMacClient,
-      forwardedKeys,
-      discardStoredState,
-      applyPlatformChrome,
-      showBootstrapError,
-      hideBootstrapError,
-      isDirty: hasUnsavedChanges,
-      settle,
+      noteActivity, flushAutosaveNow, establishBaseline, markSaved, setExternalDirty, restoreFromStorage,
+      installActivityTracking, applyModuleContext, runClipboardCommand, insertTextAtSelection,
+      handleShortcutKeydown, runForwardedShortcut, isMacClient, forwardedKeys, discardStoredState,
+      applyPlatformChrome, showBootstrapError, hideBootstrapError, isDirty: hasUnsavedChanges, settle,
     };
   }
 
   host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__ = createWorkspaceSession;
   host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__ = {
-    AUTOSAVE_STORAGE_KEY,
-    studioCommandApplies,
-    latinKeyOf,
-    shortcutComboFromEvent,
-    guessClientPlatform,
-    isRestorableSnapshot,
-    contentFingerprint,
-    moduleFingerprint,
+    AUTOSAVE_STORAGE_KEY, studioCommandApplies, latinKeyOf, shortcutComboFromEvent,
+    guessClientPlatform, isRestorableSnapshot, contentFingerprint, moduleFingerprint,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

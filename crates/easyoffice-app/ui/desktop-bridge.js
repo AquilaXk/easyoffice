@@ -209,8 +209,9 @@
       if (res && ["merged", "split", "cancelled"].includes(res.action) && Number.isSafeInteger(res.count)) return res;
       throw new Error("분할·병합 결과를 확인하지 못했습니다.");
     },
-    async save() {
-      const res = await callShell(PDF_EDIT_COMMANDS.save, {});
+    async save(fileName) {
+      const args = typeof fileName === "string" && fileName.trim() ? { fileName: fileName.trim() } : {};
+      const res = await callShell(PDF_EDIT_COMMANDS.save, args);
       if (res && (res.status === "saved" || res.status === "cancelled")) return res;
       throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
     },

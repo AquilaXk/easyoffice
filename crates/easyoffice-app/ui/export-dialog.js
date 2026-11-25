@@ -50,6 +50,7 @@
   });
 
   const KNOWN_EXT_RE = /\.(?:docx|doc|odt|rtf|pages|md|markdown|txt|xlsx|xls|ods|csv|tsv|pptx|ppsx|ppt|odp|pdf|eobase|eoboard|hwpx|hwp)$/i;
+  const WINDOWS_RESERVED_RE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 
   function formatsForModule(mod) {
     return EXPORT_SPECS[mod] || EXPORT_SPECS.DOC;
@@ -58,13 +59,27 @@
   function sanitizeBaseName(raw, fallback) {
     const safeFallback = String(fallback || "EasyOffice_문서").trim() || "EasyOffice_문서";
     let base = String(raw || "")
-      .replaceAll(/[\x00-\x1f\x7f]/g, "")
+      .replaceAll(/[\u0000-\u001f\u007f]/g, "")
       .split(/[/\\]/)
       .pop()
       .trim();
     base = base.replace(KNOWN_EXT_RE, "").trim();
+    const shared = host.__EASYOFFICE_SAVE_PAYLOAD__?.sanitizeFileBaseName;
+    if (typeof shared === "function") {
+      if (!base || base === "." || base === "..") return safeFallback;
+      return shared(base, safeFallback);
+    }
+    base = base
+      .replaceAll(/[<>:"/\\|?*]/g, "_")
+      .replaceAll(/\s+/g, " ")
+      .replace(/^[\s.]+/, "")
+      .replace(/(?<![\s.])[\s.]+$/, "");
+    if (Array.from(base).length > 120) {
+      base = Array.from(base).slice(0, 120).join("").replace(/(?<![\s.])[\s.]+$/, "");
+    }
     if (!base || base === "." || base === "..") return safeFallback;
-    return base.replace(/^\.+/, "") || safeFallback;
+    if (WINDOWS_RESERVED_RE.test(base.split(".")[0] || "")) base = "_" + base;
+    return base || safeFallback;
   }
 
   function createExportDialogController(runtime) {
@@ -87,23 +102,51 @@
     } = runtime;
 
     function sourceFormatFor(mod) {
-      if (mod === "SHEET") return "xlsx";
-      if (mod === "SLIDE") return "pptx";
+      if (mod === "SHEET" || mod === "BASE") return "xlsx";
+      if (mod === "SLIDE" || mod === "BOARD") return "pptx";
       if (mod === "PDF") return "pdf";
-      if (mod === "BASE") return "base";
-      if (mod === "BOARD") return "board";
       return "docx";
+    }
+
+    function hasLoadedPdfContent() {
+      const pane = document.getElementById("pane-pdf");
+      if (pane?.dataset?.empty === "true") return false;
+      const card = document.getElementById("pdf-page-card");
+      if (!card || card.hidden) return false;
+      return Array.from(card.querySelectorAll("h3, p:not(#pdf-form-status)")).some(
+        (el) => Boolean((el.textContent || "").trim())
+      );
     }
 
     async function runExportFormat(targetExt, customBaseName) {
       await commitPendingSheetCell?.();
       const curMod = getActiveModule();
+      if (curMod === "START" || curMod === "CONV") {
+        const msg = "현재 창에서는 내보내기를 지원하지 않습니다.";
+        setStatusFeedback(msg);
+        return { ok: false, error: msg };
+      }
       const ext = String(targetExt || "").trim().toLowerCase();
       const allowed = formatsForModule(curMod);
       if (!allowed.some((item) => item.ext === ext)) {
         const msg = "현재 창(" + curMod + ")에서는 ." + ext + " 내보내기를 지원하지 않습니다.";
         setStatusFeedback(msg);
         return { ok: false, error: msg };
+      }
+
+      if (curMod === "PDF" && !hasLoadedPdfContent()) {
+        const msg = "내보낼 PDF 문서가 없습니다.";
+        setStatusFeedback(msg);
+        return { ok: false, error: msg };
+      }
+
+      if (curMod === "BOARD" && ext === "pdf") {
+        const nodes = host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.()?.getState?.()?.nodes;
+        if (Array.isArray(nodes) && nodes.length === 0) {
+          const msg = "PDF로 내보낼 보드 요소가 없습니다.";
+          setStatusFeedback(msg);
+          return { ok: false, error: msg };
+        }
       }
 
       if (curMod === "HWP" && getHwpHost?.()?.isEmbedActive() && getHwpSession?.()) {
@@ -115,9 +158,13 @@
         return { ok: Boolean(ok), cancelled: !ok };
       }
 
+      const safeBase = sanitizeBaseName(customBaseName, resolveSaveFileBase(curMod));
+
       if (curMod === "PDF" && ext === "pdf" && getPdfEdit?.()?.isActive()) {
         try {
-          const res = await getPdfEdit().save();
+          const suggested =
+            typeof customBaseName === "string" && customBaseName.trim() ? safeBase + ".pdf" : undefined;
+          const res = await getPdfEdit().save(suggested);
           if (res.cancelled) {
             setStatusFeedback("내보내기 취소 (PDF): 저장 위치를 선택하지 않았습니다");
             return { ok: false, cancelled: true };
@@ -132,8 +179,6 @@
           return { ok: false, error: msg };
         }
       }
-
-      const safeBase = sanitizeBaseName(customBaseName, resolveSaveFileBase(curMod));
 
       if ((curMod === "BASE" && ext === "eobase") || (curMod === "BOARD" && ext === "eoboard")) {
         const deliverAsCopy = (b64, base, outExt) => deliverSavedFile(b64, base, outExt, { inPlace: false });

@@ -250,6 +250,38 @@ test("pdf: prints opened card text, stamp, watermark, rotation, and active form 
   t.h.sandbox.dispatchWindowEvent("afterprint");
 });
 
+test("PDF multi-page print & preview paginate long documents without clipping and render 180° + extracted form chips", async () => {
+  const t = await setup("PDF");
+  const { document: doc } = t.h;
+  doc.getElementById("pane-pdf").dataset.empty = "false";
+  const card = doc.getElementById("pdf-page-card");
+  card.hidden = false;
+  card.querySelector("h3").textContent = "장문 PDF 문서";
+  const statusEl = doc.getElementById("pdf-form-status");
+  for (let i = 1; i <= 50; i += 1) {
+    const p = doc.createElement("p");
+    p.textContent = `문단 ${i}: 다중 쪽 인쇄 페이지 분할 확인용 텍스트입니다.`;
+    statusEl.before(p);
+  }
+  doc.getElementById("pdf-stamp-badge").textContent = "승인필";
+  doc.getElementById("pdf-watermark-layer").textContent = "검토용";
+  doc.getElementById("pdf-rotation-badge").textContent = "회전: 180°";
+  const extracted = doc.getElementById("pdf-form-extracted");
+  extracted.hidden = false;
+  const chip = doc.createElement("span");
+  chip.className = "pdf-form-extracted-chip";
+  chip.textContent = "계약 번호: 2026-042";
+  extracted.appendChild(chip);
+
+  const preview = await doc.defaultView.__EASYOFFICE_OFFICE_PRINT__.buildPreview();
+  assert.ok(preview.pages.length >= 2, `expected multi-page PDF preview, got ${preview.pages.length}`);
+  assert.equal(preview.pages[0].querySelector(".eo-print-pdf-stamp").textContent, "승인필");
+  assert.equal(preview.pages.at(-1).querySelector(".eo-print-pdf-wm").textContent, "검토용");
+  assert.match(preview.pages.at(-1).querySelector(".eo-print-pdf-form").textContent, /계약 번호:\s*2026-042/);
+  assert.match(preview.pages.at(-1).querySelector(".eo-print-pdf-meta").textContent, /회전:\s*180°/);
+  assert.match(preview.pages.at(-1).textContent, /문단 50:/);
+});
+
 test("the print menu item follows the module: on in document, sheet, slide, and PDF", async () => {
   for (const [moduleCode, grayed] of [["DOC", false], ["SHEET", false], ["SLIDE", false], ["PDF", false]]) {
     const reports = [];

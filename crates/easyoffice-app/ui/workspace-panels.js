@@ -376,6 +376,31 @@
     }
 
     let pdfOutlines = [];
+    let pdfExtractedFields = [];
+
+    function normalizePdfExtractedFields(fields) {
+      if (!Array.isArray(fields)) return [];
+      return fields
+        .filter((f) => f && typeof f.name === "string" && f.name.trim())
+        .map((f) => ({ name: f.name.trim(), value: f.value == null ? "" : String(f.value) }));
+    }
+
+    function renderPdfExtractedFields(fields) {
+      const box = document.getElementById("pdf-form-extracted");
+      if (!box) return;
+      box.replaceChildren();
+      if (!fields || fields.length === 0) {
+        box.hidden = true;
+        return;
+      }
+      for (const field of fields) {
+        const chip = document.createElement("span");
+        chip.className = "pdf-form-extracted-chip";
+        chip.textContent = field.name + ": " + (field.value || "(입력 없음)");
+        box.appendChild(chip);
+      }
+      box.hidden = false;
+    }
 
     function capturePdfStudioState() {
       const bodyParagraphs = Array.from(
@@ -390,6 +415,7 @@
         watermarkLayer: document.getElementById("pdf-watermark-layer")?.textContent ?? "",
         applicant: document.getElementById("pdf-form-applicant")?.value ?? "",
         dept: document.getElementById("pdf-form-dept")?.value ?? "",
+        formFields: pdfExtractedFields.map((f) => ({ name: f.name, value: f.value })),
         formVisible: !document.getElementById("pdf-acroform-grid")?.hidden,
         highlightInput: document.getElementById("pdf-highlight-input")?.value ?? "",
         highlightKind: document.getElementById("pdf-highlight-kind")?.value,
@@ -482,11 +508,16 @@
     function restorePdfStudioState(pdfStudio) {
       if (!pdfStudio) return;
       pdfOutlines = Array.isArray(pdfStudio.outlines) ? pdfStudio.outlines.slice() : [];
+      pdfExtractedFields = normalizePdfExtractedFields(pdfStudio.formFields);
+      renderPdfExtractedFields(pdfExtractedFields);
       for (const [id, prop, key] of PDF_STUDIO_FIELD_RESTORES) {
         const el = document.getElementById(id);
         if (el && pdfStudio[key] !== undefined) el[prop] = pdfStudio[key];
       }
-      const hasFormValues = String(pdfStudio.applicant || "").trim() !== "" || String(pdfStudio.dept || "").trim() !== "";
+      const hasFormValues =
+        String(pdfStudio.applicant || "").trim() !== "" ||
+        String(pdfStudio.dept || "").trim() !== "" ||
+        pdfExtractedFields.length > 0;
       setPdfFormVisibility(pdfStudio.formVisible !== undefined ? Boolean(pdfStudio.formVisible) : hasFormValues);
       restorePdfCardHeading(pdfStudio);
       const card = document.getElementById("pdf-page-card");

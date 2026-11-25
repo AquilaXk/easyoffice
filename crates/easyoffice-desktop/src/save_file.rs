@@ -39,6 +39,35 @@ pub struct SaveRequest {
     bytes: Vec<u8>,
 }
 
+fn is_windows_reserved_stem(stem: &str) -> bool {
+    let head = stem.split('.').next().unwrap_or("").trim();
+    matches!(
+        head.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 /// Validates a proposed file name and returns `(file name, lower-case extension)`.
 pub(crate) fn split_file_name(file_name: &str) -> Result<(String, String), String> {
     if file_name.chars().any(|c| c.is_control()) {
@@ -51,13 +80,25 @@ pub(crate) fn split_file_name(file_name: &str) -> Result<(String, String), Strin
         .unwrap_or("")
         .trim()
         .to_string();
+    if base
+        .chars()
+        .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+    {
+        return Err(format!("저장할 수 없는 파일 이름입니다: {base}"));
+    }
     let Some((stem, ext)) = base.rsplit_once('.') else {
         return Err("저장할 파일 이름에 확장자가 없습니다.".to_string());
     };
     let stem_trimmed = stem.trim();
     let ext_ok =
         !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric());
-    if stem_trimmed.is_empty() || stem_trimmed == "." || stem_trimmed == ".." || !ext_ok {
+    if stem_trimmed.is_empty()
+        || stem_trimmed == "."
+        || stem_trimmed == ".."
+        || stem_trimmed.ends_with('.')
+        || is_windows_reserved_stem(stem_trimmed)
+        || !ext_ok
+    {
         return Err(format!("저장할 수 없는 파일 이름입니다: {base}"));
     }
     let ext = ext.to_ascii_lowercase();

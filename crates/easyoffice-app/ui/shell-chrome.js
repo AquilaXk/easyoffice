@@ -497,7 +497,9 @@
       for (let i = 0; i < PARSED_NATIVE_MENU_LIST.length; i += 1) {
         const { id, name, argument } = PARSED_NATIVE_MENU_LIST[i];
         let isDisabled;
-        if (commandModule === "START" && START_DISABLED_SET.has(name)) {
+        if ((commandModule === "START" || commandModule === "CONV") && (name === "export" || name === "export-dialog")) {
+          isDisabled = true;
+        } else if (commandModule === "START" && START_DISABLED_SET.has(name)) {
           isDisabled = true;
         } else if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") {
           isDisabled = false;

@@ -634,18 +634,31 @@ impl PdfEditSaved {
     }
 }
 
+fn resolve_pdf_save_name(suggested: Option<&str>, session_stem: &str) -> Result<String, String> {
+    let Some(raw) = suggested.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(format!("{}-편집.pdf", file_stem(session_stem)));
+    };
+    let (base, ext) = split_file_name(raw)?;
+    if ext != "pdf" {
+        return Err("PDF 내보내기 파일 이름은 .pdf 확장자여야 합니다.".to_string());
+    }
+    Ok(base)
+}
+
 /// Asks where to save, then writes the edited PDF (all pages of the plan) atomically, after it
-/// passes the check every saved document passes. The suggested name is the opened file's name with
-/// "-편집" so the original is not the default target.
+/// passes the check every saved document passes. The suggested name defaults to the opened file's
+/// name with "-편집" unless an explicit `.pdf` name is supplied by the export dialog.
 #[tauri::command]
 pub async fn pdf_edit_save(
     _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
     edits: State<'_, Arc<PdfEdits>>,
+    file_name: Option<String>,
 ) -> Result<PdfEditSaved, IpcError> {
     let (session, _) = edits.snapshot(window.label()).map_err(IpcError::new)?;
-    let suggestion = format!("{}-편집.pdf", file_stem(session.stem()));
+    let suggestion =
+        resolve_pdf_save_name(file_name.as_deref(), session.stem()).map_err(IpcError::new)?;
     let Some(target) = crate::pick_save_path(
         &app,
         &window,

@@ -167,7 +167,7 @@
       });
       const valOf = (id) => (document.getElementById(id)?.value || "").trim();
       const wmLayerVal = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
-      const stampVal = (valOf("pdf-stamp-select") || document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
+      const stampVal = (document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
       if (valOf("pdf-form-applicant")) lines.push("신청인: " + valOf("pdf-form-applicant"));
       if (valOf("pdf-form-dept")) lines.push("부서: " + valOf("pdf-form-dept"));
       // Page settings travel as fields (a PDF target writes them as page rotation, watermark and stamp).
@@ -901,7 +901,7 @@
         getPdfEdit: deps.getPdfEdit,
         getHwpHost,
         getHwpSession,
-        enqueueWorkspaceHistoryOp,
+        enqueueWorkspaceHistoryOp: deps.runExclusive || enqueueWorkspaceHistoryOp,
         resolveSaveFileBase,
         buildConversionContent,
         convertForSave,

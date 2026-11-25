@@ -735,5 +735,16 @@ pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
     push_opt_json_str(out, form.applicant.as_deref());
     out.push_str(",\"department\":");
     push_opt_json_str(out, form.department.as_deref());
-    out.push_str("}}");
+    out.push_str(",\"fields\":[");
+    for (idx, field) in form.fields.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"name\":");
+        push_json_str(out, &field.name);
+        out.push_str(",\"value\":");
+        push_opt_json_str(out, field.value.as_deref());
+        out.push('}');
+    }
+    out.push_str("]}}");
 }

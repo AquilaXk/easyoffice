@@ -96,9 +96,9 @@
     }
 
     // Saves the edited PDF (the shell asks where). Resolves { cancelled } or { name, bytes, pages, notes }.
-    async function save() {
+    async function save(fileName) {
       await syncFromUi();
-      const res = await shell().save();
+      const res = await shell().save(fileName);
       return res.status === "cancelled" ? { cancelled: true } : { cancelled: false, name: String(res.name || ""), bytes: res.bytes, pages: res.pages, notes: warningNotes(res.warnings) };
     }
 

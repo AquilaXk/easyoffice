@@ -356,3 +356,22 @@ fn a_save_answers_with_the_warnings_beside_the_name() {
         serde_json::json!([])
     );
 }
+
+#[test]
+fn resolve_pdf_save_name_accepts_pdf_names_and_rejects_spoofed_or_hostile_names() {
+    assert_eq!(
+        resolve_pdf_save_name(None, "보고서").unwrap(),
+        "보고서-편집.pdf"
+    );
+    assert_eq!(
+        resolve_pdf_save_name(Some("  "), "보고서").unwrap(),
+        "보고서-편집.pdf"
+    );
+    assert_eq!(
+        resolve_pdf_save_name(Some("../경로/결재완료.PDF"), "보고서").unwrap(),
+        "결재완료.PDF"
+    );
+    for bad in ["위조.docx", "noext", "CON.pdf", "bad\0.pdf", "a?.pdf"] {
+        assert!(resolve_pdf_save_name(Some(bad), "보고서").is_err(), "{bad}");
+    }
+}
