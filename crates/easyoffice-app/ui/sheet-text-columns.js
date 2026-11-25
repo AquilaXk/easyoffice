@@ -145,7 +145,9 @@
             ? "분할 열 수는 최대 " + MAX_SPLIT_COLS + "개"
             : plan.refused === "line"
               ? "셀 길이는 최대 " + MAX_LINE_CHARS + "자"
-              : "나눌 데이터 없음";
+              : plan.refused === "grid"
+                ? "시트 열 범위를 초과했습니다."
+                : "나눌 데이터 없음";
         note("sheet-tc-status", msg);
         return;
       }

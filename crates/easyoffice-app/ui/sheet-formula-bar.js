@@ -22,8 +22,15 @@
       }
       return "=SUM(" + col + startRow + ":" + col + Math.max(startRow, lastPlainRow) + ")";
     }
-    if (row === 2 && isNum(sheetMap?.[col + "1"]) && !isNum(sheetMap?.["B2"])) {
-      return "=SUM(" + col + "1:" + col + "1)";
+    if (row === 2 && isNum(sheetMap?.[col + "1"])) {
+      const gu = host.__EASYOFFICE_SHEET_GRID_UTILS__;
+      const prev =
+        gu?.colIndex && gu?.colName && gu.colIndex(col) > 1
+          ? gu.colName(gu.colIndex(col) - 1)
+          : col.length === 1 && col > "A"
+            ? String.fromCharCode(col.charCodeAt(0) - 1)
+            : "";
+      if (!prev || !isNum(sheetMap?.[prev + "2"])) return "=SUM(" + col + "1:" + col + "1)";
     }
     return "=SUM(B" + row + ":E" + row + ")";
   }

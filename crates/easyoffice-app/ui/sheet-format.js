@@ -391,7 +391,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         if (formatBlocked(false)) return { count: 0 };
-        const change = sheetHistory.begin({ range: effectiveRange() });
+        const ranges = effectiveRanges();
+        const box = multiApi ? multiApi.boundingBox(ranges) : ranges[0];
+        const change = sheetHistory.begin({ range: box });
         const result = applyNumFmtToModel(resolve);
         sheetHistory.commit(change);
         refreshFocusedSheetCellPendingSnapshot?.();
@@ -451,7 +453,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         if (formatBlocked(false)) return 0;
-        const change = sheetHistory.begin({ range: effectiveRange() });
+        const ranges = effectiveRanges();
+        const box = multiApi ? multiApi.boundingBox(ranges) : ranges[0];
+        const change = sheetHistory.begin({ range: box });
         const count = applyToModel(kind, value);
         sheetHistory.commit(change);
         refreshFocusedSheetCellPendingSnapshot?.();

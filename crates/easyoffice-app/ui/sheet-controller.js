@@ -691,6 +691,7 @@
       getRange: () => input.getRange(),
       getRanges: () => input.getRanges(),
       getSelection: () => input.getSelection(),
+      onStructureChange: () => recalculateActiveSheetFormulas({ updateFocusedDisplay: true }).catch(() => {}),
     });
     host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.attach({
       call: sheetStoreHelpers.callSheetAction,

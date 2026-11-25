@@ -495,6 +495,7 @@
       st.userEdited = false;
       api.retractCellUndoSnapshot(st);
       endEdit(td);
+      host.__EASYOFFICE_SHEET_LOOK__?.syncRotSpan?.(td);
       api.syncSheetCellFocusBaseline(td, true);
       refreshChrome();
     }

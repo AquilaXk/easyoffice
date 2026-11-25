@@ -65,14 +65,21 @@
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
 
     function isImeEvent(ev) {
-      return Boolean(ev.isComposing) || ev.key === "Process" || ev.keyCode === 229;
+      if (ev.isComposing) return true;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+      return ev.key === "Process" || ev.keyCode === 229;
     }
 
     function insertCurrentStamp(isTime) {
       const value = isTime ? formatLocalTime() : formatLocalDate();
       const ref = grid.refOf(sel.ar, sel.ac);
       const sheet = api.getSheetName();
-      if (protectApi?.isOn(sheet) && !protectApi.cellEditable(sheet, sel.ar, sel.ac, api.getEntry(ref)?.style)) {
+      const entry = api.getEntry(ref);
+      if (entry?.spillOf) {
+        feedback?.("배열 수식 결과 셀은 바꿀 수 없습니다.");
+        return Promise.resolve(false);
+      }
+      if (protectApi?.isOn(sheet) && !protectApi.cellEditable(sheet, sel.ar, sel.ac, entry?.style)) {
         protectApi.alertBlocked();
         return Promise.resolve(false);
       }
@@ -143,6 +150,27 @@
         }
       }
       if (allEdits.length === 0) return Promise.resolve(false);
+      for (let i = 0; i < ranges.length; i += 1) {
+        const rg = ranges[i];
+        if (layoutApi?.mergesIn(sheet, rg.r1, rg.c1, rg.r2, rg.c2)?.length > 0) {
+          feedback?.("병합된 셀에는 채울 수 없습니다.");
+          return Promise.resolve(false);
+        }
+      }
+      for (let i = 0; i < allEdits.length; i += 1) {
+        const e = allEdits[i];
+        if (api.getEntry(e.ref)?.spillOf) {
+          feedback?.("배열 수식 결과 셀은 바꿀 수 없습니다.");
+          return Promise.resolve(false);
+        }
+        if (protectApi?.isOn(sheet)) {
+          const p = grid.parseRef(e.ref);
+          if (p && !protectApi.cellEditable(sheet, p.row, p.col, api.getEntry(e.ref)?.style)) {
+            protectApi.alertBlocked();
+            return Promise.resolve(false);
+          }
+        }
+      }
       return api.applyCellEdits(allEdits, isDown ? "아래쪽 채우기" : "오른쪽 채우기");
     }
 
@@ -150,11 +178,26 @@
       const ranges = getRanges();
       const single = ranges.length === 1 && ranges[0].r1 === ranges[0].r2 && ranges[0].c1 === ranges[0].c2;
       if (single) return false;
+      const sheet = api.getSheetName();
+      const protectedOn = Boolean(protectApi?.isOn(sheet));
       const parsed = cellTypeApi.parseTypedInput(rawText, nf);
       const isFormula = Boolean(parsed.formula);
       const edits = [];
+      let blockedKind = null;
       const res = multiApi.forEachUniqueCoord(ranges, grid.packCoord, (r, c) => {
+        if (blockedKind) return;
+        const merged = layoutApi?.mergeAt(sheet, r, c);
+        if (merged && (merged.r1 !== r || merged.c1 !== c)) return;
         const ref = grid.refOf(r, c);
+        const entry = api.getEntry(ref);
+        if (entry?.spillOf) {
+          blockedKind = "spill";
+          return;
+        }
+        if (protectedOn && !protectApi.cellEditable(sheet, r, c, entry?.style)) {
+          blockedKind = "protect";
+          return;
+        }
         if (isFormula) {
           const dr = r - sel.ar;
           const dc = c - sel.ac;
@@ -166,12 +209,19 @@
           edits.push(ed);
         }
       }, MAX_BATCH_CELLS);
+      if (blockedKind) {
+        if (td) discardInlineEdit(td);
+        if (blockedKind === "protect") protectApi.alertBlocked();
+        else feedback?.("배열 수식 결과 셀은 바꿀 수 없습니다.");
+        return true;
+      }
       if (res.refused) {
         if (td) discardInlineEdit(td);
         feedback("선택 범위가 너무 큼");
         return true;
       }
       if (td) discardInlineEdit(td);
+      if (edits.length === 0) return true;
       void api.applyCellEdits(edits, "일괄 입력").then(() => focusAnchor()).catch(() => {});
       return true;
     }
@@ -278,6 +328,24 @@
       }
       return false;
     }
+
+    const seenGlobalKey = typeof WeakSet === "function" ? new WeakSet() : null;
+    const onGlobalKeydown = (ev) => {
+      if (!ev || ev.defaultPrevented || isImeEvent(ev)) return;
+      if (seenGlobalKey?.has(ev)) return;
+      seenGlobalKey?.add(ev);
+      const pane = document.getElementById("pane-sheet");
+      if (!pane || pane.hidden) return;
+      if (document.querySelector("dialog[open], .context-menu:not([hidden])")) return;
+      const ae = document.activeElement;
+      if (ae?.closest?.("input, textarea, select, [contenteditable='true'], .hwp-embed-host")) return;
+      if (ev.target?.closest?.("#sheet-viewport, input, textarea, select, [contenteditable='true'], .hwp-embed-host")) return;
+      if (ev.code === "Space" || ev.code === "Enter") return;
+      handleKey(ev, false, null);
+    };
+    document.body?.addEventListener?.("keydown", onGlobalKeydown);
+    document?.addEventListener?.("keydown", onGlobalKeydown);
+    host.addEventListener?.("keydown", onGlobalKeydown);
 
     return { handleKey, handleBarKey, fillDirection, insertCurrentStamp };
   }

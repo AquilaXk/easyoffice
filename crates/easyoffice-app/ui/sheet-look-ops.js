@@ -20,7 +20,7 @@
   const COLOR_ACTIONS = { fill: ["fill", LABELS.fill], "font-color": ["fontColor", LABELS.fontColor] };
 
   function createSheetLookOps(deps) {
-    const { document, format, gridUtils, grid, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getRanges, getSelection, openDialog } = deps;
+    const { document, format, gridUtils, grid, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getRanges, getSelection, openDialog, onStructureChange } = deps;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
     const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     const pen = { line: "thin", color: look.DEFAULT_COLOR };
@@ -123,7 +123,10 @@
             count += 1;
           }
         }
-        if (count > 0) grid?.layoutChanged?.();
+        if (count > 0) {
+          ctx._structureChanged = true;
+          grid?.layoutChanged?.();
+        }
         return null;
       }
       if (mergeOp === "merge") {
@@ -142,26 +145,32 @@
             const p = gridUtils.parseRef(ref);
             if (!p || (p.row === rg.r1 && p.col === rg.c1)) continue;
             if (p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2) {
-              ctx.map[ref] = { value: "", formula: "", style: ctx.map[ref].style };
+              if (ctx.map[ref].style) ctx.map[ref] = { value: "", formula: "", style: ctx.map[ref].style };
+              else delete ctx.map[ref];
             }
           }
           layoutApi.addMerge(sheet, rg.r1, rg.c1, rg.r2, rg.c2);
           changed = true;
         }
-        if (changed) grid?.layoutChanged?.();
+        if (changed) {
+          ctx._structureChanged = true;
+          grid?.layoutChanged?.();
+        }
       }
       return null;
     }
 
     // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap, textRotation, fontFamily, fontSize, fill, fontColor }`
     // in one step (the dialog), and `locks` `{ locked, hideFormula }` (PD-216), plus optional `mergeOp` ("merge"|"unmerge").
-    function setLook(values, border, locks, mergeOp = null) {
+    async function setLook(values, border, locks, mergeOp = null) {
       const lock = Object.keys(locks || {}).length > 0;
       const hasValues = Object.keys(values || {}).length > 0;
-      return format.editStyles(LABELS.align, (ctx) => {
+      let structureChanged = false;
+      const res = await format.editStyles(LABELS.align, (ctx) => {
         if (mergeOp) {
           const mergeErr = applyMergeChange(ctx, mergeOp);
           if (mergeErr) return mergeErr;
+          if (ctx._structureChanged) structureChanged = true;
         }
         let n = 0;
         if (hasValues) {
@@ -190,6 +199,8 @@
         if (mergeOp) n = Math.max(n, 1);
         return refused || n;
       }, lock);
+      if (structureChanged && typeof res !== "string") await onStructureChange?.();
+      return res;
     }
 
     // ---- the lock and the hidden formula of the cells (PD-216) ----------------------------------------------
@@ -198,15 +209,17 @@
 
     // `"1"` when every cell of the selection is locked, `""` when none is, `"mixed"`; the same for hidden formulas.
     function protectStates(rgOrList) {
-      const rg = Array.isArray(rgOrList) ? rgOrList[0] : rgOrList;
+      const ranges = activeRanges(rgOrList);
+      const rg = ranges[0];
       const sheet = getActiveSheetName();
       const map = sheetDataStore[sheet] || {};
       const axis = getSelection?.().axis;
-      const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+      const area = multiApi ? multiApi.totalArea(ranges) : (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
       let locked;
       let hidden;
       const seen = (prev, value) => (prev === undefined ? value : prev === value ? value : "mixed");
       if (area > STATE_SCAN_CELLS) {
+        if (ranges.length > 1) return { locked: "mixed", hidden: "mixed" };
         // A whole row or column is judged by its runs and the cells that carry a flag of their own.
         const runs = layoutApi.unlockedOf(sheet, axis === "row" ? "row" : "col");
         const [a, b] = axis === "row" ? [rg.r1, rg.r2] : [rg.c1, rg.c2];
@@ -214,12 +227,17 @@
         const explicit = Object.values(map).some((e) => e?.style?.unlocked || e?.style?.locked);
         return { locked: covered && !explicit ? "" : explicit || !axis ? "mixed" : "1", hidden: "mixed" };
       }
-      for (let r = rg.r1; r <= rg.r2; r += 1) {
-        for (let c = rg.c1; c <= rg.c2; c += 1) {
-          const st = map[gridUtils.refOf(r, c)]?.style;
-          locked = seen(locked, protectApi.cellUnlocked(sheet, r, c, st) ? "" : "1");
-          hidden = seen(hidden, st?.hideFormula ? "1" : "");
+      const checkCell = (r, c) => {
+        const st = map[gridUtils.refOf(r, c)]?.style;
+        locked = seen(locked, protectApi.cellUnlocked(sheet, r, c, st) ? "" : "1");
+        hidden = seen(hidden, st?.hideFormula ? "1" : "");
+      };
+      if (ranges.length === 1 || !multiApi) {
+        for (let r = rg.r1; r <= rg.r2; r += 1) {
+          for (let c = rg.c1; c <= rg.c2; c += 1) checkCell(r, c);
         }
+      } else {
+        multiApi.forEachUniqueCoord(ranges, gridUtils.packCoord, checkCell, STATE_SCAN_CELLS);
       }
       return { locked: locked ?? "1", hidden: hidden ?? "" };
     }
@@ -288,36 +306,47 @@
     function applyBorder(kind, line = pen.line, color = pen.color) {
       const edge = kind === "none" ? null : look.edgeText(line, color);
       if (kind !== "none" && !edge) return Promise.resolve(null);
-      return format.editStyles(LABELS.border, (ctx) => applyBorders(ctx, [{ kind, edge }]));
+      return format.editStyles(LABELS.border, (ctx) => {
+        const ranges = ctx.ranges || [ctx.rg];
+        let total = 0;
+        for (let i = 0; i < ranges.length; i += 1) {
+          const stepRes = applyBorders({ map: ctx.map, rg: ranges[i], patch: ctx.patch }, [{ kind, edge }]);
+          if (typeof stepRes === "string") return stepRes;
+          if (typeof stepRes === "number") total += stepRes;
+        }
+        return total;
+      });
     }
 
     // The border positions a selection has an edge on, for the dialog: `{ t, b, l, r, h, v }` with the
     // edge text each has in every cell concerned ("" for none, "mixed" for cells that differ).
     function borderState(rgOrList) {
-      const rg = Array.isArray(rgOrList) ? rgOrList[0] : rgOrList;
+      const ranges = activeRanges(rgOrList);
       const map = sheetDataStore[getActiveSheetName()] || {};
       const at = (r, c) => map[gridUtils.refOf(r, c)]?.style?.border;
-      const out = {};
+      const seen = { t: undefined, b: undefined, l: undefined, r: undefined, h: undefined, v: undefined };
       const gather = (key, cells) => {
-        let seen;
         for (const [r, c, side] of cells) {
           const edge = at(r, c)?.[side] || "";
-          seen = seen === undefined ? edge : seen === edge ? seen : "mixed";
+          seen[key] = seen[key] === undefined ? edge : seen[key] === edge ? seen[key] : "mixed";
+          if (seen[key] === "mixed") break;
         }
-        out[key] = seen ?? "";
       };
-      const cols = [];
-      const rows = [];
-      for (let c = rg.c1; c <= rg.c2; c += 1) cols.push(c);
-      for (let r = rg.r1; r <= rg.r2; r += 1) rows.push(r);
       const cap = (list) => list.slice(0, 200);
-      gather("t", cap(cols).map((c) => [rg.r1, c, "t"]));
-      gather("b", cap(cols).map((c) => [rg.r2, c, "b"]));
-      gather("l", cap(rows).map((r) => [r, rg.c1, "l"]));
-      gather("r", cap(rows).map((r) => [r, rg.c2, "r"]));
-      gather("h", rg.r1 === rg.r2 ? [] : cap(cols).map((c) => [rg.r1, c, "b"]));
-      gather("v", rg.c1 === rg.c2 ? [] : cap(rows).map((r) => [r, rg.c1, "r"]));
-      return out;
+      for (let i = 0; i < ranges.length; i += 1) {
+        const rg = ranges[i];
+        const cols = [];
+        const rows = [];
+        for (let c = rg.c1; c <= Math.min(rg.c2, rg.c1 + 199); c += 1) cols.push(c);
+        for (let r = rg.r1; r <= Math.min(rg.r2, rg.r1 + 199); r += 1) rows.push(r);
+        gather("t", cap(cols).map((c) => [rg.r1, c, "t"]));
+        gather("b", cap(cols).map((c) => [rg.r2, c, "b"]));
+        gather("l", cap(rows).map((r) => [r, rg.c1, "l"]));
+        gather("r", cap(rows).map((r) => [r, rg.c2, "r"]));
+        gather("h", rg.r1 === rg.r2 ? [] : cap(cols).map((c) => [rg.r1, c, "b"]));
+        gather("v", rg.c1 === rg.c2 ? [] : cap(rows).map((r) => [r, rg.c1, "r"]));
+      }
+      return Object.fromEntries(Object.keys(seen).map((k) => [k, seen[k] ?? ""]));
     }
 
     function setLine(line) {

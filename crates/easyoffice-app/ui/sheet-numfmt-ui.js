@@ -239,16 +239,11 @@
       const code = N.isDefaultFormat(val("sheet-numfmt-code")) ? "" : val("sheet-numfmt-code");
       // Another pane changed and the code did not: only that pane is written.
       const lookOnly = Boolean(look?.dirty()) && code === (N.isDefaultFormat(anchor.code) ? "" : anchor.code);
-      if (!lookOnly) {
-        if (code && N.codeWithinBounds(code)) await D.preview(code, ["0"]);
-        if (code && (!N.codeWithinBounds(code) || D.isBad(code))) {
+      if (!lookOnly && code) {
+        if (N.codeWithinBounds(code)) await D.preview(code, ["0"]);
+        if (!N.codeWithinBounds(code) || D.isBad(code)) {
           sampleToken += 1;
           note("sheet-numfmt-status", "서식 코드가 한도를 넘음");
-          return;
-        }
-        const result = await format.formatNumbers((cells) => cells.map(() => code), "셀 서식");
-        if (result?.refused) {
-          note("sheet-numfmt-status", "서식 코드는 시트마다 " + N.MAX_CODES + "개까지");
           return;
         }
       }
@@ -256,6 +251,13 @@
         const lookRes = await look.apply();
         if (typeof lookRes === "string") {
           note("sheet-numfmt-status", lookRes);
+          return;
+        }
+      }
+      if (!lookOnly) {
+        const result = await format.formatNumbers((cells) => cells.map(() => code), "셀 서식");
+        if (result?.refused) {
+          note("sheet-numfmt-status", "서식 코드는 시트마다 " + N.MAX_CODES + "개까지");
           return;
         }
       }

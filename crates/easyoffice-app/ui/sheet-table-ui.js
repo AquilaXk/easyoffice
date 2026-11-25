@@ -44,6 +44,7 @@
       getActiveSheetName,
       getSelection,
       getRange,
+      getRanges,
       getExtent,
       selectRange,
       commitIfEditing,
@@ -953,6 +954,7 @@
       commitIfEditing();
       const name = getActiveSheetName();
       if (!allowed(name)) return false;
+      if ((getRanges?.()?.length ?? 1) > 1) { say("여러 선택 영역에서는 실행할 수 없음"); return false; }
       const table = tableAtActive();
       if (table) return Boolean(dedupeUi?.open(table));
       sheetDataStore[name] = snapshotDomSheetCells();

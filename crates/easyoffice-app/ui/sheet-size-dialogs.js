@@ -262,13 +262,17 @@
       else void applyColWidth(num);
     }
 
-    function autofitRows() {
+    async function autofitRows() {
       const spans = rowSpans();
       if (spans.length === 1 && spans[0][0] === 1 && spans[0][1] >= RH.MAX_ROW) {
         return fitRows(1, RH.MAX_ROW, true);
       }
-      const [first, last] = spans[0] || [1, 1];
-      return fitRows(first, last, false);
+      let ok = false;
+      for (let i = 0; i < spans.length; i += 1) {
+        const [first, last] = spans[i];
+        if (await fitRows(first, last, false)) ok = true;
+      }
+      return ok;
     }
 
     function autofitCols() {
