@@ -23,7 +23,9 @@
   const SIDE_INDEX = { top: 0, right: 1, bottom: 2, left: 3 };
   const SIDE_PROPS = ["borderTop", "borderRight", "borderBottom", "borderLeft"];
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const COMMAND_LABELS = { "table-border-bg": "셀 테두리/배경", "table-cell-props": "표/셀 속성", "table-col-equal": "셀 너비를 같게" };
+  const HWP_COMMAND_LABELS = { "table-border-bg": "셀 테두리/배경", "table-cell-props": "표/셀 속성", "table-col-equal": "셀 너비를 같게" };
+  const DOC_COMMAND_LABELS = { "table-border-bg": "테두리 및 음영", "table-cell-props": "표 속성", "table-col-equal": "열 너비를 같게" };
+  const commandLabel = (doc, cmd) => (doc?.getElementById("app")?.dataset?.module === "HWP" ? HWP_COMMAND_LABELS : DOC_COMMAND_LABELS)[cmd];
   const round1 = (v) => Math.round(v * 10) / 10;
   const normalizeHex6 = (raw) => HEX6_RE.exec(String(raw || "").trim())?.[1]?.toUpperCase() ?? "";
 
@@ -257,7 +259,7 @@
       });
       dlg?.close?.();
       placeCaret(sel.from);
-      setFeedback?.(COMMAND_LABELS["table-border-bg"] + " 완료");
+      setFeedback?.(commandLabel(document, "table-border-bg") + " 완료");
     }
 
     function openTablePropsDialog(sel) {
@@ -294,7 +296,7 @@
       });
       dlg?.close?.();
       placeCaret(sel.from);
-      setFeedback?.(COMMAND_LABELS["table-cell-props"] + " 완료");
+      setFeedback?.(commandLabel(document, "table-cell-props") + " 완료");
     }
 
     function hitColumnBorder(ev, root) {
@@ -338,7 +340,7 @@
         if (nextTwips !== startTwips) {
           notifyMutated();
           if (preSnap) commitDeferredUndoSnapshot?.(preSnap);
-          setFeedback?.(COMMAND_LABELS["table-cell-props"] + " 완료");
+          setFeedback?.(commandLabel(document, "table-cell-props") + " 완료");
         } else if (!existedBefore) {
           grid.findColgroup(hit.table)?.remove();
           hit.table.style.tableLayout = "";
@@ -419,7 +421,7 @@
       root?.addEventListener("pointermove", (ev) => { if (root.style) root.style.cursor = hitColumnBorder(ev, root) ? "col-resize" : ""; });
     }
 
-    const handles = (cmd) => Object.hasOwn(COMMAND_LABELS, cmd);
+    const handles = (cmd) => Object.hasOwn(HWP_COMMAND_LABELS, cmd);
 
     function run(cmd) {
       const sel = selectionAt();
@@ -435,7 +437,7 @@
       if (cmd === "table-cell-props") { openTablePropsDialog(sel); return { changed: false, openedDialog: true }; }
       if (cmd === "table-col-equal") {
         const res = withUndo(() => grid.equalizeColumns(sel.table, sel.from, sel.to));
-        if (res.changed) { placeCaret(res.cell ?? sel.from); setFeedback?.(COMMAND_LABELS[cmd] + " 완료"); }
+        if (res.changed) { placeCaret(res.cell ?? sel.from); setFeedback?.(commandLabel(document, cmd) + " 완료"); }
         return res;
       }
       return { changed: false };

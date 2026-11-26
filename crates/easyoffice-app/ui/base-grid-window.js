@@ -380,8 +380,17 @@
         const view = { offset, size, padStart: memo.margin, padEnd: memo.foot, max: V.listEnd(flat, count) + tailPx() - size };
         const to = V.offsetForIndex(flat, count, i, align, view);
         if (to === null || Math.abs(to - offset) < 1 / LAYOUT_UNITS) break;
+        const itemTop = flat[i * 2], itemEnd = itemTop + flat[i * 2 + 1];
+        if (Math.abs(to - offset) <= 1 && itemTop >= offset + memo.margin && itemEnd <= offset + size - memo.foot) break;
         wrap.scrollTop = to;
+        const landed = scrollOffset();
+        if (to > offset && landed < to - 1 / LAYOUT_UNITS && itemTop >= Math.ceil(to) + memo.margin) {
+          wrap.scrollTop = Math.ceil(to);
+        } else if (to < offset && landed > to + 1 / LAYOUT_UNITS) {
+          wrap.scrollTop = Math.floor(to);
+        }
         sync();
+        if (scrollOffset() === offset) break;
       }
       sync();
     }

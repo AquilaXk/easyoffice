@@ -10,7 +10,8 @@
     const boundaries = [];
     const origin = track.getBoundingClientRect().left;
     for (const sep of Array.from(track.children)) {
-      if (!String(sep.className || "").split(/\s+/).includes("tb-sep")) continue;
+      const cls = String(sep.className || "").split(/\s+/);
+      if (!cls.includes("tb-sep") && !cls.includes("eo-style-sep")) continue;
       if (sep.hidden || sep.closest("[hidden]")) continue;
       boundaries.push(Math.round(sep.getBoundingClientRect().left - origin));
     }
@@ -135,7 +136,7 @@
   function refreshAll(docArg) {
     const doc = docArg || host.document;
     if (!doc) return;
-    for (const id of ["icon-toolbar", "sheet-table-bar", "board-toolbar"]) {
+    for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
       const el = doc.getElementById(id);
       const ctrl = el && controllers.get(el);
       if (ctrl) ctrl.refresh();
@@ -146,7 +147,7 @@
     const doc = docArg || host.document;
     if (!doc) return [];
     const list = [];
-    for (const id of ["icon-toolbar", "sheet-table-bar", "board-toolbar"]) {
+    for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
       const el = doc.getElementById(id);
       if (el) list.push(attach(el, doc));
     }

@@ -371,12 +371,14 @@
 
     // Applies `next` (a setup) as the page's, unless it leaves no body, in which case the reason is on the status line.
     function change(next, label) {
-      const refused = violation(next, activeMod());
+      const mod = activeMod();
+      const ed = byId("doc-editor");
+      const refused = violation(next, mod, mod !== "HWP" && ed?.dataset?.eoDocFlavor === "pages");
       if (refused) {
         setFeedback?.(refused);
         return false;
       }
-      applyToEditor(byId("doc-editor"), next);
+      applyToEditor(ed, next);
       setFeedback?.(label);
       return true;
     }

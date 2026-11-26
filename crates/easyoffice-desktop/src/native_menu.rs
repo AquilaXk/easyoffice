@@ -201,6 +201,7 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             "table:col-right" => return "오른쪽에 열 추가",
             "table:row-delete" => return "행 삭제",
             "table:col-delete" => return "열 삭제",
+            "table:split" => return "셀 분할",
             "table:merge" => return "셀 병합",
             "table:col-equal" => return "열 너비를 같게",
             "table:border-bg" => return "테두리 및 음영",

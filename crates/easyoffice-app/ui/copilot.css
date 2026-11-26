@@ -769,7 +769,7 @@
   flex-shrink: 0;
 }
 
-:root[data-theme-effective="dark"] .eo-copilot-send-btn {
+:root[data-theme-effective="dark"] .eo-copilot-send-btn:not(:disabled) {
   color: var(--ui-bg);
 }
 

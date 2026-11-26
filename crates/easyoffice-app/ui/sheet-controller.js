@@ -847,11 +847,11 @@
       if (inlineRes.handled) return Promise.resolve({ inserted: inlineRes.inserted });
       if (entry && isFormulaStr(entry.formula || "")) {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "수식 셀에는 문자표를 덮어쓸 수 없습니다";
+        if (fb) fb.textContent = "수식 셀에는 기호를 덮어쓸 수 없습니다";
         return Promise.resolve({ inserted: false, reason: "formula" });
       }
       const prevVal = String(entry?.value ?? "");
-      return applyCellEdits([{ ref, value: prevVal + ch, formula: "" }], "문자표 기호 삽입")
+      return applyCellEdits([{ ref, value: prevVal + ch, formula: "" }], "기호 삽입")
         .then((ok) => ({ inserted: Boolean(ok) }));
     }
 

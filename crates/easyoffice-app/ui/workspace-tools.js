@@ -21,7 +21,7 @@
   const PAGE_FRAME_COMMANDS = { "mod-header": "header", "mod-footer": "footer" };
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
-    "mod-symbol": { label: "문자표 기호 삽입" },
+    "mod-symbol": { label: "기호 삽입" },
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주" },
   };
 

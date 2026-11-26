@@ -44,6 +44,7 @@
 .tb-btn.active,
 .tb-btn[aria-pressed="true"] {
   background: var(--ui-active);
+  color: var(--ui-text);
   border-color: var(--ui-border-strong);
 }
 
@@ -136,6 +137,24 @@
 .tb-scroll-nav-prev { left: 4px; }
 .tb-scroll-nav-next { right: 4px; }
 .tb-scroll-nav[hidden] { display: none; }
+#doc-style-bar.tb-scrollable {
+  overflow: hidden;
+  gap: 0;
+}
+#doc-style-bar.tb-scrollable .tb-scroll-track {
+  align-items: center;
+  gap: 6px;
+}
+.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#icon-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])) {
+  padding-left: 30px;
+}
+.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#icon-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])) {
+  padding-right: 30px;
+}
 
 .tb-scroll-nav:hover:not(:disabled) {
   background: var(--ui-hover-strong);

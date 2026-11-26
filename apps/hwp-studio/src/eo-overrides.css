@@ -161,3 +161,25 @@ body,
 :root[data-theme-effective="dark"] .eo-menu-theme-toggle .eo-theme-icon-sun {
   display: block;
 }
+
+/* Status bar message contrast >= 4.5:1 in light and dark themes. */
+.stb-message {
+  color: var(--accent-strong);
+}
+
+:root[data-theme-effective="dark"] .stb-message {
+  color: var(--accent);
+}
+
+/* Minimum 20px target size for modal close and equation mode toggles. */
+.dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
+}
+
+.eq-mode-btn {
+  min-height: 22px;
+}

@@ -519,6 +519,12 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
     assert_eq!(label_for(MenuKind::Pages, spec("insert:link")), "링크");
     assert_eq!(label_for(MenuKind::Sheet, spec("insert:symbol")), "기호");
     assert_eq!(label_for(MenuKind::Slide, spec("insert:symbol")), "기호");
+    assert_eq!(label_for(MenuKind::Doc, spec("table:split")), "셀 분할");
+    assert_eq!(label_for(MenuKind::Pages, spec("table:split")), "셀 분할");
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("table:cell-split")),
+        "셀 나누기"
+    );
 }
 
 #[test]

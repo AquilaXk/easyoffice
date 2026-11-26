@@ -572,14 +572,22 @@
 #doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "바닥글(홀수 쪽)"; }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstFooter"]::after { content: "바닥글(첫 쪽)"; }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenFooter"]::after { content: "바닥글(짝수 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(양쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(홀수 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstHeader"]::after { content: "머리말(첫 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenHeader"]::after { content: "머리말(짝수 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(양쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(홀수 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstFooter"]::after { content: "꼬리말(첫 쪽)"; }
-.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenFooter"]::after { content: "꼬리말(짝수 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="header"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(양쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="header"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(홀수 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstHeader"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="firstHeader"]::after { content: "머리말(첫 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenHeader"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="evenHeader"]::after { content: "머리말(짝수 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="footer"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(양쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-even-odd="true"][data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(홀수 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="firstFooter"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="firstFooter"]::after { content: "꼬리말(첫 쪽)"; }
+.app-shell[data-module="HWP"] #doc-editor[data-eo-hf-edit] > section[data-eo-hf="evenFooter"]::after,
+#doc-editor[data-eo-doc-flavor="pages"][data-eo-hf-edit] > section[data-eo-hf="evenFooter"]::after { content: "꼬리말(짝수 쪽)"; }
 .doc-scroll-container.hf-editing { background: var(--ui-active); }
 
 @media screen {

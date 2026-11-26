@@ -4,7 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { studioItem, switchModule } from "./test-support/modules.mjs";
+import { createSelection, rangeOf } from "./test-support/doc-run-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -147,7 +148,7 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.equal(fnLabels.min, "최소");
   assert.ok(sheet.document.querySelector(".sheet-rot-stage #sheet-align-rotation-preview"), "rotation preview wrapped in .sheet-rot-stage");
 
-  for (const id of ["icon-toolbar", "sheet-table-bar", "board-toolbar"]) {
+  for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
     const bar = sheet.document.getElementById(id);
     assert.ok(bar, `#${id} exists`);
     assert.ok(bar.querySelector(".tb-scroll-viewport .tb-scroll-track"), `#${id} mounts horizontal scroller track`);
@@ -162,8 +163,66 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.ok(layoutMenu.querySelectorAll(".slide-layout-thumb").length >= 5, "slide layout dropdown owns visual wireframes");
   assert.equal(slide.document.querySelector('#menu-bar [data-menu="format"] [data-slide-act="bring-front"]')?.hidden, false);
   assert.equal(slide.document.querySelector('#menu-bar [data-menu="slide"] [data-studio-menu-cmd="layout-margins"]'), null);
+  const slideTableLabels = [...slide.document.querySelectorAll("#slide-table-dialog .dialog-label")].map((el) => el.textContent.trim());
+  assert.deepEqual(slideTableLabels.slice(0, 2), ["행 수", "열 수"]);
 
   const koOverrides = JSON.parse(fs.readFileSync(path.join(REPO, "config/rhwp-studio-ko-overrides.json"), "utf8"));
   assert.equal(Object.values(koOverrides).includes("옅은 테두리"), true, "rhwp ko overrides patches 옅은 테두리");
   assert.equal(Object.values(koOverrides).includes("열은 테두리"), false, "no 열은 테두리 typo");
+
+  const shellCss = readUi("shell.css");
+  const toolbarCss = readUi("toolbar.css");
+  const copilotCss = readUi("copilot.css");
+  const contentCss = readUi("content.css");
+  const hwpCss = readHwp("src/eo-overrides.css");
+  assert.match(shellCss, /:root\[data-theme-effective="dark"\] \.eo-glyph-btn\.active[\s\S]*?color:\s*var\(--ui-text\)/);
+  assert.match(toolbarCss, /\.tb-btn\.active,\s*\.tb-btn\[aria-pressed="true"\]\s*\{[^}]*color:\s*var\(--ui-text\)/);
+  assert.match(toolbarCss, /\.tb-scrollable:has\(>\s*\.tb-scroll-nav-prev:not\(\[hidden\]\)\)/);
+  assert.match(copilotCss, /:root\[data-theme-effective="dark"\] \.eo-copilot-send-btn:not\(:disabled\)/);
+  assert.match(contentCss, /#doc-editor\[data-eo-doc-flavor="pages"\]\[data-eo-hf-edit\] > section\[data-eo-hf="header"\]::after/);
+  assert.match(hwpCss, /\.stb-message\s*\{\s*color:\s*var\(--accent-strong\)/);
+  assert.match(hwpCss, /\.dialog-close\s*\{[\s\S]*?min-width:\s*22px[\s\S]*?min-height:\s*22px/);
+  assert.match(hwpCss, /\.eq-mode-btn\s*\{[^}]*min-height:\s*22px/);
+
+  // Non-HWP table/symbol feedback and Pages margin violation terminology checks.
+  const selection = createSelection();
+  const doc = await createWorkspaceHarness({ selection, search: "?module=DOC&win=w-pd359-doc-labels" });
+  await flushAsyncTurns(10);
+  const editor = doc.document.getElementById("doc-editor");
+  editor.innerHTML = "<table class='doc-inline-table'><tbody><tr><td>A</td><td>B</td></tr></tbody></table>";
+  const cells = editor.querySelectorAll("td");
+  selection.addRange(rangeOf(cells[0], 0, cells[1], 0));
+  doc.document.querySelector('.menu-item[data-menu="table"]').dispatchEvent({ type: "mouseenter" });
+  doc.userClick(studioItem(doc.document, "table-col-equal"));
+  await flushAsyncTurns(4);
+  assert.equal(doc.document.getElementById("status-command-feedback").textContent, "열 너비를 같게 완료");
+  selection.addRange(rangeOf(cells[0], 0, cells[1], 0));
+  doc.userClick(studioItem(doc.document, "table-merge"));
+  await flushAsyncTurns(4);
+  assert.equal(doc.document.getElementById("status-command-feedback").textContent, "셀 병합 완료");
+  doc.userClick(studioItem(doc.document, "table-split"));
+  await flushAsyncTurns(4);
+  assert.equal(doc.document.getElementById("status-command-feedback").textContent, "셀 분할 완료");
+
+  const cellA1 = sheet.document.querySelector('[data-cell-ref="A1"]') || sheet.document.querySelector("#sheet-grid td[tabindex]");
+  cellA1?.focus?.();
+  sheet.userClick(sheet.document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns(4);
+  sheet.userClick(sheet.document.querySelector('#symbol-picker-grid [data-symbol-char="※"]'));
+  sheet.userClick(sheet.document.getElementById("btn-symbol-insert"));
+  await flushAsyncTurns(6);
+  assert.equal(sheet.document.getElementById("status-command-feedback").textContent, "기호 삽입 완료 (※)");
+
+  const docSetup = doc.host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__;
+  assert.match(docSetup.violation({ width: 11906, height: 16838, top: 8000, bottom: 9000, left: 1000, right: 1000, header: 500, footer: 500 }, "DOC", true), /머리말·꼬리말/);
+  let pageSetupErr = "";
+  editor.dataset.eoDocFlavor = "pages";
+  editor.dataset.eoPage = "11906,16838,1000,1000,1000,11500,500,500";
+  const psApi = doc.host.__EASYOFFICE_CREATE_DOC_PAGE_SETUP__({
+    document: doc.document,
+    activeMod: () => "DOC",
+    setFeedback: (msg) => { pageSetupErr = String(msg || ""); },
+  });
+  assert.equal(psApi.turn(), false);
+  assert.match(pageSetupErr, /머리말·꼬리말/);
 });

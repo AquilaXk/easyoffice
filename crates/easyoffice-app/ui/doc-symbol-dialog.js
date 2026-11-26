@@ -215,7 +215,7 @@
         getDocRuns?.()?.refreshToolbarFromSelection?.();
         computeSmartStats();
       });
-      setFeedback?.("문자표 기호 삽입 완료 (" + ch + ")");
+      setFeedback?.((ctx.mod === "HWP" ? "문자표 기호 삽입 완료 (" : "기호 삽입 완료 (") + ch + ")");
     }
 
     function insertIntoSlide(ch, ctx) {
@@ -225,7 +225,7 @@
         restoreSelectionRange(ctx.range);
         if (insertTextAtSelection(ch)) {
           syncActiveSlideDomStylesToDeck();
-          setFeedback?.("문자표 기호 삽입 완료 (" + ch + ")");
+          setFeedback?.("기호 삽입 완료 (" + ch + ")");
           return;
         }
       }
@@ -233,7 +233,7 @@
         const el = slideCanvas.getElements?.()?.find((item) => item.id === ctx.slideElId);
         if (el && (el.kind === "textbox" || el.kind === "shape")) {
           slideCanvas.updateElement(el.id, { text: String(el.text ?? "") + ch });
-          setFeedback?.("문자표 기호 삽입 완료 (" + ch + ")");
+          setFeedback?.("기호 삽입 완료 (" + ch + ")");
           return;
         }
       }
@@ -242,7 +242,7 @@
       const target = zone.querySelector("p") || zone;
       target.appendChild(document.createTextNode(ch));
       syncActiveSlideDomStylesToDeck();
-      setFeedback?.("문자표 기호 삽입 완료 (" + ch + ")");
+      setFeedback?.("기호 삽입 완료 (" + ch + ")");
     }
 
     function commitInsert() {
@@ -257,7 +257,7 @@
       if (ctx.mod === "SHEET") {
         const sc = getSheetController();
         void Promise.resolve(sc?.insertSymbol?.(ch, ctx.sheet)).then((res) => {
-          if (res?.inserted) setFeedback?.("문자표 기호 삽입 완료 (" + ch + ")");
+          if (res?.inserted) setFeedback?.("기호 삽입 완료 (" + ch + ")");
         }).catch(() => {});
         return;
       }

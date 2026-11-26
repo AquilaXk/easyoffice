@@ -462,7 +462,7 @@ test("the symbol table opens a picker dialog, inserts at the caret and keeps the
     assert.equal(run.textContent, "굵은※글씨", moduleName + ": the symbol lands at the caret");
     assert.equal(para.textContent, "앞 굵은※글씨 뒤", moduleName);
     assert.equal(editor.querySelector(".eo-hwp-field"), null, moduleName + ": the symbol table is not the field command");
-    assert.match(document.getElementById("status-command-feedback").textContent, /문자표/);
+    assert.equal(document.getElementById("status-command-feedback").textContent, moduleName === "HWP" ? "문자표 기호 삽입 완료 (※)" : "기호 삽입 완료 (※)");
   }
 });
 

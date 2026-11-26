@@ -48,8 +48,8 @@
     return { changed: true, table, firstCell: table.querySelector("td") };
   }
 
-  // Menu command -> label rhwp-studio shows for it (`command.table.*` of its ko locale), the status line says it was done.
-  const COMMAND_LABELS = {
+  // Menu command -> label for HWP (`command.table.*` in ko locale) vs DOC/Pages (Word/Pages Korean terms).
+  const HWP_COMMAND_LABELS = {
     "table-row-above": "위쪽에 줄 추가하기",
     "table-add-row": "아래쪽에 줄 추가하기",
     "table-col-left": "왼쪽에 칸 추가하기",
@@ -60,9 +60,20 @@
     "table-merge": "셀 합치기",
     "table-sum": "블록 합계",
   };
+  const DOC_COMMAND_LABELS = {
+    "table-row-above": "위쪽에 행 추가",
+    "table-add-row": "아래쪽에 행 추가",
+    "table-col-left": "왼쪽에 열 추가",
+    "table-col-right": "오른쪽에 열 추가",
+    "table-row-delete": "행 삭제",
+    "table-col-delete": "열 삭제",
+    "table-split": "셀 분할",
+    "table-merge": "셀 병합",
+    "table-sum": "블록 합계",
+  };
   // Items of the table menu that mean something only with the caret in a table.
   const TABLE_ONLY_COMMANDS = new Set([
-    ...Object.keys(COMMAND_LABELS),
+    ...Object.keys(DOC_COMMAND_LABELS),
     "table-border-bg",
     "table-cell-props",
     "table-col-equal",
@@ -228,7 +239,8 @@
         return result;
       }
       placeCaret(result.cell ?? result.target);
-      setFeedback?.(COMMAND_LABELS[cmd] + MSG_DONE);
+      const labels = document.getElementById("app")?.dataset?.module === "HWP" ? HWP_COMMAND_LABELS : DOC_COMMAND_LABELS;
+      setFeedback?.(labels[cmd] + MSG_DONE);
       return result;
     }
 

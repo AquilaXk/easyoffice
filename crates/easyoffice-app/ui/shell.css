@@ -23,7 +23,7 @@
 .tb-btn { min-width: 28px; height: 26px; }
 .eo-glyph-btn:hover { background: var(--ui-hover-strong); color: var(--ui-text); outline: 1px solid var(--ui-border-light); font-weight: inherit; }
 .eo-glyph-btn.active, .eo-glyph-btn[aria-pressed="true"] { background: var(--ui-active); color: var(--accent-ink); outline: 1px solid var(--ui-border-strong); font-weight: inherit; }
-:root[data-theme-effective="dark"] .eo-glyph-btn.active, :root[data-theme-effective="dark"] .eo-glyph-btn[aria-pressed="true"] { color: var(--accent); }
+:root[data-theme-effective="dark"] .eo-glyph-btn.active, :root[data-theme-effective="dark"] .eo-glyph-btn[aria-pressed="true"] { color: var(--ui-text); }
 .sb-step-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); }
 .sb-step-btn .eo-icon { width: 10px; height: 10px; }
 .eo-doc-style-bar .sb-select { color: var(--ui-text); background: var(--ui-surface); border-color: var(--color-border-input); }

@@ -227,7 +227,63 @@
       }
       selectedRow = nextRow;
     };
+    let detachedLayer = false;
+    let cleanupLayer = null;
+    const clearDetachedLayer = () => {
+      cleanupLayer?.();
+      cleanupLayer = null;
+      if (!detachedLayer) return;
+      detachedLayer = false;
+      try { menu.hidePopover?.(); } catch {}
+      menu.removeAttribute?.("popover");
+      for (const prop of ["position", "inset", "margin", "left", "top", "right", "bottom", "minWidth", "maxHeight", "zIndex"]) {
+        menu.style[prop] = "";
+      }
+    };
+    const placeDetachedLayer = () => {
+      if (!root.closest?.(".tb-scroll-viewport, .tb-scrollable, #board-style-bar, .eo-style-bar")) return;
+      const rect = trigger.getBoundingClientRect?.();
+      if (!rect || !(rect.width > 0) || !(rect.height > 0)) return;
+      detachedLayer = true;
+      if (typeof menu.showPopover === "function") {
+        menu.setAttribute("popover", "manual");
+        try { menu.showPopover(); } catch {}
+      }
+      const win = document.defaultView || globalThis;
+      const vw = win.innerWidth || 1024;
+      const vh = win.innerHeight || 768;
+      menu.style.position = "fixed";
+      menu.style.inset = "auto";
+      menu.style.margin = "0";
+      menu.style.right = "auto";
+      menu.style.bottom = "auto";
+      menu.style.zIndex = "9999";
+      menu.style.minWidth = Math.round(rect.width) + "px";
+      const spaceBelow = Math.max(80, vh - rect.bottom - 8);
+      const spaceAbove = Math.max(80, rect.top - 8);
+      const placeAbove = spaceBelow < 160 && spaceAbove > spaceBelow;
+      const maxH = Math.min(240, placeAbove ? spaceAbove : spaceBelow);
+      menu.style.maxHeight = maxH + "px";
+      const mr = menu.getBoundingClientRect?.();
+      const mw = mr?.width || rect.width;
+      const mh = mr?.height || maxH;
+      const left = Math.max(8, Math.min(rect.left, vw - mw - 8));
+      const top = placeAbove ? Math.max(8, rect.top - mh - 2) : Math.max(8, Math.min(vh - mh - 8, rect.bottom + 2));
+      menu.style.left = Math.round(left) + "px";
+      menu.style.top = Math.round(top) + "px";
+      const onScrollOrResize = (ev) => {
+        if (ev?.type === "scroll" && ev.target && menu.contains?.(ev.target)) return;
+        close();
+      };
+      document.addEventListener?.("scroll", onScrollOrResize, true);
+      win.addEventListener?.("resize", onScrollOrResize);
+      cleanupLayer = () => {
+        document.removeEventListener?.("scroll", onScrollOrResize, true);
+        win.removeEventListener?.("resize", onScrollOrResize);
+      };
+    };
     const close = () => {
+      clearDetachedLayer();
       root.classList.remove("open");
       trigger.setAttribute("aria-expanded", "false");
       if (OPEN_SELECT_BY_DOC.get(document)?.root === root) {
@@ -241,6 +297,7 @@
       root.classList.add("open");
       trigger.setAttribute("aria-expanded", "true");
       OPEN_SELECT_BY_DOC.set(document, { root, trigger, close });
+      placeDetachedLayer();
     };
     const toggle = () => {
       if (root.classList.contains("open")) {
