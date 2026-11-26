@@ -128,14 +128,14 @@
 .md-item[aria-disabled="true"],
 .md-sub.disabled,
 .md-sub[aria-disabled="true"] {
-  color: var(--color-text-disabled);
+  color: var(--ui-text-muted);
   cursor: default;
 }
 
 .md-item.disabled:hover,
 .md-item[aria-disabled="true"]:hover {
   background: transparent;
-  color: var(--color-text-disabled);
+  color: var(--ui-text-muted);
 }
 
 .md-item[hidden] {
@@ -169,12 +169,12 @@
 .md-item[aria-disabled="true"] .md-shortcut,
 .md-item.disabled .md-shortcut,
 .md-item:disabled .md-shortcut {
-  color: var(--ui-border);
+  color: var(--ui-text-muted);
 }
 
 .md-sub[aria-disabled="true"] > .md-arrow,
 .md-sub.disabled > .md-arrow {
-  color: var(--ui-border-light);
+  color: var(--ui-text-muted);
 }
 
 /* separator */

@@ -106,7 +106,6 @@ test("PD-260: 빈 초기 상태·4종 노드(도형 6종/텍스트/PNG 그림 �
     ["btn-board-analyze", "요소 분석"],
     ["btn-board-print", "인쇄"],
     ["btn-board-export-pdf", "PDF로 내보내기"],
-    ["btn-board-zoom-reset", "100%"],
     ["btn-board-fit-all", "전체 맞춤"],
   ];
   for (const [id, text] of expectedBtnLabels) {
@@ -114,9 +113,9 @@ test("PD-260: 빈 초기 상태·4종 노드(도형 6종/텍스트/PNG 그림 �
     assert.ok(el, `button #${id} exists`);
     assert.equal(el.textContent.trim(), text);
   }
-  assert.equal(document.getElementById("btn-board-zoom-out").getAttribute("aria-label"), "축소");
-  assert.equal(document.getElementById("btn-board-zoom-in").getAttribute("aria-label"), "확대");
-  assert.ok(pane.querySelector("#board-viewport .board-controls #btn-board-zoom-reset"), "floating bottom-left zoom island mounted");
+  assert.equal(pane.querySelector("#board-viewport .board-controls"), null, "no duplicate floating canvas zoom island");
+  assert.equal(document.getElementById("btn-zoom-out").getAttribute("aria-label"), "배율 축소");
+  assert.equal(document.getElementById("btn-zoom-in").getAttribute("aria-label"), "배율 확대");
 
   // 6 shape types
   const shapeSelect = document.getElementById("board-shape-kind");
@@ -362,9 +361,9 @@ test("PD-260: 줌/전체 맞춤·인쇄 페이지(buildPrintPage)·벡터 PDF �
   studio.addConnector({ fromId: "b1", toId: "b2", routing: "orthogonal", label: "다음" });
 
   // Viewport zoom & fit-all
-  userClick(document.getElementById("btn-board-zoom-in"));
+  studio.stepZoom(1);
   assert.ok(studio.getState().viewport.zoom > 100);
-  userClick(document.getElementById("btn-board-zoom-reset"));
+  studio.setZoom(100);
   assert.equal(studio.getState().viewport.zoom, 100);
   userClick(document.getElementById("btn-board-fit-all"));
   assert.ok(studio.getState().viewport.zoom >= 25 && studio.getState().viewport.zoom <= 400);

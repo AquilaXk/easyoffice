@@ -16,7 +16,10 @@ const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
-const COMMANDS = ["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"];
+const COMMANDS = [
+  "new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf",
+  "print", "close", "about", "theme-system", "theme-light", "theme-dark", "theme-toggle",
+];
 
 // ---- fake editor (embed protocol) -------------------------------------------------------------
 
@@ -160,17 +163,24 @@ test("forwarded commands run the matching shell action", () => {
   assert.deepEqual(calls, [["newDocument"], ["openFile"], ["openRecent", "x1"], ["recentDialog"], ["save"], ["saveAs", "hwpx"], ["exportPdf"], ["close"]]);
 });
 
-test("overlay 파일 menu lists exactly the shell commands and no editor file action", () => {
+test("overlay 파일·보기·도움말 menus expose shell commands and omit duplicate recent-dialog", () => {
   const html = read("index.html", OVERLAY);
   const block = html.slice(html.indexOf('data-menu="file"'), html.indexOf('data-menu="edit"'));
   const commands = new Set([...block.matchAll(/data-shell-cmd="([^"]+)"/g)].map((m) => m[1]));
   assert.ok(block.includes("data-shell-recent"), "the recent submenu is filled by the shell's list");
   const byName = (a, b) => a.localeCompare(b);
-  assert.deepEqual([...commands].sort(byName), COMMANDS.filter((c) => c !== "recent").sort(byName));
+  assert.deepEqual([...commands].sort(byName), ["close", "export-pdf", "new", "open", "print", "save", "save-as"].sort(byName));
   assert.deepEqual([...block.matchAll(/data-cmd="([^"]+)"/g)].map((m) => m[1]), ["file:page-setup"], "page setup is the only editor-native file command in the 파일 menu");
-  // Same order as the reference app: new, open, recent, save, save as, export, page setup, print, ..., about.
+  // Hangul order: new, open, recent, save, save as, export, page setup, print, close.
   const order = [...block.matchAll(/data-(?:shell-cmd|cmd)="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(order, ["new", "open", "recent-dialog", "save", "save-as", "save-as", "export-pdf", "file:page-setup", "print", "close", "about"]);
+  assert.deepEqual(order, ["new", "open", "save", "save-as", "save-as", "export-pdf", "file:page-setup", "print", "close"]);
+  const helpBlock = html.slice(html.indexOf('data-menu="help"'));
+  assert.ok(helpBlock.includes('data-shell-cmd="about"'), "help menu holds about");
+  const viewBlock = html.slice(html.indexOf('data-menu="view"'), html.indexOf('data-menu="insert"'));
+  for (const t of ["theme-system", "theme-light", "theme-dark"]) {
+    assert.ok(viewBlock.includes(`data-shell-cmd="${t}"`), `view menu holds ${t}`);
+  }
+  assert.ok(html.includes('data-shell-cmd="theme-toggle"'), "menubar hosts theme toggle button");
   const ts = read("src/embed/shell-menu.ts", OVERLAY);
   const listed = /SHELL_COMMANDS = \[([^\]]+)\]/.exec(ts)[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
   assert.deepEqual(listed, COMMANDS, "the editor and the shell share one command list");

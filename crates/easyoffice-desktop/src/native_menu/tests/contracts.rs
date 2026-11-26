@@ -54,11 +54,11 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
         align,
         [
             "왼쪽 맞춤",
-            "가운데 맞춤",
+            "가로 가운데 맞춤",
             "오른쪽 맞춤",
             s,
             "위쪽 맞춤",
-            "가운데 맞춤",
+            "세로 가운데 맞춤",
             "아래쪽 맞춤",
         ]
     );
@@ -285,8 +285,8 @@ fn slice5_native_menu_parity_covers_doc_slide_base_and_cross_module_find() {
     for id in ["format:strike", "format:superscript", "format:subscript"] {
         assert!(doc_fmt.contains(&id), "DOC서식 missing {id}");
         assert!(
-            !lines_of(MenuKind::Hwp, "서식").contains(&id),
-            "HWP omits {id}"
+            lines_of(MenuKind::Hwp, "서식").contains(&id),
+            "HWP keeps {id}"
         );
         assert_eq!(spec(id).accelerator, None);
     }
@@ -305,7 +305,7 @@ fn slice5_native_menu_parity_covers_doc_slide_base_and_cross_module_find() {
     ] {
         assert!(slide_ids.contains(&id), "SLIDE missing {id}");
     }
-    assert!(lines_of(MenuKind::Slide, "삽입").contains(&layout::SLIDE_ALIGN));
+    assert!(lines_of(MenuKind::Slide, "서식").contains(&layout::SLIDE_ALIGN));
     assert!(lines_of(MenuKind::Base, "파일").contains(&"file:base-import"));
     for kind in [MenuKind::Slide, MenuKind::Pdf, MenuKind::Board] {
         let edit = lines_of(kind, "편집");
@@ -329,7 +329,7 @@ fn official_korean_labels_separate_doc_and_hwp_and_match_menu_terms() {
     assert_eq!(spec("page:paper").label, "편집 용지");
     assert_eq!(spec("page:header").label, "머리말");
     assert_eq!(spec("page:footer").label, "꼬리말");
-    let doc_page = lines_of(MenuKind::Doc, "쪽");
+    let doc_page = lines_of(MenuKind::Doc, "레이아웃");
     assert!(doc_page.contains(&"page:doc-paper"));
     assert!(doc_page.contains(&"page:doc-header"));
     assert!(doc_page.contains(&"page:doc-footer"));
@@ -421,4 +421,142 @@ fn per_kind_export_submenus_keep_hwp_isolated_and_cover_supported_formats() {
             assert!(ids.contains(item), "{kind:?} missing {item}");
         }
     }
+}
+
+#[test]
+fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
+    for (id, office_label, hwp_label) in [
+        ("edit:undo", "실행 취소", "되돌리기"),
+        ("edit:cut", "잘라내기", "오려 두기"),
+        ("edit:copy", "복사", "복사하기"),
+        ("edit:paste", "붙여넣기", "붙이기"),
+        ("edit:replace", "찾기 및 바꾸기", "찾아 바꾸기"),
+        ("format:bold", "굵게", "진하게"),
+        ("format:italic", "기울임꼴", "기울임"),
+        ("view:zoom-100", "100%", "실제 크기"),
+    ] {
+        let s = spec(id);
+        assert_eq!(s.label, office_label, "{id}");
+        assert_eq!(label_for(MenuKind::Doc, s), office_label, "{id} doc");
+        assert_eq!(label_for(MenuKind::Sheet, s), office_label, "{id} sheet");
+        assert_eq!(label_for(MenuKind::Hwp, s), hwp_label, "{id} hwp");
+    }
+    assert_eq!(spec("view:toolbar-labels").label, "도구 상자 라벨 표시");
+    assert_eq!(spec("help:update-check").label, "업데이트 확인 알림");
+    assert!(lines_of(MenuKind::Doc, "파일").contains(&"file:doc-paper"));
+    assert!(lines_of(MenuKind::Hwp, "파일").contains(&"file:save-as-hwpx"));
+    for slide_id in ["slide:insert-textbox", "slide:insert-picture"] {
+        assert!(
+            lines_of(MenuKind::Slide, "삽입").contains(&slide_id),
+            "{slide_id}"
+        );
+    }
+    for slide_id in [
+        "slide:bring-front",
+        "slide:send-back",
+        "slide:delete-element",
+    ] {
+        assert!(
+            lines_of(MenuKind::Slide, "서식").contains(&slide_id),
+            "{slide_id}"
+        );
+    }
+    for sheet_id in [
+        "sheet:insert-picture",
+        "sheet:note-insert",
+        "sheet:note-toggle-all",
+    ] {
+        assert!(
+            lines_of(MenuKind::Sheet, "삽입").contains(&sheet_id),
+            "{sheet_id}"
+        );
+    }
+    assert!(!lines_of(MenuKind::Sheet, "삽입").contains(&"table:sheet-chart"));
+    for kind in MenuKind::ALL {
+        assert!(
+            lines_of(kind, "보기").contains(&"view:toolbar-labels"),
+            "{kind:?}"
+        );
+        assert!(
+            !layout::table_ids(kind).contains(&"tool:security-audit"),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(accelerator_for(MenuKind::Hwp, spec("insert:link")), None);
+    for kind in [MenuKind::Doc, MenuKind::Sheet, MenuKind::Slide] {
+        assert_eq!(
+            accelerator_for(kind, spec("insert:link")),
+            Some("CmdOrCtrl+K"),
+            "{kind:?}"
+        );
+    }
+    for (id, acc) in [
+        ("sheet:note-insert", "Shift+F2"),
+        ("sheet:name-paste", "F3"),
+        ("sheet:calc-now", "F9"),
+        ("sheet:calc-sheet", "Shift+F9"),
+        ("table:insert", "CmdOrCtrl+T"),
+        ("table:autosum", "Alt+="),
+    ] {
+        assert_eq!(
+            accelerator_for(MenuKind::Sheet, spec(id)),
+            Some(acc),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("table:border-bg")),
+        "테두리 및 음영"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("table:cell-props")),
+        "표 속성"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("table:col-equal")),
+        "열 너비를 같게"
+    );
+    assert_eq!(label_for(MenuKind::Pages, spec("insert:link")), "링크");
+    assert_eq!(label_for(MenuKind::Sheet, spec("insert:symbol")), "기호");
+    assert_eq!(label_for(MenuKind::Slide, spec("insert:symbol")), "기호");
+}
+
+#[test]
+fn exactly_the_current_theme_is_checked_and_switches_follow_view_state() {
+    let view = |theme, toolbar_labels, update_check| MenuView {
+        theme,
+        disabled_mask: ItemMask::default(),
+        update_check,
+        toolbar_labels,
+    };
+    for mode in ["system", "light", "dark"] {
+        let checked: Vec<&str> = CHECK_IDS
+            .into_iter()
+            .filter(|id| *id != "view:toolbar-labels")
+            .filter(|id| check_state(id, &view(mode, true, None)).is_some_and(|(on, _)| on))
+            .collect();
+        assert_eq!(checked, vec![theme_item_id(mode).unwrap()], "{mode}");
+    }
+    assert_eq!(
+        check_state("view:toolbar-labels", &view("dark", true, None)),
+        Some((true, true))
+    );
+    assert_eq!(
+        check_state("view:toolbar-labels", &view("dark", false, None)),
+        Some((false, true))
+    );
+    assert_eq!(
+        check_state("help:update-check", &view("dark", true, Some(true))),
+        Some((true, true))
+    );
+    assert_eq!(
+        check_state("help:update-check", &view("dark", true, Some(false))),
+        Some((false, true))
+    );
+    assert_eq!(
+        check_state("help:update-check", &view("dark", true, None)),
+        Some((false, false)),
+        "an app that does not check offers no switch"
+    );
+    assert_eq!(check_state("file:save", &view("dark", true, None)), None);
 }

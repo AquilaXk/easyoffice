@@ -6,7 +6,22 @@
 
 export const SHELL_COMMAND_REASON = 'shell_command' as const;
 export const SHELL_TOOLBAR_LABELS_REASON = 'shell_toolbar_labels' as const;
-export const SHELL_COMMANDS = ['new', 'open', 'recent', 'recent-dialog', 'save', 'save-as', 'export-pdf', 'print', 'close', 'about'] as const;
+export const SHELL_COMMANDS = [
+  'new',
+  'open',
+  'recent',
+  'recent-dialog',
+  'save',
+  'save-as',
+  'export-pdf',
+  'print',
+  'close',
+  'about',
+  'theme-system',
+  'theme-light',
+  'theme-dark',
+  'theme-toggle',
+] as const;
 export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
 export type ShellTheme = (typeof SHELL_THEMES)[number];

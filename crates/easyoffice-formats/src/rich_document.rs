@@ -593,7 +593,7 @@ pub struct RichDocument {
 }
 
 /// The headings of the header and footer appendix, and the prefixes it puts before first-page and even-page text.
-const COPY_HEADINGS: [&str; 2] = ["머리글", "바닥글"];
+const COPY_HEADINGS: [&str; 4] = ["머리글", "바닥글", "머리말", "꼬리말"];
 const COPY_PREFIXES: [&str; 2] = ["[첫 쪽] ", "[짝수 쪽] "];
 
 fn is_frame_text(text: &str, frame_texts: &std::collections::HashSet<String>) -> bool {

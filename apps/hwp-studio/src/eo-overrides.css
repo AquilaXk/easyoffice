@@ -22,3 +22,142 @@
   height: 32px;
   min-height: 32px;
 }
+
+/* Fit embed document cleanly inside iframe height without bottom status-bar clipping. */
+html,
+body,
+#studio-root {
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+#editor-area {
+  min-height: 0;
+}
+
+/* Accessible contrast (WCAG AA >= 4.5:1) across HWP modals in light and dark themes. */
+.dialog-btn-primary {
+  background: var(--accent-strong);
+  color: var(--ui-text-on-accent);
+  border-color: var(--accent-strong);
+}
+
+:root[data-theme-effective="dark"] .dialog-btn-primary {
+  color: var(--ui-bg);
+}
+
+.dialog-btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  opacity: 0.92;
+}
+
+:root[data-theme-effective="dark"] .dialog-btn-primary:hover:not(:disabled) {
+  background: var(--accent-light);
+  border-color: var(--accent-light);
+  opacity: 1;
+}
+
+.dialog-unit,
+.pp-dir-spacer {
+  color: var(--ui-text-secondary);
+}
+
+.goto-panel .dialog-row > span {
+  color: var(--ui-text-secondary) !important;
+}
+
+.goto-panel input[type="number"] {
+  border-color: var(--color-border-input) !important;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cs-preview {
+  background: var(--doc-paper) !important;
+  color: var(--caret-color);
+  border-color: var(--ui-border-strong) !important;
+}
+
+.eq-preview-empty {
+  color: var(--ui-text-secondary);
+}
+
+:root[data-theme-effective="dark"] .eq-preview-empty {
+  color: var(--ui-border-strong);
+}
+
+#csd-mf-check:disabled + label {
+  color: var(--ui-text-muted) !important;
+}
+
+.dialog-body svg rect[x="12"][y="8"][width="118"][height="96"] {
+  stroke: var(--ui-text-muted) !important;
+}
+
+:root[data-theme-effective="dark"] .dialog-body svg rect[x="12"][y="8"][width="118"][height="96"] {
+  stroke: var(--ui-border-strong) !important;
+}
+
+/* Keep custom-select triggers legible in compact HWP modal flex rows (e.g. endnote-shape). */
+.dialog-wrap .custom-select {
+  flex-shrink: 0;
+  min-width: max-content;
+}
+
+.dialog-wrap .custom-select-trigger {
+  min-width: 64px;
+}
+
+/* Minimum 20px target size for stepper/sync buttons in table-cell-props and picture-props. */
+.tcp-all-spinner-btn {
+  min-width: 22px;
+  width: 22px;
+  min-height: 22px;
+  height: 22px;
+  line-height: 20px;
+}
+
+.pp-sync-arrow-btn {
+  min-width: 22px;
+  width: 22px;
+  min-height: 20px;
+  height: 20px;
+}
+
+.eo-menu-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex: 0 0 24px;
+}
+
+.eo-menu-theme-toggle:hover,
+.eo-menu-theme-toggle:focus-visible {
+  border-color: var(--accent-hover);
+  background: var(--ui-accent-bg);
+  color: var(--color-primary-dark);
+  outline: none;
+}
+
+.eo-menu-theme-toggle .eo-theme-icon-sun {
+  display: none;
+}
+
+:root[data-theme-effective="dark"] .eo-menu-theme-toggle .eo-theme-icon-moon {
+  display: none;
+}
+
+:root[data-theme-effective="dark"] .eo-menu-theme-toggle .eo-theme-icon-sun {
+  display: block;
+}

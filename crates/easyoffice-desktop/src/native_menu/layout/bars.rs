@@ -25,8 +25,38 @@ const FILE_HWP: MenuSpec = menu(
         "file:save-as",
         "file:save-as-hwpx",
         S,
+        "file:page-setup",
         "file:export-pdf",
         "file:print",
+    ],
+);
+const FILE_PAGES: MenuSpec = menu(
+    "파일",
+    &[
+        "file:new",
+        NEW_DOCS,
+        S,
+        "file:open",
+        "file:open-recent",
+        "file:save",
+        "file:save-as",
+        EXPORT_DOC,
+        S,
+        "page:pages-paper",
+        "file:print-preview",
+        "file:print",
+    ],
+);
+const FILE_WORKSPACE: MenuSpec = menu(
+    "파일",
+    &[
+        "file:new",
+        NEW_DOCS,
+        S,
+        "file:open",
+        "file:open-recent",
+        "file:save",
+        "file:save-as",
     ],
 );
 const FILE_DOC: MenuSpec = menu(
@@ -168,6 +198,22 @@ const EDIT_SHEET: MenuSpec = menu(
         "edit:replace",
     ],
 );
+const EDIT_PDF: MenuSpec = menu(
+    "편집",
+    &["edit:undo", "edit:redo", S, SELECT_ALL, S, "edit:find"],
+);
+const EDIT_WORKSPACE: MenuSpec = menu(
+    "편집",
+    &[
+        "edit:undo",
+        "edit:redo",
+        S,
+        "edit:cut",
+        "edit:copy",
+        PASTE,
+        SELECT_ALL,
+    ],
+);
 const EDIT_FIND_ONLY: MenuSpec = menu(
     "편집",
     &[
@@ -194,9 +240,6 @@ const VIEW_HWP: MenuSpec = menu(
         "view:zoom-fit-width",
         "view:zoom-dialog",
         S,
-        "view:split",
-        "view:outline",
-        S,
         THEME,
         "view:theme-toggle",
         S,
@@ -205,6 +248,27 @@ const VIEW_HWP: MenuSpec = menu(
         "view:ctrl-marks",
         "view:para-marks",
         "view:doc-grid",
+    ],
+);
+const VIEW_PAGES: MenuSpec = menu(
+    "보기",
+    &[
+        "view:zoom-in",
+        "view:zoom-out",
+        "view:zoom-100",
+        S,
+        "view:zoom-fit-page",
+        "view:zoom-fit-width",
+        S,
+        "view:split",
+        "view:outline",
+        "view:pages-inspector",
+        S,
+        THEME,
+        "view:theme-toggle",
+        S,
+        "view:toolbar-labels",
+        "view:para-marks",
     ],
 );
 const VIEW_DOC: MenuSpec = menu(
@@ -266,9 +330,10 @@ const INSERT_HWP: MenuSpec = menu(
     "입력",
     &[
         "insert:shape",
-        "insert:chart",
+        "insert:image",
         S,
         "insert:footnote",
+        "insert:endnote",
         "insert:symbol",
         "insert:link",
         S,
@@ -276,7 +341,7 @@ const INSERT_HWP: MenuSpec = menu(
     ],
 );
 const INSERT_DOC: MenuSpec = menu(
-    "입력",
+    "삽입",
     &[
         "insert:shape",
         "insert:image",
@@ -290,6 +355,23 @@ const INSERT_DOC: MenuSpec = menu(
         "insert:toc",
         "insert:toc-update",
         "insert:mailmerge",
+    ],
+);
+const INSERT_PAGES: MenuSpec = menu(
+    "삽입",
+    &[
+        "insert:shape",
+        "insert:image",
+        "insert:chart",
+        S,
+        "insert:footnote",
+        "insert:endnote",
+        "insert:link",
+        S,
+        "insert:toc",
+        "insert:toc-update",
+        "page:header",
+        "page:footer",
     ],
 );
 const INSERT_SHEET: MenuSpec = menu(
@@ -320,13 +402,6 @@ const INSERT_SLIDE: MenuSpec = menu(
         "insert:chart",
         "insert:symbol",
         "insert:link",
-        S,
-        "slide:bring-front",
-        "slide:bring-forward",
-        "slide:send-backward",
-        "slide:send-back",
-        SLIDE_ALIGN,
-        "slide:delete-element",
     ],
 );
 const ANNOTATE_PDF: MenuSpec = menu("주석", &["tool:pdf-highlight", "tool:review-comment"]);
@@ -343,6 +418,7 @@ const FORMAT_DOC: MenuSpec = menu(
         S,
         "format:style",
         "format:justify",
+        S,
         "format:para-numbering",
         "format:para-bullet",
         "format:para-checklist",
@@ -350,23 +426,44 @@ const FORMAT_DOC: MenuSpec = menu(
         "format:indent-out",
     ],
 );
-const FORMAT_TEXT: MenuSpec = menu(
-    "서식",
+const FORMAT_PAGES: MenuSpec = menu(
+    "포맷",
     &[
         "format:bold",
         "format:italic",
         "format:underline",
+        "format:strike",
+        "format:superscript",
+        "format:subscript",
         S,
         "format:style",
         "format:justify",
-        "format:para-numbering",
-        "format:para-bullet",
+        S,
         "format:para-checklist",
         "format:indent-in",
         "format:indent-out",
     ],
 );
-const FORMAT_CELL: MenuSpec = menu(
+const FORMAT_HWP: MenuSpec = menu(
+    "서식",
+    &[
+        "format:bold",
+        "format:italic",
+        "format:underline",
+        "format:strike",
+        "format:superscript",
+        "format:subscript",
+        S,
+        "format:style",
+        "format:justify",
+        S,
+        "format:para-numbering",
+        "format:para-bullet",
+        "format:indent-in",
+        "format:indent-out",
+    ],
+);
+const FORMAT_SLIDE: MenuSpec = menu(
     "서식",
     &[
         "format:bold",
@@ -374,6 +471,13 @@ const FORMAT_CELL: MenuSpec = menu(
         "format:underline",
         S,
         "format:style",
+        S,
+        "slide:bring-front",
+        "slide:bring-forward",
+        "slide:send-backward",
+        "slide:send-back",
+        SLIDE_ALIGN,
+        "slide:delete-element",
     ],
 );
 
@@ -415,7 +519,7 @@ const PAGE_HWP: MenuSpec = menu(
     ],
 );
 const PAGE_DOC: MenuSpec = menu(
-    "쪽",
+    "레이아웃",
     &[
         "page:doc-paper",
         "page:orientation",
@@ -467,12 +571,35 @@ const SLIDE_SLIDE: MenuSpec = menu(
         "page:slide-snap",
         S,
         "page:orientation",
-        "page:margins",
     ],
 );
 const SLIDE_SHOW: MenuSpec = menu(
     "슬라이드 쇼",
     &["page:slide-transition", "page:slide-presenter"],
+);
+
+const ARRANGE_PAGES: MenuSpec = menu(
+    "정렬",
+    &[
+        "table:insert",
+        S,
+        "table:row-above",
+        "table:add-row",
+        "table:col-left",
+        "table:col-right",
+        "table:row-delete",
+        "table:col-delete",
+        S,
+        "table:split",
+        "table:merge",
+        "table:col-equal",
+        S,
+        "table:border-bg",
+        "table:cell-props",
+        S,
+        "table:sum",
+        "table:sort",
+    ],
 );
 
 const TABLE_HWP: MenuSpec = menu(
@@ -489,13 +616,13 @@ const TABLE_HWP: MenuSpec = menu(
         "table:cell-select",
         "table:merge",
         "table:cell-split",
+        "table:col-equal",
+        S,
+        "table:border-bg",
+        "table:cell-props",
         S,
         "table:sum",
         "table:hwp-border",
-        S,
-        "table:autosum",
-        "table:fn-browser",
-        "table:sort",
     ],
 );
 const TABLE_DOC: MenuSpec = menu(
@@ -652,6 +779,7 @@ const TOOL_PDF: MenuSpec = menu(
     ],
 );
 const TOOL_WORKSPACE: MenuSpec = menu("도구", &["tool:copilot", S, "tool:palette"]);
+const TOOL_MINIMAL: MenuSpec = menu("도구", &["tool:palette"]);
 
 const DOC: [&MenuSpec; 11] = [
     &APP,
@@ -666,13 +794,25 @@ const DOC: [&MenuSpec; 11] = [
     &WINDOW,
     &HELP,
 ];
+const PAGES: [&MenuSpec; 10] = [
+    &APP,
+    &FILE_PAGES,
+    &EDIT_FULL,
+    &VIEW_PAGES,
+    &INSERT_PAGES,
+    &FORMAT_PAGES,
+    &ARRANGE_PAGES,
+    &TOOL_DOC,
+    &WINDOW,
+    &HELP,
+];
 const HWP: [&MenuSpec; 11] = [
     &APP,
     &FILE_HWP,
     &EDIT_FULL,
     &VIEW_HWP,
     &INSERT_HWP,
-    &FORMAT_TEXT,
+    &FORMAT_HWP,
     &PAGE_HWP,
     &TABLE_HWP,
     &TOOL_HWP,
@@ -699,7 +839,7 @@ const SLIDE: [&MenuSpec; 11] = [
     &EDIT_FIND_ONLY,
     &VIEW_PLAIN,
     &INSERT_SLIDE,
-    &FORMAT_CELL,
+    &FORMAT_SLIDE,
     &SLIDE_SLIDE,
     &SLIDE_SHOW,
     &TOOL_OFFICE,
@@ -709,7 +849,7 @@ const SLIDE: [&MenuSpec; 11] = [
 const PDF: [&MenuSpec; 9] = [
     &APP,
     &FILE_PDF,
-    &EDIT_FIND_ONLY,
+    &EDIT_PDF,
     &VIEW_PLAIN,
     &ANNOTATE_PDF,
     &PAGE_PDF,
@@ -735,17 +875,38 @@ const BOARD: [&MenuSpec; 7] = [
     &WINDOW,
     &HELP,
 ];
+const START: [&MenuSpec; 7] = [
+    &APP,
+    &FILE_WORKSPACE,
+    &EDIT_WORKSPACE,
+    &VIEW_WORKSPACE,
+    &TOOL_MINIMAL,
+    &WINDOW,
+    &HELP,
+];
+const CONV: [&MenuSpec; 7] = [
+    &APP,
+    &FILE_WORKSPACE,
+    &EDIT_WORKSPACE,
+    &VIEW_WORKSPACE,
+    &TOOL_MINIMAL,
+    &WINDOW,
+    &HELP,
+];
 
 /// The menus of the bar for a kind of window, in order.
 pub fn layout(kind: MenuKind) -> &'static [&'static MenuSpec] {
     match kind {
         MenuKind::Doc => &DOC,
+        MenuKind::Pages => &PAGES,
         MenuKind::Hwp => &HWP,
         MenuKind::Sheet => &SHEET,
         MenuKind::Slide => &SLIDE,
         MenuKind::Pdf => &PDF,
         MenuKind::Base => &BASE,
         MenuKind::Board => &BOARD,
+        MenuKind::Start => &START,
+        MenuKind::Conv => &CONV,
     }
 }
 

@@ -146,7 +146,7 @@ fn shape_text_keeps_pictures_and_reports_nested_tables_and_shapes() {
     assert_eq!(paragraph_texts(&doc), vec!["앞", "도형 글", "뒤"]);
     assert_eq!(image_count(&doc), 1);
     assert!(
-        warned(&warnings, "도형·각주·머리글·바닥글 안의 표·도형 2개"),
+        warned(&warnings, "도형·각주·머리말·꼬리말 안의 표·도형 2개"),
         "{warnings:?}"
     );
     assert!(!warned(&warnings, "표 안의 개체"), "{warnings:?}");
@@ -168,7 +168,7 @@ fn header_pictures_repeated_in_every_variant_count_once() {
     let body = body_with(&mut b, "앞", &[], "뒤");
     let (doc, warnings) = open(&png_zip(b, body)).expect("opens");
     assert_eq!(image_count(&doc), 1);
-    assert_eq!(paragraph_texts(&doc), vec!["앞", "뒤", "머리글", "머리말"]);
+    assert_eq!(paragraph_texts(&doc), vec!["앞", "뒤", "머리말", "머리말"]);
     assert!(!warned(&warnings, "가져오지 않은 요소"), "{warnings:?}");
 }
 

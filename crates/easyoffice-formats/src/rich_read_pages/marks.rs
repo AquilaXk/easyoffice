@@ -26,8 +26,8 @@ const DATE_FIELD: &str = "날짜·시각 필드(저장된 글자만 가져옴)";
 const BOOKMARK: &str = "책갈피";
 const CHANGE: &str = "변경 추적";
 const OTHER_FIELD: &str = "글 속 필드(자리표시자·병합·루비)";
-const NESTED_COMMENT: &str = "도형·각주·머리글·바닥글 안의 댓글";
-const NESTED_FOOTNOTE: &str = "도형·각주·머리글·바닥글 안의 각주";
+const NESTED_COMMENT: &str = "도형·각주·머리말·꼬리말 안의 댓글";
+const NESTED_FOOTNOTE: &str = "도형·각주·머리말·꼬리말 안의 각주";
 const UNKNOWN_LIST_FORMAT: &str = "알 수 없는 목록 번호 형식(1. 형식으로 가져옴)";
 
 /// Entries `(character index, object id)` of an object attribute table that point at an object.

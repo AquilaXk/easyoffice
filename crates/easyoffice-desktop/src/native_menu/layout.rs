@@ -18,35 +18,44 @@ pub use bars::table_ids;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MenuKind {
     Doc,
+    Pages,
     Hwp,
     Sheet,
     Slide,
     Pdf,
     Base,
     Board,
+    Start,
+    Conv,
 }
 
 impl MenuKind {
-    pub const ALL: [MenuKind; 7] = [
+    pub const ALL: [MenuKind; 10] = [
         MenuKind::Doc,
+        MenuKind::Pages,
         MenuKind::Hwp,
         MenuKind::Sheet,
         MenuKind::Slide,
         MenuKind::Pdf,
         MenuKind::Base,
         MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
     ];
 
     /// The name the page reports (`menuKindOf` in `menu-kinds.js`).
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "DOC" => Some(Self::Doc),
+            "PAGES" => Some(Self::Pages),
             "HWP" => Some(Self::Hwp),
             "SHEET" => Some(Self::Sheet),
             "SLIDE" => Some(Self::Slide),
             "PDF" => Some(Self::Pdf),
             "BASE" => Some(Self::Base),
             "BOARD" => Some(Self::Board),
+            "START" => Some(Self::Start),
+            "CONV" => Some(Self::Conv),
             _ => None,
         }
     }

@@ -83,7 +83,6 @@
     const doc = deps.document || host.document;
     if (doc) activeDoc = doc;
     const bar = deps.toolbarEl;
-    let sepEl = null;
     let groupEl = null;
     let fillWrap = null;
     let fillInput = null;
@@ -160,9 +159,7 @@
     }
 
     if (bar && doc) {
-      sepEl = el("span", "tb-sep", { id: "board-style-sep", "aria-hidden": "true" });
-      sepEl.hidden = true;
-      groupEl = el("div", "tb-group board-style-group", { id: "board-style-bar", role: "group", "aria-label": "선택 요소 서식" });
+      groupEl = el("div", "eo-doc-style-bar board-style-bar board-style-group", { id: "board-style-bar", role: "toolbar", "aria-label": "선택 요소 서식" });
       groupEl.hidden = true;
 
       ({ wrap: fillWrap, input: fillInput } = createColorField(
@@ -212,13 +209,8 @@
 
       appendAll(groupEl, fillWrap, strokeWrap, widthWrap, labelWrap);
 
-      const toolsGroup = bar.querySelector(".board-tools-group");
-      if (toolsGroup?.parentNode === bar) {
-        bar.insertBefore(sepEl, toolsGroup);
-        bar.insertBefore(groupEl, toolsGroup);
-      } else {
-        appendAll(bar, sepEl, groupEl);
-      }
+      if (typeof bar.after === "function") bar.after(groupEl);
+      else bar.parentNode?.appendChild?.(groupEl);
       host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, groupEl);
 
       widthSelect.addEventListener("change", () => {
@@ -280,7 +272,7 @@
     }
 
     function sync() {
-      if (!groupEl || !sepEl) return;
+      if (!groupEl) return;
       dragUndoActive = false;
       const closeIn = host.__EASYOFFICE_COLOR_PICKER__?.closePopupIn;
       const sel = hooks.getSelection?.() || {};
@@ -288,11 +280,9 @@
       const conn = sel.connector || null;
       if (!node && !conn) {
         closeIn?.(groupEl);
-        sepEl.hidden = true;
         groupEl.hidden = true;
         return;
       }
-      sepEl.hidden = false;
       groupEl.hidden = false;
       if (conn) {
         if (fillWrap) { closeIn?.(fillWrap); fillWrap.hidden = true; }

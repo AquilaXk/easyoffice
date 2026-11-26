@@ -198,12 +198,30 @@ mod tests {
         assert!(WindowMenu::parse("DOC", "light", ids(&["nope"]), None).is_err());
         let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
         assert!(WindowMenu::parse("DOC", "light", too_many, None).is_err());
-        for bad in ["", "doc", "START", "HWP_EMBED"] {
+        for bad in ["", "doc", "HWP_EMBED"] {
             assert!(
                 WindowMenu::parse(bad, "light", Vec::new(), None).is_err(),
                 "{bad}"
             );
         }
+        assert_eq!(
+            WindowMenu::parse("PAGES", "light", Vec::new(), None)
+                .unwrap()
+                .kind,
+            MenuKind::Pages
+        );
+        assert_eq!(
+            WindowMenu::parse("START", "light", Vec::new(), None)
+                .unwrap()
+                .kind,
+            MenuKind::Start
+        );
+        assert_eq!(
+            WindowMenu::parse("CONV", "light", Vec::new(), None)
+                .unwrap()
+                .kind,
+            MenuKind::Conv
+        );
     }
 
     #[test]

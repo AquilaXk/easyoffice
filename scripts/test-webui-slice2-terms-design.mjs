@@ -60,7 +60,7 @@ test("Slice 2: HWP vs Office vs .pages official Korean terminology and lossless 
 
   const styleSelect = document.getElementById("doc-style-select");
   const styles = () => [...styleSelect.querySelectorAll("option")].map((o) => o.value);
-  const paperMenuLabel = () => document.querySelector('#menu-bar .md-item[data-kinds="DOC SLIDE"][data-studio-menu-cmd="layout-paper"] .md-label')?.textContent;
+  const paperMenuLabel = () => document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="layout-paper"]:not([hidden]) .md-label')?.textContent;
 
   // 1. DOC (Word official terms)
   assert.deepEqual(styles(), ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"]);
@@ -83,10 +83,10 @@ test("Slice 2: HWP vs Office vs .pages official Korean terminology and lossless 
   await flushAsyncTurns(20);
   const editor = document.getElementById("doc-editor");
   assert.equal(editor.dataset.eoDocFlavor, "pages");
-  assert.deepEqual(styles(), ["본문", "제목", "부제목", "머리말 1", "머리말 2", "머리말 3", "제목 4", "제목 5", "제목 6"]);
+  assert.deepEqual(styles(), ["본문", "제목", "부제목", "머리말", "머리말 2", "머리말 3"]);
   assert.equal(paperMenuLabel(), "페이지 설정");
-  assert.equal(document.querySelector('#menu-bar .md-item[data-kinds="DOC"][data-studio-menu-cmd="mod-header"] .md-label').textContent, "머리말");
-  assert.equal(document.querySelector('#menu-bar .md-item[data-kinds="DOC"][data-studio-menu-cmd="mod-footer"] .md-label').textContent, "꼬리말");
+  assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-header"]:not([hidden]) .md-label').textContent, "머리말");
+  assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-footer"]:not([hidden]) .md-label').textContent, "꼬리말");
 
   // Style application keeps lossless h1/h2/h5 tags and saves them cleanly
   const firstHeading = editor.querySelector("h1");
@@ -359,7 +359,7 @@ test("Slice 2 regression: HWP -> DOC(.pages) tab switch restores Pages labels, O
   await flushAsyncTurns(14);
   await pickFile(document, makeFixtureFile("pages-switch.pages", "pages-bytes"));
   await flushAsyncTurns(16);
-  const paperMenuLabel = () => document.querySelector('#menu-bar .md-item[data-kinds="DOC SLIDE"][data-studio-menu-cmd="layout-paper"] .md-label')?.textContent;
+  const paperMenuLabel = () => document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="layout-paper"]:not([hidden]) .md-label')?.textContent;
   assert.equal(paperMenuLabel(), "페이지 설정");
 
   // Switch to HWP and back to DOC(.pages): Pages menu/style labels must stay active
@@ -369,7 +369,7 @@ test("Slice 2 regression: HWP -> DOC(.pages) tab switch restores Pages labels, O
   switchModule(document, "DOC");
   await flushAsyncTurns(8);
   assert.equal(paperMenuLabel(), "페이지 설정", "DOC(.pages) retains 페이지 설정 after switching back from HWP");
-  assert.equal(document.querySelector('#menu-bar .md-item[data-kinds="DOC"][data-studio-menu-cmd="mod-header"] .md-label').textContent, "머리말");
+  assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-header"]:not([hidden]) .md-label').textContent, "머리말");
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-label"), "굵게");
 
   // DOC / SHEET / BASE cut feedback says 잘라내기 (not 오려 두기)

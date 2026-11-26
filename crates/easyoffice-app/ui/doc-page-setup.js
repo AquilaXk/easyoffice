@@ -75,9 +75,9 @@
 
   // The setup is usable: every value within the engine's bounds, the header and footer distances inside their
   // margins, and a body of at least 10 mm in both directions. Returns the reason or null.
-  function violation(setup, mod = "DOC") {
+  function violation(setup, mod = "DOC", pages = false) {
     if (![...KEYS, "gutter"].every((key) => Number.isInteger(setup[key] ?? 0) && (setup[key] ?? 0) >= 0 && (setup[key] ?? 0) <= MAX_TWIPS)) return MSG_TOO_BIG;
-    const hfPair = mod === "HWP" ? "머리말·꼬리말" : "머리글·바닥글";
+    const hfPair = mod === "HWP" || pages ? "머리말·꼬리말" : "머리글·바닥글";
     if ((setup.header ?? 0) > (setup.top ?? 0) || (setup.footer ?? 0) > (setup.bottom ?? 0)) {
       return hfPair + " 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.";
     }
@@ -311,6 +311,11 @@
       setTxt("doc-page-setup-title", hwp ? "편집 용지" : pages ? "페이지 설정" : "용지 설정");
       setTxt("doc-ps-header-label", hwp || pages ? "머리말" : "머리글");
       setTxt("doc-ps-footer-label", hwp || pages ? "꼬리말" : "바닥글");
+      setTxt("doc-ps-binding-title", hwp || pages ? "제본" : "제본선 위치");
+      setTxt("doc-ps-single-label", hwp || pages ? "한쪽" : "왼쪽");
+      setTxt("doc-ps-facing-label", hwp || pages ? "맞쪽" : "마주보는 페이지");
+      setTxt("doc-ps-top-label", hwp || pages ? "위로" : "위쪽");
+      setTxt("doc-ps-gutter-label", hwp || pages ? "제본" : "제본선");
     }
 
     function open() {
@@ -337,6 +342,7 @@
       const editor = byId("doc-editor");
       if (!editor) return false;
       const mod = activeMod();
+      const pages = mod !== "HWP" && editor.dataset?.eoDocFlavor === "pages";
       const setup = fromFields(readFields(), original, mod);
       // A listed paper keeps its exact size, not the one its rounded millimetres give.
       const preset = PRESETS.find(([name]) => name === kit.val("doc-ps-paper"));
@@ -345,7 +351,7 @@
         const [width, height] = setup.width > setup.height ? [h, w] : [w, h];
         if (twipsToMm(width) === twipsToMm(setup.width) && twipsToMm(height) === twipsToMm(setup.height)) Object.assign(setup, { width, height });
       }
-      const refused = violation(setup, mod);
+      const refused = violation(setup, mod, pages);
       if (refused) {
         kit.note("doc-ps-status", refused);
         return false;
@@ -358,7 +364,7 @@
       };
       if (withUndo) withUndo(run);
       else run();
-      setFeedback?.(mod === "HWP" ? "편집 용지 적용" : "용지 설정 적용");
+      setFeedback?.(mod === "HWP" ? "편집 용지 적용" : pages ? "페이지 설정 적용" : "용지 설정 적용");
       editor.focus?.();
       return true;
     }

@@ -72,9 +72,9 @@ test("toolbar, menus, native menu and dialogs expose verbatim Hangul terms for �
   assert.equal(insertItem.hidden, false);
 
   for (const [cmd, label] of [
-    ["table-border-bg", "셀 테두리/배경"],
-    ["table-cell-props", "표/셀 속성"],
-    ["table-col-equal", "셀 너비를 같게"],
+    ["table-border-bg", "테두리 및 음영"],
+    ["table-cell-props", "표 속성"],
+    ["table-col-equal", "열 너비를 같게"],
   ]) {
     const item = studioItem(document, cmd);
     assert.ok(item, `${cmd} menu item exists`);
@@ -103,7 +103,7 @@ test("toolbar, menus, native menu and dialogs expose verbatim Hangul terms for �
   assert.deepEqual([...imgDlg.querySelectorAll(".dialog-footer .dialog-btn")].map((b) => b.textContent), ["확인", "취소"]);
 
   const borderDlg = document.getElementById("doc-cell-border-dialog");
-  assert.equal(borderDlg.querySelector(".dialog-title span")?.textContent, "셀 테두리/배경");
+  assert.equal(borderDlg.querySelector(".dialog-title span")?.textContent, "테두리 및 음영");
   assert.deepEqual([...borderDlg.querySelectorAll(".dialog-tab")].map((b) => b.textContent), ["테두리", "배경"]);
   assert.deepEqual(
     [...borderDlg.querySelectorAll("[data-border-line]")].map((b) => b.getAttribute("title")),
@@ -123,7 +123,7 @@ test("toolbar, menus, native menu and dialogs expose verbatim Hangul terms for �
   );
 
   const propsDlg = document.getElementById("doc-table-props-dialog");
-  assert.equal(propsDlg.querySelector(".dialog-title span")?.textContent, "표/셀 속성");
+  assert.equal(propsDlg.querySelector(".dialog-title span")?.textContent, "표 속성");
   assert.equal(propsDlg.querySelector(".dialog-section-title")?.textContent, "셀 크기");
   assert.equal(propsDlg.querySelector("label.dialog-label")?.textContent, "너비");
   assert.deepEqual([...propsDlg.querySelectorAll(".dialog-footer .dialog-btn")].map((b) => b.textContent), ["확인", "취소"]);
@@ -516,7 +516,7 @@ test("adversarial inputs, 원래 크기로, column border drag, all-column equal
   // Command palette in DOC includes 그림 and 표 cell style items.
   userClick(document.getElementById("btn-command-palette"));
   const search = document.getElementById("cmd-search-input");
-  for (const query of ["그림", "셀 테두리/배경", "표/셀 속성", "셀 너비를 같게"]) {
+  for (const query of ["그림", "테두리 및 음영", "표 속성", "열 너비를 같게"]) {
     search.value = query;
     search.dispatchEvent({ type: "input", target: search });
     const labels = [...document.querySelectorAll("#cmd-palette-list .cp-item-label")].map((el) => el.textContent);

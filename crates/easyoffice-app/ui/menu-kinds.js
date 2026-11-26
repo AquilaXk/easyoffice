@@ -7,13 +7,20 @@
   // marked: after the items are filtered, a separator is shown only between two visible items.
   // Whether a shown item applies right now stays with `studioCommandApplies` (`aria-disabled`).
 
-  const KINDS = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"]);
+  const KINDS = Object.freeze(["DOC", "PAGES", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"]);
   const KIND_SET = new Set(KINDS);
+  const KIND_MENU_TITLES = {
+    insert: { HWP: "입력", DOC: "삽입", PAGES: "삽입" },
+    page: { DOC: "레이아웃", HWP: "쪽", PDF: "쪽" },
+    format: { DOC: "서식", PAGES: "포맷", HWP: "서식", SHEET: "서식", SLIDE: "서식" },
+  };
 
-  // The menu kind of a command module: the Hangul editor's embedded editor is `HWP_EMBED`; the start
-  // screen and the converter have no menu of their own and use the document one.
-  function menuKindOf(commandModule) {
+  // The menu kind of a command module: `HWP_EMBED` -> `HWP`; `DOC` with `eoDocFlavor === "pages"` -> `PAGES`.
+  function menuKindOf(commandModule, doc) {
     if (commandModule === "HWP_EMBED") return "HWP";
+    if (commandModule === "DOC" && (doc || host.document)?.getElementById?.("doc-editor")?.dataset?.eoDocFlavor === "pages") {
+      return "PAGES";
+    }
     return KIND_SET.has(commandModule) ? commandModule : "DOC";
   }
 
@@ -33,15 +40,23 @@
   }
 
   function applyMenuKind(document, commandModule) {
-    const kind = menuKindOf(commandModule);
+    const kind = menuKindOf(commandModule, document);
     const bar = document.querySelector(".studio-menubar");
     if (!bar) return kind;
     const hwpEmbed = document.getElementById("app")?.dataset.hwpEmbed === "true";
-    for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds], #doc-style-bar [data-kinds]")]) {
+    for (const el of [
+      ...bar.querySelectorAll("[data-kinds]"),
+      ...document.querySelectorAll("#icon-toolbar [data-kinds], #doc-style-bar [data-kinds]"),
+    ]) {
       const embedHwpOnly = el.dataset.hwpSaveAs !== undefined && !hwpEmbed;
       el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled) || embedHwpOnly;
     }
     for (const menu of bar.querySelectorAll(":scope > .menu-item")) {
+      const titleMap = KIND_MENU_TITLES[menu.dataset.menu];
+      if (titleMap) {
+        const titleBtn = menu.querySelector(":scope > .menu-title");
+        if (titleBtn && titleMap[kind]) titleBtn.textContent = titleMap[kind];
+      }
       if (menu.hidden) menu.classList.remove("open");
       const dropdown = menu.querySelector(":scope > .menu-dropdown");
       if (dropdown) collapseSeparators(dropdown);

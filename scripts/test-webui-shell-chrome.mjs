@@ -259,11 +259,11 @@ test("shell chrome colours meet WCAG AA in the light and dark themes", () => {
   }
 });
 
-test("the update notice's primary button swaps to dark text in the dark theme (--color-primary is light there)", () => {
+test("the update notice's primary button swaps to dark text in the dark theme (--accent-strong contrast >= 4.5:1)", () => {
   const HOME_CSS = readText(fileURLToPath(new URL("home.css", UI_DIR)));
   const dark = cssRule(':root[data-theme-effective="dark"] .update-notice__button--primary', HOME_CSS);
   assert.ok(hasDecl(dark, "color", "var(--ui-bg)"));
-  assert.ok(hasDecl(cssRule(".update-notice__button--primary", HOME_CSS), "background", "var(--color-primary)"));
+  assert.ok(hasDecl(cssRule(".update-notice__button--primary", HOME_CSS), "background", "var(--accent-strong)"));
 });
 
 test("no UI file exceeds the line ceiling and the new modules are registered", () => {
@@ -558,13 +558,13 @@ test("menu-bar .md-icon & menuitemcheckbox centering, .sb-ls-icon in #doc-linesp
 test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, zoom slider thumb, glyph hover/active, ruler tokens) and O(1) palette/format helpers", async () => {
   assert.match(
     MENU_CSS,
-    /\.md-item\[aria-disabled="true"\]\s+\.md-shortcut,\s*\.md-item\.disabled\s+\.md-shortcut,\s*\.md-item:disabled\s+\.md-shortcut\s*\{\s*color:\s*var\(--ui-border\);\s*\}/
+    /\.md-item\[aria-disabled="true"\]\s+\.md-shortcut,\s*\.md-item\.disabled\s+\.md-shortcut,\s*\.md-item:disabled\s+\.md-shortcut\s*\{\s*color:\s*var\(--ui-text-muted\);\s*\}/
   );
   assert.match(
     MENU_CSS,
-    /\.md-sub\[aria-disabled="true"\]\s*>\s*\.md-arrow,\s*\.md-sub\.disabled\s*>\s*\.md-arrow\s*\{\s*color:\s*var\(--ui-border-light\);\s*\}/
+    /\.md-sub\[aria-disabled="true"\]\s*>\s*\.md-arrow,\s*\.md-sub\.disabled\s*>\s*\.md-arrow\s*\{\s*color:\s*var\(--ui-text-muted\);\s*\}/
   );
-  const sepRule = cssRule("#doc-style-bar > .eo-style-sep", TOOLBAR_CSS);
+  const sepRule = cssRule("#doc-style-bar .eo-style-sep", TOOLBAR_CSS);
   assert.ok(hasDecl(sepRule, "width", "1px") && hasDecl(sepRule, "height", "20px") && hasDecl(sepRule, "background", "var(--ui-border)"));
   const sliderRule = cssRule(".statusbar-zoom-slider", TOOLBAR_CSS);
   assert.ok(hasDecl(sliderRule, "width", "88px") && hasDecl(sliderRule, "height", "2px") && hasDecl(sliderRule, "background", "var(--ui-border-strong)"));

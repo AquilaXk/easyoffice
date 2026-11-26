@@ -52,7 +52,10 @@
   const SHELL_COMMAND_REASON = "shell_command";
   const SHELL_TOOLBAR_LABELS_REASON = "shell_toolbar_labels";
   const SHELL_COPILOT_TOGGLE_REASON = "shell_copilot_toggle";
-  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"]);
+  const SHELL_COMMANDS = Object.freeze([
+    "new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about",
+    "theme-system", "theme-light", "theme-dark", "theme-toggle",
+  ]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;

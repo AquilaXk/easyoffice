@@ -142,16 +142,15 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
   boardStudio.setZoom(125);
   await flushAsyncTurns(5);
   assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0, "viewport zoom alone does not mark BOARD dirty");
-  assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "125%");
+  assert.equal(document.getElementById("btn-board-zoom-reset"), null, "BOARD omits duplicate canvas zoom island in favor of status bar zoom");
   assert.equal(document.getElementById("status-zoom-label").textContent, "125%");
   assert.equal(document.querySelector(".canvas-stage").style.zoom, "", "BOARD uses transform scale only, never double stage CSS zoom");
   userClick(document.getElementById("btn-zoom-in"));
   await flushAsyncTurns(4);
   assert.equal(boardStudio.getState().viewport.zoom, 150);
-  assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "150%");
   assert.equal(document.getElementById("status-zoom-label").textContent, "150%");
   assert.equal(document.querySelector(".canvas-stage").style.zoom, "");
-  userClick(document.getElementById("btn-board-zoom-reset"));
+  userClick(document.getElementById("btn-board-fit-all"));
   await flushAsyncTurns(4);
   assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
 
@@ -258,7 +257,6 @@ test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown 
       sandbox.dispatchWindowKeydown({ key: "=", metaKey: true });
       assert.equal(boardStudio.getState().viewport.zoom, 300, "Cmd+= from 200% in BOARD steps up to 300%");
       assert.equal(document.getElementById("status-zoom-label").textContent, "300%");
-      assert.equal(document.getElementById("btn-board-zoom-reset").textContent, "300%");
       boardStudio.setZoom(25);
       assert.equal(document.getElementById("status-zoom-label").textContent, "25%");
       document.getElementById("btn-zoom-fit-width").click();

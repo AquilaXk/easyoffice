@@ -103,7 +103,7 @@ fn structured_ipc_frame_copy_accepts_string_and_bool_and_fails_closed_on_invalid
         .filter_map(|b| field(b, "frameCopy").and_then(StrictJsonValue::as_str))
         .collect();
     assert!(
-        frame_copies.contains(&"머리글") && frame_copies.contains(&"1장 머리글"),
+        frame_copies.contains(&"머리말") && frame_copies.contains(&"1장 머리글"),
         "expected string frameCopy entries in decoded JSON: {frame_copies:?}"
     );
 

@@ -348,13 +348,13 @@ test("a page break mark reaches the save payload, comes back from an opened file
   assert.deepEqual(opened.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor), blocks);
 });
 
-test("the 쪽 menu of a document has 쪽 나누기 with Ctrl+Enter, and it runs the page break of the editor; other windows do not show it", async () => {
+test("the 레이아웃 menu of a DOC document has 페이지 나누기 with Ctrl+Enter, and it runs the page break of the editor; other windows do not show it", async () => {
   const h = await createWorkspaceHarness();
   const item = h.document.querySelector('.md-item[data-studio-menu-cmd="doc-mod-page-break"]');
   assert.equal(item.dataset.kinds, "DOC");
-  assert.equal(item.querySelector(".md-label").textContent, "쪽 나누기");
+  assert.equal(item.querySelector(".md-label").textContent, "페이지 나누기");
   assert.equal(item.querySelector(".md-shortcut").textContent, "Ctrl+Enter");
-  assert.ok(item.closest('[data-menu="page"]'), "it is in the 쪽 menu");
+  assert.ok(item.closest('[data-menu="page"]'), "it is in the 레이아웃 menu");
   let breaks = 0;
   h.host.__EASYOFFICE_DOC_PAGES__.insertPageBreak = () => {
     breaks += 1;
@@ -367,15 +367,15 @@ test("the 쪽 menu of a document has 쪽 나누기 with Ctrl+Enter, and it runs 
   assert.equal(breaks, 1);
   h.userClick(h.document.getElementById("btn-command-palette"));
   const input = h.document.getElementById("cmd-search-input");
-  input.value = "쪽 나누기";
+  input.value = "페이지 나누기";
   input.dispatchEvent({ type: "input" });
   const found = [...h.document.querySelectorAll("#cmd-palette-list .cp-item")].map((li) => li.querySelector(".cp-item-label").textContent);
-  assert.deepEqual(found, ["쪽 나누기"]);
+  assert.deepEqual(found, ["페이지 나누기"]);
   const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-pb" });
   await flushAsyncTurns(10);
   sheet.userClick(sheet.document.getElementById("btn-command-palette"));
   const sheetInput = sheet.document.getElementById("cmd-search-input");
-  sheetInput.value = "쪽 나누기";
+  sheetInput.value = "페이지 나누기";
   sheetInput.dispatchEvent({ type: "input" });
   assert.equal(sheet.document.querySelectorAll("#cmd-palette-list .cp-item").length, 0);
 });

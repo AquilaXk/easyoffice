@@ -282,7 +282,7 @@
     DOC: new Set(["data-validation"]),
     HWP: new Set(["layout-orientation", "layout-margins", "data-validation"]),
     SHEET: new Set(["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"]),
-    SLIDE: new Set(["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
+    SLIDE: new Set(["layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
     PDF: new Set(["home-bold", "home-italic", "home-underline", "home-style", "insert-table", "insert-chart", "insert-shape", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
   };
   const WORKSPACE_BUTTON_PALETTE = {
@@ -323,7 +323,9 @@
       const excluded = EXCLUDED_PALETTE_SUFFIX[activeModule], koBadge = MODULE_SHORT_BADGES[activeModule] || activeModule;
       for (const cat of Object.keys(cats)) {
         for (const c of cats[cat]) {
-          if (c.id.endsWith("-view-ribbon") || excluded?.has(c.id.replace(/^[a-z]+-/, ""))) continue;
+          const suffix = c.id.replace(/^[a-z]+-/, "");
+          if (c.id.endsWith("-view-ribbon") || excluded?.has(suffix)) continue;
+          if (isPages && ["layout-columns", "mod-symbol", "para-numbering", "para-bullet", "doc-mod-mailmerge"].includes(suffix)) continue;
           const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
           const label = isPages && c.id === "document-layout-paper" ? "페이지 설정" : c.title;
           const extraKeys = c.id.endsWith("-insert-link") ? " 책갈피 링크 hyperlink" : "";
@@ -331,11 +333,12 @@
         }
       }
     }
-    if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
+    if (activeModule === "DOC" && !isPages) items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "페이지 나누기", shortcut: fmt("⌘Enter"), searchKey: "레이아웃 문서 페이지 나누기 page break " + fmt("⌘Enter") });
+    if (isPages) items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "삽입 문서 목차 업데이트 toc" });
     if (activeModule === "DOC" || isHwp || activeModule === "SHEET") items.push({ id: "studio-cmd:find", module: activeModule, title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") }, { id: "studio-cmd:replace", module: activeModule, title: isHwp ? "찾아 바꾸기" : "찾기 및 바꾸기", shortcut: fmt("⌘F2"), searchKey: "편집 찾기 및 바꾸기 찾아 바꾸기 replace " + fmt("⌘F2"), run: () => runNativeMenu("edit:replace") });
     if (activeModule === "DOC" || isHwp) {
       const hfItems = isHwp || isPages ? [["mod-header", "머리말", "header", isHwp ? "page:header" : "page:doc-header"], ["mod-footer", "꼬리말", "footer", isHwp ? "page:footer" : "page:doc-footer"]] : [["mod-header", "머리글", "header", "page:doc-header"], ["mod-footer", "바닥글", "footer", "page:doc-footer"]];
-      for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "셀 테두리/배경", "cell border background", "table:border-bg"], ["table-cell-props", "표/셀 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "셀 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
+      for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "테두리 및 음영", "cell border background", "table:border-bg"], ["table-cell-props", "표 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "열 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
         items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
@@ -628,26 +631,16 @@
     }
 
     const sheetPane = document.getElementById("pane-sheet");
-    if (sheetPane) {
-      sheetController.bindSheetCellEvents(sheetPane);
-    }
-
+    if (sheetPane) sheetController.bindSheetCellEvents(sheetPane);
     const evalBtn = document.getElementById("btn-eval-formula");
     const formulaInputEl = document.getElementById("formula-input");
     if (formulaInputEl && evalBtn) {
       formulaInputEl.addEventListener("keydown", (ev) => {
         if (sheetController.handleFormulaBarKey(ev)) return;
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          evalBtn.click();
-        }
+        if (ev.key === "Enter") { ev.preventDefault(); evalBtn.click(); }
       });
     }
-    if (evalBtn) {
-      evalBtn.addEventListener("click", () => {
-        void sheetController.evaluateActiveSheetFormulaBar(true).catch(() => {});
-      });
-    }
+    if (evalBtn) evalBtn.addEventListener("click", () => { void sheetController.evaluateActiveSheetFormulaBar(true).catch(() => {}); });
   }
 
   function setupSlideAndPdfHandlers() {
@@ -940,12 +933,8 @@
     setupStaticNavigationHandlers();
     setupPanelAndThemeActions();
     setupDocTableAndSheetTabHandlers();
-    docRunsUi.bind();
-    docLink.bind();
-    docPaste.bind();
-    docToc.bind(); docTable.bind(); docPageSetup.bind();
-    docPages.attach(document.getElementById("doc-editor"));
-    docPageFrame.attach(document.getElementById("doc-editor"), docPages);
+    docRunsUi.bind(); docLink.bind(); docPaste.bind(); docToc.bind(); docTable.bind(); docPageSetup.bind();
+    docPages.attach(document.getElementById("doc-editor")); docPageFrame.attach(document.getElementById("doc-editor"), docPages);
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();
@@ -953,6 +942,8 @@
     workspacePanels.renderModuleOutline("DOC");
     sheetController.updateSheetSelectionAndAggregates("A1");
     slideStudio.bind();
+    host.__EASYOFFICE_PAGES_UI__ = host.__EASYOFFICE_CREATE_PAGES_UI__?.({ document });
+    host.__EASYOFFICE_PAGES_UI__?.bind?.();
     host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), captureUndo: () => ribbonHistory.captureWorkspaceSnapshot(false), commitUndo: ribbonHistory.commitDeferredUndoSnapshot, noteActivity: () => workspaceSession?.noteActivity() });
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(

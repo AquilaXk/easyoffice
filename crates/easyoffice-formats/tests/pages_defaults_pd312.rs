@@ -211,7 +211,7 @@ fn multi_section_distinct_headers_carry_snapshot_and_do_not_accumulate() {
             _ => None,
         })
         .collect();
-    assert!(copies.contains(&"머리글"), "{copies:?}");
+    assert!(copies.contains(&"머리말"), "{copies:?}");
     assert!(copies.contains(&"1구역 머리글"), "{copies:?}");
     assert!(copies.contains(&"2구역 머리글"), "{copies:?}");
     assert_eq!(body_texts(&doc), vec!["일장", "이장"]);

@@ -22,7 +22,7 @@ test("PD-258 SLIDE 문서 검사: 개체 넘침·개체 겹침·빈 자리표시
 
   const inspectMenu = verifyMenuAction(document, "doc-inspect");
   assert.equal(inspectMenu.querySelector(".md-label")?.textContent, "문서 검사…");
-  assert.equal(inspectMenu.dataset.kinds, "DOC SLIDE");
+  assert.equal(inspectMenu.dataset.kinds, "DOC PAGES SLIDE");
 
   const canvasApi = host.__EASYOFFICE_SLIDE_CANVAS__;
   const printApi = host.__EASYOFFICE_OFFICE_PRINT__;
@@ -343,7 +343,7 @@ test("PD-258 창 내 실시간 인쇄 미리보기: 참조 앱 한국어 명칭,
 
   const ppMenu = verifyMenuAction(document, "print-preview");
   assert.equal(ppMenu.querySelector(".md-label")?.textContent, "인쇄 미리보기");
-  assert.equal(ppMenu.dataset.kinds, "DOC SHEET SLIDE BASE BOARD PDF");
+  assert.equal(ppMenu.dataset.kinds, "DOC PAGES SHEET SLIDE BASE BOARD PDF");
 
   // 1. Open in DOC via native menu action and verify non-destructive preview + live refresh.
   const editor = $(document, "doc-editor");

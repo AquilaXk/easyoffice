@@ -78,6 +78,11 @@ Ctrl+H는 쓰지 않는다. macOS에서는 ⌘H가 앱 숨기기이고 브라우
 | 현재 날짜 삽입 | ⌘; | Ctrl+; | |
 | 현재 시간 삽입 | ⇧⌘; | Ctrl+Shift+; | |
 | 자동 합계 (`Σ`) | ⌥= | Alt+= | |
+| 메모 삽입 | Shift+F2 | Shift+F2 | 시트 막대 메뉴(`MenuKind::Sheet`) 포함 |
+| 함수 삽입 | F3 | F3 | 시트 막대 메뉴(`MenuKind::Sheet`) 포함 |
+| 모든 시트 다시 계산 | F9 | F9 | 시트 막대 메뉴(`MenuKind::Sheet`) 포함 |
+| 현재 시트 다시 계산 | Shift+F9 | Shift+F9 | 시트 막대 메뉴(`MenuKind::Sheet`) 포함 |
+| 표 만들기 | ⌘T | Ctrl+T | 시트 막대 메뉴(`MenuKind::Sheet`) 포함 |
 | 열 전체 선택 | Ctrl+Space | Ctrl+Space | |
 | 행 전체 선택 | Shift+Space | Shift+Space | |
 | 자동 필터 전환 | ⇧⌘L | Ctrl+Shift+L | |

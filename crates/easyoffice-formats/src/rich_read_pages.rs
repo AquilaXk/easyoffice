@@ -183,7 +183,7 @@ const PAGE_LAYOUT_NOTE: &str =
 const EMPTY_SHAPE: &str = "글이 없는 도형";
 
 /// Warning kind for tables and shapes found inside nested text.
-const NESTED_UNSUPPORTED: &str = "도형·각주·머리글·바닥글 안의 표·도형";
+const NESTED_UNSUPPORTED: &str = "도형·각주·머리말·꼬리말 안의 표·도형";
 
 /// Text and attachments found in one line of a storage.
 #[derive(Default)]
@@ -690,7 +690,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         warnings.push(PAGE_LAYOUT_NOTE.to_string());
     }
     warnings.push(
-        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 동영상·오디오 등 일부 요소는 가져오지 않고 서식이 단순화될 수 있습니다. Pages로 저장할 때 도형·각주·댓글 등은 쓰지 않습니다."
+        "Pages 문서의 머리말·꼬리말·각주·댓글은 본문 뒤 부록 문단으로도 옮기며, 동영상·오디오 등 일부 요소는 가져오지 않고 서식이 단순화될 수 있습니다. Pages로 저장할 때 도형·각주·댓글 등은 쓰지 않습니다."
             .to_string(),
     );
     let title = blocks

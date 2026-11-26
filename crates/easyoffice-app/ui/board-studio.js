@@ -283,7 +283,7 @@
     const selectedNodeIds = new Set();
     let editingChartId = null, activeDrag = null, spacePressed = false;
     let root = deps.rootEl || doc.getElementById("pane-board") || null;
-    let viewportEl = null, worldEl = null, connectorLayerEl = null, nodeLayerEl = null, zoomLabelEl = null, shapeSelectEl = null, imageInputEl = null;
+    let viewportEl = null, worldEl = null, connectorLayerEl = null, nodeLayerEl = null, shapeSelectEl = null, imageInputEl = null;
     const $ = (id) => doc.getElementById(id);
 
     const nextId = (prefix, items) => {
@@ -297,7 +297,6 @@
 
     function applyViewportTransform(options = {}) {
       if (worldEl) worldEl.style.transform = `translate(${round2(state.viewport.panX)}px, ${round2(state.viewport.panY)}px) scale(${state.viewport.zoom / 100})`;
-      if (zoomLabelEl) zoomLabelEl.textContent = state.viewport.zoom + "%";
       if (options.syncHost !== false && (!deps.getActiveModule || deps.getActiveModule() === "BOARD")) {
         host.__EASYOFFICE_ZOOM__?.syncExternal?.(state.viewport.zoom);
       }
@@ -853,7 +852,6 @@
       const tbSvg = (id, iconName, text, pressed) => domEl(doc, "button", { id, type: "button", className: "tb-btn" + (pressed === "true" ? " active" : ""), "aria-label": text, "aria-pressed": pressed }, [
         domEl(doc, "span", { className: "tb-icon-svg", "data-icon": iconName, "aria-hidden": "true" }), domEl(doc, "span", { className: "tb-label", text }),
       ]);
-      const ctrlBtn = (id, text, aria, extraCls = "") => domEl(doc, "button", { id, type: "button", className: ("board-ctrl-btn " + extraCls).trim(), text, "aria-label": aria });
       const sep = () => domEl(doc, "span", { className: "tb-sep", "aria-hidden": "true" });
       const grp = (cls, items) => domEl(doc, "div", { className: ("tb-group " + cls).trim() }, items);
 
@@ -869,22 +867,15 @@
         sep(),
         grp("", [tbSvg("btn-board-front", "layers-front", "맨 앞으로 가져오기"), tbSvg("btn-board-back", "layers-back", "맨 뒤로 보내기"), tbSvg("btn-board-delete", "trash", "개체 지우기")]),
         sep(),
-        grp("board-tools-group", [tbSvg("btn-board-analyze", "activity", "요소 분석"), tbSvg("btn-board-print", "printer", "인쇄"), tbSvg("btn-board-export-pdf", "file-export-pdf", "PDF로 내보내기")]),
-      ]);
-
-      zoomLabelEl = ctrlBtn("btn-board-zoom-reset", "100%", "배율 100%로 초기화", "board-zoom-pct");
-      const zoomIsland = domEl(doc, "div", { className: "board-controls", role: "group", "aria-label": "확대/축소 제어" }, [
-        ctrlBtn("btn-board-zoom-out", "−", "축소"),
-        zoomLabelEl,
-        ctrlBtn("btn-board-zoom-in", "+", "확대"),
-        ctrlBtn("btn-board-fit-all", "전체 맞춤", null, "board-ctrl-fit"),
+        grp("board-tools-group", [tbSvg("btn-board-fit-all", "fit-page", "전체 맞춤"), tbSvg("btn-board-analyze", "activity", "요소 분석"), tbSvg("btn-board-print", "printer", "인쇄"), tbSvg("btn-board-export-pdf", "file-export-pdf", "PDF로 내보내기")]),
       ]);
 
       connectorLayerEl = svgEl(doc, "svg", { id: "board-connector-layer", class: "board-connector-layer", "aria-label": "연결선 영역" });
       nodeLayerEl = domEl(doc, "div", { id: "board-node-layer", className: "board-node-layer" });
       worldEl = domEl(doc, "div", { id: "board-world", className: "board-world" }, [connectorLayerEl, nodeLayerEl]);
-      viewportEl = domEl(doc, "div", { id: "board-viewport", className: "board-viewport", role: "region", "aria-label": "보드 캔버스" }, [worldEl, zoomIsland]);
+      viewportEl = domEl(doc, "div", { id: "board-viewport", className: "board-viewport", role: "region", "aria-label": "보드 캔버스" }, [worldEl]);
       root.replaceChildren(bar, viewportEl);
+      host.__EASYOFFICE_TOOLBAR_SCROLL__?.attach?.(bar, doc);
       styleBar = host.__EASYOFFICE_BOARD_STYLE_BAR__?.create?.(styleHooks, { document: doc, toolbarEl: bar }) || null;
       host.__EASYOFFICE_ICONS__?.applyIcons?.(doc, bar);
       host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, bar);
@@ -905,13 +896,10 @@
       on("btn-board-analyze", openAnalysisDialog);
       on("btn-board-print", () => host.__EASYOFFICE_OFFICE_PRINT__?.print?.());
       on("btn-board-export-pdf", () => void exportPdf());
-      on("btn-board-zoom-out", () => stepZoom(-1));
-      on("btn-board-zoom-in", () => stepZoom(1));
-      on("btn-board-zoom-reset", () => { state.viewport = { panX: 0, panY: 0, zoom: 100 }; applyViewportTransform(); });
       on("btn-board-fit-all", fitAll);
 
       viewportEl.addEventListener("mousedown", (ev) => {
-        if (ev.button !== 0 || ev.target?.closest?.(".board-node") || ev.target?.closest?.(".board-connector") || ev.target?.closest?.(".board-controls")) return;
+        if (ev.button !== 0 || ev.target?.closest?.(".board-node") || ev.target?.closest?.(".board-connector")) return;
         selectNode(null);
         pendingConnect = null;
         if (spacePressed || ev.target === viewportEl || ev.target === worldEl) activeDrag = { kind: "pan", startX: ev.clientX || 0, startY: ev.clientY || 0, origPanX: state.viewport.panX, origPanY: state.viewport.panY };

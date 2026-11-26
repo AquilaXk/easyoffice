@@ -8,5 +8,8 @@
   "command.table.deleteRowCol.label": "줄/칸 지우기(E)…",
   "command.table.insertRowCol.label": "줄/칸 추가하기(I)…",
   "command.view.zoomDialog.label": "화면 확대/축소…",
-  "dialog.commandPalette.input.placeholder": "명령 검색…"
+  "dialog.commandPalette.input.placeholder": "명령 검색…",
+  "dialog.pictureProps.checkboxLabel.label.xeb2b3d": "옅은 테두리 없음",
+  "dialog.pictureProps.fieldset.label.x45a5e7": "옅은 테두리 효과",
+  "dialog.pictureProps.tab.softEdge": "옅은 테두리"
 }

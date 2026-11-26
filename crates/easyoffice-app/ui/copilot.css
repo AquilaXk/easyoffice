@@ -663,7 +663,7 @@
   font-size: var(--font-size-sm);
   font-weight: 400;
   line-height: 1.35;
-  color: var(--ui-text-muted);
+  color: var(--ui-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -761,9 +761,9 @@
   width: var(--control-height-md);
   height: var(--control-height-md);
   padding: 0;
-  border: 0;
+  border: 1px solid var(--accent-strong);
   border-radius: 0;
-  background: var(--accent-primary);
+  background: var(--accent-strong);
   color: var(--ui-text-on-accent);
   cursor: pointer;
   flex-shrink: 0;
@@ -774,13 +774,14 @@
 }
 
 .eo-copilot-send-btn:hover:not(:disabled) {
-  background: var(--accent-strong);
+  background: var(--ui-primary-hover);
+  border-color: var(--ui-primary-hover);
 }
 
 .eo-copilot-send-btn:disabled {
   background: var(--ui-surface-muted);
-  color: var(--ui-text-disabled);
-  border: 1px solid var(--ui-border-light);
+  color: var(--ui-text-muted);
+  border: 1px solid var(--ui-border-strong);
   cursor: not-allowed;
 }
 

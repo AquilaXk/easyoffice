@@ -53,6 +53,8 @@
   --ui-focus-soft: rgba(74, 144, 217, 0.2);
   --doc-paper: #ffffff;
   --doc-shadow: rgba(0, 0, 0, 0.2);
+  --doc-guide-stroke: #6b7280;
+  --ui-primary-hover: #253d75;
   --focus-ring: #4a90d9;
   --selection-fill: #b8d7ff;
   --accent-primary: #6182d6;
@@ -114,7 +116,7 @@
   font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
   font-size: 10pt;
   line-height: 1.08;
-  text-align: justify;
+  text-align: left;
   background-color: var(--doc-paper);
   color: #111827;
   border-style: none;
@@ -130,6 +132,7 @@
   padding: 132.27px 113.4px 113.4px;
   font-family: '함초롬바탕', 'HCR Batang', 'AppleMyungjo', 'Noto Serif KR', serif;
   line-height: 1.6;
+  text-align: justify;
 }
 .app-shell[data-module="HWP"] #doc-editor > p:not(.manuscript-notice) {
   margin: 0;
@@ -670,13 +673,16 @@
   background: var(--ui-danger-soft);
 }
 
-.doc-studio-grid:has(> #doc-review-pane:not([hidden])) {
+.doc-studio-grid:has(> #doc-review-pane:not([hidden])),
+.doc-studio-grid:has(> #pages-inspector:not([hidden])) {
   grid-template-columns: 20px minmax(0, 1fr) 260px;
 }
-.doc-review-pane[hidden] {
+.doc-review-pane[hidden],
+.pages-inspector[hidden] {
   display: none;
 }
-.doc-review-pane {
+.doc-review-pane,
+.pages-inspector {
   grid-column: 3;
   grid-row: 1 / -1;
   display: flex;

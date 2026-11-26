@@ -12,8 +12,8 @@ const FOOTNOTE_HEADING: &str = "각주";
 const ENDNOTE_HEADING: &str = "미주";
 const COMMENT_HEADING: &str = "댓글";
 const CHANGE_HEADING: &str = "변경 추적";
-const HEADER_HEADING: &str = "머리글";
-const FOOTER_HEADING: &str = "바닥글";
+const HEADER_HEADING: &str = "머리말";
+const FOOTER_HEADING: &str = "꼬리말";
 const APPENDIX_HEADING_LEVEL: u8 = 2;
 
 fn non_empty(block: &RichBlock) -> bool {

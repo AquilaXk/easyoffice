@@ -14,7 +14,7 @@
 .base-view-tab:last-child { border-right: 0; }
 .base-view-tab:hover { background: var(--ui-hover); }
 .base-view-tab.active { background: var(--ui-selected); color: var(--accent-strong); font-weight: 700; }
-:root[data-theme-effective="dark"] .base-view-tab.active { color: var(--accent-primary); }
+:root[data-theme-effective="dark"] .base-view-tab.active { color: var(--accent-strong); }
 .base-table-tabs { display: flex; align-items: stretch; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .base-query-bar { padding: var(--space-4) var(--space-6); background: var(--ui-surface); border-bottom: 1px solid var(--ui-border-light); font-size: var(--font-size-base); }
 .base-query-bar[hidden] { display: none; }

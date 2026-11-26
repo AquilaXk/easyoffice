@@ -47,9 +47,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     "clip-copy": [...EDIT_MODULES, "BASE", "BOARD"], "clip-cut": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"], "clip-paste": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"],
     "mod-symbol": EDIT_MODULES,
-    "home-strike": ["DOC"], "home-superscript": ["DOC"], "home-subscript": ["DOC"],
-    "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
-    "table-border-bg": ["DOC"], "table-cell-props": ["DOC"], "table-col-equal": ["DOC"],
+    "home-strike": DOC_MODULES, "home-superscript": DOC_MODULES, "home-subscript": DOC_MODULES,
+    "insert-image": DOC_MODULES, "mod-endnote": DOC_MODULES, "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
+    "table-border-bg": DOC_MODULES, "table-cell-props": DOC_MODULES, "table-col-equal": DOC_MODULES, "table-split": DOC_MODULES,
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
     ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),
@@ -341,12 +341,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   }
 
   function resolveStorage() {
-    try {
-      const storage = host.localStorage;
-      return storage && typeof storage.getItem === "function" ? storage : null;
-    } catch {
-      return null;
-    }
+    try { const s = host.localStorage; return typeof s?.getItem === "function" ? s : null; } catch { return null; }
   }
 
   // True when the workbook holds more than `limit` cells; stops counting at the first one past it.
@@ -459,8 +454,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       }
       if (want === guardRegistered) return;
       guardRegistered = want;
-      if (want) host.addEventListener?.("beforeunload", handleBeforeUnload);
-      else host.removeEventListener?.("beforeunload", handleBeforeUnload);
+      (want ? host.addEventListener : host.removeEventListener)?.("beforeunload", handleBeforeUnload);
     }
 
     const workbookProtectOf = () => host.__EASYOFFICE_SHEET_PROTECT__?.getWorkbook() ?? null;
@@ -499,11 +493,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       pendingActivity = false;
       pendingEdit = false;
       dirty = true;
-      try {
-        resolveStorage()?.removeItem(storageKey());
-      } catch {
-        // storage may be blocked; the unsaved-changes guard still protects the session
-      }
+      try { resolveStorage()?.removeItem(storageKey()); } catch {}
       setFeedback("큰 시트(셀 2만 개 초과)는 자동 저장하지 않습니다. 저장(Ctrl+S)으로 보관하세요");
       syncUnloadGuard();
       return true;
@@ -634,11 +624,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       discarded = true;
       if (autosaveTimer !== null) host.clearTimeout?.(autosaveTimer);
       autosaveTimer = null;
-      try {
-        resolveStorage()?.removeItem(storageKey());
-      } catch {
-        // storage may be blocked; nothing is left to clean up
-      }
+      try { resolveStorage()?.removeItem(storageKey()); } catch {}
     }
 
     function installActivityTracking() {
@@ -662,7 +648,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const bar = document.getElementById("icon-toolbar");
       if (!bar) return;
       // The header/footer edit group shows by the edit state alone (`doc-page-frame.js`).
-      const kids = Array.from(bar.children).filter((el) => el.dataset?.hfGroup === undefined);
+      const track = bar.querySelector(".tb-scroll-track") || bar;
+      const kids = Array.from(track.children).filter((el) => el.dataset?.hfGroup === undefined);
       const isGroup = (el) => String(el.className).split(/\s+/).includes("tb-group");
       kids.forEach((el) => {
         if (!isGroup(el)) return;
@@ -687,6 +674,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       bar.hidden = false;
       const shown = Array.from(bar.querySelectorAll(".tb-btn")).filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
       bar.hidden = shown.every((btn) => btn.dataset.studioCmd === "palette");
+      host.__EASYOFFICE_TOOLBAR_SCROLL__?.refreshAll?.(document);
     }
 
     function syncToolbarButtons(mod, commandModule) {
@@ -720,11 +708,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         btn.setAttribute("title", base + suffix);
         btn.setAttribute("aria-label", base);
       }
-      for (const [cmd, pTxt, dTxt] of [["layout-paper", "페이지 설정", "용지 설정"], ["mod-header", "머리말", "머리글"], ["mod-footer", "꼬리말", "바닥글"]]) {
-        for (const el of document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`)) {
-          if (el.dataset.kinds?.split(" ").includes("DOC")) el.querySelector(".md-label").textContent = isPages ? pTxt : dTxt;
-        }
-      }
     }
 
     function applyModuleContext(mod) {
@@ -740,6 +723,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
       host.__EASYOFFICE_MENU_KINDS__.applyMenuKind(document, commandModule);
+      host.__EASYOFFICE_PAGES_UI__?.sync?.(mod);
       for (const item of document.querySelectorAll("[data-hwp-save-as]")) item.hidden = !embed;
       for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       syncToolbarRowVisibility();
@@ -754,8 +738,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       }
       deps.onMenuItemsApplied?.();
       if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule);
-      const agg = document.getElementById("status-sheet-agg");
-      if (agg) agg.hidden = mod !== "SHEET";
+      for (const id of ["status-sheet-agg", "status-sheet-mode"]) {
+        const el = document.getElementById(id);
+        if (el) { el.hidden = mod !== "SHEET"; if (mod !== "SHEET") el.textContent = ""; }
+      }
       const docStatus = document.querySelector(".statusbar-left-group");
       if (docStatus) docStatus.hidden = !isDoc;
     }

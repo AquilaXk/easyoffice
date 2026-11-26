@@ -550,6 +550,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), true);
+  assert.equal(document.getElementById("ruler-corner").textContent, "mm");
 
   switchModule(document, "DOC");
   await flushAsyncTurns();
@@ -560,7 +561,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), true);
   assert.equal(docEditor.querySelector('[data-eo-align="distribute"]').tagName, "H1", "the paragraph's alignment survives a module switch");
 
-  assert.equal(document.getElementById("ruler-corner").textContent, "mm");
+  assert.equal(document.getElementById("ruler-corner").textContent, "cm");
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-first-indent"));
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-left-margin"));
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-right-margin"));

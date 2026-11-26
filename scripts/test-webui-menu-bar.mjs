@@ -64,9 +64,13 @@ const enabledMenuItems = (document) =>
 // The ribbon commands (suffix after the module prefix) a window kind has no menu item for.
 const PALETTE_ONLY = {
   DOC: ["data-validation"],
-  HWP: ["layout-orientation", "layout-margins", "data-validation"],
+  HWP: [
+    "insert-chart", "layout-orientation", "layout-margins",
+    "data-autosum", "data-fn-browser", "data-sort", "data-validation",
+    "review-track", "review-comment", "review-verify", "review-stats", "view-split",
+  ],
   SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"],
-  SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
+  SLIDE: ["layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
   PDF: [
     "home-bold", "home-italic", "home-underline", "home-style",
     "insert-table", "insert-chart", "insert-shape", "insert-link",
@@ -181,11 +185,13 @@ test("no shown menu item is grayed out in the window it belongs to", async () =>
 });
 
 test("the menus follow rhwp-studio: ids, titles, dropdowns, sub-menus and separators", async () => {
+  const titles = (doc) => doc.querySelectorAll(".menu-item").filter(shown).map((el) => el.querySelector(".menu-title").textContent);
+  const hwp = await openModule("HWP");
+  assert.deepEqual(titles(hwp.document), ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"]);
   const { document } = await openModule("DOC");
   const bar = document.getElementById("menu-bar");
   assert.ok(bar, "#menu-bar");
-  const titles = (doc) => doc.querySelectorAll(".menu-item").filter(shown).map((el) => el.querySelector(".menu-title").textContent);
-  assert.deepEqual(titles(document), ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"]);
+  assert.deepEqual(titles(document), ["파일", "편집", "보기", "삽입", "서식", "레이아웃", "표", "도구", "도움말"]);
   for (const menu of document.querySelectorAll(".menu-item")) {
     assert.ok(menu.querySelector(".menu-dropdown"), `${menu.dataset.menu} has a dropdown`);
     assert.ok(menu.querySelector(".md-item"), `${menu.dataset.menu} has items`);

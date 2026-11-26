@@ -47,6 +47,11 @@
   border-color: var(--ui-border-strong);
 }
 
+.tb-btn.active .tb-label,
+.tb-btn[aria-pressed="true"] .tb-label {
+  color: var(--ui-text);
+}
+
 .tb-btn:active:not(:disabled) {
   background: var(--ui-active);
   border-color: var(--ui-border);
@@ -57,7 +62,7 @@
   line-height: 1.1;
   text-align: center;
   color: var(--color-text-secondary);
-  white-space: nowrap;
+  white-space: pre-line;
 }
 
 /* Toolbars of the document, sheet, slide and PDF windows in the reference toolbar format (`toolbar.css`
@@ -68,12 +73,83 @@
    The slide and PDF windows keep their combo boxes in a second row and take the buttons in the same
    format. */
 #icon-toolbar {
+  position: relative;
   align-items: stretch;
   height: 56px;
   min-height: 56px;
   padding: 2px 8px;
   gap: 0;
+  overflow: hidden;
+}
+
+.tb-scrollable {
+  position: relative;
+  overflow: hidden;
+}
+
+.tb-scroll-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-x: hidden;
   overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.tb-scroll-viewport.tb-scroll-viewport-enabled {
+  overflow-x: auto;
+}
+
+.tb-scroll-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.tb-scroll-track {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+}
+
+.tb-scroll-nav {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(to bottom, var(--ui-toolbar-bg-start), var(--ui-toolbar-bg-end));
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.tb-scroll-nav-prev { left: 4px; }
+.tb-scroll-nav-next { right: 4px; }
+.tb-scroll-nav[hidden] { display: none; }
+
+.tb-scroll-nav:hover:not(:disabled) {
+  background: var(--ui-hover-strong);
+  color: var(--ui-text);
+}
+
+.tb-scroll-nav:disabled {
+  color: var(--ui-text-muted);
+  cursor: default;
+}
+
+.tb-scroll-nav-icon {
+  font-size: var(--font-size-lg);
+  line-height: 1;
 }
 
 #slide-toolbar,
@@ -87,10 +163,14 @@
 #icon-toolbar .tb-group,
 #slide-toolbar .tb-group,
 #pdf-toolbar .tb-group,
-#base-toolbar .tb-group,
-#board-toolbar .tb-group {
+#base-toolbar .tb-group {
   align-items: stretch;
   gap: 0;
+}
+
+#board-toolbar .tb-group {
+  align-items: stretch;
+  gap: var(--space-1);
 }
 
 #icon-toolbar .tb-sep,
@@ -147,7 +227,7 @@
   font-size: var(--font-size-xl);
   line-height: 18px;
   text-align: center;
-  color: var(--accent-light);
+  color: var(--accent-strong);
   flex-shrink: 0;
 }
 
@@ -157,8 +237,13 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  color: var(--accent-light);
+  color: var(--accent-strong);
   flex-shrink: 0;
+}
+
+:root[data-theme-effective="dark"] .tb-icon-text,
+:root[data-theme-effective="dark"] .tb-icon-svg {
+  color: var(--accent-light);
 }
 
 .tb-icon-svg .eo-icon {
@@ -551,7 +636,7 @@ input.sb-ls-select {
   flex-shrink: 0;
 }
 
-#doc-style-bar > .eo-style-sep {
+#doc-style-bar .eo-style-sep {
   display: inline-block;
   width: 1px;
   height: 20px;
@@ -786,8 +871,8 @@ input.sb-ls-select {
   white-space: nowrap;
 }
 
-#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) > .tb-group:not(.tb-headerfooter-group),
-#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) > .tb-sep {
+#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) .tb-group:not(.tb-headerfooter-group),
+#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) .tb-sep {
   display: none;
 }
 

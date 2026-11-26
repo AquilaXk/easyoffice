@@ -17,7 +17,7 @@ test("document editor CSS matches Korean word processor defaults and 602px ruler
   assert.match(editorRule, /font-family:\s*'맑은 고딕'/);
   assert.match(editorRule, /font-size:\s*10pt;/);
   assert.match(editorRule, /line-height:\s*1\.08;/);
-  assert.match(editorRule, /text-align:\s*justify;/);
+  assert.match(editorRule, /text-align:\s*left;/);
 
   const paraRule = /#doc-editor > p:not\(\.manuscript-notice\)\s*\{([^}]*)\}/.exec(CONTENT_CSS)?.[1] || "";
   assert.match(paraRule, /margin:\s*0 0 8pt;/);
@@ -46,7 +46,8 @@ test("initial DOC toolbar and 편집 용지 dialog open with Korean word process
     Array.from(lsSelect.querySelectorAll("option")).map((o) => o.value),
     ["100", "108", "115", "130", "160", "180", "200", "300"]
   );
-  assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-align-left").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), false);
 
   h.userClick(studioItem(document, "layout-paper"));
   await flushAsyncTurns(4);

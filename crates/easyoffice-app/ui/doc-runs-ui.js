@@ -42,11 +42,11 @@
   const HEADING_TAG_RE = /^H[1-6]$/;
   const STYLE_HEADING_RE = /^(?:개요|제목|머리말)\s+([1-6])$/;
   const PLAIN_STYLES = new Set(["바탕글", "표준", "본문"]);
-  const PAGES_EXPLICIT_STYLES = { 제목: 1, 부제목: 2 };
+  const PAGES_EXPLICIT_STYLES = { 제목: 1, 부제목: 2, 머리말: 1 };
   const DOC_STYLE_OPTIONS = {
     doc: ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"],
     hwp: ["바탕글", "개요 1", "개요 2", "개요 3", "개요 4", "개요 5", "개요 6"],
-    pages: ["본문", "제목", "부제목", "머리말 1", "머리말 2", "머리말 3", "제목 4", "제목 5", "제목 6"],
+    pages: ["본문", "제목", "부제목", "머리말", "머리말 2", "머리말 3"],
   };
   const LIST_TAGS = { ordered: "OL", bullet: "UL", task: "UL" };
   const LIST_TAG_NAMES = new Set(Object.values(LIST_TAGS));
@@ -679,7 +679,7 @@
         if (flavor === "pages") {
           if (level === 1 && block?.dataset?.eoPagesStyle === "제목") return "제목";
           if (level === 2 && block?.dataset?.eoPagesStyle === "부제목") return "부제목";
-          return level <= 3 ? "머리말 " + level : "제목 " + level;
+          return level <= 1 ? "머리말" : level <= 3 ? "머리말 " + level : "머리말 3";
         }
         return "제목 " + level;
       }
@@ -693,8 +693,9 @@
     function alignModeOf(block) {
       const mode = block?.dataset?.eoAlign;
       if (APPROXIMATED_ALIGN_LABEL[mode]) return mode;
-      const css = (block?.style?.textAlign || editor()?.style?.textAlign || "justify").trim().toLowerCase();
-      return ALIGN_BUTTON_MODES.includes(css) ? css : "justify";
+      const def = docFlavorOf() === "hwp" ? "justify" : "left";
+      const css = (block?.style?.textAlign || editor()?.style?.textAlign || def).trim().toLowerCase();
+      return ALIGN_BUTTON_MODES.includes(css) ? css : def;
     }
 
     // Alignment buttons, list buttons, line spacing and style box show the first paragraph of the selection.
@@ -725,7 +726,7 @@
       if (badge) badge.textContent = name;
     }
 
-    let lastLabelStepMm = 10;
+    let lastRulerKey = "";
 
     function currentZoomRatio(overrideZoom) {
       if (Number.isFinite(overrideZoom) && overrideZoom > 0) return overrideZoom;
@@ -736,20 +737,24 @@
     function syncRuler(overrideZoom, firstBlock) {
       const zoomRatio = currentZoomRatio(overrideZoom);
       const scale = resolveRulerScale(zoomRatio);
-      if (scale.labelStepMm !== lastLabelStepMm) {
-        lastLabelStepMm = scale.labelStepMm;
-        const stepCm = scale.labelStepMm / 10;
+      const isHwp = docFlavorOf() === "hwp";
+      const rulerKey = scale.labelStepMm + (isHwp ? ":mm" : ":cm");
+      if (rulerKey !== lastRulerKey) {
+        lastRulerKey = rulerKey;
+        const unitEl = byId("ruler-corner");
+        if (unitEl) unitEl.textContent = isHwp ? "mm" : "cm";
+        const step = isHwp ? scale.labelStepMm : scale.labelStepMm / 10;
         const hTrack = document.querySelector("#h-ruler .ruler-track");
         if (hTrack) {
           const labels = [];
-          for (let i = 1; i <= 40; i += 1) labels.push(String(i * stepCm));
+          for (let i = 1; i <= 40; i += 1) labels.push(String(i * step));
           hTrack.textContent = labels.join(" · · · ");
         }
         const vRuler = byId("v-ruler");
         if (vRuler) {
           const spans = vRuler.querySelectorAll("span");
           for (let i = 0; i < spans.length; i += 1) {
-            spans[i].textContent = String((i + 1) * stepCm);
+            spans[i].textContent = String((i + 1) * step);
           }
         }
       }
@@ -964,29 +969,19 @@
     };
   }
 
-  const PX_PER_MM = 96 / 25.4;
-  const MIN_LABEL_SPACING_PX = 30;
-  const MIN_TICK_SPACING_PX = 3.5;
-  const MIN_LABEL_STEP_MM = 10;
+  const PX_PER_MM = 96 / 25.4, MIN_LABEL_SPACING_PX = 30, MIN_TICK_SPACING_PX = 3.5, MIN_LABEL_STEP_MM = 10;
 
   function niceStepCeil(value) {
     const safeValue = Number.isFinite(value) && value > 0 ? value : 1;
-    const exponent = Math.floor(Math.log10(safeValue));
-    const power = 10 ** exponent;
+    const power = 10 ** Math.floor(Math.log10(safeValue));
     const normalized = safeValue / power;
     if (normalized <= 1) return power;
-    if (normalized <= 2) return 2 * power;
-    if (normalized <= 5) return 5 * power;
-    return 10 * power;
+    return normalized <= 2 ? 2 * power : normalized <= 5 ? 5 * power : 10 * power;
   }
 
   function resolveRulerScale(zoom) {
-    const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    const pixelsPerMm = PX_PER_MM * safeZoom;
-    return {
-      labelStepMm: niceStepCeil(Math.max(MIN_LABEL_STEP_MM, MIN_LABEL_SPACING_PX / pixelsPerMm)),
-      tickStepMm: niceStepCeil(MIN_TICK_SPACING_PX / pixelsPerMm),
-    };
+    const pixelsPerMm = PX_PER_MM * (Number.isFinite(zoom) && zoom > 0 ? zoom : 1);
+    return { labelStepMm: niceStepCeil(Math.max(MIN_LABEL_STEP_MM, MIN_LABEL_SPACING_PX / pixelsPerMm)), tickStepMm: niceStepCeil(MIN_TICK_SPACING_PX / pixelsPerMm) };
   }
 
   host.__EASYOFFICE_DOC_RUNS_UI__ = { niceStepCeil, resolveRulerScale };

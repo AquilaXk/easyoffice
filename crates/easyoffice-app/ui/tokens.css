@@ -52,6 +52,8 @@
   --doc-workspace: #e0e0e0;
   --doc-paper: #ffffff;
   --doc-shadow: rgba(0, 0, 0, 0.2);
+  --doc-guide-stroke: #6b7280;
+  --ui-primary-hover: #253d75;
 
   /* 포커스/선택/핸들 */
   --focus-ring: #4a90d9;
@@ -210,6 +212,8 @@
   --doc-workspace: #1f2329;
   --doc-paper: #ffffff;
   --doc-shadow: rgba(0, 0, 0, 0.5);
+  --doc-guide-stroke: #6b7280;
+  --ui-primary-hover: #8bb8ff;
 
   --focus-ring: #8bb8ff;
   --selection-fill: #315f91;

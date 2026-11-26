@@ -436,13 +436,25 @@
 }
 
 .dialog-btn-primary {
-  background: var(--color-primary);
+  background: var(--accent-strong);
   color: var(--ui-text-on-accent);
-  border-color: var(--accent-light);
+  border-color: var(--accent-strong);
 }
 
-.dialog-btn-primary:hover {
-  background: var(--accent-light);
+:root[data-theme-effective="dark"] .dialog-btn-primary {
+  color: var(--ui-bg);
+}
+
+.dialog-btn-primary:hover:not(:disabled) {
+  background: var(--ui-primary-hover);
+  border-color: var(--ui-primary-hover);
+}
+
+.dialog-btn:disabled {
+  background: var(--ui-surface-muted);
+  color: var(--ui-text-muted);
+  border-color: var(--ui-border-strong);
+  cursor: default;
 }
 
 .recent-documents-dialog {
@@ -568,17 +580,24 @@
 }
 
 .update-notice__button--primary {
-  border-color: var(--color-primary);
-  background: var(--color-primary);
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
   color: var(--ui-text-on-accent);
 }
 
-/* --color-primary is light in the dark theme: dark text. */
+/* --accent-strong is light in the dark theme: dark text. */
 :root[data-theme-effective="dark"] .update-notice__button--primary {
   color: var(--ui-bg);
 }
 
+.update-notice__button--primary:hover:not(:disabled) {
+  border-color: var(--ui-primary-hover);
+  background: var(--ui-primary-hover);
+}
+
 .update-notice__button:disabled {
   cursor: default;
-  opacity: 0.6;
+  background: var(--ui-surface-muted);
+  color: var(--ui-text-muted);
+  border-color: var(--ui-border-strong);
 }

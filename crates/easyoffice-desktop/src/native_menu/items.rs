@@ -96,6 +96,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:layout-paper",
     ),
     item(
+        "file:page-setup",
+        "편집 용지",
+        None,
+        "studio-cmd:layout-paper",
+    ),
+    item(
         "file:export-pdf",
         "PDF로 내보내기…",
         Some("CmdOrCtrl+E"),
@@ -232,6 +238,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:view-outline",
     ),
+    item("view:pages-inspector", "포맷 속성", None, "pages-inspector"),
     item("view:theme-system", "시스템 설정", None, "theme:system"),
     item("view:theme-light", "밝게", None, "theme:light"),
     item("view:theme-dark", "어둡게", None, "theme:dark"),
@@ -408,7 +415,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:align-center",
-        "가운데 맞춤",
+        "가로 가운데 맞춤",
         None,
         "sheet-look:align-center",
     ),
@@ -426,7 +433,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:valign-middle",
-        "가운데 맞춤",
+        "세로 가운데 맞춤",
         None,
         "sheet-look:valign-middle",
     ),
@@ -586,6 +593,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:layout-paper",
     ),
     item("page:paper", "편집 용지", None, "studio-cmd:layout-paper"),
+    item(
+        "page:pages-paper",
+        "페이지 설정",
+        None,
+        "studio-cmd:layout-paper",
+    ),
     item(
         "page:orientation",
         "용지 방향",

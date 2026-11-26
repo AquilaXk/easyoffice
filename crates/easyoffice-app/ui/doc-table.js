@@ -255,8 +255,9 @@
     function bind() {
       editor()?.addEventListener("keydown", onKeydown);
       document.addEventListener?.("selectionchange", syncMenu);
-      const menu = document.querySelector('.menu-item[data-menu="table"]');
-      for (const type of ["mouseenter", "focusin", "click"]) menu?.addEventListener(type, syncMenu);
+      for (const menu of document.querySelectorAll('.menu-item[data-menu="table"], .menu-item[data-menu="arrange"]')) {
+        for (const type of ["mouseenter", "focusin", "click"]) menu.addEventListener(type, syncMenu);
+      }
       docImage?.bind();
       docNotes?.bind();
       tableStyle?.bind();

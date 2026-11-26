@@ -58,6 +58,7 @@ test("unknown ids, inherited property names and missing actions run nothing", ()
 // The reference app's menu event ids (`menu.rs`: 표 Select Cells / Merge Cells / Split Cells, 보기 Zoom In / Zoom
 // Out / Actual Size / Fit Page / Fit Width): inside the Hangul editor each native item is that editor command.
 const EXPECTED_EDITOR_COMMANDS = {
+  "file:page-setup": "page:setup",
   "view:zoom-in": "view:zoom-in",
   "view:zoom-out": "view:zoom-out",
   "view:zoom-100": "view:zoom-100",
@@ -66,25 +67,53 @@ const EXPECTED_EDITOR_COMMANDS = {
   "view:zoom-dialog": "view:zoom-dialog",
   "view:toolbar-labels": "view:toolbar-labels",
   "view:form-mode": "view:form-mode",
-  // 머리말 and 꼬리말 are the editor's own commands (the page frame of the document window is a different editor).
+  "view:ctrl-marks": "view:ctrl-mark",
+  "view:para-marks": "view:para-mark",
+  "view:doc-grid": "view:toggle-grid",
   "page:paper": "page:setup",
   "page:header": "page:header-create",
   "page:footer": "page:footer-create",
+  "page:columns": "page:col-settings",
+  "insert:shape": "insert:shape",
+  "insert:image": "insert:image",
+  "insert:footnote": "insert:footnote",
+  "insert:endnote": "insert:endnote",
+  "insert:symbol": "insert:symbols",
+  "insert:link": "insert:hyperlink",
+  "insert:field": "insert:field",
+  "format:bold": "format:bold",
+  "format:italic": "format:italic",
+  "format:underline": "format:underline",
+  "format:strike": "format:strikethrough",
+  "format:superscript": "format:superscript",
+  "format:subscript": "format:subscript",
+  "format:style": "format:style-dialog",
+  "format:justify": "format:align-justify",
+  "format:para-numbering": "format:toggle-numbering",
+  "format:para-bullet": "format:toggle-bullet",
+  "format:indent-in": "format:level-increase",
+  "format:indent-out": "format:level-decrease",
+  "table:insert": "table:create",
+  "table:row-above": "table:insert-row-above",
+  "table:add-row": "table:insert-row-below",
+  "table:col-left": "table:insert-col-left",
+  "table:col-right": "table:insert-col-right",
+  "table:row-delete": "table:delete-row",
+  "table:col-delete": "table:delete-col",
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",
-  // The macOS edit menu (`menu.rs`: Undo / Redo / Cut / Copy are menu events; Paste is the system item): the editor's
-  // own commands, so the editor's undo stack and selection are reached.
+  "table:col-equal": "table:cell-width-equal",
+  "table:border-bg": "table:border-each",
+  "table:cell-props": "table:cell-props",
+  "table:sum": "table:block-formula",
+  "table:hwp-border": "table:border-each",
   "edit:undo": "edit:undo",
   "edit:redo": "edit:redo",
   "edit:cut": "edit:cut",
   "edit:copy": "edit:copy",
   "edit:find": "edit:find",
   "edit:replace": "edit:find-replace",
-  "format:bold": "format:bold",
-  "format:italic": "format:italic",
-  "format:underline": "format:underline",
-  "insert:link": "insert:hyperlink",
 };
 
 test("the native menu ids that reach the Hangul editor map to the reference app's editor command ids", () => {
@@ -339,7 +368,7 @@ test("the native labels of the shared style, paper and justify commands are the 
   for (const cmd of ["home-style", "layout-paper", "para-shape", "mod-header", "mod-footer"]) {
     const native = rustItems().filter((item) => item.action === `studio-cmd:${cmd}`).map((item) => item.label);
     assert.ok(native.length > 0, cmd);
-    assert.deepEqual([...new Set(pageLabels(cmd))], [...new Set(native)], cmd);
+    assert.deepEqual([...new Set(pageLabels(cmd))].sort((a, b) => a.localeCompare(b)), [...new Set(native)].sort((a, b) => a.localeCompare(b)), cmd);
   }
   assert.ok(!rustItems().some((item) => /글자 모양|문단 모양|모양 복사|개체 속성/.test(item.label)));
 });

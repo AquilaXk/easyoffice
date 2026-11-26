@@ -14,11 +14,11 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 | 글자 (본문 / 보조 / 설명 / 힌트) | `--ui-text` / `--ui-text-secondary` / `--ui-text-muted` / `--ui-text-hint` |
 | 경계선 (기본 / 옅은 / 강한 / 구분) | `--ui-border` / `--ui-border-light` / `--ui-border-strong` / `--ui-border-subtle` |
 | 호버 / 선택 / 열린 메뉴 | `--ui-hover` / `--ui-selected` / `--ui-menu-open` |
-| 강조 (글자·선) / 포커스 링 | `--accent-strong` / `--focus-ring` |
-| 문서 작업 영역 / 종이 | `--doc-workspace` / `--doc-paper` |
+| 강조 (글자·선·호버) / 포커스 링 | `--accent-strong` / `--ui-primary-hover` / `--focus-ring` |
+| 문서 작업 영역 / 종이 / 안내선 | `--doc-workspace` / `--doc-paper` / `--doc-guide-stroke` |
 | 위험 / 경고 / 링크 | `--ui-danger` / `--ui-warning-*` / `--ui-link` |
 
-대비 기준은 크롬 글자 4.5:1, 아이콘 3:1이며 테스트가 토큰 값으로 계산합니다. `--ui-text-hint`처럼 대비가 낮은 토큰은 작은 글자의 바탕 위에 쓰지 않습니다. 흰 글자와 `--ui-menu-open`이 4.2:1인 다크 테마에서는 열린 메뉴를 `--ui-selected` 바탕에 `--ui-text`로, 기본 버튼을 `--accent-strong` 바탕에 `--ui-bg` 글자로 그립니다.
+대비 기준은 크롬 글자 4.5:1, 아이콘 3:1이며 테스트가 토큰 값으로 계산합니다. `--ui-text-hint`처럼 대비가 낮은 토큰은 작은 글자의 바탕 위에 쓰지 않습니다. 흰 글자와 `--ui-menu-open`이 4.2:1인 다크 테마에서는 열린 메뉴를 `--ui-selected` 바탕에 `--ui-text`로, 기본 버튼을 `--accent-strong` 바탕에 `--ui-bg` 글자로 그립니다. 라이트·다크 테마 모두에서 `--doc-guide-stroke`는 종이(`--doc-paper`) 위 4.5:1 이상을 유지합니다.
 
 ## 2. 테마
 
@@ -36,7 +36,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 ## 4. 창 구성 (현재, 단계적으로 참조 앱 구조로 이동 중)
 
-문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 참조 앱의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음, 측면 패널은 없습니다(PD-098 10항). 정적·동적 도구 대화상자(`#export-dialog`, `#base-import-dialog`, `#sheet-size-dialog` 등)는 `.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer` 규칙과 `enableDialogDrag`/`enableDialogKeys`, 단일 줄 `.dialog-label`, 테두리 중첩 없는 `.custom-select` 구조를 따릅니다.
+문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 참조 앱의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음은 없습니다(PD-098 10항). 폭이 넓은 도구줄(`#icon-toolbar`, `#sheet-table-bar`, `#board-toolbar`)은 `.tb-scroll-viewport`/`.tb-scroll-track`/`.tb-scroll-nav`(`«`/`»`, `toolbar-scroll.js`)로 단일 행 스크롤을 제공합니다. 페이지 문서(`eoDocFlavor="pages"`)에서는 공유 토큰과 기존 컨트롤(`.pages-insp-tab`, `.custom-select`, `.eo-glyph-btn`)로 구성한 오른쪽 `#pages-inspector`(`텍스트`/`문서` 탭)를 표시합니다. 정적·동적 도구 대화상자(`#export-dialog`, `#base-import-dialog`, `#sheet-size-dialog` 등)는 `.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer` 규칙과 `enableDialogDrag`/`enableDialogKeys`, 단일 줄 `.dialog-label`, 테두리 중첩 없는 `.custom-select` 구조를 따릅니다.
 
 ## 4-1. 화면에는 설명 문장을 두지 않는다 (QA 2026-11-12, "참조 앱과 같게"보다 우선)
 

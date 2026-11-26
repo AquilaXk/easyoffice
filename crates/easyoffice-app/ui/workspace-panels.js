@@ -817,7 +817,7 @@
       setElField("doc-font-select", "value", fontVal);
       setElField("doc-style-font-badge", "textContent", fontVal);
       // Without a selection the controls show the document-level values; a selection shows its paragraph (doc-runs-ui).
-      const alignMode = editor?.style?.textAlign || "justify";
+      const alignMode = editor?.style?.textAlign || (mod === "HWP" ? "justify" : "left");
       ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) =>
         syncBtnPressed("btn-align-" + m, m === alignMode)
       );

@@ -8,8 +8,8 @@
   const rules = host.__EASYOFFICE_SHEET_RULES__;
 
   const VALUE_KINDS = [
-    ["min", "최소값"],
-    ["max", "최대값"],
+    ["min", "최소"],
+    ["max", "최대"],
     ["num", "숫자"],
     ["percent", "백분율"],
     ["percentile", "백분위수"],

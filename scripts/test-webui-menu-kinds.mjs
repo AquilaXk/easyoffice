@@ -14,19 +14,31 @@ const byName = (a, b) => a.localeCompare(b);
 const REPO = new URL("../", import.meta.url);
 const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 
-const KINDS = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"];
+const KINDS = ["DOC", "PAGES", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"];
 const TITLES = {
-  DOC: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
+  DOC: ["파일", "편집", "보기", "삽입", "서식", "레이아웃", "표", "도구", "도움말"],
+  PAGES: ["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구", "도움말"],
   HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
   SHEET: ["파일", "편집", "보기", "삽입", "서식", "시트", "수식", "데이터", "도구", "도움말"],
   SLIDE: ["파일", "편집", "보기", "삽입", "서식", "슬라이드", "슬라이드 쇼", "도구", "도움말"],
   PDF: ["파일", "편집", "보기", "주석", "쪽", "도구", "도움말"],
   BASE: ["파일", "편집", "보기", "도구", "도움말"],
   BOARD: ["파일", "편집", "보기", "도구", "도움말"],
+  START: ["파일", "편집", "보기", "도구", "도움말"],
+  CONV: ["파일", "편집", "보기", "도구", "도움말"],
 };
 
 const shown = (el) => !el.closest("[hidden]");
-const open = (mod) => createWorkspaceHarness({ search: `?module=${mod}&win=w-kind-${mod}` });
+const open = async (mod) => {
+  if (mod === "PAGES") {
+    const h = await createWorkspaceHarness({ search: `?module=DOC&win=w-kind-${mod}` });
+    h.document.getElementById("doc-editor").dataset.eoDocFlavor = "pages";
+    h.document.defaultView.__EASYOFFICE_ACTIVATE_MODULE__("DOC");
+    return h;
+  }
+  if (mod === "START") return createWorkspaceHarness({ search: "?start=1&win=w-kind-START" });
+  return createWorkspaceHarness({ search: `?module=${mod}&win=w-kind-${mod}` });
+};
 const shownMenus = (document) => document.querySelectorAll(".studio-menubar > .menu-item").filter(shown);
 const titlesOf = (document) => shownMenus(document).map((menu) => menu.querySelector(".menu-title").textContent);
 const commandsOf = (document, menuTitle) => {
@@ -88,7 +100,7 @@ test("the spreadsheet puts sorting, validation, pivot and conditional formats in
 test("the presentation has 슬라이드 and 슬라이드 쇼 menus and the PDF has 주석 and 쪽", async () => {
   const slide = await open("SLIDE");
   await flushAsyncTurns(10);
-  assert.deepEqual(commandsOf(slide.document, "슬라이드"), ["slide-mod-master", "slide-mod-snap", "layout-orientation", "layout-margins"]);
+  assert.deepEqual(commandsOf(slide.document, "슬라이드"), ["slide-mod-master", "slide-mod-snap", "layout-orientation"]);
   assert.deepEqual(commandsOf(slide.document, "슬라이드 쇼"), ["slide-mod-transition", "slide-mod-presenter"]);
   const pdf = await open("PDF");
   await flushAsyncTurns(10);
@@ -108,9 +120,9 @@ test("the document window keeps its menus and the Hangul window's fallback edito
   assert.ok(!commandsOf(hwp.document, "입력").includes("doc-mod-toc"));
 });
 
-test("the start screen and the converter use the document menus, and BASE and BOARD keep their own kind", async () => {
+test("START and CONV keep clean minimal workspace menus, PAGES uses Pages flavor, and BASE and BOARD keep their own kind", async () => {
   const { menuKindOf } = (await open("DOC")).document.defaultView.__EASYOFFICE_MENU_KINDS__;
-  for (const [moduleCode, kind] of [["START", "DOC"], ["CONV", "DOC"], ["HWP_EMBED", "HWP"], ["SHEET", "SHEET"], ["SLIDE", "SLIDE"], ["PDF", "PDF"], ["BASE", "BASE"], ["BOARD", "BOARD"], [undefined, "DOC"]]) {
+  for (const [moduleCode, kind] of [["START", "START"], ["CONV", "CONV"], ["HWP_EMBED", "HWP"], ["SHEET", "SHEET"], ["SLIDE", "SLIDE"], ["PDF", "PDF"], ["BASE", "BASE"], ["BOARD", "BOARD"], [undefined, "DOC"]]) {
     assert.equal(menuKindOf(moduleCode), kind, String(moduleCode));
   }
 });
@@ -167,7 +179,7 @@ function rustLayout() {
     menus[m[1]] = { title: m[2], lines };
   }
   const kinds = {};
-  for (const m of src.matchAll(/const (DOC|HWP|SHEET|SLIDE|PDF|BASE|BOARD): \[&MenuSpec; (\d+)\] = \[([\s\S]*?)\];/g)) {
+  for (const m of src.matchAll(/const (DOC|PAGES|HWP|SHEET|SLIDE|PDF|BASE|BOARD|START|CONV): \[&MenuSpec; (\d+)\] = \[([\s\S]*?)\];/g)) {
     const names = [...m[3].matchAll(/&(\w+)/g)].map((x) => x[1]);
     assert.equal(names.length, Number(m[2]), `${m[1]} array length`);
     kinds[m[1]] = names.map((name) => menus[name] ?? assert.fail(`unknown menu ${name}`));
@@ -215,9 +227,9 @@ test("the native bars list the same menus as the page for every kind", () => {
   }
 });
 
-test("the native bar of a document, sheet, slide, PDF, BASE or BOARD window has the page's commands and nothing else", async () => {
+test("the native bar of a document, pages, sheet, slide, PDF, BASE, BOARD, START or CONV window has the page's commands and nothing else", async () => {
   const items = rustItems();
-  for (const kind of ["DOC", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"]) {
+  for (const kind of ["DOC", "PAGES", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"]) {
     const { document } = await open(kind);
     await flushAsyncTurns(10);
     const page = new Set([...shownCommands(document)].map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a)));
@@ -235,9 +247,9 @@ test("the Hangul window's native bar has every command of its page menus", async
 
 test("the page reports the menu kind to the shell with its menu state", () => {
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
-  assert.match(chrome, /kind: host\.__EASYOFFICE_MENU_KINDS__\.menuKindOf\(active\)/);
+  assert.match(chrome, /kind: host\.__EASYOFFICE_MENU_KINDS__\.menuKindOf\(active, document\)/);
   const kinds = read("crates/easyoffice-app/ui/menu-kinds.js");
-  assert.match(kinds, /const KINDS = Object\.freeze\(\["DOC", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD"\]\)/);
+  assert.match(kinds, /const KINDS = Object\.freeze\(\["DOC", "PAGES", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"\]\)/);
   const rust = readRustLayoutSources();
   for (const kind of KINDS) assert.ok(rust.includes(`"${kind}" => Some(`), kind);
 });

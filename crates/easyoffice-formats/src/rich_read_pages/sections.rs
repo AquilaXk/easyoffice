@@ -240,7 +240,7 @@ impl Reader<'_> {
         if text.is_empty() {
             return Ok(());
         }
-        self.text_budget.charge(text.len(), "Pages 머리글·바닥글")?;
+        self.text_budget.charge(text.len(), "Pages 머리말·꼬리말")?;
         let para_styles = AttrTable::parse(&st, storage::PARA_STYLE_TABLE)?;
         let char_styles = AttrTable::parse(&st, storage::CHAR_STYLE_TABLE)?;
         let attachments = AttrTable::parse(&st, storage::ATTACHMENT_TABLE)?;

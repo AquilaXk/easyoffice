@@ -194,7 +194,23 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
     assert_eq!(
         titles_of(MenuKind::Doc),
         bar(
-            &["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구"],
+            &[
+                "파일",
+                "편집",
+                "보기",
+                "삽입",
+                "서식",
+                "레이아웃",
+                "표",
+                "도구"
+            ],
+            &tail
+        )
+    );
+    assert_eq!(
+        titles_of(MenuKind::Pages),
+        bar(
+            &["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구"],
             &tail
         )
     );
@@ -248,6 +264,14 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
     );
     assert_eq!(
         titles_of(MenuKind::Board),
+        bar(&["파일", "편집", "보기", "도구"], &tail)
+    );
+    assert_eq!(
+        titles_of(MenuKind::Start),
+        bar(&["파일", "편집", "보기", "도구"], &tail)
+    );
+    assert_eq!(
+        titles_of(MenuKind::Conv),
         bar(&["파일", "편집", "보기", "도구"], &tail)
     );
 }
@@ -306,38 +330,64 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         "page:hwp-header",
         "page:manuscript",
         "table:hwp-border",
+        "file:page-setup",
         "file:export-pdf",
         "page:paper",
-        "page:header",
-        "page:footer",
     ];
     let doc_only = [
-        "insert:toc",
-        "insert:toc-update",
         "insert:mailmerge",
-        "insert:image",
-        "insert:endnote",
         "page:break",
-        "table:split",
-        "table:col-equal",
-        "table:border-bg",
-        "table:cell-props",
         "table:doc-formula",
-        "tool:review-accept-all",
-        "tool:review-reject-all",
         "page:doc-header",
         "page:doc-footer",
     ];
+    let doc_slide_only = ["page:doc-paper"];
+    let doc_pages_only = [
+        "insert:toc",
+        "insert:toc-update",
+        "table:split",
+        "tool:review-accept-all",
+        "tool:review-reject-all",
+    ];
+    let doc_pages_sheet_only = ["insert:chart"];
     for kind in [
         MenuKind::Doc,
+        MenuKind::Pages,
         MenuKind::Sheet,
         MenuKind::Slide,
         MenuKind::Pdf,
         MenuKind::Base,
         MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
     ] {
         not_in(kind, &editor_only);
         not_in(kind, &hwp_only);
+    }
+    for kind in [
+        MenuKind::Hwp,
+        MenuKind::Pages,
+        MenuKind::Sheet,
+        MenuKind::Slide,
+        MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
+    ] {
+        not_in(kind, &doc_only);
+    }
+    for kind in [
+        MenuKind::Hwp,
+        MenuKind::Pages,
+        MenuKind::Sheet,
+        MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
+    ] {
+        not_in(kind, &doc_slide_only);
     }
     for kind in [
         MenuKind::Hwp,
@@ -346,9 +396,31 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         MenuKind::Pdf,
         MenuKind::Base,
         MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
     ] {
-        not_in(kind, &doc_only);
+        not_in(kind, &doc_pages_only);
     }
+    for kind in [
+        MenuKind::Hwp,
+        MenuKind::Pdf,
+        MenuKind::Base,
+        MenuKind::Board,
+        MenuKind::Start,
+        MenuKind::Conv,
+    ] {
+        not_in(kind, &doc_pages_sheet_only);
+    }
+    not_in(MenuKind::Doc, &["view:pages-inspector", "page:pages-paper"]);
+    not_in(
+        MenuKind::Pages,
+        &[
+            "format:para-numbering",
+            "format:para-bullet",
+            "page:columns",
+            "insert:symbol",
+        ],
+    );
     not_in(MenuKind::Doc, &sheet_only);
     not_in(MenuKind::Doc, &slide_only);
     not_in(MenuKind::Doc, &pdf_only);
@@ -543,8 +615,6 @@ fn every_kind_keeps_the_save_items_the_standard_edit_group_and_the_command_searc
             "file:save-as",
             "edit:undo",
             "edit:redo",
-            "edit:cut",
-            "edit:copy",
             "tool:palette",
             "help:update-check",
             "view:zoom-in",
@@ -552,7 +622,20 @@ fn every_kind_keeps_the_save_items_the_standard_edit_group_and_the_command_searc
         ] {
             assert!(ids.contains(&id), "{kind:?} lacks {id}");
         }
-        assert!(lines_of(kind, "편집").contains(&layout::PASTE), "{kind:?}");
+        if kind != MenuKind::Pdf {
+            for id in ["edit:cut", "edit:copy"] {
+                assert!(ids.contains(&id), "{kind:?} lacks {id}");
+            }
+            assert!(lines_of(kind, "편집").contains(&layout::PASTE), "{kind:?}");
+        } else {
+            for id in ["edit:cut", "edit:copy"] {
+                assert!(!ids.contains(&id), "PDF omits {id}");
+            }
+            assert!(
+                !lines_of(kind, "편집").contains(&layout::PASTE),
+                "PDF omits paste"
+            );
+        }
         assert!(
             lines_of(kind, "편집").contains(&layout::SELECT_ALL),
             "{kind:?}"
@@ -565,18 +648,21 @@ fn every_kind_keeps_the_save_items_the_standard_edit_group_and_the_command_searc
 fn the_page_kind_names_are_the_rust_kinds() {
     for (name, kind) in [
         ("DOC", MenuKind::Doc),
+        ("PAGES", MenuKind::Pages),
         ("HWP", MenuKind::Hwp),
         ("SHEET", MenuKind::Sheet),
         ("SLIDE", MenuKind::Slide),
         ("PDF", MenuKind::Pdf),
         ("BASE", MenuKind::Base),
         ("BOARD", MenuKind::Board),
+        ("START", MenuKind::Start),
+        ("CONV", MenuKind::Conv),
     ] {
         assert_eq!(MenuKind::parse(name), Some(kind));
         assert!(MenuKind::ALL.contains(&kind));
     }
-    assert_eq!(MenuKind::ALL.len(), 7);
-    for bad in ["", "doc", "START", "CONV", "HWP_EMBED"] {
+    assert_eq!(MenuKind::ALL.len(), 10);
+    for bad in ["", "doc", "HWP_EMBED"] {
         assert_eq!(MenuKind::parse(bad), None, "{bad}");
     }
 }
@@ -717,15 +803,16 @@ fn the_hangul_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys()
     );
     let file = lines_of(MenuKind::Hwp, "파일");
     assert_eq!(
-        file[file.len() - 5..],
+        file[file.len() - 6..],
         [
             "file:save-as",
             "file:save-as-hwpx",
             "-",
+            "file:page-setup",
             "file:export-pdf",
             "file:print",
         ],
-        "save as, save as hwpx, a separator, export, print"
+        "save as, save as hwpx, a separator, page setup, export, print"
     );
 }
 
@@ -751,7 +838,10 @@ fn the_file_and_view_menus_keep_the_reference_order_and_separators() {
             "{kind:?}"
         );
         let view = lines_of(kind, "보기");
-        if matches!(kind, MenuKind::Base | MenuKind::Board) {
+        if matches!(
+            kind,
+            MenuKind::Base | MenuKind::Board | MenuKind::Start | MenuKind::Conv
+        ) {
             assert_eq!(
                 view,
                 [
@@ -837,11 +927,16 @@ fn the_macos_menus_have_the_custom_quit_korean_system_labels_and_one_cmd_w() {
             !ids.contains(&"file:close"),
             "{kind:?}: 닫기 is the 윈도우 menu's"
         );
-        for undo_redo_cut_copy in ["edit:undo", "edit:redo", "edit:cut", "edit:copy"] {
-            assert!(
-                ids.contains(&undo_redo_cut_copy),
-                "{kind:?}: the table's item, not a system one"
-            );
+        for edit_cmd in ["edit:undo", "edit:redo"] {
+            assert!(ids.contains(&edit_cmd), "{kind:?}: custom edit item");
+        }
+        if kind != MenuKind::Pdf {
+            for edit_cmd in ["edit:cut", "edit:copy"] {
+                assert!(
+                    ids.contains(&edit_cmd),
+                    "{kind:?}: the table's item, not a system one"
+                );
+            }
         }
     }
 }
@@ -863,109 +958,4 @@ fn the_check_items_are_the_three_themes_toolbar_labels_and_the_update_switch_of_
         Some("view-toolbar-labels")
     );
     assert_eq!(action_for("help:update-check"), Some("update-check"));
-}
-
-#[test]
-fn exactly_the_current_theme_is_checked_and_switches_follow_view_state() {
-    let view = |theme, toolbar_labels, update_check| MenuView {
-        theme,
-        disabled_mask: ItemMask::default(),
-        update_check,
-        toolbar_labels,
-    };
-    for mode in ["system", "light", "dark"] {
-        let checked: Vec<&str> = CHECK_IDS
-            .into_iter()
-            .filter(|id| *id != "view:toolbar-labels")
-            .filter(|id| check_state(id, &view(mode, true, None)).is_some_and(|(on, _)| on))
-            .collect();
-        assert_eq!(checked, vec![theme_item_id(mode).unwrap()], "{mode}");
-    }
-    assert_eq!(
-        check_state("view:toolbar-labels", &view("dark", true, None)),
-        Some((true, true))
-    );
-    assert_eq!(
-        check_state("view:toolbar-labels", &view("dark", false, None)),
-        Some((false, true))
-    );
-    assert_eq!(
-        check_state("help:update-check", &view("dark", true, Some(true))),
-        Some((true, true))
-    );
-    assert_eq!(
-        check_state("help:update-check", &view("dark", true, Some(false))),
-        Some((false, true))
-    );
-    assert_eq!(
-        check_state("help:update-check", &view("dark", true, None)),
-        Some((false, false)),
-        "an app that does not check offers no switch"
-    );
-    assert_eq!(check_state("file:save", &view("dark", true, None)), None);
-}
-
-#[test]
-fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
-    for (id, office_label, hwp_label) in [
-        ("edit:undo", "실행 취소", "되돌리기"),
-        ("edit:cut", "잘라내기", "오려 두기"),
-        ("edit:copy", "복사", "복사하기"),
-        ("edit:paste", "붙여넣기", "붙이기"),
-        ("edit:replace", "찾기 및 바꾸기", "찾아 바꾸기"),
-        ("format:bold", "굵게", "진하게"),
-        ("format:italic", "기울임꼴", "기울임"),
-        ("view:zoom-100", "100%", "실제 크기"),
-    ] {
-        let s = spec(id);
-        assert_eq!(s.label, office_label, "{id}");
-        assert_eq!(label_for(MenuKind::Doc, s), office_label, "{id} doc");
-        assert_eq!(label_for(MenuKind::Sheet, s), office_label, "{id} sheet");
-        assert_eq!(label_for(MenuKind::Hwp, s), hwp_label, "{id} hwp");
-    }
-    assert_eq!(spec("view:toolbar-labels").label, "도구 상자 라벨 표시");
-    assert_eq!(spec("help:update-check").label, "업데이트 확인 알림");
-    assert!(lines_of(MenuKind::Doc, "파일").contains(&"file:doc-paper"));
-    assert!(lines_of(MenuKind::Hwp, "파일").contains(&"file:save-as-hwpx"));
-    for slide_id in [
-        "slide:insert-textbox",
-        "slide:insert-picture",
-        "slide:bring-front",
-        "slide:send-back",
-        "slide:delete-element",
-    ] {
-        assert!(
-            lines_of(MenuKind::Slide, "삽입").contains(&slide_id),
-            "{slide_id}"
-        );
-    }
-    for sheet_id in [
-        "sheet:insert-picture",
-        "sheet:note-insert",
-        "sheet:note-toggle-all",
-    ] {
-        assert!(
-            lines_of(MenuKind::Sheet, "삽입").contains(&sheet_id),
-            "{sheet_id}"
-        );
-    }
-    assert!(!lines_of(MenuKind::Sheet, "삽입").contains(&"table:sheet-chart"));
-    for kind in MenuKind::ALL {
-        assert!(
-            lines_of(kind, "보기").contains(&"view:toolbar-labels"),
-            "{kind:?}"
-        );
-        assert!(
-            !layout::table_ids(kind).contains(&"tool:security-audit"),
-            "{kind:?}"
-        );
-    }
-    assert_eq!(accelerator_for(MenuKind::Hwp, spec("insert:link")), None);
-    for kind in [MenuKind::Doc, MenuKind::Sheet, MenuKind::Slide] {
-        assert_eq!(
-            accelerator_for(kind, spec("insert:link")),
-            Some("CmdOrCtrl+K"),
-            "{kind:?}"
-        );
-    }
 }

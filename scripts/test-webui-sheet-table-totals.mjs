@@ -105,7 +105,7 @@ test("the selected totals-row cell carries the arrow class and the menu lists th
   assert.equal(cell(h.document, "H2").classList.contains("totals-cell"), false, "not a data cell");
   await pressArrow(h, "H9");
   assert.equal($(h, "sheet-totals-menu").hidden, false);
-  assert.deepEqual(rows(h), ["없음", "평균", "개수", "숫자 개수", "최대값", "최소값", "합계", "표본 표준 편차", "표본 분산", "함수 더 보기…"]);
+  assert.deepEqual(rows(h), ["없음", "평균", "개수", "숫자 개수", "최대", "최소", "합계", "표본 표준 편차", "표본 분산", "함수 더 보기…"]);
   assert.deepEqual(checked(h), ["count"], "a column of text was counted when the row was turned on");
 });
 

@@ -34,6 +34,8 @@
     "file:save-as": "file-save-as",
     "file:save-as-hwpx": "hwp-save-as:hwpx",
     "file:doc-paper": "studio-cmd:layout-paper",
+    "file:page-setup": "studio-cmd:layout-paper",
+    "page:pages-paper": "studio-cmd:layout-paper",
     "file:export-pdf": "hwp-export-pdf",
     "file:exp-docx": "export:docx",
     "file:exp-odt": "export:odt",
@@ -71,6 +73,7 @@
     "view:zoom-100": "studio-cmd:view-zoom",
     "view:split": "studio-cmd:view-split",
     "view:outline": "studio-cmd:view-outline",
+    "view:pages-inspector": "pages-inspector",
     "view:theme-system": "theme:system",
     "view:theme-light": "theme:light",
     "view:theme-dark": "theme:dark",
@@ -343,34 +346,27 @@
 
   // Menu id -> Hangul editor command id (`automation.execute`).
   const EMBED_EDITOR_COMMANDS = Object.freeze({
-    "view:zoom-in": "view:zoom-in",
-    "view:zoom-out": "view:zoom-out",
-    "view:zoom-100": "view:zoom-100",
-    "view:zoom-fit-page": "view:zoom-fit-page",
-    "view:zoom-fit-width": "view:zoom-fit-width",
-    "view:zoom-dialog": "view:zoom-dialog",
-    "view:toolbar-labels": "view:toolbar-labels",
-    "view:form-mode": "view:form-mode",
-    // The reference editor's edit-paper command (`rhwp-studio/src/command/commands/page.ts:221`, F7): it has no
-    // orientation or margin-preset command, so the Hangul window has the one item.
-    "page:paper": "page:setup",
-    "page:header": "page:header-create",
-    "page:footer": "page:footer-create",
-    "table:cell-select": "table:cell-selection-enter",
-    "table:merge": "table:cell-merge",
-    "table:cell-split": "table:cell-split",
-    // The edit menu (macOS binds ⌘Z, ⇧⌘Z, ⌘X, ⌘C to these four, as the reference app does): the editor's
-    // own undo stack and selection, which the system items cannot reach inside the editor's frame.
-    "edit:undo": "edit:undo",
-    "edit:redo": "edit:redo",
-    "edit:cut": "edit:cut",
-    "edit:copy": "edit:copy",
-    "edit:find": "edit:find",
-    "edit:replace": "edit:find-replace",
-    "format:bold": "format:bold",
-    "format:italic": "format:italic",
-    "format:underline": "format:underline",
-    "insert:link": "insert:hyperlink",
+    "file:page-setup": "page:setup",
+    "view:zoom-in": "view:zoom-in", "view:zoom-out": "view:zoom-out", "view:zoom-100": "view:zoom-100",
+    "view:zoom-fit-page": "view:zoom-fit-page", "view:zoom-fit-width": "view:zoom-fit-width", "view:zoom-dialog": "view:zoom-dialog",
+    "view:toolbar-labels": "view:toolbar-labels", "view:form-mode": "view:form-mode",
+    "view:ctrl-marks": "view:ctrl-mark", "view:para-marks": "view:para-mark", "view:doc-grid": "view:toggle-grid",
+    "page:paper": "page:setup", "page:header": "page:header-create", "page:footer": "page:footer-create", "page:columns": "page:col-settings",
+    "insert:shape": "insert:shape", "insert:image": "insert:image", "insert:footnote": "insert:footnote",
+    "insert:endnote": "insert:endnote", "insert:symbol": "insert:symbols", "insert:link": "insert:hyperlink", "insert:field": "insert:field",
+    "format:bold": "format:bold", "format:italic": "format:italic", "format:underline": "format:underline",
+    "format:strike": "format:strikethrough", "format:superscript": "format:superscript", "format:subscript": "format:subscript",
+    "format:style": "format:style-dialog", "format:justify": "format:align-justify",
+    "format:para-numbering": "format:toggle-numbering", "format:para-bullet": "format:toggle-bullet",
+    "format:indent-in": "format:level-increase", "format:indent-out": "format:level-decrease",
+    "table:insert": "table:create", "table:row-above": "table:insert-row-above", "table:add-row": "table:insert-row-below",
+    "table:col-left": "table:insert-col-left", "table:col-right": "table:insert-col-right",
+    "table:row-delete": "table:delete-row", "table:col-delete": "table:delete-col",
+    "table:cell-select": "table:cell-selection-enter", "table:merge": "table:cell-merge", "table:cell-split": "table:cell-split",
+    "table:col-equal": "table:cell-width-equal", "table:border-bg": "table:border-each",
+    "table:cell-props": "table:cell-props", "table:sum": "table:block-formula", "table:hwp-border": "table:border-each",
+    "edit:undo": "edit:undo", "edit:redo": "edit:redo", "edit:cut": "edit:cut", "edit:copy": "edit:copy",
+    "edit:find": "edit:find", "edit:replace": "edit:find-replace",
   });
 
   // Same items when a plain text field has focus.
@@ -398,6 +394,7 @@
       "hwp-save-as": (fmt) => click(`.md-item[data-hwp-save-as="${fmt}"]`),
       export: (fmt) => clickVisible(`.md-item[data-export-format="${fmt}"]`),
       "export-dialog": () => clickVisible(".md-item[data-export-dialog]"),
+      "pages-inspector": () => click("[data-pages-inspector-toggle]"),
       "view-toolbar-labels": () => click("[data-view-toolbar-labels]"),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),
@@ -574,7 +571,7 @@
       if (!menuContext || !bridge?.isAvailable() || !deps.hasNativeMenu()) return;
       const active = menuContext.commandModule;
       const toolbarLabels = document.documentElement?.dataset?.toolbarLabels !== "hidden";
-      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(active), kind: host.__EASYOFFICE_MENU_KINDS__.menuKindOf(active), toolbarLabels };
+      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(active), kind: host.__EASYOFFICE_MENU_KINDS__.menuKindOf(active, document), toolbarLabels };
       const key = JSON.stringify(state);
       if (key === lastMenuState) return;
       lastMenuState = key;
@@ -647,6 +644,10 @@
         case "print": return report(actions.print?.());
         case "close": return report(actions.close?.());
         case "about": return openAbout();
+        case "theme-system": return themeApi().setMode("system");
+        case "theme-light": return themeApi().setMode("light");
+        case "theme-dark": return themeApi().setMode("dark");
+        case "theme-toggle": return themeApi().toggle();
         default: return undefined;
       }
     }
@@ -685,26 +686,7 @@
     }
 
     function bindIconToolbarScroller() {
-      const bar = document.getElementById("icon-toolbar");
-      if (!bar?.addEventListener) return;
-      bar.addEventListener("wheel", (ev) => {
-        if ((bar.scrollWidth || 0) <= (bar.clientWidth || 0)) return;
-        const delta = ev.deltaY || ev.deltaX || 0;
-        if (!delta) return;
-        bar.scrollLeft = Math.max(0, Math.min(bar.scrollWidth - bar.clientWidth, (bar.scrollLeft || 0) + delta));
-        ev.preventDefault?.();
-      });
-      bar.addEventListener("focusin", (ev) => {
-        const btn = ev.target?.closest?.(".tb-btn");
-        if (!btn) return;
-        if ((bar.scrollWidth || 0) > (bar.clientWidth || 0) && typeof bar.getBoundingClientRect === "function" && typeof btn.getBoundingClientRect === "function") {
-          const barRect = bar.getBoundingClientRect();
-          const btnRect = btn.getBoundingClientRect();
-          if (btnRect.left < barRect.left) bar.scrollLeft -= barRect.left - btnRect.left;
-          else if (btnRect.right > barRect.right) bar.scrollLeft += btnRect.right - barRect.right;
-        }
-        btn.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      });
+      host.__EASYOFFICE_TOOLBAR_SCROLL__?.attachAll?.(document);
     }
 
     // Dragging by the title bar (reference `dialog-drag.ts`); the position stays after the dialog is closed.

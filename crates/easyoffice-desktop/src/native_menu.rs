@@ -82,10 +82,22 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
     })
 }
 
-/// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords).
+/// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords;
+/// SHEET adds standard spreadsheet workbook/formula/table accelerators).
 fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> {
     if kind == MenuKind::Hwp && spec.id == "insert:link" {
         return None;
+    }
+    if kind == MenuKind::Sheet {
+        return match spec.id {
+            "sheet:note-insert" => Some("Shift+F2"),
+            "sheet:name-paste" => Some("F3"),
+            "sheet:calc-now" => Some("F9"),
+            "sheet:calc-sheet" => Some("Shift+F9"),
+            "table:insert" => Some("CmdOrCtrl+T"),
+            "table:autosum" => Some("Alt+="),
+            _ => accelerator_of(spec),
+        };
     }
     accelerator_of(spec)
 }
@@ -159,8 +171,8 @@ pub fn dispatch_script(id: &str) -> Option<String> {
     (id.len() <= MAX_ID_LEN).then(|| format!("{SCRIPT_PREFIX}{quoted});"))
 }
 
-/// Per-window Korean label for a menu item (`HWP` preserves the Hangul editor's terms while
-/// Office windows use official Office Korean terminology, `PD-354`).
+/// Per-window Korean label for a menu item (`HWP` preserves Hangul terms while other Office
+/// windows use standard Office Korean terminology, `PD-354`).
 pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
     if kind == MenuKind::Hwp {
         match spec.id {
@@ -174,6 +186,29 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             "view:zoom-100" => return "실제 크기",
             _ => {}
         }
+    } else if matches!(kind, MenuKind::Doc | MenuKind::Pages) {
+        match spec.id {
+            "insert:symbol" => return "기호",
+            "insert:link" if kind == MenuKind::Pages => return "링크",
+            "format:para-numbering" => return "번호 매기기",
+            "format:para-bullet" => return "글머리 기호",
+            "page:columns" => return "단",
+            "page:break" => return "페이지 나누기",
+            "table:insert" => return "표 삽입",
+            "table:row-above" => return "위쪽에 행 추가",
+            "table:add-row" => return "아래쪽에 행 추가",
+            "table:col-left" => return "왼쪽에 열 추가",
+            "table:col-right" => return "오른쪽에 열 추가",
+            "table:row-delete" => return "행 삭제",
+            "table:col-delete" => return "열 삭제",
+            "table:merge" => return "셀 병합",
+            "table:col-equal" => return "열 너비를 같게",
+            "table:border-bg" => return "테두리 및 음영",
+            "table:cell-props" => return "표 속성",
+            _ => {}
+        }
+    } else if matches!(kind, MenuKind::Sheet | MenuKind::Slide) && spec.id == "insert:symbol" {
+        return "기호";
     }
     spec.label
 }
