@@ -118,3 +118,40 @@ test("the placeholders and messages written by the Copilot, BASE and BOARD scrip
   }
   assert.equal(/mkInput\([^)]*"예:/.test(UI("base-studio.js")), false, "the field dialog fields carry no example text");
 });
+
+test("dynamically constructed dialogs carry no instructional prose or banned placeholders", async () => {
+  const { document, host, userClick } = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+
+  switchModule(document, "BASE");
+  await flushAsyncTurns(6);
+  userClick(document.getElementById("btn-base-import"));
+  await flushAsyncTurns(6);
+  const importDlg = document.getElementById("base-import-dialog");
+  assert.ok(importDlg && importDlg.open, "base import dialog opens");
+  assert.equal(document.getElementById("base-import-preview")?.textContent, "", "import preview starts empty");
+  assert.ok(importDlg.querySelector(".dialog-footer"), "import dialog uses .dialog-footer");
+  assert.equal(importDlg.querySelector(".dialog-actions"), null, "import dialog has no .dialog-actions");
+  for (const p of importDlg.querySelectorAll("p")) {
+    assert.doesNotMatch(p.textContent, INSTRUCTION, "base import dialog paragraph: " + p.textContent);
+  }
+  for (const inp of importDlg.querySelectorAll("input, textarea")) {
+    assert.doesNotMatch(inp.placeholder || "", INSTRUCTION, "base import dialog placeholder");
+  }
+  importDlg.close();
+
+  switchModule(document, "DOC");
+  await flushAsyncTurns(6);
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("file:exp-dlg"), true);
+  await flushAsyncTurns(6);
+  const exportDlg = document.getElementById("export-dialog");
+  assert.ok(exportDlg && exportDlg.open, "export dialog opens");
+  assert.equal(document.getElementById("export-dialog-status")?.textContent, "", "export status starts empty");
+  for (const p of exportDlg.querySelectorAll("p")) {
+    assert.doesNotMatch(p.textContent, INSTRUCTION, "export dialog paragraph: " + p.textContent);
+  }
+  for (const inp of exportDlg.querySelectorAll("input, textarea")) {
+    assert.doesNotMatch(inp.placeholder || "", INSTRUCTION, "export dialog placeholder");
+  }
+  exportDlg.close();
+});

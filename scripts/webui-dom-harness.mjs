@@ -857,6 +857,10 @@ class MiniElement extends MiniNode {
 
   close() {
     this.open = false;
+    const doc = this.ownerDocument;
+    for (let cur = doc?.activeElement; cur; cur = cur.parentNode || cur.parentElement) {
+      if (cur === this) { doc.activeElement.blur(); break; }
+    }
   }
 
   scrollIntoView() {

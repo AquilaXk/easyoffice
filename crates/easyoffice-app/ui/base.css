@@ -121,6 +121,10 @@
 .base-grid-table .base-new-record-row[data-sel="append"] td { background: var(--ui-selected); }
 .base-grid-table .base-grid-row td[data-fill-preview="true"] { background: var(--ui-selected); outline: 1px dashed var(--accent-primary); outline-offset: -1px; }
 .base-fill-handle { position: absolute; right: -3px; bottom: -3px; z-index: 4; width: 7px; height: 7px; background: var(--accent-primary); border: 1px solid var(--ui-surface); cursor: crosshair; }
-.base-import-dialog .base-dlg-select { height: var(--control-height-md); padding: 0 var(--space-3); border: 1px solid var(--ui-border-light); background: var(--ui-surface); color: var(--ui-text); font-family: var(--font-family-ui); font-size: var(--font-size-base); }
+.base-import-dialog .dialog-row .dialog-label { display: block; flex: 0 0 auto; min-width: 112px; width: auto; margin-bottom: 0; white-space: nowrap; flex-shrink: 0; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
+.base-import-dialog .dialog-text-input, .base-import-dialog .base-dlg-input { flex: 1; min-width: 0; width: auto; text-align: left; }
+.base-import-dialog .base-dlg-select { flex: 1; min-width: 0; width: auto; height: var(--control-height-md); padding: 0 var(--space-3); border: 1px solid var(--ui-border-light); background: var(--ui-surface); color: var(--ui-text); font-family: var(--font-family-ui); font-size: var(--font-size-base); }
+.base-import-dialog .base-dlg-select.custom-select { height: 22px; padding: 0; border: 0; background: transparent; }
+.base-import-dialog .base-dlg-select.custom-select .custom-select-trigger { width: 100%; }
 .base-import-preview { margin: var(--space-3) 0 0; font-size: var(--font-size-sm); color: var(--ui-text-muted); }
 .base-import-status { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--ui-danger); }

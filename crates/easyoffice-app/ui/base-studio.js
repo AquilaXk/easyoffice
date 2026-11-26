@@ -65,6 +65,7 @@
     // A toolbar button in the reference format: the sprite icon above the label (`toolbar.css`).
     const mkTbBtn = (icon, label, onClick, id) =>
       appendAll(mkBtn("tb-btn", "", onClick, id, label), setAttr(el("span", "tb-sprite icon-" + icon), "aria-hidden", "true"), el("span", "tb-label", label));
+    const mkTbSvg = (iconName, label, onClick, id) => appendAll(mkBtn("tb-btn", "", onClick, id, label), setAttr(setAttr(el("span", "tb-icon-svg"), "data-icon", iconName), "aria-hidden", "true"), el("span", "tb-label", label));
     const setTbLabel = (btn, text) => { btn.querySelector(".tb-label").textContent = text; };
     const mkSel = (cls, aria, id) => { const s = el("select", cls.includes("sb-combo") ? cls : "sb-combo " + cls); if (id) s.id = id; if (aria) s.setAttribute("aria-label", aria); return s; };
     const enhanceSelects = (scope) => host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, scope);
@@ -115,7 +116,7 @@
       const grpQuery = appendAll(el("div", "tb-group"), btnFilter, btnSort, groupSelect);
       const sep2 = setAttr(el("span", "tb-sep"), "aria-hidden", "true");
       const grpExport = appendAll(el("div", "tb-group base-export-group"),
-        mkTbBtn("folder-open", "가져오기", () => host.__EASYOFFICE_BASE_IMPORT__?.open?.(), "btn-base-import"),
+        mkTbSvg("folder-open", "가져오기", () => host.__EASYOFFICE_BASE_IMPORT__?.open?.(), "btn-base-import"),
         mkTbBtn("grid", "XLSX로 내보내기", () => { void exportAs("xlsx"); }, "btn-base-export-xlsx"),
         mkTbBtn("grid", "CSV로 내보내기", () => { void exportAs("csv"); }, "btn-base-export-csv"),
         mkTbBtn("grid", "TSV로 내보내기", () => { void exportAs("tsv"); }, "btn-base-export-tsv")
@@ -131,10 +132,9 @@
       });
       appendAll(toolbar, grpEdit, sep1, grpQuery, sep2, grpExport, viewTabs);
 
-      const queryBar = el("div", "base-query-bar");
-      queryBar.id = "base-query-bar"; queryBar.hidden = true;
-      const viewport = el("div", "base-viewport");
-      viewport.id = "base-viewport";
+      const queryBar = setAttr(el("div", "base-query-bar"), "id", "base-query-bar");
+      queryBar.hidden = true;
+      const viewport = setAttr(el("div", "base-viewport"), "id", "base-viewport");
 
       const bottomBar = setAttr(setAttr(el("div", "sheet-tab-bar base-sheet-tab-bar"), "role", "region"), "aria-label", "테이블 탭");
       const btnAddTable = mkBtn("sheet-tab-btn sheet-tab-add base-add-table-btn", "+ 새 테이블", () => addTable({}), "btn-base-add-table", "새 테이블");
@@ -147,6 +147,7 @@
       doc.body.appendChild(fieldDlg);
 
       container.replaceChildren(toolbar, queryBar, viewport, bottomBar);
+      host.__EASYOFFICE_ICONS__?.applyIcons?.(doc, toolbar);
       enhanceSelects(container);
       enhanceSelects(fieldDlg);
       refs = { container, tableTabs, viewTabs, viewButtons, btnFilter, btnSort, groupSelect, queryBar, viewport, fieldDlg };
@@ -772,7 +773,7 @@
       return true;
     }
     // ---- Public Studio API ----
-    function bind() { buildShellDom(); bound = true; host.__EASYOFFICE_BASE_IMPORT__?.bind?.(api, { document: doc, invokeIpc: deps.invokeIpc, setFeedback }); render(); return api; }
+    function bind() { buildShellDom(); bound = true; host.__EASYOFFICE_BASE_IMPORT__?.bind?.(api, { document: doc, invokeIpc: deps.invokeIpc, setFeedback, shellChrome: deps.shellChrome }); render(); return api; }
     const getState = () => M.serializeBaseState(state);
     function setState(next) {
       const res = M.hydrateBaseState(next);

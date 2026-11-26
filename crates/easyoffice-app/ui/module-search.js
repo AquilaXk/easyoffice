@@ -299,9 +299,9 @@
     const items = [];
     if (activeModule === "DOC") {
       for (const [cmd, title, en, menuId] of [
-        ["doc-strike", "취소선", "strikethrough", "format:doc-strike"],
-        ["doc-sup", "위 첨자", "superscript", "format:doc-sup"],
-        ["doc-sub", "아래 첨자", "subscript", "format:doc-sub"],
+        ["doc-strike", "취소선", "strikethrough", "format:strike"],
+        ["doc-sup", "위 첨자", "superscript", "format:superscript"],
+        ["doc-sub", "아래 첨자", "subscript", "format:subscript"],
       ]) {
         items.push({ id: "studio-cmd:" + cmd, module: "DOC", title, shortcut: cmd === "doc-sup" ? fmt("⇧⌘=") : cmd === "doc-sub" ? fmt("⌘=") : "", searchKey: "서식 " + title + " " + en, run: () => runNativeMenu(menuId) });
       }

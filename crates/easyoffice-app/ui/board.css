@@ -400,6 +400,11 @@
   gap: var(--space-3);
 }
 
+.board-style-group[hidden],
+.board-style-field[hidden] {
+  display: none;
+}
+
 .board-style-field {
   display: inline-flex;
   align-items: center;
@@ -409,13 +414,29 @@
   white-space: nowrap;
 }
 
-.board-style-color {
-  width: 24px;
-  height: 20px;
-  padding: 0;
-  border: 1px solid var(--ui-border-light);
-  background: var(--ui-surface);
+.board-style-group .dialog-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   cursor: pointer;
+}
+
+.board-style-group .dialog-swatch-chip {
+  width: 22px;
+  height: 12px;
+  border: 1px solid var(--color-border-dark);
+  background: var(--dialog-swatch, var(--color-surface));
+}
+
+.board-style-group .dialog-color-host .sb-hl-palette {
+  z-index: 300;
 }
 
 .board-style-select {

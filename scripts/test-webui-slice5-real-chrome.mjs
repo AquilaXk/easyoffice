@@ -581,3 +581,248 @@ test("real Chrome: DOC sub/sup/spacing & DOCX table-cell roundtrip, SLIDE UX/sea
   assert.equal(brRt.tdHtml, "Line1<br>Line2");
   assert.equal(brRt.t2, "Line1\nLine2");
 });
+
+test("real Chrome: command palette DOC formatting, BASE import icon/dialog UX, BOARD color swatches, export focus, and native menu gates", { skip }, async () => {
+  const pickPalette = async (query, expectedText) => {
+    await sendKey("/", "Slash", 191, CTRL);
+    await waitFor(`document.getElementById("cmd-palette-modal")?.open === true && document.activeElement?.id === "cmd-search-input"`);
+    await js(`document.getElementById("cmd-search-input")?.select?.()`);
+    await ctx.cdp.send("Input.insertText", { text: query });
+    await waitFor(`Array.from(document.querySelectorAll("#cmd-palette-list .cp-item .cp-item-label")).some((el) => el.textContent.trim() === ${JSON.stringify(expectedText)})`);
+    const sel = await js(`(() => {
+      const items = Array.from(document.querySelectorAll("#cmd-palette-list .cp-item"));
+      const idx = items.findIndex((el) => el.querySelector(".cp-item-label")?.textContent?.trim() === ${JSON.stringify(expectedText)});
+      if (idx < 0) return null;
+      items[idx].id = items[idx].id || "cp-opt-" + idx;
+      return "#" + items[idx].id;
+    })()`);
+    assert.ok(sel, `palette item present: ${expectedText}`);
+    await mouseClick(sel);
+    await waitFor(`document.getElementById("cmd-palette-modal")?.open === false`);
+    await sleep(80);
+  };
+
+  const selectWord = async (word) => {
+    await js(`(() => {
+      const ed = document.getElementById("doc-editor");
+      const w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = w.nextNode())) {
+        if (n.textContent.includes(${JSON.stringify(word)})) {
+          const idx = n.textContent.indexOf(${JSON.stringify(word)});
+          const sel = window.getSelection();
+          const r = document.createRange();
+          r.setStart(n, idx);
+          r.setEnd(n, idx + ${word.length});
+          sel.removeAllRanges();
+          sel.addRange(r);
+          ed.focus();
+          return true;
+        }
+      }
+      return false;
+    })()`);
+  };
+
+  // 1. DOC Command Palette: strike / superscript / subscript toggle real runs in #doc-editor
+  await openModule("DOC");
+  await waitFor(`Boolean(document.getElementById("doc-editor") && window.__EASYOFFICE_NATIVE_MENU__)`);
+  await js(`document.getElementById("doc-editor").innerHTML = "<p>Alpha Beta Gamma</p>";`);
+  await selectWord("Alpha");
+  await pickPalette("취소선", "취소선");
+  assert.equal(await js(`document.querySelector('#doc-editor .eo-run[data-eo-strike="true"]')?.textContent`), "Alpha");
+
+  await selectWord("Beta");
+  await pickPalette("위 첨자", "위 첨자");
+  assert.equal(await js(`document.querySelector('#doc-editor .eo-run[data-eo-superscript="true"]')?.textContent`), "Beta");
+
+  await selectWord("Gamma");
+  await pickPalette("아래 첨자", "아래 첨자");
+  assert.equal(await js(`document.querySelector('#doc-editor .eo-run[data-eo-subscript="true"]')?.textContent`), "Gamma");
+
+  // 2. Native menu modal gates + tool:palette toggle + cross-module format:cell-format guard
+  await js(`document.getElementById("symbol-picker-dialog").showModal();`);
+  await waitFor(`document.getElementById("symbol-picker-dialog")?.open === true`);
+  assert.equal(await js(`window.__EASYOFFICE_NATIVE_MENU__("tool:palette")`), false, "tool:palette blocked while symbol dialog open");
+  assert.equal(await js(`document.getElementById("cmd-palette-modal").open`), false, "cmd-palette-modal must not stack");
+  await js(`document.getElementById("symbol-picker-dialog").close();`);
+
+  assert.equal(await js(`window.__EASYOFFICE_NATIVE_MENU__("tool:palette")`), true);
+  await waitFor(`document.getElementById("cmd-palette-modal")?.open === true`);
+  assert.equal(await js(`window.__EASYOFFICE_NATIVE_MENU__("tool:palette")`), true, "tool:palette toggles closed");
+  await waitFor(`document.getElementById("cmd-palette-modal")?.open === false`);
+
+  assert.equal(await js(`window.__EASYOFFICE_NATIVE_MENU__("format:cell-format")`), false, "format:cell-format rejected in DOC");
+  assert.equal(await js(`Boolean(document.getElementById("sheet-numfmt-dialog")?.open)`), false, "#sheet-numfmt-dialog must not open in DOC");
+
+  // 3. #export-dialog focus moves onto .custom-select-trigger
+  assert.equal(await js(`window.__EASYOFFICE_NATIVE_MENU__("file:exp-dlg")`), true);
+  await waitFor(`document.getElementById("export-dialog")?.open === true`);
+  const exportFocus = await js(`({ activeMatch: document.activeElement === document.querySelector("#export-dialog .custom-select-trigger") })`);
+  assert.equal(exportFocus.activeMatch, true, "#export-dialog opens with focus on .custom-select-trigger");
+  await sendKey("Escape", "Escape", 27);
+  await waitFor(`document.getElementById("export-dialog")?.open === false`);
+
+  // 4. BASE #btn-base-import SVG icon + #base-import-dialog layout, drag, Tab trap, Escape isolation
+  await openModule("BASE");
+  await waitFor(`Boolean(document.getElementById("btn-base-import") && document.querySelector("#btn-base-import .tb-icon-svg svg"))`);
+  const baseBtnBox = await js(`(() => {
+    const svg = document.querySelector("#btn-base-import .tb-icon-svg svg");
+    const r = svg?.getBoundingClientRect?.();
+    return r ? { w: r.width, h: r.height } : null;
+  })()`);
+  assert.ok(baseBtnBox && baseBtnBox.w > 0 && baseBtnBox.h > 0, "#btn-base-import SVG icon renders visibly");
+
+  await mouseClick("#btn-base-import");
+  await waitFor(`document.getElementById("base-import-dialog")?.open === true`);
+  const importMetrics = await js(`(() => {
+    const dlg = document.getElementById("base-import-dialog");
+    const footer = dlg.querySelector(".dialog-footer");
+    const footerCs = getComputedStyle(footer);
+    const footerRect = footer.getBoundingClientRect();
+    const labels = Array.from(dlg.querySelectorAll(".dialog-row .dialog-label")).map((el) => ({
+      text: el.textContent,
+      height: el.getBoundingClientRect().height,
+      lineHeight: parseFloat(getComputedStyle(el).lineHeight) || 16,
+    }));
+    const fileW = document.getElementById("base-import-file").getBoundingClientRect().width;
+    const nameW = document.getElementById("base-import-table-name").getBoundingClientRect().width;
+    const selWrap = dlg.querySelector(".base-dlg-select.custom-select");
+    const selCs = getComputedStyle(selWrap);
+    const btnEls = Array.from(footer.querySelectorAll("button"));
+    const btns = btnEls.map((b) => b.textContent);
+    const btnRects = btnEls.map((b) => { const r = b.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top }; });
+    return {
+      previewText: document.getElementById("base-import-preview")?.textContent,
+      hasFooter: Boolean(footer),
+      hasActions: Boolean(dlg.querySelector(".dialog-actions")),
+      display: footerCs.display,
+      justifyContent: footerCs.justifyContent,
+      footerRect: { left: footerRect.left, right: footerRect.right, width: footerRect.width },
+      btnRects,
+      btns,
+      labels,
+      fileW,
+      nameW,
+      outerBorderTop: selCs.borderTopWidth,
+      outerPaddingTop: selCs.paddingTop,
+    };
+  })()`);
+  assert.equal(importMetrics.previewText, "");
+  assert.equal(importMetrics.hasFooter, true);
+  assert.equal(importMetrics.hasActions, false);
+  assert.equal(importMetrics.display, "flex");
+  assert.ok(importMetrics.btnRects.length === 2);
+  assert.ok(Math.abs((importMetrics.footerRect.right - 12) - importMetrics.btnRects[1].right) <= 2, "primary button right-aligned in .dialog-footer");
+  assert.ok(importMetrics.btnRects[0].left > importMetrics.footerRect.left + 100 && importMetrics.btnRects[0].right < importMetrics.btnRects[1].left, "[취소] precedes [가져오기] on right");
+  assert.deepEqual(importMetrics.btns, ["취소", "가져오기"]);
+  for (const lbl of importMetrics.labels) assert.ok(lbl.height <= 26, `single-line label (${lbl.text}): ${lbl.height}px`);
+  assert.ok(importMetrics.fileW > 180, `expanded file input width: ${importMetrics.fileW}`);
+  assert.ok(importMetrics.nameW > 180, `expanded table name input width: ${importMetrics.nameW}`);
+  assert.equal(importMetrics.outerBorderTop, "0px");
+  assert.equal(importMetrics.outerPaddingTop, "0px");
+
+  // Drag title bar
+  const beforeDrag = await js(`(() => { const r = document.querySelector("#base-import-dialog .dialog-wrap").getBoundingClientRect(); const t = document.querySelector("#base-import-dialog .dialog-title span").getBoundingClientRect(); return { x: r.left, y: r.top, tx: t.left + t.width / 2, ty: t.top + t.height / 2 }; })()`);
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: beforeDrag.tx, y: beforeDrag.ty });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: beforeDrag.tx, y: beforeDrag.ty, button: "left", buttons: 1, clickCount: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: beforeDrag.tx + 36, y: beforeDrag.ty + 24, buttons: 1 });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: beforeDrag.tx + 36, y: beforeDrag.ty + 24, button: "left", buttons: 0, clickCount: 1 });
+  const afterDrag = await js(`(() => { const r = document.querySelector("#base-import-dialog .dialog-wrap").getBoundingClientRect(); return { x: r.left, y: r.top }; })()`);
+  assert.ok(Math.abs(afterDrag.x - beforeDrag.x - 36) < 4 && Math.abs(afterDrag.y - beforeDrag.y - 24) < 4, "titlebar drag moves #base-import-dialog");
+
+  // Tab focus trap inside #base-import-dialog
+  for (let i = 0; i < 6; i += 1) {
+    await sendKey("Tab", "Tab", 9);
+    const trapped = await js(`document.getElementById("base-import-dialog").contains(document.activeElement)`);
+    assert.equal(trapped, true, `Tab ${i + 1} stays inside #base-import-dialog`);
+  }
+
+  // Nested .custom-select Escape closes only the dropdown, second Escape closes dialog
+  await mouseClick('#base-import-dialog [data-select-id="base-import-mode"] .custom-select-trigger');
+  await waitFor(`document.querySelector('#base-import-dialog [data-select-id="base-import-mode"]')?.classList.contains("open")`);
+  await sendKey("Escape", "Escape", 27);
+  await sleep(60);
+  assert.equal(await js(`document.querySelector('#base-import-dialog [data-select-id="base-import-mode"]')?.classList.contains("open")`), false, "first Escape closes nested select");
+  assert.equal(await js(`document.getElementById("base-import-dialog")?.open`), true, "first Escape keeps #base-import-dialog open");
+  await sendKey("Escape", "Escape", 27);
+  await waitFor(`document.getElementById("base-import-dialog")?.open === false`);
+
+  // 5. BOARD style bar color swatches hide raw <input type="color"> & sync/dismiss properly
+  await openModule("BOARD");
+  await waitFor(`Boolean(window.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.())`);
+  await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const n1 = b.addNode({ kind: "shape", x: 80, y: 80, w: 140, h: 70, fill: "DBEAFE", stroke: "2563EB", text: "S1" });
+    const n2 = b.addNode({ kind: "shape", x: 260, y: 80, w: 140, h: 70, fill: "FEE2E2", stroke: "DC2626", text: "S2" });
+    b.selectNode(n1.id);
+    window.__AUDIT_BOARD_NODES__ = [n1.id, n2.id];
+  })()`);
+  const boardSwatches = await js(`(() => {
+    const inpStats = ["board-style-fill", "board-style-stroke"].map((id) => {
+      const el = document.getElementById(id);
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return { id, opacity: cs.opacity, pointerEvents: cs.pointerEvents, w: r.width, h: r.height, tabIndex: el.tabIndex, ariaHidden: el.getAttribute("aria-hidden") };
+    });
+    const btns = ["#board-style-fill-host .dialog-swatch", "#board-style-stroke-host .dialog-swatch"].map((sel) => {
+      const b = document.querySelector(sel);
+      const c = b?.querySelector(".dialog-swatch-chip");
+      const r = b?.getBoundingClientRect();
+      const cr = c?.getBoundingClientRect();
+      return { sel, w: r?.width || 0, h: r?.height || 0, cw: cr?.width || 0, ch: cr?.height || 0, swatch: c?.style.getPropertyValue("--dialog-swatch") };
+    });
+    return { inpStats, btns };
+  })()`);
+  for (const s of boardSwatches.inpStats) {
+    assert.equal(s.opacity, "0", `${s.id} hidden opacity`);
+    assert.equal(s.pointerEvents, "none", `${s.id} pointerEvents none`);
+    assert.ok(s.w <= 2 && s.h <= 2, `${s.id} hidden size`);
+    assert.equal(s.tabIndex, -1);
+    assert.equal(s.ariaHidden, "true");
+  }
+  for (const b of boardSwatches.btns) {
+    assert.ok(b.w >= 20 && b.h >= 18 && b.cw >= 18 && b.ch >= 10, `${b.sel} visible swatch button/chip`);
+  }
+  assert.equal(boardSwatches.btns[0].swatch.toUpperCase(), "#DBEAFE");
+
+  // Selection switch updates swatch chip colors
+  await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().selectNode(window.__AUDIT_BOARD_NODES__[1]);`);
+  assert.equal(await js(`document.querySelector("#board-style-fill-host .dialog-swatch-chip").style.getPropertyValue("--dialog-swatch").toUpperCase()`), "#FEE2E2");
+
+  // Click swatch -> opens palette, Escape closes palette; click outside closes palette; click swatch picks color
+  await mouseClick("#board-style-fill-host .dialog-swatch");
+  await waitFor(`document.getElementById("board-style-fill-palette")?.hidden === false`);
+  await sendKey("Escape", "Escape", 27);
+  await waitFor(`document.getElementById("board-style-fill-palette")?.hidden === true`);
+
+  await mouseClick("#board-style-stroke-host .dialog-swatch");
+  await waitFor(`document.getElementById("board-style-stroke-palette")?.hidden === false`);
+  await mouseClick("#btn-board-select");
+  await waitFor(`document.getElementById("board-style-stroke-palette")?.hidden === true`);
+
+  await mouseClick("#board-style-fill-host .dialog-swatch");
+  await waitFor(`document.getElementById("board-style-fill-palette")?.hidden === false`);
+  await mouseClick("#board-style-fill-palette .sb-hl-swatch");
+  await waitFor(`document.getElementById("board-style-fill-palette")?.hidden === true`);
+  const pickedFill = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const n2 = b.getState().nodes.find((n) => n.id === window.__AUDIT_BOARD_NODES__[1]);
+    return { modelFill: n2?.fill, swatch: document.querySelector("#board-style-fill-host .dialog-swatch-chip").style.getPropertyValue("--dialog-swatch").replace(/^#/, "").toUpperCase() };
+  })()`);
+  assert.equal(pickedFill.modelFill, pickedFill.swatch, "palette pick updates both node fill and swatch chip");
+
+  // Connector hides fill field visually (.board-style-field[hidden]), and deselect hides style bar
+  const connHiddenCheck = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const [n1Id, n2Id] = window.__AUDIT_BOARD_NODES__;
+    const conn = b.addConnector({ fromId: n1Id, toId: n2Id });
+    b.selectConnector(conn.id);
+    const fillDisplay = getComputedStyle(document.getElementById("board-style-fill-wrap")).display;
+    b.selectNode(null);
+    const barDisplay = getComputedStyle(document.getElementById("board-style-bar")).display;
+    return { fillDisplay, barDisplay };
+  })()`);
+  assert.equal(connHiddenCheck.fillDisplay, "none");
+  assert.equal(connHiddenCheck.barDisplay, "none");
+});

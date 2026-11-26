@@ -920,4 +920,38 @@ test("Regression: native menu edit:cut/copy and toolbar clip commands preserve B
     { row: 0, col: 1, start: 0, end: 1, url: "https://example.org" },
     { row: 0, col: 1, start: 2, end: 3, url: "https://example.org" },
   ]);
+
+  // 6. Post-audit fixes: DOC native menu cross-module & modal/field gates, tool:palette toggle, export focus, BASE icon/dialog, BOARD swatches
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:cell-format"), false, "sheet format:cell-format must fail closed in DOC");
+  assert.equal(Boolean($(h.document, "sheet-numfmt-dialog")?.open), false);
+  const symDlg = $(h.document, "symbol-picker-dialog");
+  symDlg.showModal();
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:palette"), false);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:strike"), false);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:superscript"), false);
+  symDlg.close();
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:palette"), true);
+  assert.equal($(h.document, "cmd-palette-modal").open, true);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:palette"), true);
+  assert.equal($(h.document, "cmd-palette-modal").open, false);
+
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("file:exp-dlg"), true);
+  assert.equal(h.document.activeElement, $(h.document, "export-dialog").querySelector(".custom-select-trigger"));
+  $(h.document, "export-dialog").close();
+
+  switchModule(h.document, "BASE");
+  await flushAsyncTurns(6);
+  assert.ok($(h.document, "btn-base-import")?.querySelector(".tb-icon-svg svg"), "#btn-base-import has SVG icon");
+  switchModule(h.document, "BOARD");
+  await flushAsyncTurns(6);
+  const bCtrl = h.host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+  const bn = bCtrl.addNode({ kind: "shape", x: 40, y: 40, w: 120, h: 60, fill: "DBEAFE", stroke: "2563EB" });
+  bCtrl.selectNode(bn.id);
+  const fillInp = $(h.document, "board-style-fill");
+  const strokeInp = $(h.document, "board-style-stroke");
+  assert.equal(fillInp.classList.contains("eo-color-input"), true);
+  assert.equal(strokeInp.classList.contains("eo-color-input"), true);
+  assert.equal(fillInp.tabIndex, -1);
+  assert.equal(fillInp.getAttribute("aria-hidden"), "true");
+  assert.equal($(h.document, "board-style-fill-host").querySelector(".dialog-swatch-chip")?.style.getPropertyValue("--dialog-swatch").toUpperCase(), "#DBEAFE");
 });

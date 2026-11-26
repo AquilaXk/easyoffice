@@ -853,8 +853,8 @@
       workspaceSession.execTextFieldEdit(TEXT_FIELD_EDIT_COMMANDS[id]);
       return true;
     }
-    if (id === "view:palette" && modal?.open) { togglePaletteModal(modal, input); return true; }
-    if (!menuTable.allowsNativeMenuContext(id, document, modal)) return false;
+    if (id === "tool:palette" && modal?.open) { togglePaletteModal(modal, input); return true; }
+    if (!menuTable.allowsNativeMenuContext(id, document, modal, activeModule)) return false;
     if (id === "view:toolbar-labels") { shellChrome.toggleToolbarLabels?.(); return true; }
     // Inside the Hangul editor the zoom and cell items are the editor's own commands (a command it
     // cannot run right now, such as merging without selected cells, is refused by the editor and ignored).
@@ -974,7 +974,7 @@
     await loadWorkspaceBootstrap();
     void shellChrome.pushRecents(await windowBridge.start());
     await windowBridge.loadPending((name, bytes) => fileOpen.openDocumentFromBytes(name, bytes), () => workspaceSession.markSaved());
-    if (!windowBridge.isStart) void hwpSession.restore().catch(() => {});
+    if (!windowBridge.isStart) void (activeModule === "HWP" ? hwpHost.whenSettled() : Promise.resolve()).then(() => hwpSession.restore()).catch(() => {});
     const smokeSteps = { hwp: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")), pdf: () => hwpSession.smokePdf(), print: () => hwpPrint.smoke(), frame_ipc: () => hwpHost.runFrameProbe() };
     void windowBridge.runSmoke({ invokeIpc, steps: smokeSteps });
   }

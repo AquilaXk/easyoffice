@@ -403,7 +403,7 @@ test("Slice 2 regression: HWP -> DOC(.pages) tab switch restores Pages labels, O
   pageDlg.showModal();
   assert.equal(host.__EASYOFFICE_NATIVE_MENU__("insert:link"), false);
   assert.equal(host.__EASYOFFICE_NATIVE_MENU__("format:bold"), false);
-  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("view:palette"), false);
+  assert.equal(host.__EASYOFFICE_NATIVE_MENU__("tool:palette"), false);
   assert.equal(document.getElementById("doc-link-dialog").open, false);
   pageDlg.close();
 

@@ -110,17 +110,52 @@
       return node;
     };
 
-    function bindColorControl(input, onApply) {
+    const syncSwatchChip = (input) => {
+      const chip = input?.parentElement?.querySelector?.(".dialog-swatch-chip");
+      chip?.style?.setProperty?.("--dialog-swatch", input?.value || "");
+    };
+
+    function bindColorControl(input, pickerMounted, onApply) {
       input.addEventListener("input", () => {
+        syncSwatchChip(input);
         const changed = mutateSelectedItem(hooks, (n, c) => onApply(n, c, input.value), { recordUndo: !dragUndoActive });
         if (changed) dragUndoActive = true;
       });
-      input.addEventListener("change", () => {
+      if (!pickerMounted) {
+        input.addEventListener("change", () => {
+          syncSwatchChip(input);
+          const hadDragUndo = dragUndoActive;
+          dragUndoActive = false;
+          mutateSelectedItem(hooks, (n, c) => onApply(n, c, input.value), { recordUndo: !hadDragUndo });
+        });
+      }
+      input.addEventListener("blur", () => { dragUndoActive = false; });
+    }
+
+    function createColorField(wrapId, hostId, inputId, paletteId, captionText, ariaLabel, onApply) {
+      const wrap = el("div", "board-style-field", { id: wrapId });
+      const hostEl = el("div", "sb-color-host dialog-color-host", { id: hostId });
+      const chip = el("span", "dialog-swatch-chip", { "aria-hidden": "true" });
+      const caret = el("span", "", { "aria-hidden": "true" }, "▾");
+      const toggleBtn = appendAll(
+        el("button", "dialog-swatch", { type: "button", "data-color-toggle": "true", "aria-haspopup": "true", "aria-expanded": "false", title: ariaLabel, "aria-label": ariaLabel }),
+        chip, caret
+      );
+      const input = el("input", "", { id: inputId, type: "color", "aria-label": ariaLabel });
+      const palette = el("div", "sb-hl-palette", { id: paletteId });
+      palette.hidden = true;
+      appendAll(hostEl, toggleBtn, input, palette);
+      appendAll(wrap, el("span", "board-style-caption", {}, captionText), hostEl);
+      const commitColor = (raw) => {
+        if (raw) input.value = raw;
+        syncSwatchChip(input);
         const hadDragUndo = dragUndoActive;
         dragUndoActive = false;
         mutateSelectedItem(hooks, (n, c) => onApply(n, c, input.value), { recordUndo: !hadDragUndo });
-      });
-      input.addEventListener("blur", () => { dragUndoActive = false; });
+      };
+      const picker = host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker?.(hostEl, commitColor);
+      bindColorControl(input, Boolean(picker), onApply);
+      return { wrap, input };
     }
 
     if (bar && doc) {
@@ -129,15 +164,35 @@
       groupEl = el("div", "tb-group board-style-group", { id: "board-style-bar", role: "group", "aria-label": "선택 요소 서식" });
       groupEl.hidden = true;
 
-      fillInput = el("input", "board-style-color", { id: "board-style-fill", type: "color", "aria-label": "채우기 색" });
-      fillWrap = appendAll(el("label", "board-style-field", { id: "board-style-fill-wrap", for: "board-style-fill" }),
-        el("span", "board-style-caption", {}, "채우기"), fillInput
-      );
+      ({ wrap: fillWrap, input: fillInput } = createColorField(
+        "board-style-fill-wrap", "board-style-fill-host", "board-style-fill", "board-style-fill-palette", "채우기", "채우기 색",
+        (node, _conn, raw) => {
+          if (!node || (node.kind !== "shape" && node.kind !== "text")) return false;
+          const next = normalizeHex6(raw, node.fill || "EFF6FF");
+          if (node.fill === next) return false;
+          node.fill = next;
+          return true;
+        }
+      ));
 
-      strokeInput = el("input", "board-style-color", { id: "board-style-stroke", type: "color", "aria-label": "선 색" });
-      strokeWrap = appendAll(el("label", "board-style-field", { id: "board-style-stroke-wrap", for: "board-style-stroke" }),
-        el("span", "board-style-caption", {}, "선 색"), strokeInput
-      );
+      ({ wrap: strokeWrap, input: strokeInput } = createColorField(
+        "board-style-stroke-wrap", "board-style-stroke-host", "board-style-stroke", "board-style-stroke-palette", "선 색", "선 색",
+        (node, conn, raw) => {
+          const next = normalizeHex6(raw, node ? "2563EB" : "335095");
+          if (conn) {
+            if (conn.stroke === next) return false;
+            conn.stroke = next;
+            return true;
+          }
+          if (node?.kind === "shape") {
+            if (node.stroke === next) return false;
+            node.stroke = next;
+            if ((Number(node.strokeWidthPt) || 0) === 0) node.strokeWidthPt = 1.5;
+            return true;
+          }
+          return false;
+        }
+      ));
 
       widthSelect = el("select", "sb-select sb-combo board-style-select", { id: "board-style-width", "aria-label": "선 두께" });
       for (const optVal of WIDTH_OPTIONS) {
@@ -164,30 +219,6 @@
         appendAll(bar, sepEl, groupEl);
       }
       host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, groupEl);
-
-      bindColorControl(fillInput, (node, _conn, raw) => {
-        if (!node || (node.kind !== "shape" && node.kind !== "text")) return false;
-        const next = normalizeHex6(raw, node.fill || "EFF6FF");
-        if (node.fill === next) return false;
-        node.fill = next;
-        return true;
-      });
-
-      bindColorControl(strokeInput, (node, conn, raw) => {
-        const next = normalizeHex6(raw, node ? "2563EB" : "335095");
-        if (conn) {
-          if (conn.stroke === next) return false;
-          conn.stroke = next;
-          return true;
-        }
-        if (node?.kind === "shape") {
-          if (node.stroke === next) return false;
-          node.stroke = next;
-          if ((Number(node.strokeWidthPt) || 0) === 0) node.strokeWidthPt = 1.5;
-          return true;
-        }
-        return false;
-      });
 
       widthSelect.addEventListener("change", () => {
         const val = Number(widthSelect.value);
@@ -249,10 +280,12 @@
 
     function sync() {
       if (!groupEl || !sepEl) return;
+      const closeIn = host.__EASYOFFICE_COLOR_PICKER__?.closePopupIn;
       const sel = hooks.getSelection?.() || {};
       const node = sel.node || null;
       const conn = sel.connector || null;
       if (!node && !conn) {
+        closeIn?.(groupEl);
         sepEl.hidden = true;
         groupEl.hidden = true;
         return;
@@ -260,23 +293,23 @@
       sepEl.hidden = false;
       groupEl.hidden = false;
       if (conn) {
-        if (fillWrap) fillWrap.hidden = true;
+        if (fillWrap) { closeIn?.(fillWrap); fillWrap.hidden = true; }
         if (strokeWrap) strokeWrap.hidden = false;
         if (widthWrap) widthWrap.hidden = false;
         if (zeroWidthOpt) zeroWidthOpt.disabled = true;
-        if (strokeInput) strokeInput.value = "#" + normalizeHex6(conn.stroke, "335095");
+        if (strokeInput) { strokeInput.value = "#" + normalizeHex6(conn.stroke, "335095"); syncSwatchChip(strokeInput); }
         if (widthSelect) { widthSelect.value = nearestWidthOption(conn.strokeWidthPt ?? 1.5); host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(widthSelect); }
         if (labelInput && doc.activeElement !== labelInput) labelInput.value = conn.label || "";
         return;
       }
       const isShape = node.kind === "shape";
       const hasFill = isShape || node.kind === "text";
-      if (fillWrap) fillWrap.hidden = !hasFill;
-      if (strokeWrap) strokeWrap.hidden = !isShape;
+      if (fillWrap) { if (!hasFill) closeIn?.(fillWrap); fillWrap.hidden = !hasFill; }
+      if (strokeWrap) { if (!isShape) closeIn?.(strokeWrap); strokeWrap.hidden = !isShape; }
       if (widthWrap) widthWrap.hidden = !isShape;
       if (zeroWidthOpt) zeroWidthOpt.disabled = false;
-      if (hasFill && fillInput) fillInput.value = "#" + normalizeHex6(node.fill, isShape ? "EFF6FF" : "FFFFFF");
-      if (isShape && strokeInput) strokeInput.value = "#" + normalizeHex6(node.stroke, "2563EB");
+      if (hasFill && fillInput) { fillInput.value = "#" + normalizeHex6(node.fill, isShape ? "EFF6FF" : "FFFFFF"); syncSwatchChip(fillInput); }
+      if (isShape && strokeInput) { strokeInput.value = "#" + normalizeHex6(node.stroke, "2563EB"); syncSwatchChip(strokeInput); }
       if (isShape && widthSelect) { widthSelect.value = nearestWidthOption(node.strokeWidthPt ?? 1.5); host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(widthSelect); }
       if (labelInput && doc.activeElement !== labelInput) {
         labelInput.value = node.kind === "chart" ? (node.title || "") : node.kind === "image" ? (node.alt || "") : (node.text || "");

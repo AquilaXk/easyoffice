@@ -373,6 +373,7 @@
     const doc = deps.document || host.document;
     const getInvoke = () => deps.invokeIpc || host.__EASYOFFICE_INVOKE_BACKEND__;
     const setFeedback = typeof deps.setFeedback === "function" ? deps.setFeedback : () => {};
+    const shellChrome = () => deps.shellChrome || host.__EASYOFFICE_SHELL_CHROME__;
     let decoded = null;
     let selectedFileName = "";
     let dlg = null;
@@ -415,12 +416,11 @@
       const hdrChk = byId("base-import-header");
       if (hdrChk) hdrChk.checked = true;
       const prev = byId("base-import-preview");
-      if (prev) prev.textContent = "CSV, TSV, XLSX 파일(최대 10 MiB · 10,000건 · 64열)을 선택해 주세요.";
+      if (prev) prev.textContent = "";
       const status = byId("base-import-status");
       if (status) status.textContent = "";
       const applyBtn = byId("btn-base-import-apply");
       if (applyBtn) applyBtn.disabled = true;
-      host.__EASYOFFICE_SHELL_CHROME__?.enableDialogDrag?.(dlg);
       if (typeof dlg.showModal === "function" && !dlg.open) dlg.showModal();
       else dlg.setAttribute?.("open", "");
     }
@@ -586,11 +586,13 @@
       applyBtn.disabled = true;
       applyBtn.addEventListener("click", applyImport);
 
-      const actions = appendAll(el("div", "dialog-actions"), cancelBtn, applyBtn);
+      const actions = appendAll(el("div", "dialog-footer"), cancelBtn, applyBtn);
       appendAll(wrap, titleBar, body, actions);
       dlg.appendChild(wrap);
       doc.body.appendChild(dlg);
-      host.__EASYOFFICE_SHELL_CHROME__?.enableDialogKeys?.(dlg);
+      const chrome = shellChrome();
+      chrome?.enableDialogDrag?.(dlg);
+      chrome?.enableDialogKeys?.(dlg);
       host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, dlg);
       return dlg;
     }

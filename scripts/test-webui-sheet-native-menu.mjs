@@ -43,7 +43,10 @@ test("each native item clicks the page's menu item that carries its label", asyn
     assert.equal(el.querySelector(".md-label").textContent, item.label, item.id);
     el.addEventListener("click", () => clicked.push(item.id));
   }
-  for (const item of items) assert.equal(document.defaultView.__EASYOFFICE_NATIVE_MENU__(item.id), true, item.id);
+  for (const item of items) {
+    for (const dlg of document.querySelectorAll("dialog")) if (dlg.open) dlg.close();
+    assert.equal(document.defaultView.__EASYOFFICE_NATIVE_MENU__(item.id), true, item.id);
+  }
   assert.deepEqual(clicked, items.map((i) => i.id));
 });
 

@@ -17,8 +17,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, cur, i, all) => (cur.startsWith("--") ? [...acc, [cur.slice(2), all[i + 1]]] : acc), []));
-const APP = args.app;
-const CHROME = args.chrome;
+const APP = args.app || process.env.EO_APP;
+const CHROME = args.chrome || process.env.EO_CHROME || process.env.CHROME
+  || ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].find((p) => fs.existsSync(p));
 const PORT = Number(args.port || 8861);
 const DEBUG_PORT = PORT + 100;
 const OUT = args.out || fs.mkdtempSync(path.join(os.tmpdir(), "eo-hwp-roundtrip-"));
@@ -121,6 +122,7 @@ async function connect(wsUrl) {
   await new Promise((resolve, reject) => { sock.onopen = resolve; sock.onerror = reject; });
   sock.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.error && !pending.has(m.id)) logs.push("[cdp-error] " + JSON.stringify(m.error));
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
     if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") frameSessions.push(m.params.sessionId);
     if (m.method === "Target.detachedFromTarget") {
@@ -156,7 +158,7 @@ async function connect(wsUrl) {
 
 const KEYS = {
   Home: { code: "Home", vk: 36 }, End: { code: "End", vk: 35 }, ArrowRight: { code: "ArrowRight", vk: 39 },
-  Enter: { code: "Enter", vk: 13 }, a: { code: "KeyA", vk: 65 },
+  Backspace: { code: "Backspace", vk: 8 }, Enter: { code: "Enter", vk: 13 }, a: { code: "KeyA", vk: 65 },
 };
 
 async function pressKey(cdp, name, modifiers = 0, withCtrlHome = false) {
@@ -203,7 +205,9 @@ async function editFirstThreeChars(cdp) {
   await sleep(200);
   const size = centerOf(await rectOf(cdp, "#font-size", true));
   await click(cdp, size.x, size.y);
-  await pressKey(cdp, "a", 2); // Ctrl+A inside the size field
+  await pressKey(cdp, "a", 2);
+  await pressKey(cdp, "End");
+  for (let i = 0; i < 6; i += 1) await pressKey(cdp, "Backspace");
   await cdp.send("Input.insertText", { text: "20" });
   await pressKey(cdp, "Enter");
   await sleep(300);
@@ -212,27 +216,48 @@ async function editFirstThreeChars(cdp) {
   await sleep(300);
 }
 
+async function waitRectVisible(cdp, selector, inFrame, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rect = await rectOf(cdp, selector, inFrame);
+    if (rect.w > 0 && rect.h > 0) return rect;
+    await sleep(50);
+  }
+  throw new Error("element not visible: " + selector);
+}
+
 async function clickMenu(cdp, itemSelector) {
-  const title = centerOf(await rectOf(cdp, '.menu-item[data-menu="file"] .menu-title', false));
+  const inEmbed = (await cdp.evalJs('document.getElementById("app")?.dataset.hwpEmbed')) === "true";
+  let targetSelector = itemSelector;
+  if (inEmbed) {
+    if (itemSelector === '[data-studio-menu-cmd="studio-save"]') targetSelector = '[data-shell-cmd="save"]';
+    else {
+      const m = /^\[data-hwp-save-as="(hwp|hwpx)"\]$/.exec(itemSelector);
+      if (m) targetSelector = `[data-shell-cmd="save-as"][data-shell-format="${m[1]}"]`;
+    }
+  }
+  const title = centerOf(await waitRectVisible(cdp, '.menu-item[data-menu="file"] .menu-title', inEmbed));
   await click(cdp, title.x, title.y);
   await sleep(200);
-  const item = centerOf(await rectOf(cdp, itemSelector, false));
+  const item = centerOf(await waitRectVisible(cdp, targetSelector, inEmbed));
   await click(cdp, item.x, item.y);
 }
 
-async function waitForDownload(name, since) {
+async function waitForDownload(name, since, cdp) {
   const file = path.join(downloadDir, name);
   for (let i = 0; i < 100; i += 1) {
     if (fs.existsSync(file) && !fs.existsSync(file + ".crdownload")) return { file, ms: Date.now() - since };
     await sleep(100);
   }
-  throw new Error("download did not arrive: " + name);
+  const files = fs.existsSync(downloadDir) ? fs.readdirSync(downloadDir) : [];
+  const uiState = cdp ? await cdp.evalJs('JSON.stringify({ dirty: document.getElementById("app")?.dataset.dirty, fb: document.getElementById("status-command-feedback")?.textContent, doc: window.__EASYOFFICE_WINDOW_BRIDGE__?.instance?.getDocumentName("HWP") })').catch((e) => String(e)) : "";
+  throw new Error(`download did not arrive: ${name} (dirFiles=${JSON.stringify(files)}, cdpDownloads=${JSON.stringify(cdp?.downloads)}, ui=${uiState})`);
 }
 
 async function saveVia(cdp, itemSelector, expectedName) {
   const started = Date.now();
   await clickMenu(cdp, itemSelector);
-  const got = await waitForDownload(expectedName, started);
+  const got = await waitForDownload(expectedName, started, cdp);
   await sleep(200);
   const state = await cdp.evalJs(`JSON.stringify({ dirty: document.getElementById("app").dataset.dirty, feedback: document.getElementById("status-command-feedback").textContent })`);
   return { ...got, ...JSON.parse(state) };
@@ -333,7 +358,13 @@ async function autosaveReload(cdp, mod, bytes, name) {
   const idb = `(async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open("easyoffice.hwp.autosave.v1"); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); const rows = await new Promise((res) => { const r = db.transaction("meta").objectStore("meta").getAll(); r.onsuccess = () => res(r.result); }); return JSON.stringify(rows); })()`;
   const stored = JSON.parse(await cdp.evalJs(idb));
   await cdp.send("Page.navigate", { url: `http://127.0.0.1:${PORT}/?module=HWP&win=cdp-roundtrip` });
-  await sleep(9000);
+  await sleep(1500);
+  for (let i = 0; i < 60; i += 1) {
+    const ready = await cdp.evalJs(`document.getElementById("app")?.dataset.dirty === "true" && window.__EASYOFFICE_WINDOW_BRIDGE__?.instance?.getDocumentName("HWP") === ${JSON.stringify(name)}`).catch(() => false);
+    if (ready) break;
+    await sleep(300);
+  }
+  await sleep(300);
   const state = JSON.parse(await cdp.evalJs(`JSON.stringify({ dirty: document.getElementById("app").dataset.dirty, feedback: document.getElementById("status-command-feedback").textContent, tab: window.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("HWP") })`));
   const saved = await saveVia(cdp, '[data-studio-menu-cmd="studio-save"]', name);
   const sig = signature(mod, fs.readFileSync(path.join(dir, name)));

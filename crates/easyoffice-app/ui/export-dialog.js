@@ -275,7 +275,8 @@
       if (!dialog) return false;
       syncDialogFields();
       if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
-      document.getElementById("export-format-select")?.focus?.();
+      const target = dialog.querySelector(".custom-select-trigger") || document.getElementById("export-format-select");
+      target?.focus?.();
       return true;
     }
 

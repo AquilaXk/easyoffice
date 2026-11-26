@@ -423,24 +423,44 @@
 
   const MODAL_GATED_NATIVE_IDS = new Set([
     "edit:undo", "edit:redo", "edit:cut", "edit:copy", "edit:paste-special", "edit:find", "edit:replace",
-    "insert:link", "format:bold", "format:italic", "format:underline", "view:palette",
+    "insert:link", "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
+    "format:cell-format", "format:row-height", "format:row-autofit", "format:col-width", "format:col-autofit",
+    "sheet:remove-duplicates", "sheet:text-to-columns", "slide:bring-forward", "slide:send-backward",
+    "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom",
+    "slide:distribute-h", "slide:distribute-v", "file:base-import", "tool:palette",
   ]);
   const FIELD_GATED_NATIVE_IDS = new Set([
-    "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline",
+    "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
+    "format:cell-format", "format:row-height", "format:row-autofit", "format:col-width", "format:col-autofit",
+    "sheet:remove-duplicates", "sheet:text-to-columns", "slide:bring-forward", "slide:send-backward",
+    "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom",
+    "slide:distribute-h", "slide:distribute-v",
   ]);
 
-  function allowsNativeMenuContext(id, document, modal) {
+  function nativeMenuModuleApplies(id, commandModule) {
+    if (!commandModule) return true;
+    const p = Object.hasOwn(PARSED_NATIVE_MENU_ACTIONS, id) ? PARSED_NATIVE_MENU_ACTIONS[id] : null;
+    if (!p) return true;
+    if ((commandModule === "START" || commandModule === "CONV") && (p.name === "export" || p.name === "export-dialog")) return false;
+    if (commandModule === "START" && START_DISABLED_SET.has(p.name)) return false;
+    if (commandModule === "HWP_EMBED" && (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) || EMBED_ONLY_SET.has(p.name) || p.name === "hwp-editor")) return true;
+    if (p.name.startsWith("sheet-")) return commandModule === "SHEET";
+    if (p.name === "slide-act") return commandModule === "SLIDE";
+    if (p.name === "base-act") return commandModule === "BASE";
+    const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.studioCommandApplies;
+    return p.name !== "studio-cmd" || typeof applies !== "function" || applies(p.argument, commandModule);
+  }
+
+  function allowsNativeMenuContext(id, document, modal, activeModule) {
     if (MODAL_GATED_NATIVE_IDS.has(id)) {
-      const hasModal = Boolean(modal?.open) || Array.from(document.querySelectorAll?.("dialog") || []).some(
-        (dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog"),
-      );
+      const hasModal = Boolean(modal?.open) || Array.from(document.querySelectorAll?.("dialog") || []).some((dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog"));
       if (hasModal) return false;
     }
     const tag = document.activeElement?.tagName;
-    if ((tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") && FIELD_GATED_NATIVE_IDS.has(id)) {
-      return false;
-    }
-    return true;
+    if ((tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") && FIELD_GATED_NATIVE_IDS.has(id)) return false;
+    const appDs = document.getElementById?.("app")?.dataset;
+    const cmdMod = appDs?.windowKind === "start" ? "START" : (activeModule === "HWP" && appDs?.hwpEmbed === "true") ? "HWP_EMBED" : activeModule;
+    return nativeMenuModuleApplies(id, cmdMod);
   }
 
   // Runs the page action of a menu id; false for an unknown id or an action the page does not have.
@@ -518,29 +538,16 @@
     }
 
     const TOOLBAR_LABELS_KEY = "toolbar-labels";
-    function readToolbarLabels() {
-      try {
-        return env.localStorage?.getItem(TOOLBAR_LABELS_KEY) !== "hidden";
-      } catch {
-        return true;
-      }
-    }
+    function readToolbarLabels() { try { return env.localStorage?.getItem(TOOLBAR_LABELS_KEY) !== "hidden"; } catch { return true; } }
     function applyToolbarLabels(visible) {
       const shown = Boolean(visible);
       if (document.documentElement?.dataset) document.documentElement.dataset.toolbarLabels = shown ? "shown" : "hidden";
-      for (const el of document.querySelectorAll("[data-view-toolbar-labels]")) {
-        el.classList?.toggle?.("active", shown);
-        el.setAttribute("aria-checked", String(shown));
-      }
+      for (const el of document.querySelectorAll("[data-view-toolbar-labels]")) { el.classList?.toggle?.("active", shown); el.setAttribute("aria-checked", String(shown)); }
     }
     function saveToolbarLabels(visible) {
       const shown = Boolean(visible);
       applyToolbarLabels(shown);
-      try {
-        env.localStorage?.setItem(TOOLBAR_LABELS_KEY, shown ? "shown" : "hidden");
-      } catch {
-        // Ignore unavailable storage.
-      }
+      try { env.localStorage?.setItem(TOOLBAR_LABELS_KEY, shown ? "shown" : "hidden"); } catch {}
       pushMenuState();
       return shown;
     }
@@ -733,30 +740,19 @@
     const openDialogStack = [];
     const FOCUSABLE_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]';
 
-    function pruneOpenDialogStack() {
+    const pruneOpenDialogStack = () => {
       for (let i = openDialogStack.length - 1; i >= 0; i -= 1) {
         const dlg = openDialogStack[i];
         if (!dlg || !dlg.open || dlg.isConnected === false) openDialogStack.splice(i, 1);
       }
-    }
-
-    function pushOpenDialogStack(dialog) {
+    };
+    const removeOpenDialogStack = (dialog) => {
       const idx = openDialogStack.indexOf(dialog);
       if (idx >= 0) openDialogStack.splice(idx, 1);
       pruneOpenDialogStack();
-      openDialogStack.push(dialog);
-    }
-
-    function removeOpenDialogStack(dialog) {
-      const idx = openDialogStack.indexOf(dialog);
-      if (idx >= 0) openDialogStack.splice(idx, 1);
-      pruneOpenDialogStack();
-    }
-
-    function topOpenDialog() {
-      pruneOpenDialogStack();
-      return openDialogStack.length > 0 ? openDialogStack[openDialogStack.length - 1] : null;
-    }
+    };
+    const pushOpenDialogStack = (dialog) => { removeOpenDialogStack(dialog); openDialogStack.push(dialog); };
+    const topOpenDialog = () => { pruneOpenDialogStack(); return openDialogStack.at(-1) || null; };
 
     function inputTypeOf(el) {
       return String(el.type || el.getAttribute?.("type") || "text").toLowerCase();

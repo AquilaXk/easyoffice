@@ -70,6 +70,7 @@
         commitUndo: deps.commitUndo,
         recordCellUndo: deps.commitUndo ? (delta) => deps.commitUndo(delta) : null,
         noteActivity,
+        shellChrome: deps.shellChrome,
       });
       baseStudio.bind();
     }
