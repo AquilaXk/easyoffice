@@ -22,6 +22,12 @@ macro_rules! sa {
         item($id, $label, None, concat!("sheet-act:", $act))
     };
 }
+/// A slide menu item that runs the page menu item `data-slide-act="<act>"`.
+macro_rules! sl {
+    ($id:literal, $label:literal, $act:literal) => {
+        item($id, $label, None, concat!("slide-act:", $act))
+    };
+}
 
 /// An item of the spreadsheet's 조건부 서식 menu: it runs the page item `data-sheet-cf="<action>"`, and its id is
 /// `format:cf-<action>`.
@@ -161,6 +167,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "export-dialog:open",
     ),
+    item("file:base-import", "가져오기…", None, "base-act:import"),
     item(
         "file:print-preview",
         "인쇄 미리보기",
@@ -307,6 +314,19 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "밑줄",
         Some("CmdOrCtrl+U"),
         "studio-cmd:home-underline",
+    ),
+    item("format:strike", "취소선", None, "studio-cmd:home-strike"),
+    item(
+        "format:superscript",
+        "위 첨자",
+        None,
+        "studio-cmd:home-superscript",
+    ),
+    item(
+        "format:subscript",
+        "아래 첨자",
+        None,
+        "studio-cmd:home-subscript",
     ),
     item("format:style", "스타일 적용", None, "studio-cmd:home-style"),
     item("format:justify", "양쪽 정렬", None, "studio-cmd:para-shape"),
@@ -643,12 +663,22 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "slide-act:bring-front",
     ),
+    sl!("slide:bring-forward", "앞으로 가져오기", "bring-forward"),
+    sl!("slide:send-backward", "뒤로 보내기", "send-backward"),
     item(
         "slide:send-back",
         "맨 뒤로 보내기",
         None,
         "slide-act:send-back",
     ),
+    sl!("slide:align-left", "왼쪽 맞춤", "align-left"),
+    sl!("slide:align-center", "가운데 맞춤", "align-center"),
+    sl!("slide:align-right", "오른쪽 맞춤", "align-right"),
+    sl!("slide:align-top", "위쪽 맞춤", "align-top"),
+    sl!("slide:align-middle", "중간 맞춤", "align-middle"),
+    sl!("slide:align-bottom", "아래쪽 맞춤", "align-bottom"),
+    sl!("slide:distribute-h", "가로 간격 균등하게", "distribute-h"),
+    sl!("slide:distribute-v", "세로 간격 균등하게", "distribute-v"),
     item(
         "slide:delete-element",
         "개체 지우기",

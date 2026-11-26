@@ -15,7 +15,7 @@ use crate::pdf_writer::{
 };
 use crate::rich_document::{
     RichAlignment, RichBlock, RichColumns, RichDocument, RichListKind, RichParagraph,
-    TOC_BOOKMARK_PREFIX,
+    MAX_PARA_SPACING_TWIPS, TOC_BOOKMARK_PREFIX,
 };
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
@@ -106,11 +106,28 @@ pub(crate) fn push_docx_text(out: &mut String, text: &str) {
 /// schema order; empty when the paragraph inherits both.
 pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
     let mut xml = String::new();
-    if let Some(percent) = p.line_spacing_percent {
-        let line = line_spacing_240ths(percent);
-        xml.push_str(&format!(
-            "<w:spacing w:line=\"{line}\" w:lineRule=\"auto\"/>"
-        ));
+    if p.space_before_twips.is_some()
+        || p.space_after_twips.is_some()
+        || p.line_spacing_percent.is_some()
+    {
+        xml.push_str("<w:spacing");
+        if let Some(before) = p.space_before_twips {
+            xml.push_str(&format!(
+                " w:before=\"{}\"",
+                before.min(MAX_PARA_SPACING_TWIPS)
+            ));
+        }
+        if let Some(after) = p.space_after_twips {
+            xml.push_str(&format!(
+                " w:after=\"{}\"",
+                after.min(MAX_PARA_SPACING_TWIPS)
+            ));
+        }
+        if let Some(percent) = p.line_spacing_percent {
+            let line = line_spacing_240ths(percent);
+            xml.push_str(&format!(" w:line=\"{line}\" w:lineRule=\"auto\""));
+        }
+        xml.push_str("/>");
     }
     if p.left_indent_twips.is_some()
         || p.right_indent_twips.is_some()
@@ -455,13 +472,15 @@ impl<K: Eq + std::hash::Hash + Clone> StyleTable<K> {
 /// Automatic paragraph style identity.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OdtParaKey {
-    align: Option<RichAlignment>,
-    level: u8,
-    left_twips: Option<u32>,
-    right_twips: Option<u32>,
-    first_line_twips: Option<i32>,
-    line_percent: Option<u16>,
-    page_break: bool,
+    pub(crate) align: Option<RichAlignment>,
+    pub(crate) level: u8,
+    pub(crate) left_twips: Option<u32>,
+    pub(crate) right_twips: Option<u32>,
+    pub(crate) first_line_twips: Option<i32>,
+    pub(crate) line_percent: Option<u16>,
+    pub(crate) space_before_twips: Option<u32>,
+    pub(crate) space_after_twips: Option<u32>,
+    pub(crate) page_break: bool,
 }
 
 pub(crate) fn push_odt_text(out: &mut String, text: &str) {
@@ -497,6 +516,8 @@ pub(crate) fn push_odt_paragraph(
         right_twips: p.right_indent_twips,
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
+        space_before_twips: p.space_before_twips.map(|v| v.min(MAX_PARA_SPACING_TWIPS)),
+        space_after_twips: p.space_after_twips.map(|v| v.min(MAX_PARA_SPACING_TWIPS)),
         page_break: p.page_break_before,
     };
     let style_attr = if let Some(role) = p.toc {
@@ -549,6 +570,8 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
         right_twips,
         first_line_twips,
         line_percent,
+        space_before_twips,
+        space_after_twips,
         page_break,
     } = key;
     let mut styles = format!(
@@ -562,6 +585,18 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
             RichAlignment::Justify => "justify",
         };
         styles.push_str(&format!(" fo:text-align=\"{v}\""));
+    }
+    if let Some(before) = space_before_twips {
+        styles.push_str(&format!(
+            " fo:margin-top=\"{}\"",
+            odt_twips_to_pt(i64::from((*before).min(MAX_PARA_SPACING_TWIPS)))
+        ));
+    }
+    if let Some(after) = space_after_twips {
+        styles.push_str(&format!(
+            " fo:margin-bottom=\"{}\"",
+            odt_twips_to_pt(i64::from((*after).min(MAX_PARA_SPACING_TWIPS)))
+        ));
     }
     if let Some(left) = left_twips {
         styles.push_str(&format!(

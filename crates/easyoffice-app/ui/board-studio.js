@@ -177,7 +177,10 @@
     rawConns.slice(0, MAX_CONNECTORS).forEach((c, i) => {
       const conn = keep(() => {
         if (!c || !ids.has(String(c.fromId)) || !ids.has(String(c.toId)) || c.fromId === c.toId) throw new Error("연결선이 없는 요소를 가리킵니다.");
-        return { id: String(c.id || "bc-" + (i + 1)).slice(0, 64), fromId: String(c.fromId), toId: String(c.toId), fromPort: c.fromPort || "auto", toPort: c.toPort || "auto", routing: c.routing === "curved" ? "curved" : "orthogonal", label: String(c.label ?? "").slice(0, 128) };
+        const conn = { id: String(c.id || "bc-" + (i + 1)).slice(0, 64), fromId: String(c.fromId), toId: String(c.toId), fromPort: c.fromPort || "auto", toPort: c.toPort || "auto", routing: c.routing === "curved" ? "curved" : "orthogonal", label: String(c.label ?? "").slice(0, 128) };
+        if (c.stroke) conn.stroke = normalizeHex6(c.stroke, "");
+        if (Number.isFinite(Number(c.strokeWidthPt))) conn.strokeWidthPt = clamp(Number(c.strokeWidthPt), 0.5, 24);
+        return conn;
       });
       if (conn) conns.push(conn);
     });
@@ -276,7 +279,8 @@
     const notify = typeof deps.notify === "function" ? deps.notify : (msg) => { const fb = doc.getElementById("status-command-feedback"); if (fb) fb.textContent = msg; };
 
     const state = createInitialBoardState(), routeCache = new Map();
-    let mode = "select", selectedNodeId = null, selectedConnectorId = null, pendingConnect = null;
+    let mode = "select", selectedNodeId = null, selectedConnectorId = null, pendingConnect = null, styleBar = null;
+    const selectedNodeIds = new Set();
     let editingChartId = null, activeDrag = null, spacePressed = false;
     let root = deps.rootEl || doc.getElementById("pane-board") || null;
     let viewportEl = null, worldEl = null, connectorLayerEl = null, nodeLayerEl = null, zoomLabelEl = null, shapeSelectEl = null, imageInputEl = null;
@@ -350,6 +354,8 @@
         hit.setAttribute("d", route.pathD);
         path.setAttribute("d", route.pathD);
         path.setAttribute("marker-end", isSel ? "url(#board-arrow-end-selected)" : "url(#board-arrow-end)");
+        path.style.stroke = conn.stroke ? "#" + normalizeHex6(conn.stroke, "335095") : "";
+        path.style.strokeWidth = Number.isFinite(Number(conn.strokeWidthPt)) ? String(conn.strokeWidthPt) + "px" : "";
         if (conn.label) {
           const textW = Math.max(28, conn.label.length * 10 + 10);
           if (!lblBg) {
@@ -387,6 +393,7 @@
         const body = domEl(docTarget, "div", { className: "board-node-text", text: node.text || "" });
         body.style.fontSize = (node.fontSizePt || 9.5) + "pt";
         if (node.color) body.style.color = "#" + normalizeHex6(node.color, "1F2937");
+        if (node.fill) body.style.backgroundColor = "#" + normalizeHex6(node.fill, "FFFFFF");
         return [body];
       }
       if (node.kind === "image") {
@@ -407,7 +414,7 @@
         if (handle) { ev.preventDefault?.(); ev.stopPropagation?.(); activeDrag = { kind: "resize", dir: handle.dataset.dir || "se", node, card, startX: ev.clientX || 0, startY: ev.clientY || 0, orig: { ...node } }; return; }
         if (ev.target?.getAttribute?.("contenteditable") === "plaintext-only") { selectNode(node.id); return; }
         ev.stopPropagation?.();
-        selectNode(node.id);
+        selectNode(node.id, { toggle: Boolean(ev.shiftKey) });
         card.focus?.();
         activeDrag = { kind: "move", dir: "", node, card, startX: ev.clientX || 0, startY: ev.clientY || 0, orig: { ...node } };
       });
@@ -424,6 +431,7 @@
         const onInput = () => {
           if (!undoTaken) { deps.recordUndo?.(); undoTaken = true; }
           node.text = String(t.textContent || "").slice(0, MAX_TEXT_CHARS);
+          styleBar?.sync?.();
           deps.noteActivity?.();
         };
         const onBlur = () => { t.removeAttribute("contenteditable"); t.removeEventListener("input", onInput); t.removeEventListener("blur", onBlur); };
@@ -435,7 +443,7 @@
     function renderNodes() {
       if (!nodeLayerEl) return;
       const cards = state.nodes.map((node) => {
-        const cls = `board-node board-node--${node.kind}` + (node.id === selectedNodeId ? " is-selected" : "") + (pendingConnect?.fromId === node.id ? " is-connect-source" : "");
+        const cls = `board-node board-node--${node.kind}` + (selectedNodeIds.has(node.id) || node.id === selectedNodeId ? " is-selected" : "") + (pendingConnect?.fromId === node.id ? " is-connect-source" : "");
         const card = domEl(doc, "div", { className: cls, tabindex: 0 }, buildNodeContent(doc, node, false));
         card.dataset.nodeId = node.id;
         card.dataset.kind = node.kind;
@@ -457,21 +465,28 @@
       nodeLayerEl.replaceChildren(...cards);
     }
 
-    const renderAll = () => { applyViewportTransform(); renderNodes(); renderConnectors(); deps.onStateChange?.(getState()); };
+    const renderAll = () => { applyViewportTransform(); renderNodes(); renderConnectors(); styleBar?.sync?.(); deps.onStateChange?.(getState()); };
 
-    function selectNode(id) {
-      selectedNodeId = id && state.nodes.some((n) => n.id === id) ? id : null;
+    function selectNode(id, opts) {
+      const exists = Boolean(id && state.nodes.some((n) => n.id === id));
+      if (!exists) { selectedNodeIds.clear(); selectedNodeId = null; }
+      else if (opts?.toggle) {
+        if (selectedNodeIds.has(id)) selectedNodeIds.delete(id); else selectedNodeIds.add(id);
+        selectedNodeId = selectedNodeIds.has(id) ? id : (Array.from(selectedNodeIds).pop() || null);
+      } else { selectedNodeIds.clear(); selectedNodeIds.add(id); selectedNodeId = id; }
       selectedConnectorId = null;
-      nodeLayerEl?.querySelectorAll(".board-node").forEach((el) => el.classList.toggle("is-selected", el.dataset.nodeId === selectedNodeId));
+      nodeLayerEl?.querySelectorAll(".board-node").forEach((el) => el.classList.toggle("is-selected", selectedNodeIds.has(el.dataset.nodeId) || el.dataset.nodeId === selectedNodeId));
       connectorLayerEl?.querySelectorAll(".board-connector").forEach((el) => el.classList.remove("is-selected"));
+      styleBar?.sync?.();
       return selectedNodeId;
     }
 
     function selectConnector(id) {
       selectedConnectorId = id && state.connectors.some((c) => c.id === id) ? id : null;
-      selectedNodeId = null;
+      selectedNodeIds.clear(); selectedNodeId = null;
       nodeLayerEl?.querySelectorAll(".board-node").forEach((el) => el.classList.remove("is-selected"));
       renderConnectors();
+      styleBar?.sync?.();
       return selectedConnectorId;
     }
 
@@ -529,7 +544,7 @@
       const norm = normalizeBoardNode(spec, nextId("bn", state.nodes));
       deps.recordUndo?.();
       state.nodes.push(norm);
-      selectedNodeId = norm.id;
+      selectedNodeIds.clear(); selectedNodeIds.add(norm.id); selectedNodeId = norm.id;
       selectedConnectorId = null;
       renderAll();
       deps.noteActivity?.();
@@ -573,14 +588,13 @@
         deps.recordUndo?.();
         state.connectors.splice(idx, 1);
         selectedConnectorId = null;
-      } else if (selectedNodeId) {
-        const idx = state.nodes.findIndex((n) => n.id === selectedNodeId);
-        if (idx < 0) return false;
+      } else if (selectedNodeIds.size > 0 || selectedNodeId) {
+        const delIds = selectedNodeIds.size > 0 ? new Set(selectedNodeIds) : new Set([selectedNodeId]);
+        if (!state.nodes.some((n) => delIds.has(n.id))) return false;
         deps.recordUndo?.();
-        const removed = state.nodes[idx].id;
-        state.nodes.splice(idx, 1);
-        state.connectors = state.connectors.filter((c) => c.fromId !== removed && c.toId !== removed);
-        selectedNodeId = null;
+        state.nodes = state.nodes.filter((n) => !delIds.has(n.id));
+        state.connectors = state.connectors.filter((c) => !delIds.has(c.fromId) && !delIds.has(c.toId));
+        selectedNodeIds.clear(); selectedNodeId = null;
       } else return false;
       renderAll();
       deps.noteActivity?.();
@@ -870,6 +884,7 @@
       worldEl = domEl(doc, "div", { id: "board-world", className: "board-world" }, [connectorLayerEl, nodeLayerEl]);
       viewportEl = domEl(doc, "div", { id: "board-viewport", className: "board-viewport", role: "region", "aria-label": "보드 캔버스" }, [worldEl, zoomIsland]);
       root.replaceChildren(bar, viewportEl);
+      styleBar = host.__EASYOFFICE_BOARD_STYLE_BAR__?.create?.(styleHooks, { document: doc, toolbarEl: bar }) || null;
       host.__EASYOFFICE_ICONS__?.applyIcons?.(doc, bar);
       host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, bar);
       ensureDialogs();
@@ -913,12 +928,38 @@
       return true;
     }
 
+    const styleHooks = {
+      getMutableState: () => state,
+      getViewportEl: () => viewportEl,
+      applyViewportTransform,
+      notify,
+      nextId,
+      recordUndo: () => deps.recordUndo?.(),
+      noteActivity: () => deps.noteActivity?.(),
+      renderAll,
+      getSelection: () => ({
+        node: selectedNodeId ? state.nodes.find((n) => n.id === selectedNodeId) || null : null,
+        nodeIds: Array.from(selectedNodeIds),
+        connector: selectedConnectorId ? state.connectors.find((c) => c.id === selectedConnectorId) || null : null,
+      }),
+      setSelection: (nodeIds, connId) => {
+        selectedNodeIds.clear();
+        for (const nid of nodeIds || []) selectedNodeIds.add(nid);
+        selectedNodeId = nodeIds?.length ? nodeIds[nodeIds.length - 1] : null;
+        selectedConnectorId = connId || null;
+        renderAll();
+      },
+    };
+    host.__EASYOFFICE_BOARD_STYLE_BAR__?.registerHooks?.(styleHooks);
+
     function handleKeydown(ev) {
+      if (ev.defaultPrevented) return false;
       if (deps.getActiveModule && deps.getActiveModule() !== "BOARD") return false;
       if (ev.key === " ") spacePressed = ev.type !== "keyup";
       if (doc.querySelector("dialog[open]")) return false;
       const t = ev.target || doc.activeElement, tag = String(t?.tagName || "").toUpperCase();
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.getAttribute?.("contenteditable") === "plaintext-only") return false;
+      if (host.__EASYOFFICE_BOARD_STYLE_BAR__?.handleKeydown?.(ev, doc)) return true;
       if (ev.key === "Escape") { pendingConnect = null; setMode("select"); selectNode(null); return true; }
       if ((ev.key === "Delete" || ev.key === "Backspace") && deleteSelected()) { ev.preventDefault?.(); return true; }
       return false;
@@ -929,7 +970,7 @@
     function replaceState(nextState) {
       const next = normalizeBoardState(nextState, false);
       state.nodes = next.nodes; state.connectors = next.connectors; state.viewport = next.viewport;
-      selectedNodeId = null; selectedConnectorId = null; pendingConnect = null;
+      selectedNodeIds.clear(); selectedNodeId = null; selectedConnectorId = null; pendingConnect = null;
       renderAll();
       if (next.dropped > 0) notify("복원하지 못한 항목 " + next.dropped + "개를 건너뛰었습니다.");
       return { dropped: next.dropped };
@@ -941,9 +982,9 @@
     const api = {
       mount, getState, replaceState, addNode, addConnector, selectNode, selectConnector, deleteSelected,
       bringToFront: () => reorderSelected(true), sendToBack: () => reorderSelected(false),
-      insertPictureFromBytes, setZoom, stepZoom, fitAll, setMode,
+      insertPictureFromBytes, setZoom, stepZoom, fitAll, setMode, centerOnItem: (k, id) => host.__EASYOFFICE_BOARD_STYLE_BAR__?.centerOnItem?.(styleHooks, k, id),
       analyze: () => router?.analyzeBoard(state), openAnalysisDialog, openChartDialog, getConnectorRoute,
-      buildPrintPage, toSlideDeckPdfPayload, exportPdf, handleKeydown, render: renderAll,
+      buildPrintPage, toSlideDeckPdfPayload, exportPdf, handleKeydown, render: renderAll, _styleHooks: styleHooks,
     };
     host.__EASYOFFICE_BOARD_STUDIO__ = api;
     return api;

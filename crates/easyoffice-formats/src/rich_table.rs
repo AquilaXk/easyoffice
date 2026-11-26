@@ -10,6 +10,7 @@
 
 use crate::decode_budget::DecodeBudget;
 use crate::rich_image::RichImage;
+pub use crate::rich_table_cells::*;
 pub use crate::rich_table_style::*;
 use crate::EasyOfficeError;
 
@@ -59,6 +60,7 @@ pub struct RichTable {
     pub col_widths_twips: Vec<u32>,
     pub cell_styles: Vec<TableCellStyleEntry>,
     pub cell_images: Vec<TableCellImage>,
+    pub cell_paragraphs: Vec<TableCellParagraphs>,
 }
 
 impl From<Vec<Vec<String>>> for RichTable {
@@ -76,6 +78,7 @@ impl RichTable {
             col_widths_twips: Vec::new(),
             cell_styles: Vec::new(),
             cell_images: Vec::new(),
+            cell_paragraphs: Vec::new(),
         }
     }
 
@@ -91,6 +94,7 @@ impl RichTable {
                 col_widths_twips: Vec::new(),
                 cell_styles: Vec::new(),
                 cell_images: Vec::new(),
+                cell_paragraphs: Vec::new(),
             },
             dropped,
         )
@@ -113,6 +117,7 @@ impl RichTable {
                 col_widths_twips: Vec::new(),
                 cell_styles: Vec::new(),
                 cell_images: Vec::new(),
+                cell_paragraphs: Vec::new(),
             },
             dropped_merges,
             dropped_links,
@@ -184,6 +189,10 @@ impl RichTable {
         }
         out.truncate(write);
         out
+    }
+
+    pub fn validated_cell_paragraphs(&self) -> Vec<TableCellParagraphs> {
+        validate_cell_paragraphs(&self.rows, &self.cell_paragraphs)
     }
 
     /// In-bounds inline cell images, stably sorted by `((row as u64) << 32) | (col as u64)`.
@@ -487,6 +496,7 @@ pub(crate) struct TableAssembler {
     col_widths_twips: Vec<u32>,
     cell_styles: Vec<TableCellStyleEntry>,
     cell_images: Vec<TableCellImage>,
+    cell_paragraphs: Vec<TableCellParagraphs>,
     /// Region index that a continuing cell in column `c` extends, by column.
     open: std::collections::HashMap<usize, usize>,
     dropped: usize,
@@ -538,6 +548,19 @@ impl TableAssembler {
     pub fn push_cell_images(&mut self, row: u32, col: u32, images: Vec<RichImage>) {
         for image in images {
             self.cell_images.push(TableCellImage { row, col, image });
+        }
+    }
+
+    pub fn push_cell_paragraphs(&mut self, row: u32, col: u32, paragraphs: Vec<RichCellParagraph>) {
+        if !paragraphs.is_empty()
+            && cell_para_has_formatting(&paragraphs)
+            && self.cell_paragraphs.len() < MAX_CELL_PARAGRAPH_ENTRIES
+        {
+            self.cell_paragraphs.push(TableCellParagraphs {
+                row,
+                col,
+                paragraphs,
+            });
         }
     }
 
@@ -720,6 +743,8 @@ impl TableAssembler {
         table
             .cell_images
             .sort_by_key(|ci| (u64::from(ci.row) << 32) | u64::from(ci.col));
+        table.cell_paragraphs = self.cell_paragraphs;
+        table.cell_paragraphs = table.validated_cell_paragraphs();
         Ok((table, dropped + self.dropped))
     }
 }

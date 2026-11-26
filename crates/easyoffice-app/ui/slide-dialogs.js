@@ -348,10 +348,16 @@
         $("slide-image-file-input")?.click();
       } else if (act === "bring-front") {
         canvas.bringToFront();
+      } else if (act === "bring-forward") {
+        canvas.bringForward?.();
+      } else if (act === "send-backward") {
+        canvas.sendBackward?.();
       } else if (act === "send-back") {
         canvas.sendToBack();
       } else if (act === "delete-element") {
         canvas.deleteElement();
+      } else if (act.startsWith("align-") || act.startsWith("distribute-")) {
+        host.__EASYOFFICE_SLIDE_CONTEXT_MENU__?.alignElements?.(act);
       }
     }
 

@@ -393,3 +393,48 @@
   pointer-events: none;
   cursor: default;
 }
+
+.board-style-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.board-style-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--ui-text-muted);
+  white-space: nowrap;
+}
+
+.board-style-color {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--ui-border-light);
+  background: var(--ui-surface);
+  cursor: pointer;
+}
+
+.board-style-select {
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--ui-border-light);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-xs);
+}
+
+.board-style-input {
+  width: 120px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--ui-border-light);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-xs);
+}

@@ -980,7 +980,7 @@
     MAX_TABLES, MAX_FIELDS_PER_TABLE, MAX_RECORDS_PER_TABLE, MAX_CELL_CHARS, MAX_FORMULA_DEPTH,
     MIN_COL_PX, MAX_COL_PX, MIN_ROW_PX, MAX_ROW_PX, DEFAULT_ROW_PX,
     VIEW_MODES, FIELD_TYPES, FIELD_TYPE_LABELS, FILTER_OPS, FILTER_OP_LABELS,
-    createInitialBaseState, buildStateIndex, getTable, validateCellValue, compileFormula, evaluateFormula,
+    createInitialBaseState, buildStateIndex, getTable, parseIsoDateUtcMs, parseStrictNumber, normalizeUrlValue, validateCellValue, compileFormula, evaluateFormula,
     resolveRelationDisplay, resolveRelationItems, rollupSum, formatCellDisplay, queryTableView,
     matchesFilterRule, compareFieldValues,
     addTable, addField, updateField, deleteField, addRecord, updateCell, updateCells, deleteRecord,

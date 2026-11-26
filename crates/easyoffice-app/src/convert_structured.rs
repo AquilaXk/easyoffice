@@ -21,8 +21,8 @@ use easyoffice_formats::{
     ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
     RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
     RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT,
-    MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS,
+    MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -354,10 +354,10 @@ fn opt_run_field(run: &JsonObject) -> Result<Option<RichField>, EasyOfficeError>
     }
 }
 
-fn parse_paragraph(
+pub(crate) fn parse_runs(
     obj: &JsonObject,
     budget: &mut Budget,
-) -> Result<RichParagraph, EasyOfficeError> {
+) -> Result<Vec<RichRun>, EasyOfficeError> {
     let mut runs = Vec::new();
     if let Some(v) = field(obj, "runs") {
         for item in as_array(v, "runs")? {
@@ -388,13 +388,25 @@ fn parse_paragraph(
             });
         }
     }
-    let alignment = opt_str(obj, "align")?
+    Ok(runs)
+}
+
+pub(crate) fn parse_alignment(obj: &JsonObject) -> Result<Option<RichAlignment>, EasyOfficeError> {
+    opt_str(obj, "align")?
         .filter(|a| !a.trim().is_empty())
         .map(|a| {
             RichAlignment::parse(a)
                 .ok_or_else(|| invalid(format!("구조화 저장: 알 수 없는 정렬 '{a}'")))
         })
-        .transpose()?;
+        .transpose()
+}
+
+fn parse_paragraph(
+    obj: &JsonObject,
+    budget: &mut Budget,
+) -> Result<RichParagraph, EasyOfficeError> {
+    let runs = parse_runs(obj, budget)?;
+    let alignment = parse_alignment(obj)?;
     let heading_level = match field(obj, "heading") {
         None => 0,
         Some(v) => v
@@ -483,6 +495,20 @@ fn parse_paragraph(
         .map(|v| v as i32),
         line_spacing_percent: opt_bounded(obj, "lineSpacingPercent", 1, MAX_LINE_SPACING_PERCENT)?
             .map(|v| v as u16),
+        space_before_twips: opt_bounded(
+            obj,
+            "spaceBeforeTwips",
+            0,
+            i64::from(MAX_PARA_SPACING_TWIPS),
+        )?
+        .map(|v| v as u32),
+        space_after_twips: opt_bounded(
+            obj,
+            "spaceAfterTwips",
+            0,
+            i64::from(MAX_PARA_SPACING_TWIPS),
+        )?
+        .map(|v| v as u32),
         toc,
         bookmark,
         toc_page,

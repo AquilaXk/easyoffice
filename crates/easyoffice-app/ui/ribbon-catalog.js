@@ -373,6 +373,7 @@
     { keys: "Insert", action: "insert-mode", bareKey: true, external: true },
     // The page break is made by the document editor itself (doc-pages.js); the menu item and the palette run the same command.
     { keys: "Ctrl+Enter", action: "doc-page-break", module: "DOC", external: true },
+    { keys: "Ctrl+Shift+=", action: "home-superscript", module: "DOC", external: true },
     // The 골라 붙이기 dialog is opened by the grid's own key handler (sheet-input.js); the menu item and the palette run the same command.
     { keys: "Ctrl+Alt+V", action: "sheet-paste-special", module: "SHEET", external: true },
     // Pivot refresh is handled by the pivot bar's key listener when the active cell is inside a pivot table (PD-255).

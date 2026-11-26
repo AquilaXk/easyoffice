@@ -14,6 +14,8 @@
     italic: "btn-stylebar-italic",
     underline: "btn-stylebar-underline",
     strike: "btn-stylebar-strike",
+    superscript: "btn-stylebar-sup",
+    subscript: "btn-stylebar-sub",
   };
   const MIN_PT = 1;
   const MAX_PT = 4096;
@@ -51,7 +53,7 @@
   const LIST_BUTTON_CMDS = { ordered: "para-numbering", bullet: "para-bullet", task: "para-checklist" };
   // Look carried over when a paragraph changes its tag (the style whitelist of the saved document state).
   const CARRIED_STYLE_PROPS = [
-    "paddingLeft", "paddingRight", "textIndent", "lineHeight", "textAlign",
+    "paddingLeft", "paddingRight", "textIndent", "marginTop", "marginBottom", "lineHeight", "textAlign",
     "fontWeight", "fontStyle", "textDecoration", "fontSize", "fontFamily", "color", "backgroundColor",
   ];
   const CARRIED_ATTRS = ["class", "id", "lang"];
@@ -380,6 +382,10 @@
       return targetBlocks().filter((b) => !NON_PARAGRAPH_TAGS.has((b.tagName || "").toUpperCase()));
     }
 
+    function alignmentTargets() {
+      return targetBlocks().filter((b) => (b.tagName || "").toUpperCase() !== "CAPTION");
+    }
+
     // Runs `exec(blocks, range)` on the paragraphs the selection touches as one undo step; `hint` is
     // shown when nothing is selected. `exec` returns false when it found nothing to change, which
     // leaves no undo step.
@@ -410,7 +416,7 @@
           else delete b.dataset.eoAlign;
         });
         return stale.length > 0;
-      }, "정렬할 문단을 먼저 선택하세요");
+      }, "정렬할 문단을 먼저 선택하세요", alignmentTargets);
       if (res.changed && APPROXIMATED_ALIGN_LABEL[mode]) setFeedback(APPROXIMATED_ALIGN_LABEL[mode] + " 정렬은 저장할 때 양쪽 정렬로 기록됩니다");
       return res;
     }
@@ -445,9 +451,24 @@
           delete b.dataset.eoLineSpacing; // the exact value read from a file no longer matches
         });
         return stale.length > 0;
-      }, "줄 간격을 적용할 문단을 먼저 선택하세요");
+      }, "줄 간격을 적용할 문단을 먼저 선택하세요", alignmentTargets);
       if (res.blocks === 0) showLineSpacing(lineSpacingOf(null)); // nothing selected: the box keeps showing what applies
       return res;
+    }
+
+    function setSpacing(which, rawPt) {
+      const helper = host.__EASYOFFICE_DOC_TABLE_RUNS__;
+      if (!helper) return { changed: false, blocks: 0 };
+      const pt = Number(rawPt);
+      if (!Number.isFinite(pt)) return { changed: false, blocks: 0 };
+      const clamped = Math.max(0, Math.min(helper.MAX_PARA_SPACING_PT, pt));
+      return runOnParagraphs((blocks) => {
+        let any = false;
+        blocks.forEach((b) => {
+          if (helper.writeSpacingPt(b, which, clamped)) any = true;
+        });
+        return any;
+      }, "단락 간격을 적용할 문단을 먼저 선택하세요", paragraphTargets);
     }
 
     // Replaces `el` by an element of another tag in the same place, keeping its look, data and children.
@@ -690,6 +711,13 @@
         btn.classList.toggle("active", on);
       });
       showLineSpacing(lineSpacingOf(blk));
+      const helper = host.__EASYOFFICE_DOC_TABLE_RUNS__;
+      if (helper) {
+        const beforeEl = byId("doc-space-before-input");
+        if (beforeEl && document.activeElement !== beforeEl) beforeEl.value = String(helper.readSpacingPt(blk, "before"));
+        const afterEl = byId("doc-space-after-input");
+        if (afterEl && document.activeElement !== afterEl) afterEl.value = String(helper.readSpacingPt(blk, "after"));
+      }
       const style = byId("doc-style-select");
       const name = styleNameOf(blk);
       if (style) style.value = name;
@@ -829,6 +857,16 @@
 
     function handleKeydown(ev) {
       if (!isDocModule()) return;
+      if (getActiveModule() === "DOC" && (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.code === "Equal" || ev.key === "=" || ev.key === "+")) {
+        const root = editor();
+        const target = ev.target || document.activeElement;
+        if (root && target && root.contains(target)) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+          toggle(ev.shiftKey ? "superscript" : "subscript");
+          return;
+        }
+      }
       if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey) {
         const taskItems = paragraphTargets().filter((b) => isItemOf(b, "task"));
         if (taskItems.length === 0) return;
@@ -918,7 +956,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, styleNameOf, syncStyleOptions, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, setSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, styleNameOf, syncStyleOptions, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,

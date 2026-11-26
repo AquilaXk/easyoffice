@@ -115,6 +115,7 @@
     const lvl = Number(block.listLevel);
     if (Number.isInteger(lvl) && lvl >= 1 && lvl <= 8) spec.data.eoListLevel = String(lvl);
     if (typeof block.listNumber === "string" && block.listNumber) spec.data.eoListNum = block.listNumber;
+    host.__EASYOFFICE_DOC_TABLE_RUNS__?.applyParagraphSpacingSpec?.(spec, block, twipsToPx);
     const cols = block.columns;
     if (cols && Number.isInteger(cols.count) && cols.count >= 2 && cols.count <= 16) {
       const gap = Number.isInteger(cols.gapTwips) && cols.gapTwips >= 0 ? cols.gapTwips : 720;
@@ -319,6 +320,13 @@
       }
       list.push(im);
     });
+    const parasByCell = new Map();
+    (Array.isArray(block.cellParagraphs) ? block.cellParagraphs : []).forEach((cp) => {
+      if (cp && Number.isInteger(cp.row) && Number.isInteger(cp.col) && cp.row >= 0 && cp.col >= 0 && Array.isArray(cp.paragraphs)) {
+        parasByCell.set(cellKey(cp.row, cp.col), cp);
+      }
+    });
+    const docTableRuns = host.__EASYOFFICE_DOC_TABLE_RUNS__;
     const trs = rows.map((row, r) => {
       const cells = [];
       row.forEach((cell, c) => {
@@ -330,12 +338,19 @@
         if (span?.rowSpan > 1) attrs.rowspan = String(span.rowSpan);
         const text = typeof cell === "string" ? cell : cell?.text ?? "";
         const cellLinks = linksByCell.get(key);
-        const inlineKids = cellInlineSpecs(text, cellLinks);
         const imgs = imagesByCell.get(key);
-        const children = imgs?.length
-          ? [...(text === "" && (!cellLinks || cellLinks.length === 0) ? [] : inlineKids), ...imgs.map(imageSpec)]
-          : inlineKids;
-        const td = elSpec("td", children, {}, attrs);
+        const cellEntry = parasByCell.get(key);
+        const built = docTableRuns?.buildCellChildrenSpecs
+          ? docTableRuns.buildCellChildrenSpecs(text, cellLinks, cellEntry, imgs, { textSpec, elSpec, runSpecs, imageSpec, cellInlineSpecs })
+          : (() => {
+              const inlineKids = cellInlineSpecs(text, cellLinks);
+              const children = imgs?.length
+                ? [...(text === "" && (!cellLinks || cellLinks.length === 0) ? [] : inlineKids), ...imgs.map(imageSpec)]
+                : inlineKids;
+              return { children, cellStyle: {}, cellData: {} };
+            })();
+        const td = elSpec("td", built.children, built.cellStyle, attrs);
+        if (built.cellData) Object.assign(td.data, built.cellData);
         applyDecodedCellStyle(td, stylesByCell.get(key));
         cells.push(td);
       });
@@ -578,6 +593,9 @@
       cardHeadingNodes: [textSpec(title)],
       cardBodyParagraphsNodes: lines.filter((l) => l.trim()).map((l) => [textSpec(l)]),
       outlines: Array.isArray(res.pdfOutlines) ? res.pdfOutlines : [],
+      pages: Array.isArray(res.pdfPages)
+        ? res.pdfPages.map((p, idx) => ({ pageNumber: Number(p?.pageNumber) || idx + 1, text: String(p?.text || "") }))
+        : [],
     };
     next.pdfRotationDeg = 0;
   }

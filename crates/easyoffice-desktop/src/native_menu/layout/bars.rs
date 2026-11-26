@@ -4,12 +4,13 @@
 use super::{
     cf_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES, EXPORT_BASE_LINES,
     EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES, EXPORT_SHEET_LINES, EXPORT_SLIDE_LINES,
-    NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, THEME_IDS, USE_IN_FORMULA_LINES,
+    NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, SLIDE_ALIGN_LINES, THEME_IDS,
+    USE_IN_FORMULA_LINES,
 };
 use super::{
     menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, EXPORT_BASE, EXPORT_BOARD,
     EXPORT_DOC, EXPORT_PDF, EXPORT_SHEET, EXPORT_SLIDE, HELP, NEW_DOCS, NUMFMT, PASTE, S,
-    SELECT_ALL, THEME, USE_IN_FORMULA, WINDOW,
+    SELECT_ALL, SLIDE_ALIGN, THEME, USE_IN_FORMULA, WINDOW,
 };
 
 const FILE_HWP: MenuSpec = menu(
@@ -56,6 +57,7 @@ const FILE_BASE: MenuSpec = menu(
         "file:save",
         "file:save-as",
         EXPORT_BASE,
+        "file:base-import",
         S,
         "file:print-preview",
         "file:print",
@@ -166,7 +168,7 @@ const EDIT_SHEET: MenuSpec = menu(
         "edit:replace",
     ],
 );
-const EDIT_PLAIN: MenuSpec = menu(
+const EDIT_FIND_ONLY: MenuSpec = menu(
     "편집",
     &[
         "edit:undo",
@@ -176,6 +178,8 @@ const EDIT_PLAIN: MenuSpec = menu(
         "edit:copy",
         PASTE,
         SELECT_ALL,
+        S,
+        "edit:find",
     ],
 );
 
@@ -318,12 +322,34 @@ const INSERT_SLIDE: MenuSpec = menu(
         "insert:link",
         S,
         "slide:bring-front",
+        "slide:bring-forward",
+        "slide:send-backward",
         "slide:send-back",
+        SLIDE_ALIGN,
         "slide:delete-element",
     ],
 );
 const ANNOTATE_PDF: MenuSpec = menu("주석", &["tool:pdf-highlight", "tool:review-comment"]);
 
+const FORMAT_DOC: MenuSpec = menu(
+    "서식",
+    &[
+        "format:bold",
+        "format:italic",
+        "format:underline",
+        "format:strike",
+        "format:superscript",
+        "format:subscript",
+        S,
+        "format:style",
+        "format:justify",
+        "format:para-numbering",
+        "format:para-bullet",
+        "format:para-checklist",
+        "format:indent-in",
+        "format:indent-out",
+    ],
+);
 const FORMAT_TEXT: MenuSpec = menu(
     "서식",
     &[
@@ -632,7 +658,7 @@ const DOC: [&MenuSpec; 11] = [
     &EDIT_FULL,
     &VIEW_DOC,
     &INSERT_DOC,
-    &FORMAT_TEXT,
+    &FORMAT_DOC,
     &PAGE_DOC,
     &TABLE_DOC,
     &TOOL_DOC,
@@ -669,7 +695,7 @@ const SHEET: [&MenuSpec; 12] = [
 const SLIDE: [&MenuSpec; 11] = [
     &APP,
     &FILE_PAGE_SETUP,
-    &EDIT_PLAIN,
+    &EDIT_FIND_ONLY,
     &VIEW_PLAIN,
     &INSERT_SLIDE,
     &FORMAT_CELL,
@@ -682,7 +708,7 @@ const SLIDE: [&MenuSpec; 11] = [
 const PDF: [&MenuSpec; 9] = [
     &APP,
     &FILE_PDF,
-    &EDIT_PLAIN,
+    &EDIT_FIND_ONLY,
     &VIEW_PLAIN,
     &ANNOTATE_PDF,
     &PAGE_PDF,
@@ -702,7 +728,7 @@ const BASE: [&MenuSpec; 7] = [
 const BOARD: [&MenuSpec; 7] = [
     &APP,
     &FILE_BOARD,
-    &EDIT_PLAIN,
+    &EDIT_FIND_ONLY,
     &VIEW_WORKSPACE,
     &TOOL_WORKSPACE,
     &WINDOW,
@@ -766,6 +792,9 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 THEME => ids.extend(THEME_IDS),
                 NUMFMT => ids.extend(NUMFMT_LINES.iter().filter(|line| **line != SEPARATOR)),
                 ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),
+                SLIDE_ALIGN => {
+                    ids.extend(SLIDE_ALIGN_LINES.iter().filter(|line| **line != SEPARATOR))
+                }
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 CF => ids.extend(cf_ids()),
                 USE_IN_FORMULA => ids.extend(USE_IN_FORMULA_LINES),

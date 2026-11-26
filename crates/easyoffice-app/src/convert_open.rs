@@ -13,8 +13,9 @@ use easyoffice_formats::native_package::PackageKind;
 use easyoffice_formats::{
     evaluate_table_formulas, resolve_code, resolve_font_name, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
-    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichSlideDeck,
-    RichToc, SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter, CUSTOM_BASE,
+    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichRun, RichScript,
+    RichSlideDeck, RichToc, SheetStyling, StrictJsonValue, TableCellLink, UniversalFormatConverter,
+    CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -54,9 +55,8 @@ fn limit(entries: &JsonEntries, key: &str) -> Result<Option<u32>, EasyOfficeErro
 
 use easyoffice_formats::json_out::push_json_string as push_json_str;
 
-fn write_paragraph(out: &mut String, p: &RichParagraph) {
-    out.push_str("{\"type\":\"paragraph\",\"runs\":[");
-    for (idx, r) in p.runs.iter().enumerate() {
+pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
+    for (idx, r) in runs.iter().enumerate() {
         if idx > 0 {
             out.push(',');
         }
@@ -103,6 +103,11 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
         convert_structured_notes::write_run_annotations(out, r);
         out.push('}');
     }
+}
+
+fn write_paragraph(out: &mut String, p: &RichParagraph) {
+    out.push_str("{\"type\":\"paragraph\",\"runs\":[");
+    write_runs_json(out, &p.runs);
     out.push(']');
     if let Some(a) = p.alignment {
         let token = match a {
@@ -180,6 +185,12 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     }
     if let Some(v) = p.line_spacing_percent {
         let _ = write!(out, ",\"lineSpacingPercent\":{v}");
+    }
+    if let Some(v) = p.space_before_twips {
+        let _ = write!(out, ",\"spaceBeforeTwips\":{v}");
+    }
+    if let Some(v) = p.space_after_twips {
+        let _ = write!(out, ",\"spaceAfterTwips\":{v}");
     }
     out.push('}');
 }

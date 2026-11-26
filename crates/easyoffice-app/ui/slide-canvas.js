@@ -562,7 +562,7 @@
     const utils = host.__EASYOFFICE_SHEET_UTILS__;
     const $ = (id) => document.getElementById(id);
 
-    let selectedId = null, snapEnabled = true, activeDrag = null, editingSessionKey = "", onElementDblClick = null;
+    let selectedId = null, selectedIds = new Set(), snapEnabled = true, activeDrag = null, editingSessionKey = "", onElementDblClick = null;
 
     const say = (msg) => { const fb = $("status-command-feedback"); if (fb) fb.textContent = msg; };
     const currentAspect = () => (Object.hasOwn(STAGE_SIZES, deck[0]?.aspect) ? deck[0].aspect : "16:9");
@@ -642,9 +642,10 @@
           return;
         }
         ev.stopPropagation?.();
-        selectElement(el.id);
+        const toggledOff = ev.shiftKey && selectedIds.has(el.id);
+        selectElement(el.id, { additive: Boolean(ev.shiftKey) });
         card.focus?.();
-        startPointerDrag("move", "", ev, el, card);
+        if (!toggledOff) startPointerDrag("move", "", ev, el, card);
       });
       card.addEventListener("dblclick", (ev) => {
         ev.stopPropagation?.();
@@ -672,24 +673,48 @@
       const layer = $("slide-canvas-layer");
       if (!layer) return;
       const els = ensureElements(currentSlide());
-      if (selectedId && !els.some((e) => e.id === selectedId)) selectedId = null;
+      const validIds = new Set(els.map((e) => e.id));
+      selectedIds.forEach((id) => { if (!validIds.has(id)) selectedIds.delete(id); });
+      if (selectedId && !validIds.has(selectedId)) selectedId = Array.from(selectedIds).at(-1) || null;
+      if (selectedId && !selectedIds.has(selectedId)) selectedIds.add(selectedId);
       const stage = stageSizeOf(currentAspect(), currentOrientation());
       layer.replaceChildren(...els.map((el) => {
-        const card = buildElementDom(document, el, stage, { interactive: true, selected: el.id === selectedId });
+        const card = buildElementDom(document, el, stage, { interactive: true, selected: selectedIds.has(el.id) });
         attachInteractiveHandlers(card, el);
         return card;
       }));
       hideSnapGuides();
     }
 
-    function selectElement(id) {
-      const els = ensureElements();
-      selectedId = id && els.some((e) => e.id === id) ? id : null;
+    function syncSelectedClasses() {
       $("slide-canvas-layer")?.querySelectorAll(".slide-el").forEach((node) => {
-        node.classList.toggle("is-selected", node.dataset.elementId === selectedId);
+        node.classList.toggle("is-selected", selectedIds.has(node.dataset.elementId));
       });
+    }
+
+    function selectElement(id, options = {}) {
+      const els = ensureElements();
+      const exists = Boolean(id && els.some((e) => e.id === id));
+      if (options.additive && exists) {
+        if (selectedIds.has(id)) selectedIds.delete(id);
+        else selectedIds.add(id);
+        selectedId = selectedIds.has(id) ? id : (Array.from(selectedIds).at(-1) || null);
+      } else {
+        selectedId = exists ? id : null;
+        selectedIds = selectedId ? new Set([selectedId]) : new Set();
+      }
+      syncSelectedClasses();
       return selectedId;
     }
+    const setSelectedIds = (ids) => {
+      const valid = new Set(ensureElements().map((e) => e.id));
+      const kept = (Array.isArray(ids) ? ids : []).filter((id) => valid.has(id));
+      selectedIds = new Set(kept);
+      selectedId = kept.at(-1) || null;
+      syncSelectedClasses();
+      return kept;
+    };
+    const getSelectedIds = () => ensureElements().filter((e) => selectedIds.has(e.id)).map((e) => e.id);
     const clearSelection = () => selectElement(null);
     const getSelectedElement = () => (selectedId ? ensureElements().find((e) => e.id === selectedId) || null : null);
 
@@ -758,6 +783,7 @@
       }
       els.push(norm);
       selectedId = norm.id;
+      selectedIds = new Set([norm.id]);
       render();
       noteActivity?.();
       return norm;
@@ -790,16 +816,29 @@
       return true;
     }
 
-    function reorderElement(id, toFront) {
+    function moveOrder(id, targetFn, label) {
       const els = ensureElements(), idx = els.findIndex((e) => e.id === id);
-      if (idx < 0 || (toFront ? idx === els.length - 1 : idx === 0)) return false;
+      const target = idx >= 0 ? targetFn(idx, els.length) : -1;
+      if (idx < 0 || target < 0 || target >= els.length || target === idx) return false;
       pushUndoSnapshot(false);
       const [picked] = els.splice(idx, 1);
-      if (toFront) els.push(picked); else els.unshift(picked);
+      els.splice(target, 0, picked);
       selectedId = picked.id;
+      selectedIds = new Set([picked.id]);
       render();
       noteActivity?.();
-      say(toFront ? "맨 앞으로 가져오기" : "맨 뒤로 보내기");
+      say(label);
+      return true;
+    }
+
+    function mutateWithUndo(fn) {
+      const els = ensureElements();
+      const preSnap = captureWorkspaceSnapshot(false);
+      preSnap.slides = structuredClone(deck);
+      if (fn(els) === false) return false;
+      pushRawUndoSnapshot(preSnap);
+      render();
+      noteActivity?.();
       return true;
     }
 
@@ -913,7 +952,7 @@
     }
 
     function bind() {
-      $("slide-stage-box")?.addEventListener("mousedown", (ev) => { if (!ev.target?.closest?.(".slide-el")) clearSelection(); });
+      $("slide-stage-box")?.addEventListener("mousedown", (ev) => { if (ev.button === 0 && !ev.target?.closest?.(".slide-el")) clearSelection(); });
       document.addEventListener("mousemove", onDocMouseMove);
       document.addEventListener("mouseup", onDocMouseUp);
       const layoutSel = $("slide-layout-select");
@@ -930,10 +969,12 @@
     }
 
     return {
-      bind, render, getElements: () => ensureElements(), getSelectedElement, selectElement, clearSelection,
-      addElement, updateElement, deleteElement,
-      bringToFront: (id = selectedId) => reorderElement(id, true),
-      sendToBack: (id = selectedId) => reorderElement(id, false),
+      bind, render, getElements: () => ensureElements(), getSelectedElement, getSelectedIds, setSelectedIds, selectElement, clearSelection,
+      addElement, updateElement, deleteElement, mutateWithUndo,
+      bringToFront: (id = selectedId) => moveOrder(id, (_i, len) => len - 1, "맨 앞으로 가져오기"),
+      sendToBack: (id = selectedId) => moveOrder(id, () => 0, "맨 뒤로 보내기"),
+      bringForward: (id = selectedId) => moveOrder(id, (i) => i + 1, "앞으로 가져오기"),
+      sendBackward: (id = selectedId) => moveOrder(id, (i) => i - 1, "뒤로 보내기"),
       insertPictureFromBytes, applyFormatting, toggleSnap, isSnapEnabled: () => snapEnabled,
       setSlideLayout, currentAspect, currentOrientation, stageSize: () => stageSizeOf(currentAspect(), currentOrientation()), handleKeydown,
       setDoubleClickHandler: (fn) => { onElementDblClick = fn; },

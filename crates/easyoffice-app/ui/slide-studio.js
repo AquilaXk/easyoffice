@@ -104,6 +104,15 @@
       if (fb) fb.textContent = text;
     }
 
+    const slideClipboard = host.__EASYOFFICE_CREATE_SLIDE_CLIPBOARD__?.({
+      document, getActiveModule, getCanvas: () => slideCanvas, setFeedback,
+    });
+    if (slideClipboard) host.__EASYOFFICE_SLIDE_CLIPBOARD__ = slideClipboard;
+    const slideContextMenu = host.__EASYOFFICE_CREATE_SLIDE_CONTEXT_MENU__?.({
+      document, getActiveModule, getCanvas: () => slideCanvas, getClipboard: () => slideClipboard, setFeedback,
+    });
+    if (slideContextMenu) host.__EASYOFFICE_SLIDE_CONTEXT_MENU__ = slideContextMenu;
+
     function deckAspect() {
       const raw = deck[0]?.aspect;
       return ASPECTS.has(raw) ? raw : "16:9";
@@ -384,14 +393,23 @@
 
     function closeMenu() {
       const menu = byId("slide-context-menu");
-      if (menu) menu.hidden = true;
+      if (menu && menuIdx >= 0) {
+        menu.hidden = true;
+        delete menu.dataset.mode;
+      }
       menuIdx = -1;
     }
 
     function openMenu(idx, ev) {
       const menu = byId("slide-context-menu");
       if (!menu) return;
+      slideContextMenu?.closeCanvasMenu?.();
       if (idx !== getActiveSlideIndex()) getPanels().switchToSlideIndex(idx);
+      const thumbGrp = byId("slide-ctx-thumb-group");
+      const canvasGrp = byId("slide-ctx-canvas-group");
+      if (thumbGrp) thumbGrp.hidden = false;
+      if (canvasGrp) canvasGrp.hidden = true;
+      delete menu.dataset.mode;
       menuIdx = idx;
       menu.style.left = Math.max(0, ev.clientX || 0) + "px";
       menu.style.top = Math.max(0, ev.clientY || 0) + "px";
@@ -637,6 +655,7 @@
       if (getActiveModule() === "SLIDE" && list && target && list.contains?.(target)) {
         if (handleThumbKeydown(e)) return true;
       }
+      if (slideClipboard?.handleKeydown?.(e)) return true;
       if (slideCanvas?.handleKeydown?.(e)) return true;
       return false;
     }
@@ -671,6 +690,7 @@
       bindEditing();
       slideCanvas?.bind?.();
       slideDialogs?.bind?.();
+      slideContextMenu?.bind?.();
     }
 
     return {

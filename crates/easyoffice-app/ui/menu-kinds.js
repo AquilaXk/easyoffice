@@ -37,7 +37,7 @@
     const bar = document.querySelector(".studio-menubar");
     if (!bar) return kind;
     const hwpEmbed = document.getElementById("app")?.dataset.hwpEmbed === "true";
-    for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds]")]) {
+    for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds], #doc-style-bar [data-kinds]")]) {
       const embedHwpOnly = el.dataset.hwpSaveAs !== undefined && !hwpEmbed;
       el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled) || embedHwpOnly;
     }

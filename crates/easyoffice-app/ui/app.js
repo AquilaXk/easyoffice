@@ -910,7 +910,7 @@
     });
 
     host.addEventListener("keydown", (e) => {
-      if (e.isComposing || docIme.isComposing()) return;
+      if (e.defaultPrevented || e.isComposing || docIme.isComposing()) return;
       if (modal?.open) {
         handleOpenPaletteKeydown(e, modal, cmdSearchInput);
         return;

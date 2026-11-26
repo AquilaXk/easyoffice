@@ -73,6 +73,7 @@
                   <button type="button" class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-export-dialog="true" role="menuitem" tabindex="-1"><span class="md-label">다른 형식으로 내보내기…</span></button>
                 </div>
               </div>
+              <div class="md-item" data-kinds="BASE" data-base-act="import" role="menuitem" tabindex="-1"><span class="md-label">가져오기…</span></div>
               <div class="md-item" data-kinds="HWP" data-hwp-save-as="hwp" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWP</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
               <div class="md-item" data-kinds="HWP" data-hwp-save-as="hwpx" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWPX</span></div>
               <div class="md-item" data-kinds="DOC SLIDE" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">용지 설정</span></div>
@@ -93,15 +94,15 @@
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="studio-undo" role="menuitem" tabindex="-1"><span class="md-label">되돌리기</span><span class="md-shortcut">Ctrl+Z</span></div>
               <div class="md-item" data-studio-menu-cmd="studio-redo" role="menuitem" tabindex="-1"><span class="md-label">다시 실행</span><span class="md-shortcut">Ctrl+Shift+Z</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC SHEET BASE" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span><span class="md-shortcut">Ctrl+X</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span><span class="md-shortcut">Ctrl+X</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">오려 두기</span><span class="md-shortcut">Ctrl+X</span></div>
-              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span><span class="md-shortcut">Ctrl+C</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span><span class="md-shortcut">Ctrl+C</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사하기</span><span class="md-shortcut">Ctrl+C</span></div>
-              <div class="md-item" data-kinds="DOC SHEET BASE" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙여넣기</span><span class="md-shortcut">Ctrl+V</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙여넣기</span><span class="md-shortcut">Ctrl+V</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙이기</span><span class="md-shortcut">Ctrl+V</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-paste="special" role="menuitem" tabindex="-1"><span class="md-label">선택하여 붙여넣기…</span><span class="md-shortcut">Ctrl+Alt+V</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC HWP SHEET BASE" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
               <div class="md-item" data-kinds="DOC SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
@@ -170,7 +171,24 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="link-remove" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 제거</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="bring-front" role="menuitem" tabindex="-1"><span class="md-label">맨 앞으로 가져오기</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="bring-forward" role="menuitem" tabindex="-1"><span class="md-label">앞으로 가져오기</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="send-backward" role="menuitem" tabindex="-1"><span class="md-label">뒤로 보내기</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="send-back" role="menuitem" tabindex="-1"><span class="md-label">맨 뒤로 보내기</span></div>
+              <div class="md-sub" data-kinds="SLIDE" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">맞춤</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="맞춤">
+                  <button type="button" class="md-item" data-slide-act="align-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽 맞춤</span></button>
+                  <button type="button" class="md-item" data-slide-act="align-center" role="menuitem" tabindex="-1"><span class="md-label">가운데 맞춤</span></button>
+                  <button type="button" class="md-item" data-slide-act="align-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽 맞춤</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" data-slide-act="align-top" role="menuitem" tabindex="-1"><span class="md-label">위쪽 맞춤</span></button>
+                  <button type="button" class="md-item" data-slide-act="align-middle" role="menuitem" tabindex="-1"><span class="md-label">중간 맞춤</span></button>
+                  <button type="button" class="md-item" data-slide-act="align-bottom" role="menuitem" tabindex="-1"><span class="md-label">아래쪽 맞춤</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" data-slide-act="distribute-h" role="menuitem" tabindex="-1"><span class="md-label">가로 간격 균등하게</span></button>
+                  <button type="button" class="md-item" data-slide-act="distribute-v" role="menuitem" tabindex="-1"><span class="md-label">세로 간격 균등하게</span></button>
+                </div>
+              </div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="delete-element" role="menuitem" tabindex="-1"><span class="md-label">개체 지우기</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="note-insert" role="menuitem" tabindex="-1"><span class="md-label">메모 삽입</span><span class="md-shortcut">Shift+F2</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="note-toggle-all" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">메모 표시/숨기기</span></div>
@@ -194,6 +212,9 @@
               <div class="md-item" data-kinds="DOC SHEET SLIDE" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">기울임꼴</span><span class="md-shortcut">Ctrl+I</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">기울임</span><span class="md-shortcut">Ctrl+I</span></div>
               <div class="md-item" data-studio-menu-cmd="home-underline" role="menuitem" tabindex="-1"><span class="md-label">밑줄</span><span class="md-shortcut">Ctrl+U</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="home-strike" role="menuitem" tabindex="-1"><span class="md-label">취소선</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="home-superscript" role="menuitem" tabindex="-1"><span class="md-label">위 첨자</span><span class="md-shortcut">Ctrl+Shift+=</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 정렬</span></div>
@@ -677,6 +698,8 @@
             <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" data-icon="italic" title="기울임꼴 (Ctrl+I)" aria-label="기울임꼴"></button>
             <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" data-icon="underline" title="밑줄 (Ctrl+U)" aria-label="밑줄"></button>
             <button id="btn-stylebar-strike" class="eo-glyph-btn" type="button" data-icon="strikethrough" title="취소선" aria-label="취소선"></button>
+            <button id="btn-stylebar-sup" class="eo-glyph-btn" type="button" data-icon="superscript" title="위 첨자 (Ctrl+Shift+=)" aria-label="위 첨자" data-kinds="DOC"></button>
+            <button id="btn-stylebar-sub" class="eo-glyph-btn" type="button" data-icon="subscript" title="아래 첨자 (Ctrl+=)" aria-label="아래 첨자" data-kinds="DOC"></button>
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-color-group">
@@ -719,6 +742,14 @@
               <button id="btn-ls-up" type="button" class="sb-step-btn" data-icon="chevron-up" title="줄 간격 넓게" aria-label="줄 간격 넓게"></button>
               <button id="btn-ls-down" type="button" class="sb-step-btn" data-icon="chevron-down" title="줄 간격 좁게" aria-label="줄 간격 좁게"></button>
             </span>
+          </div>
+          <span class="eo-style-sep" aria-hidden="true" data-kinds="DOC">|</span>
+          <div id="doc-para-spacing-group" class="sb-spacing-group" data-kinds="DOC">
+            <label class="sb-spacing-label" for="doc-space-before-input">단락 앞</label>
+            <input id="doc-space-before-input" class="sb-spacing-input" type="number" min="0" max="400" step="1" value="0" aria-label="단락 앞 간격 (pt)" title="단락 앞 간격 (0~400pt)" />
+            <label class="sb-spacing-label" for="doc-space-after-input">단락 뒤</label>
+            <input id="doc-space-after-input" class="sb-spacing-input" type="number" min="0" max="400" step="1" value="0" aria-label="단락 뒤 간격 (pt)" title="단락 뒤 간격 (0~400pt)" />
+            <span class="sb-size-unit">pt</span>
           </div>
         </div>
       </div>
@@ -1062,11 +1093,12 @@
                 </div>
                 <div class="slide-notes-box">
                   <label for="slide-presenter-notes">발표자 노트</label>
-                  <input
+                  <textarea
                     id="slide-presenter-notes"
-                    type="text"
-                    class="cmd-input"
-                  />
+                    class="cmd-input slide-presenter-notes-input"
+                    rows="3"
+                    aria-label="발표자 노트"
+                  ></textarea>
                 </div>
               </div>
             </div>
@@ -1106,6 +1138,7 @@
                 <button id="btn-pdf-apply" type="button" class="tb-btn" disabled title="양식·스탬프 적용" aria-label="양식·스탬프 적용"><span class="tb-sprite icon-stamp"></span><span class="tb-label">양식·스탬프<br/>적용</span></button>
               </div>
               <span id="pdf-rotation-badge" class="sb-size-unit">회전: 0°</span>
+              <span id="pdf-page-indicator" class="sb-size-unit" hidden>쪽 1 / 1</span>
             </div>
             <div class="pdf-page-card" id="pdf-page-card" hidden>
               <div class="pdf-stamp" id="pdf-stamp-badge"></div>
@@ -2884,12 +2917,27 @@
       <div class="md-item" data-tab-act="ungroup" role="menuitem" tabindex="-1"><span class="md-label">시트 그룹 해제</span></div>
     </div>
 
-    <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
-      <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
-      <button type="button" role="menuitem" data-slide-action="duplicate">복제</button>
-      <button type="button" role="menuitem" data-slide-action="delete">삭제</button>
-      <button type="button" role="menuitem" data-slide-action="up">위로 이동</button>
-      <button type="button" role="menuitem" data-slide-action="down">아래로 이동</button>
+    <div id="slide-context-menu" class="slide-context-menu context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
+      <div id="slide-ctx-thumb-group">
+        <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
+        <button type="button" role="menuitem" data-slide-action="duplicate">복제</button>
+        <button type="button" role="menuitem" data-slide-action="delete">삭제</button>
+        <button type="button" role="menuitem" data-slide-action="up">위로 이동</button>
+        <button type="button" role="menuitem" data-slide-action="down">아래로 이동</button>
+      </div>
+      <div id="slide-ctx-canvas-group" hidden>
+        <div class="md-item" data-slide-canvas-act="cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span></div>
+        <div class="md-item" data-slide-canvas-act="copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span></div>
+        <div class="md-item" data-slide-canvas-act="paste" role="menuitem" tabindex="-1"><span class="md-label">붙여넣기</span></div>
+        <div class="md-item" data-slide-canvas-act="duplicate" role="menuitem" tabindex="-1"><span class="md-label">복제</span></div>
+        <div class="md-sep"></div>
+        <div class="md-item" data-slide-canvas-act="bring-front" role="menuitem" tabindex="-1"><span class="md-label">맨 앞으로 가져오기</span></div>
+        <div class="md-item" data-slide-canvas-act="bring-forward" role="menuitem" tabindex="-1"><span class="md-label">앞으로 가져오기</span></div>
+        <div class="md-item" data-slide-canvas-act="send-backward" role="menuitem" tabindex="-1"><span class="md-label">뒤로 보내기</span></div>
+        <div class="md-item" data-slide-canvas-act="send-back" role="menuitem" tabindex="-1"><span class="md-label">맨 뒤로 보내기</span></div>
+        <div class="md-sep"></div>
+        <div class="md-item" data-slide-canvas-act="delete" role="menuitem" tabindex="-1"><span class="md-label">삭제</span></div>
+      </div>
     </div>
 
     <div id="slide-show-overlay" class="slide-show" role="dialog" aria-modal="true" aria-label="슬라이드 쇼" tabindex="-1" hidden>
@@ -2931,6 +2979,7 @@
     <script src="./doc-notes.js"></script>
     <script src="./doc-notes-ui.js"></script>
     <script src="./doc-table-style.js"></script>
+    <script src="./doc-table-runs.js"></script>
     <script src="./doc-table-tab.js"></script>
     <script src="./doc-table.js"></script>
     <script src="./doc-pages-core.js"></script>
@@ -2952,9 +3001,12 @@
     <script src="./find-doc.js"></script>
     <script src="./find-sheet.js"></script>
     <script src="./find-base.js"></script>
+    <script src="./module-search.js"></script>
     <script src="./find-replace.js"></script>
     <script src="./zoom-range.js"></script>
     <script src="./slide-canvas.js"></script>
+    <script src="./slide-clipboard.js"></script>
+    <script src="./slide-context-menu.js"></script>
     <script src="./slide-dialogs.js"></script>
     <script src="./doc-symbol-dialog.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
@@ -3084,8 +3136,10 @@
     <script src="./base-clipboard.js"></script>
     <script src="./base-cell-select.js"></script>
     <script src="./base-grid-size.js"></script>
+    <script src="./base-import.js"></script>
     <script src="./base-studio.js"></script>
     <script src="./board-router.js"></script>
+    <script src="./board-style-bar.js"></script>
     <script src="./board-studio.js"></script>
     <script src="./base-board-host.js"></script>
     <script src="./export-dialog.js"></script>

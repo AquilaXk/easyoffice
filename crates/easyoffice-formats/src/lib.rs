@@ -89,6 +89,7 @@ mod rich_rtf_writer;
 mod rich_run_writers;
 pub mod rich_slide;
 mod rich_table;
+mod rich_table_cells;
 mod rich_table_style;
 mod rich_table_writers;
 mod rich_toc_writers;
@@ -147,7 +148,8 @@ pub use rich_document::{
     RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField, RichListKind,
     RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame, RichPageMargins,
     RichPaper, RichParagraph, RichRun, RichScript, RichToc, MAX_PAGE_FRAME_PARAGRAPHS,
-    MAX_PAGE_MARGIN_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
+    MAX_PAGE_MARGIN_TWIPS, MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     check_document_images, ImageBudget, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES,
@@ -163,6 +165,10 @@ pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rich_slide::*;
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
+};
+pub use rich_table_cells::{
+    RichCellParagraph, TableCellParagraphs, MAX_CELL_PARAGRAPH_ENTRIES, MAX_PARAGRAPHS_PER_CELL,
+    MAX_RUNS_PER_CELL_PARA,
 };
 pub use rich_table_style::{
     CellFill, TableBorderEdge, TableBorderKind, TableCellBorders, TableCellImage,

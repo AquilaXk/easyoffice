@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{toc_bookmark_number, RichColumns};
+use crate::rich_document::{toc_bookmark_number, RichColumns, MAX_PARA_SPACING_TWIPS};
 use crate::rich_notes::{RichNoteKind, RichRevision, RichRevisionKind};
 use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{drawing_picture, DocxMedia, DocxRelationships, DrawingOutcome};
@@ -16,12 +16,12 @@ use crate::rich_read_numbering::{read_numbering, Numbering};
 use crate::rich_read_page_setup::{
     binding_of, fitting_setup, page_gutter, page_margins, page_paper,
 };
-use crate::rich_table::{join_cell_paragraphs, TableAssembler};
+use crate::rich_table::{join_rich_cell_paragraphs, TableAssembler};
 use crate::rich_xml::{check_paragraph_depth, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper, RichRun,
-    XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
+    EasyOfficeError, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper, RichParagraph,
+    RichRun, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
     MAX_TOTAL_IMAGE_BYTES,
 };
 
@@ -78,6 +78,16 @@ fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
     match name {
         "w:spacing" => {
+            if let Some(before) = number("w:before").filter(|v| *v >= 0) {
+                top.space_before = u32::try_from(before)
+                    .ok()
+                    .map(|v| v.min(MAX_PARA_SPACING_TWIPS));
+            }
+            if let Some(after) = number("w:after").filter(|v| *v >= 0) {
+                top.space_after = u32::try_from(after)
+                    .ok()
+                    .map(|v| v.min(MAX_PARA_SPACING_TWIPS));
+            }
             let line = number("w:line").filter(|l| *l > 0);
             top.line_percent = match (attr(attrs, "w:lineRule").as_deref(), line) {
                 (None | Some("auto"), Some(l)) => l
@@ -122,7 +132,7 @@ pub(super) struct DocxWalker {
     tbl_depth: usize,
     table: TableAssembler,
     table_state: DocxTableState,
-    cell_paras: Vec<Vec<RichRun>>,
+    cell_paras: Vec<RichParagraph>,
     /// `w:gridSpan` and `w:vMerge` of the open top-level cell.
     cell_span: u32,
     cell_v_merge: VMerge,
@@ -538,7 +548,7 @@ impl DocxWalker {
                 self.table_state.on_end(name);
             }
             "w:tc" if self.tbl_depth == 1 => {
-                let (text, spans) = join_cell_paragraphs(&self.cell_paras);
+                let (text, spans, rich_paras) = join_rich_cell_paragraphs(&self.cell_paras);
                 self.cell_paras.clear();
                 self.text_budget.charge_cell(text.len(), "DOCX 표 셀")?;
                 let (row, col) = self.table.next_coord();
@@ -546,6 +556,9 @@ impl DocxWalker {
                 if self.cell_v_merge != VMerge::Continue {
                     if !spans.is_empty() {
                         self.table.push_cell_links(row, col, &spans);
+                    }
+                    if let Some(paras) = rich_paras {
+                        self.table.push_cell_paragraphs(row, col, paras);
                     }
                     self.table.push_cell_style(row, col, fill, borders);
                     if !images.is_empty() {
@@ -648,7 +661,7 @@ impl DocxWalker {
         let sect_end = p.sect_end.take();
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
-            self.cell_paras.push(p.runs);
+            self.cell_paras.push(resolver.finish(p));
         } else if !p.zones.is_empty() {
             let mut zones = std::mem::take(&mut p.zones);
             let last_jc = p.jc.take().unwrap_or_else(|| "left".to_string());

@@ -746,5 +746,18 @@ pub(crate) fn append_pdf_outlines_json(out: &mut String, bytes: &[u8]) {
         push_opt_json_str(out, field.value.as_deref());
         out.push('}');
     }
-    out.push_str("]}}");
+    out.push_str("]}");
+    if let Ok(report) = easyoffice_formats::PdfSerializer::inspect_readback(bytes) {
+        out.push_str(",\"pdfPages\":[");
+        for (idx, page) in report.pages.iter().take(1_000).enumerate() {
+            if idx > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "{{\"pageNumber\":{},\"text\":", page.page_number);
+            push_json_str(out, truncate_chars(&page.body_text, 16_384));
+            out.push('}');
+        }
+        out.push(']');
+    }
+    out.push('}');
 }

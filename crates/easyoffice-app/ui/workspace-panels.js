@@ -377,6 +377,17 @@
 
     let pdfOutlines = [];
     let pdfExtractedFields = [];
+    let pdfPages = [];
+    let pdfCurrentPage = 1;
+
+    function goToPdfPage(pageNum) {
+      const total = Math.max(1, pdfPages.length);
+      const next = Math.max(1, Math.min(total, Math.trunc(Number(pageNum) || 1)));
+      pdfCurrentPage = next;
+      const badge = document.getElementById("pdf-page-indicator");
+      if (badge) { badge.textContent = "쪽 " + next + " / " + total; badge.hidden = pdfPages.length === 0; }
+      return next;
+    }
 
     function normalizePdfExtractedFields(fields) {
       if (!Array.isArray(fields)) return [];
@@ -426,6 +437,8 @@
         highlightText: card?.querySelector(".pdf-highlight-badge")?.textContent ?? "",
         splitMergeText: card?.querySelector(".pdf-splitmerge-badge")?.textContent ?? "",
         outlines: pdfOutlines.slice(),
+        pages: pdfPages.slice(),
+        currentPage: pdfCurrentPage,
       };
     }
 
@@ -508,6 +521,8 @@
     function restorePdfStudioState(pdfStudio) {
       if (!pdfStudio) return;
       pdfOutlines = Array.isArray(pdfStudio.outlines) ? pdfStudio.outlines.slice() : [];
+      pdfPages = Array.isArray(pdfStudio.pages) ? pdfStudio.pages.slice() : [];
+      goToPdfPage(pdfStudio.currentPage || 1);
       pdfExtractedFields = normalizePdfExtractedFields(pdfStudio.formFields);
       renderPdfExtractedFields(pdfExtractedFields);
       for (const [id, prop, key] of PDF_STUDIO_FIELD_RESTORES) {
@@ -758,6 +773,13 @@
       applyPdfStudioFormState,
       renderModuleOutline,
     });
+    host.__EASYOFFICE_MODULE_FIND_HOOKS__ = {
+      getSlideDeck: () => slideDeckState,
+      getSlideIndex: deps.getActiveSlideIndex,
+      switchSlide: switchToSlideIndex,
+      getPdfPages: () => pdfPages,
+      goToPdfPage,
+    };
 
     function syncBtnPressed(id, on) {
       const btn = document.getElementById(id);

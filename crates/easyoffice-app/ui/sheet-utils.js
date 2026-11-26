@@ -622,8 +622,8 @@
       "fontWeight", "fontStyle", "textDecoration", "fontSize", "color", "backgroundColor",
       "borderStyle", "borderTop", "borderRight", "borderBottom", "borderLeft",
       "width", "height", "tableLayout", "columnCount",
-      "padding", "paddingLeft", "paddingRight", "textIndent",
-      "fontFamily", "lineHeight", "textAlign", "outline", "transform",
+      "padding", "paddingLeft", "paddingRight", "textIndent", "marginTop", "marginBottom",
+      "fontFamily", "lineHeight", "textAlign", "verticalAlign", "outline", "transform",
     ];
     if (node.style) {
       styleProps.forEach((prop) => {

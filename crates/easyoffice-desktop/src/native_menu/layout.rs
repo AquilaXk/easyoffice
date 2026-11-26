@@ -78,6 +78,8 @@ pub const THEME: &str = "@theme";
 pub const NUMFMT: &str = "@numfmt";
 /// The 맞춤 submenu of the spreadsheet's 서식 menu ([`ALIGN_LINES`]).
 pub const ALIGN: &str = "@align";
+/// The 맞춤 submenu of the presentation's 삽입 menu ([`SLIDE_ALIGN_LINES`]).
+pub const SLIDE_ALIGN: &str = "@slide-align";
 /// The 테두리 submenu of the spreadsheet's 서식 menu ([`BORDER_LINES`]).
 pub const BORDER: &str = "@border";
 /// The 조건부 서식 submenu of the spreadsheet's 서식 menu ([`CF_LINES`]; its own submenus are [`CF_SUBMENUS`]).
@@ -181,6 +183,19 @@ pub const ALIGN_LINES: [&str; 7] = [
     "format:valign-top",
     "format:valign-middle",
     "format:valign-bottom",
+];
+/// The lines of the presentation 맞춤 submenu.
+pub const SLIDE_ALIGN_LINES: [&str; 10] = [
+    "slide:align-left",
+    "slide:align-center",
+    "slide:align-right",
+    SEPARATOR,
+    "slide:align-top",
+    "slide:align-middle",
+    "slide:align-bottom",
+    SEPARATOR,
+    "slide:distribute-h",
+    "slide:distribute-v",
 ];
 /// The lines of the 테두리 submenu.
 pub const BORDER_LINES: [&str; 16] = [

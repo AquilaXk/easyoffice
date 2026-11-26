@@ -10,8 +10,8 @@ use super::layout::{
     CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, EXPORT_BASE, EXPORT_BASE_LINES, EXPORT_BOARD,
     EXPORT_BOARD_LINES, EXPORT_DOC, EXPORT_DOC_LINES, EXPORT_PDF, EXPORT_PDF_LINES, EXPORT_SHEET,
     EXPORT_SHEET_LINES, EXPORT_SLIDE, EXPORT_SLIDE_LINES, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
-    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME,
-    THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
+    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL,
+    SLIDE_ALIGN, SLIDE_ALIGN_LINES, THEME, THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
 use super::{check, custom, is_check_item, label_for, quit_item, spec, QUIT_ID};
 
@@ -55,6 +55,7 @@ fn submenu<R: Runtime>(
             THEME => builder.item(&nested(app, kind, "테마", &THEME_IDS)?),
             NUMFMT => builder.item(&nested(app, kind, "표시 형식", &NUMFMT_LINES)?),
             ALIGN => builder.item(&nested(app, kind, "맞춤", &ALIGN_LINES)?),
+            SLIDE_ALIGN => builder.item(&nested(app, kind, "맞춤", &SLIDE_ALIGN_LINES)?),
             BORDER => builder.item(&nested(app, kind, "테두리", &BORDER_LINES)?),
             CF => builder.item(&nested(app, kind, "조건부 서식", &CF_LINES)?),
             USE_IN_FORMULA => {

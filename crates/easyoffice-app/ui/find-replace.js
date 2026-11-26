@@ -9,7 +9,8 @@
 
   const { buildMatcher, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
   const DIALOG_ID = "find-dialog";
-  const KIND_OF = { DOC: "doc", HWP: "doc", SHEET: "sheet", BASE: "base" };
+  const KIND_OF = { DOC: "doc", HWP: "doc", SHEET: "sheet", SLIDE: "slide", BASE: "base", BOARD: "board", PDF: "pdf" };
+  const FIND_ONLY_KINDS = new Set(["slide", "board", "pdf"]);
   // Matches on each side of the current one that get an on-screen highlight range.
   const NEAR_WINDOW = 1000;
   const MAX_SELECTION_QUERY = 100;
@@ -41,6 +42,19 @@
     function createSource(moduleCode) {
       if (moduleCode === "DOC" || moduleCode === "HWP") return host.__EASYOFFICE_CREATE_DOC_FIND_SOURCE__({ root: byId("doc-editor"), document, env, withUndo });
       if (moduleCode === "BASE") return host.__EASYOFFICE_CREATE_BASE_FIND_SOURCE__({ getBaseStudio: deps.getBaseStudio, setFeedback });
+      if (moduleCode === "SLIDE" || moduleCode === "PDF" || moduleCode === "BOARD") {
+        const hooks = host.__EASYOFFICE_MODULE_FIND_HOOKS__ || {};
+        return host.__EASYOFFICE_CREATE_MODULE_FIND_SOURCE__?.(moduleCode, {
+          document,
+          getSlideDeck: hooks.getSlideDeck,
+          getSlideIndex: hooks.getSlideIndex,
+          switchSlide: hooks.switchSlide,
+          getSlideCanvas: () => host.__EASYOFFICE_SLIDE_CANVAS__,
+          getPdfPages: hooks.getPdfPages,
+          goToPdfPage: hooks.goToPdfPage,
+          getBoardStudio: () => host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.(),
+        });
+      }
       return host.__EASYOFFICE_CREATE_SHEET_FIND_SOURCE__({
         sheetDataStore: deps.sheetDataStore, getActiveSheetName: deps.getActiveSheetName,
         getActiveCellRef: deps.getActiveSheetCellRef, sheetController: deps.sheetController,
@@ -189,7 +203,7 @@
 
     function applyMode(mode) {
       const { title, replaceRow, replaceButtons, sheetOptions: optionsRow } = ui();
-      const replacing = mode === "replace";
+      const replacing = mode === "replace" && !FIND_ONLY_KINDS.has(source?.kind);
       const replaceTitle = getActiveModule() === "HWP" ? "찾아 바꾸기" : "찾기 및 바꾸기";
       title.textContent = replacing ? replaceTitle : "찾기";
       replaceRow.hidden = !replacing;

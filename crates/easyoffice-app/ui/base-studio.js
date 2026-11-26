@@ -115,6 +115,7 @@
       const grpQuery = appendAll(el("div", "tb-group"), btnFilter, btnSort, groupSelect);
       const sep2 = setAttr(el("span", "tb-sep"), "aria-hidden", "true");
       const grpExport = appendAll(el("div", "tb-group base-export-group"),
+        mkTbBtn("folder-open", "가져오기", () => host.__EASYOFFICE_BASE_IMPORT__?.open?.(), "btn-base-import"),
         mkTbBtn("grid", "XLSX로 내보내기", () => { void exportAs("xlsx"); }, "btn-base-export-xlsx"),
         mkTbBtn("grid", "CSV로 내보내기", () => { void exportAs("csv"); }, "btn-base-export-csv"),
         mkTbBtn("grid", "TSV로 내보내기", () => { void exportAs("tsv"); }, "btn-base-export-tsv")
@@ -770,12 +771,9 @@
       for (const fn of changeListeners) fn();
       return true;
     }
-
     // ---- Public Studio API ----
-
-    function bind() { buildShellDom(); bound = true; render(); return api; }
+    function bind() { buildShellDom(); bound = true; host.__EASYOFFICE_BASE_IMPORT__?.bind?.(api, { document: doc, invokeIpc: deps.invokeIpc, setFeedback }); render(); return api; }
     const getState = () => M.serializeBaseState(state);
-
     function setState(next) {
       const res = M.hydrateBaseState(next);
       if (!res.ok) { setFeedback(res.error); return res; }
@@ -980,6 +978,7 @@
       onChange: (fn) => (changeListeners.add(fn), () => changeListeners.delete(fn)),
       cellCount: () => state.tables.reduce((s, t) => s + t.records.length * t.fields.length, 0),
       activeCellTarget: cellSel.activeTarget, selectCellById: cellSel.selectRecordField, relationIds,
+      runStateMutation: (fn) => runMut(() => { const r = fn(state); if (r?.ok) { qCache?.invalidateSchema(state); gridSize?.clearAll?.(gridWidths); gridMemo.key = ""; queryPanel = ""; } return r || { ok: false, error: "변경에 실패했습니다." }; }, true),
     };
     host.__EASYOFFICE_BASE_STUDIO__ = api;
     return api;

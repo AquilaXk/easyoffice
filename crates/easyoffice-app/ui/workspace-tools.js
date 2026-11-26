@@ -760,6 +760,11 @@
       if (execStudioClipboardCmd(cmd)) return;
       if (execStudioParaCmd(cmd, fb, isDocMod)) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
+      const runProp = { "home-strike": "strike", "home-superscript": "superscript", "home-subscript": "subscript" }[cmd];
+      if (runProp) {
+        if (curMod === "DOC" || (curMod === "HWP" && runProp === "strike")) getDocRuns().toggle(runProp);
+        return;
+      }
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
@@ -779,6 +784,8 @@
       document.getElementById("btn-size-up")?.addEventListener("click", () => runs().bumpSize(1));
       document.getElementById("btn-size-down")?.addEventListener("click", () => runs().bumpSize(-1));
       document.getElementById("btn-stylebar-strike")?.addEventListener("click", () => runs().toggle("strike"));
+      document.getElementById("btn-stylebar-sup")?.addEventListener("click", () => runs().toggle("superscript"));
+      document.getElementById("btn-stylebar-sub")?.addEventListener("click", () => runs().toggle("subscript"));
       const colorPicker = host.__EASYOFFICE_COLOR_PICKER__;
       [["btn-stylebar-textcolor", "doc-textcolor-host", "color", { remember: true }], ["btn-stylebar-highlight", "doc-highlight-host", "highlight", { clear: true }]].forEach(([btnId, hostId, prop, options]) => {
         const btn = document.getElementById(btnId);
@@ -837,6 +844,15 @@
       document.getElementById("btn-ls-down")?.addEventListener("click", () => {
         const cur = Number.parseInt(lsSelect?.value || "108", 10) || 108;
         applyStudioLineSpacing(LS_STEPS_REV.find((s) => s < cur) || 100);
+      });
+      [["doc-space-before-input", "before"], ["doc-space-after-input", "after"]].forEach(([id, which]) => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        const apply = () => getDocRuns().setSpacing(which, Number.parseFloat(input.value));
+        input.addEventListener("change", apply);
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") { ev.preventDefault?.(); apply(); }
+        });
       });
     }
 

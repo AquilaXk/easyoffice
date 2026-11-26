@@ -3,17 +3,24 @@
 
 use std::fmt::Write as _;
 
+use crate::rich_document::safe_link_target;
 use crate::rich_image_writers::{
     docx_image_paragraph, docx_image_relationship, odt_image_paragraph, MediaParts,
 };
-use crate::rich_link_writers::DocxLinks;
-use crate::rich_table::{CellSpan, RichTable, TableCellLink};
+use crate::rich_link_writers::{docx_linked_run_properties, DocxLinks};
+use crate::rich_rtf_writer::line_spacing_240ths;
+use crate::rich_run_writers::{
+    docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
+};
+use crate::rich_table::{
+    slice_cell_paragraphs, CellSpan, RichCellParagraph, RichTable, TableCellLink,
+};
 use crate::rich_table_style::{
     next_cell_style, slice_cell_images, CellFill, TableBorderEdge, TableBorderKind,
     TableCellBorders, TableCellImage,
 };
-use crate::rich_writers::{push_docx_text, push_odt_text, StyleTable};
-use crate::XmlSanitizer;
+use crate::rich_writers::{push_docx_text, push_odt_text, OdtParaKey, StyleTable};
+use crate::{RichAlignment, XmlSanitizer};
 
 const DOCX_TABLE_CELL_PPR: &str =
     "<w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/><w:jc w:val=\"left\"/></w:pPr>";
@@ -149,6 +156,72 @@ fn push_docx_tc_borders(out: &mut String, borders: TableCellBorders) {
     out.push_str("</w:tcBorders>");
 }
 
+fn push_docx_cell_paragraphs(out: &mut String, paras: &[RichCellParagraph], links: &mut DocxLinks) {
+    for p in paras {
+        out.push_str("<w:p><w:pPr>");
+        let line = p
+            .line_spacing_percent
+            .map(line_spacing_240ths)
+            .unwrap_or(240);
+        let _ = write!(
+            out,
+            "<w:spacing w:after=\"0\" w:line=\"{line}\" w:lineRule=\"auto\"/>"
+        );
+        let jc = match p.alignment.unwrap_or(RichAlignment::Left) {
+            RichAlignment::Left => "left",
+            RichAlignment::Center => "center",
+            RichAlignment::Right => "right",
+            RichAlignment::Justify => "both",
+        };
+        let _ = write!(out, "<w:jc w:val=\"{jc}\"/></w:pPr>");
+        let mut cur_link: Option<&str> = None;
+        for run in &p.runs {
+            if run.text.is_empty() {
+                continue;
+            }
+            let want_link = run.link.as_deref().and_then(safe_link_target);
+            if cur_link.is_some() && cur_link != want_link {
+                out.push_str("</w:hyperlink>");
+                cur_link = None;
+            }
+            if cur_link != want_link {
+                if let Some(url) = want_link {
+                    match url.strip_prefix('#') {
+                        Some(anchor) => {
+                            let _ = write!(
+                                out,
+                                "<w:hyperlink w:anchor=\"{}\" w:history=\"1\">",
+                                XmlSanitizer::escape(anchor)
+                            );
+                        }
+                        None => {
+                            let _ = write!(
+                                out,
+                                "<w:hyperlink r:id=\"{}\" w:history=\"1\">",
+                                links.rel_id(url)
+                            );
+                        }
+                    }
+                    cur_link = Some(url);
+                }
+            }
+            let props = docx_run_properties(run);
+            out.push_str("<w:r>");
+            out.push_str(&if cur_link.is_some() {
+                docx_linked_run_properties(&props)
+            } else {
+                props
+            });
+            push_docx_text(out, &run.text);
+            out.push_str("</w:r>");
+        }
+        if cur_link.is_some() {
+            out.push_str("</w:hyperlink>");
+        }
+        out.push_str("</w:p>");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_docx_cell(
     out: &mut String,
@@ -159,6 +232,7 @@ fn push_docx_cell(
     text: &str,
     cell_links: &[TableCellLink],
     cell_images: &[&TableCellImage],
+    cell_paras: Option<&[RichCellParagraph]>,
     ctx: &mut DocxTableContext<'_>,
 ) {
     out.push_str("<w:tc>");
@@ -187,7 +261,9 @@ fn push_docx_cell(
         }
         out.push_str("</w:tcPr>");
     }
-    if !text.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
+    if let Some(paras) = cell_paras.filter(|ps| !ps.is_empty()) {
+        push_docx_cell_paragraphs(out, paras, ctx.links);
+    } else if !text.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
         out.push_str("<w:p>");
         out.push_str(DOCX_TABLE_CELL_PPR);
         if cell_links.is_empty() {
@@ -258,10 +334,12 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
     let links = table.validated_links();
     let styles = table.validated_cell_styles();
     let images = table.validated_cell_images();
+    let cell_paras = table.validated_cell_paragraphs();
     let col_widths = table.validated_col_widths();
     let mut link_cursor = 0usize;
     let mut style_cursor = 0usize;
     let mut image_cursor = 0usize;
+    let mut para_cursor = 0usize;
     out.push_str("<w:tbl>");
     crate::ooxml_shared_parts::push_docx_table_properties_with_widths_for_page(
         out,
@@ -280,7 +358,8 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
                     let cl = slice_cell_links(&links, &mut link_cursor, r, c);
                     let st = next_cell_style(&styles, &mut style_cursor, r, c);
                     let ci = slice_cell_images(&images, &mut image_cursor, r, c);
-                    push_docx_cell(out, tc_w, 1, None, st, &row[c], cl, ci, ctx);
+                    let cp = slice_cell_paragraphs(&cell_paras, &mut para_cursor, r, c);
+                    push_docx_cell(out, tc_w, 1, None, st, &row[c], cl, ci, cp, ctx);
                 }
                 CellSpan::Anchor { row_span, col_span } => {
                     let v_merge = (row_span > 1).then_some("restart");
@@ -288,7 +367,8 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
                     let cl = slice_cell_links(&links, &mut link_cursor, r, c);
                     let st = next_cell_style(&styles, &mut style_cursor, r, c);
                     let ci = slice_cell_images(&images, &mut image_cursor, r, c);
-                    push_docx_cell(out, tc_w, col_span, v_merge, st, &row[c], cl, ci, ctx);
+                    let cp = slice_cell_paragraphs(&cell_paras, &mut para_cursor, r, c);
+                    push_docx_cell(out, tc_w, col_span, v_merge, st, &row[c], cl, ci, cp, ctx);
                     c += col_span as usize - 1;
                 }
                 CellSpan::Covered {
@@ -311,6 +391,7 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
                             "",
                             &[],
                             &[],
+                            None,
                             ctx,
                         );
                         c += col_span as usize - 1;
@@ -353,16 +434,20 @@ pub(crate) fn push_odt_table(
     body: &mut String,
     table: &RichTable,
     table_styles: &mut OdtTableStyles,
+    para_styles: &mut StyleTable<OdtParaKey>,
+    text_styles: &mut StyleTable<OdtTextKey>,
     media: &mut MediaParts,
 ) {
     let spans = table.span_map();
     let links = table.validated_links();
     let styles = table.validated_cell_styles();
     let images = table.validated_cell_images();
+    let cell_paras = table.validated_cell_paragraphs();
     let col_widths = table.validated_col_widths();
     let mut link_cursor = 0usize;
     let mut style_cursor = 0usize;
     let mut image_cursor = 0usize;
+    let mut para_cursor = 0usize;
     let cols = table.column_count().max(1);
     body.push_str("<table:table>");
     if let Some(widths) = col_widths {
@@ -402,6 +487,7 @@ pub(crate) fn push_odt_table(
                     let cl = slice_cell_links(&links, &mut link_cursor, r, c);
                     let st = next_cell_style(&styles, &mut style_cursor, r, c);
                     let ci = slice_cell_images(&images, &mut image_cursor, r, c);
+                    let cp = slice_cell_paragraphs(&cell_paras, &mut para_cursor, r, c);
                     let _ = write!(
                         body,
                         "<table:table-cell table:number-columns-spanned=\"{col_span}\" table:number-rows-spanned=\"{row_span}\""
@@ -411,20 +497,21 @@ pub(crate) fn push_odt_table(
                         let _ = write!(body, " table:style-name=\"TD{sid}\"");
                     }
                     body.push_str(" office:value-type=\"string\">");
-                    push_odt_cell_body(body, cell, cl, ci, media);
+                    push_odt_cell_body(body, cell, cl, ci, cp, para_styles, text_styles, media);
                     body.push_str("</table:table-cell>");
                 }
                 CellSpan::Plain => {
                     let cl = slice_cell_links(&links, &mut link_cursor, r, c);
                     let st = next_cell_style(&styles, &mut style_cursor, r, c);
                     let ci = slice_cell_images(&images, &mut image_cursor, r, c);
+                    let cp = slice_cell_paragraphs(&cell_paras, &mut para_cursor, r, c);
                     body.push_str("<table:table-cell");
                     if let Some(key) = st {
                         let sid = table_styles.cell_styles.intern(&key);
                         let _ = write!(body, " table:style-name=\"TD{sid}\"");
                     }
                     body.push_str(" office:value-type=\"string\">");
-                    push_odt_cell_body(body, cell, cl, ci, media);
+                    push_odt_cell_body(body, cell, cl, ci, cp, para_styles, text_styles, media);
                     body.push_str("</table:table-cell>");
                 }
             }
@@ -434,14 +521,75 @@ pub(crate) fn push_odt_table(
     body.push_str("</table:table>");
 }
 
+fn push_odt_cell_paragraphs(
+    body: &mut String,
+    paras: &[RichCellParagraph],
+    para_styles: &mut StyleTable<OdtParaKey>,
+    text_styles: &mut StyleTable<OdtTextKey>,
+) {
+    for p in paras {
+        let key = OdtParaKey {
+            align: p.alignment,
+            line_percent: p.line_spacing_percent,
+            ..OdtParaKey::default()
+        };
+        if key == OdtParaKey::default() {
+            body.push_str("<text:p text:style-name=\"TableCellP\">");
+        } else {
+            let pid = para_styles.intern(&key);
+            let _ = write!(body, "<text:p text:style-name=\"P{pid}\">");
+        }
+        let mut cur_link: Option<&str> = None;
+        for run in &p.runs {
+            if run.text.is_empty() {
+                continue;
+            }
+            let want_link = run.link.as_deref().and_then(safe_link_target);
+            if cur_link.is_some() && cur_link != want_link {
+                body.push_str("</text:a>");
+                cur_link = None;
+            }
+            if cur_link != want_link {
+                if let Some(url) = want_link {
+                    let _ = write!(
+                        body,
+                        "<text:a xlink:type=\"simple\" xlink:href=\"{}\">",
+                        XmlSanitizer::escape(url)
+                    );
+                    cur_link = Some(url);
+                }
+            }
+            let tkey = odt_text_key(run);
+            if odt_text_key_is_plain(&tkey) {
+                push_odt_text(body, &run.text);
+            } else {
+                let tid = text_styles.intern(&tkey);
+                let _ = write!(body, "<text:span text:style-name=\"T{tid}\">");
+                push_odt_text(body, &run.text);
+                body.push_str("</text:span>");
+            }
+        }
+        if cur_link.is_some() {
+            body.push_str("</text:a>");
+        }
+        body.push_str("</text:p>");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_odt_cell_body(
     body: &mut String,
     cell: &str,
     cell_links: &[TableCellLink],
     cell_images: &[&TableCellImage],
+    cell_paras: Option<&[RichCellParagraph]>,
+    para_styles: &mut StyleTable<OdtParaKey>,
+    text_styles: &mut StyleTable<OdtTextKey>,
     media: &mut MediaParts,
 ) {
-    if !cell.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
+    if let Some(paras) = cell_paras.filter(|ps| !ps.is_empty()) {
+        push_odt_cell_paragraphs(body, paras, para_styles, text_styles);
+    } else if !cell.is_empty() || !cell_links.is_empty() || cell_images.is_empty() {
         body.push_str("<text:p text:style-name=\"TableCellP\">");
         push_odt_cell_content(body, cell, cell_links);
         body.push_str("</text:p>");

@@ -13,9 +13,11 @@ use self::notes::OdtNotesState;
 use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries_for};
-use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
+use crate::rich_document::{
+    normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc, MAX_PARA_SPACING_TWIPS,
+};
 use crate::rich_image::{safe_package_path, ImageBudget};
-use crate::rich_table::{join_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
+use crate::rich_table::{join_rich_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -51,6 +53,8 @@ struct StyleProps {
     right_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
+    space_before_twips: Option<u32>,
+    space_after_twips: Option<u32>,
     page_break_before: bool,
     /// Columns of a section style (`style:section-properties`); a count of 1 stands for one column.
     columns: Option<RichColumns>,
@@ -178,6 +182,18 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
     p.line_percent = attr(attrs, "fo:line-height")
         .as_deref()
         .and_then(line_height_percent);
+    p.space_before_twips = attr(attrs, "fo:margin-top")
+        .as_deref()
+        .and_then(length_twips)
+        .and_then(|t| u32::try_from(t).ok())
+        .filter(|t| *t > 0)
+        .map(|t| t.min(MAX_PARA_SPACING_TWIPS));
+    p.space_after_twips = attr(attrs, "fo:margin-bottom")
+        .as_deref()
+        .and_then(length_twips)
+        .and_then(|t| u32::try_from(t).ok())
+        .filter(|t| *t > 0)
+        .map(|t| t.min(MAX_PARA_SPACING_TWIPS));
     p.page_break_before = attr(attrs, "fo:break-before").as_deref() == Some("page");
 }
 
@@ -316,6 +332,12 @@ fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
             if props.line_percent.is_none() {
                 props.line_percent = p.line_percent;
             }
+            if props.space_before_twips.is_none() {
+                props.space_before_twips = p.space_before_twips;
+            }
+            if props.space_after_twips.is_none() {
+                props.space_after_twips = p.space_after_twips;
+            }
             props.page_break_before |= p.page_break_before;
             props.fmt = merge_span_fmt(p.fmt.clone(), props.fmt.clone());
             cur_parent = p.parent.as_deref();
@@ -361,7 +383,7 @@ struct OdtWalker<'a> {
     tbl_depth: usize,
     table: TableAssembler,
     table_state: OdtTableState,
-    cell_paras: Vec<Vec<RichRun>>,
+    cell_paras: Vec<RichParagraph>,
     /// Row span, column span and repeat count of the open top-level cell.
     cell_shape: (u32, u32, u32),
     /// Merged regions dropped as invalid in this document.
@@ -695,9 +717,9 @@ impl<'a> OdtWalker<'a> {
             }
             "text:p" | "text:h" if !self.in_automatic_styles => self.finish_paragraph()?,
             "table:table-cell" if self.tbl_depth == 1 => {
-                let (text, spans) = join_cell_paragraphs(&self.cell_paras);
+                let (text, spans, rich_paras) = join_rich_cell_paragraphs(&self.cell_paras);
                 self.cell_paras.clear();
-                self.push_cell_with_links(text, &spans)?;
+                self.push_cell_with_links(text, &spans, rich_paras.as_deref())?;
             }
             "table:table-row" if self.tbl_depth == 1 => self.table.end_row(),
             "table:table" => {
@@ -724,11 +746,12 @@ impl<'a> OdtWalker<'a> {
         u32::try_from(MAX_PADDED_COLUMNS.saturating_sub(self.table.row_len())).unwrap_or(0)
     }
 
-    /// Adds the closed cell (with any hyperlink spans, style, and images), repeated as declared.
+    /// Adds the closed cell (with any hyperlink spans, rich paragraphs, style, and images), repeated as declared.
     fn push_cell_with_links(
         &mut self,
         text: String,
         spans: &[(u32, u32, String)],
+        rich_paras: Option<&[crate::rich_table::RichCellParagraph]>,
     ) -> Result<(), EasyOfficeError> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
@@ -737,6 +760,9 @@ impl<'a> OdtWalker<'a> {
         let (r0, c0) = self.table.next_coord();
         if !spans.is_empty() {
             self.table.push_cell_links(r0, c0, spans);
+        }
+        if let Some(paras) = rich_paras {
+            self.table.push_cell_paragraphs(r0, c0, paras.to_vec());
         }
         if let Some((fill, borders)) = cell_style {
             self.table.push_cell_style(r0, c0, fill, borders);
@@ -751,6 +777,9 @@ impl<'a> OdtWalker<'a> {
             let (rk, ck) = self.table.next_coord();
             if !spans.is_empty() {
                 self.table.push_cell_links(rk, ck, spans);
+            }
+            if let Some(paras) = rich_paras {
+                self.table.push_cell_paragraphs(rk, ck, paras.to_vec());
             }
             if let Some((fill, borders)) = cell_style {
                 self.table.push_cell_style(rk, ck, fill, borders);
@@ -783,7 +812,12 @@ impl<'a> OdtWalker<'a> {
         });
         let images = p.images;
         if self.tbl_depth > 0 {
-            self.cell_paras.push(p.runs);
+            self.cell_paras.push(RichParagraph {
+                runs: p.runs,
+                alignment: p.style.align,
+                line_spacing_percent: p.style.line_percent,
+                ..RichParagraph::default()
+            });
         } else if text.trim().is_empty() && !has_special_run {
             self.pending_page_break |= p.style.page_break_before;
         } else {
@@ -822,6 +856,8 @@ impl<'a> OdtWalker<'a> {
                 right_indent_twips: p.style.right_twips,
                 first_line_indent_twips: p.style.first_line_twips,
                 line_spacing_percent: p.style.line_percent,
+                space_before_twips: p.style.space_before_twips,
+                space_after_twips: p.style.space_after_twips,
                 toc: p.toc,
                 bookmark: p.bookmark,
                 toc_page,

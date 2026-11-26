@@ -834,3 +834,13 @@ input.sb-ls-select {
 .doc-image-handle[data-resize-dir="se"] { right: -5px; bottom: -5px; cursor: nwse-resize; }
 .doc-image-handle[data-resize-dir="e"] { right: -5px; top: calc(50% - 4px); cursor: ew-resize; }
 .doc-image-handle[data-resize-dir="s"] { left: calc(50% - 4px); bottom: -5px; cursor: ns-resize; }
+.sb-spacing-group { display: inline-flex; align-items: center; gap: 4px; }
+.sb-spacing-label { font-size: var(--font-size-xs); color: var(--ui-text-secondary); white-space: nowrap; }
+.sb-spacing-input { width: 48px; height: 22px; padding: 0 4px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-xs); text-align: right; }
+.sb-spacing-input:focus { outline: none; border-color: var(--focus-ring); }
+.slide-presenter-notes-input { width: 100%; min-height: 58px; resize: vertical; font: inherit; line-height: 1.45; }
+.slide-context-menu.context-menu[data-mode="canvas"] { min-width: 200px; display: block; padding: 4px 0; background: var(--color-surface); border: 1px solid var(--ui-border); box-shadow: var(--shadow-dropdown); }
+.slide-context-menu.context-menu[data-mode="canvas"] > #slide-ctx-thumb-group { display: none; }
+#slide-ctx-thumb-group { display: flex; flex-direction: column; gap: 2px; }
+#slide-ctx-thumb-group[hidden], #slide-ctx-canvas-group[hidden] { display: none; }
+.eo-search-hit { outline: 2px solid var(--focus-ring); outline-offset: 2px; background-color: var(--selection-fill); }

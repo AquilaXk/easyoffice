@@ -44,9 +44,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "security-audit": [...RIBBON_MODULES, "CONV"], "bench-run": [...RIBBON_MODULES, "CONV"],
     "view-outline": [...RIBBON_MODULES, "CONV"],
     "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
-    find: ["DOC", "HWP", "SHEET", "BASE"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
-    "clip-copy": [...EDIT_MODULES, "BASE"], "clip-cut": [...DOC_SHEET_MODULES, "BASE"], "clip-paste": [...DOC_SHEET_MODULES, "BASE"],
+    find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
+    "clip-copy": [...EDIT_MODULES, "BASE", "BOARD"], "clip-cut": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"], "clip-paste": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"],
     "mod-symbol": EDIT_MODULES,
+    "home-strike": DOC_MODULES, "home-superscript": ["DOC"], "home-subscript": ["DOC"],
     "insert-image": ["DOC"], "mod-endnote": ["DOC"], "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
     "table-border-bg": ["DOC"], "table-cell-props": ["DOC"], "table-col-equal": ["DOC"],
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
@@ -820,6 +821,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         return;
       }
       if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
+      if (mod === "SLIDE") return host.__EASYOFFICE_SLIDE_CLIPBOARD__?.runMenuClipboard?.(cmd);
+      if (mod === "BOARD") return host.__EASYOFFICE_BOARD_STYLE_BAR__?.runClipboardCommand?.(cmd);
       if (mod === "BASE") return host.__EASYOFFICE_BASE_BOARD_HOST__?.getBaseStudio()?.runClipboardCommand?.(cmd, readSystemClipboard, writeSystemClipboard);
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();

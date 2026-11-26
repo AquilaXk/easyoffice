@@ -112,6 +112,8 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
             .is_some_and(|t| t.saturating_abs() > MAX_INDENT_TWIPS)
         || p.line_spacing_percent
             .is_some_and(|pct| pct == 0 || pct > MAX_SPACING_PERCENT)
+        || p.space_before_twips.is_some_and(|v| v > 0)
+        || p.space_after_twips.is_some_and(|v| v > 0)
 }
 
 pub(super) fn drawable_archive_fields(w_pt: f32, h_pt: f32, description: Option<&str>) -> Vec<Fld> {

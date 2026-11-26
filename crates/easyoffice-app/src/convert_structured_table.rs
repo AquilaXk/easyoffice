@@ -10,6 +10,9 @@ use easyoffice_formats::{
     MIN_COL_WIDTH_TWIPS,
 };
 
+#[path = "convert_structured_table_cells.rs"]
+mod convert_structured_table_cells;
+
 use super::{as_array, as_object, field, invalid, opt_bounded, opt_str, Budget, JsonObject};
 use crate::EasyOfficeIpcRouter;
 
@@ -76,6 +79,7 @@ pub(crate) fn write_table_extras(out: &mut String, table: &RichTable) {
         }
         out.push(']');
     }
+    convert_structured_table_cells::write_cell_paragraphs_json(out, table);
 }
 
 fn write_borders_json(out: &mut String, borders: TableCellBorders) {
@@ -129,7 +133,7 @@ pub(super) fn parse_image_budgeted(
     Ok(image)
 }
 
-fn req_u32(obj: &JsonObject, key: &str, what: &str) -> Result<u32, EasyOfficeError> {
+pub(super) fn req_u32(obj: &JsonObject, key: &str, what: &str) -> Result<u32, EasyOfficeError> {
     field(obj, key)
         .and_then(StrictJsonValue::as_u64)
         .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
@@ -410,7 +414,25 @@ pub(super) fn parse_table(
         }
         rows.push(row);
     }
+    let raw_eq_cells: Vec<(usize, usize, String)> = if field(obj, "cellParagraphs").is_some() {
+        rows.iter()
+            .enumerate()
+            .flat_map(|(r, row)| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(_, cell)| cell.trim_start().starts_with('='))
+                    .map(move |(c, cell)| (r, c, cell.clone()))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     evaluate_table_formulas(&mut rows);
+    let formula_cells: Vec<(u32, u32)> = raw_eq_cells
+        .into_iter()
+        .filter(|(r, c, raw)| rows.get(*r).and_then(|row| row.get(*c)) != Some(raw))
+        .map(|(r, c, _)| (r as u32, c as u32))
+        .collect();
     let mut merges = Vec::new();
     if let Some(v) = field(obj, "merges") {
         for item in as_array(v, "merges")? {
@@ -446,5 +468,12 @@ pub(super) fn parse_table(
     table.col_widths_twips = parse_col_widths(obj, max_cols, warnings)?;
     table.cell_styles = parse_cell_styles(obj, &table.rows, budget, warnings)?;
     table.cell_images = parse_cell_images(obj, &table.rows, budget, img_budget, warnings)?;
+    table.cell_paragraphs = convert_structured_table_cells::parse_cell_paragraphs(
+        obj,
+        &table.rows,
+        &formula_cells,
+        budget,
+        warnings,
+    )?;
     Ok(table)
 }

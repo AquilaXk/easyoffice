@@ -916,3 +916,12 @@
 .pdf-form-extracted { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 10px; padding-top: 6px; border-top: 1px solid var(--ui-border-subtle); font-size: var(--font-size-xs); color: var(--ui-text-secondary); }
 .pdf-form-extracted[hidden] { display: none; }
 .pdf-form-extracted-chip { padding: 2px 6px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-bg-light); }
+#doc-editor .eo-run[data-eo-superscript="true"],
+#doc-editor sup:not(.eo-note-ref),
+#eo-print-root .eo-run[data-eo-superscript="true"],
+#eo-print-root sup:not(.eo-note-ref) { vertical-align: super; font-size: 0.78em; line-height: 0; }
+#doc-editor .eo-run[data-eo-subscript="true"],
+#doc-editor sub,
+#eo-print-root .eo-run[data-eo-subscript="true"],
+#eo-print-root sub { vertical-align: sub; font-size: 0.78em; line-height: 0; }
+.doc-inline-table td > p { margin: 0; }

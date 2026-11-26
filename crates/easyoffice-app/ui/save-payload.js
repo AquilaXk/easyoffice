@@ -90,12 +90,15 @@
     }
     const weight = String(st.fontWeight || "").trim().toLowerCase();
     const deco = String(st.textDecoration || st.textDecorationLine || "").toLowerCase();
+    const va = String(st.verticalAlign || "").trim().toLowerCase();
+    const dsScript = ds.eoSuperscript === "true" ? "superscript" : ds.eoSubscript === "true" ? "subscript" : null;
+    const styleScript = va === "super" ? "superscript" : va === "sub" ? "subscript" : null;
     const next = {
       bold: fmt.bold || tag === "STRONG" || tag === "B" || weight === "bold" || weight === "bolder" || Number(weight) >= 600,
       italic: fmt.italic || tag === "EM" || tag === "I" || String(st.fontStyle || "").toLowerCase() === "italic",
       underline: fmt.underline || tag === "U" || (tag === "INS" && !isRev) || deco.includes("underline"),
       strike: fmt.strike || tag === "S" || tag === "STRIKE" || (tag === "DEL" && !isRev) || deco.includes("line-through"),
-      script: SCRIPT_TAGS[tag] || fmt.script,
+      script: dsScript || styleScript || SCRIPT_TAGS[tag] || fmt.script,
       link: tag === "A" ? linkTarget(el) : fmt.link,
       commentId,
       revision,
@@ -136,6 +139,13 @@
     return Number.isFinite(stored) && Math.abs(stored - computed) <= 1 ? stored : computed;
   }
 
+  function parseLineSpacingPercent(raw) {
+    const spacing = LINE_SPACING_RE.exec(String(raw || "").trim());
+    if (!spacing) return null;
+    const percent = Math.round(Number(spacing[1]) * (spacing[2] ? 1 : 100));
+    return percent >= 1 && percent <= MAX_LINE_PERCENT && percent !== 100 ? percent : null;
+  }
+
   function paragraphLayout(node, baseLineHeight) {
     const st = node.style || {};
     const data = node.dataset || {};
@@ -146,12 +156,10 @@
     if (right !== null && right > 0) out.rightIndentTwips = right;
     const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
     if (first !== null && first !== 0) out.firstLineIndentTwips = first;
-    const rawLineHeight = String(st.lineHeight || baseLineHeight || "").trim();
-    const spacing = LINE_SPACING_RE.exec(rawLineHeight);
-    if (spacing) {
-      const percent = Math.round(Number(spacing[1]) * (spacing[2] ? 1 : 100));
-      if (percent >= 1 && percent <= MAX_LINE_PERCENT && percent !== 100) out.lineSpacingPercent = percent;
-    }
+    const percent = parseLineSpacingPercent(String(st.lineHeight || baseLineHeight || ""));
+    if (percent !== null) out.lineSpacingPercent = percent;
+    const docTableRuns = host.__EASYOFFICE_DOC_TABLE_RUNS__;
+    if (docTableRuns) Object.assign(out, docTableRuns.paragraphSpacingLayout(node));
     return out;
   }
 
@@ -429,6 +437,20 @@
   // behind them. Covered slots are empty strings. Spans stop at the table's last row, at
   // MAX_TABLE_COLUMNS and at slots another cell covers; hidden cells are not part of the grid; rows
   // without any slot are dropped.
+  function applyFmtFields(run, fmt, includeLink) {
+    if (fmt.script) run.script = fmt.script;
+    if (includeLink && fmt.link) run.link = fmt.link;
+    if (fmt.commentId !== undefined) run.commentId = fmt.commentId;
+    if (fmt.revision) run.revision = { ...fmt.revision };
+    BOOL_KEYS.forEach((k) => {
+      if (fmt[k]) run[k] = true;
+    });
+    VALUE_KEYS.forEach((k) => {
+      if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
+    });
+    return run;
+  }
+
   function readTableGrid(table) {
     const trs = collectTableRows(table);
     const taken = trs.map(() => []);
@@ -437,6 +459,8 @@
     const rawLinks = [];
     const rawStyles = [];
     const rawImages = [];
+    const rawCellParagraphs = [];
+    const docTableRuns = host.__EASYOFFICE_DOC_TABLE_RUNS__;
     trs.forEach((tr, r) => {
       let col = 0;
       const cells = tr.children;
@@ -460,6 +484,10 @@
         const styleEntry = readCellStyleEntry(cell, r, col);
         if (styleEntry) rawStyles.push(styleEntry);
         readCellImagesIn(cell, r, col).forEach((im) => rawImages.push(im));
+        const richParas = docTableRuns?.readCellParagraphs?.(cell, {
+          isSkippedElement, styleFormat, normalizeAlign, parseLineSpacing: parseLineSpacingPercent, applyFmtFields, sameFormat,
+        });
+        if (richParas) rawCellParagraphs.push({ row: r, col, paragraphs: richParas });
         if (rowSpan * colSpan > 1) merges.push({ row: r, col, rowSpan, colSpan });
         col += colSpan;
       }
@@ -479,23 +507,28 @@
     const cellImages = rawImages
       .filter((im) => rows[im.row]?.length > 0)
       .map((im) => ({ ...im, row: before[im.row] }));
+    const cellParagraphs = rawCellParagraphs
+      .filter((cp) => rows[cp.row]?.length > 0)
+      .map((cp) => ({ ...cp, row: before[cp.row] }));
     const keptRows = rows.filter((row) => row.length > 0);
     const colCount = keptRows.reduce((m, row) => Math.max(m, row.length), 0);
     const colWidthsTwips = readColWidthsTwips(table, colCount);
-    return { texts: keptRows, merges: regions, links, colWidthsTwips, cellStyles, cellImages };
+    return { texts: keptRows, merges: regions, links, colWidthsTwips, cellStyles, cellImages, cellParagraphs };
   }
 
   function buildTableBlock(table) {
-    const { texts, merges, links, colWidthsTwips, cellStyles, cellImages } = readTableGrid(table);
+    const { texts, merges, links, colWidthsTwips, cellStyles, cellImages, cellParagraphs } = readTableGrid(table);
     const values = evaluateDocTableFormulas(texts);
     const rows = texts.map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })));
     const keptLinks = links.filter((l) => values[l.row]?.[l.col] === null);
+    const keptCellParas = cellParagraphs.filter((cp) => values[cp.row]?.[cp.col] === null);
     const block = { type: "table", rows };
     if (merges.length > 0) block.merges = merges;
     if (keptLinks.length > 0) block.links = keptLinks;
     if (colWidthsTwips.length > 0) block.colWidthsTwips = colWidthsTwips;
     if (cellStyles.length > 0) block.cellStyles = cellStyles;
     if (cellImages.length > 0) block.cellImages = cellImages;
+    if (keptCellParas.length > 0) block.cellParagraphs = keptCellParas;
     return block;
   }
 
@@ -539,20 +572,6 @@
         blocks.push(block);
       }
       cur = null;
-    }
-
-    function applyFmtFields(run, fmt, includeLink) {
-      if (fmt.script) run.script = fmt.script;
-      if (includeLink && fmt.link) run.link = fmt.link;
-      if (fmt.commentId !== undefined) run.commentId = fmt.commentId;
-      if (fmt.revision) run.revision = { ...fmt.revision };
-      BOOL_KEYS.forEach((k) => {
-        if (fmt[k]) run[k] = true;
-      });
-      VALUE_KEYS.forEach((k) => {
-        if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
-      });
-      return run;
     }
 
     function appendText(text, ctx, fmt) {

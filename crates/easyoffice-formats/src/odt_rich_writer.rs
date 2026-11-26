@@ -143,9 +143,14 @@ pub(crate) fn odt_rich_entries(
                     &mut notes_ctx,
                 );
             }
-            RichBlock::Table(table) => {
-                push_odt_table(&mut body, table, &mut table_styles, &mut media)
-            }
+            RichBlock::Table(table) => push_odt_table(
+                &mut body,
+                table,
+                &mut table_styles,
+                &mut para_styles,
+                &mut text_styles,
+                &mut media,
+            ),
             RichBlock::Image(img) => {
                 let picture = media.add(ODT_MEDIA_DIR, img);
                 body.push_str(&odt_image_paragraph(img, picture.ordinal, &picture.path));

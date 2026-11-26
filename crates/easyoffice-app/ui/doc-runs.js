@@ -10,13 +10,14 @@
   // validated first and assigned through element.style / dataset.
 
   const RUN_CLASS = "eo-run";
-  const BOOL_PROPS = ["bold", "italic", "underline", "strike"];
+  const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
   const VALUE_PROPS = ["size", "font", "color", "highlight"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   const DATA_KEY = {
     size: "eoSize", font: "eoFont", color: "eoColor", highlight: "eoHighlight",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
+    superscript: "eoSuperscript", subscript: "eoSubscript",
   };
   const MIN_HALF_PT = 2;
   const MAX_HALF_PT = 8192;
@@ -85,6 +86,8 @@
       out[prop] = v;
       any = true;
     });
+    if (out.superscript === true && !Object.hasOwn(out, "subscript")) out.subscript = null;
+    if (out.subscript === true && !Object.hasOwn(out, "superscript")) out.superscript = null;
     return any ? out : null;
   }
 
@@ -120,16 +123,20 @@
     B: { bold: true }, STRONG: { bold: true }, I: { italic: true }, EM: { italic: true },
     U: { underline: true }, INS: { underline: true },
     S: { strike: true }, STRIKE: { strike: true }, DEL: { strike: true },
+    SUP: { superscript: true }, SUB: { subscript: true },
   };
 
   function readInlineStyleFormat(st) {
     const weight = String(st.fontWeight || "").toLowerCase();
     const deco = String(st.textDecoration || st.textDecorationLine || "").toLowerCase();
+    const va = String(st.verticalAlign || "").toLowerCase();
     const candidates = {
       bold: weight === "bold" || weight === "bolder" || Number(weight) >= 600,
       italic: String(st.fontStyle || "").toLowerCase() === "italic",
       underline: deco.includes("underline"),
       strike: deco.includes("line-through"),
+      superscript: va === "super",
+      subscript: va === "sub",
       size: cssSizeToHalfPt(st.fontSize),
       font: st.fontFamily ? normalizeFont(st.fontFamily) : null,
       color: st.color ? normalizeColor(st.color) : null,
@@ -141,6 +148,7 @@
   // Formatting of elements that were not created by the run engine (pasted or opened content).
   function readLegacyFormat(el) {
     const tag = (el.tagName || "").toUpperCase();
+    if (tag === "SUP" && el.dataset?.eoNoteKind !== undefined) return {};
     if ((tag === "INS" || tag === "DEL") && el.dataset?.eoRevId !== undefined) return {};
     const fmt = { ...TAG_FORMAT[tag] };
     if (tag !== "SPAN" && tag !== "FONT") return fmt;
@@ -161,6 +169,7 @@
       fontWeight: fmt.bold ? "bold" : "",
       fontStyle: fmt.italic ? "italic" : "",
       textDecoration: deco,
+      verticalAlign: fmt.superscript ? "super" : fmt.subscript ? "sub" : "",
     };
   }
 
@@ -193,15 +202,18 @@
     else if (fmt.underline) st.textDecoration = "underline";
     else if (fmt.strike) st.textDecoration = "line-through";
     else st.textDecoration = "";
+    st.verticalAlign = fmt.superscript ? "super" : fmt.subscript ? "sub" : "";
   }
 
   // Format of a structured-payload / decoded model run ({sizeHalfPt, font, color, highlight,
-  // bold, italic, underline, strike}); invalid values are dropped.
+  // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
       size: run?.sizeHalfPt, font: run?.font, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
+      superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
+      subscript: run?.subscript === true || run?.script === "subscript" ? true : undefined,
     });
     const fmt = {};
     PROPS.forEach((p) => {
