@@ -386,6 +386,7 @@
       pdfCurrentPage = next;
       const badge = document.getElementById("pdf-page-indicator");
       if (badge) { badge.textContent = "쪽 " + next + " / " + total; badge.hidden = pdfPages.length === 0; }
+      const card = document.getElementById("pdf-page-card"); if (card) card.dataset.activePage = String(next);
       return next;
     }
 
@@ -778,6 +779,7 @@
       getSlideIndex: deps.getActiveSlideIndex,
       switchSlide: switchToSlideIndex,
       getPdfPages: () => pdfPages,
+      getPdfCurrentPage: () => pdfCurrentPage,
       goToPdfPage,
     };
 

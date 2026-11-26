@@ -375,4 +375,36 @@ test("real Chrome: DOC sub/sup/spacing & DOCX table-cell roundtrip, SLIDE UX/sea
   assert.equal(await js(`document.getElementById("find-count").textContent`), "1 / 1");
   assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio()._styleHooks.getSelection().node?.id`), boardSetup.n2Id);
   assert.notEqual(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().getState().viewport.panX`), 0);
+  await sendKey("Escape", "Escape", 27);
+  await sleep(60);
+
+  // Real Chrome regression: BOARD custom-select trigger sync + SLIDE Shift-select multi-Delete + undo
+  await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const s = b.getState().nodes.find((n) => n.kind === "shape");
+    if (s) { b.selectNode(s.id); document.getElementById("board-style-width").value = "3"; document.getElementById("board-style-width").dispatchEvent(new Event("change", { bubbles: true })); }
+    const c = b.getState().connectors[0];
+    if (c) b.selectConnector(c.id);
+  })()`);
+  await sleep(60);
+  assert.match(await js(`document.querySelector('[data-select-id="board-style-width"]')?.textContent || ""`), /1\.5pt/);
+
+  await openModule("SLIDE");
+  await waitFor(`Boolean(window.__EASYOFFICE_SLIDE_CANVAS__)`);
+  await js(`(() => {
+    const c = window.__EASYOFFICE_SLIDE_CANVAS__;
+    while (c.getElements().length > 0) c.deleteElement(c.getElements()[0].id);
+    const x1 = c.addElement({ kind: "textbox", x: 40, y: 40, w: 90, h: 40, text: "R1" });
+    const x2 = c.addElement({ kind: "textbox", x: 180, y: 40, w: 90, h: 40, text: "R2" });
+    c.addElement({ kind: "textbox", x: 320, y: 40, w: 90, h: 40, text: "R3" });
+    c.setSelectedIds([x1.id, x2.id]);
+    document.querySelector('#slide-canvas-layer .slide-el[data-element-id="' + x2.id + '"]')?.focus();
+  })()`);
+  await sleep(60);
+  await sendKey("Delete", "Delete", 46);
+  await sleep(100);
+  assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`), 1, "real Chrome multi-select Delete deletes all selected shapes");
+  await sendKey("z", "KeyZ", 90, CTRL);
+  await sleep(150);
+  assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`), 3, "1-step undo restores all multi-deleted shapes");
 });

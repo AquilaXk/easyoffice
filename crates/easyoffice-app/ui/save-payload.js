@@ -478,16 +478,15 @@
             texts[r + dr][col + dc] = "";
           }
         }
-        const { text, links } = readCellContent(cell);
-        texts[r][col] = text;
-        links.forEach((l) => rawLinks.push({ row: r, col, start: l.start, end: l.end, url: l.url }));
+        const cellEntry = docTableRuns?.readCellSaveEntry
+          ? docTableRuns.readCellSaveEntry(cell, { isSkippedElement, styleFormat, normalizeAlign, parseLineSpacing: parseLineSpacingPercent, applyFmtFields, sameFormat }, readCellContent)
+          : { ...readCellContent(cell), paragraphs: null };
+        texts[r][col] = cellEntry.text;
+        cellEntry.links.forEach((l) => rawLinks.push({ row: r, col, start: l.start, end: l.end, url: l.url }));
         const styleEntry = readCellStyleEntry(cell, r, col);
         if (styleEntry) rawStyles.push(styleEntry);
         readCellImagesIn(cell, r, col).forEach((im) => rawImages.push(im));
-        const richParas = docTableRuns?.readCellParagraphs?.(cell, {
-          isSkippedElement, styleFormat, normalizeAlign, parseLineSpacing: parseLineSpacingPercent, applyFmtFields, sameFormat,
-        });
-        if (richParas) rawCellParagraphs.push({ row: r, col, paragraphs: richParas });
+        if (cellEntry.paragraphs) rawCellParagraphs.push({ row: r, col, paragraphs: cellEntry.paragraphs });
         if (rowSpan * colSpan > 1) merges.push({ row: r, col, rowSpan, colSpan });
         col += colSpan;
       }

@@ -151,22 +151,23 @@
     return out;
   }
 
-  function readCellParagraphs(cell, helpers) {
+  function extractCellParagraphsRaw(cell, helpers) {
     const { isSkippedElement, styleFormat, normalizeAlign, parseLineSpacing, applyFmtFields, sameFormat } = helpers;
     const cellAlign = normalizeAlign(cell.style?.textAlign);
     const cellLs = parseLineSpacing(cell.style?.lineHeight || "");
     const paragraphs = [];
+    let hasBlockChild = false;
 
-    function pushStream(nodes, align, lineSpacingPercent) {
+    function pushStream(nodes, align, lineSpacingPercent, initialFmt) {
       let curRuns = [];
-      let hadContent = false;
+      let pushedInStream = 0;
+      const startFmt = initialFmt || { bold: false, italic: false, underline: false, strike: false };
       const pushCurPara = () => {
         paragraphs.push(finalizeParagraphRuns({ runs: curRuns, align, lineSpacingPercent }));
         curRuns = [];
       };
       const appendText = (text, fmt) => {
         if (!text) return;
-        hadContent = true;
         const last = curRuns[curRuns.length - 1];
         if (sameFormat(last, fmt)) {
           last.text += text;
@@ -186,8 +187,8 @@
         const tag = (node.tagName || "").toUpperCase();
         if (tag === "IMG") return;
         if (tag === "BR") {
-          hadContent = true;
           pushCurPara();
+          pushedInStream += 1;
           return;
         }
         const nextFmt = styleFormat(node, fmt);
@@ -195,36 +196,36 @@
         if (!kids) return;
         for (let i = 0; i < kids.length; i += 1) walkInline(kids[i], nextFmt);
       };
-      for (const n of nodes) walkInline(n, { bold: false, italic: false, underline: false, strike: false });
-      if (curRuns.length > 0 || hadContent || paragraphs.length === 0) pushCurPara();
+      for (const n of nodes) walkInline(n, startFmt);
+      if (curRuns.length > 0 || pushedInStream === 0) pushCurPara();
     }
 
     let pendingInline = [];
     const flushInline = () => {
       if (pendingInline.length === 0) return;
-      pushStream(pendingInline, cellAlign, cellLs);
+      pushStream(pendingInline, cellAlign, cellLs, null);
       pendingInline = [];
     };
     for (const child of Array.from(cell.childNodes || [])) {
       if (child.nodeType === 1 && isSkippedElement(child)) continue;
       if (child.nodeType === 1 && BLOCK_CELL_TAGS.has((child.tagName || "").toUpperCase())) {
+        hasBlockChild = true;
         flushInline();
         const blkAlign = normalizeAlign(child.style?.textAlign) || cellAlign;
         const blkLs = parseLineSpacing(child.style?.lineHeight || "") || cellLs;
         const blkFmt = styleFormat(child, { bold: false, italic: false, underline: false, strike: false });
-        // Walk block's children preserving block-level inline formatting (if any on wrapper).
-        const subParasStart = paragraphs.length;
-        pushStream(Array.from(child.childNodes || []), blkAlign, blkLs);
-        if (blkFmt.bold || blkFmt.italic || blkFmt.underline || blkFmt.strike || blkFmt.size || blkFmt.font || blkFmt.color || blkFmt.highlight) {
-          for (let i = subParasStart; i < paragraphs.length; i += 1) {
-            for (const run of paragraphs[i].runs) {
-              if (blkFmt.bold && !run.bold) run.bold = true;
-              if (blkFmt.italic && !run.italic) run.italic = true;
-              if (blkFmt.underline && !run.underline) run.underline = true;
-              if (blkFmt.strike && !run.strike) run.strike = true;
-            }
-          }
+        const dr = host.__EASYOFFICE_DOC_RUNS__, st = child.style || {};
+        if (dr) {
+          const sz = st.fontSize ? dr.cssSizeToHalfPt?.(st.fontSize) : null;
+          const fn = st.fontFamily ? dr.normalizeFont?.(st.fontFamily) : null;
+          const col = st.color ? dr.normalizeColor?.(st.color) : null;
+          const hi = st.backgroundColor ? dr.normalizeColor?.(st.backgroundColor) : null;
+          if (sz && blkFmt.size === undefined) blkFmt.size = sz;
+          if (fn && blkFmt.font === undefined) blkFmt.font = fn;
+          if (col && blkFmt.color === undefined) blkFmt.color = col;
+          if (hi && blkFmt.highlight === undefined) blkFmt.highlight = hi;
         }
+        pushStream(Array.from(child.childNodes || []), blkAlign, blkLs, blkFmt);
       } else {
         pendingInline.push(child);
       }
@@ -239,8 +240,89 @@
     ) {
       paragraphs.pop();
     }
-    if (!cellParasNeedSave(paragraphs)) return null;
-    return paragraphs;
+    return { paragraphs, hasBlockChild };
+  }
+
+  function readCellParagraphs(cell, helpers) {
+    const { paragraphs } = extractCellParagraphsRaw(cell, helpers);
+    return cellParasNeedSave(paragraphs) ? paragraphs : null;
+  }
+
+  function paragraphsToTextAndLinks(paragraphs) {
+    const enc = new (host.TextEncoder || TextEncoder)();
+    let text = "";
+    let bytePos = 0;
+    const links = [];
+    for (let pIdx = 0; pIdx < paragraphs.length; pIdx += 1) {
+      if (pIdx > 0) {
+        text += "\n";
+        bytePos += 1;
+      }
+      for (const run of paragraphs[pIdx].runs || []) {
+        const rt = String(run?.text || "");
+        if (!rt) continue;
+        const bLen = enc.encode(rt).length;
+        const start = bytePos;
+        const end = start + bLen;
+        if (run.link) {
+          const prev = links[links.length - 1];
+          if (prev && prev.end === start && prev.url === run.link) prev.end = end;
+          else links.push({ start, end, url: run.link });
+        }
+        text += rt;
+        bytePos = end;
+      }
+    }
+    return { text, links };
+  }
+
+  function readCellSaveEntry(cell, helpers, fallbackReadCellContent) {
+    const { paragraphs, hasBlockChild } = extractCellParagraphsRaw(cell, helpers);
+    const rich = cellParasNeedSave(paragraphs) ? paragraphs : null;
+    if ((hasBlockChild || (rich && rich.length > 1)) && paragraphs.length > 0) {
+      const { text, links } = paragraphsToTextAndLinks(paragraphs);
+      return { text, links, paragraphs: rich };
+    }
+    const base = fallbackReadCellContent ? fallbackReadCellContent(cell) : { text: "", links: [] };
+    return { text: base.text, links: base.links, paragraphs: rich };
+  }
+
+  function applyCellLinksToParagraphs(paragraphs, cellLinks) {
+    if (!Array.isArray(cellLinks) || cellLinks.length === 0) return paragraphs;
+    if (paragraphs.some((p) => Array.isArray(p.runs) && p.runs.some((r) => r.link))) return paragraphs;
+    const enc = new (host.TextEncoder || TextEncoder)();
+    let bytePos = 0;
+    return paragraphs.map((p, pIdx) => {
+      if (pIdx > 0) bytePos += 1;
+      const outRuns = [];
+      for (const run of p.runs || []) {
+        const rt = String(run?.text || "");
+        if (!rt) continue;
+        const chars = Array.from(rt);
+        const charStarts = new Array(chars.length + 1);
+        charStarts[0] = bytePos;
+        for (let i = 0; i < chars.length; i += 1) {
+          charStarts[i + 1] = charStarts[i] + enc.encode(chars[i]).length;
+        }
+        const runEnd = charStarts[chars.length];
+        let segStart = 0;
+        const urlAt = (bs, be) => cellLinks.find((l) => l && bs >= l.start && be <= l.end)?.url || null;
+        let curUrl = chars.length > 0 ? urlAt(charStarts[0], charStarts[1]) : null;
+        for (let i = 1; i < chars.length; i += 1) {
+          const nextUrl = urlAt(charStarts[i], charStarts[i + 1]);
+          if (nextUrl !== curUrl) {
+            const slice = chars.slice(segStart, i).join("");
+            if (slice) outRuns.push(curUrl ? { ...run, text: slice, link: curUrl } : { ...run, text: slice });
+            segStart = i;
+            curUrl = nextUrl;
+          }
+        }
+        const tail = chars.slice(segStart).join("");
+        if (tail) outRuns.push(curUrl ? { ...run, text: tail, link: curUrl } : { ...run, text: tail });
+        bytePos = runEnd;
+      }
+      return { ...p, runs: outRuns };
+    });
   }
 
   function buildCellChildrenSpecs(text, cellLinks, entry, imgs, helpers) {
@@ -252,8 +334,9 @@
         : inlineKids;
       return { children, cellStyle: {}, cellData: {} };
     }
-    if (entry.paragraphs.length === 1) {
-      const p = entry.paragraphs[0];
+    const paragraphs = applyCellLinksToParagraphs(entry.paragraphs, cellLinks);
+    if (paragraphs.length === 1) {
+      const p = paragraphs[0];
       const cellStyle = {};
       const cellData = {};
       if (p.align) cellStyle.textAlign = p.align;
@@ -266,7 +349,7 @@
       const children = imgs?.length ? [...base, ...imgs.map(imageSpec)] : base;
       return { children, cellStyle, cellData };
     }
-    const children = entry.paragraphs.map((p) => {
+    const children = paragraphs.map((p) => {
       const st = {};
       const ds = {};
       if (p.align) st.textAlign = p.align;
@@ -293,6 +376,7 @@
     paragraphSpacingLayout,
     applyParagraphSpacingSpec,
     readCellParagraphs,
+    readCellSaveEntry,
     buildCellChildrenSpecs,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

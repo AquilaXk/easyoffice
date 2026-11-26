@@ -24,9 +24,9 @@
     const t = target || doc?.activeElement;
     if (!t) return false;
     const tag = String(t.tagName || "").toUpperCase();
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) return true;
     const ce = t.getAttribute?.("contenteditable");
-    return ce === "" || ce === "true" || ce === "plaintext-only" || Boolean(t.closest?.('[contenteditable="true"],[contenteditable="plaintext-only"]'));
+    return ce === "" || ce === "true" || ce === "plaintext-only" || Boolean(t.closest?.('[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]'));
   }
 
   function nearestWidthOption(val) {
@@ -158,6 +158,7 @@
       } else {
         appendAll(bar, sepEl, groupEl);
       }
+      host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, groupEl);
 
       bindColorControl(fillInput, (node, _conn, raw) => {
         if (!node || (node.kind !== "shape" && node.kind !== "text")) return false;
@@ -259,7 +260,7 @@
         if (widthWrap) widthWrap.hidden = false;
         if (zeroWidthOpt) zeroWidthOpt.disabled = true;
         if (strokeInput) strokeInput.value = "#" + normalizeHex6(conn.stroke, "335095");
-        if (widthSelect) widthSelect.value = nearestWidthOption(conn.strokeWidthPt ?? 1.5);
+        if (widthSelect) { widthSelect.value = nearestWidthOption(conn.strokeWidthPt ?? 1.5); host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(widthSelect); }
         if (labelInput && doc.activeElement !== labelInput) labelInput.value = conn.label || "";
         return;
       }
@@ -271,7 +272,7 @@
       if (zeroWidthOpt) zeroWidthOpt.disabled = false;
       if (hasFill && fillInput) fillInput.value = "#" + normalizeHex6(node.fill, isShape ? "EFF6FF" : "FFFFFF");
       if (isShape && strokeInput) strokeInput.value = "#" + normalizeHex6(node.stroke, "2563EB");
-      if (isShape && widthSelect) widthSelect.value = nearestWidthOption(node.strokeWidthPt ?? 1.5);
+      if (isShape && widthSelect) { widthSelect.value = nearestWidthOption(node.strokeWidthPt ?? 1.5); host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(widthSelect); }
       if (labelInput && doc.activeElement !== labelInput) {
         labelInput.value = node.kind === "chart" ? (node.title || "") : node.kind === "image" ? (node.alt || "") : (node.text || "");
       }

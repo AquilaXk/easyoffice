@@ -727,11 +727,11 @@
       defs.appendChild(marker);
       svg.appendChild(defs);
       const mapPt = (p) => `${round2(offX + p.x * scale)} ${round2(offY + p.y * scale)}`;
-      for (const { route } of b.routes) {
+      for (const { conn, route } of b.routes) {
         const dStr = route.routing === "curved" && route.controlPoints?.length === 2
           ? `M ${mapPt(route.points[0])} C ${mapPt(route.controlPoints[0])}, ${mapPt(route.controlPoints[1])}, ${mapPt(route.points[1])}`
           : route.points.map((p, idx) => (idx === 0 ? "M " : "L ") + mapPt(p)).join(" ");
-        svg.appendChild(svgEl(d, "path", { d: dStr, fill: "none", stroke: "var(--accent-strong)", "stroke-width": 2, "marker-end": "url(#board-print-arrow)" }));
+        svg.appendChild(svgEl(d, "path", { d: dStr, fill: "none", stroke: conn.stroke ? "#" + normalizeHex6(conn.stroke, "335095") : "var(--accent-strong)", "stroke-width": conn.strokeWidthPt ?? 2, "marker-end": "url(#board-print-arrow)" }));
       }
       stage.appendChild(svg);
       for (const n of state.nodes) {
@@ -760,24 +760,25 @@
         else if (n.kind === "image") { const data = n.imageId ? utils?.getDocImage?.(n.imageId)?.base64 || "" : ""; if (data) elements.push({ id: n.id, kind: "image", x, y, w, h, mime: n.mime || "image/png", data, alt: n.alt || "" }); }
         else if (n.kind === "chart") elements.push({ id: n.id, kind: "chart", x, y, w, h, chartType: n.chartType || "column", title: n.title || "", legend: n.legend || "right", ...sanitizeChart(n.categories, n.series) });
       }
-      const pushSeg = (id, x0, y0, x1, y1) => {
+      const pushSeg = (id, x0, y0, x1, y1, colorHex = "335095") => {
         if (elements.length >= MAX_SLIDE_ELEMENTS) return;
         const sx = round2(clamp(Math.min(x0, x1), 0, SW - 1.5)), sy = round2(clamp(Math.min(y0, y1), 0, SH - 1.5));
-        elements.push({ id, kind: "shape", x: sx, y: sy, w: round2(clamp(Math.max(1.5, Math.abs(x1 - x0)), 1, SW - sx)), h: round2(clamp(Math.max(1.5, Math.abs(y1 - y0)), 1, SH - sy)), shapeType: "rect", text: "", fill: "335095", stroke: "335095", strokeWidthPt: 0, color: "FFFFFF", fontSizePt: 8, bold: false, align: "center" });
+        elements.push({ id, kind: "shape", x: sx, y: sy, w: round2(clamp(Math.max(1.5, Math.abs(x1 - x0)), 1, SW - sx)), h: round2(clamp(Math.max(1.5, Math.abs(y1 - y0)), 1, SH - sy)), shapeType: "rect", text: "", fill: colorHex, stroke: colorHex, strokeWidthPt: 0, color: "FFFFFF", fontSizePt: 8, bold: false, align: "center" });
       };
       for (const { conn, route } of b.routes) {
         if (elements.length >= MAX_SLIDE_ELEMENTS) break;
+        const cStroke = conn.stroke ? normalizeHex6(conn.stroke, "335095") : "335095";
         if (route.routing === "curved" && route.controlPoints?.length === 2) {
           const p0 = route.points[0], p3 = route.points[1], [c1, c2] = route.controlPoints;
           let prev = { x: mapX(p0.x), y: mapY(p0.y) };
           for (let s = 1; s <= 6; s += 1) {
             const t = s / 6, u = 1 - t;
             const cur = { x: mapX(u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x), y: mapY(u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p3.y) };
-            pushSeg(`${conn.id}-c${s}`, prev.x, prev.y, cur.x, cur.y);
+            pushSeg(`${conn.id}-c${s}`, prev.x, prev.y, cur.x, cur.y, cStroke);
             prev = cur;
           }
         } else {
-          for (let i = 0; i < route.points.length - 1; i += 1) pushSeg(`${conn.id}-s${i}`, mapX(route.points[i].x), mapY(route.points[i].y), mapX(route.points[i + 1].x), mapY(route.points[i + 1].y));
+          for (let i = 0; i < route.points.length - 1; i += 1) pushSeg(`${conn.id}-s${i}`, mapX(route.points[i].x), mapY(route.points[i].y), mapX(route.points[i + 1].x), mapY(route.points[i + 1].y), cStroke);
         }
       }
       return { sourceFormat: "pptx", targetFormat: "pdf", title: String(title || deps.getTitle?.() || "보드"), aspect: "16:9", slides: [{ title: "", bullets: [], notes: "", layout: "blank", transition: "none", elements }] };
@@ -958,7 +959,7 @@
       if (ev.key === " ") spacePressed = ev.type !== "keyup";
       if (doc.querySelector("dialog[open]")) return false;
       const t = ev.target || doc.activeElement, tag = String(t?.tagName || "").toUpperCase();
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.getAttribute?.("contenteditable") === "plaintext-only") return false;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable || t?.closest?.('[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]')) return false;
       if (host.__EASYOFFICE_BOARD_STYLE_BAR__?.handleKeydown?.(ev, doc)) return true;
       if (ev.key === "Escape") { pendingConnect = null; setMode("select"); selectNode(null); return true; }
       if ((ev.key === "Delete" || ev.key === "Backspace") && deleteSelected()) { ev.preventDefault?.(); return true; }

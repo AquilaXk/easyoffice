@@ -613,3 +613,178 @@ test("BOARD: contextual selection style bar, multi-node/connector clipboard + of
   await flushAsyncTurns(10);
   assert.equal(board.getState().nodes.length, preNodes + 2);
 });
+
+test("Regression: DOC multi-para table cell links, trailing <br>, and wrapper font/color inheritance", async () => {
+  const h = await createWorkspaceHarness({ search: "?module=DOC&win=w-pd357-doc-reg" });
+  await flushAsyncTurns(8);
+  const editor = $(h.document, "doc-editor");
+  editor.innerHTML =
+    '<table class="doc-inline-table"><tbody><tr>' +
+    '<td><p style="font-size:16pt; color:#ff0000; font-family:NanumGothic; text-align:center">WrapText<br></p></td>' +
+    '<td><p><b>First</b></p><p><a href="https://example.org/p2" data-eo-link="1">Second</a></p></td>' +
+    "</tr></tbody></table>";
+
+  const blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor, {});
+  const tbl = blocks.find((b) => b.type === "table");
+  assert.ok(tbl);
+  assert.equal(tbl.rows[0][0].text, "WrapText");
+  assert.equal(tbl.rows[0][1].text, "First\nSecond");
+  assert.deepEqual(tbl.links, [{ row: 0, col: 1, start: 6, end: 12, url: "https://example.org/p2" }]);
+
+  const cp0 = tbl.cellParagraphs.find((c) => c.row === 0 && c.col === 0);
+  assert.equal(cp0.paragraphs.length, 1, "trailing <br> inside centered <p> must not create phantom paragraph");
+  assert.equal(cp0.paragraphs[0].align, "center");
+  assert.equal(cp0.paragraphs[0].runs[0].sizeHalfPt, 32);
+  assert.equal(cp0.paragraphs[0].runs[0].color, "FF0000");
+  assert.equal(cp0.paragraphs[0].runs[0].font, "NanumGothic");
+
+  // Reopen with cellLinks while paragraphs omit run.link -> buildCellChildrenSpecs preserves link
+  const dtRuns = h.host.__EASYOFFICE_DOC_TABLE_RUNS__;
+  const built = dtRuns.buildCellChildrenSpecs("First\nSecond", [{ start: 6, end: 12, url: "https://example.org/p2" }], {
+    paragraphs: [
+      { runs: [{ text: "First", bold: true }] },
+      { runs: [{ text: "Second" }] },
+    ],
+  }, [], {
+    textSpec: (v) => ({ t: "text", v }),
+    elSpec: (tag, children, style) => ({ t: "el", tag, children: children || [], style: style || {} }),
+    runSpecs: (runs) => runs.map((r) => (r.link ? { t: "el", tag: "a", href: r.link, children: [r.text] } : { t: "text", v: r.text })),
+    imageSpec: (x) => x,
+    cellInlineSpecs: (t) => [{ t: "text", v: t }],
+  });
+  assert.equal(built.children.length, 2);
+  assert.equal(built.children[1].children[0].tag, "a");
+  assert.equal(built.children[1].children[0].href, "https://example.org/p2");
+});
+
+test("Regression: SLIDE modal dismissal, focus-scoped clipboard, and multi-object Delete + undo", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(8);
+  switchModule(h.document, "SLIDE");
+  await flushAsyncTurns(6);
+  const canvas = h.host.__EASYOFFICE_SLIDE_CANVAS__;
+  while (canvas.getElements().length > 0) canvas.deleteElement(canvas.getElements()[0].id);
+
+  const a = canvas.addElement({ kind: "textbox", x: 30, y: 30, w: 90, h: 40, text: "M1" });
+  const b = canvas.addElement({ kind: "textbox", x: 160, y: 30, w: 90, h: 40, text: "M2" });
+  const c = canvas.addElement({ kind: "textbox", x: 290, y: 30, w: 90, h: 40, text: "M3" });
+
+  // Focus on toolbar button must NOT hijack Ctrl+D or Ctrl+C
+  canvas.selectElement(a.id);
+  const addBtn = $(h.document, "btn-add-slide");
+  addBtn.focus?.();
+  dispatchKey(h, { key: "d", code: "KeyD", ctrlKey: true }, addBtn);
+  assert.equal(canvas.getElements().length, 3, "toolbar button focus isolates canvas Ctrl+D");
+
+  // Context menu closes when modal opens (via real Ctrl+/ command palette)
+  const layer = $(h.document, "slide-canvas-layer");
+  const cardA = layer.querySelector(`.slide-el[data-element-id="${a.id}"]`);
+  cardA.dispatchEvent({ type: "contextmenu", bubbles: true, cancelable: true, target: cardA, clientX: 80, clientY: 90, preventDefault() {} });
+  assert.equal($(h.document, "slide-context-menu").hidden, false);
+  dispatchKey(h, { key: "/", code: "Slash", ctrlKey: true }, h.document.body);
+  assert.equal($(h.document, "cmd-palette-modal").open, true);
+  assert.equal($(h.document, "slide-context-menu").hidden, true, "modal open dismisses slide context menu");
+  $(h.document, "cmd-palette-modal").close?.();
+
+  // Multi-select a & b -> Delete key removes BOTH in 1 undo step; Ctrl+Z restores BOTH
+  canvas.setSelectedIds([a.id, b.id]);
+  const cardB = layer.querySelector(`.slide-el[data-element-id="${b.id}"]`);
+  dispatchKey(h, { key: "Delete", code: "Delete" }, cardB);
+  assert.deepEqual(canvas.getElements().map((e) => e.id), [c.id], "Delete removes all multi-selected elements");
+  dispatchKey(h, { key: "z", code: "KeyZ", ctrlKey: true }, h.document.body);
+  await flushAsyncTurns(8);
+  assert.equal(canvas.getElements().length, 3, "1-step undo restores multi-deleted elements");
+});
+
+test("Regression: PDF repeated query jumps to Page 2 paragraph, Command Palette completeness, BASE warning specificity, BOARD custom-select sync", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+
+  // Command palette includes DOC sup/sub/strike, SLIDE/PDF/BOARD find, BASE import
+  const collect = async (mod, q) => {
+    switchModule(h.document, mod);
+    await flushAsyncTurns(4);
+    dispatchKey(h, { key: "/", code: "Slash", ctrlKey: true }, h.document.body);
+    const inp = $(h.document, "cmd-search-input");
+    inp.value = q;
+    inp.dispatchEvent({ type: "input", target: inp });
+    const titles = Array.from(h.document.querySelectorAll("#cmd-palette-list li")).map((li) => li.textContent);
+    $(h.document, "cmd-palette-modal").close?.();
+    return titles.join("|");
+  };
+  assert.match(await collect("DOC", "위 첨자"), /위 첨자/);
+  assert.match(await collect("SLIDE", "찾기"), /찾기/);
+  assert.match(await collect("PDF", "찾기"), /찾기/);
+  assert.match(await collect("BOARD", "찾기"), /찾기/);
+  assert.match(await collect("BASE", "가져오기"), /가져오기/);
+
+  // PDF repeated query across 2 pages highlights Page 2's <p>, not Page 1's <p>
+  const pdfDecoded = {
+    status: "OK",
+    module: "PDF",
+    format: "pdf",
+    title: "다중페이지.pdf",
+    blocks: [{ runs: [{ text: "공통조항 첫째" }] }, { runs: [{ text: "공통조항 둘째" }] }],
+    pdfPages: [{ pageNumber: 1, text: "공통조항 첫째" }, { pageNumber: 2, text: "공통조항 둘째" }],
+    pdfForm: { hasAcroForm: true, fieldCount: 1, fields: [{ name: "ContractCode", value: "" }] },
+    warnings: [],
+  };
+  const hPdf = await createWorkspaceHarness({
+    search: "?module=PDF&win=w-pd357-pdf-reg",
+    testIpc: async (cmd, payload) => {
+      if (cmd === "convert_document_format" && JSON.parse(payload || "{}").action === "decode") return pdfDecoded;
+      return h.host.__EASYOFFICE_TEST_IPC__ ? h.host.__EASYOFFICE_TEST_IPC__(cmd, payload) : {};
+    },
+  });
+  await flushAsyncTurns(8);
+  await hPdf.host.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("multi2.pdf", new Uint8Array([37, 80, 68, 70, 45]));
+  await flushAsyncTurns(6);
+  dispatchKey(hPdf, { key: "f", code: "KeyF", ctrlKey: true }, hPdf.document.body);
+  const fq = $(hPdf.document, "find-query");
+  fq.value = "공통조항";
+  fq.dispatchEvent({ type: "input", target: fq });
+  await flushAsyncTurns(4);
+  $(hPdf.document, "btn-find-next").click();
+  await flushAsyncTurns(4);
+  assert.equal($(hPdf.document, "pdf-page-indicator").textContent, "쪽 2 / 2");
+  const pdfPs = Array.from(hPdf.document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)"));
+  assert.equal(pdfPs[0].classList.contains("eo-search-hit"), false, "Page 1 paragraph must not stay highlighted on Page 2 match");
+  assert.equal(pdfPs[1].classList.contains("eo-search-hit"), true, "Page 2 paragraph must be highlighted on Page 2 match");
+  $(hPdf.document, "find-dialog").close?.();
+
+  // BASE benign XLSX warning does not trigger false overflow error; leading space formula is neutralized
+  const imp = h.host.__EASYOFFICE_BASE_IMPORT__;
+  assert.equal(imp.neutralizeFormulaText(" =CMD()"), "' =CMD()");
+  const benign = await imp.decodeImportFile("ok.xlsx", new Uint8Array([80, 75, 3, 4]), async () => ({
+    warnings: ["Sheet1 시트의 조건부 서식 규칙은 지원하지 않아 가져오지 않았습니다."],
+    sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "이름", t: "s" }, { ref: "A2", raw: "값", t: "s" }] }],
+  }));
+  assert.equal(benign.ok, true, "benign XLSX rule warning must not fail BASE import");
+  const over = await imp.decodeImportFile("big.xlsx", new Uint8Array([80, 75, 3, 4]), async () => ({
+    warnings: ["편집기 격자(최대 10002행 × 65열) 밖의 셀 5개는 가져오지 않았습니다."],
+    sheets: [{ name: "Sheet1", cells: [] }],
+  }));
+  assert.equal(over.ok, false, "grid overflow warning must still fail closed");
+
+  // BOARD custom-select trigger label syncs across connector/shape + nested contenteditable isolation
+  switchModule(h.document, "BOARD");
+  await flushAsyncTurns(4);
+  const board = h.host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+  const s1 = board.addNode({ kind: "shape", x: 40, y: 40, w: 100, h: 60, strokeWidthPt: 3, text: "S1" });
+  const s2 = board.addNode({ kind: "shape", x: 240, y: 40, w: 100, h: 60, strokeWidthPt: 2, text: "S2" });
+  const cn = board.addConnector({ fromId: s1.id, toId: s2.id, label: "연결" });
+  board.selectNode(s1.id);
+  const wTrigger = h.document.querySelector('[data-select-id="board-style-width"] .custom-select-btn, [data-select-id="board-style-width"]');
+  assert.ok(wTrigger?.textContent?.includes("3pt"), "custom select reflects shape strokeWidthPt=3");
+  board.selectConnector(cn.id);
+  assert.ok(wTrigger?.textContent?.includes("1.5pt"), "custom select syncs when switching to connector");
+  const ceHost = h.document.createElement("div");
+  ceHost.setAttribute("contenteditable", "true");
+  const ceChild = h.document.createElement("span");
+  ceHost.appendChild(ceChild);
+  h.document.body.appendChild(ceHost);
+  const nCount = board.getState().nodes.length;
+  dispatchKey(h, { key: "d", code: "KeyD", ctrlKey: true }, ceChild);
+  assert.equal(board.getState().nodes.length, nCount, "nested contenteditable isolates BOARD Ctrl+D");
+  ceHost.remove();
+});

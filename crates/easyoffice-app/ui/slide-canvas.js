@@ -678,11 +678,9 @@
       if (selectedId && !validIds.has(selectedId)) selectedId = Array.from(selectedIds).at(-1) || null;
       if (selectedId && !selectedIds.has(selectedId)) selectedIds.add(selectedId);
       const stage = stageSizeOf(currentAspect(), currentOrientation());
-      layer.replaceChildren(...els.map((el) => {
-        const card = buildElementDom(document, el, stage, { interactive: true, selected: selectedIds.has(el.id) });
-        attachInteractiveHandlers(card, el);
-        return card;
-      }));
+      const hadLayerFocus = layer.contains(document.activeElement);
+      layer.replaceChildren(...els.map((el) => { const c = buildElementDom(document, el, stage, { interactive: true, selected: selectedIds.has(el.id) }); attachInteractiveHandlers(c, el); return c; }));
+      if (hadLayerFocus) (selectedId && Array.from(layer.children).find((n) => n.dataset?.elementId === selectedId) || $("slide-stage-box"))?.focus?.();
       hideSnapGuides();
     }
 
@@ -803,16 +801,18 @@
       return els[idx];
     }
 
-    function deleteElement(id = selectedId, options = {}) {
-      if (!id) return false;
-      const els = ensureElements(), idx = els.findIndex((e) => e.id === id);
-      if (idx < 0) return false;
+    function deleteElement(id, options = {}) {
+      const els = ensureElements(), targets = id != null ? new Set([id]) : (selectedIds.size > 0 ? new Set(selectedIds) : (selectedId ? new Set([selectedId]) : new Set()));
+      if (targets.size === 0 || !els.some((e) => targets.has(e.id))) return false;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
-      els.splice(idx, 1);
-      if (selectedId === id) selectedId = null;
+      let removed = 0;
+      for (let i = els.length - 1; i >= 0; i -= 1) if (targets.has(els[i].id)) { els.splice(i, 1); removed += 1; }
+      targets.forEach((t) => selectedIds.delete(t));
+      if (selectedId && targets.has(selectedId)) selectedId = Array.from(selectedIds).at(-1) || null;
       render();
+      if (!selectedId) $("slide-stage-box")?.focus?.();
       noteActivity?.();
-      say("개체 지우기 완료");
+      say(removed > 1 ? `개체 ${removed}개 지우기 완료` : "개체 지우기 완료");
       return true;
     }
 
@@ -934,7 +934,7 @@
       const target = e.target || document.activeElement;
       if (isEditableTarget(target) || $("slide-thumb-list")?.contains?.(target) || e.ctrlKey || e.metaKey || e.altKey) return false;
       if (e.key === "Escape") { e.preventDefault(); clearSelection(); return true; }
-      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); return deleteElement(selectedId); }
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); return deleteElement(); }
       const step = e.shiftKey ? 10 : 2;
       let dx = 0, dy = 0;
       if (e.key === "ArrowLeft") dx = -step;
@@ -952,7 +952,8 @@
     }
 
     function bind() {
-      $("slide-stage-box")?.addEventListener("mousedown", (ev) => { if (ev.button === 0 && !ev.target?.closest?.(".slide-el")) clearSelection(); });
+      const sb = $("slide-stage-box");
+      if (sb) { sb.tabIndex = -1; sb.addEventListener("mousedown", (ev) => { if (ev.button === 0 && !ev.target?.closest?.(".slide-el")) { clearSelection(); if (!ev.target?.closest?.("#slide-title-zone, #slide-lower-zone")) sb.focus?.(); } }); }
       document.addEventListener("mousemove", onDocMouseMove);
       document.addEventListener("mouseup", onDocMouseUp);
       const layoutSel = $("slide-layout-select");
@@ -979,7 +980,7 @@
       setSlideLayout, currentAspect, currentOrientation, stageSize: () => stageSizeOf(currentAspect(), currentOrientation()), handleKeydown,
       setDoubleClickHandler: (fn) => { onElementDblClick = fn; },
       startPresenterShow: () => hooks.startShow?.(true, { presenter: true }),
-      onLeaveModule: () => { activeDrag = null; hideSnapGuides(); clearSelection(); hooks.onLeave?.(); },
+      onLeaveModule: () => { activeDrag = null; hideSnapGuides(); clearSelection(); const m = $("slide-context-menu"); if (m) { m.hidden = true; delete m.dataset.mode; } hooks.onLeave?.(); },
     };
   }
 

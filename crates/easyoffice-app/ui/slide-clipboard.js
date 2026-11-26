@@ -19,6 +19,8 @@
     return Boolean(el.closest?.('#slide-title-zone, #slide-lower-zone, [contenteditable="true"], [contenteditable="plaintext-only"]'));
   }
 
+  const cssEsc = (v) => (typeof host.CSS?.escape === "function" ? host.CSS.escape(String(v)) : String(v).replace(/["\\]/g, "\\$&"));
+
   function createSlideClipboard(deps) {
     const { document, getActiveModule, getCanvas, setFeedback } = deps;
     let clipItems = [];
@@ -71,6 +73,7 @@
         canvas.clearSelection?.();
         return true;
       });
+      document.getElementById("slide-stage-box")?.focus?.();
       setFeedback?.("슬라이드 개체 " + clipItems.length + "개 잘라내기");
       return true;
     }
@@ -123,7 +126,7 @@
       }
       if (!ok) return false;
       canvas.setSelectedIds?.(addedIds);
-      const lastCard = document.querySelector('#slide-canvas-layer .slide-el[data-element-id="' + addedIds.at(-1) + '"]');
+      const lastCard = document.querySelector('#slide-canvas-layer .slide-el[data-element-id="' + cssEsc(addedIds.at(-1)) + '"]');
       lastCard?.focus?.();
       setFeedback?.("슬라이드 개체 " + addedIds.length + "개 " + label);
       return true;
@@ -155,7 +158,11 @@
       if (document.querySelector("dialog[open]") || document.querySelector("#slide-show-overlay:not([hidden])")) return false;
       const target = ev.target || document.activeElement;
       if (isEditableField(target)) return false;
-      if (document.getElementById("slide-thumb-list")?.contains?.(target)) return false;
+      const stageBox = document.getElementById("slide-stage-box");
+      const activeEl = document.activeElement;
+      const inStage = Boolean(stageBox && ((target && stageBox.contains?.(target)) || (activeEl && stageBox.contains?.(activeEl))));
+      if (!inStage) return false;
+      if (activeEl && isEditableField(activeEl)) return false;
       return true;
     }
 

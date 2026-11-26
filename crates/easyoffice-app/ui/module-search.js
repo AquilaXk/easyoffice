@@ -23,6 +23,10 @@
     document.querySelectorAll("." + cls).forEach((el) => el.classList.remove(cls));
   }
 
+  function cssEsc(val) {
+    return typeof host.CSS?.escape === "function" ? host.CSS.escape(String(val)) : String(val).replace(/["\\]/g, "\\$&");
+  }
+
   function createSlideSource(deps) {
     const { document, getSlideDeck, getSlideIndex, switchSlide, getSlideCanvas } = deps;
     let watchCb = null;
@@ -80,7 +84,7 @@
       if (zone === "el") {
         const elId = parts.slice(3).join(":");
         canvas?.selectElement?.(elId);
-        const card = document.querySelector(`#slide-canvas-layer .slide-el[data-element-id="${elId}"]`);
+        const card = document.querySelector(`#slide-canvas-layer .slide-el[data-element-id="${cssEsc(elId)}"]`);
         card?.classList?.add("eo-search-hit");
         card?.scrollIntoView?.({ block: "nearest" });
       } else if (zone === "notes") {
@@ -111,11 +115,29 @@
   }
 
   function createPdfSource(deps) {
-    const { document, getPdfPages, goToPdfPage } = deps;
+    const { document, getPdfPages, getPdfCurrentPage, goToPdfPage } = deps;
     let watchCb = null;
+
+    function pageParagraphBounds(pages, paras, pageNum) {
+      let cursor = 0;
+      for (let p = 0; p < Math.min(pageNum - 1, pages.length); p += 1) {
+        const pLines = String(pages[p]?.text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+        let matched = 0;
+        for (const line of pLines) {
+          const hitIdx = paras.findIndex((el, idx) => idx >= cursor && String(el.textContent || "").trim() === line);
+          if (hitIdx >= 0) { cursor = hitIdx + 1; matched += 1; }
+        }
+        if (matched === 0 && pLines.length > 0) cursor = Math.min(paras.length, cursor + pLines.length);
+      }
+      const curLines = String(pages[pageNum - 1]?.text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const end = curLines.length > 0 ? Math.min(paras.length, cursor + curLines.length) : paras.length;
+      return { start: Math.min(cursor, paras.length), end: Math.max(Math.min(cursor, paras.length), end) };
+    }
 
     function sync(index) {
       const blocks = [];
+      const heading = document.querySelector("#pdf-page-card h3")?.textContent || "";
+      if (heading) blocks.push({ id: "pdf:heading:0", text: heading });
       const pages = typeof getPdfPages === "function" ? getPdfPages() : [];
       if (Array.isArray(pages) && pages.length > 0) {
         pages.forEach((p, i) => {
@@ -124,26 +146,35 @@
           if (text) blocks.push({ id: `pdf:page:${num}`, text });
         });
       } else {
-        const heading = document.querySelector("#pdf-page-card h3")?.textContent || "";
-        if (heading) blocks.push({ id: "pdf:heading:0", text: heading });
         document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)").forEach((p, idx) => {
           const t = String(p.textContent || "");
           if (t) blocks.push({ id: `pdf:para:${idx}`, text: t });
         });
       }
+      const formGrid = document.getElementById("pdf-acroform-grid");
+      const formShown = Boolean(formGrid && !formGrid.hidden);
       const appVal = String(document.getElementById("pdf-form-applicant")?.value || "");
-      if (appVal) blocks.push({ id: "pdf:input:pdf-form-applicant", text: appVal });
+      if (appVal || formShown) blocks.push({ id: "pdf:input:pdf-form-applicant", text: appVal ? "신청인 성명 " + appVal : "신청인 성명" });
       const deptVal = String(document.getElementById("pdf-form-dept")?.value || "");
-      if (deptVal) blocks.push({ id: "pdf:input:pdf-form-dept", text: deptVal });
+      if (deptVal || formShown) blocks.push({ id: "pdf:input:pdf-form-dept", text: deptVal ? "소속 부서명 " + deptVal : "소속 부서명" });
       document.querySelectorAll("#pdf-form-extracted .pdf-form-extracted-chip").forEach((chip, idx) => {
-        const t = String(chip.textContent || "");
+        const raw = String(chip.textContent || "");
+        const t = raw.endsWith(": (입력 없음)") ? raw.slice(0, -": (입력 없음)".length) : raw;
         if (t) blocks.push({ id: `pdf:chip:${idx}`, text: t });
       });
       index.setBlocks(blocks);
     }
 
     function anchor() {
-      return { id: "pdf:page:1", offset: 0 };
+      const pages = typeof getPdfPages === "function" ? getPdfPages() : [];
+      if (Array.isArray(pages) && pages.length > 0) {
+        const curFn = getPdfCurrentPage || host.__EASYOFFICE_MODULE_FIND_HOOKS__?.getPdfCurrentPage;
+        const cur = Math.max(1, Math.min(pages.length, Number(curFn?.() || 1)));
+        const p = pages[cur - 1];
+        return { id: `pdf:page:${Number(p?.pageNumber) || cur}`, offset: 0 };
+      }
+      if (document.querySelector("#pdf-page-card h3")?.textContent) return { id: "pdf:heading:0", offset: 0 };
+      return { id: "pdf:para:0", offset: 0 };
     }
 
     function clearHighlight() {
@@ -160,7 +191,15 @@
         goToPdfPage?.(pageNum);
         const queryVal = String(document.getElementById("find-query")?.value || "").toLowerCase();
         const paras = Array.from(document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)"));
-        const hit = paras.find((p) => queryVal && String(p.textContent || "").toLowerCase().includes(queryVal)) || paras[0];
+        const pages = typeof getPdfPages === "function" ? getPdfPages() : [];
+        const { start, end } = pageParagraphBounds(pages, paras, pageNum);
+        const inPage = paras.slice(start, end);
+        const hit =
+          inPage.find((p) => queryVal && String(p.textContent || "").toLowerCase().includes(queryVal)) ||
+          paras.slice(start).find((p) => queryVal && String(p.textContent || "").toLowerCase().includes(queryVal)) ||
+          inPage[0] ||
+          paras.find((p) => queryVal && String(p.textContent || "").toLowerCase().includes(queryVal)) ||
+          paras[0];
         hit?.classList?.add("eo-search-hit");
         hit?.scrollIntoView?.({ block: "nearest" });
       } else if (kind === "input") {
@@ -237,7 +276,7 @@
       if (kind === "node") {
         board.selectNode?.(itemId);
         board.centerOnItem?.("node", itemId);
-        document.querySelector(`#board-node-layer .board-node[data-node-id="${itemId}"]`)?.classList?.add("eo-search-hit");
+        document.querySelector(`#board-node-layer .board-node[data-node-id="${cssEsc(itemId)}"]`)?.classList?.add("eo-search-hit");
       } else if (kind === "conn") {
         board.selectConnector?.(itemId);
         board.centerOnItem?.("conn", itemId);
@@ -256,10 +295,43 @@
     };
   }
 
+  function extraPaletteItems(activeModule, fmt, runNativeMenu) {
+    const items = [];
+    if (activeModule === "DOC") {
+      for (const [cmd, title, en, menuId] of [
+        ["doc-strike", "취소선", "strikethrough", "format:doc-strike"],
+        ["doc-sup", "위 첨자", "superscript", "format:doc-sup"],
+        ["doc-sub", "아래 첨자", "subscript", "format:doc-sub"],
+      ]) {
+        items.push({ id: "studio-cmd:" + cmd, module: "DOC", title, shortcut: cmd === "doc-sup" ? fmt("⇧⌘=") : cmd === "doc-sub" ? fmt("⌘=") : "", searchKey: "서식 " + title + " " + en, run: () => runNativeMenu(menuId) });
+      }
+    } else if (activeModule === "SLIDE") {
+      items.push({ id: "studio-cmd:find", module: "SLIDE", title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") });
+      for (const [cmd, title, en, menuId] of [
+        ["slide-bring-forward", "앞으로 가져오기", "bring forward", "slide:bring-forward"],
+        ["slide-send-backward", "뒤로 보내기", "send backward", "slide:send-backward"],
+        ["slide-align-left", "왼쪽 맞춤", "align left", "slide:align-left"],
+        ["slide-align-center", "가운데 맞춤", "align center", "slide:align-center"],
+        ["slide-align-right", "오른쪽 맞춤", "align right", "slide:align-right"],
+        ["slide-align-top", "위쪽 맞춤", "align top", "slide:align-top"],
+        ["slide-align-middle", "중간 맞춤", "align middle", "slide:align-middle"],
+        ["slide-align-bottom", "아래쪽 맞춤", "align bottom", "slide:align-bottom"],
+        ["slide-distribute-h", "가로 간격 균등하게", "distribute horizontally", "slide:distribute-h"],
+        ["slide-distribute-v", "세로 간격 균등하게", "distribute vertically", "slide:distribute-v"],
+      ]) {
+        items.push({ id: "studio-cmd:" + cmd, module: "SLIDE", title, shortcut: "", searchKey: "슬라이드 정돈 맞춤 " + title + " " + en, run: () => runNativeMenu(menuId) });
+      }
+    } else if (activeModule === "PDF") {
+      items.push({ id: "studio-cmd:find", module: "PDF", title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") });
+    }
+    return items;
+  }
+
   host.__EASYOFFICE_CREATE_MODULE_FIND_SOURCE__ = function createModuleFindSource(mod, deps) {
     if (mod === "SLIDE") return createSlideSource(deps);
     if (mod === "PDF") return createPdfSource(deps);
     if (mod === "BOARD") return createBoardSource(deps);
     return null;
   };
+  host.__EASYOFFICE_EXTRA_PALETTE_ITEMS__ = extraPaletteItems;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

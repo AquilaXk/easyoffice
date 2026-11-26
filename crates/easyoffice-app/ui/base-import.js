@@ -49,7 +49,9 @@
 
   function neutralizeFormulaText(raw) {
     const s = String(raw ?? "");
-    if (!s || !FORMULA_PREFIX_RE.test(s)) return s;
+    if (!s) return s;
+    const trimmed = s.replace(/^[ \t\r]+/, "");
+    if (!FORMULA_PREFIX_RE.test(s) && !/^[=+\-@]/.test(trimmed)) return s;
     const model = M();
     if (model?.parseStrictNumber && model.parseStrictNumber(s) !== null) return s;
     return "'" + s;
@@ -241,7 +243,10 @@
       return fail(err?.message || String(err) || "파일을 해독하지 못했습니다.");
     }
     const warnings = Array.isArray(reply?.warnings) ? reply.warnings : [];
-    if (warnings.some((w) => String(w).includes("가져오지 않았습니다"))) {
+    if (warnings.some((w) => {
+      const s = String(w);
+      return s.includes("편집기 격자(최대") || (s.includes("셀 ") && s.includes("가져오지 않았습니다"));
+    })) {
       return fail(`파일 크기 또는 행/열 상한(${MAX_IMPORT_RECORDS}건 · ${MAX_IMPORT_FIELDS}열)을 초과했습니다.`);
     }
     const sheets = Array.isArray(reply?.sheets) ? reply.sheets : [];
@@ -401,11 +406,11 @@
       const fileInp = byId("base-import-file");
       if (fileInp) fileInp.value = "";
       const sheetSel = byId("base-import-sheet");
-      if (sheetSel) { sheetSel.replaceChildren(); sheetSel.hidden = true; }
+      if (sheetSel) { sheetSel.replaceChildren(); sheetSel.hidden = true; host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(sheetSel); }
       const sheetRow = byId("base-import-sheet-row");
       if (sheetRow) sheetRow.hidden = true;
       const modeSel = byId("base-import-mode");
-      if (modeSel) modeSel.value = "new";
+      if (modeSel) { modeSel.value = "new"; host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(modeSel); }
       const tblInp = byId("base-import-table-name");
       if (tblInp) tblInp.value = "";
       const nameRow = byId("base-import-name-row");
@@ -482,6 +487,7 @@
         sheetSel.value = "0";
         sheetRow.hidden = res.sheets.length <= 1;
         sheetSel.hidden = res.sheets.length <= 1;
+        host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(sheetSel);
       }
       const tblInp = byId("base-import-table-name");
       if (tblInp) tblInp.value = res.sheets[0]?.name || fileBaseName(selectedFileName);
@@ -534,13 +540,13 @@
       fileInp.accept = ".csv,.tsv,.xlsx";
       fileInp.addEventListener("change", (ev) => { void handleFileSelect(ev); });
 
-      const sheetSel = el("select", "sb-select base-dlg-select");
+      const sheetSel = el("select", "sb-select sb-combo base-dlg-select");
       sheetSel.id = "base-import-sheet";
       sheetSel.addEventListener("change", updatePreview);
       const sheetRow = mkRow("시트 선택", sheetSel, "base-import-sheet-row");
       sheetRow.hidden = true;
 
-      const modeSel = el("select", "sb-select base-dlg-select");
+      const modeSel = el("select", "sb-select sb-combo base-dlg-select");
       modeSel.id = "base-import-mode";
       for (const [val, txt] of [["new", "새 테이블로 가져오기"], ["append", "현재 테이블 끝에 추가"], ["replace", "현재 테이블 내용 바꾸기"]]) {
         const o = el("option", "", txt);
@@ -587,6 +593,8 @@
       appendAll(wrap, titleBar, body, actions);
       dlg.appendChild(wrap);
       doc.body.appendChild(dlg);
+      host.__EASYOFFICE_SHELL_CHROME__?.enableDialogKeys?.(dlg);
+      host.__EASYOFFICE_CUSTOM_SELECT__?.enhanceCustomSelects?.(doc, dlg);
       return dlg;
     }
 

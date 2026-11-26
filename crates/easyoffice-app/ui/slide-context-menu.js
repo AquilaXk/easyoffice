@@ -18,17 +18,25 @@
 
   function createSlideContextMenu(deps) {
     const { document, getActiveModule, getCanvas, getClipboard, setFeedback } = deps;
-    let canvasOpen = false;
 
     const byId = (id) => document.getElementById(id);
 
+    const isAnyMenuOpen = () => {
+      const menu = byId("slide-context-menu");
+      return Boolean(menu && !menu.hidden);
+    };
+
+    const isCanvasMenuOpen = () => {
+      const menu = byId("slide-context-menu");
+      return Boolean(menu && !menu.hidden && menu.dataset.mode === "canvas");
+    };
+
     function closeCanvasMenu() {
       const menu = byId("slide-context-menu");
-      if (menu && canvasOpen) {
+      if (menu && !menu.hidden) {
         menu.hidden = true;
         delete menu.dataset.mode;
       }
-      canvasOpen = false;
     }
 
     function selectedList(canvas) {
@@ -140,7 +148,6 @@
       menu.style.left = left + "px";
       menu.style.top = top + "px";
       menu.hidden = false;
-      canvasOpen = true;
     }
 
     function runCanvasAction(act) {
@@ -185,10 +192,39 @@
         runCanvasAction(act);
       });
       document.addEventListener("mousedown", (ev) => {
-        if (canvasOpen && menu && !menu.contains(ev.target)) closeCanvasMenu();
+        if (isAnyMenuOpen() && menu && !menu.contains(ev.target)) closeCanvasMenu();
+      });
+      const closeIfOutside = (ev) => {
+        if (isAnyMenuOpen() && (ev.target?.closest?.("dialog[open]") || (menu && !menu.contains?.(ev.target)))) {
+          closeCanvasMenu();
+        }
+      };
+      document.addEventListener("focusin", closeIfOutside);
+      document.addEventListener("focus", closeIfOutside, true);
+      for (const dlg of document.querySelectorAll?.("dialog") || []) {
+        for (const m of ["showModal", "show"]) {
+          const orig = dlg[m];
+          if (typeof orig === "function" && !orig._eoSlideCtxWrapped) {
+            const wrapped = function (...args) { closeCanvasMenu(); return orig.apply(this, args); };
+            wrapped._eoSlideCtxWrapped = true;
+            dlg[m] = wrapped;
+          }
+        }
+      }
+      if (typeof host.MutationObserver === "function" && document.body) {
+        const obs = new host.MutationObserver(() => {
+          if (isAnyMenuOpen() && document.querySelector("dialog[open]")) closeCanvasMenu();
+        });
+        obs.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
+      }
+      byId("menu-bar")?.addEventListener("mousedown", () => {
+        if (isAnyMenuOpen()) closeCanvasMenu();
+      });
+      host.addEventListener?.("blur", () => {
+        if (isAnyMenuOpen()) closeCanvasMenu();
       });
       document.addEventListener("keydown", (ev) => {
-        if (canvasOpen && ev.key === "Escape") {
+        if (isCanvasMenuOpen() && ev.key === "Escape") {
           ev.preventDefault?.();
           ev.stopPropagation?.();
           closeCanvasMenu();
@@ -202,7 +238,7 @@
       openCanvasMenu,
       closeCanvasMenu,
       runCanvasAction,
-      isCanvasMenuOpen: () => canvasOpen,
+      isCanvasMenuOpen,
     };
   }
 

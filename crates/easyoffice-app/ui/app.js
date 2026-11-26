@@ -286,7 +286,7 @@
     PDF: new Set(["home-bold", "home-italic", "home-underline", "home-style", "insert-table", "insert-chart", "insert-shape", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
   };
   const WORKSPACE_BUTTON_PALETTE = {
-    BASE: [["btn-base-add-record", "새 레코드"], ["btn-base-add-field", "필드 추가"], ["btn-base-filter", "필터"], ["btn-base-sort", "정렬"], ["btn-base-add-table", "새 테이블"], ["btn-base-export-xlsx", "XLSX로 내보내기"], ["btn-base-export-csv", "CSV로 내보내기"], ["btn-base-export-tsv", "TSV로 내보내기"]],
+    BASE: [["btn-base-add-record", "새 레코드"], ["btn-base-add-field", "필드 추가"], ["btn-base-filter", "필터"], ["btn-base-sort", "정렬"], ["btn-base-add-table", "새 테이블"], ["btn-base-import", "가져오기…"], ["btn-base-export-xlsx", "XLSX로 내보내기"], ["btn-base-export-csv", "CSV로 내보내기"], ["btn-base-export-tsv", "TSV로 내보내기"]],
     BOARD: [["btn-board-select", "선택 도구"], ["btn-board-add-shape", "도형 추가"], ["btn-board-add-text", "텍스트 추가"], ["btn-board-add-image", "그림 추가"], ["btn-board-add-chart", "차트 추가"], ["btn-board-connect-ortho", "직각 연결선"], ["btn-board-connect-curved", "곡선 연결선"], ["btn-board-front", "맨 앞으로 가져오기"], ["btn-board-back", "맨 뒤로 보내기"], ["btn-board-delete", "개체 지우기"], ["btn-board-analyze", "요소 분석"], ["btn-board-export-pdf", "PDF로 내보내기"], ["btn-board-fit-all", "전체 맞춤"]],
   };
 
@@ -341,10 +341,11 @@
     }
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
     if (activeModule === "BASE" || activeModule === "BOARD") {
-      const ws = [["zoom-in", "확대", "⌘=", "view:zoom-in"], ["zoom-out", "축소", "⌘-", "view:zoom-out"], ["view-zoom", "100%", "⌘0", "view:zoom-100"], ["view-theme", "밝게/어둡게 전환", "⌃⌥D", "view:theme-toggle"], ["copilot-toggle", "코파일럿", "⇧⌘K", "tool:copilot"], ["print", "인쇄…", "⌘P", "file:print"], ...(activeModule === "BASE" ? [["find", "찾기", "⌘F", "edit:find"], ["replace", "찾기 및 바꾸기", "⌘F2", "edit:replace"]] : [])];
+      const ws = [["zoom-in", "확대", "⌘=", "view:zoom-in"], ["zoom-out", "축소", "⌘-", "view:zoom-out"], ["view-zoom", "100%", "⌘0", "view:zoom-100"], ["view-theme", "밝게/어둡게 전환", "⌃⌥D", "view:theme-toggle"], ["copilot-toggle", "코파일럿", "⇧⌘K", "tool:copilot"], ["print", "인쇄…", "⌘P", "file:print"], ["find", "찾기", "⌘F", "edit:find"], ...(activeModule === "BASE" ? [["replace", "찾기 및 바꾸기", "⌘F2", "edit:replace"]] : [])];
       for (const [id, title, sc, menuId] of ws) items.push({ id: "ws-" + id, module: activeModule, title, shortcut: fmt(sc), searchKey: title + " " + id + " " + fmt(sc), run: () => runNativeMenu(menuId) });
       for (const [btnId, title] of WORKSPACE_BUTTON_PALETTE[activeModule]) items.push({ id: "btn:" + btnId, module: activeModule, title, shortcut: "", searchKey: activeModule.toLowerCase() + " " + title, run: () => document.getElementById(btnId)?.click?.() });
     }
+    if (host.__EASYOFFICE_EXTRA_PALETTE_ITEMS__) items.push(...host.__EASYOFFICE_EXTRA_PALETTE_ITEMS__(activeModule, fmt, runNativeMenu));
     items.push({ id: "view:toolbar-labels", module: activeModule, title: "도구 상자 라벨 표시", shortcut: "", searchKey: "보기 도구 상자 라벨 표시 toolbar labels", run: () => runNativeMenu("view:toolbar-labels") });
     return items;
   }
