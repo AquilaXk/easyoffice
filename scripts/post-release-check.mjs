@@ -299,10 +299,16 @@ function parseNextLink(linkHeader) {
     const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
     if (match) {
       const nextUrl = match[1];
-      if (!nextUrl.startsWith("https://api.github.com/")) {
+      let validated;
+      try {
+        validated = validateHttpsUrl(nextUrl, "pagination", { isRedirect: false });
+      } catch {
         throw new Error(`refusing non-GitHub API pagination URL '${nextUrl}'`);
       }
-      return nextUrl;
+      if (validated.origin !== "https://api.github.com") {
+        throw new Error(`refusing non-GitHub API pagination URL '${nextUrl}'`);
+      }
+      return validated.url;
     }
   }
   return null;
@@ -352,57 +358,71 @@ export async function fetchGitHubPaginatedJson(initialUrl, token, fetchImpl = fe
 }
 
 const MAX_ASSET_REDIRECTS = 3;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-function validateHttpsRedirectUrl(location, assetName) {
-  const trimmed = typeof location === "string" ? location.trim() : "";
+function validateHttpsUrl(rawUrl, assetName, { isRedirect = false } = {}) {
+  const context = isRedirect ? "redirect" : "API url";
+  const subject = isRedirect ? "Location URL" : "URL";
+  const trimmed = typeof rawUrl === "string" ? rawUrl.trim() : "";
   if (!trimmed) {
-    throw new Error(`asset '${assetName}' redirect missing Location header`);
+    throw new Error(
+      isRedirect
+        ? `asset '${assetName}' redirect missing Location header`
+        : `asset '${assetName}' has no API url`,
+    );
+  }
+  if (/[\s\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new Error(`asset '${assetName}' ${context} has invalid ${subject} '${trimmed}'`);
   }
   let parsed;
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error(`asset '${assetName}' redirect has invalid Location URL '${trimmed}'`);
+    throw new Error(`asset '${assetName}' ${context} has invalid ${subject} '${trimmed}'`);
   }
   if (parsed.protocol !== "https:" || !parsed.hostname) {
-    throw new Error(`asset '${assetName}' redirect refuses non-HTTPS Location URL '${trimmed}'`);
+    throw new Error(`asset '${assetName}' ${context} refuses non-HTTPS ${subject} '${trimmed}'`);
   }
   if (!/^https:\/\//i.test(trimmed)) {
-    throw new Error(`asset '${assetName}' redirect has malformed HTTPS Location URL '${trimmed}'`);
+    throw new Error(`asset '${assetName}' ${context} has malformed HTTPS ${subject} '${trimmed}'`);
   }
-  if (parsed.username || parsed.password) {
-    throw new Error(`asset '${assetName}' redirect refuses credentials in Location URL`);
+  if (parsed.username || parsed.password || /^https:\/\/[^/?#]*@/i.test(trimmed)) {
+    throw new Error(`asset '${assetName}' ${context} refuses credentials in ${subject}`);
   }
-  return trimmed;
+  if (!/^https:\/\/[^/?#@\\]+(?:[/?#]|$)/i.test(trimmed)) {
+    throw new Error(`asset '${assetName}' ${context} has malformed HTTPS ${subject} '${trimmed}'`);
+  }
+  return { url: trimmed, origin: parsed.origin };
 }
 
 export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
-  if (!asset?.url) throw new Error(`asset '${asset?.name ?? "(unknown)"}' has no API url`);
-  let currentUrl = asset.url;
+  const assetName = asset?.name ?? "(unknown)";
+  const initial = validateHttpsUrl(asset?.url, assetName, { isRedirect: false });
+  let currentUrl = initial.url;
   let res;
   for (let redirects = 0; ; redirects += 1) {
     const headers =
       redirects === 0
-        ? githubHeaders(token, "application/octet-stream")
+        ? githubHeaders(initial.origin === "https://api.github.com" ? token : "", "application/octet-stream")
         : { "User-Agent": "easyoffice-release-verifier" };
     res = await fetchImpl(currentUrl, { headers, redirect: "manual" });
-    if (res.status < 300 || res.status >= 400) break;
+    if (!REDIRECT_STATUSES.has(res.status)) break;
     const location = res.headers?.get?.("location");
     await res.body?.cancel?.().catch(() => {});
     if (redirects >= MAX_ASSET_REDIRECTS) {
-      throw new Error(`asset '${asset.name}' exceeded ${MAX_ASSET_REDIRECTS} redirects`);
+      throw new Error(`asset '${assetName}' exceeded ${MAX_ASSET_REDIRECTS} redirects`);
     }
-    currentUrl = validateHttpsRedirectUrl(location, asset.name);
+    currentUrl = validateHttpsUrl(location, assetName, { isRedirect: true }).url;
   }
   if (!res.ok) {
     await res.body?.cancel?.().catch(() => {});
-    const message = `downloading '${asset.name}' failed (${res.status})`;
+    const message = `downloading '${assetName}' failed (${res.status})`;
     if (res.status === 404 || res.status >= 500) {
       throw new TransientVerificationError(message);
     }
     throw new Error(message);
   }
-  return readResponseTextBounded(res, `asset '${asset.name}'`);
+  return readResponseTextBounded(res, `asset '${assetName}'`);
 }
 
 async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetchImpl }) {
@@ -414,6 +434,7 @@ async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetch
     return JSON.parse(text);
   }
   if (res.status === 404 && allowDraftFallback) {
+    await res.body?.cancel?.().catch(() => {});
     const releases = await fetchGitHubPaginatedJson(`${apiBase}/releases?per_page=100`, token, fetchImpl);
     const matches = releases.filter((r) => r && r.tag_name === tag);
     if (matches.length > 1) {

@@ -25,7 +25,9 @@ runs:
       id: cache-dir
       if: inputs.cache == 'true'
       shell: bash
-      run: echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      run: |
+        cache_dir="$(npm config get cache)"
+        printf 'dir=%s\n' "${cache_dir%$'\r'}" >> "$GITHUB_OUTPUT"
 
     - name: Restore and save npm cache (non-PR)
       if: inputs.cache == 'true' && github.event_name != 'pull_request'

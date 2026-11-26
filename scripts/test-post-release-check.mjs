@@ -377,14 +377,25 @@ test("fetchGitHubAssetText rejects non-HTTPS, relative, malformed, and credentia
     { location: "//objects.githubusercontent.com/dl/latest.json", expected: /invalid Location URL/ },
     { location: "not a valid url", expected: /invalid Location URL/ },
     { location: "https://", expected: /invalid Location URL/ },
+    { location: "https://objects.github\nusercontent.com/dl/latest.json", expected: /invalid Location URL/, rawHeader: true },
+    { location: "https://objects.githubusercontent.com/dl/latest\tjson", expected: /invalid Location URL/ },
+    { location: "https://objects.githubusercontent.com/dl with space", expected: /invalid Location URL/ },
     { location: "https:objects.githubusercontent.com/dl/latest.json", expected: /malformed HTTPS Location URL/ },
+    { location: "https:///objects.githubusercontent.com/dl/latest.json", expected: /malformed HTTPS Location URL/ },
+    { location: "https:////objects.githubusercontent.com/dl/latest.json", expected: /malformed HTTPS Location URL/ },
+    { location: "https://objects.githubusercontent.com\\foo", expected: /malformed HTTPS Location URL/ },
     { location: "https://user:pass@objects.githubusercontent.com/dl/latest.json", expected: /credentials in Location URL/ },
+    { location: "https://@objects.githubusercontent.com/dl/latest.json", expected: /credentials in Location URL/ },
+    { location: "https://objects.githubusercontent.com\\@evil.com/dl/latest.json", expected: /credentials in Location URL/ },
   ];
 
-  for (const { location, expected } of badLocations) {
+  for (const { location, expected, rawHeader } of badLocations) {
     const seenUrls = [];
     const mockFetch = async (url) => {
       seenUrls.push(url);
+      if (rawHeader) {
+        return { status: 302, headers: new Map([["location", location]]), body: null };
+      }
       const headers = location === "" ? undefined : { location };
       return new Response(null, { status: 302, headers });
     };
@@ -461,4 +472,74 @@ test("verifyReleaseOnGitHub fails closed without retrying when an asset redirect
     /non-HTTPS Location URL/,
   );
   assert.equal(releaseCalls, 1);
+});
+
+test("fetchGitHubAssetText fails closed on non-HTTPS initial asset.url, strips token off api.github.com, and rejects non-redirect 304", async () => {
+  let called = false;
+  await assert.rejects(
+    () =>
+      fetchGitHubAssetText(
+        { name: MANIFEST_FILE, url: "http://api.github.com/repos/AquilaXk/easyoffice/releases/assets/1" },
+        "secret-tok",
+        async () => {
+          called = true;
+          return new Response("ok", { status: 200 });
+        },
+      ),
+    /non-HTTPS URL/,
+  );
+  assert.equal(called, false, "must reject non-HTTPS initial asset.url before fetch");
+
+  let seenAuth = "unset";
+  const nonApiText = await fetchGitHubAssetText(
+    { name: SUMS_FILE, url: "https://objects.githubusercontent.com/direct/SHA256SUMS.txt" },
+    "secret-tok",
+    async (_url, init) => {
+      seenAuth = init.headers?.Authorization ?? null;
+      return new Response("ok", { status: 200 });
+    },
+  );
+  assert.equal(nonApiText, "ok");
+  assert.equal(seenAuth, null, "must not send Authorization header outside api.github.com");
+
+  await assert.rejects(
+    () =>
+      fetchGitHubAssetText(
+        { name: MANIFEST_FILE, url: "https://api.github.com/repos/AquilaXk/easyoffice/releases/assets/1" },
+        "tok",
+        async () => new Response(null, { status: 304 }),
+      ),
+    /failed \(304\)/,
+  );
+});
+
+test("verifyReleaseOnGitHub rejects malformed Link pagination URLs containing control chars or triple slashes", async () => {
+  for (const link of [
+    '<https:///api.github.com/repos/AquilaXk/easyoffice/releases?page=2>; rel="next"',
+    '<https://api.github.com/repos/AquilaXk/easyoffice/releases\t?page=2>; rel="next"',
+  ]) {
+    const mockFetch = async (url) => {
+      if (url.endsWith("/releases/tags/v0.2.3")) return new Response("Not Found", { status: 404 });
+      if (url.endsWith("/releases?per_page=100")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { link },
+        });
+      }
+      return new Response("unexpected", { status: 404 });
+    };
+    await assert.rejects(
+      () =>
+        verifyReleaseOnGitHub({
+          repo: "AquilaXk/easyoffice",
+          tag: "v0.2.3",
+          expectedDraft: true,
+          token: "tok",
+          summaryPath: "",
+          fetchImpl: mockFetch,
+          retryDelayMs: 0,
+        }),
+      /refusing non-GitHub API pagination URL/,
+    );
+  }
 });

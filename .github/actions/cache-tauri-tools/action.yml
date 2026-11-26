@@ -13,9 +13,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Restore the Tauri bundler tool cache
-      if: runner.os != 'macOS'
+    - name: Restore and save the Tauri bundler tool cache (non-PR)
+      if: runner.os != 'macOS' && github.event_name != 'pull_request'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/tauri' || '~/.cache/tauri' }}
+        key: tauri-tools-${{ runner.os }}-${{ runner.arch }}-cli-${{ inputs.tauri-cli-version }}
+
+    - name: Restore the Tauri bundler tool cache read-only (pull_request)
+      if: runner.os != 'macOS' && github.event_name == 'pull_request'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ${{ runner.os == 'Windows' && '~/AppData/Local/tauri' || '~/.cache/tauri' }}
         key: tauri-tools-${{ runner.os }}-${{ runner.arch }}-cli-${{ inputs.tauri-cli-version }}

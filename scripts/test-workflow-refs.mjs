@@ -68,22 +68,30 @@ test("every workflow declares top-level permissions and job timeouts", () => {
   }
 });
 
+function extractStepBlock(lines, lineIndex) {
+  let start = lineIndex;
+  while (start > 0 && !/^\s*-\s+/.test(lines[start])) {
+    start -= 1;
+  }
+  const baseIndent = lines[start].search(/\S/);
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim() !== "") {
+      const indent = line.search(/\S/);
+      if (indent < baseIndent || (/^\s*-\s+/.test(line) && indent <= baseIndent)) break;
+    }
+    end += 1;
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 test("every actions/checkout step sets persist-credentials: false within its own step", () => {
   for (const rel of allCiYaml) {
     const lines = readText(path.join(REPO, rel)).split("\n");
     for (let i = 0; i < lines.length; i += 1) {
       if (!lines[i].includes("actions/checkout@")) continue;
-      const baseIndent = lines[i].search(/\S/);
-      let end = i + 1;
-      while (end < lines.length) {
-        const line = lines[end];
-        if (line.trim() !== "") {
-          const indent = line.search(/\S/);
-          if (indent < baseIndent || /^\s*-\s+/.test(line) && indent <= baseIndent) break;
-        }
-        end += 1;
-      }
-      const stepBlock = lines.slice(i, end).join("\n");
+      const stepBlock = extractStepBlock(lines, i);
       assert.match(
         stepBlock,
         /persist-credentials:\s*false/,
@@ -93,17 +101,69 @@ test("every actions/checkout step sets persist-credentials: false within its own
   }
 });
 
-test("CI Rust caches keep pull_request runs read-only via save-if", () => {
-  const ci = readText(path.join(REPO, ".github/workflows/ci.yml"));
-  const caches = ci.match(/Swatinem\/rust-cache@[^\n]*\n(?: {8}with:\n(?: {10}[^\n]*\n)+)?/g) ?? [];
-  assert.ok(caches.length >= 5);
-  for (const cache of caches) {
-    assert.match(
-      cache,
-      /save-if:\s*\$\{\{\s*github\.event_name\s*!=\s*'pull_request'\s*\}\}/,
-      "CI Swatinem/rust-cache must set save-if to keep pull_request runs read-only",
-    );
+test("all workflow and composite-action caches keep pull_request runs read-only", () => {
+  let rustCacheCount = 0;
+  let cacheSaveStepCount = 0;
+  for (const rel of allCiYaml) {
+    const lines = readText(path.join(REPO, rel)).split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.includes("Swatinem/rust-cache@")) {
+        rustCacheCount += 1;
+        const stepBlock = extractStepBlock(lines, i);
+        assert.match(
+          stepBlock,
+          /save-if:\s*\$\{\{\s*github\.event_name\s*!=\s*'pull_request'\s*\}\}/,
+          `${rel}:${i + 1} Swatinem/rust-cache must set save-if to keep pull_request runs read-only`,
+        );
+      } else if (/uses:\s*actions\/cache(?:\/save)?@/.test(line) && !line.includes("actions/cache/restore@")) {
+        cacheSaveStepCount += 1;
+        const stepBlock = extractStepBlock(lines, i);
+        assert.match(
+          stepBlock,
+          /^\s+if:\s*.*github\.event_name\s*!=\s*'pull_request'/m,
+          `${rel}:${i + 1} actions/cache save step must exclude pull_request runs`,
+        );
+      } else if (line.includes("actions/setup-node@") && rel !== ".github/actions/setup-node-ci/action.yml") {
+        const stepBlock = extractStepBlock(lines, i);
+        assert.doesNotMatch(
+          stepBlock,
+          /^\s+cache:/m,
+          `${rel}:${i + 1} must use ./.github/actions/setup-node-ci rather than actions/setup-node built-in cache`,
+        );
+      }
+    }
   }
+  assert.ok(rustCacheCount >= 6, `expected >= 6 Swatinem/rust-cache steps, found ${rustCacheCount}`);
+  assert.ok(cacheSaveStepCount >= 4, `expected >= 4 guarded cache write steps, found ${cacheSaveStepCount}`);
+});
+
+test("workflow job dependency and release-guard trigger contracts hold", () => {
+  const ci = readText(path.join(REPO, ".github/workflows/ci.yml"));
+  const ciJobs = ci.slice(ci.indexOf("\njobs:\n") + 1).split(/\n(?= {2}[a-z][\w-]*:\s*(?:#.*)?\n)/).slice(1);
+  for (const job of ciJobs) {
+    const name = job.match(/^ {2}([\w-]+):/)[1];
+    if (name === "sonar") {
+      assert.match(job, /^\s{4}needs:\s*\[checks,\s*checks-rust\]/m, "ci.yml sonar must wait on checks and checks-rust");
+    } else {
+      assert.doesNotMatch(job, /^\s{4}needs:/m, `ci.yml job '${name}' must run in parallel without needs:`);
+    }
+  }
+
+  const latestGuard = readText(path.join(REPO, ".github/workflows/latest-guard.yml"));
+  assert.match(
+    latestGuard,
+    /on:\s*\n\s+release:\s*\n\s+types:\s*\[published,\s*edited,\s*released\]/,
+    "latest-guard.yml must trigger on release published, edited, and released",
+  );
+
+  const release = readText(path.join(REPO, ".github/workflows/release.yml"));
+  const timingsBlock = release.slice(release.indexOf("\n  release-timings:"));
+  assert.match(
+    timingsBlock,
+    /^\s{4}if:\s*always\(\)\s*&&\s*!cancelled\(\)\s*&&\s*needs\.release-macos\.result\s*!=\s*'skipped'/m,
+    "release.yml release-timings must guard against cancelled runs and skipped tag pushes",
+  );
 });
 
 test("all literal repo paths, working directories, --prefix dirs, and hashFiles lockfiles exist", () => {
