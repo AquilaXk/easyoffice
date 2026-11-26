@@ -174,8 +174,10 @@ pub fn decode_utf16le_vec_baseline(bytes: &[u8]) -> Result<String, EasyOfficeErr
         ));
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     String::from_utf16(&units).map_err(|_| {
         EasyOfficeError::InvalidUtf8("유효하지 않은 UTF-16LE 시퀀스입니다.".to_string())

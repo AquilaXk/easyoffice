@@ -894,7 +894,7 @@ impl SheetEngine {
         check_text_arity(args, 3, usize::MAX)?;
         let target = self.eval_arg_val(&args[0], ctx, depth)?;
         let rest = &args[1..];
-        for pair in rest.chunks_exact(2) {
+        for pair in rest.as_chunks::<2>().0 {
             let k = self.eval_arg_val(&pair[0], ctx, depth)?;
             if Self::values_match(&target, &k) {
                 return Ok(self.eval_expr_ctx(&pair[1], ctx, depth));

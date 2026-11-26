@@ -31,20 +31,19 @@ fn mix(lane: u64, word: u64) -> u64 {
 /// The 64-bit hash of `bytes` under `seed`; the length is part of the hash.
 pub(crate) fn hash_bytes(bytes: &[u8], seed: u64) -> u64 {
     let mut lanes = LANE_ADD.map(|add| add ^ seed);
-    let mut steps = bytes.chunks_exact(STEP_BYTES);
-    for step in &mut steps {
-        for (lane, word) in lanes.iter_mut().zip(step.chunks_exact(8)) {
-            *lane = mix(*lane, u64::from_le_bytes(word.try_into().unwrap_or([0; 8])));
+    let (steps, step_rem) = bytes.as_chunks::<STEP_BYTES>();
+    for step in steps {
+        for (lane, word) in lanes.iter_mut().zip(step.as_chunks::<8>().0) {
+            *lane = mix(*lane, u64::from_le_bytes(*word));
         }
     }
-    let mut tail = steps.remainder().chunks_exact(8);
+    let (tail, rest) = step_rem.as_chunks::<8>();
     let mut acc =
         lanes[0] ^ lanes[1].rotate_left(13) ^ lanes[2].rotate_left(29) ^ lanes[3].rotate_left(47);
-    for word in &mut tail {
-        acc = mix(acc, u64::from_le_bytes(word.try_into().unwrap_or([0; 8])));
+    for word in tail {
+        acc = mix(acc, u64::from_le_bytes(*word));
     }
     let mut last = [0u8; 8];
-    let rest = tail.remainder();
     last[..rest.len()].copy_from_slice(rest);
     acc = mix(
         acc,

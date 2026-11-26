@@ -901,9 +901,9 @@ impl EasyOfficeIpcRouter {
                 ));
             }
             let mut out = Vec::with_capacity(bytes.len() / 2);
-            for chunk in bytes.chunks_exact(2) {
-                let hi = HEX_LUT[chunk[0] as usize];
-                let lo = HEX_LUT[chunk[1] as usize];
+            for &[b0, b1] in bytes.as_chunks::<2>().0 {
+                let hi = HEX_LUT[b0 as usize];
+                let lo = HEX_LUT[b1 as usize];
                 if (hi | lo) == 0xFF {
                     return Err(EasyOfficeError::InvalidArgument(
                         "유효하지 않은 16진수 문자입니다.".to_string(),
@@ -925,9 +925,9 @@ impl EasyOfficeIpcRouter {
             ));
         }
         let mut out = Vec::with_capacity(cleaned.len() / 2);
-        for chunk in cleaned.chunks_exact(2) {
-            let hi = HEX_LUT[chunk[0] as usize];
-            let lo = HEX_LUT[chunk[1] as usize];
+        for &[b0, b1] in cleaned.as_chunks::<2>().0 {
+            let hi = HEX_LUT[b0 as usize];
+            let lo = HEX_LUT[b1 as usize];
             if (hi | lo) == 0xFF {
                 return Err(EasyOfficeError::InvalidArgument(
                     "유효하지 않은 16진수 문자입니다.".to_string(),

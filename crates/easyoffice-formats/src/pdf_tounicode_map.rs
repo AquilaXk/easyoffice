@@ -102,7 +102,7 @@ impl PdfToUnicodeMap {
             };
             let block = &after[..end_pos];
             let tokens = Self::extract_hex_tokens(block);
-            for pair in tokens.chunks_exact(2) {
+            for pair in tokens.as_chunks::<2>().0 {
                 if let (Some((code, byte_len)), Some(dst)) = (
                     Self::parse_code_hex(pair[0]),
                     decode_pdf_hex_string(pair[1], true),
@@ -239,8 +239,10 @@ impl PdfToUnicodeMap {
         }
         budget.charge(entries * (ENTRY_BYTES + bytes.len() * 2), MAP_WHAT)?;
         let base_units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| u16::from_be_bytes(*p))
             .collect();
         let base_last = *base_units.last().unwrap_or(&0);
         let mut cur_units = base_units;

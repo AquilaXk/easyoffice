@@ -533,8 +533,8 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
     let mut mapped = String::with_capacity(bytes.len());
     let mut any_hit = false;
     if cm.is_two_byte && bytes.len().is_multiple_of(2) {
-        for pair in bytes.chunks_exact(2) {
-            let code = u16::from_be_bytes([pair[0], pair[1]]);
+        for pair in bytes.as_chunks::<2>().0 {
+            let code = u16::from_be_bytes(*pair);
             if code <= 0xFF
                 && (cm.single_byte_mask[usize::from(code >> 6)] & (1u64 << (code & 63))) != 0
             {
@@ -625,8 +625,10 @@ pub(crate) fn decode_pdf_hex_string_with_cmap(
             return None;
         }
         let units: Vec<u16> = rest
-            .chunks_exact(2)
-            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_be_bytes(*pair))
             .collect();
         return Some(String::from_utf16_lossy(&units));
     }
@@ -635,8 +637,10 @@ pub(crate) fn decode_pdf_hex_string_with_cmap(
     }
     if prefer_utf16be && bytes.len() % 2 == 0 {
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_be_bytes(*pair))
             .collect();
         return Some(String::from_utf16_lossy(&units));
     }
@@ -765,8 +769,10 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
         let raw: Vec<u8> = out.chars().skip(2).map(|c| c as u8).collect();
         if raw.len().is_multiple_of(2) {
             let units: Vec<u16> = raw
-                .chunks_exact(2)
-                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u16::from_be_bytes(*pair))
                 .collect();
             return String::from_utf16_lossy(&units);
         }

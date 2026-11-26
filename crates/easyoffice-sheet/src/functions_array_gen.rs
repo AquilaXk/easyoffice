@@ -265,15 +265,16 @@ impl SheetEngine {
         }
         let target = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
         let rest = &args[1..];
+        let (rest_pairs, _) = rest.as_chunks::<2>();
         if target.is_scalar()
-            && !rest
-                .chunks_exact(2)
+            && !rest_pairs
+                .iter()
                 .any(|p| crate::array_class::arrayish(&p[0]))
         {
             if let V::Error(e) = target.data[0] {
                 return Ok(Val::error(e));
             }
-            for pair in rest.chunks_exact(2) {
+            for pair in rest_pairs {
                 let k = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
                 if k.is_scalar() {
                     if let V::Error(e) = k.data[0] {
@@ -291,7 +292,7 @@ impl SheetEngine {
         }
         let mut pairs = Vec::with_capacity(rest.len() / 2);
         let (mut rows, mut cols) = (target.rows, target.cols);
-        for pair in rest.chunks_exact(2) {
+        for pair in rest_pairs {
             let k = self.eval_val(&pair[0], env, ctx, depth + 1)?.into_grid()?;
             let v = self.eval_val(&pair[1], env, ctx, depth + 1)?.into_grid()?;
             rows = rows.max(k.rows).max(v.rows);

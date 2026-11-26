@@ -369,8 +369,8 @@ fn read_font_name(body: &[u8]) -> Option<String> {
     let chars = body.get(16..16 + byte_len)?;
     let name = if wide {
         let mut units = [0u16; MAX_FONT_NAME_CHARS];
-        for (slot, pair) in units[..count].iter_mut().zip(chars.chunks_exact(2)) {
-            *slot = u16::from_le_bytes([pair[0], pair[1]]);
+        for (slot, pair) in units[..count].iter_mut().zip(chars.as_chunks::<2>().0) {
+            *slot = u16::from_le_bytes(*pair);
         }
         String::from_utf16(&units[..count]).ok()?
     } else if chars.is_ascii() {
@@ -397,8 +397,8 @@ fn read_format(body: &[u8]) -> Option<(u16, String)> {
     let chars = body.get(head..head + byte_len)?;
     let code = if wide {
         let mut units = [0u16; MAX_NUM_FMT_CODE_BYTES];
-        for (slot, pair) in units[..count].iter_mut().zip(chars.chunks_exact(2)) {
-            *slot = u16::from_le_bytes([pair[0], pair[1]]);
+        for (slot, pair) in units[..count].iter_mut().zip(chars.as_chunks::<2>().0) {
+            *slot = u16::from_le_bytes(*pair);
         }
         String::from_utf16(&units[..count]).ok()?
     } else if chars.is_ascii() {

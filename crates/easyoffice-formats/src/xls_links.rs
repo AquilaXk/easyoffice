@@ -89,8 +89,10 @@ fn zero_terminated(bytes: &[u8]) -> Option<String> {
         return None;
     }
     let end = bytes
-        .chunks_exact(2)
-        .position(|unit| unit == [0, 0])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|unit| *unit == [0, 0])
         .map(|at| at * 2)?;
     decode_utf16le_swar(&bytes[..end]).ok()
 }
@@ -157,8 +159,10 @@ fn read_url_moniker(bytes: &mut Bytes) -> Option<String> {
 /// the 24 bytes of the tail.
 fn zero_terminated_prefix(moniker: &[u8]) -> Option<String> {
     let end = moniker
-        .chunks_exact(2)
-        .position(|unit| unit == [0, 0])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|unit| *unit == [0, 0])
         .map(|at| at * 2 + 2)?;
     let rest = moniker.len() - end;
     (rest == 0 || rest == URL_TAIL.len()).then_some(())?;
@@ -254,8 +258,10 @@ fn read_tooltip(data: &[u8]) -> Option<(CellBox, String)> {
 fn zero_terminated_or_rest(bytes: &[u8]) -> Option<String> {
     let even = &bytes[..bytes.len() & !1];
     let end = even
-        .chunks_exact(2)
-        .position(|unit| unit == [0, 0])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|unit| *unit == [0, 0])
         .map_or(even.len(), |at| at * 2);
     decode_utf16le_swar(&even[..end]).ok()
 }

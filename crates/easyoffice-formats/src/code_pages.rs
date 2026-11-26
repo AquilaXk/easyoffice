@@ -295,8 +295,10 @@ mod tests {
     fn assigned_cell_counts_pin_the_tables() {
         let assigned = |table: &[u8]| {
             table
-                .chunks_exact(2)
-                .filter(|c| u16::from_le_bytes([c[0], c[1]]) != 0)
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .filter(|c| u16::from_le_bytes(**c) != 0)
                 .count()
         };
         assert_eq!(assigned(SJIS), 9_604);

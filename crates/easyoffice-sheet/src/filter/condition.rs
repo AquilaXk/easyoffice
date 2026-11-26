@@ -31,13 +31,13 @@ impl Hasher for TextHasher {
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
         const K: u64 = 0x517c_c1b7_2722_0a95;
-        let mut chunks = bytes.chunks_exact(8);
-        for chunk in &mut chunks {
-            let word = u64::from_le_bytes(chunk.try_into().unwrap_or([0; 8]));
+        let (chunks, remainder) = bytes.as_chunks::<8>();
+        for chunk in chunks {
+            let word = u64::from_le_bytes(*chunk);
             self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(K);
         }
         let mut tail = 0u64;
-        for (i, &b) in chunks.remainder().iter().enumerate() {
+        for (i, &b) in remainder.iter().enumerate() {
             tail |= u64::from(b) << (8 * i);
         }
         self.0 = (self.0.rotate_left(5) ^ tail ^ (bytes.len() as u64)).wrapping_mul(K);

@@ -63,8 +63,10 @@ fn unpack(json: &str) -> Vec<CellVisual> {
     let w = &json[w_start..w_start + json[w_start..].find('"').unwrap()];
     let bytes = EasyOfficeIpcRouter::decode_base64(w).unwrap();
     let words = bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     decode_visuals(&PackedVisuals {
         palette,

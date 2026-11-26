@@ -499,10 +499,10 @@ fn fill_row(
     let mut unsupported = 0usize;
     for (col_idx, (slot, pair)) in cells
         .iter_mut()
-        .zip(offsets.chunks_exact(2).take(cols))
+        .zip(offsets.as_chunks::<2>().0.iter().take(cols))
         .enumerate()
     {
-        let offset = u16::from_le_bytes([pair[0], pair[1]]);
+        let offset = u16::from_le_bytes(*pair);
         if offset == table::NO_CELL_OFFSET {
             continue;
         }

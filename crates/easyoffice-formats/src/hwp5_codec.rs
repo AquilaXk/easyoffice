@@ -941,10 +941,7 @@ impl Hwp5Codec {
                     "HWP 5.0 표 텍스트 페이로드가 보안 상한을 초과했습니다.".to_string(),
                 ));
             }
-            if payload_slice
-                .chunks_exact(2)
-                .any(|c| c[0] == 0 && c[1] == 0)
-            {
+            if payload_slice.as_chunks::<2>().0.contains(&[0, 0]) {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
                     "HWP 5.0 표 레코드 셀 한도 초과 또는 비정상 바이너리 구조입니다.".to_string(),
                 ));

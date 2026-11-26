@@ -277,10 +277,10 @@ fn random_salt() -> [u8; SALT_BYTES] {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    for (i, chunk) in salt.chunks_exact_mut(8).enumerate() {
+    for (i, chunk) in salt.as_chunks_mut::<8>().0.iter_mut().enumerate() {
         // `RandomState` keys come from the operating system's random source.
         let word = std::collections::hash_map::RandomState::new().hash_one((nanos, i));
-        chunk.copy_from_slice(&word.to_le_bytes());
+        *chunk = word.to_le_bytes();
     }
     salt
 }

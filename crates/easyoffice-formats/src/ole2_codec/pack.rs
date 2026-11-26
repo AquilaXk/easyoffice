@@ -88,7 +88,9 @@ impl Ole2ContainerCodec {
         let mut dir_bytes = vec![0u8; dir_sector_count * Self::SECTOR_SIZE];
         // The format wants "no stream" in the sibling and child ids of an entry that is not used.
         for unused in dir_bytes
-            .chunks_exact_mut(Self::DIR_ENTRY_SIZE)
+            .as_chunks_mut::<{ Self::DIR_ENTRY_SIZE }>()
+            .0
+            .iter_mut()
             .skip(nodes.len())
         {
             unused[68..80].fill(0xFF);
