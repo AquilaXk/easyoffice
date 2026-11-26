@@ -315,7 +315,6 @@ jobs:
     timeout-minutes: 30
     env:
       PLAYWRIGHT_VERSION: "1.56.1"
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -355,6 +354,8 @@ jobs:
 
       - name: Install the pinned browser driver and WebKit
         if: steps.webkit-cache.outputs.cache-hit != 'true'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pw" "$PLAYWRIGHT_BROWSERS_PATH"
@@ -374,6 +375,7 @@ jobs:
         env:
           EO_APP: ${{ github.workspace }}/target/debug/easyoffice-app
           EO_PW_DIR: ${{ runner.temp }}/pw
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
         run: node scripts/webkit-dom/run.mjs "$RUNNER_TEMP/webkit-dom-captures"
 
       - name: Upload the captures of the failed steps

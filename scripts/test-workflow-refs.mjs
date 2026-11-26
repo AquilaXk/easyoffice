@@ -208,3 +208,35 @@ test("all literal repo paths, working directories, --prefix dirs, and hashFiles 
     }
   }
 });
+
+test("workflow and job-level env blocks do not reference step-only contexts (runner or steps)", () => {
+  for (const rel of workflows) {
+    const lines = readText(path.join(REPO, rel)).split("\n");
+    let scope = "top";
+    let envIndent = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() === "" || line.trim().startsWith("#")) continue;
+      const indent = line.search(/\S/);
+      if (indent === 0 && line.startsWith("jobs:")) {
+        scope = "jobs";
+        envIndent = -1;
+        continue;
+      }
+      if (envIndent >= 0 && indent <= envIndent) {
+        envIndent = -1;
+      }
+      if (envIndent >= 0) {
+        assert.doesNotMatch(
+          line,
+          /\$\{\{[^}]*\b(?:runner|steps)\./,
+          `${rel}:${i + 1} workflow/job env must not reference step-only context`,
+        );
+        continue;
+      }
+      if ((scope === "top" && indent === 0 && /^env:\s*$/.test(line)) || (scope === "jobs" && indent === 4 && /^ {4}env:\s*$/.test(line))) {
+        envIndent = indent;
+      }
+    }
+  }
+});
