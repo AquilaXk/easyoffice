@@ -2,10 +2,10 @@
 //! and table-cell inner run formatting + paragraph alignment/line-spacing roundtrip in DOCX/ODT.
 
 use easyoffice_formats::{
-    CellFill, CellMerge, DecodedContent, DocumentFormat, RichAlignment, RichBlock,
-    RichCellParagraph, RichDocument, RichParagraph, RichRun, RichScript, RichTable,
-    TableCellBorders, TableCellLink, TableCellParagraphs, TableCellStyleEntry,
-    UniversalFormatConverter,
+    pages_write_loss, CellFill, CellMerge, DecodedContent, DocumentFormat, EasyOfficeError,
+    RichAlignment, RichBlock, RichCellParagraph, RichDocument, RichParagraph, RichRun, RichScript,
+    RichTable, TableCellBorders, TableCellLink, TableCellParagraphs, TableCellStyleEntry,
+    UniversalFormatConverter, ZipArchiveCodec, MAX_CELL_PARAGRAPH_ENTRIES, MAX_PARAGRAPHS_PER_CELL,
 };
 
 fn build_doc_with_spacing_and_rich_table() -> RichDocument {
@@ -267,4 +267,167 @@ fn out_of_bounds_cell_paragraphs_are_safely_ignored() {
         })
         .unwrap();
     assert!(tbl.cell_paragraphs.is_empty());
+}
+
+fn pack_odt_content(content_xml: &str) -> Vec<u8> {
+    let manifest = r#"<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>"#;
+    ZipArchiveCodec::pack_compressed(&[
+        (
+            "mimetype".to_string(),
+            b"application/vnd.oasis.opendocument.text".to_vec(),
+        ),
+        (
+            "META-INF/manifest.xml".to_string(),
+            manifest.as_bytes().to_vec(),
+        ),
+        ("content.xml".to_string(), content_xml.as_bytes().to_vec()),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn pages_write_loss_counts_rich_cell_paragraphs() {
+    let mut formatted_tbl = RichTable::new(vec![vec!["셀".to_string()]]);
+    formatted_tbl.cell_paragraphs = vec![TableCellParagraphs {
+        row: 0,
+        col: 0,
+        paragraphs: vec![RichCellParagraph {
+            runs: vec![RichRun {
+                text: "셀".to_string(),
+                bold: true,
+                ..RichRun::default()
+            }],
+            alignment: Some(RichAlignment::Center),
+            line_spacing_percent: Some(150),
+        }],
+    }];
+    let doc_fmt = RichDocument {
+        title: "pages_loss_rich".to_string(),
+        blocks: vec![RichBlock::Table(formatted_tbl)],
+        ..RichDocument::default()
+    };
+    assert_eq!(pages_write_loss(&doc_fmt).formats, 1);
+
+    let mut plain_tbl = RichTable::new(vec![vec!["셀".to_string()]]);
+    plain_tbl.cell_paragraphs = vec![TableCellParagraphs {
+        row: 0,
+        col: 0,
+        paragraphs: vec![RichCellParagraph {
+            runs: vec![RichRun::plain("셀")],
+            ..RichCellParagraph::default()
+        }],
+    }];
+    let doc_plain = RichDocument {
+        title: "pages_loss_plain".to_string(),
+        blocks: vec![RichBlock::Table(plain_tbl)],
+        ..RichDocument::default()
+    };
+    assert_eq!(pages_write_loss(&doc_plain).formats, 0);
+}
+
+#[test]
+fn odt_repeated_styled_cells_exceeding_budget_fail_closed() {
+    let empty_paras = "<text:p text:style-name=\"CenterP\"/>".repeat(2_000);
+    let rows_empty = format!(
+        "<table:table-row><table:table-cell table:number-columns-repeated=\"1024\">{empty_paras}</table:table-cell></table:table-row>"
+    )
+    .repeat(10);
+    let xml_empty = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <office:automatic-styles>
+    <style:style style:name="CenterP" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>
+  </office:automatic-styles>
+  <office:body><office:text><table:table>{rows_empty}</table:table></office:text></office:body>
+</office:document-content>"#
+    );
+    let odt_empty = pack_odt_content(&xml_empty);
+    let err_empty =
+        UniversalFormatConverter::decode_rich(&odt_empty, Some("bomb1.odt")).unwrap_err();
+    assert!(
+        matches!(err_empty, EasyOfficeError::ResourceBudgetExceeded(_)),
+        "expected ResourceBudgetExceeded for repeated empty styled paras, got {err_empty:?}"
+    );
+
+    let span_runs = "<text:a xlink:href=\"https://example.org/r\"><text:span text:style-name=\"BoldT\">a</text:span><text:span text:style-name=\"ItalicT\">b</text:span></text:a>".repeat(500);
+    let rows_spans = format!(
+        "<table:table-row><table:table-cell table:number-columns-repeated=\"1024\"><text:p>{span_runs}</text:p></table:table-cell></table:table-row>"
+    )
+    .repeat(5);
+    let xml_spans = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <office:automatic-styles>
+    <style:style style:name="BoldT" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="ItalicT" style:family="text"><style:text-properties fo:font-style="italic"/></style:style>
+  </office:automatic-styles>
+  <office:body><office:text><table:table>{rows_spans}</table:table></office:text></office:body>
+</office:document-content>"#
+    );
+    let odt_spans = pack_odt_content(&xml_spans);
+    let err_spans =
+        UniversalFormatConverter::decode_rich(&odt_spans, Some("bomb2.odt")).unwrap_err();
+    assert!(
+        matches!(err_spans, EasyOfficeError::ResourceBudgetExceeded(_)),
+        "expected ResourceBudgetExceeded for repeated styled/linked 1-byte spans, got {err_spans:?}"
+    );
+}
+
+#[test]
+fn odt_repeated_cells_past_max_entries_stop_gracefully_and_overflow_cell_keeps_plain_text() {
+    let rows_cap = "<table:table-row><table:table-cell table:number-columns-repeated=\"1024\"><text:p><text:span text:style-name=\"BoldT\">x</text:span></text:p></table:table-cell></table:table-row>"
+        .repeat(55);
+    let xml_cap = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:automatic-styles>
+    <style:style style:name="BoldT" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+  </office:automatic-styles>
+  <office:body><office:text><table:table>{rows_cap}</table:table></office:text></office:body>
+</office:document-content>"#
+    );
+    let odt_cap = pack_odt_content(&xml_cap);
+    let doc_cap = decode_doc(&odt_cap, "cap.odt");
+    let tbl_cap = doc_cap
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            RichBlock::Table(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(tbl_cap.rows.len(), 55);
+    assert_eq!(tbl_cap.cell_paragraphs.len(), MAX_CELL_PARAGRAPH_ENTRIES);
+
+    let mut overflow_paras = String::new();
+    for i in 0..=(MAX_PARAGRAPHS_PER_CELL + 4) {
+        overflow_paras.push_str(&format!(
+            "<text:p><text:span text:style-name=\"BoldT\">L{i}</text:span></text:p>"
+        ));
+    }
+    let xml_overflow = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:automatic-styles>
+    <style:style style:name="BoldT" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+  </office:automatic-styles>
+  <office:body><office:text><table:table><table:table-row><table:table-cell>{overflow_paras}</table:table-cell></table:table-row></table:table></office:text></office:body>
+</office:document-content>"#
+    );
+    let odt_overflow = pack_odt_content(&xml_overflow);
+    let doc_overflow = decode_doc(&odt_overflow, "overflow.odt");
+    let tbl_overflow = doc_overflow
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            RichBlock::Table(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert!(tbl_overflow.cell_paragraphs.is_empty());
+    let tail_marker = format!("L{}", MAX_PARAGRAPHS_PER_CELL + 4);
+    assert!(
+        tbl_overflow.rows[0][0].ends_with(&tail_marker),
+        "expected plain text past MAX_PARAGRAPHS_PER_CELL to survive"
+    );
 }

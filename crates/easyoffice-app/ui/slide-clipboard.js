@@ -11,12 +11,15 @@
   const round2 = (v) => Math.round(v * 100) / 100;
 
   function isEditableField(el) {
-    if (!el || el.nodeType !== 1) return false;
-    const tag = String(el.tagName || "").toUpperCase();
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable) return true;
-    const ce = el.getAttribute?.("contenteditable");
-    if (ce === "true" || ce === "plaintext-only") return true;
-    return Boolean(el.closest?.('#slide-title-zone, #slide-lower-zone, [contenteditable="true"], [contenteditable="plaintext-only"]'));
+    const node = el?.nodeType === 3 ? el.parentElement : el;
+    if (!node || node.nodeType !== 1) return false;
+    const tag = String(node.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable) return true;
+    const ceEl = node.closest?.("#slide-title-zone, #slide-lower-zone, [contenteditable]");
+    if (!ceEl) return false;
+    if (ceEl.id === "slide-title-zone" || ceEl.id === "slide-lower-zone") return true;
+    const ce = ceEl.getAttribute?.("contenteditable");
+    return ce === "" || ce === "true" || ce === "plaintext-only";
   }
 
   const cssEsc = (v) => (typeof host.CSS?.escape === "function" ? host.CSS.escape(String(v)) : String(v).replace(/["\\]/g, "\\$&"));
@@ -194,6 +197,17 @@
     }
 
     function runMenuClipboard(cmd) {
+      if (isEditableField(document.activeElement)) {
+        const execName = { "clip-cut": "cut", "clip-copy": "copy", "clip-paste": "paste" }[cmd];
+        if (!execName) return false;
+        const util = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.execTextFieldEdit;
+        if (typeof util === "function") return util(execName, document);
+        try {
+          return typeof document.execCommand === "function" ? Boolean(document.execCommand(execName)) : false;
+        } catch {
+          return false;
+        }
+      }
       if (cmd === "clip-cut") return cutSelected();
       if (cmd === "clip-copy") return copySelected();
       if (cmd === "clip-paste") return pasteClipboard();

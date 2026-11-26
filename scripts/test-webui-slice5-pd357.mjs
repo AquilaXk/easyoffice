@@ -788,3 +788,80 @@ test("Regression: PDF repeated query jumps to Page 2 paragraph, Command Palette 
   assert.equal(board.getState().nodes.length, nCount, "nested contenteditable isolates BOARD Ctrl+D");
   ceHost.remove();
 });
+
+test("Regression: native menu edit:cut/copy and toolbar clip commands preserve BOARD/SLIDE objects while editing contenteditable, and unstyled <br> cell keeps newline", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+
+  // 1. Unstyled <td>Line1<br>Line2</td> keeps \n separator
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(4);
+  const editor = $(h.document, "doc-editor");
+  editor.innerHTML = '<table class="doc-inline-table"><tbody><tr><td>Line1<br>Line2</td><td>Single<br></td></tr></tbody></table>';
+  const docBlocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor, {});
+  const tblBlock = docBlocks.find((b) => b.type === "table");
+  assert.equal(tblBlock.rows[0][0].text, "Line1\nLine2");
+  assert.equal(tblBlock.rows[0][1].text, "Single");
+
+  // 2. BOARD contenteditable isolates native edit:cut/copy and boardStyleBar.runClipboardCommand
+  switchModule(h.document, "BOARD");
+  await flushAsyncTurns(4);
+  const board = h.host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+  const barApi = h.host.__EASYOFFICE_BOARD_STYLE_BAR__;
+  const bn1 = board.addNode({ kind: "text", x: 60, y: 60, w: 160, h: 70, text: "HelloWorld" });
+  const bn2 = board.addNode({ kind: "shape", x: 300, y: 60, w: 120, h: 70, text: "Target" });
+  board.addConnector({ fromId: bn1.id, toId: bn2.id, label: "link" });
+  board.selectNode(bn1.id);
+
+  const execCalls = [];
+  h.document.execCommand = (name) => { execCalls.push(name); return true; };
+
+  const textNodeEl = h.document.querySelector(`#board-node-layer .board-node[data-node-id="${bn1.id}"] .board-node-text`);
+  assert.ok(textNodeEl);
+  textNodeEl.setAttribute("contenteditable", "plaintext-only");
+  textNodeEl.focus();
+  assert.equal(h.document.activeElement, textNodeEl);
+
+  const preNodes = board.getState().nodes.length;
+  const preConns = board.getState().connectors.length;
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("edit:cut"), true);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("edit:copy"), true);
+  assert.equal(barApi.runClipboardCommand("clip-cut"), true);
+  assert.equal(barApi.runClipboardCommand("clip-copy"), true);
+  assert.equal(barApi.runClipboardCommand("clip-paste"), true);
+  assert.deepEqual(execCalls, ["cut", "copy", "cut", "copy", "paste"]);
+  assert.equal(board.getState().nodes.length, preNodes, "BOARD node must not be deleted while contenteditable text is focused");
+  assert.equal(board.getState().connectors.length, preConns, "BOARD connector must not be deleted while contenteditable text is focused");
+  textNodeEl.removeAttribute("contenteditable");
+
+  // 3. SLIDE contenteditable (#slide-title-zone, #slide-lower-zone, .slide-el-textbox) isolates native edit:cut/copy and slideClipboard.runMenuClipboard
+  switchModule(h.document, "SLIDE");
+  await flushAsyncTurns(4);
+  const canvas = h.host.__EASYOFFICE_SLIDE_CANVAS__;
+  const slideClip = h.host.__EASYOFFICE_SLIDE_CLIPBOARD__;
+  while (canvas.getElements().length > 0) canvas.deleteElement(canvas.getElements()[0].id);
+  const sb = canvas.addElement({ kind: "textbox", x: 50, y: 50, w: 180, h: 60, text: "AlphaBeta" });
+  canvas.selectElement(sb.id);
+
+  const tbDiv = h.document.querySelector(`#slide-canvas-layer .slide-el[data-element-id="${sb.id}"] .slide-el-textbox`);
+  assert.ok(tbDiv);
+  tbDiv.setAttribute("contenteditable", "plaintext-only");
+  tbDiv.focus();
+  execCalls.length = 0;
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("edit:cut"), true);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("edit:copy"), true);
+  assert.equal(slideClip.runMenuClipboard("clip-cut"), true);
+  assert.equal(slideClip.runMenuClipboard("clip-copy"), true);
+  assert.equal(slideClip.runMenuClipboard("clip-paste"), true);
+  assert.deepEqual(execCalls, ["cut", "copy", "cut", "copy", "paste"]);
+  assert.equal(canvas.getElements().length, 1, "SLIDE textbox must not be deleted while contenteditable text is focused");
+  tbDiv.removeAttribute("contenteditable");
+
+  const titleZone = $(h.document, "slide-title-zone");
+  titleZone.focus();
+  execCalls.length = 0;
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("edit:cut"), true);
+  assert.equal(slideClip.runMenuClipboard("clip-copy"), true);
+  assert.deepEqual(execCalls, ["cut", "copy"]);
+  assert.equal(canvas.getElements().length, 1, "SLIDE object stays intact while #slide-title-zone is focused");
+});

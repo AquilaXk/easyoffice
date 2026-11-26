@@ -407,4 +407,121 @@ test("real Chrome: DOC sub/sup/spacing & DOCX table-cell roundtrip, SLIDE UX/sea
   await sendKey("z", "KeyZ", 90, CTRL);
   await sleep(150);
   assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`), 3, "1-step undo restores all multi-deleted shapes");
+
+  // Real Chrome regression: native edit:cut while editing BOARD node contenteditable cuts only text selection and preserves node + connector
+  await openModule("BOARD");
+  await waitFor(`Boolean(window.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.())`);
+  const boardCut = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const n1 = b.addNode({ kind: "text", x: 100, y: 100, w: 160, h: 70, text: "HelloWorld" });
+    const n2 = b.addNode({ kind: "shape", x: 340, y: 100, w: 120, h: 70, text: "KeepMe" });
+    b.addConnector({ fromId: n1.id, toId: n2.id, label: "edge" });
+    const card = document.querySelector('#board-node-layer .board-node[data-node-id="' + n1.id + '"]');
+    card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const editable = card.querySelector('.board-node-text[contenteditable="plaintext-only"]');
+    if (!editable || !editable.firstChild) return { ready: false };
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(editable.firstChild, 5);
+    r.setEnd(editable.firstChild, 10);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    const beforeNodes = b.getState().nodes.length;
+    const beforeConns = b.getState().connectors.length;
+    const ok = window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    const afterNode = b.getState().nodes.find((n) => n.id === n1.id);
+    return {
+      ready: true,
+      ok,
+      beforeNodes,
+      afterNodes: b.getState().nodes.length,
+      beforeConns,
+      afterConns: b.getState().connectors.length,
+      domText: editable.textContent,
+      modelText: afterNode?.text,
+    };
+  })()`);
+  assert.equal(boardCut.ready, true);
+  assert.equal(boardCut.ok, true);
+  assert.equal(boardCut.afterNodes, boardCut.beforeNodes, "BOARD node must survive native edit:cut during text edit");
+  assert.equal(boardCut.afterConns, boardCut.beforeConns, "BOARD connector must survive native edit:cut during text edit");
+  assert.equal(boardCut.domText, "Hello");
+  assert.equal(boardCut.modelText, "Hello");
+
+  const boardShapeCut = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const shape = b.getState().nodes.find((n) => n.kind === "shape" && n.text === "KeepMe");
+    const card = document.querySelector('#board-node-layer .board-node[data-node-id="' + shape.id + '"]');
+    card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const editable = card.querySelector('.board-node-label[contenteditable="plaintext-only"]');
+    if (!editable || !editable.firstChild) return { ready: false };
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(editable.firstChild, 4);
+    r.setEnd(editable.firstChild, 6);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    const beforeNodes = b.getState().nodes.length;
+    const ok = window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    return { ready: true, ok, beforeNodes, afterNodes: b.getState().nodes.length, text: b.getState().nodes.find((n) => n.id === shape.id)?.text };
+  })()`);
+  assert.equal(boardShapeCut.ready, true);
+  assert.equal(boardShapeCut.ok, true);
+  assert.equal(boardShapeCut.afterNodes, boardShapeCut.beforeNodes);
+  assert.equal(boardShapeCut.text, "Keep");
+
+  // Real Chrome regression: native edit:cut while editing SLIDE textbox contenteditable cuts only text selection and preserves textbox
+  await openModule("SLIDE");
+  await waitFor(`Boolean(window.__EASYOFFICE_SLIDE_CANVAS__)`);
+  const slideCut = await js(`(() => {
+    const c = window.__EASYOFFICE_SLIDE_CANVAS__;
+    while (c.getElements().length > 0) c.deleteElement(c.getElements()[0].id);
+    const tb = c.addElement({ kind: "textbox", x: 60, y: 60, w: 200, h: 70, text: "AlphaBeta" });
+    const card = document.querySelector('#slide-canvas-layer .slide-el[data-element-id="' + tb.id + '"]');
+    card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const editable = card.querySelector('.slide-el-textbox[contenteditable="plaintext-only"]');
+    if (!editable || !editable.firstChild) return { ready: false };
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(editable.firstChild, 5);
+    r.setEnd(editable.firstChild, 9);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    const ok = window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    const afterEl = c.getElements().find((e) => e.id === tb.id);
+    return {
+      ready: true,
+      ok,
+      count: c.getElements().length,
+      domText: editable.textContent,
+      modelText: afterEl?.text,
+    };
+  })()`);
+  assert.equal(slideCut.ready, true);
+  assert.equal(slideCut.ok, true);
+  assert.equal(slideCut.count, 1, "SLIDE textbox must survive native edit:cut during text edit");
+  assert.equal(slideCut.domText, "Alpha");
+  assert.equal(slideCut.modelText, "Alpha");
+
+  const slideTitleCut = await js(`(() => {
+    const c = window.__EASYOFFICE_SLIDE_CANVAS__;
+    const sh = c.addElement({ kind: "shape", x: 300, y: 120, w: 120, h: 60, text: "Shape" });
+    c.selectElement(sh.id);
+    const tz = document.getElementById("slide-title-zone");
+    const h2 = tz.querySelector("h2") || tz;
+    h2.textContent = "SlideTitle";
+    tz.focus();
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(h2.firstChild, 5);
+    r.setEnd(h2.firstChild, 10);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    const beforeCount = c.getElements().length;
+    const ok = window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    return { ok, beforeCount, afterCount: c.getElements().length, titleText: tz.textContent };
+  })()`);
+  assert.equal(slideTitleCut.ok, true);
+  assert.equal(slideTitleCut.afterCount, slideTitleCut.beforeCount, "SLIDE shape must survive native edit:cut in #slide-title-zone");
+  assert.equal(slideTitleCut.titleText, "Slide");
 });

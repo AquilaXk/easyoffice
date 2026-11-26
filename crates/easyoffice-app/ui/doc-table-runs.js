@@ -279,7 +279,7 @@
   function readCellSaveEntry(cell, helpers, fallbackReadCellContent) {
     const { paragraphs, hasBlockChild } = extractCellParagraphsRaw(cell, helpers);
     const rich = cellParasNeedSave(paragraphs) ? paragraphs : null;
-    if ((hasBlockChild || (rich && rich.length > 1)) && paragraphs.length > 0) {
+    if ((hasBlockChild || paragraphs.length > 1) && paragraphs.length > 0) {
       const { text, links } = paragraphsToTextAndLinks(paragraphs);
       return { text, links, paragraphs: rich };
     }

@@ -98,3 +98,33 @@ fn hostile_odt_runs_exceeding_decode_budget_fail_closed() {
         Some(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }
+
+#[test]
+fn hostile_odt_table_paragraphs_exceeding_decode_budget_fail_closed() {
+    let styles = HashMap::new();
+    let lists = HashMap::new();
+    let table_styles = OdtTableStylesMap::default();
+    let mut walker = OdtWalker::new(&styles, &lists, &table_styles);
+    walker.text_budget = DecodeBudget::with_limit(512);
+    let xml = format!(
+        "<office:document-content><table:table><table:table-row><table:table-cell>{}</table:table-cell></table:table-row></table:table></office:document-content>",
+        "<text:p/>".repeat(16)
+    );
+    let mut reader = XmlReader::new(&xml);
+    let mut hit = None;
+    while let Some(ev) = reader.next_event().unwrap() {
+        let res = match ev {
+            XmlEvent::Start { name, ref attrs } => walker.on_start(name, attrs).map(|_| ()),
+            XmlEvent::Text(text) => walker.push_inline(&text),
+            XmlEvent::End(name) => walker.on_end(name),
+        };
+        if let Err(err) = res {
+            hit = Some(err);
+            break;
+        }
+    }
+    assert!(matches!(
+        hit,
+        Some(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}

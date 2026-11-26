@@ -53,7 +53,7 @@ fn ipc_roundtrips_doc_spacing_and_table_cell_paragraphs_across_docx_and_odt() {
                           "align":"center",
                           "lineSpacingPercent":150,
                           "runs":[
-                            {{"text":"굵은 빨강 ","bold":true,"italic":true,"underline":true,"strike":true,"color":"DC2626","font":"맑은 고딕","sizePt":14}},
+                            {{"text":"굵은 빨강 ","bold":true,"italic":true,"underline":true,"strike":true,"color":"DC2626","font":"맑은 고딕","sizeHalfPt":28}},
                             {{"text":"H"}},
                             {{"text":"2","script":"subscript"}}
                           ]
@@ -120,6 +120,10 @@ fn ipc_roundtrips_doc_spacing_and_table_cell_paragraphs_across_docx_and_odt() {
         );
         assert!(
             dec_resp.contains("\"color\":\"DC2626\""),
+            "{target}: {dec_resp}"
+        );
+        assert!(
+            dec_resp.contains("\"sizeHalfPt\":28"),
             "{target}: {dec_resp}"
         );
         assert!(dec_resp.contains("\"strike\":true"), "{target}: {dec_resp}");

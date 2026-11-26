@@ -54,3 +54,26 @@ fn hostile_docx_runs_and_blocks_exceeding_decode_budget_fail_closed() {
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }
+
+#[test]
+fn hostile_docx_table_paragraphs_exceeding_decode_budget_fail_closed() {
+    let mut walker = DocxWalker {
+        text_budget: DecodeBudget::with_limit(512),
+        ..Default::default()
+    };
+    let styles = HashMap::new();
+    let numbering = Numbering::default();
+    let resolver = Resolver {
+        styles: &styles,
+        numbering: &numbering,
+    };
+    let media = DocxMedia::load(&[]).unwrap();
+    let xml = format!(
+        "<w:document><w:body><w:tbl><w:tr><w:tc>{}</w:tc></w:tr></w:tbl></w:body></w:document>",
+        "<w:p/>".repeat(16)
+    );
+    assert!(matches!(
+        walk_part(&xml, &mut walker, &resolver, &media),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}

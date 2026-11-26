@@ -374,6 +374,25 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return typeof r.cloneRange === "function" ? r.cloneRange() : r;
   }
 
+  function execTextFieldEdit(execName, doc = host.document, writeClip) {
+    if (!doc || !execName) return false;
+    let ok = false;
+    try { ok = typeof doc.execCommand === "function" && Boolean(doc.execCommand(execName)); } catch { ok = false; }
+    if (ok) return true;
+    if (execName !== "cut" && execName !== "copy") return false;
+    const el = doc.activeElement;
+    const isInput = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    const txt = isInput && Number.isInteger(el.selectionStart) && Number.isInteger(el.selectionEnd)
+      ? String(el.value || "").slice(el.selectionStart, el.selectionEnd)
+      : (() => { const sel = host.getSelection?.(); return sel && !sel.isCollapsed ? sel.toString() : ""; })();
+    if (txt) {
+      if (typeof writeClip === "function") void writeClip(txt);
+      else { try { void host.navigator?.clipboard?.writeText?.(txt)?.catch?.(() => {}); } catch {} }
+    }
+    if (execName !== "cut") return Boolean(txt);
+    try { return typeof doc.execCommand === "function" && Boolean(doc.execCommand("delete")); } catch { return false; }
+  }
+
   function createWorkspaceSession(deps) {
     const {
       document,
@@ -964,12 +983,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       installActivityTracking, applyModuleContext, runClipboardCommand, insertTextAtSelection,
       handleShortcutKeydown, runForwardedShortcut, isMacClient, forwardedKeys, discardStoredState,
       applyPlatformChrome, showBootstrapError, hideBootstrapError, isDirty: hasUnsavedChanges, settle,
+      execTextFieldEdit: (execName) => execTextFieldEdit(execName, document, writeSystemClipboard),
     };
   }
 
   host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__ = createWorkspaceSession;
   host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__ = {
     AUTOSAVE_STORAGE_KEY, studioCommandApplies, latinKeyOf, shortcutComboFromEvent,
-    guessClientPlatform, isRestorableSnapshot, contentFingerprint, moduleFingerprint,
+    guessClientPlatform, isRestorableSnapshot, contentFingerprint, moduleFingerprint, execTextFieldEdit,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

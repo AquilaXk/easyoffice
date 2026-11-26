@@ -21,12 +21,15 @@
   }
 
   function isEditableTarget(target, doc) {
-    const t = target || doc?.activeElement;
-    if (!t) return false;
+    const raw = target || doc?.activeElement;
+    const t = raw?.nodeType === 3 ? raw.parentElement : raw;
+    if (!t || t === doc?.body || t === doc?.documentElement) return false;
     const tag = String(t.tagName || "").toUpperCase();
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) return true;
-    const ce = t.getAttribute?.("contenteditable");
-    return ce === "" || ce === "true" || ce === "plaintext-only" || Boolean(t.closest?.('[contenteditable="true"],[contenteditable="plaintext-only"],[contenteditable=""]'));
+    const ceEl = t.closest?.("[contenteditable]");
+    if (!ceEl) return false;
+    const ce = ceEl.getAttribute?.("contenteditable");
+    return ce === "" || ce === "true" || ce === "plaintext-only";
   }
 
   function nearestWidthOption(val) {
@@ -42,6 +45,7 @@
   }
 
   let activeHooks = null;
+  let activeDoc = null;
   let clipData = null;
 
   function mutateSelectedItem(hooks, fn, opts = {}) {
@@ -77,6 +81,7 @@
   function createBoardStyleBar(hooks, deps = {}) {
     if (hooks) activeHooks = hooks;
     const doc = deps.document || host.document;
+    if (doc) activeDoc = doc;
     const bar = deps.toolbarEl;
     let sepEl = null;
     let groupEl = null;
@@ -419,6 +424,18 @@
   }
 
   function runClipboardCommand(cmd) {
+    const doc = activeDoc || resolveHooks()?.getViewportEl?.()?.ownerDocument || host.document;
+    if (isEditableTarget(null, doc)) {
+      const execName = { "clip-cut": "cut", "clip-copy": "copy", "clip-paste": "paste" }[cmd];
+      if (!execName) return false;
+      const util = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.execTextFieldEdit;
+      if (typeof util === "function") return util(execName, doc);
+      try {
+        return typeof doc?.execCommand === "function" ? Boolean(doc.execCommand(execName)) : false;
+      } catch {
+        return false;
+      }
+    }
     if (cmd === "clip-copy") return copySelected();
     if (cmd === "clip-paste") return pasteClipboard();
     if (cmd === "clip-cut") return cutSelected();

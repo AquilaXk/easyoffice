@@ -551,6 +551,10 @@ impl TableAssembler {
         }
     }
 
+    pub fn cell_paragraphs_len(&self) -> usize {
+        self.cell_paragraphs.len()
+    }
+
     pub fn push_cell_paragraphs(&mut self, row: u32, col: u32, paragraphs: Vec<RichCellParagraph>) {
         if !paragraphs.is_empty()
             && cell_para_has_formatting(&paragraphs)

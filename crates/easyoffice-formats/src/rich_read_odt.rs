@@ -17,7 +17,10 @@ use crate::rich_document::{
     normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc, MAX_PARA_SPACING_TWIPS,
 };
 use crate::rich_image::{safe_package_path, ImageBudget};
-use crate::rich_table::{join_rich_cell_paragraphs, TableAssembler, MAX_PADDED_COLUMNS};
+use crate::rich_table::{
+    estimate_cell_paragraphs_bytes, join_rich_cell_paragraphs, run_extra_metadata_bytes,
+    TableAssembler, MAX_CELL_PARAGRAPH_ENTRIES, MAX_PADDED_COLUMNS,
+};
 use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -756,41 +759,36 @@ impl<'a> OdtWalker<'a> {
         let (row_span, col_span, repeated) = self.cell_shape;
         let repeated = repeated.min(self.padding_room()).max(1);
         let (cell_style, cell_images) = self.table_state.finish_cell();
-        self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
-        let (r0, c0) = self.table.next_coord();
-        if !spans.is_empty() {
-            self.table.push_cell_links(r0, c0, spans);
-        }
-        if let Some(paras) = rich_paras {
-            self.table.push_cell_paragraphs(r0, c0, paras.to_vec());
-        }
-        if let Some((fill, borders)) = cell_style {
-            self.table.push_cell_style(r0, c0, fill, borders);
-        }
-        if !cell_images.is_empty() {
-            self.table.push_cell_images(r0, c0, cell_images.clone());
-        }
-        self.table
-            .anchor(text.clone(), row_span, col_span, &mut self.text_budget)?;
-        for _ in 1..repeated {
+        let para_bytes = rich_paras.map_or(0, estimate_cell_paragraphs_bytes);
+        for copy_idx in 0..repeated {
             self.text_budget.charge_cell(text.len(), "ODT 표 셀")?;
             let (rk, ck) = self.table.next_coord();
             if !spans.is_empty() {
                 self.table.push_cell_links(rk, ck, spans);
             }
             if let Some(paras) = rich_paras {
-                self.table.push_cell_paragraphs(rk, ck, paras.to_vec());
+                if self.table.cell_paragraphs_len() < MAX_CELL_PARAGRAPH_ENTRIES {
+                    self.text_budget.charge(para_bytes, "ODT 표 셀 문단 서식")?;
+                    self.table.push_cell_paragraphs(rk, ck, paras.to_vec());
+                }
             }
             if let Some((fill, borders)) = cell_style {
                 self.table.push_cell_style(rk, ck, fill, borders);
             }
             if !cell_images.is_empty() {
-                for img in &cell_images {
-                    self.budget.charge(img.bytes().len())?;
+                if copy_idx > 0 {
+                    for img in &cell_images {
+                        self.budget.charge(img.bytes().len())?;
+                    }
                 }
                 self.table.push_cell_images(rk, ck, cell_images.clone());
             }
-            self.table.cell(text.clone(), &mut self.text_budget)?;
+            if copy_idx == 0 {
+                self.table
+                    .anchor(text.clone(), row_span, col_span, &mut self.text_budget)?;
+            } else {
+                self.table.cell(text.clone(), &mut self.text_budget)?;
+            }
         }
         Ok(())
     }
@@ -812,6 +810,10 @@ impl<'a> OdtWalker<'a> {
         });
         let images = p.images;
         if self.tbl_depth > 0 {
+            let extra = p.runs.iter().fold(0usize, |acc, r| {
+                acc.saturating_add(run_extra_metadata_bytes(r))
+            });
+            self.text_budget.charge_block(extra, "ODT 표 문단")?;
             self.cell_paras.push(RichParagraph {
                 runs: p.runs,
                 alignment: p.style.align,

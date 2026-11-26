@@ -255,6 +255,24 @@
     return { ok: true, ext: pre.ext, sheets };
   }
 
+  function buildImportedTable(model, state, grid) {
+    let fSeq = Number(state.nextFieldSeq) || 1;
+    const fields = grid.fields.map((spec) => ({ id: `fld-${fSeq++}`, name: spec.name, type: spec.type, validation: {} }));
+    let rSeq = Number(state.nextRecordSeq) || 1;
+    const records = [];
+    for (const row of grid.rows) {
+      const values = {};
+      for (let c = 0; c < fields.length; c += 1) {
+        const fld = fields[c];
+        const vRes = model.validateCellValue(fld, row[c], state);
+        if (!vRes.ok) return vRes;
+        values[fld.id] = vRes.value;
+      }
+      records.push({ id: `rec-${rSeq++}`, values });
+    }
+    return { ok: true, fields, records, nextFieldSeq: fSeq, nextRecordSeq: rSeq };
+  }
+
   function applyImportToState(state, grid, options = {}) {
     const model = M();
     if (!model || !state || !Array.isArray(state.tables)) return fail("데이터베이스 모델을 사용할 수 없습니다.");
@@ -265,20 +283,9 @@
     const mode = options.mode === "append" || options.mode === "replace" ? options.mode : "new";
     if (mode === "new") {
       if (state.tables.length >= MAX_TABLES) return fail(`최대 테이블 수(${MAX_TABLES}개)를 초과했습니다.`);
-      let fSeq = Number(state.nextFieldSeq) || 1;
-      const fields = grid.fields.map((spec) => ({ id: `fld-${fSeq++}`, name: spec.name, type: spec.type, validation: {} }));
-      let rSeq = Number(state.nextRecordSeq) || 1;
-      const records = [];
-      for (const row of grid.rows) {
-        const values = {};
-        for (let c = 0; c < fields.length; c += 1) {
-          const fld = fields[c];
-          const vRes = model.validateCellValue(fld, row[c], state);
-          if (!vRes.ok) return vRes;
-          values[fld.id] = vRes.value;
-        }
-        records.push({ id: `rec-${rSeq++}`, values });
-      }
+      const built = buildImportedTable(model, state, grid);
+      if (!built.ok) return built;
+      const { fields, records, nextFieldSeq, nextRecordSeq } = built;
       let tSeq = Number(state.nextTableSeq) || 1;
       const name = neutralizeFormulaText(String(options.tableName || grid.sheetName || "가져온 테이블").trim()).slice(0, MAX_HEADER_CHARS) || `테이블 ${tSeq}`;
       const newTbl = {
@@ -299,8 +306,8 @@
       state.tables.push(newTbl);
       state.activeTableId = newTbl.id;
       state.nextTableSeq = tSeq;
-      state.nextFieldSeq = fSeq;
-      state.nextRecordSeq = rSeq;
+      state.nextFieldSeq = nextFieldSeq;
+      state.nextRecordSeq = nextRecordSeq;
       return { ok: true, table: newTbl, importedCount: records.length };
     }
 
@@ -308,19 +315,9 @@
     if (!activeTbl) return fail("활성 테이블이 없습니다.");
 
     if (mode === "replace") {
-      let fSeq = Number(state.nextFieldSeq) || 1;
-      const fields = grid.fields.map((spec) => ({ id: `fld-${fSeq++}`, name: spec.name, type: spec.type, validation: {} }));
-      let rSeq = Number(state.nextRecordSeq) || 1;
-      const records = [];
-      for (const row of grid.rows) {
-        const values = {};
-        for (let c = 0; c < fields.length; c += 1) {
-          const vRes = model.validateCellValue(fields[c], row[c], state);
-          if (!vRes.ok) return vRes;
-          values[fields[c].id] = vRes.value;
-        }
-        records.push({ id: `rec-${rSeq++}`, values });
-      }
+      const built = buildImportedTable(model, state, grid);
+      if (!built.ok) return built;
+      const { fields, records, nextFieldSeq, nextRecordSeq } = built;
       activeTbl.fields = fields;
       activeTbl.records = records;
       activeTbl.view = "grid";
@@ -330,8 +327,8 @@
       activeTbl.collapsedGroups = [];
       activeTbl.kanbanFieldId = "";
       activeTbl.calendarFieldId = fields.find((f) => f.type === "date")?.id || "";
-      state.nextFieldSeq = fSeq;
-      state.nextRecordSeq = rSeq;
+      state.nextFieldSeq = nextFieldSeq;
+      state.nextRecordSeq = nextRecordSeq;
       return { ok: true, table: activeTbl, importedCount: records.length };
     }
 

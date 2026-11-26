@@ -846,8 +846,11 @@
     const menuTable = host.__EASYOFFICE_NATIVE_MENU_TABLE__;
     const { EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS } = menuTable;
     const field = document.activeElement;
-    if (Object.hasOwn(TEXT_FIELD_EDIT_COMMANDS, id) && (field?.tagName === "INPUT" || field?.tagName === "TEXTAREA")) {
-      document.execCommand(TEXT_FIELD_EDIT_COMMANDS[id]);
+    const isBoardOrSlide = activeModule === "BOARD" || activeModule === "SLIDE";
+    const ceRoot = isBoardOrSlide && (id === "edit:cut" || id === "edit:copy") ? field?.closest?.("[contenteditable]") : null;
+    const inInline = Boolean(isBoardOrSlide && (id === "edit:cut" || id === "edit:copy") && (field?.isContentEditable || (ceRoot && ceRoot.getAttribute?.("contenteditable") !== "false")));
+    if (Object.hasOwn(TEXT_FIELD_EDIT_COMMANDS, id) && (field?.tagName === "INPUT" || field?.tagName === "TEXTAREA" || inInline)) {
+      workspaceSession.execTextFieldEdit(TEXT_FIELD_EDIT_COMMANDS[id]);
       return true;
     }
     if (id === "view:palette" && modal?.open) { togglePaletteModal(modal, input); return true; }

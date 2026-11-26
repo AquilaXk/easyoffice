@@ -107,8 +107,45 @@ pub(crate) fn slice_cell_paragraphs<'a>(
     }
 }
 
+/// Additional heap-owned string bytes carried by one [`RichRun`] beyond `text` and `link`
+/// (which streaming walkers charge on push).
+#[inline]
+pub(crate) fn run_extra_metadata_bytes(run: &RichRun) -> usize {
+    let rev_bytes = run
+        .revision
+        .as_ref()
+        .map_or(0, |rev| rev.author.len().saturating_add(rev.date.len()));
+    run.font
+        .as_deref()
+        .map_or(0, str::len)
+        .saturating_add(run.color.as_deref().map_or(0, str::len))
+        .saturating_add(run.highlight.as_deref().map_or(0, str::len))
+        .saturating_add(rev_bytes)
+}
+
+/// Estimates total struct and heap byte cost of one cell's rich paragraphs for `DecodeBudget`.
+pub(crate) fn estimate_cell_paragraphs_bytes(paras: &[RichCellParagraph]) -> usize {
+    let mut total = paras
+        .len()
+        .saturating_mul(std::mem::size_of::<RichCellParagraph>());
+    for p in paras {
+        total = total.saturating_add(p.runs.len().saturating_mul(std::mem::size_of::<RichRun>()));
+        for r in &p.runs {
+            let run_bytes = r
+                .text
+                .len()
+                .saturating_add(r.link.as_deref().map_or(0, str::len))
+                .saturating_add(run_extra_metadata_bytes(r));
+            total = total.saturating_add(run_bytes);
+        }
+    }
+    total
+}
+
 /// Single-pass extraction for cell paragraphs: returns plain cell text, UTF-8 byte hyperlink spans,
-/// and (when non-default formatting is present) the structured [`RichCellParagraph`] list.
+/// and (when non-default formatting fits within cell limits) the structured [`RichCellParagraph`] list.
+/// When a cell exceeds [`MAX_PARAGRAPHS_PER_CELL`] or any paragraph exceeds [`MAX_RUNS_PER_CELL_PARA`],
+/// structured formatting drops to `None` so plain `text` retains all paragraphs without silent truncation.
 #[allow(clippy::type_complexity)]
 pub(crate) fn join_rich_cell_paragraphs(
     paras: &[RichParagraph],
@@ -136,12 +173,21 @@ pub(crate) fn join_rich_cell_paragraphs(
         + active.len().saturating_sub(1);
     let mut text = String::with_capacity(total_bytes);
     let mut spans: Vec<(u32, u32, String)> = Vec::new();
-    let mut cell_paras = Vec::with_capacity(active.len().min(MAX_PARAGRAPHS_PER_CELL));
+    let mut rich_overflow = active.len() > MAX_PARAGRAPHS_PER_CELL;
+    let mut cell_paras = if rich_overflow {
+        Vec::new()
+    } else {
+        Vec::with_capacity(active.len())
+    };
     for (p_idx, p) in active.iter().enumerate() {
         if p_idx > 0 {
             text.push('\n');
         }
-        let mut kept_runs = Vec::with_capacity(p.runs.len().min(MAX_RUNS_PER_CELL_PARA));
+        let mut kept_runs = if rich_overflow {
+            Vec::new()
+        } else {
+            Vec::with_capacity(p.runs.len().min(MAX_RUNS_PER_CELL_PARA))
+        };
         for run in &p.runs {
             if run.text.is_empty() {
                 continue;
@@ -157,11 +203,17 @@ pub(crate) fn join_rich_cell_paragraphs(
                     spans.push((s, e, url.clone()));
                 }
             }
-            if kept_runs.len() < MAX_RUNS_PER_CELL_PARA {
-                kept_runs.push(run.clone());
+            if !rich_overflow {
+                if kept_runs.len() < MAX_RUNS_PER_CELL_PARA {
+                    kept_runs.push(run.clone());
+                } else {
+                    rich_overflow = true;
+                    kept_runs = Vec::new();
+                    cell_paras = Vec::new();
+                }
             }
         }
-        if cell_paras.len() < MAX_PARAGRAPHS_PER_CELL {
+        if !rich_overflow {
             cell_paras.push(RichCellParagraph {
                 runs: kept_runs,
                 alignment: p.alignment,
@@ -169,6 +221,79 @@ pub(crate) fn join_rich_cell_paragraphs(
             });
         }
     }
-    let rich = cell_para_has_formatting(&cell_paras).then_some(cell_paras);
+    let rich = (!rich_overflow && cell_para_has_formatting(&cell_paras)).then_some(cell_paras);
     (text, spans, rich)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{RichRevision, RichRevisionKind};
+
+    #[test]
+    fn overflow_paragraphs_or_runs_drop_rich_to_none_while_keeping_all_plain_text() {
+        let mut paras: Vec<RichParagraph> = (0..=MAX_PARAGRAPHS_PER_CELL)
+            .map(|i| RichParagraph {
+                runs: vec![RichRun {
+                    text: format!("p{i}"),
+                    bold: true,
+                    ..RichRun::default()
+                }],
+                ..RichParagraph::default()
+            })
+            .collect();
+        let (text, _spans, rich) = join_rich_cell_paragraphs(&paras);
+        assert!(rich.is_none());
+        assert!(text.ends_with(&format!("p{MAX_PARAGRAPHS_PER_CELL}")));
+        assert_eq!(text.lines().count(), MAX_PARAGRAPHS_PER_CELL + 1);
+
+        paras.truncate(1);
+        paras[0].runs = (0..=MAX_RUNS_PER_CELL_PARA)
+            .map(|i| RichRun {
+                text: if i == MAX_RUNS_PER_CELL_PARA {
+                    "TAIL".to_string()
+                } else {
+                    "a".to_string()
+                },
+                italic: true,
+                ..RichRun::default()
+            })
+            .collect();
+        let (run_text, _spans, run_rich) = join_rich_cell_paragraphs(&paras);
+        assert!(run_rich.is_none());
+        assert!(run_text.ends_with("TAIL"));
+        assert_eq!(run_text.len(), MAX_RUNS_PER_CELL_PARA + 4);
+    }
+
+    #[test]
+    fn estimate_cell_paragraphs_bytes_counts_structs_and_strings() {
+        let paras = vec![RichCellParagraph {
+            runs: vec![RichRun {
+                text: "abc".to_string(),
+                link: Some("https://example.org".to_string()),
+                font: Some("Pretendard".to_string()),
+                color: Some("112233".to_string()),
+                highlight: Some("FFFF00".to_string()),
+                revision: Some(RichRevision {
+                    id: 1,
+                    kind: RichRevisionKind::Insert,
+                    author: "QA".to_string(),
+                    date: "2026-11-26".to_string(),
+                }),
+                ..RichRun::default()
+            }],
+            alignment: Some(RichAlignment::Center),
+            line_spacing_percent: Some(150),
+        }];
+        let expected = std::mem::size_of::<RichCellParagraph>()
+            + std::mem::size_of::<RichRun>()
+            + 3
+            + "https://example.org".len()
+            + "Pretendard".len()
+            + 6
+            + 6
+            + 2
+            + 10;
+        assert_eq!(estimate_cell_paragraphs_bytes(&paras), expected);
+    }
 }

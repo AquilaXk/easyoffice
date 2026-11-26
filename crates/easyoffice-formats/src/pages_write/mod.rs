@@ -112,6 +112,7 @@ pub fn pages_write_loss(doc: &RichDocument) -> PagesWriteLoss {
                         })
                         .count();
                     loss.formats += t.validated_cell_images().len();
+                    loss.formats += t.validated_cell_paragraphs().len();
                 }
             }
             RichBlock::Image(_) => {}

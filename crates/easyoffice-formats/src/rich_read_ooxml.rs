@@ -16,7 +16,10 @@ use crate::rich_read_numbering::{read_numbering, Numbering};
 use crate::rich_read_page_setup::{
     binding_of, fitting_setup, page_gutter, page_margins, page_paper,
 };
-use crate::rich_table::{join_rich_cell_paragraphs, TableAssembler};
+use crate::rich_table::{
+    estimate_cell_paragraphs_bytes, join_rich_cell_paragraphs, run_extra_metadata_bytes,
+    TableAssembler, MAX_CELL_PARAGRAPH_ENTRIES,
+};
 use crate::rich_xml::{check_paragraph_depth, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -558,7 +561,13 @@ impl DocxWalker {
                         self.table.push_cell_links(row, col, &spans);
                     }
                     if let Some(paras) = rich_paras {
-                        self.table.push_cell_paragraphs(row, col, paras);
+                        if self.table.cell_paragraphs_len() < MAX_CELL_PARAGRAPH_ENTRIES {
+                            self.text_budget.charge(
+                                estimate_cell_paragraphs_bytes(&paras),
+                                "DOCX 표 셀 문단 서식",
+                            )?;
+                            self.table.push_cell_paragraphs(row, col, paras);
+                        }
                     }
                     self.table.push_cell_style(row, col, fill, borders);
                     if !images.is_empty() {
@@ -661,7 +670,12 @@ impl DocxWalker {
         let sect_end = p.sect_end.take();
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
-            self.cell_paras.push(resolver.finish(p));
+            let para = resolver.finish(p);
+            let extra = para.runs.iter().fold(0usize, |acc, r| {
+                acc.saturating_add(run_extra_metadata_bytes(r))
+            });
+            self.text_budget.charge_block(extra, "DOCX 표 문단")?;
+            self.cell_paras.push(para);
         } else if !p.zones.is_empty() {
             let mut zones = std::mem::take(&mut p.zones);
             let last_jc = p.jc.take().unwrap_or_else(|| "left".to_string());
