@@ -10,15 +10,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { escapeWorkflowCommand } from "./workflow-command.mjs";
 
 const MAX_REPORT_BYTES = 16 * 1024 * 1024;
 
 function escapeMarkdownCell(value) {
   return String(value ?? "").replace(/\r?\n/g, " ").replaceAll("|", "\\|");
-}
-
-function escapeWorkflowCommand(value) {
-  return String(value ?? "").replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
 export function parseCargoAuditJson(rawText, label) {
@@ -169,7 +166,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   try {
     runCli(process.argv.slice(2));
   } catch (err) {
-    console.error(`::error::${err.message}`);
+    console.error(`::error::${escapeWorkflowCommand(err?.message ?? err)}`);
     process.exit(1);
   }
 }

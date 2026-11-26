@@ -19,14 +19,42 @@ import {
   releaseFileNames,
   signedVersion,
 } from "./release-assets.mjs";
+import { escapeWorkflowCommand } from "./workflow-command.mjs";
 
 export const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_RELEASE_PAGES = 20;
 const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
-const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-class TransientVerificationError extends Error {}
+export class TransientVerificationError extends Error {}
+
+export async function retryTransient(
+  fn,
+  { maxAttempts = 4, retryDelayMs = 2000, sleepImpl = defaultSleep } = {},
+) {
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error(`invalid maxAttempts '${maxAttempts}'`);
+  }
+  if (typeof retryDelayMs !== "number" || !Number.isFinite(retryDelayMs) || retryDelayMs < 0) {
+    throw new Error(`invalid retryDelayMs '${retryDelayMs}'`);
+  }
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      lastError = err;
+      if (!(err instanceof TransientVerificationError) || attempt >= maxAttempts) {
+        throw err;
+      }
+      if (retryDelayMs > 0) {
+        await sleepImpl(retryDelayMs * attempt);
+      }
+    }
+  }
+  throw lastError;
+}
 
 function compareStrings(a, b) {
   if (a < b) return -1;
@@ -193,7 +221,7 @@ export function verifyReleaseRecord({
 
   for (const name of expectedAssets) {
     const asset = assetByName.get(name);
-    if (asset.state !== undefined && asset.state !== "uploaded") {
+    if (asset.state !== "uploaded") {
       throw new Error(`release ${expectedTag} asset '${name}' is incomplete (state=${asset.state})`);
     }
     if (typeof asset.size !== "number" || asset.size <= 0) {
@@ -466,9 +494,8 @@ export async function verifyReleaseOnGitHub({
   const expectedVersion = tag.slice(1);
   const apiBase = `https://api.github.com/repos/${repo}`;
 
-  let lastError;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
+  return retryTransient(
+    async () => {
       const release = await findReleaseByTag({
         apiBase,
         tag,
@@ -505,43 +532,41 @@ export async function verifyReleaseOnGitHub({
         fs.appendFileSync(summaryPath, `${formatAssetSummaryMarkdown(release)}\n`);
       }
       return { result, release };
-    } catch (err) {
-      lastError = err;
-      if (!(err instanceof TransientVerificationError) || attempt >= maxAttempts) {
-        throw err;
-      }
-      if (retryDelayMs > 0) {
-        await sleepImpl(retryDelayMs * attempt);
-      }
-    }
-  }
-  throw lastError;
+    },
+    { maxAttempts, retryDelayMs, sleepImpl },
+  );
 }
 
-function parseCliArgs(argv) {
-  const args = { repo: process.env.GITHUB_REPOSITORY || "", tag: "", expectDraft: undefined };
+export function parseCliArgs(argv, env = process.env) {
+  const args = { repo: env?.GITHUB_REPOSITORY || "", tag: "", expectedDraft: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--repo" && argv[i + 1]) args.repo = argv[++i];
     else if (arg === "--tag" && argv[i + 1]) args.tag = argv[++i];
-    else if (arg === "--expect-draft") args.expectDraft = true;
-    else if (arg === "--expect-public") args.expectDraft = false;
+    else if (arg === "--expect-draft") args.expectedDraft = true;
+    else if (arg === "--expect-public") args.expectedDraft = false;
     else if (arg === "--draft" && argv[i + 1]) {
       const val = argv[++i];
       if (val !== "true" && val !== "false") throw new Error(`invalid --draft '${val}' (expected true|false)`);
-      args.expectDraft = val === "true";
+      args.expectedDraft = val === "true";
     }
     else throw new Error(`unknown or incomplete argument '${arg}'`);
   }
   if (!args.repo || !args.tag) {
-    throw new Error("usage: post-release-check.mjs --repo <owner/repo> --tag <vX.Y.Z> [--expect-draft|--expect-public]");
+    throw new Error(
+      "usage: post-release-check.mjs --repo <owner/repo> --tag <vX.Y.Z> [--expect-draft|--expect-public|--draft <true|false>]",
+    );
   }
   return args;
 }
 
 async function main() {
   const opts = parseCliArgs(process.argv.slice(2));
-  const { result } = await verifyReleaseOnGitHub(opts);
+  const { result } = await verifyReleaseOnGitHub({
+    repo: opts.repo,
+    tag: opts.tag,
+    expectedDraft: opts.expectedDraft,
+  });
   console.log(
     `Verified release ${result.tag} (draft=${result.draft}): ${result.assetCount} assets, ${result.manifestKeys} updater keys, ${result.checksumCount} checksums.`,
   );
@@ -549,7 +574,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((err) => {
-    console.error(`::error::${err.message}`);
+    console.error(`::error::${escapeWorkflowCommand(err?.message ?? err)}`);
     process.exit(1);
   });
 }

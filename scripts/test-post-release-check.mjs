@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   MANIFEST_FILE,
   PLATFORMS,
@@ -17,6 +19,7 @@ import {
   expectedReleaseAssetNames,
   fetchGitHubAssetText,
   formatAssetSummaryMarkdown,
+  parseCliArgs,
   readResponseTextBounded,
   validateChecksumsPayload,
   validateManifestPayload,
@@ -163,6 +166,36 @@ test("rejects missing release asset, incomplete upload state, or zero-byte uploa
         expectedVersion: "0.2.3",
       }),
     /incomplete \(state=starter\)/,
+  );
+
+  const missingState = makeRelease();
+  delete missingState.assets[0].state;
+  assert.throws(
+    () =>
+      verifyReleaseRecord({
+        release: missingState,
+        manifestText,
+        sumsText,
+        latestRelease: { tag_name: "v0.2.3" },
+        expectedDraft: false,
+        expectedVersion: "0.2.3",
+      }),
+    /incomplete \(state=undefined\)/,
+  );
+
+  const nullState = makeRelease();
+  nullState.assets[0].state = null;
+  assert.throws(
+    () =>
+      verifyReleaseRecord({
+        release: nullState,
+        manifestText,
+        sumsText,
+        latestRelease: { tag_name: "v0.2.3" },
+        expectedDraft: false,
+        expectedVersion: "0.2.3",
+      }),
+    /incomplete \(state=null\)/,
   );
 
   const zeroByte = makeRelease();
@@ -542,4 +575,190 @@ test("verifyReleaseOnGitHub rejects malformed Link pagination URLs containing co
       /refusing non-GitHub API pagination URL/,
     );
   }
+});
+
+test("parseCliArgs parses --draft, --expect-draft, and --expect-public into expectedDraft", () => {
+  assert.deepEqual(
+    parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--draft", "true"], {}),
+    { repo: "AquilaXk/easyoffice", tag: "v0.2.3", expectedDraft: true },
+  );
+  assert.deepEqual(
+    parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--draft", "false"], {}),
+    { repo: "AquilaXk/easyoffice", tag: "v0.2.3", expectedDraft: false },
+  );
+  assert.deepEqual(
+    parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--expect-draft"], {}),
+    { repo: "AquilaXk/easyoffice", tag: "v0.2.3", expectedDraft: true },
+  );
+  assert.deepEqual(
+    parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--expect-public"], {}),
+    { repo: "AquilaXk/easyoffice", tag: "v0.2.3", expectedDraft: false },
+  );
+  assert.deepEqual(
+    parseCliArgs(["--tag", "v0.2.3"], { GITHUB_REPOSITORY: "AquilaXk/easyoffice" }),
+    { repo: "AquilaXk/easyoffice", tag: "v0.2.3", expectedDraft: undefined },
+  );
+
+  assert.throws(() => parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--draft", "yes"], {}), /invalid --draft/);
+  assert.throws(() => parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--draft"], {}), /incomplete argument/);
+  assert.throws(() => parseCliArgs(["--repo", "AquilaXk/easyoffice"], {}), /usage:/);
+  assert.throws(() => parseCliArgs(["--tag", "v0.2.3"], {}), /usage:/);
+  assert.throws(() => parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", "--bogus"], {}), /unknown/);
+});
+
+test("CLI draft/public options propagate expectedDraft to verifyReleaseOnGitHub and reject mismatches", async () => {
+  const manifest = makeManifestText("0.2.3");
+  const sums = makeChecksumsText(manifest);
+  const draftRelease = makeRelease({ tag: "v0.2.3", draft: true });
+  const publicRelease = makeRelease({ tag: "v0.2.3", draft: false });
+
+  for (const flagArgs of [["--draft", "false"], ["--expect-public"]]) {
+    const opts = parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", ...flagArgs], {});
+    let listCalled = false;
+    const draftOnlyFetch = async (url) => {
+      if (url.endsWith("/releases/tags/v0.2.3")) return new Response("Not Found", { status: 404 });
+      if (url.includes("/releases?per_page=100")) {
+        listCalled = true;
+        return new Response(JSON.stringify([draftRelease]), { status: 200 });
+      }
+      return new Response("unexpected", { status: 404 });
+    };
+    await assert.rejects(
+      () =>
+        verifyReleaseOnGitHub({
+          repo: opts.repo,
+          tag: opts.tag,
+          expectedDraft: opts.expectedDraft,
+          token: "tok",
+          summaryPath: "",
+          fetchImpl: draftOnlyFetch,
+          maxAttempts: 2,
+          retryDelayMs: 0,
+        }),
+      /404/,
+    );
+    assert.equal(listCalled, false, `${flagArgs.join(" ")} must disable draft list fallback`);
+
+    let tagAttempts = 0;
+    const directDraftFetch = async (url) => {
+      if (url.endsWith("/releases/tags/v0.2.3")) {
+        tagAttempts += 1;
+        return new Response(JSON.stringify(draftRelease), { status: 200 });
+      }
+      if (url.includes("/releases/assets/")) {
+        const idx = Number(url.split("/").pop()) - 1;
+        const name = draftRelease.assets[idx].name;
+        if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
+        if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+      }
+      return new Response("unexpected", { status: 404 });
+    };
+    await assert.rejects(
+      () =>
+        verifyReleaseOnGitHub({
+          repo: opts.repo,
+          tag: opts.tag,
+          expectedDraft: opts.expectedDraft,
+          token: "tok",
+          summaryPath: "",
+          fetchImpl: directDraftFetch,
+          maxAttempts: 3,
+          retryDelayMs: 0,
+        }),
+      /draft=true, expected draft=false/,
+    );
+    assert.equal(tagAttempts, 1, `${flagArgs.join(" ")} draft mismatch must fail without retry`);
+  }
+
+  for (const flagArgs of [["--draft", "true"], ["--expect-draft"]]) {
+    const opts = parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", ...flagArgs], {});
+    let tagAttempts = 0;
+    const publishedFetch = async (url) => {
+      if (url.endsWith("/releases/tags/v0.2.3")) {
+        tagAttempts += 1;
+        return new Response(JSON.stringify(publicRelease), { status: 200 });
+      }
+      if (url.endsWith("/releases/latest")) {
+        return new Response(JSON.stringify(publicRelease), { status: 200 });
+      }
+      if (url.includes("/releases/assets/")) {
+        const idx = Number(url.split("/").pop()) - 1;
+        const name = publicRelease.assets[idx].name;
+        if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
+        if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+      }
+      return new Response("unexpected", { status: 404 });
+    };
+    await assert.rejects(
+      () =>
+        verifyReleaseOnGitHub({
+          repo: opts.repo,
+          tag: opts.tag,
+          expectedDraft: opts.expectedDraft,
+          token: "tok",
+          summaryPath: "",
+          fetchImpl: publishedFetch,
+          maxAttempts: 3,
+          retryDelayMs: 0,
+        }),
+      /draft=false, expected draft=true/,
+    );
+    assert.equal(tagAttempts, 1, `${flagArgs.join(" ")} public mismatch must fail without retry`);
+
+    const matchedDraft = await verifyReleaseOnGitHub({
+      repo: opts.repo,
+      tag: opts.tag,
+      expectedDraft: opts.expectedDraft,
+      token: "tok",
+      summaryPath: "",
+      fetchImpl: async (url) => {
+        if (url.endsWith("/releases/tags/v0.2.3")) return new Response("Not Found", { status: 404 });
+        if (url.endsWith("/releases?per_page=100")) return new Response(JSON.stringify([draftRelease]), { status: 200 });
+        if (url.includes("/releases/assets/")) {
+          const idx = Number(url.split("/").pop()) - 1;
+          const name = draftRelease.assets[idx].name;
+          if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
+          if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+        }
+        return new Response("unexpected", { status: 404 });
+      },
+      retryDelayMs: 0,
+    });
+    assert.equal(matchedDraft.result.draft, true);
+  }
+
+  for (const flagArgs of [["--draft", "false"], ["--expect-public"]]) {
+    const opts = parseCliArgs(["--repo", "AquilaXk/easyoffice", "--tag", "v0.2.3", ...flagArgs], {});
+    const matchedPublic = await verifyReleaseOnGitHub({
+      repo: opts.repo,
+      tag: opts.tag,
+      expectedDraft: opts.expectedDraft,
+      token: "tok",
+      summaryPath: "",
+      fetchImpl: async (url) => {
+        if (url.endsWith("/releases/tags/v0.2.3")) return new Response(JSON.stringify(publicRelease), { status: 200 });
+        if (url.endsWith("/releases/latest")) return new Response(JSON.stringify(publicRelease), { status: 200 });
+        if (url.includes("/releases/assets/")) {
+          const idx = Number(url.split("/").pop()) - 1;
+          const name = publicRelease.assets[idx].name;
+          if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
+          if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+        }
+        return new Response("unexpected", { status: 404 });
+      },
+      retryDelayMs: 0,
+    });
+    assert.equal(matchedPublic.result.draft, false);
+  }
+});
+
+test("post-release-check CLI escapes %, CR, and LF in ::error:: output", () => {
+  const scriptPath = fileURLToPath(new URL("./post-release-check.mjs", import.meta.url));
+  const res = spawnSync(
+    process.execPath,
+    [scriptPath, "--repo", "AquilaXk/bad%repo\r\n::warning::injected", "--tag", "v0.2.3"],
+    { encoding: "utf8" },
+  );
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /^::error::invalid repository 'AquilaXk\/bad%25repo%0D%0A::warning::injected'\r?\n$/);
 });

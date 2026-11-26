@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { fetchGitHubJson } from "./post-release-check.mjs";
+import { escapeWorkflowCommand } from "./workflow-command.mjs";
 
 const SELF_JOB_NAMES = new Set(["release-timings", "Report Release Timing & Regressions"]);
 const PREPARE_JOB_NAMES = new Set([
@@ -24,10 +25,6 @@ const MAX_CANDIDATE_RUNS = 5;
 
 function escapeMarkdownCell(value) {
   return String(value ?? "").replace(/\r?\n/g, " ").replaceAll("|", "\\|");
-}
-
-function escapeWorkflowCommand(value) {
-  return String(value ?? "").replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
 export function elapsedSeconds(startedAt, completedAt) {

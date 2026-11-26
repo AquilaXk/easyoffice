@@ -594,6 +594,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
+
       - name: Setup Node.js for timing report
         uses: ./.github/actions/setup-node-ci
         with:

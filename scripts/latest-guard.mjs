@@ -12,12 +12,16 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MANIFEST_FILE, SUMS_FILE } from "./release-assets.mjs";
 import {
+  TransientVerificationError,
+  defaultSleep,
   fetchGitHubAssetText,
   fetchGitHubJson,
   fetchGitHubPaginatedJson,
   formatAssetSummaryMarkdown,
+  retryTransient,
   verifyReleaseRecord,
 } from "./post-release-check.mjs";
+import { escapeWorkflowCommand } from "./workflow-command.mjs";
 
 const STABLE_SEMVER_TAG_RE = /^v(\d+)\.(\d+)\.(\d+)$/;
 
@@ -50,7 +54,7 @@ export function findExpectedLatestRelease(releases) {
   return candidates[0];
 }
 
-export function evaluateLatestState({ releases, latestRelease, manifestText, sumsText }) {
+function assertLatestReleaseMatchesExpected(releases, latestRelease) {
   const expectedLatest = findExpectedLatestRelease(releases);
   if (!latestRelease || typeof latestRelease.tag_name !== "string") {
     throw new Error("/releases/latest returned no release");
@@ -59,10 +63,15 @@ export function evaluateLatestState({ releases, latestRelease, manifestText, sum
     throw new Error(`/releases/latest '${latestRelease.tag_name}' cannot be draft or prerelease`);
   }
   if (latestRelease.tag_name !== expectedLatest.tag_name) {
-    throw new Error(
+    throw new TransientVerificationError(
       `/releases/latest points to '${latestRelease.tag_name}', expected highest published stable release '${expectedLatest.tag_name}'`,
     );
   }
+  return expectedLatest;
+}
+
+export function evaluateLatestState({ releases, latestRelease, manifestText, sumsText }) {
+  const expectedLatest = assertLatestReleaseMatchesExpected(releases, latestRelease);
   const result = verifyReleaseRecord({
     release: latestRelease,
     manifestText,
@@ -79,28 +88,42 @@ export async function runLatestGuard({
   token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "",
   summaryPath = process.env.GITHUB_STEP_SUMMARY || "",
   fetchImpl = fetch,
+  maxAttempts = 4,
+  retryDelayMs = 2000,
+  sleepImpl = defaultSleep,
 } = {}) {
   if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
     throw new Error(`invalid repository '${repo}'`);
   }
   const apiBase = `https://api.github.com/repos/${repo}`;
-  const [releases, latestRelease] = await Promise.all([
-    fetchGitHubPaginatedJson(`${apiBase}/releases?per_page=100`, token, fetchImpl),
-    fetchGitHubJson(`${apiBase}/releases/latest`, token, fetchImpl),
-  ]);
 
-  const assetsByName = new Map((latestRelease?.assets ?? []).map((a) => [a.name, a]));
-  const manifestAsset = assetsByName.get(MANIFEST_FILE);
-  const sumsAsset = assetsByName.get(SUMS_FILE);
-  if (!manifestAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${MANIFEST_FILE}`);
-  if (!sumsAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${SUMS_FILE}`);
+  const { evaluated, latestRelease } = await retryTransient(
+    async () => {
+      const [releases, latestRelease] = await Promise.all([
+        fetchGitHubPaginatedJson(`${apiBase}/releases?per_page=100`, token, fetchImpl),
+        fetchGitHubJson(`${apiBase}/releases/latest`, token, fetchImpl),
+      ]);
+      assertLatestReleaseMatchesExpected(releases, latestRelease);
 
-  const [manifestText, sumsText] = await Promise.all([
-    fetchGitHubAssetText(manifestAsset, token, fetchImpl),
-    fetchGitHubAssetText(sumsAsset, token, fetchImpl),
-  ]);
+      const assetsByName = new Map((latestRelease?.assets ?? []).map((a) => [a.name, a]));
+      const manifestAsset = assetsByName.get(MANIFEST_FILE);
+      const sumsAsset = assetsByName.get(SUMS_FILE);
+      if (!manifestAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${MANIFEST_FILE}`);
+      if (!sumsAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${SUMS_FILE}`);
 
-  const evaluated = evaluateLatestState({ releases, latestRelease, manifestText, sumsText });
+      const [manifestText, sumsText] = await Promise.all([
+        fetchGitHubAssetText(manifestAsset, token, fetchImpl),
+        fetchGitHubAssetText(sumsAsset, token, fetchImpl),
+      ]);
+
+      return {
+        evaluated: evaluateLatestState({ releases, latestRelease, manifestText, sumsText }),
+        latestRelease,
+      };
+    },
+    { maxAttempts, retryDelayMs, sleepImpl },
+  );
+
   if (summaryPath) {
     const md = [
       `## Latest Release Guard (${evaluated.expectedTag})`,
@@ -123,7 +146,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       );
     })
     .catch((err) => {
-      console.error(`::error::${err.message}`);
+      console.error(`::error::${escapeWorkflowCommand(err?.message ?? err)}`);
       process.exit(1);
     });
 }

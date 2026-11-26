@@ -210,6 +210,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-release-timing-report.mjs",
   "scripts/cargo-audit-report.mjs",
   "scripts/test-cargo-audit-report.mjs",
+  "scripts/workflow-command.mjs",
+  "scripts/test-workflow-command.mjs",
   "scripts/test-workflow-refs.mjs",
   "scripts/verify-linux-bundles.mjs",
   "scripts/test-verify-linux-bundles.mjs",

@@ -158,6 +158,17 @@ test("workflow job dependency and release-guard trigger contracts hold", () => {
   );
 
   const release = readText(path.join(REPO, ".github/workflows/release.yml"));
+  const releaseJobs = release.slice(release.indexOf("\njobs:\n") + 1).split(/\n(?= {2}[a-z][\w-]*:\s*(?:#.*)?\n)/).slice(1);
+  assert.equal(releaseJobs.length, 6, "release.yml must define the 6 release jobs");
+  for (const job of releaseJobs) {
+    const jobName = job.match(/^ {2}([\w-]+):/)[1];
+    assert.match(
+      job,
+      /uses:\s*\.\/\.github\/actions\/assert-sha[\s\S]*?expected-sha:\s*\$\{\{\s*github\.sha\s*\}\}/,
+      `release.yml job '${jobName}' must verify checked-out commit via ./.github/actions/assert-sha`,
+    );
+  }
+
   const timingsBlock = release.slice(release.indexOf("\n  release-timings:"));
   assert.match(
     timingsBlock,
