@@ -582,7 +582,7 @@ jobs:
   release-timings:
     name: Report Release Timing & Regressions
     needs: [release-macos, build-windows-release, build-linux-release, publish-release]
-    if: always() && needs.release-macos.result != 'skipped'
+    if: always() && !cancelled() && needs.release-macos.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

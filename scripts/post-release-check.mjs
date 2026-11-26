@@ -351,28 +351,58 @@ export async function fetchGitHubPaginatedJson(initialUrl, token, fetchImpl = fe
   return items;
 }
 
+const MAX_ASSET_REDIRECTS = 3;
+
+function validateHttpsRedirectUrl(location, assetName) {
+  const trimmed = typeof location === "string" ? location.trim() : "";
+  if (!trimmed) {
+    throw new Error(`asset '${assetName}' redirect missing Location header`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`asset '${assetName}' redirect has invalid Location URL '${trimmed}'`);
+  }
+  if (parsed.protocol !== "https:" || !parsed.hostname) {
+    throw new Error(`asset '${assetName}' redirect refuses non-HTTPS Location URL '${trimmed}'`);
+  }
+  if (!/^https:\/\//i.test(trimmed)) {
+    throw new Error(`asset '${assetName}' redirect has malformed HTTPS Location URL '${trimmed}'`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`asset '${assetName}' redirect refuses credentials in Location URL`);
+  }
+  return trimmed;
+}
+
 export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
   if (!asset?.url) throw new Error(`asset '${asset?.name ?? "(unknown)"}' has no API url`);
-  const first = await fetchImpl(asset.url, {
-    headers: githubHeaders(token, "application/octet-stream"),
-    redirect: "manual",
-  });
-  let finalRes = first;
-  if (first.status >= 300 && first.status < 400) {
-    const location = first.headers.get("location");
-    if (!location) throw new Error(`asset '${asset.name}' redirect missing Location header`);
-    finalRes = await fetchImpl(location, {
-      headers: { "User-Agent": "easyoffice-release-verifier" },
-    });
+  let currentUrl = asset.url;
+  let res;
+  for (let redirects = 0; ; redirects += 1) {
+    const headers =
+      redirects === 0
+        ? githubHeaders(token, "application/octet-stream")
+        : { "User-Agent": "easyoffice-release-verifier" };
+    res = await fetchImpl(currentUrl, { headers, redirect: "manual" });
+    if (res.status < 300 || res.status >= 400) break;
+    const location = res.headers?.get?.("location");
+    await res.body?.cancel?.().catch(() => {});
+    if (redirects >= MAX_ASSET_REDIRECTS) {
+      throw new Error(`asset '${asset.name}' exceeded ${MAX_ASSET_REDIRECTS} redirects`);
+    }
+    currentUrl = validateHttpsRedirectUrl(location, asset.name);
   }
-  if (!finalRes.ok) {
-    const message = `downloading '${asset.name}' failed (${finalRes.status})`;
-    if (finalRes.status === 404 || finalRes.status >= 500) {
+  if (!res.ok) {
+    await res.body?.cancel?.().catch(() => {});
+    const message = `downloading '${asset.name}' failed (${res.status})`;
+    if (res.status === 404 || res.status >= 500) {
       throw new TransientVerificationError(message);
     }
     throw new Error(message);
   }
-  return readResponseTextBounded(finalRes, `asset '${asset.name}'`);
+  return readResponseTextBounded(res, `asset '${asset.name}'`);
 }
 
 async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetchImpl }) {

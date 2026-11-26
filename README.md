@@ -120,13 +120,13 @@ AppImage는 설치가 필요 없지만 `chmod +x EasyOffice-linux-x64.AppImage` 
 
 ## 성능
 
-Apple M4 Pro release 빌드 실측 수치입니다. `HWP → PDF 내보내기`는 `scripts/bench-run.mjs --suite hwp`(5회 중앙값, Rust `1.98.1`), 엔진 경로는 `cargo run --release -p easyoffice-app -- --self-test`(3회 중앙값, Rust `1.93.1`) 기준입니다. 전체 측정 조건과 회귀 비교는 [성능 문서](docs/performance.md)에 있습니다.
+Apple M4 Pro release 빌드 실측 수치입니다. `HWP → PDF 내보내기`는 `scripts/bench-run.mjs` (`--suite hwp`/`synthetic`, 5회 중앙값, Rust `1.98.1`), 엔진 경로는 `cargo run --release -p easyoffice-app -- --self-test`(3회 중앙값, Rust `1.93.1`) 기준입니다. 전체 측정 조건과 회귀 비교는 [성능 문서](docs/performance.md)에 있습니다.
 
 | 항목 | 측정 경로 | EasyOffice 실측 | 비교 기준 / 비고 |
 | --- | --- | ---: | --- |
-| HWP → PDF 내보내기 (`biz_plan.hwp`, 6쪽) | `bench-run.mjs` (§4.1 / §2.1) | **67 ms** (최적화 전 `80 ms`) | 참조 앱 `710 ms` 대비 **8.8~10.7배** (§2.1 기준) |
-| HWP → PDF 내보내기 (`kps-ai.hwp`, 77쪽) | `bench-run.mjs` (§4.1 / §2.1) | **700 ms** (최적화 전 `798 ms`) | 참조 앱 `11,389 ms` 대비 **7.7~14배** (§2.1 벽시계 비) |
-| HWP → PDF 내보내기 (합성 300쪽) | `bench-run.mjs` (§4.1 / §2.1) | **1,194 ms** (최적화 전 `1,462 ms`) | 참조 앱 `97,410 ms` 대비 **약 67~70배** (§2.1 기준) |
+| HWP → PDF 내보내기 (`biz_plan.hwp`, 6쪽) | `bench-run.mjs` (§4.1 / §2.1) | **67 ms** (§4.1 최적화 전 `81 ms`) | §2.1 참조 앱 `710 ms` 대비 **8.8~10.7배** (§2.1 우리 `80 ms` 기준) |
+| HWP → PDF 내보내기 (`kps-ai.hwp`, 77쪽) | `bench-run.mjs` (§4.1 / §2.1) | **700 ms** (§4.1 최적화 전 `864 ms`) | §2.1 참조 앱 `11,389 ms` 대비 **7.7~14배** (§2.1 우리 `798 ms` 기준) |
+| HWP → PDF 내보내기 (합성 300쪽) | `bench-run.mjs` (§4.1 / §2.1) | **1,194 ms** (§4.1 최적화 전 `1,399 ms`) | §2.1 참조 앱 `97,410 ms` 대비 **약 67~70배** (§2.1 우리 `1,462 ms` 기준) |
 | 하드웨어 CRC-32 (`crc32_hardware_1mib`) | `--self-test` (§7.2) | **108 µs** | 기준 구현 `2,180 µs` 대비 **19.95배** |
 | Deflate/Zlib 왕복 (`deflate_zlib_roundtrip`) | `--self-test` (§7.2) | **45 µs** | 기준 구현 `250 µs` 대비 **5.91배** |
 | 시트 증분 재계산 (`sheet_recalc_10k_rows`, 5만 셀) | `--self-test` (§7.2) | **4,235 µs** | 기준 구현 `26,791 µs` 대비 **6.31배** |

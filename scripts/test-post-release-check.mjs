@@ -15,6 +15,7 @@ import {
   MAX_PAYLOAD_BYTES,
   expectedManifestUrls,
   expectedReleaseAssetNames,
+  fetchGitHubAssetText,
   formatAssetSummaryMarkdown,
   readResponseTextBounded,
   validateChecksumsPayload,
@@ -359,4 +360,105 @@ test("verifyReleaseOnGitHub paginates /releases list when verifying a draft rele
   });
   assert.equal(result.draft, true);
   assert.equal(result.assetCount, 18);
+});
+
+test("fetchGitHubAssetText rejects non-HTTPS, relative, malformed, and credentialed redirect Locations without following them", async () => {
+  const asset = {
+    name: MANIFEST_FILE,
+    url: "https://api.github.com/repos/AquilaXk/easyoffice/releases/assets/1",
+  };
+  const badLocations = [
+    { location: "", expected: /missing Location header/ },
+    { location: "http://objects.githubusercontent.com/dl/latest.json", expected: /non-HTTPS Location URL/ },
+    { location: "file:///etc/passwd", expected: /non-HTTPS Location URL/ },
+    { location: "ftp://objects.githubusercontent.com/dl/latest.json", expected: /non-HTTPS Location URL/ },
+    { location: "javascript:alert(1)", expected: /non-HTTPS Location URL/ },
+    { location: "/relative/dl/latest.json", expected: /invalid Location URL/ },
+    { location: "//objects.githubusercontent.com/dl/latest.json", expected: /invalid Location URL/ },
+    { location: "not a valid url", expected: /invalid Location URL/ },
+    { location: "https://", expected: /invalid Location URL/ },
+    { location: "https:objects.githubusercontent.com/dl/latest.json", expected: /malformed HTTPS Location URL/ },
+    { location: "https://user:pass@objects.githubusercontent.com/dl/latest.json", expected: /credentials in Location URL/ },
+  ];
+
+  for (const { location, expected } of badLocations) {
+    const seenUrls = [];
+    const mockFetch = async (url) => {
+      seenUrls.push(url);
+      const headers = location === "" ? undefined : { location };
+      return new Response(null, { status: 302, headers });
+    };
+    await assert.rejects(() => fetchGitHubAssetText(asset, "tok", mockFetch), expected);
+    assert.deepEqual(seenUrls, [asset.url], `must not follow bad Location '${location}'`);
+  }
+});
+
+test("fetchGitHubAssetText validates secondary redirects and caps excessive redirect chains", async () => {
+  const asset = {
+    name: SUMS_FILE,
+    url: "https://api.github.com/repos/AquilaXk/easyoffice/releases/assets/2",
+  };
+  const seen = [];
+  const downgradeFetch = async (url) => {
+    seen.push(url);
+    if (url === asset.url) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://objects.githubusercontent.com/cdn-1" },
+      });
+    }
+    if (url === "https://objects.githubusercontent.com/cdn-1") {
+      return new Response(null, {
+        status: 307,
+        headers: { location: "http://insecure.example.com/payload" },
+      });
+    }
+    throw new Error(`should not fetch '${url}'`);
+  };
+  await assert.rejects(() => fetchGitHubAssetText(asset, "tok", downgradeFetch), /non-HTTPS Location URL/);
+  assert.deepEqual(seen, [asset.url, "https://objects.githubusercontent.com/cdn-1"]);
+
+  let redirects = 0;
+  const loopFetch = async () => {
+    redirects += 1;
+    return new Response(null, {
+      status: 302,
+      headers: { location: `https://objects.githubusercontent.com/cdn-${redirects}` },
+    });
+  };
+  await assert.rejects(() => fetchGitHubAssetText(asset, "tok", loopFetch), /exceeded 3 redirects/);
+  assert.equal(redirects, 4);
+});
+
+test("verifyReleaseOnGitHub fails closed without retrying when an asset redirect uses non-HTTPS Location", async () => {
+  const release = makeRelease({ tag: "v0.2.3", draft: true });
+  let releaseCalls = 0;
+  const mockFetch = async (url) => {
+    if (url.endsWith("/releases/tags/v0.2.3")) {
+      releaseCalls += 1;
+      return new Response(JSON.stringify(release), { status: 200 });
+    }
+    if (url.includes("/releases/assets/")) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://objects.githubusercontent.com/dl/downgraded" },
+      });
+    }
+    return new Response("unexpected url", { status: 404 });
+  };
+  await assert.rejects(
+    () =>
+      verifyReleaseOnGitHub({
+        repo: "AquilaXk/easyoffice",
+        tag: "v0.2.3",
+        expectedDraft: true,
+        token: "tok",
+        summaryPath: "",
+        fetchImpl: mockFetch,
+        maxAttempts: 4,
+        retryDelayMs: 0,
+      }),
+    /non-HTTPS Location URL/,
+  );
+  assert.equal(releaseCalls, 1);
 });
