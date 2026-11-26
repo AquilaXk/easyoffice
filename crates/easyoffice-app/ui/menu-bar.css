@@ -212,7 +212,7 @@
   flex-shrink: 0;
   margin-left: auto;
   padding-left: 16px;
-  color: var(--color-text-placeholder);
+  color: var(--color-text-secondary);
 }
 
 .md-sub > .md-shortcut + .md-arrow {

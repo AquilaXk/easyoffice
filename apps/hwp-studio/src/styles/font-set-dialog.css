@@ -23,6 +23,7 @@
   background: var(--ui-surface-muted);
   color: var(--ui-text-muted);
   border-color: var(--ui-border-strong);
+  opacity: 1;
   cursor: not-allowed;
 }
 

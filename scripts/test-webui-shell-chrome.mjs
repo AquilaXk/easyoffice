@@ -266,6 +266,29 @@ test("the update notice's primary button swaps to dark text in the dark theme (-
   assert.ok(hasDecl(cssRule(".update-notice__button--primary", HOME_CSS), "background", "var(--accent-strong)"));
 });
 
+test("dialog primary button in home.css uses --accent-strong and dark --ui-bg text, dialog-close >= 20px, about license table & menu arrows meet contrast", () => {
+  const HOME_CSS = readText(fileURLToPath(new URL("home.css", UI_DIR)));
+  const primary = cssRule(".dialog-btn-primary", HOME_CSS);
+  assert.ok(hasDecl(primary, "background", "var(--accent-strong)"), ".dialog-btn-primary background is var(--accent-strong)");
+  assert.ok(hasDecl(primary, "color", "var(--ui-text-on-accent)"), ".dialog-btn-primary light text is var(--ui-text-on-accent)");
+  const darkPrimary = cssRule(':root[data-theme-effective="dark"] .dialog-btn-primary', HOME_CSS);
+  assert.ok(hasDecl(darkPrimary, "color", "var(--ui-bg)"), ".dialog-btn-primary dark text is var(--ui-bg)");
+
+  const closeRule = cssRule(".dialog-close", HOME_CSS);
+  assert.ok(hasDecl(closeRule, "min-width", "22px") && hasDecl(closeRule, "min-height", "22px"), ".dialog-close meets >= 20px target size");
+
+  const aboutLast = cssRule(".about-license-table td:last-child", SHELL_CSS);
+  assert.ok(hasDecl(aboutLast, "color", "var(--ui-text-muted)"), "#about-dialog license table last column uses --ui-text-muted");
+  for (const theme of ["light", "dark"]) {
+    const t = tokens(theme);
+    const ratio = contrast(t["--ui-text-muted"], t["--ui-surface-raised"]);
+    assert.ok(ratio >= 4.5, `${theme}: --ui-text-muted on --ui-surface-raised is ${ratio.toFixed(2)}:1`);
+  }
+
+  const mdArrow = cssRule(".md-arrow", MENU_CSS);
+  assert.ok(hasDecl(mdArrow, "color", "var(--color-text-secondary)"), ".md-arrow uses --color-text-secondary");
+});
+
 test("no UI file exceeds the line ceiling and the new modules are registered", () => {
   for (const name of ["icons.js", "window-bridge.js"]) {
     const lines = readText(fileURLToPath(new URL(name, UI_DIR))).split("\n").length;

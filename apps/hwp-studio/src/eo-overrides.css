@@ -80,12 +80,35 @@ body,
   border-color: var(--ui-border-strong) !important;
 }
 
+/* .eq-preview keeps --doc-paper in both themes so black equation ink stays legible. */
+.eq-preview {
+  background: var(--doc-paper);
+}
+
 .eq-preview-empty {
   color: var(--ui-text-secondary);
 }
 
 :root[data-theme-effective="dark"] .eq-preview-empty {
-  color: var(--ui-border-strong);
+  color: var(--caret-color);
+}
+
+/* Explicitly bind button ink and scheme to tokens so buttons never inherit UA default ink. */
+.pp-wrap-btn,
+.pp-sync-arrow-btn,
+.pp-preset-btn,
+.cs-icon-btn,
+.bm-icon-btn {
+  color: var(--color-text);
+  color-scheme: inherit;
+}
+
+:root[data-theme-effective="dark"] .cs-icon-btn > span[style*="text-stroke"] {
+  -webkit-text-stroke-color: var(--ui-text) !important;
+}
+
+.pp-desc-error {
+  color: var(--ui-danger) !important;
 }
 
 #csd-mf-check:disabled + label {

@@ -71,10 +71,15 @@ test("PD-359: light and dark tokens satisfy WCAG AA contrast for primary buttons
   assert.ok(contrastRatio(light.get("--doc-guide-stroke"), light.get("--doc-paper")) >= 4.5, "light guide stroke >= 4.5:1");
   assert.ok(contrastRatio(dark.get("--doc-guide-stroke"), dark.get("--doc-paper")) >= 4.5, "dark guide stroke >= 4.5:1");
 
+  assert.ok(contrastRatio(dark.get("--caret-color"), dark.get("--doc-paper")) >= 4.5, "dark paper ink >= 4.5:1");
+
   const eoCss = readHwp("src/eo-overrides.css");
   assert.match(eoCss, /\.cs-preview\s*\{[^}]*color:\s*var\(--caret-color\)/);
+  assert.match(eoCss, /\.eq-preview\s*\{[^}]*background:\s*var\(--doc-paper\)/);
   assert.match(eoCss, /\.eq-preview-empty\s*\{[^}]*color:\s*var\(--ui-text-secondary\)/);
-  assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.eq-preview-empty\s*\{[^}]*color:\s*var\(--ui-border-strong\)/);
+  assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.eq-preview-empty\s*\{[^}]*color:\s*var\(--caret-color\)/);
+  assert.match(eoCss, /\.pp-dir-spacer\s*\{[^}]*color:\s*var\(--ui-text-secondary\)/);
+  assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.cs-icon-btn\s*>\s*span\[style\*="text-stroke"\]\s*\{/);
   const shellCss = readUi("shell.css");
   assert.match(shellCss, /\.sheet-rot-stage\s*\{/);
   assert.match(shellCss, /\.custom-select\.open\s+\.custom-select-menu\.slide-layout-grid-menu\s*\{/);
