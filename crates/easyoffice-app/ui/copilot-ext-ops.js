@@ -1,4 +1,4 @@
-// HWP · PDF · BASE · BOARD 코파일럿 통합 실행기, 미리보기·지문·위치 이동 및 온디맨드 읽기 도구 (PD-359).
+// HWP · PDF · BASE · BOARD 코파일럿 통합 실행기, 미리보기·지문·위치 이동 및 온디맨드 읽기 도구 (PD-360).
 
 (function (host) {
   "use strict";

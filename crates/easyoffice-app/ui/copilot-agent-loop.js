@@ -1,4 +1,4 @@
-// WebView 주도 경량 멀티턴 읽기·검증 루프 (PD-074 이벤트 권한 불허 및 ipc_commands = 15 준수, PD-359).
+// WebView 주도 경량 멀티턴 읽기·검증 루프 (PD-074 이벤트 권한 불허 및 ipc_commands = 15 준수, PD-360).
 // 최대 6턴(MAX_TURNS = 6) 및 누적 요청 바이트 상한(MAX_CUMULATIVE_BYTES)을 엄격히 강제하고,
 // 온디맨드 읽기 도구(read_doc_blocks, read_sheet_range, find_sheet_cells, search_pdf_pages)와
 // 미리보기 제시 전 사후 검증 게이트(SLIDE·DOC layout_lint PD-258, SHEET 수식 오류 신규 발생 점검)를 수행한다.

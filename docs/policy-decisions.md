@@ -6253,10 +6253,10 @@
 - **Verified by** Node 22(`/opt/homebrew/opt/node@22/bin`, `v22.23.5`, `.nvmrc` `22` 일치) 기준 `node scripts/check-repo-hygiene.mjs`(1674개 파일·256개 계약 통과), `node --test "scripts/test-*.mjs"`(2490개 중 2489개 통과·1개 런타임 조건부 건너뜀(`native path matches the fallback when the runtime has fromBase64/toBase64`)·실패 0), `node scripts/check-commit-messages.mjs "$(git rev-parse main)" "$(git rev-parse HEAD)"`, `git diff main..HEAD -- crates/ Cargo.toml Cargo.lock` 공백(0바이트) 확인, `cargo fmt --all -- --check`, `cargo run -p easyoffice-app -- --self-test` 통과(`cargo clippy`는 호스트 `rustc 1.98.1`과 고정 `.github/rust-toolchain-version` `1.93.1` 불일치로 `1.98` 신규 린트에서 중단).
 - **Revisit when** upstream 크레이트(`zip` 등) 업그레이드로 `Cargo.lock` 취약점 0건이 달성되어 `dependency-audit.yml`의 Cargo 감사를 기본 `--strict` 게이트로 승격할 때.
 
-## PD-359 — 전 모듈 코파일럿 심층 개편: 제공자 프로토콜·도구 스키마, 경량 멀티턴 루프·자동 검증 게이트, 클라우드 PII 치환·복원 및 HWP·PDF·BASE·BOARD 확장 (2026-11-27)
+## PD-360 — 전 모듈 코파일럿 심층 개편: 제공자 프로토콜·도구 스키마, 경량 멀티턴 루프·자동 검증 게이트, 클라우드 PII 치환·복원 및 HWP·PDF·BASE·BOARD 확장 (2026-11-27)
 
 - **Context** 기존 코파일럿은 추론 모델(`o1`·`o3`·`o4`·`gpt-5`·Gemini 3/4)에 낮은 `temperature`를 강제 주입하거나 Gemini 2.5 출력 예산을 깎았으며 `PD-304` 화면 연산(`slide.add_element`, 슬라이드 개체·레이아웃·전환, 문서 범위 교체)이 Rust 검증기에서 단절되어 있었다. 또한 200문단 이후 선택 명령의 주변 문맥 증발, 채팅 마크다운 미렌더링, 단일 턴 한계, 문서 인라인 서식·표 유실, 원격 전송 전 개인정보 노출, `HWP` 미지원 및 `BASE`·`BOARD` 읽기 전용 제약이 남아 있었다.
-- **Decision (`PD-359`)**
+- **Decision (`PD-360`)**
   1. **제공자 프로토콜 수리, 네이티브 도구 호출 및 프롬프트 캐싱 (`providers.rs` · `schema.rs` · `stream.rs` · `wire.rs` · `copilot_http.rs`)**:
      - `infer_reasoning_support` 대상 추론 모델에서 `"temperature": 0.2` 자동 주입을 제거하고 비추론 Anthropic·DeepSeek 모델에는 `thinking`·`reasoning_effort` 필드를 주입하지 않는다. Google Gemini 3·4 계열은 `thinkingConfig.thinkingLevel`(`"low" | "medium" | "high"`)을 쓰고 낮은 `temperature` 강제를 빼며 Gemini 2.5 계열은 `maxOutputTokens = MAX_OUTPUT_TOKENS + budget`으로 출력 한도를 넓힌다.
      - Google 스트리밍 어셈블러는 첫 비공백 바이트를 자동 감지해 SSE(`data: {...}`)와 완결 JSON 배열(`[{...},{...}]`) 및 단일 JSON 객체 응답을 모두 처리한다. 공식 `api.anthropic.com` 호스트 요청에는 시스템 지시문에 `cache_control: {"type": "ephemeral"}`을 붙인다.

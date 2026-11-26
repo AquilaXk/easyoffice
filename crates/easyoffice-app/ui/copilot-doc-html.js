@@ -1,4 +1,4 @@
-// 문서(DOC) 코파일럿 인라인 서식·표 보존 직렬화기, 안전 화이트리스트 DOM 빌더 및 변경 내용 추적 연동 (PD-359).
+// 문서(DOC) 코파일럿 인라인 서식·표 보존 직렬화기, 안전 화이트리스트 DOM 빌더 및 변경 내용 추적 연동 (PD-360).
 // 허용 인라인 태그(<strong>, <em>, <u>, <s>, <a href>)와 표(<table>/<tr>/<th>/<td>)만 다루며,
 // innerHTML/DOMParser를 쓰지 않고 doc-runs.js(span.eo-run) 및 doc-table.js(table.doc-inline-table) 계약으로 변환한다.
 
