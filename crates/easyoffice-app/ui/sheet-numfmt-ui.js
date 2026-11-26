@@ -231,6 +231,7 @@
       void refreshSample();
       look?.open(pane);
       openDialog("sheet-numfmt-dialog");
+      look?.refreshFontSample?.();
       if (pane === "numfmt") $("sheet-numfmt-code")?.focus?.();
     }
 

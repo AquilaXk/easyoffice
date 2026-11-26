@@ -175,6 +175,28 @@
     const MAX_SAMPLE_PT = 28;
     const MIN_SAMPLE_PT = 8;
 
+    function measureSampleOverflow(sample) {
+      const cw = sample.clientWidth;
+      const ch = sample.clientHeight;
+      if (!(cw > 0 && ch > 0)) return null;
+      const cs = host.getComputedStyle?.(sample);
+      const padX = cs ? (Number.parseFloat(cs.paddingLeft) || 0) + (Number.parseFloat(cs.paddingRight) || 0) : 0;
+      const padY = cs ? (Number.parseFloat(cs.paddingTop) || 0) + (Number.parseFloat(cs.paddingBottom) || 0) : 0;
+      const availW = Math.max(1, cw - padX - 2);
+      const availH = Math.max(1, ch - padY - 2);
+      const textEl = sample.querySelector?.(".sheet-font-sample-text");
+      const tr = textEl?.getBoundingClientRect?.();
+      const hasBox = Boolean(tr && tr.width > 0 && tr.height > 0);
+      const needW = hasBox ? tr.width : (sample.scrollWidth > cw ? sample.scrollWidth : 0);
+      const needH = hasBox ? tr.height : (sample.scrollHeight > ch ? sample.scrollHeight : 0);
+      const overflowX = (hasBox && tr.width > availW) || sample.scrollWidth > cw;
+      const overflowY = (hasBox && tr.height > availH) || sample.scrollHeight > ch;
+      if (!overflowX && !overflowY) return null;
+      const ratioW = overflowX && needW > 0 ? availW / needW : 1;
+      const ratioH = overflowY && needH > 0 ? availH / needH : 1;
+      return { ratio: Math.min(ratioW, ratioH), needW, needH };
+    }
+
     function updateFontSample() {
       const sample = $("sheet-font-sample");
       if (!sample) return;
@@ -183,16 +205,24 @@
       const dfApi = host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
       const cssFam = ff && ff !== "mixed" ? (dfApi?.quoteCssFont?.(ff) || ("'" + ff + "'")) : "";
       const rawPt = fs && fs !== "mixed" ? Number.parseFloat(fs) : NaN;
-      let previewPt = Number.isFinite(rawPt) && rawPt > 0 ? Math.min(rawPt, MAX_SAMPLE_PT) : NaN;
+      const previewPt = Number.isFinite(rawPt) && rawPt > 0 ? Math.min(rawPt, MAX_SAMPLE_PT) : NaN;
       if (cssFam) sample.style.setProperty("--sample-font", cssFam);
       else sample.style.removeProperty("--sample-font");
       if (Number.isFinite(previewPt)) sample.style.setProperty("--sample-size", previewPt + "pt");
       else sample.style.removeProperty("--sample-size");
-      if (sample.clientWidth > 0 && sample.clientHeight > 0 && (sample.scrollWidth > sample.clientWidth || sample.scrollHeight > sample.clientHeight)) {
-        const basePt = Number.isFinite(previewPt) ? previewPt : 11;
-        const ratio = Math.min((sample.clientWidth - 2) / sample.scrollWidth, (sample.clientHeight - 2) / sample.scrollHeight);
-        const fitPt = Math.max(Math.min(MIN_SAMPLE_PT, basePt), Math.floor(basePt * ratio * 2) / 2);
+      let fitPt = Number.isFinite(previewPt) ? previewPt : 11;
+      const minFloor = Math.min(MIN_SAMPLE_PT, fitPt);
+      let over = measureSampleOverflow(sample);
+      for (let step = 0; over && fitPt > minFloor && step < 6; step += 1) {
+        const scaled = Math.floor(fitPt * over.ratio * 2) / 2;
+        const nextPt = Math.max(minFloor, step === 0 ? scaled : Math.min(fitPt - 0.5, scaled));
+        if (!(nextPt < fitPt)) break;
+        const prevW = over.needW;
+        const prevH = over.needH;
+        fitPt = nextPt;
         sample.style.setProperty("--sample-size", fitPt + "pt");
+        over = measureSampleOverflow(sample);
+        if (over && !(over.needW < prevW || over.needH < prevH)) break;
       }
     }
 
@@ -468,9 +498,22 @@
         setVal("sheet-border-color", "#" + rgb);
         touchBorder();
       });
+      const sampleEl = $("sheet-font-sample");
+      if (sampleEl && typeof host.ResizeObserver === "function") {
+        let lastW = 0;
+        let lastH = 0;
+        new host.ResizeObserver(() => {
+          const w = sampleEl.clientWidth;
+          const h = sampleEl.clientHeight;
+          if (!(w > 0 && h > 0) || (w === lastW && h === lastH)) return;
+          lastW = w;
+          lastH = h;
+          updateFontSample();
+        }).observe(sampleEl);
+      }
     }
 
-    return { open, apply, dirty, validate, showPane };
+    return { open, apply, dirty, validate, showPane, refreshFontSample: updateFontSample };
   }
 
   // The cell format commands of the sheet window: the number format dialog with the two panes, the

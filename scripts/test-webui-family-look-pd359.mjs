@@ -268,6 +268,7 @@ test("PD-359: SHEET font preview caps oversized pt, fits narrow containers, and 
   };
 
   await chooseSize("72");
+  assert.equal(sample.textContent, "가나다 AaBb", "font sample keeps full preview text");
   assert.equal(sample.style.getPropertyValue("--sample-size"), "28pt", "72pt font preview is capped inside the 76px box");
 
   await chooseSize("18");
@@ -287,13 +288,60 @@ test("PD-359: SHEET font preview caps oversized pt, fits narrow containers, and 
   const fittedPt = Number.parseFloat(sample.style.getPropertyValue("--sample-size"));
   assert.ok(fittedPt >= 8 && fittedPt < 28, `overflow guard scales 48pt down for narrow container (got ${fittedPt}pt)`);
 
+  // Inner text bounding box with padding converges so text width fits inside clientWidth - padX.
+  const textSpan = sample.querySelector(".sheet-font-sample-text");
+  assert.ok(textSpan, "sheet-font-sample wraps preview text for accurate inner measurement");
+  const prevGetCS = sheet.host.getComputedStyle;
+  sheet.host.getComputedStyle = () => ({ paddingLeft: "10px", paddingRight: "10px", paddingTop: "4px", paddingBottom: "4px" });
+  Object.defineProperties(sample, {
+    clientWidth: { configurable: true, get: () => 196 },
+    clientHeight: { configurable: true, get: () => 74 },
+    scrollWidth: { configurable: true, get: () => 196 },
+    scrollHeight: { configurable: true, get: () => 74 },
+  });
+  textSpan.getBoundingClientRect = () => {
+    const pt = Number.parseFloat(sample.style.getPropertyValue("--sample-size")) || 11;
+    return { width: pt * 7.5, height: pt * 1.4 };
+  };
+  try {
+    await chooseSize("72");
+    const convPt = Number.parseFloat(sample.style.getPropertyValue("--sample-size"));
+    assert.ok(convPt >= 8 && convPt * 7.5 <= 174, `72pt Courier-like width converges inside padded inner box (got ${convPt}pt -> ${convPt * 7.5}px <= 174px)`);
+  } finally {
+    sheet.host.getComputedStyle = prevGetCS;
+  }
+
+  // Opening directly on "font" tab re-runs fit check after openDialog makes dimensions non-zero.
+  let dlgOpen = false;
+  sheet.host.getComputedStyle = () => ({ paddingLeft: "10px", paddingRight: "10px", paddingTop: "4px", paddingBottom: "4px" });
+  try {
+    const numfmtUi = sheet.host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__;
+    assert.equal(typeof numfmtUi, "function");
+    const kit = sheet.host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(sheet.document);
+    let refreshedAfterOpen = false;
+    let wasOpenDuringRefresh = false;
+    const api = numfmtUi({
+      document: sheet.document,
+      format: { anchorCell: () => ({ code: "", raw: "" }), formatNumbers: async () => ({}) },
+      kit: { ...kit, openDialog: (id) => { dlgOpen = true; kit.openDialog(id); } },
+      look: { open: () => { dlgOpen = false; }, refreshFontSample: () => { refreshedAfterOpen = true; wasOpenDuringRefresh = dlgOpen; } },
+    });
+    api.openNumfmtDialog("font");
+    assert.ok(refreshedAfterOpen && wasOpenDuringRefresh, "openNumfmtDialog refreshes font sample after openDialog makes dimensions visible");
+  } finally {
+    sheet.host.getComputedStyle = prevGetCS;
+  }
+
   const shellCss = readUi("shell.css");
   const toolbarCss = readUi("toolbar.css");
   const hwpCss = readHwp("src/eo-overrides.css");
   assert.match(shellCss, /#sheet-font-sample\s*\{[^}]*justify-content:\s*center/);
+  assert.match(shellCss, /\.pages-insp-size\s*\{[^}]*padding:\s*0 4px 0 6px;/);
   assert.match(shellCss, /::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
   assert.match(toolbarCss, /\.custom-select-value\s*\{[^}]*padding-right:\s*6px;/);
   assert.match(toolbarCss, /\.sb-spacing-input::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
-  assert.match(hwpCss, /input\[type="number"\]\.dialog-input::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
-  assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*min-width:\s*68px;[^}]*text-align:\s*center;/);
+  assert.match(hwpCss, /\.dialog-wrap input\[type="number"\]::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
+  assert.match(hwpCss, /\.dialog-wrap input\[type="number"\]\.dialog-input:not\(\.pp-sync-spinner\)\s*\{[^}]*min-width:\s*60px;/);
+  assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*min-width:\s*72px;/);
+  assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*text-align:\s*center;/);
 });

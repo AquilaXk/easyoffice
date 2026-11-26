@@ -744,7 +744,8 @@
 .split-compare-table td, .split-compare-table th { border: 1px solid var(--ui-border-light); padding: 3px 6px; text-align: left; }
 
 /* Sheet Format Cells, Text Rotation, Size Dialogs & Text-to-Columns (PD-356). */
-.tool-dialog #sheet-font-sample { height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; justify-content: center; padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.15; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
+.tool-dialog #sheet-font-sample { box-sizing: border-box; height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; justify-content: center; justify-content: safe center; padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.15; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
+.tool-dialog #sheet-font-sample .sheet-font-sample-text { display: inline-block; flex: 0 0 auto; line-height: inherit; }
 .sheet-rot-presets button { padding: 3px 7px; font-size: var(--font-size-xs); }
 .sheet-rot-presets button[aria-pressed="true"] { background: var(--color-accent-bg); border-color: var(--color-primary); color: var(--color-primary-dark); font-weight: 700; }
 .sheet-rot-stage { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; margin-left: auto; flex: none; overflow: hidden; border: 1px solid var(--color-border-dark); background: var(--color-surface); }
@@ -772,7 +773,7 @@
 .pages-insp-label { font-size: var(--font-size-xs); font-weight: 600; color: var(--ui-text-secondary); }
 .pages-insp-row { display: flex; align-items: center; gap: var(--space-2); }
 .pages-insp-row .custom-select { flex: 1; min-width: 0; }
-.pages-insp-size { width: 64px; height: 24px; padding: 0 var(--space-2); border: 1px solid var(--ui-border); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-sm); }
+.pages-insp-size { box-sizing: border-box; width: 64px; height: 24px; padding: 0 4px 0 6px; border: 1px solid var(--ui-border); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-sm); }
 .pages-insp-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); }
 .pages-insp-seg .eo-glyph-btn { width: 100%; height: 26px; border: 1px solid var(--ui-border-light); background: var(--ui-surface); font-size: var(--font-size-xs); }
 .pages-insp-seg .eo-glyph-btn.active { background: var(--ui-selected); border-color: var(--accent-strong); color: var(--accent-strong); }
