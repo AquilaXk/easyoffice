@@ -43,7 +43,7 @@ test("the slide window's icon toolbar lists only the commands that work on a sli
   const { document } = await openSlide();
   assert.equal(document.getElementById("icon-toolbar").hidden, false);
   const shown = document.querySelectorAll("#icon-toolbar .tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
-  assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["clip-copy", "home-style", "insert-table", "insert-shape", "mod-symbol", "insert-link", "palette"]);
+  assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["clip-cut", "clip-copy", "clip-paste", "home-style", "insert-table", "insert-shape", "mod-symbol", "insert-link", "palette"]);
 });
 
 test("aspect and transition selects are custom selects over the native state holders", async () => {

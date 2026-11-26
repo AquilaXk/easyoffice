@@ -223,7 +223,7 @@ test("PD-260 BOARD shell integration: launch, pan/zoom non-dirty, undo/redo, Del
 
 test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown command enabled", async () => {
   const shown = (el) => !el.closest("[hidden]");
-  const checkWindow = async (mod, expectFind, expectClip) => {
+  const checkWindow = async (mod, expectFind, expectReplace, expectClip) => {
     const { document, host, sandbox } = await createWorkspaceHarness({ search: `?module=${mod}&win=w-menu-${mod}` });
     await flushAsyncTurns(10);
     assert.equal(host.__EASYOFFICE_MENU_KINDS__.menuKindOf(mod), mod);
@@ -242,7 +242,7 @@ test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown 
       assert.ok(!cmds.has(excluded), `${mod} hides ${excluded}`);
     }
     assert.equal(cmds.has("find"), expectFind);
-    assert.equal(cmds.has("replace"), expectFind);
+    assert.equal(cmds.has("replace"), expectReplace);
     assert.equal(cmds.has("clip-copy"), expectClip);
     document.querySelector('.md-item[data-studio-menu-cmd="zoom-in"]').click();
     assert.notEqual(document.getElementById("status-zoom-label").textContent, "100%");
@@ -265,8 +265,8 @@ test("PD-334 BASE and BOARD isolate their menubars cleanly and keep every shown 
       assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
     }
   };
-  await checkWindow("BASE", true, true);
-  await checkWindow("BOARD", false, false);
+  await checkWindow("BASE", true, true, true);
+  await checkWindow("BOARD", true, false, true);
 
   // Switching out of BOARD restores non-BOARD zoom percentage and 50..200 slider bounds
   const { document, host } = await createWorkspaceHarness({ search: "?module=BASE&win=w-board-switch" });

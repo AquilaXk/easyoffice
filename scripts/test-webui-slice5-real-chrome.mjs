@@ -1,0 +1,378 @@
+import test, { after, before } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { REPO, sleep, startBrowser, startEngine, startUiServer } from "./bench-webui-support.mjs";
+import { findChrome } from "./hwp-studio-harness.mjs";
+
+const exe = process.platform === "win32" ? "easyoffice-app.exe" : "easyoffice-app";
+const APP = [
+  process.env.EO_APP,
+  path.join(REPO, "../target-193/debug", exe),
+  path.join(REPO, "target-193/debug", exe),
+  path.join(REPO, "target/debug", exe),
+].find((file) => file && fs.existsSync(file));
+
+let CHROME = null;
+try {
+  CHROME = findChrome();
+} catch {
+  CHROME = null;
+}
+const skip = !APP || !CHROME ? "needs easyoffice-app and Chrome (EO_APP, CHROME_PATH)" : false;
+
+const CTRL = 2;
+const SHIFT = 8;
+let ctx = null;
+let uiPort = 0;
+
+before(async () => {
+  if (skip) return;
+  const port = 24000 + Math.floor(Math.random() * 16000);
+  const engine = startEngine(APP, port);
+  await sleep(900);
+  uiPort = port + 1;
+  const server = await startUiServer({ enginePort: port, port: uiPort });
+  const browser = await startBrowser({
+    chrome: CHROME,
+    debugPort: port + 2,
+    url: `http://127.0.0.1:${uiPort}/?module=DOC&win=slice5-doc-chrome`,
+    width: 1320,
+    height: 840,
+  });
+  ctx = { engine, server, browser, cdp: browser.cdp };
+  await sleep(1000);
+});
+
+after(async () => {
+  if (!ctx) return;
+  await ctx.browser.stop();
+  ctx.server.close();
+  ctx.engine.kill();
+});
+
+const js = (expr) => ctx.cdp.evalJs(expr);
+
+async function waitFor(fnExpr, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (await js(fnExpr)) return;
+    } catch {
+      // still loading
+    }
+    await sleep(60);
+  }
+  throw new Error(`Timed out waiting for: ${fnExpr}`);
+}
+
+async function openModule(mod) {
+  await ctx.cdp.send("Page.navigate", { url: `http://127.0.0.1:${uiPort}/?module=${mod}&win=slice5-${mod}-chrome` });
+  await waitFor(`document.readyState === "complete" && document.getElementById("app")?.dataset?.module === ${JSON.stringify(mod)}`);
+  await sleep(300);
+}
+
+async function sendKey(keyName, code, vk, modifiers = 0) {
+  const base = { key: keyName, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers };
+  await ctx.cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...base });
+  await ctx.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+}
+
+async function mouseClick(sel, button = "left", modifiers = 0) {
+  const r = await js(`(() => {
+    const el = document.querySelector(${JSON.stringify(sel)});
+    if (!el) return null;
+    const b = el.getBoundingClientRect();
+    return b.width > 0 && b.height > 0 ? { left: b.left, top: b.top, width: b.width, height: b.height } : null;
+  })()`);
+  assert.ok(r, `element visible for click: ${sel}`);
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  const buttons = button === "right" ? 2 : 1;
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, modifiers });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons, clickCount: 1, modifiers });
+  await ctx.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount: 1, modifiers });
+}
+
+test("real Chrome: DOC sub/sup/spacing & DOCX table-cell roundtrip, SLIDE UX/search, PDF page-jump search, BASE import+undo, BOARD style+clipboard", { skip }, async () => {
+  // 1. DOC: sup/sub buttons, Ctrl+= / Ctrl+Shift+=, spacing inputs, and real DOCX roundtrip via /api/ipc
+  await waitFor(`Boolean(document.getElementById("btn-stylebar-sup") && window.__EASYOFFICE_SAVE_PAYLOAD__)`);
+  await js(`(() => {
+    const ed = document.getElementById("doc-editor");
+    ed.innerHTML = "<p>H2O and E=mc2</p>";
+    const p = ed.firstChild;
+    const tn = p.firstChild;
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(tn, 1);
+    r.setEnd(tn, 2);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    ed.focus();
+  })()`);
+  await sleep(60);
+  await sendKey("=", "Equal", 187, CTRL);
+  await sleep(120);
+  assert.equal(await js(`document.querySelector('#doc-editor .eo-run[data-eo-subscript="true"]')?.textContent`), "2");
+
+  // Click superscript button on last char
+  await js(`(() => {
+    const ed = document.getElementById("doc-editor");
+    const tn = Array.from(ed.firstChild.childNodes).find((n) => n.nodeType === 3 && n.textContent.includes("mc2"));
+    const idx = tn.textContent.indexOf("2");
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(tn, idx);
+    r.setEnd(tn, idx + 1);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  })()`);
+  await mouseClick("#btn-stylebar-sup");
+  await sleep(100);
+  assert.equal(await js(`document.querySelector('#doc-editor .eo-run[data-eo-superscript="true"]')?.textContent`), "2");
+
+  // Set spacing + rich table-cell formatting, convert to real DOCX via Rust IPC, then reopen
+  const rtRes = await js(`(async () => {
+    const ed = document.getElementById("doc-editor");
+    ed.innerHTML =
+      '<p style="margin-top:16px;margin-bottom:32px" data-eo-space-before-twips="240" data-eo-space-after-twips="480">문단 간격 시험</p>' +
+      '<table><tbody><tr>' +
+      '<td><p style="text-align:center;line-height:1.5" data-eo-line-spacing="150"><b>Bold</b> <sub>sub</sub> <span style="color:#b91c1c">Red</span></p></td>' +
+      '<td>Plain</td>' +
+      '</tr></tbody></table>';
+    const blocks = window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(ed);
+    const resp = await fetch("/api/ipc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command: "convert_document_format",
+        payload: JSON.stringify({ sourceFormat: "docx", targetFormat: "docx", title: "slice5-rt", blocks })
+      })
+    });
+    const parsed = await resp.json();
+    const bin = atob(parsed.convertedBase64 || "");
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    window.confirm = () => true;
+    const opened = await window.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("slice5-rt.docx", bytes);
+    const ps = ed.querySelectorAll("p");
+    const td = ed.querySelector("table td");
+    return {
+      ok: opened.ok,
+      before: ps[0]?.dataset?.eoSpaceBeforeTwips,
+      after: ps[0]?.dataset?.eoSpaceAfterTwips,
+      align: td?.querySelector("p")?.style?.textAlign || td?.style?.textAlign || "",
+      bold: td?.querySelector('.eo-run[data-eo-bold="true"], b, strong')?.textContent || "",
+      sub: td?.querySelector('.eo-run[data-eo-subscript="true"], sub')?.textContent || "",
+      red: td?.querySelector('.eo-run[data-eo-color="B91C1C"]')?.textContent || ""
+    };
+  })()`);
+  assert.equal(rtRes.ok, true);
+  assert.equal(rtRes.before, "240");
+  assert.equal(rtRes.after, "480");
+  assert.equal(rtRes.align, "center");
+  assert.equal(rtRes.bold, "Bold");
+  assert.equal(rtRes.sub, "sub");
+  assert.equal(rtRes.red, "Red");
+
+  // 2. SLIDE: multiline notes isolating Ctrl+D, context menu duplicate/bring-forward, align, and Ctrl+F cross-slide jump
+  await openModule("SLIDE");
+  await waitFor(`Boolean(window.__EASYOFFICE_SLIDE_CANVAS__ && document.getElementById("slide-presenter-notes"))`);
+  await mouseClick("#slide-presenter-notes");
+  await ctx.cdp.send("Input.insertText", { text: "첫 줄\n둘째 줄" });
+  await sleep(60);
+  const preNotesCount = await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`);
+  await sendKey("d", "KeyD", 68, CTRL);
+  await sleep(80);
+  assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`), preNotesCount, "textarea notes isolates Ctrl+D");
+  assert.equal(await js(`document.getElementById("slide-presenter-notes").value`), "첫 줄\n둘째 줄");
+
+  // Add deterministic boxes on Slide 1, right-click box 1, duplicate via context menu
+  await js(`(() => {
+    const c = window.__EASYOFFICE_SLIDE_CANVAS__;
+    while (c.getElements().length > 0) c.deleteElement(c.getElements()[0].id);
+    c.addElement({ kind: "textbox", x: 50, y: 60, w: 120, h: 48, text: "상자A" });
+    c.addElement({ kind: "textbox", x: 240, y: 120, w: 120, h: 48, text: "상자B" });
+    c.selectElement(c.getElements()[0].id);
+  })()`);
+  await sleep(80);
+  await mouseClick('#slide-canvas-layer .slide-el', "right");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("slide-context-menu").hidden`), false);
+  await mouseClick('#slide-ctx-canvas-group [data-slide-canvas-act="duplicate"]');
+  await sleep(100);
+  assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements().length`), 3);
+  assert.equal(await js(`window.__EASYOFFICE_SLIDE_CANVAS__.getElements()[2].x`), 66);
+
+  // Add Slide 2 with searchable shape, switch back to Slide 1, press Ctrl+F -> find jumps to Slide 2 keeping #find-query focused
+  await mouseClick("#btn-add-slide");
+  await sleep(100);
+  await js(`(() => {
+    window.__EASYOFFICE_SLIDE_CANVAS__.addElement({ kind: "shape", x: 100, y: 100, w: 180, h: 80, text: "분기핵심표적" });
+    window.__EASYOFFICE_MODULE_FIND_HOOKS__.switchSlide(0);
+  })()`);
+  await sleep(100);
+  await sendKey("f", "KeyF", 70, CTRL);
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("find-dialog").open`), true);
+  await ctx.cdp.send("Input.insertText", { text: "분기핵심표적" });
+  await sleep(150);
+  assert.equal(await js(`document.getElementById("find-count").textContent`), "1 / 1");
+  assert.equal(await js(`window.__EASYOFFICE_MODULE_FIND_HOOKS__.getSlideIndex()`), 1);
+  assert.equal(await js(`document.activeElement?.id`), "find-query");
+  await sendKey("Escape", "Escape", 27);
+  await sleep(60);
+
+  // 3. PDF: generate real multi-page PDF via /api/ipc, open it, Ctrl+F jumps to page 2 while keeping #find-query focus
+  await openModule("PDF");
+  const pdfOpen = await js(`(async () => {
+    const blocks = [];
+    for (let i = 0; i < 85; i += 1) {
+      blocks.push({ type: "paragraph", runs: [{ text: i === 80 ? "SecondPageTargetToken" : "Body line number " + i + " sample text." }] });
+    }
+    const resp = await fetch("/api/ipc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command: "convert_document_format",
+        payload: JSON.stringify({ sourceFormat: "docx", targetFormat: "pdf", title: "multipage", blocks })
+      })
+    });
+    const parsed = await resp.json();
+    const bin = atob(parsed.convertedBase64 || "");
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    window.confirm = () => true;
+    return window.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("multipage.pdf", bytes);
+  })()`);
+  assert.equal(pdfOpen.ok, true);
+  await sleep(150);
+  await sendKey("f", "KeyF", 70, CTRL);
+  await sleep(80);
+  await ctx.cdp.send("Input.insertText", { text: "SecondPageTargetToken" });
+  await sleep(150);
+  assert.equal(await js(`document.getElementById("find-count").textContent`), "1 / 1");
+  assert.match(await js(`document.getElementById("pdf-page-indicator").textContent`), /^쪽\s+2\s+\/\s+\d+/);
+  assert.equal(await js(`document.activeElement?.id`), "find-query");
+
+  // 4. BASE: open #base-import-dialog button, run real CSV decode IPC import + formula neutralization + Ctrl+Z undo + oversized reject
+  await openModule("BASE");
+  await mouseClick("#btn-base-import");
+  await sleep(80);
+  assert.equal(await js(`document.getElementById("base-import-dialog").open`), true);
+  await sendKey("Escape", "Escape", 27);
+  await sleep(60);
+
+  const baseImp = await js(`(async () => {
+    const imp = window.__EASYOFFICE_BASE_IMPORT__;
+    const model = window.__EASYOFFICE_BASE_MODEL__;
+    const bs = window.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+    const beforeCount = bs.getState().tables.length;
+    const csv = new TextEncoder().encode("이름,금액,완료\\n=CMD(),-42.5,true\\n홍길동,1500,false\\n");
+    const res = await imp.controller().importBytes("sales.csv", csv, { mode: "new", tableName: "실제수입", hasHeader: true });
+    const tbl = model.getTable(bs.getState());
+    const oversize = await imp.controller().importBytes("too-big.csv", new Uint8Array(imp.MAX_IMPORT_BYTES + 1), { mode: "new" });
+    return {
+      ok: res.ok,
+      beforeCount,
+      afterCount: bs.getState().tables.length,
+      formulaCell: tbl.records[0].values[tbl.fields[0].id],
+      negNumber: tbl.records[0].values[tbl.fields[1].id],
+      oversizeOk: oversize.ok,
+    };
+  })()`);
+  assert.equal(baseImp.ok, true);
+  assert.equal(baseImp.afterCount, baseImp.beforeCount + 1);
+  assert.equal(baseImp.formulaCell, "'=CMD()");
+  assert.equal(baseImp.negNumber, -42.5);
+  assert.equal(baseImp.oversizeOk, false);
+  await sendKey("z", "KeyZ", 90, CTRL);
+  await sleep(200);
+  assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio().getState().tables.length`), baseImp.beforeCount);
+
+  // Also test real XLSX encode -> decode -> BASE import roundtrip against real IPC
+  const xlsxImp = await js(`(async () => {
+    const imp = window.__EASYOFFICE_BASE_IMPORT__;
+    const model = window.__EASYOFFICE_BASE_MODEL__;
+    const bs = window.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
+    const resp = await fetch("/api/ipc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command: "convert_document_format",
+        payload: JSON.stringify({
+          sourceFormat: "xlsx",
+          targetFormat: "xlsx",
+          title: "xlsx-src",
+          sheets: [{
+            name: "시트1",
+            cells: [
+              { ref: "A1", raw: "제품", t: "s" },
+              { ref: "B1", raw: "수량", t: "s" },
+              { ref: "A2", raw: "문서엔진", t: "s" },
+              { ref: "B2", raw: "7", t: "n" }
+            ]
+          }]
+        })
+      })
+    });
+    const parsed = await resp.json();
+    const bin = atob(parsed.convertedBase64 || "");
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    const res = await imp.controller().importBytes("real.xlsx", bytes, { mode: "new", tableName: "XLSX수입", hasHeader: true });
+    const tbl = model.getTable(bs.getState());
+    return { ok: res.ok, count: tbl.records.length, val: tbl.records[0]?.values[tbl.fields[1]?.id] };
+  })()`);
+  assert.equal(xlsxImp.ok, true);
+  assert.equal(xlsxImp.count, 1);
+  assert.equal(xlsxImp.val, 7);
+
+  // 5. BOARD: style bar controls, Ctrl+D multi-node/connector clone + Ctrl+Z undo, Ctrl+F select + viewport pan
+  await openModule("BOARD");
+  await waitFor(`Boolean(window.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.())`);
+  const boardSetup = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    b.selectNode(null);
+    const barHidden = document.getElementById("board-style-bar").hidden;
+    const n1 = b.addNode({ kind: "shape", x: 100, y: 100, w: 140, h: 70, text: "기준" });
+    const n2 = b.addNode({ kind: "shape", x: 2200, y: 1500, w: 160, h: 80, text: "보드타겟노드" });
+    b.addConnector({ fromId: n1.id, toId: n2.id, label: "링크" });
+    b.selectNode(n1.id);
+    const barVisible = !document.getElementById("board-style-bar").hidden;
+    const lbl = document.getElementById("board-style-label");
+    lbl.value = "수정됨";
+    lbl.dispatchEvent(new Event("change", { bubbles: true }));
+    const editedText = b.getState().nodes.find((n) => n.id === n1.id).text;
+    b.selectNode(n1.id);
+    b.selectNode(n2.id, { toggle: true });
+    return { barHidden, barVisible, editedText, nodes: b.getState().nodes.length, conns: b.getState().connectors.length, n1Id: n1.id, n2Id: n2.id };
+  })()`);
+  assert.equal(boardSetup.barHidden, true);
+  assert.equal(boardSetup.barVisible, true);
+  assert.equal(boardSetup.editedText, "수정됨");
+
+  await mouseClick("#board-viewport");
+  await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    b.selectNode(${JSON.stringify(boardSetup.n1Id)});
+    b.selectNode(${JSON.stringify(boardSetup.n2Id)}, { toggle: true });
+  })()`);
+  await sleep(60);
+  await sendKey("d", "KeyD", 68, CTRL);
+  await sleep(120);
+  assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().getState().nodes.length`), boardSetup.nodes + 2);
+  assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().getState().connectors.length`), boardSetup.conns + 1);
+
+  await sendKey("z", "KeyZ", 90, CTRL);
+  await sleep(200);
+  assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().getState().nodes.length`), boardSetup.nodes);
+
+  await sendKey("f", "KeyF", 70, CTRL);
+  await sleep(80);
+  await ctx.cdp.send("Input.insertText", { text: "보드타겟노드" });
+  await sleep(150);
+  assert.equal(await js(`document.getElementById("find-count").textContent`), "1 / 1");
+  assert.equal(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio()._styleHooks.getSelection().node?.id`), boardSetup.n2Id);
+  assert.notEqual(await js(`window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio().getState().viewport.panX`), 0);
+});

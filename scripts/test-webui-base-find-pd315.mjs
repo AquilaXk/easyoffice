@@ -95,10 +95,17 @@ test("BASE enables find/replace menu items and opens find dialog instead of comm
     switchModule(h.document, mod);
     await flushAsyncTurns(4);
     ctrl(h, "f");
-    assert.equal($(h.document, "find-dialog").open, false, `${mod} still uses command palette on Ctrl+F`);
-    assert.equal($(h.document, "cmd-palette-modal").open, true, `${mod} opens palette`);
-    $(h.document, "cmd-palette-modal").close();
+    assert.equal($(h.document, "find-dialog").open, true, `${mod} opens find dialog on Ctrl+F`);
+    assert.equal($(h.document, "find-replace-row").hidden, true, `${mod} keeps replace hidden`);
+    pressDialogKey(h, $(h.document, "find-query"), "Escape");
+    assert.equal($(h.document, "find-dialog").open, false);
   }
+  switchModule(h.document, "CONV");
+  await flushAsyncTurns(4);
+  ctrl(h, "f");
+  assert.equal($(h.document, "find-dialog").open, false, "CONV still uses command palette on Ctrl+F");
+  assert.equal($(h.document, "cmd-palette-modal").open, true, "CONV opens palette");
+  $(h.document, "cmd-palette-modal").close();
 });
 
 test("BASE finds offscreen matches in 10,000 virtualized rows, cycles Enter/Shift+Enter, and scrolls/selects cell without stealing focus", async () => {

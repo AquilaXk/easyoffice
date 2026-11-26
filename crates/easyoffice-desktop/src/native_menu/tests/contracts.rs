@@ -275,8 +275,46 @@ fn base_and_board_isolate_workspace_menus_without_doc_leaks() {
     }
     assert!(lines_of(MenuKind::Base, "편집").contains(&"edit:find"));
     assert!(lines_of(MenuKind::Base, "편집").contains(&"edit:replace"));
-    assert!(!lines_of(MenuKind::Board, "편집").contains(&"edit:find"));
+    assert!(lines_of(MenuKind::Board, "편집").contains(&"edit:find"));
     assert!(!lines_of(MenuKind::Board, "편집").contains(&"edit:replace"));
+}
+
+#[test]
+fn slice5_native_menu_parity_covers_doc_slide_base_and_cross_module_find() {
+    let doc_fmt = lines_of(MenuKind::Doc, "서식");
+    for id in ["format:strike", "format:superscript", "format:subscript"] {
+        assert!(doc_fmt.contains(&id), "DOC서식 missing {id}");
+        assert!(
+            !lines_of(MenuKind::Hwp, "서식").contains(&id),
+            "HWP omits {id}"
+        );
+        assert_eq!(spec(id).accelerator, None);
+    }
+    let slide_ids = layout::table_ids(MenuKind::Slide);
+    for id in [
+        "slide:bring-forward",
+        "slide:send-backward",
+        "slide:align-left",
+        "slide:align-center",
+        "slide:align-right",
+        "slide:align-top",
+        "slide:align-middle",
+        "slide:align-bottom",
+        "slide:distribute-h",
+        "slide:distribute-v",
+    ] {
+        assert!(slide_ids.contains(&id), "SLIDE missing {id}");
+    }
+    assert!(lines_of(MenuKind::Slide, "삽입").contains(&layout::SLIDE_ALIGN));
+    assert!(lines_of(MenuKind::Base, "파일").contains(&"file:base-import"));
+    for kind in [MenuKind::Slide, MenuKind::Pdf, MenuKind::Board] {
+        let edit = lines_of(kind, "편집");
+        assert!(edit.contains(&"edit:find"), "{kind:?} missing edit:find");
+        assert!(
+            !edit.contains(&"edit:replace"),
+            "{kind:?} must omit edit:replace"
+        );
+    }
 }
 
 #[test]

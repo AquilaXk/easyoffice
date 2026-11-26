@@ -6,5 +6,6 @@ export function itemTable(source) {
   const table = source.slice(start, source.indexOf("];", start));
   return table
     .replace(/sa!\s*[({]\s*("[^"]+"),\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item($1, $2, None, "sheet-act:$3")')
+    .replace(/sl!\s*[({]\s*("[^"]+"),\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item($1, $2, None, "slide-act:$3")')
     .replace(/cf!\s*[({]\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item("format:cf-$2", $1, None, "sheet-cf:$2")');
 }

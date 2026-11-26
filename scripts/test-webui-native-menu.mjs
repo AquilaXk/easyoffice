@@ -146,6 +146,8 @@ test("the native file menu has PDF export and print with the reference keys, run
 const PAGE_ITEM_SELECTORS = {
   "studio-cmd": (cmd) => `.md-item[data-studio-menu-cmd="${cmd}"]`,
   "verify-act": (act) => `.md-item[data-verify-act="${act}"]`,
+  "base-act": (act) => `.md-item[data-base-act="${act}"]`,
+  "slide-act": (act) => `.md-item[data-slide-act="${act}"]`,
   "window-new": (kind) => `[data-window-new="${kind.toUpperCase()}"]`,
   export: (fmt) => `.md-item[data-export-format="${fmt}"]`,
   "export-dialog": () => ".md-item[data-export-dialog]",
