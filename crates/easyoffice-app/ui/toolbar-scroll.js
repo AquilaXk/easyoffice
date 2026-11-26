@@ -133,10 +133,21 @@
     return api;
   }
 
+  const TOOLBAR_IDS = [
+    "icon-toolbar",
+    "doc-style-bar",
+    "sheet-table-bar",
+    "sheet-pivot-bar",
+    "slide-toolbar",
+    "pdf-toolbar",
+    "base-toolbar",
+    "board-toolbar",
+  ];
+
   function refreshAll(docArg) {
     const doc = docArg || host.document;
     if (!doc) return;
-    for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
+    for (const id of TOOLBAR_IDS) {
       const el = doc.getElementById(id);
       const ctrl = el && controllers.get(el);
       if (ctrl) ctrl.refresh();
@@ -147,7 +158,7 @@
     const doc = docArg || host.document;
     if (!doc) return [];
     const list = [];
-    for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
+    for (const id of TOOLBAR_IDS) {
       const el = doc.getElementById(id);
       if (el) list.push(attach(el, doc));
     }

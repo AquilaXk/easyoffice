@@ -77,9 +77,17 @@ test("PD-359: light and dark tokens satisfy WCAG AA contrast for primary buttons
   assert.match(eoCss, /\.cs-preview\s*\{[^}]*color:\s*var\(--caret-color\)/);
   assert.match(eoCss, /\.eq-preview\s*\{[^}]*background:\s*var\(--doc-paper\)/);
   assert.match(eoCss, /\.eq-preview-empty\s*\{[^}]*color:\s*var\(--ui-text-secondary\)/);
-  assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.eq-preview-empty\s*\{[^}]*color:\s*var\(--caret-color\)/);
+  assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.eq-preview-empty[\s\S]*?\{[^}]*color:\s*var\(--caret-color\)/);
+  assert.match(eoCss, /\.eq-preview-error\s*\{[^}]*color:\s*var\(--eo-paper-danger\)/);
   assert.match(eoCss, /\.pp-dir-spacer\s*\{[^}]*color:\s*var\(--ui-text-secondary\)/);
   assert.match(eoCss, /:root\[data-theme-effective="dark"\]\s+\.cs-icon-btn\s*>\s*span\[style\*="text-stroke"\]\s*\{/);
+  assert.match(eoCss, /\.eq-script-error/);
+  assert.match(eoCss, /\.bm-empty[\s\S]*?color:\s*var\(--ui-text-muted\)/);
+  assert.match(eoCss, /\.pp-wrap-btn:disabled[\s\S]*?opacity:\s*1;[\s\S]*?color:\s*var\(--ui-text-muted\)/);
+  assert.match(eoCss, /\.dialog-btn:disabled[\s\S]*?color:\s*var\(--ui-text-muted\)/);
+  const hwpSelectCss = readHwp("src/styles/custom-select.css");
+  assert.match(hwpSelectCss, /\.custom-select\.disabled\s*\{\s*opacity:\s*1;/);
+  assert.match(hwpSelectCss, /\.custom-select\.open\s+\.custom-select-arrow\s*\{[^}]*color:\s*var\(--color-text-secondary\)/);
   const shellCss = readUi("shell.css");
   assert.match(shellCss, /\.sheet-rot-stage\s*\{/);
   assert.match(shellCss, /\.custom-select\.open\s+\.custom-select-menu\.slide-layout-grid-menu\s*\{/);
@@ -153,13 +161,17 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.equal(fnLabels.min, "최소");
   assert.ok(sheet.document.querySelector(".sheet-rot-stage #sheet-align-rotation-preview"), "rotation preview wrapped in .sheet-rot-stage");
 
-  for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "board-toolbar"]) {
+  for (const id of ["icon-toolbar", "doc-style-bar", "sheet-table-bar", "sheet-pivot-bar", "slide-toolbar", "pdf-toolbar", "board-toolbar"]) {
     const bar = sheet.document.getElementById(id);
     assert.ok(bar, `#${id} exists`);
     assert.ok(bar.querySelector(".tb-scroll-viewport .tb-scroll-track"), `#${id} mounts horizontal scroller track`);
     assert.ok(bar.querySelector(".tb-scroll-nav-prev"), `#${id} mounts prev nav`);
     assert.ok(bar.querySelector(".tb-scroll-nav-next"), `#${id} mounts next nav`);
   }
+  const base = await createWorkspaceHarness({ search: "?module=BASE&win=w-pd359-base-tb" });
+  await flushAsyncTurns(10);
+  const baseToolbar = base.document.getElementById("base-toolbar");
+  assert.ok(baseToolbar?.querySelector(".tb-scroll-viewport .tb-scroll-track"), "#base-toolbar mounts horizontal scroller track");
 
   const slide = await createWorkspaceHarness({ search: "?module=SLIDE&win=w-pd359-slide" });
   await flushAsyncTurns(10);
@@ -183,6 +195,13 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.match(shellCss, /:root\[data-theme-effective="dark"\] \.eo-glyph-btn\.active[\s\S]*?color:\s*var\(--ui-text\)/);
   assert.match(toolbarCss, /\.tb-btn\.active,\s*\.tb-btn\[aria-pressed="true"\]\s*\{[^}]*color:\s*var\(--ui-text\)/);
   assert.match(toolbarCss, /\.tb-scrollable:has\(>\s*\.tb-scroll-nav-prev:not\(\[hidden\]\)\)/);
+  assert.match(toolbarCss, /#slide-toolbar\.tb-scrollable:has\(>\s*\.tb-scroll-nav-prev:not\(\[hidden\]\)\)/);
+  assert.match(toolbarCss, /\.custom-select\.open\s+\.custom-select-arrow\s*\{[^}]*color:\s*var\(--color-text-secondary\)/);
+  assert.match(toolbarCss, /\.sb-color-host\.open\s+\.sb-color-arrow\s*\{[^}]*color:\s*var\(--color-text-secondary\)/);
+  assert.match(toolbarCss, /\.custom-select\.disabled\s*\{\s*opacity:\s*1;/);
+  const stylesCss = readUi("styles.css");
+  assert.doesNotMatch(stylesCss, /\.slide-thumb-snippet\s*\{[^}]*opacity:/);
+  assert.doesNotMatch(stylesCss, /\.slide-thumb-title\.is-empty\s*\{[^}]*opacity:/);
   assert.match(copilotCss, /:root\[data-theme-effective="dark"\] \.eo-copilot-send-btn:not\(:disabled\)/);
   assert.match(contentCss, /#doc-editor\[data-eo-doc-flavor="pages"\]\[data-eo-hf-edit\] > section\[data-eo-hf="header"\]::after/);
   assert.match(hwpCss, /\.stb-message\s*\{\s*color:\s*var\(--accent-strong\)/);

@@ -283,10 +283,16 @@ test("dialog primary button in home.css uses --accent-strong and dark --ui-bg te
     const t = tokens(theme);
     const ratio = contrast(t["--ui-text-muted"], t["--ui-surface-raised"]);
     assert.ok(ratio >= 4.5, `${theme}: --ui-text-muted on --ui-surface-raised is ${ratio.toFixed(2)}:1`);
+    const dangerRatio = contrast(t["--ui-danger"], t["--ui-surface-raised"]);
+    assert.ok(dangerRatio >= 4.5, `${theme}: --ui-danger on --ui-surface-raised is ${dangerRatio.toFixed(2)}:1`);
   }
 
   const mdArrow = cssRule(".md-arrow", MENU_CSS);
   assert.ok(hasDecl(mdArrow, "color", "var(--color-text-secondary)"), ".md-arrow uses --color-text-secondary");
+  const cfHover = cssRule('.cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"]', SHELL_CSS);
+  assert.ok(hasDecl(cfHover, "color", "var(--color-text-secondary)"), ".cf-dropdown-btn hover/open uses --color-text-secondary");
+  const sheetNameHover = cssRule(".sheet-name-arrow:hover", SHELL_CSS);
+  assert.ok(hasDecl(sheetNameHover, "color", "var(--color-text-secondary)"), ".sheet-name-arrow hover uses --color-text-secondary");
 });
 
 test("no UI file exceeds the line ceiling and the new modules are registered", () => {

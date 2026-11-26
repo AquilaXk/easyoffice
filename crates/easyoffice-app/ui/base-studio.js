@@ -147,6 +147,7 @@
       doc.body.appendChild(fieldDlg);
 
       container.replaceChildren(toolbar, queryBar, viewport, bottomBar);
+      host.__EASYOFFICE_TOOLBAR_SCROLL__?.attach?.(toolbar, doc);
       host.__EASYOFFICE_ICONS__?.applyIcons?.(doc, toolbar);
       enhanceSelects(container);
       enhanceSelects(fieldDlg);

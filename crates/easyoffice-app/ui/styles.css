@@ -159,13 +159,13 @@ select:focus-visible,
   overflow-y: auto;
   min-width: 0;
 }
-.slide-thumb { display: flex; gap: 8px; align-items: flex-start; min-width: 0; padding: 8px 10px; color: var(--ui-text-muted); font-size: 12px; text-align: left; border-left: 2px solid transparent; cursor: grab; }
+.slide-thumb { display: flex; gap: 8px; align-items: flex-start; min-width: 0; padding: 8px 10px; color: var(--ui-text-secondary); font-size: 12px; text-align: left; border-left: 2px solid transparent; cursor: grab; }
 .slide-thumb:hover { color: var(--ui-text); background: var(--ui-hover); }
 .slide-thumb-num { flex: 0 0 auto; min-width: 1.4em; font-variant-numeric: tabular-nums; }
 .slide-thumb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .slide-thumb-title { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.slide-thumb-title.is-empty { font-style: italic; opacity: 0.7; }
-.slide-thumb-snippet { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: 0.7; font-weight: 400; }
+.slide-thumb-title.is-empty { font-style: italic; color: var(--ui-text-muted); }
+.slide-thumb-snippet { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ui-text-muted); font-weight: 400; }
 .slide-thumb.dragging { opacity: 0.4; }
 .slide-thumb.drop-above { box-shadow: inset 0 2px 0 var(--accent-strong); }
 .slide-thumb.drop-below { box-shadow: inset 0 -2px 0 var(--accent-strong); }

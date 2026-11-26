@@ -11,6 +11,15 @@
   display: none;
 }
 
+:root {
+  --eo-paper-danger: #b42b2b;
+}
+
+:root:not([data-theme-effective="dark"]) {
+  --ui-danger: #b42b2b;
+  --ui-danger-strong: #c42330;
+}
+
 /* "도구 상자 라벨 표시" (보기 menu): adapted from the reference app `styles/toolbar-labels.css` (MIT; see THIRD_PARTY_NOTICES.md).
    The upstream toolbar markup stays as it is; this is only the display preference. */
 :root[data-toolbar-labels="hidden"] #icon-toolbar .tb-label,
@@ -80,16 +89,22 @@ body,
   border-color: var(--ui-border-strong) !important;
 }
 
-/* .eq-preview keeps --doc-paper in both themes so black equation ink stays legible. */
+/* .eq-preview keeps --doc-paper and dark ink in both themes so equation SVG text/strokes stay legible. */
 .eq-preview {
   background: var(--doc-paper);
+  color: var(--caret-color);
 }
 
 .eq-preview-empty {
   color: var(--ui-text-secondary);
 }
 
-:root[data-theme-effective="dark"] .eq-preview-empty {
+.eq-preview-error {
+  color: var(--eo-paper-danger);
+}
+
+:root[data-theme-effective="dark"] .eq-preview-empty,
+:root[data-theme-effective="dark"] .eq-preview svg text {
   color: var(--caret-color);
 }
 
@@ -107,12 +122,38 @@ body,
   -webkit-text-stroke-color: var(--ui-text) !important;
 }
 
-.pp-desc-error {
+.pp-desc-error,
+.eq-script-error,
+.field-edit-error,
+.bm-status,
+.goto-panel > div:not(.dialog-row) {
   color: var(--ui-danger) !important;
 }
 
+.bm-empty,
+.pp-stub-msg,
+.goto-bookmark-list > div:not(.goto-bookmark-item),
 #csd-mf-check:disabled + label {
   color: var(--ui-text-muted) !important;
+}
+
+.pp-wrap-btn:disabled,
+.pp-preset-btn:disabled {
+  opacity: 1;
+  background: var(--ui-surface-muted);
+  border-color: var(--color-border-lighter);
+  color: var(--ui-text-muted);
+}
+
+.dialog-btn:disabled,
+.dialog-btn-group button:disabled,
+.dialog-btn:disabled:hover,
+.dialog-btn-group button:disabled:hover,
+.tcp-diag-btn:disabled,
+.tcp-diag-btn:disabled:hover {
+  background: var(--ui-surface-muted);
+  border-color: var(--color-border-lighter);
+  color: var(--ui-text-muted);
 }
 
 .dialog-body svg rect[x="12"][y="8"][width="118"][height="96"] {

@@ -299,7 +299,7 @@
 .sheet-grid td.ts-shadow.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent), var(--ts-shadow, none); }
 /* The arrow of a list cell is the combo box's arrow cell (`toolbar.css` `.custom-select-arrow`): no box, a 1px left divider, the `▾` letter at 8px in the muted color, 15px wide and as tall as the cell, at the cell's right end. Hover and the open menu take the combo's hover fill. */
 .cf-dropdown-btn { position: fixed; z-index: 30; display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-left: 1px solid var(--color-border-light); border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; font-size: 8px; line-height: 1; cursor: default; }
-.cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"] { background: var(--color-hover-bg); }
+.cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"] { background: var(--color-hover-bg); color: var(--color-text-secondary); }
 .cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
 .cf-dropdown-btn[hidden] { display: none; } /* the button's own `display` (icon button) would show it while hidden */
 .cf-dropdown-menu { font-size: var(--font-size-base); } /* the menu items' size, as `.md-item` */
@@ -498,6 +498,7 @@
 .sheet-name-box .cell-ref { display: inline-flex; align-items: center; justify-content: flex-start; min-width: 64px; max-width: 160px; padding: 0 6px; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--ui-text); outline: none; text-align: left; }
 .sheet-name-box:focus-within { border-color: var(--color-primary-hover); }
 .sheet-name-arrow { display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-left: 1px solid var(--color-border-light); border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; font-size: 8px; line-height: 1; cursor: default; }
+.sheet-name-arrow:hover { background: var(--color-hover-bg); color: var(--color-text-secondary); }
 .sheet-name-arrow:hover, .sheet-name-box .cell-ref[aria-expanded="true"] + .sheet-name-arrow { background: var(--color-hover-bg); }
 .sheet-name-box-list { position: absolute; top: 100%; left: 0; z-index: 31; min-width: 240px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-base); }
 .sheet-name-box-list[hidden] { display: none; }

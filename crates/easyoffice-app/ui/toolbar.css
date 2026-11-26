@@ -137,22 +137,44 @@
 .tb-scroll-nav-prev { left: 4px; }
 .tb-scroll-nav-next { right: 4px; }
 .tb-scroll-nav[hidden] { display: none; }
-#doc-style-bar.tb-scrollable {
+#doc-style-bar.tb-scrollable, #sheet-table-bar.tb-scrollable, #sheet-pivot-bar.tb-scrollable,
+#slide-toolbar.tb-scrollable, #pdf-toolbar.tb-scrollable, #base-toolbar.tb-scrollable, #board-toolbar.tb-scrollable {
   overflow: hidden;
   gap: 0;
 }
-#doc-style-bar.tb-scrollable .tb-scroll-track {
+#doc-style-bar.tb-scrollable .tb-scroll-track, #sheet-pivot-bar.tb-scrollable .tb-scroll-track {
   align-items: center;
   gap: 6px;
 }
+#slide-toolbar.tb-scrollable .tb-scroll-track, #pdf-toolbar.tb-scrollable .tb-scroll-track,
+#base-toolbar.tb-scrollable .tb-scroll-track, #board-toolbar.tb-scrollable .tb-scroll-track {
+  align-items: stretch;
+  gap: 6px;
+}
+#slide-toolbar .sb-field-grid, #slide-toolbar #slide-meta-status,
+#pdf-toolbar .sb-field-grid, #base-toolbar .base-view-tabs {
+  align-self: center;
+}
 .tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
 #icon-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
-#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])) {
+#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#sheet-table-bar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#sheet-pivot-bar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#slide-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#pdf-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#base-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
+#board-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])) {
   padding-left: 30px;
 }
 .tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
 #icon-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
-#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])) {
+#doc-style-bar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#sheet-table-bar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#sheet-pivot-bar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#slide-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#pdf-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#base-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
+#board-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])) {
   padding-right: 30px;
 }
 
@@ -520,7 +542,14 @@
 }
 
 .custom-select.disabled {
-  opacity: 0.5;
+  opacity: 1;
+}
+
+.custom-select.disabled .custom-select-trigger {
+  background: var(--ui-surface-muted);
+  border-color: var(--color-border-lighter);
+  color: var(--ui-text-muted);
+  cursor: not-allowed;
 }
 
 .custom-select[hidden] {
@@ -559,6 +588,15 @@ input.sb-ls-select {
   color: var(--color-text-muted);
   font-size: 8px;
   line-height: 1;
+}
+
+.custom-select:not(.disabled):hover .custom-select-arrow,
+.custom-select.open .custom-select-arrow {
+  color: var(--color-text-secondary);
+}
+
+.custom-select.disabled .custom-select-arrow {
+  color: var(--ui-text-muted);
 }
 
 .custom-select-menu {
@@ -755,6 +793,7 @@ input.sb-ls-select {
 .sb-color-host.open .sb-color-arrow {
   background: var(--ui-hover-strong);
   border-color: var(--ui-border-light);
+  color: var(--color-text-secondary);
 }
 
 /* WebKit shows no chooser for an input of size 0, so it stays 1px and transparent. */
