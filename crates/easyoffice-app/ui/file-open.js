@@ -246,22 +246,33 @@
   const utf8Encoder = new TextEncoder();
   const utf8Decoder = new TextDecoder();
 
+  function pushCellLines(out, raw, wrapFn) {
+    const parts = String(raw ?? "").split("\n");
+    parts.forEach((line, idx) => {
+      if (idx > 0) out.push(elSpec("br"));
+      if (line || parts.length === 1) out.push(wrapFn ? wrapFn(line) : textSpec(line));
+    });
+  }
+
   function cellInlineSpecs(text, cellLinks) {
-    if (!cellLinks || cellLinks.length === 0) return [textSpec(text)];
-    const bytes = utf8Encoder.encode(text);
     const out = [];
+    if (!cellLinks || cellLinks.length === 0) {
+      pushCellLines(out, text);
+      return out;
+    }
+    const bytes = utf8Encoder.encode(text);
     let pos = 0;
     for (const link of cellLinks) {
       const s = Number(link.start);
       const e = Number(link.end);
       const href = host.__EASYOFFICE_DOC_LINK__?.normalizeUrl(link.url);
       if (!href || !Number.isInteger(s) || !Number.isInteger(e) || s < pos || e <= s || e > bytes.length) continue;
-      if (pos < s) out.push(textSpec(utf8Decoder.decode(bytes.subarray(pos, s))));
+      if (pos < s) pushCellLines(out, utf8Decoder.decode(bytes.subarray(pos, s)));
       const piece = utf8Decoder.decode(bytes.subarray(s, e));
-      out.push({ ...elSpec("a", [textSpec(piece)], {}, { href }), data: { eoLink: "1" } });
+      pushCellLines(out, piece, (line) => ({ ...elSpec("a", [textSpec(line)], {}, { href }), data: { eoLink: "1" } }));
       pos = e;
     }
-    if (pos < bytes.length || out.length === 0) out.push(textSpec(utf8Decoder.decode(bytes.subarray(pos))));
+    if (pos < bytes.length || out.length === 0) pushCellLines(out, utf8Decoder.decode(bytes.subarray(pos)));
     return out;
   }
 

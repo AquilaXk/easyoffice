@@ -170,7 +170,7 @@ pub(crate) fn join_rich_cell_paragraphs(
         .iter()
         .map(|p| p.runs.iter().map(|r| r.text.len()).sum::<usize>())
         .sum::<usize>()
-        + active.len().saturating_sub(1);
+        .saturating_add(active.len().saturating_sub(1));
     let mut text = String::with_capacity(total_bytes);
     let mut spans: Vec<(u32, u32, String)> = Vec::new();
     let mut rich_overflow = active.len() > MAX_PARAGRAPHS_PER_CELL;

@@ -423,13 +423,13 @@
     return studio.deleteSelected();
   }
 
-  function runClipboardCommand(cmd) {
+  function runClipboardCommand(cmd, writeClip) {
     const doc = activeDoc || resolveHooks()?.getViewportEl?.()?.ownerDocument || host.document;
     if (isEditableTarget(null, doc)) {
       const execName = { "clip-cut": "cut", "clip-copy": "copy", "clip-paste": "paste" }[cmd];
       if (!execName) return false;
       const util = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.execTextFieldEdit;
-      if (typeof util === "function") return util(execName, doc);
+      if (typeof util === "function") return util(execName, doc, writeClip);
       try {
         return typeof doc?.execCommand === "function" ? Boolean(doc.execCommand(execName)) : false;
       } catch {

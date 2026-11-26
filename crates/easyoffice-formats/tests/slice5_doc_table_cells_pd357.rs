@@ -430,4 +430,43 @@ fn odt_repeated_cells_past_max_entries_stop_gracefully_and_overflow_cell_keeps_p
         tbl_overflow.rows[0][0].ends_with(&tail_marker),
         "expected plain text past MAX_PARAGRAPHS_PER_CELL to survive"
     );
+
+    let mut docx_paras = String::new();
+    for i in 0..=(MAX_PARAGRAPHS_PER_CELL + 4) {
+        docx_paras.push_str(&format!(
+            "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>D{i}</w:t></w:r></w:p>"
+        ));
+    }
+    let docx_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc>{docx_paras}</w:tc></w:tr></w:tbl></w:body></w:document>"#
+    );
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
+    let rels = r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#;
+    let docx_overflow = ZipArchiveCodec::pack_compressed(&[
+        (
+            "[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        ),
+        ("_rels/.rels".to_string(), rels.as_bytes().to_vec()),
+        (
+            "word/document.xml".to_string(),
+            docx_xml.as_bytes().to_vec(),
+        ),
+    ])
+    .unwrap();
+    let doc_docx_ov = decode_doc(&docx_overflow, "overflow.docx");
+    let tbl_docx_ov = doc_docx_ov
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            RichBlock::Table(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert!(tbl_docx_ov.cell_paragraphs.is_empty());
+    let docx_tail = format!("D{}", MAX_PARAGRAPHS_PER_CELL + 4);
+    assert!(
+        tbl_docx_ov.rows[0][0].ends_with(&docx_tail),
+        "DOCX plain text past MAX_PARAGRAPHS_PER_CELL must survive"
+    );
 }

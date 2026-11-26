@@ -864,4 +864,60 @@ test("Regression: native menu edit:cut/copy and toolbar clip commands preserve B
   assert.equal(slideClip.runMenuClipboard("clip-copy"), true);
   assert.deepEqual(execCalls, ["cut", "copy"]);
   assert.equal(canvas.getElements().length, 1, "SLIDE object stays intact while #slide-title-zone is focused");
+
+  // 4. execTextFieldEdit collapsed selection must NOT delete characters, and <input> setRangeText fallback fires input
+  const utils = h.host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
+  const origExec = h.document.execCommand;
+  let deleteCalls = 0;
+  h.document.execCommand = (name) => {
+    if (name === "delete") deleteCalls += 1;
+    return false;
+  };
+  const labelInp = h.document.createElement("input");
+  labelInp.type = "text";
+  labelInp.value = "LabelText";
+  labelInp.setRangeText = (rep, s, e) => {
+    labelInp.value = labelInp.value.slice(0, s) + rep + labelInp.value.slice(e);
+    labelInp.selectionStart = s + rep.length;
+    labelInp.selectionEnd = s + rep.length;
+  };
+  h.document.body.appendChild(labelInp);
+  labelInp.focus();
+  labelInp.selectionStart = 5;
+  labelInp.selectionEnd = 5;
+  assert.equal(utils.execTextFieldEdit("cut", h.document), false);
+  assert.equal(labelInp.value, "LabelText", "collapsed cut must not delete char before caret");
+  assert.equal(deleteCalls, 0);
+
+  let inputFired = 0;
+  labelInp.addEventListener("input", () => { inputFired += 1; });
+  labelInp.selectionStart = 5;
+  labelInp.selectionEnd = 9;
+  const clipOut = [];
+  assert.equal(utils.execTextFieldEdit("cut", h.document, (t) => clipOut.push(t)), true);
+  assert.deepEqual(clipOut, ["Text"]);
+  assert.equal(labelInp.value, "Label");
+  assert.equal(inputFired, 1);
+  labelInp.remove();
+  h.document.execCommand = origExec;
+
+  // 5. Full unstyled <br> table cell roundtrip via buildEditorNodes -> restoreDomChildren -> collectDocBlocks preserves \n and links
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(4);
+  const { buildEditorNodes } = h.host.__EASYOFFICE_FILE_OPEN_UTILS__;
+  const { restoreDomChildren } = h.host.__EASYOFFICE_SHEET_UTILS__;
+  const specs = buildEditorNodes([{
+    type: "table",
+    rows: [[{ text: "Line1\nLine2" }, { text: "A\nB" }]],
+    links: [{ row: 0, col: 1, start: 0, end: 3, url: "https://example.org" }],
+  }]);
+  restoreDomChildren(editor, specs, h.document);
+  const reopenedBlocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor, {});
+  const reopenedTbl = reopenedBlocks.find((b) => b.type === "table");
+  assert.equal(reopenedTbl.rows[0][0].text, "Line1\nLine2");
+  assert.equal(reopenedTbl.rows[0][1].text, "A\nB");
+  assert.deepEqual(reopenedTbl.links, [
+    { row: 0, col: 1, start: 0, end: 1, url: "https://example.org" },
+    { row: 0, col: 1, start: 2, end: 3, url: "https://example.org" },
+  ]);
 });

@@ -196,12 +196,12 @@
       return false;
     }
 
-    function runMenuClipboard(cmd) {
+    function runMenuClipboard(cmd, writeClip) {
       if (isEditableField(document.activeElement)) {
         const execName = { "clip-cut": "cut", "clip-copy": "copy", "clip-paste": "paste" }[cmd];
         if (!execName) return false;
         const util = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.execTextFieldEdit;
-        if (typeof util === "function") return util(execName, document);
+        if (typeof util === "function") return util(execName, document, writeClip);
         try {
           return typeof document.execCommand === "function" ? Boolean(document.execCommand(execName)) : false;
         } catch {

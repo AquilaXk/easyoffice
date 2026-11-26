@@ -97,6 +97,30 @@ fn hostile_odt_runs_exceeding_decode_budget_fail_closed() {
         hit,
         Some(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
+
+    let mut nested_walker = OdtWalker::new(&styles, &lists, &table_styles);
+    nested_walker.text_budget = DecodeBudget::with_limit(512);
+    let nested_xml = format!(
+        "<office:document-content><table:table><table:table-row><table:table-cell><table:table><table:table-row><table:table-cell>{}</table:table-cell></table:table-row></table:table></table:table-cell></table:table-row></table:table></office:document-content>",
+        "<text:p/>".repeat(16)
+    );
+    let mut nested_reader = XmlReader::new(&nested_xml);
+    let mut nested_hit = None;
+    while let Some(ev) = nested_reader.next_event().unwrap() {
+        let res = match ev {
+            XmlEvent::Start { name, ref attrs } => nested_walker.on_start(name, attrs).map(|_| ()),
+            XmlEvent::Text(text) => nested_walker.push_inline(&text),
+            XmlEvent::End(name) => nested_walker.on_end(name),
+        };
+        if let Err(err) = res {
+            nested_hit = Some(err);
+            break;
+        }
+    }
+    assert!(matches!(
+        nested_hit,
+        Some(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
 }
 
 #[test]
@@ -125,6 +149,30 @@ fn hostile_odt_table_paragraphs_exceeding_decode_budget_fail_closed() {
     }
     assert!(matches!(
         hit,
+        Some(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+
+    let mut nested_walker = OdtWalker::new(&styles, &lists, &table_styles);
+    nested_walker.text_budget = DecodeBudget::with_limit(512);
+    let nested_xml = format!(
+        "<office:document-content><table:table><table:table-row><table:table-cell><table:table><table:table-row><table:table-cell>{}</table:table-cell></table:table-row></table:table></table:table-cell></table:table-row></table:table></office:document-content>",
+        "<text:p/>".repeat(16)
+    );
+    let mut nested_reader = XmlReader::new(&nested_xml);
+    let mut nested_hit = None;
+    while let Some(ev) = nested_reader.next_event().unwrap() {
+        let res = match ev {
+            XmlEvent::Start { name, ref attrs } => nested_walker.on_start(name, attrs).map(|_| ()),
+            XmlEvent::Text(text) => nested_walker.push_inline(&text),
+            XmlEvent::End(name) => nested_walker.on_end(name),
+        };
+        if let Err(err) = res {
+            nested_hit = Some(err);
+            break;
+        }
+    }
+    assert!(matches!(
+        nested_hit,
         Some(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }

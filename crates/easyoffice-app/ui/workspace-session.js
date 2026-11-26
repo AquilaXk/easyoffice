@@ -376,21 +376,23 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   function execTextFieldEdit(execName, doc = host.document, writeClip) {
     if (!doc || !execName) return false;
-    let ok = false;
-    try { ok = typeof doc.execCommand === "function" && Boolean(doc.execCommand(execName)); } catch { ok = false; }
-    if (ok) return true;
+    try { if (typeof doc.execCommand === "function" && doc.execCommand(execName)) return true; } catch {}
     if (execName !== "cut" && execName !== "copy") return false;
     const el = doc.activeElement;
     const isInput = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
-    const txt = isInput && Number.isInteger(el.selectionStart) && Number.isInteger(el.selectionEnd)
-      ? String(el.value || "").slice(el.selectionStart, el.selectionEnd)
-      : (() => { const sel = host.getSelection?.(); return sel && !sel.isCollapsed ? sel.toString() : ""; })();
-    if (txt) {
-      if (typeof writeClip === "function") void writeClip(txt);
-      else { try { void host.navigator?.clipboard?.writeText?.(txt)?.catch?.(() => {}); } catch {} }
-    }
-    if (execName !== "cut") return Boolean(txt);
-    try { return typeof doc.execCommand === "function" && Boolean(doc.execCommand("delete")); } catch { return false; }
+    const hasRange = isInput && Number.isInteger(el.selectionStart) && Number.isInteger(el.selectionEnd);
+    const sel = isInput ? null : (doc.getSelection?.() || doc.defaultView?.getSelection?.() || host.getSelection?.());
+    const txt = isInput ? (hasRange ? String(el.value || "").slice(el.selectionStart, el.selectionEnd) : "") : (sel && !sel.isCollapsed ? sel.toString() : "");
+    if (!txt || (execName === "cut" && isInput && (el.readOnly || el.disabled))) return false;
+    if (typeof writeClip === "function") void writeClip(txt);
+    else { try { void host.navigator?.clipboard?.writeText?.(txt)?.catch?.(() => {}); } catch {} }
+    if (execName === "copy") return true;
+    try { if (typeof doc.execCommand === "function" && doc.execCommand("delete")) return true; } catch {}
+    if (!hasRange || typeof el.setRangeText !== "function") return false;
+    el.setRangeText("", el.selectionStart, el.selectionEnd, "end");
+    const Ev = doc.defaultView?.Event || host.Event;
+    el.dispatchEvent?.(typeof Ev === "function" ? new Ev("input", { bubbles: true }) : { type: "input", bubbles: true });
+    return true;
   }
 
   function createWorkspaceSession(deps) {
@@ -840,8 +842,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         return;
       }
       if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
-      if (mod === "SLIDE") return host.__EASYOFFICE_SLIDE_CLIPBOARD__?.runMenuClipboard?.(cmd);
-      if (mod === "BOARD") return host.__EASYOFFICE_BOARD_STYLE_BAR__?.runClipboardCommand?.(cmd);
+      if (mod === "SLIDE") return host.__EASYOFFICE_SLIDE_CLIPBOARD__?.runMenuClipboard?.(cmd, writeSystemClipboard);
+      if (mod === "BOARD") return host.__EASYOFFICE_BOARD_STYLE_BAR__?.runClipboardCommand?.(cmd, writeSystemClipboard);
       if (mod === "BASE") return host.__EASYOFFICE_BASE_BOARD_HOST__?.getBaseStudio()?.runClipboardCommand?.(cmd, readSystemClipboard, writeSystemClipboard);
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();

@@ -524,4 +524,60 @@ test("real Chrome: DOC sub/sup/spacing & DOCX table-cell roundtrip, SLIDE UX/sea
   assert.equal(slideTitleCut.ok, true);
   assert.equal(slideTitleCut.afterCount, slideTitleCut.beforeCount, "SLIDE shape must survive native edit:cut in #slide-title-zone");
   assert.equal(slideTitleCut.titleText, "Slide");
+
+  // Collapsed caret edit:cut in BOARD contenteditable and <input> must NOT delete characters before caret; selection <input>/<textarea> cuts cleanly
+  await openModule("BOARD");
+  await waitFor(`Boolean(window.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.())`);
+  const collapsedAndInput = await js(`(() => {
+    const b = window.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
+    const n1 = b.addNode({ kind: "text", x: 100, y: 100, w: 160, h: 70, text: "HelloWorld" });
+    const card = document.querySelector('#board-node-layer .board-node[data-node-id="' + n1.id + '"]');
+    card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const editable = card.querySelector('.board-node-text[contenteditable="plaintext-only"]');
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.setStart(editable.firstChild, 5);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    const afterCollapsedCe = b.getState().nodes.find((n) => n.id === n1.id)?.text;
+
+    const inp = document.getElementById("board-style-label");
+    inp.value = "LabelText";
+    inp.focus();
+    inp.setSelectionRange(5, 5);
+    window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    const afterCollapsedInp = inp.value;
+
+    inp.setSelectionRange(5, 9);
+    window.__EASYOFFICE_NATIVE_MENU__("edit:cut");
+    const afterSelectedInp = inp.value;
+    return { afterCollapsedCe, afterCollapsedInp, afterSelectedInp };
+  })()`);
+  assert.equal(collapsedAndInput.afterCollapsedCe, "HelloWorld", "collapsed cut in BOARD contenteditable must not delete char");
+  assert.equal(collapsedAndInput.afterCollapsedInp, "LabelText", "collapsed cut in <input> must not delete char");
+  assert.equal(collapsedAndInput.afterSelectedInp, "Label", "selection cut in <input> cuts selected slice");
+
+  // Unstyled <td>Line1<br>Line2</td> full roundtrip (DOC -> DOCX -> reopen -> collectDocBlocks) preserves \n
+  await openModule("DOC");
+  await waitFor(`Boolean(window.__EASYOFFICE_SAVE_PAYLOAD__ && window.__EASYOFFICE_WORKSPACE_API__)`);
+  const brRt = await js(`(async () => {
+    const ed = document.getElementById("doc-editor");
+    ed.innerHTML = '<table class="doc-inline-table"><tbody><tr><td>Line1<br>Line2</td></tr></tbody></table>';
+    const b1 = window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(ed, {});
+    const saved = await fetch("/api/ipc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "convert_document_format", payload: JSON.stringify({ targetFormat: "docx", title: "brrt", blocks: b1 }) }),
+    }).then((r) => r.json());
+    const bytes = window.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(saved.convertedBase64);
+    await window.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes("brrt.docx", bytes);
+    const tdHtml = document.querySelector("#doc-editor td")?.innerHTML;
+    const b2 = window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(ed, {});
+    return { tdHtml, t1: b1.find((b) => b.type === "table")?.rows?.[0]?.[0]?.text, t2: b2.find((b) => b.type === "table")?.rows?.[0]?.[0]?.text };
+  })()`);
+  assert.equal(brRt.t1, "Line1\nLine2");
+  assert.equal(brRt.tdHtml, "Line1<br>Line2");
+  assert.equal(brRt.t2, "Line1\nLine2");
 });

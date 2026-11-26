@@ -53,6 +53,19 @@ fn hostile_docx_runs_and_blocks_exceeding_decode_budget_fail_closed() {
         walk_part(&xml, &mut walker, &resolver, &media),
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
+
+    let mut nested_walker = DocxWalker {
+        text_budget: DecodeBudget::with_limit(512),
+        ..Default::default()
+    };
+    let nested_xml = format!(
+        "<w:document><w:body><w:tbl><w:tr><w:tc><w:tbl><w:tr><w:tc>{}</w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl></w:body></w:document>",
+        "<w:p/>".repeat(16)
+    );
+    assert!(matches!(
+        walk_part(&nested_xml, &mut nested_walker, &resolver, &media),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
 }
 
 #[test]
@@ -74,6 +87,19 @@ fn hostile_docx_table_paragraphs_exceeding_decode_budget_fail_closed() {
     );
     assert!(matches!(
         walk_part(&xml, &mut walker, &resolver, &media),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+
+    let mut nested_walker = DocxWalker {
+        text_budget: DecodeBudget::with_limit(512),
+        ..Default::default()
+    };
+    let nested_xml = format!(
+        "<w:document><w:body><w:tbl><w:tr><w:tc><w:tbl><w:tr><w:tc>{}</w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl></w:body></w:document>",
+        "<w:p/>".repeat(16)
+    );
+    assert!(matches!(
+        walk_part(&nested_xml, &mut nested_walker, &resolver, &media),
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }

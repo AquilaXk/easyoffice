@@ -846,9 +846,9 @@
     const menuTable = host.__EASYOFFICE_NATIVE_MENU_TABLE__;
     const { EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS } = menuTable;
     const field = document.activeElement;
-    const isBoardOrSlide = activeModule === "BOARD" || activeModule === "SLIDE";
-    const ceRoot = isBoardOrSlide && (id === "edit:cut" || id === "edit:copy") ? field?.closest?.("[contenteditable]") : null;
-    const inInline = Boolean(isBoardOrSlide && (id === "edit:cut" || id === "edit:copy") && (field?.isContentEditable || (ceRoot && ceRoot.getAttribute?.("contenteditable") !== "false")));
+    const inlineCutCopy = (activeModule === "BOARD" || activeModule === "SLIDE") && (id === "edit:cut" || id === "edit:copy");
+    const ceAttr = inlineCutCopy ? field?.closest?.("[contenteditable]")?.getAttribute?.("contenteditable") : null;
+    const inInline = inlineCutCopy && Boolean(field?.isContentEditable || ceAttr === "" || ceAttr === "true" || ceAttr === "plaintext-only");
     if (Object.hasOwn(TEXT_FIELD_EDIT_COMMANDS, id) && (field?.tagName === "INPUT" || field?.tagName === "TEXTAREA" || inInline)) {
       workspaceSession.execTextFieldEdit(TEXT_FIELD_EDIT_COMMANDS[id]);
       return true;
