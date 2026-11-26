@@ -250,3 +250,50 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.equal(psApi.turn(), false);
   assert.match(pageSetupErr, /머리말·꼬리말/);
 });
+
+test("PD-359: SHEET font preview caps oversized pt, fits narrow containers, and numeric inputs keep spinner clearance", async () => {
+  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-pd359-font-preview" });
+  await flushAsyncTurns(10);
+  sheet.userClick(sheet.document.querySelector('[data-sheet-numfmt="dialog"]'));
+  await flushAsyncTurns(4);
+  sheet.userClick(sheet.document.getElementById("sheet-fmt-tab-font"));
+  await flushAsyncTurns(2);
+
+  const sizeSel = sheet.document.getElementById("sheet-font-size-select");
+  const sample = sheet.document.getElementById("sheet-font-sample");
+  const chooseSize = async (val) => {
+    sizeSel.value = val;
+    sizeSel.dispatchEvent({ type: "change", bubbles: true });
+    await flushAsyncTurns(2);
+  };
+
+  await chooseSize("72");
+  assert.equal(sample.style.getPropertyValue("--sample-size"), "28pt", "72pt font preview is capped inside the 76px box");
+
+  await chooseSize("18");
+  assert.equal(sample.style.getPropertyValue("--sample-size"), "18pt", "normal font sizes under the cap keep exact pt");
+
+  await chooseSize("");
+  assert.equal(sample.style.getPropertyValue("--sample-size"), "", "default font size clears custom override");
+
+  // Overflow guard scales down further when rendered width/height cannot hold the capped size.
+  Object.defineProperties(sample, {
+    clientWidth: { configurable: true, get: () => 180 },
+    clientHeight: { configurable: true, get: () => 74 },
+    scrollWidth: { configurable: true, get: () => 300 },
+    scrollHeight: { configurable: true, get: () => 74 },
+  });
+  await chooseSize("48");
+  const fittedPt = Number.parseFloat(sample.style.getPropertyValue("--sample-size"));
+  assert.ok(fittedPt >= 8 && fittedPt < 28, `overflow guard scales 48pt down for narrow container (got ${fittedPt}pt)`);
+
+  const shellCss = readUi("shell.css");
+  const toolbarCss = readUi("toolbar.css");
+  const hwpCss = readHwp("src/eo-overrides.css");
+  assert.match(shellCss, /#sheet-font-sample\s*\{[^}]*justify-content:\s*center/);
+  assert.match(shellCss, /::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
+  assert.match(toolbarCss, /\.custom-select-value\s*\{[^}]*padding-right:\s*6px;/);
+  assert.match(toolbarCss, /\.sb-spacing-input::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
+  assert.match(hwpCss, /input\[type="number"\]\.dialog-input::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
+  assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*min-width:\s*68px;[^}]*text-align:\s*center;/);
+});

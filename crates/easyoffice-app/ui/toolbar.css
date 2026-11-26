@@ -569,6 +569,7 @@ input.sb-ls-select {
 
 .custom-select-value {
   min-width: 0;
+  padding-right: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -979,7 +980,9 @@ input.sb-ls-select {
 .doc-image-handle[data-resize-dir="s"] { left: calc(50% - 4px); bottom: -5px; cursor: ns-resize; }
 .sb-spacing-group { display: inline-flex; align-items: center; gap: 4px; }
 .sb-spacing-label { font-size: var(--font-size-xs); color: var(--ui-text-secondary); white-space: nowrap; }
-.sb-spacing-input { width: 48px; height: 22px; padding: 0 4px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-xs); text-align: right; }
+.sb-spacing-input { width: 52px; height: 22px; padding: 0 4px 0 6px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-xs); text-align: right; }
+.sb-spacing-input::-webkit-inner-spin-button,
+.sb-spacing-input::-webkit-outer-spin-button { margin-inline-start: 4px; }
 .sb-spacing-input:focus { outline: none; border-color: var(--focus-ring); }
 .slide-presenter-notes-input { width: 100%; min-height: 58px; resize: vertical; font: inherit; line-height: 1.45; }
 .slide-context-menu.context-menu[data-mode="canvas"] { min-width: 200px; display: block; padding: 4px 0; background: var(--color-surface); border: 1px solid var(--ui-border); box-shadow: var(--shadow-dropdown); }

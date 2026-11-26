@@ -68,6 +68,7 @@
         tab.tabIndex = on ? 0 : -1;
       }
       for (const pane of panes()) pane.hidden = pane.dataset.fmtPane !== name;
+      if (name === "font") updateFontSample();
     }
 
     function setOptions(id, pairs, value) {
@@ -171,6 +172,9 @@
       }
     }
 
+    const MAX_SAMPLE_PT = 28;
+    const MIN_SAMPLE_PT = 8;
+
     function updateFontSample() {
       const sample = $("sheet-font-sample");
       if (!sample) return;
@@ -178,11 +182,18 @@
       const fs = val("sheet-font-size-select");
       const dfApi = host.__EASYOFFICE_SHEET_DEFAULT_FONT__;
       const cssFam = ff && ff !== "mixed" ? (dfApi?.quoteCssFont?.(ff) || ("'" + ff + "'")) : "";
-      const cssSize = fs && fs !== "mixed" ? fs + "pt" : "";
+      const rawPt = fs && fs !== "mixed" ? Number.parseFloat(fs) : NaN;
+      let previewPt = Number.isFinite(rawPt) && rawPt > 0 ? Math.min(rawPt, MAX_SAMPLE_PT) : NaN;
       if (cssFam) sample.style.setProperty("--sample-font", cssFam);
       else sample.style.removeProperty("--sample-font");
-      if (cssSize) sample.style.setProperty("--sample-size", cssSize);
+      if (Number.isFinite(previewPt)) sample.style.setProperty("--sample-size", previewPt + "pt");
       else sample.style.removeProperty("--sample-size");
+      if (sample.clientWidth > 0 && sample.clientHeight > 0 && (sample.scrollWidth > sample.clientWidth || sample.scrollHeight > sample.clientHeight)) {
+        const basePt = Number.isFinite(previewPt) ? previewPt : 11;
+        const ratio = Math.min((sample.clientWidth - 2) / sample.scrollWidth, (sample.clientHeight - 2) / sample.scrollHeight);
+        const fitPt = Math.max(Math.min(MIN_SAMPLE_PT, basePt), Math.floor(basePt * ratio * 2) / 2);
+        sample.style.setProperty("--sample-size", fitPt + "pt");
+      }
     }
 
     function mergeStateOf(ranges) {

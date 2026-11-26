@@ -101,6 +101,11 @@
 .tool-dialog .dialog-label { min-width: 40px; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
 .tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input, .sheet-tab-edit { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .tool-dialog .dialog-input { width: 72px; text-align: right; }
+.tool-dialog input[type="number"].dialog-input { padding: 0 4px 0 6px; }
+.tool-dialog input[type="number"].dialog-input::-webkit-inner-spin-button,
+.tool-dialog input[type="number"].dialog-input::-webkit-outer-spin-button,
+.pages-insp-size::-webkit-inner-spin-button,
+.pages-insp-size::-webkit-outer-spin-button { margin-inline-start: 4px; }
 .tool-dialog .dialog-text-input { width: 120px; }
 .tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus, .sheet-filter-panel .dialog-text-input:focus, .sheet-tab-edit:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 /* Combo boxes in dialogs size to their content, like the reference's `.dialog-select` (no width, `custom-select.css`: inline-flex, the trigger fills the root). */
@@ -739,7 +744,7 @@
 .split-compare-table td, .split-compare-table th { border: 1px solid var(--ui-border-light); padding: 3px 6px; text-align: left; }
 
 /* Sheet Format Cells, Text Rotation, Size Dialogs & Text-to-Columns (PD-356). */
-.tool-dialog #sheet-font-sample { height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.05; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
+.tool-dialog #sheet-font-sample { height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; justify-content: center; padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.15; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
 .sheet-rot-presets button { padding: 3px 7px; font-size: var(--font-size-xs); }
 .sheet-rot-presets button[aria-pressed="true"] { background: var(--color-accent-bg); border-color: var(--color-primary); color: var(--color-primary-dark); font-weight: 700; }
 .sheet-rot-stage { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; margin-left: auto; flex: none; overflow: hidden; border: 1px solid var(--color-border-dark); background: var(--color-surface); }
