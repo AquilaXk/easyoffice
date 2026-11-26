@@ -24,6 +24,7 @@ test("the version is written in one file only", () => {
   const files = [
     ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
+    ".github/workflows/dependency-audit.yml",
     ".github/actions/setup-rust/action.yml",
     ".github/actions/prepare-desktop-build/action.yml",
   ];
@@ -41,7 +42,7 @@ test("the setup action installs the pinned toolchain and exports it to later ste
   assert.match(action, /RUSTUP_TOOLCHAIN=\$VERSION" >> "\$GITHUB_ENV"/);
 });
 
-for (const file of [".github/workflows/ci.yml", ".github/workflows/release.yml"]) {
+for (const file of [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/dependency-audit.yml"]) {
   test(`every Rust job in ${file} sets up the pinned toolchain before running cargo`, () => {
     const jobs = rustJobs(readText(repo(file)));
     assert.ok(jobs.length >= 1);
@@ -61,7 +62,7 @@ test("the shared release action sets up the pinned toolchain before its cargo st
 });
 
 test("no step installs or switches a Rust toolchain on its own", () => {
-  for (const file of [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/actions/prepare-desktop-build/action.yml"]) {
+  for (const file of [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/dependency-audit.yml", ".github/actions/prepare-desktop-build/action.yml"]) {
     assert.doesNotMatch(readText(repo(file)), /rustup (toolchain|default|update|target)|dtolnay\/rust-toolchain/, file);
   }
 });

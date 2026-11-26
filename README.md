@@ -1,38 +1,44 @@
 <div align="center">
 
-<img src="crates/easyoffice-desktop/icons/icon.png" alt="EasyOffice 아이콘" width="96" height="96" />
+<img src="crates/easyoffice-desktop/icons/icon.png" alt="EasyOffice 아이콘" width="88" height="88" />
 
 <h1>EasyOffice</h1>
 
-<p><strong>문서·시트·슬라이드·PDF·한글을 한 앱에서 여는 오프라인 올인원 오피스</strong></p>
-
-<p>macOS · Windows · Linux에서 실행하는 Rust 엔진 + Tauri v2 데스크톱 오피스입니다.</p>
-
 <p>
-  <a href="https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" alt="Windows 다운로드" height="48" /></a>&nbsp;&nbsp;
-  <a href="#다운로드"><img src="docs/images/download-macos.svg" alt="macOS 다운로드" height="48" /></a>&nbsp;&nbsp;
-  <a href="#다운로드"><img src="docs/images/download-linux.svg" alt="Linux 다운로드" height="48" /></a>
+  <strong>문서·시트·슬라이드·PDF·한글을 한 앱에서 여는 오프라인 올인원 오피스</strong>
+  <br />
+  macOS · Windows · Linux에서 실행하는 Rust 엔진 + Tauri v2 데스크톱 앱
+  <br />
+  <a href="#다운로드"><b>다운로드 ↓</b></a>
 </p>
-
-<p>
-  <a href="https://github.com/AquilaXk/easyoffice/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AquilaXk/easyoffice/ci.yml?branch=main&amp;label=CI" alt="CI" /></a>
-  <a href="https://github.com/AquilaXk/easyoffice/releases/latest"><img src="https://img.shields.io/github/v/release/AquilaXk/easyoffice?label=Release" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="License Apache-2.0" /></a>
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-555" alt="Platforms" />
-</p>
-
-<p>
-  <a href="#할-수-있는-일">할 수 있는 일</a> ·
-  <a href="#다운로드">다운로드</a> ·
-  <a href="#설치-유의사항">설치 유의사항</a> ·
-  <a href="#성능">성능</a> ·
-  <a href="#개발하기">개발하기</a> ·
-  <a href="#문서">문서</a>
-</p>
-
-<br />
 
 <img src="docs/images/easyoffice-home.png" alt="EasyOffice 홈 화면" width="840" />
+
+<p>
+  <a href="https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" alt="Windows 다운로드" height="48" /></a>
+  &nbsp;
+  <a href="https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-arm64.dmg"><img src="docs/images/download-macos.svg" alt="macOS 다운로드" height="48" /></a>
+  &nbsp;
+  <a href="https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb"><img src="docs/images/download-linux.svg" alt="Linux 다운로드" height="48" /></a>
+  <br />
+  <sub>macOS 버튼은 Apple Silicon(M1 이후)용입니다. Intel Mac은 <a href="https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-x64.dmg">Intel Mac용 다운로드</a>를 받으세요. Linux 버튼은 x64 <code>.deb</code>이며 <code>.rpm</code>·<code>AppImage</code>·ARM64 빌드는 아래 표에 있습니다.</sub>
+</p>
+
+<p>
+  <a href="https://github.com/AquilaXk/easyoffice/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AquilaXk/easyoffice/ci.yml?branch=main&amp;label=CI&amp;style=flat-square" alt="CI" /></a>
+  <a href="https://github.com/AquilaXk/easyoffice/releases/latest"><img src="https://img.shields.io/github/v/release/AquilaXk/easyoffice?label=Release&amp;style=flat-square" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License Apache-2.0" /></a>
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-555?style=flat-square" alt="Platforms" />
+</p>
+
+<p>
+  <a href="#할-수-있는-일"><b>할 수 있는 일</b></a> ·
+  <a href="#다운로드"><b>다운로드</b></a> ·
+  <a href="#설치-유의사항"><b>설치 유의사항</b></a> ·
+  <a href="#성능"><b>성능</b></a> ·
+  <a href="#개발하기"><b>개발하기</b></a> ·
+  <a href="#문서"><b>문서</b></a>
+</p>
 
 </div>
 
@@ -114,18 +120,18 @@ AppImage는 설치가 필요 없지만 `chmod +x EasyOffice-linux-x64.AppImage` 
 
 ## 성능
 
-Apple M4 Pro 환경의 release 빌드(`cargo run -p easyoffice-app -- --self-test`, 3회 중앙값) 기준 실측 수치입니다. 전체 측정 조건과 항목별 비교는 [성능 문서](docs/performance.md)에 있습니다.
+Apple M4 Pro release 빌드 실측 수치입니다. `HWP → PDF 내보내기`는 `scripts/bench-run.mjs --suite hwp`(5회 중앙값, Rust `1.98.1`), 엔진 경로는 `cargo run --release -p easyoffice-app -- --self-test`(3회 중앙값, Rust `1.93.1`) 기준입니다. 전체 측정 조건과 회귀 비교는 [성능 문서](docs/performance.md)에 있습니다.
 
-| 항목 | EasyOffice 실측 | 비교 기준 / 비고 |
-| --- | ---: | --- |
-| HWP -> PDF 내보내기 (`biz_plan.hwp`, 6쪽) | **80 ms** | 참조 앱 `710 ms` 대비 **8.8배** |
-| HWP -> PDF 내보내기 (`kps-ai.hwp`, 77쪽) | **798 ms** | 참조 앱 `11,389 ms` 대비 **14배** |
-| HWP -> PDF 내보내기 (합성 300쪽) | **1,462 ms** | 참조 앱 `97,410 ms` 대비 **약 67배** |
-| 하드웨어 CRC-32 (`crc32_hardware_1mib`) | **108 µs** | 소프트웨어 테이블 `2,180 µs` 대비 **19.95배** |
-| Deflate/Zlib 왕복 (`deflate_zlib_roundtrip`) | **45 µs** | 기본 경로 `250 µs` 대비 **5.91배** |
-| 시트 증분 재계산 (`sheet_recalc_10k_rows`, 5만 셀) | **4,235 µs** | 전체 재계산 `26,791 µs` 대비 **6.31배** |
-| DOCX 왕복 (`docx_to_docx_1mb`) | **10.6 ms** | 1 MB 문서 파싱·직렬화 |
-| XLSX 10만 셀 왕복 (`xlsx_100k_cells_pack_unpack`) | **44.6 ms** | 10만 셀 생성·압축·복원 |
+| 항목 | 측정 경로 | EasyOffice 실측 | 비교 기준 / 비고 |
+| --- | --- | ---: | --- |
+| HWP → PDF 내보내기 (`biz_plan.hwp`, 6쪽) | `bench-run.mjs` (§4.1 / §2.1) | **67 ms** (최적화 전 `80 ms`) | 참조 앱 `710 ms` 대비 **8.8~10.7배** (§2.1 기준) |
+| HWP → PDF 내보내기 (`kps-ai.hwp`, 77쪽) | `bench-run.mjs` (§4.1 / §2.1) | **700 ms** (최적화 전 `798 ms`) | 참조 앱 `11,389 ms` 대비 **7.7~14배** (§2.1 벽시계 비) |
+| HWP → PDF 내보내기 (합성 300쪽) | `bench-run.mjs` (§4.1 / §2.1) | **1,194 ms** (최적화 전 `1,462 ms`) | 참조 앱 `97,410 ms` 대비 **약 67~70배** (§2.1 기준) |
+| 하드웨어 CRC-32 (`crc32_hardware_1mib`) | `--self-test` (§7.2) | **108 µs** | 기준 구현 `2,180 µs` 대비 **19.95배** |
+| Deflate/Zlib 왕복 (`deflate_zlib_roundtrip`) | `--self-test` (§7.2) | **45 µs** | 기준 구현 `250 µs` 대비 **5.91배** |
+| 시트 증분 재계산 (`sheet_recalc_10k_rows`, 5만 셀) | `--self-test` (§7.2) | **4,235 µs** | 기준 구현 `26,791 µs` 대비 **6.31배** |
+| DOCX 왕복 (`docx_to_docx_1mb`) | `--self-test` (§7.3) | **10.6 ms** | 1 MB 문서 파싱·직렬화 |
+| XLSX 10만 셀 왕복 (`xlsx_100k_cells_pack_unpack`) | `--self-test` (§7.3) | **44.6 ms** | 10만 셀 생성·압축·복원 |
 
 ## 개발하기
 
@@ -143,6 +149,7 @@ node --test scripts/test-*.mjs
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
 cargo test --workspace --exclude easyoffice-desktop
+cargo run -p easyoffice-app -- --self-test
 ```
 
 플랫폼별 패키지 빌드와 오픈소스 이식 규칙은 [개발 문서](docs/DEVELOPMENT.md)에서 확인할 수 있습니다.

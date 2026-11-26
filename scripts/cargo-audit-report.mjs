@@ -13,6 +13,14 @@ import { pathToFileURL } from "node:url";
 
 const MAX_REPORT_BYTES = 16 * 1024 * 1024;
 
+function escapeMarkdownCell(value) {
+  return String(value ?? "").replace(/\r?\n/g, " ").replaceAll("|", "\\|");
+}
+
+function escapeWorkflowCommand(value) {
+  return String(value ?? "").replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
+
 export function parseCargoAuditJson(rawText, label) {
   if (typeof rawText !== "string" || rawText.trim().length === 0) {
     throw new Error(`cargo audit report '${label}' is empty`);
@@ -85,7 +93,9 @@ export function formatCargoAuditMarkdown(summary) {
   if (summary.vulnerabilities.length > 0) {
     lines.push("| Target | ID | Package | Version | Patched | Title |", "| --- | --- | --- | --- | --- | --- |");
     for (const v of summary.vulnerabilities) {
-      lines.push(`| \`${v.label}\` | \`${v.id}\` | \`${v.pkg}\` | \`${v.version}\` | \`${v.patched}\` | ${v.title} |`);
+      lines.push(
+        `| \`${escapeMarkdownCell(v.label)}\` | \`${escapeMarkdownCell(v.id)}\` | \`${escapeMarkdownCell(v.pkg)}\` | \`${escapeMarkdownCell(v.version)}\` | \`${escapeMarkdownCell(v.patched)}\` | ${escapeMarkdownCell(v.title)} |`,
+      );
     }
     lines.push("");
   }
@@ -93,7 +103,9 @@ export function formatCargoAuditMarkdown(summary) {
   if (summary.warnings.length > 0) {
     lines.push("| Target | Kind | Package | Version | ID |", "| --- | --- | --- | --- | --- |");
     for (const w of summary.warnings) {
-      lines.push(`| \`${w.label}\` | ${w.kind} | \`${w.pkg}\` | \`${w.version}\` | \`${w.id}\` |`);
+      lines.push(
+        `| \`${escapeMarkdownCell(w.label)}\` | ${escapeMarkdownCell(w.kind)} | \`${escapeMarkdownCell(w.pkg)}\` | \`${escapeMarkdownCell(w.version)}\` | \`${escapeMarkdownCell(w.id)}\` |`,
+      );
     }
     lines.push("");
   }
@@ -137,7 +149,9 @@ function runCli(argv) {
 
   const level = strict ? "error" : "warning";
   for (const v of summary.vulnerabilities) {
-    console.warn(`::${level}::[${v.label}] ${v.id} in ${v.pkg} ${v.version} (patched: ${v.patched}) — ${v.title}`);
+    console.warn(
+      `::${level}::[${escapeWorkflowCommand(v.label)}] ${escapeWorkflowCommand(v.id)} in ${escapeWorkflowCommand(v.pkg)} ${escapeWorkflowCommand(v.version)} (patched: ${escapeWorkflowCommand(v.patched)}) — ${escapeWorkflowCommand(v.title)}`,
+    );
   }
   const summaryPath = process.env.GITHUB_STEP_SUMMARY || "";
   if (summaryPath) {

@@ -11,7 +11,7 @@ test("parseCargoAuditJson extracts vulnerabilities and warnings and formats summ
     vulnerabilities: {
       list: [
         {
-          advisory: { id: "RUSTSEC-2026-0001", title: "Example issue" },
+          advisory: { id: "RUSTSEC-2026-0001", title: "Example | pipe\nnewline issue" },
           versions: { patched: [">=1.2.3"] },
           package: { name: "example-crate", version: "1.0.0" },
         },
@@ -36,6 +36,7 @@ test("parseCargoAuditJson extracts vulnerabilities and warnings and formats summ
   assert.match(md, /RUSTSEC-2026-0001/);
   assert.match(md, /`example-crate`/);
   assert.match(md, /`old-crate`/);
+  assert.match(md, /Example \\\| pipe newline issue/);
 });
 
 test("parseCargoAuditJson rejects empty, malformed, or incomplete input fail-closed", () => {

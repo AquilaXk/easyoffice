@@ -27,8 +27,8 @@ runs:
       shell: bash
       run: echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
 
-    - name: Restore and save npm cache (push)
-      if: inputs.cache == 'true' && github.event_name == 'push'
+    - name: Restore and save npm cache (non-PR)
+      if: inputs.cache == 'true' && github.event_name != 'pull_request'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ${{ steps.cache-dir.outputs.dir }}
@@ -36,8 +36,8 @@ runs:
         restore-keys: |
           npm-${{ runner.os }}-${{ runner.arch }}-
 
-    - name: Restore npm cache read-only (non-push)
-      if: inputs.cache == 'true' && github.event_name != 'push'
+    - name: Restore npm cache read-only (pull_request)
+      if: inputs.cache == 'true' && github.event_name == 'pull_request'
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ${{ steps.cache-dir.outputs.dir }}

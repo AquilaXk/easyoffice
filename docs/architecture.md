@@ -61,9 +61,12 @@ EasyOffice/
 │   └── performance.md                             # 측정값과 병목
 └── .github/
     ├── release.yml                                # GitHub Release 노트 자동 분류 설정
+    ├── actions/                                   # 공용 복합 액션 (assert-sha, setup-node-ci, setup-rust, prepare-desktop-build, install-linux-deps, cache-tauri-tools)
     └── workflows/
-        ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS 데스크톱 셸·.app·.dmg + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
-        └── release.yml                            # macOS 유니버설 .dmg, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
+        ├── ci.yml                                 # 병렬 checks/checks-rust + sonar + webkit-dom(WebKit 캐시) + verify(macOS)/verify-linux/verify-windows (PR 읽기 전용 캐시)
+        ├── release.yml                            # assert-sha·아키텍처별 macOS(.dmg)/Windows(NSIS)/Linux(.AppImage/.deb/.rpm) 서명 릴리스 + post-release-check + release-timings
+        ├── latest-guard.yml                       # /releases/latest 포인터와 최고 안정 태그·자산·매니페스트 일치 검사
+        └── dependency-audit.yml                   # npm audit(high 이상 게이트) 및 Cargo.lock/Quick Look lockfile 취약점 감사
 ```
 
 ### 1.1 크레이트 의존 정책 (PD-269, PD-101)

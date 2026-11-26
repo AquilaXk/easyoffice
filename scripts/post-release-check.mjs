@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
  * Verifies a GitHub Release (draft or published) against EasyOffice's fixed release asset set,
- * `latest.json` updater manifest (signatures, URLs, version claims), `SHA256SUMS.txt`, and public
- * `/releases/latest` pointer.
+ * `latest.json` updater manifest (signatures, URLs, version claims), `SHA256SUMS.txt` (including
+ * cryptographic match with `latest.json`), and public `/releases/latest` pointer.
  *
  * Uses Node.js built-in modules only.
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,9 +20,13 @@ import {
   signedVersion,
 } from "./release-assets.mjs";
 
-const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+export const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_RELEASE_PAGES = 20;
 const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+class TransientVerificationError extends Error {}
 
 function compareStrings(a, b) {
   if (a < b) return -1;
@@ -156,8 +161,11 @@ export function verifyReleaseRecord({
   if (release.tag_name !== expectedTag) {
     throw new Error(`release tag is '${release.tag_name}', expected '${expectedTag}'`);
   }
-  if (release.prerelease) {
-    throw new Error(`release ${expectedTag} must not be marked prerelease`);
+  const expectPrerelease = expectedVersion.includes("-");
+  if (Boolean(release.prerelease) !== expectPrerelease) {
+    throw new Error(
+      `release ${expectedTag} prerelease=${Boolean(release.prerelease)}, expected prerelease=${expectPrerelease}`,
+    );
   }
   if (typeof expectedDraft === "boolean" && Boolean(release.draft) !== expectedDraft) {
     throw new Error(`release ${expectedTag} draft=${Boolean(release.draft)}, expected draft=${expectedDraft}`);
@@ -185,6 +193,9 @@ export function verifyReleaseRecord({
 
   for (const name of expectedAssets) {
     const asset = assetByName.get(name);
+    if (asset.state !== undefined && asset.state !== "uploaded") {
+      throw new Error(`release ${expectedTag} asset '${name}' is incomplete (state=${asset.state})`);
+    }
     if (typeof asset.size !== "number" || asset.size <= 0) {
       throw new Error(`release ${expectedTag} asset '${name}' has invalid size ${asset.size}`);
     }
@@ -192,16 +203,26 @@ export function verifyReleaseRecord({
 
   const manifest = validateManifestPayload(manifestText, expectedVersion);
   const checksums = validateChecksumsPayload(sumsText);
+  const manifestDigest = crypto.createHash("sha256").update(manifestText, "utf8").digest("hex");
+  const expectedManifestDigest = checksums.get(MANIFEST_FILE);
+  if (manifestDigest !== expectedManifestDigest) {
+    throw new Error(
+      `${SUMS_FILE} digest for ${MANIFEST_FILE} (${expectedManifestDigest}) does not match downloaded ${MANIFEST_FILE} (${manifestDigest})`,
+    );
+  }
 
-  if (!release.draft && latestRelease !== undefined) {
+  if (!release.draft && !release.prerelease && latestRelease !== undefined) {
     if (!latestRelease || latestRelease.tag_name !== expectedTag) {
-      throw new Error(`/releases/latest points to '${latestRelease?.tag_name ?? "(none)"}', expected '${expectedTag}'`);
+      throw new TransientVerificationError(
+        `/releases/latest points to '${latestRelease?.tag_name ?? "(none)"}', expected '${expectedTag}'`,
+      );
     }
   }
 
   return {
     tag: expectedTag,
     draft: Boolean(release.draft),
+    prerelease: Boolean(release.prerelease),
     assetCount: expectedAssets.length,
     manifestKeys: Object.keys(manifest.platforms).length,
     checksumCount: checksums.size,
@@ -238,17 +259,96 @@ function githubHeaders(token, accept = "application/vnd.github+json") {
   return headers;
 }
 
+export async function readResponseTextBounded(res, label, maxBytes = MAX_PAYLOAD_BYTES) {
+  const contentLength = res.headers?.get?.("content-length");
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    await res.body?.cancel?.().catch(() => {});
+    throw new Error(`${label} exceeds ${maxBytes} bytes`);
+  }
+  if (res.body && typeof res.body.getReader === "function") {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const buf = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        total += buf.length;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new Error(`${label} exceeds ${maxBytes} bytes`);
+        }
+        chunks.push(buf);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, total).toString("utf8");
+  }
+  const text = await res.text();
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    throw new Error(`${label} exceeds ${maxBytes} bytes`);
+  }
+  return text;
+}
+
+function parseNextLink(linkHeader) {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match) {
+      const nextUrl = match[1];
+      if (!nextUrl.startsWith("https://api.github.com/")) {
+        throw new Error(`refusing non-GitHub API pagination URL '${nextUrl}'`);
+      }
+      return nextUrl;
+    }
+  }
+  return null;
+}
+
 export async function fetchGitHubJson(url, token, fetchImpl = fetch) {
   const res = await fetchImpl(url, { headers: githubHeaders(token) });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`GET ${url} failed (${res.status}): ${body.slice(0, 300)}`);
+    const body = await readResponseTextBounded(res, `error response from ${url}`, 8192).catch(() => "");
+    const message = `GET ${url} failed (${res.status}): ${body.slice(0, 300)}`;
+    if (res.status === 404 || res.status >= 500) {
+      throw new TransientVerificationError(message);
+    }
+    throw new Error(message);
   }
-  const text = await res.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_PAYLOAD_BYTES) {
-    throw new Error(`response from ${url} exceeds ${MAX_PAYLOAD_BYTES} bytes`);
-  }
+  const text = await readResponseTextBounded(res, `response from ${url}`);
   return JSON.parse(text);
+}
+
+export async function fetchGitHubPaginatedJson(initialUrl, token, fetchImpl = fetch, maxPages = MAX_RELEASE_PAGES) {
+  const items = [];
+  let nextUrl = initialUrl;
+  let page = 0;
+  while (nextUrl) {
+    page += 1;
+    if (page > maxPages) {
+      throw new Error(`pagination for ${initialUrl} exceeded ${maxPages} pages`);
+    }
+    const res = await fetchImpl(nextUrl, { headers: githubHeaders(token) });
+    if (!res.ok) {
+      const body = await readResponseTextBounded(res, `error response from ${nextUrl}`, 8192).catch(() => "");
+      const message = `GET ${nextUrl} failed (${res.status}): ${body.slice(0, 300)}`;
+      if (res.status === 404 || res.status >= 500) {
+        throw new TransientVerificationError(message);
+      }
+      throw new Error(message);
+    }
+    const text = await readResponseTextBounded(res, `response from ${nextUrl}`);
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`paginated response from ${nextUrl} must be a JSON array`);
+    }
+    items.push(...parsed);
+    nextUrl = parseNextLink(res.headers?.get?.("link") ?? "");
+  }
+  return items;
 }
 
 export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
@@ -266,13 +366,13 @@ export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
     });
   }
   if (!finalRes.ok) {
-    throw new Error(`downloading '${asset.name}' failed (${finalRes.status})`);
+    const message = `downloading '${asset.name}' failed (${finalRes.status})`;
+    if (finalRes.status === 404 || finalRes.status >= 500) {
+      throw new TransientVerificationError(message);
+    }
+    throw new Error(message);
   }
-  const text = await finalRes.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_PAYLOAD_BYTES) {
-    throw new Error(`asset '${asset.name}' exceeds ${MAX_PAYLOAD_BYTES} bytes`);
-  }
-  return text;
+  return readResponseTextBounded(finalRes, `asset '${asset.name}'`);
 }
 
 async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetchImpl }) {
@@ -280,19 +380,23 @@ async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetch
   const tagUrl = `${apiBase}/releases/tags/${encodeURIComponent(tag)}`;
   const res = await fetchImpl(tagUrl, { headers });
   if (res.ok) {
-    const text = await res.text();
-    if (Buffer.byteLength(text, "utf8") > MAX_PAYLOAD_BYTES) {
-      throw new Error(`response from ${tagUrl} exceeds ${MAX_PAYLOAD_BYTES} bytes`);
-    }
+    const text = await readResponseTextBounded(res, `response from ${tagUrl}`);
     return JSON.parse(text);
   }
   if (res.status === 404 && allowDraftFallback) {
-    const releases = await fetchGitHubJson(`${apiBase}/releases?per_page=30`, token, fetchImpl);
-    const found = Array.isArray(releases) ? releases.find((r) => r && r.tag_name === tag) : null;
-    if (found) return found;
+    const releases = await fetchGitHubPaginatedJson(`${apiBase}/releases?per_page=100`, token, fetchImpl);
+    const matches = releases.filter((r) => r && r.tag_name === tag);
+    if (matches.length > 1) {
+      throw new Error(`multiple draft releases match tag '${tag}' (${matches.length})`);
+    }
+    if (matches.length === 1) return matches[0];
   }
-  const body = await res.text().catch(() => "");
-  throw new Error(`GET ${tagUrl} failed (${res.status}): ${body.slice(0, 300)}`);
+  const body = await readResponseTextBounded(res, `error response from ${tagUrl}`, 8192).catch(() => "");
+  const message = `GET ${tagUrl} failed (${res.status}): ${body.slice(0, 300)}`;
+  if (res.status === 404 || res.status >= 500) {
+    throw new TransientVerificationError(message);
+  }
+  throw new Error(message);
 }
 
 export async function verifyReleaseOnGitHub({
@@ -302,48 +406,65 @@ export async function verifyReleaseOnGitHub({
   token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "",
   summaryPath = process.env.GITHUB_STEP_SUMMARY || "",
   fetchImpl = fetch,
+  maxAttempts = 4,
+  retryDelayMs = 2000,
+  sleepImpl = defaultSleep,
 }) {
   if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error(`invalid repository '${repo}'`);
   if (!/^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error(`invalid release tag '${tag}'`);
   const expectedVersion = tag.slice(1);
   const apiBase = `https://api.github.com/repos/${repo}`;
 
-  const release = await findReleaseByTag({
-    apiBase,
-    tag,
-    allowDraftFallback: expectedDraft !== false,
-    token,
-    fetchImpl,
-  });
-  const assetsByName = new Map((release.assets ?? []).map((a) => [a.name, a]));
-  const manifestAsset = assetsByName.get(MANIFEST_FILE);
-  const sumsAsset = assetsByName.get(SUMS_FILE);
-  if (!manifestAsset) throw new Error(`release ${tag} is missing ${MANIFEST_FILE}`);
-  if (!sumsAsset) throw new Error(`release ${tag} is missing ${SUMS_FILE}`);
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const release = await findReleaseByTag({
+        apiBase,
+        tag,
+        allowDraftFallback: expectedDraft !== false,
+        token,
+        fetchImpl,
+      });
+      const assetsByName = new Map((release.assets ?? []).map((a) => [a.name, a]));
+      const manifestAsset = assetsByName.get(MANIFEST_FILE);
+      const sumsAsset = assetsByName.get(SUMS_FILE);
+      if (!manifestAsset) throw new Error(`release ${tag} is missing ${MANIFEST_FILE}`);
+      if (!sumsAsset) throw new Error(`release ${tag} is missing ${SUMS_FILE}`);
 
-  const [manifestText, sumsText] = await Promise.all([
-    fetchGitHubAssetText(manifestAsset, token, fetchImpl),
-    fetchGitHubAssetText(sumsAsset, token, fetchImpl),
-  ]);
+      const [manifestText, sumsText] = await Promise.all([
+        fetchGitHubAssetText(manifestAsset, token, fetchImpl),
+        fetchGitHubAssetText(sumsAsset, token, fetchImpl),
+      ]);
 
-  let latestRelease;
-  if (!release.draft) {
-    latestRelease = await fetchGitHubJson(`${apiBase}/releases/latest`, token, fetchImpl);
+      let latestRelease;
+      if (!release.draft && !release.prerelease) {
+        latestRelease = await fetchGitHubJson(`${apiBase}/releases/latest`, token, fetchImpl);
+      }
+
+      const result = verifyReleaseRecord({
+        release,
+        manifestText,
+        sumsText,
+        latestRelease,
+        expectedDraft,
+        expectedVersion,
+      });
+
+      if (summaryPath) {
+        fs.appendFileSync(summaryPath, `${formatAssetSummaryMarkdown(release)}\n`);
+      }
+      return { result, release };
+    } catch (err) {
+      lastError = err;
+      if (!(err instanceof TransientVerificationError) || attempt >= maxAttempts) {
+        throw err;
+      }
+      if (retryDelayMs > 0) {
+        await sleepImpl(retryDelayMs * attempt);
+      }
+    }
   }
-
-  const result = verifyReleaseRecord({
-    release,
-    manifestText,
-    sumsText,
-    latestRelease,
-    expectedDraft,
-    expectedVersion,
-  });
-
-  if (summaryPath) {
-    fs.appendFileSync(summaryPath, `${formatAssetSummaryMarkdown(release)}\n`);
-  }
-  return { result, release };
+  throw lastError;
 }
 
 function parseCliArgs(argv) {

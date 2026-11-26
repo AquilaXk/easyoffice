@@ -14,6 +14,7 @@ import { MANIFEST_FILE, SUMS_FILE } from "./release-assets.mjs";
 import {
   fetchGitHubAssetText,
   fetchGitHubJson,
+  fetchGitHubPaginatedJson,
   formatAssetSummaryMarkdown,
   verifyReleaseRecord,
 } from "./post-release-check.mjs";
@@ -84,7 +85,7 @@ export async function runLatestGuard({
   }
   const apiBase = `https://api.github.com/repos/${repo}`;
   const [releases, latestRelease] = await Promise.all([
-    fetchGitHubJson(`${apiBase}/releases?per_page=30`, token, fetchImpl),
+    fetchGitHubPaginatedJson(`${apiBase}/releases?per_page=100`, token, fetchImpl),
     fetchGitHubJson(`${apiBase}/releases/latest`, token, fetchImpl),
   ]);
 

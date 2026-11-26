@@ -361,8 +361,8 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/pw" --no-save --no-audit --no-fund --ignore-scripts "playwright-core@$PLAYWRIGHT_VERSION"
           node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install webkit
 
-      - name: Save Playwright driver and WebKit cache (push only)
-        if: steps.webkit-cache.outputs.cache-hit != 'true' && github.event_name == 'push'
+      - name: Save Playwright driver and WebKit cache (non-PR only)
+        if: steps.webkit-cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |

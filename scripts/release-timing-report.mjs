@@ -12,10 +12,23 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { fetchGitHubJson } from "./post-release-check.mjs";
 
-const SELF_JOB_NAME = "release-timings";
+const SELF_JOB_NAMES = new Set(["release-timings", "Report Release Timing & Regressions"]);
+const PREPARE_JOB_NAMES = new Set([
+  "prepare",
+  "Resolve Release and Check Tag Matches Cargo Workspace Version",
+]);
 const JOB_REGRESSION_MIN_SEC = 30;
 const STEP_REGRESSION_MIN_SEC = 15;
 const REGRESSION_RATIO = 0.10;
+const MAX_CANDIDATE_RUNS = 5;
+
+function escapeMarkdownCell(value) {
+  return String(value ?? "").replace(/\r?\n/g, " ").replaceAll("|", "\\|");
+}
+
+function escapeWorkflowCommand(value) {
+  return String(value ?? "").replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
 
 export function elapsedSeconds(startedAt, completedAt) {
   if (!startedAt || !completedAt) return null;
@@ -41,7 +54,9 @@ export function formatDelta(deltaSeconds, prevSeconds) {
 }
 
 function summarizeJobs(jobs) {
-  const filtered = (jobs ?? []).filter((job) => job && job.name !== SELF_JOB_NAME && job.conclusion !== "skipped");
+  const filtered = (jobs ?? []).filter(
+    (job) => job && !SELF_JOB_NAMES.has(job.name) && job.conclusion !== "skipped",
+  );
   let minStart = Infinity;
   let maxEnd = -Infinity;
   const byName = new Map();
@@ -71,6 +86,14 @@ function summarizeJobs(jobs) {
       : null;
 
   return { byName, spanSeconds };
+}
+
+export function isSubstantiveReleaseJobs(jobs) {
+  const { byName } = summarizeJobs(jobs);
+  for (const jobName of byName.keys()) {
+    if (!PREPARE_JOB_NAMES.has(jobName)) return true;
+  }
+  return false;
 }
 
 export function computeTimingReport({ currentRunId, currentJobs, previousRun = null, previousJobs = [] }) {
@@ -142,7 +165,7 @@ export function formatTimingMarkdown(report) {
   const lines = ["## Release Build Timing Report", ""];
   if (report.previousRunId) {
     lines.push(
-      `Baseline: run \`${report.previousRunId}\` (${report.previousLabel ?? "previous"}) | Wall-clock span: **${formatDuration(report.currentSpanSec)}** (baseline **${formatDuration(report.previousSpanSec)}**, delta ${formatDelta(report.spanDeltaSec, report.previousSpanSec)})`,
+      `Baseline: run \`${report.previousRunId}\` (${escapeMarkdownCell(report.previousLabel ?? "previous")}) | Wall-clock span: **${formatDuration(report.currentSpanSec)}** (baseline **${formatDuration(report.previousSpanSec)}**, delta ${formatDelta(report.spanDeltaSec, report.previousSpanSec)})`,
     );
   } else {
     lines.push(
@@ -153,7 +176,7 @@ export function formatTimingMarkdown(report) {
   lines.push("", "| Job | Outcome | Duration | Baseline | Delta |", "| --- | --- | ---: | ---: | ---: |");
   for (const row of report.jobRows) {
     lines.push(
-      `| \`${row.name}\` | ${row.conclusion} | ${formatDuration(row.currentSec)} | ${formatDuration(row.previousSec)} | ${formatDelta(row.deltaSec, row.previousSec)} |`,
+      `| \`${escapeMarkdownCell(row.name)}\` | ${escapeMarkdownCell(row.conclusion)} | ${formatDuration(row.currentSec)} | ${formatDuration(row.previousSec)} | ${formatDelta(row.deltaSec, row.previousSec)} |`,
     );
   }
 
@@ -161,7 +184,7 @@ export function formatTimingMarkdown(report) {
     lines.push("", "### Step Timing Regressions (>10% and >=15s)", "", "| Job | Step | Current | Baseline | Delta |", "| --- | --- | ---: | ---: | ---: |");
     for (const reg of report.stepRegressions.slice(0, 15)) {
       lines.push(
-        `| \`${reg.job}\` | ${reg.step} | ${formatDuration(reg.currentSec)} | ${formatDuration(reg.previousSec)} | ${formatDelta(reg.deltaSec, reg.previousSec)} |`,
+        `| \`${escapeMarkdownCell(reg.job)}\` | ${escapeMarkdownCell(reg.step)} | ${formatDuration(reg.currentSec)} | ${formatDuration(reg.previousSec)} | ${formatDelta(reg.deltaSec, reg.previousSec)} |`,
       );
     }
   }
@@ -185,15 +208,23 @@ export async function runReleaseTimingReport({
     fetchGitHubJson(`${apiBase}/actions/workflows/release.yml/runs?status=success&per_page=20`, token, fetchImpl),
   ]);
 
-  const previousRun = (runsResp.workflow_runs ?? []).find((run) => run && run.id !== runId) ?? null;
+  const candidates = (runsResp.workflow_runs ?? [])
+    .filter((run) => run && run.id !== runId)
+    .slice(0, MAX_CANDIDATE_RUNS);
+  let previousRun = null;
   let previousJobs = [];
-  if (previousRun) {
-    const prevJobsResp = await fetchGitHubJson(
-      `${apiBase}/actions/runs/${previousRun.id}/jobs?per_page=100`,
+  for (const candidate of candidates) {
+    const candidateJobsResp = await fetchGitHubJson(
+      `${apiBase}/actions/runs/${candidate.id}/jobs?per_page=100`,
       token,
       fetchImpl,
     );
-    previousJobs = prevJobsResp.jobs ?? [];
+    const candidateJobs = candidateJobsResp.jobs ?? [];
+    if (isSubstantiveReleaseJobs(candidateJobs)) {
+      previousRun = candidate;
+      previousJobs = candidateJobs;
+      break;
+    }
   }
 
   const report = computeTimingReport({
@@ -210,12 +241,12 @@ export async function runReleaseTimingReport({
   }
   for (const reg of report.jobRegressions) {
     console.warn(
-      `::warning::Release job '${reg.job}' regressed from ${formatDuration(reg.previousSec)} to ${formatDuration(reg.currentSec)} (${formatDelta(reg.deltaSec, reg.previousSec)})`,
+      `::warning::Release job '${escapeWorkflowCommand(reg.job)}' regressed from ${formatDuration(reg.previousSec)} to ${formatDuration(reg.currentSec)} (${formatDelta(reg.deltaSec, reg.previousSec)})`,
     );
   }
   for (const reg of report.stepRegressions.slice(0, 10)) {
     console.warn(
-      `::warning::Step '${reg.step}' in '${reg.job}' regressed from ${formatDuration(reg.previousSec)} to ${formatDuration(reg.currentSec)} (${formatDelta(reg.deltaSec, reg.previousSec)})`,
+      `::warning::Step '${escapeWorkflowCommand(reg.step)}' in '${escapeWorkflowCommand(reg.job)}' regressed from ${formatDuration(reg.previousSec)} to ${formatDuration(reg.currentSec)} (${formatDelta(reg.deltaSec, reg.previousSec)})`,
     );
   }
 
@@ -233,7 +264,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       );
     })
     .catch((err) => {
-      console.error(`::warning::Release timing report unavailable: ${err.message}`);
+      console.error(`::warning::Release timing report unavailable: ${escapeWorkflowCommand(err.message)}`);
       process.exit(0);
     });
 }

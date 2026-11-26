@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,8 +33,9 @@ function makeManifest(version) {
   return JSON.stringify({ version, notes: `EasyOffice v${version}`, pub_date: "2026-11-26T00:00:00Z", platforms });
 }
 
-function makeSums() {
-  return `${releaseFileNames().map((n) => `${"c".repeat(64)}  ${n}`).join("\n")}\n`;
+function makeSums(manifestText) {
+  const manifestHash = crypto.createHash("sha256").update(manifestText, "utf8").digest("hex");
+  return `${releaseFileNames().map((n) => `${n === MANIFEST_FILE ? manifestHash : "c".repeat(64)}  ${n}`).join("\n")}\n`;
 }
 
 function makeRelease(tag, { draft = false, prerelease = false } = {}) {
@@ -43,6 +45,7 @@ function makeRelease(tag, { draft = false, prerelease = false } = {}) {
     prerelease,
     assets: expectedReleaseAssetNames().map((name, idx) => ({
       name,
+      state: "uploaded",
       size: 2048 + idx,
       url: `https://api.github.com/repos/AquilaXk/easyoffice/releases/assets/${idx + 1}`,
     })),
@@ -62,11 +65,12 @@ test("findExpectedLatestRelease ignores drafts and prereleases and sorts semver 
 test("evaluateLatestState passes when /releases/latest matches highest published semver and assets", () => {
   const latest = makeRelease("v0.2.10");
   const releases = [makeRelease("v0.2.9"), latest, makeRelease("v0.3.0", { draft: true })];
+  const manifestText = makeManifest("0.2.10");
   const res = evaluateLatestState({
     releases,
     latestRelease: latest,
-    manifestText: makeManifest("0.2.10"),
-    sumsText: makeSums(),
+    manifestText,
+    sumsText: makeSums(manifestText),
   });
   assert.equal(res.expectedTag, "v0.2.10");
   assert.equal(res.verification.assetCount, 18);
@@ -75,29 +79,39 @@ test("evaluateLatestState passes when /releases/latest matches highest published
 test("evaluateLatestState fails when /releases/latest lags behind a newer published stable release", () => {
   const older = makeRelease("v0.2.2");
   const newer = makeRelease("v0.2.3");
+  const manifestText = makeManifest("0.2.2");
   assert.throws(
     () =>
       evaluateLatestState({
         releases: [older, newer],
         latestRelease: older,
-        manifestText: makeManifest("0.2.2"),
-        sumsText: makeSums(),
+        manifestText,
+        sumsText: makeSums(manifestText),
       }),
     /points to 'v0\.2\.2', expected highest published stable release 'v0\.2\.3'/,
   );
 });
 
-test("runLatestGuard fetches releases and verifies assets without modifying state", async () => {
+test("runLatestGuard paginates releases and verifies assets without modifying state", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "latest-guard-test-"));
   const summaryFile = path.join(tmpDir, "summary.md");
   try {
+    const older = makeRelease("v0.2.2");
     const latest = makeRelease("v0.2.3");
     const manifest = makeManifest("0.2.3");
-    const sums = makeSums();
+    const sums = makeSums(manifest);
 
     const mockFetch = async (url, init = {}) => {
       if (init.method && init.method !== "GET") throw new Error(`unexpected mutating method ${init.method}`);
-      if (url.endsWith("/releases?per_page=30")) return new Response(JSON.stringify([latest]), { status: 200 });
+      if (url.endsWith("/releases?per_page=100")) {
+        return new Response(JSON.stringify([older]), {
+          status: 200,
+          headers: { link: '<https://api.github.com/repos/AquilaXk/easyoffice/releases?per_page=100&page=2>; rel="next"' },
+        });
+      }
+      if (url.endsWith("/releases?per_page=100&page=2")) {
+        return new Response(JSON.stringify([latest]), { status: 200 });
+      }
       if (url.endsWith("/releases/latest")) return new Response(JSON.stringify(latest), { status: 200 });
       if (url.includes("/releases/assets/")) {
         const idx = Number(url.split("/").pop()) - 1;

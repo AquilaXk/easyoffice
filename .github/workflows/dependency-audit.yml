@@ -1,6 +1,24 @@
 name: Dependency Audit
 
 on:
+  pull_request:
+    paths:
+      - "**/package-lock.json"
+      - "**/package.json"
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - .github/workflows/dependency-audit.yml
+      - scripts/cargo-audit-report.mjs
+  push:
+    branches:
+      - main
+    paths:
+      - "**/package-lock.json"
+      - "**/package.json"
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - .github/workflows/dependency-audit.yml
+      - scripts/cargo-audit-report.mjs
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -12,8 +30,8 @@ on:
         default: false
 
 concurrency:
-  group: audit-${{ github.workflow }}
-  cancel-in-progress: true
+  group: audit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -36,7 +54,6 @@ jobs:
         uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
-          cache: "true"
 
       - name: Audit apps/hwp-studio lockfile
         working-directory: apps/hwp-studio
@@ -66,9 +83,9 @@ jobs:
       - name: Set up the pinned Rust toolchain
         uses: ./.github/actions/setup-rust
 
-      - name: Cache cargo-audit binary
+      - name: Restore cargo-audit binary
         id: audit-bin
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cargo-audit-bin
           key: cargo-audit-${{ env.CARGO_AUDIT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -77,12 +94,19 @@ jobs:
         if: steps.audit-bin.outputs.cache-hit != 'true'
         run: cargo install --locked cargo-audit --version "$CARGO_AUDIT_VERSION" --root ~/.cargo-audit-bin
 
+      - name: Save cargo-audit binary (non-PR only)
+        if: steps.audit-bin.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cargo-audit-bin
+          key: cargo-audit-${{ env.CARGO_AUDIT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Run cargo audit against workspace and Quick Look lockfiles
         run: |
           set -euo pipefail
           AUDIT="$HOME/.cargo-audit-bin/bin/cargo-audit"
           "$AUDIT" audit --json --file Cargo.lock > "$RUNNER_TEMP/audit-workspace.json" || true
-          "$AUDIT" audit --json --file apps/quicklook/rust/Cargo.lock > "$RUNNER_TEMP/audit-quicklook.json" || true
+          "$AUDIT" audit --json --no-fetch --file apps/quicklook/rust/Cargo.lock > "$RUNNER_TEMP/audit-quicklook.json" || true
 
       - name: Evaluate Cargo audit reports
         env:
