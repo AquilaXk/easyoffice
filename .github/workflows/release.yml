@@ -42,6 +42,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   # Resolves the version, tag and draft state once for every job. A tag push must name the version the
   # sources carry, or the app would ship with a stale version (PD-103 compares it with the latest
@@ -144,6 +147,13 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
 
       - name: Compare the tag version with the workspace package version
         if: github.ref_type == 'tag'
@@ -195,12 +205,22 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
 
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
         with:
           rust-targets: ${{ matrix.target }}
           rust-tests: ${{ matrix.rust-tests }}
+          cache-key: ${{ matrix.platform }}-release
+          cache-workspaces: |
+            . -> target
+            apps/quicklook/rust -> target
 
       # The Quick Look preview and thumbnail extensions (PD-140) are copied into the app's PlugIns
       # folder by bundle.macOS.files, so they are built first, for this architecture only, with the same
@@ -289,9 +309,17 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
 
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
+        with:
+          cache-key: windows-x64-release
 
       # Prebuilt Tauri CLI (major 2) installed from scripts/tauri-cli/package-lock.json; it builds crates/easyoffice-desktop in release mode
       # with the WebUI embedded and packages it with NSIS. The release version overrides the
@@ -361,12 +389,20 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
 
       - name: Install the Linux build dependencies
         uses: ./.github/actions/install-linux-deps
 
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
+        with:
+          cache-key: ${{ matrix.platform }}-release
 
       - name: Build EasyOffice desktop shell signed Linux packages
         working-directory: crates/easyoffice-desktop
@@ -415,6 +451,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Verify checked-out commit matches trigger SHA
+        uses: ./.github/actions/assert-sha
+        with:
+          expected-sha: ${{ github.sha }}
+
+      - name: Setup Node.js for release manifest and verification scripts
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
 
       - name: Download the macOS, Windows and Linux release artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -523,3 +571,35 @@ jobs:
             fi
             gh_logged release create "$TAG" "${FILES[@]}" "${FLAGS[@]}"
           fi
+
+      - name: Verify uploaded release assets, manifest and public pointer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
+        run: node scripts/post-release-check.mjs --repo "$GITHUB_REPOSITORY" --tag "$TAG" --draft "$DRAFT"
+
+  release-timings:
+    name: Report Release Timing & Regressions
+    needs: [release-macos, build-windows-release, build-linux-release, publish-release]
+    if: always() && needs.release-macos.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js for timing report
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+
+      - name: Compute build timing comparison and report regressions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-timing-report.mjs

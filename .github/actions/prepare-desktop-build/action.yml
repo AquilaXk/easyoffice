@@ -17,20 +17,30 @@ inputs:
       Linux and Windows jobs, and the suite has time-bound tests that a 4-core Intel runner fails by speed alone.
     required: false
     default: "true"
+  cache-key:
+    description: Suffix added to the Rust cache key so architecture and platform caches stay isolated.
+    required: false
+    default: "desktop-release"
+  cache-workspaces:
+    description: Workspaces specification passed to Swatinem/rust-cache.
+    required: false
+    default: ". -> target"
 
 runs:
   using: composite
   steps:
     # One pinned version for every Rust build (PD-147).
     - name: Set up the pinned Rust toolchain
+      id: rust
       uses: ./.github/actions/setup-rust
       with:
         targets: ${{ inputs.rust-targets }}
 
     - name: Setup Node.js for the hygiene guard, the editor bundle and the Tauri CLI
-      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      uses: ./.github/actions/setup-node-ci
       with:
         node-version: "22"
+        cache: "true"
 
     # The CLI the signing step runs comes from the committed lockfile: every package is checked against its
     # integrity hash and no install script runs, so a changed registry package cannot reach the signing key.
@@ -59,6 +69,13 @@ runs:
       run: |
         node scripts/checkout-rhwp.mjs
         node scripts/build-hwp-studio.mjs
+
+    - name: Cache Rust dependencies and build artifacts
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: rust-${{ steps.rust.outputs.version }}-${{ inputs.cache-key }}
+        workspaces: ${{ inputs.cache-workspaces }}
+        save-if: ${{ github.event_name != 'pull_request' }}
 
     - name: Run Rust workspace test suite
       if: inputs.rust-tests != 'false'

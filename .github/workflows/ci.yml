@@ -14,26 +14,31 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 # The desktop shell crate (crates/easyoffice-desktop, Tauri v2: WebView2 on Windows, WKWebView on
 # macOS, WebKitGTK on Linux) is excluded from the cross-platform engine gates and verified on its own in
 # the macOS (`verify`), Windows and Linux (`verify-linux`) jobs: its build needs the platform toolchain
 # and webview (PD-074, PD-094).
 
 jobs:
-  # Platform-independent gates run once on the fastest runner; the OS jobs keep only what needs their OS
-  # (desktop shell, .app and .dmg on macOS; engine tests, desktop shell and installer on Windows; desktop
-  # shell and the deb, rpm and AppImage packages on Linux).
+  # Platform-independent JS/hygiene gates run once on Ubuntu while Rust engine gates (`checks-rust`)
+  # run in parallel, cutting wall-clock feedback time for Rust lints and tests from ~22m to ~6m.
   checks:
     name: checks
     runs-on: ubuntu-latest
-    # 13-20 min on 2026-11-21 (the 20-min limit cancelled one run mid-test); 35 leaves room as suites grow.
-    timeout-minutes: 35
+    # 13-18 min for Node coverage suites; 30m leaves room as suites grow.
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js for repository hygiene guard
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
 
@@ -48,7 +53,9 @@ jobs:
           BASE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags --depth=200 origin "$BASE_SHA" "$HEAD_SHA"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=200 origin "$BASE_SHA" "$HEAD_SHA"
+          fi
           node scripts/check-commit-messages.mjs "$BASE_SHA" "$HEAD_SHA"
 
       - name: Verify rhwp upstream pin (no submodule checkout)
@@ -81,6 +88,23 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  # Cross-platform Rust gates run in parallel with `checks` so formatting, Clippy, license checks,
+  # workspace tests, and engine self-tests fail fast without waiting on JS coverage suites.
+  checks-rust:
+    name: checks-rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js for license and rhwp checkout scripts
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+
       # Cargo reads the manifest of every workspace dependency, and the desktop shell (excluded from
       # the builds below) depends on this checkout (PD-142). It is not compiled in this job.
       - name: Check out the pinned rhwp upstream (sparse, shallow)
@@ -94,6 +118,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rust-${{ steps.rust.outputs.version }}
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -117,7 +142,7 @@ jobs:
   # token (fork pull requests) skips the scan; an analysis failure fails the run.
   sonar:
     name: sonar
-    needs: checks
+    needs: [checks, checks-rust]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -128,6 +153,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download the JavaScript coverage report
         if: env.SONAR_TOKEN != ''
@@ -147,13 +173,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js for the hwp-studio bundle build and the Tauri CLI
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/hwp-studio/package-lock.json
+          cache: "true"
 
       - name: Set up the pinned Rust toolchain (PD-147)
         id: rust
@@ -169,6 +196,7 @@ jobs:
           workspaces: |
             . -> target
             apps/quicklook/rust -> target
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       # The desktop shell embeds the generated editor bundle (frontendDist) and fails to build without it.
       - name: Check out the pinned rhwp upstream (sparse, shallow)
@@ -234,6 +262,12 @@ jobs:
           DMG_BYTES=$(stat -f%z "${DMGS[0]}")
           echo "${DMGS[0]}: ${DMG_BYTES} bytes"
           test "$DMG_BYTES" -ge 1048576 || { echo ".dmg is unexpectedly small"; exit 1; }
+          {
+            echo "### macOS CI Bundle"
+            echo ""
+            echo "- \`EasyOffice.app\`: ${APP_KB} KiB"
+            echo "- \`$(basename "${DMGS[0]}")\`: $((DMG_BYTES / 1048576)) MiB (${DMG_BYTES} bytes)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, both architectures)
         run: node scripts/verify-quicklook-bundle.mjs target/release/bundle/macos/EasyOffice.app --archs arm64,x86_64
@@ -281,12 +315,15 @@ jobs:
     timeout-minutes: 30
     env:
       PLAYWRIGHT_VERSION: "1.56.1"
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js for the browser driver
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
 
@@ -302,16 +339,36 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rust-${{ steps.rust.outputs.version }}
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Build the engine binary (debug)
         run: cargo build -p easyoffice-app
 
+      - name: Restore cached Playwright driver and WebKit browser
+        id: webkit-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ runner.temp }}/pw
+            ${{ runner.temp }}/pw-browsers
+          key: webkit-${{ runner.os }}-${{ runner.arch }}-pw-${{ env.PLAYWRIGHT_VERSION }}
+
       - name: Install the pinned browser driver and WebKit
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pw"
+          mkdir -p "$RUNNER_TEMP/pw" "$PLAYWRIGHT_BROWSERS_PATH"
           npm install --prefix "$RUNNER_TEMP/pw" --no-save --no-audit --no-fund --ignore-scripts "playwright-core@$PLAYWRIGHT_VERSION"
           node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install webkit
+
+      - name: Save Playwright driver and WebKit cache (push only)
+        if: steps.webkit-cache.outputs.cache-hit != 'true' && github.event_name == 'push'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ runner.temp }}/pw
+            ${{ runner.temp }}/pw-browsers
+          key: webkit-${{ runner.os }}-${{ runner.arch }}-pw-${{ env.PLAYWRIGHT_VERSION }}
 
       - name: Run the WebKit DOM suite
         env:
@@ -339,16 +396,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install the Linux build dependencies
         uses: ./.github/actions/install-linux-deps
 
       - name: Setup Node.js for the hwp-studio bundle build and the Tauri CLI
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/hwp-studio/package-lock.json
+          cache: "true"
 
       - name: Set up the pinned Rust toolchain (PD-147)
         id: rust
@@ -358,6 +416,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rust-${{ steps.rust.outputs.version }}
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Check out the pinned rhwp upstream (sparse, shallow)
         run: node scripts/checkout-rhwp.mjs
@@ -387,7 +446,15 @@ jobs:
           node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES"
 
       - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
-        run: node scripts/verify-linux-bundles.mjs linux-x64
+        run: |
+          node scripts/verify-linux-bundles.mjs linux-x64
+          {
+            echo "### Linux x64 CI Packages"
+            echo ""
+            for f in target/release/bundle/appimage/*.AppImage target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm; do
+              echo "- \`$(basename "$f")\`: $(du -sh "$f" | cut -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # WebKitGTK needs a display: Xvfb provides one. The binary prints one EASYOFFICE_SMOKE_STEP_OK or
       # _FAIL line per step; `timeout` ends a hang (the app's own watchdog is 75 s).
@@ -423,13 +490,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js for the hwp-studio bundle build
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: ./.github/actions/setup-node-ci
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/hwp-studio/package-lock.json
+          cache: "true"
 
       # The release runs this guard on Windows (CRLF checkout), so CI does too (PD-091).
       - name: Run repository hygiene guard on a Windows checkout
@@ -443,6 +511,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rust-${{ steps.rust.outputs.version }}
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
       # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell
@@ -531,6 +600,7 @@ jobs:
             throw "NSIS installer is unexpectedly small: $($installers[0].Length) bytes"
           }
           Write-Output "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
+          "### Windows x64 CI Installer`n`n- ``$($installers[0].Name)``: $([math]::Round($installers[0].Length / 1MB, 2)) MiB ($($installers[0].Length) bytes)" >> $env:GITHUB_STEP_SUMMARY
           # 7-Zip lists the files inside an NSIS installer without running it: the third-party notices
           # (MIT notice condition) must be among them.
           $listing = & 7z l $installers[0].FullName

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="224" height="48" viewBox="0 0 224 48" role="img" aria-label="Windows 다운로드" font-family="Segoe UI Variable Display,Segoe UI,Apple SD Gothic Neo,Malgun Gothic,Noto Sans KR,-apple-system,sans-serif">
+  <rect x="0.5" y="0.5" width="223" height="47" rx="10" fill="#1F2328" stroke="#3D444D"/>
+  <g transform="translate(30 15)" fill="#FFFFFF">
+    <rect width="8.5" height="8.5" rx="1"/>
+    <rect x="9.5" width="8.5" height="8.5" rx="1"/>
+    <rect y="9.5" width="8.5" height="8.5" rx="1"/>
+    <rect x="9.5" y="9.5" width="8.5" height="8.5" rx="1"/>
+  </g>
+  <text x="58" y="29.5" font-size="15" font-weight="600" fill="#FFFFFF">Windows 다운로드</text>
+</svg>

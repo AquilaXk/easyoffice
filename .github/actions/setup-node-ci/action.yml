@@ -1,0 +1,46 @@
+name: Setup Node.js with read-only PR cache
+description: >-
+  Sets up Node.js and shares the npm download cache across runs while keeping pull request runs read-only
+  to prevent PR cache churn from evicting main-branch caches.
+
+inputs:
+  node-version:
+    description: Node.js version to install.
+    required: false
+    default: "22"
+  cache:
+    description: Set to "true" in jobs that run npm ci/install to enable npm cache restore (and save on push).
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Resolve npm cache directory
+      id: cache-dir
+      if: inputs.cache == 'true'
+      shell: bash
+      run: echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore and save npm cache (push)
+      if: inputs.cache == 'true' && github.event_name == 'push'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ steps.cache-dir.outputs.dir }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/hwp-studio/package-lock.json', 'scripts/tauri-cli/package-lock.json') }}
+        restore-keys: |
+          npm-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore npm cache read-only (non-push)
+      if: inputs.cache == 'true' && github.event_name != 'push'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ steps.cache-dir.outputs.dir }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/hwp-studio/package-lock.json', 'scripts/tauri-cli/package-lock.json') }}
+        restore-keys: |
+          npm-${{ runner.os }}-${{ runner.arch }}-

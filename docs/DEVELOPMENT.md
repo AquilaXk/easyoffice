@@ -100,6 +100,14 @@ cargo test -p easyoffice-desktop
 - 실제 WebKit DOM 시험(CI `webkit-dom`, PD-281)은 `cargo build -p easyoffice-app` 뒤 `mkdir -p .scratch/pw && npm install --prefix .scratch/pw --ignore-scripts playwright-core@1.56.1 && node .scratch/pw/node_modules/playwright-core/cli.js install webkit`으로 한 번 준비하고 `EO_PW_DIR=$PWD/.scratch/pw node scripts/webkit-dom/run.mjs`로 돌립니다(브라우저 위치는 `PLAYWRIGHT_BROWSERS_PATH`, 엔진 위치는 `EO_APP`). 일반 `node --test`에는 들어가지 않으며 브라우저가 없으면 실패합니다.
 - `--self-test`는 포맷·수식·보안 불변식과 벤치마크의 결과 동일성을 확인합니다. 속도 하한은 release 빌드에서만 판정합니다(PD-082). 측정값은 [performance.md](performance.md)에 있습니다.
 
+### CI/CD 워크플로 구성
+
+- **`.github/workflows/ci.yml`**: `checks`(위생 가드, 커밋 메시지 검사, Node 회귀·커버리지)와 `checks-rust`(의존성 라이선스, `fmt`, `clippy`, 엔진 테스트, `--self-test`)를 병렬로 실행한 뒤 `sonar`, `verify`(macOS), `webkit-dom`, `verify-linux`, `verify-windows`를 이어갑니다. PR 실행에서는 `setup-node-ci`·`rust-cache`·WebKit 캐시를 읽기 전용으로 복원해 기본 브랜치 캐시 축출을 막습니다.
+- **`.github/workflows/release.yml`**: `prepare` 이후 모든 빌드·발행 잡이 `assert-sha`로 트리거 커밋 SHA를 검증하며, `prepare-desktop-build`가 플랫폼별 Rust·npm 캐시를 복원해 빌드합니다. 발행 뒤에는 `scripts/post-release-check.mjs`가 업로드된 18개 파일, `latest.json` 서명·URL, `SHA256SUMS.txt`, `/releases/latest` 포인터를 점검하고, 끝에서 `scripts/release-timing-report.mjs`가 직전 성공 릴리스 대비 단계·잡 소요 시간 회귀를 요약합니다.
+- **`.github/workflows/latest-guard.yml`**: 매일 `/releases/latest`가 가장 높은 안정 태그(`vMAJOR.MINOR.PATCH`)를 가리키는지와 자산·매니페스트·체크섬이 온전한지 읽기 전용으로 점검합니다(`scripts/latest-guard.mjs`).
+- **`.github/workflows/dependency-audit.yml`**: 매주 `apps/hwp-studio`·`scripts/tauri-cli`의 `npm audit --audit-level=high` 게이트와 `Cargo.lock`·`apps/quicklook/rust/Cargo.lock`의 `cargo audit --json` 요약을 실행합니다(`scripts/cargo-audit-report.mjs`, 수동 `strict_cargo` 입력 시 취약점 발견 즉시 실패).
+- **워크플로 계약 테스트**: `scripts/test-workflow-refs.mjs`가 모든 워크플로·액션의 외부 액션 40자 SHA 고정, `persist-credentials: false`, `permissions`, `timeout-minutes`, 스크립트·잠금 파일 경로 존재를 검증합니다(`PD-359`).
+
 ### 한글 편집기 번들 준비
 
 데스크톱 셸 빌드와 한글 편집기 시험은 생성된 번들 `crates/easyoffice-app/ui/hwp-studio/`(추적하지 않음)가 필요합니다. 고정 커밋은 `config/rhwp-upstream.json`이 정합니다.

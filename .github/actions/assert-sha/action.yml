@@ -1,0 +1,30 @@
+name: Assert checked-out commit SHA
+description: >-
+  Verifies that the checked-out HEAD matches the expected 40-character commit SHA so multi-job builds and
+  releases cannot run against a moved branch or re-pointed tag.
+
+inputs:
+  expected-sha:
+    description: Expected 40-character hexadecimal commit SHA.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verify HEAD matches expected commit SHA
+      shell: bash
+      env:
+        EXPECTED_SHA: ${{ inputs.expected-sha }}
+      run: |
+        set -euo pipefail
+        expected_lower="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
+        if [[ ! "$expected_lower" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::Invalid expected-sha format: '$EXPECTED_SHA'"
+          exit 1
+        fi
+        actual_sha="$(git rev-parse --verify HEAD | tr '[:upper:]' '[:lower:]')"
+        if [ "$actual_sha" != "$expected_lower" ]; then
+          echo "::error::Checked-out HEAD ($actual_sha) does not match expected SHA ($expected_lower)"
+          exit 1
+        fi
+        echo "Verified HEAD matches $actual_sha"

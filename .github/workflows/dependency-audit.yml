@@ -1,0 +1,99 @@
+name: Dependency Audit
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      strict_cargo:
+        description: "Fail the Cargo audit job if any RustSec vulnerability advisory is present"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: audit-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit-npm:
+    name: Audit npm lockfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+          cache: "true"
+
+      - name: Audit apps/hwp-studio lockfile
+        working-directory: apps/hwp-studio
+        run: npm audit --audit-level=high
+
+      - name: Audit scripts/tauri-cli lockfile
+        working-directory: scripts/tauri-cli
+        run: npm audit --audit-level=high
+
+  audit-cargo:
+    name: Audit Cargo lockfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_AUDIT_VERSION: "0.23.0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js for report parser
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+
+      - name: Set up the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache cargo-audit binary
+        id: audit-bin
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cargo-audit-bin
+          key: cargo-audit-${{ env.CARGO_AUDIT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install cargo-audit
+        if: steps.audit-bin.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-audit --version "$CARGO_AUDIT_VERSION" --root ~/.cargo-audit-bin
+
+      - name: Run cargo audit against workspace and Quick Look lockfiles
+        run: |
+          set -euo pipefail
+          AUDIT="$HOME/.cargo-audit-bin/bin/cargo-audit"
+          "$AUDIT" audit --json --file Cargo.lock > "$RUNNER_TEMP/audit-workspace.json" || true
+          "$AUDIT" audit --json --file apps/quicklook/rust/Cargo.lock > "$RUNNER_TEMP/audit-quicklook.json" || true
+
+      - name: Evaluate Cargo audit reports
+        env:
+          STRICT_CARGO: ${{ inputs.strict_cargo }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARGS=()
+          if [ "${STRICT_CARGO:-false}" = "true" ]; then
+            EXTRA_ARGS+=(--strict)
+          fi
+          node scripts/cargo-audit-report.mjs \
+            --report "workspace=$RUNNER_TEMP/audit-workspace.json" \
+            --report "quicklook=$RUNNER_TEMP/audit-quicklook.json" \
+            "${EXTRA_ARGS[@]}"
