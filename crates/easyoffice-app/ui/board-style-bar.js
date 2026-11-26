@@ -154,6 +154,7 @@
         mutateSelectedItem(hooks, (n, c) => onApply(n, c, input.value), { recordUndo: !hadDragUndo });
       };
       const picker = host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker?.(hostEl, commitColor);
+      toggleBtn.addEventListener("click", () => { dragUndoActive = false; });
       bindColorControl(input, Boolean(picker), onApply);
       return { wrap, input };
     }
@@ -280,6 +281,7 @@
 
     function sync() {
       if (!groupEl || !sepEl) return;
+      dragUndoActive = false;
       const closeIn = host.__EASYOFFICE_COLOR_PICKER__?.closePopupIn;
       const sel = hooks.getSelection?.() || {};
       const node = sel.node || null;

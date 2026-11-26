@@ -924,9 +924,25 @@ test("Regression: native menu edit:cut/copy and toolbar clip commands preserve B
   // 6. Post-audit fixes: DOC native menu cross-module & modal/field gates, tool:palette toggle, export focus, BASE icon/dialog, BOARD swatches
   assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:cell-format"), false, "sheet format:cell-format must fail closed in DOC");
   assert.equal(Boolean($(h.document, "sheet-numfmt-dialog")?.open), false);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("file:save-as-hwpx"), false, "hwp save-as-hwpx must fail closed in DOC");
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("table:cell-select"), false, "hwp editor-only command must fail closed in DOC");
+  switchModule(h.document, "SHEET");
+  await flushAsyncTurns(4);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:doc-inspect"), false, "doc-inspect must fail closed in SHEET");
+  switchModule(h.document, "HWP");
+  await flushAsyncTurns(4);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("file:print-preview"), false, "print-preview must fail closed in HWP");
+  switchModule(h.document, "START");
+  await flushAsyncTurns(4);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("file:print-preview"), false, "print-preview must fail closed in START");
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:doc-inspect"), false, "doc-inspect must fail closed in START");
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(4);
+
   const symDlg = $(h.document, "symbol-picker-dialog");
   symDlg.showModal();
   assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("tool:palette"), false);
+  assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("file:exp-dlg"), false, "modal-gated file:exp-dlg must fail closed over open modal");
   assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:strike"), false);
   assert.equal(h.host.__EASYOFFICE_NATIVE_MENU__("format:superscript"), false);
   symDlg.close();
@@ -947,11 +963,27 @@ test("Regression: native menu edit:cut/copy and toolbar clip commands preserve B
   const bCtrl = h.host.__EASYOFFICE_BASE_BOARD_HOST__.getBoardStudio();
   const bn = bCtrl.addNode({ kind: "shape", x: 40, y: 40, w: 120, h: 60, fill: "DBEAFE", stroke: "2563EB" });
   bCtrl.selectNode(bn.id);
+  const fillHost = $(h.document, "board-style-fill-host");
   const fillInp = $(h.document, "board-style-fill");
   const strokeInp = $(h.document, "board-style-stroke");
   assert.equal(fillInp.classList.contains("eo-color-input"), true);
   assert.equal(strokeInp.classList.contains("eo-color-input"), true);
   assert.equal(fillInp.tabIndex, -1);
   assert.equal(fillInp.getAttribute("aria-hidden"), "true");
-  assert.equal($(h.document, "board-style-fill-host").querySelector(".dialog-swatch-chip")?.style.getPropertyValue("--dialog-swatch").toUpperCase(), "#DBEAFE");
+  assert.equal(fillHost.querySelector(".dialog-swatch-chip")?.style.getPropertyValue("--dialog-swatch").toUpperCase(), "#DBEAFE");
+
+  // Dragging native picker (input only, no change/blur) then switching to swatch click must preserve Undo step
+  fillInp.value = "#ff0000";
+  fillInp.dispatchEvent({ type: "input", target: fillInp });
+  assert.equal(bCtrl.getState().nodes.find((n) => n.id === bn.id).fill, "FF0000");
+  fillHost.querySelector(".dialog-swatch").click();
+  const swatchHex = (el) => (el.title || el.getAttribute("aria-label") || "").replace("#", "").toUpperCase();
+  const nextSwatch = Array.from(fillHost.querySelectorAll(".sb-hl-swatch")).find((el) => /^[0-9A-F]{6}$/.test(swatchHex(el)) && swatchHex(el) !== "FF0000");
+  assert.ok(nextSwatch, "palette exposes alternate fill swatch");
+  nextSwatch.click();
+  const pickedFill = swatchHex(nextSwatch);
+  assert.equal(bCtrl.getState().nodes.find((n) => n.id === bn.id).fill, pickedFill);
+  dispatchKey(h, { key: "z", code: "KeyZ", ctrlKey: true }, h.document.body);
+  await flushAsyncTurns(6);
+  assert.equal(bCtrl.getState().nodes.find((n) => n.id === bn.id).fill, "FF0000", "undo must step back to prior native drag color instead of skipping");
 });

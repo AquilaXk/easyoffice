@@ -422,12 +422,17 @@
   }
 
   const MODAL_GATED_NATIVE_IDS = new Set([
+    "file:exp-dlg", "file:print-preview", "file:base-import", "file:doc-paper",
     "edit:undo", "edit:redo", "edit:cut", "edit:copy", "edit:paste-special", "edit:find", "edit:replace",
-    "insert:link", "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
-    "format:cell-format", "format:row-height", "format:row-autofit", "format:col-width", "format:col-autofit",
-    "sheet:remove-duplicates", "sheet:text-to-columns", "slide:bring-forward", "slide:send-backward",
-    "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom",
-    "slide:distribute-h", "slide:distribute-v", "file:base-import", "tool:palette",
+    "insert:shape", "insert:image", "insert:chart", "insert:symbol", "insert:link", "insert:toc", "insert:mailmerge",
+    "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
+    "format:cell-format", "format:row-height", "format:row-autofit", "format:col-width", "format:col-autofit", "format:border-color",
+    "sheet:sort", "sheet:remove-duplicates", "sheet:text-to-columns", "sheet:page-setup", "sheet:protect", "sheet:protect-workbook", "sheet:protect-ranges",
+    "sheet:name-define", "sheet:name-manage", "sheet:name-create", "sheet:name-paste", "sheet:tab-delete", "sheet:tab-rename", "sheet:tab-move-copy", "sheet:tab-unhide",
+    "slide:bring-forward", "slide:send-backward", "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom", "slide:distribute-h", "slide:distribute-v",
+    "page:doc-paper", "page:paper", "page:margins", "page:columns", "page:slide-transition",
+    "table:insert", "table:sort", "table:validation", "table:fn-browser", "table:doc-formula", "table:border-bg", "table:cell-props", "table:sheet-pivot", "table:sheet-condfmt", "table:sheet-freeze", "table:hwp-border",
+    "tool:diagnose", "tool:scrub-pii", "tool:doc-inspect", "tool:review-comment", "tool:review-stats", "tool:pdf-highlight", "tool:pdf-rotate", "tool:pdf-splitmerge", "tool:pdf-tooffice", "tool:palette",
   ]);
   const FIELD_GATED_NATIVE_IDS = new Set([
     "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
@@ -436,6 +441,7 @@
     "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom",
     "slide:distribute-h", "slide:distribute-v",
   ]);
+  const PRINT_PREVIEW_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
 
   function nativeMenuModuleApplies(id, commandModule) {
     if (!commandModule) return true;
@@ -444,15 +450,18 @@
     if ((commandModule === "START" || commandModule === "CONV") && (p.name === "export" || p.name === "export-dialog")) return false;
     if (commandModule === "START" && START_DISABLED_SET.has(p.name)) return false;
     if (commandModule === "HWP_EMBED" && (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) || EMBED_ONLY_SET.has(p.name) || p.name === "hwp-editor")) return true;
+    if (p.name === "hwp-save-as" || p.name === "hwp-editor") return false;
+    if (p.name === "verify-act") return p.argument === "doc-inspect" ? (commandModule === "DOC" || commandModule === "SLIDE") : PRINT_PREVIEW_MODULES.has(commandModule);
     if (p.name.startsWith("sheet-")) return commandModule === "SHEET";
     if (p.name === "slide-act") return commandModule === "SLIDE";
     if (p.name === "base-act") return commandModule === "BASE";
     const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__?.studioCommandApplies;
+    if (p.name === "print") return commandModule === "HWP_EMBED" || typeof applies !== "function" || applies("print", commandModule);
     return p.name !== "studio-cmd" || typeof applies !== "function" || applies(p.argument, commandModule);
   }
 
   function allowsNativeMenuContext(id, document, modal, activeModule) {
-    if (MODAL_GATED_NATIVE_IDS.has(id)) {
+    if (MODAL_GATED_NATIVE_IDS.has(id) || id.startsWith("format:cf-")) {
       const hasModal = Boolean(modal?.open) || Array.from(document.querySelectorAll?.("dialog") || []).some((dlg) => dlg.open && !dlg.classList?.contains?.("find-dialog"));
       if (hasModal) return false;
     }
