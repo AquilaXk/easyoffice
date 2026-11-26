@@ -1,6 +1,6 @@
 // 참조 구현: udecode/plate (MIT, Copyright (c) Ziad Beyens, Dylan Schiemann, Joe Anderson, Felix Feng,
 // 커밋 e401aaf9, `packages/ai/src/react/copilot/CopilotPlugin.tsx`, see THIRD_PARTY_NOTICES.md) —
-// 문서 편집기(#doc-editor) 선택적 인라인 고스트 텍스트 자동완성 제안(Tab 수락 / Esc 거절).
+// 문서 편집기(#doc-editor) 선택적 텍스트 예측(Tab 수락 / Esc 닫기).
 // 편집 DOM 밖(.doc-scroll-container) 오버레이에만 그려 수락 전까지 저장·자동저장·Undo 기록을 오염시키지 않는다.
 
 (function (host) {
@@ -177,7 +177,7 @@
         module: "DOC",
         prompt: "현재 문단의 마지막 문장에 자연스럽게 이어질 다음 구절만 한 줄(80자 이내, 따옴표·설명 없이 이어질 텍스트만)로 제안하세요.",
         history: [],
-        selection: { range: "인라인 자동완성" },
+        selection: { range: "텍스트 예측" },
         context: {
           doc: {
             paragraphs: [snippet],

@@ -724,3 +724,116 @@ fn pii_restoration_runs_before_validation_for_cell_coords_sheet_names_and_length
         Some("AB1000000")
     );
 }
+
+#[test]
+fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed() {
+    let ok_openai = openai_text_reply(r#"{"reply":"이어지는 예측 구절","operations":[]}"#);
+    let ok_anthropic =
+        r#"{"content":[{"type":"text","text":"{\"reply\":\"확인\",\"operations\":[]}"}]}"#;
+    let ok_google = r#"{"candidates":[{"content":{"parts":[{"text":"{\"reply\":\"확인\",\"operations\":[]}"}]}}]}"#;
+
+    // 1. Single-paragraph text prediction (`텍스트 예측`) must not expose `read_doc_blocks`
+    let ghost_req = r#"{
+        "action":"copilot_run",
+        "mode":"ask",
+        "module":"DOC",
+        "prompt":"다음 구절 제안",
+        "selection":{"range":"텍스트 예측"},
+        "provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"},
+        "context":{"doc":{"paragraphs":["초안 문장 시작 "],"selectedText":"초안 문장 시작 ","omittedParagraphs":0}}
+    }"#;
+    let (g_res, g_reqs) = dispatch_raw_llm(ghost_req, &ok_openai);
+    assert!(g_res.is_ok());
+    assert!(g_reqs[0].body_json.contains("\"emit_copilot_turn\""));
+    assert!(
+        !g_reqs[0].body_json.contains("\"read_doc_blocks\""),
+        "text prediction request must not expose read_doc_blocks: {}",
+        g_reqs[0].body_json
+    );
+
+    // 2. Short complete DOC and HWP documents across OpenAI, Anthropic, and Google omit `read_doc_blocks`
+    let short_hwp_anth = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"HWP",
+        "prompt":"다듬기",
+        "provider":{"kind":"anthropic","baseUrl":"https://93.184.216.34/v1","model":"claude-sonnet-4-5","apiKey":"sk-ant-test"},
+        "context":{"doc":{"paragraphs":["첫 문단","둘째 문단"],"omittedParagraphs":0}}
+    }"#;
+    let (_, short_anth_reqs) = dispatch_raw_llm(short_hwp_anth, ok_anthropic);
+    assert!(!short_anth_reqs[0].body_json.contains("\"read_doc_blocks\""));
+
+    let short_doc_google = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"DOC",
+        "prompt":"다듬기",
+        "provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-3-flash","apiKey":"AIza-test"},
+        "context":{"doc":{"paragraphs":["첫 문단","둘째 문단"],"omittedParagraphs":0}}
+    }"#;
+    let (_, short_google_reqs) = dispatch_raw_llm(short_doc_google, ok_google);
+    assert!(!short_google_reqs[0]
+        .body_json
+        .contains("\"read_doc_blocks\""));
+
+    // 3. Explicit `omittedParagraphs > 0` exposes `read_doc_blocks`
+    let omitted_req = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"DOC",
+        "prompt":"전체 요약 추가",
+        "provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"},
+        "context":{"doc":{"paragraphs":["문단 0","문단 1"],"omittedParagraphs":5}}
+    }"#;
+    let (_, omitted_reqs) = dispatch_raw_llm(omitted_req, &ok_openai);
+    assert!(omitted_reqs[0].body_json.contains("\"read_doc_blocks\""));
+
+    // 4. `paragraphs.len() > 200` (with `omittedParagraphs == 0`) exposes `read_doc_blocks`
+    let over_200_paras: String = (0..205)
+        .map(|i| format!("\"문단 {i}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let over_200_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"HWP","prompt":"끝 확인","provider":{{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"}},"context":{{"doc":{{"paragraphs":[{over_200_paras}],"omittedParagraphs":0}}}}}}"#
+    );
+    let (_, over_200_reqs) = dispatch_raw_llm(&over_200_req, &ok_openai);
+    assert!(over_200_reqs[0].body_json.contains("\"read_doc_blocks\""));
+
+    // 5. Sparse empty slot (`""`) exposes `read_doc_blocks`
+    let sparse_req = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"HWP",
+        "prompt":"빈 구간 조회",
+        "provider":{"kind":"anthropic","baseUrl":"https://93.184.216.34/v1","model":"claude-sonnet-4-5","apiKey":"sk-ant-test"},
+        "context":{"doc":{"paragraphs":["첫 문단","","셋째 문단"],"omittedParagraphs":0}}
+    }"#;
+    let (_, sparse_reqs) = dispatch_raw_llm(sparse_req, ok_anthropic);
+    assert!(sparse_reqs[0].body_json.contains("\"read_doc_blocks\""));
+
+    // 6. Byte-budget truncation (`<= 200` paragraphs exceeding 24 KiB prompt budget) exposes `read_doc_blocks`
+    let big_para = "가".repeat(400); // 1,200 UTF-8 bytes per paragraph; 25 paragraphs = 30,000 bytes > 24 KiB
+    let budget_paras: String = (0..25)
+        .map(|_| format!("\"{big_para}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let budget_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"요약","provider":{{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-3-flash","apiKey":"AIza-test"}},"context":{{"doc":{{"paragraphs":[{budget_paras}],"omittedParagraphs":0}}}}}}"#
+    );
+    let (_, budget_reqs) = dispatch_raw_llm(&budget_req, ok_google);
+    assert!(budget_reqs[0].body_json.contains("\"read_doc_blocks\""));
+
+    // 7. Selection commands never expose `read_doc_blocks` even when `omittedParagraphs > 0`
+    let cmd_req = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"DOC",
+        "command":"rewrite",
+        "prompt":"다시 쓰기",
+        "selection":{"paragraphIndex":0,"paragraphEnd":0},
+        "provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"},
+        "context":{"doc":{"paragraphs":["문단 0","문단 1"],"omittedParagraphs":12}}
+    }"#;
+    let (_, cmd_reqs) = dispatch_raw_llm(cmd_req, &ok_openai);
+    assert!(!cmd_reqs[0].body_json.contains("\"read_doc_blocks\""));
+}

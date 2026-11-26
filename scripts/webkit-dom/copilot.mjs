@@ -140,4 +140,63 @@ export const copilotDocSteps = [
     await undoLast(page);
     await page.waitForFunction((texts) => Array.from(document.querySelectorAll("#doc-editor > p:not(.manuscript-notice)")).map((p) => p.textContent).join("|") === texts.join("|"), PARAGRAPHS);
   }],
+
+  ["text prediction renders outside the editor, dismisses on Escape, accepts on Tab, and chat Markdown renders safe tables", async (page) => {
+    await page.route("**/api/ipc", async (route) => {
+      const body = JSON.parse(route.request().postData() || "{}");
+      const payload = body.command === "run_smart_assistant" ? JSON.parse(body.payload || "{}") : {};
+      if (payload.action === "copilot_list_models") {
+        return route.fulfill({ json: { status: "ok", models: [{ id: "fixture-model", name: "fixture-model" }] } });
+      }
+      if (payload.action === "copilot_run") {
+        if (payload.selection?.range === "텍스트 예측") {
+          return route.fulfill({ json: { status: "ok", mode: "ask", reply: "이어지는 예측 구절입니다.", operations: [], locations: [] } });
+        }
+        return route.fulfill({
+          json: {
+            status: "ok",
+            mode: "ask",
+            reply: "### 검토 결과\n핵심 수식은 `SUM(B2:B5)` 입니다.\n\n| 항목 | 수치 |\n| --- | --- |\n| 매출 | 120 |",
+            operations: [],
+            locations: [],
+          },
+        });
+      }
+      return route.continue();
+    });
+
+    if (!(await page.isVisible(PANEL_MODEL))) await page.click("#btn-copilot-toggle");
+    await page.click(PANEL_MODEL);
+    await page.click('#copilot-model-menu button[data-quick-kind="ollama"]');
+
+    assert.equal((await page.textContent("#btn-copilot-ghost")).trim(), "텍스트 예측");
+    await page.click("#btn-copilot-ghost");
+    assert.equal(await page.getAttribute("#btn-copilot-ghost", "aria-pressed"), "true");
+
+    await page.evaluate(() => {
+      const ed = document.getElementById("doc-editor");
+      ed.innerHTML = "<p><br></p>";
+    });
+    await page.click("#doc-editor p");
+    await page.keyboard.type("초안 문장 ");
+    await page.waitForSelector(".eo-copilot-ghost-overlay");
+    assert.equal(await page.$eval("#doc-editor", (ed) => Boolean(ed.querySelector(".eo-copilot-ghost-overlay"))), false);
+
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".eo-copilot-ghost-overlay", { state: "detached" });
+    assert.deepEqual(await paragraphTexts(page), ["초안 문장 "]);
+
+    await page.keyboard.type("계속 ");
+    await page.waitForSelector(".eo-copilot-ghost-overlay");
+    await page.keyboard.press("Tab");
+    await page.waitForSelector(".eo-copilot-ghost-overlay", { state: "detached" });
+    assert.deepEqual(await paragraphTexts(page), ["초안 문장 계속 이어지는 예측 구절입니다."]);
+
+    await page.click("#btn-copilot-mode");
+    await page.fill("#copilot-input", "표로 요약해 주세요");
+    await page.click("#btn-copilot-send");
+    await page.waitForSelector("#copilot-thread .eo-copilot-md-table-wrap");
+    assert.equal(await page.locator("#eo-copilot-shell p").count(), 0);
+    assert.equal(await page.getAttribute("#copilot-thread .eo-copilot-md-table-wrap", "role"), "region");
+  }],
 ];

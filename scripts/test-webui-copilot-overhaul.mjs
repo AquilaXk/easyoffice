@@ -201,13 +201,19 @@ test("DOC preserves inline formatting & tables, records Track Changes revisions,
   assert.equal(editedP.querySelector("del.eo-rev-del")?.textContent, "이전 원문 문장");
   assert.equal(editedP.querySelector("ins.eo-rev-ins")?.textContent, "새 개정 문장");
 
-  // Inline ghost text: toggle #btn-copilot-ghost, Esc dismisses, Tab accepts, overlay stays outside #doc-editor
+  // Text prediction (텍스트 예측): toggle #btn-copilot-ghost, Esc dismisses, Tab accepts, overlay stays outside #doc-editor
+  let seenGhostRange = "";
   const ghostH = await open({
     module: "DOC",
-    run: () => ({ status: "ok", mode: "ask", reply: "이어지는 추천 문구입니다.", operations: [] }),
+    run: (req) => {
+      seenGhostRange = req.selection?.range || "";
+      return { status: "ok", mode: "ask", reply: "이어지는 추천 문구입니다.", operations: [] };
+    },
   });
   const ghostBtn = ghostH.document.getElementById("btn-copilot-ghost");
   assert.ok(ghostBtn, "ghost toggle button exists");
+  assert.equal(ghostBtn.textContent, "텍스트 예측");
+  assert.equal(ghostBtn.getAttribute("title"), "입력하는 동안 텍스트 예측 표시 (Tab 수락 / Esc 닫기)");
   ghostH.userClick(ghostBtn);
   assert.equal(ghostBtn.getAttribute("aria-pressed"), "true");
 
@@ -231,6 +237,7 @@ test("DOC preserves inline formatting & tables, records Track Changes revisions,
   await flushAsyncTurns(10);
   let overlay = ghostH.document.querySelector(".eo-copilot-ghost-overlay");
   assert.ok(overlay, "ghost overlay rendered outside #doc-editor");
+  assert.equal(seenGhostRange, "텍스트 예측");
   assert.equal(ghostH.editor.contains(overlay), false, "ghost overlay lives outside #doc-editor");
   assert.equal(gp.textContent, "초안 문장 시작 ", "editor untouched while suggestion is only previewed");
 

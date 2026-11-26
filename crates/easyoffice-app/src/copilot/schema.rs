@@ -3,7 +3,11 @@
 use easyoffice_formats::StrictJsonValue;
 use std::fmt::Write as _;
 
-use super::types::{push_json_str, CopilotModule, CopilotRunRequest, ProviderKind};
+use super::prompt::escape_context_text;
+use super::types::{
+    push_json_str, CopilotModule, CopilotRunRequest, ProviderKind, MAX_PROMPT_CONTEXT_BYTES,
+    MAX_PROMPT_DOC_PARAGRAPHS,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeToolInvocation {
@@ -62,12 +66,51 @@ fn build_emit_schema(req: &CopilotRunRequest) -> String {
     )
 }
 
+const fn decimal_digits(mut n: usize) -> usize {
+    let mut digits = 1;
+    while n >= 10 {
+        n /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
+    let Some(doc) = req.context.doc.as_ref() else {
+        return false;
+    };
+    if doc.omitted_paragraphs > 0
+        || doc.paragraphs.len() > MAX_PROMPT_DOC_PARAGRAPHS
+        || doc.paragraphs.iter().any(String::is_empty)
+    {
+        return true;
+    }
+    let mut used = 19 + req.module.as_str().len() + req.mode.as_str().len();
+    if let Some(range) = &req.selection.range {
+        used += 16 + escape_context_text(range).len();
+    }
+    if let Some(start) = req.selection.paragraph_index {
+        let end = req.selection.paragraph_end.unwrap_or(start);
+        used += 21 + decimal_digits(start) + decimal_digits(end);
+    }
+    for (i, p) in doc.paragraphs.iter().enumerate() {
+        if !p.trim().is_empty() {
+            let next_len = 6 + decimal_digits(i) + escape_context_text(p).len();
+            if used + next_len > MAX_PROMPT_CONTEXT_BYTES {
+                return true;
+            }
+            used += next_len;
+        }
+    }
+    false
+}
+
 fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
     if req.command.is_some() {
         return Vec::new();
     }
     match req.module {
-        CopilotModule::Doc | CopilotModule::Hwp => vec![ToolDef {
+        CopilotModule::Doc | CopilotModule::Hwp if doc_has_unread_blocks(req) => vec![ToolDef {
             name: "read_doc_blocks",
             description: "생략된 문단 범위를 추가로 읽는다.",
             parameters_json: READ_DOC_SCHEMA,
