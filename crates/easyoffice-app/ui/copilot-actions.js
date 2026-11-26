@@ -51,6 +51,7 @@
     return {
       getEmbedHwpHost: () => null,
       refreshHwpSnapshot: async () => null,
+      canUndoHwpSync: () => false,
       getHwpSelectionLabel: () => "",
       getHwpCommandTarget: () => null,
       extractHwpContextAsync: async () => ({ selection: {}, context: {} }),
@@ -434,6 +435,9 @@
     async function flushSheetEvaluationAndFormats(sheetName) {
       const sc = getSheetController();
       if (!sc) return;
+      if (sheetName && sheetName !== getActiveSheetName() && sheetDataStore[sheetName]) {
+        await sc.switchSheetTab?.(sheetName);
+      }
       sc.restoreDomSheetCells(sheetName);
       await sc.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       const map = sheetDataStore[sheetName] || {};
@@ -453,6 +457,7 @@
         }
         sc.restoreDomSheetCells(sheetName);
       }
+      sc.syncChartLayer?.();
       sc.syncSheetFormatToolbar?.();
     }
 
@@ -635,8 +640,22 @@
       return rawIdx;
     }
 
-    function normalizeOperations(mod, operations) {
-      if (mod !== "SLIDE" || !Array.isArray(operations)) return operations;
+    function normalizeOperations(mod, operations, frozenSelection) {
+      if (!Array.isArray(operations)) return operations;
+      if (mod === "SHEET" && frozenSelection?.sheet) {
+        return operations.map((op) => {
+          if (!op || typeof op !== "object") return op;
+          const kind = String(op.op || op.type || op.kind || "").trim();
+          const next = op.sheet ? op : { ...op, sheet: frozenSelection.sheet };
+          const needsRange = kind === "sheet.format" || kind === "sheet.cond_format" || kind === "sheet.sort_filter"
+            || (kind === "sheet.table" && (!next.action || next.action === "create") && !next.tableName);
+          if (needsRange && !next.range && frozenSelection.range) {
+            return { ...next, range: frozenSelection.range };
+          }
+          return next;
+        });
+      }
+      if (mod !== "SLIDE") return operations;
       const active = getActiveSlideIndex();
       return operations.map((op) => {
         const kind = String(op?.op || op?.type || op?.kind || "").trim();
@@ -707,6 +726,7 @@
 
         if (touchedSheet) await flushSheetEvaluationAndFormats(touchedSheet);
         if (touchedDoc) {
+          host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
           const panels = getWorkspacePanels();
           panels?.saveActiveDocTabState?.();
           panels?.computeSmartStats?.();
@@ -747,11 +767,13 @@
         document,
         invokeIpc,
         slideDeckState,
+        getActiveSlideIndex,
         sheetDataStore,
         sheetRowCounts,
         sheetOps,
         getActiveSheetName,
         getSheetController,
+        docBlocksOf,
         buildDocBlockElement,
         executeSlideOperation,
       });
@@ -793,7 +815,11 @@
     // A restore would drop whatever the user did after the turn, so the undo is gone once the history moved.
     function canUndoTurn(turnId) {
       if (!lastUndoEntry || lastUndoEntry.turnId !== turnId) return false;
-      if (lastUndoEntry.hwpEmbed) return Boolean(extOps.getEmbedHwpHost());
+      if (lastUndoEntry.hwpEmbed) {
+        return extOps.canUndoHwpSync
+          ? extOps.canUndoHwpSync(lastUndoEntry.afterGeneration)
+          : Boolean(extOps.getEmbedHwpHost());
+      }
       return getHistoryMutationEpoch?.() === lastUndoEntry.epoch;
     }
 
@@ -817,6 +843,7 @@
       const snap = lastUndoEntry.snapshot;
       lastUndoEntry = null;
       await restoreWorkspaceSnapshot(snap, undefined, { keepProtections: true });
+      host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
       noteActivity?.();
       return true;
     }

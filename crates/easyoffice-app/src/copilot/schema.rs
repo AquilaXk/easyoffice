@@ -23,30 +23,35 @@ const FIND_SHEET_SCHEMA: &str = r#"{"type":"object","properties":{"sheet":{"type
 const SEARCH_PDF_SCHEMA: &str =
     r#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#;
 
-fn op_item_schema(module: CopilotModule, read_only: bool) -> &'static str {
+const DOC_BLOCK_ITEM_SCHEMA: &str = r#"{"type":"object","properties":{"heading":{"type":"integer","minimum":1},"text":{"type":"string"},"list":{"type":"string","enum":["bullet","ordered","task"]},"items":{"type":"array","items":{"type":"string"}},"table":{"type":"object","properties":{"headerRow":{"type":"boolean"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}}},"required":["rows"]}}}"#;
+const SLIDE_ELEMENT_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["textbox","shape","table","chart","image"]},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number"},"h":{"type":"number"},"text":{"type":"string"},"role":{"type":"string","enum":["title","subtitle","body","none"]},"fontSizePt":{"type":"number"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"color":{"type":"string"},"fill":{"type":"string"},"align":{"type":"string","enum":["left","center","right","justify"]},"shapeType":{"type":"string"},"stroke":{"type":"string"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}},"headerRow":{"type":"boolean"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"title":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"series":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"values":{"type":"array","items":{"type":"number"}},"color":{"type":"string"}},"required":["values"]}}},"required":["kind"]}"#;
+
+fn op_item_schema(module: CopilotModule, read_only: bool) -> String {
     if read_only {
-        return r#"{"type":"object"}"#;
+        return r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string();
     }
     match module {
-        CopilotModule::Doc => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.append","doc.replace_paragraphs","doc.scrub_pii"]},"blocks":{"type":"array","items":{"type":"object"}},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}},"startIndex":{"type":"integer","minimum":0},"endIndex":{"type":"integer","minimum":0}},"required":["kind"]}"#
-        }
+        CopilotModule::Doc => format!(
+            r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["doc.append","doc.replace_paragraphs","doc.scrub_pii"]}},"blocks":{{"type":"array","items":{DOC_BLOCK_ITEM_SCHEMA}}},"replacements":{{"type":"array","items":{{"type":"object","properties":{{"index":{{"type":"integer","minimum":0}},"text":{{"type":"string"}}}},"required":["index","text"]}}}},"startIndex":{{"type":"integer","minimum":0}},"endIndex":{{"type":"integer","minimum":0}}}},"required":["kind"]}}"#
+        ),
         CopilotModule::Hwp => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.append","doc.replace_paragraphs"]},"blocks":{"type":"array","items":{"type":"object","properties":{"heading":{"type":"integer"},"text":{"type":"string"},"list":{"type":"string"},"items":{"type":"array","items":{"type":"string"}}}}},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}},"startIndex":{"type":"integer","minimum":0},"endIndex":{"type":"integer","minimum":0}},"required":["kind"]}"#
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.append","doc.replace_paragraphs"]},"blocks":{"type":"array","items":{"type":"object","properties":{"heading":{"type":"integer"},"text":{"type":"string"},"list":{"type":"string"},"items":{"type":"array","items":{"type":"string"}}}}},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}},"startIndex":{"type":"integer","minimum":0},"endIndex":{"type":"integer","minimum":0}},"required":["kind"]}"#.to_string()
         }
         CopilotModule::Sheet => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["sheet.write","sheet.format","sheet.chart","sheet.table","sheet.pivot","sheet.cond_format","sheet.sort_filter","sheet.structure","sheet.note"]},"sheet":{"type":"string"},"range":{"type":"string"},"cells":{"type":"array","items":{"type":"object","properties":{"coord":{"type":"string"},"raw":{"type":"string"},"numFmt":{"type":"string"},"bold":{"type":"boolean"},"fill":{"type":"string"},"color":{"type":"string"}},"required":["coord","raw"]}},"fill":{"type":"string"},"color":{"type":"string"},"bold":{"type":"boolean"},"numFmt":{"type":"string"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"dataRange":{"type":"string"},"title":{"type":"string"},"legend":{"type":"string","enum":["right","bottom","top","left","none"]},"switchRowCol":{"type":"boolean"},"action":{"type":"string"},"tableName":{"type":"string"},"style":{"type":"string"},"totalRow":{"type":"boolean"},"sourceRange":{"type":"string"},"destCell":{"type":"string"},"rowField":{"type":"string"},"colField":{"type":"string"},"valueField":{"type":"string"},"agg":{"type":"string","enum":["sum","count","average","min","max"]},"preset":{"type":"string"},"value1":{"type":"string"},"value2":{"type":"string"},"colOffset":{"type":"integer"},"ascending":{"type":"boolean"},"query":{"type":"string"},"index":{"type":"integer"},"count":{"type":"integer"},"coord":{"type":"string"},"text":{"type":"string"}},"required":["kind"]}"#
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["sheet.write","sheet.format","sheet.chart","sheet.table","sheet.pivot","sheet.cond_format","sheet.sort_filter","sheet.structure","sheet.note"]},"sheet":{"type":"string"},"range":{"type":"string"},"cells":{"type":"array","items":{"type":"object","properties":{"coord":{"type":"string"},"raw":{"type":"string"},"numFmt":{"type":"string"},"bold":{"type":"boolean"},"fill":{"type":"string"},"color":{"type":"string"}},"required":["coord","raw"]}},"fill":{"type":"string"},"color":{"type":"string"},"bold":{"type":"boolean"},"numFmt":{"type":"string"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"dataRange":{"type":"string"},"title":{"type":"string"},"legend":{"type":"string","enum":["right","bottom","top","left","none"]},"switchRowCol":{"type":"boolean"},"action":{"type":"string"},"tableName":{"type":"string"},"style":{"type":"string"},"totalRow":{"type":"boolean"},"sourceRange":{"type":"string"},"destSheet":{"type":"string"},"destCell":{"type":"string"},"rowField":{"type":"string"},"colField":{"type":"string"},"valueField":{"type":"string"},"agg":{"type":"string","enum":["sum","count","average","min","max"]},"preset":{"type":"string"},"value1":{"type":"string"},"value2":{"type":"string"},"colOffset":{"type":"integer"},"ascending":{"type":"boolean"},"query":{"type":"string"},"index":{"type":"integer"},"count":{"type":"integer"},"coord":{"type":"string"},"text":{"type":"string"}},"required":["kind"]}"#.to_string()
         }
-        CopilotModule::Slide => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["slide.add","slide.update","slide.add_element"]},"index":{"type":"integer","minimum":0},"slideIndex":{"type":"integer","minimum":0},"title":{"type":"string"},"bullets":{"type":"array","items":{"type":"string"}},"notes":{"type":"string"},"layout":{"type":"string","enum":["titleSlide","titleAndContent","sectionHeader","twoColumn","blank"]},"transition":{"type":"string","enum":["none","fade","push","wipe","split","zoom"]},"elements":{"type":"array","items":{"type":"object"}},"element":{"type":"object"}},"required":["kind"]}"#
-        }
+        CopilotModule::Slide => format!(
+            r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["slide.add","slide.update","slide.add_element"]}},"index":{{"type":"integer","minimum":0}},"slideIndex":{{"type":"integer","minimum":0}},"title":{{"type":"string"}},"body":{{"type":"string"}},"bullets":{{"type":"array","items":{{"type":"string"}}}},"notes":{{"type":"string"}},"layout":{{"type":"string","enum":["titleSlide","titleAndContent","sectionHeader","twoColumn","blank"]}},"transition":{{"type":"string","enum":["none","fade","push","wipe","split","zoom"]}},"elements":{{"type":"array","items":{SLIDE_ELEMENT_SCHEMA}}},"element":{SLIDE_ELEMENT_SCHEMA}}},"required":["kind"]}}"#
+        ),
         CopilotModule::Base => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object"}},"filterField":{"type":"string"},"filterOp":{"type":"string"},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object","properties":{"rowIndex":{"type":"integer","minimum":0},"values":{"type":"object"}},"required":["rowIndex","values"]}},"view":{"type":"string","enum":["grid","kanban","calendar","gallery"]},"filterField":{"type":"string"},"filterOp":{"type":"string"},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#.to_string()
         }
         CopilotModule::Board => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["board.add_graph"]},"direction":{"type":"string","enum":["TB","LR"]},"nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["shape","text"]},"shape":{"type":"string","enum":["rect","roundRect","diamond","ellipse"]},"text":{"type":"string"},"fill":{"type":"string"}},"required":["id","text"]}},"edges":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"label":{"type":"string"},"style":{"type":"string","enum":["orthogonal","curved"]}},"required":["from","to"]}}},"required":["kind","nodes"]}"#
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["board.add_graph"]},"direction":{"type":"string","enum":["TB","LR"]},"nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["shape","text"]},"shape":{"type":"string","enum":["rect","roundRect","diamond","ellipse"]},"text":{"type":"string"},"fill":{"type":"string"}},"required":["id","text"]}},"edges":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"label":{"type":"string"},"style":{"type":"string","enum":["orthogonal","curved"]}},"required":["from","to"]}}},"required":["kind","nodes"]}"#.to_string()
         }
-        CopilotModule::Pdf => r#"{"type":"object"}"#,
+        CopilotModule::Pdf => {
+            r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string()
+        }
     }
 }
 
@@ -124,13 +129,13 @@ pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
             out.push(']');
         }
         ProviderKind::Google => {
-            out.push_str(",\"tools\":[{\"functionDeclarations\":[{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parameters\":");
+            out.push_str(",\"tools\":[{\"functionDeclarations\":[{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parametersJsonSchema\":");
             out.push_str(&emit_schema);
             out.push('}');
             for t in &read_tools {
                 let _ = write!(out, ",{{\"name\":\"{}\",\"description\":", t.name);
                 push_json_str(out, t.description);
-                out.push_str(",\"parameters\":");
+                out.push_str(",\"parametersJsonSchema\":");
                 out.push_str(t.parameters_json);
                 out.push('}');
             }

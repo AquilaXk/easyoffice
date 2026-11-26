@@ -26,6 +26,13 @@
     const { blockText } = deps;
     const slidePerf = host.__EASYOFFICE_COPILOT_PERFORM_SLIDE__.createSlidePerformance({ document, slideDeckState, getActiveSlideIndex, getWorkspacePanels });
 
+    const isTableDocItem = (item) => {
+      if (typeof item === "string") return /^<table\b/i.test(item.trim());
+      if (!item || typeof item !== "object") return false;
+      return Boolean(item.table || String(item.kind || item.tag || "").toLowerCase() === "table" || Array.isArray(item.rows));
+    };
+    const hasInlineMarkup = (str) => typeof str === "string" && /<\/?(?:strong|b|em|i|u|s|del|strike|a|table|br)\b/i.test(str);
+
     // ---- 목표: 연산에서 한 자씩 칠 글을 순서대로 뽑는다. `cut(clone, typed)`가 쓰던 곳까지로 연산 복사본을 자른다.
     function collectTargets(mod, operations) {
       const targets = [];
@@ -37,12 +44,27 @@
           if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
             op.replacements.forEach((rep, entry) => {
               const index = Number(rep?.index);
-              if (Number.isInteger(index) && index >= 0) targets.push({ opIndex, kind: "doc-replace", entry, index, text: String(rep.text ?? "") });
+              const raw = String(rep?.text ?? "");
+              if (Number.isInteger(index) && index >= 0) {
+                targets.push({ opIndex, kind: "doc-replace", entry, index, text: blockText(raw), atomicDoc: isTableDocItem(raw) || hasInlineMarkup(raw) });
+              }
             });
           } else if (kind === "doc.append" || kind === "doc.replace_paragraphs") {
             const key = Array.isArray(op.blocks) ? "blocks" : Array.isArray(op.paragraphs) ? "paragraphs" : null;
             const range = kind === "doc.append" ? {} : { startIndex: op.startIndex, endIndex: op.endIndex };
-            (key ? op[key] : []).forEach((item, entry) => targets.push({ opIndex, kind: kind === "doc.append" ? "doc-append" : "doc-range", key, entry, text: blockText(item), item, ...range }));
+            (key ? op[key] : []).forEach((item, entry) => {
+              const rawItemText = typeof item === "string" ? item : String(item?.text ?? item?.content ?? "");
+              targets.push({
+                opIndex,
+                kind: kind === "doc.append" ? "doc-append" : "doc-range",
+                key,
+                entry,
+                text: blockText(item),
+                item,
+                atomicDoc: isTableDocItem(item) || hasInlineMarkup(rawItemText),
+                ...range,
+              });
+            });
           }
         } else if (mod === "SLIDE") {
           targets.push(...slidePerf.collect(op, opIndex, kind, deck));
@@ -85,11 +107,18 @@
           return;
         }
         const keepFirst = (arr, partial) => arr.slice(0, target.entry).concat(partial ? [partial] : []);
+        const fullAtomic = !stop.unstarted && typed >= target.text.length;
         if (target.kind === "doc-replace") {
-          op.replacements = keepFirst(op.replacements, prefix ? { ...op.replacements[target.entry], text: prefix } : null);
+          const origRep = op.replacements[target.entry];
+          const partial = target.atomicDoc
+            ? (fullAtomic ? origRep : null)
+            : (prefix ? { ...origRep, text: prefix } : null);
+          op.replacements = keepFirst(op.replacements, partial);
         } else if (target.kind === "doc-append" || target.kind === "doc-range") {
           const item = op[target.key][target.entry];
-          const partial = !prefix ? null : typeof item === "string" ? prefix : Array.isArray(item?.items) ? { ...item, items: prefix.split("\n") } : { ...item, text: prefix };
+          const partial = target.atomicDoc
+            ? (fullAtomic ? item : null)
+            : (!prefix ? null : typeof item === "string" ? prefix : Array.isArray(item?.items) ? { ...item, items: prefix.split("\n") } : { ...item, text: prefix });
           op[target.key] = keepFirst(op[target.key], partial);
         } else if (target.kind === "sheet-cell") {
           op.cells = keepFirst(op.cells, prefix && !isAtomicText(target.text) ? { ...op.cells[target.entry], raw: prefix, formula: undefined, value: undefined } : null);
@@ -322,6 +351,7 @@
       }
 
       async function sheetTarget(t) {
+        if (t.sheet && t.sheet !== getActiveSheetName()) return { typed: t.text.length, skipped: true };
         const cell = document.querySelector?.(`#sheet-grid td[data-cell="${t.coord}"]`);
         if (!cell) return { typed: t.text.length, skipped: true };
         remember(cell);
@@ -364,7 +394,7 @@
           cursor.place(rect ? rect.left + 24 : 640, rect ? rect.top + 120 : 200);
           for (const target of targets) {
             if (stopped) {
-              cutAt = { target, typed: 0 };
+              cutAt = { target, typed: 0, unstarted: true };
               break;
             }
             const result = await drivers[target.kind](target);

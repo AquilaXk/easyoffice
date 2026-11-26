@@ -795,6 +795,8 @@ class MiniElement extends MiniNode {
       relatedTarget: ev.relatedTarget ?? null,
       key: ev.key || "",
       code: ev.code || "",
+      keyCode: ev.keyCode ?? 0,
+      which: ev.which ?? ev.keyCode ?? 0,
       metaKey: Boolean(ev.metaKey),
       ctrlKey: Boolean(ev.ctrlKey),
       shiftKey: Boolean(ev.shiftKey),

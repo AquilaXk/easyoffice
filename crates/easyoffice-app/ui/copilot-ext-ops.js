@@ -28,12 +28,33 @@
 
     // Most recent HWP read snapshot for synchronous selection badge, preview diff, and fingerprint checks.
     let cachedHwpSnapshot = null;
+    let boundHwpHost = null;
+
+    function ensureHwpHostListeners(h) {
+      if (!h || h === boundHwpHost) return;
+      boundHwpHost = h;
+      h.onChange?.((ev) => {
+        const gen = Number(ev?.payload?.documentGeneration);
+        if (cachedHwpSnapshot && Number.isFinite(gen) && gen >= 0) {
+          cachedHwpSnapshot.documentGeneration = gen;
+        } else if (cachedHwpSnapshot && ev?.payload?.reason !== "dirty_changed") {
+          cachedHwpSnapshot.documentGeneration += 1;
+        }
+        void refreshHwpSnapshot().catch(() => {});
+      });
+      h.onStatus?.((status) => {
+        if (status === "ready") void refreshHwpSnapshot().catch(() => {});
+        else cachedHwpSnapshot = null;
+      });
+    }
 
     function getEmbedHwpHost() {
       const h = getHwpHost?.();
+      ensureHwpHostListeners(h);
       if (!h || h.usesLegacy?.() || h.getStatus?.() !== "ready") return null;
       return h;
     }
+    ensureHwpHostListeners(getHwpHost?.());
 
     async function refreshHwpSnapshot(span = null) {
       const hwp = getEmbedHwpHost();
@@ -231,6 +252,11 @@
         locations,
         afterDocumentGeneration: Number(res?.documentGeneration || cachedHwpSnapshot?.documentGeneration || 0),
       };
+    }
+
+    function canUndoHwpSync(expectedAfterGeneration) {
+      if (!getEmbedHwpHost() || !cachedHwpSnapshot) return false;
+      return cachedHwpSnapshot.documentGeneration === expectedAfterGeneration;
     }
 
     async function canUndoHwpTurnAsync(expectedAfterGeneration) {
@@ -675,6 +701,7 @@
       hwpFingerprint,
       verifyHwpFingerprintAsync,
       applyHwpOperations,
+      canUndoHwpSync,
       canUndoHwpTurnAsync,
       undoHwpTurn,
       locateHwpTarget,

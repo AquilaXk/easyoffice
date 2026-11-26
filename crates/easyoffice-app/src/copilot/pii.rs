@@ -5,6 +5,7 @@
 //! 응답·스트림·연산 문자열에서 원문으로 복원한다. 원문에 이미 `[PII_*_N]` 모양 문자열이 있으면 그 번호 뒤부터
 //! 발급해 자리표시자 충돌 주입을 차단한다.
 
+use easyoffice_formats::StrictJsonValue;
 use std::collections::HashMap;
 
 use crate::pii_identifiers::match_identifier_at;
@@ -158,6 +159,35 @@ impl PiiVault {
             out.push_str(&text[cursor..]);
         }
         out
+    }
+
+    /// JSON AST의 모든 문자열·객체 키 안 자리표시자를 검증 전에 원문으로 복원한다.
+    pub fn restore_json_entries(&self, entries: &mut [(String, StrictJsonValue)]) {
+        if !self.has_entries() {
+            return;
+        }
+        for (k, v) in entries {
+            *k = self.restore_text(k);
+            self.restore_json_value(v);
+        }
+    }
+
+    fn restore_json_value(&self, val: &mut StrictJsonValue) {
+        match val {
+            StrictJsonValue::Str(s) => *s = self.restore_text(s),
+            StrictJsonValue::Array(items) => {
+                for item in items {
+                    self.restore_json_value(item);
+                }
+            }
+            StrictJsonValue::Object(entries) => {
+                for (k, v) in entries {
+                    *k = self.restore_text(k);
+                    self.restore_json_value(v);
+                }
+            }
+            StrictJsonValue::Null | StrictJsonValue::Bool(_) | StrictJsonValue::Number(_) => {}
+        }
     }
 
     fn restore_opt(&self, val: &mut Option<String>) {

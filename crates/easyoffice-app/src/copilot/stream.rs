@@ -42,7 +42,7 @@ fn read_delta(kind: ProviderKind, event: &MessageEvent) -> Option<Delta> {
         return Some(delta);
     }
     match kind {
-        ProviderKind::Anthropic => read_anthropic(root, event, &mut delta),
+        ProviderKind::Anthropic => read_anthropic(root, event.event.as_ref(), &mut delta),
         ProviderKind::Google => read_google(root, &mut delta),
         _ => read_openai(root, &mut delta),
     }
@@ -57,8 +57,9 @@ fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
     else {
         return;
     };
-    if let Some(d) =
-        StrictJsonValue::get_field(choice, "delta").and_then(StrictJsonValue::as_object)
+    if let Some(d) = StrictJsonValue::get_field(choice, "delta")
+        .or_else(|| StrictJsonValue::get_field(choice, "message"))
+        .and_then(StrictJsonValue::as_object)
     {
         delta
             .text
@@ -99,8 +100,8 @@ fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
     delta.done = StrictJsonValue::get_str(choice, "finish_reason").is_some();
 }
 
-fn read_anthropic(root: &[(String, StrictJsonValue)], event: &MessageEvent, delta: &mut Delta) {
-    let kind = StrictJsonValue::get_str(root, "type").unwrap_or(event.event.as_ref());
+fn read_anthropic(root: &[(String, StrictJsonValue)], event_name: &str, delta: &mut Delta) {
+    let kind = StrictJsonValue::get_str(root, "type").unwrap_or(event_name);
     let slot = StrictJsonValue::get_field(root, "index")
         .and_then(StrictJsonValue::as_u64)
         .and_then(|n| usize::try_from(n).ok())
@@ -236,7 +237,7 @@ struct JsonArrayReader {
     started: bool,
 }
 
-fn parse_object(bytes: &[u8]) -> Option<Delta> {
+fn parse_object(kind: ProviderKind, bytes: &[u8]) -> Option<Delta> {
     let text = std::str::from_utf8(bytes).ok()?;
     let parsed = StrictJsonValue::parse(text).ok()?;
     let object = parsed.as_object()?;
@@ -244,7 +245,11 @@ fn parse_object(bytes: &[u8]) -> Option<Delta> {
     if let Some(err) = StrictJsonValue::get_field(object, "error") {
         delta.error = Some(error_message(err));
     } else {
-        read_google(object, &mut delta);
+        match kind {
+            ProviderKind::Google => read_google(object, &mut delta),
+            ProviderKind::Anthropic => read_anthropic(object, "", &mut delta),
+            _ => read_openai(object, &mut delta),
+        }
     }
     Some(delta)
 }
@@ -307,7 +312,7 @@ impl JsonArrayReader {
         self.buffer.drain(..cut);
     }
 
-    fn push(&mut self, chunk: &[u8]) -> Result<Vec<Delta>, &'static str> {
+    fn push(&mut self, kind: ProviderKind, chunk: &[u8]) -> Result<Vec<Delta>, &'static str> {
         self.buffer.extend_from_slice(chunk);
         if self.buffer.len() > MAX_LLM_RESPONSE_BYTES {
             return Err("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.");
@@ -321,7 +326,7 @@ impl JsonArrayReader {
             let Some(obj_end) = scan_complete_json_object(&self.buffer) else {
                 break;
             };
-            if let Some(delta) = parse_object(&self.buffer[..obj_end]) {
+            if let Some(delta) = parse_object(kind, &self.buffer[..obj_end]) {
                 let is_err = delta.error.is_some();
                 deltas.push(delta);
                 self.buffer.drain(..obj_end);
@@ -336,9 +341,23 @@ impl JsonArrayReader {
     }
 }
 
+fn sniff_first_payload_byte(buf: &[u8]) -> Option<u8> {
+    const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+    let rest = if buf.starts_with(UTF8_BOM) {
+        &buf[UTF8_BOM.len()..]
+    } else if UTF8_BOM.starts_with(buf) {
+        return None;
+    } else {
+        buf
+    };
+    rest.iter().copied().find(|b| !b.is_ascii_whitespace())
+}
+
 enum Wire {
+    Auto(Vec<u8>),
     Sse(SseDecoder),
     JsonArray(JsonArrayReader),
+    PlainJson(usize),
 }
 
 pub struct StreamAssembler {
@@ -356,11 +375,7 @@ impl StreamAssembler {
     pub fn new(kind: ProviderKind) -> Self {
         Self {
             kind,
-            wire: if kind == ProviderKind::Google {
-                Wire::JsonArray(JsonArrayReader::default())
-            } else {
-                Wire::Sse(SseDecoder::new())
-            },
+            wire: Wire::Auto(Vec::new()),
             text: String::new(),
             reasoning: String::new(),
             tool_slots: Vec::new(),
@@ -372,8 +387,44 @@ impl StreamAssembler {
 
     pub fn feed(&mut self, chunk: &[u8]) -> Option<String> {
         let deltas = match &mut self.wire {
+            Wire::Auto(pre) => {
+                pre.extend_from_slice(chunk);
+                if pre.len() > MAX_LLM_RESPONSE_BYTES {
+                    Err("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string())
+                } else if let Some(first) = sniff_first_payload_byte(pre) {
+                    let initial = std::mem::take(pre);
+                    match first {
+                        b'[' => {
+                            let mut reader = JsonArrayReader::default();
+                            let res = reader.push(self.kind, &initial).map_err(str::to_string);
+                            self.wire = Wire::JsonArray(reader);
+                            res
+                        }
+                        b'{' => {
+                            self.wire = Wire::PlainJson(initial.len());
+                            Ok(Vec::new())
+                        }
+                        _ => {
+                            let mut decoder = SseDecoder::new();
+                            let res = read_sse_deltas(self.kind, &mut decoder, &initial);
+                            self.wire = Wire::Sse(decoder);
+                            res
+                        }
+                    }
+                } else {
+                    Ok(Vec::new())
+                }
+            }
             Wire::Sse(decoder) => read_sse_deltas(self.kind, decoder, chunk),
-            Wire::JsonArray(reader) => reader.push(chunk).map_err(str::to_string),
+            Wire::JsonArray(reader) => reader.push(self.kind, chunk).map_err(str::to_string),
+            Wire::PlainJson(seen) => {
+                *seen = seen.saturating_add(chunk.len());
+                if *seen > MAX_LLM_RESPONSE_BYTES {
+                    Err("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string())
+                } else {
+                    Ok(Vec::new())
+                }
+            }
         };
         let mut added = String::new();
         match deltas {

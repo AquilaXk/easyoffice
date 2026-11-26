@@ -239,7 +239,7 @@ pub fn run_remote_or_local(
             extract_provider_completion(req.provider.kind, &raw_response)?
         }
     };
-    let mut resp = parse_and_validate_assistant_output(req, &content, reasoning);
+    let mut resp = parse_and_validate_assistant_output(req, &content, reasoning, &vault);
     vault.restore_response(&mut resp);
     Ok(resp)
 }
@@ -309,7 +309,9 @@ fn parse_and_validate_assistant_output(
     req: &CopilotRunRequest,
     content: &str,
     default_reasoning: String,
+    vault: &PiiVault,
 ) -> CopilotRunResponse {
+    let default_reasoning = vault.restore_text(&default_reasoning);
     let candidate = strip_code_fence(content);
     let parsed_obj = StrictJsonValue::parse(candidate)
         .ok()
@@ -317,14 +319,14 @@ fn parse_and_validate_assistant_output(
             StrictJsonValue::Object(o) => Some(o),
             _ => None,
         });
-    let Some(obj) = parsed_obj.filter(|o| {
+    let Some(mut obj) = parsed_obj.filter(|o| {
         StrictJsonValue::get_str(o, "reply").is_some()
             || StrictJsonValue::get_field(o, "toolCalls").is_some()
             || StrictJsonValue::get_field(o, "operations").is_some()
     }) else {
         return CopilotRunResponse {
             mode: req.mode,
-            reply: content.trim().to_string(),
+            reply: vault.restore_text(content.trim()),
             reasoning: default_reasoning,
             updated_in_place: false,
             operations: Vec::new(),
@@ -333,6 +335,8 @@ fn parse_and_validate_assistant_output(
             tool_calls: Vec::new(),
         };
     };
+    // 검증기 실행 전에 자리표시자를 원문으로 복원해 셀 좌표·시트 이름·길이 상한 검사를 실제 값 기준으로 수행한다.
+    vault.restore_json_entries(&mut obj);
     let reply = StrictJsonValue::get_str(&obj, "reply").unwrap_or("");
     let reasoning = StrictJsonValue::get_str(&obj, "reasoning")
         .filter(|s| !s.is_empty())

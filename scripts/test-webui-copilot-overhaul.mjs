@@ -396,11 +396,14 @@ test("HWP copilot-bridge enforces read budgets, batches multi-paragraph edits in
       sections[s].splice(p, 1, cur.slice(0, off), cur.slice(off));
     },
     mergeParagraph: (s, p) => {
-      if (p + 1 < sections[s].length) {
-        sections[s][p] += sections[s][p + 1];
-        sections[s].splice(p + 1, 1);
+      if (p > 0 && p < sections[s].length) {
+        sections[s][p - 1] += sections[s][p];
+        sections[s].splice(p, 1);
       }
     },
+    getFieldInfoAt: ({ paragraphIndex, charOffset }) => ({
+      inField: paragraphIndex === 99 && charOffset === 7,
+    }),
   };
 
   const input = {
@@ -455,6 +458,39 @@ test("HWP copilot-bridge enforces read budgets, batches multi-paragraph edits in
   );
   assert.equal(undoStack.length, 1);
 
+  // Shrinking 3 paragraphs at section end (indices 2..4) down to 1 paragraph with real rhwp mergeParagraph(p-1, p) semantics
+  const shrinkRes = applyCopilotEdits(wasm, input, parseApplyCopilotEditsParams({
+    expectedDocumentGeneration: wasm.documentGeneration,
+    steps: [{ kind: "replace_range", startIndex: 2, endIndex: 4, texts: ["압축 결론"] }],
+  }));
+  assert.equal(shrinkRes.ok, true);
+  assert.deepEqual(sections[0], ["첫 문단\u0002제어", "통합 문단 A", "압축 결론"]);
+
+  // Short 1-char field inside a 64-char paragraph is caught by character-by-character assertEditableParagraph
+  let fieldCheckOffsetSeen = false;
+  const fieldWasm = {
+    ...wasm,
+    getParagraphCount: () => 1,
+    getParagraphLength: () => 64,
+    getTextRange: () => "가".repeat(64),
+    getControlTextPositions: () => [],
+    getFieldInfoAt: ({ charOffset }) => {
+      if (charOffset === 7) fieldCheckOffsetSeen = true;
+      return { inField: charOffset === 7 };
+    },
+  };
+  const fieldInput = {
+    ...input,
+    executeOperation: (desc) => desc.operation(fieldWasm),
+  };
+  assert.throws(
+    () => applyCopilotEdits(fieldWasm, fieldInput, parseApplyCopilotEditsParams({
+      steps: [{ kind: "replace_paragraphs", replacements: [{ index: 0, text: "덮어쓰기 시도" }] }],
+    })),
+    /누름틀·필드가 포함된 문단/,
+  );
+  assert.equal(fieldCheckOffsetSeen, true);
+
   // Toggle relay emits SHELL_COPILOT_TOGGLE_REASON
   const relay = createCopilotToggleRelay();
   const events = [];
@@ -506,4 +542,172 @@ test("SHEET post-verification gate catches formula errors (#DIV/0!) and agent lo
   });
   await loopH.send("반복 조회 점검", 40);
   assert.equal(loopCalls, 6, "agent loop never exceeds MAX_TURNS = 6");
+});
+
+test("sheet.note coord fingerprint detects note edits and sheet.structure delete_rows rewrites formulas without dry-run side effects", async () => {
+  let noteSheet = "";
+  const noteH = await open({
+    module: "SHEET",
+    run: (req) => {
+      noteSheet = req.context.sheet.name;
+      return answer([{ kind: "sheet.note", sheet: noteSheet, coord: "B2", text: "코파일럿 메모" }]);
+    },
+  });
+  const layout = noteH.host.__EASYOFFICE_SHEET_LAYOUT__;
+  await noteH.send("B2에 메모 추가", 18);
+  layout.setNotes(noteSheet, [{ ref: "B2", author: "사용자", text: "수동 작성 메모" }]);
+  await acceptProposal(noteH.document, noteH.userClick);
+  assert.equal(layout.noteAtRef(noteSheet, "B2")?.text, "수동 작성 메모", "coord-keyed sheet.note fingerprint blocks overwriting user note");
+
+  // Structure delete_rows rewrites =A2+A3 -> =#REF!+A2, triggers gate self-correction, and does NOT mutate freeze during dry-run
+  let structTurn = 0;
+  let structSheet = "";
+  let seeded = false;
+  const seedH = await open({
+    module: "SHEET",
+    run: (req) => {
+      structSheet = req.context.sheet.name;
+      if (!seeded) {
+        seeded = true;
+        return answer([
+          { kind: "sheet.write", sheet: structSheet, cells: [
+            { coord: "A2", raw: "10" },
+            { coord: "A3", raw: "20" },
+            { coord: "A4", raw: "=A2+A3" },
+          ] },
+        ]);
+      }
+      structTurn += 1;
+      if (structTurn === 1) {
+        return answer([
+          { kind: "sheet.structure", sheet: structSheet, action: "delete_rows", at: 2, count: 1 },
+          { kind: "sheet.structure", sheet: structSheet, action: "freeze", freezeRows: 2, freezeCols: 0 },
+        ]);
+      }
+      assert.match(req.history.at(-1)?.text || "", /#REF!/, "deleted-row #REF! caught by dry-run verification gate");
+      return answer([
+        { kind: "sheet.write", sheet: structSheet, cells: [{ coord: "A4", raw: "=A3*2" }] },
+        { kind: "sheet.structure", sheet: structSheet, action: "delete_rows", at: 2, count: 1 },
+        { kind: "sheet.structure", sheet: structSheet, action: "freeze", freezeRows: 1, freezeCols: 0 },
+      ]);
+    },
+  });
+  await seedH.send("초기 수식 입력", 20);
+  assert.ok(await acceptProposal(seedH.document, seedH.userClick));
+  const seedLayout = seedH.host.__EASYOFFICE_SHEET_LAYOUT__;
+  seedLayout.setNotes(structSheet, [{ ref: "A3", author: "검토자", text: "이동될 메모" }]);
+  assert.equal(seedLayout.freezeOf(structSheet), null);
+
+  await seedH.send("2행 삭제 및 틀 고정", 30);
+  assert.equal(structTurn, 2, "retried after delete_rows broke =A2+A3 into =#REF!+A2");
+  assert.equal(seedLayout.freezeOf(structSheet), null, "dry-run did not mutate live freeze before 수락");
+  assert.ok(await acceptProposal(seedH.document, seedH.userClick));
+  assert.equal(seedLayout.freezeOf(structSheet)?.rows, 1);
+  assert.equal(seedLayout.noteAtRef(structSheet, "A2")?.text, "이동될 메모", "note on A3 shifted up to A2 on row 2 deletion");
+  assert.equal(seedH.document.querySelector('#pane-sheet td[data-cell="A3"]')?.textContent.trim(), "40");
+
+  // HWP embed host onChange invalidates canUndoHwpSync immediately after manual user edit
+  let hwpGen = 5;
+  let changeListener = null;
+  const mockHwpHost = {
+    usesLegacy: () => false,
+    getStatus: () => "ready",
+    onChange: (fn) => { changeListener = fn; },
+    onStatus: () => {},
+    call: async () => ({
+      documentGeneration: hwpGen,
+      pageCount: 1,
+      totalParagraphs: 1,
+      paragraphs: [{ index: 0, section: 0, paragraph: 0, text: "한글 문단", hasControls: false }],
+      selection: { hasSelection: true, text: "한글 문단", startParagraphIndex: 0, endParagraphIndex: 0 },
+    }),
+  };
+  const extOps = seedH.host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__({
+    document: seedH.document,
+    getHwpHost: () => mockHwpHost,
+  });
+  await extOps.refreshHwpSnapshot();
+  assert.equal(extOps.canUndoHwpSync(5), true);
+  hwpGen = 6;
+  changeListener?.({ payload: { reason: "text_changed", documentGeneration: 6 } });
+  assert.equal(extOps.canUndoHwpSync(5), false, "HWP manual edit invalidates synchronous Undo state");
+});
+
+test("DOC table cell HTML escaping, ul Track Changes, layout_lint offscreen clone gate, FULL_MOTION inline HTML typing, and IME guards", async () => {
+  // 1. DOC layout_lint gate rejects 12-column overflowing table on offscreen clone without touching live #doc-editor, plus escapes < in cells
+  let docGateTurn = 0;
+  const h = await open({
+    module: "DOC",
+    run: (req) => {
+      docGateTurn += 1;
+      if (docGateTurn === 1) {
+        return answer([
+          { kind: "doc.append", blocks: [{ table: { headerRow: true, rows: [Array.from({ length: 12 }, (_, i) => `열${i + 1}`)] } }] },
+        ]);
+      }
+      assert.match(req.history.at(-1)?.text || "", /본문 가용 폭/, "wide table overflow reported by DOC layout_lint gate");
+      return answer([
+        { kind: "doc.append", blocks: [{ table: { headerRow: true, rows: [["조건", "식"], ["범위", "x < y & z > 0"]] } }] },
+      ]);
+    },
+  });
+  const initialHtml = h.editor.innerHTML;
+  await h.send("조건 표 추가", 28);
+  assert.equal(docGateTurn, 2);
+  assert.equal(h.editor.innerHTML, initialHtml, "DOC dry-run gate ran on offscreen clone without mutating #doc-editor");
+  assert.ok(await acceptProposal(h.document, h.userClick));
+  const cells = Array.from(h.editor.querySelectorAll("table td")).map((td) => td.textContent);
+  assert.deepEqual(cells, ["조건", "식", "범위", "x < y & z > 0"]);
+
+  // 2. ul Track Changes wraps <del> inside <li> (valid HTML) and syncs #doc-review-pane
+  let notesSynced = 0;
+  h.host.__EASYOFFICE_DOC_NOTES_API__ = {
+    ...(h.host.__EASYOFFICE_DOC_NOTES_API__ || {}),
+    syncAll: () => { notesSynced += 1; },
+  };
+  const ulH = await open({
+    module: "DOC",
+    run: () => answer([{ kind: "doc.replace_paragraphs", startIndex: 0, endIndex: 0, blocks: [{ text: "새 요약 문단" }] }]),
+  });
+  let ulSyncCount = 0;
+  ulH.host.__EASYOFFICE_DOC_NOTES_API__ = { syncAll: () => { ulSyncCount += 1; } };
+  const ul = ulH.document.createElement("ul");
+  const li = ulH.document.createElement("li");
+  li.textContent = "삭제될 목록 항목";
+  ul.appendChild(li);
+  ulH.editor.replaceChildren(ul);
+  ulH.editor.dataset.eoTrackChanges = "true";
+  await ulH.send("목록을 문단으로 교체", 18);
+  assert.ok(await acceptProposal(ulH.document, ulH.userClick));
+  assert.equal(ulH.editor.querySelector("ul > del"), null, "no invalid <ul><del> wrapper");
+  assert.equal(ulH.editor.querySelector("ul > li > del.eo-rev-del")?.textContent, "삭제될 목록 항목");
+  assert.ok(ulSyncCount >= 1, "DOC_NOTES_API.syncAll called after Track Changes edit");
+
+  // 3. FULL_MOTION animated typing of DOC inline HTML never flashes raw <strong> tags and preserves formatted run at completion
+  const motionH = await open({
+    module: "DOC",
+    motion: true,
+    run: () => answer([{ kind: "doc.replace_paragraphs", replacements: [{ index: 0, text: "<strong>강조 제목</strong> 본문 이어짐" }] }]),
+  });
+  await motionH.send("강조 문장으로 교체", 18);
+  motionH.userClick(motionH.document.querySelector('[data-copilot-action="accept"]'));
+  await motionH.play(450);
+  assert.equal(motionH.editor.textContent.includes("<strong"), false, "no raw <strong> tag characters typed during FULL_MOTION");
+  await motionH.play(3500);
+  assert.equal(motionH.editor.querySelector('p span.eo-run[data-eo-bold="true"]')?.textContent, "강조 제목");
+
+  // 4. Safari/WKWebView Korean IME keyCode === 229 & 50ms post-compositionend Enter guard on #copilot-input
+  const runCallsOf = (arr) => arr.filter((r) => r.action === "copilot_run").length;
+  const imeCountBefore = runCallsOf(motionH.seen);
+  assert.equal(imeCountBefore, 1, "valid DOC replacement passed dry-run gate in 1 turn with zero false retries");
+  motionH.input.value = "한글 조합 중 엔터";
+  motionH.input.dispatchEvent({ type: "input", target: motionH.input });
+  motionH.input.dispatchEvent({ type: "keydown", key: "Enter", keyCode: 229, timeStamp: 100, preventDefault() {} });
+  motionH.input.dispatchEvent({ type: "compositionend", timeStamp: 200 });
+  motionH.input.dispatchEvent({ type: "keydown", key: "Enter", keyCode: 13, timeStamp: 220, preventDefault() {} });
+  await flushAsyncTurns(6);
+  assert.equal(runCallsOf(motionH.seen), imeCountBefore, "IME confirming Enter (229 and <50ms after compositionend) blocked");
+  motionH.input.dispatchEvent({ type: "keydown", key: "Enter", keyCode: 13, timeStamp: 300, preventDefault() {} });
+  await flushAsyncTurns(14);
+  assert.equal(runCallsOf(motionH.seen), imeCountBefore + 1, "Enter >=50ms after compositionend submits cleanly");
 });

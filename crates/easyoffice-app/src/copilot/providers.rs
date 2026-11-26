@@ -214,7 +214,9 @@ pub fn build_provider_chat_body_with_history(
     let body = match req.provider.kind {
         ProviderKind::Anthropic => {
             let turns = coalesce_turns(history, user_content);
-            let budget = effort.map_or(0, ReasoningEffort::budget_tokens);
+            let budget = effort
+                .filter(|_| is_reasoning)
+                .map_or(0, ReasoningEffort::budget_tokens);
             let max_tokens = MAX_OUTPUT_TOKENS + budget;
             let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
             out.push_str("{\"model\":");
@@ -329,7 +331,7 @@ pub fn build_provider_chat_body_with_history(
             let _ = write!(out, ",\"{cap_field}\":{cap}");
             write_provider_tools_field(&mut out, req);
             if let Some(level) = effort {
-                if req.provider.kind == ProviderKind::DeepSeek {
+                if req.provider.kind == ProviderKind::DeepSeek && is_reasoning {
                     out.push_str(",\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":");
                     push_json_str(&mut out, level.as_str());
                 } else if matches!(

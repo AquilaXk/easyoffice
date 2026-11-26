@@ -411,7 +411,7 @@ function assertEditableParagraph(wasm: CopilotWasmSource, sec: number, para: num
   }
   if (typeof wasm.getFieldInfoAt === 'function') {
     const checkCount = Math.min(len, COPILOT_MAX_PARAGRAPH_CHARS);
-    for (let offset = 0; offset <= checkCount; offset += Math.max(1, Math.floor(checkCount / 16) || 1)) {
+    for (let offset = 0; offset <= checkCount; offset += 1) {
       if (wasm.getFieldInfoAt({ sectionIndex: sec, paragraphIndex: para, charOffset: offset }).inField) {
         throw new Error('누름틀·필드가 포함된 문단은 코파일럿으로 덮어쓸 수 없습니다.');
       }

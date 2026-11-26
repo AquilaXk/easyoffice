@@ -612,3 +612,115 @@ fn cloud_pii_redaction_masks_outbound_payload_and_restores_chunk_split_stream_wh
         "loopback provider keeps raw local text without unnecessary redaction"
     );
 }
+
+#[test]
+fn google_sse_streaming_and_parameters_json_schema_work_alongside_array_fallback() {
+    let sse_chunks = [
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"reply\\\":\\\"SSE 첫 조각, \"}]}}]}\n\n",
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"SSE 둘째 조각\\\",\\\"operations\\\":[{\\\"op\\\":\\\"doc.append\\\",\\\"text\\\":\\\"추가 문단\\\"}]}\"}]}}]}\n\n",
+    ];
+    let stream_req = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"추가","stream":true,"requestId":"g-sse-1","provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-3-flash","apiKey":"AIza-test"}}"#;
+    let (res, reqs, pieces) = dispatch_stream_chunks(stream_req, &sse_chunks);
+    let o = parse_obj(&res.expect("google SSE stream ok"));
+    assert_eq!(
+        StrictJsonValue::get_str(&o, "reply"),
+        Some("SSE 첫 조각, SSE 둘째 조각")
+    );
+    assert_eq!(ops_of(&o).len(), 1);
+    assert!(
+        !pieces.is_empty(),
+        "Google SSE stream must emit live text chunks"
+    );
+    assert!(
+        reqs[0].body_json.contains("\"parametersJsonSchema\"")
+            && !reqs[0].body_json.contains("\"parameters\":{"),
+        "Google functionDeclarations must use parametersJsonSchema: {}",
+        reqs[0].body_json
+    );
+    assert!(
+        !reqs[0].body_json.contains(r#"{"type":"object"}"#),
+        "schemas must not contain bare empty object definitions: {}",
+        reqs[0].body_json
+    );
+}
+
+#[test]
+fn non_reasoning_anthropic_and_deepseek_models_omit_thinking_fields() {
+    let anthropic_resp =
+        r#"{"content":[{"type":"text","text":"{\"reply\":\"하단 응답\",\"operations\":[]}"}]}"#;
+    let haiku_req = r#"{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"확인","provider":{"kind":"anthropic","baseUrl":"https://93.184.216.34/v1","model":"claude-3-5-haiku-20241022","apiKey":"sk-ant-test","reasoningEffort":"high"}}"#;
+    let (res_h, reqs_h) = dispatch_raw_llm(haiku_req, anthropic_resp);
+    assert!(res_h.is_ok());
+    assert!(
+        !reqs_h[0].body_json.contains("\"thinking\""),
+        "non-reasoning Anthropic model must not inject thinking budget: {}",
+        reqs_h[0].body_json
+    );
+
+    let ds_chat_req = r#"{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"확인","provider":{"kind":"remote_https","baseUrl":"https://93.184.216.34/v1","model":"deepseek-chat","apiKey":"sk-ds","reasoningEffort":"high"}}"#;
+    let (res_ds, reqs_ds) = dispatch_raw_llm(
+        ds_chat_req,
+        &openai_text_reply(r#"{"reply":"완료","operations":[]}"#),
+    );
+    assert!(res_ds.is_ok());
+    assert!(
+        !reqs_ds[0].body_json.contains("\"thinking\"")
+            && !reqs_ds[0].body_json.contains("\"reasoning_effort\""),
+        "deepseek-chat must not receive reasoning_effort/thinking: {}",
+        reqs_ds[0].body_json
+    );
+}
+
+#[test]
+fn pii_restoration_runs_before_validation_for_cell_coords_sheet_names_and_length_bounds() {
+    let long_email = format!("{}@example.com", "a".repeat(170));
+    let sheet_req = format!(
+        r#"{{
+            "action":"copilot_run",
+            "mode":"edit",
+            "module":"SHEET",
+            "prompt":"셀 AB1000000과 긴 제목 {long_email} 반영",
+            "selection":{{"sheet":"admin@corp.kr","range":"AB1000000"}},
+            "provider":{{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"}},
+            "context":{{"sheet":{{"name":"admin@corp.kr","cells":[{{"coord":"AB1000000","raw":"10","value":"10"}}],"rowCount":1000005}}}}
+        }}"#
+    );
+    // Outbound scan order: prompt ("AB1000000" -> [PII_ID_1], long_email -> [PII_EMAIL_2]),
+    // selection/context ("admin@corp.kr" -> [PII_EMAIL_3]).
+    let model_reply = r#"{
+        "reply":"시트 [PII_EMAIL_3]의 [PII_ID_1] 갱신, 꼬리 조각 [PII_EMA",
+        "operations":[
+            {"op":"sheet.write","sheet":"[PII_EMAIL_3]","cells":[{"coord":"[PII_ID_1]","raw":"99"}]},
+            {"op":"sheet.chart","sheet":"[PII_EMAIL_3]","chartType":"bar","dataRange":"A1:B3","title":"[PII_EMAIL_2]"}
+        ]
+    }"#;
+    let (res, reqs) = dispatch_raw_llm(&sheet_req, &openai_text_reply(model_reply));
+    assert!(
+        !reqs[0].body_json.contains("admin@corp.kr") && !reqs[0].body_json.contains("AB1000000"),
+        "outbound payload redacted sheet email and passport-shaped coord: {}",
+        reqs[0].body_json
+    );
+    let o = parse_obj(&res.expect("PII pre-validation restore ok"));
+    let ops = ops_of(&o);
+    assert_eq!(
+        ops.len(),
+        1,
+        "valid AB1000000 sheet.write survives while >160-char restored chart title is dropped"
+    );
+    assert_eq!(
+        StrictJsonValue::get_field(&o, "droppedOperations").and_then(StrictJsonValue::as_u64),
+        Some(1)
+    );
+    let op0 = ops[0].as_object().unwrap();
+    assert_eq!(
+        StrictJsonValue::get_str(op0, "sheet"),
+        Some("admin@corp.kr")
+    );
+    let cells = StrictJsonValue::get_field(op0, "cells")
+        .and_then(StrictJsonValue::as_array)
+        .unwrap();
+    assert_eq!(
+        StrictJsonValue::get_str(cells[0].as_object().unwrap(), "coord"),
+        Some("AB1000000")
+    );
+}

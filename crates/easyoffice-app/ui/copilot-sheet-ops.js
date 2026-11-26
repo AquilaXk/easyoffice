@@ -78,7 +78,7 @@
     return { kind: "text", text: rawVal, display: rawVal };
   }
 
-  function executeSheetTable(op, sheetName, sheetDataStore, sheetRowCounts, locations) {
+  function executeSheetTable(op, sheetName, sheetDataStore, sheetRowCounts, locations, options = {}) {
     const guard = host.__EASYOFFICE_SHEET_PROTECT__;
     if (guard?.isOn(sheetName)) throw new Error("보호된 시트에서는 표를 편집할 수 없습니다.");
     const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -115,14 +115,30 @@
       });
       if (plan.error) throw new Error(plan.error);
       if (op.style) plan.table.style = String(op.style);
-      if (typeof op.totalRow === "boolean") plan.table.totals = op.totalRow;
       for (const hw of plan.headerWrites || []) {
         const ref = refOf(hw.row, hw.col);
         map[ref] = { ...(map[ref] || {}), value: hw.text, formula: "" };
       }
-      const boxAfter = layout.tableBox(plan.table);
+      let boxAfter = layout.tableBox(plan.table);
+      if (op.totalRow === true && !plan.table.totals) {
+        const totRow = boxAfter.r2 + 1;
+        plan.table.range = formatSelectionA1({ r1: boxAfter.r1, c1: boxAfter.c1, r2: totRow, c2: boxAfter.c2 }, colName);
+        plan.table.totals = true;
+        const firstRef = refOf(totRow, boxAfter.c1);
+        if (!map[firstRef]?.value && !map[firstRef]?.formula) {
+          map[firstRef] = { value: "합계", formula: "" };
+        }
+        if (boxAfter.c2 > boxAfter.c1) {
+          const lastCol = colName(boxAfter.c2);
+          const sumRef = refOf(totRow, boxAfter.c2);
+          map[sumRef] = { value: "", formula: `=SUBTOTAL(109,${lastCol}${boxAfter.r1 + 1}:${lastCol}${boxAfter.r2})` };
+        }
+        boxAfter = layout.tableBox(plan.table);
+      } else if (typeof op.totalRow === "boolean") {
+        plan.table.totals = op.totalRow;
+      }
       if (boxAfter.r2 > (sheetRowCounts[sheetName] || 12)) sheetRowCounts[sheetName] = boxAfter.r2;
-      layout.setTables(sheetName, [...existing, plan.table]);
+      if (!options.dryRun) layout.setTables(sheetName, [...existing, plan.table]);
       locations.push({ module: "SHEET", label: plan.table.name, sheet: sheetName, range: plan.table.range });
       return;
     }
@@ -137,7 +153,7 @@
 
     if (action === "style" && op.style) {
       target.style = String(op.style);
-      layout.setTables(sheetName, existing);
+      if (!options.dryRun) layout.setTables(sheetName, existing);
     } else if (action === "total_row") {
       const nextTotals = typeof op.totalRow === "boolean" ? op.totalRow : !target.totals;
       const b = layout.tableBox(target);
@@ -160,14 +176,14 @@
         target.range = formatSelectionA1({ r1: b.r1, c1: b.c1, r2: b.r2 - 1, c2: b.c2 }, colName);
         target.totals = false;
       }
-      layout.setTables(sheetName, existing);
+      if (!options.dryRun) layout.setTables(sheetName, existing);
     } else if (action === "to_range") {
       if (tableBake?.plan && tableBake?.apply) {
         const baked = tableBake.plan(target, layout.tableBox(target), (r, c) => map[refOf(r, c)]);
         if (!baked.error) tableBake.apply(baked, map, refOf);
       }
       existing.splice(idx, 1);
-      layout.setTables(sheetName, existing);
+      if (!options.dryRun) layout.setTables(sheetName, existing);
     }
     locations.push({ module: "SHEET", label: target.name, sheet: sheetName, range: target.range });
   }
@@ -422,7 +438,96 @@
     locations.push({ module: "SHEET", label: "정렬 " + rangeStr, sheet: sheetName, range: rangeStr });
   }
 
-  function executeSheetStructure(op, sheetName, sheetDataStore, sheetRowCounts, locations) {
+  const ENDPOINT_PARTS_RE = /^(\$?)([A-Za-z]{1,3})?(\$?)(\d+)?$/;
+
+  function parseFormulaRefEndpoint(rawPart, colIndex) {
+    const m = ENDPOINT_PARTS_RE.exec(String(rawPart || "").trim());
+    if (!m || (!m[2] && !m[4])) return null;
+    const col = m[2] ? colIndex(m[2].toUpperCase()) : null;
+    const row = m[4] ? Number(m[4]) : null;
+    if (col !== null && (!Number.isInteger(col) || col < 1)) return null;
+    if (row !== null && (!Number.isInteger(row) || row < 1)) return null;
+    return { colDollar: m[1] || "", col, rowDollar: m[3] || "", row };
+  }
+
+  function remapAxisSpan(edit, lo, hi, maxBound) {
+    if (edit.op === "insert") {
+      const nextLo = lo < edit.at ? lo : Math.min(maxBound, lo + edit.count);
+      const nextHi = hi < edit.at ? hi : Math.min(maxBound, hi + edit.count);
+      return [nextLo, nextHi];
+    }
+    const delEnd = edit.at + edit.count - 1;
+    if (hi < edit.at) return [lo, hi];
+    if (lo > delEnd) return [lo - edit.count, hi - edit.count];
+    if (lo >= edit.at && hi <= delEnd) return null;
+    const nextLo = lo < edit.at ? lo : edit.at;
+    const nextHi = hi > delEnd ? hi - edit.count : edit.at - 1;
+    return nextLo <= nextHi ? [nextLo, nextHi] : null;
+  }
+
+  function formatFormulaRefEndpoint(ep, col, row, colName) {
+    return (col !== null ? ep.colDollar + colName(col) : "") + (row !== null ? ep.rowDollar + String(row) : "");
+  }
+
+  function unquoteSheetPrefix(prefixWithBang) {
+    const body = String(prefixWithBang || "").slice(0, -1).trim();
+    if (!body) return null;
+    if (body.startsWith("'") && body.endsWith("'")) {
+      const inner = body.slice(1, -1);
+      if (inner.includes("':'")) return null;
+      return inner.replaceAll("''", "'");
+    }
+    if (body.includes(":")) return null;
+    return body;
+  }
+
+  function remapFormulaForStructureEdit(formula, edit, editedSheet, formulaSheet) {
+    const tokenRe = host.__EASYOFFICE_SHEET_REF_TOKENS__?.TOKEN_RE;
+    const refs = host.__EASYOFFICE_SHEET_REFS__;
+    if (!tokenRe || !refs || typeof formula !== "string" || !formula.startsWith("=")) return formula;
+    const { colName, colIndex, MAX_ROWS = 1048576, MAX_COLS = 16384 } = refs;
+    const editedLower = String(editedSheet || "").toLowerCase();
+    const re = new RegExp(tokenRe.source, tokenRe.flags);
+    return formula.replace(re, (match, sheetPrefix, refToken) => {
+      if (!refToken) return match;
+      const targetSheet = sheetPrefix ? unquoteSheetPrefix(sheetPrefix) : formulaSheet;
+      if (!targetSheet || targetSheet.toLowerCase() !== editedLower) return match;
+      if (!refToken.includes(":")) {
+        const ep = parseFormulaRefEndpoint(refToken, colIndex);
+        if (!ep || ep.row === null || ep.col === null) return match;
+        const rSpan = edit.axis === "row" ? remapAxisSpan(edit, ep.row, ep.row, MAX_ROWS) : [ep.row, ep.row];
+        const cSpan = edit.axis === "col" ? remapAxisSpan(edit, ep.col, ep.col, MAX_COLS) : [ep.col, ep.col];
+        if (!rSpan || !cSpan) return "#REF!";
+        return (sheetPrefix || "") + formatFormulaRefEndpoint(ep, cSpan[0], rSpan[0], colName);
+      }
+      const [rawA, rawB] = refToken.split(":");
+      const epA = parseFormulaRefEndpoint(rawA, colIndex);
+      const epB = parseFormulaRefEndpoint(rawB, colIndex);
+      if (!epA || !epB) return match;
+      let rPair = [epA.row, epB.row];
+      if (epA.row !== null && epB.row !== null && edit.axis === "row") {
+        const lo = Math.min(epA.row, epB.row);
+        const hi = Math.max(epA.row, epB.row);
+        const mapped = remapAxisSpan(edit, lo, hi, MAX_ROWS);
+        if (!mapped) return "#REF!";
+        rPair = epA.row <= epB.row ? mapped : [mapped[1], mapped[0]];
+      }
+      let cPair = [epA.col, epB.col];
+      if (epA.col !== null && epB.col !== null && edit.axis === "col") {
+        const lo = Math.min(epA.col, epB.col);
+        const hi = Math.max(epA.col, epB.col);
+        const mapped = remapAxisSpan(edit, lo, hi, MAX_COLS);
+        if (!mapped) return "#REF!";
+        cPair = epA.col <= epB.col ? mapped : [mapped[1], mapped[0]];
+      }
+      return (sheetPrefix || "")
+        + formatFormulaRefEndpoint(epA, cPair[0], rPair[0], colName)
+        + ":"
+        + formatFormulaRefEndpoint(epB, cPair[1], rPair[1], colName);
+    });
+  }
+
+  function executeSheetStructure(op, sheetName, sheetDataStore, sheetRowCounts, locations, options = {}) {
     const guard = host.__EASYOFFICE_SHEET_PROTECT__;
     const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
     const { colName, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
@@ -431,7 +536,7 @@
     if (action === "freeze" || action === "unfreeze") {
       const rows = action === "unfreeze" ? 0 : Math.max(0, Math.min(64, Number(op.freezeRows ?? op.index ?? op.count ?? 1) || 0));
       const cols = action === "unfreeze" ? 0 : Math.max(0, Math.min(64, Number(op.freezeCols) || 0));
-      layout?.setFreeze?.(sheetName, { rows, cols });
+      if (!options.dryRun) layout?.setFreeze?.(sheetName, { rows, cols });
       const label = rows === 0 && cols === 0 ? "틀 고정 해제" : `틀 고정 (${rows}행 ${cols}열)`;
       locations.push({ module: "SHEET", label, sheet: sheetName, range: "A1" });
       return;
@@ -452,9 +557,30 @@
       const nextRow = isRow ? layout.mapIndex(edit, p.row) : p.row;
       const nextCol = !isRow ? layout.mapIndex(edit, p.col) : p.col;
       if (nextRow === null || nextCol === null) continue;
-      nextMap[refOf(nextRow, nextCol)] = entry;
+      nextMap[refOf(nextRow, nextCol)] = { ...entry };
     }
     sheetDataStore[sheetName] = nextMap;
+    for (const [sName, sMap] of Object.entries(sheetDataStore)) {
+      if (!sMap || typeof sMap !== "object") continue;
+      for (const coord of Object.keys(sMap)) {
+        const rec = sMap[coord];
+        if (rec && typeof rec.formula === "string" && rec.formula.startsWith("=")) {
+          const nextF = remapFormulaForStructureEdit(rec.formula, edit, sheetName, sName);
+          if (nextF !== rec.formula) sMap[coord] = { ...rec, formula: nextF };
+        }
+      }
+    }
+    if (!options.dryRun && layout?.notesOf && layout?.setNotes) {
+      const curNotes = layout.notesOf(sheetName);
+      if (curNotes.length > 0) {
+        const movedNotes = [];
+        for (const n of curNotes) {
+          const nextRef = layout.remapRef(edit, String(n.ref || "").toUpperCase());
+          if (nextRef) movedNotes.push({ ...n, ref: nextRef });
+        }
+        layout.setNotes(sheetName, movedNotes);
+      }
+    }
     if (isRow) {
       const curRows = sheetRowCounts[sheetName] || 12;
       sheetRowCounts[sheetName] = isInsert ? curRows + count : Math.max(12, curRows - count);
@@ -602,7 +728,7 @@
         return [Object.keys(store).length, layout?.freezeOf?.(sheet) || null];
       }
       if (kind === "sheet.note") {
-        const cell = String(op?.cell || "").toUpperCase();
+        const cell = String(op?.coord || op?.cell || "").toUpperCase();
         return layout?.noteAtRef?.(sheet, cell) || null;
       }
       return null;
@@ -710,13 +836,13 @@
     "sheet.note",
   ]);
 
-  function executeExtendedSheetOp(kind, op, deps) {
+  function executeExtendedSheetOp(kind, op, deps, options = {}) {
     const { sheetName, sheetDataStore, sheetRowCounts, locations } = deps;
-    if (kind === "sheet.table") return executeSheetTable(op, sheetName, sheetDataStore, sheetRowCounts, locations);
+    if (kind === "sheet.table") return executeSheetTable(op, sheetName, sheetDataStore, sheetRowCounts, locations, options);
     if (kind === "sheet.pivot") return executeSheetPivot(op, sheetName, sheetDataStore, sheetRowCounts, locations);
     if (kind === "sheet.cond_format") return executeSheetCondFormat(op, sheetName, locations);
     if (kind === "sheet.sort_filter") return executeSheetSortFilter(op, sheetName, sheetDataStore, locations);
-    if (kind === "sheet.structure") return executeSheetStructure(op, sheetName, sheetDataStore, sheetRowCounts, locations);
+    if (kind === "sheet.structure") return executeSheetStructure(op, sheetName, sheetDataStore, sheetRowCounts, locations, options);
     if (kind === "sheet.note") return executeSheetNote(op, sheetName, locations);
     throw new Error("지원하지 않는 시트 작업입니다: " + kind);
   }
@@ -726,6 +852,7 @@
     FORMULA_ERROR_CODES,
     freezeSelection,
     parseRangeBox1,
+    remapFormulaForStructureEdit,
     executeExtendedSheetOp,
     previewEntryForExtendedSheetOp,
     computeSheetFingerprint,

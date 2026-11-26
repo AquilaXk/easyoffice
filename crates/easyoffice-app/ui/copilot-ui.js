@@ -525,9 +525,16 @@
       syncComposerControls();
     }
 
+    function refreshHwpBadgeAsync() {
+      if (getActiveModule() === "HWP") {
+        void copilotActions.refreshHwpSnapshot?.().then(() => syncSelectionBadge()).catch(() => {});
+      }
+    }
+
     function setOpen(nextOpen) {
       if (!isModuleSupported()) return false;
       isOpen = Boolean(nextOpen);
+      if (isOpen) refreshHwpBadgeAsync();
       syncPanelChrome();
       if (isOpen) byId("copilot-input")?.focus?.();
       return isOpen;
@@ -604,7 +611,7 @@
       activeRequestId = newRequestId();
       renderThread();
       syncComposerControls();
-      return { assistantEntry, turnId, mod, mode, selection, context, history, token: activeRunToken, requestId: activeRequestId, request };
+      return { assistantEntry, turnId, mod, mode, selection, frozenSelection, context, history, token: activeRunToken, requestId: activeRequestId, request };
     }
 
     // 스트림으로 온 글이 늘 때마다 대기 중인 답글을 그 자리에서 고쳐 쓴다(조각마다 스레드를 다시 그리지 않는다).
@@ -622,8 +629,8 @@
     }
 
     // 연산이 있는 편집 응답은 적용하지 않고 바뀔 곳을 보여 준다. 수락해야 적용한다.
-    function propose(entry, mod, rawOperations) {
-      const operations = copilotActions.normalizeOperations(mod, rawOperations);
+    function propose(entry, mod, rawOperations, frozenSelection) {
+      const operations = copilotActions.normalizeOperations(mod, rawOperations, frozenSelection);
       const changes = copilotActions.buildChanges(mod, operations);
       entry.change = { state: "pending", mod, operations, changes, fingerprint: copilotActions.fingerprint(mod, operations) };
       if (mod === "DOC") copilotActions.showDocPreview(changes);
@@ -661,6 +668,7 @@
         if (turn.request.command) baseReq.command = turn.request.command;
         const res = await agentLoop.runAgentTurn({
           baseReq,
+          frozenSelection: turn.frozenSelection,
           newSubRequestId: (stepIdx) => turn.requestId + "-s" + stepIdx,
           isCancelled: () => token !== activeRunToken,
           onStreamText: (text) => showStreamed(assistantEntry, text, token),
@@ -673,7 +681,7 @@
         assistantEntry.reply = String(res?.reply || "요청을 처리했습니다.");
         assistantEntry.reasoning = String(res?.reasoning || "");
         assistantEntry.locations = explicitLocs;
-        if (mode === "edit" && ops.length > 0) propose(assistantEntry, mod, ops);
+        if (mode === "edit" && ops.length > 0) propose(assistantEntry, mod, ops, turn.frozenSelection);
         const dropped = Number(res?.droppedOperations) || 0;
         if (dropped > 0) setStatusFeedback?.("형식이 맞지 않는 작업 " + dropped + "개를 건너뛰었습니다");
       } catch (err) {
@@ -888,6 +896,14 @@
       buildCommandRow();
 
       const inputEl = byId("copilot-input");
+      let inputComposing = false;
+      let lastCompEndAt = -Infinity;
+      inputEl?.addEventListener("compositionstart", () => { inputComposing = true; });
+      inputEl?.addEventListener("compositionend", (ev) => {
+        inputComposing = false;
+        const ts = Number(ev?.timeStamp);
+        if (Number.isFinite(ts)) lastCompEndAt = ts;
+      });
       inputEl?.addEventListener("input", () => {
         // 질문은 UTF-8 바이트 상한까지만 받는다(예전 `maxlength`는 글자 수라 한글이 엔진 상한을 넘었다).
         const clipped = host.__EASYOFFICE_COPILOT_TEXT__.clipUtf8Bytes(inputEl.value, MAX_PROMPT_BYTES);
@@ -898,12 +914,18 @@
       });
       inputEl?.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter" && !ev.shiftKey) {
-          if (ev.isComposing || isImeComposing?.()) return;
+          const ts = Number(ev.timeStamp);
+          const withinPostComp = Number.isFinite(ts) && ts - lastCompEndAt >= 0 && ts - lastCompEndAt < 50;
+          if (ev.isComposing || ev.keyCode === 229 || inputComposing || withinPostComp || isImeComposing?.()) return;
           ev.preventDefault();
           void submitPrompt();
         }
       });
 
+      const shellEl = byId("eo-copilot-shell");
+      for (const evt of ["pointerenter", "focusin"]) {
+        shellEl?.addEventListener(evt, () => refreshHwpBadgeAsync());
+      }
       for (const type of ["focusin", "keyup", "input", "click"]) {
         document.addEventListener(type, () => syncSelectionBadge());
       }

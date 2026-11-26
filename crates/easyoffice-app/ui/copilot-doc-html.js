@@ -93,7 +93,9 @@
     };
   }
 
-  function serializeInlineChildren(container) {
+  const TAG_LIKE_PLAIN_RE = /<\/?(?:strong|b|em|i|u|s|del|strike|a|table|tr|th|td|br)\b/i;
+
+  function serializeInlineInternal(container) {
     let hasMarkup = false;
     const walk = (node) => {
       if (!node) return "";
@@ -133,9 +135,15 @@
     };
 
     const html = walk(container).trim();
+    return { html, hasMarkup };
+  }
+
+  function serializeInlineChildren(container) {
+    const { html, hasMarkup } = serializeInlineInternal(container);
     if (!hasMarkup) {
-      // Plain text without HTML entity noise when there is no inline formatting.
-      return decodeHtmlEntities(html);
+      const plain = decodeHtmlEntities(html);
+      // Keep HTML entity escaping if literal text looks like an allowed formatting/table tag so round-trips stay lossless.
+      return TAG_LIKE_PLAIN_RE.test(plain) ? html : plain;
     }
     return html;
   }
@@ -153,9 +161,8 @@
       const cellStr = cells.map((cell) => {
         const isHeader = (cell.tagName || "").toLowerCase() === "th" || (rIdx === 0 && cell.dataset?.eoHeader === "true");
         const tag = isHeader ? "th" : "td";
-        const content = serializeInlineChildren(cell);
-        const encoded = content.includes("<") ? content : escapeHtmlText(content);
-        return `<${tag}>${encoded}</${tag}>`;
+        const { html } = serializeInlineInternal(cell);
+        return `<${tag}>${html}</${tag}>`;
       }).join("");
       return `<tr>${cellStr}</tr>`;
     }).join("");
@@ -273,10 +280,11 @@
         if (!closing && stack.length < MAX_INLINE_DEPTH) {
           const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
           const candidate = decodeHtmlEntities(hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? "");
+          const prevHref = activeHref;
           if (isSafeHref(candidate)) {
             activeHref = candidate.trim();
-            stack.push({ kind: "link", prevHref: "" });
           }
+          stack.push({ kind: "link", prevHref });
         } else if (closing) {
           for (let s = stack.length - 1; s >= 0; s -= 1) {
             if (stack[s].kind === "link") {
@@ -455,11 +463,12 @@
   }
 
   function replaceParagraphContentWithTrackChanges(document, editor, blockEl, rawText) {
+    const tableParsed = parseHtmlTableString(rawText);
     if (!isTrackChangesActive(editor)) {
-      const built = buildDocBlockElement(document, rawText);
-      if (built && (built.tagName || "").toLowerCase() === "table") {
-        blockEl.replaceWith(built);
-        return built;
+      if (tableParsed) {
+        const tbl = buildTableElement(document, tableParsed.rows, tableParsed.headerRow);
+        blockEl.replaceWith(tbl);
+        return tbl;
       }
       blockEl.replaceChildren();
       populateSanitizedInline(document, blockEl, rawText);
@@ -468,6 +477,16 @@
 
     const revId = nextRevisionId(editor);
     const dateIso = new Date().toISOString();
+    if (tableParsed) {
+      const hadText = Boolean(String(blockEl.textContent || "").trim());
+      markBlockDeletedInPlace(document, blockEl, revId, dateIso);
+      const tbl = buildTableElement(document, tableParsed.rows, tableParsed.headerRow);
+      wrapBlockInserted(document, tbl, revId + (hadText ? 1 : 0), dateIso);
+      if (blockEl.parentElement === editor) blockEl.after(tbl);
+      else editor.appendChild(tbl);
+      return tbl;
+    }
+
     const oldHasText = Boolean(String(blockEl.textContent || "").trim());
     const delWrapper = oldHasText ? makeRevisionWrapper(document, "del", revId, dateIso) : null;
     if (delWrapper) {
@@ -494,6 +513,15 @@
         const del = makeRevisionWrapper(document, "del", revId, dateIso);
         while (cell.firstChild) del.appendChild(cell.firstChild);
         cell.appendChild(del);
+      }
+      return;
+    }
+    if (tag === "ul" || tag === "ol") {
+      for (const li of Array.from(blockEl.querySelectorAll?.("li") || [])) {
+        if (!String(li.textContent || "").trim()) continue;
+        const del = makeRevisionWrapper(document, "del", revId, dateIso);
+        while (li.firstChild) del.appendChild(li.firstChild);
+        li.appendChild(del);
       }
       return;
     }

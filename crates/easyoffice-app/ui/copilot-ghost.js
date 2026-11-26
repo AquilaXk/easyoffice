@@ -255,6 +255,7 @@
       }
 
       if (beforeSnap) commitDeferredUndoSnapshot?.(beforeSnap);
+      host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
       noteActivity?.();
       const panels = getWorkspacePanels?.();
       panels?.saveActiveDocTabState?.();
@@ -279,8 +280,17 @@
     function bind() {
       const editor = document.getElementById("doc-editor");
       if (!editor) return;
+      let lastCompEndAt = -Infinity;
+      editor.addEventListener("compositionend", (ev) => {
+        const ts = Number(ev?.timeStamp);
+        if (Number.isFinite(ts)) lastCompEndAt = ts;
+        scheduleSuggestion();
+      });
       editor.addEventListener("keydown", (ev) => {
         if (!activeSuggestion) return;
+        const ts = Number(ev.timeStamp);
+        const withinPostComp = Number.isFinite(ts) && ts - lastCompEndAt >= 0 && ts - lastCompEndAt < 50;
+        if (ev.isComposing || ev.keyCode === 229 || withinPostComp || isImeComposing?.()) return;
         if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
           if (acceptSuggestion()) {
             ev.preventDefault?.();
