@@ -174,14 +174,7 @@ export function validateChecksumsPayload(rawText, expectedNames = releaseFileNam
   return map;
 }
 
-export function verifyReleaseRecord({
-  release,
-  manifestText,
-  sumsText,
-  latestRelease,
-  expectedDraft,
-  expectedVersion,
-}) {
+export function verifyReleaseMetadata({ release, expectedDraft, expectedVersion }) {
   if (!release || typeof release !== "object") {
     throw new Error("release payload is missing");
   }
@@ -202,7 +195,9 @@ export function verifyReleaseRecord({
   const assets = Array.isArray(release.assets) ? release.assets : [];
   const assetByName = new Map();
   for (const asset of assets) {
-    if (!asset || typeof asset.name !== "string") continue;
+    if (!asset || typeof asset.name !== "string") {
+      throw new Error(`release ${expectedTag} contains malformed asset entry`);
+    }
     if (assetByName.has(asset.name)) {
       throw new Error(`release ${expectedTag} contains duplicate asset '${asset.name}'`);
     }
@@ -224,10 +219,27 @@ export function verifyReleaseRecord({
     if (asset.state !== "uploaded") {
       throw new Error(`release ${expectedTag} asset '${name}' is incomplete (state=${asset.state})`);
     }
-    if (typeof asset.size !== "number" || asset.size <= 0) {
+    if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
       throw new Error(`release ${expectedTag} asset '${name}' has invalid size ${asset.size}`);
     }
   }
+
+  return { expectedTag, expectedAssets, assetByName };
+}
+
+export function verifyReleaseRecord({
+  release,
+  manifestText,
+  sumsText,
+  latestRelease,
+  expectedDraft,
+  expectedVersion,
+}) {
+  const { expectedTag, expectedAssets } = verifyReleaseMetadata({
+    release,
+    expectedDraft,
+    expectedVersion,
+  });
 
   const manifest = validateManifestPayload(manifestText, expectedVersion);
   const checksums = validateChecksumsPayload(sumsText);
@@ -264,7 +276,8 @@ export function formatBytes(bytes) {
 }
 
 export function formatAssetSummaryMarkdown(release) {
-  const rows = [...(release.assets ?? [])]
+  const rows = (Array.isArray(release?.assets) ? release.assets : [])
+    .filter((asset) => asset && typeof asset.name === "string")
     .sort((a, b) => compareStrings(a.name, b.name))
     .map((asset) => `| \`${asset.name}\` | ${formatBytes(asset.size)} |`);
   return [
@@ -503,11 +516,13 @@ export async function verifyReleaseOnGitHub({
         token,
         fetchImpl,
       });
-      const assetsByName = new Map((release.assets ?? []).map((a) => [a.name, a]));
-      const manifestAsset = assetsByName.get(MANIFEST_FILE);
-      const sumsAsset = assetsByName.get(SUMS_FILE);
-      if (!manifestAsset) throw new Error(`release ${tag} is missing ${MANIFEST_FILE}`);
-      if (!sumsAsset) throw new Error(`release ${tag} is missing ${SUMS_FILE}`);
+      const { assetByName } = verifyReleaseMetadata({
+        release,
+        expectedDraft,
+        expectedVersion,
+      });
+      const manifestAsset = assetByName.get(MANIFEST_FILE);
+      const sumsAsset = assetByName.get(SUMS_FILE);
 
       const [manifestText, sumsText] = await Promise.all([
         fetchGitHubAssetText(manifestAsset, token, fetchImpl),
@@ -537,18 +552,25 @@ export async function verifyReleaseOnGitHub({
   );
 }
 
+function setExpectedDraft(args, value) {
+  if (args.expectedDraft !== undefined && args.expectedDraft !== value) {
+    throw new Error("conflicting draft/public arguments");
+  }
+  args.expectedDraft = value;
+}
+
 export function parseCliArgs(argv, env = process.env) {
   const args = { repo: env?.GITHUB_REPOSITORY || "", tag: "", expectedDraft: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--repo" && argv[i + 1]) args.repo = argv[++i];
     else if (arg === "--tag" && argv[i + 1]) args.tag = argv[++i];
-    else if (arg === "--expect-draft") args.expectedDraft = true;
-    else if (arg === "--expect-public") args.expectedDraft = false;
+    else if (arg === "--expect-draft") setExpectedDraft(args, true);
+    else if (arg === "--expect-public") setExpectedDraft(args, false);
     else if (arg === "--draft" && argv[i + 1]) {
       const val = argv[++i];
       if (val !== "true" && val !== "false") throw new Error(`invalid --draft '${val}' (expected true|false)`);
-      args.expectedDraft = val === "true";
+      setExpectedDraft(args, val === "true");
     }
     else throw new Error(`unknown or incomplete argument '${arg}'`);
   }
@@ -560,20 +582,38 @@ export function parseCliArgs(argv, env = process.env) {
   return args;
 }
 
-async function main() {
-  const opts = parseCliArgs(process.argv.slice(2));
+export async function runPostReleaseCheckCli(
+  argv = process.argv.slice(2),
+  {
+    env = process.env,
+    fetchImpl = fetch,
+    summaryPath = env?.GITHUB_STEP_SUMMARY || "",
+    maxAttempts = 4,
+    retryDelayMs = 2000,
+    sleepImpl = defaultSleep,
+    log = console.log,
+  } = {},
+) {
+  const opts = parseCliArgs(argv, env);
   const { result } = await verifyReleaseOnGitHub({
     repo: opts.repo,
     tag: opts.tag,
     expectedDraft: opts.expectedDraft,
+    token: env?.GH_TOKEN || env?.GITHUB_TOKEN || "",
+    summaryPath,
+    fetchImpl,
+    maxAttempts,
+    retryDelayMs,
+    sleepImpl,
   });
-  console.log(
+  log(
     `Verified release ${result.tag} (draft=${result.draft}): ${result.assetCount} assets, ${result.manifestKeys} updater keys, ${result.checksumCount} checksums.`,
   );
+  return result;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main().catch((err) => {
+  runPostReleaseCheckCli().catch((err) => {
     console.error(`::error::${escapeWorkflowCommand(err?.message ?? err)}`);
     process.exit(1);
   });

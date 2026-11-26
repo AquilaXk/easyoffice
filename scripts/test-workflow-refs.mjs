@@ -167,6 +167,12 @@ test("workflow job dependency and release-guard trigger contracts hold", () => {
       /uses:\s*\.\/\.github\/actions\/assert-sha[\s\S]*?expected-sha:\s*\$\{\{\s*github\.sha\s*\}\}/,
       `release.yml job '${jobName}' must verify checked-out commit via ./.github/actions/assert-sha`,
     );
+    const checkoutIdx = job.indexOf("actions/checkout@");
+    const assertShaIdx = job.indexOf("./.github/actions/assert-sha");
+    assert.ok(
+      checkoutIdx >= 0 && assertShaIdx > checkoutIdx,
+      `release.yml job '${jobName}' must run ./.github/actions/assert-sha after actions/checkout`,
+    );
   }
 
   const timingsBlock = release.slice(release.indexOf("\n  release-timings:"));

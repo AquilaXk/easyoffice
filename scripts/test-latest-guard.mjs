@@ -209,6 +209,38 @@ test("runLatestGuard retries TransientVerificationError when /releases/latest la
   assert.equal(apiRes.expectedTag, "v0.2.3");
   assert.equal(apiCalls, 3);
   assert.deepEqual(apiSleeps, [10, 20]);
+
+  let listLagCalls = 0;
+  const listLagSleeps = [];
+  const listLagRes = await runLatestGuard({
+    repo: "AquilaXk/easyoffice",
+    token: "tok",
+    summaryPath: "",
+    maxAttempts: 3,
+    retryDelayMs: 20,
+    sleepImpl: async (ms) => {
+      listLagSleeps.push(ms);
+    },
+    fetchImpl: async (url) => {
+      if (url.endsWith("/releases?per_page=100")) {
+        listLagCalls += 1;
+        return new Response(JSON.stringify(listLagCalls === 1 ? [] : [latest]), { status: 200 });
+      }
+      if (url.endsWith("/releases/latest")) {
+        return new Response(JSON.stringify(latest), { status: 200 });
+      }
+      if (url.includes("/releases/assets/")) {
+        const idx = Number(url.split("/").pop()) - 1;
+        const name = latest.assets[idx].name;
+        if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
+        if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  assert.equal(listLagRes.expectedTag, "v0.2.3");
+  assert.equal(listLagCalls, 2);
+  assert.deepEqual(listLagSleeps, [20]);
 });
 
 test("runLatestGuard fails closed after exhausting retries on persistent lag and does not retry non-transient errors", async () => {
@@ -272,6 +304,57 @@ test("runLatestGuard fails closed after exhausting retries on persistent lag and
   );
   assert.equal(forbiddenCalls, 1);
   assert.deepEqual(forbiddenSleeps, []);
+
+  let nonSemverCalls = 0;
+  const nonSemverSleeps = [];
+  await assert.rejects(
+    () =>
+      runLatestGuard({
+        repo: "AquilaXk/easyoffice",
+        token: "tok",
+        summaryPath: "",
+        maxAttempts: 3,
+        retryDelayMs: 15,
+        sleepImpl: async (ms) => {
+          nonSemverSleeps.push(ms);
+        },
+        fetchImpl: async (url) => {
+          if (url.endsWith("/releases?per_page=100")) {
+            return new Response(JSON.stringify([older]), { status: 200 });
+          }
+          if (url.endsWith("/releases/latest")) {
+            nonSemverCalls += 1;
+            return new Response(JSON.stringify(makeRelease("v0.2.3-rc.1")), { status: 200 });
+          }
+          return new Response("unexpected", { status: 404 });
+        },
+      }),
+    /not a stable semver tag/,
+  );
+  assert.equal(nonSemverCalls, 1);
+  assert.deepEqual(nonSemverSleeps, []);
+
+  const starterAssetRelease = makeRelease("v0.2.3");
+  starterAssetRelease.assets[0].state = "starter";
+  let assetFetchCalled = false;
+  await assert.rejects(
+    () =>
+      runLatestGuard({
+        repo: "AquilaXk/easyoffice",
+        token: "tok",
+        summaryPath: "",
+        maxAttempts: 3,
+        retryDelayMs: 0,
+        fetchImpl: async (url) => {
+          if (url.endsWith("/releases?per_page=100")) return new Response(JSON.stringify([latest]), { status: 200 });
+          if (url.endsWith("/releases/latest")) return new Response(JSON.stringify(starterAssetRelease), { status: 200 });
+          assetFetchCalled = true;
+          return new Response("unexpected", { status: 404 });
+        },
+      }),
+    /incomplete \(state=starter\)/,
+  );
+  assert.equal(assetFetchCalled, false);
 });
 
 test("latest-guard CLI escapes %, CR, and LF in ::error:: output", () => {

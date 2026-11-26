@@ -19,6 +19,7 @@ import {
   fetchGitHubPaginatedJson,
   formatAssetSummaryMarkdown,
   retryTransient,
+  verifyReleaseMetadata,
   verifyReleaseRecord,
 } from "./post-release-check.mjs";
 import { escapeWorkflowCommand } from "./workflow-command.mjs";
@@ -42,26 +43,43 @@ export function compareSemverDesc(aTag, bTag) {
   return 0;
 }
 
-export function findExpectedLatestRelease(releases) {
+function stableReleaseCandidates(releases) {
   if (!Array.isArray(releases)) {
     throw new Error("releases response must be an array");
   }
-  const candidates = releases.filter((r) => r && !r.draft && !r.prerelease && parseSemverTag(r.tag_name) !== null);
+  return releases
+    .filter((r) => r && !r.draft && !r.prerelease && parseSemverTag(r.tag_name) !== null)
+    .sort((a, b) => compareSemverDesc(a.tag_name, b.tag_name));
+}
+
+export function findExpectedLatestRelease(releases) {
+  const candidates = stableReleaseCandidates(releases);
   if (candidates.length === 0) {
     throw new Error("no published stable release matching vMAJOR.MINOR.PATCH was found");
   }
-  candidates.sort((a, b) => compareSemverDesc(a.tag_name, b.tag_name));
   return candidates[0];
 }
 
 function assertLatestReleaseMatchesExpected(releases, latestRelease) {
-  const expectedLatest = findExpectedLatestRelease(releases);
+  if (!Array.isArray(releases)) {
+    throw new Error("releases response must be an array");
+  }
   if (!latestRelease || typeof latestRelease.tag_name !== "string") {
     throw new Error("/releases/latest returned no release");
   }
   if (latestRelease.draft || latestRelease.prerelease) {
     throw new Error(`/releases/latest '${latestRelease.tag_name}' cannot be draft or prerelease`);
   }
+  if (parseSemverTag(latestRelease.tag_name) === null) {
+    throw new Error(`/releases/latest '${latestRelease.tag_name}' is not a stable semver tag vMAJOR.MINOR.PATCH`);
+  }
+  const candidates = stableReleaseCandidates(releases);
+  if (candidates.length === 0) {
+    throw new TransientVerificationError(
+      "published stable release list has not propagated yet (no vMAJOR.MINOR.PATCH found)",
+    );
+  }
+  const expectedLatest = candidates[0];
   if (latestRelease.tag_name !== expectedLatest.tag_name) {
     throw new TransientVerificationError(
       `/releases/latest points to '${latestRelease.tag_name}', expected highest published stable release '${expectedLatest.tag_name}'`,
@@ -105,11 +123,13 @@ export async function runLatestGuard({
       ]);
       assertLatestReleaseMatchesExpected(releases, latestRelease);
 
-      const assetsByName = new Map((latestRelease?.assets ?? []).map((a) => [a.name, a]));
-      const manifestAsset = assetsByName.get(MANIFEST_FILE);
-      const sumsAsset = assetsByName.get(SUMS_FILE);
-      if (!manifestAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${MANIFEST_FILE}`);
-      if (!sumsAsset) throw new Error(`/releases/latest (${latestRelease?.tag_name}) is missing ${SUMS_FILE}`);
+      const { assetByName } = verifyReleaseMetadata({
+        release: latestRelease,
+        expectedDraft: false,
+        expectedVersion: latestRelease.tag_name.slice(1),
+      });
+      const manifestAsset = assetByName.get(MANIFEST_FILE);
+      const sumsAsset = assetByName.get(SUMS_FILE);
 
       const [manifestText, sumsText] = await Promise.all([
         fetchGitHubAssetText(manifestAsset, token, fetchImpl),

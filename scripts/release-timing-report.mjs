@@ -261,7 +261,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       );
     })
     .catch((err) => {
-      console.error(`::warning::Release timing report unavailable: ${escapeWorkflowCommand(err.message)}`);
+      console.error(`::warning::Release timing report unavailable: ${escapeWorkflowCommand(err?.message ?? err)}`);
       process.exit(0);
     });
 }
