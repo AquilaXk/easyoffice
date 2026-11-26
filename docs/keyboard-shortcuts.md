@@ -27,11 +27,13 @@ EasyOffice의 단축키 목록이다. macOS는 ⌘(Command), Windows와 Linux는
 | 오려 두기 / 복사 / 붙이기 | ⌘X / ⌘C / ⌘V | Ctrl+X / Ctrl+C / Ctrl+V | macOS의 ⌘X·⌘C는 편집 메뉴 항목(PD-119)이 받아 한글 창에서는 편집기 명령으로, 다른 창에서는 페이지 명령(입력란이면 브라우저 편집 명령)으로 보낸다. ⌘V는 시스템 붙이기. Windows·Linux는 브라우저 기본 동작 |
 | 명령 팔레트 | ⌘/ | Ctrl+/ | 참조 편집기와 같은 키. `/`만 눌러도 같은 동작(입력란 밖). 한글 창은 편집기 자체의 Ctrl+/가 편집기 팔레트를 연다 |
 | 하이퍼링크 | ⌘K | Ctrl+K | 문서·시트·슬라이드 창(사무 프로그램의 표준 키). 입력란 안에서는 그 입력란이 받음. 한글 창은 편집기 자체 키(Ctrl+K,H) |
-| 찾기 | ⌘F | Ctrl+F | 문서·시트: 찾기 대화상자. 한글: 편집기 찾기. 슬라이드·PDF·변환: 명령 팔레트 |
-| 찾아 바꾸기 | ⌘F2 | Ctrl+F2 | 문서·시트(참조 편집기와 같은 키). 한글은 편집기 자체 키 |
+| 찾기 | ⌘F | Ctrl+F | 문서·시트·슬라이드·PDF·BASE·BOARD: 찾기 대화상자(`#find-dialog`). 한글: 편집기 찾기. 변환기 등 그 밖: 명령 팔레트 |
+| 찾아 바꾸기 | ⌘F2 | Ctrl+F2 | 문서·시트·BASE(참조 편집기와 같은 키). 한글은 편집기 자체 키 |
 | 굵게 | ⌘B | Ctrl+B | |
 | 기울임 | ⌘I | Ctrl+I | |
 | 밑줄 | ⌘U | Ctrl+U | |
+| 아래 첨자 | ⌘= | Ctrl+= | 문서(`DOC`) `#doc-editor` 내부 전용(`PD-357`). 그 밖은 확대 |
+| 위 첨자 | ⇧⌘= | Ctrl+Shift+= | 문서(`DOC`) `#doc-editor` 내부 전용(`PD-357`) |
 | 확대 | ⌘= | Ctrl+=, Ctrl+Shift++ | |
 | 축소 | ⌘- | Ctrl+- | |
 | 100% 배율 | ⌘0 | Ctrl+0 | |
@@ -65,15 +67,25 @@ Ctrl+H는 쓰지 않는다. macOS에서는 ⌘H가 앱 숨기기이고 브라우
 
 ## 시트
 
-시트 모듈에서만 동작한다. Ctrl은 macOS에서 ⌘다(`crates/easyoffice-app/ui/sheet-input.js`).
+시트 모듈에서만 동작한다. 물리 키(`ev.code`) 기준으로 한글 IME 상태에서도 동작하며 조합 중 입력은 건너뛴다(`crates/easyoffice-app/ui/sheet-input.js` · `sheet-shortcuts.js`, `PD-356`).
 
-| 동작 | 키 |
-| --- | --- |
-| 취소선 | Ctrl+5 (macOS는 ⌘5) |
+| 동작 | macOS | Windows / Linux | 비고 |
+| --- | --- | --- | --- |
+| 셀 서식… | ⌘1 | Ctrl+1 | |
+| 취소선 | ⌘5 | Ctrl+5 | |
+| 아래로 채우기 | ⌘D | Ctrl+D | |
+| 오른쪽으로 채우기 | ⌘R | Ctrl+R | |
+| 현재 날짜 삽입 | ⌘; | Ctrl+; | |
+| 현재 시간 삽입 | ⇧⌘; | Ctrl+Shift+; | |
+| 자동 합계 (`Σ`) | ⌥= | Alt+= | |
+| 열 전체 선택 | Ctrl+Space | Ctrl+Space | |
+| 행 전체 선택 | Shift+Space | Shift+Space | |
+| 자동 필터 전환 | ⇧⌘L | Ctrl+Shift+L | |
+| 선택 범위 일괄 입력 | ⌘Enter | Ctrl+Enter | 단일 셀은 제자리 확정, 다중 셀/다중 범위는 상대 참조 이동과 함께 채움 |
 
 ## 슬라이드
 
-슬라이드 모듈에서만 동작한다. 첫째·둘째 줄은 입력란 밖에서만 잡는다.
+슬라이드 모듈에서만 동작한다. 첫째·둘째 줄과 캔버스 개체 클립보드(`slide-clipboard.js`, `PD-357`)는 입력란·`#slide-presenter-notes`·인라인 편집(`contenteditable`) 밖에서만 잡는다.
 
 | 동작 | 키 |
 | --- | --- |
@@ -82,6 +94,16 @@ Ctrl+H는 쓰지 않는다. macOS에서는 ⌘H가 앱 숨기기이고 브라우
 | 슬라이드 위로 이동(썸네일 목록 안) | Alt+↑ (macOS는 ⌥↑) |
 | 슬라이드 아래로 이동(썸네일 목록 안) | Alt+↓ (macOS는 ⌥↓) |
 | 슬라이드 지우기(썸네일 목록 안) | Delete |
+| 캔버스 개체 잘라내기 / 복사 / 붙여넣기 / 복제 | ⌘X / ⌘C / ⌘V / ⌘D (Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+D) |
+
+## 보드(BOARD)
+
+보드 모듈에서 캔버스 노드·연결선 편집 시 입력란·인라인 편집(`contenteditable`) 밖에서 동작한다(`board-style-bar.js`, `PD-357`).
+
+| 동작 | 키 |
+| --- | --- |
+| 선택 요소·내부 연결선 복사 / 붙여넣기 / 복제 | ⌘C / ⌘V / ⌘D (Ctrl+C / Ctrl+V / Ctrl+D) |
+| 선택 요소 지우기 | Delete / Backspace |
 
 ## macOS 메뉴 막대
 

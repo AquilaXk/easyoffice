@@ -32,15 +32,15 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 - 아이콘은 `ui/icons.js`의 24x24 선 아이콘 한 벌(`currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않고, 아이콘만 있는 컨트롤은 `aria-label`을 갖습니다.
 - 예외 한 가지. `▾`(콤보 화살표, 색 선택 단추)는 참조 앱과 같은 글리프라 `aria-hidden` 요소 안에 둡니다. 체크·라디오 메뉴 항목은 글리프 없이 참조 앱처럼 `aria-checked="true"`에 `.md-item.active`와 같은 바탕·글자색(`--ui-selected`, `--color-primary-dark`)을 씁니다.
 - 포커스는 어디서나 `--color-focus-border` 1px 윤곽을 안쪽에 그립니다(`styles.css`의 `:focus-visible`, rhwp-studio `.sb-btn:focus-visible`). 컨트롤마다 따로 링을 만들지 않습니다(메뉴 항목·홈 화면처럼 참조 앱이 따로 정한 곳 제외).
-- 색 선택은 `ui/color-picker.js`(팔레트 + 최근 색 + 숨긴 네이티브 입력)를 씁니다. 보이는 `<input type="color">`는 두지 않습니다.
+- 색 선택은 `ui/color-picker.js`(팔레트 + 최근 색 + 숨긴 네이티브 입력)를 씁니다. 대화상자나 `#board-style-bar`(`board-style-bar.js`, `.sb-color-host.dialog-color-host` + `.dialog-swatch`)에서도 보이는 `<input type="color">`는 두지 않습니다.
 
 ## 4. 창 구성 (현재, 단계적으로 참조 앱 구조로 이동 중)
 
-문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 참조 앱의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음, 측면 패널은 없습니다(PD-098 10항). 스마트 보조·개인정보 스캔·보안 검사·성능 진단·문서 개요는 메뉴에서 여는 대화상자(`.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer`)이고, 시트·슬라이드·PDF 재입힘은 이후 단계에서 이 절을 갱신합니다.
+문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 참조 앱의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음, 측면 패널은 없습니다(PD-098 10항). 정적·동적 도구 대화상자(`#export-dialog`, `#base-import-dialog`, `#sheet-size-dialog` 등)는 `.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer` 규칙과 `enableDialogDrag`/`enableDialogKeys`, 단일 줄 `.dialog-label`, 테두리 중첩 없는 `.custom-select` 구조를 따릅니다.
 
 ## 4-1. 화면에는 설명 문장을 두지 않는다 (QA 2026-11-12, "참조 앱과 같게"보다 우선)
 
-버튼·메뉴·필드 이름 같은 기능 라벨, "최근 문서" 같은 구역 제목, 상태·오류 메시지("열기 실패: …", "일치 3/10")만 화면에 둡니다. 사용법을 알려 주거나 기능을 풀어 쓰는 문장(홈 제목·부제, 끌어다 놓기 안내, 빈 상태 안내, 대화상자 안내 줄, 입력란 안내 문구, 긴 툴팁)은 넣지 않습니다. 툴팁(`title`)은 기능 이름과 단축키만 씁니다. 빈 상태는 빈 작업 영역과 비활성 도구줄로 보입니다. `scripts/test-webui-no-explanations.mjs`가 홈 화면·대화상자·빈 화면에 문장형 요소가 다시 들어오는 것을 막습니다.
+버튼·메뉴·필드 이름 같은 기능 라벨, "최근 문서" 같은 구역 제목, 상태·오류 메시지("열기 실패: …", "일치 3/10")만 화면에 둡니다. 사용법을 알려 주거나 기능을 풀어 쓰는 문장(홈 제목·부제, 끌어다 놓기 안내, 빈 상태 안내, 대화상자 안내 줄, 입력란 안내 문구, 긴 툴팁)은 넣지 않습니다. 툴팁(`title`)은 기능 이름과 단축키만 씁니다. 빈 상태는 빈 작업 영역과 비활성 도구줄로 보입니다. `scripts/test-webui-no-explanations.mjs`가 홈 화면·정적/동적 생성 대화상자(`#base-import-dialog`, `#export-dialog` 등)·빈 화면에 문장형 요소가 다시 들어오는 것을 막습니다.
 
 ## 5. 새 화면을 만들 때
 

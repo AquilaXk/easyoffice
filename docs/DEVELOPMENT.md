@@ -8,17 +8,17 @@
 
 - **macOS·Windows·Linux 단일 코드베이스**: Rust 엔진(`crates/`), WebUI(`crates/easyoffice-app/ui/`), Tauri v2 데스크톱 셸(`crates/easyoffice-desktop`, macOS는 WKWebView·Windows는 WebView2·Linux는 WebKitGTK). 문서마다 개별 창으로 열리고 시작 창에서 새 문서·최근 문서·열기를 고릅니다. 단일 인스턴스, 외부 변경 감지가 있는 제자리 원자적 저장, 파일 연결은 Rust가 처리하며 WebView는 파일 경로를 받지 않습니다.
 - **한글(HWP/HWPX) 편집기**: rhwp 엔진(MIT, 고정된 upstream 서브모듈)을 불투명 출처 샌드박스 iframe(`allow-scripts allow-modals`, `allow-same-origin` 없음) 편집기로 띄워 HWP/HWPX 열기, 저장 전 검증, 수정 상태, IndexedDB 자동 저장을 지원하고, 셸이 파일 메뉴·테마·상태 표시줄을 맡습니다.
-- **읽기·쓰기 20종 + Pages(읽기, 쓰기는 실험적)**:
+- **읽기·쓰기 20종 + Pages(읽기·실험적 쓰기)**:
   - ZIP 컨테이너(`ZipArchiveCodec`, `ZipSecurityGuard`): `OoxmlCodec`(`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `OdfCodec`(`.odt`, `.ods`, `.odp`), `HwpxCodec`(`.hwpx`, `.hwtx`).
   - OLE2 복합 파일(`Ole2ContainerCodec`, `Ole2SecurityGuard`): `Hwp5Codec`(`.hwp`, `.hwt`), 실제 MS-DOC·MS-PPT 구조와 BIFF8 `.xls`를 쓰는 `LegacyOle2Codec`.
   - `PdfSerializer`(ISO 32000), `CsvCodec`(RFC 4180 `.csv`/`.tsv`), `CommonMarkCodec`(`.md`), `RtfCodec`(`.rtf`), UTF-8 `.txt`.
-  - Pages(`.pages`, IWA + Snappy 변형 + protobuf, 자체 디코더)는 보기·변환 원본으로 엽니다. Pages로 저장은 실험적이며 본문 글자·제목·정렬·기본 글자 서식만 씁니다(PD-162).
-  - `RichDocument`가 DOCX·HWPX·ODT·RTF·Markdown·TXT·PDF에서 블록 순서와 글자 단위 서식을 유지합니다.
+  - Pages(`.pages`, IWA + Snappy 변형 + protobuf 자체 디코더)는 보기·변환 원본으로 여는 동시에 실험적 쓰기(`pages_write`, `PD-162`·`PD-246`·`PD-355`: 본문·제목 1~6·목록·그림·하이퍼링크·다단·머리글/바닥글·여백·가로 방향·표 열 너비·셀 채우기·RLE 테두리)를 지원하며 미표현 요소는 손실 경고로 알립니다.
+  - `RichDocument`가 DOCX·HWPX·ODT·RTF·Markdown·TXT·PDF에서 블록 순서와 글자 단위 서식을 유지하며, `rich_table_cells.rs`·`convert_structured_table_cells.rs`(`PD-357`)가 `DOCX`·`ODT` 표 셀 내부 문단 정렬·줄 간격·글자 런 서식을 왕복 보존합니다.
 - **비트 수준 엔진 최적화**: `crc32fast`를 감싼 `IeeeCrc32`, DEFLATE 크레이트를 감싼 DEFLATE 어댑터, SWAR 기반 UTF-16·XML·CSV 스캔, 64비트 `PackedCellCoordinate`(상위 32비트 행·하위 32비트 열), `SectorBitset`, `checked_*` 산술. `unsafe`는 C-ABI 브리지, Quick Look 래퍼, 데스크톱 셸의 OS 호출(프로세스 제한·글꼴 매핑)에만 둡니다. `--self-test`가 벤치마크와 결과 동일성을 검사합니다.
 - **시트 엔진**(`SheetEngine`, `WorkbookEngine`): 수학·통계·논리·찾기·텍스트·재무(`PMT`, `NPV`, `IRR` 등)·날짜/시간·정보를 아우르는 **314종 내장 함수**, 슬롯 메모를 쓰는 의존성 DAG, 피벗(`compute_pivot`), 차트, 조건부 서식·유효성 검사. 셀 서식과 열 너비는 XLSX/ODS에 저장·복원됩니다.
 - **오프라인 스마트 도구와 보안**: 출력 바이트를 `FormatDetector`로 사후 검증하는 `UniversalFormatConverter` 일괄 변환, `LocalSmartAssistant`(핵심 문장 요약, 문장 진단, 문서 비교), fail-closed `FormatDetector`·`XmlSanitizer`·`DocumentSecurityAuditor`(매직 바이트 위조, ZIP 폭탄, 경로 순회, XXE, 개인정보 비식별화).
 - **PDF 스튜디오**: 원본 PDF의 그림·글꼴·링크·북마크·양식·주석·숨긴 레이어·쪽 레이블·첨부·XMP를 보존하는 쪽 편집과 저장(PD-170, PD-245, PD-266). PDF 읽기·쓰기는 셸이 띄우는 별도 워커 프로세스에서 하며, 옮기지 못한 항목은 경고로 알립니다.
-- **BASE·BOARD**: 관계형 데이터베이스(`.eobase`)와 무한 캔버스 보드(`.eoboard`)는 ZIP 편집 패키지로 저장합니다. XLSX·CSV·TSV와 PDF는 내보내기입니다(PD-259, PD-260, PD-265).
+- **BASE·BOARD**: 관계형 데이터베이스(`.eobase`)와 무한 캔버스 보드(`.eoboard`)는 ZIP 편집 패키지로 저장합니다. `BASE`는 `CSV·TSV·XLSX` 표 가져오기(`base-import.js`, `PD-357`)와 `XLSX·CSV·TSV` 내보내기를, `BOARD`는 선택 요소 서식 막대(`board-style-bar.js`)와 다중 요소 클립보드, 순수 벡터 `PDF` 내보내기를 지원합니다(PD-259, PD-260, PD-265, PD-357).
 - **코파일럿**: 사용자가 등록한 AI 모델 서버(클라우드·로컬)와 대화하는 우측 패널. 요청은 셸의 Rust가 SSRF 방어 전송으로 보내고, 중지하면 진행 중인 요청의 소켓을 끊습니다(PD-253, PD-267).
 - **참조 앱의 rhwp-studio 크롬 기준 디자인**(PD-098): 단일 SVG 아이콘 세트, 라이트·다크 테마, 테스트로 검사하는 WCAG 2.1 AA 명암비.
 
@@ -32,12 +32,12 @@
 | :--- | :--- | :--- | :--- |
 | **Document** | `DOCX`, `DOC`, `ODT`, `RTF`, `MD`, `TXT` | ECMA-376 WordprocessingML (ZIP+XML), OLE2 Word, ISO/IEC 26300 ODF Text, RTF 1.9, CommonMark, UTF-8 | `OOXMLContainerCodec`, `ODFContainerCodec`, `OLE2ContainerCodec`, `RTFCodec`, `CommonMarkCodec`, 다단/구역 조판, 표 계산식, 변경 내용 추적, 메일 머지 |
 | **HWP (한글)** | `HWP`, `HWPX`, `HWT`, `HWTX` | HWP 5.0 Binary (OLE2 CFBF `FileHeader`/`DocInfo`/`BodyText`), KS X 6101 OWPML (ZIP+XML) | `HWP5BinaryCodec`, `HWP5RecordHeader`, `HWPXContainerCodec`, 공문서 두문/결재란 표 양식, 머리말/꼬리말, 각주, 서식 템플릿, HWP ↔ HWPX/DOCX/PDF 변환 |
-| **Pages (읽기 전용 원본)** | `PAGES` | iWork IWA (ZIP + `Index/*.iwa`: Snappy 변형 청크 + protobuf 레코드). 구형 `index.xml`·암호화 문서는 명확한 안내와 함께 거부 | `pages_iwa`, `pages_proto`, `rich_read_pages` (자체 디코더, 제조사 스키마 파일 미복사): 본문, 굵게/기울임/밑줄/취소선, 정렬, 제목, 단순 목록·표. 건너뛴 요소는 경고로 안내. 열기·변환 원본으로만 사용(저장·변환 대상 아님), PD-087 |
-| **Sheet** | `XLSX`, `XLS`, `ODS`, `CSV`, `TSV` | ECMA-376 SpreadsheetML, OLE2 BIFF8, ISO/IEC 26300 ODF Spreadsheet, RFC 4180 CSV/TSV | `PackedCellCoordinate`, 314종 내장 수식 함수, `PivotTableEngine`, `SheetChartBuilder`, `CSVStateMachineCodec`, 다중 정렬, 조건부 서식·유효성 검사 |
-| **Slide** | `PPTX`, `PPT`, `PPSX`, `ODP` | ECMA-376 PresentationML, OLE2 Presentation, ISO/IEC 26300 ODF Presentation | `PresentationDeckModel`, 16:9·4:3·A4 캔버스, `SnapGuideCalculator` 스마트 정렬 가이드, 레이어 순서 제어, 전환 효과, `PresenterSession` 발표자 뷰 |
-| **PDF Studio** | `PDF` | ISO 32000-1 / 32000-2 (`%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer`, `PDFStudioDocumentModel`, 5종 주석·서명, 북마크 트리, 페이지 병합/분할/재배치/회전, 오피스 ↔ PDF 양방향 변환 |
-| **BASE** | `EOBASE` | ZIP 패키지(`mimetype`·`manifest.json`·`model.json`), `application/vnd.easyoffice.base+zip` | `native_package.rs`, 9종 필드, 수식, 데이터시트·보드·일정 보기, XLSX·CSV·TSV 내보내기 |
-| **BOARD** | `EOBOARD` | ZIP 패키지(위와 같음, `media/`에 PNG·JPEG), `application/vnd.easyoffice.board+zip` | `native_package.rs`, 도형·글·그림·차트·연결선, PDF 내보내기 |
+| **Pages (읽기·실험적 쓰기)** | `PAGES` | iWork IWA (ZIP + `Index/*.iwa`: Snappy 변형 청크 + protobuf 레코드). 구형 `index.xml`·암호화 문서는 명확한 안내와 함께 거부 | `pages_iwa`, `pages_proto`, `rich_read_pages`, `pages_write` (`PD-087`, `PD-162`, `PD-246`, `PD-355`): 본문, 제목 1~6, 목록, 하이퍼링크, 그림, 머리글/바닥글, 여백, 표 열 너비·셀 채우기·RLE 테두리 읽기/쓰기 및 `eoDocFlavor="pages"` 창 맥락 지원(원본 제자리 덮어쓰기는 차단) |
+| **Sheet** | `XLSX`, `XLS`, `ODS`, `CSV`, `TSV` | ECMA-376 SpreadsheetML, OLE2 BIFF8, ISO/IEC 26300 ODF Spreadsheet, RFC 4180 CSV/TSV | `PackedCellCoordinate`, 314종 내장 수식 함수, `PivotTableEngine`, `SheetChartBuilder`, `CSVStateMachineCodec`, 다중 정렬, 비연속 다중 범위(`sheet-multi-range.js`), 텍스트 나누기·중복 제거·텍스트 방향(`-90°..90°`), 조건부 서식·유효성 검사 |
+| **Slide** | `PPTX`, `PPT`, `PPSX`, `ODP` | ECMA-376 PresentationML, OLE2 Presentation, ISO/IEC 26300 ODF Presentation | `PresentationDeckModel`, 16:9·4:3·A4 캔버스, `SnapGuideCalculator` 스마트 정렬 가이드, 개체 클립보드(`slide-clipboard.js`), 캔버스 우클릭(`slide-context-menu.js`), 레이어/맞춤/균등 배치, 전환 효과, `PresenterSession` 발표자 뷰 |
+| **PDF Studio** | `PDF` | ISO 32000-1 / 32000-2 (`%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer`, `PDFStudioDocumentModel`, 동적 `/AcroForm` 양식 추출, 인쇄·미리보기, 단일 원본 증분 저장(`/StructTreeRoot`·`/FT /Sig` 보전, `PD-349`), 5종 주석·서명, 북마크 트리, 페이지 병합/분할/재배치/회전, 오피스 ↔ PDF 양방향 변환 |
+| **BASE** | `EOBASE` | ZIP 패키지(`mimetype`·`manifest.json`·`model.json`), `application/vnd.easyoffice.base+zip` | `native_package.rs`, 9종 필드, 수식, 데이터시트·보드·일정 보기, `CSV·TSV·XLSX` 표 가져오기(`base-import.js`), `XLSX·CSV·TSV` 내보내기 |
+| **BOARD** | `EOBOARD` | ZIP 패키지(위와 같음, `media/`에 PNG·JPEG), `application/vnd.easyoffice.board+zip` | `native_package.rs`, 도형·글·그림·차트·연결선, 선택 요소 서식 막대(`board-style-bar.js`), 다중 요소 클립보드, PDF 내보내기 |
 
 ---
 
@@ -49,13 +49,13 @@ EasyOffice/
 ├── crates/easyoffice-formats/        # 포맷 레지스트리, 코덱, 보안 가드, BASE·BOARD 패키지 (외부 의존 0)
 ├── crates/easyoffice-sheet/          # 수식 엔진(314종 내장 함수), 피벗, DAG 재계산 (외부 의존 있음)
 ├── crates/easyoffice-layout/         # 쪽·슬라이드 조판 모델 (외부 의존 0)
-├── crates/easyoffice-app/            # IPC 라우터, 코파일럿 엔진, `--serve`, `--self-test`, `ui/`의 WebUI (외부 의존 0)
+├── crates/easyoffice-app/            # IPC 라우터, 코파일럿 엔진, `--serve`, `--self-test`, `ui/` 모듈화 WebUI(1,000줄 미만 경계: `doc-table-runs.js`·`sheet-shortcuts.js`·`sheet-multi-range.js`·`sheet-context-menu.js`·`sheet-size-dialogs.js`·`sheet-text-columns.js`·`slide-clipboard.js`·`slide-context-menu.js`·`module-search.js`·`base-import.js`·`board-style-bar.js`·`export-dialog.js` 등, 외부 의존 0)
 ├── crates/easyoffice-desktop/        # Tauri v2 셸: 창, 저장, PDF 내보내기·편집 워커, 코파일럿 전송 (외부 의존 있음)
 ├── apps/hwp-studio/                  # 고정된 rhwp 위의 한글 편집기 오버레이
 ├── apps/quicklook/                   # macOS 빠른 보기 확장(별도 워크스페이스)
 ├── vendor/                           # 패치한 사본(각 폴더의 PATCHES.md 또는 RHWP_PATCHES.md), rhwp WASM
 ├── third_party/rhwp/                 # 고정 커밋의 sparse 체크아웃(추적하지 않음)
-├── scripts/                          # 위생 가드, 번들 계약 검사, WebUI 회귀 테스트
+├── scripts/                          # 위생 가드, 번들 계약 검사, 모듈별 WebUI·DOM·실제 Chrome/WebKit 회귀 시험(`test-webui-*.mjs`, `webkit-dom/`, `hwp-roundtrip-cdp.mjs`)
 └── docs/                             # 아키텍처, 포맷 지원, 성능, 정책 결정 기록(SSOT), 제품 명세
 ```
 
@@ -197,6 +197,6 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles appimage,deb,r
 
 **개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).
 
-**문서마다 개별 창.** 설치형 앱은 문서 하나를 창 하나로 엽니다. 인수 없이 실행하면 새 문서(DOCX·한글·XLSX·PPTX·PDF·변환기)·파일 열기·최근 문서가 있는 시작 창이 뜨고, **파일 → 새 문서**·**열기…(`Ctrl+O`)**·끌어 놓기는 새 창에서 문서를 엽니다(이미 열린 파일은 그 창을 앞으로 가져옵니다). 창 제목은 `파일 이름 — EasyOffice`이며 저장하지 않은 변경이 있으면 `●`가 붙고, 닫을 때 저장 / 저장 안 함 / 취소를 묻습니다. 마지막 창을 닫으면 앱이 종료됩니다. 파일 경로는 Rust 쪽에만 있고 WebView에는 파일 이름과 바이트만 전달됩니다(PD-088). 개발 전용 `--serve`는 같은 모델을 브라우저 창(`window.open`)으로 흉내 냅니다.
+**문서마다 개별 창.** 설치형 앱은 문서 하나를 창 하나로 엽니다. 인수 없이 실행하면 새 문서 8종(DOCX·한글·XLSX·PPTX·BASE·BOARD·PDF·변환기)·파일 열기·최근 문서가 있는 시작 창이 뜨고, **파일 → 새 문서**·**열기…(`Ctrl+O`)**·끌어 놓기는 새 창에서 문서를 엽니다(이미 열린 파일은 그 창을 앞으로 가져옵니다). 창 제목은 `파일 이름 — EasyOffice`이며 저장하지 않은 변경이 있으면 `●`가 붙고, 닫을 때 저장 / 저장 안 함 / 취소를 묻습니다. 마지막 창을 닫으면 앱이 종료됩니다. 파일 경로는 Rust 쪽에만 있고 WebView에는 파일 이름과 바이트만 전달됩니다(PD-088). 개발 전용 `--serve`는 같은 모델을 브라우저 창(`window.open`)으로 흉내 냅니다.
 
-WebUI에서는 **파일 → 열기…(`Ctrl+O`)** 또는 작업 영역에 파일을 끌어 놓아 DOCX/DOC/ODT/RTF/MD/TXT, HWP/HWPX/HWT/HWTX, XLSX/XLS/ODS/CSV/TSV, PPTX/PPT/PPSX/ODP, PDF, Pages(`.pages`, 읽기 전용) 파일(최대 10 MiB)을 해당 모듈에서 열 수 있습니다. 탭 제목은 파일 이름이 되고 열기는 하나의 실행 취소 단위이며, 편집기 모델이 담지 못하는 항목(그림·도형·머리말·셀 서식)은 열기 후 알려 줍니다. 글자 서식(크기·글꼴·글자 색·형광펜·굵게·기울임·밑줄·취소선)은 선택한 글자에만 적용되며 DOCX·HWPX·ODT·RTF 저장·열기에서 유지됩니다. 변환기 패널에서는 편집기 텍스트 대신 선택한 원본 파일의 실제 바이트를 변환할 수도 있습니다.
+WebUI에서는 **파일 → 열기…(`Ctrl+O`)** 또는 작업 영역에 파일을 끌어 놓아 DOCX/DOC/ODT/RTF/MD/TXT, HWP/HWPX/HWT/HWTX, XLSX/XLS/ODS/CSV/TSV, PPTX/PPT/PPSX/ODP, PDF, Pages(`.pages`, 읽기·실험적 쓰기 및 사본 내보내기 전용) 파일(최대 10 MiB)을 해당 모듈에서 열 수 있습니다. 탭 제목은 파일 이름이 되고 열기는 하나의 실행 취소 단위이며, 편집기 모델이 담지 못하는 항목(그림·도형·머리말·셀 서식 등)은 열기 후 알려 줍니다. 글자 서식(크기·글꼴·글자 색·형광펜·굵게·기울임·밑줄·취소선·위/아래 첨자)과 문단 앞/뒤 간격(`0..400pt`), 표 셀 내부 런 서식은 선택한 범위와 `DOC` 표 셀에 적용되며 `DOCX`·`ODT` 저장·열기에서 유지됩니다(`PD-357`). 변환기 패널에서는 편집기 텍스트 대신 선택한 원본 파일의 실제 바이트를 변환할 수도 있습니다.
