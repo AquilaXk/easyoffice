@@ -1,6 +1,14 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts, hostFontsReply and setDragOver are added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts, hostFontsReply, setDragOver, readParagraphRange and applyCopilotEdits are added. See config/rhwp-studio-overrides.json.
 import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
+import {
+  parseApplyCopilotEditsParams,
+  parseReadParagraphRangeParams,
+  type ApplyCopilotEditsParams,
+  type ApplyCopilotEditsResult,
+  type ReadParagraphRangeParams,
+  type ReadParagraphRangeResult,
+} from './copilot-bridge.ts';
 import type { HmlSaveState } from '@/core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '@/core/font-decision-trace.ts';
 import {
@@ -57,6 +65,10 @@ export interface EmbedRpcHandlers {
   hostFontsReply(params: Record<string, unknown>): Promise<{ accepted: boolean }>;
   /** EasyOffice extension (drag-over-v1): show or hide the drop highlight (`drag-over` class) on the scroll container. */
   setDragOver(active: boolean): Promise<{ applied: true }>;
+  /** EasyOffice extension (copilot-v1): bounded plain-text paragraph range read for Copilot context and tools. */
+  readParagraphRange(params: ReadParagraphRangeParams): Promise<ReadParagraphRangeResult>;
+  /** EasyOffice extension (copilot-v1): single-snapshot batch paragraph replacement/append for Copilot. */
+  applyCopilotEdits(params: ApplyCopilotEditsParams): Promise<ApplyCopilotEditsResult>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -204,6 +216,10 @@ export async function routeEmbedRequest(
       assertOnlyKeys(params, ['active'], 'setDragOver params');
       if (typeof params.active !== 'boolean') throw new Error('active must be a boolean');
       return handlers.setDragOver(params.active);
+    case 'readParagraphRange':
+      return handlers.readParagraphRange(parseReadParagraphRangeParams(params));
+    case 'applyCopilotEdits':
+      return handlers.applyCopilotEdits(parseApplyCopilotEditsParams(params));
     case 'pageCount': return handlers.pageCount();
     case 'getPrintPages': {
       const range = parsePrintBatchRange(params);

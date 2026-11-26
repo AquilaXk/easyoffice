@@ -8,7 +8,9 @@
   const MAX_CONTEXT_PARAGRAPHS = 200;
   // A selection command on a later block is sent with empty entries up to it (the engine reads 2,048 at most).
   const MAX_COMMAND_BLOCK_INDEX = 2047;
+  const SURROUNDING_PARAGRAPH_WINDOW = 16;
   const MAX_CONTEXT_SLIDES = 64;
+  const MAX_SLIDES = 256;
   const MAX_CONTEXT_TEXT_CHARS = 24000;
   // A paragraph a selection command works on is sent whole up to one code point past the engine's 24 KiB context
   // (`MAX_PROMPT_CONTEXT_BYTES`): a longer one is cut here, stays over the limit, and the engine refuses the command.
@@ -16,7 +18,6 @@
   const MAX_OPERATIONS = 64;
   const MAX_WRITE_CELLS = 1024;
   const MAX_RANGE_CELLS = 4096;
-  const ALLOWED_BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "blockquote"]);
 
   function compareCoordEntries(a, b) {
     return a.row - b.row || a.col - b.col;
@@ -30,51 +31,31 @@
   }
 
   function docBlocksOf(editor) {
+    const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
+    if (docHtml?.docBlocksOf) return docHtml.docBlocksOf(editor);
     if (!editor) return [];
-    return Array.from(editor.querySelectorAll("p, h1, h2, h3, h4, ul, ol, blockquote"))
+    return Array.from(editor.querySelectorAll("p, h1, h2, h3, h4, ul, ol, blockquote, table"))
       .filter((el) => el.parentElement === editor && !el.hidden && !el.classList.contains("manuscript-notice"));
   }
 
   function buildDocBlockElement(document, item) {
-    if (typeof item === "string") {
-      const p = document.createElement("p");
-      p.textContent = item;
-      return p;
+    if (host.__EASYOFFICE_COPILOT_DOC_HTML__?.buildDocBlockElement) {
+      return host.__EASYOFFICE_COPILOT_DOC_HTML__.buildDocBlockElement(document, item);
     }
-    if (!item || typeof item !== "object") return null;
-    if (Number.isInteger(item.heading) && item.heading >= 1) {
-      const h = document.createElement("h" + Math.min(4, item.heading));
-      h.textContent = String(item.text ?? item.content ?? "");
-      return h;
-    }
-    const listKind = String(item.list || "").toLowerCase();
-    const rawKind = String(item.tag || item.kind || "p").toLowerCase();
-    if (listKind || rawKind === "ul" || rawKind === "ol" || rawKind === "task-list" || Array.isArray(item.items)) {
-      const isOl = listKind === "ordered" || rawKind === "ol";
-      const isTask = listKind === "task" || rawKind === "task-list" || item.task === true;
-      const list = document.createElement(isOl ? "ol" : "ul");
-      if (isTask && !isOl) {
-        list.className = "eo-task-list";
-        list.dataset.eoList = "task";
-      }
-      const entries = Array.isArray(item.items) ? item.items.slice(0, MAX_CONTEXT_PARAGRAPHS) : [String(item.text || "")];
-      for (const entry of entries) {
-        const li = document.createElement("li");
-        if (isTask && !isOl) {
-          const checked = typeof entry === "object" && entry !== null ? Boolean(entry.checked) : false;
-          li.dataset.eoChecked = checked ? "true" : "false";
-          li.textContent = typeof entry === "object" && entry !== null ? String(entry.text || "") : String(entry ?? "");
-        } else {
-          li.textContent = typeof entry === "object" && entry !== null ? String(entry.text || "") : String(entry ?? "");
-        }
-        list.appendChild(li);
-      }
-      return list;
-    }
-    const tag = ALLOWED_BLOCK_TAGS.has(rawKind) ? rawKind : "p";
-    const el = document.createElement(tag);
-    el.textContent = String(item.text ?? item.content ?? "");
-    return el;
+    const p = document.createElement("p");
+    p.textContent = String(item?.text ?? item ?? "");
+    return p;
+  }
+
+  function createFallbackExtOps() {
+    return {
+      getEmbedHwpHost: () => null,
+      refreshHwpSnapshot: async () => null,
+      getHwpSelectionLabel: () => "",
+      getHwpCommandTarget: () => null,
+      extractHwpContextAsync: async () => ({ selection: {}, context: {} }),
+      extractPdfContext: () => ({ pageCount: 0, text: "" }),
+    };
   }
 
   function createCopilotActions(deps) {
@@ -101,6 +82,11 @@
 
     const { colName, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
+    const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__ || null;
+    const sheetOps = host.__EASYOFFICE_COPILOT_SHEET_OPS__ || null;
+    const extOps = typeof host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__ === "function"
+      ? host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__(deps)
+      : createFallbackExtOps();
     let lastUndoEntry = null;
     let activeRun = null;
     const idleWaiters = [];
@@ -113,7 +99,16 @@
 
     // 접근성: 움직임 줄이기를 켠 사용자에게는 포인터·타이핑 연출 없이 바로 적용한다.
     const isReducedMotion = () => host.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
-    const preview = host.__EASYOFFICE_CREATE_COPILOT_PREVIEW__({ document, win: host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName });
+    const preview = host.__EASYOFFICE_CREATE_COPILOT_PREVIEW__({
+      document,
+      win: host,
+      docBlocksOf,
+      slideDeckState,
+      sheetDataStore,
+      getActiveSheetName,
+      getSheetController,
+      extOps,
+    });
     const cursorApi = host.__EASYOFFICE_COPILOT_CURSOR__;
     const performer = host.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({
       document,
@@ -141,7 +136,10 @@
       if (mod === "BASE" || mod === "BOARD") {
         return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod)?.selection?.range || "";
       }
-      if (mod === "DOC") {
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return extOps.getHwpSelectionLabel();
+      }
+      if (mod === "DOC" || mod === "HWP") {
         const sel = host.getSelection?.();
         const editor = document.getElementById("doc-editor");
         if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
@@ -153,6 +151,13 @@
         }
       }
       return "";
+    }
+
+    function freezeSheetSelection() {
+      if (sheetOps?.freezeSelection) {
+        return sheetOps.freezeSelection(getActiveSheetName(), getSheetController());
+      }
+      return { sheet: getActiveSheetName(), range: getSelectionLabel("SHEET") || "A1" };
     }
 
     function extractSheetContext() {
@@ -177,25 +182,30 @@
     }
 
     // One entry per block, empty ones included, so that an index in the context is the block index an operation
-    // names. A command target past the window is sent too (its neighbours stay empty); `omittedParagraphs` counts
-    // the blocks that were left out.
+    // names. A command target past paragraph 200 also carries its surrounding window (`SURROUNDING_PARAGRAPH_WINDOW`, PD-268).
     function extractDocContext(span) {
       const editor = document.getElementById("doc-editor");
       const blocks = docBlocksOf(editor);
-      const lastSent = span ? Math.max(MAX_CONTEXT_PARAGRAPHS - 1, span.end) : MAX_CONTEXT_PARAGRAPHS - 1;
+      const winStart = span ? Math.max(0, span.start - SURROUNDING_PARAGRAPH_WINDOW) : 0;
+      const winEnd = span
+        ? Math.min(blocks.length - 1, MAX_COMMAND_BLOCK_INDEX, span.end + SURROUNDING_PARAGRAPH_WINDOW)
+        : -1;
+      const lastSent = span ? Math.max(MAX_CONTEXT_PARAGRAPHS - 1, winEnd) : MAX_CONTEXT_PARAGRAPHS - 1;
       const count = Math.min(blocks.length, lastSent + 1);
       const paragraphs = [];
       for (let i = 0; i < count; i += 1) {
         const inSpan = Boolean(span) && i >= span.start && i <= span.end;
+        const inWindow = Boolean(span) && i >= winStart && i <= winEnd;
         const limit = inSpan ? MAX_COMMAND_SPAN_CHARS : MAX_CONTEXT_TEXT_CHARS;
-        paragraphs.push(inSpan || i < MAX_CONTEXT_PARAGRAPHS ? clipCodePoints(String(blocks[i].textContent || "").trim(), limit) : "");
+        const serialized = docHtml ? docHtml.serializeBlockForContext(blocks[i]) : String(blocks[i].textContent || "").trim();
+        paragraphs.push(inSpan || inWindow || i < MAX_CONTEXT_PARAGRAPHS ? clipCodePoints(serialized, limit) : "");
       }
       let selectedText = "";
       const sel = host.getSelection?.();
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editor?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
         selectedText = clipCodePoints(sel.getRangeAt(0).toString?.() || "", MAX_CONTEXT_TEXT_CHARS);
       }
-      return { paragraphs, selectedText, omittedParagraphs: blocks.length - count };
+      return { paragraphs, selectedText, omittedParagraphs: Math.max(0, blocks.length - count) };
     }
 
     function blockIndexOf(node, editor) {
@@ -207,10 +217,13 @@
     // Where a selection command works: the blocks a text selection in the document touches, or the slide title or
     // body a selection sits in. `null` when there is nothing selected there.
     function getCommandTarget(mod = getActiveModule()) {
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return extOps.getHwpCommandTarget();
+      }
       const sel = host.getSelection?.();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
       const range = sel.getRangeAt(0);
-      if (mod === "DOC") {
+      if (mod === "DOC" || mod === "HWP") {
         const editor = document.getElementById("doc-editor");
         if (!editor || !editor.contains(range.commonAncestorContainer)) return null;
         const first = blockIndexOf(range.startContainer, editor);
@@ -236,12 +249,15 @@
     function snapshotTarget(mod, target) {
       const sel = target?.selection;
       if (!sel) return null;
-      if (mod === "DOC") {
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return String(sel.selectedText || "");
+      }
+      if (mod === "DOC" || mod === "HWP") {
         const blocks = docBlocksOf(document.getElementById("doc-editor"));
         const texts = [];
         for (let i = sel.paragraphIndex; i <= sel.paragraphEnd; i += 1) {
           if (!blocks[i]) return null;
-          texts.push(String(blocks[i].textContent || "").trim());
+          texts.push(docHtml ? docHtml.serializeBlockForContext(blocks[i]) : String(blocks[i].textContent || "").trim());
         }
         return JSON.stringify(texts);
       }
@@ -281,22 +297,14 @@
       return { activeIndex: getActiveSlideIndex(), aspect: String(slideDeckState[0]?.aspect || "16:9"), slides };
     }
 
-    function extractPdfContext() {
-      const rawText = clipCodePoints(
-        String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "").trim(),
-        MAX_CONTEXT_TEXT_CHARS,
-      );
-      const pageCount = Number(getPdfEdit?.()?.pageCount?.() || 1) || 1;
-      return { text: rawText, pageCount };
-    }
-
-    function extractContext(mod = getActiveModule(), { target } = {}) {
+    function extractContext(mod = getActiveModule(), { target, frozenSelection } = {}) {
       const label = getSelectionLabel(mod);
       if (mod === "SHEET") {
-        const sheet = getActiveSheetName();
-        return { selection: { sheet, range: label || "A1" }, context: { sheet: extractSheetContext() } };
+        const sheet = frozenSelection?.sheet || getActiveSheetName();
+        const range = frozenSelection?.range || label || "A1";
+        return { selection: { sheet, range }, context: { sheet: extractSheetContext() } };
       }
-      if (mod === "DOC") {
+      if (mod === "DOC" || (mod === "HWP" && !extOps.getEmbedHwpHost())) {
         const sel = target?.selection;
         const span = sel ? { start: sel.paragraphIndex, end: sel.paragraphEnd } : null;
         return { selection: sel ? { ...sel } : label ? { range: label } : {}, context: { doc: extractDocContext(span) } };
@@ -305,8 +313,15 @@
         return { selection: target?.selection ? { ...target.selection } : { slideIndex: getActiveSlideIndex() }, context: { slide: extractSlideContext() } };
       }
       if (mod === "BASE" || mod === "BOARD") return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod) || { selection: {}, context: {} };
-      if (mod === "PDF") return { selection: {}, context: { pdf: extractPdfContext() } };
+      if (mod === "PDF") return { selection: {}, context: { pdf: extOps.extractPdfContext() } };
       return { selection: {}, context: {} };
+    }
+
+    async function extractContextAsync(mod = getActiveModule(), options = {}) {
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return extOps.extractHwpContextAsync(options.target || null);
+      }
+      return extractContext(mod, options);
     }
 
     function applyCellStyleFields(map, ref, spec) {
@@ -471,6 +486,7 @@
       }
 
       const existing = docBlocksOf(editor);
+      const tracking = Boolean(docHtml?.isTrackChangesActive?.(editor));
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         if (op.replacements.length === 0 || op.replacements.length > MAX_CONTEXT_PARAGRAPHS) {
           throw new Error("문서 편집 문단 개수가 허용 범위를 벗어났습니다.");
@@ -480,11 +496,17 @@
           if (!Number.isInteger(idx) || idx < 0) continue;
           const nextText = String(rep?.text ?? "");
           if (idx < existing.length) {
-            existing[idx].textContent = nextText;
+            if (docHtml?.replaceParagraphContentWithTrackChanges) {
+              docHtml.replaceParagraphContentWithTrackChanges(document, editor, existing[idx], nextText);
+            } else {
+              existing[idx].textContent = nextText;
+            }
           } else {
-            const p = document.createElement("p");
-            p.textContent = nextText;
-            editor.appendChild(p);
+            const added = buildDocBlockElement(document, nextText);
+            if (added) {
+              if (tracking) docHtml.wrapBlockInserted(document, added, docHtml.nextRevisionId(editor), new Date().toISOString());
+              editor.appendChild(added);
+            }
           }
           locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
         }
@@ -506,23 +528,45 @@
         const start = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
         const end = Number.isInteger(op.endIndex) ? Math.min(existing.length, op.endIndex + 1) : existing.length;
         const anchor = existing[end] || null;
-        for (let i = start; i < end; i += 1) existing[i]?.remove();
-        items.forEach((item, offset) => {
-          const el = buildDocBlockElement(document, item);
-          if (el) editor.insertBefore(el, anchor);
-          const idx = start + offset;
-          locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
-        });
+        if (tracking) {
+          const revId = docHtml.nextRevisionId(editor);
+          const dateIso = new Date().toISOString();
+          for (let i = start; i < end; i += 1) {
+            if (existing[i]) docHtml.markBlockDeletedInPlace(document, existing[i], revId, dateIso);
+          }
+          items.forEach((item, offset) => {
+            const el = buildDocBlockElement(document, item);
+            if (el) {
+              docHtml.wrapBlockInserted(document, el, revId + 1, dateIso);
+              editor.insertBefore(el, anchor);
+            }
+            const idx = start + offset;
+            locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
+          });
+        } else {
+          for (let i = start; i < end; i += 1) existing[i]?.remove();
+          items.forEach((item, offset) => {
+            const el = buildDocBlockElement(document, item);
+            if (el) editor.insertBefore(el, anchor);
+            const idx = start + offset;
+            locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
+          });
+        }
         return true;
       }
 
-      if (existing.length === 1 && String(existing[0].textContent || "").trim() === "") {
+      if (!tracking && existing.length === 1 && String(existing[0].textContent || "").trim() === "") {
         existing[0].remove();
       }
       const baseIdx = docBlocksOf(editor).length;
+      const appendRevId = tracking ? docHtml.nextRevisionId(editor) : 0;
+      const appendDate = tracking ? new Date().toISOString() : "";
       items.forEach((item, offset) => {
         const el = buildDocBlockElement(document, item);
-        if (el) editor.appendChild(el);
+        if (el) {
+          if (tracking) docHtml.wrapBlockInserted(document, el, appendRevId, appendDate);
+          editor.appendChild(el);
+        }
         const idx = baseIdx + offset;
         locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
       });
@@ -538,7 +582,7 @@
           : undefined;
       const bulletBody = Array.isArray(op.bullets) ? op.bullets.map((b) => String(b ?? "")).join("\n") : undefined;
       if (kind === "slide.add") {
-        if (slideDeckState.length >= MAX_CONTEXT_SLIDES) {
+        if (slideDeckState.length >= MAX_SLIDES) {
           throw new Error("슬라이드 최대 개수를 초과했습니다.");
         }
         const empty = host.__EASYOFFICE_RIBBON_CATALOG__.createEmptySlideStyleFields();
@@ -602,7 +646,7 @@
     }
 
     const canApply = (mod, mode, operations) =>
-      mode === "edit" && mod !== "PDF" && mod !== "BASE" && mod !== "BOARD" && Array.isArray(operations) && operations.length > 0;
+      mode === "edit" && mod !== "PDF" && Array.isArray(operations) && operations.length > 0;
 
     // `options.beforeSnap`: 연출이 시작되기 전에 뜬 스냅숏. 연출이 임시로 쓴 것은 이미 되돌린 뒤라 그 스냅숏이 되돌리기 한 단계의 앞 상태다.
     async function applyOperations(mod, mode, operations, turnId, options = {}) {
@@ -612,6 +656,14 @@
       if (operations.length > MAX_OPERATIONS) {
         throw new Error("코파일럿 작업 개수가 허용 상한(64개)을 초과했습니다.");
       }
+
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        const hwpRes = await extOps.applyHwpOperations(operations);
+        noteActivity?.();
+        lastUndoEntry = { turnId, hwpEmbed: true, afterGeneration: hwpRes.afterDocumentGeneration };
+        return { applied: hwpRes.applied, locations: hwpRes.locations };
+      }
+
       if (mod === "SLIDE") getWorkspacePanels()?.syncActiveSlideDomStylesToDeck?.();
       const beforeSnap = options.beforeSnap || captureWorkspaceSnapshot(false);
       const startEpoch = getHistoryMutationEpoch?.();
@@ -619,30 +671,37 @@
       let touchedSheet = null;
       let touchedDoc = false;
       let focusSlideIdx = null;
+      let touchedBaseOrBoard = false;
 
       // The operations apply as a whole: one that fails (an unknown kind, a protected cell, a range over the limit) puts back what
       // the ones before it changed, so a reply never leaves the document half edited.
       try {
-        for (const op of operations) {
-          if (!op || typeof op !== "object") throw new Error("유효하지 않은 코파일럿 작업 항목입니다.");
-          const kind = String(op.op || op.type || op.kind || "").trim();
-          if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart") {
-            const sheetName = String(op.sheet || getActiveSheetName());
-            if (!Object.hasOwn(sheetDataStore, sheetName)) {
-              // The active sheet may not have a store entry yet; a name the model made up must not create one.
-              if (sheetName !== getActiveSheetName()) throw new Error("없는 시트입니다: " + sheetName);
-              sheetDataStore[sheetName] = Object.create(null);
+        if (mod === "BASE") {
+          touchedBaseOrBoard = extOps.applyBaseOperationsBatch(operations, derivedLocations);
+        } else if (mod === "BOARD") {
+          touchedBaseOrBoard = extOps.applyBoardOperationsBatch(operations, derivedLocations);
+        } else {
+          for (const op of operations) {
+            if (!op || typeof op !== "object") throw new Error("유효하지 않은 코파일럿 작업 항목입니다.");
+            const kind = String(op.op || op.type || op.kind || "").trim();
+            if (kind === "sheet.write" || kind === "sheet.format" || kind === "sheet.chart" || sheetOps?.EXTENDED_SHEET_KINDS?.has(kind)) {
+              const sheetName = String(op.sheet || getActiveSheetName());
+              if (!Object.hasOwn(sheetDataStore, sheetName)) {
+                if (sheetName !== getActiveSheetName()) throw new Error("없는 시트입니다: " + sheetName);
+                sheetDataStore[sheetName] = Object.create(null);
+              }
+              touchedSheet = op.destSheet ? String(op.destSheet) : sheetName;
+              if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+              else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+              else if (kind === "sheet.chart") executeSheetChart(op, sheetName, derivedLocations);
+              else sheetOps.executeExtendedSheetOp(kind, op, { sheetName, sheetDataStore, sheetRowCounts, locations: derivedLocations });
+            } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
+              touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
+            } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
+              focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
+            } else {
+              throw new Error("지원하지 않는 코파일럿 작업입니다: " + kind);
             }
-            touchedSheet = sheetName;
-            if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
-            else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
-            else executeSheetChart(op, sheetName, derivedLocations);
-          } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
-            touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
-          } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
-            focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
-          } else {
-            throw new Error("지원하지 않는 코파일럿 작업입니다: " + kind);
           }
         }
 
@@ -651,16 +710,18 @@
           const panels = getWorkspacePanels();
           panels?.saveActiveDocTabState?.();
           panels?.computeSmartStats?.();
-          panels?.renderModuleOutline?.("DOC");
+          panels?.renderModuleOutline?.(mod);
         }
         if (focusSlideIdx !== null) {
           const panels = getWorkspacePanels();
           panels?.renderSlideDeck?.(focusSlideIdx);
           panels?.renderModuleOutline?.("SLIDE");
         }
+        if (touchedBaseOrBoard) {
+          getWorkspacePanels()?.renderModuleOutline?.(mod);
+        }
       } catch (err) {
         const reason = String(err?.message || err);
-        // The history moved while the operations ran (the user edited): a restore would drop those edits too.
         if (getHistoryMutationEpoch?.() !== startEpoch) {
           throw new Error(reason + " (그 사이 다른 편집이 있어 앞서 적용한 변경을 되돌리지 않았습니다)");
         }
@@ -672,10 +733,36 @@
         throw err;
       }
 
-      commitDeferredUndoSnapshot(beforeSnap);
-      noteActivity?.();
-      lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
+      if (!options.dryRun) {
+        commitDeferredUndoSnapshot(beforeSnap);
+        noteActivity?.();
+        lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
+      }
       return { applied: true, locations: derivedLocations };
+    }
+
+    async function dryRunVerifyOperations(mod, operations, invokeIpc) {
+      if (typeof host.__EASYOFFICE_COPILOT_VERIFY_OPS__ !== "function") return { ok: true, issues: [] };
+      return host.__EASYOFFICE_COPILOT_VERIFY_OPS__(mod, operations, {
+        document,
+        invokeIpc,
+        slideDeckState,
+        sheetDataStore,
+        sheetRowCounts,
+        sheetOps,
+        getActiveSheetName,
+        getSheetController,
+        buildDocBlockElement,
+        executeSlideOperation,
+      });
+    }
+
+    async function executeReadTool(mod, toolName, args) {
+      if (toolName === "read_doc_blocks") return extOps.readDocBlocksTool(mod, args, docBlocksOf);
+      if (toolName === "read_sheet_range") return sheetOps.readSheetRangeTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
+      if (toolName === "find_sheet_cells") return sheetOps.findSheetCellsTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
+      if (toolName === "search_pdf_pages") return extOps.searchPdfPagesTool(args);
+      throw new Error("알 수 없는 조회 도구입니다: " + toolName);
     }
 
     /**
@@ -684,6 +771,10 @@
      */
     async function applyOperationsAnimated(mod, mode, operations, turnId) {
       if (!canApply(mod, mode, operations)) return { applied: false, locations: [] };
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        const applied = await applyOperations(mod, mode, operations, turnId);
+        return { ...applied, interrupted: false };
+      }
       const beforeSnap = captureWorkspaceSnapshot(false);
       const run = performer.perform(mod, operations);
       activeRun = run;
@@ -701,7 +792,9 @@
 
     // A restore would drop whatever the user did after the turn, so the undo is gone once the history moved.
     function canUndoTurn(turnId) {
-      return Boolean(lastUndoEntry && lastUndoEntry.turnId === turnId && getHistoryMutationEpoch?.() === lastUndoEntry.epoch);
+      if (!lastUndoEntry || lastUndoEntry.turnId !== turnId) return false;
+      if (lastUndoEntry.hwpEmbed) return Boolean(extOps.getEmbedHwpHost());
+      return getHistoryMutationEpoch?.() === lastUndoEntry.epoch;
     }
 
     // Whether this turn still has an undo entry, usable or not (it stops being usable once the user edited).
@@ -711,6 +804,15 @@
 
     async function undoLastTurn(turnId) {
       if (!lastUndoEntry || (turnId !== undefined && lastUndoEntry.turnId !== turnId)) return false;
+      if (lastUndoEntry.hwpEmbed) {
+        const gen = lastUndoEntry.afterGeneration;
+        const ok = await extOps.undoHwpTurn(gen);
+        if (ok) {
+          lastUndoEntry = null;
+          noteActivity?.();
+        }
+        return ok;
+      }
       if (getHistoryMutationEpoch?.() !== lastUndoEntry.epoch) return false;
       const snap = lastUndoEntry.snapshot;
       lastUndoEntry = null;
@@ -719,11 +821,24 @@
       return true;
     }
 
+    async function verifyFingerprintAsync(mod, operations, expectedFp) {
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return extOps.verifyHwpFingerprintAsync(expectedFp);
+      }
+      return preview.fingerprint(mod, operations) === expectedFp;
+    }
+
     async function locateTarget(loc) {
       if (!loc || typeof loc !== "object") return false;
       const mod = String(loc.module || getActiveModule()).toUpperCase();
       if (mod !== getActiveModule() && typeof activatePane === "function") {
         await activatePane(mod);
+      }
+      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
+        return extOps.locateHwpTarget(loc);
+      }
+      if (mod === "PDF") {
+        return extOps.locatePdfTarget(loc);
       }
       if (mod === "SHEET") {
         const sc = getSheetController();
@@ -744,7 +859,7 @@
         }
         return false;
       }
-      if (mod === "DOC") {
+      if (mod === "DOC" || mod === "HWP") {
         const editor = document.getElementById("doc-editor");
         const blocks = docBlocksOf(editor);
         const idx = Number.isInteger(loc.paragraphIndex) ? loc.paragraphIndex : 0;
@@ -771,16 +886,25 @@
         document.getElementById("slide-thumb-list")?.querySelector(`[data-slide-idx="${idx}"]`)?.focus?.();
         return true;
       }
+      if (mod === "BASE" || mod === "BOARD") {
+        return true;
+      }
       return false;
     }
 
     return {
       getSelectionLabel,
+      freezeSheetSelection,
       extractContext,
+      extractContextAsync,
+      refreshHwpSnapshot: extOps.refreshHwpSnapshot,
       getCommandTarget,
       snapshotTarget,
       applyOperations,
       applyOperationsAnimated,
+      dryRunVerifyOperations,
+      executeReadTool,
+      verifyFingerprintAsync,
       stopPerformance: () => activeRun?.stop(),
       // 쓰던 부분도 적용하지 않고 버린다(새 대화).
       abortPerformance: () => activeRun?.discard(),

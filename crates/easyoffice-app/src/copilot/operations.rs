@@ -1,17 +1,23 @@
 //! 참조 구현: dream-num/univer-office-copilot (Apache-2.0, Copyright DreamNum Co., Ltd.) 및 continuedev/continue (Apache-2.0, Copyright Continue Dev, Inc., see THIRD_PARTY_NOTICES.md)
 //!
-//! 모델이 돌려준 `operations`·`locations`를 검사한다. 형식·범위·개수가 어긋난 작업은 버리고,
-//! 버린 개수를 응답에 실어 사용자에게 알린다.
+//! 모델이 돌려준 `operations`·`locations`·`toolCalls`를 검사한다. 요청 모듈(`req.module`)과 일치하지 않는
+//! 교차 모듈 작업과 형식·범위·개수 위반 작업은 즉시 버리고 `droppedOperations`에 센다.
 
 use easyoffice_formats::StrictJsonValue;
 
 use super::context::SlideField;
+pub use super::operations_ext::validate_tool_calls;
+use super::operations_ext::{
+    opt_hex, opt_usize, parse_slide_element, parse_slide_elements_opt, parse_slide_layout,
+    parse_slide_transition, validate_base_or_board_op, validate_extended_sheet_op,
+};
 use super::types::{
-    is_valid_a1_coord, is_valid_hex_color, is_valid_range_ref, parse_bounded_range, ChartLegend,
-    ChartType, CopilotLocation, CopilotModule, CopilotOperation, CopilotRunRequest, DocBlock,
+    is_valid_a1_coord, is_valid_range_ref, parse_bounded_range, ChartLegend, ChartType,
+    CopilotCommand, CopilotLocation, CopilotModule, CopilotOperation, CopilotRunRequest, DocBlock,
     DocReplacement, SheetWriteCell, MAX_CHART_HEIGHT, MAX_CHART_SERIES, MAX_CHART_TITLE_CHARS,
-    MAX_CHART_WIDTH, MAX_DOC_APPEND_BLOCKS, MAX_LLM_LOCATIONS, MAX_LLM_OPERATIONS,
-    MAX_SHEET_WRITE_CELLS, MIN_CHART_HEIGHT, MIN_CHART_WIDTH,
+    MAX_CHART_WIDTH, MAX_DOC_APPEND_BLOCKS, MAX_DOC_TABLE_COLS, MAX_DOC_TABLE_ROWS,
+    MAX_LLM_LOCATIONS, MAX_LLM_OPERATIONS, MAX_SHEET_WRITE_CELLS, MAX_SLIDES, MAX_SLIDE_BULLETS,
+    MIN_CHART_HEIGHT, MIN_CHART_WIDTH,
 };
 
 /// 검사를 통과한 작업과 버린 작업 수.
@@ -25,22 +31,41 @@ pub fn validate_operations(
     req: &CopilotRunRequest,
     items: &[StrictJsonValue],
 ) -> ValidatedOperations {
-    let accepted: Vec<CopilotOperation> = items
-        .iter()
-        .take(MAX_LLM_OPERATIONS)
-        .filter_map(|item| {
-            item.as_object()
-                .and_then(|o| validate_single_operation(req, o))
-        })
-        .collect();
+    let mut known_slides = req.context.slide.as_ref().map(|s| s.slides.len());
+    let mut accepted: Vec<CopilotOperation> = Vec::new();
+    for item in items.iter().take(MAX_LLM_OPERATIONS) {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        if let Some(op) = validate_single_operation(req, obj, known_slides) {
+            if matches!(op, CopilotOperation::SlideAdd { .. }) {
+                if let Some(n) = &mut known_slides {
+                    *n = (*n + 1).min(MAX_SLIDES);
+                }
+            }
+            accepted.push(op);
+        }
+    }
     let operations = if req.command.is_some() {
         restrict_to_command(req, accepted)
     } else {
         accepted
     };
     ValidatedOperations {
-        dropped: items.len() - operations.len(),
+        dropped: items.len().saturating_sub(operations.len()),
         operations,
+    }
+}
+
+fn op_matches_module(kind: &str, module: CopilotModule) -> bool {
+    match module {
+        CopilotModule::Sheet => kind.starts_with("sheet."),
+        CopilotModule::Doc => kind.starts_with("doc."),
+        CopilotModule::Hwp => matches!(kind, "doc.append" | "doc.replace_paragraphs"),
+        CopilotModule::Slide => kind.starts_with("slide."),
+        CopilotModule::Base => kind.starts_with("base."),
+        CopilotModule::Board => kind.starts_with("board."),
+        CopilotModule::Pdf => false,
     }
 }
 
@@ -52,12 +77,21 @@ fn restrict_to_command(
 ) -> Vec<CopilotOperation> {
     let sel = &req.selection;
     let kept = match req.module {
-        CopilotModule::Doc => {
+        CopilotModule::Doc | CopilotModule::Hwp => {
             let start = sel.paragraph_index.unwrap_or(0);
             let end = sel.paragraph_end.unwrap_or(start);
-            accepted.into_iter().find(|op| {
-                matches!(op, CopilotOperation::DocReplaceParagraphs { replacements }
-                    if replacements.iter().all(|r| (start..=end).contains(&r.index)))
+            let allow_range = req.command == Some(CopilotCommand::VisualizeTable)
+                && req.module == CopilotModule::Doc;
+            accepted.into_iter().find(|op| match op {
+                CopilotOperation::DocReplaceParagraphs { replacements } => replacements
+                    .iter()
+                    .all(|r| (start..=end).contains(&r.index)),
+                CopilotOperation::DocReplaceRange {
+                    start_index: Some(s),
+                    end_index: Some(e),
+                    blocks,
+                } if allow_range => *s >= start && *e <= end && *s <= *e && !blocks.is_empty(),
+                _ => false,
             })
         }
         CopilotModule::Slide => accepted.into_iter().find_map(|op| match op {
@@ -66,18 +100,24 @@ fn restrict_to_command(
                 title,
                 bullets,
                 ..
-            } if Some(index) == sel.slide_index => match sel.slide_field {
+            } if index == sel.slide_index => match sel.slide_field {
                 Some(SlideField::Title) => title.map(|title| CopilotOperation::SlideUpdate {
                     index,
                     title: Some(title),
                     bullets: None,
                     notes: None,
+                    layout: None,
+                    transition: None,
+                    elements: None,
                 }),
                 _ => bullets.map(|bullets| CopilotOperation::SlideUpdate {
                     index,
                     title: None,
                     bullets: Some(bullets),
                     notes: None,
+                    layout: None,
+                    transition: None,
+                    elements: None,
                 }),
             },
             _ => None,
@@ -85,13 +125,6 @@ fn restrict_to_command(
         _ => None,
     };
     kept.into_iter().collect()
-}
-
-fn opt_hex(obj: &[(String, StrictJsonValue)], key: &str) -> Option<String> {
-    StrictJsonValue::get_str(obj, key)
-        .map(str::trim)
-        .filter(|s| is_valid_hex_color(s))
-        .map(ToString::to_string)
 }
 
 fn opt_num_fmt(obj: &[(String, StrictJsonValue)]) -> Option<String> {
@@ -109,17 +142,121 @@ fn opt_str_list(obj: &[(String, StrictJsonValue)], key: &str) -> Option<Vec<Stri
     })
 }
 
-fn opt_usize(obj: &[(String, StrictJsonValue)], key: &str) -> Option<usize> {
-    StrictJsonValue::get_field(obj, key)
-        .and_then(StrictJsonValue::as_u64)
-        .and_then(|v| usize::try_from(v).ok())
+fn parse_slide_bullets_or_body(obj: &[(String, StrictJsonValue)]) -> Option<Option<Vec<String>>> {
+    match StrictJsonValue::get_field(obj, "bullets") {
+        Some(StrictJsonValue::Null) => None,
+        Some(v) => {
+            let arr = v.as_array()?;
+            if arr.len() > MAX_SLIDE_BULLETS {
+                return None;
+            }
+            let mut out = Vec::with_capacity(arr.len());
+            for item in arr {
+                out.push(item.as_str()?.to_string());
+            }
+            Some(Some(out))
+        }
+        None => match StrictJsonValue::get_field(obj, "body") {
+            None | Some(StrictJsonValue::Null) => Some(None),
+            Some(v) => {
+                let s = v.as_str()?;
+                let lines: Vec<String> = s
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .take(MAX_SLIDE_BULLETS)
+                    .map(ToString::to_string)
+                    .collect();
+                Some(Some(lines))
+            }
+        },
+    }
+}
+
+fn parse_doc_blocks(raw_blocks: &[StrictJsonValue], allow_tables: bool) -> Option<Vec<DocBlock>> {
+    if raw_blocks.is_empty() || raw_blocks.len() > MAX_DOC_APPEND_BLOCKS {
+        return None;
+    }
+    let mut blocks = Vec::with_capacity(raw_blocks.len());
+    for b_val in raw_blocks {
+        if let Some(s) = b_val.as_str() {
+            blocks.push(DocBlock::Paragraph {
+                text: s.to_string(),
+            });
+            continue;
+        }
+        let b_obj = b_val.as_object()?;
+        let table_spec = StrictJsonValue::get_field(b_obj, "table")
+            .and_then(StrictJsonValue::as_object)
+            .or_else(|| {
+                (StrictJsonValue::get_str(b_obj, "kind") == Some("table")
+                    || StrictJsonValue::get_field(b_obj, "rows").is_some())
+                .then_some(b_obj)
+            });
+        if let Some(t_obj) = table_spec {
+            if !allow_tables {
+                return None;
+            }
+            let raw_rows = StrictJsonValue::get_field(t_obj, "rows")?.as_array()?;
+            if raw_rows.is_empty() || raw_rows.len() > MAX_DOC_TABLE_ROWS {
+                return None;
+            }
+            let mut rows = Vec::with_capacity(raw_rows.len());
+            for r_val in raw_rows {
+                let cells = r_val.as_array()?;
+                if cells.is_empty() || cells.len() > MAX_DOC_TABLE_COLS {
+                    return None;
+                }
+                let mut row = Vec::with_capacity(cells.len());
+                for cell in cells {
+                    let s = cell.to_scalar_string()?;
+                    if s.len() > 8_192 {
+                        return None;
+                    }
+                    row.push(s);
+                }
+                rows.push(row);
+            }
+            let header_row = StrictJsonValue::get_field(t_obj, "headerRow")
+                .and_then(StrictJsonValue::as_bool)
+                .unwrap_or(true);
+            blocks.push(DocBlock::Table { rows, header_row });
+        } else if let Some(list_kind) = StrictJsonValue::get_str(b_obj, "list") {
+            if !matches!(list_kind, "bullet" | "ordered" | "task") {
+                return None;
+            }
+            blocks.push(DocBlock::List {
+                kind: list_kind.to_string(),
+                items: opt_str_list(b_obj, "items")?,
+            });
+        } else if let Some(lvl) =
+            StrictJsonValue::get_field(b_obj, "heading").and_then(StrictJsonValue::as_u64)
+        {
+            let level = u8::try_from(lvl.clamp(1, 6)).ok()?;
+            blocks.push(DocBlock::Heading {
+                level,
+                text: StrictJsonValue::get_str(b_obj, "text")?.to_string(),
+            });
+        } else {
+            blocks.push(DocBlock::Paragraph {
+                text: StrictJsonValue::get_str(b_obj, "text")?.to_string(),
+            });
+        }
+    }
+    Some(blocks)
 }
 
 fn validate_single_operation(
     req: &CopilotRunRequest,
     obj: &[(String, StrictJsonValue)],
+    known_slides: Option<usize>,
 ) -> Option<CopilotOperation> {
-    let kind = StrictJsonValue::get_str(obj, "kind")?;
+    let kind = StrictJsonValue::get_str(obj, "kind")
+        .or_else(|| StrictJsonValue::get_str(obj, "op"))?
+        .trim();
+    if !op_matches_module(kind, req.module) {
+        return None;
+    }
     let default_sheet = req
         .context
         .sheet
@@ -128,10 +265,6 @@ fn validate_single_operation(
         .unwrap_or("Sheet1");
     match kind {
         "sheet.write" => {
-            let range = StrictJsonValue::get_str(obj, "range")?.trim();
-            if !is_valid_range_ref(range) {
-                return None;
-            }
             let sheet = StrictJsonValue::get_str(obj, "sheet")
                 .unwrap_or(default_sheet)
                 .to_string();
@@ -159,9 +292,19 @@ fn validate_single_operation(
                     color: opt_hex(c_obj, "color"),
                 });
             }
+            let range = match StrictJsonValue::get_str(obj, "range") {
+                Some(r) => {
+                    let t = r.trim();
+                    if !is_valid_range_ref(t) {
+                        return None;
+                    }
+                    t.to_string()
+                }
+                None => cells[0].coord.clone(),
+            };
             Some(CopilotOperation::SheetWrite {
                 sheet,
-                range: range.to_string(),
+                range,
                 cells,
             })
         }
@@ -183,46 +326,68 @@ fn validate_single_operation(
             })
         }
         "sheet.chart" => validate_sheet_chart(obj, default_sheet),
+        "sheet.table" | "sheet.pivot" | "sheet.cond_format" | "sheet.sort_filter"
+        | "sheet.structure" | "sheet.note" => validate_extended_sheet_op(kind, obj, default_sheet),
         "doc.append" => {
-            let raw_blocks = StrictJsonValue::get_field(obj, "blocks")?.as_array()?;
-            if raw_blocks.is_empty() || raw_blocks.len() > MAX_DOC_APPEND_BLOCKS {
-                return None;
+            let allow_tables = req.module == CopilotModule::Doc;
+            if let Some(raw_blocks) =
+                StrictJsonValue::get_field(obj, "blocks").and_then(StrictJsonValue::as_array)
+            {
+                let blocks = parse_doc_blocks(raw_blocks, allow_tables)?;
+                return Some(CopilotOperation::DocAppend { blocks });
             }
-            let mut blocks = Vec::with_capacity(raw_blocks.len());
-            for b_val in raw_blocks {
-                let b_obj = b_val.as_object()?;
-                if let Some(list_kind) = StrictJsonValue::get_str(b_obj, "list") {
-                    if !matches!(list_kind, "bullet" | "ordered" | "task") {
-                        return None;
-                    }
-                    blocks.push(DocBlock::List {
-                        kind: list_kind.to_string(),
-                        items: opt_str_list(b_obj, "items")?,
-                    });
-                } else if let Some(lvl) =
-                    StrictJsonValue::get_field(b_obj, "heading").and_then(StrictJsonValue::as_u64)
-                {
-                    let level = u8::try_from(lvl.clamp(1, 6)).ok()?;
-                    blocks.push(DocBlock::Heading {
-                        level,
-                        text: StrictJsonValue::get_str(b_obj, "text")?.to_string(),
-                    });
-                } else {
-                    blocks.push(DocBlock::Paragraph {
-                        text: StrictJsonValue::get_str(b_obj, "text")?.to_string(),
-                    });
-                }
-            }
-            Some(CopilotOperation::DocAppend { blocks })
+            let text = StrictJsonValue::get_str(obj, "text")?;
+            Some(CopilotOperation::DocAppend {
+                blocks: vec![DocBlock::Paragraph {
+                    text: text.to_string(),
+                }],
+            })
         }
         "doc.replace_paragraphs" => {
-            let arr = StrictJsonValue::get_field(obj, "replacements")?.as_array()?;
             let max_para = req
                 .context
                 .doc
                 .as_ref()
-                .map(|d| d.paragraphs.len())
+                .map(|d| d.paragraphs.len() + d.omitted_paragraphs)
                 .unwrap_or(usize::MAX);
+            if let Some(raw_blocks) =
+                StrictJsonValue::get_field(obj, "blocks").and_then(StrictJsonValue::as_array)
+            {
+                let blocks = parse_doc_blocks(raw_blocks, req.module == CopilotModule::Doc)?;
+                let start_index = opt_usize(obj, "startIndex");
+                let end_index = opt_usize(obj, "endIndex");
+                match (start_index, end_index) {
+                    (Some(s), Some(e)) => {
+                        if s > e || e >= max_para {
+                            return None;
+                        }
+                        return Some(CopilotOperation::DocReplaceRange {
+                            start_index: Some(s),
+                            end_index: Some(e),
+                            blocks,
+                        });
+                    }
+                    (Some(s), None) => {
+                        if s >= max_para {
+                            return None;
+                        }
+                        return Some(CopilotOperation::DocReplaceRange {
+                            start_index: Some(s),
+                            end_index: Some(s),
+                            blocks,
+                        });
+                    }
+                    (None, None) => {
+                        return Some(CopilotOperation::DocReplaceRange {
+                            start_index: None,
+                            end_index: None,
+                            blocks,
+                        });
+                    }
+                    (None, Some(_)) => return None,
+                }
+            }
+            let arr = StrictJsonValue::get_field(obj, "replacements")?.as_array()?;
             let mut replacements = Vec::new();
             for item in arr {
                 let r_obj = item.as_object()?;
@@ -239,27 +404,94 @@ fn validate_single_operation(
                 .then_some(CopilotOperation::DocReplaceParagraphs { replacements })
         }
         "doc.scrub_pii" => Some(CopilotOperation::DocScrubPii),
-        "slide.add" => Some(CopilotOperation::SlideAdd {
-            title: StrictJsonValue::get_str(obj, "title")?.to_string(),
-            bullets: opt_str_list(obj, "bullets").unwrap_or_default(),
-            notes: StrictJsonValue::get_str(obj, "notes")
-                .unwrap_or("")
-                .to_string(),
-        }),
-        "slide.update" => {
-            let index = opt_usize(obj, "index")?;
-            if let Some(slides) = req.context.slide.as_ref().map(|s| s.slides.len()) {
-                if index >= slides {
-                    return None;
+        "slide.add" => {
+            if known_slides.is_some_and(|n| n >= MAX_SLIDES) {
+                return None;
+            }
+            let layout = parse_slide_layout(obj)?;
+            let transition = parse_slide_transition(obj)?;
+            let elements = parse_slide_elements_opt(obj)?;
+            let bullets = parse_slide_bullets_or_body(obj)?.unwrap_or_default();
+            let title = match StrictJsonValue::get_str(obj, "title") {
+                Some(t) => t.to_string(),
+                None if layout.is_some() || elements.is_some() || !bullets.is_empty() => {
+                    String::new()
                 }
+                None => return None,
+            };
+            let notes = StrictJsonValue::get_str(obj, "notes")
+                .unwrap_or("")
+                .to_string();
+            Some(CopilotOperation::SlideAdd {
+                title,
+                bullets,
+                notes,
+                layout,
+                transition,
+                elements,
+            })
+        }
+        "slide.update" => {
+            let index = match StrictJsonValue::get_field(obj, "index") {
+                None | Some(StrictJsonValue::Null) => None,
+                Some(v) => {
+                    let idx = v.as_u64().and_then(|n| usize::try_from(n).ok())?;
+                    if known_slides.is_some_and(|slides| idx >= slides) {
+                        return None;
+                    }
+                    Some(idx)
+                }
+            };
+            let title = StrictJsonValue::get_str(obj, "title").map(ToString::to_string);
+            let bullets = parse_slide_bullets_or_body(obj)?;
+            let notes = StrictJsonValue::get_str(obj, "notes").map(ToString::to_string);
+            let layout = parse_slide_layout(obj)?;
+            let transition = parse_slide_transition(obj)?;
+            let elements = parse_slide_elements_opt(obj)?;
+            if title.is_none()
+                && bullets.is_none()
+                && notes.is_none()
+                && layout.is_none()
+                && transition.is_none()
+                && elements.is_none()
+            {
+                return None;
             }
             Some(CopilotOperation::SlideUpdate {
                 index,
-                title: StrictJsonValue::get_str(obj, "title").map(ToString::to_string),
-                bullets: opt_str_list(obj, "bullets"),
-                notes: StrictJsonValue::get_str(obj, "notes").map(ToString::to_string),
+                title,
+                bullets,
+                notes,
+                layout,
+                transition,
+                elements,
             })
         }
+        "slide.add_element" => {
+            let slide_index = match StrictJsonValue::get_field(obj, "slideIndex")
+                .or_else(|| StrictJsonValue::get_field(obj, "index"))
+            {
+                None | Some(StrictJsonValue::Null) => None,
+                Some(v) => {
+                    let idx = v.as_u64().and_then(|n| usize::try_from(n).ok())?;
+                    if known_slides.is_some_and(|slides| idx >= slides) {
+                        return None;
+                    }
+                    Some(idx)
+                }
+            };
+            let el_obj = StrictJsonValue::get_field(obj, "element")?.as_object()?;
+            let element = Box::new(parse_slide_element(el_obj)?);
+            Some(CopilotOperation::SlideAddElement {
+                slide_index,
+                element,
+            })
+        }
+        "base.add_field"
+        | "base.add_records"
+        | "base.update_records"
+        | "base.set_view"
+        | "board.add_graph" => validate_base_or_board_op(kind, obj),
         _ => None,
     }
 }
@@ -270,9 +502,12 @@ pub fn validate_locations(items: &[StrictJsonValue]) -> Vec<CopilotLocation> {
         let Some(obj) = item.as_object() else {
             continue;
         };
-        let Some(module) = StrictJsonValue::get_str(obj, "module")
-            .filter(|m| matches!(*m, "SHEET" | "DOC" | "SLIDE"))
-        else {
+        let Some(module) = StrictJsonValue::get_str(obj, "module").filter(|m| {
+            matches!(
+                *m,
+                "SHEET" | "DOC" | "HWP" | "SLIDE" | "PDF" | "BASE" | "BOARD"
+            )
+        }) else {
             continue;
         };
         let Some(label) = StrictJsonValue::get_str(obj, "label").filter(|l| !l.trim().is_empty())
@@ -288,6 +523,7 @@ pub fn validate_locations(items: &[StrictJsonValue]) -> Vec<CopilotLocation> {
                 .map(ToString::to_string),
             paragraph_index: opt_usize(obj, "paragraphIndex"),
             slide_index: opt_usize(obj, "slideIndex"),
+            page: opt_usize(obj, "page").filter(|p| *p >= 1 && *p <= 10_000),
         });
     }
     out
@@ -330,7 +566,6 @@ fn validate_sheet_chart(
     let switch_row_col = StrictJsonValue::get_field(obj, "switchRowCol")
         .and_then(StrictJsonValue::as_bool)
         == Some(true);
-    // 첫 열(행)은 범주 이름이고 나머지가 계열이다.
     let (rows, cols) = range.dimensions();
     if (if switch_row_col { rows } else { cols }) > MAX_CHART_SERIES + 1 {
         return None;

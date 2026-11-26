@@ -250,7 +250,7 @@
   copilotUi = host.__EASYOFFICE_CREATE_COPILOT_UI__({
     document, invokeIpc, canStreamIpc, sheetDataStore, sheetRowCounts, slideDeckState,
     getActiveModule: () => activeModule, getActiveSheetName: () => activeSheetName, getActiveSlideIndex: () => activeSlideIndex,
-    getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit,
+    getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit, getHwpHost: () => hwpHost,
     activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch,
@@ -963,7 +963,7 @@
     // The start window has no document: gray the menu items that need one.
     if (windowBridge.isStart) { workspaceSession.applyModuleContext(activeModule); copilotUi.onModuleChanged(); }
     windowBridge.bindStatusTooltips();
-    hwpHost.onShortcut((combo) => handleForwardedShortcut(combo));
+    hwpHost.onShortcut((combo) => handleForwardedShortcut(combo)); hwpHost.onCopilotToggle?.(() => copilotUi.toggle());
     // The start window has no document of its own: nothing to restore there.
     const restoredRecord = windowBridge.isStart ? null : await workspaceSession.restoreFromStorage().catch(() => null);
     workspaceSession.establishBaseline(restoredRecord);

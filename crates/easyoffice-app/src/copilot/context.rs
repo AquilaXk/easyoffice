@@ -8,7 +8,8 @@ use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use super::types::{
     opt_scalar_string, opt_str, MAX_BASE_FIELDS, MAX_BASE_RECORDS, MAX_BASE_TABLES,
     MAX_BASE_TEXT_BYTES, MAX_BOARD_CONNECTORS, MAX_BOARD_NODES, MAX_BOARD_TEXT_BYTES,
-    MAX_DOC_PARAGRAPHS, MAX_SHEET_CELLS, MAX_SLIDES, MAX_SLIDE_BULLETS, MAX_TEXT_CONTEXT_BYTES,
+    MAX_DOC_PARAGRAPHS, MAX_SHEET_CELLS, MAX_SLIDES, MAX_SLIDE_BULLETS, MAX_SLIDE_ELEMENTS,
+    MAX_TEXT_CONTEXT_BYTES,
 };
 
 /// 선택 영역이 가리키는 슬라이드 칸.
@@ -60,10 +61,23 @@ pub struct DocContext {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SlideElementSummary {
+    pub id: String,
+    pub kind: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlideItem {
     pub title: String,
     pub bullets: Vec<String>,
     pub notes: String,
+    pub layout: String,
+    pub elements: Vec<SlideElementSummary>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -536,6 +550,7 @@ fn parse_slide_context(obj: &[(String, StrictJsonValue)]) -> Result<SlideContext
                 })?;
                 let title = opt_str(s_obj, "title")?.unwrap_or("").to_string();
                 let notes = opt_str(s_obj, "notes")?.unwrap_or("").to_string();
+                let layout = bounded_text(s_obj, "layout", 64, "슬라이드 레이아웃")?.to_string();
                 let bullets = match StrictJsonValue::get_field(s_obj, "bullets") {
                     None | Some(StrictJsonValue::Null) => opt_str(s_obj, "body")?
                         .unwrap_or("")
@@ -568,10 +583,48 @@ fn parse_slide_context(obj: &[(String, StrictJsonValue)]) -> Result<SlideContext
                         bs
                     }
                 };
+                let mut elements = Vec::new();
+                for el_val in bounded_array(
+                    s_obj,
+                    "elements",
+                    MAX_SLIDE_ELEMENTS,
+                    "context.slide.elements",
+                )? {
+                    let el_obj = el_val.as_object().ok_or_else(|| {
+                        EasyOfficeError::InvalidArgument(
+                            "슬라이드 개체 항목은 객체여야 합니다.".to_string(),
+                        )
+                    })?;
+                    let num_f64 = |key: &str| match StrictJsonValue::get_field(el_obj, key) {
+                        Some(StrictJsonValue::Number(s)) => {
+                            s.parse::<f64>().ok().filter(|v| v.is_finite())
+                        }
+                        _ => None,
+                    };
+                    let x = num_f64("x").map_or(0, |v| v.round().clamp(-10_000.0, 10_000.0) as i32);
+                    let y = num_f64("y").map_or(0, |v| v.round().clamp(-10_000.0, 10_000.0) as i32);
+                    let w = num_f64("w")
+                        .filter(|v| *v >= 0.0)
+                        .map_or(0, |v| v.round().clamp(0.0, 10_000.0) as u32);
+                    let h = num_f64("h")
+                        .filter(|v| *v >= 0.0)
+                        .map_or(0, |v| v.round().clamp(0.0, 10_000.0) as u32);
+                    elements.push(SlideElementSummary {
+                        id: bounded_text(el_obj, "id", 128, "개체 ID")?.to_string(),
+                        kind: bounded_text(el_obj, "kind", 64, "개체 종류")?.to_string(),
+                        x,
+                        y,
+                        w,
+                        h,
+                        text: bounded_text(el_obj, "text", 2_048, "개체 텍스트")?.to_string(),
+                    });
+                }
                 out.push(SlideItem {
                     title,
                     bullets,
                     notes,
+                    layout,
+                    elements,
                 });
             }
             out

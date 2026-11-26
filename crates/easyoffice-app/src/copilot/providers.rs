@@ -3,6 +3,9 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use std::fmt::Write as _;
 
+use super::schema::{
+    synthesize_completion_from_tools, write_provider_tools_field, NativeToolInvocation,
+};
 use super::ssrf::EndpointTarget;
 use super::types::{
     push_json_str, CopilotRunRequest, HistoryMessage, ProviderConfig, ProviderKind,
@@ -86,10 +89,6 @@ pub fn models_endpoint_target(provider: &ProviderConfig) -> EndpointTarget<'stat
     }
 }
 
-/// OpenAI 호환 본문의 출력 상한 필드와 값. 공식 OpenAI는 추론 모델이 `max_tokens`를 거부하므로
-/// `max_completion_tokens`를 쓰고, 그 밖의 호환 서버는 널리 받는 `max_tokens`를 쓴다.
-/// 추론 토큰도 상한에 들어가는 제공자는 추론 예산만큼 더한다(Anthropic 경로와 같은 방식).
-/// DeepSeek은 모델별 상한이 8,192라 그대로 둔다.
 fn openai_output_cap(kind: ProviderKind, effort: Option<ReasoningEffort>) -> (&'static str, u32) {
     let field = if kind == ProviderKind::OpenAi {
         "max_completion_tokens"
@@ -113,7 +112,9 @@ pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
             let mut out = String::with_capacity(256);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            out.push_str(",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}");
+            out.push_str(
+                ",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
+            );
             out
         }
         ProviderKind::Google => {
@@ -168,9 +169,36 @@ fn coalesce_turns<'a>(
     turns
 }
 
-/// `stream`이면 Anthropic·OpenAI 호환 본문에 `"stream":true`를 넣는다(Gemini는 주소가 스트림 메서드로 달라지고 본문은 같다).
+fn is_official_anthropic_host(base_url: &str) -> bool {
+    let trimmed = base_url.trim();
+    let after_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("HTTPS://"))
+        .unwrap_or("");
+    let host_port = after_scheme.split('/').next().unwrap_or("");
+    let host = host_port.split(':').next().unwrap_or("");
+    host.eq_ignore_ascii_case("api.anthropic.com")
+}
+
+fn is_gemini_3_or_4(clean_model_lower: &str) -> bool {
+    clean_model_lower.starts_with("gemini-3")
+        || clean_model_lower.starts_with("gemini-4")
+        || clean_model_lower.contains("/gemini-3")
+        || clean_model_lower.contains("/gemini-4")
+}
+
 pub fn build_provider_chat_body(
     req: &CopilotRunRequest,
+    system_prompt: &str,
+    user_content: &str,
+    stream: bool,
+) -> Result<String, EasyOfficeError> {
+    build_provider_chat_body_with_history(req, &req.history, system_prompt, user_content, stream)
+}
+
+pub fn build_provider_chat_body_with_history(
+    req: &CopilotRunRequest,
+    history: &[HistoryMessage],
     system_prompt: &str,
     user_content: &str,
     stream: bool,
@@ -182,16 +210,23 @@ pub fn build_provider_chat_body(
         ));
     }
     let effort = req.provider.reasoning_effort;
+    let is_reasoning = infer_reasoning_support(model);
     let body = match req.provider.kind {
         ProviderKind::Anthropic => {
-            let turns = coalesce_turns(&req.history, user_content);
-            let budget = effort.map_or(0, |e| e.budget_tokens());
+            let turns = coalesce_turns(history, user_content);
+            let budget = effort.map_or(0, ReasoningEffort::budget_tokens);
             let max_tokens = MAX_OUTPUT_TOKENS + budget;
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 512);
+            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
             let _ = write!(out, ",\"max_tokens\":{max_tokens},\"system\":");
-            push_json_str(&mut out, system_prompt);
+            if is_official_anthropic_host(&req.provider.base_url) {
+                out.push_str("[{\"type\":\"text\",\"text\":");
+                push_json_str(&mut out, system_prompt);
+                out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}}]");
+            } else {
+                push_json_str(&mut out, system_prompt);
+            }
             out.push_str(",\"messages\":[");
             for (idx, (role, text)) in turns.iter().enumerate() {
                 if idx > 0 {
@@ -204,12 +239,13 @@ pub fn build_provider_chat_body(
                 out.push('}');
             }
             out.push(']');
+            write_provider_tools_field(&mut out, req);
             if budget > 0 {
                 let _ = write!(
                     out,
                     ",\"thinking\":{{\"type\":\"enabled\",\"budget_tokens\":{budget}}}"
                 );
-            } else {
+            } else if !is_reasoning {
                 out.push_str(",\"temperature\":0.2");
             }
             if stream {
@@ -219,9 +255,17 @@ pub fn build_provider_chat_body(
             out
         }
         ProviderKind::Google => {
-            let turns = coalesce_turns(&req.history, user_content);
-            let budget = effort.map_or(0, |e| e.budget_tokens());
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 512);
+            let turns = coalesce_turns(history, user_content);
+            let clean_lower = model
+                .strip_prefix("models/")
+                .unwrap_or(model)
+                .to_ascii_lowercase();
+            let gemini_34 = is_gemini_3_or_4(&clean_lower);
+            let budget = effort
+                .filter(|_| is_reasoning || gemini_34)
+                .map_or(0, ReasoningEffort::budget_tokens);
+            let max_out = MAX_OUTPUT_TOKENS + budget;
+            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
             out.push_str("{\"systemInstruction\":{\"parts\":[{\"text\":");
             push_json_str(&mut out, system_prompt);
             out.push_str("}]},\"contents\":[");
@@ -240,11 +284,22 @@ pub fn build_provider_chat_body(
                 push_json_str(&mut out, text);
                 out.push_str("}]}");
             }
-            let _ = write!(
-                out,
-                "],\"generationConfig\":{{\"temperature\":0.2,\"maxOutputTokens\":{MAX_OUTPUT_TOKENS}"
-            );
-            if budget > 0 {
+            out.push(']');
+            write_provider_tools_field(&mut out, req);
+            out.push_str(",\"generationConfig\":{");
+            if !gemini_34 && !is_reasoning && budget == 0 {
+                out.push_str("\"temperature\":0.2,");
+            }
+            let _ = write!(out, "\"maxOutputTokens\":{max_out}");
+            if gemini_34 {
+                if let Some(level) = effort {
+                    out.push_str(
+                        ",\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingLevel\":",
+                    );
+                    push_json_str(&mut out, level.as_str());
+                    out.push('}');
+                }
+            } else if budget > 0 {
                 let _ = write!(
                     out,
                     ",\"thinkingConfig\":{{\"includeThoughts\":true,\"thinkingBudget\":{budget}}}"
@@ -254,13 +309,13 @@ pub fn build_provider_chat_body(
             out
         }
         _ => {
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 512);
+            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
             out.push_str(",\"messages\":[{\"role\":\"system\",\"content\":");
             push_json_str(&mut out, system_prompt);
             out.push('}');
-            for h in &req.history {
+            for h in history {
                 out.push_str(",{\"role\":");
                 push_json_str(&mut out, &h.role);
                 out.push_str(",\"content\":");
@@ -272,6 +327,7 @@ pub fn build_provider_chat_body(
             out.push_str("}]");
             let (cap_field, cap) = openai_output_cap(req.provider.kind, effort);
             let _ = write!(out, ",\"{cap_field}\":{cap}");
+            write_provider_tools_field(&mut out, req);
             if let Some(level) = effort {
                 if req.provider.kind == ProviderKind::DeepSeek {
                     out.push_str(",\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":");
@@ -279,13 +335,14 @@ pub fn build_provider_chat_body(
                 } else if matches!(
                     req.provider.kind,
                     ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Xai
-                ) {
+                ) && is_reasoning
+                {
                     out.push_str(",\"reasoning_effort\":");
                     push_json_str(&mut out, level.as_str());
-                } else if !model.contains("reasoner") {
+                } else if !is_reasoning {
                     out.push_str(",\"temperature\":0.2");
                 }
-            } else if !model.contains("reasoner") {
+            } else if !is_reasoning {
                 out.push_str(",\"temperature\":0.2");
             }
             if stream {
@@ -305,23 +362,19 @@ pub fn build_provider_chat_body(
     Ok(body)
 }
 
-pub fn extract_provider_completion(
+fn extract_from_root_object(
     kind: ProviderKind,
-    raw_json: &str,
-) -> Result<(String, String), EasyOfficeError> {
-    let parsed = StrictJsonValue::parse(raw_json).map_err(|_| {
-        EasyOfficeError::InvalidArgument("모델 응답이 유효한 JSON이 아닙니다.".to_string())
-    })?;
-    let root = parsed.as_object().ok_or_else(|| {
-        EasyOfficeError::InvalidArgument("모델 응답 루트는 JSON 객체여야 합니다.".to_string())
-    })?;
-
+    root: &[(String, StrictJsonValue)],
+    raw_fallback: Option<&str>,
+    text_out: &mut String,
+    thinking_out: &mut String,
+    tools_out: &mut Vec<NativeToolInvocation>,
+) -> bool {
+    let mut matched = false;
     if kind == ProviderKind::Anthropic {
         if let Some(blocks) =
             StrictJsonValue::get_field(root, "content").and_then(StrictJsonValue::as_array)
         {
-            let mut text_out = String::new();
-            let mut thinking_out = String::new();
             for block in blocks {
                 let Some(b_obj) = block.as_object() else {
                     continue;
@@ -338,51 +391,75 @@ pub fn extract_provider_completion(
                     "text" => {
                         if let Some(t) = StrictJsonValue::get_str(b_obj, "text") {
                             text_out.push_str(t);
+                            matched = true;
+                        }
+                    }
+                    "tool_use" => {
+                        if let Some(name) = StrictJsonValue::get_str(b_obj, "name") {
+                            let input = StrictJsonValue::get_field(b_obj, "input")
+                                .map_or_else(|| "{}".to_string(), StrictJsonValue::to_json_string);
+                            tools_out.push(NativeToolInvocation {
+                                name: name.to_string(),
+                                arguments_json: input,
+                            });
+                            matched = true;
                         }
                     }
                     _ => {}
                 }
             }
-            if !text_out.is_empty() {
-                return Ok((text_out, thinking_out));
+            if matched {
+                return true;
             }
         }
     }
 
-    if kind == ProviderKind::Google {
-        if let Some(cands) =
-            StrictJsonValue::get_field(root, "candidates").and_then(StrictJsonValue::as_array)
-        {
-            if let Some(first) = cands.first().and_then(StrictJsonValue::as_object) {
-                if let Some(content_obj) = StrictJsonValue::get_field(first, "content")
-                    .and_then(StrictJsonValue::as_object)
+    if let Some(cands) =
+        StrictJsonValue::get_field(root, "candidates").and_then(StrictJsonValue::as_array)
+    {
+        if let Some(first) = cands.first().and_then(StrictJsonValue::as_object) {
+            if let Some(content_obj) =
+                StrictJsonValue::get_field(first, "content").and_then(StrictJsonValue::as_object)
+            {
+                if let Some(parts) = StrictJsonValue::get_field(content_obj, "parts")
+                    .and_then(StrictJsonValue::as_array)
                 {
-                    if let Some(parts) = StrictJsonValue::get_field(content_obj, "parts")
-                        .and_then(StrictJsonValue::as_array)
-                    {
-                        let mut text_out = String::new();
-                        let mut thinking_out = String::new();
-                        for part in parts {
-                            let Some(p_obj) = part.as_object() else {
-                                continue;
-                            };
-                            let is_thought = StrictJsonValue::get_field(p_obj, "thought")
-                                .and_then(StrictJsonValue::as_bool)
-                                .unwrap_or(false);
-                            if let Some(t) = StrictJsonValue::get_str(p_obj, "text") {
-                                if is_thought {
-                                    if !thinking_out.is_empty() {
-                                        thinking_out.push('\n');
-                                    }
-                                    thinking_out.push_str(t);
-                                } else {
-                                    text_out.push_str(t);
+                    for part in parts {
+                        let Some(p_obj) = part.as_object() else {
+                            continue;
+                        };
+                        let is_thought = StrictJsonValue::get_field(p_obj, "thought")
+                            .and_then(StrictJsonValue::as_bool)
+                            .unwrap_or(false);
+                        if let Some(t) = StrictJsonValue::get_str(p_obj, "text") {
+                            if is_thought {
+                                if !thinking_out.is_empty() {
+                                    thinking_out.push('\n');
                                 }
+                                thinking_out.push_str(t);
+                            } else {
+                                text_out.push_str(t);
+                                matched = true;
                             }
                         }
-                        if !text_out.is_empty() {
-                            return Ok((text_out, thinking_out));
+                        if let Some(fc) = StrictJsonValue::get_field(p_obj, "functionCall")
+                            .and_then(StrictJsonValue::as_object)
+                        {
+                            if let Some(name) = StrictJsonValue::get_str(fc, "name") {
+                                let args = StrictJsonValue::get_field(fc, "args").map_or_else(
+                                    || "{}".to_string(),
+                                    StrictJsonValue::to_json_string,
+                                );
+                                tools_out.push(NativeToolInvocation {
+                                    name: name.to_string(),
+                                    arguments_json: args,
+                                });
+                                matched = true;
+                            }
                         }
+                    }
+                    if matched {
+                        return true;
                     }
                 }
             }
@@ -393,27 +470,124 @@ pub fn extract_provider_completion(
         StrictJsonValue::get_field(root, "choices").and_then(StrictJsonValue::as_array)
     {
         if let Some(first) = choices.first().and_then(StrictJsonValue::as_object) {
-            if let Some(msg) =
-                StrictJsonValue::get_field(first, "message").and_then(StrictJsonValue::as_object)
-            {
-                let content = StrictJsonValue::get_str(msg, "content")
-                    .unwrap_or("")
-                    .to_string();
-                let reasoning = StrictJsonValue::get_str(msg, "reasoning")
+            let msg_or_delta = StrictJsonValue::get_field(first, "message")
+                .or_else(|| StrictJsonValue::get_field(first, "delta"))
+                .and_then(StrictJsonValue::as_object);
+            if let Some(msg) = msg_or_delta {
+                if let Some(c) = StrictJsonValue::get_str(msg, "content") {
+                    if !c.is_empty() {
+                        text_out.push_str(c);
+                        matched = true;
+                    }
+                }
+                if let Some(r) = StrictJsonValue::get_str(msg, "reasoning")
                     .or_else(|| StrictJsonValue::get_str(msg, "reasoning_content"))
-                    .unwrap_or("")
-                    .to_string();
-                if !content.is_empty() {
-                    return Ok((content, reasoning));
+                {
+                    if !r.is_empty() {
+                        thinking_out.push_str(r);
+                    }
+                }
+                if let Some(tcs) = StrictJsonValue::get_field(msg, "tool_calls")
+                    .and_then(StrictJsonValue::as_array)
+                {
+                    for tc in tcs {
+                        if let Some(fn_obj) = tc
+                            .as_object()
+                            .and_then(|o| StrictJsonValue::get_field(o, "function"))
+                            .and_then(StrictJsonValue::as_object)
+                        {
+                            if let Some(name) = StrictJsonValue::get_str(fn_obj, "name") {
+                                let args = StrictJsonValue::get_str(fn_obj, "arguments")
+                                    .unwrap_or("{}")
+                                    .to_string();
+                                tools_out.push(NativeToolInvocation {
+                                    name: name.to_string(),
+                                    arguments_json: args,
+                                });
+                                matched = true;
+                            }
+                        }
+                    }
+                }
+                if matched {
+                    return true;
                 }
             }
             if let Some(text) = StrictJsonValue::get_str(first, "text") {
-                return Ok((text.to_string(), String::new()));
+                text_out.push_str(text);
+                return true;
             }
         }
     }
-    if StrictJsonValue::get_str(root, "reply").is_some() {
-        return Ok((raw_json.to_string(), String::new()));
+
+    if let Some(raw) = raw_fallback {
+        if StrictJsonValue::get_str(root, "reply").is_some() {
+            text_out.push_str(raw);
+            return true;
+        }
+    }
+    false
+}
+
+pub fn extract_provider_completion(
+    kind: ProviderKind,
+    raw_json: &str,
+) -> Result<(String, String), EasyOfficeError> {
+    let parsed = StrictJsonValue::parse(raw_json).map_err(|_| {
+        EasyOfficeError::InvalidArgument("모델 응답이 유효한 JSON이 아닙니다.".to_string())
+    })?;
+    let mut text_out = String::new();
+    let mut thinking_out = String::new();
+    let mut tools_out = Vec::new();
+
+    if let Some(arr) = parsed.as_array() {
+        let mut any_matched = false;
+        for item in arr {
+            let Some(obj) = item.as_object() else {
+                continue;
+            };
+            if let Some(err) = StrictJsonValue::get_field(obj, "error") {
+                let msg = err
+                    .as_object()
+                    .and_then(|o| StrictJsonValue::get_str(o, "message"))
+                    .or_else(|| err.as_str())
+                    .unwrap_or("모델 서버가 오류를 반환했습니다.");
+                return Err(EasyOfficeError::InvalidArgument(msg.to_string()));
+            }
+            any_matched |= extract_from_root_object(
+                kind,
+                obj,
+                None,
+                &mut text_out,
+                &mut thinking_out,
+                &mut tools_out,
+            );
+        }
+        if any_matched && (!text_out.is_empty() || !tools_out.is_empty()) {
+            let content = synthesize_completion_from_tools(text_out, &tools_out);
+            return Ok((content, thinking_out));
+        }
+        return Err(EasyOfficeError::InvalidArgument(
+            "모델 응답 배열에서 메시지 본문을 찾을 수 없습니다.".to_string(),
+        ));
+    }
+
+    let root = parsed.as_object().ok_or_else(|| {
+        EasyOfficeError::InvalidArgument(
+            "모델 응답 루트는 JSON 객체 또는 배열이어야 합니다.".to_string(),
+        )
+    })?;
+    if extract_from_root_object(
+        kind,
+        root,
+        Some(raw_json),
+        &mut text_out,
+        &mut thinking_out,
+        &mut tools_out,
+    ) && (!text_out.is_empty() || !tools_out.is_empty())
+    {
+        let content = synthesize_completion_from_tools(text_out, &tools_out);
+        return Ok((content, thinking_out));
     }
     Err(EasyOfficeError::InvalidArgument(
         "모델 응답에서 메시지 본문을 찾을 수 없습니다.".to_string(),
@@ -438,8 +612,11 @@ fn is_non_chat_model_id(id: &str) -> bool {
         || lower == "aqa"
 }
 
-fn infer_reasoning_support(id: &str) -> bool {
-    let lower = id.to_ascii_lowercase();
+pub fn infer_reasoning_support(id: &str) -> bool {
+    let lower = id
+        .strip_prefix("models/")
+        .unwrap_or(id)
+        .to_ascii_lowercase();
     if lower.contains("flash-lite") && lower.contains("gemini-2.5") {
         return false;
     }

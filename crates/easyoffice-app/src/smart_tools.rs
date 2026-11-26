@@ -291,7 +291,7 @@ impl PiiAuditResult {
     }
 }
 
-enum EmailScanOutcome {
+pub(crate) enum EmailScanOutcome {
     Matched(usize),
     Failed(usize),
 }
@@ -299,7 +299,7 @@ enum EmailScanOutcome {
 /// 256-byte lookup table for PII candidate start bytes:
 /// - bit `0x01`: can start a resident ID, phone number, or identifier (`0-9`, `+`, `A-Z`)
 /// - bit `0x02`: can start an email local part (`0-9`, `A-Z`, `a-z`, or non-ASCII UTF-8 lead byte)
-const PII_START_LUT: [u8; 256] = {
+pub(crate) const PII_START_LUT: [u8; 256] = {
     let mut table = [0u8; 256];
     let mut i = 0usize;
     while i < 256 {
@@ -471,7 +471,7 @@ impl DocumentSecurityAuditor {
             && (b'1'..=b'8').contains(&gender_digit)
     }
 
-    fn match_resident_id_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+    pub(crate) fn match_resident_id_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
         if idx > 0 && bytes[idx - 1].is_ascii_digit() {
             return None;
         }
@@ -596,7 +596,7 @@ impl DocumentSecurityAuditor {
             .map(|end| (end - idx, "***-****-****"))
     }
 
-    fn match_phone_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+    pub(crate) fn match_phone_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
         if idx > 0 && (bytes[idx - 1].is_ascii_digit() || bytes[idx - 1] == b'+') {
             return None;
         }
@@ -668,7 +668,7 @@ impl DocumentSecurityAuditor {
         Ok((p, prev_was_dot))
     }
 
-    fn scan_email_at(text: &str, idx: usize) -> EmailScanOutcome {
+    pub(crate) fn scan_email_at(text: &str, idx: usize) -> EmailScanOutcome {
         let Some(first_ch) = text[idx..].chars().next() else {
             return EmailScanOutcome::Failed(text.len());
         };

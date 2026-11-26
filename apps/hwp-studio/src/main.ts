@@ -67,6 +67,12 @@ import {
   sanitizeShellContext,
 } from './embed/shell-menu.ts';
 import { renderPrintBatch } from './embed/print-batch.ts';
+import {
+  applyCopilotEdits,
+  createCopilotToggleRelay,
+  readParagraphRange,
+  type CopilotInputBridge,
+} from './embed/copilot-bridge.ts';
 import { createShellFontBridge } from './embed/host-fonts.ts';
 import { initToolbarLabels, onToolbarLabelsToggle, setToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import { cellSelectionEnterCommand } from './command/cell-selection.ts';
@@ -276,6 +282,14 @@ registry.register(cellSelectionEnterCommand);
 defaultShortcuts.push([{ key: 'insert', alt: true }, 'table:insert-col-left']);
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
+const copilotToggleRelay = createCopilotToggleRelay();
+registry.register({
+  id: 'tool:copilot',
+  label: '코파일럿',
+  execute() {
+    copilotToggleRelay.toggle();
+  },
+});
 
 /**
  * embed 프로파일의 메뉴·도구막대 정리 — index.html은 그대로 두고 부트 시 런타임에
@@ -665,6 +679,7 @@ installEmbedRuntime({
     const offs = [
       shellShortcutRelay.add(listener),
       shellCommandRelay.add(listener),
+      copilotToggleRelay.add(listener),
       onToolbarLabelsToggle((visible) => listener({ schemaVersion: 1, reason: SHELL_TOOLBAR_LABELS_REASON, visible })),
       shellFontBridge.relay.add((request) => listener({ ...request })),
       eventBus.on('document-agent-changed', listener),
@@ -719,6 +734,19 @@ installEmbedRuntime({
     async setDragOver(active) {
       document.getElementById('scroll-container')?.classList.toggle('drag-over', active);
       return { applied: true as const };
+    },
+    // EasyOffice extension (copilot-v1): bounded paragraph range reading and single-snapshot batch edits.
+    async readParagraphRange(params) {
+      await initPromise;
+      return readParagraphRange(wasm, inputHandler as unknown as CopilotInputBridge | null, params);
+    },
+    async applyCopilotEdits(params) {
+      await initPromise;
+      const result = applyCopilotEdits(wasm, inputHandler as unknown as CopilotInputBridge | null, params);
+      if (canvasView) {
+        sbMessage().textContent = t('ui.sbMessage.filePages', { p1: wasm.fileName, p2: wasm.pageCount });
+      }
+      return result;
     },
     async getRendererDiagnostics(pageIndex) {
       await initPromise;

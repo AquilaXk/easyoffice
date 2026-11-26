@@ -43,7 +43,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "smart-diagnose": [...RIBBON_MODULES, "CONV"], "scrub-pii": [...RIBBON_MODULES, "CONV"],
     "security-audit": [...RIBBON_MODULES, "CONV"], "bench-run": [...RIBBON_MODULES, "CONV"],
     "view-outline": [...RIBBON_MODULES, "CONV"],
-    "copilot-toggle": ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
+    "copilot-toggle": ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     "clip-copy": [...EDIT_MODULES, "BASE", "BOARD"], "clip-cut": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"], "clip-paste": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"],
     "mod-symbol": EDIT_MODULES,
@@ -68,7 +68,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === "Ctrl+Shift+K")) {
     sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
       ...sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS,
-      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"] },
+      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"] },
     ]);
   }
   const BLOCKED_SPEC_TAGS = new Set([
@@ -111,7 +111,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   // Commands that still apply while the embedded HWP editor is the active surface.
   // The PII scrub and security audit read the page's own (hidden) fallback DOM, not the embedded document, so they stay off here.
-  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme", "print"]);
+  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme", "print", "copilot-toggle"]);
 
   // The start window has no document: only the window-level commands apply.
   const START_COMMANDS = new Set(["palette", "view-theme"]);

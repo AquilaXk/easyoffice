@@ -884,7 +884,7 @@
       if (ev.shiftKey || getActiveModule() !== "DOC") return;
       const root = editor();
       const range = currentRange();
-      if (!root || !range || root.dataset?.eoHfEdit) return;
+      if (!root || !range || root.dataset?.eoHfEdit || root.dataset?.eoGhostActive === "true") return;
       const startEl = range.startContainer?.nodeType === 1 ? range.startContainer : range.startContainer?.parentElement;
       if (startEl?.closest?.("table")) return;
       ev.preventDefault?.();

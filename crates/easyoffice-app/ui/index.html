@@ -499,7 +499,7 @@
           <div class="menu-item" data-menu="tool">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="review">도구</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-kinds="DOC SHEET SLIDE PDF BASE BOARD" data-studio-menu-cmd="copilot-toggle" role="menuitem" tabindex="-1"><span class="md-label">코파일럿</span><span class="md-shortcut">Ctrl+Shift+K</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF BASE BOARD" data-studio-menu-cmd="copilot-toggle" role="menuitem" tabindex="-1"><span class="md-label">코파일럿</span><span class="md-shortcut">Ctrl+Shift+K</span></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF" data-studio-menu-cmd="smart-diagnose" role="menuitem" tabindex="-1"><span class="md-label">문장 진단 및 요약</span></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF" data-studio-menu-cmd="scrub-pii" role="menuitem" tabindex="-1"><span class="md-label">개인정보 스캔/마스킹</span></div>
               <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF" data-studio-menu-cmd="review-verify" role="menuitem" tabindex="-1"><span class="md-label">문서 보안 검사</span></div>
@@ -1311,6 +1311,7 @@
                 <div class="eo-copilot-composer-bar">
                   <div class="eo-copilot-composer-tools">
                     <button id="btn-copilot-mode" type="button" class="eo-copilot-pill-btn eo-copilot-mode-btn" data-mode="edit" title="현재 문서를 직접 편집">편집</button>
+                    <button id="btn-copilot-ghost" type="button" class="eo-copilot-pill-btn eo-copilot-ghost-btn" aria-pressed="false" title="문서 인라인 자동완성 제안 (Tab 수락 / Esc 거절)">인라인 제안</button>
                     <button id="btn-copilot-model" type="button" class="eo-copilot-pill-btn eo-copilot-model-btn" aria-haspopup="menu" aria-expanded="false" title="모델 선택"><span id="copilot-model-btn-text" class="eo-copilot-model-btn-text">모델 선택</span><span class="eo-copilot-caret" aria-hidden="true">▾</span></button>
                     <div id="copilot-model-menu" class="eo-copilot-model-menu" hidden>
                       <div id="copilot-model-menu-group" focusgroup="menu nomemory" aria-labelledby="btn-copilot-model"></div>
@@ -3118,6 +3119,10 @@
     <script src="./copilot-catalog.js"></script>
     <script src="./copilot-text.js"></script>
     <script src="./copilot-diff.js"></script>
+    <script src="./copilot-markdown.js"></script>
+    <script src="./copilot-doc-html.js"></script>
+    <script src="./copilot-sheet-ops.js"></script>
+    <script src="./copilot-ext-ops.js"></script>
     <script src="./copilot-typing.js"></script>
     <script src="./copilot-cursor.js"></script>
     <script src="./copilot-timeline.js"></script>
@@ -3126,6 +3131,8 @@
     <script src="./copilot-perform-slide.js"></script>
     <script src="./copilot-perform.js"></script>
     <script src="./copilot-actions.js"></script>
+    <script src="./copilot-agent-loop.js"></script>
+    <script src="./copilot-ghost.js"></script>
     <script src="./copilot-model-ui.js"></script>
     <script src="./copilot-ui.js"></script>
     <script src="./base-model.js"></script>

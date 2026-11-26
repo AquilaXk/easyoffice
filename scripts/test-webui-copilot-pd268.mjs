@@ -224,14 +224,16 @@ test("the reply streams in as the model writes and the operations never show", a
   });
   await send("요약해 주세요", 8);
   const msg = assistants()[0];
-  const live = msg.querySelector("[data-turn-reply]").textContent;
-  assert.match(live, /^요약을 \*\*굵게\*\* 마쳤습니다$/, "the reply shows while the request is still running");
+  const replyNode = msg.querySelector("[data-turn-reply]");
+  assert.match(replyNode.textContent, /^요약을 굵게 마쳤습니다$/, "the reply shows while the request is still running");
+  assert.equal(replyNode.querySelector("strong")?.textContent, "굵게");
   assert.ok(!msg.textContent.includes("비밀 연산"), "operations are not shown before they are checked");
   assert.ok(msg.querySelector(".eo-copilot-loading"), "still waiting for the end");
   releaseRun();
   await flushAsyncTurns(10);
   assert.equal(assistants()[0].querySelector(".eo-copilot-loading"), null);
-  assert.match(assistants()[0].textContent, /요약을 \*\*굵게\*\* 마쳤습니다/);
+  assert.match(assistants()[0].textContent, /요약을 굵게 마쳤습니다/);
+  assert.equal(assistants()[0].querySelector("strong")?.textContent, "굵게");
   assert.equal(document.getElementById("btn-copilot-send").getAttribute("aria-label"), "보내기");
 });
 

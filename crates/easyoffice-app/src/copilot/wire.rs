@@ -71,11 +71,7 @@ pub fn send_local_http_streaming(
         "{} {} HTTP/1.1\r\nHost: {host_hdr}\r\nAccept: {}\r\nAccept-Encoding: identity\r\n",
         req.method.as_str(),
         req.path,
-        if req.stream {
-            "text/event-stream"
-        } else {
-            "application/json"
-        }
+        req.accept_header()
     );
     if req.method == HttpMethod::Post {
         let _ = write!(

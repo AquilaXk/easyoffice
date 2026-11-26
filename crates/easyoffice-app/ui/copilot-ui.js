@@ -4,9 +4,9 @@
   "use strict";
 
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const SUPPORTED_MODULES = new Set(["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
-  // These have no edit operations (the engine strips them): the panel stays in ask mode.
-  const ASK_ONLY_MODULES = new Set(["PDF", "BASE", "BOARD"]);
+  const SUPPORTED_MODULES = new Set(["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"]);
+  // Only PDF is ask-only (the engine strips write operations there).
+  const ASK_ONLY_MODULES = new Set(["PDF"]);
   const MIN_WIDTH = 280;
   const MAX_WIDTH = 520;
   const DEFAULT_WIDTH = 320;
@@ -23,8 +23,9 @@
     { id: "lengthen", label: "더 길게" },
     { id: "fix_spelling", label: "맞춤법 수정" },
     { id: "translate", label: "번역" },
+    { id: "visualize_table", label: "표로 시각화", docOnly: true },
   ]);
-  const COMMAND_MODULES = new Set(["DOC", "SLIDE"]);
+  const COMMAND_MODULES = new Set(["DOC", "HWP", "SLIDE"]);
 
   const MODULE_EXAMPLES = Object.freeze({
     SHEET: Object.freeze([
@@ -35,21 +36,25 @@
       { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 요약해 주세요." },
       { label: "피동 표현 다듬기", prompt: "피동 표현을 자연스러운 능동 문장으로 다듬어 주세요." },
     ]),
+    HWP: Object.freeze([
+      { label: "한글 문서 문장 다듬기", prompt: "문서의 어색한 표현을 자연스러운 문장으로 다듬어 주세요." },
+      { label: "문서 핵심 요약 추가", prompt: "문서 끝에 핵심 요약을 추가해 주세요." },
+    ]),
     SLIDE: Object.freeze([
       { label: "발표 슬라이드 추가", prompt: "발표 슬라이드를 추가하고 발표자 노트를 작성하세요." },
       { label: "발표자 노트 작성", prompt: "현재 슬라이드의 발표자 노트를 작성해 주세요." },
     ]),
     PDF: Object.freeze([
-      { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 요약해 주세요." },
+      { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 쪽 번호와 함께 요약해 주세요." },
       { label: "주요 항목 정리", prompt: "문서의 주요 항목과 수치를 정리해 주세요." },
     ]),
     BASE: Object.freeze([
+      { label: "샘플 레코드 추가", prompt: "현재 테이블 구조에 맞는 예시 레코드 3건을 추가해 주세요." },
       { label: "테이블 데이터 요약", prompt: "현재 테이블 레코드와 집계 수치를 요약해 주세요." },
-      { label: "이상치 및 누락 점검", prompt: "누락된 값이나 주의할 항목을 정리해 주세요." },
     ]),
     BOARD: Object.freeze([
+      { label: "업무 흐름 다이어그램 생성", prompt: "요청 접수 → 검토 → 승인 → 완료 순서의 흐름도를 추가해 주세요." },
       { label: "보드 흐름 요약", prompt: "현재 보드의 연결 흐름과 핵심 요소를 설명해 주세요." },
-      { label: "구조 개선 제안", prompt: "단계 누락이나 병목 구간이 있는지 분석해 주세요." },
     ]),
   });
 
@@ -134,7 +139,7 @@
       const mod = String(loc.module || fallbackMod).toUpperCase();
       const label = String(loc.label || loc.range || "").trim();
       if (!label) continue;
-      const key = mod + ":" + (loc.sheet || "") + ":" + label;
+      const key = mod + ":" + (loc.sheet || "") + ":" + (loc.page || "") + ":" + label;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
@@ -144,6 +149,7 @@
         range: loc.range ? String(loc.range) : undefined,
         paragraphIndex: Number.isInteger(loc.paragraphIndex) ? loc.paragraphIndex : undefined,
         slideIndex: Number.isInteger(loc.slideIndex) ? loc.slideIndex : undefined,
+        page: Number.isInteger(loc.page) ? loc.page : undefined,
       });
     }
     return out;
@@ -179,6 +185,39 @@
       isRunning: () => running,
       onChanged: () => syncComposerControls(),
     });
+    const agentLoop = host.__EASYOFFICE_CREATE_COPILOT_AGENT_LOOP__({
+      invokeIpc,
+      canStreamIpc,
+      streamApi,
+      copilotActions,
+    });
+    const copilotGhost = host.__EASYOFFICE_CREATE_COPILOT_GHOST__?.({
+      document,
+      invokeIpc,
+      getActiveModule,
+      isModelConfigured: () => modelUi.isConfigured(),
+      getProviderPayload: () => modelUi.currentProviderPayload(),
+      isPanelBusy: () => running || regenerating,
+      isImeComposing,
+      captureWorkspaceSnapshot: deps.captureWorkspaceSnapshot,
+      commitDeferredUndoSnapshot: deps.commitDeferredUndoSnapshot,
+      noteActivity: deps.noteActivity,
+      getWorkspacePanels: deps.getWorkspacePanels,
+    }) || null;
+
+    function renderReplyContent(replyEl, text, isError) {
+      const md = host.__EASYOFFICE_COPILOT_MARKDOWN__;
+      if (!md?.renderMarkdownInto) {
+        replyEl.textContent = text;
+        return;
+      }
+      md.renderMarkdownInto(document, replyEl, text, {
+        plainTextOnly: Boolean(isError),
+        onPageJump: (page) => {
+          void copilotActions.locateTarget({ module: "PDF", page, label: page + "쪽" }).then(() => syncSelectionBadge());
+        },
+      });
+    }
 
     function isStartWindow() {
       const mod = getActiveModule();
@@ -229,15 +268,21 @@
         isOpen && isModuleSupported() && !running && !regenerating && COMMAND_MODULES.has(mod) &&
         effectiveMode(mod) === "edit" && copilotActions.getCommandTarget(mod)
       );
+      if (!row.hidden) {
+        for (const chip of row.querySelectorAll("[data-doc-only]")) {
+          chip.hidden = mod !== "DOC";
+        }
+      }
     }
 
     function buildCommandRow() {
       const row = byId("copilot-command-row");
       if (!row) return;
-      const chips = SELECTION_COMMANDS.map(({ id, label }) => {
+      const chips = SELECTION_COMMANDS.map(({ id, label, docOnly }) => {
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = "eo-copilot-chip-btn";
+        if (docOnly) chip.dataset.docOnly = "true";
         chip.textContent = label;
         // The selection stays in the document while the chip is pressed.
         chip.addEventListener("mousedown", (ev) => ev.preventDefault());
@@ -284,6 +329,8 @@
         modeBtn.setAttribute("title", curMode === "edit" ? "현재 문서를 직접 편집" : "읽기 전용 질문");
       }
       modelUi.syncModelButton();
+      const ghostBtn = byId("btn-copilot-ghost");
+      if (ghostBtn) ghostBtn.hidden = mod !== "DOC";
       if (sendBtn) {
         const hasDraft = Boolean(String(inputEl?.value || "").trim());
         sendBtn.disabled = !running && !hasDraft;
@@ -427,7 +474,7 @@
         const replyEl = document.createElement("div");
         replyEl.className = "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : "");
         replyEl.dataset.turnReply = msg.id;
-        replyEl.textContent = msg.reply;
+        renderReplyContent(replyEl, msg.reply, msg.error);
         wrap.appendChild(replyEl);
       }
       if (msg.pending) {
@@ -523,7 +570,8 @@
       const mod = request.mod || getActiveModule();
       const mode = request.mode || effectiveMode(mod);
       const history = buildHistoryPayload();
-      const { selection, context } = copilotActions.extractContext(mod, { target: request.target });
+      const frozenSelection = mod === "SHEET" ? copilotActions.freezeSheetSelection() : null;
+      const { selection, context } = copilotActions.extractContext(mod, { target: request.target, frozenSelection });
 
       if (clearInput) {
         const inputEl = byId("copilot-input");
@@ -565,7 +613,7 @@
       entry.reply = text;
       const node = byId("copilot-thread")?.querySelector(`[data-turn-reply="${entry.id}"]`);
       if (node) {
-        node.textContent = text;
+        renderReplyContent(node, text, entry.error);
         const bodyEl = byId("copilot-body");
         if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight || 0;
       } else {
@@ -589,27 +637,36 @@
     }
 
     async function finishTurn(turn) {
-      const { assistantEntry, turnId, mod, mode, token } = turn;
+      const { assistantEntry, mod, mode, token } = turn;
       try {
-        const streaming = Boolean(canStreamIpc?.());
-        const req = {
+        let selection = turn.selection;
+        let context = turn.context;
+        if (mod === "HWP" && copilotActions.extractContextAsync) {
+          const fresh = await copilotActions.extractContextAsync(mod, { target: turn.request.target });
+          if (token !== activeRunToken) return;
+          selection = fresh.selection;
+          context = fresh.context;
+        }
+        const baseReq = {
           action: "copilot_run",
           requestId: turn.requestId,
           mode,
           module: mod,
           prompt: turn.request.prompt,
           history: turn.history,
-          selection: turn.selection,
-          context: turn.context,
+          selection,
+          context,
           provider: modelUi.currentProviderPayload(),
         };
-        if (turn.request.command) req.command = turn.request.command;
-        if (streaming) req.stream = true;
-        // 모델이 쓰는 글을 받는 대로 답글에 보인다. 연산은 보이지 않고, 전송이 끝나 엔진이 검증한 뒤의 응답으로만 쓴다.
-        const session = streaming ? streamApi.createStreamSession({ requestId: turn.requestId, onText: (text) => showStreamed(assistantEntry, text, token) }) : null;
-        const res = await invokeIpc("run_smart_assistant", JSON.stringify(req), session ? { stream: { onPiece: (piece) => session.accept(piece) } } : undefined);
-        if (token !== activeRunToken) return;
-        session?.finish();
+        if (turn.request.command) baseReq.command = turn.request.command;
+        const res = await agentLoop.runAgentTurn({
+          baseReq,
+          newSubRequestId: (stepIdx) => turn.requestId + "-s" + stepIdx,
+          isCancelled: () => token !== activeRunToken,
+          onStreamText: (text) => showStreamed(assistantEntry, text, token),
+          onActiveRequestId: (id) => { activeRequestId = id; },
+        });
+        if (!res || token !== activeRunToken) return;
         const ops = Array.isArray(res?.operations) ? res.operations : [];
         const explicitLocs = normalizeLocations(res?.locations, mod);
         assistantEntry.pending = false;
@@ -638,7 +695,10 @@
       const change = msg?.change;
       if (!change || change.state !== "pending" || running || regenerating) return;
       copilotActions.clearPreview();
-      if (copilotActions.fingerprint(change.mod, change.operations) !== change.fingerprint) {
+      const freshOk = copilotActions.verifyFingerprintAsync
+        ? await copilotActions.verifyFingerprintAsync(change.mod, change.operations, change.fingerprint)
+        : copilotActions.fingerprint(change.mod, change.operations) === change.fingerprint;
+      if (!freshOk) {
         change.state = "stale";
         setStatusFeedback?.("문서가 바뀌어 적용할 수 없습니다");
         renderThread();
@@ -852,6 +912,20 @@
         modelUi.repositionMenu();
       });
       bindResizer();
+      copilotGhost?.bind?.();
+      const ghostBtn = byId("btn-copilot-ghost");
+      if (ghostBtn && copilotGhost) {
+        const syncGhostBtn = () => {
+          const on = copilotGhost.isEnabled();
+          ghostBtn.setAttribute("aria-pressed", on ? "true" : "false");
+          ghostBtn.classList.toggle("active", on);
+        };
+        syncGhostBtn();
+        ghostBtn.addEventListener("click", () => {
+          copilotGhost.setEnabled(!copilotGhost.isEnabled());
+          syncGhostBtn();
+        });
+      }
       syncPanelChrome();
     }
 
@@ -861,11 +935,14 @@
       setOpen,
       onModuleChanged: () => {
         dismissPreview();
+        copilotGhost?.dismiss?.();
+        if (getActiveModule() === "HWP") void copilotActions.refreshHwpSnapshot?.().then(() => syncSelectionBadge()).catch(() => {});
         syncPanelChrome();
       },
       syncSelection: () => syncSelectionBadge(),
       isPerforming: () => copilotActions.isPerforming(),
       whenIdle: () => copilotActions.whenIdle(),
+      ghost: copilotGhost,
     };
   }
 

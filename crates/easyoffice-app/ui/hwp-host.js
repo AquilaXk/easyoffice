@@ -51,6 +51,7 @@
   // here before anything runs, so a compromised frame can only ask for these actions.
   const SHELL_COMMAND_REASON = "shell_command";
   const SHELL_TOOLBAR_LABELS_REASON = "shell_toolbar_labels";
+  const SHELL_COPILOT_TOGGLE_REASON = "shell_copilot_toggle";
   const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
@@ -144,6 +145,7 @@
     const shortcutListeners = new Set();
     const commandListeners = new Set();
     const toolbarLabelsListeners = new Set();
+    const copilotToggleListeners = new Set();
     // Pushed into the editor (`setShellContext`): the shell theme, recent-documents list, pdf capability and toolbar labels.
     const shellContext = {
       theme: SHELL_THEMES.includes(deps.initialTheme) ? deps.initialTheme : "system",
@@ -447,6 +449,10 @@
         if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
         return;
       }
+      if (payload?.reason === SHELL_COPILOT_TOGGLE_REASON) {
+        for (const listener of copilotToggleListeners) listener();
+        return;
+      }
       for (const listener of changeListeners) listener(data);
     }
 
@@ -693,6 +699,11 @@
       return () => toolbarLabelsListeners.delete(listener);
     }
 
+    function onCopilotToggle(listener) {
+      copilotToggleListeners.add(listener);
+      return () => copilotToggleListeners.delete(listener);
+    }
+
     function onShortcut(listener) {
       shortcutListeners.add(listener);
       return () => shortcutListeners.delete(listener);
@@ -770,7 +781,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, onToolbarLabels, setShellContext, setDragOver, onStatus, whenSettled, runSmoke, runFrameProbe,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, onToolbarLabels, onCopilotToggle, setShellContext, setDragOver, onStatus, whenSettled, runSmoke, runFrameProbe,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

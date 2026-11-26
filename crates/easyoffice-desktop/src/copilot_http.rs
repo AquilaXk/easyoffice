@@ -244,14 +244,7 @@ fn complete_https(
         HttpMethod::Get => agent.get(&req.url),
         HttpMethod::Post => agent.post(&req.url).set("Content-Type", "application/json"),
     }
-    .set(
-        "Accept",
-        if req.stream {
-            "text/event-stream"
-        } else {
-            "application/json"
-        },
-    )
+    .set("Accept", req.accept_header())
     .set("Accept-Encoding", "identity");
 
     for (name, val) in &req.headers {

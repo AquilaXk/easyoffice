@@ -566,6 +566,7 @@ const DATA_SHEET: MenuSpec = menu(
 const TOOL_HWP: MenuSpec = menu(
     "도구",
     &[
+        "tool:copilot",
         "tool:diagnose",
         "tool:scrub-pii",
         "tool:review-verify",

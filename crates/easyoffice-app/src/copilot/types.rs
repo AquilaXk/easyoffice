@@ -6,6 +6,10 @@ use std::net::SocketAddr;
 
 use super::cancel::CancelHandle;
 use super::context::{parse_context, parse_selection, CopilotContext, SelectionContext};
+pub use super::op_types::{
+    BoardGraphEdge, BoardGraphNode, CopilotLocation, CopilotOperation, CopilotRunResponse,
+    CopilotToolCall, DocBlock, DocReplacement, SheetWriteCell, SlideChartSeries, SlideElementSpec,
+};
 
 pub const MAX_PROMPT_BYTES: usize = 16_384;
 pub const MAX_HISTORY_ITEMS: usize = 32;
@@ -41,6 +45,7 @@ pub const MAX_BOARD_TEXT_BYTES: usize = 1_024;
 pub const MAX_OUTPUT_TOKENS: u32 = 8_192;
 pub const MAX_SLIDES: usize = 256;
 pub const MAX_SLIDE_BULLETS: usize = 64;
+pub const MAX_SLIDE_ELEMENTS: usize = 64;
 pub const MAX_TEXT_CONTEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_API_KEY_BYTES: usize = 4_096;
 pub const MAX_BASE_URL_BYTES: usize = 2_048;
@@ -49,7 +54,10 @@ pub const MAX_LLM_REQUEST_BYTES: usize = 512 * 1024;
 pub const MAX_LLM_RESPONSE_BYTES: usize = 512 * 1024;
 pub const MAX_LLM_OPERATIONS: usize = 64;
 pub const MAX_LLM_LOCATIONS: usize = 64;
+pub const MAX_LLM_TOOL_CALLS: usize = 16;
 pub const MAX_DOC_APPEND_BLOCKS: usize = 256;
+pub const MAX_DOC_TABLE_ROWS: usize = 128;
+pub const MAX_DOC_TABLE_COLS: usize = 32;
 pub const MAX_DISCOVERED_MODELS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,9 +89,19 @@ pub struct CopilotLlmRequest {
     pub body_json: String,
     /// 요청 취소 신호. 전송 계층이 소켓을 등록하고 취소 때 끊는다.
     pub cancel: CancelHandle,
-    /// 응답을 `text/event-stream`(또는 Gemini의 JSON 배열 스트림)으로 받는다. 전송 계층은 본문이 오는 대로 조각을 넘기고
-    /// 끝나면 지금처럼 전체 본문도 돌려준다.
+    /// 응답을 스트림(`text/event-stream` 또는 Google JSON 배열 스트림)으로 받는다.
     pub stream: bool,
+}
+
+impl CopilotLlmRequest {
+    /// 스트림 요청이라도 Google `:streamGenerateContent`는 SSE가 아니라 JSON 배열 스트림이므로 `application/json`을 요청한다.
+    pub fn accept_header(&self) -> &'static str {
+        if self.stream && !self.path.contains(":streamGenerateContent") {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }
+    }
 }
 
 /// Host-supplied HTTP(S) completion callback (e.g. desktop OS TLS transport).
@@ -144,6 +162,7 @@ impl CopilotMode {
 pub enum CopilotModule {
     Sheet,
     Doc,
+    Hwp,
     Slide,
     Pdf,
     Base,
@@ -155,6 +174,7 @@ impl CopilotModule {
         match self {
             Self::Sheet => "SHEET",
             Self::Doc => "DOC",
+            Self::Hwp => "HWP",
             Self::Slide => "SLIDE",
             Self::Pdf => "PDF",
             Self::Base => "BASE",
@@ -162,15 +182,16 @@ impl CopilotModule {
         }
     }
 
-    /// 편집 연산이 없는 모듈. 질문 답변만 받는다.
+    /// 편집 연산이 없는 모듈(`PDF`만 읽기 전용).
     pub fn is_ask_only(self) -> bool {
-        matches!(self, Self::Pdf | Self::Base | Self::Board)
+        matches!(self, Self::Pdf)
     }
 
     pub fn parse(raw: &str) -> Result<Self, EasyOfficeError> {
         match raw.trim().to_ascii_uppercase().as_str() {
             "SHEET" => Ok(Self::Sheet),
-            "DOC" | "HWP" => Ok(Self::Doc),
+            "DOC" => Ok(Self::Doc),
+            "HWP" => Ok(Self::Hwp),
             "SLIDE" => Ok(Self::Slide),
             "PDF" => Ok(Self::Pdf),
             "BASE" => Ok(Self::Base),
@@ -352,6 +373,7 @@ pub enum CopilotCommand {
     Lengthen,
     FixSpelling,
     Translate,
+    VisualizeTable,
 }
 
 impl CopilotCommand {
@@ -364,6 +386,7 @@ impl CopilotCommand {
             "lengthen" => Ok(Some(Self::Lengthen)),
             "fix_spelling" => Ok(Some(Self::FixSpelling)),
             "translate" => Ok(Some(Self::Translate)),
+            "visualize_table" => Ok(Some(Self::VisualizeTable)),
             other => Err(EasyOfficeError::InvalidArgument(format!(
                 "지원하지 않는 선택 영역 명령입니다: {other}"
             ))),
@@ -384,78 +407,10 @@ pub struct CopilotRunRequest {
 }
 
 impl CopilotRunRequest {
-    /// 질문 모드이거나 편집 연산이 없는 모듈이면 모델이 돌려준 연산은 전부 버린다.
+    /// 질문 모드이거나 편집 연산이 없는 모듈(`PDF`)이면 모델이 돌려준 연산은 전부 버린다.
     pub fn is_read_only(&self) -> bool {
         self.mode == CopilotMode::Ask || self.module.is_ask_only()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SheetWriteCell {
-    pub coord: String,
-    pub raw: String,
-    pub num_fmt: Option<String>,
-    pub bold: Option<bool>,
-    pub fill: Option<String>,
-    pub color: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DocBlock {
-    Heading { level: u8, text: String },
-    Paragraph { text: String },
-    List { kind: String, items: Vec<String> },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocReplacement {
-    pub index: usize,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CopilotOperation {
-    SheetWrite {
-        sheet: String,
-        range: String,
-        cells: Vec<SheetWriteCell>,
-    },
-    SheetFormat {
-        sheet: String,
-        range: String,
-        fill: Option<String>,
-        color: Option<String>,
-        bold: Option<bool>,
-        num_fmt: Option<String>,
-    },
-    DocAppend {
-        blocks: Vec<DocBlock>,
-    },
-    DocReplaceParagraphs {
-        replacements: Vec<DocReplacement>,
-    },
-    DocScrubPii,
-    SlideAdd {
-        title: String,
-        bullets: Vec<String>,
-        notes: String,
-    },
-    SlideUpdate {
-        index: usize,
-        title: Option<String>,
-        bullets: Option<Vec<String>>,
-        notes: Option<String>,
-    },
-    SheetChart {
-        sheet: String,
-        chart_type: ChartType,
-        data_range: String,
-        title: String,
-        legend: ChartLegend,
-        switch_row_col: bool,
-        width: Option<u32>,
-        height: Option<u32>,
-    },
 }
 
 /// 화면 쪽 `CHART_TYPES`(`sheet-layout.js`)와 같은 종류.
@@ -522,28 +477,6 @@ impl ChartLegend {
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CopilotLocation {
-    pub module: String,
-    pub label: String,
-    pub sheet: Option<String>,
-    pub range: Option<String>,
-    pub paragraph_index: Option<usize>,
-    pub slide_index: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CopilotRunResponse {
-    pub mode: CopilotMode,
-    pub reply: String,
-    pub reasoning: String,
-    pub updated_in_place: bool,
-    pub operations: Vec<CopilotOperation>,
-    /// 모델이 보냈지만 형식·범위·개수 검사에서 버린 작업 수.
-    pub dropped_operations: usize,
-    pub locations: Vec<CopilotLocation>,
 }
 
 pub use easyoffice_formats::json_out::push_json_string as push_json_str;
@@ -679,8 +612,8 @@ pub fn parse_run_request(
     let context = parse_context(entries)?;
     let provider = parse_provider_config(entries)?;
 
-    if command.is_some() {
-        validate_command_target(mode, module, &selection, &context)?;
+    if let Some(cmd) = command {
+        validate_command_target(mode, module, cmd, &selection, &context)?;
     }
 
     Ok(CopilotRunRequest {
@@ -739,10 +672,11 @@ fn parse_history(
     Ok(out)
 }
 
-/// 선택 영역 명령은 편집 모드의 문서·슬라이드 텍스트에서만 받고, 대상 위치가 있어야 한다.
+/// 선택 영역 명령은 편집 모드의 문서·한글·슬라이드 텍스트에서만 받고, 대상 위치가 있어야 한다.
 fn validate_command_target(
     mode: CopilotMode,
     module: CopilotModule,
+    command: CopilotCommand,
     selection: &SelectionContext,
     context: &CopilotContext,
 ) -> Result<(), EasyOfficeError> {
@@ -751,7 +685,10 @@ fn validate_command_target(
         return invalid("선택 영역 명령은 편집 모드에서만 쓸 수 있습니다.");
     }
     match module {
-        CopilotModule::Doc => {
+        CopilotModule::Doc | CopilotModule::Hwp => {
+            if module == CopilotModule::Hwp && command == CopilotCommand::VisualizeTable {
+                return invalid("표로 시각화 명령은 문서 편집기에서만 쓸 수 있습니다.");
+            }
             let (Some(start), end) = (selection.paragraph_index, selection.paragraph_end) else {
                 return invalid("선택 영역 명령에는 선택한 문단 위치가 필요합니다.");
             };
@@ -763,6 +700,9 @@ fn validate_command_target(
             Ok(())
         }
         CopilotModule::Slide => {
+            if command == CopilotCommand::VisualizeTable {
+                return invalid("표로 시각화 명령은 문서 편집기에서만 쓸 수 있습니다.");
+            }
             let known = context.slide.as_ref().map_or(0, |slide| slide.slides.len());
             match (selection.slide_index, selection.slide_field) {
                 (Some(index), Some(_)) if index < known => Ok(()),

@@ -3,10 +3,13 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 
 use super::cancel::CancelHandle;
-use super::operations::{validate_locations, validate_operations, ValidatedOperations};
+use super::operations::{
+    validate_locations, validate_operations, validate_tool_calls, ValidatedOperations,
+};
+use super::pii::{PiiVault, StreamingPiiRestorer};
 use super::prompt::build_prompts_for_llm;
 use super::providers::{
-    build_provider_chat_body, build_provider_headers, build_provider_ping_body,
+    build_provider_chat_body_with_history, build_provider_headers, build_provider_ping_body,
     extract_provider_completion, parse_discovered_models, serialize_models_response,
 };
 use super::ssrf::ValidatedEndpoint;
@@ -47,7 +50,6 @@ pub fn validate_wire_headers(headers: &[(String, String)]) -> Result<(), EasyOff
     Ok(())
 }
 
-/// 호스트 전송이 돌려준 오류 문구를 오류 종류로 가른다.
 fn host_error(msg: String) -> EasyOfficeError {
     if msg.contains("리다이렉트") || msg.contains("사설") || msg.contains("보안") {
         EasyOfficeError::SecurityViolation(msg)
@@ -56,7 +58,6 @@ fn host_error(msg: String) -> EasyOfficeError {
     }
 }
 
-/// 전송 전에 모든 요청이 거치는 검사: 인증 헤더 모양과 이미 온 취소.
 fn precheck(req: &CopilotLlmRequest) -> Result<(), EasyOfficeError> {
     validate_wire_headers(&req.headers)?;
     req.cancel.check().map_err(EasyOfficeError::InvalidArgument)
@@ -183,7 +184,6 @@ pub fn discover_provider_models(
     Ok(serialize_models_response(provider.kind, &discovered, true))
 }
 
-/// 스트림으로 받을 때 호스트가 대는 것: 전송, 모델 글 조각을 화면으로 보내는 통로, 조각을 묶는 요청 번호.
 #[derive(Clone, Copy)]
 pub struct StreamPlan<'a> {
     pub request_id: &'a str,
@@ -204,43 +204,68 @@ pub fn run_remote_or_local(
         ));
     }
     let headers = build_provider_headers(&req.provider)?;
-    let (system_prompt, user_content) = build_prompts_for_llm(req)?;
-    let body_json = build_provider_chat_body(req, &system_prompt, &user_content, stream.is_some())?;
+    let (mut system_prompt, raw_user_content) = build_prompts_for_llm(req)?;
+
+    let mut vault = PiiVault::new();
+    let (history_to_send, user_content) = if req.provider.kind.is_local_loopback() {
+        (req.history.clone(), raw_user_content)
+    } else {
+        vault.reserve_existing_tokens(&raw_user_content);
+        let redacted_history = vault.redact_history(&req.history);
+        let redacted_user = vault.redact_text(&raw_user_content);
+        if vault.has_entries() {
+            system_prompt.push_str(
+                " [PII_EMAIL_1], [PII_PHONE_1], [PII_RRN_1], [PII_ID_1] 형태의 토큰은 보호된 개인정보 자리표시자이므로 원문에서 참조할 때 변형 없이 그대로 유지하세요.",
+            );
+        }
+        (redacted_history, redacted_user)
+    };
+
+    let body_json = build_provider_chat_body_with_history(
+        req,
+        &history_to_send,
+        &system_prompt,
+        &user_content,
+        stream.is_some(),
+    )?;
     let mut http_req = build_http_req(HttpMethod::Post, endpoint, headers, body_json, cancel);
     let (content, reasoning) = match stream {
         Some(plan) => {
             http_req.stream = true;
-            read_streamed(req, &http_req, plan)?
+            read_streamed(req, &http_req, plan, &vault)?
         }
         None => {
             let raw_response = dispatch_transport(&http_req, host_llm)?;
             extract_provider_completion(req.provider.kind, &raw_response)?
         }
     };
-    Ok(parse_and_validate_assistant_output(
-        req, &content, reasoning,
-    ))
+    let mut resp = parse_and_validate_assistant_output(req, &content, reasoning);
+    vault.restore_response(&mut resp);
+    Ok(resp)
 }
 
-/// 스트림 전송으로 본문을 받으며 모델 글 조각을 화면으로 흘리고, 끝난 뒤 조립한 본문을 돌려준다.
-/// 흘려 보낸 글은 보여 주기만 하고 검증은 돌려주는 본문 전체로 한다.
 fn read_streamed(
     req: &CopilotRunRequest,
     http_req: &CopilotLlmRequest,
     plan: StreamPlan<'_>,
+    vault: &PiiVault,
 ) -> Result<(String, String), EasyOfficeError> {
     precheck(http_req)?;
     let mut assembler = StreamAssembler::new(req.provider.kind);
+    let mut restorer = StreamingPiiRestorer::default();
     let mut seq = 0u32;
     let sent = {
         let mut sink = |chunk: &[u8]| {
             if let Some(text) = assembler.feed(chunk) {
-                (plan.events)(&CopilotStreamEvent {
-                    request_id: plan.request_id,
-                    seq,
-                    text: &text,
-                });
-                seq += 1;
+                let restored = restorer.push(vault, &text);
+                if !restored.is_empty() {
+                    (plan.events)(&CopilotStreamEvent {
+                        request_id: plan.request_id,
+                        seq,
+                        text: &restored,
+                    });
+                    seq += 1;
+                }
             }
             assembler.failure().is_none()
         };
@@ -248,7 +273,6 @@ fn read_streamed(
     };
     let raw = match sent {
         Ok(raw) => raw,
-        // 조립기가 스트림 오류로 읽기를 멈추게 했으면 그 사유가 원인이다.
         Err(msg) => {
             return Err(match assembler.failure() {
                 Some(failure) => EasyOfficeError::InvalidArgument(failure.to_string()),
@@ -256,6 +280,14 @@ fn read_streamed(
             })
         }
     };
+    let flushed = restorer.flush(vault);
+    if !flushed.is_empty() {
+        (plan.events)(&CopilotStreamEvent {
+            request_id: plan.request_id,
+            seq,
+            text: &flushed,
+        });
+    }
     assembler.finish(&raw)
 }
 
@@ -285,7 +317,11 @@ fn parse_and_validate_assistant_output(
             StrictJsonValue::Object(o) => Some(o),
             _ => None,
         });
-    let Some(obj) = parsed_obj.filter(|o| StrictJsonValue::get_str(o, "reply").is_some()) else {
+    let Some(obj) = parsed_obj.filter(|o| {
+        StrictJsonValue::get_str(o, "reply").is_some()
+            || StrictJsonValue::get_field(o, "toolCalls").is_some()
+            || StrictJsonValue::get_field(o, "operations").is_some()
+    }) else {
         return CopilotRunResponse {
             mode: req.mode,
             reply: content.trim().to_string(),
@@ -294,6 +330,7 @@ fn parse_and_validate_assistant_output(
             operations: Vec::new(),
             dropped_operations: 0,
             locations: Vec::new(),
+            tool_calls: Vec::new(),
         };
     };
     let reply = StrictJsonValue::get_str(&obj, "reply").unwrap_or("");
@@ -307,7 +344,6 @@ fn parse_and_validate_assistant_output(
     } else {
         match StrictJsonValue::get_field(&obj, "operations") {
             Some(StrictJsonValue::Array(items)) => validate_operations(req, items),
-            // 배열이 아닌 operations는 통째로 버린 하나의 작업으로 센다.
             Some(StrictJsonValue::Null) | None => ValidatedOperations::default(),
             Some(_) => ValidatedOperations {
                 operations: Vec::new(),
@@ -323,6 +359,10 @@ fn parse_and_validate_assistant_output(
         .and_then(StrictJsonValue::as_array)
         .map(validate_locations)
         .unwrap_or_default();
+    let tool_calls = StrictJsonValue::get_field(&obj, "toolCalls")
+        .and_then(StrictJsonValue::as_array)
+        .map(|items| validate_tool_calls(req, items))
+        .unwrap_or_default();
 
     CopilotRunResponse {
         mode: req.mode,
@@ -332,5 +372,6 @@ fn parse_and_validate_assistant_output(
         operations,
         dropped_operations: dropped,
         locations,
+        tool_calls,
     }
 }

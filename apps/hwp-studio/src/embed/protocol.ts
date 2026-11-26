@@ -32,6 +32,8 @@ export const EMBED_CAPABILITIES = [
   'host-fonts-v1',
   // EasyOffice extension: setDragOver RPC (the shell shows the drop highlight on the editor's scroll container while a file is dragged over the window).
   'drag-over-v1',
+  // EasyOffice extension: readParagraphRange and applyCopilotEdits RPCs for the shell Copilot panel.
+  'copilot-v1',
 ] as const;
 
 export interface EmbedConnectAttempt {

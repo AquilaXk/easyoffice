@@ -1,28 +1,32 @@
 //! 참조 구현: continuedev/continue (Apache-2.0, Copyright Continue Dev, Inc., 커밋 5522c6f4, see THIRD_PARTY_NOTICES.md)
 //! `packages/fetch/src/stream.ts:54-99`(`parseDataLine`·`parseSseLine`: `data:` 한 줄의 JSON, `error` 필드는 스트림 오류, `[DONE]`),
 //! `core/llm/llms/OpenAI.ts:686`(`choices[0].delta.content`), `core/llm/llms/Anthropic.ts:346-360`(`content_block_delta`의 `text_delta`·`thinking_delta`),
-//! `core/llm/llms/Gemini.ts:369-455`(`processGeminiResponse`: `streamGenerateContent`가 돌려주는 JSON 배열 조각을 `\n,`로 나눠 읽는다)를 옮겼다.
-//! SSE 줄 해석은 `sse-core` 크레이트가 한다(이벤트 하나의 데이터·이름·id는 각각 512 KiB까지).
-//!
-//! 스트림은 화면에 보여 줄 글을 먼저 흘려 보내는 용도다. 최종 본문은 전송이 끝난 뒤 한꺼번에 검증하므로(`llm_client`),
-//! 스트림이 끊기거나 형식이 틀려도 검증을 건너뛰지 않는다.
+//! `core/llm/llms/Gemini.ts:369-455`(`processGeminiResponse`)를 옮기고 균형 중괄호 스캐너와 네이티브 도구 델타 조립을 더했다.
 
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use sse_core::{MessageEvent, SseDecoder, SseEvent};
 
 use super::providers::extract_provider_completion;
-use super::types::{ProviderKind, MAX_LLM_RESPONSE_BYTES};
+use super::schema::{synthesize_completion_from_tools, NativeToolInvocation};
+use super::types::{ProviderKind, MAX_LLM_RESPONSE_BYTES, MAX_LLM_TOOL_CALLS};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ToolCallChunk {
+    slot: usize,
+    name: Option<String>,
+    args_piece: String,
+}
 
 /// 이벤트 하나가 더한 것.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Delta {
     text: String,
     reasoning: String,
+    tool_chunks: Vec<ToolCallChunk>,
     error: Option<String>,
     done: bool,
 }
 
-/// 모델 본문 이벤트(`data:` JSON)를 제공자별 델타로 바꾼다. JSON이 아니거나 모르는 모양이면 `None`이다.
 fn read_delta(kind: ProviderKind, event: &MessageEvent) -> Option<Delta> {
     if event.data.trim() == "[DONE]" {
         return Some(Delta {
@@ -45,7 +49,6 @@ fn read_delta(kind: ProviderKind, event: &MessageEvent) -> Option<Delta> {
     Some(delta)
 }
 
-// 옮김[continue-delta] 시작
 fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
     let Some(choice) = StrictJsonValue::get_field(root, "choices")
         .and_then(StrictJsonValue::as_array)
@@ -65,13 +68,61 @@ fn read_openai(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
                 .or_else(|| StrictJsonValue::get_str(d, "reasoning"))
                 .unwrap_or(""),
         );
+        if let Some(tcs) =
+            StrictJsonValue::get_field(d, "tool_calls").and_then(StrictJsonValue::as_array)
+        {
+            for tc in tcs {
+                let Some(tc_obj) = tc.as_object() else {
+                    continue;
+                };
+                let slot = StrictJsonValue::get_field(tc_obj, "index")
+                    .and_then(StrictJsonValue::as_u64)
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(0);
+                if slot >= MAX_LLM_TOOL_CALLS {
+                    continue;
+                }
+                if let Some(fn_obj) = StrictJsonValue::get_field(tc_obj, "function")
+                    .and_then(StrictJsonValue::as_object)
+                {
+                    delta.tool_chunks.push(ToolCallChunk {
+                        slot,
+                        name: StrictJsonValue::get_str(fn_obj, "name").map(ToString::to_string),
+                        args_piece: StrictJsonValue::get_str(fn_obj, "arguments")
+                            .unwrap_or("")
+                            .to_string(),
+                    });
+                }
+            }
+        }
     }
     delta.done = StrictJsonValue::get_str(choice, "finish_reason").is_some();
 }
 
 fn read_anthropic(root: &[(String, StrictJsonValue)], event: &MessageEvent, delta: &mut Delta) {
     let kind = StrictJsonValue::get_str(root, "type").unwrap_or(event.event.as_ref());
+    let slot = StrictJsonValue::get_field(root, "index")
+        .and_then(StrictJsonValue::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0);
     match kind {
+        "content_block_start" => {
+            if slot < MAX_LLM_TOOL_CALLS {
+                if let Some(cb) = StrictJsonValue::get_field(root, "content_block")
+                    .and_then(StrictJsonValue::as_object)
+                {
+                    if StrictJsonValue::get_str(cb, "type") == Some("tool_use") {
+                        if let Some(name) = StrictJsonValue::get_str(cb, "name") {
+                            delta.tool_chunks.push(ToolCallChunk {
+                                slot,
+                                name: Some(name.to_string()),
+                                args_piece: String::new(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
         "content_block_delta" => {
             let Some(d) =
                 StrictJsonValue::get_field(root, "delta").and_then(StrictJsonValue::as_object)
@@ -85,6 +136,15 @@ fn read_anthropic(root: &[(String, StrictJsonValue)], event: &MessageEvent, delt
                 "thinking_delta" => delta
                     .reasoning
                     .push_str(StrictJsonValue::get_str(d, "thinking").unwrap_or("")),
+                "input_json_delta" if slot < MAX_LLM_TOOL_CALLS => {
+                    if let Some(partial) = StrictJsonValue::get_str(d, "partial_json") {
+                        delta.tool_chunks.push(ToolCallChunk {
+                            slot,
+                            name: None,
+                            args_piece: partial.to_string(),
+                        });
+                    }
+                }
                 _ => {}
             }
         }
@@ -102,27 +162,41 @@ fn read_google(root: &[(String, StrictJsonValue)], delta: &mut Delta) {
         .and_then(StrictJsonValue::as_object)
         .and_then(|c| StrictJsonValue::get_field(c, "parts"))
         .and_then(StrictJsonValue::as_array);
+    let mut fc_slot = 0usize;
     for part in parts
         .into_iter()
         .flatten()
         .filter_map(StrictJsonValue::as_object)
     {
-        let Some(text) = StrictJsonValue::get_str(part, "text") else {
-            continue;
-        };
-        let thought = StrictJsonValue::get_field(part, "thought")
-            .and_then(StrictJsonValue::as_bool)
-            .unwrap_or(false);
-        if thought {
-            delta.reasoning.push_str(text);
-        } else {
-            delta.text.push_str(text);
+        if let Some(text) = StrictJsonValue::get_str(part, "text") {
+            let thought = StrictJsonValue::get_field(part, "thought")
+                .and_then(StrictJsonValue::as_bool)
+                .unwrap_or(false);
+            if thought {
+                delta.reasoning.push_str(text);
+            } else {
+                delta.text.push_str(text);
+            }
+        }
+        if let Some(fc) =
+            StrictJsonValue::get_field(part, "functionCall").and_then(StrictJsonValue::as_object)
+        {
+            if fc_slot < MAX_LLM_TOOL_CALLS {
+                if let Some(name) = StrictJsonValue::get_str(fc, "name") {
+                    let args = StrictJsonValue::get_field(fc, "args")
+                        .map_or_else(|| "{}".to_string(), StrictJsonValue::to_json_string);
+                    delta.tool_chunks.push(ToolCallChunk {
+                        slot: MAX_LLM_TOOL_CALLS + fc_slot,
+                        name: Some(name.to_string()),
+                        args_piece: args,
+                    });
+                    fc_slot += 1;
+                }
+            }
         }
     }
 }
-// 옮김[continue-delta] 끝
 
-/// SSE 조각에서 읽히는 이벤트마다 델타를 낸다. 모르는 모양의 이벤트는 건너뛴다. 오류 이벤트나 이벤트 크기 상한을 만나면 거기서 멈춘다.
 fn read_sse_deltas(
     kind: ProviderKind,
     decoder: &mut SseDecoder,
@@ -147,7 +221,6 @@ fn read_sse_deltas(
     Ok(deltas)
 }
 
-/// `error` 필드의 사유. 객체면 `message`, 아니면 문자열 그대로(원본 `parseDataLine`).
 fn error_message(err: &StrictJsonValue) -> String {
     err.as_object()
         .and_then(|o| StrictJsonValue::get_str(o, "message"))
@@ -156,15 +229,10 @@ fn error_message(err: &StrictJsonValue) -> String {
         .to_string()
 }
 
-// 옮김[continue-gemini-array] 시작
-/// `streamGenerateContent`의 본문은 `[{..}\n,{..}\n,{..}]` 모양의 JSON 배열이 조각으로 온다. 읽힌 객체는 델타로 내고 버리며,
-/// 아직 덜 온 꼬리만 다음 조각까지 보관한다. 배열의 `[`는 스트림 처음에서만 걷고, 끝의 `]`는 그것을 걷어 내야 객체가 읽힐 때만 걷는다
-/// (조각이 객체 안의 `]`에서 끊겨도 건드리지 않는다).
+/// JSON 배열 스트림(`[{..},{..}]` 또는 `[{..}\n,{..}\n]`)에서 최상위 객체 경계를 균형 중괄호로 찾아 하나씩 꺼낸다.
 #[derive(Default)]
 struct JsonArrayReader {
-    /// 아직 읽지 못한 꼬리.
     buffer: Vec<u8>,
-    /// `[`를 걷었거나 배열이 아닌 시작을 확인했다.
     started: bool,
 }
 
@@ -181,8 +249,41 @@ fn parse_object(bytes: &[u8]) -> Option<Delta> {
     Some(delta)
 }
 
+/// `buf[0] == b'{'`일 때 문자열 리터럴·이스케이프를 건너뛰며 닫는 최상위 `}` 다음 바이트 오프셋을 찾는다.
+fn scan_complete_json_object(buf: &[u8]) -> Option<usize> {
+    if buf.first() != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, &b) in buf.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 impl JsonArrayReader {
-    /// 앞쪽의 공백과 쉼표, 스트림 처음의 `[`를 걷는다.
     fn trim_head(&mut self) {
         let mut cut = 0;
         while !self.started {
@@ -199,7 +300,7 @@ impl JsonArrayReader {
         while self
             .buffer
             .get(cut)
-            .is_some_and(|b| b.is_ascii_whitespace() || *b == b',')
+            .is_some_and(|b| b.is_ascii_whitespace() || *b == b',' || *b == b']')
         {
             cut += 1;
         }
@@ -217,46 +318,36 @@ impl JsonArrayReader {
             if self.buffer.is_empty() {
                 break;
             }
-            if let Some(at) = find_separator(&self.buffer) {
-                // 구분자 앞은 한 객체다. 읽히지 않으면 깨진 조각이라 버린다(남겨 두면 뒤를 막는다).
-                deltas.extend(parse_object(&self.buffer[..at]));
-                self.buffer.drain(..at + 2);
-                continue;
-            }
-            // 구분자가 아직 없다: 지금까지가 온전한 객체면 낸다. 끝의 `]`는 그것을 걷어야 읽힐 때만 배열의 끝이다.
-            let end = self.buffer.trim_ascii_end();
-            let parsed = parse_object(end).or_else(|| {
-                end.strip_suffix(b"]")
-                    .and_then(|rest| parse_object(rest.trim_ascii_end()))
-            });
-            match parsed {
-                Some(delta) => {
-                    deltas.push(delta);
-                    self.buffer.clear();
+            let Some(obj_end) = scan_complete_json_object(&self.buffer) else {
+                break;
+            };
+            if let Some(delta) = parse_object(&self.buffer[..obj_end]) {
+                let is_err = delta.error.is_some();
+                deltas.push(delta);
+                self.buffer.drain(..obj_end);
+                if is_err {
+                    break;
                 }
-                None => break,
+            } else {
+                self.buffer.drain(..obj_end);
             }
         }
         Ok(deltas)
     }
 }
 
-fn find_separator(haystack: &[u8]) -> Option<usize> {
-    haystack.windows(2).position(|w| w == b"\n,")
-}
-// 옮김[continue-gemini-array] 끝
-
 enum Wire {
     Sse(SseDecoder),
     JsonArray(JsonArrayReader),
 }
 
-/// 응답 본문 조각을 먹여 모델 글을 조립한다.
 pub struct StreamAssembler {
     kind: ProviderKind,
     wire: Wire,
     text: String,
     reasoning: String,
+    tool_slots: Vec<(usize, String, String)>,
+    tool_bytes: usize,
     events: u32,
     failure: Option<String>,
 }
@@ -272,12 +363,13 @@ impl StreamAssembler {
             },
             text: String::new(),
             reasoning: String::new(),
+            tool_slots: Vec::new(),
+            tool_bytes: 0,
             events: 0,
             failure: None,
         }
     }
 
-    /// 조각을 먹이고 이번 조각이 더한 모델 글을 돌려준다. 실패하면 [`failure`](Self::failure)에 사유가 남고 `None`이다.
     pub fn feed(&mut self, chunk: &[u8]) -> Option<String> {
         let deltas = match &mut self.wire {
             Wire::Sse(decoder) => read_sse_deltas(self.kind, decoder, chunk),
@@ -295,11 +387,44 @@ impl StreamAssembler {
                     self.reasoning.push_str(&delta.reasoning);
                     self.text.push_str(&delta.text);
                     added.push_str(&delta.text);
+                    for tc in delta.tool_chunks {
+                        self.tool_bytes = self.tool_bytes.saturating_add(tc.args_piece.len());
+                        if tc.slot >= MAX_LLM_TOOL_CALLS {
+                            if self.tool_slots.len() < MAX_LLM_TOOL_CALLS * 2 {
+                                self.tool_slots.push((
+                                    usize::MAX,
+                                    tc.name.unwrap_or_default(),
+                                    tc.args_piece,
+                                ));
+                            }
+                        } else if let Some(existing) =
+                            self.tool_slots.iter_mut().find(|(s, _, _)| *s == tc.slot)
+                        {
+                            if let Some(name) = tc.name {
+                                if existing.1.is_empty() {
+                                    existing.1 = name;
+                                }
+                            }
+                            existing.2.push_str(&tc.args_piece);
+                        } else if self.tool_slots.len() < MAX_LLM_TOOL_CALLS * 2 {
+                            self.tool_slots.push((
+                                tc.slot,
+                                tc.name.unwrap_or_default(),
+                                tc.args_piece,
+                            ));
+                        }
+                    }
                 }
             }
             Err(message) => self.failure = Some(message),
         }
-        if self.text.len() + self.reasoning.len() > MAX_LLM_RESPONSE_BYTES {
+        if self
+            .text
+            .len()
+            .saturating_add(self.reasoning.len())
+            .saturating_add(self.tool_bytes)
+            > MAX_LLM_RESPONSE_BYTES
+        {
             self.failure = Some("모델 응답 크기가 허용 상한(512 KiB)을 초과했습니다.".to_string());
         }
         (self.failure.is_none() && !added.is_empty()).then_some(added)
@@ -309,7 +434,6 @@ impl StreamAssembler {
         self.failure.as_deref()
     }
 
-    /// 전송이 끝난 뒤의 본문과 생각. 서버가 스트림 대신 일반 JSON을 돌려줬으면(스트림을 무시하는 서버) 그 본문에서 읽는다.
     pub fn finish(self, raw_body: &str) -> Result<(String, String), EasyOfficeError> {
         if let Some(message) = self.failure {
             return Err(EasyOfficeError::InvalidArgument(message));
@@ -317,12 +441,26 @@ impl StreamAssembler {
         if self.events == 0 {
             return extract_provider_completion(self.kind, raw_body);
         }
-        if self.text.is_empty() {
+        let invocations: Vec<NativeToolInvocation> = self
+            .tool_slots
+            .into_iter()
+            .filter(|(_, name, _)| !name.is_empty())
+            .map(|(_, name, args)| NativeToolInvocation {
+                name,
+                arguments_json: if args.trim().is_empty() {
+                    "{}".to_string()
+                } else {
+                    args
+                },
+            })
+            .collect();
+        if self.text.is_empty() && invocations.is_empty() {
             return Err(EasyOfficeError::InvalidArgument(
                 "모델 응답에서 메시지 본문을 찾을 수 없습니다.".to_string(),
             ));
         }
-        Ok((self.text, self.reasoning))
+        let content = synthesize_completion_from_tools(self.text, &invocations);
+        Ok((content, self.reasoning))
     }
 }
 
@@ -405,10 +543,21 @@ mod tests {
     }
 
     #[test]
+    fn google_compact_comma_array_without_newlines_is_parsed() {
+        let (asm, shown) = feed_all(
+            ProviderKind::Google,
+            &[
+                "[{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"첫째\"}]}}]},{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"둘째\"}]}}]}]",
+            ],
+        );
+        assert_eq!(shown, ["첫째둘째"]);
+        assert_eq!(asm.finish("").unwrap().0, "첫째둘째");
+    }
+
+    #[test]
     fn a_google_object_split_across_reads_waits_for_its_end() {
         let whole = "[{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"완성\"}]}}]}\n]";
         let bytes = whole.as_bytes();
-        // 멀티바이트 글자 한가운데서도 자른다.
         let cut = whole.find("완").unwrap() + 1;
         let mut asm = StreamAssembler::new(ProviderKind::Google);
         let mut shown = Vec::new();
@@ -424,7 +573,6 @@ mod tests {
 
     #[test]
     fn a_google_array_split_at_a_separator_emits_each_object_once() {
-        // 조각이 `\n,{B}`로 시작해도 이미 낸 `{A}`를 다시 내지 않는다.
         let (a, b, c) = (google_part("가"), google_part("나"), google_part("다"));
         let chunks = [format!("[{a}"), format!("\n,{b}"), format!("\n,{c}\n]")];
         let mut asm = StreamAssembler::new(ProviderKind::Google);
@@ -457,7 +605,6 @@ mod tests {
 
     #[test]
     fn a_google_chunk_that_happens_to_end_in_a_bracket_is_not_cut() {
-        // 한 객체 안의 `]`에서 조각이 끊겨도 `]`를 걷어 내지 않는다.
         let whole = format!("[{}\n]", google_part("끝"));
         let cut = whole.find("}]").unwrap() + 2;
         let (head, tail) = whole.as_bytes().split_at(cut);
@@ -522,7 +669,6 @@ mod tests {
         assert!(refused, "540 KiB of text is over the 512 KiB limit");
     }
 
-    // 이벤트 하나의 상한(512 KiB)은 `sse-core`가 지킨다. 그 상한이 스트림 실패로 이어지는지 본다.
     #[test]
     fn one_event_over_the_event_limit_fails_the_stream() {
         let mut asm = StreamAssembler::new(ProviderKind::OpenAi);

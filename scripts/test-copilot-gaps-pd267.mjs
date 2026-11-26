@@ -118,10 +118,12 @@ test("a text selection command targets the blocks the selection touches and reac
   const farTarget = far.instance.getCommandTarget("DOC");
   const { selection: sel, context } = far.instance.extractContext("DOC", { target: farTarget });
   assert.equal(sel.paragraphIndex, 230);
-  assert.equal(context.doc.paragraphs.length, 232, "padded up to the last selected block");
+  assert.equal(context.doc.paragraphs.length, 248, "padded through the surrounding window past the last selected block");
   assert.equal(context.doc.paragraphs[231], "문단 231");
+  assert.equal(context.doc.paragraphs[220], "문단 220", "surrounding window past paragraph 200 is preserved");
+  assert.equal(context.doc.paragraphs[245], "문단 245", "trailing surrounding window is preserved");
   assert.equal(context.doc.paragraphs[210], "", "outside the window and the selection stays empty");
-  assert.equal(context.doc.omittedParagraphs, 28);
+  assert.equal(context.doc.omittedParagraphs, 12);
 });
 
 test("a selection inside the slide title or body is a command target for that field", () => {

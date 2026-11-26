@@ -78,8 +78,8 @@ test("코파일럿 패널은 기본 닫힘이며 모듈 가시성, 진입점 토
 
   switchModule(document, "HWP");
   await flushAsyncTurns(4);
-  assert.equal(shell.hidden, true, "hidden in HWP module");
-  assert.equal(topBtn.hidden, true, "topbar toggle hidden in HWP module");
+  assert.equal(shell.hidden, true, "closed until toggled open in HWP module");
+  assert.equal(topBtn.hidden, false, "topbar toggle visible in HWP module");
 
   switchModule(document, "CONV");
   await flushAsyncTurns(4);

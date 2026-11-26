@@ -92,12 +92,12 @@ fn base_and_board_context_reaches_the_model_and_stays_ask_only() {
     );
     let (res, bodies) = run(&base, MUTATING_REPLY);
     let o = obj(&res.unwrap());
-    assert!(ops(&o).is_empty(), "BASE has no edit operations");
+    assert!(ops(&o).is_empty(), "cross-module ops on BASE are rejected");
     assert_eq!(
         StrictJsonValue::get_field(&o, "updatedInPlace").and_then(StrictJsonValue::as_bool),
         Some(false)
     );
-    assert_eq!(field_u64(&o, "droppedOperations"), 0);
+    assert_eq!(field_u64(&o, "droppedOperations"), 2);
     let body = &bodies[0];
     for needle in [
         "테이블 목록: 고객, 주문",
@@ -105,6 +105,7 @@ fn base_and_board_context_reaches_the_model_and_stays_ask_only() {
         "이름(text), 금액(number)",
         "[1] 이름=이, 금액=20",
         "[이하 248건 생략]",
+        "base.add_field",
     ] {
         assert!(body.contains(needle), "BASE context lacks {needle}: {body}");
     }
@@ -115,12 +116,32 @@ fn base_and_board_context_reaches_the_model_and_stays_ask_only() {
         r#","context":{"board":{"nodes":[{"id":"n1","kind":"shape","text":"시작"},{"id":"n2","kind":"text","text":"끝"}],"connectors":[{"from":"n1","to":"n2"}],"totalNodes":2}}"#,
     );
     let (res, bodies) = run(&board, MUTATING_REPLY);
-    assert!(ops(&obj(&res.unwrap())).is_empty());
-    for needle in ["요소 2개, 연결선 1개", "[n1] shape: 시작", "연결 n1 -> n2"] {
+    let board_obj = obj(&res.unwrap());
+    assert!(
+        ops(&board_obj).is_empty(),
+        "cross-module ops on BOARD are rejected"
+    );
+    assert_eq!(field_u64(&board_obj, "droppedOperations"), 2);
+    for needle in [
+        "요소 2개, 연결선 1개",
+        "[n1] shape: 시작",
+        "연결 n1 -> n2",
+        "board.add_graph",
+    ] {
         assert!(bodies[0].contains(needle), "BOARD context lacks {needle}");
     }
+
+    let board_ask = payload(
+        "ask",
+        "BOARD",
+        r#","context":{"board":{"nodes":[{"id":"n1","kind":"shape","text":"시작"}],"connectors":[],"totalNodes":1}}"#,
+    );
+    let (ask_res, ask_bodies) = run(&board_ask, MUTATING_REPLY);
+    let ask_obj = obj(&ask_res.unwrap());
+    assert!(ops(&ask_obj).is_empty());
+    assert_eq!(field_u64(&ask_obj, "droppedOperations"), 0);
     assert!(
-        bodies[0].contains("읽기 전용 모드"),
+        ask_bodies[0].contains("읽기 전용 모드"),
         "ask-only rule is in the instruction"
     );
 }

@@ -159,7 +159,7 @@ test("a text selection shows the selection commands and runs the chosen one on t
   await flushAsyncTurns(3);
   assert.equal(row.hidden, false);
   const labels = Array.from(row.querySelectorAll("button")).map((b) => b.textContent.trim());
-  assert.deepEqual(labels, ["다시 쓰기", "요약", "더 짧게", "더 길게", "맞춤법 수정", "번역"]);
+  assert.deepEqual(labels, ["다시 쓰기", "요약", "더 짧게", "더 길게", "맞춤법 수정", "번역", "표로 시각화"]);
 
   userClick(Array.from(row.querySelectorAll("button")).find((b) => b.textContent.trim() === "요약"));
   await flushAsyncTurns(16);
@@ -213,12 +213,15 @@ test("regenerate of a command asks again only while its blocks are what they wer
   assert.equal(assistants().length, 1, "the answer stays");
 });
 
-test("BASE and BOARD questions go to the engine as table and board context, and the panel stays in ask mode", async () => {
+test("BASE and BOARD support both edit and ask modes and send table and board context", async () => {
   for (const [module, key] of [["BASE", "base"], ["BOARD", "board"]]) {
-    const { document, send, runs } = await open({ module, run: () => ({ status: "ok", mode: "ask", reply: "답", operations: [] }) });
+    const { document, userClick, send, runs } = await open({ module, run: (req) => ({ status: "ok", mode: req.mode, reply: "답", operations: [] }) });
     const modeBtn = document.getElementById("btn-copilot-mode");
+    assert.equal(modeBtn.textContent.trim(), "편집", module);
+    assert.equal(modeBtn.disabled, false, module);
+    userClick(modeBtn);
+    await flushAsyncTurns(2);
     assert.equal(modeBtn.textContent.trim(), "질문", module);
-    assert.equal(modeBtn.disabled, true, module);
     await send("현재 내용을 요약해 주세요");
     const req = runs()[0];
     assert.equal(req.module, module);

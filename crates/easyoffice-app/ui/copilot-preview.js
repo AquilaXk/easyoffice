@@ -15,9 +15,11 @@
   const ELEMENT_LABELS = Object.freeze({ textbox: "글상자", textBox: "글상자", shape: "도형", image: "그림", table: "표", chart: "차트" });
 
   function createCopilotPreview(deps) {
-    const { document, win = host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName } = deps;
+    const { document, win = host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName, getSheetController, extOps } = deps;
     const { diffSegments } = host.__EASYOFFICE_COPILOT_DIFF__;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
+    const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
+    const sheetOps = host.__EASYOFFICE_COPILOT_SHEET_OPS__;
     let overlays = [];
     // 덧씌움이 원래 문단보다 길어질 때 뒤 문단을 미는 규칙들. 편집 DOM의 인라인 스타일이 아니라 따로 둔 스타일 시트에 넣는다.
     let pushRules = [];
@@ -35,6 +37,7 @@
     const clip = (text) => clipCodePoints(String(text ?? ""), MAX_ENTRY_CHARS);
 
     function blockText(item) {
+      if (docHtml?.plainPreviewTextOfBlock) return docHtml.plainPreviewTextOfBlock(item);
       if (typeof item === "string") return item;
       if (!item || typeof item !== "object") return "";
       if (Array.isArray(item.items)) {
@@ -67,8 +70,8 @@
         for (const rep of op.replacements) {
           const index = Number(rep?.index);
           if (!Number.isInteger(index) || index < 0) continue;
-          const before = index < blocks.length ? blocks[index].textContent || "" : "";
-          entries.push(change(index < blocks.length ? "replace" : "insert", "문단 " + (index + 1), before, rep?.text, { module: "DOC", paragraphIndex: index }, { docIndex: index }));
+          const before = index < blocks.length ? blockText(docHtml ? docHtml.serializeBlockForContext(blocks[index]) : (blocks[index].textContent || "")) : "";
+          entries.push(change(index < blocks.length ? "replace" : "insert", "문단 " + (index + 1), before, blockText(rep?.text), { module: "DOC", paragraphIndex: index }, { docIndex: index }));
         }
         return;
       }
@@ -76,7 +79,7 @@
       if (kind === "doc.replace_paragraphs") {
         const start = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
         const end = Number.isInteger(op.endIndex) ? Math.min(blocks.length - 1, op.endIndex) : blocks.length - 1;
-        const before = blocks.slice(start, end + 1).map((b) => b.textContent || "").join("\n");
+        const before = blocks.slice(start, end + 1).map((b) => blockText(docHtml ? docHtml.serializeBlockForContext(b) : (b.textContent || ""))).join("\n");
         entries.push(change("replace", "문단 " + (start + 1) + (end > start ? "~" + (end + 1) : ""), before, items.map(blockText).join("\n"), { module: "DOC", paragraphIndex: start }, { docIndex: start, docEnd: end }));
         return;
       }
@@ -126,6 +129,11 @@
         entries.push(change("format", "차트 " + (op.title || op.dataRange || ""), "", "", { module: "SHEET", sheet, range: String(op.dataRange || "") }));
         return;
       }
+      const extEntry = sheetOps?.previewEntryForExtendedSheetOp?.(op, change, getActiveSheetName);
+      if (extEntry) {
+        entries.push(extEntry);
+        return;
+      }
       entries.push(change("format", "서식 " + String(op.range || ""), "", "", { module: "SHEET", sheet, range: String(op.range || "") }));
     }
 
@@ -135,8 +143,14 @@
       for (const op of Array.isArray(operations) ? operations : []) {
         if (!op || typeof op !== "object") continue;
         if (mod === "DOC") docEntries(op, entries);
+        else if (mod === "HWP") {
+          if (extOps?.getEmbedHwpHost?.()) extOps.hwpEntries(op, entries, change);
+          else docEntries(op, entries);
+        }
         else if (mod === "SLIDE") slideEntries(op, entries);
         else if (mod === "SHEET") sheetEntries(op, entries);
+        else if (mod === "BASE") extOps?.baseEntries?.(op, entries, change);
+        else if (mod === "BOARD") extOps?.boardEntries?.(op, entries, change);
         if (entries.length > MAX_ENTRIES * 8) break;
       }
       return { entries: entries.slice(0, MAX_ENTRIES), omitted: Math.max(0, entries.length - MAX_ENTRIES) };
@@ -145,7 +159,10 @@
     /** 연산이 건드리는 곳의 지금 내용. 미리보기를 본 뒤 그 곳이 바뀌었으면 적용하지 않는다. */
     function fingerprint(mod, operations) {
       const ops = Array.isArray(operations) ? operations : [];
-      if (mod === "DOC") {
+      if (mod === "HWP" && extOps?.getEmbedHwpHost?.()) {
+        return extOps.hwpFingerprint();
+      }
+      if (mod === "DOC" || mod === "HWP") {
         const blocks = editorBlocks();
         const touched = new Set();
         for (const op of ops) {
@@ -157,17 +174,28 @@
             for (let i = start; i <= end; i += 1) touched.add(i);
           }
         }
-        return JSON.stringify({ n: blocks.length, t: [...touched].filter(Number.isInteger).sort((a, b) => a - b).map((i) => [i, blocks[i]?.textContent ?? null]) });
+        return JSON.stringify({
+          n: blocks.length,
+          t: [...touched].filter(Number.isInteger).sort((a, b) => a - b).map((i) => [
+            i,
+            blocks[i] ? (docHtml ? docHtml.serializeBlockForContext(blocks[i]) : (blocks[i].textContent ?? null)) : null,
+          ]),
+        });
       }
       if (mod === "SLIDE") {
         return JSON.stringify({ n: slideDeckState.length, t: ops.map((op) => { const s = slideDeckState[Number.isInteger(op?.index) ? op.index : op?.slideIndex ?? 0]; return s ? [s.title, s.lower, s.notes, s.layout, s.transition, s.elements] : null; }) });
       }
       if (mod === "SHEET") {
+        if (sheetOps?.computeSheetFingerprint) {
+          return sheetOps.computeSheetFingerprint(ops, { document, sheetDataStore, getActiveSheetName, getSheetController });
+        }
         return JSON.stringify(ops.map((op) => {
           const store = sheetDataStore[String(op?.sheet || getActiveSheetName())] || {};
           return (Array.isArray(op?.cells) ? op.cells : []).map((c) => { const e = store[String(c?.coord || "").toUpperCase()]; return e ? [e.formula || "", e.value ?? ""] : null; });
         }));
       }
+      if (mod === "BASE") return extOps?.baseFingerprint?.() || "";
+      if (mod === "BOARD") return extOps?.boardFingerprint?.() || "";
       return "";
     }
 
