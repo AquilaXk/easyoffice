@@ -611,27 +611,69 @@
     locations.push({ module: "SHEET", label: "메모 " + cell, sheet: sheetName, range: cell });
   }
 
+  const TABLE_ACTION_LABELS = Object.freeze({
+    create: "표 만들기",
+    style: "표 스타일",
+    total_row: "요약 행",
+    to_range: "범위로 변환",
+  });
+  const PIVOT_AGG_LABELS = Object.freeze({
+    sum: "합계",
+    count: "개수",
+    average: "평균",
+    min: "최소값",
+    max: "최대값",
+  });
+  const COND_PRESET_LABELS = Object.freeze({
+    greaterThan: "보다 큼",
+    lessThan: "보다 작음",
+    top10: "상위 10개 항목",
+    aboveAverage: "평균 초과",
+    duplicateValues: "중복 값",
+    dataBar: "데이터 막대",
+    colorScale: "색조",
+    iconSet: "아이콘 집합",
+    cellIs: "셀 값",
+  });
+  const SORT_FILTER_LABELS = Object.freeze({
+    sort: "정렬",
+    filter: "자동 필터",
+    clear_filter: "필터 지우기",
+  });
+  const STRUCTURE_ACTION_LABELS = Object.freeze({
+    insert_rows: "행 삽입",
+    delete_rows: "행 삭제",
+    insert_cols: "열 삽입",
+    delete_cols: "열 삭제",
+    freeze: "틀 고정",
+    unfreeze: "틀 고정 해제",
+  });
+
   function previewEntryForExtendedSheetOp(op, change, getActiveSheetName) {
     const kind = String(op.op || op.type || op.kind || "");
     const sheet = String(op.sheet || getActiveSheetName());
     if (kind === "sheet.table") {
       const target = String(op.range || op.tableName || op.name || "");
-      return change("format", `표 (${op.action || "create"}) ${target}`.trim(), "", "", { module: "SHEET", sheet, range: String(op.range || "A1") });
+      const actLabel = TABLE_ACTION_LABELS[op.action || "create"] || "표";
+      return change("format", `${actLabel} ${target}`.trim(), "", "", { module: "SHEET", sheet, range: String(op.range || "A1") });
     }
     if (kind === "sheet.pivot") {
       const dst = String(op.destSheet || sheet);
       const rFields = Array.isArray(op.rowFields) ? op.rowFields : (op.rowField ? [op.rowField] : []);
-      return change("insert", `피벗 테이블 (${op.sourceRange})`, "", `${rFields.join(", ")} · ${op.agg || "sum"}`, { module: "SHEET", sheet: dst, range: String(op.destCell || "A1") });
+      const aggLabel = PIVOT_AGG_LABELS[op.agg || "sum"] || "합계";
+      return change("insert", `피벗 테이블 (${op.sourceRange})`, "", `${rFields.join(", ")} · ${aggLabel}`, { module: "SHEET", sheet: dst, range: String(op.destCell || "A1") });
     }
     if (kind === "sheet.cond_format") {
-      return change("format", `조건부 서식 ${op.range || ""}`, "", String(op.preset || op.ruleType || "cellIs"), { module: "SHEET", sheet, range: String(op.range || "A1") });
+      const ruleKey = String(op.preset || op.ruleType || "cellIs");
+      const ruleLabel = COND_PRESET_LABELS[ruleKey] || "셀 값";
+      return change("format", `조건부 서식 (${ruleLabel}) ${op.range || ""}`.trim(), "", "", { module: "SHEET", sheet, range: String(op.range || "A1") });
     }
     if (kind === "sheet.sort_filter") {
-      const labelMap = { sort: "정렬", filter: "자동 필터", clear_filter: "필터 지우기" };
-      return change("format", `${labelMap[op.action] || op.action} ${op.range || ""}`, "", String(op.query || ""), { module: "SHEET", sheet, range: String(op.range || "A1") });
+      return change("format", `${SORT_FILTER_LABELS[op.action] || "정렬"} ${op.range || ""}`, "", String(op.query || ""), { module: "SHEET", sheet, range: String(op.range || "A1") });
     }
     if (kind === "sheet.structure") {
-      return change("format", `구조 변경 (${op.action})`, "", "", { module: "SHEET", sheet, range: "A1" });
+      const structLabel = STRUCTURE_ACTION_LABELS[op.action] || "틀 고정";
+      return change("format", structLabel, "", "", { module: "SHEET", sheet, range: "A1" });
     }
     if (kind === "sheet.note") {
       const cell = String(op.coord || op.cell || "A1").toUpperCase();

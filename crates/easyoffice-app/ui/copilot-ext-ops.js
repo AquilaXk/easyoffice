@@ -480,7 +480,8 @@
           if (op.filterField && op.filterOp) {
             const ff = table.fields.find((f) => f.name === op.filterField || f.name.toLowerCase() === String(op.filterField).toLowerCase());
             if (ff) {
-              table.filters = [{ fieldId: ff.id, op: String(op.filterOp), value: String(op.filterValue ?? "") }];
+              const normOp = op.filterOp === "not_empty" ? "notEmpty" : String(op.filterOp);
+              table.filters = [{ fieldId: ff.id, op: normOp, value: String(op.filterValue ?? "") }];
             }
           }
           locations.push({ module: "BASE", label: `${table.name} 보기 설정`, range: table.name });
@@ -495,11 +496,19 @@
       return true;
     }
 
+    const BASE_VIEW_LABELS = Object.freeze({
+      grid: "데이터시트 보기",
+      kanban: "보드",
+      calendar: "일정",
+    });
+
     function baseEntries(op, entries, change) {
       const kind = String(op.op || op.type || op.kind || "");
       const loc = { module: "BASE", label: "현재 테이블" };
+      const fieldLabels = host.__EASYOFFICE_BASE_MODEL__?.FIELD_TYPE_LABELS || {};
       if (kind === "base.add_field") {
-        entries.push(change("insert", `필드 추가: ${op.name || ""}`, "", `${op.fieldType || "text"}`, loc));
+        const fType = String(op.fieldType || "text");
+        entries.push(change("insert", `필드 추가: ${op.name || ""}`, "", fieldLabels[fType] || fType, loc));
       } else if (kind === "base.add_records") {
         const count = Array.isArray(op.records) ? op.records.length : 0;
         const preview = (op.records || []).slice(0, 3).map((r) => JSON.stringify(r)).join("\n");
@@ -508,7 +517,9 @@
         const count = Array.isArray(op.updates) ? op.updates.length : 0;
         entries.push(change("replace", `레코드 ${count}건 수정`, "", JSON.stringify((op.updates || []).slice(0, 3)), loc));
       } else if (kind === "base.set_view") {
-        entries.push(change("format", "보기·정렬·필터 변경", "", [op.view, op.sortField, op.filterField].filter(Boolean).join(" · "), loc));
+        const viewLabel = op.view ? (BASE_VIEW_LABELS[op.view] || op.view) : "";
+        const detail = [viewLabel, op.sortField, op.filterField].filter(Boolean).join(" · ");
+        entries.push(change("format", detail ? `보기 설정 (${detail})` : "보기·정렬·필터 변경", "", "", loc));
       }
     }
 

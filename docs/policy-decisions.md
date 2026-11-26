@@ -6255,12 +6255,12 @@
 
 ## PD-359 — 전 모듈 코파일럿 심층 개편: 제공자 프로토콜·도구 스키마, 경량 멀티턴 루프·자동 검증 게이트, 클라우드 PII 치환·복원 및 HWP·PDF·BASE·BOARD 확장 (2026-11-27)
 
-- **Context** 기존 코파일럿은 추론 모델(`o1`·`o3`·`o4`·`gpt-5`·Gemini 3/4)에 낮은 `temperature`를 강제 주입하거나 Gemini 2.5 출력 예산을 깎았고, `PD-304` 화면 연산(`slide.add_element`, 슬라이드 개체·레이아웃·전환, 문서 범위 교체)이 Rust 검증기에서 단절되어 있었다. 또한 200문단 이후 선택 명령의 주변 문맥 증발, 채팅 마크다운 미렌더링, 단일 턴 한계, 문서 인라인 서식·표 유실, 원격 전송 전 개인정보 노출, `HWP` 미지원 및 `BASE`·`BOARD` 읽기 전용 제약이 남아 있었다.
+- **Context** 기존 코파일럿은 추론 모델(`o1`·`o3`·`o4`·`gpt-5`·Gemini 3/4)에 낮은 `temperature`를 강제 주입하거나 Gemini 2.5 출력 예산을 깎았으며 `PD-304` 화면 연산(`slide.add_element`, 슬라이드 개체·레이아웃·전환, 문서 범위 교체)이 Rust 검증기에서 단절되어 있었다. 또한 200문단 이후 선택 명령의 주변 문맥 증발, 채팅 마크다운 미렌더링, 단일 턴 한계, 문서 인라인 서식·표 유실, 원격 전송 전 개인정보 노출, `HWP` 미지원 및 `BASE`·`BOARD` 읽기 전용 제약이 남아 있었다.
 - **Decision (`PD-359`)**
   1. **제공자 프로토콜 수리, 네이티브 도구 호출 및 프롬프트 캐싱 (`providers.rs` · `schema.rs` · `stream.rs` · `wire.rs` · `copilot_http.rs`)**:
      - `infer_reasoning_support` 대상 추론 모델에서 `"temperature": 0.2` 자동 주입을 제거하고 비추론 Anthropic·DeepSeek 모델에는 `thinking`·`reasoning_effort` 필드를 주입하지 않는다. Google Gemini 3·4 계열은 `thinkingConfig.thinkingLevel`(`"low" | "medium" | "high"`)을 쓰고 낮은 `temperature` 강제를 빼며 Gemini 2.5 계열은 `maxOutputTokens = MAX_OUTPUT_TOKENS + budget`으로 출력 한도를 넓힌다.
      - Google 스트리밍 어셈블러는 첫 비공백 바이트를 자동 감지해 SSE(`data: {...}`)와 완결 JSON 배열(`[{...},{...}]`) 및 단일 JSON 객체 응답을 모두 처리한다. 공식 `api.anthropic.com` 호스트 요청에는 시스템 지시문에 `cache_control: {"type": "ephemeral"}`을 붙인다.
-     - 모듈별 편집 연산(`emit_copilot_turn`, 구체적인 `blocks`·`element`·`updates`·`destSheet` 스키마 포함)과 온디맨드 조회 도구(`read_doc_blocks`, `read_sheet_range`, `find_sheet_cells`, `search_pdf_pages`; `read_doc_blocks`는 `DOC`·`HWP`에서 생략·창 절단·빈 슬롯·24 KiB 예산 초과 문단이 있을 때만 노출) 스키마를 정의해 OpenAI `tool_calls`, Anthropic `tool_use`, Google `functionDeclarations`(`parametersJsonSchema`)·`functionCall` 네이티브 도구 호출과 기존 JSON 본문 응답 폴백을 함께 지원한다.
+     - 모듈별 편집 연산(`emit_copilot_turn`, 구체적인 `blocks`·`element`·`updates`·`destSheet` 스키마 포함)과 온디맨드 조회 도구(`read_doc_blocks`, `read_sheet_range`, `find_sheet_cells`, `search_pdf_pages`; `read_doc_blocks`는 `DOC`·`HWP`에서 생략·창 절단·빈 슬롯·24 KiB 예산 초과 문단이 있을 때만 네이티브 도구·시스템 프롬프트·도구 검증기에 노출) 스키마를 정의해 OpenAI `tool_calls`, Anthropic `tool_use`, Google `functionDeclarations`(`parametersJsonSchema`)·`functionCall` 네이티브 도구 호출과 기존 JSON 본문 응답 폴백을 함께 지원한다.
   2. **`PD-304` 엔진-화면 정합 복구 및 교차 모듈 연산 차단 (`operations.rs` · `operations_ext.rs` · `op_types.rs` · `op_serialize.rs` · `context.rs` · `prompt.rs`)**:
      - `slide.add_element`, `slide.add`·`slide.update` 확장 필드(`layout`, `transition`, `elements`, `body`, 무대 좌표 `0..=1920pt`·크기 `12..=1920pt`·개체 `64개` 검증), `doc.replace_paragraphs` 범위 교체(`startIndex`·`endIndex`+`blocks`), 문서 표 블록(`table`), 슬라이드 `layout`·`elements` 문맥 전달을 Rust 검증기와 직렬화기에 연결했다.
      - 일반 편집 요청(`command.is_none()`)에서도 요청 `module`과 맞지 않는 타 모듈 연산을 즉시 버리고 `droppedOperations`에 합산한다.

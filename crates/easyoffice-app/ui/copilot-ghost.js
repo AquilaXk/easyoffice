@@ -33,8 +33,29 @@
     let timerId = null;
     let activeSuggestion = null;
     let overlayEl = null;
+    let ghostSheet = null;
     let requestSeq = 0;
     let activeReqId = "";
+
+    function syncParaMarkMask(editor, block) {
+      if (typeof win.CSSStyleSheet !== "function" || !("adoptedStyleSheets" in document)) return;
+      if (!editor || !block) {
+        if (ghostSheet) {
+          document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== ghostSheet);
+          ghostSheet = null;
+        }
+        return;
+      }
+      const nth = Array.prototype.indexOf.call(editor.children || [], block) + 1;
+      if (nth <= 0) return;
+      if (!ghostSheet) {
+        ghostSheet = new win.CSSStyleSheet();
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, ghostSheet];
+      }
+      ghostSheet.replaceSync(
+        `#doc-editor[data-eo-ghost-active="true"] > :nth-child(${nth})::after { content: none !important; }`,
+      );
+    }
 
     function readStoredEnabled() {
       try {
@@ -72,6 +93,7 @@
       activeSuggestion = null;
       const ed = document.getElementById("doc-editor");
       if (ed?.dataset) delete ed.dataset.eoGhostActive;
+      syncParaMarkMask(null, null);
       if (overlayEl) {
         overlayEl.remove();
         overlayEl = null;
@@ -119,6 +141,17 @@
       return { editor, block, range: savedRange, blockText: fullText };
     }
 
+    const NAV_KEYS = new Set([
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+    ]);
+
     function renderGhostOverlay(target, text) {
       if (overlayEl) {
         overlayEl.remove();
@@ -133,18 +166,56 @@
       box.setAttribute("aria-hidden", "true");
       box.textContent = text + "  [Tab]";
 
-      const hostRect = container.getBoundingClientRect?.() || { left: 0, top: 0 };
+      const hostRect = container.getBoundingClientRect?.() || { left: 0, top: 0, width: 0 };
       const blockRect = target.block.getBoundingClientRect?.() || { left: 0, top: 0, width: 320, height: 20 };
       const caretRect = target.range.getBoundingClientRect?.();
       const hasCaretRect = caretRect && (caretRect.width > 0 || caretRect.height > 0);
-      const leftPx = (hasCaretRect ? caretRect.left : blockRect.left + Math.min(blockRect.width * 0.6, 240)) - hostRect.left + (Number(container.scrollLeft) || 0);
-      const topPx = (hasCaretRect ? caretRect.top : blockRect.top) - hostRect.top + (Number(container.scrollTop) || 0);
+      const zoomScale =
+        Number(container.offsetWidth) > 0 && Number(hostRect.width) > 0
+          ? hostRect.width / container.offsetWidth
+          : 1;
+      const rawLeft = hasCaretRect ? caretRect.left : blockRect.left + Math.min(blockRect.width * 0.6, 240);
+      const rawTop = hasCaretRect ? caretRect.top : blockRect.top;
+      const leftPx = (rawLeft - hostRect.left) / zoomScale + (Number(container.scrollLeft) || 0);
+      const topPx = (rawTop - hostRect.top) / zoomScale + (Number(container.scrollTop) || 0);
+
+      const styleTarget =
+        target.range?.endContainer?.nodeType === 1
+          ? target.range.endContainer
+          : target.range?.endContainer?.parentElement || target.block;
+      const style = win.getComputedStyle?.(styleTarget) || win.getComputedStyle?.(target.block);
+      if (style) {
+        const family = style.getPropertyValue?.("font-family") || style.fontFamily;
+        if (family) box.style.setProperty("font-family", family);
+        const size = Number.parseFloat(style.fontSize);
+        if (Number.isFinite(size) && size > 0) box.style.setProperty("font-size", `${size}px`);
+        if (hasCaretRect && Number(caretRect.height) > 0) {
+          box.style.setProperty("line-height", `${caretRect.height / zoomScale}px`);
+        } else if (style.lineHeight) {
+          box.style.setProperty("line-height", style.lineHeight);
+        }
+      }
 
       box.style.setProperty("left", `${Math.max(8, Math.round(leftPx))}px`);
       box.style.setProperty("top", `${Math.max(4, Math.round(topPx))}px`);
       container.appendChild(box);
       if (target.editor?.dataset) target.editor.dataset.eoGhostActive = "true";
+      syncParaMarkMask(target.editor, target.block);
       overlayEl = box;
+    }
+
+    function repositionActiveOverlay() {
+      if (!activeSuggestion) return;
+      const liveTarget = caretContextAtBlockEnd();
+      if (
+        !liveTarget ||
+        liveTarget.block !== activeSuggestion.block ||
+        liveTarget.blockText !== activeSuggestion.expectedBlockText
+      ) {
+        dismiss();
+        return;
+      }
+      renderGhostOverlay(liveTarget, activeSuggestion.text);
     }
 
     function cleanGhostCompletion(rawReply, prefixText) {
@@ -216,12 +287,32 @@
       }, DEBOUNCE_MS) ?? null;
     }
 
+    function appendBeforeTrailingBr(block, node) {
+      const last = block.lastChild;
+      if (last && last.nodeType === 1 && String(last.tagName || "").toUpperCase() === "BR") {
+        const prev = last.previousSibling;
+        block.insertBefore(node, last);
+        if (!prev || prev.nodeType !== 1 || String(prev.tagName || "").toUpperCase() !== "BR") {
+          last.remove();
+        }
+        return;
+      }
+      block.appendChild(node);
+    }
+
     function acceptSuggestion() {
       if (!activeSuggestion) return false;
       const editor = document.getElementById("doc-editor");
-      const { text, block, expectedBlockText } = activeSuggestion;
+      const { text, block, expectedBlockText, skipCaretCheck } = activeSuggestion;
+      const liveTarget = skipCaretCheck ? { block } : caretContextAtBlockEnd();
       dismiss();
-      if (!editor || !editor.contains(block) || String(block.textContent || "") !== expectedBlockText) {
+      if (
+        !editor ||
+        !editor.contains(block) ||
+        !liveTarget ||
+        liveTarget.block !== block ||
+        String(block.textContent || "") !== expectedBlockText
+      ) {
         return false;
       }
 
@@ -234,21 +325,26 @@
         ins.dataset.eoRevAuthor = "코파일럿";
         ins.dataset.eoRevDate = new Date().toISOString();
         ins.textContent = text;
-        block.appendChild(ins);
+        appendBeforeTrailingBr(block, ins);
       } else {
-        block.appendChild(document.createTextNode(text));
+        appendBeforeTrailingBr(block, document.createTextNode(text));
       }
 
       const sel = win.getSelection?.();
       if (sel && document.createRange) {
         const r = document.createRange();
-        if (typeof r.selectNodeContents === "function") {
+        const last = block.lastChild;
+        const count = block.childNodes?.length || 0;
+        const endIdx =
+          last && last.nodeType === 1 && String(last.tagName || "").toUpperCase() === "BR"
+            ? Math.max(0, count - 1)
+            : count;
+        if (typeof r.setStart === "function") {
+          r.setStart(block, endIdx);
+          r.setEnd(block, endIdx);
+        } else if (typeof r.selectNodeContents === "function") {
           r.selectNodeContents(block);
           r.collapse(false);
-        } else {
-          const count = block.childNodes?.length || 0;
-          r.setStart?.(block, count);
-          r.setEnd?.(block, count);
         }
         sel.removeAllRanges?.();
         sel.addRange?.(r);
@@ -269,7 +365,7 @@
       const block = target?.block || editor?.querySelector?.("p, h1, h2, h3, h4, li, blockquote");
       if (!editor || !block) return false;
       const blockText = String(block.textContent || "");
-      activeSuggestion = { text: String(text), block, expectedBlockText: blockText };
+      activeSuggestion = { text: String(text), block, expectedBlockText: blockText, skipCaretCheck: !target };
       renderGhostOverlay(
         target || { editor, block, range: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) } },
         String(text),
@@ -304,6 +400,10 @@
           ev.stopPropagation?.();
           ev.stopImmediatePropagation?.();
           dismiss();
+          return;
+        }
+        if (NAV_KEYS.has(ev.key)) {
+          dismiss();
         }
       }, true);
 
@@ -317,6 +417,13 @@
 
       for (const evt of ["click", "blur"]) {
         editor.addEventListener(evt, () => dismiss());
+      }
+
+      win.addEventListener?.("resize", repositionActiveOverlay);
+      const stage = document.querySelector?.(".canvas-stage");
+      if (stage && typeof win.MutationObserver === "function") {
+        const zoomObserver = new win.MutationObserver(() => repositionActiveOverlay());
+        zoomObserver.observe(stage, { attributes: true, attributeFilter: ["style"] });
       }
     }
 

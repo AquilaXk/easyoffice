@@ -6,6 +6,7 @@ use super::op_types::{
     BoardGraphEdge, BoardGraphNode, CopilotOperation, CopilotToolCall, SlideChartSeries,
     SlideElementSpec,
 };
+use super::prompt::doc_has_unread_blocks;
 use super::types::{
     is_valid_a1_coord, is_valid_hex_color, is_valid_range_ref, CopilotModule, CopilotRunRequest,
     MAX_BASE_FIELDS, MAX_BASE_RECORDS, MAX_BASE_TEXT_BYTES, MAX_BOARD_TEXT_BYTES,
@@ -607,18 +608,25 @@ pub(super) fn validate_base_or_board_op(
         "base.set_view" => {
             let view = match opt_clean_str(obj, "view", 16)? {
                 None => None,
-                Some(v) if matches!(v.as_str(), "grid" | "kanban" | "calendar" | "gallery") => {
-                    Some(v)
-                }
+                Some(v) if matches!(v.as_str(), "grid" | "kanban" | "calendar") => Some(v),
                 Some(_) => return None,
             };
             let filter_field = opt_clean_str(obj, "filterField", MAX_BASE_TEXT_BYTES)?;
             let filter_op = match opt_clean_str(obj, "filterOp", 32)? {
                 None => None,
+                Some(op) if op == "not_empty" => Some("notEmpty".to_string()),
                 Some(op)
                     if matches!(
                         op.as_str(),
-                        "contains" | "eq" | "neq" | "gt" | "lt" | "empty" | "not_empty"
+                        "contains"
+                            | "eq"
+                            | "neq"
+                            | "gt"
+                            | "gte"
+                            | "lt"
+                            | "lte"
+                            | "empty"
+                            | "notEmpty"
                     ) =>
                 {
                     Some(op)
@@ -748,11 +756,12 @@ pub fn validate_tool_calls(
         else {
             continue;
         };
+        let allow_doc_read = doc_has_unread_blocks(req);
         match (name, req.module) {
             (
                 "read_doc_blocks" | "read_hwp_paragraphs",
                 CopilotModule::Doc | CopilotModule::Hwp,
-            ) => {
+            ) if allow_doc_read => {
                 let start = opt_usize(obj, "startIndex").unwrap_or(0);
                 let end = opt_usize(obj, "endIndex").unwrap_or(start + 19);
                 if start <= end && start < MAX_DOC_PARAGRAPHS && end.saturating_sub(start) < 200 {

@@ -514,6 +514,29 @@ fn extended_sheet_base_and_board_operations_enforce_strict_bounds() {
         StrictJsonValue::get_field(&b_obj, "droppedOperations").and_then(StrictJsonValue::as_u64),
         Some(1)
     );
+
+    // BASE set_view normalizes snake_case `not_empty` -> `notEmpty` and rejects unsupported `gallery` view
+    let base_reply = r#"{
+        "reply":"보기 설정",
+        "operations":[
+            {"op":"base.set_view","view":"kanban","filterField":"담당자","filterOp":"not_empty"},
+            {"op":"base.set_view","view":"gallery"}
+        ]
+    }"#;
+    let base_req = r#"{"action":"copilot_run","mode":"edit","module":"BASE","prompt":"보기 정리","provider":{"kind":"remote_https","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"}}"#;
+    let (base_res, _) = dispatch_raw_llm(base_req, &openai_text_reply(base_reply));
+    let base_obj = parse_obj(&base_res.unwrap());
+    let base_ops = ops_of(&base_obj);
+    assert_eq!(base_ops.len(), 1);
+    assert_eq!(
+        StrictJsonValue::get_str(base_ops[0].as_object().unwrap(), "filterOp"),
+        Some("notEmpty")
+    );
+    assert_eq!(
+        StrictJsonValue::get_field(&base_obj, "droppedOperations")
+            .and_then(StrictJsonValue::as_u64),
+        Some(1)
+    );
 }
 
 #[test]
@@ -732,7 +755,11 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         r#"{"content":[{"type":"text","text":"{\"reply\":\"확인\",\"operations\":[]}"}]}"#;
     let ok_google = r#"{"candidates":[{"content":{"parts":[{"text":"{\"reply\":\"확인\",\"operations\":[]}"}]}}]}"#;
 
-    // 1. Single-paragraph text prediction (`텍스트 예측`) must not expose `read_doc_blocks`
+    // 1. Single-paragraph text prediction (`텍스트 예측`) must not expose `read_doc_blocks` or `toolCalls`
+    //    anywhere in tools OR system prompt, and drops hallucinated `read_doc_blocks` calls.
+    let hallucinated_tool_reply = openai_text_reply(
+        r#"{"reply":"이어지는 예측 구절","operations":[],"toolCalls":[{"name":"read_doc_blocks","startIndex":0,"endIndex":10}]}"#,
+    );
     let ghost_req = r#"{
         "action":"copilot_run",
         "mode":"ask",
@@ -742,16 +769,22 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"},
         "context":{"doc":{"paragraphs":["초안 문장 시작 "],"selectedText":"초안 문장 시작 ","omittedParagraphs":0}}
     }"#;
-    let (g_res, g_reqs) = dispatch_raw_llm(ghost_req, &ok_openai);
-    assert!(g_res.is_ok());
+    let (g_res, g_reqs) = dispatch_raw_llm(ghost_req, &hallucinated_tool_reply);
+    let g_obj = parse_obj(&g_res.expect("ghost request ok"));
     assert!(g_reqs[0].body_json.contains("\"emit_copilot_turn\""));
     assert!(
-        !g_reqs[0].body_json.contains("\"read_doc_blocks\""),
-        "text prediction request must not expose read_doc_blocks: {}",
+        !g_reqs[0].body_json.contains("read_doc_blocks")
+            && !g_reqs[0].body_json.contains("toolCalls"),
+        "text prediction request must not expose read_doc_blocks or toolCalls anywhere: {}",
         g_reqs[0].body_json
     );
+    assert!(
+        tools_of(&g_obj).is_empty(),
+        "hallucinated read_doc_blocks must be rejected when doc has no unread blocks"
+    );
 
-    // 2. Short complete DOC and HWP documents across OpenAI, Anthropic, and Google omit `read_doc_blocks`
+    // 2. Short complete DOC and HWP documents across OpenAI, Anthropic, Google, and Ollama omit `read_doc_blocks`
+    //    from both native `tools` AND `system` instructions.
     let short_hwp_anth = r#"{
         "action":"copilot_run",
         "mode":"edit",
@@ -761,7 +794,11 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "context":{"doc":{"paragraphs":["첫 문단","둘째 문단"],"omittedParagraphs":0}}
     }"#;
     let (_, short_anth_reqs) = dispatch_raw_llm(short_hwp_anth, ok_anthropic);
-    assert!(!short_anth_reqs[0].body_json.contains("\"read_doc_blocks\""));
+    assert!(
+        !short_anth_reqs[0].body_json.contains("read_doc_blocks"),
+        "short HWP must omit read_doc_blocks from system prompt and tools: {}",
+        short_anth_reqs[0].body_json
+    );
 
     let short_doc_google = r#"{
         "action":"copilot_run",
@@ -772,9 +809,28 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "context":{"doc":{"paragraphs":["첫 문단","둘째 문단"],"omittedParagraphs":0}}
     }"#;
     let (_, short_google_reqs) = dispatch_raw_llm(short_doc_google, ok_google);
-    assert!(!short_google_reqs[0]
-        .body_json
-        .contains("\"read_doc_blocks\""));
+    assert!(
+        !short_google_reqs[0].body_json.contains("read_doc_blocks"),
+        "short DOC must omit read_doc_blocks from systemInstruction and tools: {}",
+        short_google_reqs[0].body_json
+    );
+
+    let short_ollama = r#"{
+        "action":"copilot_run",
+        "mode":"ask",
+        "module":"DOC",
+        "prompt":"다음 구절 제안",
+        "selection":{"range":"텍스트 예측"},
+        "provider":{"kind":"ollama","baseUrl":"http://127.0.0.1:11434/v1","model":"qwen3"},
+        "context":{"doc":{"paragraphs":["초안 문장 시작 "],"selectedText":"초안 문장 시작 ","omittedParagraphs":0}}
+    }"#;
+    let (_, short_ollama_reqs) = dispatch_raw_llm(short_ollama, &ok_openai);
+    assert!(
+        !short_ollama_reqs[0].body_json.contains("read_doc_blocks")
+            && !short_ollama_reqs[0].body_json.contains("toolCalls"),
+        "local loopback ghost request must not advertise toolCalls: {}",
+        short_ollama_reqs[0].body_json
+    );
 
     // 3. Explicit `omittedParagraphs > 0` exposes `read_doc_blocks`
     let omitted_req = r#"{
@@ -835,5 +891,9 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "context":{"doc":{"paragraphs":["문단 0","문단 1"],"omittedParagraphs":12}}
     }"#;
     let (_, cmd_reqs) = dispatch_raw_llm(cmd_req, &ok_openai);
-    assert!(!cmd_reqs[0].body_json.contains("\"read_doc_blocks\""));
+    assert!(
+        !cmd_reqs[0].body_json.contains("read_doc_blocks"),
+        "selection command must never expose read_doc_blocks: {}",
+        cmd_reqs[0].body_json
+    );
 }

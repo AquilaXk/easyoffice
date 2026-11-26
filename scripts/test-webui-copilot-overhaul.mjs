@@ -218,7 +218,8 @@ test("DOC preserves inline formatting & tables, records Track Changes revisions,
   assert.equal(ghostBtn.getAttribute("aria-pressed"), "true");
 
   const gp = ghostH.document.createElement("p");
-  gp.textContent = "초안 문장 시작 ";
+  gp.appendChild(ghostH.document.createTextNode("초안 문장 시작 "));
+  gp.appendChild(ghostH.document.createElement("br"));
   ghostH.editor.replaceChildren(gp);
   const gpText = gp.firstChild;
   const realRange = ghostH.document.createRange();
@@ -246,7 +247,28 @@ test("DOC preserves inline formatting & tables, records Track Changes revisions,
   assert.equal(ghostH.document.querySelector(".eo-copilot-ghost-overlay"), null, "Esc dismisses ghost overlay");
   assert.equal(gp.textContent, "초안 문장 시작 ");
 
-  // Trigger again and press Tab to accept
+  // ArrowLeft navigation dismisses stale prediction immediately
+  ghostH.editor.dispatchEvent({ type: "input", target: gp });
+  ghostH.advanceTimers(1000);
+  await flushAsyncTurns(10);
+  assert.ok(ghostH.document.querySelector(".eo-copilot-ghost-overlay"));
+  ghostH.editor.dispatchEvent({ type: "keydown", key: "ArrowLeft", preventDefault() {}, stopPropagation() {} });
+  assert.equal(ghostH.document.querySelector(".eo-copilot-ghost-overlay"), null, "ArrowLeft dismisses stale prediction");
+
+  // Moving selection into middle of paragraph blocks Tab acceptance and lets editor Tab handler run
+  ghostH.editor.dispatchEvent({ type: "input", target: gp });
+  ghostH.advanceTimers(1000);
+  await flushAsyncTurns(10);
+  assert.ok(ghostH.document.querySelector(".eo-copilot-ghost-overlay"));
+  realRange.setStart(gpText, 2);
+  realRange.setEnd(gpText, 2);
+  ghostH.editor.dispatchEvent({ type: "keydown", key: "Tab", preventDefault() {}, stopPropagation() {} });
+  assert.equal(gp.textContent, "초안\t 문장 시작 ", "Tab inserts literal tab instead of accepting stale ghost text");
+
+  // Restore caret to end, trigger again, and press Tab to accept cleanly without leaving trailing <br> in middle
+  gpText.data = "초안 문장 시작 ";
+  realRange.setStart(gpText, gpText.data.length);
+  realRange.setEnd(gpText, gpText.data.length);
   ghostH.editor.dispatchEvent({ type: "input", target: gp });
   ghostH.advanceTimers(1000);
   await flushAsyncTurns(10);
@@ -254,6 +276,7 @@ test("DOC preserves inline formatting & tables, records Track Changes revisions,
   assert.ok(overlay);
   ghostH.editor.dispatchEvent({ type: "keydown", key: "Tab", preventDefault() {}, stopPropagation() {} });
   assert.equal(gp.textContent, "초안 문장 시작 이어지는 추천 문구입니다.");
+  assert.equal(gp.querySelectorAll("br").length, 0, "placeholder <br> must not remain sandwiched in paragraph");
 });
 
 test("SHEET pins FrozenSelection, detects uncommitted DOM cell edits, and executes extended sheet ops with Undo", async () => {
@@ -286,6 +309,10 @@ test("SHEET pins FrozenSelection, detects uncommitted DOM cell edits, and execut
   await flushAsyncTurns(4);
 
   await h.send("표·피벗·조건부 서식·정렬·메모 적용", 20);
+  const sheetChangeLabels = Array.from(h.document.querySelectorAll(".eo-copilot-change-label")).map((el) => el.textContent);
+  assert.ok(sheetChangeLabels.includes("표 만들기 A1:B3"), "sheet.table preview uses Korean label");
+  assert.ok(sheetChangeLabels.includes("틀 고정"), "sheet.structure preview uses Korean label without raw enum");
+  assert.equal(sheetChangeLabels.some((lbl) => lbl.includes("create") || lbl.includes("freeze") || lbl.includes("구조 변경")), false);
 
   // Verify DOM cell edit after preview triggers conflict detection and blocks stale apply
   const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -322,17 +349,22 @@ test("BASE and BOARD apply structured schema/record/graph operations and undo in
     run: () => answer([
       { kind: "base.add_field", name: "우선순위", fieldType: "select", options: ["높음", "보통"] },
       { kind: "base.add_records", records: [{ "우선순위": "높음" }] },
-      { kind: "base.set_view", view: "kanban", groupField: "우선순위" },
+      { kind: "base.set_view", view: "kanban", groupField: "우선순위", filterField: "우선순위", filterOp: "not_empty" },
     ]),
   });
   const baseStudio = baseH.host.__EASYOFFICE_BASE_BOARD_HOST__.getBaseStudio();
   const beforeRecords = baseStudio.getState().tables[0].records.length;
   await baseH.send("우선순위 필드와 칸반 보기를 구성해 주세요", 18);
+  const baseDiffTexts = Array.from(baseH.document.querySelectorAll(".eo-copilot-diff")).map((el) => el.textContent);
+  const baseLabels = Array.from(baseH.document.querySelectorAll(".eo-copilot-change-label")).map((el) => el.textContent);
+  assert.ok(baseDiffTexts.includes("단일 선택"), "base.add_field preview uses Korean field type label");
+  assert.ok(baseLabels.some((t) => t.includes("보기 설정 (보드")), "base.set_view preview uses Korean view label");
   assert.ok(await acceptProposal(baseH.document, baseH.userClick));
   const afterTable = baseStudio.getState().tables[0];
   assert.ok(afterTable.fields.some((f) => f.name === "우선순위"));
   assert.equal(afterTable.records.length, beforeRecords + 1);
   assert.equal(afterTable.view, "kanban");
+  assert.equal(afterTable.filters[0]?.op, "notEmpty");
 
   baseH.userClick(baseH.assistants()[0].querySelector(".eo-copilot-undo-btn"));
   await flushAsyncTurns(6);

@@ -3,11 +3,8 @@
 use easyoffice_formats::StrictJsonValue;
 use std::fmt::Write as _;
 
-use super::prompt::escape_context_text;
-use super::types::{
-    push_json_str, CopilotModule, CopilotRunRequest, ProviderKind, MAX_PROMPT_CONTEXT_BYTES,
-    MAX_PROMPT_DOC_PARAGRAPHS,
-};
+use super::prompt::doc_has_unread_blocks;
+use super::types::{push_json_str, CopilotModule, CopilotRunRequest, ProviderKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeToolInvocation {
@@ -48,7 +45,7 @@ fn op_item_schema(module: CopilotModule, read_only: bool) -> String {
             r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["slide.add","slide.update","slide.add_element"]}},"index":{{"type":"integer","minimum":0}},"slideIndex":{{"type":"integer","minimum":0}},"title":{{"type":"string"}},"body":{{"type":"string"}},"bullets":{{"type":"array","items":{{"type":"string"}}}},"notes":{{"type":"string"}},"layout":{{"type":"string","enum":["titleSlide","titleAndContent","sectionHeader","twoColumn","blank"]}},"transition":{{"type":"string","enum":["none","fade","push","wipe","split","zoom"]}},"elements":{{"type":"array","items":{SLIDE_ELEMENT_SCHEMA}}},"element":{SLIDE_ELEMENT_SCHEMA}}},"required":["kind"]}}"#
         ),
         CopilotModule::Base => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object","properties":{"rowIndex":{"type":"integer","minimum":0},"values":{"type":"object"}},"required":["rowIndex","values"]}},"view":{"type":"string","enum":["grid","kanban","calendar","gallery"]},"filterField":{"type":"string"},"filterOp":{"type":"string"},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#.to_string()
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object","properties":{"rowIndex":{"type":"integer","minimum":0},"values":{"type":"object"}},"required":["rowIndex","values"]}},"view":{"type":"string","enum":["grid","kanban","calendar"]},"filterField":{"type":"string"},"filterOp":{"type":"string","enum":["contains","eq","neq","gt","gte","lt","lte","empty","notEmpty"]},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#.to_string()
         }
         CopilotModule::Board => {
             r#"{"type":"object","properties":{"kind":{"type":"string","enum":["board.add_graph"]},"direction":{"type":"string","enum":["TB","LR"]},"nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["shape","text"]},"shape":{"type":"string","enum":["rect","roundRect","diamond","ellipse"]},"text":{"type":"string"},"fill":{"type":"string"}},"required":["id","text"]}},"edges":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"label":{"type":"string"},"style":{"type":"string","enum":["orthogonal","curved"]}},"required":["from","to"]}}},"required":["kind","nodes"]}"#.to_string()
@@ -64,45 +61,6 @@ fn build_emit_schema(req: &CopilotRunRequest) -> String {
     format!(
         r#"{{"type":"object","properties":{{"reply":{{"type":"string"}},"reasoning":{{"type":"string"}},"operations":{{"type":"array","items":{op_schema}}},"locations":{{"type":"array","items":{{"type":"object","properties":{{"module":{{"type":"string"}},"label":{{"type":"string"}},"sheet":{{"type":"string"}},"range":{{"type":"string"}},"paragraphIndex":{{"type":"integer"}},"slideIndex":{{"type":"integer"}},"page":{{"type":"integer"}}}},"required":["module","label"]}}}}}},"required":["reply","operations"]}}"#
     )
-}
-
-const fn decimal_digits(mut n: usize) -> usize {
-    let mut digits = 1;
-    while n >= 10 {
-        n /= 10;
-        digits += 1;
-    }
-    digits
-}
-
-fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
-    let Some(doc) = req.context.doc.as_ref() else {
-        return false;
-    };
-    if doc.omitted_paragraphs > 0
-        || doc.paragraphs.len() > MAX_PROMPT_DOC_PARAGRAPHS
-        || doc.paragraphs.iter().any(String::is_empty)
-    {
-        return true;
-    }
-    let mut used = 19 + req.module.as_str().len() + req.mode.as_str().len();
-    if let Some(range) = &req.selection.range {
-        used += 16 + escape_context_text(range).len();
-    }
-    if let Some(start) = req.selection.paragraph_index {
-        let end = req.selection.paragraph_end.unwrap_or(start);
-        used += 21 + decimal_digits(start) + decimal_digits(end);
-    }
-    for (i, p) in doc.paragraphs.iter().enumerate() {
-        if !p.trim().is_empty() {
-            let next_len = 6 + decimal_digits(i) + escape_context_text(p).len();
-            if used + next_len > MAX_PROMPT_CONTEXT_BYTES {
-                return true;
-            }
-            used += next_len;
-        }
-    }
-    false
 }
 
 fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {

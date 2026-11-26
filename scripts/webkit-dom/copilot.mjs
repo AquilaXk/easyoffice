@@ -188,9 +188,29 @@ export const copilotDocSteps = [
 
     await page.keyboard.type("계속 ");
     await page.waitForSelector(".eo-copilot-ghost-overlay");
+
+    // Verify coordinate alignment at 150% zoom and immediate reposition back to 100%
+    const zoomDelta = await page.evaluate(() => {
+      globalThis.__EASYOFFICE_ZOOM__.apply(150);
+      const ov = document.querySelector(".eo-copilot-ghost-overlay").getBoundingClientRect();
+      const cr = window.getSelection().getRangeAt(0).getBoundingClientRect();
+      const dTop = Math.abs(ov.top - cr.top);
+      const dLeft = Math.abs(ov.left - cr.left);
+      globalThis.__EASYOFFICE_ZOOM__.apply(100);
+      return { dTop, dLeft };
+    });
+    assert.ok(zoomDelta.dTop <= 6 && zoomDelta.dLeft <= 12, `zoomed ghost overlay misaligned: ${JSON.stringify(zoomDelta)}`);
+
+    // ArrowLeft dismisses stale prediction, ArrowRight + text re-triggers, Tab accepts cleanly without stray <br>
+    await page.keyboard.press("ArrowLeft");
+    await page.waitForSelector(".eo-copilot-ghost-overlay", { state: "detached" });
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.type("더 ");
+    await page.waitForSelector(".eo-copilot-ghost-overlay");
     await page.keyboard.press("Tab");
     await page.waitForSelector(".eo-copilot-ghost-overlay", { state: "detached" });
-    assert.deepEqual(await paragraphTexts(page), ["초안 문장 계속 이어지는 예측 구절입니다."]);
+    assert.deepEqual(await paragraphTexts(page), ["초안 문장 계속 더 이어지는 예측 구절입니다."]);
+    assert.equal(await page.$eval("#doc-editor p", (p) => p.querySelectorAll("br").length), 0);
 
     await page.click("#btn-copilot-mode");
     await page.fill("#copilot-input", "표로 요약해 주세요");
