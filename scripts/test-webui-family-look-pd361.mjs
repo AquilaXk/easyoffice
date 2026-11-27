@@ -591,6 +591,27 @@ test("The Pages format sidebar has the product's structure and its controls form
   doc.dispatchEvent({ type: "selectionchange" });
   await flushAsyncTurns(10);
   assert.deepEqual([lineKind.value, lineAmount.value], ["multiple", "1.5"], "the controls show the paragraph's own spacing");
+  // 문자 간격: percent of the font size on the screen, twips in the run (PD-367)
+  const charSpacing = byId("pages-insp-spacing");
+  select();
+  charSpacing.value = "10";
+  charSpacing.dispatchEvent({ type: "change", target: charSpacing, bubbles: true });
+  await flushAsyncTurns(4);
+  const spaced = editor.querySelector('[data-eo-spacing="20"]');
+  assert.ok(spaced, "문자 간격 10% of the 10 pt default is 20 twips");
+  assert.equal(spaced.style.letterSpacing, "1.333px");
+  const savedRun = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor).flatMap((b) => b.runs || []).find((r) => r.letterSpacingTwips);
+  assert.equal(savedRun?.letterSpacingTwips, 20, "the run is saved with its spacing");
+  select();
+  charSpacing.value = "999999";
+  charSpacing.dispatchEvent({ type: "change", target: charSpacing, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.ok(editor.querySelector('[data-eo-spacing="20"]'), "a value out of range changes nothing");
+  select();
+  charSpacing.value = "0";
+  charSpacing.dispatchEvent({ type: "change", target: charSpacing, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.equal(editor.querySelector("[data-eo-spacing]"), null, "0 takes the spacing off");
   const listSelect = byId("pages-insp-list");
   const pickList = async (value) => {
     select();

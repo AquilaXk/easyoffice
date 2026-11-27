@@ -123,6 +123,7 @@
           run.strike ||
           run.script ||
           run.sizeHalfPt !== undefined ||
+          run.letterSpacingTwips !== undefined ||
           run.font !== undefined ||
           run.color !== undefined ||
           run.highlight !== undefined)

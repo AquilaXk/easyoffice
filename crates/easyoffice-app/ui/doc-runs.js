@@ -12,10 +12,13 @@
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
-  const VALUE_PROPS = ["size", "font", "color", "highlight"];
+  const VALUE_PROPS = ["size", "font", "color", "highlight", "spacing"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
+  // Letter spacing (`spacing`): twips added after each character, either way up to 1,584 pt (PD-367).
+  const MAX_SPACING_TWIPS = 31680;
+  const TWIPS_PER_PX = 15;
   const DATA_KEY = {
-    size: "eoSize", font: "eoFont", color: "eoColor", highlight: "eoHighlight",
+    size: "eoSize", font: "eoFont", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
     superscript: "eoSuperscript", subscript: "eoSubscript",
   };
@@ -71,6 +74,11 @@
       const n = Number(value);
       return Number.isInteger(n) && n >= MIN_HALF_PT && n <= MAX_HALF_PT ? n : undefined;
     }
+    if (prop === "spacing") {
+      const n = Number(value);
+      if (n === 0) return null;
+      return Number.isInteger(n) && Math.abs(n) <= MAX_SPACING_TWIPS ? n : undefined;
+    }
     if (prop === "font") return normalizeFont(value) ?? undefined;
     if (prop === "color" || prop === "highlight") return normalizeColor(value) ?? undefined;
     return undefined;
@@ -104,6 +112,8 @@
     });
     const size = Number(el.dataset[DATA_KEY.size]);
     if (Number.isInteger(size) && size >= MIN_HALF_PT && size <= MAX_HALF_PT) fmt.size = size;
+    const spacing = Number(el.dataset[DATA_KEY.spacing]);
+    if (Number.isInteger(spacing) && spacing !== 0 && Math.abs(spacing) <= MAX_SPACING_TWIPS) fmt.spacing = spacing;
     const font = el.dataset[DATA_KEY.font];
     if (font && FONT_RE.test(font)) fmt.font = font;
     ["color", "highlight"].forEach((p) => {
@@ -158,6 +168,10 @@
     return (halfPt / 2) + "pt";
   }
 
+  function spacingToCss(twips) {
+    return twips ? String(Math.round((twips / TWIPS_PER_PX) * 1000) / 1000) + "px" : "";
+  }
+
   // CSSOM property values mirroring a (validated) format; empty string = property not set.
   function styleFor(fmt) {
     const deco = [fmt.underline ? "underline" : "", fmt.strike ? "line-through" : ""].filter(Boolean).join(" ");
@@ -166,6 +180,7 @@
       fontFamily: fmt.font ? '"' + fmt.font + '"' : "",
       color: fmt.color ? "#" + fmt.color : "",
       backgroundColor: fmt.highlight ? "#" + fmt.highlight : "",
+      letterSpacing: spacingToCss(fmt.spacing),
       fontWeight: fmt.bold ? "bold" : "",
       fontStyle: fmt.italic ? "italic" : "",
       textDecoration: deco,
@@ -196,6 +211,7 @@
     st.fontFamily = fmt.font ? '"' + fmt.font + '"' : "";
     st.color = fmt.color ? "#" + fmt.color : "";
     st.backgroundColor = fmt.highlight ? "#" + fmt.highlight : "";
+    st.letterSpacing = spacingToCss(fmt.spacing);
     st.fontWeight = fmt.bold ? "bold" : "";
     st.fontStyle = fmt.italic ? "italic" : "";
     if (fmt.underline && fmt.strike) st.textDecoration = "underline line-through";
@@ -209,7 +225,7 @@
   // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, font: run?.font, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, font: run?.font, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
@@ -513,6 +529,7 @@
     return (
       runFlags(a) === runFlags(b) &&
       (a.size || "") === (b.size || "") &&
+      (a.spacing || 0) === (b.spacing || 0) &&
       (a.font || "") === (b.font || "") &&
       (a.color || "") === (b.color || "") &&
       (a.highlight || "") === (b.highlight || "")

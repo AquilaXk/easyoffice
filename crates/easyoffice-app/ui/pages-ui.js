@@ -102,6 +102,27 @@
       if (doc.activeElement !== amountEl) amountEl.value = lineKinds().amountOf(spec.kind, spec.value);
     }
 
+    // 문자 간격: percent of the font size on the screen, twips in the run (the selection's size, else the 10 pt default).
+    const DEFAULT_HALF_PT = 20;
+    const sizeHalfPt = (state) => (Number.isInteger(state?.size) ? state.size : DEFAULT_HALF_PT);
+
+    function syncCharSpacing() {
+      const el = byId("pages-insp-spacing");
+      if (!el || doc.activeElement === el) return;
+      const state = deps.getDocRuns?.()?.getState?.();
+      const twips = Number.isInteger(state?.spacing) ? state.spacing : 0;
+      el.value = String(Math.round((twips * 100) / (sizeHalfPt(state) * 10)));
+    }
+
+    function applyCharSpacing(text) {
+      const percent = Number(text);
+      const runs = deps.getDocRuns?.();
+      if (!runs || !Number.isFinite(percent)) return;
+      const twips = Math.round((percent / 100) * sizeHalfPt(runs.getState?.()) * 10);
+      runs.applyPatch?.({ spacing: twips });
+      syncInspectorValues();
+    }
+
     function applyLineSpacing(kind, amountText) {
       const value = lineKinds().valueOf(kind, amountText);
       if (value !== null) deps.getDocRuns?.()?.setLineSpacingRule?.(kind, value);
@@ -137,6 +158,7 @@
       }
       const block = selectedBlocks()[0];
       syncLineSpacing(block);
+      syncCharSpacing();
       const listSel = byId("pages-insp-list");
       if (listSel && doc.activeElement !== listSel) {
         const kind = listKindOf(block);
@@ -343,6 +365,7 @@
         const fallback = kind === "multiple" ? lineKinds().amountOf("multiple", deps.getDocRuns?.()?.lineSpecOf?.(null)?.value ?? 108) : LINE_KIND_START[kind];
         applyLineSpacing(kind, fallback);
       });
+      byId("pages-insp-spacing")?.addEventListener("change", (ev) => applyCharSpacing(ev.target.value));
       byId("pages-insp-lineamount")?.addEventListener("change", (ev) => applyLineSpacing(byId("pages-insp-linekind").value, ev.target.value));
       for (const [inspId, srcId] of [
         ["pages-insp-style", "doc-style-select"],

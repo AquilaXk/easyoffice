@@ -219,6 +219,22 @@ test("PD-366: a decoded 최소·고정·줄 사이 paragraph keeps its kind thro
   assert.equal(lineKinds.specialOf(a), null, "an unknown stored kind is not used");
 });
 
+test("PD-367: a decoded run keeps its letter spacing in twips and hostile values are dropped", async () => {
+  const h = await createRunHarness([p("가")]);
+  const R = h.host.__EASYOFFICE_DOC_RUNS__;
+  assert.equal(R.fromModelRun({ letterSpacingTwips: 60 }).spacing, 60);
+  assert.equal(R.fromModelRun({ letterSpacingTwips: -24 }).spacing, -24);
+  for (const bad of [31681, -31681, 1.5, "넓게", NaN, Infinity, 0]) {
+    assert.equal(R.fromModelRun({ letterSpacingTwips: bad }).spacing, undefined, String(bad));
+  }
+  const span = R.createRun(h.document, { spacing: 60 });
+  assert.equal(span.dataset.eoSpacing, "60");
+  assert.equal(span.style.letterSpacing, "4px");
+  assert.deepEqual(R.readRunFormat(span), { spacing: 60 });
+  span.dataset.eoSpacing = "999999";
+  assert.deepEqual(R.readRunFormat(span), {}, "a stored value out of range is not used");
+});
+
 test("numbering and bullets build list structure, convert back, and are saved as list items", async () => {
   const h = await createRunHarness([p("가"), p("나"), p("다"), p("라")]);
   const [a, b, c] = h.blocks;
