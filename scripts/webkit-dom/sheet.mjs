@@ -402,14 +402,16 @@ export const sheetSteps = [
     await tabMenu("Sheet2", "move-right");
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet4!A1)");
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "4");
-    // One undo per move gives the order and the text of the span back (the shown sum waits for a recalculation: `TODO.md`).
+    // One undo per move gives the order, the text and the shown sum of the span back.
     await undo();
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet2:Sheet4!A1)");
     assert.deepEqual(await order(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4"]);
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "6");
     await undo();
     await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]:nth-child(2)")?.dataset.sheetTab === "Sheet2");
     assert.deepEqual(await order(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4"]);
     assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "9");
     // 이동/복사 puts Sheet2 after Sheet4: the span is Sheet3:Sheet4 (the help page's "Sheet2:Sheet6" example).
     await tabMenu("Sheet2", "move-copy");
     await page.click("#sheet-tab-move-list li:last-child");
@@ -425,6 +427,7 @@ export const sheetSteps = [
     assert.deepEqual(await order(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4"]);
     await show("Sheet1");
     assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "9");
   }],
 
   ["a picture sits on the cell it was put on and follows it when the rows above get taller or the default row height changes (PD-299)", async (page) => {
