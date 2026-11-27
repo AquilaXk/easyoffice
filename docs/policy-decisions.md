@@ -6794,3 +6794,12 @@
 - **Trade-offs** 22px 컨트롤이 24px가 되어 도구 줄이 조금 커진다. 메뉴 제목 높이가 줄고 메뉴 항목이 2px 낮아진다. 팔레트 견본 간격은 1px 그대로다.
 - **Verified by** `scripts/test-design-guard.mjs`, `scripts/test-webui-sheet-rules.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
 - **Revisit when** copilot.css의 알려진 위반을 줄일 때, `글꼴 색`·`우선순위`의 원문 이름을 확인할 때.
+
+## PD-385 — 시트·공통 메뉴 이름 네 가지를 기준 표 계산 프로그램 한국어판 화면에 맞춘다 (2026-11-28)
+
+- **Decision** 기준 표 계산 프로그램 한국어판 화면을 확인해 시트 테두리 `모두` → `모든 테두리`, `윤곽선 지우기` → `윤곽 지우기`, 메뉴·리본 `함수 마법사` → `함수 삽입`, `인쇄 미리보기` → `인쇄 미리 보기`로 바꿨다. 네이티브 메뉴·리본 목록·메뉴 모음·실행 취소 이름에 같이 적용했다. 함수 대화상자 제목(`함수 마법사`)과 문서 표 테두리 대화상자의 `모두`는 그대로다.
+- **그대로 둔 것** 한국어판 화면과 같은 `이동/복사…`, `인쇄 영역 해제`, `중복된 항목 제거`, 파일 메뉴 `새 문서`.
+- **재사용 판단 (구현 원칙 3단계)** 이름 문자열 수정이라 크레이트·이식 대상이 없다.
+- **Why** 이름이 화면과 다르면 메뉴를 찾지 못한다.
+- **Verified by** `scripts/test-webui-sheet-look.mjs`, `scripts/test-webui-verify-review-pd258.mjs`, `crates/easyoffice-desktop/src/native_menu/tests/contracts.rs`, 전체 WebKit 묶음.
+- **Revisit when** CSV·TSV 저장 형식 이름을 실기기와 대조할 때.
