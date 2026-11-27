@@ -1,7 +1,8 @@
 //! Wrapped-text line breaking, auto row-height expansion, and aligned multi-line cell
 //! rendering for the engine's sheet PDF (`PD-343`).
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::pdf_laid::{width_pt, Area, Canvas, CELL_PAD_PT, PDF_PT_PER_PX, SHEET_FONT_PT};
 use crate::pdf_sheet_icons::icon_slot;
@@ -260,9 +261,84 @@ pub(crate) fn wrap_cell_lines(text: &str, room_pt: f64, font_pt: f64) -> Vec<&st
     out
 }
 
-fn is_merged(r: u32, c: u32, merges: &[&CellBox]) -> bool {
-    let limit = merges.partition_point(|m| m.row0 <= r);
-    merges[..limit].iter().any(|m| m.contains(r, c))
+/// Answers "is this cell inside a merged range" for cells asked in ascending row order, in time
+/// logarithmic in the column count instead of linear in the number of merges (PD-361). A merge
+/// enters the sweep at its first row and leaves after its last; a Fenwick tree over the columns of
+/// the area counts the merges that cover each column (range add, point query).
+struct MergeSweep<'a> {
+    /// The merges that touch the area, by first row.
+    merges: &'a [&'a CellBox],
+    next: usize,
+    /// `(last row, first column, last column)` of the merges inside the sweep, soonest to leave first.
+    active: BinaryHeap<Reverse<(u32, u32, u32)>>,
+    cover: Vec<i32>,
+    first_col: u32,
+    last_col: u32,
+}
+
+impl<'a> MergeSweep<'a> {
+    /// `merges` sorted by first row; the area spans columns `first_col..=last_col`.
+    fn new(merges: &'a [&'a CellBox], first_col: u32, last_col: u32) -> Self {
+        // no merge, no tree: the common sheet pays nothing
+        let width = if merges.is_empty() {
+            0
+        } else {
+            (last_col - first_col) as usize + 1
+        };
+        Self {
+            merges,
+            next: 0,
+            active: BinaryHeap::new(),
+            cover: vec![0; width + 2],
+            first_col,
+            last_col,
+        }
+    }
+
+    /// Adds `delta` at Fenwick index `i` (1-based).
+    fn update(&mut self, mut i: usize, delta: i32) {
+        while i < self.cover.len() {
+            self.cover[i] += delta;
+            i += i & i.wrapping_neg();
+        }
+    }
+
+    /// Adds `delta` to every column of `col0..=col1` that the area holds.
+    fn add(&mut self, col0: u32, col1: u32, delta: i32) {
+        let (lo, hi) = (col0.max(self.first_col), col1.min(self.last_col));
+        if lo > hi {
+            return;
+        }
+        self.update((lo - self.first_col) as usize + 1, delta);
+        self.update((hi - self.first_col) as usize + 2, -delta);
+    }
+
+    /// Whether the cell lies inside a merge; `r` never decreases between calls and `c` lies in
+    /// the area.
+    fn contains(&mut self, r: u32, c: u32) -> bool {
+        if self.merges.is_empty() {
+            return false;
+        }
+        while let Some(m) = self.merges.get(self.next).filter(|m| m.row0 <= r) {
+            self.active.push(Reverse((m.row1, m.col0, m.col1)));
+            self.add(m.col0, m.col1, 1);
+            self.next += 1;
+        }
+        while let Some(&Reverse((row1, col0, col1))) = self.active.peek() {
+            if row1 >= r {
+                break;
+            }
+            self.active.pop();
+            self.add(col0, col1, -1);
+        }
+        let mut i = (c - self.first_col) as usize + 1;
+        let mut count = 0;
+        while i > 0 {
+            count += self.cover[i];
+            i -= i & i.wrapping_neg();
+        }
+        count > 0
+    }
 }
 
 /// Expands automatic rows in `row_sizes` (unscaled points) to fit wrapped cell content (`PD-343`).
@@ -289,9 +365,14 @@ pub(crate) fn expand_wrapped_row_heights(
             m.row0 <= area.r2 && m.row1 >= area.r1 && m.col0 <= area.c2 && m.col1 >= area.c1
         })
         .collect();
-    if !area_merges.is_empty() {
-        area_merges.sort_unstable_by_key(|m| (m.row0, m.col0));
-    }
+    area_merges.sort_unstable_by_key(|m| (m.row0, m.col0));
+    // the tree spans the columns that have a size, so a hostile area width costs nothing
+    let last_col = area
+        .c1
+        .saturating_add(col_sizes.len().saturating_sub(1) as u32)
+        .min(area.c2)
+        .max(area.c1);
+    let mut merged = MergeSweep::new(&area_merges, area.c1, last_col);
 
     for (&(r, c), style) in st.cells.range((area.r1, 0)..=(area.r2, u32::MAX)) {
         if !style.wrap || c < area.c1 || c > area.c2 {
@@ -317,7 +398,7 @@ pub(crate) fn expand_wrapped_row_heights(
         if text.is_empty() {
             continue;
         }
-        if !area_merges.is_empty() && is_merged(r, c, &area_merges) {
+        if merged.contains(r, c) {
             continue;
         }
 
@@ -441,6 +522,68 @@ pub(crate) fn draw_wrapped_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn boxes(list: &[(u32, u32, u32, u32)]) -> Vec<CellBox> {
+        let mut merges: Vec<CellBox> = list
+            .iter()
+            .map(|&(row0, col0, row1, col1)| CellBox {
+                row0,
+                col0,
+                row1,
+                col1,
+            })
+            .collect();
+        merges.sort_unstable_by_key(|m| (m.row0, m.col0));
+        merges
+    }
+
+    #[test]
+    fn the_merge_sweep_agrees_with_a_scan_of_every_merge() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = move |n: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % u64::from(n)) as u32
+        };
+        for _ in 0..200 {
+            let list: Vec<_> = (0..next(12))
+                .map(|_| {
+                    let (row0, col0) = (next(20), next(10));
+                    (row0, col0, row0 + next(6), col0 + next(5))
+                })
+                .collect();
+            let merges = boxes(&list);
+            let refs: Vec<&CellBox> = merges.iter().collect();
+            let (first_col, last_col) = (2, 9);
+            let mut sweep = MergeSweep::new(&refs, first_col, last_col);
+            for r in 0..26 {
+                for c in first_col..=last_col {
+                    let expected = merges.iter().any(|m| m.contains(r, c));
+                    assert_eq!(sweep.contains(r, c), expected, "{list:?} at {r},{c}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_hundred_thousand_merges_over_half_a_million_cells_stay_fast() {
+        let list: Vec<_> = (0..100_000u32)
+            .map(|i| (i, i % 200, i + 50, i % 200 + 3))
+            .collect();
+        let merges = boxes(&list);
+        let refs: Vec<&CellBox> = merges.iter().collect();
+        let mut sweep = MergeSweep::new(&refs, 0, 199);
+        let started = std::time::Instant::now();
+        let mut inside = 0usize;
+        for r in 0..2_500 {
+            for c in 0..200 {
+                inside += usize::from(sweep.contains(r, c));
+            }
+        }
+        assert!(inside > 0);
+        assert!(started.elapsed().as_secs() < 2, "{:?}", started.elapsed());
+    }
 
     #[test]
     fn wrap_splits_english_words_and_korean_characters() {
