@@ -1725,6 +1725,7 @@
 - **Alternatives rejected** 각주를 각주 번호가 붙은 문단으로 본문 안에 끼우기(표식 위치 해석이 픽스처 한 건뿐), 문단 스타일의 글꼴도 가져오기(모든 런에 템플릿 글꼴이 붙음).
 - **Verified by** `cargo test -p easyoffice-formats --test pages_fixtures --test rich_script_and_layout`(도형·텍스트 상자 위치, 부록 문단, 글꼴·첨자·들여쓰기·줄 간격의 픽스처 값, 작성기별 XML과 DOCX·ODT 읽기).
 - **Revisit when** 문자열·기간·오류 셀이 있는 Pages 문서를 구하게 되었을 때, 각주 표식 위치를 연결할 때, ODT·HWPX 문단 서식 읽기를 추가할 때.
+- **PD-365가 바꿈** Pages는 줄 간격 배수만이 아니라 최소(모드 1)·고정(모드 2)·줄 사이(모드 4)도 읽고 쓴다. 줄 간격은 `RichLineSpacing`이다.
 
 ## PD-098. UI 기준을 참조 앱/rhwp-studio 크롬으로 통일하고 자체 디자인 시스템을 폐기
 
@@ -5776,6 +5777,7 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 외부 크레이트 추가 없이 기존 파서·라이터를 보완했다. (2) `rich_rtf_writer::line_spacing_240ths`, `rich_read_odt::length_twips`, `doc_save_loss`, `RichPaper::A4`, `RichPageMargins::DOC_DEFAULT`, `push_docx_table_properties_with_widths_for_page` 기존 헬퍼와 공용 경계 검사를 재사용·공유했다. (3) 외부 이식 코드는 `0`줄이며 공개 규격(`ECMA-376`·`ODF 1.3`·`RTF 1.9.1`)에 맞춘 보정과 오버플로우 방지(`checked_mul`·`i128`·`saturating_sub`)만 더했다.
 - **Why** 한글 문서 서식 왕복 정확도와 표·용지 레이아웃 충실도를 높이고, `.doc`과 데스크톱 PDF 저장에서 누락되는 검토·첫 쪽 머리말/바닥말 정보를 사용자에게 정확히 알리기 위함이다.
 - **Trade-offs** (1) 고정/최소 줄간격(`exact`/`atLeast`·ODT 길이 단위)은 `RichParagraph::line_spacing_percent`의 비율 모델에 맞추기 위해 `12pt`(`240` twips) 단줄 기준으로 백분율 근사한다. (2) 호스트 PDF 경로 경고는 내부 중간 포맷인 HWPX 변환(`render_document`)에서 소실되는 항목을 `"PDF"` 라벨로 집계한다.
+- **PD-365가 바꿈** 고정·최소 줄 간격은 백분율로 근사하지 않고 종류와 twips로 읽고 쓴다(`RichLineSpacing`). 이 PD가 만든 경계(DOCX 배수 1..=1000%, ODT 길이)는 그대로이고 길이는 31,680 twips에서 자른다.
 - **Alternatives rejected** (1) DOCX `w:ascii`를 계속 최우선으로 두고 `w:eastAsia`를 무시하는 방식: 서구권 기본 글꼴이 함께 적힌 한글 문서에서 한글 글꼴이 유실된다. (2) `i64` 직접 곱셈으로 `w:line` 백분율을 구하는 방식: 큰 `w:line` 입력 시 산술 오버플로우 패닉이 발생한다.
 - **Verified by** `crates/easyoffice-formats/tests/doc_fidelity_pd328.rs`, `crates/easyoffice-formats/tests/doc_korean_defaults_pd307.rs`, `crates/easyoffice-formats/src/rich_rtf_table.rs`, `crates/easyoffice-app/tests/rich_pdf_renderer.rs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`.
 - **Revisit when** `RichParagraph`가 비율 외에 절대 포인트(`pt`) 줄간격 모드를 별도로 모델링하거나 `.doc` 네이티브 머리말·바닥글 라이터를 구현할 때.
@@ -6403,3 +6405,31 @@
   11. **편집기 저장의 문서 기본값(PD-363 후속)**: 열기 JSON의 `docDefaults`를 문서 탭 상태(`eoDefaults`)로 들고 있다가 저장 페이로드에 실어 보낸다(`convert_structured_defaults.rs`, `file-open.js`, `save-payload.js`, `workspace-panels.js`). 열 때와 저장할 때 모두 알려진 키만, 정수 범위(크기 1~3276 half-point, 간격 0~8000 twips, 줄 1~2400, 탭 1~31680)와 이름 256자 안에서 받고 벗어나면 저장을 거부한다. 기본값이 없는 새 문서는 한국어판 기본값이다.
 - **Verified by** `pdf_edit_incremental_appearance_tests.rs`, `crates/easyoffice-sheet/tests/{sheet_3d_endpoints,sheet_index_array_args,sheet_if_choose_cost}.rs`, `sheet_refs_ipc_tests.rs`, `preview/pages_bundle_tests.rs`, `copilot/stream.rs`·`operations_ext.rs` 단위 시험, `convert_structured_defaults.rs`, `scripts/test-webui-{copilot-hwp-limits,copilot-sheet-table-target,sheet-manual-new-formulas,sheet-session-order,copilot-html-table,doc-defaults-roundtrip}.mjs`, `scripts/test-base-record-seq.mjs`, `scripts/test-post-release-check.mjs`.
 - **Revisit when** 시트 탭 이동에 `sheetRefs` `move`를 넣을 때, 혼합 `IF` 중첩의 조건 재계산을 캐시로 없앨 때.
+
+## PD-365 — 줄 간격 방식(줄·최소·고정·줄 사이)을 모델에 두고 DOCX·ODT·RTF·HWPX·Pages와 화면에 연결 (2026-11-27)
+
+- **Status** Implemented. Pages 쓰기·읽기의 필드 번호는 공개 `.proto`로 확인했다(아래 6항).
+- **Context** `PD-362` 5항의 페이지 앱 포맷 사이드바는 `간격` 팝업에서 `최소`·`고정`·`줄 사이`를 엔진이 다루지 못해 뺐다. 모델은 줄 높이를 단일 줄의 백분율(`line_spacing_percent`) 하나로만 가졌고, 읽기는 고정·최소 값을 12pt 단줄 기준 백분율로 근사했다(`PD-328`). 근거 문서(역할별): (1) Pages 한국어 지원 문서 「Mac용 Pages에서 줄 및 단락 간격 설정하기」(`https://support.apple.com/ko-kr/guide/pages/tanb74d5cbe9/mac`, 2026-11-27 확인)는 `스타일` 단추의 `간격` 옆 팝업에 `줄`·`최소`·`고정`·`줄 사이` 네 가지를 두고 팝업 오른쪽 화살표로 크기를 정한다고 적는다. `줄`은 서체 크기에 비례, `최소`는 큰 서체에서만 더 벌어지는 하한, `고정`은 기준선 사이의 정밀한 거리, `줄 사이`는 줄 높이 대신 줄 사이의 간격을 늘린다. 같은 문서는 표 셀 안 텍스트의 줄 간격은 조절할 수 없다고 적는다. (2) 표준 워드프로세서 문단 대화상자의 `줄 간격`은 `한 줄`·`1.5줄`·`2줄`·`최소`·`고정`·`배수`이고 오른쪽 `값`에 최소·고정은 pt, 배수는 줄 수를 넣는다. (3) 한글 워드프로세서의 줄 간격 종류는 글자에 따라·고정 값·여백만 지정·최소이고 OWPML `hh:lineSpacing/@type`는 `PERCENT`·`FIXED`·`BETWEEN_LINES`·`AT_LEAST`다.
+- **Decision (`PD-365`)**
+  1. **모델(`rich_line_spacing.rs`)**: `RichLineSpacing::{Multiple(백분율 1..=1000), AtLeast(twips), Exact(twips), Between(twips)}`. `RichParagraph::line_spacing`과 `RichCellParagraph::line_spacing`이 `line_spacing_percent`를 대신한다. 길이는 1..=31,680 twips(1,584pt, 워드프로세서 문단 대화상자의 상한)이고 읽을 때 넘으면 이 값으로 자른다. `Between`만 0을 쓴다(0은 단일 줄과 같은 명시값). 0·음수·비수·1000% 초과 배수는 지정 없음으로 버린다.
+  2. **포맷별 대응**
+
+     | | 줄 | 최소 | 고정 | 줄 사이 |
+     |---|---|---|---|---|
+     | DOCX | `w:lineRule="auto"`, 240분의 1줄 | `atLeast`, twips | `exact`, twips | 같은 크기의 배수로 환산해 `auto` |
+     | ODT | `fo:line-height="N%"` | `style:line-height-at-least` | `fo:line-height`(길이) | `style:line-spacing` |
+     | RTF | `\slN\slmult1` | `\slN\slmult0` | `\sl-N\slmult0` | 배수로 환산 |
+     | HWPX | `PERCENT` | `AT_LEAST`(HWPUNIT=5×twips) | `FIXED` | `BETWEEN_LINES` |
+     | Pages | 모드 0, 양 = 배수 | 모드 1, 양 = pt | 모드 2, 양 = pt | 모드 4, 양 = pt |
+
+     DOCX·RTF에는 줄 사이 규칙이 없어 `Between(t)`를 12pt 단줄에 t를 더한 배수(`100 + t×100/240`%)로 쓴다. 다시 열면 `Multiple`이 된다.
+  3. **읽기가 바뀐 곳**: DOCX `exact`·`atLeast`, ODT의 길이 `fo:line-height`, HWPX `FIXED`·`AT_LEAST`·`BETWEEN_LINES`, Pages 모드 1·2는 백분율 근사 대신 자기 규칙과 twips로 읽는다. 문서 기본값(`RichDefaults`, `PD-363`)은 그대로 배수 하나이고, `exact`·`atLeast`인 기본값은 여전히 읽지 않는다. Pages 모드 3(`kMaximumLineSpacing`)은 화면에 항목이 없어 지정 없음으로 읽는다. Pages 단일 줄(배수 1.0)은 지정 없음으로 두고, HWPX는 쓰기 기본값(160%)을 지정 없음으로 읽는 기존 규칙을 따른다.
+  4. **화면↔엔진 JSON(`line_spacing_json.rs`)**: 배수는 기존 `lineSpacingPercent`를 그대로 쓰고, 나머지는 `lineSpacingKind`(`atLeast`·`exact`·`between`)와 `lineSpacingTwips`다. 종류만 있고 twips가 없거나, 종류를 모르거나, 범위(1..=31,680, `between`은 0..=)를 벗어나거나, 두 형식이 한 문단에 같이 있으면 저장을 거부한다. 열기에서 나가는 JSON도 같은 키다(표 셀 `cellParagraphs` 포함).
+  5. **화면**: 편집기 문단은 `data-eo-line-kind`·`data-eo-line-twips`와 `line-height`를 가진다. 고정은 길이, 최소는 `max(1em, 길이)`, 줄 사이는 `calc(1em + 길이)`다(`doc-line-spacing.js`). 페이지 앱 포맷 사이드바 `스타일`의 `간격`은 방식 팝업(`줄`·`최소`·`고정`·`줄 사이`)과 값 칸이다. `줄`은 줄 수(0.1~5, 0.1씩), 나머지는 pt(1~1584, 줄 사이는 0~)다. 팝업을 바꾸면 `줄`은 문서 기본 간격, `최소`·`고정`은 16pt, `줄 사이`는 0pt로 시작한다. 워드프로세서 도구 막대의 줄 간격 목록은 끝에 `줄 간격 옵션…`을 두고, 이 항목이 `단락` 대화상자(`줄 간격(N)`: 한 줄·1.5줄·2줄·최소·고정·배수, `값(A)`)를 연다. 최소·고정을 고르면 목록에 `고정 15 pt` 같은 항목 하나가 현재 값으로 들어간다. 표 셀 안 문단은 열기·저장에서 방식을 잃지 않는다.
+  6. **`.pages` 필드 번호 확인**: 줄 간격 메시지는 문단 속성의 필드 13(`line_spacing`)이고 `mode`는 필드 1, `amount`는 필드 2(float)다. 모드는 0 `kRelativeLineSpacing`, 1 `kMinimumLineSpacing`, 2 `kExactLineSpacing`, 3 `kMaximumLineSpacing`, 4 `kSpaceBetweenLineSpacing`이다. 근거는 MIT 라이선스 공개 구현의 `src/protos/TSWPArchives.proto`(`LineSpacingArchive`, `ParagraphStylePropertiesArchive.line_spacing = 13`)이고, 참조 구현(`THIRD_PARTY_NOTICES.md`의 Pages 읽기·쓰기 출처)의 `FORMAT.md` 표는 `12.13.2` 배수만 실문서로 확인했다고 적는다. 필드 번호와 모드 값은 이 공개 `.proto`로 확인했다. 길이 모드(1·2·4)의 `amount` 단위(pt)는 `.proto`에 적혀 있지 않아 기존 읽기의 가정(`PD-157`)과 공식 문서의 pt 표기를 따랐고, 이 저장소의 픽스처 문서에 길이 모드가 없어 실문서로는 확인하지 못했다(`TODO.md`). 읽기 시험(`pages_reader`·`hwpx_pages_ppt_pd332`)은 합성 payload로 모드 1·2를 확인한다. 기존 시험의 모드 이름이 바뀌어 있어 고쳤다(모드 1이 최소, 2가 고정).
+- **재사용 판단 (구현 원칙 3단계)** (1) 줄 간격 모델·포맷 대응을 대신할 허용 라이선스 크레이트가 없다. (2) 기존 `Rich*` 모델, 포맷별 읽기·쓰기 경로, `StrictJsonValue` 검증, `custom-select.js`·대화상자 틀을 그대로 썼다. (3) 이식한 코드는 없다. Pages 모드 번호는 공개 `.proto`의 값만 확인에 썼고 코드나 텍스트를 가져오지 않았다. HWPX 종류 이름은 OWPML 규격 값이고, ODT 속성은 ODF 1.2의 속성이다.
+- **Why** 레이아웃을 정하는 값이 근사로 바뀌면 열었다 저장하는 것만으로 문서의 줄 높이가 달라진다(고정 18pt가 150%로 저장되어 글자 크기가 바뀌면 줄 높이도 따라 변한다). 참조 앱과 표준 워드프로세서는 종류를 그대로 보존한다.
+- **Trade-offs** (1) 이전에 근사로 열던 파일(DOCX `exact`, ODT 길이 줄 높이 등)은 이제 길이 규칙으로 열려 편집기에서 줄 높이가 고정으로 보인다. 이전 저장 결과와 다르다. (2) DOCX·RTF는 줄 사이를 배수로 쓰므로 Pages·ODT·HWPX에서 줄 사이로 만든 값이 DOCX로 가면 종류가 바뀐다. (3) 최소는 화면에서 `max(1em, 길이)`로 근사한다(CSS에 최소 줄 높이가 없고, 줄 안 큰 글자 크기는 `em` 기준으로 반영되지 않는다). (4) 줄 사이를 한 줄 12pt 기준 배수로 환산하는 것은 글자 크기를 모르는 쓰기 쪽의 근사다. (5) Pages는 공식 문서대로 표 셀 안 줄 간격을 화면에서 조절하지 못하게 하지는 않았다(다른 포맷에서 온 값을 잃지 않기 위해). (6) 워드프로세서 줄 간격 목록의 값(100·108·115·130·160·180·200·300%)이 표준 워드프로세서 목록(1.0·1.15·1.5·2.0·2.5·3.0)과 다르다. 이번에 고치지 않았고 `TODO.md`에 남겼다.
+- **Alternatives rejected** (1) `line_spacing_percent`를 두고 종류 필드를 따로 추가: 두 값이 어긋나는 상태가 가능하고 컴파일러가 놓친 호출부를 알려 주지 못한다. (2) 줄 사이를 DOCX에서 `atLeast`로 쓰기: 글자가 큰 줄에서 의미가 달라진다. (3) `RichDefaults`까지 종류를 넓히기: 문서 기본값 보존(`PD-363`)과 다른 범위다.
+- **Verified by** `crates/easyoffice-formats/tests/line_spacing_kinds_pd365.rs`(네 종류의 포맷별 왕복, 포맷별 규칙 낱말, 변조 DOCX·ODT·RTF 값), `rich_line_spacing.rs`·`line_spacing_json.rs` 단위 시험(경계와 거부), `doc_fidelity_pd328.rs`·`hwpx_pages_ppt_pd332.rs`·`pages_reader.rs`(바뀐 읽기 규칙), `scripts/test-webui-doc-paragraphs.mjs`·`scripts/test-webui-family-look-pd361.mjs`(목록·`단락` 대화상자·사이드바), 실제 WebKit DOM 시험.
+- **Revisit when** `RichDefaults`가 줄 간격 종류를 가질 때, 모델이 글자 크기별 줄 높이를 가질 때(줄 사이 환산 개선), 실제 Pages로 만든 길이 모드 문서를 구했을 때.
