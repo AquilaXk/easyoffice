@@ -115,6 +115,8 @@ export const DRAWN_SIZES = new Map([
   [".sb-hl-swatch", ["height"]],
   [".eo-recent-colors .sb-hl-palette-row", ["min-height"]],
   [".slide-presenter-notes-input", ["min-height"]],
+  // styles.css (PD-384): the separator line between toolbar groups.
+  [".tb-sep", ["height"]],
 ]);
 
 /**
