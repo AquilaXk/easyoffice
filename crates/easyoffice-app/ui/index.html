@@ -1742,8 +1742,25 @@
           </fieldset>
           <div class="dialog-status-row"><span id="doc-font-status" class="dialog-status" role="status" aria-live="polite"></span></div>
         </div>
-        <div class="dialog-footer">
+        <div class="dialog-footer dialog-footer-split">
+          <button id="btn-doc-font-default" type="button" class="dialog-btn" data-accesskey="d">기본값으로 설정(<span class="dialog-key">D</span>)</button>
+          <button id="btn-doc-font-effects" type="button" class="dialog-btn" data-accesskey="e" data-pending>텍스트 효과(<span class="dialog-key">E</span>)…</button>
+          <span class="dialog-footer-gap"></span>
           <button id="btn-doc-font-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-font-default-dialog" class="tool-dialog" aria-labelledby="doc-font-default-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-font-default-title">글꼴</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span id="doc-font-default-summary" class="dialog-status"></span></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input type="radio" name="doc-font-default-scope" value="document" checked data-accesskey="t" /><span>이 문서에만(<span class="dialog-key">T</span>)</span></label></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-font-default-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -3310,6 +3327,7 @@
     <script src="./doc-paste.js"></script>
     <script src="./doc-line-spacing.js"></script>
     <script src="./dialog-combo.js"></script>
+    <script src="./doc-font-defaults.js"></script>
     <script src="./doc-font-dialog.js"></script>
     <script src="./doc-font-styles.js"></script>
     <script src="./doc-runs-ui.js"></script>

@@ -22,6 +22,7 @@
   const DEFAULT_KERNING_PT = 1;
   const MIXED = "mixed";
   const MSG_RANGE = "값이 범위를 벗어났습니다";
+  const MSG_NO_DEFAULT = "기본값으로 정할 글꼴이나 크기가 없습니다";
   const SAMPLE_MAX_PX = 28;
   const SAMPLE_MAX_SHIFT_PX = 10;
 
@@ -320,6 +321,7 @@
         el.title = PENDING_TITLE;
       }
       byId("btn-doc-font-apply").addEventListener("click", () => apply());
+      byId("btn-doc-font-default").addEventListener("click", () => setAsDefault());
       els.dialog.addEventListener("keydown", (ev) => {
         onAccessKey(ev, els.dialog);
         if (ev.defaultPrevented) return;
@@ -358,6 +360,25 @@
     if (initial.opentype === null ? openTypeTouched : openType !== initial.opentype) patch.opentype = openType;
     if (touched.has("grid")) patch.nogrid = els.grid.checked ? null : 1;
     return { patch };
+  }
+
+  // 기본값으로 설정(D): the font and size of the dialog become the document's defaults after the prompt (only this document:
+  // the app has no template for "all documents"). The selection itself is left as it is.
+  function setAsDefault() {
+    const { els, document, R } = current;
+    const defaults = host.__EASYOFFICE_DOC_FONT_DEFAULTS__;
+    const font = els.family.value || "";
+    const pt = Number.parseFloat(els.size.value);
+    const sizeHalfPt = Number.isFinite(pt) ? R.ptToHalfPt(Math.max(1, Math.min(1638, pt))) : undefined;
+    if (!font && sizeHalfPt === undefined) {
+      els.status.textContent = MSG_NO_DEFAULT;
+      return;
+    }
+    const summary = `기본 글꼴을 ${[font, sizeHalfPt === undefined ? "" : `${sizeHalfPt / 2}pt`].filter(Boolean).join(" ")}로 설정합니다.`;
+    defaults?.ask(document, summary, () => {
+      const root = document.getElementById("doc-editor");
+      if (root && defaults.setDefaults(root, { font, sizeHalfPt })) els.dialog.close();
+    });
   }
 
   // 확인: the patch has only what differs from what the selection had; a value out of range keeps the dialog open.

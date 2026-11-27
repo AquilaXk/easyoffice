@@ -174,7 +174,7 @@
 #doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row:nth-last-of-type(2) { margin-bottom: 0; }
 #doc-toc-dialog .dialog-checkbox { margin-left: 72px; }
 /* Font dialog of the word processor (doc-font-dialog.js): the tab bodies keep one height so the dialog does not jump between 글꼴 and 고급. */
-#doc-font-dialog { width: min(440px, calc(100vw - 32px)); }
+#doc-font-dialog { width: min(480px, calc(100vw - 32px)); }
 #doc-font-dialog .dialog-body[data-font-pane] { min-height: 196px; }
 #doc-font-dialog #doc-font-sample-text { display: inline-block; transform-origin: left center; }
 #doc-font-dialog #doc-font-kerning { margin: 0; accent-color: var(--color-primary); }
@@ -197,6 +197,9 @@
 #doc-font-dialog .dialog-font-top .dialog-combo, #doc-font-dialog .dialog-font-top .dialog-field { width: 100%; }
 #doc-font-dialog .dialog-font-rows { margin-bottom: 8px; }
 #doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+/* The font dialog's footer: 기본값으로 설정 and 텍스트 효과 on the left, 확인 and 취소 on the right. */
+#doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: 8px; }
+#doc-font-dialog .dialog-footer-gap { flex: 1; }
 .tool-dialog .dialog-swatch-text { font-size: var(--font-size-sm); color: var(--color-text); min-width: 28px; text-align: left; }
 .tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }

@@ -144,10 +144,42 @@ test("글꼴 색 and 밑줄 스타일 write the run's color and underline", asyn
   assert.equal(byId(h, "doc-font-underline-style").value, "single");
 });
 
+test("기본값으로 설정 asks once and makes the font and size the document's defaults", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  await openDialog(h, "font");
+  const confirm = byId(h, "doc-font-default-dialog");
+  const size = byId(h, "doc-font-size");
+  size.value = "12";
+  fire(size, "input");
+  const family = byId(h, "doc-font-family");
+  const option = h.document.createElement("option");
+  option.value = "Arial";
+  option.textContent = "Arial";
+  family.appendChild(option);
+  family.value = "Arial";
+  fire(family);
+  h.userClick(byId(h, "btn-doc-font-default"));
+  assert.equal(confirm.open, true, "the prompt opens");
+  assert.match(byId(h, "doc-font-default-summary").textContent, /12pt/);
+  assert.deepEqual([...confirm.querySelectorAll('input[type="radio"]')].map((r) => r.parentNode.textContent.trim()), ["이 문서에만(T)"], "only what the model keeps");
+  h.userClick(confirm.querySelector("[data-dialog-close].dialog-btn"));
+  assert.equal(h.editor.dataset.eoDefaults, undefined, "취소 sets nothing");
+  confirm.open = false;
+  h.userClick(byId(h, "btn-doc-font-default"));
+  h.userClick(byId(h, "btn-doc-font-default-apply"));
+  const defaults = JSON.parse(h.editor.dataset.eoDefaults);
+  assert.equal(defaults.sizeHalfPoints, 24);
+  assert.deepEqual([defaults.font, defaults.eastAsianFont], ["Arial", "Arial"]);
+  assert.equal(h.editor.style.fontFamily, '"Arial"');
+  assert.equal(defaults.line240ths, 259, "the rest are a new document's defaults");
+  assert.equal(h.editor.style.fontSize, "12pt", "an unstyled paragraph draws with it");
+  assert.equal(byId(h, "doc-font-dialog").open, false, "the font dialog closes");
+});
+
 test("the items the engine does not keep yet are visible and off", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
-  for (const id of ["doc-font-latin", "doc-font-underline-color", "doc-font-emphasis", "doc-font-smallcaps", "doc-font-dstrike", "doc-font-allcaps", "doc-font-hidden"]) {
+  for (const id of ["doc-font-latin", "doc-font-underline-color", "doc-font-emphasis", "doc-font-smallcaps", "doc-font-dstrike", "doc-font-allcaps", "doc-font-hidden", "btn-doc-font-effects"]) {
     assert.equal(byId(h, id).disabled, true, id);
   }
 });
