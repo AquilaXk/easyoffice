@@ -321,25 +321,70 @@
     if (!parent.firstChild) parent.appendChild(document.createElement("br"));
   }
 
+  const isWordChar = (ch) => /^[A-Za-z0-9_]$/.test(ch);
+
+  // The next `<name ...>` at or after `from` in `lower` (the text with ASCII capitals folded, so indexes match the
+  // text): `{ start, bodyStart }`, or null when there is none. The tag name ends at a word boundary (`<tr` is not
+  // `<track`) and the tag at the next `>`; with no `>` left there is no tag left either.
+  function nextOpenTag(lower, name, from) {
+    let at = lower.indexOf("<" + name, from);
+    while (at >= 0) {
+      const after = lower.charAt(at + 1 + name.length);
+      if (after === "" || !isWordChar(after)) {
+        const gt = lower.indexOf(">", at);
+        return gt < 0 ? null : { start: at, bodyStart: gt + 1 };
+      }
+      at = lower.indexOf("<" + name, at + 1);
+    }
+    return null;
+  }
+
+  const foldAscii = (text) => text.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+
+  // The cells of one row body: `<th>` or `<td>` up to its own end tag, in order, at most MAX_TABLE_COLS. A cell with
+  // no end tag in the rest of the body is skipped, and so is every later one of its kind.
+  function parseTableCells(body, firstRow, state) {
+    const lower = foldAscii(body);
+    const row = [];
+    const ended = { th: false, td: false };
+    let from = 0;
+    while (row.length < MAX_TABLE_COLS) {
+      const th = ended.th ? null : nextOpenTag(lower, "th", from);
+      const td = ended.td ? null : nextOpenTag(lower, "td", from);
+      const tag = th && (!td || th.start < td.start) ? th : td;
+      if (!tag) break;
+      const name = tag === th ? "th" : "td";
+      const close = lower.indexOf("</" + name + ">", tag.bodyStart);
+      if (close < 0) {
+        ended[name] = true;
+        continue;
+      }
+      if (firstRow && name === "th") state.headerRow = true;
+      row.push(body.slice(tag.bodyStart, close).trim());
+      from = close + name.length + 3;
+    }
+    return row;
+  }
+
+  // One pass over the text: each `<tr>` up to the first `</tr>` is a row (a `<tr>` with no end tag after it ends the
+  // table), so the work grows with the length of the text, however many tags lack an end tag.
   function parseHtmlTableString(rawHtml) {
     const trimmed = String(rawHtml ?? "").trim();
     if (!/^<table\b/i.test(trimmed)) return null;
+    const lower = foldAscii(trimmed);
     const rows = [];
-    let headerRow = false;
-    const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-    let trMatch;
-    while ((trMatch = trRe.exec(trimmed)) !== null && rows.length < MAX_TABLE_ROWS) {
-      const rowBody = trMatch[1];
-      const cellRe = /<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi;
-      const row = [];
-      let cellMatch;
-      while ((cellMatch = cellRe.exec(rowBody)) !== null && row.length < MAX_TABLE_COLS) {
-        if (rows.length === 0 && cellMatch[1].toLowerCase() === "th") headerRow = true;
-        row.push(cellMatch[2].trim());
-      }
+    const state = { headerRow: false };
+    let from = 0;
+    while (rows.length < MAX_TABLE_ROWS) {
+      const tag = nextOpenTag(lower, "tr", from);
+      if (!tag) break;
+      const close = lower.indexOf("</tr>", tag.bodyStart);
+      if (close < 0) break;
+      const row = parseTableCells(trimmed.slice(tag.bodyStart, close), rows.length === 0, state);
       if (row.length > 0) rows.push(row);
+      from = close + 5;
     }
-    return rows.length > 0 ? { rows, headerRow } : null;
+    return rows.length > 0 ? { rows, headerRow: state.headerRow } : null;
   }
 
   function buildTableElement(document, rows, headerRow) {
@@ -688,5 +733,6 @@
     markBlockDeletedInPlace,
     plainPreviewTextOfBlock,
     plainActiveTextOfBlock,
+    parseHtmlTableString,
   });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
