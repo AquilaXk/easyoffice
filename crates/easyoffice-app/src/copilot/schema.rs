@@ -3,8 +3,7 @@
 use easyoffice_formats::StrictJsonValue;
 use std::fmt::Write as _;
 
-use super::cache::is_official_anthropic_host;
-use super::prompt::doc_has_unread_blocks;
+use super::cache::{is_official_anthropic_host, is_openrouter_anthropic_cache, uses_native_tools};
 use super::types::{push_json_str, CopilotCommand, CopilotModule, CopilotRunRequest, ProviderKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +23,7 @@ const READ_SHEET_SCHEMA: &str = r#"{"type":"object","properties":{"sheet":{"type
 const FIND_SHEET_SCHEMA: &str = r#"{"type":"object","properties":{"sheet":{"type":"string"},"query":{"type":"string"}},"required":["query"]}"#;
 const SEARCH_PDF_SCHEMA: &str =
     r#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#;
+const READ_BASE_SCHEMA: &str = r#"{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":50},"query":{"type":"string"}},"required":["offset","limit"]}"#;
 
 const DOC_BLOCK_ITEM_SCHEMA: &str = r#"{"type":"object","properties":{"heading":{"type":"integer","minimum":1},"text":{"type":"string"},"list":{"type":"string","enum":["bullet","ordered","task"]},"items":{"type":"array","items":{"type":"string"}},"table":{"type":"object","properties":{"headerRow":{"type":"boolean"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}}},"required":["rows"]}}}"#;
 const SLIDE_ELEMENT_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["textbox","shape","table","chart","image"]},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number"},"h":{"type":"number"},"text":{"type":"string"},"role":{"type":"string","enum":["title","subtitle","body","none"]},"fontSizePt":{"type":"number"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"color":{"type":"string"},"fill":{"type":"string"},"align":{"type":"string","enum":["left","center","right","justify"]},"shapeType":{"type":"string"},"stroke":{"type":"string"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}},"headerRow":{"type":"boolean"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"title":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"series":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"values":{"type":"array","items":{"type":"number"}},"color":{"type":"string"}},"required":["values"]}}},"required":["kind"]}"#;
@@ -110,9 +110,9 @@ fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
         return Vec::new();
     }
     match req.module {
-        CopilotModule::Doc | CopilotModule::Hwp if doc_has_unread_blocks(req) => vec![ToolDef {
+        CopilotModule::Doc | CopilotModule::Hwp => vec![ToolDef {
             name: "read_doc_blocks",
-            description: "생략된 문단 범위를 추가로 읽는다.",
+            description: "지정 범위의 문단을 추가로 읽는다.",
             parameters_json: READ_DOC_SCHEMA,
         }],
         CopilotModule::Sheet => vec![
@@ -132,14 +132,28 @@ fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
             description: "PDF 전체 쪽에서 검색어가 있는 쪽과 발췌문을 찾는다.",
             parameters_json: SEARCH_PDF_SCHEMA,
         }],
+        CopilotModule::Base => vec![ToolDef {
+            name: "read_base_records",
+            description: "현재 베이스 테이블의 레코드를 오프셋과 검색어로 추가 조회한다.",
+            parameters_json: READ_BASE_SCHEMA,
+        }],
         _ => Vec::new(),
     }
 }
 
-/// 공식 제공자(`OpenAI`·`Anthropic`·`Google`) 요청 본문에 네이티브 `tools` 스키마를 덧붙인다.
+pub fn has_emitted_tools(req: &CopilotRunRequest) -> bool {
+    if req.lightweight {
+        return false;
+    }
+    let read_only = req.is_read_only();
+    let read_tools = read_tools_for_module(req);
+    !(read_only && read_tools.is_empty())
+}
+
+/// 공식 제공자(`OpenAI`·`Anthropic`·`Google`·공식 `DeepSeek`/`OpenRouter`/`xAI`) 요청 본문에 네이티브 `tools` 스키마를 덧붙인다.
 /// `lightweight` 요청은 도구를 생략하고, 읽기 전용(`ask`·`PDF`)은 필요한 읽기 도구만 남기며 0개면 `tools` 자체를 생략한다.
 pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
-    if req.lightweight {
+    if req.lightweight || !uses_native_tools(req) {
         return;
     }
     let read_only = req.is_read_only();
@@ -149,17 +163,26 @@ pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
     }
     let emit_schema = (!read_only).then(|| build_emit_schema(req));
     match req.provider.kind {
-        ProviderKind::OpenAi => {
+        ProviderKind::OpenAi
+        | ProviderKind::DeepSeek
+        | ProviderKind::OpenRouter
+        | ProviderKind::Xai => {
+            let allow_cache = is_openrouter_anthropic_cache(req);
+            let total_tools = usize::from(emit_schema.is_some()) + read_tools.len();
+            let mut emitted = 0usize;
             out.push_str(",\"tools\":[");
-            let mut wrote = false;
             if let Some(schema) = &emit_schema {
                 out.push_str("{\"type\":\"function\",\"function\":{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parameters\":");
                 out.push_str(schema);
-                out.push_str("}}");
-                wrote = true;
+                out.push('}');
+                emitted += 1;
+                if allow_cache && emitted == total_tools {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
+                out.push('}');
             }
             for t in &read_tools {
-                if wrote {
+                if emitted > 0 {
                     out.push(',');
                 }
                 let _ = write!(
@@ -170,13 +193,18 @@ pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
                 push_json_str(out, t.description);
                 out.push_str(",\"parameters\":");
                 out.push_str(t.parameters_json);
-                out.push_str("}}");
-                wrote = true;
+                out.push('}');
+                emitted += 1;
+                if allow_cache && emitted == total_tools {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
+                out.push('}');
             }
             out.push(']');
         }
         ProviderKind::Anthropic => {
-            let official_host = is_official_anthropic_host(&req.provider.base_url);
+            let allow_cache =
+                req.command.is_none() && is_official_anthropic_host(&req.provider.base_url);
             let total_tools = usize::from(emit_schema.is_some()) + read_tools.len();
             let mut emitted = 0usize;
             out.push_str(",\"tools\":[");
@@ -184,7 +212,7 @@ pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
                 out.push_str("{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"input_schema\":");
                 out.push_str(schema);
                 emitted += 1;
-                if official_host && emitted == total_tools {
+                if allow_cache && emitted == total_tools {
                     out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
                 }
                 out.push('}');
@@ -198,7 +226,7 @@ pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
                 out.push_str(",\"input_schema\":");
                 out.push_str(t.parameters_json);
                 emitted += 1;
-                if official_host && emitted == total_tools {
+                if allow_cache && emitted == total_tools {
                     out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
                 }
                 out.push('}');
@@ -289,6 +317,7 @@ pub fn synthesize_completion_from_tools(
                 | "read_sheet_range"
                 | "find_sheet_cells"
                 | "search_pdf_pages"
+                | "read_base_records"
         ) {
             let mut entries = obj.to_vec();
             entries.push(("name".to_string(), StrictJsonValue::Str(inv.name.clone())));

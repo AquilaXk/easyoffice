@@ -8,6 +8,7 @@ use sse_core::{MessageEvent, SseDecoder, SseEvent};
 
 use super::providers::extract_provider_completion_with_usage;
 use super::schema::{synthesize_completion_from_tools, NativeToolInvocation};
+use super::stream_reply::{extract_emit_reply_prefix, PlainJsonGuard};
 use super::types::{ProviderKind, MAX_LLM_RESPONSE_BYTES, MAX_LLM_TOOL_CALLS};
 use super::usage::TokenUsage;
 
@@ -383,178 +384,6 @@ enum Wire {
     PlainJson(usize),
 }
 
-fn parse_hex4(bytes: &[u8]) -> Option<u16> {
-    if bytes.len() < 4 {
-        return None;
-    }
-    let s = std::str::from_utf8(&bytes[..4]).ok()?;
-    u16::from_str_radix(s, 16).ok()
-}
-
-fn scan_json_str_literal(bytes: &[u8], mut i: usize) -> Option<(String, usize, bool)> {
-    let mut out = String::new();
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'"' {
-            return Some((out, i + 1, true));
-        }
-        if b == b'\\' {
-            if i + 1 >= bytes.len() {
-                return Some((out, i, false));
-            }
-            match bytes[i + 1] {
-                b'"' => {
-                    out.push('"');
-                    i += 2;
-                }
-                b'\\' => {
-                    out.push('\\');
-                    i += 2;
-                }
-                b'/' => {
-                    out.push('/');
-                    i += 2;
-                }
-                b'n' => {
-                    out.push('\n');
-                    i += 2;
-                }
-                b'r' => {
-                    out.push('\r');
-                    i += 2;
-                }
-                b't' => {
-                    out.push('\t');
-                    i += 2;
-                }
-                b'b' => {
-                    out.push('\x08');
-                    i += 2;
-                }
-                b'f' => {
-                    out.push('\x0c');
-                    i += 2;
-                }
-                b'u' => {
-                    let Some(hi) = parse_hex4(&bytes[i + 2..]) else {
-                        return Some((out, i, false));
-                    };
-                    if (0xD800..=0xDBFF).contains(&hi) {
-                        if i + 6 == bytes.len()
-                            || (i + 7 == bytes.len() && bytes[i + 6] == b'\\')
-                            || (i + 12 > bytes.len()
-                                && i + 8 <= bytes.len()
-                                && bytes[i + 6] == b'\\'
-                                && bytes[i + 7] == b'u')
-                        {
-                            return Some((out, i, false));
-                        }
-                        if i + 12 <= bytes.len() && bytes[i + 6] == b'\\' && bytes[i + 7] == b'u' {
-                            if let Some(lo) = parse_hex4(&bytes[i + 8..])
-                                .filter(|lo| (0xDC00..=0xDFFF).contains(lo))
-                            {
-                                let cp = 0x10000
-                                    + ((u32::from(hi) - 0xD800) << 10)
-                                    + (u32::from(lo) - 0xDC00);
-                                out.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
-                                i += 12;
-                            } else {
-                                out.push('\u{FFFD}');
-                                i += 6;
-                            }
-                        } else {
-                            out.push('\u{FFFD}');
-                            i += 6;
-                        }
-                    } else {
-                        out.push(char::from_u32(u32::from(hi)).unwrap_or('\u{FFFD}'));
-                        i += 6;
-                    }
-                }
-                other => {
-                    out.push(char::from(other));
-                    i += 2;
-                }
-            }
-            continue;
-        }
-        let s = std::str::from_utf8(&bytes[i..]).ok()?;
-        let ch = s.chars().next()?;
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    Some((out, i, false))
-}
-
-/// `emit_copilot_turn` 도구 인자 JSON 버퍼에서 최상위 `"reply":"..."` 완성 접두사를 추출한다.
-fn extract_emit_reply_prefix(json_buf: &str) -> String {
-    let bytes = json_buf.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    if bytes.get(i) != Some(&b'{') {
-        return String::new();
-    }
-    i += 1;
-    let mut depth = 1usize;
-    let mut expecting_key = true;
-    let mut saw_reply_key = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b.is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-        if depth == 1 && b == b'"' {
-            let Some((lit, next_i, complete)) = scan_json_str_literal(bytes, i + 1) else {
-                return String::new();
-            };
-            if expecting_key {
-                saw_reply_key = complete && lit == "reply";
-                expecting_key = false;
-            } else if saw_reply_key {
-                return lit;
-            }
-            if !complete {
-                return String::new();
-            }
-            i = next_i;
-            continue;
-        }
-        if b == b'"' {
-            let Some((_, next_i, complete)) = scan_json_str_literal(bytes, i + 1) else {
-                return String::new();
-            };
-            if !complete {
-                return String::new();
-            }
-            i = next_i;
-            continue;
-        }
-        match b {
-            b'{' | b'[' => {
-                depth += 1;
-                saw_reply_key = false;
-            }
-            b'}' | b']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    break;
-                }
-            }
-            b',' if depth == 1 => {
-                expecting_key = true;
-                saw_reply_key = false;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    String::new()
-}
-
 pub struct StreamAssembler {
     kind: ProviderKind,
     wire: Wire,
@@ -562,6 +391,7 @@ pub struct StreamAssembler {
     reasoning: String,
     tool_slots: Vec<(usize, String, String)>,
     emit_reply_sent: usize,
+    plain_guard: PlainJsonGuard,
     usage: TokenUsage,
     has_usage: bool,
     tool_bytes: usize,
@@ -578,6 +408,7 @@ impl StreamAssembler {
             reasoning: String::new(),
             tool_slots: Vec::new(),
             emit_reply_sent: 0,
+            plain_guard: PlainJsonGuard::Undecided,
             usage: TokenUsage::default(),
             has_usage: false,
             tool_bytes: 0,
@@ -643,7 +474,8 @@ impl StreamAssembler {
                     }
                     self.reasoning.push_str(&delta.reasoning);
                     self.text.push_str(&delta.text);
-                    added.push_str(&delta.text);
+                    self.plain_guard
+                        .advance(&self.text, &delta.text, &mut added);
                     for tc in delta.tool_chunks {
                         self.tool_bytes = self.tool_bytes.saturating_add(tc.args_piece.len());
                         if tc.slot >= MAX_LLM_TOOL_CALLS {
@@ -680,7 +512,7 @@ impl StreamAssembler {
             }
             Err(message) => self.failure = Some(message),
         }
-        if touched_emit && self.text.is_empty() {
+        if touched_emit && self.text.trim().is_empty() {
             if let Some((_, _, args)) = self
                 .tool_slots
                 .iter()

@@ -247,6 +247,11 @@ pub enum CopilotToolCall {
     SearchPdfPages {
         query: String,
     },
+    ReadBaseRecords {
+        offset: usize,
+        limit: usize,
+        query: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,6 +274,8 @@ pub struct CopilotRunResponse {
     pub operations: Vec<CopilotOperation>,
     /// 모델이 보냈지만 형식·범위·개수 검사에서 버린 작업 수.
     pub dropped_operations: usize,
+    /// 검증에서 버린 연산의 사유 목록(최대 8건).
+    pub dropped_reasons: Vec<String>,
     pub locations: Vec<CopilotLocation>,
     pub tool_calls: Vec<CopilotToolCall>,
     pub usage: Option<super::usage::TokenUsage>,
@@ -476,6 +483,21 @@ pub fn write_tool_call_json(out: &mut String, tc: &CopilotToolCall) {
         CopilotToolCall::SearchPdfPages { query } => {
             out.push_str("{\"name\":\"search_pdf_pages\",\"query\":");
             push_json_str(out, query);
+            out.push('}');
+        }
+        CopilotToolCall::ReadBaseRecords {
+            offset,
+            limit,
+            query,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"name\":\"read_base_records\",\"offset\":{offset},\"limit\":{limit}"
+            );
+            if let Some(q) = query {
+                out.push_str(",\"query\":");
+                push_json_str(out, q);
+            }
             out.push('}');
         }
     }

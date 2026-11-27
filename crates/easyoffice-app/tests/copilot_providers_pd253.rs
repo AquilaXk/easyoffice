@@ -305,9 +305,9 @@ fn deepseek_reasoning_and_live_model_discovery_across_formats() {
     };
     let ds_req = r#"{
       "action": "copilot_run",
-      "mode": "ask",
+      "mode": "edit",
       "module": "DOC",
-      "prompt": "검토",
+      "prompt": "문서 전체 수식과 구조를 분석해 수정안을 작성하세요.",
       "provider": {
         "kind": "deepseek",
         "baseUrl": "https://93.184.216.34",

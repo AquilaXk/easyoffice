@@ -10,13 +10,14 @@ use std::fmt::Write as _;
 use super::context::{
     BaseContext, DocContext, PdfContext, SelectionContext, SheetContext, SlideItem,
 };
+use super::delta::Tier2Included;
 use super::prompt::{
-    escape_context_text, push_line, push_omitted, write_common_context_header,
-    write_doc_selection_header, write_windowed,
+    escape_context_text, push_line_with_limit, push_omitted, req_context_byte_budget,
+    write_common_context_header, write_doc_selection_header, write_windowed,
 };
 use super::types::{
-    CopilotModule, CopilotRunRequest, MAX_PROMPT_CONTEXT_BYTES, MAX_PROMPT_DOC_PARAGRAPHS,
-    MAX_PROMPT_SHEET_CELLS, MAX_PROMPT_SLIDES,
+    CopilotModule, CopilotRunRequest, MAX_PROMPT_BASE_RECORDS, MAX_PROMPT_CONTEXT_BYTES,
+    MAX_PROMPT_DOC_PARAGRAPHS, MAX_PROMPT_SHEET_CELLS, MAX_PROMPT_SLIDES,
 };
 use super::window::{select_window, Line};
 
@@ -36,7 +37,7 @@ fn selection_too_large() -> EasyOfficeError {
     EasyOfficeError::InvalidArgument("선택한 범위가 너무 커서 처리할 수 없습니다.".to_string())
 }
 
-/// `DOC`·`HWP` 일반 요청에서 프롬프트에 다 실리지 못한 문단(명시적 생략·200문단 초과·희소 미적재 슬롯·24 KiB 예산 절단)이
+/// `DOC`·`HWP` 일반 요청에서 프롬프트에 다 실리지 못한 문단(명시적 생략·200문단 초과·희소 미적재 슬롯·예산 절단)이
 /// 있는지 판별한다. 실제 내용이 빈 문단(`Some("")`)은 미적재 슬롯(`None`)과 구분되어 false를 유지한다.
 pub fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
     let Some(doc) = req.context.doc.as_ref() else {
@@ -48,16 +49,19 @@ pub fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
     {
         return true;
     }
+    let budget = req_context_byte_budget(req);
     let mut header = String::with_capacity(96);
     write_common_context_header(&mut header, req);
-    write_doc_selection_header(&mut header, &req.selection);
+    if req.lightweight || req.command.is_some() {
+        write_doc_selection_header(&mut header, &req.selection);
+    }
     let mut used = header.len();
     for (i, slot) in doc.paragraphs.iter().enumerate() {
         if let Some(p) = slot {
             if !p.trim().is_empty() {
                 let next_len =
                     DOC_LINE_AFFIX_BYTES + decimal_digits(i) + escape_context_text(p).len();
-                if used + next_len > MAX_PROMPT_CONTEXT_BYTES {
+                if used + next_len > budget {
                     return true;
                 }
                 used += next_len;
@@ -68,15 +72,19 @@ pub fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
 }
 
 /// 현재 요청에 읽기 도구가 실제로 필요한지 판별한다.
+/// DOC/HWP 일반 대화는 `read_doc_blocks`를 상시 노출해 200문단·예산 경계 토글에 의한 캐시 무효화를 막는다.
 pub fn has_read_tools(req: &CopilotRunRequest) -> bool {
     if req.lightweight || req.command.is_some() {
         return false;
     }
-    match req.module {
-        CopilotModule::Doc | CopilotModule::Hwp => doc_has_unread_blocks(req),
-        CopilotModule::Sheet | CopilotModule::Pdf => true,
-        CopilotModule::Slide | CopilotModule::Base | CopilotModule::Board => false,
-    }
+    matches!(
+        req.module,
+        CopilotModule::Doc
+            | CopilotModule::Hwp
+            | CopilotModule::Sheet
+            | CopilotModule::Pdf
+            | CopilotModule::Base
+    )
 }
 
 fn selected_span_matches_loaded(
@@ -127,6 +135,27 @@ pub fn write_doc_context(
     selection: &SelectionContext,
     command: bool,
 ) -> Result<(), EasyOfficeError> {
+    let mut tier2 = Tier2Included::default();
+    write_doc_context_with_budget(
+        out,
+        doc,
+        selection,
+        command,
+        false,
+        &mut tier2,
+        MAX_PROMPT_CONTEXT_BYTES,
+    )
+}
+
+pub fn write_doc_context_with_budget(
+    out: &mut String,
+    doc: &DocContext,
+    selection: &SelectionContext,
+    command: bool,
+    separate_volatile: bool,
+    tier2: &mut Tier2Included,
+    budget: usize,
+) -> Result<(), EasyOfficeError> {
     let mut included = BTreeSet::new();
     if command {
         let start = selection.paragraph_index.unwrap_or(0);
@@ -168,7 +197,11 @@ pub fn write_doc_context(
                 }
                 Some(p) => {
                     if !p.trim().is_empty()
-                        && !push_line(out, &format!("  [{i}] {}", escape_context_text(p)))
+                        && !push_line_with_limit(
+                            out,
+                            &format!("  [{i}] {}", escape_context_text(p)),
+                            budget,
+                        )
                     {
                         break;
                     }
@@ -180,9 +213,10 @@ pub fn write_doc_context(
         let cut = doc.paragraphs.len().saturating_sub(consumed);
         push_omitted(out, cut + doc.omitted_paragraphs + unseen_sparse, "문단");
     }
-    if !doc.selected_text.trim().is_empty()
-        && !selected_span_matches_loaded(doc, selection, &included)
-    {
+    let matches_loaded = selected_span_matches_loaded(doc, selection, &included);
+    tier2.doc_selected_matches_loaded = matches_loaded;
+    tier2.doc_paras.extend(included);
+    if !separate_volatile && !doc.selected_text.trim().is_empty() && !matches_loaded {
         let _ = writeln!(
             out,
             "선택 텍스트: {}",
@@ -218,7 +252,7 @@ fn col_name(mut col: u32) -> String {
     String::from_utf8(buf).unwrap_or_default()
 }
 
-fn parse_cell_coord(coord: &str) -> Option<(u32, u32)> {
+pub(super) fn parse_cell_coord(coord: &str) -> Option<(u32, u32)> {
     let clean = coord.trim().trim_start_matches('$');
     let split = clean.find(|c: char| c.is_ascii_digit())?;
     let (col_part, row_part) = clean.split_at(split);
@@ -228,7 +262,7 @@ fn parse_cell_coord(coord: &str) -> Option<(u32, u32)> {
     (1..=1_048_576).contains(&row).then_some((row, col))
 }
 
-fn parse_range_bounds(range: &str) -> Option<((u32, u32), (u32, u32))> {
+pub(super) fn parse_range_bounds(range: &str) -> Option<((u32, u32), (u32, u32))> {
     let trimmed = range.trim();
     if trimmed.is_empty() {
         return None;
@@ -323,7 +357,7 @@ fn normalize_row_formula(formula: &str, base_row: u32) -> String {
     out
 }
 
-fn format_cell_display(raw: &str, value: &str) -> String {
+pub(super) fn format_cell_display(raw: &str, value: &str) -> String {
     let raw_esc = escape_context_text(raw);
     let val_esc = escape_context_text(value);
     if raw_esc == val_esc || value.is_empty() {
@@ -336,6 +370,25 @@ fn format_cell_display(raw: &str, value: &str) -> String {
 }
 
 pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &SelectionContext) {
+    let mut coords = BTreeSet::new();
+    write_sheet_context_with_budget(
+        out,
+        sheet,
+        selection,
+        false,
+        &mut coords,
+        MAX_PROMPT_CONTEXT_BYTES,
+    );
+}
+
+pub fn write_sheet_context_with_budget(
+    out: &mut String,
+    sheet: &SheetContext,
+    selection: &SelectionContext,
+    separate_volatile: bool,
+    emitted_coords: &mut BTreeSet<(u32, u32)>,
+    budget: usize,
+) {
     let sel_bounds = selection.range.as_deref().and_then(parse_range_bounds);
     let mut parsed_cells: Vec<(u32, u32, usize)> = Vec::with_capacity(sheet.cells.len());
     let mut min_r = u32::MAX;
@@ -379,15 +432,20 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
         escape_context_text(used_range),
         total
     );
-    push_line(out, &summary);
+    push_line_with_limit(out, &summary, budget);
 
-    // 선택 범위 셀을 먼저 배치하고 나머지 셀은 좌표 순으로 싣는다.
+    // 일반 대화 Tier 2는 선택 범위와 무관하게 좌표 순으로 결정론적 고정하고, 단발 요청만 선택 범위를 우선 배치한다.
     let mut prioritized = parsed_cells;
-    prioritized.sort_by_key(|&(r, c, idx)| {
-        let in_sel = sel_bounds
-            .is_some_and(|((r1, c1), (r2, c2))| (r1..=r2).contains(&r) && (c1..=c2).contains(&c));
-        (!in_sel, r, c, idx)
-    });
+    if separate_volatile {
+        prioritized.sort_by_key(|&(r, c, idx)| (r, c, idx));
+    } else {
+        prioritized.sort_by_key(|&(r, c, idx)| {
+            let in_sel = sel_bounds.is_some_and(|((r1, c1), (r2, c2))| {
+                (r1..=r2).contains(&r) && (c1..=c2).contains(&c)
+            });
+            (!in_sel, r, c, idx)
+        });
+    }
     let capped: Vec<(u32, u32, usize)> = prioritized
         .into_iter()
         .take(MAX_PROMPT_SHEET_CELLS)
@@ -445,7 +503,7 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
     }
 
     for note in &iso_notes {
-        if !push_line(out, note) {
+        if !push_line_with_limit(out, note, budget) {
             break;
         }
     }
@@ -461,7 +519,7 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
     if use_tsv {
         let cols: Vec<u32> = cols_used.into_iter().collect();
         let header_cols: Vec<String> = cols.iter().map(|&c| col_name(c)).collect();
-        let _ = push_line(out, &format!("열: {}", header_cols.join("\t")));
+        let _ = push_line_with_limit(out, &format!("열: {}", header_cols.join("\t")), budget);
         for (r, row_map) in &grid {
             let mut parts: Vec<String> = Vec::with_capacity(cols.len());
             for &c in &cols {
@@ -480,8 +538,11 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
             while parts.last().is_some_and(String::is_empty) {
                 parts.pop();
             }
-            if !push_line(out, &format!("  [{r}] {}", parts.join("\t"))) {
+            if !push_line_with_limit(out, &format!("  [{r}] {}", parts.join("\t")), budget) {
                 break;
+            }
+            for &c in row_map.keys() {
+                emitted_coords.insert((*r, c));
             }
             shown += row_map.len();
         }
@@ -493,12 +554,14 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
             } else {
                 format_cell_display(&cell.raw, &cell.value)
             };
-            if !push_line(
+            if !push_line_with_limit(
                 out,
                 &format!("  {}: {display}", escape_context_text(&cell.coord)),
+                budget,
             ) {
                 break;
             }
+            emitted_coords.insert((r, c));
             shown += 1;
         }
     }
@@ -506,8 +569,12 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
 }
 
 pub fn write_base_context(out: &mut String, base: &BaseContext) {
+    write_base_context_with_budget(out, base, MAX_PROMPT_CONTEXT_BYTES);
+}
+
+pub fn write_base_context_with_budget(out: &mut String, base: &BaseContext, budget: usize) {
     let tables: Vec<Cow<'_, str>> = base.tables.iter().map(|t| escape_context_text(t)).collect();
-    if !push_line(out, &format!("테이블 목록: {}", tables.join(", "))) {
+    if !push_line_with_limit(out, &format!("테이블 목록: {}", tables.join(", ")), budget) {
         push_omitted(out, tables.len(), "테이블");
     }
     let _ = writeln!(
@@ -527,11 +594,16 @@ pub fn write_base_context(out: &mut String, base: &BaseContext) {
             )
         })
         .collect();
-    if !push_line(out, &format!("필드: {}", field_list.join(", "))) {
+    if !push_line_with_limit(out, &format!("필드: {}", field_list.join(", ")), budget) {
         push_omitted(out, field_list.len(), "필드");
     }
     let mut shown = 0usize;
-    for (idx, row) in base.records.iter().enumerate() {
+    for (idx, row) in base
+        .records
+        .iter()
+        .take(MAX_PROMPT_BASE_RECORDS)
+        .enumerate()
+    {
         let cells: Vec<String> = row
             .iter()
             .map(|val| {
@@ -541,7 +613,7 @@ pub fn write_base_context(out: &mut String, base: &BaseContext) {
             })
             .collect();
         let line = format!("  [{idx}] {}", cells.join(" | "));
-        if !push_line(out, &line) {
+        if !push_line_with_limit(out, &line, budget) {
             break;
         }
         shown += 1;
@@ -549,34 +621,64 @@ pub fn write_base_context(out: &mut String, base: &BaseContext) {
     push_omitted(out, base.total_records.saturating_sub(shown), "건");
 }
 
-fn parse_pdf_page_prefix(line: &str) -> Option<usize> {
+pub(super) fn parse_pdf_page_prefix(line: &str) -> Option<usize> {
     let rest = line.trim_start().strip_prefix('[')?;
     let idx = rest.find("쪽]")?;
     rest[..idx].trim().parse::<usize>().ok().filter(|&p| p >= 1)
 }
 
 pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
-    let _ = writeln!(
-        out,
-        "전체 쪽 수: {}, 현재 쪽: {}",
-        pdf.page_count,
-        pdf.active_page.unwrap_or(1)
-    );
+    let mut pages = BTreeSet::new();
+    write_pdf_context_with_budget(out, pdf, false, &mut pages, MAX_PROMPT_CONTEXT_BYTES);
+}
+
+pub fn write_pdf_context_with_budget(
+    out: &mut String,
+    pdf: &PdfContext,
+    separate_volatile: bool,
+    emitted_pages: &mut BTreeSet<usize>,
+    context_limit: usize,
+) {
+    if separate_volatile {
+        let _ = writeln!(out, "전체 쪽 수: {}", pdf.page_count);
+    } else {
+        let _ = writeln!(
+            out,
+            "전체 쪽 수: {}, 현재 쪽: {}",
+            pdf.page_count,
+            pdf.active_page.unwrap_or(1)
+        );
+    }
     let raw_lines: Vec<&str> = pdf.text.lines().collect();
     if raw_lines.is_empty() {
         return;
     }
-    let active = pdf.active_page.unwrap_or(1).max(1);
+    let anchor = if separate_volatile {
+        pdf.anchor_page.or(pdf.active_page).unwrap_or(1).max(1)
+    } else {
+        pdf.active_page.unwrap_or(1).max(1)
+    };
     let mut current_page = 1usize;
+    let mut saw_real_page = false;
     let mut lines: Vec<Line> = Vec::with_capacity(raw_lines.len());
+    let mut line_pages: Vec<Option<usize>> = Vec::with_capacity(raw_lines.len());
     let mut target_start: Option<usize> = None;
     let mut target_end: Option<usize> = None;
 
     for (idx, raw) in raw_lines.iter().enumerate() {
+        let is_omitted_banner = raw.starts_with("[앞 ") && raw.ends_with("쪽 생략]");
         if let Some(p) = parse_pdf_page_prefix(raw) {
             current_page = p;
+            saw_real_page = true;
         }
-        if current_page == active {
+        let assigned_page = if is_omitted_banner {
+            None
+        } else if saw_real_page || !raw.trim().is_empty() {
+            Some(current_page)
+        } else {
+            None
+        };
+        if !is_omitted_banner && current_page == anchor {
             if target_start.is_none() {
                 target_start = Some(idx);
             }
@@ -586,11 +688,12 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
             index: idx,
             text: escape_context_text(raw).into_owned(),
         });
+        line_pages.push(assigned_page);
     }
 
     let start = target_start.unwrap_or(0);
     let end = target_end.unwrap_or(start);
-    let budget = MAX_PROMPT_CONTEXT_BYTES.saturating_sub(out.len() + OMIT_NOTICE_RESERVE);
+    let budget = context_limit.saturating_sub(out.len() + OMIT_NOTICE_RESERVE);
     if let Some((before, selected, after)) = select_window(&lines, &(start..=end), budget) {
         let cut_front = lines
             .iter()
@@ -603,13 +706,16 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
         for line in before.iter().chain(selected).chain(after) {
             out.push_str(&line.text);
             out.push('\n');
+            if let Some(p) = line_pages.get(line.index).copied().flatten() {
+                emitted_pages.insert(p);
+            }
         }
         let full_after = lines.iter().filter(|l| l.index > end).count();
         let cut_after = full_after.saturating_sub(after.len());
         push_omitted(out, cut_after, "줄");
     } else {
         // 선택 쪽 자체가 예산을 넘으면 앞선 쪽을 건너뛰고 현재 쪽의 앞부분을 UTF-8 경계까지 실어 보낸다.
-        let limit = MAX_PROMPT_CONTEXT_BYTES.saturating_sub(OMIT_NOTICE_RESERVE);
+        let limit = context_limit.saturating_sub(OMIT_NOTICE_RESERVE);
         if start > 0 {
             if start == 2
                 && lines[0].text.ends_with("쪽 생략]")
@@ -628,6 +734,9 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
             if out.len() + line.text.len() < limit {
                 out.push_str(&line.text);
                 out.push('\n');
+                if let Some(p) = line_pages.get(line.index).copied().flatten() {
+                    emitted_pages.insert(p);
+                }
                 shown += 1;
             } else {
                 if shown == 0 {
@@ -636,6 +745,9 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
                     if cut > 0 {
                         out.push_str(&line.text[..cut]);
                         out.push('\n');
+                        if let Some(p) = line_pages.get(line.index).copied().flatten() {
+                            emitted_pages.insert(p);
+                        }
                         clipped_first = true;
                     }
                 }
@@ -655,7 +767,7 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
     }
 }
 
-fn slide_line(i: usize, s: &SlideItem) -> String {
+pub(super) fn slide_line(i: usize, s: &SlideItem) -> String {
     let mut line = format!("  [{i}] 제목={}", escape_context_text(&s.title));
     if !s.bullets.is_empty() {
         let bullets: Vec<Cow<'_, str>> = s.bullets.iter().map(|b| escape_context_text(b)).collect();
@@ -689,16 +801,79 @@ fn slide_line(i: usize, s: &SlideItem) -> String {
     line
 }
 
+fn inactive_slide_line(i: usize, s: &SlideItem) -> String {
+    let mut parts = Vec::with_capacity(2);
+    if !s.bullets.is_empty() {
+        parts.push(format!("항목 {}개", s.bullets.len()));
+    }
+    if !s.elements.is_empty() {
+        parts.push(format!("개체 {}개", s.elements.len()));
+    }
+    if parts.is_empty() {
+        format!("  [{i}] 제목={}", escape_context_text(&s.title))
+    } else {
+        format!(
+            "  [{i}] 제목={} ({})",
+            escape_context_text(&s.title),
+            parts.join(", ")
+        )
+    }
+}
+
 pub fn write_slide_context(
     out: &mut String,
     slides: &[SlideItem],
     target: Option<usize>,
 ) -> Result<(), EasyOfficeError> {
+    let mut expanded = BTreeSet::new();
+    write_slide_context_with_budget(
+        out,
+        slides,
+        0,
+        None,
+        false,
+        target,
+        &mut expanded,
+        MAX_PROMPT_CONTEXT_BYTES,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn write_slide_context_with_budget(
+    out: &mut String,
+    slides: &[SlideItem],
+    active_index: usize,
+    anchor_index: Option<usize>,
+    separate_volatile: bool,
+    target: Option<usize>,
+    expanded: &mut BTreeSet<usize>,
+    budget: usize,
+) -> Result<(), EasyOfficeError> {
     let Some(target) = target else {
+        let pinned_active = if separate_volatile {
+            anchor_index.unwrap_or(active_index)
+        } else {
+            active_index
+        };
+        let eff_active = if pinned_active < slides.len() {
+            pinned_active
+        } else {
+            0
+        };
+        let multi = slides.len() > 1;
         let mut shown = 0usize;
         for (i, s) in slides.iter().enumerate().take(MAX_PROMPT_SLIDES) {
-            if !push_line(out, &slide_line(i, s)) {
+            let full = !multi || i == eff_active;
+            let line = if full {
+                slide_line(i, s)
+            } else {
+                inactive_slide_line(i, s)
+            };
+            if !push_line_with_limit(out, &line, budget) {
                 break;
+            }
+            if full {
+                expanded.insert(i);
             }
             shown += 1;
         }

@@ -5,15 +5,22 @@
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 
-use super::types::{push_json_str, CopilotModule, CopilotRunRequest, HistoryMessage};
+use super::types::{push_json_str, CopilotModule, CopilotRunRequest, HistoryMessage, ProviderKind};
 
 const MAX_CACHE_SEED_BYTES: usize = 512;
 
-/// 4계층 대화 배치에서 한 턴의 역할과 연속 텍스트 블록 목록이다.
+/// 계층형 대화 배치의 한 텍스트 블록(Anthropic 캐시 브레이크포인트 여부 포함).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnBlock {
+    pub text: String,
+    pub cache_breakpoint: bool,
+}
+
+/// 5계층 대화 배치에서 한 턴의 역할과 연속 텍스트 블록 목록이다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnMessage {
     pub role: &'static str,
-    pub blocks: Vec<String>,
+    pub blocks: Vec<TurnBlock>,
 }
 
 pub(super) fn clamp_utf8_boundary(s: &str, mut end: usize) -> usize {
@@ -47,6 +54,54 @@ pub fn is_official_openai_host(base_url: &str) -> bool {
     extract_host_lower(base_url) == "api.openai.com"
 }
 
+pub fn is_official_deepseek_host(base_url: &str) -> bool {
+    extract_host_lower(base_url) == "api.deepseek.com"
+}
+
+pub fn is_official_openrouter_host(base_url: &str) -> bool {
+    extract_host_lower(base_url) == "openrouter.ai"
+}
+
+pub fn is_official_xai_host(base_url: &str) -> bool {
+    extract_host_lower(base_url) == "api.x.ai"
+}
+
+/// 네이티브 함수 호출(`tools`)을 안전하게 켤 수 있는 공식 제공자·호스트인지 판별한다.
+pub fn uses_native_tools(req: &CopilotRunRequest) -> bool {
+    match req.provider.kind {
+        ProviderKind::OpenAi | ProviderKind::Anthropic | ProviderKind::Google => true,
+        ProviderKind::DeepSeek => is_official_deepseek_host(&req.provider.base_url),
+        ProviderKind::OpenRouter => is_official_openrouter_host(&req.provider.base_url),
+        ProviderKind::Xai => is_official_xai_host(&req.provider.base_url),
+        _ => false,
+    }
+}
+
+/// 공식 OpenRouter 경유 `anthropic/*` 일반 대화 모델에 정적 블록 `cache_control`을 켤지 판별한다.
+pub fn is_openrouter_anthropic_cache(req: &CopilotRunRequest) -> bool {
+    !req.lightweight
+        && req.command.is_none()
+        && req.provider.kind == ProviderKind::OpenRouter
+        && is_official_openrouter_host(&req.provider.base_url)
+        && req
+            .provider
+            .model
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("anthropic/")
+}
+
+/// OpenAI 계열 공식 엔드포인트에서 `stream_options.include_usage: true`를 안전하게 켤 수 있는지 판별한다.
+pub fn supports_openai_stream_usage(req: &CopilotRunRequest) -> bool {
+    match req.provider.kind {
+        ProviderKind::OpenAi => is_official_openai_host(&req.provider.base_url),
+        ProviderKind::DeepSeek => is_official_deepseek_host(&req.provider.base_url),
+        ProviderKind::OpenRouter => is_official_openrouter_host(&req.provider.base_url),
+        ProviderKind::Xai => is_official_xai_host(&req.provider.base_url),
+        _ => false,
+    }
+}
+
 /// 요청 문맥에서 정규화된 64자 SHA-256 `prompt_cache_key`를 생성한다.
 pub fn build_prompt_cache_key(req: &CopilotRunRequest) -> String {
     let fallback = match req.module {
@@ -73,9 +128,12 @@ pub fn build_prompt_cache_key(req: &CopilotRunRequest) -> String {
         .unwrap_or(fallback);
     let clipped = &raw_seed[..clamp_utf8_boundary(raw_seed, MAX_CACHE_SEED_BYTES)];
     let canonical = format!(
-        "eo-v1|{}|{}|{}",
+        "eo-v1|{}|{}|{}|{}|{}",
         req.module.as_str(),
         req.mode.as_str(),
+        req.command
+            .map_or("none", super::types::CopilotCommand::as_str),
+        req.provider.model.trim(),
         clipped
     );
     let digest = Sha256::digest(canonical.as_bytes());
@@ -86,31 +144,64 @@ pub fn build_prompt_cache_key(req: &CopilotRunRequest) -> String {
     hex
 }
 
-fn push_turn(out: &mut Vec<TurnMessage>, role: &'static str, block: String, merge_same_role: bool) {
+fn push_turn(
+    out: &mut Vec<TurnMessage>,
+    role: &'static str,
+    block: String,
+    merge_same_role: bool,
+    cache_breakpoint: bool,
+) -> Option<(usize, usize)> {
     if block.trim().is_empty() {
-        return;
+        return None;
     }
     if merge_same_role && out.is_empty() && role != "user" {
-        return;
+        return None;
     }
+    let item = TurnBlock {
+        text: block,
+        cache_breakpoint,
+    };
     if merge_same_role {
         if let Some(last) = out.last_mut().filter(|m| m.role == role) {
-            last.blocks.push(block);
-            return;
+            last.blocks.push(item);
+            let b_idx = last.blocks.len() - 1;
+            return Some((out.len() - 1, b_idx));
         }
     }
     out.push(TurnMessage {
         role,
-        blocks: vec![block],
+        blocks: vec![item],
     });
+    Some((out.len() - 1, 0))
 }
 
-/// 4계층 캐시 규칙(`[1. tools+system] -> [2. priorHistory] -> [3. <document_context> + prompt] -> [4. loopSteps]`)에 맞춰
-/// 메시지 목록을 조립한다. 불변 읽기 전용 `PDF`는 후속 질문에서도 `<document_context>`를 `priorHistory` 앞에 고정한다.
 pub fn assemble_ordered_turns(
     req: &CopilotRunRequest,
     prior_history: &[HistoryMessage],
     context_block: &str,
+    user_prompt: &str,
+    loop_steps: &[HistoryMessage],
+    merge_same_role: bool,
+) -> Vec<TurnMessage> {
+    assemble_ordered_turns_with_volatile(
+        req,
+        prior_history,
+        context_block,
+        "",
+        user_prompt,
+        loop_steps,
+        merge_same_role,
+    )
+}
+
+/// 5계층 캐시 순서대로 메시지 목록을 조립한다.
+/// 일반 대화: `[Tier 2: 고정 <document_context>] -> [Tier 3: priorHistory] -> [Tier 4: 가변 상태+prompt] -> [Tier 5: loopSteps]`.
+/// 단발 요청(`lightweight` 또는 `command`): `priorHistory` 없이 `[<document_context> + 가변 상태 + prompt]`.
+pub fn assemble_ordered_turns_with_volatile(
+    req: &CopilotRunRequest,
+    prior_history: &[HistoryMessage],
+    context_block: &str,
+    volatile_state: &str,
     user_prompt: &str,
     loop_steps: &[HistoryMessage],
     merge_same_role: bool,
@@ -122,47 +213,67 @@ pub fn assemble_ordered_turns(
         user_prompt.to_string()
     };
 
-    if req.lightweight {
-        let body = if context_block.is_empty() {
-            prompt_text
-        } else {
-            format!("{context_block}\n\n{prompt_text}")
-        };
-        push_turn(&mut out, "user", body, merge_same_role);
+    if req.lightweight || req.command.is_some() {
+        let mut combined = String::new();
+        for part in [context_block, volatile_state, prompt_text.as_str()] {
+            if !part.is_empty() {
+                if !combined.is_empty() {
+                    combined.push_str("\n\n");
+                }
+                combined.push_str(part);
+            }
+        }
+        push_turn(&mut out, "user", combined, merge_same_role, false);
+        if req.command.is_some() {
+            for step in loop_steps {
+                let role = if step.role == "assistant" {
+                    "assistant"
+                } else {
+                    "user"
+                };
+                push_turn(&mut out, role, step.text.clone(), merge_same_role, false);
+            }
+        }
         return out;
     }
 
-    let pdf_immutable_prefix =
-        req.is_read_only() && req.module == CopilotModule::Pdf && !context_block.is_empty();
-
-    if pdf_immutable_prefix {
-        // 불변 PDF는 턴 1과 후속 질문 모두 [system, user(<document_context>), priorHistory..., user(prompt)] 접두를 공유한다.
-        push_turn(&mut out, "user", context_block.to_string(), merge_same_role);
-        for h in prior_history {
-            let role = if h.role == "assistant" {
-                "assistant"
-            } else {
-                "user"
-            };
-            push_turn(&mut out, role, h.text.clone(), merge_same_role);
-        }
-        push_turn(&mut out, "user", prompt_text, merge_same_role);
-    } else {
-        for h in prior_history {
-            let role = if h.role == "assistant" {
-                "assistant"
-            } else {
-                "user"
-            };
-            push_turn(&mut out, role, h.text.clone(), merge_same_role);
-        }
-        let tier3 = if context_block.is_empty() {
-            prompt_text
-        } else {
-            format!("{context_block}\n\n{prompt_text}")
-        };
-        push_turn(&mut out, "user", tier3, merge_same_role);
+    if !context_block.is_empty() {
+        push_turn(
+            &mut out,
+            "user",
+            context_block.to_string(),
+            merge_same_role,
+            true,
+        );
     }
+    let mut last_history_pos: Option<(usize, usize)> = None;
+    let mut seen_history_user = false;
+    for h in prior_history {
+        let role = if h.role == "assistant" {
+            "assistant"
+        } else {
+            "user"
+        };
+        if !seen_history_user && role != "user" {
+            continue;
+        }
+        seen_history_user = true;
+        if let Some(pos) = push_turn(&mut out, role, h.text.clone(), merge_same_role, false) {
+            last_history_pos = Some(pos);
+        }
+    }
+    if let Some((t_idx, b_idx)) = last_history_pos {
+        out[t_idx].blocks[b_idx].cache_breakpoint = true;
+    }
+
+    let tier4 = if volatile_state.is_empty() {
+        prompt_text
+    } else if prompt_text.is_empty() {
+        volatile_state.to_string()
+    } else {
+        format!("{volatile_state}\n\n{prompt_text}")
+    };
+    push_turn(&mut out, "user", tier4, merge_same_role, false);
 
     for step in loop_steps {
         let role = if step.role == "assistant" {
@@ -170,26 +281,29 @@ pub fn assemble_ordered_turns(
         } else {
             "user"
         };
-        push_turn(&mut out, role, step.text.clone(), merge_same_role);
+        push_turn(&mut out, role, step.text.clone(), merge_same_role, false);
     }
 
     out
 }
 
 /// Anthropic 요청 본문의 `system` 및 `messages` 필드를 직렬화한다.
-/// 공식 호스트(`api.anthropic.com`)에는 루트 `cache_control`, 시스템 블록 브레이크포인트, 일관된 텍스트 블록 배열을 적용한다.
+/// 루트 `cache_control`을 제거하고 재사용 경계(도구 또는 시스템, Tier 2 문서, priorHistory 끝)에만 브레이크포인트를 둔다.
 pub fn write_anthropic_system_and_messages(
     out: &mut String,
     system_prompt: &str,
     turns: &[TurnMessage],
-    official_host: bool,
+    use_block_array: bool,
+    allow_cache_breakpoints: bool,
+    cache_system_breakpoint: bool,
 ) {
-    if official_host {
-        out.push_str(
-            ",\"cache_control\":{\"type\":\"ephemeral\"},\"system\":[{\"type\":\"text\",\"text\":",
-        );
+    if use_block_array {
+        out.push_str(",\"system\":[{\"type\":\"text\",\"text\":");
         push_json_str(out, system_prompt);
-        out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}}]");
+        if allow_cache_breakpoints && cache_system_breakpoint {
+            out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+        }
+        out.push_str("}]");
     } else {
         out.push_str(",\"system\":");
         push_json_str(out, system_prompt);
@@ -203,20 +317,24 @@ pub fn write_anthropic_system_and_messages(
         out.push_str("{\"role\":");
         push_json_str(out, turn.role);
         out.push_str(",\"content\":");
-        if official_host {
+        if use_block_array {
             out.push('[');
             for (b_idx, block) in turn.blocks.iter().enumerate() {
                 if b_idx > 0 {
                     out.push(',');
                 }
                 out.push_str("{\"type\":\"text\",\"text\":");
-                push_json_str(out, block);
+                push_json_str(out, &block.text);
+                if allow_cache_breakpoints && block.cache_breakpoint {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
                 out.push('}');
             }
             out.push(']');
         } else {
-            let joined = turn.blocks.join("\n\n");
-            push_json_str(out, &joined);
+            let joined: Vec<&str> = turn.blocks.iter().map(|b| b.text.as_str()).collect();
+            let joined_str = joined.join("\n\n");
+            push_json_str(out, &joined_str);
         }
         out.push('}');
     }
@@ -243,7 +361,7 @@ pub fn write_google_contents(out: &mut String, turns: &[TurnMessage]) {
                 out.push(',');
             }
             out.push_str("{\"text\":");
-            push_json_str(out, block);
+            push_json_str(out, &block.text);
             out.push('}');
         }
         out.push_str("]}");
@@ -252,19 +370,56 @@ pub fn write_google_contents(out: &mut String, turns: &[TurnMessage]) {
 }
 
 /// OpenAI 및 호환 엔드포인트의 `messages` 배열을 직렬화한다.
-pub fn write_openai_messages(out: &mut String, system_prompt: &str, turns: &[TurnMessage]) {
+/// OpenRouter `anthropic/` 모델(`openrouter_anth_cache == true`)은 블록 배열과 정적 경계 `cache_control`을 쓴다.
+pub fn write_openai_messages_with_cache(
+    out: &mut String,
+    system_prompt: &str,
+    turns: &[TurnMessage],
+    openrouter_anth_cache: bool,
+    cache_system_breakpoint: bool,
+) {
     out.push_str(",\"messages\":[{\"role\":\"system\",\"content\":");
-    push_json_str(out, system_prompt);
+    if openrouter_anth_cache {
+        out.push_str("[{\"type\":\"text\",\"text\":");
+        push_json_str(out, system_prompt);
+        if cache_system_breakpoint {
+            out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+        }
+        out.push_str("}]");
+    } else {
+        push_json_str(out, system_prompt);
+    }
     out.push('}');
     for turn in turns {
-        let joined = turn.blocks.join("\n\n");
         out.push_str(",{\"role\":");
         push_json_str(out, turn.role);
         out.push_str(",\"content\":");
-        push_json_str(out, &joined);
+        if openrouter_anth_cache {
+            out.push('[');
+            for (b_idx, block) in turn.blocks.iter().enumerate() {
+                if b_idx > 0 {
+                    out.push(',');
+                }
+                out.push_str("{\"type\":\"text\",\"text\":");
+                push_json_str(out, &block.text);
+                if block.cache_breakpoint {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
+                out.push('}');
+            }
+            out.push(']');
+        } else {
+            let joined: Vec<&str> = turn.blocks.iter().map(|b| b.text.as_str()).collect();
+            let joined_str = joined.join("\n\n");
+            push_json_str(out, &joined_str);
+        }
         out.push('}');
     }
     out.push(']');
+}
+
+pub fn write_openai_messages(out: &mut String, system_prompt: &str, turns: &[TurnMessage]) {
+    write_openai_messages_with_cache(out, system_prompt, turns, false, false);
 }
 
 #[cfg(test)]

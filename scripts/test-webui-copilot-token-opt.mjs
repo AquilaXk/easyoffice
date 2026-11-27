@@ -184,10 +184,12 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
 
   // PDF activePage
   let pdfCtx = null;
+  let pdfDelta = null;
   const pdfH = await open({
     module: "PDF",
     run: (req) => {
       pdfCtx = req.context.pdf;
+      pdfDelta = req.contextDelta || null;
       return { status: "ok", mode: "ask", reply: "[3쪽] 확인", operations: [] };
     },
   });
@@ -222,9 +224,15 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
     assert.ok(pageMarkers[i] > pageMarkers[i - 1], `page numbers strictly ascending: ${pageMarkers[i - 1]} -> ${pageMarkers[i]}`);
   }
 
-  // activePage=1 on >24,000-char PDF starts directly with [1쪽] and omits front notice
+  // PD-369: scrolling 45 -> 1 in same PDF session keeps anchor pinned (anchorPage=45) and sends page 1 excerpt in contextDelta; 새 대화 rotates and re-anchors
   pdfH.document.getElementById("pdf-page-card").dataset.activePage = "1";
   await pdfH.send("1쪽 확인");
+  assert.equal(pdfCtx.anchorPage, 45, "scrolling within same session keeps PDF anchor window pinned");
+  assert.equal(pdfCtx.activePage, 1);
+  assert.match(pdfDelta?.summary || "", /^\[1쪽\] PAGE_1_BODY/, "page 1 excerpt sent in contextDelta");
+
+  pdfH.document.getElementById("btn-copilot-new").click();
+  await pdfH.send("1쪽 새 대화 확인");
   assert.match(pdfCtx.text, /^\[1쪽\] PAGE_1_BODY/);
   assert.doesNotMatch(pdfCtx.text, /쪽 생략\]/);
 
@@ -409,15 +417,15 @@ test("regression fixes: live UI chunk eviction across 9 turns, <del> active span
       return { status: "ok", mode: "ask", reply: "응답 " + req.prompt, operations: [] };
     },
   });
-  for (let t = 1; t <= 9; t += 1) {
+  for (let t = 1; t <= 11; t += 1) {
     await uiH.send("질문 " + t);
   }
-  assert.equal(histories.length, 9);
-  assert.equal(histories[6].length, 12, "Turn 7 still carries 6 completed turns (12 items)");
-  assert.equal(histories[7].length, 10, "Turn 8 evicts one 4-item chunk (14 -> 10)");
-  assert.equal(histories[7][0].text, "질문 3");
-  assert.equal(histories[8].length, 12, "Turn 9 appends turn 8 onto exact Turn 8 prefix");
-  assert.deepEqual(histories[8].slice(0, 10), histories[7], "Turn 8 & Turn 9 share exact 10-item cache prefix");
+  assert.equal(histories.length, 11);
+  assert.equal(histories[8].length, 16, "Turn 9 carries 8 completed turns (16 items)");
+  assert.equal(histories[9].length, 10, "Turn 10 evicts one 8-item chunk (18 -> 10)");
+  assert.equal(histories[9][0].text, "질문 5");
+  assert.equal(histories[10].length, 12, "Turn 11 appends turn 10 onto exact Turn 10 prefix");
+  assert.deepEqual(histories[10].slice(0, 10), histories[9], "Turn 10 & Turn 11 share exact 10-item cache prefix");
 
   // 2. <del data-eo-rev-id> and <sup data-eo-note-kind> excluded in replaceSpanWithTrackChanges & preview
   const docHtml = uiH.host.__EASYOFFICE_COPILOT_DOC_HTML__;

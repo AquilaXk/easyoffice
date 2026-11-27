@@ -11,16 +11,12 @@
     "#REF!", "#NAME?", "#VALUE!", "#CYCLE!", "#DIV/0!", "#N/A", "#NUM!", "#NULL!", "#SPILL!",
   ]);
 
-  function compareCoordEntries(a, b) {
-    return a.row - b.row || a.col - b.col;
-  }
-
-  function formatSelectionA1(rg, colName) {
-    if (!rg || !Number.isInteger(rg.r1) || !Number.isInteger(rg.c1)) return "A1";
-    const start = colName(rg.c1) + rg.r1;
-    if (rg.r1 === rg.r2 && rg.c1 === rg.c2) return start;
-    return start + ":" + colName(rg.c2) + rg.r2;
-  }
+  const compareCoordEntries = (a, b) => a.row - b.row || a.col - b.col;
+  const formatSelectionA1 = (rg, colName) => (
+    !rg || !Number.isInteger(rg.r1) || !Number.isInteger(rg.c1)
+      ? "A1"
+      : colName(rg.c1) + rg.r1 + (rg.r1 === rg.r2 && rg.c1 === rg.c2 ? "" : ":" + colName(rg.c2) + rg.r2)
+  );
 
   function parseRangeBox1(rawRange) {
     const names = host.__EASYOFFICE_SHEET_NAMES__;
@@ -808,7 +804,7 @@
 
   function readSheetRangeTool(args, deps) {
     const { sheetDataStore, getActiveSheetName, getSheetController } = deps;
-    const { refOf } = host.__EASYOFFICE_SHEET_REFS__;
+    const { colName, refOf } = host.__EASYOFFICE_SHEET_REFS__;
     const sc = getSheetController?.();
     const active = getActiveSheetName();
     if (sc && (!args.sheet || args.sheet === active)) {
@@ -817,28 +813,43 @@
     const sheet = String(args.sheet || active);
     const store = sheetDataStore[sheet] || {};
     const box = parseRangeBox1(args.range);
-    if (!box) return { sheet, range: String(args.range || ""), cells: [], error: "유효하지 않은 범위입니다." };
+    if (!box) return { sheet, range: String(args.range || ""), tsv: "", error: "유효하지 않은 범위입니다." };
 
-    const cells = [];
+    const colsSet = new Set();
+    const rowsMap = new Map();
+    let cellCount = 0;
     let truncated = false;
     for (let r = box.r1; r <= box.r2; r += 1) {
       for (let c = box.c1; c <= box.c2; c += 1) {
-        if (cells.length >= MAX_READ_TOOL_CELLS) {
+        if (cellCount >= MAX_READ_TOOL_CELLS) {
           truncated = true;
           break;
         }
         const coord = refOf(r, c);
         const rec = store[coord];
         if (!rec || (!rec.value && !rec.formula)) continue;
-        cells.push({
-          coord,
-          raw: rec.formula ? String(rec.formula) : String(rec.value ?? ""),
-          value: String(rec.value ?? ""),
-        });
+        const raw = rec.formula ? String(rec.formula) : String(rec.value ?? "");
+        const val = String(rec.value ?? "");
+        const disp = val && raw && val !== raw ? `${raw}=${val}` : raw || val;
+        colsSet.add(c);
+        if (!rowsMap.has(r)) rowsMap.set(r, new Map());
+        rowsMap.get(r).set(c, disp.replace(/[\t\r\n]+/g, " "));
+        cellCount += 1;
       }
       if (truncated) break;
     }
-    return { sheet, range: String(args.range || ""), truncated, cells };
+    const cols = Array.from(colsSet).sort((a, b) => a - b);
+    const lines = [`시트: ${sheet} | 범위: ${String(args.range || "")}${truncated ? " (일부 생략)" : ""}`];
+    if (cols.length > 0) {
+      lines.push("열: " + cols.map((c) => colName(c)).join("\t"));
+      for (const r of Array.from(rowsMap.keys()).sort((a, b) => a - b)) {
+        const rMap = rowsMap.get(r);
+        const rowCells = cols.map((c) => rMap.get(c) ?? "");
+        while (rowCells.length > 0 && rowCells[rowCells.length - 1] === "") rowCells.pop();
+        lines.push(`  [${r}] ${rowCells.join("\t")}`);
+      }
+    }
+    return { sheet, range: String(args.range || ""), truncated, tsv: lines.join("\n") };
   }
 
   function findSheetCellsTool(args, deps) {
@@ -849,11 +860,12 @@
     if (sc) sheetDataStore[active] = sc.snapshotDomSheetCells();
 
     const q = String(args.query || "").trim().toLowerCase();
-    if (!q) return { matches: [] };
+    if (!q) return { lines: [] };
     const sheetNames = args.sheet && Object.hasOwn(sheetDataStore, args.sheet)
       ? [args.sheet]
       : Object.keys(sheetDataStore);
-    const matches = [];
+    const lines = [];
+    let truncated = false;
     for (const sName of sheetNames) {
       const store = sheetDataStore[sName] || {};
       const coords = [];
@@ -867,22 +879,20 @@
         const val = String(rec?.value ?? "");
         const raw = String(rec?.formula || val);
         if (val.toLowerCase().includes(q) || raw.toLowerCase().includes(q)) {
-          matches.push({ sheet: sName, coord: item.key, raw, value: val });
-          if (matches.length >= MAX_FIND_MATCHES) return { query: args.query, matches, truncated: true };
+          const disp = val && raw && val !== raw ? `${raw}=${val}` : raw || val;
+          lines.push(`${sName}!${item.key}: ${disp.replace(/[\r\n]+/g, " ")}`);
+          if (lines.length >= MAX_FIND_MATCHES) {
+            truncated = true;
+            break;
+          }
         }
       }
+      if (truncated) break;
     }
-    return { query: args.query, matches, truncated: false };
+    return { query: args.query, truncated, lines };
   }
 
-  const EXTENDED_SHEET_KINDS = new Set([
-    "sheet.table",
-    "sheet.pivot",
-    "sheet.cond_format",
-    "sheet.sort_filter",
-    "sheet.structure",
-    "sheet.note",
-  ]);
+  const EXTENDED_SHEET_KINDS = new Set(["sheet.table", "sheet.pivot", "sheet.cond_format", "sheet.sort_filter", "sheet.structure", "sheet.note"]);
 
   function executeExtendedSheetOp(kind, op, deps, options = {}) {
     const { sheetName, sheetDataStore, sheetRowCounts, locations } = deps;

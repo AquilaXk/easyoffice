@@ -90,6 +90,7 @@ pub struct SlideItem {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlideContext {
     pub active_index: usize,
+    pub anchor_index: Option<usize>,
     pub slides: Vec<SlideItem>,
 }
 
@@ -98,6 +99,7 @@ pub struct PdfContext {
     pub text: String,
     pub page_count: usize,
     pub active_page: Option<usize>,
+    pub anchor_page: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,10 +461,12 @@ pub(super) fn parse_context(
                 .and_then(|v| usize::try_from(v).ok())
                 .unwrap_or(0);
             let active_page = opt_usize_field(p_obj, "activePage").filter(|&p| p >= 1);
+            let anchor_page = opt_usize_field(p_obj, "anchorPage").filter(|&p| p >= 1);
             Some(PdfContext {
                 text,
                 page_count,
                 active_page,
+                anchor_page,
             })
         }
     } else {
@@ -585,6 +589,7 @@ fn parse_slide_context(obj: &[(String, StrictJsonValue)]) -> Result<SlideContext
         .and_then(StrictJsonValue::as_u64)
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(0);
+    let anchor_index = opt_usize_field(obj, "anchorIndex");
     let slides = match StrictJsonValue::get_field(obj, "slides") {
         None | Some(StrictJsonValue::Null) => Vec::new(),
         Some(v) => {
@@ -686,6 +691,7 @@ fn parse_slide_context(obj: &[(String, StrictJsonValue)]) -> Result<SlideContext
     };
     Ok(SlideContext {
         active_index,
+        anchor_index,
         slides,
     })
 }

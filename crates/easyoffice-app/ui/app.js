@@ -187,7 +187,7 @@
     onOpenRequest: () => windowBridge.requestOpenFile(),
     routeFile: (file) => windowBridge.routeFile(file),
     enqueueOp: enqueueWorkspaceHistoryOp, runExclusive: chainWorkspaceQueue,
-    onOpenedClean: () => (windowBridge.isManaged() ? workspaceSession.markSaved() : undefined),
+    onOpenedClean: () => { copilotUi?.onDocumentOpened?.(); return windowBridge.isManaged() ? workspaceSession.markSaved() : undefined; },
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,

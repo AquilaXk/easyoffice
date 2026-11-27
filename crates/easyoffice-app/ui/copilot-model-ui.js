@@ -32,6 +32,7 @@
     const keyUrlsByProvider = new Map();
     const urlsByProvider = new Map();
     const modelsByProvider = new Map();
+    const fastModelsByProvider = new Map();
     const discoveredByProvider = new Map();
 
     const keyFor = (kind, baseUrl) => (keyUrlsByProvider.get(kind) === baseUrl ? keysByProvider.get(kind) || "" : "");
@@ -67,6 +68,33 @@
         model: providerModel,
         apiKey: providerKind ? keyFor(providerKind, providerBaseUrl) : "",
         reasoningEffort: canReason ? reasoningEffort : "",
+      };
+    }
+
+    function setFastModel(modelId, kind = providerKind) {
+      const targetKind = String(kind || providerKind || "").trim();
+      if (!targetKind) return "";
+      const clean = String(modelId || "").trim();
+      if (clean) fastModelsByProvider.set(targetKind, clean);
+      else fastModelsByProvider.delete(targetKind);
+      return clean;
+    }
+
+    function getFastModel(kind = providerKind) {
+      return fastModelsByProvider.get(String(kind || providerKind || "")) || "";
+    }
+
+    function getFastProviderPayload() {
+      const base = currentProviderPayload();
+      if (!base.kind || !base.model) return base;
+      const overrideId = fastModelsByProvider.get(base.kind) || "";
+      const fastId = overrideId || catalog.findFastSiblingModel?.(base.kind, base.model, discoveredByProvider) || "";
+      if (!fastId || fastId === base.model) return base;
+      const canReason = catalog.supportsReasoning(base.kind, fastId, discoveredByProvider);
+      return {
+        ...base,
+        model: fastId,
+        reasoningEffort: canReason ? "low" : "",
       };
     }
 
@@ -775,6 +803,10 @@
       openDialog,
       syncModelButton,
       currentProviderPayload,
+      setFastModel,
+      getFastModel,
+      getFastProviderPayload,
+      getContextWindow: () => catalog.getModelContextWindow(providerKind, providerModel, discoveredByProvider),
       closeMenu,
       repositionMenu: () => {
         if (isMenuOpen) positionMenu();

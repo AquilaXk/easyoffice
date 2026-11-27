@@ -4,18 +4,18 @@ use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use std::fmt::Write as _;
 
 use super::cache::{
-    assemble_ordered_turns, build_prompt_cache_key, is_official_anthropic_host,
-    is_official_openai_host, write_anthropic_system_and_messages, write_google_contents,
-    write_openai_messages,
+    assemble_ordered_turns_with_volatile, build_prompt_cache_key, is_official_anthropic_host,
+    is_official_openai_host, is_openrouter_anthropic_cache, supports_openai_stream_usage,
+    write_anthropic_system_and_messages, write_google_contents, write_openai_messages_with_cache,
 };
 use super::schema::{
-    synthesize_completion_from_tools, write_provider_tools_field, NativeToolInvocation,
+    has_emitted_tools, synthesize_completion_from_tools, write_provider_tools_field,
+    NativeToolInvocation,
 };
 use super::ssrf::EndpointTarget;
 use super::types::{
     push_json_str, CopilotRunRequest, HistoryMessage, ProviderConfig, ProviderKind,
-    ReasoningEffort, LIGHTWEIGHT_MAX_OUTPUT_TOKENS, MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES,
-    MAX_OUTPUT_TOKENS,
+    ReasoningEffort, MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES, MAX_OUTPUT_TOKENS,
 };
 use super::usage::{extract_usage_from_root, TokenUsage};
 
@@ -96,7 +96,11 @@ pub fn models_endpoint_target(provider: &ProviderConfig) -> EndpointTarget<'stat
     }
 }
 
-fn openai_output_cap(kind: ProviderKind, effort: Option<ReasoningEffort>) -> (&'static str, u32) {
+fn openai_output_cap(
+    kind: ProviderKind,
+    base_cap: u32,
+    effort: Option<ReasoningEffort>,
+) -> (&'static str, u32) {
     let field = if kind == ProviderKind::OpenAi {
         "max_completion_tokens"
     } else {
@@ -109,7 +113,7 @@ fn openai_output_cap(kind: ProviderKind, effort: Option<ReasoningEffort>) -> (&'
     let extra = effort
         .filter(|_| reasoning_counts)
         .map_or(0, ReasoningEffort::budget_tokens);
-    (field, MAX_OUTPUT_TOKENS + extra)
+    (field, base_cap + extra)
 }
 
 pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
@@ -132,7 +136,7 @@ pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
             let mut out = String::with_capacity(256);
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            let (field, _) = openai_output_cap(provider.kind, None);
+            let (field, _) = openai_output_cap(provider.kind, MAX_OUTPUT_TOKENS, None);
             let _ = write!(
                 out,
                 ",\"messages\":[{{\"role\":\"user\",\"content\":\"ping\"}}],\"{field}\":1}}"
@@ -185,6 +189,29 @@ pub fn build_provider_chat_body_with_parts(
     stream: bool,
     system_prompt: &str,
 ) -> Result<String, EasyOfficeError> {
+    build_provider_chat_body_with_all_parts(
+        req,
+        prior_history,
+        context_block,
+        "",
+        user_prompt,
+        loop_steps,
+        stream,
+        system_prompt,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_provider_chat_body_with_all_parts(
+    req: &CopilotRunRequest,
+    prior_history: &[HistoryMessage],
+    context_block: &str,
+    volatile_state: &str,
+    user_prompt: &str,
+    loop_steps: &[HistoryMessage],
+    stream: bool,
+    system_prompt: &str,
+) -> Result<String, EasyOfficeError> {
     let model = req.provider.model.trim();
     if model.is_empty() {
         return Err(EasyOfficeError::InvalidArgument(
@@ -192,13 +219,15 @@ pub fn build_provider_chat_body_with_parts(
         ));
     }
     let effort = req.effective_reasoning_effort();
+    let base_cap = req.effective_output_base_cap();
     let is_reasoning = infer_reasoning_support(model);
     let body = match req.provider.kind {
         ProviderKind::Anthropic => {
-            let turns = assemble_ordered_turns(
+            let turns = assemble_ordered_turns_with_volatile(
                 req,
                 prior_history,
                 context_block,
+                volatile_state,
                 user_prompt,
                 loop_steps,
                 true,
@@ -210,19 +239,29 @@ pub fn build_provider_chat_body_with_parts(
                     .filter(|_| is_reasoning)
                     .map_or(0, ReasoningEffort::budget_tokens)
             };
-            let max_tokens = if req.lightweight {
-                LIGHTWEIGHT_MAX_OUTPUT_TOKENS
-            } else {
-                MAX_OUTPUT_TOKENS + budget
-            };
+            let max_tokens = base_cap + budget;
             let official_host = is_official_anthropic_host(&req.provider.base_url);
+            let allow_cache_breakpoints =
+                !req.lightweight && req.command.is_none() && official_host;
+            let cache_system_breakpoint = !has_emitted_tools(req);
             let mut out = String::with_capacity(
-                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+                system_prompt.len()
+                    + context_block.len()
+                    + volatile_state.len()
+                    + user_prompt.len()
+                    + 1024,
             );
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
             let _ = write!(out, ",\"max_tokens\":{max_tokens}");
-            write_anthropic_system_and_messages(&mut out, system_prompt, &turns, official_host);
+            write_anthropic_system_and_messages(
+                &mut out,
+                system_prompt,
+                &turns,
+                official_host,
+                allow_cache_breakpoints,
+                cache_system_breakpoint,
+            );
             write_provider_tools_field(&mut out, req);
             if !req.lightweight {
                 if budget > 0 {
@@ -241,10 +280,11 @@ pub fn build_provider_chat_body_with_parts(
             out
         }
         ProviderKind::Google => {
-            let turns = assemble_ordered_turns(
+            let turns = assemble_ordered_turns_with_volatile(
                 req,
                 prior_history,
                 context_block,
+                volatile_state,
                 user_prompt,
                 loop_steps,
                 true,
@@ -261,13 +301,13 @@ pub fn build_provider_chat_body_with_parts(
                     .filter(|_| is_reasoning || gemini_34)
                     .map_or(0, ReasoningEffort::budget_tokens)
             };
-            let max_out = if req.lightweight {
-                LIGHTWEIGHT_MAX_OUTPUT_TOKENS
-            } else {
-                MAX_OUTPUT_TOKENS + budget
-            };
+            let max_out = base_cap + budget;
             let mut out = String::with_capacity(
-                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+                system_prompt.len()
+                    + context_block.len()
+                    + volatile_state.len()
+                    + user_prompt.len()
+                    + 1024,
             );
             out.push_str("{\"systemInstruction\":{\"parts\":[{\"text\":");
             push_json_str(&mut out, system_prompt);
@@ -299,26 +339,33 @@ pub fn build_provider_chat_body_with_parts(
             out
         }
         _ => {
-            let turns = assemble_ordered_turns(
+            let or_anth_cache = is_openrouter_anthropic_cache(req);
+            let turns = assemble_ordered_turns_with_volatile(
                 req,
                 prior_history,
                 context_block,
+                volatile_state,
                 user_prompt,
                 loop_steps,
                 false,
             );
             let mut out = String::with_capacity(
-                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+                system_prompt.len()
+                    + context_block.len()
+                    + volatile_state.len()
+                    + user_prompt.len()
+                    + 1024,
             );
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            write_openai_messages(&mut out, system_prompt, &turns);
-            let (cap_field, cap) = if req.lightweight {
-                let (f, _) = openai_output_cap(req.provider.kind, None);
-                (f, LIGHTWEIGHT_MAX_OUTPUT_TOKENS)
-            } else {
-                openai_output_cap(req.provider.kind, effort)
-            };
+            write_openai_messages_with_cache(
+                &mut out,
+                system_prompt,
+                &turns,
+                or_anth_cache,
+                !has_emitted_tools(req),
+            );
+            let (cap_field, cap) = openai_output_cap(req.provider.kind, base_cap, effort);
             let _ = write!(out, ",\"{cap_field}\":{cap}");
             write_provider_tools_field(&mut out, req);
             if req.provider.kind == ProviderKind::OpenAi
@@ -351,9 +398,7 @@ pub fn build_provider_chat_body_with_parts(
             }
             if stream {
                 out.push_str(",\"stream\":true");
-                if req.provider.kind == ProviderKind::OpenAi
-                    && is_official_openai_host(&req.provider.base_url)
-                {
+                if supports_openai_stream_usage(req) {
                     out.push_str(",\"stream_options\":{\"include_usage\":true}");
                 }
             }

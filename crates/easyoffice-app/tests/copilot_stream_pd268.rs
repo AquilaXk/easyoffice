@@ -94,7 +94,7 @@ fn obj(raw: &str) -> Vec<(String, StrictJsonValue)> {
 #[test]
 fn text_pieces_reach_the_host_in_order_and_the_answer_is_validated_at_the_end() {
     let (seen, bodies) = (Mutex::new(Vec::new()), Mutex::new(Vec::new()));
-    let pieces = openai_sse(MODEL_JSON, 9);
+    let pieces = openai_sse(MODEL_JSON, 3);
     let res = run_streaming(
         &payload("cp-s-order", r#","stream":true"#),
         pieces,
@@ -133,8 +133,8 @@ fn text_pieces_reach_the_host_in_order_and_the_answer_is_validated_at_the_end() 
     }
     let joined: String = seen.iter().map(|(_, _, t)| t.as_str()).collect();
     assert_eq!(
-        joined, MODEL_JSON,
-        "the pieces add up to what the model wrote"
+        joined, "문단을 추가했습니다.",
+        "stream exposes only reply prose and never leaks raw operations JSON"
     );
     let body = &bodies.lock().unwrap()[0];
     assert!(body.contains(r#""stream":true"#), "{body}");
@@ -369,7 +369,7 @@ fn the_loopback_client_hands_over_chunked_pieces_while_the_server_is_still_writi
         .iter()
         .map(|(_, _, t)| t.clone())
         .collect();
-    assert_eq!(joined, r#"{"reply":"첫째 둘째 셋째"}"#);
+    assert_eq!(joined, "첫째 둘째 셋째");
 }
 
 #[test]

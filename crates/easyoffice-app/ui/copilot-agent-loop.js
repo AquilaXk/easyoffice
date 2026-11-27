@@ -11,7 +11,7 @@
   const MAX_CUMULATIVE_BYTES = 384 * 1024;
   const MAX_TOOL_OUTPUT_CHARS = 12000;
   const MAX_TOOL_OUTPUT_BYTES = 15000;
-  const MAX_HISTORY_SEND = 12;
+  const MAX_HISTORY_SEND = 16;
   const MAX_DRY_RUN_EVAL_CELLS = 10000;
   const DEFAULT_A4_CONTENT_W_PT = 481.89;
   const PT_PER_TWIP = 0.05;
@@ -248,6 +248,92 @@
       return { ok: newIssues.length === 0, issues: newIssues };
     }
 
+    if (mod === "HWP") {
+      const snap = ctx.getHwpSnapshot?.();
+      if (!snap) return { ok: true, issues: [] };
+      const total = Number(snap.totalParagraphs || 0);
+      const byIndex = snap.byIndex instanceof Map ? snap.byIndex : new Map();
+      const hasHtmlTag = (text) => /<\/?[a-z][a-z0-9]*\b[^>]*>/i.test(String(text || ""));
+      for (const op of operations) {
+        const kind = String(op?.op || op?.type || op?.kind || "").trim();
+        if (kind === "doc.replace_span") {
+          const idx = Number(op?.index);
+          if (!Number.isInteger(idx) || idx < 0 || idx >= total) {
+            newIssues.push(`HWP 문단 인덱스 ${op?.index}가 범위(0..${total})를 벗어났습니다.`);
+            continue;
+          }
+          const entry = byIndex.get(idx);
+          if (entry?.hasControls) {
+            newIssues.push(`HWP 문단 [${idx}]에는 표·그림 등 개체가 있어 부분 치환할 수 없습니다.`);
+            continue;
+          }
+          const search = String(op?.search ?? "");
+          const replace = String(op?.replace ?? "");
+          if (!search.trim()) {
+            newIssues.push(`HWP doc.replace_span(index=${idx}): search가 비어 있습니다.`);
+            continue;
+          }
+          if (hasHtmlTag(replace)) {
+            newIssues.push(`HWP doc.replace_span(index=${idx}): HWP 연산에 HTML 태그를 넣을 수 없습니다.`);
+            continue;
+          }
+          if (entry && typeof entry.text === "string") {
+            const at = entry.text.indexOf(search);
+            if (at < 0) {
+              newIssues.push(`HWP doc.replace_span(index=${idx}): search='${search.slice(0, 40)}'를 찾지 못했습니다.`);
+            } else if (entry.text.indexOf(search, at + 1) >= 0) {
+              newIssues.push(`HWP doc.replace_span(index=${idx}): search='${search.slice(0, 40)}'가 여러 번 일치합니다.`);
+            }
+          }
+        } else if (kind === "doc.replace_paragraphs") {
+          if (Array.isArray(op.replacements)) {
+            for (const rep of op.replacements) {
+              const idx = Number(rep?.index);
+              if (!Number.isInteger(idx) || idx < 0 || idx >= total) {
+                newIssues.push(`HWP doc.replace_paragraphs: 인덱스 ${rep?.index} 범위 초과(0..${total})`);
+                continue;
+              }
+              if (byIndex.get(idx)?.hasControls) {
+                newIssues.push(`HWP 문단 [${idx}] 개체 포함 문단은 수정할 수 없습니다.`);
+              }
+              if (hasHtmlTag(rep?.text)) {
+                newIssues.push(`HWP 문단 [${idx}] 평문 전용(HTML 금지)`);
+              }
+            }
+          } else {
+            const start = Number.isInteger(op.startIndex) ? op.startIndex : 0;
+            const end = Number.isInteger(op.endIndex) ? op.endIndex : total - 1;
+            if (start < 0 || end < start || end >= total) {
+              newIssues.push(`HWP doc.replace_paragraphs: 범위 [${start}..${end}] 오류(0..${total})`);
+            } else {
+              for (let i = start; i <= end; i += 1) {
+                if (byIndex.get(i)?.hasControls) {
+                  newIssues.push(`HWP 문단 [${i}] 개체 포함 문단은 범위 교체할 수 없습니다.`);
+                  break;
+                }
+              }
+            }
+            const blocks = Array.isArray(op.blocks) ? op.blocks : [];
+            if (blocks.some((b) => Boolean(b?.table || b?.rows))) {
+              newIssues.push("HWP 문서는 doc.replace_paragraphs에 표 블록을 지원하지 않습니다.");
+            }
+            if (blocks.some((b) => hasHtmlTag(typeof b === "string" ? b : b?.text))) {
+              newIssues.push("HWP doc.replace_paragraphs는 평문만 허용합니다(HTML 금지).");
+            }
+          }
+        } else if (kind === "doc.append") {
+          const blocks = Array.isArray(op.blocks) ? op.blocks : [];
+          if (blocks.some((b) => Boolean(b?.table || b?.rows))) {
+            newIssues.push("HWP 문서는 doc.append에 표 블록을 지원하지 않습니다.");
+          }
+          if (blocks.some((b) => hasHtmlTag(typeof b === "string" ? b : b?.text))) {
+            newIssues.push("HWP doc.append는 평문만 허용합니다(HTML 금지).");
+          }
+        }
+      }
+      return { ok: newIssues.length === 0, issues: newIssues };
+    }
+
     if (mod === "DOC") {
       const liveEditor = ctx.document?.getElementById?.("doc-editor");
       const clone = ctx.document.createElement("div");
@@ -375,29 +461,60 @@
     } = deps;
     const { clipCodePoints, clipUtf8Bytes } = host.__EASYOFFICE_COPILOT_TEXT__;
 
+    function formatToolArgsSummary(tc) {
+      if (!tc || typeof tc !== "object") return "";
+      return Object.entries(tc)
+        .filter(([k, v]) => k !== "name" && v !== undefined && v !== null && v !== "")
+        .slice(0, 4)
+        .map(([k, v]) => `${k}=${clipCodePoints(String(v), 48)}`)
+        .join(",");
+    }
+
+    function formatDenseToolResult(name, result) {
+      if (!result || typeof result !== "object") return String(result ?? "");
+      if (typeof result.tsv === "string" && result.tsv) return result.tsv;
+      if (Array.isArray(result.lines)) {
+        const hdr = Number.isInteger(result.totalParagraphs)
+          ? `[문단 전체 ${result.totalParagraphs}개]`
+          : result.query ? `[검색: ${result.query}${result.truncated ? ", 일부 생략" : ""}]` : "";
+        return [hdr, ...result.lines].filter(Boolean).join("\n");
+      }
+      if (Array.isArray(result.blocks)) {
+        const hdr = Number.isInteger(result.totalParagraphs) ? `[문단 전체 ${result.totalParagraphs}개]` : "";
+        const ls = result.blocks.map((b) => `  [${b.index}] ${String(b.text ?? "").replace(/[\r\n]+/g, " ")}`);
+        return [hdr, ...ls].filter(Boolean).join("\n");
+      }
+      if (Array.isArray(result.matches)) {
+        return result.matches.map((m) => (m.page ? `[${m.page}쪽] ${m.snippet || ""}` : `${m.sheet || ""}!${m.coord || ""}: ${m.raw ?? m.value ?? ""}`)).join("\n");
+      }
+      return JSON.stringify(result);
+    }
+
     async function executeToolCalls(mod, toolCalls, compactor) {
-      const outputs = [];
+      const chunks = [];
       for (const tc of toolCalls) {
         if (!tc || typeof tc !== "object") continue;
         const name = String(tc.name || "");
+        const argStr = formatToolArgsSummary(tc);
         try {
           if (compactor) {
             const entry = await compactor.runCachedReadTool(mod, tc, copilotActions.executeReadTool);
             if (entry.cached) {
-              outputs.push({ tool: name, cached: true, receipt: entry.receipt });
+              chunks.push(`[${name}(${argStr})] ${entry.receipt}`);
             } else {
-              outputs.push({ tool: name, ok: true, sha256: entry.sha256.slice(0, 12), result: entry.result });
+              const body = formatDenseToolResult(name, entry.result);
+              chunks.push(`[${name}(${argStr}) sha256=${entry.sha256.slice(0, 12)}]\n${body}`);
             }
           } else {
             const result = await copilotActions.executeReadTool(mod, name, tc);
-            outputs.push({ tool: name, ok: true, result });
+            chunks.push(`[${name}(${argStr})]\n${formatDenseToolResult(name, result)}`);
           }
         } catch (err) {
-          outputs.push({ tool: name, ok: false, error: String(err?.message || err) });
+          chunks.push(`[${name}(${argStr}) 오류] ${String(err?.message || err)}`);
         }
       }
-      const rawJson = JSON.stringify(outputs);
-      const capped = clipCodePoints(rawJson, MAX_TOOL_OUTPUT_CHARS);
+      const combined = chunks.join("\n\n");
+      const capped = clipCodePoints(combined, MAX_TOOL_OUTPUT_CHARS);
       return typeof clipUtf8Bytes === "function" ? clipUtf8Bytes(capped, MAX_TOOL_OUTPUT_BYTES) : capped;
     }
 
@@ -424,8 +541,17 @@
       const compactor = compactApi ? compactApi.createLoopCompactor() : null;
       let cumulativeBytes = 0;
       let totalDropped = 0;
+      let dropRetries = 0;
       let lintRetries = 0;
       let finalRes = null;
+      let hasUsage = false;
+      const totalUsage = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+      };
 
       for (let turnIdx = 0; turnIdx < MAX_TURNS; turnIdx += 1) {
         if (isCancelled()) return null;
@@ -461,6 +587,14 @@
         session?.finish();
 
         totalDropped += Number(res?.droppedOperations) || 0;
+        if (res?.usage && typeof res.usage === "object") {
+          hasUsage = true;
+          totalUsage.inputTokens += Number(res.usage.inputTokens) || 0;
+          totalUsage.outputTokens += Number(res.usage.outputTokens) || 0;
+          totalUsage.cachedTokens += Number(res.usage.cachedTokens) || 0;
+          totalUsage.cacheWriteTokens += Number(res.usage.cacheWriteTokens) || 0;
+          totalUsage.reasoningTokens += Number(res.usage.reasoningTokens) || 0;
+        }
         finalRes = res;
 
         const toolCalls = Array.isArray(res?.toolCalls) ? res.toolCalls : [];
@@ -470,7 +604,12 @@
         if (toolCalls.length > 0 && ops.length === 0 && turnIdx + 1 < MAX_TURNS) {
           const toolJson = await executeToolCalls(baseReq.module, toolCalls, compactor);
           if (isCancelled()) return null;
-          const stepAssistant = String(res?.reply || "문서 범위를 조회합니다.");
+          const calledNames = toolCalls
+            .map((tc) => `${String(tc?.name || "")}(${formatToolArgsSummary(tc)})`)
+            .join(", ");
+          const stepAssistant = res?.reply
+            ? `${String(res.reply).trim()}\n[조회 호출] ${calledNames}`
+            : `[조회 호출] ${calledNames}`;
           const stepUser = `[도구 실행 결과]\n${toolJson}\n위 조회 결과를 바탕으로 최종 답변·연산을 작성하십시오.`;
           if (compactor) {
             compactor.pushStepPair(loopSteps, stepAssistant, stepUser);
@@ -481,14 +620,37 @@
           continue;
         }
 
-        // 2. Deterministic post-verification gate before presenting edit preview (DOC / SLIDE / SHEET).
+        // 2. Rust droppedOperations feedback retry loop when engine returned droppedReasons.
+        if (
+          baseReq.mode === "edit"
+          && ops.length === 0
+          && (Number(res?.droppedOperations) || 0) > 0
+          && Array.isArray(res?.droppedReasons)
+          && res.droppedReasons.length > 0
+          && dropRetries < MAX_LINT_RETRIES
+          && !baseReq.command
+          && turnIdx + 1 < MAX_TURNS
+        ) {
+          dropRetries += 1;
+          if (compactor?.summarizeDroppedOperations) {
+            const pair = compactor.summarizeDroppedOperations(res);
+            compactor.pushStepPair(loopSteps, pair.assistantText, pair.userText);
+          } else {
+            const reasons = res.droppedReasons.slice(0, 8).join("; ");
+            loopSteps.push({ role: "assistant", text: String(res?.reply || "연산 검증 재시도") });
+            loopSteps.push({ role: "user", text: `[엔진 연산 검증 거부] ${reasons}. 유효한 연산을 다시 작성하십시오.` });
+          }
+          continue;
+        }
+
+        // 3. Deterministic post-verification gate before presenting edit preview (DOC / HWP / SLIDE / SHEET).
         if (
           baseReq.mode === "edit"
           && ops.length > 0
           && !baseReq.command
           && lintRetries < MAX_LINT_RETRIES
           && turnIdx + 1 < MAX_TURNS
-          && (baseReq.module === "DOC" || baseReq.module === "SLIDE" || baseReq.module === "SHEET")
+          && (baseReq.module === "DOC" || baseReq.module === "HWP" || baseReq.module === "SLIDE" || baseReq.module === "SHEET")
         ) {
           const normalizedOps = copilotActions.normalizeOperations(baseReq.module, ops, params.frozenSelection);
           const gate = await copilotActions.dryRunVerifyOperations(baseReq.module, normalizedOps, invokeIpc);
@@ -517,9 +679,13 @@
       }
 
       if (!finalRes) return null;
+      const lastContextTokens = finalRes?.usage && typeof finalRes.usage === "object"
+        ? (Number(finalRes.usage.inputTokens) || 0) + (Number(finalRes.usage.outputTokens) || 0)
+        : 0;
       return {
         ...finalRes,
         droppedOperations: totalDropped,
+        ...(hasUsage ? { usage: totalUsage, lastContextTokens } : {}),
       };
     }
 

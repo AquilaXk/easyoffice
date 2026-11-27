@@ -35,9 +35,11 @@ pub const MAX_PROMPT_SHEET_CELLS: usize = 300;
 pub const MAX_PROMPT_SLIDES: usize = 64;
 pub const MAX_PROMPT_PDF_CHARS: usize = 12_000;
 pub const MAX_PROMPT_CONTEXT_BYTES: usize = 24 * 1024;
+pub const MAX_CJK_PROMPT_CONTEXT_BYTES: usize = 36 * 1024;
 pub const MAX_BASE_TABLES: usize = 64;
 pub const MAX_BASE_FIELDS: usize = 64;
 pub const MAX_BASE_RECORDS: usize = 100;
+pub const MAX_PROMPT_BASE_RECORDS: usize = 50;
 pub const MAX_BASE_TEXT_BYTES: usize = 1_024;
 pub const MAX_BOARD_NODES: usize = 256;
 pub const MAX_BOARD_CONNECTORS: usize = 1_024;
@@ -379,6 +381,18 @@ pub enum CopilotCommand {
 }
 
 impl CopilotCommand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rewrite => "rewrite",
+            Self::Summarize => "summarize",
+            Self::Shorten => "shorten",
+            Self::Lengthen => "lengthen",
+            Self::FixSpelling => "fix_spelling",
+            Self::Translate => "translate",
+            Self::VisualizeTable => "visualize_table",
+        }
+    }
+
     pub fn parse_optional(raw: &str) -> Result<Option<Self>, EasyOfficeError> {
         match raw.trim() {
             "" => Ok(None),
@@ -408,6 +422,7 @@ pub struct CopilotRunRequest {
     pub lightweight: bool,
     pub selection: SelectionContext,
     pub context: CopilotContext,
+    pub context_delta: Option<super::delta::ContextDelta>,
     pub provider: ProviderConfig,
 }
 
@@ -417,25 +432,111 @@ impl CopilotRunRequest {
         self.mode == CopilotMode::Ask || self.module.is_ask_only()
     }
 
-    /// 대화 이력(`history`·`loop_steps`)이 없으면 단순 문단 선택 명령의 추론 강도를 `low`로 제한해 토큰을 아낀다.
-    /// 이력이 이어지는 멀티턴 대화에서는 프롬프트 캐시 보존을 위해 사용자 설정 `reasoning_effort`를 유지한다.
+    /// 이력 없는 첫 턴 단순 질문·단순 서식 변경인지 판별한다.
+    pub fn is_simple_first_turn(&self) -> bool {
+        if !self.history.is_empty() || !self.loop_steps.is_empty() || self.command.is_some() {
+            return false;
+        }
+        let prompt = self.prompt.trim();
+        if prompt.len() > 160 {
+            return false;
+        }
+        const COMPLEX_MARKERS: [&str; 12] = [
+            "분석",
+            "비교",
+            "추론",
+            "검증",
+            "설계",
+            "계산",
+            "수식",
+            "함수",
+            "차트",
+            "피벗",
+            "다이어그램",
+            "슬라이드 추가",
+        ];
+        if COMPLEX_MARKERS.iter().any(|m| prompt.contains(m)) {
+            return false;
+        }
+        const COMPLEX_EN_MARKERS: [&str; 11] = [
+            "analyze",
+            "analyse",
+            "compare",
+            "calculate",
+            "formula",
+            "chart",
+            "pivot",
+            "diagram",
+            "design",
+            "evaluate",
+            "explain why",
+        ];
+        let prompt_lower = prompt.to_ascii_lowercase();
+        if COMPLEX_EN_MARKERS.iter().any(|m| prompt_lower.contains(m)) {
+            return false;
+        }
+        if self.is_read_only() {
+            return true;
+        }
+        const SIMPLE_FORMAT_MARKERS: [&str; 11] = [
+            "서식",
+            "굵게",
+            "글꼴",
+            "배경색",
+            "색상",
+            "정렬",
+            "밑줄",
+            "기울임",
+            "너비",
+            "높이",
+            "맞춤법",
+        ];
+        SIMPLE_FORMAT_MARKERS.iter().any(|m| prompt.contains(m))
+    }
+
+    /// 요청 유형별 기본 출력 토큰 상한을 차등 산정한다(추론 모델 예산은 호출 측에서 가산).
+    pub fn effective_output_base_cap(&self) -> u32 {
+        if self.lightweight {
+            return LIGHTWEIGHT_MAX_OUTPUT_TOKENS;
+        }
+        if let Some(cmd) = self.command {
+            return if cmd == CopilotCommand::VisualizeTable {
+                4_096
+            } else {
+                2_048
+            };
+        }
+        if self.is_read_only() {
+            return if self.module != CopilotModule::Pdf
+                && self.history.is_empty()
+                && self.loop_steps.is_empty()
+                && self.prompt.len() <= 160
+            {
+                2_048
+            } else {
+                4_096
+            };
+        }
+        MAX_OUTPUT_TOKENS
+    }
+
+    /// 단순 변환 선택 명령(`Summarize` 포함) 및 이력 없는 첫 턴 단순 질문/서식은 추론 강도를 `low`로 제한한다.
     pub fn effective_reasoning_effort(&self) -> Option<ReasoningEffort> {
         if self.lightweight {
             return None;
         }
         let effort = self.provider.reasoning_effort?;
-        if self.history.is_empty()
-            && self.loop_steps.is_empty()
-            && matches!(
-                self.command,
-                Some(
-                    CopilotCommand::FixSpelling
-                        | CopilotCommand::Shorten
-                        | CopilotCommand::Lengthen
-                        | CopilotCommand::Rewrite
-                        | CopilotCommand::Translate
-                )
+        if matches!(
+            self.command,
+            Some(
+                CopilotCommand::FixSpelling
+                    | CopilotCommand::Shorten
+                    | CopilotCommand::Lengthen
+                    | CopilotCommand::Rewrite
+                    | CopilotCommand::Translate
+                    | CopilotCommand::Summarize
             )
+        ) || self.is_simple_first_turn()
         {
             return Some(ReasoningEffort::Low);
         }
@@ -455,6 +556,7 @@ impl CopilotRunRequest {
             lightweight: false,
             selection: SelectionContext::default(),
             context: CopilotContext::default(),
+            context_delta: None,
             provider: ProviderConfig {
                 kind: ProviderKind::OpenAi,
                 base_url: "https://api.openai.com/v1".to_string(),
@@ -684,6 +786,7 @@ pub fn parse_run_request(
         .unwrap_or(false);
     let selection = parse_selection(entries)?;
     let context = parse_context(entries)?;
+    let context_delta = super::delta::parse_context_delta(entries)?;
     let provider = parse_provider_config(entries)?;
 
     if let Some(cmd) = command {
@@ -701,6 +804,7 @@ pub fn parse_run_request(
         lightweight,
         selection,
         context,
+        context_delta,
         provider,
     })
 }

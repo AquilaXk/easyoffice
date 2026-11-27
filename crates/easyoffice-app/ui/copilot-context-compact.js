@@ -4,8 +4,8 @@
 (function (host) {
   "use strict";
 
-  const DEFAULT_MAX_HISTORY = 12;
-  const DEFAULT_CHUNK_SIZE = 4;
+  const DEFAULT_MAX_HISTORY = 16;
+  const DEFAULT_CHUNK_SIZE = 8;
   const DEFAULT_MAX_HISTORY_BYTES = 48 * 1024;
   const DEFAULT_MAX_LOOP_BYTES = 24 * 1024;
   const MAX_HISTORY_ITEM_BYTES = 16 * 1024;
@@ -130,7 +130,7 @@
     return a < b ? -1 : a > b ? 1 : 0;
   }
 
-  /// 대화 이력을 `{role, text}` 단위로 정규화하고 상한 초과 시 앞쪽 청크(기본 4개=2쌍) 단위로 퇴출해 캐시 접두를 유지한다.
+  /// 대화 이력을 `{role, text}` 단위로 정규화하고 상한 초과 시 앞쪽 청크(기본 8개=4쌍) 단위로 퇴출해 캐시 접두를 유지한다.
   function compactHistory(
     rawHistory,
     maxItems = DEFAULT_MAX_HISTORY,
@@ -178,12 +178,27 @@
     if (op.sheet) summary.sheet = String(op.sheet);
     if (op.range) summary.range = String(op.range);
     if (op.coord) summary.coord = String(op.coord);
+    if (op.dataRange) summary.dataRange = String(op.dataRange);
+    if (op.sourceRange) summary.sourceRange = String(op.sourceRange);
+    if (op.destCell) summary.destCell = String(op.destCell);
     if (Number.isInteger(op.index)) summary.index = op.index;
     if (Number.isInteger(op.startIndex)) summary.startIndex = op.startIndex;
     if (Number.isInteger(op.endIndex)) summary.endIndex = op.endIndex;
     if (Number.isInteger(op.slideIndex)) summary.slideIndex = op.slideIndex;
-    if (Array.isArray(op.replacements)) summary.count = op.replacements.length;
-    if (Array.isArray(op.cells)) summary.cellCount = op.cells.length;
+    if (typeof op.search === "string") summary.search = clipUtf8Bytes(op.search, 160);
+    if (typeof op.replace === "string") summary.replace = clipUtf8Bytes(op.replace, 160);
+    if (Array.isArray(op.replacements)) {
+      summary.count = op.replacements.length;
+      summary.indices = op.replacements.slice(0, 8).map((r) => r?.index);
+    }
+    if (Array.isArray(op.cells)) {
+      summary.cellCount = op.cells.length;
+      const formulaCells = op.cells
+        .filter((c) => c?.coord && String(c?.raw ?? "").startsWith("="))
+        .slice(0, 8)
+        .map((c) => ({ coord: String(c.coord), raw: clipUtf8Bytes(String(c.raw), 80) }));
+      if (formulaCells.length > 0) summary.formulaCells = formulaCells;
+    }
     return summary;
   }
 
@@ -217,8 +232,18 @@
         attempted: opsSummary,
       });
       const issueLine = (Array.isArray(issues) ? issues : []).slice(0, 6).join("; ");
-      const userText = `[자동 검증 게이트 오류] ${issueLine}. 오류가 없도록 좌표·크기·수식 참조만 수정해 연산을 다시 생성하십시오.`;
+      const userText = `[자동 검증 게이트 오류] ${issueLine}. 오류가 없도록 좌표·크기·수식 참조·search만 수정해 연산을 다시 생성하십시오.`;
       return { assistantText, userText };
+    }
+
+    function summarizeDroppedOperations(res) {
+      const reasons = Array.isArray(res?.droppedReasons) ? res.droppedReasons : [];
+      const dropped = Number(res?.droppedOperations) || reasons.length;
+      const reasonLine = reasons.slice(0, 8).join("; ") || "필수 필드·좌표·범위 형식이 계약에 맞지 않습니다";
+      return {
+        assistantText: String(res?.reply || `연산 ${dropped}건 생성`),
+        userText: `[엔진 연산 검증 거부(${dropped}건)] ${reasonLine}. 유효한 좌표·인덱스·search로 operations를 다시 작성하십시오.`,
+      };
     }
 
     function pushStepPair(loopSteps, assistantText, userText) {
@@ -238,6 +263,7 @@
     return {
       runCachedReadTool,
       summarizeValidationFailure,
+      summarizeDroppedOperations,
       pushStepPair,
     };
   }

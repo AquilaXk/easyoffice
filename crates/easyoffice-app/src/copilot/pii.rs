@@ -128,6 +128,25 @@ impl PiiVault {
             .collect()
     }
 
+    /// 현재 텍스트의 기존 `[PII_*_N]` 리터럴만 선행 예약한 뒤 순차 치환해 후속 턴 번호 변동을 막는다.
+    pub fn redact_text_sequential(&mut self, text: &str) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+        self.reserve_existing_tokens(text);
+        self.redact_text(text)
+    }
+
+    pub fn redact_history_sequential(&mut self, history: &[HistoryMessage]) -> Vec<HistoryMessage> {
+        history
+            .iter()
+            .map(|h| HistoryMessage {
+                role: h.role.clone(),
+                text: self.redact_text_sequential(&h.text),
+            })
+            .collect()
+    }
+
     /// 자리표시자를 원문으로 복원한다. 발급한 적 없는 `[PII_*]` 문자열은 그대로 둔다.
     pub fn restore_text(&self, text: &str) -> String {
         if self.token_to_orig.is_empty() || !text.contains("[PII_") {
@@ -254,6 +273,9 @@ impl PiiVault {
                 CopilotToolCall::FindSheetCells { query, .. }
                 | CopilotToolCall::SearchPdfPages { query } => {
                     *query = self.restore_text(query);
+                }
+                CopilotToolCall::ReadBaseRecords { query, .. } => {
+                    self.restore_opt(query);
                 }
             }
         }

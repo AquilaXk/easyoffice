@@ -6474,3 +6474,33 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 서체 열거에 허용 라이선스 크레이트를 먼저 본다(예: `font-kit` MIT/Apache-2.0가 CoreText·DirectWrite·fontconfig를 한 인터페이스로 감싼다). 적합하면 그대로 쓰고 이미 쓰는 의존성과 겹치는지 확인한다. (2) 없으면 이미 쓰는 데스크톱 셸 의존성(CoreText 바인딩 등)을 확인한다. (3) 둘 다 아닐 때만 참조 앱의 서체 처리를 이식한다.
 - **Open questions** (1) Pages 한국어 화면의 스타일 이름(`가는체` 등)을 어떤 로케일 문자열에서 가져오는지(서체의 이름 표 `nameID 2` 현지화 이름 vs 고정 번역). (2) 변형 폭(너비)이 Pages `폭좁은체`처럼 계열의 별도 서체로 있는 경우의 목록 구성. 구현 전에 `font-kit` 도입 가능성과 위 두 질문을 확인한다.
 - **Revisit when** 구현을 시작할 때.
+
+## PD-369 — 코파일럿 멀티턴 캐시 안정성·제공자 호환 확장·차등 예산·경량 보조 라우팅 고도화 (Phase 1~3) (2026-11-27)
+
+- **Status** Accepted (QA 승인; `PD-364` 후속 일괄 고도화)
+- **Decision (`PD-369`)** `PD-364` 이후 멀티턴 프롬프트 캐시 역과금·불일치를 없애고 상용 수준의 문맥·도구·라우팅 최적화를 3단계로 적용한다.
+  1. **Phase 1(P0) — 5계층 스냅샷 고정·Anthropic 과금 차단·PII 순서 고정·드롭 사유 루프 (`cache.rs` · `delta.rs` · `llm_client.rs` · `op_reasons.rs` · `copilot-session-anchor.js`)**:
+     - 일반 대화 메시지 배치를 `[Tier 1: 정적 tools+system] -> [Tier 2: 기준 스냅샷 <document_context>] -> [Tier 3: 청크 고정 priorHistory] -> [Tier 4: 가변 상태(선택 범위·현재 쪽/슬라이드·변경분 delta) + prompt] -> [Tier 5: loopSteps]` 5계층으로 고정하고 단발 요청(`lightweight`·`command`)은 `priorHistory` 없이 보낸다.
+     - `copilot-session-anchor.js`는 편집 후 변경량이 기준 스냅샷의 25% 이하면 기준 `<document_context>`와 `promptCacheSession`을 유지한 채 `Tier 4`에 `[문서 최신 변경분]`(delta)만 덧붙이고, 25%를 넘거나 문서/모듈 전환·`새 대화` 시 기준 스냅샷과 세션 키를 함께 회전한다(`PDF`는 첫 쪽 텍스트 서명을 포함해 같은 쪽수 문서 전환도 구분하며, 서버는 `contextDelta`에 8 KiB/64문단 상한과 태그 이스케이프를 강제한다).
+     - `SHEET` 일반 대화 `Tier 2`는 좌표순 결정론적 배치로 고정하고 선택 범위 밖 셀만 `Tier 4`로 보충하며, 대형 `PDF`는 세션 기준 쪽(`anchorPage`) 창을 고정한다.
+     - 공식 Anthropic 호스트의 루트 `cache_control`(일회용 질문 블록 1.25x 쓰기 할증)을 없애고 정적 경계(마지막 `tools`/시스템, `Tier 2` 문서 스냅샷, 비어 있지 않은 `priorHistory` 마지막 블록)에만 최대 3개 브레이크포인트를 둔다. 단발·선택 명령은 `cache_control`을 0개로 둔다.
+     - `PiiVault`는 실제 전송 순서(`Tier 2 -> Tier 3 -> Tier 4 -> Tier 5`)대로 순차 예약·치환해 후속 질문의 새 PII나 리터럴 토큰이 선행 문서·이력 자리표시자 번호를 밀어내지 못하게 한다.
+     - 선택 영역 명령은 `history: []`로 격리하고 `Summarize`를 포함한 단순 변환 선택 명령을 `ReasoningEffort::Low` 상한으로 제한하며 `build_prompt_cache_key`에 `model`과 `command` 구분자를 포함한다. `DOC`/`HWP` 일반 대화는 `read_doc_blocks`를 상시 노출하고 `copilot-context-compact.js` 이력 청크를 8개(`DEFAULT_MAX_HISTORY = 16`), `copilot-ui.js` 퇴출 단위를 8배수로 맞춘다.
+     - `CopilotRunResponse`에 `droppedReasons`(최대 8건)를 반환해 `ops.length === 0 && droppedOperations > 0` 시 `loopSteps` 재시도를 돌리며, `HWP`도 `cachedHwpSnapshot` 기반 사전 검증 게이트에 편입하고 최신 검증 실패에는 좌표·수식·`search`를 남긴다.
+  2. **Phase 2(P1) — 읽기 도구 고밀도 압축·호환 제공자 확장·평문 JSON 보호·사용량 합산 (`stream_reply.rs` · `usage.rs` · `providers.rs` · `copilot-sheet-ops.js` · `copilot-agent-loop.js`)**:
+     - `read_sheet_range`·`find_sheet_cells`·`read_doc_blocks` 출력을 TSV·인덱스 줄 형식으로 줄이고 `stepAssistant`에 `[조회 호출]` 요약을 기록한다.
+     - 공식 호스트 판별기(`api.deepseek.com`·`openrouter.ai`·`api.x.ai`)에 한해 네이티브 `tools`와 `stream_options.include_usage`를 켜고 `OpenRouter` `anthropic/` 모델에 정적 블록 `cache_control`을 붙인다(비공식 프록시 URL 미주입). `PlainJsonGuard`로 비네이티브 `edit` 평문 JSON 스트림에서 `operations` JSON을 가리고 `"reply"`만 증분 전송한다.
+     - `TokenUsage`에 `cacheWriteTokens`를 분리 추가하고 Google `thoughtsTokenCount`를 `outputTokens`에 합산한다. `copilot-agent-loop.js`와 `copilot-session-anchor.js`는 서브턴 누적 사용량을 합산하고 모델 문맥 창의 75% 초과 시 선제 청크 퇴출을 실행한다.
+  3. **Phase 3(P2) — 경량 보조 모델 라우팅·고스트 접두 재사용 & LRU·차등 예산·잔여 모듈 고도화 (`copilot-catalog.js` · `copilot-model-ui.js` · `copilot-ghost.js` · `prompt.rs` · `compact.rs` · `base-board-host.js`)**:
+     - `modelUi.getFastProviderPayload()`(`fastModel` 오버라이드 또는 live `discoveredModels` 내 검증된 경량 형제 모델 매핑, 미조회 시 주력 모델 유지)를 `copilot-ghost.js`와 단순 선택 명령(`fix_spelling`·`shorten`·`translate`)에 우선 적용하고 실패 시 주력 모델로 1회 폴백한다.
+     - `copilot-ghost.js`는 일치하는 타이핑 접두를 받으면 요청 없이 잔여 접미사를 즉시 갱신하고 64항목 LRU 캐시와 고정 `promptCacheKey`를 쓴다.
+     - 요청별 출력 상한을 `lightweight` 96, 단순 선택 명령·단문 첫 턴 `ask` 2,048, `VisualizeTable`·`PDF`·다회 `ask` 4,096, 복합 `edit` 8,192로 차등 적용하고 이력 없는 첫 턴 단순 질문·서식은 추론 강도를 `low`로 내린다.
+     - 일반 대화 한글/CJK 문맥 예산을 다바이트 밀도에 따라 최대 36 KiB까지 보정하되 순수 ASCII와 선택 명령은 24 KiB를 유지한다. `SLIDE`는 비활성 슬라이드를 제목·개수 요약 1줄로 줄이고 `BOARD` 연결선을 `연결 A -> B, C` 인접 리스트로 묶으며 `BASE` 초기 컨텍스트를 50건으로 줄여 온디맨드 `read_base_records(offset, limit, query)` 도구와 조합한다.
+- **실측·검증 결과**
+  - 한글 31.5 KiB 문서(21문단): 기존 24 KiB 상한 대비 `36 KiB` CJK 예산으로 절단 없이 전 문단 적재(ASCII 문맥과 선택 명령은 24 KiB 유지).
+  - 고스트 타이핑 접두 일치·64-LRU 히트 시 IPC 호출 `0`건 유지, `BASE` 초기 레코드 `100건 -> 50건`(-50%) 및 `read_base_records` 필터 조회 동작 확인.
+  - 신규 Rust 크레이트·npm 패키지 `0`건 유지, 전 소스 파일 930줄 이하 유지, `ipc_commands = 15` 및 4개 인증 헤더 화이트리스트 유지.
+- **Why** 멀티턴 대화의 캐시 쓰기 할증·접두 무효화·PII 번호 변동·오류 무응답·고비용 단일 모델 독점과 CJK 문맥 조기 절단을 한 번에 해소해 응답 지연과 토큰 단가를 상용 수준으로 낮춘다.
+- **Trade-offs** (1) 공식 호스트 목록 외 프록시 제공자에는 캐시·사용량 확장 필드를 넣지 않아 호환성 400 오류를 피한다. (2) 경량 보조 모델 자동 선택은 실제 조회한 모델 목록(`discoveredModels`) 안에서만 매핑해 미등록 모델 오호출을 막는다.
+- **Verified by** `crates/easyoffice-app/tests/copilot_commercial_opt_pd369.rs`, `scripts/test-webui-copilot-commercial-opt.mjs` 및 전체 11종 CI 게이트(`check-repo-hygiene.mjs`, `check-commit-messages.mjs`, `verify-licenses.mjs`, `check-hwp-studio-bundle.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy` workspace+desktop, `cargo test` workspace+desktop, `cargo run -p easyoffice-app -- --self-test`).
+- **Revisit when** 실시간 과금 계산 UI가 모델별 입력·출력·캐시 단가표를 필요로 할 때.

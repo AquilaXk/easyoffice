@@ -135,12 +135,13 @@ fn cache_tiers_pdf_immutable_prefix_anthropic_blocks_and_openai_official_only() 
         .iter()
         .map(|m| StrictJsonValue::get_str(m.as_object().unwrap(), "content").unwrap())
         .collect();
-    assert_eq!(msg_texts[1], "이전 질문");
-    assert_eq!(msg_texts[2], "이전 답변");
-    assert!(msg_texts[3].starts_with("<document_context>"));
-    assert!(msg_texts[3].contains("3번 문단 다듬기"));
-    assert_eq!(msg_texts[4], "도구 호출");
-    assert_eq!(msg_texts[5], "[도구 실행 결과] OK");
+    // 5-tier cache prefix order: [system] -> [Tier 2: <document_context>] -> [Tier 3: priorHistory] -> [Tier 4: volatile+prompt] -> [Tier 5: loopSteps]
+    assert!(msg_texts[1].starts_with("<document_context>"));
+    assert_eq!(msg_texts[2], "이전 질문");
+    assert_eq!(msg_texts[3], "이전 답변");
+    assert!(msg_texts[4].contains("3번 문단 다듬기"));
+    assert_eq!(msg_texts[5], "도구 호출");
+    assert_eq!(msg_texts[6], "[도구 실행 결과] OK");
 
     let out = parse_obj(&res_json);
     let usage = StrictJsonValue::get_field(&out, "usage")
@@ -187,7 +188,7 @@ fn cache_tiers_pdf_immutable_prefix_anthropic_blocks_and_openai_official_only() 
         );
     }
 
-    // 3. Immutable read-only PDF puts <document_context> BEFORE priorHistory on official Anthropic with block arrays & root cache_control
+    // 3. Immutable read-only PDF puts <document_context> BEFORE priorHistory on official Anthropic with block arrays & <=3 explicit breakpoints (no root cache_control)
     let pdf_req = r#"{
         "action":"copilot_run","mode":"ask","module":"PDF","prompt":"후속 질문 2",
         "history":[{"role":"user","text":"첫 질문 1"},{"role":"assistant","text":"첫 답변 1"}],
@@ -200,13 +201,22 @@ fn cache_tiers_pdf_immutable_prefix_anthropic_blocks_and_openai_official_only() 
     );
     let p_obj = parse_obj(&pdf_reqs[0].body_json);
     assert!(
-        StrictJsonValue::get_field(&p_obj, "cache_control").is_some(),
-        "top-level cache_control present"
+        StrictJsonValue::get_field(&p_obj, "cache_control").is_none(),
+        "top-level root cache_control must be absent to avoid +25% surcharge on ephemeral user tail"
     );
-    let sys_arr = StrictJsonValue::get_field(&p_obj, "system")
+    assert!(
+        pdf_reqs[0].body_json.matches(r#""cache_control""#).count() <= 3,
+        "at most 3 cache_control breakpoints: {}",
+        pdf_reqs[0].body_json
+    );
+    let tools_arr = StrictJsonValue::get_field(&p_obj, "tools")
         .and_then(StrictJsonValue::as_array)
         .unwrap();
-    assert!(StrictJsonValue::get_field(sys_arr[0].as_object().unwrap(), "cache_control").is_some());
+    assert!(StrictJsonValue::get_field(
+        tools_arr.last().unwrap().as_object().unwrap(),
+        "cache_control"
+    )
+    .is_some());
     let anth_msgs = StrictJsonValue::get_field(&p_obj, "messages")
         .and_then(StrictJsonValue::as_array)
         .unwrap();
@@ -218,6 +228,9 @@ fn cache_tiers_pdf_immutable_prefix_anthropic_blocks_and_openai_official_only() 
     assert!(
         b0.contains("<document_context>"),
         "PDF document context precedes priorHistory: {b0}"
+    );
+    assert!(
+        StrictJsonValue::get_field(first_blocks[0].as_object().unwrap(), "cache_control").is_some()
     );
     assert_eq!(b1, "첫 질문 1");
 
@@ -404,10 +417,10 @@ fn module_high_density_compression_dedup_tsv_isomorphic_and_pdf_window() {
     assert!(pdf_jw_r[0].body_json.contains("[1..35쪽 생략]"));
     assert!(pdf_jw_r[0].body_json.contains("[45쪽] 페이지 45 본문"));
 
-    // Oversized single-line Korean activePage=45 (>24 KiB UTF-8) preserves [1..44쪽 생략] and [45쪽] prefix instead of dropping page 45
+    // Oversized single-line Korean activePage=45 (>36 KiB CJK ceiling) preserves [1..44쪽 생략] and [45쪽] prefix instead of dropping page 45
     let huge_pdf_req = format!(
         r#"{{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"45쪽 확인","context":{{"pdf":{{"text":"[1..44쪽 생략]\\n\\n[45쪽] HUGE45_{}","pageCount":50,"activePage":45}}}},"provider":{{"kind":"ollama","model":"qwen3"}}}}"#,
-        "한".repeat(10_000)
+        "한".repeat(14_000)
     );
     let (huge_pdf_res, huge_pdf_r) =
         dispatch_raw_llm(&huge_pdf_req, &openai_text_reply("[45쪽] 요약"));
@@ -535,7 +548,7 @@ fn lightweight_ask_streaming_schema_slimming_and_emit_reply_streaming() {
         Some("고친 😀 alice@corp.kr")
     );
 
-    // Standalone selection command clamps OpenAI gpt-5 reasoning_effort high -> low when no history, preserves high with history
+    // Simple transform selection command clamps OpenAI gpt-5 reasoning_effort high -> low and isolates history, while visualize_table keeps user effort
     let cmd_alone = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"맞춤법","command":"fix_spelling","selection":{"paragraphIndex":0,"paragraphEnd":0},"context":{"doc":{"paragraphs":["문장"]}},"provider":{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-5","apiKey":"sk-test","reasoningEffort":"high"}}"#;
     let (_, ca_reqs) = dispatch_raw_llm(
         cmd_alone,
@@ -548,9 +561,8 @@ fn lightweight_ask_streaming_schema_slimming_and_emit_reply_streaming() {
         cmd_with_hist,
         &openai_text_reply(r#"{"reply":"ok","operations":[]}"#),
     );
-    assert!(ch_reqs[0]
-        .body_json
-        .contains(r#""reasoning_effort":"high""#));
+    assert!(ch_reqs[0].body_json.contains(r#""reasoning_effort":"low""#));
+    assert!(!ch_reqs[0].body_json.contains("이전"));
 }
 
 #[test]

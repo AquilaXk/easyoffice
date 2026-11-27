@@ -386,7 +386,7 @@ fn openai_output_cap_uses_the_provider_field_name() {
             r#","provider":{{"kind":"{kind}","baseUrl":"https://93.184.216.34/v1","model":"m","apiKey":"sk-test","reasoningEffort":"{effort}"}}"#
         );
         let p = format!(
-            r#"{{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"요청"{provider}}}"#
+            r#"{{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"문단 전체 구조를 분석하고 필요한 서식과 수정을 반영하세요."{provider}}}"#
         );
         run(&p, r#"{"reply":"x"}"#).1.remove(0)
     };
@@ -542,8 +542,11 @@ fn selection_command_refuses_a_selection_the_context_cannot_hold() {
     );
     res.unwrap();
     assert!(bodies[0].contains("[1] 가"));
-    let ask =
-        big_doc_command("ask", r#"{"paragraphIndex":3}"#).replace(r#""command":"summarize","#, "");
+    let ask_big = format!(r#""{}""#, "가".repeat(3_000));
+    let ask_paras = vec![ask_big; 5].join(",");
+    let ask = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"요약","selection":{{"paragraphIndex":3}},"context":{{"doc":{{"paragraphs":[{ask_paras}]}}}},{REMOTE}}}"#
+    );
     let (res, bodies) = run(&ask, reply);
     res.unwrap();
     assert!(bodies[0].contains("[이하 "), "{}", &bodies[0][..200]);

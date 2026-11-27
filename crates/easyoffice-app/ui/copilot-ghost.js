@@ -10,6 +10,7 @@
   const DEBOUNCE_MS = 950;
   const MAX_GHOST_CHARS = 160;
   const CONTEXT_TAIL_CHARS = 600;
+  const MAX_LRU_ENTRIES = 64;
 
   function createCopilotGhost(deps) {
     const {
@@ -19,6 +20,7 @@
       getActiveModule,
       isModelConfigured,
       getProviderPayload,
+      getFastProviderPayload,
       isPanelBusy,
       isImeComposing,
       captureWorkspaceSnapshot,
@@ -36,6 +38,26 @@
     let ghostSheet = null;
     let requestSeq = 0;
     let activeReqId = "";
+    const lruCache = new Map();
+    const ghostCacheKey = "ghost-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+
+    function getLru(key) {
+      if (!lruCache.has(key)) return null;
+      const val = lruCache.get(key);
+      lruCache.delete(key);
+      lruCache.set(key, val);
+      return val;
+    }
+
+    function setLru(key, val) {
+      if (!key || !val) return;
+      if (lruCache.has(key)) lruCache.delete(key);
+      else if (lruCache.size >= MAX_LRU_ENTRIES) {
+        const oldest = lruCache.keys().next().value;
+        if (oldest !== undefined) lruCache.delete(oldest);
+      }
+      lruCache.set(key, val);
+    }
 
     function syncParaMarkMask(editor, block) {
       if (typeof win.CSSStyleSheet !== "function" || !("adoptedStyleSheets" in document)) return;
@@ -231,19 +253,42 @@
       return clipCodePoints((needsLeadingSpace ? " " : "") + txt, MAX_GHOST_CHARS);
     }
 
+    function buildCacheKey(provider, snippet) {
+      return `${String(provider?.kind || "")}:${String(provider?.model || "")}\u0000${snippet}`;
+    }
+
+    function applyGhostSuggestion(target, suggestion) {
+      activeSuggestion = {
+        text: suggestion,
+        block: target.block,
+        expectedBlockText: target.blockText,
+      };
+      renderGhostOverlay(target, suggestion);
+    }
+
     async function requestSuggestion() {
       if (!enabled || isPanelBusy?.() || isImeComposing?.() || !isModelConfigured?.()) return;
       const target = caretContextAtBlockEnd();
       if (!target) return;
 
+      const primaryProvider = getProviderPayload();
+      const fastProvider = typeof getFastProviderPayload === "function" ? getFastProviderPayload() : primaryProvider;
+      const snippet = clipCodePoints(target.blockText, CONTEXT_TAIL_CHARS);
+      const lruKey = buildCacheKey(fastProvider, target.blockText);
+      const cached = getLru(lruKey);
+      if (cached) {
+        applyGhostSuggestion(target, cached);
+        return;
+      }
+
       const mySeq = ++requestSeq;
       const reqId = "cp-ghost-" + Date.now().toString(36) + "-" + mySeq;
       activeReqId = reqId;
-      const snippet = clipCodePoints(target.blockText, CONTEXT_TAIL_CHARS);
 
-      const req = {
+      const baseReq = {
         action: "copilot_run",
         requestId: reqId,
+        promptCacheKey: ghostCacheKey,
         mode: "ask",
         module: "DOC",
         lightweight: true,
@@ -256,29 +301,71 @@
             omittedParagraphs: 0,
           },
         },
-        provider: getProviderPayload(),
       };
 
+      const canFallback = Boolean(
+        fastProvider?.model && primaryProvider?.model && fastProvider.model !== primaryProvider.model,
+      );
       try {
-        const res = await invokeIpc("run_smart_assistant", JSON.stringify(req));
+        let res;
+        try {
+          res = await invokeIpc("run_smart_assistant", JSON.stringify({ ...baseReq, provider: fastProvider }));
+        } catch (err) {
+          if (mySeq !== requestSeq || !canFallback) throw err;
+          activeReqId = reqId + "-fb";
+          res = await invokeIpc("run_smart_assistant", JSON.stringify({
+            ...baseReq,
+            requestId: reqId + "-fb",
+            provider: primaryProvider,
+          }));
+        }
         if (mySeq !== requestSeq) return;
         activeReqId = "";
         const liveTarget = caretContextAtBlockEnd();
         if (!liveTarget || liveTarget.block !== target.block || liveTarget.blockText !== target.blockText) return;
         const suggestion = cleanGhostCompletion(res?.reply, liveTarget.blockText);
         if (!suggestion) return;
-        activeSuggestion = {
-          text: suggestion,
-          block: liveTarget.block,
-          expectedBlockText: liveTarget.blockText,
-        };
-        renderGhostOverlay(liveTarget, suggestion);
+        setLru(lruKey, suggestion);
+        applyGhostSuggestion(liveTarget, suggestion);
       } catch {
         if (mySeq === requestSeq) activeReqId = "";
       }
     }
 
     function scheduleSuggestion() {
+      if (
+        activeSuggestion
+        && enabled
+        && getActiveModule?.() === "DOC"
+        && isModelConfigured?.()
+        && !isImeComposing?.()
+      ) {
+        const liveTarget = caretContextAtBlockEnd();
+        if (
+          liveTarget
+          && liveTarget.block === activeSuggestion.block
+          && liveTarget.blockText.startsWith(activeSuggestion.expectedBlockText)
+        ) {
+          const typed = liveTarget.blockText.slice(activeSuggestion.expectedBlockText.length);
+          if (typed.length > 0 && activeSuggestion.text.startsWith(typed)) {
+            const remaining = activeSuggestion.text.slice(typed.length);
+            if (remaining.length > 0) {
+              clearTimer();
+              requestSeq += 1;
+              activeReqId = "";
+              applyGhostSuggestion(liveTarget, remaining);
+              const activeProvider = typeof getFastProviderPayload === "function"
+                ? getFastProviderPayload()
+                : getProviderPayload?.();
+              setLru(
+                buildCacheKey(activeProvider, liveTarget.blockText),
+                remaining,
+              );
+              return;
+            }
+          }
+        }
+      }
       dismiss();
       if (!enabled || getActiveModule?.() !== "DOC" || !isModelConfigured?.()) return;
       timerId = win.setTimeout?.(() => {
@@ -435,6 +522,8 @@
       getSuggestionText: () => activeSuggestion?.text || "",
       acceptSuggestion,
       dismiss,
+      getCacheSize: () => lruCache.size,
+      getPromptCacheKey: () => ghostCacheKey,
       showSuggestionForTest,
     };
   }

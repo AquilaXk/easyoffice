@@ -262,10 +262,32 @@
     return "";
   }
 
-  // The limits match what the engine accepts (`MAX_BASE_*`, `MAX_BOARD_*` in `copilot/types.rs`); it refuses a request over
-  // them, so the page cuts first and tells the engine how much there is (`totalRecords`, `totalNodes`).
-  const COPILOT_MAX_TABLES = 64, COPILOT_MAX_FIELDS = 64, COPILOT_MAX_RECORDS = 100, COPILOT_MAX_NODES = 256, COPILOT_MAX_CONNECTORS = 1024, COPILOT_MAX_TEXT = 200;
+  // The limits match what the engine accepts (`MAX_BASE_*`, `MAX_BOARD_*` in `copilot/types.rs`); initial prompt
+  // caps BASE records at 50 and provides `read_base_records` for deeper inspection.
+  const COPILOT_MAX_TABLES = 64, COPILOT_MAX_FIELDS = 64, COPILOT_MAX_RECORDS = 50, COPILOT_MAX_NODES = 256, COPILOT_MAX_CONNECTORS = 1024, COPILOT_MAX_TEXT = 200;
   const clipText = (v) => host.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints(v, COPILOT_MAX_TEXT);
+
+  function readBaseRecordsTool(args) {
+    if (!baseStudio) return "베이스 데이터가 열려 있지 않습니다.";
+    const M = host.__EASYOFFICE_BASE_MODEL__, st = baseStudio.getState();
+    const tbl = M.getTable(st, st.activeTableId) || st.tables?.[0];
+    if (!tbl) return "활성 테이블이 없습니다.";
+    const q = M.queryTableView(st, tbl.id);
+    const fields = q.fields.slice(0, COPILOT_MAX_FIELDS);
+    const offset = Math.max(0, Number.parseInt(args?.offset, 10) || 0);
+    const limit = Math.min(COPILOT_MAX_RECORDS, Math.max(1, Number.parseInt(args?.limit, 10) || 20));
+    const needle = String(args?.query || "").trim().toLowerCase();
+    const indexed = [];
+    for (let i = 0; i < q.rows.length; i += 1) {
+      const vals = fields.map((f) => clipText(q.rows[i].displays[f.id]));
+      if (!needle || vals.some((v) => v.toLowerCase().includes(needle))) {
+        indexed.push(`[${i}] ${vals.map((v) => v.replace(/\|/g, "/").replace(/[\r\n]+/g, " ")).join(" | ")}`);
+      }
+    }
+    const slice = indexed.slice(offset, offset + limit);
+    const header = `테이블: ${tbl.name} | 필드: ${fields.map((f) => f.name).join(", ")} | 일치 ${indexed.length}건`;
+    return slice.length > 0 ? `${header}\n${slice.join("\n")}` : `${header}\n(해당 범위 레코드 없음)`;
+  }
 
   function extractCopilotContext(mod) {
     if (mod === "BASE" && baseStudio) {
@@ -317,6 +339,7 @@
     outlineItems,
     extractPlainText,
     extractCopilotContext,
+    readBaseRecordsTool,
     deliverExport,
   };
 

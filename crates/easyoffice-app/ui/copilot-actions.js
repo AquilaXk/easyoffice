@@ -19,45 +19,27 @@
   const MAX_WRITE_CELLS = 1024;
   const MAX_RANGE_CELLS = 4096;
 
-  function compareCoordEntries(a, b) {
-    return a.row - b.row || a.col - b.col;
-  }
-
-  function formatSelectionA1(rg, colName) {
-    if (!rg || !Number.isInteger(rg.r1) || !Number.isInteger(rg.c1)) return "A1";
-    const start = colName(rg.c1) + rg.r1;
-    if (rg.r1 === rg.r2 && rg.c1 === rg.c2) return start;
-    return start + ":" + colName(rg.c2) + rg.r2;
-  }
-
-  function docBlocksOf(editor) {
-    const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
-    if (docHtml?.docBlocksOf) return docHtml.docBlocksOf(editor);
-    if (!editor) return [];
-    return Array.from(editor.querySelectorAll("p, h1, h2, h3, h4, ul, ol, blockquote, table"))
+  const compareCoordEntries = (a, b) => a.row - b.row || a.col - b.col;
+  const formatSelectionA1 = (rg, colName) => (
+    !rg || !Number.isInteger(rg.r1) || !Number.isInteger(rg.c1)
+      ? "A1"
+      : colName(rg.c1) + rg.r1 + (rg.r1 === rg.r2 && rg.c1 === rg.c2 ? "" : ":" + colName(rg.c2) + rg.r2)
+  );
+  const docBlocksOf = (editor) => host.__EASYOFFICE_COPILOT_DOC_HTML__?.docBlocksOf
+    ? host.__EASYOFFICE_COPILOT_DOC_HTML__.docBlocksOf(editor)
+    : Array.from(editor?.querySelectorAll("p, h1, h2, h3, h4, ul, ol, blockquote, table") || [])
       .filter((el) => el.parentElement === editor && !el.hidden && !el.classList.contains("manuscript-notice"));
-  }
-
-  function buildDocBlockElement(document, item) {
-    if (host.__EASYOFFICE_COPILOT_DOC_HTML__?.buildDocBlockElement) {
-      return host.__EASYOFFICE_COPILOT_DOC_HTML__.buildDocBlockElement(document, item);
-    }
+  const buildDocBlockElement = (document, item) => {
+    if (host.__EASYOFFICE_COPILOT_DOC_HTML__?.buildDocBlockElement) return host.__EASYOFFICE_COPILOT_DOC_HTML__.buildDocBlockElement(document, item);
     const p = document.createElement("p");
     p.textContent = String(item?.text ?? item ?? "");
     return p;
-  }
-
-  function createFallbackExtOps() {
-    return {
-      getEmbedHwpHost: () => null,
-      refreshHwpSnapshot: async () => null,
-      canUndoHwpSync: () => false,
-      getHwpSelectionLabel: () => "",
-      getHwpCommandTarget: () => null,
-      extractHwpContextAsync: async () => ({ selection: {}, context: {} }),
-      extractPdfContext: () => ({ pageCount: 0, text: "" }),
-    };
-  }
+  };
+  const createFallbackExtOps = () => ({
+    getEmbedHwpHost: () => null, refreshHwpSnapshot: async () => null, canUndoHwpSync: () => false,
+    getHwpSelectionLabel: () => "", getHwpCommandTarget: () => null,
+    extractHwpContextAsync: async () => ({ selection: {}, context: {} }), extractPdfContext: () => ({ pageCount: 0, text: "" }),
+  });
 
   function createCopilotActions(deps) {
     const {
@@ -510,29 +492,8 @@
       const editor = document.getElementById("doc-editor");
       if (!editor) throw new Error("문서 편집 영역을 찾을 수 없습니다.");
       if (kind === "doc.scrub_pii") {
-        const blocks = docBlocksOf(editor);
-        let changedCount = 0;
-        blocks.forEach((blk, idx) => {
-          const walk = (node) => {
-            for (const child of node.childNodes) {
-              if (child.nodeType === 3) {
-                const res = localScrubPii(child.data);
-                if (res && res.totalMasked > 0 && typeof res.scrubbedText === "string") {
-                  child.data = res.scrubbedText;
-                  changedCount += res.totalMasked;
-                }
-              } else if (child.nodeType === 1) {
-                walk(child);
-              }
-            }
-          };
-          const before = blk.textContent;
-          walk(blk);
-          if (blk.textContent !== before) {
-            locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
-          }
-        });
-        return changedCount > 0 || blocks.length > 0;
+        if (docHtml?.scrubDocPiiInEditor) return docHtml.scrubDocPiiInEditor(editor, localScrubPii, locations);
+        return false;
       }
 
       const existing = docBlocksOf(editor);
@@ -846,11 +807,13 @@
         docBlocksOf,
         buildDocBlockElement,
         executeSlideOperation,
+        getHwpSnapshot: extOps.getHwpSnapshot,
       });
     }
 
     async function executeReadTool(mod, toolName, args) {
       if (toolName === "read_doc_blocks") return extOps.readDocBlocksTool(mod, args, docBlocksOf);
+      if (toolName === "read_base_records") return extOps.readBaseRecordsTool(args);
       if (toolName === "read_sheet_range") return sheetOps.readSheetRangeTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
       if (toolName === "find_sheet_cells") return sheetOps.findSheetCellsTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
       if (toolName === "search_pdf_pages") return extOps.searchPdfPagesTool(args);

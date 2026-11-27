@@ -720,6 +720,32 @@
     return blockEl;
   }
 
+  function scrubDocPiiInEditor(editor, localScrubPii, locations) {
+    const blocks = docBlocksOf(editor);
+    let changedCount = 0;
+    blocks.forEach((blk, idx) => {
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if (child.nodeType === 3) {
+            const res = localScrubPii(child.data);
+            if (res && res.totalMasked > 0 && typeof res.scrubbedText === "string") {
+              child.data = res.scrubbedText;
+              changedCount += res.totalMasked;
+            }
+          } else if (child.nodeType === 1) {
+            walk(child);
+          }
+        }
+      };
+      const before = blk.textContent;
+      walk(blk);
+      if (blk.textContent !== before) {
+        locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
+      }
+    });
+    return changedCount > 0 || blocks.length > 0;
+  }
+
   host.__EASYOFFICE_COPILOT_DOC_HTML__ = Object.freeze({
     docBlocksOf,
     serializeBlockForContext,
@@ -731,6 +757,7 @@
     replaceParagraphContentWithTrackChanges,
     replaceSpanWithTrackChanges,
     markBlockDeletedInPlace,
+    scrubDocPiiInEditor,
     plainPreviewTextOfBlock,
     plainActiveTextOfBlock,
     parseHtmlTableString,

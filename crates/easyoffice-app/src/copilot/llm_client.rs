@@ -7,9 +7,9 @@ use super::operations::{
     validate_locations, validate_operations, validate_tool_calls, ValidatedOperations,
 };
 use super::pii::{PiiVault, StreamingPiiRestorer};
-use super::prompt::build_prompt_parts_for_llm;
+use super::prompt::build_prompt_bundle_for_llm;
 use super::providers::{
-    build_provider_chat_body_with_parts, build_provider_headers, build_provider_ping_body,
+    build_provider_chat_body_with_all_parts, build_provider_headers, build_provider_ping_body,
     extract_provider_completion_with_usage, parse_discovered_models, serialize_models_response,
 };
 use super::ssrf::ValidatedEndpoint;
@@ -241,42 +241,49 @@ pub fn run_remote_or_local(
         ));
     }
     let headers = build_provider_headers(&req.provider)?;
-    let (system_prompt, raw_context_block, raw_user_prompt) = build_prompt_parts_for_llm(req)?;
+    let (system_prompt, raw_context_block, raw_volatile_state, raw_user_prompt) =
+        build_prompt_bundle_for_llm(req)?;
+    let one_shot = req.lightweight || req.command.is_some();
 
     let mut vault = PiiVault::new();
-    let (history_to_send, ctx_to_send, prompt_to_send, steps_to_send) =
+    let (history_to_send, ctx_to_send, volatile_to_send, prompt_to_send, steps_to_send) =
         if req.provider.kind.is_local_loopback() {
             (
-                req.history.clone(),
+                if one_shot {
+                    Vec::new()
+                } else {
+                    req.history.clone()
+                },
                 raw_context_block,
+                raw_volatile_state,
                 raw_user_prompt,
                 req.loop_steps.clone(),
             )
         } else {
-            vault.reserve_existing_tokens(&raw_context_block);
-            vault.reserve_existing_tokens(&raw_user_prompt);
-            for h in &req.history {
-                vault.reserve_existing_tokens(&h.text);
-            }
-            for s in &req.loop_steps {
-                vault.reserve_existing_tokens(&s.text);
-            }
-            let redacted_history = vault.redact_history(&req.history);
-            let redacted_prompt = vault.redact_text(&raw_user_prompt);
-            let redacted_ctx = vault.redact_text(&raw_context_block);
-            let redacted_steps = vault.redact_history(&req.loop_steps);
+            // 실제 배치 순서(Tier 2 문서 -> Tier 3 priorHistory -> Tier 4 가변/질문 -> Tier 5 loopSteps)대로 순차 예약·치환한다.
+            let redacted_ctx = vault.redact_text_sequential(&raw_context_block);
+            let redacted_history = if one_shot {
+                Vec::new()
+            } else {
+                vault.redact_history_sequential(&req.history)
+            };
+            let redacted_volatile = vault.redact_text_sequential(&raw_volatile_state);
+            let redacted_prompt = vault.redact_text_sequential(&raw_user_prompt);
+            let redacted_steps = vault.redact_history_sequential(&req.loop_steps);
             (
                 redacted_history,
                 redacted_ctx,
+                redacted_volatile,
                 redacted_prompt,
                 redacted_steps,
             )
         };
 
-    let body_json = build_provider_chat_body_with_parts(
+    let body_json = build_provider_chat_body_with_all_parts(
         req,
         &history_to_send,
         &ctx_to_send,
+        &volatile_to_send,
         &prompt_to_send,
         &steps_to_send,
         stream.is_some(),
@@ -386,6 +393,7 @@ fn parse_and_validate_assistant_output(
             updated_in_place: false,
             operations: Vec::new(),
             dropped_operations: 0,
+            dropped_reasons: Vec::new(),
             locations: Vec::new(),
             tool_calls: Vec::new(),
             usage,
@@ -408,12 +416,14 @@ fn parse_and_validate_assistant_output(
             Some(_) => ValidatedOperations {
                 operations: Vec::new(),
                 dropped: 1,
+                dropped_reasons: vec!["operations 필드는 배열이어야 합니다.".to_string()],
             },
         }
     };
     let ValidatedOperations {
         operations,
         dropped,
+        dropped_reasons,
     } = validated;
     let locations = StrictJsonValue::get_field(&obj, "locations")
         .and_then(StrictJsonValue::as_array)
@@ -431,6 +441,7 @@ fn parse_and_validate_assistant_output(
         updated_in_place: !operations.is_empty(),
         operations,
         dropped_operations: dropped,
+        dropped_reasons,
         locations,
         tool_calls,
         usage,

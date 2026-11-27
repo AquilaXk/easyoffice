@@ -11,7 +11,7 @@
   const MAX_WIDTH = 520;
   const DEFAULT_WIDTH = 320;
   const MAX_MESSAGES = 64;
-  const MAX_HISTORY_ITEMS = 12;
+  const MAX_HISTORY_ITEMS = 16;
   // 엔진이 받는 질문의 상한(UTF-8 바이트). 글자 수가 아니라 바이트로 맞춘다(`copilot-text.js` `clipUtf8Bytes`).
   const MAX_PROMPT_BYTES = 16384;
 
@@ -26,37 +26,7 @@
     { id: "visualize_table", label: "표로 시각화", docOnly: true },
   ]);
   const COMMAND_MODULES = new Set(["DOC", "HWP", "SLIDE"]);
-
-  const MODULE_EXAMPLES = Object.freeze({
-    SHEET: Object.freeze([
-      { label: "목표 대비 % 및 최대 격차 표시", prompt: "목표 대비 %를 추가하고 가장 큰 격차를 표시하세요." },
-      { label: "합계 및 평균 추가", prompt: "합계 행을 추가하세요." },
-    ]),
-    DOC: Object.freeze([
-      { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 요약해 주세요." },
-      { label: "피동 표현 다듬기", prompt: "피동 표현을 자연스러운 능동 문장으로 다듬어 주세요." },
-    ]),
-    HWP: Object.freeze([
-      { label: "한글 문서 문장 다듬기", prompt: "문서의 어색한 표현을 자연스러운 문장으로 다듬어 주세요." },
-      { label: "문서 핵심 요약 추가", prompt: "문서 끝에 핵심 요약을 추가해 주세요." },
-    ]),
-    SLIDE: Object.freeze([
-      { label: "발표 슬라이드 추가", prompt: "발표 슬라이드를 추가하고 발표자 노트를 작성하세요." },
-      { label: "발표자 노트 작성", prompt: "현재 슬라이드의 발표자 노트를 작성해 주세요." },
-    ]),
-    PDF: Object.freeze([
-      { label: "문서 핵심 요약", prompt: "문서의 핵심 내용을 쪽 번호와 함께 요약해 주세요." },
-      { label: "주요 항목 정리", prompt: "문서의 주요 항목과 수치를 정리해 주세요." },
-    ]),
-    BASE: Object.freeze([
-      { label: "샘플 레코드 추가", prompt: "현재 테이블 구조에 맞는 예시 레코드 3건을 추가해 주세요." },
-      { label: "테이블 데이터 요약", prompt: "현재 테이블 레코드와 집계 수치를 요약해 주세요." },
-    ]),
-    BOARD: Object.freeze([
-      { label: "업무 흐름 다이어그램 생성", prompt: "요청 접수 → 검토 → 승인 → 완료 순서의 흐름도를 추가해 주세요." },
-      { label: "보드 흐름 요약", prompt: "현재 보드의 연결 흐름과 핵심 요소를 설명해 주세요." },
-    ]),
-  });
+  const FAST_SELECTION_COMMANDS = new Set(["fix_spelling", "shorten", "translate"]);
 
   function clampWidth(v) {
     const raw = Math.round(Number(v) || DEFAULT_WIDTH);
@@ -82,78 +52,35 @@
     return svg;
   }
 
-  function buildCheckIcon(document) {
-    return createSvgIcon(document, [
-      { tag: "circle", cx: "8", cy: "8", r: "6.5", stroke: "currentColor", "stroke-width": "1.4" },
-      { d: "M5.2 8.2L7.1 10.1L10.9 6.1", stroke: "currentColor", "stroke-width": "1.5", "stroke-linecap": "round", "stroke-linejoin": "round" },
-    ], 14);
-  }
+  const buildCheckIcon = (d) => createSvgIcon(d, [
+    { tag: "circle", cx: "8", cy: "8", r: "6.5", stroke: "currentColor", "stroke-width": "1.4" },
+    { d: "M5.2 8.2L7.1 10.1L10.9 6.1", stroke: "currentColor", "stroke-width": "1.5", "stroke-linecap": "round", "stroke-linejoin": "round" },
+  ], 14);
 
-  function buildLocationIcon(document, mod) {
-    if (mod === "SHEET") {
-      return createSvgIcon(document, [
-        { tag: "rect", x: "2", y: "2.5", width: "12", height: "11", rx: "1.5", stroke: "currentColor", "stroke-width": "1.3" },
-        { d: "M2 6.5H14M6.5 2.5V13.5", stroke: "currentColor", "stroke-width": "1.2" },
-      ], 12);
-    }
-    if (mod === "SLIDE") {
-      return createSvgIcon(document, [
-        { tag: "rect", x: "1.8", y: "3", width: "12.4", height: "9.5", rx: "1.5", stroke: "currentColor", "stroke-width": "1.3" },
-        { d: "M5 6.5H11M5 9.2H8.8", stroke: "currentColor", "stroke-width": "1.2", "stroke-linecap": "round" },
-      ], 12);
-    }
-    return createSvgIcon(document, [
+  function buildLocationIcon(d, mod) {
+    if (mod === "SHEET") return createSvgIcon(d, [
+      { tag: "rect", x: "2", y: "2.5", width: "12", height: "11", rx: "1.5", stroke: "currentColor", "stroke-width": "1.3" },
+      { d: "M2 6.5H14M6.5 2.5V13.5", stroke: "currentColor", "stroke-width": "1.2" },
+    ], 12);
+    if (mod === "SLIDE") return createSvgIcon(d, [
+      { tag: "rect", x: "1.8", y: "3", width: "12.4", height: "9.5", rx: "1.5", stroke: "currentColor", "stroke-width": "1.3" },
+      { d: "M5 6.5H11M5 9.2H8.8", stroke: "currentColor", "stroke-width": "1.2", "stroke-linecap": "round" },
+    ], 12);
+    return createSvgIcon(d, [
       { tag: "rect", x: "3", y: "2", width: "10", height: "12", rx: "1.5", stroke: "currentColor", "stroke-width": "1.3" },
       { d: "M5.2 5.5H10.8M5.2 8H10.8M5.2 10.5H8.5", stroke: "currentColor", "stroke-width": "1.2", "stroke-linecap": "round" },
     ], 12);
   }
 
-  function buildExampleArrowIcon(document) {
-    const svg = createSvgIcon(document, [
-      { d: "M5 11L11 5M6.2 5H11V9.8", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round", "stroke-linejoin": "round" },
-    ], 13);
+  function buildExampleArrowIcon(d) {
+    const svg = createSvgIcon(d, [{ d: "M5 11L11 5M6.2 5H11V9.8", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round", "stroke-linejoin": "round" }], 13);
     svg.setAttribute("class", "eo-copilot-example-arrow");
     return svg;
   }
 
-  function buildSendGlyph(document, running) {
-    if (running) {
-      return createSvgIcon(document, [
-        { tag: "rect", x: "4.5", y: "4.5", width: "7", height: "7", rx: "1.2", fill: "currentColor" },
-      ], 14);
-    }
-    return createSvgIcon(document, [
-      { d: "M8 12.5V3.8M4.5 7.2L8 3.6L11.5 7.2", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" },
-    ], 14);
-  }
-
-  function normalizeLocations(rawList, fallbackMod) {
-    if (!Array.isArray(rawList)) return [];
-    const seen = new Set();
-    const out = [];
-    for (const item of rawList) {
-      const loc = typeof item === "string"
-        ? { module: fallbackMod, label: item, range: fallbackMod === "SHEET" ? item : undefined }
-        : item;
-      if (!loc || typeof loc !== "object") continue;
-      const mod = String(loc.module || fallbackMod).toUpperCase();
-      const label = String(loc.label || loc.range || "").trim();
-      if (!label) continue;
-      const key = mod + ":" + (loc.sheet || "") + ":" + (loc.page || "") + ":" + label;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        module: mod,
-        label,
-        sheet: loc.sheet ? String(loc.sheet) : undefined,
-        range: loc.range ? String(loc.range) : undefined,
-        paragraphIndex: Number.isInteger(loc.paragraphIndex) ? loc.paragraphIndex : undefined,
-        slideIndex: Number.isInteger(loc.slideIndex) ? loc.slideIndex : undefined,
-        page: Number.isInteger(loc.page) ? loc.page : undefined,
-      });
-    }
-    return out;
-  }
+  const buildSendGlyph = (d, running) => createSvgIcon(d, running
+    ? [{ tag: "rect", x: "4.5", y: "4.5", width: "7", height: "7", rx: "1.2", fill: "currentColor" }]
+    : [{ d: "M8 12.5V3.8M4.5 7.2L8 3.6L11.5 7.2", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }], 14);
 
   function createCopilotUi(deps) {
     const {
@@ -197,6 +124,7 @@
       getActiveModule,
       isModelConfigured: () => modelUi.isConfigured(),
       getProviderPayload: () => modelUi.currentProviderPayload(),
+      getFastProviderPayload: () => modelUi.getFastProviderPayload(),
       isPanelBusy: () => running || regenerating,
       isImeComposing,
       captureWorkspaceSnapshot: deps.captureWorkspaceSnapshot,
@@ -342,6 +270,13 @@
       syncSelectionBadge();
     }
 
+    const mkEl = (tag, cls, txt) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (txt !== undefined) n.textContent = txt;
+      return n;
+    };
+
     function renderWelcome() {
       const welcome = byId("copilot-welcome");
       const examplesWrap = byId("copilot-examples");
@@ -352,14 +287,12 @@
       const show = messages.length === 0 && !hasDraft && isModuleSupported(mod);
       welcome.hidden = !show;
       if (!show) return;
-      const items = MODULE_EXAMPLES[mod] || MODULE_EXAMPLES.DOC;
+      const examplesMap = host.__EASYOFFICE_COPILOT_SESSION_ANCHOR__?.MODULE_EXAMPLES || {};
+      const items = examplesMap[mod] || examplesMap.DOC || [];
       const nodes = items.map((ex) => {
-        const btn = document.createElement("button");
+        const btn = mkEl("button", "eo-copilot-example-btn");
         btn.type = "button";
-        btn.className = "eo-copilot-example-btn";
-        const span = document.createElement("span");
-        span.textContent = ex.label;
-        btn.appendChild(span);
+        btn.appendChild(mkEl("span", undefined, ex.label));
         btn.appendChild(buildExampleArrowIcon(document));
         btn.addEventListener("click", () => {
           if (!inputEl) return;
@@ -376,23 +309,12 @@
     }
 
     function renderAssistantNode(msg) {
-      const wrap = document.createElement("div");
-      wrap.className = "eo-copilot-msg eo-copilot-msg--assistant";
-
-      if (msg.reasoning) {
-        const reasonEl = document.createElement("div");
-        reasonEl.className = "eo-copilot-reasoning";
-        reasonEl.textContent = msg.reasoning;
-        wrap.appendChild(reasonEl);
-      }
-
+      const wrap = mkEl("div", "eo-copilot-msg eo-copilot-msg--assistant");
+      if (msg.reasoning) wrap.appendChild(mkEl("div", "eo-copilot-reasoning", msg.reasoning));
       if (msg.updatedInPlace && !msg.undone) {
-        const statusRow = document.createElement("div");
-        statusRow.className = "eo-copilot-inplace-row";
+        const statusRow = mkEl("div", "eo-copilot-inplace-row");
         statusRow.appendChild(buildCheckIcon(document));
-        const label = document.createElement("span");
-        label.textContent = "제자리에서 업데이트됨";
-        statusRow.appendChild(label);
+        statusRow.appendChild(mkEl("span", undefined, "제자리에서 업데이트됨"));
         wrap.appendChild(statusRow);
       }
 
@@ -401,42 +323,34 @@
       const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id);
       const showRegenerate = !msg.pending && Boolean(msg.request) && messages.at(-1) === msg;
       if (locs.length > 0 || showUndo || showRegenerate || proposing) {
-        const chipRow = document.createElement("div");
-        chipRow.className = "eo-copilot-chip-row";
+        const chipRow = mkEl("div", "eo-copilot-chip-row");
         if (proposing) {
           for (const [action, label, handler] of [["accept", "수락", acceptChange], ["reject", "거절", rejectChange]]) {
-            const btn = document.createElement("button");
+            const btn = mkEl("button", "eo-copilot-chip-btn eo-copilot-review-btn", label);
             btn.type = "button";
-            btn.className = "eo-copilot-chip-btn eo-copilot-review-btn";
             btn.dataset.turn = msg.id;
             btn.dataset.copilotAction = action;
             btn.disabled = actionDisabled(action, msg);
-            btn.textContent = label;
             btn.addEventListener("click", () => void handler(msg));
             chipRow.appendChild(btn);
           }
         }
         for (const loc of locs) {
-          const chip = document.createElement("button");
+          const chip = mkEl("button", "eo-copilot-loc-chip");
           chip.type = "button";
-          chip.className = "eo-copilot-loc-chip";
           chip.appendChild(buildLocationIcon(document, loc.module));
-          const txt = document.createElement("span");
-          txt.textContent = loc.label;
-          chip.appendChild(txt);
+          chip.appendChild(mkEl("span", undefined, loc.label));
           chip.addEventListener("click", () => {
             void copilotActions.locateTarget(loc).then(() => syncSelectionBadge());
           });
           chipRow.appendChild(chip);
         }
         if (showUndo) {
-          const undoBtn = document.createElement("button");
+          const undoBtn = mkEl("button", "eo-copilot-undo-btn", "실행 취소");
           undoBtn.type = "button";
-          undoBtn.className = "eo-copilot-undo-btn";
           undoBtn.dataset.turn = msg.id;
           undoBtn.dataset.copilotAction = "undo";
           undoBtn.disabled = actionDisabled("undo", msg);
-          undoBtn.textContent = "실행 취소";
           undoBtn.addEventListener("click", () => {
             void copilotActions.undoLastTurn(msg.id).then((restored) => {
               if (!restored) return;
@@ -448,13 +362,11 @@
           chipRow.appendChild(undoBtn);
         }
         if (showRegenerate) {
-          const regenBtn = document.createElement("button");
+          const regenBtn = mkEl("button", "eo-copilot-chip-btn", "다시 생성");
           regenBtn.type = "button";
-          regenBtn.className = "eo-copilot-chip-btn";
           regenBtn.dataset.turn = msg.id;
           regenBtn.dataset.copilotAction = "regenerate";
           regenBtn.disabled = actionDisabled("regenerate", msg);
-          regenBtn.textContent = "다시 생성";
           regenBtn.addEventListener("click", () => void regenerateLast());
           chipRow.appendChild(regenBtn);
         }
@@ -464,25 +376,16 @@
       if (proposing) {
         wrap.appendChild(copilotActions.renderChangeList(msg.change.changes, (loc) => void copilotActions.locateTarget(loc).then(() => syncSelectionBadge())));
       } else if (msg.change?.state === "rejected") {
-        const note = document.createElement("div");
-        note.className = "eo-copilot-inplace-row";
-        note.textContent = "거절함";
-        wrap.appendChild(note);
+        wrap.appendChild(mkEl("div", "eo-copilot-inplace-row", "거절함"));
       }
 
       if (msg.reply) {
-        const replyEl = document.createElement("div");
-        replyEl.className = "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : "");
+        const replyEl = mkEl("div", "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : ""));
         replyEl.dataset.turnReply = msg.id;
         renderReplyContent(replyEl, msg.reply, msg.error);
         wrap.appendChild(replyEl);
       }
-      if (msg.pending) {
-        const loading = document.createElement("div");
-        loading.className = "eo-copilot-loading";
-        loading.textContent = "응답 생성 중…";
-        wrap.appendChild(loading);
-      }
+      if (msg.pending) wrap.appendChild(mkEl("div", "eo-copilot-loading", "응답 생성 중…"));
       return wrap;
     }
 
@@ -552,26 +455,19 @@
       textarea.setAttribute("rows", String(rows));
     }
 
-    function buildHistoryPayload() {
-      const completed = [];
-      for (let i = 0; i < messages.length; i += 1) {
-        const m = messages[i];
-        if (!m || m.pending || m.error) continue;
-        if (m.role === "user") {
-          const next = messages[i + 1];
-          if (next && next.role === "assistant" && (next.pending || next.error)) continue;
-        }
-        completed.push(m);
-      }
-      const raw = completed.map((m) => ({
-        role: m.role,
-        text: m.role === "user" ? String(m.text || "") : String(m.reply || ""),
-      }));
-      const compactApi = host.__EASYOFFICE_COPILOT_CONTEXT_COMPACT__;
-      return compactApi ? compactApi.compactHistory(raw, MAX_HISTORY_ITEMS) : raw.slice(-MAX_HISTORY_ITEMS);
-    }
+    const anchorApi = host.__EASYOFFICE_COPILOT_SESSION_ANCHOR__;
+    const sessionAnchor = anchorApi?.createCopilotSessionAnchor?.() || null;
+    const usageTracker = anchorApi?.createUsageTracker?.() || null;
+    const normalizeLocations = (rawList, fallbackMod) => (
+      anchorApi?.normalizeLocations ? anchorApi.normalizeLocations(rawList, fallbackMod) : []
+    );
 
-    let promptCacheSession = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    function buildHistoryPayload(limit = MAX_HISTORY_ITEMS) {
+      if (anchorApi?.buildHistoryPayload) {
+        return anchorApi.buildHistoryPayload(messages, limit);
+      }
+      return [];
+    }
 
     function newRequestId() {
       return "cp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) + "-" + turnCounter;
@@ -589,7 +485,15 @@
       dismissPreview();
       const mod = request.mod || getActiveModule();
       const mode = request.mode || effectiveMode(mod);
-      const history = buildHistoryPayload();
+      if (anchorApi?.evictAlignedMessages) {
+        anchorApi.evictAlignedMessages(messages, MAX_MESSAGES, 8);
+      } else if (messages.length >= MAX_MESSAGES) {
+        messages.splice(0, 8);
+      }
+      const historyLimit = usageTracker
+        ? usageTracker.preemptForWindow(messages, modelUi.getContextWindow?.(), MAX_HISTORY_ITEMS)
+        : MAX_HISTORY_ITEMS;
+      const history = request.command ? [] : buildHistoryPayload(historyLimit);
       const frozenSelection = mod === "SHEET" ? copilotActions.freezeSheetSelection() : null;
       const { selection, context } = copilotActions.extractContext(mod, { target: request.target, frozenSelection });
 
@@ -600,7 +504,6 @@
           autoGrowTextarea(inputEl);
         }
       }
-      if (messages.length >= MAX_MESSAGES) messages.splice(0, messages.length - MAX_MESSAGES + 4);
       turnCounter += 1;
       const turnId = "turn-" + turnCounter;
       messages.push({ id: turnId + "-u", role: "user", text: request.prompt });
@@ -667,28 +570,52 @@
           selection = fresh.selection;
           context = fresh.context;
         }
+        const resolved = sessionAnchor
+          ? sessionAnchor.resolveTurnPayload({ mod, command: turn.request.command, liveContext: context, liveSelection: selection })
+          : { promptCacheKey: undefined, context, contextDelta: null };
+        const primaryProvider = modelUi.currentProviderPayload();
+        const useFastForCmd = Boolean(turn.request.command && FAST_SELECTION_COMMANDS.has(turn.request.command));
+        const fastProvider = useFastForCmd && modelUi.getFastProviderPayload
+          ? modelUi.getFastProviderPayload()
+          : primaryProvider;
+        const canFallbackPrimary = Boolean(
+          useFastForCmd && fastProvider?.model && primaryProvider?.model && fastProvider.model !== primaryProvider.model,
+        );
         const baseReq = {
           action: "copilot_run",
           requestId: turn.requestId,
-          promptCacheKey: promptCacheSession,
+          promptCacheKey: resolved.promptCacheKey,
           mode,
           module: mod,
           prompt: turn.request.prompt,
           history: turn.history,
           selection,
-          context,
-          provider: modelUi.currentProviderPayload(),
+          context: resolved.context,
+          provider: fastProvider,
         };
+        if (resolved.contextDelta) baseReq.contextDelta = resolved.contextDelta;
         if (turn.request.command) baseReq.command = turn.request.command;
-        const res = await agentLoop.runAgentTurn({
+        const turnArgs = {
           baseReq,
           frozenSelection: turn.frozenSelection,
           newSubRequestId: (stepIdx) => turn.requestId + "-s" + stepIdx,
           isCancelled: () => token !== activeRunToken,
           onStreamText: (text) => showStreamed(assistantEntry, text, token),
           onActiveRequestId: (id) => { activeRequestId = id; },
-        });
+        };
+        let res;
+        try {
+          res = await agentLoop.runAgentTurn(turnArgs);
+        } catch (err) {
+          if (!canFallbackPrimary || token !== activeRunToken) throw err;
+          showStreamed(assistantEntry, "", token);
+          res = await agentLoop.runAgentTurn({
+            ...turnArgs,
+            baseReq: { ...baseReq, requestId: turn.requestId + "-fb", provider: primaryProvider },
+          });
+        }
         if (!res || token !== activeRunToken) return;
+        usageTracker?.record(res.usage, res.lastContextTokens);
         const ops = Array.isArray(res?.operations) ? res.operations : [];
         const explicitLocs = normalizeLocations(res?.locations, mod);
         assistantEntry.pending = false;
@@ -888,6 +815,8 @@
         copilotActions.abortPerformance();
         stopActiveRun();
         dismissPreview();
+        sessionAnchor?.resetSession(true);
+        usageTracker?.reset();
         messages.length = 0;
         copilotActions.clearUndo();
         const inputEl = byId("copilot-input");
@@ -969,15 +898,25 @@
       bind,
       toggle,
       setOpen,
+      onDocumentOpened: () => {
+        dismissPreview();
+        copilotGhost?.dismiss?.();
+        sessionAnchor?.resetSession(true);
+        usageTracker?.reset();
+        syncPanelChrome();
+      },
       onModuleChanged: () => {
         dismissPreview();
         copilotGhost?.dismiss?.();
+        sessionAnchor?.syncActiveModule(getActiveModule());
+        usageTracker?.reset();
         if (getActiveModule() === "HWP") void copilotActions.refreshHwpSnapshot?.().then(() => syncSelectionBadge()).catch(() => {});
         syncPanelChrome();
       },
       syncSelection: () => syncSelectionBadge(),
       isPerforming: () => copilotActions.isPerforming(),
       whenIdle: () => copilotActions.whenIdle(),
+      getSessionUsage: () => usageTracker?.snapshot?.() || null,
       ghost: copilotGhost,
     };
   }

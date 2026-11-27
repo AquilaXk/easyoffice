@@ -6,7 +6,6 @@ use super::op_types::{
     BoardGraphEdge, BoardGraphNode, CopilotOperation, CopilotToolCall, SlideChartSeries,
     SlideElementSpec,
 };
-use super::prompt::doc_has_unread_blocks;
 use super::types::{
     is_valid_a1_coord, is_valid_hex_color, is_valid_range_ref, CopilotModule, CopilotRunRequest,
     MAX_BASE_FIELDS, MAX_BASE_RECORDS, MAX_BASE_TEXT_BYTES, MAX_BOARD_TEXT_BYTES,
@@ -756,7 +755,7 @@ pub fn validate_tool_calls(
         else {
             continue;
         };
-        let allow_doc_read = doc_has_unread_blocks(req);
+        let allow_doc_read = !req.lightweight && req.command.is_none();
         match (name, req.module) {
             (
                 "read_doc_blocks" | "read_hwp_paragraphs",
@@ -800,6 +799,20 @@ pub fn validate_tool_calls(
                     if !query.is_empty() {
                         out.push(CopilotToolCall::SearchPdfPages { query });
                     }
+                }
+            }
+            ("read_base_records", CopilotModule::Base) => {
+                let offset = opt_usize(obj, "offset").unwrap_or(0);
+                let limit = opt_usize(obj, "limit").unwrap_or(20).clamp(1, 50);
+                let query = opt_clean_str(obj, "query", 256)
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                if offset <= 100_000 {
+                    out.push(CopilotToolCall::ReadBaseRecords {
+                        offset,
+                        limit,
+                        query,
+                    });
                 }
             }
             _ => {}

@@ -6,6 +6,10 @@
 use easyoffice_formats::StrictJsonValue;
 
 use super::context::SlideField;
+use super::op_reasons::{
+    diagnose_dropped_op, effective_doc_para_count, effective_doc_para_text, effective_slide_count,
+    push_reason, too_many_ops_reason,
+};
 pub use super::operations_ext::validate_tool_calls;
 use super::operations_ext::{
     opt_hex, opt_usize, parse_slide_element, parse_slide_elements_opt, parse_slide_layout,
@@ -20,21 +24,31 @@ use super::types::{
     MAX_SLIDES, MAX_SLIDE_BULLETS, MIN_CHART_HEIGHT, MIN_CHART_WIDTH,
 };
 
-/// 검사를 통과한 작업과 버린 작업 수.
+/// 검사를 통과한 작업과 버린 작업 수·사유.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ValidatedOperations {
     pub operations: Vec<CopilotOperation>,
     pub dropped: usize,
+    pub dropped_reasons: Vec<String>,
 }
 
 pub fn validate_operations(
     req: &CopilotRunRequest,
     items: &[StrictJsonValue],
 ) -> ValidatedOperations {
-    let mut known_slides = req.context.slide.as_ref().map(|s| s.slides.len());
+    let mut known_slides = effective_slide_count(req);
     let mut accepted: Vec<CopilotOperation> = Vec::new();
-    for item in items.iter().take(MAX_LLM_OPERATIONS) {
+    let mut dropped_reasons: Vec<String> = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        if idx >= MAX_LLM_OPERATIONS {
+            push_reason(&mut dropped_reasons, too_many_ops_reason(items.len()));
+            break;
+        }
         let Some(obj) = item.as_object() else {
+            push_reason(
+                &mut dropped_reasons,
+                format!("연산 [{idx}]: JSON 객체가 아닙니다."),
+            );
             continue;
         };
         if let Some(op) = validate_single_operation(req, obj, known_slides) {
@@ -44,15 +58,38 @@ pub fn validate_operations(
                 }
             }
             accepted.push(op);
+        } else {
+            let kind = StrictJsonValue::get_str(obj, "kind")
+                .or_else(|| StrictJsonValue::get_str(obj, "op"))
+                .map(str::trim)
+                .unwrap_or("");
+            let op_matches = op_matches_module(kind, req.module);
+            let reason = diagnose_dropped_op(req, obj, known_slides, op_matches, |para, search| {
+                let plain = strip_simple_inline_tags(para);
+                (
+                    plain.match_indices(search).count(),
+                    para.match_indices(search).count(),
+                )
+            });
+            push_reason(&mut dropped_reasons, reason);
         }
     }
     let operations = if req.command.is_some() {
-        restrict_to_command(req, accepted)
+        let before = accepted.len();
+        let kept = restrict_to_command(req, accepted);
+        if kept.len() < before {
+            push_reason(
+                &mut dropped_reasons,
+                "선택 영역 명령 범위 밖의 작업이 제외되었습니다.".to_string(),
+            );
+        }
+        kept
     } else {
         accepted
     };
     ValidatedOperations {
         dropped: items.len().saturating_sub(operations.len()),
+        dropped_reasons,
         operations,
     }
 }
@@ -424,12 +461,7 @@ fn validate_single_operation(
             })
         }
         "doc.replace_paragraphs" => {
-            let max_para = req
-                .context
-                .doc
-                .as_ref()
-                .map(|d| d.paragraphs.len() + d.omitted_paragraphs)
-                .unwrap_or(usize::MAX);
+            let max_para = effective_doc_para_count(req);
             if let Some(raw_blocks) =
                 StrictJsonValue::get_field(obj, "blocks").and_then(StrictJsonValue::as_array)
             {
@@ -484,12 +516,7 @@ fn validate_single_operation(
                 .then_some(CopilotOperation::DocReplaceParagraphs { replacements })
         }
         "doc.replace_span" => {
-            let max_para = req
-                .context
-                .doc
-                .as_ref()
-                .map(|d| d.paragraphs.len() + d.omitted_paragraphs)
-                .unwrap_or(usize::MAX);
+            let max_para = effective_doc_para_count(req);
             let index = opt_usize(obj, "index")?;
             if index >= max_para {
                 return None;
@@ -502,12 +529,7 @@ fn validate_single_operation(
             {
                 return None;
             }
-            if let Some(Some(para_text)) = req
-                .context
-                .doc
-                .as_ref()
-                .and_then(|d| d.paragraphs.get(index))
-            {
+            if let Some(para_text) = effective_doc_para_text(req, index) {
                 let plain = strip_simple_inline_tags(para_text);
                 let plain_hits = plain.match_indices(search).count();
                 if plain_hits > 1 {

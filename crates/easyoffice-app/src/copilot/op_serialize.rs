@@ -18,9 +18,14 @@ pub fn serialize_run_response(resp: &CopilotRunResponse) -> String {
     push_json_str(&mut out, &resp.reasoning);
     let _ = write!(
         out,
-        ",\"updatedInPlace\":{},\"droppedOperations\":{},\"operations\":[",
+        ",\"updatedInPlace\":{},\"droppedOperations\":{}",
         resp.updated_in_place, resp.dropped_operations
     );
+    if !resp.dropped_reasons.is_empty() {
+        out.push_str(",\"droppedReasons\":");
+        write_str_array(&mut out, &resp.dropped_reasons);
+    }
+    out.push_str(",\"operations\":[");
     for (idx, op) in resp.operations.iter().enumerate() {
         if idx > 0 {
             out.push(',');

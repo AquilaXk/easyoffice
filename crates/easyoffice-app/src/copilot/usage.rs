@@ -7,12 +7,13 @@ use std::fmt::Write as _;
 
 use super::types::ProviderKind;
 
-/// 한 턴의 LLM 호출이 보고한 입력·출력·캐시·추론 토큰 사용량이다.
+/// 한 턴의 LLM 호출이 보고한 입력·출력·캐시·캐시쓰기·추론 토큰 사용량이다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
+    pub cache_write_tokens: u64,
     pub reasoning_tokens: u64,
 }
 
@@ -21,6 +22,7 @@ impl TokenUsage {
         self.input_tokens == 0
             && self.output_tokens == 0
             && self.cached_tokens == 0
+            && self.cache_write_tokens == 0
             && self.reasoning_tokens == 0
     }
 
@@ -29,6 +31,7 @@ impl TokenUsage {
         self.input_tokens = self.input_tokens.max(next.input_tokens);
         self.output_tokens = self.output_tokens.max(next.output_tokens);
         self.cached_tokens = self.cached_tokens.max(next.cached_tokens);
+        self.cache_write_tokens = self.cache_write_tokens.max(next.cache_write_tokens);
         self.reasoning_tokens = self.reasoning_tokens.max(next.reasoning_tokens);
     }
 }
@@ -57,6 +60,12 @@ fn parse_openai_usage_obj(u: &[(String, StrictJsonValue)]) -> TokenUsage {
         .or_else(|| u64_field(u, "cached_tokens"))
         .or_else(|| u64_field(u, "prompt_cache_hit_tokens"))
         .unwrap_or(0);
+    let cache_write_tokens = obj_field(u, "prompt_tokens_details")
+        .or_else(|| obj_field(u, "input_tokens_details"))
+        .and_then(|d| u64_field(d, "cache_write_tokens"))
+        .or_else(|| u64_field(u, "cache_creation_input_tokens"))
+        .or_else(|| u64_field(u, "cache_write_tokens"))
+        .unwrap_or(0);
     let reasoning_tokens = obj_field(u, "completion_tokens_details")
         .or_else(|| obj_field(u, "output_tokens_details"))
         .and_then(|d| u64_field(d, "reasoning_tokens"))
@@ -66,6 +75,7 @@ fn parse_openai_usage_obj(u: &[(String, StrictJsonValue)]) -> TokenUsage {
         input_tokens,
         output_tokens,
         cached_tokens,
+        cache_write_tokens,
         reasoning_tokens,
     }
 }
@@ -83,16 +93,20 @@ fn parse_anthropic_usage_obj(u: &[(String, StrictJsonValue)]) -> TokenUsage {
         input_tokens,
         output_tokens,
         cached_tokens: cache_read,
+        cache_write_tokens: cache_create,
         reasoning_tokens,
     }
 }
 
 fn parse_google_usage_obj(u: &[(String, StrictJsonValue)]) -> TokenUsage {
+    let candidates = u64_field(u, "candidatesTokenCount").unwrap_or(0);
+    let thoughts = u64_field(u, "thoughtsTokenCount").unwrap_or(0);
     TokenUsage {
         input_tokens: u64_field(u, "promptTokenCount").unwrap_or(0),
-        output_tokens: u64_field(u, "candidatesTokenCount").unwrap_or(0),
+        output_tokens: candidates.saturating_add(thoughts),
         cached_tokens: u64_field(u, "cachedContentTokenCount").unwrap_or(0),
-        reasoning_tokens: u64_field(u, "thoughtsTokenCount").unwrap_or(0),
+        cache_write_tokens: 0,
+        reasoning_tokens: thoughts,
     }
 }
 
@@ -114,8 +128,12 @@ pub fn extract_usage_from_root(
 pub fn write_usage_json_field(out: &mut String, usage: TokenUsage) {
     let _ = write!(
         out,
-        ",\"usage\":{{\"inputTokens\":{},\"outputTokens\":{},\"cachedTokens\":{},\"reasoningTokens\":{}}}",
-        usage.input_tokens, usage.output_tokens, usage.cached_tokens, usage.reasoning_tokens
+        ",\"usage\":{{\"inputTokens\":{},\"outputTokens\":{},\"cachedTokens\":{},\"cacheWriteTokens\":{},\"reasoningTokens\":{}}}",
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cached_tokens,
+        usage.cache_write_tokens,
+        usage.reasoning_tokens
     );
 }
 
@@ -141,6 +159,7 @@ mod tests {
                 input_tokens: 1200,
                 output_tokens: 85,
                 cached_tokens: 960,
+                cache_write_tokens: 0,
                 reasoning_tokens: 32,
             })
         );
@@ -168,6 +187,7 @@ mod tests {
                 input_tokens: 1712,
                 output_tokens: 64,
                 cached_tokens: 1500,
+                cache_write_tokens: 200,
                 reasoning_tokens: 0,
             }
         );
@@ -179,8 +199,9 @@ mod tests {
             extract_usage_from_root(ProviderKind::Google, &gg),
             Some(TokenUsage {
                 input_tokens: 900,
-                output_tokens: 45,
+                output_tokens: 165,
                 cached_tokens: 600,
+                cache_write_tokens: 0,
                 reasoning_tokens: 120,
             })
         );

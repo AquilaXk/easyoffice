@@ -388,17 +388,17 @@
         const res = await getEmbedHwpHost().call("readParagraphRange", { startIndex, count });
         return {
           totalParagraphs: res?.totalParagraphs || 0,
-          blocks: (res?.paragraphs || []).map((p) => ({ index: p.index, text: p.text })),
+          lines: (res?.paragraphs || []).map((p) => `  [${p.index}] ${String(p.text ?? "").replace(/[\r\n]+/g, " ")}`),
         };
       }
       const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
       const editor = document.getElementById("doc-editor");
       const blocks = docBlocksOf(editor);
-      const slice = blocks.slice(startIndex, startIndex + count).map((el, offset) => ({
-        index: startIndex + offset,
-        text: docHtml ? docHtml.serializeBlockForContext(el) : String(el.textContent || "").trim(),
-      }));
-      return { totalParagraphs: blocks.length, blocks: slice };
+      const slice = blocks.slice(startIndex, startIndex + count).map((el, offset) => {
+        const txt = docHtml ? docHtml.serializeBlockForContext(el) : String(el.textContent || "").trim();
+        return `  [${startIndex + offset}] ${txt.replace(/[\r\n]+/g, " ")}`;
+      });
+      return { totalParagraphs: blocks.length, lines: slice };
     }
 
     // ---- PDF context, page search & page locate ----------------------------------------------------
@@ -893,6 +893,7 @@
 
     return {
       getEmbedHwpHost,
+      getHwpSnapshot: () => cachedHwpSnapshot,
       refreshHwpSnapshot,
       extractHwpContextAsync,
       getHwpSelectionLabel,
@@ -906,6 +907,7 @@
       undoHwpTurn,
       locateHwpTarget,
       readDocBlocksTool,
+      readBaseRecordsTool: (args) => host.__EASYOFFICE_BASE_BOARD_HOST__?.readBaseRecordsTool?.(args) || "테이블이 비어 있습니다.",
       extractPdfContext,
       searchPdfPagesTool,
       locatePdfTarget,

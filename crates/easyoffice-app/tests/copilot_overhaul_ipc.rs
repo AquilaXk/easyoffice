@@ -139,7 +139,7 @@ fn reasoning_models_omit_temperature_and_google_uses_thinking_level_or_budget() 
 
     // Gemini 3 / 4 uses thinkingLevel and omits forced temperature: 0.2
     let google_resp = r#"{"candidates":[{"content":{"parts":[{"text":"{\"reply\":\"제미나이 답\",\"operations\":[]}"}]}}]}"#;
-    let gemini3 = r#"{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"요약","provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-3-pro","apiKey":"AIza-test","reasoningEffort":"high"}}"#;
+    let gemini3 = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"전체 문단 구조를 분석하고 수정안을 작성해 주세요.","provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-3-pro","apiKey":"AIza-test","reasoningEffort":"high"}}"#;
     let (res3, reqs3) = dispatch_raw_llm(gemini3, google_resp);
     assert!(res3.is_ok());
     assert!(
@@ -155,7 +155,7 @@ fn reasoning_models_omit_temperature_and_google_uses_thinking_level_or_budget() 
     );
 
     // Gemini 2.5 adds budget to maxOutputTokens (8192 + 4096 = 12288) and uses thinkingBudget
-    let gemini25 = r#"{"action":"copilot_run","mode":"ask","module":"DOC","prompt":"요약","provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-2.5-pro","apiKey":"AIza-test","reasoningEffort":"medium"}}"#;
+    let gemini25 = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"전체 문단 구조를 분석하고 수정안을 작성해 주세요.","provider":{"kind":"google","baseUrl":"https://93.184.216.34/v1beta","model":"gemini-2.5-pro","apiKey":"AIza-test","reasoningEffort":"medium"}}"#;
     let (res25, reqs25) = dispatch_raw_llm(gemini25, google_resp);
     assert!(res25.is_ok());
     assert!(
@@ -561,11 +561,11 @@ fn cloud_pii_redaction_masks_outbound_payload_and_restores_chunk_split_stream_wh
         }
     }"#;
 
-    // Stream splits `[PII_EMAIL_2]` and `[PII_PHONE_3]` across SSE chunks, plus includes an unissued `[PII_FAKE_99]`.
+    // Stream splits `[PII_EMAIL_3]` and `[PII_PHONE_4]` across SSE chunks (Tier 2 doc reserves [PII_EMAIL_1], issues [PII_RRN_2] & [PII_EMAIL_3]; Tier 4 prompt issues [PII_PHONE_4]), plus includes unissued `[PII_FAKE_99]`.
     let sse_chunks = [
         "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"reply\\\":\\\"담당자 [PII_EMA\"}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"content\":\"IL_2] (연락처 [PII_PHO\"}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"content\":\"NE_3], 미발급 [PII_FAKE_99]) 안내 완료\\\",\\\"operations\\\":[{\\\"op\\\":\\\"doc.append\\\",\\\"text\\\":\\\"문의: [PII_EMAIL_2] / [PII_PHONE_3]\\\"}]}\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"IL_3] (연락처 [PII_PHO\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"NE_4], 미발급 [PII_FAKE_99]) 안내 완료\\\",\\\"operations\\\":[{\\\"op\\\":\\\"doc.append\\\",\\\"text\\\":\\\"문의: [PII_EMAIL_3] / [PII_PHONE_4]\\\"}]}\"}}]}\n\n",
         "data: [DONE]\n\n",
     ];
     let (res, reqs, pieces) = dispatch_stream_chunks(remote_req, &sse_chunks);
@@ -583,16 +583,16 @@ fn cloud_pii_redaction_masks_outbound_payload_and_restores_chunk_split_stream_wh
         "raw RRN must not leave to remote provider: {outbound}"
     );
     assert!(
-        outbound.contains("[PII_EMAIL_2]"),
-        "collision avoidance starts at 2 after literal [PII_EMAIL_1]: {outbound}"
+        outbound.contains("[PII_RRN_2]"),
+        "Tier 2 doc RRN starts at 2 after literal [PII_EMAIL_1]: {outbound}"
     );
     assert!(
-        outbound.contains("[PII_PHONE_3]"),
-        "phone token present in outbound body: {outbound}"
+        outbound.contains("[PII_EMAIL_3]"),
+        "Tier 2/4 email reuses [PII_EMAIL_3]: {outbound}"
     );
     assert!(
-        outbound.contains("[PII_RRN_4]"),
-        "RRN token present in outbound body: {outbound}"
+        outbound.contains("[PII_PHONE_4]"),
+        "Tier 4 phone token present in outbound body: {outbound}"
     );
 
     let o = parse_obj(&res.expect("PII stream roundtrip ok"));
@@ -708,13 +708,13 @@ fn pii_restoration_runs_before_validation_for_cell_coords_sheet_names_and_length
             "context":{{"sheet":{{"name":"admin@corp.kr","cells":[{{"coord":"AB1000000","raw":"10","value":"10"}}],"rowCount":1000005}}}}
         }}"#
     );
-    // Outbound scan order: prompt ("AB1000000" -> [PII_ID_1], long_email -> [PII_EMAIL_2]),
-    // selection/context ("admin@corp.kr" -> [PII_EMAIL_3]).
+    // Outbound Tier order: Tier 2 context/sheet ("admin@corp.kr" -> [PII_EMAIL_1], "AB1000000" -> [PII_ID_2]),
+    // Tier 4 volatile/prompt (reuses [PII_ID_2], [PII_EMAIL_1], assigns long_email -> [PII_EMAIL_3]).
     let model_reply = r#"{
-        "reply":"시트 [PII_EMAIL_3]의 [PII_ID_1] 갱신, 꼬리 조각 [PII_EMA",
+        "reply":"시트 [PII_EMAIL_1]의 [PII_ID_2] 갱신, 꼬리 조각 [PII_EMA",
         "operations":[
-            {"op":"sheet.write","sheet":"[PII_EMAIL_3]","cells":[{"coord":"[PII_ID_1]","raw":"99"}]},
-            {"op":"sheet.chart","sheet":"[PII_EMAIL_3]","chartType":"bar","dataRange":"A1:B3","title":"[PII_EMAIL_2]"}
+            {"op":"sheet.write","sheet":"[PII_EMAIL_1]","cells":[{"coord":"[PII_ID_2]","raw":"99"}]},
+            {"op":"sheet.chart","sheet":"[PII_EMAIL_1]","chartType":"bar","dataRange":"A1:B3","title":"[PII_EMAIL_3]"}
         ]
     }"#;
     let (res, reqs) = dispatch_raw_llm(&sheet_req, &openai_text_reply(model_reply));
@@ -755,7 +755,7 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         r#"{"content":[{"type":"text","text":"{\"reply\":\"확인\",\"operations\":[]}"}]}"#;
     let ok_google = r#"{"candidates":[{"content":{"parts":[{"text":"{\"reply\":\"확인\",\"operations\":[]}"}]}}]}"#;
 
-    // 1. Single-paragraph text prediction (`텍스트 예측`) must not expose `read_doc_blocks` or `toolCalls`
+    // 1. Lightweight text prediction (`lightweight: true`) must not expose `read_doc_blocks` or `toolCalls`
     //    anywhere in tools OR system prompt, and drops hallucinated `read_doc_blocks` calls.
     let hallucinated_tool_reply = openai_text_reply(
         r#"{"reply":"이어지는 예측 구절","operations":[],"toolCalls":[{"name":"read_doc_blocks","startIndex":0,"endIndex":10}]}"#,
@@ -764,6 +764,7 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "action":"copilot_run",
         "mode":"ask",
         "module":"DOC",
+        "lightweight":true,
         "prompt":"다음 구절 제안",
         "selection":{"range":"텍스트 예측"},
         "provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o","apiKey":"sk-test"},
@@ -774,22 +775,22 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     assert!(
         !g_reqs[0].body_json.contains("\"emit_copilot_turn\"")
             && !g_reqs[0].body_json.contains("\"tools\""),
-        "read-only ask request with 0 read tools omits emit_copilot_turn and tools: {}",
+        "lightweight request with 0 read tools omits emit_copilot_turn and tools: {}",
         g_reqs[0].body_json
     );
     assert!(
         !g_reqs[0].body_json.contains("read_doc_blocks")
             && !g_reqs[0].body_json.contains("toolCalls"),
-        "text prediction request must not expose read_doc_blocks or toolCalls anywhere: {}",
+        "lightweight text prediction request must not expose read_doc_blocks or toolCalls anywhere: {}",
         g_reqs[0].body_json
     );
     assert!(
         tools_of(&g_obj).is_empty(),
-        "hallucinated read_doc_blocks must be rejected when doc has no unread blocks"
+        "hallucinated read_doc_blocks must be rejected on lightweight ghost requests"
     );
 
-    // 2. Short complete DOC and HWP documents across OpenAI, Anthropic, Google, and Ollama omit `read_doc_blocks`
-    //    from both native `tools` AND `system` instructions.
+    // 2. Normal DOC and HWP chats permanently expose `read_doc_blocks` across OpenAI, Anthropic, Google, and Ollama
+    //    to avoid 200-paragraph / 24 KiB boundary schema toggles that invalidate Tier 1 prompt cache.
     let short_hwp_anth = r#"{
         "action":"copilot_run",
         "mode":"edit",
@@ -800,8 +801,8 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     }"#;
     let (_, short_anth_reqs) = dispatch_raw_llm(short_hwp_anth, ok_anthropic);
     assert!(
-        !short_anth_reqs[0].body_json.contains("read_doc_blocks"),
-        "short HWP must omit read_doc_blocks from system prompt and tools: {}",
+        short_anth_reqs[0].body_json.contains("\"read_doc_blocks\""),
+        "normal HWP permanently exposes read_doc_blocks to preserve Tier 1 cache: {}",
         short_anth_reqs[0].body_json
     );
 
@@ -815,8 +816,10 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     }"#;
     let (_, short_google_reqs) = dispatch_raw_llm(short_doc_google, ok_google);
     assert!(
-        !short_google_reqs[0].body_json.contains("read_doc_blocks"),
-        "short DOC must omit read_doc_blocks from systemInstruction and tools: {}",
+        short_google_reqs[0]
+            .body_json
+            .contains("\"read_doc_blocks\""),
+        "normal DOC permanently exposes read_doc_blocks to preserve Tier 1 cache: {}",
         short_google_reqs[0].body_json
     );
 
@@ -824,6 +827,7 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
         "action":"copilot_run",
         "mode":"ask",
         "module":"DOC",
+        "lightweight":true,
         "prompt":"다음 구절 제안",
         "selection":{"range":"텍스트 예측"},
         "provider":{"kind":"ollama","baseUrl":"http://127.0.0.1:11434/v1","model":"qwen3"},
@@ -833,7 +837,7 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     assert!(
         !short_ollama_reqs[0].body_json.contains("read_doc_blocks")
             && !short_ollama_reqs[0].body_json.contains("toolCalls"),
-        "local loopback ghost request must not advertise toolCalls: {}",
+        "local loopback lightweight ghost request must not advertise toolCalls: {}",
         short_ollama_reqs[0].body_json
     );
 
@@ -860,7 +864,7 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     let (_, over_200_reqs) = dispatch_raw_llm(&over_200_req, &ok_openai);
     assert!(over_200_reqs[0].body_json.contains("\"read_doc_blocks\""));
 
-    // 5. Genuine blank paragraph (`""`) does NOT expose `read_doc_blocks`, while sparse `null` slot DOES
+    // 5. Genuine blank paragraph (`""`) and sparse `null` slot keep consistent schema
     let blank_req = r#"{
         "action":"copilot_run",
         "mode":"edit",
@@ -871,8 +875,8 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     }"#;
     let (_, blank_reqs) = dispatch_raw_llm(blank_req, ok_anthropic);
     assert!(
-        !blank_reqs[0].body_json.contains("read_doc_blocks"),
-        "genuine blank paragraph must not trigger read_doc_blocks: {}",
+        blank_reqs[0].body_json.contains("\"read_doc_blocks\""),
+        "normal HWP keeps stable read_doc_blocks schema: {}",
         blank_reqs[0].body_json
     );
 
