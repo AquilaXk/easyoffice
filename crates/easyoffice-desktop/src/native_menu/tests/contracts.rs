@@ -76,7 +76,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "아래쪽",
             "왼쪽",
             "오른쪽",
-            "없음",
+            "테두리 없음",
             s,
             "가는 실선",
             "굵은 실선",

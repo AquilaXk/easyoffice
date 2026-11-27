@@ -460,7 +460,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "sheet-look:border-right",
     ),
-    item("format:border-none", "없음", None, "sheet-look:border-none"),
+    item(
+        "format:border-none",
+        "테두리 없음",
+        None,
+        "sheet-look:border-none",
+    ),
     item(
         "format:border-line-thin",
         "가는 실선",
@@ -625,13 +630,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "page:slide-master",
-        "마스터 레이아웃",
+        "슬라이드 마스터",
         None,
         "studio-cmd:slide-mod-master",
     ),
     item(
         "page:slide-snap",
-        "스마트 정렬 가이드",
+        "스마트 가이드",
         None,
         "studio-cmd:slide-mod-snap",
     ),
