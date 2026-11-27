@@ -166,9 +166,9 @@ export const docSteps = [
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
     await page.click("#doc-font-tab-advanced");
-    await page.click("#doc-font-dialog .dialog-combo-arrow");
-    assert.deepEqual(await page.$$eval("#doc-font-dialog .dialog-combo-list li", (rows) => rows.map((r) => r.textContent)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
-    await page.click('#doc-font-dialog .dialog-combo-list li:nth-child(2)');
+    await page.click("#doc-font-pane-advanced .dialog-combo-arrow");
+    assert.deepEqual(await page.$$eval("#doc-font-pane-advanced .dialog-combo-list li", (rows) => rows.map((r) => r.textContent)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
+    await page.click("#doc-font-pane-advanced .dialog-combo-list li:nth-child(2)");
     assert.equal(await page.inputValue("#doc-font-scale"), "150%");
     await page.selectOption("#doc-font-spacing-kind", "expanded");
     await page.fill("#doc-font-spacing-value", "2");

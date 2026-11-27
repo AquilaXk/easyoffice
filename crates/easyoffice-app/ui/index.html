@@ -1628,20 +1628,41 @@
           <button type="button" class="dialog-tab" role="tab" id="doc-font-tab-advanced" aria-selected="false" aria-controls="doc-font-pane-advanced" tabindex="-1" data-font-tab="advanced">고급</button>
         </div>
         <div class="dialog-body" id="doc-font-pane-font" role="tabpanel" aria-labelledby="doc-font-tab-font" data-font-pane="font">
-          <div class="dialog-row"><label class="dialog-label" for="doc-font-family">글꼴(F)</label><select id="doc-font-family" class="sb-combo dialog-select"></select></div>
-          <div class="dialog-row"><label class="dialog-label" for="doc-font-style">글꼴 스타일(Y)</label>
-            <select id="doc-font-style" class="sb-combo dialog-select">
-              <option value="regular">보통</option>
-              <option value="italic">기울임꼴</option>
-              <option value="bold">굵게</option>
-              <option value="bolditalic">굵게 기울임꼴</option>
-            </select>
+          <div class="dialog-font-top">
+            <label class="dialog-label" for="doc-font-family">한글 글꼴(<span class="dialog-key">T</span>):</label>
+            <label class="dialog-label" for="doc-font-style">글꼴 스타일(<span class="dialog-key">Y</span>):</label>
+            <label class="dialog-label" for="doc-font-size">크기(<span class="dialog-key">S</span>):</label>
+            <select id="doc-font-family" class="sb-combo dialog-select" data-accesskey="t"></select>
+            <input id="doc-font-style" class="dialog-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
+            <input id="doc-font-size" class="dialog-input dialog-field" type="text" inputmode="decimal" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
           </div>
-          <div class="dialog-row"><label class="dialog-label" for="doc-font-size">크기(S)</label><input id="doc-font-size" class="dialog-input" type="number" min="1" max="1638" step="0.5" /><span class="dialog-unit">pt</span></div>
-          <div class="dialog-section-title">효과</div>
-          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-strike" type="checkbox" /> 취소선(K)</label></div>
-          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-sup" type="checkbox" /> 위 첨자(P)</label></div>
-          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-sub" type="checkbox" /> 아래 첨자(B)</label></div>
+          <div class="dialog-grid dialog-font-rows">
+            <label class="dialog-label" for="doc-font-latin">영어 글꼴(<span class="dialog-key">F</span>):</label>
+            <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f" data-pending></select>
+            <label class="dialog-label" for="doc-font-color">글꼴 색(<span class="dialog-key">C</span>):</label>
+            <div id="doc-font-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="c" aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span aria-hidden="true">▾</span></button><input id="doc-font-color" type="color" value="#000000" aria-label="글꼴 색" /><div id="doc-font-color-palette" class="sb-hl-palette" hidden></div></div>
+            <label class="dialog-label" for="doc-font-underline-style">밑줄 스타일(<span class="dialog-key">U</span>):</label>
+            <select id="doc-font-underline-style" class="sb-combo dialog-select" data-accesskey="u">
+              <option value="none">(없음)</option>
+              <option value="single">한 줄</option>
+            </select>
+            <label class="dialog-label" for="doc-font-underline-color">밑줄 색(<span class="dialog-key">I</span>):</label>
+            <select id="doc-font-underline-color" class="sb-combo dialog-select" data-accesskey="i" data-pending><option value="">자동</option></select>
+            <label class="dialog-label" for="doc-font-emphasis">강조점(<span class="dialog-key">·</span>):</label>
+            <select id="doc-font-emphasis" class="sb-combo dialog-select" data-pending><option value="0">(없음)</option></select>
+          </div>
+          <fieldset class="dialog-group">
+            <legend>효과</legend>
+            <div class="dialog-effects">
+              <label class="dialog-checkbox"><input id="doc-font-strike" type="checkbox" data-accesskey="k" /><span>취소선(<span class="dialog-key">K</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-smallcaps" type="checkbox" data-accesskey="m" data-pending /><span>작은 대문자(<span class="dialog-key">M</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-dstrike" type="checkbox" data-accesskey="l" data-pending /><span>이중 취소선(<span class="dialog-key">L</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-allcaps" type="checkbox" data-accesskey="a" data-pending /><span>모두 대문자(<span class="dialog-key">A</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-sup" type="checkbox" data-accesskey="p" /><span>위 첨자(<span class="dialog-key">P</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-hidden" type="checkbox" data-accesskey="h" data-pending /><span>숨김(<span class="dialog-key">H</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-sub" type="checkbox" data-accesskey="b" /><span>아래 첨자(<span class="dialog-key">B</span>)</span></label>
+            </div>
+          </fieldset>
         </div>
         <div class="dialog-body" id="doc-font-pane-advanced" role="tabpanel" aria-labelledby="doc-font-tab-advanced" data-font-pane="advanced" hidden>
           <fieldset class="dialog-group">

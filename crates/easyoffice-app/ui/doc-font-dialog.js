@@ -32,7 +32,11 @@
     bolditalic: { bold: true, italic: true },
   };
 
+  const STYLE_LABEL = { regular: "보통", italic: "기울임꼴", bold: "굵게", bolditalic: "굵게 기울임꼴" };
+
   const styleKey = (bold, italic) => Object.keys(STYLE_OF).find((k) => STYLE_OF[k].bold === bold && STYLE_OF[k].italic === italic);
+  // The style a 글꼴 스타일 text names; `undefined` for a text that is not in the list.
+  const styleOfText = (text) => Object.keys(STYLE_LABEL).find((k) => STYLE_LABEL[k] === String(text).trim());
 
   const OT = host.__EASYOFFICE_DOC_OPEN_TYPE__;
   const PLAIN_NUMBER_RE =/^-?(\d+\.?\d*|\.\d+)$/;
@@ -104,12 +108,17 @@
     }
   }
 
-  // The preset lists of the combo boxes (`data-presets`: 배율's 200 % ... 33 %).
+  // The lists of the editable fields: a drop-down combo (`data-presets`: 배율's 200 % ... 33 %) and the always-open list
+  // boxes of the 글꼴 tab (`data-list`: 글꼴 스타일, 크기). Returns the list boxes, whose highlighted row follows the field.
   function bindPresetCombos(dialog) {
+    const combo = host.__EASYOFFICE_DIALOG_COMBO__;
     for (const input of dialog.querySelectorAll("input[data-presets]")) {
       const items = input.dataset.presets.split(",").map((n) => withUnit(n, input.dataset.unit));
-      host.__EASYOFFICE_DIALOG_COMBO__?.attach(input, { items, arrowLabel: "배율 목록 열기" });
+      combo?.attach(input, { items, arrowLabel: "배율 목록 열기" });
     }
+    return Array.from(dialog.querySelectorAll("input[data-list]")).map((input) => (
+      combo?.attach(input, { items: input.dataset.list.split(","), inline: true, label: input.getAttribute("aria-label") || "" })
+    ));
   }
 
   // Alt+letter (Option+letter on a Mac, whose `key` is a symbol, so the physical key is read) moves the focus to the control
@@ -131,8 +140,10 @@
     if (target.getAttribute("type") === "checkbox" || target.tagName === "BUTTON") target.click();
   }
 
+  const PENDING_TITLE = "아직 지원하지 않는 항목입니다";
   let bound = false;
   let current = null;
+  let listBoxes = [];
 
   function open(runs, document) {
     const byId = (id) => document.getElementById(id);
@@ -144,12 +155,28 @@
       posKind: byId("doc-font-position-kind"), posValue: byId("doc-font-position-value"),
       kern: byId("doc-font-kerning"), kernValue: byId("doc-font-kerning-value"),
       grid: byId("doc-font-grid"), ot: OT.controls(document),
+      color: byId("doc-font-color"), ulStyle: byId("doc-font-underline-style"),
       sample: byId("doc-font-sample"), sampleText: byId("doc-font-sample-text"), note: byId("doc-font-sample-note"), status: byId("doc-font-status"),
     };
     const R = host.__EASYOFFICE_DOC_RUNS__;
     const state = runs.getState?.() || {};
     // The OpenType controls (and the line-grid box) the user touched: only those replace what the selection had.
     const touched = new Set();
+    // The 글꼴 색 the dialog holds (6 hex digits; "" is 자동, the text color of the page).
+    let color = "";
+    const colorNow = () => color;
+    const paintColor = () => {
+      const chip = els.dialog.querySelector("#doc-font-color-host .dialog-swatch-chip");
+      const label = els.dialog.querySelector("#doc-font-color-host .dialog-swatch-text");
+      if (chip) chip.style.background = color ? `#${color}` : "";
+      if (label) label.textContent = color ? `#${color}` : "자동";
+    };
+    const setColor = (picked) => {
+      color = String(picked || "").replace(/^#/, "").toUpperCase();
+      touched.add("color");
+      paintColor();
+      drawSample();
+    };
 
     // Tabs: one pane shows at a time.
     const showPane = (name) => {
@@ -178,14 +205,15 @@
     // The sample shows the chosen look at a size the box holds. The width scale is drawn for real here (a transform on the
     // sample's own box); the document's runs approximate it (PD-372).
     const drawSample = () => {
-      const style = STYLE_OF[els.style.value] || STYLE_OF.regular;
+      const style = STYLE_OF[styleOfText(els.style.value)] || STYLE_OF.regular;
       const pt = Number.parseFloat(els.size.value);
       const css = els.sample.style;
       css.fontFamily = els.family.value ? `"${els.family.value}", sans-serif` : "";
       css.fontWeight = style.bold ? "700" : "400";
       css.fontStyle = style.italic ? "italic" : "normal";
       css.fontSize = Number.isFinite(pt) ? `${Math.min(SAMPLE_MAX_PX, Math.max(8, pt * (4 / 3)))}px` : "";
-      css.textDecoration = els.strike.checked ? "line-through" : "none";
+      css.textDecoration = [els.ulStyle.value !== "none" ? "underline" : "", els.strike.checked ? "line-through" : ""].filter(Boolean).join(" ") || "none";
+      css.color = colorNow() ? `#${colorNow()}` : "";
       const twips = spacingTwips(els.kind.value, els.value.value);
       css.letterSpacing = twips ? `${(twips / TWIPS_PER_PT) * (4 / 3)}px` : "normal";
       const text = els.sampleText.style;
@@ -228,8 +256,13 @@
       // A mixed selection (null) shows the defaults and keeps each part it did not touch.
       opentype: state.opentype === MIXED ? null : (integer(state.opentype) ?? 0),
       nogrid: state.nogrid === MIXED ? null : state.nogrid === 1,
+      color: state.color === MIXED ? null : (typeof state.color === "string" ? state.color : ""),
+      underline: state.underline === true,
     };
-    els.style.value = initial.style || "regular";
+    color = initial.color || "";
+    paintColor();
+    els.ulStyle.value = initial.underline ? "single" : "none";
+    els.style.value = STYLE_LABEL[initial.style || "regular"];
     els.size.value = initial.size;
     els.strike.checked = initial.strike;
     els.sup.checked = initial.sup;
@@ -254,7 +287,8 @@
 
     // A modal dialog takes the selection from the editor (WebKit collapses it), so 확인 applies to the range the dialog opened on.
     current = {
-      els, R, initial, runs, document, drawSample, syncValue, showPane, touched, range: runs.getLastRange?.() ?? null,
+      els, R, initial, runs, document, drawSample, syncValue, showPane, touched, setColor, getColor: colorNow,
+      range: runs.getLastRange?.() ?? null,
     };
     if (!bound) {
       bound = true;
@@ -277,7 +311,14 @@
         });
       }
       bindUnitFields(els.dialog);
-      bindPresetCombos(els.dialog);
+      listBoxes = bindPresetCombos(els.dialog);
+      host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(byId("doc-font-color-host"), (picked) => current.setColor(picked), { clear: true, clearLabel: "자동" });
+      els.ulStyle.addEventListener("change", () => current.drawSample());
+      // Items whose run property the engine does not keep yet stay visible and off.
+      for (const el of els.dialog.querySelectorAll("[data-pending]")) {
+        el.disabled = true;
+        el.title = PENDING_TITLE;
+      }
       byId("btn-doc-font-apply").addEventListener("click", () => apply());
       els.dialog.addEventListener("keydown", (ev) => {
         onAccessKey(ev, els.dialog);
@@ -287,6 +328,7 @@
         apply();
       });
     }
+    for (const box of listBoxes) box?.sync();
     els.dialog.showModal();
     els.family.focus();
   }
@@ -324,8 +366,9 @@
     const patch = {};
     // Another font drops the variant, as the style bar's font list does (`setFont`, PD-368).
     if (els.family.value && els.family.value !== initial.family) Object.assign(patch, { font: els.family.value, face: null });
-    if (els.style.value !== (initial.style || "regular")) {
-      const style = STYLE_OF[els.style.value];
+    const chosen = styleOfText(els.style.value);
+    if (chosen && chosen !== (initial.style || "regular")) {
+      const style = STYLE_OF[chosen];
       patch.bold = style.bold ? true : null;
       patch.italic = style.italic ? true : null;
     }
@@ -334,6 +377,9 @@
     if (els.strike.checked !== initial.strike) patch.strike = els.strike.checked ? true : null;
     if (els.sup.checked !== initial.sup) patch.superscript = els.sup.checked ? true : null;
     if (els.sub.checked !== initial.sub) patch.subscript = els.sub.checked ? true : null;
+    const underlined = els.ulStyle.value !== "none";
+    if (underlined !== initial.underline) patch.underline = underlined ? true : null;
+    if (current.touched.has("color")) patch.color = current.getColor() || null;
     const advanced = advancedPatch(els, initial, current.touched);
     if (advanced.box) {
       els.status.textContent = MSG_RANGE;

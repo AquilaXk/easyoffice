@@ -40,7 +40,7 @@ test("고급 tab lists 배율, 위치 (표준·올림·내림) and 글꼴 커닝
   assert.equal(byId(h, "doc-font-kerning-value").disabled, true, "kerning off takes no size");
   const labels = [...h.document.querySelectorAll("#doc-font-pane-advanced label")].map((l) => l.textContent.trim());
   for (const label of ["배율(C):", "간격(S):", "값(B):", "위치(P):", "값(Y):", "글꼴 커닝(K):", "포인트 이상(O)"]) assert.ok(labels.includes(label), `${label} in ${labels}`);
-  assert.deepEqual([...h.document.querySelectorAll("#doc-font-dialog legend")].map((l) => l.textContent), ["문자 간격", "OpenType 기능", "미리 보기"]);
+  assert.deepEqual([...h.document.querySelectorAll("#doc-font-dialog legend")].map((l) => l.textContent), ["효과", "문자 간격", "OpenType 기능", "미리 보기"]);
 });
 
 test("배율 writes the scale in percent and 100 takes it off", async () => {

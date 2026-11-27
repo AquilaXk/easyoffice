@@ -190,6 +190,14 @@
 .tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 96px; }
 .tool-dialog .dialog-grid .dialog-combo .dialog-field { width: 100%; }
 .tool-dialog .dialog-grid-wide { grid-template-columns: auto minmax(0, 1fr); }
+/* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
+#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; align-items: start; gap: 2px 8px; margin-bottom: 8px; }
+#doc-font-dialog .dialog-font-top > .dialog-label { text-align: left; }
+#doc-font-dialog .dialog-font-top > .custom-select { justify-self: stretch; }
+#doc-font-dialog .dialog-font-top .dialog-combo, #doc-font-dialog .dialog-font-top .dialog-field { width: 100%; }
+#doc-font-dialog .dialog-font-rows { margin-bottom: 8px; }
+#doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.tool-dialog .dialog-swatch-text { font-size: var(--font-size-sm); color: var(--color-text); min-width: 28px; text-align: left; }
 .tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-field { text-align: left; }

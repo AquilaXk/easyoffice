@@ -29,7 +29,7 @@ test("배율 is an editable combo box with the official presets", async () => {
   const scale = byId(h, "doc-font-scale");
   assert.equal(scale.getAttribute("role"), "combobox");
   assert.equal(scale.getAttribute("type"), "text", "you can type into it");
-  const list = h.document.querySelector("#doc-font-dialog .dialog-combo-list");
+  const list = scale.parentNode.querySelector(".dialog-combo-list");
   assert.deepEqual([...list.querySelectorAll("li")].map((li) => li.textContent), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
   const arrow = h.document.querySelector("#doc-font-dialog .dialog-combo-arrow");
   arrow.dispatchEvent({ type: "mousedown", target: arrow, bubbles: true, preventDefault() {} });
@@ -47,7 +47,7 @@ test("the arrow keys step through the 배율 presets and Enter picks one", async
   const scale = byId(h, "doc-font-scale");
   const press = (key) => scale.dispatchEvent({ type: "keydown", key, bubbles: true, preventDefault() {}, stopPropagation() {} });
   press("ArrowDown");
-  const list = h.document.querySelector("#doc-font-dialog .dialog-combo-list");
+  const list = scale.parentNode.querySelector(".dialog-combo-list");
   assert.equal(list.hidden, false);
   press("ArrowDown");
   press("ArrowDown");
@@ -94,4 +94,60 @@ test("the preview has a framed group and the line under it", async () => {
   await openDialog(h);
   assert.match(byId(h, "doc-font-sample-note").textContent, /프린터/);
   assert.ok(byId(h, "doc-font-sample").closest("fieldset"), "the sample sits in the 미리 보기 group");
+});
+
+test("글꼴 tab has the official items with their access keys", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  await openDialog(h, "font");
+  const labels = [...h.document.querySelectorAll("#doc-font-pane-font label")].map((l) => l.textContent.trim());
+  for (const label of ["한글 글꼴(T):", "글꼴 스타일(Y):", "크기(S):", "영어 글꼴(F):", "글꼴 색(C):", "밑줄 스타일(U):", "밑줄 색(I):", "강조점(·):",
+    "취소선(K)", "작은 대문자(M)", "이중 취소선(L)", "모두 대문자(A)", "위 첨자(P)", "숨김(H)", "아래 첨자(B)"]) {
+    assert.ok(labels.includes(label), `${label} in ${labels}`);
+  }
+  assert.deepEqual([...h.document.querySelectorAll("#doc-font-dialog legend")].map((l) => l.textContent).slice(0, 1), ["효과"]);
+  const sizes = [...byId(h, "doc-font-size").parentNode.querySelectorAll("li")].map((li) => li.textContent);
+  assert.deepEqual(sizes, ["8", "9", "10", "10.5", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"]);
+});
+
+test("크기 and 글꼴 스타일 are fields with list boxes: a row fills the field and typing highlights the row", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  await openDialog(h, "font");
+  const size = byId(h, "doc-font-size");
+  const rows = [...size.parentNode.querySelectorAll("li")];
+  h.userClick(rows[5]);
+  assert.equal(size.value, "12", "a row fills the field");
+  size.value = "2";
+  fire(size, "input");
+  assert.equal(rows.findIndex((r) => r.getAttribute("aria-selected") === "true"), rows.findIndex((r) => r.textContent.startsWith("2")), "the first row that starts with the text is highlighted");
+  h.userClick(byId(h, "btn-doc-font-apply"));
+  assert.deepEqual(savedRuns(h).filter((r) => r.sizeHalfPt).map((r) => r.sizeHalfPt), [4], "2 pt is 4 half-points");
+});
+
+test("글꼴 색 and 밑줄 스타일 write the run's color and underline", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  await openDialog(h, "font");
+  const toggle = h.document.querySelector("#doc-font-color-host [data-color-toggle]");
+  assert.equal(toggle.textContent.includes("자동"), true, "no color shows 자동");
+  h.userClick(toggle);
+  h.userClick(h.document.querySelector('#doc-font-color-host .sb-hl-swatch[aria-label="#ff0000"]'));
+  assert.equal(h.document.querySelector("#doc-font-color-host .dialog-swatch-text").textContent, "#FF0000");
+  const style = byId(h, "doc-font-underline-style");
+  assert.deepEqual([...style.querySelectorAll("option")].map((o) => o.textContent), ["(없음)", "한 줄"]);
+  style.value = "single";
+  fire(style);
+  h.userClick(byId(h, "btn-doc-font-apply"));
+  const run = savedRuns(h).find((r) => r.color);
+  assert.equal(run.color, "FF0000");
+  assert.equal(run.underline, true);
+  await openDialog(h, "font");
+  assert.equal(h.document.querySelector("#doc-font-color-host .dialog-swatch-text").textContent, "#FF0000", "the dialog shows the run's color");
+  assert.equal(byId(h, "doc-font-underline-style").value, "single");
+});
+
+test("the items the engine does not keep yet are visible and off", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  await openDialog(h, "font");
+  for (const id of ["doc-font-latin", "doc-font-underline-color", "doc-font-emphasis", "doc-font-smallcaps", "doc-font-dstrike", "doc-font-allcaps", "doc-font-hidden"]) {
+    assert.equal(byId(h, id).disabled, true, id);
+  }
 });

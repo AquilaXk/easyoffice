@@ -72,6 +72,8 @@
 
       input.addEventListener("keydown", (event) => this.onKey(event));
       input.addEventListener("blur", () => this.close());
+      // A list box follows what is typed: the first row that starts with the text is highlighted (the field keeps its text).
+      if (this.inline) input.addEventListener("input", () => this.sync(true));
       // The mousedown keeps the field focused; the pick happens on the click, so dragging off a row cancels it.
       this.ul.addEventListener("mousedown", (event) => event.preventDefault?.());
       this.ul.addEventListener("click", (event) => {
@@ -125,6 +127,13 @@
       this.isOpened = false;
       this.goto(-1);
       this.input.setAttribute("aria-activedescendant", "");
+    }
+
+    // Highlights the row for the field's text: the row with that value, or with `prefix` the first that starts with it.
+    sync(prefix = false) {
+      const text = this.input.value.trim().toLowerCase();
+      const same = (item) => (prefix ? item.value.toLowerCase().startsWith(text) : item.value.toLowerCase() === text);
+      this.goto(text === "" ? -1 : this.items.findIndex(same));
     }
 
     next() {
