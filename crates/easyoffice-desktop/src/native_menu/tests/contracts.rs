@@ -97,7 +97,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "첫 행 고정",
             "첫 열 고정",
             "틀 고정",
-            "틀 고정 해제",
+            "틀 고정 취소",
             s,
             "행 위에 삽입",
             "행 아래에 삽입",
@@ -517,10 +517,134 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
         "열 너비를 같게"
     );
     assert_eq!(label_for(MenuKind::Pages, spec("insert:link")), "링크");
+    assert_eq!(label_for(MenuKind::Pages, spec("insert:image")), "이미지");
+    assert_eq!(label_for(MenuKind::Pages, spec("file:print")), "프린트…");
+    assert_eq!(label_for(MenuKind::Pages, spec("edit:redo")), "실행 복귀");
+    assert_eq!(label_for(MenuKind::Pages, spec("edit:cut")), "오려두기");
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("edit:replace")),
+        "찾기 및 대치"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("view:para-marks")),
+        "보이지 않는 요소 보기"
+    );
+    assert_eq!(label_for(MenuKind::Pages, spec("format:bold")), "볼드체");
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("format:italic")),
+        "이탤릭체"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("format:underline")),
+        "밑줄체"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("format:pages-justify")),
+        "좌우 정렬"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("format:indent-in")),
+        "들여쓰기 단계 증가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("format:indent-out")),
+        "들여쓰기 단계 감소"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:row-above")),
+        "위에 행 추가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:add-row")),
+        "아래에 행 추가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:col-left")),
+        "앞에 열 추가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:col-right")),
+        "뒤에 열 추가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:col-equal")),
+        "같은 너비로 열 조절"
+    );
     assert_eq!(label_for(MenuKind::Sheet, spec("insert:symbol")), "기호");
+    assert_eq!(label_for(MenuKind::Sheet, spec("table:insert")), "표 삽입");
     assert_eq!(label_for(MenuKind::Slide, spec("insert:symbol")), "기호");
+    assert_eq!(label_for(MenuKind::Slide, spec("table:insert")), "표 삽입");
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("slide:insert-textbox")),
+        "텍스트 상자"
+    );
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("slide:distribute-h")),
+        "가로 간격을 동일하게"
+    );
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("slide:distribute-v")),
+        "세로 간격을 동일하게"
+    );
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("slide:delete-element")),
+        "개체 삭제"
+    );
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("page:slide-transition")),
+        "전환 효과"
+    );
+    assert_eq!(
+        label_for(MenuKind::Slide, spec("page:slide-presenter")),
+        "발표자 보기"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("view:ctrl-marks")),
+        "서식 기호"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("view:para-marks")),
+        "편집 기호"
+    );
+    assert_eq!(label_for(MenuKind::Doc, spec("view:doc-grid")), "눈금선");
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("format:doc-justify")),
+        "양쪽 맞춤"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("format:indent-in")),
+        "들여쓰기 늘림"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("format:indent-out")),
+        "들여쓰기 줄임"
+    );
     assert_eq!(label_for(MenuKind::Doc, spec("table:split")), "셀 분할");
-    assert_eq!(label_for(MenuKind::Pages, spec("table:split")), "셀 분할");
+    assert_eq!(
+        label_for(MenuKind::Pages, spec("table:split")),
+        "셀 병합 해제"
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("view:ctrl-marks")),
+        "조판 부호"
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("view:para-marks")),
+        "문단 부호"
+    );
+    assert_eq!(label_for(MenuKind::Hwp, spec("view:doc-grid")), "격자 설정");
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("format:justify")),
+        "양쪽 정렬"
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("format:indent-in")),
+        "한 수준 증가"
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("format:indent-out")),
+        "한 수준 감소"
+    );
     assert_eq!(
         label_for(MenuKind::Hwp, spec("table:cell-split")),
         "셀 나누기"

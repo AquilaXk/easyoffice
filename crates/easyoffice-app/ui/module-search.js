@@ -316,8 +316,8 @@
         ["slide-align-top", "위쪽 맞춤", "align top", "slide:align-top"],
         ["slide-align-middle", "중간 맞춤", "align middle", "slide:align-middle"],
         ["slide-align-bottom", "아래쪽 맞춤", "align bottom", "slide:align-bottom"],
-        ["slide-distribute-h", "가로 간격 균등하게", "distribute horizontally", "slide:distribute-h"],
-        ["slide-distribute-v", "세로 간격 균등하게", "distribute vertically", "slide:distribute-v"],
+        ["slide-distribute-h", "가로 간격을 동일하게", "distribute horizontally", "slide:distribute-h"],
+        ["slide-distribute-v", "세로 간격을 동일하게", "distribute vertically", "slide:distribute-v"],
       ]) {
         items.push({ id: "studio-cmd:" + cmd, module: "SLIDE", title, shortcut: "", searchKey: "슬라이드 정돈 맞춤 " + title + " " + en, run: () => runNativeMenu(menuId) });
       }

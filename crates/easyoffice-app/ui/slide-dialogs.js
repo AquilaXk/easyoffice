@@ -343,7 +343,7 @@
       closeMenuDropdowns();
       if (act === "insert-textbox") {
         const stagger = (canvas.getElements().length % 4) * 18;
-        canvas.addElement({ kind: "textbox", x: 100 + stagger, y: 130 + stagger, w: 340, h: 84, text: "글상자" });
+        canvas.addElement({ kind: "textbox", x: 100 + stagger, y: 130 + stagger, w: 340, h: 84, text: "텍스트 상자" });
       } else if (act === "insert-picture") {
         $("slide-image-file-input")?.click();
       } else if (act === "bring-front") {

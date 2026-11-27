@@ -244,16 +244,16 @@
       const slides = Array.isArray(ctx.slide?.slides) ? ctx.slide.slides : [];
       const activeIdx = Number(ctx.slide?.activeIndex || 0);
       if (mode === "edit") {
-        if (/도형|글상자|차트|표|레이아웃/.test(prompt)) {
+        if (/도형|글상자|텍스트\s*상자|차트|표|레이아웃/.test(prompt)) {
           const ops = [];
-          if (/두\s*개의\s*내용/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "twoColumn" });
+          if (/(?:두\s*개의\s*내용|콘텐츠\s*2개)/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "twoColumn" });
           else if (/제목\s*슬라이드/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "titleSlide" });
           else if (/빈\s*화면/.test(prompt)) ops.push({ op: "slide.update", slideIndex: activeIdx, layout: "blank" });
           if (/도형/.test(prompt)) {
             ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "shape", shapeType: "roundRect", x: 480, y: 150, w: 220, h: 96, text: "핵심 지표" } });
           } else if (/차트/.test(prompt)) {
             ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "chart", chartType: "column", x: 460, y: 240, w: 360, h: 190, title: "실적 요약" } });
-          } else if (/글상자/.test(prompt)) {
+          } else if (/(?:글상자|텍스트\s*상자)/.test(prompt)) {
             ops.push({ op: "slide.add_element", slideIndex: activeIdx, element: { kind: "textbox", x: 100, y: 140, w: 320, h: 80, text: "요약 설명" } });
           }
           if (ops.length > 0) {

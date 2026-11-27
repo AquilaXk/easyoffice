@@ -218,7 +218,7 @@
       if (selectedImageId === imageId) selectedImageId = null;
       await commitImagesMutation(sheet, next);
       focusAnchor?.();
-      say("개체 지우기");
+      say("그림 삭제");
       return true;
     }
 
@@ -418,9 +418,9 @@
       delBtn.type = "button";
       delBtn.className = "sheet-image-btn";
       delBtn.dataset.imageAct = "delete";
-      delBtn.title = "개체 지우기";
-      delBtn.setAttribute("aria-label", "개체 지우기");
-      delBtn.textContent = "개체 지우기";
+      delBtn.title = "삭제";
+      delBtn.setAttribute("aria-label", "그림 삭제");
+      delBtn.textContent = "삭제";
       delBtn.addEventListener("click", (ev) => {
         ev.stopPropagation?.();
         void deleteImageById(img.id).catch(() => {});

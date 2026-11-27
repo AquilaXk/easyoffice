@@ -42,11 +42,11 @@
   const HEADING_TAG_RE = /^H[1-6]$/;
   const STYLE_HEADING_RE = /^(?:개요|제목|머리말)\s+([1-6])$/;
   const PLAIN_STYLES = new Set(["바탕글", "표준", "본문"]);
-  const PAGES_EXPLICIT_STYLES = { 제목: 1, 부제목: 2, 머리말: 1 };
+  const PAGES_EXPLICIT_STYLES = { 제목: 1, 부제: 2, 부제목: 2, 머리말: 1 };
   const DOC_STYLE_OPTIONS = {
     doc: ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"],
     hwp: ["바탕글", "개요 1", "개요 2", "개요 3", "개요 4", "개요 5", "개요 6"],
-    pages: ["본문", "제목", "부제목", "머리말", "머리말 2", "머리말 3"],
+    pages: ["본문", "제목", "부제", "머리말", "머리말 2", "머리말 3"],
   };
   const LIST_TAGS = { ordered: "OL", bullet: "UL", task: "UL" };
   const LIST_TAG_NAMES = new Set(Object.values(LIST_TAGS));
@@ -678,7 +678,7 @@
         if (flavor === "hwp") return "개요 " + level;
         if (flavor === "pages") {
           if (level === 1 && block?.dataset?.eoPagesStyle === "제목") return "제목";
-          if (level === 2 && block?.dataset?.eoPagesStyle === "부제목") return "부제목";
+          if (level === 2 && (block?.dataset?.eoPagesStyle === "부제" || block?.dataset?.eoPagesStyle === "부제목")) return "부제";
           return level <= 1 ? "머리말" : level <= 3 ? "머리말 " + level : "머리말 3";
         }
         return "제목 " + level;

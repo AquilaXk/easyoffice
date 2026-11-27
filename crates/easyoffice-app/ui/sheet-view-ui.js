@@ -74,7 +74,7 @@
       step((name) => {
         if (!layoutApi.freezeOf(name)) return null;
         layoutApi.setFreeze(name, null);
-        return "틀 고정 해제";
+        return "틀 고정 취소";
       });
 
     function freezeAtSelection() {

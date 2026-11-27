@@ -23,8 +23,10 @@
   const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   const IHDR_SIG = [0x49, 0x48, 0x44, 0x52];
   const CMD_INSERT_IMAGE = "insert-image";
-  const MSG_INSERT_DONE = "그림 완료";
-  const MSG_DELETE_DONE = "개체 지우기 완료";
+  const imageMod = (doc, getActiveModule) => getActiveModule?.() || doc?.getElementById("app")?.dataset?.module;
+  const isPagesDoc = (doc, mod) => mod === "DOC" && doc?.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages";
+  const msgInsertDone = (doc, mod) => (isPagesDoc(doc, mod) ? "이미지 완료" : "그림 완료");
+  const msgDeleteDone = (doc, mod) => (mod === "HWP" ? "개체 지우기 완료" : isPagesDoc(doc, mod) ? "이미지 삭제 완료" : "그림 삭제 완료");
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const round1 = (v) => Math.round(v * 10) / 10;
@@ -245,7 +247,7 @@
       });
       if (res.changed) {
         selectImage(res.img);
-        setFeedback?.(MSG_INSERT_DONE);
+        setFeedback?.(msgInsertDone(document, imageMod(document, getActiveModule)));
       }
       return res;
     }
@@ -295,7 +297,8 @@
         else if (hMm !== openedHMm && wMm === openedWMm && hMm > 0) wMm = round1(hMm * dialogAspect);
       }
       if (!Number.isFinite(wMm) || !Number.isFinite(hMm) || wMm < MIN_DIALOG_MM || wMm > MAX_DIALOG_MM || hMm < MIN_DIALOG_MM || hMm > MAX_DIALOG_MM) {
-        setFeedback?.("그림 크기는 1mm 이상 500mm 이하여야 합니다");
+        const mediaWord = isPagesDoc(document, imageMod(document, getActiveModule)) ? "이미지" : "그림";
+        setFeedback?.(mediaWord + " 크기는 1mm 이상 500mm 이하여야 합니다");
         return;
       }
       const nextWEmu = wMm === openedWMm && exactWEmu > 0 ? exactWEmu : wMm * EMU_PER_MM;
@@ -304,7 +307,7 @@
       withUndo(() => { applyImageSizeEmu(target, nextWEmu, nextHEmu); return { changed: true }; });
       dlg?.close?.();
       selectImage(target);
-      setFeedback?.(MSG_INSERT_DONE);
+      setFeedback?.(msgInsertDone(document, imageMod(document, getActiveModule)));
     }
 
     function startHandleDrag(ev, dir) {
@@ -347,7 +350,7 @@
         if (nextW !== startW || nextH !== startH) {
           notifyMutated();
           if (preSnap) commitDeferredUndoSnapshot?.(preSnap);
-          setFeedback?.(MSG_INSERT_DONE);
+          setFeedback?.(msgInsertDone(document, imageMod(document, getActiveModule)));
         }
       };
       document.addEventListener("pointermove", onMove);
@@ -373,7 +376,7 @@
         return { changed: true };
       });
       clearSelection();
-      setFeedback?.(MSG_DELETE_DONE);
+      setFeedback?.(msgDeleteDone(document, imageMod(document, getActiveModule)));
     }
 
     function bind() {
@@ -383,7 +386,8 @@
         input.value = "";
         if (!file) return;
         void Promise.resolve(file.arrayBuffer()).then((buf) => insertImageBytes(new Uint8Array(buf), file.name)).catch(() => {
-          setFeedback?.("그림 파일을 읽지 못했습니다");
+          const mediaWord = isPagesDoc(document, imageMod(document, getActiveModule)) ? "이미지" : "그림";
+          setFeedback?.(mediaWord + " 파일을 읽지 못했습니다");
         });
       });
       const root = editor();

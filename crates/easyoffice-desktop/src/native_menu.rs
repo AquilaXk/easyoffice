@@ -181,15 +181,51 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             "edit:copy" => return "복사하기",
             "edit:paste" => return "붙이기",
             "edit:replace" => return "찾아 바꾸기",
+            "view:ctrl-marks" => return "조판 부호",
+            "view:para-marks" => return "문단 부호",
+            "view:doc-grid" => return "격자 설정",
             "format:bold" => return "진하게",
             "format:italic" => return "기울임",
+            "format:indent-in" => return "한 수준 증가",
+            "format:indent-out" => return "한 수준 감소",
             "view:zoom-100" => return "실제 크기",
             _ => {}
         }
-    } else if matches!(kind, MenuKind::Doc | MenuKind::Pages) {
+    } else if kind == MenuKind::Pages {
+        match spec.id {
+            "file:print" => return "프린트…",
+            "edit:redo" => return "실행 복귀",
+            "edit:cut" => return "오려두기",
+            "edit:replace" => return "찾기 및 대치",
+            "view:para-marks" => return "보이지 않는 요소 보기",
+            "insert:image" => return "이미지",
+            "insert:link" => return "링크",
+            "format:bold" => return "볼드체",
+            "format:italic" => return "이탤릭체",
+            "format:underline" => return "밑줄체",
+            "format:para-numbering" => return "번호 매기기",
+            "format:para-bullet" => return "글머리 기호",
+            "format:indent-in" => return "들여쓰기 단계 증가",
+            "format:indent-out" => return "들여쓰기 단계 감소",
+            "page:columns" => return "단",
+            "page:break" => return "페이지 나누기",
+            "table:insert" => return "표 삽입",
+            "table:row-above" => return "위에 행 추가",
+            "table:add-row" => return "아래에 행 추가",
+            "table:col-left" => return "앞에 열 추가",
+            "table:col-right" => return "뒤에 열 추가",
+            "table:row-delete" => return "행 삭제",
+            "table:col-delete" => return "열 삭제",
+            "table:split" => return "셀 병합 해제",
+            "table:merge" => return "셀 병합",
+            "table:col-equal" => return "같은 너비로 열 조절",
+            "table:border-bg" => return "테두리 및 음영",
+            "table:cell-props" => return "표 속성",
+            _ => {}
+        }
+    } else if kind == MenuKind::Doc {
         match spec.id {
             "insert:symbol" => return "기호",
-            "insert:link" if kind == MenuKind::Pages => return "링크",
             "format:para-numbering" => return "번호 매기기",
             "format:para-bullet" => return "글머리 기호",
             "page:columns" => return "단",
@@ -208,8 +244,12 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             "table:cell-props" => return "표 속성",
             _ => {}
         }
-    } else if matches!(kind, MenuKind::Sheet | MenuKind::Slide) && spec.id == "insert:symbol" {
-        return "기호";
+    } else if matches!(kind, MenuKind::Sheet | MenuKind::Slide) {
+        match spec.id {
+            "insert:symbol" => return "기호",
+            "table:insert" => return "표 삽입",
+            _ => {}
+        }
     }
     spec.label
 }

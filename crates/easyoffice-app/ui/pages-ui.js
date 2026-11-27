@@ -38,11 +38,11 @@
       const core = host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__;
       const setup = core?.decode?.(raw, "DOC");
       if (!setup) {
-        box.textContent = "위 3.0 · 아래 2.5 · 왼 2.5 · 오른 2.5 cm";
+        box.textContent = "상단 3.0 · 하단 2.5 · 왼쪽 2.5 · 오른쪽 2.5 cm";
         return;
       }
       const cm = (tw) => (Math.round(((Number(tw) || 0) / 566.9291) * 10) / 10).toFixed(1);
-      box.textContent = `위 ${cm(setup.top)} · 아래 ${cm(setup.bottom)} · 왼 ${cm(setup.left)} · 오른 ${cm(setup.right)} cm`;
+      box.textContent = `상단 ${cm(setup.top)} · 하단 ${cm(setup.bottom)} · 왼쪽 ${cm(setup.left)} · 오른쪽 ${cm(setup.right)} cm`;
     }
 
     function mirrorSelect(srcId, dstId) {
@@ -115,7 +115,55 @@
       btnText('#icon-toolbar [data-studio-cmd="para-numbering"]', hwp ? "문단\n번호" : "번호\n매기기", hwp ? "문단 번호" : "번호 매기기");
       btnText('#icon-toolbar [data-studio-cmd="para-bullet"]', hwp ? "글머리\n표" : "글머리\n기호", hwp ? "글머리표" : "글머리 기호");
       btnText('#icon-toolbar [data-studio-cmd="mod-symbol"]', hwp ? "문자표" : "기호", hwp ? "문자표" : "기호");
-      btnText('#icon-toolbar [data-studio-cmd="para-shape"]', hwp ? "양쪽\n정렬" : isPages ? "본문\n정렬" : "양쪽\n정렬", "양쪽 정렬");
+      btnText(
+        '#icon-toolbar [data-studio-cmd="para-shape"]',
+        hwp ? "양쪽\n정렬" : isPages ? "좌우\n정렬" : "양쪽\n맞춤",
+        hwp ? "양쪽 정렬" : isPages ? "좌우 정렬" : "양쪽 맞춤",
+      );
+      btnText(
+        '#icon-toolbar [data-studio-cmd="indent-in"]',
+        hwp ? "한 수준\n증가" : isPages ? "들여쓰기\n증가" : "들여쓰기\n늘림",
+        hwp ? "한 수준 증가" : isPages ? "들여쓰기 단계 증가" : "들여쓰기 늘림",
+      );
+      btnText(
+        '#icon-toolbar [data-studio-cmd="indent-out"]',
+        hwp ? "한 수준\n감소" : isPages ? "들여쓰기\n감소" : "들여쓰기\n줄임",
+        hwp ? "한 수준 감소" : isPages ? "들여쓰기 단계 감소" : "들여쓰기 줄임",
+      );
+      btnText('#icon-toolbar #btn-toggle-ctrl-marks', hwp ? "조판\n부호" : "서식\n기호", hwp ? "조판 부호 표시" : "서식 기호 표시");
+      btnText(
+        '#icon-toolbar #btn-toggle-para-marks',
+        hwp ? "문단\n부호" : isPages ? "보이지\n않는 요소" : "편집\n기호",
+        hwp ? "문단 부호 표시" : isPages ? "보이지 않는 요소 보기" : "편집 기호 표시",
+      );
+      btnText('#icon-toolbar #btn-toggle-doc-grid', hwp ? "격자\n보기" : "눈금선", hwp ? "격자 보기" : "눈금선 보기");
+      btnText('#icon-toolbar [data-studio-cmd="insert-table"]', "표", hwp ? "표 만들기" : "표 삽입");
+      btnText('#icon-toolbar [data-studio-cmd="insert-image"]', isPages ? "이미지" : "그림", isPages ? "이미지" : "그림");
+      const alignSuffix = hwp || isPages ? "정렬" : "맞춤";
+      const justifyWord = hwp ? "양쪽 정렬" : isPages ? "좌우 정렬" : "양쪽 맞춤";
+      for (const [id, text] of [
+        ["btn-align-left", `왼쪽 ${alignSuffix}`],
+        ["btn-align-center", `가운데 ${alignSuffix}`],
+        ["btn-align-right", `오른쪽 ${alignSuffix}`],
+        ["btn-align-justify", justifyWord],
+      ]) {
+        const el = byId(id);
+        if (!el) continue;
+        el.setAttribute("title", text);
+        el.setAttribute("aria-label", text);
+      }
+      for (const [key, title] of [["bold", "볼드체"], ["italic", "이탤릭체"], ["underline", "밑줄체"], ["strike", "취소선"]]) {
+        const el = doc.querySelector(`[data-pages-style-btn="${key}"]`);
+        if (!el) continue;
+        el.setAttribute("title", title);
+        el.setAttribute("aria-label", title);
+      }
+      const inspJustify = doc.querySelector('[data-pages-align-btn="justify"]');
+      if (inspJustify) {
+        inspJustify.textContent = "좌우";
+        inspJustify.setAttribute("title", "좌우 정렬");
+        inspJustify.setAttribute("aria-label", "좌우 정렬");
+      }
     }
 
     function sync(mod) {

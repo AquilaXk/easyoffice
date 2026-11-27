@@ -391,7 +391,7 @@ test("선택 영역에서 이름 만들기 names the rows or columns by their la
   await t.act("name-create");
   const dialog = t.document.getElementById("sheet-name-create-dialog");
   assert.equal(dialog.open, true);
-  assert.deepEqual([...dialog.querySelectorAll(".dialog-checkbox")].map((l) => l.textContent.trim()), ["첫 행", "마지막 행", "왼쪽 열", "오른쪽 열"]);
+  assert.deepEqual([...dialog.querySelectorAll(".dialog-checkbox")].map((l) => l.textContent.trim()), ["첫 행", "끝 행", "왼쪽 열", "오른쪽 열"]);
   assert.equal(t.document.getElementById("sheet-name-create-top").checked, true, "a first row is the guess");
   t.document.getElementById("sheet-name-create-top").checked = false;
   t.document.getElementById("btn-sheet-name-create-apply").click();

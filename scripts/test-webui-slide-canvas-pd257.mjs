@@ -549,7 +549,7 @@ test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 �
   await flushAsyncTurns(6);
 
   const input = $(document, "copilot-input");
-  input.value = "현재 슬라이드에 도형 개체를 배치하고 두 개의 내용 레이아웃으로 변경하세요.";
+  input.value = "현재 슬라이드에 도형 개체를 배치하고 콘텐츠 2개 레이아웃으로 변경하세요.";
   input.dispatchEvent({ type: "input", target: input });
   userClick($(document, "btn-copilot-send"));
   await flushAsyncTurns(16);

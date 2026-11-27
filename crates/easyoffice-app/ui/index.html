@@ -83,7 +83,8 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-set" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 설정</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-clear" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 해제</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE BASE BOARD PDF" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리보기</span></div>
-              <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">프린트…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-window-close="true" role="menuitem" tabindex="-1"><span class="md-label">닫기</span><span class="md-shortcut">Ctrl+W</span></div>
             </div>
@@ -93,9 +94,11 @@
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE PDF BASE BOARD START CONV" data-studio-menu-cmd="studio-undo" role="menuitem" tabindex="-1"><span class="md-label">실행 취소</span><span class="md-shortcut">Ctrl+Z</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="studio-undo" role="menuitem" tabindex="-1"><span class="md-label">되돌리기</span><span class="md-shortcut">Ctrl+Z</span></div>
-              <div class="md-item" data-studio-menu-cmd="studio-redo" role="menuitem" tabindex="-1"><span class="md-label">다시 실행</span><span class="md-shortcut">Ctrl+Shift+Z</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF BASE BOARD START CONV" data-studio-menu-cmd="studio-redo" role="menuitem" tabindex="-1"><span class="md-label">다시 실행</span><span class="md-shortcut">Ctrl+Shift+Z</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="studio-redo" role="menuitem" tabindex="-1"><span class="md-label">실행 복귀</span><span class="md-shortcut">Ctrl+Shift+Z</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE BASE BOARD START CONV" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span><span class="md-shortcut">Ctrl+X</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD START CONV" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span><span class="md-shortcut">Ctrl+X</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">오려두기</span><span class="md-shortcut">Ctrl+X</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-cut" role="menuitem" tabindex="-1"><span class="md-label">오려 두기</span><span class="md-shortcut">Ctrl+X</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE BASE BOARD START CONV" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span><span class="md-shortcut">Ctrl+C</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사하기</span><span class="md-shortcut">Ctrl+C</span></div>
@@ -104,7 +107,8 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-paste="special" role="menuitem" tabindex="-1"><span class="md-label">선택하여 붙여넣기…</span><span class="md-shortcut">Ctrl+Alt+V</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
-              <div class="md-item" data-kinds="DOC PAGES SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
+              <div class="md-item" data-kinds="DOC SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 대치</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
             </div>
@@ -135,16 +139,21 @@
               <div class="md-sep"></div>
               <div class="md-item" data-view-toolbar-labels="true" role="menuitemcheckbox" aria-checked="true" tabindex="-1"><span class="md-icon"></span><span class="md-label">도구 상자 라벨 표시</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="ctrl-marks" role="menuitem" tabindex="-1"><span class="md-label">조판 부호</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">문단 부호</span></div>
-              <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="doc-grid" role="menuitem" tabindex="-1"><span class="md-label">격자 설정</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="ctrl-marks" role="menuitem" tabindex="-1"><span class="md-label">서식 기호</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="ctrl-marks" role="menuitem" tabindex="-1"><span class="md-label">조판 부호</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">편집 기호</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">보이지 않는 요소 보기</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">문단 부호</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-grid" role="menuitem" tabindex="-1"><span class="md-label">눈금선</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="doc-grid" role="menuitem" tabindex="-1"><span class="md-label">격자 설정</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="insert" data-kinds="DOC PAGES HWP">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">입력</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
+              <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">이미지</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
@@ -166,8 +175,8 @@
           <div class="menu-item" data-menu="insert-object" data-kinds="SHEET SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">삽입</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-textbox" role="menuitem" tabindex="-1"><span class="md-label">글상자</span></div>
-              <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 만들기</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-textbox" role="menuitem" tabindex="-1"><span class="md-label">텍스트 상자</span></div>
+              <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
@@ -193,25 +202,34 @@
           <div class="menu-item" data-menu="format" data-kinds="DOC PAGES HWP SHEET SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">서식</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE" data-studio-menu-cmd="home-bold" role="menuitem" tabindex="-1"><span class="md-label">굵게</span><span class="md-shortcut">Ctrl+B</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE" data-studio-menu-cmd="home-bold" role="menuitem" tabindex="-1"><span class="md-label">굵게</span><span class="md-shortcut">Ctrl+B</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="home-bold" role="menuitem" tabindex="-1"><span class="md-label">볼드체</span><span class="md-shortcut">Ctrl+B</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="home-bold" role="menuitem" tabindex="-1"><span class="md-label">진하게</span><span class="md-shortcut">Ctrl+B</span></div>
-              <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">기울임꼴</span><span class="md-shortcut">Ctrl+I</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">기울임꼴</span><span class="md-shortcut">Ctrl+I</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">이탤릭체</span><span class="md-shortcut">Ctrl+I</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="home-italic" role="menuitem" tabindex="-1"><span class="md-label">기울임</span><span class="md-shortcut">Ctrl+I</span></div>
-              <div class="md-item" data-studio-menu-cmd="home-underline" role="menuitem" tabindex="-1"><span class="md-label">밑줄</span><span class="md-shortcut">Ctrl+U</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE" data-studio-menu-cmd="home-underline" role="menuitem" tabindex="-1"><span class="md-label">밑줄</span><span class="md-shortcut">Ctrl+U</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="home-underline" role="menuitem" tabindex="-1"><span class="md-label">밑줄체</span><span class="md-shortcut">Ctrl+U</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-strike" role="menuitem" tabindex="-1"><span class="md-label">취소선</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-superscript" role="menuitem" tabindex="-1"><span class="md-label">위 첨자</span><span class="md-shortcut">Ctrl+Shift+=</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 정렬</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 맞춤</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">좌우 정렬</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 정렬</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-numbering" role="menuitem" tabindex="-1"><span class="md-label">번호 매기기</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="para-numbering" role="menuitem" tabindex="-1"><span class="md-label">문단 번호 모양</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-bullet" role="menuitem" tabindex="-1"><span class="md-label">글머리 기호</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="para-bullet" role="menuitem" tabindex="-1"><span class="md-label">글머리표 모양</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="para-checklist" role="menuitem" tabindex="-1"><span class="md-label">체크리스트</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">한 수준 증가</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">한 수준 감소</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 늘림</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 단계 증가</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">한 수준 증가</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 줄임</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 단계 감소</span></div>
+              <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">한 수준 감소</span></div>
               <div class="md-sep" data-kinds="SLIDE"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="bring-front" role="menuitem" tabindex="-1"><span class="md-label">맨 앞으로 가져오기</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="bring-forward" role="menuitem" tabindex="-1"><span class="md-label">앞으로 가져오기</span></div>
@@ -228,11 +246,11 @@
                   <button type="button" class="md-item" data-slide-act="align-middle" role="menuitem" tabindex="-1"><span class="md-label">중간 맞춤</span></button>
                   <button type="button" class="md-item" data-slide-act="align-bottom" role="menuitem" tabindex="-1"><span class="md-label">아래쪽 맞춤</span></button>
                   <div class="md-sep"></div>
-                  <button type="button" class="md-item" data-slide-act="distribute-h" role="menuitem" tabindex="-1"><span class="md-label">가로 간격 균등하게</span></button>
-                  <button type="button" class="md-item" data-slide-act="distribute-v" role="menuitem" tabindex="-1"><span class="md-label">세로 간격 균등하게</span></button>
+                  <button type="button" class="md-item" data-slide-act="distribute-h" role="menuitem" tabindex="-1"><span class="md-label">가로 간격을 동일하게</span></button>
+                  <button type="button" class="md-item" data-slide-act="distribute-v" role="menuitem" tabindex="-1"><span class="md-label">세로 간격을 동일하게</span></button>
                 </div>
               </div>
-              <div class="md-item" data-kinds="SLIDE" data-slide-act="delete-element" role="menuitem" tabindex="-1"><span class="md-label">개체 지우기</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="delete-element" role="menuitem" tabindex="-1"><span class="md-label">개체 삭제</span></div>
               <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">표시 형식</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="표시 형식">
@@ -385,7 +403,7 @@
               <div class="md-item" data-sheet-act="freeze-first-row" role="menuitem" tabindex="-1"><span class="md-label">첫 행 고정</span></div>
               <div class="md-item" data-sheet-act="freeze-first-col" role="menuitem" tabindex="-1"><span class="md-label">첫 열 고정</span></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">틀 고정</span></div>
-              <div class="md-item" data-sheet-act="freeze-clear" role="menuitem" tabindex="-1"><span class="md-label">틀 고정 해제</span></div>
+              <div class="md-item" data-sheet-act="freeze-clear" role="menuitem" tabindex="-1"><span class="md-label">틀 고정 취소</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="row-insert-above" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
               <div class="md-item" data-sheet-act="row-insert-below" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
@@ -423,8 +441,8 @@
           <div class="menu-item" data-menu="slideshow" data-kinds="SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="view">슬라이드 쇼</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-studio-menu-cmd="slide-mod-transition" role="menuitem" tabindex="-1"><span class="md-label">화면 전환 효과</span></div>
-              <div class="md-item" data-studio-menu-cmd="slide-mod-presenter" role="menuitem" tabindex="-1"><span class="md-label">발표자 도구 시작</span></div>
+              <div class="md-item" data-studio-menu-cmd="slide-mod-transition" role="menuitem" tabindex="-1"><span class="md-label">전환 효과</span></div>
+              <div class="md-item" data-studio-menu-cmd="slide-mod-presenter" role="menuitem" tabindex="-1"><span class="md-label">발표자 보기</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="arrange" data-kinds="PAGES">
@@ -432,16 +450,16 @@
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위쪽에 행 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-add-row" role="menuitem" tabindex="-1"><span class="md-label">아래쪽에 행 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽에 열 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽에 열 추가</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위에 행 추가</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-add-row" role="menuitem" tabindex="-1"><span class="md-label">아래에 행 추가</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">앞에 열 추가</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">뒤에 열 추가</span></div>
               <div class="md-item" data-studio-menu-cmd="table-row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
               <div class="md-item" data-studio-menu-cmd="table-col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 분할</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 병합 해제</span></div>
               <div class="md-item" data-studio-menu-cmd="table-merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-equal" role="menuitem" tabindex="-1"><span class="md-label">열 너비를 같게</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-equal" role="menuitem" tabindex="-1"><span class="md-label">같은 너비로 열 조절</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">테두리 및 음영</span></div>
               <div class="md-item" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표 속성</span></div>
@@ -608,26 +626,26 @@
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group sb-viewmark-group">
-          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" title="조판 부호 표시" aria-label="조판 부호 표시"><span class="tb-sprite icon-ctrl-mark"></span><span class="tb-label">조판<br/>부호</span></button>
-          <button id="btn-toggle-para-marks" class="tb-btn active" type="button" aria-pressed="true" title="문단 부호 표시" aria-label="문단 부호 표시"><span class="tb-sprite icon-para-mark"></span><span class="tb-label">문단<br/>부호</span></button>
-          <button id="btn-toggle-doc-grid" class="tb-btn" type="button" title="격자 보기" aria-label="격자 보기"><span class="tb-sprite icon-grid"></span><span class="tb-label">격자<br/>보기</span></button>
+          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" title="서식 기호 표시" aria-label="서식 기호 표시"><span class="tb-sprite icon-ctrl-mark"></span><span class="tb-label">서식<br/>기호</span></button>
+          <button id="btn-toggle-para-marks" class="tb-btn active" type="button" aria-pressed="true" title="편집 기호 표시" aria-label="편집 기호 표시"><span class="tb-sprite icon-para-mark"></span><span class="tb-label">편집<br/>기호</span></button>
+          <button id="btn-toggle-doc-grid" class="tb-btn" type="button" title="눈금선 보기" aria-label="눈금선 보기"><span class="tb-sprite icon-grid"></span><span class="tb-label">눈금선</span></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="home-style" title="스타일 적용" aria-label="스타일 적용"><span class="tb-sprite icon-char-shape"></span><span class="tb-label">스타일</span></button>
-          <button type="button" class="tb-btn" data-studio-cmd="para-shape" title="양쪽 정렬" aria-label="양쪽 정렬"><span class="tb-sprite icon-align-justify"></span><span class="tb-label">양쪽<br/>정렬</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-shape" title="양쪽 맞춤" aria-label="양쪽 맞춤"><span class="tb-sprite icon-align-justify"></span><span class="tb-label">양쪽<br/>맞춤</span></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
           <button type="button" class="tb-btn" data-kinds="DOC HWP" data-studio-cmd="para-numbering" aria-pressed="false" title="번호 매기기" aria-label="번호 매기기"><span class="tb-icon-text" aria-hidden="true">1.</span><span class="tb-label">번호<br/>매기기</span></button>
           <button type="button" class="tb-btn" data-kinds="DOC HWP" data-studio-cmd="para-bullet" aria-pressed="false" title="글머리 기호" aria-label="글머리 기호"><span class="tb-icon-text" aria-hidden="true">●</span><span class="tb-label">글머리<br/>기호</span></button>
           <button type="button" class="tb-btn" data-kinds="DOC PAGES HWP" data-studio-cmd="para-checklist" aria-pressed="false" title="체크리스트" aria-label="체크리스트"><span class="tb-icon-text" aria-hidden="true">☑</span><span class="tb-label">체크<br/>리스트</span></button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가" aria-label="한 수준 증가"><span class="tb-icon-svg" data-icon="indent-increase" aria-hidden="true"></span><span class="tb-label">한 수준<br/>증가</span></button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소" aria-label="한 수준 감소"><span class="tb-icon-svg" data-icon="indent-decrease" aria-hidden="true"></span><span class="tb-label">한 수준<br/>감소</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="들여쓰기 늘림" aria-label="들여쓰기 늘림"><span class="tb-icon-svg" data-icon="indent-increase" aria-hidden="true"></span><span class="tb-label">들여쓰기<br/>늘림</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="들여쓰기 줄임" aria-label="들여쓰기 줄임"><span class="tb-icon-svg" data-icon="indent-decrease" aria-hidden="true"></span><span class="tb-label">들여쓰기<br/>줄임</span></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기" aria-label="표 만들기"><span class="tb-sprite icon-table"></span><span class="tb-label">표</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 삽입" aria-label="표 삽입"><span class="tb-sprite icon-table"></span><span class="tb-label">표</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입" aria-label="도형 삽입"><span class="tb-sprite icon-shape"></span><span class="tb-label">도형</span></button>
           <button type="button" class="tb-btn" data-kinds="DOC PAGES" data-studio-cmd="insert-image" title="그림" aria-label="그림"><span class="tb-sprite icon-image"></span><span class="tb-label">그림</span></button>
         </div>
@@ -761,10 +779,10 @@
           </div>
           <span class="eo-style-sep" aria-hidden="true"></span>
           <div class="sb-align-group">
-            <button id="btn-align-left" class="eo-glyph-btn active" type="button" data-icon="align-left" title="왼쪽 정렬" aria-label="왼쪽 정렬"></button>
-            <button id="btn-align-center" class="eo-glyph-btn" type="button" data-icon="align-center" title="가운데 정렬" aria-label="가운데 정렬"></button>
-            <button id="btn-align-right" class="eo-glyph-btn" type="button" data-icon="align-right" title="오른쪽 정렬" aria-label="오른쪽 정렬"></button>
-            <button id="btn-align-justify" class="eo-glyph-btn" type="button" data-icon="align-justify" title="양쪽 정렬" aria-label="양쪽 정렬"></button>
+            <button id="btn-align-left" class="eo-glyph-btn active" type="button" data-icon="align-left" title="왼쪽 맞춤" aria-label="왼쪽 맞춤"></button>
+            <button id="btn-align-center" class="eo-glyph-btn" type="button" data-icon="align-center" title="가운데 맞춤" aria-label="가운데 맞춤"></button>
+            <button id="btn-align-right" class="eo-glyph-btn" type="button" data-icon="align-right" title="오른쪽 맞춤" aria-label="오른쪽 맞춤"></button>
+            <button id="btn-align-justify" class="eo-glyph-btn" type="button" data-icon="align-justify" title="양쪽 맞춤" aria-label="양쪽 맞춤"></button>
             <button id="btn-align-distribute" class="eo-glyph-btn" type="button" data-icon="align-distribute" title="배분 정렬" aria-label="배분 정렬" data-kinds="HWP"></button>
             <button id="btn-align-divide" class="eo-glyph-btn" type="button" data-icon="align-divide" title="나눔 정렬" aria-label="나눔 정렬" data-kinds="HWP"></button>
           </div>
@@ -864,19 +882,19 @@
                       <input id="pages-insp-size" class="pages-insp-size" type="number" min="4" max="200" step="0.5" value="10.0" aria-label="서체 크기" />
                     </div>
                     <div class="pages-insp-seg" role="group" aria-label="텍스트 스타일">
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="bold" aria-pressed="false" title="굵게">B</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="italic" aria-pressed="false" title="기울임꼴">I</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="underline" aria-pressed="false" title="밑줄">U</button>
+                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="bold" aria-pressed="false" title="볼드체">B</button>
+                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="italic" aria-pressed="false" title="이탤릭체">I</button>
+                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="underline" aria-pressed="false" title="밑줄체">U</button>
                       <button type="button" class="eo-glyph-btn" data-pages-style-btn="strike" aria-pressed="false" title="취소선">S</button>
                     </div>
                   </div>
                   <div class="pages-insp-section">
-                    <span class="pages-insp-label">정렬 및 간격</span>
+                    <span class="pages-insp-label">정렬</span>
                     <div class="pages-insp-seg" role="group" aria-label="정렬">
                       <button type="button" class="eo-glyph-btn" data-pages-align-btn="left" aria-pressed="false" title="왼쪽 정렬">왼쪽</button>
                       <button type="button" class="eo-glyph-btn" data-pages-align-btn="center" aria-pressed="false" title="가운데 정렬">가운데</button>
                       <button type="button" class="eo-glyph-btn" data-pages-align-btn="right" aria-pressed="false" title="오른쪽 정렬">오른쪽</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="justify" aria-pressed="false" title="양쪽 정렬">양쪽</button>
+                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="justify" aria-pressed="false" title="좌우 정렬">좌우</button>
                     </div>
                     <div class="pages-insp-row">
                       <label class="pages-insp-label" for="pages-insp-linespacing">줄 간격</label>
@@ -1140,7 +1158,7 @@
               <div class="tb-group">
                 <button id="btn-add-slide" type="button" class="tb-btn" title="새 슬라이드" aria-label="새 슬라이드"><span class="tb-sprite icon-add"></span><span class="tb-label">새<br/>슬라이드</span></button>
                 <button id="btn-slide-duplicate" type="button" class="tb-btn" title="슬라이드 복제" aria-label="슬라이드 복제"><span class="tb-sprite icon-copy"></span><span class="tb-label">슬라이드<br/>복제</span></button>
-                <button id="btn-slide-delete" type="button" class="tb-btn" title="슬라이드 지우기 · Delete" aria-label="슬라이드 지우기"><span class="tb-sprite icon-remove"></span><span class="tb-label">슬라이드<br/>지우기</span></button>
+                <button id="btn-slide-delete" type="button" class="tb-btn" title="슬라이드 삭제 · Delete" aria-label="슬라이드 삭제"><span class="tb-sprite icon-remove"></span><span class="tb-label">슬라이드<br/>삭제</span></button>
                 <button id="btn-slide-move-up" type="button" class="tb-btn" title="위로 이동 · Alt+↑" aria-label="슬라이드 위로 이동"><span class="tb-sprite icon-arrow-up"></span><span class="tb-label">위로<br/>이동</span></button>
                 <button id="btn-slide-move-down" type="button" class="tb-btn" title="아래로 이동 · Alt+↓" aria-label="슬라이드 아래로 이동"><span class="tb-sprite icon-arrow-down"></span><span class="tb-label">아래로<br/>이동</span></button>
               </div>
@@ -1157,10 +1175,10 @@
                   <option value="titleSlide" selected>제목 슬라이드</option>
                   <option value="titleAndContent">제목 및 내용</option>
                   <option value="sectionHeader">구역 머리글</option>
-                  <option value="twoColumn">두 개의 내용</option>
+                  <option value="twoColumn">콘텐츠 2개</option>
                   <option value="blank">빈 화면</option>
                 </select>
-                <label for="slide-transition-select" class="sb-size-unit">화면 전환</label>
+                <label for="slide-transition-select" class="sb-size-unit">전환</label>
                 <select id="slide-transition-select" class="sb-combo slide-transition-select">
                   <option value="none" selected>없음</option>
                   <option value="fade">페이드</option>
@@ -1629,8 +1647,8 @@
           <div class="dialog-section">
             <div class="dialog-section-title">용지 여백</div>
             <div class="margin-grid">
-              <label class="dialog-label" for="doc-ps-top">위쪽</label><input id="doc-ps-top" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label class="dialog-label" for="doc-ps-bottom">아래쪽</label><input id="doc-ps-bottom" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-margin-top-label" class="dialog-label" for="doc-ps-top">위쪽</label><input id="doc-ps-top" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-margin-bottom-label" class="dialog-label" for="doc-ps-bottom">아래쪽</label><input id="doc-ps-bottom" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="doc-ps-left">왼쪽</label><input id="doc-ps-left" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="doc-ps-right">오른쪽</label><input id="doc-ps-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-header-label" class="dialog-label" for="doc-ps-header">머리글</label><input id="doc-ps-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
@@ -1982,7 +2000,7 @@
           <p id="sheet-image-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-sheet-image-delete" type="button" class="dialog-btn">개체 지우기</button>
+          <button id="btn-sheet-image-delete" type="button" class="dialog-btn">그림 삭제</button>
           <button id="btn-sheet-image-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
@@ -2042,19 +2060,19 @@
         <div class="dialog-body" id="sheet-fmt-pane-numfmt" role="tabpanel" aria-labelledby="sheet-fmt-tab-numfmt" data-fmt-pane="numfmt">
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-kind-select">분류</label><select id="sheet-numfmt-kind-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row" data-numfmt-field="decimals" hidden><label class="dialog-label" for="sheet-numfmt-decimals">소수 자릿수</label><input id="sheet-numfmt-decimals" type="number" min="0" max="30" step="1" class="dialog-input" /></div>
-          <div class="dialog-row" data-numfmt-field="thousands" hidden><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-numfmt-thousands" type="checkbox" /> 천 단위 구분</label></div>
+          <div class="dialog-row" data-numfmt-field="thousands" hidden><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-numfmt-thousands" type="checkbox" /> 천 단위 구분 기호 사용</label></div>
           <div class="dialog-row" data-numfmt-field="symbol" hidden><label class="dialog-label" for="sheet-numfmt-symbol-select">통화 기호</label><select id="sheet-numfmt-symbol-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row" data-numfmt-field="negative" hidden><label class="dialog-label" for="sheet-numfmt-negative-select">음수</label><select id="sheet-numfmt-negative-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row" data-numfmt-field="list" hidden><label class="dialog-label" for="sheet-numfmt-list-select">형식</label><select id="sheet-numfmt-list-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-code">서식 코드</label><input id="sheet-numfmt-code" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
-          <div class="dialog-row"><span class="dialog-label">표본</span><output id="sheet-numfmt-sample" class="sheet-numfmt-sample"></output></div>
+          <div class="dialog-row"><span class="dialog-label">보기</span><output id="sheet-numfmt-sample" class="sheet-numfmt-sample"></output></div>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-align" role="tabpanel" aria-labelledby="sheet-fmt-tab-align" data-fmt-pane="align" hidden>
           <div class="dialog-row"><label class="dialog-label" for="sheet-align-h-select">가로</label><select id="sheet-align-h-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-align-v-select">세로</label><select id="sheet-align-v-select" class="sb-combo dialog-select"></select></div>
-          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-wrap" type="checkbox" /> 텍스트 줄 바꿈</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-wrap" type="checkbox" /> 자동 줄 바꿈</label></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-merge" type="checkbox" /> 셀 병합</label></div>
-          <div class="dialog-row"><label class="dialog-label" for="sheet-align-rotation">텍스트 방향</label><input id="sheet-align-rotation" type="number" min="-90" max="90" step="1" class="dialog-input" /><span class="dialog-unit">°</span><div class="dialog-btn-group sheet-rot-presets" role="group" aria-label="방향 각도"><button type="button" data-rot-preset="0" aria-pressed="false">0°</button><button type="button" data-rot-preset="45" aria-pressed="false">45°</button><button type="button" data-rot-preset="90" aria-pressed="false">90°</button><button type="button" data-rot-preset="-45" aria-pressed="false">-45°</button><button type="button" data-rot-preset="-90" aria-pressed="false">-90°</button></div><span class="sheet-rot-stage"><output id="sheet-align-rotation-preview" class="sheet-rot-preview">가나다</output></span></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-align-rotation">방향</label><input id="sheet-align-rotation" type="number" min="-90" max="90" step="1" class="dialog-input" /><span class="dialog-unit">°</span><div class="dialog-btn-group sheet-rot-presets" role="group" aria-label="방향 각도"><button type="button" data-rot-preset="0" aria-pressed="false">0°</button><button type="button" data-rot-preset="45" aria-pressed="false">45°</button><button type="button" data-rot-preset="90" aria-pressed="false">90°</button><button type="button" data-rot-preset="-45" aria-pressed="false">-45°</button><button type="button" data-rot-preset="-90" aria-pressed="false">-90°</button></div><span class="sheet-rot-stage"><output id="sheet-align-rotation-preview" class="sheet-rot-preview">가나다</output></span></div>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-font" role="tabpanel" aria-labelledby="sheet-fmt-tab-font" data-fmt-pane="font" hidden>
           <div class="dialog-row"><label class="dialog-label" for="sheet-font-family-select">글꼴</label><select id="sheet-font-family-select" class="sb-combo dialog-select"></select></div>
@@ -2183,7 +2201,7 @@
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-name-create-title">선택 영역에서 이름 만들기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
-          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-name-create-top" type="checkbox" /> 첫 행</label><label class="dialog-checkbox"><input id="sheet-name-create-bottom" type="checkbox" /> 마지막 행</label></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-name-create-top" type="checkbox" /> 첫 행</label><label class="dialog-checkbox"><input id="sheet-name-create-bottom" type="checkbox" /> 끝 행</label></div>
           <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-name-create-left" type="checkbox" /> 왼쪽 열</label><label class="dialog-checkbox"><input id="sheet-name-create-right" type="checkbox" /> 오른쪽 열</label></div>
           <p id="sheet-name-create-status" class="dialog-pdf-note" role="status"></p>
         </div>
@@ -2760,7 +2778,7 @@
               <option value="titleSlide">제목 슬라이드</option>
               <option value="titleAndContent" selected>제목 및 내용</option>
               <option value="sectionHeader">구역 머리글</option>
-              <option value="twoColumn">두 개의 내용</option>
+              <option value="twoColumn">콘텐츠 2개</option>
               <option value="blank">빈 화면</option>
             </select>
           </div>
@@ -2797,7 +2815,7 @@
           <p id="slide-shape-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-slide-shape-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 지우기</button>
+          <button id="btn-slide-shape-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 삭제</button>
           <button id="btn-slide-shape-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
@@ -2806,7 +2824,7 @@
 
     <dialog id="slide-table-dialog" class="tool-dialog" aria-labelledby="slide-table-dialog-title">
       <div class="dialog-wrap">
-        <div class="dialog-title"><span id="slide-table-dialog-title">표 만들기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-title"><span id="slide-table-dialog-title">표 삽입</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
           <div class="dialog-row"><label class="dialog-label" for="slide-table-rows">행 수</label><input id="slide-table-rows" type="number" min="1" max="64" step="1" value="3" class="dialog-input" /><label class="dialog-label" for="slide-table-cols">열 수</label><input id="slide-table-cols" type="number" min="1" max="32" step="1" value="3" class="dialog-input" /></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="slide-table-header" type="checkbox" checked /> 머리글 행 강조</label><span class="dialog-label">머리글 색</span><div id="slide-table-fill-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="머리글 색" aria-label="머리글 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="slide-table-fill" type="color" value="#dbeafe" aria-label="머리글 색" /><div id="slide-table-fill-palette" class="sb-hl-palette" hidden></div></div></div>
@@ -2815,7 +2833,7 @@
           <p id="slide-table-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-slide-table-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 지우기</button>
+          <button id="btn-slide-table-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 삭제</button>
           <button id="btn-slide-table-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
@@ -2854,7 +2872,7 @@
           <p id="slide-chart-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-slide-chart-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 지우기</button>
+          <button id="btn-slide-chart-delete" type="button" class="dialog-btn slide-dialog-delete-btn" hidden>개체 삭제</button>
           <button id="btn-slide-chart-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
@@ -2872,7 +2890,7 @@
           <p id="slide-image-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-slide-image-delete" type="button" class="dialog-btn slide-dialog-delete-btn">개체 지우기</button>
+          <button id="btn-slide-image-delete" type="button" class="dialog-btn slide-dialog-delete-btn">개체 삭제</button>
           <button id="btn-slide-image-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>

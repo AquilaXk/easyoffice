@@ -347,3 +347,111 @@ test("PD-359: SHEET font preview caps oversized pt, fits narrow containers, and 
   assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*min-width:\s*72px;/);
   assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*text-align:\s*center;/);
 });
+
+test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLIDE, and HWP", async () => {
+  const h = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-terms-official",
+    testIpc: async (cmd, raw) => {
+      if (cmd !== "convert_document_format") return null;
+      const req = JSON.parse(raw || "{}");
+      if (req.action === "decode" && String(req.fileName || "").endsWith(".pages")) {
+        return {
+          status: "OK",
+          module: "DOC",
+          format: "pages",
+          kind: "blocks",
+          itemCount: 1,
+          title: "terms.pages",
+          blocks: [{ type: "paragraph", heading: 2, runs: [{ text: "부제 본문" }] }],
+        };
+      }
+      return null;
+    },
+  });
+  await flushAsyncTurns(10);
+  const doc = h.document;
+  const shownLabel = (cmd) => doc.querySelector(`#menu-bar .md-item[data-studio-menu-cmd="${cmd}"]:not([hidden]) .md-label`)?.textContent?.trim();
+
+  // DOC
+  assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => doc.getElementById(id).getAttribute("title")), ["왼쪽 맞춤", "가운데 맞춤", "오른쪽 맞춤", "양쪽 맞춤"]);
+  assert.equal(shownLabel("para-shape"), "양쪽 맞춤");
+  assert.equal(shownLabel("indent-in"), "들여쓰기 늘림");
+  assert.equal(shownLabel("indent-out"), "들여쓰기 줄임");
+  assert.equal(shownLabel("ctrl-marks"), "서식 기호");
+  assert.equal(shownLabel("para-marks"), "편집 기호");
+  assert.equal(shownLabel("doc-grid"), "눈금선");
+
+  // PAGES (Apple Pages macOS Korean)
+  await pickFile(doc, makeFixtureFile("terms.pages", "pages-bytes"));
+  await flushAsyncTurns(16);
+  assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => doc.getElementById(id).getAttribute("title")), ["왼쪽 정렬", "가운데 정렬", "오른쪽 정렬", "좌우 정렬"]);
+  assert.equal(doc.querySelector('[data-pages-align-btn="justify"]').textContent, "좌우");
+  assert.equal(doc.querySelector('[data-pages-align-btn="justify"]').getAttribute("title"), "좌우 정렬");
+  assert.equal(doc.querySelector('[data-pages-style-btn="bold"]').getAttribute("title"), "볼드체");
+  assert.equal(doc.querySelector('[data-pages-style-btn="italic"]').getAttribute("title"), "이탤릭체");
+  assert.equal(doc.querySelector('[data-pages-style-btn="underline"]').getAttribute("title"), "밑줄체");
+  assert.equal(shownLabel("para-shape"), "좌우 정렬");
+  assert.equal(shownLabel("print"), "프린트…");
+  assert.equal(shownLabel("studio-redo"), "실행 복귀");
+  assert.equal(shownLabel("clip-cut"), "오려두기");
+  assert.equal(shownLabel("replace"), "찾기 및 대치");
+  assert.equal(shownLabel("para-marks"), "보이지 않는 요소 보기");
+  assert.equal(shownLabel("insert-image"), "이미지");
+  assert.equal(shownLabel("home-bold"), "볼드체");
+  assert.equal(shownLabel("home-italic"), "이탤릭체");
+  assert.equal(shownLabel("home-underline"), "밑줄체");
+  assert.equal(shownLabel("indent-in"), "들여쓰기 단계 증가");
+  assert.equal(shownLabel("indent-out"), "들여쓰기 단계 감소");
+  assert.equal(shownLabel("table-row-above"), "위에 행 추가");
+  assert.equal(shownLabel("table-add-row"), "아래에 행 추가");
+  assert.equal(shownLabel("table-col-left"), "앞에 열 추가");
+  assert.equal(shownLabel("table-col-right"), "뒤에 열 추가");
+  assert.equal(shownLabel("table-split"), "셀 병합 해제");
+  assert.equal(shownLabel("table-col-equal"), "같은 너비로 열 조절");
+  assert.match(doc.getElementById("pages-insp-margin-summary").textContent, /상단 .*하단 .*왼쪽 .*오른쪽/);
+  h.userClick(doc.getElementById("btn-pages-insp-setup"));
+  await flushAsyncTurns(4);
+  assert.equal(doc.getElementById("doc-ps-margin-top-label").textContent, "상단");
+  assert.equal(doc.getElementById("doc-ps-margin-bottom-label").textContent, "하단");
+  assert.equal(doc.getElementById("doc-ps-facing-label").textContent, "페이지 마주보기");
+  doc.getElementById("doc-page-setup-dialog").close();
+
+  // HWP
+  switchModule(doc, "HWP");
+  await flushAsyncTurns(8);
+  assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => doc.getElementById(id).getAttribute("title")), ["왼쪽 정렬", "가운데 정렬", "오른쪽 정렬", "양쪽 정렬"]);
+  assert.equal(shownLabel("para-shape"), "양쪽 정렬");
+  assert.equal(shownLabel("ctrl-marks"), "조판 부호");
+  assert.equal(shownLabel("para-marks"), "문단 부호");
+  assert.equal(shownLabel("doc-grid"), "격자 설정");
+
+  // SHEET
+  switchModule(doc, "SHEET");
+  await flushAsyncTurns(8);
+  assert.equal(doc.querySelector('[data-sheet-act="freeze-clear"] .md-label').textContent, "틀 고정 취소");
+  assert.equal(doc.querySelector('label[for="sheet-align-rotation"]').textContent, "방향");
+  assert.match(doc.querySelector('input#sheet-align-wrap').parentElement.textContent, /자동 줄 바꿈/);
+  assert.match(doc.querySelector('input#sheet-numfmt-thousands').parentElement.textContent, /천 단위 구분 기호 사용/);
+  h.userClick(doc.querySelector('[data-sheet-numfmt="dialog"]'));
+  await flushAsyncTurns(4);
+  assert.deepEqual([...doc.querySelectorAll("#sheet-align-h-select option")].map((o) => o.textContent), ["일반", "왼쪽", "가운데", "오른쪽"]);
+  assert.equal(doc.querySelector("#sheet-font-size-select option").textContent, "자동");
+  doc.getElementById("sheet-numfmt-dialog").close();
+
+  // SLIDE
+  switchModule(doc, "SLIDE");
+  await flushAsyncTurns(8);
+  assert.equal(doc.querySelector('[data-slide-act="insert-textbox"] .md-label').textContent, "텍스트 상자");
+  assert.equal(doc.querySelector('[data-slide-act="distribute-h"] .md-label').textContent, "가로 간격을 동일하게");
+  assert.equal(doc.querySelector('[data-slide-act="distribute-v"] .md-label').textContent, "세로 간격을 동일하게");
+  assert.equal(doc.querySelector('[data-slide-act="delete-element"] .md-label').textContent, "개체 삭제");
+  assert.equal(doc.getElementById("btn-slide-delete").getAttribute("aria-label"), "슬라이드 삭제");
+  assert.equal(doc.querySelector('label[for="slide-transition-select"]').textContent, "전환");
+  assert.equal(shownLabel("slide-mod-transition"), "전환 효과");
+  assert.equal(shownLabel("slide-mod-presenter"), "발표자 보기");
+  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden).map((el) => el.querySelector(".md-label").textContent), ["맞춤"]);
+  assert.deepEqual([...doc.querySelectorAll("#slide-layout-select option")].map((o) => o.textContent), ["제목 슬라이드", "제목 및 내용", "구역 머리글", "콘텐츠 2개", "빈 화면"]);
+  switchModule(doc, "DOC");
+  await flushAsyncTurns(6);
+  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden), []);
+});

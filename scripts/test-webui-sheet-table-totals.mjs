@@ -105,7 +105,7 @@ test("the selected totals-row cell carries the arrow class and the menu lists th
   assert.equal(cell(h.document, "H2").classList.contains("totals-cell"), false, "not a data cell");
   await pressArrow(h, "H9");
   assert.equal($(h, "sheet-totals-menu").hidden, false);
-  assert.deepEqual(rows(h), ["없음", "평균", "개수", "숫자 개수", "최대", "최소", "합계", "표본 표준 편차", "표본 분산", "함수 더 보기…"]);
+  assert.deepEqual(rows(h), ["없음", "평균", "개수", "숫자 개수", "최대", "최소", "합계", "표준 편차", "분산", "추가 함수…"]);
   assert.deepEqual(checked(h), ["count"], "a column of text was counted when the row was turned on");
 });
 
@@ -144,7 +144,7 @@ test("a choice writes the SUBTOTAL into the cell as one undo step, and none empt
   assert.equal(cell(h.document, "C9").dataset.formula || "", "", "a second undo takes the choice away");
 });
 
-test("함수 더 보기 selects the cell and starts a formula in the formula bar", async () => {
+test("추가 함수 selects the cell and starts a formula in the formula bar", async () => {
   const h = await tableWithTotals();
   await pressArrow(h, "D9");
   $(h, "sheet-totals-menu").querySelector('[data-totals-fn="more"]').click();

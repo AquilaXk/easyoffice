@@ -475,8 +475,8 @@ impl RibbonCommandRouter {
                         OfficeModuleKind::Slide => [
                             ("mod-master", "마스터 레이아웃", "Shift+Cmd+M"),
                             ("mod-snap", "스마트 정렬 가이드", "Cmd+;"),
-                            ("mod-transition", "화면 전환 효과", "Alt+Cmd+T"),
-                            ("mod-presenter", "발표자 도구 시작", "Alt+Cmd+P"),
+                            ("mod-transition", "전환 효과", "Alt+Cmd+T"),
+                            ("mod-presenter", "발표자 보기", "Alt+Cmd+P"),
                         ],
                         OfficeModuleKind::Pdf => [
                             ("mod-highlight", "형광펜·밑줄 주석", "Ctrl+Cmd+H"),

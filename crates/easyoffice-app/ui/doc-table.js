@@ -71,6 +71,17 @@
     "table-merge": "셀 병합",
     "table-sum": "블록 합계",
   };
+  const PAGES_COMMAND_LABELS = {
+    "table-row-above": "위에 행 추가",
+    "table-add-row": "아래에 행 추가",
+    "table-col-left": "앞에 열 추가",
+    "table-col-right": "뒤에 열 추가",
+    "table-row-delete": "행 삭제",
+    "table-col-delete": "열 삭제",
+    "table-split": "셀 병합 해제",
+    "table-merge": "셀 병합",
+    "table-sum": "블록 합계",
+  };
   // Items of the table menu that mean something only with the caret in a table.
   const TABLE_ONLY_COMMANDS = new Set([
     ...Object.keys(DOC_COMMAND_LABELS),
@@ -239,7 +250,9 @@
         return result;
       }
       placeCaret(result.cell ?? result.target);
-      const labels = document.getElementById("app")?.dataset?.module === "HWP" ? HWP_COMMAND_LABELS : DOC_COMMAND_LABELS;
+      const mod = document.getElementById("app")?.dataset?.module;
+      const isPages = mod !== "HWP" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages";
+      const labels = mod === "HWP" ? HWP_COMMAND_LABELS : isPages ? PAGES_COMMAND_LABELS : DOC_COMMAND_LABELS;
       setFeedback?.(labels[cmd] + MSG_DONE);
       return result;
     }

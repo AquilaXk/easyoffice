@@ -25,7 +25,13 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
   const HWP_COMMAND_LABELS = { "table-border-bg": "셀 테두리/배경", "table-cell-props": "표/셀 속성", "table-col-equal": "셀 너비를 같게" };
   const DOC_COMMAND_LABELS = { "table-border-bg": "테두리 및 음영", "table-cell-props": "표 속성", "table-col-equal": "열 너비를 같게" };
-  const commandLabel = (doc, cmd) => (doc?.getElementById("app")?.dataset?.module === "HWP" ? HWP_COMMAND_LABELS : DOC_COMMAND_LABELS)[cmd];
+  const PAGES_COMMAND_LABELS = { "table-border-bg": "테두리 및 음영", "table-cell-props": "표 속성", "table-col-equal": "같은 너비로 열 조절" };
+  const commandLabel = (doc, cmd) => {
+    const mod = doc?.getElementById("app")?.dataset?.module;
+    if (mod === "HWP") return HWP_COMMAND_LABELS[cmd];
+    if (doc?.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages") return PAGES_COMMAND_LABELS[cmd];
+    return DOC_COMMAND_LABELS[cmd];
+  };
   const round1 = (v) => Math.round(v * 10) / 10;
   const normalizeHex6 = (raw) => HEX6_RE.exec(String(raw || "").trim())?.[1]?.toUpperCase() ?? "";
 

@@ -117,8 +117,8 @@
     SLIDE: [
       { id: "slide-mod-master", title: "마스터 레이아웃", shortcut: "⇧⌘M" },
       { id: "slide-mod-snap", title: "스마트 정렬 가이드", shortcut: "⌘;" },
-      { id: "slide-mod-transition", title: "화면 전환 효과", shortcut: "⌥⌘T" },
-      { id: "slide-mod-presenter", title: "발표자 도구 시작", shortcut: "⌥⌘P" },
+      { id: "slide-mod-transition", title: "전환 효과", shortcut: "⌥⌘T" },
+      { id: "slide-mod-presenter", title: "발표자 보기", shortcut: "⌥⌘P" },
     ],
     PDF: [
       { id: "pdf-mod-highlight", title: "형광펜·밑줄 주석", shortcut: "⌃⌘H" },

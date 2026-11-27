@@ -78,8 +78,9 @@
   function violation(setup, mod = "DOC", pages = false) {
     if (![...KEYS, "gutter"].every((key) => Number.isInteger(setup[key] ?? 0) && (setup[key] ?? 0) >= 0 && (setup[key] ?? 0) <= MAX_TWIPS)) return MSG_TOO_BIG;
     const hfPair = mod === "HWP" || pages ? "머리말·꼬리말" : "머리글·바닥글";
+    const tbPair = pages ? "상단·하단" : "위쪽·아래쪽";
     if ((setup.header ?? 0) > (setup.top ?? 0) || (setup.footer ?? 0) > (setup.bottom ?? 0)) {
-      return hfPair + " 여백은 위쪽·아래쪽 여백보다 클 수 없습니다.";
+      return hfPair + " 여백은 " + tbPair + " 여백보다 클 수 없습니다.";
     }
     const mm = (twips) => (twips / TWIPS_PER_MM).toFixed(1);
     const atTop = setup.binding === TOP_BINDING;
@@ -90,7 +91,7 @@
       return "좌우 여백이 너무 커서 본문이 남지 않습니다 (본문 너비 " + mm(width) + "mm, 최소 " + MIN_BODY_MM + "mm). 왼쪽·오른쪽 여백을 줄여주세요.";
     }
     if (height < MIN_BODY_TWIPS) {
-      return "위아래 여백이 너무 커서 본문이 남지 않습니다 (본문 높이 " + mm(height) + "mm, 최소 " + MIN_BODY_MM + "mm). 위쪽·아래쪽·" + hfPair + " 여백을 줄여주세요.";
+      return "위아래 여백이 너무 커서 본문이 남지 않습니다 (본문 높이 " + mm(height) + "mm, 최소 " + MIN_BODY_MM + "mm). " + tbPair + "·" + hfPair + " 여백을 줄여주세요.";
     }
     return null;
   }
@@ -309,11 +310,13 @@
       const pages = !hwp && byId("doc-editor")?.dataset?.eoDocFlavor === "pages";
       const setTxt = (id, text) => { const el = byId(id); if (el) el.textContent = text; };
       setTxt("doc-page-setup-title", hwp ? "편집 용지" : pages ? "페이지 설정" : "용지 설정");
+      setTxt("doc-ps-margin-top-label", pages ? "상단" : "위쪽");
+      setTxt("doc-ps-margin-bottom-label", pages ? "하단" : "아래쪽");
       setTxt("doc-ps-header-label", hwp || pages ? "머리말" : "머리글");
       setTxt("doc-ps-footer-label", hwp || pages ? "꼬리말" : "바닥글");
-      setTxt("doc-ps-binding-title", hwp || pages ? "제본" : "제본선 위치");
+      setTxt("doc-ps-binding-title", hwp ? "제본" : pages ? "페이지 보기" : "제본선 위치");
       setTxt("doc-ps-single-label", hwp || pages ? "한쪽" : "왼쪽");
-      setTxt("doc-ps-facing-label", hwp || pages ? "맞쪽" : "마주보는 페이지");
+      setTxt("doc-ps-facing-label", hwp ? "맞쪽" : pages ? "페이지 마주보기" : "마주보는 페이지");
       setTxt("doc-ps-top-label", hwp || pages ? "위로" : "위쪽");
       setTxt("doc-ps-gutter-label", hwp || pages ? "제본" : "제본선");
     }

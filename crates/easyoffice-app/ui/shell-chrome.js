@@ -101,6 +101,8 @@
     "format:underline": "studio-cmd:home-underline",
     "format:strike": "studio-cmd:home-strike", "format:superscript": "studio-cmd:home-superscript", "format:subscript": "studio-cmd:home-subscript",
     "format:style": "studio-cmd:home-style",
+    "format:doc-justify": "studio-cmd:para-shape",
+    "format:pages-justify": "studio-cmd:para-shape",
     "format:justify": "studio-cmd:para-shape",
     "format:para-numbering": "studio-cmd:para-numbering",
     "format:para-bullet": "studio-cmd:para-bullet",

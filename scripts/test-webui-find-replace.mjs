@@ -49,6 +49,14 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   await flushAsyncTurns(4);
   ctrl(h, "F2");
   assert.equal($(h.document, "find-dialog-title").textContent, "찾아 바꾸기");
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(4);
+  $(h.document, "doc-editor").dataset.eoDocFlavor = "pages";
+  ctrl(h, "F2");
+  assert.equal($(h.document, "find-dialog-title").textContent, "찾기 및 대치");
+  assert.equal($(h.document, "find-replace-row").querySelector("label").textContent, "대치할 내용");
+  assert.equal($(h.document, "btn-find-replace").textContent, "대치");
+  assert.equal($(h.document, "btn-find-replace-all").textContent, "모두 대치");
 });
 
 test("the shortcut table has no repeated combination and keeps print, find and replace to one action each", async () => {

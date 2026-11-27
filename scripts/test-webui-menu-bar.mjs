@@ -310,8 +310,12 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.equal(buttonsOf(document, "layout-paper").length, 0, "no toolbar button called object properties");
   // `para-shape` clicks the editor bar's justify button; `mod-header`, `mod-footer` and `mod-footnote` each do one thing, so one
   // button each; `insert-chart` has no picture or chart icon and stays a menu item.
-  assert.deepEqual(labelsOf(document, "para-shape"), ["양쪽 정렬"]);
-  assert.deepEqual(buttonsOf(document, "para-shape").map((el) => el.getAttribute("title")), ["양쪽 정렬"]);
+  assert.deepEqual(labelsOf(document, "para-shape"), ["양쪽 맞춤"]);
+  assert.deepEqual(buttonsOf(document, "para-shape").map((el) => el.getAttribute("title")), ["양쪽 맞춤"]);
+  assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => document.getElementById(id).getAttribute("title")), ["왼쪽 맞춤", "가운데 맞춤", "오른쪽 맞춤", "양쪽 맞춤"]);
+  assert.deepEqual(labelsOf(document, "ctrl-marks"), ["서식 기호"]);
+  assert.deepEqual(labelsOf(document, "para-marks"), ["편집 기호"]);
+  assert.deepEqual(labelsOf(document, "doc-grid"), ["눈금선"]);
   assert.deepEqual(labelsOf(document, "mod-header"), ["머리글"]);
   assert.deepEqual(labelsOf(document, "mod-footer"), ["바닥글"]);
   assert.deepEqual(buttonsOf(document, "mod-header").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["머리글", "머리글"]]);
@@ -337,6 +341,9 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(labelsOf(hwp.document, "mod-footer"), ["꼬리말"]);
   assert.deepEqual(buttonsOf(hwp.document, "mod-header").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["머리말", "머리말"]]);
   assert.deepEqual(buttonsOf(hwp.document, "mod-footer").map((el) => [el.getAttribute("title"), el.querySelector(".tb-label").textContent.trim()]), [["꼬리말", "꼬리말"]]);
+  assert.deepEqual(labelsOf(hwp.document, "para-shape"), ["양쪽 정렬"]);
+  assert.deepEqual(buttonsOf(hwp.document, "para-shape").map((el) => el.getAttribute("title")), ["양쪽 정렬"]);
+  assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => hwp.document.getElementById(id).getAttribute("title")), ["왼쪽 정렬", "가운데 정렬", "오른쪽 정렬", "양쪽 정렬"]);
   const named = [
     ...document.querySelectorAll(".md-label").map((el) => el.textContent),
     ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),

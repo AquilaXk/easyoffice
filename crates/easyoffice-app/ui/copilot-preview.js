@@ -12,7 +12,7 @@
   // 변경 목록은 이만큼까지 그리고 나머지는 개수로만 알린다. 한 칸의 글도 이만큼에서 자른다.
   const MAX_ENTRIES = 40;
   const MAX_ENTRY_CHARS = 600;
-  const ELEMENT_LABELS = Object.freeze({ textbox: "글상자", textBox: "글상자", shape: "도형", image: "그림", table: "표", chart: "차트" });
+  const ELEMENT_LABELS = Object.freeze({ textbox: "텍스트 상자", textBox: "텍스트 상자", shape: "도형", image: "그림", table: "표", chart: "차트" });
 
   function createCopilotPreview(deps) {
     const { document, win = host, docBlocksOf, slideDeckState, sheetDataStore, getActiveSheetName, getSheetController, extOps } = deps;
@@ -105,8 +105,8 @@
       for (const [name, next, prev] of fields) {
         if (next !== undefined) entries.push(change(prev ? "replace" : "insert", `슬라이드 ${index + 1} ${name}`, prev || "", next, location));
       }
-      // 글이 아닌 변경(레이아웃, 화면 전환, 개체 목록 교체)도 목록에 올려 수락 전에 무엇이 바뀌는지 보이게 한다.
-      for (const [name, next] of [["레이아웃", op.layout], ["화면 전환", op.transition], ["개체", Array.isArray(op.elements) ? op.elements : undefined]]) {
+      // 글이 아닌 변경(레이아웃, 전환, 개체 목록 교체)도 목록에 올려 수락 전에 무엇이 바뀌는지 보이게 한다.
+      for (const [name, next] of [["레이아웃", op.layout], ["전환", op.transition], ["개체", Array.isArray(op.elements) ? op.elements : undefined]]) {
         if (next !== undefined) entries.push(change("format", `슬라이드 ${index + 1} ${name}`, "", "", location));
       }
     }

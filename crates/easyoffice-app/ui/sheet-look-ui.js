@@ -7,10 +7,10 @@
   // (`cell-border-bg-dialog.ts`): a grid of line kinds, a color, preset buttons and the positions around a
   // preview of the cell.
 
-  const H_OPTIONS = [["", "기본"], ["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]];
+  const H_OPTIONS = [["", "일반"], ["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]];
   const V_OPTIONS = [["top", "위쪽"], ["middle", "가운데"], ["bottom", "아래쪽"]];
   const FONT_FAMILIES = [
-    ["", "기본 (맑은 고딕)"], ["맑은 고딕", "맑은 고딕"], ["함초롬돋움", "함초롬돋움"],
+    ["", "기본 글꼴 (맑은 고딕)"], ["맑은 고딕", "맑은 고딕"], ["함초롬돋움", "함초롬돋움"],
     ["함초롬바탕", "함초롬바탕"], ["나눔고딕", "나눔고딕"], ["돋움", "돋움"], ["바탕", "바탕"],
     ["Arial", "Arial"], ["Calibri", "Calibri"], ["Times New Roman", "Times New Roman"], ["Courier New", "Courier New"],
   ];
@@ -280,7 +280,7 @@
         famPairs.push([loadedFont.family, loadedFont.family]);
       }
       setOptions("sheet-font-family-select", loadedFont.family === "mixed" ? [...MIXED, ...famPairs] : famPairs, loadedFont.family);
-      const sizePairs = FONT_SIZES.map((s) => [s, s === "" ? "기본" : s]);
+      const sizePairs = FONT_SIZES.map((s) => [s, s === "" ? "자동" : s]);
       if (sizePt && sizePt !== "mixed" && !FONT_SIZES.includes(sizePt)) sizePairs.push([sizePt, sizePt]);
       setOptions("sheet-font-size-select", sizePt === "mixed" ? [...MIXED, ...sizePairs] : sizePairs, sizePt);
       updateFontSample();
@@ -405,7 +405,7 @@
         const raw = rotInput.value.trim();
         if (raw !== "") {
           if (!/^-?\d+$/.test(raw) || Number(raw) < -90 || Number(raw) > 90) {
-            note("sheet-numfmt-status", "텍스트 방향은 -90~90 사이의 정수");
+            note("sheet-numfmt-status", "방향 각도는 -90~90 사이의 정수");
             showPane("align");
             rotInput.focus?.();
             return false;
@@ -471,7 +471,7 @@
       fillOptions("sheet-align-h-select", H_OPTIONS);
       fillOptions("sheet-align-v-select", V_OPTIONS);
       fillOptions("sheet-font-family-select", FONT_FAMILIES);
-      fillOptions("sheet-font-size-select", FONT_SIZES.map((s) => [s, s === "" ? "기본" : s]));
+      fillOptions("sheet-font-size-select", FONT_SIZES.map((s) => [s, s === "" ? "자동" : s]));
       $("sheet-font-family-select")?.addEventListener("change", updateFontSample);
       $("sheet-font-size-select")?.addEventListener("change", updateFontSample);
       $("sheet-align-rotation")?.addEventListener("input", () => {

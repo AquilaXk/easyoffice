@@ -67,6 +67,10 @@ test("Slice 2: HWP vs Office vs .pages official Korean terminology and lossless 
   assert.equal(paperMenuLabel(), "용지 설정");
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (Ctrl+B)");
   assert.equal(document.getElementById("btn-stylebar-italic").getAttribute("title"), "기울임꼴 (Ctrl+I)");
+  document.querySelector('.md-item[data-studio-menu-cmd="clip-cut"]').click();
+  await flushAsyncTurns(4);
+  assert.match(document.getElementById("status-command-feedback").textContent, /잘라낼 텍스트를 먼저 선택/);
+  assert.doesNotMatch(document.getElementById("status-command-feedback").textContent, /오려/);
 
   // 2. HWP (Hangul ko.ts terms)
   switchModule(document, "HWP");
@@ -83,7 +87,7 @@ test("Slice 2: HWP vs Office vs .pages official Korean terminology and lossless 
   await flushAsyncTurns(20);
   const editor = document.getElementById("doc-editor");
   assert.equal(editor.dataset.eoDocFlavor, "pages");
-  assert.deepEqual(styles(), ["본문", "제목", "부제목", "머리말", "머리말 2", "머리말 3"]);
+  assert.deepEqual(styles(), ["본문", "제목", "부제", "머리말", "머리말 2", "머리말 3"]);
   assert.equal(paperMenuLabel(), "페이지 설정");
   assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-header"]:not([hidden]) .md-label').textContent, "머리말");
   assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-footer"]:not([hidden]) .md-label').textContent, "꼬리말");
@@ -370,13 +374,12 @@ test("Slice 2 regression: HWP -> DOC(.pages) tab switch restores Pages labels, O
   await flushAsyncTurns(8);
   assert.equal(paperMenuLabel(), "페이지 설정", "DOC(.pages) retains 페이지 설정 after switching back from HWP");
   assert.equal(document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="mod-header"]:not([hidden]) .md-label').textContent, "머리말");
-  assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-label"), "굵게");
+  assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-label"), "볼드체");
 
-  // DOC / SHEET / BASE cut feedback says 잘라내기 (not 오려 두기)
-  document.querySelector('.md-item[data-studio-menu-cmd="clip-cut"]').click();
+  // Pages cut uses 오려두기, while SHEET / BASE cut uses 잘라내기
+  document.querySelector('#menu-bar .md-item[data-studio-menu-cmd="clip-cut"]:not([hidden])').click();
   await flushAsyncTurns(4);
-  assert.match(document.getElementById("status-command-feedback").textContent, /잘라낼 텍스트를 먼저 선택/);
-  assert.doesNotMatch(document.getElementById("status-command-feedback").textContent, /오려/);
+  assert.match(document.getElementById("status-command-feedback").textContent, /오려둘 텍스트를 먼저 선택/);
 
   switchModule(document, "BASE");
   await flushAsyncTurns(6);

@@ -285,7 +285,7 @@ test("the preview names a layout change, a new object list and the kind of a new
   const h = await slides(() => answer([{ op: "slide.update", layout: "twoColumn", transition: "push", elements: [textbox("개체")] }, addElement({ kind: "chart" })]));
   await h.send("바꿔 주세요");
   const labels = Array.from(h.document.querySelectorAll("#copilot-thread .eo-copilot-change-label")).map((b) => b.textContent);
-  assert.deepEqual(labels, ["슬라이드 1 레이아웃", "슬라이드 1 화면 전환", "슬라이드 1 개체", "개체 추가 (차트)"]);
+  assert.deepEqual(labels, ["슬라이드 1 레이아웃", "슬라이드 1 전환", "슬라이드 1 개체", "개체 추가 (차트)"]);
   assert.equal(cards(h.document).length, 0);
   assert.ok(reviewButton(h.document, "accept") && reviewButton(h.document, "reject"));
 });

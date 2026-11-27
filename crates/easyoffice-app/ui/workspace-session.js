@@ -683,7 +683,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hfLabels = hwpOrPages ? { "mod-header": "머리말", "mod-footer": "꼬리말" } : { "mod-header": "머리글", "mod-footer": "바닥글" };
       const clipLabels = mod === "HWP"
         ? { "clip-cut": ["오려 두기", "오려\n두기"], "clip-copy": ["복사하기", "복사\n하기"], "clip-paste": ["붙이기", "붙이기"] }
-        : { "clip-cut": ["잘라내기", "잘라\n내기"], "clip-copy": ["복사", "복사"], "clip-paste": ["붙여넣기", "붙여\n넣기"] };
+        : isPages
+          ? { "clip-cut": ["오려두기", "오려\n두기"], "clip-copy": ["복사", "복사"], "clip-paste": ["붙여넣기", "붙여\n넣기"] }
+          : { "clip-cut": ["잘라내기", "잘라\n내기"], "clip-copy": ["복사", "복사"], "clip-paste": ["붙여넣기", "붙여\n넣기"] };
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
         if (!cmd) continue;
@@ -701,10 +703,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
           if (lbl) lbl.textContent = hfLabel || clipPair[1];
         }
       }
-      for (const [id, hwpTxt, offTxt] of [["btn-stylebar-bold", "진하게", "굵게"], ["btn-stylebar-italic", "기울임", "기울임꼴"]]) {
+      for (const [id, hwpTxt, offTxt, pagesTxt] of [
+        ["btn-stylebar-bold", "진하게", "굵게", "볼드체"],
+        ["btn-stylebar-italic", "기울임", "기울임꼴", "이탤릭체"],
+        ["btn-stylebar-underline", "밑줄", "밑줄", "밑줄체"],
+      ]) {
         const btn = document.getElementById(id);
         if (!btn) continue;
-        const base = mod === "HWP" ? hwpTxt : offTxt, suffix = (btn.getAttribute("title") || "").match(/ \([^)]+\)$/)?.[0] || "";
+        const base = mod === "HWP" ? hwpTxt : isPages ? pagesTxt : offTxt;
+        const suffix = (btn.getAttribute("title") || "").match(/ \([^)]+\)$/)?.[0] || "";
         btn.setAttribute("title", base + suffix);
         btn.setAttribute("aria-label", base);
       }
@@ -834,8 +841,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();
       if (cmd === "clip-paste") return runDocClipboardPaste(range);
-      const cutVerb = mod === "HWP" ? "오려 두기" : "잘라내기";
-      const cutObject = mod === "HWP" ? "오려 둘" : "잘라낼";
+      const isPages = mod === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages";
+      const cutVerb = mod === "HWP" ? "오려 두기" : isPages ? "오려두기" : "잘라내기";
+      const cutObject = mod === "HWP" ? "오려 둘" : isPages ? "오려둘" : "잘라낼";
       const text = range && !range.collapsed ? range.toString() : "";
       if (!text) {
         setFeedback((cmd === "clip-cut" ? cutObject : "복사할") + " 텍스트를 먼저 선택하세요");

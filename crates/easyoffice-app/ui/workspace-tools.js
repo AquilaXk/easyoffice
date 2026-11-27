@@ -639,27 +639,27 @@
     }
 
     const PARA_LIST_CMDS = {
-      "para-numbering": { kind: "ordered", label: "문단 번호 서식 적용 완료" },
-      "para-bullet": { kind: "bullet", label: "글머리표 서식 적용 완료" },
-      "para-checklist": { kind: "task", label: "체크리스트 서식 적용 완료" },
+      "para-numbering": ["ordered", "문단 번호 서식 적용 완료", "번호 매기기 서식 적용 완료"],
+      "para-bullet": ["bullet", "글머리표 서식 적용 완료", "글머리 기호 서식 적용 완료"],
+      "para-checklist": ["task", "체크리스트 서식 적용 완료", "체크리스트 서식 적용 완료"],
     };
-    const PARA_INDENT_CMDS = { "indent-in": { delta: 16, label: "한 수준 증가 적용 완료" }, "indent-out": { delta: -16, label: "한 수준 감소 적용 완료" } };
-    function execStudioParaCmd(cmd, fb, isDocMod) {
-      const list = PARA_LIST_CMDS[cmd];
-      const ind = PARA_INDENT_CMDS[cmd];
+    const PARA_INDENT_CMDS = {
+      "indent-in": [16, "한 수준 증가 적용 완료", "들여쓰기 늘림 적용 완료", "들여쓰기 단계 증가 적용 완료"],
+      "indent-out": [-16, "한 수준 감소 적용 완료", "들여쓰기 줄임 적용 완료", "들여쓰기 단계 감소 적용 완료"],
+    };
+    function execStudioParaCmd(cmd, fb, isDocMod, curMod, editor) {
+      const list = PARA_LIST_CMDS[cmd], ind = PARA_INDENT_CMDS[cmd];
       if (!list && !ind && cmd !== "para-shape") return false;
       if (!isDocMod) return true;
+      const isHwp = curMod === "HWP", isPages = !isHwp && editor?.dataset?.eoDocFlavor === "pages";
       if (list) {
-        if (getDocRuns().toggleList(list.kind).changed) {
-          computeSmartStats();
-          if (fb) fb.textContent = list.label;
-        }
+        if (getDocRuns().toggleList(list[0]).changed) { computeSmartStats(); if (fb) fb.textContent = isHwp ? list[1] : list[2]; }
       } else if (ind) {
-        getDocRuns().shiftIndent(ind.delta);
-        if (fb) fb.textContent = ind.label;
+        getDocRuns().shiftIndent(ind[0]);
+        if (fb) fb.textContent = isHwp ? ind[1] : isPages ? ind[3] : ind[2];
       } else {
         document.getElementById("btn-align-justify")?.click();
-        if (fb) fb.textContent = "문단 모양 정렬 적용 완료";
+        if (fb) fb.textContent = isHwp ? "양쪽 정렬 적용 완료" : isPages ? "좌우 정렬 적용 완료" : "양쪽 맞춤 적용 완료";
       }
       return true;
     }
@@ -758,7 +758,7 @@
       const blk = resolveActiveDocBlock(editor);
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
       if (execStudioClipboardCmd(cmd)) return;
-      if (execStudioParaCmd(cmd, fb, isDocMod)) return;
+      if (execStudioParaCmd(cmd, fb, isDocMod, curMod, editor)) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       const runProp = { "home-strike": "strike", "home-superscript": "superscript", "home-subscript": "subscript" }[cmd];
       if (runProp) {

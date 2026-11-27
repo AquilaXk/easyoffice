@@ -1,8 +1,8 @@
 (function (host) {
   "use strict";
 
-  // The totals row of a table (PD-232): the function list of a totals-row cell (없음, 평균, 개수, 숫자 개수, 최대값, 최소값, 합계,
-  // 표본 표준 편차, 표본 분산, 함수 더 보기) and the `SUBTOTAL` formula each one writes. The function of a cell is read from
+  // The totals row of a table (PD-232): the function list of a totals-row cell (없음, 평균, 개수, 숫자 개수, 최대, 최소, 합계,
+  // 표준 편차, 분산, 추가 함수) and the `SUBTOTAL` formula each one writes. The function of a cell is read from
   // the cell itself (`functionOf`), so a cell edited by hand shows what it holds now. The file's `totalsRowFunction` is the
   // same word list (ECMA-376 18.18.80); the writer derives it from the cell too (`xlsx_tables.rs`).
   //
@@ -22,10 +22,10 @@
     ["max", "최대", 104],
     ["min", "최소", 105],
     ["sum", "합계", 109],
-    ["stdDev", "표본 표준 편차", 107],
-    ["var", "표본 분산", 110],
+    ["stdDev", "표준 편차", 107],
+    ["var", "분산", 110],
   ];
-  const MORE_LABEL = "함수 더 보기…";
+  const MORE_LABEL = "추가 함수…";
   const CODE_OF = new Map(FUNCTIONS.filter((f) => f[2]).map((f) => [f[0], f[2]]));
   const ID_OF = new Map(FUNCTIONS.filter((f) => f[2]).map((f) => [f[2], f[0]]));
   const HIT_PX = 18; // the arrow at the right edge of the selected cell

@@ -12,7 +12,7 @@
   });
   const LAYOUT_LABELS = Object.freeze({
     titleSlide: "제목 슬라이드", titleAndContent: "제목 및 내용",
-    sectionHeader: "구역 머리글", twoColumn: "두 개의 내용", blank: "빈 화면",
+    sectionHeader: "구역 머리글", twoColumn: "콘텐츠 2개", blank: "빈 화면",
   });
   const SHAPE_LABELS = Object.freeze({
     rect: "직사각형", roundRect: "모서리가 둥근 직사각형", ellipse: "타원",

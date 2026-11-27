@@ -34,10 +34,12 @@
     const ui = () => (elements ??= {
       dialog: byId(DIALOG_ID), title: byId("find-dialog-title"), query: byId("find-query"),
       replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"), status: byId("find-status"),
+      replaceLabel: byId("find-replace-row")?.querySelector("label"), replaceBtn: byId("btn-find-replace"), replaceAllBtn: byId("btn-find-replace-all"),
       caseBox: byId("find-opt-case"), sheetOptions: byId("find-sheet-options"),
       wholeBox: byId("find-opt-whole"), formulaBox: byId("find-opt-formula"), workbookBox: byId("find-opt-workbook"),
       replaceButtons: byId("find-replace-buttons"),
     });
+    const isPagesDoc = () => getActiveModule() === "DOC" && byId("doc-editor")?.dataset?.eoDocFlavor === "pages";
 
     function createSource(moduleCode) {
       if (moduleCode === "DOC" || moduleCode === "HWP") return host.__EASYOFFICE_CREATE_DOC_FIND_SOURCE__({ root: byId("doc-editor"), document, env, withUndo });
@@ -156,7 +158,8 @@
     function reportReplaced({ replaced, skipped, rejected = 0 }) {
       const skipNote = skipped > 0 ? " (수식 셀 " + skipped + "개는 건너뜀)" : "";
       const invalidNote = rejected > 0 ? " (유효성 불일치 " + rejected + "개는 건너뜀)" : "";
-      const text = replaced + "개를 바꿨습니다" + skipNote + invalidNote;
+      const verb = isPagesDoc() ? "대치했습니다" : "바꿨습니다";
+      const text = replaced + "개를 " + verb + skipNote + invalidNote;
       setFeedback?.(text);
       return text;
     }
@@ -202,10 +205,14 @@
     }
 
     function applyMode(mode) {
-      const { title, replaceRow, replaceButtons, sheetOptions: optionsRow } = ui();
+      const { title, replaceLabel, replaceRow, replaceButtons, replaceBtn, replaceAllBtn, sheetOptions: optionsRow } = ui();
       const replacing = mode === "replace" && !FIND_ONLY_KINDS.has(source?.kind);
-      const replaceTitle = getActiveModule() === "HWP" ? "찾아 바꾸기" : "찾기 및 바꾸기";
+      const pages = isPagesDoc();
+      const replaceTitle = getActiveModule() === "HWP" ? "찾아 바꾸기" : pages ? "찾기 및 대치" : "찾기 및 바꾸기";
       title.textContent = replacing ? replaceTitle : "찾기";
+      if (replaceLabel) replaceLabel.textContent = pages ? "대치할 내용" : "바꿀 내용";
+      if (replaceBtn) replaceBtn.textContent = pages ? "대치" : "바꾸기";
+      if (replaceAllBtn) replaceAllBtn.textContent = pages ? "모두 대치" : "모두 바꾸기";
       replaceRow.hidden = !replacing;
       replaceButtons.hidden = !replacing;
       optionsRow.hidden = source?.kind !== "sheet";

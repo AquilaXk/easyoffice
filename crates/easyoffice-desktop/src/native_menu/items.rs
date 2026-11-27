@@ -28,6 +28,12 @@ macro_rules! sl {
         item($id, $label, None, concat!("slide-act:", $act))
     };
 }
+/// A studio menu command item (`studio-cmd:<cmd>`).
+macro_rules! sc {
+    ($id:literal, $label:literal, $cmd:literal) => {
+        item($id, $label, None, concat!("studio-cmd:", $cmd))
+    };
+}
 
 /// An item of the spreadsheet's 조건부 서식 menu: it runs the page item `data-sheet-cf="<action>"`, and its id is
 /// `format:cf-<action>`.
@@ -257,17 +263,17 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("view:form-mode", "양식 모드", None, "hwp-editor"),
     item(
         "view:ctrl-marks",
-        "조판 부호",
+        "서식 기호",
         None,
         "studio-cmd:ctrl-marks",
     ),
     item(
         "view:para-marks",
-        "문단 부호",
+        "편집 기호",
         None,
         "studio-cmd:para-marks",
     ),
-    item("view:doc-grid", "격자 설정", None, "studio-cmd:doc-grid"),
+    item("view:doc-grid", "눈금선", None, "studio-cmd:doc-grid"),
     item("insert:shape", "도형", None, "studio-cmd:insert-shape"),
     item("insert:image", "그림", None, "studio-cmd:insert-image"),
     item("insert:chart", "차트", None, "studio-cmd:insert-chart"),
@@ -336,37 +342,14 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:home-subscript",
     ),
     item("format:style", "스타일 적용", None, "studio-cmd:home-style"),
-    item("format:justify", "양쪽 정렬", None, "studio-cmd:para-shape"),
-    item(
-        "format:para-numbering",
-        "문단 번호 모양",
-        None,
-        "studio-cmd:para-numbering",
-    ),
-    item(
-        "format:para-bullet",
-        "글머리표 모양",
-        None,
-        "studio-cmd:para-bullet",
-    ),
-    item(
-        "format:para-checklist",
-        "체크리스트",
-        None,
-        "studio-cmd:para-checklist",
-    ),
-    item(
-        "format:indent-in",
-        "한 수준 증가",
-        None,
-        "studio-cmd:indent-in",
-    ),
-    item(
-        "format:indent-out",
-        "한 수준 감소",
-        None,
-        "studio-cmd:indent-out",
-    ),
+    sc!("format:doc-justify", "양쪽 맞춤", "para-shape"),
+    sc!("format:pages-justify", "좌우 정렬", "para-shape"),
+    sc!("format:justify", "양쪽 정렬", "para-shape"),
+    sc!("format:para-numbering", "문단 번호 모양", "para-numbering"),
+    sc!("format:para-bullet", "글머리표 모양", "para-bullet"),
+    sc!("format:para-checklist", "체크리스트", "para-checklist"),
+    sc!("format:indent-in", "들여쓰기 늘림", "indent-in"),
+    sc!("format:indent-out", "들여쓰기 줄임", "indent-out"),
     item(
         "format:numfmt-general",
         "일반",
@@ -648,19 +631,19 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "page:slide-transition",
-        "화면 전환 효과",
+        "전환 효과",
         None,
         "studio-cmd:slide-mod-transition",
     ),
     item(
         "page:slide-presenter",
-        "발표자 도구 시작",
+        "발표자 보기",
         None,
         "studio-cmd:slide-mod-presenter",
     ),
     item(
         "slide:insert-textbox",
-        "글상자",
+        "텍스트 상자",
         None,
         "slide-act:insert-textbox",
     ),
@@ -690,11 +673,11 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sl!("slide:align-top", "위쪽 맞춤", "align-top"),
     sl!("slide:align-middle", "중간 맞춤", "align-middle"),
     sl!("slide:align-bottom", "아래쪽 맞춤", "align-bottom"),
-    sl!("slide:distribute-h", "가로 간격 균등하게", "distribute-h"),
-    sl!("slide:distribute-v", "세로 간격 균등하게", "distribute-v"),
+    sl!("slide:distribute-h", "가로 간격을 동일하게", "distribute-h"),
+    sl!("slide:distribute-v", "세로 간격을 동일하게", "distribute-v"),
     item(
         "slide:delete-element",
-        "개체 지우기",
+        "개체 삭제",
         None,
         "slide-act:delete-element",
     ),
@@ -826,7 +809,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     sa!("sheet:freeze-first-row", "첫 행 고정", "freeze-first-row"),
     sa!("sheet:freeze-first-col", "첫 열 고정", "freeze-first-col"),
-    sa!("sheet:freeze-clear", "틀 고정 해제", "freeze-clear"),
+    sa!("sheet:freeze-clear", "틀 고정 취소", "freeze-clear"),
     sa!("sheet:tab-insert", "시트 삽입", "tab-insert"),
     sa!("sheet:tab-delete", "시트 삭제", "tab-delete"),
     sa!("sheet:tab-rename", "시트 이름 바꾸기", "tab-rename"),

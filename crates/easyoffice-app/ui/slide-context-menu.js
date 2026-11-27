@@ -12,8 +12,8 @@
     "align-top": "위쪽 맞춤",
     "align-middle": "중간 맞춤",
     "align-bottom": "아래쪽 맞춤",
-    "distribute-h": "가로 간격 균등하게",
-    "distribute-v": "세로 간격 균등하게",
+    "distribute-h": "가로 간격을 동일하게",
+    "distribute-v": "세로 간격을 동일하게",
   });
 
   function createSlideContextMenu(deps) {
@@ -56,7 +56,7 @@
       const targets = selectedList(canvas);
       if (mode === "distribute-h" || mode === "distribute-v") {
         if (targets.length < 3) {
-          setFeedback?.("균등 배치는 개체를 3개 이상 선택하세요.");
+          setFeedback?.("간격을 동일하게 맞추려면 개체를 3개 이상 선택하세요.");
           return false;
         }
         const horiz = mode === "distribute-h";

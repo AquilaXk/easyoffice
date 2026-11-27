@@ -290,6 +290,8 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         .map(|spec| spec.id)
         .collect();
     let paragraph = [
+        "format:doc-justify",
+        "format:pages-justify",
         "format:justify",
         "format:para-numbering",
         "format:para-bullet",
@@ -411,15 +413,29 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
     ] {
         not_in(kind, &doc_pages_sheet_only);
     }
-    not_in(MenuKind::Doc, &["view:pages-inspector", "page:pages-paper"]);
+    not_in(
+        MenuKind::Doc,
+        &[
+            "view:pages-inspector",
+            "page:pages-paper",
+            "format:pages-justify",
+            "format:justify",
+        ],
+    );
     not_in(
         MenuKind::Pages,
         &[
             "format:para-numbering",
             "format:para-bullet",
+            "format:doc-justify",
+            "format:justify",
             "page:columns",
             "insert:symbol",
         ],
+    );
+    not_in(
+        MenuKind::Hwp,
+        &["format:doc-justify", "format:pages-justify"],
     );
     not_in(MenuKind::Doc, &sheet_only);
     not_in(MenuKind::Doc, &slide_only);

@@ -231,14 +231,14 @@ test("image insert validates PNG/JPEG headers, scales oversized images, places i
   await flushAsyncTurns(20);
   assert.equal(editor.querySelector(":scope > img.doc-inline-image").dataset.eoImageWidthEmu, String(80 * 36000));
 
-  // Select body image and press Delete -> 개체 지우기 완료 in one Undo step.
+  // Select body image and press Delete -> 그림 삭제 완료 in one Undo step.
   const liveBodyImg = editor.querySelector(":scope > img.doc-inline-image");
   liveBodyImg.dispatchEvent({ type: "click", target: liveBodyImg });
   assert.equal(resizer.hidden, false);
   document.dispatchEvent({ type: "keydown", key: "Delete", target: editor, preventDefault() {}, stopPropagation() {} });
   assert.equal(editor.querySelector(":scope > img.doc-inline-image"), null);
   assert.equal(resizer.hidden, true);
-  assert.equal(document.getElementById("status-command-feedback").textContent, "개체 지우기 완료");
+  assert.equal(document.getElementById("status-command-feedback").textContent, "그림 삭제 완료");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(20);
