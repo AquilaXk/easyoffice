@@ -662,6 +662,11 @@
           <button type="button" class="tb-btn" data-kinds="DOC PAGES" data-studio-cmd="mod-endnote" title="미주" aria-label="미주"><span class="tb-sprite icon-endnote"></span><span class="tb-label">미주</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+/)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
         </div>
+        <span class="tb-sep" data-kinds="PAGES" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="PAGES">
+          <button type="button" class="tb-btn" data-pages-sidebar-toggle="format" aria-pressed="true" title="포맷" aria-label="포맷"><span class="tb-sprite icon-char-shape"></span><span class="tb-label">포맷</span></button>
+          <button type="button" class="tb-btn" data-pages-sidebar-toggle="document" aria-pressed="false" title="문서" aria-label="문서"><span class="tb-icon-svg" data-icon="fit-page" aria-hidden="true"></span><span class="tb-label">문서</span></button>
+        </div>
         <div class="tb-group tb-headerfooter-group" data-hf-group hidden>
           <span class="tb-hf-label"></span>
           <span class="tb-sep" aria-hidden="true"></span>
@@ -861,48 +866,86 @@
                 </div>
                 <div id="doc-review-list" class="doc-review-list"></div>
               </aside>
-              <aside id="pages-inspector" class="pages-inspector" aria-labelledby="pages-inspector-title" hidden>
+              <aside id="pages-inspector" class="pages-inspector" data-pages-sidebar="format" aria-labelledby="pages-inspector-title" hidden>
                 <div class="doc-review-head">
                   <span id="pages-inspector-title" class="doc-review-title">포맷</span>
                   <button id="btn-pages-inspector-close" type="button" class="dialog-btn doc-review-close">닫기</button>
                 </div>
-                <div class="pages-insp-tabs" role="tablist" aria-label="포맷 속성 탭">
-                  <button id="btn-pages-tab-text" type="button" class="pages-insp-tab active" role="tab" aria-selected="true" data-pages-tab="text">텍스트</button>
-                  <button id="btn-pages-tab-doc" type="button" class="pages-insp-tab" role="tab" aria-selected="false" data-pages-tab="document">문서</button>
+                <div id="pages-format-sidebar" data-pages-sidebar-pane="format">
+                  <div class="pages-insp-tabs" role="tablist" aria-label="포맷">
+                    <button id="btn-pages-tab-style" type="button" class="pages-insp-tab active" role="tab" aria-selected="true" data-pages-tab="style">스타일</button>
+                    <button id="btn-pages-tab-layout" type="button" class="pages-insp-tab" role="tab" aria-selected="false" data-pages-tab="layout">레이아웃</button>
+                  </div>
+                  <div id="pages-pane-style" class="pages-insp-body" role="tabpanel" data-pages-pane="style">
+                    <div class="pages-insp-section">
+                      <label class="pages-insp-label" for="pages-insp-style">단락 스타일</label>
+                      <div class="pages-insp-row"><select id="pages-insp-style" class="sb-combo sb-select" aria-label="단락 스타일"></select></div>
+                    </div>
+                    <div class="pages-insp-section">
+                      <span class="pages-insp-label">서체</span>
+                      <div class="pages-insp-row"><select id="pages-insp-font" class="sb-combo sb-select" aria-label="서체"></select></div>
+                      <div class="pages-insp-row">
+                        <label class="pages-insp-sublabel" for="pages-insp-size">서체 크기</label>
+                        <input id="pages-insp-size" class="pages-insp-size" type="number" min="4" max="200" step="0.5" value="10.0" aria-label="서체 크기" />
+                        <span class="pages-insp-unit">pt</span>
+                      </div>
+                      <div class="pages-insp-seg" role="group" aria-label="서체 포맷">
+                        <button type="button" class="eo-glyph-btn" data-pages-style-btn="bold" data-icon="bold" aria-pressed="false" title="볼드체" aria-label="볼드체"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-style-btn="italic" data-icon="italic" aria-pressed="false" title="이탤릭체" aria-label="이탤릭체"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-style-btn="underline" data-icon="underline" aria-pressed="false" title="밑줄체" aria-label="밑줄체"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-style-btn="strike" data-icon="strikethrough" aria-pressed="false" title="취소선" aria-label="취소선"></button>
+                      </div>
+                      <div class="pages-insp-row">
+                        <label class="pages-insp-sublabel" for="pages-insp-textcolor">텍스트 색상</label>
+                        <input id="pages-insp-textcolor" class="pages-insp-color" type="color" value="#000000" aria-label="텍스트 색상" title="텍스트 색상" />
+                      </div>
+                    </div>
+                    <div class="pages-insp-section">
+                      <span class="pages-insp-label">정렬</span>
+                      <div class="pages-insp-seg" role="group" aria-label="정렬">
+                        <button type="button" class="eo-glyph-btn" data-pages-align-btn="left" data-icon="align-left" aria-pressed="false" title="왼쪽 정렬" aria-label="왼쪽 정렬"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-align-btn="center" data-icon="align-center" aria-pressed="false" title="가운데 정렬" aria-label="가운데 정렬"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-align-btn="right" data-icon="align-right" aria-pressed="false" title="오른쪽 정렬" aria-label="오른쪽 정렬"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-align-btn="justify" data-icon="align-justify" aria-pressed="false" title="좌우 정렬" aria-label="좌우 정렬"></button>
+                      </div>
+                      <div class="pages-insp-seg pages-insp-seg-2" role="group" aria-label="기본 들여쓰기">
+                        <button type="button" class="eo-glyph-btn" data-pages-indent-btn="indent-out" data-icon="indent-decrease" title="들여쓰기 단계 감소" aria-label="들여쓰기 단계 감소"></button>
+                        <button type="button" class="eo-glyph-btn" data-pages-indent-btn="indent-in" data-icon="indent-increase" title="들여쓰기 단계 증가" aria-label="들여쓰기 단계 증가"></button>
+                      </div>
+                    </div>
+                    <div class="pages-insp-section">
+                      <span class="pages-insp-label">간격</span>
+                      <div class="pages-insp-row"><select id="pages-insp-linespacing" class="sb-combo sb-select" aria-label="간격"></select></div>
+                      <div class="pages-insp-row">
+                        <label class="pages-insp-sublabel" for="pages-insp-space-before">단락 앞</label>
+                        <input id="pages-insp-space-before" class="pages-insp-num" type="number" min="0" max="400" step="1" value="0" aria-label="단락 앞" />
+                        <label class="pages-insp-sublabel" for="pages-insp-space-after">단락 뒤</label>
+                        <input id="pages-insp-space-after" class="pages-insp-num" type="number" min="0" max="400" step="1" value="0" aria-label="단락 뒤" />
+                      </div>
+                    </div>
+                    <div class="pages-insp-section">
+                      <label class="pages-insp-label" for="pages-insp-list">구분점 및 목록</label>
+                      <div class="pages-insp-row"><select id="pages-insp-list" class="sb-combo sb-select" aria-label="구분점 및 목록"><option value="">없음</option><option value="bullet">텍스트 구분점</option><option value="ordered">숫자</option></select></div>
+                    </div>
+                  </div>
+                  <div id="pages-pane-layout" class="pages-insp-body" role="tabpanel" data-pages-pane="layout" hidden>
+                    <div class="pages-insp-section">
+                      <span class="pages-insp-label">들여쓰기</span>
+                      <div class="pages-insp-row">
+                        <label class="pages-insp-sublabel" for="pages-insp-indent-first">첫 번째</label>
+                        <input id="pages-insp-indent-first" class="pages-insp-num" type="number" min="-2.5" max="5" step="0.1" value="0" aria-label="첫 번째" />
+                        <span class="pages-insp-unit">cm</span>
+                      </div>
+                      <div class="pages-insp-row">
+                        <label class="pages-insp-sublabel" for="pages-insp-indent-left">왼쪽</label>
+                        <input id="pages-insp-indent-left" class="pages-insp-num" type="number" min="0" max="5" step="0.1" value="0" aria-label="왼쪽" />
+                        <span class="pages-insp-unit">cm</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div id="pages-pane-text" class="pages-insp-body" role="tabpanel" data-pages-pane="text">
-                  <div class="pages-insp-section">
-                    <label class="pages-insp-label" for="pages-insp-style">단락 스타일</label>
-                    <div class="pages-insp-row"><select id="pages-insp-style" class="sb-combo sb-select" aria-label="단락 스타일"></select></div>
-                  </div>
-                  <div class="pages-insp-section">
-                    <label class="pages-insp-label" for="pages-insp-font">서체</label>
-                    <div class="pages-insp-row">
-                      <select id="pages-insp-font" class="sb-combo sb-select" aria-label="서체"></select>
-                      <input id="pages-insp-size" class="pages-insp-size" type="number" min="4" max="200" step="0.5" value="10.0" aria-label="서체 크기" />
-                    </div>
-                    <div class="pages-insp-seg" role="group" aria-label="텍스트 스타일">
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="bold" aria-pressed="false" title="볼드체">B</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="italic" aria-pressed="false" title="이탤릭체">I</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="underline" aria-pressed="false" title="밑줄체">U</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-style-btn="strike" aria-pressed="false" title="취소선">S</button>
-                    </div>
-                  </div>
-                  <div class="pages-insp-section">
-                    <span class="pages-insp-label">정렬</span>
-                    <div class="pages-insp-seg" role="group" aria-label="정렬">
-                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="left" aria-pressed="false" title="왼쪽 정렬">왼쪽</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="center" aria-pressed="false" title="가운데 정렬">가운데</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="right" aria-pressed="false" title="오른쪽 정렬">오른쪽</button>
-                      <button type="button" class="eo-glyph-btn" data-pages-align-btn="justify" aria-pressed="false" title="좌우 정렬">좌우</button>
-                    </div>
-                    <div class="pages-insp-row">
-                      <label class="pages-insp-label" for="pages-insp-linespacing">줄 간격</label>
-                      <select id="pages-insp-linespacing" class="sb-combo sb-select" aria-label="줄 간격"></select>
-                    </div>
-                  </div>
-                </div>
-                <div id="pages-pane-doc" class="pages-insp-body" role="tabpanel" data-pages-pane="document" hidden>
+                <div id="pages-document-sidebar" data-pages-sidebar-pane="document" hidden>
+                <div id="pages-pane-doc" class="pages-insp-body" data-pages-pane="document">
                   <div class="pages-insp-section">
                     <span class="pages-insp-label">프린터 및 용지 크기</span>
                     <button id="btn-pages-insp-setup" type="button" class="dialog-btn">페이지 설정…</button>
@@ -915,6 +958,7 @@
                       <button id="btn-pages-insp-footer" type="button" class="dialog-btn">꼬리말</button>
                     </div>
                   </div>
+                </div>
                 </div>
               </aside>
             </div>

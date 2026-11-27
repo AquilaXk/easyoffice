@@ -6,9 +6,24 @@
   function createPagesUi(deps = {}) {
     const doc = deps.document || host.document;
     let inspectorOpen = true;
+    let sidebarKind = "format";
     let bound = false;
 
     const byId = (id) => doc?.getElementById?.(id) || null;
+    // The indent fields (cm, the ruler's unit) of the 레이아웃 pane and the paragraph style each one writes.
+    const PX_PER_CM = 96 / 2.54;
+    const INDENT_FIELDS = [["pages-insp-indent-first", "textIndent"], ["pages-insp-indent-left", "paddingLeft"]];
+    const selectedBlocks = () => {
+      const root = byId("doc-editor");
+      const range = deps.getDocRuns?.()?.currentRange?.();
+      return root && range ? host.__EASYOFFICE_DOC_RUNS__.blocksInRange(root, range) : [];
+    };
+    // The list kind of a paragraph: "ordered", "bullet", "task" or "" (not a list item).
+    const listKindOf = (block) => {
+      if (block?.tagName !== "LI") return "";
+      if (block.parentNode?.tagName === "OL") return "ordered";
+      return block.parentNode?.dataset?.eoList === "task" ? "task" : "bullet";
+    };
     const isPagesActive = () =>
       byId("app")?.dataset?.docFlavor === "pages";
 
@@ -90,6 +105,22 @@
         const btn = doc.querySelector(`[data-pages-align-btn="${mode}"]`);
         setBtnState(btn, src?.classList?.contains("active"));
       }
+      for (const [dstId, srcId] of [["pages-insp-space-before", "doc-space-before-input"], ["pages-insp-space-after", "doc-space-after-input"]]) {
+        const src = byId(srcId);
+        const dst = byId(dstId);
+        if (src && dst && doc.activeElement !== dst) dst.value = src.value;
+      }
+      const block = selectedBlocks()[0];
+      const listSel = byId("pages-insp-list");
+      if (listSel && doc.activeElement !== listSel) {
+        const kind = listKindOf(block);
+        listSel.value = kind === "task" ? "" : kind;
+        host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(listSel);
+      }
+      for (const [id, prop] of INDENT_FIELDS) {
+        const el = byId(id);
+        if (el && block && doc.activeElement !== el) el.value = String(Math.round((Number.parseInt(block.style[prop] || "0", 10) / PX_PER_CM) * 10) / 10);
+      }
       syncMarginSummary();
     }
 
@@ -158,12 +189,6 @@
         el.setAttribute("title", title);
         el.setAttribute("aria-label", title);
       }
-      const inspJustify = doc.querySelector('[data-pages-align-btn="justify"]');
-      if (inspJustify) {
-        inspJustify.textContent = "좌우";
-        inspJustify.setAttribute("title", "좌우 정렬");
-        inspJustify.setAttribute("aria-label", "좌우 정렬");
-      }
     }
 
     function sync(mod) {
@@ -180,6 +205,7 @@
       if (insp) insp.hidden = !(isPages && inspectorOpen);
       const toggleItem = doc.querySelector("[data-pages-inspector-toggle]");
       if (toggleItem) toggleItem.setAttribute("aria-checked", isPages && inspectorOpen ? "true" : "false");
+      syncSidebarKind();
       syncProductLabels(mod, isPages);
       if (isPages) syncInspectorValues();
       host.__EASYOFFICE_TOOLBAR_SCROLL__?.refreshAll?.(doc);
@@ -206,14 +232,33 @@
       }
     }
 
+    // 포맷 sidebar: the 스타일 and 레이아웃 buttons at its top each show their own sections.
     function switchTab(tabName) {
       for (const btn of doc.querySelectorAll("[data-pages-tab]")) {
         const active = btn.dataset.pagesTab === tabName;
         btn.classList[active ? "add" : "remove"]("active");
         btn.setAttribute("aria-selected", active ? "true" : "false");
       }
-      for (const pane of doc.querySelectorAll("[data-pages-pane]")) {
+      for (const pane of doc.querySelectorAll("#pages-format-sidebar [data-pages-pane]")) {
         pane.hidden = pane.dataset.pagesPane !== tabName;
+      }
+    }
+
+    // The toolbar's 포맷 and 문서 buttons each open their own sidebar; the button of the open one closes it.
+    function showSidebar(kind) {
+      inspectorOpen = !(inspectorOpen && sidebarKind === kind);
+      sidebarKind = kind;
+      if (isPagesActive()) sync("DOC");
+    }
+
+    function syncSidebarKind() {
+      const insp = byId("pages-inspector");
+      if (insp) insp.dataset.pagesSidebar = sidebarKind;
+      for (const pane of doc.querySelectorAll("[data-pages-sidebar-pane]")) pane.hidden = pane.dataset.pagesSidebarPane !== sidebarKind;
+      const title = byId("pages-inspector-title");
+      if (title) title.textContent = sidebarKind === "document" ? "문서" : "포맷";
+      for (const btn of doc.querySelectorAll("[data-pages-sidebar-toggle]")) {
+        btn.setAttribute("aria-pressed", inspectorOpen && btn.dataset.pagesSidebarToggle === sidebarKind ? "true" : "false");
       }
     }
 
@@ -224,6 +269,9 @@
       for (const tabBtn of doc.querySelectorAll("[data-pages-tab]")) {
         tabBtn.addEventListener("click", () => switchTab(tabBtn.dataset.pagesTab));
       }
+      for (const btn of doc.querySelectorAll("[data-pages-sidebar-toggle]")) {
+        btn.addEventListener("click", () => showSidebar(btn.dataset.pagesSidebarToggle));
+      }
       byId("btn-pages-inspector-close")?.addEventListener("click", () => {
         inspectorOpen = false;
         if (isPagesActive()) sync("DOC");
@@ -232,6 +280,38 @@
         inspectorOpen = !inspectorOpen;
         if (isPagesActive()) sync("DOC");
       });
+      byId("pages-insp-textcolor")?.addEventListener("change", (ev) => {
+        deps.getDocRuns?.()?.setColor?.("color", ev.target.value);
+        syncInspectorValues();
+      });
+      // 구분점 및 목록: the list kind the popup names (없음 takes the paragraphs out of their list).
+      byId("pages-insp-list")?.addEventListener("change", (ev) => {
+        const runs = deps.getDocRuns?.();
+        const now = listKindOf(selectedBlocks()[0]);
+        const want = ev.target.value;
+        if (runs && want !== now) runs.toggleList(want || now);
+        syncInspectorValues();
+      });
+      for (const [id, which] of [["pages-insp-space-before", "before"], ["pages-insp-space-after", "after"]]) {
+        byId(id)?.addEventListener("change", (ev) => {
+          deps.getDocRuns?.()?.setSpacing?.(which, ev.target.value);
+          syncInspectorValues();
+        });
+      }
+      for (const [id, prop] of INDENT_FIELDS) {
+        byId(id)?.addEventListener("change", (ev) => {
+          const runs = deps.getDocRuns?.();
+          const px = Number(ev.target.value) * PX_PER_CM;
+          if (runs && Number.isFinite(px)) runs.withUndo(() => ({ changed: runs.setBlockIndent(prop, px) > 0 }));
+          syncInspectorValues();
+        });
+      }
+      for (const btn of doc.querySelectorAll("[data-pages-indent-btn]")) {
+        btn.addEventListener("click", () => {
+          triggerCmd(btn.dataset.pagesIndentBtn);
+          syncInspectorValues();
+        });
+      }
       for (const [inspId, srcId] of [
         ["pages-insp-style", "doc-style-select"],
         ["pages-insp-font", "doc-font-select"],

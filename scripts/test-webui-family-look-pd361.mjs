@@ -140,9 +140,16 @@ test("PD-361: START and CONV keep a minimal 5-menu chrome and clear docFlavor ac
   assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구", "도움말"]);
   assert.equal(h.document.getElementById("pages-inspector").hidden, false);
 
-  h.userClick(h.document.querySelector('[data-pages-tab="document"]'));
-  assert.equal(h.document.querySelector('[data-pages-pane="document"]').hidden, false);
-  assert.equal(h.document.querySelector('[data-pages-pane="text"]').hidden, true);
+  // The toolbar's 문서 button opens the document sidebar in place of the format sidebar; its button again closes it.
+  h.userClick(h.document.querySelector('[data-pages-sidebar-toggle="document"]'));
+  assert.equal(h.document.getElementById("pages-document-sidebar").hidden, false);
+  assert.equal(h.document.getElementById("pages-format-sidebar").hidden, true);
+  assert.equal(h.document.getElementById("pages-inspector-title").textContent, "문서");
+  h.userClick(h.document.querySelector('[data-pages-sidebar-toggle="document"]'));
+  assert.equal(h.document.getElementById("pages-inspector").hidden, true);
+  h.userClick(h.document.querySelector('[data-pages-sidebar-toggle="format"]'));
+  assert.equal(h.document.getElementById("pages-inspector").hidden, false);
+  assert.equal(h.document.getElementById("pages-inspector-title").textContent, "포맷");
 
   switchModule(h.document, "HWP");
   await flushAsyncTurns(8);
@@ -385,7 +392,6 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   await pickFile(doc, makeFixtureFile("terms.pages", "pages-bytes"));
   await flushAsyncTurns(16);
   assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => doc.getElementById(id).getAttribute("title")), ["왼쪽 정렬", "가운데 정렬", "오른쪽 정렬", "좌우 정렬"]);
-  assert.equal(doc.querySelector('[data-pages-align-btn="justify"]').textContent, "좌우");
   assert.equal(doc.querySelector('[data-pages-align-btn="justify"]').getAttribute("title"), "좌우 정렬");
   assert.equal(doc.querySelector('[data-pages-style-btn="bold"]').getAttribute("title"), "볼드체");
   assert.equal(doc.querySelector('[data-pages-style-btn="italic"]').getAttribute("title"), "이탤릭체");
@@ -455,6 +461,112 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   switchModule(doc, "DOC");
   await flushAsyncTurns(6);
   assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden), []);
+});
+
+// The Pages format sidebar follows the product's own guide: the toolbar's 포맷 and 문서 buttons each open a sidebar, the format sidebar
+// has the 스타일 and 레이아웃 buttons, 스타일 holds 단락 스타일, 서체 (with the 볼드체·이탤릭체·밑줄체·취소선 buttons and 텍스트 색상),
+// 정렬 (icon buttons and 기본 들여쓰기) and 간격, and 레이아웃 holds 들여쓰기. Every control applies to the selected paragraphs.
+test("The Pages format sidebar has the product's structure and its controls format the selection", async () => {
+  const selection = createSelection();
+  const h = await createWorkspaceHarness({
+    selection,
+    search: "?module=DOC&win=w-pd361-sidebar",
+    testIpc: async (cmd, raw) => {
+      if (cmd !== "convert_document_format") return null;
+      const req = JSON.parse(raw || "{}");
+      if (req.action === "decode" && String(req.fileName || "").endsWith(".pages")) {
+        return { status: "OK", module: "DOC", format: "pages", kind: "blocks", itemCount: 1, title: "sb.pages", blocks: [{ type: "paragraph", runs: [{ text: "본문" }] }] };
+      }
+      return null;
+    },
+  });
+  await flushAsyncTurns(10);
+  await pickFile(h.document, makeFixtureFile("sb.pages", "pages-bytes"));
+  await flushAsyncTurns(16);
+  const doc = h.document;
+  const byId = (id) => doc.getElementById(id);
+  const attr = (sel, name) => doc.querySelector(sel).getAttribute(name);
+  const editor = byId("doc-editor");
+
+  // Structure and words
+  assert.deepEqual(["format", "document"].map((kind) => attr(`[data-pages-sidebar-toggle="${kind}"]`, "title")), ["포맷", "문서"]);
+  assert.deepEqual([...doc.querySelectorAll("#pages-format-sidebar .pages-insp-tab")].map((el) => el.textContent), ["스타일", "레이아웃"]);
+  const sectionLabels = (pane) => [...doc.querySelectorAll(`#pages-pane-${pane} > .pages-insp-section > .pages-insp-label`)].map((el) => el.textContent);
+  assert.deepEqual(sectionLabels("style"), ["단락 스타일", "서체", "정렬", "간격", "구분점 및 목록"]);
+  assert.deepEqual([...byId("pages-insp-list").querySelectorAll("option")].map((o) => o.textContent), ["없음", "텍스트 구분점", "숫자"]);
+  assert.deepEqual(sectionLabels("layout"), ["들여쓰기"]);
+  assert.deepEqual([...doc.querySelectorAll("[data-pages-style-btn]")].map((el) => [el.getAttribute("title"), el.getAttribute("aria-label"), el.dataset.icon]), [
+    ["볼드체", "볼드체", "bold"], ["이탤릭체", "이탤릭체", "italic"], ["밑줄체", "밑줄체", "underline"], ["취소선", "취소선", "strikethrough"],
+  ]);
+  assert.deepEqual([...doc.querySelectorAll("[data-pages-align-btn]")].map((el) => [el.getAttribute("title"), el.dataset.icon, el.textContent.trim()]), [
+    ["왼쪽 정렬", "align-left", ""], ["가운데 정렬", "align-center", ""], ["오른쪽 정렬", "align-right", ""], ["좌우 정렬", "align-justify", ""],
+  ]);
+  assert.deepEqual([...doc.querySelectorAll("[data-pages-indent-btn]")].map((el) => el.getAttribute("title")), ["들여쓰기 단계 감소", "들여쓰기 단계 증가"]);
+  assert.equal(attr("#pages-insp-textcolor", "title"), "텍스트 색상");
+  h.userClick(doc.querySelector('[data-pages-tab="layout"]'));
+  assert.equal(byId("pages-pane-layout").hidden, false);
+  assert.equal(byId("pages-pane-style").hidden, true);
+  h.userClick(doc.querySelector('[data-pages-tab="style"]'));
+  assert.equal(byId("pages-pane-style").hidden, false);
+
+  // The controls format the selected paragraph
+  editor.innerHTML = "<p>본문 글</p>";
+  const text = editor.querySelector("p").firstChild;
+  const select = () => selection.addRange(rangeOf(text, 0, text, 2));
+  const para = () => editor.querySelector("p");
+  select();
+  h.userClick(doc.querySelector('[data-pages-style-btn="bold"]'));
+  await flushAsyncTurns(4);
+  assert.ok(editor.querySelector('[data-eo-bold="true"]'), "볼드체 button makes the selection bold");
+  select();
+  h.userClick(doc.querySelector('[data-pages-align-btn="center"]'));
+  await flushAsyncTurns(4);
+  assert.equal(para().style.textAlign, "center");
+  select();
+  h.userClick(doc.querySelector('[data-pages-align-btn="justify"]'));
+  await flushAsyncTurns(4);
+  assert.equal(para().style.textAlign, "justify");
+  select();
+  const color = byId("pages-insp-textcolor");
+  color.value = "#ff0000";
+  color.dispatchEvent({ type: "change", target: color, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.ok(editor.querySelector('[data-eo-color="FF0000"]'), "텍스트 색상 colors the selection");
+  select();
+  h.userClick(doc.querySelector('[data-pages-indent-btn="indent-in"]'));
+  await flushAsyncTurns(4);
+  assert.ok(Number.parseInt(para().style.paddingLeft, 10) > 0, "기본 들여쓰기 moves the paragraph");
+  select();
+  const left = byId("pages-insp-indent-left");
+  left.value = "1";
+  left.dispatchEvent({ type: "change", target: left, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.equal(para().style.paddingLeft, "38px", "1 cm");
+  select();
+  const first = byId("pages-insp-indent-first");
+  first.value = "0.5";
+  first.dispatchEvent({ type: "change", target: first, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.equal(para().style.textIndent, "19px", "0.5 cm");
+  select();
+  const before = byId("pages-insp-space-before");
+  before.value = "12";
+  before.dispatchEvent({ type: "change", target: before, bubbles: true });
+  await flushAsyncTurns(4);
+  assert.equal(Number.parseFloat(para().style.marginTop) > 0, true, "단락 앞 spacing");
+  const listSelect = byId("pages-insp-list");
+  const pickList = async (value) => {
+    select();
+    listSelect.value = value;
+    listSelect.dispatchEvent({ type: "change", target: listSelect, bubbles: true });
+    await flushAsyncTurns(4);
+  };
+  await pickList("bullet");
+  assert.equal(editor.querySelector("ul > li") !== null, true, "텍스트 구분점 makes a bulleted list");
+  await pickList("ordered");
+  assert.equal(editor.querySelector("ol > li") !== null && editor.querySelector("ul > li") === null, true, "숫자 makes a numbered list");
+  await pickList("");
+  assert.equal(editor.querySelector("li"), null, "없음 takes the paragraph out of its list");
 });
 
 // The page setup dialog shows the items of the product it belongs to: HWP the reference editor's 편집 용지 (제본: 한쪽·맞쪽·위로),
