@@ -13,6 +13,7 @@ use self::frame::{parse_odt_list_level_bullet, parse_odt_list_level_number, OdtL
 use self::notes::OdtNotesState;
 use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
+use crate::letter_spacing;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries_for};
 use crate::rich_document::{
     normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc, MAX_PARA_SPACING_TWIPS,
@@ -178,6 +179,10 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
             .as_deref()
             .and_then(normalize_hex_color),
         script: script_of(attr(attrs, "style:text-position").as_deref()),
+        letter_spacing_twips: attr(attrs, "fo:letter-spacing")
+            .as_deref()
+            .and_then(length_twips)
+            .and_then(|t| letter_spacing(i64::from(t))),
     }
 }
 
@@ -441,6 +446,7 @@ fn merge_span_fmt(cur: CharFmt, add: CharFmt) -> CharFmt {
         } else {
             add.script
         },
+        letter_spacing_twips: add.letter_spacing_twips.or(cur.letter_spacing_twips),
     }
 }
 

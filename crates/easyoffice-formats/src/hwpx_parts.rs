@@ -141,6 +141,8 @@ pub(crate) struct HwpxCharShape {
     pub text_color: Option<u32>,
     pub shade_color: Option<u32>,
     pub script: RichScript,
+    /// Character spacing (`hh:spacing`) in percent of the font size.
+    pub spacing_percent: i8,
 }
 
 impl Default for HwpxCharShape {
@@ -155,6 +157,7 @@ impl Default for HwpxCharShape {
             text_color: None,
             shade_color: None,
             script: RichScript::Normal,
+            spacing_percent: 0,
         }
     }
 }
@@ -214,7 +217,10 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
         per_lang_attrs(&shape.font.to_string())
     ));
     xml.push_str(&format!("<hh:ratio {}/>", per_lang_attrs("100")));
-    xml.push_str(&format!("<hh:spacing {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!(
+        "<hh:spacing {}/>",
+        per_lang_attrs(&shape.spacing_percent.to_string())
+    ));
     xml.push_str(&format!("<hh:relSz {}/>", per_lang_attrs("100")));
     xml.push_str(&format!("<hh:offset {}/>", per_lang_attrs("0")));
     if shape.italic {

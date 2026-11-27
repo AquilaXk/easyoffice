@@ -397,6 +397,10 @@ pub(crate) struct CharPropFields {
     pub highlight_alt: Option<u32>,
     /// Text fill message whose field 1 is the color that is drawn (it wins over `color`).
     pub fill: Option<u32>,
+    /// Tracking (float): the letter spacing as a fraction of the font size. 확인: field 27 of
+    /// `CharacterStylePropertiesArchive` in the published `.proto` and the reference implementation's
+    /// field table (`11.27`, 3 pt on 12 pt gave `0.25`; PD-367). Only the full layout carries it.
+    pub tracking: Option<u32>,
 }
 
 /// Full layout (`style::CHAR_PROPS`): bold (varint bool) 1, italic 2 (검증 필요: only ever 0 in
@@ -419,6 +423,7 @@ pub(crate) const FULL_CHAR_FIELDS: CharPropFields = CharPropFields {
     font_alt: Some(5),
     highlight_alt: Some(26),
     fill: Some(46),
+    tracking: Some(27),
 };
 
 /// Compact layout (`style::COMPACT_CHAR_PROPS`), every field matches the fixture text file (검증 필요:
@@ -437,6 +442,7 @@ pub(crate) const COMPACT_CHAR_FIELDS: CharPropFields = CharPropFields {
     font_alt: None,
     highlight_alt: None,
     fill: None,
+    tracking: None,
 };
 
 /// Character property message of a style object and the field layout that applies to it: the
@@ -501,12 +507,20 @@ pub(crate) struct ParaPropFields {
     pub first_line_indent: u32,
     pub left_indent: u32,
     pub line_spacing: u32,
+    /// Space before and after the paragraph (float, points). 확인: `space_before = 21` and
+    /// `space_after = 20` of `ParagraphStylePropertiesArchive` in the published `.proto` and the
+    /// reference implementation's table (`12.20` after, `12.21` before; PD-367). Only the layout
+    /// that follows those numbers (the alternate full layout) carries them.
+    pub space_before: Option<u32>,
+    pub space_after: Option<u32>,
 }
 
 pub(crate) const FULL_PARA_FIELDS: ParaPropFields = ParaPropFields {
     first_line_indent: para_props::FIRST_LINE_INDENT,
     left_indent: para_props::LEFT_INDENT,
     line_spacing: para_props::LINE_SPACING,
+    space_before: None,
+    space_after: None,
 };
 
 /// Paragraph properties of the full layout according to independent notes (검증 필요): first-line
@@ -516,12 +530,16 @@ pub(crate) const FULL_PARA_FIELDS_ALT: ParaPropFields = ParaPropFields {
     first_line_indent: 7,
     left_indent: 11,
     line_spacing: 13,
+    space_before: Some(21),
+    space_after: Some(20),
 };
 
 pub(crate) const COMPACT_PARA_FIELDS: ParaPropFields = ParaPropFields {
     first_line_indent: compact_para::FIRST_LINE_INDENT,
     left_indent: compact_para::LEFT_INDENT,
     line_spacing: compact_para::LINE_SPACING,
+    space_before: None,
+    space_after: None,
 };
 
 /// Baseline values of the character `script` field.

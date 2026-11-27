@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::code_pages::CodePage;
 use crate::decode_budget::DecodeBudget;
+use crate::letter_spacing;
 use crate::rich_document::{normalize_hex_color, MAX_PAGE_MARGIN_TWIPS};
 use crate::rich_read_page_setup::fitting_setup;
 use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
@@ -74,6 +75,7 @@ struct CharState {
     color: Option<usize>,
     highlight: Option<usize>,
     script: RichScript,
+    spacing: Option<i16>,
 }
 
 #[derive(Clone)]
@@ -276,6 +278,7 @@ impl Reader {
             color: color_at(st.color),
             highlight: color_at(st.highlight),
             script: st.script,
+            letter_spacing_twips: st.spacing,
         }
     }
 
@@ -388,6 +391,7 @@ impl Reader {
                     color: r.color,
                     highlight: r.highlight,
                     script: r.script,
+                    letter_spacing_twips: r.letter_spacing_twips,
                 };
                 push_run(&mut merged, &r.text, &fmt);
             }
@@ -707,6 +711,8 @@ impl Reader {
             "fs" => {
                 st.size = param.and_then(|v| u16::try_from(v).ok()).filter(|v| *v > 0);
             }
+            "expndtw" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v))),
+            "expnd" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v) * 5)),
             "f" => st.font = param,
             "cf" => st.color = param.and_then(|v| usize::try_from(v).ok()),
             "highlight" | "chcbpat" | "cb" => {

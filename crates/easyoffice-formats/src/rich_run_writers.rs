@@ -34,6 +34,9 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
     if let Some(color) = run.color.as_deref() {
         xml.push_str(&format!("<w:color w:val=\"{color}\"/>"));
     }
+    if let Some(spacing) = run.letter_spacing_twips {
+        xml.push_str(&format!("<w:spacing w:val=\"{spacing}\"/>"));
+    }
     if let Some(size) = run.size_half_pt {
         xml.push_str(&format!(
             "<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/>"
@@ -72,6 +75,7 @@ pub(crate) type OdtTextKey = (
     Option<String>,
     Option<String>,
     RichScript,
+    Option<i16>,
 );
 
 pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
@@ -82,6 +86,7 @@ pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
         run.color.clone(),
         run.highlight.clone(),
         run.script,
+        run.letter_spacing_twips,
     )
 }
 
@@ -92,6 +97,7 @@ pub(crate) fn odt_text_key_is_plain(key: &OdtTextKey) -> bool {
         && key.3.is_none()
         && key.4.is_none()
         && key.5 == RichScript::Normal
+        && key.6.is_none()
 }
 
 fn odt_points(half_pt: u16) -> String {
@@ -104,7 +110,7 @@ fn odt_points(half_pt: u16) -> String {
 
 /// `<style:style family="text">` for the `index`-th (1-based) automatic text style.
 pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
-    let ((bold, italic, underline, strike), size, font, color, highlight, script) = key;
+    let ((bold, italic, underline, strike), size, font, color, highlight, script, spacing) = key;
     let mut xml = format!(
         "<style:style style:name=\"T{index}\" style:family=\"text\"><style:text-properties"
     );
@@ -134,6 +140,12 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
     }
     if *strike {
         xml.push_str(" style:text-line-through-style=\"solid\"");
+    }
+    if let Some(spacing) = spacing {
+        xml.push_str(&format!(
+            " fo:letter-spacing=\"{}\"",
+            crate::rich_writers::odt_twips_to_pt(i64::from(*spacing))
+        ));
     }
     match script {
         RichScript::Normal => {}
@@ -252,6 +264,9 @@ impl RtfRunTables {
         if let Some(size) = run.size_half_pt {
             out.push_str(&format!("\\fs{size} "));
         }
+        if let Some(spacing) = run.letter_spacing_twips {
+            out.push_str(&format!("\\expndtw{spacing} "));
+        }
         if let Some(color) = &run.color {
             if let Some(&idx) = self.color_map.get(color) {
                 out.push_str(&format!("\\cf{idx} "));
@@ -268,6 +283,7 @@ impl RtfRunTables {
 
 pub(crate) fn has_extra_run_format(run: &RichRun) -> bool {
     run.size_half_pt.is_some()
+        || run.letter_spacing_twips.is_some()
         || run.font.is_some()
         || run.color.is_some()
         || run.highlight.is_some()

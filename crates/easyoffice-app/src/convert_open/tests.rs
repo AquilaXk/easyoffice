@@ -641,6 +641,7 @@ fn rich_sample(png: &[u8]) -> RichDocument {
                     RichRun {
                         text: "2".into(),
                         script: RichScript::Superscript,
+                        letter_spacing_twips: Some(60),
                         ..RichRun::default()
                     },
                 ],
@@ -668,6 +669,7 @@ fn editor_json_keeps_pictures_scripts_indents_and_spacing_through_open_and_save(
     .unwrap();
     let blocks = blocks_array(&json);
     assert!(blocks.contains("\"script\":\"superscript\""), "{blocks}");
+    assert!(blocks.contains("\"letterSpacingTwips\":60"), "{blocks}");
     assert!(blocks.contains("\"leftIndentTwips\":720"), "{blocks}");
     assert!(blocks.contains("\"firstLineIndentTwips\":-360"), "{blocks}");
     assert!(blocks.contains("\"lineSpacingPercent\":200"), "{blocks}");
@@ -724,7 +726,14 @@ fn editor_json_rejects_damaged_oversized_and_malformed_pictures() {
             "{label}"
         );
     }
-    for bad in ["\"script\":\"above\"", "\"script\":1"] {
+    for bad in [
+        "\"script\":\"above\"",
+        "\"script\":1",
+        "\"letterSpacingTwips\":31681",
+        "\"letterSpacingTwips\":-31681",
+        "\"letterSpacingTwips\":\"넓게\"",
+        "\"letterSpacingTwips\":1.5",
+    ] {
         let payload = format!(
             "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\",{bad}}}]}}]}}"
         );

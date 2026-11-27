@@ -590,7 +590,7 @@ pub(crate) fn push_odt_paragraph(
 }
 
 /// Twips as a point length with at most two decimals (`36pt`, `7.5pt`).
-fn odt_twips_to_pt(twips: i64) -> String {
+pub(crate) fn odt_twips_to_pt(twips: i64) -> String {
     let sign = if twips < 0 { "-" } else { "" };
     let abs = twips.unsigned_abs();
     let (whole, tenths_of_twip) = (abs / 20, abs % 20 * 5);

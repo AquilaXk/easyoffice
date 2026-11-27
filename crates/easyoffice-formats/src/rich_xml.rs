@@ -39,6 +39,7 @@ pub(crate) struct CharFmt {
     pub color: Option<String>,
     pub highlight: Option<String>,
     pub script: RichScript,
+    pub letter_spacing_twips: Option<i16>,
 }
 
 impl CharFmt {
@@ -73,6 +74,7 @@ impl CharFmt {
             && self.font == run.font
             && self.color == run.color
             && self.highlight == run.highlight
+            && self.letter_spacing_twips == run.letter_spacing_twips
     }
 }
 
@@ -129,6 +131,7 @@ pub(crate) fn push_annotated_run(
         color: fmt.color.clone(),
         highlight: fmt.highlight.clone(),
         script: fmt.script,
+        letter_spacing_twips: fmt.letter_spacing_twips,
         note_ref: None,
         comment_id,
         revision: revision.cloned(),

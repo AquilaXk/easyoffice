@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::letter_spacing;
 use crate::rich_document::{
     highlight_name_to_hex, normalize_hex_color, RichColumns, RichLineSpacing, RichToc,
 };
@@ -223,6 +224,11 @@ pub(super) fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_
                 .map(Cow::into_owned);
         }
         "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
+        "w:spacing" => {
+            fmt.letter_spacing_twips = val
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .and_then(letter_spacing);
+        }
         "w:color" => fmt.color = val.and_then(normalize_hex_color),
         "w:highlight" => fmt.highlight = val.and_then(highlight_name_to_hex),
         "w:vertAlign" => {

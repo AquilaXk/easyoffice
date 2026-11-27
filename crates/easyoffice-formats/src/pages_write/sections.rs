@@ -7,7 +7,7 @@
 
 use super::body::{alignment_value, clean, look_of, para_look_of};
 use super::package::Blueprint;
-use super::styles::Styles;
+use super::styles::{default_half_points, Styles};
 use super::wire::{msg, reference, string, varint, Fld};
 use crate::pages_schema::{header_footer, number_attachment, section, settings, storage, ty};
 use crate::{
@@ -164,7 +164,7 @@ fn write_zone_storage(
         para_entries.push(table_entry(offset, Some(pstyle)));
 
         for run in &para.runs {
-            let look = look_of(run);
+            let look = look_of(run, default_half_points(0));
             let wanted = if look.is_plain() {
                 None
             } else {

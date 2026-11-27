@@ -16,6 +16,7 @@ use crate::hwpx_parts::{
 };
 pub(crate) use crate::hwpx_unpack::section_xml;
 use crate::office_codecs::checked_part;
+use crate::rich_char_spacing::MAX_SPACING_PERCENT;
 use crate::rich_document::{
     frame_paragraph, safe_link_target, RichAlignment, RichBinding, RichBlock, RichColumns,
     RichDocument, RichField, RichPageMargins, RichPaper, RichParagraph,
@@ -90,6 +91,18 @@ struct ShapeTables {
     /// Text a file-name field is written as.
     file_text: String,
     notes_by_key: std::collections::HashMap<(RichNoteKind, u32), String>,
+}
+
+/// `hh:spacing` of a run: its letter spacing as a percent of the size the run is drawn at.
+fn hwpx_spacing_percent(run: &crate::RichRun, base_height: u32) -> i8 {
+    let size = run
+        .size_half_pt
+        .or_else(|| u16::try_from(base_height / 50).ok());
+    let permille = run
+        .letter_spacing_twips
+        .map_or(0, |t| crate::rich_char_spacing::to_permille(t, size));
+    let percent = (permille + permille.signum() * 5) / 10;
+    percent.clamp(-MAX_SPACING_PERCENT, MAX_SPACING_PERCENT) as i8
 }
 
 fn hex_rgb(hex: &str) -> Option<u32> {
@@ -286,6 +299,7 @@ impl ShapeTables {
                     text_color: run.color.as_deref().and_then(hex_rgb),
                     shade_color: run.highlight.as_deref().and_then(hex_rgb),
                     script: run.script,
+                    spacing_percent: hwpx_spacing_percent(run, base.height),
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
                 if let Some(key) = run.note_ref {

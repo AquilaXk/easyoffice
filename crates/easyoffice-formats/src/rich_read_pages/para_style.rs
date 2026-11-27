@@ -6,6 +6,8 @@ use crate::pages_schema::{
     baseline, char_props_layout, compact_para, heading, para_props, style, ty, CharPropFields,
     ParaPropFields, COLOR_RGBA, COMPACT_PARA_FIELDS, FULL_PARA_FIELDS, FULL_PARA_FIELDS_ALT,
 };
+use crate::rich_char_spacing::from_permille;
+use crate::rich_document::MAX_PARA_SPACING_TWIPS;
 use crate::{RichAlignment, RichLineSpacing, RichRun, RichScript};
 
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
@@ -17,6 +19,8 @@ const FILL_COLOR: u32 = 1;
 const MAX_INDENT_PT: f32 = 1000.0;
 const MAX_LINE_SPACING_MULTIPLE: f32 = 10.0;
 const SINGLE_SPACING_PERCENT: u16 = 100;
+/// The size a tracking is measured against when no style names one (12 pt, as the line estimate assumes).
+const DEFAULT_HALF_POINTS: u16 = 24;
 
 pub(super) const FLAG_BOLD: u8 = 1 << 0;
 pub(super) const FLAG_ITALIC: u8 = 1 << 1;
@@ -41,6 +45,10 @@ pub(super) struct Fmt {
     pub right_indent_twips: Option<u32>,
     pub first_line_indent_twips: Option<i32>,
     pub line_spacing: Option<RichLineSpacing>,
+    pub space_before_twips: Option<u32>,
+    pub space_after_twips: Option<u32>,
+    /// Tracking in per-mille of the font size.
+    pub tracking_permille: Option<i64>,
 }
 
 fn color_hex(color: &Message) -> Option<String> {
@@ -163,6 +171,13 @@ impl Fmt {
         if self.script.is_none() {
             self.script = l.script.and_then(|n| p.varint(n)).and_then(script_of);
         }
+        if self.tracking_permille.is_none() {
+            self.tracking_permille = l
+                .tracking
+                .and_then(|n| p.float(n))
+                .filter(|t| t.is_finite())
+                .map(|t| (f64::from(t) * 1000.0).round() as i64);
+        }
     }
 
     /// Indents and line spacing of a paragraph property message.
@@ -182,6 +197,20 @@ impl Fmt {
         }
         if self.line_spacing.is_none() {
             self.line_spacing = line_spacing(p, l.line_spacing);
+        }
+        let space = |field: Option<u32>| {
+            field
+                .and_then(|n| p.float(n))
+                .and_then(points_to_twips)
+                .and_then(|t| u32::try_from(t).ok())
+                .filter(|t| *t > 0)
+                .map(|t| t.min(MAX_PARA_SPACING_TWIPS))
+        };
+        if self.space_before_twips.is_none() {
+            self.space_before_twips = space(l.space_before);
+        }
+        if self.space_after_twips.is_none() {
+            self.space_after_twips = space(l.space_after);
         }
     }
 
@@ -276,15 +305,19 @@ pub(super) fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> Rich
     let p_bits = p.map_or(0, |f| f.style_bits);
     let c_known = c_bits & 0x0F;
     let resolved = ((c_bits >> 4) & c_known) | ((p_bits >> 4) & !c_known & (p_bits & 0x0F));
+    let size_half_pt = pick(c, p, |f| f.size_half_pt);
     RichRun {
         field: None,
         link: None,
         text,
+        letter_spacing_twips: pick(c, p, |f| f.tracking_permille).and_then(|permille| {
+            from_permille(permille, size_half_pt.or(Some(DEFAULT_HALF_POINTS)))
+        }),
         bold: (resolved & FLAG_BOLD) != 0,
         italic: (resolved & FLAG_ITALIC) != 0,
         underline: (resolved & FLAG_UNDERLINE) != 0,
         strike: (resolved & FLAG_STRIKE) != 0,
-        size_half_pt: pick(c, p, |f| f.size_half_pt),
+        size_half_pt,
         color: pick(c, p, |f| f.color.clone()),
         highlight: pick(c, p, |f| f.highlight.clone()),
         // The paragraph style's font is the template default, so only a character style counts.

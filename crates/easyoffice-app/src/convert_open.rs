@@ -76,6 +76,9 @@ pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
         if let Some(size) = r.size_half_pt {
             let _ = write!(out, ",\"sizeHalfPt\":{size}");
         }
+        if let Some(spacing) = r.letter_spacing_twips {
+            let _ = write!(out, ",\"letterSpacingTwips\":{spacing}");
+        }
         match r.field {
             Some(RichField::PageNumber) => out.push_str(",\"field\":\"page\""),
             Some(RichField::TotalPages) => out.push_str(",\"field\":\"pages\""),

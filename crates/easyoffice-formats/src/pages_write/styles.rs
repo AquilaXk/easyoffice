@@ -35,6 +35,15 @@ const TYPE_CELL_STYLE: u32 = ty::CELL_STYLE;
 /// Body text: 11 pt, black (`AppleSDGothicNeo-Regular`). Headings 1-6 use `AppleSDGothicNeo-Bold`.
 pub(super) const BODY_POINTS: f32 = 11.0;
 const HEADING_POINTS: [f32; 6] = [18.0, 16.0, 14.0, 13.0, 12.0, 11.0];
+
+/// Size in half-points of a paragraph's text (heading 1 to 6, else body): what a run without a size is drawn at.
+pub(super) fn default_half_points(heading_level: u8) -> u16 {
+    let points = match usize::from(heading_level).min(6) {
+        0 => BODY_POINTS,
+        level => HEADING_POINTS[level - 1],
+    };
+    (points * 2.0) as u16
+}
 const BODY_FONT: &str = "AppleSDGothicNeo-Regular";
 const HEADING_FONT: &str = "AppleSDGothicNeo-Bold";
 const DEFAULT_TAB_STOPS_PT: f32 = 36.0;
@@ -95,6 +104,8 @@ pub(super) struct CharLook {
     pub color: Option<[u8; 3]>,
     pub highlight: Option<[u8; 3]>,
     pub script: u8,
+    /// Tracking (field 27), the letter spacing in per-mille of the font size; 0 is none.
+    pub tracking_permille: i32,
 }
 
 impl CharLook {
@@ -116,6 +127,7 @@ impl CharLook {
             && self.color.is_none()
             && self.highlight.is_none()
             && self.script == 0
+            && self.tracking_permille == 0
     }
 }
 
@@ -127,6 +139,8 @@ pub(super) struct ParaLook {
     pub left_indent_twips: Option<u32>,
     pub right_indent_twips: Option<u32>,
     pub line_spacing: Option<RichLineSpacing>,
+    pub space_before_twips: Option<u32>,
+    pub space_after_twips: Option<u32>,
 }
 
 impl ParaLook {
@@ -136,6 +150,8 @@ impl ParaLook {
             && self.left_indent_twips.is_none()
             && self.right_indent_twips.is_none()
             && self.line_spacing.is_none()
+            && self.space_before_twips.is_none()
+            && self.space_after_twips.is_none()
     }
 }
 
@@ -503,6 +519,13 @@ impl Styles {
             bag.push(float(para_props::RIGHT_INDENT, right_tw as f32 / 20.0));
             count += 1;
         }
+        // Space after (20) and before (21), in points.
+        for (number, twips) in [(20, look.space_after_twips), (21, look.space_before_twips)] {
+            if let Some(twips) = twips {
+                bag.push(float(number, twips as f32 / 20.0));
+                count += 1;
+            }
+        }
         let fields = [
             variation_header(parent, self.stylesheet),
             varint(10, count),
@@ -557,6 +580,10 @@ impl Styles {
         }
         if let Some(hl_bytes) = look.highlight {
             bag.push(msg(26, rgb(hl_bytes)));
+            count += 1;
+        }
+        if look.tracking_permille != 0 {
+            bag.push(float(27, look.tracking_permille as f32 / 1000.0));
             count += 1;
         }
         if let Some(rgb_bytes) = look.color {

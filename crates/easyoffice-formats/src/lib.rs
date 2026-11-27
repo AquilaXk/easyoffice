@@ -64,6 +64,7 @@ mod pptx_rich_read;
 mod pptx_shape_read;
 mod pptx_theme_cache;
 mod pptx_theme_color;
+mod rich_char_spacing;
 mod rich_defaults;
 pub mod rich_document;
 mod rich_image;
@@ -145,6 +146,7 @@ pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATION
 pub use pdf_sheet_rules::{plain_cell_numeric, CellRule, CellShown, SheetShown};
 pub use pdf_slide::encode_slide_pdf;
 pub use pdf_writer::PdfWriteOptions;
+pub use rich_char_spacing::{letter_spacing, MAX_LETTER_SPACING_TWIPS};
 pub use rich_defaults::RichDefaults;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,

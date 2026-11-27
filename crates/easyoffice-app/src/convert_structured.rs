@@ -16,13 +16,14 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    check_document_images, clean_font_name, code_within_bounds, frame_paragraph,
+    check_document_images, clean_font_name, code_within_bounds, frame_paragraph, letter_spacing,
     normalize_hex_color, safe_link_target, CellStyle, DefaultFont, EasyOfficeError, FontTable,
     ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
     RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
     RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS,
-    MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_LETTER_SPACING_TWIPS, MAX_NUM_FMTS,
+    MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -386,6 +387,13 @@ pub(crate) fn parse_runs(
                 color: opt_color(run, "color")?,
                 highlight: opt_color(run, "highlight")?,
                 script: opt_script(run)?,
+                letter_spacing_twips: opt_bounded(
+                    run,
+                    "letterSpacingTwips",
+                    -i64::from(MAX_LETTER_SPACING_TWIPS),
+                    i64::from(MAX_LETTER_SPACING_TWIPS),
+                )?
+                .and_then(letter_spacing),
                 note_ref,
                 comment_id,
                 revision,

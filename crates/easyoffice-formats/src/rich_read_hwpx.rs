@@ -138,6 +138,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
             color: r.color,
             highlight: r.highlight,
             script: r.script,
+            letter_spacing_twips: r.letter_spacing_twips,
         };
         if r.field.is_some() {
             runs.push(RichRun {

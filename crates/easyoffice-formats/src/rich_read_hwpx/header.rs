@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::table_style::BorderFillReader;
 use crate::hwpx_parts::{DEFAULT_FONT_FACE, HWPUNIT_PER_TWIP};
+use crate::rich_char_spacing::{from_permille, MAX_SPACING_PERCENT};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table_style::{CellFill, TableCellBorders};
@@ -131,6 +132,18 @@ impl HeaderBuilder {
                     .cloned();
                 if let Some(f) = self.char_fmt_mut() {
                     f.font = font;
+                }
+            }
+            "hh:spacing" => {
+                // Percent of the font size in the Hangul slot (the writer repeats it in every slot).
+                let percent = attr(attrs, "hangul").and_then(|v| v.trim().parse::<i64>().ok());
+                if let Some(f) = self.char_fmt_mut() {
+                    f.letter_spacing_twips = percent.and_then(|p| {
+                        from_permille(
+                            p.clamp(-MAX_SPACING_PERCENT, MAX_SPACING_PERCENT) * 10,
+                            f.size_half_pt,
+                        )
+                    });
                 }
             }
             "hh:bold" => {

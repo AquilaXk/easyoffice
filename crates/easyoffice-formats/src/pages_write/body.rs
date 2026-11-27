@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use super::package::Blueprint;
-use super::styles::{CharLook, ListLook, ParaLook, Styles};
+use super::styles::{default_half_points, CharLook, ListLook, ParaLook, Styles};
 use super::tables::{write_table_attachment, TableWriteBudget};
 use super::wire::{float, msg, reference, string, varint, Fld};
 use crate::pages_schema::{drawable, geometry, hyperlink, image, storage, ty};
@@ -24,7 +24,7 @@ use crate::rich_table::safe_cell_link_url;
 use crate::{
     normalize_hex_color, EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField,
     RichImage, RichImageFormat, RichLineSpacing, RichListKind, RichNumberEnclosure,
-    RichNumberFormat, RichParagraph, RichRun, MAX_LINE_SPACING_TWIPS,
+    RichNumberFormat, RichParagraph, RichRun, MAX_LINE_SPACING_TWIPS, MAX_PARA_SPACING_TWIPS,
 };
 
 const TYPE_STORAGE: u32 = ty::STORAGE;
@@ -111,8 +111,6 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
         || p.first_line_indent_twips
             .is_some_and(|t| t.saturating_abs() > MAX_INDENT_TWIPS)
         || p.line_spacing.is_some_and(|s| !line_spacing_fits(s))
-        || p.space_before_twips.is_some_and(|v| v > 0)
-        || p.space_after_twips.is_some_and(|v| v > 0)
 }
 
 pub(super) fn drawable_archive_fields(w_pt: f32, h_pt: f32, description: Option<&str>) -> Vec<Fld> {
@@ -129,8 +127,13 @@ pub(super) fn drawable_archive_fields(w_pt: f32, h_pt: f32, description: Option<
     fields
 }
 
-pub(super) fn look_of(run: &RichRun) -> CharLook {
+/// The look of a run; `default_half_points` is the size its paragraph draws it at when the run names none.
+pub(super) fn look_of(run: &RichRun, default_half_points: u16) -> CharLook {
+    let size = run.size_half_pt.or(Some(default_half_points));
     CharLook {
+        tracking_permille: run.letter_spacing_twips.map_or(0, |t| {
+            i32::try_from(crate::rich_char_spacing::to_permille(t, size)).unwrap_or(0)
+        }),
         bold: run.bold,
         italic: run.italic,
         underline: run.underline,
@@ -172,6 +175,12 @@ pub(super) fn para_look_of(p: &RichParagraph) -> ParaLook {
         line_spacing: p
             .line_spacing
             .filter(|s| *s != RichLineSpacing::Multiple(100) && line_spacing_fits(*s)),
+        space_before_twips: p
+            .space_before_twips
+            .filter(|t| *t > 0 && *t <= MAX_PARA_SPACING_TWIPS),
+        space_after_twips: p
+            .space_after_twips
+            .filter(|t| *t > 0 && *t <= MAX_PARA_SPACING_TWIPS),
     }
 }
 
@@ -369,7 +378,7 @@ pub(super) fn write_body<'a>(
                             "Pages 쓰기: 글자 구간 수가 열기 한도를 넘었습니다".to_string(),
                         ));
                     }
-                    let mut look = look_of(run);
+                    let mut look = look_of(run, default_half_points(paragraph.heading_level));
                     if run.note_ref.is_some() {
                         look.script = CharLook::script_code(crate::RichScript::Superscript);
                     }
@@ -607,10 +616,10 @@ mod tests {
             color: Some(c.to_string()),
             ..RichRun::plain("x")
         };
-        assert_eq!(look_of(&run("FF8000")).color, Some([255, 128, 0]));
-        assert_eq!(look_of(&run("#ff8000")).color, Some([255, 128, 0]));
-        assert_eq!(look_of(&run("FF80")).color, None);
-        assert_eq!(look_of(&run("GG0000")).color, None);
-        assert!(look_of(&RichRun::plain("x")).is_plain());
+        assert_eq!(look_of(&run("FF8000"), 22).color, Some([255, 128, 0]));
+        assert_eq!(look_of(&run("#ff8000"), 22).color, Some([255, 128, 0]));
+        assert_eq!(look_of(&run("FF80"), 22).color, None);
+        assert_eq!(look_of(&run("GG0000"), 22).color, None);
+        assert!(look_of(&RichRun::plain("x"), 22).is_plain());
     }
 }
