@@ -17,12 +17,6 @@ export const KNOWN_SIZE_VIOLATIONS = {
     ".eo-copilot-menu-item-body",
     ".eo-copilot-menu-hint",
   ],
-  "home.css": [
-    ".home-recent-page-btn",
-    ".dialog-body",
-    ".dialog-footer",
-    ".update-notice__button",
-  ],
 };
 
 /** CSS written inside scripts with a literal px in those properties, per script. None yet. */
