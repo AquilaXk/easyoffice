@@ -421,6 +421,34 @@ test("an incomplete conditional formatting rule is explained, not stored", async
   assert.equal(rules.hasAny(), false);
 });
 
+test("the data validation dialog has the tabs 설정, 설명 메시지 and 오류 메시지, one pane at a time, and a bad range brings back 설정", async () => {
+  const { rulesUi, document, userClick } = await dialogHarness();
+  rulesUi.openDataValidationDialog();
+  const tabs = [...document.querySelectorAll("#sheet-dv-dialog .dialog-tabs .dialog-tab")];
+  assert.deepEqual(tabs.map((t) => t.textContent), ["설정", "설명 메시지", "오류 메시지"]);
+  const shown = () => [...document.querySelectorAll("#sheet-dv-dialog [data-dv-pane]")].filter((p) => !p.hidden).map((p) => p.dataset.dvPane);
+  assert.deepEqual(shown(), ["setting"]);
+  const paneOf = (id) => document.getElementById(id).closest("[data-dv-pane]").dataset.dvPane;
+  assert.equal(paneOf("sheet-dv-show-prompt"), "prompt");
+  assert.equal(paneOf("sheet-dv-prompt"), "prompt");
+  assert.equal(paneOf("sheet-dv-show-error"), "error");
+  assert.equal(paneOf("sheet-dv-alert-select"), "error");
+  assert.equal(paneOf("sheet-dv-err"), "error");
+  userClick(tabs[2]);
+  assert.deepEqual(shown(), ["error"]);
+  assert.equal(tabs[2].getAttribute("aria-selected"), "true");
+  assert.equal(tabs[0].getAttribute("aria-selected"), "false");
+  field(document, "sheet-dv-range", "가나다");
+  userClick(document.getElementById("btn-sheet-dv-apply"));
+  await flushAsyncTurns();
+  assert.deepEqual(shown(), ["setting"]);
+  assert.match(document.getElementById("sheet-dv-status").textContent, /적용 범위/);
+  userClick(tabs[1]);
+  document.getElementById("sheet-dv-dialog").close?.();
+  rulesUi.openDataValidationDialog();
+  assert.deepEqual(shown(), ["setting"], "the dialog opens on 설정");
+});
+
 test("the data validation dialog stores one rule per range and clears overlapping ones", async () => {
   const { rulesUi, rules, document, userClick } = await dialogHarness();
   rulesUi.openDataValidationDialog();
@@ -612,13 +640,13 @@ const CF_VISIBLE = {
   icons: ["아이콘", "아이콘 2", "표시"],
 };
 const DV_VISIBLE = {
-  whole: ["조건", "값"],
-  decimal: ["조건", "값"],
-  date: ["조건", "값"],
-  time: ["조건", "값"],
-  textLength: ["조건", "값"],
-  list: ["원본", "목록 화살표 표시"],
-  listMultiple: ["원본", "목록 화살표 표시"],
+  whole: ["데이터", "값"],
+  decimal: ["데이터", "값"],
+  date: ["데이터", "값"],
+  time: ["데이터", "값"],
+  textLength: ["데이터", "값"],
+  list: ["원본", "드롭다운 표시"],
+  listMultiple: ["원본", "드롭다운 표시"],
   checkbox: ["선택 값", "해제 값"],
   custom: ["값"],
 };

@@ -649,9 +649,21 @@
       });
     }
 
+    // 설정 / 설명 메시지 / 오류 메시지: one pane at a time.
+    function showDvPane(name) {
+      for (const tab of document.querySelectorAll("#sheet-dv-dialog [data-dv-tab]")) {
+        const on = tab.dataset.dvTab === name;
+        tab.classList.toggle("active", on);
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.tabIndex = on ? 0 : -1;
+      }
+      for (const pane of document.querySelectorAll("#sheet-dv-dialog [data-dv-pane]")) pane.hidden = pane.dataset.dvPane !== name;
+    }
+
     function ensureDvControls() {
       if (dv.ready) return;
       dv.ready = true;
+      for (const tab of document.querySelectorAll("#sheet-dv-dialog [data-dv-tab]")) tab.addEventListener("click", () => showDvPane(tab.dataset.dvTab));
       $("btn-sheet-dv-apply")?.addEventListener("click", () => void applyDvForm());
       $("btn-sheet-dv-clear")?.addEventListener("click", () => void clearDv());
     }
@@ -719,6 +731,7 @@
     async function applyDvForm() {
       const { rule, error } = readDvForm();
       if (error) {
+        showDvPane("setting");
         note("sheet-dv-status", error);
         return;
       }
@@ -752,6 +765,7 @@
       fillDvForm(existing);
       setVal("sheet-dv-range", existing ? existing.r : selectionText());
       note("sheet-dv-status", "");
+      showDvPane("setting");
       return openDialog("sheet-dv-dialog");
     }
 
