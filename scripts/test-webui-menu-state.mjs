@@ -83,8 +83,11 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
       .filter(([, action]) => action === "hwp-editor")
       .map(([id]) => id);
     assert.deepEqual(editorOnly.sort(byName), [
+      "format:hwp-char-shape",
+      "format:hwp-para-shape",
       "table:cell-select",
       "table:cell-split",
+      "table:hwp-split",
       "view:form-mode",
       "view:zoom-dialog",
     ]);

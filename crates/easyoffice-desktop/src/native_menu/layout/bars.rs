@@ -455,6 +455,9 @@ const FORMAT_HWP: MenuSpec = menu(
         "format:superscript",
         "format:subscript",
         S,
+        "format:hwp-char-shape",
+        "format:hwp-para-shape",
+        S,
         "format:style",
         "format:justify",
         S,
@@ -579,8 +582,8 @@ const SLIDE_SHOW: MenuSpec = menu(
     &["page:slide-transition", "page:slide-presenter"],
 );
 
-const ARRANGE_PAGES: MenuSpec = menu(
-    "정렬",
+const TABLE_PAGES: MenuSpec = menu(
+    "표",
     &[
         "table:insert",
         S,
@@ -617,6 +620,7 @@ const TABLE_HWP: MenuSpec = menu(
         "table:cell-select",
         "table:merge",
         "table:cell-split",
+        "table:hwp-split",
         "table:col-equal",
         S,
         "table:border-bg",
@@ -644,11 +648,7 @@ const TABLE_DOC: MenuSpec = menu(
         "table:border-bg",
         "table:cell-props",
         S,
-        "table:sum",
         "table:doc-formula",
-        S,
-        "table:autosum",
-        "table:fn-browser",
         "table:sort",
     ],
 );
@@ -802,7 +802,7 @@ const PAGES: [&MenuSpec; 10] = [
     &VIEW_PAGES,
     &INSERT_PAGES,
     &FORMAT_PAGES,
-    &ARRANGE_PAGES,
+    &TABLE_PAGES,
     &TOOL_DOC,
     &WINDOW,
     &HELP,

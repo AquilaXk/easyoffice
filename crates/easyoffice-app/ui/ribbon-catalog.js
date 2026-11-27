@@ -195,7 +195,7 @@
   const DEFAULT_HWP_EDITOR_NODES = [
     elSpec("p", {}, {}, [elSpec("br")]),
     elSpec("p", { id: "hwp-manuscript-preview", class: "manuscript-notice", hidden: "" }, {}, [
-      textSpec("한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성"),
+      textSpec("200자 원고지"),
     ]),
   ];
 

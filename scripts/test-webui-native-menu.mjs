@@ -103,6 +103,9 @@ const EXPECTED_EDITOR_COMMANDS = {
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",
+  "table:hwp-split": "table:split",
+  "format:hwp-char-shape": "format:char-shape",
+  "format:hwp-para-shape": "format:para-shape",
   "table:col-equal": "table:cell-width-equal",
   "table:border-bg": "table:border-each",
   "table:cell-props": "table:cell-props",
@@ -124,8 +127,11 @@ test("the native menu ids that reach the Hangul editor map to the reference app'
   // Items that exist only for the editor have no page action of their own: they are the `hwp-editor` ones.
   const editorOnly = Object.keys(NATIVE_MENU_ACTIONS).filter((id) => NATIVE_MENU_ACTIONS[id] === "hwp-editor");
   assert.deepEqual(editorOnly.sort((a, b) => a.localeCompare(b)), [
+    "format:hwp-char-shape",
+    "format:hwp-para-shape",
     "table:cell-select",
     "table:cell-split",
+    "table:hwp-split",
     "view:form-mode",
     "view:zoom-dialog",
   ]);
@@ -370,5 +376,7 @@ test("the native labels of the shared style, paper and justify commands are the 
     assert.ok(native.length > 0, cmd);
     assert.deepEqual([...new Set(pageLabels(cmd))].sort((a, b) => a.localeCompare(b)), [...new Set(native)].sort((a, b) => a.localeCompare(b)), cmd);
   }
-  assert.ok(!rustItems().some((item) => /글자 모양|문단 모양|모양 복사|개체 속성/.test(item.label)));
+  assert.ok(!rustItems().some((item) => /모양 복사|개체 속성/.test(item.label)));
+  // 글자 모양 and 문단 모양 are the Hangul editor's own dialogs (PD-134: a name must do what it says), so they run in the editor only.
+  for (const label of ["글자 모양…", "문단 모양…"]) assert.ok(rustItems().some((item) => item.label === label && item.action === "hwp-editor"), label);
 });

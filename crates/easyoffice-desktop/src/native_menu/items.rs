@@ -306,7 +306,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "insert:field",
-        "누름틀 필드 삽입",
+        "필드 입력",
         None,
         "studio-cmd:hwp-mod-field",
     ),
@@ -347,6 +347,8 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:font-dialog",
     ),
+    item("format:hwp-char-shape", "글자 모양…", None, "hwp-editor"),
+    item("format:hwp-para-shape", "문단 모양…", None, "hwp-editor"),
     item("format:style", "스타일 적용", None, "studio-cmd:home-style"),
     sc!("format:doc-justify", "양쪽 맞춤", "para-shape"),
     sc!("format:pages-justify", "좌우 정렬", "para-shape"),
@@ -755,6 +757,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:table-cell-props",
     ),
     item("table:cell-split", "셀 나누기", None, "hwp-editor"),
+    item("table:hwp-split", "표 나누기", None, "hwp-editor"),
     item("table:split", "셀 나누기", None, "studio-cmd:table-split"),
     item("table:sum", "블록 합계", None, "studio-cmd:table-sum"),
     item(

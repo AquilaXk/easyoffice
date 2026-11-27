@@ -210,7 +210,7 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
     assert_eq!(
         titles_of(MenuKind::Pages),
         bar(
-            &["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구"],
+            &["파일", "편집", "보기", "삽입", "포맷", "표", "도구"],
             &tail
         )
     );
@@ -701,8 +701,11 @@ fn the_hangul_window_keeps_the_full_bar_with_the_reference_cell_items_in_order()
         [
             "view:zoom-dialog",
             "view:form-mode",
+            "format:hwp-char-shape",
+            "format:hwp-para-shape",
             "table:cell-select",
             "table:cell-split",
+            "table:hwp-split",
         ]
     );
     assert_eq!(spec("view:toolbar-labels").action, "view-toolbar-labels");

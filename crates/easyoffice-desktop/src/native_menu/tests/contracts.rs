@@ -430,7 +430,6 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
         ("edit:cut", "잘라내기", "오려 두기"),
         ("edit:copy", "복사", "복사하기"),
         ("edit:paste", "붙여넣기", "붙이기"),
-        ("edit:replace", "찾기 및 바꾸기", "찾아 바꾸기"),
         ("format:bold", "굵게", "진하게"),
         ("format:italic", "기울임꼴", "기울임"),
         ("view:zoom-100", "100%", "실제 크기"),
@@ -600,11 +599,45 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
     );
     assert_eq!(
         label_for(MenuKind::Doc, spec("view:ctrl-marks")),
-        "서식 기호"
+        "모든 서식 표시"
     );
     assert_eq!(
         label_for(MenuKind::Doc, spec("view:para-marks")),
-        "편집 기호"
+        "단락 표시"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("file:doc-paper")),
+        "페이지 설정"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("view:zoom-fit-page")),
+        "한 페이지"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("view:zoom-fit-width")),
+        "페이지 너비"
+    );
+    assert_eq!(label_for(MenuKind::Doc, spec("edit:replace")), "바꾸기");
+    assert_eq!(
+        label_for(MenuKind::Sheet, spec("edit:replace")),
+        "찾기 및 바꾸기"
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("edit:replace")),
+        "찾아 바꾸기"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("table:row-above")),
+        "위에 삽입"
+    );
+    assert_eq!(
+        label_for(MenuKind::Doc, spec("tool:review-stats")),
+        "단어 개수"
+    );
+    assert_eq!(label_for(MenuKind::Hwp, spec("insert:field")), "필드 입력");
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("table:hwp-split")),
+        "표 나누기"
     );
     assert_eq!(label_for(MenuKind::Doc, spec("view:doc-grid")), "눈금선");
     assert_eq!(
