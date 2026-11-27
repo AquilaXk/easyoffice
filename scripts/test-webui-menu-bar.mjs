@@ -67,7 +67,7 @@ const PALETTE_ONLY = {
   HWP: [
     "insert-chart", "layout-orientation", "layout-margins",
     "data-autosum", "data-fn-browser", "data-sort", "data-validation",
-    "review-track", "review-comment", "review-verify", "review-stats", "view-split",
+    "review-track", "review-comment", "review-stats", "view-split",
   ],
   SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"],
   SLIDE: ["layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
