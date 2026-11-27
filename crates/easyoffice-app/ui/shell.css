@@ -10,12 +10,12 @@
 /* ---- top bar ---------------------------------------------------------------------------------- */
 .topbar { height: 28px; padding: 0 8px 0 4px; gap: 8px; flex-wrap: nowrap; min-width: 0; background: var(--ui-bg-light); color: var(--ui-text); border-bottom: 1px solid var(--ui-border-light); }
 .topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
-.icon-btn { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ui-text-secondary); border-radius: 4px; }
+.icon-btn { width: var(--control-height-sm); height: var(--control-height-sm); padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ui-text-secondary); border-radius: 4px; }
 .icon-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
-.palette-btn { display: inline-flex; align-items: center; gap: 8px; height: var(--control-height-sm); min-width: 176px; padding: 0 6px 0 8px; font-size: var(--control-font-size); color: var(--ui-text-muted); border: var(--control-border-width) solid var(--ui-border); border-radius: var(--control-radius); background: transparent; flex-shrink: 0; }
+.palette-btn { display: inline-flex; align-items: center; gap: var(--space-4); height: var(--control-height-sm); min-width: 176px; padding: 0 var(--space-3) 0 var(--space-4); font-size: var(--control-font-size); color: var(--ui-text-muted); border: var(--control-border-width) solid var(--ui-border); border-radius: var(--control-radius); background: transparent; flex-shrink: 0; }
 .palette-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
 .palette-label { flex: 1 1 auto; text-align: left; white-space: nowrap; }
-.palette-btn kbd { font: 11px/1 "Consolas", "Menlo", monospace; padding: 2px 5px; color: var(--ui-text-muted); border: 1px solid var(--ui-border); border-radius: 3px; }
+.palette-btn kbd { font: var(--font-size-xs)/1 "Consolas", "Menlo", monospace; padding: var(--space-1) var(--space-3); color: var(--ui-text-muted); border: 1px solid var(--ui-border); border-radius: 3px; }
 /* ---- toolbars drawn with the icon set --------------------------------------------------------- */
 .eo-icon-toolbar { background: var(--ui-bg-light); border-bottom-color: var(--ui-border); }
 .eo-doc-style-bar { border-bottom-color: var(--ui-border); color: var(--ui-text); }
@@ -52,11 +52,11 @@
 .statusbar-pos-metrics, .statusbar-mode-btn, .eo-style-sep { flex-shrink: 0; white-space: nowrap; }
 .statusbar-diag-group > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #status-command-feedback { flex: 0 1 auto; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-.statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
+.statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: var(--control-height-sm); padding: 0 var(--space-3); font-size: var(--font-size-sm); font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
 .statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
 .statusbar-sheet-mode { flex-shrink: 0; font-weight: 600; color: var(--ui-text); }
 /* The zoom buttons are the reference status bar's icon button (`status-bar.css` .stb-icon-btn: 24x24, no radius, a transparent 1px border; hover: the hover fill and the strong border; 18px icon). */
-.statusbar-zoom-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); }
+.statusbar-zoom-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: var(--control-height-sm); height: var(--control-height-sm); padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); }
 .statusbar-zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border-strong); }
 .statusbar-zoom-btn .eo-icon { width: 18px; height: 18px; stroke-width: 1.5; }
 #status-studio-pos, #status-zoom-label { cursor: pointer; border-radius: var(--radius-xs); padding: 1px 6px; }
@@ -66,7 +66,7 @@
 /* ---- About dialog and toasts -------------------------------------------------------------------- */
 /* Product information in the reference dialog frame (`dialogs.css` 435-512): 460px, centred, product name and version first. */
 #about-dialog .dialog-wrap { max-height: calc(100vh - 48px); overflow-y: auto; }
-#about-dialog .about-body { display: block; padding: 16px 24px; text-align: center; font-size: var(--font-size-base); line-height: normal; }
+#about-dialog .about-body { display: block; padding: var(--space-8) var(--space-12); text-align: center; font-size: var(--font-size-base); line-height: normal; }
 .about-product-name { margin-bottom: 2px; font-size: 18px; font-weight: bold; color: var(--accent-strong); }
 .about-product-name-ko { margin-bottom: 8px; font-size: var(--font-size-md); color: var(--accent-subtle); }
 .about-notice { margin: 16px 0; text-align: left; padding: 10px 14px; font-size: var(--font-size-base); line-height: 1.6; color: var(--ui-note-text); background: var(--ui-note-bg); border: 1px solid var(--ui-note-border); border-radius: 4px; }
@@ -82,9 +82,9 @@
 .cmd-modal[open] { padding-top: 12vh; }
 .cmd-modal::backdrop { background: var(--overlay-bg); }
 .cp-panel { width: min(560px, calc(100vw - 48px)); background: var(--ui-bg-light); border-color: var(--ui-border); border-radius: 8px; box-shadow: var(--shadow-dialog); color: var(--ui-text); }
-.cp-input-wrap { position: relative; display: block; padding: 10px 12px; background: transparent; border-bottom: 1px solid var(--ui-border); }
+.cp-input-wrap { position: relative; display: block; padding: var(--space-5) var(--space-6); background: transparent; border-bottom: 1px solid var(--ui-border); }
 .cp-slash { position: absolute; top: 50%; left: 24px; transform: translateY(-50%); width: 16px; height: 16px; color: var(--ui-text-muted); pointer-events: none; }
-.cmd-input.cp-input { display: block; width: 100%; height: 34px; padding-left: 40px; padding-right: 12px; font-size: 14px; color: var(--ui-text); background: transparent; }
+.cmd-input.cp-input { display: block; width: 100%; height: var(--control-height-sm); padding-left: calc(var(--space-12) + var(--space-8)); padding-right: var(--space-6); font-size: var(--font-size-sm); color: var(--ui-text); background: transparent; }
 .cmd-input.cp-input::placeholder { color: var(--ui-text-muted); opacity: 1; }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
@@ -120,15 +120,15 @@
 /* The reference editor's find dialog (rhwp-studio `find-dialog.css`, MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md):
    same placement, sizes and spacing; the colours are this app's tokens. */
 .find-dialog { position: fixed; top: 80px; right: 24px; left: auto; margin: 0; width: min(380px, calc(100vw - 32px)); z-index: 9999; }
-.find-dialog .dialog-body { display: block; padding: 10px 12px 4px; }
+.find-dialog .dialog-body { display: block; padding: var(--space-5) var(--space-6) var(--space-2); }
 .find-dialog .dialog-row { display: flex; align-items: center; gap: var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
 .find-dialog .dialog-label { width: 70px; flex-shrink: 0; text-align: right; }
 .find-dialog .dialog-input { flex: 1; text-align: left; height: var(--control-height-sm); border: var(--control-border-width) solid var(--ui-border-strong); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); box-sizing: border-box; min-width: 0; }
 .find-dialog .dialog-input:focus { border-color: var(--color-focus-border); outline: none; }
 .find-dialog .find-count { margin-left: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
 .find-dialog .find-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-.find-dialog .find-status-row { min-height: 18px; line-height: 18px; text-align: right; }
-.find-dialog .find-buttons { display: flex; gap: var(--dialog-button-gap); padding: 4px 12px 8px; justify-content: flex-end; }
+.find-dialog .find-status-row { min-height: var(--dialog-status-height); line-height: var(--dialog-status-height); text-align: right; }
+.find-dialog .find-buttons { display: flex; gap: var(--dialog-button-gap); padding: var(--space-2) var(--space-6) var(--space-4); justify-content: flex-end; }
 .find-dialog .dialog-btn { white-space: nowrap; }
 /* Hyperlink dialog (doc-link.js): the address and label fields fill their rows; the status line has the find dialog's metrics. */
 #doc-link-dialog { width: min(420px, calc(100vw - 32px)); }
@@ -138,14 +138,14 @@
 #sheet-link-dialog { width: min(560px, calc(100vw - 24px)); }
 #sheet-link-dialog .dialog-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 108px; max-width: calc(100vw - 24px); }
 #sheet-link-dialog .dialog-wrap > .dialog-title { grid-column: 1 / -1; }
-#sheet-link-dialog .dialog-wrap > .dialog-body { padding: 20px 14px 18px 20px; min-width: 0; }
-#sheet-link-dialog .dialog-wrap > .dialog-footer { padding: 20px 14px 0 0; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; border: 0; background: transparent; }
-#sheet-link-dialog .dialog-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+#sheet-link-dialog .dialog-wrap > .dialog-body { padding: var(--space-10) var(--space-6) var(--space-8) var(--space-10); min-width: 0; }
+#sheet-link-dialog .dialog-wrap > .dialog-footer { padding: var(--space-10) var(--space-6) 0 0; display: flex; flex-direction: column; justify-content: flex-start; gap: var(--space-4); border: 0; background: transparent; }
+#sheet-link-dialog .dialog-row { display: flex; gap: var(--space-5); margin-bottom: 10px; align-items: center; }
 #sheet-link-dialog .dialog-label { flex: 0 0 92px; width: auto; min-width: 0; text-align: left; }
 #sheet-link-dialog .dialog-text-input { min-width: 0; flex: 1; text-align: left; width: 100%; }
 #sheet-link-dialog .dialog-hyperlink-target { border: 0; padding: 0; margin: 22px 0 0; min-width: 0; }
-#sheet-link-dialog .dialog-hyperlink-target legend { padding: 0 0 12px; font-weight: 600; }
-#sheet-link-dialog .dialog-hyperlink-panel { display: flex; flex-direction: column; gap: 10px; border-color: var(--ui-border-strong); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); padding: 16px 12px; margin-bottom: 0; }
+#sheet-link-dialog .dialog-hyperlink-target legend { padding: 0 0 var(--space-6); font-weight: 600; }
+#sheet-link-dialog .dialog-hyperlink-panel { display: flex; flex-direction: column; gap: var(--space-5); border-color: var(--ui-border-strong); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); padding: var(--space-8) var(--space-6); margin-bottom: 0; }
 #sheet-link-dialog .dialog-hyperlink-panel[hidden] { display: none; }
 #sheet-link-dialog .dialog-hyperlink-panel .dialog-row { margin-bottom: 0; }
 #sheet-link-dialog .dialog-hyperlink-preview { min-width: 30px; width: 30px; padding: 0; flex: 0 0 30px; display: grid; place-items: center; color: var(--color-primary); }
@@ -153,7 +153,7 @@
 #sheet-link-dialog .dialog-hyperlink-status { min-height: 1em; margin: 12px 0 0; color: var(--ui-danger); }
 @media (max-width: 520px) {
   #sheet-link-dialog .dialog-wrap { display: block; }
-  #sheet-link-dialog .dialog-wrap > .dialog-footer { flex-direction: row; justify-content: flex-end; padding: 0 16px 16px; }
+  #sheet-link-dialog .dialog-wrap > .dialog-footer { flex-direction: row; justify-content: flex-end; padding: 0 var(--space-8) var(--space-8); }
   #sheet-link-dialog .dialog-label { flex-basis: 86px; }
 }
 /* Table of contents dialog (doc-toc.js): the status line has the find dialog's metrics. */
@@ -231,7 +231,7 @@
 /* The preview: a framed sample (the reference's `.cs-preview`, `char-shape-dialog.css` 86-92) and the line under it. */
 #doc-font-dialog .doc-font-sample { display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; width: 100%; height: var(--dialog-preview-height); padding: 0 var(--space-6); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
 #doc-font-dialog #doc-font-sample-note { display: block; margin-top: var(--dialog-row-gap); min-height: var(--dialog-status-height); }
-.dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
+.dialog-status-row { min-height: var(--dialog-status-height); line-height: var(--dialog-status-height); text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */
 /* Sheet rule dialogs (conditional formatting, data validation, pivot, entry alert). Widths follow the reference dialogs of the same kind:
@@ -251,7 +251,7 @@
 #sheet-ranges-dialog { width: min(440px, calc(100vw - 32px)); }
 /* The message of a refused edit is the confirmation dialog's frame with one button (the same 360px and padded body as the validation alert). */
 #sheet-protect-alert-dialog { width: min(360px, calc(100vw - 32px)); }
-#sheet-protect-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; }
+#sheet-protect-alert-dialog .dialog-body { padding: var(--space-8) var(--space-10); line-height: 1.6; }
 #sheet-protect-dialog .sheet-protect-heading { width: auto; min-width: 0; text-align: left; }
 #sheet-protect-dialog .dialog-text-input, #sheet-wb-protect-dialog .dialog-text-input, #sheet-password-dialog .dialog-text-input, #sheet-range-edit-dialog .dialog-text-input { flex: 1; min-width: 0; }
 #sheet-ranges-dialog .sheet-names-head, #sheet-ranges-dialog .sheet-names-list li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
@@ -263,11 +263,11 @@
 .sheet-numfmt-sample.nf-red { color: var(--ui-danger); }
 /* Cell format dialog tabs and panes (PD-207), after the reference editor's tab strip and border dialog (`dialogs.css` 530-570, `table-cell-props.css` 111-190). */
 /* Tabs: the reference editor's dialog tabs (`dialogs.css` .dialog-tabs/.dialog-tab), also the sheet tab strip (no radius, active tab on the raised surface). The strip's line is an inset shadow so its scroll box does not clip the active tab over it. */
-.dialog-tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
+.dialog-tabs { display: flex; gap: 0; padding: 0 var(--dialog-tab-padding-x); border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
 .dialog-tab, .sheet-tab-btn { position: relative; box-sizing: border-box; height: var(--dialog-tab-height); margin-bottom: -1px; padding: 0 var(--dialog-tab-padding-x); border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--control-font-size); line-height: 1; cursor: pointer; }
 .dialog-tab:hover, .sheet-tab-btn:hover { background: var(--color-accent-bg); color: var(--color-text); }
 .dialog-tab.active, .sheet-tab-btn.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
-.sheet-tab-bar { display: flex; gap: 0; flex: 0 0 auto; padding: 0 12px; background: var(--color-bg); box-shadow: inset 0 -1px 0 var(--ui-border-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.sheet-tab-bar { display: flex; gap: 0; flex: 0 0 auto; padding: 0 var(--dialog-tab-padding-x); background: var(--color-bg); box-shadow: inset 0 -1px 0 var(--ui-border-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 /* The reference tab is a button that keeps the browser's button font (its dialogs do not inherit); the shell's `button { font: inherit }` is rolled back for the tab only. */
 .sheet-tab-btn { font-family: revert; line-height: normal; flex: 0 0 auto; max-width: 220px; margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The tab strip sits inside the dialog body's 12px edge, as in the reference dialogs. */
@@ -293,7 +293,7 @@
 .sheet-border-positions button[aria-pressed="true"] { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--ui-text-on-accent); }
 :root[data-theme-effective="dark"] .sheet-border-positions button[aria-pressed="true"] { color: var(--ui-bg); }
 .tool-dialog .dialog-btn-group button:focus-visible, .sheet-line-item:focus-visible, .sheet-border-positions button:focus-visible, .dialog-tab:focus-visible, .sheet-tab-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
-#sheet-dv-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; white-space: pre-line; }
+#sheet-dv-alert-dialog .dialog-body { padding: var(--space-8) var(--space-10); line-height: 1.6; white-space: pre-line; }
 /* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
 .sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }
 /* Colour field: the shell's palette popup (color-picker.js) behind a chip button. */
@@ -301,17 +301,17 @@
 .tool-dialog .dialog-swatch-chip { width: 22px; height: 12px; border: 1px solid var(--color-border-dark); background: var(--dialog-swatch, var(--color-surface)); }
 .tool-dialog .dialog-color-host .sb-hl-palette { z-index: 300; }
 /* The sample of the 글꼴 and 채우기 panes of the cell format dialog (PD-227): the colours come from custom properties set by sheet-look-ui.js. */
-.tool-dialog .sheet-color-sample { display: inline-flex; align-items: center; min-width: 160px; height: 40px; padding: 0 8px; border: 1px solid var(--color-border-dark); background: var(--sample-fill, var(--color-surface)); color: var(--sample-text, var(--color-text)); }
+.tool-dialog .sheet-color-sample { display: inline-flex; align-items: center; min-width: 160px; height: 40px; padding: 0 var(--space-4); border: 1px solid var(--color-border-dark); background: var(--sample-fill, var(--color-surface)); color: var(--sample-text, var(--color-text)); }
 .tool-dialog .dialog-stack { display: flex; flex-direction: column; }
 .tool-dialog .dialog-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 120px; overflow-y: auto; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-sm); }
-.tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: 4px 8px; color: var(--color-text-muted); }
-.tool-dialog .dialog-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: var(--list-row-padding-y) var(--list-row-padding-x); color: var(--color-text-muted); }
+.tool-dialog .dialog-list li { padding: var(--list-row-padding-y) var(--list-row-padding-x); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
 #sheet-names-dialog { width: min(760px, calc(100vw - 32px)); }
 #sheet-name-edit-dialog .dialog-label { width: 64px; min-width: 64px; flex-shrink: 0; }
 /* The name list of the 이름 관리 dialog: the list cell of the rules dialog, three columns (PD-214). */
-.tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: minmax(0, 18fr) minmax(0, 18fr) minmax(0, 30fr) minmax(0, 14fr) minmax(0, 20fr); gap: 8px; }
-.tool-dialog .sheet-names-head { padding: 3px 8px; border: 1px solid var(--color-border); border-bottom: 0; background: var(--color-surface); color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: minmax(0, 18fr) minmax(0, 18fr) minmax(0, 30fr) minmax(0, 14fr) minmax(0, 20fr); gap: var(--space-4); }
+.tool-dialog .sheet-names-head { padding: var(--list-row-padding-y) var(--list-row-padding-x); border: 1px solid var(--color-border); border-bottom: 0; background: var(--color-surface); color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .tool-dialog .sheet-names-list { max-height: 200px; }
 .tool-dialog .sheet-names-list:empty::before { content: "이름 없음"; }
 .tool-dialog .sheet-names-list li > span { overflow: hidden; text-overflow: ellipsis; }
@@ -345,7 +345,7 @@
 .cfg-title { padding: 4px 12px 2px; color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .cfg-grid { display: flex; flex-wrap: wrap; gap: 4px; max-width: 244px; padding: 2px 8px 6px; }
 #sheet-cf-gallery-icons .cfg-grid { max-width: 340px; }
-.md-item.cfg-tile { width: auto; padding: 3px; border: 1px solid var(--color-border-light); }
+.md-item.cfg-tile { width: auto; padding: var(--space-2); border: 1px solid var(--color-border-light); }
 .cfg-tile .cfp { min-width: 56px; }
 .cfg-tile .cfp[data-kind="icons"] { min-width: 0; }
 .cfg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -363,10 +363,10 @@
 /* The arrow of a list cell is the combo box's arrow cell (`toolbar.css` `.custom-select-arrow`): no box, a 1px left divider, the `▾` letter at 8px in the muted color, 15px wide and as tall as the cell, at the cell's right end. Hover and the open menu take the combo's hover fill. */
 .cf-dropdown-btn { position: fixed; z-index: 30; display: inline-flex; align-items: center; justify-content: center; width: calc(var(--chevron-size) + 2 * var(--picker-padding-end)); padding: 0; border: 0; border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; line-height: 1; cursor: default; }
 .cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"] { background: var(--color-hover-bg); color: var(--color-text-secondary); }
-.cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
+.cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: var(--space-1) 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
 .cf-dropdown-btn[hidden] { display: none; } /* the button's own `display` (icon button) would show it while hidden */
 .cf-dropdown-menu { font-size: var(--font-size-base); } /* the menu items' size, as `.md-item` */
-.cf-dropdown-menu li { padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+.cf-dropdown-menu li { padding: var(--space-2) var(--space-5); cursor: pointer; white-space: nowrap; }
 .cf-dropdown-menu li:hover, .cf-dropdown-menu li[aria-selected="true"] { background: var(--color-accent-bg); }
 /* Check mark (the check shape of the cell icons) and the box of a check box cell and of a multiple list item: a 14px box, filled with the accent when checked. */
 :root { --dv-check-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M4%2013l2.5-2.5%203.5%203.5%207.5-7.5L20%209%2010%2019z%22%2F%3E%3C%2Fsvg%3E"); }
@@ -376,7 +376,7 @@
 .sheet-grid td[data-dv-box]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin: -7px 0 0 -7px; border: 1px solid var(--color-border-dark); border-radius: 0; background: var(--color-surface); cursor: pointer; }
 .sheet-grid td[data-dv-box="on"]::before { border-color: var(--color-primary); background: var(--color-primary); }
 .sheet-grid td[data-dv-box="on"]::after { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; pointer-events: none; }
-.cf-dropdown-menu[aria-multiselectable="true"] li { position: relative; padding-left: 30px; }
+.cf-dropdown-menu[aria-multiselectable="true"] li { position: relative; padding-left: calc(var(--space-10) + var(--space-5)); }
 .cf-dropdown-menu[aria-multiselectable="true"] li::before { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin-top: -7px; border: 1px solid var(--color-border-dark); border-radius: 0; background: var(--color-surface); }
 .cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::before { border-color: var(--color-primary); background: var(--color-primary); }
 .cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::after { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; }
@@ -440,11 +440,11 @@
 }
 /* Auto filter (PD-198): the panel is a `.context-menu` (menu-bar.css) with a search field, a virtual list and the dialog buttons. */
 .sheet-filter-panel { width: 240px; padding: 4px 0 8px; }
-.sheet-filter-panel .md-item[data-filter-act] { padding-left: 16px; }
+.sheet-filter-panel .md-item[data-filter-act] { padding-left: var(--space-8); }
 .sheet-filter-panel { overflow: visible; }
-.sheet-filter-panel > .md-sub { padding-left: 16px; }
+.sheet-filter-panel > .md-sub { padding-left: var(--space-8); }
 .sheet-filter-panel .md-sub-panel[data-leaf-menu] { max-height: min(440px, calc(100vh - 24px)); overflow-y: auto; }
-.sheet-filter-panel .md-sub-panel .sb-hl-palette-row { padding: 2px 16px; margin-bottom: 0; }
+.sheet-filter-panel .md-sub-panel .sb-hl-palette-row { padding: var(--space-1) var(--space-8); margin-bottom: 0; }
 .sheet-filter-row .sheet-filter-arrow { margin-left: 0; padding-left: 0; flex: none; }
 .sheet-filter-row .sheet-filter-arrow[hidden] { display: none; }
 .sheet-filter-search { padding: 2px 8px 6px; }
@@ -521,17 +521,17 @@
 .sb-hl-swatch.selected { box-shadow: 0 0 0 1px var(--color-text); }
 #sheet-tab-color-input { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 #sheet-tab-menu .md-sub.open > .md-sub-panel { display: block; }
-#sheet-tab-menu .md-sub-panel { padding: 4px 0; }
-#sheet-tab-menu .md-sub-panel .sb-hl-palette-row, #sheet-tab-menu .md-sub-panel .sb-hl-palette-actions { padding: 2px 16px; margin-bottom: 0; }
+#sheet-tab-menu .md-sub-panel { padding: var(--space-2) 0; }
+#sheet-tab-menu .md-sub-panel .sb-hl-palette-row, #sheet-tab-menu .md-sub-panel .sb-hl-palette-actions { padding: var(--space-1) var(--space-8); margin-bottom: 0; }
 #sheet-tab-menu .md-sub-panel .sb-hl-palette-actions { margin-top: 2px; }
 .sheet-tab-edit[aria-invalid="true"] { border-color: var(--ui-danger-strong); box-shadow: 0 0 0 2px var(--ui-danger-soft); }
 .sheet-tab-dialog { width: min(360px, calc(100vw - 32px)); }
-#sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+#sheet-tab-delete-message { margin: 0; padding: var(--list-row-padding-y) var(--list-row-padding-x); line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .sheet-tab-hidden-list { max-height: 180px; margin: 0; }
 .sheet-tab-hidden-list li:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 
 /* Page setup dialog (doc-page-setup.js): the reference's edit-paper dialog, `dialogs.css` 95-109, 171-174, 355-431 (MIT, see THIRD_PARTY_NOTICES.md), same values. */
-.dialog-section { border: 1px solid var(--color-border-lighter); background: var(--color-surface); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; }
+.dialog-section { border: 1px solid var(--color-border-lighter); background: var(--color-surface); border-radius: var(--radius-sm); padding: var(--space-5) var(--space-6); margin-bottom: 10px; }
 .dialog-section-title { font-weight: bold; color: var(--color-primary-dark); font-size: var(--font-size-sm); margin-bottom: 8px; }
 .dialog-unit { font-size: var(--font-size-xs); color: var(--ui-text-secondary); }
 .page-setup-sections { display: flex; gap: 10px; }
@@ -541,8 +541,8 @@
 /* Each product shows its own page setup items (`doc-page-setup.js` `syncDialogLabels`); `hidden` wins over the row and grid display rules. */
 #doc-page-setup-dialog [hidden] { display: none !important; }
 #doc-ps-gutter-label { white-space: nowrap; }
-.dialog-icon-radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
-.icon-radio-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--ui-border-subtle); border-radius: 3px; cursor: pointer; background: var(--color-surface); min-width: 52px; }
+.dialog-icon-radio-group { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.icon-radio-card { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1.5px solid var(--ui-border-subtle); border-radius: 3px; cursor: pointer; background: var(--color-surface); min-width: 52px; }
 .icon-radio-card:hover { border-color: var(--accent-hover); background: var(--color-accent-bg-light); }
 .icon-radio-card.selected { border-color: var(--color-primary); background: var(--color-accent-bg); }
 .icon-radio-input { display: none; }
@@ -578,9 +578,9 @@
 #sheet-table-dialog .dialog-label { width: 112px; min-width: 112px; flex-shrink: 0; }
 #sheet-table-dialog .dialog-text-input { flex: 1; min-width: 0; }
 .sheet-table-bar { position: relative; margin: 0 0 4px; padding: 0 8px; overflow: hidden; }
-.sheet-table-bar .tb-scroll-track { align-items: center; gap: 6px; }
+.sheet-table-bar .tb-scroll-track { align-items: center; gap: var(--space-3); }
 .sheet-table-bar[hidden] { display: none; }
-.sheet-table-bar-tab { flex-shrink: 0; padding-right: 6px; font-weight: 700; color: var(--accent-strong); }
+.sheet-table-bar-tab { flex-shrink: 0; padding-right: var(--space-3); font-weight: 700; color: var(--accent-strong); }
 .sheet-table-name { width: 120px; }
 .sheet-table-options { gap: 10px; }
 .sheet-table-options .dialog-checkbox { font-size: var(--font-size-sm); white-space: nowrap; }
@@ -607,7 +607,7 @@
 .sheet-check-list { max-height: 184px; overflow-y: auto; margin: 0; padding: 4px 6px; list-style: none; border: 1px solid var(--color-border-light); background: var(--color-surface); }
 .sheet-check-list li { padding: 3px 4px; }
 .sheet-check-list li:hover { background: var(--color-hover-bg); }
-.sheet-check-list .dialog-checkbox { width: 100%; display: flex; align-items: center; gap: 6px; }
+.sheet-check-list .dialog-checkbox { width: 100%; display: flex; align-items: center; gap: var(--space-3); }
 .sheet-slicer-layer { grid-area: 2 / 2; position: relative; z-index: 6; pointer-events: none; overflow: hidden; }
 .sheet-slicer-layer[hidden] { display: none; }
 .sheet-slicer-card { position: absolute; pointer-events: auto; display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--color-primary-subtle); border-radius: 0; background: var(--color-surface); color: var(--color-text); overflow: hidden; user-select: none; outline: none; }
@@ -615,7 +615,7 @@
 .sheet-slicer-head { display: flex; align-items: center; gap: 4px; padding: 5px 6px 4px 8px; border-bottom: 1px solid var(--ui-border-subtle); background: var(--color-surface); cursor: move; }
 .sheet-slicer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-base); font-weight: 600; color: var(--color-primary-dark); }
 .sheet-slicer-actions { display: inline-flex; align-items: center; gap: 1px; }
-.sheet-slicer-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.sheet-slicer-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: var(--control-height-sm); padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
 .sheet-slicer-btn .eo-icon { width: 14px; height: 14px; }
 .sheet-slicer-btn:hover:not(:disabled) { border-color: var(--ui-border); background: var(--ui-hover-strong); color: var(--color-text); }
 .sheet-slicer-btn[aria-pressed="true"] { border-color: var(--accent-primary); background: var(--ui-selected); color: var(--color-primary-dark); }
@@ -646,7 +646,7 @@
 .sheet-image-el { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
 .sheet-image-actions { position: absolute; top: 4px; right: 4px; display: none; align-items: center; gap: 2px; padding: 2px; background: var(--color-surface-raised); border: 1px solid var(--ui-border); }
 .sheet-image-card:hover .sheet-image-actions, .sheet-image-card.selected .sheet-image-actions { display: inline-flex; }
-.sheet-image-btn { display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 5px; border: 1px solid transparent; background: transparent; color: var(--color-text-secondary); font-size: var(--font-size-xs); cursor: pointer; }
+.sheet-image-btn { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height-sm); padding: 0 var(--space-3); border: 1px solid transparent; background: transparent; color: var(--color-text-secondary); font-size: var(--font-size-xs); cursor: pointer; }
 .sheet-image-btn:hover { border-color: var(--ui-border); background: var(--ui-hover-strong); color: var(--color-text); }
 .sheet-image-btn[data-image-act="delete"]:hover { color: var(--ui-danger); }
 .sheet-image-resize-handle { position: absolute; right: -4px; bottom: -4px; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid var(--ui-surface); background: var(--resize-handle); cursor: nwse-resize; display: none; }
@@ -657,7 +657,7 @@
 #sheet-image-dialog, #sheet-note-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-image-dialog .dialog-label, #sheet-note-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
 #sheet-note-dialog .sheet-note-text-row { align-items: flex-start; }
-#sheet-note-dialog .sheet-note-textarea { flex: 1; min-width: 0; height: auto; min-height: 72px; padding: 4px 6px; resize: vertical; font: inherit; font-size: var(--font-size-sm); }
+#sheet-note-dialog .sheet-note-textarea { flex: 1; min-width: 0; height: auto; min-height: 72px; padding: var(--space-2) var(--space-3); resize: vertical; font: inherit; font-size: var(--font-size-sm); }
 #sheet-image-dialog #btn-sheet-image-delete, #sheet-note-dialog #btn-sheet-note-delete { margin-right: auto; color: var(--ui-danger); }
 #sheet-note-dialog #btn-sheet-note-delete[hidden] { display: none; }
 
@@ -709,7 +709,7 @@
 #slide-layout-dialog .dialog-label, #slide-shape-dialog .dialog-label, #slide-table-dialog .dialog-label, #slide-chart-dialog .dialog-label, #slide-image-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
 #slide-shape-dialog .dialog-text-input, #slide-chart-dialog .dialog-text-input, #slide-image-dialog .dialog-text-input { flex: 1; min-width: 0; }
 .slide-chart-series-row { align-items: flex-start; }
-.slide-chart-series-input { height: auto; min-height: 60px; padding: 4px 6px; resize: vertical; font: inherit; font-size: var(--font-size-sm); }
+.slide-chart-series-input { height: auto; min-height: 60px; padding: var(--space-2) var(--space-3); resize: vertical; font: inherit; font-size: var(--font-size-sm); }
 .slide-dialog-delete-btn { margin-right: auto; color: var(--ui-danger); }
 .slide-dialog-delete-btn[hidden] { display: none; }
 @media print {
@@ -773,7 +773,7 @@
 .doc-inspect-summary { padding: 6px 10px; margin-bottom: 8px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-bg-light); color: var(--ui-text); font-size: var(--font-size-sm); line-height: 1.45; }
 #doc-inspect-dialog .doc-inspect-list { max-height: 260px; margin-bottom: 0; }
 #doc-inspect-dialog .doc-inspect-list:empty::before { content: "문제가 발견되지 않았습니다."; }
-#doc-inspect-dialog .doc-inspect-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--ui-border-subtle); white-space: normal; cursor: default; }
+#doc-inspect-dialog .doc-inspect-item { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--ui-border-subtle); white-space: normal; cursor: default; }
 #doc-inspect-dialog .doc-inspect-item:last-child { border-bottom: 0; }
 .doc-inspect-badge { flex-shrink: 0; display: inline-flex; align-items: center; padding: 1px 6px; border-radius: var(--radius-sm); border: 1px solid var(--ui-border); background: var(--ui-accent-bg); color: var(--color-primary-dark); font-size: var(--font-size-xs); font-weight: 700; white-space: nowrap; }
 .doc-inspect-badge[data-kind="overflow"] { background: var(--ui-danger-soft); border-color: var(--ui-danger); color: var(--ui-danger); }
@@ -784,16 +784,16 @@
 #doc-shape-dialog, #doc-chart-dialog, #doc-fn-dialog { overflow: visible; }
 #doc-shape-dialog .dialog-label, #doc-chart-dialog .dialog-label, #doc-fn-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
 #doc-shape-dialog .dialog-text-input, #doc-chart-dialog .dialog-text-input { flex: 1; min-width: 0; }
-.symbol-cat-tab { padding: 4px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ui-text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
+.symbol-cat-tab { padding: var(--space-2) var(--space-5); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ui-text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
 .symbol-cat-tab.active { color: var(--color-primary-dark); border-bottom-color: var(--color-primary); font-weight: 700; }
-.symbol-picker-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; max-height: 190px; overflow-y: auto; padding: 4px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); }
+.symbol-picker-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: var(--space-2); max-height: 190px; overflow-y: auto; padding: var(--space-2); border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); }
 .symbol-cell { height: 30px; padding: 0; border: 1px solid var(--ui-border-subtle); border-radius: var(--radius-sm); background: var(--ui-bg-light); color: var(--ui-text); font-size: 15px; cursor: pointer; }
 .symbol-cell:hover { background: var(--ui-hover); }
 .symbol-cell.is-selected { border-color: var(--color-primary); background: var(--ui-accent-bg); color: var(--color-primary-dark); font-weight: 700; }
 .symbol-preview-row { margin-top: 8px; }
 .symbol-preview-char { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--ui-border); border-radius: var(--radius-sm); background: var(--ui-surface); font-size: 18px; }
 .symbol-preview-code { font-size: var(--font-size-xs); color: var(--ui-text-secondary); font-family: monospace; }
-.dialog-preview-code { padding: 3px 8px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); font-family: monospace; font-size: var(--font-size-sm); }
+.dialog-preview-code { padding: var(--list-row-padding-y) var(--list-row-padding-x); border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); font-family: monospace; font-size: var(--font-size-sm); }
 .eo-doc-shape, .eo-doc-chart { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); }
 .eo-doc-shape-svg { display: block; max-width: 100%; }
 .eo-doc-shape-text, .eo-doc-chart-title { margin: 6px 0 0; font-weight: 600; color: var(--ui-text); }
@@ -806,9 +806,9 @@
 .split-compare-table td, .split-compare-table th { border: 1px solid var(--ui-border-light); padding: 3px 6px; text-align: left; }
 
 /* Sheet Format Cells, Text Rotation, Size Dialogs & Text-to-Columns (PD-356). */
-.tool-dialog #sheet-font-sample { box-sizing: border-box; height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; justify-content: center; justify-content: safe center; padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.15; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
+.tool-dialog #sheet-font-sample { box-sizing: border-box; height: 76px; min-height: 76px; max-height: 76px; width: 100%; flex: 1; min-width: 0; justify-content: center; justify-content: safe center; padding: var(--space-2) var(--space-5); overflow: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.15; font-family: var(--sample-font, var(--sheet-cell-font-family)); font-size: var(--sample-size, var(--sheet-cell-font-size)); }
 .tool-dialog #sheet-font-sample .sheet-font-sample-text { display: inline-block; flex: 0 0 auto; line-height: inherit; }
-.sheet-rot-presets button { padding: 3px 7px; font-size: var(--font-size-xs); }
+.sheet-rot-presets button { padding: var(--space-2) var(--space-4); font-size: var(--font-size-xs); }
 .sheet-rot-presets button[aria-pressed="true"] { background: var(--color-accent-bg); border-color: var(--color-primary); color: var(--color-primary-dark); font-weight: 700; }
 .sheet-rot-stage { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; margin-left: auto; flex: none; overflow: hidden; border: 1px solid var(--color-border-dark); background: var(--color-surface); }
 .sheet-rot-preview { display: inline-flex; align-items: center; justify-content: center; padding: 2px 4px; font-size: var(--font-size-xs); line-height: 1.2; white-space: nowrap; transform: rotate(var(--rot-preview, 0deg)); }

@@ -83,6 +83,29 @@ export const selectorKey = (selector) => (selector.length > KEY_LENGTH ? `${sele
 export const hasLiteralPx = (value) => (value.match(LITERAL_PX) ?? []).some((px) => Number.parseFloat(px) !== 0);
 
 /**
+ * Sizes that are the size of a drawing, not of a control (PD-383): an icon, a swatch or a preview sample has the pixels it
+ * is drawn with, and the multi-line fields keep a minimum of rows. `selector -> properties` of rules the size guard skips.
+ */
+export const DRAWN_SIZES = new Map([
+  [".statusbar-zoom-btn .eo-icon", ["height"]],
+  [".cp-slash", ["height"]],
+  [".tool-dialog .dialog-swatch-chip", ["height"]],
+  [".tool-dialog .sheet-color-sample", ["height"]],
+  [".tool-dialog .dialog-list li .cfp", ["height"]],
+  ['.cf-dropdown-menu[aria-multiselectable="true"] li::before', ["height"]],
+  ['.cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::after', ["height"]],
+  [".icon-radio-icon", ["height"]],
+  [".sheet-table-swatch", ["height", "padding"]],
+  [".sheet-table-swatch-text", ["height"]],
+  [".sheet-table-swatch-text.bold", ["height"]],
+  [".sheet-slicer-btn .eo-icon", ["height"]],
+  [".tool-dialog #sheet-font-sample", ["height", "min-height"]],
+  ["#sheet-note-dialog .sheet-note-textarea", ["min-height"]],
+  [".slide-chart-series-input", ["min-height"]],
+  [".pages-insp-seg .eo-glyph-btn [data-icon], .pages-insp-seg .eo-glyph-btn svg", ["height"]],
+]);
+
+/**
  * The size rules of a stylesheet that break the token rule: a dialog or control selector with a literal px in
  * `height`, `min-height`, `font-size`, `line-height`, `gap` or `padding`. One entry per `selector`, `properties` sorted.
  */
@@ -90,8 +113,9 @@ export function sizeViolations(css) {
   const found = new Map();
   for (const { selector, declarations } of styleRules(css)) {
     if (!CONTROL_SELECTOR.test(selector)) continue;
+    const drawn = DRAWN_SIZES.get(selector) ?? [];
     for (const [name, value] of declarations) {
-      if (SIZE_PROPS.test(name) && hasLiteralPx(value)) found.set(selector, new Set([...(found.get(selector) ?? []), name]));
+      if (SIZE_PROPS.test(name) && !drawn.includes(name) && hasLiteralPx(value)) found.set(selector, new Set([...(found.get(selector) ?? []), name]));
     }
   }
   return [...found].map(([selector, properties]) => ({ selector, key: selectorKey(selector), properties: [...properties].sort(byName) }));
