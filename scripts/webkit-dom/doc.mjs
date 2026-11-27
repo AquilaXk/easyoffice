@@ -166,14 +166,13 @@ export const docSteps = [
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
     await page.click("#doc-font-tab-advanced");
-    assert.deepEqual(await page.$$eval("#doc-font-scale-presets option", (rows) => rows.map((r) => r.value)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
+    assert.deepEqual(await page.$$eval("#doc-font-scale-presets option", (rows) => rows.map((r) => r.value)), ["200", "150", "100", "90", "80", "66", "50", "33"]);
     await page.fill("#doc-font-scale", "150");
-    await page.keyboard.press("Tab");
-    assert.equal(await page.inputValue("#doc-font-scale"), "150%", "a bare number takes its unit");
     await page.selectOption("#doc-font-spacing-kind", "expanded");
-    await page.fill("#doc-font-spacing-value", "2");
-    await page.keyboard.press("Tab");
-    assert.equal(await page.inputValue("#doc-font-spacing-value"), "2pt", "a bare number takes its unit");
+    await page.fill("#doc-font-spacing-value", "");
+    await page.keyboard.type("2pt");
+    assert.equal(await page.inputValue("#doc-font-spacing-value"), "2", "a number field takes the digits; the unit is the label beside it");
+    assert.equal(await page.textContent("#doc-font-spacing-value + .dialog-unit"), "pt");
     await page.selectOption("#doc-font-num-spacing", "2");
     await page.selectOption("#doc-font-num-form", "1");
     await page.selectOption("#doc-font-style-set", "3");
@@ -213,6 +212,23 @@ export const docSteps = [
     assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
     const rows = await page.$$eval("#doc-font-size-list .goto-bookmark-item", (els) => els.map((el) => getComputedStyle(el).fontSize));
     assert.ok(rows.length > 0 && rows.every((size) => size === "11px"), "the list rows have the field's text size");
+    const lists = await page.$$eval("#doc-font-size-list, #doc-font-style-list", (els) => els.map((el) => ({ height: el.getBoundingClientRect().height, row: el.querySelector(".goto-bookmark-item").getBoundingClientRect().height })));
+    for (const list of lists) assert.equal((list.height - 2) % list.row, 0, `a list shows whole rows: ${JSON.stringify(list)}`);
+    assert.equal(lists[0].height, lists[1].height, "both lists have one height");
+    // Every group is the same distance from the next on both tabs, the last group of a tab from the preview group included.
+    for (const tab of ["font", "advanced"]) {
+      await page.click(`#doc-font-tab-${tab}`);
+      const gaps = await page.$$eval(`#doc-font-pane-${tab} > fieldset, #doc-font-dialog .doc-font-preview-body fieldset`, (els) => els.slice(1).map((el, i) => Math.round(el.getBoundingClientRect().top - els[i].getBoundingClientRect().bottom)));
+      assert.ok(gaps.length >= 1 && gaps.every((gap) => gap === 6), `${tab}: the gaps between groups are 6px: ${gaps}`);
+    }
+    // The 고급 tab's label column is as wide as its longest label (70px) plus the 8px gap, so the controls start right after it.
+    const start = await page.$eval("#doc-font-pane-advanced .dialog-grid-wide", (grid) => {
+      const label = [...grid.querySelectorAll(".dialog-label")].find((l) => l.textContent.startsWith("스타일 모음"));
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      return grid.querySelector(".custom-select").getBoundingClientRect().left - range.getBoundingClientRect().right;
+    });
+    assert.ok(start >= 8 && start < 12, `the controls start ${start}px after the longest label`);
   }],
 
   // PD-375: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style

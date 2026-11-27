@@ -27,12 +27,12 @@ test("배율 is a field you can type into, and its presets are the field's own l
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h);
   const scale = byId(h, "doc-font-scale");
-  assert.equal(scale.getAttribute("type"), "text", "you can type into it");
   assert.equal(scale.classList.contains("dialog-input"), true, "it is the dialog's own field, with no custom arrow");
   const presets = h.document.getElementById(scale.getAttribute("list"));
   assert.equal(presets.tagName, "DATALIST");
-  assert.deepEqual([...presets.querySelectorAll("option")].map((o) => o.value), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
-  scale.value = "150%";
+  assert.deepEqual([...presets.querySelectorAll("option")].map((o) => o.value), ["200", "150", "100", "90", "80", "66", "50", "33"]);
+  assert.equal(scale.getAttribute("type"), "number");
+  scale.value = "150";
   fire(scale);
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.deepEqual(withKey(h, "scalePercent"), [150]);
@@ -53,25 +53,25 @@ test("the arrow keys step through a list box and put the row in the field", asyn
   assert.equal(size.getAttribute("aria-activedescendant"), byId(h, "doc-font-size-list").children[3].id);
 });
 
-test("a bare number in a value field takes its unit when the field is left", async () => {
+test("the value fields are spin fields with the unit beside them, and a pasted number with its unit is accepted", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h);
   const kind = byId(h, "doc-font-spacing-kind");
   kind.value = "expanded";
   fire(kind);
   const value = byId(h, "doc-font-spacing-value");
+  assert.deepEqual([value.getAttribute("type"), value.classList.contains("dialog-input")], ["number", true], "the reference's number field");
+  const beside = value.parentNode.children[[...value.parentNode.children].indexOf(value) + 1];
+  assert.deepEqual([beside.className, beside.textContent], ["dialog-unit", "pt"], "the unit is the label beside the field");
+  for (const [pasted, shown] of [["2pt", "2"], ["1,5", "1.5"], ["150 %", "150"]]) {
+    value.dispatchEvent({ type: "paste", target: value, bubbles: true, clipboardData: { getData: () => pasted }, preventDefault() {} });
+    assert.equal(value.value, shown, pasted);
+  }
   value.value = "2";
-  fire(value);
-  assert.equal(value.value, "2pt");
-  value.value = "1,5";
-  fire(value);
-  assert.equal(value.value, "1.5pt");
-  value.value = "abc";
-  fire(value);
-  assert.equal(value.value, "abc", "a text that is no number stays as typed");
-  value.value = "2pt";
+  value.dispatchEvent({ type: "paste", target: value, bubbles: true, clipboardData: { getData: () => "abc" }, preventDefault() {} });
+  assert.equal(value.value, "2", "a text that is no number leaves the field as it was");
   h.userClick(byId(h, "btn-doc-font-apply"));
-  assert.deepEqual(withKey(h, "letterSpacingTwips"), [40], "the unit is accepted when applying");
+  assert.deepEqual(withKey(h, "letterSpacingTwips"), [40], "2 pt is 40 twips");
 });
 
 test("Alt+letter moves the focus to the labelled control of the visible tab", async () => {

@@ -71,8 +71,8 @@
     return PLAIN_NUMBER_RE.test(t) ? Number(t) : Number.NaN;
   };
 
-  // A value as the dialog shows it: the unit sits inside the field (`2pt`), and a blank stays blank.
-  const withUnit = (value, unit) => (value === "" || value === null || value === undefined ? "" : `${value}${unit}`);
+  // A value as the number field shows it (the unit is the label beside it), and a blank stays blank.
+  const shownNumber = (value) => (value === "" || value === null || value === undefined ? "" : String(value));
 
   // The 간격 and 값 the dialog shows for a run spacing in twips.
   function spacingShown(twips) {
@@ -116,16 +116,19 @@
     return Math.round(pt * HALF_PT_PER_PT);
   }
 
-  // A unit field shows its number with the unit inside (`2pt`): leaving it completes a bare number, and a text
-  // that is not a number stays as typed so 확인 can name the box.
-  function bindUnitFields(dialog) {
-    for (const input of dialog.querySelectorAll("input[data-unit]")) {
-      const complete = () => {
-        const n = numberOf(input.value);
-        if (Number.isFinite(n)) input.value = withUnit(n, input.dataset.unit);
-      };
-      input.addEventListener("change", complete);
-      input.addEventListener("blur", complete);
+  // A number field (`type="number"`, the unit is a label beside it) takes only digits when typed, so the unit letters of what
+  // is pasted (`2pt`, `150 %`, `1,5`) go: the pasted text becomes its number when it is one.
+  function bindNumberFields(dialog) {
+    for (const input of dialog.querySelectorAll('input[type="number"]')) {
+      input.addEventListener("paste", (event) => {
+        const n = numberOf(event.clipboardData?.getData?.("text") ?? "");
+        if (!Number.isFinite(n)) return;
+        event.preventDefault?.();
+        input.value = String(n);
+        for (const type of ["input", "change"]) {
+          input.dispatchEvent(typeof host.Event === "function" ? new host.Event(type, { bubbles: true }) : { type, bubbles: true, target: input });
+        }
+      });
     }
   }
 
@@ -220,7 +223,7 @@
       ]) {
         box.disabled = !on;
         if (!on) box.value = "";
-        else if (!box.value) box.value = withUnit(fallback, "pt");
+        else if (!box.value) box.value = shownNumber(fallback);
       }
     };
 
@@ -313,13 +316,13 @@
     els.sub.checked = initial.sub;
     const shown = spacingShown(initial.spacing ?? 0);
     els.kind.value = shown.kind;
-    els.value.value = withUnit(shown.value, "pt");
-    els.scale.value = initial.scale === null ? "" : withUnit(initial.scale, "%");
+    els.value.value = shownNumber(shown.value);
+    els.scale.value = shownNumber(initial.scale);
     const shownPosition = positionShown(initial.position ?? 0);
     els.posKind.value = shownPosition.kind;
-    els.posValue.value = withUnit(shownPosition.value, "pt");
+    els.posValue.value = shownNumber(shownPosition.value);
     els.kern.checked = (initial.kerning ?? 0) > 0;
-    els.kernValue.value = els.kern.checked ? withUnit(initial.kerning / HALF_PT_PER_PT, "pt") : "";
+    els.kernValue.value = els.kern.checked ? shownNumber(initial.kerning / HALF_PT_PER_PT) : "";
     OT.show(els.ot, initial.opentype);
     els.grid.checked = initial.nogrid !== true;
     els.grid.indeterminate = initial.nogrid === null;
@@ -354,7 +357,7 @@
           current.drawSample();
         });
       }
-      bindUnitFields(els.dialog);
+      bindNumberFields(els.dialog);
       listBoxes = bindListBoxes(els.dialog);
       for (const key of Object.keys(COLOR_HOST)) {
         host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(els.dialog.querySelector(COLOR_HOST[key]), (picked) => current.setColor(key, picked), { clear: true, clearLabel: "자동" });

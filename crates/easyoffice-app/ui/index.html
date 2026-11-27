@@ -1634,7 +1634,7 @@
             <label class="dialog-label" for="doc-font-size">크기(<span class="dialog-key">S</span>):</label>
             <select id="doc-font-family" class="sb-combo dialog-select" data-accesskey="t"></select>
             <input id="doc-font-style" class="dialog-text-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
-            <input id="doc-font-size" class="dialog-text-input dialog-field" type="text" inputmode="decimal" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
+            <input id="doc-font-size" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
             <label class="dialog-label" for="doc-font-latin">영어 글꼴(<span class="dialog-key">F</span>):</label>
             <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f"></select>
             <div id="doc-font-style-list" class="goto-bookmark-list" aria-label="글꼴 스타일 목록"></div>
@@ -1681,9 +1681,9 @@
             <legend>문자 간격</legend>
             <div class="dialog-grid">
               <label class="dialog-label" for="doc-font-scale">배율(<span class="dialog-key">C</span>):</label>
-              <input id="doc-font-scale" class="dialog-input dialog-field" type="text" inputmode="numeric" data-accesskey="c" data-unit="%" list="doc-font-scale-presets" />
-              <datalist id="doc-font-scale-presets"><option value="200%"></option><option value="150%"></option><option value="100%"></option><option value="90%"></option><option value="80%"></option><option value="66%"></option><option value="50%"></option><option value="33%"></option></datalist>
-              <span></span><span></span>
+              <input id="doc-font-scale" class="dialog-input dialog-field" type="number" min="1" max="600" step="1" data-accesskey="c" list="doc-font-scale-presets" />
+              <datalist id="doc-font-scale-presets"><option value="200"></option><option value="150"></option><option value="100"></option><option value="90"></option><option value="80"></option><option value="66"></option><option value="50"></option><option value="33"></option></datalist>
+              <span class="dialog-unit">%</span><span></span><span></span>
               <label class="dialog-label" for="doc-font-spacing-kind">간격(<span class="dialog-key">S</span>):</label>
               <select id="doc-font-spacing-kind" class="sb-combo dialog-select" data-accesskey="s">
                 <option value="normal">표준</option>
@@ -1691,7 +1691,7 @@
                 <option value="condensed">좁게</option>
               </select>
               <label class="dialog-label" for="doc-font-spacing-value">값(<span class="dialog-key">B</span>):</label>
-              <input id="doc-font-spacing-value" class="dialog-input dialog-field" type="text" data-accesskey="b" data-unit="pt" />
+              <input id="doc-font-spacing-value" class="dialog-input dialog-field" type="number" min="0.1" max="1584" step="0.1" data-accesskey="b" /><span class="dialog-unit">pt</span>
               <label class="dialog-label" for="doc-font-position-kind">위치(<span class="dialog-key">P</span>):</label>
               <select id="doc-font-position-kind" class="sb-combo dialog-select" data-accesskey="p">
                 <option value="normal">표준</option>
@@ -1699,11 +1699,11 @@
                 <option value="lowered">글자 위치 내림</option>
               </select>
               <label class="dialog-label" for="doc-font-position-value">값(<span class="dialog-key">Y</span>):</label>
-              <input id="doc-font-position-value" class="dialog-input dialog-field" type="text" data-accesskey="y" data-unit="pt" />
+              <input id="doc-font-position-value" class="dialog-input dialog-field" type="number" min="0.5" max="1584" step="0.5" data-accesskey="y" /><span class="dialog-unit">pt</span>
             </div>
             <div class="dialog-inline-row">
               <label class="dialog-checkbox" for="doc-font-kerning"><input id="doc-font-kerning" type="checkbox" data-accesskey="k" /><span>글꼴 커닝(<span class="dialog-key">K</span>):</span></label>
-              <input id="doc-font-kerning-value" class="dialog-input dialog-field" type="text" data-accesskey="o" data-unit="pt" aria-labelledby="doc-font-kerning-unit" />
+              <input id="doc-font-kerning-value" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="o" aria-labelledby="doc-font-kerning-unit" />
               <label id="doc-font-kerning-unit" class="dialog-label dialog-label-left" for="doc-font-kerning-value">포인트 이상(<span class="dialog-key">O</span>)</label>
             </div>
             <div class="dialog-inline-row">

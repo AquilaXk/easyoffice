@@ -33,7 +33,7 @@ function setBox(h, id, value, type = "input") {
 test("고급 tab lists 배율, 위치 (표준·올림·내림) and 글꼴 커닝 under 문자 간격", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, h.blocks[0]);
-  assert.equal(byId(h, "doc-font-scale").value, "100%", "text without a scale shows 100 % with the unit in the field");
+  assert.equal(byId(h, "doc-font-scale").value, "100", "text without a scale shows 100 (the % is the label beside the field)");
   assert.deepEqual([...byId(h, "doc-font-position-kind").querySelectorAll("option")].map((o) => o.textContent), ["표준", "글자 위치 올림", "글자 위치 내림"]);
   assert.equal(byId(h, "doc-font-position-value").disabled, true, "표준 takes no value");
   assert.equal(byId(h, "doc-font-kerning").checked, false);
@@ -54,7 +54,7 @@ test("배율 writes the scale in percent and 100 takes it off", async () => {
   assert.equal(h.editor.querySelector(".eo-run").dataset.eoScale, "150");
 
   await openDialog(h, a);
-  assert.equal(byId(h, "doc-font-scale").value, "150%", "the dialog shows the selection's scale");
+  assert.equal(byId(h, "doc-font-scale").value, "150", "the dialog shows the selection's scale");
   setBox(h, "doc-font-scale", "600");
   apply(h);
   assert.deepEqual(withKey(h, "scalePercent"), [600]);
@@ -71,13 +71,13 @@ test("위치 writes the raise or lowering in half-points; 표준 takes it off", 
   await openDialog(h, a);
   setBox(h, "doc-font-position-kind", "raised", "change");
   assert.equal(byId(h, "doc-font-position-value").disabled, false);
-  assert.equal(byId(h, "doc-font-position-value").value, "3pt", "올림 starts at 3 pt");
+  assert.equal(byId(h, "doc-font-position-value").value, "3", "올림 starts at 3 pt");
   apply(h);
   assert.deepEqual(withKey(h, "positionHalfPt"), [6]);
   assert.equal(h.editor.querySelector(".eo-run").style.verticalAlign, "3pt", "the editor raises the run");
 
   await openDialog(h, a);
-  assert.deepEqual([byId(h, "doc-font-position-kind").value, byId(h, "doc-font-position-value").value], ["raised", "3pt"]);
+  assert.deepEqual([byId(h, "doc-font-position-kind").value, byId(h, "doc-font-position-value").value], ["raised", "3"]);
   setBox(h, "doc-font-position-kind", "lowered", "change");
   setBox(h, "doc-font-position-value", "0,5");
   apply(h);
@@ -96,7 +96,7 @@ test("글꼴 커닝 writes the smallest kerned size in half-points", async () =>
   await openDialog(h, a);
   byId(h, "doc-font-kerning").checked = true;
   fire(byId(h, "doc-font-kerning"));
-  assert.equal(byId(h, "doc-font-kerning-value").value, "1pt", "checking it starts at 1 pt");
+  assert.equal(byId(h, "doc-font-kerning-value").value, "1", "checking it starts at 1 pt");
   setBox(h, "doc-font-kerning-value", "12");
   apply(h);
   assert.deepEqual(withKey(h, "kerningHalfPt"), [24]);
@@ -104,7 +104,7 @@ test("글꼴 커닝 writes the smallest kerned size in half-points", async () =>
 
   await openDialog(h, a);
   assert.equal(byId(h, "doc-font-kerning").checked, true);
-  assert.equal(byId(h, "doc-font-kerning-value").value, "12pt");
+  assert.equal(byId(h, "doc-font-kerning-value").value, "12");
   byId(h, "doc-font-kerning").checked = false;
   fire(byId(h, "doc-font-kerning"));
   apply(h);
