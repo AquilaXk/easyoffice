@@ -5,10 +5,6 @@
 
 /** Dialog and control rules with a literal px in height, min-height, font-size, line-height, gap or padding, per stylesheet (selector, cut at 110 characters). */
 export const KNOWN_SIZE_VIOLATIONS = {
-  "content.css": [
-    "#doc-comment-dialog .doc-comment-textarea",
-    ".sheet-chart-btn",
-  ],
   "copilot.css": [
     ".eo-copilot-textarea",
     ".eo-copilot-model-menu [focusgroup~=\"menu\"]",

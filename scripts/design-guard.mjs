@@ -123,6 +123,8 @@ export const DRAWN_SIZES = new Map([
   // board.css (PD-384): the chart series field's rows and the colour chip of the style bar.
   [".board-chart-series-input", ["min-height"]],
   [".board-style-group .dialog-swatch-chip", ["height"]],
+  // content.css (PD-384): the comment field keeps its rows.
+  ["#doc-comment-dialog .doc-comment-textarea", ["min-height"]],
 ]);
 
 /**
