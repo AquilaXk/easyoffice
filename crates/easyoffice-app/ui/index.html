@@ -1698,11 +1698,11 @@
               </select>
               <label class="dialog-label" for="doc-font-position-value">값(<span class="dialog-key">Y</span>):</label>
               <input id="doc-font-position-value" class="dialog-input dialog-field" type="number" min="0.5" max="1584" step="0.5" data-accesskey="y" /><span class="dialog-unit">pt</span>
-            </div>
-            <div class="dialog-inline-row">
               <label class="dialog-checkbox" for="doc-font-kerning"><input id="doc-font-kerning" type="checkbox" data-accesskey="k" /><span>글꼴 커닝(<span class="dialog-key">K</span>):</span></label>
-              <input id="doc-font-kerning-value" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="o" aria-labelledby="doc-font-kerning-unit" />
-              <label id="doc-font-kerning-unit" class="dialog-label dialog-label-left" for="doc-font-kerning-value">포인트 이상(<span class="dialog-key">O</span>)</label>
+              <div class="dialog-inline-cell">
+                <input id="doc-font-kerning-value" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="o" aria-labelledby="doc-font-kerning-unit" />
+                <label id="doc-font-kerning-unit" class="dialog-label dialog-label-left" for="doc-font-kerning-value">포인트 이상(<span class="dialog-key">O</span>)</label>
+              </div>
             </div>
             <div class="dialog-inline-row">
               <label class="dialog-checkbox" for="doc-font-grid"><input id="doc-font-grid" type="checkbox" data-accesskey="w" /><span>문서 눈금이 지정되어 있으면 줄 눈금에 맞춤(<span class="dialog-key">W</span>)</span></label>

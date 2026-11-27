@@ -225,14 +225,27 @@ export const docSteps = [
       const gaps = await page.$$eval(`#doc-font-pane-${tab} > fieldset, #doc-font-dialog .doc-font-preview-body fieldset`, (els) => els.slice(1).map((el, i) => Math.round(el.getBoundingClientRect().top - els[i].getBoundingClientRect().bottom)));
       assert.ok(gaps.length >= 1 && gaps.every((gap) => gap === 8), `${tab}: the gaps between groups are 8px (--dialog-group-gap): ${gaps}`);
     }
-    // The 고급 tab's label column is as wide as its longest label (70px) plus the 8px gap, so the controls start right after it.
-    const start = await page.$eval("#doc-font-pane-advanced .dialog-grid-wide", (grid) => {
-      const label = [...grid.querySelectorAll(".dialog-label")].find((l) => l.textContent.startsWith("스타일 모음"));
-      const range = document.createRange();
-      range.selectNodeContents(label);
-      return grid.querySelector(".custom-select").getBoundingClientRect().left - range.getBoundingClientRect().right;
+    // The 고급 tab's boxes all start at one left edge, the 글꼴 커닝 box (96px, like the 값 boxes) included, with its 포인트 이상 label right after it;
+    // the label column is as wide as its widest cell (the 글꼴 커닝 check box and label), so every label ends before the boxes start.
+    const edges = await page.evaluate(() => {
+      const left = (selector) => document.querySelector(selector).getBoundingClientRect().left;
+      const stepper = (id) => `#doc-font-pane-advanced .eo-stepper:has(#${id})`;
+      const combo = (id) => `#doc-font-pane-advanced .custom-select[data-select-id="${id}"]`;
+      const kern = document.querySelector(stepper("doc-font-kerning-value")).getBoundingClientRect();
+      const unit = document.querySelector("#doc-font-kerning-unit").getBoundingClientRect();
+      const value = document.querySelector(stepper("doc-font-spacing-value")).getBoundingClientRect();
+      const labels = [...document.querySelectorAll("#doc-font-pane-advanced .dialog-grid .dialog-label, #doc-font-pane-advanced .dialog-grid-wide .dialog-label")]
+        .filter((l) => l.getBoundingClientRect().width > 0 && l.parentElement.firstElementChild === l || l.matches("[for=doc-font-style-set]"));
+      return {
+        lefts: [stepper("doc-font-scale"), combo("doc-font-spacing-kind"), combo("doc-font-position-kind"), stepper("doc-font-kerning-value"), combo("doc-font-ligatures"), combo("doc-font-num-spacing"), combo("doc-font-style-set")].map(left),
+        kernWidth: [kern.width, value.width], unitGap: unit.left - kern.right,
+        labelEnds: labels.map((l) => { const r = document.createRange(); r.selectNodeContents(l); return left(stepper("doc-font-scale")) - r.getBoundingClientRect().right; }),
+      };
     });
-    assert.ok(start >= 8 && start < 12, `the controls start ${start}px after the longest label`);
+    assert.equal(new Set(edges.lefts.map((x) => Math.round(x * 2))).size, 1, `the boxes of the 고급 tab start at one left edge, the 글꼴 커닝 box included: ${edges.lefts}`);
+    assert.deepEqual(edges.kernWidth[0], edges.kernWidth[1], "the 글꼴 커닝 box is as wide as the 값 boxes");
+    assert.ok(Math.abs(edges.unitGap - 8) <= 1, `포인트 이상 follows the 글꼴 커닝 box by the 8px dialog gap: ${edges.unitGap}`);
+    assert.ok(edges.labelEnds.every((gap) => gap >= 8), `every label ends at least 8px before the boxes: ${edges.labelEnds}`);
   }],
 
   // PD-377: the number field is the stepper (a press steps and clamps in the real engine, the cell is as high as the field with a line
