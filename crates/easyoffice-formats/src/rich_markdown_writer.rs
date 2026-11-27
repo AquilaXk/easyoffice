@@ -134,7 +134,7 @@ fn render_markdown_runs(p: &RichParagraph) -> String {
             if run.bold {
                 piece = format!("**{piece}**");
             }
-            if run.strike {
+            if run.strike || run.advanced.fx.double_strike {
                 piece = format!("~~{piece}~~");
             }
             if run.underline {

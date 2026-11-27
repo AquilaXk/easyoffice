@@ -210,7 +210,10 @@ impl HeaderBuilder {
             }
             "hh:strikeout" => {
                 if let Some(f) = self.char_fmt_mut() {
-                    f.strike = attr(attrs, "shape").is_some_and(|t| t != "NONE");
+                    // `DOUBLE_SLIM` is the double line of the reference parser's line shape table; any other shape but NONE is a line.
+                    let shape = attr(attrs, "shape");
+                    f.advanced.fx.double_strike = shape.as_deref() == Some("DOUBLE_SLIM");
+                    f.strike = shape.is_some_and(|t| t != "NONE") && !f.advanced.fx.double_strike;
                 }
             }
             "hh:supscript" | "hh:subscript" => {

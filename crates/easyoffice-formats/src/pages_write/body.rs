@@ -140,7 +140,8 @@ pub(super) fn look_of(run: &RichRun, default_half_points: u16) -> CharLook {
         bold: run.bold,
         italic: run.italic,
         underline: run.underline,
-        strike: run.strike,
+        // Pages has no double line: a double strikethrough is written as a strikethrough.
+        strike: run.strike || run.advanced.fx.double_strike,
         size_half_pt: run.size_half_pt.filter(|s| *s > 0 && *s <= MAX_HALF_POINTS),
         // The variant's PostScript name when the run has one (PD-368), else the font name.
         font: run

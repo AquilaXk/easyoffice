@@ -136,6 +136,8 @@ pub(crate) struct HwpxCharShape {
     pub italic: bool,
     pub underline: bool,
     pub strike: bool,
+    /// The strikethrough is the double line (`DOUBLE_SLIM`); only meaningful with `strike`.
+    pub strike_double: bool,
     pub height: u32,
     pub font: usize,
     /// Font table index of the East Asian (Hangul, Hanja, Japanese) slots; the same as `font` for one font.
@@ -160,6 +162,7 @@ impl Default for HwpxCharShape {
             italic: false,
             underline: false,
             strike: false,
+            strike_double: false,
             height: DEFAULT_CHAR_HEIGHT,
             font: 0,
             font_east: 0,
@@ -255,7 +258,11 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
     ));
     xml.push_str(&format!(
         "<hh:strikeout shape=\"{}\" color=\"#000000\"/>",
-        if shape.strike { "SOLID" } else { "NONE" }
+        match (shape.strike, shape.strike_double) {
+            (false, _) => "NONE",
+            (true, false) => "SOLID",
+            (true, true) => "DOUBLE_SLIM",
+        }
     ));
     xml.push_str(concat!(
         "<hh:outline type=\"NONE\"/>",

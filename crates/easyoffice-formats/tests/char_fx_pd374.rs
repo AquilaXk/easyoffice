@@ -202,7 +202,12 @@ fn hwpx_and_pages_drop_them_and_pages_says_so() {
     ] {
         let bytes = UniversalFormatConverter::encode_rich(&doc, fmt, None).unwrap();
         let back = the_run(&decode(&bytes, name), "모두");
-        assert!(back.advanced.fx.is_none(), "{name}: {:?}", back.advanced.fx);
+        // HWPX keeps the double line (`DOUBLE_SLIM`), the rest is dropped; Pages drops all of it.
+        let kept = TextFx {
+            double_strike: name == "a.hwpx",
+            ..TextFx::default()
+        };
+        assert_eq!(back.advanced.fx, kept, "{name}");
     }
 }
 
