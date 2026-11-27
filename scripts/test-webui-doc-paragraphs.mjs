@@ -177,6 +177,11 @@ test("PD-365: 줄 간격 옵션… opens the 단락 dialog with the paragraph's 
   h.userClick(h.document.getElementById("btn-doc-paragraph-apply"));
   assert.equal(a.style.lineHeight, "2.00");
   assert.equal(a.dataset.eoLineKind, undefined);
+
+  h.host.__EASYOFFICE_DOC_LINE_SPACING__.writeSpecial(a, "between", 120);
+  await selectAcross(h, a, a);
+  pickLine(h, "options");
+  assert.deepEqual([kind.value, value.value], ["oneHalf", ""], "Word has no 줄 사이: the dialog shows the equal multiple");
 });
 
 test("PD-365: a decoded 최소·고정·줄 사이 paragraph keeps its kind through open and save, and hostile kinds are ignored", async () => {

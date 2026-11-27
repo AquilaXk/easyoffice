@@ -140,7 +140,9 @@
       });
     }
     return {
-      open(current) {
+      open(shown) {
+        // Word has no 줄 사이: the dialog shows the multiple that adds the same space to a 12 pt line (what a DOCX save writes).
+        const current = shown.kind === "between" ? { kind: "multiple", value: Math.min(1000, Math.round(100 + (shown.value * 100) / 240)) } : shown;
         const named = current.kind === "multiple" ? Object.keys(NAMED_MULTIPLES).find((k) => NAMED_MULTIPLES[k] === current.value) : null;
         kind.value = named || current.kind;
         value.value = named ? "" : amountOf(current.kind, current.value);
