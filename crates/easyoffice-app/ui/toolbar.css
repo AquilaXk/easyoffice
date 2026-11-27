@@ -144,12 +144,12 @@
 }
 #doc-style-bar.tb-scrollable .tb-scroll-track, #sheet-pivot-bar.tb-scrollable .tb-scroll-track {
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 #slide-toolbar.tb-scrollable .tb-scroll-track, #pdf-toolbar.tb-scrollable .tb-scroll-track,
 #base-toolbar.tb-scrollable .tb-scroll-track, #board-toolbar.tb-scrollable .tb-scroll-track {
   align-items: stretch;
-  gap: 6px;
+  gap: var(--space-3);
 }
 #slide-toolbar .sb-field-grid, #slide-toolbar #slide-meta-status,
 #pdf-toolbar .sb-field-grid, #base-toolbar .base-view-tabs {
@@ -164,7 +164,7 @@
 #pdf-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
 #base-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])),
 #board-toolbar.tb-scrollable:has(> .tb-scroll-nav-prev:not([hidden])) {
-  padding-left: 30px;
+  padding-left: calc(var(--control-height-sm) + var(--space-3)); /* nav button 24px + its 4px inset + 2px */
 }
 .tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
 #icon-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
@@ -175,7 +175,7 @@
 #pdf-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
 #base-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])),
 #board-toolbar.tb-scrollable:has(> .tb-scroll-nav-next:not([hidden])) {
-  padding-right: 30px;
+  padding-right: calc(var(--control-height-sm) + var(--space-3)); /* nav button 24px + its 4px inset + 2px */
 }
 
 .tb-scroll-nav:hover:not(:disabled) {
@@ -232,10 +232,10 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: var(--space-1);
   min-width: 44px;
   height: auto;
-  padding: 2px 4px;
+  padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-base);
 }
 
@@ -312,7 +312,7 @@
 :root[data-toolbar-labels="hidden"] #board-toolbar .tb-btn {
   min-width: var(--control-height-sm);
   min-height: var(--control-height-sm);
-  padding: 2px 5px;
+  padding: var(--space-1) var(--space-2);
 }
 
 /* The sprite has no marks icons: the reference draws them from characters (`.icon-ctrl-mark`, `.icon-para-mark`). */
@@ -420,7 +420,7 @@
   display: inline-flex;
   align-items: center;
   height: 100%;
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border-left: 1px solid var(--ui-border-light);
 }
 
@@ -641,7 +641,7 @@ input.sb-ls-select {
   max-width: min(420px, 90vw);
   max-height: 260px;
   overflow: auto;
-  padding: 2px;
+  padding: var(--space-1);
   border: 1px solid var(--color-border-dark);
   border-radius: var(--radius-sm);
   background: var(--color-surface-raised);
@@ -655,8 +655,8 @@ input.sb-ls-select {
 .custom-select-option {
   display: block;
   width: 100%;
-  min-height: 20px;
-  padding: 3px 20px 3px 7px;
+  min-height: var(--control-height-sm);
+  padding: var(--space-2) var(--space-10) var(--space-2) var(--space-4);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -682,7 +682,7 @@ input.sb-ls-select {
 }
 
 .custom-select-group {
-  padding: 5px 8px 2px;
+  padding: var(--space-3) var(--space-4) var(--space-1);
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -866,7 +866,7 @@ input.sb-ls-select {
   left: 0;
   top: 100%;
   z-index: 200;
-  padding: 4px;
+  padding: var(--space-2);
   border: 1px solid var(--ui-border-strong);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-light);
@@ -893,15 +893,15 @@ input.sb-ls-select {
 
 .sb-hl-palette-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
   margin-top: 2px;
-  padding: 4px 0 2px;
+  padding: var(--space-2) 0 var(--space-1);
   border-top: 1px solid var(--ui-border-light);
 }
 
 .sb-hl-palette-actions button {
   flex: 1;
-  padding: 2px 4px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--ui-border-strong);
   background: var(--color-surface);
   font-size: var(--font-size-sm);
@@ -944,7 +944,7 @@ input.sb-ls-select {
 .tb-hf-label {
   align-self: center;
   margin: 6px 8px;
-  padding: 5px 10px;
+  padding: var(--space-3) var(--space-5);
   border: 1px solid color-mix(in srgb, var(--focus-ring) 55%, var(--ui-border));
   border-radius: var(--radius-md);
   background: var(--ui-selected);
@@ -957,7 +957,7 @@ input.sb-ls-select {
 .tb-hf-label {
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 var(--space-6);
   font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--accent-strong);
@@ -1012,12 +1012,12 @@ input.sb-ls-select {
 .doc-image-handle[data-resize-dir="se"] { right: -5px; bottom: -5px; cursor: nwse-resize; }
 .doc-image-handle[data-resize-dir="e"] { right: -5px; top: calc(50% - 4px); cursor: ew-resize; }
 .doc-image-handle[data-resize-dir="s"] { left: calc(50% - 4px); bottom: -5px; cursor: ns-resize; }
-.sb-spacing-group { display: inline-flex; align-items: center; gap: 4px; }
+.sb-spacing-group { display: inline-flex; align-items: center; gap: var(--space-2); }
 .sb-spacing-label { font-size: var(--font-size-xs); color: var(--ui-text-secondary); white-space: nowrap; }
 .sb-spacing-input { box-sizing: border-box; width: 52px; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--ui-border-light); border-radius: var(--control-radius); background: var(--ui-surface); color: var(--ui-text); font-size: var(--control-font-size); text-align: right; }
 .sb-spacing-input:focus { outline: none; border-color: var(--focus-ring); }
 .slide-presenter-notes-input { width: 100%; min-height: 58px; resize: vertical; font: inherit; line-height: 1.45; }
-.slide-context-menu.context-menu[data-mode="canvas"] { min-width: 200px; display: block; padding: 4px 0; background: var(--color-surface); border: 1px solid var(--ui-border); box-shadow: var(--shadow-dropdown); }
+.slide-context-menu.context-menu[data-mode="canvas"] { min-width: 200px; display: block; padding: var(--space-2) 0; background: var(--color-surface); border: 1px solid var(--ui-border); box-shadow: var(--shadow-dropdown); }
 .slide-context-menu.context-menu[data-mode="canvas"] > #slide-ctx-thumb-group { display: none; }
 #slide-ctx-thumb-group { display: flex; flex-direction: column; gap: 2px; }
 #slide-ctx-thumb-group[hidden], #slide-ctx-canvas-group[hidden] { display: none; }

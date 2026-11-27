@@ -103,6 +103,18 @@ export const DRAWN_SIZES = new Map([
   ["#sheet-note-dialog .sheet-note-textarea", ["min-height"]],
   [".slide-chart-series-input", ["min-height"]],
   [".pages-insp-seg .eo-glyph-btn [data-icon], .pages-insp-seg .eo-glyph-btn svg", ["height"]],
+  // toolbar.css (PD-384): toolbar icons, the colour-bar sprite, palette swatches and the notes field's rows.
+  [".tb-sprite", ["height"]],
+  [".tb-icon-text", ["height", "line-height"]],
+  [".tb-icon-svg", ["height"]],
+  [".tb-icon-svg .eo-icon", ["height"]],
+  [".sb-ls-icon", ["height"]],
+  ['.sb-color-host > input[type="color"]', ["height"]],
+  [".tb-color-btn .tb-sprite", ["height"]],
+  [".sb-hl-palette-row", ["gap"]],
+  [".sb-hl-swatch", ["height"]],
+  [".eo-recent-colors .sb-hl-palette-row", ["min-height"]],
+  [".slide-presenter-notes-input", ["min-height"]],
 ]);
 
 /**
