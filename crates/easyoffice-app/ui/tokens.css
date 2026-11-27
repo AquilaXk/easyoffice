@@ -163,10 +163,10 @@
   --control-font-size: 12px;          /* font-size-75 */
   --control-padding-x: 9px;           /* component-edge-to-text-75 10px - border-width-100 1px */
   --control-border-width: 1px;        /* border-width-100 */
-  --control-radius: 8px;              /* corner-radius-100 */
-  --button-padding-x: 11px;           /* component-pill-edge-to-text-75 13px - button 테두리 2px */
-  --button-border-width: 2px;         /* border-width-200 */
-  --button-radius: calc(var(--control-height-sm) / 2);  /* 알약 모양: spectrum-Button border-radius = 높이 / 2 */
+  --control-radius: 2px;              /* 모서리는 앱의 2px (QA 2026-11-28, Spectrum S의 corner-radius-100 8px 대신) */
+  --button-padding-x: 12px;           /* component-pill-edge-to-text-75 13px - 테두리 1px (QA 2026-11-28: 단추 테두리는 앱의 1px) */
+  --button-border-width: 1px;         /* 앱의 1px (Spectrum S는 border-width-200 2px) */
+  --button-radius: 2px;               /* 앱의 2px (Spectrum S는 알약 모양) */
   --checkbox-size: 12px;              /* checkbox-control-size-small, radio-button-control-size-small */
   --checkbox-border-width: 2px;       /* border-width-200 */
   --checkbox-radius: 2px;             /* checkbox-control-corner-radius */

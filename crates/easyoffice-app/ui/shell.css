@@ -176,13 +176,13 @@
 .tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: var(--dialog-group-gap) 0; padding: var(--space-3) var(--space-4) var(--space-4); min-width: 0; }
 .tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 var(--space-2); }
 /* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
-/* The label column is as wide as the longest label (`스타일 모음(T):`, 5.8em; a wider font grows it), then the combo (150px), the value label, the value field (96px) and its unit. */
-.tool-dialog .dialog-grid { display: grid; grid-template-columns: minmax(5.8em, auto) 150px auto 96px auto; justify-content: start; align-items: center; gap: var(--dialog-row-gap) var(--dialog-gap); }
+/* The label column is as wide as the longest label (`스타일 모음(T):`, about 6.3em; a wider font grows it) and at least 6.4em in every group, so the combo boxes of the two groups start at the same left edge; then the combo (150px), the value label, the value field (96px) and its unit. */
+.tool-dialog .dialog-grid { display: grid; grid-template-columns: minmax(6.4em, auto) 150px auto 96px auto; justify-content: start; align-items: center; gap: var(--dialog-row-gap) var(--dialog-gap); }
 .tool-dialog .dialog-grid > .dialog-label { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: stretch; }
 .tool-dialog .dialog-grid .custom-select-trigger { width: 100%; box-sizing: border-box; }
 .tool-dialog .dialog-grid > .dialog-field { width: 100%; }
-.tool-dialog .dialog-grid-wide { grid-template-columns: minmax(5.8em, auto) 150px; }
+.tool-dialog .dialog-grid-wide { grid-template-columns: minmax(6.4em, auto) 150px; }
 .tool-dialog .dialog-inline-row .dialog-field { width: 96px; flex: none; }
 /* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
 #doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 68px; grid-template-areas: "fl sl zl" "ff sf zf" "el . ." "ef . ."; align-items: start; gap: var(--label-bottom-to-text) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
@@ -534,10 +534,11 @@
 .dialog-unit { font-size: var(--font-size-xs); color: var(--ui-text-secondary); }
 .page-setup-sections { display: flex; gap: 10px; }
 .page-setup-sections > .dialog-section { flex: 1; margin-bottom: 0; }
-.margin-grid { display: grid; grid-template-columns: 40px 72px auto 40px 72px auto; gap: 6px 6px; align-items: center; }
+/* The first label column is as wide as its longest label (the longer 제본용 여백 label of the word processor), so the 제본 row has the same label, field and unit columns as the rows above it. */
+.margin-grid { display: grid; grid-template-columns: minmax(40px, auto) 72px auto 40px 72px auto; gap: var(--dialog-row-gap) var(--space-3); align-items: center; }
 /* Each product shows its own page setup items (`doc-page-setup.js` `syncDialogLabels`); `hidden` wins over the row and grid display rules. */
 #doc-page-setup-dialog [hidden] { display: none !important; }
-#doc-ps-gutter-label { grid-column: 1 / span 2; white-space: nowrap; }
+#doc-ps-gutter-label { white-space: nowrap; }
 .dialog-icon-radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .icon-radio-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--ui-border-subtle); border-radius: 3px; cursor: pointer; background: var(--color-surface); min-width: 52px; }
 .icon-radio-card:hover { border-color: var(--accent-hover); background: var(--color-accent-bg-light); }

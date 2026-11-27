@@ -145,6 +145,18 @@ const dialogOf = (controls, clipped = []) => ({ dialogId: "x-dialog", controls, 
 const field = (name, row, top, height, fontSize = 12) => ({ name, row, top, height, fontSize });
 const tokens = { height: [24], font: [12] };
 
+test("layout guard: a unit label sits next to its field, and the units of one container share their distance (the page setup's 제본 row)", () => {
+  const unit = (name, parent, gap, dy = 0) => ({ name, parent, gap, dy });
+  const aligned = [unit("span.dialog-unit", 0, 6), unit("span.dialog-unit", 0, 6), unit("span#doc-ps-gutter-unit.dialog-unit", 0, 6), unit("span.dialog-unit", 1, 8)];
+  assert.deepEqual(analyzeDialog({ ...dialogOf([]), units: aligned }, tokens), []);
+  const drifted = [unit("span.dialog-unit", 0, 6), unit("span#doc-ps-gutter-unit.dialog-unit", 0, 52), unit("span#far.dialog-unit", 1, 8, 5)];
+  const found = analyzeDialog({ ...dialogOf([]), units: drifted }, tokens);
+  assert.deepEqual(found.map((v) => v.key), [
+    "x-dialog unit-gap span#doc-ps-gutter-unit.dialog-unit", "x-dialog unit-gap span#far.dialog-unit", "x-dialog unit-column span#doc-ps-gutter-unit.dialog-unit",
+  ]);
+  assert.match(found[0].message, /52px from its field/);
+});
+
 test("layout guard: a row of equal controls passes, mismatches name the dialog, the element and the numbers", () => {
   assert.deepEqual(analyzeDialog(dialogOf([field("input#a", 0, 100, 24), field("div.custom-select", 0, 100, 24), field("button.dialog-btn", 1, 140, 24, 12)]), tokens), []);
   const found = analyzeDialog(dialogOf([

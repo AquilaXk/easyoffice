@@ -6,6 +6,8 @@
 //   same-height / same-top   the controls of one row (`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) share one height and one top
 //   height                   a control is as tall as one of the `--control-height-*` tokens of tokens.css (the Spectrum S size table, PD-378)
 //   font                     a control's text is one of the `--control-font-size*` tokens
+//   unit-gap                 a unit label (`.dialog-unit`) after a control sits next to it (at most 16px away) on its middle line
+//   unit-column              the unit labels of one container (the margin grid of the page setup) are all the same distance from their control, so they share a left edge per column
 //   clip                     no box of the dialog holds more than it shows (`scrollWidth > clientWidth`, same for the height)
 //   class                    a control-like class (also one a script makes) is in the kit list or grandfathered
 import fs from "node:fs";
@@ -23,6 +25,7 @@ export const CONTROL_SELECTOR = [
   "button.dialog-btn", ".dialog-btn-group button",
 ].join(", ");
 const TOLERANCE_PX = 0.5;
+const MAX_UNIT_GAP_PX = 16;
 const NON_BOX_TAGS = ["INPUT", "TEXTAREA", "SELECT", "OPTION", "svg", "path"];
 
 /** The px values of `--<prefix>*` in tokens.css, ascending. */
@@ -55,6 +58,16 @@ export function collectDialog([dialogId, rowSelector, controlSelector, nonBoxTag
         top: rect.top, height: rect.height, fontSize: Number.parseFloat(getComputedStyle(textBox).fontSize),
       };
     });
+  // A unit label ("mm", "pt") is the next sibling of the field it belongs to: where it sits relative to that field, per container.
+  const parents = new Map();
+  const units = [...dialog.querySelectorAll(".dialog-unit")].filter(shown).flatMap((el) => {
+    const field = el.previousElementSibling;
+    if (!field || !field.matches(controlSelector) || !shown(field)) return [];
+    const a = field.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    if (!parents.has(el.parentElement)) parents.set(el.parentElement, parents.size);
+    return [{ name: name(el), parent: parents.get(el.parentElement), gap: b.left - a.right, dy: (b.top + b.bottom) / 2 - (a.top + a.bottom) / 2 }];
+  });
   // A box holds more than it shows when its own text is wider than it, or a visible descendant (not a 1px helper such as the
   // colour field's hidden input) reaches past its edge.
   const overflows = (el) => {
@@ -74,7 +87,7 @@ export function collectDialog([dialogId, rowSelector, controlSelector, nonBoxTag
     .filter(overflows)
     .map((el) => ({ name: name(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
   const classes = [...new Set([...dialog.querySelectorAll("*")].flatMap((el) => [...el.classList]))];
-  return { dialogId, controls, clipped, classes };
+  return { dialogId, controls, units, clipped, classes };
 }
 
 /** Collects one open dialog of `page`. */
@@ -108,6 +121,16 @@ export function analyzeDialog(raw, tokens = { height: tokenSizes("control-height
     for (const c of list.slice(1)) {
       if (!near(c.height, first.height)) add("same-height", c.name, `row ${row}: ${fmt(c.height)}px beside ${first.name} ${fmt(first.height)}px`);
       else if (!near(c.top, first.top)) add("same-top", c.name, `row ${row}: top ${fmt(c.top)} beside ${first.name} top ${fmt(first.top)}`);
+    }
+  }
+  for (const u of raw.units ?? []) {
+    if (u.gap < 0 || u.gap > MAX_UNIT_GAP_PX || Math.abs(u.dy) > TOLERANCE_PX * 2) add("unit-gap", u.name, `${fmt(u.gap)}px from its field, ${fmt(u.dy)}px off the field's middle line (at most ${MAX_UNIT_GAP_PX}px and 1px)`);
+  }
+  const byParent = new Map();
+  for (const u of raw.units ?? []) byParent.set(u.parent, [...(byParent.get(u.parent) ?? []), u]);
+  for (const list of byParent.values()) {
+    for (const u of list.slice(1)) {
+      if (!near(u.gap, list[0].gap)) add("unit-column", u.name, `${fmt(u.gap)}px from its field beside ${list[0].name} ${fmt(list[0].gap)}px`);
     }
   }
   for (const el of clipped) add("clip", el.name, `content ${el.scrollWidth}x${el.scrollHeight} in a ${el.clientWidth}x${el.clientHeight} box`);
