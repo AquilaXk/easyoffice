@@ -334,6 +334,101 @@ fn a_move_with_a_wrong_new_order_closes_only_the_span_of_the_moved_end() {
     assert_eq!(got, vec![("Sum!A1".to_string(), "=SUM(#REF!)".to_string())]);
 }
 
+/// `fmt` saved from the structured `sheets` (a JSON array) and decoded again: the JSON the file opens as.
+fn saved_and_reopened(fmt: &str, sheets: &str) -> String {
+    let save = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(
+            r#"{{"sourceFormat":"xlsx","targetFormat":"{fmt}","forSave":true,"sheets":{sheets}}}"#
+        ),
+    )
+    .unwrap();
+    let marker = "\"convertedBase64\":\"";
+    let start = save.find(marker).unwrap() + marker.len();
+    let b64 = &save[start..start + save[start..].find('"').unwrap()];
+    EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(r#"{{"action":"decode","fileName":"book.{fmt}","sourceBase64":"{b64}"}}"#),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_moved_span_end_survives_a_save_and_a_reopen_in_the_new_tab_order() {
+    // Sheet2:Sheet6 with Sheet2 moved after Sheet6 (the reference app's help page example).
+    let tabs = [
+        "Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sum",
+    ];
+    let id = open_with(&tabs, &[("Sum!A1", "=SUM(Sheet2:Sheet6!A1)")]);
+    let after = [
+        "Sheet1", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet2", "Sum",
+    ];
+    let order: Vec<String> = after.iter().map(|n| format!("\"{n}\"")).collect();
+    let rewritten = texts(&call(&moved(&id, r#""Sheet2""#, &order.join(","))));
+    assert_eq!(
+        rewritten,
+        vec![("Sum!A1".to_string(), "=SUM(Sheet3:Sheet6!A1)".to_string())]
+    );
+    // The page saves the sheets in the new order with the rewritten formula.
+    let sheets: Vec<String> = after
+        .iter()
+        .map(|name| match *name {
+            "Sum" => format!(
+                r#"{{"name":"Sum","cells":[{{"ref":"A1","raw":"{}"}}]}}"#,
+                rewritten[0].1
+            ),
+            n => format!(
+                r#"{{"name":"{n}","cells":[{{"ref":"A1","raw":"{}"}}]}}"#,
+                n.trim_start_matches("Sheet")
+            ),
+        })
+        .collect();
+    for fmt in ["xlsx", "ods", "xls"] {
+        let reopened = saved_and_reopened(fmt, &format!("[{}]", sheets.join(",")));
+        let at: Vec<usize> = after
+            .iter()
+            .map(|n| {
+                reopened
+                    .find(&format!("\"name\":\"{n}\""))
+                    .unwrap_or(usize::MAX)
+            })
+            .collect();
+        assert!(
+            at.windows(2).all(|w| w[0] < w[1]),
+            "{fmt} order {at:?}: {reopened}"
+        );
+        if fmt == "xls" {
+            // The binary format opens with the result the formula had when it was saved: 3 + 4 + 5 + 6.
+            assert!(
+                reopened.contains(r#"{"ref":"A1","raw":"18"}"#),
+                "{fmt}: {reopened}"
+            );
+        } else {
+            assert!(
+                reopened.contains("=SUM(Sheet3:Sheet6!A1)"),
+                "{fmt}: {reopened}"
+            );
+        }
+    }
+    // Opened in that order, the span sums Sheet3 to Sheet6 and leaves Sheet2 out: Sheet3 set to 10 gives 10 + 4 + 5 + 6.
+    let session = open_with(
+        &after,
+        &[
+            ("Sheet3!A1", "3"),
+            ("Sheet4!A1", "4"),
+            ("Sheet5!A1", "5"),
+            ("Sheet6!A1", "6"),
+            ("Sheet2!A1", "2"),
+            ("Sum!A1", "=SUM(Sheet3:Sheet6!A1)"),
+        ],
+    );
+    let sum = call(&format!(
+        "{{\"sessionAction\":\"apply\",\"session\":\"{session}\",\"changes\":[{{\"sheet\":\"Sheet3\",\"cell\":\"A1\",\"value\":\"10\"}}]}}"
+    ));
+    let json = sum.to_json_string();
+    assert!(json.contains("\"value\":\"25\""), "{json}");
+}
+
 #[test]
 fn hostile_move_requests_change_nothing() {
     let id = open_with(&["S", "T"], &[("T!A1", "=SUM(S:T!A1)")]);
