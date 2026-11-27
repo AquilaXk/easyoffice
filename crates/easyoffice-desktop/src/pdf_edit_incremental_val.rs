@@ -488,6 +488,10 @@ impl<'a> ChunkCursor<'a> {
                 {
                     self.pos += 1;
                 }
+                // A stray delimiter (`)`, `>`, `}`) starts no value; the callers loop until their end word.
+                if self.pos == tok_start {
+                    return Err("생성된 PDF 객체 구문을 확인할 수 없습니다.".to_string());
+                }
                 if self.bytes[tok_start..self.pos]
                     .iter()
                     .all(u8::is_ascii_digit)
@@ -640,5 +644,55 @@ impl<'a> ChunkCursor<'a> {
         }
         self.pos = after_num;
         Some(val)
+    }
+}
+
+#[cfg(test)]
+mod chunk_cursor_tests {
+    use super::ChunkCursor;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Scans `body` as the inside of an indirect object on a thread, so a scan that never ends fails
+    /// the test after a wait instead of hanging it.
+    fn scan_body(body: &'static [u8]) -> Option<Result<(), String>> {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut cursor = ChunkCursor {
+                bytes: body,
+                pos: 0,
+            };
+            let _ = sender.send(cursor.skip_indirect_body());
+        });
+        receiver.recv_timeout(Duration::from_secs(2)).ok()
+    }
+
+    #[test]
+    fn a_value_that_cannot_advance_is_an_error_not_a_loop() {
+        for body in [
+            &b" ) endobj"[..],
+            b" > endobj",
+            b" } endobj",
+            b" << /Key ) >> endobj",
+            b" [ 1 ) ] endobj",
+            b" << /A [ << /B > ] >> >> endobj",
+        ] {
+            let answer = scan_body(body).unwrap_or_else(|| {
+                panic!("the scan of {:?} did not end", String::from_utf8_lossy(body))
+            });
+            assert!(answer.is_err(), "{:?}", String::from_utf8_lossy(body));
+        }
+    }
+
+    #[test]
+    fn well_formed_bodies_still_scan() {
+        for body in [
+            &b" << /Type /Page /Kids [ 1 0 R 2 0 R ] /S (a\\)b) /H <4142> >> endobj"[..],
+            b" 12 endobj",
+            b" [ ] endobj",
+            b" << /Length 3 >> stream\nabc\nendstream endobj",
+        ] {
+            assert_eq!(scan_body(body), Some(Ok(())), "{:?}", String::from_utf8_lossy(body));
+        }
     }
 }
