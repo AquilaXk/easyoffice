@@ -571,7 +571,7 @@
         const bd = readBorderRow();
         if (bd === undefined) return { error: "테두리를 그릴 변을 하나 이상 고르세요." };
         if (bd) rule.bd = { ...bd };
-        if (!rule.bg && !rule.fg && !rule.fl && !rule.bd) return { error: "배경, 글자 색, 글꼴, 테두리 중 하나는 정해야 합니다." };
+        if (!rule.bg && !rule.fg && !rule.fl && !rule.bd) return { error: "채우기, 글꼴 색, 글꼴, 테두리 중 하나는 정해야 합니다." };
       }
       return { rule };
     }

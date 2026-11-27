@@ -417,7 +417,7 @@ test("an incomplete conditional formatting rule is explained, not stored", async
   field(document, "sheet-cf-fg-on", false);
   userClick(document.getElementById("btn-sheet-cf-apply"));
   await flushAsyncTurns();
-  assert.match(document.getElementById("sheet-cf-status").textContent, /배경, 글자 색, 글꼴/);
+  assert.match(document.getElementById("sheet-cf-status").textContent, /채우기, 글꼴 색, 글꼴/);
   assert.equal(rules.hasAny(), false);
 });
 
@@ -624,7 +624,7 @@ test("colour fields use the shell's palette popup and no visible native colour i
 
 // ---- which rows a rule kind shows ------------------------------------------------------------
 
-const STYLE_ROWS = ["배경", "글자", "글꼴", "테두리", "테두리 변"];
+const STYLE_ROWS = ["채우기", "글꼴 색", "글꼴", "테두리", "테두리 변"];
 const CF_VISIBLE = {
   cellIs: ["조건", ...STYLE_ROWS],
   text: ["텍스트", ...STYLE_ROWS],
