@@ -76,6 +76,7 @@ struct CharState {
     highlight: Option<usize>,
     script: RichScript,
     spacing: Option<i16>,
+    advanced: crate::CharAdvanced,
 }
 
 #[derive(Clone)]
@@ -279,6 +280,7 @@ impl Reader {
             highlight: color_at(st.highlight),
             script: st.script,
             letter_spacing_twips: st.spacing,
+            advanced: st.advanced,
         }
     }
 
@@ -382,16 +384,8 @@ impl Reader {
             let mut merged: Vec<RichRun> = Vec::new();
             for r in runs {
                 let fmt = CharFmt {
-                    bold: r.bold,
-                    italic: r.italic,
-                    underline: r.underline,
-                    strike: r.strike,
                     size_half_pt: r.size_half_pt.filter(|s| Some(*s) != inherited),
-                    font: r.font,
-                    color: r.color,
-                    highlight: r.highlight,
-                    script: r.script,
-                    letter_spacing_twips: r.letter_spacing_twips,
+                    ..CharFmt::from(&r)
                 };
                 push_run(&mut merged, &r.text, &fmt);
             }
@@ -719,7 +713,7 @@ impl Reader {
                 st.highlight = param.and_then(|v| usize::try_from(v).ok());
             }
             "plain" => *st = CharState::default(),
-            _ => {}
+            _ => st.advanced.apply_rtf_word(word, param),
         }
     }
 

@@ -229,6 +229,7 @@ pub(super) fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_
                 .and_then(|v| v.trim().parse::<i64>().ok())
                 .and_then(letter_spacing);
         }
+        "w:w" | "w:kern" | "w:position" => fmt.advanced.apply_docx_property(name, val),
         "w:color" => fmt.color = val.and_then(normalize_hex_color),
         "w:highlight" => fmt.highlight = val.and_then(highlight_name_to_hex),
         "w:vertAlign" => {

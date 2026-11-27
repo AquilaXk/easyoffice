@@ -170,6 +170,7 @@ pub struct RichRun {
     pub script: RichScript,
     /// Space added after each character, in twips (negative tightens, see [`crate::letter_spacing`]); `None` inherits.
     pub letter_spacing_twips: Option<i16>,
+    pub advanced: crate::CharAdvanced,
     /// Hyperlink target the run belongs to (a [`safe_link_target`] address). The DOCX, ODT, HWPX and Pages
     /// writers emit external targets (`#_Toc<N>` internal anchors are counted by `pages_write_loss` in Pages).
     pub link: Option<String>,

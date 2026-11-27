@@ -79,6 +79,7 @@ pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
         if let Some(spacing) = r.letter_spacing_twips {
             let _ = write!(out, ",\"letterSpacingTwips\":{spacing}");
         }
+        r.advanced.write_json(out);
         match r.field {
             Some(RichField::PageNumber) => out.push_str(",\"field\":\"page\""),
             Some(RichField::TotalPages) => out.push_str(",\"field\":\"pages\""),
@@ -981,6 +982,8 @@ impl EasyOfficeIpcRouter {
     }
 }
 
+#[cfg(test)]
+mod char_advanced_tests;
 #[cfg(test)]
 mod font_face_tests;
 #[cfg(test)]

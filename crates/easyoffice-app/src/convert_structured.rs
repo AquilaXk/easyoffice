@@ -16,14 +16,15 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    check_document_images, clean_font_name, code_within_bounds, font_face, frame_paragraph,
-    letter_spacing, normalize_hex_color, safe_link_target, CellStyle, DefaultFont, EasyOfficeError,
-    FontTable, ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment,
-    RichBlock, RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
+    char_kerning, char_position, char_scale, check_document_images, clean_font_name,
+    code_within_bounds, font_face, frame_paragraph, letter_spacing, normalize_hex_color,
+    safe_link_target, CellStyle, CharAdvanced, DefaultFont, EasyOfficeError, FontTable,
+    ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
+    RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
     RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_LETTER_SPACING_TWIPS, MAX_NUM_FMTS,
-    MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
-    MIN_COLUMN_PX, MIN_SIZE_PT,
+    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_KERNING_HALF_PT, MAX_LETTER_SPACING_TWIPS, MAX_NUM_FMTS,
+    MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_POSITION_HALF_PT, MAX_SCALE_PERCENT,
+    MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -396,6 +397,7 @@ pub(crate) fn parse_runs(
                     i64::from(MAX_LETTER_SPACING_TWIPS),
                 )?
                 .and_then(letter_spacing),
+                advanced: opt_advanced(run)?,
                 note_ref,
                 comment_id,
                 revision,
@@ -570,6 +572,20 @@ pub(crate) fn opt_bounded(
             _ => Err(invalid(format!("구조화 저장: '{key}'는 숫자여야 합니다."))),
         })
         .transpose()
+}
+
+/// Width scale, raised or lowered position and kerning threshold of a run (PD-372). Each key is an integer
+/// inside the model's bounds or absent; a value outside them rejects the save.
+fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
+    let max_position = i64::from(MAX_POSITION_HALF_PT);
+    Ok(CharAdvanced {
+        scale_percent: opt_bounded(run, "scalePercent", 1, i64::from(MAX_SCALE_PERCENT))?
+            .and_then(char_scale),
+        position_half_pt: opt_bounded(run, "positionHalfPt", -max_position, max_position)?
+            .and_then(char_position),
+        kerning_half_pt: opt_bounded(run, "kerningHalfPt", 1, i64::from(MAX_KERNING_HALF_PT))?
+            .and_then(char_kerning),
+    })
 }
 
 /// Run position: `"superscript"`, `"subscript"` or absent.

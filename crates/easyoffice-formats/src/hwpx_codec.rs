@@ -289,6 +289,10 @@ impl ShapeTables {
             });
             for run in visible {
                 let font = run.font.as_ref().map_or(0, |f| self.font_index(f));
+                let size = run
+                    .size_half_pt
+                    .or_else(|| u16::try_from(base.height / 50).ok());
+                let (ratio_percent, offset_percent, kerning) = run.advanced.hwpx_values(size);
                 let shape = HwpxCharShape {
                     bold: base.bold || run.bold,
                     italic: run.italic,
@@ -300,6 +304,9 @@ impl ShapeTables {
                     shade_color: run.highlight.as_deref().and_then(hex_rgb),
                     script: run.script,
                     spacing_percent: hwpx_spacing_percent(run, base.height),
+                    ratio_percent,
+                    offset_percent,
+                    kerning,
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
                 if let Some(key) = run.note_ref {

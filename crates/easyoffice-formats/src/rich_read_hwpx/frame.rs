@@ -217,6 +217,7 @@ impl SectionWalker {
                 highlight: fmt.highlight,
                 script: fmt.script,
                 letter_spacing_twips: fmt.letter_spacing_twips,
+                advanced: fmt.advanced,
                 field: Some(field),
                 ..RichRun::default()
             });

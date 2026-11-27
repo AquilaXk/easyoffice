@@ -262,6 +262,7 @@ fn rtf_paragraph_line(
                 highlight: run.highlight.clone(),
                 script: RichScript::Superscript,
                 letter_spacing_twips: run.letter_spacing_twips,
+                advanced: run.advanced,
                 ..RichRun::default()
             };
             push_rtf_run(&mut line, &note_run, tables, &base);

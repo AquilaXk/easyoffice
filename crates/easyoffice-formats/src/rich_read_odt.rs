@@ -15,6 +15,7 @@ use self::table::{read_frame, OdtTableState, OdtTableStylesMap};
 use crate::decode_budget::DecodeBudget;
 use crate::letter_spacing;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries_for};
+use crate::rich_char_adv::odt_plain_position;
 use crate::rich_document::{
     normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc, MAX_PARA_SPACING_TWIPS,
 };
@@ -26,9 +27,9 @@ use crate::rich_table::{
 use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    DocumentFormat, EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns, RichDocument,
-    RichField, RichImage, RichLineSpacing, RichListKind, RichParagraph, RichRun, RichScript,
-    ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    CharAdvanced, DocumentFormat, EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns,
+    RichDocument, RichField, RichImage, RichLineSpacing, RichListKind, RichParagraph, RichRun,
+    RichScript, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 const EMU_PER_INCH: f64 = 914_400.0;
@@ -127,6 +128,9 @@ fn off(value: Option<&str>) -> bool {
 /// `14pt`/`9.5pt` to half-points; other units are ignored.
 /// `style:text-position` such as `super 58%`, `sub 58%` or `33% 58%` (positive raise = super).
 fn script_of(position: Option<&str>) -> RichScript {
+    if position.and_then(odt_plain_position).is_some() {
+        return RichScript::Normal;
+    }
     let first = position
         .and_then(|p| p.split_whitespace().next())
         .unwrap_or("");
@@ -151,7 +155,7 @@ fn parse_points(value: &str) -> Option<u16> {
 
 /// Character format described by a `style:text-properties` element.
 fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
-    CharFmt {
+    let mut fmt = CharFmt {
         bold: attr(attrs, "fo:font-weight")
             .is_some_and(|w| w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)),
         italic: attr(attrs, "fo:font-style").is_some_and(|s| s == "italic" || s == "oblique"),
@@ -183,7 +187,10 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
             .as_deref()
             .and_then(length_twips)
             .and_then(|t| letter_spacing(i64::from(t))),
-    }
+        advanced: CharAdvanced::default(),
+    };
+    fmt.advanced = CharAdvanced::from_odt(attrs, fmt.size_half_pt);
+    fmt
 }
 
 /// Alignment, list marker margin, indents and line spacing of `style:paragraph-properties`.
@@ -447,6 +454,7 @@ fn merge_span_fmt(cur: CharFmt, add: CharFmt) -> CharFmt {
             add.script
         },
         letter_spacing_twips: add.letter_spacing_twips.or(cur.letter_spacing_twips),
+        advanced: add.advanced.or(cur.advanced),
     }
 }
 
@@ -654,6 +662,7 @@ impl<'a> OdtWalker<'a> {
                 highlight: fmt.highlight,
                 script: fmt.script,
                 letter_spacing_twips: fmt.letter_spacing_twips,
+                advanced: fmt.advanced,
                 field: Some(field),
                 ..RichRun::default()
             });

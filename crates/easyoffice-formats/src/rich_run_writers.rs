@@ -4,7 +4,7 @@
 
 use crate::rich_defaults::RichDefaults;
 use crate::rich_document::hex_to_highlight_name;
-use crate::{RichRun, RichScript, RtfCodec, XmlSanitizer};
+use crate::{CharAdvanced, RichRun, RichScript, RtfCodec, XmlSanitizer};
 
 /// The `\f0` face of an RTF file whose defaults name no typeface.
 const RTF_FALLBACK_FONT: &str = "Times New Roman";
@@ -37,6 +37,7 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
     if let Some(spacing) = run.letter_spacing_twips {
         xml.push_str(&format!("<w:spacing w:val=\"{spacing}\"/>"));
     }
+    xml.push_str(&run.advanced.docx_xml());
     if let Some(size) = run.size_half_pt {
         xml.push_str(&format!(
             "<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/>"
@@ -76,6 +77,7 @@ pub(crate) type OdtTextKey = (
     Option<String>,
     RichScript,
     Option<i16>,
+    CharAdvanced,
 );
 
 pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
@@ -87,6 +89,7 @@ pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
         run.highlight.clone(),
         run.script,
         run.letter_spacing_twips,
+        run.advanced,
     )
 }
 
@@ -98,6 +101,7 @@ pub(crate) fn odt_text_key_is_plain(key: &OdtTextKey) -> bool {
         && key.4.is_none()
         && key.5 == RichScript::Normal
         && key.6.is_none()
+        && key.7.is_none()
 }
 
 fn odt_points(half_pt: u16) -> String {
@@ -110,7 +114,8 @@ fn odt_points(half_pt: u16) -> String {
 
 /// `<style:style family="text">` for the `index`-th (1-based) automatic text style.
 pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
-    let ((bold, italic, underline, strike), size, font, color, highlight, script, spacing) = key;
+    let ((bold, italic, underline, strike), size, font, color, highlight, script, spacing, adv) =
+        key;
     let mut xml = format!(
         "<style:style style:name=\"T{index}\" style:family=\"text\"><style:text-properties"
     );
@@ -147,6 +152,7 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
             crate::rich_writers::odt_twips_to_pt(i64::from(*spacing))
         ));
     }
+    xml.push_str(&adv.odt_attrs(*size, *script == RichScript::Normal));
     match script {
         RichScript::Normal => {}
         RichScript::Superscript => xml.push_str(" style:text-position=\"super 58%\""),
@@ -267,6 +273,7 @@ impl RtfRunTables {
         if let Some(spacing) = run.letter_spacing_twips {
             out.push_str(&format!("\\expndtw{spacing} "));
         }
+        out.push_str(&run.advanced.rtf_words());
         if let Some(color) = &run.color {
             if let Some(&idx) = self.color_map.get(color) {
                 out.push_str(&format!("\\cf{idx} "));
@@ -284,6 +291,7 @@ impl RtfRunTables {
 pub(crate) fn has_extra_run_format(run: &RichRun) -> bool {
     run.size_half_pt.is_some()
         || run.letter_spacing_twips.is_some()
+        || !run.advanced.is_none()
         || run.font.is_some()
         || run.color.is_some()
         || run.highlight.is_some()

@@ -143,6 +143,12 @@ pub(crate) struct HwpxCharShape {
     pub script: RichScript,
     /// Character spacing (`hh:spacing`) in percent of the font size.
     pub spacing_percent: i8,
+    /// Character width ratio (`hh:ratio`) in percent, 10 to 200.
+    pub ratio_percent: u16,
+    /// Relative position (`hh:offset`) in percent of the font size, -100 to 100.
+    pub offset_percent: i8,
+    /// Pair kerning (`useKerning`).
+    pub kerning: bool,
 }
 
 impl Default for HwpxCharShape {
@@ -158,6 +164,9 @@ impl Default for HwpxCharShape {
             shade_color: None,
             script: RichScript::Normal,
             spacing_percent: 0,
+            ratio_percent: 100,
+            offset_percent: 0,
+            kerning: false,
         }
     }
 }
@@ -208,21 +217,28 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
         .shade_color
         .map_or_else(|| "none".to_string(), |c| format!("#{c:06X}"));
     let mut xml = format!(
-        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#{:06X}\" shadeColor=\"{shade}\" useFontSpace=\"0\" useKerning=\"0\" symMark=\"NONE\" borderFillIDRef=\"1\">",
+        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#{:06X}\" shadeColor=\"{shade}\" useFontSpace=\"0\" useKerning=\"{}\" symMark=\"NONE\" borderFillIDRef=\"1\">",
         shape.height,
-        shape.text_color.unwrap_or(0)
+        shape.text_color.unwrap_or(0),
+        u8::from(shape.kerning)
     );
     xml.push_str(&format!(
         "<hh:fontRef {}/>",
         per_lang_attrs(&shape.font.to_string())
     ));
-    xml.push_str(&format!("<hh:ratio {}/>", per_lang_attrs("100")));
+    xml.push_str(&format!(
+        "<hh:ratio {}/>",
+        per_lang_attrs(&shape.ratio_percent.to_string())
+    ));
     xml.push_str(&format!(
         "<hh:spacing {}/>",
         per_lang_attrs(&shape.spacing_percent.to_string())
     ));
     xml.push_str(&format!("<hh:relSz {}/>", per_lang_attrs("100")));
-    xml.push_str(&format!("<hh:offset {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!(
+        "<hh:offset {}/>",
+        per_lang_attrs(&shape.offset_percent.to_string())
+    ));
     if shape.italic {
         xml.push_str("<hh:italic/>");
     }

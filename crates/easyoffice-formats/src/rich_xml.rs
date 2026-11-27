@@ -40,6 +40,26 @@ pub(crate) struct CharFmt {
     pub highlight: Option<String>,
     pub script: RichScript,
     pub letter_spacing_twips: Option<i16>,
+    pub advanced: crate::CharAdvanced,
+}
+
+impl From<&RichRun> for CharFmt {
+    /// The character format of a run, to merge it back through [`push_run`].
+    fn from(run: &RichRun) -> Self {
+        Self {
+            bold: run.bold,
+            italic: run.italic,
+            underline: run.underline,
+            strike: run.strike,
+            size_half_pt: run.size_half_pt,
+            font: run.font.clone(),
+            color: run.color.clone(),
+            highlight: run.highlight.clone(),
+            script: run.script,
+            letter_spacing_twips: run.letter_spacing_twips,
+            advanced: run.advanced,
+        }
+    }
 }
 
 impl CharFmt {
@@ -75,6 +95,7 @@ impl CharFmt {
             && self.color == run.color
             && self.highlight == run.highlight
             && self.letter_spacing_twips == run.letter_spacing_twips
+            && self.advanced == run.advanced
     }
 }
 
@@ -133,6 +154,7 @@ pub(crate) fn push_annotated_run(
         highlight: fmt.highlight.clone(),
         script: fmt.script,
         letter_spacing_twips: fmt.letter_spacing_twips,
+        advanced: fmt.advanced,
         note_ref: None,
         comment_id,
         revision: revision.cloned(),

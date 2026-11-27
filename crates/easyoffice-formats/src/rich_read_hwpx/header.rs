@@ -12,7 +12,7 @@ use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::CharFmt;
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
-use crate::{EasyOfficeError, RichLineSpacing, RichScript};
+use crate::{CharAdvanced, EasyOfficeError, RichLineSpacing, RichScript};
 
 #[derive(Default, Clone)]
 pub(super) struct ParaShape {
@@ -78,8 +78,17 @@ fn char_fmt_from_attrs(attrs: &Attrs<'_>) -> CharFmt {
         highlight: attr(attrs, "shadeColor")
             .as_deref()
             .and_then(normalize_hex_color),
+        advanced: CharAdvanced {
+            kerning_half_pt: CharAdvanced::hwpx_kerning(attr(attrs, "useKerning").as_deref()),
+            ..CharAdvanced::default()
+        },
         ..CharFmt::default()
     }
+}
+
+/// The percent in the Hangul slot of a per-language element (`hh:ratio`, `hh:offset`, `hh:spacing`).
+fn hangul_percent(attrs: &Attrs<'_>) -> Option<i64> {
+    attr(attrs, "hangul").and_then(|v| v.trim().parse().ok())
 }
 
 /// Parsing state while reading `Contents/header.xml`.
@@ -136,7 +145,7 @@ impl HeaderBuilder {
             }
             "hh:spacing" => {
                 // Percent of the font size in the Hangul slot (the writer repeats it in every slot).
-                let percent = attr(attrs, "hangul").and_then(|v| v.trim().parse::<i64>().ok());
+                let percent = hangul_percent(attrs);
                 if let Some(f) = self.char_fmt_mut() {
                     f.letter_spacing_twips = percent.and_then(|p| {
                         from_permille(
@@ -144,6 +153,19 @@ impl HeaderBuilder {
                             f.size_half_pt,
                         )
                     });
+                }
+            }
+            "hh:ratio" => {
+                let percent = hangul_percent(attrs);
+                if let Some(f) = self.char_fmt_mut() {
+                    f.advanced.scale_percent = CharAdvanced::hwpx_scale(percent);
+                }
+            }
+            "hh:offset" => {
+                let percent = hangul_percent(attrs);
+                if let Some(f) = self.char_fmt_mut() {
+                    f.advanced.position_half_pt =
+                        CharAdvanced::hwpx_position(percent, f.size_half_pt);
                 }
             }
             "hh:bold" => {
