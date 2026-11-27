@@ -143,12 +143,18 @@
       return;
     }
 
-    const targetIdx = existing.findIndex((t) =>
-      (op.tableName && t.name.toLowerCase() === String(op.tableName).toLowerCase())
-      || (op.range && t.range.toUpperCase() === String(op.range).toUpperCase()),
-    );
-    const idx = targetIdx >= 0 ? targetIdx : (existing.length > 0 ? 0 : -1);
-    if (idx < 0) throw new Error("대상 시트 표를 찾을 수 없습니다.");
+    // The name picks the table, else the range does; one that was asked for and is not there fails and is never
+    // swapped for another table. An operation with neither acts on the sheet's first table.
+    const named = op.tableName ? String(op.tableName).toLowerCase() : "";
+    const ranged = op.range ? String(op.range).toUpperCase() : "";
+    const idx = named
+      ? existing.findIndex((t) => t.name.toLowerCase() === named)
+      : ranged
+        ? existing.findIndex((t) => t.range.toUpperCase() === ranged)
+        : (existing.length > 0 ? 0 : -1);
+    if (idx < 0) {
+      throw new Error("대상 시트 표를 찾을 수 없습니다" + (named || ranged ? ": " + String(op.tableName || op.range) : "."));
+    }
     const target = existing[idx];
 
     if (action === "style" && op.style) {
