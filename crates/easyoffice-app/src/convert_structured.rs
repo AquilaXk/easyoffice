@@ -237,6 +237,9 @@ pub(crate) fn parse_structured_content(
             notes,
             comments,
             track_changes,
+            // The editor payload carries no document defaults yet (PD-361), so a save from it is
+            // written with the new-document defaults.
+            defaults: None,
         };
         check_document_images(&doc)?;
         let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);
