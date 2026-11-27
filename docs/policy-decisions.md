@@ -6433,3 +6433,44 @@
 - **Alternatives rejected** (1) `line_spacing_percent`를 두고 종류 필드를 따로 추가: 두 값이 어긋나는 상태가 가능하고 컴파일러가 놓친 호출부를 알려 주지 못한다. (2) 줄 사이를 DOCX에서 `atLeast`로 쓰기: 글자가 큰 줄에서 의미가 달라진다. (3) `RichDefaults`까지 종류를 넓히기: 문서 기본값 보존(`PD-363`)과 다른 범위다.
 - **Verified by** `crates/easyoffice-formats/tests/line_spacing_kinds_pd366.rs`(네 종류의 포맷별 왕복, 포맷별 규칙 낱말, 변조 DOCX·ODT·RTF 값), `rich_line_spacing.rs`·`line_spacing_json.rs` 단위 시험(경계와 거부), `doc_fidelity_pd328.rs`·`hwpx_pages_ppt_pd332.rs`·`pages_reader.rs`(바뀐 읽기 규칙), `scripts/test-webui-doc-paragraphs.mjs`·`scripts/test-webui-family-look-pd361.mjs`(목록·`단락` 대화상자·사이드바), 실제 WebKit DOM 시험.
 - **Revisit when** `RichDefaults`가 줄 간격 종류를 가질 때, 모델이 글자 크기별 줄 높이를 가질 때(줄 사이 환산 개선), 실제 Pages로 만든 길이 모드 문서를 구했을 때.
+
+## PD-367 — 글자 간격(자간)을 모델에 두고 DOCX·ODT·RTF·HWPX·Pages와 화면에 연결, Pages 단락 앞뒤 간격 기록 (2026-11-27)
+
+- **Status** Implemented. Pages 필드 번호는 공개 `.proto`와 참조 구현의 필드 표로 확인했다(3항).
+- **Context** `PD-366`에 이어 `PD-362` 5항의 페이지 앱 포맷 사이드바에서 엔진이 다루지 못해 뺀 `서체` 섹션의 문자 간격을 넣는다. Pages 한국어 지원 문서 「Mac용 Pages에서 문자 간격 조절하기」(`https://support.apple.com/ko-kr/guide/pages/tanc87eaca89/mac`, 2026-11-27 확인)는 포맷 사이드바 `스타일`의 `서체` 섹션에서 문자 간격 값을 바꾸고, 기본 간격은 0이며 값을 늘리면 넓어지고 줄이면 좁아진다고 적는다. 단위는 문서에 적혀 있지 않다. 같은 점검에서 Pages 쓰기가 단락 앞뒤 간격(`space_before`·`space_after`)을 손실로 세고 쓰지 않는 것도 확인했다.
+- **Decision (`PD-367`)**
+  1. **모델(`rich_char_spacing.rs`)**: `RichRun::letter_spacing_twips: Option<i16>`, 글자마다 뒤에 더하는 간격(twips, 음수는 좁힘). ±31,680 twips(1,584pt, 글꼴 대화상자 상한)로 자르고 0은 지정 없음이다. DOCX·ODT·RTF가 절대 길이로 가지므로 모델도 절대 길이로 두었다.
+  2. **포맷별 대응**
+
+     | | 단위 | 읽기 | 쓰기 |
+     |---|---|---|---|
+     | DOCX | twips | `w:rPr/w:spacing/@w:val` | 같은 요소(`w:color`와 `w:sz` 사이) |
+     | ODT | 길이 | `fo:letter-spacing`(길이만, `normal`은 지정 없음) | 같은 속성(pt) |
+     | RTF | twips | `\expndtw`, `\expnd`(4분의 1pt, ×5) | `\expndtw` |
+     | HWPX | 글자 크기 대비 % (`hh:spacing`, 한글 슬롯, -50~50) | 글자 모양의 크기로 twips 환산 | 런 크기(없으면 문단 기본)로 %를 반올림 |
+     | Pages | 글자 크기 대비 비율(`tracking`) | 글자·단락 스타일에서 해석한 크기(없으면 12pt)로 환산 | 문단이 그리는 크기(본문 11pt, 제목 18~11pt)로 비율을 씀 |
+
+     HWPX와 Pages는 크기를 알아야 환산되므로 크기가 다른 서식으로 옮기면 값이 크기에 비례해 바뀐다(HWPX는 1% 단위로 반올림: 12pt에서 -20 twips는 -19로 돌아온다). 크기 없는 런을 HWPX가 10pt, Pages가 문단 크기로 보는 점도 다르다.
+  3. **`.pages` 필드 번호 확인**: 글자 속성 필드 27 `tracking`(float, 글자 크기 대비 비율)은 MIT 라이선스 공개 구현의 `src/protos/TSWPArchives.proto`(`CharacterStylePropertiesArchive.tracking = 27`)와 참조 구현 `FORMAT.md`의 표(`11.27`, 12pt 글자에 3pt를 주자 0.25)로 확인했다. 컴팩트 배치(필드 2)는 번호를 확인하지 못해 읽기·쓰기 모두 건너뛴다. 단락 속성의 `space_before = 21`, `space_after = 20`(float, pt)도 같은 두 근거로 확인했고(`12.20`·`12.21`, 23pt·17pt), 쓰기는 이 번호를 쓰는 배치에서만 읽는다. 단위(pt)는 참조 구현 표의 "points"를 따랐다. 문자 간격의 화면 단위(%)는 문서에 단위가 없어 비율의 백분율로 보여 주는 우리 선택이다.
+  4. **Pages 단락 앞뒤 간격**: 쓰기는 `ParaLook`의 `space_before_twips`·`space_after_twips`를 변형 스타일의 필드 21·20으로 쓰고 손실 경고에서 뺐다. 읽기는 스타일 체인에서 0보다 큰 값을 읽어 8,000 twips(`MAX_PARA_SPACING_TWIPS`)로 자른다. 템플릿 스타일이 가진 단락 간격도 이제 읽혀 DOCX 등으로 저장하면 나온다.
+  5. **화면·JSON**: 런은 `data-eo-spacing`(twips)와 `letter-spacing`을 가진다(`doc-runs.js`의 `spacing`). 엔진 JSON 키는 `letterSpacingTwips`이고 범위(±31,680 정수) 밖이나 정수가 아니면 저장을 거부한다. 페이지 앱 포맷 사이드바 `스타일 > 서체`의 `문자 간격` 칸은 글자 크기 대비 %이고(-50~500), 선택의 글자 크기(없으면 10pt)로 twips로 바꿔 적용한다. 0은 간격을 없앤다. 워드프로세서·한글 화면의 글꼴 대화상자에는 아직 항목이 없다(`TODO.md`).
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트 중 대신할 것이 없다. (2) 기존 `CharFmt`, `RichRun`, 포맷별 읽기·쓰기, `StrictJsonValue`, `doc-runs.js` 런 엔진을 그대로 썼다. (3) 이식한 코드는 없다. Pages 필드 번호만 공개 `.proto`로 확인했다(`THIRD_PARTY_NOTICES.md`).
+- **Why** 자간은 제목·표지에서 줄 길이를 맞추는 데 쓰여 열고 저장할 때 사라지면 레이아웃이 달라진다. 참조 앱과 표준 워드프로세서는 자간을 보존한다.
+- **Trade-offs** (1) HWPX·Pages는 크기 비례라 크기를 바꾸면 의미가 달라진다. (2) Pages 템플릿의 단락 간격이 읽혀 열어 본 문서의 문단이 이전보다 벌어져 보일 수 있다. 이전에는 파일에 있던 값을 버렸다. (3) 한글 5.0(HWP) 편집기는 자체 엔진이라 이 모델과 별개다.
+- **Alternatives rejected** (1) 모델을 크기 대비 비율로 두기: DOCX·ODT·RTF 왕복이 크기를 몰라 어긋난다. (2) 컴팩트 배치에 추정한 번호로 쓰기: 번호 미확인.
+- **Verified by** `crates/easyoffice-formats/tests/letter_spacing_pd367.rs`(포맷별 왕복, 규칙 낱말, 변조 값, Pages 단락 앞뒤 간격), `rich_char_spacing.rs` 단위 시험, `crates/easyoffice-app/src/convert_open/tests.rs`(JSON 키와 범위 거부), `scripts/test-webui-family-look-pd361.mjs`·`scripts/test-webui-doc-paragraphs.mjs`.
+- **Revisit when** 실제 Pages 문서로 `tracking`·단락 간격 단위를 확인할 때, 워드프로세서 글꼴 대화상자를 넣을 때.
+
+## PD-368 — 서체 스타일 팝업(가는체·폭좁은체 등) 설계 (2026-11-27)
+
+- **Status** Designed (구현 전). 이 결정은 구현에 앞서 방식을 확정한다.
+- **Context** Pages 포맷 사이드바 `서체` 섹션의 서체 팝업 아래에는 같은 서체 계열의 스타일(보통·가는체·굵은체·폭좁은체 등)을 고르는 팝업이 있다(`PD-362` 5항에서 엔진 기능이 없어 뺀 항목). 우리 모델의 `RichRun::font`는 서체 이름 하나이고 굵게·기울임은 별도 불리언이다.
+- **Decision (`PD-368`, 설계)**
+  1. **목록의 출처**: 데스크톱 셸이 시스템 서체를 계열별로 열거해 변형 목록 `{계열, PostScript 이름, 스타일 이름, 굵기(100~900), 너비, 기울임}`을 돌려주는 IPC를 둔다(macOS CoreText `CTFontManagerCopyAvailableFontFamilyNames`·`CTFontCopyAvailableTables` 대신 `CTFontDescriptorCreateMatchingFontDescriptors`로 계열별 기술자, Windows DirectWrite 글꼴 집합, Linux fontconfig). 웹 화면은 열거 API가 없으므로 이 IPC가 없는 환경(브라우저 시험)에서는 팝업을 `보통` 하나로 둔다. 목록은 계열당 64개, 전체 2,048개로 자른다.
+  2. **모델**: `RichRun`에 `font_face: Option<String>`(PostScript 이름)을 추가한다. `font`는 계열 이름을 그대로 두고, `font_face`가 있으면 그 변형을 뜻한다. 굵게·기울임 불리언과 함께 쓸 때는 변형의 굵기·기울임이 불리언을 대신한다(불리언만 켜진 런은 지금처럼 쓴다).
+  3. **포맷별 쓰기**: Pages는 글자 속성 필드 11.5가 PostScript 이름이므로 `font_face`를 그대로 쓴다(참조 구현 표로 확인). DOCX·ODT·RTF·HWPX는 변형을 서체 이름으로 쓴다(`w:rFonts`의 `AppleSDGothicNeo-Light` 같은 PostScript 이름이 아니라 워드프로세서가 계열로 취급하는 전체 이름 `Apple SD Gothic Neo Light`). 읽을 때는 서체 이름이 목록의 전체 이름과 일치하면 계열과 변형으로 나눈다.
+  4. **화면 표시**: 편집기 런은 `data-eo-face`를 가지고 CSS는 `font-family`에 계열을, `font-weight`·`font-stretch`에 변형의 값을 쓴다. 변형이 시스템 서체에 있을 때만 쓰고, 없는 변형은 팝업에서 `(없음)`으로 표시한다. 문서에 있으나 이 기기에 없는 변형은 이름을 보존한다.
+  5. **입력 상한**: `font_face`는 128바이트, 제어 문자 없는 문자열이며 JSON·파일에서 읽을 때 상한을 넘으면 지정 없음으로 읽는다(`pages_write`의 서체 이름 상한과 같다).
+- **재사용 판단 (구현 원칙 3단계)** (1) 서체 열거에 허용 라이선스 크레이트를 먼저 본다(예: `font-kit` MIT/Apache-2.0가 CoreText·DirectWrite·fontconfig를 한 인터페이스로 감싼다). 적합하면 그대로 쓰고 이미 쓰는 의존성과 겹치는지 확인한다. (2) 없으면 이미 쓰는 데스크톱 셸 의존성(CoreText 바인딩 등)을 확인한다. (3) 둘 다 아닐 때만 참조 앱의 서체 처리를 이식한다.
+- **Open questions** (1) Pages 한국어 화면의 스타일 이름(`가는체` 등)을 어떤 로케일 문자열에서 가져오는지(서체의 이름 표 `nameID 2` 현지화 이름 vs 고정 번역). (2) 변형 폭(너비)이 Pages `폭좁은체`처럼 계열의 별도 서체로 있는 경우의 목록 구성. 구현 전에 `font-kit` 도입 가능성과 위 두 질문을 확인한다.
+- **Revisit when** 구현을 시작할 때.

@@ -95,7 +95,7 @@ SOFTWARE.
 ## numbers-parser (MIT, published `.proto` definitions used to confirm Pages field numbers)
 
 Source: https://github.com/masaccio/numbers-parser (`src/protos/TSWPArchives.proto`).
-Only field numbers and enum values (`TSWP.LineSpacingArchive` modes and fields, `TSWP.ParagraphStylePropertiesArchive.line_spacing`, `TSWP.CharacterStylePropertiesArchive.tracking`) were read to confirm the numbers written in `crates/easyoffice-formats/src/pages_schema.rs` and `crates/easyoffice-formats/src/pages_write/styles.rs` (PD-366). No file, message definition text or generated code was copied.
+Only field numbers and enum values (`TSWP.LineSpacingArchive` modes and fields, `TSWP.ParagraphStylePropertiesArchive.line_spacing`, `TSWP.CharacterStylePropertiesArchive.tracking`, `TSWP.ParagraphStylePropertiesArchive.space_before` and `space_after`) were read to confirm the numbers written in `crates/easyoffice-formats/src/pages_schema.rs` and `crates/easyoffice-formats/src/pages_write/styles.rs` (PD-366, PD-367). No file, message definition text or generated code was copied.
 
 ```
 Copyright 2021 Jon Connell
