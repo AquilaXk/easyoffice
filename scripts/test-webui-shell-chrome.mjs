@@ -143,7 +143,7 @@ test("theme toggle keeps an accessible name and announces its state", async () =
 test("reference values: 28px menu bar with the light border, bottom-left update card with the dialog shadow, 14px preview margin, product information in the dialog frame", () => {
   const bar = cssRule(".topbar", SHELL_CSS);
   assert.ok(hasDecl(bar, "height", "28px") && hasDecl(bar, "border-bottom", "1px solid var(--ui-border-light)"));
-  assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "24px") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "var(--control-height-sm)"), "the search and theme controls (24px, PD-378) fit 28px");
+  assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "var(--control-height-sm)") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "var(--control-height-sm)"), "the search and theme controls (24px, PD-378) fit 28px");
   const home = readText(fileURLToPath(new URL("home.css", UI_DIR)));
   const card = cssRule(".update-notice", home);
   assert.ok(hasDecl(card, "left", "16px") && hasDecl(card, "bottom", "48px") && hasDecl(card, "box-shadow", "var(--shadow-dialog)"));
@@ -194,8 +194,7 @@ test("command palette is an overlay panel and the slash icon cannot overlap the 
   const slash = cssRule(".cp-slash");
   assert.ok(hasDecl(slash, "position", "absolute"));
   const input = cssRule(".cmd-input.cp-input");
-  const pad = /padding(?:-left)?\s*:\s*(?:(?:[\d.]+px\s+){3})?([\d.]+)px/.exec(input);
-  assert.ok(pad && Number(pad[1]) >= 36, `input left padding clears the icon (${pad?.[1]})`);
+  assert.ok(hasDecl(input, "padding-left", "calc(var(--space-12) + var(--space-8))"), "input left padding (24px + 16px) clears the icon");
 });
 
 test("toolbar labels share one size and the presenter panel never wraps its labels", () => {

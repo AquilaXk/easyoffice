@@ -6773,3 +6773,13 @@
 - **Trade-offs** `이동/복사…`로 옮기면 옮긴 시트가 활성 시트가 된다(이전 `왼쪽으로 이동`은 활성 시트를 바꾸지 않았다). 오류 메시지 탭의 확인란 이름은 도움말 본문에 없어 `오류 메시지` 탭 이름과 용어집의 `오류 메시지`에 맞춰 쓴 것이다.
 - **Verified by** `scripts/test-webui-sheet-tabs.mjs`, `test-webui-sheet-protect.mjs`, `test-webui-sheet-undo.mjs`, `test-webui-sheet-color.mjs`, `test-webui-sheet-view-state.mjs`, `test-webui-sheet-media-notes-pd256.mjs`, `test-webui-sheet-rules.mjs`, `test-webui-sheet-native-menu.mjs`, `crates/easyoffice-desktop/src/native_menu/tests/contracts.rs`.
 - **Revisit when** 남은 이름의 원문을 확인할 때.
+
+## PD-383 — shell.css의 크기를 토큰으로 옮기고, 그림 크기는 크기 검사에서 뺀다 (2026-11-28)
+
+- **Decision** `shell.css`의 알려진 위반 64곳을 없앴다. 간격·안쪽 여백은 `--space-*`, 대화상자 목록 줄은 `--list-row-padding-*`, 탭 안쪽 여백은 `--dialog-tab-padding-x`, 상태 줄은 `--dialog-status-height`로 바꿨다. 높이가 18·20px이던 컨트롤(상태 줄 모드 단추, 슬라이서 단추, 이미지 단추)은 `--control-height-sm`(24px)로, 명령 팔레트 입력(34px, 14px 글자)은 24px·12px(`--font-size-sm`)로 맞췄다. 토큰 값과 맞지 않던 3·5·7·14px는 가까운 토큰(2·4·6·8·12px)으로 옮겼다.
+- **크기 검사에서 뺀 것** 아이콘·견본·미리 보기처럼 그림 자체의 크기와 여러 줄 입력 칸의 최소 높이는 컨트롤 크기가 아니다. `scripts/design-guard.mjs`의 `DRAWN_SIZES`에 선택자와 속성을 적어 검사에서 뺀다(상태 줄 확대 아이콘 18px, 명령 팔레트 돋보기 16px, 조건부 서식 견본·색 견본·확인란 상자, 아이콘 라디오 아이콘 영역, 표 서식 견본, 슬라이서 아이콘, 글꼴 견본 76px, 메모·차트 계열 입력 칸의 최소 높이, 쪽 인스펙터 아이콘). 목록에 없는 속성은 계속 검사한다.
+- **재사용 판단 (구현 원칙 3단계)** 이미 쓰는 토큰으로 충분해 새 의존성·이식이 없다.
+- **Why** 그림 크기까지 컨트롤 토큰으로 묶으면 같은 값을 다른 뜻으로 쓰게 된다. 컨트롤 크기는 Spectrum S 한 벌로 맞춘다(PD-378).
+- **Trade-offs** 18·20px 컨트롤이 24px가 되고 명령 팔레트 입력이 작아진다. 3px 단위 안쪽 여백은 1px씩 달라진다.
+- **Verified by** `scripts/test-design-guard.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
+- **Revisit when** 남은 스타일시트(toolbar·styles·base·board·menu-bar·home·content)의 알려진 위반을 줄일 때.

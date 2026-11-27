@@ -724,7 +724,7 @@ test("a rule dialog takes the shell's common open path: the focus starts on the 
 test("the alert dialog follows the reference confirm dialog: 360px, padded body, line breaks kept", () => {
   const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8");
   assert.match(css, /#sheet-dv-alert-dialog \{ width: min\(360px/);
-  assert.match(css, /#sheet-dv-alert-dialog \.dialog-body \{ padding: 16px 20px; line-height: 1\.6; white-space: pre-line; \}/);
+  assert.match(css, /#sheet-dv-alert-dialog \.dialog-body \{ padding: var\(--space-8\) var\(--space-10\); line-height: 1\.6; white-space: pre-line; \}/);
 });
 
 test("the icon set combo shows Korean labels and keeps the file format identifiers as values", async () => {
