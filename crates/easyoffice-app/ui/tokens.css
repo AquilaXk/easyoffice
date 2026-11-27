@@ -176,6 +176,11 @@
   --picker-padding-end: 7px;          /* field-end-edge-to-disclosure-icon-75 */
   --picker-text-gap: 5px;             /* text-to-visual-75 */
   --stepper-width: 20px;              /* in-field-button-width-stacked-small */
+  --stepper-chevron-size: 6px;        /* chevron-icon-size-50 (the S stepper's ChevronUp50 / ChevronDown50) */
+  --stepper-fill-border-width: 1px;   /* in-field-button-border-width = stepper-button-border-width = border-width-100 */
+  --stepper-fill-bg: var(--ui-surface-muted);        /* infield-button-background-color gray-100 (233) ~ #e8e8e8 */
+  --stepper-fill-bg-hover: var(--ui-hover);          /* gray-200 (225) ~ #e0e0e0, hover and down */
+  --stepper-fill-bg-disabled: var(--ui-surface-muted); /* disabled-background-color = gray-100 */
   --focus-ring-width: 2px;            /* focus-indicator-thickness */
 
   /* 대화상자 간격과 목록. 행 간격은 spectrum-Form의 라벨 위 배치 간격, 라벨 옆 간격은 spectrum-FieldLabel sizeS의 side padding */

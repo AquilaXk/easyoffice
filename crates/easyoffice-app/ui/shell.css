@@ -866,22 +866,29 @@
 .slide-layout-thumb[data-thumb="blank"] .slt-b { display: none; }
 /* The number field (number-stepper.js, PD-377), after every rule that frames a field so it wins at equal weight.
    Reference implementation (structure ported): the Stepper of the Apache-2.0 CSS design system named in THIRD_PARTY_NOTICES.md
-   ("Spectrum CSS" section), `components/stepper/index.css` 299-320 (the buttons column): the field and a column of two stacked
-   buttons as high as the field, no line in front of the column, one line between the buttons, only the end-side corners rounded
-   (the box clips the column to the field's corners). */
+   ("Spectrum CSS" section), `components/stepper/index.css` 299-320 (the buttons column) and `components/infieldbutton/index.css` 176-232
+   (the stacked fills): the field and a column of two stacked in-field buttons as high as the field. Each button is a fill (background
+   `gray-100`, `gray-200` on hover) with a 1px border in the field's border color (`inherit`, so hover and focus recolor it with the field):
+   the left border is the line in front of the column, the lower fill's top border is the one line between the buttons (the upper fill has
+   no bottom border), the right, top and bottom lines are the field's own. The gaps between the fills and between a fill and the field
+   edge are 0 (`in-field-button-stacked-inner-edge-to-fill`, `in-field-button-edge-to-fill`), so the fills touch; only the end-side
+   corners are rounded (the box clips the column to the field's corners, `--control-radius`). Focus: the borders take the focus color and the
+   keyboard focus ring is a 2px outline 2px away (`stepper/index.css` 197-203), no glow. */
 .eo-stepper.eo-stepper { display: inline-flex; align-items: stretch; padding: 0; overflow: hidden; }
 .eo-stepper > input[type="number"].eo-stepper-input.eo-stepper-input { flex: 1 1 0; width: auto; min-width: 0; height: auto; margin: 0; padding: 0 var(--control-padding-x); border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: inherit; font: inherit; text-align: inherit; -webkit-appearance: textfield; appearance: textfield; }
 .eo-stepper-input::-webkit-inner-spin-button, .eo-stepper-input::-webkit-outer-spin-button { display: none; -webkit-appearance: none; appearance: none; width: 0; margin: 0; padding: 0; }
-.eo-stepper:focus-within { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
+.eo-stepper:hover:not(.disabled) { border-color: var(--color-border); }
+.eo-stepper:focus-within { border-color: var(--color-focus-border); box-shadow: none; }
+.eo-stepper:has(.eo-stepper-input:focus-visible) { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-width); }
 .eo-stepper.disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); }
-.eo-stepper-buttons { display: flex; flex: none; flex-direction: column; width: var(--stepper-width); }
-.eo-stepper-button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text-muted); cursor: default; overflow: visible; }
-/* The chevron box is as high as its half button, and its drawing (the cropped 14:8 glyph, drawn at the icon size, centered) sits in the middle of it, so the button holds exactly what it shows. */
-.eo-stepper-button .eo-chevron { height: 100%; -webkit-mask-size: var(--chevron-size) var(--chevron-size); mask-size: var(--chevron-size) var(--chevron-size); }
-.eo-stepper-button + .eo-stepper-button { box-shadow: inset 0 var(--control-border-width) 0 var(--color-border-light); }
-.eo-stepper-button:hover:not(:disabled) { background: var(--ui-hover); color: var(--color-text); }
-.eo-stepper-button:active:not(:disabled) { background: var(--ui-active); }
-.eo-stepper-button:disabled { color: var(--ui-text-muted); background: transparent; cursor: not-allowed; }
+.eo-stepper-buttons { display: flex; flex: none; flex-direction: column; box-sizing: border-box; width: var(--stepper-width); border-left: var(--control-border-width) solid; border-color: inherit; }
+.eo-stepper-button { display: inline-flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 50%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: var(--stepper-fill-bg); color: var(--color-text-muted); cursor: default; overflow: visible; }
+.eo-stepper-button + .eo-stepper-button { border-top: var(--stepper-fill-border-width) solid; border-color: inherit; }
+/* The chevron box is as high as its half button, and its drawing (the cropped 14:8 glyph, drawn at the S icon size, centered) sits in the middle of it, so the button holds exactly what it shows. */
+.eo-stepper-button .eo-chevron, .sb-step-btn .eo-chevron { width: var(--stepper-chevron-size); height: 100%; -webkit-mask-size: var(--stepper-chevron-size) var(--stepper-chevron-size); mask-size: var(--stepper-chevron-size) var(--stepper-chevron-size); }
+.eo-stepper-button:hover:not(:disabled) { background: var(--stepper-fill-bg-hover); color: var(--color-text); }
+.eo-stepper-button:active:not(:disabled) { background: var(--stepper-fill-bg-hover); }
+.eo-stepper-button:disabled { color: var(--ui-text-muted); background: var(--stepper-fill-bg-disabled); cursor: not-allowed; }
 /* Check boxes and radio buttons (PD-378), after every rule that frames an input so they win at equal weight. The Spectrum S control: a 12px box
    (`checkbox-control-size-small`, `radio-button-control-size-small`), a 2px border (`border-width-200`), corner radius 2px (the radio is round); a checked
    radio is a 4px dot (`radio-button-selection-indicator`), which is a (12 - 4) / 2 = 4px ring in the accent color. The check mark is Lucide `check`, the dash

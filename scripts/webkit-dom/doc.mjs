@@ -248,8 +248,8 @@ export const docSteps = [
     assert.ok(edges.labelEnds.every((gap) => gap >= 8), `every label ends at least 8px before the boxes: ${edges.labelEnds}`);
   }],
 
-  // PD-377: the number field is the stepper (a press steps and clamps in the real engine, the cell is as high as the field with a line
-  // only between its two buttons and no divider in front of it) and the chevrons are drawn and centered, also in the combo box.
+  // PD-377: the number field is the stepper (a press steps and clamps in the real engine, the cell is as high as the field and holds two
+  // bordered fills of Spectrum's stacked in-field buttons, PD-378) and the chevrons are drawn and centered, also in the combo box.
   ["숫자 칸의 위·아래 단추가 값을 바꾸고 단추 열과 쉐브론이 칸과 선택 화살표 칸의 가운데에 맞는다", async (page) => {
     await typeFirstParagraph(page, "가나다라");
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
@@ -267,6 +267,7 @@ export const docSteps = [
     await page.fill("#doc-font-size", "1");
     await page.click(`${buttons} >> nth=1`);
     assert.equal(await page.inputValue("#doc-font-size"), "1", "min clamps");
+    await page.mouse.move(0, 0);
     const geometry = await page.evaluate(() => {
       const input = document.querySelector("#doc-font-size");
       const box = input.parentNode;
@@ -274,20 +275,34 @@ export const docSteps = [
       const [up, down] = [...cell.querySelectorAll(".eo-stepper-button")];
       const rect = (el) => el.getBoundingClientRect();
       const middle = (r) => [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
-      const line = (el, side) => getComputedStyle(el)[`border${side}Width`];
-      const divider = (el) => getComputedStyle(el).boxShadow !== "none";
+      const style = (el, name) => getComputedStyle(el)[name];
+      const inside = (inner, outer) => inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom;
       const chevrons = [up, down].map((b) => ({ button: middle(rect(b)), chevron: middle(rect(b.querySelector(".eo-chevron"))) }));
       const arrow = document.querySelector('.custom-select[data-select-id="doc-font-family"] .custom-select-arrow');
       const before = getComputedStyle(arrow, "::before");
       return {
         box: rect(box).height, cell: rect(cell).height, cellWidth: rect(cell).width, cellRight: rect(cell).right, boxRight: rect(box).right,
-        lines: [line(cell, "Left"), line(up, "Top"), line(down, "Top"), divider(up), divider(down)], native: getComputedStyle(input).appearance,
-        halves: [rect(up).height, rect(down).height], dividerSpan: [rect(down).left - rect(cell).left, rect(cell).right - rect(down).right],
+        native: getComputedStyle(input).appearance,
+        // Spectrum's stacked fills: bordered fills on the gray-100 tone, touching (both gaps are 0), the cell's left border is the line in front of
+        // them and the lower fill's top border the one line between them (the upper fill has no bottom border); the border color is the field's.
+        fills: {
+          inCell: [inside(rect(up), rect(cell)), inside(rect(down), rect(cell))],
+          halves: [rect(up).height, rect(down).height], gap: rect(down).top - rect(up).bottom,
+          cellLeft: style(cell, "borderLeftWidth"), upBorders: [style(up, "borderTopWidth"), style(up, "borderBottomWidth")], downTop: style(down, "borderTopWidth"),
+          shadows: [style(up, "boxShadow"), style(down, "boxShadow")],
+          colors: [style(cell, "borderLeftColor") === style(box, "borderLeftColor"), style(down, "borderTopColor") === style(box, "borderLeftColor")],
+          background: [style(up, "backgroundColor"), style(down, "backgroundColor"), style(box, "backgroundColor")],
+          chevron: [style(up.querySelector(".eo-chevron"), "width"), style(down.querySelector(".eo-chevron"), "width")],
+        },
         styleBar: (() => {
-          // The style bar's size stepper: its two buttons are exactly the column, so the line between them is the column's width, not wider.
+          // The style bar's size stepper has the same fills: its two buttons are exactly its column, with the line in front and between them.
           const col = document.querySelector("#btn-size-up").parentNode;
           const [high, low] = [document.querySelector("#btn-size-up"), document.querySelector("#btn-size-down")];
-          return { column: rect(col).width, spans: [rect(high).left - rect(col).left, rect(low).left - rect(col).left, rect(col).right - rect(high).right, rect(col).right - rect(low).right], high: rect(high).height, low: rect(low).height };
+          return {
+            column: rect(col).width, spans: [rect(high).left - rect(col).left, rect(low).left - rect(col).left, rect(col).right - rect(high).right, rect(col).right - rect(low).right],
+            high: rect(high).height, low: rect(low).height, gap: rect(low).top - rect(high).bottom, colLeft: style(col, "borderLeftWidth"), lowTop: style(low, "borderTopWidth"),
+            background: style(col, "backgroundColor"),
+          };
         })(),
         chevrons,
         arrowLeft: getComputedStyle(arrow).borderLeftWidth, arrowChevron: [before.width, before.height, before.maskImage || before.webkitMaskImage],
@@ -297,12 +312,22 @@ export const docSteps = [
     assert.ok(Math.abs(geometry.box - geometry.cell - 2) <= 1, `the cell is as high as the field inside its frame: ${geometry.box} ${geometry.cell}`);
     assert.equal(geometry.cellWidth, 20, "the cell has the token width (Spectrum S in-field-button-width-stacked-small)");
     assert.ok(Math.abs(geometry.boxRight - geometry.cellRight - 1) <= 1, "the cell is at the end of the field");
-    assert.deepEqual(geometry.lines, ["0px", "0px", "0px", false, true], "no line in front of the cell, one (the lower button's top edge) between the two buttons");
-    assert.deepEqual(geometry.halves[0], geometry.halves[1], "the two buttons are equally high");
-    assert.deepEqual(geometry.dividerSpan, [0, 0], "the line between the buttons is exactly the button cell's width");
+    const { fills } = geometry;
+    assert.deepEqual(fills.inCell, [true, true], "each fill is inside the cell");
+    assert.equal(fills.halves[0], fills.halves[1], "the two fills are equally high");
+    assert.equal(fills.gap, 0, "the fills touch: the gap between them is in-field-button-stacked-inner-edge-to-fill, 0px");
+    assert.deepEqual([fills.cellLeft, fills.upBorders, fills.downTop], ["1px", ["0px", "0px"], "1px"], "the line in front is the cell's left border; the upper fill has no top or bottom border of its own (the field's top line is its edge), the lower fill's top border is the one line between");
+    assert.deepEqual(fills.shadows, ["none", "none"], "no drawn divider: the lines are borders");
+    assert.deepEqual(fills.colors, [true, true], "the lines have the field's border color");
+    assert.equal(fills.background[0], fills.background[1], "both fills have the fill tone");
+    assert.notEqual(fills.background[0], fills.background[2], "the fill tone differs from the field's");
+    assert.deepEqual(fills.chevron, ["6px", "6px"], "the S stepper chevron is chevron-icon-size-50");
     assert.equal(geometry.styleBar.column, 20, "the style bar's stepper column has the token width");
-    assert.deepEqual(geometry.styleBar.spans, [0, 0, 0, 0], "the style bar's buttons are exactly its column, so the line between them is not wider than the cell");
+    assert.deepEqual(geometry.styleBar.spans, [1, 1, 0, 0], "the style bar's buttons are exactly its column inside the 1px line in front of it");
     assert.equal(geometry.styleBar.high, geometry.styleBar.low, "the style bar's two buttons are equally high");
+    assert.equal(geometry.styleBar.gap, 0, "the style bar's buttons touch");
+    assert.deepEqual([geometry.styleBar.colLeft, geometry.styleBar.lowTop], ["1px", "1px"], "the style bar's line in front of the column and the one between its buttons");
+    assert.equal(geometry.styleBar.background, fills.background[0], "the style bar's column has the same fill tone");
     assert.equal(geometry.native, "textfield", "the browser's own spin button is gone");
     for (const { button, chevron } of geometry.chevrons) assert.ok(Math.abs(button[0] - chevron[0]) <= 1 && Math.abs(button[1] - chevron[1]) <= 1, `a chevron is centered in its button: ${button} ${chevron}`);
     assert.equal(geometry.arrowLeft, "0px", "no divider in front of the combo box's chevron");

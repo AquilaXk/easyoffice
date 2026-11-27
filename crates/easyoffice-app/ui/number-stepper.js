@@ -7,8 +7,8 @@
   // Reference implementation (structure ported): the Stepper of the Apache-2.0 CSS design system named in THIRD_PARTY_NOTICES.md
   // ("Spectrum CSS" section; its repository is archived, the successor repository is named there too), files
   // `components/stepper/index.css` and `components/stepper/stories/template.js`. Kept from the original: the text field plus a
-  // column of two stacked in-field buttons that is as high as the field, has no line in front of it, only a line between the
-  // two buttons and rounds only the end-side corners, and the disabled state of the buttons following the field. Changed to
+  // column of two stacked in-field buttons (bordered fills, PD-378) that is as high as the field and rounds only the end-side
+  // corners, and the disabled state of the buttons following the field. Changed to
   // fit: plain DOM in place of the Lit template, the stacked buttons carry the chevrons of toolbar.css, the colors, sizes and
   // focus are the tokens of tokens.css.
   //

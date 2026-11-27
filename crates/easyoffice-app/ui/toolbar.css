@@ -424,8 +424,12 @@
   border-left: 1px solid var(--ui-border-light);
 }
 
+/* The style bar's stepper is the same Spectrum S fills as the dialogs' number field (shell.css `.eo-stepper-button`): the fill color, the
+   line in front of the column (the size group's own right, top and bottom lines are the field's) and the line between the buttons. */
 .sb-stepper-col {
-  background: var(--color-surface);
+  box-sizing: border-box;
+  border-left: var(--control-border-width) solid var(--color-border-input);
+  background: var(--stepper-fill-bg);
 }
 
 .sb-ls-group .sb-stepper-col {
