@@ -1,4 +1,4 @@
-//! PD-374: a run in a table cell that carries only a character format the cell gate did not know (East Asian font, letter
+//! PD-375: a run in a table cell that carries only a character format the cell gate did not know (East Asian font, letter
 //! spacing, scale, position, kerning, text effects, OpenType features, grid switch) is kept on save. Before, the whole cell
 //! paragraph entry was dropped when nothing else in the cell was formatted.
 

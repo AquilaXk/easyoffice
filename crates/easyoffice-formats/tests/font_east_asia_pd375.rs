@@ -1,4 +1,4 @@
-//! PD-374: a run keeps a Latin font and a separate East Asian font through DOCX, ODT, RTF and HWPX; a document with one font keeps
+//! PD-375: a run keeps a Latin font and a separate East Asian font through DOCX, ODT, RTF and HWPX; a document with one font keeps
 //! its single value (opening and saving it again writes the same bytes of the font words), and Pages says it cannot keep the pair.
 
 use easyoffice_formats::{

@@ -257,7 +257,7 @@
     };
 
     // The font list is the style bar's, so the dialog offers what the bar does.
-    // 한글 글꼴 is the East Asian face (the Latin one when the run names no other) and 영어 글꼴 the Latin one (PD-374).
+    // 한글 글꼴 is the East Asian face (the Latin one when the run names no other) and 영어 글꼴 the Latin one (PD-375).
     const named = (v) => (typeof v === "string" && v !== MIXED ? v : "");
     const latin = named(state.font);
     const family = state.eastfont === MIXED ? "" : named(state.eastfont) || latin;

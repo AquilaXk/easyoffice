@@ -67,7 +67,7 @@ impl From<&RichRun> for CharFmt {
 
 impl CharFmt {
     /// Sets the Latin and the East Asian font a file names (`None`: it names none). A file that names only one gives it to
-    /// both, and a pair that is the same font is one font, so a document with a single font keeps its single value (PD-374).
+    /// both, and a pair that is the same font is one font, so a document with a single font keeps its single value (PD-375).
     pub(crate) fn set_fonts(&mut self, latin: Option<String>, east_asia: Option<String>) {
         match (latin, east_asia) {
             (None, east) => {
