@@ -253,15 +253,17 @@ impl Reader {
     fn resolve(&self, st: &CharState) -> CharFmt {
         // Index 0 of the color table is "auto" and stored as `None`.
         let color_at = |i: Option<usize>| i.and_then(|i| self.colors.get(i)).and_then(Clone::clone);
-        // The default face is no font only when both `\f` and `\af` are it; next to another face it is a name like any other.
+        // The default face is no font only when both `\f` and the East Asian face (`\dbch\af`) are it; next to another face it
+        // is a name like any other.
         let default = self.default_font;
+        let east_font = st.east_font();
         let both_default =
-            st.font.is_none_or(|f| f == default) && st.font_ea.is_none_or(|f| f == default);
+            st.font.is_none_or(|f| f == default) && east_font.is_none_or(|f| f == default);
         let face = |id: Option<i32>| self.fonts.get(&id?).cloned();
         let (latin, east) = if both_default {
             (None, None)
         } else {
-            (face(st.font), face(st.font_ea))
+            (face(st.font), face(east_font))
         };
         CharFmt {
             bold: st.bold,
@@ -708,7 +710,9 @@ impl Reader {
             "expndtw" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v))),
             "expnd" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v) * 5)),
             "f" => st.font = param,
-            "af" => st.font_ea = param,
+            "af" | "loch" | "hich" | "dbch" | "ltrch" | "rtlch" => {
+                st.apply_script_word(word, param)
+            }
             "cf" => st.color = param.and_then(|v| usize::try_from(v).ok()),
             "highlight" | "chcbpat" | "cb" => {
                 st.highlight = param.and_then(|v| usize::try_from(v).ok());
