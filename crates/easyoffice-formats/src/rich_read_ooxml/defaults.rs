@@ -1,5 +1,5 @@
 //! The defaults of a DOCX (PD-361): `w:docDefaults` merged with the Normal style, theme typefaces
-//! resolved against `word/theme/theme1.xml`. Word applies them to every paragraph and run that
+//! resolved against `word/theme/theme1.xml`. A word processor applies them to every paragraph and run that
 //! names no value, so a writer has to give them back unchanged.
 
 use crate::rich_defaults::RichDefaults;

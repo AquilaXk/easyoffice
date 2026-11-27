@@ -93,7 +93,7 @@ const WORD_SETTINGS: &str = concat!(
     "<w:defaultTabStop w:val=\"720\"/></w:settings>"
 );
 
-/// A Word-style DOCX: Calibri 11 from the theme, single unspaced lines, no `w:jc`, 720-twip tabs.
+/// A DOCX as an office suite writes it: Calibri 11 from the theme, single unspaced lines, no `w:jc`, 720-twip tabs.
 fn word_docx() -> Vec<u8> {
     with_parts(
         &encode(&new_document(), DocumentFormat::Docx),
