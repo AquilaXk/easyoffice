@@ -417,7 +417,7 @@ test("the 서식 menu and the toolbar list the look commands, each with a label 
   const h = await createHarness();
   const items = [...h.document.querySelectorAll(".md-item[data-sheet-look]")];
   const labels = items.map((el) => el.querySelector(".md-label").textContent);
-  assert.deepEqual(labels.slice(0, 7), ["왼쪽 맞춤", "가로 가운데 맞춤", "오른쪽 맞춤", "위쪽 맞춤", "세로 가운데 맞춤", "아래쪽 맞춤", "텍스트 줄 바꿈"]);
+  assert.deepEqual(labels.slice(0, 7), ["왼쪽 맞춤", "가운데 맞춤", "오른쪽 맞춤", "위쪽 맞춤", "가운데 맞춤", "아래쪽 맞춤", "텍스트 줄 바꿈"]);
   assert.deepEqual(labels.slice(7), ["모두", "바깥쪽", "안쪽", "위쪽", "아래쪽", "왼쪽", "오른쪽", "없음", "가는 실선", "굵은 실선", "파선", "점선", "이중 실선", "테두리 색…"]);
   const buttons = [...h.document.querySelectorAll(".tb-btn[data-sheet-look]")];
   assert.equal(buttons.length, 8);

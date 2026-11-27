@@ -398,7 +398,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:align-center",
-        "가로 가운데 맞춤",
+        "가운데 맞춤",
         None,
         "sheet-look:align-center",
     ),
@@ -416,7 +416,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:valign-middle",
-        "세로 가운데 맞춤",
+        "가운데 맞춤",
         None,
         "sheet-look:valign-middle",
     ),

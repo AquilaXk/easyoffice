@@ -54,11 +54,11 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
         align,
         [
             "왼쪽 맞춤",
-            "가로 가운데 맞춤",
+            "가운데 맞춤",
             "오른쪽 맞춤",
             s,
             "위쪽 맞춤",
-            "세로 가운데 맞춤",
+            "가운데 맞춤",
             "아래쪽 맞춤",
         ]
     );
