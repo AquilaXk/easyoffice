@@ -129,16 +129,12 @@
     }
   }
 
-  // The lists of the editable fields: a drop-down combo (`data-presets`: 배율's 200 % ... 33 %) and the always-open list
-  // boxes of the 글꼴 tab (`data-list`: 글꼴 스타일, 크기). Returns the list boxes, whose highlighted row follows the field.
-  function bindPresetCombos(dialog) {
+  // The list boxes of the 글꼴 tab (`data-list` on the field, the `<id>-list` box under it: 글꼴 스타일, 크기). Returns them; the
+  // highlighted row follows the field. 배율's presets are the field's own `<datalist>`.
+  function bindListBoxes(dialog) {
     const combo = host.__EASYOFFICE_DIALOG_COMBO__;
-    for (const input of dialog.querySelectorAll("input[data-presets]")) {
-      const items = input.dataset.presets.split(",").map((n) => withUnit(n, input.dataset.unit));
-      combo?.attach(input, { items, arrowLabel: "배율 목록 열기" });
-    }
     return Array.from(dialog.querySelectorAll("input[data-list]")).map((input) => (
-      combo?.attach(input, { items: input.dataset.list.split(","), inline: true, label: input.getAttribute("aria-label") || "" })
+      combo?.attach(input, dialog.querySelector(`#${input.id}-list`), input.dataset.list.split(","))
     ));
   }
 
@@ -359,7 +355,7 @@
         });
       }
       bindUnitFields(els.dialog);
-      listBoxes = bindPresetCombos(els.dialog);
+      listBoxes = bindListBoxes(els.dialog);
       for (const key of Object.keys(COLOR_HOST)) {
         host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(els.dialog.querySelector(COLOR_HOST[key]), (picked) => current.setColor(key, picked), { clear: true, clearLabel: "자동" });
       }

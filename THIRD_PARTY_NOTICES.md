@@ -763,7 +763,7 @@ SOFTWARE.
 ## Awesomplete (MIT)
 
 Source: https://github.com/LeaVerou/awesomplete (`awesomplete.js`, Copyright (c) 2015 Lea Verou).
-Nothing is vendored or linked at runtime. The editable combo box of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-375) is ported from it: the instance fields (`index`, `ul`, `container`, `isOpened`), `open`, `close`, `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-expanded`, `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Enter / Esc / Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a toggle arrow, an inline list and a `change` event after a pick.
+Nothing is vendored or linked at runtime. The field-and-list-box behavior of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-375) is ported from it: the instance fields (`index`, `ul`), `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a list that is part of the markup and never closes, and a `change` event after a pick.
 
 ```
 The MIT License (MIT)

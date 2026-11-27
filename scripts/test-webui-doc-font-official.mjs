@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// The 글꼴 dialog follows the word processor's official dialog: the 배율 box is an editable combo with its presets, the value
+// The 글꼴 dialog follows the word processor's official dialog: the 배율 box is a field with its presets, the value
 // fields carry their unit (`2pt`), the access keys (Alt+letter) move the focus, and the preview has a frame and a note line.
 
 const byId = (h, id) => h.document.getElementById(id);
@@ -23,36 +23,34 @@ async function openDialog(h, tab = "advanced") {
 
 const keydown = (h, init) => byId(h, "doc-font-dialog").dispatchEvent({ type: "keydown", bubbles: true, preventDefault() {}, ...init });
 
-test("배율 is an editable combo box with the official presets", async () => {
+test("배율 is a field you can type into, and its presets are the field's own list", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h);
   const scale = byId(h, "doc-font-scale");
-  assert.equal(scale.getAttribute("role"), "combobox");
   assert.equal(scale.getAttribute("type"), "text", "you can type into it");
-  const list = scale.parentNode.querySelector(".dialog-combo-list");
-  assert.deepEqual([...list.querySelectorAll("li")].map((li) => li.textContent), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
-  const arrow = h.document.querySelector("#doc-font-dialog .dialog-combo-arrow");
-  arrow.dispatchEvent({ type: "mousedown", target: arrow, bubbles: true, preventDefault() {} });
-  assert.equal(list.hidden, false, "the arrow opens the list");
-  h.userClick(list.querySelectorAll("li")[1]);
-  assert.equal(scale.value, "150%", "a row fills the field");
-  assert.equal(list.hidden, true);
+  assert.equal(scale.classList.contains("dialog-input"), true, "it is the dialog's own field, with no custom arrow");
+  const presets = h.document.getElementById(scale.getAttribute("list"));
+  assert.equal(presets.tagName, "DATALIST");
+  assert.deepEqual([...presets.querySelectorAll("option")].map((o) => o.value), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
+  scale.value = "150%";
+  fire(scale);
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.deepEqual(withKey(h, "scalePercent"), [150]);
 });
 
-test("the arrow keys step through the 배율 presets and Enter picks one", async () => {
+test("the arrow keys step through a list box and put the row in the field", async () => {
   const h = await createRunHarness([p("가나다")]);
-  await openDialog(h);
-  const scale = byId(h, "doc-font-scale");
-  const press = (key) => scale.dispatchEvent({ type: "keydown", key, bubbles: true, preventDefault() {}, stopPropagation() {} });
+  await openDialog(h, "font");
+  const size = byId(h, "doc-font-size");
+  const press = (key) => size.dispatchEvent({ type: "keydown", key, bubbles: true, preventDefault() {}, stopPropagation() {} });
+  assert.equal(size.value, "10", "the list starts on the field's row");
   press("ArrowDown");
-  const list = scale.parentNode.querySelector(".dialog-combo-list");
-  assert.equal(list.hidden, false);
+  assert.equal(size.value, "10.5");
   press("ArrowDown");
-  press("ArrowDown");
-  press("Enter");
-  assert.equal(scale.value, "80%", "the first press opens on 100 %, the next two step to 90 % and 80 %");
+  assert.equal(size.value, "11");
+  press("ArrowUp");
+  assert.equal(size.value, "10.5");
+  assert.equal(size.getAttribute("aria-activedescendant"), byId(h, "doc-font-size-list").children[3].id);
 });
 
 test("a bare number in a value field takes its unit when the field is left", async () => {
@@ -105,7 +103,7 @@ test("글꼴 tab has the official items with their access keys", async () => {
     assert.ok(labels.includes(label), `${label} in ${labels}`);
   }
   assert.deepEqual([...h.document.querySelectorAll("#doc-font-dialog legend")].map((l) => l.textContent).slice(0, 1), ["효과"]);
-  const sizes = [...byId(h, "doc-font-size").parentNode.querySelectorAll("li")].map((li) => li.textContent);
+  const sizes = [...byId(h, "doc-font-size-list").querySelectorAll(".goto-bookmark-item")].map((row) => row.textContent);
   assert.deepEqual(sizes, ["8", "9", "10", "10.5", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"]);
 });
 
@@ -113,12 +111,13 @@ test("크기 and 글꼴 스타일 are fields with list boxes: a row fills the fi
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
   const size = byId(h, "doc-font-size");
-  const rows = [...size.parentNode.querySelectorAll("li")];
+  const rows = [...byId(h, "doc-font-size-list").querySelectorAll(".goto-bookmark-item")];
   h.userClick(rows[5]);
   assert.equal(size.value, "12", "a row fills the field");
   size.value = "2";
   fire(size, "input");
   assert.equal(rows.findIndex((r) => r.getAttribute("aria-selected") === "true"), rows.findIndex((r) => r.textContent.startsWith("2")), "the first row that starts with the text is highlighted");
+  assert.equal(rows.filter((r) => r.classList.contains("selected")).length, 1, "the highlighted row carries the list's selected class");
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.deepEqual(savedRuns(h).filter((r) => r.sizeHalfPt).map((r) => r.sizeHalfPt), [4], "2 pt is 4 half-points");
 });

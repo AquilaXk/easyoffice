@@ -1633,14 +1633,16 @@
             <label class="dialog-label" for="doc-font-style">글꼴 스타일(<span class="dialog-key">Y</span>):</label>
             <label class="dialog-label" for="doc-font-size">크기(<span class="dialog-key">S</span>):</label>
             <select id="doc-font-family" class="sb-combo dialog-select" data-accesskey="t"></select>
-            <input id="doc-font-style" class="dialog-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
-            <input id="doc-font-size" class="dialog-input dialog-field" type="text" inputmode="decimal" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
+            <input id="doc-font-style" class="dialog-text-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
+            <input id="doc-font-size" class="dialog-text-input dialog-field" type="text" inputmode="decimal" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
             <label class="dialog-label" for="doc-font-latin">영어 글꼴(<span class="dialog-key">F</span>):</label>
             <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f"></select>
+            <div id="doc-font-style-list" class="goto-bookmark-list" aria-label="글꼴 스타일 목록"></div>
+            <div id="doc-font-size-list" class="goto-bookmark-list" aria-label="크기 목록"></div>
           </div>
           <div class="dialog-font-colors">
             <label class="dialog-label" for="doc-font-color">글꼴 색(<span class="dialog-key">C</span>):</label>
-            <div id="doc-font-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="c" aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span aria-hidden="true">▾</span></button><input id="doc-font-color" type="color" value="#000000" aria-label="글꼴 색" /><div id="doc-font-color-palette" class="sb-hl-palette" hidden></div></div>
+            <div id="doc-font-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="c" aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span class="custom-select-arrow" aria-hidden="true">▾</span></button><input id="doc-font-color" type="color" value="#000000" aria-label="글꼴 색" /><div id="doc-font-color-palette" class="sb-hl-palette" hidden></div></div>
             <label class="dialog-label" for="doc-font-underline-style">밑줄 스타일(<span class="dialog-key">U</span>):</label>
             <select id="doc-font-underline-style" class="sb-combo dialog-select" data-accesskey="u">
               <option value="none">(없음)</option>
@@ -1651,7 +1653,7 @@
               <option value="16">이중 물결선</option>
             </select>
             <label class="dialog-label" for="doc-font-underline-color">밑줄 색(<span class="dialog-key">I</span>):</label>
-            <div id="doc-font-underline-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="i" aria-haspopup="true" aria-expanded="false" title="밑줄 색" aria-label="밑줄 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span aria-hidden="true">▾</span></button><input id="doc-font-underline-color" type="color" value="#000000" aria-label="밑줄 색" /><div id="doc-font-underline-color-palette" class="sb-hl-palette" hidden></div></div>
+            <div id="doc-font-underline-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="i" aria-haspopup="true" aria-expanded="false" title="밑줄 색" aria-label="밑줄 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span class="custom-select-arrow" aria-hidden="true">▾</span></button><input id="doc-font-underline-color" type="color" value="#000000" aria-label="밑줄 색" /><div id="doc-font-underline-color-palette" class="sb-hl-palette" hidden></div></div>
             <label class="dialog-label" for="doc-font-emphasis">강조점(<span class="dialog-key">·</span>):</label>
             <select id="doc-font-emphasis" class="sb-combo dialog-select">
               <option value="0">(없음)</option>
@@ -1679,7 +1681,8 @@
             <legend>문자 간격</legend>
             <div class="dialog-grid">
               <label class="dialog-label" for="doc-font-scale">배율(<span class="dialog-key">C</span>):</label>
-              <input id="doc-font-scale" class="dialog-input dialog-field" type="text" inputmode="numeric" data-accesskey="c" data-unit="%" data-presets="200,150,100,90,80,66,50,33" />
+              <input id="doc-font-scale" class="dialog-input dialog-field" type="text" inputmode="numeric" data-accesskey="c" data-unit="%" list="doc-font-scale-presets" />
+              <datalist id="doc-font-scale-presets"><option value="200%"></option><option value="150%"></option><option value="100%"></option><option value="90%"></option><option value="80%"></option><option value="66%"></option><option value="50%"></option><option value="33%"></option></datalist>
               <span></span><span></span>
               <label class="dialog-label" for="doc-font-spacing-kind">간격(<span class="dialog-key">S</span>):</label>
               <select id="doc-font-spacing-kind" class="sb-combo dialog-select" data-accesskey="s">

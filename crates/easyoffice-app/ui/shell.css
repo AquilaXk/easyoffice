@@ -114,7 +114,7 @@
 .tool-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
 .tool-dialog .custom-select-value { padding-right: 6px; }
 .tool-dialog .custom-select-value, .tool-dialog .custom-select-sizer { grid-area: 1 / 1; }
-.tool-dialog .custom-select-arrow { grid-area: 1 / 2; }
+.tool-dialog .custom-select-trigger .custom-select-arrow { grid-area: 1 / 2; }
 .tool-dialog .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; padding-right: 6px; white-space: nowrap; }
 .tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .tool-dialog .dialog-checkbox input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
@@ -181,67 +181,63 @@
 #doc-font-dialog .doc-font-preview-body { padding-top: 0; }
 #doc-font-dialog .dialog-status-row:has(> :empty) { display: none; }
 /* Group frames of the dialog: the reference's `.cs-fieldset` (`char-shape-dialog.css` 34-46, MIT, see THIRD_PARTY_NOTICES.md), same values. */
-.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: 0 0 6px; padding: 6px 8px 8px; min-width: 0; }
+.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: 6px 0; padding: 6px 8px 8px; min-width: 0; }
 .tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 4px; }
 /* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
 /* A fixed four-column grid: the label, its combo (150px), the value label right after it and the value field (96px). */
-.tool-dialog .dialog-grid { display: grid; grid-template-columns: auto 150px auto 96px; justify-content: start; align-items: center; gap: 6px 8px; }
+.tool-dialog .dialog-grid { display: grid; grid-template-columns: 90px 150px auto 96px; justify-content: start; align-items: center; gap: 6px 8px; }
 .tool-dialog .dialog-grid > .dialog-label { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: stretch; }
 .tool-dialog .dialog-grid .custom-select-trigger { width: 100%; box-sizing: border-box; }
-.tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 100%; }
-.tool-dialog .dialog-grid .dialog-combo .dialog-field { width: 100%; }
-.tool-dialog .dialog-grid-wide { grid-template-columns: auto 190px; }
+.tool-dialog .dialog-grid > .dialog-field { width: 100%; }
+.tool-dialog .dialog-grid-wide { grid-template-columns: 90px 150px; }
 .tool-dialog .dialog-inline-row .dialog-field { width: 96px; flex: none; }
 /* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
-#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; grid-template-rows: auto auto auto auto 1fr; grid-template-areas: "fl sl zl" "ff sf zf" "el sf zf" "ef sf zf" ". sf zf"; align-items: start; gap: 2px 8px; margin-bottom: 8px; }
+#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; grid-template-rows: auto auto auto 1fr; grid-template-areas: "fl sl zl" "ff sf zf" "el sb zb" "ef sb zb"; align-items: start; gap: 6px 8px; margin-bottom: 8px; }
 #doc-font-dialog .dialog-font-top > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-top > .custom-select { justify-self: stretch; }
-#doc-font-dialog .dialog-font-top .dialog-combo, #doc-font-dialog .dialog-font-top .dialog-field { width: 100%; }
+#doc-font-dialog .dialog-font-top > .dialog-field { width: 100%; }
 #doc-font-dialog .dialog-font-top label[for="doc-font-family"] { grid-area: fl; }
 #doc-font-dialog .dialog-font-top label[for="doc-font-style"] { grid-area: sl; }
 #doc-font-dialog .dialog-font-top label[for="doc-font-size"] { grid-area: zl; }
-#doc-font-dialog .dialog-font-top label[for="doc-font-latin"] { grid-area: el; margin-top: 6px; }
+#doc-font-dialog .dialog-font-top label[for="doc-font-latin"] { grid-area: el; }
 #doc-font-dialog .dialog-font-top .custom-select[data-select-id="doc-font-family"] { grid-area: ff; }
 #doc-font-dialog .dialog-font-top .custom-select[data-select-id="doc-font-latin"] { grid-area: ef; }
-#doc-font-dialog .dialog-font-top .dialog-combo:has(#doc-font-style) { grid-area: sf; }
-#doc-font-dialog .dialog-font-top .dialog-combo:has(#doc-font-size) { grid-area: zf; }
+#doc-font-dialog #doc-font-style { grid-area: sf; }
+#doc-font-dialog #doc-font-size { grid-area: zf; }
+#doc-font-dialog #doc-font-style-list { grid-area: sb; }
+#doc-font-dialog #doc-font-size-list { grid-area: zb; }
 /* 글꼴 색, 밑줄 스타일 and 밑줄 색 are three columns with the label over each control; 강조점 is the row below. */
-#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: 2px 8px; margin-bottom: 8px; align-items: start; }
+#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: 6px 8px; margin-bottom: 8px; align-items: start; }
 #doc-font-dialog .dialog-font-colors > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-color"] { grid-area: cl; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-underline-style"] { grid-area: ul; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-underline-color"] { grid-area: uc; }
-#doc-font-dialog .dialog-font-colors label[for="doc-font-emphasis"] { grid-area: el; margin-top: 6px; }
+#doc-font-dialog .dialog-font-colors label[for="doc-font-emphasis"] { grid-area: el; }
 #doc-font-dialog .dialog-font-colors #doc-font-color-host { grid-area: ch; }
 #doc-font-dialog .dialog-font-colors #doc-font-underline-color-host { grid-area: uh; }
 #doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-underline-style"] { grid-area: us; }
 #doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-emphasis"] { grid-area: es; }
 #doc-font-dialog .dialog-font-colors > .custom-select, #doc-font-dialog .dialog-font-colors > .dialog-color-host { justify-self: stretch; }
 .tool-dialog .dialog-font-colors .custom-select-trigger { width: 100%; box-sizing: border-box; }
-#doc-font-dialog .dialog-font-colors .dialog-swatch { width: 100%; box-sizing: border-box; }
-#doc-font-dialog .dialog-font-colors .dialog-swatch { justify-content: flex-start; }
-#doc-font-dialog .dialog-font-colors .dialog-swatch > :last-child { margin-left: auto; }
-#doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+/* A color button has the combo box's cells: the chip and the name, then the 15px arrow cell (`.custom-select-arrow`) after its divider. */
+#doc-font-dialog .dialog-font-colors .dialog-swatch { display: grid; grid-template-columns: auto minmax(0, 1fr) 15px; width: 100%; box-sizing: border-box; padding: 0 0 0 4px; }/* The check boxes: `.cs-checkbox-label` gap 3px and margin-right 16px (`char-shape-dialog.css` 117-127), rows 6px apart as `.dialog-row`. */
+#doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+#doc-font-dialog .dialog-checkbox { gap: 3px; }
 /* The font dialog's footer: 기본값으로 설정 and 텍스트 효과 on the left, 확인 and 취소 on the right. */
 #doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: 8px; }
 #doc-font-dialog .dialog-footer-gap { flex: 1; }
+/* 확인 and 취소 are the reference's 72px buttons (`.cs-right-col .dialog-btn`, `char-shape-dialog.css` 28-31). */
+#doc-font-dialog .dialog-footer .dialog-btn { min-width: 72px; white-space: nowrap; }
 .tool-dialog .dialog-swatch-text { font-size: var(--font-size-sm); color: var(--color-text); min-width: 28px; text-align: left; }
 .tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }
-.tool-dialog .dialog-field { text-align: left; }
 .tool-dialog .dialog-key { text-decoration: underline; }
-/* Editable combo box (dialog-combo.js): the field with the arrow cell of a combo box; the list drops below it. */
-.tool-dialog .dialog-combo { position: relative; display: inline-flex; align-items: stretch; box-sizing: border-box; }
-.tool-dialog .dialog-combo .dialog-input { flex: 1; min-width: 0; border-right: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
-.tool-dialog .dialog-combo-arrow { width: 15px; height: 22px; padding: 0; border: 1px solid var(--color-border); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--color-surface); color: var(--color-text-muted); font-size: 8px; line-height: 1; cursor: pointer; }
-.tool-dialog .dialog-combo-arrow:hover { background: var(--color-accent-bg); }
-.tool-dialog .dialog-combo-list { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; list-style: none; margin: 0; padding: 0; max-height: 132px; overflow-y: auto; border: 1px solid var(--color-border-dark); background: var(--color-surface); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-sm); }
-.tool-dialog .dialog-combo-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; }
-.tool-dialog .dialog-combo-list li:hover, .tool-dialog .dialog-combo-list li[aria-selected="true"] { background: var(--color-selected-bg); }
-.tool-dialog .dialog-combo-inline { display: flex; flex-direction: column; }
-.tool-dialog .dialog-combo-inline .dialog-input { border-right: 1px solid var(--color-border); border-radius: var(--radius-sm); width: 100%; text-align: left; }
-.tool-dialog .dialog-combo-inline .dialog-combo-list { position: static; box-shadow: none; max-height: 96px; border-color: var(--color-border); margin-top: -1px; }
+/* The list box of a dialog (dialog-combo.js fills it): the reference's `.goto-bookmark-list` and `.goto-bookmark-item` (`dialogs.css` 1023-1040, MIT, see THIRD_PARTY_NOTICES.md), same values. */
+.goto-bookmark-list { border: 1px solid var(--color-border); background: var(--color-surface); height: 140px; overflow-y: auto; }
+.goto-bookmark-item { padding: 4px 8px; font-size: var(--font-size-sm); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.goto-bookmark-item:hover { background: var(--ui-selected); }
+.goto-bookmark-item.selected { background: var(--color-primary); color: var(--ui-text-on-accent); }
 /* The preview: a framed sample (the reference's `.cs-preview`, `char-shape-dialog.css` 86-92) and the line under it. */
 #doc-font-dialog .doc-font-sample { display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; width: 100%; height: 48px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
 #doc-font-dialog #doc-font-sample-note { display: block; margin-top: 6px; min-height: 16px; }

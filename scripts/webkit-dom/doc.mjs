@@ -158,7 +158,7 @@ export const docSteps = [
   }],
 
   // PD-375: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
-  // the 배율 combo opens its preset list and the unit sits inside the value field.
+  // the 배율 field has its presets and the unit sits inside the value field.
   ["글꼴 대화상자 OpenType 기능과 줄 눈금 상자가 런과 저장 JSON에 닿고 값 칸에 단위가 든다", async (page) => {
     await typeFirstParagraph(page, "가나다라 1234");
     await page.keyboard.press("Shift+ArrowLeft");
@@ -166,10 +166,10 @@ export const docSteps = [
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
     await page.click("#doc-font-tab-advanced");
-    await page.click("#doc-font-pane-advanced .dialog-combo-arrow");
-    assert.deepEqual(await page.$$eval("#doc-font-pane-advanced .dialog-combo-list li", (rows) => rows.map((r) => r.textContent)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
-    await page.click("#doc-font-pane-advanced .dialog-combo-list li:nth-child(2)");
-    assert.equal(await page.inputValue("#doc-font-scale"), "150%");
+    assert.deepEqual(await page.$$eval("#doc-font-scale-presets option", (rows) => rows.map((r) => r.value)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
+    await page.fill("#doc-font-scale", "150");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.inputValue("#doc-font-scale"), "150%", "a bare number takes its unit");
     await page.selectOption("#doc-font-spacing-kind", "expanded");
     await page.fill("#doc-font-spacing-value", "2");
     await page.keyboard.press("Tab");
@@ -192,6 +192,29 @@ export const docSteps = [
     assert.equal(hit[0].scalePercent, 150);
   }],
 
+  // PD-375: every field, combo box and color button of the 글꼴 dialog has the reference dialog's box (22px high, 11px text), the three
+  // controls under 한글 글꼴, 글꼴 스타일 and 크기 start on one line, and the list boxes use the reference's list rows.
+  ["글꼴 대화상자의 모든 컨트롤이 참조 대화상자의 높이·글자 크기를 쓰고 한글 글꼴·글꼴 스타일·크기가 한 줄에서 시작한다", async (page) => {
+    await typeFirstParagraph(page, "가나다라");
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
+    await page.waitForSelector("#doc-font-dialog[open]");
+    for (const tab of ["font", "advanced"]) {
+      await page.click(`#doc-font-tab-${tab}`);
+      const pane = `#doc-font-pane-${tab}`;
+      const boxes = await page.$$eval(`${pane} input[type="text"], ${pane} .custom-select, ${pane} .dialog-swatch`, (els) => els.filter((el) => el.getBoundingClientRect().height > 0).map((el) => {
+        const text = el.matches(".custom-select") ? el.querySelector(".custom-select-value") : el.matches(".dialog-swatch") ? el.querySelector(".dialog-swatch-text") : el;
+        return { id: el.id || el.dataset.selectId, height: el.getBoundingClientRect().height, font: getComputedStyle(text).fontSize };
+      }));
+      assert.ok(boxes.length >= 4, `${tab}: the controls are found`);
+      for (const box of boxes) assert.deepEqual([box.height, box.font], [22, "11px"], `${tab}: ${box.id}`);
+    }
+    await page.click("#doc-font-tab-font");
+    const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], #doc-font-style, #doc-font-size', (els) => els.map((el) => el.getBoundingClientRect().top));
+    assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
+    const rows = await page.$$eval("#doc-font-size-list .goto-bookmark-item", (els) => els.map((el) => getComputedStyle(el).fontSize));
+    assert.ok(rows.length > 0 && rows.every((size) => size === "11px"), "the list rows have the field's text size");
+  }],
+
   // PD-375: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style
   // in the real WebKit and the save JSON.
   ["글꼴 대화상자 글꼴 탭의 색·밑줄 스타일·이중 취소선·대문자·강조점이 런과 저장 JSON에 닿는다", async (page) => {
@@ -201,7 +224,7 @@ export const docSteps = [
     await page.keyboard.press("Shift+ArrowLeft");
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
-    await page.click("#doc-font-size ~ .dialog-combo-list li:nth-child(6)");
+    await page.click("#doc-font-size-list .goto-bookmark-item:nth-child(6)");
     assert.equal(await page.inputValue("#doc-font-size"), "12", "a row of the size list fills the field");
     await page.click("#doc-font-color-host [data-color-toggle]");
     await page.click('#doc-font-color-host .sb-hl-swatch[aria-label="#ff0000"]');
