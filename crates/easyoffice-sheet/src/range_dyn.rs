@@ -9,6 +9,27 @@ use std::borrow::Cow;
 
 use crate::range_refs::ResolvedRangeRef;
 
+/// Whether `expr` can stand for cells (or an error literal), which is what
+/// `extract_range_and_sheet_ctx` answers for. `IF` and `CHOOSE` look at their branches with this
+/// before they evaluate the condition: when no branch can be a reference the caller evaluates the
+/// call as a value, and a condition evaluated here as well would be evaluated twice at every
+/// nesting level (2^n for n nested levels).
+fn can_pass_reference(expr: &Expr) -> bool {
+    match expr.peeled() {
+        Expr::ErrorLiteral(_)
+        | Expr::Cell(_)
+        | Expr::Range(_)
+        | Expr::SheetCell(_)
+        | Expr::SheetRange(_)
+        | Expr::SheetSpan(_) => true,
+        Expr::FuncCall(f) => matches!(
+            f.name.as_str(),
+            "TRANSPOSE" | "INDIRECT" | "OFFSET" | "INDEX" | "CHOOSE" | "IF" | ":" | "SINGLE" | "TRIMRANGE"
+        ),
+        _ => false,
+    }
+}
+
 impl SheetEngine {
     #[inline]
     pub(crate) fn is_virtual_sheet(sheet: Option<&str>) -> bool {
@@ -108,7 +129,7 @@ impl SheetEngine {
         if args.len() < 2 {
             return Err(FormulaError::Value);
         }
-        if crate::array_class::arrayish(&args[0]) {
+        if crate::array_class::arrayish(&args[0]) || !args[1..].iter().any(can_pass_reference) {
             return Ok(None);
         }
         let idx = self.eval_arg_num(&args[0], ctx, depth + 1)?.trunc() as isize;
@@ -127,7 +148,7 @@ impl SheetEngine {
         if !(2..=3).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
-        if crate::array_class::arrayish(&args[0]) {
+        if crate::array_class::arrayish(&args[0]) || !args[1..].iter().any(can_pass_reference) {
             return Ok(None);
         }
         let cond = match self.eval_arg_val(&args[0], ctx, depth + 1)? {
