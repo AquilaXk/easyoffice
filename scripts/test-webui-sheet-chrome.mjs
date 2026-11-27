@@ -85,7 +85,7 @@ test("the toolbars are the reference toolbar format: the icon above a label, on 
   const shown = buttons.filter((button) => !button.hidden && !button.closest("[hidden]") && button.closest("#icon-toolbar"));
   assert.equal(shown.length, 24, "the sheet window shows the sheet commands only");
   const rule = rulesFor(css, ["#icon-toolbar .tb-btn"]).map((r) => r.body).join(" ");
-  assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: 2px 4px"));
+  assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: var(--space-1) var(--space-2)"));
   assert.match(css, /\.tb-sprite \{[^}]*width: 18px;[^}]*height: 18px;[^}]*var\(--ui-icon-sprite-url\)/);
   assert.ok(read("tokens.css").includes("--ui-icon-sprite-url: url(/hwp-studio/images/icon_small_ko_dark.svg)"));
 });
