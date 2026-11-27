@@ -107,7 +107,7 @@ test("a decoded run opens with its effects, and values the engine would refuse a
   const h = await createRunHarness([p("가")]);
   const good = FX(h).pack({ allCaps: true, underline: 16 });
   assert.deepEqual(h.runs.fromModelRun({ textFx: good, underlineColor: "ff0000" }), { textfx: good, ucolor: "FF0000" });
-  for (const bad of [-1, 4096, 1.5, "x", Number.NaN, Infinity, {}, 5 << 4, 17 << 7, 2 ** 32 + 1]) {
+  for (const bad of [-1, 4096, 1.5, "x", "8", Number.NaN, Infinity, {}, { mask: 3, value: 3 }, [8], 5 << 4, 17 << 7, 2 ** 32 + 1]) {
     assert.deepEqual(h.runs.fromModelRun({ textFx: bad }), {}, String(bad));
   }
   assert.deepEqual(h.runs.fromModelRun({ underlineColor: "red" }), {});

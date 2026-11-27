@@ -68,6 +68,23 @@ test("changing only 영어 글꼴 keeps the East Asian face as it was, and the s
   assert.deepEqual([run.font, run.fontEastAsia], ["Verdana", undefined], "a font named alone is for both");
 });
 
+test("only a new English font drops the font variant; a new Korean font keeps it", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  const text = h.blocks[0].childNodes[0];
+  h.runs.applyFormat(h.editor, { startContainer: text, startOffset: 0, endContainer: text, endOffset: 3 }, { font: "Helvetica Neue Light", face: "HelveticaNeue-Light", eastfont: "맑은 고딕" });
+  const run = () => h.editor.querySelector(".eo-run");
+  await openDialog(h, { whole: true });
+  choose(h, "doc-font-family", "바탕");
+  apply(h);
+  assert.equal(run().dataset.eoEastfont, "바탕");
+  assert.equal(run().dataset.eoFace, "HelveticaNeue-Light", "the Latin variant stays");
+  await openDialog(h, { whole: true });
+  choose(h, "doc-font-latin", "Arial");
+  apply(h);
+  assert.equal(run().dataset.eoFace, undefined, "a new Latin font drops the variant");
+  assert.equal(run().dataset.eoEastfont, "바탕");
+});
+
 test("a decoded run opens with both faces and the engine's names are checked", async () => {
   const h = await createRunHarness([p("가")]);
   assert.deepEqual(h.runs.fromModelRun({ font: "Calibri", fontEastAsia: "맑은 고딕" }), { font: "Calibri", eastfont: "맑은 고딕" });

@@ -455,10 +455,11 @@
     if (!initial.fontsMixed) {
       const latinFont = els.latin.value || els.family.value;
       const eastFont = els.family.value || latinFont;
-      return { font: latinFont, eastfont: eastFont === latinFont ? null : eastFont, face: null };
+      // The variant (PostScript name) belongs to the Latin font: only a new Latin font drops it.
+      return { font: latinFont, eastfont: eastFont === latinFont ? null : eastFont, ...(latinChanged ? { face: null } : {}) };
     }
-    const patch = { face: null };
-    if (latinChanged) patch.font = els.latin.value;
+    const patch = {};
+    if (latinChanged) Object.assign(patch, { font: els.latin.value, face: null });
     if (eastChanged) patch.eastfont = els.family.value;
     else patch.keepEast = true;
     return patch;

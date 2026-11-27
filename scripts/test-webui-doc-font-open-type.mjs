@@ -105,7 +105,7 @@ test("a decoded run opens with its features, and values the engine would refuse 
   const h = await createRunHarness([p("가")]);
   const good = OT(h).pack({ ligatures: 15, spacing: 1 });
   assert.deepEqual(h.runs.fromModelRun({ openType: good, snapToGrid: false }), { opentype: good, nogrid: 1 });
-  for (const bad of [-1, 2 ** 29, 1.5, "x", Number.NaN, Infinity, {}, 3 << 4, 3 << 6, 2 ** 32 + 1]) {
+  for (const bad of [-1, 2 ** 29, 1.5, "x", "8", Number.NaN, Infinity, {}, { mask: 3, value: 3 }, [8], 3 << 4, 3 << 6, 2 ** 32 + 1]) {
     assert.deepEqual(h.runs.fromModelRun({ openType: bad }), {}, String(bad));
   }
   assert.deepEqual(h.runs.fromModelRun({ snapToGrid: true }), {});

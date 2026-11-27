@@ -305,9 +305,12 @@
 
   // Format of a structured-payload / decoded model run ({sizeHalfPt, font, color, highlight,
   // bold, italic, underline, strike, script}); invalid values are dropped.
+  // The packed values of a decoded run are numbers; an object (the `{ mask, value }` patch form) or any other kind is no value.
+  const modelNumber = (value) => (typeof value === "number" ? value : undefined);
+
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: run?.openType, nogrid: run?.snapToGrid === false ? 1 : undefined, textfx: run?.textFx, ucolor: run?.underlineColor, font: run?.font, eastfont: run?.fontEastAsia, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: modelNumber(run?.openType), nogrid: run?.snapToGrid === false ? 1 : undefined, textfx: modelNumber(run?.textFx), ucolor: run?.underlineColor, font: run?.font, eastfont: run?.fontEastAsia, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
