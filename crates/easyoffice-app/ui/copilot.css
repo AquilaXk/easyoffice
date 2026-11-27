@@ -441,7 +441,7 @@
 
 .eo-copilot-textarea {
   width: 100%;
-  min-height: 40px;
+  min-height: var(--textarea-min-height);
   max-height: 120px;
   padding: 0;
   border: 0;
@@ -538,7 +538,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .eo-copilot-menu-scroll {
@@ -548,7 +548,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .eo-copilot-menu-scroll > * {
@@ -573,7 +573,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 1px;
+  gap: var(--menu-footer-gap);
 }
 
 .eo-copilot-model-menu [focusgroup~="menu"] hr {
@@ -636,7 +636,7 @@
   flex-direction: column;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .eo-copilot-menu-item-title {
@@ -721,7 +721,7 @@
 .eo-copilot-menu-hint {
   margin-inline-start: auto;
   flex: none;
-  padding: 1px var(--space-2);
+  padding: var(--menu-hint-padding);
   font-size: var(--font-size-xs);
   font-weight: 400;
   line-height: 1.3;

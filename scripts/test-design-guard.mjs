@@ -21,9 +21,7 @@ const uiFiles = (extension) => fs.readdirSync(fileURLToPath(UI_DIR)).filter((nam
 const DESIGN_SYSTEM = readText(fileURLToPath(new URL("../docs/design-system.md", import.meta.url)));
 const TOKENS = ui("tokens.css");
 
-const SIZE_VIOLATION_COUNTS = {
-  "copilot.css": 6,
-};
+const SIZE_VIOLATION_COUNTS = {};
 const GLYPH_ARROW_COUNT = 8;
 const WIDGET_CLASS_COUNT = 24;
 

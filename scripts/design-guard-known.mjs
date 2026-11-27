@@ -4,16 +4,7 @@
 // kit list in docs/design-system.md, and an icon of ui/icons.js instead.
 
 /** Dialog and control rules with a literal px in height, min-height, font-size, line-height, gap or padding, per stylesheet (selector, cut at 110 characters). */
-export const KNOWN_SIZE_VIOLATIONS = {
-  "copilot.css": [
-    ".eo-copilot-textarea",
-    ".eo-copilot-model-menu [focusgroup~=\"menu\"]",
-    ".eo-copilot-menu-scroll",
-    ".eo-copilot-menu-footer",
-    ".eo-copilot-menu-item-body",
-    ".eo-copilot-menu-hint",
-  ],
-};
+export const KNOWN_SIZE_VIOLATIONS = {};
 
 /** CSS written inside scripts with a literal px in those properties, per script. None yet. */
 export const KNOWN_SCRIPT_SIZE_VIOLATIONS = {};

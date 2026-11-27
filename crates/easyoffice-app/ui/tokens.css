@@ -205,6 +205,9 @@
   /* 메뉴 항목(PD-384): 줄 16px + 위아래 4px = 24px(--control-height-sm), 글자는 아이콘 칸(32px) 뒤에서 시작 */
   --menu-item-line-height: 16px;
   --menu-item-padding: var(--space-2) var(--space-8) var(--space-2) calc(var(--space-12) + var(--space-4));
+  --menu-footer-gap: 1px;                         /* 메뉴 아래 줄 항목 사이 틈(코파일럿 모델 메뉴) */
+  --menu-hint-padding: 1px var(--space-2);        /* 메뉴 항목 힌트 칩 안쪽 여백 */
+  --textarea-min-height: 40px;                    /* 코파일럿 입력 칸의 최소 높이(두 줄) */
 
   /* 터치 타겟 (모바일) */
   --touch-target-min: 44px;
