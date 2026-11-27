@@ -1,5 +1,5 @@
-//! A 3D span follows the sheets that are inserted, moved and deleted the way Excel does ("Create a
-//! reference to the same cell range on multiple worksheets", Microsoft Support):
+//! A 3D span follows the sheets that are inserted, moved and deleted the way the reference
+//! spreadsheet app does (its help page on 3D references across worksheets):
 //! - inserting or copying a sheet between the ends adds its cells to the calculation;
 //! - deleting a sheet between the ends removes its values;
 //! - deleting an end moves that end to the neighbor inside the span, and only a span with no sheet

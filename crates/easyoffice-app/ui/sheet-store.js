@@ -201,27 +201,13 @@
       return next;
     }
 
-    // The sheets in tab order. The engine resolves a 3D span (`Sheet1:Sheet3!A1`) and a deleted end of
-    // one by this order, so the store's key order (which a name like "2024" reorders) cannot stand in.
-    function orderedSheetNames(sheetsMap) {
-      const keys = Object.keys(sheetsMap || {});
-      const known = new Set(keys);
-      const seen = new Set();
-      const out = [];
-      for (const name of host.__EASYOFFICE_SHEET_TAB_STRIP__?.getOrder?.() || []) {
-        if (known.has(name) && !seen.has(name)) {
-          out.push(name);
-          seen.add(name);
-        }
-      }
-      for (const key of keys) if (!seen.has(key)) out.push(key);
-      return out;
-    }
-
-    // The order is part of the key: moving a tab opens a session with the sheets in the new order.
-    function sheetSetKey(names) {
-      return names.join("\u0000");
-    }
+    // The sheets in tab order: the engine resolves a 3D span (`Sheet1:Sheet3!A1`) and a deleted end of one by it, and the
+    // store's key order (a name like "2024" is reordered) is not it. The order is part of the session key, so a moved tab reopens it.
+    const orderedSheetNames = (sheetsMap) => [...new Set([
+      ...(host.__EASYOFFICE_SHEET_TAB_STRIP__?.getOrder?.() || []).filter((name) => Object.hasOwn(sheetsMap || {}, name)),
+      ...Object.keys(sheetsMap || {}),
+    ])];
+    const sheetSetKey = (names) => names.join("\u0000");
 
     async function openSession(names, sheetKey) {
       dropSession();

@@ -6,7 +6,7 @@ import { demoHtml, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 import { acceptProposal } from "./test-support/copilot-accept.mjs";
 import { open, answer } from "./test-support/copilot-open.mjs";
 
-// In 수동 계산 mode a formula that is new (typed, pasted, filled) is calculated at once, as in Excel; the formulas that
+// In 수동 계산 mode a formula that is new (typed, pasted, filled) is calculated at once, as in the reference spreadsheet app; the formulas that
 // were already there keep their old value until F9 (PD-309).
 
 async function openSheet() {

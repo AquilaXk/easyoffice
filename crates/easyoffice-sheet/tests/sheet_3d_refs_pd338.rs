@@ -411,7 +411,7 @@ fn recalc_session_batch_dag_and_axis_sheet_rewrites() {
         .as_deref(),
         Some("=SUM('Sheet 1:끝''시트'!A1)")
     );
-    // Deleting the last sheet of a span moves its end to the previous sheet (Excel)
+    // Deleting the last sheet of a span moves its end to the previous sheet (reference app)
     let tabs = ["Sheet1", "Sheet2", "Sheet3", "Summary"];
     assert_eq!(
         rewrite_sheet_names(

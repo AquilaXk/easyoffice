@@ -1,5 +1,5 @@
 //! `INDEX` with an array for `row_num` or `column_num` returns one element per array item, as in
-//! Excel 365 where `=SUM(INDEX(A1:A10,{1,3}))` adds the first and third cell. It does not read
+//! the reference spreadsheet app (365 edition), where `=SUM(INDEX(A1:A10,{1,3}))` adds the first and third cell. It does not read
 //! only the first item of the array.
 #![allow(clippy::unwrap_used)]
 

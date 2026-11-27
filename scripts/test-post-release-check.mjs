@@ -854,7 +854,7 @@ test("the release passes when every signature file matches latest.json and the t
   const served = makeServedRelease();
   const { result } = await checkServed(served);
   assert.equal(result.signatureCount, signatureAssetNames().length);
-  assert.deepEqual(result.spotChecked, selectSpotCheckAssets(new Map(served.release.assets.map((a) => [a.name, a]))).sort());
+  assert.deepEqual(result.spotChecked, selectSpotCheckAssets(new Map(served.release.assets.map((a) => [a.name, a]))).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
 });
 
 test("a .sig that differs from the signature in latest.json fails, even when SHA256SUMS lists that .sig", async () => {

@@ -14,8 +14,8 @@
 //! changes. A deleted sheet's whole reference (`Gone!A1:B2`) becomes one `#REF!`; a renamed
 //! sheet's name is quoted only when the formula needs it.
 //!
-//! A 3D span (`Start:End!A1`) follows the Excel rule for a deleted endpoint ("Create a reference
-//! to the same cell range on multiple worksheets", Microsoft Support): the values of the deleted
+//! A 3D span (`Start:End!A1`) follows the rule of the reference spreadsheet app for a deleted
+//! endpoint (its help page on 3D references across worksheets): the values of the deleted
 //! sheet leave the calculation and the span keeps the sheets that are still between its ends. The
 //! first sheet of the span is replaced by the next sheet in tab order and the last one by the
 //! previous sheet; only a span with no sheet left becomes `#REF!`. The tab order comes with the
